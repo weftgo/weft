@@ -1,0 +1,2 @@
+go test fuzz v1
+string("[{\"Content\":[{\"tYpe\":\"tool_call\"}]}]")

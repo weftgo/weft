@@ -1,0 +1,6 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"plan: answer briefly","thought":true,"thoughtSignature":"c2lnLTE="},{"text":"Hello."}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":5,"thoughtsTokenCount":0}}
+
+
+=== response 2 ===
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Continued."}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":5,"thoughtsTokenCount":0}}
+

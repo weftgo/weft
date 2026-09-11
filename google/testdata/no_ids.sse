@@ -1,0 +1,6 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"probe","args":{"n":1}}},{"functionCall":{"name":"probe","args":{"n":2}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":5,"thoughtsTokenCount":0}}
+
+
+=== response 2 ===
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Done."}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":5,"thoughtsTokenCount":0}}
+

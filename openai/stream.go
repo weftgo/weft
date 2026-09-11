@@ -1,0 +1,237 @@
+package openai
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"iter"
+	"strings"
+	"time"
+
+	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/packages/ssestream"
+	"github.com/weftgo/weft"
+)
+
+// partialCall accumulates one tool call's streamed fragments, keyed by
+// the delta's index — the only stable key across chunks (compatible
+// servers repeat or omit the id on continuation chunks).
+type partialCall struct {
+	id   string
+	name strings.Builder
+	args strings.Builder
+}
+
+// Stream implements weft.Model over the SDK's streaming Chat
+// Completions. Text deltas pass through live; tool calls are buffered
+// whole and yielded before ModelFinish, in first-seen index order; call
+// ids are synthesised (call_<i>) when a compatible server omits them,
+// in first-seen order so the next step's tool_call_id matches
+// deterministically.
+func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	return func(yield func(weft.ModelEvent, error) bool) {
+		if !weft.ModelRequestsAllowed() {
+			yield(nil, weft.ErrModelRequestsDenied)
+			return
+		}
+		params, err := m.params(req)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+
+		reader := newStreamReader(ctx, m.idle)
+		defer reader.cancel()
+		stream := m.client.Chat.Completions.NewStreaming(reader.sctx, params)
+		defer func() { _ = stream.Close() }()
+		reader.start(stream)
+		defer reader.wait()
+
+		var (
+			calls  = map[int64]*partialCall{}
+			order  []int64
+			finish string
+			usage  weft.Usage
+		)
+		for {
+			ok, idleHit := reader.next()
+			if idleHit {
+				yield(nil, fmt.Errorf("%w after %s", weft.ErrStreamIdle, m.idle))
+				return
+			}
+			if !ok {
+				break
+			}
+			chunk := stream.Current()
+			reader.release()
+			if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 {
+				usage = toUsage(chunk.Usage)
+			}
+			for _, ch := range chunk.Choices {
+				if ch.Delta.Content != "" && !yield(weft.ModelTextDelta{Text: ch.Delta.Content}, nil) {
+					return
+				}
+				if r := reasoningContent(ch.Delta); r != "" && !yield(weft.ModelReasoningDelta{Text: r}, nil) {
+					return
+				}
+				for _, tc := range ch.Delta.ToolCalls {
+					pc := calls[tc.Index]
+					if pc == nil {
+						pc = &partialCall{}
+						calls[tc.Index] = pc
+						order = append(order, tc.Index)
+					}
+					if tc.ID != "" {
+						pc.id = tc.ID
+					}
+					if tc.Function.Name != "" {
+						pc.name.WriteString(tc.Function.Name)
+					}
+					pc.args.WriteString(tc.Function.Arguments)
+				}
+				if ch.FinishReason != "" {
+					finish = ch.FinishReason
+				}
+			}
+		}
+		reader.wait()
+		if err := stream.Err(); err != nil {
+			yield(nil, terminalErr(ctx, err))
+			return
+		}
+		for i, idx := range order {
+			pc := calls[idx]
+			id := pc.id
+			if id == "" {
+				id = fmt.Sprintf("call_%d", i+1)
+			}
+			args := pc.args.String()
+			if args == "" {
+				// The core's Invoke already treats null as {}, but the
+				// adapter never emits an undecodable empty string.
+				args = "{}"
+			}
+			if !yield(weft.ModelToolCall{ID: id, Name: pc.name.String(), Args: json.RawMessage(args)}, nil) {
+				return
+			}
+		}
+		reason, raw := mapFinish(finish, len(order) > 0)
+		yield(weft.ModelFinish{Reason: reason, Usage: usage, Raw: raw}, nil)
+	}
+}
+
+// terminalErr reports the stream's error the way the Model contract
+// expects: ctx.Err() when the caller's context ended (the SDK wraps
+// cancellation in its own error), the SDK error unchanged otherwise —
+// so callers can errors.As the SDK's *openai.Error.
+func terminalErr(ctx context.Context, err error) error {
+	if cerr := ctx.Err(); cerr != nil {
+		return cerr
+	}
+	return err
+}
+
+// reasoningContent surfaces DeepSeek-style reasoning_content from
+// compatible servers. It is not an OpenAI field, so it arrives in the
+// delta's extra fields; there is no signature to carry.
+func reasoningContent(d openai.ChatCompletionChunkChoiceDelta) string {
+	// Extra fields report Valid() false by design; presence is a
+	// non-empty Raw() (the respjson contract for unknown fields).
+	f, ok := d.JSON.ExtraFields["reasoning_content"]
+	if !ok || f.Raw() == "" {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal([]byte(f.Raw()), &s); err != nil {
+		return ""
+	}
+	return s
+}
+
+// streamReader drives the SDK's SSE stream on a goroutine with an idle
+// timeout: a chunk gap longer than idle cancels the stream's context
+// (unblocking the SDK's reader) and the call fails wrapping
+// weft.ErrStreamIdle. A slow but actively streaming response is never
+// killed — the timer resets after every chunk — and the caller's ctx
+// deadline remains the hard limit on the whole call.
+type streamReader struct {
+	sctx   context.Context
+	cancel context.CancelFunc
+	ready  chan bool
+	ack    chan struct{}
+	done   chan struct{}
+	idle   time.Duration
+}
+
+func newStreamReader(ctx context.Context, idle time.Duration) *streamReader {
+	sctx, cancel := context.WithCancel(ctx)
+	return &streamReader{
+		sctx:   sctx,
+		cancel: cancel,
+		ready:  make(chan bool),
+		ack:    make(chan struct{}),
+		done:   make(chan struct{}),
+		idle:   idle,
+	}
+}
+
+// start launches the reader goroutine. After signalling a chunk it
+// parks on ack until release, so Current() is never read while Next()
+// advances it.
+func (r *streamReader) start(stream *ssestream.Stream[openai.ChatCompletionChunk]) {
+	go func() {
+		defer close(r.done)
+		defer close(r.ready)
+		for stream.Next() {
+			select {
+			case r.ready <- true:
+			case <-r.sctx.Done():
+				return
+			}
+			select {
+			case <-r.ack:
+			case <-r.sctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+// next waits for the next chunk or the stream's end. idleHit reports an
+// idle-timeout expiry (the stream's context is canceled; the caller
+// reports ErrStreamIdle rather than the SDK's cancellation error).
+func (r *streamReader) next() (ok, idleHit bool) {
+	var timeout <-chan time.Time
+	if r.idle > 0 {
+		t := time.NewTimer(r.idle)
+		defer t.Stop()
+		timeout = t.C
+	}
+	select {
+	case ok := <-r.ready:
+		return ok, false
+	case <-r.sctx.Done():
+		return false, false
+	case <-timeout:
+		r.cancel()
+		return false, true
+	}
+}
+
+// release lets the reader advance to the next chunk; call it after
+// processing Current().
+func (r *streamReader) release() {
+	select {
+	case r.ack <- struct{}{}:
+	case <-r.sctx.Done():
+	}
+}
+
+// wait lets the reader goroutine finish before the stream's error is
+// read or its body closed — Next writes Err's state, so they must never
+// run concurrently. Cancelling first is the universal unpark: a caller
+// that stopped consuming leaves the reader parked on its handshake.
+func (r *streamReader) wait() {
+	r.cancel()
+	<-r.done
+}

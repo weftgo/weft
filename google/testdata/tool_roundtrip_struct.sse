@@ -1,0 +1,6 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_probe","name":"probe","args":{"n":3}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":5,"thoughtsTokenCount":0}}
+
+
+=== response 2 ===
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"The doubled value is 6."}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":5,"thoughtsTokenCount":0}}
+

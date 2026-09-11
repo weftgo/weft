@@ -1,0 +1,22 @@
+# Internal working notes — never published
+/TODO.md
+/REVIEW-v0.md
+/docs/PLAYBOOK.md
+/docs/STATUS.md
+/docs/phase2-*-plan.md
+/docs/tool-schema-design.md
+
+# Build output
+/bin/
+/dist/
+
+# Go test artifacts
+*.test
+*.out
+coverage.*
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store

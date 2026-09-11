@@ -1,0 +1,40 @@
+{
+  "weft": 1,
+  "agents": [
+    {
+      "name": "getting-started",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "instructions": "You are a support agent.",
+      "policy": {
+        "parallelism": 4,
+        "max_steps": 10,
+        "max_result_bytes": 65536
+      },
+      "tools": [
+        {
+          "name": "lookup_order",
+          "description": "Look up an order by ID.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string",
+                "description": "the order to look up"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          },
+          "output_schema": {
+            "type": "object"
+          },
+          "source": "examples/getting-started/main.go:19"
+        }
+      ]
+    }
+  ]
+}

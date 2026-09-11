@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Support policy: current Go release and N-1 (go.mod pins the
+        # minimum). See README "Development".
+        go-version: ["1.26.x", "stable"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          check-latest: true
+      # One module per adapter (ADR 0005): loop over the workspace the
+      # same way `make test` does. The live suite is never in CI — no
+      # keys; it is a release-time manual step.
+      - name: vet (every module)
+        run: |
+          for m in $(go list -m -f '{{.Dir}}'); do
+            (cd "$m" && go vet ./...)
+          done
+      - name: test (every module)
+        run: |
+          for m in $(go list -m -f '{{.Dir}}'); do
+            (cd "$m" && go test -race ./...)
+          done
+      - name: build (every module)
+        run: |
+          for m in $(go list -m -f '{{.Dir}}'); do
+            (cd "$m" && go build ./...)
+          done
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+      # golangci-lint per module, all sharing the root .golangci.yml.
+      # Pinned so lint results do not drift with HEAD (staticcheck's
+      # rule set changes between minor versions).
+      - name: install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b "$(go env GOPATH)/bin" v2.13.2
+      - name: lint (every module)
+        run: |
+          for m in $(go list -m -f '{{.Dir}}'); do
+            (cd "$m" && golangci-lint run --config "$GITHUB_WORKSPACE/.golangci.yml")
+          done
+
+  # apidiff: add a go-apidiff job that compares the public API against
+  # the previous tag and fails the build on any incompatible change;
+  # each adapter gets its own gate when it tags. Stability is enforced
+  # in CI, not aspired to.

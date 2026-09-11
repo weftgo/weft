@@ -25,9 +25,23 @@ tool failures never cancel their siblings.
 ## Quick start
 
 A tool is a plain function — the JSON Schema is reflected from the input
-struct. Offline, the model comes from `wefttest`: a scripted,
-deterministic stand-in for a real provider (an adapter slots into the
-same `Model` seam):
+struct, so the struct is both the contract and the documentation:
+
+```go
+type EchoInput struct {
+    Msg string `json:"msg" jsonschema:"the message to echo"`
+}
+
+echo := weft.Tool("echo", "Echo a message back, uppercased.",
+    func(ctx context.Context, in EchoInput) (string, error) {
+        return strings.ToUpper(in.Msg), nil
+    })
+```
+
+An agent is a value: build it once, run it many times, concurrently.
+Offline, the model comes from `wefttest`: a scripted, deterministic
+stand-in for a real provider (an adapter slots into the same `Model`
+seam):
 
 ```go
 model := wefttest.Script(
@@ -35,7 +49,7 @@ model := wefttest.Script(
     wefttest.Say("HELLO"),
 )
 agt := weft.New(
-    model,                                   // or openai.Model("gpt-4o-mini") — see Providers
+    model,                                   // or anthropic.Model("claude-sonnet-5") — see Providers
     weft.Instructions("You are a support agent."),
     echo,
 )
@@ -44,16 +58,9 @@ res, err := agt.Generate(ctx, weft.Prompt("Echo hello."))
 fmt.Println(res.Text(), res.Usage.Total())
 ```
 
-where `echo` is defined once and reused:
-
-```go
-echo := weft.Tool("echo", "Echo a message back, uppercased.",
-    func(ctx context.Context, in struct {
-        Msg string `json:"msg" jsonschema:"the message to echo"`
-    }) (string, error) {
-        return strings.ToUpper(in.Msg), nil
-    })
-```
+For a one-off tool the input struct can be written inline in the
+handler signature; a named type reads better and is reusable across
+tools and tests.
 
 Streaming is Go iteration — typed events, cancel via context, exactly one
 terminal error:
@@ -83,6 +90,46 @@ agt := weft.New(model,
     submit, search,
 )
 ```
+
+### Structured output
+
+`Output[T]` constrains the final answer to a struct: a `submit_output`
+tool with `T`'s reflected schema is advertised, and the run ends when
+the model calls it with arguments that decode. An invalid submission is
+an ordinary tool error the model repairs. `GenerateAs` returns the
+value; `OutputOf` reads it from a streamed run's result.
+
+```go
+type Verdict struct {
+    Approved bool   `json:"approved"`
+    Reason   string `json:"reason" jsonschema:"one sentence"`
+}
+
+agt := weft.New(model, weft.Output[Verdict](), lookup)
+v, res, err := weft.GenerateAs[Verdict](ctx, agt, weft.Prompt("Review order 42."))
+```
+
+It is tool mode, so it works on every provider; a run that ends in text
+returns `ErrNoOutput` with the transcript attached.
+
+### Per-tool policy
+
+Trailing options on `Tool` set policy for that tool alone. The same
+names on `New` set the agent-wide default:
+
+```go
+run := weft.Tool("run_command", "Run a shell command.", runCommand,
+    weft.Timeout(30*time.Second),   // deadline on ctx; expiry is an error result
+    weft.MaxResultBytes(0),         // this tool's output arrives whole
+    weft.StrictInput(),             // undeclared argument fields are rejected
+)
+agt := weft.New(model, weft.Timeout(10*time.Second), run, grep)
+```
+
+Bad arguments come back to the model in the schema's own words —
+`field "days": expected integer, got string` — so it can map the error
+to the schema it was shown. Undeclared fields are ignored by default;
+`StrictInput` rejects them by name.
 
 ## The manifest — `weft.json`
 
@@ -117,7 +164,7 @@ import (
 )
 
 openai.Model("gpt-4o-mini")                          // or any compatible server via openai.BaseURL
-anthropic.Model("claude-sonnet-4-5", anthropic.Thinking(true))
+anthropic.Model("claude-sonnet-5", anthropic.Thinking(true))
 google.Model("gemini-2.5-flash")
 ```
 
@@ -153,7 +200,9 @@ surprise bills. ([ADR 0013](docs/adr/0013-adapter-contract.md))
   recorded on `RunResult.StopReason` (the run still succeeds — callers
   decide what truncated text means), and oversized tool results are
   capped (64 KiB by default, `weft.MaxResultBytes(n)` to change, `0` to
-  disable) with a marker the model sees.
+  disable, per tool or per agent) with a marker the model sees.
+- **A hung tool never hangs the run**: `weft.Timeout(d)` on a tool or
+  agent turns an overdue call into an error result and moves on.
 - **The Model stream contract is enforced**: a stream that ends without
   `ModelFinish`, continues after it, carries a tool call with an empty
   ID or name, or panics fails the run wrapping `ErrModelContract` — a
@@ -169,7 +218,8 @@ surprise bills. ([ADR 0013](docs/adr/0013-adapter-contract.md))
 ```
 doc.go, message.go    message model (roles, parts, versioned JSON)
 errors.go, env.go     error model (sentinels, RunError, kill switch)
-tool.go, schema.go    tool contract + schema reflection
+tool.go, schema.go    tool contract, per-tool policy, schema reflection
+output.go             structured output (Output, GenerateAs, OutputOf)
 model.go              provider seam (streaming-first Model interface)
 events.go             sealed run-event set
 agent.go, run.go      agent construction options, run/stream/result

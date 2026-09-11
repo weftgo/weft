@@ -98,3 +98,32 @@ construction-time set — a manifest describes the code, not a registry.
 The decision — tools are values, reflection is a convenience — is
 unchanged: RawTool is the same value with the schema supplied instead
 of derived, and ToolSource is the same list, fetched instead of stored.
+
+
+## Amendment (2026-09-12): per-tool policy and schema-shaped decode errors
+
+**Trailing options on `Tool` and `RawTool`** (`opts ...ToolOption`) set
+policy for one tool. `Timeout`, `MaxResultBytes`, and `StrictInput` are
+`PolicyOption`s — both `Option` and `ToolOption` — so the same name sets
+the agent-wide default in `New` and the override in `Tool`. The loop
+resolves tool-then-agent; `Agent.CallTool`/`ToolDef.Invoke` apply only
+the tool's own `StrictInput` (timeouts and caps are run policy). The
+manifest records both levels, and a tool without options renders
+exactly as before.
+
+**`Timeout`** puts the deadline on the handler's ctx; on expiry the loop
+records `tool "X" timed out after d` as an error result and abandons the
+handler's goroutine. A hung tool must not hang the run; a handler that
+ignores ctx leaks its goroutine, which is the handler's bug. A run-ctx
+cancellation during a timed call is reported as that cancellation.
+
+**Decode errors name the field.** `ErrInvalidToolInput` results now read
+`field "days": expected integer, got string`, `expected object at the
+top level, got array`, `invalid JSON at offset N: …`, or `unknown field
+"units": not in the schema` — the schema's own vocabulary, so the model
+can map the error back to the schema it was shown. Lenient decoding
+stays the default (stray keys cost a round trip, not accuracy);
+`StrictInput` is the opt-in rejection.
+
+Model-visible strings pinned by tests: the timeout message, the four
+decode messages.

@@ -2,10 +2,12 @@ package weft
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unicode/utf8"
 )
 
@@ -313,23 +315,37 @@ func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error)
 	return def.Invoke(ctx, call.Args)
 }
 
-// callTool runs CallTool and folds every failure — unknown tool, bad
-// arguments, handler error, handler panic — into an error result the model
-// can correct: a tool failure is data, not a run failure. The result cap
-// is applied last, over every outcome.
+// callTool dispatches one call under the tool's effective policy and
+// folds every failure — unknown tool, bad arguments, handler error,
+// handler panic, timeout — into an error result the model can correct: a
+// tool failure is data, not a run failure. Per-tool options override the
+// agent's defaults; the result cap is applied last, over every outcome.
 func (a *Agent) callTool(ctx context.Context, call ToolCallPart) (res ToolResultPart) {
 	res = ToolResultPart{CallID: call.ID, Name: call.Name}
-	// Defers run LIFO: the panic handler below runs first and may set the
-	// failure text; the cap runs after it, over whatever text resulted.
-	defer func() { res.Content = a.capResult(res.Content) }()
-	defer func() {
-		if p := recover(); p != nil {
-			res.IsError = true
-			res.Content = fmt.Sprintf("tool %q panicked: %v", call.Name, p)
-		}
-	}()
+	def, ok := a.toolByName(call.Name)
+	if !ok {
+		res.IsError = true
+		res.Content = capResult(fmt.Errorf("%w: %q", ErrNoSuchTool, call.Name).Error(), a.resultCap)
+		return res
+	}
+	resultCap := a.resultCap
+	if def.capSet {
+		resultCap = def.resultCap
+	}
+	timeout := a.toolTimeout
+	if def.timeout > 0 {
+		timeout = def.timeout
+	}
+	strict := a.strict || def.strict
+	defer func() { res.Content = capResult(res.Content, resultCap) }()
 
-	out, err := a.CallTool(ctx, call)
+	var out string
+	var err error
+	if timeout <= 0 {
+		out, err = invokeContained(ctx, def, call, strict)
+	} else {
+		out, err = invokeWithTimeout(ctx, def, call, strict, timeout)
+	}
 	if err != nil {
 		res.IsError = true
 		res.Content = err.Error()
@@ -339,16 +355,63 @@ func (a *Agent) callTool(ctx context.Context, call ToolCallPart) (res ToolResult
 	return res
 }
 
-// capResult enforces the agent's tool-result cap. The cut lands on a rune
+// invokeContained runs the tool, turning a handler panic into an error.
+func invokeContained(ctx context.Context, def *ToolDef, call ToolCallPart, strict bool) (out string, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("tool %q panicked: %v", call.Name, p)
+		}
+	}()
+	return def.invoke(ctx, call.Args, strict)
+}
+
+// invokeWithTimeout runs the tool under a per-call deadline. The handler
+// sees the deadline on its ctx; if it has not returned when the deadline
+// passes, the call is recorded as timed out and the handler's goroutine
+// is abandoned — a hung tool must not hang the run. A cancellation of
+// the run's own ctx is reported as that cancellation, not as a timeout.
+func invokeWithTimeout(ctx context.Context, def *ToolDef, call ToolCallPart, strict bool, timeout time.Duration) (string, error) {
+	tctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	type outcome struct {
+		out string
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		out, err := invokeContained(tctx, def, call, strict)
+		done <- outcome{out, err}
+	}()
+	timedOut := func() error {
+		return fmt.Errorf("tool %q timed out after %s", call.Name, timeout)
+	}
+	select {
+	case o := <-done:
+		// A handler that honoured the deadline returns
+		// DeadlineExceeded itself; name the timeout rather than
+		// echoing the context error.
+		if o.err != nil && errors.Is(o.err, context.DeadlineExceeded) && ctx.Err() == nil && tctx.Err() != nil {
+			return "", timedOut()
+		}
+		return o.out, o.err
+	case <-tctx.Done():
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		return "", timedOut()
+	}
+}
+
+// capResult enforces a tool-result cap. The cut lands on a rune
 // boundary and always ends with a marker, so the model knows the output
 // is partial rather than silently receiving a prefix.
-func (a *Agent) capResult(s string) string {
-	if a.resultCap <= 0 || len(s) <= a.resultCap {
+func capResult(s string, resultCap int) string {
+	if resultCap <= 0 || len(s) <= resultCap {
 		return s
 	}
-	cut := a.resultCap
+	cut := resultCap
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
-	return s[:cut] + fmt.Sprintf("\n…[truncated %d bytes]", a.resultCap)
+	return s[:cut] + fmt.Sprintf("\n…[truncated %d bytes]", resultCap)
 }

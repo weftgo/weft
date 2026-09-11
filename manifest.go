@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 )
 
 // Manifest renders the agents as their `weft.json` document: one
@@ -60,15 +61,23 @@ type manifestPolicy struct {
 	Parallelism    int      `json:"parallelism"`
 	MaxSteps       int      `json:"max_steps"`
 	MaxResultBytes int      `json:"max_result_bytes"`
+	Timeout        string   `json:"timeout,omitempty"`
+	StrictInput    bool     `json:"strict_input,omitempty"`
 	StopWhen       []string `json:"stop_when,omitempty"`
 }
 
+// manifestTool carries the tool's contract and, when set, its own
+// policy: the keys appear only for tools that override the agent's
+// defaults, so a tool without options renders exactly as before.
 type manifestTool struct {
-	Name         string  `json:"name"`
-	Description  string  `json:"description,omitempty"`
-	InputSchema  *Schema `json:"input_schema,omitempty"`
-	OutputSchema *Schema `json:"output_schema,omitempty"`
-	Source       string  `json:"source,omitempty"`
+	Name           string  `json:"name"`
+	Description    string  `json:"description,omitempty"`
+	InputSchema    *Schema `json:"input_schema,omitempty"`
+	OutputSchema   *Schema `json:"output_schema,omitempty"`
+	Timeout        string  `json:"timeout,omitempty"`
+	MaxResultBytes *int    `json:"max_result_bytes,omitempty"`
+	StrictInput    bool    `json:"strict_input,omitempty"`
+	Source         string  `json:"source,omitempty"`
 }
 
 func (a *Agent) manifestEntry() manifestAgent {
@@ -80,6 +89,8 @@ func (a *Agent) manifestEntry() manifestAgent {
 			Parallelism:    a.parallelism,
 			MaxSteps:       a.maxSteps,
 			MaxResultBytes: a.resultCap,
+			Timeout:        durationName(a.toolTimeout),
+			StrictInput:    a.strict,
 		},
 		Tools: make([]manifestTool, 0, len(a.toolList)),
 	}
@@ -87,15 +98,30 @@ func (a *Agent) manifestEntry() manifestAgent {
 		ma.Policy.StopWhen = append(ma.Policy.StopWhen, stopName(c))
 	}
 	for _, t := range a.toolList {
-		ma.Tools = append(ma.Tools, manifestTool{
+		mt := manifestTool{
 			Name:         t.Name,
 			Description:  t.Description,
 			InputSchema:  t.InputSchema,
 			OutputSchema: t.OutputSchema,
+			Timeout:      durationName(t.timeout),
+			StrictInput:  t.strict,
 			Source:       toolSource(t),
-		})
+		}
+		if t.capSet {
+			resultCap := t.resultCap
+			mt.MaxResultBytes = &resultCap
+		}
+		ma.Tools = append(ma.Tools, mt)
 	}
 	return ma
+}
+
+// durationName renders a timeout for the manifest, "" when unset.
+func durationName(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	return d.String()
 }
 
 // stopName renders a stop condition for the manifest: the built-ins

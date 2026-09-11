@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 )
 
 const (
@@ -18,7 +19,8 @@ const (
 
 // Option configures an Agent at construction. Options are small values
 // returned by Instructions, MaxSteps, Parallelism, Sequential, StopWhen,
-// and the Tool constructor.
+// Output, the PolicyOptions (MaxResultBytes, Timeout, StrictInput), and
+// the Tool constructor.
 type Option interface {
 	apply(*Agent)
 }
@@ -76,6 +78,13 @@ func (o maxResultBytesOption) apply(a *Agent) {
 	}
 }
 
+func (o maxResultBytesOption) applyTool(t *ToolDef) {
+	if o.n >= 0 {
+		t.resultCap = o.n
+		t.capSet = true
+	}
+}
+
 type nameOption struct{ name string }
 
 func (o nameOption) apply(a *Agent) {
@@ -112,10 +121,12 @@ func Tap(fn func(ctx context.Context, ev Event)) Option { return tapOption{fn} }
 // bytes (default 64 KiB). The loop caps longer results — successes,
 // failures, and panics alike — cutting on a rune boundary and appending a
 // marker the model can see, so it knows the output is partial.
-// MaxResultBytes(0) removes the cap; negative values are ignored.
-// Agent.CallTool returns uncapped output: the cap is a run policy,
-// applied by the loop.
-func MaxResultBytes(n int) Option { return maxResultBytesOption{n} }
+// MaxResultBytes(0) removes the cap; negative values are ignored. On a
+// tool it overrides the agent's cap for that tool alone — a per-tool
+// MaxResultBytes(0) lifts the cap for a tool whose output must arrive
+// whole. Agent.CallTool returns uncapped output: the cap is a run
+// policy, applied by the loop.
+func MaxResultBytes(n int) PolicyOption { return maxResultBytesOption{n} }
 
 // StopCondition decides, after a step's tool calls have run, whether the
 // run is complete. It sees every step so far; the last element is the step
@@ -192,6 +203,8 @@ type Agent struct {
 	maxSteps    int
 	parallelism int
 	resultCap   int
+	toolTimeout time.Duration
+	strict      bool
 	taps        []func(context.Context, Event)
 	name        string
 }

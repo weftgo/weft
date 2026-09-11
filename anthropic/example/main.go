@@ -19,7 +19,7 @@ func main() {
 	if len(os.Args) > 1 {
 		prompt = os.Args[1]
 	}
-	model := anthropic.Model("claude-sonnet-4-5")
+	model := anthropic.Model("claude-sonnet-5")
 	agt := weft.New(model,
 		weft.Name("anthropic-example"),
 		weft.Instructions("You are a terse assistant. Use the tool when asked."),

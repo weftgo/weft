@@ -22,7 +22,7 @@ func TestConformanceLive(t *testing.T) {
 	}
 	name := os.Getenv("ANTHROPIC_MODEL")
 	if name == "" {
-		name = "claude-sonnet-4-5"
+		name = "claude-sonnet-5"
 	}
 	conformance.Run(t, conformance.Caps{
 		Reasoning:  true,

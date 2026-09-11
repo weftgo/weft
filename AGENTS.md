@@ -8,13 +8,20 @@ authority; this is the map.
 
 ```go
 // 1. A tool is a plain function. Schema comes from the input struct's tags.
+type LookupInput struct {
+    OrderID string `json:"order_id" jsonschema:"the order to look up"`
+}
 lookup := weft.Tool("lookup_order", "Look up an order by ID.",
-    func(ctx context.Context, in struct {
-        OrderID string `json:"order_id" jsonschema:"the order to look up"`
-    }) (Order, error) {           // string Out → sent verbatim; other Out → JSON
+    func(ctx context.Context, in LookupInput) (Order, error) { // string Out → verbatim; other Out → JSON
         call, _ := weft.CallFromContext(ctx) // RunID, Step, CallID, Name
         return db.Find(ctx, in.OrderID)
-    })
+    },
+    weft.Timeout(5*time.Second),   // per-tool policy: deadline → error result
+    weft.MaxResultBytes(0),        // this tool's output is never capped
+    weft.StrictInput(),            // undeclared argument fields are rejected
+)
+// Bad arguments are ErrInvalidToolInput results naming the field:
+//   field "days": expected integer, got string
 
 // 1b. Tools defined outside Go source: explicit schema, raw args.
 //     weft.RawTool("parse_invoice", "…", schema, func(ctx, raw) (string, error))
@@ -28,6 +35,7 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
     weft.StopWhen(weft.HasToolCall("submit")), // intended end (optional)
     weft.MaxSteps(20),                         // safety budget → ErrMaxSteps (default 10)
     weft.MaxResultBytes(64 << 10),             // tool-result cap (default 64 KiB; 0 = off)
+    weft.Timeout(30*time.Second),              // default per-call deadline (none by default)
     weft.Parallelism(4),                       // or weft.Sequential()
     weft.Tap(func(ctx context.Context, ev weft.Event) {...}), // observer: sees every event, changes nothing
     lookup,                                    // tools are options
@@ -53,6 +61,12 @@ for ev, err := range agt.Stream(ctx, weft.Prompt("...")).Events() {
 
 // 4. Continue a conversation: feed the transcript back.
 res2, err := agt.Generate(ctx, weft.Messages(res.Messages...), weft.Prompt("And order 5678?"))
+
+// 4b. Structured output: a submit_output tool with T's schema; the run
+//     ends on a valid call. Invalid → ErrInvalidToolInput result, model repairs.
+agt := weft.New(model, weft.Output[Verdict](), lookup)
+v, res, err := weft.GenerateAs[Verdict](ctx, agt, weft.Prompt("..."))   // ErrNoOutput if none
+v, err := weft.OutputOf[Verdict](res)                                    // after Stream + Wait
 
 // 5. Describe the fleet: weft.Manifest(agents...) → weft.json (generated,
 //    committed, golden-gated; never read back).
@@ -100,7 +114,11 @@ network. `wefttest` models ignore it.
    transcript.
 8. **Truncation is visible, never silent**: a `max_tokens` finish is
    recorded on `RunResult.StopReason`; tool results are capped (64 KiB
-   default, `weft.MaxResultBytes`) with a marker the model sees.
+   default, `weft.MaxResultBytes`, per agent or per tool) with a marker
+   the model sees.
+9. **A hung tool never hangs the run**: `weft.Timeout` on a tool or
+   agent records "tool X timed out after d" as an error result and
+   abandons the handler's goroutine; handlers must honour ctx.
 
 ## Working in this repo
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/wefttest"
@@ -215,4 +216,55 @@ func ExampleAgent_stream() {
 	// tool: roll_dice
 	// text: You rolled a 4!
 	// done in 2 steps
+}
+
+// Structured output: Output constrains the final answer to a struct, and
+// GenerateAs returns it decoded. An invalid submission is an ordinary
+// tool error the model repairs; a valid one ends the run.
+func ExampleGenerateAs() {
+	type Verdict struct {
+		Approved bool   `json:"approved"`
+		Reason   string `json:"reason" jsonschema:"one sentence"`
+	}
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "submit_output", Args: `{"approved":true,"reason":"within policy"}`}),
+	)
+	agt := weft.New(model, weft.Instructions("Review refund requests."), weft.Output[Verdict]())
+
+	v, res, err := weft.GenerateAs[Verdict](context.Background(), agt, weft.Prompt("Refund order 42?"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(v.Approved, v.Reason)
+	fmt.Println("steps:", res.NumSteps())
+	// Output:
+	// true within policy
+	// steps: 1
+}
+
+// Per-tool policy: trailing options on Tool override the agent's
+// defaults for that tool alone. Here a slow tool times out into an error
+// result the model sees, and the run carries on.
+func ExampleTimeout() {
+	slow := weft.Tool("slow", "Takes a while.",
+		func(ctx context.Context, _ struct{}) (string, error) {
+			<-ctx.Done() // a well-behaved handler honours the deadline
+			return "", ctx.Err()
+		},
+		weft.Timeout(10*time.Millisecond))
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "slow"}),
+		wefttest.Say("It did not answer in time."),
+	)
+	agt := weft.New(model, slow)
+
+	res, err := agt.Generate(context.Background(), weft.Prompt("Try the slow tool."))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Steps[0].Results[0].Content)
+	fmt.Println(res.Text())
+	// Output:
+	// tool "slow" timed out after 10ms
+	// It did not answer in time.
 }

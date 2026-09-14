@@ -25,8 +25,8 @@ type block struct {
 
 // Stream implements weft.Model over the SDK's streaming Messages API.
 // Text and thinking deltas are yielded live; tool calls are assembled
-// from input_json_delta fragments and yielded whole before
-// ModelFinish.
+// from input_json_delta fragments (surfaced live as ModelToolCallDelta
+// progress) and yielded whole before ModelFinish.
 func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
 	return func(yield func(weft.ModelEvent, error) bool) {
 		if !weft.ModelRequestsAllowed() {
@@ -108,10 +108,21 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 				case anthropic.InputJSONDelta:
 					if b := blocks[e.Index]; b != nil {
 						b.args.WriteString(d.PartialJSON)
+						if d.PartialJSON != "" {
+							// Argument fragments stream as progress —
+							// see the openai adapter's note.
+							if !yield(weft.ModelToolCallDelta{Index: int(e.Index), Name: b.name, Args: d.PartialJSON}, nil) {
+								return
+							}
+						}
 					}
 				}
 			case anthropic.MessageDeltaEvent:
-				stop = string(e.Delta.StopReason)
+				// Guarded like the other adapters: an empty stop
+				// reason on a later delta must not clobber a real one.
+				if e.Delta.StopReason != "" {
+					stop = string(e.Delta.StopReason)
+				}
 				if e.Delta.StopDetails.Category != "" {
 					category = string(e.Delta.StopDetails.Category)
 				}
@@ -121,6 +132,15 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 		reader.wait()
 		if err := stream.Err(); err != nil {
 			yield(nil, terminalErr(ctx, err))
+			return
+		}
+		// A canceled caller must never see a fabricated finish: the
+		// reader goroutine can exit its handshake on cancellation
+		// without Next() returning false, leaving stream.Err nil — so
+		// the contract's (nil, ctx.Err()) is enforced here, not left
+		// to the SDK's error state alone.
+		if err := ctx.Err(); err != nil {
+			yield(nil, err)
 			return
 		}
 		// Whole calls, in block order, before the finish.

@@ -25,7 +25,8 @@
 // the model sees; only model failures, cancellation, and the step budget
 // reach the caller, as *RunError. Output constrains the final answer to
 // a struct (GenerateAs), and trailing options on Tool — Timeout,
-// MaxResultBytes, StrictInput — set per-tool policy.
+// MaxResultBytes, StrictInput — set per-tool policy. Thinking sets the
+// reasoning depth (agent default, run override).
 //
 // The model seam (Model) is streaming-first; provider adapters translate
 // vendor wire formats into weft's events. The wefttest package provides a

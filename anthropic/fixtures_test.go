@@ -52,13 +52,29 @@ func TestStreamToolCallFromFragments(t *testing.T) {
 		t.Fatal(err)
 	}
 	var call weft.ModelToolCall
+	var deltas []weft.ModelToolCallDelta
 	for _, ev := range evs {
-		if c, ok := ev.(weft.ModelToolCall); ok {
-			call = c
+		switch e := ev.(type) {
+		case weft.ModelToolCall:
+			call = e
+		case weft.ModelToolCallDelta:
+			deltas = append(deltas, e)
 		}
 	}
 	if call.ID != "call_probe" || call.Name != "probe" || string(call.Args) != `{"n":3}` {
 		t.Fatalf("call = %+v, want the assembled probe call", call)
+	}
+	// The fragments also surface live as progress, joining back to the
+	// assembled call's arguments.
+	var joined strings.Builder
+	for _, d := range deltas {
+		joined.WriteString(d.Args)
+		if d.Name != "probe" {
+			t.Errorf("delta name = %q, want probe", d.Name)
+		}
+	}
+	if joined.String() != `{"n":3}` {
+		t.Errorf("joined delta args = %s, want the call's arguments", joined.String())
 	}
 	fin := lastFinish(t, evs)
 	if fin.Reason != weft.StopToolCalls || fin.Usage.InputTokens != 9 || fin.Usage.OutputTokens != 5 {

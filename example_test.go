@@ -268,3 +268,25 @@ func ExampleTimeout() {
 	// tool "slow" timed out after 10ms
 	// It did not answer in time.
 }
+
+// Fast by default, think on demand: the agent option sets every run's
+// default, a run option overrides it for that run alone. The scripted
+// model records what each run asked for.
+func ExampleThinking() {
+	model := wefttest.Script(wefttest.Say("ok"), wefttest.Say("ok"))
+	agt := weft.New(model, weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkOff}))
+	deep := weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkHigh, Budget: 2048})
+	if _, err := agt.Generate(context.Background(), deep, weft.Prompt("hard")); err != nil {
+		log.Fatal(err)
+	}
+	if _, err := agt.Generate(context.Background(), weft.Prompt("quick")); err != nil {
+		log.Fatal(err)
+	}
+	for _, req := range model.Requests() {
+		fmt.Println(req.Thinking == weft.ThinkingConfig{Level: weft.ThinkHigh, Budget: 2048},
+			req.Thinking.Level == weft.ThinkOff)
+	}
+	// Output:
+	// true false
+	// false true
+}

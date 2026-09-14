@@ -10,9 +10,9 @@ import (
 // cannot join, so switches over events stay exhaustively lintable.
 //
 // On the wire every event carries a "type" discriminator (run_start,
-// step_start, text_delta, reasoning_delta, tool_start, tool_finish,
-// step_finish, run_finish) and UnmarshalEvent restores it — the same
-// rule and the same compatibility contract as the message parts
+// step_start, text_delta, reasoning_delta, tool_args_delta, tool_start,
+// tool_finish, step_finish, run_finish) and UnmarshalEvent restores it —
+// the same rule and the same compatibility contract as the message parts
 // (ADR 0004).
 type Event interface {
 	isEvent()
@@ -53,6 +53,18 @@ type ToolStart struct {
 	Args   json.RawMessage `json:"args"`
 }
 
+// ToolArgsDelta reports an increment of a tool call's arguments as the
+// model streams them — the model is "writing" the call, which can take
+// a while for large arguments (generated code, long documents). It is
+// progress only: the call has not been made, and ToolStart still
+// arrives when it executes. Name is the best-known name so far; a
+// provider that streams fragments of several calls interleaves their
+// deltas, distinguished by name where the provider supplies one.
+type ToolArgsDelta struct {
+	Name string `json:"name"`
+	Args string `json:"args"`
+}
+
 // ToolFinish reports that a tool invocation completed, successfully or not.
 // Content is the tool's JSON output, or the failure text when IsError is
 // set — the same value the model sees on the matching ToolResultPart, so a
@@ -86,6 +98,7 @@ func (RunStart) isEvent()       {}
 func (StepStart) isEvent()      {}
 func (TextDelta) isEvent()      {}
 func (ReasoningDelta) isEvent() {}
+func (ToolArgsDelta) isEvent()  {}
 func (ToolStart) isEvent()      {}
 func (ToolFinish) isEvent()     {}
 func (StepFinish) isEvent()     {}
@@ -97,6 +110,7 @@ const (
 	eventStepStart      = "step_start"
 	eventTextDelta      = "text_delta"
 	eventReasoningDelta = "reasoning_delta"
+	eventToolArgsDelta  = "tool_args_delta"
 	eventToolStart      = "tool_start"
 	eventToolFinish     = "tool_finish"
 	eventStepFinish     = "step_finish"
@@ -111,6 +125,7 @@ type (
 	stepStartWire      StepStart
 	textDeltaWire      TextDelta
 	reasoningDeltaWire ReasoningDelta
+	toolArgsDeltaWire  ToolArgsDelta
 	toolStartWire      ToolStart
 	toolFinishWire     ToolFinish
 	stepFinishWire     StepFinish
@@ -147,6 +162,14 @@ func (e ReasoningDelta) MarshalJSON() ([]byte, error) {
 		Type string `json:"type"`
 		reasoningDeltaWire
 	}{eventReasoningDelta, reasoningDeltaWire(e)})
+}
+
+// MarshalJSON encodes the event with its "type" discriminator.
+func (e ToolArgsDelta) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type string `json:"type"`
+		toolArgsDeltaWire
+	}{eventToolArgsDelta, toolArgsDeltaWire(e)})
 }
 
 // MarshalJSON encodes the event with its "type" discriminator.
@@ -208,6 +231,9 @@ func UnmarshalEvent(b []byte) (Event, error) {
 	case eventReasoningDelta:
 		var v ReasoningDelta
 		err, ev = json.Unmarshal(b, (*reasoningDeltaWire)(&v)), v
+	case eventToolArgsDelta:
+		var v ToolArgsDelta
+		err, ev = json.Unmarshal(b, (*toolArgsDeltaWire)(&v)), v
 	case eventToolStart:
 		var v ToolStart
 		err, ev = json.Unmarshal(b, (*toolStartWire)(&v)), v

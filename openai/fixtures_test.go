@@ -45,11 +45,14 @@ func TestStreamToolCallSplitAcrossChunks(t *testing.T) {
 		t.Fatal(err)
 	}
 	var calls []weft.ModelToolCall
+	var deltas []weft.ModelToolCallDelta
 	var finish weft.ModelFinish
 	for _, ev := range evs {
 		switch e := ev.(type) {
 		case weft.ModelToolCall:
 			calls = append(calls, e)
+		case weft.ModelToolCallDelta:
+			deltas = append(deltas, e)
 		case weft.ModelFinish:
 			finish = e
 		}
@@ -59,6 +62,18 @@ func TestStreamToolCallSplitAcrossChunks(t *testing.T) {
 	}
 	if string(calls[0].Args) != `{"n":3}` {
 		t.Errorf("args = %s, want the joined fragments", calls[0].Args)
+	}
+	// Argument fragments surface live as progress, in order, joining
+	// back to the assembled call's arguments.
+	var joined strings.Builder
+	for _, d := range deltas {
+		joined.WriteString(d.Args)
+		if d.Name != "" && d.Name != "probe" {
+			t.Errorf("delta name = %q, want probe (or empty before the name arrives)", d.Name)
+		}
+	}
+	if joined.String() != `{"n":3}` {
+		t.Errorf("joined delta args = %s, want the call's arguments", joined.String())
 	}
 	if finish.Reason != weft.StopToolCalls {
 		t.Errorf("reason = %q, want tool_calls", finish.Reason)

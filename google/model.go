@@ -113,10 +113,13 @@ func Model(name string, opts ...Option) weft.Model {
 type model struct {
 	// client is created on first use: genai.NewClient wants a context
 	// for credential discovery, and Model itself performs no I/O.
-	client    *genai.Client
-	clientErr error
-	ready     bool
-	once      sync.Once
+	// initMu guards the lazy init; a failed attempt is not cached —
+	// credential discovery can be transient (metadata-server hiccup,
+	// an already-canceled first ctx), and caching it would brick the
+	// Model value forever.
+	client *genai.Client
+	ready  bool
+	initMu sync.Mutex
 
 	name        string
 	baseURL     string
@@ -131,23 +134,26 @@ type model struct {
 
 // initClient builds the SDK client on the first Stream call.
 func (m *model) initClient(ctx context.Context) error {
-	m.once.Do(func() {
-		if m.ready {
-			return
-		}
-		cc := &genai.ClientConfig{APIKey: m.apiKey}
-		if m.baseURL != "" {
-			cc.HTTPOptions.BaseURL = m.baseURL
-		}
-		if m.maxRetries > 0 {
-			// Attempts counts the original request.
-			attempts := int32(m.maxRetries + 1)
-			cc.HTTPOptions.RetryOptions = &genai.HTTPRetryOptions{Attempts: &attempts}
-		}
-		m.client, m.clientErr = genai.NewClient(ctx, cc)
-		m.ready = m.clientErr == nil
-	})
-	return m.clientErr
+	m.initMu.Lock()
+	defer m.initMu.Unlock()
+	if m.ready {
+		return nil
+	}
+	cc := &genai.ClientConfig{APIKey: m.apiKey}
+	if m.baseURL != "" {
+		cc.HTTPOptions.BaseURL = m.baseURL
+	}
+	if m.maxRetries > 0 {
+		// Attempts counts the original request.
+		attempts := int32(m.maxRetries + 1)
+		cc.HTTPOptions.RetryOptions = &genai.HTTPRetryOptions{Attempts: &attempts}
+	}
+	client, err := genai.NewClient(ctx, cc)
+	if err != nil {
+		return err // not cached: the next call retries
+	}
+	m.client, m.ready = client, true
+	return nil
 }
 
 // Info identifies the model for RunStart and the manifest.

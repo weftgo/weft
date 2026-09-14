@@ -18,6 +18,10 @@
 //   - SequentialTools has no Gemini switch: function-calling config
 //     stays AUTO and the adapter's conformance run declares the
 //     sequential cap false — a documented gap, not a silent one.
+//   - ModelRequest.Thinking maps onto thinkingConfig: Off zeroes the
+//     budget (Gemini's off switch), a Budget pins it, a bare level
+//     maps to thinkingLevel — and asks for thought summaries back so
+//     reasoning streams (ADR 0013 amendment 9).
 //
 // Retry stance: transport retries (429, 5xx, connection errors) belong
 // to the SDK via MaxRetries (off unless asked); the weft loop never

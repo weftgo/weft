@@ -216,3 +216,49 @@ func TestConfigOptions(t *testing.T) {
 		t.Errorf("cfg = max %d temp %v, want 64 / 0.5", cfg.MaxOutputTokens, cfg.Temperature)
 	}
 }
+
+// Run-level thinking (TODO §5.14): Off disables via a zero budget, a
+// Budget pins depth, a bare level maps to thinkingLevel — and nothing
+// is sent when the run asks for nothing.
+func TestThinkingConfig(t *testing.T) {
+	cases := []struct {
+		name  string
+		run   weft.ThinkingConfig
+		check func(t *testing.T, tc *genai.ThinkingConfig)
+	}{
+		{"unset sends nothing", weft.ThinkingConfig{},
+			func(t *testing.T, tc *genai.ThinkingConfig) {
+				if tc != nil {
+					t.Errorf("want nil ThinkingConfig, got %+v", tc)
+				}
+			}},
+		{"off zeroes the budget", weft.ThinkingConfig{Level: weft.ThinkOff},
+			func(t *testing.T, tc *genai.ThinkingConfig) {
+				if tc == nil || tc.ThinkingBudget == nil || *tc.ThinkingBudget != 0 {
+					t.Errorf("ThinkOff: got %+v, want budget 0", tc)
+				}
+			}},
+		{"budget pins depth and asks for thoughts", weft.ThinkingConfig{Budget: 4096},
+			func(t *testing.T, tc *genai.ThinkingConfig) {
+				if tc == nil || tc.ThinkingBudget == nil || *tc.ThinkingBudget != 4096 || !tc.IncludeThoughts {
+					t.Errorf("Budget 4096: got %+v, want budget 4096 + thoughts", tc)
+				}
+			}},
+		{"medium maps to the level", weft.ThinkingConfig{Level: weft.ThinkMedium},
+			func(t *testing.T, tc *genai.ThinkingConfig) {
+				if tc == nil || tc.ThinkingLevel != genai.ThinkingLevelMedium || !tc.IncludeThoughts {
+					t.Errorf("ThinkMedium: got %+v, want level MEDIUM + thoughts", tc)
+				}
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Model("m").(*model)
+			_, cfg, err := m.contents(weft.ModelRequest{Thinking: tc.run})
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.check(t, cfg.ThinkingConfig)
+		})
+	}
+}

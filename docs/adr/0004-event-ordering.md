@@ -108,6 +108,18 @@ id per event (the `store` module defines its envelope, as ADR 0001 says
 for messages) and a streaming codec (JSON lines needs nothing from the
 core).
 
+## Amendment (2026-09-14 — tool-argument progress, `tool_args_delta`)
+
+`ToolArgsDelta` joins the wire set: an increment of a tool call's
+arguments while the model is still "writing" it. It is **progress
+only** — the assembled call still arrives as `ToolStart` when it
+executes, and every `ToolArgsDelta` precedes the `ToolStart` of the
+call it belongs to by construction (deltas stream during the model
+call; `ToolStart` is emitted by tool dispatch after it). Like
+`TextDelta`, it is emitted from the single loop goroutine and carries
+no `Seq`. The adapters' side of the rule (which providers stream
+fragments, and the matching `ModelToolCallDelta`) is ADR 0013's.
+
 ## Consequences
 
 - Replaying a recorded event stream reproduces the exact live interleaving.

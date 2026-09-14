@@ -127,6 +127,22 @@ func Run(t *testing.T, caps Caps, newModel func(t *testing.T, name string) weft.
 		}
 	})
 
+	// The run-level thinking option must thread through the public API
+	// without failing the exchange — wire-shape assertions (the exact
+	// param each provider receives) live in the adapters' own unit
+	// tests, where the request body is recordable.
+	t.Run("thinking_option", func(t *testing.T) {
+		res, err := generate(t, newModel(t, "text_only"), nil,
+			weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkOff}),
+			weft.Prompt("Reply with one short sentence."))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.NumSteps() != 1 || res.Text() == "" {
+			t.Errorf("steps = %d, text = %q; the thinking option broke the exchange", res.NumSteps(), res.Text())
+		}
+	})
+
 	t.Run("tool_roundtrip_struct", func(t *testing.T) {
 		res, err := generate(t, newModel(t, "tool_roundtrip_struct"), nil,
 			weft.Prompt("Call `probe` with n=3, then tell me the doubled value it returned."))

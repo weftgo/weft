@@ -120,6 +120,15 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			yield(nil, terminalErr(ctx, err))
 			return
 		}
+		// A canceled caller must never see a fabricated finish: the
+		// reader goroutine can exit its handshake on cancellation
+		// without the SDK's iterator yielding an error, leaving
+		// streamErr nil — so the contract's (nil, ctx.Err()) is
+		// enforced here, not left to the iterator's error state alone.
+		if err := ctx.Err(); err != nil {
+			yield(nil, err)
+			return
+		}
 		for i, c := range calls {
 			if c.ID == "" {
 				c.ID = fmt.Sprintf("call_%d", i+1)

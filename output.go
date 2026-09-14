@@ -63,6 +63,9 @@ func (o outputOption) apply(a *Agent) {
 type outputSubmitted struct{}
 
 func (outputSubmitted) Stop(steps []StepRecord) bool {
+	if len(steps) == 0 {
+		return false
+	}
 	last := steps[len(steps)-1]
 	for _, r := range last.Results {
 		if r.Name == outputToolName && !r.IsError {

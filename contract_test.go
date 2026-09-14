@@ -1500,6 +1500,8 @@ func TestEventJSONRoundTrip(t *testing.T) {
 		{weft.StepStart{Index: 1}, `{"type":"step_start","index":1}`},
 		{weft.TextDelta{Text: "hi"}, `{"type":"text_delta","text":"hi"}`},
 		{weft.ReasoningDelta{Text: "hm"}, `{"type":"reasoning_delta","text":"hm"}`},
+		{weft.ToolArgsDelta{Name: "write_file", Args: `{"content":"x`},
+			`{"type":"tool_args_delta","name":"write_file","args":"{\"content\":\"x"}`},
 		{weft.ToolStart{Seq: 5, CallID: "c1", Name: "echo", Args: json.RawMessage(`{"m":"x"}`)},
 			`{"type":"tool_start","seq":5,"call_id":"c1","name":"echo","args":{"m":"x"}}`},
 		{weft.ToolStart{Seq: 7, CallID: "c2", Name: "t"},

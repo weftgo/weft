@@ -70,6 +70,31 @@ func (sequentialOption) apply(a *Agent) { a.parallelism = 1 }
 // parallel batches in the first place.
 func Sequential() Option { return sequentialOption{} }
 
+// ThinkingOption is accepted by both New and Stream/Generate: reasoning
+// depth is a per-question concern, not a per-agent one. On an agent it
+// is the default for every run; on a run it overrides that default.
+type ThinkingOption interface {
+	Option
+	RunOption
+}
+
+type thinkingOption struct{ cfg ThinkingConfig }
+
+func (o thinkingOption) apply(a *Agent)        { a.thinking = o.cfg }
+func (o thinkingOption) applyRun(c *runConfig) { c.thinking, c.thinkingSet = o.cfg, true }
+
+// Thinking sets the reasoning level for the agent's model calls. As an
+// Option it is every run's default; as a RunOption it overrides that
+// default for one run — the quick-ask shape: fast by default, think on
+// demand, without rebuilding the agent.
+//
+//	agt := weft.New(m, weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkOff}))
+//	agt.Generate(ctx, weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkHigh}), weft.Prompt(q))
+//
+// The zero Level keeps the provider default; adapters map what the
+// provider can express and document what they drop.
+func Thinking(cfg ThinkingConfig) ThinkingOption { return thinkingOption{cfg} }
+
 type maxResultBytesOption struct{ n int }
 
 func (o maxResultBytesOption) apply(a *Agent) {
@@ -169,6 +194,9 @@ func HasToolCall(names ...string) StopCondition {
 type hasToolCall struct{ names []string }
 
 func (h hasToolCall) Stop(steps []StepRecord) bool {
+	if len(steps) == 0 {
+		return false
+	}
 	last := steps[len(steps)-1]
 	for _, c := range last.ToolCalls {
 		if slices.Contains(h.names, c.Name) {
@@ -207,6 +235,7 @@ type Agent struct {
 	strict      bool
 	taps        []func(context.Context, Event)
 	name        string
+	thinking    ThinkingConfig
 }
 
 // New builds an Agent. Nil models panic — including typed nils such as

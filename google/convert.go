@@ -64,6 +64,21 @@ func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.Genera
 		t := float32(m.temperature)
 		cfg.Temperature = &t
 	}
+	// Run-level thinking (TODO §5.14): Off disables (a zero budget is
+	// Gemini's off switch), a Budget pins depth, a bare level maps to
+	// Gemini's thinkingLevel. An explicit level or budget asks for
+	// thought summaries back, so reasoning streams; the default sends
+	// nothing and keeps the model's own behavior.
+	switch {
+	case req.Thinking.Level == weft.ThinkOff:
+		zero := int32(0)
+		cfg.ThinkingConfig = &genai.ThinkingConfig{ThinkingBudget: &zero}
+	case req.Thinking.Budget > 0:
+		b := int32(req.Thinking.Budget)
+		cfg.ThinkingConfig = &genai.ThinkingConfig{ThinkingBudget: &b, IncludeThoughts: true}
+	case req.Thinking.Level != weft.ThinkUnset:
+		cfg.ThinkingConfig = &genai.ThinkingConfig{ThinkingLevel: geminiLevel(req.Thinking.Level), IncludeThoughts: true}
+	}
 	for _, t := range req.Tools {
 		converted, ok := m.tools.Load(t)
 		if !ok {
@@ -75,6 +90,20 @@ func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.Genera
 	// SequentialTools has no Gemini switch (function-calling config
 	// stays AUTO) — a documented gap; see ADR 0013.
 	return contents, cfg, nil
+}
+
+// geminiLevel maps the neutral scale onto Gemini's own; an unmapped
+// level (Unset never reaches here, Off is handled by the budget switch)
+// lands on medium.
+func geminiLevel(l weft.ThinkingLevel) genai.ThinkingLevel {
+	switch l {
+	case weft.ThinkLow:
+		return genai.ThinkingLevelLow
+	case weft.ThinkHigh:
+		return genai.ThinkingLevelHigh
+	default:
+		return genai.ThinkingLevelMedium
+	}
 }
 
 // userParts converts a user message: text to text parts, file parts to

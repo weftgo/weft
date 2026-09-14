@@ -73,6 +73,7 @@ for ev, err := range agt.Stream(ctx, weft.Prompt("Echo hello.")).Events() {
     switch ev := ev.(type) {
     case weft.TextDelta:
         io.WriteString(w, ev.Text)
+    case weft.ToolArgsDelta: // progress: the model is still writing the call
     case weft.ToolStart:
         slog.Info("tool", "name", ev.Name, "seq", ev.Seq)
     case weft.RunFinish:
@@ -168,14 +169,22 @@ anthropic.Model("claude-sonnet-5", anthropic.Thinking(true))
 google.Model("gemini-2.5-flash")
 ```
 
+Reasoning depth is per run: `weft.Thinking(weft.ThinkingConfig{Level:
+weft.ThinkHigh})` — an agent option sets every run's default, a run
+option overrides it for one — maps to whatever the provider expresses
+(`reasoning_effort`, `budget_tokens`, `thinkingBudget`); adapters
+document what they drop. The openai adapter picks the thinking wire
+form from the base URL; `openai.Dialect` pins it when detection can't.
+
 Every adapter passes the same executable contract
 (`wefttest/conformance`): streaming tool-call fragments are assembled
-into whole calls, provider errors pass through unchanged for
-`errors.As`, cancellation surfaces as `ctx.Err()`, a stalled stream
-fails with `ErrStreamIdle` while a slow-but-streaming one never does,
-and `WEFT_MODEL_REQUESTS=deny` refuses every call before any network
-I/O — test suites that must stay offline get loud failures, not
-surprise bills. ([ADR 0013](docs/adr/0013-adapter-contract.md))
+into whole calls and also surface live as `ToolArgsDelta` progress,
+provider errors pass through unchanged for `errors.As`, cancellation
+surfaces as `ctx.Err()`, a stalled stream fails with `ErrStreamIdle`
+while a slow-but-streaming one never does, and
+`WEFT_MODEL_REQUESTS=deny` refuses every call before any network I/O —
+test suites that must stay offline get loud failures, not surprise
+bills. ([ADR 0013](docs/adr/0013-adapter-contract.md))
 
 ## The rules that matter
 

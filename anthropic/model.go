@@ -11,8 +11,9 @@ import (
 )
 
 // Option configures the adapter at construction, the same functional
-// style as the core. The zero configuration reads $ANTHROPIC_API_KEY
-// and does not retry.
+// style as the core. The zero configuration reads $ANTHROPIC_API_KEY;
+// the SDK's transport default applies (2 retries on
+// 429/5xx/connection errors).
 type Option interface{ apply(*config) }
 
 type config struct {
@@ -65,8 +66,11 @@ func IdleTimeout(d time.Duration) Option {
 }
 
 // MaxRetries forwards to the SDK's transport retry configuration
-// (429/5xx/connection errors only). The weft loop never retries a model
-// call; logic retries are model-seam middleware (TODO §4.1).
+// (429/5xx/connection errors only). Only n > 0 is forwarded: the SDK's
+// own default (2) applies otherwise, and 0 cannot disable it — keep a
+// zero-retry client via Client(c) if you need one. The weft loop never
+// retries a model call; logic retries are model-seam middleware
+// (TODO §4.1).
 func MaxRetries(n int) Option { return optionFunc(func(c *config) { c.maxRetries = n }) }
 
 // Thinking enables adaptive thinking: the request carries

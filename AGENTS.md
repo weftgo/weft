@@ -37,12 +37,15 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
     weft.MaxResultBytes(64 << 10),             // tool-result cap (default 64 KiB; 0 = off)
     weft.Timeout(30*time.Second),              // default per-call deadline (none by default)
     weft.Parallelism(4),                       // or weft.Sequential()
+    weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkOff}), // reasoning default (adapters map what they can)
     weft.Tap(func(ctx context.Context, ev weft.Event) {...}), // observer: sees every event, changes nothing
     lookup,                                    // tools are options
 )
 
 // 3. Run it.
 res, err := agt.Generate(ctx, weft.Prompt("Where is order 1234?"))
+// Thinking also works per run, overriding the agent default — fast by default, think on demand:
+//   agt.Generate(ctx, weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkHigh}), weft.Prompt("..."))
 // res.Text(), res.Messages (full transcript), res.Steps, res.Usage, res.ID
 
 // 3b. Or stream it.
@@ -52,6 +55,7 @@ for ev, err := range agt.Stream(ctx, weft.Prompt("...")).Events() {
     case weft.RunStart:      // ID, Model (ModelInfo when the model reports one)
     case weft.ReasoningDelta: // Text (provider reasoning; signatures stay on the part)
     case weft.TextDelta:     // Text
+    case weft.ToolArgsDelta: // Name, Args — progress while the model writes a tool call
     case weft.ToolStart:     // Seq, CallID, Name, Args
     case weft.ToolFinish:    // Seq, CallID, Name, Content, IsError
     case weft.StepFinish:    // Index, Reason, Usage

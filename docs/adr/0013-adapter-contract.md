@@ -1,6 +1,9 @@
 # ADR 0013 — Adapter contract and conformance
 
-- Status: decided (2026-09-10, with TODO §3.1–§3.7)
+- Status: decided (2026-09-10, with TODO §3.1–§3.7); amended 2026-09-12
+  (thinking pass-through, TODO §5.14) and 2026-09-14 (argument-delta
+  progress, enforced cancellation, empty-content and refusal handling —
+  cross-cutting rules and appendices below)
 - Numbering: 0013, not 0006 — 0006–0011 are reserved by the TODO items
   that name them (§4 seams, §4.4 approval, §6 output, §10 wire, §11
   record, §14 runtime) and 0012 is the manifest.
@@ -36,6 +39,7 @@ against `wefttest` models (proving the harness itself).
 | `max_tokens` | the adapter's token-limit option maps to `StopMaxTokens` |
 | `sequential_hint` (`Caps.Sequential`) | under `weft.Sequential()`, ≤1 call per step |
 | `reasoning_passthrough` (`Caps.Reasoning`) | a ReasoningPart precedes text; feeding the transcript back succeeds (signature round trip) |
+| `thinking_option` | a run with the `weft.Thinking` option completes normally (the option threads through the public API); wire-shape assertions live in adapter unit tests, where the request body is recordable |
 | `file_input` | with `Caps.Files` an inline PNG is answered; without, the run fails wrapping `ErrUnsupported` |
 | `idle_timeout` (offline only) | a stalled stream fails wrapping `ErrStreamIdle` |
 | `kill_switch` | `WEFT_MODEL_REQUESTS=deny` fails the run wrapping `ErrModelRequestsDenied` before any request (offline runs point the case at `conformance.NoRequestServer`, which fails the test if anything arrives) |
@@ -61,11 +65,21 @@ fixture-only idle case.
   `errors.As` them; the only errors an adapter *creates* are wraps of
   `ErrUnsupported`, `ErrStreamIdle`, `ErrModelRequestsDenied`, and
   `ctx.Err()`.
+- **Cancellation is terminal.** A caller whose ctx ends mid-stream gets
+  `(nil, ctx.Err())` — never a finish fabricated from buffered state.
+  The reader goroutine can exit its handshake on cancellation with the
+  SDK's error state still nil, so every adapter checks ctx explicitly
+  after its read loop (2026-09-14; the `cancel_mid_stream` case and
+  per-adapter regression tests pin it).
 - **Whole tool calls, before `ModelFinish`, in a stable order.**
   Streaming argument fragments are the adapter's problem (the core's
   uniform-streaming rent). Empty IDs or names fail the run via
   `ErrModelContract` — synthesised ids (`call_<i>`, first-seen order)
-  prevent that on servers that omit them.
+  prevent that on servers that omit them. Since 2026-09-14 the
+  fragments also surface live as `ModelToolCallDelta` progress (run
+  side: `ToolArgsDelta`, ADR 0004's amendment) — progress only, the
+  assembled call still arrives whole; adapters whose calls arrive whole
+  (Google) simply yield none.
 - **Read-only `ModelRequest`**; convert into fresh SDK values.
 - **Tool defs converted once**, cached by `*ToolDef` pointer.
 - **Vendor extras live in adapter options**, never on core types;
@@ -108,13 +122,29 @@ tracked in TODO §9.2's orbit.)
   fans out to N `tool` messages (error results as plain content).
 - Stop reasons: `stop`→end_turn, `tool_calls`→tool_calls,
   `length`→max_tokens, empty-with-calls→tool_calls (compatible
-  servers), anything else→end_turn + `Raw`.
+  servers), anything else→end_turn + `Raw`. A streamed safety refusal
+  (`delta.refusal`, `finish_reason` `content_filter`) is the model's
+  answer text (2026-09-14): it streams as a text delta rather than
+  vanishing, and `content_filter` rides `Raw` via the unmapped rule.
 - Usage from the final chunk (`stream_options.include_usage`); tools
   cached by pointer; `SequentialTools` → `parallel_tool_calls: false`;
   `MaxTokens` → `max_completion_tokens`; `MaxRetries` → the SDK's
   transport retries. Compatible servers: `Provider` stays `"openai"`
   (a base URL host is not an identity), ids synthesised when missing,
   zero usage allowed via `Caps.Usage=false`.
+- Thinking (§5.14): `ModelRequest.Thinking` maps by dialect —
+  `reasoning_effort` low/medium/high for the official API and
+  unrecognized hosts; a `thinking:{"type":"enabled"|"disabled"}` object
+  injected into the JSON body via a per-request SDK middleware for the
+  known gateway hosts (z.ai, bigmodel.cn, moonshot.ai/cn), whose param
+  the SDK's typed params cannot carry. `Dialect(...)` overrides
+  detection; `DialectNone` sends nothing for strict servers. Declared
+  gaps: the official API has no off switch (`ThinkOff` sends nothing
+  there) and no budget form (`Budget` is dropped in the effort
+  dialect); Kimi k3's advertised `think_efforts` scale is future work. Live finding
+  (2026-09-12): Moonshot's kimi-k2.7-code family rejects
+  `{"type":"disabled"}` ("only type=enabled is allowed for this
+  model") — always-thinking models; the 400 is the honest answer.
 
 ## Appendix B — Anthropic (Messages, `anthropic-sdk-go` v1.72.0)
 
@@ -123,7 +153,12 @@ tracked in TODO §9.2's orbit.)
   `is_error` preserved); assistant order thinking → text → `tool_use`
   (the loop already builds it); unsigned `ReasoningPart` dropped —
   Anthropic rejects unsigned thinking; images (png/jpeg/gif/webp) and
-  PDF, inline or URL; other media → `ErrUnsupported`.
+  PDF, inline or URL; other media → `ErrUnsupported`. Empty content the
+  API rejects never reaches the wire (2026-09-14): an empty tool result
+  travels as a visible `"(empty tool output)"` placeholder, a user
+  message whose every part was empty text as `"(empty message)"`, and
+  an assistant message with nothing sendable is skipped —
+  model-visible, recorded here per the contracts rule.
 - Streaming: `input_json_delta` fragments accumulate per block index;
   `thinking_delta`/`signature_delta` become reasoning deltas; calls are
   held until `message_stop` and yielded in block order.
@@ -133,9 +168,16 @@ tracked in TODO §9.2's orbit.)
   (cache read + creation folded in — billed input) + `message_delta`
   output.
 - `Thinking(true)` → `thinking:{"type":"adaptive"}` (the plan's guess,
-  confirmed against the pinned SDK; no `budget_tokens` — rejected by
-  current models). `max_tokens` required; default 4096. Vertex/Bedrock
-  compose through `Client(c)`. Forced tool choice is never sent.
+  confirmed against the pinned SDK). `max_tokens` required; default
+  4096. Vertex/Bedrock compose through `Client(c)`. Forced tool choice
+  is never sent.
+- Thinking (§5.14): the run-level `ModelRequest.Thinking` overrides the
+  construction default — `ThinkOff` → `{"type":"disabled"}` (for
+  models that think by default), `Budget>0` →
+  `{"type":"enabled","budget_tokens":n}` (the SDK requires
+  `budget_tokens` alongside a raised `max_tokens` — callers own that
+  relationship), a bare level → adaptive. Off wins over a contradictory
+  Budget.
 
 ## Appendix C — Google (Gemini, `google.golang.org/genai` v1.71.0)
 
@@ -174,6 +216,11 @@ tracked in TODO §9.2's orbit.)
   `HTTPOptions.RetryOptions{Attempts: n+1}` (the SDK retries nothing
   unless asked, so the zero configuration matches the other adapters).
   `BaseURL` unset defers to the SDK's own `$GOOGLE_GEMINI_BASE_URL`.
+- Thinking (§5.14): `ThinkOff` → `thinkingBudget: 0` (Gemini's off
+  switch); `Budget>0` → `thinkingBudget: n`; a bare level →
+  `thinkingLevel` low/medium/high. An explicit level or budget also
+  sets `includeThoughts: true` so reasoning streams; the default sends
+  nothing and keeps the model's own behavior.
 
 ## Decisions recorded from the plan's guesses
 
@@ -199,6 +246,17 @@ tracked in TODO §9.2's orbit.)
 8. Anthropic cache tokens fold into input usage; Google thought tokens
    fold into output usage — both are billed tokens, both are guesses
    the conformance `usage_nonzero` case keeps honest.
+9. Thinking control is **per-run, not per-construction** (§5.14,
+   2026-09-12): `ModelRequest.Thinking` is the seam — a neutral
+   `ThinkingLevel` scale plus an optional token budget — filled from a
+   `weft.Thinking` option that works as both agent default and run
+   override (the `PolicyOption` shape). Adapter construction options
+   (`anthropic.Thinking`) remain the default the run value overrides.
+   The openai adapter's gateway escape hatch rewrites the request body
+   via an SDK request middleware, in the open — the predicted
+   openai-go friction arrived as expected, and the RawTool-precedented
+   override is the answer, never a silent absorption into a fake SDK
+   field.
 
 ## Consequences
 

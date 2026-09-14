@@ -12,7 +12,8 @@ import (
 
 // Option configures the adapter at construction, the same functional
 // style as the core. The zero configuration reads $OPENAI_API_KEY (and
-// $OPENAI_BASE_URL) and does not retry.
+// $OPENAI_BASE_URL); the SDK's transport default applies (2 retries on
+// 429/5xx/connection errors).
 type Option interface{ apply(*config) }
 
 type config struct {
@@ -25,6 +26,7 @@ type config struct {
 	idle        time.Duration
 	idleSet     bool
 	maxRetries  int
+	dialect     ThinkingDialect
 }
 
 type optionFunc func(*config)
@@ -65,8 +67,11 @@ func IdleTimeout(d time.Duration) Option {
 }
 
 // MaxRetries forwards to the SDK's transport retry configuration
-// (429/5xx/connection errors only). The weft loop never retries a model
-// call; logic retries are model-seam middleware (TODO §4.1).
+// (429/5xx/connection errors only). Only n > 0 is forwarded: the SDK's
+// own default (2) applies otherwise, and 0 cannot disable it — keep a
+// zero-retry client via Client(c) if you need one. The weft loop never
+// retries a model call; logic retries are model-seam middleware
+// (TODO §4.1).
 func MaxRetries(n int) Option { return optionFunc(func(c *config) { c.maxRetries = n }) }
 
 const (
@@ -92,6 +97,7 @@ func Model(name string, opts ...Option) weft.Model {
 		temperature: cfg.temperature,
 		tempSet:     cfg.tempSet,
 		idle:        defaultIdleTimeout,
+		dialect:     resolveDialect(cfg.dialect, cfg.baseURL),
 	}
 	if cfg.idleSet {
 		m.idle = cfg.idle
@@ -123,6 +129,7 @@ type model struct {
 	temperature float64
 	tempSet     bool
 	idle        time.Duration
+	dialect     ThinkingDialect
 	tools       sync.Map // *weft.ToolDef → openai.ChatCompletionToolParam
 }
 

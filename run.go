@@ -14,8 +14,10 @@ type RunOption interface {
 }
 
 type runConfig struct {
-	id       string
-	messages []Message
+	id          string
+	messages    []Message
+	thinking    ThinkingConfig
+	thinkingSet bool // a run-level Thinking option was applied
 }
 
 type runIDOption string
@@ -40,6 +42,16 @@ func (c *runConfig) finish() {
 	if c.id == "" {
 		c.id = newRunID()
 	}
+}
+
+// effectiveThinking resolves the run's reasoning request: a run-level
+// Thinking option overrides the agent's construction-time default;
+// neither set keeps the provider default (the zero ThinkingConfig).
+func (c *runConfig) effectiveThinking(agentDefault ThinkingConfig) ThinkingConfig {
+	if c.thinkingSet {
+		return c.thinking
+	}
+	return agentDefault
 }
 
 type promptOption string

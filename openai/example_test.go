@@ -19,3 +19,15 @@ func ExampleModel() {
 	agt := weft.New(m, echo)
 	_ = agt // a run is agt.Generate(ctx, weft.Prompt("Echo: hello"))
 }
+
+// The thinking wire form is detected from the base URL (reasoning_effort
+// for the official API and unrecognized hosts, a thinking object for the
+// known gateways); Dialect pins it when detection can't know — a custom
+// gateway behind an unrecognized host, or a client whose endpoint the
+// adapter cannot inspect.
+func ExampleDialect() {
+	m := openai.Model("kimi-k2.7",
+		openai.BaseURL("https://gw.internal/v1"),
+		openai.Dialect(openai.DialectObject))
+	_ = m // runs now send thinking:{"type":...} per weft.Thinking
+}

@@ -199,3 +199,56 @@ func TestMapStopReason(t *testing.T) {
 		}
 	}
 }
+
+// Run-level thinking (TODO §5.14): Off explicitly disables, a Budget
+// pins depth via budget_tokens, a bare level defers to adaptive — and
+// the construction default survives when the run sends nothing.
+func TestThinkingParams(t *testing.T) {
+	cases := []struct {
+		name         string
+		construction bool // anthropic.Thinking(true)
+		run          weft.ThinkingConfig
+		check        func(t *testing.T, u anthropic.ThinkingConfigParamUnion)
+	}{
+		{"construction default survives", true, weft.ThinkingConfig{},
+			func(t *testing.T, u anthropic.ThinkingConfigParamUnion) {
+				if u.OfAdaptive == nil {
+					t.Error("construction Thinking(true) + Unset run: want adaptive")
+				}
+			}},
+		{"unset without construction sends nothing", false, weft.ThinkingConfig{},
+			func(t *testing.T, u anthropic.ThinkingConfigParamUnion) {
+				if u.OfAdaptive != nil || u.OfEnabled != nil || u.OfDisabled != nil {
+					t.Errorf("want nothing sent, got %+v", u)
+				}
+			}},
+		{"off overrides construction", true, weft.ThinkingConfig{Level: weft.ThinkOff},
+			func(t *testing.T, u anthropic.ThinkingConfigParamUnion) {
+				if u.OfDisabled == nil {
+					t.Error("ThinkOff: want OfDisabled")
+				}
+			}},
+		{"budget pins depth", false, weft.ThinkingConfig{Level: weft.ThinkHigh, Budget: 2048},
+			func(t *testing.T, u anthropic.ThinkingConfigParamUnion) {
+				if u.OfEnabled == nil || u.OfEnabled.BudgetTokens != 2048 {
+					t.Errorf("Budget 2048: got %+v, want OfEnabled with budget 2048", u)
+				}
+			}},
+		{"bare level is adaptive", false, weft.ThinkingConfig{Level: weft.ThinkMedium},
+			func(t *testing.T, u anthropic.ThinkingConfigParamUnion) {
+				if u.OfAdaptive == nil {
+					t.Error("bare level: want adaptive")
+				}
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Model("m", Thinking(tc.construction)).(*model)
+			p, err := m.params(weft.ModelRequest{Thinking: tc.run})
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.check(t, p.Thinking)
+		})
+	}
+}

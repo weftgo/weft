@@ -7,11 +7,21 @@
 //
 //   - weft's batched RoleTool message is already Anthropic's shape: one
 //     user message with N tool_result blocks.
+//   - Streamed input_json_delta argument fragments surface live as
+//     ModelToolCallDelta progress; the assembled call is emitted whole
+//     before ModelFinish.
+//   - Empty content the API rejects never reaches the wire: an empty
+//     tool result travels as "(empty tool output)", a user message
+//     with no sendable parts as "(empty message)", and an assistant
+//     message with nothing sendable is skipped.
 //   - Reasoning round-trips as thinking blocks with their signature;
 //     an unsigned ReasoningPart (a transcript from another provider)
 //     is dropped rather than failing the call.
 //   - SequentialTools sets tool_choice.auto with
 //     disable_parallel_tool_use.
+//   - ModelRequest.Thinking overrides the Thinking(true) construction
+//     default: Off disables explicitly, a Budget pins budget_tokens,
+//     a bare level sends adaptive (ADR 0013 amendment 9).
 //   - max_tokens is required by the API; the adapter defaults it to
 //     4096 when MaxTokens is not given.
 //

@@ -30,6 +30,23 @@ func (m *model) params(req weft.ModelRequest) (anthropic.MessageNewParams, error
 			OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{},
 		}
 	}
+	// Run-level thinking (TODO §5.14) overrides the construction
+	// default: Off explicitly disables (relevant for models that think
+	// by default), a Budget pins the depth, and a bare level defers the
+	// depth to the model — adaptive, the same shape Thinking(true)
+	// sends. Off wins over a contradictory Budget.
+	switch {
+	case req.Thinking.Level == weft.ThinkOff:
+		p.Thinking = anthropic.ThinkingConfigParamUnion{
+			OfDisabled: &anthropic.ThinkingConfigDisabledParam{},
+		}
+	case req.Thinking.Budget > 0:
+		p.Thinking = anthropic.ThinkingConfigParamOfEnabled(req.Thinking.Budget)
+	case req.Thinking.Level != weft.ThinkUnset:
+		p.Thinking = anthropic.ThinkingConfigParamUnion{
+			OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{},
+		}
+	}
 	if m.tempSet {
 		p.Temperature = anthropic.Float(m.temperature)
 	}
@@ -50,9 +67,16 @@ func (m *model) params(req weft.ModelRequest) (anthropic.MessageNewParams, error
 			if err != nil {
 				return p, err
 			}
-			p.Messages = append(p.Messages, anthropic.NewUserMessage(blocks...))
+			if len(blocks) > 0 {
+				p.Messages = append(p.Messages, anthropic.NewUserMessage(blocks...))
+			}
 		case weft.RoleAssistant:
-			p.Messages = append(p.Messages, anthropic.NewAssistantMessage(assistantBlocks(msg)...))
+			// An assistant message with no sendable blocks (only
+			// unsigned reasoning, say) is skipped: the API rejects
+			// empty content arrays.
+			if blocks := assistantBlocks(msg); len(blocks) > 0 {
+				p.Messages = append(p.Messages, anthropic.NewAssistantMessage(blocks...))
+			}
 		case weft.RoleTool:
 			// weft's batched tool message is already Anthropic's shape:
 			// one user message, N tool_result blocks, in part order.
@@ -62,7 +86,15 @@ func (m *model) params(req weft.ModelRequest) (anthropic.MessageNewParams, error
 				if !ok {
 					continue
 				}
-				blocks = append(blocks, anthropic.NewToolResultBlock(tr.CallID, tr.Content, tr.IsError))
+				// The API rejects empty text inside a tool_result
+				// ("text content blocks must be non-empty"); an empty
+				// tool output is data, not a failure, so it travels as
+				// a visible placeholder.
+				content := tr.Content
+				if content == "" {
+					content = "(empty tool output)"
+				}
+				blocks = append(blocks, anthropic.NewToolResultBlock(tr.CallID, content, tr.IsError))
 			}
 			if len(blocks) > 0 {
 				p.Messages = append(p.Messages, anthropic.NewUserMessage(blocks...))
@@ -89,6 +121,9 @@ func userBlocks(msg weft.Message) ([]anthropic.ContentBlockParamUnion, error) {
 	for _, part := range msg.Content {
 		switch p := part.(type) {
 		case weft.TextPart:
+			if p.Text == "" {
+				continue // an empty text block is API-rejected; it carries nothing
+			}
 			blocks = append(blocks, anthropic.NewTextBlock(p.Text))
 		case weft.FilePart:
 			if (len(p.Data) == 0) == (p.URL == "") {
@@ -114,6 +149,13 @@ func userBlocks(msg weft.Message) ([]anthropic.ContentBlockParamUnion, error) {
 				return nil, fmt.Errorf("%w: anthropic accepts image and PDF files, got %q", weft.ErrUnsupported, p.MediaType)
 			}
 		}
+	}
+	// A user message must carry at least one non-empty block; the API
+	// rejects empty content arrays. A message whose every part was
+	// empty text (weft.User("")) keeps a visible placeholder rather
+	// than silently vanishing from the transcript.
+	if len(blocks) == 0 {
+		blocks = append(blocks, anthropic.NewTextBlock("(empty message)"))
 	}
 	return blocks, nil
 }

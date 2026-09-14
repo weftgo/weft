@@ -7,8 +7,9 @@
 // Mapping highlights (ADR 0013 has the full tables):
 //
 //   - Text deltas pass through as ModelTextDelta; tool-call argument
-//     fragments are buffered by delta index and emitted as whole
-//     ModelToolCall values before ModelFinish — the core's
+//     fragments also surface live as ModelToolCallDelta progress while
+//     the assembled call is buffered by delta index and emitted whole
+//     as a ModelToolCall before ModelFinish — the core's
 //     uniform-streaming rent.
 //   - Stop reasons map to weft's three; anything unmapped keeps its raw
 //     value on ModelFinish.Raw.
@@ -16,6 +17,13 @@
 //     result; assistant ReasoningParts are dropped (Chat Completions
 //     has no reasoning input).
 //   - SequentialTools sets parallel_tool_calls: false.
+//   - ModelRequest.Thinking maps by dialect: reasoning_effort for the
+//     official API and unrecognized hosts; a thinking object injected
+//     into the request body (per-request SDK middleware) for the known
+//     gateway hosts — z.ai, bigmodel.cn, moonshot.ai/cn — whose param
+//     the typed params cannot carry. Dialect(...) overrides detection;
+//     Off has no effort form and sends nothing there (ADR 0013
+//     amendment 9 has the full table).
 //
 // Retry stance: transport retries (429, 5xx, net.Error) belong to the
 // SDK via MaxRetries; the weft loop never retries a model call, and

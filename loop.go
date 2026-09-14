@@ -62,6 +62,9 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			Messages:        res.Messages,
 			Tools:           a.effectiveTools(),
 			SequentialTools: a.parallelism == 1,
+			// A run-level Thinking option overrides the agent's default
+			// for this run alone (the thinkingOption applies to both).
+			Thinking: cfg.effectiveThinking(a.thinking),
 		}
 		var (
 			sb       strings.Builder
@@ -116,6 +119,10 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 						return fmt.Errorf("%w: tool call with an empty name", ErrModelContract)
 					}
 					calls = append(calls, ToolCallPart(e))
+				case ModelToolCallDelta:
+					// Progress only — the assembled call still arrives
+					// as a ModelToolCall before ModelFinish.
+					emit(ToolArgsDelta{Name: e.Name, Args: e.Args})
 				case ModelFinish:
 					finish = e
 					finished = true

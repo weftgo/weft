@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/ssestream"
 	"github.com/weftgo/weft"
 )
@@ -23,11 +24,12 @@ type partialCall struct {
 }
 
 // Stream implements weft.Model over the SDK's streaming Chat
-// Completions. Text deltas pass through live; tool calls are buffered
-// whole and yielded before ModelFinish, in first-seen index order; call
-// ids are synthesised (call_<i>) when a compatible server omits them,
-// in first-seen order so the next step's tool_call_id matches
-// deterministically.
+// Completions. Text deltas pass through live; tool-call argument
+// fragments surface live as ModelToolCallDelta progress while the
+// assembled call is buffered and yielded whole before ModelFinish, in
+// first-seen index order; call ids are synthesised (call_<i>) when a
+// compatible server omits them, in first-seen order so the next step's
+// tool_call_id matches deterministically.
 func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
 	return func(yield func(weft.ModelEvent, error) bool) {
 		if !weft.ModelRequestsAllowed() {
@@ -42,7 +44,14 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 
 		reader := newStreamReader(ctx, m.idle)
 		defer reader.cancel()
-		stream := m.client.Chat.Completions.NewStreaming(reader.sctx, params)
+		// Gateway dialect: the thinking object rides as a request
+		// middleware rewriting the JSON body — the SDK's typed params
+		// have no field for it (thinking.go carries the mapping).
+		var reqOpts []option.RequestOption
+		if obj := thinkingObj(req.Thinking); m.dialect == DialectObject && obj != nil {
+			reqOpts = append(reqOpts, option.WithMiddleware(injectThinking(obj)))
+		}
+		stream := m.client.Chat.Completions.NewStreaming(reader.sctx, params, reqOpts...)
 		defer func() { _ = stream.Close() }()
 		reader.start(stream)
 		defer reader.wait()
@@ -71,6 +80,12 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 				if ch.Delta.Content != "" && !yield(weft.ModelTextDelta{Text: ch.Delta.Content}, nil) {
 					return
 				}
+				// A safety refusal streams its message in delta.refusal
+				// (with finish_reason "content_filter"); it is the
+				// model's answer text and must not vanish.
+				if ch.Delta.Refusal != "" && !yield(weft.ModelTextDelta{Text: ch.Delta.Refusal}, nil) {
+					return
+				}
 				if r := reasoningContent(ch.Delta); r != "" && !yield(weft.ModelReasoningDelta{Text: r}, nil) {
 					return
 				}
@@ -87,7 +102,16 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 					if tc.Function.Name != "" {
 						pc.name.WriteString(tc.Function.Name)
 					}
-					pc.args.WriteString(tc.Function.Arguments)
+					if tc.Function.Arguments != "" {
+						pc.args.WriteString(tc.Function.Arguments)
+						// Argument fragments stream as progress: a large
+						// generated-code argument can take seconds to
+						// arrive, and without these the consumer sees
+						// dead air until the call is whole.
+						if !yield(weft.ModelToolCallDelta{Index: int(tc.Index), Name: pc.name.String(), Args: tc.Function.Arguments}, nil) {
+							return
+						}
+					}
 				}
 				if ch.FinishReason != "" {
 					finish = ch.FinishReason
@@ -97,6 +121,15 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 		reader.wait()
 		if err := stream.Err(); err != nil {
 			yield(nil, terminalErr(ctx, err))
+			return
+		}
+		// A canceled caller must never see a fabricated finish: the
+		// reader goroutine can exit its handshake on cancellation
+		// without Next() returning false, leaving stream.Err nil — so
+		// the contract's (nil, ctx.Err()) is enforced here, not left
+		// to the SDK's error state alone.
+		if err := ctx.Err(); err != nil {
+			yield(nil, err)
 			return
 		}
 		for i, idx := range order {

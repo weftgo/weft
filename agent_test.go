@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"iter"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -519,5 +520,132 @@ func TestModelFailureFailsTheRun(t *testing.T) {
 	}
 	if res != nil {
 		t.Error("result should be nil on model failure")
+	}
+}
+
+func TestThinkingOption(t *testing.T) {
+	newScript := func() *wefttest.Model {
+		return wefttest.Script(wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"))
+	}
+
+	// No options: the zero ThinkingConfig — the provider default.
+	m := newScript()
+	if _, err := weft.New(m).Generate(context.Background(), weft.Prompt("q")); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Requests()[0].Thinking; got != (weft.ThinkingConfig{}) {
+		t.Errorf("no options: Thinking = %+v, want the zero value", got)
+	}
+
+	// Agent-level default applies to every run.
+	m = newScript()
+	agt := weft.New(m, weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkOff}))
+	for range 2 {
+		if _, err := agt.Generate(context.Background(), weft.Prompt("q")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, req := range m.Requests() {
+		if req.Thinking.Level != weft.ThinkOff {
+			t.Errorf("run %d: Thinking.Level = %v, want ThinkOff", i, req.Thinking.Level)
+		}
+	}
+
+	// Run-level option overrides the agent default for that run alone.
+	off := weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkOff})
+	high := weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkHigh, Budget: 8192})
+	m = newScript()
+	agt = weft.New(m, off)
+	if _, err := agt.Generate(context.Background(), high, weft.Prompt("deep")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agt.Generate(context.Background(), weft.Prompt("quick")); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Requests()[0].Thinking; got.Level != weft.ThinkHigh || got.Budget != 8192 {
+		t.Errorf("override run: Thinking = %+v, want high/8192", got)
+	}
+	if got := m.Requests()[1].Thinking; got.Level != weft.ThinkOff {
+		t.Errorf("next run: Thinking = %+v, want the agent default (off)", got)
+	}
+}
+
+// deltaModel streams a tool call's argument in fragments before the
+// whole call — the shape OpenAI-compatible and Anthropic providers
+// deliver while the model "writes" large arguments. Step 0 requests
+// the call; step 1 answers.
+type deltaModel struct{ steps int }
+
+func (m *deltaModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	return func(yield func(weft.ModelEvent, error) bool) {
+		m.steps++
+		if m.steps == 1 {
+			if !yield(weft.ModelToolCallDelta{Index: 0, Name: "echo", Args: `{"msg":"he`}, nil) {
+				return
+			}
+			if !yield(weft.ModelToolCallDelta{Index: 0, Name: "echo", Args: `llo"}`}, nil) {
+				return
+			}
+			if !yield(weft.ModelToolCall{ID: "c1", Name: "echo", Args: json.RawMessage(`{"msg":"hello"}`)}, nil) {
+				return
+			}
+			yield(weft.ModelFinish{Reason: weft.StopToolCalls}, nil)
+			return
+		}
+		yield(weft.ModelTextDelta{Text: "done"}, nil)
+		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+	}
+}
+
+// TestToolArgsDeltaStreamsProgress: ModelToolCallDelta progress from
+// the model seam surfaces as ToolArgsDelta run events, before the call
+// exists — the model is still writing its arguments. The assembled
+// call still arrives and executes normally.
+func TestToolArgsDeltaStreamsProgress(t *testing.T) {
+	echo := weft.Tool("echo", "echo", func(_ context.Context, in echoIn) (string, error) {
+		return in.Msg, nil
+	})
+	agt := weft.New(&deltaModel{}, echo)
+
+	var evs []weft.Event
+	run := agt.Stream(context.Background(), weft.Prompt("q"))
+	for ev, err := range run.Events() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		evs = append(evs, ev)
+	}
+	res, err := run.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deltas []weft.ToolArgsDelta
+	sawToolStart := false
+	for _, ev := range evs {
+		switch e := ev.(type) {
+		case weft.ToolArgsDelta:
+			deltas = append(deltas, e)
+		case weft.ToolStart:
+			sawToolStart = true
+		}
+	}
+	if len(deltas) != 2 || deltas[0].Name != "echo" || deltas[0].Args != `{"msg":"he` || deltas[1].Args != `llo"}` {
+		t.Errorf("deltas = %+v, want both argument fragments named echo", deltas)
+	}
+	if sawToolStart && len(deltas) == 2 {
+		// order: every delta must precede ToolStart of the call it belongs to
+		for i, j := 0, 0; i < len(evs); i++ {
+			switch evs[i].(type) {
+			case weft.ToolStart:
+				if j < len(deltas) {
+					t.Errorf("ToolStart arrived before delta %d", j)
+				}
+			case weft.ToolArgsDelta:
+				j++
+			}
+		}
+	}
+	if got := res.Text(); got != "done" {
+		t.Errorf("text = %q, want the follow-up answer", got)
 	}
 }

@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -86,8 +85,5 @@ func TestContractDetectorFires(t *testing.T) {
 	d.check(fmt.Errorf("model stream: %w: stream ended without ModelFinish", weft.ErrModelContract))
 	if !d.violated {
 		t.Fatal("detector missed a wrapped ErrModelContract")
-	}
-	if !errors.Is(weft.ErrModelRequestsDenied, weft.ErrModelRequestsDenied) { // keep errors import honest
-		t.Fatal("unreachable")
 	}
 }

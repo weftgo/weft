@@ -250,6 +250,18 @@ func TestThinkingConfig(t *testing.T) {
 					t.Errorf("ThinkMedium: got %+v, want level MEDIUM + thoughts", tc)
 				}
 			}},
+		{"low maps to the level", weft.ThinkingConfig{Level: weft.ThinkLow},
+			func(t *testing.T, tc *genai.ThinkingConfig) {
+				if tc == nil || tc.ThinkingLevel != genai.ThinkingLevelLow || !tc.IncludeThoughts {
+					t.Errorf("ThinkLow: got %+v, want level LOW + thoughts", tc)
+				}
+			}},
+		{"high maps to the level", weft.ThinkingConfig{Level: weft.ThinkHigh},
+			func(t *testing.T, tc *genai.ThinkingConfig) {
+				if tc == nil || tc.ThinkingLevel != genai.ThinkingLevelHigh || !tc.IncludeThoughts {
+					t.Errorf("ThinkHigh: got %+v, want level HIGH + thoughts", tc)
+				}
+			}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

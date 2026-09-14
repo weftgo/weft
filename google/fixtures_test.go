@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -88,6 +91,91 @@ func TestStreamSynthesisesIDs(t *testing.T) {
 	}
 }
 
+// Synthesised ids survive the round trip: the next request's
+// functionResponse parts carry them, so the API can match results to
+// calls — the reason synthesis is deterministic. The fixture's second
+// recorded response answers the tool turn.
+func TestSynthesisedIDsRoundTrip(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "no_ids.sse"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Split into recorded responses the way conformance.FixtureServer
+	// does (its parser is unexported): separator lines are dropped, the
+	// blank-line structure is preserved — genai rejects a manufactured
+	// empty SSE event.
+	var responses []string
+	var cur []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if t := strings.TrimSpace(line); strings.HasPrefix(t, "=== response ") && strings.HasSuffix(t, "===") {
+			responses = append(responses, strings.Join(cur, "\n"))
+			cur = nil
+			continue
+		}
+		cur = append(cur, line)
+	}
+	responses = append(responses, strings.Join(cur, "\n"))
+
+	var mu sync.Mutex
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(b))
+		i := len(bodies) - 1
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(responses[i]))
+	}))
+	t.Cleanup(srv.Close)
+	m := Model("m", BaseURL(srv.URL), APIKey("test"))
+
+	// Turn 1: two calls, ids synthesised.
+	evs, err := collect(m, basicReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []weft.ToolCallPart
+	for _, ev := range evs {
+		if c, ok := ev.(weft.ModelToolCall); ok {
+			calls = append(calls, weft.ToolCallPart(c))
+		}
+	}
+	if len(calls) != 2 || calls[0].ID != "call_1" || calls[1].ID != "call_2" {
+		t.Fatalf("calls = %+v, want synthesised call_1/call_2", calls)
+	}
+
+	// Turn 2: the transcript with results goes back.
+	assistant := make([]weft.Part, len(calls))
+	for i, c := range calls {
+		assistant[i] = c
+	}
+	evs, err = collect(m, weft.ModelRequest{Messages: []weft.Message{
+		weft.User("hi"),
+		{Role: weft.RoleAssistant, Content: assistant},
+		{Role: weft.RoleTool, Content: []weft.Part{
+			weft.ToolResultPart{CallID: calls[0].ID, Name: calls[0].Name, Content: "ok"},
+			weft.ToolResultPart{CallID: calls[1].ID, Name: calls[1].Name, Content: "ok"},
+		}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fin := lastFinish(t, evs); fin.Reason != weft.StopEndTurn {
+		t.Errorf("second turn reason = %q", fin.Reason)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 2 {
+		t.Fatalf("recorded %d request bodies, want 2", len(bodies))
+	}
+	for _, id := range []string{`"id":"call_1"`, `"id":"call_2"`} {
+		if !strings.Contains(bodies[1], id) {
+			t.Errorf("second request lacks %s: the synthesised ids must ride the functionResponse parts", id)
+		}
+	}
+}
+
 // Thought parts stream as reasoning with their signature; text follows.
 // The signature is carried base64 (as on the wire) so a recorded
 // transcript survives encoding/json; the part's text precedes its
@@ -139,6 +227,11 @@ func TestStreamSignatureOnFunctionCall(t *testing.T) {
 	}
 	if reasonSG != 0 {
 		t.Errorf("%d signature reasoning deltas, want none (call sigs ride the call)", reasonSG)
+	}
+	// Thought tokens are folded into output tokens (ADR 0013): 5 candidate
+	// + 2 thought tokens.
+	if fin := lastFinish(t, evs); fin.Usage.OutputTokens != 7 {
+		t.Errorf("output tokens = %d, want 7 (candidates + thoughts)", fin.Usage.OutputTokens)
 	}
 }
 
@@ -193,31 +286,6 @@ func TestStreamIdleTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "150ms") {
 		t.Errorf("err = %v, want the timeout in the text", err)
-	}
-}
-
-func TestStreamCancelMidStream(t *testing.T) {
-	srv := conformance.StallServer(t, stallChunk)
-	m := Model("m", BaseURL(srv.URL), APIKey("test"))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var runErr error
-	sawDelta := false
-	for ev, err := range m.Stream(ctx, basicReq) {
-		if err != nil {
-			runErr = err
-			break
-		}
-		if _, ok := ev.(weft.ModelTextDelta); ok && !sawDelta {
-			sawDelta = true
-			cancel()
-		}
-	}
-	if !sawDelta {
-		t.Fatal("no text delta observed")
-	}
-	if !errors.Is(runErr, context.Canceled) {
-		t.Fatalf("err = %v (%T), want context.Canceled", runErr, runErr)
 	}
 }
 

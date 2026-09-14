@@ -1,8 +1,11 @@
 data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"I can"},"finish_reason":null}]}
 
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{"refusal":"I cannot assist with that request."},"finish_reason":null}]}
+
 data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"content_filter"}]}
 
 data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}
 
 data: [DONE]
+
 

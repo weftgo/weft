@@ -106,7 +106,12 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 						return
 					}
 				case anthropic.InputJSONDelta:
-					if b := blocks[e.Index]; b != nil {
+					// Only tool_use blocks carry weft arguments. Server
+					// tools (web_search, code_execution, ...) stream their
+					// own input fragments; they are not weft content, and
+					// surfacing them as call progress would advertise a
+					// call that never arrives.
+					if b := blocks[e.Index]; b != nil && b.kind == "tool_use" {
 						b.args.WriteString(d.PartialJSON)
 						if d.PartialJSON != "" {
 							// Argument fragments stream as progress —
@@ -242,8 +247,16 @@ func (r *streamReader) next() (ok, idleHit bool) {
 	case <-r.sctx.Done():
 		return false, false
 	case <-timeout:
-		r.cancel()
-		return false, true
+		// A chunk landing in the same instant as the deadline must not
+		// be reported idle: prefer data that is already waiting (the
+		// closed ready channel ends the stream here, correctly).
+		select {
+		case ok := <-r.ready:
+			return ok, false
+		default:
+			r.cancel()
+			return false, true
+		}
 	}
 }
 

@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -178,9 +179,19 @@ func assistantBlocks(msg weft.Message) []anthropic.ContentBlockParamUnion {
 	for _, part := range msg.Content {
 		switch p := part.(type) {
 		case weft.TextPart:
+			if p.Text == "" {
+				continue // an empty text block is API-rejected; it carries nothing
+			}
 			blocks = append(blocks, anthropic.NewTextBlock(p.Text))
 		case weft.ToolCallPart:
-			blocks = append(blocks, anthropic.NewToolUseBlock(p.ID, p.Args, p.Name))
+			// The API requires an object; nil args (a hand-built call)
+			// would travel as input:null and be rejected. Inbound, the
+			// stream already normalises empty arguments to {}.
+			args := p.Args
+			if len(args) == 0 {
+				args = json.RawMessage("{}")
+			}
+			blocks = append(blocks, anthropic.NewToolUseBlock(p.ID, args, p.Name))
 		}
 	}
 	return blocks

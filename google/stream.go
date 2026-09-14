@@ -215,8 +215,16 @@ func (r *streamReader) next() (resp *genai.GenerateContentResponse, idleHit, ok 
 	case <-r.sctx.Done():
 		return nil, false, false
 	case <-timeout:
-		r.cancel()
-		return nil, true, false
+		// A chunk landing in the same instant as the deadline must not
+		// be reported idle: prefer data that is already waiting (the
+		// closed ready channel ends the stream here, correctly).
+		select {
+		case resp, open := <-r.ready:
+			return resp, false, open
+		default:
+			r.cancel()
+			return nil, true, false
+		}
 	}
 }
 

@@ -7,10 +7,15 @@
 //
 //	weft.New(model, weft.WrapModel(
 //	    mw.Log(logger),                 // outermost: sees retries and fallbacks
+//	    mw.Fallback(backupModel),       // fail over once Retry has given up
 //	    mw.Retry(mw.MaxRetries(3)),     // transient failures, backoff, retry-after
-//	    mw.Fallback(backupModel),       // another model when this one fails
 //	    mw.RepairJSON(),                // innermost: fixes truncated tool-call args
 //	))
+//
+// Order matters: Fallback outside Retry retries the primary to exhaustion
+// before switching models (retry, then fail over). The reverse — Retry
+// outside Fallback — retries the fallback chain as a whole, so the primary
+// gets exactly one attempt and Retry never sees its transient failures.
 //
 // Tool seam — around every tool call the loop dispatches:
 //

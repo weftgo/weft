@@ -142,10 +142,81 @@ func TestRetryHonoursRetryAfterAndFailsFastPastMaxWait(t *testing.T) {
 	if time.Since(start) > time.Second || len(model.Requests()) != 1 {
 		t.Error("did not fail fast")
 	}
-	// Ask within MaxWait after raising it.
-	model = wefttest.Script(wefttest.Fail(status(429, map[string]string{"retry-after": "0"})), wefttest.Say("ok"))
-	if _, err := weft.New(model, weft.WrapModel(mw.Retry(mw.MaxWait(time.Hour)))).Generate(context.Background(), weft.Prompt("x")); err != nil {
-		t.Error(err)
+	// The MaxWait boundary is real on both sides: an ask inside it is
+	// honoured (slept, then retried); an ask beyond it fails fast.
+	model = wefttest.Script(wefttest.Fail(status(429, map[string]string{"retry-after-ms": "100"})), wefttest.Say("ok"))
+	start = time.Now()
+	if _, err := weft.New(model, weft.WrapModel(mw.Retry(mw.BaseDelay(0), mw.MaxWait(5*time.Second)))).Generate(context.Background(), weft.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d < 100*time.Millisecond {
+		t.Errorf("retried after %s; retry-after-ms: 100 was not honoured", d)
+	}
+	model = wefttest.Script(wefttest.Fail(status(429, map[string]string{"retry-after-ms": "100"})), wefttest.Say("never"))
+	if _, err := weft.New(model, weft.WrapModel(mw.Retry(mw.BaseDelay(0), mw.MaxWait(50*time.Millisecond)))).Generate(context.Background(), weft.Prompt("x")); !errors.Is(err, mw.ErrRetryAfterTooLong) {
+		t.Errorf("ask past a lowered MaxWait: err = %v, want ErrRetryAfterTooLong", err)
+	}
+}
+
+// MaxRetries(0) disables retrying but keeps the retry-after behaviour
+// observable, as its doc promises: a raw failure surfaces after one call,
+// and an ask past MaxWait still fails fast wrapping ErrRetryAfterTooLong.
+func TestRetryMaxRetriesZero(t *testing.T) {
+	model := wefttest.Script(wefttest.Fail(status(503, nil)), wefttest.Say("never"))
+	_, err := weft.New(model, weft.WrapModel(mw.Retry(mw.BaseDelay(0), mw.MaxRetries(0)))).Generate(context.Background(), weft.Prompt("x"))
+	var ae *apiError
+	if !errors.As(err, &ae) || ae.StatusCode != 503 || len(model.Requests()) != 1 {
+		t.Errorf("raw failure: err=%v calls=%d, want the provider error after one call", err, len(model.Requests()))
+	}
+	model = wefttest.Script(wefttest.Fail(status(429, map[string]string{"retry-after": "3600"})), wefttest.Say("never"))
+	_, err = weft.New(model, weft.WrapModel(mw.Retry(mw.BaseDelay(0), mw.MaxRetries(0)))).Generate(context.Background(), weft.Prompt("x"))
+	if !errors.Is(err, mw.ErrRetryAfterTooLong) || len(model.Requests()) != 1 {
+		t.Errorf("too-long ask: err=%v calls=%d, want ErrRetryAfterTooLong after one call", err, len(model.Requests()))
+	}
+}
+
+// A BaseDelay below 2ns has no jitter range; the backoff must return it
+// unchanged rather than panicking inside rand.Int64N.
+func TestRetryBaseDelayNanosecond(t *testing.T) {
+	model := wefttest.Script(wefttest.Fail(status(503, nil)), wefttest.Say("ok"))
+	res, err := weft.New(model, weft.WrapModel(mw.Retry(mw.BaseDelay(time.Nanosecond)))).Generate(context.Background(), weft.Prompt("x"))
+	if err != nil || res.Text() != "ok" {
+		t.Errorf("BaseDelay(1ns): res=%v err=%v, want the retry to succeed", res, err)
+	}
+}
+
+// weft.ErrStreamIdle is retried like any transient failure.
+func TestRetryRetriesIdleStreams(t *testing.T) {
+	model := wefttest.Script(
+		wefttest.Fail(fmt.Errorf("%w after 60s", weft.ErrStreamIdle)),
+		wefttest.Say("ok"),
+	)
+	res, err := weft.New(model, weft.WrapModel(mw.Retry(mw.BaseDelay(0)))).Generate(context.Background(), weft.Prompt("x"))
+	if err != nil || res.Text() != "ok" {
+		t.Errorf("idle retry: res=%v err=%v", res, err)
+	}
+}
+
+// The canonical composition, as mw/doc.go shows it: Fallback outside
+// Retry retries the primary to exhaustion before switching models.
+func TestRetryThenFallback(t *testing.T) {
+	// Primary recovers on the third call: Retry saves the run, the
+	// backup is never consulted.
+	backup := wefttest.Script(wefttest.Say("never"))
+	primary := wefttest.Script(wefttest.Fail(status(503, nil)), wefttest.Fail(status(503, nil)), wefttest.Say("from primary"))
+	res, err := weft.New(primary, weft.WrapModel(mw.Fallback(backup), mw.Retry(mw.BaseDelay(0)))).Generate(context.Background(), weft.Prompt("x"))
+	if err != nil || res.Text() != "from primary" || len(primary.Requests()) != 3 || len(backup.Requests()) != 0 {
+		t.Errorf("retry-then-failover: text=%q err=%v primary=%d backup=%d",
+			res.Text(), err, len(primary.Requests()), len(backup.Requests()))
+	}
+	// Primary stays down: every retry happens on the primary, then the
+	// backup answers.
+	backup = wefttest.Script(wefttest.Say("from backup"))
+	primary = wefttest.Script(wefttest.Fail(status(503, nil)), wefttest.Fail(status(503, nil)), wefttest.Fail(status(503, nil)))
+	res, err = weft.New(primary, weft.WrapModel(mw.Fallback(backup), mw.Retry(mw.BaseDelay(0), mw.MaxRetries(2)))).Generate(context.Background(), weft.Prompt("x"))
+	if err != nil || res.Text() != "from backup" || len(primary.Requests()) != 3 || len(backup.Requests()) != 1 {
+		t.Errorf("failover after retries: text=%q err=%v primary=%d backup=%d",
+			res.Text(), err, len(primary.Requests()), len(backup.Requests()))
 	}
 }
 
@@ -283,6 +354,14 @@ func TestRepairJSON(t *testing.T) {
 	}
 	if r := res.Steps[0].Results[0]; !r.IsError || !strings.HasPrefix(r.Content, "INVALID_INPUT") {
 		t.Errorf("unrepairable = %+v", r)
+	}
+	// A stream error passes through unchanged: repair only touches tool
+	// calls, never the terminal error.
+	boom := errors.New("provider exploded")
+	_, ferr := weft.New(wefttest.Script(wefttest.Fail(boom)),
+		weft.WrapModel(mw.RepairJSON())).Generate(context.Background(), weft.Prompt("x"))
+	if !errors.Is(ferr, boom) {
+		t.Errorf("stream error through RepairJSON = %v, want %v", ferr, boom)
 	}
 }
 

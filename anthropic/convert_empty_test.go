@@ -37,6 +37,38 @@ func TestEmptyToolResultPlaceholder(t *testing.T) {
 	}
 }
 
+// Outbound assistant content gets the same wire safety the API demands:
+// an empty text part carries nothing (the API rejects empty text blocks)
+// and a hand-built call with nil args travels as input:{} — never
+// input:null, which the API rejects.
+func TestAssistantEmptyTextAndNilArgsNeverReachTheWire(t *testing.T) {
+	m := Model("m").(*model)
+	p, err := m.params(weft.ModelRequest{
+		Messages: []weft.Message{
+			weft.User("q"),
+			{Role: weft.RoleAssistant, Content: []weft.Part{
+				weft.TextPart{Text: ""},
+				weft.ToolCallPart{ID: "c1", Name: "t"},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant := p.Messages[1]
+	if n := len(assistant.Content); n != 1 || assistant.Content[0].OfToolUse == nil {
+		t.Fatalf("assistant blocks = %d, want only the tool_use (empty text dropped)", n)
+	}
+	tu := assistant.Content[0].OfToolUse
+	b, err := json.Marshal(tu.Input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "{}" {
+		t.Errorf("tool_use input = %s, want {} (nil args must not reach the wire as null)", b)
+	}
+}
+
 // An assistant message with nothing sendable (only unsigned reasoning,
 // which assistantBlocks drops) is skipped, not sent as an empty
 // content array the API would reject.

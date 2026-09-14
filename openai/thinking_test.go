@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -16,13 +17,13 @@ func TestResolveDialect(t *testing.T) {
 		baseURL string
 		want    ThinkingDialect
 	}{
-		{"", DialectEffort},                             // the SDK default endpoint
-		{"https://api.openai.com/v1", DialectEffort},    //
-		{"https://api.z.ai/api/paas/v4", DialectObject}, // hmm's zai endpoint
-		{"https://api.moonshot.ai/v1", DialectObject},   // hmm's kimi endpoint
+		{"", DialectEffort},                          // the SDK default endpoint
+		{"https://api.openai.com/v1", DialectEffort}, //
+		{"https://api.z.ai/api/paas/v4", DialectObject},
+		{"https://api.moonshot.ai/v1", DialectObject}, // Kimi
 		{"https://api.moonshot.cn/v1", DialectObject},
-		{"https://open.bigmodel.cn/api/paas/v4", DialectObject},
-		{"http://localhost:8080/v1", DialectEffort}, // unrecognized: OpenAI's own param
+		{"https://open.bigmodel.cn/api/paas/v4", DialectObject}, // GLM
+		{"http://localhost:8080/v1", DialectEffort},             // unrecognized: OpenAI's own param
 	}
 	for _, tc := range cases {
 		if got := resolveDialect(DialectAuto, tc.baseURL); got != tc.want {
@@ -39,17 +40,19 @@ func TestResolveDialect(t *testing.T) {
 }
 
 func TestThinkingParamsEffort(t *testing.T) {
-	m := Model("m").(*model) // 127.0.0.1-free construction: no BaseURL → effort dialect
+	// Pin the env: construction falls back to $OPENAI_BASE_URL, which
+	// would flip the dialect on machines that have it set.
+	t.Setenv("OPENAI_BASE_URL", "")
+	m := Model("m").(*model)
 	cases := []struct {
-		run   weft.ThinkingConfig
-		want  string
-		async bool // must not touch the params at all
+		run  weft.ThinkingConfig
+		want string
 	}{
-		{weft.ThinkingConfig{Level: weft.ThinkHigh}, "high", false},
-		{weft.ThinkingConfig{Level: weft.ThinkMedium}, "medium", false},
-		{weft.ThinkingConfig{Level: weft.ThinkLow}, "low", false},
-		{weft.ThinkingConfig{Level: weft.ThinkOff}, "", true}, // no off switch; documented gap
-		{weft.ThinkingConfig{}, "", true},
+		{weft.ThinkingConfig{Level: weft.ThinkHigh}, "high"},
+		{weft.ThinkingConfig{Level: weft.ThinkMedium}, "medium"},
+		{weft.ThinkingConfig{Level: weft.ThinkLow}, "low"},
+		{weft.ThinkingConfig{Level: weft.ThinkOff}, ""}, // no off switch; documented gap
+		{weft.ThinkingConfig{}, ""},
 	}
 	for _, tc := range cases {
 		p, err := m.params(weft.ModelRequest{Thinking: tc.run})
@@ -58,6 +61,26 @@ func TestThinkingParamsEffort(t *testing.T) {
 		}
 		if string(p.ReasoningEffort) != tc.want {
 			t.Errorf("level %d: ReasoningEffort = %q, want %q", tc.run.Level, p.ReasoningEffort, tc.want)
+		}
+	}
+}
+
+// The gateway object's whole vocabulary: off disables, every depth
+// enables, unset sends nothing.
+func TestThinkingObj(t *testing.T) {
+	cases := []struct {
+		run  weft.ThinkingConfig
+		want map[string]any
+	}{
+		{weft.ThinkingConfig{Level: weft.ThinkOff}, map[string]any{"type": "disabled"}},
+		{weft.ThinkingConfig{Level: weft.ThinkLow}, map[string]any{"type": "enabled"}},
+		{weft.ThinkingConfig{Level: weft.ThinkMedium}, map[string]any{"type": "enabled"}},
+		{weft.ThinkingConfig{Level: weft.ThinkHigh}, map[string]any{"type": "enabled"}},
+		{weft.ThinkingConfig{}, nil},
+	}
+	for _, tc := range cases {
+		if got := thinkingObj(tc.run); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("level %d: thinkingObj = %v, want %v", tc.run.Level, got, tc.want)
 		}
 	}
 }

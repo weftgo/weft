@@ -38,6 +38,15 @@ func collect(m weft.Model, req weft.ModelRequest) ([]weft.ModelEvent, error) {
 
 var basicReq = weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}}
 
+func lastFinish(t *testing.T, evs []weft.ModelEvent) weft.ModelFinish {
+	t.Helper()
+	fin, ok := evs[len(evs)-1].(weft.ModelFinish)
+	if !ok {
+		t.Fatalf("last event = %T, want ModelFinish", evs[len(evs)-1])
+	}
+	return fin
+}
+
 // A tool call split across chunks arrives whole, before the finish.
 func TestStreamToolCallSplitAcrossChunks(t *testing.T) {
 	evs, err := collect(fixtureModel(t, "tool_roundtrip_struct"), basicReq)
@@ -142,21 +151,30 @@ func TestStreamLengthStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fin := evs[len(evs)-1].(weft.ModelFinish)
-	if fin.Reason != weft.StopMaxTokens {
+	if fin := lastFinish(t, evs); fin.Reason != weft.StopMaxTokens {
 		t.Errorf("reason = %q, want max_tokens", fin.Reason)
 	}
 }
 
-// An unmapped finish reason rides on ModelFinish.Raw.
+// An unmapped finish reason rides on ModelFinish.Raw, and a safety
+// refusal's delta.refusal text streams as the answer.
 func TestStreamRawFinishReason(t *testing.T) {
 	evs, err := collect(fixtureModel(t, "content_filter"), basicReq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fin := evs[len(evs)-1].(weft.ModelFinish)
-	if fin.Reason != weft.StopEndTurn || fin.Raw != "content_filter" {
+	if fin := lastFinish(t, evs); fin.Reason != weft.StopEndTurn || fin.Raw != "content_filter" {
 		t.Errorf("finish = %+v, want stop + raw content_filter", fin)
+	}
+	var refusal string
+	for _, ev := range evs {
+		switch e := ev.(type) {
+		case weft.ModelTextDelta:
+			refusal += e.Text
+		}
+	}
+	if !strings.Contains(refusal, "cannot assist") {
+		t.Errorf("refusal text = %q, want the delta.refusal content to stream", refusal)
 	}
 }
 
@@ -260,5 +278,32 @@ func TestStreamUnsupportedFilePart(t *testing.T) {
 	_, err := collect(m, req)
 	if err == nil || !errors.Is(err, weft.ErrUnsupported) {
 		t.Fatalf("err = %v, want ErrUnsupported", err)
+	}
+}
+
+// A zero-argument call (empty function.arguments) arrives as {} — never
+// an undecodable empty string.
+func TestStreamZeroArgumentCallNormalized(t *testing.T) {
+	const sse = `data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"ping","arguments":""}}]},"finish_reason":null}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+
+`
+	srv, _ := recordingServer(t, sse)
+	m := Model("m", BaseURL(srv.URL), APIKey("test"))
+	evs, err := collect(m, basicReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var call weft.ModelToolCall
+	for _, ev := range evs {
+		if c, ok := ev.(weft.ModelToolCall); ok {
+			call = c
+		}
+	}
+	if call.Name != "ping" || string(call.Args) != "{}" {
+		t.Errorf("call = %+v, want ping with {} args", call)
 	}
 }

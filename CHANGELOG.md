@@ -102,6 +102,26 @@ is pre-1.0 and tags per module (ADR 0005).
   retried on the next call instead of being cached forever.
 - `StopWhen` conditions (`HasToolCall`, structured output's stop) no
   longer panic when called with an empty step slice.
+- mw: `Retry` panicked on a `BaseDelay` below 2ns (jitter computed
+  `rand.Int64N(0)`); the backoff now returns such delays unchanged.
+- mw: `MaxRetries(0)` kept its documented retry-after behaviour only in
+  the docs — the attempt-budget check returned the raw error before the
+  fail-fast ran, so `ErrRetryAfterTooLong` was unreachable. The fail-fast
+  now outranks the budget.
+- mw: the doc.go composition example put `Retry` outside `Fallback`,
+  which retries the fallback chain as a whole — the primary gets one
+  attempt and its transient failures are never retried. The canonical
+  order is `Fallback` outside `Retry` (retry, then fail over).
+- all adapters: a chunk landing in the same instant as the idle deadline
+  could be reported as `ErrStreamIdle` (select picks uniformly among
+  ready cases); a waiting chunk now wins over the timer.
+- anthropic: `input_json_delta` of non-`tool_use` blocks (server tools
+  such as web_search) leaked as `ToolArgsDelta` progress for a call that
+  never arrives; only `tool_use` fragments surface now.
+- anthropic: an empty assistant text part and a hand-built tool call
+  with nil arguments no longer reach the wire (the Messages API rejects
+  empty text blocks and `input:null`; the inbound stream already
+  normalised empty arguments to `{}`).
 
 ### Changed
 

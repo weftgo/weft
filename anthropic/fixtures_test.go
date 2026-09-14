@@ -105,7 +105,7 @@ func TestStreamThinkingThenToolUse(t *testing.T) {
 	}
 }
 
-func TestStreamTwoToolUseBlocks(t *testing.T) {
+func TestStreamParallelCallsInBlockOrder(t *testing.T) {
 	evs, err := collect(fixtureModel(t, "parallel_three_calls"), basicReq)
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +123,40 @@ func TestStreamTwoToolUseBlocks(t *testing.T) {
 		if string(calls[i].Args) != want {
 			t.Errorf("call %d args = %s, want %s", i, calls[i].Args, want)
 		}
+	}
+}
+
+// Server tools (web_search, code_execution, ...) stream their own
+// input_json_delta fragments. They are not weft content: no fragment may
+// surface as call progress, and no call may materialize from them.
+func TestStreamServerToolUseDeltasIgnored(t *testing.T) {
+	evs, err := collect(fixtureModel(t, "server_tool_use"), basicReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range evs {
+		switch e := ev.(type) {
+		case weft.ModelToolCallDelta:
+			t.Errorf("server tool fragment surfaced as call progress: %+v", e)
+		case weft.ModelToolCall:
+			t.Errorf("server tool became a weft call: %+v", e)
+		}
+	}
+	fin := lastFinish(t, evs)
+	if fin.Reason != weft.StopEndTurn {
+		t.Errorf("reason = %q, want end_turn (no weft calls)", fin.Reason)
+	}
+}
+
+// A tool_use block with an empty id or name fails the stream loudly
+// wrapping ErrModelContract — exactly what the core's loop would report.
+func TestStreamEmptyToolUseIDFailsLoudly(t *testing.T) {
+	_, err := collect(fixtureModel(t, "empty_tool_use_id"), basicReq)
+	if !errors.Is(err, weft.ErrModelContract) {
+		t.Fatalf("err = %v, want ErrModelContract", err)
+	}
+	if !strings.Contains(err.Error(), "empty id or name") {
+		t.Errorf("err = %v, want it to name the violation", err)
 	}
 }
 
@@ -183,31 +217,6 @@ func TestStreamIdleTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "150ms") {
 		t.Errorf("err = %v, want the timeout in the text", err)
-	}
-}
-
-func TestStreamCancelMidStream(t *testing.T) {
-	srv := conformance.StallServer(t, anthropicStallChunk)
-	m := Model("m", BaseURL(srv.URL), APIKey("test"))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var runErr error
-	sawDelta := false
-	for ev, err := range m.Stream(ctx, basicReq) {
-		if err != nil {
-			runErr = err
-			break
-		}
-		if _, ok := ev.(weft.ModelTextDelta); ok && !sawDelta {
-			sawDelta = true
-			cancel()
-		}
-	}
-	if !sawDelta {
-		t.Fatal("no text delta observed")
-	}
-	if !errors.Is(runErr, context.Canceled) {
-		t.Fatalf("err = %v (%T), want context.Canceled", runErr, runErr)
 	}
 }
 

@@ -131,17 +131,20 @@ func (m *retryModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq
 				yield(nil, failed)
 				return
 			}
+			// The retry-after fail-fast outranks the attempt budget, so
+			// even MaxRetries(0) reports ErrRetryAfterTooLong rather than
+			// the raw error.
+			delay, err := m.cfg.delay(attempt, failed, time.Now())
+			if err != nil {
+				yield(nil, err)
+				return
+			}
 			if attempt >= m.cfg.maxRetries {
 				if attempt == 0 {
 					yield(nil, failed)
 				} else {
 					yield(nil, fmt.Errorf("mw: giving up after %d retries: %w", attempt, failed))
 				}
-				return
-			}
-			delay, err := m.cfg.delay(attempt, failed, time.Now())
-			if err != nil {
-				yield(nil, err)
 				return
 			}
 			if !sleep(ctx, delay) {
@@ -174,7 +177,11 @@ func (c *retryConfig) backoff(attempt int) time.Duration {
 	if d <= 0 {
 		return 0
 	}
-	// ±25% jitter, so a fleet of clients does not retry in lockstep.
+	// ±25% jitter, so a fleet of clients does not retry in lockstep. A
+	// delay below 2ns has no jitter range (rand.Int64N(0) panics).
+	if d/2 <= 0 {
+		return d
+	}
 	jitter := time.Duration(rand.Int64N(int64(d)/2)) - d/4
 	return d + jitter
 }

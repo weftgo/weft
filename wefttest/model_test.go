@@ -3,6 +3,7 @@ package wefttest_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/weftgo/weft"
@@ -22,12 +23,19 @@ func TestScriptPlaysTurnsAndRecordsRequests(t *testing.T) {
 	)
 	req := weft.ModelRequest{System: "sys", SequentialTools: false}
 
+	// count also collects the turn's tool-call ids, pinning the
+	// documented default-ID rule: "call_1", "call_2", ... within the
+	// turn unless set explicitly.
+	var ids []string
 	count := func() int {
 		t.Helper()
 		n := 0
-		for _, err := range model.Stream(context.Background(), req) {
+		for ev, err := range model.Stream(context.Background(), req) {
 			if err != nil {
 				t.Fatalf("stream error: %v", err)
+			}
+			if c, ok := ev.(weft.ModelToolCall); ok {
+				ids = append(ids, c.ID)
 			}
 			n++
 		}
@@ -35,6 +43,9 @@ func TestScriptPlaysTurnsAndRecordsRequests(t *testing.T) {
 	}
 	if n := count(); n != 3 { // two tool calls + finish
 		t.Errorf("first stream yielded %d events, want 3", n)
+	}
+	if got := strings.Join(ids, ","); got != "call_1,x2" {
+		t.Errorf("call ids = %q, want the default call_1 and the explicit x2", got)
 	}
 	if n := count(); n != 2 { // text delta + finish
 		t.Errorf("second stream yielded %d events, want 2", n)

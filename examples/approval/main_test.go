@@ -24,3 +24,31 @@ func TestApprovalRoundTrip(t *testing.T) {
 		t.Errorf("resumed: text=%q pending=%v", res.Text(), res.Pending)
 	}
 }
+
+// The Approve leg: the parked call executes through the tool chain and
+// its result lands in the transcript the model then sees.
+func TestApprovalApproveExecutesRefund(t *testing.T) {
+	agt := newAgent()
+	res, err := agt.Generate(context.Background(), weft.Prompt("Please refund order 1234 in full."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = agt.Generate(context.Background(), weft.Messages(res.Messages...), weft.Approve(res.Pending[0].ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refunded string
+	for _, m := range res.Messages {
+		if m.Role != weft.RoleTool {
+			continue
+		}
+		for _, p := range m.Content {
+			if r, ok := p.(weft.ToolResultPart); ok && r.Name == "refund_order" && !r.IsError {
+				refunded = r.Content
+			}
+		}
+	}
+	if refunded != "refunded $129.99 on order 1234" {
+		t.Errorf("refund_order result = %q, want the executed refund", refunded)
+	}
+}

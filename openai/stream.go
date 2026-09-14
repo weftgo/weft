@@ -246,8 +246,16 @@ func (r *streamReader) next() (ok, idleHit bool) {
 	case <-r.sctx.Done():
 		return false, false
 	case <-timeout:
-		r.cancel()
-		return false, true
+		// A chunk landing in the same instant as the deadline must not
+		// be reported idle: prefer data that is already waiting (the
+		// closed ready channel ends the stream here, correctly).
+		select {
+		case ok := <-r.ready:
+			return ok, false
+		default:
+			r.cancel()
+			return false, true
+		}
 	}
 }
 

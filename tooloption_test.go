@@ -93,6 +93,45 @@ func TestAgentTimeoutIsTheDefault(t *testing.T) {
 	}
 }
 
+// Timeout(0) on a tool removes the agent's default for that tool alone
+// — the timeout analogue of MaxResultBytes(0).
+func TestTimeoutZeroOnToolLiftsAgentDefault(t *testing.T) {
+	sleepy := func(ctx context.Context, _ struct{}) (string, error) {
+		select {
+		case <-time.After(80 * time.Millisecond):
+			return "done", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	exempt := weft.Tool("exempt", "", sleepy, weft.Timeout(0))
+	inherits := weft.Tool("inherits", "", sleepy)
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "exempt"}, wefttest.Call{Name: "inherits"}),
+		wefttest.Say("ok"),
+	), weft.Name("m"), weft.Timeout(20*time.Millisecond), exempt, inherits)
+
+	res, err := agt.Generate(context.Background(), weft.Prompt("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := res.Steps[0].Results
+	if results[0].IsError || results[0].Content != "done" {
+		t.Errorf("Timeout(0) tool = %+v, want it exempt from the agent default", results[0])
+	}
+	if !results[1].IsError || !strings.Contains(results[1].Content, "timed out after 20ms") {
+		t.Errorf("tool without its own timeout = %+v, want the agent default", results[1])
+	}
+	// The manifest records the explicit lift, like max_result_bytes: 0.
+	b, err := weft.Manifest(agt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"timeout": "0s"`) {
+		t.Errorf("manifest lacks the Timeout(0) lift:\n%s", b)
+	}
+}
+
 // Cancelling the run during a timed call reports the cancellation, not
 // a timeout.
 func TestTimeoutReportsCancellationAsSuch(t *testing.T) {

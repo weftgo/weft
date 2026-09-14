@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,8 +42,19 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	}
 	// The input transcript is repaired before the first model call, so
 	// anything a caller feeds back in (a partial transcript, a resumed
-	// session) becomes valid provider input.
-	res := &RunResult{ID: cfg.id, Messages: Repair(cfg.messages)}
+	// session) becomes valid provider input. When the caller supplies
+	// approval decisions, the calls left pending by the earlier run are
+	// exempt from repair: this run resolves them itself, below.
+	var resume []ToolCallPart
+	var skip map[string]bool
+	if len(cfg.decisions) > 0 {
+		resume = unresolvedCalls(cfg.messages)
+		skip = make(map[string]bool, len(resume))
+		for _, c := range resume {
+			skip[c.ID] = true
+		}
+	}
+	res := &RunResult{ID: cfg.id, Messages: repair(cfg.messages, skip)}
 	seq := new(atomic.Int64)
 	fail := func(step int, err error) (*RunResult, error) {
 		return nil, &RunError{Step: step, Err: err, Result: res}
@@ -51,16 +63,39 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// interface stays optional so Model remains one method.
 	emit(RunStart{ID: cfg.id, Model: a.modelInfo(), Agent: a.name})
 
+	// The approval boundary's second half: approved calls run now,
+	// before any model call, and every other pending call is denied.
+	// Their results complete the dangling tool message of the earlier
+	// run, so the model sees an ordinary transcript.
+	if len(resume) > 0 {
+		if err := ctx.Err(); err != nil {
+			return fail(0, err)
+		}
+		results, pending := a.resolvePending(ctx, cfg, resume, seq, emit)
+		res.Messages = attachResults(res.Messages, resume, results)
+		if len(pending) > 0 {
+			res.Pending = pending
+			emit(RunFinish{Usage: res.Usage, Steps: 0, Pending: pending})
+			// Cancellation wins here too (see the pending exit in the
+			// step loop): the error carries the resumable result.
+			if err := ctx.Err(); err != nil {
+				return fail(0, err)
+			}
+			return res, nil
+		}
+	}
+
 	for step := 0; step < a.maxSteps; step++ {
 		if err := ctx.Err(); err != nil {
 			return fail(step, err)
 		}
 		emit(StepStart{Index: step})
 
+		tools := a.effectiveTools()
 		req := ModelRequest{
-			System:          a.system,
+			System:          composeSystem(a.system, tools),
 			Messages:        res.Messages,
-			Tools:           a.effectiveTools(),
+			Tools:           tools,
 			SequentialTools: a.parallelism == 1,
 			// A run-level Thinking option overrides the agent's default
 			// for this run alone (the thinkingOption applies to both).
@@ -170,8 +205,28 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			Text:          sb.String(),
 			ToolCalls:     calls,
 		}
-		if len(calls) > 0 {
-			rec.Results = a.execTools(ctx, cfg.id, step, calls, seq, emit)
+		var pending []ToolCallPart
+		switch {
+		case len(calls) == 0:
+		case finish.Reason == StopMaxTokens:
+			// A message cut by the output-token limit must not have its
+			// calls acted on: an intact-looking call may be the first
+			// of several the model never finished issuing. Every call
+			// fails without executing — a uniform, visible result — and
+			// the loop continues so the model retries with a full
+			// budget (ADR 0002, "fail truncated calls").
+			for _, c := range calls {
+				rec.Results = append(rec.Results, ToolResultPart{
+					CallID:  c.ID,
+					Name:    c.Name,
+					IsError: true,
+					Content: truncatedCallResult(c.Name),
+				})
+			}
+		default:
+			rec.Results, pending = a.execTools(ctx, cfg.id, step, calls, seq, emit, false)
+		}
+		if len(rec.Results) > 0 {
 			toolMsg := Message{Role: RoleTool}
 			for _, r := range rec.Results {
 				toolMsg.Content = append(toolMsg.Content, r)
@@ -183,6 +238,21 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		res.Usage = res.Usage.Add(finish.Usage)
 		emit(StepFinish{Index: step, Reason: finish.Reason, Usage: finish.Usage, Raw: finish.Raw})
 
+		if len(pending) > 0 {
+			// The approval boundary: the step's other tools have run;
+			// the pending calls have no result in the transcript. The
+			// run ends successfully and the caller resumes it with
+			// Approve/Deny — unless the run was canceled, in which case
+			// cancellation wins, as it does everywhere else: the run
+			// fails with the ctx error, the parked calls riding on
+			// RunError.Result.Pending so the transcript stays resumable.
+			res.Pending = pending
+			emit(RunFinish{Usage: res.Usage, Steps: len(res.Steps), Pending: pending})
+			if err := ctx.Err(); err != nil {
+				return fail(step, err)
+			}
+			return res, nil
+		}
 		if len(calls) == 0 {
 			// A max_tokens finish is recorded, not fatal: RunResult
 			// .StopReason (and the last StepRecord) carry it, so callers
@@ -228,12 +298,7 @@ func (a *Agent) stopped(steps []StepRecord) bool {
 
 // modelInfo reports the model's identity when it implements the
 // optional Info interface; the zero ModelInfo otherwise.
-func (a *Agent) modelInfo() ModelInfo {
-	if m, ok := a.model.(interface{ Info() ModelInfo }); ok {
-		return m.Info()
-	}
-	return ModelInfo{}
-}
+func (a *Agent) modelInfo() ModelInfo { return InfoOf(a.model) }
 
 // execTools runs one step's tool calls with bounded concurrency. Results
 // are returned in call order regardless of completion order — determinism
@@ -245,8 +310,15 @@ func (a *Agent) modelInfo() ModelInfo {
 // start in the order the model requested them, and under Sequential each
 // one finishes before the next begins. Calls that never obtain a slot
 // because ctx was canceled produce an error result and no events.
-func (a *Agent) execTools(ctx context.Context, runID string, step int, calls []ToolCallPart, seq *atomic.Int64, emit func(Event)) []ToolResultPart {
-	results := make([]ToolResultPart, len(calls))
+//
+// A tool marked Sequential is a barrier: the dispatcher waits for the
+// in-flight calls to finish, runs it alone, and resumes. Calls the chain
+// parks with ErrApprovalRequired are returned as pending rather than as
+// results: they had a ToolStart and get no ToolFinish. approved marks
+// calls resumed under an Approve decision.
+func (a *Agent) execTools(ctx context.Context, runID string, step int, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool) (results []ToolResultPart, pending []ToolCallPart) {
+	outcomes := make([]ToolResultPart, len(calls))
+	parked := make([]bool, len(calls))
 	sem := make(chan struct{}, a.parallelism)
 
 	// Event-ordering rule for concurrent tools: the Seq is assigned and the
@@ -262,6 +334,13 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, calls []T
 
 	var wg sync.WaitGroup
 	for i, call := range calls {
+		def, _ := a.toolByName(call.Name)
+		barrier := def != nil && def.sequential
+		if barrier {
+			// Let everything in flight finish before this call starts.
+			// wg.Add only happens on this goroutine, so Wait is safe.
+			wg.Wait()
+		}
 		// Never start a tool once the run is canceled. The explicit check
 		// makes this deterministic: a select alone picks at random when a
 		// slot frees up at the same moment ctx is done.
@@ -274,7 +353,7 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, calls []T
 			}
 		}
 		if canceled {
-			results[i] = ToolResultPart{
+			outcomes[i] = ToolResultPart{
 				CallID:  call.ID,
 				Name:    call.Name,
 				IsError: true,
@@ -291,85 +370,283 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, calls []T
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			callCtx := withCall(ctx, Call{RunID: runID, Step: step, CallID: call.ID, Name: call.Name})
-			results[i] = a.callTool(callCtx, call)
+			callCtx := withCall(ctx, Call{RunID: runID, Step: step, CallID: call.ID, Name: call.Name, Approved: approved})
+			outcomes[i], parked[i] = a.callTool(callCtx, call)
+			if parked[i] {
+				return
+			}
 			ordered(func(s int64) Event {
 				return ToolFinish{
 					Seq:     s,
 					CallID:  call.ID,
 					Name:    call.Name,
-					Content: results[i].Content,
-					IsError: results[i].IsError,
+					Content: outcomes[i].Content,
+					IsError: outcomes[i].IsError,
 				}
 			})
 		}()
+		if barrier {
+			// Run alone: nothing after it starts until it is done.
+			wg.Wait()
+		}
 	}
 	wg.Wait()
-	return results
+	results = make([]ToolResultPart, 0, len(calls))
+	for i, call := range calls {
+		if parked[i] {
+			pending = append(pending, call)
+			continue
+		}
+		results = append(results, outcomes[i])
+	}
+	return results, pending
 }
 
-// CallTool dispatches one tool call by name, the way the loop does, and
-// returns the result text the model would see. It is the seam for manual
-// dispatchers and future tool middleware. Unlike the loop it does not
-// contain failures: an unknown name returns an error wrapping
-// ErrNoSuchTool, undecodable arguments one wrapping ErrInvalidToolInput,
-// and handler errors and panics propagate.
-func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error) {
-	def, ok := a.toolByName(call.Name)
-	if !ok {
-		return "", fmt.Errorf("%w: %q", ErrNoSuchTool, call.Name)
+// resolvePending runs the calls an earlier run left pending, under this
+// run's decisions: approved calls execute through the ordinary chain
+// with Call.Approved set; denied and undecided calls become error
+// results the model sees. Results come back in call order; a call the
+// chain parks again is returned as pending. The step index of the
+// resumed calls is reported as 0: the original index is not recoverable
+// from the transcript, and there is no StepRecord for them (ADR 0007).
+// Audit lines should key on the CallID, not the step.
+func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolCallPart, seq *atomic.Int64, emit func(Event)) ([]ToolResultPart, []ToolCallPart) {
+	var approved []ToolCallPart
+	for _, c := range calls {
+		if d, ok := cfg.decisions[c.ID]; ok && d.approved {
+			approved = append(approved, c)
+		}
 	}
-	return def.Invoke(ctx, call.Args)
+	ran, pending := a.execTools(ctx, cfg.id, 0, approved, seq, emit, true)
+	byID := make(map[string]ToolResultPart, len(ran))
+	for _, r := range ran {
+		byID[r.CallID] = r
+	}
+	parked := make(map[string]bool, len(pending))
+	for _, c := range pending {
+		parked[c.ID] = true
+	}
+	results := make([]ToolResultPart, 0, len(calls))
+	for _, c := range calls {
+		if parked[c.ID] {
+			continue
+		}
+		if r, ok := byID[c.ID]; ok {
+			results = append(results, r)
+			continue
+		}
+		reason := "no decision"
+		if d, ok := cfg.decisions[c.ID]; ok {
+			reason = d.reason
+		}
+		results = append(results, ToolResultPart{
+			CallID:  c.ID,
+			Name:    c.Name,
+			IsError: true,
+			Content: deniedResult(reason),
+		})
+	}
+	return results, pending
+}
+
+// unresolvedCalls returns the tool calls of the last assistant message
+// that have no result on the tool message directly after it — the
+// calls an earlier run left pending.
+func unresolvedCalls(msgs []Message) []ToolCallPart {
+	i := lastAssistantWithCalls(msgs)
+	if i < 0 {
+		return nil
+	}
+	served := map[string]bool{}
+	if i+1 < len(msgs) && msgs[i+1].Role == RoleTool {
+		for _, p := range msgs[i+1].Content {
+			if r, ok := p.(ToolResultPart); ok {
+				served[r.CallID] = true
+			}
+		}
+	}
+	var out []ToolCallPart
+	for _, p := range msgs[i].Content {
+		if c, ok := p.(ToolCallPart); ok && !served[c.ID] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func lastAssistantWithCalls(msgs []Message) int {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != RoleAssistant {
+			continue
+		}
+		for _, p := range msgs[i].Content {
+			if _, ok := p.(ToolCallPart); ok {
+				return i
+			}
+		}
+		return -1
+	}
+	return -1
+}
+
+// attachResults places results on the tool message directly after the
+// assistant message that issued calls, creating that message when the
+// earlier run recorded none — so the transcript's shape is the
+// canonical one whether or not other tools ran in that step.
+func attachResults(msgs []Message, calls []ToolCallPart, results []ToolResultPart) []Message {
+	if len(results) == 0 {
+		return msgs
+	}
+	i := lastAssistantWithCalls(msgs)
+	if i < 0 {
+		return msgs
+	}
+	parts := make([]Part, 0, len(results))
+	for _, r := range results {
+		parts = append(parts, r)
+	}
+	if i+1 < len(msgs) && msgs[i+1].Role == RoleTool {
+		out := slices.Clone(msgs)
+		out[i+1].Content = append(slices.Clone(out[i+1].Content), parts...)
+		return out
+	}
+	return slices.Insert(slices.Clone(msgs), i+1, Message{Role: RoleTool, Content: parts})
+}
+
+// composeSystem appends the advertised tools' PromptSnippets to the
+// agent's instructions: one paragraph per tool, in order, blank-line
+// separated. Without snippets the instructions pass through unchanged.
+func composeSystem(system string, tools []*ToolDef) string {
+	var b strings.Builder
+	b.WriteString(system)
+	for _, t := range tools {
+		if t == nil || t.snippet == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(t.snippet)
+	}
+	return b.String()
+}
+
+// Model-visible result strings — contract, pinned by tests (ADR 0002,
+// ADR 0007).
+func truncatedCallResult(name string) string {
+	return fmt.Sprintf("tool call %s was not executed: the response hit the output token limit", name)
+}
+
+func deniedResult(reason string) string {
+	return (&ToolError{Code: codeDenied, Message: reason, Err: ErrApprovalDenied}).Error()
+}
+
+// codeDenied is the code on a denied call's result; mw.Allow uses the
+// same code for its own denials.
+const codeDenied = "DENIED"
+
+// CallTool dispatches one tool call by name the way the loop does —
+// through the agent's WrapTools chain and the tool's own — and returns
+// the result text the model would see. It is the seam for manual
+// dispatchers. Unlike the loop it does not contain failures or apply
+// run policy: an unknown name returns an error wrapping ErrNoSuchTool,
+// undecodable arguments one wrapping ErrInvalidToolInput, a
+// RequireApproval tool one wrapping ErrApprovalRequired, and handler
+// errors, middleware errors, and panics propagate. Timeouts and result
+// caps are not applied; StrictInput is, at both levels, as in the loop.
+func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error) {
+	def, _ := a.toolByName(call.Name)
+	strict := a.strict
+	if def != nil && def.strict {
+		strict = true
+	}
+	return a.chain(def, strict)(ctx, call)
+}
+
+// chain builds the tool-call chain for one call: agent middleware
+// (outermost, first registered first) around the tool's middleware
+// around the base caller, which resolves the tool, enforces
+// RequireApproval, decodes, and runs the handler. def is nil for an
+// unknown tool — the chain still runs, so Allow/Audit see the attempt,
+// and the base returns the NO_SUCH_TOOL error.
+func (a *Agent) chain(def *ToolDef, strict bool) ToolCaller {
+	base := func(ctx context.Context, call ToolCallPart) (string, error) {
+		if def == nil {
+			return "", noSuchTool(call.Name)
+		}
+		if def.approval {
+			if c, _ := CallFromContext(ctx); !c.Approved {
+				return "", fmt.Errorf("%w: tool %q", ErrApprovalRequired, call.Name)
+			}
+		}
+		return def.invoke(ctx, call.Args, strict)
+	}
+	c := base
+	if def != nil {
+		for i := len(def.mw) - 1; i >= 0; i-- {
+			c = def.mw[i](c)
+		}
+	}
+	for i := len(a.toolMW) - 1; i >= 0; i-- {
+		c = a.toolMW[i](c)
+	}
+	return c
 }
 
 // callTool dispatches one call under the tool's effective policy and
 // folds every failure — unknown tool, bad arguments, handler error,
-// handler panic, timeout — into an error result the model can correct: a
-// tool failure is data, not a run failure. Per-tool options override the
-// agent's defaults; the result cap is applied last, over every outcome.
-func (a *Agent) callTool(ctx context.Context, call ToolCallPart) (res ToolResultPart) {
+// handler or middleware panic, timeout — into an error result the model
+// can correct: a tool failure is data, not a run failure. Per-tool
+// options override the agent's defaults; the result cap is applied
+// last, over every outcome. An error wrapping ErrApprovalRequired is
+// the one non-result: the call is reported pending instead.
+func (a *Agent) callTool(ctx context.Context, call ToolCallPart) (res ToolResultPart, pending bool) {
 	res = ToolResultPart{CallID: call.ID, Name: call.Name}
-	def, ok := a.toolByName(call.Name)
-	if !ok {
-		res.IsError = true
-		res.Content = capResult(fmt.Errorf("%w: %q", ErrNoSuchTool, call.Name).Error(), a.resultCap)
-		return res
-	}
+	def, _ := a.toolByName(call.Name)
 	resultCap := a.resultCap
-	if def.capSet {
-		resultCap = def.resultCap
-	}
 	timeout := a.toolTimeout
-	if def.timeout > 0 {
-		timeout = def.timeout
+	strict := a.strict
+	if def != nil {
+		if def.capSet {
+			resultCap = def.resultCap
+		}
+		if def.timeoutSet {
+			timeout = def.timeout // includes the Timeout(0) lift
+		}
+		strict = strict || def.strict
 	}
-	strict := a.strict || def.strict
 	defer func() { res.Content = capResult(res.Content, resultCap) }()
 
+	fn := a.chain(def, strict)
 	var out string
 	var err error
 	if timeout <= 0 {
-		out, err = invokeContained(ctx, def, call, strict)
+		out, err = invokeContained(ctx, fn, call)
 	} else {
-		out, err = invokeWithTimeout(ctx, def, call, strict, timeout)
+		out, err = invokeWithTimeout(ctx, fn, call, timeout)
 	}
 	if err != nil {
+		if errors.Is(err, ErrApprovalRequired) {
+			return res, true
+		}
 		res.IsError = true
 		res.Content = err.Error()
-		return res
+		return res, false
 	}
 	res.Content = out
-	return res
+	return res, false
 }
 
-// invokeContained runs the tool, turning a handler panic into an error.
-func invokeContained(ctx context.Context, def *ToolDef, call ToolCallPart, strict bool) (out string, err error) {
+// invokeContained runs the chain, turning a panic — in the handler or
+// in middleware — into an error. Containment sits outside the chain by
+// design: no middleware can turn a panic into a run failure.
+func invokeContained(ctx context.Context, fn ToolCaller, call ToolCallPart) (out string, err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = fmt.Errorf("tool %q panicked: %v", call.Name, p)
 		}
 	}()
-	return def.invoke(ctx, call.Args, strict)
+	return fn(ctx, call)
 }
 
 // invokeWithTimeout runs the tool under a per-call deadline. The handler
@@ -377,7 +654,7 @@ func invokeContained(ctx context.Context, def *ToolDef, call ToolCallPart, stric
 // passes, the call is recorded as timed out and the handler's goroutine
 // is abandoned — a hung tool must not hang the run. A cancellation of
 // the run's own ctx is reported as that cancellation, not as a timeout.
-func invokeWithTimeout(ctx context.Context, def *ToolDef, call ToolCallPart, strict bool, timeout time.Duration) (string, error) {
+func invokeWithTimeout(ctx context.Context, fn ToolCaller, call ToolCallPart, timeout time.Duration) (string, error) {
 	tctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	type outcome struct {
@@ -386,7 +663,7 @@ func invokeWithTimeout(ctx context.Context, def *ToolDef, call ToolCallPart, str
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		out, err := invokeContained(tctx, def, call, strict)
+		out, err := invokeContained(tctx, fn, call)
 		done <- outcome{out, err}
 	}()
 	timedOut := func() error {

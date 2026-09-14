@@ -144,6 +144,48 @@ stop reason when the mapped `StopReason` had to be approximated
 interpreted — a vendor value surfaces without a vendor-specific field on
 a core type.
 
+## Amendment (2026-09-14 — fail truncated calls, TODO §5.6a; tool
+## errors have codes, §5.2a; the approval boundary, §4.4)
+
+**Fail truncated calls — a decision reversal.** The 2026-09-09
+amendment let a `max_tokens` step *with* tool calls execute them,
+relying on decode failure for cut arguments. That covers undecodable
+arguments only: an intact call issued just before the cut would still
+run, from a message the model never finished. Now, when a step
+finishes `StopMaxTokens` and carries tool calls, **every call fails
+and none executes**: each gets the pinned result `tool call <name> was
+not executed: the response hit the output token limit`, the tool
+message is appended, and the loop continues so the model retries with
+a full output budget. No `ToolStart`/`ToolFinish` is emitted for them
+(nothing started). `RunResult.StopReason` still records the truncation
+when it is the last step. Model-visible change: the earlier
+`ErrInvalidToolInput` text for cut arguments is replaced by the uniform
+string. (pi `failToolCallsFromTruncatedMessage`.)
+
+**Tool errors have codes.** `*weft.ToolError{Code, Message, Err}`
+renders as `CODE: Message`; `Err` is the internal cause, reachable
+through `errors.As`/`Unwrap` for middleware and audit logs and never
+shown to the model. `weft.Errorf(code, format, args...)` builds one.
+The loop's own failures are coded the same way — model-visible
+change, pinned by tests:
+
+| condition | before | now |
+|---|---|---|
+| arguments do not decode | `weft: tool input is not valid for its schema: tool "x": …` | `INVALID_INPUT: tool "x": field "days": expected integer, got string` |
+| unknown tool | `weft: no tool with that name: "x"` | `NO_SUCH_TOOL: no tool named "x"` |
+
+Both still wrap their sentinels, so `errors.Is(err, ErrInvalidToolInput)`
+and `errors.Is(err, ErrNoSuchTool)` hold through `CallTool` and the
+seam. Plain handler errors keep rendering as `err.Error()`;
+`mw.MapErrors` codes them centrally (`INTERNAL: tool "x" failed` by
+default, cause retained). Timeout, panic, and cancellation strings are
+unchanged. Codes are not validated; SCREAMING_SNAKE is the convention.
+
+**Two approval sentinels** join the catalogue (ADR 0007):
+`ErrApprovalRequired` — returned by the chain to park a call; a
+`RequireApproval` tool through `CallTool` — and `ErrApprovalDenied`,
+the cause on a `DENIED: <reason>` result. Neither is a run error.
+
 ## Alternatives considered
 
 - **errgroup abort on first tool error**: cancels unrelated work the model

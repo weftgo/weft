@@ -127,3 +127,26 @@ stays the default (stray keys cost a round trip, not accuracy);
 
 Model-visible strings pinned by tests: the timeout message, the four
 decode messages.
+
+
+## Amendment (2026-09-14): the rest of the per-tool policy — TODO §4.3
+
+With the tool seam landed (ADR 0006), the options that were blocked on
+it ship, all as trailing options on `Tool`/`RawTool`:
+
+- **`Sequential()`** on a tool is a barrier (in-flight calls finish, it
+  runs alone, the step resumes). `Sequential` now returns
+  `PolicyOption`, like `Timeout`/`MaxResultBytes`/`StrictInput`.
+- **`WrapTools(mw...)`** on a tool wraps that tool alone, inside the
+  agent-level chain.
+- **`PromptSnippet(text)`**: the loop composes the advertised tools'
+  snippets into `ModelRequest.System` after the instructions, one
+  paragraph per tool, blank-line separated. Model-visible (the system
+  prompt), pinned by `TestPromptSnippetsComposeIntoInstructions`.
+- **`Replay(ReplaySafe|ReplayNever)`**: an annotation for checkpoint
+  restart (§11); accessor `ToolDef.ReplayPolicy()`.
+- **`RequireApproval()`** — ADR 0007.
+
+The manifest records each (`sequential`, `require_approval`, `replay`,
+`prompt_snippet`); tools without them render exactly as before.
+Decode failures are now coded `INVALID_INPUT: tool "x": …` (ADR 0002).

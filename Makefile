@@ -6,7 +6,7 @@ GO ?= go
 # SDKs are required only by the adapter modules.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy live
+.PHONY: build test vet fmt lint tidy live apidiff
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...); done
@@ -25,6 +25,11 @@ lint:
 
 tidy:
 	for m in $(MODULES); do (cd $$m && $(GO) mod tidy); done
+
+# The apidiff gate (TODO §1.7): root module vs the last v* tag.
+# Needs: go install golang.org/x/exp/cmd/apidiff@latest
+apidiff:
+	scripts/apidiff.sh
 
 # Live adapter tests behind the `live` build tag; never in CI (no keys).
 live:

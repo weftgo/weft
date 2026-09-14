@@ -144,14 +144,16 @@ func TestMaxTokensStopReasonIsRecorded(t *testing.T) {
 	}
 }
 
-// max_tokens alongside tool calls is recoverable: the step's tools run
-// (truncated arguments become error results) and the next model call
-// proceeds normally.
-func TestMaxTokensWithToolCallsContinues(t *testing.T) {
-	touch := weft.Tool("touch", "", func(_ context.Context, _ struct{}) (string, error) { return "ok", nil })
+// max_tokens alongside tool calls is recoverable: none of the step's
+// calls execute — each gets the pinned truncation failure — and the
+// next model call proceeds normally.
+func TestMaxTokensWithToolCallsFailsThemWithoutExecuting(t *testing.T) {
+	executed := 0
+	touch := weft.Tool("touch", "", func(_ context.Context, _ struct{}) (string, error) { executed++; return "ok", nil })
 	model := &turnModel{turns: [][]weft.ModelEvent{
 		{
 			weft.ModelToolCall{ID: "c1", Name: "touch", Args: json.RawMessage(`{}`)},
+			weft.ModelToolCall{ID: "c2", Name: "touch", Args: json.RawMessage(`{"cut`)},
 			weft.ModelFinish{Reason: weft.StopMaxTokens, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
 		},
 		{
@@ -159,12 +161,39 @@ func TestMaxTokensWithToolCallsContinues(t *testing.T) {
 			weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
 		},
 	}}
-	res, err := weft.New(model, touch).Generate(context.Background(), weft.Prompt("x"))
+	var events []weft.Event
+	agt := weft.New(model, touch, weft.Tap(func(_ context.Context, ev weft.Event) { events = append(events, ev) }))
+	res, err := agt.Generate(context.Background(), weft.Prompt("x"))
 	if err != nil {
 		t.Fatalf("a max_tokens step with tool calls must not fail the run: %v", err)
 	}
+	if executed != 0 {
+		t.Errorf("handler ran %d times on a truncated step; a cut message's calls must not be acted on", executed)
+	}
 	if res.NumSteps() != 2 || res.Text() != "recovered" {
 		t.Errorf("result = %d steps, text %q; want 2 steps ending in recovery", res.NumSteps(), res.Text())
+	}
+	// Every call — intact or cut — gets the same pinned failure text.
+	want := "tool call touch was not executed: the response hit the output token limit"
+	results := res.Steps[0].Results
+	if len(results) != 2 {
+		t.Fatalf("results = %d, want one per call", len(results))
+	}
+	for i, r := range results {
+		if !r.IsError || r.Content != want {
+			t.Errorf("result %d = %+v, want IsError with %q", i, r, want)
+		}
+	}
+	// The transcript carries the tool message, so the model retries
+	// with a full budget on a valid transcript.
+	if m := res.Messages[len(res.Messages)-2]; m.Role != weft.RoleTool || len(m.Content) != 2 {
+		t.Errorf("message before the recovery = %+v, want a tool message with both results", m)
+	}
+	for _, ev := range events {
+		switch ev.(type) {
+		case weft.ToolStart, weft.ToolFinish:
+			t.Errorf("unexpected %T on a truncated step: nothing executed", ev)
+		}
 	}
 }
 

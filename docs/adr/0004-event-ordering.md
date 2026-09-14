@@ -139,3 +139,16 @@ fragments, and the matching `ModelToolCallDelta`) is ADR 0013's.
   `Seq`; every `ToolFinish` follows its `ToolStart`),
   `TestToolStartsInCallOrder`, `TestSequentialRunsInCallOrder`,
   `TestCanceledBeforeStartEmitsNoOrphanEvents`.
+
+## Amendment (2026-09-14 — pending calls, `RunFinish.Pending`, ADR 0007)
+
+A call parked by the approval boundary has its `ToolStart` — the
+dispatcher handed it to the tool chain, which is where the decision
+to park is made — and **no `ToolFinish`**. It is listed on
+`RunFinish.Pending` (wire: `pending`, omitted when empty), mirroring
+`RunResult.Pending`, so a UI resolves the open call from the last
+event. The "every `ToolFinish` is preceded by its `ToolStart`" rule
+stands; its converse now has one documented exception. Resumed calls
+(`Approve`) emit their `ToolStart`/`ToolFinish` into the resuming run,
+before its first `StepStart`. A step that finished `max_tokens` with
+calls emits no tool events at all: nothing started (ADR 0002).

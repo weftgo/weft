@@ -6,7 +6,53 @@ is pre-1.0 and tags per module (ADR 0005).
 
 ## Unreleased (2026-09-14)
 
+### Changed — model-visible contracts (read before upgrading)
+
+- **A `max_tokens` step with tool calls executes none of them.** Every
+  call gets the error result `tool call <name> was not executed: the
+  response hit the output token limit` and the loop continues so the
+  model retries with a full budget. Previously intact calls ran and
+  only cut arguments failed decoding. (ADR 0002 amendment, TODO §5.6a.)
+- **The loop's own tool failures are coded.** Undecodable arguments
+  render `INVALID_INPUT: tool "x": field "days": expected integer, got
+  string` (was `weft: tool input is not valid for its schema: …`) and
+  an unknown tool `NO_SUCH_TOOL: no tool named "x"` (was `weft: no tool
+  with that name: "x"`). `errors.Is` on the sentinels is unchanged.
+- `Sequential` returns `PolicyOption` (source-compatible); `RunFinish`
+  gained `Pending` and is no longer `==`-comparable.
+- `Agent.CallTool` now runs the tool middleware chain, and applies the
+  agent-level `StrictInput` exactly as the loop does.
+- A run whose context is canceled while calls are parked for approval
+  fails with the cancellation error (the parked calls stay resumable on
+  `RunError.Result.Pending`) — cancellation wins, as everywhere else.
+
 ### Added
+
+- **The two middleware seams** (ADR 0006): `WrapModel(mw
+  ...ModelMiddleware)` and `WrapTools(mw ...ToolMiddleware)` — chi-style,
+  first listed outermost; `WrapTools` also works on one tool.
+  `ToolCaller`, `ToolMiddleware`, `ModelMiddleware`, `InfoOf`.
+- **Package `mw`**, the reference middleware: `Retry` (backoff with
+  jitter, retry-after honoured, >60s asks fail fast, overflow never
+  retried), `Fallback`/`FallbackWhen`, `Log`, `RepairJSON`; `Allow`,
+  `Audit`, `MapErrors`.
+- **`ToolError`** — `{Code, Message, Err}` renders `CODE: Message`; the
+  cause is for middleware and logs only. `weft.Errorf(code, format,
+  ...)`; several `%w` verbs keep every cause reachable.
+- **The approval boundary** (ADR 0007): `RequireApproval()`,
+  `RunResult.Pending`, `RunFinish.Pending`, `Approve(id)`, `Deny(id,
+  reason)`, `Call.Approved`, `ErrApprovalRequired`, `ErrApprovalDenied`;
+  `examples/approval`.
+- Per-tool policy: `Sequential()` on a tool is a barrier;
+  `PromptSnippet(text)` composes into the instructions; `Replay(policy)`
+  annotates checkpoint restart (`ReplaySafe`/`ReplayNever`). All in the
+  manifest. `Timeout(0)` on a tool removes the agent's default for
+  that tool alone (the manifest records `"timeout": "0s"`), the
+  timeout analogue of `MaxResultBytes(0)`.
+- The apidiff gate (`scripts/apidiff.sh`, `make apidiff`, CI job) with
+  the pre-1.0 `.apidiff-allow` acknowledgement file.
+- `docs/life-of-a-call.md`: where every phase of a step and a tool call
+  sits.
 
 - Per-run reasoning control: `weft.Thinking(weft.ThinkingConfig{...})`
   — an agent option sets every run's default, a run option overrides

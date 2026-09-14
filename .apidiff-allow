@@ -1,0 +1,14 @@
+# Acknowledged incompatible API changes since the last root tag, one
+# exact apidiff line per entry (scripts/apidiff.sh). Pre-1.0 only: each
+# entry is a deliberate, reviewed evolution. Reset this file when tagging.
+#
+# 2026-09-12 (TODO §4.3): trailing variadic ToolOption on Tool/RawTool and
+# MaxResultBytes returning the PolicyOption superset — source-compatible
+# for every caller. 2026-09-14 (§4.3 barrier): Sequential likewise.
+MaxResultBytes: changed from func(int) Option to func(int) PolicyOption
+RawTool: changed from func(string, string, *Schema, func(ctx context.Context, args encoding/json.RawMessage) (string, error)) *ToolDef to func(string, string, *Schema, func(ctx context.Context, args encoding/json.RawMessage) (string, error), ...ToolOption) *ToolDef
+Tool: changed from func(string, string, func(ctx context.Context, in In) (Out, error)) *ToolDef to func(string, string, func(ctx context.Context, in In) (Out, error), ...ToolOption) *ToolDef
+Sequential: changed from func() Option to func() PolicyOption
+# 2026-09-14 (TODO §4.4): RunFinish.Pending is a slice, so the event value
+# is no longer ==-comparable; compare fields, or switch on the type.
+RunFinish: old is comparable, new is not

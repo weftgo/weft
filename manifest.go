@@ -70,14 +70,18 @@ type manifestPolicy struct {
 // policy: the keys appear only for tools that override the agent's
 // defaults, so a tool without options renders exactly as before.
 type manifestTool struct {
-	Name           string  `json:"name"`
-	Description    string  `json:"description,omitempty"`
-	InputSchema    *Schema `json:"input_schema,omitempty"`
-	OutputSchema   *Schema `json:"output_schema,omitempty"`
-	Timeout        string  `json:"timeout,omitempty"`
-	MaxResultBytes *int    `json:"max_result_bytes,omitempty"`
-	StrictInput    bool    `json:"strict_input,omitempty"`
-	Source         string  `json:"source,omitempty"`
+	Name            string       `json:"name"`
+	Description     string       `json:"description,omitempty"`
+	InputSchema     *Schema      `json:"input_schema,omitempty"`
+	OutputSchema    *Schema      `json:"output_schema,omitempty"`
+	Timeout         string       `json:"timeout,omitempty"`
+	MaxResultBytes  *int         `json:"max_result_bytes,omitempty"`
+	StrictInput     bool         `json:"strict_input,omitempty"`
+	Sequential      bool         `json:"sequential,omitempty"`
+	RequireApproval bool         `json:"require_approval,omitempty"`
+	Replay          ReplayPolicy `json:"replay,omitempty"`
+	PromptSnippet   string       `json:"prompt_snippet,omitempty"`
+	Source          string       `json:"source,omitempty"`
 }
 
 func (a *Agent) manifestEntry() manifestAgent {
@@ -99,13 +103,17 @@ func (a *Agent) manifestEntry() manifestAgent {
 	}
 	for _, t := range a.toolList {
 		mt := manifestTool{
-			Name:         t.Name,
-			Description:  t.Description,
-			InputSchema:  t.InputSchema,
-			OutputSchema: t.OutputSchema,
-			Timeout:      durationName(t.timeout),
-			StrictInput:  t.strict,
-			Source:       toolSource(t),
+			Name:            t.Name,
+			Description:     t.Description,
+			InputSchema:     t.InputSchema,
+			OutputSchema:    t.OutputSchema,
+			Timeout:         toolTimeoutName(t),
+			StrictInput:     t.strict,
+			Sequential:      t.sequential,
+			RequireApproval: t.approval,
+			Replay:          t.replay,
+			PromptSnippet:   t.snippet,
+			Source:          toolSource(t),
 		}
 		if t.capSet {
 			resultCap := t.resultCap
@@ -122,6 +130,16 @@ func durationName(d time.Duration) string {
 		return ""
 	}
 	return d.String()
+}
+
+// toolTimeoutName renders a tool's timeout for the manifest. A set
+// timeout renders even when zero: "0s" records an explicit lift of the
+// agent's default — the per-tool analogue of max_result_bytes: 0.
+func toolTimeoutName(t *ToolDef) string {
+	if t.timeoutSet {
+		return t.timeout.String()
+	}
+	return ""
 }
 
 // stopName renders a stop condition for the manifest: the built-ins

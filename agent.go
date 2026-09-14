@@ -60,7 +60,8 @@ func Parallelism(n int) Option { return parallelismOption{n} }
 
 type sequentialOption struct{}
 
-func (sequentialOption) apply(a *Agent) { a.parallelism = 1 }
+func (sequentialOption) apply(a *Agent)       { a.parallelism = 1 }
+func (sequentialOption) applyTool(t *ToolDef) { t.sequential = true }
 
 // Sequential restricts a step's tool calls to run one at a time, in call
 // order: each tool finishes before the next starts — the safe setting for
@@ -68,7 +69,50 @@ func (sequentialOption) apply(a *Agent) { a.parallelism = 1 }
 // order; Sequential additionally serializes their execution. It also sets
 // ModelRequest.SequentialTools, so adapters ask the provider not to emit
 // parallel batches in the first place.
-func Sequential() Option { return sequentialOption{} }
+//
+// On a tool, Sequential is a barrier: the dispatcher lets every
+// in-flight call of the step finish, runs this call alone, then resumes
+// the step's parallelism for the calls after it. Other tools keep
+// running in parallel; only this one is serialized.
+func Sequential() PolicyOption { return sequentialOption{} }
+
+// ModelMiddleware wraps a Model, the chi shape: it sees every
+// ModelRequest the loop builds and every event the inner model yields,
+// and may retry, substitute, log, or rewrite. Implementations should
+// forward Info (see InfoOf) so RunStart.Model and the manifest still
+// name the underlying model.
+type ModelMiddleware func(next Model) Model
+
+type wrapModelOption []ModelMiddleware
+
+func (o wrapModelOption) apply(a *Agent) {
+	for _, m := range o {
+		if m != nil {
+			a.modelMW = append(a.modelMW, m)
+		}
+	}
+}
+
+// WrapModel installs model middleware around the agent's model. The
+// first middleware listed is the outermost — WrapModel(a, b) calls
+// a(b(model)) — and successive WrapModel options append inward. The
+// chain is built once, at New, and sees each step's ModelRequest as the
+// loop built it. The reference set is in package mw: Retry, Fallback,
+// Log, RepairJSON. Nil entries are ignored.
+func WrapModel(mw ...ModelMiddleware) Option { return wrapModelOption(mw) }
+
+// InfoOf reports m's ModelInfo when it implements the optional
+//
+//	interface{ Info() ModelInfo }
+//
+// and the zero ModelInfo otherwise. Model middleware forwards identity
+// with it: func (w *wrapper) Info() weft.ModelInfo { return weft.InfoOf(w.next) }.
+func InfoOf(m Model) ModelInfo {
+	if m, ok := m.(interface{ Info() ModelInfo }); ok {
+		return m.Info()
+	}
+	return ModelInfo{}
+}
 
 // ThinkingOption is accepted by both New and Stream/Generate: reasoning
 // depth is a per-question concern, not a per-agent one. On an agent it
@@ -236,6 +280,8 @@ type Agent struct {
 	taps        []func(context.Context, Event)
 	name        string
 	thinking    ThinkingConfig
+	modelMW     []ModelMiddleware
+	toolMW      []ToolMiddleware
 }
 
 // New builds an Agent. Nil models panic — including typed nils such as
@@ -255,6 +301,13 @@ func New(m Model, opts ...Option) *Agent {
 	for _, o := range opts {
 		if o != nil {
 			o.apply(a)
+		}
+	}
+	// The model chain is built once, here: first registered = outermost.
+	for i := len(a.modelMW) - 1; i >= 0; i-- {
+		a.model = a.modelMW[i](a.model)
+		if isNilModel(a.model) {
+			panic("weft: model middleware returned a nil Model")
 		}
 	}
 	return a

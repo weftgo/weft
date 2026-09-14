@@ -45,7 +45,9 @@ type ReasoningDelta struct {
 
 // ToolStart reports that a tool invocation began. Events from tools running
 // in parallel interleave: pair them by CallID and order by Seq, a per-run
-// counter assigned at emission that totally orders the stream.
+// counter assigned at emission that totally orders the stream. A call
+// parked by the approval boundary has a ToolStart and no ToolFinish; it
+// is listed on RunFinish.Pending instead.
 type ToolStart struct {
 	Seq    int64           `json:"seq"`
 	CallID string          `json:"call_id"`
@@ -92,6 +94,10 @@ type StepFinish struct {
 type RunFinish struct {
 	Usage Usage `json:"usage"`
 	Steps int   `json:"steps"`
+	// Pending mirrors RunResult.Pending: calls the run ended on without
+	// executing, awaiting Approve/Deny. Such a call had its ToolStart
+	// and no ToolFinish.
+	Pending []ToolCallPart `json:"pending,omitempty"`
 }
 
 func (RunStart) isEvent()       {}

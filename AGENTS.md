@@ -21,7 +21,11 @@ lookup := weft.Tool("lookup_order", "Look up an order by ID.",
     weft.StrictInput(),            // undeclared argument fields are rejected
 )
 // Bad arguments are ErrInvalidToolInput results naming the field:
-//   field "days": expected integer, got string
+//   INVALID_INPUT: tool "lookup_order": field "days": expected integer, got string
+// Give the model a code to branch on; the cause stays in logs:
+//   return "", &weft.ToolError{Code: "ORDER_NOT_FOUND", Message: "order 42 does not exist", Err: err}
+// More per-tool options: weft.Sequential() (barrier), weft.RequireApproval(),
+// weft.PromptSnippet("…"), weft.Replay(weft.ReplaySafe), weft.WrapTools(mw...).
 
 // 1b. Tools defined outside Go source: explicit schema, raw args.
 //     weft.RawTool("parse_invoice", "…", schema, func(ctx, raw) (string, error))
@@ -39,8 +43,15 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
     weft.Parallelism(4),                       // or weft.Sequential()
     weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkOff}), // reasoning default (adapters map what they can)
     weft.Tap(func(ctx context.Context, ev weft.Event) {...}), // observer: sees every event, changes nothing
+    weft.WrapModel(mw.Retry(), mw.Fallback(backup)),           // model seam: first listed = outermost
+    weft.WrapTools(mw.Audit(logger), mw.Allow(permits), mw.MapErrors(nil)), // tool seam, same rule
     lookup,                                    // tools are options
 )
+// A ToolMiddleware is func(next weft.ToolCaller) weft.ToolCaller; a
+// ModelMiddleware is func(next weft.Model) weft.Model. Middleware that
+// verifies something puts it on ctx before next; handlers read it via a
+// typed accessor (ExampleWrapTools_context). docs/life-of-a-call.md
+// shows where every phase sits — phases are docs, seams are code.
 
 // 3. Run it.
 res, err := agt.Generate(ctx, weft.Prompt("Where is order 1234?"))
@@ -59,12 +70,17 @@ for ev, err := range agt.Stream(ctx, weft.Prompt("...")).Events() {
     case weft.ToolStart:     // Seq, CallID, Name, Args
     case weft.ToolFinish:    // Seq, CallID, Name, Content, IsError
     case weft.StepFinish:    // Index, Reason, Usage
-    case weft.RunFinish:     // Usage, Steps
+    case weft.RunFinish:     // Usage, Steps, Pending (calls awaiting Approve/Deny)
     }
 }
 
 // 4. Continue a conversation: feed the transcript back.
 res2, err := agt.Generate(ctx, weft.Messages(res.Messages...), weft.Prompt("And order 5678?"))
+
+// 4a. Approval: a RequireApproval tool parks its call; the run ends
+//     successfully with res.Pending set. Resume with a decision:
+//     agt.Generate(ctx, weft.Messages(res.Messages...), weft.Approve(id), weft.Deny(id, "why"))
+//     Middleware parks any call by returning an error wrapping ErrApprovalRequired.
 
 // 4b. Structured output: a submit_output tool with T's schema; the run
 //     ends on a valid call. Invalid → ErrInvalidToolInput result, model repairs.
@@ -123,6 +139,18 @@ network. `wefttest` models ignore it.
 9. **A hung tool never hangs the run**: `weft.Timeout` on a tool or
    agent records "tool X timed out after d" as an error result and
    abandons the handler's goroutine; handlers must honour ctx.
+10. **Two behavioural seams, one tap, no more.** `WrapModel` and
+    `WrapTools` (chi-style, first listed = outermost) are where
+    behaviour attaches; `Tap` observes. Panic containment and timeouts
+    sit outside the tool chain. A third seam, or a phase turned into a
+    hook, needs an ADR (ADR 0006).
+11. **A `max_tokens` step with tool calls executes none of them**: every
+    call gets `tool call X was not executed: the response hit the
+    output token limit` and the model retries with a full budget.
+12. **Approval is a run boundary**: pending calls end the run
+    successfully (`RunResult.Pending`, `RunFinish.Pending`); the next
+    run resumes with `Approve`/`Deny`; undecided calls are `DENIED: no
+    decision`. A policy seam, not a security boundary (ADR 0007).
 
 ## Working in this repo
 
@@ -132,8 +160,9 @@ network. `wefttest` models ignore it.
 - Keep the public surface small: functional options, sealed interfaces
   (`Option`, `Event`, `Part`, `ModelEvent`), no config structs, no
   globals, `context.Context` first in every signature.
-- Prefer additive change. Post-1.0 the apidiff gate fails incompatible
-  changes; pre-1.0 we still avoid renames (naming stability is API
-  stability).
+- Prefer additive change. CI runs the apidiff gate (`make apidiff`,
+  `scripts/apidiff.sh`) against the last tag and fails on incompatible
+  changes; pre-1.0 a deliberate source-compatible widening is
+  acknowledged line-by-line in `.apidiff-allow`. Renames always fail.
 - Docs: `README.md` (usage), `docs/adr/` (why), this file (map). Update
   the one that applies in the same change.

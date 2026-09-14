@@ -18,7 +18,43 @@ type runConfig struct {
 	messages    []Message
 	thinking    ThinkingConfig
 	thinkingSet bool // a run-level Thinking option was applied
+	// decisions resolves calls left pending by an earlier run: call id →
+	// approve, or deny with a reason (Approve, Deny).
+	decisions map[string]decision
 }
+
+type decision struct {
+	approved bool
+	reason   string
+}
+
+func (c *runConfig) decide(id string, d decision) {
+	if c.decisions == nil {
+		c.decisions = map[string]decision{}
+	}
+	c.decisions[id] = d
+}
+
+type approveOption string
+
+func (o approveOption) applyRun(c *runConfig) { c.decide(string(o), decision{approved: true}) }
+
+// Approve resumes a call left on RunResult.Pending by an earlier run:
+// pass the earlier transcript with Messages and the decision, and the
+// loop executes the call — through the ordinary tool chain, with
+// Call.Approved set — before its next model call. Ids that are not
+// pending are ignored.
+func Approve(callID string) RunOption { return approveOption(callID) }
+
+type denyOption struct{ id, reason string }
+
+func (o denyOption) applyRun(c *runConfig) { c.decide(o.id, decision{reason: o.reason}) }
+
+// Deny resolves a pending call without running it: the model sees an
+// error result reading "DENIED: <reason>" and the loop continues.
+// Pending calls given neither Approve nor Deny are denied with the
+// reason "no decision" ("DENIED: no decision").
+func Deny(callID, reason string) RunOption { return denyOption{callID, reason} }
 
 type runIDOption string
 
@@ -101,6 +137,12 @@ type RunResult struct {
 	Messages   []Message
 	Steps      []StepRecord
 	Usage      Usage
+	// Pending lists the tool calls of the last step that await an
+	// approval decision (RequireApproval, or middleware returning
+	// ErrApprovalRequired). The run ended successfully without running
+	// them and the transcript carries no result for them; resume with
+	// Messages(res.Messages...) plus Approve/Deny per call.
+	Pending []ToolCallPart
 }
 
 // NumSteps returns how many model calls the run made.

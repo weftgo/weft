@@ -65,7 +65,66 @@ var (
 	// wefttest models ignore the switch, so ordinary offline tests are
 	// unaffected.
 	ErrModelRequestsDenied = errors.New("weft: model requests denied by WEFT_MODEL_REQUESTS")
+
+	// ErrApprovalRequired marks a tool call that must not run until a
+	// human (or an outer system) decides. The loop raises it for tools
+	// built with RequireApproval; tool middleware may return an error
+	// wrapping it to defer any call. The run then ends successfully with
+	// the call on RunResult.Pending; resume with Approve or Deny.
+	ErrApprovalRequired = errors.New("weft: tool call requires approval")
+
+	// ErrApprovalDenied is the cause on the error result the model sees
+	// for a pending call that was denied (Deny, or no decision on
+	// resume). It is a tool error — data — never a run error.
+	ErrApprovalDenied = errors.New("weft: tool call denied")
 )
+
+// ToolError is a tool failure with a stable code the model can branch
+// on. Code is SCREAMING_SNAKE by convention ("ORDER_NOT_FOUND"); Message
+// is what the model reads; Err is the internal cause — available to
+// tool middleware and audit logs through errors.As/Unwrap, and never
+// shown to the model. A handler returning *ToolError produces the
+// result "<CODE>: <Message>"; the loop renders its own failures with
+// codes too: INVALID_INPUT (arguments that do not decode) and
+// NO_SUCH_TOOL. Codes are not validated. Plain errors keep rendering as
+// err.Error(); install mw.MapErrors to code them centrally.
+type ToolError struct {
+	Code    string
+	Message string
+	Err     error
+}
+
+// Error renders the model-visible form: "CODE: Message". Err is not
+// included.
+func (e *ToolError) Error() string {
+	if e.Message == "" {
+		return e.Code
+	}
+	return e.Code + ": " + e.Message
+}
+
+// Unwrap returns the internal cause, for errors.Is/As in middleware and
+// logs.
+func (e *ToolError) Unwrap() error { return e.Err }
+
+// Errorf builds a *ToolError with a formatted Message. A %w verb sets
+// Err as fmt.Errorf would — with several %w verbs every cause stays
+// reachable through errors.Is — so the cause is available to middleware
+// while the model sees only the formatted text.
+func Errorf(code, format string, args ...any) *ToolError {
+	// fmt.Errorf renders %w as the wrapped error's text and records it
+	// as the cause; the message the model sees is the rendered text.
+	// Two or more %w verbs produce a joined error whose single-value
+	// Unwrap is nil, so rejoin the causes to keep them reachable.
+	wrapped := fmt.Errorf(format, args...)
+	te := &ToolError{Code: code, Message: wrapped.Error()}
+	if multi, ok := wrapped.(interface{ Unwrap() []error }); ok {
+		te.Err = errors.Join(multi.Unwrap()...)
+		return te
+	}
+	te.Err = errors.Unwrap(wrapped)
+	return te
+}
 
 // RunError reports a step-scoped failure: the model stream failed, the
 // context was canceled, or the step budget ran out. Err is the cause — use

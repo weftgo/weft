@@ -132,6 +132,60 @@ Bad arguments come back to the model in the schema's own words —
 to the schema it was shown. Undeclared fields are ignored by default;
 `StrictInput` rejects them by name.
 
+### The two seams
+
+Behaviour attaches at two chi-style seams; observation at `weft.Tap`.
+`WrapModel` wraps the model, `WrapTools` wraps every tool call (on the
+agent, or on one tool). First listed is outermost. Package `mw` holds
+the reference set:
+
+```go
+agt := weft.New(model,
+    weft.WrapModel(
+        mw.Log(logger),               // request summary + finish, Debug level
+        mw.Retry(mw.MaxRetries(3)),   // 429/5xx/net errors; retry-after honoured; backoff with jitter
+        mw.Fallback(backupModel),     // another model when this one fails before yielding
+        mw.RepairJSON(),              // close a truncated tool-call argument object once
+    ),
+    weft.WrapTools(
+        mw.Audit(logger),             // every call: run, step, tool, duration, error + cause
+        mw.Allow(policy.Permits),     // DENIED: tool "rm" is not allowed — the model sees it
+        mw.MapErrors(nil),            // plain errors → INTERNAL: tool "x" failed (cause kept)
+    ),
+    tools...,
+)
+```
+
+Middleware that verifies something puts it on ctx before `next`, and
+the handler reads it back through a typed accessor — the same shape as
+`weft.CallFromContext` (see `ExampleWrapTools_context`). A middleware
+panic is a tool error result, never a run error. Handlers give the
+model a code to branch on with `*weft.ToolError` (`ORDER_NOT_FOUND:
+order 42 does not exist`; the cause stays in logs); the loop's own
+failures are coded `INVALID_INPUT` and `NO_SUCH_TOOL`.
+[docs/life-of-a-call.md](docs/life-of-a-call.md) shows where each
+thing sits; [ADR 0006](docs/adr/0006-seams.md) is the decision.
+
+### Approval
+
+`weft.RequireApproval()` on a tool parks its calls: the run ends
+successfully with them on `RunResult.Pending`, the step's other tools
+having run. Resume with the transcript and a decision — over any
+transport, with no persistence required:
+
+```go
+res, _ := agt.Generate(ctx, weft.Prompt("Refund order 42"))
+for _, call := range res.Pending { /* ask someone */ }
+res, _ = agt.Generate(ctx, weft.Messages(res.Messages...),
+    weft.Approve(call.ID), weft.Deny(other.ID, "over the limit"))
+```
+
+Approved calls run (handlers see `Call.Approved`); denied ones become
+`DENIED: <reason>` results the model sees; undecided ones `DENIED: no
+decision`. Middleware can park any call by returning an error wrapping
+`ErrApprovalRequired`. It is a policy seam, not a security boundary
+([ADR 0007](docs/adr/0007-approval-boundary.md); `examples/approval`).
+
 ## The manifest — `weft.json`
 
 One generated, committed, diffable description of every agent and tool
@@ -207,9 +261,14 @@ bills. ([ADR 0013](docs/adr/0013-adapter-contract.md))
   tool call can learn its own via `weft.CallFromContext(ctx)`.
 - **Truncation is visible, never silent**: a `max_tokens` finish is
   recorded on `RunResult.StopReason` (the run still succeeds — callers
-  decide what truncated text means), and oversized tool results are
+  decide what truncated text means); a `max_tokens` step *with* tool
+  calls executes none of them — each gets a visible failure and the
+  model retries with a full budget; and oversized tool results are
   capped (64 KiB by default, `weft.MaxResultBytes(n)` to change, `0` to
   disable, per tool or per agent) with a marker the model sees.
+- **Two behavioural seams, one observation tap.** `WrapModel` and
+  `WrapTools` change; `Tap` sees. A third seam needs an ADR.
+  ([ADR 0006](docs/adr/0006-seams.md))
 - **A hung tool never hangs the run**: `weft.Timeout(d)` on a tool or
   agent turns an overdue call into an error result and moves on.
 - **The Model stream contract is enforced**: a stream that ends without
@@ -232,7 +291,8 @@ output.go             structured output (Output, GenerateAs, OutputOf)
 model.go              provider seam (streaming-first Model interface)
 events.go             sealed run-event set
 agent.go, run.go      agent construction options, run/stream/result
-loop.go               the loop: model call → tool fan-out → repeat
+loop.go               the loop: model call → tool chain fan-out → repeat; approval resume
+mw/                   reference middleware: Retry, Fallback, Log, RepairJSON, Allow, Audit, MapErrors
 wefttest/             scripted mock model + the conformance suite
 openai/               OpenAI Chat Completions (+ compatible servers)
 anthropic/            Anthropic Messages (thinking, signatures)
@@ -248,19 +308,31 @@ make test   # go test -race ./... in every workspace module
 make vet
 make lint   # golangci-lint (CI uses .golangci.yml)
 make live   # adapter conformance against real keys (-tags live)
+make apidiff  # public API of the root module vs the last tag (CI runs it)
 make fmt
 ```
 
 Requires Go 1.26 or newer; the current and previous Go releases are
 supported and both are tested in CI.
 
+**API stability is enforced, not aspired to.** CI runs
+`scripts/apidiff.sh`: the root module's exported API is compared
+against the last `v*` tag and any incompatible change fails the build.
+Pre-1.0, a deliberate source-compatible evolution (widening a return
+type to a superset interface, adding a trailing variadic) can be
+acknowledged by adding apidiff's exact line to `.apidiff-allow` with a
+justification; the file is emptied at each tag. Renaming or removing
+an exported symbol always fails.
+
 ## Roadmap
 
 1. ~~First provider adapters~~ — **done** (OpenAI + compatible servers,
    Anthropic, Google; ADR 0013).
-2. The two middleware seams (model call + tool call, chi-style).
-3. MCP interop: consume MCP servers as tools, expose weft tools as MCP.
-4. Subagents as tools; execution-policy refinements.
+2. ~~The two middleware seams~~ — **done** (`WrapModel`/`WrapTools`,
+   package `mw`, the approval boundary; ADR 0006, ADR 0007).
+3. Loop refinements: subagents as tools, `ModelRetry`, usage limits,
+   loop detection, `PrepareStep`.
+4. MCP interop: consume MCP servers as tools, expose weft tools as MCP.
 5. The satellites: `runtime` (sessions, approvals), `store`, `serve`,
    `studio`, and the eval/prompt/mem/trace modules.
 

@@ -31,11 +31,18 @@ type ToolDef struct {
 
 	// Per-tool policy, set by ToolOptions. Zero values defer to the
 	// agent; capSet distinguishes "no per-tool cap" from
-	// MaxResultBytes(0), which removes the cap for this tool.
-	timeout   time.Duration
-	resultCap int
-	capSet    bool
-	strict    bool
+	// MaxResultBytes(0), which removes the cap for this tool, and
+	// timeoutSet does the same for Timeout(0).
+	timeout    time.Duration
+	timeoutSet bool
+	resultCap  int
+	capSet     bool
+	strict     bool
+	sequential bool         // barrier: runs alone in its step
+	approval   bool         // RequireApproval: never runs unapproved
+	replay     ReplayPolicy // checkpoint-restart annotation
+	snippet    string       // PromptSnippet: composed into the system prompt
+	mw         []ToolMiddleware
 
 	// invoke decodes args (rejecting undeclared fields when strict),
 	// runs the handler, and renders the result text. RawTool handlers
@@ -155,9 +162,29 @@ func decodeInput[In any](name string, args json.RawMessage, strict bool) (In, er
 		dec.DisallowUnknownFields()
 	}
 	if err := dec.Decode(&in); err != nil {
-		return in, fmt.Errorf("%w: tool %q: %s", ErrInvalidToolInput, name, describeDecodeError(err))
+		return in, invalidInput(name, describeDecodeError(err))
 	}
 	return in, nil
+}
+
+// Codes the loop renders its own tool failures with — model-visible
+// contract (ADR 0002, "tool errors have codes").
+const (
+	codeInvalidInput = "INVALID_INPUT"
+	codeNoSuchTool   = "NO_SUCH_TOOL"
+)
+
+// invalidInput is the ErrInvalidToolInput failure as the model sees it:
+// a coded ToolError whose cause is the sentinel, so errors.Is still
+// matches and the result reads `INVALID_INPUT: tool "x": field "days":
+// expected integer, got string`.
+func invalidInput(name, detail string) error {
+	return &ToolError{Code: codeInvalidInput, Message: fmt.Sprintf("tool %q: %s", name, detail), Err: ErrInvalidToolInput}
+}
+
+// noSuchTool is the ErrNoSuchTool failure, coded the same way.
+func noSuchTool(name string) error {
+	return &ToolError{Code: codeNoSuchTool, Message: fmt.Sprintf("no tool named %q", name), Err: ErrNoSuchTool}
 }
 
 // describeDecodeError renders an encoding/json failure in schema terms:
@@ -272,13 +299,15 @@ func (t *ToolDef) apply(a *Agent) {
 	a.toolList = append(a.toolList, t)
 }
 
-// Timeout bounds one tool call. On a tool it is that tool's deadline; on
-// the agent it is the default for every tool without its own. The
-// handler's ctx carries the deadline; when it expires the loop records
-// an error result ("tool X timed out after 10s") the model sees and
-// moves on, abandoning the handler's goroutine — handlers must honour
-// ctx to release their resources. Non-positive values are ignored;
-// without Timeout only the run's ctx bounds a call.
+// Timeout bounds one tool call. On a tool it is that tool's deadline —
+// Timeout(0) on a tool removes the agent's default for that tool alone,
+// the timeout analogue of MaxResultBytes(0); on the agent it is the
+// default for every tool without its own, and non-positive values are
+// ignored there. The handler's ctx carries the deadline; when it expires
+// the loop records an error result ("tool X timed out after 10s") the
+// model sees and moves on, abandoning the handler's goroutine —
+// handlers must honour ctx to release their resources. Without any
+// Timeout only the run's ctx bounds a call.
 func Timeout(d time.Duration) PolicyOption { return timeoutOption{d} }
 
 type timeoutOption struct{ d time.Duration }
@@ -290,8 +319,8 @@ func (o timeoutOption) apply(a *Agent) {
 }
 
 func (o timeoutOption) applyTool(t *ToolDef) {
-	if o.d > 0 {
-		t.timeout = o.d
+	if o.d >= 0 {
+		t.timeout, t.timeoutSet = o.d, true
 	}
 }
 
@@ -310,6 +339,111 @@ type strictOption struct{}
 func (strictOption) apply(a *Agent)       { a.strict = true }
 func (strictOption) applyTool(t *ToolDef) { t.strict = true }
 
+// ToolCaller is one link of the tool-call chain: it takes a call and
+// returns the result text the model will see, or an error. The
+// innermost caller decodes the arguments and runs the handler; every
+// ToolMiddleware wraps one.
+type ToolCaller func(ctx context.Context, call ToolCallPart) (string, error)
+
+// ToolMiddleware wraps a ToolCaller, the chi shape: it may act before
+// next (deny, decorate ctx, log), after it (map errors, audit), or
+// instead of it. Panic containment stays outside the chain — a panic in
+// middleware is still a tool error result, never a run error.
+type ToolMiddleware func(next ToolCaller) ToolCaller
+
+type wrapToolsOption []ToolMiddleware
+
+func (o wrapToolsOption) apply(a *Agent) {
+	for _, m := range o {
+		if m != nil {
+			a.toolMW = append(a.toolMW, m)
+		}
+	}
+}
+
+func (o wrapToolsOption) applyTool(t *ToolDef) {
+	for _, m := range o {
+		if m != nil {
+			t.mw = append(t.mw, m)
+		}
+	}
+}
+
+// WrapTools installs tool middleware. On the agent it wraps every tool
+// call the loop (and Agent.CallTool) dispatches; on a tool it wraps
+// that tool alone, inside the agent's chain: agent middleware → tool
+// middleware → decode → handler. The first middleware listed is the
+// outermost, so WrapTools(a, b) runs a(b(call)), and successive
+// WrapTools options append inward. Middleware sees CallFromContext and
+// may decorate ctx for the handler (see ExampleWrapTools_context); it
+// returns the result text or an error — a *ToolError to give the
+// model a code, an error wrapping ErrApprovalRequired to park the call
+// on RunResult.Pending. The reference set is in package mw: Allow,
+// Audit, MapErrors. Nil entries are ignored.
+func WrapTools(mw ...ToolMiddleware) PolicyOption { return wrapToolsOption(mw) }
+
+// ReplayPolicy annotates what a checkpoint restart may do with a tool
+// call that was interrupted mid-flight. The core records it on the
+// tool and in the manifest; the store/runtime layers consume it.
+type ReplayPolicy string
+
+const (
+	// ReplaySafe marks a tool as idempotent: a restart may run an
+	// interrupted call again.
+	ReplaySafe ReplayPolicy = "safe"
+	// ReplayNever marks a tool whose interrupted calls must not be
+	// re-run; a restart synthesizes an error result instead.
+	ReplayNever ReplayPolicy = "never"
+)
+
+type replayOption struct{ policy ReplayPolicy }
+
+func (o replayOption) applyTool(t *ToolDef) { t.replay = o.policy }
+
+// Replay annotates a tool with its checkpoint-restart policy. It changes
+// nothing in the loop today: the annotation rides on the manifest for
+// the store and runtime layers, which re-run ReplaySafe tools and
+// synthesize interrupted results for ReplayNever ones.
+func Replay(policy ReplayPolicy) ToolOption { return replayOption{policy} }
+
+// ReplayPolicy reports the tool's Replay annotation; empty when unset.
+func (t *ToolDef) ReplayPolicy() ReplayPolicy { return t.replay }
+
+type snippetOption struct{ text string }
+
+func (o snippetOption) applyTool(t *ToolDef) { t.snippet = o.text }
+
+// PromptSnippet attaches system-prompt lines to a tool. The loop appends
+// the snippets of the tools it advertises to the agent's Instructions
+// for every model call — one paragraph per tool, in registration order,
+// separated by blank lines — so usage rules live with the tool instead
+// of in a central prompt that drifts as the set grows. Empty snippets
+// add nothing. The manifest records the snippet.
+func PromptSnippet(text string) ToolOption { return snippetOption{text} }
+
+// PromptSnippet reports the tool's PromptSnippet text; empty when unset.
+func (t *ToolDef) PromptSnippet() string { return t.snippet }
+
+type approvalOption struct{}
+
+func (approvalOption) applyTool(t *ToolDef) { t.approval = true }
+
+// RequireApproval marks a tool whose calls never run without a
+// decision. When the model calls it the loop executes the step's other
+// tools, then ends the run successfully with the call on
+// RunResult.Pending (and RunFinish.Pending) and no result in the
+// transcript. Resume with the transcript plus Approve or Deny:
+//
+//	res, _ := agt.Generate(ctx, weft.Prompt("Refund order 42"))
+//	for _, call := range res.Pending { /* ask someone */ }
+//	res, _ = agt.Generate(ctx, weft.Messages(res.Messages...), weft.Approve(call.ID))
+//
+// Approved calls run through the ordinary chain with Call.Approved set;
+// denied ones (and pending calls given no decision) become error results
+// the model sees. This is a policy and UX seam, not a security
+// boundary: the boundary is the sandbox a tool runs in.
+func RequireApproval() ToolOption { return approvalOption{} }
+
 // Call identifies the tool invocation a handler is serving. Retrieve it
 // with CallFromContext — for audit logs, per-call idempotency keys, or
 // progress reporting that must name its call.
@@ -318,6 +452,11 @@ type Call struct {
 	Step   int    // zero-based index of the step that requested it
 	CallID string // the provider's call identifier
 	Name   string // the tool name
+	// Approved is set when the call was parked by the approval boundary
+	// and is now running under an Approve decision — middleware that
+	// defers calls with ErrApprovalRequired reads it to let the
+	// approved call through.
+	Approved bool
 }
 
 type callKey struct{}

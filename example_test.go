@@ -3,7 +3,9 @@ package weft_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"iter"
 	"log"
 	"strings"
 	"time"
@@ -289,4 +291,212 @@ func ExampleThinking() {
 	// Output:
 	// true false
 	// false true
+}
+
+// Model middleware wraps the agent's model, chi-style: the first listed
+// is the outermost. The reference set lives in package mw.
+func ExampleWrapModel() {
+	logged := func(next weft.Model) weft.Model {
+		return loggingModel{next: next}
+	}
+	agt := weft.New(wefttest.Script(wefttest.Say("hello")), weft.WrapModel(logged))
+	res, err := agt.Generate(context.Background(), weft.Prompt("hi"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Text())
+	// Output:
+	// model call: 1 messages
+	// hello
+}
+
+type loggingModel struct{ next weft.Model }
+
+func (m loggingModel) Info() weft.ModelInfo { return weft.InfoOf(m.next) }
+
+func (m loggingModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	fmt.Printf("model call: %d messages\n", len(req.Messages))
+	return m.next.Stream(ctx, req)
+}
+
+// Tool middleware wraps every call the loop dispatches. A middleware
+// that returns an error produces an error result the model sees; a
+// *weft.ToolError gives it a code.
+func ExampleWrapTools() {
+	readOnly := func(next weft.ToolCaller) weft.ToolCaller {
+		return func(ctx context.Context, call weft.ToolCallPart) (string, error) {
+			if strings.HasPrefix(call.Name, "delete_") {
+				return "", &weft.ToolError{Code: "DENIED", Message: "this agent is read-only"}
+			}
+			return next(ctx, call)
+		}
+	}
+	del := weft.Tool("delete_order", "", func(_ context.Context, _ struct{}) (string, error) { return "deleted", nil })
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "delete_order"}),
+		wefttest.Say("I cannot do that."),
+	), del, weft.WrapTools(readOnly))
+	res, err := agt.Generate(context.Background(), weft.Prompt("delete order 1"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Steps[0].Results[0].Content)
+	fmt.Println(res.Text())
+	// Output:
+	// DENIED: this agent is read-only
+	// I cannot do that.
+}
+
+// The context-decoration convention: middleware that has verified
+// something (here, who is calling) adds it to ctx before next, and the
+// handler reads it back through a typed accessor — the same shape as
+// weft.CallFromContext. Decorate only with data the middleware has
+// verified; derive business values in the handler after decode.
+func ExampleWrapTools_context() {
+	authUser := func(next weft.ToolCaller) weft.ToolCaller {
+		return func(ctx context.Context, call weft.ToolCallPart) (string, error) {
+			user, err := verifyUser(ctx) // a session lookup, a token check, ...
+			if err != nil {
+				return "", &weft.ToolError{Code: "UNAUTHENTICATED", Message: "sign in first", Err: err}
+			}
+			return next(withUser(ctx, user), call)
+		}
+	}
+	myOrders := weft.Tool("my_orders", "List the caller's orders.",
+		func(ctx context.Context, _ struct{}) (string, error) {
+			u, ok := userFromContext(ctx)
+			if !ok {
+				return "", weft.Errorf("UNAUTHENTICATED", "no user on the call")
+			}
+			return "orders for " + u.Name, nil
+		})
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "my_orders"}),
+		wefttest.Say("Here they are."),
+	), myOrders, weft.WrapTools(authUser))
+	res, err := agt.Generate(context.Background(), weft.Prompt("show my orders"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Steps[0].Results[0].Content)
+	// Output:
+	// orders for ada
+}
+
+type exampleUser struct{ Name string }
+
+type userKey struct{}
+
+func withUser(ctx context.Context, u exampleUser) context.Context {
+	return context.WithValue(ctx, userKey{}, u)
+}
+
+func userFromContext(ctx context.Context) (exampleUser, bool) {
+	u, ok := ctx.Value(userKey{}).(exampleUser)
+	return u, ok
+}
+
+func verifyUser(context.Context) (exampleUser, error) { return exampleUser{Name: "ada"}, nil }
+
+// A *ToolError carries a code the model can branch on and a cause it
+// never sees.
+func ExampleToolError() {
+	lookup := weft.Tool("lookup_order", "", func(_ context.Context, in struct {
+		ID string `json:"id"`
+	}) (string, error) {
+		return "", &weft.ToolError{
+			Code:    "ORDER_NOT_FOUND",
+			Message: "order " + in.ID + " does not exist",
+			Err:     errors.New("pg: no rows in result set"), // for logs and middleware only
+		}
+	})
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"id":"42"}`}),
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"id":42}`}),
+		wefttest.Say("No such order."),
+	), lookup)
+	res, err := agt.Generate(context.Background(), weft.Prompt("order 42?"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Steps[0].Results[0].Content)
+	fmt.Println(res.Steps[1].Results[0].Content)
+	// Output:
+	// ORDER_NOT_FOUND: order 42 does not exist
+	// INVALID_INPUT: tool "lookup_order": field "id": expected string, got number
+}
+
+// A RequireApproval tool parks its calls: the run ends successfully
+// with them on Pending, and a later run resumes with a decision.
+func ExampleRequireApproval() {
+	refund := weft.Tool("refund", "Refund an order.", func(_ context.Context, in struct {
+		Order string `json:"order"`
+	}) (string, error) {
+		return "refunded " + in.Order, nil
+	}, weft.RequireApproval())
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{ID: "c1", Name: "refund", Args: `{"order":"42"}`}),
+		wefttest.Say("Done."),
+	), refund)
+
+	res, err := agt.Generate(context.Background(), weft.Prompt("refund order 42"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, call := range res.Pending {
+		fmt.Printf("awaiting approval: %s %s\n", call.Name, call.Args)
+	}
+
+	// Someone decided. Resume with the transcript and the decision.
+	res, err = agt.Generate(context.Background(), weft.Messages(res.Messages...), weft.Approve("c1"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Text())
+	// Output:
+	// awaiting approval: refund {"order":"42"}
+	// Done.
+}
+
+// PromptSnippet keeps a tool's usage rules next to the tool; the loop
+// appends them to the instructions of every model call.
+func ExamplePromptSnippet() {
+	search := weft.Tool("search", "Search the docs.", func(_ context.Context, _ struct{}) (string, error) { return "", nil },
+		weft.PromptSnippet("Cite the search result you used."))
+	model := wefttest.Script(wefttest.Say("ok"))
+	if _, err := weft.New(model, weft.Instructions("You answer questions."), search).Generate(context.Background(), weft.Prompt("hi")); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(model.Requests()[0].System)
+	// Output:
+	// You answer questions.
+	//
+	// Cite the search result you used.
+}
+
+// A Sequential tool is a barrier: it runs alone. The step's calls in
+// flight finish first, and the calls after it wait — under any
+// parallelism. Results stay in call order either way.
+func ExampleSequential() {
+	write := weft.Tool("write", "Append to the ledger.", func(_ context.Context, _ struct{}) (string, error) {
+		return "written", nil
+	}, weft.Sequential())
+	check := weft.Tool("check", "Verify the ledger.", func(_ context.Context, _ struct{}) (string, error) {
+		return "verified", nil
+	})
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "check"}, wefttest.Call{Name: "write"}, wefttest.Call{Name: "check"}),
+		wefttest.Say("done"),
+	)
+	res, err := weft.New(model, write, check, weft.Parallelism(4)).Generate(context.Background(), weft.Prompt("x"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, r := range res.Steps[0].Results {
+		fmt.Println(r.Name, "->", r.Content)
+	}
+	// Output:
+	// check -> verified
+	// write -> written
+	// check -> verified
 }

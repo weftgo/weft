@@ -2302,15 +2302,22 @@ func TestRunCloseAbandoned(t *testing.T) {
 	run.Close() // abandoned without consuming
 	run.Close() // idempotent
 
-	// The canceled run still consumes its single Events sequence cleanly.
+	// The canceled run still consumes its single Events sequence
+	// cleanly, and must actually deliver the cancellation — a silent,
+	// error-free stream would mean Close released nothing.
+	sawErr := false
 	for _, err := range run.Events() {
 		if err == nil {
 			continue
 		}
+		sawErr = true
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("error after Close = %v, want context.Canceled", err)
 		}
 		break
+	}
+	if !sawErr {
+		t.Error("Events after Close delivered no error; Close must cancel the run")
 	}
 
 	// Close after a completed run is a no-op.

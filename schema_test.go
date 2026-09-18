@@ -111,3 +111,27 @@ func TestToolInvoke(t *testing.T) {
 		t.Errorf("empty-args output = %s, want {\"n\":0}", raw)
 	}
 }
+
+// Map values carry their type through AdditionalProperties:
+// map[string]int stops being "some object" (Fix 10).
+func TestSchemaMapValuesTyped(t *testing.T) {
+	type inner struct {
+		Tag string `json:"tag"`
+	}
+	type input struct {
+		Scores   map[string]int      `json:"scores"`
+		Nested   map[string][]string `json:"nested,omitempty"`
+		Ancestry map[string]*inner   `json:"ancestry,omitempty"`
+	}
+	tool := weft.Tool("maps", "", func(_ context.Context, in input) (string, error) {
+		return "ok", nil
+	})
+	got, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"type":"object","properties":{"ancestry":{"type":"object","additionalProperties":{"type":"object","properties":{"tag":{"type":"string"}},"required":["tag"]}},"nested":{"type":"object","additionalProperties":{"type":"array","items":{"type":"string"}}},"scores":{"type":"object","additionalProperties":{"type":"integer"}}},"required":["scores"]}`
+	if string(got) != want {
+		t.Errorf("schema:\n got  %s\n want %s", got, want)
+	}
+}

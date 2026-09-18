@@ -1,5 +1,7 @@
 package weft
 
+import "slices"
+
 // Repair makes a transcript valid model input: every tool call has a
 // result (missing ones become visible error results), results with no
 // call are dropped, everything else is untouched. The loop applies it
@@ -62,9 +64,13 @@ func repair(msgs []Message, skip map[string]bool) []Message {
 		// The kept tool message, if any, sits directly after the
 		// assistant message with nothing between (later tool messages
 		// were dropped), so appending at the end places the missing
-		// results on it — or creates the tool message it lacks.
+		// results on it — or creates the tool message it lacks. The
+		// append clones first: purity must not depend on whose backing
+		// array the kept message's Content happens to use.
 		if n := len(out); n > 0 && out[n-1].Role == RoleTool {
-			out[n-1].Content = append(out[n-1].Content, missing...)
+			kept := out[n-1]
+			kept.Content = append(slices.Clone(kept.Content), missing...)
+			out[n-1] = kept
 			return
 		}
 		out = append(out, Message{Role: RoleTool, Content: missing})

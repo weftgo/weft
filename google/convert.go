@@ -228,7 +228,10 @@ func convertTool(t *weft.ToolDef) *genai.Tool {
 }
 
 // genaiSchema converts a weft.Schema to the SDK's; the type names map
-// from JSON-Schema lowercase to the API's uppercase.
+// from JSON-Schema lowercase to the API's uppercase. AdditionalProperties
+// is dropped: Gemini's schema subset (and the SDK's Schema) has no
+// additionalProperties field, so typed map values degrade to a plain
+// object there — the openai and anthropic adapters carry them.
 func genaiSchema(s *weft.Schema) *genai.Schema {
 	if s == nil {
 		return nil

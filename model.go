@@ -75,8 +75,12 @@ type ThinkingConfig struct {
 // ModelRequest is everything a model needs for one step: the system
 // instruction, the transcript so far, and the callable tools.
 //
-// Read-only: implementations must not modify Messages or Tools, and must
-// clone anything they retain beyond the call.
+// Read-only: the loop builds each request with fresh copies of the
+// Messages and Tools slices, so appending to them or reassigning their
+// elements cannot reach the run or the agent. The values inside remain
+// shared — message Content parts, and ToolDef fields frozen at
+// construction — so implementations must still not modify them, and
+// must clone anything they retain beyond the call.
 type ModelRequest struct {
 	System   string
 	Messages []Message

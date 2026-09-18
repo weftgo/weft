@@ -205,12 +205,19 @@ func convertTool(t *weft.ToolDef) anthropic.ToolUnionParam {
 		tool.Description = anthropic.String(t.Description)
 	}
 	if t.InputSchema != nil {
+		m := schemaMap(t.InputSchema)
 		schema := anthropic.ToolInputSchemaParam{}
-		if props := schemaMap(t.InputSchema)["properties"]; props != nil {
+		if props := m["properties"]; props != nil {
 			schema.Properties = props
 		}
 		if req := t.InputSchema.Required; len(req) > 0 {
 			schema.Required = req
+		}
+		// The SDK param has no additionalProperties field; ExtraFields
+		// puts it on the wire anyway, so typed map values reach the
+		// model instead of degrading to "some object".
+		if ap := m["additionalProperties"]; ap != nil {
+			schema.ExtraFields = map[string]any{"additionalProperties": ap}
 		}
 		tool.InputSchema = schema
 	}
@@ -254,6 +261,9 @@ func schemaMap(s *weft.Schema) map[string]any {
 	}
 	if s.Items != nil {
 		m["items"] = schemaMap(s.Items)
+	}
+	if s.AdditionalProperties != nil {
+		m["additionalProperties"] = schemaMap(s.AdditionalProperties)
 	}
 	if s.Properties != nil {
 		props := make(map[string]any, len(s.Properties))

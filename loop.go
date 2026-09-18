@@ -2,6 +2,7 @@ package weft
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -71,11 +72,14 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		if err := ctx.Err(); err != nil {
 			return fail(0, err)
 		}
-		results, pending := a.resolvePending(ctx, cfg, resume, seq, emit)
+		results, pending, err := a.resolvePending(ctx, cfg, resume, seq, emit)
+		if err != nil {
+			return fail(0, err)
+		}
 		res.Messages = attachResults(res.Messages, resume, results)
 		if len(pending) > 0 {
 			res.Pending = pending
-			emit(RunFinish{Usage: res.Usage, Steps: 0, Pending: pending})
+			emit(RunFinish{RunID: cfg.id, Usage: res.Usage, Steps: 0, Pending: snapshotPending(pending)})
 			// Cancellation wins here too (see the pending exit in the
 			// step loop): the error carries the resumable result.
 			if err := ctx.Err(); err != nil {
@@ -89,13 +93,21 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		if err := ctx.Err(); err != nil {
 			return fail(step, err)
 		}
-		emit(StepStart{Index: step})
+		// One snapshot per step: advertising, the sequential barrier,
+		// and dispatch all resolve against this fetch, so what the
+		// model was shown is exactly what runs. A source with a
+		// duplicate name fails here rather than silently dropping a
+		// tool.
+		tools, err := a.dispatchTools()
+		if err != nil {
+			return fail(step, err)
+		}
+		emit(StepStart{RunID: cfg.id, Index: step})
 
-		tools := a.effectiveTools()
 		req := ModelRequest{
 			System:          composeSystem(a.system, tools),
-			Messages:        res.Messages,
-			Tools:           tools,
+			Messages:        slices.Clone(res.Messages), // adapters cannot reach the run's transcript
+			Tools:           slices.Clone(tools),        // nor the agent's tool list
 			SequentialTools: a.parallelism == 1,
 			// A run-level Thinking option overrides the agent's default
 			// for this run alone (the thinkingOption applies to both).
@@ -127,10 +139,10 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 				}
 				switch e := mev.(type) {
 				case ModelTextDelta:
-					emit(TextDelta(e))
+					emit(TextDelta{RunID: cfg.id, Text: e.Text})
 					sb.WriteString(e.Text)
 				case ModelReasoningDelta:
-					emit(ReasoningDelta{Text: e.Text})
+					emit(ReasoningDelta{RunID: cfg.id, Text: e.Text})
 					// One ReasoningPart per provider block: a signature
 					// closes the block (providers send it last), the next
 					// delta opens a new one. Unsigned reasoning keeps
@@ -157,7 +169,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 				case ModelToolCallDelta:
 					// Progress only — the assembled call still arrives
 					// as a ModelToolCall before ModelFinish.
-					emit(ToolArgsDelta{Name: e.Name, Args: e.Args})
+					emit(ToolArgsDelta{RunID: cfg.id, Name: e.Name, Args: e.Args})
 				case ModelFinish:
 					finish = e
 					finished = true
@@ -224,7 +236,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 				})
 			}
 		default:
-			rec.Results, pending = a.execTools(ctx, cfg.id, step, calls, seq, emit, false)
+			rec.Results, pending = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, false)
 		}
 		if len(rec.Results) > 0 {
 			toolMsg := Message{Role: RoleTool}
@@ -236,7 +248,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		res.Steps = append(res.Steps, rec)
 		res.StopReason = finish.Reason
 		res.Usage = res.Usage.Add(finish.Usage)
-		emit(StepFinish{Index: step, Reason: finish.Reason, Usage: finish.Usage, Raw: finish.Raw})
+		emit(StepFinish{RunID: cfg.id, Index: step, Reason: finish.Reason, Usage: finish.Usage, Raw: finish.Raw})
 
 		if len(pending) > 0 {
 			// The approval boundary: the step's other tools have run;
@@ -247,7 +259,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			// fails with the ctx error, the parked calls riding on
 			// RunError.Result.Pending so the transcript stays resumable.
 			res.Pending = pending
-			emit(RunFinish{Usage: res.Usage, Steps: len(res.Steps), Pending: pending})
+			emit(RunFinish{RunID: cfg.id, Usage: res.Usage, Steps: len(res.Steps), Pending: snapshotPending(pending)})
 			if err := ctx.Err(); err != nil {
 				return fail(step, err)
 			}
@@ -259,11 +271,11 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			// can branch on truncation without indexing. Tool-call
 			// arguments truncated into undecodable JSON already come back
 			// as error results the model recovers from.
-			emit(RunFinish{Usage: res.Usage, Steps: len(res.Steps)})
+			emit(RunFinish{RunID: cfg.id, Usage: res.Usage, Steps: len(res.Steps)})
 			return res, nil
 		}
 		if a.stopped(res.Steps) {
-			emit(RunFinish{Usage: res.Usage, Steps: len(res.Steps)})
+			emit(RunFinish{RunID: cfg.id, Usage: res.Usage, Steps: len(res.Steps)})
 			return res, nil
 		}
 	}
@@ -279,11 +291,41 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	return fail(a.maxSteps, ErrMaxSteps)
 }
 
-// safeTap runs one tap, containing a panic: a broken observer must not
-// break a run.
+// safeTap runs one tap, containing a panic and counting it (TapPanics):
+// a broken observer must not break a run, but it must not be invisible
+// either.
 func (a *Agent) safeTap(ctx context.Context, tap func(context.Context, Event), ev Event) {
-	defer func() { _ = recover() }()
+	defer func() {
+		if recover() != nil {
+			a.tapPanics.Add(1)
+		}
+	}()
 	tap(ctx, ev)
+}
+
+// cloneRaw detaches a raw-JSON byte slice: json.RawMessage is mutable,
+// and events are snapshots, so an event's Args must not alias the
+// transcript's bytes.
+func cloneRaw(b json.RawMessage) json.RawMessage {
+	if b == nil {
+		return nil
+	}
+	return append(json.RawMessage(nil), b...)
+}
+
+// snapshotPending deep-copies the pending calls carried on RunFinish:
+// the event travels to its consumer, and its Args bytes must not alias
+// the transcript's.
+func snapshotPending(pending []ToolCallPart) []ToolCallPart {
+	if pending == nil {
+		return nil
+	}
+	out := make([]ToolCallPart, len(pending))
+	for i, c := range pending {
+		c.Args = cloneRaw(c.Args)
+		out[i] = c
+	}
+	return out
 }
 
 // stopped reports whether any StopWhen condition is met.
@@ -300,10 +342,13 @@ func (a *Agent) stopped(steps []StepRecord) bool {
 // optional Info interface; the zero ModelInfo otherwise.
 func (a *Agent) modelInfo() ModelInfo { return InfoOf(a.model) }
 
-// execTools runs one step's tool calls with bounded concurrency. Results
-// are returned in call order regardless of completion order — determinism
-// for the transcript; ToolStart/ToolFinish events carry the live interleaving.
-// A failing tool never cancels its siblings; only ctx does.
+// execTools runs one step's tool calls with bounded concurrency, all of
+// them resolved against tools — the step's snapshot: advertising showed
+// that list, so dispatch cannot name-resolve against anything fresher.
+// Results are returned in call order regardless of completion order —
+// determinism for the transcript; ToolStart/ToolFinish events carry the
+// live interleaving. A failing tool never cancels its siblings; only
+// ctx does.
 //
 // The concurrency slot is acquired here, in call order, before the tool's
 // goroutine is spawned. That is what makes "in call order" true: tools
@@ -316,7 +361,7 @@ func (a *Agent) modelInfo() ModelInfo { return InfoOf(a.model) }
 // parks with ErrApprovalRequired are returned as pending rather than as
 // results: they had a ToolStart and get no ToolFinish. approved marks
 // calls resumed under an Approve decision.
-func (a *Agent) execTools(ctx context.Context, runID string, step int, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool) (results []ToolResultPart, pending []ToolCallPart) {
+func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool) (results []ToolResultPart, pending []ToolCallPart) {
 	outcomes := make([]ToolResultPart, len(calls))
 	parked := make([]bool, len(calls))
 	sem := make(chan struct{}, a.parallelism)
@@ -334,7 +379,7 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, calls []T
 
 	var wg sync.WaitGroup
 	for i, call := range calls {
-		def, _ := a.toolByName(call.Name)
+		def, _ := findTool(tools, call.Name)
 		barrier := def != nil && def.sequential
 		if barrier {
 			// Let everything in flight finish before this call starts.
@@ -364,19 +409,20 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, calls []T
 		// ToolStart is emitted here, on the dispatching goroutine, so
 		// start events are in call order by construction.
 		ordered(func(s int64) Event {
-			return ToolStart{Seq: s, CallID: call.ID, Name: call.Name, Args: call.Args}
+			return ToolStart{RunID: runID, Seq: s, CallID: call.ID, Name: call.Name, Args: cloneRaw(call.Args)}
 		})
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
 			callCtx := withCall(ctx, Call{RunID: runID, Step: step, CallID: call.ID, Name: call.Name, Approved: approved})
-			outcomes[i], parked[i] = a.callTool(callCtx, call)
+			outcomes[i], parked[i] = a.callTool(callCtx, call, def)
 			if parked[i] {
 				return
 			}
 			ordered(func(s int64) Event {
 				return ToolFinish{
+					RunID:   runID,
 					Seq:     s,
 					CallID:  call.ID,
 					Name:    call.Name,
@@ -410,14 +456,20 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, calls []T
 // resumed calls is reported as 0: the original index is not recoverable
 // from the transcript, and there is no StepRecord for them (ADR 0007).
 // Audit lines should key on the CallID, not the step.
-func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolCallPart, seq *atomic.Int64, emit func(Event)) ([]ToolResultPart, []ToolCallPart) {
+func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolCallPart, seq *atomic.Int64, emit func(Event)) ([]ToolResultPart, []ToolCallPart, error) {
+	// Resumed calls run before any step exists, so they fetch their own
+	// snapshot — a separate consultation, like CallTool's.
+	tools, err := a.dispatchTools()
+	if err != nil {
+		return nil, nil, err
+	}
 	var approved []ToolCallPart
 	for _, c := range calls {
 		if d, ok := cfg.decisions[c.ID]; ok && d.approved {
 			approved = append(approved, c)
 		}
 	}
-	ran, pending := a.execTools(ctx, cfg.id, 0, approved, seq, emit, true)
+	ran, pending := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, true)
 	byID := make(map[string]ToolResultPart, len(ran))
 	for _, r := range ran {
 		byID[r.CallID] = r
@@ -446,7 +498,7 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 			Content: deniedResult(reason),
 		})
 	}
-	return results, pending
+	return results, pending, nil
 }
 
 // unresolvedCalls returns the tool calls of the last assistant message
@@ -552,10 +604,16 @@ const codeDenied = "DENIED"
 // run policy: an unknown name returns an error wrapping ErrNoSuchTool,
 // undecodable arguments one wrapping ErrInvalidToolInput, a
 // RequireApproval tool one wrapping ErrApprovalRequired, and handler
-// errors, middleware errors, and panics propagate. Timeouts and result
-// caps are not applied; StrictInput is, at both levels, as in the loop.
+// errors, middleware errors, and panics propagate. A tool source whose
+// snapshot carries a duplicate name returns an error wrapping
+// ErrDuplicateTool. Timeouts and result caps are not applied;
+// StrictInput is, at both levels, as in the loop.
 func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error) {
-	def, _ := a.toolByName(call.Name)
+	tools, err := a.dispatchTools()
+	if err != nil {
+		return "", err
+	}
+	def, _ := findTool(tools, call.Name)
 	strict := a.strict
 	if def != nil && def.strict {
 		strict = true
@@ -596,13 +654,14 @@ func (a *Agent) chain(def *ToolDef, strict bool) ToolCaller {
 // callTool dispatches one call under the tool's effective policy and
 // folds every failure — unknown tool, bad arguments, handler error,
 // handler or middleware panic, timeout — into an error result the model
-// can correct: a tool failure is data, not a run failure. Per-tool
-// options override the agent's defaults; the result cap is applied
-// last, over every outcome. An error wrapping ErrApprovalRequired is
-// the one non-result: the call is reported pending instead.
-func (a *Agent) callTool(ctx context.Context, call ToolCallPart) (res ToolResultPart, pending bool) {
+// can correct: a tool failure is data, not a run failure. def is the
+// call's resolution against the step's (or CallTool's) snapshot; nil
+// for an unknown name. Per-tool options override the agent's defaults;
+// the result cap is applied last, over every outcome. An error wrapping
+// ErrApprovalRequired is the one non-result: the call is reported
+// pending instead.
+func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef) (res ToolResultPart, pending bool) {
 	res = ToolResultPart{CallID: call.ID, Name: call.Name}
-	def, _ := a.toolByName(call.Name)
 	resultCap := a.resultCap
 	timeout := a.toolTimeout
 	strict := a.strict

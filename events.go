@@ -14,6 +14,14 @@ import (
 // tool_finish, step_finish, run_finish) and UnmarshalEvent restores it —
 // the same rule and the same compatibility contract as the message parts
 // (ADR 0004).
+//
+// Every event except RunStart carries RunID: concurrent runs on one
+// agent emit interleaved streams, and a per-run Seq counter is unique
+// only within its run, so RunID is what attributes an event to its run.
+//
+// Events are snapshots. Their fields — including the Args byte slices —
+// do not alias the run's transcript; a consumer may retain or write
+// into them freely.
 type Event interface {
 	isEvent()
 }
@@ -28,19 +36,22 @@ type RunStart struct {
 
 // StepStart reports that the model is being called for step Index.
 type StepStart struct {
-	Index int `json:"index"`
+	RunID string `json:"run_id"`
+	Index int    `json:"index"`
 }
 
 // TextDelta is an increment of assistant text.
 type TextDelta struct {
-	Text string `json:"text"`
+	RunID string `json:"run_id"`
+	Text  string `json:"text"`
 }
 
 // ReasoningDelta is an increment of provider reasoning, in the order the
 // model produced it relative to TextDelta. Signatures are not streamed;
 // they are on the ReasoningPart of the transcript.
 type ReasoningDelta struct {
-	Text string `json:"text"`
+	RunID string `json:"run_id"`
+	Text  string `json:"text"`
 }
 
 // ToolStart reports that a tool invocation began. Events from tools running
@@ -49,6 +60,7 @@ type ReasoningDelta struct {
 // parked by the approval boundary has a ToolStart and no ToolFinish; it
 // is listed on RunFinish.Pending instead.
 type ToolStart struct {
+	RunID  string          `json:"run_id"`
 	Seq    int64           `json:"seq"`
 	CallID string          `json:"call_id"`
 	Name   string          `json:"name"`
@@ -63,8 +75,9 @@ type ToolStart struct {
 // provider that streams fragments of several calls interleaves their
 // deltas, distinguished by name where the provider supplies one.
 type ToolArgsDelta struct {
-	Name string `json:"name"`
-	Args string `json:"args"`
+	RunID string `json:"run_id"`
+	Name  string `json:"name"`
+	Args  string `json:"args"`
 }
 
 // ToolFinish reports that a tool invocation completed, successfully or not.
@@ -72,6 +85,7 @@ type ToolArgsDelta struct {
 // set — the same value the model sees on the matching ToolResultPart, so a
 // UI can render results as they land.
 type ToolFinish struct {
+	RunID   string `json:"run_id"`
 	Seq     int64  `json:"seq"`
 	CallID  string `json:"call_id"`
 	Name    string `json:"name"`
@@ -83,6 +97,7 @@ type ToolFinish struct {
 // provider's own stop reason when Reason was approximated (see
 // ModelFinish.Raw); empty when the mapping was exact.
 type StepFinish struct {
+	RunID  string     `json:"run_id"`
 	Index  int        `json:"index"`
 	Reason StopReason `json:"reason"`
 	Usage  Usage      `json:"usage"`
@@ -92,8 +107,9 @@ type StepFinish struct {
 // RunFinish is always the final event of a successful run and carries the
 // run's total usage and step count.
 type RunFinish struct {
-	Usage Usage `json:"usage"`
-	Steps int   `json:"steps"`
+	RunID string `json:"run_id"`
+	Usage Usage  `json:"usage"`
+	Steps int    `json:"steps"`
 	// Pending mirrors RunResult.Pending: calls the run ended on without
 	// executing, awaiting Approve/Deny. Such a call had its ToolStart
 	// and no ToolFinish.

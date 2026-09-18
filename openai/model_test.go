@@ -174,3 +174,23 @@ func TestInfo(t *testing.T) {
 		t.Errorf("Info() = %+v, want provider openai even under BaseURL", got)
 	}
 }
+
+// Typed map values reach the wire: schemaMap (and convertTool behind it)
+// carries AdditionalProperties instead of degrading maps to "some
+// object" (Fix 10's fidelity gap, closed at the adapter seam too).
+func TestSchemaMapCarriesAdditionalProperties(t *testing.T) {
+	type in struct {
+		Scores map[string]int `json:"scores"`
+	}
+	tool := weft.Tool("maps", "", func(_ context.Context, _ in) (string, error) {
+		return "ok", nil
+	})
+	got, err := json.Marshal(convertTool(tool).Function.Parameters)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"properties":{"scores":{"additionalProperties":{"type":"integer"},"type":"object"}},"required":["scores"],"type":"object"}`
+	if string(got) != want {
+		t.Errorf("parameters:\n got  %s\n want %s", got, want)
+	}
+}

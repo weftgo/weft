@@ -166,6 +166,20 @@ func TestSchemaConversion(t *testing.T) {
 	}
 }
 
+// Gemini's schema subset cannot express additionalProperties, so typed
+// map values degrade to a plain object on this adapter (documented on
+// genaiSchema). This pins the deliberate drop: if the SDK ever grows
+// the field, wire it up and delete this test.
+func TestSchemaConversionDropsAdditionalProperties(t *testing.T) {
+	got := genaiSchema(&weft.Schema{
+		Type:                 "object",
+		AdditionalProperties: &weft.Schema{Type: "integer"},
+	})
+	if got.Type != genai.TypeObject {
+		t.Errorf("type = %v, want OBJECT", got.Type)
+	}
+}
+
 func TestMapFinish(t *testing.T) {
 	cases := []struct {
 		reason   genai.FinishReason

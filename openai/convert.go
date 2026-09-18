@@ -209,6 +209,9 @@ func schemaMap(s *weft.Schema) map[string]any {
 	if s.Items != nil {
 		m["items"] = schemaMap(s.Items)
 	}
+	if s.AdditionalProperties != nil {
+		m["additionalProperties"] = schemaMap(s.AdditionalProperties)
+	}
 	if s.Properties != nil {
 		props := make(map[string]any, len(s.Properties))
 		for k, v := range s.Properties {

@@ -252,3 +252,24 @@ func TestThinkingParams(t *testing.T) {
 		})
 	}
 }
+
+// Typed map values reach the wire: the SDK's ToolInputSchemaParam has no
+// additionalProperties field, so convertTool sends it through
+// ExtraFields — map[string]int stays an object of integers instead of
+// "some object".
+func TestConvertToolCarriesAdditionalProperties(t *testing.T) {
+	type in struct {
+		Scores map[string]int `json:"scores"`
+	}
+	tool := weft.Tool("maps", "", func(_ context.Context, _ in) (string, error) {
+		return "ok", nil
+	})
+	got, err := json.Marshal(convertTool(tool))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"input_schema":{"properties":{"scores":{"additionalProperties":{"type":"integer"},"type":"object"}},"required":["scores"],"type":"object"},"name":"maps"}`
+	if string(got) != want {
+		t.Errorf("tool:\n got  %s\n want %s", got, want)
+	}
+}

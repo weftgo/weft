@@ -482,3 +482,17 @@ func TestMapErrorsPassesLoopErrorsThrough(t *testing.T) {
 		t.Errorf("approval through MapErrors: pending = %v", res.Pending)
 	}
 }
+
+// Every model middleware in the reference set forwards the inner
+// model's identity (the Info convention, checked).
+func TestMiddlewaresConformInfo(t *testing.T) {
+	for _, m := range []weft.ModelMiddleware{
+		mw.Retry(mw.MaxRetries(2)),
+		mw.Fallback(wefttest.Script()),
+		mw.FallbackWhen(func(error) bool { return true }, wefttest.Script()),
+		mw.Log(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))),
+		mw.RepairJSON(),
+	} {
+		wefttest.ConformInfoT(t, m)
+	}
+}

@@ -15,8 +15,14 @@ type Schema struct {
 	Format      string             `json:"format,omitempty"`
 	Description string             `json:"description,omitempty"`
 	Properties  map[string]*Schema `json:"properties,omitempty"`
-	Required    []string           `json:"required,omitempty"`
-	Items       *Schema            `json:"items,omitempty"`
+	// AdditionalProperties types a map's values (JSON Schema draft
+	// 2020-12), so map[string]int stops being "some object". The
+	// boolean false form is not expressible: reflection always has a
+	// value type, and hand-written RawTool schemas that need to lock
+	// properties down must say so in Description.
+	AdditionalProperties *Schema  `json:"additionalProperties,omitempty"`
+	Required             []string `json:"required,omitempty"`
+	Items                *Schema  `json:"items,omitempty"`
 }
 
 // schemaFor derives the input schema for a Go type.
@@ -28,7 +34,8 @@ type Schema struct {
 //	integers                → integer
 //	floats                  → number
 //	slice, array            → array with Items
-//	map                     → object
+//	map                     → object with AdditionalProperties typing the
+//	                         values (map[string]int → object of integers)
 //	struct, time.Time       → object (time.Time → string with format date-time)
 //	pointer                 → the pointed-to schema; the field becomes optional
 //
@@ -39,6 +46,9 @@ type Schema struct {
 //
 // Known gaps, deliberate for now: union types (oneOf/anyOf) do not exist in
 // Go's type system, and interface fields degrade to an unconstrained value.
+// A time.Duration field is an integer counting nanoseconds — consistent
+// with encoding/json round trips, but a foot-gun for models; prefer a
+// string with a provider-appropriate format for model-facing durations.
 // A recursive struct (a tree) is cut at the point of recursion: the nested
 // occurrence becomes an unconstrained value instead of an infinite schema.
 // An optional go:generate step may recover stricter schemas later.
@@ -77,7 +87,7 @@ func schemaOf(t reflect.Type, visiting map[reflect.Type]bool) *Schema {
 	case reflect.Array:
 		return &Schema{Type: "array", Items: schemaOf(t.Elem(), visiting)}
 	case reflect.Map:
-		return &Schema{Type: "object"}
+		return &Schema{Type: "object", AdditionalProperties: schemaOf(t.Elem(), visiting)}
 	case reflect.Struct:
 		if visiting[t] {
 			return &Schema{} // recursion: unconstrained at this depth

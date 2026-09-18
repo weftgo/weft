@@ -9,6 +9,7 @@ import (
 	"io"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,11 @@ import (
 // ToolDef is a named, schema-described tool the model can call. Build one
 // with the generic Tool constructor; the agent loop (and any manual
 // dispatcher) executes it through Invoke.
+//
+// A ToolDef is mutable until it is registered with New and frozen
+// thereafter: New keeps a deep copy, so mutating the value that was
+// passed in — or a copy returned by Agent.Tools — never reaches the
+// agent or a running run.
 type ToolDef struct {
 	Name         string  `json:"name"`
 	Description  string  `json:"description,omitempty"`
@@ -286,8 +292,41 @@ func (t *ToolDef) Invoke(ctx context.Context, args json.RawMessage) (string, err
 	return t.invoke(ctx, args, t.strict)
 }
 
+// clone returns a deep copy of the definition: the struct, its
+// middleware slice, and the schema trees. The invoke closure is shared,
+// which is safe — it is a value that captures only the handler and the
+// tool's name.
+func (t *ToolDef) clone() *ToolDef {
+	c := *t
+	c.InputSchema = cloneSchema(t.InputSchema)
+	c.OutputSchema = cloneSchema(t.OutputSchema)
+	c.mw = slices.Clone(t.mw)
+	return &c
+}
+
+// cloneSchema deep-copies a schema tree: the node, its Required list,
+// its Items and AdditionalProperties subtrees, and its Properties map.
+func cloneSchema(s *Schema) *Schema {
+	if s == nil {
+		return nil
+	}
+	c := *s
+	c.Required = slices.Clone(s.Required)
+	c.Items = cloneSchema(s.Items)
+	c.AdditionalProperties = cloneSchema(s.AdditionalProperties)
+	if s.Properties != nil {
+		c.Properties = make(map[string]*Schema, len(s.Properties))
+		for k, v := range s.Properties {
+			c.Properties[k] = cloneSchema(v)
+		}
+	}
+	return &c
+}
+
 // apply registers the tool as a New option. Duplicate names panic at
-// construction time — fail loud, fail early.
+// construction time — fail loud, fail early. The agent stores a deep
+// copy, freezing the definition: later mutations of the caller's value
+// cannot reach it.
 func (t *ToolDef) apply(a *Agent) {
 	if t == nil {
 		return
@@ -295,8 +334,9 @@ func (t *ToolDef) apply(a *Agent) {
 	if _, dup := a.tools[t.Name]; dup {
 		panic(fmt.Sprintf("weft: duplicate tool name %q", t.Name))
 	}
-	a.tools[t.Name] = t
-	a.toolList = append(a.toolList, t)
+	def := t.clone()
+	a.tools[def.Name] = def
+	a.toolList = append(a.toolList, def)
 }
 
 // Timeout bounds one tool call. On a tool it is that tool's deadline —

@@ -4,6 +4,66 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## Unreleased (2026-09-18)
+
+### Changed — run & event semantics (read before upgrading)
+
+- **Events carry `RunID`.** Every event except `RunStart` (whose `id`
+  is the run's) carries `run_id` on the wire, so taps and stream
+  consumers can attribute events under concurrent runs; the per-run
+  `Seq` counter was already unique only within its run. Old recordings
+  without the field decode with an empty `RunID`.
+- **Events are snapshots.** `ToolStart.Args` and `RunFinish.Pending`
+  no longer alias the transcript's byte slices: writing into a
+  received event cannot corrupt the run. The copies ride tool-event
+  frequency, not delta frequency — no benchmark movement.
+- **A step consults its `ToolSource` exactly once.** Advertising, the
+  sequential barrier, and dispatch resolve against one per-step
+  snapshot, so a source that changes mid-step can no longer produce an
+  advertised-then-`NO_SUCH_TOOL` failure or a barrier that disagrees
+  with the executed def. A tool registered mid-step becomes callable
+  on the next step (the per-step refresh `TestToolSource` always
+  modelled). A snapshot with a duplicate name now fails the run with
+  the new `ErrDuplicateTool` instead of silently resolving
+  first-wins; `Agent.CallTool` reports the same condition as an error.
+- **Registered tools are frozen at `New`.** The agent keeps a deep
+  copy; mutating the value you passed in (fields or schema trees)
+  after construction no longer reaches dispatch, advertisement, or a
+  running run. `Agent.Tools` returns deep copies too. The "immutable,
+  reusable, concurrent" contract now holds by construction.
+- **`ModelRequest` hands adapters copies.** `Messages` and `Tools`
+  are fresh slice copies per request; a hostile or careless `Model`
+  can no longer corrupt the transcript or the agent's tool list at
+  slice level. `wefttest`'s mock already cloned both — loop, contract,
+  and test double now agree.
+
+### Added
+
+- `Run.Close` releases an abandoned run's resources (idempotent; a
+  run you will consume needs no Close — Events and Wait release
+  everything themselves).
+- `Agent.TapPanics` counts contained tap panics, so a dead observer
+  is no longer invisible.
+- `Schema.AdditionalProperties` types map values (`map[string]int` →
+  an object of integers) and rides the wire in the manifest and the
+  OpenAI and Anthropic adapters. The Google adapter drops it: Gemini's
+  schema subset (and the genai SDK's `Schema`) has no
+  `additionalProperties` field. Wire output for schemas without maps is
+  byte-identical.
+- `wefttest.ConformInfo` / `ConformInfoT` check that model middleware
+  forwards the inner model's identity (the Info convention, checked).
+- `ExampleTap_async`: the supported pattern for slow observers — hand
+  each event to a queue inside the tap, drain on your own goroutine.
+- `Run.Events` and `Tap` docs now state the consumer-speed coupling:
+  tool events are emitted under the step's ordering lock, so a slow
+  consumer gates the start of subsequent tools.
+
+### Fixed
+
+- `Repair`'s purity is pinned: the input is never mutated
+  (fuzz-checked byte-for-byte), and the synthesis append no longer
+  relies on whose backing array the kept tool message uses.
+
 ## Unreleased (2026-09-14)
 
 ### Changed — model-visible contracts (read before upgrading)

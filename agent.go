@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -179,11 +180,15 @@ func (o tapOption) apply(a *Agent) {
 // including runs made with Generate, synchronously and in emission order
 // on the emitting goroutine. It must be fast and must not block: it runs
 // under the event-ordering lock, so a slow tap delays every tool event
-// of its step and blocks the emitting tool goroutines. Taps run in
-// registration order; a panic in one is recovered and dropped, so a
-// broken observer cannot break a run. Taps observe and cannot change
-// anything — behaviour attaches at the two middleware seams. ctx is the
-// run's context.
+// of its step and blocks the emitting tool goroutines — the same
+// consumer-speed coupling Run.Events documents. Slow observation (a
+// database write, a network sink) must not happen inside the tap: hand
+// each event to a queue and drain it on your own goroutine;
+// ExampleTap_async is the tested pattern. Taps run in registration
+// order; a panic in one is recovered, counted (see TapPanics), and
+// dropped, so a broken observer cannot break a run. Taps observe and
+// cannot change anything — behaviour attaches at the two middleware
+// seams. ctx is the run's context.
 func Tap(fn func(ctx context.Context, ev Event)) Option { return tapOption{fn} }
 
 // MaxResultBytes sets the maximum size of one tool result's text, in
@@ -264,7 +269,8 @@ func (s stepCountIs) String() string { return fmt.Sprintf("step_count_is:%d", s.
 
 // Agent is an immutable, reusable value: a model, a system instruction, a
 // tool set, and an execution policy. Build it once with New; run it many
-// times, concurrently if you like — runs share no state.
+// times, concurrently if you like — runs share no state, and the
+// registered tool set is frozen at construction (see ToolDef).
 type Agent struct {
 	model       Model
 	system      string
@@ -282,6 +288,9 @@ type Agent struct {
 	thinking    ThinkingConfig
 	modelMW     []ModelMiddleware
 	toolMW      []ToolMiddleware
+	// tapPanics counts tap invocations that panicked and were contained;
+	// read with TapPanics.
+	tapPanics atomic.Int64
 }
 
 // New builds an Agent. Nil models panic — including typed nils such as
@@ -329,14 +338,18 @@ func isNilModel(m Model) bool {
 }
 
 // ToolSource replaces the tool set the loop advertises and dispatches
-// against with the given function's return value, fetched fresh at each
-// step — the seam for registries that change while the agent runs
-// (plugins installed mid-run, MCP servers polled per step). The Agent
-// stays immutable: the source is a value; synchronization and
-// uniqueness of names belong to the source's owner. The function runs
-// on the loop goroutine once per step for advertising and once per
-// dispatched call; on duplicate names in the returned list the first
-// entry wins. A nil function (the default) keeps the static
+// against with the given function's return value, fetched fresh exactly
+// once per step (and once per manual Agent.CallTool): the step's
+// advertisement and its dispatch both resolve against that one
+// snapshot, so what the model was shown is exactly what runs. The seam
+// is for registries that change while the agent runs (plugins
+// installed mid-run, MCP servers polled per step); a tool registered
+// mid-step becomes callable on the next step's fetch. The Agent stays
+// immutable: the source is a value; synchronization and freshness of
+// the list belong to the source's owner. A snapshot with a duplicate
+// name fails the run with ErrDuplicateTool (the runtime analogue of
+// New's duplicate-name panic) rather than silently dropping the second
+// tool. A nil function (the default) keeps the static
 // construction-time list — Tool/option registration is then the only
 // source of tools, byte-identical to an agent without a source.
 // Manifest and Agent.Tools still report the static construction-time
@@ -356,15 +369,32 @@ func (a *Agent) effectiveTools() []*ToolDef {
 	return a.toolSource()
 }
 
-// toolByName resolves a dispatch target: statically registered first
-// when no source is set (the map, byte-identical to before ToolSource),
-// otherwise a scan of the source's current list (first match wins).
-func (a *Agent) toolByName(name string) (*ToolDef, bool) {
+// dispatchTools fetches and validates the snapshot one consultation
+// resolves against: the step's snapshot inside the loop, a fresh fetch
+// per manual Agent.CallTool. Static agents skip validation — New
+// already panicked on duplicates — so the check costs nothing there.
+func (a *Agent) dispatchTools() ([]*ToolDef, error) {
+	tools := a.effectiveTools()
 	if a.toolSource == nil {
-		def, ok := a.tools[name]
-		return def, ok
+		return tools, nil
 	}
-	for _, t := range a.toolSource() {
+	seen := make(map[string]bool, len(tools))
+	for _, t := range tools {
+		if t == nil {
+			continue
+		}
+		if seen[t.Name] {
+			return nil, fmt.Errorf("%w: %q", ErrDuplicateTool, t.Name)
+		}
+		seen[t.Name] = true
+	}
+	return tools, nil
+}
+
+// findTool resolves a name against a fetched snapshot; first match
+// wins, the rule registration order already implies for static lists.
+func findTool(tools []*ToolDef, name string) (*ToolDef, bool) {
+	for _, t := range tools {
 		if t != nil && t.Name == name {
 			return t, true
 		}
@@ -372,5 +402,18 @@ func (a *Agent) toolByName(name string) (*ToolDef, bool) {
 	return nil, false
 }
 
-// Tools returns the registered tool definitions in registration order.
-func (a *Agent) Tools() []*ToolDef { return slices.Clone(a.toolList) }
+// Tools returns copies of the registered tool definitions, in
+// registration order. Mutating them — fields or schema trees — does not
+// affect the agent; the registered set is frozen at New.
+func (a *Agent) Tools() []*ToolDef {
+	out := make([]*ToolDef, len(a.toolList))
+	for i, t := range a.toolList {
+		out[i] = t.clone()
+	}
+	return out
+}
+
+// TapPanics reports how many tap invocations have panicked and been
+// contained since construction. A rising counter means an observer is
+// broken; runs are unaffected by design.
+func (a *Agent) TapPanics() int64 { return a.tapPanics.Load() }

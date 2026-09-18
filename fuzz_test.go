@@ -54,7 +54,17 @@ func FuzzRepair(f *testing.F) {
 		if err := json.Unmarshal([]byte(data), &msgs); err != nil {
 			return
 		}
+		// Purity pin: the input must be byte-identical after Repair —
+		// the promise on Repair's doc, checked for every fuzz input.
+		before, err := json.Marshal(msgs)
+		if err != nil {
+			return
+		}
 		out := weft.Repair(msgs)
+		after, _ := json.Marshal(msgs)
+		if string(before) != string(after) {
+			t.Fatalf("Repair mutated its input:\n was %s\n now %s", before, after)
+		}
 		once, err := json.Marshal(out)
 		if err != nil {
 			t.Fatalf("repaired transcript does not re-encode: %v", err)

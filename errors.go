@@ -77,6 +77,13 @@ var (
 	// for a pending call that was denied (Deny, or no decision on
 	// resume). It is a tool error — data — never a run error.
 	ErrApprovalDenied = errors.New("weft: tool call denied")
+
+	// ErrDuplicateTool is a run error raised when a step's tool
+	// snapshot contains a name twice — the runtime analogue of New's
+	// duplicate-name panic. Fix the tool source; the run fails rather
+	// than silently dropping the second tool. Agent.CallTool reports
+	// the same condition as an error.
+	ErrDuplicateTool = errors.New("weft: duplicate tool name from tool source")
 )
 
 // ToolError is a tool failure with a stable code the model can branch

@@ -10,9 +10,11 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -1526,23 +1528,24 @@ func TestEventJSONRoundTrip(t *testing.T) {
 			`{"type":"run_start","id":"r1","model":{"provider":"openai","name":"gpt-5-mini"},"agent":"support-bot"}`},
 		{weft.RunStart{ID: "r2"},
 			`{"type":"run_start","id":"r2","model":{"provider":"","name":""}}`},
-		{weft.StepStart{Index: 1}, `{"type":"step_start","index":1}`},
-		{weft.TextDelta{Text: "hi"}, `{"type":"text_delta","text":"hi"}`},
-		{weft.ReasoningDelta{Text: "hm"}, `{"type":"reasoning_delta","text":"hm"}`},
-		{weft.ToolArgsDelta{Name: "write_file", Args: `{"content":"x`},
-			`{"type":"tool_args_delta","name":"write_file","args":"{\"content\":\"x"}`},
-		{weft.ToolStart{Seq: 5, CallID: "c1", Name: "echo", Args: json.RawMessage(`{"m":"x"}`)},
-			`{"type":"tool_start","seq":5,"call_id":"c1","name":"echo","args":{"m":"x"}}`},
-		{weft.ToolStart{Seq: 7, CallID: "c2", Name: "t"},
-			`{"type":"tool_start","seq":7,"call_id":"c2","name":"t","args":null}`},
-		{weft.ToolFinish{Seq: 6, CallID: "c1", Name: "echo", Content: "ok", IsError: false},
-			`{"type":"tool_finish","seq":6,"call_id":"c1","name":"echo","content":"ok","is_error":false}`},
-		{weft.StepFinish{Index: 1, Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
-			`{"type":"step_finish","index":1,"reason":"tool_calls","usage":{"input_tokens":10,"output_tokens":5}}`},
-		{weft.StepFinish{Index: 2, Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 1, OutputTokens: 1}, Raw: "refusal"},
-			`{"type":"step_finish","index":2,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1},"raw":"refusal"}`},
-		{weft.RunFinish{Usage: weft.Usage{InputTokens: 20, OutputTokens: 10}, Steps: 2},
-			`{"type":"run_finish","usage":{"input_tokens":20,"output_tokens":10},"steps":2}`},
+		{weft.StepStart{RunID: "r1", Index: 1}, `{"type":"step_start","run_id":"r1","index":1}`},
+		{weft.StepStart{Index: 2}, `{"type":"step_start","run_id":"","index":2}`},
+		{weft.TextDelta{RunID: "r1", Text: "hi"}, `{"type":"text_delta","run_id":"r1","text":"hi"}`},
+		{weft.ReasoningDelta{RunID: "r1", Text: "hm"}, `{"type":"reasoning_delta","run_id":"r1","text":"hm"}`},
+		{weft.ToolArgsDelta{RunID: "r1", Name: "write_file", Args: `{"content":"x`},
+			`{"type":"tool_args_delta","run_id":"r1","name":"write_file","args":"{\"content\":\"x"}`},
+		{weft.ToolStart{RunID: "r1", Seq: 5, CallID: "c1", Name: "echo", Args: json.RawMessage(`{"m":"x"}`)},
+			`{"type":"tool_start","run_id":"r1","seq":5,"call_id":"c1","name":"echo","args":{"m":"x"}}`},
+		{weft.ToolStart{RunID: "r1", Seq: 7, CallID: "c2", Name: "t"},
+			`{"type":"tool_start","run_id":"r1","seq":7,"call_id":"c2","name":"t","args":null}`},
+		{weft.ToolFinish{RunID: "r1", Seq: 6, CallID: "c1", Name: "echo", Content: "ok", IsError: false},
+			`{"type":"tool_finish","run_id":"r1","seq":6,"call_id":"c1","name":"echo","content":"ok","is_error":false}`},
+		{weft.StepFinish{RunID: "r1", Index: 1, Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+			`{"type":"step_finish","run_id":"r1","index":1,"reason":"tool_calls","usage":{"input_tokens":10,"output_tokens":5}}`},
+		{weft.StepFinish{RunID: "r1", Index: 2, Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 1, OutputTokens: 1}, Raw: "refusal"},
+			`{"type":"step_finish","run_id":"r1","index":2,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1},"raw":"refusal"}`},
+		{weft.RunFinish{RunID: "r1", Usage: weft.Usage{InputTokens: 20, OutputTokens: 10}, Steps: 2},
+			`{"type":"run_finish","run_id":"r1","usage":{"input_tokens":20,"output_tokens":10},"steps":2}`},
 	}
 	for i, tc := range cases {
 		b, err := json.Marshal(tc.ev)
@@ -1848,5 +1851,541 @@ func TestToolSource(t *testing.T) {
 		if td.Name == "late_tool" {
 			t.Error("Agent.Tools must stay static")
 		}
+	}
+}
+
+// A registered tool is frozen: New keeps a deep copy, so mutating the
+// caller's value afterwards — name, description, a schema leaf — never
+// reaches dispatch, advertisement, or a running run (Fix 1).
+func TestToolDefFrozenAtRegistration(t *testing.T) {
+	def := weft.Tool("echo", "Echo the query.",
+		func(_ context.Context, in struct {
+			Q string `json:"q" jsonschema:"the query"`
+		}) (string, error) {
+			return "echo: " + in.Q, nil
+		})
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"q":"hi"}`}),
+		wefttest.Say("done"),
+	), def)
+
+	def.Name = "renamed"
+	def.Description = "hacked"
+	def.InputSchema.Properties["q"].Type = "number"
+
+	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := res.Steps[0].Results[0]; r.IsError || r.Content != "echo: hi" {
+		t.Errorf("dispatch result = %+v; post-New mutation must not reach it", r)
+	}
+	tools := agt.Tools()
+	if len(tools) != 1 || tools[0].Name != "echo" || tools[0].Description != "Echo the query." {
+		t.Fatalf("advertised tool = %+v, want the registration-time echo", tools[0])
+	}
+	if got := tools[0].InputSchema.Properties["q"].Type; got != "string" {
+		t.Errorf("schema leaf = %q, want string (frozen at New)", got)
+	}
+}
+
+// Agent.Tools returns deep copies: mutating them (fields and schema
+// trees alike) leaves the agent untouched (Fix 1).
+func TestToolsReturnsCopies(t *testing.T) {
+	def := weft.Tool("echo", "d", func(_ context.Context, in struct {
+		Q string `json:"q"`
+	}) (string, error) {
+		return in.Q, nil
+	})
+	agt := weft.New(wefttest.Script(wefttest.Say("ok")), def)
+
+	copies := agt.Tools()
+	copies[0].Name = "renamed"
+	copies[0].Description = "hacked"
+	copies[0].InputSchema.Properties["q"].Type = "number"
+
+	again := agt.Tools()
+	if again[0].Name != "echo" || again[0].Description != "d" ||
+		again[0].InputSchema.Properties["q"].Type != "string" {
+		t.Errorf("mutating Tools() reached the agent: %+v", again[0])
+	}
+}
+
+// Concurrent runs with a caller mutating its own def pointer stay
+// race-clean: the agent's frozen copy shares no memory with it. Under
+// -race this is a tripwire for removing the registration-time clone.
+func TestCallerMutationDuringRunIsRaceClean(t *testing.T) {
+	def := weft.Tool("echo", "d", func(_ context.Context, in struct {
+		Q string `json:"q"`
+	}) (string, error) {
+		return in.Q, nil
+	})
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"q":"x"}`}),
+		wefttest.Say("done"),
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"q":"x"}`}),
+		wefttest.Say("done"),
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"q":"x"}`}),
+		wefttest.Say("done"),
+	), def)
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			def.Description = fmt.Sprintf("spin %d", i)
+			def.InputSchema.Properties["q"].Description = fmt.Sprintf("spin %d", i)
+		}
+	}()
+	for i := 0; i < 3; i++ {
+		if _, err := agt.Generate(context.Background(), weft.Prompt("go")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(stop)
+	<-done
+}
+
+// A step consults its ToolSource exactly once: advertising and dispatch
+// resolve against the same snapshot, so a source that drops a tool
+// mid-run cannot produce the advertised-then-NO_SUCH_TOOL failure, and
+// a source that allocates is not hammered per call (Fix 5).
+func TestToolSourceSnapshotConsistency(t *testing.T) {
+	var fetches atomic.Int64
+	echo := weft.Tool("echo", "", func(_ context.Context, in struct {
+		Q string `json:"q"`
+	}) (string, error) {
+		return "ok:" + in.Q, nil
+	})
+	agt := weft.New(
+		wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"q":"hi"}`}),
+			wefttest.Say("done"),
+		),
+		weft.ToolSource(func() []*weft.ToolDef {
+			if fetches.Add(1) > 1 {
+				return nil // the registry drops echo after step 0
+			}
+			return []*weft.ToolDef{echo}
+		}),
+	)
+	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := res.Steps[0].Results[0]; r.IsError || r.Content != "ok:hi" {
+		t.Errorf("result = %+v; dispatch must resolve against the step's snapshot, not a refetch", r)
+	}
+	if got := fetches.Load(); got != 2 {
+		t.Errorf("source consulted %d times, want exactly once per step (2 steps)", got)
+	}
+}
+
+// The sequential barrier decision matches the executed def: a source
+// whose sequential flag flips between fetches cannot make the barrier
+// check and the execution disagree (Fix 5).
+func TestToolSourceSequentialBarrierMatchesSnapshot(t *testing.T) {
+	var fetches atomic.Int64
+	slow := weft.Tool("slow", "", func(_ context.Context, _ struct{}) (string, error) {
+		time.Sleep(10 * time.Millisecond) // outlast the sibling's dispatch
+		return "s", nil
+	})
+	lonely := func(seq bool) *weft.ToolDef {
+		opts := []weft.ToolOption{}
+		if seq {
+			opts = append(opts, weft.Sequential())
+		}
+		return weft.Tool("lonely", "", func(_ context.Context, _ struct{}) (string, error) {
+			return "l", nil
+		}, opts...)
+	}
+	agt := weft.New(
+		wefttest.Script(
+			wefttest.ToolCalls(
+				wefttest.Call{Name: "slow"},
+				wefttest.Call{Name: "lonely"},
+			),
+			wefttest.Say("done"),
+		),
+		weft.ToolSource(func() []*weft.ToolDef {
+			if fetches.Add(1) == 1 {
+				return []*weft.ToolDef{slow, lonely(true)}
+			}
+			return []*weft.ToolDef{slow, lonely(false)}
+		}),
+	)
+	var order []string
+	for ev, err := range agt.Stream(context.Background(), weft.Prompt("go")).Events() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch e := ev.(type) {
+		case weft.ToolStart:
+			order = append(order, ">"+e.Name)
+		case weft.ToolFinish:
+			order = append(order, "<"+e.Name)
+		}
+	}
+	want := []string{">slow", "<slow", ">lonely", "<lonely"}
+	if !slices.Equal(order, want) {
+		t.Errorf("event order = %v, want %v (barrier must match the snapshot's sequential flag)", order, want)
+	}
+}
+
+// A ToolSource snapshot with a duplicate name fails the run loudly —
+// the runtime analogue of New's duplicate-name panic — instead of
+// silently resolving first-wins (Fix 9).
+func TestToolSourceDuplicateFailsRun(t *testing.T) {
+	dup := func(tag string) *weft.ToolDef {
+		return weft.Tool("dup", tag, func(_ context.Context, _ struct{}) (string, error) {
+			return tag, nil
+		})
+	}
+	agt := weft.New(
+		wefttest.Script(wefttest.Say("never reached")),
+		weft.ToolSource(func() []*weft.ToolDef {
+			return []*weft.ToolDef{dup("a"), dup("b")}
+		}),
+	)
+	_, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if !errors.Is(err, weft.ErrDuplicateTool) {
+		t.Errorf("run error = %v, want ErrDuplicateTool", err)
+	}
+	if _, err := agt.CallTool(context.Background(), weft.ToolCallPart{Name: "dup"}); !errors.Is(err, weft.ErrDuplicateTool) {
+		t.Errorf("CallTool error = %v, want ErrDuplicateTool", err)
+	}
+}
+
+// hostileModel tries to corrupt the run through the request: appending
+// to Messages and Tools, reassigning tool elements. The loop hands each
+// request fresh slice copies, so none of it reaches the run, the
+// transcript, or the agent (Fix 2).
+type hostileModel struct{ inner weft.Model }
+
+func (h hostileModel) Info() weft.ModelInfo { return weft.InfoOf(h.inner) }
+
+func (h hostileModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	req.Messages = append(req.Messages, weft.User("injected"))
+	req.Tools = append(req.Tools, nil)
+	req.Tools[0] = nil
+	return h.inner.Stream(ctx, req)
+}
+
+func TestModelRequestCopiesDefendTheRun(t *testing.T) {
+	echo := weft.Tool("echo", "", func(_ context.Context, in struct {
+		Q string `json:"q"`
+	}) (string, error) {
+		return in.Q, nil
+	})
+	agt := weft.New(hostileModel{wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"q":"hi"}`}),
+		wefttest.Say("done"),
+	)}, echo)
+	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range res.Messages {
+		if m.Role == weft.RoleUser && m.Text() == "injected" {
+			t.Error("hostile model injected a message into the run transcript")
+		}
+	}
+	if r := res.Steps[0].Results[0]; r.IsError || r.Content != "hi" {
+		t.Errorf("result = %+v; tool-list sabotage must not reach dispatch", r)
+	}
+	if tools := agt.Tools(); len(tools) != 1 || tools[0].Name != "echo" {
+		t.Errorf("agent tool list = %+v; sabotage must not reach the agent", tools)
+	}
+}
+
+// stepModel is stateless and thread-safe: the first call of any run asks
+// for a tool, every later one answers. Run-scoped behaviour from request
+// shape alone, so one Model can serve concurrent runs on one agent.
+type stepModel struct{}
+
+func (stepModel) Info() weft.ModelInfo { return weft.ModelInfo{Provider: "wefttest", Name: "step"} }
+
+func (stepModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	answered := false
+	for _, m := range req.Messages {
+		if m.Role == weft.RoleAssistant {
+			answered = true
+		}
+	}
+	return func(yield func(weft.ModelEvent, error) bool) {
+		if answered {
+			yield(weft.ModelTextDelta{Text: "done"}, nil)
+			yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+			return
+		}
+		yield(weft.ModelToolCall{ID: "c1", Name: "ping", Args: json.RawMessage(`{}`)}, nil)
+		yield(weft.ModelFinish{Reason: weft.StopToolCalls}, nil)
+	}
+}
+
+func eventRunID(ev weft.Event) string {
+	switch e := ev.(type) {
+	case weft.RunStart:
+		return e.ID
+	case weft.StepStart:
+		return e.RunID
+	case weft.TextDelta:
+		return e.RunID
+	case weft.ReasoningDelta:
+		return e.RunID
+	case weft.ToolArgsDelta:
+		return e.RunID
+	case weft.ToolStart:
+		return e.RunID
+	case weft.ToolFinish:
+		return e.RunID
+	case weft.StepFinish:
+		return e.RunID
+	case weft.RunFinish:
+		return e.RunID
+	}
+	return "?"
+}
+
+// Every event carries its run's id, so a tap watching concurrent runs on
+// one agent can attribute each event — per-run Seq counters are unique
+// only within their run (Fix 6).
+func TestEventsCarryRunIDUnderConcurrency(t *testing.T) {
+	ping := weft.Tool("ping", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "pong", nil
+	})
+	var mu sync.Mutex
+	buckets := map[string][]weft.Event{}
+	agt := weft.New(stepModel{}, ping,
+		weft.Tap(func(_ context.Context, ev weft.Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			buckets[eventRunID(ev)] = append(buckets[eventRunID(ev)], ev)
+		}),
+	)
+	var wg sync.WaitGroup
+	for _, id := range []string{"r1", "r2"} {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			if _, err := agt.Generate(context.Background(), weft.Prompt("go"), weft.RunID(id)); err != nil {
+				t.Error(err)
+			}
+		}(id)
+	}
+	wg.Wait()
+
+	for _, id := range []string{"r1", "r2"} {
+		evs := buckets[id]
+		if len(evs) == 0 {
+			t.Fatalf("no events attributed to %s", id)
+		}
+		if _, ok := evs[0].(weft.RunStart); !ok {
+			t.Errorf("%s: first event is %T, want RunStart", id, evs[0])
+		}
+		if _, ok := evs[len(evs)-1].(weft.RunFinish); !ok {
+			t.Errorf("%s: last event is %T, want RunFinish", id, evs[len(evs)-1])
+		}
+		var seqs []int64
+		for _, ev := range evs {
+			if got := eventRunID(ev); got != id {
+				t.Errorf("%s: event %T attributed to %q", id, ev, got)
+			}
+			switch e := ev.(type) {
+			case weft.ToolStart:
+				seqs = append(seqs, e.Seq)
+			case weft.ToolFinish:
+				seqs = append(seqs, e.Seq)
+			}
+		}
+		if !slices.Equal(seqs, []int64{1, 2}) {
+			t.Errorf("%s: tool event seqs = %v, want [1 2] within the run", id, seqs)
+		}
+	}
+
+	// Legacy recordings without run_id still decode (RunID is additive).
+	ev, err := weft.UnmarshalEvent([]byte(`{"type":"step_start","index":3}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ss := ev.(weft.StepStart); ss.Index != 3 || ss.RunID != "" {
+		t.Errorf("legacy step_start = %+v, want index 3 and empty RunID", ss)
+	}
+}
+
+// Events are snapshots: writing into a received ToolStart's Args must
+// not corrupt the transcript the run is building (Fix 4, option b).
+func TestEventArgsAreSnapshots(t *testing.T) {
+	echo := weft.Tool("echo", "", func(_ context.Context, in struct {
+		Q string `json:"q"`
+	}) (string, error) {
+		return in.Q, nil
+	})
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"q":"hi"}`}),
+		wefttest.Say("done"),
+	), echo)
+	run := agt.Stream(context.Background(), weft.Prompt("go"))
+	for ev, err := range run.Events() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ts, ok := ev.(weft.ToolStart); ok {
+			copy(ts.Args, []byte(`ZZ`)) // in-place write into the event's copy
+		}
+	}
+	res, err := run.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range res.Messages {
+		for _, p := range m.Content {
+			if c, ok := p.(weft.ToolCallPart); ok && string(c.Args) != `{"q":"hi"}` {
+				t.Errorf("transcript args = %s; event mutation leaked into the transcript", c.Args)
+			}
+		}
+	}
+}
+
+// RunFinish.Pending is a snapshot too: writing into the event's pending
+// args must not reach the run result or the transcript (Fix 4, option b).
+func TestRunFinishPendingArgsAreSnapshots(t *testing.T) {
+	gate := weft.Tool("gate", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "never", nil
+	}, weft.RequireApproval())
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "gate", Args: `{"secret":"1"}`}),
+	), gate)
+	run := agt.Stream(context.Background(), weft.Prompt("go"))
+	for ev, err := range run.Events() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rf, ok := ev.(weft.RunFinish); ok && len(rf.Pending) > 0 {
+			copy(rf.Pending[0].Args, []byte(`XX`))
+		}
+	}
+	res, err := run.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(res.Pending[0].Args) != `{"secret":"1"}` {
+		t.Errorf("res.Pending args = %s; event mutation leaked into the run result", res.Pending[0].Args)
+	}
+	for _, m := range res.Messages {
+		for _, p := range m.Content {
+			if c, ok := p.(weft.ToolCallPart); ok && string(c.Args) != `{"secret":"1"}` {
+				t.Errorf("transcript args = %s; event mutation leaked into the transcript", c.Args)
+			}
+		}
+	}
+}
+
+// Closing an abandoned run releases it: the cancel handle Stream
+// created is freed without ever consuming events, and a later
+// consumption reports the cancellation. Close after completion is a
+// no-op (Fix 11).
+func TestRunCloseAbandoned(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	defer cancelParent()
+	agt := weft.New(wefttest.Script(wefttest.Say("never consumed")),
+		weft.Tool("noop", "", func(_ context.Context, _ struct{}) (string, error) {
+			return "", nil
+		}))
+	run := agt.Stream(parent, weft.Prompt("go"))
+	run.Close() // abandoned without consuming
+	run.Close() // idempotent
+
+	// The canceled run still consumes its single Events sequence cleanly.
+	for _, err := range run.Events() {
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("error after Close = %v, want context.Canceled", err)
+		}
+		break
+	}
+
+	// Close after a completed run is a no-op.
+	done := agt.Stream(context.Background(), weft.Prompt("go"))
+	if _, err := done.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	done.Close()
+}
+
+// A panicking tap is contained and counted: the run completes, and
+// TapPanics reports exactly the number of matching invocations (Fix 12).
+func TestTapPanicsContainedAndCounted(t *testing.T) {
+	agt := weft.New(
+		wefttest.Script(wefttest.Say("hello")),
+		weft.Tap(func(_ context.Context, ev weft.Event) {
+			if _, ok := ev.(weft.TextDelta); ok {
+				panic("observer bug")
+			}
+		}),
+	)
+	if got := agt.TapPanics(); got != 0 {
+		t.Fatalf("TapPanics before any run = %d, want 0", got)
+	}
+	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text() != "hello" {
+		t.Errorf("run text = %q; a broken tap must not break the run", res.Text())
+	}
+	if got := agt.TapPanics(); got != 1 {
+		t.Errorf("TapPanics = %d, want 1 (one TextDelta panicked)", got)
+	}
+}
+
+// Repair never writes into the caller's memory — including the spare
+// capacity of append-built parts slices. The second window over the
+// same backing array stays untouched even when Repair synthesizes a
+// result onto a kept tool message (Fix 3 hardening: purity must not
+// depend on whose backing array the kept Content uses).
+func TestRepairNeverWritesIntoCallerMemory(t *testing.T) {
+	parts := make([]weft.Part, 3, 8) // deliberate spare capacity
+	parts[0] = weft.ToolResultPart{CallID: "a", Name: "t", Content: "ok"}
+	parts[1] = weft.ToolResultPart{CallID: "b", Name: "t", Content: "ok"}
+	parts[2] = weft.ToolResultPart{CallID: "c", Name: "t", Content: "ok"}
+	spare := parts[:8] // a second window onto the whole array
+	in := []weft.Message{
+		{Role: weft.RoleAssistant, Content: []weft.Part{
+			weft.ToolCallPart{ID: "a", Name: "t", Args: json.RawMessage(`{}`)},
+			weft.ToolCallPart{ID: "b", Name: "t", Args: json.RawMessage(`{}`)},
+			weft.ToolCallPart{ID: "c", Name: "t", Args: json.RawMessage(`{}`)},
+			weft.ToolCallPart{ID: "d", Name: "t", Args: json.RawMessage(`{}`)}, // missing result
+		}},
+		{Role: weft.RoleTool, Content: parts},
+	}
+	out := weft.Repair(in)
+	if len(out) < 2 || out[1].Role != weft.RoleTool {
+		t.Fatalf("repair shape = %+v, want the kept tool message", out)
+	}
+	var served []string
+	for _, p := range out[1].Content {
+		if r, ok := p.(weft.ToolResultPart); ok {
+			served = append(served, r.CallID)
+		}
+	}
+	if !slices.Equal(served, []string{"a", "b", "c", "d"}) {
+		t.Errorf("repaired results = %v, want a b c d", served)
+	}
+	for i, p := range spare[3:] {
+		if p != nil {
+			t.Errorf("repair wrote into the caller's spare capacity at %d: %v", i+3, p)
+		}
+	}
+	if got := parts[0]; got == nil {
+		t.Error("input parts disturbed")
 	}
 }

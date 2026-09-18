@@ -30,7 +30,10 @@
             ]
           },
           "output_schema": {
-            "type": "object"
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           },
           "source": "examples/getting-started/main.go:19"
         }

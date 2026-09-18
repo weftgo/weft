@@ -8,6 +8,7 @@ import (
 	"iter"
 	"log"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/weftgo/weft"
@@ -499,4 +500,50 @@ func ExampleSequential() {
 	// check -> verified
 	// write -> written
 	// check -> verified
+}
+
+// Slow observers (a database write, a network sink) must not run inside
+// a Tap: taps are synchronous and run under the step's event-ordering
+// lock, so a slow tap delays every tool event of its step. The pattern:
+// hand each event to a queue inside the tap — never block — and drain
+// it on your own goroutine, which may be as slow as it likes. A bounded
+// queue with a visible drop counter keeps a stuck drain from wedging
+// the run.
+func ExampleTap_async() {
+	events := make(chan weft.Event, 1024)
+	var dropped atomic.Int64
+	done := make(chan int)
+	go func() {
+		starts := 0
+		for ev := range events {
+			if _, ok := ev.(weft.ToolStart); ok {
+				starts++
+			}
+		}
+		done <- starts
+	}()
+
+	agt := weft.New(
+		wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "ping"}),
+			wefttest.Say("done"),
+		),
+		weft.Tap(func(_ context.Context, ev weft.Event) {
+			select {
+			case events <- ev: // fast: hand to the belt
+			default: // full belt: drop, but visibly
+				dropped.Add(1)
+			}
+		}),
+		weft.Tool("ping", "", func(_ context.Context, _ struct{}) (string, error) {
+			return "pong", nil
+		}),
+	)
+	if _, err := agt.Generate(context.Background(), weft.Prompt("hi")); err != nil {
+		log.Fatal(err)
+	}
+	close(events)
+	fmt.Println("tool starts:", <-done, "dropped:", dropped.Load())
+	// Output:
+	// tool starts: 1 dropped: 0
 }

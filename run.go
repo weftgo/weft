@@ -197,7 +197,15 @@ func (r *Run) ID() string { return r.cfg.id }
 // yields only ErrRunConsumed.
 //
 // Events arrive in emission order (see ToolStart for the concurrent-tool
-// ordering rule). A failed run delivers its error exactly once as the final
+// ordering rule). Delivery is a direct hand-off over an unbuffered
+// channel, and tool events are emitted while holding the step's
+// event-ordering lock — so a slow consumer does not merely receive late:
+// it delays event emission and gates the start of the step's subsequent
+// tools. For latency-sensitive parallel tools, consume promptly (range
+// over Events in a dedicated goroutine that buffers) or use Generate,
+// which needs no consumer.
+//
+// A failed run delivers its error exactly once as the final
 // element; a successful run ends with RunFinish. Breaking out of the range
 // cancels the run.
 func (r *Run) Events() iter.Seq2[Event, error] {
@@ -249,6 +257,12 @@ func (r *Run) Events() iter.Seq2[Event, error] {
 		}
 	}
 }
+
+// Close releases the run's resources, canceling it if still running.
+// It is for abandoned runs: a run you will consume needs no Close —
+// Events and Wait release everything themselves. Safe to call any
+// number of times, before or after consumption.
+func (r *Run) Close() { r.cancel() }
 
 // Wait blocks until the run finishes and returns its result. If Events has
 // not been consumed, Wait runs the agent itself, discarding events; it is

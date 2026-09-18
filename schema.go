@@ -35,7 +35,8 @@ type Schema struct {
 //	floats                  → number
 //	slice, array            → array with Items
 //	map                     → object with AdditionalProperties typing the
-//	                         values (map[string]int → object of integers)
+//	                         values (map[string]int → object of integers;
+//	                         map[string]any → bare object, free-form)
 //	struct, time.Time       → object (time.Time → string with format date-time)
 //	pointer                 → the pointed-to schema; the field becomes optional
 //
@@ -87,6 +88,13 @@ func schemaOf(t reflect.Type, visiting map[reflect.Type]bool) *Schema {
 	case reflect.Array:
 		return &Schema{Type: "array", Items: schemaOf(t.Elem(), visiting)}
 	case reflect.Map:
+		// An any value type has nothing to say — every value is
+		// allowed, which a bare object already means — so
+		// map[string]any stays wire-identical to a free-form object
+		// instead of carrying an empty additionalProperties:{}.
+		if t.Elem().Kind() == reflect.Interface {
+			return &Schema{Type: "object"}
+		}
 		return &Schema{Type: "object", AdditionalProperties: schemaOf(t.Elem(), visiting)}
 	case reflect.Struct:
 		if visiting[t] {

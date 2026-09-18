@@ -113,7 +113,9 @@ func TestToolInvoke(t *testing.T) {
 }
 
 // Map values carry their type through AdditionalProperties:
-// map[string]int stops being "some object" (Fix 10).
+// map[string]int stops being "some object" (Fix 10). An any value
+// type says nothing — map[string]any stays a bare object rather than
+// carrying an empty additionalProperties:{}.
 func TestSchemaMapValuesTyped(t *testing.T) {
 	type inner struct {
 		Tag string `json:"tag"`
@@ -122,6 +124,7 @@ func TestSchemaMapValuesTyped(t *testing.T) {
 		Scores   map[string]int      `json:"scores"`
 		Nested   map[string][]string `json:"nested,omitempty"`
 		Ancestry map[string]*inner   `json:"ancestry,omitempty"`
+		Free     map[string]any      `json:"free,omitempty"`
 	}
 	tool := weft.Tool("maps", "", func(_ context.Context, in input) (string, error) {
 		return "ok", nil
@@ -130,7 +133,7 @@ func TestSchemaMapValuesTyped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"type":"object","properties":{"ancestry":{"type":"object","additionalProperties":{"type":"object","properties":{"tag":{"type":"string"}},"required":["tag"]}},"nested":{"type":"object","additionalProperties":{"type":"array","items":{"type":"string"}}},"scores":{"type":"object","additionalProperties":{"type":"integer"}}},"required":["scores"]}`
+	want := `{"type":"object","properties":{"ancestry":{"type":"object","additionalProperties":{"type":"object","properties":{"tag":{"type":"string"}},"required":["tag"]}},"free":{"type":"object"},"nested":{"type":"object","additionalProperties":{"type":"array","items":{"type":"string"}}},"scores":{"type":"object","additionalProperties":{"type":"integer"}}},"required":["scores"]}`
 	if string(got) != want {
 		t.Errorf("schema:\n got  %s\n want %s", got, want)
 	}

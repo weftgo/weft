@@ -45,11 +45,12 @@ is pre-1.0 and tags per module (ADR 0005).
 - `Agent.TapPanics` counts contained tap panics, so a dead observer
   is no longer invisible.
 - `Schema.AdditionalProperties` types map values (`map[string]int` →
-  an object of integers) and rides the wire in the manifest and the
-  OpenAI and Anthropic adapters. The Google adapter drops it: Gemini's
-  schema subset (and the genai SDK's `Schema`) has no
-  `additionalProperties` field. Wire output for schemas without maps is
-  byte-identical.
+  an object of integers; `map[string]any` stays a bare object — an
+  `any` value type has nothing to say) and rides the wire in the
+  manifest and the OpenAI and Anthropic adapters. The Google adapter
+  drops it: Gemini's schema subset (and the genai SDK's `Schema`) has
+  no `additionalProperties` field. Wire output for schemas without
+  typed maps is byte-identical.
 - `wefttest.ConformInfo` / `ConformInfoT` check that model middleware
   forwards the inner model's identity (the Info convention, checked).
 - `ExampleTap_async`: the supported pattern for slow observers — hand

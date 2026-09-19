@@ -78,6 +78,7 @@ func TestRetryNotForClientErrorsOverflowOrMidStream(t *testing.T) {
 		"402 quota":       status(402, nil),
 		"overflow":        &apiError{StatusCode: 500, Message: "context_length_exceeded: prompt is too long"},
 		"unsupported":     fmt.Errorf("%w: pdf", weft.ErrUnsupported),
+		"contract":        fmt.Errorf("%w: stream bent", weft.ErrModelContract),
 		"denied":          weft.ErrModelRequestsDenied,
 		"no-retry header": status(503, map[string]string{"x-should-retry": "false"}),
 	}
@@ -322,14 +323,17 @@ func TestLogRecordsRequestAndFinish(t *testing.T) {
 
 func TestRepairJSON(t *testing.T) {
 	cases := map[string]string{
-		`{"city":"Paris"}`:        `{"city":"Paris"}`,
-		`{"city":"Par`:            `{"city":"Par"}`,
-		`{"a":1,`:                 `{"a":1}`,
-		`{"a":{"b":[1,2`:          `{"a":{"b":[1,2]}}`,
-		`{"a":`:                   `{"a":null}`,
-		"```json\n{\"a\":1}\n```": `{"a":1}`,
-		`{"s":"say \"hi\`:         `{"s":"say \"hi\\"}`,
-		``:                        `{}`,
+		`{"city":"Paris"}`:              `{"city":"Paris"}`,
+		`{"city":"Par`:                  `{"city":"Par"}`,
+		`{"a":1,`:                       `{"a":1}`,
+		`{"a":{"b":[1,2`:                `{"a":{"b":[1,2]}}`,
+		`{"a":`:                         `{"a":null}`,
+		"```json\n{\"a\":1}\n```":       `{"a":1}`,
+		"```JSON\n{\"a\":1}\n```":       `{"a":1}`, // case-insensitive tag
+		"```javascript\n{\"a\":1}\n```": `{"a":1}`, // any language tag, not just json
+		"```\n{\"a\":1}\n```":           `{"a":1}`,
+		`{"s":"say \"hi\`:               `{"s":"say \"hi\\"}`,
+		``:                              `{}`,
 	}
 	for in, want := range cases {
 		model := wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "t", Args: in}), wefttest.Say("ok"))

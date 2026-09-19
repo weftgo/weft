@@ -135,11 +135,8 @@ func (b *bodies) last() map[string]any {
 // with the rest of the body intact.
 func TestThinkingObjectInjection(t *testing.T) {
 	srv, got := recordingServer(t, oneWordSSE)
-	m := Model("m",
-		BaseURL(srv.URL),
-		APIKey("test"),
-		Dialect(DialectObject), // 127.0.0.1 would otherwise detect as effort
-	)
+	c := testClient(srv)
+	m := Model("m", Client(&c), Dialect(DialectObject))
 	res, err := weft.New(m).Generate(context.Background(),
 		weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkOff}),
 		weft.Prompt("Reply with one word: lime"),
@@ -164,7 +161,8 @@ func TestThinkingObjectInjection(t *testing.T) {
 // nothing at all there (no off switch on Chat Completions).
 func TestThinkingNoObjectForEffortDialect(t *testing.T) {
 	srv, got := recordingServer(t, oneWordSSE)
-	m := Model("m", BaseURL(srv.URL), APIKey("test")) // localhost → effort dialect
+	c := testClient(srv)
+	m := Model("m", Client(&c)) // no base URL → the effort dialect (the api.openai.com default)
 	if _, err := weft.New(m).Generate(context.Background(),
 		weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkOff}),
 		weft.Prompt("Reply with one word: lime"),
@@ -183,7 +181,8 @@ func TestThinkingNoObjectForEffortDialect(t *testing.T) {
 // ThinkUnset on the gateway dialect leaves the body untouched.
 func TestThinkingUnsetSendsNothing(t *testing.T) {
 	srv, got := recordingServer(t, oneWordSSE)
-	m := Model("m", BaseURL(srv.URL), APIKey("test"), Dialect(DialectObject))
+	c := testClient(srv)
+	m := Model("m", Client(&c), Dialect(DialectObject))
 	if _, err := weft.New(m).Generate(context.Background(), weft.Prompt("hi")); err != nil {
 		t.Fatal(err)
 	}

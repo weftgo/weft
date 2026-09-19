@@ -25,7 +25,7 @@ func Allow(permit func(weft.Call) bool) weft.ToolMiddleware {
 				c = weft.Call{CallID: call.ID, Name: call.Name}
 			}
 			if permit != nil && !permit(c) {
-				return "", &weft.ToolError{Code: "DENIED", Message: fmt.Sprintf("tool %q is not allowed", call.Name)}
+				return "", &weft.ToolError{Code: weft.CodeDenied, Message: fmt.Sprintf("tool %q is not allowed", call.Name)}
 			}
 			return next(ctx, call)
 		}

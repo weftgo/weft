@@ -12,7 +12,7 @@ import (
 
 // Fallback tries the given models, in order, when the wrapped model's
 // stream fails before yielding any event — a provider outage, a
-// capability gap (weft.ErrUnsupported), a denied request. A failure
+// capability gap (weft.ErrUnsupported). A failure
 // after events were yielded is not retried anywhere: the loop already
 // consumed part of the reply, so it surfaces as the run error. Context
 // cancellation and the WEFT_MODEL_REQUESTS kill switch never fall

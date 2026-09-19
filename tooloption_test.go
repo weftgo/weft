@@ -176,13 +176,13 @@ func TestPerToolMaxResultBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	results := res.Steps[0].Results
-	if !strings.HasPrefix(results[0].Content, strings.Repeat("x", 10)+"\n…[truncated 10 bytes]") {
+	if !strings.HasPrefix(results[0].Content, strings.Repeat("x", 10)+"\n…[truncated 990 bytes]") {
 		t.Errorf("tight = %q", results[0].Content)
 	}
 	if len(results[1].Content) != 1000 {
 		t.Errorf("whole: len = %d, want 1000 (per-tool MaxResultBytes(0) lifts the cap)", len(results[1].Content))
 	}
-	if !strings.HasSuffix(results[2].Content, "[truncated 100 bytes]") {
+	if !strings.HasSuffix(results[2].Content, "[truncated 900 bytes]") {
 		t.Errorf("inherits = %q, want the agent cap", results[2].Content[len(results[2].Content)-40:])
 	}
 }
@@ -201,6 +201,34 @@ func TestDecodeErrorsNameTheField(t *testing.T) {
 	strict := weft.Tool("forecast", "", func(_ context.Context, in In) (string, error) {
 		return in.City, nil
 	}, weft.StrictInput())
+	// The two kinds where the schema's wire type differs from the plain
+	// Go kind: decode errors must speak the schema's vocabulary, not
+	// the Go kind mapping.
+	blob := weft.Tool("blob", "", func(_ context.Context, in struct {
+		Data []byte `json:"data"`
+	}) (string, error) {
+		return string(in.Data), nil
+	})
+	quoted := weft.Tool("quoted", "", func(_ context.Context, in struct {
+		N int `json:"n,string"`
+	}) (string, error) {
+		return "", nil
+	})
+	// Nested paths: the error's field path may carry array indices and
+	// map keys ("items.0.qty", "meta.k.when"); the schema walk must step
+	// through Items and AdditionalProperties to reach the advertised
+	// leaf type.
+	type item struct {
+		Qty int `json:"qty,string"`
+	}
+	nested := weft.Tool("nested", "", func(_ context.Context, in struct {
+		Items []item `json:"items"`
+		Meta  map[string]struct {
+			When string `json:"when"`
+		} `json:"meta"`
+	}) (string, error) {
+		return "", nil
+	})
 	ctx := context.Background()
 
 	cases := []struct {
@@ -210,11 +238,19 @@ func TestDecodeErrorsNameTheField(t *testing.T) {
 		want string // "" means success
 	}{
 		{"type mismatch", lenient, `{"city":"Oslo","days":"three"}`, `field "days": expected integer, got string`},
+		{"[]byte speaks the schema", blob, `{"data":{}}`, `field "data": expected string, got object`},
+		{",string speaks the schema", quoted, `{"n":9}`, `field "n": expected string, got number`},
+		{"nested ,string through an array", nested, `{"items":[{"qty":5}]}`, `: expected string, got number`},
+		{"nested through a map value", nested, `{"meta":{"k":{"when":7}}}`, `: expected string, got number`},
+		{"array itself", nested, `{"items":"x"}`, `field "items": expected array, got string`},
 		{"top-level mismatch", lenient, `[1,2]`, `expected object at the top level, got array`},
 		{"syntax", lenient, `{"city":}`, `invalid JSON at offset`},
 		{"truncated", lenient, `{"city":`, `invalid JSON: unexpected end of input`},
 		{"unknown field ignored", lenient, `{"city":"Oslo","units":"C"}`, ""},
 		{"unknown field rejected", strict, `{"city":"Oslo","units":"C"}`, `unknown field "units": not in the schema`},
+		{"trailing second object", lenient, `{"city":"Oslo"} {"city":"Rome"}`, "trailing data after the JSON arguments"},
+		{"trailing garbage", strict, `{"city":"Oslo"} x`, "trailing data after the JSON arguments"},
+		{"trailing whitespace only", lenient, `{"city":"Oslo"} `, ""},
 		{"empty args", lenient, ``, ""},
 	}
 	for _, tc := range cases {

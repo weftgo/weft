@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/shared"
 	"github.com/weftgo/weft"
 )
 
@@ -126,26 +124,6 @@ func TestConvertFiles(t *testing.T) {
 	}
 }
 
-func TestToolDefsConvertedOnce(t *testing.T) {
-	m := Model("m").(*model)
-	def := testTool()
-	// A sentinel in the cache proves params() uses it instead of
-	// converting again.
-	m.tools.Store(def, openai.ChatCompletionToolParam{
-		Function: shared.FunctionDefinitionParam{Name: "sentinel"},
-	})
-	p, err := m.params(weft.ModelRequest{Tools: []*weft.ToolDef{def, def}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := p.Tools[0].Function.Name; got != "sentinel" {
-		t.Errorf("tool converted again (%q), want the cached sentinel", got)
-	}
-	if len(p.Tools) != 2 {
-		t.Errorf("tools = %d, want 2", len(p.Tools))
-	}
-}
-
 func TestMapFinish(t *testing.T) {
 	cases := []struct {
 		reason   string
@@ -175,7 +153,7 @@ func TestInfo(t *testing.T) {
 	}
 }
 
-// Typed map values reach the wire: schemaMap (and convertTool behind it)
+// Typed map values reach the wire: adapterkit.SchemaMap (and convertTool behind it)
 // carries AdditionalProperties instead of degrading maps to "some
 // object" (Fix 10's fidelity gap, closed at the adapter seam too).
 func TestSchemaMapCarriesAdditionalProperties(t *testing.T) {

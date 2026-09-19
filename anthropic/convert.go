@@ -7,6 +7,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/internal/adapterkit"
 )
 
 // params builds the Messages request for one step. The ModelRequest is
@@ -102,13 +103,12 @@ func (m *model) params(req weft.ModelRequest) (anthropic.MessageNewParams, error
 			}
 		}
 	}
+	// Converted per request: conversion is microseconds against the
+	// network round trip, and the pointer-keyed cache this replaced
+	// never evicted — an unbounded leak under a per-step ToolSource
+	// (ADR 0013, 2026-09-18).
 	for _, t := range req.Tools {
-		converted, ok := m.tools.Load(t)
-		if !ok {
-			converted = convertTool(t)
-			m.tools.Store(t, converted)
-		}
-		p.Tools = append(p.Tools, converted.(anthropic.ToolUnionParam))
+		p.Tools = append(p.Tools, convertTool(t))
 	}
 	return p, nil
 }
@@ -127,8 +127,8 @@ func userBlocks(msg weft.Message) ([]anthropic.ContentBlockParamUnion, error) {
 			}
 			blocks = append(blocks, anthropic.NewTextBlock(p.Text))
 		case weft.FilePart:
-			if (len(p.Data) == 0) == (p.URL == "") {
-				return nil, fmt.Errorf("%w: a file part must set exactly one of Data or URL", weft.ErrUnsupported)
+			if err := adapterkit.FilePartSource(p); err != nil {
+				return nil, err
 			}
 			switch p.MediaType {
 			case "image/png", "image/jpeg", "image/gif", "image/webp":
@@ -205,7 +205,7 @@ func convertTool(t *weft.ToolDef) anthropic.ToolUnionParam {
 		tool.Description = anthropic.String(t.Description)
 	}
 	if t.InputSchema != nil {
-		m := schemaMap(t.InputSchema)
+		m := adapterkit.SchemaMap(t.InputSchema)
 		schema := anthropic.ToolInputSchemaParam{}
 		if props := m["properties"]; props != nil {
 			schema.Properties = props
@@ -245,35 +245,4 @@ func mapStopReason(reason string, category string) (weft.StopReason, string) {
 		// keep the vendor's word on Raw (empty stays empty).
 		return weft.StopEndTurn, reason
 	}
-}
-
-// schemaMap renders a weft.Schema as a plain JSON map.
-func schemaMap(s *weft.Schema) map[string]any {
-	if s == nil {
-		return nil
-	}
-	m := map[string]any{"type": s.Type}
-	if s.Format != "" {
-		m["format"] = s.Format
-	}
-	if s.Description != "" {
-		m["description"] = s.Description
-	}
-	if s.Items != nil {
-		m["items"] = schemaMap(s.Items)
-	}
-	if s.AdditionalProperties != nil {
-		m["additionalProperties"] = schemaMap(s.AdditionalProperties)
-	}
-	if s.Properties != nil {
-		props := make(map[string]any, len(s.Properties))
-		for k, v := range s.Properties {
-			props[k] = schemaMap(v)
-		}
-		m["properties"] = props
-	}
-	if len(s.Required) > 0 {
-		m["required"] = s.Required
-	}
-	return m
 }

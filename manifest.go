@@ -70,18 +70,17 @@ type manifestPolicy struct {
 // policy: the keys appear only for tools that override the agent's
 // defaults, so a tool without options renders exactly as before.
 type manifestTool struct {
-	Name            string       `json:"name"`
-	Description     string       `json:"description,omitempty"`
-	InputSchema     *Schema      `json:"input_schema,omitempty"`
-	OutputSchema    *Schema      `json:"output_schema,omitempty"`
-	Timeout         string       `json:"timeout,omitempty"`
-	MaxResultBytes  *int         `json:"max_result_bytes,omitempty"`
-	StrictInput     bool         `json:"strict_input,omitempty"`
-	Sequential      bool         `json:"sequential,omitempty"`
-	RequireApproval bool         `json:"require_approval,omitempty"`
-	Replay          ReplayPolicy `json:"replay,omitempty"`
-	PromptSnippet   string       `json:"prompt_snippet,omitempty"`
-	Source          string       `json:"source,omitempty"`
+	Name            string  `json:"name"`
+	Description     string  `json:"description,omitempty"`
+	InputSchema     *Schema `json:"input_schema,omitempty"`
+	OutputSchema    *Schema `json:"output_schema,omitempty"`
+	Timeout         string  `json:"timeout,omitempty"`
+	MaxResultBytes  *int    `json:"max_result_bytes,omitempty"`
+	StrictInput     bool    `json:"strict_input,omitempty"`
+	Sequential      bool    `json:"sequential,omitempty"`
+	RequireApproval bool    `json:"require_approval,omitempty"`
+	PromptSnippet   string  `json:"prompt_snippet,omitempty"`
+	Source          string  `json:"source,omitempty"`
 }
 
 func (a *Agent) manifestEntry() manifestAgent {
@@ -111,7 +110,6 @@ func (a *Agent) manifestEntry() manifestAgent {
 			StrictInput:     t.strict,
 			Sequential:      t.sequential,
 			RequireApproval: t.approval,
-			Replay:          t.replay,
 			PromptSnippet:   t.snippet,
 			Source:          toolSource(t),
 		}
@@ -156,8 +154,8 @@ func stopName(c StopCondition) string {
 }
 
 // toolSource renders the tool's defining call site as file:line, or ""
-// for a ToolDef that did not come through Tool (a future RawTool, a
-// literal) — the key is then omitted rather than rendered as ":0".
+// for a ToolDef that did not come through Tool (a RawTool, a literal
+// ToolDef) — the key is then omitted rather than rendered as ":0".
 func toolSource(t *ToolDef) string {
 	if t.sourceFile == "" {
 		return ""

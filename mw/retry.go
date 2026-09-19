@@ -41,7 +41,8 @@ type retryConfig struct {
 
 // MaxRetries sets how many times a failed call is retried (default 3).
 // Zero disables retrying while keeping the retry-after and classifier
-// behaviour observable through Log.
+// behaviour observable through Log. Negative values are ignored — the
+// core options' rule, stated here too.
 func MaxRetries(n int) RetryOption {
 	return func(c *retryConfig) {
 		if n >= 0 {
@@ -52,7 +53,8 @@ func MaxRetries(n int) RetryOption {
 
 // BaseDelay sets the first backoff delay (default 500ms). Delays double
 // per attempt — 0.5s, 1s, 2s, … — capped at 8s, each with ±25% jitter,
-// unless the provider names its own retry-after, which wins.
+// unless the provider names its own retry-after, which wins. Zero is
+// meaningful (no delay between attempts); negative values are ignored.
 func BaseDelay(d time.Duration) RetryOption {
 	return func(c *retryConfig) {
 		if d >= 0 {
@@ -63,9 +65,11 @@ func BaseDelay(d time.Duration) RetryOption {
 
 // MaxWait bounds a provider's retry-after ask (default 60s): a longer
 // ask fails fast wrapping ErrRetryAfterTooLong instead of sleeping.
+// MaxWait(0) removes the cap — whatever the provider asks, Retry
+// waits — and negative values are ignored.
 func MaxWait(d time.Duration) RetryOption {
 	return func(c *retryConfig) {
-		if d > 0 {
+		if d >= 0 {
 			c.maxWait = d
 		}
 	}
@@ -156,11 +160,11 @@ func (m *retryModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq
 }
 
 // delay picks the wait before retry number attempt+1: the provider's
-// retry-after when it sent one (failing fast past maxWait), otherwise
-// exponential backoff with jitter.
+// retry-after when it sent one (failing fast past maxWait — 0 meaning
+// no cap), otherwise exponential backoff with jitter.
 func (c *retryConfig) delay(attempt int, err error, now time.Time) (time.Duration, error) {
 	if ask, ok := RetryAfter(err, now); ok {
-		if ask > c.maxWait {
+		if c.maxWait > 0 && ask > c.maxWait {
 			return 0, fmt.Errorf("%w: asked %s, maximum %s: %w", ErrRetryAfterTooLong, ask, c.maxWait, err)
 		}
 		return ask, nil

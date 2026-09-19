@@ -16,11 +16,12 @@ tool failures never cancel their siblings.
 
 > **Status:** v0.1.0 — experimental, pre-1.0. The three load-bearing
 > contracts — message model, error model, tool contract — are implemented
-> and tested, and the first provider adapters (OpenAI + compatible
-> servers, Anthropic, Google) wrap the vendors' official Go SDKs; see
-> `docs/adr/`. Middleware seams, MCP interop, and the surrounding
-> modules (serving, ops, devtools, cli) come next, in that order of
-> demand.
+> and tested; the first provider adapters (OpenAI + compatible servers,
+> Anthropic, Google) wrap the vendors' official Go SDKs, and the two
+> middleware seams (`WrapModel`/`WrapTools`, package `mw`) plus the
+> approval boundary are in; see `docs/adr/` and the roadmap below.
+> MCP interop and the surrounding modules (serving, ops, devtools, cli)
+> come next, in that order of demand.
 
 ## Quick start
 
@@ -232,13 +233,15 @@ form from the base URL; `openai.Dialect` pins it when detection can't.
 
 Every adapter passes the same executable contract
 (`wefttest/conformance`): streaming tool-call fragments are assembled
-into whole calls and also surface live as `ToolArgsDelta` progress,
-provider errors pass through unchanged for `errors.As`, cancellation
-surfaces as `ctx.Err()`, a stalled stream fails with `ErrStreamIdle`
-while a slow-but-streaming one never does, and
-`WEFT_MODEL_REQUESTS=deny` refuses every call before any network I/O —
-test suites that must stay offline get loud failures, not surprise
-bills. ([ADR 0013](docs/adr/0013-adapter-contract.md))
+into whole calls and — where the provider streams fragments at all
+(`Caps.ToolArgDeltas`; Google's calls arrive whole) — also surface live
+as `ToolArgsDelta` progress, provider errors pass through unchanged
+for `errors.As`, cancellation surfaces as `ctx.Err()`, a stalled
+stream fails with `ErrStreamIdle` while a slow-but-streaming one never
+does (both are pinned cases), and `WEFT_MODEL_REQUESTS=deny` refuses
+every self-built client's call before any network I/O — test suites
+that must stay offline get loud failures, not surprise bills.
+([ADR 0013](docs/adr/0013-adapter-contract.md))
 
 ## The rules that matter
 

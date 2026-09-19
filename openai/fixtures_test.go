@@ -12,16 +12,27 @@ import (
 	"time"
 
 	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/wefttest/conformance"
 )
+
+// testClient builds an SDK client aimed at srv. Injecting it — instead
+// of BaseURL — marks the client as a test double, so the suite stays
+// green under WEFT_MODEL_REQUESTS=deny (the offline gate); the
+// kill-switch test keeps a self-built client to prove the switch still
+// fires.
+func testClient(srv *httptest.Server) openai.Client {
+	return openai.NewClient(option.WithBaseURL(srv.URL), option.WithAPIKey("test"))
+}
 
 // fixtureModel builds the adapter against a fixture server for one
 // recorded case.
 func fixtureModel(t *testing.T, name string, opts ...Option) weft.Model {
 	t.Helper()
 	srv := conformance.FixtureServer(t, filepath.Join("testdata", name+".sse"))
-	opts = append([]Option{BaseURL(srv.URL), APIKey("test")}, opts...)
+	c := testClient(srv)
+	opts = append([]Option{Client(&c)}, opts...)
 	return Model("m", opts...)
 }
 
@@ -205,7 +216,8 @@ const stallChunk = `data: {"id":"c1","object":"chat.completion.chunk","created":
 // never would (the timer resets per chunk).
 func TestStreamIdleTimeout(t *testing.T) {
 	srv := conformance.StallServer(t, stallChunk)
-	m := Model("m", BaseURL(srv.URL), APIKey("test"), IdleTimeout(150*time.Millisecond))
+	c := testClient(srv)
+	m := Model("m", Client(&c), IdleTimeout(150*time.Millisecond))
 	_, err := collect(m, basicReq)
 	if err == nil || !errors.Is(err, weft.ErrStreamIdle) {
 		t.Fatalf("err = %v, want ErrStreamIdle", err)
@@ -218,7 +230,8 @@ func TestStreamIdleTimeout(t *testing.T) {
 // Cancellation mid-stream ends the call with ctx.Err(), exactly once.
 func TestStreamCancelMidStream(t *testing.T) {
 	srv := conformance.StallServer(t, stallChunk)
-	m := Model("m", BaseURL(srv.URL), APIKey("test"))
+	c := testClient(srv)
+	m := Model("m", Client(&c))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var runErr error
@@ -249,7 +262,8 @@ func TestStreamSDKErrorUnchanged(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"error":{"message":"Rate limit reached","type":"rate_limit_error","code":"rate_limit_exceeded"}}`)
 	}))
 	t.Cleanup(srv.Close)
-	m := Model("m", BaseURL(srv.URL), APIKey("test"))
+	c := testClient(srv)
+	m := Model("m", Client(&c))
 	_, err := collect(m, basicReq)
 	var apiErr *openai.Error
 	if !errors.As(err, &apiErr) {
@@ -269,15 +283,92 @@ func TestStreamKillSwitch(t *testing.T) {
 	}
 }
 
+// The flip side of TestStreamKillSwitch: a client the caller injected
+// is a test double by construction (ADR 0013's kill-switch clause) and
+// stays reachable under deny, so offline suites run in the very mode
+// the switch exists for.
+func TestKillSwitchExemptsInjectedClient(t *testing.T) {
+	t.Setenv("WEFT_MODEL_REQUESTS", "deny")
+	m := fixtureModel(t, "text_only") // fixtureModel injects its SDK client
+	if _, err := collect(m, basicReq); err != nil {
+		t.Fatalf("injected client must stay reachable under deny: %v", err)
+	}
+}
+
 // An unsupported file fails the stream before any request is sent.
 func TestStreamUnsupportedFilePart(t *testing.T) {
-	m := Model("m", BaseURL("http://127.0.0.1:1"), APIKey("test"))
+	c := openai.NewClient(option.WithBaseURL("http://127.0.0.1:1"), option.WithAPIKey("test"))
+	m := Model("m", Client(&c))
 	req := weft.ModelRequest{Messages: []weft.Message{weft.UserParts(
 		weft.FilePart{MediaType: "application/pdf", Data: []byte{1}},
 	)}}
 	_, err := collect(m, req)
 	if err == nil || !errors.Is(err, weft.ErrUnsupported) {
 		t.Fatalf("err = %v, want ErrUnsupported", err)
+	}
+}
+
+// A server that repeats the full function name on continuation chunks
+// must not assemble "pingpingping": the name is overwritten, exactly as
+// the id is.
+func TestStreamRepeatedNameFragmentsOverwrite(t *testing.T) {
+	const sse = `data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"ping","arguments":"{\"a\":"}}]},"finish_reason":null}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"ping","arguments":"1}"}}]},"finish_reason":null}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+
+`
+	srv, _ := recordingServer(t, sse)
+	c := testClient(srv)
+	m := Model("m", Client(&c))
+	evs, err := collect(m, basicReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range evs {
+		if call, ok := ev.(weft.ModelToolCall); ok {
+			if call.Name != "ping" {
+				t.Errorf("call name = %q, want ping (repeated fragments overwrite)", call.Name)
+			}
+		}
+	}
+}
+
+// A synthesised call_<i> must not collide with a server-populated id of
+// the same shape in the same step (llama.cpp-style servers populate
+// some ids and omit others): a repeated id fails the run with
+// ErrModelContract — the failure the synthesis exists to prevent.
+func TestStreamSynthesisedIDSkipsPopulated(t *testing.T) {
+	const sse = `data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"a","arguments":"{}"}}]},"finish_reason":null}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":1,"delta":{"tool_calls":[{"index":1,"function":{"name":"b","arguments":"{}"}}]},"finish_reason":null}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+
+`
+	srv, _ := recordingServer(t, sse)
+	c := testClient(srv)
+	m := Model("m", Client(&c))
+	evs, err := collect(m, basicReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, ev := range evs {
+		if call, ok := ev.(weft.ModelToolCall); ok {
+			ids = append(ids, call.ID)
+		}
+	}
+	if len(ids) != 2 {
+		t.Fatalf("calls = %v, want 2", ids)
+	}
+	if ids[0] != "call_1" || ids[1] == "call_1" || ids[1] == "" {
+		t.Errorf("ids = %v, want the server id kept and a distinct synthesised one", ids)
 	}
 }
 
@@ -292,7 +383,8 @@ data: [DONE]
 
 `
 	srv, _ := recordingServer(t, sse)
-	m := Model("m", BaseURL(srv.URL), APIKey("test"))
+	c := testClient(srv)
+	m := Model("m", Client(&c))
 	evs, err := collect(m, basicReq)
 	if err != nil {
 		t.Fatal(err)

@@ -31,16 +31,22 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// then the sink receives it. Nothing is delivered after
 	// cancellation — for taps and sinks alike, so Generate and Stream
 	// agree and a consumer never observes a stream that continues past
-	// its error.
-	emit := func(ev Event) {
+	// its error. It reports whether the event was delivered: the
+	// terminal RunFinish decides the run's outcome by that answer, so
+	// a cancellation landing between a ctx check and the emit can never
+	// produce a success without its RunFinish, or a RunFinish followed
+	// by an error (rule 4; Run.Events' one-terminal-element promise).
+	deliver := func(ev Event) bool {
 		if ctx.Err() != nil {
-			return
+			return false
 		}
 		for _, tap := range a.taps {
 			a.safeTap(ctx, tap, ev)
 		}
 		sink(ev)
+		return true
 	}
+	emit := func(ev Event) { deliver(ev) }
 	// The input transcript is repaired before the first model call, so
 	// anything a caller feeds back in (a partial transcript, a resumed
 	// session) becomes valid provider input. When the caller supplies
@@ -59,6 +65,21 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	seq := new(atomic.Int64)
 	fail := func(step int, err error) (*RunResult, error) {
 		return nil, &RunError{Step: step, Err: err, Result: res}
+	}
+	// Every successful exit ends here — four sites share the shape, and
+	// a field added to RunFinish must not miss any of them. One check
+	// decides both the event's delivery and the run's outcome: a
+	// delivered RunFinish is always followed by success, an undelivered
+	// one (the run's ctx ended first) always by the cancellation error,
+	// with the resumable result riding on it — cancellation wins over
+	// success at the approval boundary too (ADR 0007). The caller sets
+	// res.Pending first; snapshotPending(nil) is nil, so ordinary exits
+	// carry no pending list.
+	endRun := func(step int) (*RunResult, error) {
+		if !deliver(RunFinish{RunID: cfg.id, Usage: res.Usage, Steps: len(res.Steps), Pending: snapshotPending(res.Pending)}) {
+			return fail(step, ctx.Err())
+		}
+		return res, nil
 	}
 	// A model that can name itself does so on the first event; the
 	// interface stays optional so Model remains one method.
@@ -79,13 +100,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		res.Messages = attachResults(res.Messages, resume, results)
 		if len(pending) > 0 {
 			res.Pending = pending
-			emit(RunFinish{RunID: cfg.id, Usage: res.Usage, Steps: 0, Pending: snapshotPending(pending)})
-			// Cancellation wins here too (see the pending exit in the
-			// step loop): the error carries the resumable result.
-			if err := ctx.Err(); err != nil {
-				return fail(0, err)
-			}
-			return res, nil
+			return endRun(0)
 		}
 	}
 
@@ -161,6 +176,13 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 				case ModelToolCall:
 					if e.ID == "" {
 						return fmt.Errorf("%w: tool call with an empty ID", ErrModelContract)
+					}
+					// A repeated ID within one step makes the transcript
+					// ambiguous — repair keeps only the first result per
+					// ID, and Approve/Deny key on it — so it fails the
+					// run like an empty one. IDs may repeat across steps.
+					if slices.ContainsFunc(calls, func(c ToolCallPart) bool { return c.ID == e.ID }) {
+						return fmt.Errorf("%w: duplicate tool call ID %q", ErrModelContract, e.ID)
 					}
 					if e.Name == "" {
 						return fmt.Errorf("%w: tool call with an empty name", ErrModelContract)
@@ -259,11 +281,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			// fails with the ctx error, the parked calls riding on
 			// RunError.Result.Pending so the transcript stays resumable.
 			res.Pending = pending
-			emit(RunFinish{RunID: cfg.id, Usage: res.Usage, Steps: len(res.Steps), Pending: snapshotPending(pending)})
-			if err := ctx.Err(); err != nil {
-				return fail(step, err)
-			}
-			return res, nil
+			return endRun(step)
 		}
 		if len(calls) == 0 {
 			// A max_tokens finish is recorded, not fatal: RunResult
@@ -271,12 +289,10 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			// can branch on truncation without indexing. Tool-call
 			// arguments truncated into undecodable JSON already come back
 			// as error results the model recovers from.
-			emit(RunFinish{RunID: cfg.id, Usage: res.Usage, Steps: len(res.Steps)})
-			return res, nil
+			return endRun(step)
 		}
 		if a.stopped(res.Steps) {
-			emit(RunFinish{RunID: cfg.id, Usage: res.Usage, Steps: len(res.Steps)})
-			return res, nil
+			return endRun(step)
 		}
 	}
 
@@ -544,7 +560,11 @@ func lastAssistantWithCalls(msgs []Message) int {
 // attachResults places results on the tool message directly after the
 // assistant message that issued calls, creating that message when the
 // earlier run recorded none — so the transcript's shape is the
-// canonical one whether or not other tools ran in that step.
+// canonical one whether or not other tools ran in that step. The
+// message is rebuilt in the assistant's call order (ADR 0007 §3), each
+// call taking its resumed result when one exists and its earlier one
+// otherwise: Gemini matches functionResponses by name and position, so
+// a reordered tool message could attach a result to the wrong call.
 func attachResults(msgs []Message, calls []ToolCallPart, results []ToolResultPart) []Message {
 	if len(results) == 0 {
 		return msgs
@@ -553,13 +573,36 @@ func attachResults(msgs []Message, calls []ToolCallPart, results []ToolResultPar
 	if i < 0 {
 		return msgs
 	}
-	parts := make([]Part, 0, len(results))
+	resumed := make(map[string]ToolResultPart, len(results))
 	for _, r := range results {
-		parts = append(parts, r)
+		resumed[r.CallID] = r
+	}
+	existing := map[string][]ToolResultPart{}
+	if i+1 < len(msgs) && msgs[i+1].Role == RoleTool {
+		for _, p := range msgs[i+1].Content {
+			if r, ok := p.(ToolResultPart); ok {
+				existing[r.CallID] = append(existing[r.CallID], r)
+			}
+		}
+	}
+	parts := make([]Part, 0, len(resumed)+len(existing))
+	for _, p := range msgs[i].Content {
+		c, ok := p.(ToolCallPart)
+		if !ok {
+			continue
+		}
+		if r, ok := resumed[c.ID]; ok {
+			parts = append(parts, r)
+			continue
+		}
+		if rs := existing[c.ID]; len(rs) > 0 {
+			parts = append(parts, rs[0])
+			existing[c.ID] = rs[1:]
+		}
 	}
 	if i+1 < len(msgs) && msgs[i+1].Role == RoleTool {
 		out := slices.Clone(msgs)
-		out[i+1].Content = append(slices.Clone(out[i+1].Content), parts...)
+		out[i+1].Content = parts
 		return out
 	}
 	return slices.Insert(slices.Clone(msgs), i+1, Message{Role: RoleTool, Content: parts})
@@ -572,7 +615,7 @@ func composeSystem(system string, tools []*ToolDef) string {
 	var b strings.Builder
 	b.WriteString(system)
 	for _, t := range tools {
-		if t == nil || t.snippet == "" {
+		if t.snippet == "" {
 			continue
 		}
 		if b.Len() > 0 {
@@ -590,12 +633,8 @@ func truncatedCallResult(name string) string {
 }
 
 func deniedResult(reason string) string {
-	return (&ToolError{Code: codeDenied, Message: reason, Err: ErrApprovalDenied}).Error()
+	return (&ToolError{Code: CodeDenied, Message: reason, Err: ErrApprovalDenied}).Error()
 }
-
-// codeDenied is the code on a denied call's result; mw.Allow uses the
-// same code for its own denials.
-const codeDenied = "DENIED"
 
 // CallTool dispatches one tool call by name the way the loop does —
 // through the agent's WrapTools chain and the tool's own — and returns
@@ -746,8 +785,9 @@ func invokeWithTimeout(ctx context.Context, fn ToolCaller, call ToolCallPart, ti
 }
 
 // capResult enforces a tool-result cap. The cut lands on a rune
-// boundary and always ends with a marker, so the model knows the output
-// is partial rather than silently receiving a prefix.
+// boundary and always ends with a marker naming the bytes the model did
+// not receive, so the model knows the output is partial and how much of
+// it is missing rather than silently receiving a prefix.
 func capResult(s string, resultCap int) string {
 	if resultCap <= 0 || len(s) <= resultCap {
 		return s
@@ -756,5 +796,5 @@ func capResult(s string, resultCap int) string {
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
-	return s[:cut] + fmt.Sprintf("\n…[truncated %d bytes]", resultCap)
+	return s[:cut] + fmt.Sprintf("\n…[truncated %d bytes]", len(s)-cut)
 }

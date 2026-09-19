@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"os"
 	"reflect"
 	"regexp"
 	"runtime"
@@ -93,6 +94,13 @@ func TestModelStreamContractViolations(t *testing.T) {
 				{weft.ModelToolCall{ID: "c1", Name: ""}, finish},
 			}},
 			want: "empty name",
+		},
+		{
+			name: "duplicate tool call ID",
+			model: &turnModel{turns: [][]weft.ModelEvent{
+				{weft.ModelToolCall{ID: "c1", Name: "t"}, weft.ModelToolCall{ID: "c1", Name: "t"}, finish},
+			}},
+			want: `duplicate tool call ID "c1"`,
 		},
 		{
 			name:  "panicking stream",
@@ -203,7 +211,7 @@ func TestMaxTokensWithToolCallsFailsThemWithoutExecuting(t *testing.T) {
 // failures alike — and the cap can be turned off.
 func TestMaxResultBytes(t *testing.T) {
 	const cap = 64 << 10
-	marker := fmt.Sprintf("\n…[truncated %d bytes]", cap)
+	marker := fmt.Sprintf("\n…[truncated %d bytes]", 200_000-cap)
 	big := weft.Tool("big", "", func(_ context.Context, _ struct{}) (string, error) {
 		return strings.Repeat("x", 200_000), nil
 	})
@@ -263,7 +271,7 @@ func TestMaxResultBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := strings.TrimSuffix(res3.Steps[0].Results[0].Content, "\n…[truncated 101 bytes]")
+	body := strings.TrimSuffix(res3.Steps[0].Results[0].Content, "\n…[truncated 100 bytes]")
 	if len(body) != 100 || !utf8.ValidString(body) {
 		t.Errorf("rune-boundary cut left %d bytes (valid UTF-8: %v), want 100", len(body), utf8.ValidString(body))
 	}
@@ -546,6 +554,89 @@ func TestCanceledBeforeStartEmitsNoOrphanEvents(t *testing.T) {
 		if !results[i].IsError || !strings.Contains(results[i].Content, "before the tool started") {
 			t.Errorf("result %d = %+v, want a canceled-before-start error", i, results[i])
 		}
+	}
+}
+
+// A cancellation that lands after the loop's last ctx check and before
+// the terminal RunFinish is emitted must not produce a success without
+// its RunFinish (rule 4), nor a RunFinish followed by an error
+// (Run.Events' one-terminal-element promise). A tap cancelling on the
+// final StepFinish lands exactly in that window: taps run synchronously
+// before the sink, so the cancel is visible when RunFinish is about to
+// be emitted. Both exits — the ordinary one and the approval boundary —
+// are covered, over Generate and Stream.
+func TestCancelBeforeRunFinishIsNeverASuccess(t *testing.T) {
+	approved := weft.Tool("gated", "Parks the run.",
+		func(context.Context, struct{}) (string, error) { return "ran", nil },
+		weft.RequireApproval())
+	cases := []struct {
+		name  string
+		model func() weft.Model
+	}{
+		{"ordinary exit", func() weft.Model { return wefttest.Script(wefttest.Say("done")) }},
+		{"approval boundary exit", func() weft.Model {
+			return wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "gated"}), wefttest.Say("unreachable"))
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, mode := range []string{"generate", "stream"} {
+				ctx, cancel := context.WithCancel(context.Background())
+				var (
+					mu        sync.Mutex
+					sawFinish bool
+					seen      []weft.Event
+				)
+				agt := weft.New(tc.model(), approved, weft.Tap(func(_ context.Context, ev weft.Event) {
+					mu.Lock()
+					defer mu.Unlock()
+					seen = append(seen, ev)
+					switch ev.(type) {
+					case weft.StepFinish:
+						cancel() // the window: after the loop's checks, before RunFinish
+					case weft.RunFinish:
+						sawFinish = true
+					}
+				}))
+				var err error
+				if mode == "generate" {
+					_, err = agt.Generate(ctx, weft.Prompt("x"))
+				} else {
+					var streamed []weft.Event
+					run := agt.Stream(ctx, weft.Prompt("x"))
+					for ev, serr := range run.Events() {
+						if serr != nil {
+							err = serr
+							break
+						}
+						streamed = append(streamed, ev)
+						if _, ok := ev.(weft.RunFinish); ok {
+							sawFinish = true
+						}
+					}
+					if err == nil {
+						_, err = run.Wait()
+					}
+				}
+				mu.Lock()
+				finish := sawFinish
+				mu.Unlock()
+				switch {
+				case err == nil && !finish:
+					t.Errorf("%s: run succeeded without delivering RunFinish", mode)
+				case err != nil && finish:
+					t.Errorf("%s: RunFinish was delivered and then the run failed: %v", mode, err)
+				case err != nil && !errors.Is(err, context.Canceled):
+					t.Errorf("%s: err = %v, want context.Canceled", mode, err)
+				}
+				// The transcript stays resumable on the error.
+				var runErr *weft.RunError
+				if err != nil && (!errors.As(err, &runErr) || runErr.Result == nil) {
+					t.Errorf("%s: error = %v, want *RunError with a result", mode, err)
+				}
+				cancel()
+			}
+		})
 	}
 }
 
@@ -1662,9 +1753,12 @@ func TestModelFinishRawRecorded(t *testing.T) {
 }
 
 // The kill switch is checked on every call (no cached state to fight);
-// wefttest models ignore it.
+// wefttest models ignore it. The default-allowed assertion is skipped
+// when deny is ambient (WEFT_MODEL_REQUESTS=deny go test — the offline
+// gate): the switch exists to keep that mode green, not to break it.
 func TestModelRequestsAllowed(t *testing.T) {
-	if !weft.ModelRequestsAllowed() {
+	ambientDeny := os.Getenv("WEFT_MODEL_REQUESTS") == "deny"
+	if !ambientDeny && !weft.ModelRequestsAllowed() {
 		t.Fatal("allowed by default")
 	}
 
@@ -2059,6 +2153,102 @@ func TestToolSourceDuplicateFailsRun(t *testing.T) {
 	}
 	if _, err := agt.CallTool(context.Background(), weft.ToolCallPart{Name: "dup"}); !errors.Is(err, weft.ErrDuplicateTool) {
 		t.Errorf("CallTool error = %v, want ErrDuplicateTool", err)
+	}
+}
+
+// A ToolSource snapshot with a nil entry fails the run with ErrNilTool
+// — a malformed snapshot is a run error, not a silently shortened tool
+// list whose advertisement would dereference nil inside every adapter.
+func TestToolSourceNilEntryFailsRun(t *testing.T) {
+	tool := weft.Tool("real", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "ran", nil
+	})
+	agt := weft.New(
+		wefttest.Script(wefttest.Say("never reached")),
+		weft.ToolSource(func() []*weft.ToolDef {
+			return []*weft.ToolDef{tool, nil}
+		}),
+	)
+	_, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if !errors.Is(err, weft.ErrNilTool) {
+		t.Errorf("run error = %v, want ErrNilTool", err)
+	}
+	if _, err := agt.CallTool(context.Background(), weft.ToolCallPart{Name: "real"}); !errors.Is(err, weft.ErrNilTool) {
+		t.Errorf("CallTool error = %v, want ErrNilTool", err)
+	}
+}
+
+// Tool arguments must be exactly one JSON value — the loop-level pin
+// of ADR 0002's 2026-09-18 amendment (the decode-level table lives in
+// tooloption_test.go): a scripted call with trailing garbage after the
+// arguments becomes an INVALID_INPUT result the model sees, not a
+// decoded prefix. Siblings keep running.
+func TestTrailingArgumentDataIsInvalidInput(t *testing.T) {
+	tool := weft.Tool("t", "", func(_ context.Context, _ struct {
+		N int `json:"n"`
+	}) (string, error) {
+		return "ran", nil
+	})
+	agt := weft.New(
+		wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "t", Args: `{"n":1} {"n":2}`}),
+			wefttest.Say("ok"),
+		),
+		tool,
+	)
+	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := res.Steps[0].Results[0]
+	if !r.IsError || !strings.Contains(r.Content, "INVALID_INPUT") || !strings.Contains(r.Content, "trailing data") {
+		t.Errorf("result = %+v, want an INVALID_INPUT trailing-data error the model sees", r)
+	}
+}
+
+// Approval-resume results complete the earlier step's tool message in
+// the assistant's call order (ADR 0007 §3), not appended after the
+// earlier run's results — Gemini matches functionResponses by name and
+// position, so a reordered tool message can attach a result to the
+// wrong call.
+func TestApprovalResumeCompletesInCallOrder(t *testing.T) {
+	park := weft.Tool("park", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "parked-ran", nil
+	}, weft.RequireApproval())
+	plain := weft.Tool("plain", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "plain-ran", nil
+	})
+	agt := weft.New(
+		wefttest.Script(wefttest.ToolCalls(
+			wefttest.Call{ID: "p1", Name: "park"},
+			wefttest.Call{ID: "c1", Name: "plain"},
+		), wefttest.Say("done")),
+		park, plain,
+	)
+	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res2, err := agt.Generate(context.Background(),
+		weft.Messages(res.Messages...), weft.Approve("p1"), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The completed tool message: p1's fresh result, then c1's earlier
+	// one — the assistant's order.
+	var contents []string
+	for _, msg := range res2.Messages {
+		if msg.Role != weft.RoleTool {
+			continue
+		}
+		for _, p := range msg.Content {
+			if r, ok := p.(weft.ToolResultPart); ok {
+				contents = append(contents, r.CallID)
+			}
+		}
+	}
+	if strings.Join(contents, ",") != "p1,c1" {
+		t.Errorf("completed tool message order = %v, want [p1 c1] (the assistant's call order)", contents)
 	}
 }
 

@@ -209,6 +209,9 @@ func (ToolResultPart) isPart() {}
 func (ReasoningPart) isPart()  {}
 func (FilePart) isPart()       {}
 
+// The MarshalJSON methods below repeat deliberately, for the reason
+// recorded once at the events' wire-alias declaration (events.go): a
+// generic helper cannot preserve the flattened wire shape.
 // The *Wire aliases have no methods, so encoding them uses the plain
 // struct encoding — the MarshalJSON methods below add the discriminator
 // without recursing into themselves.

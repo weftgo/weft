@@ -4,8 +4,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/internal/adapterkit"
 	"google.golang.org/genai"
 )
 
@@ -21,9 +23,19 @@ func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.Genera
 			if err != nil {
 				return nil, nil, err
 			}
-			contents = append(contents, &genai.Content{Role: "user", Parts: parts})
+			// A Content with zero parts serializes as {"role":"user"}
+			// — the API rejects it — so a message whose every part was
+			// empty text is skipped (ADR 0013's 2026-09-14 empty-content
+			// rules).
+			if len(parts) > 0 {
+				contents = append(contents, &genai.Content{Role: "user", Parts: parts})
+			}
 		case weft.RoleAssistant:
-			contents = append(contents, &genai.Content{Role: "model", Parts: modelParts(msg)})
+			// Same rule for the model role: unsigned reasoning drops and
+			// can leave nothing sendable.
+			if parts := modelParts(msg); len(parts) > 0 {
+				contents = append(contents, &genai.Content{Role: "model", Parts: parts})
+			}
 		case weft.RoleTool:
 			// One step's results travel on one user content with N
 			// functionResponse parts, in part order — the shape Gemini
@@ -58,6 +70,13 @@ func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.Genera
 		cfg.SystemInstruction = &genai.Content{Parts: []*genai.Part{{Text: req.System}}}
 	}
 	if m.maxTokens > 0 {
+		// The API's limit is an int32; narrowing silently would wrap a
+		// large cap into a garbage (possibly negative) limit on the
+		// wire — fail naming the ceiling instead ("adapters document
+		// what they drop", ADR 0013).
+		if int64(m.maxTokens) > math.MaxInt32 {
+			return nil, nil, fmt.Errorf("%w: MaxTokens %d exceeds Gemini's int32 limit", weft.ErrUnsupported, m.maxTokens)
+		}
 		cfg.MaxOutputTokens = int32(m.maxTokens)
 	}
 	if m.tempSet {
@@ -74,18 +93,21 @@ func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.Genera
 		zero := int32(0)
 		cfg.ThinkingConfig = &genai.ThinkingConfig{ThinkingBudget: &zero}
 	case req.Thinking.Budget > 0:
+		// The budget is an int32 on the wire; see MaxTokens above.
+		if req.Thinking.Budget > math.MaxInt32 {
+			return nil, nil, fmt.Errorf("%w: Thinking Budget %d exceeds Gemini's int32 limit", weft.ErrUnsupported, req.Thinking.Budget)
+		}
 		b := int32(req.Thinking.Budget)
 		cfg.ThinkingConfig = &genai.ThinkingConfig{ThinkingBudget: &b, IncludeThoughts: true}
 	case req.Thinking.Level != weft.ThinkUnset:
 		cfg.ThinkingConfig = &genai.ThinkingConfig{ThinkingLevel: geminiLevel(req.Thinking.Level), IncludeThoughts: true}
 	}
+	// Converted per request: conversion is microseconds against the
+	// network round trip, and the pointer-keyed cache this replaced
+	// never evicted — an unbounded leak under a per-step ToolSource
+	// (ADR 0013, 2026-09-18).
 	for _, t := range req.Tools {
-		converted, ok := m.tools.Load(t)
-		if !ok {
-			converted = convertTool(t)
-			m.tools.Store(t, converted)
-		}
-		cfg.Tools = append(cfg.Tools, converted.(*genai.Tool))
+		cfg.Tools = append(cfg.Tools, convertTool(t))
 	}
 	// SequentialTools has no Gemini switch (function-calling config
 	// stays AUTO) — a documented gap; see ADR 0013.
@@ -109,16 +131,20 @@ func geminiLevel(l weft.ThinkingLevel) genai.ThinkingLevel {
 // userParts converts a user message: text to text parts, file parts to
 // inline data (Gemini carries images, audio, and video natively) or a
 // file URI. A FilePart with both or neither of Data and URL is refused
-// wrapping ErrUnsupported.
+// wrapping ErrUnsupported. Empty text parts are skipped: the SDK omits
+// empty text, so the part would serialize as a bare {} on the wire.
 func userParts(msg weft.Message) ([]*genai.Part, error) {
 	parts := make([]*genai.Part, 0, len(msg.Content))
 	for _, part := range msg.Content {
 		switch p := part.(type) {
 		case weft.TextPart:
+			if p.Text == "" {
+				continue
+			}
 			parts = append(parts, &genai.Part{Text: p.Text})
 		case weft.FilePart:
-			if (len(p.Data) == 0) == (p.URL == "") {
-				return nil, fmt.Errorf("%w: a file part must set exactly one of Data or URL", weft.ErrUnsupported)
+			if err := adapterkit.FilePartSource(p); err != nil {
+				return nil, err
 			}
 			if p.URL != "" {
 				parts = append(parts, &genai.Part{
@@ -170,6 +196,9 @@ func modelParts(msg weft.Message) []*genai.Part {
 	for _, part := range msg.Content {
 		switch p := part.(type) {
 		case weft.TextPart:
+			if p.Text == "" {
+				continue // the SDK omits empty text; a bare {} part is rejected
+			}
 			parts = append(parts, &genai.Part{Text: p.Text})
 		case weft.ReasoningPart:
 			if p.Signature == "" || hasCalls {
@@ -215,8 +244,7 @@ func decodeSignature(s string) []byte {
 	return []byte(s)
 }
 
-// convertTool converts a ToolDef once; results are cached by pointer on
-// the model (ToolDef is immutable after construction).
+// convertTool converts a ToolDef to the SDK's tool declaration.
 func convertTool(t *weft.ToolDef) *genai.Tool {
 	return &genai.Tool{
 		FunctionDeclarations: []*genai.FunctionDeclaration{{

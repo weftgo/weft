@@ -59,8 +59,8 @@ func TestScriptPlaysTurnsAndRecordsRequests(t *testing.T) {
 	}
 
 	reqs := model.Requests()
-	if len(reqs) != 2 { // the exhausted call records nothing
-		t.Fatalf("Requests() recorded %d calls, want 2", len(reqs))
+	if len(reqs) != 3 { // the exhausted call is a real request and records too
+		t.Fatalf("Requests() recorded %d calls, want 3", len(reqs))
 	}
 	if reqs[0].System != "sys" || reqs[0].SequentialTools {
 		t.Errorf("first recorded request = %+v, want the request verbatim", reqs[0])
@@ -117,5 +117,22 @@ func TestMaxTokensTurnShape(t *testing.T) {
 	}
 	if finish.Reason != weft.StopMaxTokens || finish.Usage.Total() != 15 {
 		t.Errorf("MaxTokens finish = %+v, want reason max_tokens and fixed usage", finish)
+	}
+}
+
+// The Model contract, enforced before anything scripted: a ctx that is
+// already done yields ctx.Err() — not the scripted error, not
+// ErrScriptExhausted — the same rule the adapters enforce (the
+// reference double must not teach middleware the wrong shape).
+func TestScriptYieldsContextErrorWhenDone(t *testing.T) {
+	model := wefttest.Script(wefttest.Fail(errors.New("scripted")))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var got error
+	for _, err := range model.Stream(ctx, weft.ModelRequest{}) {
+		got = err
+	}
+	if !errors.Is(got, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", got)
 	}
 }

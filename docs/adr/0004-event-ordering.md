@@ -152,3 +152,18 @@ stands; its converse now has one documented exception. Resumed calls
 (`Approve`) emit their `ToolStart`/`ToolFinish` into the resuming run,
 before its first `StepStart`. A step that finished `max_tokens` with
 calls emits no tool events at all: nothing started (ADR 0002).
+
+
+## Amendment (2026-09-18 — `run_id` on every event)
+
+The "out of scope, deliberately" line above is superseded: every event
+except `RunStart` now carries `run_id` (wire: `run_id`, snake_case as
+the rest), because concurrent runs on one agent emit interleaved
+streams and a per-run `Seq` is unique only within its run — `RunID` is
+what attributes an event to its run, for taps and stream consumers
+alike. `RunStart` keeps its own `id` field as the run's identity and
+gains nothing redundant. Old recordings without the field decode with
+an empty `RunID`; the additive-only compatibility rule is unchanged.
+The `store` module's envelope (when it exists) may still layer its own
+`SchemaVersion`; the core's field is the minimal attribution the
+concurrent-runs case needs.

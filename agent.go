@@ -347,9 +347,10 @@ func isNilModel(m Model) bool {
 // mid-step becomes callable on the next step's fetch. The Agent stays
 // immutable: the source is a value; synchronization and freshness of
 // the list belong to the source's owner. A snapshot with a duplicate
-// name fails the run with ErrDuplicateTool (the runtime analogue of
-// New's duplicate-name panic) rather than silently dropping the second
-// tool. A nil function (the default) keeps the static
+// name fails the run with ErrDuplicateTool and one with a nil entry
+// with ErrNilTool (the runtime analogues of New's duplicate-name
+// panic) rather than silently dropping the second tool or advertising a
+// dereference. A nil function (the default) keeps the static
 // construction-time list — Tool/option registration is then the only
 // source of tools, byte-identical to an agent without a source.
 // Manifest and Agent.Tools still report the static construction-time
@@ -373,15 +374,18 @@ func (a *Agent) effectiveTools() []*ToolDef {
 // resolves against: the step's snapshot inside the loop, a fresh fetch
 // per manual Agent.CallTool. Static agents skip validation — New
 // already panicked on duplicates — so the check costs nothing there.
+// A nil entry or a duplicate name is a malformed snapshot and fails
+// the consultation with its sentinel rather than shipping a tool list
+// the adapters could only crash on.
 func (a *Agent) dispatchTools() ([]*ToolDef, error) {
 	tools := a.effectiveTools()
 	if a.toolSource == nil {
 		return tools, nil
 	}
 	seen := make(map[string]bool, len(tools))
-	for _, t := range tools {
+	for i, t := range tools {
 		if t == nil {
-			continue
+			return nil, fmt.Errorf("%w: entry %d", ErrNilTool, i)
 		}
 		if seen[t.Name] {
 			return nil, fmt.Errorf("%w: %q", ErrDuplicateTool, t.Name)
@@ -393,9 +397,10 @@ func (a *Agent) dispatchTools() ([]*ToolDef, error) {
 
 // findTool resolves a name against a fetched snapshot; first match
 // wins, the rule registration order already implies for static lists.
+// Snapshots are validated by dispatchTools, so no nil guard here.
 func findTool(tools []*ToolDef, name string) (*ToolDef, bool) {
 	for _, t := range tools {
-		if t != nil && t.Name == name {
+		if t.Name == name {
 			return t, true
 		}
 	}

@@ -12,14 +12,25 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/wefttest/conformance"
 )
 
+// testClient builds an SDK client aimed at srv. Injecting it — instead
+// of BaseURL — marks the client as a test double, so the suite stays
+// green under WEFT_MODEL_REQUESTS=deny (the offline gate); the
+// kill-switch test keeps a self-built client to prove the switch still
+// fires.
+func testClient(srv *httptest.Server) anthropic.Client {
+	return anthropic.NewClient(option.WithBaseURL(srv.URL), option.WithAPIKey("test"))
+}
+
 func fixtureModel(t *testing.T, name string, opts ...Option) weft.Model {
 	t.Helper()
 	srv := conformance.FixtureServer(t, filepath.Join("testdata", name+".sse"))
-	opts = append([]Option{BaseURL(srv.URL), APIKey("test")}, opts...)
+	c := testClient(srv)
+	opts = append([]Option{Client(&c)}, opts...)
 	return Model("m", opts...)
 }
 
@@ -210,7 +221,8 @@ func TestStreamRefusalRaw(t *testing.T) {
 
 func TestStreamIdleTimeout(t *testing.T) {
 	srv := conformance.StallServer(t, anthropicStallChunk)
-	m := Model("m", BaseURL(srv.URL), APIKey("test"), IdleTimeout(150*time.Millisecond))
+	c := testClient(srv)
+	m := Model("m", Client(&c), IdleTimeout(150*time.Millisecond))
 	_, err := collect(m, basicReq)
 	if !errors.Is(err, weft.ErrStreamIdle) {
 		t.Fatalf("err = %v, want ErrStreamIdle", err)
@@ -228,7 +240,8 @@ func TestStreamSDKErrorUnchanged(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"type":"error","error":{"type":"rate_limit_error","message":"Number of requests too high"}}`)
 	}))
 	t.Cleanup(srv.Close)
-	m := Model("m", BaseURL(srv.URL), APIKey("test"))
+	c := testClient(srv)
+	m := Model("m", Client(&c))
 	_, err := collect(m, basicReq)
 	var apiErr *anthropic.Error
 	if !errors.As(err, &apiErr) {
@@ -248,8 +261,21 @@ func TestStreamKillSwitch(t *testing.T) {
 	}
 }
 
+// The flip side of TestStreamKillSwitch: a client the caller injected
+// is a test double by construction (ADR 0013's kill-switch clause) and
+// stays reachable under deny, so offline suites run in the very mode
+// the switch exists for.
+func TestKillSwitchExemptsInjectedClient(t *testing.T) {
+	t.Setenv("WEFT_MODEL_REQUESTS", "deny")
+	m := fixtureModel(t, "text_only") // fixtureModel injects its SDK client
+	if _, err := collect(m, basicReq); err != nil {
+		t.Fatalf("injected client must stay reachable under deny: %v", err)
+	}
+}
+
 func TestStreamUnsupportedFilePart(t *testing.T) {
-	m := Model("m", BaseURL("http://127.0.0.1:1"), APIKey("test"))
+	c := anthropic.NewClient(option.WithBaseURL("http://127.0.0.1:1"), option.WithAPIKey("test"))
+	m := Model("m", Client(&c))
 	req := weft.ModelRequest{Messages: []weft.Message{weft.UserParts(
 		weft.FilePart{MediaType: "audio/wav", Data: []byte{1}},
 	)}}

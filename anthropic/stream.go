@@ -11,6 +11,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/internal/adapterkit"
 )
 
 // block accumulates one streamed content block, keyed by the event's
@@ -29,7 +30,10 @@ type block struct {
 // progress) and yielded whole before ModelFinish.
 func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
 	return func(yield func(weft.ModelEvent, error) bool) {
-		if !weft.ModelRequestsAllowed() {
+		// The kill switch guards self-built client egress; a client the
+		// caller injected is a test double by construction (ADR 0013's
+		// kill-switch clause).
+		if !m.injected && !weft.ModelRequestsAllowed() {
 			yield(nil, weft.ErrModelRequestsDenied)
 			return
 		}
@@ -136,7 +140,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 		}
 		reader.wait()
 		if err := stream.Err(); err != nil {
-			yield(nil, terminalErr(ctx, err))
+			yield(nil, adapterkit.TerminalErr(ctx, err))
 			return
 		}
 		// A canceled caller must never see a fabricated finish: the
@@ -178,16 +182,6 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			Raw:    raw,
 		}, nil)
 	}
-}
-
-// terminalErr reports the stream's error the way the Model contract
-// expects: ctx.Err() when the caller's context ended, the SDK error
-// unchanged otherwise — so callers can errors.As *anthropic.Error.
-func terminalErr(ctx context.Context, err error) error {
-	if cerr := ctx.Err(); cerr != nil {
-		return cerr
-	}
-	return err
 }
 
 // streamReader drives the SDK's SSE stream on a goroutine with an idle

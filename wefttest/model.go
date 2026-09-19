@@ -108,17 +108,29 @@ func (*Model) Info() weft.ModelInfo {
 
 // Stream implements weft.Model.
 func (m *Model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	// The request is recorded even when the script is exhausted: it is
+	// a real request the agent made, and attempt-counting tests under
+	// Retry/Fallback must not under-count silently (ErrScriptExhausted
+	// on the run error says which entry it was).
 	m.mu.Lock()
 	var turn Turn
 	exhausted := m.pos >= len(m.turns)
 	if !exhausted {
 		turn = m.turns[m.pos]
 		m.pos++
-		m.requests = append(m.requests, cloneRequest(req))
 	}
+	m.requests = append(m.requests, cloneRequest(req))
 	m.mu.Unlock()
 
 	return func(yield func(weft.ModelEvent, error) bool) {
+		// The Model contract, checked before anything scripted: when
+		// ctx is done the stream yields ctx.Err() — the same rule the
+		// adapters enforce, so middleware written against the
+		// documented contract sees the same error from the double.
+		if err := ctx.Err(); err != nil {
+			yield(nil, err)
+			return
+		}
 		if exhausted {
 			yield(nil, ErrScriptExhausted)
 			return
@@ -139,8 +151,11 @@ func (m *Model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 	}
 }
 
-// Requests returns every ModelRequest the agent sent, in order — assert on
-// system prompts, transcript shape, and the tool catalog the model saw.
+// Requests returns every ModelRequest the agent sent, in order —
+// including a call that exhausted the script (identify it by the
+// ErrScriptExhausted run error) — so assert on system prompts,
+// transcript shape, the tool catalog the model saw, and attempt counts
+// under Retry/Fallback alike.
 func (m *Model) Requests() []weft.ModelRequest {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -25,7 +25,7 @@ lookup := weft.Tool("lookup_order", "Look up an order by ID.",
 // Give the model a code to branch on; the cause stays in logs:
 //   return "", &weft.ToolError{Code: "ORDER_NOT_FOUND", Message: "order 42 does not exist", Err: err}
 // More per-tool options: weft.Sequential() (barrier), weft.RequireApproval(),
-// weft.PromptSnippet("…"), weft.Replay(weft.ReplaySafe), weft.WrapTools(mw...).
+// weft.PromptSnippet("…"), weft.WrapTools(mw...).
 
 // 1b. Tools defined outside Go source: explicit schema, raw args.
 //     weft.RawTool("parse_invoice", "…", schema, func(ctx, raw) (string, error))
@@ -100,15 +100,21 @@ Set `WEFT_MODEL_REQUESTS=deny` to make every first-party adapter refuse
 to call its provider (`weft.ModelRequestsAllowed()` reads it on every
 call, so suites can toggle it per test; adapters yield
 `weft.ErrModelRequestsDenied`) — for suites that must never reach the
-network. `wefttest` models ignore it.
+network. The switch guards clients the adapters build themselves from
+credentials; a client injected via the adapters' `Client(c)` option is
+a test double by construction and stays reachable, so weft's own
+offline suites run under deny too (`make offline`). `wefttest` models
+ignore it.
 
 ## The rules (do not break these; tests pin them)
 
 1. **Tool error = data the model sees; run error = Go error.** A handler
    error, panic, unknown tool, or bad arguments becomes
-   `ToolResultPart{IsError: true}`; siblings keep running. Only model
-   failure, context cancellation, and `MaxSteps` return an error, always
-   `*RunError` with the partial transcript in `.Result`. Use `errors.Is`.
+   `ToolResultPart{IsError: true}`; siblings keep running. Model
+   failure, context cancellation, `MaxSteps`, and a malformed
+   tool-source snapshot (`ErrDuplicateTool`, `ErrNilTool`) return an
+   error, always `*RunError` with the partial transcript in `.Result`.
+   Use `errors.Is`.
 2. **Messages are `role` + typed parts, events are tagged structs**, both
    with a `type` discriminator on the wire (`weft.UnmarshalEvent` restores
    events; unknown types are errors, never drops). Roles: `user`,

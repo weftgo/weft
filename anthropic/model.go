@@ -2,7 +2,6 @@ package anthropic
 
 import (
 	"os"
-	"sync"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -42,7 +41,11 @@ func BaseURL(u string) Option { return optionFunc(func(c *config) { c.baseURL = 
 func APIKey(k string) Option { return optionFunc(func(c *config) { c.apiKey = k }) }
 
 // Client uses an already-configured SDK client (Vertex AI and Bedrock
-// clients compose here); it overrides BaseURL, APIKey, and MaxRetries.
+// clients, test doubles); it overrides BaseURL, APIKey, and MaxRetries.
+// The WEFT_MODEL_REQUESTS kill switch guards egress from clients the
+// adapter builds from credentials; an injected client's destinations
+// are the caller's responsibility — which is why it stays reachable
+// under deny (ADR 0013's kill-switch clause).
 func Client(c *anthropic.Client) Option {
 	return optionFunc(func(cfg *config) { cfg.client = c })
 }
@@ -102,13 +105,13 @@ func Model(name string, opts ...Option) weft.Model {
 		tempSet:     cfg.tempSet,
 		thinking:    cfg.thinking,
 		idle:        defaultIdleTimeout,
-		tools:       sync.Map{},
 	}
 	if cfg.idleSet {
 		m.idle = cfg.idle
 	}
 	if cfg.client != nil {
 		m.client = *cfg.client
+		m.injected = true
 		return m
 	}
 	var sdkOpts []option.RequestOption
@@ -129,13 +132,13 @@ func Model(name string, opts ...Option) weft.Model {
 
 type model struct {
 	client      anthropic.Client
+	injected    bool // client came from Client(c): a test double, exempt from the kill switch
 	name        string
 	maxTokens   int
 	temperature float64
 	tempSet     bool
 	thinking    bool
 	idle        time.Duration
-	tools       sync.Map // *weft.ToolDef → anthropic.ToolUnionParam
 }
 
 // Info identifies the model for RunStart and the manifest.

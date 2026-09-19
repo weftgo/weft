@@ -144,9 +144,61 @@ it ship, all as trailing options on `Tool`/`RawTool`:
   paragraph per tool, blank-line separated. Model-visible (the system
   prompt), pinned by `TestPromptSnippetsComposeIntoInstructions`.
 - **`Replay(ReplaySafe|ReplayNever)`**: an annotation for checkpoint
-  restart (§11); accessor `ToolDef.ReplayPolicy()`.
+  restart (§11); accessor `ToolDef.ReplayPolicy()`. (Retracted 2026-09-18 until the store ships — ADR 0006 amendment.)
 - **`RequireApproval()`** — ADR 0007.
 
 The manifest records each (`sequential`, `require_approval`, `replay`,
 `prompt_snippet`); tools without them render exactly as before.
 Decode failures are now coded `INVALID_INPUT: tool "x": …` (ADR 0002).
+
+
+## Amendment (2026-09-18, from the 2026-09-18 code review — the schema
+## derivation rules the code shipped without their ADR)
+
+Three model-visible derivation rules are contract as of this
+amendment; each was already on the wire.
+
+- **`json:",string"` scalars derive `{"type":"string"}`** for the kinds
+  that support the option (strings, bools, integers, floats): the wire
+  form is a quoted value, and advertising the bare type would invite
+  exactly the unquoted value decoding rejects. The property description
+  still comes from the `jsonschema` tag.
+- **Embedded shadowing follows encoding/json's dominance rules in
+  full**: the shallowest embedding depth wins; at equal depth exactly
+  one json-tagged claim beats untagged ones, and any other tie cancels
+  the name (encoding/json drops it from the wire, so the schema must
+  not advertise it). Two fields of the same struct claiming one JSON
+  name — always both tagged — panic at construction, at any *named*
+  nesting depth: each named struct derives its own depth-0 space, and
+  its unreachable handler field is no less a bug than the input
+  struct's — the duplicate-name and non-struct-input precedent. The
+  same collision inside an embedded struct does not panic: its claims
+  flatten into the parent's dominance rules and the name drops,
+  keeping encoding/json's drop. One deliberate,
+  conservative divergence: in a double diamond (the same field reached
+  through two same-depth paths via a shared intermediate) the schema
+  cancels the name while encoding/json's breadth-first resolver may
+  keep it — the cancelled side never advertises what decode cannot
+  reliably deliver. Pinned in `schema_conflict_test.go`.
+- **Maps derive `additionalProperties` typing the values** (JSON Schema
+  draft 2020-12): `map[string]int` → object of integers, with
+  `map[string]any` a bare object (an any value type has nothing to
+  say; an empty `additionalProperties:{}` would say nothing new). The
+  boolean false form is not expressible — reflection always has a
+  value type.
+
+Decode-error text now derives from the same mapping as the schema
+(`schemaTypeName` is gone as a second source of truth): a `[]byte`
+field reports "expected string", matching the advertised schema, and
+a json ",string" mismatch renders as `expected string: a ",string"
+field's value must arrive inside quotes` — the schema's vocabulary,
+not the Go type (encoding/json reports it as a plain error naming
+the Go type inside the quotes).
+
+
+## Amendment (2026-09-18 — `Replay` retracted)
+
+The `Replay` option above is deleted until the checkpoint store ships
+(ADR 0006's same-day amendment carries the reasoning); the manifest's
+`replay` key goes with it. Everything else in the 2026-09-14 list
+stands.

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/internal/jsonconflict"
 )
 
 func TestSchemaDerivation(t *testing.T) {
@@ -58,6 +59,83 @@ func TestSchemaEmbeddedStruct(t *testing.T) {
 	want := `{"type":"object","properties":{"lang":{"type":"string"},"query":{"type":"string"}},"required":["lang","query"]}`
 	if string(got) != want {
 		t.Errorf("schema:\n got  %s\n want %s", got, want)
+	}
+}
+
+// A field of the struct itself shadows an embedded one with the same
+// JSON name — encoding/json's depth rule — for the property's schema
+// and its required flag both, whatever the declaration order. The
+// colliding embedded types come from internal/jsonconflict: defined
+// here, go vet's structtag check would report the duplication this
+// test exists to exercise.
+func TestSchemaEmbeddedShadowing(t *testing.T) {
+	shadow := weft.Tool("shadow", "", func(_ context.Context, in struct {
+		jsonconflict.Base // declares "name": string, required
+		// Shallower and omitempty: wins the schema, drops the required.
+		Name int `json:"name,omitempty"`
+	}) (string, error) {
+		return "", nil
+	})
+	got, err := json.Marshal(shadow.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"type":"object","properties":{"keep":{"type":"string"},"name":{"type":"integer"}},"required":["keep"]}`
+	if string(got) != want {
+		t.Errorf("shadow schema:\n got  %s\n want %s", got, want)
+	}
+	// The schema must not lie about what decoding does: the outer field
+	// is the one encoding/json decodes into.
+	var in struct {
+		jsonconflict.Base
+		Name int `json:"name,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(`{"name":"str"}`), &in); err == nil {
+		t.Error("encoding/json let a string into the shadowing int field?!")
+	}
+
+	// Declaration order the other way around: the outer field declared
+	// before the embedded struct must still win.
+	flipped := weft.Tool("flipped", "", func(_ context.Context, in struct {
+		Name int    `json:"name"`
+		Keep string `json:"keep"`
+		jsonconflict.Base
+	}) (string, error) {
+		return "", nil
+	})
+	got, err = json.Marshal(flipped.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = `{"type":"object","properties":{"keep":{"type":"string"},"name":{"type":"integer"}},"required":["name","keep"]}`
+	if string(got) != want {
+		t.Errorf("flipped schema:\n got  %s\n want %s", got, want)
+	}
+}
+
+// The json ",string" option is reflected: the property is typed string —
+// the quoted wire form encoding/json demands — so a schema-following
+// model's arguments decode.
+func TestSchemaStringOption(t *testing.T) {
+	type in struct {
+		N    int    `json:"n,string"`
+		Flag bool   `json:"flag,string"`
+		Note string `json:"note"`
+	}
+	tool := weft.Tool("x", "", func(_ context.Context, in in) (string, error) {
+		return "ok", nil
+	})
+	got, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"type":"object","properties":{"flag":{"type":"string"},"n":{"type":"string"},"note":{"type":"string"}},"required":["n","flag","note"]}`
+	if string(got) != want {
+		t.Errorf("schema:\n got  %s\n want %s", got, want)
+	}
+	// The schema-conformant form — quoted values — must decode.
+	if _, err := tool.Invoke(context.Background(), json.RawMessage(`{"n":"42","flag":"true","note":"hi"}`)); err != nil {
+		t.Fatalf("quoted, schema-conformant arguments rejected: %v", err)
 	}
 }
 

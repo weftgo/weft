@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/internal/adapterkit"
 	"google.golang.org/genai"
 )
 
@@ -18,7 +19,10 @@ import (
 // per step otherwise.
 func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
 	return func(yield func(weft.ModelEvent, error) bool) {
-		if !weft.ModelRequestsAllowed() {
+		// The kill switch guards self-built client egress; a client the
+		// caller injected is a test double by construction (ADR 0013's
+		// kill-switch clause).
+		if !m.injected && !weft.ModelRequestsAllowed() {
 			yield(nil, weft.ErrModelRequestsDenied)
 			return
 		}
@@ -111,13 +115,21 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 							!yield(weft.ModelReasoningDelta{Signature: encodeSignature(part.ThoughtSignature)}, nil) {
 							return
 						}
+					case len(part.ThoughtSignature) > 0:
+						// A signature riding a non-thought part with empty
+						// text: the text is nothing but the signature must
+						// still stream back — Gemini validates its return
+						// on the next request, so losing it fails the call.
+						if !yield(weft.ModelReasoningDelta{Signature: encodeSignature(part.ThoughtSignature)}, nil) {
+							return
+						}
 					}
 				}
 			}
 		}
 		reader.wait()
 		if err := reader.err(); err != nil {
-			yield(nil, terminalErr(ctx, err))
+			yield(nil, adapterkit.TerminalErr(ctx, err))
 			return
 		}
 		// A canceled caller must never see a fabricated finish: the
@@ -129,9 +141,19 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			yield(nil, err)
 			return
 		}
+		// Synthesised ids (call_<i>) must not collide with a
+		// server-populated id of the same shape in the same step: a
+		// repeated id fails the run with ErrModelContract — the failure
+		// the synthesis exists to prevent.
+		used := make(map[string]bool, len(calls))
+		for _, c := range calls {
+			if c.ID != "" {
+				used[c.ID] = true
+			}
+		}
 		for i, c := range calls {
 			if c.ID == "" {
-				c.ID = fmt.Sprintf("call_%d", i+1)
+				c.ID = adapterkit.NextCallID(used, i)
 			}
 			if !yield(c, nil) {
 				return
@@ -140,16 +162,6 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 		reason, raw := mapFinish(finish, len(calls) > 0)
 		yield(weft.ModelFinish{Reason: reason, Usage: usage, Raw: raw}, nil)
 	}
-}
-
-// terminalErr reports the stream's error the way the Model contract
-// expects: ctx.Err() when the caller's context ended, the SDK error
-// unchanged otherwise — so callers can errors.As genai.APIError.
-func terminalErr(ctx context.Context, err error) error {
-	if cerr := ctx.Err(); cerr != nil {
-		return cerr
-	}
-	return err
 }
 
 // streamReader drives the SDK's response iterator on a goroutine with

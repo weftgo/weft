@@ -210,7 +210,8 @@ argument fragments is the adapter's job; the fragments may stream as
 `ModelToolCallDelta` progress, the assembled call still arrives
 whole), exactly one `ModelFinish`, failure as one terminal error, ctx
 honoured. A stream that ends without a finish, continues after it,
-yields a call with an empty id or name, emits an unknown type, or
+yields a call with an empty id or name, two calls sharing an id in one
+step, emits an unknown type, or
 panics, fails the run wrapping `ErrModelContract`. A broken adapter
 cannot corrupt a transcript silently. `ModelFinish.Raw` carries the
 provider's own stop reason whenever the mapping was approximate
@@ -326,7 +327,8 @@ iterator with a deferred `recover` so a panicking adapter becomes
 `TextDelta` and appended to a builder; `ModelReasoningDelta` is emitted
 as `ReasoningDelta` and appended to the open reasoning block, and a
 non-empty `Signature` closes that block; `ModelToolCall` is validated
-(empty id or name is a contract violation) and appended to `calls`;
+(empty id or name, or a repeated id within the step, is a contract
+violation) and appended to `calls`;
 `ModelToolCallDelta` is emitted as `ToolArgsDelta` and otherwise
 ignored; `ModelFinish` is recorded and sets `finished`; anything else
 is a contract violation. An event after the finish, a stream error, or
@@ -802,7 +804,8 @@ callers; the funnel above is for the model.
   error, unless the *run's* ctx was the one that expired, in which case
   the run is failing anyway.
 - **The result is enormous.** Capped at 64 KiB by default on a rune
-  boundary with a visible `…[truncated N bytes]` marker (rule 8). pi
+  boundary with a visible `…[truncated N bytes]` marker, N = bytes the
+  model did not receive (rule 8). pi
   puts the same rule on tool authors: 50 KB and 2000 lines, the rest to
   a file [pi §11].
 - **A denied call.** `DENIED: tool "x" is not allowed` from `mw.Allow`,

@@ -3,11 +3,9 @@ package google
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest/conformance"
 )
 
 // A consumer that cancels mid-stream but keeps consuming must get the
@@ -17,9 +15,7 @@ import (
 // before the ctx check after the read loop, that window turned a
 // canceled run into a normal-looking finish.
 func TestCancelMidStreamYieldsContextError(t *testing.T) {
-	m := Model("m",
-		BaseURL(conformance.FixtureServer(t, filepath.Join("testdata", "text_only.sse")).URL),
-		APIKey("test"))
+	m := fixtureModel(t, "text_only")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

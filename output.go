@@ -112,6 +112,11 @@ func OutputOf[Out any](res *RunResult) (Out, error) {
 			if k < 0 || step.Results[k].IsError {
 				continue
 			}
+			// Lenient decode, deliberately: these bytes already passed
+			// the run's decode when the handler recorded them, so
+			// strictness here would only reject a forged RunResult —
+			// outside the threat model (a caller who can forge a result
+			// can forge the output too).
 			out, err := decodeInput[Out](outputToolName, call.Args, false)
 			if err != nil {
 				// The handler decoded these same bytes; a failure here

@@ -203,20 +203,6 @@ func TestMapFinish(t *testing.T) {
 	}
 }
 
-func TestToolDefsConvertedOnce(t *testing.T) {
-	m := Model("m").(*model)
-	def := testTool()
-	sentinel := &genai.Tool{}
-	m.tools.Store(def, sentinel)
-	_, cfg, err := m.contents(weft.ModelRequest{Tools: []*weft.ToolDef{def}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Tools[0] != sentinel {
-		t.Error("tool converted again; want the cached sentinel")
-	}
-}
-
 func TestConfigOptions(t *testing.T) {
 	m := Model("m", MaxTokens(64), Temperature(0.5), MaxRetries(2)).(*model)
 	if m.maxRetries != 2 {

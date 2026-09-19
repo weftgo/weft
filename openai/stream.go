@@ -12,6 +12,7 @@ import (
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/ssestream"
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/internal/adapterkit"
 )
 
 // partialCall accumulates one tool call's streamed fragments, keyed by
@@ -19,7 +20,7 @@ import (
 // servers repeat or omit the id on continuation chunks).
 type partialCall struct {
 	id   string
-	name strings.Builder
+	name string
 	args strings.Builder
 }
 
@@ -32,7 +33,10 @@ type partialCall struct {
 // tool_call_id matches deterministically.
 func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
 	return func(yield func(weft.ModelEvent, error) bool) {
-		if !weft.ModelRequestsAllowed() {
+		// The kill switch guards self-built client egress; a client the
+		// caller injected is a test double by construction (ADR 0013's
+		// kill-switch clause).
+		if !m.injected && !weft.ModelRequestsAllowed() {
 			yield(nil, weft.ErrModelRequestsDenied)
 			return
 		}
@@ -100,7 +104,11 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 						pc.id = tc.ID
 					}
 					if tc.Function.Name != "" {
-						pc.name.WriteString(tc.Function.Name)
+						// The name, like the ID, is overwritten rather than
+						// concatenated: servers that repeat the full name on
+						// continuation chunks would otherwise assemble
+						// "pingpingping" — a call nobody can dispatch.
+						pc.name = tc.Function.Name
 					}
 					if tc.Function.Arguments != "" {
 						pc.args.WriteString(tc.Function.Arguments)
@@ -108,7 +116,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 						// generated-code argument can take seconds to
 						// arrive, and without these the consumer sees
 						// dead air until the call is whole.
-						if !yield(weft.ModelToolCallDelta{Index: int(tc.Index), Name: pc.name.String(), Args: tc.Function.Arguments}, nil) {
+						if !yield(weft.ModelToolCallDelta{Index: int(tc.Index), Name: pc.name, Args: tc.Function.Arguments}, nil) {
 							return
 						}
 					}
@@ -120,7 +128,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 		}
 		reader.wait()
 		if err := stream.Err(); err != nil {
-			yield(nil, terminalErr(ctx, err))
+			yield(nil, adapterkit.TerminalErr(ctx, err))
 			return
 		}
 		// A canceled caller must never see a fabricated finish: the
@@ -132,11 +140,22 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			yield(nil, err)
 			return
 		}
+		// Synthesised ids (call_<i>) must not collide with a
+		// server-populated id of the same shape in the same step
+		// (llama.cpp-style servers populate some ids and omit others):
+		// a repeated id fails the run with ErrModelContract — the exact
+		// failure the synthesis exists to prevent.
+		used := make(map[string]bool, len(calls))
+		for _, pc := range calls {
+			if pc != nil && pc.id != "" {
+				used[pc.id] = true
+			}
+		}
 		for i, idx := range order {
 			pc := calls[idx]
 			id := pc.id
 			if id == "" {
-				id = fmt.Sprintf("call_%d", i+1)
+				id = adapterkit.NextCallID(used, i)
 			}
 			args := pc.args.String()
 			if args == "" {
@@ -144,24 +163,13 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 				// adapter never emits an undecodable empty string.
 				args = "{}"
 			}
-			if !yield(weft.ModelToolCall{ID: id, Name: pc.name.String(), Args: json.RawMessage(args)}, nil) {
+			if !yield(weft.ModelToolCall{ID: id, Name: pc.name, Args: json.RawMessage(args)}, nil) {
 				return
 			}
 		}
 		reason, raw := mapFinish(finish, len(order) > 0)
 		yield(weft.ModelFinish{Reason: reason, Usage: usage, Raw: raw}, nil)
 	}
-}
-
-// terminalErr reports the stream's error the way the Model contract
-// expects: ctx.Err() when the caller's context ended (the SDK wraps
-// cancellation in its own error), the SDK error unchanged otherwise —
-// so callers can errors.As the SDK's *openai.Error.
-func terminalErr(ctx context.Context, err error) error {
-	if cerr := ctx.Err(); cerr != nil {
-		return cerr
-	}
-	return err
 }
 
 // reasoningContent surfaces DeepSeek-style reasoning_content from

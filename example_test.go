@@ -459,6 +459,51 @@ func ExampleRequireApproval() {
 	// Done.
 }
 
+// The loop's coded failures are exported contract strings. A denied
+// call renders DENIED whether the approval boundary refused it (here,
+// on resume) or mw.Allow did — one vocabulary for the model; the same
+// rule carries CodeInvalidInput (ExampleToolError) and
+// CodeNoSuchTool (below).
+func ExampleCodeDenied() {
+	refund := weft.Tool("refund", "Refund an order.", func(_ context.Context, _ struct{}) (string, error) {
+		return "refunded", nil
+	}, weft.RequireApproval())
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{ID: "c1", Name: "refund"}),
+		wefttest.Say("I could not refund it."),
+	), refund)
+
+	res, err := agt.Generate(context.Background(), weft.Prompt("refund order 42"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	res, err = agt.Generate(context.Background(),
+		weft.Messages(res.Messages...), weft.Deny("c1", "customer withdrew"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	// The denied call's result is the model's to read, in the transcript.
+	fmt.Println(res.Messages[len(res.Messages)-2].Content[0].(weft.ToolResultPart).Content)
+	// Output:
+	// DENIED: customer withdrew
+}
+
+// A call naming a tool the agent does not have becomes a coded error
+// result the model can self-correct from — data, not a run failure.
+func ExampleCodeNoSuchTool() {
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund"}),
+		wefttest.Say("I have no such tool."),
+	))
+	res, err := agt.Generate(context.Background(), weft.Prompt("refund it"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Steps[0].Results[0].Content)
+	// Output:
+	// NO_SUCH_TOOL: no tool named "refund"
+}
+
 // PromptSnippet keeps a tool's usage rules next to the tool; the loop
 // appends them to the instructions of every model call.
 func ExamplePromptSnippet() {

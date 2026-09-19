@@ -186,6 +186,44 @@ unchanged. Codes are not validated; SCREAMING_SNAKE is the convention.
 `RequireApproval` tool through `CallTool` — and `ErrApprovalDenied`,
 the cause on a `DENIED: <reason>` result. Neither is a run error.
 
+## Amendment (2026-09-18, from the core audit — two model-visible
+## tightenings, one clarified)
+
+- **A tool call ID repeated within one step fails the run** wrapping
+  `ErrModelContract`, alongside the empty-ID and empty-name checks.
+  A repeated ID made the transcript ambiguous: `Repair` keeps only
+  the first result per ID, so the loop could emit a transcript its
+  own repair pass rewrites, and `Approve`/`Deny` keyed on the ID
+  became ambiguous. IDs may still repeat across steps.
+- **Tool arguments must be exactly one JSON value.** Trailing data
+  after the arguments object — `{"a":1} {"a":2}` or `{"a":1} x` —
+  is now an `ErrInvalidToolInput` result (`trailing data after the
+  JSON arguments`) in lenient and strict modes alike; the decoder
+  previously took the first value and ignored the rest.
+- **The truncation marker names the bytes omitted.**
+  `\n…[truncated N bytes]` now carries N = bytes the model did not
+  receive (the old marker carried the cap, which read as "N bytes
+  missing" however many were cut). The shape is unchanged; this
+  fixes the number, unambiguous for the model.
+
+## Amendment (2026-09-18, remediation pass — the catalogue's fourth
+## run-error class; the kill-switch clause narrowed)
+
+- **A malformed tool-source snapshot fails the run.** The three
+  classes above gain a fourth: a `ToolSource` snapshot carrying a
+  duplicate name or a nil entry is the registry's bug, not something
+  the model can see and correct, so the run fails wrapping
+  **`ErrDuplicateTool`** or **`ErrNilTool`** (sentinels in
+  `errors.go`) — always `*RunError` with the partial transcript, like
+  every run error. (Spec finding R15.)
+- **The kill-switch clause above is narrowed** to the clients it was
+  always about: `WEFT_MODEL_REQUESTS=deny` makes every first-party
+  adapter yield `ErrModelRequestsDenied` before any network I/O only
+  for a client the adapter built itself from credentials. A client
+  the caller injected through the adapter's `Client(c)` option stays
+  reachable — ADR 0013's amended kill-switch clause records the full
+  rationale.
+
 ## Alternatives considered
 
 - **errgroup abort on first tool error**: cancels unrelated work the model

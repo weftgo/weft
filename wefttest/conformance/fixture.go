@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // FixtureServer serves the recorded responses in file, in order, one
@@ -63,6 +64,36 @@ func StallServer(t *testing.T, firstChunk string) *httptest.Server {
 		_, _ = io.WriteString(w, firstChunk)
 		flusher.Flush()
 		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// SlowServer drips drip every interval, count times, then serves done
+// and ends the stream. The chunk gaps sit below an adapter's
+// IdleTimeout while the stream's total exceeds it — a slow but
+// actively streaming response the per-chunk idle timer must let
+// through, the flip side of StallServer's true stall.
+func SlowServer(t *testing.T, drip, done string, interval time.Duration, count int) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Errorf("conformance: response writer cannot flush")
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		for i := 0; i < count; i++ {
+			_, _ = io.WriteString(w, drip)
+			flusher.Flush()
+			select {
+			case <-time.After(interval):
+			case <-r.Context().Done():
+				return
+			}
+		}
+		_, _ = io.WriteString(w, done)
+		flusher.Flush()
 	}))
 	t.Cleanup(srv.Close)
 	return srv

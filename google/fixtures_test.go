@@ -19,10 +19,27 @@ import (
 	"google.golang.org/genai"
 )
 
+// testClient builds an SDK client aimed at srv. Injecting it — instead
+// of BaseURL — marks the client as a test double, so the suite stays
+// green under WEFT_MODEL_REQUESTS=deny (the offline gate); the
+// kill-switch test keeps a self-built client to prove the switch still
+// fires.
+func testClient(t *testing.T, url string) *genai.Client {
+	t.Helper()
+	c, err := genai.NewClient(context.Background(), &genai.ClientConfig{
+		APIKey:      "test",
+		HTTPOptions: genai.HTTPOptions{BaseURL: url},
+	})
+	if err != nil {
+		t.Fatalf("genai.NewClient: %v", err)
+	}
+	return c
+}
+
 func fixtureModel(t *testing.T, name string, opts ...Option) weft.Model {
 	t.Helper()
 	srv := conformance.FixtureServer(t, filepath.Join("testdata", name+".sse"))
-	opts = append([]Option{BaseURL(srv.URL), APIKey("test")}, opts...)
+	opts = append([]Option{Client(testClient(t, srv.URL))}, opts...)
 	return Model("m", opts...)
 }
 
@@ -128,7 +145,7 @@ func TestSynthesisedIDsRoundTrip(t *testing.T) {
 		_, _ = w.Write([]byte(responses[i]))
 	}))
 	t.Cleanup(srv.Close)
-	m := Model("m", BaseURL(srv.URL), APIKey("test"))
+	m := Model("m", Client(testClient(t, srv.URL)))
 
 	// Turn 1: two calls, ids synthesised.
 	evs, err := collect(m, basicReq)
@@ -279,7 +296,7 @@ func TestStreamSafetyRaw(t *testing.T) {
 
 func TestStreamIdleTimeout(t *testing.T) {
 	srv := conformance.StallServer(t, stallChunk)
-	m := Model("m", BaseURL(srv.URL), APIKey("test"), IdleTimeout(150*time.Millisecond))
+	m := Model("m", Client(testClient(t, srv.URL)), IdleTimeout(150*time.Millisecond))
 	_, err := collect(m, basicReq)
 	if !errors.Is(err, weft.ErrStreamIdle) {
 		t.Fatalf("err = %v, want ErrStreamIdle", err)
@@ -297,7 +314,7 @@ func TestStreamAPIErrorUnchanged(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"error":{"code":429,"message":"Resource exhausted","status":"RESOURCE_EXHAUSTED"}}`)
 	}))
 	t.Cleanup(srv.Close)
-	m := Model("m", BaseURL(srv.URL), APIKey("test"))
+	m := Model("m", Client(testClient(t, srv.URL)))
 	_, err := collect(m, basicReq)
 	// The SDK returns APIError by value.
 	var apiErr genai.APIError
@@ -318,6 +335,18 @@ func TestStreamKillSwitch(t *testing.T) {
 	}
 }
 
+// The flip side of TestStreamKillSwitch: a client the caller injected
+// is a test double by construction (ADR 0013's kill-switch clause) and
+// stays reachable under deny, so offline suites run in the very mode
+// the switch exists for.
+func TestKillSwitchExemptsInjectedClient(t *testing.T) {
+	t.Setenv("WEFT_MODEL_REQUESTS", "deny")
+	m := fixtureModel(t, "text_only") // fixtureModel injects its SDK client
+	if _, err := collect(m, basicReq); err != nil {
+		t.Fatalf("injected client must stay reachable under deny: %v", err)
+	}
+}
+
 // A FilePart with both or neither of Data/URL fails before any request
 // is sent. (Any media type is otherwise fine: Gemini carries audio and
 // video inline natively.)
@@ -326,7 +355,7 @@ func TestStreamUnsupportedFilePart(t *testing.T) {
 		"both":    {MediaType: "image/png", Data: []byte{1}, URL: "https://x"},
 		"neither": {MediaType: "image/png"},
 	} {
-		m := Model("m", BaseURL("http://127.0.0.1:1"), APIKey("test"))
+		m := Model("m", Client(testClient(t, "http://127.0.0.1:1")))
 		req := weft.ModelRequest{Messages: []weft.Message{weft.UserParts(bad)}}
 		_, err := collect(m, req)
 		if !errors.Is(err, weft.ErrUnsupported) {
@@ -336,3 +365,75 @@ func TestStreamUnsupportedFilePart(t *testing.T) {
 }
 
 const stallChunk = `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"one"}]}}]}` + "\n\n"
+
+// sseServer serves one recorded SSE response for every request.
+func sseServer(t *testing.T, resp string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(resp))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// A signature riding a non-thought part with empty text still streams:
+// Gemini validates its return on the next request, so losing it would
+// fail the call. Before the fix, the part matched no case and the
+// signature vanished.
+func TestStreamSignatureOnEmptyTextPart(t *testing.T) {
+	const resp = `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"","thoughtSignature":"c2ln"},{"text":"Hi."}]}}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}` + "\n\n"
+	m := Model("m", Client(testClient(t, sseServer(t, resp).URL)))
+	evs, err := collect(m, basicReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var (
+		sawSig  bool
+		sawText bool
+		emptyTx bool
+	)
+	for _, ev := range evs {
+		switch e := ev.(type) {
+		case weft.ModelReasoningDelta:
+			if e.Signature != "" {
+				sawSig = e.Signature == "c2ln"
+			}
+		case weft.ModelTextDelta:
+			sawText = e.Text == "Hi."
+			if e.Text == "" {
+				emptyTx = true
+			}
+		}
+	}
+	if !sawSig {
+		t.Error("the signature on an empty text part was dropped")
+	}
+	if !sawText || emptyTx {
+		t.Errorf("text events wrong: sawText=%v emptyTextDelta=%v", sawText, emptyTx)
+	}
+}
+
+// A synthesised call_<i> must not collide with a server-populated id of
+// the same shape in the same step: a repeated id fails the run with
+// ErrModelContract — the failure the synthesis exists to prevent.
+func TestStreamSynthesisedIDSkipsPopulated(t *testing.T) {
+	const resp = `data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_1","name":"a","args":{}}},{"functionCall":{"name":"b","args":{}}}]}}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}` + "\n\n"
+	m := Model("m", Client(testClient(t, sseServer(t, resp).URL)))
+	evs, err := collect(m, basicReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, ev := range evs {
+		if c, ok := ev.(weft.ModelToolCall); ok {
+			ids = append(ids, c.ID)
+		}
+	}
+	if len(ids) != 2 {
+		t.Fatalf("calls = %v, want 2", ids)
+	}
+	if ids[0] != "call_1" || ids[1] == "call_1" || ids[1] == "" {
+		t.Errorf("ids = %v, want the server id kept and a distinct synthesised one", ids)
+	}
+}

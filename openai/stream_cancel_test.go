@@ -17,7 +17,8 @@ import (
 // reported success).
 func TestCancelMidStreamYieldsContextError(t *testing.T) {
 	srv, _ := recordingServer(t, oneWordSSE)
-	m := Model("m", BaseURL(srv.URL), APIKey("test"))
+	c := testClient(srv)
+	m := Model("m", Client(&c))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

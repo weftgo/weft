@@ -122,3 +122,15 @@ vendor SDKs; `mw.Retry` is the loop-visible logic layer above them.
   allowed` (`mw.Allow`), `INTERNAL: tool "x" failed` (`mw.MapErrors`
   default), `tool "x" panicked: …` for middleware panics, and the
   prompt-snippet composition (`"\n\n"` separator).
+
+
+## Amendment (2026-09-18 — `Replay` retracted until the store ships)
+
+`Replay(ReplaySafe|ReplayNever)` is deleted from the core. The
+checkpoint store that would consume it is post-v1 in THE-END-GOAL's
+cut list, so no consumer could exist before the persistence module
+does — and the annotation was rent-free surface ("every abstraction
+has to pay rent"). It returns together with the store (§11), which
+will re-add the option, the manifest key, and its ADR in one change.
+The manifest no longer records a `replay` key (ADR 0012's shape
+shrinks accordingly, pre-1.0).

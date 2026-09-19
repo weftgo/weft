@@ -164,19 +164,6 @@ func TestSequentialHintWithoutToolsIsNotSent(t *testing.T) {
 	}
 }
 
-func TestToolDefsConvertedOnce(t *testing.T) {
-	m := Model("m").(*model)
-	def := testTool()
-	m.tools.Store(def, anthropic.ToolUnionParam{OfTool: &anthropic.ToolParam{Name: "sentinel"}})
-	p, err := m.params(weft.ModelRequest{Tools: []*weft.ToolDef{def}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := p.Tools[0].OfTool.Name; got != "sentinel" {
-		t.Errorf("tool converted again (%q), want the cached sentinel", got)
-	}
-}
-
 func TestMapStopReason(t *testing.T) {
 	cases := []struct {
 		reason, category string

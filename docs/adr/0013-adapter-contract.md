@@ -1,9 +1,11 @@
 # ADR 0013 — Adapter contract and conformance
 
 - Status: decided (2026-09-10, with TODO §3.1–§3.7); amended 2026-09-12
-  (thinking pass-through, TODO §5.14) and 2026-09-14 (argument-delta
+  (thinking pass-through, TODO §5.14), 2026-09-14 (argument-delta
   progress, enforced cancellation, empty-content and refusal handling —
-  cross-cutting rules and appendices below)
+  cross-cutting rules and appendices below), and 2026-09-18
+  (per-request tool conversion, the narrowed kill switch, the
+  `slow_stream` and `tool_args_delta` cases, init-client error wording)
 - Numbering: 0013, not 0006 — 0006–0011 are reserved by the TODO items
   that name them (§4 seams, §4.4 approval, §6 output, §10 wire, §11
   record, §14 runtime) and 0012 is the manifest.
@@ -42,13 +44,17 @@ against `wefttest` models (proving the harness itself).
 | `thinking_option` | a run with the `weft.Thinking` option completes normally (the option threads through the public API); wire-shape assertions live in adapter unit tests, where the request body is recordable |
 | `file_input` | with `Caps.Files` an inline PNG is answered; without, the run fails wrapping `ErrUnsupported` |
 | `idle_timeout` (offline only) | a stalled stream fails wrapping `ErrStreamIdle` |
+| `slow_stream` (offline only) | a dripping stream under a tight idle timeout succeeds with text — the per-chunk idle timer resets, so only a true stall fails |
+| `tool_args_delta` (`Caps.ToolArgDeltas`) | argument fragments surface live as `ToolArgsDelta` progress before the call's `ToolStart`, and the assembled call still arrives whole |
 | `kill_switch` | `WEFT_MODEL_REQUESTS=deny` fails the run wrapping `ErrModelRequestsDenied` before any request (offline runs point the case at `conformance.NoRequestServer`, which fails the test if anything arrives) |
 | `never_contract_violation` | no case's run error wraps `ErrModelContract` (a detector flags it suite-wide) |
 
 `Caps` declares what the adapter supports (`Reasoning`, `Files`,
-`Sequential`, `Usage`, `Live`), so the suite asserts instead of
-skipping silently: `Usage` false declares a compatible server that
-never reports usage — the adapter must not fake numbers; `Live` relaxes
+`Sequential`, `Usage`, `ToolArgDeltas`, `Live`), so the suite asserts
+instead of skipping silently: `Usage` false declares a compatible
+server that never reports usage — the adapter must not fake numbers;
+`ToolArgDeltas` false declares that calls arrive whole (Google), so
+the case's progress assertions do not apply; `Live` relaxes
 determinism (a live model may make a different but valid choice; those
 cases `t.Skip`, contract breaches still fail) and skips the
 fixture-only idle case.
@@ -64,7 +70,17 @@ fixture-only idle case.
 - **Errors unchanged.** Vendor SDK error types pass through so callers
   `errors.As` them; the only errors an adapter *creates* are wraps of
   `ErrUnsupported`, `ErrStreamIdle`, `ErrModelRequestsDenied`, and
-  `ctx.Err()`.
+  `ctx.Err()` — and, since 2026-09-18, `ErrModelContract` for the
+  adapter-detected contract violation: a provider payload too
+  malformed to translate (Anthropic's empty `tool_use` id or name) —
+  "the contract was broken before the loop could enforce it", the
+  cause wrapped and reachable. One recorded exception: a failure to
+  build the SDK client at all (Google's lazy init) is a
+  location-prefixed wrap of the SDK's own error
+  (`google: init client: …`), not a sentinel — credential discovery
+  can fail transiently, and `mw.Retryable` declines `ErrModelContract`,
+  so a sentinel there would brick a retryable condition. The SDK's own
+  error passes through unchanged, per this rule's first sentence.
 - **Cancellation is terminal.** A caller whose ctx ends mid-stream gets
   `(nil, ctx.Err())` — never a finish fabricated from buffered state.
   The reader goroutine can exit its handshake on cancellation with the
@@ -81,14 +97,27 @@ fixture-only idle case.
   assembled call still arrives whole; adapters whose calls arrive whole
   (Google) simply yield none.
 - **Read-only `ModelRequest`**; convert into fresh SDK values.
-- **Tool defs converted once**, cached by `*ToolDef` pointer.
+- **Tool defs are converted per request** (since 2026-09-18). The
+  pointer-keyed cache this rule used to bless never evicted, and a
+  `ToolSource` that rebuilds its `[]*ToolDef` per fetch — a registry
+  snapshotting an MCP server per step, the documented use — inserted
+  fresh pointers every step: an unbounded leak in exactly the scenario
+  the seam exists for. Measured first (`openai.BenchmarkConvertTool`):
+  one conversion of a ten-property schema costs ~2–5µs / 62 allocs
+  against the network round trip every request also pays.
 - **Vendor extras live in adapter options**, never on core types;
   provider stop reasons ride on `ModelFinish.Raw` (recorded on
   `StepRecord.RawStopReason` and the `StepFinish` event, never
   interpreted).
 - **The kill switch** (`weft.ModelRequestsAllowed`, env
-  `WEFT_MODEL_REQUESTS=deny`) is checked at the top of `Stream`;
-  `wefttest` models ignore it.
+  `WEFT_MODEL_REQUESTS=deny`) is checked at the top of `Stream`, but
+  only for a client the adapter built itself from credentials. A client
+  the caller injected through the `Client(c)` option is a test double
+  by construction — the same "policy seam, not security boundary"
+  stance ADR 0007 takes for approvals — so it stays reachable under
+  deny and weft's own offline suites run in the very mode the switch
+  exists for (`make offline` is that gate, workspace-wide).
+  `wefttest` models ignore the switch.
 
 ### Fixtures and live runs
 
@@ -126,8 +155,10 @@ tracked in TODO §9.2's orbit.)
   (`delta.refusal`, `finish_reason` `content_filter`) is the model's
   answer text (2026-09-14): it streams as a text delta rather than
   vanishing, and `content_filter` rides `Raw` via the unmapped rule.
-- Usage from the final chunk (`stream_options.include_usage`); tools
-  cached by pointer; `SequentialTools` → `parallel_tool_calls: false`;
+- Usage from the final chunk (`stream_options.include_usage`);
+  `SequentialTools` → `parallel_tool_calls: false`, sent only
+  alongside a tool catalog (several compatible servers reject the hint
+  without one — 2026-09-18);
   `MaxTokens` → `max_completion_tokens`; `MaxRetries` → the SDK's
   transport retries. Compatible servers: `Provider` stays `"openai"`
   (a base URL host is not an identity), ids synthesised when missing,
@@ -209,6 +240,12 @@ tracked in TODO §9.2's orbit.)
   `SAFETY`/`RECITATION`/… → end_turn + `Raw`. Usage:
   `promptTokenCount` in; `candidatesTokenCount + thoughtsTokenCount`
   out.
+- Empty content never reaches the wire (2026-09-18): empty text
+  parts and Contents reduced to zero parts (all-empty text, unsigned
+  reasoning dropped) are skipped — `{"role":...}` with no parts is
+  API-rejected. `MaxTokens` and `Thinking.Budget` are int32 on the
+  wire; values above the ceiling fail the call wrapping
+  `ErrUnsupported` rather than wrapping around.
 - `SequentialTools`: no Gemini switch exists — declared gap
   (`Caps.Sequential=false`). The SDK client is created lazily on first
   run (`genai.NewClient` wants a context for credential discovery), so
@@ -240,6 +277,9 @@ tracked in TODO §9.2's orbit.)
 6. The kill switch is **checked per call, not cached** — a deviation
    from the plan's "read once", made so test suites can toggle it per
    test and the package keeps no state (see ADR 0002's amendment).
+   Since 2026-09-18 it guards **self-built client egress only**: an
+   injected `Client(c)` is a test double and stays reachable (see the
+   cross-cutting rule above).
 7. Adapter example programs live at `<adapter>/example/`, not
    `examples/<vendor>/` — the root module must not gain the SDKs to
    its module graph (the core stays dependency-free).
@@ -265,6 +305,11 @@ tracked in TODO §9.2's orbit.)
 - The suite is the reason §3.5 closed before the adapters: its Done
   line gates every adapter, so the skeleton came first.
 - The adapters share a reader-goroutine idle-timeout design; each
-   module carries its own copy over its own SDK types (adapters import
-   only the root module — a shared helper would have to live in the
-   root's public API, which the complexity budget forbids).
+   module carries its own copy over its own SDK types. SDK-free helpers
+   (schema rendering, the terminal-error rule, the FilePart guard) live
+   in the root module's `internal/adapterkit` since 2026-09-18: Go's
+   path-based internal rule admits `github.com/weftgo/weft/*` imports
+   while keeping the root's public API exactly as small as the
+   complexity budget demands — the resolution of the byte-identical
+   copies finding from that day's review. Helpers that mention an SDK
+   type stay per-adapter.

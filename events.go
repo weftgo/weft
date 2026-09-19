@@ -93,9 +93,12 @@ type ToolFinish struct {
 	IsError bool   `json:"is_error"`
 }
 
-// StepFinish reports that step Index's model call completed. Raw is the
-// provider's own stop reason when Reason was approximated (see
-// ModelFinish.Raw); empty when the mapping was exact.
+// StepFinish reports that step Index is complete: the model call
+// finished and, when the step requested tools, they have run — it
+// follows the step's ToolFinish events and precedes the stop-condition
+// check (docs/life-of-a-call.md). Raw is the provider's own stop reason
+// when Reason was approximated (see ModelFinish.Raw); empty when the
+// mapping was exact.
 type StepFinish struct {
 	RunID  string     `json:"run_id"`
 	Index  int        `json:"index"`
@@ -139,6 +142,12 @@ const (
 	eventRunFinish      = "run_finish"
 )
 
+// The per-type MarshalJSON methods below are deliberately repetitive:
+// Go forbids embedding a type parameter in a struct, so a generic
+// helper cannot preserve this flattened wire shape, and splicing the
+// discriminator into the marshalled bytes would be fragile against
+// reformatting. The sealed-interface cost, recorded here so the next
+// reader does not re-derive it.
 // The *Wire aliases have no methods, so encoding them uses the plain
 // struct encoding — the MarshalJSON methods below add the discriminator
 // without recursing into themselves.

@@ -10,8 +10,9 @@ import (
 //
 // Tool handlers return ordinary errors (or panic); the loop encodes both as
 // ToolResultPart{IsError: true} and keeps going — sibling tool calls in the
-// same step are never canceled by a failing tool. Only model-stream
-// failures, context cancellation, and step-budget exhaustion surface to the
+// same step are never canceled by a failing tool. Model-stream failures,
+// context cancellation, step-budget exhaustion, and a malformed
+// tool-source snapshot (ErrDuplicateTool, ErrNilTool) surface to the
 // caller, wrapped in RunError.
 
 // Sentinel errors for named run failures. Branch on them with errors.Is;
@@ -84,6 +85,12 @@ var (
 	// than silently dropping the second tool. Agent.CallTool reports
 	// the same condition as an error.
 	ErrDuplicateTool = errors.New("weft: duplicate tool name from tool source")
+
+	// ErrNilTool is a run error raised when a tool-source snapshot
+	// contains a nil entry — a malformed snapshot, not a tool. The run
+	// fails rather than advertising a dereference every adapter would
+	// panic on; Agent.CallTool reports the same condition as an error.
+	ErrNilTool = errors.New("weft: nil tool in tool source snapshot")
 )
 
 // ToolError is a tool failure with a stable code the model can branch

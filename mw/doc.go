@@ -29,4 +29,9 @@
 // to ctx before calling next, and tools read it back through a typed
 // accessor — the "typed request context" convention documented in
 // docs/life-of-a-call.md and weft's ExampleWrapTools_context.
+//
+// Model middleware should forward the inner model's identity;
+// wefttest.ConformInfoT (in the root module's wefttest, not here — the
+// reference middleware and its checker stay mutually discoverable)
+// turns that convention into a checked fact for your own middleware.
 package mw

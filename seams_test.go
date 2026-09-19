@@ -337,20 +337,20 @@ func TestPromptSnippetsComposeIntoInstructions(t *testing.T) {
 	}
 }
 
-func TestReplayAndPolicyInManifest(t *testing.T) {
+func TestToolPolicyInManifest(t *testing.T) {
 	a := weft.Tool("a", "", func(_ context.Context, _ struct{}) (string, error) { return "", nil },
-		weft.Replay(weft.ReplaySafe), weft.Sequential(), weft.RequireApproval(), weft.PromptSnippet("hint"))
-	if a.ReplayPolicy() != weft.ReplaySafe {
-		t.Errorf("ReplayPolicy = %q", a.ReplayPolicy())
-	}
+		weft.Sequential(), weft.RequireApproval(), weft.PromptSnippet("hint"))
 	b, err := weft.Manifest(weft.New(wefttest.Script(), weft.Name("m"), a))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"replay": "safe"`, `"sequential": true`, `"require_approval": true`, `"prompt_snippet": "hint"`} {
+	for _, want := range []string{`"sequential": true`, `"require_approval": true`, `"prompt_snippet": "hint"`} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("manifest lacks %s:\n%s", want, b)
 		}
+	}
+	if strings.Contains(string(b), "replay") {
+		t.Errorf("manifest still carries a replay key:\n%s", b)
 	}
 }
 
@@ -443,12 +443,21 @@ func TestApprovalPendingStopsTheRunAndResumes(t *testing.T) {
 		}
 	}
 	got := map[string]weft.ToolResultPart{}
+	var order []string
 	for _, p := range toolMsg.Content {
 		r := p.(weft.ToolResultPart)
 		got[r.CallID] = r
+		order = append(order, r.CallID)
 	}
 	if len(got) != 4 {
 		t.Fatalf("model saw %d results, want 4: %+v", len(got), toolMsg.Content)
+	}
+	// ADR 0007 §3: the results complete the earlier step's tool message
+	// in call order — [r1, l1, r2, r3], the assistant's order — not
+	// appended after the earlier ones. Gemini matches responses by name
+	// and position, so order is correctness, not style.
+	if strings.Join(order, ",") != "r1,l1,r2,r3" {
+		t.Errorf("result order = %v, want the assistant's call order [r1 l1 r2 r3]", order)
 	}
 	if r := got["r1"]; r.IsError || r.Content != "refunded 1" {
 		t.Errorf("approved = %+v", r)

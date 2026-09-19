@@ -46,13 +46,23 @@ func (m *repairModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Se
 	}
 }
 
-// repairJSON attempts one mechanical repair of s and reports whether
-// the result is valid JSON.
+// repairJSON attempts one mechanical repair of s. The first return is
+// the attempt — the stripped-and-closed text, handed back even when
+// it still is not valid JSON, so payload content survives byte-for-
+// byte — and the second reports whether the result is valid JSON.
 func repairJSON(s string) (string, bool) {
 	s = strings.TrimSpace(s)
-	// Markdown fences: ```json ... ``` or ``` ... ```.
+	// Markdown fences: ```json ... ```, ```javascript ... ```, ``` ... ```.
+	// A language tag is letters followed by whitespace or the newline;
+	// any tag is stripped, and anything else survives — an untagged
+	// fence whose payload starts with the literal letters "json" must
+	// not lose them (TrimPrefix("json") ate exactly that).
 	if rest, ok := strings.CutPrefix(s, "```"); ok {
-		rest = strings.TrimPrefix(rest, "json")
+		if head, tail, ok := strings.Cut(rest, "\n"); ok {
+			if head = strings.TrimRight(head, " \t\r"); head != "" && isASCIILetters(head) {
+				rest = tail
+			}
+		}
 		rest = strings.TrimSuffix(strings.TrimSpace(rest), "```")
 		s = strings.TrimSpace(rest)
 	}
@@ -110,7 +120,21 @@ func repairJSON(s string) (string, bool) {
 		}
 	}
 	if !json.Valid([]byte(out)) {
-		return "", false
+		return out, false
 	}
 	return out, true
+}
+
+// isASCIILetters reports whether s is one or more ASCII letters — the
+// shape of a fenced block's language tag (json, JSON, javascript).
+func isASCIILetters(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
+			return false
+		}
+	}
+	return true
 }

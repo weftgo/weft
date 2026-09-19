@@ -75,7 +75,30 @@ jobs:
         with:
           go-version: stable
           check-latest: true
+      # Pinned, like golangci-lint below, so gate results do not drift
+      # with HEAD.
       - name: install apidiff
-        run: go install golang.org/x/exp/cmd/apidiff@latest
+        run: go install golang.org/x/exp/cmd/apidiff@v0.0.0-20260908205506-85c1c2202aba
+      # The gate must fail closed: exercise its own failure modes (a
+      # non-compiling tree, an incompatible rename) before trusting it.
+      - name: apidiff self-test (the gate fails closed)
+        run: scripts/apidiff-selftest.sh
       - name: apidiff (root module vs last tag)
         run: scripts/apidiff.sh
+
+  # The offline gate (ADR 0013's kill-switch clause): the whole
+  # workspace stays green under WEFT_MODEL_REQUESTS=deny — suites that
+  # must never reach the network get loud failures, not silent egress.
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+      - name: test (every module, WEFT_MODEL_REQUESTS=deny)
+        run: |
+          for m in $(go list -m -f '{{.Dir}}'); do
+            (cd "$m" && WEFT_MODEL_REQUESTS=deny go test ./...)
+          done

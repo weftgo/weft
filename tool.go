@@ -44,10 +44,9 @@ type ToolDef struct {
 	resultCap  int
 	capSet     bool
 	strict     bool
-	sequential bool         // barrier: runs alone in its step
-	approval   bool         // RequireApproval: never runs unapproved
-	replay     ReplayPolicy // checkpoint-restart annotation
-	snippet    string       // PromptSnippet: composed into the system prompt
+	sequential bool   // barrier: runs alone in its step
+	approval   bool   // RequireApproval: never runs unapproved
+	snippet    string // PromptSnippet: composed into the system prompt
 	mw         []ToolMiddleware
 
 	// invoke decodes args (rejecting undeclared fields when strict),
@@ -155,9 +154,12 @@ func Tool[In, Out any](name, description string, fn func(ctx context.Context, in
 
 // decodeInput unmarshals the model's arguments into In. Empty or null
 // arguments decode as the empty object, so a tool with no required
-// fields accepts a bare call. Failures wrap ErrInvalidToolInput and
-// name the offending field in the schema's own vocabulary, so the
-// model can map the error back to the schema it was shown.
+// fields accepts a bare call. The arguments must be exactly one JSON
+// value: trailing data after it — a second object, stray bytes — is a
+// failure, not something to decode and ignore. Failures wrap
+// ErrInvalidToolInput and name the offending field in the schema's own
+// vocabulary, so the model can map the error back to the schema it was
+// shown.
 func decodeInput[In any](name string, args json.RawMessage, strict bool) (In, error) {
 	var in In
 	if len(bytes.TrimSpace(args)) == 0 || string(bytes.TrimSpace(args)) == "null" {
@@ -168,16 +170,36 @@ func decodeInput[In any](name string, args json.RawMessage, strict bool) (In, er
 		dec.DisallowUnknownFields()
 	}
 	if err := dec.Decode(&in); err != nil {
-		return in, invalidInput(name, describeDecodeError(err))
+		// The advertised schema is the vocabulary the error speaks in;
+		// deriving it here, on the failure path only, keeps the hot
+		// path free of reflection (schemaFor is what Tool used at
+		// construction, so the two cannot disagree).
+		return in, invalidInput(name, describeDecodeError(err, schemaFor(reflect.TypeFor[In]())))
+	}
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return in, invalidInput(name, "trailing data after the JSON arguments")
 	}
 	return in, nil
 }
 
 // Codes the loop renders its own tool failures with — model-visible
-// contract (ADR 0002, "tool errors have codes").
+// contract (ADR 0002, "tool errors have codes"), exported so external
+// policy middleware can produce the same wire strings without
+// duplicating them, the same class of constant as SchemaVersion.
 const (
-	codeInvalidInput = "INVALID_INPUT"
-	codeNoSuchTool   = "NO_SUCH_TOOL"
+	// CodeInvalidInput marks tool arguments that do not decode into
+	// the tool's input struct; the message names the field in the
+	// schema's own vocabulary.
+	CodeInvalidInput = "INVALID_INPUT"
+	// CodeNoSuchTool marks a call naming a tool the agent does not
+	// have.
+	CodeNoSuchTool = "NO_SUCH_TOOL"
+	// CodeDenied marks a call the approval boundary (Deny, or no
+	// decision) or a policy middleware refused — mw.Allow renders it
+	// too: to the model, a refused call is a refused call, whoever
+	// refused it (ADR 0007).
+	CodeDenied = "DENIED"
 )
 
 // invalidInput is the ErrInvalidToolInput failure as the model sees it:
@@ -185,20 +207,29 @@ const (
 // matches and the result reads `INVALID_INPUT: tool "x": field "days":
 // expected integer, got string`.
 func invalidInput(name, detail string) error {
-	return &ToolError{Code: codeInvalidInput, Message: fmt.Sprintf("tool %q: %s", name, detail), Err: ErrInvalidToolInput}
+	return &ToolError{Code: CodeInvalidInput, Message: fmt.Sprintf("tool %q: %s", name, detail), Err: ErrInvalidToolInput}
 }
 
 // noSuchTool is the ErrNoSuchTool failure, coded the same way.
 func noSuchTool(name string) error {
-	return &ToolError{Code: codeNoSuchTool, Message: fmt.Sprintf("no tool named %q", name), Err: ErrNoSuchTool}
+	return &ToolError{Code: CodeNoSuchTool, Message: fmt.Sprintf("no tool named %q", name), Err: ErrNoSuchTool}
 }
 
 // describeDecodeError renders an encoding/json failure in schema terms:
-// the JSON field name, the expected schema type, and what arrived.
-func describeDecodeError(err error) string {
+// the JSON field name, the expected schema type, and what arrived. The
+// expected type is read from the schema the tool advertises (schema is
+// the tool's input schema; nil is tolerated), walked along the error's
+// field path, so the message can never name a type the model was not
+// shown — a `,string` integer says "expected string", the quoted wire
+// form, not the Go kind behind it. The Go-type mapping is the fallback
+// for a path the walk cannot resolve.
+func describeDecodeError(err error, schema *Schema) string {
 	var typeErr *json.UnmarshalTypeError
 	if errors.As(err, &typeErr) {
-		want := schemaTypeName(typeErr.Type)
+		want, ok := advertisedType(schema, typeErr.Field)
+		if !ok {
+			want = schemaTypeName(typeErr.Type)
+		}
 		if typeErr.Field == "" {
 			return fmt.Sprintf("expected %s at the top level, got %s", want, typeErr.Value)
 		}
@@ -211,6 +242,13 @@ func describeDecodeError(err error) string {
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 		return "invalid JSON: unexpected end of input"
 	}
+	// Current toolchains report a ",string" mismatch as an
+	// UnmarshalTypeError (handled above, through the schema walk);
+	// older ones render a plain error with no field name and the Go
+	// type inside the quotes. Say the schema's word either way.
+	if strings.HasPrefix(err.Error(), "json: invalid use of ,string struct tag") {
+		return `expected string: a ",string" field's value must arrive inside quotes`
+	}
 	// encoding/json reports an undeclared field as a plain error:
 	// `json: unknown field "name"`.
 	if rest, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
@@ -222,30 +260,53 @@ func describeDecodeError(err error) string {
 	return err.Error()
 }
 
-// schemaTypeName maps a Go type to the JSON Schema type name the tool's
-// schema advertises for it — the same mapping schemaFor uses.
+// advertisedType walks the advertised schema along an
+// UnmarshalTypeError's field path and reports the leaf's advertised
+// type. The path is dotted JSON names; depending on the toolchain it
+// may also carry array indices and map keys ("items.0.qty",
+// "meta.k.when"), so a segment that is not a property of an array or
+// map schema is taken as that index or key and the walk descends into
+// Items or AdditionalProperties. ok is false when the schema is nil,
+// the path does not resolve, or the leaf has no type (an unconstrained
+// value).
+func advertisedType(s *Schema, field string) (string, bool) {
+	if s == nil {
+		return "", false
+	}
+	if field != "" {
+		for _, seg := range strings.Split(field, ".") {
+			switch {
+			case s.Properties[seg] != nil:
+				s = s.Properties[seg]
+			case s.Items != nil:
+				s = s.Items // seg is an array index
+			case s.AdditionalProperties != nil:
+				s = s.AdditionalProperties // seg is a map key
+			default:
+				return "", false
+			}
+		}
+	}
+	if s.Type == "" {
+		return "", false
+	}
+	return s.Type, true
+}
+
+// schemaTypeName names the JSON Schema type the tool's schema advertises
+// for a Go type — derived through the same mapping schemaFor uses, so a
+// decode error can never name a type the advertised schema lacks ([]byte
+// says "string", time.Time says "string"). It is the fallback when
+// advertisedType cannot resolve the error's path.
 func schemaTypeName(t reflect.Type) string {
-	t = derefType(t)
 	if t == nil {
 		return "value"
 	}
-	switch t.Kind() {
-	case reflect.String:
-		return "string"
-	case reflect.Bool:
-		return "boolean"
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return "integer"
-	case reflect.Float32, reflect.Float64:
-		return "number"
-	case reflect.Slice, reflect.Array:
-		return "array"
-	case reflect.Map, reflect.Struct:
-		return "object"
-	default:
-		return t.String()
+	s := schemaOf(t, map[reflect.Type]bool{})
+	if s.Type == "" {
+		return "value"
 	}
+	return s.Type
 }
 
 // RawTool defines a tool from an explicit schema instead of reflection —
@@ -421,33 +482,6 @@ func (o wrapToolsOption) applyTool(t *ToolDef) {
 // on RunResult.Pending. The reference set is in package mw: Allow,
 // Audit, MapErrors. Nil entries are ignored.
 func WrapTools(mw ...ToolMiddleware) PolicyOption { return wrapToolsOption(mw) }
-
-// ReplayPolicy annotates what a checkpoint restart may do with a tool
-// call that was interrupted mid-flight. The core records it on the
-// tool and in the manifest; the store/runtime layers consume it.
-type ReplayPolicy string
-
-const (
-	// ReplaySafe marks a tool as idempotent: a restart may run an
-	// interrupted call again.
-	ReplaySafe ReplayPolicy = "safe"
-	// ReplayNever marks a tool whose interrupted calls must not be
-	// re-run; a restart synthesizes an error result instead.
-	ReplayNever ReplayPolicy = "never"
-)
-
-type replayOption struct{ policy ReplayPolicy }
-
-func (o replayOption) applyTool(t *ToolDef) { t.replay = o.policy }
-
-// Replay annotates a tool with its checkpoint-restart policy. It changes
-// nothing in the loop today: the annotation rides on the manifest for
-// the store and runtime layers, which re-run ReplaySafe tools and
-// synthesize interrupted results for ReplayNever ones.
-func Replay(policy ReplayPolicy) ToolOption { return replayOption{policy} }
-
-// ReplayPolicy reports the tool's Replay annotation; empty when unset.
-func (t *ToolDef) ReplayPolicy() ReplayPolicy { return t.replay }
 
 type snippetOption struct{ text string }
 

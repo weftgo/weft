@@ -31,6 +31,11 @@ type Caps struct {
 	// Sequential: the adapter forwards SequentialTools and the provider
 	// honours the hint (emits at most one call per step).
 	Sequential bool
+	// ToolArgDeltas: the adapter surfaces ModelToolCallDelta progress
+	// while a provider streams a tool call's argument fragments.
+	// Google's calls arrive whole, so it legitimately emits none — the
+	// case is declared, not assumed.
+	ToolArgDeltas bool
 	// Usage: the provider reports non-zero token usage. False for
 	// compatible servers that never send usage — the adapter must not
 	// fake numbers, so the caller declares the gap instead.
@@ -390,6 +395,59 @@ func Run(t *testing.T, caps Caps, newModel func(t *testing.T, name string) weft.
 			_, err := generate(t, newModel(t, "idle_timeout"), nil, weft.Prompt("Say something."))
 			if !errors.Is(err, weft.ErrStreamIdle) {
 				t.Errorf("err = %v, want ErrStreamIdle", err)
+			}
+		})
+
+		// The idle timer resets per chunk: a stream that keeps dripping
+		// under the timeout — while its total exceeds it — must succeed,
+		// never ErrStreamIdle. newModel wires this case to SlowServer
+		// with an IdleTimeout tighter than the stream's total.
+		t.Run("slow_stream", func(t *testing.T) {
+			res, err := generate(t, newModel(t, "slow_stream"), nil, weft.Prompt("Count slowly."))
+			if err != nil {
+				t.Fatalf("a slow but streaming response was killed: %v", err)
+			}
+			if res.Text() == "" {
+				t.Error("no text arrived from the slow stream")
+			}
+		})
+	}
+
+	// Argument fragments surface live as ToolArgsDelta before the call's
+	// ToolStart, and the assembled call still arrives whole (ADR 0004's
+	// amendment). Declared, not assumed: adapters whose calls arrive
+	// whole (Google) set Caps.ToolArgDeltas=false. Adapters map the case's
+	// fixture onto the tool round-trip recording, which already streams
+	// the arguments in pieces.
+	if caps.ToolArgDeltas && !caps.Live {
+		t.Run("tool_args_delta", func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			var (
+				deltas       int
+				afterStart   int
+				sawToolStart bool
+			)
+			for ev, err := range weft.New(newModel(t, "tool_args_delta"), probeTool()).
+				Stream(ctx, weft.Prompt("Call `probe` with n=3, then tell me the doubled value.")).Events() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				switch ev.(type) {
+				case weft.ToolArgsDelta:
+					deltas++
+					if sawToolStart {
+						afterStart++
+					}
+				case weft.ToolStart:
+					sawToolStart = true
+				}
+			}
+			if deltas == 0 {
+				t.Error("no ToolArgsDelta surfaced while the model wrote the call")
+			}
+			if afterStart > 0 {
+				t.Errorf("%d ToolArgsDelta events arrived after ToolStart; progress precedes the call", afterStart)
 			}
 		})
 	}

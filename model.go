@@ -116,9 +116,10 @@ type ModelRequest struct {
 //     (nil, ctx.Err()) if it has not finished already.
 //
 // The loop enforces this contract: a stream that ends without
-// ModelFinish, continues after it, or panics fails the run with an error
-// wrapping ErrModelContract. A contract-violating adapter cannot corrupt
-// a transcript silently.
+// ModelFinish, continues after it, yields a tool call with an empty ID
+// or name, two tool calls sharing an ID in one step, or panics fails
+// the run with an error wrapping ErrModelContract. A
+// contract-violating adapter cannot corrupt a transcript silently.
 type Model interface {
 	Stream(ctx context.Context, req ModelRequest) iter.Seq2[ModelEvent, error]
 }
@@ -156,11 +157,12 @@ type ModelReasoningDelta struct {
 }
 
 // ModelToolCall is one complete tool invocation request. ID is the
-// provider's call identifier, echoed back on the matching ToolResultPart.
-// Signature is the provider's opaque token attached to the call itself
-// (Gemini attaches thought signatures to functionCall parts and requires
-// them returned on the same part); adapters that do not have one leave
-// it empty.
+// provider's call identifier, echoed back on the matching ToolResultPart;
+// it must be unique among one step's calls (results and approval
+// decisions key on it). Signature is the provider's opaque token
+// attached to the call itself (Gemini attaches thought signatures to
+// functionCall parts and requires them returned on the same part);
+// adapters that do not have one leave it empty.
 type ModelToolCall struct {
 	ID        string
 	Name      string

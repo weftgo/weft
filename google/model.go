@@ -41,14 +41,22 @@ func BaseURL(u string) Option { return optionFunc(func(c *config) { c.baseURL = 
 // credentials).
 func APIKey(k string) Option { return optionFunc(func(c *config) { c.apiKey = k }) }
 
-// Client uses an already-configured SDK client (Vertex AI projects and
-// regions compose here); it overrides BaseURL, APIKey, and MaxRetries.
+// Client uses an already-configured SDK client (Vertex AI projects
+// and regions, test doubles); it overrides BaseURL, APIKey, and
+// MaxRetries. The WEFT_MODEL_REQUESTS kill switch guards egress from
+// clients the adapter builds from credentials; an injected client's
+// destinations are the caller's responsibility — which is why it
+// stays reachable under deny (ADR 0013's kill-switch clause).
 func Client(c *genai.Client) Option {
 	return optionFunc(func(cfg *config) { cfg.client = c })
 }
 
 // MaxTokens caps a step's output tokens (maxOutputTokens). Zero keeps
-// the provider default.
+// the provider default. The API's limit is an int32: a value above
+// math.MaxInt32 fails the call wrapping weft.ErrUnsupported rather
+// than wrapping around on the wire. Options carry no error channel, so
+// the check lands at convert time — the first place that can refuse —
+// not at construction.
 func MaxTokens(n int) Option { return optionFunc(func(c *config) { c.maxTokens = n }) }
 
 // Temperature sets the sampling temperature; it is not sent unless the
@@ -79,8 +87,7 @@ const (
 // Model returns a weft.Model backed by the Gemini API. The SDK client
 // is created lazily on the first run (its constructor wants a context
 // for credential discovery), so constructing a Model performs no I/O.
-// A Model is immutable and safe for concurrent runs; tool definitions
-// are converted once per *ToolDef and cached by pointer.
+// A Model is immutable and safe for concurrent runs.
 func Model(name string, opts ...Option) weft.Model {
 	var cfg config
 	for _, o := range opts {
@@ -94,7 +101,6 @@ func Model(name string, opts ...Option) weft.Model {
 		temperature: cfg.temperature,
 		tempSet:     cfg.tempSet,
 		idle:        defaultIdleTimeout,
-		tools:       sync.Map{},
 	}
 	if cfg.idleSet {
 		m.idle = cfg.idle
@@ -102,6 +108,7 @@ func Model(name string, opts ...Option) weft.Model {
 	if cfg.client != nil {
 		m.client = cfg.client
 		m.ready = true
+		m.injected = true
 	} else {
 		m.baseURL = cfg.baseURL
 		m.apiKey = cfg.apiKey
@@ -119,7 +126,10 @@ type model struct {
 	// Model value forever.
 	client *genai.Client
 	ready  bool
-	initMu sync.Mutex
+	// injected: the client came from Client(c) — a test double by
+	// construction, exempt from the kill switch — so no lazy init.
+	injected bool
+	initMu   sync.Mutex
 
 	name        string
 	baseURL     string
@@ -129,7 +139,6 @@ type model struct {
 	temperature float64
 	tempSet     bool
 	idle        time.Duration
-	tools       sync.Map // *weft.ToolDef → *genai.Tool
 }
 
 // initClient builds the SDK client on the first Stream call.

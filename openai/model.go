@@ -2,7 +2,6 @@ package openai
 
 import (
 	"os"
-	"sync"
 	"time"
 
 	"github.com/openai/openai-go"
@@ -42,8 +41,12 @@ func BaseURL(u string) Option { return optionFunc(func(c *config) { c.baseURL = 
 // APIKey sets the API key. Default: $OPENAI_API_KEY.
 func APIKey(k string) Option { return optionFunc(func(c *config) { c.apiKey = k }) }
 
-// Client uses an already-configured SDK client (Azure, custom
-// transports); it overrides BaseURL, APIKey, and MaxRetries.
+// Client uses an already-configured SDK client (Azure endpoints,
+// custom transports, test doubles); it overrides BaseURL, APIKey, and
+// MaxRetries. The WEFT_MODEL_REQUESTS kill switch guards egress from
+// clients the adapter builds from credentials; an injected client's
+// destinations are the caller's responsibility — which is why it
+// stays reachable under deny (ADR 0013's kill-switch clause).
 func Client(c *openai.Client) Option {
 	return optionFunc(func(cfg *config) { cfg.client = c })
 }
@@ -82,8 +85,7 @@ const (
 
 // Model returns a weft.Model backed by the OpenAI Chat Completions API
 // (or any compatible server, via BaseURL). A Model is immutable and
-// safe for concurrent runs; tool definitions are converted once per
-// *ToolDef and cached by pointer.
+// safe for concurrent runs.
 func Model(name string, opts ...Option) weft.Model {
 	var cfg config
 	for _, o := range opts {
@@ -104,6 +106,7 @@ func Model(name string, opts ...Option) weft.Model {
 	}
 	if cfg.client != nil {
 		m.client = *cfg.client
+		m.injected = true
 		return m
 	}
 	var sdkOpts []option.RequestOption
@@ -124,13 +127,13 @@ func Model(name string, opts ...Option) weft.Model {
 
 type model struct {
 	client      openai.Client
+	injected    bool // client came from Client(c): a test double, exempt from the kill switch
 	name        string
 	maxTokens   int
 	temperature float64
 	tempSet     bool
 	idle        time.Duration
 	dialect     ThinkingDialect
-	tools       sync.Map // *weft.ToolDef → openai.ChatCompletionToolParam
 }
 
 // Info identifies the model for RunStart and the manifest. The provider

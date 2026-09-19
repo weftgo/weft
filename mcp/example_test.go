@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/weftgo/weft"
@@ -125,11 +126,19 @@ func ExampleTools_toolSource() {
 		panic(err)
 	}
 
-	var current []*weft.ToolDef
+	// The SDK runs ToolListChangedHandler on its own goroutine and the
+	// loop reads the source on the run's, so the slice lives under a
+	// mutex: refresh writes it, the source reads it.
+	var (
+		mu      sync.Mutex
+		current []*weft.ToolDef
+	)
 	refresh := func() {
 		tools, err := mcp.Tools(context.Background(), sess)
 		if err == nil {
+			mu.Lock()
 			current = tools
+			mu.Unlock()
 		}
 	}
 	refresh()
@@ -137,11 +146,18 @@ func ExampleTools_toolSource() {
 	// refresh; the served list is whatever the last refresh produced.
 	agt := weft.New(wefttest.Script(wefttest.Say("ready")),
 		weft.Name("importer"),
-		weft.ToolSource(func() []*weft.ToolDef { return current }))
+		weft.ToolSource(func() []*weft.ToolDef {
+			mu.Lock()
+			defer mu.Unlock()
+			return current
+		}))
 	res, err := agt.Generate(context.Background(), weft.Prompt("status?"))
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(res.Text(), "tools fetched:", len(current))
+	mu.Lock()
+	n := len(current)
+	mu.Unlock()
+	fmt.Println(res.Text(), "tools fetched:", n)
 	// Output: ready tools fetched: 1
 }

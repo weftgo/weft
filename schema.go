@@ -48,26 +48,113 @@ type Schema struct {
 // type must be an object — providers and MCP both require it, and
 // failing here, at import, beats failing at the first model call.
 //
-// The bytes must be exactly one JSON value: invalid JSON, trailing
-// data, or a non-object top level return an error naming the problem.
+// The structured view is lenient: a keyword whose shape the Schema
+// type cannot hold — a boolean additionalProperties, a type array
+// such as ["string","null"], tuple or boolean items, a non-string
+// description — leaves that field zero (an unconstrained node) and
+// is not an error, because the bytes carry it whole and the view is
+// for readers, not the model. Only the document itself is checked:
+// invalid JSON, trailing data, or a non-object top level return an
+// error naming the problem.
 func ParseSchema(b json.RawMessage) (*Schema, error) {
 	if len(bytes.TrimSpace(b)) == 0 {
 		return nil, fmt.Errorf("weft: ParseSchema: empty schema")
 	}
-	s := &Schema{}
+	var doc json.RawMessage
 	dec := json.NewDecoder(bytes.NewReader(b))
-	if err := dec.Decode(s); err != nil {
+	if err := dec.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("weft: ParseSchema: %w", err)
 	}
 	var extra json.RawMessage
 	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("weft: ParseSchema: trailing data after the schema")
 	}
+	s, ok := parseSchemaNode(doc)
+	if !ok {
+		return nil, fmt.Errorf("weft: ParseSchema: the document is not a JSON object")
+	}
 	if s.Type != "object" {
 		return nil, fmt.Errorf("weft: ParseSchema: top-level type must be %q, got %q", "object", s.Type)
 	}
 	s.raw = bytes.Clone(b)
 	return s, nil
+}
+
+// looseSchema is one schema node with every keyword still raw, so
+// parseSchemaNode can take each field only when it has the shape the
+// Schema type can hold and leave it zero otherwise — a legal JSON
+// Schema shape the struct cannot express must not reject the document.
+type looseSchema struct {
+	Type                 json.RawMessage `json:"type"`
+	Format               json.RawMessage `json:"format"`
+	Description          json.RawMessage `json:"description"`
+	Properties           json.RawMessage `json:"properties"`
+	AdditionalProperties json.RawMessage `json:"additionalProperties"`
+	Required             json.RawMessage `json:"required"`
+	Items                json.RawMessage `json:"items"`
+}
+
+// parseSchemaNode builds the structured view of one node. ok is false
+// when the bytes are not a JSON object (a boolean schema, an array, a
+// scalar): the caller treats such a node as unconstrained or, at the
+// top level, as an error.
+func parseSchemaNode(b json.RawMessage) (*Schema, bool) {
+	var ls looseSchema
+	if err := json.Unmarshal(b, &ls); err != nil {
+		return nil, false
+	}
+	s := &Schema{}
+	looseString(ls.Type, &s.Type)
+	looseString(ls.Format, &s.Format)
+	looseString(ls.Description, &s.Description)
+	if len(ls.Required) > 0 {
+		var req []string
+		if err := json.Unmarshal(ls.Required, &req); err == nil {
+			s.Required = req
+		}
+	}
+	if len(ls.Properties) > 0 {
+		var props map[string]json.RawMessage
+		if err := json.Unmarshal(ls.Properties, &props); err == nil && props != nil {
+			s.Properties = make(map[string]*Schema, len(props))
+			for name, pb := range props {
+				p, ok := parseSchemaNode(pb)
+				if !ok {
+					p = &Schema{} // a boolean or otherwise untyped property schema: unconstrained
+				}
+				s.Properties[name] = p
+			}
+		}
+	}
+	s.Items = parseChildNode(ls.Items)
+	s.AdditionalProperties = parseChildNode(ls.AdditionalProperties)
+	return s, true
+}
+
+// parseChildNode is parseSchemaNode for an optional subschema field:
+// absent, null, or a shape that is not an object schema (a boolean, a
+// tuple) leaves the field nil.
+func parseChildNode(b json.RawMessage) *Schema {
+	if len(b) == 0 || bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+		return nil
+	}
+	p, ok := parseSchemaNode(b)
+	if !ok {
+		return nil
+	}
+	return p
+}
+
+// looseString sets dst when raw is a JSON string and leaves it alone
+// otherwise (absent, null, or a shape the field cannot hold).
+func looseString(raw json.RawMessage, dst *string) {
+	if len(raw) == 0 {
+		return
+	}
+	var v string
+	if err := json.Unmarshal(raw, &v); err == nil {
+		*dst = v
+	}
 }
 
 // MarshalJSON emits the schema's parsed bytes verbatim when it came
@@ -235,12 +322,15 @@ func collectClaims(t reflect.Type, visiting map[reflect.Type]bool, depth int, x 
 			delete(visiting, ft)
 			continue
 		}
-		// An anonymous field with a name tag is an ordinary named field
-		// on the wire — encoding/json marshals it even when the
+		// An anonymous struct field with a name tag is an ordinary named
+		// field on the wire — encoding/json marshals it even when the
 		// embedded type's name is unexported (found by the §7.1 corpus:
-		// the wire carried "cfg":{...} the schema never advertised) —
-		// so the unexported skip below applies to ordinary fields only.
-		if !f.IsExported() && !f.Anonymous {
+		// the wire carried "cfg":{...} the schema never advertised). An
+		// anonymous field of an unexported non-struct type is ignored
+		// by encoding/json whatever its tag, so the skip keeps it out
+		// of the schema too: advertising it would name a field the
+		// decoder never reads.
+		if !f.IsExported() && (!f.Anonymous || derefType(f.Type).Kind() != reflect.Struct) {
 			continue
 		}
 		if name == "" {

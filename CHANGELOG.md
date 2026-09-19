@@ -6,6 +6,21 @@ is pre-1.0 and tags per module (ADR 0005).
 
 ## Unreleased (2026-09-19)
 
+### Fixed — ParseSchema: the structured view is lenient (ADR 0003 amendment)
+
+- A foreign schema whose keyword shape the `Schema` struct cannot hold
+  — `"additionalProperties": false` (what zod-built TypeScript servers
+  emit), a type array `["string","null"]`, tuple or boolean `items`, a
+  non-string description — no longer fails `ParseSchema`: the keyword
+  stays in the stored bytes (what the model sees) and the structured
+  view leaves it zero (what readers walk). The document itself is
+  still checked: invalid JSON, trailing data, or a non-object top
+  level fail at import. The anthropic adapter now forwards every
+  top-level keyword it cannot map (a foreign `$defs`, `oneOf`, …)
+  onto the wire, so a `$ref` inside properties never dangles; the
+  anonymous-field exemption matches `encoding/json`'s exactly (an
+  unexported non-struct anonymous field stays out whatever its tag).
+
 ### Added — MCP, both ways (TODO §7, ADR 0015)
 
 - **`mcp.AddTools(s, tools...)`** and **`mcp.Serve(s, agent, description)`**

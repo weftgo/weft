@@ -221,7 +221,7 @@ recursive types at all:
 
 | Row class | Rows | Finding |
 |---|---|---|
-| identical (policy-only differences) | 17 of 22 | scalars, pointers, `omitempty`, naming, descriptions, arrays, maps, nested structs, `time.Time`, `any`/interface fields, untagged and shadowing embeds, pointer-to-struct `In`, the repo's own shapes, empty struct — identical once weft's documented policies are set aside: struct objects left open (the loop decodes leniently; a schema must not advertise a constraint the decoder does not enforce), pointer ⇒ optional (this ADR), `format: date-time` (this ADR's 2026-09-09 amendment), optional narrowing bounds omitted (`minimum`/`maximum` on integer widths, `minItems`/`maxItems` on fixed arrays — decode still rejects out-of-range values, so nothing is silently accepted) |
+| identical (policy-only differences) | 18 of 21 classifiable (23 rows; the 2 recursive rows are the class below) | scalars, pointers, `omitempty`, naming, descriptions, arrays, maps, nested structs, `time.Time`, `any`/interface fields, untagged and shadowing embeds, pointer-to-struct `In`, the repo's own shapes, empty struct — identical once weft's documented policies are set aside: struct objects left open (the loop decodes leniently; a schema must not advertise a constraint the decoder does not enforce), pointer ⇒ optional (this ADR), `format: date-time` (this ADR's 2026-09-09 amendment), optional narrowing bounds omitted (`minimum`/`maximum` on integer widths, `minItems`/`maxItems` on fixed arrays — decode still rejects out-of-range values, so nothing is silently accepted) |
 | jsonschema-go wire-wrong | `[]byte`, `json:",string"`, tagged embed | `[]byte` derives an array of 0..255 integers where the wire is a base64 string; `,string` fields derive the bare type where the wire demands quotes; an embedded struct with a json name tag is flattened where the wire nests it under the tag. weft's renderings are the wire forms (the `,string` rule is this ADR's 2026-09-18 amendment) |
 | jsonschema-go cannot derive | recursive types | `For` fails with "cycle detected"; weft terminates with the bare object the loop decodes into (this ADR's original rule) |
 
@@ -231,7 +231,11 @@ marshalled by `encoding/json` as a nested `"cfg"` object but was
 dropped from the schema — the `IsExported` skip applied to anonymous
 fields, which encoding/json exempts. The schema now advertises it
 (`schema_conflict_test.go` pins it). No golden changed: no existing
-input used the shape.
+input used the shape. The exemption is exactly encoding/json's: an
+anonymous field of an unexported *non-struct* type is ignored on the
+wire whatever its tag, and stays out of the schema (the review pass
+of the same day caught the first cut advertising it as required;
+pinned beside the struct case).
 
 **`weft.ParseSchema(b json.RawMessage) (*Schema, error)`** reads a
 JSON Schema document from outside Go — an MCP server's `inputSchema`,
@@ -243,7 +247,15 @@ verbatim. An `enum`, `oneOf`, `minimum`, `pattern` or `$ref` the
 the server wrote it, instead of being degraded to the struct's
 vocabulary — the import half of the `oneOf` residue (§7.4). The
 top-level type must be an object, enforced at parse (fail at import,
-not at the first model call). A reflected schema has no stored bytes
+not at the first model call). The structured view is **lenient**: a
+keyword whose shape the struct cannot hold — `"additionalProperties":
+false` (what every zod-built TypeScript server emits), a type array
+`["string","null"]`, tuple or boolean `items`, a non-string
+description — leaves that field zero and is not an error, because the
+view serves readers that walk the tree while the bytes serve the
+model. The first cut decoded straight into the struct and one such
+tool failed the whole import (review pass 2026-09-19; pinned in
+`schema_test.go` and `mcp/client_test.go`). A reflected schema has no stored bytes
 and marshals exactly as before, so every committed golden is
 unchanged.
 

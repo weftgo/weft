@@ -111,8 +111,8 @@ protocol requires).
 |---|---|
 | `structuredContent` present | its JSON, compact, regardless of `content` — the spec calls text the backwards-compatible duplicate |
 | text items only | the texts joined by `"\n"` |
-| non-text items (image, audio, resource) | one line per item: `[image image/png, 9 bytes]`, `[resource <uri>]` — the model learns a payload existed; weft's transcript has no binary tool results (ADR 0001), so this is the honest rendering, not a silent drop |
-| `isError: true` | the same rendering, as the error text |
+| non-text items (image, audio, embedded resource, resource link) | one line per item: `[image image/png, 9 bytes]` (the payload's own byte count), `[resource <uri>]` — the model learns a payload existed; weft's transcript has no binary tool results (ADR 0001), so this is the honest rendering, not a silent drop |
+| `isError: true` | the same rendering, as the error text; an `isError` with no content reads `mcp: tool returned an error` (`ErrToolError`'s text) — the model always gets a sentence |
 
 **Errors: two channels, one boundary.** A remote `isError` result is a
 tool error whose text is the server's, verbatim, with

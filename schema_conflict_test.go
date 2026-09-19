@@ -294,3 +294,33 @@ func TestTaggedEmbedOfUnexportedTypeIsAdvertised(t *testing.T) {
 		t.Errorf("schema:\n got  %s\n want %s", got, want)
 	}
 }
+
+// The sibling rule: an anonymous field of an unexported non-struct
+// type is ignored by encoding/json whatever its tag, so the schema
+// must not advertise it — a required field the decoder never reads
+// would be a permanent INVALID_INPUT under StrictInput.
+func TestTaggedEmbedOfUnexportedNonStructIsSkipped(t *testing.T) {
+	type secret string
+	type input struct {
+		secret  `json:"s"`
+		Visible string `json:"visible"`
+	}
+	wire, err := json.Marshal(input{secret: "x", Visible: "v"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(wire) != `{"visible":"v"}` {
+		t.Fatalf("precondition: wire = %s, want the embed ignored", wire)
+	}
+	tool := Tool("t", "", func(_ context.Context, _ input) (string, error) {
+		return "", nil
+	})
+	got, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"type":"object","properties":{"visible":{"type":"string"}},"required":["visible"]}`
+	if string(got) != want {
+		t.Errorf("schema:\n got  %s\n want %s", got, want)
+	}
+}

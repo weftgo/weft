@@ -213,11 +213,21 @@ func convertTool(t *weft.ToolDef) anthropic.ToolUnionParam {
 		if req := t.InputSchema.Required; len(req) > 0 {
 			schema.Required = req
 		}
-		// The SDK param has no additionalProperties field; ExtraFields
-		// puts it on the wire anyway, so typed map values reach the
-		// model instead of degrading to "some object".
-		if ap := m["additionalProperties"]; ap != nil {
-			schema.ExtraFields = map[string]any{"additionalProperties": ap}
+		// The SDK param has fields for properties, required and type
+		// only; every other top-level keyword — additionalProperties
+		// (typed map values), and a foreign schema's $defs, $schema,
+		// oneOf, … (weft.ParseSchema) — rides ExtraFields onto the
+		// wire, so the model sees the schema whole and a $ref inside
+		// properties never dangles.
+		for k, v := range m {
+			switch k {
+			case "properties", "required", "type":
+				continue
+			}
+			if schema.ExtraFields == nil {
+				schema.ExtraFields = map[string]any{}
+			}
+			schema.ExtraFields[k] = v
 		}
 		tool.InputSchema = schema
 	}

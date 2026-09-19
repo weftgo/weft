@@ -304,6 +304,42 @@ func TestParseSchemaSurvivesClones(t *testing.T) {
 	}
 }
 
+// ParseSchema is lenient about keyword shapes the Schema type cannot
+// hold: a boolean additionalProperties (every zod-built TypeScript MCP
+// server emits "additionalProperties": false), a type array, tuple or
+// boolean items, a non-string description. Each leaves its field zero;
+// none rejects the document; the bytes still cross whole. Before this
+// pin, one such tool failed the whole mcp.Tools import.
+func TestParseSchemaToleratesForeignShapes(t *testing.T) {
+	in := json.RawMessage(`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"q":{"type":["string","null"],"description":"query"},"tags":{"type":"array","items":[{"type":"string"}]},"any":true,"meta":{"type":"object","additionalProperties":{"type":"string"},"description":5}},"required":["q"],"additionalProperties":false}`)
+	s, err := weft.ParseSchema(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Type != "object" || s.AdditionalProperties != nil || len(s.Required) != 1 || s.Required[0] != "q" {
+		t.Errorf("top level = %+v", s)
+	}
+	if q := s.Properties["q"]; q == nil || q.Type != "" || q.Description != "query" {
+		t.Errorf("q = %+v, want an unconstrained type with its description", q)
+	}
+	if tags := s.Properties["tags"]; tags == nil || tags.Type != "array" || tags.Items != nil {
+		t.Errorf("tags = %+v, want array with tuple items left nil", tags)
+	}
+	if any := s.Properties["any"]; any == nil || any.Type != "" {
+		t.Errorf("any = %+v, want an unconstrained node for a boolean schema", any)
+	}
+	if meta := s.Properties["meta"]; meta == nil || meta.AdditionalProperties == nil || meta.AdditionalProperties.Type != "string" || meta.Description != "" {
+		t.Errorf("meta = %+v, want typed additionalProperties and a dropped non-string description", meta)
+	}
+	got, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(in) {
+		t.Errorf("marshal:\n got  %s\n want %s", got, in)
+	}
+}
+
 func TestParseSchemaRejects(t *testing.T) {
 	for name, b := range map[string]string{
 		"empty":         ``,
@@ -313,6 +349,8 @@ func TestParseSchemaRejects(t *testing.T) {
 		"scalar top":    `{"type":"string"}`,
 		"no type":       `{"properties":{}}`,
 		"null":          `null`,
+		"type array":    `{"type":["object","null"]}`,
+		"bool schema":   `true`,
 	} {
 		if _, err := weft.ParseSchema(json.RawMessage(b)); err == nil {
 			t.Errorf("%s: ParseSchema accepted %s", name, b)

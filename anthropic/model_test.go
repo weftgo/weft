@@ -260,3 +260,36 @@ func TestConvertToolCarriesAdditionalProperties(t *testing.T) {
 		t.Errorf("tool:\n got  %s\n want %s", got, want)
 	}
 }
+
+// A foreign schema (weft.ParseSchema) reaches the Anthropic wire whole:
+// $schema, $defs and any other top-level keyword the SDK param has no
+// field for ride ExtraFields, so a $ref inside properties resolves
+// instead of dangling — the API rejects an unresolvable $ref, which
+// would surface as a run error at the first model call.
+func TestConvertToolKeepsForeignSchemaWhole(t *testing.T) {
+	in := `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","$defs":{"unit":{"type":"string","enum":["c","f"]}},"properties":{"u":{"$ref":"#/$defs/unit"},"n":{"type":"integer","minimum":0}},"required":["u"],"additionalProperties":false}`
+	schema, err := weft.ParseSchema(json.RawMessage(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := weft.RawTool("foreign", "", schema, func(_ context.Context, _ json.RawMessage) (string, error) { return "", nil })
+	got, err := json.Marshal(convertTool(tool))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		InputSchema map[string]any `json:"input_schema"`
+	}
+	if err := json.Unmarshal(got, &wire); err != nil {
+		t.Fatal(err)
+	}
+	var want map[string]any
+	if err := json.Unmarshal([]byte(in), &want); err != nil {
+		t.Fatal(err)
+	}
+	gb, _ := json.Marshal(wire.InputSchema)
+	wb, _ := json.Marshal(want)
+	if string(gb) != string(wb) {
+		t.Errorf("input_schema:\n got  %s\n want %s", gb, wb)
+	}
+}

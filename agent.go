@@ -3,11 +3,15 @@ package weft
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -292,8 +296,48 @@ func (o tapOption) apply(a *Agent) {
 // order; a panic in one is recovered, counted (see TapPanics), and
 // dropped, so a broken observer cannot break a run. Taps observe and
 // cannot change anything — behaviour attaches at the two middleware
-// seams. ctx is the run's context.
+// seams. ctx is the run's context, which carries the run's span, so a
+// tap that starts its own spans parents them under it for free.
 func Tap(fn func(ctx context.Context, ev Event)) Option { return tapOption{fn} }
+
+type tracerProviderOption struct{ tp trace.TracerProvider }
+
+func (o tracerProviderOption) apply(a *Agent) {
+	if o.tp != nil {
+		a.tracerProvider = o.tp
+	}
+}
+
+// TracerProvider sets the OpenTelemetry tracer provider the agent's
+// runs report spans to. Without it, runs use the global provider
+// (otel.GetTracerProvider), which is a no-op until an SDK registers
+// one — so a program that sets up an SDK gets weft's spans with no
+// option at all. Tests and dependency-injected programs pass their
+// own provider here instead of touching the global. Every run reports
+// one invoke_agent span, one chat span per model call, and one
+// execute_tool span per executed tool call, with the GenAI semantic
+// attributes (ADR 0016); no message or tool-argument content is ever
+// put on a span.
+func TracerProvider(tp trace.TracerProvider) Option { return tracerProviderOption{tp} }
+
+type loggerOption struct{ l *slog.Logger }
+
+func (o loggerOption) apply(a *Agent) { a.logger = o.l }
+
+// Logger sets the logger the agent's runs report to, at Debug level:
+// one line when a run starts and ends, one per model call, one per tool
+// call — run and call ids, the model, durations, usage, stop reasons
+// and outcomes; never message text, tool arguments or tool results.
+// Error text is the one exception: a failed run, model call or tool
+// call logs the error it returned, because a log is the caller's. nil (the
+// default) means slog.Default, which is silent until its handler
+// enables Debug, so weft logs nothing in a program that did not ask;
+// slog.New(slog.DiscardHandler) turns the lines off outright. The
+// lines carry the span-carrying context, so a handler that bridges to
+// OTel correlates them with the spans for free. mw.Log and mw.Audit
+// are separate: middleware the caller places, at the level the caller
+// chooses.
+func Logger(l *slog.Logger) Option { return loggerOption{l} }
 
 // MaxResultBytes sets the maximum size of one tool result's text, in
 // bytes (default 64 KiB). The loop caps longer results — successes,
@@ -396,6 +440,11 @@ type Agent struct {
 	thinking        ThinkingConfig
 	modelMW         []ModelMiddleware
 	toolMW          []ToolMiddleware
+	tracerProvider  trace.TracerProvider
+	logger          *slog.Logger
+	// obs is the loop's own reporting at the run's phases (ADR 0016):
+	// spans to the tracer, lines to the logger. Built once, below.
+	obs observer
 	// hasOutput records that Output was applied: a Subagent delegating
 	// to this agent returns the submitted JSON, not the final text.
 	hasOutput bool
@@ -423,6 +472,17 @@ func New(m Model, opts ...Option) *Agent {
 		if o != nil {
 			o.apply(a)
 		}
+	}
+	// The tracer is resolved once, here: the option's provider, or the
+	// global one — which delegates, so an SDK registered after New is
+	// still picked up and zero-config instrumentation holds.
+	tp := otel.GetTracerProvider()
+	if a.tracerProvider != nil {
+		tp = a.tracerProvider
+	}
+	a.obs = observer{
+		tracer: tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(version)),
+		log:    a.logger,
 	}
 	// The model chain is built once, here: first registered = outermost.
 	for i := len(a.modelMW) - 1; i >= 0; i-- {

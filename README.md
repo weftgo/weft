@@ -236,6 +236,40 @@ decision`. Middleware can park any call by returning an error wrapping
 `ErrApprovalRequired`. It is a policy seam, not a security boundary
 ([ADR 0007](docs/adr/0007-approval-boundary.md); `examples/approval`).
 
+### Observability
+
+Set up an OpenTelemetry SDK and every run emits the full span tree —
+one `invoke_agent` span per run, one `chat` span per model call, one
+`execute_tool` span per executed tool call, a subagent's run nested
+under its delegating tool span — with the GenAI semantic attributes
+(provider, model, tokens, finish reasons). No weft option is needed:
+the core instruments through the OTel API, which is a no-op until your
+SDK registers. Exporters and backends are not weft's business.
+
+```go
+tp := sdktrace.NewTracerProvider( /* your exporter */ )
+defer tp.Shutdown(ctx)
+// no weft option: the global provider is picked up, spans appear
+agt := weft.New(model, tools...)
+// or explicitly, without touching the global:
+agt = weft.New(model, append(tools, weft.TracerProvider(tp))...)
+```
+
+For logs, `weft.Logger(l)` writes one Debug line per phase — run start,
+run finish, model call, tool call — with ids, the model, durations,
+usage, and outcomes; never message text or tool arguments. The default
+(`slog.Default`, resolved at log time) is silent until your handler
+enables Debug; `slog.New(slog.DiscardHandler)` turns the lines off. A
+handler that bridges slog to OTel correlates the lines with the spans
+for free: they are logged on the span-carrying context.
+`examples/otel` runs the whole thing against the real SDK offline.
+No prompt, message, tool argument or tool result reaches a span: ids,
+names, counts, durations, reasons, and error types only. Error *text*
+does travel — a failed run or model call records its error as the
+span's exception, and the log lines carry the error text a tool or
+model returned, because a log is the caller's
+([ADR 0016](docs/adr/0016-observability.md)).
+
 ## The manifest — `weft.json`
 
 One generated, committed, diffable description of every agent and tool
@@ -365,11 +399,12 @@ that must stay offline get loud failures, not surprise bills.
   `ModelFinish`, continues after it, carries a tool call with an empty
   ID or name, or panics fails the run wrapping `ErrModelContract` — a
   broken adapter cannot corrupt a transcript.
-- **No dependencies** in the core module. The vendor SDKs live in the
-  adapter modules (their own `go.mod`); the one dependency the design
-  permits in the core is the OTel API package (a no-op tracer until an
-  SDK registers), which lands with instrumentation; exporters stay in a
-  satellite.
+- **One dependency** in the core module: the OTel API package (ADR
+  0016), a no-op until an SDK registers — the zero-config
+  instrumentation THE-END-GOAL sanctions as the core's single
+  exception. The vendor SDKs live in the adapter modules (their own
+  `go.mod`); the OTel SDK itself lives only in `examples/otel`; exporters
+  stay in a satellite.
 
 ## Layout
 
@@ -420,9 +455,10 @@ an exported symbol always fails.
    Anthropic, Google; ADR 0013).
 2. ~~The two middleware seams~~ — **done** (`WrapModel`/`WrapTools`,
    package `mw`, the approval boundary; ADR 0006, ADR 0007).
-3. Loop refinements: subagents as tools, `ModelRetry`, usage limits,
-   loop detection, `PrepareStep`.
-4. MCP interop: consume MCP servers as tools, expose weft tools as MCP.
+3. ~~Loop refinements~~ — **done** (subagents as tools, `ModelRetry`,
+   usage limits, loop detection, `PrepareStep`; ADR 0014).
+4. ~~MCP interop~~ — **done** (consume and expose; ADR 0015). ~~Core
+   observability~~ — **done** (OTel spans + slog lines; ADR 0016).
 5. The satellites: `runtime` (sessions, approvals), `store`, `serve`,
    `studio`, and the eval/prompt/mem/trace modules.
 

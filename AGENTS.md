@@ -57,6 +57,8 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
     weft.Parallelism(4),                       // or weft.Sequential()
     weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkOff}), // reasoning default (adapters map what they can)
     weft.Tap(func(ctx context.Context, ev weft.Event) {...}), // observer: sees every event, changes nothing
+    weft.TracerProvider(tp),                   // OTel spans: invoke_agent › chat / execute_tool (default: the global provider; no-op until an SDK registers)
+    weft.Logger(logger),                       // one Debug line per run, model call, tool call (default: slog.Default, silent unless Debug is on)
     weft.WrapModel(mw.Retry(), mw.Fallback(backup)),           // model seam: first listed = outermost
     weft.WrapTools(mw.Audit(logger), mw.Allow(permits), mw.MapErrors(nil)), // tool seam, same rule
     lookup,                                    // tools are options
@@ -148,7 +150,7 @@ ignore it.
    transcript shape). Changing it needs an ADR in `docs/adr/`.
 6. **Nothing above the core is imported by the core.** No HTTP, no
    database, no tracing backend. The OTel API package is the one
-   permitted future dependency.
+   permitted dependency (ADR 0016); exporters stay in a satellite.
 7. **The Model stream contract is enforced by the loop**: exactly one
    `ModelFinish`, nothing after it, panics converted to run errors —
    all wrapping `ErrModelContract`. A broken adapter cannot corrupt a
@@ -162,9 +164,10 @@ ignore it.
    abandons the handler's goroutine; handlers must honour ctx.
 10. **Two behavioural seams, one tap, no more.** `WrapModel` and
     `WrapTools` (chi-style, first listed = outermost) are where
-    behaviour attaches; `Tap` observes. Panic containment and timeouts
-    sit outside the tool chain. A third seam, or a phase turned into a
-    hook, needs an ADR (ADR 0006).
+    behaviour attaches; `Tap` observes. The loop reports its own spans
+    and log lines at its phases (ADR 0016); that is reporting, not a
+    seam. Panic containment and timeouts sit outside the tool chain. A
+    third seam, or a phase turned into a hook, needs an ADR (ADR 0006).
 11. **A `max_tokens` step with tool calls executes none of them**: every
     call gets `tool call X was not executed: the response hit the
     output token limit` and the model retries with a full budget.

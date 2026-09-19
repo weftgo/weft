@@ -33,6 +33,33 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// one per nesting level, and a Subagent handler refuses a delegation
 	// whose child is already on it (the cycle guard, ADR 0014).
 	ctx = withAncestry(ctx, append(slices.Clone(ancestryOf(ctx)), a))
+	// The run's own reporting begins here: one invoke_agent span, on this
+	// context, so every chat, execute_tool and tap below parents under
+	// it, ended by every exit with the outcome decided — including
+	// cancellation, which no event reports (ADR 0016).
+	ctx, endSpan := a.obs.run(ctx, cfg.id, a.name, a.modelInfo())
+	// A panic nothing contains — PrepareStep functions are arbitrary
+	// user code; model, tool, and tap panics are contained further down
+	// — must not leak the run span: this guard ends it with the panic
+	// as its outcome and re-panics, so the caller still crashes and the
+	// trace still closes (ADR 0016).
+	var spanEnded bool
+	var res *RunResult
+	defer func() {
+		if spanEnded {
+			return
+		}
+		p := recover()
+		r := res
+		if r == nil {
+			r = &RunResult{}
+		}
+		spanEnded = true
+		endSpan(r, fmt.Errorf("%w: %v", errRunPanicked, p))
+		if p != nil {
+			panic(p)
+		}
+	}()
 	// Every event passes through here exactly once: the taps observe it
 	// (synchronously, in emission order, on the emitting goroutine),
 	// then the sink receives it. Nothing is delivered after
@@ -68,10 +95,13 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			skip[c.ID] = true
 		}
 	}
-	res := &RunResult{ID: cfg.id, Messages: repair(cfg.messages, skip)}
+	res = &RunResult{ID: cfg.id, Messages: repair(cfg.messages, skip)}
 	seq := new(atomic.Int64)
 	fail := func(step int, err error) (*RunResult, error) {
-		return nil, &RunError{Step: step, Err: err, Result: res}
+		spanEnded = true
+		re := &RunError{Step: step, Err: err, Result: res}
+		endSpan(res, re)
+		return nil, re
 	}
 	// Every successful exit ends here — four sites share the shape, and
 	// a field added to RunFinish must not miss any of them. One check
@@ -86,6 +116,8 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		if !deliver(RunFinish{RunID: cfg.id, Usage: res.Usage, Steps: len(res.Steps), Pending: snapshotPending(res.Pending)}) {
 			return fail(step, ctx.Err())
 		}
+		spanEnded = true
+		endSpan(res, nil)
 		return res, nil
 	}
 	// A model that can name itself does so on the first event; the
@@ -177,6 +209,12 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			finish   ModelFinish
 			finished bool
 		)
+		// The model call's own reporting: one chat span around the chain —
+		// PrepareStep has run and mw.Retry/mw.Fallback sit inside it, so
+		// the span measures the chain's outcome (ADR 0016). The stream is
+		// consumed on the span's context, so an adapter's own HTTP spans
+		// parent under chat.
+		mctx, endModel := a.obs.model(ctx, cfg.id, step, a.modelInfo())
 		// The Model stream contract (see Model) is enforced here, not just
 		// documented: exactly one ModelFinish, nothing after it, and a
 		// panicking implementation becomes a run error instead of crashing
@@ -187,7 +225,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 					err = fmt.Errorf("%w: model stream panicked: %v", ErrModelContract, p)
 				}
 			}()
-			for mev, serr := range a.model.Stream(ctx, req) {
+			for mev, serr := range a.model.Stream(mctx, req) {
 				if serr != nil {
 					return fmt.Errorf("model stream: %w", serr)
 				}
@@ -246,8 +284,10 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			}
 			return nil
 		}
-		if err := consume(); err != nil {
-			return fail(step, err)
+		streamErr := consume()
+		endModel(finish, finished, len(calls), streamErr)
+		if streamErr != nil {
+			return fail(step, streamErr)
 		}
 
 		// An assistant turn with no text and no calls is not appended:
@@ -638,23 +678,36 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 			continue
 		}
 		// ToolStart is emitted here, on the dispatching goroutine, so
-		// start events are in call order by construction.
+		// start events are in call order by construction. The Seq is
+		// captured for the tool span's weft.tool.seq attribute; the
+		// goroutine launch happens after this emit, so the read is safe.
+		var startSeq int64
 		ordered(func(s int64) Event {
+			startSeq = s
 			return ToolStart{RunID: runID, Seq: s, CallID: call.ID, Name: call.Name, Args: cloneRaw(call.Args)}
 		})
+		c := Call{RunID: runID, Step: step, CallID: call.ID, Name: call.Name, Approved: approved}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
 			n := nestFor(call)
-			callCtx := withNest(withCall(ctx, Call{RunID: runID, Step: step, CallID: call.ID, Name: call.Name, Approved: approved}), n)
+			callCtx := withNest(withCall(ctx, c), n)
+			// The tool call's own reporting: one execute_tool span, on the
+			// handler's context — a span the handler starts is its child,
+			// and a child run's invoke_agent hangs under it — ended with
+			// the call's outcome, before ToolFinish is emitted so no span
+			// operation runs under emitMu (ADR 0016).
+			callCtx, endTool := a.obs.tool(callCtx, c, startSeq)
 			var retry bool
-			outcomes[i], parked[i], retry = a.callTool(callCtx, call, def)
+			var callErr error
+			outcomes[i], parked[i], retry, callErr = a.callTool(callCtx, call, def)
 			if retry {
 				retryMu.Lock()
 				retried = append(retried, call.Name)
 				retryMu.Unlock()
 			}
+			endTool(outcomes[i], parked[i], callErr)
 			if parked[i] {
 				return
 			}
@@ -872,7 +925,9 @@ func deniedResult(reason string) string {
 // errors, middleware errors, and panics propagate. A tool source whose
 // snapshot carries a duplicate name returns an error wrapping
 // ErrDuplicateTool. Timeouts and result caps are not applied;
-// StrictInput is, at both levels, as in the loop.
+// StrictInput is, at both levels, as in the loop. No span or log line
+// is produced: manual dispatchers own their context and their own
+// reporting (ADR 0016).
 func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error) {
 	tools, err := a.dispatchTools()
 	if err != nil {
@@ -924,8 +979,11 @@ func (a *Agent) chain(def *ToolDef, strict bool) ToolCaller {
 // for an unknown name. Per-tool options override the agent's defaults;
 // the result cap is applied last, over every outcome. An error wrapping
 // ErrApprovalRequired is the one non-result: the call is reported
-// pending instead.
-func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef) (res ToolResultPart, pending, retry bool) {
+// pending instead. The chain's error is returned beside the result —
+// folded into the result's text for the model, but typed for the
+// observer's error.type (ADR 0016) — and is nil on success and on a
+// parked call's pending report.
+func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef) (res ToolResultPart, pending, retry bool, err error) {
 	res = ToolResultPart{CallID: call.ID, Name: call.Name}
 	resultCap := a.resultCap
 	timeout := a.toolTimeout
@@ -943,7 +1001,6 @@ func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef) (
 
 	fn := a.chain(def, strict)
 	var out string
-	var err error
 	if timeout <= 0 {
 		out, err = invokeContained(ctx, fn, call)
 	} else {
@@ -951,7 +1008,7 @@ func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef) (
 	}
 	if err != nil {
 		if errors.Is(err, ErrApprovalRequired) {
-			return res, true, false
+			return res, true, false, nil
 		}
 		res.IsError = true
 		res.Content = err.Error()
@@ -960,12 +1017,24 @@ func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef) (
 		// handler's (the chain's outcome is what the loop sees).
 		var te *ToolError
 		if errors.As(err, &te) && te.Code == CodeRetry {
-			return res, false, true
+			return res, false, true, err
 		}
-		return res, false, false
+		return res, false, false, err
 	}
 	res.Content = out
-	return res, false, false
+	return res, false, false, nil
+}
+
+// toolTimeoutError is a per-call timeout, typed so the observer can
+// classify it as error.type "timeout" without matching text; Error
+// preserves the pinned model-visible string (ADR 0002).
+type toolTimeoutError struct {
+	name string
+	d    time.Duration
+}
+
+func (e *toolTimeoutError) Error() string {
+	return fmt.Sprintf("tool %q timed out after %s", e.name, e.d)
 }
 
 // invokeContained runs the chain, turning a panic — in the handler or
@@ -998,7 +1067,7 @@ func invokeWithTimeout(ctx context.Context, fn ToolCaller, call ToolCallPart, ti
 		done <- outcome{out, err}
 	}()
 	timedOut := func() error {
-		return fmt.Errorf("tool %q timed out after %s", call.Name, timeout)
+		return &toolTimeoutError{name: call.Name, d: timeout}
 	}
 	select {
 	case o := <-done:

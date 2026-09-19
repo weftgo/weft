@@ -2,7 +2,8 @@
 
 Where each thing sits, in order. **Phases are documentation; seams are
 code.** A named phase here never becomes a hook — behaviour attaches at
-the two middleware seams (ADR 0006), observation at the tap (ADR 0004).
+the two middleware seams (ADR 0006), observation at the tap (ADR 0004)
+and in the loop's own spans and log lines (ADR 0016).
 
 ## A step
 
@@ -22,6 +23,9 @@ PrepareStep (the one loop knob): rewrite the request per step —
 system = Instructions + PromptSnippets of the (prepared) tools
         │
         ▼
+┌─ `chat` span begins (ADR 0016): it wraps the whole chain, so one
+│  span per step measures the chain's outcome; spans an adapter starts
+│  for its own HTTP calls parent under it
 model middleware chain (WrapModel; first listed = outermost)
   mw.Log ─── observation: request summary, finish, duration
   mw.Retry ─ alternative dispatch: retry a call that failed before any event
@@ -34,6 +38,10 @@ adapter (weft/openai, weft/anthropic, weft/google) → vendor SDK → HTTP
         │  ModelToolCall … ModelFinish
         ▼
 contract enforcement (ErrModelContract: exactly one finish, nothing after it)
+        │
+        ▼
+└─ `chat` span ends: usage, finish reason, tool-call count — or the
+   error status when the stream failed
         │
         ▼
 transcript: one assistant message (reasoning parts, text, tool calls)
@@ -63,6 +71,9 @@ ToolStart (Seq assigned under the ordering lock)
 ── containment boundary: panics and Timeout are handled here, outside ──
         │
         ▼
+┌─ `execute_tool` span begins on the call's ctx (ADR 0016): a span the
+│  handler starts — an HTTP client's, a child run's invoke_agent — is
+│  its child
 agent WrapTools chain (first listed = outermost)
   mw.Audit ──── observation: run, step, call, duration, error + cause
   AuthUser ──── decoration: verified data onto ctx (ExampleWrapTools_context)
@@ -87,6 +98,10 @@ render: *ToolError → "CODE: message"; other error → its text
 cap: MaxResultBytes (per tool, else per agent) + visible marker
         │
         ├─ pending → no ToolFinish; RunFinish.Pending after the step
+        ▼
+└─ `execute_tool` span ends before ToolFinish (result bytes, pending,
+   or Error status + error.type — never the result text)
+        │
         ▼
 ToolFinish (Seq) → ToolResultPart, in call order, on the step's tool message
 ```

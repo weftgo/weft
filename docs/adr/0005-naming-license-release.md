@@ -74,3 +74,18 @@ official Go MCP SDK v1.8.0 — ADR 0015): `go.work` uses
 loop over `go list -m` picks it up with no workflow change. The rule
 is unchanged: the root module stays dependency-free; a satellite
 carries its own SDK.
+
+## Amendment (2026-09-19 — the version constant and the core's one dependency, ADR 0016)
+
+Two sentences above move with observability:
+
+- The mcp amendment's "the root module stays dependency-free" is
+  superseded: the root module's `go.mod` requires the OTel API
+  (`go.opentelemetry.io/otel` and `otel/trace`, v1.46.0) and nothing
+  else — the one dependency THE-END-GOAL principle 5 sanctions, decided
+  in ADR 0016. Satellites still carry their own SDKs; the OTel SDK
+  itself appears only in `examples/otel`, its own module in `go.work`.
+- The release process owns one more value: the `version` constant in
+  `observe.go` (currently `v0.1.0-dev`) rides as the OTel
+  instrumentation version on every span weft starts. Tagging a module
+  release sets it, exactly as tagging sets the module version.

@@ -6,6 +6,43 @@ is pre-1.0 and tags per module (ADR 0005).
 
 ## Unreleased (2026-09-19)
 
+### Added — Observability: OTel spans and slog lines (TODO §8, ADR 0016)
+
+- **The core's first and only dependency: the OTel API**
+  (`go.opentelemetry.io/otel` v1.46.0, `semconv/v1.41.0` — the newest
+  semconv package carrying the GenAI group). Every run reports its own
+  spans — `invoke_agent` per run, `chat` per model call, `execute_tool`
+  per executed tool call, children nested under their parents, GenAI
+  semantic attributes, no message or tool-argument content on any span —
+  through the global provider, so setting up an SDK is the whole
+  integration; no weft option needed. Cost with no SDK registered: six
+  allocations and ~230 ns per span (`BenchmarkObserverNoop`).
+- **`weft.TracerProvider(tp)`** replaces the global provider for one
+  agent (tests and DI programs never touch the global).
+- **`weft.Logger(l)`** writes one Debug line per phase — run start, run
+  finish, model call, tool call — ids, model, durations, usage, stop
+  reasons, outcomes; default `slog.Default`, resolved at log time,
+  silent unless Debug is on; lines carry the span context so an
+  OTel-bridging handler correlates them for free.
+- New module **`examples/otel`** (own `go.mod`, in `go.work`): the real
+  SDK with a stdout exporter, plus a test asserting the span tree
+  through the SDK's in-memory exporter — offline.
+- Amends ADR 0004 (OTel and slog are the loop's own reporting, not the
+  tap's) and ADR 0005 (a `version` constant for instrumentation
+  version). `Tap` is unchanged and now receives the span-carrying
+  context.
+- Review pass (2026-09-19): `error.type` for weft's sentinels is a
+  snake_case token (`max_steps`, `model_contract`, …; table in ADR
+  0016), not the sentinel's sentence; a cancelled tool call reports
+  `context.Canceled` like the run; the `chat` span takes the loop's own
+  finished flag instead of inferring it from an empty stop reason;
+  the README states precisely what error text travels. A second pass
+  the same day: a panic nothing contains — a PrepareStep function —
+  ends the run span (`run_panicked`) and re-panics instead of leaking
+  the span; ADR 0016's dependency closure drops `golang.org/x/sys`
+  (it appears only in `examples/otel`'s go.sum); the ADR 0005
+  amendment the entry above cites is written.
+
 ### Fixed — ParseSchema: the structured view is lenient (ADR 0003 amendment)
 
 - A foreign schema whose keyword shape the `Schema` struct cannot hold

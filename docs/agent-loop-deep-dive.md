@@ -1274,8 +1274,9 @@ model call. Each layer has one job and none overlaps another.
 Every harness feature in THE-END-GOAL's module map is one of these
 wrappers. Sandboxing wraps the tool call. Approval is enforced at the
 base of the tool chain (so `Allow` can deny first and `Audit` sees the
-attempt) and surfaces as a run boundary. OTel and slog attach at the
-tap. A third seam, or a phase turned into a hook, needs an ADR, and the
+attempt) and surfaces as a run boundary. OTel and slog are the loop's
+own reporting (ADR 0016) — not the tap's job, because a tap cannot
+decorate the tool context or see a cancelled run's end. A third seam, or a phase turned into a hook, needs an ADR, and the
 playbook lists "callback soup" as a red flag.
 
 The Elysia-style evaluation (playbook §9) is the worked example of

@@ -194,3 +194,19 @@ are totally ordered by the parent's `emitMu`. Without the rule, a
 replayed stream could show a call finishing and then continuing; with
 it, an abandoned (timed-out or cancelled) delegation's late events and
 usage are dropped rather than racing the step's already-read records.
+
+## Amendment (2026-09-19 — OTel and slog are the loop's own reporting, ADR 0016)
+
+The 2026-09-10 amendment's sentence "`store`, OTel (§8.1) and slog
+(§8.2) attach through it" is half-right and is corrected: **`store`
+attaches through it; OTel and slog are the loop's own reporting
+(ADR 0016)**. A tap cannot decorate the tool handler's context (it is
+built after the tap sees the run's context), never sees the end of a
+cancelled run (nothing is delivered after cancellation), and has no
+clock for durations. The loop has all three, so the loop reports its
+own phases — one `invoke_agent` span per run, one `chat` span per model
+call, one `execute_tool` span per executed tool call, and the matching
+slog lines, from one internal observer that is not a seam. `Tap` keeps
+its contract exactly as specified here; the ctx a tap receives now
+carries the run span, so a tap that starts its own spans parents them
+correctly for free.

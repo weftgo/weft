@@ -9,6 +9,7 @@
 # Build output
 /bin/
 /dist/
+/examples/otel/otel
 
 # Go test artifacts
 *.test

@@ -3,6 +3,7 @@ go 1.26
 use (
 	.
 	./anthropic
+	./examples/otel
 	./google
 	./mcp
 	./openai

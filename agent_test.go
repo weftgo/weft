@@ -721,3 +721,15 @@ func TestSubagentParallelDelegations(t *testing.T) {
 		t.Errorf("usage = %+v, want %+v", res.Usage, want)
 	}
 }
+
+// Name is the read side of the Name option: Serve (weft/mcp) names the
+// tool it exposes after the agent through it.
+func TestAgentNameAccessor(t *testing.T) {
+	m := wefttest.Script()
+	if got := weft.New(m).Name(); got != "" {
+		t.Errorf("unnamed agent reports %q", got)
+	}
+	if got := weft.New(m, weft.Name("support")).Name(); got != "support" {
+		t.Errorf("named agent reports %q", got)
+	}
+}

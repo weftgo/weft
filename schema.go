@@ -1,7 +1,11 @@
 package weft
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"time"
@@ -24,6 +28,59 @@ type Schema struct {
 	AdditionalProperties *Schema  `json:"additionalProperties,omitempty"`
 	Required             []string `json:"required,omitempty"`
 	Items                *Schema  `json:"items,omitempty"`
+
+	// raw holds the verbatim bytes a schema parsed with ParseSchema came
+	// from — an MCP server's inputSchema, a plugin manifest — including
+	// every keyword the fields above cannot express (enum, oneOf,
+	// minimum, $ref, …). Unexported and never set by the reflector: only
+	// ParseSchema writes it, and MarshalJSON emits it, so a foreign
+	// schema reaches the model whole instead of degraded to this
+	// struct's vocabulary (ADR 0003's amendment, TODO §7.1).
+	raw json.RawMessage
+}
+
+// ParseSchema reads a JSON Schema document from outside Go into a
+// *Schema: the structured fields it knows are populated (Type,
+// Properties, Required, … — the manifest and any reader that walks the
+// tree see them), and the document's own bytes are kept and re-emitted
+// by Schema.MarshalJSON, so an enum or a oneOf the Schema type cannot
+// express still reaches the model exactly as written. The top-level
+// type must be an object — providers and MCP both require it, and
+// failing here, at import, beats failing at the first model call.
+//
+// The bytes must be exactly one JSON value: invalid JSON, trailing
+// data, or a non-object top level return an error naming the problem.
+func ParseSchema(b json.RawMessage) (*Schema, error) {
+	if len(bytes.TrimSpace(b)) == 0 {
+		return nil, fmt.Errorf("weft: ParseSchema: empty schema")
+	}
+	s := &Schema{}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	if err := dec.Decode(s); err != nil {
+		return nil, fmt.Errorf("weft: ParseSchema: %w", err)
+	}
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("weft: ParseSchema: trailing data after the schema")
+	}
+	if s.Type != "object" {
+		return nil, fmt.Errorf("weft: ParseSchema: top-level type must be %q, got %q", "object", s.Type)
+	}
+	s.raw = bytes.Clone(b)
+	return s, nil
+}
+
+// MarshalJSON emits the schema's parsed bytes verbatim when it came
+// from ParseSchema — the manifest's input_schema, the adapters' tool
+// parameters, and any other reader see exactly what the foreign server
+// sent — and the plain struct encoding otherwise (a reflected schema
+// has no bytes to honour, so existing goldens are unchanged).
+func (s *Schema) MarshalJSON() ([]byte, error) {
+	if len(s.raw) > 0 {
+		return s.raw, nil
+	}
+	type plainSchema Schema
+	return json.Marshal((*plainSchema)(s))
 }
 
 // schemaFor derives the input schema for a Go type.

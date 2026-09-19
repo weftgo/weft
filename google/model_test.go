@@ -274,3 +274,32 @@ func TestThinkingConfig(t *testing.T) {
 		})
 	}
 }
+
+// A foreign schema parsed with weft.ParseSchema rides genaiSchema's
+// JSON round trip: what genai.Schema has a field for is carried (enum,
+// pattern, minimum, description), what it lacks is dropped by the
+// decoder (oneOf — Gemini's subset), and type names normalise to the
+// API's uppercase. A Gemini limit, not a weft one (TODO §7.1).
+func TestSchemaConversionForeignRaw(t *testing.T) {
+	s, err := weft.ParseSchema(json.RawMessage(`{"type":"object","properties":{"units":{"type":"string","enum":["c","f"],"pattern":"^[cf]$"},"n":{"type":"integer","minimum":0},"either":{"oneOf":[{"type":"string"}]}},"required":["units"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := genaiSchema(s)
+	if got.Type != genai.TypeObject {
+		t.Errorf("type = %v, want OBJECT", got.Type)
+	}
+	u := got.Properties["units"]
+	if u.Type != genai.TypeString || len(u.Enum) != 2 || u.Pattern != "^[cf]$" {
+		t.Errorf("units = %+v", u)
+	}
+	if n := got.Properties["n"]; n.Type != genai.TypeInteger || n.Minimum == nil || *n.Minimum != 0 {
+		t.Errorf("n = %+v", n)
+	}
+	// oneOf has no genai field: the decoder drops it, and the property
+	// degrades to an unconstrained node (empty type) rather than being
+	// lost — the same per-field drop rule as before, now decoder-driven.
+	if e := got.Properties["either"]; e.Type != "" || len(e.AnyOf) != 0 || len(e.Properties) != 0 {
+		t.Errorf("oneOf must drop under Gemini's subset, got %+v", e)
+	}
+}

@@ -12,6 +12,7 @@ package adapterkit
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/weftgo/weft"
@@ -20,33 +21,27 @@ import (
 // SchemaMap renders a weft.Schema as the plain JSON map the vendors'
 // tool-parameter fields expect (openai-go's FunctionParameters,
 // anthropic-sdk-go's InputSchema). Nil stays nil: a schema-less tool
-// takes the provider's default shape.
+// takes the provider's default shape. The rendering goes through
+// json.Marshal, which honours Schema.MarshalJSON — so a schema parsed
+// with weft.ParseSchema reaches the provider as its verbatim foreign
+// bytes (enum, oneOf and all), where the hand-built map this replaced
+// degraded them to the struct's own vocabulary. One rendering change
+// rode along: an unconstrained node (a recursion cut, an interface
+// field) marshalled as {"type": ""} before and is {} now (ADR 0003's
+// 2026-09-19 amendment).
 func SchemaMap(s *weft.Schema) map[string]any {
 	if s == nil {
 		return nil
 	}
-	m := map[string]any{"type": s.Type}
-	if s.Format != "" {
-		m["format"] = s.Format
+	b, err := json.Marshal(s)
+	if err != nil {
+		// Unreachable: every Schema field is a string, slice, or map,
+		// and ParseSchema validated the raw bytes before storing them.
+		return nil
 	}
-	if s.Description != "" {
-		m["description"] = s.Description
-	}
-	if s.Items != nil {
-		m["items"] = SchemaMap(s.Items)
-	}
-	if s.AdditionalProperties != nil {
-		m["additionalProperties"] = SchemaMap(s.AdditionalProperties)
-	}
-	if s.Properties != nil {
-		props := make(map[string]any, len(s.Properties))
-		for k, v := range s.Properties {
-			props[k] = SchemaMap(v)
-		}
-		m["properties"] = props
-	}
-	if len(s.Required) > 0 {
-		m["required"] = s.Required
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil
 	}
 	return m
 }

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/internal/jsonconflict"
+	"github.com/weftgo/weft/wefttest"
 )
 
 func TestSchemaDerivation(t *testing.T) {
@@ -214,5 +216,124 @@ func TestSchemaMapValuesTyped(t *testing.T) {
 	want := `{"type":"object","properties":{"ancestry":{"type":"object","additionalProperties":{"type":"object","properties":{"tag":{"type":"string"}},"required":["tag"]}},"free":{"type":"object"},"nested":{"type":"object","additionalProperties":{"type":"array","items":{"type":"string"}}},"scores":{"type":"object","additionalProperties":{"type":"integer"}}},"required":["scores"]}`
 	if string(got) != want {
 		t.Errorf("schema:\n got  %s\n want %s", got, want)
+	}
+}
+
+// A foreign schema parsed with ParseSchema keeps its bytes: the
+// structured fields the core can express are populated for readers
+// that walk the tree, and MarshalJSON re-emits the document verbatim —
+// an enum or a oneOf the Schema type cannot express still reaches the
+// model exactly as the server wrote it (TODO §7.1; ADR 0003).
+func TestParseSchemaKeepsForeignBytes(t *testing.T) {
+	in := json.RawMessage(`{"type":"object","properties":{"units":{"type":"string","enum":["c","f"]},"when":{"oneOf":[{"type":"string"},{"type":"number"}]}},"required":["units"],"$schema":"https://json-schema.org/draft/2020-12/schema"}`)
+	s, err := weft.ParseSchema(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Type != "object" || len(s.Properties) != 2 || s.Required[0] != "units" {
+		t.Errorf("structured fields not populated: %+v", s)
+	}
+	if s.Properties["units"].Type != "string" {
+		t.Errorf("units type = %q", s.Properties["units"].Type)
+	}
+	got, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(in) {
+		t.Errorf("marshal:\n got  %s\n want %s", got, in)
+	}
+	// A RawTool built on it marshals the same bytes, and the manifest's
+	// input_schema (which serialises the *Schema directly) shows them too.
+	tool := weft.RawTool("foreign", "a foreign tool", s,
+		func(_ context.Context, _ json.RawMessage) (string, error) { return "", nil })
+	got, err = json.Marshal(tool.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(in) {
+		t.Errorf("tool schema:\n got  %s\n want %s", got, in)
+	}
+	// The manifest indents its JSON, so the document's bytes are
+	// reformatted there but nothing is lost: the input_schema node is
+	// semantically the parsed document, oneOf and $schema included.
+	b, err := weft.Manifest(weft.New(wefttest.Script(), weft.Name("m"), tool))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Agents []struct {
+			Tools []struct {
+				InputSchema json.RawMessage `json:"input_schema"`
+			} `json:"tools"`
+		} `json:"agents"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	var gotNode, wantNode any
+	if err := json.Unmarshal(doc.Agents[0].Tools[0].InputSchema, &gotNode); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(in, &wantNode); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotNode, wantNode) {
+		t.Errorf("manifest input_schema = %v, want %v", gotNode, wantNode)
+	}
+}
+
+// The verbatim bytes survive the copies the core makes: New clones the
+// tool (and its schema tree) into its frozen registry, and Tools
+// returns clones — every copy must still marshal what the server sent.
+func TestParseSchemaSurvivesClones(t *testing.T) {
+	in := json.RawMessage(`{"type":"object","properties":{"q":{"type":"string","minLength":1}}}`)
+	s, err := weft.ParseSchema(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := weft.RawTool("foreign", "", s,
+		func(_ context.Context, _ json.RawMessage) (string, error) { return "", nil })
+	agt := weft.New(wefttest.Script(), tool)
+	got, err := json.Marshal(agt.Tools()[0].InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(in) {
+		t.Errorf("cloned schema:\n got  %s\n want %s", got, in)
+	}
+}
+
+func TestParseSchemaRejects(t *testing.T) {
+	for name, b := range map[string]string{
+		"empty":         ``,
+		"not json":      `{`,
+		"trailing data": `{} {}`,
+		"array":         `["object"]`,
+		"scalar top":    `{"type":"string"}`,
+		"no type":       `{"properties":{}}`,
+		"null":          `null`,
+	} {
+		if _, err := weft.ParseSchema(json.RawMessage(b)); err == nil {
+			t.Errorf("%s: ParseSchema accepted %s", name, b)
+		}
+	}
+}
+
+// A reflected schema (no parsed bytes) marshals exactly as before the
+// raw field existed — every committed golden depends on this.
+func TestSchemaMarshalUnchangedWithoutRaw(t *testing.T) {
+	tool := weft.Tool("t", "", func(_ context.Context, in struct {
+		A string `json:"a"`
+	}) (string, error) {
+		return in.A, nil
+	})
+	got, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]}`
+	if string(got) != want {
+		t.Errorf("marshal:\n got  %s\n want %s", got, want)
 	}
 }

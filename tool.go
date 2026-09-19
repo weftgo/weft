@@ -400,12 +400,15 @@ func (t *ToolDef) clone() *ToolDef {
 }
 
 // cloneSchema deep-copies a schema tree: the node, its Required list,
-// its Items and AdditionalProperties subtrees, and its Properties map.
+// its Items and AdditionalProperties subtrees, its Properties map, and
+// the parsed bytes of a foreign schema (ParseSchema), so the copy still
+// marshals verbatim.
 func cloneSchema(s *Schema) *Schema {
 	if s == nil {
 		return nil
 	}
 	c := *s
+	c.raw = bytes.Clone(s.raw)
 	c.Required = slices.Clone(s.Required)
 	c.Items = cloneSchema(s.Items)
 	c.AdditionalProperties = cloneSchema(s.AdditionalProperties)
@@ -531,6 +534,12 @@ func PromptSnippet(text string) ToolOption { return snippetOption{text} }
 
 // PromptSnippet reports the tool's PromptSnippet text; empty when unset.
 func (t *ToolDef) PromptSnippet() string { return t.snippet }
+
+// RequiresApproval reports whether the tool was built with
+// RequireApproval. The loop reads it to park the call; AddTools
+// (weft/mcp) refuses such a tool at registration, because MCP has no
+// approval channel and running it unapproved would bypass the gate.
+func (t *ToolDef) RequiresApproval() bool { return t.approval }
 
 type approvalOption struct{}
 

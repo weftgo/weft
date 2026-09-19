@@ -327,3 +327,19 @@ func TestManifestRecordsToolPolicy(t *testing.T) {
 		t.Errorf("timeout appears %d times, want 2 (agent + tuned only):\n%s", n, doc)
 	}
 }
+
+// RequiresApproval is the read side of the RequireApproval option: the
+// manifest reads the field internally, and weft/mcp's AddTools refuses
+// such a tool at registration (no approval channel over MCP), which
+// needs it exported.
+func TestRequiresApprovalAccessor(t *testing.T) {
+	gated := weft.Tool("refund", "", func(_ context.Context, _ struct{}) (string, error) { return "", nil },
+		weft.RequireApproval())
+	if !gated.RequiresApproval() {
+		t.Errorf("gated tool reports false")
+	}
+	plain := weft.Tool("lookup", "", func(_ context.Context, _ struct{}) (string, error) { return "", nil })
+	if plain.RequiresApproval() {
+		t.Errorf("plain tool reports true")
+	}
+}

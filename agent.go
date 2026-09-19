@@ -537,6 +537,11 @@ func (a *Agent) Tools() []*ToolDef {
 	return out
 }
 
+// Name returns the agent's name as set by the Name option; empty when
+// the agent is unnamed. Manifest requires a name; Serve (weft/mcp)
+// names the tool it exposes after the agent through this accessor.
+func (a *Agent) Name() string { return a.name }
+
 // TapPanics reports how many tap invocations have panicked and been
 // contained since construction. A rising counter means an observer is
 // broken; runs are unaffected by design.

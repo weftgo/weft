@@ -255,31 +255,54 @@ func convertTool(t *weft.ToolDef) *genai.Tool {
 	}
 }
 
-// genaiSchema converts a weft.Schema to the SDK's; the type names map
-// from JSON-Schema lowercase to the API's uppercase. AdditionalProperties
-// is dropped: Gemini's schema subset (and the SDK's Schema) has no
-// additionalProperties field, so typed map values degrade to a plain
-// object there — the openai and anthropic adapters carry them.
+// genaiSchema converts a weft.Schema to the SDK's by JSON round trip:
+// json.Marshal (which emits a foreign schema parsed with
+// weft.ParseSchema verbatim) then json.Unmarshal into genai.Schema, so
+// every field the vendor type has is carried and every field it lacks
+// — additionalProperties, oneOf, pattern, … — is dropped by the
+// decoder: the same rule the hand-built mapping this replaced applied
+// to AdditionalProperties alone, now per field. A Gemini limit, not a
+// weft one. genai.Type is an uppercase enum, so the decoded tree is
+// normalised through upperType; a decode error (a foreign schema with
+// a value where a string belongs) falls back to the structured fields
+// alone. Unconstrained nodes (type "") are unchanged: the API takes
+// the empty type as "any", as before.
 func genaiSchema(s *weft.Schema) *genai.Schema {
 	if s == nil {
 		return nil
 	}
-	out := &genai.Schema{
-		Type:        genai.Type(upperType(s.Type)),
-		Format:      s.Format,
-		Description: s.Description,
-		Required:    s.Required,
+	b, err := json.Marshal(s)
+	if err != nil {
+		// Unreachable: see adapterkit.SchemaMap.
+		return &genai.Schema{}
 	}
-	if s.Items != nil {
-		out.Items = genaiSchema(s.Items)
-	}
-	if s.Properties != nil {
-		out.Properties = make(map[string]*genai.Schema, len(s.Properties))
-		for k, v := range s.Properties {
-			out.Properties[k] = genaiSchema(v)
+	var out genai.Schema
+	if err := json.Unmarshal(b, &out); err != nil {
+		return &genai.Schema{
+			Type:        genai.Type(upperType(s.Type)),
+			Format:      s.Format,
+			Description: s.Description,
+			Required:    s.Required,
 		}
 	}
-	return out
+	normalizeGenaiTypes(&out)
+	return &out
+}
+
+// normalizeGenaiTypes uppercases the type names of a decoded schema
+// tree in place: JSON Schema says "string", the genai enum says
+// "STRING", and every nested node needs the same fix.
+func normalizeGenaiTypes(s *genai.Schema) {
+	s.Type = genai.Type(upperType(string(s.Type)))
+	for _, p := range s.Properties {
+		normalizeGenaiTypes(p)
+	}
+	for _, a := range s.AnyOf {
+		normalizeGenaiTypes(a)
+	}
+	if s.Items != nil {
+		normalizeGenaiTypes(s.Items)
+	}
 }
 
 func upperType(t string) string {

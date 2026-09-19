@@ -168,6 +168,11 @@ ignore it.
     successfully (`RunResult.Pending`, `RunFinish.Pending`); the next
     run resumes with `Approve`/`Deny`; undecided calls are `DENIED: no
     decision`. A policy seam, not a security boundary (ADR 0007).
+13. **Budgets fail at the continuation point.** `MaxSteps`,
+    `UsageLimit`, `MaxModelRetries`, `DetectLoops` are checked only
+    when the loop would call the model again; a step that ends the
+    run succeeds. A breach is `*RunError` with the partial transcript.
+    Child runs are tools: their failure is data, their usage is yours.
 
 ## Working in this repo
 

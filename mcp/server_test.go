@@ -88,11 +88,19 @@ func TestAddToolsListsTheContract(t *testing.T) {
 	if !strings.Contains(string(schema), `"order_id"`) || !strings.Contains(string(schema), `"the order to look up"`) {
 		t.Errorf("input schema = %s", schema)
 	}
-	if _, err := json.Marshal(lu.OutputSchema); err != nil {
+	out, err := json.Marshal(lu.OutputSchema)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, has := byName["echo"]; !has {
-		t.Errorf("echo not listed")
+	if !strings.Contains(string(out), `"status"`) {
+		t.Errorf("output schema = %s, want the order object's fields", out)
+	}
+	echo := byName["echo"]
+	if echo == nil {
+		t.Fatal("echo not listed")
+	}
+	if echo.OutputSchema != nil {
+		t.Errorf("echo (a string Out) carries an outputSchema: %+v", echo.OutputSchema)
 	}
 }
 
@@ -195,13 +203,17 @@ func TestAddToolsErrorsAreResults(t *testing.T) {
 	}
 }
 
-// X4: cancelling the request ctx cancels the handler.
+// X4: cancelling the request ctx cancels the handler — observed from
+// inside the handler, not inferred from the client's failure (a leaked
+// handler would still fail the client at its deadline).
 func TestAddToolsHonoursContext(t *testing.T) {
 	started := make(chan struct{})
+	ended := make(chan error, 1)
 	blocked := weft.Tool("blocked", "Blocks until cancelled.",
 		func(ctx context.Context, _ struct{}) (string, error) {
 			close(started)
 			<-ctx.Done()
+			ended <- ctx.Err()
 			return "", ctx.Err()
 		})
 	s := sdk.NewServer(&sdk.Implementation{Name: "srv", Version: "0"}, nil)
@@ -219,25 +231,99 @@ func TestAddToolsHonoursContext(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("handler never started")
 	}
+	select {
+	case err := <-ended:
+		if err == nil {
+			t.Error("handler ctx ended with a nil error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler ctx was never cancelled")
+	}
+}
+
+// mustPanic runs fn and reports when it returns without panicking.
+// Each case gets its own recover: a recover deferred inside a loop
+// would unwind the whole test at the first panic and skip the rest.
+func mustPanic(t *testing.T, name string, fn func()) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Errorf("%s: did not panic", name)
+		}
+	}()
+	fn()
 }
 
 // X5: registration is loud — nil tool, duplicate name, and an
-// approval-gated tool all panic, fail-early like New.
+// approval-gated tool all panic, fail-early like New. Every case runs.
 func TestAddToolsRefusesApprovalGated(t *testing.T) {
 	s := sdk.NewServer(&sdk.Implementation{Name: "srv", Version: "0"}, nil)
 	gated := weft.Tool("refund", "Refund.", func(context.Context, struct{}) (string, error) { return "", nil },
 		weft.RequireApproval())
+	ran := 0
 	for name, fn := range map[string]func(){
 		"approval-gated": func() { AddTools(s, gated) },
 		"nil tool":       func() { AddTools(s, nil) },
 		"duplicate":      func() { AddTools(s, echoTool(), echoTool()) },
 	} {
-		defer func(name string) {
-			if recover() == nil {
-				t.Errorf("%s: AddTools did not panic", name)
-			}
-		}(name)
-		fn()
+		ran++
+		mustPanic(t, name, fn)
+	}
+	if ran != 3 {
+		t.Errorf("%d cases ran, want 3", ran)
+	}
+}
+
+// A client that omits arguments hands a RawTool {} — never "null":
+// tools/call promises an object, and the consume side sends {} for
+// the same reason. The SDK's own client always sends {}, so the raw
+// wire form is driven here.
+func TestAddToolsNullArgumentsBecomeObject(t *testing.T) {
+	seen := make(chan string, 1)
+	raw := weft.RawTool("raw", "Echoes its argument bytes.", nil,
+		func(_ context.Context, args json.RawMessage) (string, error) {
+			seen <- string(args)
+			return "ok", nil
+		})
+	h := invokeHandler(raw)
+	for _, in := range []any{nil, json.RawMessage(nil), json.RawMessage("null")} {
+		req := &sdk.CallToolRequest{Params: &sdk.CallToolParamsRaw{Name: "raw", Arguments: nil}}
+		if b, ok := in.(json.RawMessage); ok {
+			req.Params.Arguments = b
+		}
+		if _, err := h(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+		if got := <-seen; got != "{}" {
+			t.Errorf("arguments %v: handler saw %q, want {}", in, got)
+		}
+	}
+}
+
+// Serve's tools honour the outputSchema they advertise: a non-string
+// Out answers with structuredContent as well as text, the way
+// AddTools does — the spec's MUST for a tool with an output schema.
+func TestServeStructuredContent(t *testing.T) {
+	agt := weft.New(wefttest.Script(), weft.Name("orders"), lookupTool())
+	s := sdk.NewServer(&sdk.Implementation{Name: "srv", Version: "0"}, nil)
+	Serve(s, agt, "Orders agent.")
+	sess := newSession(t, s)
+	res, err := sess.CallTool(context.Background(), &sdk.CallToolParams{
+		Name: "lookup_order", Arguments: map[string]any{"order_id": "7"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatalf("call failed: %+v", res)
+	}
+	text := res.Content[0].(*sdk.TextContent).Text
+	sc, err := json.Marshal(res.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StructuredContent == nil || !equalJSON(json.RawMessage(sc), json.RawMessage(text)) {
+		t.Errorf("structuredContent = %s, text = %s; want the same JSON", sc, text)
 	}
 }
 

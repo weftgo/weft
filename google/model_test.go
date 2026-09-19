@@ -303,3 +303,25 @@ func TestSchemaConversionForeignRaw(t *testing.T) {
 		t.Errorf("oneOf must drop under Gemini's subset, got %+v", e)
 	}
 }
+
+// The fallback when the round trip cannot decode a foreign schema into
+// genai.Schema at all (a value where a number belongs — minimum is a
+// *float64 there): the structured fields map recursively, so nested
+// properties and items survive the rejected document, not just the top
+// level (TODO §7.1: "falls back to the structured field mapping").
+func TestSchemaConversionFallbackKeepsNesting(t *testing.T) {
+	s, err := weft.ParseSchema(json.RawMessage(`{"type":"object","required":["q"],"properties":{"q":{"type":"string","minimum":"not-a-number"},"nums":{"type":"array","items":{"type":"integer"}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := genaiSchema(s)
+	if g.Type != genai.TypeObject || len(g.Required) != 1 || g.Required[0] != "q" {
+		t.Errorf("top level = %+v", g)
+	}
+	if q := g.Properties["q"]; q == nil || q.Type != genai.TypeString {
+		t.Errorf("properties.q = %+v, want the structured string schema", q)
+	}
+	if nums := g.Properties["nums"]; nums == nil || nums.Type != genai.TypeArray || nums.Items == nil || nums.Items.Type != genai.TypeInteger {
+		t.Errorf("properties.nums = %+v, want array-of-integer carried through the fallback", nums)
+	}
+}

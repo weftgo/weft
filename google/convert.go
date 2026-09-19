@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/internal/adapterkit"
@@ -264,9 +265,9 @@ func convertTool(t *weft.ToolDef) *genai.Tool {
 // to AdditionalProperties alone, now per field. A Gemini limit, not a
 // weft one. genai.Type is an uppercase enum, so the decoded tree is
 // normalised through upperType; a decode error (a foreign schema with
-// a value where a string belongs) falls back to the structured fields
-// alone. Unconstrained nodes (type "") are unchanged: the API takes
-// the empty type as "any", as before.
+// a value where a string belongs) falls back to a recursive mapping of
+// the structured fields. Unconstrained nodes (type "") are unchanged:
+// the API takes the empty type as "any", as before.
 func genaiSchema(s *weft.Schema) *genai.Schema {
 	if s == nil {
 		return nil
@@ -278,15 +279,38 @@ func genaiSchema(s *weft.Schema) *genai.Schema {
 	}
 	var out genai.Schema
 	if err := json.Unmarshal(b, &out); err != nil {
-		return &genai.Schema{
-			Type:        genai.Type(upperType(s.Type)),
-			Format:      s.Format,
-			Description: s.Description,
-			Required:    s.Required,
-		}
+		return structuredGenaiSchema(s)
 	}
 	normalizeGenaiTypes(&out)
 	return &out
+}
+
+// structuredGenaiSchema maps the structured fields alone — the fallback
+// when the JSON round trip cannot decode a foreign schema into
+// genai.Schema (a value where a number or boolean belongs). It maps
+// every field the two types share, recursively, so a document the
+// decoder rejects still contributes its whole shape, not just the top
+// level; keywords genai.Schema has no field for are dropped either way.
+func structuredGenaiSchema(s *weft.Schema) *genai.Schema {
+	if s == nil {
+		return nil
+	}
+	out := &genai.Schema{
+		Type:        genai.Type(upperType(s.Type)),
+		Format:      s.Format,
+		Description: s.Description,
+		Required:    slices.Clone(s.Required),
+	}
+	if s.Items != nil {
+		out.Items = structuredGenaiSchema(s.Items)
+	}
+	for name, p := range s.Properties {
+		if out.Properties == nil {
+			out.Properties = map[string]*genai.Schema{}
+		}
+		out.Properties[name] = structuredGenaiSchema(p)
+	}
+	return out
 }
 
 // normalizeGenaiTypes uppercases the type names of a decoded schema

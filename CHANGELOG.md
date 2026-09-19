@@ -4,6 +4,71 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## Unreleased (2026-09-19)
+
+### Added — MCP, both ways (TODO §7, ADR 0015)
+
+- **`mcp.AddTools(s, tools...)`** and **`mcp.Serve(s, agent, description)`**
+  expose weft tools and agents as an MCP server: each tool listed with
+  its own contract, every failure an `isError` result carrying weft's
+  pinned text, the agent tool literally `weft.Subagent`, and the agent's
+  tools dispatched through its chain (approval answers loudly; `AddTools`
+  refuses gated tools outright). New module **`weft/mcp`**; the official
+  Go SDK is pinned at v1.8.0 and aliased `sdk`.
+- **`mcp.Tools(ctx, sess, opts...)`** imports a connected session's tools
+  as ordinary weft tools (`RawTool`; schema bytes verbatim through
+  **`weft.ParseSchema`**), shaped by **`mcp.Prefix`**, **`mcp.Policy`**
+  and **`mcp.ErrToolError`**. Foreign tools are `Sequential` unless the
+  server marks `readOnlyHint`; `structuredContent` wins in result
+  rendering; transport failures are `mcp: `-prefixed tool errors.
+- Core, additions only (`make apidiff`): **`weft.ParseSchema`** (foreign
+  bytes kept whole; `Schema.MarshalJSON` emits them),
+  **`(*Agent).Name`**, **`(*ToolDef).RequiresApproval`**.
+- **Wire change, named:** unconstrained schema nodes reach OpenAI and
+  Anthropic as `{}` where the hand-built map wrote `{"type":""}` — no
+  test pinned the old bytes; ADR 0003's amendment records the change.
+
+### Fixed — review pass (2026-09-19)
+
+- `make build/test/vet/lint/tidy/offline/live` fail fast per module: a
+  failing module no longer reads green because a later one passes (the
+  loop kept only the last status).
+- `TestToolsTransportFailureIsData` could hang the suite: the SDK's
+  shutdown waits for an in-flight handler whose request ctx cancels only
+  after that wait — the severed-transport call now carries its own
+  deadline, the way a run's tool `Timeout` bounds it in production.
+- Gemini's fallback for a foreign schema the `genai` decoder rejects maps
+  the structured fields recursively — nested properties and items
+  survive, not the top level alone.
+- `weft.ParseSchema` no longer rejects a legal keyword shape the `Schema`
+  struct cannot hold — `"additionalProperties": false` (every zod-built
+  TypeScript MCP server emits it), a type array, tuple or boolean
+  `items`, a non-string description. The structured view leaves such a
+  field zero; the bytes still cross whole. One such tool used to fail
+  the whole `mcp.Tools` import.
+- `mcp.Tools`' image and audio markers report the payload's own byte
+  count; the SDK already decodes the wire's base64, so `DecodedLen` on
+  it under-reported by a quarter.
+- The 2026-09-19 embed rule is narrowed to what `encoding/json` does: a
+  tagged anonymous field of an unexported *non-struct* type is ignored
+  on the wire, so the schema no longer advertises it as required.
+- **Anthropic dropped a foreign schema's top-level keywords** other than
+  `properties`/`required`/`additionalProperties`: `$defs` (so every
+  `$ref` dangled and the API rejected the tool), `$schema`, top-level
+  `oneOf`. Every other top-level key now rides `ExtraFields`; pinned.
+- `Serve`'s tools answer with `structuredContent` when they advertise an
+  `outputSchema`, as `AddTools`' already did (the spec's MUST).
+- A client that omits `arguments` hands an exposed `RawTool` `{}`, not
+  `null` — the consume side's rule, now on both sides.
+- An `isError` result with no content reads `ErrToolError`'s text
+  instead of an empty string; a `ResourceLink` item renders as
+  `[resource <uri>]` instead of the opaque `[content]`.
+- `ExampleTools_toolSource` guards the refreshed slice with a mutex, as
+  the godoc now says: the SDK's `listChanged` handler and the loop read
+  it from different goroutines.
+- `TestAddToolsRefusesApprovalGated` ran one of its three cases (a
+  recover deferred in a loop unwound the test); all three run.
+
 ## Unreleased (2026-09-18)
 
 ### Added — option composition (TODO §5.10)

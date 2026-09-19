@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,7 +26,8 @@ var ErrToolError = errors.New("mcp: tool returned an error")
 // server sends it, else the text items joined by newlines; non-text
 // items render as one-line markers, because weft's transcript carries
 // no binary tool results); a remote isError result is a tool error
-// carrying the server's text verbatim (errors.Is ErrToolError); a
+// carrying the server's text verbatim (errors.Is ErrToolError; an
+// empty one reads ErrToolError's own text); a
 // transport failure is a tool error reading "mcp: <err>". Both are
 // data the model sees, never run errors.
 //
@@ -41,11 +41,20 @@ var ErrToolError = errors.New("mcp: tool returned an error")
 // ToolStart and ToolFinish bracket the remote call. Elicitation is
 // not answered: a server that asks fails the call, as a tool error.
 //
+// The SDK's client decodes the listed schema before Tools sees it, so
+// the kept bytes are the document re-encoded: keys in canonical
+// order, and an integer beyond 2^53 (a maximum on an id field, say)
+// rounded through float64 — the one loss the bridge cannot avoid
+// short of the SDK keeping raw bytes.
+//
 // Tools returns when every page is listed or ctx ends; it returns the
 // ctx error unchanged when the deadline hits mid-list. Connect
 // several servers concurrently with an errgroup and one deadline; for
 // a list that changes, set the SDK's ToolListChangedHandler to
-// re-run Tools into a slice you serve through weft.ToolSource — Tools
+// re-run Tools into a slice you serve through weft.ToolSource, under
+// a mutex (the SDK runs the handler on its own goroutine, the loop
+// reads the source on the run's; ExampleTools_toolSource shows the
+// shape) — Tools
 // does not own the session and never closes it. The kill switch
 // (WEFT_MODEL_REQUESTS) governs model requests; tools/call is not
 // one, so imported tools run under deny — they are the caller's
@@ -70,7 +79,11 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*wef
 		if t == nil {
 			return nil, fmt.Errorf("mcp: tool list carried a nil entry")
 		}
-		schema, err := weft.ParseSchema(mustBytes(t.InputSchema))
+		raw, err := fromSDK(t.InputSchema)
+		if err != nil {
+			return nil, fmt.Errorf("mcp: tool %q: %w", t.Name, err)
+		}
+		schema, err := weft.ParseSchema(raw)
 		if err != nil {
 			return nil, fmt.Errorf("mcp: tool %q: %w", t.Name, err)
 		}
@@ -85,8 +98,10 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*wef
 		tool := weft.RawTool(cfg.prefix+t.Name, t.Description, schema,
 			callHandler(sess, t.Name), toolOpts...)
 		if t.OutputSchema != nil {
-			if outSchema, err := weft.ParseSchema(mustBytes(t.OutputSchema)); err == nil {
-				tool.OutputSchema = outSchema
+			if raw, err := fromSDK(t.OutputSchema); err == nil {
+				if outSchema, err := weft.ParseSchema(raw); err == nil {
+					tool.OutputSchema = outSchema
+				}
 			}
 		}
 		out = append(out, tool)
@@ -142,6 +157,12 @@ func callHandler(sess *sdk.ClientSession, remoteName string) func(context.Contex
 		}
 		text := renderContent(res)
 		if res.IsError {
+			if text == "" {
+				// An isError result with nothing in it: the model
+				// still needs a sentence, and the sentinel's is the
+				// honest one.
+				text = ErrToolError.Error()
+			}
 			return "", &remoteError{text: text}
 		}
 		return text, nil
@@ -173,33 +194,22 @@ func renderContent(res *sdk.CallToolResult) string {
 		case *sdk.TextContent:
 			lines = append(lines, c.Text)
 		case *sdk.ImageContent:
-			lines = append(lines, fmt.Sprintf("[image %s, %d bytes]", c.MIMEType, base64.StdEncoding.DecodedLen(len(c.Data))))
+			// The SDK decodes the wire's base64 into Data, so its
+			// length is the payload's own byte count.
+			lines = append(lines, fmt.Sprintf("[image %s, %d bytes]", c.MIMEType, len(c.Data)))
 		case *sdk.AudioContent:
-			lines = append(lines, fmt.Sprintf("[audio %s, %d bytes]", c.MIMEType, base64.StdEncoding.DecodedLen(len(c.Data))))
+			lines = append(lines, fmt.Sprintf("[audio %s, %d bytes]", c.MIMEType, len(c.Data)))
 		case *sdk.EmbeddedResource:
 			uri := ""
 			if c.Resource != nil {
 				uri = c.Resource.URI
 			}
 			lines = append(lines, "[resource "+uri+"]")
+		case *sdk.ResourceLink:
+			lines = append(lines, "[resource "+c.URI+"]")
 		default:
 			lines = append(lines, "[content]")
 		}
 	}
 	return strings.Join(lines, "\n")
-}
-
-// mustBytes turns the SDK's schema value into the bytes ParseSchema
-// reads; the client side holds decoded JSON, so Marshal re-encodes it
-// (encoding/json sorts keys — the document is canonical, and the
-// server's own bytes are already gone by then).
-func mustBytes(v any) json.RawMessage {
-	if v == nil {
-		return nil
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil
-	}
-	return b
 }

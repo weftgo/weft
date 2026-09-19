@@ -16,10 +16,15 @@ import (
 
 // served builds an SDK server plus a connected client session over
 // in-memory transports, with a stop function that severs the
-// connection (the transport-failure case).
+// connection (the transport-failure case). servedOpts passes
+// ServerOptions through — the pagination test pages the list.
 func served(t *testing.T, configure func(*sdk.Server)) (*sdk.ClientSession, func()) {
+	return servedOpts(t, nil, configure)
+}
+
+func servedOpts(t *testing.T, opts *sdk.ServerOptions, configure func(*sdk.Server)) (*sdk.ClientSession, func()) {
 	t.Helper()
-	srv := sdk.NewServer(&sdk.Implementation{Name: "remote", Version: "0"}, nil)
+	srv := sdk.NewServer(&sdk.Implementation{Name: "remote", Version: "0"}, opts)
 	configure(srv)
 	serverTransport, clientTransport := sdk.NewInMemoryTransports()
 	runCtx, stop := context.WithCancel(context.Background())
@@ -118,6 +123,44 @@ func equalJSON(a, b any) bool {
 	return string(ab) == string(bb)
 }
 
+// C1: Tools follows nextCursor across pages. PageSize: 1 splits three
+// tools into three server-side pages; the raw ListTools call pins that
+// the first page really is partial before Tools is asked to see past
+// its cursor and import the whole list.
+func TestToolsListsEveryPage(t *testing.T) {
+	sess, stop := servedOpts(t, &sdk.ServerOptions{PageSize: 1}, func(srv *sdk.Server) {
+		for _, name := range []string{"alpha", "beta", "gamma"} {
+			addRemoteTool(srv, name, true, func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+				return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+			})
+		}
+	})
+	defer stop()
+	first, err := sess.ListTools(context.Background(), &sdk.ListToolsParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Tools) != 1 || first.NextCursor == "" {
+		t.Fatalf("page 1 = %d tools, cursor %q; want a paged list to follow", len(first.Tools), first.NextCursor)
+	}
+	tools, err := Tools(context.Background(), sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) != 3 {
+		t.Errorf("imported %d tools, want all 3 across pages: %+v", len(tools), tools)
+	}
+	got := map[string]bool{}
+	for _, tool := range tools {
+		got[tool.Name] = true
+	}
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		if !got[name] {
+			t.Errorf("tool %q missing from the import", name)
+		}
+	}
+}
+
 // C2: the model's raw argument bytes cross to tools/call verbatim —
 // no re-encoding, no key reordering.
 func TestToolsCallPassesArgsVerbatim(t *testing.T) {
@@ -177,7 +220,13 @@ func TestToolsRemoteErrorIsData(t *testing.T) {
 }
 
 // C4: a transport failure is a tool error result ("mcp: <err>"),
-// never a run error.
+// never a run error. The call carries its own deadline, the way a real
+// run's tool Timeout would bound it: an unbounded call after the server
+// side is severed can deadlock — the SDK's Close waits for the
+// in-flight handler, the handler waits for a request ctx that cancels
+// only when the close finishes, so the client must be the one to give
+// up (jsonrpc2 closes the stream after, not before, the in-flight
+// wait).
 func TestToolsTransportFailureIsData(t *testing.T) {
 	sess, stop := served(t, func(srv *sdk.Server) {
 		addRemoteTool(srv, "hang", false, func(ctx context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
@@ -190,7 +239,9 @@ func TestToolsTransportFailureIsData(t *testing.T) {
 		t.Fatal(err)
 	}
 	stop() // sever the connection under the running tool
-	_, err = tools[0].Invoke(context.Background(), json.RawMessage(`{}`))
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_, err = tools[0].Invoke(ctx, json.RawMessage(`{}`))
 	if err == nil || !strings.HasPrefix(err.Error(), "mcp: ") {
 		t.Fatalf("transport failure = %v, want an mcp:-prefixed tool error", err)
 	}
@@ -243,6 +294,53 @@ func TestToolsAppliesPolicy(t *testing.T) {
 	}
 	if len(res2.Pending) != 1 || res2.Pending[0].Name != "slow" {
 		t.Errorf("pending = %+v, want the imported call parked", res2.Pending)
+	}
+}
+
+// C6, the rest: MaxResultBytes and WrapTools ride through Policy and
+// apply through the loop like Timeout and RequireApproval above — the
+// cap is run policy (Agent.CallTool returns uncapped output), and the
+// tool-level middleware sits inside the agent's chain.
+func TestToolsAppliesPolicyRunRules(t *testing.T) {
+	sess, stop := served(t, func(srv *sdk.Server) {
+		addRemoteTool(srv, "babbler", true, func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: strings.Repeat("x", 500)}}}, nil
+		})
+	})
+	defer stop()
+	sawCall := make(chan weft.ToolCallPart, 1)
+	tools, err := Tools(context.Background(), sess, Policy(
+		weft.MaxResultBytes(8),
+		weft.WrapTools(func(next weft.ToolCaller) weft.ToolCaller {
+			return func(ctx context.Context, call weft.ToolCallPart) (string, error) {
+				sawCall <- call
+				return next(ctx, call)
+			}
+		}),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "babbler"}),
+		wefttest.Say("enough"),
+	)
+	agt := weft.New(model, weft.Name("parent"), tools[0])
+	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case call := <-sawCall:
+		if call.Name != "babbler" {
+			t.Errorf("middleware saw %q", call.Name)
+		}
+	default:
+		t.Error("WrapTools middleware never saw the imported call")
+	}
+	part := res.Messages[len(res.Messages)-2].Content[0].(weft.ToolResultPart)
+	if want := "xxxxxxxx\n…[truncated 492 bytes]"; part.Content != want {
+		t.Errorf("capped result = %q, want %q", part.Content, want)
 	}
 }
 
@@ -438,14 +536,102 @@ func TestRenderContent(t *testing.T) {
 	}
 	if got := renderContent(&sdk.CallToolResult{
 		Content: []sdk.Content{
-			&sdk.ImageContent{MIMEType: "image/png", Data: []byte("iVBORw0KGgo=")},
+			&sdk.ImageContent{MIMEType: "image/png", Data: make([]byte, 9)}, // Data is the decoded payload
 			&sdk.EmbeddedResource{Resource: &sdk.ResourceContents{URI: "file:///tmp/x"}},
+			&sdk.ResourceLink{URI: "file:///tmp/y", Name: "y"},
 		},
-	}); got != "[image image/png, 9 bytes]\n[resource file:///tmp/x]" {
+	}); got != "[image image/png, 9 bytes]\n[resource file:///tmp/x]\n[resource file:///tmp/y]" {
 		t.Errorf("markers: %q", got)
 	}
 	if got := renderContent(&sdk.CallToolResult{}); got != "" {
 		t.Errorf("empty: %q", got)
+	}
+}
+
+// An isError result with no content at all still gives the model a
+// sentence: the sentinel's own text, under the sentinel.
+func TestToolsEmptyRemoteErrorHasText(t *testing.T) {
+	sess, stop := served(t, func(srv *sdk.Server) {
+		addRemoteTool(srv, "mute", true, func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{IsError: true}, nil
+		})
+	})
+	defer stop()
+	tools, err := Tools(context.Background(), sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tools[0].Invoke(context.Background(), json.RawMessage(`{}`))
+	if err == nil || err.Error() != "mcp: tool returned an error" || !errors.Is(err, ErrToolError) {
+		t.Errorf("empty isError = %v, want the sentinel's text under the sentinel", err)
+	}
+}
+
+// The size marker counts the payload's own bytes on both sides of the
+// wire: the SDK base64-encodes Data on the way out and decodes it on
+// the way in, so a 12000-byte image renders as 12000, never as the
+// base64 text's length or a DecodedLen of already-decoded bytes.
+func TestRenderContentSizeSurvivesTheWire(t *testing.T) {
+	res := &sdk.CallToolResult{Content: []sdk.Content{
+		&sdk.ImageContent{MIMEType: "image/png", Data: make([]byte, 12000)},
+		&sdk.AudioContent{MIMEType: "audio/wav", Data: make([]byte, 7)},
+	}}
+	wire, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back sdk.CallToolResult
+	if err := json.Unmarshal(wire, &back); err != nil {
+		t.Fatal(err)
+	}
+	want := "[image image/png, 12000 bytes]\n[audio audio/wav, 7 bytes]"
+	if got := renderContent(&back); got != want {
+		t.Errorf("after the wire: %q, want %q", got, want)
+	}
+	if got := renderContent(res); got != want {
+		t.Errorf("before the wire: %q, want %q", got, want)
+	}
+}
+
+// C1, the shapes real servers send: a zod-built TypeScript server
+// emits "additionalProperties": false, nullable fields as a type
+// array, and $schema on every tool. None of those fit the core's
+// Schema fields; all must import (the structured view is lenient) and
+// cross to the model whole. Before this pin one such tool failed the
+// whole import.
+func TestToolsImportsZodStyleSchemas(t *testing.T) {
+	const zod = `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"path":{"type":"string"},"limit":{"type":["integer","null"],"minimum":1}},"required":["path"],"additionalProperties":false}`
+	sess, stop := served(t, func(srv *sdk.Server) {
+		srv.AddTool(&sdk.Tool{Name: "read_file", Description: "Read a file.", InputSchema: json.RawMessage(zod)},
+			func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+				return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "contents"}}}, nil
+			})
+	})
+	defer stop()
+	tools, err := Tools(context.Background(), sess)
+	if err != nil {
+		t.Fatalf("Tools: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "read_file" {
+		t.Fatalf("imported %+v", tools)
+	}
+	b, err := json.Marshal(tools[0].InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got, want any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(zod), &want); err != nil {
+		t.Fatal(err)
+	}
+	if !equalJSON(got, want) {
+		t.Errorf("schema:\n got  %s\n want %s", b, zod)
+	}
+	out, err := tools[0].Invoke(context.Background(), json.RawMessage(`{"path":"/x"}`))
+	if err != nil || out != "contents" {
+		t.Errorf("call = %q, %v", out, err)
 	}
 }
 

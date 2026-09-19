@@ -45,8 +45,10 @@ type corpusShadow struct {
 
 // The same-depth cancellation row lives in the core's
 // schema_conflict_test.go instead: declaring the conflicting embeds
-// statically trips go vet's structtag check, and the workaround
-// (reflect.StructOf) cannot feed a generic row here.
+// statically is not possible under the vet gate — `struct field Lang
+// repeats json tag "lang"` fires on both the same-name and the
+// same-tag-different-name variants (verified 2026-09-19) — and the
+// workaround (reflect.StructOf) cannot feed a generic row here.
 type corpusNode struct {
 	Children []*corpusNode `json:"children,omitempty"`
 }
@@ -83,7 +85,7 @@ func runRow[In any](name string) rowTest {
 	return rt
 }
 
-// corpus builds the rows (TODO §7.1: "thirty real tool input structs";
+// corpus builds the rows — 23, packing the plan's 30 shapes (TODO §7.1: "thirty real tool input structs";
 // several of the plan's numbered rows pack into one struct where the
 // shapes are homogeneous, so every derivation rule is measured).
 func corpus() []rowTest {
@@ -424,7 +426,7 @@ func classify(name string, gjsDoc, weftDoc any) (verdict string, ok bool, residu
 		w, g := prop(weftDoc, "b"), prop(gjsDoc, "b")
 		gt, _ := nullable(g["type"]) // the array itself is nullable in gjs
 		return "fidelity, weft wire-right: string (base64, the encoding/json wire form) vs array of 0..255 integers",
-			true, !(w != nil && g != nil && w["type"] == "string" && gt == "array")
+			true, w == nil || g == nil || w["type"] != "string" || gt != "array"
 	case "json:\",string\" scalars":
 		// jsonschema-go ignores the ,string option and advertises the
 		// bare type; encoding/json demands the quoted form, so weft's
@@ -432,7 +434,7 @@ func classify(name string, gjsDoc, weftDoc any) (verdict string, ok bool, residu
 		wi, gi := prop(weftDoc, "i"), prop(gjsDoc, "i")
 		wb, gb := prop(weftDoc, "b"), prop(gjsDoc, "b")
 		return "fidelity, weft wire-right: string (the quoted wire form) vs the bare type",
-			true, !(wi["type"] == "string" && gi["type"] == "integer" && wb["type"] == "string" && gb["type"] == "boolean")
+			true, wi["type"] != "string" || gi["type"] != "integer" || wb["type"] != "string" || gb["type"] != "boolean"
 	case "embedded tagged":
 		// jsonschema-go flattens an embedded struct even when it carries
 		// a json name tag; encoding/json nests it under the tag.

@@ -12,7 +12,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -46,5 +45,5 @@ func main() {
 	if err := newServer().Run(context.Background(), &sdk.StdioTransport{}); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Fprintln(log.Writer(), "server exited")
+	log.Println("server exited")
 }

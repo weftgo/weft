@@ -73,6 +73,23 @@ func (o maxModelRetriesOption) apply(a *Agent) {
 	}
 }
 
+type detectLoopsOption struct{ repeats int }
+
+func (o detectLoopsOption) apply(a *Agent) {
+	if o.repeats >= 2 {
+		a.detectLoops = o.repeats
+	}
+}
+
+// DetectLoops fails a run with ErrLoopDetected when repeats consecutive
+// steps request the same set of tool calls — the same names with the
+// same arguments, in any order. Varying arguments are not a loop: a
+// corrected retry has a different signature. Results are not part of
+// the signature: a tool whose output carries a timestamp must not hide
+// a loop, and a result-inclusive hash would miss it. Off by default
+// (values below 2 are ignored); the CLI scaffold writes DetectLoops(5).
+func DetectLoops(repeats int) Option { return detectLoopsOption{repeats} }
+
 // MaxModelRetries sets how many consecutive RETRY results (see
 // ModelRetry) one tool may produce in a run before the run fails with
 // ErrModelRetriesExceeded (default 3). The count is per tool name — two
@@ -314,6 +331,7 @@ type Agent struct {
 	maxSteps        int
 	usageLimit      Usage
 	maxModelRetries int
+	detectLoops     int
 	parallelism     int
 	resultCap       int
 	toolTimeout     time.Duration

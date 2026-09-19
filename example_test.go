@@ -664,3 +664,20 @@ func ExampleModelRetry() {
 	// first attempt: RETRY: date must be ISO-8601, e.g. 2026-09-19
 	// second attempt: 2026-09-19
 }
+
+// A stuck model repeating one request: DetectLoops fails the run
+// loudly instead of burning the step budget.
+func ExampleDetectLoops() {
+	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "ok", nil
+	})
+	turns := []wefttest.Turn{}
+	for range 3 {
+		turns = append(turns, wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"i":1}`}))
+	}
+	agt := weft.New(wefttest.Script(turns...), echo, weft.DetectLoops(3))
+	_, err := agt.Generate(context.Background(), weft.Prompt("q"))
+	fmt.Println(errors.Is(err, weft.ErrLoopDetected))
+	// Output:
+	// true
+}

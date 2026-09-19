@@ -6,6 +6,14 @@ is pre-1.0 and tags per module (ADR 0005).
 
 ## Unreleased (2026-09-18)
 
+### Added — loop detection (TODO §5.4, ADR 0002 amendment)
+
+- **`weft.DetectLoops(repeats)`** fails a run with
+  **`ErrLoopDetected`** when `repeats` consecutive steps request the
+  same set of tool calls — names and raw argument bytes, sorted, calls
+  only (results never enter the signature). Off by default; the
+  manifest records it when on.
+
 ### Added — model retry hints (TODO §5.2, ADR 0002 amendment)
 
 - **`weft.ModelRetry(hint)`** — a tool error rendering as

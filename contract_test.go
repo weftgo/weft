@@ -3352,3 +3352,100 @@ func TestMaxModelRetriesIgnoresZero(t *testing.T) {
 		t.Fatalf("err = %v, want the default budget of 3 to stand", err)
 	}
 }
+
+// --- Loop detection (TODO §5.4) ---
+
+func loopTool() *weft.ToolDef {
+	return weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "ok", nil
+	})
+}
+
+// repeats identical consecutive steps trip the detector; the failure
+// lands at the continuation point of the repeats-th step.
+func TestDetectLoopsTripsOnIdenticalSteps(t *testing.T) {
+	turns := []wefttest.Turn{}
+	for range 5 {
+		turns = append(turns, wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"i":1}`}))
+	}
+	turns = append(turns, wefttest.Say("never"))
+	agt := weft.New(wefttest.Script(turns...), loopTool(), weft.DetectLoops(5))
+	_, err := agt.Generate(context.Background(), weft.Prompt("q"))
+	var re *weft.RunError
+	if !errors.As(err, &re) || !errors.Is(err, weft.ErrLoopDetected) {
+		t.Fatalf("err = %v, want ErrLoopDetected", err)
+	}
+	if re.Step != 4 {
+		t.Errorf("failed at step %d, want 4 (the fifth identical step)", re.Step)
+	}
+	msgs := re.Result.Messages
+	if last := msgs[len(msgs)-1]; last.Role != weft.RoleTool {
+		t.Errorf("transcript ends on %v, want the tool message", last.Role)
+	}
+}
+
+// Varying arguments are not a loop: each corrected retry has a
+// different signature.
+func TestDetectLoopsIgnoresVaryingArgs(t *testing.T) {
+	turns := []wefttest.Turn{}
+	for i := 1; i <= 5; i++ {
+		turns = append(turns, wefttest.ToolCalls(
+			wefttest.Call{Name: "echo", Args: fmt.Sprintf(`{"i":%d}`, i)}))
+	}
+	turns = append(turns, wefttest.Say("done"))
+	agt := weft.New(wefttest.Script(turns...), loopTool(), weft.DetectLoops(3))
+	res, err := agt.Generate(context.Background(), weft.Prompt("q"))
+	if err != nil {
+		t.Fatalf("varying args must not trip: %v", err)
+	}
+	if res.Text() != "done" {
+		t.Errorf("text = %q", res.Text())
+	}
+}
+
+// The signature is a set: a permuted batch counts as the same request.
+func TestDetectLoopsIsOrderInsensitive(t *testing.T) {
+	turns := []wefttest.Turn{
+		wefttest.ToolCalls(wefttest.Call{Name: "a"}, wefttest.Call{Name: "b", Args: `{"x":1}`}),
+		wefttest.ToolCalls(wefttest.Call{Name: "b", Args: `{"x":1}`}, wefttest.Call{Name: "a"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "a"}, wefttest.Call{Name: "b", Args: `{"x":1}`}),
+		wefttest.Say("never"),
+	}
+	echoes := []*weft.ToolDef{loopTool(), loopTool()}
+	echoes[0].Name = "a"
+	echoes[1].Name = "b"
+	agt := weft.New(wefttest.Script(turns...), weft.DetectLoops(3), echoes[0], echoes[1])
+	if _, err := agt.Generate(context.Background(), weft.Prompt("q")); !errors.Is(err, weft.ErrLoopDetected) {
+		t.Fatalf("err = %v, want ErrLoopDetected on permuted repeats", err)
+	}
+}
+
+// Off by default: identical steps run to MaxSteps, not ErrLoopDetected.
+func TestDetectLoopsOffByDefault(t *testing.T) {
+	turns := []wefttest.Turn{}
+	for range 5 {
+		turns = append(turns, wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"i":1}`}))
+	}
+	turns = append(turns, wefttest.Say("done"))
+	agt := weft.New(wefttest.Script(turns...), loopTool())
+	if _, err := agt.Generate(context.Background(), weft.Prompt("q")); err != nil {
+		t.Fatalf("err = %v, want success without the option", err)
+	}
+}
+
+// The manifest records the setting only when on.
+func TestManifestDetectLoops(t *testing.T) {
+	agt := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("a"), weft.DetectLoops(5))
+	b, err := weft.Manifest(agt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"detect_loops": 5`) {
+		t.Errorf("manifest missing detect_loops:\n%s", b)
+	}
+	off := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("b"))
+	b2, _ := weft.Manifest(off)
+	if strings.Contains(string(b2), `"detect_loops"`) {
+		t.Errorf("detect_loops should be omitted when off:\n%s", b2)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"maps"
 	"slices"
 	"strings"
@@ -328,7 +329,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// every budget is checked here. A step that ended the run above
 		// succeeded even if it overshot — a budget stops further spend,
 		// it does not discard finished work (ADR 0002).
-		if err := a.guard(res, state); err != nil {
+		if err := a.guard(res, &rec, state); err != nil {
 			return fail(step, err)
 		}
 	}
@@ -397,6 +398,10 @@ type loopState struct {
 	// successful result for the tool resets it (Pydantic AI's rule: a
 	// tool that eventually succeeds is not stuck).
 	retries map[string]int
+	// lastSig/streak track the loop detector: the previous step's tool
+	// signature and how many consecutive steps have shared it.
+	lastSig uint64
+	streak  int
 }
 
 // guard is the continuation point: the checks that decide whether the
@@ -404,7 +409,7 @@ type loopState struct {
 // are not evaluated. Ordered by cheapness — a counter compare, then
 // token compares (ADR 0002: budgets are checked only when the loop
 // would otherwise spend more).
-func (a *Agent) guard(res *RunResult, st *loopState) error {
+func (a *Agent) guard(res *RunResult, rec *StepRecord, st *loopState) error {
 	for _, name := range slices.Sorted(maps.Keys(st.retries)) {
 		if st.retries[name] > a.maxModelRetries {
 			return fmt.Errorf("%w: tool %q retried %d times",
@@ -420,7 +425,46 @@ func (a *Agent) guard(res *RunResult, st *loopState) error {
 				res.Usage.OutputTokens, limit.OutputTokens)
 		}
 	}
+	if a.detectLoops > 0 {
+		sig := stepSignature(rec.ToolCalls)
+		if sig == st.lastSig && st.streak > 0 {
+			st.streak++
+		} else {
+			st.streak = 1
+		}
+		st.lastSig = sig
+		if st.streak >= a.detectLoops {
+			return fmt.Errorf("%w: %d identical steps in a row", ErrLoopDetected, st.streak)
+		}
+	}
 	return nil
+}
+
+// stepSignature hashes a step's tool calls — name and raw argument
+// bytes — sorted, so a permuted batch is the same request ("the same
+// set" in DetectLoops' spec is literal). The args are hashed as the
+// model emitted them, without canonicalisation: a model that reformats
+// its JSON has changed something, and the cost of a false negative is
+// one more step. Results are deliberately absent (ADR 0002).
+func stepSignature(calls []ToolCallPart) uint64 {
+	pairs := make([][2]string, len(calls))
+	for i, c := range calls {
+		pairs[i] = [2]string{c.Name, string(c.Args)}
+	}
+	slices.SortFunc(pairs, func(a, b [2]string) int {
+		if c := strings.Compare(a[0], b[0]); c != 0 {
+			return c
+		}
+		return strings.Compare(a[1], b[1])
+	})
+	h := fnv.New64a()
+	for _, p := range pairs {
+		h.Write([]byte(p[0]))
+		h.Write([]byte{0})
+		h.Write([]byte(p[1]))
+		h.Write([]byte{0})
+	}
+	return h.Sum64()
 }
 
 // modelInfo reports the model's identity when it implements the

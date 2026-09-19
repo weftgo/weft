@@ -224,6 +224,24 @@ the cause on a `DENIED: <reason>` result. Neither is a run error.
   reachable — ADR 0013's amended kill-switch clause records the full
   rationale.
 
+## Amendment (2026-09-19 — loop detection; ErrLoopDetected, TODO §5.4)
+
+`weft.DetectLoops(repeats)` fails a run with **`ErrLoopDetected`**
+when `repeats` consecutive steps request the same **set** of tool
+calls. The signature is FNV-1a 64 over the step's calls sorted by
+`(name, raw argument bytes)` — sorted so "set" is literal (a permuted
+batch is a repeat), and hashed exactly as the model emitted them,
+without canonicalisation: a model that reformats its JSON has changed
+something, and the cost of a false negative is one more step. **Calls
+only, never results**: a tool whose output carries a timestamp must not
+hide a loop, and a result-inclusive hash would miss it (Crush
+`loop_detection.go`). Checked at the continuation point like every
+budget; steps without calls never reach it, and resumed approved calls
+are not a step. A subagent call's signature is
+`(name, {"prompt": …})` like any tool — a parent that keeps delegating
+the same prompt is a loop. Off by default (values below 2 are ignored);
+`weft new` will scaffold `DetectLoops(5)`.
+
 ## Amendment (2026-09-19 — `RETRY` joins the code table;
 ## ErrModelRetriesExceeded, TODO §5.2)
 

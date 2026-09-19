@@ -135,3 +135,13 @@ is not described: it is code, like middleware.
   changed schemas (tool-schema-design.md §9).
 - The line number in `source` moves with edits — expected churn, same
   as any pinned file:line.
+
+
+## Amendment (2026-09-19 — no MCP field; M14)
+
+Imported MCP tools are ordinary tools: registered statically they list
+with name, description and the raw foreign schema (`input_schema`
+emits `Schema.MarshalJSON`'s verbatim bytes), no `source` (the RawTool
+rule). The format gains no MCP field: a server's tool count is runtime
+data, not code, so TODO 2.9's "MCP servers with tool counts" sentence
+is retired to Studio's run view (ADR 0015).

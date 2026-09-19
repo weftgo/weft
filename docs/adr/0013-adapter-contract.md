@@ -313,3 +313,14 @@ tracked in TODO §9.2's orbit.)
    complexity budget demands — the resolution of the byte-identical
    copies finding from that day's review. Helpers that mention an SDK
    type stay per-adapter.
+
+
+## Amendment (2026-09-19 — the kill switch does not govern `tools/call`)
+
+`WEFT_MODEL_REQUESTS` governs model requests — an adapter calling its
+provider. An MCP `tools/call` is not one: imported tools
+(`weft/mcp.Tools`, ADR 0015) are the caller's tools, like any handler
+that makes an HTTP call, and run under `deny`. The line matters when
+MCP sampling ships (a server asking *our* model to generate): that is
+a model request and will come under the switch — recorded in ADR 0015's
+orbit.

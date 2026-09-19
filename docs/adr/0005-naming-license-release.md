@@ -64,3 +64,13 @@ lives at `github.com/weftgo/weft` — matching the module path exactly.
 v0.1.0 is tagged with the core plus the three adapters; the middleware
 seams follow in a later v0.x. Internal working notes (build plan, phase
 plans, reviews) moved out of the published tree at the same time.
+
+
+## Amendment (2026-09-19 — the workspace gains `mcp`)
+
+The module list gains `mcp` (`github.com/weftgo/weft/mcp`, over the
+official Go MCP SDK v1.8.0 — ADR 0015): `go.work` uses
+`. ./anthropic ./google ./mcp ./openai`, and the same build/test/lint
+loop over `go list -m` picks it up with no workflow change. The rule
+is unchanged: the root module stays dependency-free; a satellite
+carries its own SDK.

@@ -255,6 +255,44 @@ func TestManifest(t *testing.T) {
 A tool or policy change without regenerating fails `go test`; the diff
 is the review artifact. ([ADR 0012](docs/adr/0012-manifest-format.md))
 
+## MCP: both ways
+
+`weft/mcp` (its own module over the official Go MCP SDK, aliased
+`sdk`) is the bridge in both directions, with no adapter layer — the
+tool contract is the same shape ([ADR 0015](docs/adr/0015-mcp-interop.md)):
+
+```go
+import (
+    sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+    "github.com/weftgo/weft/mcp"
+)
+
+// Consume: a server's tools as ordinary weft tools. The schema bytes
+// cross whole (an enum or oneOf reaches the model as sent), the
+// calls forward the model's arguments verbatim, and every remote
+// failure is a tool result the model sees — data, never a run error.
+tools, _ := mcp.Tools(ctx, sess, mcp.Prefix("gh_"), mcp.Policy(weft.Timeout(10*time.Second)))
+
+// Expose: weft tools — or a whole agent, as one named tool with your
+// description — on any MCP server.
+srv := sdk.NewServer(&sdk.Implementation{Name: "weft", Version: "0"}, nil)
+mcp.AddTools(srv, lookup)
+mcp.Serve(srv, agent, "Support agent.")   // agent + its tools, under its chain
+```
+
+Two warnings the godoc repeats. **A server's tool descriptions are
+untrusted content** — they land in your model's tool list, a surface
+you did not author; filter with `mw.Allow` or read `Tools()`' output
+before registering it. **A foreign tool runs sequentially unless its
+server marks it `readOnlyHint`** — the conservative reading of an
+untrusted hint for a tool whose handler you cannot read.
+
+The loop, the seams, the manifest and `wefttest` treat an imported
+tool like any other (it is a `RawTool`); `examples/` for both
+directions live in `mcp/examples/` and run offline over in-memory
+transports. `TestRoundTripIsLossless` pins the property: export →
+import keeps the schema and the answers identical.
+
 ## Providers
 
 First-party adapters wrap the vendors' official Go SDKs — weft never

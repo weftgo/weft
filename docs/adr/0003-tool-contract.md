@@ -263,3 +263,27 @@ Gemini limit, as before.
 The same-depth cancellation row could not sit in the corpus (declaring
 the conflicting embeds trips go vet's structtag check); it stays
 pinned in `schema_conflict_test.go`.
+
+
+## Amendment (2026-09-19 — §7.4: the `oneOf` residue, resolved)
+
+The corpus above cannot show demand for `oneOf` — it compares two
+reflectors on Go structs, and neither can express a union; demand
+comes from consumers, not from a table of structs. The honest split:
+
+- **Import is solved** by bytes-through: a foreign `oneOf`, `enum`,
+  `const`, `pattern` or `$ref` reaches the model whole through
+  `ParseSchema` (the amendment above). That was the case with real
+  demand — every MCP server in the wild uses `enum` — and it needed no
+  reflector change.
+- **Export keeps the stated limits**: Go's type system has no sum
+  types; model a union as separate tools or a discriminated string
+  field. An optional `go:generate` step remains the planned answer
+  *if* a consumer arrives with a struct that cannot be expressed —
+  the decision is deferred to that consumer, not to a date. No
+  codegen ships in v1.
+
+The open-questions register's richer-tag-grammar row resolves the same
+way: decided direction (an `enum` tag is a core change to
+model-visible bytes with its own amendment and pinned tests), not
+scheduled — it ships when a consumer's tool needs it.

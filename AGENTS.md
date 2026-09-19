@@ -38,6 +38,10 @@ lookup := weft.Tool("lookup_order", "Look up an order by ID.",
 //     weft.Subagent("research", "Research a topic in depth.", researcher, weft.Timeout(2*time.Minute))
 //     Child events arrive as weft.Nested{CallID, Event}; usage rolls into res.Usage.
 
+// 1d. MCP, both ways (module weft/mcp; alias the SDK as sdk):
+//     tools, _ := mcp.Tools(ctx, sess, mcp.Prefix("gh_"))   // a server's tools as weft tools (RawTool; schema verbatim)
+//     mcp.Serve(srv, agt, "Support agent.")                 // an agent (and its tools) as an MCP server
+
 // 2. An agent is a value. Build once, run many times, concurrently.
 agt := weft.New(model,                       // any weft.Model (adapters, or wefttest.Script)
     weft.Name("support-bot"),                // on RunStart.Agent; weft.Manifest requires it

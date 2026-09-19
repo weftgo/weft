@@ -1,0 +1,38 @@
+{
+  "model": {
+    "provider": "wefttest",
+    "name": "script"
+  },
+  "request": {
+    "system": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Describe a tree in as many words as you like."
+          }
+        ]
+      }
+    ],
+    "tools": [
+      "probe"
+    ]
+  },
+  "events": [
+    {
+      "type": "text",
+      "text": "Four score and se"
+    },
+    {
+      "type": "finish",
+      "reason": "max_tokens",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      }
+    }
+  ],
+  "error": ""
+}

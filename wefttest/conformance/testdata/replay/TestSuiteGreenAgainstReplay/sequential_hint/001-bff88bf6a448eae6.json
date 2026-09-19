@@ -1,0 +1,43 @@
+{
+  "model": {
+    "provider": "wefttest",
+    "name": "script"
+  },
+  "request": {
+    "system": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Call `probe` three times, once each with n=1, n=2, n=3, in one turn."
+          }
+        ]
+      }
+    ],
+    "tools": [
+      "probe"
+    ],
+    "sequential": true
+  },
+  "events": [
+    {
+      "type": "tool_call",
+      "id": "call_1",
+      "name": "probe",
+      "args": {
+        "n": 1
+      }
+    },
+    {
+      "type": "finish",
+      "reason": "tool_calls",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      }
+    }
+  ],
+  "error": ""
+}

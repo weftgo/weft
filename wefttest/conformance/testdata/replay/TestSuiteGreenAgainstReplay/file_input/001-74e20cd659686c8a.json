@@ -1,0 +1,43 @@
+{
+  "model": {
+    "provider": "wefttest",
+    "name": "script"
+  },
+  "request": {
+    "system": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "What is in this image?"
+          },
+          {
+            "type": "file",
+            "media_type": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg=="
+          }
+        ]
+      }
+    ],
+    "tools": [
+      "probe"
+    ]
+  },
+  "events": [
+    {
+      "type": "text",
+      "text": "A transparent square."
+    },
+    {
+      "type": "finish",
+      "reason": "stop",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      }
+    }
+  ],
+  "error": ""
+}

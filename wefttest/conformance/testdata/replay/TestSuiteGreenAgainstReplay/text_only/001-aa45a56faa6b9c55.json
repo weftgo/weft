@@ -1,0 +1,38 @@
+{
+  "model": {
+    "provider": "wefttest",
+    "name": "script"
+  },
+  "request": {
+    "system": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Reply with one short sentence."
+          }
+        ]
+      }
+    ],
+    "tools": [
+      "probe"
+    ]
+  },
+  "events": [
+    {
+      "type": "text",
+      "text": "Hello from the model."
+    },
+    {
+      "type": "finish",
+      "reason": "stop",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      }
+    }
+  ],
+  "error": ""
+}

@@ -102,3 +102,25 @@ jobs:
           for m in $(go list -m -f '{{.Dir}}'); do
             (cd "$m" && WEFT_MODEL_REQUESTS=deny go test ./...)
           done
+
+  # The fuzz gate (TODO §9.4): every Fuzz* target of the root module
+  # runs for FUZZTIME on stable Go. Not under -race (the seeds already
+  # run under -race in `test`). A crasher fails the job and its input
+  # is uploaded so the fix PR can commit it as a seed.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+      - name: fuzz (root module, 10s per target)
+        run: make fuzz
+      - name: upload crashers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashers
+          path: testdata/fuzz
+          if-no-files-found: ignore

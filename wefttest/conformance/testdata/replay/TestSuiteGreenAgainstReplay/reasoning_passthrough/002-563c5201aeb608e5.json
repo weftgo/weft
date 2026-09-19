@@ -1,0 +1,60 @@
+{
+  "model": {
+    "provider": "wefttest",
+    "name": "script"
+  },
+  "request": {
+    "system": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Think briefly, then reply in one sentence."
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "text": "plan: answer briefly"
+          },
+          {
+            "type": "text",
+            "text": "Hello."
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Continue in one sentence."
+          }
+        ]
+      }
+    ],
+    "tools": [
+      "probe"
+    ]
+  },
+  "events": [
+    {
+      "type": "text",
+      "text": "Continued."
+    },
+    {
+      "type": "finish",
+      "reason": "stop",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      }
+    }
+  ],
+  "error": ""
+}

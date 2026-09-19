@@ -3433,15 +3433,18 @@ func TestUsageLimitFailsBeforeTheNextCall(t *testing.T) {
 
 // A step that ends the run may overshoot the limit and still succeed:
 // the budget stops further spend, it does not discard finished work.
+// WithUsage lifts the turn off the fixed 10/5 so the overshoot is
+// explicit (TODO §9.3).
 func TestUsageLimitFinalStepMayOvershoot(t *testing.T) {
-	agt := weft.New(wefttest.Script(wefttest.Say("done")),
+	agt := weft.New(wefttest.Script(
+		wefttest.Say("done").WithUsage(weft.Usage{OutputTokens: 40})),
 		weft.UsageLimit(weft.Usage{OutputTokens: 4}))
 	res, err := agt.Generate(context.Background(), weft.Prompt("q"))
 	if err != nil {
 		t.Fatalf("a run-ending step must not be failed for overshooting: %v", err)
 	}
-	if res.Usage.OutputTokens != 5 {
-		t.Errorf("usage = %+v, want the overshooting 5 output tokens recorded", res.Usage)
+	if res.Usage.OutputTokens != 40 {
+		t.Errorf("usage = %+v, want the overshooting 40 output tokens recorded", res.Usage)
 	}
 }
 
@@ -3734,18 +3737,13 @@ func TestPrepareStepSubsetsToolsPerStep(t *testing.T) {
 		t.Errorf("step 1 call to b = %+v, want success", r)
 	}
 	// The recorded requests prove the advertisement followed the phase.
-	names := func(r weft.ModelRequest) []string {
-		out := make([]string, len(r.Tools))
-		for i, td := range r.Tools {
-			out[i] = td.Name
-		}
-		return out
-	}
-	if got := names(m.Requests()[0]); !slices.Equal(got, []string{"a"}) {
+	// The Request matchers are the short way to assert on one (§9.3).
+	if got := (wefttest.Request{ModelRequest: m.Requests()[0]}).ToolNames(); !slices.Equal(got, []string{"a"}) {
 		t.Errorf("step 0 advertised %v", got)
 	}
-	if got := names(m.Requests()[1]); !slices.Equal(got, []string{"b"}) {
-		t.Errorf("step 1 advertised %v", got)
+	step1 := wefttest.Request{ModelRequest: m.Requests()[1]}
+	if !step1.HasTool("b") {
+		t.Errorf("step 1 advertised %v, want b", step1.ToolNames())
 	}
 }
 
@@ -3764,7 +3762,8 @@ func TestPrepareStepTrimsRequestNotTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(m.Requests()[0].Messages); got != 1 {
+	// LastRequest is the one-request shorthand for the same assertion.
+	if got := len(m.LastRequest().Messages); got != 1 {
 		t.Errorf("model saw %d messages, want 1", got)
 	}
 	if got := len(res.Messages); got != 3 { // two input messages + the reply

@@ -6,7 +6,7 @@ GO ?= go
 # SDKs are required only by the adapter modules.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy live apidiff apidiff-selftest offline
+.PHONY: build test vet fmt lint tidy live apidiff apidiff-selftest offline fuzz
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -45,6 +45,15 @@ apidiff-selftest:
 # construction — so deny still means "no self-built client egress".
 offline:
 	for m in $(MODULES); do (cd $$m && WEFT_MODEL_REQUESTS=deny $(GO) test ./...) || exit 1; done
+
+# Fuzz every Fuzz* target of the root module, one invocation each (Go
+# fuzzes one target at a time), FUZZTIME apiece. A crasher is written
+# to testdata/fuzz/<Target>/ — commit it as a regression seed.
+FUZZTIME ?= 10s
+fuzz:
+	for f in $$($(GO) test -list 'Fuzz.*' . | grep '^Fuzz'); do \
+	  $(GO) test -run '^$$' -fuzz "^$$f\$$" -fuzztime $(FUZZTIME) . || exit 1; \
+	done
 
 # Live adapter tests behind the `live` build tag; never in CI (no keys).
 live:

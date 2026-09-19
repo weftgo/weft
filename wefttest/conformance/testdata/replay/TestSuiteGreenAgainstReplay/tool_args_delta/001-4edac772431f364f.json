@@ -1,0 +1,52 @@
+{
+  "model": {
+    "provider": "",
+    "name": ""
+  },
+  "request": {
+    "system": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Call `probe` with n=3, then tell me the doubled value."
+          }
+        ]
+      }
+    ],
+    "tools": [
+      "probe"
+    ]
+  },
+  "events": [
+    {
+      "type": "tool_call_delta",
+      "name": "probe",
+      "args_text": "{\"n\""
+    },
+    {
+      "type": "tool_call_delta",
+      "name": "probe",
+      "args_text": ":3}"
+    },
+    {
+      "type": "tool_call",
+      "id": "call_1",
+      "name": "probe",
+      "args": {
+        "n": 3
+      }
+    },
+    {
+      "type": "finish",
+      "reason": "tool_calls",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      }
+    }
+  ],
+  "error": ""
+}

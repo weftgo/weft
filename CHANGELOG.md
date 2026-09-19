@@ -6,6 +6,35 @@ is pre-1.0 and tags per module (ADR 0005).
 
 ## Unreleased (2026-09-19)
 
+### Added — Testing conventions: replay, wefttest growth, fuzz in CI (TODO §9, ADR 0017)
+
+- **`wefttest.Record(t, dir, inner)` / `wefttest.Replay(t, dir)`** —
+  record/replay at the `weft.Model` seam, so application tests run
+  against what a real model actually said, offline and deterministically.
+  Fixtures are one pretty-printed JSON file per request (reviewable in a
+  diff; re-recording is the review), keyed on the request's messages,
+  tool names, thinking level, and sequential flag — not the system
+  prompt, so a prompt tweak does not invalidate fixtures. A miss fails
+  loudly with `wefttest.ErrNoFixture` naming the directory, key, and
+  first user text; repeated identical requests replay in recorded
+  order. Both are ordinary `weft.Model`s (middleware, `PrepareStep`,
+  and subagents run unchanged above them); the conformance suite is
+  green against a `Replay`, and committed recordings under
+  `wefttest/testdata/replay/` prove a fresh checkout replays with no
+  key and no network. No new dependency; nothing under `weft/` proper
+  changed. Adapters keep their wire-level `.sse` fixtures (ADR 0013) —
+  replay answers the *application* question, fixtures the *adapter*
+  question.
+- **`wefttest` scripting helpers**: `Args(v)` (typed tool arguments),
+  `Raw(events...)` (verbatim events — the one-liner for contract
+  violations and signed reasoning blocks), `SayThenFail(text, err)`
+  (mid-stream failure), `Turn.WithUsage(u)`, `Request` matchers
+  (`HasTool`, `ToolNames`, `LastText`), and `Model.LastRequest()`.
+- **`make fuzz`** runs every fuzz target of the root module (10 s
+  apiece, `FUZZTIME` overridable) and a dedicated CI job gates it,
+  uploading crashers on failure; a crasher becomes a committed
+  regression seed (the `FuzzRepair` precedent).
+
 ### Added — Observability: OTel spans and slog lines (TODO §8, ADR 0016)
 
 - **The core's first and only dependency: the OTel API**

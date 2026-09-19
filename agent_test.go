@@ -47,7 +47,7 @@ func TestGenerateRunsToolsEndToEnd(t *testing.T) {
 			return echoOut{Echoed: strings.ToUpper(in.Msg)}, nil
 		})
 	model := wefttest.Script(
-		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"msg":"hello"}`}),
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: wefttest.Args(echoIn{Msg: "hello"})}),
 		wefttest.Say("All done."),
 	)
 	agt := weft.New(model, weft.Instructions("You are a test agent."), echo)
@@ -521,6 +521,26 @@ func TestModelFailureFailsTheRun(t *testing.T) {
 	}
 	if res != nil {
 		t.Error("result should be nil on model failure")
+	}
+}
+
+// A failure after partial output (SayThenFail) fails the run, and the
+// half-spoken turn is not appended to the partial transcript: a caller
+// resuming from RunError.Result must not feed a truncated assistant
+// message back in.
+func TestMidStreamFailureDiscardsPartialText(t *testing.T) {
+	boom := errors.New("stream cut mid-turn")
+	agt := weft.New(wefttest.Script(wefttest.SayThenFail("half an answ", boom)))
+
+	_, err := agt.Generate(context.Background(), weft.Prompt("x"))
+	var runErr *weft.RunError
+	if !errors.As(err, &runErr) || !errors.Is(err, boom) {
+		t.Fatalf("error = %v, want a RunError wrapping the stream error", err)
+	}
+	for _, msg := range runErr.Result.Messages {
+		if msg.Role == weft.RoleAssistant && strings.Contains(msg.Text(), "half an answ") {
+			t.Errorf("partial assistant text reached the transcript: %v", msg)
+		}
 	}
 }
 

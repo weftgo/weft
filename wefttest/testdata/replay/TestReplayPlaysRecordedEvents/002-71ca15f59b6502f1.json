@@ -1,0 +1,63 @@
+{
+  "model": {
+    "provider": "wefttest",
+    "name": "script"
+  },
+  "request": {
+    "system": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Echo hi."
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_call",
+            "id": "call_1",
+            "name": "echo",
+            "args": {
+              "msg": "hi"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [
+          {
+            "type": "tool_result",
+            "call_id": "call_1",
+            "name": "echo",
+            "content": "echo: hi",
+            "is_error": false
+          }
+        ]
+      }
+    ],
+    "tools": [
+      "echo"
+    ]
+  },
+  "events": [
+    {
+      "type": "text",
+      "text": "done"
+    },
+    {
+      "type": "finish",
+      "reason": "stop",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      }
+    }
+  ],
+  "error": ""
+}

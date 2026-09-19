@@ -1,0 +1,93 @@
+{
+  "model": {
+    "provider": "wefttest",
+    "name": "script"
+  },
+  "request": {
+    "system": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Call `probe` three times, once each with n=1, n=2, n=3, in one turn."
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_call",
+            "id": "call_1",
+            "name": "probe",
+            "args": {
+              "n": 1
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [
+          {
+            "type": "tool_result",
+            "call_id": "call_1",
+            "name": "probe",
+            "content": "{\"n\":1,\"doubled\":2}",
+            "is_error": false
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_call",
+            "id": "call_1",
+            "name": "probe",
+            "args": {
+              "n": 2
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [
+          {
+            "type": "tool_result",
+            "call_id": "call_1",
+            "name": "probe",
+            "content": "{\"n\":2,\"doubled\":4}",
+            "is_error": false
+          }
+        ]
+      }
+    ],
+    "tools": [
+      "probe"
+    ],
+    "sequential": true
+  },
+  "events": [
+    {
+      "type": "tool_call",
+      "id": "call_1",
+      "name": "probe",
+      "args": {
+        "n": 3
+      }
+    },
+    {
+      "type": "finish",
+      "reason": "tool_calls",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      }
+    }
+  ],
+  "error": ""
+}

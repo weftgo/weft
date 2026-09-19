@@ -132,7 +132,9 @@ format; when a vendor changes its wire format, the fixture is
 regenerated and the diff is the review. (The plan's `make fixtures`
 recording round-tripper is **deferred**: hand-recorded fixtures cover
 the suite today, and the tooling needs live keys to be worth building;
-tracked in TODO §9.2's orbit.)
+tracked in TODO §9.2's orbit.) Application-level replay — testing an
+*agent* against a recorded model stream — is ADR 0017's layer and
+replaces nothing here: the wire fixtures stay the adapter proof.
 
 ### Capability matrix (Caps per adapter today)
 

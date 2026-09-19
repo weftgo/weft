@@ -1,0 +1,63 @@
+{
+  "model": {
+    "provider": "",
+    "name": ""
+  },
+  "request": {
+    "system": "",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Call `probe` with n=3, then tell me the doubled value."
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_call",
+            "id": "call_1",
+            "name": "probe",
+            "args": {
+              "n": 3
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [
+          {
+            "type": "tool_result",
+            "call_id": "call_1",
+            "name": "probe",
+            "content": "{\"n\":3,\"doubled\":6}",
+            "is_error": false
+          }
+        ]
+      }
+    ],
+    "tools": [
+      "probe"
+    ]
+  },
+  "events": [
+    {
+      "type": "text",
+      "text": "The doubled value is 6."
+    },
+    {
+      "type": "finish",
+      "reason": "stop",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      }
+    }
+  ],
+  "error": ""
+}

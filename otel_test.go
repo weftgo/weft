@@ -711,28 +711,21 @@ func TestSpansErrorTypes(t *testing.T) {
 	}
 
 	tp = newRecProvider()
-	agt = weft.New(contractModel{wefttest.Script(wefttest.Say("x"))}, weft.TracerProvider(tp))
+	agt = weft.New(wefttest.Script(wefttest.Raw(weft.ModelTextDelta{Text: "hi"})), weft.TracerProvider(tp))
 	if _, err := agt.Generate(context.Background(), weft.Prompt("p")); !errors.Is(err, weft.ErrModelContract) {
 		t.Fatalf("err = %v, want ErrModelContract", err)
 	}
-	for _, name := range []string{"chat", "invoke_agent"} {
+	// "chat script": the span carries the model's name (wefttest's is
+	// "script"), the way an adapter's would carry gpt-5 or claude.
+	for _, name := range []string{"chat script", "invoke_agent"} {
 		if got := tp.find(t, name).attrsMap()["error.type"]; got != "model_contract" {
 			t.Errorf("%s ErrModelContract error.type = %q, want model_contract", name, got)
 		}
 	}
-	for _, s := range []*recSpan{tp.find(t, "chat"), tp.find(t, "invoke_agent")} {
+	for _, s := range []*recSpan{tp.find(t, "chat script"), tp.find(t, "invoke_agent")} {
 		if v := s.attrsMap()["error.type"]; strings.ContainsAny(v, " :") {
 			t.Errorf("error.type %q is not a token", v)
 		}
-	}
-}
-
-// contractModel ends its stream without a ModelFinish.
-type contractModel struct{ weft.Model }
-
-func (contractModel) Stream(context.Context, weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
-		yield(weft.ModelTextDelta{Text: "hi"}, nil)
 	}
 }
 
@@ -770,25 +763,16 @@ func TestSpansToolCancellationType(t *testing.T) {
 // it) still lands its usage on the span.
 func TestSpansEmptyReasonKeepsUsage(t *testing.T) {
 	tp := newRecProvider()
-	agt := weft.New(emptyReasonModel{wefttest.Script(wefttest.Say("x"))}, weft.TracerProvider(tp))
+	agt := weft.New(wefttest.Script(wefttest.Raw(
+		weft.ModelTextDelta{Text: "hi"},
+		weft.ModelFinish{Usage: weft.Usage{InputTokens: 7, OutputTokens: 3}},
+	)), weft.TracerProvider(tp))
 	if _, err := agt.Generate(context.Background(), weft.Prompt("p")); err != nil {
 		t.Fatal(err)
 	}
-	got := tp.find(t, "chat").attrsMap()
+	got := tp.find(t, "chat script").attrsMap()
 	if got["gen_ai.usage.input_tokens"] != "7" || got["gen_ai.usage.output_tokens"] != "3" {
 		t.Errorf("chat span usage = %v, want 7 in / 3 out", got)
-	}
-}
-
-// emptyReasonModel finishes with usage but no mapped stop reason.
-type emptyReasonModel struct{ weft.Model }
-
-func (emptyReasonModel) Stream(context.Context, weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
-		if !yield(weft.ModelTextDelta{Text: "hi"}, nil) {
-			return
-		}
-		yield(weft.ModelFinish{Usage: weft.Usage{InputTokens: 7, OutputTokens: 3}}, nil)
 	}
 }
 

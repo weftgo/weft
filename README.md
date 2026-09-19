@@ -434,11 +434,36 @@ make vet
 make lint   # golangci-lint (CI uses .golangci.yml)
 make live   # adapter conformance against real keys (-tags live)
 make apidiff  # public API of the root module vs the last tag (CI runs it)
+make fuzz    # 10 s per fuzz target; FUZZTIME=1m make fuzz for longer
 make fmt
 ```
 
 Requires Go 1.26 or newer; the current and previous Go releases are
-supported and both are tested in CI.
+supported and both are tested in CI. A fuzz crasher fails CI, its
+input is uploaded, and the fix PR commits it under `testdata/fuzz/` as
+a regression seed — the existing `FuzzRepair` seed got there that way.
+
+### Testing
+
+In reach order: script the dialogue with
+`wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))` —
+offline, deterministic, no key; compare bytes with `wefttest.Golden`;
+and when the question is "what does my agent do with what the model
+*actually* said", record once and replay forever:
+
+```go
+func model(t *testing.T) weft.Model {
+    if os.Getenv("WEFT_RECORD") != "" { // the suite's own switch; wefttest never reads it
+        return wefttest.Record(t, "testdata/replay", openai.New(key, "gpt-5"))
+    }
+    return wefttest.Replay(t, "testdata/replay")
+}
+```
+
+Fixtures are pretty JSON a reviewer reads in a diff — re-recording is
+the review (ADR 0017). The adapters' own wire-format parsing is proven
+by `wefttest/conformance` against recorded `.sse` fixtures, not by
+replay (ADR 0013).
 
 **API stability is enforced, not aspired to.** CI runs
 `scripts/apidiff.sh`: the root module's exported API is compared

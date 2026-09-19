@@ -1,6 +1,7 @@
 package weft
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -106,9 +107,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		res.Messages = attachResults(res.Messages, resume, results)
 		// Resumed delegations roll into the total only: there is no
 		// StepRecord for resumed calls (ADR 0007), so no per-call map.
-		for _, u := range sub {
-			res.Usage = res.Usage.Add(u)
-		}
+		res.Usage = rollUp(res.Usage, sub)
 		if len(pending) > 0 {
 			res.Pending = pending
 			return endRun(0)
@@ -139,6 +138,18 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			// for this run alone (the thinkingOption applies to both).
 			SequentialTools: a.parallelism == 1,
 			Thinking:        cfg.effectiveThinking(a.thinking),
+		}
+		// PrepareStep functions are arbitrary user code, and the request
+		// they see promises they may mutate it freely (ADR 0006
+		// amendment): messages and tool definitions are deep-copied at
+		// that boundary, so nothing a function writes in place — a
+		// dropped part, re-formed argument bytes, a rewritten
+		// description — reaches the run's transcript or the agent's
+		// frozen registry. The model seam keeps the lighter slice
+		// copies: adapters hold the read-only request contract.
+		if a.prepare != nil {
+			req.Messages = cloneMessages(req.Messages)
+			req.Tools = cloneTools(req.Tools)
 		}
 		// The one loop knob: PrepareStep rewrites the request before the
 		// model seam, on the raw instructions; what its chain returns is
@@ -317,9 +328,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// Child-run usage rolls up after the step's own: StepFinish
 		// reports the model call's numbers alone (finish.Usage), while
 		// RunResult.Usage carries the whole bill, subagents included.
-		for _, u := range sub {
-			res.Usage = res.Usage.Add(u)
-		}
+		res.Usage = rollUp(res.Usage, sub)
 		emit(StepFinish{RunID: cfg.id, Index: step, Reason: finish.Reason, Usage: finish.Usage, Raw: finish.Raw})
 
 		if len(pending) > 0 {
@@ -401,6 +410,44 @@ func snapshotPending(pending []ToolCallPart) []ToolCallPart {
 	return out
 }
 
+// cloneMessages deep-copies a transcript for a request handed to user
+// code: each message and its parts are copied, so an in-place write —
+// dropping a part, rewriting a tool call's raw arguments — cannot
+// reach the run's transcript. Strings are immutable; the two mutable
+// payloads, a tool call's Args and a file's Data, are re-allocated.
+func cloneMessages(msgs []Message) []Message {
+	out := make([]Message, len(msgs))
+	for i, m := range msgs {
+		content := make([]Part, len(m.Content))
+		for j, p := range m.Content {
+			switch p := p.(type) {
+			case ToolCallPart:
+				p.Args = cloneRaw(p.Args)
+				content[j] = p
+			case FilePart:
+				p.Data = bytes.Clone(p.Data)
+				content[j] = p
+			default:
+				content[j] = p
+			}
+		}
+		m.Content = content
+		out[i] = m
+	}
+	return out
+}
+
+// cloneTools deep-copies a tool list for the same boundary: each
+// definition is a frozen-registry clone, so a PrepareStep function
+// that rewrites a definition changes this step's snapshot only.
+func cloneTools(tools []*ToolDef) []*ToolDef {
+	out := make([]*ToolDef, len(tools))
+	for i, t := range tools {
+		out[i] = t.clone()
+	}
+	return out
+}
+
 // stopped reports whether any StopWhen condition is met.
 func (a *Agent) stopped(steps []StepRecord) bool {
 	for _, cond := range a.stops {
@@ -425,9 +472,10 @@ type loopState struct {
 
 // guard is the continuation point: the checks that decide whether the
 // loop may make another model call. The first breach wins; the others
-// are not evaluated. Ordered by cheapness — a counter compare, then
-// token compares (ADR 0002: budgets are checked only when the loop
-// would otherwise spend more).
+// are not evaluated. The retry pass sorts its keys so an exhaustion
+// error names one deterministic tool when several are stuck; the usage
+// compares and the loop hash follow (ADR 0002: budgets are checked
+// only when the loop would otherwise spend more).
 func (a *Agent) guard(res *RunResult, rec *StepRecord, st *loopState) error {
 	for _, name := range slices.Sorted(maps.Keys(st.retries)) {
 		if st.retries[name] > a.maxModelRetries {

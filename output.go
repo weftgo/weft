@@ -93,14 +93,13 @@ func GenerateAs[Out any](ctx context.Context, a *Agent, opts ...RunOption) (Out,
 	return out, res, err
 }
 
-// OutputOf decodes the structured output recorded in a finished run —
-// the last submit_output call with a non-error result — for callers
-// that streamed the run and hold its RunResult. It returns ErrNoOutput
-// when no such call exists.
-func OutputOf[Out any](res *RunResult) (Out, error) {
-	var zero Out
+// lastSubmitted returns the newest submit_output call with a non-error
+// result, searching steps and calls newest first — the one submission
+// OutputOf decodes and a Subagent delegation returns verbatim. ok is
+// false when the run never submitted.
+func lastSubmitted(res *RunResult) (ToolCallPart, bool) {
 	if res == nil {
-		return zero, ErrNoOutput
+		return ToolCallPart{}, false
 	}
 	for i := len(res.Steps) - 1; i >= 0; i-- {
 		step := res.Steps[i]
@@ -110,22 +109,34 @@ func OutputOf[Out any](res *RunResult) (Out, error) {
 				continue
 			}
 			k := slices.IndexFunc(step.Results, func(r ToolResultPart) bool { return r.CallID == call.ID })
-			if k < 0 || step.Results[k].IsError {
-				continue
+			if k >= 0 && !step.Results[k].IsError {
+				return call, true
 			}
-			// Lenient decode, deliberately: these bytes already passed
-			// the run's decode when the handler recorded them, so
-			// strictness here would only reject a forged RunResult —
-			// outside the threat model (a caller who can forge a result
-			// can forge the output too).
-			out, err := decodeInput[Out](outputToolName, call.Args, false)
-			if err != nil {
-				// The handler decoded these same bytes; a failure here
-				// means Out differs from the type given to Output.
-				return zero, fmt.Errorf("%w: %v", ErrNoOutput, err)
-			}
-			return out, nil
 		}
 	}
-	return zero, ErrNoOutput
+	return ToolCallPart{}, false
+}
+
+// OutputOf decodes the structured output recorded in a finished run —
+// the last submit_output call with a non-error result — for callers
+// that streamed the run and hold its RunResult. It returns ErrNoOutput
+// when no such call exists.
+func OutputOf[Out any](res *RunResult) (Out, error) {
+	var zero Out
+	call, ok := lastSubmitted(res)
+	if !ok {
+		return zero, ErrNoOutput
+	}
+	// Lenient decode, deliberately: these bytes already passed
+	// the run's decode when the handler recorded them, so
+	// strictness here would only reject a forged RunResult —
+	// outside the threat model (a caller who can forge a result
+	// can forge the output too).
+	out, err := decodeInput[Out](outputToolName, call.Args, false)
+	if err != nil {
+		// The handler decoded these same bytes; a failure here
+		// means Out differs from the type given to Output.
+		return zero, fmt.Errorf("%w: %v", ErrNoOutput, err)
+	}
+	return out, nil
 }

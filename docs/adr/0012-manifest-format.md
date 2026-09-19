@@ -108,6 +108,15 @@ manifest does **not** recurse into the child: it describes the agents
 it was given, and Studio draws the delegation edge by name when both
 ends are in the fleet.
 
+`policy` gains three keys for the §5 budgets: `max_model_retries`,
+always written like `max_steps` because it has a non-zero default (the
+one §5 change that touched a committed golden —
+`examples/getting-started/weft.json` regenerated); `usage_limit`
+(`{"input_tokens": n, "output_tokens": n}`, zero fields omitted, the
+whole object omitted when no limit is set); and `detect_loops`
+(`omitempty`, so off-by-default agents write nothing). `PrepareStep`
+is not described: it is code, like middleware.
+
 ## Alternatives considered
 
 - **A registry the Studio queries live**: couples consumers to a

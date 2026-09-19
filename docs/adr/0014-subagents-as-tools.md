@@ -156,7 +156,7 @@ serve either.
 |---|---|---|
 | G2 | Child id `<parent>/<step>/<callID>`, `resume` for approved calls | call ids repeat across steps; the step segment makes the id unique for the life of the run while staying deterministic and self-describing |
 | G3 | `SUBAGENT_*` messages quote the **tool name**, not the child agent's `Name` | the tool name is always present (a child may be unnamed), it is what the parent model called, and it is what `Audit` logs by `Call.Name`; the child's own name is on the nested `RunStart.Agent` |
-| G4 | An `Output[T]` child returns the submitted `Args` bytes verbatim; a child that never submitted returns its final text, no error | the parent sees the child model's own bytes; `ErrNoOutput` is a `GenerateAs` concern — the parent model reads what the child said |
+| G4 | An `Output[T]` child returns the submitted `Args` bytes verbatim — empty bytes are a submission (they decode as `{}`); a child that never submitted returns its final text, no error | the parent sees the child model's own bytes; `ErrNoOutput` is a `GenerateAs` concern — the parent model reads what the child said |
 | G5 | The late-event rule (events and usage, close atomic with the finish under the parent lock) | replayability; abandoned goroutines are not waited for |
 | G6 | `wefttest.Flatten` is a test helper, not core API | a test helper must not become core surface |
 | G7 | Manifest `subagent` field names the child; the manifest does not recurse | the manifest describes the agents it was given; Studio draws the edge by name when both are in the fleet |

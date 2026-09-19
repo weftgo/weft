@@ -20,8 +20,10 @@ vet:
 fmt:
 	for m in $(MODULES); do (cd $$m && $(GO) fmt ./...); done
 
+# Needs: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+# PATH gains GOPATH/bin so the target works from a bare shell (as apidiff does).
 lint:
-	for m in $(MODULES); do (cd $$m && golangci-lint run); done
+	for m in $(MODULES); do (cd $$m && PATH="$$(go env GOPATH)/bin:$$PATH" golangci-lint run); done
 
 tidy:
 	for m in $(MODULES); do (cd $$m && $(GO) mod tidy); done

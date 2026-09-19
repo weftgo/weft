@@ -15,9 +15,10 @@ import (
 // contract, pinned by tests (ADR 0002's table; ADR 0014). Exported like
 // the loop's own codes so policy middleware can branch on them.
 const (
-	// CodeSubagentFailed marks a child run that failed: its *RunError is
-	// the cause, reachable through errors.As on ToolError.Err and never
-	// shown to the model.
+	// CodeSubagentFailed marks a child run that failed. The message the
+	// model sees carries the child's step and cause; the *RunError
+	// itself stays on ToolError.Err, reachable through errors.As, so
+	// middleware can branch on it without parsing that text.
 	CodeSubagentFailed = "SUBAGENT_FAILED"
 	// CodeSubagentPending marks a child run that ended awaiting an
 	// approval decision. Approvals belong in the orchestrator, not in a
@@ -71,9 +72,11 @@ func withNest(ctx context.Context, n *nest) context.Context {
 	return context.WithValue(ctx, nestKey{}, n)
 }
 
-func nestFromContext(ctx context.Context) (*nest, bool) {
-	n, ok := ctx.Value(nestKey{}).(*nest)
-	return n, ok
+// nestFromContext returns the nest on ctx, or nil outside the loop;
+// sink and record are nil-safe, so there is no ok to check.
+func nestFromContext(ctx context.Context) *nest {
+	n, _ := ctx.Value(nestKey{}).(*nest)
+	return n
 }
 
 // ancestry carries the agents running above a context, root first.
@@ -124,30 +127,29 @@ func usageOf(res *RunResult, err error) Usage {
 	return Usage{}
 }
 
+// rollUp adds one dispatch's subagent usage to a run's total: the
+// per-call map a step records on its StepRecord — or, for calls
+// resumed under Approve, no map at all — always sums into the run's
+// bill (ADR 0014).
+func rollUp(total Usage, sub map[string]Usage) Usage {
+	for _, u := range sub {
+		total = total.Add(u)
+	}
+	return total
+}
+
 // submittedJSON returns the raw arguments of the last valid submit_output
 // call — exactly the bytes OutputOf would decode, unre-marshalled, so a
-// parent sees the child model's own bytes. ok is false when the run
-// never submitted; the caller falls back to the child's final text.
+// parent sees the child model's own bytes. Empty arguments are a valid
+// submission (decodeInput reads them as {}): the bytes are then empty,
+// as OutputOf would decode them. ok is false only when the run never
+// submitted; the caller falls back to the child's final text.
 func submittedJSON(res *RunResult) (json.RawMessage, bool) {
-	if res == nil {
+	call, ok := lastSubmitted(res)
+	if !ok {
 		return nil, false
 	}
-	for i := len(res.Steps) - 1; i >= 0; i-- {
-		step := res.Steps[i]
-		for j := len(step.ToolCalls) - 1; j >= 0; j-- {
-			call := step.ToolCalls[j]
-			if call.Name != outputToolName {
-				continue
-			}
-			k := slices.IndexFunc(step.Results, func(r ToolResultPart) bool {
-				return r.CallID == call.ID
-			})
-			if k >= 0 && !step.Results[k].IsError && len(call.Args) > 0 {
-				return call.Args, true
-			}
-		}
-	}
-	return nil, false
+	return call.Args, true
 }
 
 // subagentInput is the argument schema of every Subagent tool: one
@@ -186,7 +188,7 @@ func Subagent(name, description string, child *Agent, opts ...ToolOption) *ToolD
 				Message: fmt.Sprintf("agent %q is already running in this call chain", name)}
 		}
 		call, _ := CallFromContext(ctx)
-		n, _ := nestFromContext(ctx)
+		n := nestFromContext(ctx)
 		cfg := runConfig{id: childRunID(call), messages: []Message{User(in.Prompt)}}
 		cfg.finish()
 		res, err := child.execute(ctx, cfg, n.sink())

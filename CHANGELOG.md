@@ -84,6 +84,54 @@ is pre-1.0 and tags per module (ADR 0005).
   name>"` (omitempty; existing goldens unchanged). **wefttest**:
   `Flatten` unwraps `Nested` events recursively for assertions.
 
+### Fixed — §5 review pass (2026-09-19)
+
+- `PrepareStep` functions now receive a deep copy of the request: the
+  previous slice-level clone shared each message's parts and the frozen
+  registry's `*ToolDef` pointers, so an in-place write — dropping a
+  part, re-forming a tool call's argument bytes, rewriting a
+  definition's fields — corrupted the run transcript and the agent for
+  later runs, against the documented "mutate freely" promise (ADR 0006
+  amendment). Message parts, argument bytes, and tool definitions are
+  cloned at that boundary; the model seam keeps the lighter slice
+  copies under the adapter read-only contract.
+- A typed-output child that submitted with no argument bytes (empty
+  decodes as `{}`) now counts as submitted: the delegation returns the
+  empty bytes instead of falling back to the child's final text,
+  matching what `OutputOf` decodes (ADR 0014, G4).
+- Added the missing godoc example for `ToolOptions`, the untested
+  `resume` lineage id (`<parent>/resume/<callID>`, asserted through an
+  approved delegation), and a guard comment that described a sort as a
+  counter compare.
+- `docs/life-of-a-call.md` drew the budgets before the `StopWhen`
+  check; the loop checks `StopWhen` first and the budgets only at the
+  continuation point (ADR 0002 amendment, AGENTS rule 13). The diagram
+  now matches the code. ADR 0012 now records the three §5 policy keys
+  (`max_model_retries`, `usage_limit`, `detect_loops`) the manifest
+  had been writing without an entry.
+- Pinned four behaviours the §5 suite left implicit: cancelling the
+  parent mid-child under `Stream` delivers the cancellation last and no
+  `RunFinish` at either level; a child's `RETRY` results feed the
+  child's counter, never the parent's; concurrent runs on one
+  orchestrator keep `Nested.RunID` and `Seq` per run; `PrepareStep`
+  over a `ToolSource` consults the source once per step and dispatches
+  against the prepared subset.
+- Second round (deep review of the §5 plan against the tree):
+  `CodeSubagentFailed`'s godoc claimed the child's cause is "never
+  shown to the model" while the handler renders it into the
+  model-visible message — the comment now states the real contract
+  (message carries the cause; the `*RunError` stays on `ToolError.Err`
+  for `errors.As`). `MaxModelRetries`' godoc now records that calls
+  resumed under `Approve` do not feed the counter (they belong to no
+  step, ADR 0007), as ADR 0002 already did. The "last valid
+  `submit_output`" walk existed twice — `OutputOf` and a Subagent
+  delegation's `submittedJSON` — and is now one `lastSubmitted` helper
+  both call, so the "exactly the bytes `OutputOf` would decode" promise
+  cannot drift. `nestFromContext` dropped its never-read ok flag.
+  `make lint` now works from a bare shell like `make apidiff` does
+  (GOPATH/bin on PATH); golangci-lint is 0-issues across the four
+  modules.
+
 ### Fixed — go1.26 decode-error compatibility (follow-up to the review pass)
 
 - The schema walk behind `INVALID_INPUT` messages now handles toolchains

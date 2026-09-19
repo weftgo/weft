@@ -744,6 +744,31 @@ func ExampleOptions() {
 	// order 42:
 }
 
+// ToolOptions composes tool options into one named value, so a package
+// of per-tool policy travels under one name.
+func ExampleToolOptions() {
+	productPolicy := weft.ToolOptions(
+		weft.Timeout(5*time.Second),
+		weft.MaxResultBytes(1024),
+	)
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"id":"42"}`}),
+		wefttest.Say("Done."),
+	), weft.Tool("lookup_order", "Look up an order by id.",
+		func(_ context.Context, in struct {
+			ID string `json:"id" jsonschema:"the order id"`
+		}) (string, error) {
+			return "order " + in.ID + " shipped", nil
+		}, productPolicy))
+	res, err := agt.Generate(context.Background(), weft.Prompt("Where is order 42?"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Steps[0].Results[0].Content)
+	// Output:
+	// order 42 shipped
+}
+
 // Continuing a conversation: feed the transcript back with the next
 // question. The agent value is unchanged — the history lives in the
 // messages you pass, never in the agent.

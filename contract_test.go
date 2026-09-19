@@ -2299,6 +2299,57 @@ func TestModelRequestCopiesDefendTheRun(t *testing.T) {
 	}
 }
 
+// A PrepareStep function receives the request as a copy it may mutate
+// freely: in-place writes — rewriting a transcript part, a tool call's
+// raw argument bytes, a definition's fields — must reach neither the
+// run's transcript nor the agent's frozen registry, in this run or any
+// later one (ADR 0006 amendment).
+func TestPrepareStepCopiesDefendTheRun(t *testing.T) {
+	echo := weft.Tool("echo", "", func(_ context.Context, in struct {
+		Q string `json:"q"`
+	}) (string, error) {
+		return in.Q, nil
+	})
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"q":"hi"}`}),
+		wefttest.Say("done"),
+	), echo, weft.PrepareStep(func(_ context.Context, _ int, req weft.ModelRequest) (weft.ModelRequest, error) {
+		req.Tools[0].Description = "sabotaged"
+		req.Messages[0].Content[0] = weft.TextPart{Text: "injected"}
+		for i := range req.Messages {
+			if c, ok := req.Messages[i].Content[0].(weft.ToolCallPart); ok {
+				c.Args = json.RawMessage(`{"q":"hacked"}`)
+				req.Messages[i].Content[0] = c
+			}
+		}
+		return req, nil
+	}))
+	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := res.Steps[0].Results[0]; r.IsError || r.Content != "hi" {
+		t.Errorf("result = %+v; dispatch must see the step's own snapshot", r)
+	}
+	if got := res.Messages[0].Text(); got != "go" {
+		t.Errorf("first message = %q; transcript parts must be copies", got)
+	}
+	var args string
+	for _, m := range res.Messages {
+		for _, p := range m.Content {
+			if c, ok := p.(weft.ToolCallPart); ok {
+				args = string(c.Args)
+			}
+		}
+	}
+	if args != `{"q":"hi"}` {
+		t.Errorf("recorded call args = %q; argument bytes must be copies", args)
+	}
+	if tools := agt.Tools(); tools[0].Description != "" {
+		t.Errorf("tool description = %q; sabotage must not reach the frozen registry", tools[0].Description)
+	}
+}
+
 // stepModel is stateless and thread-safe: the first call of any run asks
 // for a tool, every later one answers. Run-scoped behaviour from request
 // shape alone, so one Model can serve concurrent runs on one agent.
@@ -2991,6 +3042,46 @@ func TestSubagentLineageIDs(t *testing.T) {
 	}
 }
 
+// A delegation resumed under Approve reports the resume lineage id,
+// <parent>/resume/<callID> — distinct from any step-0 call, which
+// childRunID's literal segment guarantees (ADR 0014).
+func TestSubagentResumeLineageID(t *testing.T) {
+	var childCall weft.Call
+	ping := weft.Tool("ping", "", func(ctx context.Context, _ struct{}) (string, error) {
+		childCall, _ = weft.CallFromContext(ctx)
+		return "pong", nil
+	})
+	child := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "ping"}),
+		wefttest.Say("ok"),
+	), ping)
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research", ID: "call_9"}),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child, weft.RequireApproval()))
+	res, err := parent.Generate(context.Background(), weft.Prompt("q"), weft.RunID("r1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Pending) != 1 || res.Pending[0].ID != "call_9" {
+		t.Fatalf("pending = %+v, want the parked research call", res.Pending)
+	}
+	evs, _ := streamEvents(t, parent,
+		weft.Messages(res.Messages...), weft.Approve("call_9"), weft.RunID("r1"))
+	var ids []string
+	for _, ev := range wefttest.Flatten(evs) {
+		if rs, ok := ev.(weft.RunStart); ok {
+			ids = append(ids, rs.ID)
+		}
+	}
+	if !slices.Equal(ids, []string{"r1", "r1/resume/call_9"}) {
+		t.Errorf("RunStart ids = %v, want the resumed child under r1/resume/call_9", ids)
+	}
+	if childCall.RunID != "r1/resume/call_9" || childCall.Name != "ping" {
+		t.Errorf("CallFromContext inside the resumed child = %+v", childCall)
+	}
+}
+
 // A child built with Output returns the submitted JSON bytes verbatim.
 func TestSubagentTypedOutput(t *testing.T) {
 	type Verdict struct {
@@ -3010,6 +3101,37 @@ func TestSubagentTypedOutput(t *testing.T) {
 	}
 	if got := res.Steps[0].Results[0].Content; got != `{"approved":true,"reason":"ok"}` {
 		t.Errorf("typed delegation = %q, want the submitted bytes verbatim", got)
+	}
+}
+
+// A child that submits with no argument bytes at all — decodeInput
+// reads empty as {} — has still submitted: the delegation returns the
+// submitted bytes (empty), not the child's final text, exactly what
+// OutputOf would decode (ADR 0014). wefttest defaults empty call args
+// to {}, so the empty-byte turn is scripted raw.
+func TestSubagentTypedOutputEmptySubmission(t *testing.T) {
+	type Verdict struct {
+		Approved bool `json:"approved"`
+	}
+	child := weft.New(&turnModel{turns: [][]weft.ModelEvent{{
+		weft.ModelTextDelta{Text: "submitting empty"},
+		weft.ModelToolCall{ID: "call_1", Name: "submit_output"},
+		weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+	}}}, weft.Output[Verdict]())
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child))
+	res, err := parent.Generate(context.Background(), weft.Prompt("q"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := res.Steps[0].Results[0]
+	if r.IsError {
+		t.Fatalf("delegation failed: %s", r.Content)
+	}
+	if r.Content != "" {
+		t.Errorf("typed delegation = %q, want the empty submitted bytes, not the child's final text", r.Content)
 	}
 }
 
@@ -3160,6 +3282,123 @@ func TestSubagentUnderGenerateStillRollsUsage(t *testing.T) {
 	if want := (weft.Usage{InputTokens: 30, OutputTokens: 15}); res.Usage != want {
 		t.Errorf("usage = %+v, want %+v", res.Usage, want)
 	}
+}
+
+// Cancelling the parent while a child is mid-run, under Stream: the
+// error is the cancellation, it is the last element, and no RunFinish
+// (parent or nested) is delivered — rule 4 holds one level down.
+func TestSubagentCancelMidChildUnderStream(t *testing.T) {
+	started := make(chan struct{})
+	probe := weft.Tool("probe", "", func(ctx context.Context, _ struct{}) (string, error) {
+		close(started)
+		<-ctx.Done()
+		return "never", nil
+	})
+	child := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "probe"}),
+		wefttest.Say("ok"),
+	), probe)
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child))
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { <-started; cancel() }()
+	var gotErr error
+	for ev, err := range parent.Stream(ctx, weft.Prompt("q")).Events() {
+		if err != nil {
+			gotErr = err
+			continue
+		}
+		if gotErr != nil {
+			t.Fatalf("event delivered after the error: %+v", ev)
+		}
+		switch e := ev.(type) {
+		case weft.RunFinish:
+			t.Error("RunFinish delivered on a cancelled run")
+		case weft.Nested:
+			if _, ok := e.Event.(weft.RunFinish); ok {
+				t.Error("nested RunFinish delivered on a cancelled run")
+			}
+		}
+	}
+	if !errors.Is(gotErr, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled as the last element", gotErr)
+	}
+}
+
+// A child's RETRY results feed the child's counter, never the parent's:
+// a parent with MaxModelRetries(1) tolerates a child whose tool retried
+// three times under the child's own default.
+func TestSubagentChildRetriesStayInTheChild(t *testing.T) {
+	flaky := weft.Tool("parse_date", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "", weft.ModelRetry("date must be ISO-8601")
+	})
+	turns := []wefttest.Turn{}
+	for range 3 {
+		turns = append(turns, wefttest.ToolCalls(wefttest.Call{Name: "parse_date"}))
+	}
+	child := weft.New(wefttest.Script(append(turns, wefttest.Say("child done"))...), flaky)
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child), weft.MaxModelRetries(1))
+	res, err := parent.Generate(context.Background(), weft.Prompt("q"))
+	if err != nil {
+		t.Fatalf("the child's retries must not fail the parent: %v", err)
+	}
+	if r := res.Steps[0].Results[0]; r.IsError || r.Content != "child done" {
+		t.Errorf("delegation = %+v", r)
+	}
+}
+
+// Concurrent runs on one orchestrator: every Nested envelope carries its
+// own run's id, and Seq stays monotonic within each run — the parent's
+// counter and lock are per run, not per agent.
+func TestSubagentConcurrentParentRuns(t *testing.T) {
+	child := weft.New(wefttest.Script(
+		wefttest.Say("found"), wefttest.Say("found"), wefttest.Say("found"), wefttest.Say("found"),
+	))
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}, wefttest.Call{Name: "research"}),
+		wefttest.Say("done"),
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}, wefttest.Call{Name: "research"}),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child))
+	var wg sync.WaitGroup
+	for _, id := range []string{"A", "B"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var last int64
+			for ev, err := range parent.Stream(context.Background(), weft.Prompt("q"), weft.RunID(id)).Events() {
+				if err != nil {
+					t.Errorf("%s: %v", id, err)
+					return
+				}
+				var seq int64
+				switch e := ev.(type) {
+				case weft.Nested:
+					if e.RunID != id {
+						t.Errorf("Nested.RunID = %q, want %q", e.RunID, id)
+					}
+					seq = e.Seq
+				case weft.ToolStart:
+					seq = e.Seq
+				case weft.ToolFinish:
+					seq = e.Seq
+				default:
+					continue
+				}
+				if seq <= last {
+					t.Errorf("%s: Seq %d not after %d", id, seq, last)
+				}
+				last = seq
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // --- Usage limits (TODO §5.3) ---
@@ -3649,6 +3888,36 @@ func TestPrepareStepDuplicateToolFailsRun(t *testing.T) {
 	agt2 := weft.New(wefttest.Script(wefttest.Say("never")), echo, weft.PrepareStep(nilEntry))
 	if _, err := agt2.Generate(context.Background(), weft.Prompt("q")); !errors.Is(err, weft.ErrNilTool) {
 		t.Fatalf("err = %v, want ErrNilTool", err)
+	}
+}
+
+// PrepareStep over a ToolSource: the source is consulted once per step
+// and the prepared subset of its snapshot is the dispatch snapshot.
+func TestPrepareStepOverToolSource(t *testing.T) {
+	var fetches int
+	a := weft.Tool("a", "", func(_ context.Context, _ struct{}) (string, error) { return "a", nil })
+	b := weft.Tool("b", "", func(_ context.Context, _ struct{}) (string, error) { return "b", nil })
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "a"}, wefttest.Call{Name: "b"}),
+		wefttest.Say("done"),
+	),
+		weft.ToolSource(func() []*weft.ToolDef { fetches++; return []*weft.ToolDef{a, b} }),
+		weft.PrepareStep(func(_ context.Context, _ int, req weft.ModelRequest) (weft.ModelRequest, error) {
+			req.Tools = slices.DeleteFunc(req.Tools, func(t *weft.ToolDef) bool { return t.Name == "b" })
+			return req, nil
+		}))
+	res, err := agt.Generate(context.Background(), weft.Prompt("q"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fetches != 2 {
+		t.Errorf("source fetched %d times, want 2 (once per step)", fetches)
+	}
+	if r := res.Steps[0].Results[0]; r.IsError || r.Content != "a" {
+		t.Errorf("kept tool = %+v", r)
+	}
+	if r := res.Steps[0].Results[1]; !r.IsError || !strings.HasPrefix(r.Content, "NO_SUCH_TOOL:") {
+		t.Errorf("dropped tool = %+v, want NO_SUCH_TOOL", r)
 	}
 }
 

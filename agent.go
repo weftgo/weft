@@ -119,12 +119,16 @@ func (o prepareStepOption) apply(a *Agent) {
 // dispatches against: a tool it removes cannot be called that step, and
 // a ToolDef it adds can. PromptSnippets are composed after it, from the
 // tools it returns, so removing a tool removes its snippet without the
-// function having to know snippets exist. The transcript in RunResult
-// is never affected; only the request is. It runs before the model
-// seam, so WrapModel middleware sees the prepared request. Several
-// PrepareStep options run in order, each receiving the previous one's
-// result. A nil function is ignored. Like ToolSource, it is one of the
-// two knobs that can break a prompt-cache prefix — trim deliberately.
+// function having to know snippets exist. The request is a copy the
+// function may mutate freely: message parts, argument bytes, and tool
+// definitions are cloned before the chain runs, so in-place writes
+// reach neither the transcript nor the agent's frozen registry. The
+// transcript in RunResult is never affected; only the request is. It
+// runs before the model seam, so WrapModel middleware sees the
+// prepared request. Several PrepareStep options run in order, each
+// receiving the previous one's result. A nil function is ignored.
+// Like ToolSource, it is one of the two knobs that can break a
+// prompt-cache prefix — trim deliberately.
 func PrepareStep(fn func(ctx context.Context, step int, req ModelRequest) (ModelRequest, error)) Option {
 	return prepareStepOption{fn}
 }
@@ -142,7 +146,9 @@ func DetectLoops(repeats int) Option { return detectLoopsOption{repeats} }
 // ModelRetry) one tool may produce in a run before the run fails with
 // ErrModelRetriesExceeded (default 3). The count is per tool name — two
 // parallel calls to the same tool both retrying count as two — and a
-// successful result for the tool resets it. Values below 1 are ignored.
+// successful result for the tool resets it. Calls resumed under Approve
+// do not feed the counter: they run before step 0 and belong to no
+// step (ADR 0007). Values below 1 are ignored.
 func MaxModelRetries(n int) Option { return maxModelRetriesOption{n} }
 
 type parallelismOption struct{ n int }

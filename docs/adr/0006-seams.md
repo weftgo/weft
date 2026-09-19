@@ -171,8 +171,12 @@ tools (removing a tool removes its snippet; the function never sees
 the composed system) → the model seam → the adapter. Several
 PrepareStep options chain, each receiving the previous result; a nil
 function is ignored; an error fails the run with the caller's sentinel
-reachable through `errors.Is`. The transcript is never affected —
-messages are fresh clones per request — and, like ToolSource, this is
-one of the two knobs that can break a prompt-cache prefix; the godoc
+reachable through `errors.Is`. The transcript is never affected — the
+request a function receives is a deep copy (message parts, a tool
+call's argument bytes, and tool definitions are cloned at that
+boundary, so in-place mutation reaches neither the transcript nor the
+frozen registry; the model seam keeps the lighter slice copies under
+the adapter read-only contract) — and, like ToolSource, this is one
+of the two knobs that can break a prompt-cache prefix; the godoc
 says so. The manifest does not describe it (it is code, like
 middleware).

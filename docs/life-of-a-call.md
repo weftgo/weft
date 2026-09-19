@@ -43,7 +43,11 @@ transcript: one assistant message (reasoning parts, text, tool calls)
         └─ calls → life of a tool call (below), then one tool message
         │
         ▼
-StepFinish → budgets? (UsageLimit, MaxModelRetries, DetectLoops) → StopWhen? → RunFinish, or the next step (MaxSteps bounds it)
+StepFinish → pending approvals? / no calls? / StopWhen? → RunFinish
+        │  (a run-ending step succeeds even if it overshot a budget)
+        ▼
+the continuation point: budgets (MaxModelRetries, UsageLimit, DetectLoops;
+  first breach wins) → the next step (MaxSteps bounds it)
 ```
 
 ## A tool call

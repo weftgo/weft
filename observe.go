@@ -31,7 +31,7 @@ import (
 // instrumentation version (ADR 0005's release process owns the value).
 const (
 	instrumentationName = "github.com/weftgo/weft"
-	version             = "v0.1.0-dev"
+	version             = "v0.2.0"
 )
 
 // The weft.* span attributes and the slog line keys, pinned by tests and

@@ -4,7 +4,16 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
-## Unreleased (2026-09-19)
+## 0.2.0 — 2026-09-19
+
+Everything unreleased since 0.1.0, tagged as one set (ADR 0005): the
+middleware seams and the approval boundary (the 2026-09-14 round), the
+loop controls and subagents as tools plus two full review passes (the
+2026-09-18 round), and MCP both ways, observability, and wefttest
+record/replay (the 2026-09-19 round). Tags cut together: the root and
+the three adapters at v0.2.0, `mcp` new at v0.1.0. The two groups
+marked "read before upgrading" are the behavior changes to check
+first.
 
 ### Added — Testing conventions: replay, wefttest growth, fuzz in CI (TODO §9, ADR 0017)
 
@@ -149,8 +158,6 @@ is pre-1.0 and tags per module (ADR 0005).
   it from different goroutines.
 - `TestAddToolsRefusesApprovalGated` ran one of its three cases (a
   recover deferred in a loop unwound the test); all three run.
-
-## Unreleased (2026-09-18)
 
 ### Added — option composition (TODO §5.10)
 
@@ -467,7 +474,7 @@ Test support and middleware:
   slice level. `wefttest`'s mock already cloned both — loop, contract,
   and test double now agree.
 
-### Added
+### Added — the rest of the 2026-09-18 round
 
 - `Run.Close` releases an abandoned run's resources (idempotent; a
   run you will consume needs no Close — Events and Wait release
@@ -489,7 +496,7 @@ Test support and middleware:
   tool events are emitted under the step's ordering lock, so a slow
   consumer gates the start of subsequent tools.
 
-### Fixed
+### Fixed — the rest of the 2026-09-18 round
 
 - Embedded-struct schema derivation now follows encoding/json's
   shadowing rules: a struct's own field wins over an embedded one with
@@ -505,8 +512,6 @@ Test support and middleware:
 - `Repair`'s purity is pinned: the input is never mutated
   (fuzz-checked byte-for-byte), and the synthesis append no longer
   relies on whose backing array the kept tool message uses.
-
-## Unreleased (2026-09-14)
 
 ### Changed — model-visible contracts (read before upgrading)
 
@@ -528,7 +533,7 @@ Test support and middleware:
   fails with the cancellation error (the parked calls stay resumable on
   `RunError.Result.Pending`) — cancellation wins, as everywhere else.
 
-### Added
+### Added — the rest of the 2026-09-14 round
 
 - **The two middleware seams** (ADR 0006): `WrapModel(mw
   ...ModelMiddleware)` and `WrapTools(mw ...ToolMiddleware)` — chi-style,
@@ -583,7 +588,7 @@ Test support and middleware:
 - Conformance suite: a `thinking_option` case asserting the option
   threads through the public API without breaking the exchange.
 
-### Fixed
+### Fixed — the rest of the 2026-09-14 round
 
 - A canceled stream can no longer fabricate a successful
   `ModelFinish`: all three adapters enforce the Model contract's
@@ -625,7 +630,7 @@ Test support and middleware:
   empty text blocks and `input:null`; the inbound stream already
   normalised empty arguments to `{}`).
 
-### Changed
+### Changed — the 2026-09-14 round (docs)
 
 - Documentation corrected: the anthropic and openai adapters' zero
   configuration inherits the vendor SDK's transport retry default (2

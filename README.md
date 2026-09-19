@@ -196,6 +196,26 @@ an agent already running in the call chain is refused
 records the mechanics, the lineage ids, and pi's AgentLanes
 counterpoint.
 
+### Composing agents
+
+A plugin is `func(deps) weft.Option` — a family of tools and its
+policy closed over its dependencies as one value, composed with
+`weft.Options` (and `weft.ToolOptions` for the per-tool counterpart).
+Nothing registers itself, so there is no registry, no scopes, no
+dedup; dependencies are parameters, never globals, and the
+"registered twice" mistake panics at `New` as always:
+
+```go
+func Orders(svc *OrderService) weft.Option {
+    return weft.Options(
+        weft.Instructions("You handle orders."),
+        svc.Lookup(), svc.Refund(),
+        weft.WrapTools(mw.Allow(svc.Permitted)),
+    )
+}
+agt := weft.New(model, base, Orders(orders))
+```
+
 ### Approval
 
 `weft.RequireApproval()` on a tool parks its calls: the run ends

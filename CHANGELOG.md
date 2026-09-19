@@ -6,6 +6,13 @@ is pre-1.0 and tags per module (ADR 0005).
 
 ## Unreleased (2026-09-18)
 
+### Added — option composition (TODO §5.10)
+
+- **`weft.Options(opts...)`** composes agent options into one value,
+  applied in order — a plugin is `func(deps) weft.Option`, dependencies
+  are parameters, never globals. **`weft.ToolOptions(opts...)`** is the
+  per-tool counterpart. Nil entries ignored; duplicates still panic.
+
 ### Added — PrepareStep, the one loop knob (TODO §5.5, ADR 0006 amendment)
 
 - **`weft.PrepareStep(fn)`** — a function the loop calls before every

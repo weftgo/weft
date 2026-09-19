@@ -27,6 +27,24 @@ type Option interface {
 	apply(*Agent)
 }
 
+type optionsOption []Option
+
+func (o optionsOption) apply(a *Agent) {
+	for _, opt := range o {
+		if opt != nil {
+			opt.apply(a)
+		}
+	}
+}
+
+// Options composes several options into one, applied in order — a
+// family of tools and policy closed over its dependencies as a single
+// value. A plugin is `func(deps) weft.Option`, and dependencies are
+// parameters, never globals; nothing registers itself, so there is no
+// registry, no scopes, no dedup. Nil entries are ignored; duplicate
+// tool names still panic at New. Nesting composes by construction.
+func Options(opts ...Option) Option { return optionsOption(opts) }
+
 type instructionsOption struct{ text string }
 
 func (o instructionsOption) apply(a *Agent) { a.system = o.text }

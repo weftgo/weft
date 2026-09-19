@@ -714,3 +714,56 @@ func ExamplePrepareStep() {
 	// NO_SUCH_TOOL: no tool named "refund"
 	// refunded
 }
+
+// Composing agents: a plugin is func(deps) weft.Option — a family of
+// tools and its policy closed over its dependencies as one value.
+// Dependencies are parameters, never globals.
+func ExampleOptions() {
+	orders := func(deps *string) weft.Option {
+		return weft.Options(
+			weft.Instructions("You handle orders."),
+			weft.Tool("lookup_order", "Look up an order by id.",
+				func(_ context.Context, in struct {
+					ID string `json:"id" jsonschema:"the order id"`
+				}) (string, error) {
+					return "order " + in.ID + ": " + *deps, nil
+				}),
+			weft.MaxResultBytes(1024),
+		)
+	}
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"id":"42"}`}),
+		wefttest.Say("Done."),
+	), orders(new(string)))
+	res, err := agt.Generate(context.Background(), weft.Prompt("Where is order 42?"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Steps[0].Results[0].Content)
+	// Output:
+	// order 42:
+}
+
+// Continuing a conversation: feed the transcript back with the next
+// question. The agent value is unchanged — the history lives in the
+// messages you pass, never in the agent.
+func ExampleAgent_conversation() {
+	agt := weft.New(wefttest.Script(
+		wefttest.Say("Order 1234? It shipped yesterday."),
+		wefttest.Say("Order 5678? Still pending."),
+	))
+	res, err := agt.Generate(context.Background(), weft.Prompt("Where is order 1234?"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	res2, err := agt.Generate(context.Background(),
+		weft.Messages(res.Messages...), weft.Prompt("And order 5678?"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Text())
+	fmt.Println(res2.Text())
+	// Output:
+	// Order 1234? It shipped yesterday.
+	// Order 5678? Still pending.
+}

@@ -3651,3 +3651,70 @@ func TestPrepareStepDuplicateToolFailsRun(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNilTool", err)
 	}
 }
+
+// --- Option composition (TODO §5.10) ---
+
+// Options applies in order: later instructions win, tools register in
+// sequence, and nil entries are ignored.
+func TestOptionsPreservesOrder(t *testing.T) {
+	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) { return "", nil })
+	plugin := weft.Options(
+		weft.Instructions("first"),
+		nil, // ignored
+		weft.Instructions("second"),
+		echo,
+		weft.MaxSteps(7),
+	)
+	plugin = weft.Options(weft.Name("composed"), plugin)
+	agt := weft.New(wefttest.Script(wefttest.Say("ok")), plugin)
+	b, err := weft.Manifest(agt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"instructions": "second"`) || !strings.Contains(string(b), `"max_steps": 7`) {
+		t.Errorf("composed option not applied:\n%s", b)
+	}
+	if !strings.Contains(string(b), `"name": "echo"`) {
+		t.Errorf("tool inside Options not registered:\n%s", b)
+	}
+}
+
+// Options nests: inner groups apply before the options that follow
+// them, by construction.
+func TestOptionsNests(t *testing.T) {
+	inner := weft.Options(weft.Instructions("inner"))
+	agt := weft.New(wefttest.Script(wefttest.Say("ok")),
+		weft.Name("nested"),
+		weft.Options(inner, weft.Instructions("outer")))
+	b, err := weft.Manifest(agt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"instructions": "outer"`) {
+		t.Errorf("nested compose order wrong:\n%s", b)
+	}
+}
+
+// The "plugin registered twice" mistake is loud, not deduplicated.
+func TestOptionsDuplicatePanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("duplicate tool names inside Options did not panic")
+		}
+	}()
+	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) { return "", nil })
+	_ = weft.New(wefttest.Script(wefttest.Say("ok")), weft.Options(echo, echo))
+}
+
+// ToolOptions packages per-tool policy under one name.
+func TestToolOptions(t *testing.T) {
+	policy := weft.ToolOptions(weft.Timeout(3*time.Second), weft.StrictInput())
+	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) { return "", nil }, policy)
+	b, err := weft.Manifest(weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("a"), echo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"timeout": "3s"`) || !strings.Contains(string(b), `"strict_input": true`) {
+		t.Errorf("ToolOptions policy not applied:\n%s", b)
+	}
+}

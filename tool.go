@@ -67,6 +67,27 @@ type ToolOption interface {
 	applyTool(*ToolDef)
 }
 
+type toolOptionsOption []ToolOption
+
+func (o toolOptionsOption) applyTool(t *ToolDef) {
+	for _, opt := range o {
+		if opt != nil {
+			opt.applyTool(t)
+		}
+	}
+}
+
+// ToolOptions composes several tool options into one, applied in
+// order — the Tool-defining counterpart of Options, so a package of
+// policy (Timeout, MaxResultBytes, StrictInput, a WrapTools chain)
+// can be named and reused:
+//
+//	productPolicy := weft.ToolOptions(weft.Timeout(5*time.Second), weft.StrictInput())
+//	weft.Tool("lookup", "…", fn, productPolicy)
+//
+// Nil entries are ignored.
+func ToolOptions(opts ...ToolOption) ToolOption { return toolOptionsOption(opts) }
+
 // PolicyOption is accepted by both New and Tool. On an agent it is the
 // default policy for every tool call; on a tool it overrides the
 // agent's default for that tool. The manifest records both levels.

@@ -6,6 +6,17 @@ is pre-1.0 and tags per module (ADR 0005).
 
 ## Unreleased (2026-09-18)
 
+### Fixed — go1.26 decode-error compatibility (follow-up to the review pass)
+
+- The schema walk behind `INVALID_INPUT` messages now handles toolchains
+  (go1.26) that omit map keys from `encoding/json`'s error field path
+  (`meta.when` for an error under `meta["k"]`): a segment at a map
+  schema is first tried as a property of the value schema before being
+  taken as a key, so the expected type named is still the advertised
+  one. The `",string"` mismatch tests accept both toolchain renderings
+  — the newer UnmarshalTypeError form (field named) and the older
+  plain-error form — both speak the schema's vocabulary.
+
 ### Changed — the 2026-09-18 code-review pass (all 43 findings)
 
 Schema correctness (ADR 0003's same-day amendment):

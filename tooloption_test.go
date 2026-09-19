@@ -235,28 +235,41 @@ func TestDecodeErrorsNameTheField(t *testing.T) {
 		name string
 		tool *weft.ToolDef
 		args string
-		want string // "" means success
+		want string // substring the error must contain; "" means success
+		// wantAny lists renderings that vary by toolchain; when set, the
+		// error must contain at least one of them instead of want.
+		// encoding/json reports a ",string" mismatch as an
+		// UnmarshalTypeError on newer toolchains (so the field is named)
+		// and as a plain error on older ones (no field available), and
+		// map keys appear in the error path only on some versions —
+		// describeDecodeError must speak the schema's vocabulary either
+		// way.
+		wantAny []string
 	}{
-		{"type mismatch", lenient, `{"city":"Oslo","days":"three"}`, `field "days": expected integer, got string`},
-		{"[]byte speaks the schema", blob, `{"data":{}}`, `field "data": expected string, got object`},
-		{",string speaks the schema", quoted, `{"n":9}`, `field "n": expected string, got number`},
-		{"nested ,string through an array", nested, `{"items":[{"qty":5}]}`, `: expected string, got number`},
-		{"nested through a map value", nested, `{"meta":{"k":{"when":7}}}`, `: expected string, got number`},
-		{"array itself", nested, `{"items":"x"}`, `field "items": expected array, got string`},
-		{"top-level mismatch", lenient, `[1,2]`, `expected object at the top level, got array`},
-		{"syntax", lenient, `{"city":}`, `invalid JSON at offset`},
-		{"truncated", lenient, `{"city":`, `invalid JSON: unexpected end of input`},
-		{"unknown field ignored", lenient, `{"city":"Oslo","units":"C"}`, ""},
-		{"unknown field rejected", strict, `{"city":"Oslo","units":"C"}`, `unknown field "units": not in the schema`},
-		{"trailing second object", lenient, `{"city":"Oslo"} {"city":"Rome"}`, "trailing data after the JSON arguments"},
-		{"trailing garbage", strict, `{"city":"Oslo"} x`, "trailing data after the JSON arguments"},
-		{"trailing whitespace only", lenient, `{"city":"Oslo"} `, ""},
-		{"empty args", lenient, ``, ""},
+		{"type mismatch", lenient, `{"city":"Oslo","days":"three"}`, `field "days": expected integer, got string`, nil},
+		{"[]byte speaks the schema", blob, `{"data":{}}`, `field "data": expected string, got object`, nil},
+		{",string speaks the schema", quoted, `{"n":9}`, "", []string{
+			`field "n": expected string, got number`,
+			`expected string: a ",string" field's value must arrive inside quotes`}},
+		{"nested ,string through an array", nested, `{"items":[{"qty":5}]}`, "", []string{
+			`: expected string, got number`,
+			`expected string: a ",string" field's value must arrive inside quotes`}},
+		{"nested through a map value", nested, `{"meta":{"k":{"when":7}}}`, `: expected string, got number`, nil},
+		{"array itself", nested, `{"items":"x"}`, `field "items": expected array, got string`, nil},
+		{"top-level mismatch", lenient, `[1,2]`, `expected object at the top level, got array`, nil},
+		{"syntax", lenient, `{"city":}`, `invalid JSON at offset`, nil},
+		{"truncated", lenient, `{"city":`, `invalid JSON: unexpected end of input`, nil},
+		{"unknown field ignored", lenient, `{"city":"Oslo","units":"C"}`, "", nil},
+		{"unknown field rejected", strict, `{"city":"Oslo","units":"C"}`, `unknown field "units": not in the schema`, nil},
+		{"trailing second object", lenient, `{"city":"Oslo"} {"city":"Rome"}`, "trailing data after the JSON arguments", nil},
+		{"trailing garbage", strict, `{"city":"Oslo"} x`, "trailing data after the JSON arguments", nil},
+		{"trailing whitespace only", lenient, `{"city":"Oslo"} `, "", nil},
+		{"empty args", lenient, ``, "", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := tc.tool.Invoke(ctx, []byte(tc.args))
-			if tc.want == "" {
+			if tc.want == "" && tc.wantAny == nil {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
@@ -264,6 +277,15 @@ func TestDecodeErrorsNameTheField(t *testing.T) {
 			}
 			if !errors.Is(err, weft.ErrInvalidToolInput) {
 				t.Fatalf("err = %v, want ErrInvalidToolInput", err)
+			}
+			if len(tc.wantAny) > 0 {
+				for _, want := range tc.wantAny {
+					if strings.Contains(err.Error(), want) {
+						return
+					}
+				}
+				t.Errorf("err = %q, want it to contain one of %q", err, tc.wantAny)
+				return
 			}
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("err = %q, want it to contain %q", err, tc.want)

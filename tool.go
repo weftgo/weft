@@ -266,7 +266,10 @@ func describeDecodeError(err error, schema *Schema) string {
 // may also carry array indices and map keys ("items.0.qty",
 // "meta.k.when"), so a segment that is not a property of an array or
 // map schema is taken as that index or key and the walk descends into
-// Items or AdditionalProperties. ok is false when the schema is nil,
+// Items or AdditionalProperties. Some toolchains omit map keys from
+// the path entirely ("meta.when" for an error under meta["k"]); there
+// the segment is first tried as a property of the map's value schema
+// before being taken as a key. ok is false when the schema is nil,
 // the path does not resolve, or the leaf has no type (an unconstrained
 // value).
 func advertisedType(s *Schema, field string) (string, bool) {
@@ -281,7 +284,13 @@ func advertisedType(s *Schema, field string) (string, bool) {
 			case s.Items != nil:
 				s = s.Items // seg is an array index
 			case s.AdditionalProperties != nil:
-				s = s.AdditionalProperties // seg is a map key
+				// seg is a map key, or the key was omitted from the
+				// path and seg names a property of the value schema.
+				if p := s.AdditionalProperties.Properties[seg]; p != nil {
+					s = p
+				} else {
+					s = s.AdditionalProperties
+				}
 			default:
 				return "", false
 			}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"log"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -680,4 +681,36 @@ func ExampleDetectLoops() {
 	fmt.Println(errors.Is(err, weft.ErrLoopDetected))
 	// Output:
 	// true
+}
+
+// Phased tool exposure: the first step plans with read-only tools; the
+// second acts. PrepareStep is the one loop knob — what it returns is
+// what the step both advertises and dispatches against.
+func ExamplePrepareStep() {
+	lookup := weft.Tool("lookup", "Look up an order.", func(_ context.Context, _ struct{}) (string, error) {
+		return "order 1234: broken item", nil
+	})
+	refund := weft.Tool("refund", "Refund an order.", func(_ context.Context, _ struct{}) (string, error) {
+		return "refunded", nil
+	})
+	phase := func(_ context.Context, step int, req weft.ModelRequest) (weft.ModelRequest, error) {
+		if step == 0 { // investigate before acting
+			req.Tools = slices.DeleteFunc(req.Tools, func(t *weft.ToolDef) bool { return t.Name == "refund" })
+		}
+		return req, nil
+	}
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund"}), // not advertised in step 0
+		wefttest.ToolCalls(wefttest.Call{Name: "refund"}), // now it is
+		wefttest.Say("Done."),
+	), lookup, refund, weft.PrepareStep(phase))
+	res, err := agt.Generate(context.Background(), weft.Prompt("Refund order 1234."))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Steps[0].Results[0].Content)
+	fmt.Println(res.Steps[1].Results[0].Content)
+	// Output:
+	// NO_SUCH_TOOL: no tool named "refund"
+	// refunded
 }

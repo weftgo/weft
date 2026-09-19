@@ -3449,3 +3449,205 @@ func TestManifestDetectLoops(t *testing.T) {
 		t.Errorf("detect_loops should be omitted when off:\n%s", b2)
 	}
 }
+
+// --- PrepareStep (TODO §5.5) ---
+
+// recordModel captures the ModelRequest a middleware chain forwards.
+type recordModel struct {
+	next weft.Model
+	seen *weft.ModelRequest
+}
+
+func (m recordModel) Info() weft.ModelInfo { return weft.InfoOf(m.next) }
+
+func (m recordModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	*m.seen = req
+	return m.next.Stream(ctx, req)
+}
+
+// The prepared tool list is both the advertisement and the dispatch
+// snapshot: a tool absent from step N's list cannot be called in step N.
+func TestPrepareStepSubsetsToolsPerStep(t *testing.T) {
+	a := weft.Tool("a", "", func(_ context.Context, _ struct{}) (string, error) { return "a", nil })
+	b := weft.Tool("b", "", func(_ context.Context, _ struct{}) (string, error) { return "b", nil })
+	phase := func(_ context.Context, step int, req weft.ModelRequest) (weft.ModelRequest, error) {
+		keep := "a"
+		if step > 0 {
+			keep = "b"
+		}
+		req.Tools = slices.DeleteFunc(req.Tools, func(t *weft.ToolDef) bool { return t.Name != keep })
+		return req, nil
+	}
+	m := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "b"}), // b not advertised in step 0
+		wefttest.ToolCalls(wefttest.Call{Name: "b"}), // now it is
+		wefttest.Say("done"),
+	)
+	agt := weft.New(m, a, b, weft.PrepareStep(phase))
+	res, err := agt.Generate(context.Background(), weft.Prompt("q"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := res.Steps[0].Results[0]; !r.IsError || !strings.HasPrefix(r.Content, "NO_SUCH_TOOL:") {
+		t.Errorf("step 0 call to b = %+v, want NO_SUCH_TOOL", r)
+	}
+	if r := res.Steps[1].Results[0]; r.IsError || r.Content != "b" {
+		t.Errorf("step 1 call to b = %+v, want success", r)
+	}
+	// The recorded requests prove the advertisement followed the phase.
+	names := func(r weft.ModelRequest) []string {
+		out := make([]string, len(r.Tools))
+		for i, td := range r.Tools {
+			out[i] = td.Name
+		}
+		return out
+	}
+	if got := names(m.Requests()[0]); !slices.Equal(got, []string{"a"}) {
+		t.Errorf("step 0 advertised %v", got)
+	}
+	if got := names(m.Requests()[1]); !slices.Equal(got, []string{"b"}) {
+		t.Errorf("step 1 advertised %v", got)
+	}
+}
+
+// Trimming the request trims what the model sees; the transcript keeps
+// the whole history.
+func TestPrepareStepTrimsRequestNotTranscript(t *testing.T) {
+	lastOnly := func(_ context.Context, _ int, req weft.ModelRequest) (weft.ModelRequest, error) {
+		if len(req.Messages) > 1 {
+			req.Messages = req.Messages[len(req.Messages)-1:]
+		}
+		return req, nil
+	}
+	m := wefttest.Script(wefttest.Say("done"))
+	agt := weft.New(m, weft.PrepareStep(lastOnly))
+	res, err := agt.Generate(context.Background(), weft.Prompt("first"), weft.Prompt("second"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(m.Requests()[0].Messages); got != 1 {
+		t.Errorf("model saw %d messages, want 1", got)
+	}
+	if got := len(res.Messages); got != 3 { // two input messages + the reply
+		t.Errorf("transcript kept %d messages, want 3 (the whole history)", got)
+	}
+}
+
+// An error from the function fails the run, with the caller's sentinel
+// reachable through errors.Is.
+func TestPrepareStepErrorFailsRun(t *testing.T) {
+	refuse := errors.New("no tools for you")
+	agt := weft.New(wefttest.Script(wefttest.Say("never")),
+		weft.PrepareStep(func(context.Context, int, weft.ModelRequest) (weft.ModelRequest, error) {
+			return weft.ModelRequest{}, refuse
+		}))
+	_, err := agt.Generate(context.Background(), weft.Prompt("q"))
+	var re *weft.RunError
+	if !errors.As(err, &re) || !errors.Is(err, refuse) {
+		t.Fatalf("err = %v, want a RunError wrapping the caller's sentinel", err)
+	}
+	if re.Step != 0 {
+		t.Errorf("failed at step %d, want 0", re.Step)
+	}
+}
+
+// Snippets compose after preparation, from the tools it returned:
+// removing a tool removes its snippet.
+func TestPrepareStepComposesSnippetsAfter(t *testing.T) {
+	noisy := weft.Tool("noisy", "", func(_ context.Context, _ struct{}) (string, error) { return "", nil },
+		weft.PromptSnippet("Use noisy carefully."))
+	quiet := weft.Tool("quiet", "", func(_ context.Context, _ struct{}) (string, error) { return "", nil })
+	drop := func(_ context.Context, _ int, req weft.ModelRequest) (weft.ModelRequest, error) {
+		req.Tools = slices.DeleteFunc(req.Tools, func(t *weft.ToolDef) bool { return t.Name == "noisy" })
+		return req, nil
+	}
+	baseM := wefttest.Script(wefttest.Say("done"))
+	base := weft.New(baseM, weft.Instructions("Base."), noisy, quiet)
+	trimmedM := wefttest.Script(wefttest.Say("done"))
+	trimmed := weft.New(trimmedM, weft.Instructions("Base."), noisy, quiet, weft.PrepareStep(drop))
+	if _, err := base.Generate(context.Background(), weft.Prompt("q")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := trimmed.Generate(context.Background(), weft.Prompt("q")); err != nil {
+		t.Fatal(err)
+	}
+	if sys := baseM.Requests()[0].System; !strings.Contains(sys, "Use noisy carefully.") {
+		t.Errorf("unprepared system = %q, want the snippet", sys)
+	}
+	if sys := trimmedM.Requests()[0].System; sys != "Base." {
+		t.Errorf("prepared system = %q, want the snippet gone (composed only from the returned tools)", sys)
+	}
+}
+
+// Several PrepareStep options chain in order, each seeing the previous
+// one's result.
+func TestPrepareStepChainsInOrder(t *testing.T) {
+	var order []string
+	tag := func(name string, rewrite func(*weft.ModelRequest)) func(context.Context, int, weft.ModelRequest) (weft.ModelRequest, error) {
+		return func(_ context.Context, _ int, req weft.ModelRequest) (weft.ModelRequest, error) {
+			order = append(order, name)
+			rewrite(&req)
+			return req, nil
+		}
+	}
+	m := wefttest.Script(wefttest.Say("done"))
+	agt := weft.New(m,
+		weft.PrepareStep(tag("first", func(r *weft.ModelRequest) { r.System += "+1" })),
+		weft.PrepareStep(tag("second", func(r *weft.ModelRequest) { r.System += "+2" })),
+	)
+	if _, err := agt.Generate(context.Background(), weft.Prompt("q")); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(order, []string{"first", "second"}) {
+		t.Errorf("order = %v", order)
+	}
+	if sys := m.Requests()[0].System; sys != "+1+2" {
+		t.Errorf("system = %q, want the chain applied in order", sys)
+	}
+}
+
+// The seam sees the prepared request: PrepareStep runs before
+// WrapModel.
+func TestPrepareStepRunsBeforeModelSeam(t *testing.T) {
+	var seen weft.ModelRequest
+	recorder := func(next weft.Model) weft.Model {
+		return recordModel{next: next, seen: &seen}
+	}
+	m := wefttest.Script(wefttest.Say("done"))
+	agt := weft.New(m,
+		weft.WrapModel(recorder),
+		weft.PrepareStep(func(_ context.Context, _ int, req weft.ModelRequest) (weft.ModelRequest, error) {
+			req.System = "prepared"
+			return req, nil
+		}),
+	)
+	if _, err := agt.Generate(context.Background(), weft.Prompt("q")); err != nil {
+		t.Fatal(err)
+	}
+	if seen.System != "prepared" {
+		t.Errorf("seam saw %q, want the prepared system", seen.System)
+	}
+}
+
+// A prepared list with a duplicate name or nil entry fails the run —
+// the same rule a tool-source snapshot obeys.
+func TestPrepareStepDuplicateToolFailsRun(t *testing.T) {
+	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) { return "", nil })
+	dup := func(_ context.Context, _ int, req weft.ModelRequest) (weft.ModelRequest, error) {
+		req.Tools = append(req.Tools, req.Tools...)
+		return req, nil
+	}
+	agt := weft.New(wefttest.Script(wefttest.Say("never")), echo, weft.PrepareStep(dup))
+	_, err := agt.Generate(context.Background(), weft.Prompt("q"))
+	if !errors.Is(err, weft.ErrDuplicateTool) {
+		t.Fatalf("err = %v, want ErrDuplicateTool", err)
+	}
+	nilEntry := func(_ context.Context, _ int, req weft.ModelRequest) (weft.ModelRequest, error) {
+		req.Tools = []*weft.ToolDef{nil}
+		return req, nil
+	}
+	agt2 := weft.New(wefttest.Script(wefttest.Say("never")), echo, weft.PrepareStep(nilEntry))
+	if _, err := agt2.Generate(context.Background(), weft.Prompt("q")); !errors.Is(err, weft.ErrNilTool) {
+		t.Fatalf("err = %v, want ErrNilTool", err)
+	}
+}

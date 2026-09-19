@@ -81,6 +81,36 @@ func (o detectLoopsOption) apply(a *Agent) {
 	}
 }
 
+// prepareFunc is the PrepareStep signature.
+type prepareFunc = func(ctx context.Context, step int, req ModelRequest) (ModelRequest, error)
+
+type prepareStepOption struct{ fn prepareFunc }
+
+func (o prepareStepOption) apply(a *Agent) {
+	if o.fn != nil {
+		a.prepare = append(a.prepare, o.fn)
+	}
+}
+
+// PrepareStep installs a function the loop calls before every model
+// call, with the request it built for step: the agent's instructions,
+// the transcript so far, the step's tool snapshot, the run's thinking
+// level. The function returns the request the step uses — trimmed
+// messages, a subset of tools, a rewritten system — or an error that
+// fails the run. What it returns is what the step advertises and
+// dispatches against: a tool it removes cannot be called that step, and
+// a ToolDef it adds can. PromptSnippets are composed after it, from the
+// tools it returns, so removing a tool removes its snippet without the
+// function having to know snippets exist. The transcript in RunResult
+// is never affected; only the request is. It runs before the model
+// seam, so WrapModel middleware sees the prepared request. Several
+// PrepareStep options run in order, each receiving the previous one's
+// result. A nil function is ignored. Like ToolSource, it is one of the
+// two knobs that can break a prompt-cache prefix — trim deliberately.
+func PrepareStep(fn func(ctx context.Context, step int, req ModelRequest) (ModelRequest, error)) Option {
+	return prepareStepOption{fn}
+}
+
 // DetectLoops fails a run with ErrLoopDetected when repeats consecutive
 // steps request the same set of tool calls — the same names with the
 // same arguments, in any order. Varying arguments are not a loop: a
@@ -332,6 +362,7 @@ type Agent struct {
 	usageLimit      Usage
 	maxModelRetries int
 	detectLoops     int
+	prepare         []func(context.Context, int, ModelRequest) (ModelRequest, error)
 	parallelism     int
 	resultCap       int
 	toolTimeout     time.Duration
@@ -439,17 +470,24 @@ func (a *Agent) dispatchTools() ([]*ToolDef, error) {
 	if a.toolSource == nil {
 		return tools, nil
 	}
+	return tools, validateSnapshot(tools)
+}
+
+// validateSnapshot rejects a tool list with a nil entry or a duplicate
+// name — the runtime analogue of New's construction-time panic. A
+// PrepareStep function's returned list is validated by the same rule.
+func validateSnapshot(tools []*ToolDef) error {
 	seen := make(map[string]bool, len(tools))
 	for i, t := range tools {
 		if t == nil {
-			return nil, fmt.Errorf("%w: entry %d", ErrNilTool, i)
+			return fmt.Errorf("%w: entry %d", ErrNilTool, i)
 		}
 		if seen[t.Name] {
-			return nil, fmt.Errorf("%w: %q", ErrDuplicateTool, t.Name)
+			return fmt.Errorf("%w: %q", ErrDuplicateTool, t.Name)
 		}
 		seen[t.Name] = true
 	}
-	return tools, nil
+	return nil
 }
 
 // findTool resolves a name against a fetched snapshot; first match

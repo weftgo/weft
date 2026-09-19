@@ -132,14 +132,33 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		emit(StepStart{RunID: cfg.id, Index: step})
 
 		req := ModelRequest{
-			System:          composeSystem(a.system, tools),
-			Messages:        slices.Clone(res.Messages), // adapters cannot reach the run's transcript
-			Tools:           slices.Clone(tools),        // nor the agent's tool list
-			SequentialTools: a.parallelism == 1,
+			System:   a.system,
+			Messages: slices.Clone(res.Messages), // adapters cannot reach the run's transcript
+			Tools:    slices.Clone(tools),        // nor the agent's tool list
 			// A run-level Thinking option overrides the agent's default
 			// for this run alone (the thinkingOption applies to both).
-			Thinking: cfg.effectiveThinking(a.thinking),
+			SequentialTools: a.parallelism == 1,
+			Thinking:        cfg.effectiveThinking(a.thinking),
 		}
+		// The one loop knob: PrepareStep rewrites the request before the
+		// model seam, on the raw instructions; what its chain returns is
+		// what the step both advertises and dispatches against, so the
+		// one-snapshot-per-step invariant holds by construction (ADR
+		// 0006 amendment).
+		for _, fn := range a.prepare {
+			var err error
+			req, err = fn(ctx, step, req)
+			if err != nil {
+				return fail(step, err)
+			}
+		}
+		tools = req.Tools
+		if a.prepare != nil {
+			if err := validateSnapshot(tools); err != nil {
+				return fail(step, err)
+			}
+		}
+		req.System = composeSystem(req.System, tools)
 		var (
 			sb       strings.Builder
 			rblocks  []rblock // provider reasoning, one entry per block

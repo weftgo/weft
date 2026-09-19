@@ -8,9 +8,18 @@ the two middleware seams (ADR 0006), observation at the tap (ADR 0004).
 
 ```
 loop builds ModelRequest
-  system  = Instructions + PromptSnippets of the advertised tools
+  system  = Instructions
   tools   = ToolSource() if set, else the static list
   thinking, SequentialTools
+        │
+        ▼
+PrepareStep (the one loop knob): rewrite the request per step —
+  messages, tools, system; what it returns is what the step both
+  advertises and dispatches against (nils/duplicates fail the run);
+  PromptSnippets compose after it, from the tools it returned
+        │
+        ▼
+system = Instructions + PromptSnippets of the (prepared) tools
         │
         ▼
 model middleware chain (WrapModel; first listed = outermost)
@@ -34,7 +43,7 @@ transcript: one assistant message (reasoning parts, text, tool calls)
         └─ calls → life of a tool call (below), then one tool message
         │
         ▼
-StepFinish → StopWhen? → RunFinish, or the next step (MaxSteps bounds it)
+StepFinish → budgets? (UsageLimit, MaxModelRetries, DetectLoops) → StopWhen? → RunFinish, or the next step (MaxSteps bounds it)
 ```
 
 ## A tool call

@@ -6,6 +6,18 @@ is pre-1.0 and tags per module (ADR 0005).
 
 ## Unreleased (2026-09-18)
 
+### Added — PrepareStep, the one loop knob (TODO §5.5, ADR 0006 amendment)
+
+- **`weft.PrepareStep(fn)`** — a function the loop calls before every
+  model call with the request it built (raw instructions, transcript,
+  tool snapshot). What it returns is what the step both advertises and
+  dispatches against (validated like a tool-source snapshot); snippets
+  compose after it, from the returned tools; the model seam sees the
+  prepared request; the transcript is never touched. Several options
+  chain in order; an error fails the run with the caller's sentinel
+  reachable. Not a third seam — the loop-level knob beside `StopWhen`
+  (ADR 0006 amendment).
+
 ### Added — loop detection (TODO §5.4, ADR 0002 amendment)
 
 - **`weft.DetectLoops(repeats)`** fails a run with

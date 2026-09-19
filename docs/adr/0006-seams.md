@@ -134,3 +134,45 @@ has to pay rent"). It returns together with the store (§11), which
 will re-add the option, the manifest key, and its ADR in one change.
 The manifest no longer records a `replay` key (ADR 0012's shape
 shrinks accordingly, pre-1.0).
+
+## Amendment (2026-09-19 — `PrepareStep` is the one loop knob, not a
+## third seam; TODO §5.5)
+
+`weft.PrepareStep(fn)` installs a function the loop calls before every
+model call, with the request it built; what the chain returns is what
+the step uses. The red flag in PLAYBOOK.md is "a hook that can *change*
+behaviour", and PrepareStep changes the request — three facts decide
+that it is not a third seam:
+
+1. **The model seam can already rewrite requests.** A ModelMiddleware
+   receives the same `ModelRequest` and may return a modified one to
+   `next`; PrepareStep adds no power the seams lack.
+2. **What the seam cannot do is make the dispatch snapshot agree with
+   what was advertised.** A middleware that drops a tool from
+   `req.Tools` leaves the loop dispatching against the full snapshot,
+   breaking the one-snapshot-per-step invariant from inside the seam.
+   PrepareStep runs *before* the snapshot is fixed, so the prepared
+   list **is** the snapshot — validated by the same rule as a
+   ToolSource fetch (`ErrDuplicateTool`, `ErrNilTool`).
+3. **It is shaped like `StopWhen`, not like a hook.** One function,
+   loop-level, pure over its inputs, with the loop's own state (`step`)
+   as an argument — the same category as `StopCondition`, a loop knob
+   since v0 that nobody calls a seam.
+
+So the taxonomy stands at two behavioural seams plus **one loop-level
+knob** (`StopWhen`, `MaxSteps`-shaped budgets, `PrepareStep`), and the
+"phases are documentation" rule is untouched: there is exactly one
+function, for exactly one phase (building the request), and the
+life-of-a-call phase list does not grow. Ordering, pinned by tests:
+the loop builds the request on the agent's raw instructions → the
+PrepareStep chain, in option order → the returned list becomes the
+step's snapshot → PromptSnippets compose after it, from the returned
+tools (removing a tool removes its snippet; the function never sees
+the composed system) → the model seam → the adapter. Several
+PrepareStep options chain, each receiving the previous result; a nil
+function is ignored; an error fails the run with the caller's sentinel
+reachable through `errors.Is`. The transcript is never affected —
+messages are fresh clones per request — and, like ToolSource, this is
+one of the two knobs that can break a prompt-cache prefix; the godoc
+says so. The manifest does not describe it (it is code, like
+middleware).

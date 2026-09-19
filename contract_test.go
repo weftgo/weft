@@ -1487,7 +1487,8 @@ func TestManifestPinsFormat(t *testing.T) {
       "policy": {
         "parallelism": 4,
         "max_steps": 10,
-        "max_result_bytes": 65536
+        "max_result_bytes": 65536,
+        "max_model_retries": 3
       },
       "tools": [
         {
@@ -3239,5 +3240,115 @@ func TestManifestUsageLimit(t *testing.T) {
 	}
 	if !strings.Contains(string(b), `"usage_limit"`) || !strings.Contains(string(b), `"output_tokens": 50000`) || strings.Contains(string(b), `"input_tokens"`) {
 		t.Errorf("manifest missing usage_limit (output only):\n%s", b)
+	}
+}
+
+// --- ModelRetry (TODO §5.2) ---
+
+// A RETRY result renders as "RETRY: <hint>" — pinned bytes.
+func TestModelRetryRendersHint(t *testing.T) {
+	flaky := weft.Tool("parse_date", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "", weft.ModelRetry("date must be ISO-8601")
+	})
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "parse_date", Args: `{"d":"tomorrow"}`}),
+		wefttest.Say("ok"),
+	), flaky)
+	res, err := agt.Generate(context.Background(), weft.Prompt("q"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := res.Steps[0].Results[0]
+	if !r.IsError || r.Content != "RETRY: date must be ISO-8601" {
+		t.Errorf("result = %+v, want RETRY: date must be ISO-8601", r)
+	}
+}
+
+// Four consecutive RETRY results from one tool fail the run at the
+// continuation point; three, a success, and three more do not — the
+// count resets on success.
+func TestModelRetryCountsPerTool(t *testing.T) {
+	newAgent := func(retryFirst int) (*weft.Agent, *wefttest.Model) {
+		var calls atomic.Int32
+		tool := weft.Tool("parse_date", "", func(_ context.Context, _ struct{}) (string, error) {
+			if int(calls.Add(1)) <= retryFirst {
+				return "", weft.ModelRetry("date must be ISO-8601")
+			}
+			return "2026-09-19", nil
+		})
+		turns := []wefttest.Turn{}
+		for range retryFirst + 1 {
+			turns = append(turns, wefttest.ToolCalls(wefttest.Call{Name: "parse_date"}))
+		}
+		m := wefttest.Script(append(turns, wefttest.Say("done"))...)
+		return weft.New(m, tool), m
+	}
+
+	stuck, _ := newAgent(4) // never succeeds
+	_, err := stuck.Generate(context.Background(), weft.Prompt("q"))
+	var re *weft.RunError
+	if !errors.As(err, &re) || !errors.Is(err, weft.ErrModelRetriesExceeded) {
+		t.Fatalf("err = %v, want ErrModelRetriesExceeded", err)
+	}
+	if re.Step != 3 {
+		t.Errorf("failed at step %d, want 3 (the fourth consecutive RETRY)", re.Step)
+	}
+	msgs := re.Result.Messages
+	if last := msgs[len(msgs)-1]; last.Role != weft.RoleTool {
+		t.Errorf("transcript ends on %v, want the tool message", last.Role)
+	}
+
+	healing, m := newAgent(3) // three retries, then it succeeds
+	res, err := healing.Generate(context.Background(), weft.Prompt("q"))
+	if err != nil {
+		t.Fatalf("a tool that heals must not fail the run: %v", err)
+	}
+	if got := len(m.Requests()); got != 5 {
+		t.Errorf("model calls = %d, want 5", got)
+	}
+	if res.Steps[3].Results[0].Content != "2026-09-19" {
+		t.Errorf("healed result = %+v", res.Steps[3].Results[0])
+	}
+}
+
+// A RETRY produced by middleware counts exactly like a handler's — the
+// loop sees the code through the chain, not who returned it.
+func TestModelRetryFromMiddlewareCounts(t *testing.T) {
+	tool := weft.Tool("parse_date", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "fine", nil
+	})
+	var n atomic.Int32
+	nag := func(next weft.ToolCaller) weft.ToolCaller {
+		return func(ctx context.Context, call weft.ToolCallPart) (string, error) {
+			if int(n.Add(1)) <= 4 {
+				return "", weft.ModelRetry("middleware says no")
+			}
+			return next(ctx, call)
+		}
+	}
+	turns := []wefttest.Turn{}
+	for range 4 {
+		turns = append(turns, wefttest.ToolCalls(wefttest.Call{Name: "parse_date"}))
+	}
+	agt := weft.New(wefttest.Script(turns...), tool, weft.WrapTools(nag))
+	_, err := agt.Generate(context.Background(), weft.Prompt("q"))
+	if !errors.Is(err, weft.ErrModelRetriesExceeded) {
+		t.Fatalf("err = %v, want ErrModelRetriesExceeded from middleware retries", err)
+	}
+}
+
+// MaxModelRetries ignores values below 1: the default 3 stands.
+func TestMaxModelRetriesIgnoresZero(t *testing.T) {
+	tool := weft.Tool("parse_date", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "", weft.ModelRetry("no")
+	})
+	turns := []wefttest.Turn{}
+	for range 4 {
+		turns = append(turns, wefttest.ToolCalls(wefttest.Call{Name: "parse_date"}))
+	}
+	agt := weft.New(wefttest.Script(turns...), tool, weft.MaxModelRetries(0))
+	_, err := agt.Generate(context.Background(), weft.Prompt("q"))
+	if !errors.Is(err, weft.ErrModelRetriesExceeded) {
+		t.Fatalf("err = %v, want the default budget of 3 to stand", err)
 	}
 }

@@ -65,6 +65,9 @@ type manifestPolicy struct {
 	StrictInput    bool           `json:"strict_input,omitempty"`
 	StopWhen       []string       `json:"stop_when,omitempty"`
 	UsageLimit     *manifestUsage `json:"usage_limit,omitempty"`
+	// MaxModelRetries is always written, like MaxSteps: it has a
+	// non-zero default the manifest should not hide.
+	MaxModelRetries int `json:"max_model_retries"`
 }
 
 // manifestUsage is UsageLimit's policy record: zero fields are omitted,
@@ -102,11 +105,12 @@ func (a *Agent) manifestEntry() manifestAgent {
 		Model:        a.modelInfo(),
 		Instructions: a.system,
 		Policy: manifestPolicy{
-			Parallelism:    a.parallelism,
-			MaxSteps:       a.maxSteps,
-			MaxResultBytes: a.resultCap,
-			Timeout:        durationName(a.toolTimeout),
-			StrictInput:    a.strict,
+			Parallelism:     a.parallelism,
+			MaxSteps:        a.maxSteps,
+			MaxResultBytes:  a.resultCap,
+			Timeout:         durationName(a.toolTimeout),
+			StrictInput:     a.strict,
+			MaxModelRetries: a.maxModelRetries,
 		},
 		Tools: make([]manifestTool, 0, len(a.toolList)),
 	}

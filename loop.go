@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -113,6 +114,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		}
 	}
 
+	state := &loopState{retries: map[string]int{}}
 	for step := 0; step < a.maxSteps; step++ {
 		if err := ctx.Err(); err != nil {
 			return fail(step, err)
@@ -268,7 +270,16 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 				})
 			}
 		default:
-			rec.Results, pending, sub = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, false)
+			var retried []string
+			rec.Results, pending, sub, retried = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, false)
+			for _, name := range retried {
+				state.retries[name]++
+			}
+			for _, r := range rec.Results {
+				if !r.IsError {
+					delete(state.retries, r.Name) // a success resets the count
+				}
+			}
 		}
 		if len(sub) > 0 {
 			rec.SubagentUsage = sub
@@ -317,7 +328,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// every budget is checked here. A step that ended the run above
 		// succeeded even if it overshot — a budget stops further spend,
 		// it does not discard finished work (ADR 0002).
-		if err := a.guard(res); err != nil {
+		if err := a.guard(res, state); err != nil {
 			return fail(step, err)
 		}
 	}
@@ -380,12 +391,26 @@ func (a *Agent) stopped(steps []StepRecord) bool {
 	return false
 }
 
+// loopState is the run-scoped state the guard carries between steps.
+type loopState struct {
+	// retries counts consecutive RETRY results per tool name; a
+	// successful result for the tool resets it (Pydantic AI's rule: a
+	// tool that eventually succeeds is not stuck).
+	retries map[string]int
+}
+
 // guard is the continuation point: the checks that decide whether the
 // loop may make another model call. The first breach wins; the others
 // are not evaluated. Ordered by cheapness — a counter compare, then
 // token compares (ADR 0002: budgets are checked only when the loop
 // would otherwise spend more).
-func (a *Agent) guard(res *RunResult) error {
+func (a *Agent) guard(res *RunResult, st *loopState) error {
+	for _, name := range slices.Sorted(maps.Keys(st.retries)) {
+		if st.retries[name] > a.maxModelRetries {
+			return fmt.Errorf("%w: tool %q retried %d times",
+				ErrModelRetriesExceeded, name, st.retries[name])
+		}
+	}
 	if limit := a.usageLimit; limit.InputTokens > 0 || limit.OutputTokens > 0 {
 		over := (limit.InputTokens > 0 && res.Usage.InputTokens > limit.InputTokens) ||
 			(limit.OutputTokens > 0 && res.Usage.OutputTokens > limit.OutputTokens)
@@ -426,11 +451,12 @@ func (a *Agent) modelInfo() ModelInfo { return InfoOf(a.model) }
 // its child run's events (wrapped in Nested, numbered from this run's
 // counter under emitMu) and usage (the returned per-call map, keyed by
 // call id). The dispatcher otherwise knows nothing about subagents.
-func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage) {
+func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage, retried []string) {
 	outcomes := make([]ToolResultPart, len(calls))
 	parked := make([]bool, len(calls))
 	sem := make(chan struct{}, a.parallelism)
 	subs := map[string]Usage{}
+	var retryMu sync.Mutex
 
 	// Event-ordering rule for concurrent tools: the Seq is assigned and the
 	// event emitted under one lock, so observed order always matches Seq
@@ -511,7 +537,13 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 			defer func() { <-sem }()
 			n := nestFor(call)
 			callCtx := withNest(withCall(ctx, Call{RunID: runID, Step: step, CallID: call.ID, Name: call.Name, Approved: approved}), n)
-			outcomes[i], parked[i] = a.callTool(callCtx, call, def)
+			var retry bool
+			outcomes[i], parked[i], retry = a.callTool(callCtx, call, def)
+			if retry {
+				retryMu.Lock()
+				retried = append(retried, call.Name)
+				retryMu.Unlock()
+			}
 			if parked[i] {
 				return
 			}
@@ -544,7 +576,7 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 		}
 		results = append(results, outcomes[i])
 	}
-	return results, pending, subs
+	return results, pending, subs, retried
 }
 
 // resolvePending runs the calls an earlier run left pending, under this
@@ -568,7 +600,7 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 			approved = append(approved, c)
 		}
 	}
-	ran, pending, sub := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, true)
+	ran, pending, sub, _ := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, true)
 	byID := make(map[string]ToolResultPart, len(ran))
 	for _, r := range ran {
 		byID[r.CallID] = r
@@ -782,7 +814,7 @@ func (a *Agent) chain(def *ToolDef, strict bool) ToolCaller {
 // the result cap is applied last, over every outcome. An error wrapping
 // ErrApprovalRequired is the one non-result: the call is reported
 // pending instead.
-func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef) (res ToolResultPart, pending bool) {
+func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef) (res ToolResultPart, pending, retry bool) {
 	res = ToolResultPart{CallID: call.ID, Name: call.Name}
 	resultCap := a.resultCap
 	timeout := a.toolTimeout
@@ -808,14 +840,21 @@ func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef) (
 	}
 	if err != nil {
 		if errors.Is(err, ErrApprovalRequired) {
-			return res, true
+			return res, true, false
 		}
 		res.IsError = true
 		res.Content = err.Error()
-		return res, false
+		// Counted while the error is still an error, through errors.As,
+		// so a middleware-produced RETRY counts exactly like a
+		// handler's (the chain's outcome is what the loop sees).
+		var te *ToolError
+		if errors.As(err, &te) && te.Code == CodeRetry {
+			return res, false, true
+		}
+		return res, false, false
 	}
 	res.Content = out
-	return res, false
+	return res, false, false
 }
 
 // invokeContained runs the chain, turning a panic — in the handler or

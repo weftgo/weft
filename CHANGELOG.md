@@ -6,6 +6,17 @@ is pre-1.0 and tags per module (ADR 0005).
 
 ## Unreleased (2026-09-18)
 
+### Added — model retry hints (TODO §5.2, ADR 0002 amendment)
+
+- **`weft.ModelRetry(hint)`** — a tool error rendering as
+  `RETRY: <hint>` that asks the model to try the call again with the
+  hint applied. The loop counts RETRY results per tool name (middleware
+  retries included) and fails the run with **`ErrModelRetriesExceeded`**
+  after more than **`weft.MaxModelRetries(n)`** (default 3) consecutive
+  asks; a success resets the count. The manifest policy records
+  `max_model_retries` (the only §5 change that touches a committed
+  golden; `examples/getting-started/weft.json` regenerated).
+
 ### Added — usage limits (TODO §5.3, ADR 0002 amendment)
 
 - **`weft.UsageLimit(max weft.Usage)`** bounds a run's total token

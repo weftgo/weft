@@ -171,3 +171,21 @@ func (e *RunError) Error() string {
 }
 
 func (e *RunError) Unwrap() error { return e.Err }
+
+// CodeRetry is the code ModelRetry renders with — the one code whose
+// result is an instruction rather than a failure report: try the call
+// again with the hint applied.
+const CodeRetry = "RETRY"
+
+// ModelRetry is a tool error asking the model to try the call again
+// with the hint applied: it renders as "RETRY: <hint>" and the loop
+// continues. Return it when the arguments are well-formed but wrong in
+// a way the model can fix — an ambiguous date, an id that needs a
+// prefix. The loop counts RETRY results per tool name per run and
+// fails the run with ErrModelRetriesExceeded when a tool exceeds
+// MaxModelRetries (default 3); a successful result for that tool
+// resets its count. Middleware-produced retries count too — the loop
+// sees the code through the chain, not who returned it.
+func ModelRetry(hint string) error {
+	return &ToolError{Code: CodeRetry, Message: hint}
+}

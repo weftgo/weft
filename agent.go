@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	defaultMaxSteps    = 10
-	defaultParallelism = 4
+	defaultMaxSteps        = 10
+	defaultParallelism     = 4
+	defaultMaxModelRetries = 3
 	// defaultResultCap bounds a single tool result's text so a runaway
 	// tool cannot silently fill the context window. 64 KiB.
 	defaultResultCap = 64 << 10
@@ -63,6 +64,21 @@ func (o usageLimitOption) apply(a *Agent) { a.usageLimit = o.max }
 // budget. Usage.Total() is not a separate limit — a caller who wants a
 // total sets both fields.
 func UsageLimit(max Usage) Option { return usageLimitOption{max} }
+
+type maxModelRetriesOption struct{ n int }
+
+func (o maxModelRetriesOption) apply(a *Agent) {
+	if o.n >= 1 {
+		a.maxModelRetries = o.n
+	}
+}
+
+// MaxModelRetries sets how many consecutive RETRY results (see
+// ModelRetry) one tool may produce in a run before the run fails with
+// ErrModelRetriesExceeded (default 3). The count is per tool name — two
+// parallel calls to the same tool both retrying count as two — and a
+// successful result for the tool resets it. Values below 1 are ignored.
+func MaxModelRetries(n int) Option { return maxModelRetriesOption{n} }
 
 type parallelismOption struct{ n int }
 
@@ -289,23 +305,24 @@ func (s stepCountIs) String() string { return fmt.Sprintf("step_count_is:%d", s.
 // times, concurrently if you like — runs share no state, and the
 // registered tool set is frozen at construction (see ToolDef).
 type Agent struct {
-	model       Model
-	system      string
-	tools       map[string]*ToolDef
-	toolList    []*ToolDef
-	toolSource  func() []*ToolDef
-	stops       []StopCondition
-	maxSteps    int
-	usageLimit  Usage
-	parallelism int
-	resultCap   int
-	toolTimeout time.Duration
-	strict      bool
-	taps        []func(context.Context, Event)
-	name        string
-	thinking    ThinkingConfig
-	modelMW     []ModelMiddleware
-	toolMW      []ToolMiddleware
+	model           Model
+	system          string
+	tools           map[string]*ToolDef
+	toolList        []*ToolDef
+	toolSource      func() []*ToolDef
+	stops           []StopCondition
+	maxSteps        int
+	usageLimit      Usage
+	maxModelRetries int
+	parallelism     int
+	resultCap       int
+	toolTimeout     time.Duration
+	strict          bool
+	taps            []func(context.Context, Event)
+	name            string
+	thinking        ThinkingConfig
+	modelMW         []ModelMiddleware
+	toolMW          []ToolMiddleware
 	// hasOutput records that Output was applied: a Subagent delegating
 	// to this agent returns the submitted JSON, not the final text.
 	hasOutput bool
@@ -322,11 +339,12 @@ func New(m Model, opts ...Option) *Agent {
 		panic("weft: New called with a nil Model")
 	}
 	a := &Agent{
-		model:       m,
-		tools:       map[string]*ToolDef{},
-		maxSteps:    defaultMaxSteps,
-		parallelism: defaultParallelism,
-		resultCap:   defaultResultCap,
+		model:           m,
+		tools:           map[string]*ToolDef{},
+		maxSteps:        defaultMaxSteps,
+		maxModelRetries: defaultMaxModelRetries,
+		parallelism:     defaultParallelism,
+		resultCap:       defaultResultCap,
 	}
 	for _, o := range opts {
 		if o != nil {

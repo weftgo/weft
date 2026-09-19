@@ -224,6 +224,26 @@ the cause on a `DENIED: <reason>` result. Neither is a run error.
   reachable — ADR 0013's amended kill-switch clause records the full
   rationale.
 
+## Amendment (2026-09-19 — `RETRY` joins the code table;
+## ErrModelRetriesExceeded, TODO §5.2)
+
+`weft.ModelRetry(hint)` is `*ToolError{Code: "RETRY", Message: hint}`,
+rendering as `RETRY: <hint>` — coded, not a bare Content string, so
+the model and `mw.MapErrors` can branch on the code (G9). The loop
+counts RETRY results **per tool name per run**, through `errors.As` on
+the chain's error, so a middleware-produced retry counts exactly like
+a handler's. More than `MaxModelRetries` (default 3, values below 1
+ignored) **consecutive** retries from one tool fail the run with
+**`ErrModelRetriesExceeded`** at the continuation point — a model that
+cannot self-correct is a run failure, not an infinite loop. A
+successful result for the tool resets its count (Pydantic AI's rule);
+two parallel calls to the same tool both retrying count as two (the
+count is per name). Resumed approved calls run before any step exists;
+their RETRY results are transcript data and do not feed the counter.
+The manifest policy records `max_model_retries` unconditionally, like
+`max_steps`, because it has a non-zero default — the one §5 change
+that touches a committed golden.
+
 ## Amendment (2026-09-19 — budgets are checked at the continuation
 ## point; ErrUsageLimit, TODO §5.3)
 

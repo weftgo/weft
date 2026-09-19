@@ -633,3 +633,34 @@ func ExampleUsageLimit() {
 	// Output:
 	// true steps kept: 1
 }
+
+// A retry hint: the model sees "RETRY: <hint>", fixes the arguments,
+// and the loop continues; a tool that cannot be satisfied fails the run
+// after MaxModelRetries consecutive asks.
+func ExampleModelRetry() {
+	var calls atomic.Int32
+	parse := weft.Tool("parse_date", "Parse a date.",
+		func(_ context.Context, in struct {
+			D string `json:"d" jsonschema:"the date, ISO-8601"`
+		}) (string, error) {
+			if in.D != "2026-09-19" {
+				return "", weft.ModelRetry("date must be ISO-8601, e.g. 2026-09-19")
+			}
+			_ = calls.Add(1)
+			return "2026-09-19", nil
+		})
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "parse_date", Args: `{"d":"tomorrow"}`}),
+		wefttest.ToolCalls(wefttest.Call{Name: "parse_date", Args: `{"d":"2026-09-19"}`}),
+		wefttest.Say("Parsed."),
+	), parse)
+	res, err := agt.Generate(context.Background(), weft.Prompt("When is it?"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("first attempt:", res.Steps[0].Results[0].Content)
+	fmt.Println("second attempt:", res.Steps[1].Results[0].Content)
+	// Output:
+	// first attempt: RETRY: date must be ISO-8601, e.g. 2026-09-19
+	// second attempt: 2026-09-19
+}

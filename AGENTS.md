@@ -24,6 +24,8 @@ lookup := weft.Tool("lookup_order", "Look up an order by ID.",
 //   INVALID_INPUT: tool "lookup_order": field "days": expected integer, got string
 // Give the model a code to branch on; the cause stays in logs:
 //   return "", &weft.ToolError{Code: "ORDER_NOT_FOUND", Message: "order 42 does not exist", Err: err}
+// Ask the model to fix its arguments; the loop counts and bounds it:
+//   return "", weft.ModelRetry("date must be ISO-8601")   // RETRY: … (MaxModelRetries, default 3)
 // More per-tool options: weft.Sequential() (barrier), weft.RequireApproval(),
 // weft.PromptSnippet("…"), weft.WrapTools(mw...).
 

@@ -11,7 +11,8 @@
       "policy": {
         "parallelism": 4,
         "max_steps": 10,
-        "max_result_bytes": 65536
+        "max_result_bytes": 65536,
+        "max_model_retries": 3
       },
       "tools": [
         {

@@ -58,12 +58,20 @@ type manifestAgent struct {
 }
 
 type manifestPolicy struct {
-	Parallelism    int      `json:"parallelism"`
-	MaxSteps       int      `json:"max_steps"`
-	MaxResultBytes int      `json:"max_result_bytes"`
-	Timeout        string   `json:"timeout,omitempty"`
-	StrictInput    bool     `json:"strict_input,omitempty"`
-	StopWhen       []string `json:"stop_when,omitempty"`
+	Parallelism    int            `json:"parallelism"`
+	MaxSteps       int            `json:"max_steps"`
+	MaxResultBytes int            `json:"max_result_bytes"`
+	Timeout        string         `json:"timeout,omitempty"`
+	StrictInput    bool           `json:"strict_input,omitempty"`
+	StopWhen       []string       `json:"stop_when,omitempty"`
+	UsageLimit     *manifestUsage `json:"usage_limit,omitempty"`
+}
+
+// manifestUsage is UsageLimit's policy record: zero fields are omitted,
+// and no limit at all omits the whole object.
+type manifestUsage struct {
+	InputTokens  int64 `json:"input_tokens,omitempty"`
+	OutputTokens int64 `json:"output_tokens,omitempty"`
 }
 
 // manifestTool carries the tool's contract and, when set, its own
@@ -101,6 +109,12 @@ func (a *Agent) manifestEntry() manifestAgent {
 			StrictInput:    a.strict,
 		},
 		Tools: make([]manifestTool, 0, len(a.toolList)),
+	}
+	if a.usageLimit != (Usage{}) {
+		ma.Policy.UsageLimit = &manifestUsage{
+			InputTokens:  a.usageLimit.InputTokens,
+			OutputTokens: a.usageLimit.OutputTokens,
+		}
 	}
 	for _, c := range a.stops {
 		ma.Policy.StopWhen = append(ma.Policy.StopWhen, stopName(c))

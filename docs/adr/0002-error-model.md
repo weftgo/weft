@@ -224,6 +224,29 @@ the cause on a `DENIED: <reason>` result. Neither is a run error.
   reachable — ADR 0013's amended kill-switch clause records the full
   rationale.
 
+## Amendment (2026-09-19 — budgets are checked at the continuation
+## point; ErrUsageLimit, TODO §5.3)
+
+`weft.UsageLimit(max Usage)` bounds a run's total usage — its own model
+calls plus every subagent's (`RunResult.Usage`). **Budgets are checked
+only when the loop would otherwise make another model call**: a step
+that ends the run — final answer, `StopWhen`, pending approvals —
+succeeds even if it overshot, because a budget's job is to stop further
+spend, not to discard finished work. `MaxSteps` already behaved this
+way (the check is the loop header). Consequence, pinned by tests: a
+breach is reported with `StopReason == tool_calls` on the last step and
+the transcript ends with a complete tool message. Zero fields are
+unlimited; `Usage.Total()` is deliberately not a third counter
+(widening `Usage` would change every adapter's folding rules). Off by
+default: the right value is workload-specific — Anthropic's research
+finding that token usage "explains 80 % of the variance" in quality
+makes a too-low limit a correctness bug, not a saving — so the core
+will not guess one; `MaxSteps` is the default budget. Breach is the
+sentinel **`ErrUsageLimit`** (wrapped with the input/output numbers), a
+run error with the partial transcript. A parent step that fans out to
+four subagents can overshoot by four children's worth before the next
+check; documented, and the reason `Timeout` on a subagent tool exists.
+
 ## Amendment (2026-09-19 — the subagent codes, TODO §5.1 / ADR 0014)
 
 Three coded tool errors join the model-visible table, rendered by the

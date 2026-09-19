@@ -6,6 +6,16 @@ is pre-1.0 and tags per module (ADR 0005).
 
 ## Unreleased (2026-09-18)
 
+### Added — usage limits (TODO §5.3, ADR 0002 amendment)
+
+- **`weft.UsageLimit(max weft.Usage)`** bounds a run's total token
+  usage, subagents included, checked at the continuation point — only
+  when the loop would otherwise make another model call; a run-ending
+  step may overshoot and still succeed. Breach fails the run with
+  **`ErrUsageLimit`** (wrapped with the numbers) and the partial
+  transcript. Off by default; the manifest policy records it
+  (`usage_limit`, zero fields omitted).
+
 ### Added — subagents as tools (TODO §5.1, ADR 0014)
 
 - **`weft.Subagent(name, description, child, opts...)`** — a tool whose

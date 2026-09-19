@@ -42,6 +42,7 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
     weft.Instructions("You are a support agent."),
     weft.StopWhen(weft.HasToolCall("submit")), // intended end (optional)
     weft.MaxSteps(20),                         // safety budget → ErrMaxSteps (default 10)
+    weft.UsageLimit(weft.Usage{OutputTokens: 50_000}), // token budget, subagents included → ErrUsageLimit
     weft.MaxResultBytes(64 << 10),             // tool-result cap (default 64 KiB; 0 = off)
     weft.Timeout(30*time.Second),              // default per-call deadline (none by default)
     weft.Parallelism(4),                       // or weft.Sequential()

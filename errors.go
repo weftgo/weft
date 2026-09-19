@@ -22,6 +22,22 @@ var (
 	// last allowed step. The partial transcript rides along on RunError.
 	ErrMaxSteps = errors.New("weft: run exceeded the maximum number of steps")
 
+	// ErrUsageLimit is returned when a run's usage exceeds its
+	// UsageLimit and the loop would otherwise call the model again. A
+	// step that ends the run may overshoot and still succeed: a budget
+	// stops further spend, it does not discard finished work.
+	ErrUsageLimit = errors.New("weft: run exceeded its usage limit")
+
+	// ErrModelRetriesExceeded is returned when one tool has produced
+	// more consecutive RETRY results than MaxModelRetries allows — a
+	// model that cannot self-correct is a run failure, not an infinite
+	// loop.
+	ErrModelRetriesExceeded = errors.New("weft: a tool asked the model to retry too many times")
+
+	// ErrLoopDetected is returned when repeats consecutive steps
+	// requested the same set of tool calls (DetectLoops).
+	ErrLoopDetected = errors.New("weft: the model repeated the same tool calls too many times")
+
 	// ErrNoSuchTool is returned by Agent.CallTool when the call names a
 	// tool the agent does not have. Inside the loop the same condition is
 	// folded into an error tool result — data for the model to

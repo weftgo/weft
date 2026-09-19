@@ -3160,3 +3160,84 @@ func TestSubagentUnderGenerateStillRollsUsage(t *testing.T) {
 		t.Errorf("usage = %+v, want %+v", res.Usage, want)
 	}
 }
+
+// --- Usage limits (TODO §5.3) ---
+
+// The limit is checked at the continuation point: a step whose tools
+// ran over the budget fails the run before the next model call, with
+// the partial transcript ending on the tool message.
+func TestUsageLimitFailsBeforeTheNextCall(t *testing.T) {
+	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "ok", nil
+	})
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo"}),
+		wefttest.Say("never reached"),
+	), echo, weft.UsageLimit(weft.Usage{OutputTokens: 4})) // Say spends 5
+	_, err := agt.Generate(context.Background(), weft.Prompt("q"))
+	var re *weft.RunError
+	if !errors.As(err, &re) || !errors.Is(err, weft.ErrUsageLimit) {
+		t.Fatalf("err = %v, want ErrUsageLimit", err)
+	}
+	if re.Step != 0 {
+		t.Errorf("failed at step %d, want 0", re.Step)
+	}
+	msgs := re.Result.Messages
+	if last := msgs[len(msgs)-1]; last.Role != weft.RoleTool {
+		t.Errorf("transcript ends on %v, want the tool message", last.Role)
+	}
+	if re.Result.Steps[0].StopReason != weft.StopToolCalls {
+		t.Errorf("last step stop reason = %v", re.Result.Steps[0].StopReason)
+	}
+}
+
+// A step that ends the run may overshoot the limit and still succeed:
+// the budget stops further spend, it does not discard finished work.
+func TestUsageLimitFinalStepMayOvershoot(t *testing.T) {
+	agt := weft.New(wefttest.Script(wefttest.Say("done")),
+		weft.UsageLimit(weft.Usage{OutputTokens: 4}))
+	res, err := agt.Generate(context.Background(), weft.Prompt("q"))
+	if err != nil {
+		t.Fatalf("a run-ending step must not be failed for overshooting: %v", err)
+	}
+	if res.Usage.OutputTokens != 5 {
+		t.Errorf("usage = %+v, want the overshooting 5 output tokens recorded", res.Usage)
+	}
+}
+
+// Child runs count: the same limit passes a plain tool step and fails
+// once a subagent's usage rolls in.
+func TestUsageLimitIncludesSubagents(t *testing.T) {
+	plain := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "ok", nil
+	})
+	solo := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo"}),
+		wefttest.Say("done"),
+	), plain, weft.UsageLimit(weft.Usage{OutputTokens: 8}))
+	if _, err := solo.Generate(context.Background(), weft.Prompt("q")); err != nil {
+		t.Fatalf("solo run under the limit failed: %v", err)
+	}
+	child := weft.New(wefttest.Script(wefttest.Say("found")))
+	withSub := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child), weft.UsageLimit(weft.Usage{OutputTokens: 8}))
+	_, err := withSub.Generate(context.Background(), weft.Prompt("q"))
+	if !errors.Is(err, weft.ErrUsageLimit) {
+		t.Fatalf("err = %v, want ErrUsageLimit once the child's usage rolls in", err)
+	}
+}
+
+// The manifest records the limit, omitting zero fields.
+func TestManifestUsageLimit(t *testing.T) {
+	agt := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("a"),
+		weft.UsageLimit(weft.Usage{OutputTokens: 50_000}))
+	b, err := weft.Manifest(agt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"usage_limit"`) || !strings.Contains(string(b), `"output_tokens": 50000`) || strings.Contains(string(b), `"input_tokens"`) {
+		t.Errorf("manifest missing usage_limit (output only):\n%s", b)
+	}
+}

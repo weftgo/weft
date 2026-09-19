@@ -313,6 +313,13 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		if a.stopped(res.Steps) {
 			return endRun(step)
 		}
+		// The continuation point: the loop is about to spend more, so
+		// every budget is checked here. A step that ended the run above
+		// succeeded even if it overshot — a budget stops further spend,
+		// it does not discard finished work (ADR 0002).
+		if err := a.guard(res); err != nil {
+			return fail(step, err)
+		}
 	}
 
 	// Cancellation during the last allowed step's tools is reported as
@@ -371,6 +378,24 @@ func (a *Agent) stopped(steps []StepRecord) bool {
 		}
 	}
 	return false
+}
+
+// guard is the continuation point: the checks that decide whether the
+// loop may make another model call. The first breach wins; the others
+// are not evaluated. Ordered by cheapness — a counter compare, then
+// token compares (ADR 0002: budgets are checked only when the loop
+// would otherwise spend more).
+func (a *Agent) guard(res *RunResult) error {
+	if limit := a.usageLimit; limit.InputTokens > 0 || limit.OutputTokens > 0 {
+		over := (limit.InputTokens > 0 && res.Usage.InputTokens > limit.InputTokens) ||
+			(limit.OutputTokens > 0 && res.Usage.OutputTokens > limit.OutputTokens)
+		if over {
+			return fmt.Errorf("%w (input %d/%d, output %d/%d)",
+				ErrUsageLimit, res.Usage.InputTokens, limit.InputTokens,
+				res.Usage.OutputTokens, limit.OutputTokens)
+		}
+	}
+	return nil
 }
 
 // modelInfo reports the model's identity when it implements the

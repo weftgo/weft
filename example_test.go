@@ -614,3 +614,22 @@ func ExampleSubagent() {
 	// order 1234 shipped yesterday
 	// total tokens: 45
 }
+
+// A token budget: exceeded, the run fails with ErrUsageLimit before the
+// next model call; the partial transcript rides on RunError.Result.
+func ExampleUsageLimit() {
+	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "ok", nil
+	})
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo"}),
+		wefttest.Say("never reached"),
+	), echo, weft.UsageLimit(weft.Usage{OutputTokens: 4}))
+	_, err := agt.Generate(context.Background(), weft.Prompt("again"))
+	var re *weft.RunError
+	if errors.As(err, &re) {
+		fmt.Println(errors.Is(err, weft.ErrUsageLimit), "steps kept:", len(re.Result.Steps))
+	}
+	// Output:
+	// true steps kept: 1
+}

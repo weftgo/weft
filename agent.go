@@ -47,6 +47,23 @@ func (o maxStepsOption) apply(a *Agent) {
 // the intended end of a run. Values below 1 are ignored.
 func MaxSteps(n int) Option { return maxStepsOption{n} }
 
+type usageLimitOption struct{ max Usage }
+
+func (o usageLimitOption) apply(a *Agent) { a.usageLimit = o.max }
+
+// UsageLimit bounds a run's total token usage — the run's own model
+// calls plus every subagent's (RunResult.Usage). A field left zero is
+// unlimited. The limit is checked after each step, before the loop
+// makes another model call: a step that ends the run — final answer,
+// StopWhen, pending approvals — may overshoot and still succeed,
+// because a budget's job is to stop further spend, not to discard
+// finished work. Exceeding it fails the run with ErrUsageLimit and the
+// partial transcript on RunError.Result. There is no default limit:
+// the right value is workload-specific, and MaxSteps is the default
+// budget. Usage.Total() is not a separate limit — a caller who wants a
+// total sets both fields.
+func UsageLimit(max Usage) Option { return usageLimitOption{max} }
+
 type parallelismOption struct{ n int }
 
 func (o parallelismOption) apply(a *Agent) {
@@ -279,6 +296,7 @@ type Agent struct {
 	toolSource  func() []*ToolDef
 	stops       []StopCondition
 	maxSteps    int
+	usageLimit  Usage
 	parallelism int
 	resultCap   int
 	toolTimeout time.Duration

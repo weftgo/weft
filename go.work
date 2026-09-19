@@ -4,5 +4,6 @@ use (
 	.
 	./anthropic
 	./google
+	./mcp
 	./openai
 )

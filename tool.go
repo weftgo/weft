@@ -35,6 +35,10 @@ type ToolDef struct {
 	sourceFile string
 	sourceLine int
 
+	// subagent names the child agent when this tool came from Subagent,
+	// for the manifest's delegation edge. Empty for ordinary tools.
+	subagent string
+
 	// Per-tool policy, set by ToolOptions. Zero values defer to the
 	// agent; capSet distinguishes "no per-tool cap" from
 	// MaxResultBytes(0), which removes the cap for this tool, and

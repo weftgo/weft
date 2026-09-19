@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"iter"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -647,5 +648,76 @@ func TestToolArgsDeltaStreamsProgress(t *testing.T) {
 	}
 	if got := res.Text(); got != "done" {
 		t.Errorf("text = %q, want the follow-up answer", got)
+	}
+}
+
+// The orchestrator-worker pattern: one step fans out to two parallel
+// delegations and one ordinary tool. Results stay in call order, Seq
+// stays monotonic across the whole parent stream, and each delegation's
+// usage is attributed per call.
+func TestSubagentParallelDelegations(t *testing.T) {
+	child := weft.New(wefttest.Script(
+		wefttest.Say("found"),
+		wefttest.Say("found"),
+	))
+	refund := weft.Tool("refund", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "refunded", nil
+	})
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(
+			wefttest.Call{Name: "research", Args: `{"prompt":"a"}`},
+			wefttest.Call{Name: "research", Args: `{"prompt":"b"}`},
+			wefttest.Call{Name: "refund"},
+		),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child), refund)
+	run := parent.Stream(context.Background(), weft.Prompt("q"), weft.RunID("r1"))
+	var evs []weft.Event
+	for ev, err := range run.Events() {
+		if err != nil {
+			t.Fatalf("stream error: %v", err)
+		}
+		evs = append(evs, ev)
+	}
+	res, err := run.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range res.Steps[0].Results {
+		got = append(got, r.Content)
+	}
+	if want := []string{"found", "found", "refunded"}; !slices.Equal(got, want) {
+		t.Errorf("results = %v, want %v (call order, not completion order)", got, want)
+	}
+	var last int64
+	for _, ev := range evs {
+		var seq int64
+		switch e := ev.(type) {
+		case weft.ToolStart:
+			seq = e.Seq
+		case weft.ToolFinish:
+			seq = e.Seq
+		case weft.Nested:
+			seq = e.Seq
+		default:
+			continue
+		}
+		if seq <= last {
+			t.Fatalf("Seq %d not after %d", seq, last)
+		}
+		last = seq
+	}
+	sub := res.Steps[0].SubagentUsage
+	if len(sub) != 2 {
+		t.Fatalf("SubagentUsage = %v, want two delegations", sub)
+	}
+	for id, u := range sub {
+		if u != (weft.Usage{InputTokens: 10, OutputTokens: 5}) {
+			t.Errorf("SubagentUsage[%s] = %+v", id, u)
+		}
+	}
+	if want := (weft.Usage{InputTokens: 40, OutputTokens: 20}); res.Usage != want {
+		t.Errorf("usage = %+v, want %+v", res.Usage, want)
 	}
 }

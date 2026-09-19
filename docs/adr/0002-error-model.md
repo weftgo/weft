@@ -224,6 +224,25 @@ the cause on a `DENIED: <reason>` result. Neither is a run error.
   reachable — ADR 0013's amended kill-switch clause records the full
   rationale.
 
+## Amendment (2026-09-19 — the subagent codes, TODO §5.1 / ADR 0014)
+
+Three coded tool errors join the model-visible table, rendered by the
+`Subagent` tool's handler (a child run failure is data the parent model
+sees, never a parent run error):
+
+| condition | result the parent model sees |
+|---|---|
+| child run failed (`*RunError`, cause on `ToolError.Err`) | `SUBAGENT_FAILED: agent "research" failed at step 3: weft: run exceeded the maximum number of steps` |
+| child ended awaiting approval | `SUBAGENT_PENDING: agent "research" ended awaiting approval of 1 call(s)` |
+| child already running in this call chain (refused before any model call) | `SUBAGENT_CYCLE: agent "research" is already running in this call chain` |
+
+The quoted name is the **tool name** (ADR 0014 G3), and the constants
+are exported (`CodeSubagentFailed`, `CodeSubagentPending`,
+`CodeSubagentCycle`). A child cancelled by the parent's run reports
+through the existing cancellation rules; a child cut off by the
+subagent tool's `Timeout` renders the ordinary `tool "x" timed out
+after d` string — no new strings for either.
+
 ## Alternatives considered
 
 - **errgroup abort on first tool error**: cancels unrelated work the model

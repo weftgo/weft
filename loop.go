@@ -26,6 +26,10 @@ type rblock struct {
 // model stops requesting tools or the step budget runs out. Every notable
 // moment is reported through emit, which must be safe for concurrent use.
 func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*RunResult, error) {
+	// This agent now runs on this context: the ancestry chain grows by
+	// one per nesting level, and a Subagent handler refuses a delegation
+	// whose child is already on it (the cycle guard, ADR 0014).
+	ctx = withAncestry(ctx, append(slices.Clone(ancestryOf(ctx)), a))
 	// Every event passes through here exactly once: the taps observe it
 	// (synchronously, in emission order, on the emitting goroutine),
 	// then the sink receives it. Nothing is delivered after
@@ -93,11 +97,16 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		if err := ctx.Err(); err != nil {
 			return fail(0, err)
 		}
-		results, pending, err := a.resolvePending(ctx, cfg, resume, seq, emit)
+		results, pending, sub, err := a.resolvePending(ctx, cfg, resume, seq, emit)
 		if err != nil {
 			return fail(0, err)
 		}
 		res.Messages = attachResults(res.Messages, resume, results)
+		// Resumed delegations roll into the total only: there is no
+		// StepRecord for resumed calls (ADR 0007), so no per-call map.
+		for _, u := range sub {
+			res.Usage = res.Usage.Add(u)
+		}
 		if len(pending) > 0 {
 			res.Pending = pending
 			return endRun(0)
@@ -240,6 +249,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			ToolCalls:     calls,
 		}
 		var pending []ToolCallPart
+		var sub map[string]Usage
 		switch {
 		case len(calls) == 0:
 		case finish.Reason == StopMaxTokens:
@@ -258,7 +268,10 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 				})
 			}
 		default:
-			rec.Results, pending = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, false)
+			rec.Results, pending, sub = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, false)
+		}
+		if len(sub) > 0 {
+			rec.SubagentUsage = sub
 		}
 		if len(rec.Results) > 0 {
 			toolMsg := Message{Role: RoleTool}
@@ -270,6 +283,12 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		res.Steps = append(res.Steps, rec)
 		res.StopReason = finish.Reason
 		res.Usage = res.Usage.Add(finish.Usage)
+		// Child-run usage rolls up after the step's own: StepFinish
+		// reports the model call's numbers alone (finish.Usage), while
+		// RunResult.Usage carries the whole bill, subagents included.
+		for _, u := range sub {
+			res.Usage = res.Usage.Add(u)
+		}
 		emit(StepFinish{RunID: cfg.id, Index: step, Reason: finish.Reason, Usage: finish.Usage, Raw: finish.Raw})
 
 		if len(pending) > 0 {
@@ -377,10 +396,16 @@ func (a *Agent) modelInfo() ModelInfo { return InfoOf(a.model) }
 // parks with ErrApprovalRequired are returned as pending rather than as
 // results: they had a ToolStart and get no ToolFinish. approved marks
 // calls resumed under an Approve decision.
-func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool) (results []ToolResultPart, pending []ToolCallPart) {
+//
+// Every dispatched call carries a nest: how a Subagent handler reports
+// its child run's events (wrapped in Nested, numbered from this run's
+// counter under emitMu) and usage (the returned per-call map, keyed by
+// call id). The dispatcher otherwise knows nothing about subagents.
+func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage) {
 	outcomes := make([]ToolResultPart, len(calls))
 	parked := make([]bool, len(calls))
 	sem := make(chan struct{}, a.parallelism)
+	subs := map[string]Usage{}
 
 	// Event-ordering rule for concurrent tools: the Seq is assigned and the
 	// event emitted under one lock, so observed order always matches Seq
@@ -391,6 +416,34 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 		emitMu.Lock()
 		defer emitMu.Unlock()
 		emit(ev(seq.Add(1)))
+	}
+	// nestFor builds one call's reporting channel. emit and usage both
+	// check the closed flag and act under emitMu, so a child event is
+	// either fully before or fully after the call's ToolFinish, and a
+	// usage record either lands in the map the step reports or is
+	// dropped with the abandoned goroutine that produced it — a timed
+	// out or cancelled delegation is not waited for, and its result was
+	// already recorded (the usage half of the late-event rule, ADR 0004
+	// and ADR 0014).
+	nestFor := func(call ToolCallPart) *nest {
+		n := new(nest)
+		n.emit = func(ev Event) {
+			emitMu.Lock()
+			defer emitMu.Unlock()
+			if n.closed.Load() {
+				return
+			}
+			emit(Nested{RunID: runID, Seq: seq.Add(1), CallID: call.ID, Event: ev})
+		}
+		n.usage = func(u Usage) {
+			emitMu.Lock()
+			defer emitMu.Unlock()
+			if n.closed.Load() {
+				return
+			}
+			subs[call.ID] = subs[call.ID].Add(u)
+		}
+		return n
 	}
 
 	var wg sync.WaitGroup
@@ -431,12 +484,17 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			callCtx := withCall(ctx, Call{RunID: runID, Step: step, CallID: call.ID, Name: call.Name, Approved: approved})
+			n := nestFor(call)
+			callCtx := withNest(withCall(ctx, Call{RunID: runID, Step: step, CallID: call.ID, Name: call.Name, Approved: approved}), n)
 			outcomes[i], parked[i] = a.callTool(callCtx, call, def)
 			if parked[i] {
 				return
 			}
 			ordered(func(s int64) Event {
+				// The late-event rule (ADR 0004): the close rides under
+				// emitMu with the finish, so no Nested event for this
+				// call can follow its ToolFinish in the stream.
+				n.closed.Store(true)
 				return ToolFinish{
 					RunID:   runID,
 					Seq:     s,
@@ -461,7 +519,7 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 		}
 		results = append(results, outcomes[i])
 	}
-	return results, pending
+	return results, pending, subs
 }
 
 // resolvePending runs the calls an earlier run left pending, under this
@@ -472,12 +530,12 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 // resumed calls is reported as 0: the original index is not recoverable
 // from the transcript, and there is no StepRecord for them (ADR 0007).
 // Audit lines should key on the CallID, not the step.
-func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolCallPart, seq *atomic.Int64, emit func(Event)) ([]ToolResultPart, []ToolCallPart, error) {
+func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolCallPart, seq *atomic.Int64, emit func(Event)) ([]ToolResultPart, []ToolCallPart, map[string]Usage, error) {
 	// Resumed calls run before any step exists, so they fetch their own
 	// snapshot — a separate consultation, like CallTool's.
 	tools, err := a.dispatchTools()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var approved []ToolCallPart
 	for _, c := range calls {
@@ -485,7 +543,7 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 			approved = append(approved, c)
 		}
 	}
-	ran, pending := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, true)
+	ran, pending, sub := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, true)
 	byID := make(map[string]ToolResultPart, len(ran))
 	for _, r := range ran {
 		byID[r.CallID] = r
@@ -514,7 +572,7 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 			Content: deniedResult(reason),
 		})
 	}
-	return results, pending, nil
+	return results, pending, sub, nil
 }
 
 // unresolvedCalls returns the tool calls of the last assistant message

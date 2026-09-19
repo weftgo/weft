@@ -288,6 +288,9 @@ type Agent struct {
 	thinking    ThinkingConfig
 	modelMW     []ModelMiddleware
 	toolMW      []ToolMiddleware
+	// hasOutput records that Output was applied: a Subagent delegating
+	// to this agent returns the submitted JSON, not the final text.
+	hasOutput bool
 	// tapPanics counts tap invocations that panicked and were contained;
 	// read with TapPanics.
 	tapPanics atomic.Int64

@@ -32,6 +32,10 @@ lookup := weft.Tool("lookup_order", "Look up an order by ID.",
 //     A registry that changes mid-run: the loop re-fetches per step.
 //     weft.ToolSource(func() []*weft.ToolDef { return reg.Tools() })
 
+// 1c. Delegate to another agent: a tool whose handler runs it.
+//     weft.Subagent("research", "Research a topic in depth.", researcher, weft.Timeout(2*time.Minute))
+//     Child events arrive as weft.Nested{CallID, Event}; usage rolls into res.Usage.
+
 // 2. An agent is a value. Build once, run many times, concurrently.
 agt := weft.New(model,                       // any weft.Model (adapters, or wefttest.Script)
     weft.Name("support-bot"),                // on RunStart.Agent; weft.Manifest requires it
@@ -69,6 +73,7 @@ for ev, err := range agt.Stream(ctx, weft.Prompt("...")).Events() {
     case weft.ToolArgsDelta: // Name, Args — progress while the model writes a tool call
     case weft.ToolStart:     // Seq, CallID, Name, Args
     case weft.ToolFinish:    // Seq, CallID, Name, Content, IsError
+    case weft.Nested:        // Seq, CallID, Event — a subagent's event, numbered from this run's counter
     case weft.StepFinish:    // Index, Reason, Usage
     case weft.RunFinish:     // Usage, Steps, Pending (calls awaiting Approve/Deny)
     }

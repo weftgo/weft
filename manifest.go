@@ -81,6 +81,11 @@ type manifestTool struct {
 	RequireApproval bool    `json:"require_approval,omitempty"`
 	PromptSnippet   string  `json:"prompt_snippet,omitempty"`
 	Source          string  `json:"source,omitempty"`
+	// Subagent names the child agent of a Subagent tool, so Studio can
+	// draw the delegation edge by name when both agents are in the
+	// fleet. The manifest does not recurse into the child: it describes
+	// the agents it was given, not the fleet (ADR 0012).
+	Subagent string `json:"subagent,omitempty"`
 }
 
 func (a *Agent) manifestEntry() manifestAgent {
@@ -112,6 +117,7 @@ func (a *Agent) manifestEntry() manifestAgent {
 			RequireApproval: t.approval,
 			PromptSnippet:   t.snippet,
 			Source:          toolSource(t),
+			Subagent:        t.subagent,
 		}
 		if t.capSet {
 			resultCap := t.resultCap

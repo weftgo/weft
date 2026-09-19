@@ -123,6 +123,11 @@ type StepRecord struct {
 	Text          string
 	ToolCalls     []ToolCallPart
 	Results       []ToolResultPart
+	// SubagentUsage is the usage of each child run this step started,
+	// keyed by the parent's call id — including a failed child's partial
+	// usage. It is already included in RunResult.Usage; Usage above is
+	// the step's own model call only. Nil when the step ran no subagent.
+	SubagentUsage map[string]Usage
 }
 
 // RunResult is the outcome of a completed run: its id, the full transcript

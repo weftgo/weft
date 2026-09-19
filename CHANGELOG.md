@@ -6,6 +6,36 @@ is pre-1.0 and tags per module (ADR 0005).
 
 ## Unreleased (2026-09-18)
 
+### Added — subagents as tools (TODO §5.1, ADR 0014)
+
+- **`weft.Subagent(name, description, child, opts...)`** — a tool whose
+  handler runs another agent on the prompt alone; the child's events
+  arrive in the parent's stream wrapped in the new **`weft.Nested`**
+  event (wire `nested`, recursive through `UnmarshalEvent`), numbered
+  from the parent's counter under the parent's ordering lock; the
+  child's usage rolls into `RunResult.Usage` and is recorded per call
+  on the new `StepRecord.SubagentUsage`. Every `ToolOption` applies to
+  the delegation (`Timeout`, `MaxResultBytes`, `RequireApproval`,
+  `Sequential`, `WrapTools`); the parent's `Parallelism` bounds
+  concurrent delegations.
+- **Child failure is data**: `SUBAGENT_FAILED: agent "x" failed at
+  step N: …` (the child's `*RunError` on `ToolError.Err`), a child
+  ending pending is `SUBAGENT_PENDING: …`, and a delegation to an
+  agent already running in the call chain is refused before any model
+  call with `SUBAGENT_CYCLE: …`. Codes exported as
+  `CodeSubagentFailed`/`CodeSubagentPending`/`CodeSubagentCycle`.
+- **Lineage ids**: a child run's id is `<parent>/<step>/<callID>`
+  (`<parent>/resume/<callID>` under `Approve`), visible on the nested
+  `RunStart` and on `CallFromContext` inside the child.
+- **The late-event rule** (ADR 0004 amendment): no `Nested` event and
+  no usage record for a call is delivered after that call's
+  `ToolFinish` — the close is atomic with the finish under the
+  parent's lock, so replayed streams never show a finished call
+  continuing.
+- **Manifest**: tools from `Subagent` carry `"subagent": "<child
+  name>"` (omitempty; existing goldens unchanged). **wefttest**:
+  `Flatten` unwraps `Nested` events recursively for assertions.
+
 ### Fixed — go1.26 decode-error compatibility (follow-up to the review pass)
 
 - The schema walk behind `INVALID_INPUT` messages now handles toolchains

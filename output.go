@@ -55,6 +55,7 @@ type outputOption struct{ tool *ToolDef }
 func (o outputOption) apply(a *Agent) {
 	o.tool.apply(a)
 	a.stops = append(a.stops, outputSubmitted{})
+	a.hasOutput = true
 }
 
 // outputSubmitted stops the run once a step has recorded a non-error

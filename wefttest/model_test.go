@@ -3,6 +3,7 @@ package wefttest_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -134,5 +135,26 @@ func TestScriptYieldsContextErrorWhenDone(t *testing.T) {
 	}
 	if !errors.Is(got, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", got)
+	}
+}
+
+// Flatten unwraps Nested events recursively, preserving order.
+func TestFlatten(t *testing.T) {
+	evs := []weft.Event{
+		weft.RunStart{ID: "r1"},
+		weft.Nested{RunID: "r1", Seq: 2, CallID: "c1", Event: weft.Nested{
+			RunID: "r1/0/c1", Seq: 1, CallID: "call_1",
+			Event: weft.TextDelta{RunID: "r1/0/c1/0/call_1", Text: "deep"},
+		}},
+		weft.StepFinish{RunID: "r1"},
+	}
+	got := wefttest.Flatten(evs)
+	want := []weft.Event{
+		weft.RunStart{ID: "r1"},
+		weft.TextDelta{RunID: "r1/0/c1/0/call_1", Text: "deep"},
+		weft.StepFinish{RunID: "r1"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("Flatten = %v, want %v", got, want)
 	}
 }

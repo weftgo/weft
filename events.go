@@ -11,9 +11,9 @@ import (
 //
 // On the wire every event carries a "type" discriminator (run_start,
 // step_start, text_delta, reasoning_delta, tool_args_delta, tool_start,
-// tool_finish, step_finish, run_finish) and UnmarshalEvent restores it —
-// the same rule and the same compatibility contract as the message parts
-// (ADR 0004).
+// tool_finish, step_finish, run_finish, nested) and UnmarshalEvent
+// restores it — the same rule and the same compatibility contract as
+// the message parts (ADR 0004).
 //
 // Every event except RunStart carries RunID: concurrent runs on one
 // agent emit interleaved streams, and a per-run Seq counter is unique
@@ -119,6 +119,22 @@ type RunFinish struct {
 	Pending []ToolCallPart `json:"pending,omitempty"`
 }
 
+// Nested wraps one event of a child run started by a Subagent tool.
+// CallID is the parent's tool call that owns the child run; Seq is from
+// the parent's counter, so the parent stream stays totally ordered with
+// the child's events in place. Event is any child event — including a
+// Nested from a grandchild — and its own RunID and Seq are the child's.
+// A child's RunStart..RunFinish all arrive inside the parent's
+// ToolStart..ToolFinish for the delegating call, and none arrive after
+// its ToolFinish (the late-event rule, ADR 0004). On the wire the type
+// is "nested" and UnmarshalEvent restores the inner event recursively.
+type Nested struct {
+	RunID  string `json:"run_id"`
+	Seq    int64  `json:"seq"`
+	CallID string `json:"call_id"`
+	Event  Event  `json:"event"`
+}
+
 func (RunStart) isEvent()       {}
 func (StepStart) isEvent()      {}
 func (TextDelta) isEvent()      {}
@@ -128,6 +144,7 @@ func (ToolStart) isEvent()      {}
 func (ToolFinish) isEvent()     {}
 func (StepFinish) isEvent()     {}
 func (RunFinish) isEvent()      {}
+func (Nested) isEvent()         {}
 
 // Wire discriminators for Event types.
 const (
@@ -140,6 +157,7 @@ const (
 	eventToolFinish     = "tool_finish"
 	eventStepFinish     = "step_finish"
 	eventRunFinish      = "run_finish"
+	eventNested         = "nested"
 )
 
 // The per-type MarshalJSON methods below are deliberately repetitive:
@@ -161,6 +179,7 @@ type (
 	toolFinishWire     ToolFinish
 	stepFinishWire     StepFinish
 	runFinishWire      RunFinish
+	nestedWire         Nested
 )
 
 // MarshalJSON encodes the event with its "type" discriminator.
@@ -235,6 +254,42 @@ func (e RunFinish) MarshalJSON() ([]byte, error) {
 	}{eventRunFinish, runFinishWire(e)})
 }
 
+// MarshalJSON encodes the event with its "type" discriminator. The
+// inner event marshals through its own MarshalJSON, so its discriminator
+// is present and decoding recurses (UnmarshalEvent inside
+// Nested.UnmarshalJSON).
+func (e Nested) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type string `json:"type"`
+		nestedWire
+	}{eventNested, nestedWire(e)})
+}
+
+// nestedEnvelope is Nested's wire form with the inner event held raw:
+// Event is an interface, so the envelope decodes the bytes and
+// UnmarshalEvent restores the concrete type.
+type nestedEnvelope struct {
+	RunID  string          `json:"run_id"`
+	Seq    int64           `json:"seq"`
+	CallID string          `json:"call_id"`
+	Event  json.RawMessage `json:"event"`
+}
+
+// UnmarshalJSON decodes the envelope and the inner event recursively —
+// an unknown inner type is an error exactly as at the top level.
+func (e *Nested) UnmarshalJSON(b []byte) error {
+	var env nestedEnvelope
+	if err := json.Unmarshal(b, &env); err != nil {
+		return err
+	}
+	inner, err := UnmarshalEvent(env.Event)
+	if err != nil {
+		return fmt.Errorf("nested event: %w", err)
+	}
+	e.RunID, e.Seq, e.CallID, e.Event = env.RunID, env.Seq, env.CallID, inner
+	return nil
+}
+
 // UnmarshalEvent decodes one wire event, dispatching on its "type"
 // discriminator. An unknown or missing type is an error, never a silent
 // drop: a recorded stream must replay exactly what was emitted.
@@ -277,6 +332,9 @@ func UnmarshalEvent(b []byte) (Event, error) {
 	case eventRunFinish:
 		var v RunFinish
 		err, ev = json.Unmarshal(b, (*runFinishWire)(&v)), v
+	case eventNested:
+		var v Nested
+		err, ev = json.Unmarshal(b, &v), v // Nested.UnmarshalJSON recurses
 	case "":
 		return nil, fmt.Errorf("event has no %q field", "type")
 	default:

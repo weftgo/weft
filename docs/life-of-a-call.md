@@ -78,6 +78,14 @@ cap: MaxResultBytes (per tool, else per agent) + visible marker
 ToolFinish (Seq) → ToolResultPart, in call order, on the step's tool message
 ```
 
+Where a **subagent's child run** sits: inside the handler line above.
+The `Subagent` handler calls the child agent's `execute` on the call's
+ctx, so the child occupies the slot like any tool; its events are
+wrapped (`Nested`, Seq from this run's counter, under this step's
+ordering lock) between the delegating call's `ToolStart` and
+`ToolFinish`, and its usage is recorded per call before the finish —
+nothing of the child crosses the finish (the late-event rule, ADR 0014).
+
 ## The two conventions
 
 - **Context decoration.** Middleware that verifies something (a user, a

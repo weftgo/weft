@@ -167,6 +167,35 @@ failures are coded `INVALID_INPUT` and `NO_SUCH_TOOL`.
 [docs/life-of-a-call.md](docs/life-of-a-call.md) shows where each
 thing sits; [ADR 0006](docs/adr/0006-seams.md) is the decision.
 
+### Delegating to another agent
+
+A subagent is a tool whose handler runs another agent — the
+orchestrator-worker pattern with zero new machinery. The child sees
+only the prompt; its events arrive in the parent's stream wrapped in
+`weft.Nested` (Seq from the parent's counter, so the stream stays
+replayable); its usage rolls into `res.Usage` and is recorded per call
+on `StepRecord.SubagentUsage`:
+
+```go
+researcher := weft.New(model, weft.Tool("deep_search", "…", DeepSearch))
+orchestrator := weft.New(model,
+    weft.Subagent("research", "Research a question in depth.", researcher,
+        weft.Timeout(2*time.Minute)),
+)
+```
+
+Everything the tool contract offers applies: `Timeout` bounds the child
+run, `Parallelism` bounds concurrent delegations (four research calls in
+one step run four children), `RequireApproval` gates the delegation
+itself. A failed child is data the parent model sees
+(`SUBAGENT_FAILED: …`, the child's `*RunError` on `ToolError.Err`), a
+child that ends awaiting approval is `SUBAGENT_PENDING` — approval-gated
+tools belong in the orchestrator, not in a child — and a delegation to
+an agent already running in the call chain is refused
+(`SUBAGENT_CYCLE`). [ADR 0014](docs/adr/0014-subagents-as-tools.md)
+records the mechanics, the lineage ids, and pi's AgentLanes
+counterpoint.
+
 ### Approval
 
 `weft.RequireApproval()` on a tool parks its calls: the run ends

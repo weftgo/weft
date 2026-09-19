@@ -99,6 +99,15 @@ The decisions the TODO spec left open, resolved:
    `source` is rendered with `/` separators on every OS, and is
    omitted for a `ToolDef` that did not come through `Tool(...)`.
 
+## Amendment (2026-09-19 — the `subagent` field, TODO §5.1 / ADR 0014)
+
+`manifestTool` gains `subagent` (`omitempty`): the child agent's name
+when the tool came from `Subagent`, omitted for ordinary tools and for
+an unnamed child — so every existing golden file is unchanged. The
+manifest does **not** recurse into the child: it describes the agents
+it was given, and Studio draws the delegation edge by name when both
+ends are in the fleet.
+
 ## Alternatives considered
 
 - **A registry the Studio queries live**: couples consumers to a

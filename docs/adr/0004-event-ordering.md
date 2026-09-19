@@ -167,3 +167,30 @@ an empty `RunID`; the additive-only compatibility rule is unchanged.
 The `store` module's envelope (when it exists) may still layer its own
 `SchemaVersion`; the core's field is the minimal attribution the
 concurrent-runs case needs.
+
+
+## Amendment (2026-09-19 — `Nested` events and the late-event rule,
+## ADR 0014)
+
+One event joins the set: `Nested{RunID, Seq, CallID, Event}` (wire
+`nested`), wrapping one event of a child run started by a `Subagent`
+tool. The envelope's `RunID` and `Seq` are the **parent's** — assigned
+and emitted under the parent's event-ordering lock from the parent's
+counter — so the total order holds one level down without a new rule
+and child events interleave correctly with sibling tools' events. The
+inner event keeps its own run id and its own per-run `Seq`
+(`run_id`-attributed per the 2026-09-18 amendment); a grandchild is a
+`Nested` inside a `Nested`, and `UnmarshalEvent` recurses, so an
+unknown inner type is an error exactly as at the top level. Lock order
+is strictly child-`emitMu` → parent-`emitMu`; the parent never takes a
+child's lock, so there is no cycle.
+
+**The late-event rule:** no `Nested` event for a call is delivered
+after that call's `ToolFinish`, and no usage is recorded after it. The
+`nest.closed` flag is set inside the `ordered` closure that emits the
+`ToolFinish`, and the child's emit and usage paths check it under the
+same lock before acting — close, finish, and any racing child event
+are totally ordered by the parent's `emitMu`. Without the rule, a
+replayed stream could show a call finishing and then continuing; with
+it, an abandoned (timed-out or cancelled) delegation's late events and
+usage are dropped rather than racing the step's already-read records.

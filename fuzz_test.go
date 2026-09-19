@@ -121,6 +121,10 @@ func FuzzUnmarshalEvent(f *testing.F) {
 		`{"type":"run_finish","usage":{"input_tokens":20,"output_tokens":10},"steps":2}`,
 		`{"type":"hologram"}`,
 		`{"text":"no type"}`,
+		`{"type":"nested","run_id":"r1","seq":4,"call_id":"c1","event":{"type":"tool_start","run_id":"r1/0/c1","seq":1,"call_id":"call_1","name":"deep_search","args":{}}}`,
+		`{"type":"nested","run_id":"r1","seq":5,"call_id":"c1","event":{"type":"nested","run_id":"r1/0/c1","seq":2,"call_id":"call_1","event":{"type":"text_delta","run_id":"r1/0/c1/0/call_1","text":"deep"}}}`,
+		`{"type":"nested","run_id":"r1","seq":6,"call_id":"c1","event":{"type":"hologram"}}`,
+		`{"type":"nested","run_id":"r1","seq":7,"call_id":"c1"}`,
 	} {
 		f.Add(seed)
 	}

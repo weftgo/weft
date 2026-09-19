@@ -592,3 +592,25 @@ func ExampleTap_async() {
 	// Output:
 	// tool starts: 1 dropped: 0
 }
+
+// Delegating to another agent: a subagent is a tool whose handler runs
+// another agent on the prompt alone. The child's events arrive wrapped
+// in Nested; its usage rolls into the parent's total.
+func ExampleSubagent() {
+	researcher := weft.New(wefttest.Script(
+		wefttest.Say("order 1234 shipped yesterday"),
+	))
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"where is order 1234?"}`}),
+		wefttest.Say("Researched."),
+	), weft.Subagent("research", "Research a question in depth.", researcher))
+	res, err := agt.Generate(context.Background(), weft.Prompt("Where is order 1234?"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Steps[0].Results[0].Content)
+	fmt.Println("total tokens:", res.Usage.Total())
+	// Output:
+	// order 1234 shipped yesterday
+	// total tokens: 45
+}

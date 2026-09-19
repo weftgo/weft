@@ -1637,6 +1637,10 @@ func TestEventJSONRoundTrip(t *testing.T) {
 			`{"type":"step_finish","run_id":"r1","index":2,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1},"raw":"refusal"}`},
 		{weft.RunFinish{RunID: "r1", Usage: weft.Usage{InputTokens: 20, OutputTokens: 10}, Steps: 2},
 			`{"type":"run_finish","run_id":"r1","usage":{"input_tokens":20,"output_tokens":10},"steps":2}`},
+		{weft.Nested{RunID: "r1", Seq: 4, CallID: "c1", Event: weft.ToolStart{RunID: "r1/0/c1", Seq: 1, CallID: "call_1", Name: "deep_search", Args: json.RawMessage(`{}`)}},
+			`{"type":"nested","run_id":"r1","seq":4,"call_id":"c1","event":{"type":"tool_start","run_id":"r1/0/c1","seq":1,"call_id":"call_1","name":"deep_search","args":{}}}`},
+		{weft.Nested{RunID: "r1", Seq: 5, CallID: "c1", Event: weft.Nested{RunID: "r1/0/c1", Seq: 2, CallID: "call_1", Event: weft.TextDelta{RunID: "r1/0/c1/0/call_1", Text: "deep"}}},
+			`{"type":"nested","run_id":"r1","seq":5,"call_id":"c1","event":{"type":"nested","run_id":"r1/0/c1","seq":2,"call_id":"call_1","event":{"type":"text_delta","run_id":"r1/0/c1/0/call_1","text":"deep"}}}`},
 	}
 	for i, tc := range cases {
 		b, err := json.Marshal(tc.ev)
@@ -2584,5 +2588,575 @@ func TestRepairNeverWritesIntoCallerMemory(t *testing.T) {
 	}
 	if got := parts[0]; got == nil {
 		t.Error("input parts disturbed")
+	}
+}
+
+// --- Subagents as tools (TODO §5.1, ADR 0014) ---
+
+// streamEvents runs agt to completion, returning every event in
+// emission order.
+func streamEvents(t *testing.T, agt *weft.Agent, opts ...weft.RunOption) ([]weft.Event, *weft.RunResult) {
+	t.Helper()
+	run := agt.Stream(context.Background(), opts...)
+	var evs []weft.Event
+	for ev, err := range run.Events() {
+		if err != nil {
+			t.Fatalf("stream error: %v", err)
+		}
+		evs = append(evs, ev)
+	}
+	res, err := run.Wait()
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	return evs, res
+}
+
+// A subagent is an ordinary tool: it registers with New, dispatches
+// through the chain, and every ToolOption applies to it.
+func TestSubagentIsAnOrdinaryTool(t *testing.T) {
+	child := weft.New(wefttest.Script(wefttest.Say("found: 3 orders")))
+	def := weft.Subagent("research", "Research a topic.", child, weft.Timeout(30*time.Second))
+	if def.Name != "research" {
+		t.Fatalf("tool name = %q", def.Name)
+	}
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"find orders"}`}),
+		wefttest.Say("done"),
+	), def)
+	if _, ok := agt.Tools()[0].InputSchema.Properties["prompt"]; !ok {
+		t.Error("the subagent tool did not register with New")
+	}
+	res, err := agt.Generate(context.Background(), weft.Prompt("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := res.Steps[0].Results[0]; r.IsError || r.Content != "found: 3 orders" {
+		t.Errorf("result = %+v, want the child's final text", r)
+	}
+	// The per-tool option reached the manifest, as for any tool.
+	b, err := weft.Manifest(weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("a"), def))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"timeout": "30s"`) {
+		t.Error("per-subagent Timeout not recorded in the manifest")
+	}
+}
+
+// The input schema is exactly one required prompt string; the output is
+// the child's final text (a string Out, so no output schema).
+func TestSubagentSchema(t *testing.T) {
+	child := weft.New(wefttest.Script(wefttest.Say("ok")))
+	def := weft.Subagent("research", "Research a topic.", child)
+	b, err := json.Marshal(def.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"type":"object","properties":{"prompt":{"type":"string","description":"The task, stated in full: the agent sees only this prompt, not the conversation."}},"required":["prompt"]}`
+	if string(b) != want {
+		t.Errorf("input schema:\n got  %s\n want %s", b, want)
+	}
+	if def.OutputSchema != nil {
+		t.Errorf("output schema = %v, want none (string Out is verbatim)", def.OutputSchema)
+	}
+}
+
+// The child's events arrive wrapped in Nested, numbered from the
+// parent's counter, bracketed by the delegating call's ToolStart and
+// ToolFinish, and never after the finish (the late-event rule).
+func TestSubagentNestedEventsAreOrdered(t *testing.T) {
+	child := weft.New(wefttest.Script(wefttest.Say("found it")))
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"p"}`}),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child))
+	evs, _ := streamEvents(t, parent, weft.Prompt("q"), weft.RunID("r1"))
+
+	var last int64
+	var nested []weft.Event
+	finishIdx := -1
+	for i, ev := range evs {
+		switch e := ev.(type) {
+		case weft.ToolStart:
+			if e.Seq <= last {
+				t.Fatalf("ToolStart Seq %d not after %d", e.Seq, last)
+			}
+			last = e.Seq
+		case weft.ToolFinish:
+			if e.Seq <= last {
+				t.Fatalf("ToolFinish Seq %d not after %d", e.Seq, last)
+			}
+			last = e.Seq
+			finishIdx = i
+			if e.Content != "found it" {
+				t.Errorf("finish content = %q", e.Content)
+			}
+		case weft.Nested:
+			if e.Seq <= last {
+				t.Fatalf("Nested Seq %d not after %d", e.Seq, last)
+			}
+			last = e.Seq
+			if e.RunID != "r1" || e.CallID != "call_1" {
+				t.Errorf("nested envelope = %+v", e)
+			}
+			nested = append(nested, e.Event)
+		}
+	}
+	if finishIdx < 0 {
+		t.Fatal("the delegating call never finished")
+	}
+	for _, ev := range evs[finishIdx+1:] {
+		if n, ok := ev.(weft.Nested); ok && n.CallID == "call_1" {
+			t.Errorf("Nested delivered after the call's ToolFinish: %+v", n)
+		}
+	}
+	kinds := make([]string, len(nested))
+	for i, ev := range nested {
+		kinds[i] = fmt.Sprintf("%T", ev)
+	}
+	want := []string{"weft.RunStart", "weft.StepStart", "weft.TextDelta", "weft.StepFinish", "weft.RunFinish"}
+	if !slices.Equal(kinds, want) {
+		t.Errorf("child event kinds = %v, want %v", kinds, want)
+	}
+}
+
+// Nested round-trips the wire byte-exactly, recursing into the inner
+// event; an unknown inner type is an error, never a drop.
+func TestNestedEventRoundTrip(t *testing.T) {
+	outer := weft.Nested{RunID: "r1", Seq: 9, CallID: "c1",
+		Event: weft.Nested{RunID: "r1/0/c1", Seq: 3, CallID: "call_1",
+			Event: weft.ToolStart{RunID: "r1/0/c1/0/call_1", Seq: 1, CallID: "p1", Name: "deep_search", Args: json.RawMessage(`{}`)}}}
+	b, err := json.Marshal(outer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := weft.UnmarshalEvent(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := json.Marshal(back)
+	if err != nil || string(b2) != string(b) {
+		t.Errorf("round trip unstable:\n first %s\n second %s (%v)", b, b2, err)
+	}
+	if _, err := weft.UnmarshalEvent([]byte(`{"type":"nested","run_id":"r1","seq":1,"call_id":"c","event":{"type":"nope"}}`)); err == nil {
+		t.Error("an unknown inner event type decoded without error")
+	}
+}
+
+// Child usage is added to the run total and recorded per call;
+// StepRecord.Usage and StepFinish.Usage stay the model call's own.
+func TestSubagentUsageRollsUp(t *testing.T) {
+	child := weft.New(wefttest.Script(wefttest.Say("ok")))
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child))
+	evs, res := streamEvents(t, parent, weft.Prompt("q"))
+	// 2 parent steps × (10/5) + 1 child step × (10/5).
+	wantTotal := weft.Usage{InputTokens: 30, OutputTokens: 15}
+	if res.Usage != wantTotal {
+		t.Errorf("RunResult.Usage = %+v, want %+v", res.Usage, wantTotal)
+	}
+	step := res.Steps[0]
+	if step.Usage != (weft.Usage{InputTokens: 10, OutputTokens: 5}) {
+		t.Errorf("StepRecord.Usage = %+v, want the model call's own", step.Usage)
+	}
+	if got := step.SubagentUsage["call_1"]; got != (weft.Usage{InputTokens: 10, OutputTokens: 5}) {
+		t.Errorf("SubagentUsage[call_1] = %+v", got)
+	}
+	if res.Steps[1].SubagentUsage != nil {
+		t.Errorf("step 1 SubagentUsage = %v, want nil (no subagent ran)", res.Steps[1].SubagentUsage)
+	}
+	var sf weft.StepFinish
+	for _, ev := range evs {
+		if e, ok := ev.(weft.StepFinish); ok && e.Index == 0 {
+			sf = e
+		}
+	}
+	if sf.Usage != (weft.Usage{InputTokens: 10, OutputTokens: 5}) {
+		t.Errorf("StepFinish.Usage = %+v, want the model call's own", sf.Usage)
+	}
+}
+
+// A failed child is data: SUBAGENT_FAILED reaches the model, the parent
+// run continues, and the child's *RunError is reachable through
+// ToolError.Err for middleware.
+func TestSubagentFailureIsData(t *testing.T) {
+	boomed := errors.New("provider down")
+	child := weft.New(wefttest.Script(wefttest.Fail(boomed)))
+	var childErr *weft.RunError
+	spy := func(next weft.ToolCaller) weft.ToolCaller {
+		return func(ctx context.Context, call weft.ToolCallPart) (string, error) {
+			out, err := next(ctx, call)
+			var te *weft.ToolError
+			if errors.As(err, &te) {
+				errors.As(te.Err, &childErr)
+			}
+			return out, err
+		}
+	}
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}),
+		wefttest.Say("recovered"),
+	), weft.Subagent("research", "Research.", child), weft.WrapTools(spy))
+	res, err := parent.Generate(context.Background(), weft.Prompt("q"))
+	if err != nil {
+		t.Fatalf("a failed child must not fail the parent: %v", err)
+	}
+	r := res.Steps[0].Results[0]
+	if !r.IsError {
+		t.Fatal("the child failure was not an error result")
+	}
+	want := `SUBAGENT_FAILED: agent "research" failed at step 0: model stream: provider down`
+	if r.Content != want {
+		t.Errorf("content = %q, want %q", r.Content, want)
+	}
+	if childErr == nil || !errors.Is(childErr.Err, boomed) || childErr.Step != 0 {
+		t.Errorf("ToolError.Err did not reach the child *RunError: %+v", childErr)
+	}
+}
+
+// Parent cancellation cancels the child at its next ctx check.
+func TestSubagentFollowsParentCancellation(t *testing.T) {
+	started := make(chan struct{})
+	childCancelled := make(chan struct{})
+	probe := weft.Tool("probe", "", func(ctx context.Context, _ struct{}) (string, error) {
+		close(started)
+		<-ctx.Done()
+		close(childCancelled)
+		return "never", nil
+	})
+	child := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "probe"}),
+		wefttest.Say("ok"),
+	), probe)
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child))
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-started
+		cancel()
+	}()
+	_, err := parent.Generate(ctx, weft.Prompt("q"))
+	var re *weft.RunError
+	if !errors.As(err, &re) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want a RunError wrapping context.Canceled", err)
+	}
+	select {
+	case <-childCancelled:
+	default:
+		t.Error("the child was not cancelled with the parent")
+	}
+}
+
+// A Timeout on the subagent tool bounds the child run; the ordinary
+// timeout result is recorded, and no Nested event for the call is
+// delivered after its ToolFinish.
+func TestSubagentTimeoutClosesNesting(t *testing.T) {
+	probe := weft.Tool("probe", "", func(ctx context.Context, _ struct{}) (string, error) {
+		<-ctx.Done() // honours the deadline
+		return "late", nil
+	})
+	child := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "probe"}),
+		wefttest.Say("ok"),
+	), probe)
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child, weft.Timeout(50*time.Millisecond)))
+	evs, _ := streamEvents(t, parent, weft.Prompt("q"))
+	finishIdx, sawNested := -1, false
+	for i, ev := range evs {
+		switch e := ev.(type) {
+		case weft.Nested:
+			if e.CallID == "call_1" {
+				sawNested = true
+			}
+		case weft.ToolFinish:
+			finishIdx = i
+			if want := `tool "research" timed out after 50ms`; e.Content != want {
+				t.Errorf("content = %q, want %q", e.Content, want)
+			}
+		}
+	}
+	if finishIdx < 0 || !sawNested {
+		t.Fatalf("finishIdx = %d, sawNested = %v", finishIdx, sawNested)
+	}
+	for _, ev := range evs[finishIdx+1:] {
+		if n, ok := ev.(weft.Nested); ok && n.CallID == "call_1" {
+			t.Errorf("Nested delivered after the timed-out finish: %+v", n)
+		}
+	}
+}
+
+// A child that ends pending is a loud tool error: the parent's
+// transcript has nowhere to carry the child's approval decision.
+func TestSubagentPendingIsLoud(t *testing.T) {
+	pay := weft.Tool("pay", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "paid", nil
+	}, weft.RequireApproval())
+	child := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "pay"}),
+		wefttest.Say("never reached"),
+	), pay)
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}),
+		wefttest.Say("recovered"),
+	), weft.Subagent("research", "Research.", child))
+	res, err := parent.Generate(context.Background(), weft.Prompt("q"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := res.Steps[0].Results[0]
+	want := `SUBAGENT_PENDING: agent "research" ended awaiting approval of 1 call(s)`
+	if !r.IsError || r.Content != want {
+		t.Errorf("result = %+v, want %q", r, want)
+	}
+}
+
+// A delegation to an agent already running in the call chain is refused
+// before any model call — the inner agents' scripts would be exhausted
+// otherwise.
+func TestSubagentCycleIsRefused(t *testing.T) {
+	aModel := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "use_b"}),
+		wefttest.Say("done"),
+	)
+	bModel := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "use_a"}),
+		wefttest.Say("b done"),
+	)
+	var a *weft.Agent
+	b := weft.New(bModel, weft.ToolSource(func() []*weft.ToolDef {
+		return []*weft.ToolDef{weft.Subagent("use_a", "Back to A.", a)}
+	}))
+	a = weft.New(aModel, weft.Subagent("use_b", "To B.", b))
+	evs, res := streamEvents(t, a, weft.Prompt("q"), weft.RunID("r1"))
+	if r := res.Steps[0].Results[0]; r.IsError || r.Content != "b done" {
+		t.Errorf("outer delegation = %+v", r)
+	}
+	var cycle string
+	for _, ev := range wefttest.Flatten(evs) {
+		if f, ok := ev.(weft.ToolFinish); ok && f.Name == "use_a" {
+			cycle = f.Content
+		}
+	}
+	want := `SUBAGENT_CYCLE: agent "use_a" is already running in this call chain`
+	if cycle != want {
+		t.Errorf("cycle result = %q, want %q", cycle, want)
+	}
+	// No extra model call: both scripts were consumed by exactly their
+	// two turns.
+	if got := len(aModel.Requests()); got != 2 {
+		t.Errorf("A made %d model calls, want 2 (the inner A never ran)", got)
+	}
+	if got := len(bModel.Requests()); got != 2 {
+		t.Errorf("B made %d model calls, want 2", got)
+	}
+}
+
+// The child's run id is derived from the parent's; CallFromContext
+// inside the child reports it.
+func TestSubagentLineageIDs(t *testing.T) {
+	var childCall weft.Call
+	ping := weft.Tool("ping", "", func(ctx context.Context, _ struct{}) (string, error) {
+		childCall, _ = weft.CallFromContext(ctx)
+		return "pong", nil
+	})
+	child := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "ping"}),
+		wefttest.Say("ok"),
+	), ping)
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research", ID: "call_9"}),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child))
+	evs, _ := streamEvents(t, parent, weft.Prompt("q"), weft.RunID("r1"))
+	var ids []string
+	for _, ev := range wefttest.Flatten(evs) {
+		if rs, ok := ev.(weft.RunStart); ok {
+			ids = append(ids, rs.ID)
+		}
+	}
+	if !slices.Equal(ids, []string{"r1", "r1/0/call_9"}) {
+		t.Errorf("RunStart ids = %v", ids)
+	}
+	if childCall.RunID != "r1/0/call_9" || childCall.Step != 0 || childCall.Name != "ping" {
+		t.Errorf("CallFromContext inside the child = %+v", childCall)
+	}
+}
+
+// A child built with Output returns the submitted JSON bytes verbatim.
+func TestSubagentTypedOutput(t *testing.T) {
+	type Verdict struct {
+		Approved bool   `json:"approved"`
+		Reason   string `json:"reason"`
+	}
+	child := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "submit_output", Args: `{"approved":true,"reason":"ok"}`}),
+	), weft.Output[Verdict]())
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child))
+	res, err := parent.Generate(context.Background(), weft.Prompt("q"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Steps[0].Results[0].Content; got != `{"approved":true,"reason":"ok"}` {
+		t.Errorf("typed delegation = %q, want the submitted bytes verbatim", got)
+	}
+}
+
+// The child's taps see its raw events; the parent's taps see the Nested
+// wrappers — never the child's events bare.
+func TestSubagentTapsSeeTheirOwnLevel(t *testing.T) {
+	var childSeen, parentSeen []weft.Event
+	child := weft.New(wefttest.Script(wefttest.Say("hi")),
+		weft.Tap(func(_ context.Context, ev weft.Event) { childSeen = append(childSeen, ev) }))
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child),
+		weft.Tap(func(_ context.Context, ev weft.Event) { parentSeen = append(parentSeen, ev) }))
+	if _, err := parent.Generate(context.Background(), weft.Prompt("q"), weft.RunID("p1")); err != nil {
+		t.Fatal(err)
+	}
+	sawText := false
+	for _, ev := range childSeen {
+		if _, ok := ev.(weft.Nested); ok {
+			t.Error("the child's tap saw a Nested wrapper")
+		}
+		if _, ok := ev.(weft.TextDelta); ok {
+			sawText = true
+		}
+	}
+	if !sawText {
+		t.Error("the child's tap saw no raw TextDelta")
+	}
+	sawNested := false
+	for _, ev := range parentSeen {
+		if td, ok := ev.(weft.TextDelta); ok && td.RunID != "p1" {
+			t.Errorf("the parent's tap saw a bare child event: %+v", td)
+		}
+		if _, ok := ev.(weft.Nested); ok {
+			sawNested = true
+		}
+	}
+	if !sawNested {
+		t.Error("the parent's tap saw no Nested wrapper")
+	}
+}
+
+// Outside the loop the child still runs — no emitter, no usage sink, an
+// empty ancestry — and returns the same text.
+func TestSubagentOutsideTheLoop(t *testing.T) {
+	var childEvents []weft.Event
+	child := weft.New(wefttest.Script(wefttest.Say("standalone"), wefttest.Say("standalone")),
+		weft.Tap(func(_ context.Context, ev weft.Event) { childEvents = append(childEvents, ev) }))
+	def := weft.Subagent("research", "Research.", child)
+	out, err := def.Invoke(context.Background(), json.RawMessage(`{"prompt":"hi"}`))
+	if err != nil || out != "standalone" {
+		t.Fatalf("Invoke = %q, %v", out, err)
+	}
+	agt := weft.New(wefttest.Script(wefttest.Say("x")), def)
+	out2, err := agt.CallTool(context.Background(), weft.ToolCallPart{ID: "c1", Name: "research", Args: json.RawMessage(`{"prompt":"hi"}`)})
+	if err != nil || out2 != "standalone" {
+		t.Fatalf("CallTool = %q, %v", out2, err)
+	}
+	if len(childEvents) == 0 {
+		t.Error("the child did not run")
+	}
+}
+
+// The manifest names the child on the tool; an unnamed child omits the
+// field, and the manifest does not recurse into it.
+func TestManifestSubagent(t *testing.T) {
+	child := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("researcher"))
+	parent := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("orchestrator"),
+		weft.Subagent("research", "Research.", child))
+	b, err := weft.Manifest(parent, child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"subagent": "researcher"`) {
+		t.Errorf("manifest missing the delegation edge:\n%s", b)
+	}
+	anon := weft.New(wefttest.Script(wefttest.Say("ok")))
+	parent2 := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("p2"),
+		weft.Subagent("research", "Research.", anon))
+	b2, err := weft.Manifest(parent2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b2), `"subagent"`) {
+		t.Errorf("unnamed child should omit the field:\n%s", b2)
+	}
+}
+
+func TestSubagentNilChildPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Subagent with a nil child did not panic")
+		}
+	}()
+	weft.Subagent("research", "Research.", nil)
+}
+
+// A grandchild event is a Nested inside a Nested, in the child's
+// emission order.
+func TestSubagentGrandchildDoubleWrap(t *testing.T) {
+	c := weft.New(wefttest.Script(wefttest.Say("deep")))
+	b := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "grand"}),
+		wefttest.Say("mid"),
+	), weft.Subagent("grand", "To C.", c))
+	a := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "use_b"}),
+		wefttest.Say("top"),
+	), weft.Subagent("use_b", "To B.", b))
+	evs, _ := streamEvents(t, a, weft.Prompt("q"), weft.RunID("r1"))
+	var deep bool
+	for _, ev := range evs {
+		n, ok := ev.(weft.Nested)
+		if !ok {
+			continue
+		}
+		inner, ok := n.Event.(weft.Nested)
+		if !ok {
+			continue
+		}
+		if n.RunID != "r1" || n.CallID != "call_1" {
+			t.Errorf("outer envelope = %+v", n)
+		}
+		if inner.RunID != "r1/0/call_1" || inner.CallID != "call_1" {
+			t.Errorf("inner envelope = %+v", inner)
+		}
+		if td, ok := inner.Event.(weft.TextDelta); ok && td.Text == "deep" {
+			deep = true
+		}
+	}
+	if !deep {
+		t.Error("no double-wrapped grandchild TextDelta in the parent stream")
+	}
+}
+
+// Generate consumes no events, but the child's usage still rolls up.
+func TestSubagentUnderGenerateStillRollsUsage(t *testing.T) {
+	child := weft.New(wefttest.Script(wefttest.Say("ok")))
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research"}),
+		wefttest.Say("done"),
+	), weft.Subagent("research", "Research.", child))
+	res, err := parent.Generate(context.Background(), weft.Prompt("q"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (weft.Usage{InputTokens: 30, OutputTokens: 15}); res.Usage != want {
+		t.Errorf("usage = %+v, want %+v", res.Usage, want)
 	}
 }

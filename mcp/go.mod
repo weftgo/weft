@@ -6,3 +6,8 @@ go 1.26
 // once weftgo/weft is pushed and tagged, drop this replace and require
 // a tagged root.
 replace github.com/weftgo/weft => ../
+
+require (
+	github.com/google/jsonschema-go v0.4.3
+	github.com/weftgo/weft v0.0.0-00010101000000-000000000000
+)

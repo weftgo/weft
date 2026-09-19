@@ -9,6 +9,7 @@ package weft
 // schema_test.go (foreign embedded type plus own field is vet-clean).
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -257,5 +258,39 @@ func TestSchemaDiamondEmbeddedConflictCancels(t *testing.T) {
 	}
 	if len(s.Required) != 0 {
 		t.Errorf("required = %v, want none", s.Required)
+	}
+}
+
+// A tagged embed whose type name is unexported is an ordinary named
+// field on the wire — encoding/json marshals it — so the schema must
+// advertise it as a nested object. Found by the §7.1 corpus (2026-09
+// —19); the schema used to drop the name entirely (the IsExported skip
+// applied to anonymous fields too), leaving the model unable to see a
+// field the decoder accepts (ADR 0003's amendment).
+func TestTaggedEmbedOfUnexportedTypeIsAdvertised(t *testing.T) {
+	type hidden struct {
+		Kind string `json:"kind"`
+	}
+	type input struct {
+		hidden  `json:"cfg"`
+		Visible string `json:"visible"`
+	}
+	wire, err := json.Marshal(input{Visible: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(wire), `"cfg":{"kind":""}`) {
+		t.Fatalf("precondition: wire = %s, want cfg nested", wire)
+	}
+	tool := Tool("t", "", func(_ context.Context, _ input) (string, error) {
+		return "", nil
+	})
+	got, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"type":"object","properties":{"cfg":{"type":"object","properties":{"kind":{"type":"string"}},"required":["kind"]},"visible":{"type":"string"}},"required":["cfg","visible"]}`
+	if string(got) != want {
+		t.Errorf("schema:\n got  %s\n want %s", got, want)
 	}
 }

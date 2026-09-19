@@ -202,3 +202,64 @@ The `Replay` option above is deleted until the checkpoint store ships
 (ADR 0006's same-day amendment carries the reasoning); the manifest's
 `replay` key goes with it. Everything else in the 2026-09-14 list
 stands.
+
+
+## Amendment (2026-09-19 — §7.1: the schema corpus, the verdict,
+## ParseSchema, and one derivation bug the corpus found)
+
+TODO §7.1 measured the hand-rolled reflector against
+`google/jsonschema-go` v0.4.3 (`jsonschema.For[T]`, the reflector
+behind the official MCP SDK) on a corpus of tool input structs — one
+per derivation rule this ADR pins (`mcp/schema_corpus_test.go`; the
+table prints under `go test -v`).
+
+**Verdict: keep the hand-rolled, zero-dependency reflector.** The
+plan's prediction held, and the evidence is stronger than predicted —
+three rows show jsonschema-go v0.4.3 deriving a schema that does not
+match the wire `encoding/json` produces, and it cannot derive
+recursive types at all:
+
+| Row class | Rows | Finding |
+|---|---|---|
+| identical (policy-only differences) | 17 of 22 | scalars, pointers, `omitempty`, naming, descriptions, arrays, maps, nested structs, `time.Time`, `any`/interface fields, untagged and shadowing embeds, pointer-to-struct `In`, the repo's own shapes, empty struct — identical once weft's documented policies are set aside: struct objects left open (the loop decodes leniently; a schema must not advertise a constraint the decoder does not enforce), pointer ⇒ optional (this ADR), `format: date-time` (this ADR's 2026-09-09 amendment), optional narrowing bounds omitted (`minimum`/`maximum` on integer widths, `minItems`/`maxItems` on fixed arrays — decode still rejects out-of-range values, so nothing is silently accepted) |
+| jsonschema-go wire-wrong | `[]byte`, `json:",string"`, tagged embed | `[]byte` derives an array of 0..255 integers where the wire is a base64 string; `,string` fields derive the bare type where the wire demands quotes; an embedded struct with a json name tag is flattened where the wire nests it under the tag. weft's renderings are the wire forms (the `,string` rule is this ADR's 2026-09-18 amendment) |
+| jsonschema-go cannot derive | recursive types | `For` fails with "cycle detected"; weft terminates with the bare object the loop decodes into (this ADR's original rule) |
+
+One real weft bug surfaced and is fixed: **a tagged embed whose type
+name is unexported** (`type input struct{ hidden `json:"cfg"}`) is
+marshalled by `encoding/json` as a nested `"cfg"` object but was
+dropped from the schema — the `IsExported` skip applied to anonymous
+fields, which encoding/json exempts. The schema now advertises it
+(`schema_conflict_test.go` pins it). No golden changed: no existing
+input used the shape.
+
+**`weft.ParseSchema(b json.RawMessage) (*Schema, error)`** reads a
+JSON Schema document from outside Go — an MCP server's `inputSchema`,
+a plugin manifest: the structured fields it knows are populated for
+readers that walk the tree, and the document's own bytes are kept in
+an unexported field that the new `Schema.MarshalJSON` re-emits
+verbatim. An `enum`, `oneOf`, `minimum`, `pattern` or `$ref` the
+`Schema` type cannot express therefore reaches the model exactly as
+the server wrote it, instead of being degraded to the struct's
+vocabulary — the import half of the `oneOf` residue (§7.4). The
+top-level type must be an object, enforced at parse (fail at import,
+not at the first model call). A reflected schema has no stored bytes
+and marshals exactly as before, so every committed golden is
+unchanged.
+
+**One rendering change rode the new single schema path:** the
+adapters' hand-built schema maps (`adapterkit.SchemaMap`, and
+google's `genaiSchema`) were replaced by render-through-`json.Marshal`
+(so a parsed schema crosses whole; one rendering instead of two). The
+hand-built map always wrote `"type"`, so an unconstrained node (a
+recursion cut, an interface field) reached OpenAI and Anthropic as
+`{"type": ""}` and now reaches them as `{}` — the same thing the
+reflected encoding always said. No test pinned the old bytes; the new
+rendering is pinned in `adapterkit_test.go`. Gemini's conversion goes
+through the same round trip and drops what `genai.Schema` has no field
+for (`additionalProperties`, `oneOf`, …), the documented per-field
+Gemini limit, as before.
+
+The same-depth cancellation row could not sit in the corpus (declaring
+the conflicting embeds trips go vet's structtag check); it stays
+pinned in `schema_conflict_test.go`.

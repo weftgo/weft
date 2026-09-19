@@ -235,7 +235,12 @@ func collectClaims(t reflect.Type, visiting map[reflect.Type]bool, depth int, x 
 			delete(visiting, ft)
 			continue
 		}
-		if !f.IsExported() {
+		// An anonymous field with a name tag is an ordinary named field
+		// on the wire — encoding/json marshals it even when the
+		// embedded type's name is unexported (found by the §7.1 corpus:
+		// the wire carried "cfg":{...} the schema never advertised) —
+		// so the unexported skip below applies to ordinary fields only.
+		if !f.IsExported() && !f.Anonymous {
 			continue
 		}
 		if name == "" {

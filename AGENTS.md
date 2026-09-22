@@ -108,6 +108,8 @@ res2, err := agt.Generate(ctx, weft.Messages(res.Messages...), weft.Prompt("And 
 agt := weft.New(model, weft.Output[Verdict](), lookup)
 v, res, err := weft.GenerateAs[Verdict](ctx, agt, weft.Prompt("..."))   // ErrNoOutput if none
 v, err := weft.OutputOf[Verdict](res)                                    // after Stream + Wait
+dec := weft.NewOutputDecoder[Verdict]()                                 // partials while it streams:
+//   for ev := range run.Events() { if p, ok := dec.Feed(ev); ok { render(p) } }; dec.Result()
 
 // 5. Describe the fleet: weft.Manifest(agents...) → weft.json (generated,
 //    committed, golden-gated; never read back).

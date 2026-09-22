@@ -851,3 +851,37 @@ func ExampleParams() {
 	// Output:
 	// A billing question, answered at temperature 0.9.
 }
+
+// An OutputDecoder renders structured output while it streams: feed it
+// the events you already consume and draw the filling-in form.
+func ExampleOutputDecoder() {
+	type Form struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	}
+	turn := wefttest.Raw(
+		weft.ModelToolCallDelta{Index: 0, Name: "submit_output", Args: `{"name":"Ada",`},
+		weft.ModelToolCallDelta{Index: 0, Name: "submit_output", Args: `"count":3}`},
+		weft.ModelToolCall{ID: "c1", Name: "submit_output", Args: json.RawMessage(`{"name":"Ada","count":3}`)},
+		weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 3, OutputTokens: 2}},
+	)
+	run := weft.New(wefttest.Script(turn), weft.Output[Form]()).Stream(context.Background(), weft.Prompt("fill the form"))
+	dec := weft.NewOutputDecoder[Form]()
+	for ev, err := range run.Events() {
+		if err != nil {
+			log.Fatal(err)
+		}
+		if p, ok := dec.Feed(ev); ok {
+			fmt.Printf("render: name=%q count=%d\n", p.Name, p.Count)
+		}
+	}
+	form, err := dec.Result()
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("final:  name=%q count=%d\n", form.Name, form.Count)
+	// Output:
+	// render: name="Ada" count=0
+	// render: name="Ada" count=3
+	// final:  name="Ada" count=3
+}

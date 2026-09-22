@@ -2,10 +2,12 @@ package weft
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"runtime"
 	"slices"
+	"strings"
 )
 
 // outputToolName is the tool Output registers. The model calls it with
@@ -136,6 +138,117 @@ func OutputOf[Out any](res *RunResult) (Out, error) {
 	if err != nil {
 		// The handler decoded these same bytes; a failure here
 		// means Out differs from the type given to Output.
+		return zero, fmt.Errorf("%w: %v", ErrNoOutput, err)
+	}
+	return out, nil
+}
+
+// OutputDecoder turns a streaming run's submit_output argument deltas
+// into a filling-in Out — the UI half of structured output: a consumer
+// rendering a form as the model writes it. It is a decoder value, not
+// an event-stream wrapper: feed it the events you already consume and
+// render what comes back.
+//
+//	dec := weft.NewOutputDecoder[Form]()
+//	for ev, err := range run.Events() {
+//	    if err != nil { return err }
+//	    if p, ok := dec.Feed(ev); ok { render(p) }
+//	}
+//	form, err := dec.Result()
+//
+// The decoder keys on the submit_output stream identity ToolArgsDelta
+// carries — the tool name and step boundaries — resets its buffer on
+// StepStart, and closes it on the matching ToolFinish. Nested events
+// are ignored: a subagent's structured output is its own decoder's
+// job. Decode is lenient and prefix-shaped: after each delta it
+// attempts the longest closed prefix of the arguments so far (see
+// partial_json.go) and reports it when it changed and decoded — fields
+// not yet present stay zero, a garbage mid-stream prefix keeps the
+// last good partial, and errors surface only at Result, which follows
+// the OutputOf rule (the last submit_output call with a non-error
+// result) and returns ErrNoOutput when none finished. Never
+// model-visible: the decoder reads the stream and writes nothing back.
+type OutputDecoder[Out any] struct {
+	buf       strings.Builder
+	lastGood  string
+	partial   Out
+	changed   bool // attempt's verdict, carried to Feed's return
+	closed    bool // a ToolFinish closed the current buffer
+	candidate []byte
+}
+
+// NewOutputDecoder returns a decoder ready to feed a run's events.
+func NewOutputDecoder[Out any]() *OutputDecoder[Out] {
+	return &OutputDecoder[Out]{}
+}
+
+// Feed consumes one run event. It ignores everything except this run's
+// StepStart, the submit_output ToolArgsDelta stream, and the
+// submit_output ToolFinish; after an args delta it returns the
+// best-effort partial Out and ok == true when the partial changed.
+func (d *OutputDecoder[Out]) Feed(ev Event) (partial Out, ok bool) {
+	d.changed = false
+	switch e := ev.(type) {
+	case StepStart:
+		d.buf.Reset()
+		d.lastGood = ""
+		d.closed = false
+	case ToolStart:
+		if e.Name == outputToolName {
+			// Calls arrive whole: the assembled args may be the first
+			// content the buffer sees (Google) or identical to the
+			// concatenated deltas. lastGood survives, so a re-decode of
+			// the same prefix reports no change.
+			d.buf.Reset()
+			d.buf.Write(cloneRaw(e.Args))
+			d.closed = false
+			d.attempt()
+		}
+	case ToolArgsDelta:
+		if e.Name != outputToolName || d.closed {
+			return d.partial, false
+		}
+		d.buf.WriteString(e.Args)
+		d.attempt()
+	case ToolFinish:
+		if e.Name != outputToolName || e.IsError {
+			return d.partial, false
+		}
+		d.closed = true
+		d.candidate = []byte(d.buf.String())
+	}
+	return d.partial, d.changed
+}
+
+// attempt decodes the buffer's closed prefix, keeping the last good
+// partial on failure. ok is decided on bytes: the prefix must differ
+// from the last one that decoded (Out need not be comparable).
+func (d *OutputDecoder[Out]) attempt() {
+	d.changed = false
+	if d.buf.Len() == 0 {
+		return
+	}
+	prefix := closedPrefix(d.buf.String())
+	if prefix == "" || prefix == d.lastGood {
+		return
+	}
+	var out Out
+	if err := json.Unmarshal([]byte(prefix), &out); err != nil {
+		return
+	}
+	d.partial, d.lastGood, d.changed = out, prefix, true
+}
+
+// Result decodes the completed submission — the last submit_output
+// call with a non-error result, the OutputOf rule — and returns
+// ErrNoOutput when no valid call finished.
+func (d *OutputDecoder[Out]) Result() (Out, error) {
+	var zero Out
+	if len(d.candidate) == 0 {
+		return zero, ErrNoOutput
+	}
+	out, err := decodeInput[Out](outputToolName, d.candidate, false)
+	if err != nil {
 		return zero, fmt.Errorf("%w: %v", ErrNoOutput, err)
 	}
 	return out, nil

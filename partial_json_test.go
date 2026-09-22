@@ -1,0 +1,104 @@
+package weft
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestClosedPrefix(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{``, ``},
+		{`{"a":1}`, `{"a":1}`},            // already valid: unchanged
+		{`{"a":1`, `{"a":1}`},             // close-only: member is whole
+		{`{"a":1,`, `{"a":1}`},            // dangling comma trimmed
+		{`{"a":1,"b":2`, `{"a":1,"b":2}`}, // closes whole: the 2 may grow, fields do not
+		{`{"a":1,"b":2,`, `{"a":1,"b":2}`},
+		{`{"a":{"x":1},"b":"te`, `{"a":{"x":1},"b":"te"}`}, // open string closes over its content
+		{`{"a":"he`, `{"a":"he"}`},
+		{`{"a":1,"b":{"c":2`, `{"a":1,"b":{"c":2}}`},
+		{`{"a":1,"b":tru`, `{"a":1}`}, // a bare literal cut mid-token cannot close: member dropped
+		{`{"a":1,"b":1e`, `{"a":1}`},
+		{`[1,2,`, `[1,2]`},
+		{`[1,2`, `[1,2]`},
+		{`{"a":"x\\"`, `{"a":"x\\"}`}, // dangling escape closed before the quote
+		{`{"a":1}}`, `{"a":1}`},       // garbage after the close: keep the valid prefix
+		{`not json`, ``},
+		{`12`, ``}, // scalars never carry tool args
+	}
+	for _, tc := range cases {
+		if got := closedPrefix(tc.in); got != tc.want {
+			t.Errorf("closedPrefix(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// FuzzPartialJSON checks the prefix closer: any byte string must not
+// panic, and for any decodable JSON document, the closed prefix of a
+// truncation never decodes to more populated fields than the closed
+// prefix of the whole string — the decoder's filling-form promise
+// (TODO §2a.6).
+func FuzzPartialJSON(f *testing.F) {
+	for _, seed := range []string{
+		`{"name":"Ada","count":4}`,
+		`{"a":{"b":[1,2,{"c":true}]},"d":null}`,
+		`{"esc":"a\"b\\c","t":1e5}`,
+		`[1,2,3]`,
+		`{"unicode":"héllo","emoji":"🎮"}`,
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, data string) {
+		var whole any
+		if err := json.Unmarshal([]byte(data), &whole); err != nil {
+			return // not JSON: only the no-panic guarantee applies
+		}
+		full := closedPrefix(data)
+		if full == "" {
+			return
+		}
+		var fullDoc any
+		if err := json.Unmarshal([]byte(full), &fullDoc); err != nil {
+			t.Fatalf("closedPrefix(%q) = %q, which does not decode: %v", data, full, err)
+		}
+		for i := 0; i <= len(data); i++ {
+			part := closedPrefix(data[:i])
+			if part == "" {
+				continue
+			}
+			var partDoc any
+			if err := json.Unmarshal([]byte(part), &partDoc); err != nil {
+				t.Fatalf("closedPrefix(%q) = %q, which does not decode: %v", data[:i], part, err)
+			}
+			if !subsetOf(partDoc, fullDoc) {
+				t.Fatalf("prefix %q of %q decodes to more than the full closed prefix %q:\n%#v\nvs\n%#v",
+					part, data, full, partDoc, fullDoc)
+			}
+		}
+	})
+}
+
+// subsetOf reports whether every field present in part is present in
+// whole with a subset value (recursively); arrays compare by length.
+func subsetOf(part, whole any) bool {
+	switch p := part.(type) {
+	case map[string]any:
+		w, ok := whole.(map[string]any)
+		if !ok {
+			return false
+		}
+		for k, v := range p {
+			wv, ok := w[k]
+			if !ok || !subsetOf(v, wv) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		w, ok := whole.([]any)
+		return ok && len(p) <= len(w)
+	default:
+		return true // a scalar present in part: whole carries some value
+	}
+}

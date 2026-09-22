@@ -2,6 +2,7 @@ package weft_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -102,4 +103,99 @@ func TestOutputRejectsNonStruct(t *testing.T) {
 		}
 	}()
 	weft.Output[string]()
+}
+
+type formOut struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Count int    `json:"count"`
+}
+
+// The golden partial sequence: each delta grows the closed prefix, and
+// Feed reports the partial exactly when it changed. Deltas scripted
+// with Raw, since Script's turns emit calls whole.
+func TestOutputDecoderPartialSequence(t *testing.T) {
+	turn := wefttest.Raw(
+		weft.ModelToolCallDelta{Index: 0, Name: "submit_output", Args: `{"na`},
+		weft.ModelToolCallDelta{Index: 0, Name: "submit_output", Args: `me":"Ada",`},
+		weft.ModelToolCallDelta{Index: 0, Name: "other_tool", Args: `{"x":1}`}, // parallel call: ignored
+		weft.ModelToolCallDelta{Index: 0, Name: "submit_output", Args: `"count":4`},
+		weft.ModelToolCall{ID: "call_1", Name: "submit_output", Args: json.RawMessage(`{"name":"Ada","count":4}`)},
+		weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 3, OutputTokens: 2}},
+	)
+	script := wefttest.Script(turn, turn) // the second turn serves the OutputOf comparison run
+	agt := weft.New(script, weft.Output[formOut]())
+	dec := weft.NewOutputDecoder[formOut]()
+	var partials []formOut
+	for ev, err := range agt.Stream(context.Background(), weft.Prompt("fill the form")).Events() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Nested events are not the decoder's concern either.
+		if _, ok := ev.(weft.Nested); ok {
+			continue
+		}
+		if p, ok := dec.Feed(ev); ok {
+			partials = append(partials, p)
+		}
+	}
+	want := []formOut{
+		{Name: "Ada"},           // after the first member's comma
+		{Name: "Ada", Count: 4}, // after the second member closes
+	}
+	if len(partials) != len(want) {
+		t.Fatalf("partials = %+v, want %+v", partials, want)
+	}
+	for i, w := range want {
+		if partials[i] != w {
+			t.Errorf("partial %d = %+v, want %+v", i, partials[i], w)
+		}
+	}
+	// Result follows the OutputOf rule on the same run's result.
+	res, err := agt.Generate(context.Background(), weft.Prompt("fill the form"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := dec.Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaOf, err := weft.OutputOf[formOut](res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != viaOf {
+		t.Errorf("Result = %+v, OutputOf = %+v; the two rules disagree", got, viaOf)
+	}
+}
+
+// A mid-stream garbage prefix keeps the last good partial; errors
+// surface only at Result, which returns ErrNoOutput when no valid
+// submit_output call finished.
+func TestOutputDecoderGarbageAndNoOutput(t *testing.T) {
+	dec := weft.NewOutputDecoder[formOut]()
+	feed := func(ev weft.Event) (formOut, bool) { return dec.Feed(ev) }
+	// A key with no value yet decodes nothing; the parallel garbage
+	// neither breaks nor reports.
+	if _, ok := feed(weft.ToolArgsDelta{Name: "submit_output", Args: `{"na`}); ok {
+		t.Error("an incomplete first key reported a partial")
+	}
+	p, ok := feed(weft.ToolArgsDelta{Name: "submit_output", Args: `me":"Ada",`})
+	if !ok || p.Name != "Ada" {
+		t.Errorf("after the member closes: (%+v, %v), want Ada/true", p, ok)
+	}
+	if _, ok := feed(weft.ToolArgsDelta{Name: "submit_output", Args: `zzz`}); ok {
+		t.Error("garbage reported a change")
+	}
+	if _, err := dec.Result(); !errors.Is(err, weft.ErrNoOutput) {
+		t.Errorf("Result before any finish = %v, want ErrNoOutput", err)
+	}
+	// Nested events are ignored wholesale — a subagent's structured
+	// output is its own decoder's job.
+	if _, ok := feed(weft.Nested{Event: weft.ToolFinish{Name: "submit_output"}}); ok {
+		t.Error("a Nested event reported a change")
+	}
+	if _, err := dec.Result(); !errors.Is(err, weft.ErrNoOutput) {
+		t.Errorf("Result after only Nested = %v, want ErrNoOutput", err)
+	}
 }

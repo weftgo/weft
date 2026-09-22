@@ -56,6 +56,7 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
     weft.Timeout(30*time.Second),              // default per-call deadline (none by default)
     weft.Parallelism(4),                       // or weft.Sequential()
     weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkOff}), // reasoning default (adapters map what they can)
+    weft.ToolChoice(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}), // force a tool call every step (Named/None too; PrepareStep can rewrite per step)
     weft.Tap(func(ctx context.Context, ev weft.Event) {...}), // observer: sees every event, changes nothing
     weft.TracerProvider(tp),                   // OTel spans: invoke_agent › chat / execute_tool (default: the global provider; no-op until an SDK registers)
     weft.Logger(logger),                       // one Debug line per run, model call, tool call (default: slog.Default, silent unless Debug is on)

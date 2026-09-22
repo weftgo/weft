@@ -70,14 +70,16 @@ func Replay(t testing.TB, dir string) weft.Model {
 // keyDoc is the canonical form a fixture is keyed on: the transcript
 // verbatim (call ids included), the tool catalogue by name only —
 // descriptions and schemas are what a prompt tweak changes — the
-// thinking request, and the sequential flag. The system prompt is
-// deliberately absent (recorded in the file for the reviewer, not
-// keyed): a prompt-wording tweak must not invalidate every fixture.
+// thinking request, the tool-choice request, and the sequential flag.
+// The system prompt is deliberately absent (recorded in the file for
+// the reviewer, not keyed): a prompt-wording tweak must not
+// invalidate every fixture.
 type keyDoc struct {
-	Messages   []weft.Message       `json:"messages"`
-	Tools      []string             `json:"tools,omitempty"`    // names, sorted
-	Thinking   *weft.ThinkingConfig `json:"thinking,omitempty"` // nil when zero
-	Sequential bool                 `json:"sequential,omitempty"`
+	Messages   []weft.Message         `json:"messages"`
+	Tools      []string               `json:"tools,omitempty"`       // names, sorted
+	Thinking   *weft.ThinkingConfig   `json:"thinking,omitempty"`    // nil when zero
+	ToolChoice *weft.ToolChoiceConfig `json:"tool_choice,omitempty"` // nil when zero
+	Sequential bool                   `json:"sequential,omitempty"`
 }
 
 func requestKey(req weft.ModelRequest) string { return hashKeyDoc(canonical(req)) }
@@ -89,6 +91,14 @@ func canonical(req weft.ModelRequest) keyDoc {
 	if req.Thinking != (weft.ThinkingConfig{}) {
 		tc := req.Thinking
 		doc.Thinking = &tc
+	}
+	// ToolChoice joins the key the way Thinking does; Params never does
+	// (a sampling tweak must not invalidate fixtures) — ADR 0017's
+	// 2026-09-22 amendment. Nil when zero, so a fixture recorded before
+	// the field existed hashes byte-identically.
+	if req.ToolChoice != (weft.ToolChoiceConfig{}) {
+		cc := req.ToolChoice
+		doc.ToolChoice = &cc
 	}
 	return doc
 }

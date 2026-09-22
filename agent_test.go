@@ -753,3 +753,146 @@ func TestAgentNameAccessor(t *testing.T) {
 		t.Errorf("named agent reports %q", got)
 	}
 }
+
+func TestToolChoiceOption(t *testing.T) {
+	classify := weft.Tool("classify", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "billing", nil
+	})
+	named := weft.ToolChoiceConfig{Mode: weft.ToolChoiceNamed, Name: "classify"}
+	anyMode := weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}
+	newScript := func() *wefttest.Model {
+		return wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "classify"}),
+			wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"),
+		)
+	}
+
+	// No options: the zero config — nothing forced.
+	m := newScript()
+	if _, err := weft.New(m, classify).Generate(context.Background(), weft.Prompt("q")); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Requests()[0].ToolChoice; got != (weft.ToolChoiceConfig{}) {
+		t.Errorf("no options: ToolChoice = %+v, want the zero value", got)
+	}
+
+	// Agent-level default applies to every step of every run.
+	m = newScript()
+	agt := weft.New(m, classify, weft.ToolChoice(anyMode))
+	for range 2 {
+		if _, err := agt.Generate(context.Background(), weft.Prompt("q")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, req := range m.Requests() {
+		if req.ToolChoice.Mode != weft.ToolChoiceAny {
+			t.Errorf("request %d: ToolChoice.Mode = %q, want any", i, req.ToolChoice.Mode)
+		}
+	}
+
+	// Run-level option overrides the agent default for that run alone.
+	m = newScript()
+	agt = weft.New(m, classify, weft.ToolChoice(anyMode))
+	if _, err := agt.Generate(context.Background(), weft.ToolChoice(named), weft.Prompt("route")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agt.Generate(context.Background(), weft.Prompt("route")); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Requests()[0].ToolChoice; got != named {
+		t.Errorf("override run: ToolChoice = %+v, want %+v", got, named)
+	}
+	if got := m.Requests()[2].ToolChoice; got.Mode != weft.ToolChoiceAny {
+		t.Errorf("next run: ToolChoice = %+v, want the agent default (any)", got)
+	}
+
+	// PrepareStep rewrites the choice per step: forced on step 0, auto
+	// afterwards — the router shape.
+	m = newScript()
+	agt = weft.New(m, classify, weft.PrepareStep(func(_ context.Context, step int, req weft.ModelRequest) (weft.ModelRequest, error) {
+		if step == 0 {
+			req.ToolChoice = named
+		} else {
+			req.ToolChoice = weft.ToolChoiceConfig{}
+		}
+		return req, nil
+	}))
+	if _, err := agt.Generate(context.Background(), weft.Prompt("route")); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Requests()[0].ToolChoice; got != named {
+		t.Errorf("step 0: ToolChoice = %+v, want forced classify", got)
+	}
+	if got := m.Requests()[1].ToolChoice; got != (weft.ToolChoiceConfig{}) {
+		t.Errorf("step 1: ToolChoice = %+v, want the provider default", got)
+	}
+}
+
+func TestToolChoiceValidation(t *testing.T) {
+	classify := weft.Tool("classify", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "billing", nil
+	})
+	forced := weft.ToolChoiceConfig{Mode: weft.ToolChoiceNamed, Name: "classify"}
+	cases := []struct {
+		name string
+		opts []weft.Option
+		want string
+	}{
+		{
+			name: "no tools",
+			opts: []weft.Option{weft.ToolChoice(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny})},
+			want: "tool_choice mode \"any\" with an empty tool list",
+		},
+		{
+			name: "no tools none",
+			opts: []weft.Option{weft.ToolChoice(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNone})},
+			want: "tool_choice mode \"none\" with an empty tool list",
+		},
+		{
+			name: "name not advertised",
+			opts: []weft.Option{classify, weft.ToolChoice(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNamed, Name: "route"})},
+			want: "tool_choice names \"route\" but the step advertises no such tool",
+		},
+		{
+			name: "empty name",
+			opts: []weft.Option{classify, weft.ToolChoice(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNamed})},
+			want: "mode \"tool\" requires a Name",
+		},
+		{
+			name: "name under any",
+			opts: []weft.Option{classify, weft.ToolChoice(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny, Name: "classify"})},
+			want: "Name \"classify\" set under mode \"any\"",
+		},
+		{
+			name: "name under auto",
+			opts: []weft.Option{classify, weft.ToolChoice(weft.ToolChoiceConfig{Name: "classify"})},
+			want: "Name \"classify\" set under mode \"\"",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := wefttest.Script(wefttest.Say("never reached"))
+			_, err := weft.New(m, tc.opts...).Generate(context.Background(), weft.Prompt("q"))
+			if err == nil {
+				t.Fatalf("run succeeded; want failure containing %q", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+
+	// A PrepareStep function that drops the tool a forced name needs
+	// fails in the same place — the validation runs on the request
+	// after the chain.
+	m := wefttest.Script(wefttest.Say("never reached"))
+	drop := func(_ context.Context, _ int, req weft.ModelRequest) (weft.ModelRequest, error) {
+		req.Tools = nil
+		return req, nil
+	}
+	_, err := weft.New(m, classify, weft.ToolChoice(forced), weft.PrepareStep(drop)).
+		Generate(context.Background(), weft.Prompt("q"))
+	if err == nil || !strings.Contains(err.Error(), `tool_choice names "classify" but the step advertises no such tool`) {
+		t.Errorf("err = %v, want the no-such-tool failure after PrepareStep", err)
+	}
+}

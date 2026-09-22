@@ -64,6 +64,11 @@ data: {"type":"message_stop"}
 		return at(conformance.SlowServer(t, stallChunk, done, 40*time.Millisecond, 4), anthropic.IdleTimeout(120*time.Millisecond))
 	case "max_tokens":
 		return at(conformance.FixtureServer(t, filepath.Join("testdata", fixtureFile(name))), anthropic.MaxTokens(16))
+	case "tool_choice_forcing":
+		// The case asserts on the request bytes: a recording fixture,
+		// wrapped so the suite can read the bodies back.
+		srv, bodies := conformance.RecordingFixtureServer(t, filepath.Join("testdata", fixtureFile(name)))
+		return conformance.RecordingModel{Model: at(srv), Bodies: bodies}
 	default:
 		return at(conformance.FixtureServer(t, filepath.Join("testdata", fixtureFile(name))))
 	}
@@ -71,13 +76,15 @@ data: {"type":"message_stop"}
 
 // The adapter's offline conformance run (TODO §3.5): reasoning
 // round-trips with signatures, images and PDFs are accepted, the
-// sequential hint maps to disable_parallel_tool_use, usage is reported.
+// sequential hint maps to disable_parallel_tool_use, tool choice is
+// forwarded, usage is reported.
 func TestConformance(t *testing.T) {
 	conformance.Run(t, conformance.Caps{
 		Reasoning:     true,
 		Files:         true,
 		Sequential:    true,
 		ToolArgDeltas: true,
+		ToolChoice:    true,
 		Usage:         true,
 	}, newModel)
 }

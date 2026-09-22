@@ -61,6 +61,11 @@ data: [DONE]
 		return at(conformance.SlowServer(t, stallChunk, done, 40*time.Millisecond, 4), openai.IdleTimeout(120*time.Millisecond))
 	case "max_tokens":
 		return at(conformance.FixtureServer(t, filepath.Join("testdata", fixtureFile(name))), openai.MaxTokens(16))
+	case "tool_choice_forcing":
+		// The case asserts on the request bytes: a recording fixture,
+		// wrapped so the suite can read the bodies back.
+		srv, bodies := conformance.RecordingFixtureServer(t, filepath.Join("testdata", fixtureFile(name)))
+		return conformance.RecordingModel{Model: at(srv), Bodies: bodies}
 	default:
 		return at(conformance.FixtureServer(t, filepath.Join("testdata", fixtureFile(name))))
 	}
@@ -70,5 +75,5 @@ data: [DONE]
 // reasoning_content is a compatible-server extension, not an OpenAI
 // field — a compatible-server user can turn the cap on.
 func TestConformance(t *testing.T) {
-	conformance.Run(t, conformance.Caps{Files: true, Sequential: true, ToolArgDeltas: true, Usage: true}, newModel)
+	conformance.Run(t, conformance.Caps{Files: true, Sequential: true, ToolArgDeltas: true, ToolChoice: true, Usage: true}, newModel)
 }

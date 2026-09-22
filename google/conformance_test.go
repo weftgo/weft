@@ -61,6 +61,11 @@ func newModel(t *testing.T, name string) weft.Model {
 		return at(conformance.SlowServer(t, stallChunk, "", 40*time.Millisecond, 4), google.IdleTimeout(120*time.Millisecond))
 	case "max_tokens":
 		return at(conformance.FixtureServer(t, filepath.Join("testdata", fixtureFile(name))), google.MaxTokens(16))
+	case "tool_choice_forcing":
+		// The case asserts on the request bytes: a recording fixture,
+		// wrapped so the suite can read the bodies back.
+		srv, bodies := conformance.RecordingFixtureServer(t, filepath.Join("testdata", fixtureFile(name)))
+		return conformance.RecordingModel{Model: at(srv), Bodies: bodies}
 	default:
 		return at(conformance.FixtureServer(t, filepath.Join("testdata", fixtureFile(name))))
 	}
@@ -68,11 +73,13 @@ func newModel(t *testing.T, name string) weft.Model {
 
 // The adapter's offline conformance run (TODO §3.5). Sequential is off:
 // Gemini has no parallel-tool-calls switch — a documented gap in
-// ADR 0013, declared rather than silently skipped.
+// ADR 0013, declared rather than silently skipped. Tool choice (ANY /
+// allowedFunctionNames / NONE) is a different knob and is forwarded.
 func TestConformance(t *testing.T) {
 	conformance.Run(t, conformance.Caps{
-		Reasoning: true,
-		Files:     true,
-		Usage:     true,
+		Reasoning:  true,
+		Files:      true,
+		ToolChoice: true,
+		Usage:      true,
 	}, newModel)
 }

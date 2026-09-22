@@ -248,6 +248,42 @@ func (o thinkingOption) applyRun(c *runConfig) { c.thinking, c.thinkingSet = o.c
 // provider can express and document what they drop.
 func Thinking(cfg ThinkingConfig) ThinkingOption { return thinkingOption{cfg} }
 
+// ToolChoiceOption is accepted by both New and Stream/Generate: which
+// tool calls a step must make is a per-question concern as much as a
+// per-agent one (the ThinkingOption shape).
+type ToolChoiceOption interface {
+	Option
+	RunOption
+}
+
+type toolChoiceOption struct{ cfg ToolChoiceConfig }
+
+func (o toolChoiceOption) apply(a *Agent) { a.toolChoice = o.cfg }
+
+func (o toolChoiceOption) applyRun(c *runConfig) {
+	c.toolChoice, c.toolChoiceSet = o.cfg, true
+}
+
+// ToolChoice forces the agent's model calls to include (or forbear
+// from) tool calls. As an Option it is every run's default; as a
+// RunOption it overrides that default for one run:
+//
+//	// a router: the first step must call classify
+//	agt := weft.New(m, classify, weft.ToolChoice(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNamed, Name: "classify"}))
+//	// a final step that must answer in text, cache prefix intact
+//	agt.Generate(ctx, weft.ToolChoice(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNone}), weft.Prompt(q))
+//
+// Modes: Any (some tool must be called), Named (Name must be — the
+// router and eval-harness shape), None (no call may be made; the
+// catalogue stays advertised, so a prompt-cache prefix on the tool
+// definitions survives), Auto (the zero value: provider default,
+// nothing sent). A PrepareStep function can rewrite the request's
+// ToolChoice per step — force classify on step 0, then auto — the same
+// way it rewrites tools. A non-auto choice the step's tool snapshot
+// cannot satisfy (no tools, a name not advertised, a name under
+// another mode) fails the run with a descriptive error.
+func ToolChoice(cfg ToolChoiceConfig) ToolChoiceOption { return toolChoiceOption{cfg} }
+
 type maxResultBytesOption struct{ n int }
 
 func (o maxResultBytesOption) apply(a *Agent) {
@@ -438,6 +474,7 @@ type Agent struct {
 	taps            []func(context.Context, Event)
 	name            string
 	thinking        ThinkingConfig
+	toolChoice      ToolChoiceConfig
 	modelMW         []ModelMiddleware
 	toolMW          []ToolMiddleware
 	tracerProvider  trace.TracerProvider
@@ -570,6 +607,40 @@ func validateSnapshot(tools []*ToolDef) error {
 			return fmt.Errorf("%w: %q", ErrDuplicateTool, t.Name)
 		}
 		seen[t.Name] = true
+	}
+	return nil
+}
+
+// validateToolChoice rejects a forced choice the step's tool snapshot
+// cannot satisfy: every provider rejects a tool_choice without a
+// catalogue, a named choice must name an advertised tool, and a Name
+// under any other mode is a malformed config. Same stance as the
+// snapshot validations it sits beside — a programming error, reported
+// in the text, no sentinel (ADR 0013's 2026-09-22 amendment).
+func validateToolChoice(cfg ToolChoiceConfig, tools []*ToolDef) error {
+	switch cfg.Mode {
+	case ToolChoiceAuto:
+		if cfg.Name != "" {
+			return fmt.Errorf("tool_choice: Name %q set under mode %q; Name belongs to mode %q",
+				cfg.Name, ToolChoiceAuto, ToolChoiceNamed)
+		}
+	case ToolChoiceNamed:
+		if cfg.Name == "" {
+			return fmt.Errorf("tool_choice: mode %q requires a Name", ToolChoiceNamed)
+		}
+		if !slices.ContainsFunc(tools, func(t *ToolDef) bool { return t.Name == cfg.Name }) {
+			return fmt.Errorf("tool_choice names %q but the step advertises no such tool", cfg.Name)
+		}
+	case ToolChoiceAny, ToolChoiceNone:
+		if cfg.Name != "" {
+			return fmt.Errorf("tool_choice: Name %q set under mode %q; Name belongs to mode %q",
+				cfg.Name, cfg.Mode, ToolChoiceNamed)
+		}
+		if len(tools) == 0 {
+			return fmt.Errorf("tool_choice mode %q with an empty tool list; the provider rejects a forced choice without a catalogue", cfg.Mode)
+		}
+	default:
+		return fmt.Errorf("tool_choice: unknown mode %q", cfg.Mode)
 	}
 	return nil
 }

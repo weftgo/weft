@@ -548,3 +548,44 @@ func TestReplayYieldsContextErrorWhenDone(t *testing.T) {
 		t.Errorf("err = %v, want context.Canceled", got)
 	}
 }
+
+// ToolChoice joins the key (ADR 0017's 2026-09-22 amendment): a forced
+// choice changes what the model says, exactly as a thinking level does.
+// The file side pins the compatibility half — a request without a
+// choice records the same canonical bytes v0.2.0 wrote, no tool_choice
+// key at all, so every pre-2a fixture's hash is unchanged.
+func TestReplayKeyToolChoice(t *testing.T) {
+	dir := t.TempDir()
+	base := weft.ModelRequest{
+		Messages: []weft.Message{weft.User("q")},
+		Tools:    []*weft.ToolDef{replayEcho},
+	}
+	m := wefttest.Record(t, dir, wefttest.Script(wefttest.Say("recorded")))
+	if _, err := streamAll(t, m, base); err != nil {
+		t.Fatal(err)
+	}
+
+	// The recorded file carries no tool_choice key: nil-when-zero keeps
+	// the canonical JSON byte-identical to v0.2.0's keyDoc.
+	files, err := filepath.Glob(filepath.Join(dir, t.Name(), "*.json"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("fixture files = %v, %v; want exactly one", files, err)
+	}
+	b, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "tool_choice") {
+		t.Errorf("recorded fixture carries a tool_choice key; nil-when-zero is broken:\n%s", b)
+	}
+
+	forced := base
+	forced.ToolChoice = weft.ToolChoiceConfig{Mode: weft.ToolChoiceNamed, Name: "echo"}
+	p := wefttest.Replay(t, dir)
+	if _, err := streamAll(t, p, forced); !errors.Is(err, wefttest.ErrNoFixture) {
+		t.Errorf("forced-choice request replayed with err = %v, want ErrNoFixture", err)
+	}
+	if evs, err := streamAll(t, p, base); err != nil || textOf(evs) != "recorded" {
+		t.Errorf("unmodified request = (%q, %v), want the recorded reply", textOf(evs), err)
+	}
+}

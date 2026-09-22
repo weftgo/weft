@@ -93,6 +93,18 @@ func (m *model) params(req weft.ModelRequest) (openai.ChatCompletionNewParams, e
 	if req.SequentialTools && len(req.Tools) > 0 {
 		p.ParallelToolCalls = openai.Bool(false)
 	}
+	// Tool-choice forcing (TODO §2a.1): the zero config sends nothing.
+	// "required" is Chat Completions' any-tool form; a named choice is
+	// the function variant of the same union.
+	switch req.ToolChoice.Mode {
+	case weft.ToolChoiceAny:
+		p.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: openai.String("required")}
+	case weft.ToolChoiceNamed:
+		p.ToolChoice = openai.ChatCompletionToolChoiceOptionParamOfChatCompletionNamedToolChoice(
+			openai.ChatCompletionNamedToolChoiceFunctionParam{Name: req.ToolChoice.Name})
+	case weft.ToolChoiceNone:
+		p.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: openai.String("none")}
+	}
 	// Effort dialect: reasoning_effort carries the level (the gateway
 	// dialect injects its thinking object at the HTTP layer instead —
 	// see thinking.go). ThinkOff and a Budget have no effort form and

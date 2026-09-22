@@ -52,14 +52,36 @@ func (m *model) params(req weft.ModelRequest) (anthropic.MessageNewParams, error
 	if m.tempSet {
 		p.Temperature = anthropic.Float(m.temperature)
 	}
-	// The API rejects tool_choice when tools is empty, so the hint is
-	// sent only alongside a catalog — an agent without tools has nothing
-	// to serialize anyway.
-	if req.SequentialTools && len(req.Tools) > 0 {
-		p.ToolChoice = anthropic.ToolChoiceUnionParam{
-			OfAuto: &anthropic.ToolChoiceAutoParam{
-				DisableParallelToolUse: anthropic.Bool(true),
-			},
+	// Tool choice: the sequential hint and a forced choice share one
+	// tool_choice entry — disable_parallel_tool_use rides whichever
+	// member is chosen, one field on the wire, both hints kept (ADR
+	// 0013's 2026-09-22 amendment). The API rejects tool_choice when
+	// tools is empty, so it is sent only alongside a catalog — the
+	// loop's validation already fails a forced choice without one.
+	if len(req.Tools) > 0 {
+		switch req.ToolChoice.Mode {
+		case weft.ToolChoiceAny:
+			any := &anthropic.ToolChoiceAnyParam{}
+			if req.SequentialTools {
+				any.DisableParallelToolUse = anthropic.Bool(true)
+			}
+			p.ToolChoice = anthropic.ToolChoiceUnionParam{OfAny: any}
+		case weft.ToolChoiceNamed:
+			tool := &anthropic.ToolChoiceToolParam{Name: req.ToolChoice.Name}
+			if req.SequentialTools {
+				tool.DisableParallelToolUse = anthropic.Bool(true)
+			}
+			p.ToolChoice = anthropic.ToolChoiceUnionParam{OfTool: tool}
+		case weft.ToolChoiceNone:
+			p.ToolChoice = anthropic.ToolChoiceUnionParam{OfNone: &anthropic.ToolChoiceNoneParam{}}
+		default:
+			if req.SequentialTools {
+				p.ToolChoice = anthropic.ToolChoiceUnionParam{
+					OfAuto: &anthropic.ToolChoiceAutoParam{
+						DisableParallelToolUse: anthropic.Bool(true),
+					},
+				}
+			}
 		}
 	}
 	for _, msg := range req.Messages {

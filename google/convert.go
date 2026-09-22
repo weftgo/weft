@@ -110,6 +110,26 @@ func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.Genera
 	for _, t := range req.Tools {
 		cfg.Tools = append(cfg.Tools, convertTool(t))
 	}
+	// Tool-choice forcing (TODO §2a.1): ANY is the forcing mode, with
+	// allowedFunctionNames narrowing it to the named tool; NONE forbids
+	// calls while the declarations stay advertised. This is a different
+	// knob from the sequential hint — that gap stays declared (ADR
+	// 0013). The zero config sends nothing.
+	switch req.ToolChoice.Mode {
+	case weft.ToolChoiceAny:
+		cfg.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{
+			Mode: genai.FunctionCallingConfigModeAny,
+		}}
+	case weft.ToolChoiceNamed:
+		cfg.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{
+			Mode:                 genai.FunctionCallingConfigModeAny,
+			AllowedFunctionNames: []string{req.ToolChoice.Name},
+		}}
+	case weft.ToolChoiceNone:
+		cfg.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{
+			Mode: genai.FunctionCallingConfigModeNone,
+		}}
+	}
 	// SequentialTools has no Gemini switch (function-calling config
 	// stays AUTO) — a documented gap; see ADR 0013.
 	return contents, cfg, nil

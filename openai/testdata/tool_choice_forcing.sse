@@ -1,0 +1,43 @@
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_probe","type":"function","function":{"name":"probe","arguments":"{\"n\":2}"}}]},"finish_reason":null}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}
+
+data: [DONE]
+
+=== response 2 ===
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"The doubled value is 4."},"finish_reason":null}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}
+
+data: [DONE]
+
+=== response 3 ===
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_probe","type":"function","function":{"name":"probe","arguments":"{\"n\":4}"}}]},"finish_reason":null}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}
+
+data: [DONE]
+
+=== response 4 ===
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"The doubled value is 8."},"finish_reason":null}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}
+
+data: [DONE]
+
+=== response 5 ===
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"4 is an even number, twice two."},"finish_reason":null}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}
+
+data: [DONE]

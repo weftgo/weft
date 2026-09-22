@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,13 +27,36 @@ import (
 // under-recorded script is loud, never silently green.
 func FixtureServer(t *testing.T, file string) *httptest.Server {
 	t.Helper()
+	srv, _ := recordingFixtureServer(t, file, false)
+	return srv
+}
+
+// RecordingFixtureServer is FixtureServer plus a record of every
+// request body, in request order — for cases that must assert on what
+// the adapter sent (tool_choice_forcing), not only on what came back.
+// The returned func is safe to call after the case's requests.
+func RecordingFixtureServer(t *testing.T, file string) (*httptest.Server, func() []string) {
+	t.Helper()
+	return recordingFixtureServer(t, file, true)
+}
+
+func recordingFixtureServer(t *testing.T, file string, record bool) (*httptest.Server, func() []string) {
+	t.Helper()
 	b, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatalf("conformance: read fixture %s: %v", file, err)
 	}
 	responses := parseFixtures(string(b))
 	var n atomic.Int64
+	var mu sync.Mutex
+	var bodies []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if record {
+			body, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			bodies = append(bodies, string(body))
+			mu.Unlock()
+		}
 		i := int(n.Add(1)) - 1
 		if i >= len(responses) {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -44,7 +68,11 @@ func FixtureServer(t *testing.T, file string) *httptest.Server {
 		_, _ = w.Write([]byte(responses[i]))
 	}))
 	t.Cleanup(srv.Close)
-	return srv
+	return srv, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), bodies...)
+	}
 }
 
 // StallServer writes firstChunk (one complete SSE event, flushed), then

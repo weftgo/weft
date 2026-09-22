@@ -13,6 +13,7 @@ package conformance
 import (
 	"context"
 	"errors"
+	"iter"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,11 @@ type Caps struct {
 	// Google's calls arrive whole, so it legitimately emits none — the
 	// case is declared, not assumed.
 	ToolArgDeltas bool
+	// ToolChoice: the adapter forwards ModelRequest.ToolChoice and the
+	// provider honours the constraint. The offline case asserts on the
+	// request bytes too (tool_choice / toolConfig must be in what the
+	// adapter sent), which needs a RecordingFixtureServer wiring.
+	ToolChoice bool
 	// Usage: the provider reports non-zero token usage. False for
 	// compatible servers that never send usage — the adapter must not
 	// fake numbers, so the caller declares the gap instead.
@@ -68,6 +74,27 @@ func probeTool() *weft.ToolDef {
 // parallelPrompt is owned by the suite so every adapter is asked the
 // same thing: three independent probe calls in one turn.
 const parallelPrompt = "Call `probe` three times, once each with n=1, n=2, n=3, in one turn."
+
+// RecordingModel wraps a model with the request bodies a
+// RecordingFixtureServer captured, so the tool_choice_forcing case can
+// assert on the bytes the adapter sent. It exists for that wiring — a
+// pass-through for Stream and Info, nothing else; it is not a general
+// proxy.
+type RecordingModel struct {
+	Model  weft.Model
+	Bodies func() []string
+}
+
+// Stream implements weft.Model by forwarding.
+func (m RecordingModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	return m.Model.Stream(ctx, req)
+}
+
+// Info forwards the wrapped model's identity.
+func (m RecordingModel) Info() weft.ModelInfo { return weft.InfoOf(m.Model) }
+
+// RecordedBodies exposes the captured request bodies, in request order.
+func (m RecordingModel) RecordedBodies() []string { return m.Bodies() }
 
 // contractDetector collects ErrModelContract sightings across a whole
 // Run and fails the suite at Cleanup — the never_contract_violation
@@ -322,6 +349,85 @@ func Run(t *testing.T, caps Caps, newModel func(t *testing.T, name string) weft.
 						t.Skipf("step %d emitted %d calls despite the sequential hint (best-effort)", s.Index, len(s.ToolCalls))
 					}
 					t.Errorf("step %d emitted %d calls under SequentialTools, want at most 1", s.Index, len(s.ToolCalls))
+				}
+			}
+		})
+	}
+
+	// Tool-choice forcing (TODO §2a.1): any must yield a call, a named
+	// choice must call exactly that tool, none must yield no call while
+	// the catalogue stays advertised. The request bytes are asserted
+	// too — the case must see the provider's tool-choice field in what
+	// the adapter sent, so the offline wiring is a RecordingFixtureServer
+	// (its bodies via RecordingModel; a live model cannot capture them).
+	if caps.ToolChoice {
+		t.Run("tool_choice_forcing", func(t *testing.T) {
+			m := newModel(t, "tool_choice_forcing")
+			recorder, records := interface{ RecordedBodies() []string }(nil), false
+			if r, ok := m.(interface{ RecordedBodies() []string }); ok {
+				recorder, records = r, true
+			} else if !caps.Live {
+				t.Fatal("offline tool_choice_forcing must wire a RecordingFixtureServer (wrap the model in conformance.RecordingModel)")
+			}
+
+			// any: some tool must be called.
+			res, err := generate(t, m, nil,
+				weft.ToolChoice(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}),
+				weft.Prompt("Call `probe` with n=2, then tell me the doubled value."))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Steps) == 0 || len(res.Steps[0].ToolCalls) == 0 {
+				if caps.Live {
+					t.Skip("model made no tool call under any (valid choice)")
+				}
+				t.Fatal("the first step made no tool calls under ToolChoiceAny")
+			}
+
+			// named: exactly the named tool.
+			res, err = generate(t, m, nil,
+				weft.ToolChoice(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNamed, Name: "probe"}),
+				weft.Prompt("Call `probe` with n=4, then tell me the doubled value."))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Steps) == 0 {
+				t.Fatal("no steps ran")
+			}
+			for _, c := range res.Steps[0].ToolCalls {
+				if c.Name != "probe" {
+					t.Errorf("step 0 called %q under ToolChoiceNamed(probe) — contract breach", c.Name)
+				}
+			}
+			if len(res.Steps[0].ToolCalls) == 0 && !caps.Live {
+				t.Fatal("the first step made no tool calls under ToolChoiceNamed")
+			}
+
+			// none: no call may be made, catalogue still advertised.
+			res, err = generate(t, m, nil,
+				weft.ToolChoice(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNone}),
+				weft.Prompt("Describe the number 4 in one sentence. Do not call any tool."))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, s := range res.Steps {
+				for _, c := range s.ToolCalls {
+					t.Errorf("step %d called %q under ToolChoiceNone — contract breach", s.Index, c.Name)
+				}
+			}
+
+			if records {
+				bodies := recorder.RecordedBodies()
+				if len(bodies) == 0 {
+					t.Fatal("no request bodies were recorded")
+				}
+				for i, b := range bodies {
+					// The provider field name is the one thing the three
+					// wire formats disagree on; exact shapes are pinned in
+					// the adapters' own unit tests, where bodies are cheap.
+					if !strings.Contains(b, `"tool_choice"`) && !strings.Contains(b, "toolConfig") {
+						t.Errorf("request %d body carries no tool_choice/toolConfig:\n%s", i+1, b)
+					}
 				}
 			}
 		})

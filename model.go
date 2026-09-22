@@ -72,6 +72,34 @@ type ThinkingConfig struct {
 	Budget int64
 }
 
+// ToolChoiceMode selects how the provider must shape a step's tool
+// calls. The zero value, ToolChoiceAuto, keeps the provider default
+// and sends nothing; every other value asks the adapter to express the
+// constraint in the provider's own tool_choice form.
+type ToolChoiceMode string
+
+const (
+	ToolChoiceAuto  ToolChoiceMode = ""     // provider default; nothing is sent
+	ToolChoiceAny   ToolChoiceMode = "any"  // some tool must be called
+	ToolChoiceNamed ToolChoiceMode = "tool" // the tool named by Name must be called
+	// ToolChoiceNone forbids tool calls while keeping the catalogue
+	// advertised. It exists for the prompt-cache interplay: removing
+	// tools from the request to stop the model calling them invalidates
+	// the cached prefix (ADR 0013's 2026-09-22 amendment), while none
+	// keeps the bytes and forbids the calls.
+	ToolChoiceNone ToolChoiceMode = "none"
+)
+
+// ToolChoiceConfig constrains what a step's model call may emit. The
+// zero value is the provider default. Name is required when Mode is
+// ToolChoiceNamed and must be empty under every other mode; the loop
+// fails the run on a mismatch rather than sending a malformed choice
+// (a programming error, not a sentinel condition).
+type ToolChoiceConfig struct {
+	Mode ToolChoiceMode
+	Name string
+}
+
 // ModelRequest is everything a model needs for one step: the system
 // instruction, the transcript so far, and the callable tools.
 //
@@ -98,6 +126,15 @@ type ModelRequest struct {
 	// anyway. Adapters mirror it in the provider's parallel-tool-calls
 	// setting.
 	SequentialTools bool
+	// ToolChoice constrains what the model may emit this step: some
+	// tool, a named tool, or none — the router-agent and hardened-Output
+	// knob. The zero value keeps the provider default; the loop fills it
+	// from the agent's ToolChoice option, which a run-level ToolChoice
+	// overrides, and a PrepareStep function can rewrite it per step
+	// (force classify on step 0, then auto). It constrains what the
+	// provider is asked to emit, never execution: a call the provider
+	// emits anyway runs, because the model was shown the tool.
+	ToolChoice ToolChoiceConfig
 }
 
 // Model is the provider seam. Implementations stream one step's output as

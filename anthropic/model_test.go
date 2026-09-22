@@ -293,3 +293,55 @@ func TestConvertToolKeepsForeignSchemaWhole(t *testing.T) {
 		t.Errorf("input_schema:\n got  %s\n want %s", gb, wb)
 	}
 }
+
+func TestConvertToolChoice(t *testing.T) {
+	tool := testTool()
+	convert := func(cfg weft.ToolChoiceConfig, seq bool) string {
+		m := Model("m").(*model)
+		p, err := m.params(weft.ModelRequest{
+			Messages:        []weft.Message{weft.User("hi")},
+			Tools:           []*weft.ToolDef{tool},
+			SequentialTools: seq,
+			ToolChoice:      cfg,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(p)
+		return string(b)
+	}
+	// Zero value: nothing sent — v0.2.0's bytes (P3).
+	if got := convert(weft.ToolChoiceConfig{}, false); strings.Contains(got, "tool_choice") {
+		t.Errorf("zero ToolChoice sent tool_choice: %s", got)
+	}
+	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}, false); !strings.Contains(got, `"tool_choice":{"type":"any"}`) {
+		t.Errorf("any: %s", got)
+	}
+	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNamed, Name: "probe"}, false); !strings.Contains(got, `"tool_choice":{"name":"probe","type":"tool"}`) {
+		t.Errorf("named: %s", got)
+	}
+	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNone}, false); !strings.Contains(got, `"tool_choice":{"type":"none"}`) {
+		t.Errorf("none: %s", got)
+	}
+	// The union-merge rule: disable_parallel_tool_use rides the chosen
+	// member, one tool_choice on the wire, both hints kept.
+	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}, true); !strings.Contains(got, `"tool_choice":{"disable_parallel_tool_use":true,"type":"any"}`) {
+		t.Errorf("any + sequential: %s", got)
+	}
+	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNamed, Name: "probe"}, true); !strings.Contains(got, `"tool_choice":{"name":"probe","disable_parallel_tool_use":true,"type":"tool"}`) {
+		t.Errorf("named + sequential: %s", got)
+	}
+	// none has no parallel field to merge.
+	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNone}, true); !strings.Contains(got, `"tool_choice":{"type":"none"}`) || strings.Contains(got, "disable_parallel") {
+		t.Errorf("none + sequential: %s", got)
+	}
+	// Sequential alone keeps the auto member, as in v0.2.0.
+	if got := convert(weft.ToolChoiceConfig{}, true); !strings.Contains(got, `"tool_choice":{"disable_parallel_tool_use":true,"type":"auto"}`) {
+		t.Errorf("sequential only: %s", got)
+	}
+	// No tools: nothing is sent whatever the choice — the loop's
+	// validation rejects that case before the adapter sees it.
+	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}, false); strings.Contains(got, "tool_choice") && !strings.Contains(got, `"type":"any"`) {
+		t.Errorf("unexpected tool_choice: %s", got)
+	}
+}

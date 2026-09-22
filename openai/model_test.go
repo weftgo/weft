@@ -172,3 +172,38 @@ func TestSchemaMapCarriesAdditionalProperties(t *testing.T) {
 		t.Errorf("parameters:\n got  %s\n want %s", got, want)
 	}
 }
+
+func TestConvertToolChoice(t *testing.T) {
+	tool := testTool()
+	convert := func(cfg weft.ToolChoiceConfig, seq bool) string {
+		m := Model("m").(*model)
+		p, err := m.params(weft.ModelRequest{
+			Messages:        []weft.Message{weft.User("hi")},
+			Tools:           []*weft.ToolDef{tool},
+			SequentialTools: seq,
+			ToolChoice:      cfg,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(p)
+		return string(b)
+	}
+	// Zero value: nothing sent — v0.2.0's bytes (P3).
+	if got := convert(weft.ToolChoiceConfig{}, false); strings.Contains(got, "tool_choice") {
+		t.Errorf("zero ToolChoice sent tool_choice: %s", got)
+	}
+	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}, false); !strings.Contains(got, `"tool_choice":"required"`) {
+		t.Errorf("any: %s", got)
+	}
+	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNamed, Name: "probe"}, false); !strings.Contains(got, `"tool_choice":{"function":{"name":"probe"},"type":"function"}`) {
+		t.Errorf("named: %s", got)
+	}
+	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNone}, false); !strings.Contains(got, `"tool_choice":"none"`) {
+		t.Errorf("none: %s", got)
+	}
+	// Forcing and the sequential hint are independent fields.
+	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}, true); !strings.Contains(got, `"tool_choice":"required"`) || !strings.Contains(got, `"parallel_tool_calls":false`) {
+		t.Errorf("any + sequential: %s", got)
+	}
+}

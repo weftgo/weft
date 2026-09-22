@@ -792,3 +792,32 @@ func ExampleAgent_conversation() {
 	// Order 1234? It shipped yesterday.
 	// Order 5678? Still pending.
 }
+
+// ToolChoice forces a step's tool calls — the router shape: classify
+// must be the first call, the rest of the run is unconstrained. One
+// PrepareStep function rewrites the request's ToolChoice per step; the
+// agent-level option would force every step instead.
+func ExampleToolChoice() {
+	classify := weft.Tool("classify", "Classify the request.",
+		func(_ context.Context, _ struct{}) (string, error) { return "billing", nil })
+	agt := weft.New(
+		wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "classify"}),
+			wefttest.Say("This is a billing question."),
+		),
+		weft.PrepareStep(func(_ context.Context, step int, req weft.ModelRequest) (weft.ModelRequest, error) {
+			if step == 0 {
+				req.ToolChoice = weft.ToolChoiceConfig{Mode: weft.ToolChoiceNamed, Name: "classify"}
+			}
+			return req, nil
+		}),
+		classify,
+	)
+	res, err := agt.Generate(context.Background(), weft.Prompt("Why did my invoice double?"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Text())
+	// Output:
+	// This is a billing question.
+}

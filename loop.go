@@ -170,6 +170,8 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			// for this run alone (the thinkingOption applies to both).
 			SequentialTools: a.parallelism == 1,
 			Thinking:        cfg.effectiveThinking(a.thinking),
+			// The same dual-option rule for a forced tool choice.
+			ToolChoice: cfg.effectiveToolChoice(a.toolChoice),
 		}
 		// PrepareStep functions are arbitrary user code, and the request
 		// they see promises they may mutate it freely (ADR 0006
@@ -200,6 +202,15 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			if err := validateSnapshot(tools); err != nil {
 				return fail(step, err)
 			}
+		}
+		// A forced choice runs against the same snapshot the step
+		// advertises and dispatches over — validated after the
+		// PrepareStep chain, so a function that sets a name and drops
+		// the tool fails in the same place. A programming error the
+		// caller fixes, reported in the text, not a sentinel (ADR
+		// 0013's 2026-09-22 amendment).
+		if err := validateToolChoice(req.ToolChoice, tools); err != nil {
+			return fail(step, err)
 		}
 		req.System = composeSystem(req.System, tools)
 		var (

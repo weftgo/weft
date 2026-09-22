@@ -14,10 +14,12 @@ type RunOption interface {
 }
 
 type runConfig struct {
-	id          string
-	messages    []Message
-	thinking    ThinkingConfig
-	thinkingSet bool // a run-level Thinking option was applied
+	id            string
+	messages      []Message
+	thinking      ThinkingConfig
+	thinkingSet   bool // a run-level Thinking option was applied
+	toolChoice    ToolChoiceConfig
+	toolChoiceSet bool // a run-level ToolChoice option was applied
 	// decisions resolves calls left pending by an earlier run: call id →
 	// approve, or deny with a reason (Approve, Deny).
 	decisions map[string]decision
@@ -86,6 +88,16 @@ func (c *runConfig) finish() {
 func (c *runConfig) effectiveThinking(agentDefault ThinkingConfig) ThinkingConfig {
 	if c.thinkingSet {
 		return c.thinking
+	}
+	return agentDefault
+}
+
+// effectiveToolChoice resolves the run's tool-choice request the same
+// way: a run-level ToolChoice option overrides the agent's default;
+// neither set keeps the provider default (the zero ToolChoiceConfig).
+func (c *runConfig) effectiveToolChoice(agentDefault ToolChoiceConfig) ToolChoiceConfig {
+	if c.toolChoiceSet {
+		return c.toolChoice
 	}
 	return agentDefault
 }

@@ -325,3 +325,35 @@ func TestSchemaConversionFallbackKeepsNesting(t *testing.T) {
 		t.Errorf("properties.nums = %+v, want array-of-integer carried through the fallback", nums)
 	}
 }
+
+func TestConvertToolChoice(t *testing.T) {
+	tool := testTool()
+	convert := func(cfg weft.ToolChoiceConfig) *genai.GenerateContentConfig {
+		m := Model("m").(*model)
+		_, cfgOut, err := m.contents(weft.ModelRequest{
+			Messages:   []weft.Message{weft.User("hi")},
+			Tools:      []*weft.ToolDef{tool},
+			ToolChoice: cfg,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfgOut
+	}
+	// Zero value: nothing sent — v0.2.0's bytes (P3).
+	if cfg := convert(weft.ToolChoiceConfig{}); cfg.ToolConfig != nil {
+		t.Errorf("zero ToolChoice set ToolConfig: %+v", cfg.ToolConfig)
+	}
+	fc := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}).ToolConfig.FunctionCallingConfig
+	if fc == nil || fc.Mode != genai.FunctionCallingConfigModeAny || len(fc.AllowedFunctionNames) != 0 {
+		t.Errorf("any: %+v", fc)
+	}
+	fc = convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNamed, Name: "probe"}).ToolConfig.FunctionCallingConfig
+	if fc == nil || fc.Mode != genai.FunctionCallingConfigModeAny || len(fc.AllowedFunctionNames) != 1 || fc.AllowedFunctionNames[0] != "probe" {
+		t.Errorf("named: %+v", fc)
+	}
+	fc = convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNone}).ToolConfig.FunctionCallingConfig
+	if fc == nil || fc.Mode != genai.FunctionCallingConfigModeNone {
+		t.Errorf("none: %+v", fc)
+	}
+}

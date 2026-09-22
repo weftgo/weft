@@ -266,6 +266,18 @@ func Run(t *testing.T, caps Caps, newModel func(t *testing.T, name string) weft.
 				if s.Usage.InputTokens <= 0 || s.Usage.OutputTokens <= 0 {
 					t.Errorf("step %d usage = %+v, want input and output > 0", i, s.Usage)
 				}
+				// The splits are reporting subsets of the totals
+				// (TODO §2a.4): a fixture that reports more cached
+				// tokens than it billed input is a wire mistake.
+				if s.Usage.CachedInputTokens > s.Usage.InputTokens {
+					t.Errorf("step %d cached %d > input %d", i, s.Usage.CachedInputTokens, s.Usage.InputTokens)
+				}
+				if s.Usage.CacheWriteTokens > s.Usage.InputTokens {
+					t.Errorf("step %d cache write %d > input %d", i, s.Usage.CacheWriteTokens, s.Usage.InputTokens)
+				}
+				if s.Usage.ReasoningTokens > s.Usage.OutputTokens {
+					t.Errorf("step %d reasoning %d > output %d", i, s.Usage.ReasoningTokens, s.Usage.OutputTokens)
+				}
 			}
 		})
 	}

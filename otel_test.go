@@ -806,3 +806,46 @@ func TestSpansRunSpanEndsOnPanic(t *testing.T) {
 		t.Errorf("error.type = %q, want run_panicked", got)
 	}
 }
+
+// The usage splits ride the spans in their semconv/v1.41.0 names, each
+// only when non-zero (ADR 0016's 2026-09-22 amendment). Absence is
+// pinned by every exact-set assertion above (the scripted turns carry
+// no splits); this is the presence half.
+func TestSpansUsageSplits(t *testing.T) {
+	tp := newRecProvider()
+	script := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"msg":"hi"}`}).WithUsage(weft.Usage{
+			InputTokens: 100, OutputTokens: 5, CachedInputTokens: 60, CacheWriteTokens: 10, ReasoningTokens: 3,
+		}),
+		wefttest.Say("done"),
+	)
+	agt := weft.New(script, weft.Name("demo"), weft.TracerProvider(tp), spanEcho)
+	if _, err := agt.Generate(context.Background(), weft.RunID("run-splits"), weft.Prompt("q")); err != nil {
+		t.Fatal(err)
+	}
+	var chat, run *recSpan
+	for _, s := range tp.spans {
+		switch {
+		case s.name == "chat script" && s.attrsMap()["weft.step.index"] == "0":
+			chat = s
+		case s.name == "invoke_agent demo":
+			run = s
+		}
+	}
+	if chat == nil || run == nil {
+		t.Fatalf("chat/run span missing: %v", tp.spans)
+	}
+	for name, span := range map[string]*recSpan{"chat": chat, "run": run} {
+		got := span.attrsMap()
+		want := map[string]string{
+			"gen_ai.usage.cache_read.input_tokens":     "60",
+			"gen_ai.usage.cache_creation.input_tokens": "10",
+			"gen_ai.usage.reasoning.output_tokens":     "3",
+		}
+		for k, v := range want {
+			if got[k] != v {
+				t.Errorf("%s span attr %s = %q, want %q", name, k, got[k], v)
+			}
+		}
+	}
+}

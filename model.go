@@ -7,16 +7,32 @@ import (
 )
 
 // Usage is token accounting for one step or one whole run.
+//
+// The totals are inclusive: CachedInputTokens and CacheWriteTokens are
+// subsets of InputTokens (tokens billed as input — read from or
+// written to a provider prompt cache), ReasoningTokens is a subset of
+// OutputTokens (provider-side reasoning the model burned). The splits
+// are reporting, not budget bases: UsageLimit and Total keep reading
+// the two totals, so a cached-heavy run budgets identically to an
+// uncached one with the same totals. All three are omitempty on the
+// wire — an event from before they existed round-trips unchanged
+// (SchemaVersion stays 1, ADR 0001/0004).
 type Usage struct {
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
+	InputTokens       int64 `json:"input_tokens"`
+	OutputTokens      int64 `json:"output_tokens"`
+	CachedInputTokens int64 `json:"cached_input_tokens,omitempty"` // ⊆ InputTokens: read from a prompt cache
+	CacheWriteTokens  int64 `json:"cache_write_tokens,omitempty"`  // ⊆ InputTokens: written to a prompt cache (anthropic)
+	ReasoningTokens   int64 `json:"reasoning_tokens,omitempty"`    // ⊆ OutputTokens
 }
 
 // Add returns the element-wise sum of u and o.
 func (u Usage) Add(o Usage) Usage {
 	return Usage{
-		InputTokens:  u.InputTokens + o.InputTokens,
-		OutputTokens: u.OutputTokens + o.OutputTokens,
+		InputTokens:       u.InputTokens + o.InputTokens,
+		OutputTokens:      u.OutputTokens + o.OutputTokens,
+		CachedInputTokens: u.CachedInputTokens + o.CachedInputTokens,
+		CacheWriteTokens:  u.CacheWriteTokens + o.CacheWriteTokens,
+		ReasoningTokens:   u.ReasoningTokens + o.ReasoningTokens,
 	}
 }
 

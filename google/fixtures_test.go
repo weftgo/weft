@@ -84,8 +84,11 @@ func TestStreamFunctionCalls(t *testing.T) {
 	if fin.Reason != weft.StopToolCalls {
 		t.Errorf("reason = %q, want tool_calls (calls present despite STOP)", fin.Reason)
 	}
-	if fin.Usage.InputTokens != 9 || fin.Usage.OutputTokens != 5 {
-		t.Errorf("usage = %+v", fin.Usage)
+	if fin.Usage.InputTokens != 9 || fin.Usage.OutputTokens != 7 {
+		t.Errorf("usage = %+v, want output folding thoughts (5+2)", fin.Usage)
+	}
+	if fin.Usage.CachedInputTokens != 4 || fin.Usage.ReasoningTokens != 2 {
+		t.Errorf("usage splits = %+v, want cached 4 / reasoning 2 (reporting subsets)", fin.Usage)
 	}
 }
 

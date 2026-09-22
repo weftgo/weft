@@ -125,6 +125,24 @@ func spanName(op attribute.KeyValue, name string) string {
 	return op.Value.AsString() + " " + name
 }
 
+// usageSplits renders Usage's three reporting subsets in their
+// semconv/v1.41.0 names, each only when non-zero (ADR 0016's
+// 2026-09-22 amendment). Span-only: the slog lines keep carrying the
+// two totals, per the line-stability rule.
+func usageSplits(u Usage) []attribute.KeyValue {
+	var attrs []attribute.KeyValue
+	if u.CachedInputTokens > 0 {
+		attrs = append(attrs, semconv.GenAIUsageCacheReadInputTokens(int(u.CachedInputTokens)))
+	}
+	if u.CacheWriteTokens > 0 {
+		attrs = append(attrs, semconv.GenAIUsageCacheCreationInputTokens(int(u.CacheWriteTokens)))
+	}
+	if u.ReasoningTokens > 0 {
+		attrs = append(attrs, semconv.GenAIUsageReasoningOutputTokens(int(u.ReasoningTokens)))
+	}
+	return attrs
+}
+
 // run brackets one execute: the span starts before RunStart is emitted
 // and the returned end function is called with the outcome execute
 // decided — the result on success, the *RunError on failure — including
@@ -171,6 +189,7 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo)
 				semconv.GenAIUsageOutputTokens(int(res.Usage.OutputTokens)),
 				attrRunSteps.Int(len(res.Steps)),
 			}
+			attrs = append(attrs, usageSplits(res.Usage)...)
 			if n := len(res.Pending); n > 0 {
 				attrs = append(attrs, attrRunPending.Int(n))
 			}
@@ -278,6 +297,7 @@ func (o *observer) model(ctx context.Context, runID string, step int, info Model
 					semconv.GenAIResponseFinishReasons(string(finish.Reason)),
 					attrModelToolCalls.Int(calls),
 				}
+				attrs = append(attrs, usageSplits(finish.Usage)...)
 				if finish.Raw != "" {
 					attrs = append(attrs, attrStopRaw.String(finish.Raw))
 				}

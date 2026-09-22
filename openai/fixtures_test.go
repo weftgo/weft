@@ -101,6 +101,9 @@ func TestStreamToolCallSplitAcrossChunks(t *testing.T) {
 	if finish.Usage.InputTokens != 9 || finish.Usage.OutputTokens != 5 {
 		t.Errorf("usage = %+v, want the final chunk's", finish.Usage)
 	}
+	if finish.Usage.CachedInputTokens != 4 || finish.Usage.ReasoningTokens != 2 {
+		t.Errorf("usage splits = %+v, want cached 4 / reasoning 2 (reporting subsets)", finish.Usage)
+	}
 }
 
 // Calls interleaved by index keep first-seen order and stay whole.

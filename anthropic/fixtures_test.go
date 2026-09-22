@@ -88,8 +88,11 @@ func TestStreamToolCallFromFragments(t *testing.T) {
 		t.Errorf("joined delta args = %s, want the call's arguments", joined.String())
 	}
 	fin := lastFinish(t, evs)
-	if fin.Reason != weft.StopToolCalls || fin.Usage.InputTokens != 9 || fin.Usage.OutputTokens != 5 {
-		t.Errorf("finish = %+v, want tool_use with start+delta usage", fin)
+	if fin.Reason != weft.StopToolCalls || fin.Usage.InputTokens != 15 || fin.Usage.OutputTokens != 5 {
+		t.Errorf("finish = %+v, want tool_use with start+delta usage (cache folded into input)", fin)
+	}
+	if fin.Usage.CachedInputTokens != 4 || fin.Usage.CacheWriteTokens != 2 {
+		t.Errorf("usage splits = %+v, want cache read 4 / write 2 (reporting subsets)", fin.Usage)
 	}
 }
 

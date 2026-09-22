@@ -61,9 +61,16 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			// reader may advance while this one is processed.
 			reader.release()
 			if um := resp.UsageMetadata; um != nil {
+				// Totals stay inclusive (thoughts folded into output);
+				// the splits report the cached prefix and the thought
+				// tokens separately (TODO §2a.4). Gemini's implicit
+				// caching reports cachedContentTokenCount with no
+				// request marker.
 				usage = weft.Usage{
-					InputTokens:  int64(um.PromptTokenCount),
-					OutputTokens: int64(um.CandidatesTokenCount + um.ThoughtsTokenCount),
+					InputTokens:       int64(um.PromptTokenCount),
+					OutputTokens:      int64(um.CandidatesTokenCount + um.ThoughtsTokenCount),
+					CachedInputTokens: int64(um.CachedContentTokenCount),
+					ReasoningTokens:   int64(um.ThoughtsTokenCount),
 				}
 			}
 			for _, cand := range resp.Candidates {

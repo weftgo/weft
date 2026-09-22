@@ -268,6 +268,16 @@ func mapFinish(reason string, hasCalls bool) (weft.StopReason, string) {
 	}
 }
 
+// toUsage maps the final chunk's usage, including the detail splits
+// when the server sends them: cached prompt tokens and reasoning
+// completion tokens are reporting subsets of the totals, never added
+// to them (TODO §2a.4). The detail objects are plain values — absent
+// on compat-gateway chunks, their fields decode as zero.
 func toUsage(u openai.CompletionUsage) weft.Usage {
-	return weft.Usage{InputTokens: u.PromptTokens, OutputTokens: u.CompletionTokens}
+	return weft.Usage{
+		InputTokens:       u.PromptTokens,
+		OutputTokens:      u.CompletionTokens,
+		CachedInputTokens: u.PromptTokensDetails.CachedTokens,
+		ReasoningTokens:   u.CompletionTokensDetails.ReasoningTokens,
+	}
 }

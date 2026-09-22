@@ -3986,3 +3986,68 @@ func TestToolOptions(t *testing.T) {
 		t.Errorf("ToolOptions policy not applied:\n%s", b)
 	}
 }
+
+// The three reporting splits (TODO §2a.4): Add is element-wise over
+// all five fields, Total still reads the two totals, and the wire is
+// omitempty — an old event decodes unchanged and a split-carrying one
+// round-trips.
+func TestUsageSplits(t *testing.T) {
+	a := weft.Usage{InputTokens: 100, OutputTokens: 50, CachedInputTokens: 40, CacheWriteTokens: 10, ReasoningTokens: 20}
+	b := weft.Usage{InputTokens: 30, OutputTokens: 20, CachedInputTokens: 5, CacheWriteTokens: 1, ReasoningTokens: 2}
+	got := a.Add(b)
+	want := weft.Usage{InputTokens: 130, OutputTokens: 70, CachedInputTokens: 45, CacheWriteTokens: 11, ReasoningTokens: 22}
+	if got != want {
+		t.Errorf("Add = %+v, want %+v", got, want)
+	}
+	if a.Total() != 150 {
+		t.Errorf("Total = %d, want 150 (the two totals only)", a.Total())
+	}
+	// omitempty: zero splits are absent from the wire.
+	b2, err := json.Marshal(weft.Usage{InputTokens: b.InputTokens, OutputTokens: b.OutputTokens})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b2), "cached_input_tokens") || strings.Contains(string(b2), "reasoning_tokens") {
+		t.Errorf("zero splits marshalled: %s", b2)
+	}
+	// A Usage with all five fields round-trips through the event wire.
+	ev := weft.StepFinish{RunID: "r1", Index: 1, Reason: weft.StopEndTurn, Usage: a}
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := weft.UnmarshalEvent(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := back.(weft.StepFinish).Usage; got != a {
+		t.Errorf("round trip = %+v, want %+v", got, a)
+	}
+}
+
+// UsageLimit reads the totals, never the splits: a cached-heavy run
+// budgets identically to an uncached one with the same totals (the
+// splits are reporting, not budget bases).
+func TestUsageLimitIgnoresSplits(t *testing.T) {
+	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) { return "ok", nil })
+	spend := func(u weft.Usage) wefttest.Turn {
+		return wefttest.ToolCalls(wefttest.Call{Name: "echo"}).WithUsage(u)
+	}
+	cached := spend(weft.Usage{InputTokens: 100, OutputTokens: 5, CachedInputTokens: 100, CacheWriteTokens: 100})
+	uncached := spend(weft.Usage{InputTokens: 100, OutputTokens: 5})
+	for name, turn := range map[string]wefttest.Turn{"cached": cached, "uncached": uncached} {
+		// Two steps, so the budget's continuation point is reached:
+		// the limit sits exactly at step 0's totals, and both runs get
+		// to spend step 1 — cached or not, a split-based limit would
+		// have failed the cached one at step 0.
+		agt := weft.New(wefttest.Script(turn, turn, wefttest.Say("done")), echo, weft.UsageLimit(weft.Usage{InputTokens: 300, OutputTokens: 30}))
+		if _, err := agt.Generate(context.Background(), weft.Prompt("q")); err != nil {
+			t.Errorf("%s: err = %v, want success (the limit reads the totals)", name, err)
+		}
+		// One token tighter than step 0 alone: both fail alike.
+		agt = weft.New(wefttest.Script(turn, turn, wefttest.Say("done")), echo, weft.UsageLimit(weft.Usage{InputTokens: 99, OutputTokens: 30}))
+		if _, err := agt.Generate(context.Background(), weft.Prompt("q")); err == nil {
+			t.Errorf("%s: succeeded under a tighter input limit", name)
+		}
+	}
+}

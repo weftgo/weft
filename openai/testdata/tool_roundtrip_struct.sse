@@ -8,7 +8,7 @@ data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"
 
 data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
 
-data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14,"prompt_tokens_details":{"cached_tokens":4},"completion_tokens_details":{"reasoning_tokens":2}}}
 
 data: [DONE]
 
@@ -18,7 +18,7 @@ data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"
 
 data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
 
-data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}
+data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14,"prompt_tokens_details":{"cached_tokens":4},"completion_tokens_details":{"reasoning_tokens":2}}}
 
 data: [DONE]
 

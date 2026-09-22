@@ -70,11 +70,15 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			reader.release()
 			switch e := ev.AsAny().(type) {
 			case anthropic.MessageStartEvent:
-				// Cache reads and writes are billed input; fold them in.
+				// Cache reads and writes are billed input; the totals
+				// fold them in, and the splits report them (TODO
+				// §2a.4) — the totals stay inclusive either way.
 				input = weft.Usage{
 					InputTokens: e.Message.Usage.InputTokens +
 						e.Message.Usage.CacheReadInputTokens +
 						e.Message.Usage.CacheCreationInputTokens,
+					CachedInputTokens: e.Message.Usage.CacheReadInputTokens,
+					CacheWriteTokens:  e.Message.Usage.CacheCreationInputTokens,
 				}
 			case anthropic.ContentBlockStartEvent:
 				b := &block{}
@@ -176,9 +180,11 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			}
 		}
 		reason, raw := mapStopReason(stop, category)
+		outputUsage := input
+		outputUsage.OutputTokens = output
 		yield(weft.ModelFinish{
 			Reason: reason,
-			Usage:  weft.Usage{InputTokens: input.InputTokens, OutputTokens: output},
+			Usage:  outputUsage,
 			Raw:    raw,
 		}, nil)
 	}

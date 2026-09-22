@@ -1,8 +1,9 @@
 package weft
 
 import (
-	"encoding/json"
 	"strings"
+
+	"github.com/weftgo/weft/internal/jsonclose"
 )
 
 // closedPrefix returns the longest prefix of s that closes into valid
@@ -12,19 +13,14 @@ import (
 // that cannot close at all — a bare literal cut mid-token, "tru" or
 // "1e" — is dropped back to the previous member boundary, because
 // closing it would fabricate a token the model has not sent. Empty
-// when nothing closes. The sibling of mw.RepairJSON's closer,
-// duplicated on purpose: mw imports weft, never the reverse.
+// when nothing closes. The closer itself is internal/jsonclose, the
+// state machine mw.RepairJSON shares.
 func closedPrefix(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" || s[0] != '{' && s[0] != '[' {
 		return ""
 	}
-	if json.Valid([]byte(s)) {
-		return s
-	}
-	// Maximal salvage first: when the whole prefix closes into valid
-	// JSON, keep every member.
-	if out := closeOpen(s); out != "" {
+	if out, ok := jsonclose.Close(s); ok {
 		return out
 	}
 	// A tail that cannot close (a bare literal cut mid-token) is
@@ -35,8 +31,11 @@ func closedPrefix(s string) string {
 		return ""
 	}
 	p := strings.TrimRight(s[:cut], " \t\r\n")
-	p = strings.TrimSuffix(p, ",")
-	return closeOpen(p)
+	out, ok := jsonclose.Close(p)
+	if !ok {
+		return ""
+	}
+	return out
 }
 
 // lastMemberEnd scans s and returns the offset just past the last
@@ -77,59 +76,4 @@ func lastMemberEnd(s string) int {
 		}
 	}
 	return best + 1
-}
-
-// closeOpen closes a truncated JSON document: open strings (with
-// escape fixup), then the bracket stack, after trimming a dangling
-// comma or colon. No value content is invented — only structure; the
-// empty string when the result still is not valid JSON.
-func closeOpen(s string) string {
-	var stack []byte
-	inStr, esc := false, false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case inStr:
-			switch {
-			case esc:
-				esc = false
-			case c == '\\':
-				esc = true
-			case c == '"':
-				inStr = false
-			}
-		case c == '"':
-			inStr = true
-		case c == '{' || c == '[':
-			stack = append(stack, c)
-		case c == '}' || c == ']':
-			if len(stack) > 0 {
-				stack = stack[:len(stack)-1]
-			}
-		}
-	}
-	var b strings.Builder
-	b.WriteString(s)
-	if inStr {
-		if esc {
-			b.WriteByte('\\') // a dangling escape would eat the quote
-		}
-		b.WriteByte('"')
-	}
-	out := strings.TrimRight(b.String(), " \t\r\n")
-	out = strings.TrimSuffix(out, ",")
-	if strings.HasSuffix(out, ":") {
-		out += "null"
-	}
-	for i := len(stack) - 1; i >= 0; i-- {
-		if stack[i] == '{' {
-			out += "}"
-		} else {
-			out += "]"
-		}
-	}
-	if !json.Valid([]byte(out)) {
-		return ""
-	}
-	return out
 }

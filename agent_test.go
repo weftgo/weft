@@ -897,6 +897,45 @@ func TestToolChoiceValidation(t *testing.T) {
 	}
 }
 
+func TestParamsValidation(t *testing.T) {
+	neg := -5
+	zero := 0
+	// The three ways a negative MaxTokens can reach a step: an agent
+	// default, a run option, a PrepareStep edit — all fail alike, at
+	// the step that carries them, named in the text (the
+	// validateToolChoice stance).
+	agentErr := func(opts ...weft.Option) error {
+		m := wefttest.Script(wefttest.Say("never reached"))
+		_, err := weft.New(m, opts...).Generate(context.Background(), weft.Prompt("q"))
+		return err
+	}
+	if err := agentErr(weft.Params(weft.RequestParams{MaxTokens: &neg})); err == nil ||
+		!strings.Contains(err.Error(), "params: MaxTokens -5 is negative") {
+		t.Errorf("agent default: err = %v, want the negative-MaxTokens failure", err)
+	}
+	m := wefttest.Script(wefttest.Say("never reached"))
+	_, err := weft.New(m, weft.Params(weft.RequestParams{MaxTokens: &zero})).
+		Generate(context.Background(), weft.Prompt("q"), weft.Params(weft.RequestParams{MaxTokens: &neg}))
+	if err == nil || !strings.Contains(err.Error(), "params: MaxTokens -5 is negative") {
+		t.Errorf("run override: err = %v, want the negative-MaxTokens failure", err)
+	}
+	m = wefttest.Script(wefttest.Say("never reached"))
+	_, err = weft.New(m, weft.PrepareStep(func(_ context.Context, _ int, req weft.ModelRequest) (weft.ModelRequest, error) {
+		req.Params = weft.RequestParams{MaxTokens: &neg}
+		return req, nil
+	})).Generate(context.Background(), weft.Prompt("q"))
+	if err == nil || !strings.Contains(err.Error(), "params: MaxTokens -5 is negative") {
+		t.Errorf("PrepareStep edit: err = %v, want the negative-MaxTokens failure", err)
+	}
+	// Zero stays a value (the anthropic exception's territory), and an
+	// absent MaxTokens stays absent — neither fails.
+	m = wefttest.Script(wefttest.Say("ok"))
+	if _, err := weft.New(m, weft.Params(weft.RequestParams{MaxTokens: &zero})).
+		Generate(context.Background(), weft.Prompt("q")); err != nil {
+		t.Errorf("zero MaxTokens: err = %v, want success", err)
+	}
+}
+
 func TestParamsOption(t *testing.T) {
 	p := func(f float64) *float64 { return &f }
 	newScript := func() *wefttest.Model {

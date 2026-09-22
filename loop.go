@@ -137,14 +137,18 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// programming error, loud at step 0. Approve and Deny keep
 		// ignoring unknown ids — the deliberate asymmetry ADR 0007's
 		// 2026-09-22 amendment records. Sorted, so the first breach is
-		// deterministic when several ids miss.
-		pendingIDs := make(map[string]bool, len(resume))
-		for _, c := range resume {
-			pendingIDs[c.ID] = true
-		}
-		for _, id := range slices.Sorted(maps.Keys(cfg.decisions)) {
-			if cfg.decisions[id].resolved && !pendingIDs[id] {
-				return fail(0, fmt.Errorf("resolve: call %q is not pending in this run's transcript", id))
+		// deterministic when several ids miss. The common run carries
+		// no decisions at all, so the pending-id set is only built
+		// when there is something to check it against.
+		if len(cfg.decisions) > 0 {
+			pendingIDs := make(map[string]bool, len(resume))
+			for _, c := range resume {
+				pendingIDs[c.ID] = true
+			}
+			for _, id := range slices.Sorted(maps.Keys(cfg.decisions)) {
+				if cfg.decisions[id].resolved && !pendingIDs[id] {
+					return fail(0, fmt.Errorf("resolve: call %q is not pending in this run's transcript", id))
+				}
 			}
 		}
 		results, pending, sub, err := a.resolvePending(ctx, cfg, resume, seq, emit)
@@ -227,6 +231,11 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// caller fixes, reported in the text, not a sentinel (ADR
 		// 0013's 2026-09-22 amendment).
 		if err := validateToolChoice(req.ToolChoice, tools); err != nil {
+			return fail(step, err)
+		}
+		// Sampling knobs validated at the same point, so an agent
+		// default, a run option, and a PrepareStep edit fail alike.
+		if err := validateParams(req.Params); err != nil {
 			return fail(step, err)
 		}
 		req.System = composeSystem(req.System, tools)
@@ -813,15 +822,15 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 		// events, Call.Approved never set (ADR 0007's 2026-09-22
 		// amendment).
 		if d, ok := cfg.decisions[c.ID]; ok && d.resolved {
-			cap := a.resultCap
+			resultCap := a.resultCap
 			if def, _ := findTool(tools, c.Name); def != nil && def.capSet {
-				cap = def.resultCap
+				resultCap = def.resultCap
 			}
 			results = append(results, ToolResultPart{
 				CallID:  c.ID,
 				Name:    c.Name,
 				IsError: d.isError,
-				Content: capResult(d.content, cap),
+				Content: capResult(d.content, resultCap),
 			})
 			continue
 		}

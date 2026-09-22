@@ -158,7 +158,8 @@ func OutputOf[Out any](res *RunResult) (Out, error) {
 //
 // The decoder keys on the submit_output stream identity ToolArgsDelta
 // carries — the tool name and step boundaries — resets its buffer on
-// StepStart, and closes it on the matching ToolFinish. Nested events
+// StepStart and on a fresh submit_output ToolStart, and closes it on
+// the matching ToolFinish. Nested events
 // are ignored: a subagent's structured output is its own decoder's
 // job. Decode is lenient and prefix-shaped: after each delta it
 // attempts the longest closed prefix of the arguments so far (see
@@ -168,6 +169,14 @@ func OutputOf[Out any](res *RunResult) (Out, error) {
 // the OutputOf rule (the last submit_output call with a non-error
 // result) and returns ErrNoOutput when none finished. Never
 // model-visible: the decoder reads the stream and writes nothing back.
+//
+// Cost: every delta rescans the buffered arguments (the close is
+// linear in what has arrived), so a submission's decode cost grows
+// with the square of its size — the price of a fresh partial on every
+// delta. At tool-argument scale (a few KiB) it is noise; a UI feeding
+// very large submissions can trade freshness for linearity by calling
+// Feed less often — the decoder keeps the last good partial across
+// the deltas it skips.
 type OutputDecoder[Out any] struct {
 	buf       strings.Builder
 	lastGood  string
@@ -183,9 +192,14 @@ func NewOutputDecoder[Out any]() *OutputDecoder[Out] {
 }
 
 // Feed consumes one run event. It ignores everything except this run's
-// StepStart, the submit_output ToolArgsDelta stream, and the
-// submit_output ToolFinish; after an args delta it returns the
-// best-effort partial Out and ok == true when the partial changed.
+// StepStart, the submit_output ToolStart (a whole-call arrival, and
+// the marker of a fresh call), the submit_output ToolArgsDelta
+// stream, and the submit_output ToolFinish; after an args delta it
+// returns the best-effort partial Out and ok == true when the partial
+// changed. A second submit_output call within the step starts the
+// buffer over — Result follows the last call, the OutputOf rule;
+// concatenating two distinct calls' arguments could only ever produce
+// bytes that do not decode.
 func (d *OutputDecoder[Out]) Feed(ev Event) (partial Out, ok bool) {
 	d.changed = false
 	switch e := ev.(type) {

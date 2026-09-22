@@ -14,6 +14,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"slices"
 
 	"github.com/weftgo/weft"
 )
@@ -113,4 +115,45 @@ func mergeMaps(dest, src map[string]any) {
 		}
 		dest[k] = v
 	}
+}
+
+// CloneJSON deep-copies a JSON-shaped value — the container shapes
+// MergeBody recurses through (maps and slices), with everything else
+// returned as is: scalars and structs are copied by their interface
+// conversion already, and only the decoded-JSON shapes alias. The
+// ExtraBody options snapshot the caller's map at construction with
+// this, so a Model stays safe for concurrent runs while the caller
+// keeps mutating what it passed (ADR 0013's Models-are-immutable
+// stance).
+func CloneJSON(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			out[k] = CloneJSON(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = CloneJSON(val)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// CloneHeaders copies h with each value slice cloned — ExtraHeaders'
+// construction-time snapshot, the same isolation CloneJSON gives
+// ExtraBody.
+func CloneHeaders(h http.Header) http.Header {
+	if h == nil {
+		return nil
+	}
+	out := make(http.Header, len(h))
+	for k, vs := range h {
+		out[k] = slices.Clone(vs)
+	}
+	return out
 }

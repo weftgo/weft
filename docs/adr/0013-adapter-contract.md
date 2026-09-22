@@ -141,11 +141,11 @@ replaces nothing here: the wire fixtures stay the adapter proof.
 
 ### Capability matrix (Caps per adapter today)
 
-| Adapter | Reasoning | Files | Sequential | Usage | Notes |
-|---|---|---|---|---|---|
-| `weft/openai` | off¹ | ✓ | ✓ | ✓ | ¹ `reasoning_content` from compatible servers is surfaced (DeepSeek-style, no signature); OpenAI's own reasoning items need the Responses API — a future `openai/responses` package |
-| `weft/anthropic` | ✓ (thinking + signature) | ✓ (images, PDF) | ✓ (`disable_parallel_tool_use`) | ✓ (cache tokens folded into input) | redacted thinking blocks are a known gap |
-| `weft/google` | ✓ (thought signatures, per block/part) | ✓ (inline/URI; audio and video are native) | ✗ ² | ✓ (thoughts tokens folded into output) | ² Gemini has no parallel-tool-calls switch — a declared gap, not a silent skip |
+| Adapter | Reasoning | Files | Sequential | Usage | Tool choice | Notes |
+|---|---|---|---|---|---|---|
+| `weft/openai` | off¹ | ✓ | ✓ | ✓ | ✓ (`required`/named/`"none"`) | ¹ `reasoning_content` from compatible servers is surfaced (DeepSeek-style, no signature); OpenAI's own reasoning items need the Responses API — a future `openai/responses` package |
+| `weft/anthropic` | ✓ (thinking + signature) | ✓ (images, PDF) | ✓ (`disable_parallel_tool_use`) | ✓ (cache tokens folded into input) | ✓ (`any`/`tool`/`none`) | redacted thinking blocks are a known gap |
+| `weft/google` | ✓ (thought signatures, per block/part) | ✓ (inline/URI; audio and video are native) | ✗ ² | ✓ (thoughts tokens folded into output) | ✓ (`ANY`/`allowedFunctionNames`/`NONE`) | ² Gemini has no parallel-tool-calls switch — a declared gap, not a silent skip |
 
 ## Appendix A — OpenAI (Chat Completions, `openai-go` v1.12.0)
 

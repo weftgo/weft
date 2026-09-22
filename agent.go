@@ -645,6 +645,19 @@ func validateSnapshot(tools []*ToolDef) error {
 	return nil
 }
 
+// validateParams rejects a sampling knob no provider accepts: a
+// negative MaxTokens is always a caller bug, and the adapters disagreed
+// on what to do with one (openai forwarded it into an opaque API
+// error, google dropped it silently, anthropic folded it to the
+// default) — the loop names it instead, the validateToolChoice stance
+// (a programming error, reported in the text, no sentinel).
+func validateParams(p RequestParams) error {
+	if p.MaxTokens != nil && *p.MaxTokens < 0 {
+		return fmt.Errorf("params: MaxTokens %d is negative; a token budget cannot be", *p.MaxTokens)
+	}
+	return nil
+}
+
 // validateToolChoice rejects a forced choice the step's tool snapshot
 // cannot satisfy: every provider rejects a tool_choice without a
 // catalogue, a named choice must name an advertised tool, and a Name

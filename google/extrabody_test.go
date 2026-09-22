@@ -103,3 +103,32 @@ func TestExtraBodyDefaultBytes(t *testing.T) {
 		t.Error("default request carries a custom header")
 	}
 }
+
+// The options snapshot what they are given: mutating the maps or header
+// values after Model returns never reaches the request — a Model is
+// safe to hand to concurrent runs while the caller keeps its config
+// alive (ADR 0013's immutable-Model stance; the 2026-09-22 review's
+// reference-capture fix).
+func TestExtraBodySnapshot(t *testing.T) {
+	nested := map[string]any{"custom": 1}
+	fields := map[string]any{"x_vendor_knob": nested}
+	h := http.Header{"X-Weft-Test": []string{"yes"}}
+	srv, body, header := captureServer(t, "testdata/text_only.sse")
+	m := atModel(t, srv, ExtraBody(fields), ExtraHeaders(h))
+	nested["custom"] = 2       // caller mutates after construction
+	h["X-Weft-Test"][0] = "no" // and the header slice
+	if _, err := weft.New(m).Generate(t.Context(), weft.Prompt("hi")); err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(body()), &payload); err != nil {
+		t.Fatalf("body is not JSON: %v\n%s", err, body())
+	}
+	knob, _ := payload["x_vendor_knob"].(map[string]any)
+	if knob == nil || knob["custom"] != float64(1) {
+		t.Errorf("x_vendor_knob = %v, want the construction-time value", payload["x_vendor_knob"])
+	}
+	if got := header().Get("X-Weft-Test"); got != "yes" {
+		t.Errorf("X-Weft-Test = %q, want the construction-time value", got)
+	}
+}

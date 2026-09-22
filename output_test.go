@@ -169,6 +169,53 @@ func TestOutputDecoderPartialSequence(t *testing.T) {
 	}
 }
 
+// Two submit_output calls within one step are degenerate — the stop
+// condition ends the run on the first valid one — and the decoder
+// treats the second as a fresh buffer: Result follows the last call,
+// the OutputOf rule (pinned by the 2026-09-22 review; concatenating
+// two distinct calls' arguments could only ever produce bytes that do
+// not decode). Whole-call arrival rides the same reset.
+func TestOutputDecoderTwoCallsInOneStep(t *testing.T) {
+	dec := weft.NewOutputDecoder[formOut]()
+	feed := func(ev weft.Event) (formOut, bool) { return dec.Feed(ev) }
+	feed(weft.StepStart{})
+	p1, ok := feed(weft.ToolArgsDelta{Name: "submit_output", Args: `{"name":"Ada","count":4`})
+	if !ok || p1.Name != "Ada" || p1.Count != 4 {
+		t.Fatalf("first call: (%+v, %v), want the full partial", p1, ok)
+	}
+	feed(weft.ToolFinish{Name: "submit_output"})
+	// The second call starts the buffer over (its ToolStart, as any
+	// adapter emits one); its deltas are its own, not a concatenation.
+	p2, ok := feed(weft.ToolStart{Name: "submit_output"})
+	if ok || p2.Name != "Ada" || p2.Count != 4 {
+		t.Fatalf("second ToolStart: (%+v, %v), want the carried partial, no change", p2, ok)
+	}
+	p3, ok := feed(weft.ToolArgsDelta{Name: "submit_output", Args: `{"name":"Grace","count":0`})
+	if !ok || p3.Name != "Grace" || p3.Count != 0 {
+		t.Errorf("second call: (%+v, %v), want Grace/0 — the fresh buffer", p3, ok)
+	}
+	feed(weft.ToolArgsDelta{Name: "submit_output", Args: `}`})
+	feed(weft.ToolFinish{Name: "submit_output"})
+	got, err := dec.Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "Grace" || got.Count != 0 {
+		t.Errorf("Result = %+v, want the last call (the OutputOf rule)", got)
+	}
+	// A whole-call arrival (ToolStart with the complete args, the
+	// Google shape) replaces the buffer the same way and decodes once.
+	feed(weft.ToolStart{Name: "submit_output", Args: json.RawMessage(`{"name":"Whole","count":9}`)})
+	feed(weft.ToolFinish{Name: "submit_output"})
+	got, err = dec.Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "Whole" || got.Count != 9 {
+		t.Errorf("Result = %+v, want the whole-call arrival", got)
+	}
+}
+
 // A mid-stream garbage prefix keeps the last good partial; errors
 // surface only at Result, which returns ErrNoOutput when no valid
 // submit_output call finished.

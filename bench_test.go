@@ -103,3 +103,74 @@ func BenchmarkMessageJSONRoundTrip(b *testing.B) {
 		}
 	}
 }
+
+// benchForm is a structured submission of the size real ones reach —
+// twelve fields, ~3 KiB of JSON — streamed as ~24-byte deltas, about
+// a token each. The decoder re-closes the buffer on every delta (the
+// documented quadratic), so this pins the per-delta constant: the
+// whole form's decode stays comfortably inside a frame budget.
+type benchForm struct {
+	Title       string `json:"title"`
+	Summary     string `json:"summary"`
+	Author      string `json:"author"`
+	Reviewer    string `json:"reviewer"`
+	Department  string `json:"department"`
+	Status      string `json:"status"`
+	Notes       string `json:"notes"`
+	Rationale   string `json:"rationale"`
+	Risk        string `json:"risk"`
+	Mitigation  string `json:"mitigation"`
+	Tags        string `json:"tags"`
+	Disposition string `json:"disposition"`
+}
+
+func benchFormArgs() string {
+	f := benchForm{
+		Title: "Quarterly infrastructure review — compute and storage",
+		Summary: "The review covers the quarter's compute and storage spend, the " +
+			"migration's residue, and the two incidents that shaped the budget. " +
+			"Recommendations follow the summary with their rationale attached.",
+		Author:     "operations@example.com",
+		Reviewer:   "finance@example.com",
+		Department: "Infrastructure",
+		Status:     "final",
+		Notes:      "Two follow-ups remain open from the previous quarter.",
+		Rationale: "Spend tracked the plan within two percent; the migration's " +
+			"residue is the only line that moved outside its band.",
+		Risk: "Moderate: the residue ages badly if the decommission slips " +
+			"another quarter.",
+		Mitigation: "A hard decommission date with a weekly checkpoint until closed.",
+		Tags:       "quarterly infra budget review",
+		Disposition: "Adopt the recommendations as written, with the decommission " +
+			"date pinned to the end of the month.",
+	}
+	b, err := json.Marshal(f)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+func BenchmarkOutputDecoder(b *testing.B) {
+	args := benchFormArgs()
+	var deltas []weft.Event
+	for i := 0; i < len(args); i += 24 {
+		end := min(i+24, len(args))
+		deltas = append(deltas, weft.ToolArgsDelta{Name: "submit_output", Args: args[i:end]})
+	}
+	events := append([]weft.Event{weft.StepStart{}}, deltas...)
+	events = append(events, weft.ToolFinish{Name: "submit_output"})
+	var changes int
+	for b.Loop() {
+		dec := weft.NewOutputDecoder[benchForm]()
+		for _, ev := range events {
+			if _, ok := dec.Feed(ev); ok {
+				changes++
+			}
+		}
+		if _, err := dec.Result(); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportMetric(float64(changes)/float64(b.N), "partials/run")
+}

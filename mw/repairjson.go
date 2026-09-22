@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/internal/jsonclose"
 )
 
 // RepairJSON re-encodes a tool call's arguments once when they are not
@@ -72,57 +73,9 @@ func repairJSON(s string) (string, bool) {
 	if json.Valid([]byte(s)) {
 		return s, true
 	}
-	// Close what is open. Track strings (with escapes) and a stack of
-	// open brackets; drop a dangling comma or colon before closing.
-	var stack []byte
-	inStr, esc := false, false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case inStr:
-			switch {
-			case esc:
-				esc = false
-			case c == '\\':
-				esc = true
-			case c == '"':
-				inStr = false
-			}
-		case c == '"':
-			inStr = true
-		case c == '{' || c == '[':
-			stack = append(stack, c)
-		case c == '}' || c == ']':
-			if len(stack) > 0 {
-				stack = stack[:len(stack)-1]
-			}
-		}
-	}
-	var b strings.Builder
-	b.WriteString(s)
-	if inStr {
-		if esc {
-			b.WriteByte('\\')
-		}
-		b.WriteByte('"')
-	}
-	out := strings.TrimRight(b.String(), " \t\r\n")
-	// A key with no value, or a trailing comma, cannot be closed as is.
-	out = strings.TrimRight(out, ",")
-	if strings.HasSuffix(out, ":") {
-		out += "null"
-	}
-	for i := len(stack) - 1; i >= 0; i-- {
-		if stack[i] == '{' {
-			out += "}"
-		} else {
-			out += "]"
-		}
-	}
-	if !json.Valid([]byte(out)) {
-		return out, false
-	}
-	return out, true
+	// Close what is open — the state machine the OutputDecoder's
+	// prefix salvage shares (internal/jsonclose).
+	return jsonclose.Close(s)
 }
 
 // isASCIILetters reports whether s is one or more ASCII letters — the

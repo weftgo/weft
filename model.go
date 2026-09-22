@@ -125,7 +125,10 @@ type ToolChoiceConfig struct {
 // with a zero. A set pointer to 0 is a value (Temperature of exactly 0
 // is sent), with one provider exception: an anthropic MaxTokens of 0
 // falls to the adapter's default, because the API requires a positive
-// value. A run-level Params option replaces the agent's struct whole,
+// value. A negative MaxTokens fails the run at the step that carries
+// it — no provider accepts one, and the loop names the bug rather
+// than letting each adapter improvise. A run-level Params option
+// replaces the agent's struct whole,
 // it does not merge field by field; PrepareStep can edit it per step.
 // Adapters drop knobs their provider lacks (Seed on anthropic) under
 // the "adapters document what they drop" rule.

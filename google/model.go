@@ -3,10 +3,12 @@ package google
 import (
 	"context"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/internal/adapterkit"
 	"google.golang.org/genai"
 )
 
@@ -103,29 +105,34 @@ func Seed(s int64) Option {
 // recursively, every other value replaces, and **your key wins on
 // conflict** — the escape hatch is you taking responsibility for bytes
 // weft did not choose, and the default-bytes tests do not cover what
-// it sends. Construction-time only; it applies to the requests the
-// adapter makes, including through an injected Client(c).
+// it sends. Construction-time only, and a snapshot: the values are
+// deep-copied when the option applies, so mutating the map you passed
+// afterwards never reaches the Model (safe for concurrent runs). It
+// applies to the requests the adapter makes, including through an
+// injected Client(c).
 func ExtraBody(fields map[string]any) Option {
 	return optionFunc(func(c *config) {
 		if c.extraBody == nil {
 			c.extraBody = map[string]any{}
 		}
 		for k, v := range fields {
-			c.extraBody[k] = v
+			c.extraBody[k] = adapterkit.CloneJSON(v)
 		}
 	})
 }
 
 // ExtraHeaders adds HTTP headers to every request, verbatim. A header
 // the SDK itself sets (Authorization, Content-Type) is yours not to
-// clobber — the option does not check. Construction-time only.
+// clobber — the option does not check. Construction-time only, and a
+// snapshot: the slices are copied when the option applies, so mutating
+// the header values you passed afterwards never reaches the Model.
 func ExtraHeaders(h http.Header) Option {
 	return optionFunc(func(c *config) {
 		if c.extraHeaders == nil {
 			c.extraHeaders = http.Header{}
 		}
 		for k, vs := range h {
-			c.extraHeaders[k] = vs
+			c.extraHeaders[k] = slices.Clone(vs)
 		}
 	})
 }

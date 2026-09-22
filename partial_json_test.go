@@ -2,6 +2,7 @@ package weft
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -54,6 +55,13 @@ func FuzzPartialJSON(f *testing.F) {
 		if err := json.Unmarshal([]byte(data), &whole); err != nil {
 			return // not JSON: only the no-panic guarantee applies
 		}
+		if hasDuplicateKeys(data) {
+			// Duplicate keys collapse last-wins in Go's decoder, so a
+			// truncation can hold the first value where the whole holds
+			// the second — the property assumes unique keys, as any
+			// real submit_output document has.
+			return
+		}
 		full := closedPrefix(data)
 		if full == "" {
 			return
@@ -77,6 +85,58 @@ func FuzzPartialJSON(f *testing.F) {
 			}
 		}
 	})
+}
+
+// hasDuplicateKeys walks the JSON token stream and reports whether any
+// object repeats a key. Go's decoder collapses duplicates last-wins,
+// which would make the subset property compare a truncation's first
+// value against the whole document's second.
+func hasDuplicateKeys(data string) bool {
+	type frame struct {
+		seen  map[string]bool
+		isKey bool // objects: the next string token is a key
+		isAry bool
+	}
+	dec := json.NewDecoder(strings.NewReader(data))
+	var stack []*frame
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		switch t := tok.(type) {
+		case json.Delim:
+			switch t {
+			case '{':
+				stack = append(stack, &frame{seen: map[string]bool{}, isKey: true})
+			case '[':
+				stack = append(stack, &frame{isAry: true})
+			case '}', ']':
+				if len(stack) > 0 {
+					stack = stack[:len(stack)-1]
+				}
+				if len(stack) > 0 && !stack[len(stack)-1].isAry {
+					stack[len(stack)-1].isKey = true // a value just completed
+				}
+			}
+		case string:
+			if len(stack) > 0 {
+				f := stack[len(stack)-1]
+				if f.isKey && !f.isAry {
+					if f.seen[t] {
+						return true
+					}
+					f.seen[t] = true
+				}
+				f.isKey = !f.isKey
+			}
+		default:
+			if len(stack) > 0 {
+				f := stack[len(stack)-1]
+				f.isKey = !f.isKey
+			}
+		}
+	}
 }
 
 // subsetOf reports whether every field present in part is present in

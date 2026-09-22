@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/weftgo/weft/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/weftgo/weft/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/weftgo/weft.svg)](https://pkg.go.dev/github.com/weftgo/weft)
-[![Version](https://img.shields.io/badge/version-v0.2.0-orange)](https://github.com/weftgo/weft/releases/tag/v0.2.0)
+[![Version](https://img.shields.io/badge/version-v0.3.0-orange)](https://github.com/weftgo/weft/releases/tag/v0.3.0)
 
 A thin, opinionated core for building AI agents in Go — designed the way
 the standard library is: small interfaces, `context` everywhere, functional
@@ -14,14 +14,17 @@ flight — and nothing else. Concurrency is the point, not a feature: a
 step's tools fan out over goroutines, parallelism is a one-line dial, and
 tool failures never cancel their siblings.
 
-> **Status:** v0.2.0 — experimental, pre-1.0. The three load-bearing
+> **Status:** v0.3.0 — experimental, pre-1.0. The three load-bearing
 > contracts — message model, error model, tool contract — are implemented
 > and tested; the provider adapters (OpenAI + compatible servers,
 > Anthropic, Google) wrap the vendors' official Go SDKs; the two
 > middleware seams (`WrapModel`/`WrapTools`, package `mw`), the approval
-> boundary, subagents as tools, MCP interop both ways (`weft/mcp`),
-> observability (OTel spans, slog lines), and wefttest record/replay
-> are in; see `docs/adr/` and the roadmap below.
+> boundary (now with externally-computed results: `Resolve`), subagents
+> as tools, MCP interop both ways (`weft/mcp`), observability (OTel
+> spans, slog lines), wefttest record/replay, and the parity-round
+> controls — tool-choice forcing, per-step sampling params, richer
+> `Usage` splits, anthropic prompt caching, and the streaming
+> `OutputDecoder` — are in; see `docs/adr/` and the roadmap below.
 > The surrounding modules (serving, ops, devtools, cli) come next, in
 > that order of demand.
 

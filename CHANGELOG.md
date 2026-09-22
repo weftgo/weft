@@ -4,6 +4,109 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## 0.3.0 — 2026-09-22
+
+The Phase 2a parity round (TODO §2a, `docs/phase2a-plan.md` — not
+published with the repo; ADR 0013's 2026-09-22 amendment records the
+decisions): the six capability items the cross-check against the
+studied frameworks found missing, plus the three stances recorded in
+the same ADR pass. Tags cut together: the root and the three adapters
+at v0.3.0; `mcp` untouched at v0.1.0. Everything is additive — apidiff
+is clean with no allowances.
+
+### Added — Tool-choice forcing (TODO §2a.1, ADR 0013)
+
+- **`weft.ToolChoice(ToolChoiceConfig{Mode, Name})`** — force a step
+  to call some tool (`any`), a named tool (`tool`), or none (`none`,
+  with the catalogue still advertised, so a prompt-cache prefix on the
+  tool definitions survives a no-calls final step). Works as agent
+  option, run option, and per-step via `PrepareStep` — the `Thinking`
+  dual shape. Mapped per provider (`required`/named/`"none"`;
+  `any`/`tool`/`none` — `disable_parallel_tool_use` merges onto the
+  chosen member; `ANY`/`allowedFunctionNames`/`NONE`). New conformance
+  case `tool_choice_forcing` (declared via `Caps.ToolChoice`) also
+  asserts the request bytes carry the provider's field.
+
+### Added — Request params and the escape hatch (TODO §2a.3, ADR 0013)
+
+- **`weft.Params(RequestParams{Temperature, TopP, MaxTokens, Stop,
+  Seed})`** — per-run/per-step sampling folding over the adapters'
+  construction options (nil keeps the construction default; a run
+  override replaces the struct whole). Adapters gained `TopP`, `Stop`,
+  and `Seed` construction options where the vendor has them (anthropic
+  has no seed — dropped, documented; google narrows Seed/MaxTokens to
+  int32, failing `ErrUnsupported` past the ceiling).
+- **`ExtraBody(map[string]any)` / `ExtraHeaders(http.Header)`** per
+  adapter — the caller-wins valve for vendor knobs weft has no option
+  for: nested maps deep-merge, every other value replaces, and **your
+  key wins on conflict** (yours, not weft's — the default-bytes tests
+  do not cover what it sends). Construction-time only.
+
+### Added — Richer `Usage` (TODO §2a.4, ADR 0016)
+
+- **`Usage.CachedInputTokens`, `Usage.CacheWriteTokens`,
+  `Usage.ReasoningTokens`** — reporting subsets of the two totals
+  (which stay inclusive; `UsageLimit` and `Total` are unchanged).
+  Filled by all three adapters (anthropic cache read/write, openai
+  cached/reasoning details, google implicit-cache and thought tokens).
+  On spans under their semconv/v1.41.0 names
+  (`gen_ai.usage.cache_read.input_tokens`,
+  `…cache_creation.input_tokens`, `…reasoning.output_tokens`), each
+  only when non-zero; the slog lines keep the two totals (line
+  stability). Wire is omitempty — old event JSON round-trips.
+
+### Added — Prompt caching (TODO §2a.2, ADR 0013)
+
+- **`anthropic.PromptCache()`** — opt-in `cache_control` breakpoints at
+  the three stable prefix edges (system block, final tool definition,
+  trailing conversation edge); without it, no marker anywhere. Cache
+  writes bill 1.25×, reads 0.1×; see the README cost note and the
+  `Usage` splits for the measurement.
+
+### Added — Externally-computed tool results (TODO §2a.5, ADR 0007)
+
+- **`weft.Resolve(callID, content)` / `weft.ResolveError(callID,
+  content)`** — resume a parked call with a result computed outside the
+  process; the handler never runs, the content becomes the tool result
+  verbatim (capped by `MaxResultBytes` as any result), composes with
+  `Approve`/`Deny` in one resuming call. **Behaviour note:**
+  `Resolve` on a call that is not pending is a loud run error at
+  step 0 — a deliberate asymmetry with `Approve`/`Deny`, which ignore
+  unknown ids.
+
+### Added — Streaming partial structured output (TODO §2a.6)
+
+- **`weft.NewOutputDecoder[Out]()`** — a decoder value fed from the
+  run's events; `Feed` returns best-effort partials as `submit_output`'s
+  arguments stream (lenient closed-prefix decode, hand-rolled in
+  `partial_json.go`, fuzzed), `Result` follows the `OutputOf` rule.
+  UI-only; never model-visible.
+
+### Docs
+
+- ADR 0013 amended (tool choice, params + escape hatch, cache markers,
+  the provider-executed-tools stance); ADR 0007 amended (resolve);
+  ADR 0014 noted (handoff isolation stands); ADR 0016 noted (usage
+  split attributes); ADR 0017 amended (replay key gains `ToolChoice`,
+  not `Params`). README: sampling/forcing paragraph, the prompt-cache
+  cost note, and "Seams are the product" (governance middleware stays
+  examples — TODO §2a.9). Godoc examples: `ExampleToolChoice`,
+  `ExampleParams`, `ExampleOutputDecoder`; `examples/approval` gains
+  the `run_sql` resolve path.
+
+### Live runs owed (carried debt — no provider keys on the build machine)
+
+v0.3.0 ships on the offline suites, as v0.2.0 did (ADR 0013's
+fixtures-and-live-runs rule). When keys exist, `make live` must prove:
+the full `conformance.Run` table including `tool_choice_forcing` on
+all three providers; `PromptCache`'s measured payoff
+(`CachedInputTokens > 0` on step 2+ of a long-transcript run);
+openai/google `CachedInputTokens`/`ReasoningTokens` non-zero against
+real responses; and `mw.Retry`'s structural `HTTPStatus`/`RetryAfter`
+extraction against real openai-go / anthropic-sdk-go / genai error
+values (the same §3.5/§4.1 debt, now grown by 2a's request-byte
+changes).
+
 ## 0.2.0 — 2026-09-19
 
 Everything unreleased since 0.1.0, tagged as one set (ADR 0005): the

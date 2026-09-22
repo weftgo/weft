@@ -380,6 +380,26 @@ option overrides it for one — maps to whatever the provider expresses
 document what they drop. The openai adapter picks the thinking wire
 form from the base URL; `openai.Dialect` pins it when detection can't.
 
+Sampling is per run or per step the same way — `weft.Params(weft.
+RequestParams{…})` (Temperature, TopP, MaxTokens, Stop, Seed) folds
+over the adapter's construction options — and every adapter carries
+`ExtraBody`/`ExtraHeaders`, the caller-wins escape hatch for vendor
+knobs weft has no option for. Forcing a step's tool calls is
+`weft.ToolChoice` (`any`, a named tool, or `none` with the catalogue
+still advertised — the router shape).
+
+**Prompt caching (Anthropic):** `anthropic.PromptCache()` marks the
+request's stable prefix edges — the system block, the final tool
+definition, the trailing conversation edge — with Anthropic's
+ephemeral `cache_control`. Cache writes bill 1.25× and reads 0.1× the
+base input price, so a long transcript whose prefix repeats across
+steps saves from the second step on; `Usage.CachedInputTokens` and
+`Usage.CacheWriteTokens` show it measured. The prefix is the caller's
+to keep stable: a `PrepareStep` that trims messages invalidates the
+trailing breakpoint on purpose, and `weft.ToolChoiceNone` is how you
+forbid calls on a final step without dropping the tool definitions —
+and the cache prefix they anchor — from the request.
+
 Every adapter passes the same executable contract
 (`wefttest/conformance`): streaming tool-call fragments are assembled
 into whole calls and — where the provider streams fragments at all

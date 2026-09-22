@@ -36,6 +36,7 @@ type config struct {
 	idleSet      bool
 	maxRetries   int
 	thinking     bool
+	promptCache  bool
 }
 
 type optionFunc func(*config)
@@ -109,6 +110,28 @@ func MaxRetries(n int) Option { return optionFunc(func(c *config) { c.maxRetries
 // sent — the vendor default for the model applies.
 func Thinking(on bool) Option { return optionFunc(func(c *config) { c.thinking = on }) }
 
+// PromptCache marks the request's stable prefix edges as cacheable:
+// cache_control:{"type":"ephemeral"} on the system text block, the
+// final tool definition, and the final content block of the final
+// message — three of Anthropic's four breakpoint budget, placed where
+// the transcript grows (Crush's placement; the fourth stays unspent
+// for a compaction summary block). Opt-in: without the option no
+// cache_control appears anywhere, and the request bytes are exactly
+// v0.2.0's.
+//
+// Economics: cache writes bill 1.25× and cache reads 0.1× the base
+// input-token price, so a long transcript whose prefix repeats across
+// steps saves from the second step on — watch Usage's
+// CachedInputTokens and CacheWriteTokens to see it measured. Prefix
+// discipline is the caller's: a PrepareStep function that trims
+// messages invalidates the trailing breakpoint on purpose (the option
+// composes with deliberate trimming, it does not forbid it), and
+// weft.ToolChoiceNone is the way to stop tool calls without dropping
+// the tool definitions — and the cache prefix they anchor — from the
+// request. No TTL or position options in v0.3.0: one good default,
+// revisit when a consumer asks.
+func PromptCache() Option { return optionFunc(func(c *config) { c.promptCache = true }) }
+
 // ExtraBody adds fields to every request's JSON body — the generic
 // valve for vendor knobs weft has no option for. Deep-merged into the
 // body weft built: nested maps merge recursively, every other value
@@ -169,6 +192,7 @@ func Model(name string, opts ...Option) weft.Model {
 		extraBody:    cfg.extraBody,
 		extraHeaders: cfg.extraHeaders,
 		thinking:     cfg.thinking,
+		promptCache:  cfg.promptCache,
 		idle:         defaultIdleTimeout,
 	}
 	if cfg.idleSet {
@@ -208,6 +232,7 @@ type model struct {
 	extraBody    map[string]any
 	extraHeaders http.Header
 	thinking     bool
+	promptCache  bool
 	idle         time.Duration
 }
 

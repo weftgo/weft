@@ -163,7 +163,59 @@ func (m *model) params(req weft.ModelRequest) (anthropic.MessageNewParams, error
 	for _, t := range req.Tools {
 		p.Tools = append(p.Tools, convertTool(t))
 	}
+	// Prompt-cache markers (TODO §2a.2): the three stable prefix edges,
+	// applied last so the final positions are final.
+	if m.promptCache {
+		markCache(&p)
+	}
 	return p, nil
+}
+
+// markCache sets cache_control on the request's three stable prefix
+// edges: the system text block, the final tool definition, and the
+// final content block of the final message — each only when it exists
+// (no system → two markers; no tools → two; both absent → one). Three
+// of Anthropic's four-breakpoint budget; the fourth stays unspent for
+// a compaction summary block (ADR 0013's 2026-09-22 amendment).
+func markCache(p *anthropic.MessageNewParams) {
+	// Type is set explicitly: the field is omitzero on the wire, and a
+	// zero struct would be dropped instead of defaulting.
+	mark := anthropic.CacheControlEphemeralParam{Type: "ephemeral"}
+	if n := len(p.System); n > 0 {
+		p.System[n-1].CacheControl = mark
+	}
+	if n := len(p.Tools); n > 0 {
+		if t := p.Tools[n-1].OfTool; t != nil {
+			t.CacheControl = mark
+		}
+	}
+	if n := len(p.Messages); n > 0 {
+		msg := &p.Messages[n-1]
+		if b := len(msg.Content); b > 0 {
+			markBlock(&msg.Content[b-1], mark)
+		}
+	}
+}
+
+// markBlock marks whichever union member the block holds. weft's
+// conversion produces text, image, document, thinking, tool_use, and
+// tool_result blocks; a thinking block has no cache_control field on
+// the wire (the SDK type carries none), so a trailing thinking block
+// goes unmarked, and the vendor's server-tool result members cannot
+// appear here at all.
+func markBlock(u *anthropic.ContentBlockParamUnion, mark anthropic.CacheControlEphemeralParam) {
+	switch {
+	case u.OfText != nil:
+		u.OfText.CacheControl = mark
+	case u.OfImage != nil:
+		u.OfImage.CacheControl = mark
+	case u.OfDocument != nil:
+		u.OfDocument.CacheControl = mark
+	case u.OfToolUse != nil:
+		u.OfToolUse.CacheControl = mark
+	case u.OfToolResult != nil:
+		u.OfToolResult.CacheControl = mark
+	}
 }
 
 // userBlocks converts a user message: text parts to text blocks, image

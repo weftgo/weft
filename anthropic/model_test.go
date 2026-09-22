@@ -413,3 +413,87 @@ func TestFoldParams(t *testing.T) {
 		})
 	}
 }
+
+func TestPromptCacheMarkers(t *testing.T) {
+	tool := testTool()
+	convert := func(opts ...Option) string {
+		m := Model("m", opts...).(*model)
+		p, err := m.params(weft.ModelRequest{
+			System:   "be brief",
+			Messages: []weft.Message{weft.User("hi")},
+			Tools:    []*weft.ToolDef{tool},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(p)
+		return string(b)
+	}
+	count := func(s string) int { return strings.Count(s, `"cache_control":{"type":"ephemeral"}`) }
+
+	// Default: no markers anywhere — v0.2.0's bytes.
+	if got := convert(); strings.Contains(got, "cache_control") {
+		t.Errorf("default request carries cache_control: %s", got)
+	}
+
+	// Full shape: exactly three markers — system, final tool, final
+	// block of the final message.
+	if got := convert(PromptCache()); count(got) != 3 {
+		t.Errorf("PromptCache request has %d markers, want 3:\n%s", count(got), got)
+	}
+	// The positions: the system blocks, the tool definitions, and the
+	// messages each carry exactly one marker (the last of each).
+	mk := Model("m", PromptCache()).(*model)
+	pp, err := mk.params(weft.ModelRequest{
+		System:   "be brief",
+		Messages: []weft.Message{weft.User("hi")},
+		Tools:    []*weft.ToolDef{tool},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, section := range map[string]any{"system": pp.System, "tools": pp.Tools, "messages": pp.Messages} {
+		sb, _ := json.Marshal(section)
+		if c := count(string(sb)); c != 1 {
+			t.Errorf("%s carries %d markers, want 1: %s", name, c, sb)
+		}
+	}
+
+	// Two-and-one variants: no system → two markers; no tools → two.
+	m := Model("m", PromptCache()).(*model)
+	p, err := m.params(weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}, Tools: []*weft.ToolDef{tool}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := json.Marshal(p); count(string(b)) != 2 {
+		t.Errorf("no-system request has %d markers, want 2:\n%s", count(string(b)), b)
+	}
+	p, err = m.params(weft.ModelRequest{System: "be brief", Messages: []weft.Message{weft.User("hi")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := json.Marshal(p); count(string(b)) != 2 {
+		t.Errorf("no-tools request has %d markers, want 2:\n%s", count(string(b)), b)
+	}
+	p, err = m.params(weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := json.Marshal(p); count(string(b)) != 1 {
+		t.Errorf("no-system-no-tools request has %d markers, want 1:\n%s", count(string(b)), b)
+	}
+
+	// The final message's final block is the one marked: a tool result
+	// block (the trailing edge mid-conversation) carries the marker.
+	res := weft.Message{Role: weft.RoleTool, Content: []weft.Part{
+		weft.ToolResultPart{CallID: "c1", Name: "probe", Content: "ok"},
+	}}
+	p, err = m.params(weft.ModelRequest{Messages: []weft.Message{weft.User("hi"), res}, Tools: []*weft.ToolDef{tool}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(p)
+	if !strings.Contains(string(b), `"cache_control":{"type":"ephemeral"`) {
+		t.Errorf("the trailing tool_result block was not marked:\n%s", b)
+	}
+}

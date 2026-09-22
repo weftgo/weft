@@ -4051,3 +4051,238 @@ func TestUsageLimitIgnoresSplits(t *testing.T) {
 		}
 	}
 }
+
+// Resolve pastes an externally-computed result into the transcript:
+// the handler never runs, the model's next request carries the content
+// verbatim, and the transcript shape is an ordinary tool result (ADR
+// 0007's 2026-09-22 amendment).
+func TestResolvePastesExternalResult(t *testing.T) {
+	ran := false
+	park := weft.Tool("run_sql", "", func(_ context.Context, _ struct{}) (string, error) {
+		ran = true
+		return "should not run", nil
+	}, weft.RequireApproval())
+	m := wefttest.Script(wefttest.ToolCalls(wefttest.Call{ID: "q1", Name: "run_sql"}), wefttest.Say("done"))
+	agt := weft.New(m, park)
+	res, err := agt.Generate(context.Background(), weft.Prompt("run it"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Pending) != 1 || res.Pending[0].ID != "q1" {
+		t.Fatalf("pending = %+v, want q1", res.Pending)
+	}
+
+	m2 := wefttest.Script(wefttest.Say("counted"))
+	agt2 := weft.New(m2, park)
+	res2, err := agt2.Generate(context.Background(),
+		weft.Messages(res.Messages...), weft.Resolve("q1", "row_count: 42"), weft.Prompt("resume"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ran {
+		t.Error("the handler ran under Resolve; it never should")
+	}
+	// The pasted content reaches the next model call verbatim.
+	req := m2.Requests()[0]
+	var saw string
+	for _, msg := range req.Messages {
+		if msg.Role != weft.RoleTool {
+			continue
+		}
+		for _, p := range msg.Content {
+			if r, ok := p.(weft.ToolResultPart); ok && r.CallID == "q1" {
+				saw = r.Content
+				if r.IsError {
+					t.Error("Resolve produced an error result")
+				}
+			}
+		}
+	}
+	if saw != "row_count: 42" {
+		t.Errorf("resolved content = %q, want it verbatim on the next request", saw)
+	}
+	// And the resolved transcript re-feeds cleanly through Repair.
+	if _, err := weft.New(wefttest.Script(wefttest.Say("ok")), park).
+		Generate(context.Background(), weft.Messages(res2.Messages...), weft.Prompt("again")); err != nil {
+		t.Errorf("resolved transcript does not re-feed: %v", err)
+	}
+}
+
+// Resolve, Approve, and Deny compose in one resuming call, in call
+// order; the last option for an id wins.
+func TestResolveComposesWithApproveDeny(t *testing.T) {
+	park := weft.Tool("park", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "approved-ran", nil
+	}, weft.RequireApproval())
+	agt := weft.New(wefttest.Script(wefttest.ToolCalls(
+		wefttest.Call{ID: "a1", Name: "park"},
+		wefttest.Call{ID: "r1", Name: "park"},
+		wefttest.Call{ID: "d1", Name: "park"},
+		wefttest.Call{ID: "n1", Name: "park"},
+	), wefttest.Say("done")), park)
+	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Pending) != 4 {
+		t.Fatalf("pending = %d, want 4", len(res.Pending))
+	}
+	agt2 := weft.New(wefttest.Script(wefttest.Say("done")), park)
+	res2, err := agt2.Generate(context.Background(),
+		weft.Messages(res.Messages...),
+		weft.Approve("a1"),
+		weft.Resolve("r1", "pasted"),
+		weft.Deny("d1", "too risky"),
+		weft.Prompt("resume"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]weft.ToolResultPart{}
+	for _, msg := range res2.Messages {
+		if msg.Role != weft.RoleTool {
+			continue
+		}
+		for _, p := range msg.Content {
+			if r, ok := p.(weft.ToolResultPart); ok {
+				got[r.CallID] = r
+			}
+		}
+	}
+	if r := got["a1"]; r.Content != "approved-ran" || r.IsError {
+		t.Errorf("a1 = %+v, want the executed result", r)
+	}
+	if r := got["r1"]; r.Content != "pasted" || r.IsError {
+		t.Errorf("r1 = %+v, want the pasted result", r)
+	}
+	if r := got["d1"]; !r.IsError || !strings.Contains(r.Content, "DENIED: too risky") {
+		t.Errorf("d1 = %+v, want DENIED: too risky", r)
+	}
+	if r := got["n1"]; !r.IsError || !strings.Contains(r.Content, "DENIED: no decision") {
+		t.Errorf("n1 = %+v, want DENIED: no decision", r)
+	}
+}
+
+// ResolveError marks the pasted content as an error result; resolved
+// content over MaxResultBytes is capped with the visible marker.
+func TestResolveErrorAndCap(t *testing.T) {
+	park := weft.Tool("park", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "never", nil
+	}, weft.RequireApproval())
+	agt := weft.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{ID: "p1", Name: "park"}), wefttest.Say("done")), park)
+	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	agt2 := weft.New(wefttest.Script(wefttest.Say("done")), park, weft.MaxResultBytes(10))
+	res2, err := agt2.Generate(context.Background(),
+		weft.Messages(res.Messages...), weft.Resolve("p1", strings.Repeat("x", 40)), weft.Prompt("r"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range res2.Messages {
+		if msg.Role != weft.RoleTool {
+			continue
+		}
+		for _, p := range msg.Content {
+			if r, ok := p.(weft.ToolResultPart); ok && r.CallID == "p1" {
+				if len(r.Content) >= 40 {
+					t.Errorf("resolved content was not capped: %q", r.Content)
+				}
+				if !strings.Contains(r.Content, "…[truncated") {
+					t.Errorf("capped content lacks the visible marker: %q", r.Content)
+				}
+			}
+		}
+	}
+
+	// ResolveError renders IsError.
+	agt3 := weft.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{ID: "p1", Name: "park"}), wefttest.Say("done")), park)
+	res3, err := agt3.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agt4 := weft.New(wefttest.Script(wefttest.Say("done")), park)
+	res4, err := agt4.Generate(context.Background(),
+		weft.Messages(res3.Messages...), weft.ResolveError("p1", "prod is down"), weft.Prompt("r"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range res4.Messages {
+		if msg.Role != weft.RoleTool {
+			continue
+		}
+		for _, p := range msg.Content {
+			if r, ok := p.(weft.ToolResultPart); ok && r.CallID == "p1" {
+				if !r.IsError || r.Content != "prod is down" {
+					t.Errorf("ResolveError result = %+v, want error with the content verbatim", r)
+				}
+			}
+		}
+	}
+}
+
+// Resolve on an id that is not pending fails the run at step 0 with
+// the id in the message — the asymmetry with Approve/Deny, which
+// ignore unknown ids, is deliberate (ADR 0007's 2026-09-22 amendment).
+func TestResolveNonPendingFails(t *testing.T) {
+	park := weft.Tool("park", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "", nil
+	}, weft.RequireApproval())
+	agt := weft.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{ID: "p1", Name: "park"}), wefttest.Say("done")), park)
+	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = weft.New(wefttest.Script(wefttest.Say("done")), park).Generate(context.Background(),
+		weft.Messages(res.Messages...), weft.Resolve("bogus", "payload"), weft.Approve("also-bogus"), weft.Prompt("r"))
+	if err == nil {
+		t.Fatal("run succeeded; want the loud non-pending resolve failure")
+	}
+	if !strings.Contains(err.Error(), `"bogus"`) {
+		t.Errorf("err = %v, want it to name the id", err)
+	}
+	var re *weft.RunError
+	if !errors.As(err, &re) || re.Step != 0 {
+		t.Errorf("err = %v, want a RunError at step 0", err)
+	}
+	// Approve on the same unknown id stayed ignored — no complaint
+	// about "also-bogus".
+	if strings.Contains(err.Error(), "also-bogus") {
+		t.Errorf("err = %v, want Approve's unknown id ignored", err)
+	}
+}
+
+// A resolved call follows the denied path, not the executed path: a
+// result in the tool message, no ToolStart, no ToolFinish, no span —
+// nothing executed.
+func TestResolveEmitsNoToolEvents(t *testing.T) {
+	park := weft.Tool("park", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "never", nil
+	}, weft.RequireApproval())
+	agt := weft.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{ID: "p1", Name: "park"}), wefttest.Say("done")), park)
+	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawStart, sawFinish bool
+	for ev, err := range weft.New(wefttest.Script(wefttest.Say("done")), park).
+		Stream(context.Background(), weft.Messages(res.Messages...), weft.Resolve("p1", "pasted"), weft.Prompt("r")).Events() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch e := ev.(type) {
+		case weft.ToolStart:
+			if e.CallID == "p1" {
+				sawStart = true
+			}
+		case weft.ToolFinish:
+			if e.CallID == "p1" {
+				sawFinish = true
+			}
+		}
+	}
+	if sawStart || sawFinish {
+		t.Errorf("resolved call emitted ToolStart=%v ToolFinish=%v; nothing executed", sawStart, sawFinish)
+	}
+}

@@ -132,6 +132,21 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		if err := ctx.Err(); err != nil {
 			return fail(0, err)
 		}
+		// A Resolve carries a payload the caller expects the model to
+		// see: one aimed at a call that is not pending is a
+		// programming error, loud at step 0. Approve and Deny keep
+		// ignoring unknown ids — the deliberate asymmetry ADR 0007's
+		// 2026-09-22 amendment records. Sorted, so the first breach is
+		// deterministic when several ids miss.
+		pendingIDs := make(map[string]bool, len(resume))
+		for _, c := range resume {
+			pendingIDs[c.ID] = true
+		}
+		for _, id := range slices.Sorted(maps.Keys(cfg.decisions)) {
+			if cfg.decisions[id].resolved && !pendingIDs[id] {
+				return fail(0, fmt.Errorf("resolve: call %q is not pending in this run's transcript", id))
+			}
+		}
 		results, pending, sub, err := a.resolvePending(ctx, cfg, resume, seq, emit)
 		if err != nil {
 			return fail(0, err)
@@ -789,6 +804,25 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 	results := make([]ToolResultPart, 0, len(calls))
 	for _, c := range calls {
 		if parked[c.ID] {
+			continue
+		}
+		// A resolved call never runs: the decision's content is the
+		// result, verbatim, capped as any result would be (the cap is
+		// a transcript rule, not an execution rule). It follows the
+		// denied path — a result in the tool message, no span, no
+		// events, Call.Approved never set (ADR 0007's 2026-09-22
+		// amendment).
+		if d, ok := cfg.decisions[c.ID]; ok && d.resolved {
+			cap := a.resultCap
+			if def, _ := findTool(tools, c.Name); def != nil && def.capSet {
+				cap = def.resultCap
+			}
+			results = append(results, ToolResultPart{
+				CallID:  c.ID,
+				Name:    c.Name,
+				IsError: d.isError,
+				Content: capResult(d.content, cap),
+			})
 			continue
 		}
 		if r, ok := byID[c.ID]; ok {

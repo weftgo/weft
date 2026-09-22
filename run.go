@@ -23,13 +23,21 @@ type runConfig struct {
 	params        RequestParams
 	paramsSet     bool // a run-level Params option was applied
 	// decisions resolves calls left pending by an earlier run: call id →
-	// approve, or deny with a reason (Approve, Deny).
+	// approve, deny with a reason, or resolve with content
+	// (Approve, Deny, Resolve, ResolveError).
 	decisions map[string]decision
 }
 
 type decision struct {
 	approved bool
 	reason   string
+	// A resolved call never runs its handler: content becomes the
+	// ToolResultPart verbatim (isError marks ResolveError). A decision
+	// is exactly one of approve / deny / resolve (ADR 0007's
+	// 2026-09-22 amendment).
+	content  string
+	resolved bool
+	isError  bool
 }
 
 func (c *runConfig) decide(id string, d decision) {
@@ -59,6 +67,41 @@ func (o denyOption) applyRun(c *runConfig) { c.decide(o.id, decision{reason: o.r
 // Pending calls given neither Approve nor Deny are denied with the
 // reason "no decision" ("DENIED: no decision").
 func Deny(callID, reason string) RunOption { return denyOption{callID, reason} }
+
+type resolveOption struct {
+	id, content string
+	isError     bool
+}
+
+func (o resolveOption) applyRun(c *runConfig) {
+	c.decide(o.id, decision{content: o.content, resolved: true, isError: o.isError})
+}
+
+// Resolve resumes a pending call with a result computed outside the
+// process — the human-as-tool-executor shape: run the query in prod,
+// paste what happened, and the next model call sees it. The content
+// becomes the call's ToolResultPart verbatim; the handler never runs,
+// no execute_tool span or ToolStart/ToolFinish is emitted (nothing
+// executed), and Call.Approved is never set. MaxResultBytes applies
+// as to any result. Composes with Approve and Deny in one resuming
+// call; the last option for an id wins.
+//
+// Resolve on a call that is not pending in the resumed transcript is a
+// loud run error at step 0 — a deliberate asymmetry with Approve and
+// Deny, which ignore unknown ids: those are yes/no marks over an id
+// set, while Resolve carries a payload the caller expects the model to
+// see, and dropping it silently is the one thing the error model
+// forbids (ADR 0007's 2026-09-22 amendment).
+func Resolve(callID, content string) RunOption {
+	return resolveOption{id: callID, content: content}
+}
+
+// ResolveError is Resolve with the result marked as an error: the
+// model sees the content on an error result, the shape a failed
+// execution would have produced.
+func ResolveError(callID, content string) RunOption {
+	return resolveOption{id: callID, content: content, isError: true}
+}
 
 type runIDOption string
 

@@ -100,3 +100,23 @@ func main() {
 	}
 	fmt.Println(res.Text())
 }
+
+// runSQLAgent parks a query for a human to execute outside the
+// process — the Resolve half of the boundary: the operator runs the
+// SQL in prod, pastes what happened, and the next model call sees it.
+// The handler below would refuse anyway; under Resolve it never runs.
+func runSQLAgent() *weft.Agent {
+	runSQL := weft.Tool("run_sql", "Run a read-only SQL query. A human executes it.",
+		func(_ context.Context, in struct {
+			SQL string `json:"sql"`
+		}) (string, error) {
+			return "", &weft.ToolError{Code: "NOT_EXECUTED", Message: "this tool only runs through a human"}
+		},
+		weft.RequireApproval(),
+	)
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{ID: "q1", Name: "run_sql", Args: `{"sql":"SELECT COUNT(*) FROM orders"}`}),
+		wefttest.Say("There are 42 orders."),
+	)
+	return weft.New(model, weft.Name("sql-desk"), runSQL)
+}

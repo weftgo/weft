@@ -99,6 +99,8 @@ res2, err := agt.Generate(ctx, weft.Messages(res.Messages...), weft.Prompt("And 
 // 4a. Approval: a RequireApproval tool parks its call; the run ends
 //     successfully with res.Pending set. Resume with a decision:
 //     agt.Generate(ctx, weft.Messages(res.Messages...), weft.Approve(id), weft.Deny(id, "why"))
+//     weft.Resolve(id, content) resumes with a result computed outside the process — the
+//     handler never runs; Resolve on a non-pending id is a loud run error.
 //     Middleware parks any call by returning an error wrapping ErrApprovalRequired.
 
 // 4b. Structured output: a submit_output tool with T's schema; the run

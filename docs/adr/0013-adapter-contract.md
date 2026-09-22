@@ -3,9 +3,12 @@
 - Status: decided (2026-09-10, with TODO §3.1–§3.7); amended 2026-09-12
   (thinking pass-through, TODO §5.14), 2026-09-14 (argument-delta
   progress, enforced cancellation, empty-content and refusal handling —
-  cross-cutting rules and appendices below), and 2026-09-18
+  cross-cutting rules and appendices below), 2026-09-18
   (per-request tool conversion, the narrowed kill switch, the
-  `slow_stream` and `tool_args_delta` cases, init-client error wording)
+  `slow_stream` and `tool_args_delta` cases, init-client error wording),
+  and 2026-09-22 (Phase 2a parity round, TODO §2a — the amendment
+  below: tool choice, request params, `ExtraBody`/`ExtraHeaders`,
+  prompt-cache markers, and the provider-executed-tools stance)
 - Numbering: 0013, not 0006 — 0006–0011 are reserved by the TODO items
   that name them (§4 seams, §4.4 approval, §6 output, §10 wire, §11
   record, §14 runtime) and 0012 is the manifest.
@@ -326,3 +329,156 @@ that makes an HTTP call, and run under `deny`. The line matters when
 MCP sampling ships (a server asking *our* model to generate): that is
 a model request and will come under the switch — recorded in ADR 0015's
 orbit.
+
+## Amendment (2026-09-22 — Phase 2a: tool choice, request params, the escape hatch, prompt-cache markers)
+
+The parity round (TODO §2a, `docs/phase2a-plan.md`) reshapes what
+adapters send. Every decision below follows the standing rules: data on
+`ModelRequest`, not seams (ADR 0006); zero value = v0.2.0's bytes,
+pinned by default-bytes tests; vendor mapping lives in the adapters,
+the core learns no provider noun. The 2026-09-22 second pass verified
+every SDK shape named here against the pinned module versions.
+
+### Tool choice
+
+`ModelRequest.ToolChoice ToolChoiceConfig{Mode ToolChoiceMode; Name
+string}` — modes `ToolChoiceAuto` (the zero value: provider default,
+nothing sent), `ToolChoiceAny` (some tool must be called),
+`ToolChoiceNamed` (`Name` must be called), `ToolChoiceNone` (no call
+may be made; the catalogue stays advertised). `weft.ToolChoice(cfg)`
+works as both agent option and run override (the `Thinking` shape), and
+`PrepareStep` can rewrite it per step — no third mechanism.
+
+Mappings:
+
+| Adapter | `any` | `tool` (named) | `none` |
+|---|---|---|---|
+| openai | `tool_choice:"required"` | `{"type":"function","function":{"name":…}}` | `tool_choice:"none"` |
+| anthropic | `OfAny` | `OfTool{Name}` | `OfNone` |
+| google | `mode:"ANY"` | `mode:"ANY"` + `allowedFunctionNames:[name]` | `mode:"NONE"` |
+
+- **Anthropic union merge:** when `SequentialTools` is also set,
+  `disable_parallel_tool_use:true` rides the chosen `OfAny`/`OfTool`
+  member instead of `OfAuto` — one `tool_choice` on the wire, both
+  hints kept. `none` has no parallel field.
+- **Google:** ANY-mode forcing is *not* the sequential hint —
+  `Caps.Sequential` stays false (a declared gap), and forcing does not
+  close it.
+- **Loop validation, no sentinel:** a non-auto choice with an empty
+  step tool list, a named choice whose tool is not advertised, a named
+  choice with an empty name, or a `Name` set under another mode, fails
+  the run with a descriptive `*RunError` at the snapshot-validation
+  site (after `PrepareStep`). This is a programming error the caller
+  fixes, not a condition to branch on — the snapshot sentinels exist
+  only because middleware produces those lists dynamically. `none` with
+  no tools is covered by the same empty-list rule (every provider
+  rejects a forced choice without a catalogue).
+- `ToolChoice` constrains what the provider is *asked* to emit, never
+  execution: a provider that ignores `none` and calls anyway has its
+  call run (the model was shown the tool; property 3 holds).
+- **Conformance:** case `tool_choice_forcing` (declared via
+  `Caps.ToolChoice`), with the request body asserted — the case's
+  server records what the adapter sent and must see the provider's
+  tool-choice field in it. Live: a valid-but-different choice under
+  `any` skips; a call under `none` or a wrong name under `tool` is a
+  breach.
+- **wefttest:** `Script` records the field and does not act on it —
+  scripts say what the model said; a double that invented a call to
+  satisfy a request field would be a second behaviour to learn.
+- **Replay key (ADR 0017):** `ToolChoice` joins the key the way
+  `Thinking` does (nil when zero, so every existing fixture key is
+  unchanged); `Params` does not (below).
+
+### Request params
+
+`ModelRequest.Params RequestParams` — `Temperature *float64`, `TopP
+*float64`, `MaxTokens *int`, `Stop []string`, `Seed *int64`. Pointer
+semantics, three states per knob: construction unset + request unset →
+not sent; construction set + request unset → the construction value;
+request set → the request value. A set pointer to `0` *is* a value
+(`Temperature: ptr(0.0)` sends 0), with one documented exception:
+anthropic `MaxTokens` of 0 falls to the adapter's 4096 default because
+the API requires a positive value. `weft.Params(p)` is the dual option
+(the `Thinking` shape); a run override replaces the agent's struct
+whole, it does not merge field by field, and `PrepareStep` can edit it
+per step. Adapters gained construction options for the same knobs:
+`TopP`, `Stop` (anthropic: `Stop`, mapping `stop_sequences`), and
+`Seed` where the vendor has one.
+
+- **openai:** `temperature`, `top_p`, `max_completion_tokens`,
+  `stop` (string-array union), `seed`.
+- **anthropic:** `temperature`, `top_p`, `max_tokens`,
+  `stop_sequences`. **No `Seed`** — the Messages API has none; a
+  `Params.Seed` on a request is dropped under the "adapters document
+  what they drop" rule (seed is a determinism *hint*, not a contract;
+  documented in `anthropic/doc.go`). `TopK` stays out (no other
+  provider has it in Chat Completions; a construction option later if
+  asked).
+- **google:** `temperature`, `topP` (narrowed to `*float32`), `maxOutputTokens`,
+  `stopSequences`, `seed` (`*int32`): a `Seed` or `MaxTokens` above
+  `math.MaxInt32` fails the call wrapping `ErrUnsupported` naming the
+  ceiling — the existing narrowing rule, not a silent wrap.
+
+### The escape hatch: `ExtraBody` / `ExtraHeaders`
+
+Each adapter gained `ExtraBody(fields map[string]any) Option` and
+`ExtraHeaders(h http.Header) Option` — the public version of the
+openai adapter's internal thinking injection. Construction-time only:
+per-request dynamic provider options stay a register row (they would
+put provider nouns on `ModelRequest`, the P5 line). Mechanism:
+openai and anthropic apply an SDK request middleware that deep-merges
+`fields` into the JSON body (nested maps merge recursively, every
+other value replaces) plus `option.WithHeader` per header entry, as
+per-request options so they also apply to an injected `Client(c)`;
+google sets `GenerateContentConfig.HTTPOptions{Headers, ExtraBody}` per
+request and lets the SDK merge (`recursiveMapMerge`).
+
+**Caller wins on conflict.** The escape hatch is the caller taking
+responsibility for bytes weft did not choose; a valve that silently
+declined to override would be the one surprise the option exists to
+remove (genai's native `ExtraBody` merges the same direction; decided
+in the 2026-09-22 review, plan §4.2). On openai the gateway thinking
+object and `ExtraBody` compose in that order — weft's injection first,
+the caller's merge last. Documented on the option: ExtraBody can
+change request bytes — yours, not weft's; the default-bytes tests do
+not cover it, and a colliding key replaces weft's value. A header the
+SDK itself sets (`Authorization`, `Content-Type`) is the caller's
+problem not to clobber.
+
+### Prompt-cache markers (anthropic)
+
+`anthropic.PromptCache()` — opt-in; without it no `cache_control`
+appears anywhere (pinned). With it, `cache_control:{"type":"ephemeral"}`
+lands on exactly three positions, each only when it exists: the system
+text block, the final tool definition, and the final content block of
+the final message of the transcript — the stable prefix edges (Crush's
+placement). Three of anthropic's four-breakpoint budget; the fourth
+stays unspent for `thread`'s compaction summary block. No TTL option
+and no position options in v0.3.0 (the residuals pattern: one good
+default, revisit when a consumer asks). `PrepareStep` interaction is
+documented on the option: trimming mid-run invalidates the trailing
+breakpoint on purpose — the option composes with deliberate trimming,
+and `ToolChoiceNone` is the way to stop calls without breaking the
+tool-definition breakpoint. The measured payoff (`CachedInputTokens > 0`
+on step 2+) is part of the carried live debt (TODO §3.5).
+
+Google's explicit context caching is **deferred** (G5): a created
+resource with TTL, not a request marker — a different mechanism whose
+lifecycle the adapter would own. Decision criterion: the first consumer
+with Gemini long-transcript economics asks. Gemini's *implicit* caching
+needs no option and is already visible through 2a.4's
+`CachedInputTokens`.
+
+### Provider-executed tools and the Responses API (stance, TODO §2a.7)
+
+Anthropic server tools (`web_search`, `code_execution`), Google
+grounding, and the OpenAI Responses API's built-ins are
+provider-executed tools — a kind `Tool`/`RawTool` has no mapping for,
+because nothing in the process executes them. Not wrapping them is a
+stance, not an oversight; the candidate mapping when the first consumer
+needs one is an adapter-mounted `RawTool` with a provider-executed
+marker routed to a request-level tool entry, argued in a future
+amendment of this ADR. The Responses API is its own sub-question
+(reasoning items, `previous_response_id` statefulness vs weft's
+caller-owned transcripts) — named here so the next person does not
+rediscover it.

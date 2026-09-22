@@ -1,6 +1,7 @@
 # ADR 0014 — Subagents as tools
 
-- Status: decided (2026-09-19, TODO §5.1)
+- Status: decided (2026-09-19, TODO §5.1); noted 2026-09-22 (context
+  forwarding, TODO §2a.8 — the note at the end)
 - Deep dive chapters 11 and 12 argued the design from the field's
   evidence; this ADR records the mechanics as shipped and every open
   decision the plan (`docs/phase2-loop-plan.md` §3) resolved with a
@@ -188,3 +189,14 @@ points of the plan's §3.2, the grandchild double-wrap, Generate usage
 roll-up), `TestSubagentParallelDelegations` in `agent_test.go`,
 `TestFlatten` in `wefttest`, all under `-race -count=3`; the
 `nested` wire bytes are pinned in `TestEventJSONRoundTrip` and fuzzed.
+
+## Note (2026-09-22 — context-forwarding delegation, TODO §2a.8)
+
+The isolation recorded above stands as the decision: a tool handler
+cannot see the parent transcript, so a takeover/handoff pattern (the
+child continues with the parent's context — LangGraph swarm, the OpenAI
+Agents SDK) is inexpressible today, **by design**. Handoff stays a
+consumer pattern — the parent summarizes into the delegating prompt —
+until hmm's first real takeover need forces the `ForwardContext`
+question; no core change until then, and when it comes it reopens this
+ADR rather than riding in as an option.

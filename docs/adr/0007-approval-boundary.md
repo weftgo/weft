@@ -1,6 +1,7 @@
 # ADR 0007 — The approval boundary
 
-- Status: decided (2026-09-14, TODO §4.4)
+- Status: decided (2026-09-14, TODO §4.4); amended 2026-09-22
+  (externally-computed results, TODO §2a.5 — the amendment at the end)
 - Depends on: ADR 0001 (transcript repair), ADR 0002 (tool errors have
   codes), ADR 0006 (the tool seam)
 
@@ -94,3 +95,36 @@ of this seam.
   Documented; revisit if a consumer needs it.
 - Model-visible strings pinned by tests: `DENIED: <reason>`,
   `DENIED: no decision`.
+
+## Amendment (2026-09-22 — externally-computed results, TODO §2a.5)
+
+The decision set grows a third kind: **resolve**. `weft.Resolve(callID,
+content)` and `weft.ResolveError(callID, content)` resume a pending
+call with a result computed outside the process — the "human as tool
+executor" pattern (run the query in prod, paste what happened; Pydantic
+AI's `DeferredToolResults`, LangGraph's `Command(resume=…)`). The
+handler never runs; the content becomes the `ToolResultPart` verbatim
+(`ResolveError` sets `IsError`), the tool message is completed in call
+order, and the loop continues. `MaxResultBytes` applies to resolved
+content as to any result — the cap is a transcript rule, not an
+execution rule. Resolves compose with `Approve`/`Deny` in one resuming
+call; the last option for an id wins; undecided calls keep
+`DENIED: no decision`. A resolved call follows the denied path, not the
+executed path: a result in the tool message, no `execute_tool` span,
+no `ToolStart`/`ToolFinish`, and `Call.Approved` is never set —
+nothing ran.
+
+**`Resolve` on a call not in the resumed transcript's pending set is a
+loud run error at step 0** — a deliberate asymmetry with
+`Approve`/`Deny`, which ignore unknown ids (documented on `Approve`
+since this ADR's first pass). Those are idempotent yes/no marks over an
+id set, and a stale id in a resume list is harmless to ignore;
+`Resolve` carries a payload the caller expects the model to see, and
+dropping it silently is exactly the silent-skip behaviour the error
+model forbids. No new sentinel: this is a programming error the caller
+fixes, reported in the error's text.
+
+`Resolve` is a *decision about* a parked call, not an execution
+channel: `Call.Approved` stays the middleware-parking contract, and
+`mcp.Serve` still refuses `RequireApproval` tools — MCP has no resolve
+verb either.

@@ -1,6 +1,8 @@
 # ADR 0017 — Testing conventions: replay, wefttest growth, the fuzz gate
 
-- Status: decided (2026-09-19, TODO §9.2/§9.3/§9.4; 9.1 closed 2026-09-10)
+- Status: decided (2026-09-19, TODO §9.2/§9.3/§9.4; 9.1 closed 2026-09-10);
+  amended 2026-09-22 (the replay key gains `ToolChoice`, TODO §2a.1 —
+  the note at the end)
 - Implementation plan: `docs/phase2-testing-plan.md`; every open decision
   it marked **Guess** is recorded here (the T-register below), plus the
   corrections the implementation forced (the C-register).
@@ -68,6 +70,7 @@ satisfy `interface{ Requests() []weft.ModelRequest }` and
 | tool names | **yes, sorted** | the catalogue changes the answer; descriptions and schemas are what a prompt tweak changes |
 | `req.Thinking` | **yes** | level and budget; omitted when zero |
 | `req.SequentialTools` | **yes** | omitted when false |
+| `req.ToolChoice` | **yes** (2026-09-22) | mode and name; nil when zero — the same rule as Thinking |
 | `req.System` | **no** | recorded in the file for the reviewer, not keyed — a prompt-wording tweak must not invalidate every fixture |
 
 **No volatile-substring normalisation** (the TODO's sketch asked for
@@ -244,3 +247,17 @@ ad-hoc contract doubles replaced by `Raw`, `WithUsage` in the
 `UsageLimit` overshoot case, `Args` in the end-to-end tool test,
 `LastRequest` in the `PrepareStep` tests). `make fuzz` is the gate's
 own test: its exit code is the verdict.
+
+## Amendment (2026-09-22 — the key gains `ToolChoice`, not `Params`)
+
+`ModelRequest.ToolChoice` joins the key (the row above): a forced
+choice changes what the model says, exactly as a thinking level does.
+It rides as `ToolChoice *weft.ToolChoiceConfig` json
+`tool_choice,omitempty`, nil when zero — so every fixture recorded
+before the field existed hashes byte-identically after (pinned by a
+test that hashes a request without a choice and compares against the
+v0.2.0 constant). `Params` is deliberately **not** keyed: a temperature
+tweak must not invalidate fixtures, the same rule that keeps the
+system prompt out — sampling knobs are not part of what the model was
+*asked*, only of how it was asked. `Script` records both fields for
+assertion and honours neither (ADR 0013's amendment).

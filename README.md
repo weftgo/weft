@@ -169,6 +169,32 @@ failures are coded `INVALID_INPUT` and `NO_SUCH_TOOL`.
 [docs/life-of-a-call.md](docs/life-of-a-call.md) shows where each
 thing sits; [ADR 0006](docs/adr/0006-seams.md) is the decision.
 
+#### Seams are the product
+
+The governance features other frameworks ship as processors — PII
+scrubbing, prompt-injection heuristics, moderation, token limits,
+response caching — need no processor layer here; each is a closure at
+one of the two seams, and each carries its own dependencies and policy
+stances rather than importing yours. `mw` stays a reference set; the
+patterns live as tested examples:
+
+- **PII scrub** — a tool middleware that masks what results carry
+  ([`Example_piiScrubMiddleware`](https://pkg.go.dev/github.com/weftgo/weft/mw#example-package-PiiScrubMiddleware)).
+- **Allowlist** — shipped as `mw.Allow(permits)`.
+- **Token limiter** — a model middleware that refuses the call before
+  the provider bills it
+  ([`Example_tokenLimitMiddleware`](https://pkg.go.dev/github.com/weftgo/weft/mw#example-package-TokenLimitMiddleware));
+  `weft.UsageLimit` covers the measured side.
+- **Response cache** — a model middleware keyed on the `ModelRequest`
+  ([`Example_responseCacheMiddleware`](https://pkg.go.dev/github.com/weftgo/weft/mw#example-package-ResponseCacheMiddleware));
+  invalidation policy is the caller's.
+
+A named `mw` package ships only when a pattern needs a dependency or a
+policy stance weft should own — the `mw.RateLimit` precedent (rate
+limiting stays an example because `golang.org/x/time` would be the
+module's first dependency). Revisit when a consumer asks for one by
+name.
+
 ### Delegating to another agent
 
 A subagent is a tool whose handler runs another agent — the

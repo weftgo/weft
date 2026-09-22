@@ -1,6 +1,7 @@
 # ADR 0016 — Observability: the loop's own reporting
 
-- Status: decided (2026-09-19, TODO §8)
+- Status: decided (2026-09-19, TODO §8); amended 2026-09-22 (usage
+  split attributes, TODO §2a.4 — the note at the end)
 - Implementation plan: `docs/phase2-observability-plan.md`; every open
   decision it marked **Guess** is recorded here (the O-register below).
 - THE-END-GOAL: the core's rent list includes "OTel spans"; principle 5
@@ -324,3 +325,20 @@ handler; `ExampleTracerProvider`, `ExampleLogger`; the real SDK's tree
 in `examples/otel/main_test.go` (`tracetest` in-memory exporter, plus
 the global-provider path), all offline under `-race`. The existing
 `TestTap*` contract tests pass unchanged.
+
+## Amendment (2026-09-22 — usage split attributes, TODO §2a.4)
+
+`Usage` gained three reporting subsets (`CachedInputTokens`,
+`CacheWriteTokens`, `ReasoningTokens`; ADR 0001's wire note records
+the fields). The pinned `semconv/v1.41.0` carries all three as GenAI
+attributes, so the splits go on spans under their standard names —
+`gen_ai.usage.cache_read.input_tokens`,
+`gen_ai.usage.cache_creation.input_tokens`, and
+`gen_ai.usage.reasoning.output_tokens` — each set only when non-zero,
+at the two sites that already set `gen_ai.usage.input/output_tokens`
+(`invoke_agent` with the run totals, `chat` with the call's). No
+`weft.*` attribute and no fallback: these are the standard names or
+nothing. The slog lines gain nothing — the two totals stay the lines'
+fields, per the line-stability rule above; the splits are span-only.
+(The first pass of the plan believed reasoning tokens had no semconv
+attribute; the pinned package has one, and all three splits ride it.)

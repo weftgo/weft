@@ -2,7 +2,5 @@
 # exact apidiff line per entry (scripts/apidiff.sh). Pre-1.0 only: each
 # entry is a deliberate, reviewed evolution. Reset this file when tagging.
 #
-# Reset at v0.2.0 (2026-09-19): the five lines acknowledged for the
-# 0.1.0 → 0.2.0 cycle (Tool/RawTool trailing variadics, MaxResultBytes
-# and Sequential widening to PolicyOption, RunFinish comparability) are
-# in the tag; the gate now diffs against v0.2.0 and the list is empty.
+# Reset at v0.3.0 (2026-09-22): the 0.2.0 → 0.3.0 cycle (Phase 2a) is
+# purely additive — no entries; the gate diffs against v0.3.0.

@@ -92,7 +92,6 @@ func TestGlobalProviderPath(t *testing.T) {
 	echo := weft.Tool("echo", "Echo.", func(_ context.Context, _ struct{}) (string, error) {
 		return "ok", nil
 	})
-	agt := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("plain"), echo)
 
 	exp := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
@@ -102,6 +101,14 @@ func TestGlobalProviderPath(t *testing.T) {
 		otel.SetTracerProvider(old)
 		_ = tp.Shutdown(context.Background())
 	}()
+	// The agent is built after the SDK registers: otel's global
+	// delegation (a tracer obtained before the first registration
+	// forwarding to it) binds exactly once per process, so an
+	// agent-first order is not repeatable under go test -count>1 —
+	// the second iteration's tracers would hang off the first,
+	// shut-down provider. Delegation is otel's guarantee; weft's part
+	// is only that New consults the global, which this still proves.
+	agt := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("plain"), echo)
 	if _, err := agt.Generate(context.Background(), weft.Prompt("x")); err != nil {
 		t.Fatal(err)
 	}

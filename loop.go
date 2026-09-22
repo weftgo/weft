@@ -172,6 +172,8 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			Thinking:        cfg.effectiveThinking(a.thinking),
 			// The same dual-option rule for a forced tool choice.
 			ToolChoice: cfg.effectiveToolChoice(a.toolChoice),
+			// And for per-request sampling knobs.
+			Params: cfg.effectiveParams(a.params),
 		}
 		// PrepareStep functions are arbitrary user code, and the request
 		// they see promises they may mutate it freely (ADR 0006

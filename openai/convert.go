@@ -80,12 +80,10 @@ func (m *model) params(req weft.ModelRequest) (openai.ChatCompletionNewParams, e
 	for _, t := range req.Tools {
 		p.Tools = append(p.Tools, convertTool(t))
 	}
-	if m.maxTokens > 0 {
-		p.MaxCompletionTokens = openai.Int(int64(m.maxTokens))
-	}
-	if m.tempSet {
-		p.Temperature = openai.Float(m.temperature)
-	}
+	// Sampling knobs: construction defaults, with any per-request
+	// RequestParams override folded on top (TODO §2a.3, ADR 0013's
+	// 2026-09-22 amendment).
+	m.foldParams(&p, req.Params)
 	// The API rejects parallel-tool-call hints without a tools list on
 	// several OpenAI-compatible servers, so the hint is sent only
 	// alongside a catalog — an agent without tools has nothing to
@@ -115,6 +113,39 @@ func (m *model) params(req weft.ModelRequest) (openai.ChatCompletionNewParams, e
 		}
 	}
 	return p, nil
+}
+
+// foldParams applies the request's sampling overrides over the
+// construction defaults — three states per knob: neither set sends
+// nothing, construction set sends the construction value, request set
+// sends the request value (a set pointer to 0 is a value). The fold
+// never replaces a construction value with a zero.
+func (m *model) foldParams(p *openai.ChatCompletionNewParams, rp weft.RequestParams) {
+	if rp.Temperature != nil {
+		p.Temperature = openai.Float(*rp.Temperature)
+	} else if m.tempSet {
+		p.Temperature = openai.Float(m.temperature)
+	}
+	if rp.TopP != nil {
+		p.TopP = openai.Float(*rp.TopP)
+	} else if m.topPSet {
+		p.TopP = openai.Float(m.topP)
+	}
+	if rp.MaxTokens != nil {
+		p.MaxCompletionTokens = openai.Int(int64(*rp.MaxTokens))
+	} else if m.maxTokens > 0 {
+		p.MaxCompletionTokens = openai.Int(int64(m.maxTokens))
+	}
+	if len(rp.Stop) > 0 {
+		p.Stop = openai.ChatCompletionNewParamsStopUnion{OfStringArray: rp.Stop}
+	} else if len(m.stop) > 0 {
+		p.Stop = openai.ChatCompletionNewParamsStopUnion{OfStringArray: m.stop}
+	}
+	if rp.Seed != nil {
+		p.Seed = openai.Int(*rp.Seed)
+	} else if m.seedSet {
+		p.Seed = openai.Int(m.seed)
+	}
 }
 
 // userParts converts a user message's parts to OpenAI content parts.

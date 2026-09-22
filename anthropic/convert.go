@@ -10,6 +10,39 @@ import (
 	"github.com/weftgo/weft/internal/adapterkit"
 )
 
+// foldParams applies the request's sampling overrides over the
+// construction defaults — three states per knob: neither set sends
+// nothing, construction set sends the construction value, request set
+// sends the request value. MaxTokens is special only in its floor: the
+// API requires a positive value, so a request MaxTokens of 0 keeps the
+// default rather than sending a value the API would reject (documented
+// on weft.RequestParams).
+func (m *model) foldParams(p *anthropic.MessageNewParams, rp weft.RequestParams) {
+	if rp.Temperature != nil {
+		p.Temperature = anthropic.Float(*rp.Temperature)
+	} else if m.tempSet {
+		p.Temperature = anthropic.Float(m.temperature)
+	}
+	if rp.TopP != nil {
+		p.TopP = anthropic.Float(*rp.TopP)
+	} else if m.topPSet {
+		p.TopP = anthropic.Float(m.topP)
+	}
+	switch {
+	case rp.MaxTokens != nil && *rp.MaxTokens > 0:
+		p.MaxTokens = int64(*rp.MaxTokens)
+	case m.maxTokens > 0:
+		p.MaxTokens = int64(m.maxTokens)
+	default:
+		p.MaxTokens = defaultMaxTokens
+	}
+	if len(rp.Stop) > 0 {
+		p.StopSequences = rp.Stop
+	} else if len(m.stop) > 0 {
+		p.StopSequences = m.stop
+	}
+}
+
 // params builds the Messages request for one step. The ModelRequest is
 // read-only: conversion builds fresh SDK values and never mutates
 // req.Messages or req.Tools.
@@ -18,12 +51,13 @@ func (m *model) params(req weft.ModelRequest) (anthropic.MessageNewParams, error
 		Model:    anthropic.Model(m.name),
 		Messages: make([]anthropic.MessageParam, 0, len(req.Messages)),
 	}
-	// max_tokens is required by the API; 4096 when unset.
-	if m.maxTokens > 0 {
-		p.MaxTokens = int64(m.maxTokens)
-	} else {
-		p.MaxTokens = defaultMaxTokens
-	}
+	// max_tokens is required by the API; the fold below defaults it to
+	// 4096 when nothing sets it.
+	// Sampling knobs: construction defaults, with any per-request
+	// RequestParams override folded on top (TODO §2a.3, ADR 0013's
+	// 2026-09-22 amendment). Seed has no Messages-API form and is
+	// dropped — seed is a determinism hint, not a contract (doc.go).
+	m.foldParams(&p, req.Params)
 	if req.System != "" {
 		p.System = []anthropic.TextBlockParam{{Text: req.System}}
 	}
@@ -48,9 +82,6 @@ func (m *model) params(req weft.ModelRequest) (anthropic.MessageNewParams, error
 		p.Thinking = anthropic.ThinkingConfigParamUnion{
 			OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{},
 		}
-	}
-	if m.tempSet {
-		p.Temperature = anthropic.Float(m.temperature)
 	}
 	// Tool choice: the sequential hint and a forced choice share one
 	// tool_choice entry — disable_parallel_tool_use rides whichever

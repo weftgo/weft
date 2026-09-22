@@ -22,6 +22,11 @@ type config struct {
 	maxTokens   int
 	temperature float64
 	tempSet     bool
+	topP        float64
+	topPSet     bool
+	stop        []string
+	seed        int64
+	seedSet     bool
 	idle        time.Duration
 	idleSet     bool
 	maxRetries  int
@@ -56,9 +61,32 @@ func Client(c *openai.Client) Option {
 func MaxTokens(n int) Option { return optionFunc(func(c *config) { c.maxTokens = n }) }
 
 // Temperature sets the sampling temperature; it is not sent unless the
-// option is given.
+// option is given. A per-request weft.RequestParams.Temperature
+// overrides it for one call.
 func Temperature(t float64) Option {
 	return optionFunc(func(c *config) { c.temperature = t; c.tempSet = true })
+}
+
+// TopP sets nucleus sampling; it is not sent unless the option is
+// given. A per-request weft.RequestParams.TopP overrides it for one
+// call.
+func TopP(p float64) Option {
+	return optionFunc(func(c *config) { c.topP = p; c.topPSet = true })
+}
+
+// Stop sets stop sequences the API stops on; not sent unless the
+// option is given. A per-request weft.RequestParams.Stop overrides it
+// for one call.
+func Stop(seqs ...string) Option {
+	return optionFunc(func(c *config) { c.stop = seqs })
+}
+
+// Seed sets the sampling seed for deterministic-ish runs — a hint the
+// provider treats best-effort, not a contract. Not sent unless the
+// option is given; a per-request weft.RequestParams.Seed overrides it
+// for one call.
+func Seed(s int64) Option {
+	return optionFunc(func(c *config) { c.seed = s; c.seedSet = true })
 }
 
 // IdleTimeout is the maximum gap between two stream chunks before the
@@ -98,6 +126,11 @@ func Model(name string, opts ...Option) weft.Model {
 		maxTokens:   cfg.maxTokens,
 		temperature: cfg.temperature,
 		tempSet:     cfg.tempSet,
+		topP:        cfg.topP,
+		topPSet:     cfg.topPSet,
+		stop:        cfg.stop,
+		seed:        cfg.seed,
+		seedSet:     cfg.seedSet,
 		idle:        defaultIdleTimeout,
 		dialect:     resolveDialect(cfg.dialect, cfg.baseURL),
 	}
@@ -132,6 +165,11 @@ type model struct {
 	maxTokens   int
 	temperature float64
 	tempSet     bool
+	topP        float64
+	topPSet     bool
+	stop        []string
+	seed        int64
+	seedSet     bool
 	idle        time.Duration
 	dialect     ThinkingDialect
 }

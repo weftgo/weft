@@ -821,3 +821,33 @@ func ExampleToolChoice() {
 	// Output:
 	// This is a billing question.
 }
+
+// Params sets per-step sampling: a PrepareStep function turns the
+// temperature down for the classifying step and back for drafting —
+// one struct, edited per step, no second Model construction.
+func ExampleParams() {
+	p := func(f float64) *float64 { return &f }
+	classify := weft.Tool("classify", "Classify the request.",
+		func(_ context.Context, _ struct{}) (string, error) { return "billing", nil })
+	agt := weft.New(
+		wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "classify"}),
+			wefttest.Say("A billing question, answered at temperature 0.9."),
+		),
+		weft.Params(weft.RequestParams{Temperature: p(0.9)}),
+		weft.PrepareStep(func(_ context.Context, step int, req weft.ModelRequest) (weft.ModelRequest, error) {
+			if step == 0 {
+				req.Params.Temperature = p(0) // cold for classification
+			}
+			return req, nil
+		}),
+		classify,
+	)
+	res, err := agt.Generate(context.Background(), weft.Prompt("Why did my invoice double?"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Text())
+	// Output:
+	// A billing question, answered at temperature 0.9.
+}

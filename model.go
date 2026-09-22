@@ -100,6 +100,27 @@ type ToolChoiceConfig struct {
 	Name string
 }
 
+// RequestParams is per-step sampling: the knobs a caller turns between
+// "cold for classification, creative for drafting". Every field is a
+// pointer or slice so the three states stay distinguishable — nil or
+// empty keeps the adapter's construction default (its Temperature,
+// TopP, MaxTokens, Stop, or Seed option), set overrides it for this
+// request alone, and the adapter never replaces a construction value
+// with a zero. A set pointer to 0 is a value (Temperature of exactly 0
+// is sent), with one provider exception: an anthropic MaxTokens of 0
+// falls to the adapter's default, because the API requires a positive
+// value. A run-level Params option replaces the agent's struct whole,
+// it does not merge field by field; PrepareStep can edit it per step.
+// Adapters drop knobs their provider lacks (Seed on anthropic) under
+// the "adapters document what they drop" rule.
+type RequestParams struct {
+	Temperature *float64
+	TopP        *float64
+	MaxTokens   *int
+	Stop        []string
+	Seed        *int64
+}
+
 // ModelRequest is everything a model needs for one step: the system
 // instruction, the transcript so far, and the callable tools.
 //
@@ -135,6 +156,12 @@ type ModelRequest struct {
 	// provider is asked to emit, never execution: a call the provider
 	// emits anyway runs, because the model was shown the tool.
 	ToolChoice ToolChoiceConfig
+	// Params overrides the adapter's construction-time sampling knobs
+	// (Temperature, TopP, MaxTokens, Stop, Seed) for this request alone;
+	// see RequestParams for the nil-keeps-default fold. The zero value
+	// keeps every construction default, so a request without it
+	// serialises exactly as v0.2.0's did.
+	Params RequestParams
 }
 
 // Model is the provider seam. Implementations stream one step's output as

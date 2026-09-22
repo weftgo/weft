@@ -345,3 +345,71 @@ func TestConvertToolChoice(t *testing.T) {
 		t.Errorf("unexpected tool_choice: %s", got)
 	}
 }
+
+func TestFoldParams(t *testing.T) {
+	p64 := func(f float64) *float64 { return &f }
+	i := func(n int) *int { return &n }
+	i64 := func(n int64) *int64 { return &n }
+	cases := []struct {
+		name  string
+		opts  []Option
+		rp    weft.RequestParams
+		want  []string
+		absnt []string
+	}{
+		{
+			name:  "nothing set sends only the required default",
+			opts:  nil,
+			rp:    weft.RequestParams{},
+			want:  []string{`"max_tokens":4096`},
+			absnt: []string{`"temperature"`, `"top_p"`, `"stop_sequences"`},
+		},
+		{
+			name: "construction only",
+			opts: []Option{Temperature(0.5), TopP(0.9), MaxTokens(128), Stop("END")},
+			rp:   weft.RequestParams{},
+			want: []string{`"temperature":0.5`, `"top_p":0.9`, `"max_tokens":128`, `"stop_sequences":["END"]`},
+		},
+		{
+			name: "request only; seed dropped (no Messages-API form)",
+			opts: nil,
+			rp:   weft.RequestParams{Temperature: p64(0.1), TopP: p64(0.8), MaxTokens: i(64), Stop: []string{"STOP"}, Seed: i64(3)},
+			want: []string{`"temperature":0.1`, `"top_p":0.8`, `"max_tokens":64`, `"stop_sequences":["STOP"]`},
+		},
+		{
+			name: "request wins on collision",
+			opts: []Option{Temperature(0.5), TopP(0.9), MaxTokens(128), Stop("END")},
+			rp:   weft.RequestParams{Temperature: p64(0), TopP: p64(0.5), MaxTokens: i(32), Stop: []string{"X"}},
+			want: []string{`"temperature":0`, `"top_p":0.5`, `"max_tokens":32`, `"stop_sequences":["X"]`},
+		},
+		{
+			name: "request MaxTokens of 0 keeps the default (API needs positive)",
+			opts: []Option{MaxTokens(128)},
+			rp:   weft.RequestParams{MaxTokens: i(0)},
+			want: []string{`"max_tokens":128`},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Model("m", tc.opts...).(*model)
+			p, err := m.params(weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}, Params: tc.rp})
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, _ := json.Marshal(p)
+			for _, w := range tc.want {
+				if !strings.Contains(string(b), w) {
+					t.Errorf("missing %s in %s", w, b)
+				}
+			}
+			for _, w := range tc.absnt {
+				if strings.Contains(string(b), w) {
+					t.Errorf("unexpected %s in %s", w, b)
+				}
+			}
+			if tc.rp.Seed != nil && strings.Contains(string(b), "seed") {
+				t.Errorf("seed leaked into the request: %s", b)
+			}
+		})
+	}
+}

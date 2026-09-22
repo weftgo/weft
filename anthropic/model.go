@@ -22,6 +22,9 @@ type config struct {
 	maxTokens   int
 	temperature float64
 	tempSet     bool
+	topP        float64
+	topPSet     bool
+	stop        []string
 	idle        time.Duration
 	idleSet     bool
 	maxRetries  int
@@ -55,9 +58,26 @@ func Client(c *anthropic.Client) Option {
 func MaxTokens(n int) Option { return optionFunc(func(c *config) { c.maxTokens = n }) }
 
 // Temperature sets the sampling temperature; it is not sent unless the
-// option is given.
+// option is given. A per-request weft.RequestParams.Temperature
+// overrides it for one call.
 func Temperature(t float64) Option {
 	return optionFunc(func(c *config) { c.temperature = t; c.tempSet = true })
+}
+
+// TopP sets nucleus sampling; it is not sent unless the option is
+// given. A per-request weft.RequestParams.TopP overrides it for one
+// call.
+func TopP(p float64) Option {
+	return optionFunc(func(c *config) { c.topP = p; c.topPSet = true })
+}
+
+// Stop sets stop sequences (stop_sequences); not sent unless the
+// option is given. A per-request weft.RequestParams.Stop overrides it
+// for one call. The Messages API has no seed — a RequestParams.Seed is
+// dropped (see doc.go), because seed is a determinism hint everywhere,
+// not a contract.
+func Stop(seqs ...string) Option {
+	return optionFunc(func(c *config) { c.stop = seqs })
 }
 
 // IdleTimeout is the maximum gap between two stream events before the
@@ -103,6 +123,9 @@ func Model(name string, opts ...Option) weft.Model {
 		maxTokens:   cfg.maxTokens,
 		temperature: cfg.temperature,
 		tempSet:     cfg.tempSet,
+		topP:        cfg.topP,
+		topPSet:     cfg.topPSet,
+		stop:        cfg.stop,
 		thinking:    cfg.thinking,
 		idle:        defaultIdleTimeout,
 	}
@@ -137,6 +160,9 @@ type model struct {
 	maxTokens   int
 	temperature float64
 	tempSet     bool
+	topP        float64
+	topPSet     bool
+	stop        []string
 	thinking    bool
 	idle        time.Duration
 }

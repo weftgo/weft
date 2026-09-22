@@ -24,6 +24,12 @@
 //     a bare level sends adaptive (ADR 0013 amendment 9).
 //   - max_tokens is required by the API; the adapter defaults it to
 //     4096 when MaxTokens is not given.
+//   - ModelRequest.Params folds over the construction Temperature/
+//     TopP/Stop defaults. The Messages API has no seed: a
+//     RequestParams.Seed is dropped — seed is a determinism hint on
+//     every provider, not a contract (ADR 0013's 2026-09-22
+//     amendment). TopK stays out for the same reason it is out
+//     everywhere: no other provider has it in Chat Completions.
 //
 // Retry stance: transport retries (429, 5xx, net.Error) belong to the
 // SDK via MaxRetries; the weft loop never retries a model call, and

@@ -896,3 +896,72 @@ func TestToolChoiceValidation(t *testing.T) {
 		t.Errorf("err = %v, want the no-such-tool failure after PrepareStep", err)
 	}
 }
+
+func TestParamsOption(t *testing.T) {
+	p := func(f float64) *float64 { return &f }
+	newScript := func() *wefttest.Model {
+		return wefttest.Script(wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"))
+	}
+
+	// No options: the zero RequestParams — construction defaults stand.
+	m := newScript()
+	if _, err := weft.New(m).Generate(context.Background(), weft.Prompt("q")); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Requests()[0].Params; got.Temperature != nil || got.TopP != nil || got.MaxTokens != nil || got.Stop != nil || got.Seed != nil {
+		t.Errorf("no options: Params = %+v, want the zero value", got)
+	}
+
+	// Agent-level default applies to every run.
+	m = newScript()
+	agt := weft.New(m, weft.Params(weft.RequestParams{Temperature: p(0.2)}))
+	for range 2 {
+		if _, err := agt.Generate(context.Background(), weft.Prompt("q")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, req := range m.Requests() {
+		if req.Params.Temperature == nil || *req.Params.Temperature != 0.2 {
+			t.Errorf("request %d: Params.Temperature = %v, want 0.2", i, req.Params.Temperature)
+		}
+	}
+
+	// A run-level Params replaces the agent's struct whole — no field
+	// merge: the override carries only what it sets.
+	m = newScript()
+	agt = weft.New(m, weft.Params(weft.RequestParams{Temperature: p(0.2), TopP: p(0.9)}))
+	if _, err := agt.Generate(context.Background(),
+		weft.Params(weft.RequestParams{Temperature: p(0.9)}), weft.Prompt("creative")); err != nil {
+		t.Fatal(err)
+	}
+	got := m.Requests()[0].Params
+	if got.Temperature == nil || *got.Temperature != 0.9 {
+		t.Errorf("override run: Temperature = %v, want 0.9", got.Temperature)
+	}
+	if got.TopP != nil {
+		t.Errorf("override run: TopP = %v, want nil (the struct replaces whole)", got.TopP)
+	}
+
+	// PrepareStep edits the request's Params per step: cold for the
+	// classifying step, the default afterwards.
+	m = wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "classify"}),
+		wefttest.Say("ok"),
+	)
+	classify := weft.Tool("classify", "", func(_ context.Context, _ struct{}) (string, error) { return "x", nil })
+	agt = weft.New(m, classify, weft.PrepareStep(func(_ context.Context, step int, req weft.ModelRequest) (weft.ModelRequest, error) {
+		if step == 0 {
+			req.Params.Temperature = p(0)
+		}
+		return req, nil
+	}))
+	if _, err := agt.Generate(context.Background(), weft.Prompt("two steps")); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Requests()[0].Params.Temperature; got == nil || *got != 0 {
+		t.Errorf("step 0: Temperature = %v, want 0", got)
+	}
+	if got := m.Requests()[1].Params.Temperature; got != nil {
+		t.Errorf("step 1: Temperature = %v, want nil", got)
+	}
+}

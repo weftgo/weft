@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/weftgo/weft"
@@ -355,5 +356,89 @@ func TestConvertToolChoice(t *testing.T) {
 	fc = convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNone}).ToolConfig.FunctionCallingConfig
 	if fc == nil || fc.Mode != genai.FunctionCallingConfigModeNone {
 		t.Errorf("none: %+v", fc)
+	}
+}
+
+func TestFoldParams(t *testing.T) {
+	p64 := func(f float64) *float64 { return &f }
+	i := func(n int) *int { return &n }
+	i64 := func(n int64) *int64 { return &n }
+	cases := []struct {
+		name string
+		opts []Option
+		rp   weft.RequestParams
+		want func(*genai.GenerateContentConfig) bool
+		desc string
+	}{
+		{
+			name: "nothing set sends nothing",
+			opts: nil,
+			rp:   weft.RequestParams{},
+			want: func(c *genai.GenerateContentConfig) bool {
+				return c.Temperature == nil && c.TopP == nil && c.MaxOutputTokens == 0 && c.StopSequences == nil && c.Seed == nil
+			},
+			desc: "all knobs nil",
+		},
+		{
+			name: "construction only",
+			opts: []Option{Temperature(0.5), TopP(0.9), MaxTokens(128), Stop("END"), Seed(7)},
+			rp:   weft.RequestParams{},
+			want: func(c *genai.GenerateContentConfig) bool {
+				return c.Temperature != nil && *c.Temperature == 0.5 && c.TopP != nil && *c.TopP == 0.9 &&
+					c.MaxOutputTokens == 128 && len(c.StopSequences) == 1 && c.Seed != nil && *c.Seed == 7
+			},
+			desc: "construction values",
+		},
+		{
+			name: "request only",
+			opts: nil,
+			rp:   weft.RequestParams{Temperature: p64(0.1), TopP: p64(0.8), MaxTokens: i(64), Stop: []string{"STOP"}, Seed: i64(3)},
+			want: func(c *genai.GenerateContentConfig) bool {
+				return c.Temperature != nil && *c.Temperature == 0.1 && c.TopP != nil && *c.TopP == 0.8 &&
+					c.MaxOutputTokens == 64 && len(c.StopSequences) == 1 && c.StopSequences[0] == "STOP" && *c.Seed == 3
+			},
+			desc: "request values",
+		},
+		{
+			name: "request wins on collision",
+			opts: []Option{Temperature(0.5), TopP(0.9), MaxTokens(128), Seed(7)},
+			rp:   weft.RequestParams{Temperature: p64(0), TopP: p64(0.5), MaxTokens: i(32), Seed: i64(1)},
+			want: func(c *genai.GenerateContentConfig) bool {
+				return *c.Temperature == 0 && *c.TopP == 0.5 && c.MaxOutputTokens == 32 && *c.Seed == 1
+			},
+			desc: "request values",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Model("m", tc.opts...).(*model)
+			_, cfg, err := m.contents(weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}, Params: tc.rp})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.want(cfg) {
+				t.Errorf("%s: cfg = %+v", tc.desc, cfg)
+			}
+		})
+	}
+
+	// The int32 ceiling: a request Seed over MaxInt32 fails wrapping
+	// ErrUnsupported, on request and construction alike.
+	m := Model("m").(*model)
+	over := int64(math.MaxInt32) + 1
+	_, _, err := m.contents(weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}, Params: weft.RequestParams{Seed: &over}})
+	if !errors.Is(err, weft.ErrUnsupported) {
+		t.Errorf("request Seed overflow: err = %v, want ErrUnsupported", err)
+	}
+	m2 := Model("m", Seed(over)).(*model)
+	_, _, err = m2.contents(weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}})
+	if !errors.Is(err, weft.ErrUnsupported) {
+		t.Errorf("construction Seed overflow: err = %v, want ErrUnsupported", err)
+	}
+	big := math.MaxInt32 + 1
+	m3 := Model("m").(*model)
+	_, _, err = m3.contents(weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}, Params: weft.RequestParams{MaxTokens: &big}})
+	if !errors.Is(err, weft.ErrUnsupported) {
+		t.Errorf("request MaxTokens overflow: err = %v, want ErrUnsupported", err)
 	}
 }

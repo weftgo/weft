@@ -20,6 +20,8 @@ type runConfig struct {
 	thinkingSet   bool // a run-level Thinking option was applied
 	toolChoice    ToolChoiceConfig
 	toolChoiceSet bool // a run-level ToolChoice option was applied
+	params        RequestParams
+	paramsSet     bool // a run-level Params option was applied
 	// decisions resolves calls left pending by an earlier run: call id →
 	// approve, or deny with a reason (Approve, Deny).
 	decisions map[string]decision
@@ -98,6 +100,17 @@ func (c *runConfig) effectiveThinking(agentDefault ThinkingConfig) ThinkingConfi
 func (c *runConfig) effectiveToolChoice(agentDefault ToolChoiceConfig) ToolChoiceConfig {
 	if c.toolChoiceSet {
 		return c.toolChoice
+	}
+	return agentDefault
+}
+
+// effectiveParams resolves the run's sampling request the same way: a
+// run-level Params option replaces the agent's default whole (no field
+// merge — the Thinking rule); neither set keeps the adapter's
+// construction defaults (the zero RequestParams).
+func (c *runConfig) effectiveParams(agentDefault RequestParams) RequestParams {
+	if c.paramsSet {
+		return c.params
 	}
 	return agentDefault
 }

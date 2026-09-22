@@ -284,6 +284,39 @@ func (o toolChoiceOption) applyRun(c *runConfig) {
 // another mode) fails the run with a descriptive error.
 func ToolChoice(cfg ToolChoiceConfig) ToolChoiceOption { return toolChoiceOption{cfg} }
 
+// ParamsOption is accepted by both New and Stream/Generate: sampling
+// knobs are as per-question as a forced choice (the ThinkingOption
+// shape).
+type ParamsOption interface {
+	Option
+	RunOption
+}
+
+type paramsOption struct{ p RequestParams }
+
+func (o paramsOption) apply(a *Agent) { a.params = o.p }
+
+func (o paramsOption) applyRun(c *runConfig) {
+	c.params, c.paramsSet = o.p, true
+}
+
+// Params sets the agent's default sampling knobs — Temperature, TopP,
+// MaxTokens, Stop, Seed — for every run's model calls; as a RunOption
+// it overrides that default for one run:
+//
+//	agt := weft.New(m, weft.Params(weft.RequestParams{Temperature: ptr(0.2)}))
+//	agt.Generate(ctx, weft.Params(weft.RequestParams{Temperature: ptr(0.9)}), weft.Prompt(q))
+//
+// A nil or empty field keeps the adapter's construction-time default
+// for that knob (its Temperature option, and so on); a run-level
+// Params replaces the agent's struct whole, never merging field by
+// field — set every knob the override should carry. A PrepareStep
+// function can edit the request's Params per step ("cold for
+// classification steps, creative for drafting" is a two-line
+// function). Adapters drop knobs their provider lacks, and the
+// provider's own limits apply (google narrows Seed to int32).
+func Params(p RequestParams) ParamsOption { return paramsOption{p} }
+
 type maxResultBytesOption struct{ n int }
 
 func (o maxResultBytesOption) apply(a *Agent) {
@@ -475,6 +508,7 @@ type Agent struct {
 	name            string
 	thinking        ThinkingConfig
 	toolChoice      ToolChoiceConfig
+	params          RequestParams
 	modelMW         []ModelMiddleware
 	toolMW          []ToolMiddleware
 	tracerProvider  trace.TracerProvider

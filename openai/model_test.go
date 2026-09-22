@@ -207,3 +207,68 @@ func TestConvertToolChoice(t *testing.T) {
 		t.Errorf("any + sequential: %s", got)
 	}
 }
+
+func TestFoldParams(t *testing.T) {
+	p64 := func(f float64) *float64 { return &f }
+	i := func(n int) *int { return &n }
+	i64 := func(n int64) *int64 { return &n }
+	// (construction options, request Params, want substrings, want absent substrings)
+	cases := []struct {
+		name  string
+		opts  []Option
+		rp    weft.RequestParams
+		want  []string
+		absnt []string
+	}{
+		{
+			name:  "nothing set sends nothing",
+			opts:  nil,
+			rp:    weft.RequestParams{},
+			absnt: []string{`"temperature"`, `"top_p"`, `"max_completion_tokens"`, `"stop"`, `"seed"`},
+		},
+		{
+			name: "construction only",
+			opts: []Option{Temperature(0.5), TopP(0.9), MaxTokens(128), Stop("END"), Seed(7)},
+			rp:   weft.RequestParams{},
+			want: []string{`"temperature":0.5`, `"top_p":0.9`, `"max_completion_tokens":128`, `"stop":["END"]`, `"seed":7`},
+		},
+		{
+			name: "request only",
+			opts: nil,
+			rp:   weft.RequestParams{Temperature: p64(0.1), TopP: p64(0.8), MaxTokens: i(64), Stop: []string{"STOP"}, Seed: i64(3)},
+			want: []string{`"temperature":0.1`, `"top_p":0.8`, `"max_completion_tokens":64`, `"stop":["STOP"]`, `"seed":3`},
+		},
+		{
+			name: "request wins on collision",
+			opts: []Option{Temperature(0.5), TopP(0.9), MaxTokens(128), Stop("END"), Seed(7)},
+			rp:   weft.RequestParams{Temperature: p64(0), TopP: p64(0.5), MaxTokens: i(32), Stop: []string{"X"}, Seed: i64(1)},
+			want: []string{`"temperature":0`, `"top_p":0.5`, `"max_completion_tokens":32`, `"stop":["X"]`, `"seed":1`},
+		},
+		{
+			name: "zero request MaxTokens is a value",
+			opts: []Option{MaxTokens(128)},
+			rp:   weft.RequestParams{MaxTokens: i(0)},
+			want: []string{`"max_completion_tokens":0`},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Model("m", tc.opts...).(*model)
+			p, err := m.params(weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}, Params: tc.rp})
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, _ := json.Marshal(p)
+			for _, w := range tc.want {
+				if !strings.Contains(string(b), w) {
+					t.Errorf("missing %s in %s", w, b)
+				}
+			}
+			for _, w := range tc.absnt {
+				if strings.Contains(string(b), w) {
+					t.Errorf("unexpected %s in %s", w, b)
+				}
+			}
+		})
+	}
+}

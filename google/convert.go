@@ -70,19 +70,14 @@ func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.Genera
 	if req.System != "" {
 		cfg.SystemInstruction = &genai.Content{Parts: []*genai.Part{{Text: req.System}}}
 	}
-	if m.maxTokens > 0 {
-		// The API's limit is an int32; narrowing silently would wrap a
-		// large cap into a garbage (possibly negative) limit on the
-		// wire — fail naming the ceiling instead ("adapters document
-		// what they drop", ADR 0013).
-		if int64(m.maxTokens) > math.MaxInt32 {
-			return nil, nil, fmt.Errorf("%w: MaxTokens %d exceeds Gemini's int32 limit", weft.ErrUnsupported, m.maxTokens)
-		}
-		cfg.MaxOutputTokens = int32(m.maxTokens)
-	}
-	if m.tempSet {
-		t := float32(m.temperature)
-		cfg.Temperature = &t
+	// Sampling knobs: construction defaults, with any per-request
+	// RequestParams override folded on top (TODO §2a.3, ADR 0013's
+	// 2026-09-22 amendment). MaxOutputTokens and Seed are int32 on the
+	// wire; out-of-range values fail the call wrapping ErrUnsupported
+	// rather than wrapping around (the pre-2a MaxTokens rule, now in
+	// foldParams).
+	if err := m.foldParams(cfg, req.Params); err != nil {
+		return nil, nil, err
 	}
 	// Run-level thinking (TODO §5.14): Off disables (a zero budget is
 	// Gemini's off switch), a Budget pins depth, a bare level maps to
@@ -133,6 +128,58 @@ func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.Genera
 	// SequentialTools has no Gemini switch (function-calling config
 	// stays AUTO) — a documented gap; see ADR 0013.
 	return contents, cfg, nil
+}
+
+// foldParams applies the request's sampling overrides over the
+// construction defaults — three states per knob: neither set sends
+// nothing, construction set sends the construction value, request set
+// sends the request value; the fold never replaces a construction
+// value with a zero. MaxOutputTokens and Seed are int32 on the wire:
+// narrowing silently would wrap a large value into garbage, so
+// out-of-range values fail naming the ceiling ("adapters document
+// what they drop", ADR 0013).
+func (m *model) foldParams(cfg *genai.GenerateContentConfig, rp weft.RequestParams) error {
+	if rp.Temperature != nil {
+		t := float32(*rp.Temperature)
+		cfg.Temperature = &t
+	} else if m.tempSet {
+		t := float32(m.temperature)
+		cfg.Temperature = &t
+	}
+	if rp.TopP != nil {
+		t := float32(*rp.TopP)
+		cfg.TopP = &t
+	} else if m.topPSet {
+		t := float32(m.topP)
+		cfg.TopP = &t
+	}
+	maxTokens := m.maxTokens
+	if rp.MaxTokens != nil {
+		maxTokens = *rp.MaxTokens
+	}
+	if maxTokens > 0 {
+		if int64(maxTokens) > math.MaxInt32 {
+			return fmt.Errorf("%w: MaxTokens %d exceeds Gemini's int32 limit", weft.ErrUnsupported, maxTokens)
+		}
+		cfg.MaxOutputTokens = int32(maxTokens)
+	}
+	if len(rp.Stop) > 0 {
+		cfg.StopSequences = rp.Stop
+	} else if len(m.stop) > 0 {
+		cfg.StopSequences = m.stop
+	}
+	seed, seedSet := m.seed, m.seedSet
+	if rp.Seed != nil {
+		seed, seedSet = *rp.Seed, true
+	}
+	if seedSet {
+		if seed > math.MaxInt32 || seed < math.MinInt32 {
+			return fmt.Errorf("%w: Seed %d exceeds Gemini's int32 limit", weft.ErrUnsupported, seed)
+		}
+		s := int32(seed)
+		cfg.Seed = &s
+	}
+	return nil
 }
 
 // geminiLevel maps the neutral scale onto Gemini's own; an unmapped

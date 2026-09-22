@@ -125,6 +125,17 @@ func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.Genera
 			Mode: genai.FunctionCallingConfigModeNone,
 		}}
 	}
+	// The escape hatch (TODO §2a.3): ExtraBody and ExtraHeaders ride
+	// per request on the SDK's own HTTPOptions — the SDK deep-merges
+	// the extra map with caller-wins semantics (recursiveMapMerge),
+	// the same rule the other adapters implement in middleware (ADR
+	// 0013's 2026-09-22 amendment).
+	if len(m.extraBody) > 0 || len(m.extraHeaders) > 0 {
+		cfg.HTTPOptions = &genai.HTTPOptions{
+			Headers:   m.extraHeaders,
+			ExtraBody: m.extraBody,
+		}
+	}
 	// SequentialTools has no Gemini switch (function-calling config
 	// stays AUTO) — a documented gap; see ADR 0013.
 	return contents, cfg, nil

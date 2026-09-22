@@ -57,3 +57,27 @@ func TestSchemaMapNil(t *testing.T) {
 		t.Errorf("nil schema must render nil")
 	}
 }
+
+func TestMergeBody(t *testing.T) {
+	dest, err := MergeBody([]byte(`{"a":1,"nested":{"x":1,"y":2},"arr":[1,2]}`), map[string]any{
+		"a":      2,                              // colliding scalar: caller wins
+		"nested": map[string]any{"y": 9, "z": 3}, // nested map: deep merge
+		"arr":    []any{3},                       // arrays replace, never merge
+		"new":    true,                           // new key: added
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"a":2,"arr":[3],"nested":{"x":1,"y":9,"z":3},"new":true}`
+	if string(dest) != want {
+		t.Errorf("merged = %s, want %s", dest, want)
+	}
+
+	// A non-object body fails rather than being replaced.
+	if _, err := MergeBody([]byte(`[1,2]`), map[string]any{"a": 1}); err == nil {
+		t.Error("array body merged without error")
+	}
+	if _, err := MergeBody([]byte(`not json`), map[string]any{"a": 1}); err == nil {
+		t.Error("garbage body merged without error")
+	}
+}

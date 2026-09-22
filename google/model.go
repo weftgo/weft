@@ -2,6 +2,7 @@ package google
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"time"
 
@@ -16,20 +17,22 @@ import (
 type Option interface{ apply(*config) }
 
 type config struct {
-	client      *genai.Client
-	baseURL     string
-	apiKey      string
-	maxTokens   int
-	temperature float64
-	tempSet     bool
-	topP        float64
-	topPSet     bool
-	stop        []string
-	seed        int64
-	seedSet     bool
-	idle        time.Duration
-	idleSet     bool
-	maxRetries  int
+	client       *genai.Client
+	baseURL      string
+	apiKey       string
+	maxTokens    int
+	temperature  float64
+	tempSet      bool
+	topP         float64
+	topPSet      bool
+	stop         []string
+	seed         int64
+	seedSet      bool
+	extraBody    map[string]any
+	extraHeaders http.Header
+	idle         time.Duration
+	idleSet      bool
+	maxRetries   int
 }
 
 type optionFunc func(*config)
@@ -94,6 +97,39 @@ func Seed(s int64) Option {
 	return optionFunc(func(c *config) { c.seed = s; c.seedSet = true })
 }
 
+// ExtraBody adds fields to every request's JSON body — the generic
+// valve for vendor knobs weft has no option for. Merged by the SDK
+// into the body weft built (recursiveMapMerge): nested maps merge
+// recursively, every other value replaces, and **your key wins on
+// conflict** — the escape hatch is you taking responsibility for bytes
+// weft did not choose, and the default-bytes tests do not cover what
+// it sends. Construction-time only; it applies to the requests the
+// adapter makes, including through an injected Client(c).
+func ExtraBody(fields map[string]any) Option {
+	return optionFunc(func(c *config) {
+		if c.extraBody == nil {
+			c.extraBody = map[string]any{}
+		}
+		for k, v := range fields {
+			c.extraBody[k] = v
+		}
+	})
+}
+
+// ExtraHeaders adds HTTP headers to every request, verbatim. A header
+// the SDK itself sets (Authorization, Content-Type) is yours not to
+// clobber — the option does not check. Construction-time only.
+func ExtraHeaders(h http.Header) Option {
+	return optionFunc(func(c *config) {
+		if c.extraHeaders == nil {
+			c.extraHeaders = http.Header{}
+		}
+		for k, vs := range h {
+			c.extraHeaders[k] = vs
+		}
+	})
+}
+
 // IdleTimeout is the maximum gap between two stream chunks before the
 // call fails wrapping weft.ErrStreamIdle (default 60s; zero disables
 // it). The ctx deadline stays the hard limit on the whole call — a
@@ -125,16 +161,18 @@ func Model(name string, opts ...Option) weft.Model {
 		}
 	}
 	m := &model{
-		name:        name,
-		maxTokens:   cfg.maxTokens,
-		temperature: cfg.temperature,
-		tempSet:     cfg.tempSet,
-		topP:        cfg.topP,
-		topPSet:     cfg.topPSet,
-		stop:        cfg.stop,
-		seed:        cfg.seed,
-		seedSet:     cfg.seedSet,
-		idle:        defaultIdleTimeout,
+		name:         name,
+		maxTokens:    cfg.maxTokens,
+		temperature:  cfg.temperature,
+		tempSet:      cfg.tempSet,
+		topP:         cfg.topP,
+		topPSet:      cfg.topPSet,
+		stop:         cfg.stop,
+		seed:         cfg.seed,
+		seedSet:      cfg.seedSet,
+		extraBody:    cfg.extraBody,
+		extraHeaders: cfg.extraHeaders,
+		idle:         defaultIdleTimeout,
 	}
 	if cfg.idleSet {
 		m.idle = cfg.idle
@@ -165,19 +203,21 @@ type model struct {
 	injected bool
 	initMu   sync.Mutex
 
-	name        string
-	baseURL     string
-	apiKey      string
-	maxRetries  int
-	maxTokens   int
-	temperature float64
-	tempSet     bool
-	topP        float64
-	topPSet     bool
-	stop        []string
-	seed        int64
-	seedSet     bool
-	idle        time.Duration
+	name         string
+	baseURL      string
+	apiKey       string
+	maxRetries   int
+	maxTokens    int
+	temperature  float64
+	tempSet      bool
+	topP         float64
+	topPSet      bool
+	stop         []string
+	seed         int64
+	seedSet      bool
+	extraBody    map[string]any
+	extraHeaders http.Header
+	idle         time.Duration
 }
 
 // initClient builds the SDK client on the first Stream call.

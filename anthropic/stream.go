@@ -45,7 +45,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 
 		reader := newStreamReader(ctx, m.idle)
 		defer reader.cancel()
-		stream := m.client.Messages.NewStreaming(reader.sctx, params)
+		stream := m.client.Messages.NewStreaming(reader.sctx, params, m.requestOptions()...)
 		defer func() { _ = stream.Close() }()
 		reader.start(stream)
 		defer reader.wait()

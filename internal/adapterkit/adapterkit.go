@@ -84,3 +84,33 @@ func FilePartSource(p weft.FilePart) error {
 	}
 	return nil
 }
+
+// MergeBody deep-merges extra into a JSON request body and returns the
+// re-encoded bytes: nested maps merge recursively, every other value —
+// scalars, arrays, null — replaces. The caller's key wins on conflict
+// at every level; this is the one semantic all three adapters'
+// ExtraBody options share, matching genai's native recursiveMapMerge
+// (ADR 0013's 2026-09-22 amendment). A body that is not a JSON object
+// fails, rather than being silently replaced.
+func MergeBody(body []byte, extra map[string]any) ([]byte, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("request body is not a JSON object: %w", err)
+	}
+	mergeMaps(payload, extra)
+	return json.Marshal(payload)
+}
+
+// mergeMaps folds src into dest with caller-wins semantics: map values
+// merge recursively, everything else replaces.
+func mergeMaps(dest, src map[string]any) {
+	for k, v := range src {
+		if m, ok := v.(map[string]any); ok {
+			if d, ok := dest[k].(map[string]any); ok {
+				mergeMaps(d, m)
+				continue
+			}
+		}
+		dest[k] = v
+	}
+}

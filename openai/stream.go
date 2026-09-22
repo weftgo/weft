@@ -50,10 +50,12 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 		defer reader.cancel()
 		// Gateway dialect: the thinking object rides as a request
 		// middleware rewriting the JSON body — the SDK's typed params
-		// have no field for it (thinking.go carries the mapping).
-		var reqOpts []option.RequestOption
+		// have no field for it (thinking.go carries the mapping). The
+		// escape hatch's options ride after it: weft's injection first,
+		// the caller's merge last (caller wins).
+		reqOpts := m.requestOptions()
 		if obj := thinkingObj(req.Thinking); m.dialect == DialectObject && obj != nil {
-			reqOpts = append(reqOpts, option.WithMiddleware(injectThinking(obj)))
+			reqOpts = append([]option.RequestOption{option.WithMiddleware(injectThinking(obj))}, reqOpts...)
 		}
 		stream := m.client.Chat.Completions.NewStreaming(reader.sctx, params, reqOpts...)
 		defer func() { _ = stream.Close() }()

@@ -1,12 +1,17 @@
 package anthropic
 
 import (
+	"bytes"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/internal/adapterkit"
 )
 
 // Option configures the adapter at construction, the same functional
@@ -16,19 +21,21 @@ import (
 type Option interface{ apply(*config) }
 
 type config struct {
-	client      *anthropic.Client
-	baseURL     string
-	apiKey      string
-	maxTokens   int
-	temperature float64
-	tempSet     bool
-	topP        float64
-	topPSet     bool
-	stop        []string
-	idle        time.Duration
-	idleSet     bool
-	maxRetries  int
-	thinking    bool
+	client       *anthropic.Client
+	baseURL      string
+	apiKey       string
+	maxTokens    int
+	temperature  float64
+	tempSet      bool
+	topP         float64
+	topPSet      bool
+	stop         []string
+	extraBody    map[string]any
+	extraHeaders http.Header
+	idle         time.Duration
+	idleSet      bool
+	maxRetries   int
+	thinking     bool
 }
 
 type optionFunc func(*config)
@@ -102,6 +109,39 @@ func MaxRetries(n int) Option { return optionFunc(func(c *config) { c.maxRetries
 // sent — the vendor default for the model applies.
 func Thinking(on bool) Option { return optionFunc(func(c *config) { c.thinking = on }) }
 
+// ExtraBody adds fields to every request's JSON body — the generic
+// valve for vendor knobs weft has no option for. Deep-merged into the
+// body weft built: nested maps merge recursively, every other value
+// replaces, and **your key wins on conflict** — the escape hatch is
+// you taking responsibility for bytes weft did not choose, and the
+// default-bytes tests do not cover what it sends. Construction-time
+// only; it applies to the requests the adapter makes, including
+// through an injected Client(c).
+func ExtraBody(fields map[string]any) Option {
+	return optionFunc(func(c *config) {
+		if c.extraBody == nil {
+			c.extraBody = map[string]any{}
+		}
+		for k, v := range fields {
+			c.extraBody[k] = v
+		}
+	})
+}
+
+// ExtraHeaders adds HTTP headers to every request, verbatim. A header
+// the SDK itself sets (Authorization, Content-Type) is yours not to
+// clobber — the option does not check. Construction-time only.
+func ExtraHeaders(h http.Header) Option {
+	return optionFunc(func(c *config) {
+		if c.extraHeaders == nil {
+			c.extraHeaders = http.Header{}
+		}
+		for k, vs := range h {
+			c.extraHeaders[k] = vs
+		}
+	})
+}
+
 const (
 	defaultIdleTimeout = 60 * time.Second
 	defaultMaxTokens   = 4096
@@ -119,15 +159,17 @@ func Model(name string, opts ...Option) weft.Model {
 		}
 	}
 	m := &model{
-		name:        name,
-		maxTokens:   cfg.maxTokens,
-		temperature: cfg.temperature,
-		tempSet:     cfg.tempSet,
-		topP:        cfg.topP,
-		topPSet:     cfg.topPSet,
-		stop:        cfg.stop,
-		thinking:    cfg.thinking,
-		idle:        defaultIdleTimeout,
+		name:         name,
+		maxTokens:    cfg.maxTokens,
+		temperature:  cfg.temperature,
+		tempSet:      cfg.tempSet,
+		topP:         cfg.topP,
+		topPSet:      cfg.topPSet,
+		stop:         cfg.stop,
+		extraBody:    cfg.extraBody,
+		extraHeaders: cfg.extraHeaders,
+		thinking:     cfg.thinking,
+		idle:         defaultIdleTimeout,
 	}
 	if cfg.idleSet {
 		m.idle = cfg.idle
@@ -154,17 +196,49 @@ func Model(name string, opts ...Option) weft.Model {
 }
 
 type model struct {
-	client      anthropic.Client
-	injected    bool // client came from Client(c): a test double, exempt from the kill switch
-	name        string
-	maxTokens   int
-	temperature float64
-	tempSet     bool
-	topP        float64
-	topPSet     bool
-	stop        []string
-	thinking    bool
-	idle        time.Duration
+	client       anthropic.Client
+	injected     bool // client came from Client(c): a test double, exempt from the kill switch
+	name         string
+	maxTokens    int
+	temperature  float64
+	tempSet      bool
+	topP         float64
+	topPSet      bool
+	stop         []string
+	extraBody    map[string]any
+	extraHeaders http.Header
+	thinking     bool
+	idle         time.Duration
+}
+
+// requestOptions builds the per-request options the escape hatch adds:
+// a middleware deep-merging ExtraBody's fields into the JSON body
+// (adapterkit.MergeBody, caller wins) and one header option per
+// ExtraHeaders entry (ADR 0013's 2026-09-22 amendment).
+func (m *model) requestOptions() []option.RequestOption {
+	var opts []option.RequestOption
+	if len(m.extraBody) > 0 {
+		extra := m.extraBody
+		opts = append(opts, option.WithMiddleware(func(r *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				return nil, err
+			}
+			merged, err := adapterkit.MergeBody(body, extra)
+			if err != nil {
+				return nil, fmt.Errorf("anthropic adapter: ExtraBody: %w", err)
+			}
+			r.Body = io.NopCloser(bytes.NewReader(merged))
+			r.ContentLength = int64(len(merged))
+			return next(r)
+		}))
+	}
+	for k, vs := range m.extraHeaders {
+		for _, v := range vs {
+			opts = append(opts, option.WithHeader(k, v))
+		}
+	}
+	return opts
 }
 
 // Info identifies the model for RunStart and the manifest.

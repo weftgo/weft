@@ -4,59 +4,6 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
-## Unreleased — the 0.3.0 review round (2026-09-22)
-
-The repo's two-axis review process over v0.2.0…v0.3.0, then the fix
-pass. Standards axis: no hard documented-standard violations; one doc
-drift, two duplication smells, and five production-readiness findings,
-all fixed or pinned below. Spec axis: the cycle is faithful to
-`docs/phase2a-plan.md`; the one deviation (the OutputDecoder's
-within-step rule) is now a documented, pinned decision instead.
-
-### Fixed
-
-- **`ExtraBody`/`ExtraHeaders` snapshot at construction** (all three
-  adapters): the options captured the caller's nested maps and header
-  slices by reference, so mutating them after `Model()` raced
-  concurrent runs. Values are deep-copied when the option applies
-  (`adapterkit.CloneJSON`, header slices cloned); pinned per adapter
-  by `TestExtraBodySnapshot`.
-- **A negative `RequestParams.MaxTokens` fails the run at the step
-  that carries it** — named in the error text, the `validateToolChoice`
-  stance. Before, the adapters improvised: openai forwarded it into an
-  opaque API error, google dropped it silently, anthropic folded it to
-  the default. Explicit zero keeps its documented per-adapter meaning.
-  Pinned by `TestParamsValidation`.
-
-### Changed — internal
-
-- **The truncated-JSON closer lives once**, in `internal/jsonclose`,
-  imported by both `partial_json.go` and `mw/repairjson.go`. The two
-  copies had already drifted (the trailing-comma rule); the plan's
-  "duplicated on purpose" rationale was wrong — `mw` importing an
-  `internal/` package of its own module breaks no rule (the
-  `adapterkit` precedent). Behaviour change rides along for
-  `closedPrefix`: a trailing comma *run* now closes (it dropped back
-  to the member boundary before) — strictly more salvage.
-- **`OutputDecoder`'s within-step rule is last-call-wins, pinned.** A
-  fresh `submit_output` `ToolStart` resets the buffer, so `Result`
-  follows the last call — the `OutputOf` rule the godoc always named;
-  the plan's "concatenates within a step" wording is amended in place
-  (two distinct calls' arguments never decode as one document).
-  `BenchmarkOutputDecoder` pins the documented cost shape (~0.9µs per
-  delta at a 3 KiB form; the per-delta re-close is quadratic in
-  submission size by design).
-- The loop skips the resume pending-id set when a run carries no
-  decisions, and a `cap`-shadowing local is renamed.
-
-### Docs
-
-- ADR 0013's capability matrix gains the Tool choice column (all
-  three adapters ✓, with each provider's wire tokens).
-- `RequestParams`, `ExtraBody`/`ExtraHeaders`, and `OutputDecoder`
-  godocs state the new rules; `docs/phase2a-plan.md` §8.1 carries the
-  two dated amendments.
-
 ## 0.3.0 — 2026-09-22
 
 The Phase 2a parity round (TODO §2a, `docs/phase2a-plan.md` — not
@@ -65,7 +12,14 @@ decisions): the six capability items the cross-check against the
 studied frameworks found missing, plus the three stances recorded in
 the same ADR pass. Tags cut together: the root and the three adapters
 at v0.3.0; `mcp` untouched at v0.1.0. Everything is additive — apidiff
-is clean with no allowances.
+is clean with no allowances. The cycle then went through the repo's
+two-axis review process and the fix pass landed inside the same
+release: the standards axis found no hard documented-standard
+violations (one doc drift, two duplication smells, five
+production-readiness findings — all fixed or pinned below), and the
+spec axis confirmed the cycle faithful to the plan, with the one
+deviation (the OutputDecoder's within-step rule) now a documented,
+pinned decision.
 
 ### Added — Tool-choice forcing (TODO §2a.1, ADR 0013)
 
@@ -135,6 +89,42 @@ is clean with no allowances.
   `partial_json.go`, fuzzed), `Result` follows the `OutputOf` rule.
   UI-only; never model-visible.
 
+### Fixed — the review round (2026-09-22)
+
+- **`ExtraBody`/`ExtraHeaders` snapshot at construction** (all three
+  adapters): the options captured the caller's nested maps and header
+  slices by reference, so mutating them after `Model()` raced
+  concurrent runs. Values are deep-copied when the option applies
+  (`adapterkit.CloneJSON`, header slices cloned); pinned per adapter
+  by `TestExtraBodySnapshot`.
+- **A negative `RequestParams.MaxTokens` fails the run at the step
+  that carries it** — named in the error text, the `validateToolChoice`
+  stance. Before, the adapters improvised: openai forwarded it into an
+  opaque API error, google dropped it silently, anthropic folded it to
+  the default. Explicit zero keeps its documented per-adapter meaning.
+  Pinned by `TestParamsValidation`.
+
+### Changed — internal (the review round)
+
+- **The truncated-JSON closer lives once**, in `internal/jsonclose`,
+  imported by both `partial_json.go` and `mw/repairjson.go`. The two
+  copies had already drifted (the trailing-comma rule); the plan's
+  "duplicated on purpose" rationale was wrong — `mw` importing an
+  `internal/` package of its own module breaks no rule (the
+  `adapterkit` precedent). Behaviour change rides along for
+  `closedPrefix`: a trailing comma *run* now closes (it dropped back
+  to the member boundary before) — strictly more salvage.
+- **`OutputDecoder`'s within-step rule is last-call-wins, pinned.** A
+  fresh `submit_output` `ToolStart` resets the buffer, so `Result`
+  follows the last call — the `OutputOf` rule the godoc always named;
+  the plan's "concatenates within a step" wording is amended in place
+  (two distinct calls' arguments never decode as one document).
+  `BenchmarkOutputDecoder` pins the documented cost shape (~0.9µs per
+  delta at a 3 KiB form; the per-delta re-close is quadratic in
+  submission size by design).
+- The loop skips the resume pending-id set when a run carries no
+  decisions, and a `cap`-shadowing local is renamed.
+
 ### Docs
 
 - ADR 0013 amended (tool choice, params + escape hatch, cache markers,
@@ -146,6 +136,11 @@ is clean with no allowances.
   examples — TODO §2a.9). Godoc examples: `ExampleToolChoice`,
   `ExampleParams`, `ExampleOutputDecoder`; `examples/approval` gains
   the `run_sql` resolve path.
+- The review round's docs: ADR 0013's capability matrix gains the
+  Tool choice column (all three adapters ✓, with each provider's wire
+  tokens); `RequestParams`, `ExtraBody`/`ExtraHeaders`, and
+  `OutputDecoder` godocs state the new rules;
+  `docs/phase2a-plan.md` §8.1 carries the two dated amendments.
 
 ### Live runs owed (carried debt — no provider keys on the build machine)
 

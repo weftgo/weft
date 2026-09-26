@@ -207,3 +207,58 @@ notifications, sampling (above), `idempotentHint` (waits for
   P1 held. Where the SDK's client re-decodes (schema bytes arrive as a
   map), the canonical form is what is kept — recorded here so "verbatim"
   is never over-claimed.
+
+## Amendment (2026-09-27 — a tool that cannot be imported fails the tool, not the listing)
+
+The decision above read "a schema that cannot parse fails the whole
+import naming the tool — one bad tool fails loudly rather than
+dropping silently". The 2026-09-24 review (§3) asked whether the
+listing should survive the tool; this amendment says yes, and keeps
+the loudness.
+
+**What the field does.** The three MCP clients surveyed in the
+research checkout — Vercel AI SDK (`packages/mcp/src/tool/mcp-client.ts`,
+`toolsFromDefinitions`), Mastra (`packages/mcp/src/client/client.ts`,
+`convertInputSchema`), pydantic-ai (`mcp.py`, `get_tools`) — pass the
+server's `inputSchema` through *verbatim*: none parses it into a typed
+structure, so a malformed schema is invisible at import and surfaces
+as a provider 400 at the **model call**, failing the whole step and
+every tool with it. The AI SDK additionally lets the caller name the
+subset it wants (`schemas: {...}`); Mastra's *server* side logs and
+skips a tool it cannot expose. Nobody fails the listing over one tool,
+and nobody reports it either — because nobody looks.
+
+**Why weft is different, and what that buys.** weft parses on purpose:
+`ParseSchema` rejects what no provider's tool-parameters contract
+accepts (a non-object root, a `$ref` root, an omitted schema), so the
+bridge *knows* at import what the others learn from a 400. The
+question is only what to do with the knowledge. Failing the whole
+import holds a server's ninety-nine good tools hostage to one — a
+production outage from a third-party server's typo, with no way to
+work around it short of not connecting (the caller cannot filter
+before `Tools` returns). Dropping the tool silently is what the
+original decision rightly forbade. The answer that keeps both
+properties is **per-tool isolation with a typed report**:
+
+- `Tools` returns every importable tool **and**, when any tool was
+  left out, an `*ImportError` naming each skipped tool (`Name`,
+  `Index`, `Err` with `ParseSchema`'s own cause; `Unwrap() []error`
+  keeps `errors.Is`/`As` working through it). The slice is usable
+  either way — the partial-result shape `*weft.RunError` already
+  established (ADR 0002): the error is a report, and whether a
+  skipped tool is a warning to log or a reason to stop is the caller's
+  policy, decided with `errors.As`, not imposed by the bridge.
+- A nil entry and an empty name — untrusted-input shapes that used to
+  fail the import — are skipped and reported the same way, by index.
+- A **listing** failure (transport, the ctx ending) is still the
+  ordinary error with no tools: nothing was learned about any tool.
+- Existing callers that `return err` on any error see exactly the
+  outcome they saw before (an error naming the tool); callers that
+  want the good tools now can have them.
+
+The out-of-scope allow/deny option stays out: with the slice always
+returned, filtering is plain Go as the decision says. Pinned by
+`TestToolsSkipsUnimportableSchemaAndReportsIt` (a type-array root
+beside two good tools: both imported and callable, the odd one named
+at its index, a clean server reports nothing) and
+`TestToolsEmptyNameIsSkippedAndReported`.

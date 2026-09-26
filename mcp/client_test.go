@@ -125,21 +125,81 @@ func equalJSON(a, b any) bool {
 
 // Review 2026-09-24 §2.5: a server listing a tool with an empty name
 // is untrusted input (the SDK's server-side name check only logs, and
-// its list filter drops nil tools but not empty names); Tools fails
-// loudly instead of panicking inside RawTool.
-func TestToolsEmptyNameIsALoudError(t *testing.T) {
+// its list filter drops nil tools but not empty names); Tools never
+// panics inside RawTool. ADR 0015's 2026-09-27 amendment: the bad tool
+// fails, not the listing — the good tool beside it is imported and the
+// *ImportError names the skipped one.
+func TestToolsEmptyNameIsSkippedAndReported(t *testing.T) {
+	ok := func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "x"}}}, nil
+	}
 	sess, stop := served(t, func(srv *sdk.Server) {
-		addRemoteTool(srv, "", true, func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "x"}}}, nil
-		})
+		addRemoteTool(srv, "", true, ok)
+		addRemoteTool(srv, "good", true, ok)
 	})
 	defer stop()
 	tools, err := Tools(context.Background(), sess)
-	if err == nil {
-		t.Fatalf("import of an empty-named tool succeeded: %v", tools)
+	var ie *ImportError
+	if !errors.As(err, &ie) {
+		t.Fatalf("err = %v, want *ImportError", err)
+	}
+	if len(ie.Skipped) != 1 || ie.Skipped[0].Name != "" || !strings.Contains(ie.Skipped[0].Err.Error(), "empty name") {
+		t.Errorf("skipped = %+v, want the empty-named entry", ie.Skipped)
 	}
 	if !strings.Contains(err.Error(), "empty name") {
 		t.Errorf("error = %q, want it to name the empty name", err.Error())
+	}
+	if len(tools) != 1 || tools[0].Name != "good" {
+		t.Errorf("tools = %v, want the good tool imported beside the report", tools)
+	}
+}
+
+// The amendment's substance: one tool whose input schema the core
+// cannot key on (a type-array root — legal JSON Schema, accepted by
+// the SDK's server, rejected by every provider's tool-parameters
+// contract) no longer fails the whole import. The two good tools are
+// returned, callable, and the report names the bad one with
+// ParseSchema's own cause reachable through errors.Is/As.
+func TestToolsSkipsUnimportableSchemaAndReportsIt(t *testing.T) {
+	ok := func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "called"}}}, nil
+	}
+	sess, stop := served(t, func(srv *sdk.Server) {
+		addRemoteTool(srv, "first", true, ok)
+		// The Go SDK's server refuses a non-"object" root on AddTool,
+		// so the shape a non-Go server sends is produced by swapping
+		// the schema after registration (the server lists the tool it
+		// holds by pointer, marshalling the schema at list time).
+		odd := &sdk.Tool{Name: "nullable_root", Description: "odd", InputSchema: json.RawMessage(`{"type":"object"}`)}
+		srv.AddTool(odd, ok)
+		odd.InputSchema = json.RawMessage(`{"type":["object","null"]}`)
+		addRemoteTool(srv, "last", true, ok)
+	})
+	defer stop()
+	tools, err := Tools(context.Background(), sess)
+	var ie *ImportError
+	if !errors.As(err, &ie) {
+		t.Fatalf("err = %v, want *ImportError", err)
+	}
+	// Index is the listing position: the SDK lists tools sorted by
+	// name (first, last, nullable_root), so the odd one is entry 2.
+	if len(ie.Skipped) != 1 || ie.Skipped[0].Name != "nullable_root" || ie.Skipped[0].Index != 2 {
+		t.Fatalf("skipped = %+v, want nullable_root at listing index 2", ie.Skipped)
+	}
+	if !strings.Contains(err.Error(), `"nullable_root"`) || !strings.Contains(err.Error(), "ParseSchema") {
+		t.Errorf("error = %q, want the tool named with ParseSchema's cause", err.Error())
+	}
+	if len(tools) != 2 || tools[0].Name != "first" || tools[1].Name != "last" {
+		t.Fatalf("tools = %v, want first and last imported in order", tools)
+	}
+	if out, err := tools[1].Invoke(context.Background(), json.RawMessage(`{}`)); err != nil || out != "called" {
+		t.Errorf("imported tool call = %q, %v", out, err)
+	}
+	// A clean server reports nothing: the error is absent, not empty.
+	sess2, stop2 := served(t, func(srv *sdk.Server) { addRemoteTool(srv, "only", true, ok) })
+	defer stop2()
+	if tools, err := Tools(context.Background(), sess2); err != nil || len(tools) != 1 {
+		t.Errorf("clean import: tools = %v, err = %v", tools, err)
 	}
 }
 
@@ -656,10 +716,11 @@ func TestToolsImportsZodStyleSchemas(t *testing.T) {
 }
 
 // Edge row: a server with zero tools imports zero tools — an empty,
-// non-nil slice, not an error. (A non-object input schema cannot be
-// served by the SDK to test the import's refusal — its server panics
-// on AddTool first — so that path is unit-pinned by the core's
-// TestParseSchemaRejects, and Tools wraps it naming the tool.)
+// non-nil slice, not an error. (A non-object input schema the SDK's
+// server refuses on AddTool cannot be served; the type-array root it
+// does accept is the skip-and-report pin above, and the rest of
+// ParseSchema's refusals are unit-pinned by the core's
+// TestParseSchemaRejects.)
 func TestToolsEdges(t *testing.T) {
 	sess, stop := served(t, func(srv *sdk.Server) {})
 	defer stop()

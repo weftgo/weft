@@ -4,6 +4,30 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## mcp 0.1.4 — 2026-09-27
+
+The one item 0.3.3 left open, decided: ADR 0015's 2026-09-27
+amendment. Only `weft/mcp` changes (`mcp/v0.1.4`); the root and the
+adapters stay at v0.3.3.
+
+### Changed — `mcp.Tools` fails the tool, not the listing
+
+- **A tool that cannot be imported no longer fails the whole import.**
+  `Tools` returns every importable tool and, when any was left out, an
+  `*mcp.ImportError` naming each skipped tool (`Name`, `Index`, `Err`
+  carrying `ParseSchema`'s cause; `Unwrap() []error`). The slice is
+  usable whether or not the error is set — `*weft.RunError`'s
+  partial-result shape — so the caller decides with `errors.As`
+  whether a skipped tool is a warning or a stop. A nil entry and an
+  empty name are reported the same way, by index; a listing failure
+  (transport, ctx) is still the plain error with no tools. Callers
+  that returned on any error see the same outcome as before; callers
+  that want the good tools now get them. The field's clients (AI SDK,
+  Mastra, pydantic-ai) pass schemas through unparsed and learn of a
+  bad one from a provider 400 that fails the whole step — weft keeps
+  its stricter import and now uses what it learns to isolate rather
+  than to refuse.
+
 ## 0.3.3 — 2026-09-26
 
 The P3s the 2026-09-24 review deferred, landed — every one of them

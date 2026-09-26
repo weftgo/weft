@@ -64,6 +64,29 @@ var ErrToolError = errors.New("mcp: tool returned an error")
 // ToolDef when it is an object schema; a non-object output schema
 // (legal per the spec) has no weft representation and is not recorded
 // — the result text is the tool's output either way.
+//
+// A tool that cannot be imported — an input schema the core cannot
+// key on (a non-object root, a $ref root, an omitted schema), an
+// empty name, a nil entry — fails that tool, not the listing: the
+// importable tools are returned and the error is an *ImportError
+// naming each skipped tool and why (ADR 0015's 2026-09-27 amendment).
+// The slice is usable whether or not err is nil; the caller decides
+// whether a skipped tool is a warning to log or a reason to stop:
+//
+//	tools, err := mcp.Tools(ctx, sess)
+//	var skipped *mcp.ImportError
+//	if errors.As(err, &skipped) {
+//		slog.Warn("mcp: tools skipped", "err", skipped)
+//		err = nil
+//	}
+//	if err != nil { // a listing failure: transport, ctx
+//		return err
+//	}
+//
+// Nothing is dropped silently — a server with one broken tool no
+// longer takes its ninety-nine good ones down, and the one is still
+// named. A listing failure (transport, the ctx ending) is the ordinary
+// error with no tools.
 func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*weft.ToolDef, error) {
 	cfg := importConfig{}
 	for _, o := range opts {
@@ -72,27 +95,34 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*wef
 		}
 	}
 	out := []*weft.ToolDef{} // non-nil: zero tools is a fact, not an error
+	var skipped []SkippedTool
+	index := -1
 	for t, err := range sess.Tools(ctx, nil) {
 		if err != nil {
 			return nil, err
 		}
+		index++
 		if t == nil {
-			return nil, fmt.Errorf("mcp: tool list carried a nil entry")
+			skipped = append(skipped, SkippedTool{Index: index, Err: errors.New("nil entry in the tool list")})
+			continue
 		}
 		name := cfg.prefix + t.Name
 		if name == "" {
 			// Server-provided content is untrusted: a hostile or buggy
 			// server listing {"name": ""} would panic RawTool at import
 			// time. The nil-entry check above is the same rule.
-			return nil, fmt.Errorf("mcp: tool list carried a tool with an empty name")
+			skipped = append(skipped, SkippedTool{Index: index, Err: errors.New("empty name")})
+			continue
 		}
 		raw, err := fromSDK(t.InputSchema)
 		if err != nil {
-			return nil, fmt.Errorf("mcp: tool %q: %w", t.Name, err)
+			skipped = append(skipped, SkippedTool{Name: t.Name, Index: index, Err: err})
+			continue
 		}
 		schema, err := weft.ParseSchema(raw)
 		if err != nil {
-			return nil, fmt.Errorf("mcp: tool %q: %w", t.Name, err)
+			skipped = append(skipped, SkippedTool{Name: t.Name, Index: index, Err: err})
+			continue
 		}
 		// Annotation default first, the caller's policy after: a
 		// missing readOnlyHint cannot be un-Sequentialised, and
@@ -113,7 +143,51 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*wef
 		}
 		out = append(out, tool)
 	}
+	if len(skipped) > 0 {
+		return out, &ImportError{Skipped: skipped}
+	}
 	return out, nil
+}
+
+// ImportError is Tools' report of the tools it could not import. It
+// travels beside the importable tools, not instead of them — the
+// partial-result shape *weft.RunError uses (ADR 0002): the caller
+// reads it with errors.As and decides whether a skipped tool is a
+// warning or a stop. Unwrap exposes each tool's cause, so errors.Is
+// against a ParseSchema failure still works through the report.
+type ImportError struct {
+	Skipped []SkippedTool
+}
+
+// SkippedTool is one tool Tools left out: its server-side name (empty
+// when the name itself was the problem), its position in the listing,
+// and why.
+type SkippedTool struct {
+	Name  string
+	Index int
+	Err   error
+}
+
+func (e *ImportError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "mcp: %d tool(s) not imported:", len(e.Skipped))
+	for _, s := range e.Skipped {
+		if s.Name != "" {
+			fmt.Fprintf(&b, " %q: %v;", s.Name, s.Err)
+		} else {
+			fmt.Fprintf(&b, " entry %d: %v;", s.Index, s.Err)
+		}
+	}
+	return strings.TrimSuffix(b.String(), ";")
+}
+
+// Unwrap returns each skipped tool's cause.
+func (e *ImportError) Unwrap() []error {
+	errs := make([]error, len(e.Skipped))
+	for i, s := range e.Skipped {
+		errs[i] = s.Err
+	}
+	return errs
 }
 
 // Option configures one Tools call.

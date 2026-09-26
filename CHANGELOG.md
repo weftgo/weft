@@ -21,10 +21,11 @@ is pre-1.0 and tags per module (ADR 0005).
 ## 0.3.5 / store 0.1.0 — 2026-09-27
 
 Phase 2b step 1 (`docs/phase2b-store-plan.md`): the run store, and the
-one core addition it needs. Tags cut in two phases (ADR 0005): the
-root at v0.3.5 first, then the sub-modules — openai, anthropic, google
-at v0.3.5 and mcp at v0.1.7 (requirement bumps only) — plus the new
-`store/v0.1.0` requiring the tagged root v0.3.6.
+core additions it needs. Tags cut in two phases (ADR 0005): the root
+at v0.3.5 (OnRunEnd) and v0.3.6 (the observation accessors), then the
+sub-modules — openai, anthropic, google at v0.3.6 and mcp at v0.1.7
+(requirement bumps only) — plus the new `store/v0.1.0` requiring the
+tagged root v0.3.6.
 
 ### Added — core: `weft.OnRunEnd(fn)`, the outcome observer
 

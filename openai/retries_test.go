@@ -26,6 +26,14 @@ func TestMaxRetriesZeroDisablesSDKRetries(t *testing.T) {
 		{"absent_is_sdk_default", nil, 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			// MaxRetries composes into the client the adapter builds;
+			// an injected Client(c) bypasses construction options, so
+			// this test must self-build — and a self-built client is
+			// what the kill switch guards. Allow it explicitly: the
+			// only endpoint is the loopback httptest server, and the
+			// kill-switch test itself keeps a self-built client to
+			// prove the switch fires.
+			t.Setenv("WEFT_MODEL_REQUESTS", "allow")
 			var hits atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				hits.Add(1)

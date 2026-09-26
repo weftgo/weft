@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/weftgo/weft v0.3.2
+	github.com/weftgo/weft v0.3.3
 )
 
 require (

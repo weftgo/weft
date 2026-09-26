@@ -67,7 +67,8 @@ var ErrToolError = errors.New("mcp: tool returned an error")
 //
 // A tool that cannot be imported — an input schema the core cannot
 // key on (a non-object root, a $ref root, an omitted schema), an
-// empty name, a nil entry — fails that tool, not the listing: the
+// empty name, a name repeated in the listing (the first occurrence
+// stands), a nil entry — fails that tool, not the listing: the
 // importable tools are returned and the error is an *ImportError
 // naming each skipped tool and why (ADR 0015's 2026-09-27 amendment).
 // The slice is usable whether or not err is nil; the caller decides
@@ -96,6 +97,7 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*wef
 	}
 	out := []*weft.ToolDef{} // non-nil: zero tools is a fact, not an error
 	var skipped []SkippedTool
+	seen := map[string]bool{}
 	index := -1
 	for t, err := range sess.Tools(ctx, nil) {
 		if err != nil {
@@ -106,12 +108,23 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*wef
 			skipped = append(skipped, SkippedTool{Index: index, Err: errors.New("nil entry in the tool list")})
 			continue
 		}
-		name := cfg.prefix + t.Name
-		if name == "" {
+		if t.Name == "" {
 			// Server-provided content is untrusted: a hostile or buggy
 			// server listing {"name": ""} would panic RawTool at import
-			// time. The nil-entry check above is the same rule.
+			// time — and checked on the composed name, as this once
+			// was, a Prefix hid it: {"name": ""} under Prefix("gh_")
+			// imported as a tool called "gh_" whose handler called the
+			// remote tool "". The nil-entry check above is the same rule.
 			skipped = append(skipped, SkippedTool{Index: index, Err: errors.New("empty name")})
+			continue
+		}
+		name := cfg.prefix + t.Name
+		if seen[name] {
+			// A repeated name in one listing is the same untrusted
+			// input: both would import and weft.New would panic on
+			// the duplicate later. The first occurrence stands, the
+			// repeat is reported.
+			skipped = append(skipped, SkippedTool{Name: t.Name, Index: index, Err: fmt.Errorf("duplicate name %q in the listing", t.Name)})
 			continue
 		}
 		raw, err := fromSDK(t.InputSchema)
@@ -142,6 +155,7 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*wef
 			}
 		}
 		out = append(out, tool)
+		seen[name] = true
 	}
 	if len(skipped) > 0 {
 		return out, &ImportError{Skipped: skipped}

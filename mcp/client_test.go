@@ -761,3 +761,60 @@ func TestToolsSchemaIntegersRoundThroughFloat64(t *testing.T) {
 		t.Errorf("imported schema = %s; want the maximum rounded through float64 to 9007199254740992", b)
 	}
 }
+
+// The empty-name check must look at the server's name, not the
+// composed one: under Prefix("gh_") a tool listed as {"name": ""} used
+// to import as a tool called "gh_" whose handler called the remote
+// tool "" (a defect in the 0.3.1 fix, found reviewing mcp v0.1.4).
+func TestToolsEmptyNameIsSkippedUnderPrefix(t *testing.T) {
+	ok := func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "x"}}}, nil
+	}
+	sess, stop := served(t, func(srv *sdk.Server) {
+		addRemoteTool(srv, "", true, ok)
+		addRemoteTool(srv, "search", true, ok)
+	})
+	defer stop()
+	tools, err := Tools(context.Background(), sess, Prefix("gh_"))
+	var ie *ImportError
+	if !errors.As(err, &ie) || len(ie.Skipped) != 1 || !strings.Contains(ie.Skipped[0].Err.Error(), "empty name") {
+		t.Fatalf("err = %v, want an ImportError reporting the empty name", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "gh_search" {
+		t.Errorf("tools = %v, want only gh_search (no tool named \"gh_\")", tools)
+	}
+}
+
+// A name repeated in one listing is untrusted input of the same kind:
+// both used to import and weft.New panicked on the duplicate later.
+// The first occurrence stands, the repeat is reported, and the result
+// registers with New without incident.
+func TestToolsDuplicateNameIsSkippedAndReported(t *testing.T) {
+	ok := func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "x"}}}, nil
+	}
+	sess, stop := servedOpts(t, nil, func(srv *sdk.Server) {
+		addRemoteTool(srv, "search", true, ok)
+		// The SDK's server replaces a tool re-added under the same
+		// name, so the repeat is produced the way a non-Go server
+		// would send it: two entries in the listing.
+		dup := &sdk.Tool{Name: "search_", Description: "a remote tool", InputSchema: json.RawMessage(foreignSchema)}
+		srv.AddTool(dup, ok)
+		dup.Name = "search"
+	})
+	defer stop()
+	tools, err := Tools(context.Background(), sess)
+	var ie *ImportError
+	if !errors.As(err, &ie) || len(ie.Skipped) != 1 || ie.Skipped[0].Name != "search" || !strings.Contains(ie.Skipped[0].Err.Error(), "duplicate") {
+		t.Fatalf("err = %v, want an ImportError reporting the duplicate", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "search" {
+		t.Fatalf("tools = %v, want one search", tools)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("New panicked on the imported tools: %v", r)
+		}
+	}()
+	_ = weft.New(wefttest.Script(wefttest.Say("ok")), tools[0])
+}

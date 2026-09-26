@@ -131,3 +131,13 @@ tools — served by swapping the schema after `AddTool`, since the Go
 SDK's server refuses a non-object root — and the empty-name case),
 both pins failing on the old code. Only `weft/mcp` changed; tagged
 `mcp/v0.1.4`.
+
+## 10. Review of mcp v0.1.4 (2026-09-27, landed as mcp v0.1.5)
+
+Two defects in the untrusted-input class, both pinned and both pins
+failing on v0.1.4: the empty-name check tested the composed name, so
+`{"name": ""}` under `Prefix("gh_")` imported as a tool called `gh_`
+calling the remote tool `""` (present since the 0.3.1 fix); and a name
+repeated in one listing imported twice, leaving `weft.New` to panic on
+the duplicate. The first occurrence now stands and the repeat is
+reported; the example client shows the `errors.As` idiom.

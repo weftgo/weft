@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -82,11 +83,11 @@ func run() error {
 	// Import with per-server prefixes so the two can share one agent;
 	// the remote calls still use the servers' own tool names.
 	var tools []*weft.ToolDef
-	tools, err = mcp.Tools(ctx, sessions[0], mcp.Prefix("gh_"))
+	tools, err = importTools(ctx, sessions[0], "gh_")
 	if err != nil {
 		return err
 	}
-	more, err := mcp.Tools(ctx, sessions[1], mcp.Prefix("db_"))
+	more, err := importTools(ctx, sessions[1], "db_")
 	if err != nil {
 		return err
 	}
@@ -120,4 +121,18 @@ func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// importTools imports one server's tools under a prefix. A tool the
+// bridge cannot import fails that tool, not the listing (ADR 0015): the
+// report is logged and the good tools are used; a listing failure
+// (transport, ctx) is the error returned.
+func importTools(ctx context.Context, sess *sdk.ClientSession, prefix string) ([]*weft.ToolDef, error) {
+	tools, err := mcp.Tools(ctx, sess, mcp.Prefix(prefix))
+	var skipped *mcp.ImportError
+	if errors.As(err, &skipped) {
+		log.Printf("%v", skipped)
+		err = nil
+	}
+	return tools, err
 }

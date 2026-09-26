@@ -4,6 +4,24 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## mcp 0.1.5 — 2026-09-27
+
+Reviewing 0.1.4 found two defects in the same untrusted-input class;
+only `weft/mcp` changes (`mcp/v0.1.5`).
+
+### Fixed — `mcp.Tools`
+
+- **An empty server-side name is skipped under a `Prefix` too.** The
+  0.3.1 check tested the composed name, so `{"name": ""}` under
+  `Prefix("gh_")` imported as a tool called `gh_` whose handler called
+  the remote tool `""`. The check reads the server's name.
+- **A name repeated in one listing is skipped and reported** (the
+  first occurrence stands). Both used to import and `weft.New`
+  panicked on the duplicate later — untrusted input escaping as a
+  panic.
+- `mcp/examples/client` shows the `errors.As(err, &skipped)` idiom the
+  ADR 0015 amendment documents.
+
 ## mcp 0.1.4 — 2026-09-27
 
 The one item 0.3.3 left open, decided: ADR 0015's 2026-09-27

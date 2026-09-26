@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -374,4 +376,69 @@ func TestSchemaMarshalUnchangedWithoutRaw(t *testing.T) {
 	if string(got) != want {
 		t.Errorf("marshal:\n got  %s\n want %s", got, want)
 	}
+}
+
+// Corpus rows the 2026-09-24 review found unpinned: a time.Duration
+// field is an integer (nanoseconds — the documented foot-gun, pinned
+// so it never silently becomes a string), an embedded *pointer* struct
+// is flattened exactly like an embedded value, and a map nested in a
+// map carries its value type through two additionalProperties levels.
+func TestSchemaCorpusDurationEmbeddedPointerNestedMap(t *testing.T) {
+	type Base struct {
+		ID string `json:"id"`
+	}
+	type input struct {
+		*Base
+		Wait  time.Duration             `json:"wait"`
+		Grid  map[string]map[string]int `json:"grid,omitempty"`
+		Delay *time.Duration            `json:"delay,omitempty"`
+	}
+	tool := weft.Tool("corpus", "", func(_ context.Context, in input) (string, error) {
+		if in.Base == nil || in.ID != "x" || in.Wait != 1500*time.Millisecond || in.Grid["a"]["b"] != 1 {
+			return "", fmt.Errorf("decoded %+v", in)
+		}
+		return "ok", nil
+	})
+	got, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"type":"object","properties":{"delay":{"type":"integer"},"grid":{"type":"object","additionalProperties":{"type":"object","additionalProperties":{"type":"integer"}}},"id":{"type":"string"},"wait":{"type":"integer"}},"required":["id","wait"]}`
+	if string(got) != want {
+		t.Errorf("schema:\n got  %s\n want %s", got, want)
+	}
+	// The schema and encoding/json agree on the wire: a duration
+	// arrives as an integer, the embedded pointer is allocated and
+	// filled, the nested map decodes.
+	out, err := tool.Invoke(context.Background(), json.RawMessage(`{"id":"x","wait":1500000000,"grid":{"a":{"b":1}}}`))
+	if err != nil || out != "ok" {
+		t.Errorf("invoke = %q, %v; want ok", out, err)
+	}
+}
+
+// The row that found a defect: an embedded pointer to an *unexported*
+// struct type. encoding/json can marshal it when non-nil but can never
+// unmarshal into it ("cannot set embedded pointer to unexported struct
+// type"), and every weft schema is decoded into a zero value — so the
+// schema advertised fields no argument could ever reach, and the model
+// saw "field \"id\": expected string, got string". Loud at
+// construction instead, like an empty name or a nil handler.
+func TestSchemaEmbeddedPointerToUnexportedStructPanics(t *testing.T) {
+	type base struct {
+		ID string `json:"id"`
+	}
+	type input struct {
+		*base
+		W int `json:"w"`
+	}
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("an embedded pointer to an unexported struct type did not panic at Tool()")
+		}
+		if s, _ := r.(string); !strings.Contains(s, "base") || !strings.Contains(s, "unexported") {
+			t.Errorf("panic = %v, want it to name the embedded type and the rule", r)
+		}
+	}()
+	_ = weft.Tool("bad", "", func(_ context.Context, _ input) (string, error) { return "", nil })
 }

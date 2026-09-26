@@ -4306,3 +4306,20 @@ func TestResolveEmitsNoToolEvents(t *testing.T) {
 		t.Errorf("resolved call emitted ToolStart=%v ToolFinish=%v; nothing executed", sawStart, sawFinish)
 	}
 }
+
+// A nil *ToolDef handed to New is loud, like a duplicate name: the
+// runtime snapshot path already fails the run with ErrNilTool for the
+// same mistake, and New used to skip it silently (review 2026-09-24 §3).
+func TestNewNilToolPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("a nil *ToolDef option did not panic")
+		}
+		if s, _ := r.(string); !strings.Contains(s, "nil *ToolDef") {
+			t.Errorf("panic = %v, want it to name the nil tool", r)
+		}
+	}()
+	var missing *weft.ToolDef
+	_ = weft.New(wefttest.Script(wefttest.Say("ok")), missing)
+}

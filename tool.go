@@ -421,13 +421,15 @@ func cloneSchema(s *Schema) *Schema {
 	return &c
 }
 
-// apply registers the tool as a New option. Duplicate names panic at
-// construction time — fail loud, fail early. The agent stores a deep
-// copy, freezing the definition: later mutations of the caller's value
-// cannot reach it.
+// apply registers the tool as a New option. Duplicate names and a nil
+// tool panic at construction time — fail loud, fail early; a nil used
+// to be skipped silently while the runtime snapshot path fails the run
+// with ErrNilTool for the same mistake (review 2026-09-24 §3). The
+// agent stores a deep copy, freezing the definition: later mutations of
+// the caller's value cannot reach it.
 func (t *ToolDef) apply(a *Agent) {
 	if t == nil {
-		return
+		panic("weft: nil *ToolDef passed to New")
 	}
 	if _, dup := a.tools[t.Name]; dup {
 		panic(fmt.Sprintf("weft: duplicate tool name %q", t.Name))

@@ -317,6 +317,18 @@ func collectClaims(t reflect.Type, visiting map[reflect.Type]bool, depth int, x 
 			if ft.Kind() != reflect.Struct || visiting[ft] {
 				continue
 			}
+			// encoding/json can never decode into an embedded pointer
+			// to an unexported struct type (it cannot allocate the
+			// pointer: "cannot set embedded pointer to unexported
+			// struct type"), and every weft schema is decoded into a
+			// zero value — so the flattened fields would be advertised
+			// yet unreachable, and the model would see "field "id":
+			// expected string, got string" for every argument it sent
+			// (found by the 2026-09-24 review's corpus row). Loud at
+			// construction, like an empty name or a nil handler.
+			if f.Type.Kind() == reflect.Pointer && !f.IsExported() {
+				panic(fmt.Sprintf("weft: %s embeds *%s, a pointer to an unexported struct type: encoding/json cannot decode into it, so its fields would be unreachable; embed the value (%s) or export the type", t, ft, ft.Name()))
+			}
 			visiting[ft] = true
 			collectClaims(ft, visiting, depth+1, x)
 			delete(visiting, ft)

@@ -16,7 +16,9 @@ import (
 // no prompt, no exception. Approval is a different seam
 // (weft.RequireApproval): Allow is the fixed policy, approval the
 // deferred decision. Outside the loop (Agent.CallTool with a bare
-// ctx) the Call is built from the call part alone.
+// ctx) the Call is built from the call part alone. A nil permit allows
+// every call — the middleware is a pass-through, so a policy that is
+// configured off composes without a branch at the call site.
 func Allow(permit func(weft.Call) bool) weft.ToolMiddleware {
 	return func(next weft.ToolCaller) weft.ToolCaller {
 		return func(ctx context.Context, call weft.ToolCallPart) (string, error) {

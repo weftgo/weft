@@ -17,9 +17,12 @@ import (
 var update = flag.Bool("update", false, "rewrite golden files instead of comparing")
 
 // Golden compares got against the committed golden file at path. With
-// -update it writes got (creating parent directories); otherwise a
-// mismatch fails the test with a line diff, and a missing file fails
-// with a hint to regenerate. Note the flag goes after the package list
+// -update it writes got (creating parent directories) and logs which
+// files it created or changed, so a regeneration run says what was
+// stale rather than rewriting everything silently; an up-to-date file
+// is left untouched. Otherwise a mismatch fails the test with a line
+// diff, and a missing file fails with a hint to regenerate. Note the
+// flag goes after the package list
 // (`go test ./... -update`): placed before it, the go tool routes it to
 // the wrong package's binary.
 //
@@ -31,6 +34,17 @@ var update = flag.Bool("update", false, "rewrite golden files instead of compari
 func Golden(t testing.TB, path string, got []byte) {
 	t.Helper()
 	if *update {
+		prev, err := os.ReadFile(path)
+		switch {
+		case err == nil && bytes.Equal(prev, got):
+			return // up to date: nothing rewritten, nothing to report
+		case err == nil:
+			t.Logf("golden %s: stale, rewritten", path)
+		case os.IsNotExist(err):
+			t.Logf("golden %s: created", path)
+		default:
+			t.Fatalf("golden %s: %v", path, err)
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("golden %s: %v", path, err)
 		}

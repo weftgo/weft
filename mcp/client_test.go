@@ -668,3 +668,35 @@ func TestToolsEdges(t *testing.T) {
 		t.Errorf("zero tools: tools = %v (nil = %t), err = %v", tools, tools == nil, err)
 	}
 }
+
+// The one loss the bridge documents (Tools' doc): the SDK's client
+// decodes a listed schema before Tools sees it, so an integer beyond
+// 2^53 in the document rounds through float64. Pinned so the rounding
+// is a known, visible property of the import, not a surprise —
+// 9007199254740993 (2^53+1) arrives as 9007199254740992.
+func TestToolsSchemaIntegersRoundThroughFloat64(t *testing.T) {
+	sess, stop := served(t, func(srv *sdk.Server) {
+		srv.AddTool(&sdk.Tool{
+			Name:        "big",
+			Description: "an id-keyed tool",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"integer","maximum":9007199254740993}}}`),
+		}, func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "x"}}}, nil
+		})
+	})
+	defer stop()
+	tools, err := Tools(context.Background(), sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("imported %d tools, want 1", len(tools))
+	}
+	b, err := json.Marshal(tools[0].InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "9007199254740992") || strings.Contains(string(b), "9007199254740993") {
+		t.Errorf("imported schema = %s; want the maximum rounded through float64 to 9007199254740992", b)
+	}
+}

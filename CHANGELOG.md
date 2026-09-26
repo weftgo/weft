@@ -4,6 +4,90 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## 0.3.3 — 2026-09-26
+
+The P3s the 2026-09-24 review deferred, landed — every one of them
+except the mcp schema-import skip-and-aggregate, which contradicts ADR
+0015's standing decision (one bad schema fails the import loudly) and
+waits for an ADR, not a patch. One of the corpus rows found a defect
+of its own. Tags cut together: root, openai, anthropic, google at
+v0.3.3; `mcp` at v0.1.3. Root API is additive only (two conformance
+helpers, one `Caps` field).
+
+### Fixed — a schema could advertise fields no argument could reach
+
+- **`Tool` and `Output[T]` (reflected schemas) panic at
+  construction on an embedded pointer to an unexported struct type**
+  (`type input struct{ *base }`). encoding/json can marshal such a
+  field when non-nil but can never unmarshal into it ("cannot set
+  embedded pointer to unexported struct type"), and every weft schema
+  is decoded into a zero value — so the flattened fields were
+  advertised, unreachable, and every argument the model sent came
+  back as `field "id": expected string, got string`. The panic names
+  the type and the fix (embed the value, or export the type). Found
+  by the corpus row the review asked for; an embedded pointer to an
+  *exported* type is pinned working.
+
+### Fixed — adapters
+
+- **google folds `toolUsePromptTokenCount` into `InputTokens`.** genai
+  bills those tokens outside `promptTokenCount`; tool-heavy runs
+  undercounted input and `UsageLimit` budgeting skewed with it.
+  Pinned on the tool round-trip fixture (9+3).
+- **The idle timer now covers the wait for response headers in openai
+  and anthropic.** Both opened the stream synchronously, so a server
+  that accepted the connection and never answered stalled until the
+  caller's ctx deadline — forever without one — and never produced
+  `ErrStreamIdle`. The request is opened on the reader goroutine, as
+  google's always was. New conformance case
+  `idle_timeout_before_headers`, green on all three.
+- **openai and google send no tool choice without a catalog**, the
+  guard anthropic already had: `tool_choice` / `toolConfig` alongside
+  an empty `tools` is a provider 400 for direct `Model.Stream`
+  callers (the loop already refuses a forced choice with no tools).
+
+### Fixed — the core fails loud on a nil tool at `New`
+
+- A nil `*ToolDef` handed to `New` panics naming the mistake, as a
+  duplicate name does; it used to be skipped silently while the
+  runtime snapshot path fails the run with `ErrNilTool` for the same
+  thing.
+
+### Added — conformance
+
+- **`provider_error` case**: a 429 with `Retry-After: 7` from the
+  provider must reach the caller as a `*RunError` with the SDK's own
+  error type still on the chain — `mw.HTTPStatus` reads 429 off it on
+  every adapter, and `mw.RetryAfter` reads the header where the SDK
+  keeps the response (`Caps.ErrorHeaders`: openai and anthropic yes;
+  google no — genai's `APIError` carries no headers, so `mw.Retry`
+  backs off on Gemini 429s, a declared gap). This retires part of the
+  live debt: Retry's header extraction now runs against the real SDK
+  error types offline.
+- `conformance.SilentServer` (accepts, never answers) and
+  `conformance.ErrorServer` (status + headers + body) back the two new
+  cases; `Caps.ErrorHeaders` declares the header capability.
+
+### Fixed — docs, tests, tooling
+
+- `wefttest.Golden -update` logs each file it created or rewrote and
+  leaves up-to-date files untouched, so a regeneration run says what
+  was stale instead of rewriting everything silently.
+- `mw.Allow(nil)` is documented as a pass-through.
+- The empty-user-message rules cross-reference each other: openai and
+  anthropic keep a visible placeholder, google drops the message.
+- Schema corpus rows for `time.Duration` (integer nanoseconds, the
+  documented foot-gun, pinned), embedded pointer structs, and nested
+  maps; the mcp import's float64 rounding of integers beyond 2^53 is
+  pinned (`9007199254740993` arrives as `9007199254740992`).
+
+### Left open (needs an ADR)
+
+- One unparseable input schema still fails the whole mcp import (ADR
+  0015: loud over silent). Failing the tool rather than the listing is
+  the review's suggestion; it changes documented behaviour and waits
+  for a decision.
+
 ## 0.3.2 — 2026-09-26
 
 The release that makes the tags installable. Every sub-module tag so

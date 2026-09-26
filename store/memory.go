@@ -128,6 +128,7 @@ func (m *memStore) List(_ context.Context, q Query) (Page, error) {
 	}
 	for i := range page {
 		page[i].Events = nil
+		page[i].Result = nil // the list body lesson (ADR 0010 §0.1): Get returns everything
 	}
 	return Page{Runs: page, Total: total}, nil
 }

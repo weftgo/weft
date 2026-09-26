@@ -318,6 +318,9 @@ func paging(open func(t *testing.T) store.Store) func(*testing.T) {
 				if rec.Events != nil {
 					t.Fatal("List returned events in the page body")
 				}
+				if rec.Result != nil {
+					t.Fatal("List returned a decoded result in the page body")
+				}
 				seen = append(seen, rec.ID)
 			}
 			before = p.Runs[len(p.Runs)-1].Started

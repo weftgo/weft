@@ -4,6 +4,28 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## Unreleased
+
+Fixes from the 2026-09-24 review (full report in the research
+checkout; `WEFT-CODE-REVIEW-2026-09-24.md`).
+
+### Fixed — `mcp`: untrusted-input robustness (review §2.5, §2.6)
+
+- **`Tools` fails loudly on a server tool with an empty name** instead
+  of panicking inside `RawTool`. The SDK's server-side name check only
+  logs and its list filter drops nil tools but not empty names, so a
+  hostile or buggy server listing `{"name":""}` reached the import
+  path as a panic — untrusted input escaping as a process crash.
+- **A schema'd tool returning non-JSON text is an isError result, not
+  a wedged session.** Both `AddTools` and `Serve` set
+  structuredContent from the result text whenever the tool advertises
+  an output schema; text that is not JSON produced a `CallToolResult`
+  the SDK cannot serialize, so the server never wrote a reply and the
+  client blocked in `CallTool` forever — a *successful* call hanging
+  the session. The result now names the output-schema breach; regular
+  `Tool` definitions are unaffected (a string `Out` carries no output
+  schema, everything else marshals).
+
 ## 0.3.0 — 2026-09-22
 
 The Phase 2a parity round (TODO §2a, `docs/phase2a-plan.md` — not

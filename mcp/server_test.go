@@ -153,6 +153,63 @@ func TestAddToolsStructuredContent(t *testing.T) {
 	}
 }
 
+// nonJSONOutputTool is the §2.6 shape: a RawTool with an output schema
+// whose handler returns plain text — a breach of the tool's own
+// contract that, unanswered, wedges the session.
+func nonJSONOutputTool() *weft.ToolDef {
+	t := weft.RawTool("badge", "Issue a badge.", nil,
+		func(_ context.Context, _ json.RawMessage) (string, error) {
+			return "badge granted", nil
+		})
+	t.OutputSchema = &weft.Schema{Type: "object"}
+	return t
+}
+
+// Review 2026-09-24 §2.6: a schema'd tool whose result text is not
+// JSON must answer with an isError result naming the breach. As
+// shipped, the CallToolResult carries structuredContent the SDK cannot
+// serialize, the reply never goes out, and the client blocks in the
+// call forever — a successful call wedging the session. The timeout
+// keeps a regression a failure, not a hang.
+func TestAddToolsNonJSONOutputIsErrorNotWedge(t *testing.T) {
+	s := sdk.NewServer(&sdk.Implementation{Name: "srv", Version: "0"}, nil)
+	AddTools(s, nonJSONOutputTool())
+	sess := newSession(t, s)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	res, err := sess.CallTool(ctx, &sdk.CallToolParams{Name: "badge"})
+	if err != nil {
+		t.Fatalf("call: %v (the session wedged?)", err)
+	}
+	if !res.IsError {
+		t.Fatalf("want an isError result, got %+v", res)
+	}
+	if text := res.Content[0].(*sdk.TextContent).Text; !strings.Contains(text, "must be JSON") {
+		t.Errorf("text = %q, want it to name the output-schema breach", text)
+	}
+}
+
+// The Serve path shares the rule: the chain handler's result goes
+// through the same gate, so the agent's exposition cannot wedge either.
+func TestServeNonJSONOutputIsErrorNotWedge(t *testing.T) {
+	s := sdk.NewServer(&sdk.Implementation{Name: "srv", Version: "0"}, nil)
+	agt := weft.New(wefttest.Script(wefttest.Say("hi")), weft.Name("badger"), nonJSONOutputTool())
+	Serve(s, agt, "Issues badges.")
+	sess := newSession(t, s)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	res, err := sess.CallTool(ctx, &sdk.CallToolParams{Name: "badge"})
+	if err != nil {
+		t.Fatalf("call: %v (the session wedged?)", err)
+	}
+	if !res.IsError {
+		t.Fatalf("want an isError result, got %+v", res)
+	}
+	if text := res.Content[0].(*sdk.TextContent).Text; !strings.Contains(text, "must be JSON") {
+		t.Errorf("text = %q, want it to name the output-schema breach", text)
+	}
+}
+
 // X3: every model-recoverable failure is a tool result with isError,
 // carrying weft's pinned text verbatim — the same strings weft's own
 // model would see (ADR 0002), now over the wire.

@@ -79,6 +79,13 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*wef
 		if t == nil {
 			return nil, fmt.Errorf("mcp: tool list carried a nil entry")
 		}
+		name := cfg.prefix + t.Name
+		if name == "" {
+			// Server-provided content is untrusted: a hostile or buggy
+			// server listing {"name": ""} would panic RawTool at import
+			// time. The nil-entry check above is the same rule.
+			return nil, fmt.Errorf("mcp: tool list carried a tool with an empty name")
+		}
 		raw, err := fromSDK(t.InputSchema)
 		if err != nil {
 			return nil, fmt.Errorf("mcp: tool %q: %w", t.Name, err)
@@ -95,7 +102,7 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*wef
 			toolOpts = append(toolOpts, weft.Sequential())
 		}
 		toolOpts = append(toolOpts, cfg.policy...)
-		tool := weft.RawTool(cfg.prefix+t.Name, t.Description, schema,
+		tool := weft.RawTool(name, t.Description, schema,
 			callHandler(sess, t.Name), toolOpts...)
 		if t.OutputSchema != nil {
 			if raw, err := fromSDK(t.OutputSchema); err == nil {

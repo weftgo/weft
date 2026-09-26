@@ -123,6 +123,26 @@ func equalJSON(a, b any) bool {
 	return string(ab) == string(bb)
 }
 
+// Review 2026-09-24 §2.5: a server listing a tool with an empty name
+// is untrusted input (the SDK's server-side name check only logs, and
+// its list filter drops nil tools but not empty names); Tools fails
+// loudly instead of panicking inside RawTool.
+func TestToolsEmptyNameIsALoudError(t *testing.T) {
+	sess, stop := served(t, func(srv *sdk.Server) {
+		addRemoteTool(srv, "", true, func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "x"}}}, nil
+		})
+	})
+	defer stop()
+	tools, err := Tools(context.Background(), sess)
+	if err == nil {
+		t.Fatalf("import of an empty-named tool succeeded: %v", tools)
+	}
+	if !strings.Contains(err.Error(), "empty name") {
+		t.Errorf("error = %q, want it to name the empty name", err.Error())
+	}
+}
+
 // C1: Tools follows nextCursor across pages. PageSize: 1 splits three
 // tools into three server-side pages; the raw ListTools call pins that
 // the first page really is partial before Tools is asked to see past

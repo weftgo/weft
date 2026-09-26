@@ -91,11 +91,7 @@ func invokeHandler(t *weft.ToolDef) sdk.ToolHandler {
 		if err != nil {
 			return errorResult(err), nil
 		}
-		res := &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: out}}}
-		if t.OutputSchema != nil {
-			res.StructuredContent = json.RawMessage(out)
-		}
-		return res, nil
+		return toolResult(t, out), nil
 	}
 }
 
@@ -186,15 +182,27 @@ func chainHandler(a *weft.Agent, t *weft.ToolDef, state *serveState) sdk.ToolHan
 		if err != nil {
 			return errorResult(err), nil
 		}
-		res := &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: out}}}
-		if t.OutputSchema != nil {
-			// A tool that advertises an outputSchema must answer with
-			// structuredContent (the spec's MUST) — the same JSON the
-			// text carries, as invokeHandler does.
-			res.StructuredContent = json.RawMessage(out)
-		}
-		return res, nil
+		return toolResult(t, out), nil
 	}
+}
+
+// toolResult is a successful tool text as MCP sees it: one text item,
+// plus structuredContent — the same JSON the text carries — when the
+// tool advertises an output schema. A schema'd tool whose text is not
+// JSON is a breach of the tool's own contract; it becomes an isError
+// result naming the breach (data the client model reads), because a
+// CallToolResult carrying unserializable structuredContent is a reply
+// that never goes out — the client blocks in the call forever.
+func toolResult(t *weft.ToolDef, out string) *sdk.CallToolResult {
+	res := &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: out}}}
+	if t.OutputSchema == nil {
+		return res
+	}
+	if json.Valid([]byte(out)) {
+		res.StructuredContent = json.RawMessage(out)
+		return res
+	}
+	return errorResult(fmt.Errorf("tool %q advertised an output schema, so its result must be JSON; got non-JSON text", t.Name))
 }
 
 // errorResult is every model-recoverable failure as MCP sees it: a

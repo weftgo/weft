@@ -4,6 +4,76 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## 0.3.5 / store 0.1.0 — 2026-09-27
+
+Phase 2b step 1 (`docs/phase2b-store-plan.md`): the run store, and the
+one core addition it needs. Tags cut in two phases (ADR 0005): the
+root at v0.3.5 first, then the sub-modules — openai, anthropic, google
+at v0.3.5 and mcp at v0.1.7 (requirement bumps only) — plus the new
+`store/v0.1.0` requiring the tagged root.
+
+### Added — core: `weft.OnRunEnd(fn)`, the outcome observer
+
+- Called exactly once per run, after `RunFinish` is delivered or the
+  `RunError` is built, before `Run` returns. It is the failure signal a
+  tap cannot carry — a failed run emits no event after its last
+  delivered one (ADR 0004) — and neither middleware seam wraps the
+  run. `res` on failure is the `RunError`'s partial transcript; a child
+  run's fires inside the parent's tool call; a panicked run fires
+  nothing; a panic in an observer is contained and counted with the
+  tap panics. Not a third seam (ADR 0006's note); ADR 0016's amendment
+  records it as the fourth observation output.
+
+### Added — module `weft/store` (v0.1.0): run records, SQLite first
+
+- **What a record holds** (`store.RunRecord`): the run's identity —
+  id, parent id and parent call id when it is a subagent's child, agent
+  name, model, manifest hash, weft version, started/finished/
+  heartbeat, status, tags — its event stream (every `weft.Event`,
+  `Nested` inline, in `Seq` order), and its result (`RunResult`; on
+  failure the partial plus the `RunError` text). **What it is not: a
+  checkpoint** — weft records what happened and replays it; resume
+  stays the approval boundary (ADR 0007). The format is ADR 0010's.
+- **`store.Record(s, store.Tags(...))` is the tap**: one `Append` per
+  event as it arrives — nothing buffered, so a crash loses nothing that
+  was emitted and the Inspector can tail a live run. The row is
+  written at `RunStart` as `running`, the heartbeat bumps per event and
+  on a ticker while the run is alive but quiet, and `OnRunEnd` closes
+  it — `succeeded` with the result, `failed` with the partial and the
+  error text. Store errors are logged through the agent's logger and
+  never fail the run; a failed append marks the record degraded in its
+  `Err`.
+- **`interrupted` is derived, never stored**: `status == running` and a
+  heartbeat older than `HeartbeatTimeout` (30 s) reads as interrupted —
+  a crash leaves evidence, and a live run in another process is not
+  mistaken for a corpse.
+- **Child runs own records**, linked by `ParentID`/`ParentCallID`, and
+  stay inline in the parent's stream (ADR 0004's total order is the
+  record's order). `Query` with an empty `ParentID` lists top-level
+  runs only, so children do not flood the list view.
+- **`List` returns no events and a `Total`** (Mastra's `listTracesLight`
+  lesson), paged by a `Before` cursor on `Started`, not offsets
+  (LangGraph); `Get` returns everything; `Delete` is in the contract
+  from day one — children survive a deleted parent, orphaned by
+  design.
+- **`store/sqlite`** (`sqlite.Open(path)`; `":memory:"` works): CGO-free
+  `modernc.org/sqlite` with Crush's pragmas (WAL, `synchronous=NORMAL`,
+  `busy_timeout`, `foreign_keys`, `_txlock=immediate`), embedded
+  migrations tracked in `schema_migrations` — a database written by a
+  newer weft fails `Open` with `ErrNewerSchema`, never a silent
+  misread. An event whose `type` this weft does not know fails `Get`
+  with `ErrUnknownEvent` naming it and the run; `List` still works, so
+  an older Inspector shows the run and says why it cannot open it.
+- `store.Memory()` is the in-process backend (tests, examples, and the
+  reference the SQLite suite is compared against); both run the shared
+  `storetest` conformance table under `-race`.
+
+### Fixed — release hygiene
+
+- The OTel instrumentation `version` constant rides at the tag again
+  (v0.3.5); it had drifted at v0.3.0 through the 0.3.1–0.3.4 releases
+  (ADR 0005's amendment: tagging a release sets it).
+
 ## 0.3.4 — 2026-09-27
 
 The pass over 0.3.1–0.3.3 (and mcp 0.1.4–0.1.5): the fixes hold, one

@@ -140,6 +140,52 @@ func NoRequestServer(t *testing.T) *httptest.Server {
 	return srv
 }
 
+// SilentServer accepts the connection and never answers — not even
+// response headers — until the client goes away: the pre-headers stall
+// of the idle_timeout_before_headers case, which the per-chunk idle
+// timer must cover as it covers a mid-stream one.
+func SilentServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	stop := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Drain the body first: net/http starts the background read
+		// that notices the client hanging up only once the request
+		// body is consumed, and this handler writes nothing (no
+		// headers, no flush) that would otherwise surface the
+		// disconnect. Without it the handler never returns and
+		// Server.Close waits forever.
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case <-r.Context().Done():
+		case <-stop:
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(stop) }) // runs before srv.Close (LIFO)
+	return srv
+}
+
+// ErrorServer answers every request with status, the given headers,
+// and body — a provider refusing the call (a 429 with a retry-after,
+// say), for the provider_error case. The body bytes are
+// vendor-specific (each SDK parses its own error envelope); the
+// behaviour is not.
+func ErrorServer(t *testing.T, status int, header http.Header, body string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for k, vs := range header {
+			for _, v := range vs {
+				w.Header().Add(k, v)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
 func isResponseSeparator(line string) bool {
 	t := strings.TrimSpace(line)
 	return strings.HasPrefix(t, "=== response ") && strings.HasSuffix(t, "===")

@@ -1,6 +1,7 @@
 package anthropic_test
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -51,6 +52,16 @@ func newModel(t *testing.T, name string) weft.Model {
 		return at(conformance.StallServer(t, stallChunk))
 	case "idle_timeout":
 		return at(conformance.StallServer(t, stallChunk), anthropic.IdleTimeout(200*time.Millisecond))
+	case "idle_timeout_before_headers":
+		return at(conformance.SilentServer(t), anthropic.IdleTimeout(200*time.Millisecond))
+	case "provider_error":
+		// The SDK's own transport retries are off: the case wants the
+		// one 429 back as the SDK's error type, retry-after header and
+		// all, not two silent sleeps first.
+		srv := conformance.ErrorServer(t, 429, http.Header{"Retry-After": {"7"}},
+			`{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`)
+		c := antsdk.NewClient(option.WithBaseURL(srv.URL), option.WithAPIKey("test"), option.WithMaxRetries(0))
+		return anthropic.Model("m", anthropic.Client(&c))
 	case "slow_stream":
 		done := `event: message_delta
 data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5}}
@@ -86,5 +97,6 @@ func TestConformance(t *testing.T) {
 		ToolArgDeltas: true,
 		ToolChoice:    true,
 		Usage:         true,
+		ErrorHeaders:  true,
 	}, newModel)
 }

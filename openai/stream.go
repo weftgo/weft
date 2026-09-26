@@ -57,10 +57,16 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 		if obj := thinkingObj(req.Thinking); m.dialect == DialectObject && obj != nil {
 			reqOpts = append([]option.RequestOption{option.WithMiddleware(injectThinking(obj))}, reqOpts...)
 		}
-		stream := m.client.Chat.Completions.NewStreaming(reader.sctx, params, reqOpts...)
-		defer func() { _ = stream.Close() }()
-		reader.start(stream)
-		defer reader.wait()
+		// The request is opened on the reader goroutine: NewStreaming
+		// blocks until response headers, and opening it here would
+		// leave that stall outside the idle timer — a server that
+		// accepts the connection and never answers would hang until
+		// the caller's ctx deadline, never ErrStreamIdle (review
+		// 2026-09-24 §3). Google's adapter always started this way.
+		reader.start(func() *ssestream.Stream[openai.ChatCompletionChunk] {
+			return m.client.Chat.Completions.NewStreaming(reader.sctx, params, reqOpts...)
+		})
+		defer reader.close()
 
 		var (
 			calls  = map[int64]*partialCall{}
@@ -77,7 +83,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			if !ok {
 				break
 			}
-			chunk := stream.Current()
+			chunk := reader.stream.Current()
 			reader.release()
 			if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 {
 				usage = toUsage(chunk.Usage)
@@ -129,7 +135,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			}
 		}
 		reader.wait()
-		if err := stream.Err(); err != nil {
+		if err := reader.stream.Err(); err != nil {
 			yield(nil, adapterkit.TerminalErr(ctx, err))
 			return
 		}
@@ -204,6 +210,10 @@ type streamReader struct {
 	ack    chan struct{}
 	done   chan struct{}
 	idle   time.Duration
+	// stream is opened by the reader goroutine before its first
+	// handshake, so it is safe to read after next() reported a chunk
+	// (or the end) and after wait(); never before.
+	stream *ssestream.Stream[openai.ChatCompletionChunk]
 }
 
 func newStreamReader(ctx context.Context, idle time.Duration) *streamReader {
@@ -218,13 +228,17 @@ func newStreamReader(ctx context.Context, idle time.Duration) *streamReader {
 	}
 }
 
-// start launches the reader goroutine. After signalling a chunk it
-// parks on ack until release, so Current() is never read while Next()
-// advances it.
-func (r *streamReader) start(stream *ssestream.Stream[openai.ChatCompletionChunk]) {
+// start launches the reader goroutine, which opens the stream (the
+// HTTP round trip to response headers, under the idle timer like every
+// later gap) and then drives it. After signalling a chunk it parks on
+// ack until release, so Current() is never read while Next() advances
+// it.
+func (r *streamReader) start(open func() *ssestream.Stream[openai.ChatCompletionChunk]) {
 	go func() {
 		defer close(r.done)
 		defer close(r.ready)
+		stream := open()
+		r.stream = stream
 		for stream.Next() {
 			select {
 			case r.ready <- true:
@@ -285,4 +299,15 @@ func (r *streamReader) release() {
 func (r *streamReader) wait() {
 	r.cancel()
 	<-r.done
+}
+
+// close is wait plus the stream's own Close — the body is released
+// only after the goroutine that opened it has finished with it. A
+// stream the goroutine never got to open (it is always opened first)
+// leaves nothing to close.
+func (r *streamReader) close() {
+	r.wait()
+	if r.stream != nil {
+		_ = r.stream.Close()
+	}
 }

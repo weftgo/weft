@@ -45,10 +45,14 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 
 		reader := newStreamReader(ctx, m.idle)
 		defer reader.cancel()
-		stream := m.client.Messages.NewStreaming(reader.sctx, params, m.requestOptions()...)
-		defer func() { _ = stream.Close() }()
-		reader.start(stream)
-		defer reader.wait()
+		// Opened on the reader goroutine so the wait for response
+		// headers sits under the idle timer — see the openai adapter's
+		// note (review 2026-09-24 §3).
+		reqOpts := m.requestOptions()
+		reader.start(func() *ssestream.Stream[anthropic.MessageStreamEventUnion] {
+			return m.client.Messages.NewStreaming(reader.sctx, params, reqOpts...)
+		})
+		defer reader.close()
 
 		var (
 			blocks   = map[int64]*block{}
@@ -67,7 +71,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			if !ok {
 				break
 			}
-			ev := stream.Current()
+			ev := reader.stream.Current()
 			reader.release()
 			switch e := ev.AsAny().(type) {
 			case anthropic.MessageStartEvent:
@@ -151,7 +155,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			}
 		}
 		reader.wait()
-		if err := stream.Err(); err != nil {
+		if err := reader.stream.Err(); err != nil {
 			yield(nil, adapterkit.TerminalErr(ctx, err))
 			return
 		}
@@ -210,6 +214,10 @@ type streamReader struct {
 	ack    chan struct{}
 	done   chan struct{}
 	idle   time.Duration
+	// stream is opened by the reader goroutine before its first
+	// handshake: safe to read after next() reported a chunk (or the
+	// end) and after wait(); never before.
+	stream *ssestream.Stream[anthropic.MessageStreamEventUnion]
 }
 
 func newStreamReader(ctx context.Context, idle time.Duration) *streamReader {
@@ -224,10 +232,15 @@ func newStreamReader(ctx context.Context, idle time.Duration) *streamReader {
 	}
 }
 
-func (r *streamReader) start(stream *ssestream.Stream[anthropic.MessageStreamEventUnion]) {
+// start launches the reader goroutine, which opens the stream (the
+// round trip to response headers, under the idle timer like every
+// later gap) and then drives it.
+func (r *streamReader) start(open func() *ssestream.Stream[anthropic.MessageStreamEventUnion]) {
 	go func() {
 		defer close(r.done)
 		defer close(r.ready)
+		stream := open()
+		r.stream = stream
 		for stream.Next() {
 			select {
 			case r.ready <- true:
@@ -282,4 +295,15 @@ func (r *streamReader) release() {
 func (r *streamReader) wait() {
 	r.cancel()
 	<-r.done
+}
+
+// close is wait plus the stream's own Close — the body is released
+// only after the goroutine that opened it has finished with it. A
+// stream the goroutine never got to open (it is always opened first)
+// leaves nothing to close.
+func (r *streamReader) close() {
+	r.wait()
+	if r.stream != nil {
+		_ = r.stream.Close()
+	}
 }

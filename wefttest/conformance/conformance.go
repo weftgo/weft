@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/weftgo/weft/mw"
+
 	"github.com/weftgo/weft"
 )
 
@@ -46,10 +48,17 @@ type Caps struct {
 	// compatible servers that never send usage — the adapter must not
 	// fake numbers, so the caller declares the gap instead.
 	Usage bool
+	// ErrorHeaders: the SDK's error type carries the HTTP response,
+	// so mw.RetryAfter can read a provider's retry-after header off a
+	// failed call. False where the SDK keeps only the status code
+	// (genai's APIError) — mw.Retry then falls back to backoff on that
+	// provider's 429s, a declared gap, not a silent one. HTTPStatus is
+	// asserted for every adapter regardless.
+	ErrorHeaders bool
 	// Live: the model is reached over the network. The suite relaxes
 	// determinism (a live model may make a different but valid choice;
 	// those cases t.Skip rather than fail) and skips fixture-only cases
-	// (idle_timeout).
+	// (idle_timeout, provider_error).
 	Live bool
 }
 
@@ -513,6 +522,47 @@ func Run(t *testing.T, caps Caps, newModel func(t *testing.T, name string) weft.
 			_, err := generate(t, newModel(t, "idle_timeout"), nil, weft.Prompt("Say something."))
 			if !errors.Is(err, weft.ErrStreamIdle) {
 				t.Errorf("err = %v, want ErrStreamIdle", err)
+			}
+		})
+
+		// The idle timer covers the wait for response headers too: a
+		// server that accepts the connection and never answers is the
+		// same stall as one that stops mid-stream, and must fail
+		// ErrStreamIdle rather than hang until the caller's deadline
+		// (review 2026-09-24 §3). newModel wires this case to
+		// SilentServer with a short IdleTimeout.
+		t.Run("idle_timeout_before_headers", func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_, err := weft.New(newModel(t, "idle_timeout_before_headers"), probeTool()).Generate(ctx, weft.Prompt("Say something."))
+			detector.check(err)
+			if !errors.Is(err, weft.ErrStreamIdle) {
+				t.Errorf("err = %v, want ErrStreamIdle (a pre-headers stall escaped the idle timer)", err)
+			}
+		})
+
+		// A provider error reaches the caller as the SDK's own error
+		// type, wrapped, never flattened to text: mw.Retry's classifier
+		// reads the status off it and — where the SDK keeps the
+		// response — the retry-after header. newModel wires this case
+		// to ErrorServer(429, Retry-After: 7) with the SDK's own
+		// transport retries off, so the one request is the one answer.
+		t.Run("provider_error", func(t *testing.T) {
+			_, err := generate(t, newModel(t, "provider_error"), nil, weft.Prompt("Say something."))
+			if err == nil {
+				t.Fatal("a 429 from the provider produced no error")
+			}
+			var re *weft.RunError
+			if !errors.As(err, &re) {
+				t.Errorf("err = %T, want *weft.RunError", err)
+			}
+			if code, ok := mw.HTTPStatus(err); !ok || code != 429 {
+				t.Errorf("mw.HTTPStatus(err) = %d, %v; want 429 — the SDK error type must stay on the chain (err = %v)", code, ok, err)
+			}
+			if caps.ErrorHeaders {
+				if d, ok := mw.RetryAfter(err, time.Now()); !ok || d != 7*time.Second {
+					t.Errorf("mw.RetryAfter(err) = %s, %v; want 7s from the response header (err = %v)", d, ok, err)
+				}
 			}
 		})
 

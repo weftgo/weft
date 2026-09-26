@@ -2,6 +2,7 @@ package google_test
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -54,6 +55,11 @@ func newModel(t *testing.T, name string) weft.Model {
 		return at(conformance.StallServer(t, stallChunk))
 	case "idle_timeout":
 		return at(conformance.StallServer(t, stallChunk), google.IdleTimeout(200*time.Millisecond))
+	case "idle_timeout_before_headers":
+		return at(conformance.SilentServer(t), google.IdleTimeout(200*time.Millisecond))
+	case "provider_error":
+		return at(conformance.ErrorServer(t, 429, http.Header{"Retry-After": {"7"}},
+			`{"error":{"code":429,"message":"slow down","status":"RESOURCE_EXHAUSTED"}}`))
 	case "slow_stream":
 		// Drips every 40ms for 160ms under a 120ms idle timeout: the
 		// total exceeds the timeout, each gap does not. The stream ends
@@ -81,5 +87,9 @@ func TestConformance(t *testing.T) {
 		Files:      true,
 		ToolChoice: true,
 		Usage:      true,
+		// ErrorHeaders stays false: genai's APIError carries the status
+		// code and message only, never the response headers, so
+		// mw.RetryAfter has nothing to read on a Gemini 429 and mw.Retry
+		// backs off instead — a declared gap.
 	}, newModel)
 }

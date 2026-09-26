@@ -56,8 +56,12 @@ func scriptedFor(t *testing.T, name string) weft.Model {
 		// An adapter without file support yields a stream error wrapping
 		// ErrUnsupported — the shape the no-Files branch asserts.
 		return wefttest.Script(wefttest.Fail(fmt.Errorf("%w: file parts", weft.ErrUnsupported)))
-	case "idle_timeout":
+	case "idle_timeout", "idle_timeout_before_headers":
 		return wefttest.Script(wefttest.Fail(fmt.Errorf("%w after 60s", weft.ErrStreamIdle)))
+	case "provider_error":
+		// The shape mw.HTTPStatus reads off the vendor SDKs' error
+		// types: an exported StatusCode field on the chain.
+		return wefttest.Script(wefttest.Fail(fmt.Errorf("provider: %w", providerErr{StatusCode: 429})))
 	case "slow_stream":
 		// A scripted model cannot drip; the case's substance (gaps under
 		// the timeout, total over it) is the adapters' SlowServer wiring,
@@ -158,3 +162,9 @@ func (m *argDeltaModel) Stream(_ context.Context, _ weft.ModelRequest) iter.Seq2
 }
 
 func scriptedArgDeltas() weft.Model { return &argDeltaModel{} }
+
+// providerErr is the scripted stand-in for a vendor SDK's API error: an
+// exported StatusCode, which is all mw.HTTPStatus needs from the chain.
+type providerErr struct{ StatusCode int }
+
+func (e providerErr) Error() string { return fmt.Sprintf("status %d", e.StatusCode) }

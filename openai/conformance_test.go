@@ -1,6 +1,7 @@
 package openai_test
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -50,6 +51,16 @@ func newModel(t *testing.T, name string) weft.Model {
 		return at(conformance.StallServer(t, stallChunk))
 	case "idle_timeout":
 		return at(conformance.StallServer(t, stallChunk), openai.IdleTimeout(200*time.Millisecond))
+	case "idle_timeout_before_headers":
+		return at(conformance.SilentServer(t), openai.IdleTimeout(200*time.Millisecond))
+	case "provider_error":
+		// The SDK's own transport retries are off: the case wants the
+		// one 429 back as the SDK's error type, retry-after header and
+		// all, not two silent sleeps first.
+		srv := conformance.ErrorServer(t, 429, http.Header{"Retry-After": {"7"}},
+			`{"error":{"message":"slow down","type":"rate_limit_error","param":null,"code":"rate_limit_exceeded"}}`)
+		c := openaisdk.NewClient(option.WithBaseURL(srv.URL), option.WithAPIKey("test"), option.WithMaxRetries(0))
+		return openai.Model("m", openai.Client(&c))
 	case "slow_stream":
 		done := `data: {"id":"c1","object":"chat.completion.chunk","created":1700000000,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
 
@@ -75,5 +86,5 @@ data: [DONE]
 // reasoning_content is a compatible-server extension, not an OpenAI
 // field — a compatible-server user can turn the cap on.
 func TestConformance(t *testing.T) {
-	conformance.Run(t, conformance.Caps{Files: true, Sequential: true, ToolArgDeltas: true, ToolChoice: true, Usage: true}, newModel)
+	conformance.Run(t, conformance.Caps{Files: true, Sequential: true, ToolArgDeltas: true, ToolChoice: true, Usage: true, ErrorHeaders: true}, newModel)
 }

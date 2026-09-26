@@ -259,7 +259,8 @@ func userBlocks(msg weft.Message) ([]anthropic.ContentBlockParamUnion, error) {
 	// A user message must carry at least one non-empty block; the API
 	// rejects empty content arrays. A message whose every part was
 	// empty text (weft.User("")) keeps a visible placeholder rather
-	// than silently vanishing from the transcript.
+	// than silently vanishing from the transcript — openai's rule too;
+	// google drops the message instead (see each adapter's userParts).
 	if len(blocks) == 0 {
 		blocks = append(blocks, anthropic.NewTextBlock("(empty message)"))
 	}

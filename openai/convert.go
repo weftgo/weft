@@ -93,15 +93,21 @@ func (m *model) params(req weft.ModelRequest) (openai.ChatCompletionNewParams, e
 	}
 	// Tool-choice forcing (TODO §2a.1): the zero config sends nothing.
 	// "required" is Chat Completions' any-tool form; a named choice is
-	// the function variant of the same union.
-	switch req.ToolChoice.Mode {
-	case weft.ToolChoiceAny:
-		p.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: openai.String("required")}
-	case weft.ToolChoiceNamed:
-		p.ToolChoice = openai.ChatCompletionToolChoiceOptionParamOfChatCompletionNamedToolChoice(
-			openai.ChatCompletionNamedToolChoiceFunctionParam{Name: req.ToolChoice.Name})
-	case weft.ToolChoiceNone:
-		p.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: openai.String("none")}
+	// the function variant of the same union. Sent only alongside a
+	// catalog: the API rejects tool_choice without tools, and the loop
+	// already fails a forced choice with no tools — the guard covers
+	// direct Model.Stream callers, as anthropic's does (review
+	// 2026-09-24 §3).
+	if len(req.Tools) > 0 {
+		switch req.ToolChoice.Mode {
+		case weft.ToolChoiceAny:
+			p.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: openai.String("required")}
+		case weft.ToolChoiceNamed:
+			p.ToolChoice = openai.ChatCompletionToolChoiceOptionParamOfChatCompletionNamedToolChoice(
+				openai.ChatCompletionNamedToolChoiceFunctionParam{Name: req.ToolChoice.Name})
+		case weft.ToolChoiceNone:
+			p.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: openai.String("none")}
+		}
 	}
 	// Effort dialect: reasoning_effort carries the level (the gateway
 	// dialect injects its thinking object at the HTTP layer instead —
@@ -154,7 +160,9 @@ func (m *model) foldParams(p *openai.ChatCompletionNewParams, rp weft.RequestPar
 // wrapping ErrUnsupported — Chat Completions accepts images only. An
 // empty text part carries nothing and is never emitted, and a message
 // whose every part was empty keeps a visible placeholder: an empty
-// content array is API-rejected.
+// content array is API-rejected. Anthropic keeps the same placeholder;
+// google drops the message instead (its API accepts a turn with no
+// parts as nothing at all) — each adapter's userParts states its rule.
 func userParts(msg weft.Message) ([]openai.ChatCompletionContentPartUnionParam, error) {
 	parts := make([]openai.ChatCompletionContentPartUnionParam, 0, len(msg.Content))
 	for _, part := range msg.Content {

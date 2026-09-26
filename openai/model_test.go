@@ -193,6 +193,22 @@ func TestConvertToolChoice(t *testing.T) {
 	if got := convert(weft.ToolChoiceConfig{}, false); strings.Contains(got, "tool_choice") {
 		t.Errorf("zero ToolChoice sent tool_choice: %s", got)
 	}
+	// No catalog: nothing sent either, whatever the mode — tool_choice
+	// without tools is a provider 400 (review 2026-09-24 §3; the
+	// anthropic guard, ported).
+	{
+		m := Model("m").(*model)
+		p, err := m.params(weft.ModelRequest{
+			Messages:   []weft.Message{weft.User("hi")},
+			ToolChoice: weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if b, _ := json.Marshal(p); strings.Contains(string(b), "tool_choice") {
+			t.Errorf("ToolChoiceAny with no tools sent tool_choice: %s", b)
+		}
+	}
 	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}, false); !strings.Contains(got, `"tool_choice":"required"`) {
 		t.Errorf("any: %s", got)
 	}

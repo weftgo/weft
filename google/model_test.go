@@ -345,6 +345,22 @@ func TestConvertToolChoice(t *testing.T) {
 	if cfg := convert(weft.ToolChoiceConfig{}); cfg.ToolConfig != nil {
 		t.Errorf("zero ToolChoice set ToolConfig: %+v", cfg.ToolConfig)
 	}
+	// No catalog: nothing sent either, whatever the mode — a toolConfig
+	// without tools is a provider 400 (review 2026-09-24 §3; the
+	// anthropic guard, ported).
+	{
+		m := Model("m").(*model)
+		_, cfg, err := m.contents(weft.ModelRequest{
+			Messages:   []weft.Message{weft.User("hi")},
+			ToolChoice: weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.ToolConfig != nil {
+			t.Errorf("ToolChoiceAny with no tools set ToolConfig: %+v", cfg.ToolConfig)
+		}
+	}
 	fc := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}).ToolConfig.FunctionCallingConfig
 	if fc == nil || fc.Mode != genai.FunctionCallingConfigModeAny || len(fc.AllowedFunctionNames) != 0 {
 		t.Errorf("any: %+v", fc)

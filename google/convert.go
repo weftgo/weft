@@ -109,21 +109,27 @@ func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.Genera
 	// allowedFunctionNames narrowing it to the named tool; NONE forbids
 	// calls while the declarations stay advertised. This is a different
 	// knob from the sequential hint — that gap stays declared (ADR
-	// 0013). The zero config sends nothing.
-	switch req.ToolChoice.Mode {
-	case weft.ToolChoiceAny:
-		cfg.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{
-			Mode: genai.FunctionCallingConfigModeAny,
-		}}
-	case weft.ToolChoiceNamed:
-		cfg.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{
-			Mode:                 genai.FunctionCallingConfigModeAny,
-			AllowedFunctionNames: []string{req.ToolChoice.Name},
-		}}
-	case weft.ToolChoiceNone:
-		cfg.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{
-			Mode: genai.FunctionCallingConfigModeNone,
-		}}
+	// 0013). The zero config sends nothing, and so does a choice with
+	// no catalog: a toolConfig without tools is a provider 400, and the
+	// loop already fails a forced choice with no tools — the guard
+	// covers direct Model.Stream callers, as anthropic's does (review
+	// 2026-09-24 §3).
+	if len(req.Tools) > 0 {
+		switch req.ToolChoice.Mode {
+		case weft.ToolChoiceAny:
+			cfg.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{
+				Mode: genai.FunctionCallingConfigModeAny,
+			}}
+		case weft.ToolChoiceNamed:
+			cfg.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{
+				Mode:                 genai.FunctionCallingConfigModeAny,
+				AllowedFunctionNames: []string{req.ToolChoice.Name},
+			}}
+		case weft.ToolChoiceNone:
+			cfg.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{
+				Mode: genai.FunctionCallingConfigModeNone,
+			}}
+		}
 	}
 	// The escape hatch (TODO §2a.3): ExtraBody and ExtraHeaders ride
 	// per request on the SDK's own HTTPOptions — the SDK deep-merges
@@ -218,7 +224,11 @@ func geminiLevel(l weft.ThinkingLevel) genai.ThinkingLevel {
 // inline data (Gemini carries images, audio, and video natively) or a
 // file URI. A FilePart with both or neither of Data and URL is refused
 // wrapping ErrUnsupported. Empty text parts are skipped: the SDK omits
-// empty text, so the part would serialize as a bare {} on the wire.
+// empty text, so the part would serialize as a bare {} on the wire —
+// and a message left with no parts is dropped by the caller (contents),
+// where openai and anthropic keep a visible "(empty message)"
+// placeholder because their APIs reject an empty content array. The
+// divergence is deliberate and pinned on each side.
 func userParts(msg weft.Message) ([]*genai.Part, error) {
 	parts := make([]*genai.Part, 0, len(msg.Content))
 	for _, part := range msg.Content {

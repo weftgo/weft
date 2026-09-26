@@ -361,3 +361,26 @@ observer is contained and counted with the tap panics. Not a seam
 signal and the result that no event carries. The taxonomy stands at:
 the loop reports (spans, lines); the user observes (Tap for the
 stream, OnRunEnd for the outcome); the seams change.
+
+## Amendment (2026-09-27 — the observation accessors; TODO §11, root v0.3.6)
+
+Writing the store's `Record` from a satellite found the one thing
+composition cannot reach: `weft.Option` is sealed (ADR 0004 — plugins
+attach through seams, not option kinds), so a satellite composes
+`weft.Options(weft.Tap(...), weft.OnRunEnd(...))` and never receives
+the `*Agent` the option was applied to. Two additive accessors close
+the gap, both observation-scoped, neither a seam:
+
+- `weft.AgentFromContext(ctx)` — the head of the ancestry chain the
+  cycle guard already keeps on every run context (ADR 0014): the agent
+  whose run produced the event an observer received. Nil outside a
+  run, so observers must not depend on it. Read-only by construction —
+  an Agent is immutable after New. The store uses it to record the
+  run's manifest hash (ADR 0010) and to find its logger.
+- `(*Agent).Logger()` — the `Logger` option's value or
+  `slog.Default()`, the same resolution the run's own lines use, so an
+  observer's errors land beside the loop's lines in one sink.
+
+In the same spirit as `CallFromContext` (an accessor over data the
+context already carries), both are taps-see-not-change surface. Pinned
+by `TestAgentFromContext*` and `TestAgentLogger`.

@@ -168,10 +168,13 @@ One sentence each, so nobody asks the record to be these:
 - `weft/store` is the only writer of the format; the Inspector (§12),
   Weft CI, and hmm are readers. Readers older than a format bump fail
   loudly at `Get`/`Open`, never silently.
-- The core gains exactly one option to write records faithfully —
-  `OnRunEnd` (plan §3.7, ADR 0006 note): a tap cannot see a failed
-  run's end, because a failed run emits nothing after its last
-  delivered event (ADR 0004).
+- The core gains `OnRunEnd` (plan §3.7, ADR 0006 note) — a tap cannot
+  see a failed run's end, because a failed run emits nothing after its
+  last delivered event (ADR 0004) — plus the two observation
+  accessors the recorder needs from outside the sealed Option
+  interface: `AgentFromContext` (the manifest hash's source) and
+  `(*Agent).Logger()` (the observer's error sink), both recorded in
+  ADR 0016's 2026-09-27 accessor amendment.
 - The manifest hash rides on the record (computed by `Record` from the
   agent it is installed on), not on `RunStart`: an event is the run's
   output, the record is what ran it. Nobody in the field stores a graph

@@ -755,6 +755,19 @@ func (a *Agent) Tools() []*ToolDef {
 // names the tool it exposes after the agent through this accessor.
 func (a *Agent) Name() string { return a.name }
 
+// Logger returns the logger the agent's runs report their lines to —
+// the Logger option's value, or slog.Default when none was set (the
+// same resolution the run's own lines use, made here once for callers
+// that need the same sink). Observation satellites (the store's
+// Record) log their own errors through it, so everything a run
+// produced — the loop's lines and the observer's — lands in one place.
+func (a *Agent) Logger() *slog.Logger {
+	if a.logger != nil {
+		return a.logger
+	}
+	return slog.Default()
+}
+
 // TapPanics reports how many tap invocations have panicked and been
 // contained since construction. A rising counter means an observer is
 // broken; runs are unaffected by design.

@@ -4,13 +4,27 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## 0.3.6 — 2026-09-27
+
+### Added — the observation accessors (`AgentFromContext`, `Agent.Logger`)
+
+- Writing the store's `Record` from a satellite found the one thing
+  composition cannot reach: `weft.Option` is sealed, so a satellite
+  composes `weft.Options(weft.Tap(...), weft.OnRunEnd(...))` and never
+  receives the agent it was installed on. `weft.AgentFromContext(ctx)`
+  returns the agent running on ctx — the ancestry chain's head, nil
+  outside a run — and `(*Agent).Logger()` returns the run lines' sink.
+  Both observation-scoped, read-only, no seam (ADR 0016's amendment);
+  the store records the run's manifest hash through the first
+  (ADR 0010).
+
 ## 0.3.5 / store 0.1.0 — 2026-09-27
 
 Phase 2b step 1 (`docs/phase2b-store-plan.md`): the run store, and the
 one core addition it needs. Tags cut in two phases (ADR 0005): the
 root at v0.3.5 first, then the sub-modules — openai, anthropic, google
 at v0.3.5 and mcp at v0.1.7 (requirement bumps only) — plus the new
-`store/v0.1.0` requiring the tagged root.
+`store/v0.1.0` requiring the tagged root v0.3.6.
 
 ### Added — core: `weft.OnRunEnd(fn)`, the outcome observer
 

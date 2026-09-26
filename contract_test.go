@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"log/slog"
 	"os"
 	"reflect"
 	"regexp"
@@ -4495,5 +4496,76 @@ func TestOnRunEndOrderAndContainment(t *testing.T) {
 	}
 	if n := agt.TapPanics(); n != 1 {
 		t.Errorf("TapPanics = %d, want 1 contained observer panic", n)
+	}
+}
+
+// --- AgentFromContext / Agent.Logger (TODO §11, plan §3.7's found gap) ---
+
+// A tap sees the agent it is installed on through the run's context —
+// the head of the ancestry chain — and a child run's tap sees the
+// child. Outside a run there is none.
+func TestAgentFromContext(t *testing.T) {
+	var parent, child, outside *weft.Agent
+	kid := weft.New(wefttest.Script(wefttest.Say("done")), weft.Name("kid"),
+		weft.Tap(func(ctx context.Context, _ weft.Event) {
+			child = weft.AgentFromContext(ctx)
+		}))
+	agt := weft.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "delegate"}), wefttest.Say("done")),
+		weft.Name("parent"),
+		weft.Tap(func(ctx context.Context, _ weft.Event) {
+			if parent == nil {
+				parent = weft.AgentFromContext(ctx)
+			}
+		}),
+		weft.Subagent("delegate", "Runs the child.", kid))
+	if _, err := agt.Generate(context.Background(), weft.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	if parent != agt {
+		t.Errorf("parent tap saw %p, want the agent itself %p", parent, agt)
+	}
+	if child != kid {
+		t.Errorf("child tap saw %p, want the child agent %p", child, kid)
+	}
+	if outside = weft.AgentFromContext(context.Background()); outside != nil {
+		t.Errorf("AgentFromContext outside a run = %p, want nil", outside)
+	}
+}
+
+// A child run's tap reads its parent linkage from the same context:
+// the parent's tool call rides it, so a recorder learns ParentID and
+// ParentCallID without parsing run ids.
+func TestAgentFromContextChildSeesParentCall(t *testing.T) {
+	type link struct{ run, call string }
+	var got link
+	kid := weft.New(wefttest.Script(wefttest.Say("done")), weft.Name("kid"),
+		weft.Tap(func(ctx context.Context, ev weft.Event) {
+			if _, ok := ev.(weft.RunStart); ok {
+				if c, ok := weft.CallFromContext(ctx); ok {
+					got = link{run: c.RunID, call: c.CallID}
+				}
+			}
+		}))
+	agt := weft.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "delegate"}), wefttest.Say("done")),
+		weft.Subagent("delegate", "Runs the child.", kid))
+	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.run != res.ID || got.call != "call_1" {
+		t.Errorf("child saw parent linkage {run:%s call:%s}, want {run:%s call:call_1}", got.run, got.call, res.ID)
+	}
+}
+
+// Logger returns the configured logger, defaulting to slog.Default.
+func TestAgentLogger(t *testing.T) {
+	var buf bytes.Buffer
+	l := slog.New(slog.NewTextHandler(&buf, nil))
+	agt := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Logger(l))
+	if agt.Logger() != l {
+		t.Error("Logger() != the Logger option's value")
+	}
+	if got := weft.New(wefttest.Script(wefttest.Say("ok"))).Logger(); got != slog.Default() {
+		t.Error("Logger() without the option != slog.Default()")
 	}
 }

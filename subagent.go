@@ -94,6 +94,23 @@ func ancestryOf(ctx context.Context) []*Agent {
 	return chain
 }
 
+// AgentFromContext returns the agent running on ctx — the head of the
+// ancestry chain: the agent whose run is producing the events a Tap or
+// OnRunEnd observer receives, and that a tool handler is running for.
+// For a subagent's child run it is the child (the chain grows by one
+// per nesting level, ADR 0014). Nil outside a run — a manually
+// dispatched Agent.CallTool, a handler invoked directly — so observers
+// must not depend on it. Only the head is exposed, read-only: an Agent
+// is immutable after New, so nothing can be changed through it. The
+// consumer it ships for is the store's Record (ADR 0010), which
+// describes the run by the agent that ran it (manifest hash, logger).
+func AgentFromContext(ctx context.Context) *Agent {
+	if chain := ancestryOf(ctx); len(chain) > 0 {
+		return chain[len(chain)-1]
+	}
+	return nil
+}
+
 // childRunID derives a child run's id from the parent call that owns
 // it: <parent>/<step>/<callID> for a call dispatched by a step, and
 // <parent>/resume/<callID> for one executed under Approve (resumed

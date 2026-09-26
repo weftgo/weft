@@ -3,7 +3,7 @@ module github.com/weftgo/weft/google
 go 1.26
 
 require (
-	github.com/weftgo/weft v0.0.0-00010101000000-000000000000
+	github.com/weftgo/weft v0.3.2
 	google.golang.org/genai v1.71.0
 )
 
@@ -33,8 +33,3 @@ require (
 	google.golang.org/grpc v1.66.2 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 )
-
-// Dev-time resolution while the root module is unpublished (TODO §1.1):
-// once weftgo/weft is pushed and tagged, drop this replace and require
-// a tagged root.
-replace github.com/weftgo/weft => ../

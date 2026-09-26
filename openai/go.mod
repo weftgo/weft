@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/openai/openai-go v1.12.0
-	github.com/weftgo/weft v0.0.0
+	github.com/weftgo/weft v0.3.2
 )
 
 require (
@@ -20,8 +20,3 @@ require (
 	go.opentelemetry.io/otel/metric v1.46.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 )
-
-// Dev-time resolution while the root module is unpublished (TODO §1.1):
-// once weftgo/weft is pushed and tagged, drop this replace and require
-// a tagged root.
-replace github.com/weftgo/weft => ../

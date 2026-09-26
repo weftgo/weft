@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.72.0
-	github.com/weftgo/weft v0.0.0-00010101000000-000000000000
+	github.com/weftgo/weft v0.3.2
 )
 
 require (
@@ -27,8 +27,3 @@ require (
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 )
-
-// Dev-time resolution while the root module is unpublished (TODO §1.1):
-// once weftgo/weft is pushed and tagged, drop this replace and require
-// a tagged root.
-replace github.com/weftgo/weft => ../

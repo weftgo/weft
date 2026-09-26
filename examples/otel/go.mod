@@ -3,7 +3,7 @@ module github.com/weftgo/weft/examples/otel
 go 1.26
 
 require (
-	github.com/weftgo/weft v0.0.0
+	github.com/weftgo/weft v0.3.2
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.46.0
 	go.opentelemetry.io/otel/sdk v1.46.0
@@ -19,5 +19,3 @@ require (
 	go.opentelemetry.io/otel/metric v1.46.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 )
-
-replace github.com/weftgo/weft => ../..

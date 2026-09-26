@@ -112,3 +112,22 @@ Gates: build/vet/-race/lint/deny green in all six modules, fuzz clean,
 apidiff additive against v0.3.2 (SilentServer, ErrorServer,
 Caps.ErrorHeaders). Tags cut and pushed: root/openai/anthropic/google
 at v0.3.3, mcp at v0.1.3; sub-modules require root v0.3.3.
+
+## 9. The open item, decided (2026-09-27, landed as mcp v0.1.4)
+
+The mcp schema-import policy §3 questioned. Surveyed in the research
+checkout: Vercel AI SDK, Mastra and pydantic-ai all pass `inputSchema`
+through unparsed — a malformed schema is invisible at import and
+surfaces as a provider 400 at the model call, failing the whole step.
+weft parses on purpose and so knows at import what they learn from a
+400; failing the whole import over it held a server's good tools
+hostage to one, and silent skipping is what ADR 0015 forbade. Decision
+(ADR 0015 amendment 2026-09-27): per-tool isolation with a typed
+report — `Tools` returns the importable tools plus an `*ImportError`
+naming each skipped tool, `*weft.RunError`'s partial-result shape.
+Nil entries and empty names join the report by index; listing
+failures stay plain errors. Pinned (a type-array root beside two good
+tools — served by swapping the schema after `AddTool`, since the Go
+SDK's server refuses a non-object root — and the empty-name case),
+both pins failing on the old code. Only `weft/mcp` changed; tagged
+`mcp/v0.1.4`.

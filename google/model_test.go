@@ -408,6 +408,26 @@ func TestFoldParams(t *testing.T) {
 			},
 			desc: "request values",
 		},
+		{
+			// Review 2026-09-24 §2.3: a request MaxTokens of 0 must not
+			// lift a construction cap into the provider default.
+			name: "request zero keeps the construction cap",
+			opts: []Option{MaxTokens(128)},
+			rp:   weft.RequestParams{MaxTokens: i(0)},
+			want: func(c *genai.GenerateContentConfig) bool {
+				return c.MaxOutputTokens == 128
+			},
+			desc: "construction cap kept",
+		},
+		{
+			name: "request zero without construction sends nothing",
+			opts: nil,
+			rp:   weft.RequestParams{MaxTokens: i(0)},
+			want: func(c *genai.GenerateContentConfig) bool {
+				return c.MaxOutputTokens == 0
+			},
+			desc: "provider default",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

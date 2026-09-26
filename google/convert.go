@@ -165,7 +165,14 @@ func (m *model) foldParams(cfg *genai.GenerateContentConfig, rp weft.RequestPara
 		cfg.TopP = &t
 	}
 	maxTokens := m.maxTokens
-	if rp.MaxTokens != nil {
+	// A request MaxTokens of 0 keeps the construction value — the fold
+	// never replaces a construction value with a zero. Taking the
+	// request value unconditionally made Params{MaxTokens: 0} lift a
+	// construction cap into the provider default, effectively
+	// unbounded (review 2026-09-24 §2.3). Only openai sends a 0 as a
+	// value; anthropic keeps the default the same way, documented on
+	// weft.RequestParams.
+	if rp.MaxTokens != nil && *rp.MaxTokens > 0 {
 		maxTokens = *rp.MaxTokens
 	}
 	if maxTokens > 0 {

@@ -47,6 +47,27 @@ checkout; `WEFT-CODE-REVIEW-2026-09-24.md`).
   single-valued header is byte-identical to before. Google's path was
   already correct (genai assigns the whole `http.Header`).
 
+### Fixed — google: a run-level `MaxTokens: 0` no longer lifts a construction cap (review §2.3)
+
+- The fold took the request value unconditionally, then its
+  `if maxTokens > 0` gate sent nothing — so `google.MaxTokens(128)`
+  plus a run `Params{MaxTokens: 0}` replaced the 128 cap with the
+  provider default (effectively unbounded), while the adapter's own
+  comment claimed the fold never replaces a construction value with a
+  zero. A request `MaxTokens` of 0 now keeps the construction value,
+  mirroring anthropic's fold; neither-set still sends nothing, and
+  openai keeps sending 0 as a value (pinned). Both cases are pinned
+  in `TestFoldParams`.
+
+### Fixed — anthropic: `ReasoningTokens` is mapped (review §2.4)
+
+- The `MessageDeltaEvent` case read only `OutputTokens`, so thinking
+  runs reported `ReasoningTokens: 0` forever while openai mapped
+  `reasoning_tokens` and google mapped `thoughtsTokenCount`. The
+  finish now carries `output_tokens_details.thinking_tokens` — a
+  subset of the inclusive `OutputTokens`, per the 2a.4 splits rule —
+  pinned on the extended `thinking_then_tool_use` fixture.
+
 ## 0.3.0 — 2026-09-22
 
 The Phase 2a parity round (TODO §2a, `docs/phase2a-plan.md` — not

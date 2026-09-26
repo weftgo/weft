@@ -249,8 +249,16 @@ func (m *model) requestOptions() []option.RequestOption {
 		}))
 	}
 	for k, vs := range m.extraHeaders {
-		for _, v := range vs {
-			opts = append(opts, option.WithHeader(k, v))
+		// WithHeader has Set semantics — looping it over one key's
+		// values would keep only the last. The first value sets, the
+		// rest add, so a multi-valued header (X-Multi: a, b) reaches
+		// the wire whole, verbatim as documented.
+		for i, v := range vs {
+			if i == 0 {
+				opts = append(opts, option.WithHeader(k, v))
+			} else {
+				opts = append(opts, option.WithHeaderAdd(k, v))
+			}
 		}
 	}
 	return opts

@@ -36,6 +36,17 @@ checkout; `WEFT-CODE-REVIEW-2026-09-24.md`).
   alongside another pending call failed as documented. Approve/Deny
   keep ignoring unknown ids, the recorded asymmetry.
 
+### Fixed — adapters: multi-valued `ExtraHeaders` truncated (review §2.2)
+
+- **openai + anthropic keep every value of a multi-valued
+  `ExtraHeaders` entry.** Both looped `option.WithHeader` over one
+  key's values, which has `Set` semantics — `http.Header{"X-Multi":
+  {"a","b"}}` (legal, and `CloneHeaders` deliberately preserves the
+  whole slice) lost "a" on the wire despite the verbatim-headers doc.
+  The first value now sets and the rest add (`WithHeaderAdd`); a
+  single-valued header is byte-identical to before. Google's path was
+  already correct (genai assigns the whole `http.Header`).
+
 ## 0.3.0 — 2026-09-22
 
 The Phase 2a parity round (TODO §2a, `docs/phase2a-plan.md` — not

@@ -88,6 +88,24 @@ func TestExtraBodyDefaultBytes(t *testing.T) {
 	}
 }
 
+// Review 2026-09-24 §2.2: a header carrying several values (legal
+// http.Header, and CloneHeaders deliberately preserves the whole
+// slice) reaches the wire whole. option.WithHeader has Set semantics,
+// so looping it per value kept only the last one — the verbatim-
+// headers promise silently truncated.
+func TestExtraHeadersMultiValued(t *testing.T) {
+	h := http.Header{"X-Multi": []string{"a", "b"}}
+	srv, _, header := captureServer(t, "testdata/text_only.sse")
+	c := antsdk.NewClient(option.WithBaseURL(srv.URL), option.WithAPIKey("test"))
+	m := Model("m", Client(&c), ExtraHeaders(h))
+	if _, err := weft.New(m).Generate(t.Context(), weft.Prompt("hi")); err != nil {
+		t.Fatal(err)
+	}
+	if got := header()["X-Multi"]; len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Errorf("X-Multi = %q, want [a b]", got)
+	}
+}
+
 // The options snapshot what they are given: mutating the maps or header
 // values after Model returns never reaches the request — a Model is
 // safe to hand to concurrent runs while the caller keeps its config

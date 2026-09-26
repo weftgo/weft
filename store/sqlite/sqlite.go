@@ -93,13 +93,14 @@ func (s *Store) Save(ctx context.Context, r store.RunRecord) error {
 	if err != nil {
 		return err
 	}
-	usage := r.Usage
-	steps := 0
+	usage, steps := r.Usage, r.Steps
 	if r.Result != nil {
 		if usage == (weft.Usage{}) {
 			usage = r.Result.Usage
 		}
-		steps = r.Result.NumSteps()
+		if steps == 0 {
+			steps = r.Result.NumSteps()
+		}
 	}
 	usageJSON, err := json.Marshal(usage)
 	if err != nil {
@@ -393,6 +394,7 @@ func scanRun(rs *sql.Rows, now time.Time) (store.RunRecord, error) {
 		&usage, &tags, &result, &errTx); err != nil {
 		return store.RunRecord{}, err
 	}
+	rec.Steps = steps
 	rec.ParentID, rec.ParentCallID = parent.String, parentCall.String
 	_ = json.Unmarshal([]byte(model), &rec.Model)
 	_ = json.Unmarshal([]byte(usage), &rec.Usage)

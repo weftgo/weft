@@ -72,10 +72,11 @@ type RunRecord struct {
 	Tags         map[string]string // consumer-supplied (Tags); hmm: cwd, Weft CI: pr
 	Events       []weft.Event      // Seq order, Nested inline; empty from List
 	Result       *weft.RunResult   // set on success and on failure (the partial); omitted by List
-	// Usage is the run's total usage, denormalized onto the record
-	// from Result (ADR 0010 §2.6: the Usage struct per run) — the
-	// list view's token column without a Get.
+	// Usage and Steps are denormalized onto the record from Result
+	// (ADR 0010 §2.6: the Usage struct per run) — the list view's
+	// token and step columns without a Get.
 	Usage weft.Usage
+	Steps int
 	// Err is the RunError text when Status == Failed, and the
 	// degraded marker when a store write failed mid-run.
 	Err string

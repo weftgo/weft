@@ -301,6 +301,30 @@ span's exception, and the log lines carry the error text a tool or
 model returned, because a log is the caller's
 ([ADR 0016](docs/adr/0016-observability.md)).
 
+### Recording runs
+
+Module `weft/store` (v0.1.0) records what a run did and reads it back:
+one record per run — identity (agent, model, manifest hash, tags),
+every event in order, and the result, kept on failure as the partial
+transcript. Install `store.Record` on every agent of a fleet; a
+subagent's child records itself and links to the parent's call. Events
+are appended as they arrive, so a crash loses nothing emitted and a
+reader can tail a live run; a run whose heartbeat goes stale reads
+`interrupted`. The record is not a checkpoint — replay is the
+Inspector's job ([ADR 0010](docs/adr/0010-record-format.md)).
+
+```go
+s, _ := sqlite.Open(".weft/dev.db")            // ":memory:" works too; store.Memory() in tests
+agt := weft.New(model, store.Record(s, store.Tags(map[string]string{"cwd": wd})), tools...)
+page, _ := s.List(ctx, store.Query{})          // no events in rows, a Total, a Before cursor
+rec, _  := s.Get(ctx, page.Runs[0].ID)         // everything: stream, result, tags
+_ = s.Delete(ctx, rec.ID)                      // children survive, orphaned
+```
+
+`go run ./store/examples/basic` records a run with a tool call and a
+subagent into `.weft/dev.db` and prints the table, the event stream,
+and the child run — the shape the Inspector (next) reads.
+
 ## The manifest — `weft.json`
 
 One generated, committed, diffable description of every agent and tool
@@ -484,6 +508,7 @@ wefttest/             scripted mock model + the conformance suite
 openai/               OpenAI Chat Completions (+ compatible servers)
 anthropic/            Anthropic Messages (thinking, signatures)
 google/               Gemini via genai
+store/                run records: Record tap, Memory + sqlite backends, storetest
 examples/             runnable core example (per-adapter: <adapter>/example)
 docs/adr/             decision records for the contracts
 ```

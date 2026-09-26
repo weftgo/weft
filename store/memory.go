@@ -45,6 +45,12 @@ func (m *memStore) Save(_ context.Context, r RunRecord) error {
 		row.events = append(slices.Clone(row.events), r.Events[held:]...)
 	}
 	r.Events = nil // the row never carries events; they live in the store
+	if r.Result != nil && r.Steps == 0 {
+		r.Steps = r.Result.NumSteps()
+	}
+	if r.Result != nil && r.Usage == (weft.Usage{}) {
+		r.Usage = r.Result.Usage
+	}
 	row.rec = r
 	m.runs[r.ID] = row
 	return nil

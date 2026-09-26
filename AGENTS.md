@@ -115,6 +115,12 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 
 // 5. Describe the fleet: weft.Manifest(agents...) → weft.json (generated,
 //    committed, golden-gated; never read back).
+
+// 6. Record runs (module weft/store; sqlite.Open(path) | store.Memory()):
+//    store.Record(s, store.Tags({"cwd": wd})) — a Tap + OnRunEnd pair: events appended
+//    as they arrive, the result written at the run's end (the partial on failure);
+//    s.List(ctx, store.Query{}) pages without events; s.Get(ctx, id) returns everything;
+//    a stale heartbeat reads interrupted; s.Delete orphans children by design.
 ```
 
 Test offline with `wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))`;

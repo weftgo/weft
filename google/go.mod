@@ -3,7 +3,7 @@ module github.com/weftgo/weft/google
 go 1.26
 
 require (
-	github.com/weftgo/weft v0.3.3
+	github.com/weftgo/weft v0.3.4
 	google.golang.org/genai v1.71.0
 )
 

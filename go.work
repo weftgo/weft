@@ -7,4 +7,5 @@ use (
 	./google
 	./mcp
 	./openai
+	./store
 )

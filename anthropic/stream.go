@@ -52,11 +52,12 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 
 		var (
 			blocks   = map[int64]*block{}
-			input    weft.Usage
-			output   int64
-			stop     string
-			category string
-		)
+		input    weft.Usage
+		output   int64
+		thinking int64
+		stop     string
+		category string
+	)
 		for {
 			ok, idleHit := reader.next()
 			if idleHit {
@@ -140,6 +141,13 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 					category = string(e.Delta.StopDetails.Category)
 				}
 				output = e.Usage.OutputTokens
+				// The billed total stays inclusive; the split reports
+				// how much of it was reasoning ("always ≤
+				// output_tokens", the SDK's own wording — TODO §2a.4's
+				// rule for ReasoningTokens). OpenAI maps
+				// reasoning_tokens and google thoughtsTokenCount the
+				// same way.
+				thinking = e.Usage.OutputTokensDetails.ThinkingTokens
 			}
 		}
 		reader.wait()
@@ -182,6 +190,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 		reason, raw := mapStopReason(stop, category)
 		outputUsage := input
 		outputUsage.OutputTokens = output
+		outputUsage.ReasoningTokens = thinking
 		yield(weft.ModelFinish{
 			Reason: reason,
 			Usage:  outputUsage,

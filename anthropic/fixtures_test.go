@@ -117,6 +117,14 @@ func TestStreamThinkingThenToolUse(t *testing.T) {
 	if len(order) != 3 || order[0] != want[0] || order[1] != want[1] || order[2] != want[2] {
 		t.Errorf("order = %v, want %v", order, want)
 	}
+	// Review 2026-09-24 §2.4: the thinking split rides the finish — a
+	// subset of the inclusive OutputTokens, as on openai (reasoning_
+	// tokens) and google (thoughtsTokenCount). Thinking runs used to
+	// report ReasoningTokens: 0 forever.
+	fin := lastFinish(t, evs)
+	if fin.Usage.ReasoningTokens != 3 {
+		t.Errorf("ReasoningTokens = %d, want 3 (the split of the inclusive 5)", fin.Usage.ReasoningTokens)
+	}
 }
 
 func TestStreamParallelCallsInBlockOrder(t *testing.T) {

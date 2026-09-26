@@ -236,6 +236,18 @@ func TestRetryAfterParsing(t *testing.T) {
 	if _, ok := mw.RetryAfter(errors.New("plain"), now); ok {
 		t.Error("plain error reported a retry-after")
 	}
+	// Review 2026-09-24 §3: ParseFloat accepts these, and the int64
+	// conversion of the scaled value wraps negative — which used to
+	// slip past the maxWait cap and sleep zero. They now report no
+	// ask, so Retry falls back to backoff.
+	for _, v := range []string{"1e19", "Infinity", "NaN", "-1"} {
+		if d, ok := mw.RetryAfter(status(429, map[string]string{"retry-after": v}), now); ok {
+			t.Errorf("retry-after %q reported %s; want no ask", v, d)
+		}
+	}
+	if d, ok := mw.RetryAfter(status(429, map[string]string{"retry-after-ms": "1e16"}), now); ok {
+		t.Errorf("retry-after-ms 1e16 reported %s; want no ask", d)
+	}
 	if code, ok := mw.HTTPStatus(fmt.Errorf("wrapped: %w", status(418, nil))); !ok || code != 418 {
 		t.Errorf("HTTPStatus through wrapping = %d %v", code, ok)
 	}

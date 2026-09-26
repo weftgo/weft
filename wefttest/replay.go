@@ -197,9 +197,12 @@ func testDir(dir, test string) string { return filepath.Join(dir, test) }
 // fixturePath names one request's fixture: dir/<test>/<seq>-<key>.json.
 // The sequence number makes a directory listing read in conversation
 // order and keeps two identical requests from colliding; the key is
-// what Replay matches on.
+// what Replay matches on. Five digits: the replayer loads in name
+// order, and a three-digit pad sorted "1000-x" before "999-x", so a
+// 1000+-request recording whose identical key recurred across the
+// boundary replayed out of order (ADR 0017's 2026-09-26 amendment).
 func fixturePath(dir, test string, seq int, key string) string {
-	return filepath.Join(dir, test, fmt.Sprintf("%03d-%s.json", seq, key))
+	return filepath.Join(dir, test, fmt.Sprintf("%05d-%s.json", seq, key))
 }
 
 // --- recorder ------------------------------------------------------------

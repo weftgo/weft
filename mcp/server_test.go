@@ -355,6 +355,20 @@ func TestAddToolsNullArgumentsBecomeObject(t *testing.T) {
 			t.Errorf("arguments %v: handler saw %q, want {}", in, got)
 		}
 	}
+	// Review 2026-09-24 §3: the handler sees the client's own bytes —
+	// whitespace kept, <, >, & not escaped. Re-marshalling compacted
+	// and escaped them, so a RawTool echoing or hashing its arguments
+	// saw different bytes than the client sent.
+	req := &sdk.CallToolRequest{Params: &sdk.CallToolParamsRaw{
+		Name:      "raw",
+		Arguments: json.RawMessage(`{ "markup": "a<b&c>d" }`),
+	}}
+	if _, err := h(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := <-seen, `{ "markup": "a<b&c>d" }`; got != want {
+		t.Errorf("handler saw %q, want the client's bytes verbatim %q", got, want)
+	}
 }
 
 // Serve's tools honour the outputSchema they advertise: a non-string

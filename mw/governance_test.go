@@ -13,23 +13,33 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/wefttest"
 )
 
 // A PII scrubber sits on the tool seam and masks what the model — and
-// so every transcript downstream — is allowed to see.
+// so every transcript downstream — is allowed to see. Both channels
+// are scrubbed: the result text, and the error's text too — the loop
+// renders err.Error() into the transcript verbatim, so scrubbing only
+// the success path would leak through every failure. Rewriting the
+// message means dropping the cause chain on purpose; a scrubber that
+// keeps the original reachable is no scrubber.
 func Example_piiScrubMiddleware() {
 	email := regexp.MustCompile(`[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}`)
 	scrub := func(next weft.ToolCaller) weft.ToolCaller {
 		return func(ctx context.Context, call weft.ToolCallPart) (string, error) {
 			out, err := next(ctx, call)
-			return email.ReplaceAllString(out, "[redacted]"), err
+			if err != nil {
+				return "", errors.New(email.ReplaceAllString(err.Error(), "[redacted]"))
+			}
+			return email.ReplaceAllString(out, "[redacted]"), nil
 		}
 	}
 	lookup := weft.Tool("lookup", "", func(_ context.Context, _ struct{}) (string, error) {
@@ -101,10 +111,11 @@ func (m limitedModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Se
 // A response cache is model middleware keyed on the ModelRequest: the
 // same prompt and catalogue replay the recorded answer without a
 // provider call. Cache invalidation is the caller's policy — here the
-// whole request is the key, so any change misses.
+// whole request is the key, so any change misses. The map carries a
+// mutex because a Model must survive the Agent's concurrent reuse
+// (the rate-limit example's rule; an unsynchronized map races the
+// moment two runs share the cache).
 func Example_responseCacheMiddleware() {
-	cache := map[string][]weft.ModelEvent{}
-	hits := 0
 	key := func(req weft.ModelRequest) string {
 		b, _ := json.Marshal(struct {
 			System   string
@@ -114,35 +125,50 @@ func Example_responseCacheMiddleware() {
 		sum := sha256.Sum256(b)
 		return hex.EncodeToString(sum[:8])
 	}
-	cached := func(next weft.Model) weft.Model {
-		return cacheModel{next: next, cache: cache, key: key, hits: &hits}
-	}
+	shared := &responseCache{cache: map[string][]weft.ModelEvent{}}
 	model := wefttest.Script(wefttest.Say("fresh"), wefttest.Say("fresh"))
-	agt := weft.New(model, weft.WrapModel(cached))
+	agt := weft.New(model, weft.WrapModel(func(next weft.Model) weft.Model {
+		return cacheModel{next: next, c: shared, key: key}
+	}))
 	for range 3 {
 		if _, err := agt.Generate(context.Background(), weft.Prompt("same question")); err != nil {
 			fmt.Println(err)
 			return
 		}
 	}
-	fmt.Printf("provider calls made: %d of 3\n", 3-hits)
+	fmt.Printf("provider calls made: %d of 3\n", 3-shared.Hits())
 	// Output:
 	// provider calls made: 1 of 3
 }
 
-type cacheModel struct {
-	next  weft.Model
+// responseCache is the shared state one wrapper process feeds; every
+// access takes the mutex, reads (hits) included.
+type responseCache struct {
+	mu    sync.Mutex
 	cache map[string][]weft.ModelEvent
-	key   func(weft.ModelRequest) string
-	hits  *int
+	hits  int
+}
+
+func (c *responseCache) Hits() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.hits
+}
+
+type cacheModel struct {
+	next weft.Model
+	c    *responseCache
+	key  func(weft.ModelRequest) string
 }
 
 func (m cacheModel) Info() weft.ModelInfo { return weft.InfoOf(m.next) }
 
 func (m cacheModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
 	k := m.key(req)
-	if events, ok := m.cache[k]; ok {
-		*m.hits++
+	m.c.mu.Lock()
+	if events, ok := m.c.cache[k]; ok {
+		m.c.hits++
+		m.c.mu.Unlock()
 		return func(yield func(weft.ModelEvent, error) bool) {
 			for _, ev := range events {
 				if !yield(ev, nil) {
@@ -151,6 +177,7 @@ func (m cacheModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2
 			}
 		}
 	}
+	m.c.mu.Unlock()
 	return func(yield func(weft.ModelEvent, error) bool) {
 		var seen []weft.ModelEvent
 		for ev, err := range m.next.Stream(ctx, req) {
@@ -163,7 +190,9 @@ func (m cacheModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2
 				return
 			}
 		}
-		m.cache[k] = seen
+		m.c.mu.Lock()
+		m.c.cache[k] = seen
+		m.c.mu.Unlock()
 	}
 }
 

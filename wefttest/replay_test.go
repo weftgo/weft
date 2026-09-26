@@ -92,7 +92,7 @@ func TestRecordPassesThroughAndWrites(t *testing.T) {
 	if len(files) != 2 {
 		t.Fatalf("%d fixture files, want 2: %v", len(files), files)
 	}
-	if files[0] >= files[1] || !strings.HasPrefix(files[0], "001-") || !strings.HasPrefix(files[1], "002-") {
+	if files[0] >= files[1] || !strings.HasPrefix(files[0], "00001-") || !strings.HasPrefix(files[1], "00002-") {
 		t.Errorf("fixtures %v, want conversation order by sequence number", files)
 	}
 	b, err := os.ReadFile(filepath.Join(dir, t.Name(), files[0]))

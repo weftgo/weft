@@ -83,10 +83,7 @@ func containedInvoke(name string, fn func() (string, error)) (out string, err er
 // MCP it would be inside a run, not a dead server.
 func invokeHandler(t *weft.ToolDef) sdk.ToolHandler {
 	return func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-		args, err := argumentBytes(req)
-		if err != nil {
-			return nil, err // arguments that cannot be encoded are a protocol failure
-		}
+		args := argumentBytes(req)
 		out, err := containedInvoke(t.Name, func() (string, error) { return t.Invoke(ctx, args) })
 		if err != nil {
 			return errorResult(err), nil
@@ -96,18 +93,19 @@ func invokeHandler(t *weft.ToolDef) sdk.ToolHandler {
 }
 
 // argumentBytes is the call's arguments as the bytes a weft handler
-// receives. A client that omits arguments (the SDK's own always sends
-// {}) would otherwise hand a RawTool "null" where tools/call promises
-// an object, so empty and null become {} — the consume side's rule.
-func argumentBytes(req *sdk.CallToolRequest) (json.RawMessage, error) {
-	args, err := json.Marshal(req.Params.Arguments)
-	if err != nil {
-		return nil, err
-	}
-	if trimmed := strings.TrimSpace(string(args)); trimmed == "" || trimmed == "null" {
+// receives — the client's own bytes, verbatim: Params.Arguments is the
+// raw wire value, and re-marshalling it would compact whitespace and
+// escape <, >, & (a RawTool that echoes or hashes args would see
+// different bytes than the client sent). A client that omits arguments
+// (the SDK's own always sends {}) would otherwise hand a RawTool
+// "null" where tools/call promises an object, so empty and null
+// become {} — the consume side's rule.
+func argumentBytes(req *sdk.CallToolRequest) json.RawMessage {
+	args := json.RawMessage(strings.TrimSpace(string(req.Params.Arguments)))
+	if len(args) == 0 || string(args) == "null" {
 		args = json.RawMessage("{}")
 	}
-	return args, nil
+	return args
 }
 
 // Serve exposes an agent over MCP: one tool named after the agent
@@ -169,10 +167,7 @@ type serveState struct{ seq atomic.Int64 }
 // never a bypass.
 func chainHandler(a *weft.Agent, t *weft.ToolDef, state *serveState) sdk.ToolHandler {
 	return func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-		args, err := argumentBytes(req)
-		if err != nil {
-			return nil, err
-		}
+		args := argumentBytes(req)
 		call := weft.ToolCallPart{
 			ID:   fmt.Sprintf("mcp_call_%d", state.seq.Add(1)),
 			Name: t.Name,

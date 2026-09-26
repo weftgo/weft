@@ -52,12 +52,12 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 
 		var (
 			blocks   = map[int64]*block{}
-		input    weft.Usage
-		output   int64
-		thinking int64
-		stop     string
-		category string
-	)
+			input    weft.Usage
+			output   int64
+			thinking int64
+			stop     string
+			category string
+		)
 		for {
 			ok, idleHit := reader.next()
 			if idleHit {

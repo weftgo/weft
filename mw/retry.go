@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"math"
 	"math/rand/v2"
 	"net"
 	"reflect"
@@ -163,12 +164,16 @@ func (m *retryModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq
 // retry-after when it sent one (failing fast past maxWait — 0 meaning
 // no cap), otherwise exponential backoff with jitter.
 func (c *retryConfig) delay(attempt int, err error, now time.Time) (time.Duration, error) {
-	if ask, ok := RetryAfter(err, now); ok {
+	if ask, ok := RetryAfter(err, now); ok && ask >= 0 {
 		if c.maxWait > 0 && ask > c.maxWait {
 			return 0, fmt.Errorf("%w: asked %s, maximum %s: %w", ErrRetryAfterTooLong, ask, c.maxWait, err)
 		}
 		return ask, nil
 	}
+	// No usable ask — none sent, or one RetryAfter rejected as
+	// unconvertible (a parse that would wrap negative; see
+	// fitsDuration). The defensive ask >= 0 above keeps even a future
+	// parse path from sleeping zero on a wrapped value.
 	return c.backoff(attempt), nil
 }
 
@@ -260,10 +265,15 @@ func isContextOverflow(err error) bool {
 // RetryAfter extracts the provider's retry-after ask from the error's
 // HTTP response headers: retry-after-ms (milliseconds), then
 // retry-after (seconds, or an HTTP date relative to now). ok is false
-// when the error carries no such header.
+// when the error carries no such header, or carries one whose value
+// cannot become a duration — unparseable, negative, or too large to
+// convert (ParseFloat accepts 1e19 and Infinity; the int64 conversion
+// of those wraps negative, which would slip past the maxWait cap and
+// sleep zero, turning a misbehaving gateway's ask into up to
+// MaxRetries+1 back-to-back requests).
 func RetryAfter(err error, now time.Time) (time.Duration, bool) {
 	if v := headerValue(err, "retry-after-ms"); v != "" {
-		if ms, perr := strconv.ParseFloat(v, 64); perr == nil && ms >= 0 {
+		if ms, perr := strconv.ParseFloat(v, 64); perr == nil && fitsDuration(ms, float64(time.Millisecond)) {
 			return time.Duration(ms * float64(time.Millisecond)), true
 		}
 	}
@@ -271,7 +281,7 @@ func RetryAfter(err error, now time.Time) (time.Duration, bool) {
 	if v == "" {
 		return 0, false
 	}
-	if secs, perr := strconv.ParseFloat(v, 64); perr == nil && secs >= 0 {
+	if secs, perr := strconv.ParseFloat(v, 64); perr == nil && fitsDuration(secs, float64(time.Second)) {
 		return time.Duration(secs * float64(time.Second)), true
 	}
 	for _, layout := range []string{time.RFC1123, time.RFC1123Z, time.RFC850, time.ANSIC} {
@@ -280,6 +290,14 @@ func RetryAfter(err error, now time.Time) (time.Duration, bool) {
 		}
 	}
 	return 0, false
+}
+
+// fitsDuration reports whether f scaled by the unit converts to a
+// time.Duration without wrapping: f must be finite, non-negative, and
+// within int64 range once scaled. NaN fails every comparison, +Inf
+// exceeds the bound, negatives are not waits.
+func fitsDuration(f, unit float64) bool {
+	return f >= 0 && f <= math.MaxInt64/unit
 }
 
 // HTTPStatus finds an HTTP status code on the error chain: the vendor

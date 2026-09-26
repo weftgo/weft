@@ -6,7 +6,7 @@ GO ?= go
 # SDKs are required only by the adapter modules.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy live apidiff apidiff-selftest offline fuzz
+.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-selftest offline fuzz
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -28,15 +28,22 @@ lint:
 tidy:
 	for m in $(MODULES); do (cd $$m && $(GO) mod tidy) || exit 1; done
 
+# Pinned tooling — the exact versions CI installs, so a local gate and
+# the remote gate can never disagree (TODO §1.2a, the §1 pre-flight of
+# docs/phase2b-store-plan.md). go install is idempotent; a warm module
+# cache makes this a no-op.
+tools:
+	$(GO) install golang.org/x/exp/cmd/apidiff@v0.0.0-20260908205506-85c1c2202aba
+
 # The apidiff gate (TODO §1.7): root module vs the last v* tag.
-# Needs: go install golang.org/x/exp/cmd/apidiff@latest
-# PATH gains GOPATH/bin so the target works from a bare shell.
-apidiff:
+# The tools target installs the pinned apidiff so the gate runs on a
+# machine without a pre-existing binary; PATH gains GOPATH/bin for it.
+apidiff: tools
 	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh
 
 # Exercises the gate's own failure modes — a broken tree must fail it,
-# never read green. Needs apidiff as above.
-apidiff-selftest:
+# never read green.
+apidiff-selftest: tools
 	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff-selftest.sh
 
 # The offline gate (ADR 0013's kill-switch clause): every suite in the

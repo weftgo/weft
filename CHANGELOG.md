@@ -4,6 +4,39 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## 0.3.2 — 2026-09-26
+
+The release that makes the tags installable. Every sub-module tag so
+far (`openai`, `anthropic`, `google` at v0.1.0 … v0.3.1; `mcp` at
+v0.1.0, v0.1.1) required the root as a placeholder pseudo-version
+(`v0.0.0-00010101000000-000000000000`) resolved through a `replace
+=> ../` that only the workspace honours. Consumers ignore `replace`,
+so `go get github.com/weftgo/weft/anthropic@v0.3.1` failed with
+`invalid version: unknown revision 000000000000` — none of the adapter
+or mcp tags could be used outside this checkout. Tags cut together:
+root, openai, anthropic, google at v0.3.2; `mcp` at v0.1.2. The root
+module's Go API is unchanged (apidiff clean against v0.3.1).
+
+### Fixed — the sub-modules require the tagged root
+
+- **`openai`, `anthropic`, `google`, `mcp` require
+  `github.com/weftgo/weft v0.3.2` and carry no `replace`.** The
+  committed `go.work` keeps in-repo development resolving the root
+  from disk exactly as before (ADR 0005: "a tagged adapter requires a
+  tagged root"); outside the workspace the published root is used.
+  `examples/otel` follows the same rule. Verified from a clean module
+  with `GOPROXY=direct`: `go get github.com/weftgo/weft/anthropic@v0.3.2`
+  resolves and builds.
+
+### Fixed — `mw.Retry`: the retry-after bound is strict
+
+- `fitsDuration` now rejects a value that lands exactly on
+  `MaxInt64/unit`: `float64(math.MaxInt64)` rounds up to 2^63, so the
+  boundary value scaled to a float the `int64` conversion could not
+  hold (overflow is implementation-defined). No real header reaches
+  it; the 0.3.1 fix's `ask >= 0` guard in `delay` already contained
+  the consequence. Pinned.
+
 ## 0.3.1 — 2026-09-26
 
 The 2026-09-24 review's findings, landed (full report in the research

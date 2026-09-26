@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -240,7 +242,10 @@ func TestRetryAfterParsing(t *testing.T) {
 	// conversion of the scaled value wraps negative — which used to
 	// slip past the maxWait cap and sleep zero. They now report no
 	// ask, so Retry falls back to backoff.
-	for _, v := range []string{"1e19", "Infinity", "NaN", "-1"} {
+	// The bound itself is out too: float64(MaxInt64) rounds up to 2^63,
+	// so a value landing exactly on MaxInt64/unit scales past int64.
+	edge := strconv.FormatFloat(math.MaxInt64/float64(time.Second), 'f', -1, 64)
+	for _, v := range []string{"1e19", "Infinity", "NaN", "-1", edge} {
 		if d, ok := mw.RetryAfter(status(429, map[string]string{"retry-after": v}), now); ok {
 			t.Errorf("retry-after %q reported %s; want no ask", v, d)
 		}

@@ -2,6 +2,6 @@
 # exact apidiff line per entry (scripts/apidiff.sh). Pre-1.0 only: each
 # entry is a deliberate, reviewed evolution. Reset this file when tagging.
 #
-# Reset at v0.3.1 (2026-09-26): the 0.3.0 → 0.3.1 cycle is the
-# 2026-09-24 review's fixes — purely internal, no entries; the gate
-# diffs against v0.3.1.
+# Reset at v0.3.2 (2026-09-26): the 0.3.1 → 0.3.2 cycle makes the
+# sub-module tags installable (go.mod only) — no entries; the gate
+# diffs against v0.3.2.

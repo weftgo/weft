@@ -295,9 +295,12 @@ func RetryAfter(err error, now time.Time) (time.Duration, bool) {
 // fitsDuration reports whether f scaled by the unit converts to a
 // time.Duration without wrapping: f must be finite, non-negative, and
 // within int64 range once scaled. NaN fails every comparison, +Inf
-// exceeds the bound, negatives are not waits.
+// exceeds the bound, negatives are not waits. The bound is strict:
+// float64(math.MaxInt64) rounds up to 2^63, so a value that lands
+// exactly on it scales to a float the int64 conversion cannot hold
+// (overflow is implementation-defined in Go, MinInt64 on amd64).
 func fitsDuration(f, unit float64) bool {
-	return f >= 0 && f <= math.MaxInt64/unit
+	return f >= 0 && f < math.MaxInt64/unit
 }
 
 // HTTPStatus finds an HTTP status code on the error chain: the vendor

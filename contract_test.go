@@ -4323,3 +4323,177 @@ func TestNewNilToolPanics(t *testing.T) {
 	var missing *weft.ToolDef
 	_ = weft.New(wefttest.Script(wefttest.Say("ok")), missing)
 }
+
+// --- OnRunEnd (TODO §11, plan §3.7) ---------------------------------
+//
+// The outcome observer: exactly once per run, after RunFinish or the
+// RunError, before Run returns. A tap cannot be this — a failed run
+// emits nothing after its last delivered event (ADR 0004) — and neither
+// seam wraps the run. These tests pin the four contract points the
+// store depends on.
+
+type runEndLog struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (l *runEndLog) add(s string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.calls = append(l.calls, s)
+}
+
+func (l *runEndLog) snapshot() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.calls...)
+}
+
+// Fires once on success, with the complete result and a nil error, and
+// has fired by the time Generate returns.
+func TestOnRunEndFiresOnceOnSuccess(t *testing.T) {
+	var calls int
+	agt := weft.New(wefttest.Script(wefttest.Say("hello")), weft.OnRunEnd(
+		func(_ context.Context, res *weft.RunResult, err error) {
+			calls++
+			if err != nil {
+				t.Errorf("err = %v, want nil on success", err)
+			}
+			if res == nil || res.Text() != "hello" {
+				t.Errorf("res = %v, want the completed result", res)
+			}
+		}))
+	if _, err := agt.Generate(context.Background(), weft.Prompt("hi")); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Errorf("OnRunEnd called %d times, want exactly 1", calls)
+	}
+}
+
+// Fires once on failure; res is the RunError's partial and err is the
+// *RunError itself, so errors.Is works in the observer.
+func TestOnRunEndFiresOnRunErrorWithPartial(t *testing.T) {
+	sentinel := errors.New("provider down")
+	var gotRes *weft.RunResult
+	agt := weft.New(wefttest.Script(wefttest.Fail(sentinel)),
+		weft.OnRunEnd(func(_ context.Context, res *weft.RunResult, err error) {
+			gotRes = res
+			var re *weft.RunError
+			if !errors.As(err, &re) {
+				t.Errorf("err = %v, want *RunError", err)
+			}
+			if !errors.Is(err, sentinel) {
+				t.Errorf("err = %v, want the cause reachable", err)
+			}
+		}))
+	_, err := agt.Generate(context.Background(), weft.Prompt("hi"))
+	if err == nil {
+		t.Fatal("run should have failed")
+	}
+	if gotRes == nil {
+		t.Fatal("OnRunEnd did not fire")
+	}
+	var re *weft.RunError
+	errors.As(err, &re)
+	if gotRes != re.Result {
+		t.Errorf("res = %p, want the RunError's partial %p", gotRes, re.Result)
+	}
+}
+
+// Fires once on cancellation, with the ctx error reachable through the
+// RunError.
+func TestOnRunEndFiresOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	slow := weft.Tool("slow", "", func(ctx context.Context, _ struct{}) (string, error) {
+		cancel()
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+	var gotErr error
+	agt := weft.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "slow"}), wefttest.Say("late")), slow,
+		weft.OnRunEnd(func(_ context.Context, _ *weft.RunResult, err error) { gotErr = err }))
+	_, err := agt.Generate(ctx, weft.Prompt("hi"))
+	if err == nil {
+		t.Fatal("run should have failed with the cancellation")
+	}
+	if gotErr == nil {
+		t.Fatal("OnRunEnd did not fire")
+	}
+	if !errors.Is(gotErr, context.Canceled) {
+		t.Errorf("observer err = %v, want context.Canceled reachable", gotErr)
+	}
+}
+
+// A run that panics did not end — OnRunEnd never fires, and the panic
+// still reaches the caller (the span guard re-panics; the observer
+// must not launder a crash into an outcome).
+func TestOnRunEndDoesNotFireOnPanic(t *testing.T) {
+	calls := 0
+	agt := weft.New(wefttest.Script(wefttest.Say("ok")),
+		weft.PrepareStep(func(_ context.Context, _ int, req weft.ModelRequest) (weft.ModelRequest, error) {
+			panic("user code bug")
+		}),
+		weft.OnRunEnd(func(context.Context, *weft.RunResult, error) { calls++ }))
+	defer func() {
+		if recover() == nil {
+			t.Fatal("the PrepareStep panic should have reached the caller")
+		}
+		if calls != 0 {
+			t.Errorf("OnRunEnd fired %d times on a panicked run; a crash is not an outcome", calls)
+		}
+	}()
+	_, _ = agt.Generate(context.Background(), weft.Prompt("hi"))
+}
+
+// A child run's OnRunEnd fires inside the parent's tool call — before
+// the parent's — with the child's own id on res, the same visibility
+// rule as the child's events (ADR 0014).
+func TestOnRunEndChildFiresInsideParentToolCall(t *testing.T) {
+	log := &runEndLog{}
+	child := weft.New(wefttest.Script(wefttest.Say("child done")),
+		weft.Name("child"),
+		weft.OnRunEnd(func(_ context.Context, res *weft.RunResult, _ error) {
+			log.add("child:" + res.ID)
+		}))
+	parent := weft.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "delegate"}), wefttest.Say("parent done")),
+		weft.Subagent("delegate", "Runs the child.", child),
+		weft.OnRunEnd(func(_ context.Context, res *weft.RunResult, _ error) {
+			log.add("parent:" + res.ID)
+		}))
+	res, err := parent.Generate(context.Background(), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := log.snapshot()
+	if len(calls) != 2 {
+		t.Fatalf("OnRunEnd calls = %v, want child then parent", calls)
+	}
+	if !strings.HasPrefix(calls[0], "child:") || calls[0] != "child:"+res.ID+"/0/call_1" {
+		t.Errorf("first call = %q, want the child with its derived id", calls[0])
+	}
+	if calls[1] != "parent:"+res.ID {
+		t.Errorf("second call = %q, want the parent after its tool call", calls[1])
+	}
+}
+
+// Several OnRunEnd options run in registration order (the Tap rule),
+// and a panic in one is contained and counted, not propagated — a
+// broken observer cannot break a run.
+func TestOnRunEndOrderAndContainment(t *testing.T) {
+	log := &runEndLog{}
+	agt := weft.New(wefttest.Script(wefttest.Say("ok")),
+		weft.OnRunEnd(func(context.Context, *weft.RunResult, error) { log.add("first") }),
+		weft.OnRunEnd(func(context.Context, *weft.RunResult, error) { panic("observer bug") }),
+		weft.OnRunEnd(func(context.Context, *weft.RunResult, error) { log.add("third") }))
+	if _, err := agt.Generate(context.Background(), weft.Prompt("hi")); err != nil {
+		t.Fatal(err)
+	}
+	calls := log.snapshot()
+	if len(calls) != 2 || calls[0] != "first" || calls[1] != "third" {
+		t.Errorf("calls = %v, want [first third] around the contained panic", calls)
+	}
+	if n := agt.TapPanics(); n != 1 {
+		t.Errorf("TapPanics = %d, want 1 contained observer panic", n)
+	}
+}

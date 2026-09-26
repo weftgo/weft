@@ -97,10 +97,25 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	}
 	res = &RunResult{ID: cfg.id, Messages: repair(cfg.messages, skip)}
 	seq := new(atomic.Int64)
+	// The OnRunEnd observers report the run's outcome exactly once —
+	// endRun's undelivered-RunFinish path routes through fail, and the
+	// run must read as ended once, with the failure. They do not run on
+	// the panic path below: a panicked run did not end, it crashed.
+	observed := false
+	observeRunEnd := func(err error) {
+		if observed {
+			return
+		}
+		observed = true
+		for _, fn := range a.onRunEnd {
+			a.safeRunEnd(ctx, fn, res, err)
+		}
+	}
 	fail := func(step int, err error) (*RunResult, error) {
 		spanEnded = true
 		re := &RunError{Step: step, Err: err, Result: res}
 		endSpan(res, re)
+		observeRunEnd(re)
 		return nil, re
 	}
 	// Every successful exit ends here — four sites share the shape, and
@@ -118,6 +133,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		}
 		spanEnded = true
 		endSpan(res, nil)
+		observeRunEnd(nil)
 		return res, nil
 	}
 	// A model that can name itself does so on the first event; the
@@ -463,6 +479,19 @@ func (a *Agent) safeTap(ctx context.Context, tap func(context.Context, Event), e
 		}
 	}()
 	tap(ctx, ev)
+}
+
+// safeRunEnd runs one OnRunEnd observer under Tap's containment rule:
+// the outcome observer runs after the run is decided, so a panic in it
+// cannot change the outcome either — it is contained and counted with
+// the tap panics.
+func (a *Agent) safeRunEnd(ctx context.Context, fn func(context.Context, *RunResult, error), res *RunResult, err error) {
+	defer func() {
+		if recover() != nil {
+			a.tapPanics.Add(1)
+		}
+	}()
+	fn(ctx, res, err)
 }
 
 // cloneRaw detaches a raw-JSON byte slice: json.RawMessage is mutable,

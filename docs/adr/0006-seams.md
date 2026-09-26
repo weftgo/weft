@@ -180,3 +180,22 @@ the adapter read-only contract) — and, like ToolSource, this is one
 of the two knobs that can break a prompt-cache prefix; the godoc
 says so. The manifest does not describe it (it is code, like
 middleware).
+
+## Note (2026-09-27 — `OnRunEnd` observes an outcome; TODO §11, root v0.3.5)
+
+`weft.OnRunEnd(fn)` installs a function the loop calls exactly once per
+run — after `RunFinish` is delivered or the `RunError` is built, before
+`Run` returns. It is not a third seam. A seam wraps a call and can
+change what that call does; `OnRunEnd` receives an outcome that has
+already happened — the result was computed, the error was built — the
+same relationship `Tap` has to the event stream. The playbook's red
+flag is "a hook that can *change* behaviour"; an observer whose inputs
+are frozen cannot. It exists because neither of the existing
+observation paths can carry the one fact the store (§11) needs: a
+failed run emits no event after its last delivered one (ADR 0004), so
+failure is invisible to a tap, and `WrapModel`/`WrapTools` wrap one
+call each, not the run. A panicked run never fires it (a crash is not
+an outcome; the panic still reaches the caller); a panic in it is
+contained and counted with the tap panics (`TapPanics`); several run
+in registration order. Pinned by `TestOnRunEnd*` in
+`contract_test.go`.

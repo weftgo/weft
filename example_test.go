@@ -885,3 +885,18 @@ func ExampleOutputDecoder() {
 	// render: name="Ada" count=3
 	// final:  name="Ada" count=3
 }
+
+// OnRunEnd is the outcome observer: unlike Tap it sees the run's end
+// even when the run fails, because a failed run emits no event after
+// its last delivered one. The store's Record option pairs the two.
+func ExampleOnRunEnd() {
+	agt := weft.New(
+		wefttest.Script(wefttest.Fail(errors.New("provider down"))),
+		weft.OnRunEnd(func(_ context.Context, res *weft.RunResult, err error) {
+			fmt.Printf("run ended: has id=%v failed=%v steps=%d\n", res.ID != "", err != nil, res.NumSteps())
+		}),
+	)
+	_, _ = agt.Generate(context.Background(), weft.Prompt("hi"))
+	// Output:
+	// run ended: has id=true failed=true steps=0
+}

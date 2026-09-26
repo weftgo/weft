@@ -342,3 +342,22 @@ nothing. The slog lines gain nothing — the two totals stay the lines'
 fields, per the line-stability rule above; the splits are span-only.
 (The first pass of the plan believed reasoning tokens had no semconv
 attribute; the pinned package has one, and all three splits ride it.)
+
+## Amendment (2026-09-27 — `OnRunEnd`, the fourth observation output; TODO §11, root v0.3.5)
+
+The observation family gains a fourth output: `weft.OnRunEnd(fn)` —
+the user's *outcome* observer, the counterpart the loop's own reporting
+already has. Spans and log lines report the run's end to backends
+(including a cancelled run's end, which no event reports); `Tap`
+reports the event stream to Go code; `OnRunEnd` reports the outcome to
+Go code — one call per run, on the loop's goroutine, after the run
+span has ended and before `Run` returns. `res` is the run's result
+(the `RunError`'s partial on failure), `err` the `RunError` or nil; a
+child run's fires inside the parent's tool call, like its events; a
+panicked run fires nothing (a crash is not an outcome); a panic in an
+observer is contained and counted with the tap panics. Not a seam
+(ADR 0006's note): it sees, it cannot change. The store's `Record`
+(ADR 0010) is the first consumer — the final save needs the failure
+signal and the result that no event carries. The taxonomy stands at:
+the loop reports (spans, lines); the user observes (Tap for the
+stream, OnRunEnd for the outcome); the seams change.

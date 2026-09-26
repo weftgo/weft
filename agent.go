@@ -369,6 +369,40 @@ func (o tapOption) apply(a *Agent) {
 // tap that starts its own spans parents them under it for free.
 func Tap(fn func(ctx context.Context, ev Event)) Option { return tapOption{fn} }
 
+type onRunEndOption struct {
+	fn func(context.Context, *RunResult, error)
+}
+
+func (o onRunEndOption) apply(a *Agent) {
+	if o.fn != nil {
+		a.onRunEnd = append(a.onRunEnd, o.fn)
+	}
+}
+
+// OnRunEnd registers an observer the loop calls exactly once per run,
+// after RunFinish is delivered or the RunError is built and before Run
+// returns — the outcome signal a tap cannot carry: a failed run emits
+// no event after its last delivered one (ADR 0004), so failure is
+// invisible to Tap, and neither middleware seam wraps the run. res is
+// the run's result and err its error: on success err is nil and res is
+// complete; on failure err is the *RunError and res its partial
+// transcript (ADR 0002) — the same value RunError.Result holds; on
+// cancellation err is the RunError wrapping the ctx error. For a
+// Subagent's child run it fires inside the parent's tool call, like
+// the child's events, and res.ID names the child. A run that panics
+// (a PrepareStep function is arbitrary user code) never fires it: the
+// run crashed, it did not end — the panic still reaches the caller.
+// Like Tap it observes and cannot change anything (ADR 0006's note:
+// not a third seam — a seam wraps a call, this observes an outcome);
+// like Tap a panic in it is contained and counted (TapPanics).
+// Several OnRunEnd options run in registration order. ctx is the run's
+// span-carrying context. The one consumer this ships for is the store
+// (TODO §11): store.Record pairs a Tap for the event stream with
+// OnRunEnd for the result and the failure.
+func OnRunEnd(fn func(ctx context.Context, res *RunResult, err error)) Option {
+	return onRunEndOption{fn}
+}
+
 type tracerProviderOption struct{ tp trace.TracerProvider }
 
 func (o tracerProviderOption) apply(a *Agent) {
@@ -505,6 +539,7 @@ type Agent struct {
 	toolTimeout     time.Duration
 	strict          bool
 	taps            []func(context.Context, Event)
+	onRunEnd        []func(context.Context, *RunResult, error)
 	name            string
 	thinking        ThinkingConfig
 	toolChoice      ToolChoiceConfig

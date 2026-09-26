@@ -4,10 +4,16 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
-## Unreleased
+## 0.3.1 — 2026-09-26
 
-Fixes from the 2026-09-24 review (full report in the research
-checkout; `WEFT-CODE-REVIEW-2026-09-24.md`).
+The 2026-09-24 review's findings, landed (full report in the research
+checkout; `WEFT-CODE-REVIEW-2026-09-24.md`): all six P2s, the doc
+drift, and the P3 edges that touched files already open. Tags cut
+together: root, openai, anthropic, google at v0.3.1; `mcp` at v0.1.1.
+Everything is fixes — apidiff is clean against v0.3.0 with no
+allowances, and the adapter request bytes are unchanged (the one
+byte-visible change, multi-valued ExtraHeaders, only adds values the
+caller explicitly set).
 
 ### Fixed — `mcp`: untrusted-input robustness (review §2.5, §2.6)
 

@@ -128,29 +128,32 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// before any model call, and every other pending call is denied.
 	// Their results complete the dangling tool message of the earlier
 	// run, so the model sees an ordinary transcript.
+	if err := ctx.Err(); err != nil {
+		return fail(0, err)
+	}
+	// A Resolve carries a payload the caller expects the model to
+	// see: one aimed at a call that is not pending is a programming
+	// error, loud at step 0. The check runs even when nothing is
+	// pending — an empty resume makes every resolved id a breach, and
+	// the check living inside the resume block used to drop such
+	// Resolves silently instead (review 2026-09-24 §2.1). Approve and
+	// Deny keep ignoring unknown ids — the deliberate asymmetry ADR
+	// 0007's 2026-09-22 amendment records. Sorted, so the first breach
+	// is deterministic when several ids miss. The common run carries
+	// no decisions at all, so the pending-id set is only built when
+	// there is something to check it against.
+	if len(cfg.decisions) > 0 {
+		pendingIDs := make(map[string]bool, len(resume))
+		for _, c := range resume {
+			pendingIDs[c.ID] = true
+		}
+		for _, id := range slices.Sorted(maps.Keys(cfg.decisions)) {
+			if cfg.decisions[id].resolved && !pendingIDs[id] {
+				return fail(0, fmt.Errorf("resolve: call %q is not pending in this run's transcript", id))
+			}
+		}
+	}
 	if len(resume) > 0 {
-		if err := ctx.Err(); err != nil {
-			return fail(0, err)
-		}
-		// A Resolve carries a payload the caller expects the model to
-		// see: one aimed at a call that is not pending is a
-		// programming error, loud at step 0. Approve and Deny keep
-		// ignoring unknown ids — the deliberate asymmetry ADR 0007's
-		// 2026-09-22 amendment records. Sorted, so the first breach is
-		// deterministic when several ids miss. The common run carries
-		// no decisions at all, so the pending-id set is only built
-		// when there is something to check it against.
-		if len(cfg.decisions) > 0 {
-			pendingIDs := make(map[string]bool, len(resume))
-			for _, c := range resume {
-				pendingIDs[c.ID] = true
-			}
-			for _, id := range slices.Sorted(maps.Keys(cfg.decisions)) {
-				if cfg.decisions[id].resolved && !pendingIDs[id] {
-					return fail(0, fmt.Errorf("resolve: call %q is not pending in this run's transcript", id))
-				}
-			}
-		}
 		results, pending, sub, err := a.resolvePending(ctx, cfg, resume, seq, emit)
 		if err != nil {
 			return fail(0, err)

@@ -26,6 +26,16 @@ checkout; `WEFT-CODE-REVIEW-2026-09-24.md`).
   `Tool` definitions are unaffected (a string `Out` carries no output
   schema, everything else marshals).
 
+### Fixed — `Resolve` with nothing pending (review §2.1)
+
+- **A `Resolve` against a transcript with zero pending calls now fails
+  the run loudly at step 0**, as `Resolve`'s doc and ADR 0007's
+  2026-09-22 amendment already promised. The resolved-id validation
+  ran only inside the resume block, so with nothing to resume the
+  payload was silently dropped (`err = nil`) — while the same Resolve
+  alongside another pending call failed as documented. Approve/Deny
+  keep ignoring unknown ids, the recorded asymmetry.
+
 ## 0.3.0 — 2026-09-22
 
 The Phase 2a parity round (TODO §2a, `docs/phase2a-plan.md` — not

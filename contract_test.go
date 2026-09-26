@@ -4253,6 +4253,26 @@ func TestResolveNonPendingFails(t *testing.T) {
 	}
 }
 
+// Review 2026-09-24 §2.1: the same loud failure when nothing at all is
+// pending. The validation used to live inside the resume block, so a
+// Resolve against a transcript with zero dangling calls was silently
+// dropped — err = nil, payload gone — while the same Resolve next to
+// another pending call failed as documented.
+func TestResolveWithNothingPendingFails(t *testing.T) {
+	agt := weft.New(wefttest.Script(wefttest.Say("done")))
+	_, err := agt.Generate(context.Background(), weft.Prompt("hi"), weft.Resolve("nonexistent", "payload"))
+	if err == nil {
+		t.Fatal("run succeeded; the Resolve was silently dropped")
+	}
+	if !strings.Contains(err.Error(), `"nonexistent"`) {
+		t.Errorf("err = %v, want it to name the id", err)
+	}
+	var re *weft.RunError
+	if !errors.As(err, &re) || re.Step != 0 {
+		t.Errorf("err = %v, want a RunError at step 0", err)
+	}
+}
+
 // A resolved call follows the denied path, not the executed path: a
 // result in the tool message, no ToolStart, no ToolFinish, no span —
 // nothing executed.

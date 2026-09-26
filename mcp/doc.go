@@ -3,7 +3,12 @@
 // (github.com/modelcontextprotocol/go-sdk, aliased `sdk` in examples —
 // this package keeps the name `mcp`):
 //
-//	tools, _ := mcp.Tools(ctx, sess, mcp.Prefix("gh_"))
+//	tools, err := mcp.Tools(ctx, sess, mcp.Prefix("gh_"))
+//	var skipped *mcp.ImportError
+//	if errors.As(err, &skipped) { // the good tools imported; these did not
+//		slog.Warn("mcp: tools skipped", "err", skipped)
+//		err = nil
+//	}
 //	mcp.AddTools(srv, lookup, refund)
 //	mcp.Serve(srv, agt, "Support agent.")
 //

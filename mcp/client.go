@@ -67,8 +67,9 @@ var ErrToolError = errors.New("mcp: tool returned an error")
 //
 // A tool that cannot be imported — an input schema the core cannot
 // key on (a non-object root, a $ref root, an omitted schema), an
-// empty name, a name repeated in the listing (the first occurrence
-// stands), a nil entry — fails that tool, not the listing: the
+// empty name, a name repeated in the listing (the first importable
+// occurrence stands: an earlier entry that was itself skipped claims
+// nothing), a nil entry — fails that tool, not the listing: the
 // importable tools are returned and the error is an *ImportError
 // naming each skipped tool and why (ADR 0015's 2026-09-27 amendment).
 // The slice is usable whether or not err is nil; the caller decides
@@ -122,8 +123,10 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*wef
 		if seen[name] {
 			// A repeated name in one listing is the same untrusted
 			// input: both would import and weft.New would panic on
-			// the duplicate later. The first occurrence stands, the
-			// repeat is reported.
+			// the duplicate later. The first importable occurrence
+			// stands, the repeat is reported — seen is set only when a
+			// tool is appended, so a skipped first entry does not block
+			// a later valid one under the same name.
 			skipped = append(skipped, SkippedTool{Name: t.Name, Index: index, Err: fmt.Errorf("duplicate name %q in the listing", t.Name)})
 			continue
 		}

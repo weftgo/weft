@@ -250,6 +250,10 @@ properties is **per-tool isolation with a typed report**:
   policy, decided with `errors.As`, not imposed by the bridge.
 - A nil entry and an empty name — untrusted-input shapes that used to
   fail the import — are skipped and reported the same way, by index.
+  A name repeated in one listing is reported too (mcp 0.1.5): the
+  first *importable* occurrence stands — an earlier entry that was
+  itself skipped claims nothing, so a later valid tool under the same
+  name imports (pinned, mcp 0.1.6).
 - A **listing** failure (transport, the ctx ending) is still the
   ordinary error with no tools: nothing was learned about any tool.
 - Existing callers that `return err` on any error see exactly the

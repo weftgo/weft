@@ -336,7 +336,18 @@ import (
 // cross whole (an enum or oneOf reaches the model as sent), the
 // calls forward the model's arguments verbatim, and every remote
 // failure is a tool result the model sees — data, never a run error.
-tools, _ := mcp.Tools(ctx, sess, mcp.Prefix("gh_"), mcp.Policy(weft.Timeout(10*time.Second)))
+tools, err := mcp.Tools(ctx, sess, mcp.Prefix("gh_"), mcp.Policy(weft.Timeout(10*time.Second)))
+// A tool the bridge cannot import fails that tool, not the listing:
+// the good ones are in tools, the skipped ones are named. Warning or
+// stop is your call; a listing failure (transport, ctx) is a plain err.
+var skipped *mcp.ImportError
+if errors.As(err, &skipped) {
+    slog.Warn("mcp: tools skipped", "err", skipped)
+    err = nil
+}
+if err != nil {
+    return err
+}
 
 // Expose: weft tools — or a whole agent, as one named tool with your
 // description — on any MCP server.

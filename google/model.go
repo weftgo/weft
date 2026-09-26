@@ -139,8 +139,10 @@ func ExtraHeaders(h http.Header) Option {
 
 // IdleTimeout is the maximum gap between two stream chunks before the
 // call fails wrapping weft.ErrStreamIdle (default 60s; zero disables
-// it). The ctx deadline stays the hard limit on the whole call — a
-// slow but actively streaming response is never killed.
+// it). The wait for response headers is the first gap — it covers the
+// SDK's transport retries when MaxRetries asked for any. The ctx
+// deadline stays the hard limit on the whole call — a slow but
+// actively streaming response is never killed.
 func IdleTimeout(d time.Duration) Option {
 	return optionFunc(func(c *config) { c.idle = d; c.idleSet = true })
 }

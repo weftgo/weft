@@ -818,3 +818,39 @@ func TestToolsDuplicateNameIsSkippedAndReported(t *testing.T) {
 	}()
 	_ = weft.New(wefttest.Script(wefttest.Say("ok")), tools[0])
 }
+
+// "The first occurrence stands" means the first *importable* one: an
+// earlier entry under the same name that was itself skipped claims
+// nothing, so a later valid tool under that name imports. The report
+// names the skipped entry with its own cause, not as a duplicate.
+func TestToolsSkippedFirstEntryDoesNotBlockLaterSameName(t *testing.T) {
+	ok := func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "called"}}}, nil
+	}
+	sess, stop := servedOpts(t, nil, func(srv *sdk.Server) {
+		// Listed first (the server orders by registered name): a
+		// "search" whose schema the core cannot key on.
+		odd := &sdk.Tool{Name: "search", Description: "odd", InputSchema: json.RawMessage(`{"type":"object"}`)}
+		srv.AddTool(odd, ok)
+		odd.InputSchema = json.RawMessage(`{"type":["object","null"]}`)
+		// Listed second, under the same name on the wire: a valid one.
+		good := &sdk.Tool{Name: "search_", Description: "a remote tool", InputSchema: json.RawMessage(foreignSchema)}
+		srv.AddTool(good, ok)
+		good.Name = "search"
+	})
+	defer stop()
+	tools, err := Tools(context.Background(), sess)
+	var ie *ImportError
+	if !errors.As(err, &ie) || len(ie.Skipped) != 1 {
+		t.Fatalf("err = %v, want an ImportError with one skipped entry", err)
+	}
+	if s := ie.Skipped[0]; s.Name != "search" || s.Index != 0 || strings.Contains(s.Err.Error(), "duplicate") || !strings.Contains(s.Err.Error(), "ParseSchema") {
+		t.Fatalf("skipped = %+v, want entry 0 reported with ParseSchema's cause, not as a duplicate", s)
+	}
+	if len(tools) != 1 || tools[0].Name != "search" {
+		t.Fatalf("tools = %v, want the later valid search imported", tools)
+	}
+	if out, err := tools[0].Invoke(context.Background(), json.RawMessage(`{}`)); err != nil || out != "called" {
+		t.Fatalf("Invoke = %q, %v; want called", out, err)
+	}
+}

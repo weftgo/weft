@@ -4,6 +4,48 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## 0.3.4 — 2026-09-27
+
+The pass over 0.3.1–0.3.3 (and mcp 0.1.4–0.1.5): the fixes hold, one
+of them changed a behaviour it did not document, and two snippets
+drifted. Tags cut together: root, openai, anthropic, google at v0.3.4;
+`mcp` at v0.1.6. Root API unchanged (apidiff clean); the adapters'
+`MaxRetries` gains a meaning for 0.
+
+### Changed — openai, anthropic: `MaxRetries(0)` switches the SDK's retries off
+
+- **0.3.3 put the wait for response headers under the idle timer**, and
+  that wait contains the SDK's own transport retries and their sleeps.
+  The Anthropic SDK honours any `retry-after` uncapped and the OpenAI
+  SDK any under a minute, two retries each by default — so a 429 whose
+  ask the SDK would have slept out and retried successfully now fails
+  at `IdleTimeout` (60s), as `ErrStreamIdle`, with the 429 and its
+  header discarded. `mw.Retry` retries that on backoff rather than the
+  provider's ask; without it the caller reads a stall where the cause
+  was rate limiting. The documented gap "0 cannot disable it — keep a
+  zero-retry client via `Client(c)`" is closed: `MaxRetries(0)` now
+  forwards 0 (a negative n is 0; absent, the SDK default of 2 still
+  applies). That is the pairing for `mw.Retry`, which then owns every
+  retry, honours the ask itself under `MaxWait`, and shows it in `Log`.
+  Pinned in both adapters (a 500 draws one request under 0, three
+  under the default). `IdleTimeout`'s doc on all three adapters, and
+  `mw.Retry`'s, now say the pre-headers wait is the first gap and what
+  it contains; google's SDK retries nothing unless asked, so only its
+  doc changes.
+
+### Fixed — docs
+
+- README's mcp snippet and `mcp/doc.go` taught `tools, _ :=
+  mcp.Tools(...)`, which since mcp 0.1.4 silently discards the
+  `*ImportError` naming the skipped tools — the one outcome the ADR
+  0015 amendment rules out. Both show the `errors.As` idiom the client
+  example already used.
+- "The first occurrence stands" for a repeated mcp tool name is the
+  first *importable* occurrence: a skipped earlier entry claims
+  nothing, so a later valid tool under that name imports. Stated in
+  `Tools`' doc, the ADR amendment, and pinned
+  (`TestToolsSkippedFirstEntryDoesNotBlockLaterSameName`).
+
 ## mcp 0.1.5 — 2026-09-27
 
 Reviewing 0.1.4 found two defects in the same untrusted-input class;

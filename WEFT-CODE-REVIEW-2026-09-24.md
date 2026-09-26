@@ -141,3 +141,31 @@ calling the remote tool `""` (present since the 0.3.1 fix); and a name
 repeated in one listing imported twice, leaving `weft.New` to panic on
 the duplicate. The first occurrence now stands and the repeat is
 reported; the example client shows the `errors.As` idiom.
+
+## 11. Pass over 0.3.1–0.3.3 and mcp 0.1.4–0.1.5 (2026-09-27, landed as v0.3.4 / mcp v0.1.6)
+
+Every fix in the three rounds re-read against its claim and its pin;
+build, vet, and every test green in the workspace and per module; all
+tags on the expected commits and pushed; the sub-module tags resolve
+outside the workspace (`GOWORK=off`: mcp reports the root at v0.3.3,
+anthropic builds from the proxy). The reader-goroutine open is
+race-free (the stream field is written before the first handshake and
+read only after a chunk or after wait); the fixture rename to five
+digits breaks no recording (the replayer matches by hashed request
+key, not filename); `fitsDuration` is strict at the boundary (checked
+the largest float below the bound for both units — neither wraps).
+
+One P2, a behaviour change the 0.3.3 fix did not document: the
+pre-headers wait now under the idle timer contains the SDK's own
+transport retries, and the Anthropic SDK honours any `retry-after`
+uncapped (the OpenAI SDK any under a minute), two retries by default —
+so a long ask that used to be slept out and retried now fails at
+`IdleTimeout` as `ErrStreamIdle` with the 429 discarded. Decided: keep
+the timer (the stall it closed is real), close the documented gap
+instead — `MaxRetries(0)` now forwards 0 so `mw.Retry` can own retries
+and honour the ask itself; `IdleTimeout` and `mw.Retry` docs say what
+the first gap contains. Pinned (one request under 0, three under the
+default). Two P3 doc drifts: the README and `mcp/doc.go` snippets
+discarded the `*ImportError` with `_`; "first occurrence stands" is
+the first importable one, now stated and pinned.
+

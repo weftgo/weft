@@ -22,22 +22,23 @@ import (
 type Option interface{ apply(*config) }
 
 type config struct {
-	client       *anthropic.Client
-	baseURL      string
-	apiKey       string
-	maxTokens    int
-	temperature  float64
-	tempSet      bool
-	topP         float64
-	topPSet      bool
-	stop         []string
-	extraBody    map[string]any
-	extraHeaders http.Header
-	idle         time.Duration
-	idleSet      bool
-	maxRetries   int
-	thinking     bool
-	promptCache  bool
+	client        *anthropic.Client
+	baseURL       string
+	apiKey        string
+	maxTokens     int
+	temperature   float64
+	tempSet       bool
+	topP          float64
+	topPSet       bool
+	stop          []string
+	extraBody     map[string]any
+	extraHeaders  http.Header
+	idle          time.Duration
+	idleSet       bool
+	maxRetries    int
+	maxRetriesSet bool
+	thinking      bool
+	promptCache   bool
 }
 
 type optionFunc func(*config)
@@ -91,19 +92,28 @@ func Stop(seqs ...string) Option {
 
 // IdleTimeout is the maximum gap between two stream events before the
 // call fails wrapping weft.ErrStreamIdle (default 60s; zero disables
-// it). The ctx deadline stays the hard limit on the whole call — a
-// slow but actively streaming response is never killed.
+// it). The wait for response headers is the first gap: it covers the
+// SDK's transport retries and their sleeps too (a 429 whose retry-after
+// the SDK honours sleeps inside it), so a retry sequence longer than
+// the timeout fails ErrStreamIdle with the provider's error discarded —
+// hand retries to mw.Retry with MaxRetries(0), or raise the timeout.
+// The ctx deadline stays the hard limit on the whole call — a slow but
+// actively streaming response is never killed.
 func IdleTimeout(d time.Duration) Option {
 	return optionFunc(func(c *config) { c.idle = d; c.idleSet = true })
 }
 
-// MaxRetries forwards to the SDK's transport retry configuration
-// (429/5xx/connection errors only). Only n > 0 is forwarded: the SDK's
-// own default (2) applies otherwise, and 0 cannot disable it — keep a
-// zero-retry client via Client(c) if you need one. The weft loop never
+// MaxRetries sets the SDK's transport retry count (429/5xx/connection
+// errors only; the SDK's own default is 2 when the option is absent).
+// MaxRetries(0) switches the SDK's retries off — the pairing for
+// mw.Retry, which then owns every retry and reads the provider's
+// retry-after itself instead of the SDK sleeping on it under the idle
+// timer (see IdleTimeout). A negative n is 0. The weft loop never
 // retries a model call; logic retries are model-seam middleware
 // (TODO §4.1).
-func MaxRetries(n int) Option { return optionFunc(func(c *config) { c.maxRetries = n }) }
+func MaxRetries(n int) Option {
+	return optionFunc(func(c *config) { c.maxRetries = max(n, 0); c.maxRetriesSet = true })
+}
 
 // Thinking enables adaptive thinking: the request carries
 // thinking:{"type":"adaptive"} and the stream surfaces thinking blocks
@@ -217,7 +227,7 @@ func Model(name string, opts ...Option) weft.Model {
 	if cfg.apiKey != "" {
 		sdkOpts = append(sdkOpts, option.WithAPIKey(cfg.apiKey))
 	}
-	if cfg.maxRetries > 0 {
+	if cfg.maxRetriesSet {
 		sdkOpts = append(sdkOpts, option.WithMaxRetries(cfg.maxRetries))
 	}
 	m.client = anthropic.NewClient(sdkOpts...)

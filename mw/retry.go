@@ -99,7 +99,12 @@ func Classifier(fn func(error) bool) RetryOption {
 // (retry-after-ms, retry-after, and x-should-retry headers). A failure
 // after events were yielded is never retried: part of the reply has
 // already reached the loop. Exhausted retries return the last error
-// wrapped, so errors.As on the SDK's type still works.
+// wrapped, so errors.As on the SDK's type still works. Pair Retry
+// with the adapter's MaxRetries(0): the SDK's retries sleep on the
+// provider's retry-after inside the adapter's idle timer (the wait for
+// response headers is one gap), so a long ask fails ErrStreamIdle with
+// the 429 discarded — here the same ask is honoured, capped by MaxWait,
+// and visible in Log.
 func Retry(opts ...RetryOption) weft.ModelMiddleware {
 	cfg := retryConfig{
 		maxRetries: defaultMaxRetries,

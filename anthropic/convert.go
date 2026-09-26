@@ -302,8 +302,8 @@ func assistantBlocks(msg weft.Message) []anthropic.ContentBlockParamUnion {
 	return blocks
 }
 
-// convertTool converts a ToolDef once; results are cached by pointer on
-// the model (ToolDef is immutable after construction).
+// convertTool converts a ToolDef to the SDK's tool type. Conversion
+// runs per request (ADR 0013: the pointer-keyed cache never evicted).
 func convertTool(t *weft.ToolDef) anthropic.ToolUnionParam {
 	tool := anthropic.ToolParam{Name: t.Name}
 	if t.Description != "" {

@@ -149,8 +149,8 @@ the reference set:
 agt := weft.New(model,
     weft.WrapModel(
         mw.Log(logger),               // request summary + finish, Debug level
+        mw.Fallback(backupModel),     // fail over once Retry has given up on the primary
         mw.Retry(mw.MaxRetries(3)),   // 429/5xx/net errors; retry-after honoured; backoff with jitter
-        mw.Fallback(backupModel),     // another model when this one fails before yielding
         mw.RepairJSON(),              // close a truncated tool-call argument object once
     ),
     weft.WrapTools(

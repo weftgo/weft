@@ -15,7 +15,8 @@
 // Order matters: Fallback outside Retry retries the primary to exhaustion
 // before switching models (retry, then fail over). The reverse — Retry
 // outside Fallback — retries the fallback chain as a whole, so the primary
-// gets exactly one attempt and Retry never sees its transient failures.
+// gets one attempt per retry cycle (up to MaxRetries+1 in total, each
+// followed by the backup) and Retry never sees its transient failures.
 //
 // Tool seam — around every tool call the loop dispatches:
 //

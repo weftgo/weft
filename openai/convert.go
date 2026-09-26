@@ -232,8 +232,8 @@ func assistantMessage(msg weft.Message) (openai.ChatCompletionMessageParamUnion,
 	return openai.ChatCompletionMessageParamUnion{OfAssistant: am}, true
 }
 
-// convertTool converts a ToolDef once; results are cached by pointer on
-// the model (ToolDef is immutable after construction).
+// convertTool converts a ToolDef to the SDK's tool type. Conversion
+// runs per request (ADR 0013: the pointer-keyed cache never evicted).
 func convertTool(t *weft.ToolDef) openai.ChatCompletionToolParam {
 	fn := shared.FunctionDefinitionParam{Name: t.Name}
 	if t.Description != "" {

@@ -68,6 +68,47 @@ checkout; `WEFT-CODE-REVIEW-2026-09-24.md`).
   subset of the inclusive `OutputTokens`, per the 2a.4 splits rule —
   pinned on the extended `thinking_then_tool_use` fixture.
 
+### Fixed — the docs the review caught drifting (§3)
+
+- **README's flagship middleware snippet now teaches the order
+  `mw/doc.go` documents** — `Log, Fallback, Retry, RepairJSON`. As
+  shipped it showed `Retry` outside `Fallback`, so the primary's
+  429/503 never reached Retry's classifier and the snippet's own
+  "retry-after honoured" comment was wrong for the primary.
+  `mw/doc.go`'s "the primary gets exactly one attempt" is corrected
+  too (one per retry cycle, up to MaxRetries+1).
+- **Three stale comments still describing the tool cache deleted on
+  2026-09-18** (anthropic's Model doc and both adapters'
+  `convertTool`) now state the per-request conversion ADR 0013
+  records.
+
+### Fixed — P3 edges the same review filed (§3)
+
+- **`mw.Retry` rejects a `retry-after` it cannot convert** — `1e19`,
+  `Infinity`, `NaN` parse as floats, and the int64 conversion wraps
+  them negative, slipping past the `MaxWait` cap and sleeping zero:
+  a misbehaving gateway got up to MaxRetries+1 back-to-back requests
+  instead of the documented fail-fast. Such asks now report no
+  retry-after and Retry falls back to backoff; `delay` keeps a
+  defensive non-negative check.
+- **`mcp` expose path forwards the client's argument bytes verbatim.**
+  `argumentBytes` re-marshalled the raw wire value, compacting
+  whitespace and escaping `<`, `>`, `&` — a RawTool echoing or
+  hashing its arguments saw different bytes than the client sent.
+  The raw bytes go through untouched (empty/null still become `{}`),
+  pinned byte-for-byte.
+- **The governance examples are safe to copy**: the response-cache
+  example's map now carries the mutex the Agent's concurrent-reuse
+  promise requires, and the PII scrubber scrubs `err.Error()` too —
+  the loop renders error text into the transcript verbatim, so a
+  success-only scrubber leaked through every failure.
+- **`wefttest` fixture names pad the sequence to five digits**
+  (`00001-x.json`, ADR 0017 amendment): the replayer loads in listing
+  order, and the three-digit pad sorted `1000-x` before `999-x`, so a
+  1000+-request recording with a recurring key replayed out of order.
+  Replay matches on the key, so old-name fixtures still replay; the
+  committed ones were renamed.
+
 ## 0.3.0 — 2026-09-22
 
 The Phase 2a parity round (TODO §2a, `docs/phase2a-plan.md` — not

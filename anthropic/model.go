@@ -178,7 +178,7 @@ const (
 
 // Model returns a weft.Model backed by the Anthropic Messages API. A
 // Model is immutable and safe for concurrent runs; tool definitions
-// are converted once per *ToolDef and cached by pointer.
+// are converted per request (ADR 0013).
 func Model(name string, opts ...Option) weft.Model {
 	var cfg config
 	for _, o := range opts {

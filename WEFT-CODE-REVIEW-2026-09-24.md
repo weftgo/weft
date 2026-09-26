@@ -64,3 +64,51 @@ push. Gates at both v0.3.2 commits: build/vet/test/-race green in all
 six modules, deny gate green, golangci-lint 0 issues, apidiff clean
 against v0.3.1. Tags cut and pushed: root/openai/anthropic/google at
 v0.3.2, mcp at v0.1.2.
+
+## 8. The deferred P3s (2026-09-26, landed as v0.3.3)
+
+Every §3 item the v0.3.1 round left open, landed — except the mcp
+schema-import skip-and-aggregate: ADR 0015 decides the opposite ("a
+schema that cannot parse fails the whole import naming the tool"), so
+that one waits for an ADR, not a patch. What landed, each pinned and
+each pin mutation-checked (fails with the fix reverted):
+
+- google folds `toolUsePromptTokenCount` into InputTokens (9+3 on the
+  tool round-trip fixture).
+- The idle timer covers the pre-headers stall in openai and anthropic:
+  the request opens on the reader goroutine, as google's did. New
+  conformance case `idle_timeout_before_headers` (SilentServer), green
+  on all three — the openai and anthropic pins fail on the old code.
+- ToolChoice with no catalog sends nothing on openai and google (the
+  anthropic guard ported); empty-user-message rules cross-referenced.
+- A nil `*ToolDef` at `New` panics, matching the runtime `ErrNilTool`.
+- `Golden -update` logs what it created or rewrote; `mw.Allow(nil)`
+  documented; the mcp float64 rounding beyond 2^53 pinned.
+- Conformance `provider_error`: a 429 with Retry-After reaches the
+  caller with the SDK's error type on the chain (`mw.HTTPStatus` on
+  all three; `mw.RetryAfter` where the SDK keeps the response —
+  `Caps.ErrorHeaders`, false for genai whose APIError carries no
+  headers). Retry's header extraction now runs against real SDK error
+  types offline: part of the live debt retired.
+
+**A defect the corpus row found (P2 by the review's own scale):** an
+embedded pointer to an unexported struct type (`struct{ *base }`) was
+flattened into the schema, but encoding/json can never decode into it
+("cannot set embedded pointer to unexported struct type") — every weft
+schema decodes into a zero value, so the fields were advertised yet
+unreachable, and every argument the model sent came back as
+`field "id": expected string, got string`. `Tool`/`Output[T]` now
+panic at construction naming the type and the fix; an exported
+embedded pointer, `time.Duration` (integer nanoseconds), and nested
+maps are pinned working.
+
+Harness note: `SilentServer` must drain the request body before
+parking — net/http starts the disconnect-detecting background read
+only once the body is consumed, and a handler that writes nothing
+otherwise never returns, hanging `Server.Close` (found as a 10-minute
+test timeout during this round; the adapter code was never at fault).
+
+Gates: build/vet/-race/lint/deny green in all six modules, fuzz clean,
+apidiff additive against v0.3.2 (SilentServer, ErrorServer,
+Caps.ErrorHeaders). Tags cut and pushed: root/openai/anthropic/google
+at v0.3.3, mcp at v0.1.3; sub-modules require root v0.3.3.

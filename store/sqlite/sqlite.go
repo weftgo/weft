@@ -367,7 +367,7 @@ func (s *Store) queryRuns(ctx context.Context, where string, args []any, before 
 	if err != nil {
 		return nil, err
 	}
-	defer rs.Close()
+	defer func() { _ = rs.Close() }()
 	var out []store.RunRecord
 	now := time.Now().UTC()
 	for rs.Next() {
@@ -425,7 +425,7 @@ func (s *Store) events(ctx context.Context, id string) ([]weft.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rs.Close()
+	defer func() { _ = rs.Close() }()
 	var out []weft.Event
 	for rs.Next() {
 		var raw string

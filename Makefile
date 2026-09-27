@@ -6,7 +6,7 @@ GO ?= go
 # SDKs are required only by the adapter modules.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-selftest offline fuzz
+.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-store apidiff-selftest offline fuzz
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -41,8 +41,14 @@ tools:
 apidiff: tools
 	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh
 
-# Exercises the gate's own failure modes — a broken tree must fail it,
-# never read green.
+# The store module's half of the gate — vs the last store/v* tag, from
+# the store's second tag on (plan §3.1). Other sub-modules join the
+# same way when they tag.
+apidiff-store: tools
+	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh "" store
+
+# Exercises the gates' own failure modes — a broken tree must fail
+# them, never read green.
 apidiff-selftest: tools
 	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff-selftest.sh
 

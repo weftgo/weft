@@ -85,6 +85,10 @@ jobs:
         run: scripts/apidiff-selftest.sh
       - name: apidiff (root module vs last tag)
         run: scripts/apidiff.sh
+      # The store module joined the gate at its second tag, store/v0.1.1
+      # (the store plan §3.1); adapters get their own step when they tag.
+      - name: apidiff (store module vs last store tag)
+        run: scripts/apidiff.sh "" store
 
   # The offline gate (ADR 0013's kill-switch clause): the whole
   # workspace stays green under WEFT_MODEL_REQUESTS=deny — suites that

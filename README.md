@@ -303,7 +303,7 @@ model returned, because a log is the caller's
 
 ### Recording runs
 
-Module `weft/store` (v0.1.0) records what a run did and reads it back:
+Module `weft/store` (v0.1.1) records what a run did and reads it back:
 one record per run — identity (agent, model, manifest hash, tags),
 every event in order, and the result, kept on failure as the partial
 transcript. Install `store.Record` on every agent of a fleet; a

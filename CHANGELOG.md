@@ -4,7 +4,7 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
-## store 0.1.1 — unreleased (review pass over 0.1.0)
+## store 0.1.1 — 2026-09-27 (review pass over 0.1.0)
 
 ### Fixed — the durability races a second look found
 

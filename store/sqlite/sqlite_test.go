@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,6 +47,15 @@ func TestMigrations(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := s.(*Store).db
+	// WAL is the file's persistent mode — set once by the first Open,
+	// read back as "wal" by every later one (the Inspector's handle).
+	var mode string
+	if err := db.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		t.Fatalf("journal_mode = %q, want wal", mode)
+	}
 	var n int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatal(err)
@@ -70,6 +80,49 @@ func TestMigrations(t *testing.T) {
 	_, err = Open(path)
 	if !errors.Is(err, ErrNewerSchema) {
 		t.Errorf("Open on a newer schema: err = %v, want ErrNewerSchema", err)
+	}
+}
+
+// Two processes opening the same fresh file both migrate: the loser's
+// stale pre-lock read must not fail it once the winner's transaction
+// has landed — the version is re-checked inside each migration's
+// transaction, so concurrent first Opens all succeed and the file
+// ends with one applied migration.
+func TestConcurrentFirstOpen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fresh.db")
+	const opens = 8
+	errCh := make(chan error, opens)
+	var wg sync.WaitGroup
+	for i := 0; i < opens; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s, err := Open(path)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			defer func() { _ = s.(*Store).db.Close() }()
+			if _, err := s.List(context.Background(), store.Query{}); err != nil {
+				errCh <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Error(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := s.(*Store).db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("after %d concurrent first Opens, %d applied migrations, want 1", opens, n)
 	}
 }
 
@@ -148,5 +201,32 @@ func TestTwoHandlesOneFile(t *testing.T) {
 	}
 	if got.Status != store.Interrupted {
 		t.Errorf("stale row through second handle = %q, want interrupted", got.Status)
+	}
+}
+
+// A result document the reader cannot decode fails Get loudly, naming
+// the run — never a record that quietly reads as if the run produced
+// nothing — while List, which never reads results, still shows it.
+func TestCorruptResultLoudOnGet(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "corrupt.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := s.Save(ctx, store.RunRecord{ID: "run-corrupt", Agent: "a", Started: time.Now().UTC(), Status: store.Succeeded}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.(*Store).db.Exec(`UPDATE runs SET result = '{"weft":1,"result":{"messages":"not-a-list"}}' WHERE id = 'run-corrupt'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Get(ctx, "run-corrupt"); err == nil || !strings.Contains(err.Error(), "run-corrupt") {
+		t.Errorf("Get on a corrupt result: err = %v, want an error naming the run", err)
+	}
+	p, err := s.List(ctx, store.Query{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Total != 1 || len(p.Runs) != 1 {
+		t.Errorf("List = %+v, want the run listed — List never reads results", p)
 	}
 }

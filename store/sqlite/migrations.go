@@ -3,11 +3,14 @@ package sqlite
 import (
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	msqlite "modernc.org/sqlite"
 )
 
 // The migrations are embedded SQL files applied in order on Open,
@@ -53,6 +56,47 @@ func highestMigration() int {
 	return versions[len(versions)-1]
 }
 
+// setWAL switches the database file to WAL — once, here, not per
+// connection. The mode switch needs a brief exclusive lock that
+// SQLite does not take the busy handler's patience for, so concurrent
+// first Opens (two processes on a fresh file) can each see SQLITE_BUSY
+// where every other statement would simply wait. The loop converges:
+// whichever process wins the switch writes WAL into the file header,
+// and every later attempt reads mode "wal" back and returns — so the
+// retry budget only has to outlast the switch itself, and a BUSY that
+// outlives the budget still fails Open loudly.
+func setWAL(db *sql.DB) error {
+	for try := 0; ; try++ {
+		var mode string
+		if err := db.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil {
+			return err
+		}
+		if strings.EqualFold(mode, "wal") {
+			return nil
+		}
+		if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err == nil {
+			return nil
+		} else if !isBusy(err) || try >= 20 {
+			return err
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+// isBusy reports whether err is SQLite's SQLITE_BUSY or SQLITE_LOCKED,
+// including their extended codes (the low byte carries the primary).
+func isBusy(err error) bool {
+	var serr *msqlite.Error
+	if !errors.As(err, &serr) {
+		return false
+	}
+	switch serr.Code() & 0xff {
+	case 5, 6: // SQLITE_BUSY, SQLITE_LOCKED
+		return true
+	}
+	return false
+}
+
 // migrate applies pending migrations, each in its own transaction, and
 // refuses a schema ahead of this binary.
 func migrate(db *sql.DB) error {
@@ -85,6 +129,20 @@ func migrate(db *sql.DB) error {
 		tx, err := db.Begin()
 		if err != nil {
 			return err
+		}
+		// Re-read the applied version inside the transaction: another
+		// process may have migrated this file between the read above
+		// and the write lock this Begin took (two first Opens on a
+		// fresh file). The loser skips what the winner applied instead
+		// of failing on a table or primary key that now exists.
+		var applied sql.NullInt64
+		if err := tx.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&applied); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if applied.Valid && int(applied.Int64) >= v {
+			_ = tx.Rollback()
+			continue
 		}
 		if _, err := tx.Exec(string(body)); err != nil {
 			_ = tx.Rollback()

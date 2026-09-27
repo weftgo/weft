@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -40,15 +39,17 @@ type Store struct {
 
 // Open opens (creating if needed) the database at path and brings its
 // schema up to date. ":memory:" works — an in-process database for
-// tests. The connection is opened with WAL, synchronous=NORMAL,
-// busy_timeout=30000, foreign_keys=ON, and immediate write
-// transactions (preventing deferred-to-writer upgrade deadlocks —
-// Crush's set), and the handle allows a single connection so every
-// write is serialized.
+// tests. Connections carry synchronous=NORMAL, busy_timeout=30000,
+// foreign_keys=ON, and immediate write transactions (preventing
+// deferred-to-writer upgrade deadlocks — Crush's set), and the handle
+// allows a single connection so every write is serialized. WAL is not
+// a connection pragma here: it is a persistent property of the file,
+// switched once by the first Open (setWAL) — the DSN-pragma form races
+// on a fresh file, where concurrent mode switches take an exclusive
+// lock SQLite does not take the busy handler's patience for.
 func Open(path string) (store.Store, error) {
 	dsn := "file:" + path +
 		"?_txlock=immediate" +
-		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=synchronous(NORMAL)" +
 		"&_pragma=busy_timeout(30000)" +
 		"&_pragma=foreign_keys(ON)"
@@ -72,6 +73,12 @@ func Open(path string) (store.Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
+	if path != ":memory:" {
+		if err := setWAL(db); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	}
 	if err := migrate(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -120,6 +127,17 @@ func (s *Store) Save(ctx context.Context, r store.RunRecord) error {
 		}
 		result = sql.NullString{String: string(b), Valid: true}
 	}
+	heartbeat := r.Heartbeat
+	if heartbeat.IsZero() {
+		// A row without a heartbeat is not a corpse: the last write is
+		// the start (or now, for a record with no start either), the
+		// same default Memory applies, so both backends derive the
+		// same status from the same record.
+		heartbeat = r.Started
+		if heartbeat.IsZero() {
+			heartbeat = time.Now().UTC()
+		}
+	}
 	finished := sql.NullString{Valid: false}
 	if !r.Finished.IsZero() {
 		finished = sql.NullString{String: formatTime(r.Finished), Valid: true}
@@ -146,7 +164,7 @@ func (s *Store) Save(ctx context.Context, r store.RunRecord) error {
 		 usage=excluded.usage, tags=excluded.tags, result=excluded.result, err=excluded.err,
 		 format=excluded.format`,
 		r.ID, nullString(r.ParentID), nullString(r.ParentCallID), r.Agent, string(model),
-		r.ManifestHash, r.WeftVersion, formatTime(r.Started), finished, formatTime(r.Heartbeat),
+		r.ManifestHash, r.WeftVersion, formatTime(r.Started), finished, formatTime(heartbeat),
 		string(status), steps, string(usageJSON), tags, result, errStr, store.FormatVersion)
 	if err != nil {
 		return err
@@ -167,18 +185,22 @@ func (s *Store) Append(ctx context.Context, id string, ev ...weft.Event) error {
 	if len(ev) == 0 {
 		return nil
 	}
-	var exists bool
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE id = ?)`, id).Scan(&exists); err != nil {
-		return err
-	}
-	if !exists {
-		return fmt.Errorf("%w: %s", store.ErrNotFound, id)
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer rollback(tx)
+	// The existence check rides inside the transaction: a Delete
+	// racing this call is ordered before or after the whole append,
+	// never between the check and the insert (which the FK would turn
+	// into a constraint error instead of ErrNotFound).
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE id = ?)`, id).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("%w: %s", store.ErrNotFound, id)
+	}
 	if err := appendEvents(ctx, tx, id, ev); err != nil {
 		return err
 	}
@@ -232,7 +254,7 @@ func (s *Store) mergeTail(ctx context.Context, tx *sql.Tx, r store.RunRecord) er
 // know fails with store.ErrUnknownEvent naming it and the run — loud
 // over silent (ADR 0010 §2.5).
 func (s *Store) Get(ctx context.Context, id string) (store.RunRecord, error) {
-	rows, err := s.queryRuns(ctx, `WHERE id = ?`, []any{id}, time.Time{}, 1)
+	rows, err := s.queryRuns(ctx, `WHERE id = ?`, []any{id}, time.Time{}, 1, true)
 	if err != nil {
 		return store.RunRecord{}, err
 	}
@@ -258,13 +280,9 @@ func (s *Store) List(ctx context.Context, q store.Query) (store.Page, error) {
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs `+where, args...).Scan(&total); err != nil {
 		return store.Page{}, err
 	}
-	rows, err := s.queryRuns(ctx, where, args, q.Before, limit(q.Limit))
+	rows, err := s.queryRuns(ctx, where, args, q.Before, limit(q.Limit), false)
 	if err != nil {
 		return store.Page{}, err
-	}
-	for i := range rows {
-		rows[i].Events = nil
-		rows[i].Result = nil
 	}
 	return store.Page{Runs: rows, Total: total}, nil
 }
@@ -295,9 +313,14 @@ func formatTime(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000000000Z")
 }
 
+// parseTime reads the schema's fixed form and, for a row another
+// writer of the format produced, plain RFC 3339 with any fraction.
 func parseTime(s string) time.Time {
-	t, _ := time.Parse("2006-01-02T15:04:05.000000000Z", s)
-	return t
+	if t, err := time.Parse("2006-01-02T15:04:05.000000000Z", s); err == nil {
+		return t
+	}
+	t, _ := time.Parse(time.RFC3339Nano, s)
+	return t.UTC()
 }
 
 func limit(n int) int {
@@ -342,20 +365,30 @@ func whereClause(q store.Query) (string, []any) {
 		args = append(args, q.ParentID)
 	}
 	for k, v := range q.Tags {
-		// The key is quoted into the JSON path with escaped quotes;
-		// the value stays a bound parameter.
-		path := `$.` + strconv.Quote(k)
-		conds = append(conds, "json_extract(tags, ?) = ?")
-		args = append(args, path, v)
+		// Key and value are both bound parameters: a JSON path would
+		// have to quote the key into SQL, and SQLite's path grammar
+		// does not unescape what Go would escape. json_each walks the
+		// object instead — a missing key never matches, whatever the
+		// queried value (Memory's rule too).
+		conds = append(conds, "EXISTS (SELECT 1 FROM json_each(runs.tags) WHERE json_each.key = ? AND json_each.value = ?)")
+		args = append(args, k, v)
 	}
 	return "WHERE " + strings.Join(conds, " AND "), args
 }
 
 // queryRuns selects run rows for a WHERE clause, newest first, with
-// the Before cursor and a limit applied.
-func (s *Store) queryRuns(ctx context.Context, where string, args []any, before time.Time, n int) ([]store.RunRecord, error) {
+// the Before cursor and a limit applied. withResult selects and
+// decodes the result document (Get); List leaves the column out of
+// the SELECT entirely — the transcript is the bulk of a row, and a
+// page that reads it only to drop it is the list-body cost the format
+// exists to avoid.
+func (s *Store) queryRuns(ctx context.Context, where string, args []any, before time.Time, n int, withResult bool) ([]store.RunRecord, error) {
+	resultCol := "NULL"
+	if withResult {
+		resultCol = "result"
+	}
 	q := `SELECT id, parent_id, parent_call_id, agent, model, manifest_hash, weft_version,
-	      started, finished, heartbeat_at, status, steps, usage, tags, result, err
+	      started, finished, heartbeat_at, status, steps, usage, tags, ` + resultCol + ` AS result, err
 	      FROM runs ` + where
 	if !before.IsZero() {
 		q += ` AND started < ?`
@@ -396,10 +429,19 @@ func scanRun(rs *sql.Rows, now time.Time) (store.RunRecord, error) {
 	}
 	rec.Steps = steps
 	rec.ParentID, rec.ParentCallID = parent.String, parentCall.String
-	_ = json.Unmarshal([]byte(model), &rec.Model)
-	_ = json.Unmarshal([]byte(usage), &rec.Usage)
+	// Every column the store wrote as JSON reads back loudly (ADR 0010
+	// §2.5): a row this reader cannot decode names itself and the
+	// column instead of coming back with blanks.
+	if err := json.Unmarshal([]byte(model), &rec.Model); err != nil {
+		return store.RunRecord{}, fmt.Errorf("sqlite: run %s: model column: %w", rec.ID, err)
+	}
+	if err := json.Unmarshal([]byte(usage), &rec.Usage); err != nil {
+		return store.RunRecord{}, fmt.Errorf("sqlite: run %s: usage column: %w", rec.ID, err)
+	}
 	if tags != "" && tags != "{}" {
-		_ = json.Unmarshal([]byte(tags), &rec.Tags)
+		if err := json.Unmarshal([]byte(tags), &rec.Tags); err != nil {
+			return store.RunRecord{}, fmt.Errorf("sqlite: run %s: tags column: %w", rec.ID, err)
+		}
 	}
 	rec.Started = parseTime(started)
 	rec.Heartbeat = parseTime(heartbeat)
@@ -407,9 +449,14 @@ func scanRun(rs *sql.Rows, now time.Time) (store.RunRecord, error) {
 		rec.Finished = parseTime(finished.String)
 	}
 	if result.Valid && result.String != "" && result.String != "null" {
-		if res, err := store.UnmarshalResult([]byte(result.String)); err == nil {
-			rec.Result = res
+		// Loud over silent (ADR 0010 §2.5): a result the reader cannot
+		// decode is an error naming the run, not a record that quietly
+		// reads as if the run produced nothing.
+		res, err := store.UnmarshalResult([]byte(result.String))
+		if err != nil {
+			return store.RunRecord{}, fmt.Errorf("sqlite: run %s: result document: %w", rec.ID, err)
 		}
+		rec.Result = res
 	}
 	if errTx.Valid {
 		rec.Err = errTx.String

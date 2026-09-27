@@ -69,6 +69,12 @@ func Tags(kv map[string]string) RecordOption { return tagsOption(kv) }
 // the record, not only in the log. Record never retries a write: an
 // event lost by a failed append stays lost, and the record says so.
 func Record(s Store, opts ...RecordOption) weft.Option {
+	if s == nil {
+		// A nil store is a construction bug, not a degraded recording:
+		// fail at the call site (Subagent's nil-child panic is the
+		// precedent) instead of on every write the tap then makes.
+		panic("store: Record called with a nil Store")
+	}
 	r := &recorder{
 		store:          s,
 		tags:           map[string]string{},
@@ -99,13 +105,18 @@ type recorder struct {
 	hashes map[*weft.Agent]string
 }
 
-// runLog is one open run's recording state.
+// runLog is one open run's recording state. rec, degraded, and stopped
+// are guarded by the recorder's mutex; saveMu serializes the row
+// writes that race — a heartbeat touch against the closing write — so
+// a touch that copied the running row can never land after the row
+// that closed the run and resurrect it.
 type runLog struct {
 	rec      RunRecord
 	logger   *slog.Logger
 	degraded string // the first store error; "" while healthy
 	stopped  bool   // ticker stopped; the run's recording is closed
 	stop     chan struct{}
+	saveMu   sync.Mutex // touch and end: one row write at a time, end's last
 }
 
 func (r *recorder) tap(ctx context.Context, ev weft.Event) {
@@ -171,6 +182,14 @@ func (r *recorder) start(ctx context.Context, e weft.RunStart) {
 	if r.logs == nil {
 		r.logs = map[string]*runLog{}
 	}
+	// The same id twice means the earlier run under it never ended
+	// here (its OnRunEnd never fired): stop that log's ticker before
+	// replacing it, or the orphan keeps re-saving its stale running
+	// row under the id and clobbers this run's.
+	if old := r.logs[e.ID]; old != nil && !old.stopped {
+		old.stopped = true
+		close(old.stop)
+	}
 	r.logs[e.ID] = l
 	r.mu.Unlock()
 	if err := r.store.Save(context.Background(), l.rec); err != nil {
@@ -199,7 +218,14 @@ func (r *recorder) end(_ context.Context, res *weft.RunResult, err error) {
 	if l == nil {
 		return // never started (no RunStart observed); nothing to close
 	}
+	// The closing write waits for a heartbeat touch already in flight
+	// (it copied the running row before stopped was set) and lands
+	// after it — the row's final state is the run's outcome, never a
+	// stale heartbeat that would read as interrupted 30 s later.
+	l.saveMu.Lock()
+	defer l.saveMu.Unlock()
 	now := r.now()
+	r.mu.Lock()
 	l.rec.Finished = now
 	l.rec.Heartbeat = now
 	l.rec.Result = res
@@ -216,7 +242,9 @@ func (r *recorder) end(_ context.Context, res *weft.RunResult, err error) {
 			l.rec.Err = "store degraded: " + l.degraded
 		}
 	}
-	if serr := r.store.Save(context.Background(), l.rec); serr != nil {
+	rec := l.rec
+	r.mu.Unlock()
+	if serr := r.store.Save(context.Background(), rec); serr != nil {
 		r.degrade(l, "save", serr)
 	}
 }
@@ -245,8 +273,13 @@ func (r *recorder) startTicker(ctx context.Context, l *runLog) {
 	}()
 }
 
-// touch re-saves the row with a fresh heartbeat.
+// touch re-saves the row with a fresh heartbeat. It holds the run's
+// write lock from the stopped check through the Save, so the closing
+// write (end) either precedes it — and the check sees stopped — or
+// waits for it and lands last.
 func (r *recorder) touch(l *runLog) {
+	l.saveMu.Lock()
+	defer l.saveMu.Unlock()
 	r.mu.Lock()
 	if l.stopped {
 		r.mu.Unlock()

@@ -34,7 +34,12 @@ func MarshalResult(r *weft.RunResult) ([]byte, error) {
 }
 
 // UnmarshalResult decodes a result document written by MarshalResult
-// (or by any writer of the format — the tags are the contract).
+// (or by any writer of the format — the tags are the contract). The
+// envelope's version integer must equal FormatVersion: a document from
+// a newer weft fails with ErrNewerFormat instead of being decoded with
+// this build's tags (ADR 0010 §2.3), and a document with a result but
+// no matching envelope was never written by this format — both loud,
+// never a silent misread.
 func UnmarshalResult(b []byte) (*weft.RunResult, error) {
 	var env envelope
 	if err := json.Unmarshal(b, &env); err != nil {
@@ -42,6 +47,14 @@ func UnmarshalResult(b []byte) (*weft.RunResult, error) {
 	}
 	if env.Result == nil {
 		return nil, nil
+	}
+	if env.Weft != FormatVersion {
+		if env.Weft > FormatVersion {
+			return nil, fmt.Errorf("%w: result document has weft=%d, this build writes %d",
+				ErrNewerFormat, env.Weft, FormatVersion)
+		}
+		return nil, fmt.Errorf("store: result document has weft=%d, this build writes %d — not a document this format wrote",
+			env.Weft, FormatVersion)
 	}
 	d := env.Result
 	out := &weft.RunResult{
@@ -128,7 +141,7 @@ func readJSONLEvents(text string) ([]weft.Event, error) {
 	var (
 		out     []weft.Event
 		lineNo  int
-		skipped int
+		skipped []int
 	)
 	for _, line := range splitLines(text) {
 		lineNo++
@@ -137,14 +150,14 @@ func readJSONLEvents(text string) ([]weft.Event, error) {
 		}
 		ev, err := weft.UnmarshalEvent([]byte(line))
 		if err != nil {
-			skipped++
+			skipped = append(skipped, lineNo)
 			continue
 		}
 		out = append(out, ev)
 	}
 	var err error
-	if skipped > 0 {
-		err = fmt.Errorf("store: skipped %d malformed event line(s)", skipped)
+	if len(skipped) > 0 {
+		err = fmt.Errorf("store: skipped %d malformed event line(s), first at line %d", len(skipped), skipped[0])
 	}
 	return out, err
 }

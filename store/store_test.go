@@ -89,6 +89,31 @@ func TestResultDocWire(t *testing.T) {
 	}
 }
 
+// The envelope integer is a gate, not a decoration (ADR 0010 §2.3): a
+// result document from a newer format fails with ErrNewerFormat, and
+// one with a result but no matching envelope was never written by
+// this format — neither decodes with today's tags.
+func TestResultDocVersionLoud(t *testing.T) {
+	_, err := store.UnmarshalResult([]byte(`{"weft":2,"result":{"id":"r1"}}`))
+	if !errors.Is(err, store.ErrNewerFormat) {
+		t.Errorf("newer envelope: err = %v, want ErrNewerFormat", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "weft=2") {
+		t.Errorf("newer envelope: err = %v, want both version numbers named", err)
+	}
+	if _, err := store.UnmarshalResult([]byte(`{"result":{"id":"r1"}}`)); err == nil {
+		t.Error("missing envelope: err = nil, want a loud decode error")
+	}
+	// The version this build writes still reads.
+	b, err := store.MarshalResult(&weft.RunResult{ID: "r1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UnmarshalResult(b); err != nil {
+		t.Errorf("current envelope: %v", err)
+	}
+}
+
 // oneRun generates a script run with a subagent and a pending approval
 // — reasoning, tool calls, Nested events, a pending gate — recorded
 // into a fresh Memory store, with the emitted stream captured beside

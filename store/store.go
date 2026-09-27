@@ -166,6 +166,15 @@ var (
 	// which never reads events — still works, so an older Inspector
 	// shows the run and names why it cannot open it.
 	ErrUnknownEvent = errors.New("store: event type unknown to this weft")
+
+	// ErrNewerFormat wraps the decode failure UnmarshalResult reports
+	// for a result document whose {"weft": N} envelope is ahead of
+	// FormatVersion: the document came from a newer weft, and decoding
+	// it with this build's tags would misread it (ADR 0010 §2.3 — the
+	// number moves only on an incompatible change). The schema
+	// migrations enforce the same rule for the database as a whole at
+	// Open (sqlite.ErrNewerSchema); this is the document-level half.
+	ErrNewerFormat = errors.New("store: document format newer than this weft")
 )
 
 // limitOf normalizes Query.Limit: 0 means the default 50, values above

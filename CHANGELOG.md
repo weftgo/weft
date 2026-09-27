@@ -4,6 +4,61 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## store 0.1.1 — unreleased (review pass over 0.1.0)
+
+### Fixed — the durability races a second look found
+
+- **Concurrent first Opens on a fresh file no longer fail.** Two
+  things raced when two processes opened a brand-new database at once:
+  the per-connection `journal_mode(WAL)` DSN pragma (the mode switch
+  wants a brief exclusive lock SQLite will not wait for — instant
+  `SQLITE_BUSY`, unretried by busy_timeout) and the migration loser,
+  whose pre-lock read of `schema_migrations` made it re-run a migration
+  the winner had applied ("table already exists"). WAL is now set once
+  by the first `Open` through a converging switch (`setWAL`: the
+  winner writes WAL into the file header, everyone else reads `wal`
+  back and moves on), and each migration re-checks the applied version
+  inside its own transaction — the loser skips what the winner applied.
+  Steady-state pragmas (synchronous, busy_timeout, foreign_keys,
+  `_txlock=immediate`) stay per-connection, as before.
+- **A heartbeat touch in flight when the run ends can no longer land
+  after the closing write** and resurrect a `running` row that reads as
+  interrupted half a minute later: touch and end serialize on the
+  run's write lock, end's write last.
+- **A run id that restarts in-process closes the old run's log**: its
+  orphaned heartbeat ticker otherwise kept re-saving the stale running
+  row under the id and clobbered the new run's — including its closing
+  write.
+
+### Fixed — loud where 0.1.0 was silent
+
+- `store.UnmarshalResult` now enforces the `{"weft": N}` envelope
+  (ADR 0010 §2.3): a result document from a newer format fails with
+  `store.ErrNewerFormat`, and one with a result but no envelope fails
+  outright — neither decodes with this build's tags. The migrations
+  table already enforced the same rule for the schema; this is the
+  document-level half.
+- Every JSON column the SQLite backend reads (model, usage, tags,
+  result) decodes loudly, naming the run and the column, instead of
+  coming back with blanks; `List` still never reads events or results,
+  so a run that cannot be opened still lists.
+- The JSONL event reader names the first skipped line, not just the
+  count, as ADR 0010 §2.5 promises.
+- `store.Record(nil)` panics at the call site (Subagent's nil-child
+  panic is the core's precedent) instead of failing on — or silently
+  dropping — every write.
+
+### Fixed — aliasing and matching
+
+- Neither backend aliases a caller's `RunResult` or tags: Memory clones
+  through the store's own codec on Save and Get, and every returned
+  tags map is a copy — editing a returned record changes nothing on the
+  next read.
+- A tag a record does not carry never matches a tag query, even when
+  the queried value is `""` — sqlite's `json_each` filter and Memory
+  now agree; keys that would need escaping in a JSON path still filter,
+  because the key is a bound parameter.
+
 ## 0.3.6 — 2026-09-27
 
 ### Added — the observation accessors (`AgentFromContext`, `Agent.Logger`)

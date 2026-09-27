@@ -104,6 +104,17 @@ func roundTrip(open func(t *testing.T) store.Store) func(*testing.T) {
 			got.Result.Usage.InputTokens != 20 || len(got.Result.Messages) != 2 {
 			t.Errorf("result did not round trip: %+v", got.Result)
 		}
+		// Neither the saved result nor a returned one aliases the
+		// store: editing either changes nothing on the next Get.
+		rec.Result.Messages = rec.Result.Messages[:1]
+		got.Result.Messages = nil
+		again, err := s.Get(ctx(), runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if again.Result == nil || len(again.Result.Messages) != 2 {
+			t.Errorf("the store aliased a caller's RunResult: %+v", again.Result)
+		}
 	}
 }
 
@@ -262,8 +273,6 @@ func heartbeat(open func(t *testing.T) store.Store) func(*testing.T) {
 		if got, _ := s.Get(ctx(), "fresh"); got.Status != store.Running {
 			t.Errorf("fresh row status = %q, want running", got.Status)
 		}
-		interrupted := s.List
-		_ = interrupted
 		p, err := s.List(ctx(), store.Query{Status: store.Interrupted})
 		if err != nil {
 			t.Fatal(err)
@@ -277,6 +286,25 @@ func heartbeat(open func(t *testing.T) store.Store) func(*testing.T) {
 		}
 		if p.Total != 1 || p.Runs[0].ID != "fresh" {
 			t.Errorf("Query{Running} = %+v, want only the fresh row (Running excludes stale)", p)
+		}
+		// A running row saved without a heartbeat is judged by its
+		// start: a fresh start reads running, an old one interrupted —
+		// never immortal, and the same in every backend.
+		if err := s.Save(ctx(), store.RunRecord{ID: "nohb-fresh", Agent: "hb", Started: now, Status: store.Running}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Save(ctx(), store.RunRecord{ID: "nohb-old", Agent: "hb", Started: now.Add(-2 * store.HeartbeatTimeout), Status: store.Running}); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := s.Get(ctx(), "nohb-fresh"); got.Status != store.Running {
+			t.Errorf("fresh start, no heartbeat: status = %q, want running", got.Status)
+		}
+		if got, _ := s.Get(ctx(), "nohb-old"); got.Status != store.Interrupted {
+			t.Errorf("old start, no heartbeat: status = %q, want interrupted", got.Status)
+		}
+		p, _ = s.List(ctx(), store.Query{Status: store.Running})
+		if p.Total != 2 {
+			t.Errorf("Query{Running} Total = %d, want 2 (fresh + nohb-fresh)", p.Total)
 		}
 	}
 }
@@ -392,6 +420,25 @@ func filters(open func(t *testing.T) store.Store) func(*testing.T) {
 		p, _ = s.List(ctx(), store.Query{Tags: map[string]string{"cwd": "/w", "pr": "8"}})
 		if p.Total != 0 {
 			t.Errorf("Tags mismatch = %d, want 0", p.Total)
+		}
+		// A missing key never matches, even when the queried value is
+		// "" — and keys that would need escaping in a JSON path still
+		// filter, because the key is a bound parameter, not a path.
+		p, _ = s.List(ctx(), store.Query{Tags: map[string]string{"absent": ""}})
+		if p.Total != 0 {
+			t.Errorf("Tags{absent:\"\"} = %d, want 0 (a missing key is not the empty value)", p.Total)
+		}
+		save(store.RunRecord{ID: "root-q", Agent: "gamma", Started: now, Status: store.Succeeded, Tags: map[string]string{`we"ird\key`: `va"lue`}})
+		p, _ = s.List(ctx(), store.Query{Tags: map[string]string{`we"ird\key`: `va"lue`}})
+		if p.Total != 1 || p.Runs[0].ID != "root-q" {
+			t.Errorf("Tags with quotes in the key = %+v, want root-q", p)
+		}
+		// The page never aliases the store: editing a returned tag map
+		// changes nothing on the next read.
+		p, _ = s.List(ctx(), store.Query{Agent: "alpha"})
+		p.Runs[0].Tags["cwd"] = "/edited"
+		if got, _ := s.Get(ctx(), "root-a"); got.Tags["cwd"] != "/w" {
+			t.Errorf("a List page aliased the stored tags: %v", got.Tags)
 		}
 	}
 }

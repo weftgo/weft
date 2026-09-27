@@ -45,6 +45,27 @@ func (m *memStore) Save(_ context.Context, r RunRecord) error {
 		row.events = append(slices.Clone(row.events), r.Events[held:]...)
 	}
 	r.Events = nil // the row never carries events; they live in the store
+	r.Tags = cloneTags(r.Tags)
+	// The result is held as the format holds it — a copy through the
+	// store's own codec — so the caller's live RunResult is never
+	// aliased, and what Memory returns is exactly what sqlite would:
+	// the reference behaviour is the format's, not the pointer's.
+	if r.Result != nil {
+		res, err := cloneResult(r.Result)
+		if err != nil {
+			return err
+		}
+		r.Result = res
+	}
+	if r.Heartbeat.IsZero() {
+		// The same default sqlite applies: no heartbeat means the last
+		// write was the start, so a running row with no heartbeat is
+		// judged by its start, not treated as immortal.
+		r.Heartbeat = r.Started
+		if r.Heartbeat.IsZero() {
+			r.Heartbeat = time.Now()
+		}
+	}
 	if r.Result != nil && r.Steps == 0 {
 		r.Steps = r.Result.NumSteps()
 	}
@@ -83,6 +104,14 @@ func (m *memStore) Get(_ context.Context, id string) (RunRecord, error) {
 	}
 	rec := row.rec
 	rec.Events = slices.Clone(row.events)
+	rec.Tags = cloneTags(rec.Tags) // a caller's edit must not reach the store
+	if rec.Result != nil {
+		res, err := cloneResult(rec.Result)
+		if err != nil {
+			return RunRecord{}, err
+		}
+		rec.Result = res
+	}
 	rec.Status = DeriveStatus(rec.Status, rec.Heartbeat, time.Now())
 	return rec, nil
 }
@@ -135,6 +164,7 @@ func (m *memStore) List(_ context.Context, q Query) (Page, error) {
 	for i := range page {
 		page[i].Events = nil
 		page[i].Result = nil // the list body lesson (ADR 0010 §0.1): Get returns everything
+		page[i].Tags = cloneTags(page[i].Tags)
 	}
 	return Page{Runs: page, Total: total}, nil
 }
@@ -193,7 +223,9 @@ func (q Query) matches(rec *RunRecord, storedStatus Status) bool {
 		}
 	}
 	for k, v := range q.Tags {
-		if rec.Tags[k] != v {
+		// A missing key never matches, even a queried "" — the rule
+		// sqlite's json_each filter applies.
+		if got, ok := rec.Tags[k]; !ok || got != v {
 			return false
 		}
 	}
@@ -212,4 +244,14 @@ func cloneTags(kv map[string]string) map[string]string {
 		return nil
 	}
 	return maps.Clone(kv)
+}
+
+// cloneResult copies a result through the store's codec: the same
+// bytes a durable backend would write and read back.
+func cloneResult(r *weft.RunResult) (*weft.RunResult, error) {
+	b, err := MarshalResult(r)
+	if err != nil {
+		return nil, err
+	}
+	return UnmarshalResult(b)
 }

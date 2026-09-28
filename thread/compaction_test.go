@@ -1016,3 +1016,198 @@ func TestForkMintsRunIDsPastTheCopiedTurns(t *testing.T) {
 		}
 	})
 }
+
+// A pin keeps ANY message-kind entry in the context through a
+// compaction — a custom_message the application injected below the
+// cut survives exactly like a plain message (ADR 0020 §4).
+func TestPinKeepsACustomMessageThroughCompaction(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		rec := &summaryRecorder{reply: "s"}
+		agent := weft.New(rec)
+		s, _ := thread.Create(ctx, st, agent, thread.KeepRecent(100))
+		if err := st.Append(ctx, s.ID(),
+			thread.MessageEntry{ID: "e_big", Created: timeUTC(), Message: weft.User(strings.Repeat("a", 60_000))},
+			thread.CustomMessageEntry{ID: "e_note", ParentID: "e_big", Created: timeUTC(), Kind: "app/note", Message: weft.User("SERVICE NOTE: the API key rotates Friday")},
+			thread.MessageEntry{ID: "e_tail", ParentID: "e_note", Created: timeUTC(), Message: weft.User("tail")},
+		); err != nil {
+			t.Fatal(err)
+		}
+		s = reopenWith(t, ctx, st, s, agent, thread.KeepRecent(100))
+		if err := s.Pin(ctx, "e_note"); err != nil {
+			t.Fatal(err)
+		}
+		s = reopenWith(t, ctx, st, s, agent, thread.KeepRecent(100))
+		if err := s.Compact(ctx); err != nil {
+			t.Fatalf("Compact: %v", err)
+		}
+		found := false
+		for _, m := range s.Context() {
+			if strings.Contains(m.Text(), "SERVICE NOTE") {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("the pinned custom_message did not survive the compaction")
+		}
+		var last *thread.CompactionEntry
+		for _, e := range s.Entries() {
+			if c, ok := e.(thread.CompactionEntry); ok {
+				last = &c
+			}
+		}
+		if last == nil || len(last.Pinned) == 0 {
+			t.Errorf("the entry records no pinned ids: %+v", last)
+		}
+	})
+}
+
+// A branch summary keeps the abandoned branch's own compaction: its
+// summary is the only record of that branch's older part, and losing
+// it would lose the branch's history twice over.
+func TestSummarizeLeftKeepsTheBranchCompaction(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		rec := &summaryRecorder{reply: "branch summary"}
+		agent := weft.New(rec)
+		s, _ := thread.Create(ctx, st, agent)
+		msgs(t, ctx, st, s,
+			strings.Repeat("a", 60_000),
+			strings.Repeat("b", 60_000),
+			strings.Repeat("c", 60_000),
+		)
+		s = reopenWith(t, ctx, st, s, agent)
+		if err := s.Compact(ctx); err != nil {
+			t.Fatalf("Compact: %v", err)
+		}
+		s = reopenWith(t, ctx, st, s, agent)
+		mainLeaf := s.Leaf()
+		// Branch away from the compacted line, grow a compactable side
+		// branch, and compact IT — then leave that branch with a
+		// summary back to the main line.
+		firstID := ""
+		for _, e := range s.Entries() {
+			if m, ok := e.(thread.MessageEntry); ok {
+				firstID = m.ID
+				break
+			}
+		}
+		if err := s.Branch(ctx, firstID); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Append(ctx, s.ID(), thread.MessageEntry{
+			ID: "e_side", ParentID: firstID, Created: timeUTC(),
+			Message: weft.User("side note " + strings.Repeat("s", 60_000)),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		s = reopenWith(t, ctx, st, s, agent)
+		if err := s.Compact(ctx); err != nil {
+			t.Fatalf("the side branch's own Compact: %v", err)
+		}
+		if err := s.Branch(ctx, mainLeaf, thread.SummarizeLeft()); err != nil {
+			t.Fatalf("SummarizeLeft over a compacted branch: %v", err)
+		}
+		// The summarizer saw both the side note and the abandoned
+		// compaction's summary.
+		saw := fmt.Sprint(rec.saw()[len(rec.saw())-1].Messages)
+		if !strings.Contains(saw, "side note") {
+			t.Error("the branch summary input lost the side branch's messages")
+		}
+		if !strings.Contains(saw, "summary") {
+			t.Error("the branch summary input lost the branch's own compaction summary")
+		}
+	})
+}
+
+// A fork of a compacted session keeps working: the walk reads the same
+// context as the original, and the fork can compact again on its own.
+func TestForkOfACompactedSession(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		rec := &summaryRecorder{reply: "summary"}
+		agent := weft.New(rec)
+		s, _ := thread.Create(ctx, st, agent)
+		msgs(t, ctx, st, s,
+			strings.Repeat("a", 60_000),
+			strings.Repeat("b", 60_000),
+			strings.Repeat("c", 60_000),
+		)
+		s = reopenWith(t, ctx, st, s, agent)
+		if err := s.Compact(ctx); err != nil {
+			t.Fatal(err)
+		}
+		before := fmt.Sprint(s.Context())
+		f, err := s.Fork(ctx, s.Leaf())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := fmt.Sprint(f.Context()); got != before {
+			t.Error("the fork's context differs from the compacted original's")
+		}
+		// The fork compacts again once it grows — from the copied
+		// boundary, with the copied summary fed in.
+		msgs(t, ctx, st, f, strings.Repeat("d", 30_000), strings.Repeat("e", 30_000))
+		f = reopenWith(t, ctx, st, f, agent)
+		if err := f.Compact(ctx); err != nil {
+			t.Fatalf("the fork's own Compact: %v", err)
+		}
+		if got := len(f.Context()); got != 3 {
+			t.Errorf("fork context after its own compaction = %d messages, want 3", got)
+		}
+	})
+}
+
+// Uncompact of a trim record: the undo branches back to the entry
+// before the trim, and the raw results return (the stubs were a view,
+// never a rewrite).
+func TestUncompactOfATrim(t *testing.T) {
+	ctx := context.Background()
+	rec := &summaryRecorder{reply: "s"}
+	agent := weft.New(rec)
+	st := thread.Memory()
+	s, _ := thread.Create(ctx, st, agent, thread.ClearOldToolResults(0))
+	callPair := []thread.Entry{
+		thread.MessageEntry{ID: "e_c0", Created: timeUTC(), Message: weft.Message{Role: weft.RoleAssistant,
+			Content: []weft.Part{weft.ToolCallPart{ID: "c1", Name: "read", Args: json.RawMessage(`{}`)}}}},
+		thread.MessageEntry{ID: "e_c1", ParentID: "e_c0", Created: timeUTC(), Message: weft.Message{Role: weft.RoleTool,
+			Content: []weft.Part{weft.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 900)}}}},
+	}
+	entries := []thread.Entry{thread.MessageEntry{ID: "e_old", Created: timeUTC(), Message: weft.User(strings.Repeat("a", 120_000))}}
+	entries = append(entries, callPair...)
+	if err := st.Append(ctx, s.ID(), entries...); err != nil {
+		t.Fatal(err)
+	}
+	s, err := thread.Open(ctx, st, s.ID(), agent, thread.ClearOldToolResults(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ApplyCompaction(ctx, &thread.Compaction{FirstKept: "e_c0", Reason: thread.ReasonTrim, TokensBefore: 1}); err != nil {
+		t.Fatalf("trim: %v", err)
+	}
+	// The stub view: the result reads as the cleared stub.
+	s, _ = thread.Open(ctx, st, s.ID(), agent, thread.ClearOldToolResults(0))
+	stubbed := false
+	for _, m := range s.Context() {
+		for _, p := range m.Content {
+			if r, ok := p.(weft.ToolResultPart); ok && r.Content == "[cleared tool result read c1]" {
+				stubbed = true
+			}
+		}
+	}
+	if !stubbed {
+		t.Fatal("the trim did not stub the result — the scenario is not measuring what it should")
+	}
+	// Undo: the raw result returns.
+	if err := s.Uncompact(ctx); err != nil {
+		t.Fatalf("Uncompact of a trim: %v", err)
+	}
+	s, _ = thread.Open(ctx, st, s.ID(), agent, thread.ClearOldToolResults(0))
+	for _, m := range s.Context() {
+		for _, p := range m.Content {
+			if r, ok := p.(weft.ToolResultPart); ok && r.Content == "[cleared tool result read c1]" {
+				t.Error("the stub outlived the undo — the file was rewritten, not viewed")
+			}
+		}
+	}
+}

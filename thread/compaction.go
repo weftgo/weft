@@ -1107,6 +1107,13 @@ func (s *Session) summarizeBranch(ctx context.Context, target string) (summary, 
 			sumMsgs = append(sumMsgs, e.Message)
 		case BranchSummaryEntry:
 			sumMsgs = append(sumMsgs, summaryMessage(e.Summary))
+		case CompactionEntry:
+			// The abandoned branch may hold its own compaction; its
+			// summary is the only record of that branch's older part,
+			// and the branch summary must keep it.
+			if e.Summary != "" {
+				sumMsgs = append(sumMsgs, summaryMessage(e.Summary))
+			}
 		}
 	}
 	s.mu.Unlock()

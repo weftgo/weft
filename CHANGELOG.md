@@ -52,10 +52,10 @@ v0.3.7's `Agent.Model()` and imports nothing else from weft.
 
 ### Added — compaction (ADR 0020)
 
-- The trigger: the provider-reported input of the last step (recorded
-  on the turn entry) plus an estimated delta against
-  `window − Reserve`; no window known means no automatic compaction
-  and one warning. The cut keeps about `KeepRecent` tokens, lands on
+- The trigger: the provider-reported input of the last step plus the
+  estimated tail that report cannot cover (recorded together on the
+  turn entry), plus an estimated delta against `window − Reserve`; no
+  window known means no automatic compaction and one warning. The cut keeps about `KeepRecent` tokens, lands on
   a user or assistant boundary, never between a call and its result,
   and splits turns larger than the window. Signed reasoning older
   than the compaction is stripped from the context the model sees.

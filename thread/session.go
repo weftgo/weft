@@ -395,8 +395,8 @@ func (s *Session) rawContextLocked() []weft.Message {
 				pinnedSet[id] = true
 			}
 			for j := 0; j < start; j++ {
-				if e, ok := path[j].(MessageEntry); ok && pinnedSet[idOf(e)] {
-					pinnedMsgs = append(pinnedMsgs, pinnedKept{idx: j, msg: stripSignedReasoning(e.Message)})
+				if m, ok := contextMessage(path[j]); ok && pinnedSet[idOf(path[j])] {
+					pinnedMsgs = append(pinnedMsgs, pinnedKept{idx: j, msg: stripSignedReasoning(m)})
 				}
 			}
 		}

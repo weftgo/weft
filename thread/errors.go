@@ -14,6 +14,11 @@ var (
 	// instead of a silent no-op.
 	ErrNotImplemented = errors.New("thread: feature not implemented in this build")
 
+	// ErrBusy is returned by Send under the Reject busy policy when the
+	// session is already running a turn: the follow-up was not
+	// accepted and nothing was written (ADR 0011 §4).
+	ErrBusy = errors.New("thread: session is busy with another turn")
+
 	// ErrNotFound is returned by Load, Append, and Delete for a session
 	// id the storage does not hold.
 	ErrNotFound = errors.New("thread: session not found")

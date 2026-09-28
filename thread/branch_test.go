@@ -43,10 +43,15 @@ func reopen(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Sess
 	return again
 }
 
+// contextTexts lists the non-empty message texts, top to bottom — the
+// call and result messages of a tool step carry their content in parts
+// Text() does not join, so they read as blanks here.
 func contextTexts(s *thread.Session) []string {
 	var out []string
 	for _, m := range s.Context() {
-		out = append(out, m.Text())
+		if m.Text() != "" {
+			out = append(out, m.Text())
+		}
 	}
 	return out
 }

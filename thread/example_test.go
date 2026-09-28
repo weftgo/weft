@@ -1,6 +1,7 @@
 package thread_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -60,4 +61,44 @@ func ExampleHeader() {
 func ExampleNewSessionID() {
 	fmt.Println(len(thread.NewSessionID()), len(thread.NewEntryID()))
 	// Output: 28 28
+}
+
+// Memory is the in-process Storage: create a session, append entries,
+// load them back — the shape every backend shares (threadtest pins the
+// rest).
+func ExampleMemory() {
+	ctx := context.Background()
+	st := thread.Memory()
+	h := thread.Header{
+		ID:      "s_demo",
+		Created: time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC),
+		Meta:    map[string]string{"room": "table-1"},
+	}
+	if err := st.Create(ctx, h); err != nil {
+		fmt.Println(err)
+		return
+	}
+	if err := st.Append(ctx, h.ID, thread.MessageEntry{
+		ID:      "e_demo1",
+		Created: h.Created.Add(time.Second),
+		Message: weft.User("Where is order 1234?"),
+	}); err != nil {
+		fmt.Println(err)
+		return
+	}
+	header, entries, report, err := st.Load(ctx, h.ID)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(header.ID, header.Meta["room"], len(entries), report)
+	for _, e := range entries {
+		switch e := e.(type) {
+		case thread.MessageEntry:
+			fmt.Println(e.Message.Role, "asks:", e.Message.Text())
+		}
+	}
+	// Output:
+	// s_demo table-1 1 <nil>
+	// user asks: Where is order 1234?
 }

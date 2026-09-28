@@ -29,15 +29,30 @@ export function absoluteTime(iso: string): string {
   return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}`
 }
 
-/** Run-level duration (finished - started), "1.2s" / "40.5s" / "4m03s". */
+/** Run-level duration (finished - started), "12ms" / "1.2s" / "4m03s" / "2h05m". */
 export function duration(started: string, finished: string | null): string {
   const a = Date.parse(started)
   const b = finished ? Date.parse(finished) : NaN
   if (Number.isNaN(a) || Number.isNaN(b) || b < a) return "—"
-  const s = (b - a) / 1000
+  return spanMs(b - a)
+}
+
+/** A span of milliseconds in the tightest unit that still reads. */
+export function spanMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  const s = ms / 1000
   if (s < 60) return `${s.toFixed(1)}s`
   const m = Math.floor(s / 60)
-  return `${m}m${String(Math.round(s % 60)).padStart(2, "0")}s`
+  if (m < 60) return `${m}m${String(Math.round(s % 60)).padStart(2, "0")}s`
+  const h = Math.floor(m / 60)
+  return `${h}h${String(m % 60).padStart(2, "0")}m`
+}
+
+/** How long a still-running run has been going, against now. */
+export function elapsed(started: string, now: number = Date.now()): string {
+  const a = Date.parse(started)
+  if (Number.isNaN(a) || now < a) return "—"
+  return spanMs(now - a)
 }
 
 /** "12.4k / 3.1k" — token counts stay compact; exact values on hover. */

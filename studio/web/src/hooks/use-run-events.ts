@@ -20,17 +20,30 @@ async function fetchPage(id: string, after: number): Promise<EventsPage> {
   const res = await fetch(url.toString(), {
     headers: { Accept: "application/json" },
   })
-  if (!res.ok) throw new Error(`events ${res.status}: ${res.statusText}`)
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`
+    try {
+      const body = (await res.json()) as { error?: { message?: string } }
+      if (body.error?.message) message = body.error.message
+    } catch {
+      // not JSON — keep the status line
+    }
+    throw new Error(message)
+  }
   return (await res.json()) as EventsPage
 }
 
 export interface RunStream {
+  /** The stream so far. A fresh array on every publish, so memoized
+   * consumers see the change; never mutated after publish. */
   events: WireEvent[]
   folded: FoldedRun
   /** True when the endpoint says the run is over and drained. */
   done: boolean
   /** The last position read — where a tail resumes. */
   lastPos: number
+  /** True while the first walk is still paging. */
+  loading: boolean
   /** The error that stopped the walk, if one did. */
   error: string | null
 }
@@ -40,28 +53,50 @@ const emptyStream: RunStream = {
   folded: newFold().result(),
   done: false,
   lastPos: -1,
+  loading: true,
   error: null,
 }
 
+interface Walk {
+  feed: FoldFeed
+  events: WireEvent[]
+  pos: number
+  done: boolean
+}
+
+/** Apply a page: only positions past the cursor are new. Returns
+ * whether anything changed (events or the done flag). */
+function apply(s: Walk, page: EventsPage): boolean {
+  const fresh = page.events.filter((pe) => pe.pos > s.pos)
+  if (fresh.length > 0) {
+    const evs = fresh.map((pe) => pe.event)
+    foldMore(s.feed, evs)
+    s.events = s.events.concat(evs)
+    s.pos = fresh[fresh.length - 1].pos
+  }
+  const changed = fresh.length > 0 || page.done !== s.done
+  s.done = page.done
+  return changed
+}
+
 export function useRunEvents(id: string, status: string): RunStream {
-  // The walk's accumulated state lives in refs, not react-query: the
+  // The walk's accumulated state lives in a ref, not react-query: the
   // pages are folded once and the tail extends them in place, so a
   // poll is one small request regardless of how long the run is. The
   // walk is keyed by id alone — a run finishing (status leaving
   // "running") must not restart it, just stop the tail.
-  const state = useRef<{ feed: FoldFeed; events: WireEvent[]; pos: number }>({
+  const walk = useRef<Walk>({
     feed: newFold(),
     events: [],
     pos: -1,
+    done: false,
   })
-  const done = useRef(false)
   const statusRef = useRef(status)
   statusRef.current = status
   const [stream, setStream] = useState<RunStream>(emptyStream)
 
   useEffect(() => {
-    state.current = { feed: newFold(), events: [], pos: -1 }
-    done.current = false
+    walk.current = { feed: newFold(), events: [], pos: -1, done: false }
     setStream(emptyStream)
 
     const ctrl: { cancelled: boolean } = { cancelled: false }
@@ -70,37 +105,20 @@ export function useRunEvents(id: string, status: string): RunStream {
     // which would defeat the post-await checks.
     const isCancelled = (): boolean => ctrl.cancelled
 
-    const applyPage = (page: EventsPage) => {
-      const s = state.current
-      // Positions make the walk overlap-proof: a page never re-feeds
-      // an event the fold has already seen.
-      const fresh = page.events.filter((pe) => pe.pos > s.pos)
-      if (fresh.length > 0) {
-        foldMore(
-          s.feed,
-          fresh.map((pe) => pe.event)
-        )
-        s.events.push(...fresh.map((pe) => pe.event))
-        s.pos = fresh[fresh.length - 1].pos
-      }
-      done.current = page.done
-    }
-    const publish = (error: string | null = null) => {
-      const s = state.current
+    const publish = (loading: boolean, error: string | null = null) => {
+      const s = walk.current
       setStream({
         events: s.events,
         folded: s.feed.result(),
-        done: done.current,
+        done: s.done,
         lastPos: s.pos,
+        loading,
         error,
       })
     }
-    const probe = async () => {
-      const page = await fetchPage(id, state.current.pos)
-      if (isCancelled()) return
-      applyPage(page)
-      publish()
-    }
+    // The next page starts one past the last position read: the
+    // endpoint's `after` names the first position to return.
+    const next = () => fetchPage(id, walk.current.pos + 1)
 
     // The initial walk: pages until the cursor stops. An error stops
     // it loudly — the run page shows it rather than an empty story.
@@ -108,23 +126,29 @@ export function useRunEvents(id: string, status: string): RunStream {
       try {
         for (;;) {
           if (isCancelled()) return
-          const page = await fetchPage(id, state.current.pos)
+          const page = await next()
           if (isCancelled()) return
-          applyPage(page)
-          publish()
+          apply(walk.current, page)
+          publish(page.next_after != null)
           if (page.next_after == null) return
         }
       } catch (e) {
-        if (!isCancelled()) publish(e instanceof Error ? e.message : String(e))
+        if (!isCancelled())
+          publish(false, e instanceof Error ? e.message : String(e))
       }
     })()
 
     // The tail: while the run is running, ask only for what is new.
     // A failed probe keeps the last good view; the next tick retries.
     const timer = setInterval(() => {
-      if (isCancelled() || statusRef.current !== "running" || done.current)
+      if (isCancelled() || statusRef.current !== "running" || walk.current.done)
         return
-      probe().catch(() => {})
+      next()
+        .then((page) => {
+          if (isCancelled()) return
+          if (apply(walk.current, page)) publish(false)
+        })
+        .catch(() => {})
     }, 2000)
 
     return () => {
@@ -139,27 +163,17 @@ export function useRunEvents(id: string, status: string): RunStream {
   useEffect(() => {
     if (status === "running") return
     const drain: { cancelled: boolean } = { cancelled: false }
-    fetchPage(id, state.current.pos)
+    fetchPage(id, walk.current.pos + 1)
       .then((page) => {
         if (drain.cancelled) return
-        const s = state.current
-        const fresh = page.events.filter((pe) => pe.pos > s.pos)
-        if (fresh.length === 0 && page.done === done.current) return
-        if (fresh.length > 0) {
-          foldMore(
-            s.feed,
-            fresh.map((pe) => pe.event)
-          )
-          s.events.push(...fresh.map((pe) => pe.event))
-          s.pos = fresh[fresh.length - 1].pos
-        }
-        done.current = page.done
-        const view = s.feed.result()
+        const s = walk.current
+        if (!apply(s, page)) return
         setStream((prev) => ({
           events: s.events,
-          folded: view,
-          done: done.current,
+          folded: s.feed.result(),
+          done: s.done,
           lastPos: s.pos,
+          loading: prev.loading,
           error: prev.error,
         }))
       })

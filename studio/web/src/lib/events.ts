@@ -32,6 +32,10 @@ export interface FoldedToolCall {
   result?: ToolCallResult
   /** The subagent run this call owns, folded from nested events. */
   child?: FoldedRun
+  /** Stream position of tool_start — replay "to here" lands after it. */
+  startPos: number
+  /** Stream position of tool_finish, once seen. */
+  finishPos?: number
 }
 
 export interface FoldedStep {
@@ -40,6 +44,10 @@ export interface FoldedStep {
   reasoning: string
   toolCalls: FoldedToolCall[]
   finish?: { reason: string; raw?: string; usage: Usage }
+  /** Stream positions of the first and last event folded into this
+   * step (inclusive) — the replay range a step card can jump to. */
+  from: number
+  to: number
 }
 
 export interface FoldedRun {
@@ -53,6 +61,9 @@ export interface FoldedRun {
   /** True when run_finish was seen. A failed run's stream simply
    * ends — the record's status carries that, not the events. */
   finished: boolean
+  /** Stream positions of run_start and run_finish, when seen. */
+  startPos?: number
+  finishPos?: number
 }
 
 /**
@@ -62,7 +73,11 @@ export interface FoldedRun {
  * accumulated stream — so there is exactly one folding algorithm.
  */
 export interface FoldFeed {
-  push: (ev: WireEvent) => void
+  /** Feed one event. pos is its stream position; it defaults to the
+   * number of events fed so far (the top-level stream's own count).
+   * A nested child stream is fed with its parent's positions, so
+   * "replay to here" on a child call still names a top-level index. */
+  push: (ev: WireEvent, pos?: number) => void
   /** A fresh view of everything fed so far; the feed keeps accepting. */
   result: () => FoldedRun
 }
@@ -83,6 +98,13 @@ export function fold(
   return feed.result()
 }
 
+/** fold over (event, position) pairs — a nested child's sub-stream. */
+function foldAt(events: { ev: WireEvent; pos: number }[]): FoldedRun {
+  const feed = newFold()
+  for (const { ev, pos } of events) feed.push(ev, pos)
+  return feed.result()
+}
+
 /**
  * foldMore extends a previous fold with one events page — the seam the
  * paged reader and T2a's live tail stream through (plan §4.4): pages
@@ -100,14 +122,17 @@ export function newFold(): FoldFeed {
   // A call's child events, collected in arrival order and folded at
   // result() time: nested is just a sub-stream (nested within nested
   // included), so one recursive fold covers all depths.
-  const nested = new Map<string, WireEvent[]>()
+  const nested = new Map<string, { ev: WireEvent; pos: number }[]>()
+  let count = 0
+  let at = 0 // the position of the event being pushed
 
   const step = (index: number): FoldedStep => {
     let s = run.steps.find((x) => x.index === index)
     if (!s) {
-      s = { index, text: "", reasoning: "", toolCalls: [] }
+      s = { index, text: "", reasoning: "", toolCalls: [], from: at, to: at }
       run.steps.push(s)
     }
+    if (at > s.to) s.to = at
     return s
   }
   const findCall = (callId: string): FoldedToolCall | undefined => {
@@ -121,12 +146,15 @@ export function newFold(): FoldFeed {
     run.steps.length ? run.steps[run.steps.length - 1].index : 0
 
   return {
-    push(ev: WireEvent) {
+    push(ev: WireEvent, pos?: number) {
+      at = pos ?? count
+      count++
       switch (ev.type) {
         case "run_start":
           run.runId = ev.id
           run.agent = ev.agent
           run.model = ev.model
+          run.startPos = at
           break
         case "step_start":
           step(ev.index) // a resumed index keeps its accumulated state
@@ -147,6 +175,7 @@ export function newFold(): FoldFeed {
             args: ev.args,
             streamedArgs: streamedArgs.get(ev.name) ?? "",
             state: "running",
+            startPos: at,
           })
           streamedArgs.delete(ev.name)
           break
@@ -155,6 +184,10 @@ export function newFold(): FoldFeed {
           if (c) {
             c.result = { content: ev.content, isError: ev.is_error }
             c.state = "done"
+            c.finishPos = at
+            // the call's step spans through its finish
+            for (const s of run.steps)
+              if (s.toolCalls.includes(c) && at > s.to) s.to = at
           }
           break
         }
@@ -169,11 +202,17 @@ export function newFold(): FoldFeed {
           run.finished = true
           run.usage = ev.usage
           run.pending = ev.pending ?? []
+          run.finishPos = at
           break
         case "nested": {
+          const entry = { ev: ev.event, pos: at }
           const list = nested.get(ev.call_id)
-          if (list) list.push(ev.event)
-          else nested.set(ev.call_id, [ev.event])
+          if (list) list.push(entry)
+          else nested.set(ev.call_id, [entry])
+          const c = findCall(ev.call_id)
+          if (c)
+            for (const s of run.steps)
+              if (s.toolCalls.includes(c) && at > s.to) s.to = at
           break
         }
       }
@@ -189,10 +228,12 @@ export function newFold(): FoldFeed {
         pending: [...run.pending],
         usage: run.usage,
         finished: run.finished,
+        startPos: run.startPos,
+        finishPos: run.finishPos,
       }
       for (const [callId, events] of nested) {
         const call = findCall(callId)
-        if (call) call.child = fold(events)
+        if (call) call.child = foldAt(events)
       }
       return out
     },

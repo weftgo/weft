@@ -75,26 +75,34 @@ const cycle: Record<ThemeChoice, ThemeChoice> = {
   dark: "system",
 }
 
+/** Advance system → light → dark → system and apply it. Returns the new choice. */
+export function cycleTheme(): ThemeChoice {
+  const next = cycle[readChoice()]
+  // 'system' is stored as no value — the bootstrap's own rule —
+  // so a fresh visit follows the system again.
+  if (next === "system") {
+    try {
+      localStorage.removeItem("theme")
+    } catch {
+      // ignore
+    }
+  } else {
+    store(next)
+  }
+  apply(next)
+  window.dispatchEvent(new Event("studio:theme"))
+  return next
+}
+
 export function ThemeToggle() {
   const [choice, setChoice] = useState<ThemeChoice>(readChoice)
-  const onToggle = useCallback(() => {
-    setChoice((c) => {
-      const next = cycle[c]
-      // 'system' is stored as no value — the bootstrap's own rule —
-      // so a fresh visit follows the system again.
-      if (next === "system") {
-        try {
-          localStorage.removeItem("theme")
-        } catch {
-          // ignore
-        }
-      } else {
-        store(next)
-      }
-      apply(next)
-      return next
-    })
+  // The palette can cycle the theme too; keep the icon in step.
+  useEffect(() => {
+    const sync = () => setChoice(readChoice())
+    window.addEventListener("studio:theme", sync)
+    return () => window.removeEventListener("studio:theme", sync)
   }, [])
+  const onToggle = useCallback(() => setChoice(cycleTheme()), [])
   const label = `theme: ${choice}`
   return (
     <Button

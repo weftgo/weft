@@ -140,9 +140,9 @@ export function AgentCard({ agent }: { agent: ManifestAgent }) {
       </div>
       {agent.instructions ? (
         <Collapsible defaultOpen={false}>
-          <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground">
+          <CollapsibleTrigger className="group/instr flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
             <ChevronRight
-              className="size-3 transition-transform group-data-[state=open]:rotate-90"
+              className="size-3 transition-transform group-aria-expanded/instr:rotate-90 group-data-[panel-open]/instr:rotate-90"
               data-slot="icon"
             />
             instructions · {agent.instructions.length} chars

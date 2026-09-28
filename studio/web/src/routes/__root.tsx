@@ -1,4 +1,9 @@
-import { HeadContent, Scripts, createRootRoute } from "@tanstack/react-router"
+import {
+  HeadContent,
+  Link,
+  Scripts,
+  createRootRoute,
+} from "@tanstack/react-router"
 import { QueryClientProvider } from "@tanstack/react-query"
 
 import { AppShell } from "@/components/studio/app-shell"
@@ -28,10 +33,20 @@ export const Route = createRootRoute({
     ],
   }),
   notFoundComponent: () => (
-    <main className="container mx-auto p-4 pt-16">
-      <h1>404</h1>
-      <p>The requested page could not be found.</p>
-    </main>
+    <div className="mx-auto max-w-md space-y-3 py-24 text-center">
+      <p className="font-mono text-xs text-faint">404</p>
+      <p className="text-sm">There is no page here.</p>
+      <p className="text-xs text-muted-foreground">
+        Studio has two places: the runs list and the agents page. A run link
+        looks like <span className="font-mono">runs/&lt;id&gt;</span>.
+      </p>
+      <Link
+        to="/runs"
+        className="inline-block font-mono text-xs text-thread-ink hover:underline"
+      >
+        go to runs
+      </Link>
+    </div>
   ),
   shellComponent: RootDocument,
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { absoluteTime, duration, relativeTime, tokens } from "./format"
+import { absoluteTime, duration, elapsed, relativeTime, tokens } from "./format"
 
 // A fixed "now" so the tests never flake: 2026-09-28T12:00:00Z.
 const NOW = Date.parse("2026-09-28T12:00:00Z")
@@ -41,7 +41,14 @@ describe("absoluteTime and duration", () => {
     expect(duration("2026-09-28T09:00:00Z", "2026-09-28T09:04:03Z")).toBe(
       "4m03s"
     )
+    expect(duration("2026-09-28T09:00:00Z", "2026-09-28T09:00:00.012Z")).toBe(
+      "12ms"
+    )
+    expect(duration("2026-09-28T09:00:00Z", "2026-09-28T11:05:00Z")).toBe(
+      "2h05m"
+    )
     expect(duration("2026-09-28T09:00:00Z", null)).toBe("—")
+    expect(elapsed("2026-09-28T09:00:00Z", NOW)).toBe("3h00m")
   })
 })
 

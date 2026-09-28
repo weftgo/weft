@@ -620,18 +620,29 @@ func (s *Session) summarizeWith(ctx context.Context, m weft.Model, in SummaryInp
 		Messages: input,
 		Params:   weft.RequestParams{MaxTokens: &cap},
 	}
+	// The stream contract, enforced the way the loop enforces it:
+	// exactly one ModelFinish, nothing after it (ErrModelContract) —
+	// a summarizer stream that ends without a finish is an error, not
+	// whatever text happened to arrive.
 	var sb strings.Builder
 	var usage weft.Usage
+	finished := false
 	for ev, err := range m.Stream(ctx, req) {
 		if err != nil {
 			return Summary{}, fmt.Errorf("thread: summarizer: %w", err)
+		}
+		if finished {
+			return Summary{}, fmt.Errorf("%w: the summarizer stream continued after ModelFinish", weft.ErrModelContract)
 		}
 		switch ev := ev.(type) {
 		case weft.ModelTextDelta:
 			sb.WriteString(ev.Text)
 		case weft.ModelFinish:
-			usage = ev.Usage
+			usage, finished = ev.Usage, true
 		}
+	}
+	if !finished {
+		return Summary{}, fmt.Errorf("%w: the summarizer stream ended without ModelFinish", weft.ErrModelContract)
 	}
 	summary := strings.TrimSpace(sb.String())
 	if summary == "" {
@@ -793,8 +804,10 @@ func estimateMessage(m weft.Message) int64 {
 
 // estimateEntry estimates the context weight of one path entry:
 // message and custom_message entries carry their message; a branch
-// summary carries its summary; the bookkeeping kinds weigh nothing
-// (they never reach the context).
+// summary and a compaction carry the summary the context shows for
+// them; the bookkeeping kinds weigh nothing (they never reach the
+// context). The summaries weigh what they cost in the window — a cut
+// that ignored them would keep more than KeepRecent really allows.
 func estimateEntry(e Entry) int64 {
 	switch e := e.(type) {
 	case MessageEntry:
@@ -802,6 +815,8 @@ func estimateEntry(e Entry) int64 {
 	case CustomMessageEntry:
 		return estimateMessage(e.Message)
 	case BranchSummaryEntry:
+		return estimateMessage(summaryMessage(e.Summary))
+	case CompactionEntry:
 		return estimateMessage(summaryMessage(e.Summary))
 	}
 	return 0
@@ -866,14 +881,20 @@ func (s *Session) maybeAutoCompact(ctx context.Context) {
 			}
 			continue
 		}
-		switch e := e.(type) {
-		case MessageEntry:
-			since = append(since, e.Message)
-		case CustomMessageEntry:
-			since = append(since, e.Message)
+		if m, ok := contextMessage(e); ok {
+			since = append(since, m) // branch summaries count: the context carries them
 		}
 	}
 	s.mu.Unlock()
+	if !counting {
+		// The mark is off the leaf's path — a Branch or an Uncompact
+		// moved the line since the measurement. There is no honest
+		// delta against a report that no longer describes this path,
+		// so this trigger stands down; the next turn's report becomes
+		// the signal again (the same rule as a never-measured
+		// session).
+		return
+	}
 
 	var est int64
 	for _, m := range since {
@@ -884,7 +905,7 @@ func (s *Session) maybeAutoCompact(ctx context.Context) {
 		if !s.safeTrigger(in) {
 			return
 		}
-	} else if lastInput+est <= cfg.window-cfg.reserve {
+	} else if !firesAt(in) {
 		return
 	}
 
@@ -923,6 +944,14 @@ func (s *Session) maybeAutoCompact(ctx context.Context) {
 			s.agent.Logger().Warn("thread: automatic compaction failed", "session", s.header.ID, "err", err)
 		}
 	}
+}
+
+// firesAt is the default trigger condition (ADR 0020 §2): the
+// measured context plus the estimated delta crosses window minus
+// Reserve. Measured plus estimated — never an estimate standing in
+// for the measurement.
+func firesAt(in TriggerInput) bool {
+	return in.LastInput+in.Estimated > in.Window-in.Reserve
 }
 
 // safeTrigger consults the trigger function, containing a panic as a

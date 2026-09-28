@@ -810,3 +810,209 @@ func TestApplyCompactionValidatesTheBoundary(t *testing.T) {
 		t.Error("ApplyCompaction without a summary or a trim reason: no error")
 	}
 }
+
+// The turn entry's LastInput is the trigger's baseline: the final
+// step's reported input plus the estimated tail that report cannot
+// cover (the final step's own messages) — one number, so the live
+// session and a reopen read the same delta from the same mark.
+func TestLastInputCarriesTheUnreportedTail(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		// A turn of two steps: the first answers with a tool call, the
+		// second (the final step) answers in text — its reported input
+		// covers everything but its own reply.
+		agent := weft.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "echo"}).WithUsage(weft.Usage{InputTokens: 5_000, OutputTokens: 10}),
+			wefttest.Say(strings.Repeat("final answer ", 400)).WithUsage(weft.Usage{InputTokens: 6_000, OutputTokens: 20}),
+		),
+			weft.Tool("echo", "replies", func(ctx context.Context, in struct{}) (string, error) {
+				return "ok", nil
+			}),
+		)
+		s, _ := thread.Create(ctx, st, agent)
+		turn, err := s.Send(ctx, weft.User("go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := turn.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		var te *thread.TurnEntry
+		for _, e := range s.Entries() {
+			if x, ok := e.(thread.TurnEntry); ok {
+				te = &x
+			}
+		}
+		if te == nil {
+			t.Fatal("no turn entry")
+		}
+		// The final step's input was 6,000; the tail it could not
+		// report is its own ~1,200-token reply: the baseline carries
+		// both, and a reopen reads the same number from the entry.
+		if te.LastInput <= 6_000 {
+			t.Errorf("LastInput = %d, want more than the final step's reported 6,000", te.LastInput)
+		}
+		again := reopen(t, ctx, st, s)
+		var te2 *thread.TurnEntry
+		for _, e := range again.Entries() {
+			if x, ok := e.(thread.TurnEntry); ok {
+				te2 = &x
+			}
+		}
+		if te2 == nil || te2.LastInput != te.LastInput {
+			t.Errorf("reopened LastInput = %+v, want the same %d", te2, te.LastInput)
+		}
+	})
+}
+
+// A trigger whose measurement mark is off the leaf's path — a Branch
+// moved the line since — stands down instead of firing on a stale
+// number: no threshold compaction runs until a turn on the new path
+// measures again (the same rule as a never-measured session).
+func TestTriggerStandsDownOnAnOffPathMark(t *testing.T) {
+	ctx := context.Background()
+	agent := weft.New(wefttest.Script(
+		wefttest.Say("first").WithUsage(weft.Usage{InputTokens: 95_000, OutputTokens: 5}),
+		wefttest.Say("the summary"),
+		wefttest.Fail(errors.New("model down")),
+	))
+	st := thread.Memory()
+	s, _ := thread.Create(ctx, st, agent, thread.ContextWindow(100_000))
+	// Real bulk, so the post-turn trigger has something to compact.
+	if err := st.Append(ctx, s.ID(),
+		thread.MessageEntry{ID: "e_b1", Created: timeUTC(), Message: weft.User(strings.Repeat("a", 120_000))},
+		thread.MessageEntry{ID: "e_b2", ParentID: "e_b1", Created: timeUTC(), Message: weft.User(strings.Repeat("b", 120_000))},
+	); err != nil {
+		t.Fatal(err)
+	}
+	s, err := thread.Open(ctx, st, s.ID(), agent, thread.ContextWindow(100_000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := s.Send(ctx, weft.User("one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := turn.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	compacted := false
+	for _, e := range s.Entries() {
+		if c, ok := e.(thread.CompactionEntry); ok && c.Reason == thread.ReasonThreshold {
+			compacted = true
+		}
+	}
+	if !compacted {
+		t.Fatal("the first turn's post-turn trigger did not compact — the scenario is not measuring what it should")
+	}
+	// Undo it and branch below the measured turn: the mark goes off
+	// the path while the stale 95k report would still cross the line.
+	if err := s.Uncompact(ctx); err != nil {
+		t.Fatalf("Uncompact: %v", err)
+	}
+	if err := s.Branch(ctx, "e_b1"); err != nil {
+		t.Fatal(err)
+	}
+	before := map[string]bool{}
+	for _, e := range s.Entries() {
+		if c, ok := e.(thread.CompactionEntry); ok && c.Reason == thread.ReasonThreshold {
+			before[c.ID] = true
+		}
+	}
+	// The next turn fails before any step reports: the pre-turn
+	// trigger must stand down rather than compact on the stale 95k.
+	if turn, err := s.Send(ctx, weft.User("two")); err != nil {
+		t.Fatal(err)
+	} else if _, err := turn.Wait(); err == nil {
+		t.Fatal("the scripted failure did not fail")
+	}
+	for _, e := range s.Entries() {
+		if c, ok := e.(thread.CompactionEntry); ok && c.Reason == thread.ReasonThreshold && !before[c.ID] {
+			t.Errorf("threshold compaction %s ran off a mark that is not on the path", c.ID)
+		}
+	}
+}
+
+// A summarizer stream that breaks the Model contract — no ModelFinish,
+// or events after it — is an error wrapping weft.ErrModelContract, the
+// same enforcement the loop applies; the text that happened to arrive
+// is never accepted as a summary.
+func TestSummarizerStreamContract(t *testing.T) {
+	ctx := context.Background()
+	for name, model := range map[string]weft.Model{
+		"no finish": &contractModel{events: []weft.ModelEvent{weft.ModelTextDelta{Text: "half a summary"}}},
+		"after finish": &contractModel{events: []weft.ModelEvent{
+			weft.ModelTextDelta{Text: "a summary"},
+			weft.ModelFinish{Reason: weft.StopEndTurn},
+			weft.ModelTextDelta{Text: "and more"},
+		}},
+	} {
+		st := thread.Memory()
+		s, _ := thread.Create(ctx, st, weft.New(model))
+		msgs(t, ctx, st, s,
+			strings.Repeat("a", 30_000),
+			strings.Repeat("b", 30_000),
+			strings.Repeat("c", 30_000),
+		)
+		s, err := thread.Open(ctx, st, s.ID(), weft.New(model))
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = s.Compact(ctx)
+		if !errors.Is(err, weft.ErrModelContract) {
+			t.Errorf("%s: Compact err = %v, want weft.ErrModelContract", name, err)
+		}
+		for _, e := range s.Entries() {
+			if _, ok := e.(thread.CompactionEntry); ok {
+				t.Errorf("%s: a compaction entry landed from a contract-violating stream", name)
+			}
+		}
+	}
+}
+
+// contractModel plays a fixed event slice verbatim — the shape a
+// contract-violating adapter would produce.
+type contractModel struct{ events []weft.ModelEvent }
+
+func (m *contractModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	return func(yield func(weft.ModelEvent, error) bool) {
+		for _, ev := range m.events {
+			if !yield(ev, nil) {
+				return
+			}
+		}
+	}
+}
+
+// A fork counts the turns it copied: its first Send mints
+// <fork>-t<n+1>, matching what Open's recovery would number the same
+// file.
+func TestForkMintsRunIDsPastTheCopiedTurns(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		agent := weft.New(wefttest.Script(wefttest.Say("one"), wefttest.Say("in the fork")))
+		s, _ := thread.Create(ctx, st, agent)
+		turn, err := s.Send(ctx, weft.User("first"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := turn.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		f, err := s.Fork(ctx, s.Leaf())
+		if err != nil {
+			t.Fatal(err)
+		}
+		ft, err := f.Send(ctx, weft.User("second"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ft.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		want := fmt.Sprintf("%s-t2", f.ID())
+		if got := ft.RunID(); got != want {
+			t.Errorf("fork's first run id = %q, want %q", got, want)
+		}
+	})
+}

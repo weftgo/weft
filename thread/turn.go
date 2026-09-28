@@ -366,7 +366,25 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 		te.Steps = len(res.Steps)
 		te.Pending = res.Pending
 		if n := len(res.Steps); n > 0 {
+			// The trigger's baseline: the final step's reported input,
+			// plus the estimated tail no report covers — the final
+			// step's own messages (everything from its assistant
+			// message onward). Recorded as one number, so the live
+			// session and a reopen read the same baseline from the
+			// same mark, the turn entry (ADR 0020 §2: reported tokens
+			// are the signal; only what the report cannot cover is
+			// estimated).
 			te.LastInput = res.Steps[n-1].Usage.InputTokens
+			tailStart := inputLen
+			for i := len(full) - 1; i >= inputLen; i-- {
+				if full[i].Role == weft.RoleAssistant {
+					tailStart = i
+					break
+				}
+			}
+			for _, m := range full[tailStart:] {
+				te.LastInput += s.estimate(m)
+			}
 		}
 	}
 	if err != nil {
@@ -385,10 +403,10 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 		s.adoptLocked(e)
 	}
 	if te.LastInput > 0 {
-		// The trigger's new measurement: the final step's reported
-		// input, covering everything up to the turn's prompt entry.
+		// The trigger's new measurement, marked at the turn entry:
+		// everything the path holds after it is the next delta.
 		s.lastInput = te.LastInput
-		s.lastMeasureLeaf = t.id
+		s.lastMeasureLeaf = te.ID
 	}
 	if f, ok := s.st.(Flusher); ok {
 		if flushErr := f.Flush(ctx, s.header.ID); flushErr != nil {

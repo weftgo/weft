@@ -50,7 +50,7 @@ option on the next run.**
 4. Decisions are recorded in the transcript only through the resulting
    tool message — no new part types. Resumed calls emit
    `ToolStart`/`ToolFinish` into the new run and are not a
-   `StepRecord` (there was no model call); `runtime` adds signed
+   `StepRecord` (there was no model call); `thread` (ADR 0021) adds signed
    decisions, persistence, and workflows on top.
 5. `Agent.CallTool` on a `RequireApproval` tool returns an error
    wrapping `ErrApprovalRequired`; middleware that defers calls reads

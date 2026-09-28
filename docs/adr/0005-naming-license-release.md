@@ -51,7 +51,7 @@ cannot soften, so this must be settled before the first tag.
 
 - Import paths everywhere reference `github.com/weftgo/weft` (done via
   the TODO §1.1 sed step; tests, examples, and the README agree).
-- Satellite names follow TODO's header: `runtime`, `store`, `serve`,
+- Satellite names follow TODO's header: `runtime` (renamed `thread` 2026-09-19; ADR 0011), `store`, `serve`,
   `studio`, with `ops` dissolved into `eval`, `prompt`, `mem`, `trace`.
   The README roadmap was updated to match.
 - Tag v0.1.0 remains gated on TODO §2 (first adapter) and §3 (middleware

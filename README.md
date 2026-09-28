@@ -591,8 +591,10 @@ an exported symbol always fails.
    observability~~ — **done** (OTel spans + slog lines; ADR 0016).
 5. The satellites: ~~`store`~~ — **done** (v0.1.1; ADR 0010).
    ~~`studio`~~ — **T1 done** (the Inspector, v0.1.0; ADR 0018).
-   Next: `runtime` (sessions, approvals), `serve`, and the
-   eval/prompt/mem/trace modules.
+   Next: `thread` — sessions, branching, compaction, approvals,
+   steering, pool, sandbox, v0.1 → v1.0 (designed in
+   [ADR 0011](docs/adr/0011-thread-sessions.md) and ADRs 0019–0023),
+   then `serve` and the eval/prompt/mem/trace modules.
 
 ## License
 

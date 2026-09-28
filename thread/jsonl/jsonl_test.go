@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -204,8 +203,12 @@ func TestSalvage(t *testing.T) {
 
 	// Strict: the malformed line fails the load naming the line.
 	_, _, _, err = strict.Load(ctx, h.ID)
-	if !errors.Is(err, thread.ErrCorrupt) || !strings.Contains(err.Error(), "line 4") {
-		t.Fatalf("strict load: err = %v, want ErrCorrupt naming line 4", err)
+	if !errors.Is(err, thread.ErrCorrupt) {
+		t.Fatalf("strict load: err = %v, want ErrCorrupt", err)
+	}
+	var ce *thread.CorruptError
+	if !errors.As(err, &ce) || ce.Line != 4 {
+		t.Fatalf("strict load: err = %v, want a CorruptError carrying line 4", err)
 	}
 	// Salvage: the line is skipped and reported; the rest loads.
 	_, entries, report, err := salvaging.Load(ctx, h.ID)

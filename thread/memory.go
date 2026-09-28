@@ -61,7 +61,7 @@ func (m *memStorage) Create(ctx context.Context, h Header) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.sessions[h.ID]; ok {
-		return fmt.Errorf("thread: session %s already exists", h.ID)
+		return fmt.Errorf("%w: %s", ErrExists, h.ID)
 	}
 	h.Meta = cloneMeta(h.Meta)
 	m.sessions[h.ID] = memSession{header: h}
@@ -132,7 +132,7 @@ func (m *memStorage) Load(ctx context.Context, session string) (Header, []Entry,
 		if errors.Is(err, ErrNewerFormat) {
 			return Header{}, nil, nil, err // loud, always
 		}
-		return Header{}, nil, nil, fmt.Errorf("%w: session %s line %d: %v", ErrCorrupt, session, i+2, err)
+		return Header{}, nil, nil, &CorruptError{Session: session, Line: i + 2, Err: err}
 	}
 	h := s.header
 	h.Meta = cloneMeta(h.Meta)

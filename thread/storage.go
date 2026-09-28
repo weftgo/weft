@@ -16,8 +16,8 @@ type Storage interface {
 	// ID must satisfy ValidID — an id is a path component in some
 	// backend, so every backend vets it — a zero Weft means the current
 	// FormatVersion, any other envelope is rejected, and creating a
-	// session that already exists fails: a session is never silently
-	// replaced.
+	// session that already exists fails with ErrExists: a session is
+	// never silently replaced.
 	Create(ctx context.Context, h Header) error
 
 	// Append adds entries to a session in arrival order, after the

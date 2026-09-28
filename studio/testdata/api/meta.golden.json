@@ -1,0 +1,9 @@
+{
+  "weft_version": "(test)",
+  "studio_version": "v0.1.0",
+  "has_manifest": true,
+  "title": "weft studio",
+  "store": "memory",
+  "capabilities": []
+}
+

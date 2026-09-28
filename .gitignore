@@ -11,6 +11,16 @@
 /dist/
 /examples/otel/otel
 
+# Studio's web project: contributor-side build state only — the build
+# output itself (studio/dist) is committed and embedded (ADR 0018 §3).
+/studio/web/node_modules/
+/studio/web/.output/
+/studio/web/.tanstack/
+/studio/web/.vinxi/
+/studio/web/.vite/
+/studio/web/dist-tmp/
+/studio/examples/basic/basic
+
 # Go test artifacts
 *.test
 *.out

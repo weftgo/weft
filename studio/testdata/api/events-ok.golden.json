@@ -1,0 +1,79 @@
+{
+  "events": [
+    {
+      "type": "run_start",
+      "id": "r_ok",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "agent": "orders"
+    },
+    {
+      "type": "step_start",
+      "run_id": "r_ok",
+      "index": 0
+    },
+    {
+      "type": "tool_start",
+      "run_id": "r_ok",
+      "seq": 1,
+      "call_id": "call_1",
+      "name": "lookup_order",
+      "args": {
+        "order_id": "42"
+      }
+    },
+    {
+      "type": "tool_finish",
+      "run_id": "r_ok",
+      "seq": 2,
+      "call_id": "call_1",
+      "name": "lookup_order",
+      "content": "order 42: shipped",
+      "is_error": false
+    },
+    {
+      "type": "step_finish",
+      "run_id": "r_ok",
+      "index": 0,
+      "reason": "tool_calls",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      }
+    },
+    {
+      "type": "step_start",
+      "run_id": "r_ok",
+      "index": 1
+    },
+    {
+      "type": "text_delta",
+      "run_id": "r_ok",
+      "text": "Order 42 shipped this morning."
+    },
+    {
+      "type": "step_finish",
+      "run_id": "r_ok",
+      "index": 1,
+      "reason": "stop",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      }
+    },
+    {
+      "type": "run_finish",
+      "run_id": "r_ok",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "steps": 2
+    }
+  ],
+  "next_after": null,
+  "done": true
+}
+

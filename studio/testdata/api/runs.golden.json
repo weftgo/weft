@@ -1,0 +1,101 @@
+{
+  "total": 4,
+  "runs": [
+    {
+      "id": "r_stale",
+      "parent_id": "",
+      "parent_call_id": "",
+      "agent": "orders",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "started": "2020-01-01T09:03:00.123Z",
+      "finished": null,
+      "status": "interrupted",
+      "steps": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "tags": {
+        "cwd": "/tmp/demo"
+      },
+      "err": ""
+    },
+    {
+      "id": "r_sub",
+      "parent_id": "",
+      "parent_call_id": "",
+      "agent": "orders",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "manifest_hash": "786a2e04dd01168fc5ad4e20e979f2138ae9337cda2a8ce2473bb0ab16cff896",
+      "weft_version": "(test)",
+      "started": "2020-01-01T09:02:00.123Z",
+      "finished": "2020-01-01T09:02:05.123Z",
+      "status": "succeeded",
+      "steps": 2,
+      "usage": {
+        "input_tokens": 30,
+        "output_tokens": 15
+      },
+      "tags": {
+        "cwd": "/tmp/demo"
+      },
+      "err": ""
+    },
+    {
+      "id": "r_fail",
+      "parent_id": "",
+      "parent_call_id": "",
+      "agent": "support",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "manifest_hash": "b9d9df86cf77c5476cfe727b80ac1f0c45173c84920e1d4e081a014b32174ae3",
+      "weft_version": "(test)",
+      "started": "2020-01-01T09:01:00.123Z",
+      "finished": "2020-01-01T09:01:02.123Z",
+      "status": "failed",
+      "steps": 1,
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "tags": {
+        "cwd": "/tmp/demo"
+      },
+      "err": "weft: run failed at step 1: model stream: wefttest: injected provider 500"
+    },
+    {
+      "id": "r_ok",
+      "parent_id": "",
+      "parent_call_id": "",
+      "agent": "orders",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "manifest_hash": "bf2580cbcb3e115a8591cf8c71f28b6f26e0322b405d65cefaf154cbfa23186e",
+      "weft_version": "(test)",
+      "started": "2020-01-01T09:00:00.123Z",
+      "finished": "2020-01-01T09:00:02.123Z",
+      "status": "succeeded",
+      "steps": 2,
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "tags": {
+        "cwd": "/tmp/demo"
+      },
+      "err": ""
+    }
+  ],
+  "next_before": null
+}
+

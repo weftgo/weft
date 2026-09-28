@@ -1,0 +1,31 @@
+//  @ts-check
+
+import { tanstackConfig } from "@tanstack/eslint-config"
+
+export default [
+  ...tanstackConfig,
+  {
+    rules: {
+      "import/no-cycle": "off",
+      "import/order": "off",
+      "sort-imports": "off",
+      "@typescript-eslint/array-type": "off",
+      "@typescript-eslint/require-await": "off",
+      "pnpm/json-enforce-catalog": "off",
+    },
+  },
+  {
+    // shadcn components are copied in, not authored here (ADR 0018 §9);
+    // their house style is kept as generated.
+    files: ["src/components/ui/**"],
+    rules: {
+      "import/consistent-type-specifier-style": "off",
+      "no-shadow": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/no-unnecessary-type-assertion": "off",
+    },
+  },
+  {
+    ignores: ["eslint.config.js", ".prettierrc", "src/routeTree.gen.ts"],
+  },
+]

@@ -900,3 +900,32 @@ func ExampleOnRunEnd() {
 	// Output:
 	// run ended: has id=true failed=true steps=0
 }
+
+// countingWrapper stands in for any model middleware: it forwards the
+// model and declares it with Unwrap, the convention beside Info.
+type countingWrapper struct{ next weft.Model }
+
+func (w countingWrapper) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	return w.next.Stream(ctx, req)
+}
+func (w countingWrapper) Info() weft.ModelInfo { return weft.InfoOf(w.next) }
+func (w countingWrapper) Unwrap() weft.Model   { return w.next }
+
+// Model returns the model as the loop calls it — WrapModel middleware
+// included — and Unwrap walks one level into a wrapper, so a caller
+// sees the chain without knowing the wrapper types. The session layer
+// (thread) reaches the session agent's own model this way to summarize
+// with it (ADR 0020 §2).
+func ExampleAgent_Model() {
+	base := wefttest.Script(wefttest.Say("hi"))
+	agt := weft.New(base, weft.WrapModel(func(next weft.Model) weft.Model {
+		return countingWrapper{next}
+	}))
+	fmt.Println(weft.InfoOf(agt.Model()))
+	fmt.Println(weft.InfoOf(weft.Unwrap(agt.Model())))
+	fmt.Println(weft.Unwrap(base) == nil)
+	// Output:
+	// {wefttest script}
+	// {wefttest script}
+	// true
+}

@@ -27,6 +27,10 @@ type repairModel struct{ next weft.Model }
 
 func (m *repairModel) Info() weft.ModelInfo { return weft.InfoOf(m.next) }
 
+// Unwrap declares the model whose JSON it repairs (the Unwrap
+// convention, beside Info).
+func (m *repairModel) Unwrap() weft.Model { return m.next }
+
 func (m *repairModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
 	return func(yield func(weft.ModelEvent, error) bool) {
 		for ev, err := range m.next.Stream(ctx, req) {

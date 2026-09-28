@@ -54,6 +54,11 @@ type fallbackModel struct {
 
 func (m *fallbackModel) Info() weft.ModelInfo { return weft.InfoOf(m.chain[0]) }
 
+// Unwrap declares the primary — the chain's first model, the same one
+// Info names — so a caller walking with weft.Unwrap sees the chain's
+// face, not its backups.
+func (m *fallbackModel) Unwrap() weft.Model { return m.chain[0] }
+
 func (m *fallbackModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
 	return func(yield func(weft.ModelEvent, error) bool) {
 		for i, model := range m.chain {
@@ -104,6 +109,10 @@ type logModel struct {
 }
 
 func (m *logModel) Info() weft.ModelInfo { return weft.InfoOf(m.next) }
+
+// Unwrap declares the model the log lines are about (the Unwrap
+// convention, beside Info).
+func (m *logModel) Unwrap() weft.Model { return m.next }
 
 func (m *logModel) logger() *slog.Logger {
 	if m.log != nil {

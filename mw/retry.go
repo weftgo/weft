@@ -130,6 +130,10 @@ type retryModel struct {
 
 func (m *retryModel) Info() weft.ModelInfo { return weft.InfoOf(m.next) }
 
+// Unwrap declares the model retries retry (the Unwrap convention,
+// beside Info).
+func (m *retryModel) Unwrap() weft.Model { return m.next }
+
 func (m *retryModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
 	return func(yield func(weft.ModelEvent, error) bool) {
 		for attempt := 0; ; attempt++ {

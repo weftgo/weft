@@ -754,6 +754,49 @@ func TestAgentNameAccessor(t *testing.T) {
 	}
 }
 
+// stampedModel is a middleware wrapper that names itself and forwards the
+// rest: enough Model for the accessor tests, plus the Unwrap the
+// convention asks of wrappers.
+type stampedModel struct {
+	name string
+	next weft.Model
+}
+
+func (m stampedModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	return m.next.Stream(ctx, req)
+}
+func (m stampedModel) Info() weft.ModelInfo { return weft.InfoOf(m.next) }
+func (m stampedModel) Unwrap() weft.Model   { return m.next }
+
+// Model is the read side of the model chain (step 1.1, ADR 0020 §2):
+// the model as the loop calls it — WrapModel middleware included, in
+// the installed order — and Unwrap walks it one level at a time.
+func TestAgentModelAccessor(t *testing.T) {
+	base := wefttest.Script(wefttest.Say("hi"))
+	// No middleware: the model itself.
+	if got := weft.New(base).Model(); got != weft.Model(base) {
+		t.Errorf("Model without middleware = %#v, want the New model", got)
+	}
+	// WrapModel(a, b) calls a(b(model)): the walk sees a, b, the model.
+	outer := func(next weft.Model) weft.Model { return stampedModel{name: "outer", next: next} }
+	inner := func(next weft.Model) weft.Model { return stampedModel{name: "inner", next: next} }
+	var walked []string
+	for m := weft.New(base, weft.WrapModel(outer, inner)).Model(); m != nil; m = weft.Unwrap(m) {
+		if tag, ok := m.(stampedModel); ok {
+			walked = append(walked, tag.name)
+			continue
+		}
+		walked = append(walked, "base")
+	}
+	if want := []string{"outer", "inner", "base"}; !slices.Equal(walked, want) {
+		t.Errorf("the chain walked %v, want %v", walked, want)
+	}
+	// Unwrap on a non-wrapper is nil, so the walk terminates.
+	if got := weft.Unwrap(base); got != nil {
+		t.Errorf("Unwrap on a non-wrapper = %#v, want nil", got)
+	}
+}
+
 func TestToolChoiceOption(t *testing.T) {
 	classify := weft.Tool("classify", "", func(_ context.Context, _ struct{}) (string, error) {
 		return "billing", nil

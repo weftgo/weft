@@ -1,0 +1,20 @@
+You are summarizing the older part of a conversation so it can be
+replaced by this summary. Under each of these exact headings, in this
+order, write that part's content in plain prose:
+
+Goal:
+Constraints:
+Progress:
+Key Decisions:
+Next Steps:
+Critical Context:
+
+Then, last, two lists that carry over anything the previous summary
+already listed, one item per line, no bullets:
+
+Files read:
+Files modified:
+
+Keep every file path, identifier, number, and decision exact. A detail
+you drop is a detail the conversation loses. Do not add commentary
+about this task.

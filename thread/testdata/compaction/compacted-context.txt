@@ -1,0 +1,20 @@
+[
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "\u003cweft-summary\u003e\nThe work is done.\n\u003c/weft-summary\u003e"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "hi there"
+      }
+    ]
+  }
+]

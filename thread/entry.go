@@ -53,6 +53,12 @@ type TurnEntry struct {
 	Err        string              `json:"err,omitempty"`
 	Pending    []weft.ToolCallPart `json:"pending,omitempty"`
 	Canceled   bool                `json:"canceled,omitempty"`
+	// LastInput is the provider-reported input of the run's final
+	// model step — the best measurement of what the whole context
+	// costs that the compaction trigger has (ADR 0020 §2: reported
+	// tokens are the signal; only the delta is estimated). Absent on
+	// turns that ran no step.
+	LastInput int64 `json:"last_input,omitempty"`
 }
 
 // Reason is why a compaction ran (ADR 0020 §1): manual (the caller

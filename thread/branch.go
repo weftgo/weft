@@ -52,19 +52,73 @@ func SummarizeLeft() BranchOption { return summarizeLeftOption{} }
 // root, restarting the conversation from nothing while the file keeps
 // everything. An id the session does not hold is an error.
 func (s *Session) Branch(ctx context.Context, entryID string, opts ...BranchOption) error {
+	if resolveBranch(opts...).summarizeLeft {
+		// Validate, then summarize with the lock released — the model
+		// call takes seconds — then append the batch under it.
+		if err := s.checkEntry(entryID); err != nil {
+			return err
+		}
+		summary, err := s.summarizeBranch(ctx, entryID)
+		if err != nil {
+			return err
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		nav := s.mintIDLocked()
+		sum := s.mintIDLocked()
+		for _, id := range []string{nav, sum} {
+			if !ValidID(id) {
+				return fmt.Errorf("thread: invalid entry id %q", id)
+			}
+			if _, dup := s.byID[id]; dup {
+				return fmt.Errorf("thread: entry id %q already held by session %s", id, s.header.ID)
+			}
+		}
+		now := time.Now().UTC()
+		// Two entries, one atomic batch: the navigation off the old
+		// leaf, then the summary sitting on the new line — its parent
+		// is the branch point, so the walk from any future leaf
+		// carries it in the abandoned branch's place. Branch summaries
+		// share no cache prefix with the main line; that cost is
+		// documented, not hidden.
+		batch := []Entry{
+			LeafEntry{ID: nav, ParentID: s.leaf, Created: now, Entry: entryID},
+			BranchSummaryEntry{ID: sum, ParentID: entryID, Created: now, Summary: summary, FromEntry: entryID},
+		}
+		if err := s.st.Append(ctx, s.header.ID, batch...); err != nil {
+			return err
+		}
+		for _, e := range batch {
+			s.adoptLocked(e)
+		}
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.checkEntryLocked(entryID); err != nil {
+		return err
+	}
+	return s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {
+		return LeafEntry{ID: id, ParentID: parent, Created: created, Entry: entryID}
+	})
+}
+
+// checkEntry validates a branch target without holding the lock.
+func (s *Session) checkEntry(entryID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.checkEntryLocked(entryID)
+}
+
+// checkEntryLocked is checkEntry with s.mu held (Branch's rule: any
+// held entry, or "" for the root).
+func (s *Session) checkEntryLocked(entryID string) error {
 	if entryID != "" {
 		if _, ok := s.byID[entryID]; !ok {
 			return fmt.Errorf("thread: session %s holds no entry %q", s.header.ID, entryID)
 		}
 	}
-	if resolveBranch(opts...).summarizeLeft {
-		return fmt.Errorf("%w: SummarizeLeft writes branch summaries from step 1.8 (ADR 0020 §6)", ErrNotImplemented)
-	}
-	return s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {
-		return LeafEntry{ID: id, ParentID: parent, Created: created, Entry: entryID}
-	})
+	return nil
 }
 
 // Fork copies the session's path root → entryID into a new session in

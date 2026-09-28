@@ -373,10 +373,13 @@ func ExampleSession_Pin() {
 	agent := weft.New(wefttest.Script())
 	st := thread.Memory()
 	s, _ := thread.Create(ctx, st, agent)
-	st.Append(ctx, s.ID(), thread.MessageEntry{
+	if err := st.Append(ctx, s.ID(), thread.MessageEntry{
 		ID: "e_req", Created: time.Now().UTC(),
 		Message: weft.User("THE REQUIREMENT: ship by Friday"),
-	})
+	}); err != nil {
+		fmt.Println(err)
+		return
+	}
 	open, _ := thread.Open(ctx, st, s.ID(), agent)
 	if err := open.Pin(ctx, "e_req"); err != nil {
 		fmt.Println(err)

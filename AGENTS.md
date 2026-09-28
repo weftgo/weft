@@ -127,6 +127,20 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //        studio.Handler(s, studio.Manifest(bytes), studio.Capabilities("live"))))
 //    serves the embedded UI (committed dist, no build step) and the JSON API:
 //    meta/runs/runs/{id}/run events (paged)/manifest. Base(path) mounts it anywhere.
+
+// 8. Sessions (module weft/thread; jsonl.Open(dir) | thread.Memory()):
+//    s, _ := thread.Create(ctx, st, agent) — the append-only entry tree; every write
+//    through Storage.Append; s.Context() is the leaf's messages, repaired.
+//    turn, _ := s.Send(ctx, weft.User("…"), thread.RunOptions(weft.Tap(...))) —
+//    prompt durable before the run; turn.Wait(); busy: Queue (default) or
+//    thread.BusyPolicy(thread.Reject) → ErrBusy.
+//    s.Branch(ctx, entryID[, thread.SummarizeLeft()]), s.Fork(ctx, entryID) — the tree,
+//    nothing lost; s.Label, s.SetInfo, s.Custom, s.CustomMessage, s.Pin.
+//    Compaction (ADR 0020): thread.ContextWindow(n) arms the trigger (reported input +
+//    estimated delta > window − Reserve); s.Compact(ctx[, thread.Instructions("…")]),
+//    s.PreviewCompaction, s.ApplyCompaction, s.Uncompact; five layers (SummaryModel,
+//    SummaryPrompt/Focus/MaxTokens, WithSummarizer/Compactor/Trimmer, hooks,
+//    thread.PreferNative), thread.ClearOldToolResults(n) — nothing ever deleted.
 ```
 
 Test offline with `wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))`;

@@ -350,3 +350,39 @@ func ExampleSession_Compact() {
 	// kept raw: true
 	// after Uncompact: 3 messages
 }
+
+// A session under the Reject busy policy says ErrBusy instead of
+// holding a follow-up while a turn runs.
+func ExampleBusyPolicy() {
+	ctx := context.Background()
+	agent := weft.New(wefttest.Script())
+	s, _ := thread.Create(ctx, thread.Memory(), agent, thread.BusyPolicy(thread.Reject))
+	_ = s
+	// With a turn in flight (a blocking tool, say):
+	//   if _, err := s.Send(ctx, weft.User("one more thing")); errors.Is(err, thread.ErrBusy) { … }
+	fmt.Println("Queue is the default; Reject is one option away")
+	// Output:
+	// Queue is the default; Reject is one option away
+}
+
+// Pin keeps an entry in the context through every compaction — the
+// requirement, the key decision — recorded as a reserved custom entry
+// that survives compaction the way all custom state does.
+func ExampleSession_Pin() {
+	ctx := context.Background()
+	agent := weft.New(wefttest.Script())
+	st := thread.Memory()
+	s, _ := thread.Create(ctx, st, agent)
+	st.Append(ctx, s.ID(), thread.MessageEntry{
+		ID: "e_req", Created: time.Now().UTC(),
+		Message: weft.User("THE REQUIREMENT: ship by Friday"),
+	})
+	open, _ := thread.Open(ctx, st, s.ID(), agent)
+	if err := open.Pin(ctx, "e_req"); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("pinned")
+	// Output:
+	// pinned
+}

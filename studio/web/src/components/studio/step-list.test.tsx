@@ -17,7 +17,7 @@ function load(name: string): string {
 
 const subDoc = JSON.parse(load("run-sub.golden.json")) as RunDoc
 const subEvents = (JSON.parse(load("events-sub.golden.json")) as EventsPage)
-  .events
+  .events.map((pe) => pe.event)
 
 describe("StepList", () => {
   it("renders steps with the subagent block inline (B1, B7)", async () => {

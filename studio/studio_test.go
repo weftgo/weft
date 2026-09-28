@@ -264,12 +264,16 @@ func TestRunGolden(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("run: %d", code)
 	}
-	// The document carries children but never events (ADR 0018 §8).
+	// The document carries children but never events (ADR 0018 §8),
+	// and event_count sizes the replay scrubber (plan §3).
 	if strings.Contains(body, `"events"`) {
 		t.Error("run document carries inline events")
 	}
 	if !strings.Contains(body, `"parent_id":"r_sub"`) {
 		t.Errorf("run document misses children: %s", body)
+	}
+	if !strings.Contains(body, `"event_count":`) {
+		t.Errorf("run document misses event_count: %s", body)
 	}
 	golden(t, "run-sub.golden.json", body)
 
@@ -302,6 +306,34 @@ func TestEventsGolden(t *testing.T) {
 	// side (B7) — Nested wrappers inline in the parent's order.
 	_, _, sub := get(t, h, "/studio/api/runs/r_sub/events?limit=1000")
 	golden(t, "events-sub.golden.json", sub)
+
+	// A child run's id carries slashes (childRunID: parent/step/callID)
+	// and its page is a full run page (B7): the document and the events
+	// endpoint must both answer for it.
+	kid := childID(t, h, "r_sub")
+	if code, _, b := get(t, h, "/studio/api/runs/"+kid); code != http.StatusOK ||
+		!strings.Contains(b, `"id":"`+kid+`"`) || !strings.Contains(b, `"parent_id":"r_sub"`) {
+		t.Errorf("child run document: %d %s", code, b)
+	}
+	if code, _, b := get(t, h, "/studio/api/runs/"+kid+"/events"); code != http.StatusOK ||
+		!strings.Contains(b, `"done":true`) {
+		t.Errorf("child run events: %d %s", code, b)
+	}
+}
+
+// childID returns the parent's first child run id from the run document.
+func childID(t *testing.T, h http.Handler, parent string) string {
+	t.Helper()
+	_, _, body := get(t, h, "/studio/api/runs/"+parent)
+	var doc struct {
+		Children []struct {
+			ID string `json:"id"`
+		} `json:"children"`
+	}
+	if err := json.Unmarshal([]byte(body), &doc); err != nil || len(doc.Children) == 0 {
+		t.Fatalf("no children under %s: %v %s", parent, err, body)
+	}
+	return doc.Children[0].ID
 }
 
 func TestEventsPaging(t *testing.T) {
@@ -329,16 +361,24 @@ func TestEventsPaging(t *testing.T) {
 	for {
 		_, _, body := get(t, h, fmt.Sprintf("/studio/api/runs/r_ok/events?after=%d&limit=2", after))
 		var page struct {
-			Events    []json.RawMessage `json:"events"`
-			NextAfter *int64            `json:"next_after"`
-			Done      bool              `json:"done"`
+			Events []struct {
+				Pos   int64           `json:"pos"`
+				Event json.RawMessage `json:"event"`
+			} `json:"events"`
+			NextAfter *int64 `json:"next_after"`
+			Done      bool   `json:"done"`
 		}
 		if err := json.Unmarshal([]byte(body), &page); err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
-		for _, ev := range page.Events {
-			if walked >= total || string(ev) != want[walked] {
-				t.Fatalf("event %d = %s, want %s", walked, ev, want)
+		for i, pe := range page.Events {
+			// Positions are dense and continuous across pages: each
+			// page starts exactly at the cursor it was given.
+			if pe.Pos != int64(after+i) {
+				t.Fatalf("event %d has pos %d, want %d", walked, pe.Pos, after+i)
+			}
+			if walked >= total || string(pe.Event) != want[walked] {
+				t.Fatalf("event %d = %s, want %s", walked, pe.Event, want)
 			}
 			walked++
 		}
@@ -352,6 +392,12 @@ func TestEventsPaging(t *testing.T) {
 	}
 	if walked != total {
 		t.Fatalf("walked %d events, store holds %d", walked, total)
+	}
+
+	// -1 is the documented "from the start" default and reads like 0.
+	if code, _, b := get(t, h, "/studio/api/runs/r_ok/events?after=-1&limit=2"); code != http.StatusOK ||
+		!strings.Contains(b, `"pos":0`) {
+		t.Errorf("after=-1: %d %s", code, b)
 	}
 
 	// Past the end: empty page, no cursor, still done.
@@ -412,8 +458,8 @@ func TestAPIErrors(t *testing.T) {
 	if code, _, b := get(t, h, "/studio/api/runs?before=yesterday"); code != http.StatusBadRequest || !strings.Contains(b, "bad_request") {
 		t.Errorf("bad before: %d %s", code, b)
 	}
-	if code, _, b := get(t, h, "/studio/api/runs/r_ok/events?after=-1"); code != http.StatusBadRequest {
-		t.Errorf("negative after: %d %s", code, b)
+	if code, _, b := get(t, h, "/studio/api/runs/r_ok/events?after=-2"); code != http.StatusBadRequest {
+		t.Errorf("after=-2: %d %s", code, b)
 	}
 	if code, _, b := get(t, h, "/studio/api/runs?limit=lots"); code != http.StatusBadRequest {
 		t.Errorf("bad limit: %d %s", code, b)

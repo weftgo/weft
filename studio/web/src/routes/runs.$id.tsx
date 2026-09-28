@@ -53,6 +53,12 @@ function RunPage() {
     setPlayhead(t)
     void navigate({ search: (prev) => ({ ...prev, t: t ?? undefined }) })
   }
+  // The URL owns the playhead: after a remount or back/forward
+  // navigation whose search commit lands late, local state catches up
+  // from t instead of silently flipping back to live.
+  useEffect(() => {
+    setPlayhead(search.t ?? null)
+  }, [search.t])
 
   // r toggles raw JSON (A4).
   useEffect(() => {
@@ -112,6 +118,11 @@ function RunPage() {
         onTick={setPlayhead}
         onSeek={seek}
       />
+      {stream.error && (
+        <div className="rounded-md border border-status-bad/30 px-3 py-2 font-mono text-xs text-status-bad">
+          event stream: {stream.error}
+        </div>
+      )}
       <Tabs
         value={search.view ?? "steps"}
         onValueChange={(v) =>
@@ -133,6 +144,7 @@ function RunPage() {
             folded={stream.folded}
             doc={doc}
             upTo={playhead ?? undefined}
+            highlight={search.step}
           />
         </TabsContent>
         <TabsContent value="raw" className="mt-3">

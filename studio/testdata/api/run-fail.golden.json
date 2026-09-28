@@ -21,6 +21,7 @@
     "cwd": "/tmp/demo"
   },
   "err": "weft: run failed at step 1: model stream: wefttest: injected provider 500",
+  "event_count": 7,
   "result": {
     "id": "r_fail",
     "stop_reason": "tool_calls",

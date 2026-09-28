@@ -21,6 +21,7 @@
     "cwd": "/tmp/demo"
   },
   "err": "",
+  "event_count": 14,
   "result": {
     "id": "r_sub",
     "stop_reason": "stop",

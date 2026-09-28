@@ -26,7 +26,7 @@ import (
 // Events paging (ADR 0018 §8): constants for the endpoint.
 const (
 	eventsDefaultLimit = 500
-	eventsMaxLimit     = 2000
+	eventsMaxLimit     = 5000
 	// finishedRunCache is how many finished runs' event streams the
 	// paged endpoint keeps sliced in memory, so paging through a run
 	// is one store Get, not one per page. Running runs are never
@@ -95,7 +95,11 @@ func (a *app) serveAPI(w http.ResponseWriter, r *http.Request, path string) {
 			a.serveRunEvents(w, r, id)
 			return
 		}
-		if rest == "" || strings.Contains(rest, "/") {
+		// Everything else after /api/runs/ is a run id, slashes included:
+		// a subagent's child id is <parent>/<step>/<callID> (the core's
+		// childRunID), and its page is a full run page (B7). An unknown
+		// id still answers 404 — from the store, naming the run.
+		if rest == "" {
 			writeError(w, r, http.StatusNotFound, "not_found", "no such api route "+path)
 			return
 		}
@@ -161,6 +165,10 @@ type runsPage struct {
 
 type runDoc struct {
 	runRow
+	// EventCount sizes the replay scrubber before the pages arrive
+	// (plan §3); the run document itself never carries events — they
+	// are paged (ADR 0018 §8).
+	EventCount int `json:"event_count"`
 	// Result is the store's own result document (store.MarshalResult,
 	// envelope unwrapped): the store is the single owner of
 	// RunResult's JSON shape, so a step field added there appears here
@@ -169,10 +177,18 @@ type runDoc struct {
 	Children []runRow        `json:"children"`
 }
 
+// posEvent is one event in a paged stream: its 0-based position beside
+// the event itself, so a client can verify continuity page to page and
+// replay scrubs on an explicit index (plan §3).
+type posEvent struct {
+	Pos   int64      `json:"pos"`
+	Event weft.Event `json:"event"`
+}
+
 type eventsPage struct {
 	// Events is the slice [after, after+len) of the run's stream, in
 	// Seq order, Nested inline. Empty (not null) past the end.
-	Events []weft.Event `json:"events"`
+	Events []posEvent `json:"events"`
 	// NextAfter is the position after the last event returned, when
 	// more buffered events remain; else null.
 	NextAfter *int64 `json:"next_after"`
@@ -310,8 +326,12 @@ func (a *app) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 		a.storeError(w, r, "list", id, err)
 		return
 	}
-	doc := runDoc{runRow: a.row(rec), Result: json.RawMessage("null"),
-		Children: make([]runRow, 0, len(kids.Runs))}
+	doc := runDoc{
+		runRow:     a.row(rec),
+		EventCount: len(rec.Events),
+		Result:     json.RawMessage("null"),
+		Children:   make([]runRow, 0, len(kids.Runs)),
+	}
 	for _, kid := range kids.Runs {
 		doc.Children = append(doc.Children, a.row(kid))
 	}
@@ -327,21 +347,25 @@ func (a *app) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 // serveRunEvents answers api/runs/{id}/events?after=&limit=: one page
-// of the run's event stream, 0-based positions. The whole stream is
-// one store Get, sliced; finished runs are cached (finishedRunCache)
-// so a multi-page walk costs one Get, and running runs are read fresh
-// every call so a tail sees new events.
+// of the run's event stream, 0-based positions. `after` is exclusive;
+// -1 and 0 both read from the start (-1 is the documented default for
+// "the whole stream"). The whole stream is one store Get, sliced;
+// runs whose stored status is terminal are cached (finishedRunCache)
+// so a multi-page walk costs one Get, and anything still stored
+// running — including a row that only *reads* interrupted through a
+// stale heartbeat — is re-read on every call, so a resumed run's tail
+// is never served from a stale snapshot.
 func (a *app) serveRunEvents(w http.ResponseWriter, r *http.Request, id string) {
 	q := r.URL.Query()
 	after := int64(0)
 	if v := q.Get("after"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || n < 0 {
+		if err != nil || n < -1 {
 			writeError(w, r, http.StatusBadRequest, "bad_request",
-				"after must be a non-negative integer")
+				"after must be -1 (from the start) or a non-negative position")
 			return
 		}
-		after = n
+		after = max(n, 0)
 	}
 	limit := eventsDefaultLimit
 	if v := q.Get("limit"); v != "" {
@@ -365,7 +389,7 @@ func (a *app) serveRunEvents(w http.ResponseWriter, r *http.Request, id string) 
 		}
 		events = rec.Events
 		finished = store.DeriveStatus(rec.Status, rec.Heartbeat, a.now()) != store.Running
-		if finished {
+		if rec.Status == store.Succeeded || rec.Status == store.Failed {
 			a.events.put(id, events)
 		}
 	}
@@ -374,11 +398,9 @@ func (a *app) serveRunEvents(w http.ResponseWriter, r *http.Request, id string) 
 	if end > int64(len(events)) || end < 0 {
 		end = int64(len(events))
 	}
-	page := eventsPage{Events: make([]weft.Event, 0)}
-	if after < int64(len(events)) {
-		// Copy the slice: json encodes through the events' own
-		// MarshalJSON, and the cache must not alias the response.
-		page.Events = append(page.Events, events[after:end]...)
+	page := eventsPage{Events: make([]posEvent, 0, end-after)}
+	for pos := after; pos < end; pos++ {
+		page.Events = append(page.Events, posEvent{Pos: pos, Event: events[pos]})
 	}
 	if end < int64(len(events)) {
 		next := end

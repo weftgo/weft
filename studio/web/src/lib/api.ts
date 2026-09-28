@@ -68,13 +68,21 @@ export interface StepDoc {
 }
 
 export interface RunDoc extends RunRow {
+  /** The stream's length — sizes the replay scrubber before pages land. */
+  event_count: number
   result: ResultDoc | null
   children: RunRow[]
 }
 
+/** One positioned event in a paged stream (plan §3). */
+export interface PosEvent {
+  pos: number
+  event: WireEvent
+}
+
 /** One page of a run's event stream (ADR 0018 §8: paged, never inline). */
 export interface EventsPage {
-  events: WireEvent[]
+  events: PosEvent[]
   next_after: number | null
   done: boolean
 }

@@ -56,6 +56,18 @@ export interface FoldedRun {
 }
 
 /**
+ * A fold in progress: feed events in stream order, take views with
+ * result(). One folder serves both consumers — the run page walks
+ * pages into it (foldMore, below) and replay renders prefixes of the
+ * accumulated stream — so there is exactly one folding algorithm.
+ */
+export interface FoldFeed {
+  push: (ev: WireEvent) => void
+  /** A fresh view of everything fed so far; the feed keeps accepting. */
+  result: () => FoldedRun
+}
+
+/**
  * Fold events[0, upTo) into a run view. upTo defaults to the whole
  * stream; replay renders prefixes of the stream at every index, so
  * folding a prefix must never throw and must agree with the full fold
@@ -65,11 +77,28 @@ export function fold(
   events: WireEvent[],
   upTo: number = events.length
 ): FoldedRun {
+  const feed = newFold()
+  const n = Math.max(0, Math.min(upTo, events.length))
+  for (let i = 0; i < n; i++) feed.push(events[i])
+  return feed.result()
+}
+
+/**
+ * foldMore extends a previous fold with one events page — the seam the
+ * paged reader and T2a's live tail stream through (plan §4.4): pages
+ * are folded once as they arrive, never re-folded from the top.
+ */
+export function foldMore(feed: FoldFeed, page: WireEvent[]): FoldFeed {
+  for (const ev of page) feed.push(ev)
+  return feed
+}
+
+export function newFold(): FoldFeed {
   const run: FoldedRun = { runId: "", steps: [], pending: [], finished: false }
   // tool_args_delta carries no call id — keyed by best-known name.
   const streamedArgs = new Map<string, string>()
   // A call's child events, collected in arrival order and folded at
-  // the end: nested is just a sub-stream (nested within nested
+  // result() time: nested is just a sub-stream (nested within nested
   // included), so one recursive fold covers all depths.
   const nested = new Map<string, WireEvent[]>()
 
@@ -91,72 +120,83 @@ export function fold(
   const last = (): number =>
     run.steps.length ? run.steps[run.steps.length - 1].index : 0
 
-  const n = Math.max(0, Math.min(upTo, events.length))
-  for (let i = 0; i < n; i++) {
-    const ev = events[i]
-    switch (ev.type) {
-      case "run_start":
-        run.runId = ev.id
-        run.agent = ev.agent
-        run.model = ev.model
-        break
-      case "step_start":
-        step(ev.index) // a resumed index keeps its accumulated state
-        break
-      case "text_delta":
-        step(last()).text += ev.text
-        break
-      case "reasoning_delta":
-        step(last()).reasoning += ev.text
-        break
-      case "tool_args_delta":
-        streamedArgs.set(ev.name, (streamedArgs.get(ev.name) ?? "") + ev.args)
-        break
-      case "tool_start":
-        step(last()).toolCalls.push({
-          callId: ev.call_id,
-          name: ev.name,
-          args: ev.args,
-          streamedArgs: streamedArgs.get(ev.name) ?? "",
-          state: "running",
-        })
-        streamedArgs.delete(ev.name)
-        break
-      case "tool_finish": {
-        const c = findCall(ev.call_id)
-        if (c) {
-          c.result = { content: ev.content, isError: ev.is_error }
-          c.state = "done"
+  return {
+    push(ev: WireEvent) {
+      switch (ev.type) {
+        case "run_start":
+          run.runId = ev.id
+          run.agent = ev.agent
+          run.model = ev.model
+          break
+        case "step_start":
+          step(ev.index) // a resumed index keeps its accumulated state
+          break
+        case "text_delta":
+          step(last()).text += ev.text
+          break
+        case "reasoning_delta":
+          step(last()).reasoning += ev.text
+          break
+        case "tool_args_delta":
+          streamedArgs.set(ev.name, (streamedArgs.get(ev.name) ?? "") + ev.args)
+          break
+        case "tool_start":
+          step(last()).toolCalls.push({
+            callId: ev.call_id,
+            name: ev.name,
+            args: ev.args,
+            streamedArgs: streamedArgs.get(ev.name) ?? "",
+            state: "running",
+          })
+          streamedArgs.delete(ev.name)
+          break
+        case "tool_finish": {
+          const c = findCall(ev.call_id)
+          if (c) {
+            c.result = { content: ev.content, isError: ev.is_error }
+            c.state = "done"
+          }
+          break
         }
-        break
-      }
-      case "step_finish":
-        step(ev.index).finish = {
-          reason: ev.reason,
-          raw: ev.raw,
-          usage: ev.usage,
+        case "step_finish":
+          step(ev.index).finish = {
+            reason: ev.reason,
+            raw: ev.raw,
+            usage: ev.usage,
+          }
+          break
+        case "run_finish":
+          run.finished = true
+          run.usage = ev.usage
+          run.pending = ev.pending ?? []
+          break
+        case "nested": {
+          const list = nested.get(ev.call_id)
+          if (list) list.push(ev.event)
+          else nested.set(ev.call_id, [ev.event])
+          break
         }
-        break
-      case "run_finish":
-        run.finished = true
-        run.usage = ev.usage
-        run.pending = ev.pending ?? []
-        break
-      case "nested": {
-        const list = nested.get(ev.call_id)
-        if (list) list.push(ev.event)
-        else nested.set(ev.call_id, [ev.event])
-        break
       }
-    }
+    },
+    result(): FoldedRun {
+      const out: FoldedRun = {
+        runId: run.runId,
+        agent: run.agent,
+        model: run.model,
+        // Sorted copy: insertion order stays intact inside the feed,
+        // so a later push still lands on the last-opened step.
+        steps: [...run.steps].sort((a, b) => a.index - b.index),
+        pending: [...run.pending],
+        usage: run.usage,
+        finished: run.finished,
+      }
+      for (const [callId, events] of nested) {
+        const call = findCall(callId)
+        if (call) call.child = fold(events)
+      }
+      return out
+    },
   }
-
-  run.steps.sort((a, b) => a.index - b.index)
-  for (const [callId, events_] of nested) {
-    const call = findCall(callId)
-    if (call) call.child = fold(events_)
-  }
-  return run
 }
 
 /**

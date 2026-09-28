@@ -4,6 +4,7 @@
 // name(args) with their results under them, then finish reason and
 // usage with the cached/reasoning splits.
 import { ChevronRight } from "lucide-react"
+import { useEffect, useRef } from "react"
 
 import type { RunDoc, WireEvent } from "@/lib/api"
 import { callState, fold } from "@/lib/events"
@@ -126,13 +127,26 @@ function StepCard({
   step,
   runStatus,
   childLinks,
+  highlighted,
 }: {
   step: FoldedStep
   runStatus: string
   childLinks: Map<string, { id: string; label: string }>
+  highlighted?: boolean
 }) {
+  const ref = useRef<HTMLDivElement>(null)
+  // A ?step= link (A3) lands on the card it names.
+  useEffect(() => {
+    if (highlighted) ref.current?.scrollIntoView({ block: "center" })
+  }, [highlighted])
   return (
-    <div className="space-y-2 rounded-lg border bg-background px-4 py-3">
+    <div
+      ref={ref}
+      data-step={step.index}
+      className={`space-y-2 rounded-lg border bg-background px-4 py-3 ${
+        highlighted ? "ring-2 ring-thread/60" : ""
+      }`}
+    >
       <div className="flex items-center gap-2">
         <span className="eyebrow">step {step.index}</span>
         {step.finish ? (
@@ -191,6 +205,7 @@ export function StepList({
   folded,
   doc,
   upTo,
+  highlight,
 }: {
   events: WireEvent[]
   folded: FoldedRun
@@ -198,6 +213,8 @@ export function StepList({
   /** Replay playhead: render only events up to this position — the
    * same fold over a prefix, never a second shape (B2). */
   upTo?: number
+  /** The ?step= selection (A3): the named step is ringed and centred. */
+  highlight?: number
 }) {
   const view = upTo == null ? folded : fold(events, upTo)
   // A child link per call id: the store's own child rows (B7).
@@ -212,6 +229,7 @@ export function StepList({
           step={step}
           runStatus={doc.status}
           childLinks={childLinks}
+          highlighted={step.index === highlight}
         />
       ))}
       {view.finished ? null : (

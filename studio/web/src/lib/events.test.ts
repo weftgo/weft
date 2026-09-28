@@ -7,12 +7,19 @@ import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
 import type { EventsPage, ResultDoc, WireEvent } from "./api"
-import { callState, crossCheck, fold, truncation } from "./events"
+import {
+  callState,
+  crossCheck,
+  fold,
+  foldMore,
+  newFold,
+  truncation,
+} from "./events"
 
 function golden(name: string): WireEvent[] {
   const path = resolve(process.cwd(), `../testdata/api/${name}`)
   const page = JSON.parse(readFileSync(path, "utf8")) as EventsPage
-  return page.events
+  return page.events.map((pe) => pe.event)
 }
 
 /** Wrap one event as the wire would: a nested envelope. */
@@ -326,6 +333,38 @@ describe("the replay prefix property", () => {
       }
     })
   }
+})
+
+describe("incremental folding (foldMore, plan §4.4)", () => {
+  const cases: Array<[string, WireEvent[]]> = [
+    ["goldens: r_ok", okEvents],
+    ["goldens: r_sub (nested)", subEvents],
+  ]
+
+  for (const [name, events] of cases) {
+    it(`folding ${name} page by page equals the one-shot fold at every split`, () => {
+      for (const size of [1, 2, 3, 5]) {
+        const feed = newFold()
+        const collected: WireEvent[] = []
+        for (let i = 0; i < events.length; i += size) {
+          const page = events.slice(i, i + size)
+          foldMore(feed, page)
+          collected.push(...page)
+          // The view after each page is exactly the one-shot fold of
+          // everything seen so far (toEqual is insertion-order blind —
+          // an earlier result() may have attached a key sooner).
+          expect(feed.result()).toEqual(fold(collected))
+        }
+      }
+    })
+  }
+
+  it("foldMore on an empty feed of empty pages stays empty and usable", () => {
+    const feed = foldMore(newFold(), [])
+    expect(feed.result().steps).toEqual([])
+    foldMore(feed, okEvents)
+    expect(feed.result().runId).toBe("r_ok")
+  })
 })
 
 describe("truncation markers (B9)", () => {

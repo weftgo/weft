@@ -115,6 +115,18 @@ func (b *backend) path(id string) string { return filepath.Join(b.dir, id+".json
 // current format (zero means it), or a session that already exists —
 // here or in any other process sharing the directory — fails, and a
 // session is never silently replaced.
+//
+// The whole setup — create, lock, header write, dirent sync — runs
+// under the instance lock, and the session is published only after its
+// header is durable. An Append racing Create therefore lands in one of
+// two clean places: it waits on the instance lock and finds the
+// published session (the header is always first, and never below an
+// entry), or it ran before the file existed and answers ErrNotFound.
+// Neither this instance's own appends nor its Create can read the
+// other as a foreign writer, and Create's failure path can never
+// discard a file a goroutine of ours is appending to. The cost is the
+// setup's two fsyncs under the instance lock — once per session, not
+// per append.
 func (b *backend) Create(ctx context.Context, h thread.Header) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -132,10 +144,10 @@ func (b *backend) Create(ctx context.Context, h thread.Header) error {
 	if err != nil {
 		return err
 	}
+	buf := append(line, '\n')
 	b.mu.Lock()
-	_, held := b.sessions[h.ID]
-	b.mu.Unlock()
-	if held {
+	defer b.mu.Unlock()
+	if _, held := b.sessions[h.ID]; held {
 		return fmt.Errorf("thread: session %s already exists", h.ID)
 	}
 	f, err := os.OpenFile(b.path(h.ID), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -154,7 +166,6 @@ func (b *backend) Create(ctx context.Context, h thread.Header) error {
 		return err
 	}
 	s := &session{f: f}
-	buf := append(line, '\n')
 	if err := writeAll(s, buf, true); err != nil {
 		discardSession(f)
 		return err
@@ -163,9 +174,7 @@ func (b *backend) Create(ctx context.Context, h thread.Header) error {
 		discardSession(f)
 		return err
 	}
-	b.mu.Lock()
 	b.sessions[h.ID] = s
-	b.mu.Unlock()
 	return nil
 }
 

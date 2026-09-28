@@ -58,7 +58,7 @@ func (s *Session) Branch(ctx context.Context, entryID string, opts ...BranchOpti
 		if err := s.checkEntry(entryID); err != nil {
 			return err
 		}
-		summary, err := s.summarizeBranch(ctx, entryID)
+		summary, fromEntry, err := s.summarizeBranch(ctx, entryID)
 		if err != nil {
 			return err
 		}
@@ -83,7 +83,7 @@ func (s *Session) Branch(ctx context.Context, entryID string, opts ...BranchOpti
 		// documented, not hidden.
 		batch := []Entry{
 			LeafEntry{ID: nav, ParentID: s.leaf, Created: now, Entry: entryID},
-			BranchSummaryEntry{ID: sum, ParentID: entryID, Created: now, Summary: summary, FromEntry: entryID},
+			BranchSummaryEntry{ID: sum, ParentID: entryID, Created: now, Summary: summary, FromEntry: fromEntry},
 		}
 		if err := s.st.Append(ctx, s.header.ID, batch...); err != nil {
 			return err

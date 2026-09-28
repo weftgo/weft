@@ -185,18 +185,38 @@ func (s *Session) Compact(ctx context.Context, opts ...CompactOption) error {
 }
 
 // ApplyCompaction writes a computed Compaction as the session's next
-// compaction entry, appended at the leaf. c must name a FirstKept the
-// session holds; anything else is an error, and nothing is written.
-// The entry lands whatever else happened between its computation and
-// this call — the tree only grew, so the kept range stays correct.
+// compaction entry, appended at the leaf. c must name a FirstKept on
+// the leaf's path — a value the walk could never reach is an error,
+// not a fallback — and one at or after the previous compaction's kept
+// boundary: an iterative compaction never summarizes what a summary
+// already replaced (ADR 0020 §1). A summary-less compaction must be a
+// trim. Anything else is an error, and nothing is written. The entry
+// lands whatever else happened between its computation and this call —
+// the tree only grew, so the kept range stays correct.
 func (s *Session) ApplyCompaction(ctx context.Context, c *Compaction) error {
 	if c == nil {
 		return fmt.Errorf("thread: ApplyCompaction with no Compaction")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.byID[c.FirstKept]; !ok {
-		return fmt.Errorf("thread: compaction keeps first entry %q, which session %s does not hold", c.FirstKept, s.header.ID)
+	path, err := s.pathLocked(s.leaf)
+	if err != nil {
+		return err
+	}
+	keptIdx := indexOfID(path, c.FirstKept)
+	if keptIdx < 0 {
+		return fmt.Errorf("thread: compaction keeps first entry %q, which is not on session %s's leaf path", c.FirstKept, s.header.ID)
+	}
+	for i := len(path) - 1; i >= 0; i-- {
+		if prev, ok := path[i].(CompactionEntry); ok {
+			if prevIdx := indexOfID(path, prev.FirstKept); prevIdx >= 0 && keptIdx < prevIdx {
+				return fmt.Errorf("thread: compaction keeps first entry %q, before the previous compaction's kept boundary %q (ADR 0020 §1)", c.FirstKept, prev.FirstKept)
+			}
+			break
+		}
+	}
+	if c.Summary == "" && c.Reason != ReasonTrim {
+		return fmt.Errorf("thread: a compaction without a summary must be a trim (ADR 0020 §1)")
 	}
 	e := CompactionEntry{
 		ID:              s.mintIDLocked(),
@@ -330,9 +350,18 @@ func (s *Session) computeCompaction(ctx context.Context, reason Reason, instruct
 	}
 	cfg := s.cfg.compaction
 	prev := ""
+	rangeStart := 0
 	for i := len(path) - 1; i >= 0; i-- {
 		if c, ok := path[i].(CompactionEntry); ok {
 			prev = c.Summary // iterative: the previous summary feeds the next
+			// …and the previous kept boundary is where the range to
+			// summarize starts: entries below it exist only inside the
+			// previous summary, and re-serializing them would feed the
+			// summarizer the whole history every time — an input that
+			// itself outgrows the window (ADR 0020 §1).
+			if j := indexOfID(path, c.FirstKept); j >= 0 {
+				rangeStart = j
+			}
 			break
 		}
 	}
@@ -348,11 +377,17 @@ func (s *Session) computeCompaction(ctx context.Context, reason Reason, instruct
 			return 0
 		}
 	}
-	cut := cutIndexWeighted(path, cfg.keepRecent, pinned, weight)
+	cut := cutIndexWeighted(path, cfg.keepRecent, weight)
 	if cut < 0 {
 		return nil, fmt.Errorf("%w: session %s's tail fits inside KeepRecent", errNothingToCompact, s.header.ID)
 	}
-	kept, summarized := path[cut:], path[:cut]
+	if cut <= rangeStart {
+		// Nothing new to summarize: everything past the previous kept
+		// boundary still fits — the iterative chain is fed nothing it
+		// does not already hold.
+		return nil, fmt.Errorf("%w: session %s has nothing new past the kept boundary", errNothingToCompact, s.header.ID)
+	}
+	kept, summarized := path[cut:], path[rangeStart:cut]
 	var rangeMsgs, contextMsgs []weft.Message
 	for _, e := range path {
 		if m, ok := contextMessage(e); ok {
@@ -364,8 +399,12 @@ func (s *Session) computeCompaction(ctx context.Context, reason Reason, instruct
 			rangeMsgs = append(rangeMsgs, m)
 		}
 	}
+	// The pinned ids this compaction keeps through: every pin below the
+	// cut, in the range it summarizes and in the older summary's range
+	// alike — the walk re-includes them from the entry, so a pin never
+	// has to hold the cut back (ADR 0020 §4).
 	var pinnedThrough []string
-	for _, e := range path {
+	for _, e := range path[:cut] {
 		if pinned[idOf(e)] {
 			pinnedThrough = append(pinnedThrough, idOf(e))
 		}
@@ -469,6 +508,17 @@ func contextMessage(e Entry) (weft.Message, bool) {
 		return summaryMessage(e.Summary), true
 	}
 	return weft.Message{}, false
+}
+
+// indexOfID returns the position of the entry with the given id on the
+// path, or -1 when the path does not reach it.
+func indexOfID(path []Entry, id string) int {
+	for i, e := range path {
+		if idOf(e) == id {
+			return i
+		}
+	}
+	return -1
 }
 
 // compactFailed runs the CompactFailed hook when one is set — the
@@ -598,8 +648,11 @@ func (s *Session) summarizeWith(ctx context.Context, m weft.Model, in SummaryInp
 // assistant message with tool calls — never between a call and its
 // result (ADR 0020 §2). A single turn larger than keepRecent is split
 // at an assistant message inside it. -1 means nothing to compact.
-func cutIndex(path []Entry, keepRecent int64, pinned map[string]bool) int {
-	return cutIndexWeighted(path, keepRecent, pinned, defaultEntryWeight)
+// Pinned entries do not constrain the cut: the walk re-includes them
+// from the compaction entry's Pinned list, so a pin near the root
+// cannot hold the whole context raw forever.
+func cutIndex(path []Entry, keepRecent int64) int {
+	return cutIndexWeighted(path, keepRecent, defaultEntryWeight)
 }
 
 // defaultEntryWeight is the default per-entry weight for the walk.
@@ -607,7 +660,7 @@ func defaultEntryWeight(e Entry) int64 { return estimateEntry(e) }
 
 // cutIndexWeighted is cutIndex with a replaceable per-entry weight —
 // the session's Estimator when one is configured.
-func cutIndexWeighted(path []Entry, keepRecent int64, pinned map[string]bool, weight func(Entry) int64) int {
+func cutIndexWeighted(path []Entry, keepRecent int64, weight func(Entry) int64) int {
 	// Walk back from the leaf accumulating the estimated tail.
 	suffix := int64(0)
 	cut := -1
@@ -626,9 +679,10 @@ func cutIndexWeighted(path []Entry, keepRecent int64, pinned map[string]bool, we
 	// message (the session's first write is a prompt or a custom
 	// message — a custom message is a user message unless its caller
 	// made it something else, and the walk then skips to the next
-	// real boundary). A pinned entry in the summarized range moves the
-	// cut forward the same way: a pin survives every compaction.
-	for cut < len(path) && (!validCut(path, cut) || pinnedIn(path[:cut], pinned)) {
+	// real boundary). Pinned entries do not hold the cut back: the
+	// walk re-includes them from the compaction entry's Pinned list,
+	// so a pin near the root cannot keep the whole context raw.
+	for cut < len(path) && !validCut(path, cut) {
 		cut++
 	}
 	if cut < len(path) {
@@ -642,24 +696,11 @@ func cutIndexWeighted(path []Entry, keepRecent int64, pinned map[string]bool, we
 	// An estimate cannot refuse to compact a context the window
 	// cannot hold.
 	for c := len(path) - 1; c >= 1; c-- {
-		if validCut(path, c) && !pinnedIn(path[:c], pinned) {
+		if validCut(path, c) {
 			return c
 		}
 	}
 	return -1
-}
-
-// pinnedIn reports whether any entry in the range is pinned.
-func pinnedIn(rangeEntries []Entry, pinned map[string]bool) bool {
-	if len(pinned) == 0 {
-		return false
-	}
-	for _, e := range rangeEntries {
-		if pinned[idOf(e)] {
-			return true
-		}
-	}
-	return false
 }
 
 // validCut reports whether path[cut] may be the first kept entry: a
@@ -946,15 +987,28 @@ func (s *Session) rateLimitAllows() bool {
 }
 
 // writeTrim records a trim: the same compaction entry, no summary, the
-// whole path kept (the trim stubs results, it drops nothing), and the
-// trimmed view re-derived on read from the configured trimmer — the
-// built-in one is deterministic over the file.
+// kept boundary the last compaction left (the root when none has — a
+// trim drops nothing, so everything is kept), and the trimmed view
+// re-derived on read from the configured trimmer — the built-in one
+// is deterministic over the file.
 func (s *Session) writeTrim(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	path, err := s.pathLocked(s.leaf)
 	if err != nil || len(path) == 0 {
 		return fmt.Errorf("thread: no path to trim")
+	}
+	firstKept := idOf(path[0])
+	for i := len(path) - 1; i >= 0; i-- {
+		if c, ok := path[i].(CompactionEntry); ok {
+			// The boundary the walk already reads from: a trim on a
+			// compacted session keeps it, so its record satisfies the
+			// same iterative rule every compaction does.
+			if indexOfID(path, c.FirstKept) >= 0 {
+				firstKept = c.FirstKept
+			}
+			break
+		}
 	}
 	var before int64
 	for _, e := range path {
@@ -964,7 +1018,7 @@ func (s *Session) writeTrim(ctx context.Context) error {
 		ID:           s.mintIDLocked(),
 		ParentID:     s.leaf,
 		Created:      time.Now().UTC(),
-		FirstKept:    idOf(path[0]),
+		FirstKept:    firstKept,
 		TokensBefore: before,
 		Reason:       ReasonTrim,
 	}
@@ -986,26 +1040,37 @@ var errCompactCanceled = errors.New("thread: compaction canceled")
 var errNothingToCompact = errors.New("thread: nothing to compact")
 
 // summarizeBranch summarizes the branch a SummarizeLeft Branch leaves
-// behind — the messages after the divergence entry up to the current
-// leaf — with the same skeleton, marker and model as compaction
-// (ADR 0020 §6): one summary, cache prefix shared with nothing, the
-// cost documented rather than hidden.
-func (s *Session) summarizeBranch(ctx context.Context, divergence string) (string, error) {
+// behind — the messages from the divergence up to the current leaf —
+// with the same skeleton, marker and model as compaction (ADR 0020
+// §6): one summary, cache prefix shared with nothing, the cost
+// documented rather than hidden. The divergence is the common
+// ancestor of the current leaf and the branch target: a target on
+// another branch summarizes everything this branch grew since the two
+// parted, and the returned from-entry names that ancestor ("" when
+// the branch being left is the whole session, grown from the root).
+func (s *Session) summarizeBranch(ctx context.Context, target string) (summary, fromEntry string, err error) {
 	s.mu.Lock()
-	path, err := s.pathLocked(s.leaf)
+	leafPath, err := s.pathLocked(s.leaf)
 	if err != nil {
 		s.mu.Unlock()
-		return "", err
+		return "", "", err
+	}
+	targetPath, err := s.pathLocked(target)
+	if err != nil {
+		s.mu.Unlock()
+		return "", "", err
+	}
+	common := 0
+	for common < len(leafPath) && common < len(targetPath) &&
+		idOf(leafPath[common]) == idOf(targetPath[common]) {
+		common++
+	}
+	fromEntry = ""
+	if common > 0 {
+		fromEntry = idOf(leafPath[common-1])
 	}
 	var sumMsgs []weft.Message
-	counting := false
-	for _, e := range path {
-		if !counting {
-			if idOf(e) == divergence {
-				counting = true // the summarized range starts after the divergence
-			}
-			continue
-		}
+	for _, e := range leafPath[common:] {
 		switch e := e.(type) {
 		case MessageEntry:
 			sumMsgs = append(sumMsgs, e.Message)
@@ -1017,7 +1082,7 @@ func (s *Session) summarizeBranch(ctx context.Context, divergence string) (strin
 	}
 	s.mu.Unlock()
 	if len(sumMsgs) == 0 {
-		return "", fmt.Errorf("thread: SummarizeLeft on a branch with no messages after %q", divergence)
+		return "", "", fmt.Errorf("thread: SummarizeLeft with no branch to summarize: the leaf is on %q's path already", target)
 	}
 	view, _ := summarizerView(sumMsgs)
 	cfg := s.cfg.compaction
@@ -1027,5 +1092,5 @@ func (s *Session) summarizeBranch(ctx context.Context, divergence string) (strin
 		SystemPrompt: cfg.summarySystemPrompt(""),
 		SummaryModel: cfg.summaryModel,
 	}, ReasonManual)
-	return sum.Text, err
+	return sum.Text, fromEntry, err
 }

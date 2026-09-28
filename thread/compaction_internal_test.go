@@ -2,6 +2,7 @@ package thread
 
 import (
 	"fmt"
+	"math/rand"
 	"testing"
 
 	"github.com/weftgo/weft"
@@ -155,5 +156,63 @@ func TestCutSplitWhenEveryEntryOverflows(t *testing.T) {
 	path := pathOf(user(bigText(30_000)), user(bigText(30_000)), user(bigText(30_000)))
 	if got := cutIndex(path, 20_000); got != 2 {
 		t.Errorf("cutIndex = %d, want 2 (the last message alone)", got)
+	}
+}
+
+// TestCutProperty runs random transcripts and keep windows through
+// cutIndex and checks the two invariants that make a cut legal: the
+// kept side starts at a user or assistant message, and the summarized
+// side never ends on an assistant message with tool calls — a call is
+// never separated from its results.
+func TestCutProperty(t *testing.T) {
+	seedRand := func(n int) *rand.Rand { return rand.New(rand.NewSource(int64(n))) }
+	for seed := 0; seed < 200; seed++ {
+		rng := seedRand(seed)
+		var shapes []any
+		n := 1 + rng.Intn(12)
+		openCalls := 0
+		for i := 0; i < n; i++ {
+			switch rng.Intn(6) {
+			case 0:
+				shapes = append(shapes, user(bigText(int64(1+rng.Intn(40)))))
+			case 1:
+				shapes = append(shapes, assist(bigText(int64(1+rng.Intn(40)))))
+			case 2:
+				id := fmt.Sprintf("c%d", i)
+				shapes = append(shapes, assistCall(id, "t"))
+				openCalls++
+			case 3:
+				if openCalls > 0 {
+					openCalls--
+					shapes = append(shapes, toolResult(fmt.Sprintf("c%d", rng.Intn(i+1))))
+				} else {
+					shapes = append(shapes, assist("plain"))
+				}
+			case 4:
+				shapes = append(shapes, "state")
+			case 5:
+				shapes = append(shapes, user("tiny"))
+			}
+		}
+		path := pathOf(shapes...)
+		for _, keep := range []int64{1, 5, 25, 60, 125, 250, 1000} {
+			cut := cutIndex(path, keep)
+			if cut == -1 {
+				continue
+			}
+			first, ok := path[cut].(MessageEntry)
+			if !ok || (first.Message.Role != weft.RoleUser && first.Message.Role != weft.RoleAssistant) {
+				t.Fatalf("seed %d keep %d: kept side starts at %T", seed, keep, path[cut])
+			}
+			if cut > 0 {
+				if prev, ok := path[cut-1].(MessageEntry); ok && prev.Message.Role == weft.RoleAssistant {
+					for _, p := range prev.Message.Content {
+						if _, isCall := p.(weft.ToolCallPart); isCall {
+							t.Fatalf("seed %d keep %d: cut separates a call from its results", seed, keep)
+						}
+					}
+				}
+			}
+		}
 	}
 }

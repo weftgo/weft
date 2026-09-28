@@ -269,9 +269,12 @@ func (s *Session) computeCompaction(ctx context.Context, reason Reason) (*Compac
 	slices.Sort(filesRead)
 	filesRead = slices.Compact(filesRead)
 
+	// Tokens before is the whole context at compaction time — the
+	// summarized range and the kept tail both — the number the next
+	// compaction's growth compares against.
 	var tokensBefore int64
-	for _, m := range sumMsgs {
-		tokensBefore += estimateMessage(m)
+	for _, e := range path {
+		tokensBefore += estimateEntry(e)
 	}
 
 	summary, usage, err := s.summarize(ctx, view, prev)
@@ -507,19 +510,26 @@ func (s *Session) maybeAutoCompact(ctx context.Context) {
 	}
 	s.mu.Lock()
 	lastInput := s.lastInput
+	if s.lastMeasureLeaf == "" {
+		// No model step has ever been measured — there is no reported
+		// number, and estimating the whole context would make the
+		// trigger a chars-per-token guess, the one signal ADR 0020
+		// forbids. The first turn's report becomes the signal.
+		s.mu.Unlock()
+		return
+	}
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
 		s.mu.Unlock()
 		return
 	}
 	var since []weft.Message
-	counting := s.lastMeasureLeaf == ""
+	counting := false
 	for _, e := range path {
-		if !counting && idOf(e) == s.lastMeasureLeaf {
-			counting = true
-			continue
-		}
 		if !counting {
+			if idOf(e) == s.lastMeasureLeaf {
+				counting = true // the messages after the measured turn are the delta
+			}
 			continue
 		}
 		switch e := e.(type) {

@@ -251,3 +251,54 @@ func ExampleSession_Branch() {
 	// branch context: 1
 	// fork of s_nav at e_2 carries 2 messages
 }
+
+// Send runs a turn: the prompt is durable before the run starts, the
+// reply and the turn's ledger land after it, and a reopen sees the
+// whole conversation.
+func ExampleSession_Send() {
+	ctx := context.Background()
+	// A scripted model makes the example deterministic and offline.
+	agent := weft.New(wefttest.Script(wefttest.Say("It shipped Tuesday."), wefttest.Say("Order 1234, two items.")))
+	st := thread.Memory()
+	next := 0
+	ids := []string{"s_demo", "e_1", "e_2", "e_3", "e_4", "e_5", "e_6"}
+	s, _ := thread.Create(ctx, st, agent, thread.IDs(func() string { id := ids[next]; next++; return id }))
+
+	t1, err := s.Send(ctx, weft.User("Where is order 1234?"))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	res, err := t1.Wait()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("run", t1.RunID(), "replied:", res.Text())
+
+	t2, err := s.Send(ctx, weft.User("And what was in it?"))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	if _, err := t2.Wait(); err != nil {
+		fmt.Println(err)
+		return
+	}
+	again, err := thread.Open(ctx, st, s.ID(), agent)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	for _, m := range again.Context() {
+		if m.Text() != "" {
+			fmt.Println(m.Role, ":", m.Text())
+		}
+	}
+	// Output:
+	// run s_demo-t1 replied: It shipped Tuesday.
+	// user : Where is order 1234?
+	// assistant : It shipped Tuesday.
+	// user : And what was in it?
+	// assistant : Order 1234, two items.
+}

@@ -26,6 +26,9 @@ type sessionConfig struct {
 	// ids mints session and entry ids; nil means the package's own
 	// time-sortable ids (NewSessionID, NewEntryID).
 	ids func() string
+	// policy is the busy policy Send follows (ADR 0011 §4): Queue (the
+	// zero value, the default) or Reject.
+	policy Policy
 }
 
 func resolveSession(opts ...SessionOption) sessionConfig {
@@ -74,9 +77,18 @@ type Session struct {
 	// navigation), or "" while the session holds no entries — the next
 	// entry is then the root.
 	leaf string
-	// turns counts the turn entries ever appended, branches included —
-	// the counter Send mints <session>-t<n> run ids from (step 1.7).
-	turns int
+	// turns counts the turn entries ever appended, branches included,
+	// and turnSeq is the run-id counter Send mints <session>-t<n> ids
+	// from (step 1.7): it recovers from turns on a reopen and moves at
+	// mint time, so a crashed turn's id is never reused.
+	turns   int
+	turnSeq int
+	// running is the one-runner flag behind the busy policy: a Send
+	// while true queues or rejects; the runner clears it when the
+	// queue drains. queue holds the accepted sends waiting for their
+	// turn, in acceptance order.
+	running bool
+	queue   []pendingSend
 }
 
 // Create starts a new session in st: a fresh header under a new
@@ -154,6 +166,7 @@ func Open(ctx context.Context, st Storage, id string, agent *weft.Agent, opts ..
 		}
 	}
 	s.leaf = leaf
+	s.turnSeq = s.turns
 	if s.leaf != "" {
 		if _, ok := s.byID[s.leaf]; !ok {
 			// Loud on the undefined (ADR 0011 §5): a trailing leaf

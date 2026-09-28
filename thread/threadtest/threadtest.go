@@ -274,8 +274,8 @@ func createValidation(open func(t *testing.T) thread.Storage) func(*testing.T) {
 		if err := st.Create(ctx(), h); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.Create(ctx(), h); err == nil {
-			t.Error("Create over an existing session succeeded, want rejected")
+		if err := st.Create(ctx(), h); !errors.Is(err, thread.ErrExists) {
+			t.Errorf("Create over an existing session: err = %v, want ErrExists", err)
 		}
 		got, _, _, err := st.Load(ctx(), h.ID)
 		if err != nil {
@@ -515,8 +515,9 @@ func corrupt(open func(t *testing.T) thread.Storage) func(*testing.T) {
 			if !errors.Is(err, thread.ErrCorrupt) {
 				t.Fatalf("err = %v, want ErrCorrupt", err)
 			}
-			if !strings.Contains(err.Error(), "line 3") {
-				t.Errorf("err = %v, want it to name line 3 (header is line 1)", err)
+			var ce *thread.CorruptError
+			if !errors.As(err, &ce) || ce.Line != 3 {
+				t.Errorf("err = %v, want a CorruptError carrying line 3 (header is line 1)", err)
 			}
 		})
 

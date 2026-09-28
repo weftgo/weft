@@ -1,6 +1,9 @@
 package thread
 
-import "context"
+import (
+	"context"
+	"iter"
+)
 
 // OpenOption configures a Storage backend at open, one value per
 // concern, applied over the defaults. The options live here — in the
@@ -79,4 +82,17 @@ func FsyncOnFlush() OpenOption { return syncEveryAppendOption(false) }
 // another writer holds but this one never buffered flushes nothing.
 type Flusher interface {
 	Flush(ctx context.Context, session string) error
+}
+
+// Watcher is the optional Storage capability that tails a session as
+// it is appended to — the same small-interface rule. It arrives in
+// v0.4 (plan §7, the live tail); it is declared now, unimplemented,
+// so the capability pattern and its vocabulary ship with the first
+// release instead of being retrofitted. Watch yields the session's
+// entries in arrival order, starting after the entry named by after
+// (empty — from the beginning), and ends when ctx is done; a session
+// the storage does not hold fails with ErrNotFound before the first
+// yield. Readers never lock: a watcher is a reader that waits.
+type Watcher interface {
+	Watch(ctx context.Context, session string, after string) (iter.Seq2[Entry, error], error)
 }

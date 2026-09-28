@@ -148,12 +148,12 @@ func (b *backend) Create(ctx context.Context, h thread.Header) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if _, held := b.sessions[h.ID]; held {
-		return fmt.Errorf("thread: session %s already exists", h.ID)
+		return fmt.Errorf("%w: %s", thread.ErrExists, h.ID)
 	}
 	f, err := os.OpenFile(b.path(h.ID), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
-			return fmt.Errorf("thread: session %s already exists", h.ID)
+			return fmt.Errorf("%w: %s", thread.ErrExists, h.ID)
 		}
 		return err
 	}
@@ -246,7 +246,9 @@ func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.
 	if len(lines) == 0 {
 		// Not one complete line — not even a header. Bytes at all are
 		// a torn first line; either way this is not a loadable session.
-		return thread.Header{}, nil, nil, fmt.Errorf("%w: session %s line 1: no complete header line", thread.ErrCorrupt, id)
+		return thread.Header{}, nil, nil, &thread.CorruptError{
+			Session: id, Line: 1, Err: errors.New("no complete header line"),
+		}
 	}
 	report := &thread.LoadReport{}
 	if rawTorn(raw) {
@@ -254,7 +256,7 @@ func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.
 	}
 	var h thread.Header
 	if err := json.Unmarshal(lines[0], &h); err != nil {
-		return thread.Header{}, nil, nil, fmt.Errorf("%w: session %s line 1: %v", thread.ErrCorrupt, id, err)
+		return thread.Header{}, nil, nil, &thread.CorruptError{Session: id, Line: 1, Err: err}
 	}
 	entries := make([]thread.Entry, 0, len(lines)-1)
 	for i, line := range lines[1:] {
@@ -267,7 +269,7 @@ func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.
 		case b.salvage:
 			report.Skipped = append(report.Skipped, i+2)
 		default:
-			return thread.Header{}, nil, nil, fmt.Errorf("%w: session %s line %d: %v", thread.ErrCorrupt, id, i+2, err)
+			return thread.Header{}, nil, nil, &thread.CorruptError{Session: id, Line: i + 2, Err: err}
 		}
 	}
 	if report.Torn == 0 && len(report.Skipped) == 0 {

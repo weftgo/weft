@@ -3,7 +3,6 @@ package thread_test
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -67,8 +66,12 @@ func TestMemoryHoldsRawBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, _, err := st.Load(ctx, id)
-	if !errors.Is(err, thread.ErrCorrupt) || !strings.Contains(err.Error(), "line 3") {
-		t.Errorf("malformed line: err = %v, want ErrCorrupt naming line 3", err)
+	if !errors.Is(err, thread.ErrCorrupt) {
+		t.Fatalf("malformed line: err = %v, want ErrCorrupt", err)
+	}
+	var ce *thread.CorruptError
+	if !errors.As(err, &ce) || ce.Line != 3 {
+		t.Errorf("malformed line: err = %v, want a CorruptError carrying line 3", err)
 	}
 
 	// A torn tail is a crash: dropped, reported, never an error — and

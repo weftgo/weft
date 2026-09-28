@@ -42,9 +42,9 @@ func reopen(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Sess
 // reopenWith reopens on the caller's agent — the tests whose model
 // records what it saw (the compaction suite) must not swap it for a
 // fresh scripted one on the way back in.
-func reopenWith(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Session, agent *weft.Agent) *thread.Session {
+func reopenWith(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Session, agent *weft.Agent, opts ...thread.SessionOption) *thread.Session {
 	t.Helper()
-	again, err := thread.Open(ctx, st, s.ID(), agent)
+	again, err := thread.Open(ctx, st, s.ID(), agent, opts...)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

@@ -30,6 +30,16 @@ function apply(choice: ThemeChoice) {
   document.documentElement.style.colorScheme = dark ? "dark" : "light"
 }
 
+/**
+ * Re-apply the stored choice after hydration: the inline bootstrap
+ * sets the class before paint, but hydration of the prerendered shell
+ * can reset <html>'s attributes on its way in — one mount effect
+ * restores what the bootstrap already decided (plan §5.5).
+ */
+export function applyStoredTheme() {
+  apply(readChoice())
+}
+
 function store(choice: ThemeChoice) {
   try {
     localStorage.setItem("theme", choice)

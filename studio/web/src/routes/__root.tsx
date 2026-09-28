@@ -51,6 +51,17 @@ function RootComponent() {
   )
 }
 
+// The base must be React-owned AND carry the runtime mount, or React
+// (which manages <base> as a head singleton) deletes or rewrites it
+// after hydration — breaking every later relative fetch on deep
+// links. clean-dist.ts injects a parse-time <base href="/">; the Go
+// handler rewrites it per request; hydration renders the same href it
+// finds, so the element is adopted, not fought over.
+function mountBase(): string {
+  if (typeof document === "undefined") return "/" // the shell prerender
+  return new URL(document.baseURI).pathname
+}
+
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
     // suppressHydrationWarning: the theme bootstrap mutates <html>'s
@@ -58,12 +69,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
     // intentional and the attributes are not React-owned after that.
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Rewritten by the Go handler to the mount path per request
-            (ADR 0018 §6); first in head so every relative URL after it
-            resolves under the mount. clean-dist.ts keeps it first.
-            suppressHydrationWarning: the rewrite happens after
-            prerender, so the hydrated href is intentionally different. */}
-        <base href="/" suppressHydrationWarning />
+        <base href={mountBase()} />
         <script dangerouslySetInnerHTML={{ __html: themeBootstrap }} />
         <link rel="icon" type="image/svg+xml" href="favicon.svg" />
         <link rel="stylesheet" href="fonts.css" />

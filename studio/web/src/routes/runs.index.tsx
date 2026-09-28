@@ -8,16 +8,8 @@ import { RefreshCw } from "lucide-react"
 import { fetchRuns } from "@/lib/api"
 import type { RunsFilters, RunStatus } from "@/lib/api"
 import { EmptyState } from "@/components/studio/empty-state"
-import { KbdHelpBody } from "@/components/studio/kbd-help"
 import { RunsTable } from "@/components/studio/runs-table"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -90,7 +82,6 @@ function RunsPage() {
   // j/k selection, enter opens, "/" focuses the filter box (A4).
   const [selected, setSelected] = useState(0)
   const agentInput = useRef<HTMLInputElement>(null)
-  const [helpOpen, setHelpOpen] = useState(false)
   const [chord, setChord] = useState<"g" | null>(null)
 
   useEffect(() => {
@@ -120,9 +111,6 @@ function RunsPage() {
           return
         case "g":
           setChord("g")
-          return
-        case "?":
-          setHelpOpen(true)
           return
         case "Enter": {
           const run = runs.at(selected)
@@ -229,16 +217,6 @@ function RunsPage() {
           )}
         </>
       )}
-
-      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Keyboard</DialogTitle>
-            <DialogDescription>Studio is keyboard-first.</DialogDescription>
-          </DialogHeader>
-          <KbdHelpBody />
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

@@ -6,7 +6,7 @@ GO ?= go
 # SDKs are required only by the adapter modules.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-store apidiff-selftest offline fuzz
+.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-store apidiff-selftest offline fuzz studio-build studio-check
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -71,3 +71,21 @@ fuzz:
 # Live adapter tests behind the `live` build tag; never in CI (no keys).
 live:
 	for m in $(MODULES); do (cd $$m && $(GO) test -tags live ./...) || exit 1; done
+
+# ── Studio (TODO §12, ADR 0018) ─────────────────────────────────────
+# Needs Bun. Contributors run these only when the UI changes; users of
+# the module get the committed, embedded studio/dist.
+
+studio-build:
+	cd studio/web && bun install --frozen-lockfile && bun run build
+
+# The freshness gate (ADR 0018 §4): rebuild the web app and prove the
+# committed dist matches, fits the 600 KiB gzip budget (§7), and that
+# its own checks pass. CI runs this on every push.
+studio-check: studio-build
+	git diff --exit-code -- studio/dist || { echo "studio/dist is stale: run 'make studio-build' and commit"; exit 1; }
+	total=0; for f in $$(find studio/dist -type f); do \
+	  sz=$$(gzip -c $$f | wc -c); total=$$((total+sz)); done; \
+	kib=$$((total / 1024)); echo "studio dist: $$kib KiB gzipped (budget 600)"; \
+	test $$kib -le 600 || { echo "studio dist exceeds the 600 KiB gzip budget (ADR 0018 §7)"; exit 1; }
+	cd studio/web && bun run typecheck && bun run test

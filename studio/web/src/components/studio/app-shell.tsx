@@ -8,7 +8,15 @@ import { Link, Outlet, useLocation, useRouter } from "@tanstack/react-router"
 import { Bot, List, Search } from "lucide-react"
 
 import { metaQuery } from "@/lib/api"
-import { ThemeToggle } from "@/components/studio/theme"
+import { KbdHelpBody } from "@/components/studio/kbd-help"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { ThemeToggle, applyStoredTheme } from "@/components/studio/theme"
 import { WeftWordmark } from "@/components/studio/weft-mark"
 import { Button } from "@/components/ui/button"
 import { Kbd } from "@/components/ui/kbd"
@@ -70,14 +78,26 @@ export function AppShell() {
   const router = useRouter()
   const [paletteOpen, setPaletteOpen] = useState(false)
 
-  // ⌘K / ctrl-K opens the palette; "/" is reserved for search where
-  // there is a list (A4, wired with the runs list).
+  // The theme class survives hydration (see applyStoredTheme).
+  useEffect(applyStoredTheme, [])
+
+  // ⌘K / ctrl-K opens the palette; "?" opens the keyboard help from
+  // anywhere (A4). "/" is reserved for search where there is a list
+  // (wired with the runs list).
+  const [helpOpen, setHelpOpen] = useState(false)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault()
         setPaletteOpen((o) => !o)
+        return
       }
+      const el = e.target as HTMLElement
+      const typing =
+        el.tagName === "INPUT" ||
+        el.tagName === "TEXTAREA" ||
+        el.isContentEditable
+      if (e.key === "?" && !typing) setHelpOpen(true)
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -124,6 +144,16 @@ export function AppShell() {
           <Outlet />
         </div>
       </SidebarInset>
+
+      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Keyboard</DialogTitle>
+            <DialogDescription>Studio is keyboard-first.</DialogDescription>
+          </DialogHeader>
+          <KbdHelpBody />
+        </DialogContent>
+      </Dialog>
 
       <CommandDialog open={paletteOpen} onOpenChange={setPaletteOpen}>
         <CommandInput placeholder="Type a command…" />

@@ -32,10 +32,14 @@ export function SchemaTree({
   if (s.required?.length) parts.push(`requires ${s.required.join(", ")}`)
   return (
     <div
-      className={`font-mono text-[11px] leading-relaxed ${depth > 0 ? "ml-3 border-l border-line pl-2" : ""}`}
+      className={`font-mono text-[11px] leading-relaxed ${depth > 0 ? "border-line ml-3 border-l pl-2" : ""}`}
     >
-      {parts.length > 0 && <span className="text-muted-foreground">{parts.join(" · ")}</span>}
-      {s.description ? <span className="block text-faint">{s.description}</span> : null}
+      {parts.length > 0 && (
+        <span className="text-muted-foreground">{parts.join(" · ")}</span>
+      )}
+      {s.description ? (
+        <span className="block text-faint">{s.description}</span>
+      ) : null}
       {Object.entries(s.properties ?? {}).map(([name, prop]) => (
         <div key={name} className="mt-0.5">
           <span className="text-foreground">{name}</span>
@@ -61,7 +65,8 @@ function PolicyChips({ tool }: { tool: ManifestTool }) {
   if (tool.sequential) chips.push("sequential")
   if (tool.require_approval) chips.push("approval")
   if (tool.strict_input) chips.push("strict input")
-  if (tool.max_result_bytes !== undefined) chips.push(`cap ${tool.max_result_bytes}`)
+  if (tool.max_result_bytes !== undefined)
+    chips.push(`cap ${tool.max_result_bytes}`)
   if (tool.subagent) chips.push(`subagent: ${tool.subagent}`)
   if (chips.length === 0) return null
   return (
@@ -84,11 +89,15 @@ function ToolCard({ tool }: { tool: ManifestTool }) {
       <div className="flex flex-wrap items-baseline gap-2">
         <span className="font-mono text-[13px] text-ev-tool">{tool.name}</span>
         {tool.source ? (
-          <span className="font-mono text-[10px] text-faint">{tool.source}</span>
+          <span className="font-mono text-[10px] text-faint">
+            {tool.source}
+          </span>
         ) : null}
       </div>
       {tool.description ? (
-        <p className="mt-0.5 text-xs text-muted-foreground">{tool.description}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {tool.description}
+        </p>
       ) : null}
       <div className="mt-1.5">
         <span className="eyebrow">input</span>
@@ -139,7 +148,7 @@ export function AgentCard({ agent }: { agent: ManifestAgent }) {
             instructions · {agent.instructions.length} chars
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="whitespace-pre-wrap border-l-2 border-line pl-3 text-xs text-muted-foreground">
+            <div className="border-line border-l-2 pl-3 text-xs whitespace-pre-wrap text-muted-foreground">
               {agent.instructions}
             </div>
           </CollapsibleContent>

@@ -1,0 +1,1 @@
+import{Ht as e,pt as t,yt as n}from"./useControlled-9YNCv7n4.js";var r={name:`loader-circle`,size:24,node:[[`path`,{d:`M21 12a9 9 0 1 1-6.219-8.56`,key:`13zald`}]],aliases:[`loader-2`]};r.node;var i=n(r),a=e();function o({className:e,...n}){return(0,a.jsx)(i,{"data-slot":`spinner`,role:`status`,"aria-label":`Loading`,className:t(`size-4 animate-spin`,e),...n})}export{o as t};

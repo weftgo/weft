@@ -1,11 +1,13 @@
 // Command basic records demo runs — a tool call, a subagent, a
 // failure — into a SQLite store and serves Studio on 127.0.0.1:7331:
 //
-//	go run ./studio/examples/basic [-serve] [dir]
+//	go run ./studio/examples/basic [-serve] [-addr 127.0.0.1:7331] [dir]
 //
 // The database lives at <dir>/dev.db (default .weft) and persists
-// across invocations; -serve skips recording and only serves. The
-// manifest option feeds the agent and tool cards (H1).
+// across invocations; -serve skips recording and only serves; -addr
+// picks the listen address (loopback by default — bind loopback until
+// token auth exists, features doc L4). The manifest option feeds the
+// agent and tool cards (H1).
 package main
 
 import (
@@ -28,18 +30,19 @@ import (
 
 func main() {
 	serve := flag.Bool("serve", false, "serve only; record no new run")
+	addr := flag.String("addr", "127.0.0.1:7331", "listen address")
 	flag.Parse()
 	dir := ".weft"
 	if flag.NArg() > 0 {
 		dir = flag.Arg(0)
 	}
-	if err := run(dir, *serve); err != nil {
+	if err := run(dir, *serve, *addr); err != nil {
 		fmt.Fprintln(os.Stderr, "basic:", err)
 		os.Exit(1)
 	}
 }
 
-func run(dir string, serveOnly bool) error {
+func run(dir string, serveOnly bool, addr string) error {
 	s, err := sqlite.Open(filepath.Join(dir, "dev.db"))
 	if err != nil {
 		return err
@@ -49,8 +52,8 @@ func run(dir string, serveOnly bool) error {
 			return err
 		}
 	}
-	fmt.Println("studio: http://127.0.0.1:7331/studio/")
-	return http.ListenAndServe("127.0.0.1:7331", handler(s))
+	fmt.Printf("studio: http://%s/studio/\n", addr)
+	return http.ListenAndServe(addr, handler(s))
 }
 
 // handler wires Studio under /studio/ with the demo manifest.

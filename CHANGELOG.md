@@ -53,10 +53,55 @@ as one read-only `http.Handler`. New module, no core or store change.
   self-hosted, offline), the Studio event/status palette
   (contrast-checked), system/light/dark with no flash.
 
+### The UX review pass (2026-09-28, before tagging)
+
+A second look at the T1 UI as a debugging tool, with the fixes it
+found:
+
+- Run page: the prompt and the answer sit above the fold, with the
+  error for a failed run; facts read as words (`2 steps · 14 events ·
+  30 in / 15 out · took 2ms`, elapsed while running). Tool calls are
+  one-line rows — name, an args summary, `ok · 29 B` or the
+  `ToolError` code, `running…`, `never completed`, the truncation
+  badge — opening to the args and result windows; JSON is
+  pretty-printed and coloured; long windows fold at 24 lines. A
+  failed run's open step says *failed during this step*, not *in
+  flight*. Subagent steps render through the same step body as the
+  parent's. Every step and call has *replay to here* (the fold
+  carries stream positions).
+- Trace: a waterfall of the run — steps, tool calls and subagent
+  runs (their own steps and calls nested) as spans on the event
+  position axis, in one tree with one playhead. Click a bar to seek,
+  a label to land on the step card or call row; open spans fade,
+  never-completed ones hatch, the step a run died in reads red. The
+  `Waterfall` component is axis-agnostic (Span[] over a numeric
+  domain) so T2a's timed spans and the live view draw on it as is.
+  `?trace=0` folds the panel.
+- Replay: the gutter is bucketed (never wider than its box, a click
+  lands where it looks), a playhead line, a readout naming the event
+  at the playhead, `[`/`]` jump by step or tool boundary, `,`/`.`
+  move one event, Home/End on the focused bar.
+- Raw: an events explorer (position, kind, type, one-line summary;
+  kind filters with counts, full-text search, expand to the event,
+  replay-to-here, paged at 500 rows) and a collapsible document tree;
+  copy and download for both.
+- Runs list: status as dot + word, the error under a failed run's id,
+  the whole row opens the run, elapsed for running runs, filters that
+  mirror the URL and apply on enter/blur, active-filter chips, a
+  "no runs match" state distinct from "no runs recorded", the select
+  shows its label. ⌘K jumps to any recent run.
+- Fixes: shortcuts no longer fire with ctrl/⌘/alt held (ctrl-r
+  toggled raw *and* reloaded); collapsible chevrons rotate; the
+  events tail asks from `last+1` instead of re-fetching the last
+  event each poll; the stream array is fresh per publish; `?before=`
+  seeds the first page; the shell's location-dependent parts render
+  client-only so a deep link can never hydration-mismatch (which
+  would drop the runtime `<base>` and break every module script).
+
 ### Engineering
 
 - The UI is a TanStack Start SPA prebuilt into a committed, embedded
-  `studio/dist` (~305 KiB gzipped of a 600 KiB budget): no build step
+  `studio/dist` (~313 KiB gzipped of a 600 KiB budget): no build step
   for users. `make studio-check` gates dist freshness (two clean
   builds are byte-identical), the size budget, and the web
   typecheck/tests; `make test`/`lint` cover the Go side via go.work.

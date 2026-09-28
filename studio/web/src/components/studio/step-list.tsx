@@ -139,7 +139,7 @@ function CallPill({
   )
 }
 
-function ToolCallRow({
+export function ToolCallRow({
   call,
   runStatus,
   childLink,
@@ -307,7 +307,7 @@ export function StepBody({
 }
 
 /** The step's end state as a phrase: honest when it never finished. */
-function stepOutcome(step: FoldedStep, runStatus: string) {
+export function stepOutcome(step: FoldedStep, runStatus: string) {
   if (step.finish) {
     return (
       <span className="flex items-center gap-2 text-xs">

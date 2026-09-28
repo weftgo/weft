@@ -29,27 +29,37 @@ run:
 ![runs list, light theme](screenshots/runs-light.png)
 
 The run page (light) — the prompt and the answer first, then the
-facts; the replay bar with its bucketed gutter; a step with its tool
-call as a one-line row (name, args, `ok · 29 B`) opening to the args
-window, the subagent block with the child's own steps, and the
-result:
+facts and the replay bar; below, the **trace**: the flow strip (one
+pill per step, arrows for results fed back), then the waterfall on
+the left — the run, its steps, tool calls and subagent runs (their
+own steps and calls nested) as spans on one axis — and the selected
+span's data on the right, read as *detail* (the same step and call
+bodies as the story), *events* (only that span's slice of the
+stream) or *json* (the folded node). The trace opens on whatever
+went wrong, else the first step; `j`/`k` or the arrow keys walk it;
+`?sel=` names the selection:
 
-![run page, light theme](screenshots/run-light.png)
+![run page with the trace, light theme](screenshots/run-light.png)
 
-The trace (light) — the run, its steps, tool calls and subagents as
-spans on one axis, the event position (events carry no timestamps,
-so this is order, not duration; T2a's spans put time on the same
-component). The replay playhead crosses every row, and everything
-past it is veiled; click a bar to seek, a label to land on that step
-or call:
+The axis is the event position: events carry no timestamps, so this
+is order, not duration (T2a's spans put time on the same component).
+Scrubbed to event 6 of 14, the replay playhead crosses every row,
+everything past it is veiled, and the detail panel renders the fold
+*at* the playhead — the call reads `running` until its finish is
+revealed:
 
-![trace waterfall, light theme](screenshots/trace-light.png)
+![trace scrubbed mid-run, light theme](screenshots/trace-light.png)
 
-A failed run (dark): the error at the top, the `ORDER_NOT_FOUND`
-tool error as data (mustard, never red), and the step that had no
-`step_finish` saying so:
+A failed run (dark): the error at the top, the flow strip's step 1
+red, the `ORDER_NOT_FOUND` tool error as data (mustard, never red)
+selected first, and the step that had no `step_finish` saying so:
 
-![run page, dark theme](screenshots/run-dark.png)
+![failed run with the trace, dark theme](screenshots/run-dark.png)
+
+The story view (`s`) is the step cards top to bottom, the same
+bodies as the detail panel:
+
+![story view, light theme](screenshots/story-light.png)
 
 Raw (light) — the events explorer: every event by position with its
 kind, type and a one-line summary, filtered by kind, searched by any
@@ -70,12 +80,14 @@ palette) cycles system → light → dark:
 
 ![runs list, dark theme](screenshots/runs-dark.png)
 
-Every view is a URL: filters, the selected step, `view=raw` (and
-`raw=doc`), and the replay position `t` all live in search params —
-paste a link into an issue and it reproduces exactly. Keyboard: `⌘K`
-jumps to any recent run, `/` filters, `j`/`k` move, `enter` opens,
-`space` replays, `[`/`]` jump by step or tool event, `,`/`.` move one
-event, `r` toggles raw, `?` lists everything, `g r`/`g a` navigate.
+Every view is a URL: filters, `view=story|raw` (and `raw=doc`), the
+selected span `sel` and detail mode `d`, the selected step, and the
+replay position `t` all live in search params — paste a link into an
+issue and it reproduces exactly. Keyboard: `⌘K` jumps to any recent
+run, `/` filters, `j`/`k` move (rows in the list, spans in the
+trace), `enter` opens, `e`/`s`/`r` switch trace/story/raw, `space`
+replays, `[`/`]` jump by step or tool event, `,`/`.` move one event,
+`?` lists everything, `g r`/`g a` navigate.
 Keys fire only on a bare press outside a text box — ctrl/⌘ always go
 to the browser.
 

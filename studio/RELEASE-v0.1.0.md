@@ -35,9 +35,12 @@ What's in:
   inline under their call with their own steps and usage, and every
   child is a link to a full run page. Every step and call can send
   replay to the moment it happened.
-- **Trace** — the run as a waterfall: steps, tool calls and subagent
-  runs as spans on the event axis, one tree, one playhead. Click a
-  bar to seek, a label to land on the step or call.
+- **Trace** — the default view: a flow strip of the loop, then the
+  run as a waterfall (steps, tool calls and subagent runs as spans on
+  the event axis, one tree, one playhead) beside a detail panel that
+  reads the selected span as detail, events or json — and renders it
+  at the playhead, so replay plays inside the panel too. It opens on
+  whatever went wrong. The step story is one key away (`s`).
 - **Guaranteed replay** — play the event stream at 1×/4×, scrub the
   bucketed gutter, read the event at the playhead, jump by step or
   tool event with `[` and `]`, move one event with `,` and `.`.

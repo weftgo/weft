@@ -19,7 +19,10 @@ export type SpanTone =
   | "never" // open on a run that ended: never completed
 
 export interface Span {
+  /** Unique within the trace; the tree path. */
   id: string
+  /** Short and URL-safe: s0, c:call_1, r:<runId>. What ?sel= carries. */
+  key: string
   /** Nesting: rows indent by depth; the parent's id for folding. */
   parent?: string
   depth: number
@@ -27,6 +30,8 @@ export interface Span {
   label: string
   /** A quieter second label: reason, size, usage. */
   sub?: string
+  /** A short badge: the stop reason, ok, the error code. */
+  badge?: string
   tone: SpanTone
   /** Inclusive start position. */
   from: number
@@ -34,6 +39,10 @@ export interface Span {
   to: number | null
   /** What a "select" should land on: a step index or a call id. */
   target?: { step?: number; call?: string }
+  /** The folded node behind the span, for the detail panel. */
+  node: FoldedRun | FoldedStep | FoldedToolCall
+  /** For steps and calls inside a subagent: which run they belong to. */
+  runId: string
 }
 
 function usage(u?: { input_tokens: number; output_tokens: number }): string {
@@ -44,11 +53,15 @@ function bytesOf(s: string): number {
   return new TextEncoder().encode(s).length
 }
 
+/** A ToolError renders "CODE: message" — the code is the badge. */
+const CODED = /^([A-Z][A-Z0-9_]+): /
+
 function callSpans(
   call: FoldedToolCall,
   parent: string,
   depth: number,
   runStatus: string,
+  runId: string,
   out: Span[]
 ) {
   const open = call.finishPos === undefined
@@ -59,25 +72,31 @@ function callSpans(
     : call.result?.isError
       ? "error"
       : "tool"
-  const sub = open
+  const coded = call.result?.isError ? CODED.exec(call.result.content) : null
+  const badge = open
     ? runStatus === "running"
-      ? "running…"
-      : "never completed"
-    : call.result
-      ? `${call.result.isError ? "error" : "ok"} · ${bytesOf(call.result.content)} B`
-      : ""
+      ? "running"
+      : "never"
+    : call.result?.isError
+      ? (coded?.[1] ?? "error")
+      : "ok"
+  const sub = open ? "" : call.result ? `${bytesOf(call.result.content)} B` : ""
   const id = `${parent}/call:${call.callId}`
   out.push({
     id,
+    key: `c:${call.callId}`,
     parent,
     depth,
     kind: "tool",
     label: call.name,
     sub,
+    badge,
     tone,
     from: call.startPos,
     to: open ? null : (call.finishPos ?? null),
     target: { call: call.callId },
+    node: call,
+    runId,
   })
   if (call.child) runSpans(call.child, id, depth + 1, runStatus, out, true)
 }
@@ -87,23 +106,27 @@ function stepSpans(
   parent: string,
   depth: number,
   runStatus: string,
+  runId: string,
+  isChild: boolean,
   out: Span[]
 ) {
   const id = `${parent}/step:${step.index}`
   const failedHere = !step.finish && runStatus === "failed"
   out.push({
     id,
+    key: isChild ? `s:${runId}:${step.index}` : `s${step.index}`,
     parent,
     depth,
     kind: "step",
     label: `step ${step.index}`,
     sub: step.finish
-      ? `${step.finish.reason} · ${usage(step.finish.usage)}`
+      ? usage(step.finish.usage)
       : runStatus === "running"
         ? "in flight…"
         : failedHere
           ? "failed here"
           : "no step_finish",
+    badge: step.finish?.reason,
     tone: failedHere
       ? "bad"
       : step.finish
@@ -114,9 +137,11 @@ function stepSpans(
     from: step.from,
     to: step.finish || runStatus !== "running" ? step.to : null,
     target: { step: step.index },
+    node: step,
+    runId,
   })
   for (const call of step.toolCalls)
-    callSpans(call, id, depth + 1, runStatus, out)
+    callSpans(call, id, depth + 1, runStatus, runId, out)
 }
 
 function runSpans(
@@ -134,20 +159,31 @@ function runSpans(
     (run.steps.length ? Math.max(...run.steps.map((s) => s.to)) : first)
   out.push({
     id,
+    key: sub ? `r:${run.runId}` : "run",
     parent,
     depth,
     kind: sub ? "subagent" : "run",
-    label: sub ? `↳ ${run.agent || "subagent"}` : run.agent || "run",
-    sub: run.finished
-      ? `${run.steps.length} ${run.steps.length === 1 ? "step" : "steps"} · ${usage(run.usage)}`
+    label: sub ? run.agent || "subagent" : run.agent || "run",
+    sub: `${run.steps.length} ${run.steps.length === 1 ? "step" : "steps"}${
+      run.usage ? ` · ${usage(run.usage)}` : ""
+    }`,
+    badge: run.finished
+      ? sub
+        ? "done"
+        : runStatus
       : runStatus === "running"
-        ? "running…"
-        : "did not finish",
+        ? "running"
+        : sub
+          ? "unfinished"
+          : runStatus,
     tone: run.finished ? "step" : runStatus === "running" ? "running" : "never",
     from: first,
     to: run.finished || runStatus !== "running" ? last : null,
+    node: run,
+    runId: run.runId,
   })
-  for (const step of run.steps) stepSpans(step, id, depth + 1, runStatus, out)
+  for (const step of run.steps)
+    stepSpans(step, id, depth + 1, runStatus, run.runId, sub, out)
 }
 
 /**
@@ -168,4 +204,49 @@ export function spansFromFold(
   out[0].from = 0
   if (folded.finished) out[0].to = Math.max(out[0].to ?? 0, total - 1)
   return out
+}
+
+/**
+ * Where to start reading: the first thing that went wrong (a tool
+ * error, a step the run died in), else the first step, else the run.
+ */
+export function defaultSelection(spans: Span[]): Span | undefined {
+  return (
+    spans.find((s) => s.tone === "error" || s.tone === "bad") ??
+    spans.find((s) => s.tone === "never" && s.kind === "tool") ??
+    spans.find((s) => s.kind === "step") ??
+    spans.at(0)
+  )
+}
+
+/** One pill per top-level step for the flow strip: the loop at a glance. */
+export interface FlowPill {
+  key: string
+  index: number
+  /** The step's gist: its text, or its first tool call. */
+  gist: string
+  finish?: string
+  bad: boolean
+  open: boolean
+}
+
+export function flowFromFold(folded: FoldedRun, runStatus: string): FlowPill[] {
+  return folded.steps.map((s) => {
+    const first = s.toolCalls.at(0)
+    const gist = s.text
+      ? s.text.replace(/\s+/g, " ").trim()
+      : first
+        ? `${first.name}(${first.args !== undefined ? JSON.stringify(first.args) : "…"})`
+        : s.reasoning
+          ? "reasoning…"
+          : ""
+    return {
+      key: `s${s.index}`,
+      index: s.index,
+      gist: gist.length > 60 ? `${gist.slice(0, 59)}…` : gist,
+      finish: s.finish?.reason,
+      bad: !s.finish && runStatus === "failed",
+      open: !s.finish && runStatus === "running",
+    }
+  })
 }

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest"
 
 import type { EventsPage, WireEvent } from "./api"
 import { fold } from "./events"
-import { spansFromFold } from "./trace"
+import { defaultSelection, flowFromFold, spansFromFold } from "./trace"
 
 function golden(name: string): WireEvent[] {
   const path = resolve(process.cwd(), `../testdata/api/${name}`)
@@ -24,7 +24,7 @@ describe("spansFromFold", () => {
       "0:run:orders",
       "1:step:step 0",
       "2:tool:research",
-      "3:subagent:↳ researcher",
+      "3:subagent:researcher",
       "4:step:step 0",
       "1:step:step 1",
     ])
@@ -36,9 +36,40 @@ describe("spansFromFold", () => {
     expect([childStep.from, childStep.to]).toEqual([4, 6])
     expect([step1.from, step1.to]).toEqual([10, 12])
     expect(call.tone).toBe("tool")
-    expect(call.sub).toBe("ok · 29 B")
+    expect(call.badge).toBe("ok")
+    expect(call.sub).toBe("29 B")
     expect(child.parent).toBe(call.id)
     expect(step1.target).toEqual({ step: 1 })
+    // Short, URL-safe keys; a child's step names its run.
+    expect(spans.map((s) => s.key)).toEqual([
+      "run",
+      "s0",
+      "c:call_1",
+      "r:r_sub/0/call_1",
+      "s:r_sub/0/call_1:0",
+      "s1",
+    ])
+    // Nothing went wrong: start at the first step.
+    expect(defaultSelection(spans)?.key).toBe("s0")
+    // The flow strip: one pill per top-level step.
+    expect(flowFromFold(fold(events), "succeeded")).toEqual([
+      {
+        key: "s0",
+        index: 0,
+        gist: 'research({"prompt":"status of order 42"})',
+        finish: "tool_calls",
+        bad: false,
+        open: false,
+      },
+      {
+        key: "s1",
+        index: 1,
+        gist: "Order 42 shipped.",
+        finish: "stop",
+        bad: false,
+        open: false,
+      },
+    ])
   })
 
   it("draws an open call as running while live and never after", () => {
@@ -59,8 +90,11 @@ describe("spansFromFold", () => {
     expect(live[2].tone).toBe("running")
     const dead = spansFromFold(fold(events), events.length, "failed")
     expect(dead[2].tone).toBe("never")
+    expect(dead[2].badge).toBe("never")
     expect(dead[1].tone).toBe("bad")
     expect(dead[1].sub).toBe("failed here")
+    // Start where it went wrong.
+    expect(defaultSelection(dead)?.key).toBe("s0")
   })
 
   it("is empty for an empty stream", () => {

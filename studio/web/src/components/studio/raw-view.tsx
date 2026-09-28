@@ -153,14 +153,20 @@ function EventRow({
   )
 }
 
-function EventsExplorer({
+export function EventsExplorer({
   events,
   playhead,
   onJump,
+  range,
+  compact,
 }: {
   events: WireEvent[]
   playhead: number | null
   onJump?: (t: number) => void
+  /** Only positions within [from, to] (inclusive) — a span's slice. */
+  range?: [number, number]
+  /** A tighter toolbar for a side panel. */
+  compact?: boolean
 }) {
   const [hidden, setHidden] = useState<Set<EventKind>>(() => new Set())
   const [q, setQ] = useState("")
@@ -184,13 +190,17 @@ function EventsExplorer({
     const needle = q.trim().toLowerCase()
     const out: { pos: number; ev: WireEvent }[] = []
     events.forEach((ev, pos) => {
+      if (range && (pos < range[0] || pos > range[1])) return
       if (hidden.has(eventKind(ev))) return
       if (needle && !JSON.stringify(ev).toLowerCase().includes(needle)) return
       out.push({ pos, ev })
     })
     return out
-  }, [events, hidden, q])
+  }, [events, hidden, q, range])
 
+  const inRange = range
+    ? Math.max(0, Math.min(range[1], events.length - 1) - range[0] + 1)
+    : events.length
   const at = playhead ?? events.length
   const toggle = (k: EventKind) =>
     setHidden((h) => {
@@ -209,9 +219,9 @@ function EventsExplorer({
             setQ(e.target.value)
             setLimit(ROWS)
           }}
-          placeholder="search events · id, text, json…"
+          placeholder={compact ? "search…" : "search events · id, text, json…"}
           aria-label="search events"
-          className="h-8 w-72 font-mono text-xs"
+          className={`h-8 font-mono text-xs ${compact ? "w-36" : "w-72"}`}
         />
         <div className="flex flex-wrap items-center gap-1">
           {KINDS.map((k) => (
@@ -237,9 +247,9 @@ function EventsExplorer({
           ) : null}
         </div>
         <span className="ml-auto font-mono text-[11px] text-faint tabular-nums">
-          {rows.length === events.length
-            ? `${events.length.toLocaleString()} events`
-            : `${rows.length.toLocaleString()} of ${events.length.toLocaleString()} events`}
+          {rows.length === inRange
+            ? `${inRange.toLocaleString()} events`
+            : `${rows.length.toLocaleString()} of ${inRange.toLocaleString()} events`}
         </span>
       </div>
       <div className="rounded-lg border bg-background">

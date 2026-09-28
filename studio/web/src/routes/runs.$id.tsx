@@ -1,22 +1,31 @@
-// The run page (B1, B2, B7, B9, B10). Every view is a URL: step
-// selection, view=steps|raw (and raw=events|doc), and the replay
-// position live in search params (A3) — a paste into an issue
-// reproduces the exact view. A running run's document and stream
-// refresh every 2 s until the status leaves running (plan §4.5);
-// that is the only live-ish behaviour in T1.
+// The run page (B1, B2, B7, B9, B10). Three views, all URLs (A3):
+//
+//   trace  (default) the flow strip, then a waterfall | detail split:
+//          steps, tool calls and subagents as spans on the event axis
+//          on the left, the selected span's data on the right
+//          (detail / events / json). ?sel= names the span.
+//   story  the step cards top to bottom.
+//   raw    the events explorer and the document tree.
+//
+// The replay playhead (?t=) drives every view: the waterfall veils
+// what is past it, and the story and the detail panel render the fold
+// AT the playhead, so scrubbing replays the whole page. A running
+// run's document and stream refresh every 2 s until the status leaves
+// running (plan §4.5); that is the only live-ish behaviour in T1.
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { ChevronRight } from "lucide-react"
 
 import { runQuery } from "@/lib/api"
-import { crossCheck } from "@/lib/events"
+import { crossCheck, fold } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
-import { spansFromFold } from "@/lib/trace"
-import type { Span } from "@/lib/trace"
+import { defaultSelection, flowFromFold, spansFromFold } from "@/lib/trace"
+import { FlowStrip } from "@/components/studio/flow-strip"
 import { RunHeader } from "@/components/studio/run-header"
 import { RawView } from "@/components/studio/raw-view"
 import { ReplayBar } from "@/components/studio/replay-bar"
+import { SpanDetail } from "@/components/studio/span-detail"
+import type { DetailMode } from "@/components/studio/span-detail"
 import { StepList } from "@/components/studio/step-list"
 import { Waterfall } from "@/components/studio/waterfall"
 import { Button } from "@/components/ui/button"
@@ -25,25 +34,33 @@ import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useRunEvents } from "@/hooks/use-run-events"
 
+type View = "trace" | "story" | "raw"
+
 interface RunSearch {
   step?: number
-  view?: "steps" | "raw"
+  view?: View
   raw?: "events" | "doc"
+  /** The selected span's key (trace view): s0, c:call_1, r:<runId>. */
+  sel?: string
+  /** The detail panel's mode (trace view). */
+  d?: DetailMode
   t?: number
-  /** The trace panel, folded away: trace=0. */
-  trace?: 0
 }
 
 export const Route = createFileRoute("/runs/$id")({
   validateSearch: (search: Record<string, unknown>): RunSearch => ({
     step: typeof search.step === "number" ? search.step : undefined,
-    view: search.view === "raw" ? "raw" : undefined,
+    view:
+      search.view === "raw" || search.view === "story"
+        ? search.view
+        : undefined,
     raw: search.raw === "doc" ? "doc" : undefined,
+    sel: typeof search.sel === "string" && search.sel ? search.sel : undefined,
+    d: search.d === "events" || search.d === "json" ? search.d : undefined,
     t:
       typeof search.t === "number" && search.t >= 0
         ? Math.floor(search.t)
         : undefined,
-    trace: search.trace === 0 ? 0 : undefined,
   }),
   component: RunPage,
 })
@@ -52,12 +69,14 @@ function RunPage() {
   const { id } = Route.useParams()
   const search = Route.useSearch()
   const navigate = useNavigate({ from: "/runs/$id" })
+  const view: View = search.view ?? "trace"
 
   const run = useQuery({
     ...runQuery(id),
     refetchInterval: (q) => (q.state.data?.status === "running" ? 2000 : false),
   })
   const stream = useRunEvents(id, run.data?.status ?? "running")
+  const runStatus = run.data?.status ?? "running"
 
   // The replay playhead: null = live. Seeks and pauses write t to the
   // URL (a paste reproduces the exact view, A3); playback ticks do
@@ -81,75 +100,75 @@ function RunPage() {
     setPlayhead(search.t ?? null)
   }, [search.t])
 
-  // A "replay to here" from a step, call or raw row: seek there and
-  // show the steps, so the jump has something to land on.
+  // Everything below renders the fold AT the playhead: one fold, one
+  // shape, whether live or scrubbed (B2).
+  const replaying = playhead !== null && playhead < stream.events.length
+  const atPlayhead = useMemo(
+    () => (replaying ? fold(stream.events, playhead) : stream.folded),
+    [replaying, stream.events, stream.folded, playhead]
+  )
+  // While scrubbing the run reads as running: calls past the playhead
+  // are "running", not "never completed".
+  const viewStatus = replaying ? "running" : runStatus
+
+  const spans = useMemo(
+    () => spansFromFold(atPlayhead, stream.events.length, viewStatus),
+    [atPlayhead, stream.events.length, viewStatus]
+  )
+  const flow = useMemo(
+    () => flowFromFold(atPlayhead, viewStatus),
+    [atPlayhead, viewStatus]
+  )
+  // The selection: ?sel= names a span key; absent, start where
+  // something went wrong (the full fold decides, not the prefix).
+  const fullSpans = useMemo(
+    () => spansFromFold(stream.folded, stream.events.length, runStatus),
+    [stream.folded, stream.events.length, runStatus]
+  )
+  const selKey = search.sel ?? defaultSelection(fullSpans)?.key
+  const selected = spans.find((s) => s.key === selKey)
+  const select = useCallback(
+    (key: string) =>
+      void navigate({
+        search: (prev) => ({ ...prev, sel: key, view: undefined }),
+        replace: true,
+      }),
+    [navigate]
+  )
+
+  // A "replay to here" from a step, call or raw row: seek there.
   const jump = useCallback(
     (t: number) => {
       setPlayhead(t)
-      void navigate({
-        search: (prev) => ({ ...prev, t, view: undefined }),
-      })
-      window.scrollTo({ top: 0, behavior: "smooth" })
+      void navigate({ search: (prev) => ({ ...prev, t }) })
     },
     [navigate]
   )
 
-  // The trace: the fold as spans (subagents included) on the stream
-  // position axis, sharing the replay playhead. Selecting a span
-  // lands on its step card or call row.
-  const spans = useMemo(
-    () =>
-      spansFromFold(
-        stream.folded,
-        stream.events.length,
-        run.data?.status ?? "running"
-      ),
-    [stream.folded, stream.events.length, run.data?.status]
-  )
-  const selectSpan = useCallback(
-    (sp: Span) => {
-      if (sp.target?.step !== undefined) {
-        void navigate({
-          search: (prev) => ({
-            ...prev,
-            step: sp.target?.step,
-            view: undefined,
-          }),
-        })
-      }
-      if (sp.target?.call) {
-        void navigate({ search: (prev) => ({ ...prev, view: undefined }) })
-        const callId = sp.target.call
-        requestAnimationFrame(() => {
-          const el = document.querySelector(
-            `[data-call="${CSS.escape(callId)}"]`
-          )
-          el?.scrollIntoView({ block: "center", behavior: "smooth" })
-          el?.classList.add("flash")
-          setTimeout(() => el?.classList.remove("flash"), 1200)
-        })
-      }
-    },
-    [navigate]
-  )
-  const traceOpen = search.trace !== 0
-
-  // r toggles raw JSON (A4).
+  // Keys: r toggles raw, s the story, e the trace; j/k walk the
+  // trace's rows (A4).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!isPlainShortcut(e)) return
-      if (e.key === "r" && run.data) {
+      if (!isPlainShortcut(e) || !run.data) return
+      const setView = (v: View) =>
         void navigate({
           search: (prev) => ({
             ...prev,
-            view: prev.view === "raw" ? undefined : "raw",
+            view: prev.view === v || v === "trace" ? undefined : v,
           }),
         })
+      if (e.key === "r") setView("raw")
+      else if (e.key === "s") setView("story")
+      else if (e.key === "e") setView("trace")
+      else if ((e.key === "j" || e.key === "k") && view === "trace") {
+        const i = spans.findIndex((s) => s.key === selKey)
+        const next = spans.at(e.key === "j" ? i + 1 : Math.max(i - 1, 0))
+        if (next) select(next.key)
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [navigate, run.data])
+  }, [navigate, run.data, view, spans, selKey, select])
 
   // Dev-only bug signal: the folded stream and the store's result
   // document are two recordings of one run — mismatches are ours.
@@ -209,55 +228,28 @@ function RunPage() {
           event stream: {stream.error}
         </div>
       )}
-      <section className="space-y-1.5">
-        <button
-          type="button"
-          className="group/trace flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-          aria-expanded={traceOpen}
-          onClick={() =>
-            void navigate({
-              search: (prev) => ({ ...prev, trace: traceOpen ? 0 : undefined }),
-              replace: true,
-            })
-          }
-        >
-          <ChevronRight
-            className={`size-3 transition-transform ${traceOpen ? "rotate-90" : ""}`}
-          />
-          <span className="eyebrow">trace</span>
-          <span className="font-mono text-[11px] text-faint">
-            {spans.length} spans · steps, tool calls and subagents on the event
-            axis
-          </span>
-        </button>
-        {traceOpen ? (
-          <Waterfall
-            spans={spans}
-            domain={[0, Math.max(0, stream.events.length - 1)]}
-            playhead={playhead}
-            onSeek={seek}
-            onSelect={selectSpan}
-          />
-        ) : null}
-      </section>
       <Tabs
-        value={search.view ?? "steps"}
+        value={view}
         onValueChange={(v) =>
           void navigate({
             search: (prev) => ({
               ...prev,
-              view: v === "raw" ? "raw" : undefined,
+              view: v === "raw" || v === "story" ? v : undefined,
             }),
           })
         }
       >
         <div className="flex flex-wrap items-center gap-3">
           <TabsList>
-            <TabsTrigger value="steps">steps</TabsTrigger>
+            <TabsTrigger value="trace">trace</TabsTrigger>
+            <TabsTrigger value="story">story</TabsTrigger>
             <TabsTrigger value="raw">raw</TabsTrigger>
           </TabsList>
           <span className="hidden items-center gap-1 text-[11px] text-faint md:flex">
-            <Kbd>r</Kbd> raw · <Kbd>space</Kbd> replay · <Kbd>[</Kbd>
+            <Kbd>e</Kbd>
+            <Kbd>s</Kbd>
+            <Kbd>r</Kbd> views · <Kbd>j</Kbd>
+            <Kbd>k</Kbd> spans · <Kbd>space</Kbd> replay · <Kbd>[</Kbd>
             <Kbd>]</Kbd> step · <Kbd>?</Kbd> all keys
           </span>
           {stream.loading ? (
@@ -266,7 +258,54 @@ function RunPage() {
             </span>
           ) : null}
         </div>
-        <TabsContent value="steps" className="mt-3">
+
+        <TabsContent value="trace" className="mt-3 space-y-3">
+          <FlowStrip
+            pills={flow}
+            runStatus={viewStatus}
+            selectedKey={selKey}
+            onSelect={select}
+          />
+          <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
+            <Waterfall
+              spans={spans}
+              domain={[0, Math.max(0, stream.events.length - 1)]}
+              playhead={playhead}
+              onSeek={seek}
+              onSelect={(sp) => select(sp.key)}
+              selectedId={selected?.id}
+              className="max-h-[60vh] lg:max-h-[calc(100vh-8rem)]"
+            />
+            <div className="lg:sticky lg:top-3 lg:max-h-[calc(100vh-8rem)]">
+              <SpanDetail
+                span={selected}
+                view={atPlayhead}
+                events={stream.events}
+                doc={doc}
+                runStatus={viewStatus}
+                playhead={playhead}
+                mode={search.d ?? "detail"}
+                onMode={(m) =>
+                  void navigate({
+                    search: (prev) => ({
+                      ...prev,
+                      d: m === "detail" ? undefined : m,
+                    }),
+                    replace: true,
+                  })
+                }
+                onJump={jump}
+              />
+            </div>
+          </div>
+          {selKey && !selected ? (
+            <p className="font-mono text-[11px] text-faint">
+              the selected span ({selKey}) is past the playhead — play forward
+              or press End for live
+            </p>
+          ) : null}
+        </TabsContent>
+        <TabsContent value="story" className="mt-3">
           <StepList
             events={stream.events}
             folded={stream.folded}

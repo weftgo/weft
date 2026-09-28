@@ -14,7 +14,17 @@ export const bindings: Binding[] = [
   { keys: ["/"], action: "focus the agent filter", where: "runs" },
   { keys: ["j", "k"], action: "next / previous row (or ↓ ↑)", where: "runs" },
   { keys: ["enter"], action: "open the selected run", where: "runs" },
-  { keys: ["r"], action: "toggle raw (events and document)", where: "run" },
+  { keys: ["e", "s", "r"], action: "trace · story · raw views", where: "run" },
+  {
+    keys: ["j", "k"],
+    action: "next / previous span in the trace",
+    where: "run",
+  },
+  {
+    keys: ["↑", "↓", "←", "→"],
+    action: "move / fold in the trace (tree focused)",
+    where: "run",
+  },
   { keys: ["space"], action: "play / pause replay", where: "run" },
   {
     keys: ["[", "]"],

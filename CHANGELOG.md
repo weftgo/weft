@@ -69,14 +69,24 @@ found:
   flight*. Subagent steps render through the same step body as the
   parent's. Every step and call has *replay to here* (the fold
   carries stream positions).
-- Trace: a waterfall of the run — steps, tool calls and subagent
+- Trace, the default view: a flow strip (one pill per step, arrows
+  for results fed back, the end state), then a waterfall | detail
+  split. The waterfall is the run — steps, tool calls and subagent
   runs (their own steps and calls nested) as spans on the event
-  position axis, in one tree with one playhead. Click a bar to seek,
-  a label to land on the step card or call row; open spans fade,
-  never-completed ones hatch, the step a run died in reads red. The
-  `Waterfall` component is axis-agnostic (Span[] over a numeric
-  domain) so T2a's timed spans and the live view draw on it as is.
-  `?trace=0` folds the panel.
+  position axis, one tree, one playhead; rows carry a kind icon, a
+  badge (stop reason, ok, the ToolError code, running, never) and
+  the event range; ↑↓ select, ←→ fold, expand/collapse all; a bar
+  click seeks. The detail panel reads the selected span as detail
+  (the same step and call bodies as the story), events (that span's
+  slice of the stream) or json (the folded node), and renders the
+  fold AT the playhead, so scrubbing replays inside it too. The
+  trace opens on whatever went wrong (a tool error, the step a run
+  died in), else the first step. `?sel=` and `?d=` name the
+  selection and mode; `e`/`s`/`r` switch trace/story/raw; `j`/`k`
+  walk spans. Open spans fade, never-completed ones hatch, the step
+  a run died in reads red. The `Waterfall` component is axis-
+  agnostic (Span[] over a numeric domain) so T2a's timed spans and
+  the live view draw on it as is; the step story stays as `story`.
 - Replay: the gutter is bucketed (never wider than its box, a click
   lands where it looks), a playhead line, a readout naming the event
   at the playhead, `[`/`]` jump by step or tool boundary, `,`/`.`

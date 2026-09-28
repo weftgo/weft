@@ -219,7 +219,7 @@ func (s *Session) appendPromptLocked(ctx context.Context, id string, msg weft.Me
 func (s *Session) execute(first pendingSend) {
 	cur := first
 	for {
-		s.runOne(cur)
+		s.runOneContained(cur)
 		s.mu.Lock()
 		if len(s.queue) == 0 {
 			s.running = false
@@ -230,6 +230,24 @@ func (s *Session) execute(first pendingSend) {
 		s.queue = s.queue[1:]
 		s.mu.Unlock()
 	}
+}
+
+// runOneContained keeps a panic in the session's own turn machinery
+// from wedging the runner slot: the turn ends with the panic as its
+// error, the agent's logger says so, and the queue moves on. Tool and
+// model panics never reach here — the core contains them as errors
+// (invokeContained, the stream consume) — this guards the session
+// layer's own code and the caller's ids function.
+func (s *Session) runOneContained(ps pendingSend) {
+	defer func() {
+		if p := recover(); p != nil {
+			err := fmt.Errorf("thread: turn panicked: %v", p)
+			ps.turn.finish(nil, err)
+			s.agent.Logger().Error("thread: turn panicked",
+				"session", s.header.ID, "run", ps.turn.runID, "panic", p)
+		}
+	}()
+	s.runOne(ps)
 }
 
 // runOne runs one accepted send. The idle path wrote the prompt in
@@ -262,8 +280,10 @@ func (s *Session) runOne(ps pendingSend) {
 	}
 
 	// The input is the session's context — the walk already includes
-	// the prompt entry appended for this turn.
-	input := s.Context()
+	// the prompt entry appended for this turn — carried raw: the loop
+	// repairs its input itself, leaving a decision's pending calls
+	// unresolved so it can resolve them (the approval resume).
+	input := s.rawContext()
 	runOpts := append([]weft.RunOption(nil), ps.opts...)
 	runOpts = append(runOpts, weft.Messages(input...), weft.RunID(t.runID))
 	run := s.agent.Stream(ps.ctx, runOpts...)
@@ -306,7 +326,19 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 	var entries []Entry
 	parent := s.leaf
 	if len(full) > inputLen {
-		for _, m := range weft.Repair(full[inputLen:]) {
+		// A successful run's messages are already sound model input
+		// (the loop repairs its input before appending its own), and a
+		// pending call must stay unresolved in the tree so a later
+		// decision can resolve it — so no repair here on success. A
+		// failed run's partial is repaired on the way in, the ADR's
+		// rule. Repairs land exactly at the input's tail (the tree
+		// holds valid prefixes with at most a pending tail), so the
+		// boundary slice stays aligned.
+		newMsgs := full[inputLen:]
+		if err != nil {
+			newMsgs = weft.Repair(newMsgs)
+		}
+		for _, m := range newMsgs {
 			id := s.mintIDLocked()
 			entries = append(entries, MessageEntry{
 				ID: id, ParentID: parent, Created: time.Now().UTC(), Message: cloneMessage(m),

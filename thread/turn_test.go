@@ -529,3 +529,165 @@ func open2(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Sessi
 	t.Helper()
 	return reopen(t, ctx, st, s)
 }
+
+func TestSendPendingApprovalResume(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		ran := make(chan string, 1)
+		agent := weft.New(
+			wefttest.Script(
+				wefttest.ToolCalls(wefttest.Call{Name: "dangerous", ID: "call_9"}),
+				wefttest.Say("the call ran"),
+			),
+			weft.Tool("dangerous", "needs a human", func(ctx context.Context, in struct{}) (string, error) {
+				ran <- "ran"
+				return "approved result", nil
+			}, weft.RequireApproval()),
+		)
+		s, _ := thread.Create(ctx, st, agent)
+
+		t1, err := s.Send(ctx, weft.User("do the dangerous thing"))
+		if err != nil {
+			t.Fatalf("Send 1: %v", err)
+		}
+		res1, err := t1.Wait()
+		if err != nil {
+			t.Fatalf("Wait 1: %v", err) // a pending turn is a success
+		}
+		if len(res1.Pending) != 1 || res1.Pending[0].ID != "call_9" {
+			t.Fatalf("Pending = %+v, want call_9", res1.Pending)
+		}
+
+		// The turn entry records the pending call, and the tree keeps
+		// the call unresolved — resume is a Send with the decision.
+		open := reopen(t, ctx, st, s)
+		var pending []weft.ToolCallPart
+		for _, e := range open.Entries() {
+			if te, ok := e.(thread.TurnEntry); ok && len(te.Pending) > 0 {
+				pending = te.Pending
+			}
+		}
+		if len(pending) != 1 || pending[0].ID != "call_9" {
+			t.Fatalf("turn entry Pending = %+v, want call_9", pending)
+		}
+
+		t2, err := s.Send(ctx, weft.User("approve it"), thread.RunOptions(weft.Approve("call_9")))
+		if err != nil {
+			t.Fatalf("Send 2: %v", err)
+		}
+		res2, err := t2.Wait()
+		if err != nil {
+			t.Fatalf("Wait 2: %v", err)
+		}
+		if res2.Text() != "the call ran" {
+			t.Errorf("reply = %q, want the post-approval reply", res2.Text())
+		}
+		select {
+		case r := <-ran:
+			if r != "ran" {
+				t.Errorf("tool reported %q", r)
+			}
+		default:
+			t.Error("the approved call never ran")
+		}
+	})
+}
+
+func TestSendRunIDUniqueAcrossReopen(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		agent := weft.New(wefttest.Script(wefttest.Say("a"), wefttest.Say("b")))
+		s, _ := thread.Create(ctx, st, agent)
+		t1, _ := s.Send(ctx, weft.User("one"))
+		if _, err := t1.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		// Reopen: the counter recovers from the turn entries, so the
+		// next run id continues the sequence.
+		s2, err := thread.Open(ctx, st, s.ID(), agent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t2, err := s2.Send(ctx, weft.User("two"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if t2.RunID() != s.ID()+"-t2" {
+			t.Errorf("run id after reopen = %q, want -t2", t2.RunID())
+		}
+		if _, err := t2.Wait(); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestSendAfterFailedTurn(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		boom := errors.New("boom")
+		agent := weft.New(
+			wefttest.Script(
+				wefttest.ToolCalls(wefttest.Call{Name: "lookup"}),
+				wefttest.Fail(boom),
+				wefttest.Say("recovered"),
+			),
+			weft.Tool("lookup", "", func(ctx context.Context, in struct{}) (string, error) {
+				return "found", nil
+			}),
+		)
+		s, _ := thread.Create(ctx, st, agent)
+		t1, _ := s.Send(ctx, weft.User("first"))
+		if _, err := t1.Wait(); err == nil {
+			t.Fatal("want the scripted failure")
+		}
+		// Nothing from the failed turn corrupts the next turn: the
+		// context is a valid transcript and the run continues.
+		t2, err := s.Send(ctx, weft.User("try again"))
+		if err != nil {
+			t.Fatalf("Send after failure: %v", err)
+		}
+		res, err := t2.Wait()
+		if err != nil {
+			t.Fatalf("Wait after failure: %v", err)
+		}
+		if res.Text() != "recovered" {
+			t.Errorf("reply = %q", res.Text())
+		}
+		if msgs := s.Context(); msgs[len(msgs)-1].Text() != "recovered" {
+			t.Errorf("final context message = %+v", msgs[len(msgs)-1])
+		}
+	})
+}
+
+func TestSendToolPanicRecordsTurn(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		agent := weft.New(
+			wefttest.Script(
+				wefttest.ToolCalls(wefttest.Call{Name: "bang"}),
+				wefttest.Say("carried on"),
+			),
+			weft.Tool("bang", "", func(ctx context.Context, in struct{}) (string, error) {
+				panic("tool blew up")
+			}),
+		)
+		s, _ := thread.Create(ctx, st, agent)
+		t1, _ := s.Send(ctx, weft.User("use the tool"))
+		res, err := t1.Wait()
+		if err != nil {
+			t.Fatalf("a contained tool panic must not fail the run: %v", err)
+		}
+		if res.Text() != "carried on" {
+			t.Errorf("reply = %q", res.Text())
+		}
+		found := false
+		for _, e := range reopen(t, ctx, st, s).Entries() {
+			if te, ok := e.(thread.TurnEntry); ok && te.Err == "" {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("no clean turn entry for the panic-containing turn")
+		}
+	})
+}

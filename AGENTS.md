@@ -131,7 +131,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 // 8. Sessions (module weft/thread; jsonl.Open(dir) | thread.Memory()):
 //    s, _ := thread.Create(ctx, st, agent) — the append-only entry tree; every write
 //    through Storage.Append; s.Context() is the leaf's messages, repaired.
-//    turn, _ := s.Send(ctx, weft.User("…"), thread.RunOptions(weft.Tap(...))) —
+//    turn, _ := s.Send(ctx, weft.User("…"), thread.RunOptions(weft.Deny(...))) —
 //    prompt durable before the run; turn.Wait(); busy: Queue (default) or
 //    thread.BusyPolicy(thread.Reject) → ErrBusy.
 //    s.Branch(ctx, entryID[, thread.SummarizeLeft()]), s.Fork(ctx, entryID) — the tree,

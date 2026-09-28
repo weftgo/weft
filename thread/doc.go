@@ -31,6 +31,6 @@
 // branching, compaction); the current surface is the format, the
 // Storage contract, and the Session tree they stand on — Create/Open,
 // the context walk, entries, leaf and path, labels, info, custom
-// state. Send, branching and compaction follow in the next steps of
+// state, branching. Send and compaction follow in the next steps of
 // v0.1.
 package thread

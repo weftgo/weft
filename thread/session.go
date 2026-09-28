@@ -461,6 +461,12 @@ func (s *Session) appendLocked(ctx context.Context, build func(id, parent string
 	if !ValidID(id) {
 		return fmt.Errorf("thread: invalid entry id %q", id)
 	}
+	if _, dup := s.byID[id]; dup {
+		// An id the tree already holds would make it ambiguous —
+		// which entry does the id name? — and every walk reads one of
+		// the two. Random ids cannot collide; an IDs function can.
+		return fmt.Errorf("thread: entry id %q already held by session %s", id, s.header.ID)
+	}
 	e := build(id, s.leaf, time.Now().UTC())
 	if err := s.st.Append(ctx, s.header.ID, e); err != nil {
 		return err

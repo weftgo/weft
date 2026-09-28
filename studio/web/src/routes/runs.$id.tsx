@@ -6,12 +6,13 @@
 // live-ish behaviour in T1.
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 
 import { runQuery } from "@/lib/api"
 import { crossCheck } from "@/lib/events"
 import { RunHeader } from "@/components/studio/run-header"
 import { RawView } from "@/components/studio/raw-view"
+import { ReplayBar } from "@/components/studio/replay-bar"
 import { StepList } from "@/components/studio/step-list"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -43,6 +44,39 @@ function RunPage() {
   })
   const stream = useRunEvents(id, run.data?.status ?? "running")
 
+  // The replay playhead: null = live. Seeks and pauses write t to the
+  // URL (a paste reproduces the exact view, A3); playback ticks do
+  // not — 60 ms of history churn is noise, and a reload mid-play
+  // landing near the playhead is fine.
+  const [playhead, setPlayhead] = useState<number | null>(search.t ?? null)
+  const seek = (t: number | null) => {
+    setPlayhead(t)
+    void navigate({ search: (prev) => ({ ...prev, t: t ?? undefined }) })
+  }
+
+  // r toggles raw JSON (A4).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement
+      if (
+        el.tagName === "INPUT" ||
+        el.tagName === "TEXTAREA" ||
+        el.isContentEditable
+      )
+        return
+      if (e.key === "r" && run.data) {
+        void navigate({
+          search: (prev) => ({
+            ...prev,
+            view: prev.view === "raw" ? undefined : "raw",
+          }),
+        })
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [navigate, run.data])
+
   // Dev-only bug signal: the folded stream and the store's result
   // document are two recordings of one run — mismatches are ours.
   useEffect(() => {
@@ -72,6 +106,12 @@ function RunPage() {
   return (
     <div className="space-y-4">
       <RunHeader doc={doc} />
+      <ReplayBar
+        events={stream.events}
+        playhead={playhead}
+        onTick={setPlayhead}
+        onSeek={seek}
+      />
       <Tabs
         value={search.view ?? "steps"}
         onValueChange={(v) =>
@@ -92,7 +132,7 @@ function RunPage() {
             events={stream.events}
             folded={stream.folded}
             doc={doc}
-            upTo={search.t}
+            upTo={playhead ?? undefined}
           />
         </TabsContent>
         <TabsContent value="raw" className="mt-3">

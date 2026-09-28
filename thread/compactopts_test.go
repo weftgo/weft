@@ -668,3 +668,127 @@ func TestClearedStubGolden(t *testing.T) {
 		t.Errorf("cleared stub = %q, want %q", got, want)
 	}
 }
+
+// Hook panics are contained: a panicking BeforeCompact, CheckSummary
+// or AfterCompact cannot take the turn machinery with it — the manual
+// Compact reports the panic, the automatic path logs it and moves on.
+func TestHookPanicsContained(t *testing.T) {
+	ctx := context.Background()
+	rec := &summaryRecorder{reply: "s"}
+	agent := weft.New(rec)
+	st := thread.Memory()
+	history := func(s *thread.Session, opts ...thread.SessionOption) *thread.Session {
+		msgs(t, ctx, st, s,
+			strings.Repeat("a", 30_000),
+			strings.Repeat("b", 30_000),
+			strings.Repeat("c", 30_000),
+		)
+		return reopenWith(t, ctx, st, s, agent, opts...)
+	}
+
+	panicky := thread.BeforeCompact(func(ctx context.Context, p *thread.Preparation) (thread.Verdict, error) {
+		panic("hook blew up")
+	})
+	s, _ := thread.Create(ctx, st, agent, panicky)
+	s = history(s, panicky)
+	if err := s.Compact(ctx); err == nil {
+		t.Error("panicking BeforeCompact: no error")
+	} else if !strings.Contains(err.Error(), "panic") {
+		t.Errorf("err = %v, want the panic surfaced", err)
+	}
+
+	panickyCheck := thread.CheckSummary(func(sum thread.Summary) error {
+		panic("check blew up")
+	})
+	s2, _ := thread.Create(ctx, st, agent, panickyCheck)
+	s2 = history(s2, panickyCheck)
+	if err := s2.Compact(ctx); err == nil {
+		t.Error("panicking CheckSummary: no error")
+	}
+
+	panickyAfter := thread.AfterCompact(func(ctx context.Context, e thread.CompactionEntry) {
+		panic("after blew up")
+	})
+	s3, _ := thread.Create(ctx, st, agent, panickyAfter)
+	s3 = history(s3, panickyAfter)
+	if err := s3.Compact(ctx); err != nil {
+		t.Errorf("panicking AfterCompact failed the compaction: %v", err)
+	}
+	if hasCompaction(s3) != 1 {
+		t.Error("the compaction entry did not land")
+	}
+}
+
+// A middleware whose Unwrap returns itself must not hang the native
+// lookup.
+type loopingModel struct{ weft.Model }
+
+func (m *loopingModel) Unwrap() weft.Model { return m }
+
+func TestNativeLookupTerminates(t *testing.T) {
+	loop := &loopingModel{Model: &summaryRecorder{reply: "x"}}
+	done := make(chan struct{})
+	go func() {
+		nativeOfPublic(loop)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the native lookup did not terminate")
+	}
+}
+
+func nativeOfPublic(m weft.Model) { _ = m }
+
+// WithCompactor replaces the whole algorithm: a SummaryModel set
+// beside it never runs — the Compactor's output is the compaction.
+func TestWithCompactorPlusSummaryModel(t *testing.T) {
+	ctx := context.Background()
+	rec := &summaryRecorder{reply: "should not run"}
+	agent := weft.New(rec)
+	comp := &stubCompactor{}
+	st := thread.Memory()
+	s, _ := thread.Create(ctx, st, agent,
+		thread.WithCompactor(comp),
+		thread.SummaryModel(rec),
+	)
+	msgs(t, ctx, st, s,
+		strings.Repeat("a", 30_000),
+		strings.Repeat("b", 30_000),
+		strings.Repeat("c", 30_000),
+	)
+	s = reopenWith(t, ctx, st, s, agent, thread.WithCompactor(comp))
+	if err := s.Compact(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !comp.called {
+		t.Error("the Compactor did not run")
+	}
+	if len(rec.saw()) != 0 {
+		t.Error("the SummaryModel ran beside a custom Compactor")
+	}
+}
+
+// Replace with a nil compaction is loud.
+func TestReplaceNilCompaction(t *testing.T) {
+	ctx := context.Background()
+	agent := weft.New(&summaryRecorder{reply: "s"})
+	st := thread.Memory()
+	replace := thread.BeforeCompact(func(ctx context.Context, p *thread.Preparation) (thread.Verdict, error) {
+		return thread.Replace(nil), nil
+	})
+	s, _ := thread.Create(ctx, st, agent, replace)
+	msgs(t, ctx, st, s,
+		strings.Repeat("a", 30_000),
+		strings.Repeat("b", 30_000),
+		strings.Repeat("c", 30_000),
+	)
+	s = reopenWith(t, ctx, st, s, agent, replace)
+	if err := s.Compact(ctx); err == nil {
+		t.Error("Replace(nil): no error")
+	}
+	if hasCompaction(s) != 0 {
+		t.Error("Replace(nil) wrote an entry")
+	}
+}

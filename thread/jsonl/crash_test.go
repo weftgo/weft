@@ -1,3 +1,9 @@
+//go:build unix
+
+// The crash test kills a process with SIGKILL — a unix signal — so it
+// runs on unix only, the same line lock_unix.go draws. The load rules
+// it pins are pinned everywhere by the fuzz and conformance suites.
+
 package jsonl_test
 
 import (

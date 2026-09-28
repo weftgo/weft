@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/weftgo/weft"
@@ -301,4 +302,51 @@ func ExampleSession_Send() {
 	// assistant : It shipped Tuesday.
 	// user : And what was in it?
 	// assistant : Order 1234, two items.
+}
+
+// Compaction summarizes the old part of a session and keeps the recent
+// part raw — nothing is deleted, and Uncompact branches right back.
+func ExampleSession_Compact() {
+	ctx := context.Background()
+	// The same model summarizes; a script makes it deterministic.
+	rec := &recordingModel{reply: "Goal: ship the order service."}
+	agent := weft.New(rec)
+	st := thread.Memory()
+	s, _ := thread.Create(ctx, st, agent)
+
+	// A long history, appended the way Send does.
+	msgs := []string{strings.Repeat("order ", 12_000), strings.Repeat("invoice ", 12_000), strings.Repeat("refund ", 12_000)}
+	parent := ""
+	var batch []thread.Entry
+	for i, text := range msgs {
+		id := fmt.Sprintf("e_%d", i)
+		batch = append(batch, thread.MessageEntry{ID: id, ParentID: parent, Created: time.Now().UTC(), Message: weft.User(text)})
+		parent = id
+	}
+	if err := st.Append(ctx, s.ID(), batch...); err != nil {
+		fmt.Println(err)
+		return
+	}
+	s, err := thread.Open(ctx, st, s.ID(), agent)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	if err := s.Compact(ctx); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("after Compact:", len(s.Context()), "messages")
+	fmt.Println("summary rides first:", strings.HasPrefix(s.Context()[0].Text(), "<weft-summary>"))
+	fmt.Println("kept raw:", len(s.Entries()) > 3)
+	if err := s.Uncompact(ctx); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("after Uncompact:", len(s.Context()), "messages")
+	// Output:
+	// after Compact: 2 messages
+	// summary rides first: true
+	// kept raw: true
+	// after Uncompact: 3 messages
 }

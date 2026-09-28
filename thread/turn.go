@@ -279,6 +279,11 @@ func (s *Session) runOne(ps pendingSend) {
 		return
 	}
 
+	// The trigger's first site (ADR 0020 §2): before the run, with the
+	// prompt already on the path so the estimate covers what the run
+	// is about to be fed.
+	s.maybeAutoCompact(ps.ctx)
+
 	// The input is the session's context — the walk already includes
 	// the prompt entry appended for this turn — carried raw: the loop
 	// repairs its input itself, leaving a decision's pending calls
@@ -296,6 +301,9 @@ func (s *Session) runOne(ps pendingSend) {
 	}
 	res, err := run.Wait()
 	s.recordTurnEnd(persist, t, res, err, len(input))
+	// The trigger's second site: after the turn, with the new
+	// measurement recorded.
+	s.maybeAutoCompact(persist)
 	t.finish(res, err)
 }
 
@@ -352,6 +360,9 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 		te.Usage = res.Usage
 		te.Steps = len(res.Steps)
 		te.Pending = res.Pending
+		if n := len(res.Steps); n > 0 {
+			te.LastInput = res.Steps[n-1].Usage.InputTokens
+		}
 	}
 	if err != nil {
 		te.Err = err.Error()
@@ -367,6 +378,12 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 	}
 	for _, e := range entries {
 		s.adoptLocked(e)
+	}
+	if te.LastInput > 0 {
+		// The trigger's new measurement: the final step's reported
+		// input, covering everything up to the turn's prompt entry.
+		s.lastInput = te.LastInput
+		s.lastMeasureLeaf = t.id
 	}
 	if f, ok := s.st.(Flusher); ok {
 		if flushErr := f.Flush(ctx, s.header.ID); flushErr != nil {

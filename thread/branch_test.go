@@ -2,7 +2,7 @@ package thread_test
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -36,7 +36,15 @@ func msgs(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Sessio
 
 func reopen(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Session) *thread.Session {
 	t.Helper()
-	again, err := thread.Open(ctx, st, s.ID(), weft.New(wefttest.Script()))
+	return reopenWith(t, ctx, st, s, weft.New(wefttest.Script()))
+}
+
+// reopenWith reopens on the caller's agent — the tests whose model
+// records what it saw (the compaction suite) must not swap it for a
+// fresh scripted one on the way back in.
+func reopenWith(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Session, agent *weft.Agent) *thread.Session {
+	t.Helper()
+	again, err := thread.Open(ctx, st, s.ID(), agent)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -157,7 +165,7 @@ func TestBranchValidation(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		s, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
-		s, ids := msgs(t, ctx, st, s, "one")
+		s, _ = msgs(t, ctx, st, s, "one")
 		if err := s.Branch(ctx, "e_nope"); err == nil {
 			t.Error("Branch to unknown id: no error")
 		}
@@ -182,18 +190,61 @@ func TestBranchValidation(t *testing.T) {
 		if n := len(restarted.Entries()); n != 4 { // one, two, and the two leaf entries
 			t.Errorf("Entries after branch to root = %d, want 4 (nothing deleted)", n)
 		}
-		// SummarizeLeft is loud about not being here yet.
-		if err := restarted.Branch(ctx, ids[0], thread.SummarizeLeft()); !errors.Is(err, thread.ErrNotImplemented) {
-			t.Errorf("Branch SummarizeLeft: err = %v, want ErrNotImplemented", err)
-		}
+		// SummarizeLeft now summarizes (step 1.8); its shape is
+		// pinned by TestBranchSummarizeLeft.
+		_ = restarted
 	})
 }
 
-// TestBranchSummarizeLeft lands with step 1.8, which wires the
-// summarizer into Branch (ADR 0020 §6). Until then the option is a
-// loud ErrNotImplemented, pinned above.
+// The SummarizeLeft option, wired by step 1.8: the branch being left
+// is summarized with the compaction summarizer, and the new line's
+// context carries the summary in the abandoned branch's place
+// (ADR 0020 §6).
 func TestBranchSummarizeLeft(t *testing.T) {
-	t.Skip("enabled in step 1.8: SummarizeLeft writes a branch_summary (ADR 0020 §6)")
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		rec := &summaryRecorder{reply: "what the abandoned branch did"}
+		agent := weft.New(rec)
+		s, _ := thread.Create(ctx, st, agent)
+		now := time.Now().UTC()
+		if err := st.Append(ctx, s.ID(),
+			thread.MessageEntry{ID: "e_bs1", Created: now, Message: weft.User("the setup")},
+			thread.MessageEntry{ID: "e_bs2", ParentID: "e_bs1", Created: now, Message: weft.Assistant("the wrong turn")},
+		); err != nil {
+			t.Fatal(err)
+		}
+		s = reopenWith(t, ctx, st, s, agent)
+		if err := s.Branch(ctx, "e_bs1", thread.SummarizeLeft()); err != nil {
+			t.Fatalf("Branch SummarizeLeft: %v", err)
+		}
+
+		// The abandoned branch is gone from the context; its summary
+		// rides in its place, behind the same marker compaction uses.
+		got := s.Context()
+		if len(got) != 2 {
+			t.Fatalf("Context = %d messages, want 2 (the setup, the summary)", len(got))
+		}
+		if want := "<weft-summary>\nwhat the abandoned branch did\n</weft-summary>"; got[1].Text() != want {
+			t.Errorf("branch summary message = %q, want %q", got[1].Text(), want)
+		}
+		// Durable, and the abandoned entries stay in the file.
+		open := reopenWith(t, ctx, st, s, agent)
+		if fmt.Sprint(open.Context()) != fmt.Sprint(s.Context()) {
+			t.Error("reopen changed the branched context")
+		}
+		if n := len(open.Entries()); n != 4 { // setup, wrong turn, leaf, branch_summary
+			t.Errorf("Entries = %d, want 4", n)
+		}
+		var bs *thread.BranchSummaryEntry
+		for _, e := range open.Entries() {
+			if b, ok := e.(thread.BranchSummaryEntry); ok {
+				bs = &b
+			}
+		}
+		if bs == nil || bs.FromEntry != "e_bs1" {
+			t.Errorf("branch_summary = %+v, want FromEntry e_bs1", bs)
+		}
+	})
 }
 
 func TestFork(t *testing.T) {

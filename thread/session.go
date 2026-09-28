@@ -29,10 +29,13 @@ type sessionConfig struct {
 	// policy is the busy policy Send follows (ADR 0011 §4): Queue (the
 	// zero value, the default) or Reject.
 	policy Policy
+	// compaction is the compaction configuration (ADR 0020): the
+	// defaults until step 1.9's public layers override them.
+	compaction compactConfig
 }
 
 func resolveSession(opts ...SessionOption) sessionConfig {
-	var cfg sessionConfig
+	cfg := sessionConfig{compaction: defaultCompactConfig()}
 	for _, o := range opts {
 		if o != nil {
 			o.applySession(&cfg)
@@ -89,6 +92,15 @@ type Session struct {
 	// turn, in acceptance order.
 	running bool
 	queue   []pendingSend
+
+	// The compaction trigger's state (ADR 0020 §2): lastInput is the
+	// provider-reported input of the last model step the session ran,
+	// lastMeasureLeaf the entry that step's request covered up to (the
+	// turn's prompt — the messages after it are the estimated delta),
+	// and warnedNoWindow keeps the no-window warning to one line.
+	lastInput       int64
+	lastMeasureLeaf string
+	warnedNoWindow  bool
 }
 
 // Create starts a new session in st: a fresh header under a new
@@ -167,6 +179,15 @@ func Open(ctx context.Context, st Storage, id string, agent *weft.Agent, opts ..
 	}
 	s.leaf = leaf
 	s.turnSeq = s.turns
+	// The trigger's measurement recovers from the last turn entry that
+	// recorded one: its input is the last provider-reported number, and
+	// the messages after its entry are the estimated delta.
+	for _, e := range entries {
+		if te, ok := e.(TurnEntry); ok && te.LastInput > 0 {
+			s.lastInput = te.LastInput
+			s.lastMeasureLeaf = te.ID
+		}
+	}
 	if s.leaf != "" {
 		if _, ok := s.byID[s.leaf]; !ok {
 			// Loud on the undefined (ADR 0011 §5): a trailing leaf
@@ -305,20 +326,85 @@ func (s *Session) Context() []weft.Message {
 func (s *Session) rawContext() []weft.Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.rawContextLocked()
+}
+
+// rawContextLocked is the walk (callers hold s.mu): the latest
+// compaction entry on the path leads with its summary behind the fixed
+// marker, and the context then reads from its first kept entry onward
+// (ADR 0020 §1); a branch_summary entry contributes its summary in
+// the abandoned branch's place wherever it sits (§6); and reasoning
+// parts carrying a signature are stripped from entries recorded before
+// the compaction — their prefix changed, and a resent signature breaks
+// (pi #9391, Anthropic prefix_binding_mismatch). Entries recorded
+// after the compaction keep theirs: they were made over a prefix that
+// already held the summary. A FirstKept the path does not reach (a
+// hand-made file) makes the compaction unusable, and the walk falls
+// back to the whole path rather than a summary of nothing.
+func (s *Session) rawContextLocked() []weft.Message {
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
 		return nil // the leaf is always an entry the session holds
 	}
 	var msgs []weft.Message
-	for _, e := range path {
-		switch e := e.(type) {
+	start, compactionAt := 0, -1
+	for i := len(path) - 1; i >= 0; i-- {
+		if c, ok := path[i].(CompactionEntry); ok {
+			msgs = append(msgs, summaryMessage(c.Summary))
+			compactionAt = i
+			for j := 0; j <= i; j++ {
+				if idOf(path[j]) == c.FirstKept {
+					start = j
+					break
+				}
+			}
+			break
+		}
+	}
+	for i := start; i < len(path); i++ {
+		switch e := path[i].(type) {
 		case MessageEntry:
-			msgs = append(msgs, e.Message)
+			m := e.Message
+			if compactionAt >= 0 && i < compactionAt {
+				m = stripSignedReasoning(m)
+			}
+			msgs = append(msgs, m)
 		case CustomMessageEntry:
-			msgs = append(msgs, e.Message)
+			m := e.Message
+			if compactionAt >= 0 && i < compactionAt {
+				m = stripSignedReasoning(m)
+			}
+			msgs = append(msgs, m)
+		case BranchSummaryEntry:
+			msgs = append(msgs, summaryMessage(e.Summary))
 		}
 	}
 	return msgs
+}
+
+// stripSignedReasoning drops the message's signed reasoning parts —
+// the kept-side half of the compaction's reasoning rule, applied to
+// the context the model sees and never to what the file holds.
+func stripSignedReasoning(m weft.Message) weft.Message {
+	has := false
+	for _, p := range m.Content {
+		if r, ok := p.(weft.ReasoningPart); ok && r.Signature != "" {
+			has = true
+			break
+		}
+	}
+	if !has {
+		return m
+	}
+	out := m
+	out.Content = nil
+	for _, p := range m.Content {
+		if r, ok := p.(weft.ReasoningPart); ok && r.Signature != "" {
+			continue
+		}
+		out.Content = append(out.Content, p)
+	}
+	return out
 }
 
 // Label names an entry — bookmarks, checkpoints, the anchors a UI

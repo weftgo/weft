@@ -297,6 +297,11 @@ func TestEventsGolden(t *testing.T) {
 
 	_, _, paged := get(t, h, "/studio/api/runs/r_ok/events?after=2&limit=3")
 	golden(t, "events-ok-paged.golden.json", paged)
+
+	// The subagent run's stream is the nested-fold fixture for the TS
+	// side (B7) — Nested wrappers inline in the parent's order.
+	_, _, sub := get(t, h, "/studio/api/runs/r_sub/events?limit=1000")
+	golden(t, "events-sub.golden.json", sub)
 }
 
 func TestEventsPaging(t *testing.T) {

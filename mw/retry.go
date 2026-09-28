@@ -130,7 +130,7 @@ type retryModel struct {
 
 func (m *retryModel) Info() weft.ModelInfo { return weft.InfoOf(m.next) }
 
-// Unwrap declares the model retries retry (the Unwrap convention,
+// Unwrap declares the model being retried (the Unwrap convention,
 // beside Info).
 func (m *retryModel) Unwrap() weft.Model { return m.next }
 

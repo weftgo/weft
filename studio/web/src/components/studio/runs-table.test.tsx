@@ -3,33 +3,16 @@
 // surface on hover.
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import {
-  RouterProvider,
-  createMemoryHistory,
-  createRootRoute,
-  createRouter,
-} from "@tanstack/react-router"
-import { render, screen } from "@testing-library/react"
+import { screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 
 import type { RunsPage } from "@/lib/api"
 import { RunsTable } from "@/components/studio/runs-table"
+import { renderWithRouter } from "@/test/render"
 
 function goldenRuns() {
   const path = resolve(process.cwd(), "../testdata/api/runs.golden.json")
   return (JSON.parse(readFileSync(path, "utf8")) as RunsPage).runs
-}
-
-/** The table links into the app router; render inside a memory one. */
-async function renderWithRouter(ui: React.ReactNode) {
-  const router = createRouter({
-    routeTree: createRootRoute({
-      component: () => <>{ui}</>,
-    }).addChildren([]),
-    history: createMemoryHistory({ initialEntries: ["/"] }),
-  })
-  await router.load()
-  return render(<RouterProvider router={router} />)
 }
 
 const NOW = Date.parse("2026-10-01T12:00:00Z")

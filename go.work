@@ -9,4 +9,5 @@ use (
 	./openai
 	./store
 	./studio
+	./thread
 )

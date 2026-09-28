@@ -261,7 +261,7 @@ export interface RunsFilters {
   before?: string
 }
 
-export function runsQuery(filters: RunsFilters = {}) {
+export function runsSearch(filters: RunsFilters): string {
   const params = new URLSearchParams()
   if (filters.agent) params.set("agent", filters.agent)
   if (filters.status) params.set("status", filters.status)
@@ -270,12 +270,20 @@ export function runsQuery(filters: RunsFilters = {}) {
   for (const [k, v] of Object.entries(filters.tag ?? {}))
     params.set(`tag.${k}`, v)
   const qs = params.toString()
+  return qs ? `?${qs}` : ""
+}
+
+export async function fetchRuns(filters: RunsFilters = {}): Promise<RunsPage> {
+  return get<RunsPage>(`runs${runsSearch(filters)}`)
+}
+
+export function runsQuery(filters: RunsFilters = {}) {
   return queryOptions({
     queryKey: ["runs", filters],
     // The list is live enough at 5 s stale; a manual refresh covers
     // the rest (plan §4.5). No other polling.
     staleTime: 5_000,
-    queryFn: () => get<RunsPage>(`runs${qs ? `?${qs}` : ""}`),
+    queryFn: () => fetchRuns(filters),
   })
 }
 

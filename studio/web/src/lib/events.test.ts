@@ -3,16 +3,14 @@
 // prefix property — folding events[0,k) never throws and agrees with
 // the full fold on everything it has seen.
 import { readFileSync } from "node:fs"
-import { fileURLToPath } from "node:url"
+import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
 import type { EventsPage, ResultDoc, WireEvent } from "./api"
 import { callState, crossCheck, fold, truncation } from "./events"
 
 function golden(name: string): WireEvent[] {
-  const path = fileURLToPath(
-    new URL(`../../../testdata/api/${name}`, import.meta.url)
-  )
+  const path = resolve(process.cwd(), `../testdata/api/${name}`)
   const page = JSON.parse(readFileSync(path, "utf8")) as EventsPage
   return page.events
 }

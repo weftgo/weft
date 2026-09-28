@@ -1,1 +1,0 @@
-import{t as e}from"./index-Dsn9jPPV.js";var t=e(),n=()=>(0,t.jsx)(`div`,{className:`text-muted-foreground`,children:`run page lands next`});export{n as component};

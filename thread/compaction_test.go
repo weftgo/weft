@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -482,5 +483,64 @@ func (m *recordingModel) Stream(ctx context.Context, req weft.ModelRequest) iter
 	return func(yield func(weft.ModelEvent, error) bool) {
 		yield(weft.ModelTextDelta{Text: m.reply}, nil)
 		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+	}
+}
+
+// A summarizer error leaves the session unchanged: no entry, the same
+// context (ADR 0020 §4: a failed compaction never loses entries — and
+// never gains one either).
+func TestCompactionSummarizerFailure(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		fail := &failingModel{}
+		agent := weft.New(fail)
+		s, _ := thread.Create(ctx, st, agent)
+		msgs(t, ctx, st, s,
+			strings.Repeat("a", 30_000),
+			strings.Repeat("b", 30_000),
+			strings.Repeat("c", 30_000),
+		)
+		s = reopenWith(t, ctx, st, s, agent)
+		beforeCtx := fmt.Sprint(s.Context())
+		beforeEntries := len(s.Entries())
+		if err := s.Compact(ctx); err == nil {
+			t.Fatal("Compact with a failing summarizer: no error")
+		}
+		if got := fmt.Sprint(s.Context()); got != beforeCtx {
+			t.Error("the context changed on a failed compaction")
+		}
+		if n := len(s.Entries()); n != beforeEntries {
+			t.Errorf("Entries = %d after a failed compaction, want %d", n, beforeEntries)
+		}
+	})
+}
+
+type failingModel struct{}
+
+func (m *failingModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	return func(yield func(weft.ModelEvent, error) bool) {
+		yield(nil, errors.New("summarizer down"))
+	}
+}
+
+// SummarizeLeft on a branch with nothing after the branch point is
+// loud: there is nothing to summarize.
+func TestBranchSummarizeLeftNoDivergence(t *testing.T) {
+	ctx := context.Background()
+	rec := &summaryRecorder{reply: "x"}
+	agent := weft.New(rec)
+	st := thread.Memory()
+	s, _ := thread.Create(ctx, st, agent)
+	if err := st.Append(ctx, s.ID(), thread.MessageEntry{
+		ID: "e_only", Created: timeUTC(), Message: weft.User("only line"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s = reopenWith(t, ctx, st, s, agent)
+	if err := s.Branch(ctx, "e_only", thread.SummarizeLeft()); err == nil {
+		t.Error("SummarizeLeft to the leaf: no error")
+	}
+	if n := len(s.Entries()); n != 1 {
+		t.Errorf("Entries = %d after the rejected SummarizeLeft, want 1", n)
 	}
 }

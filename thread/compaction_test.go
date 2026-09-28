@@ -137,6 +137,21 @@ func TestCompactionIterative(t *testing.T) {
 		if err := s.Compact(ctx); err != nil {
 			t.Fatal(err)
 		}
+		// Compacting again with nothing new past the kept boundary is
+		// the nothing-to-compact refusal, not a re-summary of the whole
+		// history: the iterative chain is fed only what it lacks.
+		if err := s.Compact(ctx); err == nil || !strings.Contains(err.Error(), "nothing to compact") {
+			t.Fatalf("Compact with nothing new: err = %v, want the nothing-to-compact refusal", err)
+		}
+		// The session grows past the window again, and the second
+		// compaction folds the first summary in with only the new
+		// messages — the kept boundary onward.
+		msgs(t, ctx, st, s,
+			strings.Repeat("e", 30_000),
+			strings.Repeat("f", 30_000),
+			strings.Repeat("g", 30_000),
+		)
+		s = reopenWith(t, ctx, st, s, weft.New(rec))
 		if err := s.Compact(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -159,12 +174,17 @@ func TestCompactionIterative(t *testing.T) {
 		if len(second) == 0 || second[0].Text() != "<weft-summary>\nsummary\n</weft-summary>" {
 			t.Errorf("second summary input = %+v, want the previous summary first", second[0])
 		}
+		for _, m := range second[1:] {
+			if txt := m.Text(); strings.Contains(txt, strings.Repeat("a", 100)) || strings.Contains(txt, strings.Repeat("b", 100)) {
+				t.Error("the first compaction's summarized range was re-serialized into the second call")
+			}
+		}
 
 		// The context after two compactions shows only the latest
 		// summary plus its kept tail.
 		got := s.Context()
-		if len(got) != 3 || !strings.HasPrefix(got[2].Text(), "d") {
-			t.Errorf("Context = %d messages; want summary + two kept ending in d", len(got))
+		if len(got) != 3 || !strings.HasPrefix(got[2].Text(), "g") {
+			t.Errorf("Context = %d messages; want summary + two kept ending in g", len(got))
 		}
 	})
 }
@@ -542,5 +562,251 @@ func TestBranchSummarizeLeftNoDivergence(t *testing.T) {
 	}
 	if n := len(s.Entries()); n != 1 {
 		t.Errorf("Entries = %d after the rejected SummarizeLeft, want 1", n)
+	}
+}
+
+// A trim record on top of a summary compaction keeps that summary's
+// boundary: the trim layers its stubs over the kept range, and the
+// context stays summary + kept (stubbed) — never the whole raw
+// history back. The bug: writeTrim's FirstKept named the root, and a
+// trim governing the walk resurfaced everything the summary replaced.
+func TestTrimAfterCompactionKeepsTheBoundary(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		rec := &summaryRecorder{reply: "the summary"}
+		agent := weft.New(rec)
+		s, _ := thread.Create(ctx, st, agent, thread.ClearOldToolResults(0))
+		callPair := []weft.Message{
+			{Role: weft.RoleAssistant, Content: []weft.Part{
+				weft.ToolCallPart{ID: "c1", Name: "read", Args: json.RawMessage(`{}`)},
+			}},
+			{Role: weft.RoleTool, Content: []weft.Part{
+				weft.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 500)},
+			}},
+		}
+		entries := []thread.Entry{
+			thread.MessageEntry{ID: "e_old", Created: timeUTC(), Message: weft.User(strings.Repeat("a", 120_000))},
+			thread.MessageEntry{ID: "e_mid", ParentID: "e_old", Created: timeUTC(), Message: weft.User(strings.Repeat("m", 5_000))},
+		}
+		parent := "e_mid"
+		for i, m := range callPair {
+			id := fmt.Sprintf("e_c%d", i)
+			entries = append(entries, thread.MessageEntry{ID: id, ParentID: parent, Created: timeUTC(), Message: m})
+			parent = id
+		}
+		entries = append(entries, thread.MessageEntry{ID: "e_kept", ParentID: parent, Created: timeUTC(), Message: weft.User("kept tail")})
+		if err := st.Append(ctx, s.ID(), entries...); err != nil {
+			t.Fatal(err)
+		}
+		if again, err := thread.Open(ctx, st, s.ID(), agent, thread.ClearOldToolResults(0)); err != nil {
+			t.Fatal(err)
+		} else {
+			s = again
+		}
+		if err := s.Compact(ctx); err != nil {
+			t.Fatalf("Compact: %v", err)
+		}
+		// A trim lands next — keeping the boundary the compaction left,
+		// the value writeTrim resolves on the automatic path.
+		if err := s.ApplyCompaction(ctx, &thread.Compaction{
+			FirstKept: "e_mid", Reason: thread.ReasonTrim, TokensBefore: 1,
+		}); err != nil {
+			t.Fatalf("ApplyCompaction trim: %v", err)
+		}
+		if again, err := thread.Open(ctx, st, s.ID(), agent, thread.ClearOldToolResults(0)); err != nil {
+			t.Fatal(err)
+		} else {
+			s = again
+		}
+		got := s.Context()
+		// Summary marker, the kept mid message, the kept call pair with
+		// its result stubbed (keepLast 0), then the kept tail — never
+		// the 120k message the summary replaced.
+		if len(got) != 5 {
+			t.Fatalf("Context after the trim = %d messages, want 5 (summary, mid, call, stubbed result, kept tail)", len(got))
+		}
+		if !strings.HasPrefix(got[0].Text(), "<weft-summary>") || !strings.Contains(got[0].Text(), "the summary") {
+			t.Errorf("first message = %q, want the summary marker", got[0].Text()[:min(60, len(got[0].Text()))])
+		}
+		if !strings.HasPrefix(got[1].Text(), strings.Repeat("m", 10)) {
+			t.Errorf("kept mid message = %q", got[1].Text()[:min(30, len(got[1].Text()))])
+		}
+		if got[2].Role != weft.RoleAssistant || len(got[2].Content) == 0 {
+			t.Errorf("call message = %+v, want the kept assistant call", got[2])
+		}
+		res, ok := got[3].Content[0].(weft.ToolResultPart)
+		if !ok || res.Content != "[cleared tool result read c1]" {
+			t.Errorf("result part = %+v, want the cleared stub", got[3].Content[0])
+		}
+		if got[4].Text() != "kept tail" {
+			t.Errorf("kept message = %q, want the kept tail", got[4].Text())
+		}
+		for _, m := range got {
+			if strings.Contains(m.Text(), strings.Repeat("a", 100)) {
+				t.Error("the summarized history resurfaced through the trim")
+			}
+		}
+	})
+}
+
+// Iterative compaction summarizes from the previous kept boundary
+// (ADR 0020 §1): the second summarizer call carries the previous
+// summary first and only the messages past that boundary — never the
+// whole history again, an input that would itself outgrow the window.
+func TestIterativeRangeStartsAtKeptBoundary(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		rec := &summaryRecorder{reply: "summary"}
+		agent := weft.New(rec)
+		s, _ := thread.Create(ctx, st, agent)
+		msgs(t, ctx, st, s,
+			strings.Repeat("a", 30_000),
+			strings.Repeat("b", 30_000),
+			strings.Repeat("c", 30_000),
+			strings.Repeat("d", 30_000),
+		)
+		s = reopenWith(t, ctx, st, s, agent)
+		if err := s.Compact(ctx); err != nil {
+			t.Fatal(err)
+		}
+		msgs(t, ctx, st, s,
+			strings.Repeat("e", 30_000),
+			strings.Repeat("f", 30_000),
+			strings.Repeat("g", 30_000),
+			strings.Repeat("h", 30_000),
+		)
+		s = reopenWith(t, ctx, st, s, agent)
+		if err := s.Compact(ctx); err != nil {
+			t.Fatal(err)
+		}
+		reqs := rec.saw()
+		if len(reqs) != 2 {
+			t.Fatalf("summarizer calls = %d, want 2", len(reqs))
+		}
+		second := reqs[1].Messages
+		if len(second) == 0 || !strings.HasPrefix(second[0].Text(), "<weft-summary>") {
+			t.Fatalf("second call's first message is not the previous summary: %+v", second[0])
+		}
+		for _, m := range second {
+			if txt := m.Text(); strings.Contains(txt, strings.Repeat("a", 100)) || strings.Contains(txt, strings.Repeat("b", 100)) {
+				t.Error("the first compaction's summarized range was re-serialized into the second call")
+			}
+		}
+		sawE, sawD := false, false
+		for _, m := range second {
+			if strings.Contains(m.Text(), strings.Repeat("e", 100)) {
+				sawE = true
+			}
+			if strings.Contains(m.Text(), strings.Repeat("d", 100)) {
+				sawD = true
+			}
+		}
+		if !sawD || !sawE {
+			t.Errorf("second range = kept-boundary onward: saw d=%v e=%v, want both", sawD, sawE)
+		}
+		// And the walk after two compactions shows the latest summary
+		// plus its kept tail.
+		if got := s.Context(); len(got) != 3 {
+			t.Errorf("Context = %d messages, want 3 (summary + two kept)", len(got))
+		}
+	})
+}
+
+// SummarizeLeft across branches: the branch being left is summarized
+// back to the COMMON ANCESTOR of the leaf and the target (ADR 0020
+// §6) — a target on another branch works, and FromEntry names the
+// ancestor, not the target.
+func TestSummarizeLeftAcrossBranches(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		rec := &summaryRecorder{reply: "what B did"}
+		agent := weft.New(rec)
+		s, _ := thread.Create(ctx, st, agent)
+		if err := st.Append(ctx, s.ID(),
+			thread.MessageEntry{ID: "e_r", Created: timeUTC(), Message: weft.User("root")},
+			thread.MessageEntry{ID: "e_a1", ParentID: "e_r", Created: timeUTC(), Message: weft.Assistant("line A")},
+			thread.MessageEntry{ID: "e_a2", ParentID: "e_a1", Created: timeUTC(), Message: weft.Assistant("line A end")},
+		); err != nil {
+			t.Fatal(err)
+		}
+		s = reopenWith(t, ctx, st, s, agent)
+		if err := s.Branch(ctx, "e_r"); err != nil { // grow branch B off the root
+			t.Fatal(err)
+		}
+		if err := st.Append(ctx, s.ID(), thread.MessageEntry{
+			ID: "e_b1", ParentID: "e_r", Created: timeUTC(), Message: weft.Assistant("line B"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		s = reopenWith(t, ctx, st, s, agent)
+		if err := s.Branch(ctx, "e_a2", thread.SummarizeLeft()); err != nil {
+			t.Fatalf("cross-branch SummarizeLeft: %v", err)
+		}
+		// The summarizer saw B's line, not A's.
+		if reqs := rec.saw(); len(reqs) != 1 || !strings.Contains(fmt.Sprint(reqs[0].Messages), "line B") {
+			t.Fatalf("summarizer input = %+v, want line B only", reqs)
+		}
+		var bs *thread.BranchSummaryEntry
+		for _, e := range s.Entries() {
+			if b, ok := e.(thread.BranchSummaryEntry); ok {
+				bs = &b
+			}
+		}
+		if bs == nil || bs.FromEntry != "e_r" {
+			t.Errorf("branch_summary FromEntry = %+v, want e_r (the common ancestor)", bs)
+		}
+		// The new line's context: root, A's messages, the B summary.
+		got := contextTexts(s)
+		want := []string{"root", "line A", "line A end", "<weft-summary>\nwhat B did\n</weft-summary>"}
+		if !equalStrings(got, want) {
+			t.Errorf("Context = %q, want %q", got, want)
+		}
+	})
+}
+
+// ApplyCompaction's validation: the kept boundary must sit on the
+// leaf's path, at or after the previous compaction's, and a
+// summary-less compaction must be a trim.
+func TestApplyCompactionValidatesTheBoundary(t *testing.T) {
+	ctx := context.Background()
+	rec := &summaryRecorder{reply: "s"}
+	agent := weft.New(rec)
+	st := thread.Memory()
+	s, _ := thread.Create(ctx, st, agent)
+	if err := st.Append(ctx, s.ID(),
+		thread.MessageEntry{ID: "e_1", Created: timeUTC(), Message: weft.User(strings.Repeat("a", 60_000))},
+		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: timeUTC(), Message: weft.User(strings.Repeat("b", 30_000))},
+		thread.MessageEntry{ID: "e_3", ParentID: "e_2", Created: timeUTC(), Message: weft.User(strings.Repeat("c", 30_000))},
+	); err != nil {
+		t.Fatal(err)
+	}
+	s = reopenWith(t, ctx, st, s, agent)
+	if err := s.Compact(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// FirstKept before the previous compaction's boundary.
+	if err := s.ApplyCompaction(ctx, &thread.Compaction{Summary: "x", FirstKept: "e_1"}); err == nil {
+		t.Error("ApplyCompaction into the summarized range: no error")
+	}
+	// FirstKept held but off the leaf's path (an abandoned branch).
+	if err := s.Branch(ctx, "e_1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Append(ctx, s.ID(), thread.MessageEntry{
+		ID: "e_side", ParentID: "e_1", Created: timeUTC(), Message: weft.User("side"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s = reopenWith(t, ctx, st, s, agent)
+	// (back on the main line, where e_side is held but off-path)
+	if err := s.Branch(ctx, "e_3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ApplyCompaction(ctx, &thread.Compaction{Summary: "x", FirstKept: "e_side"}); err == nil {
+		t.Error("ApplyCompaction with an off-path FirstKept: no error")
+	}
+	// A summary-less compaction that is not a trim.
+	if err := s.ApplyCompaction(ctx, &thread.Compaction{FirstKept: "e_3", Reason: thread.ReasonManual}); err == nil {
+		t.Error("ApplyCompaction without a summary or a trim reason: no error")
 	}
 }

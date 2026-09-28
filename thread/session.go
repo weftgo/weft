@@ -343,75 +343,122 @@ func (s *Session) rawContext() []weft.Message {
 // already held the summary. A FirstKept the path does not reach (a
 // hand-made file) makes the compaction unusable, and the walk falls
 // back to the whole path rather than a summary of nothing.
+//
+// A trim record (no summary of its own) never governs the boundary:
+// the latest summary compaction at or below it keeps supplying the
+// marker and the first-kept id, and the trim only layers its stubs
+// over that kept range. A trim that reset the boundary to the root
+// would resurface, raw, everything the summary had replaced — a
+// context larger than the one the trimmer measured.
+// pinnedKept is one pinned entry the walk re-includes: its path
+// index (for the trim's stub set) and its stripped message.
+type pinnedKept struct {
+	idx int
+	msg weft.Message
+}
+
 func (s *Session) rawContextLocked() []weft.Message {
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
 		return nil // the leaf is always an entry the session holds
 	}
 	var msgs []weft.Message
-	start, compactionAt := 0, -1
+	var pinnedMsgs []pinnedKept
+	start, compactionAt, trimAt := 0, -1, -1
 	for i := len(path) - 1; i >= 0; i-- {
-		if c, ok := path[i].(CompactionEntry); ok {
-			if c.Summary != "" { // a trim records no summary and no marker
-				msgs = append(msgs, summaryMessage(c.Summary))
+		c, ok := path[i].(CompactionEntry)
+		if !ok {
+			continue
+		}
+		if c.Summary == "" && c.Reason == ReasonTrim {
+			if trimAt < 0 {
+				trimAt = i // the latest trim: where its stubs reach up to
 			}
-			compactionAt = i
-			for j := 0; j <= i; j++ {
-				if idOf(path[j]) == c.FirstKept {
-					start = j
-					break
+			continue // a trim does not govern; the summary below it does
+		}
+		msgs = append(msgs, summaryMessage(c.Summary))
+		compactionAt = i
+		for j := 0; j <= i; j++ {
+			if idOf(path[j]) == c.FirstKept {
+				start = j
+				break
+			}
+		}
+		// The pinned ids the compaction kept through: message-kind
+		// entries below the boundary re-enter the context after the
+		// summary, in path order — a pin survives every compaction
+		// without holding the cut back (ADR 0020 §4). Collected here,
+		// appended once the trim's stub set is known.
+		if len(c.Pinned) > 0 {
+			pinnedSet := make(map[string]bool, len(c.Pinned))
+			for _, id := range c.Pinned {
+				pinnedSet[id] = true
+			}
+			for j := 0; j < start; j++ {
+				if e, ok := path[j].(MessageEntry); ok && pinnedSet[idOf(e)] {
+					pinnedMsgs = append(pinnedMsgs, pinnedKept{idx: j, msg: stripSignedReasoning(e.Message)})
 				}
 			}
-			break
 		}
+		break
 	}
-	// A trim record (Reason "trim") re-derives the built-in trimmer's
-	// view on read: every tool result in the kept range recorded before
-	// the trim reads as the golden stub, except the newest keepLast of
-	// them (the same rule the trimmer applied when it decided the trim
-	// was enough). A custom trimmer's record is not re-derived — its
-	// view was its own; the raw messages read as stored.
+	// A trim record re-derives the built-in trimmer's view on read:
+	// every tool result in the kept range recorded before the trim
+	// reads as the golden stub, except the newest keepLast of them
+	// (the same rule the trimmer applied when it decided the trim was
+	// enough). A custom trimmer's record is not re-derived — its view
+	// was its own; the raw messages read as stored.
 	var stubParts map[struct{ msg, part int }]bool
-	if compactionAt >= 0 {
-		if c, ok := path[compactionAt].(CompactionEntry); ok && c.Reason == ReasonTrim {
-			if t, ok := s.cfg.compaction.trimmer.(clearResultsTrimmer); ok {
-				// The mirror of the trimmer's rule, per result part
-				// (a step's results batch on one message): the newest
-				// keepLast parts in the pre-trim range survive, every
-				// older one's message is stubbed.
-				type at = struct{ msg, part int }
-				var parts []at // oldest first
-				for i := start; i < compactionAt; i++ {
-					if m, ok := path[i].(MessageEntry); ok {
-						for j := range m.Message.Content {
-							if _, isResult := m.Message.Content[j].(weft.ToolResultPart); isResult {
-								parts = append(parts, at{i, j})
-							}
+	if trimAt >= 0 && trimAt > start {
+		if t, ok := s.cfg.compaction.trimmer.(clearResultsTrimmer); ok {
+			// The mirror of the trimmer's rule, per result part (a
+			// step's results batch on one message): the newest keepLast
+			// parts in the pre-trim range survive, every older one's
+			// message is stubbed.
+			type at = struct{ msg, part int }
+			var parts []at // oldest first
+			for i := start; i < trimAt; i++ {
+				if m, ok := path[i].(MessageEntry); ok {
+					for j := range m.Message.Content {
+						if _, isResult := m.Message.Content[j].(weft.ToolResultPart); isResult {
+							parts = append(parts, at{i, j})
 						}
 					}
 				}
-				stubParts = map[at]bool{}
-				for _, p := range parts {
-					stubParts[p] = true
-				}
-				for n := 0; n < min(t.keepLast, len(parts)); n++ {
-					delete(stubParts, parts[len(parts)-1-n]) // the newest survive
-				}
+			}
+			stubParts = map[at]bool{}
+			for _, p := range parts {
+				stubParts[p] = true
+			}
+			for n := 0; n < min(t.keepLast, len(parts)); n++ {
+				delete(stubParts, parts[len(parts)-1-n]) // the newest survive
 			}
 		}
+	}
+	for _, pk := range pinnedMsgs {
+		msgs = append(msgs, stubMessageParts(pk.msg, pk.idx, stubParts))
+	}
+	// Below the governing compaction entry the recorded entries are
+	// pre-compaction (signed reasoning stripped, trim stubs applied).
+	// A trim's stubs rewrite prefixes below the trim itself, so when
+	// one exists the strip boundary is the trim — the lower of the two
+	// positions, since the trim always sits above the governor.
+	stripBelow := compactionAt
+	if trimAt >= 0 {
+		stripBelow = trimAt
 	}
 	for i := start; i < len(path); i++ {
 		switch e := path[i].(type) {
 		case MessageEntry:
 			m := e.Message
-			if compactionAt >= 0 && i < compactionAt {
+			if stripBelow >= 0 && i < stripBelow {
 				m = stripSignedReasoning(m)
 				m = stubMessageParts(m, i, stubParts)
 			}
 			msgs = append(msgs, m)
 		case CustomMessageEntry:
 			m := e.Message
-			if compactionAt >= 0 && i < compactionAt {
+			if stripBelow >= 0 && i < stripBelow {
 				m = stripSignedReasoning(m)
 			}
 			msgs = append(msgs, m)

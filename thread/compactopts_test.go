@@ -562,6 +562,16 @@ func TestPinSurvivesCompactions(t *testing.T) {
 			if err := s.Compact(ctx); err != nil {
 				t.Fatal(err)
 			}
+			// Grow past the window again — the next compaction has new
+			// messages past the kept boundary, and the pin must survive
+			// that one too.
+			grow := fmt.Sprintf("%s%d", strings.Repeat("g", 30_000), i)
+			if err := st.Append(ctx, s.ID(), thread.MessageEntry{
+				ID: fmt.Sprintf("e_g%d", i), ParentID: s.Leaf(), Created: time.Now().UTC(),
+				Message: weft.Assistant(grow),
+			}); err != nil {
+				t.Fatal(err)
+			}
 			s = reopenWith(t, ctx, st, s, agent, thread.KeepRecent(100))
 		}
 		found := false

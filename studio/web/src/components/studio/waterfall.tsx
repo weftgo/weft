@@ -76,11 +76,17 @@ export function Waterfall({
   foldDepth = 5,
   className = "",
 }: WaterfallProps) {
-  const [folded, setFolded] = useState<Set<string>>(() => {
-    const s = new Set<string>()
-    for (const sp of spans) if (sp.depth >= foldDepth) s.add(sp.parent ?? "")
-    return s
-  })
+  const [folded, setFolded] = useState<Set<string>>(() => new Set())
+  // Deep subtrees start folded. The events usually arrive after mount,
+  // so the fold is applied once, the first time there is a tree.
+  const autoFolded = useRef(false)
+  useEffect(() => {
+    if (autoFolded.current || spans.length <= 1) return
+    autoFolded.current = true
+    const deep = new Set<string>()
+    for (const sp of spans) if (sp.depth >= foldDepth) deep.add(sp.parent ?? "")
+    if (deep.size > 0) setFolded((prev) => new Set([...prev, ...deep]))
+  }, [spans, foldDepth])
   const children = useMemo(() => {
     const m = new Map<string, number>()
     for (const sp of spans)

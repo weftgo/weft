@@ -157,27 +157,34 @@ export function useRunEvents(id: string, status: string): RunStream {
     }
   }, [id])
 
-  // When the run's status leaves "running", drain once more: the
+  // When the run's status leaves "running", drain what is left: the
   // closing events (run_finish) can land between the last tail probe
-  // and the status flip.
+  // and the status flip, and a burst at the end can span more than one
+  // page — so follow next_after until the stream says there is no more.
   useEffect(() => {
     if (status === "running") return
     const drain: { cancelled: boolean } = { cancelled: false }
-    fetchPage(id, walk.current.pos + 1)
-      .then((page) => {
-        if (drain.cancelled) return
-        const s = walk.current
-        if (!apply(s, page)) return
-        setStream((prev) => ({
-          events: s.events,
-          folded: s.feed.result(),
-          done: s.done,
-          lastPos: s.pos,
-          loading: prev.loading,
-          error: prev.error,
-        }))
-      })
-      .catch(() => {})
+    void (async () => {
+      try {
+        for (;;) {
+          const page = await fetchPage(id, walk.current.pos + 1)
+          if (drain.cancelled) return
+          const s = walk.current
+          if (apply(s, page))
+            setStream((prev) => ({
+              events: s.events,
+              folded: s.feed.result(),
+              done: s.done,
+              lastPos: s.pos,
+              loading: prev.loading,
+              error: prev.error,
+            }))
+          if (page.next_after == null || page.events.length === 0) return
+        }
+      } catch {
+        // A failed drain keeps the last good view.
+      }
+    })()
     return () => {
       drain.cancelled = true
     }

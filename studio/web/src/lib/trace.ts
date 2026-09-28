@@ -62,6 +62,7 @@ function callSpans(
   depth: number,
   runStatus: string,
   runId: string,
+  isChild: boolean,
   out: Span[]
 ) {
   const open = call.finishPos === undefined
@@ -84,7 +85,7 @@ function callSpans(
   const id = `${parent}/call:${call.callId}`
   out.push({
     id,
-    key: `c:${call.callId}`,
+    key: isChild ? `c:${runId}:${call.callId}` : `c:${call.callId}`,
     parent,
     depth,
     kind: "tool",
@@ -141,7 +142,7 @@ function stepSpans(
     runId,
   })
   for (const call of step.toolCalls)
-    callSpans(call, id, depth + 1, runStatus, runId, out)
+    callSpans(call, id, depth + 1, runStatus, runId, isChild, out)
 }
 
 function runSpans(

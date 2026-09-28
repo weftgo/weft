@@ -125,7 +125,10 @@ function RunsPage() {
   // failed rows ride along with everything else (A1). A ?before= in
   // the URL is the first page's cursor.
   const page = useInfiniteQuery({
-    queryKey: ["runs", filters],
+    // Its own key: runsQuery (the ⌘K palette) caches a plain RunsPage
+    // under ["runs", filters]; sharing it would hand this observer a
+    // non-infinite entry.
+    queryKey: ["runs", "infinite", filters],
     staleTime: 5_000,
     initialPageParam: filters.before,
     queryFn: ({ pageParam }) => fetchRuns({ ...filters, before: pageParam }),

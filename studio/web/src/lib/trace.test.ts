@@ -72,6 +72,46 @@ describe("spansFromFold", () => {
     ])
   })
 
+  it("keys a subagent's call apart from a parent call with the same id", () => {
+    // Fake and test providers reuse ids like call_1 in every run; the
+    // ?sel= key must still name exactly one span.
+    const events = golden("events-sub.golden.json")
+    const child = "r_sub/0/call_1"
+    const nest = (seq: number, event: WireEvent): WireEvent =>
+      ({
+        type: "nested",
+        run_id: "r_sub",
+        seq,
+        call_id: "call_1",
+        event,
+      }) as unknown as WireEvent
+    const inner = [
+      nest(4, {
+        type: "tool_start",
+        run_id: child,
+        seq: 1,
+        call_id: "call_1",
+        name: "lookup_order",
+        args: { order_id: "42" },
+      } as unknown as WireEvent),
+      nest(4, {
+        type: "tool_finish",
+        run_id: child,
+        seq: 2,
+        call_id: "call_1",
+        name: "lookup_order",
+        content: "shipped",
+        is_error: false,
+      } as unknown as WireEvent),
+    ]
+    const spliced = [...events.slice(0, 5), ...inner, ...events.slice(5)]
+    const spans = spansFromFold(fold(spliced), spliced.length, "succeeded")
+    const keys = spans.map((s) => s.key)
+    expect(keys).toContain("c:call_1")
+    expect(keys).toContain(`c:${child}:call_1`)
+    expect(new Set(keys).size).toBe(keys.length)
+  })
+
   it("draws an open call as running while live and never after", () => {
     const events: WireEvent[] = [
       { type: "run_start", id: "r", model: { provider: "p", name: "m" } },

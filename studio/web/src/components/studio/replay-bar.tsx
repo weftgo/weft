@@ -111,6 +111,7 @@ export function ReplayBar({
         case " ":
           e.preventDefault()
           if (at >= total) onSeek(0)
+          else if (playing) onSeek(at) // a pause is a position: write t
           setPlaying((p) => !p)
           break
         case "]":
@@ -133,7 +134,7 @@ export function ReplayBar({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [at, total, events, onSeek])
+  }, [at, total, events, onSeek, playing])
 
   const seekFromPointer = (e: React.MouseEvent) => {
     const bar = gutter.current
@@ -180,7 +181,9 @@ export function ReplayBar({
           aria-label={playing ? "pause" : "play"}
           title={playing ? "pause (space)" : "play (space)"}
           onClick={() => {
-            if (!playing && at >= total) onSeek(0) // replay from the top
+            if (!playing && at >= total)
+              onSeek(0) // replay from the top
+            else if (playing) onSeek(at) // a pause is a position: write t
             setPlaying((p) => !p)
           }}
         >

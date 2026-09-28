@@ -3,9 +3,11 @@ package jsonl_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -259,6 +261,112 @@ func TestListBoundedSkipsOversized(t *testing.T) {
 	}
 	if p.Total != 1 || len(p.Sessions) != 1 || p.Sessions[0].ID != "s_listable" {
 		t.Errorf("List = %+v, want only s_listable", p)
+	}
+}
+
+// Two goroutines on one Storage racing to a session's first write share
+// the held file: the instance's own concurrency must never read as
+// ErrLocked — that error belongs to the second writer in another
+// process or another Storage instance (ADR 0011 §5's one-writer rule is
+// about writers, not goroutines of one writer).
+func TestConcurrentFirstTouchOneSession(t *testing.T) {
+	dir := t.TempDir()
+	st, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	const workers = 32
+	const rounds = 25
+	for r := 0; r < rounds; r++ {
+		id := fmt.Sprintf("s_touch%02d", r)
+		if err := st.Create(ctx, thread.Header{ID: id, Created: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		errs := make(chan error, workers)
+		for w := 0; w < workers; w++ {
+			wg.Add(1)
+			go func(w int) {
+				defer wg.Done()
+				errs <- st.Append(ctx, id, thread.MessageEntry{
+					ID:      fmt.Sprintf("e_touch%02d_%02d", r, w),
+					Message: weft.User("first touch"),
+				})
+			}(w)
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Errorf("round %d: %v", r, err)
+			}
+		}
+		_, loaded, _, err := st.Load(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(loaded) != workers {
+			t.Fatalf("round %d: %d entries, want %d", r, len(loaded), workers)
+		}
+	}
+}
+
+// Two Opens racing to create the same missing directory both succeed:
+// the loser of os.Mkdir sees EEXIST for a directory that is exactly
+// what it wanted.
+func TestOpenConcurrentCreate(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "sessions")
+	const n = 16
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := jsonl.Open(dir)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("open: %v", err)
+		}
+	}
+	if di, err := os.Stat(dir); err != nil || !di.IsDir() {
+		t.Fatalf("stat %s: %v, want the directory", dir, err)
+	}
+}
+
+// Inject is a test hook, not an escape hatch: an id that is not one
+// path component is rejected like every other entry point, so the hook
+// cannot reach a file outside the session directory.
+func TestInjectValidatesID(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "sessions")
+	// A decoy one level up: without validation, ../escape names it.
+	decoy := filepath.Join(base, "escape.jsonl")
+	if err := os.WriteFile(decoy, []byte("do not touch\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := st.Create(ctx, thread.Header{ID: "s_inject", Created: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	inj := st.(threadtest.RawInjector)
+	for _, id := range []string{"../escape", "a/b", ""} {
+		if err := inj.Inject(ctx, id, []byte("x")); err == nil {
+			t.Errorf("Inject(%q) succeeded, want rejected", id)
+		}
+	}
+	if raw, err := os.ReadFile(decoy); err != nil || string(raw) != "do not touch\n" {
+		t.Errorf("the decoy file changed: %q, %v", raw, err)
 	}
 }
 

@@ -56,9 +56,20 @@ func Open(dir string, opts ...thread.OpenOption) (thread.Storage, error) {
 	case errors.Is(err, fs.ErrNotExist):
 		// The directory we create is ours to set exactly 0700, whatever
 		// the umask would leave (ADR 0011 §5); a directory the caller
-		// already had keeps its own permissions.
-		if err := os.Mkdir(abs, 0o700); err != nil {
-			return nil, err
+		// already had keeps its own permissions. Two Opens racing to
+		// create it: the mkdir loser looks again, and a directory is
+		// exactly what it wanted.
+		mkdirErr := os.Mkdir(abs, 0o700)
+		if errors.Is(mkdirErr, fs.ErrExist) {
+			fi, err := os.Stat(abs)
+			if err != nil {
+				return nil, err
+			}
+			if !fi.IsDir() {
+				return nil, fmt.Errorf("jsonl: %s is a file, not a session directory", abs)
+			}
+		} else if mkdirErr != nil {
+			return nil, mkdirErr
 		}
 		if err := os.Chmod(abs, 0o700); err != nil {
 			return nil, err
@@ -396,17 +407,20 @@ func (b *backend) Inject(ctx context.Context, id string, data []byte) error {
 // sessionFor returns the held session state for id, opening and
 // locking the file on first touch. A missing session is ErrNotFound;
 // a session held by another writer — another process, or another
-// Storage instance — is ErrLocked.
+// Storage instance — is ErrLocked. The open, the lock and the store
+// happen under the instance lock: flock never blocks, so the hold is
+// two syscalls, and two goroutines of this instance racing to the same
+// session share one held file instead of reading each other as the
+// foreign writer the second flock would report.
 func (b *backend) sessionFor(id string) (*session, error) {
+	if !thread.ValidID(id) {
+		return nil, fmtNotFound(id)
+	}
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	if s, ok := b.sessions[id]; ok {
-		b.mu.Unlock()
 		return s, nil
 	}
-	b.mu.Unlock()
-	// Open and lock outside the instance lock, then re-check: two
-	// goroutines racing to the same session must end up sharing one
-	// held file, not reporting each other as locked.
 	f, err := os.OpenFile(b.path(id), os.O_WRONLY|os.O_APPEND, 0)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmtNotFound(id)
@@ -419,25 +433,17 @@ func (b *backend) sessionFor(id string) (*session, error) {
 		return nil, err
 	}
 	s := &session{f: f}
-	b.mu.Lock()
-	if existing, ok := b.sessions[id]; ok {
-		// Lost the race: another goroutine of ours holds it — join
-		// theirs, release ours.
-		b.mu.Unlock()
-		_ = unlockFile(s.f)
-		_ = s.f.Close()
-		return existing, nil
-	}
 	b.sessions[id] = s
-	b.mu.Unlock()
 	return s, nil
 }
 
 // lockOnly takes a session's lock without keeping state — Delete's
-// path for a session this instance does not hold. A missing session is
-// ErrNotFound; a held one, ErrLocked. Returns nil for a session whose
-// file exists but needs no cleanup (it never held a descriptor).
+// path for a session this instance does not hold, under the instance
+// lock for the same reason as sessionFor. A missing session is
+// ErrNotFound; a held one, ErrLocked.
 func (b *backend) lockOnly(id string) (*session, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	f, err := os.OpenFile(b.path(id), os.O_WRONLY|os.O_APPEND, 0)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmtNotFound(id)

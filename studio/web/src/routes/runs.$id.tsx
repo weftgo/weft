@@ -15,6 +15,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { Columns2, Rows3 } from "lucide-react"
 
 import { runQuery } from "@/lib/api"
 import { crossCheck, fold } from "@/lib/events"
@@ -35,6 +36,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useRunEvents } from "@/hooks/use-run-events"
 
 type View = "trace" | "story" | "raw"
+
+/** The trace's layout: side by side, stacked, or by the width. */
+type Layout = "auto" | "split" | "stack"
+const LAYOUT_KEY = "studio.trace.layout"
+function readLayout(): Layout {
+  try {
+    const v = localStorage.getItem(LAYOUT_KEY)
+    if (v === "split" || v === "stack") return v
+  } catch {
+    // unreadable storage: auto
+  }
+  return "auto"
+}
 
 interface RunSearch {
   step?: number
@@ -70,6 +84,34 @@ function RunPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: "/runs/$id" })
   const view: View = search.view ?? "trace"
+  const [layout, setLayout] = useState<Layout>(readLayout)
+  const cycleLayout = () =>
+    setLayout((l) => {
+      const next: Layout =
+        l === "auto" ? "split" : l === "split" ? "stack" : "auto"
+      try {
+        if (next === "auto") localStorage.removeItem(LAYOUT_KEY)
+        else localStorage.setItem(LAYOUT_KEY, next)
+      } catch {
+        // unwritable storage: this page only
+      }
+      return next
+    })
+  // The split keys on the CONTENT width (a container query), not the
+  // viewport — the sidebar takes 16rem of the window — and can be
+  // forced either way.
+  const gridCols =
+    layout === "split"
+      ? "grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]"
+      : layout === "stack"
+        ? ""
+        : "@3xl/trace:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]"
+  const stickyDetail =
+    layout === "split"
+      ? "sticky top-3 max-h-[calc(100vh-8rem)]"
+      : layout === "stack"
+        ? ""
+        : "@3xl/trace:sticky @3xl/trace:top-3 @3xl/trace:max-h-[calc(100vh-8rem)]"
 
   const run = useQuery({
     ...runQuery(id),
@@ -259,14 +301,38 @@ function RunPage() {
           ) : null}
         </div>
 
-        <TabsContent value="trace" className="mt-3 space-y-3">
-          <FlowStrip
-            pills={flow}
-            runStatus={viewStatus}
-            selectedKey={selKey}
-            onSelect={select}
-          />
-          <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
+        <TabsContent value="trace" className="@container/trace mt-3 space-y-3">
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <FlowStrip
+                pills={flow}
+                runStatus={viewStatus}
+                selectedKey={selKey}
+                onSelect={select}
+              />
+            </div>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0 text-muted-foreground"
+              aria-label={`layout: ${layout}`}
+              title={
+                layout === "auto"
+                  ? "layout: side by side when the page is wide enough (click: always side by side)"
+                  : layout === "split"
+                    ? "layout: side by side (click: stacked)"
+                    : "layout: stacked (click: automatic)"
+              }
+              onClick={cycleLayout}
+            >
+              {layout === "stack" ? (
+                <Rows3 data-slot="icon" />
+              ) : (
+                <Columns2 data-slot="icon" />
+              )}
+            </Button>
+          </div>
+          <div className={`grid items-start gap-3 ${gridCols}`}>
             <Waterfall
               spans={spans}
               domain={[0, Math.max(0, stream.events.length - 1)]}
@@ -274,9 +340,9 @@ function RunPage() {
               onSeek={seek}
               onSelect={(sp) => select(sp.key)}
               selectedId={selected?.id}
-              className="max-h-[60vh] lg:max-h-[calc(100vh-8rem)]"
+              className="max-h-[60vh] @3xl/trace:max-h-[calc(100vh-8rem)]"
             />
-            <div className="lg:sticky lg:top-3 lg:max-h-[calc(100vh-8rem)]">
+            <div className={stickyDetail}>
               <SpanDetail
                 span={selected}
                 view={atPlayhead}

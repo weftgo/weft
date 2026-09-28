@@ -101,7 +101,7 @@ export function Waterfall({
   const total = hi - lo + 1
   const at = playhead ?? hi + 1
   const ticks = useMemo(() => {
-    const n = Math.min(6, Math.max(1, total - 1))
+    const n = Math.min(4, Math.max(1, total - 1))
     const out: number[] = []
     for (let i = 0; i <= n; i++)
       out.push(lo + Math.round((i * (total - 1)) / n))
@@ -157,7 +157,7 @@ export function Waterfall({
 
   return (
     <div
-      className={`waterfall grid grid-cols-[minmax(13rem,19rem)_minmax(0,1fr)_3.5rem] overflow-auto rounded-lg border bg-background font-mono text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${className}`}
+      className={`waterfall grid grid-cols-[minmax(12rem,17rem)_minmax(0,1fr)_3.5rem] overflow-auto rounded-lg border bg-background font-mono text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${className}`}
       role="tree"
       aria-label="trace"
       tabIndex={0}

@@ -37,7 +37,9 @@ span's data on the right, read as *detail* (the same step and call
 bodies as the story), *events* (only that span's slice of the
 stream) or *json* (the folded node). The trace opens on whatever
 went wrong, else the first step; `j`/`k` or the arrow keys walk it;
-`?sel=` names the selection:
+`?sel=` names the selection. The split appears when the content is
+about 768px wide (collapse the sidebar on a small screen), and the
+toggle beside the flow strip forces side by side or stacked:
 
 ![run page with the trace, light theme](screenshots/run-light.png)
 

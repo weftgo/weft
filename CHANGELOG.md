@@ -83,8 +83,11 @@ found:
   trace opens on whatever went wrong (a tool error, the step a run
   died in), else the first step. `?sel=` and `?d=` name the
   selection and mode; `e`/`s`/`r` switch trace/story/raw; `j`/`k`
-  walk spans. Open spans fade, never-completed ones hatch, the step
-  a run died in reads red. The `Waterfall` component is axis-
+  walk spans. The split keys on the content width (a container
+  query, not the viewport — the sidebar takes 16rem) and a toggle
+  forces side by side or stacked, remembered per browser. Open
+  spans fade, never-completed ones hatch, the step a run died in
+  reads red. The `Waterfall` component is axis-
   agnostic (Span[] over a numeric domain) so T2a's timed spans and
   the live view draw on it as is; the step story stays as `story`.
 - Replay: the gutter is bucketed (never wider than its box, a click

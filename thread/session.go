@@ -128,6 +128,7 @@ func Create(ctx context.Context, st Storage, agent *weft.Agent, opts ...SessionO
 	if err := st.Create(ctx, h); err != nil {
 		return nil, err
 	}
+	cfg.compaction.resolve(agent.Model()) // per-model overrides need the agent
 	return &Session{
 		st:     st,
 		agent:  agent,
@@ -158,11 +159,12 @@ func Open(ctx context.Context, st Storage, id string, agent *weft.Agent, opts ..
 	s := &Session{
 		st:     st,
 		agent:  agent,
-		cfg:    resolveSession(opts...),
 		header: h,
 		order:  entries,
 		byID:   make(map[string]int, len(entries)),
 	}
+	s.cfg = resolveSession(opts...)
+	s.cfg.compaction.resolve(agent.Model()) // per-model overrides need the agent
 	leaf := ""
 	for i, e := range entries {
 		if id := idOf(e); id != "" {
@@ -350,7 +352,9 @@ func (s *Session) rawContextLocked() []weft.Message {
 	start, compactionAt := 0, -1
 	for i := len(path) - 1; i >= 0; i-- {
 		if c, ok := path[i].(CompactionEntry); ok {
-			msgs = append(msgs, summaryMessage(c.Summary))
+			if c.Summary != "" { // a trim records no summary and no marker
+				msgs = append(msgs, summaryMessage(c.Summary))
+			}
 			compactionAt = i
 			for j := 0; j <= i; j++ {
 				if idOf(path[j]) == c.FirstKept {
@@ -361,12 +365,48 @@ func (s *Session) rawContextLocked() []weft.Message {
 			break
 		}
 	}
+	// A trim record (Reason "trim") re-derives the built-in trimmer's
+	// view on read: every tool result in the kept range recorded before
+	// the trim reads as the golden stub, except the newest keepLast of
+	// them (the same rule the trimmer applied when it decided the trim
+	// was enough). A custom trimmer's record is not re-derived — its
+	// view was its own; the raw messages read as stored.
+	var stubParts map[struct{ msg, part int }]bool
+	if compactionAt >= 0 {
+		if c, ok := path[compactionAt].(CompactionEntry); ok && c.Reason == ReasonTrim {
+			if t, ok := s.cfg.compaction.trimmer.(clearResultsTrimmer); ok {
+				// The mirror of the trimmer's rule, per result part
+				// (a step's results batch on one message): the newest
+				// keepLast parts in the pre-trim range survive, every
+				// older one's message is stubbed.
+				type at = struct{ msg, part int }
+				var parts []at // oldest first
+				for i := start; i < compactionAt; i++ {
+					if m, ok := path[i].(MessageEntry); ok {
+						for j := range m.Message.Content {
+							if _, isResult := m.Message.Content[j].(weft.ToolResultPart); isResult {
+								parts = append(parts, at{i, j})
+							}
+						}
+					}
+				}
+				stubParts = map[at]bool{}
+				for _, p := range parts {
+					stubParts[p] = true
+				}
+				for n := 0; n < min(t.keepLast, len(parts)); n++ {
+					delete(stubParts, parts[len(parts)-1-n]) // the newest survive
+				}
+			}
+		}
+	}
 	for i := start; i < len(path); i++ {
 		switch e := path[i].(type) {
 		case MessageEntry:
 			m := e.Message
 			if compactionAt >= 0 && i < compactionAt {
 				m = stripSignedReasoning(m)
+				m = stubMessageParts(m, i, stubParts)
 			}
 			msgs = append(msgs, m)
 		case CustomMessageEntry:
@@ -380,6 +420,39 @@ func (s *Session) rawContextLocked() []weft.Message {
 		}
 	}
 	return msgs
+}
+
+// stubMessageParts replaces this message's trimmed result parts — the
+// ones the walk marked — with the golden stub naming the call.
+func stubMessageParts(m weft.Message, pathIdx int, stubParts map[struct{ msg, part int }]bool) weft.Message {
+	if len(stubParts) == 0 {
+		return m
+	}
+	var any bool
+	for j := range m.Content {
+		if stubParts[struct{ msg, part int }{pathIdx, j}] {
+			any = true
+			break
+		}
+	}
+	if !any {
+		return m
+	}
+	content := make([]weft.Part, len(m.Content))
+	copy(content, m.Content)
+	for j := range content {
+		if stubParts[struct{ msg, part int }{pathIdx, j}] {
+			if r, ok := content[j].(weft.ToolResultPart); ok {
+				content[j] = weft.ToolResultPart{
+					CallID:  r.CallID,
+					Name:    r.Name,
+					Content: clearedResultStub(r.CallID, r.Name),
+				}
+			}
+		}
+	}
+	m.Content = content
+	return m
 }
 
 // stripSignedReasoning drops the message's signed reasoning parts —

@@ -110,7 +110,7 @@ func TestCutPointTable(t *testing.T) {
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
-			got := cutIndex(row.path, row.keep)
+			got := cutIndex(row.path, row.keep, nil)
 			if got != row.want {
 				where := "nothing"
 				if got >= 0 && got < len(row.path) {
@@ -154,7 +154,7 @@ func TestCutSplitWhenEveryEntryOverflows(t *testing.T) {
 	// Messages each larger than the keep window: the smallest valid
 	// tail is kept — one message — and the rest is summarized.
 	path := pathOf(user(bigText(30_000)), user(bigText(30_000)), user(bigText(30_000)))
-	if got := cutIndex(path, 20_000); got != 2 {
+	if got := cutIndex(path, 20_000, nil); got != 2 {
 		t.Errorf("cutIndex = %d, want 2 (the last message alone)", got)
 	}
 }
@@ -196,7 +196,7 @@ func TestCutProperty(t *testing.T) {
 		}
 		path := pathOf(shapes...)
 		for _, keep := range []int64{1, 5, 25, 60, 125, 250, 1000} {
-			cut := cutIndex(path, keep)
+			cut := cutIndex(path, keep, nil)
 			if cut == -1 {
 				continue
 			}

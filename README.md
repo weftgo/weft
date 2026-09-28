@@ -342,6 +342,54 @@ mux.Handle("/studio/", http.StripPrefix("/studio",
 `go run ./studio/examples/basic` records three demo runs and serves
 Studio on `127.0.0.1:7331/studio/`.
 
+## Sessions — `weft/thread`
+
+The core is stateless on purpose; `weft/thread` is the layer above it:
+a conversation as an append-only tree of entries, durable through a
+`Storage` backend, with branching, compaction and (in v0.2) approvals
+built on the same tree. A session is a file you can read with `jq` and
+back up with `cp` — one header line, then one line per entry; nothing
+is ever rewritten or deleted in place.
+
+```go
+st, _ := jsonl.Open(dir)                       // or thread.Memory() in tests
+s, _ := thread.Create(ctx, st, agent)          // the agent is the session's own
+
+turn, _ := s.Send(ctx, weft.User("Where is order 1234?"))
+res, _ := turn.Wait()                          // prompt durable before the run;
+                                               // the reply and the turn's ledger after
+for ev, err := range turn.Events() { ... }     // forwarded run events, replayable
+
+s.Branch(ctx, entryID)                         // navigate the tree; nothing lost
+fork, _ := s.Fork(ctx, entryID)                // a new session, self-contained
+again, _ := thread.Open(ctx, st, s.ID(), agent) // reopen from disk, same context
+```
+
+Compaction (ADR 0020) keeps long sessions inside the window without
+losing anything: the older part is summarized behind a fixed marker,
+the recent part stays raw, and the summarized entries stay in the
+file. `thread.ContextWindow(n)` arms the automatic trigger — the
+provider-reported input of the last step plus an estimated delta
+against `window − Reserve`, never a chars-per-token guess — and every
+layer is replaceable:
+
+```go
+s, _ = thread.Create(ctx, st, agent,
+    thread.ContextWindow(200_000),       // arms the trigger; ModelWindows per model
+    thread.SummaryModel(cheap),          // falls back to the session model
+    thread.SummaryFocus("keep file paths"),
+    thread.ClearOldToolResults(4),       // stub old tool results before summarizing
+    thread.BeforeCompact(hook),          // Proceed / Cancel / Replace
+)
+plan, _ := s.PreviewCompaction(ctx)      // the cut and the summary, no write
+s.ApplyCompaction(ctx, plan)             // or s.Compact(ctx) for both
+s.Uncompact(ctx)                         // branch back — undo is a navigation
+```
+
+`go run ./thread/examples/session` walks a session through turns, a
+label, a branch, a fork, a previewed compaction and a reopen from
+disk, offline through a scripted model.
+
 ## The manifest — `weft.json`
 
 One generated, committed, diffable description of every agent and tool

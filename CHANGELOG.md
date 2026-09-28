@@ -4,6 +4,86 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## thread 0.1.0 (unreleased)
+
+First release of `weft/thread`: sessions as an append-only entry tree
+(ADR 0011), durable through `jsonl.Open(dir)` or `thread.Memory()`,
+with compaction (ADR 0020) on top. New module; it requires root
+v0.3.7's `Agent.Model()` and imports nothing else from weft.
+
+### Added — the format and the Storage contract (ADR 0011 §2, §5–§6)
+
+- The sealed entry kinds — `message`, `turn`, `compaction`,
+  `branch_summary`, `leaf`, `label`, `info`, `custom`,
+  `custom_message` — one wire discriminator each; a `message` entry
+  embeds the ADR 0001 wire verbatim. The `{"weft":1}` header
+  envelope, the "v" minimum-reader rule (loud on the unknown and the
+  newer, never a skip), time-sortable ids with an `IDs(func() string)`
+  option, and goldens for every kind in `thread/testdata/format1/`.
+- `thread.Storage` (Create, atomic multi-entry Append, Load, List,
+  Delete) with `ErrNotFound`/`ErrExists`/`ErrLocked`/
+  `ErrNewerFormat`/`ErrCorrupt{Line}`, `LoadReport` for torn tails
+  and salvaged lines, and the optional `Flusher` and `Watcher`
+  capabilities. `thread.Memory()` and `thread/jsonl` (0700/0600,
+  id vetting, one-write appends + fsync, advisory locks, bounded
+  header-only List) both pass the shared `threadtest` conformance
+  table, crash-tested and fuzzed.
+
+### Added — sessions, turns, branching (ADR 0011 §2–§4)
+
+- `thread.Create`/`Open`/`List`/`Delete`; `Session.Context()` walks
+  the leaf's path and repairs it; `Entries`, `Leaf`, `Path`, `Label`,
+  `SetInfo` (title last-wins, metadata merged), `Custom`,
+  `CustomMessage`, and `Usage` with the summarizer costs in their own
+  bucket.
+- `Send` appends and flushes the prompt before the run starts, runs
+  the session's agent under `<session>-t<n>`, and persists the new
+  messages plus the turn entry in one atomic batch under a
+  `WithoutCancel` window — the partial transcript kept and repaired
+  on failure, a cancel recorded as canceled, pending approval calls
+  recorded for a `weft.Approve`/`Deny` resume. `Turn` is the receipt
+  (`ID`) and handle (`RunID`, replayable `Events`, `Wait`); busy
+  sends Queue (default) or Reject (`ErrBusy`); `thread.RunOptions`
+  carries extra run options and refuses `weft.Messages`, `Prompt`
+  and `RunID`.
+- `Branch` navigates (with `SummarizeLeft` writing a branch summary),
+  `Fork` copies the path into a self-contained new session, and
+  nothing is ever deleted.
+
+### Added — compaction (ADR 0020)
+
+- The trigger: the provider-reported input of the last step (recorded
+  on the turn entry) plus an estimated delta against
+  `window − Reserve`; no window known means no automatic compaction
+  and one warning. The cut keeps about `KeepRecent` tokens, lands on
+  a user or assistant boundary, never between a call and its result,
+  and splits turns larger than the window. Signed reasoning older
+  than the compaction is stripped from the context the model sees.
+- The summary: the session's own model by default (or `SummaryModel`
+  with a fallback chain), the golden skeleton prompt behind the fixed
+  `<weft-summary>` marker, iterative (each summary fed the previous),
+  output capped at 0.8 × Reserve, and the serialized range with tool
+  results capped and files as names. `PreviewCompaction`,
+  `ApplyCompaction`, `Compact`, `Uncompact`.
+- All five configuration layers: the knobs (`ContextWindow`,
+  `ModelWindows`/`ModelReserves`, `Reserve`, `KeepRecent`,
+  `TriggerFunc`, `MinTurnsBetween`, `MaxPerSession`,
+  `WithEstimator`, `Disabled`), the summary options, the swap
+  interfaces (`Summarizer`, `Compactor`, `Trimmer`, plus
+  `ClearOldToolResults` with its golden stub), the hooks
+  (`BeforeCompact` with Proceed/Cancel/Replace, `AfterCompact`,
+  `CompactFailed`, `CheckSummary`) — panics contained — and the
+  `NativeCompactor` seam with `PreferNative` and the text fallback.
+  Extras: `Pin` (an entry survives every compaction) and the cost
+  ledger.
+
+### Added — docs and examples
+
+- `thread/examples/session`: turns, a label, a branch, a fork, a
+  previewed compaction and a reopen from disk, offline and
+  deterministic. README "Sessions" section; AGENTS block 8; this
+  changelog.
+
 ## 0.3.7 (unreleased)
 
 ### Added — the model accessors thread needs (ADR 0006 amendment)

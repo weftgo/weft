@@ -177,5 +177,10 @@ func (s *Session) Fork(ctx context.Context, entryID string, opts ...SessionOptio
 			f.turns++
 		}
 	}
+	// The copied turns count for run ids the way Open's recovery
+	// counts them: the fork's first Send mints <fork>-t<n+1>, not
+	// <fork>-t1 — the file already holds n turns, and a numbering
+	// that restarts would read as a different session's history.
+	f.turnSeq = f.turns
 	return f, nil
 }

@@ -132,21 +132,53 @@ func TestCutPointTable(t *testing.T) {
 // estimated — there is no path where an estimate replaces the
 // measurement.
 func TestTriggerCondition(t *testing.T) {
-	s := &Session{cfg: sessionConfig{compaction: compactConfig{window: 100_000, reserve: 16_384}}}
-	fire := func(lastInput int64, delta int64) bool {
-		return lastInput+delta > s.cfg.compaction.window-s.cfg.compaction.reserve
+	// The production condition, not a mirror of it: window − reserve
+	// is the line, measured plus estimated crosses it strictly.
+	base := TriggerInput{Window: 100_000, Reserve: 16_384}
+	cases := []struct {
+		lastInput, estimated int64
+		want                 bool
+	}{
+		{50_000, 10_000, false}, // 60k of 83.6k headroom
+		{83_600, 100, true},     // past the line
+		{83_616, 1, true},       // exactly past the line
+		{83_616, 0, false},      // exactly on the line
+		{0, 90_000, true},       // a delta alone can cross
 	}
-	if fire(50_000, 10_000) {
-		t.Error("fired at 60k of 83.6k headroom")
+	for _, c := range cases {
+		in := base
+		in.LastInput, in.Estimated = c.lastInput, c.estimated
+		if got := firesAt(in); got != c.want {
+			t.Errorf("firesAt(%+v) = %v, want %v", in, got, c.want)
+		}
 	}
-	if !fire(83_600, 100) {
-		t.Error("did not fire past the line")
+}
+
+// A compaction's summary weighs what it costs in the window: the cut
+// walk counts it, so the kept tail is really about KeepRecent.
+func TestCutCountsTheSummaryWeight(t *testing.T) {
+	path := []Entry{
+		MessageEntry{ID: "e_m0", Message: user(bigText(100))},
+		MessageEntry{ID: "e_m1", ParentID: "e_m0", Message: user("small")},
+		CompactionEntry{ID: "e_c", ParentID: "e_m1", FirstKept: "e_m0", Summary: bigText(60)},
+		MessageEntry{ID: "e_u1", ParentID: "e_c", Message: user("small")},
+		MessageEntry{ID: "e_a", ParentID: "e_u1", Message: assist("end")},
 	}
-	if !fire(83_616, 1) {
-		t.Error("did not fire exactly past the line")
+	// With the summary weighing ~60: the tail (assistant, user, the
+	// summary) overflows keep 80 at the compaction entry, and the cut
+	// lands on the user past it. Without the summary's weight the
+	// same walk fits the whole post-compaction tail and overflows at
+	// the big message instead — the cut lands on the small user under
+	// the compaction. Same path, different cut: the summary counted.
+	if got := cutIndex(path, 80); got != 3 {
+		t.Errorf("cutIndex = %d, want 3 (the summary's weight pushes the cut past the compaction)", got)
 	}
-	if fire(83_616, 0) {
-		t.Error("fired exactly on the line")
+	if c, ok := path[2].(CompactionEntry); ok {
+		c.Summary = ""
+		path[2] = c
+	}
+	if got := cutIndex(path, 80); got != 1 {
+		t.Errorf("cutIndex with an empty summary = %d, want 1", got)
 	}
 }
 

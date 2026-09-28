@@ -539,3 +539,30 @@ func TestIDs(t *testing.T) {
 		}
 	}
 }
+
+// The turn entry's trigger baseline has a pinned wire shape: present
+// as "last_input" when set, absent when zero — additive either way,
+// but named forever once written.
+func TestTurnEntryLastInputWire(t *testing.T) {
+	set, err := json.Marshal(thread.TurnEntry{ID: "e_t", LastInput: 42})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(set), `"last_input":42`) {
+		t.Errorf("TurnEntry with LastInput marshals as %s, want last_input", set)
+	}
+	zero, err := json.Marshal(thread.TurnEntry{ID: "e_t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(zero), "last_input") {
+		t.Errorf("TurnEntry without LastInput marshals as %s, want no last_input key", zero)
+	}
+	var back thread.TurnEntry
+	if err := json.Unmarshal(set, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.LastInput != 42 {
+		t.Errorf("LastInput round trip = %d, want 42", back.LastInput)
+	}
+}

@@ -553,8 +553,13 @@ func (preferNativeOption) applySession(c *sessionConfig) { c.compaction.preferNa
 func PreferNative() SessionOption { return preferNativeOption{} }
 
 // nativeOf walks m's middleware chain looking for a NativeCompactor.
+// The walk remembers what it has seen: middleware whose Unwrap loops
+// (a wrapper returning itself, or a cycle) ends the walk instead of
+// hanging it.
 func nativeOf(m weft.Model) NativeCompactor {
-	for ; m != nil; m = weft.Unwrap(m) {
+	seen := map[weft.Model]bool{}
+	for ; m != nil && !seen[m]; m = weft.Unwrap(m) {
+		seen[m] = true
 		if nc, ok := m.(NativeCompactor); ok {
 			return nc
 		}

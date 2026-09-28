@@ -241,8 +241,9 @@ func (s *Session) execute(first pendingSend) {
 func (s *Session) runOneContained(ps pendingSend) {
 	defer func() {
 		if p := recover(); p != nil {
-			err := fmt.Errorf("thread: turn panicked: %v", p)
-			ps.turn.finish(nil, err)
+			// The turn may already be decided (the panic came from
+			// after it); finish refuses to overwrite it.
+			ps.turn.finish(nil, fmt.Errorf("thread: turn panicked: %v", p))
 			s.agent.Logger().Error("thread: turn panicked",
 				"session", s.header.ID, "run", ps.turn.runID, "panic", p)
 		}
@@ -495,9 +496,14 @@ func (t *Turn) promptWritten() bool {
 }
 
 // finish ends the turn with the run's outcome — or, for a turn that
-// never ran, its error.
+// never ran, its error. Idempotent: the first call wins, so a late
+// containment path cannot repaint a decided turn.
 func (t *Turn) finish(res *weft.RunResult, err error) {
 	t.mu.Lock()
+	if t.done {
+		t.mu.Unlock()
+		return
+	}
 	t.result, t.waitErr, t.done = res, err, true
 	t.mu.Unlock()
 	t.cond.Broadcast()

@@ -225,10 +225,62 @@ func (s *Session) ApplyCompaction(ctx context.Context, c *Compaction) error {
 	s.agent.Logger().Info("thread: compacted",
 		"session", s.header.ID, "reason", string(c.Reason),
 		"tokens_before", c.TokensBefore, "first_kept", c.FirstKept)
-	if fn := s.cfg.compaction.after; fn != nil {
-		fn(ctx, e) // the durable record, not the plan
-	}
+	s.safeAfter(ctx, e) // the durable record, not the plan
 	return nil
+}
+
+// The hook wrappers: a panicking hook is contained — the deciding
+// hooks (before, compactor, summarizer, check) turn the panic into
+// the compaction's error, and the observing hooks (after, failed)
+// log it through the agent's logger and move on. A hook must not
+// take the turn machinery with it (the review's containment row).
+func safeBefore(fn func(context.Context, *Preparation) (Verdict, error), ctx context.Context, p *Preparation) (v Verdict, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("thread: BeforeCompact panicked: %v", r)
+		}
+	}()
+	return fn(ctx, p)
+}
+
+func safeCompactor(c Compactor, ctx context.Context, p Preparation) (comp *Compaction, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("thread: the Compactor panicked: %v", r)
+		}
+	}()
+	return c.Compact(ctx, p)
+}
+
+func safeSummarize(fn Summarizer, ctx context.Context, in SummaryInput) (sum Summary, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("thread: the Summarizer panicked: %v", r)
+		}
+	}()
+	return fn.Summarize(ctx, in)
+}
+
+func safeCheck(fn func(Summary) error, sum Summary) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("thread: CheckSummary panicked: %v", r)
+		}
+	}()
+	return fn(sum)
+}
+
+func (s *Session) safeAfter(ctx context.Context, e CompactionEntry) {
+	fn := s.cfg.compaction.after
+	if fn == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			s.agent.Logger().Error("thread: AfterCompact panicked", "panic", r)
+		}
+	}()
+	fn(ctx, e)
 }
 
 // Uncompact undoes the latest compaction on the leaf's path the only
@@ -334,7 +386,7 @@ func (s *Session) computeCompaction(ctx context.Context, reason Reason, instruct
 		Pinned:       pinnedThrough,
 	}
 	if cfg.before != nil {
-		v, err := cfg.before(ctx, &prep)
+		v, err := safeBefore(cfg.before, ctx, &prep)
 		if err != nil {
 			s.compactFailed(ctx, reason, err)
 			return nil, err
@@ -358,7 +410,7 @@ func (s *Session) computeCompaction(ctx context.Context, reason Reason, instruct
 		}
 	}
 	if cfg.compactor != nil {
-		c, err := cfg.compactor.Compact(ctx, prep)
+		c, err := safeCompactor(cfg.compactor, ctx, prep)
 		if err != nil {
 			s.compactFailed(ctx, reason, err)
 			return nil, err
@@ -420,11 +472,19 @@ func contextMessage(e Entry) (weft.Message, bool) {
 }
 
 // compactFailed runs the CompactFailed hook when one is set — the
-// session is unchanged, and the caller is told why.
+// session is unchanged, and the caller is told why. A panicking hook
+// is contained: the failure it reports is already the story.
 func (s *Session) compactFailed(ctx context.Context, reason Reason, err error) {
-	if fn := s.cfg.compaction.failed; fn != nil {
-		fn(ctx, reason, err)
+	fn := s.cfg.compaction.failed
+	if fn == nil {
+		return
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			s.agent.Logger().Error("thread: CompactFailed panicked", "panic", r)
+		}
+	}()
+	fn(ctx, reason, err)
 }
 
 // produceSummary runs the summary chain: a custom Summarizer if one is
@@ -434,16 +494,16 @@ func (s *Session) compactFailed(ctx context.Context, reason Reason, err error) {
 // CompactFailed hears why (ADR 0020 §4).
 func (s *Session) produceSummary(ctx context.Context, in SummaryInput, reason Reason) (Summary, error) {
 	if fn := s.cfg.compaction.summarizer; fn != nil {
-		sum, err := fn.Summarize(ctx, in)
+		sum, err := safeSummarize(fn, ctx, in)
 		if err == nil && s.cfg.compaction.check != nil {
-			if err = s.cfg.compaction.check(sum); err == nil {
+			if err = safeCheck(s.cfg.compaction.check, sum); err == nil {
 				return sum, nil
 			}
 			// One retry, then the chain is exhausted for a custom
 			// summarizer: there is nothing to fall back to.
-			sum, err = fn.Summarize(ctx, in)
+			sum, err = safeSummarize(fn, ctx, in)
 			if err == nil {
-				if err = s.cfg.compaction.check(sum); err == nil {
+				if err = safeCheck(s.cfg.compaction.check, sum); err == nil {
 					return sum, nil
 				}
 			}
@@ -468,7 +528,7 @@ func (s *Session) produceSummary(ctx context.Context, in SummaryInput, reason Re
 				break // model error: the chain falls back
 			}
 			if s.cfg.compaction.check != nil {
-				if err := s.cfg.compaction.check(sum); err != nil {
+				if err := safeCheck(s.cfg.compaction.check, sum); err != nil {
 					lastErr = err
 					continue // retry once on the same model
 				}
@@ -780,7 +840,7 @@ func (s *Session) maybeAutoCompact(ctx context.Context) {
 	}
 	in := TriggerInput{LastInput: lastInput, Estimated: est, Window: cfg.window, Reserve: cfg.reserve}
 	if cfg.trigger != nil {
-		if !cfg.trigger(in) {
+		if !s.safeTrigger(in) {
 			return
 		}
 	} else if lastInput+est <= cfg.window-cfg.reserve {
@@ -799,7 +859,10 @@ func (s *Session) maybeAutoCompact(ctx context.Context) {
 	// entry instead.
 	if cfg.trimmer != nil {
 		before := s.rawContext()
-		trimmed, _ := cfg.trimmer.Trim(ctx, before)
+		trimmed, ok := s.safeTrim(ctx, before)
+		if !ok {
+			return // the trimmer panicked: logged, no trim this turn
+		}
 		var after int64
 		for _, m := range trimmed {
 			after += s.estimate(m)
@@ -819,6 +882,31 @@ func (s *Session) maybeAutoCompact(ctx context.Context) {
 			s.agent.Logger().Warn("thread: automatic compaction failed", "session", s.header.ID, "err", err)
 		}
 	}
+}
+
+// safeTrigger consults the trigger function, containing a panic as a
+// no-fire with a log line — the runner must survive its caller's hook.
+func (s *Session) safeTrigger(in TriggerInput) (fire bool) {
+	fn := s.cfg.compaction.trigger
+	defer func() {
+		if r := recover(); r != nil {
+			fire = false
+			s.agent.Logger().Error("thread: TriggerFunc panicked", "panic", r)
+		}
+	}()
+	return fn(in)
+}
+
+// safeTrim runs the trimmer, containing a panic as no-trim.
+func (s *Session) safeTrim(ctx context.Context, before []weft.Message) (trimmed []weft.Message, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			trimmed, ok = nil, false
+			s.agent.Logger().Error("thread: the Trimmer panicked", "panic", r)
+		}
+	}()
+	trimmed, _ = s.cfg.compaction.trimmer.Trim(ctx, before)
+	return trimmed, true
 }
 
 // applyAuto is the trigger's Compact: compute and apply with the

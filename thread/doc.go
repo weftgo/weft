@@ -28,6 +28,9 @@
 // storage internals: what Load returns is the caller's to keep.
 //
 // v0.1 completes the layer above this format (Session, Send/Turn,
-// branching, compaction); the current surface is the format and the
-// Storage contract they stand on.
+// branching, compaction); the current surface is the format, the
+// Storage contract, and the Session tree they stand on — Create/Open,
+// the context walk, entries, leaf and path, labels, info, custom
+// state. Send, branching and compaction follow in the next steps of
+// v0.1.
 package thread

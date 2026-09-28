@@ -32,3 +32,6 @@ coverage.*
 .vscode/
 *.swp
 .DS_Store
+
+# Built example binaries (go build / go run leftovers)
+/examples/getting-started/getting-started

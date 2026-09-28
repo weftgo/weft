@@ -323,7 +323,24 @@ _ = s.Delete(ctx, rec.ID)                      // children survive, orphaned
 
 `go run ./store/examples/basic` records a run with a tool call and a
 subagent into `.weft/dev.db` and prints the table, the event stream,
-and the child run — the shape the Inspector (next) reads.
+and the child run — the shape the Inspector reads.
+
+### Inspecting runs
+
+Module `weft/studio` (v0.1.0) is the Inspector: a read-only UI over a
+run store, served as one `http.Handler` with the UI embedded — no
+build step, no Node at runtime, nothing leaves the process. The runs
+list, the run page with its trace waterfall, guaranteed replay over
+the event index, raw JSON, and agent and tool cards from the
+manifest ([studio/README.md](studio/README.md), ADR 0018).
+
+```go
+mux.Handle("/studio/", http.StripPrefix("/studio",
+    studio.Handler(s, studio.Manifest(manifestBytes))))  // bind loopback: no auth yet
+```
+
+`go run ./studio/examples/basic` records three demo runs and serves
+Studio on `127.0.0.1:7331/studio/`.
 
 ## The manifest — `weft.json`
 
@@ -509,6 +526,7 @@ openai/               OpenAI Chat Completions (+ compatible servers)
 anthropic/            Anthropic Messages (thinking, signatures)
 google/               Gemini via genai
 store/                run records: Record tap, Memory + sqlite backends, storetest
+studio/               the Inspector: read-only handler + embedded UI (web/ is its Bun source)
 examples/             runnable core example (per-adapter: <adapter>/example)
 docs/adr/             decision records for the contracts
 ```
@@ -571,8 +589,10 @@ an exported symbol always fails.
    usage limits, loop detection, `PrepareStep`; ADR 0014).
 4. ~~MCP interop~~ — **done** (consume and expose; ADR 0015). ~~Core
    observability~~ — **done** (OTel spans + slog lines; ADR 0016).
-5. The satellites: `runtime` (sessions, approvals), `store`, `serve`,
-   `studio`, and the eval/prompt/mem/trace modules.
+5. The satellites: ~~`store`~~ — **done** (v0.1.1; ADR 0010).
+   ~~`studio`~~ — **T1 done** (the Inspector, v0.1.0; ADR 0018).
+   Next: `runtime` (sessions, approvals), `serve`, and the
+   eval/prompt/mem/trace modules.
 
 ## License
 

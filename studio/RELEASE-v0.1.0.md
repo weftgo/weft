@@ -1,9 +1,8 @@
-# studio/v0.1.0 — release notes (DRAFT, not tagged)
+# studio/v0.1.0 — release notes
 
-Release is two-phase (TODO §1.1): the root and store need no change,
-so after this branch merges, tag `studio/v0.1.0` against a `go.mod`
-that requires the tagged `weft v0.3.6` and `store v0.1.1` with no
-`replace`. The tag message is this file.
+Tagged 2026-09-28. One tag: the root and store need no change, so
+`studio/v0.1.0` stands against a `go.mod` that requires the tagged
+`weft v0.3.6` and `store v0.1.1` with no `replace` (TODO §1.1).
 
 ---
 
@@ -64,12 +63,19 @@ with run length and a live tail is the same endpoint. A hosted
 Studio is this bundle plus a server that declares what it carries.
 
 Engineering: the UI is a TanStack Start SPA prebuilt into a
-committed, embedded `dist` (~313 KiB gzipped of a 600 KiB budget);
+committed, embedded `dist` (~319 KiB gzipped of a 600 KiB budget);
 `make studio-check` fails CI on a stale dist, an over-budget build,
 or a non-deterministic one. The JSON API is golden-pinned on the Go
 side and type-mirrored in TypeScript against the same fixtures. The
 theme is the landing page's paper loom (Geist self-hosted) with a
 contrast-checked event palette; dark and light follow the system.
+
+Fixed in the release review: a past-the-end events cursor no longer
+panics the handler; the runs list and the ⌘K palette no longer share
+a cache entry (the list crashed after the palette opened); a run that
+finishes mid-burst drains every remaining page; pause writes `t`;
+subagent call spans key apart from the parent's; missing assets 404;
+`Title`/`Base` are escaped. CI now runs `make studio-check`.
 
 Known limits (by design, T1): no live view (T2a), no chat view, no
 lanes or durations — events carry no timestamps; the store's order is

@@ -4,7 +4,7 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
-## studio 0.1.0 — 2026-09-28 (the Inspector, T1 — unreleased until tagged)
+## studio 0.1.0 — 2026-09-28 (the Inspector, T1)
 
 First release of `weft/studio`: the Inspector over a run store, served
 as one read-only `http.Handler`. New module, no core or store change.
@@ -111,10 +111,34 @@ found:
   client-only so a deep link can never hydration-mismatch (which
   would drop the runtime `<base>` and break every module script).
 
+### Fixed — the release review (2026-09-28, before tagging)
+
+- `api/runs/{id}/events` panicked (negative slice capacity) on an
+  `after` past the end of the stream; it now answers the empty,
+  done page. Regression cases cover `len+5` and the int64 maximum.
+- A missing hashed asset under `assets/` is a 404, not the HTML shell
+  served under a script's name.
+- `Title` and `Base` are HTML-escaped where they enter the shell.
+- The runs list and the ⌘K palette shared one query-cache key with
+  different shapes (a plain page vs. an infinite query): opening the
+  palette and then the list crashed it. The list has its own key.
+- When a run finished, the closing drain read one page only; a burst
+  of more than one page at the end stayed truncated. It follows
+  `next_after` to the end.
+- Pausing replay writes `t`, as the URL contract says.
+- A subagent's tool call keyed its span `c:<callID>` like the
+  parent's, so a reused id (`call_1`) made `?sel=` pick the wrong
+  span. Child call keys carry the child run id, as step keys do.
+- Deep subagent trees fold on first load: the fold is applied once
+  the spans arrive, not only at mount.
+- CI gains the `studio` job (`make studio-check` under Bun 1.3.14):
+  the freshness, budget, and web-test gate this section describes
+  now runs on every push and PR.
+
 ### Engineering
 
 - The UI is a TanStack Start SPA prebuilt into a committed, embedded
-  `studio/dist` (~313 KiB gzipped of a 600 KiB budget): no build step
+  `studio/dist` (~319 KiB gzipped of a 600 KiB budget): no build step
   for users. `make studio-check` gates dist freshness (two clean
   builds are byte-identical), the size budget, and the web
   typecheck/tests; `make test`/`lint` cover the Go side via go.work.

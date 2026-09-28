@@ -136,5 +136,11 @@ func (a *app) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if a.serveFile(w, r, path) {
 		return
 	}
+	if strings.HasPrefix(path, "/assets/") {
+		// A missing hashed asset (a stale tab after an upgrade) is a
+		// 404, never the HTML shell under a script's name.
+		writeError(w, r, http.StatusNotFound, "not_found", "no asset "+path)
+		return
+	}
 	a.serveShell(w, r)
 }

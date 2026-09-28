@@ -347,7 +347,8 @@ func (a *app) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 // serveRunEvents answers api/runs/{id}/events?after=&limit=: one page
-// of the run's event stream, 0-based positions. `after` is exclusive;
+// of the run's event stream, 0-based positions. `after` is the first
+// position returned (next_after feeds straight back in);
 // -1 and 0 both read from the start (-1 is the documented default for
 // "the whole stream"). The whole stream is one store Get, sliced;
 // runs whose stored status is terminal are cached (finishedRunCache)
@@ -394,6 +395,9 @@ func (a *app) serveRunEvents(w http.ResponseWriter, r *http.Request, id string) 
 		}
 	}
 
+	// A cursor past the end (a stale client, a hand-typed URL) reads as
+	// the end: an empty page, never a negative slice capacity.
+	after = min(after, int64(len(events)))
 	end := after + int64(limit)
 	if end > int64(len(events)) || end < 0 {
 		end = int64(len(events))

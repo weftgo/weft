@@ -401,9 +401,12 @@ func TestEventsPaging(t *testing.T) {
 	}
 
 	// Past the end: empty page, no cursor, still done.
-	_, _, tail := get(t, h, fmt.Sprintf("/studio/api/runs/r_ok/events?after=%d", total))
-	if !strings.Contains(tail, `"events":[]`) || !strings.Contains(tail, `"done":true`) {
-		t.Errorf("past-the-end page = %s", tail)
+	for _, after := range []int64{int64(total), int64(total) + 5, 1<<63 - 1} {
+		code, _, tail := get(t, h, fmt.Sprintf("/studio/api/runs/r_ok/events?after=%d", after))
+		if code != http.StatusOK || !strings.Contains(tail, `"events":[]`) ||
+			!strings.Contains(tail, `"next_after":null`) || !strings.Contains(tail, `"done":true`) {
+			t.Errorf("after=%d past the end: %d %s", after, code, tail)
+		}
 	}
 
 	// A live run (fresh heartbeat) is never done and is not cached.
@@ -570,6 +573,13 @@ func TestShellAndFallback(t *testing.T) {
 	}
 	if _, _, b := get(t, Handler(fixtureStore(t), Title("dev studio")), "/studio/"); !strings.Contains(b, "<title>dev studio</title>") {
 		t.Errorf("Title not rewritten: %s", b)
+	}
+	if _, _, b := get(t, Handler(fixtureStore(t), Title("a <b> & c")), "/studio/"); !strings.Contains(b, "<title>a &lt;b&gt; &amp; c</title>") {
+		t.Errorf("Title not escaped: %s", b)
+	}
+	if code, hdr, _ := get(t, h, "/studio/assets/missing-0000.js"); code != http.StatusNotFound ||
+		strings.Contains(hdr.Get("Content-Type"), "text/html") {
+		t.Errorf("missing asset: %d %q, want a non-HTML 404", code, hdr.Get("Content-Type"))
 	}
 }
 

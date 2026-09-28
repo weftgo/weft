@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/base64"
+	"html"
 	"io/fs"
 	"net/http"
 	"path"
@@ -46,7 +47,7 @@ func (a *app) prepareShell() {
 	if a.title != "" {
 		if t := titleTag.FindIndex(shell); t != nil {
 			shell = bytes.Replace(shell, shell[t[0]:t[1]],
-				[]byte("<title>"+a.title+"</title>"), 1)
+				[]byte("<title>"+html.EscapeString(a.title)+"</title>"), 1)
 		}
 	}
 	a.shell = shell
@@ -113,12 +114,12 @@ func (a *app) serveShell(w http.ResponseWriter, r *http.Request) {
 	body := a.shell
 	if bytes.Contains(body, baseTag) {
 		body = bytes.Replace(body, baseTag,
-			[]byte(`<base href="`+a.base+`">`), 1)
+			[]byte(`<base href="`+html.EscapeString(a.base)+`">`), 1)
 	} else if i := bytes.Index(body, []byte("<head>")); i >= 0 {
 		// The build dropped the marker: inject rather than misroute.
 		i += len("<head>")
 		body = append(append([]byte{}, body[:i]...),
-			append([]byte(`<base href="`+a.base+`">`), body[i:]...)...)
+			append([]byte(`<base href="`+html.EscapeString(a.base)+`">`), body[i:]...)...)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")

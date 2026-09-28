@@ -575,3 +575,24 @@ func TestSessionOpenReportsRepair(t *testing.T) {
 		t.Errorf("Open logged nothing about the repair; log = %q", log.String())
 	}
 }
+
+func TestSessionOpenDanglingLeaf(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		agent := weft.New(wefttest.Script())
+		s, _ := thread.Create(ctx, st, agent)
+		if err := st.Append(ctx, s.ID(),
+			thread.MessageEntry{ID: "e_m", Created: time.Now().UTC(), Message: weft.User("one")},
+			// A leaf entry pointing at an entry the file does not hold:
+			// the session's active position is undefined, and Open must
+			// say so instead of answering every read with nothing.
+			thread.LeafEntry{ID: "e_l", ParentID: "e_m", Created: time.Now().UTC(), Entry: "e_ghost"},
+		); err != nil {
+			t.Fatal(err)
+		}
+		_, err := thread.Open(ctx, st, s.ID(), agent)
+		if !errors.Is(err, thread.ErrCorrupt) {
+			t.Errorf("Open with a dangling leaf: err = %v, want ErrCorrupt", err)
+		}
+	})
+}

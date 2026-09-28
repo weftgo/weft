@@ -154,6 +154,18 @@ func Open(ctx context.Context, st Storage, id string, agent *weft.Agent, opts ..
 		}
 	}
 	s.leaf = leaf
+	if s.leaf != "" {
+		if _, ok := s.byID[s.leaf]; !ok {
+			// Loud on the undefined (ADR 0011 §5): a trailing leaf
+			// entry that navigates to an entry the file does not hold
+			// leaves the session's active position meaningless — every
+			// read would quietly answer nothing. No code path here
+			// writes one (Branch validates its target); a file that
+			// holds one was written by something else.
+			return nil, &CorruptError{Session: id, Err: fmt.Errorf(
+				"the leaf names entry %q, which the file does not hold", s.leaf)}
+		}
+	}
 	if report != nil {
 		agent.Logger().Warn("thread: session loaded with a repair",
 			"session", id, "torn_line", report.Torn, "skipped_lines", report.Skipped)

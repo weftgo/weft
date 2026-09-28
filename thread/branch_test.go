@@ -278,3 +278,28 @@ func TestForkValidation(t *testing.T) {
 		}
 	})
 }
+
+func TestSessionDuplicateEntryID(t *testing.T) {
+	ctx := context.Background()
+	agent := weft.New(wefttest.Script())
+	st := thread.Memory()
+	next := 0
+	ids := []string{"s_dup", "e_dup", "e_dup"}
+	mint := thread.IDs(func() string { id := ids[next]; next++; return id })
+	s, err := thread.Create(ctx, st, agent, mint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Custom(ctx, "k", nil); err != nil {
+		t.Fatalf("first Custom: %v", err)
+	}
+	// An ids function that mints an id the session already holds would
+	// make the tree ambiguous (which entry does the id name?); the
+	// write must fail loudly instead.
+	if err := s.Custom(ctx, "k2", nil); err == nil {
+		t.Error("duplicate entry id accepted")
+	}
+	if n := len(s.Entries()); n != 1 {
+		t.Errorf("Entries after rejected duplicate = %d, want 1", n)
+	}
+}

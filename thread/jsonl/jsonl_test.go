@@ -312,6 +312,74 @@ func TestConcurrentFirstTouchOneSession(t *testing.T) {
 	}
 }
 
+// Create racing its own session's first appends: an append that gets
+// in before the header is durable must not be able to take the file's
+// lock out from under Create (Create would fail spuriously and its
+// cleanup would unlink the appender's file), and one that lands must
+// land after the header. The contract: Create never fails against its
+// own instance's appends; every append returns nil or — it ran before
+// the session existed — ErrNotFound; and the load afterwards is clean,
+// header first, holding exactly the appends that returned nil.
+func TestCreateRacingAppends(t *testing.T) {
+	dir := t.TempDir()
+	st, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	const appenders = 8
+	const rounds = 20
+	for r := 0; r < rounds; r++ {
+		id := fmt.Sprintf("s_race%02d", r)
+		h := thread.Header{ID: id, Created: time.Now().UTC()}
+		var wg sync.WaitGroup
+		createErr := make(chan error, 1)
+		appendErrs := make(chan error, appenders)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			createErr <- st.Create(ctx, h)
+		}()
+		for a := 0; a < appenders; a++ {
+			wg.Add(1)
+			go func(a int) {
+				defer wg.Done()
+				appendErrs <- st.Append(ctx, id, thread.MessageEntry{
+					ID:      fmt.Sprintf("e_race%02d_%02d", r, a),
+					Message: weft.User("racing"),
+				})
+			}(a)
+		}
+		wg.Wait()
+		close(createErr)
+		close(appendErrs)
+		if err := <-createErr; err != nil {
+			t.Fatalf("round %d: Create racing its own appends failed: %v", r, err)
+		}
+		landed := 0
+		for err := range appendErrs {
+			switch {
+			case err == nil:
+				landed++
+			case errors.Is(err, thread.ErrNotFound):
+				// Ran before the session existed — the honest answer.
+			default:
+				t.Fatalf("round %d: Append: %v, want nil or ErrNotFound", r, err)
+			}
+		}
+		got, entries, report, err := st.Load(ctx, id)
+		if err != nil {
+			t.Fatalf("round %d: Load: %v", r, err)
+		}
+		if report != nil {
+			t.Fatalf("round %d: the load reported repairs: %+v", r, report)
+		}
+		if got.ID != id || len(entries) != landed {
+			t.Fatalf("round %d: %d entries for %d landed appends — a nil append was lost", r, len(entries), landed)
+		}
+	}
+}
+
 // Two Opens racing to create the same missing directory both succeed:
 // the loser of os.Mkdir sees EEXIST for a directory that is exactly
 // what it wanted.

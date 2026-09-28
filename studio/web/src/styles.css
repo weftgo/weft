@@ -1,131 +1,281 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/dm-sans";
-@import "@fontsource-variable/outfit";
 
 @custom-variant dark (&:is(.dark *));
 
+/* ─────────────────────────────────────────────────────────────────────
+   weft studio · design system v6 "paper loom" — the landing page's
+   tokens (site/index.html :root), mapped onto shadcn's variables
+   (plan §5). Geist for reading, Geist Mono for what the machine says
+   (ids, models, JSON, tokens, durations, seq). One accent: the thread.
+   The Studio addition is the event/status palette below (plan §5.3),
+   contrast-checked: ≥ 4.5:1 text, ≥ 3:1 dots and bars.
+   ───────────────────────────────────────────────────────────────────── */
+
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.148 0.004 228.8);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.148 0.004 228.8);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.148 0.004 228.8);
-    --primary: oklch(0.488 0.243 264.376);
-    --primary-foreground: oklch(0.97 0.014 254.604);
-    --secondary: oklch(0.967 0.001 286.375);
-    --secondary-foreground: oklch(0.21 0.006 285.885);
-    --muted: oklch(0.963 0.002 197.1);
-    --muted-foreground: oklch(0.56 0.021 213.5);
-    --accent: oklch(0.963 0.002 197.1);
-    --accent-foreground: oklch(0.218 0.008 223.9);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.925 0.005 214.3);
-    --input: oklch(0.925 0.005 214.3);
-    --ring: oklch(0.723 0.014 214.4);
-    --chart-1: oklch(0.872 0.007 219.6);
-    --chart-2: oklch(0.56 0.021 213.5);
-    --chart-3: oklch(0.45 0.017 213.2);
-    --chart-4: oklch(0.378 0.015 216);
-    --chart-5: oklch(0.275 0.011 216.9);
-    --radius: 0.875rem;
-    --sidebar: oklch(0.987 0.002 197.1);
-    --sidebar-foreground: oklch(0.148 0.004 228.8);
-    --sidebar-primary: oklch(0.546 0.245 262.881);
-    --sidebar-primary-foreground: oklch(0.97 0.014 254.604);
-    --sidebar-accent: oklch(0.963 0.002 197.1);
-    --sidebar-accent-foreground: oklch(0.218 0.008 223.9);
-    --sidebar-border: oklch(0.925 0.005 214.3);
-    --sidebar-ring: oklch(0.723 0.014 214.4);
+  --background: #fbfaf7; /* paper */
+  --foreground: #191713; /* ink */
+  --card: #fbfaf7;
+  --card-foreground: #191713;
+  --popover: #fbfaf7;
+  --popover-foreground: #191713;
+  --primary: #191713; /* the site's primary button is ink, not accent */
+  --primary-foreground: #fbfaf7;
+  --secondary: #f3f1ea; /* quiet panels */
+  --secondary-foreground: #191713;
+  --muted: #f3f1ea;
+  --muted-foreground: #6e6759;
+  --accent: #f3f1ea; /* shadcn's accent is the hover wash, not the brand accent */
+  --accent-foreground: #191713;
+  --destructive: #b42318;
+  --border: #e7e3d9; /* line */
+  --input: #e7e3d9;
+  --ring: #ff5c2b; /* the thread — the site's focus ring is the accent */
+  --chart-1: #2f5bd3;
+  --chart-2: #4d7a2a;
+  --chart-3: #9a6a06;
+  --chart-4: #ff5c2b;
+  --chart-5: #6e6759;
+  --radius: 0.625rem; /* 10px buttons; cards use radius-lg = 12px */
+  --sidebar: #f3f1ea;
+  --sidebar-foreground: #191713;
+  --sidebar-primary: #ff5c2b;
+  --sidebar-primary-foreground: #fbfaf7;
+  --sidebar-accent: #e7e3d9;
+  --sidebar-accent-foreground: #191713;
+  --sidebar-border: #e7e3d9;
+  --sidebar-ring: #ff5c2b;
+
+  /* brand tokens (plan §5.2) */
+  --thread: #ff5c2b; /* the one accent; never a fill for large areas */
+  --thread-ink: #d13c10; /* accent text at small sizes */
+  --faint: #a39c8f; /* eyebrow labels, seq gutter */
+  --code-bg: #161310; /* code windows are dark in both themes, like the site */
+  --code-ink: #ece6d6;
+  --code-mut: #8d887b;
+  --code-str: #a8c07a;
+  --win-border: #26221b;
+  --win-bar: #1d1a15;
+  --win-dot: #332e25;
+
+  /* event and status colours (plan §5.3) */
+  --ev-step: #191713;
+  --ev-tool: #2f5bd3;
+  --ev-result: #4d7a2a;
+  --ev-error: #9a6a06; /* error-as-data is mustard, not red */
+  --ev-reasoning: #6e6759;
+  --status-ok: #1f7a45;
+  --status-bad: #b42318;
+  --status-run: #ef4d21; /* the thread, darkened to clear 3:1 on paper */
+  --status-int: #9a6a06;
 }
 
 .dark {
-    --background: oklch(0.148 0.004 228.8);
-    --foreground: oklch(0.987 0.002 197.1);
-    --card: oklch(0.218 0.008 223.9);
-    --card-foreground: oklch(0.987 0.002 197.1);
-    --popover: oklch(0.218 0.008 223.9);
-    --popover-foreground: oklch(0.987 0.002 197.1);
-    --primary: oklch(0.424 0.199 265.638);
-    --primary-foreground: oklch(0.97 0.014 254.604);
-    --secondary: oklch(0.274 0.006 286.033);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.275 0.011 216.9);
-    --muted-foreground: oklch(0.723 0.014 214.4);
-    --accent: oklch(0.275 0.011 216.9);
-    --accent-foreground: oklch(0.987 0.002 197.1);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.56 0.021 213.5);
-    --chart-1: oklch(0.872 0.007 219.6);
-    --chart-2: oklch(0.56 0.021 213.5);
-    --chart-3: oklch(0.45 0.017 213.2);
-    --chart-4: oklch(0.378 0.015 216);
-    --chart-5: oklch(0.275 0.011 216.9);
-    --sidebar: oklch(0.218 0.008 223.9);
-    --sidebar-foreground: oklch(0.987 0.002 197.1);
-    --sidebar-primary: oklch(0.623 0.214 259.815);
-    --sidebar-primary-foreground: oklch(0.97 0.014 254.604);
-    --sidebar-accent: oklch(0.275 0.011 216.9);
-    --sidebar-accent-foreground: oklch(0.987 0.002 197.1);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.56 0.021 213.5);
+  --background: #131211;
+  --foreground: #ece6d6;
+  --card: #1c1a17;
+  --card-foreground: #ece6d6;
+  --popover: #1c1a17;
+  --popover-foreground: #ece6d6;
+  --primary: #ece6d6;
+  --primary-foreground: #131211;
+  --secondary: #1c1a17;
+  --secondary-foreground: #ece6d6;
+  --muted: #1c1a17;
+  --muted-foreground: #a39c8f;
+  --accent: #1c1a17;
+  --accent-foreground: #ece6d6;
+  --destructive: #f87171;
+  --border: #2a2722;
+  --input: #2a2722;
+  --ring: #ff7d52; /* the thread, lifted for dark paper */
+  --chart-1: #7aa2ff;
+  --chart-2: #8fbf6a;
+  --chart-3: #e3b341;
+  --chart-4: #ff5c2b;
+  --chart-5: #a39c8f;
+  --sidebar: #1c1a17;
+  --sidebar-foreground: #ece6d6;
+  --sidebar-primary: #ff7d52;
+  --sidebar-primary-foreground: #131211;
+  --sidebar-accent: #2a2722;
+  --sidebar-accent-foreground: #ece6d6;
+  --sidebar-border: #2a2722;
+  --sidebar-ring: #ff7d52;
+
+  --thread: #ff5c2b;
+  --thread-ink: #ff7d52;
+  --faint: #6e6759;
+  --code-bg: #1b1815;
+  --code-ink: #ece6d6;
+  --code-mut: #8d887b;
+  --code-str: #a8c07a;
+  --win-border: #2f2b25;
+  --win-bar: #221f1a;
+  --win-dot: #3a352d;
+
+  --ev-step: #ece6d6;
+  --ev-tool: #7aa2ff;
+  --ev-result: #8fbf6a;
+  --ev-error: #e3b341;
+  --ev-reasoning: #a39c8f;
+  --status-ok: #4ade80;
+  --status-bad: #f87171;
+  --status-run: #ff5c2b;
+  --status-int: #e3b341;
 }
 
 @theme inline {
-    --font-sans: 'DM Sans Variable', sans-serif;
-    --font-heading: 'Outfit Variable', sans-serif;
-    --color-sidebar-ring: var(--sidebar-ring);
-    --color-sidebar-border: var(--sidebar-border);
-    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-    --color-sidebar-accent: var(--sidebar-accent);
-    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-    --color-sidebar-primary: var(--sidebar-primary);
-    --color-sidebar-foreground: var(--sidebar-foreground);
-    --color-sidebar: var(--sidebar);
-    --color-chart-5: var(--chart-5);
-    --color-chart-4: var(--chart-4);
-    --color-chart-3: var(--chart-3);
-    --color-chart-2: var(--chart-2);
-    --color-chart-1: var(--chart-1);
-    --color-ring: var(--ring);
-    --color-input: var(--input);
-    --color-border: var(--border);
-    --color-destructive: var(--destructive);
-    --color-accent-foreground: var(--accent-foreground);
-    --color-accent: var(--accent);
-    --color-muted-foreground: var(--muted-foreground);
-    --color-muted: var(--muted);
-    --color-secondary-foreground: var(--secondary-foreground);
-    --color-secondary: var(--secondary);
-    --color-primary-foreground: var(--primary-foreground);
-    --color-primary: var(--primary);
-    --color-popover-foreground: var(--popover-foreground);
-    --color-popover: var(--popover);
-    --color-card-foreground: var(--card-foreground);
-    --color-card: var(--card);
-    --color-foreground: var(--foreground);
-    --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-thread: var(--thread);
+  --color-thread-ink: var(--thread-ink);
+  --color-faint: var(--faint);
+  --color-code-bg: var(--code-bg);
+  --color-code-ink: var(--code-ink);
+  --color-code-mut: var(--code-mut);
+  --color-code-str: var(--code-str);
+  --color-win-border: var(--win-border);
+  --color-win-bar: var(--win-bar);
+  --color-win-dot: var(--win-dot);
+  --color-ev-step: var(--ev-step);
+  --color-ev-tool: var(--ev-tool);
+  --color-ev-result: var(--ev-result);
+  --color-ev-error: var(--ev-error);
+  --color-ev-reasoning: var(--ev-reasoning);
+  --color-status-ok: var(--status-ok);
+  --color-status-bad: var(--status-bad);
+  --color-status-run: var(--status-run);
+  --color-status-int: var(--status-int);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: calc(var(--radius) * 1.2); /* 12px cards, like .codewin */
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
-  body {
-    @apply bg-background text-foreground;
-    }
+  }
   html {
     @apply font-sans;
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+    /* Studio is a tool: denser than the site (plan §5.4) */
+    font-size: 0.875rem;
+    line-height: 1.55;
+  }
+  ::selection {
+    background: var(--thread);
+    color: #fff;
+  }
+}
+
+@layer utilities {
+  /* eyebrow labels — the site's .eyebrow/.facts .k convention */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem; /* 11px */
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--faint);
+  }
+  /* the running dot pulses once per 2 s; reduced motion stops it */
+  .pulse-dot {
+    animation: pulse-dot 2s ease-out 1;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pulse-dot {
+      animation: none;
     }
+  }
+}
+
+@keyframes pulse-dot {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--status-run) 60%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+/* ── code windows (plan §5.2/.codewin on the site) ──────────────────
+   Dark in both themes; the only shadow in the UI. Three dots, one
+   lit with the thread when live. */
+.codewin {
+  border-radius: 0.75rem;
+  overflow: hidden;
+  border: 1px solid var(--win-border);
+  background: var(--code-bg);
+  color: var(--code-ink);
+  box-shadow:
+    0 1px 2px rgba(20, 16, 10, 0.05),
+    0 12px 40px -18px rgba(20, 16, 10, 0.25);
+}
+.codewin-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--win-bar);
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--win-border);
+}
+.codewin-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--win-dot);
+}
+.codewin-dot.on {
+  background: var(--thread);
+}
+.codewin pre {
+  margin: 0;
+  padding: 0.875rem 1rem;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--code-ink);
 }

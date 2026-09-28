@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -163,6 +164,18 @@ func TestEntryRoundTrip(t *testing.T) {
 				weft.TextPart{Text: "looking"},
 				weft.ToolCallPart{ID: "call_2", Name: "lookup", Args: json.RawMessage(`{"order_id":"99"}`)},
 				weft.FilePart{MediaType: "image/png", URL: "https://example.com/p.png"},
+			},
+		},
+	})
+	// FilePart's other half — inline Data, base64 on the wire —
+	// round-trips byte-for-byte too.
+	all = append(all, thread.MessageEntry{
+		ID: entryID0, Created: at(1),
+		Message: weft.Message{
+			Role: weft.RoleUser,
+			Content: []weft.Part{
+				weft.TextPart{Text: "what is this?"},
+				weft.FilePart{MediaType: "image/png", Data: []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff}},
 			},
 		},
 	})
@@ -473,6 +486,37 @@ func TestIDs(t *testing.T) {
 		}
 		prev = id
 		time.Sleep(2 * time.Millisecond)
+	}
+
+	// Concurrent generation — many goroutines in the same milliseconds
+	// — still never collides: the 80 random bits carry the uniqueness.
+	const workers = 8
+	const each = 500
+	ids := make(chan string, workers*each)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < each; i++ {
+				ids <- thread.NewEntryID()
+			}
+		}()
+	}
+	wg.Wait()
+	close(ids)
+	uniq := map[string]bool{}
+	for id := range ids {
+		if uniq[id] {
+			t.Fatalf("concurrent generation collided on %q", id)
+		}
+		uniq[id] = true
+		if !thread.ValidID(id) {
+			t.Fatalf("concurrently generated id %q fails ValidID", id)
+		}
+	}
+	if len(uniq) != workers*each {
+		t.Fatalf("%d unique ids, want %d", len(uniq), workers*each)
 	}
 
 	valid := []string{"s", "e_01J8", strings.Repeat("x", 128), "A-b_9"}

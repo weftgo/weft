@@ -145,13 +145,15 @@ type InfoEntry struct {
 
 // CustomEntry carries application state: a caller-chosen Kind and
 // opaque JSON Data. It survives every compaction (ADR 0020 §4) and
-// never enters the model's context.
+// never enters the model's context. A nil Data writes no "data" key —
+// omitempty keeps nil and absent the same value both ways, so a
+// round trip through the wire never turns "no data" into "null".
 type CustomEntry struct {
 	ID       string          `json:"id"`
 	ParentID string          `json:"parent,omitempty"`
 	Created  time.Time       `json:"created"`
 	Kind     string          `json:"kind"`
-	Data     json.RawMessage `json:"data"`
+	Data     json.RawMessage `json:"data,omitempty"`
 }
 
 // CustomMessageEntry carries an application message: a caller-chosen

@@ -3,7 +3,10 @@
 # module's public Go API since that module's last tag. The root module
 # gates against the newest v* tag; the store module gates against the
 # newest store/v* tag, from its second tag on (plan §3.1). The other
-# sub-modules get their own gate when they tag.
+# sub-modules get their own gate when they tag: thread joins at its
+# second tag (thread/v0.2.0, plan §10 — as store joined at
+# store/v0.1.1); add a `thread` case beside `store` and an
+# apidiff-thread target then.
 #
 # Usage: scripts/apidiff.sh [base-ref] [module-dir]
 #   module-dir "." (the default) is the root module; "store" is the

@@ -1,8 +1,23 @@
 # Changelog
 
 Notable changes to weft, newest first. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
+[Keep a Changelog](https://keepachangelog.com/en/1.0.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
+
+## 0.3.7 (unreleased)
+
+### Added — the model accessors thread needs (ADR 0006 amendment)
+
+- `(*Agent).Model()` — the model as the loop calls it, `WrapModel`
+  middleware included, in the installed order. The session layer
+  (`weft/thread`, v0.1) summarizes with the session agent's own model
+  by default (ADR 0020 §2).
+- The `Unwrap() Model` convention on model middleware wrappers, beside
+  `Info()`/`InfoOf`: `mw.Retry`, `mw.Fallback` (its primary — the
+  chain's first model, the one `Info` names), `mw.Log` and
+  `mw.RepairJSON` implement it; `weft.Unwrap(m)` walks one level and
+  returns nil on a non-wrapper. Callers walk a chain one middleware at
+  a time without knowing the wrapper types.
 
 ## studio 0.1.0 — 2026-09-28 (the Inspector, T1)
 

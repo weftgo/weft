@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"log/slog"
 	"math"
@@ -515,5 +516,28 @@ func TestMiddlewaresConformInfo(t *testing.T) {
 		mw.RepairJSON(),
 	} {
 		wefttest.ConformInfoT(t, m)
+	}
+}
+
+// The Unwrap convention (step 1.1, ADR 0006 note): every model
+// middleware in this package declares the model it wraps, so callers
+// walk a chain without knowing the wrapper types. Fallback names the
+// primary — the chain's first model, the same one its Info reports.
+func TestUnwrapConvention(t *testing.T) {
+	base := wefttest.Script(wefttest.Say("x"))
+	backup := wefttest.Script(wefttest.Say("y"))
+	wrappers := map[string]weft.Model{
+		"retry":      mw.Retry()(base),
+		"fallback":   mw.Fallback(backup)(base),
+		"log":        mw.Log(slog.New(slog.NewTextHandler(io.Discard, nil)))(base),
+		"repairjson": mw.RepairJSON()(base),
+	}
+	for name, m := range wrappers {
+		if got := weft.Unwrap(m); got != weft.Model(base) {
+			t.Errorf("%s: Unwrap = %#v, want the wrapped primary", name, got)
+		}
+	}
+	if got := weft.Unwrap(base); got != nil {
+		t.Errorf("Unwrap on a non-wrapper = %#v, want nil", got)
 	}
 }

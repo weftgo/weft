@@ -189,7 +189,9 @@ func Sequential() PolicyOption { return sequentialOption{} }
 // ModelRequest the loop builds and every event the inner model yields,
 // and may retry, substitute, log, or rewrite. Implementations should
 // forward Info (see InfoOf) so RunStart.Model and the manifest still
-// name the underlying model.
+// name the underlying model, and declare the model they wrap with
+// Unwrap (see the Unwrap helper) so a caller can walk the chain one
+// middleware at a time.
 type ModelMiddleware func(next Model) Model
 
 type wrapModelOption []ModelMiddleware
@@ -221,6 +223,27 @@ func InfoOf(m Model) ModelInfo {
 		return m.Info()
 	}
 	return ModelInfo{}
+}
+
+// Unwrap reports the Model one level inside m — the model a middleware
+// wrapper wraps — or nil when m does not implement the optional
+//
+//	interface{ Unwrap() Model }
+//
+// convention (the same shape as InfoOf's). Model middleware declares
+// its inner model with it — func (w *wrapper) Unwrap() weft.Model
+// { return w.next } — so a caller walks a chain one middleware at a
+// time, without knowing the wrapper types:
+//
+//	for m := agt.Model(); m != nil; m = weft.Unwrap(m) { … }
+//
+// The walk ends at the first non-wrapper, which is the model New was
+// given unless user middleware wrapped something of its own.
+func Unwrap(m Model) Model {
+	if m, ok := m.(interface{ Unwrap() Model }); ok {
+		return m.Unwrap()
+	}
+	return nil
 }
 
 // ThinkingOption is accepted by both New and Stream/Generate: reasoning
@@ -754,6 +777,15 @@ func (a *Agent) Tools() []*ToolDef {
 // the agent is unnamed. Manifest requires a name; Serve (weft/mcp)
 // names the tool it exposes after the agent through this accessor.
 func (a *Agent) Name() string { return a.name }
+
+// Model returns the model as the loop calls it: the New model with
+// WrapModel middleware applied, outermost first, exactly the chain
+// every run's model calls go through. The session layer (thread)
+// summarizes with the session agent's own model through it (ADR 0020
+// §2) and walks the middleware with Unwrap to find provider-native
+// compaction (ADR 0020 §7). The value is the agent's own; middleware
+// cannot be added or removed after New.
+func (a *Agent) Model() Model { return a.model }
 
 // Logger returns the logger the agent's runs report their lines to —
 // the Logger option's value, or slog.Default when none was set (the

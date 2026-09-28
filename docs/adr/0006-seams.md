@@ -28,6 +28,18 @@ middleware that wraps a `Model` forwards its identity with
 `weft.InfoOf(next)`, so `RunStart.Model` and the manifest still name the
 provider. Middleware returning a nil `Model` panics at `New`.
 
+*2026-09-28 amendment (root 0.3.7, thread step 1.1).* Middleware
+wrappers also declare the model they wrap — an optional
+`Unwrap() Model` method, the same shape as the `Info()` forwarding —
+and `weft.Unwrap(m)` walks one level, nil on a non-wrapper;
+`(*Agent).Model()` returns the model as the loop calls it, middleware
+included, in the installed order. Neither changes the seam: both are
+read-only accessors. The session layer needs them — it summarizes with
+the session agent's own model by default (ADR 0020 §2) and walks the
+chain to find provider-native compaction (ADR 0020 §7). Implemented by
+every model middleware in package `mw` (`Fallback` names its primary,
+the chain's first model — the same one its `Info` reports).
+
 **Tool seam.** `weft.WrapTools(mw ...ToolMiddleware)` wraps every call
 the loop dispatches, and `Agent.CallTool` — the manual dispatch seam —
 runs the same chain. `ToolCaller` is `func(ctx, ToolCallPart) (string,

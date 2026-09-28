@@ -197,3 +197,57 @@ func mustPath(s *thread.Session, id string) []thread.Entry {
 	}
 	return path
 }
+
+// Branch navigates the tree and Fork copies a path into a new session:
+// the branch's context drops the abandoned entries, the fork carries
+// the whole copied path and names its origin in its header.
+func ExampleSession_Branch() {
+	ctx := context.Background()
+	agent := weft.New(wefttest.Script())
+	st := thread.Memory()
+	next := 0
+	ids := []string{"s_nav", "e_nav"}
+	s, err := thread.Create(ctx, st, agent, thread.IDs(func() string { id := ids[next]; next++; return id }))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	// Two messages of history, appended the way Send will from step 1.7.
+	if err := st.Append(ctx, s.ID(),
+		thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: weft.User("draft the intro")},
+		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: time.Now().UTC(), Message: weft.Assistant("done")},
+	); err != nil {
+		fmt.Println(err)
+		return
+	}
+	s, err = thread.Open(ctx, st, s.ID(), agent, thread.IDs(func() string { id := ids[next]; next++; return id }))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// Navigate back to the first entry: the abandoned reply drops out
+	// of the context, and the file keeps it.
+	if err := s.Branch(ctx, "e_1"); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("branch context:", len(s.Context()))
+
+	// Fork the full path into a new session: self-contained, its
+	// header naming where it grew from.
+	f, err := s.Fork(ctx, "e_2", thread.IDs(func() string { return "s_fork" }))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	page, _ := thread.List(ctx, st, thread.Query{})
+	for _, h := range page.Sessions {
+		if h.ID == "s_fork" && h.Parent != nil {
+			fmt.Println("fork of", h.Parent.Session, "at", h.Parent.Entry, "carries", len(f.Context()), "messages")
+		}
+	}
+	// Output:
+	// branch context: 1
+	// fork of s_nav at e_2 carries 2 messages
+}

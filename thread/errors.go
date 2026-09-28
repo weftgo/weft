@@ -6,6 +6,14 @@ import (
 )
 
 var (
+	// ErrNotImplemented is returned by the pieces of the v0.1 design
+	// whose step has not landed yet — SummarizeLeft until step 1.8
+	// writes branch summaries (ADR 0020 §6). It says "not in this
+	// build", never "not in the design": the option exists so callers
+	// code against the final shape and get a loud, matchable error
+	// instead of a silent no-op.
+	ErrNotImplemented = errors.New("thread: feature not implemented in this build")
+
 	// ErrNotFound is returned by Load, Append, and Delete for a session
 	// id the storage does not hold.
 	ErrNotFound = errors.New("thread: session not found")

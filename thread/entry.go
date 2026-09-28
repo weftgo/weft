@@ -178,6 +178,62 @@ func (InfoEntry) isEntry()          {}
 func (CustomEntry) isEntry()        {}
 func (CustomMessageEntry) isEntry() {}
 
+// idOf returns the entry's ID — the tree node's name, the one field
+// every kind carries at the same meaning. The sealed set keeps the
+// switch exhaustive by construction; the empty string returns only for
+// a zero value no code path in this package builds.
+func idOf(e Entry) string {
+	switch e := e.(type) {
+	case MessageEntry:
+		return e.ID
+	case TurnEntry:
+		return e.ID
+	case CompactionEntry:
+		return e.ID
+	case BranchSummaryEntry:
+		return e.ID
+	case LeafEntry:
+		return e.ID
+	case LabelEntry:
+		return e.ID
+	case InfoEntry:
+		return e.ID
+	case CustomEntry:
+		return e.ID
+	case CustomMessageEntry:
+		return e.ID
+	}
+	return ""
+}
+
+// parentOf returns the entry's ParentID — where it attached in the
+// tree, empty for a root. A leaf entry's parent is where the leaf
+// entry itself was appended; the entry it navigates to is its own
+// Entry field, not its parent.
+func parentOf(e Entry) string {
+	switch e := e.(type) {
+	case MessageEntry:
+		return e.ParentID
+	case TurnEntry:
+		return e.ParentID
+	case CompactionEntry:
+		return e.ParentID
+	case BranchSummaryEntry:
+		return e.ParentID
+	case LeafEntry:
+		return e.ParentID
+	case LabelEntry:
+		return e.ParentID
+	case InfoEntry:
+		return e.ParentID
+	case CustomEntry:
+		return e.ParentID
+	case CustomMessageEntry:
+		return e.ParentID
+	}
+	return ""
+}
+
 // Wire discriminators for entry kinds.
 const (
 	kindMessage       = "message"

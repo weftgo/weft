@@ -8,6 +8,7 @@ import (
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/thread"
+	"github.com/weftgo/weft/wefttest"
 )
 
 // A session entry marshals with its "type" discriminator — one JSON
@@ -101,4 +102,98 @@ func ExampleMemory() {
 	// Output:
 	// s_demo table-1 1 <nil>
 	// user asks: Where is order 1234?
+}
+
+// A session carries the conversation: application state survives
+// outside the model's context, application messages ride inside it,
+// and the title and metadata are editable appends. The IDs option pins
+// deterministic ids so the output is stable.
+func ExampleCreate() {
+	ctx := context.Background()
+	agent := weft.New(wefttest.Script()) // no run happens here; Send arrives in step 1.7
+	st := thread.Memory()
+
+	next := 0
+	ids := []string{"s_demo1", "e_demo2", "e_demo3", "e_demo4", "e_demo5"}
+	deterministic := thread.IDs(func() string { id := ids[next]; next++; return id })
+
+	s, err := thread.Create(ctx, st, agent, deterministic)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("session", s.ID())
+	if err := s.SetInfo(ctx, "Order support", map[string]string{"team": "ops"}); err != nil {
+		fmt.Println(err)
+		return
+	}
+	if err := s.Custom(ctx, "cart", json.RawMessage(`{"items":2}`)); err != nil {
+		fmt.Println(err)
+		return
+	}
+	if err := s.CustomMessage(ctx, "note", weft.User("The customer's quote covers two items.")); err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	again, err := thread.Open(ctx, st, s.ID(), agent, thread.IDs(func() string { return "e_demo6" }))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(again.Title(), again.Meta()["team"])
+	for _, m := range again.Context() {
+		fmt.Println(m.Role, ":", m.Text())
+	}
+	// Output:
+	// session s_demo1
+	// Order support ops
+	// user : The customer's quote covers two items.
+}
+
+// The tree in memory and the session in storage agree, and the leaf is
+// where the next entry attaches: Entries walks the whole tree, Path
+// one root-to-entry chain, and Usage reads the cost ledger.
+func ExampleSession_Usage() {
+	ctx := context.Background()
+	agent := weft.New(wefttest.Script())
+	st := thread.Memory()
+	s, err := thread.Create(ctx, st, agent, thread.IDs(func() string { return "s_ledger" }))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	// A finished turn, recorded the way Send will from step 1.7.
+	if err := st.Append(ctx, s.ID(),
+		thread.MessageEntry{ID: "e_q", Created: time.Now().UTC(), Message: weft.User("Summarize the plan.")},
+		thread.TurnEntry{
+			ID: "e_t", ParentID: "e_q", Created: time.Now().UTC(),
+			RunID: "s_ledger-t1", StopReason: weft.StopEndTurn,
+			Usage: weft.Usage{InputTokens: 120, OutputTokens: 30},
+		},
+	); err != nil {
+		fmt.Println(err)
+		return
+	}
+	open, err := thread.Open(ctx, st, "s_ledger", agent)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("entries:", len(open.Entries()), "leaf:", open.Leaf())
+	fmt.Println("path:", len(mustPath(open, "e_t")))
+	u := open.Usage()
+	fmt.Println("turn input tokens:", u.Turns.InputTokens, "summary tokens:", u.Summaries.InputTokens)
+	// Output:
+	// entries: 2 leaf: e_t
+	// path: 2
+	// turn input tokens: 120 summary tokens: 0
+}
+
+func mustPath(s *thread.Session, id string) []thread.Entry {
+	path, err := s.Path(id)
+	if err != nil {
+		panic(err)
+	}
+	return path
 }

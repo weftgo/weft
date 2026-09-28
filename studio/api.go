@@ -463,24 +463,25 @@ func (c *eventCache) put(id string, events []weft.Event) {
 }
 
 // storeKind names the store's backend for api/meta, best effort: the
-// dynamic type's name ("memStore" → "memory", anything containing
-// "sqlite" → "sqlite"), else "unknown".
+// dynamic type's full name ("*store.memStore" → "memory", anything
+// carrying "sqlite" → "sqlite"), else its bare type name.
 func storeKind(s store.Store) string {
-	name := fmt.Sprintf("%T", s)
+	full := fmt.Sprintf("%T", s)
+	lower := strings.ToLower(full)
+	switch {
+	case strings.Contains(lower, "mem"):
+		return "memory"
+	case strings.Contains(lower, "sqlite"):
+		return "sqlite"
+	}
+	name := strings.TrimPrefix(full, "*")
 	if i := strings.LastIndex(name, "."); i >= 0 {
 		name = name[i+1:]
 	}
-	name = strings.Trim(name, "*")
-	switch {
-	case strings.Contains(strings.ToLower(name), "mem"):
-		return "memory"
-	case strings.Contains(strings.ToLower(name), "sqlite"):
-		return "sqlite"
-	case name == "":
+	if name == "" {
 		return "unknown"
-	default:
-		return name
 	}
+	return name
 }
 
 // weftVersion reports the core module version this process built

@@ -18,11 +18,24 @@ const config = defineConfig({
   build: {
     sourcemap: false,
   },
+  // The dev loop (plan §6): terminal 1 serves the API on :7331, this
+  // dev server serves the app under /studio/ (run with
+  // `bun run dev -- --base /studio/`) and proxies the API across, so
+  // the app sees exactly the production path shape.
+  server: {
+    proxy: {
+      "/studio/api": { target: "http://127.0.0.1:7331", changeOrigin: false },
+    },
+  },
   plugins: [
     tailwindcss(),
     tanstackStart({
       spa: {
         enabled: true,
+        // The shell is prerendered at /runs — a real page. "/" would
+        // hit the index route's redirect during prerender and yield an
+        // empty shell the client then fails to hydrate.
+        maskPath: "/runs",
         prerender: { outputPath: "index.html" },
       },
     }),

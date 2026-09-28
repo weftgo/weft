@@ -547,3 +547,19 @@ func TestHandlerNilPanics(t *testing.T) {
 	}()
 	_ = Handler(nil)
 }
+
+// The CSP hashes must match what the browser computes over the PARSED
+// script text: the HTML parser replaces NUL bytes with U+FFFD (the
+// router's streamed match ids contain one), so a NUL in an inline
+// script must hash identically to its already-replaced form —
+// otherwise the script is blocked and the app never boots.
+func TestCSPHashMatchesParsedText(t *testing.T) {
+	withNUL := cspFor([]byte(`<script>x("a` + "\x00" + `");</script>`))
+	withReplacement := cspFor([]byte(`<script>x("a` + "�" + `");</script>`))
+	if withNUL != withReplacement {
+		t.Errorf("NUL script hashed differently than its parsed form:\n%s\n%s", withNUL, withReplacement)
+	}
+	if !strings.Contains(withNUL, "'sha256-") {
+		t.Errorf("no hash emitted: %s", withNUL)
+	}
+}

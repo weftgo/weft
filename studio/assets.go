@@ -67,6 +67,11 @@ func cspFor(shell []byte) string {
 		if len(bytes.TrimSpace(body)) == 0 {
 			continue
 		}
+		// The HTML parser replaces NUL bytes in script text with
+		// U+FFFD, and the browser hashes the parsed text — so the
+		// router's "__root__\x00" match id must be normalized the
+		// same way before hashing.
+		body = bytes.ReplaceAll(body, []byte{0}, []byte("\uFFFD"))
 		sum := sha256.Sum256(body)
 		csp += " 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
 	}

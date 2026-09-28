@@ -4,6 +4,66 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## studio 0.1.0 — 2026-09-28 (the Inspector, T1 — unreleased until tagged)
+
+First release of `weft/studio`: the Inspector over a run store, served
+as one read-only `http.Handler`. New module, no core or store change.
+
+### Added — the mount surface (ADR 0018)
+
+- `Handler(store, opts...)` serves the embedded UI and the JSON API;
+  options `Base` (the mount path, default `/studio/`, written into the
+  shell's `<base href>` per request — the same bundle mounts
+  anywhere), `Manifest` (agent/tool cards), `Title`, and
+  `Capabilities(...)` — ADR 0018 §8's hosting seam: the open handler
+  reports none, a hosted server declares what it carries, and the UI
+  gates deployment-specific screens on the one
+  `api/meta.capabilities` list.
+- The read-only API, golden-pinned on the Go side and type-mirrored in
+  TS against the same fixtures: `api/meta`, `api/runs` (agent,
+  status, tag, and cursor paging — `parent` absent means top-level
+  only), `api/runs/{id}` (row + the store's own result document +
+  children), `api/runs/{id}/events` — **paged, never inline**
+  (`after`/`limit`, `next_after`, `done` only when the run finished;
+  the T2a live tail is this endpoint read from the last position;
+  sliced from one `Get` behind a finished-run LRU), `api/manifest`.
+  A recording this weft cannot decode is a 409 `newer_format` with
+  the upgrade message; unknown-event results likewise.
+- `studio/examples/basic`: records a tool-call run, a subagent run,
+  and a failing run into SQLite and serves Studio on 127.0.0.1:7331.
+
+### Added — the Inspector UI (T1: A1–A4, B1–B2, B7, B9–B10, H1, L3)
+
+- Runs list: every status shown (crash-orphaned rows read
+  interrupted), filters and the paging cursor in the URL, manual
+  refresh, copyable mono ids, token columns with cached/reasoning
+  splits on hover.
+- Run page: steps with model text, reasoning collapsed, tool calls
+  with pretty-printed args and their results (error-as-data in
+  mustard with the `ToolError` code), subagents inline with usage
+  rollups and links to child run pages, truncation badged from the
+  loop's own markers, raw JSON one `r` away, the local-recording
+  note. Every view, selection, and replay position is a URL.
+- Guaranteed replay over the event index (events carry no
+  timestamps): play/pause, 1×/4×, scrubber over the seq gutter, `[`
+  and `]` step, `t` in the URL.
+- Agent and tool cards from the manifest: schemas as trees, per-tool
+  policy chips, source file:line.
+- Theme: the landing page's paper-loom tokens (Geist/Geist Mono
+  self-hosted, offline), the Studio event/status palette
+  (contrast-checked), system/light/dark with no flash.
+
+### Engineering
+
+- The UI is a TanStack Start SPA prebuilt into a committed, embedded
+  `studio/dist` (~305 KiB gzipped of a 600 KiB budget): no build step
+  for users. `make studio-check` gates dist freshness (two clean
+  builds are byte-identical), the size budget, and the web
+  typecheck/tests; `make test`/`lint` cover the Go side via go.work.
+- Fully offline by construction: every resource the app loads is
+  same-origin; the CSP allows no external script, style, or
+  connection.
+
 ## store 0.1.1 — 2026-09-27 (review pass over 0.1.0)
 
 ### Fixed — the durability races a second look found

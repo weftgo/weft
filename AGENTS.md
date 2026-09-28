@@ -121,6 +121,12 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    as they arrive, the result written at the run's end (the partial on failure);
 //    s.List(ctx, store.Query{}) pages without events; s.Get(ctx, id) returns everything;
 //    a stale heartbeat reads interrupted; s.Delete orphans children by design.
+
+// 7. Serve the Inspector (module weft/studio): one read-only handler over a store —
+//    mux.Handle("/studio/", http.StripPrefix("/studio",
+//        studio.Handler(s, studio.Manifest(bytes), studio.Capabilities("live"))))
+//    serves the embedded UI (committed dist, no build step) and the JSON API:
+//    meta/runs/runs/{id}/run events (paged)/manifest. Base(path) mounts it anywhere.
 ```
 
 Test offline with `wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))`;

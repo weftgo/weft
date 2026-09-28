@@ -16,8 +16,9 @@ function load(name: string): string {
 }
 
 const subDoc = JSON.parse(load("run-sub.golden.json")) as RunDoc
-const subEvents = (JSON.parse(load("events-sub.golden.json")) as EventsPage)
-  .events.map((pe) => pe.event)
+const subEvents = (
+  JSON.parse(load("events-sub.golden.json")) as EventsPage
+).events.map((pe) => pe.event)
 
 describe("StepList", () => {
   it("renders steps with the subagent block inline (B1, B7)", async () => {
@@ -36,7 +37,12 @@ describe("StepList", () => {
     // The child's text appears twice by design: inline in the
     // subagent block and as the parent call's tool result.
     expect(screen.getAllByText("order 42 shipped this morning").length).toBe(2)
-    expect(screen.getByText(/10 in \/ 5 out/)).toBeTruthy()
+    // (the step header carries the same numbers, so more than one)
+    expect(screen.getAllByText(/10 in \/ 5 out/).length).toBeGreaterThan(0)
+    // The call row: name, an args summary, the ok pill and the size.
+    expect(screen.getByText('{"prompt":"status of order 42"}')).toBeTruthy()
+    expect(screen.getByText("ok")).toBeTruthy()
+    expect(screen.getAllByText("29 B").length).toBeGreaterThan(0)
 
     // The child link (the store's own children rows).
     expect(screen.getByText("open run")).toBeTruthy()
@@ -87,6 +93,26 @@ describe("StepList", () => {
       <StepList events={events} folded={fold(events)} doc={doc} />
     )
     expect(screen.getByText("cut 130,000 bytes")).toBeTruthy()
+  })
+
+  it("says a failed run's open step failed, not that it is in flight", async () => {
+    const events: WireEvent[] = [
+      { type: "run_start", id: "r_x", model: { provider: "p", name: "m" } },
+      { type: "step_start", run_id: "r_x", index: 0 },
+      { type: "text_delta", run_id: "r_x", text: "partial" },
+    ]
+    const doc = {
+      ...subDoc,
+      id: "r_x",
+      children: [],
+      status: "failed",
+      err: "boom",
+    } as RunDoc
+    await renderWithRouter(
+      <StepList events={events} folded={fold(events)} doc={doc} />
+    )
+    expect(screen.getByText("failed during this step")).toBeTruthy()
+    expect(screen.queryByText("in flight…")).toBeNull()
   })
 
   it("renders exactly the folded prefix at a playhead (B2's shape)", async () => {

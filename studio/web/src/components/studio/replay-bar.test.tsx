@@ -98,6 +98,23 @@ describe("ReplayBar", () => {
     expect(screen.getByTestId("ph").textContent).toBe("4/6")
     fireEvent.keyDown(window, { key: "]" })
     expect(screen.getByTestId("ph").textContent).toBe("5/6")
+    // [ skips the two deltas back to the step_start boundary; . and ,
+    // move one event at a time.
+    fireEvent.keyDown(window, { key: "[" })
+    fireEvent.keyDown(window, { key: "[" })
+    expect(screen.getByTestId("ph").textContent).toBe("1/6")
+    fireEvent.keyDown(window, { key: "." })
+    expect(screen.getByTestId("ph").textContent).toBe("2/6")
+    fireEvent.keyDown(window, { key: "," })
+    expect(screen.getByTestId("ph").textContent).toBe("1/6")
+    // A held modifier goes to the browser, not the bar.
+    fireEvent.keyDown(window, { key: "]", ctrlKey: true })
+    expect(screen.getByTestId("ph").textContent).toBe("1/6")
+    // ] lands just past the next boundary: step_start, then tool_start.
+    fireEvent.keyDown(window, { key: "]" })
+    expect(screen.getByTestId("ph").textContent).toBe("2/6")
+    fireEvent.keyDown(window, { key: "]" })
+    expect(screen.getByTestId("ph").textContent).toBe("5/6")
     // Space mid-stream plays from here; from the end it restarts.
     fireEvent.keyDown(window, { key: "]" })
     expect(screen.getByTestId("ph").textContent).toBe("6/6")

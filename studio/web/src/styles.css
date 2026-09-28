@@ -55,6 +55,7 @@
   --code-ink: #ece6d6;
   --code-mut: #8d887b;
   --code-str: #a8c07a;
+  --code-num: #9fb8ff; /* numbers in JSON, on the dark window */
   --win-border: #26221b;
   --win-bar: #1d1a15;
   --win-dot: #332e25;
@@ -111,6 +112,7 @@
   --code-ink: #ece6d6;
   --code-mut: #8d887b;
   --code-str: #a8c07a;
+  --code-num: #9fb8ff;
   --win-border: #2f2b25;
   --win-bar: #221f1a;
   --win-dot: #3a352d;
@@ -167,6 +169,7 @@
   --color-code-ink: var(--code-ink);
   --color-code-mut: var(--code-mut);
   --color-code-str: var(--code-str);
+  --color-code-num: var(--code-num);
   --color-win-border: var(--win-border);
   --color-win-bar: var(--win-bar);
   --color-win-dot: var(--win-dot);
@@ -231,6 +234,19 @@
   }
 }
 
+/* a row the trace just pointed at */
+.flash {
+  animation: flash 1.2s ease-out 1;
+}
+@keyframes flash {
+  0% {
+    box-shadow: 0 0 0 2px var(--thread);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+
 @keyframes pulse-dot {
   0% {
     box-shadow: 0 0 0 0 color-mix(in oklab, var(--status-run) 60%, transparent);
@@ -244,22 +260,57 @@
    Dark in both themes; the only shadow in the UI. Three dots, one
    lit with the thread when live. */
 .codewin {
-  border-radius: 0.75rem;
+  border-radius: 0.625rem;
   overflow: hidden;
   border: 1px solid var(--win-border);
   background: var(--code-bg);
   color: var(--code-ink);
   box-shadow:
     0 1px 2px rgba(20, 16, 10, 0.05),
-    0 12px 40px -18px rgba(20, 16, 10, 0.25);
+    0 8px 24px -16px rgba(20, 16, 10, 0.25);
 }
 .codewin-bar {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   background: var(--win-bar);
-  padding: 0.5rem 1rem;
+  padding: 0.25rem 0.5rem 0.25rem 0.75rem;
   border-bottom: 1px solid var(--win-border);
+  min-height: 1.75rem;
+}
+/* the "show all" foot of a folded window */
+.codewin-more {
+  display: block;
+  width: 100%;
+  padding: 0.375rem 1rem;
+  border-top: 1px solid var(--win-border);
+  background: var(--win-bar);
+  color: var(--code-mut);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-align: left;
+  cursor: pointer;
+}
+.codewin-more:hover {
+  color: var(--code-ink);
+}
+/* the waterfall: an open span fades out at its right edge; a span
+   that never completed is hatched */
+.waterfall-open {
+  mask-image: linear-gradient(to right, #000 60%, transparent);
+}
+.waterfall-hatched {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 3px,
+    rgba(0, 0, 0, 0.25) 3px 5px
+  );
+}
+/* an inline JSON block inside a paper surface (the raw explorer rows) */
+.codewin-inline {
+  background: var(--code-bg);
+  color: var(--code-ink);
+  border: 1px solid var(--win-border);
 }
 .codewin-dot {
   width: 9px;
@@ -272,10 +323,16 @@
 }
 .codewin pre {
   margin: 0;
-  padding: 0.875rem 1rem;
+  padding: 0.625rem 0.75rem;
   overflow: auto;
   font-family: var(--font-mono);
   font-size: 0.8125rem;
-  line-height: 1.6;
+  line-height: 1.55;
   color: var(--code-ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.codewin pre[data-folded] {
+  /* a fade at the fold so the cut is visible */
+  mask-image: linear-gradient(to bottom, #000 80%, transparent);
 }

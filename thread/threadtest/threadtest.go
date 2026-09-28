@@ -26,8 +26,9 @@ import (
 // them. The corruption rows — unknown kind, newer "v", malformed and
 // torn lines — need a backend that can hold undecodable data, so they
 // run only when the storage also implements RawInjector and skip
-// otherwise: Memory cannot hold what does not decode, and its loudness
-// is pinned by the format tests in the thread package.
+// otherwise: Memory holds the raw bytes (it implements the hook), and
+// a backend that cannot hold them at all pins its loudness where its
+// format lives.
 func Run(t *testing.T, open func(t *testing.T) thread.Storage) {
 	t.Run("CreateLoadRoundTrip", roundTrip(open))
 	t.Run("AppendAtomic", appendAtomic(open))

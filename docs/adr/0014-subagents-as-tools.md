@@ -82,7 +82,7 @@ middleware (`errors.As`). A child that ends with pending approvals is
 under the run-boundary model the parent's transcript has nowhere to
 carry the child's pending call, and no parent option can decide for a
 call id that exists only inside the child, so the delegation is loud
-rather than silently lossy; full propagation belongs to `runtime`, which
+rather than silently lossy; full propagation belongs to `thread` (ADR 0022), which
 owns sessions and can resume the child under its lineage id. The
 practical guidance, stated in the godoc and README: approval-gated tools
 belong in the orchestrator, not in a child. `RequireApproval` **on the
@@ -147,7 +147,7 @@ a goroutine with a window, not a box. The "shared tree" half of
 AgentLanes is a *session* concept (one transcript, several
 configurations taking turns on it); it is expressible today as user
 code — several agents sharing `Messages` on a caller-owned transcript —
-and belongs to `runtime` sessions if it ever becomes a primitive. The
+and belongs to `thread` sessions if it ever becomes a primitive. The
 core does not choose between the shapes: `Nested` + usage roll-up
 serve either.
 
@@ -166,8 +166,8 @@ serve either.
 ## Out of scope, deliberately
 
 A handoff primitive, a graph, shared mutable state between parent and
-child, a subagent pool or receipts (`runtime`, TODO §14), propagation
-of a child's pending approvals (`runtime`), and `Nested.Depth` (the
+child, a subagent pool or receipts (`thread/pool`, ADR 0022), propagation
+of a child's pending approvals (`thread`, ADR 0022), and `Nested.Depth` (the
 wrapping is its own record; depth is a viewer concern).
 
 ## Consequences

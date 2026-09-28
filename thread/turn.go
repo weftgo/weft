@@ -303,7 +303,11 @@ func (s *Session) runOne(ps pendingSend) {
 	res, err := run.Wait()
 	s.recordTurnEnd(persist, t, res, err, len(input))
 	// The trigger's second site: after the turn, with the new
-	// measurement recorded.
+	// measurement recorded. It runs before the turn is decided so a
+	// Wait that returns leaves the session fully settled — turn,
+	// ledger and any between-turn compaction. A panic here cannot
+	// repaint the turn: finish is idempotent and the hooks contain
+	// their own panics.
 	s.maybeAutoCompact(persist)
 	t.finish(res, err)
 }

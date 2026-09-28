@@ -29,6 +29,10 @@ var (
 	// (ADR 0011 §5–§6). Loud over silent: a session must decode to
 	// exactly what was written, and an older weft says so instead of
 	// guessing. List, which reads headers only, still works — an older
-	// reader can see the session and name why it cannot open it.
+	// reader sees a session whose entries are newer and Load names why
+	// it cannot open it. The one thing List cannot show is a session
+	// whose header itself is newer: the envelope gates the whole file,
+	// so such a session is invisible to an older List — visible again
+	// as soon as its directory is read by a weft that knows the format.
 	ErrNewerFormat = errors.New("thread: session format newer than this build")
 )

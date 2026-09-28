@@ -281,7 +281,9 @@ func (s *Session) pathLocked(entryID string) ([]Entry, error) {
 // conversation order, with weft.Repair applied last — every call the
 // transcript shows has a result (ADR 0011 §2, ADR 0001). Entries of
 // the bookkeeping kinds never reach it; a custom entry's whole point
-// is to survive outside it.
+// is to survive outside it. A call left pending by its turn is shown
+// repaired here — the caller's view; the run Send starts repairs
+// pending calls itself, so the decision options can resolve them.
 //
 // This walk is where compaction lands: from step 1.8, the latest
 // compaction entry on the path contributes its summary ahead of the
@@ -290,6 +292,17 @@ func (s *Session) pathLocked(entryID string) ([]Entry, error) {
 // (ADR 0020 §1, §6). Nothing before step 1.8 writes either kind, so
 // the walk below reads the whole path raw.
 func (s *Session) Context() []weft.Message {
+	return weft.Repair(s.rawContext())
+}
+
+// rawContext is Context before weft.Repair: the leaf's path messages
+// exactly as stored. The run Send starts carries these — the loop
+// repairs its input itself, and with a decision option in force it
+// leaves that decision's pending calls unresolved so it can resolve
+// them (loop.go: repair-with-skip). Repairing here would close the
+// approval boundary: an Approve arriving at a transcript whose call
+// already reads "interrupted" has nothing left to resolve.
+func (s *Session) rawContext() []weft.Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	path, err := s.pathLocked(s.leaf)
@@ -305,7 +318,7 @@ func (s *Session) Context() []weft.Message {
 			msgs = append(msgs, e.Message)
 		}
 	}
-	return weft.Repair(msgs)
+	return msgs
 }
 
 // Label names an entry — bookmarks, checkpoints, the anchors a UI

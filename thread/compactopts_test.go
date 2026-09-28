@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -148,10 +149,13 @@ func TestTriggerFuncAndRateLimits(t *testing.T) {
 	ctx := context.Background()
 	agent, _ := scriptedAgent(bigUsage(), 8)
 	st := thread.Memory()
+	var mu sync.Mutex
 	var seen []thread.TriggerInput
 	s, _ := thread.Create(ctx, st, agent,
 		thread.ContextWindow(100_000),
 		thread.TriggerFunc(func(in thread.TriggerInput) bool {
+			mu.Lock()
+			defer mu.Unlock()
 			seen = append(seen, in)
 			return in.LastInput > 0 && in.Window == 100_000
 		}),
@@ -180,9 +184,14 @@ func TestTriggerFuncAndRateLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(seen) == 0 {
-		t.Fatal("the custom trigger was never consulted")
-	}
+	// The trigger runs in the session's runner goroutine; the waits
+	// above cover it (a Wait returns with the between-turn
+	// housekeeping done), and the counts read under the mutex.
+	waitFor(t, "the custom trigger to be consulted", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(seen) > 0
+	})
 	// MaxPerSession(1) plus MinTurnsBetween(5): exactly one automatic
 	// compaction ran.
 	waitFor(t, "the rate-limited compaction", func() bool { return hasCompaction(s) >= 1 })

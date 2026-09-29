@@ -751,6 +751,23 @@ func (s *Session) appendLocked(ctx context.Context, build func(id, parent string
 		return err
 	}
 	s.adoptLocked(e)
+	// Every session write is durable when it returns: under the
+	// FsyncOnFlush cadence the flush is what makes it so, and losing a
+	// revocation — or a decision, Decide's own rule — to a crash must
+	// not be possible after a successful call.
+	return s.flushLocked(ctx)
+}
+
+// flushLocked completes the storage's buffered durability when it
+// offers the Flusher capability (open.go): under FsyncOnFlush, the
+// append is in the page cache until here. The paths that cannot fail
+// their turn for a late flush (recordTurnEnd) log it instead of
+// returning it; everything else returns it — the durability a call
+// promised is part of the call. Callers hold s.mu.
+func (s *Session) flushLocked(ctx context.Context) error {
+	if f, ok := s.st.(Flusher); ok {
+		return f.Flush(ctx, s.header.ID)
+	}
 	return nil
 }
 

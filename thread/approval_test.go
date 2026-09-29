@@ -1273,3 +1273,315 @@ func TestResumeTwice(t *testing.T) {
 		t.Fatalf("executions: %v", got)
 	}
 }
+
+// ── The 2026-09-29 review round's pins ────────────────────────────────
+
+// A grant match under Quorum(2) is one identity, not a completed
+// boundary: the chain-decided turn must not auto-resume (which would
+// deny the call as "no decision"), and a second decision from a
+// distinct identity completes it (ADR 0021 §5 — the chain-decided
+// hand-off arms only when every dangling call holds an effective
+// decision).
+func TestQuorumGrantMatchWaitsForSecondDecision(t *testing.T) {
+	ctx := context.Background()
+	agent, ran := refundAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1234"}`}),
+		wefttest.Say("done"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.Quorum(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Grant(ctx, thread.Grant{
+		Tool: "refund",
+		Args: []thread.Arg{thread.ArgEquals("/order_id", json.RawMessage(`"1234"`))},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	call := parkSend(t, s, ctx)
+	if got := ran.snapshot(); len(got) != 0 {
+		t.Fatalf("the tool ran before the quorum completed: %v", got)
+	}
+	if got := s.Pending(); len(got) != 1 {
+		t.Fatalf("Pending after a one-identity grant decision: got %d, want 1 (quorum unmet)", len(got))
+	}
+	rt, err := s.Decide(ctx, thread.Decision{CallID: call.ID, Kind: thread.OutcomeApprove, Who: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt == nil {
+		t.Fatal("Decide completing the quorum returned no Turn")
+	}
+	if _, err := rt.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := ran.snapshot(); len(got) != 1 || !got[0] {
+		t.Fatalf("approved resume: Approved flags %v, want [true]", got)
+	}
+	if got := s.Pending(); len(got) != 0 {
+		t.Fatalf("Pending after the completed quorum: got %d, want 0", len(got))
+	}
+}
+
+// An Approver's single approval under Quorum(2) leaves the call
+// pending — one identity — instead of arming a resume that denies it
+// as "no decision"; the second decision completes it.
+func TestQuorumApproverApprovalWaitsForSecondDecision(t *testing.T) {
+	ctx := context.Background()
+	agent, ran := refundAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1234"}`}),
+		wefttest.Say("done"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent,
+		thread.Quorum(2),
+		thread.WithApprover(func(ctx context.Context, r thread.Request) (thread.Decision, bool) {
+			return thread.Decision{CallID: r.CallID, Kind: thread.OutcomeApprove, Who: "terminal"}, true
+		}),
+		thread.ApproverTimeout(5*time.Second),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := parkSend(t, s, ctx)
+	if got := ran.snapshot(); len(got) != 0 {
+		t.Fatalf("the tool ran before the quorum completed: %v", got)
+	}
+	if got := s.Pending(); len(got) != 1 {
+		t.Fatalf("Pending after the approver's single approval: got %d, want 1 (quorum unmet)", len(got))
+	}
+	rt, err := s.Decide(ctx, thread.Decision{CallID: call.ID, Kind: thread.OutcomeApprove, Who: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt == nil {
+		t.Fatal("Decide completing the quorum returned no Turn")
+	}
+	if _, err := rt.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := ran.snapshot(); len(got) != 1 || !got[0] {
+		t.Fatalf("approved resume: Approved flags %v, want [true]", got)
+	}
+}
+
+// A Deny built with Always set mints no standing approval: the next
+// such call parks again. Only an approve grants (ADR 0021 §4) — the
+// same gate the Approver path applies.
+func TestDenyAlwaysMintsNoGrant(t *testing.T) {
+	ctx := context.Background()
+	agent, ran := refundAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`, ID: "call_1"}),
+		wefttest.Say("ok"),
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`, ID: "call_2"}),
+		wefttest.Say("ok again"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := parkSend(t, s, ctx)
+	d := thread.Deny(call.ID, "not allowed")
+	d.Always = true
+	rt, err := s.Decide(ctx, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range s.Entries() {
+		if g, ok := e.(thread.GrantEntry); ok && g.Tool == "refund" {
+			t.Fatalf("a Deny with Always minted grant %+v", g.Grant)
+		}
+	}
+	if got := ran.snapshot(); len(got) != 0 {
+		t.Fatalf("denied call ran: %v", got)
+	}
+	// The next such call parks again: no grant stands.
+	turn, err := s.Send(ctx, weft.User("refund it again"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := turn.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Pending(); len(got) != 1 {
+		t.Fatalf("Pending after re-issuing a deny-always call: got %d, want 1 (no grant may stand)", len(got))
+	}
+}
+
+// A call id the model re-issues starts a fresh occurrence: the walk
+// resets the call's request and decisions at the message that carries
+// it, so a grant-decided second occurrence is not folded together
+// with the first one's conflicting decisions (ADR 0007 lets call ids
+// repeat across turns; ADR 0021 scopes by occurrence).
+func TestRepeatedCallIDOccurrencesStaySeparate(t *testing.T) {
+	ctx := context.Background()
+	agent, ran := refundAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`, ID: "call_9"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`, ID: "call_9"}),
+		wefttest.Say("done"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.AutoResume(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := parkSend(t, s, ctx)
+	// Conflicting decisions resolve the first occurrence to deny.
+	if _, err := s.Decide(ctx,
+		thread.Decision{CallID: call.ID, Kind: thread.OutcomeApprove, Who: "a"},
+		thread.Deny(call.ID, "changed my mind"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Grant(ctx, thread.Grant{
+		Tool: "refund",
+		Args: []thread.Arg{thread.ArgEquals("/order_id", json.RawMessage(`"1"`))},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The resume's model re-issues call_9; the grant decides it.
+	r1, err := s.Resume(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Pending(); len(got) != 0 {
+		t.Fatalf("Pending after the grant-decided re-issue: got %d, want 0 (the grant resolves the second occurrence)", len(got))
+	}
+	// Resolving the boundary runs the granted call approved.
+	r2, err := s.Resume(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r2.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := ran.snapshot(); len(got) != 1 || !got[0] {
+		t.Fatalf("granted re-issue: Approved flags %v, want [true] — the old occurrence's conflict must not deny it", got)
+	}
+	// The transcript holds both occurrences' results — the first's
+	// pinned conflict denial, then the granted run's own — in that
+	// order; the second occurrence's is the one that must be last.
+	var last string
+	for _, r := range toolResults(s.Context()) {
+		if r.CallID == call.ID {
+			last = r.Content
+		}
+	}
+	if last != "refunded 1" {
+		t.Fatalf("the second occurrence's result: got %q, want the granted run's %q (the old occurrence's conflict leaked)", last, "refunded 1")
+	}
+}
+
+// An approve beside a resolve is a conflict both ways — the fold's
+// own words — not a silently discarded approve (ADR 0021 §5).
+func TestResolveBesideApproveConflicts(t *testing.T) {
+	ctx := context.Background()
+	agent, ran := refundAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}),
+		wefttest.Say("ok"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := parkSend(t, s, ctx)
+	rt, err := s.Decide(ctx,
+		thread.Resolve(call.ID, "42"),
+		thread.Decision{CallID: call.ID, Kind: thread.OutcomeApprove, Who: "bob"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := ran.snapshot(); len(got) != 0 {
+		t.Fatalf("a conflicted call ran: %v", got)
+	}
+	var saw string
+	for _, r := range toolResults(s.Context()) {
+		if r.CallID == call.ID {
+			saw = r.Content
+		}
+	}
+	if saw != "DENIED: conflicting decisions" {
+		t.Fatalf("resolve-then-approve: got result %q, want the pinned conflict denial", saw)
+	}
+}
+
+// flushCounter wraps a storage's Flusher capability, counting calls.
+type flushCounter struct {
+	thread.Storage
+	mu sync.Mutex
+	n  int
+}
+
+func (c *flushCounter) Flush(ctx context.Context, session string) error {
+	c.mu.Lock()
+	c.n++
+	c.mu.Unlock()
+	return c.Storage.(thread.Flusher).Flush(ctx, session)
+}
+
+func (c *flushCounter) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.n
+}
+
+// Decide, Grant and Revoke are durable when they return: under the
+// FsyncOnFlush cadence the flush is what makes them so — a decision
+// (its own doc's word) and a revocation (whose loss would re-activate
+// the grant after a crash) must not live only in the page cache.
+func TestDecideGrantRevokeFlushDurable(t *testing.T) {
+	ctx := context.Background()
+	st, err := jsonl.Open(t.TempDir(), thread.FsyncOnFlush())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &flushCounter{Storage: st}
+	agent, _ := refundAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}),
+		wefttest.Say("done"),
+	)
+	s, err := thread.Create(ctx, c, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := parkSend(t, s, ctx)
+	n0 := c.count()
+	rt, err := s.Decide(ctx, thread.Approve(call.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if c.count() == n0 {
+		t.Error("Decide did not flush: the decision is not durable under FsyncOnFlush")
+	}
+	n1 := c.count()
+	if err := s.Grant(ctx, thread.Grant{Tool: "refund"}); err != nil {
+		t.Fatal(err)
+	}
+	if c.count() == n1 {
+		t.Error("Grant did not flush")
+	}
+	var grantID string
+	for _, e := range s.Entries() {
+		if g, ok := e.(thread.GrantEntry); ok {
+			grantID = g.ID
+		}
+	}
+	n2 := c.count()
+	if err := s.Revoke(ctx, grantID); err != nil {
+		t.Fatal(err)
+	}
+	if c.count() == n2 {
+		t.Error("Revoke did not flush: a lost revocation re-activates the grant after a crash")
+	}
+}

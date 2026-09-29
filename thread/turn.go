@@ -500,16 +500,36 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 	// here — handed to the runner as resumeWork — not after the wake.
 	if chain != nil {
 		s.fireOnRequest(chain)
-		if len(chain.parkedCalls) == 0 && s.cfg.autoResume {
-			// The runner's own arming goes through the same registration
-			// as Decide and Resume: the minted resume is the boundary's
-			// one armed resume, so a Resume arriving while it flies
-			// returns this turn instead of arming a second one beside
-			// it (one boundary, one resume).
-			s.mu.Lock()
-			rt := s.mintResumeLocked()
-			s.resumeWork = &pendingResume{ctx: chain.awaitCtx, turn: rt}
-			s.mu.Unlock()
+		s.mu.Lock()
+		undecided := -1
+		if len(chain.parkedCalls) == 0 {
+			// The chain decided every call without parking. That only
+			// completes the boundary when every dangling call holds an
+			// effective decision, quorum included: one approval under
+			// Quorum(n) — the Approver's, or a grant's single identity —
+			// leaves it open for the next decision instead of arming a
+			// resume that would deny the undecided calls as "no
+			// decision" (the same gate the runner's own pickup and
+			// Decide apply, ADR 0021 §5).
+			undecided = len(s.pendingLocked())
+			if undecided == 0 && s.cfg.autoResume {
+				// The runner's own arming goes through the same
+				// registration as Decide and Resume: the minted resume is
+				// the boundary's one armed resume, so a Resume arriving
+				// while it flies returns this turn instead of arming a
+				// second one beside it (one boundary, one resume).
+				rt := s.mintResumeLocked()
+				s.resumeWork = &pendingResume{ctx: chain.awaitCtx, turn: rt}
+			}
+		}
+		s.mu.Unlock()
+		if undecided > 0 {
+			// A chain-decided boundary that stayed open: the turn is
+			// done, but Pending() still shows the calls awaiting their
+			// quorum — the log line is the operator's signal; nothing
+			// parked, so OnRequest owes no notification.
+			s.agent.Logger().Debug("thread: chain decided without completing the boundary",
+				"session", s.header.ID, "run", t.runID, "undecided", undecided)
 		}
 	}
 	if t.resume {
@@ -548,6 +568,24 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 		}
 	} else if res != nil {
 		full = res.Messages
+	}
+
+	// The estimated tail runs before the lock: the Estimator is a
+	// caller's hook, consulted outside s.mu like every other — one
+	// that calls back into the Session (Leaf, Pending) must not
+	// deadlock the turn's own persistence.
+	var tailEst int64
+	if res != nil && len(res.Steps) > 0 {
+		tailStart := inputLen
+		for i := len(full) - 1; i >= inputLen; i-- {
+			if full[i].Role == weft.RoleAssistant {
+				tailStart = i
+				break
+			}
+		}
+		for _, m := range full[tailStart:] {
+			tailEst += s.estimate(m)
+		}
 	}
 
 	s.mu.Lock()
@@ -594,17 +632,7 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 			// same mark, the turn entry (ADR 0020 §2: reported tokens
 			// are the signal; only what the report cannot cover is
 			// estimated).
-			te.LastInput = res.Steps[n-1].Usage.InputTokens
-			tailStart := inputLen
-			for i := len(full) - 1; i >= inputLen; i-- {
-				if full[i].Role == weft.RoleAssistant {
-					tailStart = i
-					break
-				}
-			}
-			for _, m := range full[tailStart:] {
-				te.LastInput += s.estimate(m)
-			}
+			te.LastInput = res.Steps[n-1].Usage.InputTokens + tailEst
 		}
 	}
 	if err != nil {

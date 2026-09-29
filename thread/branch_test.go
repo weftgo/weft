@@ -2,6 +2,7 @@ package thread_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -357,5 +358,51 @@ func TestSessionDuplicateEntryID(t *testing.T) {
 	}
 	if n := len(s.Entries()); n != 1 {
 		t.Errorf("Entries after rejected duplicate = %d, want 1", n)
+	}
+}
+
+// Branch is a between-turns operation: while a turn runs, the line
+// its transcript must land on is held, and a navigation underneath it
+// would strand the run's messages on a branch whose context the model
+// never saw — so it fails with ErrBusy, loudly, instead.
+func TestBranchDuringRunningTurnFailsBusy(t *testing.T) {
+	ctx := context.Background()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	type blockInput struct{}
+	tool := weft.Tool("block", "Block until released.",
+		func(ctx context.Context, in blockInput) (string, error) {
+			close(started)
+			<-release
+			return "ok", nil
+		})
+	agent := weft.New(
+		wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "block"}),
+			wefttest.Say("done"),
+		),
+		weft.Name("branch-busy-test"), tool)
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := s.Send(ctx, weft.User("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the turn never started its tool")
+	}
+	if err := s.Branch(ctx, ""); !errors.Is(err, thread.ErrBusy) {
+		t.Fatalf("Branch during a running turn: got %v, want ErrBusy", err)
+	}
+	close(release)
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Branch(ctx, ""); err != nil {
+		t.Fatalf("Branch between turns: %v", err)
 	}
 }

@@ -408,7 +408,7 @@ func TestSharedGrantStore(t *testing.T) {
 	}
 	for _, e := range s.Audit() {
 		if a, ok := e.(thread.ApprovalAuditEntry); ok && a.Step == thread.StepGrant {
-			if a.Detail != "grant ops-42" {
+			if a.Detail != "shared grant ops-42" {
 				t.Fatalf("shared grant audit detail: %q", a.Detail)
 			}
 		}
@@ -623,5 +623,130 @@ func TestAuditTellsTheWholeStory(t *testing.T) {
 		if !found {
 			t.Fatalf("audit trail misses %q: %v", w, kinds)
 		}
+	}
+}
+
+// A deny-grant's matches count against its MaxUses like an approval
+// grant's: a standing refusal bounded to one use stops refusing after
+// it — the next such call parks (ADR 0021 §4, "its audit entries
+// count the uses").
+func TestDenyGrantMaxUsesCountsDenials(t *testing.T) {
+	ctx := context.Background()
+	agent, ran := runAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "run", Args: `{"command":"go build"}`}),
+		wefttest.Say("one"),
+		wefttest.ToolCalls(wefttest.Call{Name: "run", Args: `{"command":"go build"}`}),
+		wefttest.Say("two"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Grant(ctx, thread.Grant{
+		Tool:    "run",
+		Deny:    true,
+		Reason:  "blocked",
+		MaxUses: 1,
+		Args:    []thread.Arg{thread.ArgEquals("/command", json.RawMessage(`"go build"`))},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t1, err := s.Send(ctx, weft.User("build"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if len(*ran) != 0 {
+		t.Fatalf("the deny-granted call ran: %v", *ran)
+	}
+	// The grant is spent: the same call parks instead of refusing.
+	t2, err := s.Send(ctx, weft.User("build again"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t2.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Pending(); len(got) != 1 {
+		t.Fatalf("Pending after a spent deny-grant: got %d, want 1 (MaxUses must bound denials too)", len(got))
+	}
+}
+
+// A shared grant whose store id collides with a session grant's entry
+// id must not inflate the session grant's use count: the audit
+// namespaces a shared match ("shared grant …"), and the session
+// counts only its own matches (ADR 0021 §4 — a shared grant's uses
+// are the store's own business).
+func TestSharedGrantIDCollisionDoesNotInflateSessionUses(t *testing.T) {
+	ctx := context.Background()
+	// Four model calls: t1's turn (build, shared-grant decided — the
+	// auto-resume it completes is model call two), then t2's turn
+	// (test, session-grant decided — model call four).
+	agent, _ := runAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "run", Args: `{"command":"go build"}`}),
+		wefttest.Say("built"),
+		wefttest.ToolCalls(wefttest.Call{Name: "run", Args: `{"command":"go test"}`}),
+		wefttest.Say("tested"),
+	)
+	shared := &memStore{} // empty at first; the collision is staged below
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.WithGrantStore(shared))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Grant(ctx, thread.Grant{
+		Tool:    "run",
+		MaxUses: 1,
+		Args:    []thread.Arg{thread.ArgEquals("/command", json.RawMessage(`"go test"`))},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var sessionGrantID string
+	for _, e := range s.Entries() {
+		if g, ok := e.(thread.GrantEntry); ok {
+			sessionGrantID = g.ID
+		}
+	}
+	if sessionGrantID == "" {
+		t.Fatal("no session grant recorded")
+	}
+	// A shared grant under the colliding id matches a different call;
+	// the chain consults the store live, so staging it now suffices.
+	shared.grants = []thread.SharedGrant{{
+		ID: sessionGrantID, // the collision
+		Grant: thread.Grant{
+			Tool: "run",
+			Args: []thread.Arg{thread.ArgEquals("/command", json.RawMessage(`"go build"`))},
+		},
+	}}
+	// One shared match (go build)…
+	t1, err := s.Send(ctx, weft.User("build"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	var sharedAudit int
+	for _, e := range s.Entries() {
+		if a, ok := e.(thread.ApprovalAuditEntry); ok && a.Detail == "shared grant "+sessionGrantID {
+			sharedAudit++
+		}
+	}
+	if sharedAudit != 1 {
+		t.Fatalf("shared match audits: got %d, want 1", sharedAudit)
+	}
+	// …must not spend the colliding session grant's single use: the
+	// call it covers still goes through the grant, not the park.
+	t2, err := s.Send(ctx, weft.User("test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t2.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Pending(); len(got) != 0 {
+		t.Fatalf("Pending after the session grant's own match: got %d, want 0 (the shared match must not have spent its MaxUses)", len(got))
 	}
 }

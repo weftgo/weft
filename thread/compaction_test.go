@@ -1211,3 +1211,104 @@ func TestUncompactOfATrim(t *testing.T) {
 		}
 	}
 }
+
+// leafReadingEstimator is an Estimator that calls back into the
+// Session it serves — Leaf, like any UI observer would — the thing
+// every other caller hook is allowed to do. The turn's persistence
+// must consult it outside the session lock, or the session deadlocks
+// on its own mutex (the 2026-09-29 review's finding).
+type leafReadingEstimator struct{ s *thread.Session }
+
+func (e leafReadingEstimator) Estimate(msgs []weft.Message) int {
+	_ = e.s.Leaf()
+	return len(msgs)
+}
+
+func TestEstimatorMayCallTheSession(t *testing.T) {
+	ctx := context.Background()
+	agent := weft.New(wefttest.Script(wefttest.Say("hello")), weft.Name("estimator-reentry"))
+	est := &leafReadingEstimator{}
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.WithEstimator(est))
+	if err != nil {
+		t.Fatal(err)
+	}
+	est.s = s
+	done := make(chan error, 1)
+	go func() {
+		turn, err := s.Send(ctx, weft.User("hi"))
+		if err != nil {
+			done <- err
+			return
+		}
+		_, err = turn.Wait()
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the session deadlocked consulting its Estimator under the lock")
+	}
+}
+
+// The trigger re-arms on the turn that resolves a parked boundary:
+// while the boundary is open no threshold compaction runs (the
+// dangling calls must stay raw for their decisions, ADR 0021's
+// amendment), and the resume's own post-turn trigger fires the moment
+// the boundary is gone — the hold is a hold, not an off switch.
+func TestTriggerReArmsAfterTheBoundaryResolves(t *testing.T) {
+	ctx := context.Background()
+	agent, _ := refundAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}).WithUsage(weft.Usage{InputTokens: 95_000, OutputTokens: 5}),
+		wefttest.Say("done").WithUsage(weft.Usage{InputTokens: 95_000, OutputTokens: 5}),
+		wefttest.Say("the summary"),
+	)
+	st := thread.Memory()
+	s, _ := thread.Create(ctx, st, agent, thread.ContextWindow(100_000))
+	// Real bulk, so the held trigger has something to compact.
+	if err := st.Append(ctx, s.ID(),
+		thread.MessageEntry{ID: "e_b1", Created: timeUTC(), Message: weft.User(strings.Repeat("a", 120_000))},
+		thread.MessageEntry{ID: "e_b2", ParentID: "e_b1", Created: timeUTC(), Message: weft.User(strings.Repeat("b", 120_000))},
+	); err != nil {
+		t.Fatal(err)
+	}
+	s, err := thread.Open(ctx, st, s.ID(), agent, thread.ContextWindow(100_000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := s.Send(ctx, weft.User("refund it"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := turn.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Pending(); len(got) != 1 {
+		t.Fatalf("Pending after the parked turn: got %d, want 1", len(got))
+	}
+	for _, e := range s.Entries() {
+		if c, ok := e.(thread.CompactionEntry); ok {
+			t.Fatalf("compaction %s ran while the boundary was open", c.ID)
+		}
+	}
+	// Resolving the boundary re-arms the trigger: the resume's own
+	// post-turn site fires and the summary lands.
+	rt, err := s.Decide(ctx, thread.Approve(s.Pending()[0].CallID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	rearmed := false
+	for _, e := range s.Entries() {
+		if c, ok := e.(thread.CompactionEntry); ok && c.Reason == thread.ReasonThreshold {
+			rearmed = true
+		}
+	}
+	if !rearmed {
+		t.Fatal("the trigger did not re-arm on the turn that resolved the boundary")
+	}
+}

@@ -290,7 +290,10 @@ func (s *Session) DecideSigned(ctx context.Context, sd SignedDecision) (*Turn, e
 	}
 	e.ID, e.ParentID, e.Created = s.mintIDLocked(), s.leaf, time.Now().UTC()
 	entries := []Entry{e}
-	if sd.Always {
+	if sd.Always && sd.Kind == OutcomeApprove {
+		// Only an approval grants (ADR 0021 §4): a signed Deny or
+		// Resolve with Always set must not mint a standing approval —
+		// the same gate Decide and the Approver path apply.
 		g := GrantEntry{
 			ID: s.mintIDLocked(), ParentID: e.ID, Created: time.Now().UTC(),
 			Grant: Grant{
@@ -305,6 +308,9 @@ func (s *Session) DecideSigned(ctx context.Context, sd SignedDecision) (*Turn, e
 	}
 	for _, en := range entries {
 		s.adoptLocked(en)
+	}
+	if err := s.flushLocked(ctx); err != nil {
+		return nil, fmt.Errorf("thread: decision flush: %w", err)
 	}
 	if s.cfg.autoResume && s.boundaryLocked() && len(s.pendingLocked()) == 0 {
 		return s.armResumeLocked(ctx)

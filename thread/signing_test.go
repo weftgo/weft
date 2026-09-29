@@ -382,3 +382,60 @@ func TestSignedApproveAlways(t *testing.T) {
 		t.Fatalf("executions: %v", got)
 	}
 }
+
+// A signed Deny with Always set mints no grant: the same gate Decide
+// applies (only an approve grants, ADR 0021 §4) holds on the signed
+// door — a signed refusal must not become a standing approval.
+func TestSignedDenyAlwaysMintsNoGrant(t *testing.T) {
+	ctx := context.Background()
+	ring, secret := signerRing(t)
+	agent, ran := runAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "run", Args: `{"command":"go build"}`}),
+		wefttest.Say("one"),
+		wefttest.ToolCalls(wefttest.Call{Name: "run", Args: `{"command":"go build"}`}),
+		wefttest.Say("two"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.WithKeyring(ring))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := s.Send(ctx, weft.User("build"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	call := s.Pending()[0]
+	r, err := s.Request(call.CallID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := thread.Deny(call.CallID, "not allowed")
+	d.Always = true
+	rt, err := s.DecideSigned(ctx, thread.SignDecision(secret, r, d))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range s.Entries() {
+		if g, ok := e.(thread.GrantEntry); ok && g.Tool == "run" {
+			t.Fatalf("a signed Deny with Always minted grant %+v", g.Grant)
+		}
+	}
+	t2, err := s.Send(ctx, weft.User("build again"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t2.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Pending(); len(got) != 1 {
+		t.Fatalf("Pending after re-issuing a signed deny-always call: got %d, want 1 (no grant may stand)", len(got))
+	}
+	if len(*ran) != 0 {
+		t.Fatalf("denied call ran: %v", *ran)
+	}
+}

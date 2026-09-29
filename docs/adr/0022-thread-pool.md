@@ -53,15 +53,19 @@
    what nested approvals need — the child is resumable after a restart.
 
 4. **Receipts.** One `pool_receipt` entry kind, `"v":4` (ADR 0011 §6):
-   acceptance records the child session and prompt; settlement, linked
-   by receipt id like the steering receipts (ADR 0019), records the
-   final state — `done`, `failed`, `canceled` (explicit `Cancel`) or
+   acceptance records the child session and prompt; a `running` entry
+   lands when the slot is acquired and the child starts — the wait
+   between the two is the pool's queue, visible; settlement, linked by
+   receipt id like the steering receipts (ADR 0019), records the final
+   state — `done`, `failed`, `canceled` (explicit `Cancel`) or
    `capped` (the child died on a budget: `MaxSteps` or a usage limit —
    DeerFlow's token-capped/turn-capped/loop-capped collapse into one
    state, the stop reason already distinguishing them) — plus the
    child's stop text and usage. Receipt entries never enter the
-   model's context; the answer does, as the delegating call's result
-   (sync) or the entry a later turn reads (async).
+   model's context. The answer reaches the model as the delegating
+   call's result (sync); for an async delegation the application
+   delivers it — the settled receipt is what a later turn or caller
+   reads, not context.
 
 5. **Budgets (D3).** The parent session's `Usage` gains a third
    bucket, `Delegated`, summed from settled receipts' usage.
@@ -90,8 +94,11 @@
    the child's answer — for a sync delegation by resolving the parked
    parent call with the child's final text (the core's `Resolve`:
    re-running the delegation would replay the child), for an async one
-   by settling its receipt. A bare `weft.Subagent` with no pool keeps
-   ADR 0014's `SUBAGENT_PENDING` exactly as written.
+   by settling its receipt. The parked wrapper call itself is never
+   offered for direct decision: `Pending()` shows the child's requests
+   with their lineage, and the wrapper completes through them. A bare
+   `weft.Subagent` with no pool keeps ADR 0014's `SUBAGENT_PENDING`
+   exactly as written.
 
 8. **Steering forwarding.** Explicit only — `pool.Forward(receiptID,
    msg)` steers a running child through its session (ADR 0019 §7);

@@ -44,6 +44,46 @@
   sentinel, as it never retried the marker text — the consumer is
   `weft/thread` v0.3's compact-and-retry turn.
 
+## thread 0.3.0 (unreleased)
+
+Steering, interrupt, overflow (ADR 0019, ADR 0020 §5): everything a
+Send can do with a busy session, on the session tree.
+
+### Added
+
+- **Busy policies**: `Steer`, `Interrupt` and `Rollback` join `Queue`
+  (the default) and `Reject` — per session with `BusyPolicy(p)`, per
+  Send with the new `As(p)`.
+- **`Steer`**: the message is accepted at once — a queued receipt
+  entry, flushed — and delivered into the running turn at the core's
+  drain points (after the tool batch, every call paired with its
+  result, or at what would have been the final step, redirecting it).
+  A steer meeting a `StopWhen` end or an open approval boundary never
+  drains: it defers to a follow-up turn, linked through `Turn.Next`.
+- **Receipts** (`"v":3`, format-3 goldens): `queued → delivered |
+  deferred | dropped` entries — delivered receipts join the turn's
+  end batch atomically, naming the run; deferred entries name the
+  follow-up; dropped is `ClearQueue`. `s.Queue()` lists the live
+  queue. A queued receipt whose fate never landed (a crash) defers on
+  reopen and its follow-up runs — accepted input is durable input.
+  `weft.Steering` in `RunOptions` is refused: the session owns the
+  steer queue.
+- **`Interrupt`**: cancels the in-flight run (the mark survives the
+  arm race — an interrupt landing between Send and the run's start
+  fells it at birth); calls the partial left without a real result
+  record the golden interruption text; an approval boundary the
+  interrupt supersedes is denied with the interrupted reason; the
+  message runs as the next turn.
+- **`Rollback`**: an interrupt that also branches the leaf back to
+  before the interrupted turn's receipt entry — the follow-up answers
+  as though it never happened, its entries keeping their own line of
+  the tree.
+- **The overflow re-run**: a turn failing with
+  `weft.ErrContextOverflow` compacts (reason `overflow`) and re-runs
+  once over the shrunken path under a fresh run id; a second failure
+  fails the turn with both errors joined. `ReRunOnOverflow(false)`
+  turns it off.
+
 ## thread 0.2.0 — 2026-09-29
 
 Approvals, complete (ADR 0021): the core's approval boundary made

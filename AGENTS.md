@@ -159,6 +159,14 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    WithKeyring, s.Request(id) → thread.SignDecision(key, r, d) → s.DecideSigned (fail-
 //    closed: ErrBadSignature/ErrExpired/ErrReplay/ErrArgsChanged/ErrUnknownKey),
 //    thread.RequireSigned(); a Send while approvals pend queues behind them.
+//    Busy policies (ADR 0019): thread.BusyPolicy(Queue | Reject | Steer | Interrupt |
+//    Rollback), or per Send with thread.As(p). Steer delivers mid-run at the drain
+//    points — receipts are durable entries (queued → delivered | deferred | dropped);
+//    s.Queue(), s.ClearQueue(ctx); a steer meeting StopWhen or approvals defers to a
+//    follow-up (Turn.Next). Interrupt cancels the run (dangling calls record the
+//    interruption text; a parked boundary is denied); Rollback also branches back.
+//    Overflow: ErrContextOverflow → compact (reason overflow) + one re-run
+//    (thread.ReRunOnOverflow(false) off); a second failure joins both errors.
 ```
 
 Test offline with `wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))`;

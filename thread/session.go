@@ -48,10 +48,14 @@ type sessionConfig struct {
 	grantStore      GrantStore
 	keyring         *Keyring
 	requireSigned   bool
+	// reRunOnOverflow arms the overflow re-run (ADR 0020 §5): a turn
+	// failing with weft.ErrContextOverflow compacts — reason overflow —
+	// and runs once more over the shrunken path. Default on.
+	reRunOnOverflow bool
 }
 
 func resolveSession(opts ...SessionOption) sessionConfig {
-	cfg := sessionConfig{compaction: defaultCompactConfig(), autoResume: true}
+	cfg := sessionConfig{compaction: defaultCompactConfig(), autoResume: true, reRunOnOverflow: true}
 	for _, o := range opts {
 		if o != nil {
 			o.applySession(&cfg)

@@ -38,6 +38,19 @@ const (
 	// result, nil error — when the steer reaches its final state,
 	// and its Next is the follow-up turn a deferred steer became.
 	Steer
+	// Interrupt cancels the running turn and runs the message next
+	// (plan §6): the in-flight run's context is canceled, the calls
+	// its partial transcript left without a result carry the golden
+	// interruption text, an approval boundary that holds the session
+	// is denied with the interrupted reason, and the message runs as
+	// the next turn. The interrupted turn's entries stay on the
+	// tree — evidence, never deleted.
+	Interrupt
+	// Rollback is an Interrupt that also branches the leaf back to
+	// before the interrupted turn's receipt entry: the follow-up runs
+	// as though the interrupted turn never happened, while its
+	// entries keep their own line of the tree (nothing lost).
+	Rollback
 )
 
 type busyPolicyOption Policy
@@ -45,8 +58,8 @@ type busyPolicyOption Policy
 func (o busyPolicyOption) applySession(c *sessionConfig) { c.policy = Policy(o) }
 
 // BusyPolicy returns the SessionOption setting what Send does when the
-// session is busy: Queue (the default), Reject, or Steer. A single
-// Send overrides it with As.
+// session is busy: Queue (the default), Reject, Steer, Interrupt, or
+// Rollback. A single Send overrides it with As.
 func BusyPolicy(p Policy) SessionOption { return busyPolicyOption(p) }
 
 // SendOption configures one Send. Step 1.7 carries one: RunOptions,
@@ -194,6 +207,9 @@ func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption
 			// never resolves a parked call.
 			return s.steerSendLocked(ctx, msg)
 		}
+		if policy == Interrupt || policy == Rollback {
+			return s.interruptSendLocked(ctx, msg, policy == Rollback)
+		}
 		t := s.newTurnLocked()
 		s.queue = append(s.queue, pendingSend{ctx: ctx, msg: msg, opts: extra, turn: t})
 		if !s.running && s.cfg.autoResume && len(s.pendingLocked()) == 0 {
@@ -332,6 +348,11 @@ func (s *Session) execute(first workItem) {
 		retry := !cur.resume || !cur.ps.turn.failed()
 		s.mu.Lock()
 		s.inFlight = nil // the item boundary: a Branch here is already safe
+		// A Rollback turn branches the leaf back before its receipt
+		// entry here — its entries have landed, the follow-up (queued
+		// by the interrupting Send) starts next on the rolled-back
+		// line (plan §6).
+		s.rollbackLocked(cur.ps.turn)
 		// Every exit path settles the live steers here, not only
 		// runTurn's own end: a turn that died early — a panicked
 		// session path, a prompt append that failed, a caller who
@@ -458,7 +479,20 @@ func (s *Session) runOne(ps pendingSend) {
 	// boundary — the dangling tail must stay raw for its decisions.
 	s.maybeAutoCompact(ps.ctx)
 
-	s.runTurn(persist, ps.ctx, t, ps.opts)
+	// The run flies under a cancelable child of the caller's context:
+	// an Interrupt or Rollback send fells it (plan §6) without
+	// touching the caller's own.
+	rctx, cancel := context.WithCancel(ps.ctx)
+	defer cancel()
+	t.setRunCancel(cancel)
+	defer t.clearRunCancel()
+	if t.wasInterrupted() {
+		// An Interrupt or Rollback arrived before the run armed its
+		// cancel — between Send and here. The run dies at birth: the
+		// interrupting Send's follow-up is already queued.
+		cancel()
+	}
+	s.runTurn(persist, rctx, t, ps.opts)
 }
 
 // runResume runs one resume over a parked approval boundary (ADR 0021
@@ -516,7 +550,15 @@ func (s *Session) runResume(ctx context.Context, t *Turn) {
 	}
 	opts := append([]weft.RunOption(nil), s.await.opts...)
 	s.mu.Unlock()
-	s.runTurn(persist, ctx, t, opts)
+	// A resume is as interruptible as a send's turn.
+	rctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	t.setRunCancel(cancel)
+	defer t.clearRunCancel()
+	if t.wasInterrupted() {
+		cancel()
+	}
+	s.runTurn(persist, rctx, t, opts)
 }
 
 // runTurn is the shared body of a send's and a resume's run: the raw
@@ -526,31 +568,77 @@ func (s *Session) runResume(ctx context.Context, t *Turn) {
 // turn — the resume inherits the parked send's — and after them come
 // the recorded decisions, which win.
 func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []weft.RunOption) {
-	// The input is the session's context — the walk already includes
-	// the prompt entry appended for this turn, or the boundary's
-	// dangling calls for a resume — carried raw: the loop repairs its
-	// input itself, leaving a decision's pending calls unresolved so it
-	// can resolve them (the approval resume).
-	input := s.rawContext()
-	s.mu.Lock()
-	decisions := s.danglingDecisionsLocked(t.resume)
-	s.mu.Unlock()
-	runOpts := append([]weft.RunOption(nil), callerOpts...)
-	runOpts = append(runOpts, decisions...)
-	// The session's steering source rides every run (ADR 0019): an
-	// empty queue drains nothing, and a Send under the Steer policy
-	// can queue at any moment — including after this run started.
-	runOpts = append(runOpts, weft.Steering(s.steerSource))
-	runOpts = append(runOpts, weft.Messages(input...), weft.RunID(t.runID))
-	run := s.agent.Stream(ctx, runOpts...)
-	for ev, err := range run.Events() {
-		if err != nil {
-			t.setStreamErr(err)
-			break
+	var res *weft.RunResult
+	var err error
+	inputLen := 0
+	// One re-run is allowed (ADR 0020 §5): a turn failing with
+	// weft.ErrContextOverflow compacts — reason overflow — and tries
+	// again over the shrunken path under a fresh run id. The failed
+	// attempt's partial is never recorded (an overflowed request
+	// produced no transcript worth keeping; the run store holds the
+	// attempt's own records under its id); a second failure fails the
+	// turn with both errors joined.
+	var firstOverflow error
+	for attempt := 0; ; attempt++ {
+		// The input is the session's context — the walk already includes
+		// the prompt entry appended for this turn, or the boundary's
+		// dangling calls for a resume — carried raw: the loop repairs its
+		// input itself, leaving a decision's pending calls unresolved so it
+		// can resolve them (the approval resume).
+		input := s.rawContext()
+		inputLen = len(input)
+		s.mu.Lock()
+		decisions := s.danglingDecisionsLocked(t.resume)
+		s.mu.Unlock()
+		runOpts := append([]weft.RunOption(nil), callerOpts...)
+		runOpts = append(runOpts, decisions...)
+		// The session's steering source rides every run (ADR 0019): an
+		// empty queue drains nothing, and a Send under the Steer policy
+		// can queue at any moment — including after this run started.
+		runOpts = append(runOpts, weft.Steering(s.steerSource))
+		runOpts = append(runOpts, weft.Messages(input...), weft.RunID(t.RunID()))
+		run := s.agent.Stream(ctx, runOpts...)
+		for ev, serr := range run.Events() {
+			if serr != nil {
+				t.setStreamErr(serr)
+				break
+			}
+			t.push(ev)
 		}
-		t.push(ev)
+		res, err = run.Wait()
+		if attempt == 0 && errors.Is(err, weft.ErrContextOverflow) && s.cfg.reRunOnOverflow && !t.overflowRetried {
+			firstOverflow = err
+			t.overflowRetried = true
+			if cerr := s.compactForOverflow(persist); cerr == nil {
+				// The shrunken path gets a fresh run id; the consumer
+				// sees one turn, its outcome from the attempt that
+				// answered.
+				t.clearStreamErr()
+				s.mu.Lock()
+				s.turnSeq++
+				t.remintRunID(fmt.Sprintf("%s-t%d", s.header.ID, s.turnSeq))
+				s.mu.Unlock()
+				continue
+			} else {
+				s.agent.Logger().Warn("thread: overflow compaction failed; no re-run",
+					"session", s.header.ID, "run", t.RunID(), "err", cerr)
+			}
+		}
+		break
 	}
-	res, err := run.Wait()
+	if firstOverflow != nil && err != nil {
+		err = errors.Join(firstOverflow, err)
+	}
+	if t.wasInterrupted() && err != nil {
+		// The interrupted partial carries completions for its dangling
+		// calls — the golden text — before the repair sees it (plan §6:
+		// the recorded transcript stays sound model input, and the model
+		// sees why a call has no answer).
+		var runErr *weft.RunError
+		if errors.As(err, &runErr) && runErr.Result != nil {
+			runErr.Result.Messages = withInterruptedResults(runErr.Result.Messages)
+		}
+	}
 	// The decision chain (ADR 0021 §2) runs before the turn's end is
 	// persisted, so a call about to park is asked — grants, then a
 	// bounded Approver — and its request entry lands in the same
@@ -560,7 +648,7 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 	if err == nil && res != nil && len(res.Pending) > 0 {
 		chain = s.runChain(persist, t, callerOpts, res.Pending)
 	}
-	s.recordTurnEnd(persist, t, res, err, len(input), chain)
+	s.recordTurnEnd(persist, t, res, err, inputLen, chain)
 	// Steers still live when the run ended defer here (plan §6): the
 	// run met a StopWhen end or parked approvals without draining
 	// them, or they arrived after the last drain point. The follow-ups
@@ -816,6 +904,21 @@ type Turn struct {
 	// once, under mu, by the session when it arms a resume.
 	next *Turn
 
+	// interrupt is the Interrupt/Rollback bookkeeping (plan §6):
+	// cancel fells the run's context, interrupted marks the turn (the
+	// partial's dangling calls get the golden completion), rollback
+	// names the Rollback policy, and preTurn is the leaf before this
+	// turn's receipt entry — where a rollback branches back to. Written
+	// by a Send under mu while the run flies; read by the runner under
+	// mu at the turn's end.
+	cancel      context.CancelFunc
+	interrupted bool
+	rollback    bool
+	preTurn     string
+	// overflowRetried marks the turn that already spent its one
+	// overflow re-run (ADR 0020 §5). Runner-goroutine only.
+	overflowRetried bool
+
 	mu         sync.Mutex
 	cond       *sync.Cond
 	events     []weft.Event
@@ -834,8 +937,64 @@ type Turn struct {
 func (t *Turn) ID() string { return t.id }
 
 // RunID returns the run's id, <session>-t<n> — the key the run store
-// holds the run's records under, unique across a reopen.
-func (t *Turn) RunID() string { return t.runID }
+// holds the run's records under, unique across a reopen. A turn that
+// re-ran after an overflow reports the re-run's id (the run that
+// produced its outcome).
+func (t *Turn) RunID() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.runID
+}
+
+// remintRunID re-ids the turn for its overflow re-run: a fresh
+// <session>-t<n>, spent from the same counter, so the re-run's store
+// records stay addressable (the failed attempt's id is in its run
+// records).
+func (t *Turn) remintRunID(id string) {
+	t.mu.Lock()
+	t.runID = id
+	t.mu.Unlock()
+}
+
+// setRunCancel arms the cancel that fells this turn's run; the runner
+// calls it when the run starts and clears it when the run ends, so a
+// late Interrupt cannot cancel a context nobody runs on.
+func (t *Turn) setRunCancel(cancel context.CancelFunc) {
+	t.mu.Lock()
+	t.cancel = cancel
+	t.mu.Unlock()
+}
+
+// clearRunCancel drops the cancel handle; see setRunCancel.
+func (t *Turn) clearRunCancel() {
+	t.mu.Lock()
+	t.cancel = nil
+	t.mu.Unlock()
+}
+
+// wasInterrupted reports the Interrupt mark (the runner's read of a
+// field a Send may have written under mu mid-run).
+func (t *Turn) wasInterrupted() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.interrupted
+}
+
+// rollbackTarget reports the rollback mark and its branch target.
+func (t *Turn) rollbackTarget() (bool, string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.rollback, t.preTurn
+}
+
+// clearStreamErr drops a failed attempt's stream error when the turn
+// gets another attempt (the overflow re-run): the consumer must see
+// only the final attempt's error, once, at the end.
+func (t *Turn) clearStreamErr() {
+	t.mu.Lock()
+	t.streamErr = nil
+	t.mu.Unlock()
+}
 
 // Next returns the turn the session resumed this turn's parked
 // approval boundary with, or nil while there is none — this turn did

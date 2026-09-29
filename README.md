@@ -397,6 +397,38 @@ unsigned door; `s.Audit()` tells the whole story from the file. A
 `go run ./thread/examples/approvals` parks a call, restarts, decides
 signed, resumes, and replays a rejected signature — offline, pinned.
 
+Steering (ADR 0019) is what a Send does when the session is busy — the
+busy policy, per session or per Send:
+
+```go
+s, _ := thread.Create(ctx, st, agent, thread.BusyPolicy(thread.Steer))
+
+steer, _ := s.Send(ctx, weft.User("wait — metric units"))  // mid-run
+steer.Wait()                                  // nil result: the receipt's fate
+s.Queue()                                     // the live steer queue
+n, _ := s.ClearQueue(ctx)                     // drop the undelivered: receipts
+
+turn, _ := s.Send(ctx, weft.User("stop, do this instead"),
+    thread.As(thread.Interrupt))              // cancel the run, run this next
+turn, _ = s.Send(ctx, weft.User("no — this road"),
+    thread.As(thread.Rollback))               // …and branch back before it
+```
+
+`Steer` delivers into the running turn at the loop's drain points —
+after the tool batch, or at what would have been the final step —
+through a receipt that is durable from acceptance: `queued → delivered
+| deferred | dropped`, entries in the file. A steer that meets an
+intended end (`StopWhen`) or an open approval boundary never drains:
+it defers to a follow-up turn (`steer.Next()`). `Interrupt` cancels
+the in-flight run — its dangling calls record the interruption text —
+and denies a parked boundary it supersedes; `Rollback` also branches
+the leaf back, so the follow-up answers as though the interrupted turn
+never happened (its entries stay on their own line: nothing lost). A
+turn that overflows the window (`weft.ErrContextOverflow`, mapped by
+every adapter) compacts — reason `overflow` — and re-runs once
+(`thread.ReRunOnOverflow(false)` to turn it off); a second overflow
+fails the turn with both errors joined.
+
 Compaction (ADR 0020) keeps long sessions inside the window without
 losing anything: the older part is summarized behind a fixed marker,
 the recent part stays raw, and the summarized entries stay in the

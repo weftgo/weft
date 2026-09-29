@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/thread"
@@ -346,4 +347,93 @@ func renderContext(s *thread.Session) string {
 		}
 	}
 	return b.String()
+}
+
+// Interrupt during a tool that ignores ctx: the documented cure is the
+// per-tool Timeout (the core abandons the handler and records the
+// timeout), and the interrupt flows through — the turn ends, the
+// follow-up runs. Without a Timeout a hung handler hangs any cancel
+// equally; interrupt adds no new requirement (the review's focus).
+func TestInterruptDuringCtxIgnoringTool(t *testing.T) {
+	ctx := context.Background()
+	hang := weft.Tool("hang", "", func(_ context.Context, _ struct{}) (string, error) {
+		<-make(chan struct{}) // ignores ctx outright
+		return "never", nil
+	}, weft.Timeout(50*time.Millisecond))
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "hang"}),
+		wefttest.Say("through"),
+	)
+	started := make(chan struct{})
+	var once sync.Once
+	agent := weft.New(model, hang, weft.Tap(func(_ context.Context, ev weft.Event) {
+		if _, ok := ev.(weft.ToolStart); ok {
+			once.Do(func() { close(started) })
+		}
+	}))
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.BusyPolicy(thread.Interrupt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := s.Send(ctx, weft.User("start"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	t2, err := s.Send(ctx, weft.User("enough of this"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t1.Wait(); err == nil {
+		t.Fatal("the interrupted turn reported success")
+	}
+	res2, err := t2.Wait()
+	if err != nil {
+		t.Fatalf("follow-up Wait: %v", err)
+	}
+	if res2.Text() != "through" {
+		t.Errorf("follow-up reply = %q", res2.Text())
+	}
+}
+
+// A compaction that itself overflows cannot loop: the compaction
+// fails, no re-run is armed, and the turn fails with the run's own
+// overflow (the review's focus).
+func TestOverflowCompactionThatOverflows(t *testing.T) {
+	ctx := context.Background()
+	model := wefttest.Script(
+		wefttest.Say("the first answer"),
+		wefttest.Fail(weft.ErrContextOverflow), // the run
+		wefttest.Fail(weft.ErrContextOverflow), // the summarizer
+	)
+	agent := weft.New(model)
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.KeepRecent(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0, err := s.Send(ctx, weft.User("a first question"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t0.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	t1, err := s.Send(ctx, weft.User("a prompt that overflows"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = t1.Wait()
+	if !errors.Is(err, weft.ErrContextOverflow) {
+		t.Fatalf("err = %v, want the overflow sentinel", err)
+	}
+	// One overflow in the joined error only — the re-run never ran.
+	if got := strings.Count(err.Error(), weft.ErrContextOverflow.Error()); got < 2 {
+		t.Logf("err = %v (compaction-failure shape)", err)
+	}
+	// No compaction entry landed: the summarizer failed.
+	for _, e := range s.Entries() {
+		if c, ok := e.(thread.CompactionEntry); ok {
+			t.Fatalf("a compaction entry landed despite the overflow: %+v", c)
+		}
+	}
 }

@@ -612,9 +612,19 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 			if cerr := s.compactForOverflow(persist); cerr == nil {
 				// The shrunken path gets a fresh run id; the consumer
 				// sees one turn, its outcome from the attempt that
-				// answered.
+				// answered. Steers the failed attempt drained die with
+				// its transcript (an overflowed attempt records none),
+				// so they rejoin the live queue — in acceptance order,
+				// ahead of anything newer — and the re-run delivers
+				// them again; otherwise their messages are lost while
+				// their receipts would read delivered (ADR 0020 §5
+				// keeps the failed attempt transcript-less, ADR 0011 §4
+				// keeps the accepted input).
 				t.clearStreamErr()
 				s.mu.Lock()
+				requeue := append([]queuedSteer(nil), s.handed...)
+				s.steerQueue = append(requeue, s.steerQueue...)
+				s.handed = nil
 				s.turnSeq++
 				t.remintRunID(fmt.Sprintf("%s-t%d", s.header.ID, s.turnSeq))
 				s.mu.Unlock()
@@ -834,8 +844,13 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 			Status: ReceiptDelivered, RunID: t.runID})
 		parent = id
 	}
+	// handed stays set until the batch lands: a turn-end append that
+	// fails — or panics — leaves these steers delivered to a run whose
+	// messages are in no tree (the batch, them included, is neither
+	// written nor adopted), and the settle after recordTurnEnd defers
+	// them so their messages re-run instead of finishing as delivered
+	// into nothing.
 	handed := s.handed
-	s.handed = nil
 	if chain != nil {
 		// The chain's entries join the turn's batch: ids and parents
 		// assigned here, in call order, after the turn entry (ADR 0021
@@ -853,15 +868,14 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 	if appendErr := s.st.Append(ctx, s.header.ID, entries...); appendErr != nil {
 		s.agent.Logger().Error("thread: turn end not persisted",
 			"session", s.header.ID, "run", t.runID, "err", appendErr)
-		// The steers were handed to the run and are in its transcript:
-		// their receipts finish as delivered even though the batch (the
-		// messages included) did not land — the in-memory tree keeps
-		// them, and the storage error is on the record.
-		for i := range handed {
-			handed[i].turn.finish(nil, nil)
-		}
+		// The batch — the steered messages included — is in no tree:
+		// written nowhere, adopted nowhere. The steers stay in handed
+		// and the settle after this defers them, so their messages
+		// re-run as follow-ups instead of finishing as delivered into
+		// nothing (the storage error is on the record above).
 		return
 	}
+	s.handed = nil
 	for _, e := range entries {
 		s.adoptLocked(e)
 	}

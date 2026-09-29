@@ -2,8 +2,10 @@ package thread_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +16,32 @@ import (
 	"github.com/weftgo/weft/thread/jsonl"
 	"github.com/weftgo/weft/wefttest"
 )
+
+// waitUntil polls cond until it holds or the deadline passes, failing
+// the test with what instead — the steer tests' asynchronous settles
+// (follow-ups the runner picks up) all need it.
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal(what)
+}
+
+// steerInContext reports whether the steered text is on the session's
+// active context.
+func steerInContext(s *thread.Session, text string) bool {
+	for _, m := range s.Context() {
+		if m.Role == weft.RoleUser && m.Text() == text {
+			return true
+		}
+	}
+	return false
+}
 
 // receipts collects a session's receipt entries, oldest first.
 func receipts(s *thread.Session) []thread.ReceiptEntry {
@@ -715,4 +743,353 @@ func TestSteerSettlesWhenTurnDiesEarly(t *testing.T) {
 	if !inContext {
 		t.Fatal("the deferred steer's follow-up never ran its message")
 	}
+}
+
+// A steer delivered during the attempt that then overflows is not lost
+// with that attempt's unpersisted transcript (ADR 0020 §5: the failed
+// attempt records none): the re-run re-queues it and delivers it
+// again, so the message lands on the tree exactly once and its
+// receipt names the re-run.
+func TestOverflowReRunRedeliversHandedSteers(t *testing.T) {
+	ctx := context.Background()
+	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "ok", nil
+	})
+	model := wefttest.Script(
+		wefttest.Say("a first answer"),                  // a prior turn, so the compaction has a cut
+		wefttest.ToolCalls(wefttest.Call{Name: "echo"}), // attempt 1: a batch to drain the steer after
+		wefttest.Fail(weft.ErrContextOverflow),          // attempt 1: the overflow
+		wefttest.Say("the summary"),                     // the compaction's summarizer call
+		wefttest.ToolCalls(wefttest.Call{Name: "echo"}), // attempt 2: a batch to drain the re-queued steer after
+		wefttest.Say("done"),
+	)
+	var steerRef *thread.Session
+	var steerOnce sync.Once
+	agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
+		if _, ok := ev.(weft.ToolStart); ok {
+			steerOnce.Do(func() {
+				if _, err := steerRef.Send(ctx, weft.User("switch to metric units")); err != nil {
+					t.Errorf("steer Send: %v", err)
+				}
+			})
+		}
+	}))
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.BusyPolicy(thread.Steer), thread.KeepRecent(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	steerRef = s
+	t0, err := s.Send(ctx, weft.User("a first question"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t0.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	t1, err := s.Send(ctx, weft.User("convert this"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := t1.Wait()
+	if err != nil {
+		t.Fatalf("the overflow re-run failed: %v", err)
+	}
+	if res.Text() != "done" {
+		t.Errorf("reply = %q, want the re-run's answer", res.Text())
+	}
+	// The steered message reached the tree exactly once — through the
+	// re-run's transcript, not only the failed attempt's memory.
+	if n := countUser(s, "switch to metric units"); n != 1 {
+		t.Fatalf("the steered message appears %d times in the context, want exactly once", n)
+	}
+	status := receiptStatus(receipts(s))
+	if len(status) != 1 {
+		t.Fatalf("receipts = %+v, want one steer's story", status)
+	}
+	for id, st := range status {
+		if st != thread.ReceiptDelivered {
+			t.Errorf("receipt %s = %q, want delivered", id, st)
+		}
+	}
+	for _, r := range receipts(s) {
+		if r.Status == thread.ReceiptDelivered && r.RunID != t1.RunID() {
+			t.Errorf("delivered receipt names run %q, want the re-run's %q", r.RunID, t1.RunID())
+		}
+	}
+}
+
+// countUser counts the user messages on the context carrying text.
+func countUser(s *thread.Session, text string) int {
+	n := 0
+	for _, m := range s.Context() {
+		if m.Role == weft.RoleUser && m.Text() == text {
+			n++
+		}
+	}
+	return n
+}
+
+// panicOnceStorage panics, once, on the Append that carries a turn
+// entry — the turn's end batch — and behaves otherwise.
+type panicOnceStorage struct {
+	thread.Storage
+	armed bool
+}
+
+func (p *panicOnceStorage) Append(ctx context.Context, session string, entries ...thread.Entry) error {
+	if p.armed {
+		for _, e := range entries {
+			if _, ok := e.(thread.TurnEntry); ok {
+				p.armed = false
+				panic("storage exploded under the turn's end batch")
+			}
+		}
+	}
+	return p.Storage.Append(ctx, session, entries...)
+}
+
+// A steer handed to a run whose turn then dies on the session layer's
+// panic path (the turn's end batch never lands) must still reach a
+// final state and its message must still run: it defers to a
+// follow-up, like every undelivered steer — delivered-to-a-lost-
+// transcript is not a receipt state at all (the review's
+// every-receipt-final-state focus).
+func TestSteerSettlesWhenTurnEndPanics(t *testing.T) {
+	ctx := context.Background()
+	st := &panicOnceStorage{Storage: thread.Memory(), armed: true}
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo"}),
+		wefttest.Say("done"),
+		wefttest.Say("followed"),
+	)
+	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "ok", nil
+	})
+	var steerRef *thread.Session
+	var steerOnce sync.Once
+	agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
+		if _, ok := ev.(weft.ToolStart); ok {
+			steerOnce.Do(func() {
+				if _, err := steerRef.Send(ctx, weft.User("steer the doomed turn")); err != nil {
+					t.Errorf("steer Send: %v", err)
+				}
+			})
+		}
+	}))
+	s, err := thread.Create(ctx, st, agent, thread.BusyPolicy(thread.Steer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	steerRef = s
+	t1, err := s.Send(ctx, weft.User("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t1.Wait(); err == nil || !strings.Contains(err.Error(), "panicked") {
+		t.Fatalf("the panicked turn's Wait = %v, want the containment error", err)
+	}
+	// The steer defers (a queued receipt alone is not a final state)
+	// and its follow-up runs the message.
+	waitUntil(t, "the steer of a panicked turn never reached a final receipt state", func() bool {
+		for _, r := range receipts(s) {
+			if r.Status == thread.ReceiptDeferred {
+				return true
+			}
+		}
+		return false
+	})
+	waitUntil(t, "the steer of a panicked turn never ran its message", func() bool {
+		return steerInContext(s, "steer the doomed turn")
+	})
+}
+
+// failTurnEndStorage fails, once, the Append that carries a turn
+// entry, and behaves otherwise.
+type failTurnEndStorage struct {
+	thread.Storage
+	fail bool
+}
+
+func (f *failTurnEndStorage) Append(ctx context.Context, session string, entries ...thread.Entry) error {
+	if f.fail {
+		for _, e := range entries {
+			if _, ok := e.(thread.TurnEntry); ok {
+				f.fail = false
+				return errors.New("disk on fire")
+			}
+		}
+	}
+	return f.Storage.Append(ctx, session, entries...)
+}
+
+// A steer handed to a run whose turn-end batch the storage refuses
+// must not finish as delivered while its message is in no tree — not
+// in storage (the batch failed) and not in memory (nothing was
+// adopted). It defers and the follow-up re-runs the message: accepted
+// input acknowledged then lost is the exact scar ADR 0011 §1 carries
+// from Codex #40805.
+func TestSteerRedeliveredWhenTurnEndNotPersisted(t *testing.T) {
+	ctx := context.Background()
+	st := &failTurnEndStorage{Storage: thread.Memory(), fail: true}
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo"}),
+		wefttest.Say("done"),
+		wefttest.Say("followed"),
+	)
+	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "ok", nil
+	})
+	var steerRef *thread.Session
+	var steerOnce sync.Once
+	agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
+		if _, ok := ev.(weft.ToolStart); ok {
+			steerOnce.Do(func() {
+				if _, err := steerRef.Send(ctx, weft.User("steer the unpersisted turn")); err != nil {
+					t.Errorf("steer Send: %v", err)
+				}
+			})
+		}
+	}))
+	s, err := thread.Create(ctx, st, agent, thread.BusyPolicy(thread.Steer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	steerRef = s
+	t1, err := s.Send(ctx, weft.User("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t1.Wait(); err != nil {
+		t.Fatalf("the run itself succeeded; only its persistence failed: %v", err)
+	}
+	// The message re-runs: it is in no tree until a follow-up carries it.
+	waitUntil(t, "the steer of an unpersisted turn never reached a final receipt state", func() bool {
+		for _, r := range receipts(s) {
+			if r.Status == thread.ReceiptDeferred {
+				return true
+			}
+		}
+		return false
+	})
+	waitUntil(t, "the steer of an unpersisted turn never re-ran its message", func() bool {
+		return steerInContext(s, "steer the unpersisted turn")
+	})
+}
+
+// flushFailStorage adds the Flusher capability to any storage, failing
+// the first failNext Flush calls.
+type flushFailStorage struct {
+	thread.Storage
+	failNext atomic.Int32
+}
+
+func (f *flushFailStorage) Flush(ctx context.Context, session string) error {
+	if f.failNext.Add(-1) >= 0 {
+		return errors.New("fsync failed")
+	}
+	return nil
+}
+
+// A steer whose receipt flush fails is written but unsynced: Send
+// reports the failure, and the live session must match what a reopen
+// would do with the same on-disk state (resurrectSteers defers the
+// orphan) — the steer defers and runs, rather than sitting in a
+// queued receipt no running turn will ever drain.
+func TestSteerFlushFailureStillSettles(t *testing.T) {
+	ctx := context.Background()
+	st := &flushFailStorage{Storage: thread.Memory()}
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo"}),
+		wefttest.Say("done"),
+		wefttest.Say("followed"),
+	)
+	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "ok", nil
+	})
+	var steerRef *thread.Session
+	var steerOnce sync.Once
+	agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
+		if _, ok := ev.(weft.ToolStart); ok {
+			steerOnce.Do(func() {
+				st.failNext.Store(1) // the steer receipt's flush fails
+				if _, err := steerRef.Send(ctx, weft.User("steer past the flush failure")); err == nil {
+					t.Error("a steer whose receipt flush failed was reported accepted")
+				}
+			})
+		}
+	}))
+	s, err := thread.Create(ctx, st, agent, thread.BusyPolicy(thread.Steer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	steerRef = s
+	t1, err := s.Send(ctx, weft.User("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	// The receipt reaches a final state and the message runs — exactly
+	// what a reopen would resurrect from the written entry.
+	waitUntil(t, "the flush-failed steer never reached a final receipt state", func() bool {
+		for _, r := range receipts(s) {
+			if r.Status == thread.ReceiptDeferred {
+				return true
+			}
+		}
+		return false
+	})
+	waitUntil(t, "the flush-failed steer never ran its message", func() bool {
+		return steerInContext(s, "steer past the flush failure")
+	})
+}
+
+// failDeferredStorage fails, once, the Append of a deferred receipt
+// entry, and behaves otherwise.
+type failDeferredStorage struct {
+	thread.Storage
+	fail bool
+}
+
+func (f *failDeferredStorage) Append(ctx context.Context, session string, entries ...thread.Entry) error {
+	if f.fail {
+		for _, e := range entries {
+			if r, ok := e.(thread.ReceiptEntry); ok && r.Status == thread.ReceiptDeferred {
+				f.fail = false
+				return errors.New("disk on fire")
+			}
+		}
+	}
+	return f.Storage.Append(ctx, session, entries...)
+}
+
+// A crashed steer resurrected on reopen whose deferral cannot be
+// persisted still runs: the follow-up is queued in memory, the same
+// recovery settleSteersLocked uses — the message is in hand, and only
+// the receipt entry stays queued on disk.
+func TestResurrectSteerSurvivesFailedDeferral(t *testing.T) {
+	ctx := context.Background()
+	inner := thread.Memory()
+	st := &failDeferredStorage{Storage: inner, fail: true}
+	agent := weft.New(wefttest.Script(wefttest.Say("resurrected"), wefttest.Say("resurrected")))
+	s0, err := thread.Create(ctx, inner, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The crash window: a queued receipt no fate followed.
+	clone := weft.User("lost in the crash")
+	if err := st.Append(ctx, s0.ID(), thread.ReceiptEntry{
+		ID: "e_orphan", ParentID: "", Created: time.Now().UTC(),
+		Status: thread.ReceiptQueued, Msg: &clone,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := thread.Open(ctx, st, s0.ID(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the resurrected steer never ran despite the failed deferral write", func() bool {
+		return steerInContext(s, "lost in the crash")
+	})
 }

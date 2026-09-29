@@ -81,6 +81,13 @@ func (s *Session) steerSendLocked(ctx context.Context, msg weft.Message) (*Turn,
 	s.adoptLocked(e)
 	if f, ok := s.st.(Flusher); ok {
 		if err := f.Flush(ctx, s.header.ID); err != nil {
+			// The receipt is written but not synced, and Send reports
+			// the failure — yet the entry is on disk, and a reopen
+			// would resurrect it as a running follow-up
+			// (resurrectSteers). The live session must match: the
+			// steer defers now instead of waiting forever in a queued
+			// receipt nothing will drain.
+			s.settleSteerLocked(queuedSteer{receipt: t.id, msg: msg, ctx: ctx, turn: t})
 			return nil, fmt.Errorf("thread: steer receipt flush: %w", err)
 		}
 	}
@@ -119,28 +126,45 @@ func (s *Session) deferSteerLocked(q queuedSteer) error {
 	return nil
 }
 
+// settleSteerLocked settles one accepted steer as a deferred follow-up
+// (called under mu): the deferred receipt entry is appended, the
+// follow-up turn minted and queued in acceptance order, and the
+// steer's Turn linked to it through Next and finished. When the
+// deferred receipt cannot be persisted the failure is logged, not
+// raised — the follow-up still runs from the in-memory queue, the
+// message in hand: the turn has landed, and only the receipt entry
+// stays queued (the caller's next interaction re-reads the tree).
+func (s *Session) settleSteerLocked(q queuedSteer) {
+	if err := s.deferSteerLocked(q); err != nil {
+		s.agent.Logger().Error("thread: steer deferral not persisted",
+			"session", s.header.ID, "receipt", q.receipt, "err", err)
+		ft := s.newTurnLocked()
+		s.queue = append(s.queue, pendingSend{ctx: q.ctx, msg: q.msg, turn: ft})
+		if q.turn != nil {
+			q.turn.setNext(ft)
+			q.turn.finish(nil, nil)
+		}
+	}
+}
+
 // settleSteersLocked runs at the end of every turn (called under mu):
 // every steer still live when the run ended — it met a StopWhen end,
 // the run parked approvals, or it arrived after the last drain point —
-// defers to a follow-up. A persistence failure is logged, not raised:
-// the turn has landed, and the steer's follow-up still runs from the
-// in-memory queue (the receipt entry alone stays queued).
+// defers to a follow-up, and so does every steer the run's drain took
+// whose turn never recorded its end (a panicked session path, a turn
+// batch the storage refused): handed-but-unrecorded is not a final
+// state, and the message re-runs rather than dying with a transcript
+// that is in no tree.
 func (s *Session) settleSteersLocked() {
 	for len(s.steerQueue) > 0 {
 		q := s.steerQueue[0]
 		s.steerQueue = s.steerQueue[1:]
-		if err := s.deferSteerLocked(q); err != nil {
-			s.agent.Logger().Error("thread: steer deferral not persisted",
-				"session", s.header.ID, "receipt", q.receipt, "err", err)
-			// The follow-up still runs: the message is in hand, and the
-			// caller's next interaction re-reads the tree.
-			ft := s.newTurnLocked()
-			s.queue = append(s.queue, pendingSend{ctx: q.ctx, msg: q.msg, turn: ft})
-			if q.turn != nil {
-				q.turn.setNext(ft)
-				q.turn.finish(nil, nil)
-			}
-		}
+		s.settleSteerLocked(q)
+	}
+	for len(s.handed) > 0 {
+		q := s.handed[0]
+		s.handed = s.handed[1:]
+		s.settleSteerLocked(q)
 	}
 }
 
@@ -216,11 +240,10 @@ func (s *Session) resurrectSteers(ctx context.Context) {
 		if !ok || r.Status != ReceiptQueued || r.Msg == nil || settled[r.ID] {
 			continue
 		}
-		if err := s.deferSteerLocked(queuedSteer{receipt: r.ID, msg: *r.Msg, ctx: context.WithoutCancel(ctx)}); err != nil {
-			s.agent.Logger().Error("thread: steer resurrection not persisted",
-				"session", s.header.ID, "receipt", r.ID, "err", err)
-			continue
-		}
+		// The settle's own rule: a deferral the storage refuses still
+		// runs the follow-up in memory (the message is in hand), and
+		// the queued entry stays for the next reopen to retry.
+		s.settleSteerLocked(queuedSteer{receipt: r.ID, msg: *r.Msg, ctx: context.WithoutCancel(ctx)})
 	}
 	s.kickRunnerLocked()
 }

@@ -346,8 +346,8 @@ Studio on `127.0.0.1:7331/studio/`.
 
 The core is stateless on purpose; `weft/thread` is the layer above it:
 a conversation as an append-only tree of entries, durable through a
-`Storage` backend, with branching, compaction and (in v0.2) approvals
-built on the same tree. A session is a file you can read with `jq` and
+`Storage` backend, with branching, compaction and approvals built on
+the same tree. A session is a file you can read with `jq` and
 back up with `cp` — one header line, then one line per entry; nothing
 is ever rewritten or deleted in place.
 
@@ -364,6 +364,38 @@ s.Branch(ctx, entryID)                         // navigate the tree; nothing los
 fork, _ := s.Fork(ctx, entryID)                // a new session, self-contained
 again, _ := thread.Open(ctx, st, s.ID(), agent) // reopen from disk, same context
 ```
+
+Approvals (ADR 0021) make the core's run boundary durable: a gated
+call parks as a request entry written with its turn, `Pending()`
+survives restarts, and `Decide` records the decision and resumes on
+its own — the decision chain (grants, then a bounded Approver, then
+the park) runs before anything parks:
+
+```go
+turn, _ = s.Send(ctx, weft.User("Deploy to prod."))
+res, _ = turn.Wait()                       // res.Pending: the gated calls
+for _, r := range s.Pending() { notify(r) } // durable, restart-safe
+
+rt, _ := s.Decide(ctx, thread.Approve(id)) // resumes when the boundary completes
+follow := turn.Next()                      // the auto-resume's turn, when one ran
+
+s.Grant(ctx, thread.Grant{                 // "always allow go test"
+    Tool: "run",
+    Args: []thread.Arg{thread.ArgGlob("/command", "go test*")},
+})
+rt, _ = s.DecideSigned(ctx, sd)            // decisions that crossed a process:
+r, _ := s.Request(callID)                  // a challenge under the session's Keyring
+sd = thread.SignDecision(key, r, thread.Approve(callID))
+```
+
+Grants match tool plus argument predicates (`ArgEquals`, `ArgPrefix`,
+`ArgGlob`), expire, count uses, revoke, and can deny outright;
+`Quorum(n)` needs n distinct approvers; `RequireSigned()` closes the
+unsigned door; `s.Audit()` tells the whole story from the file. A
+`Send` while approvals pend queues behind them.
+
+`go run ./thread/examples/approvals` parks a call, restarts, decides
+signed, resumes, and replays a rejected signature — offline, pinned.
 
 Compaction (ADR 0020) keeps long sessions inside the window without
 losing anything: the older part is summarized behind a fixed marker,

@@ -1,3 +1,52 @@
+## thread 0.2.0 (unreleased)
+
+Approvals, complete (ADR 0021): the core's approval boundary made
+durable, signed, granted and audited on the session tree.
+
+- New entry kinds with `"v":2` — `approval_request`,
+  `approval_decision`, `approval_audit`, `grant`, `grant_revoked` —
+  with goldens in `thread/testdata/format2/`; a v0.1 reader fails
+  loudly on a session that used approvals, and every format1 golden
+  still reads. A parked call becomes an `approval_request` in the same
+  Append as its turn; `s.Pending()` rebuilds from entries, so pending
+  approvals survive restarts.
+- `s.Decide(ctx, decisions...)` records `thread.Approve`/`Deny`/
+  `Resolve`/`ResolveError`/`ApproveAlways` durably — `ErrNotPending`
+  before anything lands or runs — and resumes the boundary when it
+  completes (`thread.AutoResume`, default on; `s.Resume(ctx)` forces
+  it, denying undecided calls with the core's "no decision" text).
+  The resumed turn links to the parked one through `Turn.Next()`. A
+  `Send` while approvals pend queues behind the boundary.
+- The decision chain — grants, then an optional `Approver` bounded by
+  `thread.ApproverTimeout`, then the park — runs before a request is
+  durable, and every step writes an audit entry.
+- Grants: one tool plus argument predicates (`thread.ArgEquals`,
+  `ArgPrefix`, `ArgGlob` — `*` spans separators, a command is not a
+  path), session-scoped as entries (`s.Grant`, `s.Revoke`) or shared
+  behind `thread.WithGrantStore`; expiry, `MaxUses` counted from the
+  audit trail, deny-grants whose model-visible default "denied by
+  grant" is pinned, and "approve and always allow" via
+  `thread.ApproveAlways`.
+- Signed decisions for transports that cross a process:
+  `thread.NewKeyring` + `thread.WithKeyring`, `s.Request(callID)` mints
+  an HMAC-SHA256 challenge (nonce, key id, the request's hashes),
+  `thread.SignDecision` signs, `s.DecideSigned` verifies fail-closed —
+  `ErrBadSignature` (constant-time), `ErrExpired`, `ErrReplay` (nonces
+  are entries; the guard survives restarts), `ErrArgsChanged`,
+  `ErrUnknownKey` — and `thread.RequireSigned()` closes the unsigned
+  door.
+- `thread.Quorum(n)`: approvals from n distinct approver identities
+  resolve a call; conflicts resolve to deny with the pinned
+  "conflicting decisions". `thread.RequestExpiry(d)` lapses undecided
+  requests with a stated, pinned reason on the next resume.
+  `thread.OnRequest(fn)` notifies when a request parks; `s.Audit()`
+  returns the whole approval trail from the file.
+- Decisions fold per parked run, never per bare call id: call ids may
+  repeat across turns (ADR 0007), and a decision names its own
+  boundary.
+- `thread/examples/approvals`: park, restart, a signed decision,
+  resume, a rejected replay, the audit trail — offline, output pinned.
+
 # Changelog
 
 Notable changes to weft, newest first. The format follows

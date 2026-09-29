@@ -158,6 +158,13 @@ func (p *Pool) Close(ctx context.Context) error {
 		p.wg.Wait()
 		close(done)
 	}()
+	// An already-done ctx must not mask a finished drain: the drain
+	// wins when both are ready at once.
+	select {
+	case <-done:
+		return nil
+	default:
+	}
 	select {
 	case <-done:
 		return nil

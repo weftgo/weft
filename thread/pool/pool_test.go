@@ -62,6 +62,20 @@ func waitState(t *testing.T, parent *thread.Session, state string) pool.Receipt 
 	return pool.Receipt{}
 }
 
+// Submit's argument contract: a nil parent or agent is an error, not
+// a panic mid-delegation.
+func TestSubmitValidates(t *testing.T) {
+	ctx := context.Background()
+	p := pool.New(1)
+	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	if _, err := p.Submit(ctx, nil, weft.New(wefttest.Script()), "go"); err == nil {
+		t.Errorf("nil parent accepted")
+	}
+	if _, err := p.Submit(ctx, s, nil, "go"); err == nil {
+		t.Errorf("nil agent accepted")
+	}
+}
+
 func TestNewMaxPanics(t *testing.T) {
 	for _, max := range []int{0, -1} {
 		func() {
@@ -161,7 +175,9 @@ func TestWrapSync(t *testing.T) {
 }
 
 // A failing child is a tool error the parent model sees — failure is
-// data (ADR 0014) — and the receipt settles failed.
+// data (ADR 0014) — and the receipt settles failed. The model-visible
+// failure text is ADR 0014's pinned shape, byte-for-byte: the pool
+// replaces the mechanism, not the contract.
 func TestWrapSyncFails(t *testing.T) {
 	ctx := context.Background()
 	cause := errors.New("connection reset")
@@ -177,8 +193,13 @@ func TestWrapSyncFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	if _, err := turn.Wait(); err != nil {
+	res, err := turn.Wait()
+	if err != nil {
 		t.Fatalf("a failed child must not fail the parent turn: %v", err)
+	}
+	want := `SUBAGENT_FAILED: agent "research" failed at step 0: model stream: connection reset`
+	if !strings.Contains(transcriptText(res.Messages), want) {
+		t.Errorf("parent transcript lacks the pinned failure text %q:\n%s", want, transcriptText(res.Messages))
 	}
 	rs := pool.Receipts(s)
 	if len(rs) != 1 || rs[0].State != thread.PoolFailed {
@@ -187,6 +208,21 @@ func TestWrapSyncFails(t *testing.T) {
 	if rs[0].Stop == "" {
 		t.Errorf("failed receipt carries no cause: %+v", rs[0])
 	}
+}
+
+// transcriptText renders a transcript's tool results, for substring
+// assertions over what the model saw.
+func transcriptText(msgs []weft.Message) string {
+	var b strings.Builder
+	for _, m := range msgs {
+		for _, part := range m.Content {
+			if tp, ok := part.(weft.ToolResultPart); ok {
+				b.WriteString(tp.Content)
+				b.WriteByte('\n')
+			}
+		}
+	}
+	return b.String()
 }
 
 // The capped settlement: a child that dies on a budget (ADR 0022 §4).
@@ -598,6 +634,16 @@ func TestReceiptsAfterRestart(t *testing.T) {
 	}
 	if open.Usage().Delegated.OutputTokens != 5 {
 		t.Errorf("Delegated after restart = %+v", open.Usage().Delegated)
+	}
+	// The link survives the restart from both ends: the parent's
+	// receipt names the child, and the child's header names the
+	// parent (ADR 0022 §3).
+	childOpen, err := thread.Open(ctx, st, rs[0].Child, child)
+	if err != nil {
+		t.Fatalf("Open child after restart: %v", err)
+	}
+	if lin := childOpen.Lineage(); lin.Session != open.ID() {
+		t.Errorf("child lineage after restart = %+v, want session %s", lin, open.ID())
 	}
 }
 

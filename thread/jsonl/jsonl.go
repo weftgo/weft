@@ -256,6 +256,12 @@ func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.
 	}
 	var h thread.Header
 	if err := json.Unmarshal(lines[0], &h); err != nil {
+		if errors.Is(err, thread.ErrNewerFormat) {
+			// A header from a newer weft reads loud as its own class —
+			// thread.ErrNewerFormat names the header — not as line-1
+			// corruption a caller cannot branch on.
+			return thread.Header{}, nil, nil, err
+		}
 		return thread.Header{}, nil, nil, &thread.CorruptError{Session: id, Line: 1, Err: err}
 	}
 	entries := make([]thread.Entry, 0, len(lines)-1)
@@ -303,6 +309,12 @@ func (b *backend) List(ctx context.Context, q thread.Query) (thread.Page, error)
 		h, ok, err := readHeader(b.path(id))
 		if err != nil || !ok {
 			continue // not ours to list; Load will say why
+		}
+		if !metaMatch(h.Meta, q.Meta) {
+			continue
+		}
+		if q.TitleSearch != "" && !titleMatches(titleOf(b.path(id)), q.TitleSearch) {
+			continue
 		}
 		h.Meta = cloneMeta(h.Meta)
 		headers = append(headers, h)
@@ -500,6 +512,47 @@ func limitOf(n int) int {
 	default:
 		return n
 	}
+}
+
+// metaMatch reports whether meta holds every pair of want, exactly —
+// Query.Meta's rule, duplicated from thread the way limitOf is; the
+// conformance table pins both copies to the same answer.
+func metaMatch(meta, want map[string]string) bool {
+	for k, v := range want {
+		if meta == nil || meta[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// titleMatches reports whether the title contains the search, folding
+// case — Query.TitleSearch's rule, duplicated from thread like
+// metaMatch.
+func titleMatches(title, search string) bool {
+	return strings.Contains(strings.ToLower(title), strings.ToLower(search))
+}
+
+// titleOf returns the session's current title from its file — the last
+// info entry's Title, empty when none was ever written. This is the
+// one read beyond headers List ever does, and only for a TitleSearch:
+// the query shape pays for it (Query.TitleSearch's rule).
+func titleOf(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	title := ""
+	for _, line := range splitLines(raw)[1:] {
+		var head struct {
+			Type  string `json:"type"`
+			Title string `json:"title"`
+		}
+		if json.Unmarshal(line, &head) == nil && head.Type == "info" {
+			title = head.Title
+		}
+	}
+	return title
 }
 
 // readHeader reads and decodes a session file's first line, bounded to

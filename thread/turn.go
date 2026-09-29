@@ -190,7 +190,13 @@ func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.running || s.boundaryLocked() {
+	// A runner whose in-flight turn is already decided is on its way
+	// out — the epilogue frees the slot moments after the Wait that
+	// returned to this caller. Reading it as busy would answer ErrBusy
+	// (or queue) for a turn that already landed, the same stale-state
+	// race retireInFlightLocked closes for Branch; a Send that takes
+	// the slot here is legitimate, and the epilogue leaves it alone.
+	if (s.running && !s.inFlightDecidedLocked()) || s.boundaryLocked() {
 		// A running turn holds the session, and so does an open approval
 		// boundary: the follow-up is queued and runs when the boundary
 		// resolves — Decide or Resume resume it, the runner drains the
@@ -347,7 +353,16 @@ func (s *Session) execute(first workItem) {
 		// Send or Resume (both arm it again).
 		retry := !cur.resume || !cur.ps.turn.failed()
 		s.mu.Lock()
-		s.inFlight = nil // the item boundary: a Branch here is already safe
+		// The item boundary: a Branch here is already safe. A Send may
+		// have taken the slot while this turn was being decided (the
+		// busy check above reads a decided turn as free): this runner
+		// then owns nothing but its own turn's epilogue — it exits
+		// without touching the slot or the queue, and the new runner's
+		// loop drains what is left.
+		usurped := s.inFlight != nil
+		if !usurped {
+			s.inFlight = nil
+		}
 		// A Rollback turn branches the leaf back before its receipt
 		// entry here — its entries have landed, the follow-up (queued
 		// by the interrupting Send) starts next on the rolled-back
@@ -377,6 +392,12 @@ func (s *Session) execute(first workItem) {
 				s.agent.Logger().Error("thread: interrupt re-arm failed",
 					"session", s.header.ID, "err", err)
 			}
+		}
+		if usurped {
+			// The resume work, the queue and the slot belong to the new
+			// runner's loop now; this one's own turn is settled above.
+			s.mu.Unlock()
+			return
 		}
 		if s.resumeWork != nil {
 			rw := *s.resumeWork
@@ -451,6 +472,12 @@ func (s *Session) runOneContained(item workItem) {
 // it under mu first, so a caller whose Wait returns may Branch at
 // once and never read ErrBusy for a turn that already landed.
 // Callers hold s.mu.
+// inFlightDecidedLocked reports whether the runner slot's turn has
+// already landed: the epilogue is freeing it. Callers hold s.mu.
+func (s *Session) inFlightDecidedLocked() bool {
+	return s.inFlight == nil || s.inFlight.isDecided()
+}
+
 func (s *Session) retireInFlightLocked(t *Turn) {
 	if s.inFlight == t {
 		s.inFlight = nil
@@ -482,7 +509,7 @@ func (s *Session) runOne(ps pendingSend) {
 		// The caller walked away before the turn started: the prompt is
 		// kept, the turn is recorded as canceled, and the queue moves on.
 		errOut := fmt.Errorf("thread: turn canceled before it started: %w", err)
-		s.recordTurnEnd(persist, t, nil, errOut, 0, nil)
+		s.recordTurnEnd(persist, t, nil, errOut, 0, nil, nil)
 		s.mu.Lock()
 		s.retireInFlightLocked(t)
 		s.mu.Unlock()
@@ -533,7 +560,7 @@ func (s *Session) runResume(ctx context.Context, t *Turn) {
 	persist := context.WithoutCancel(ctx)
 	if err := ctx.Err(); err != nil {
 		errOut := fmt.Errorf("thread: resume canceled before it started: %w", err)
-		s.recordTurnEnd(persist, t, nil, errOut, 0, nil)
+		s.recordTurnEnd(persist, t, nil, errOut, 0, nil, nil)
 		s.mu.Lock()
 		s.settleResumeLocked(t)
 		s.retireInFlightLocked(t)
@@ -594,8 +621,13 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 	// attempt's partial is never recorded (an overflowed request
 	// produced no transcript worth keeping; the run store holds the
 	// attempt's own records under its id); a second failure fails the
-	// turn with both errors joined.
+	// turn with both errors joined. Per-step durability (ADR 0011 §7)
+	// makes "never recorded" a branch, not an absence: the attempt's
+	// step messages stay on the tree, on their own line of it.
 	var firstOverflow error
+	s.mu.Lock()
+	sp := &stepPersist{startLeaf: s.leaf}
+	s.mu.Unlock()
 	for attempt := 0; ; attempt++ {
 		// The input is the session's context — the walk already includes
 		// the prompt entry appended for this turn, or the boundary's
@@ -613,6 +645,10 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 		// empty queue drains nothing, and a Send under the Steer policy
 		// can queue at any moment — including after this run started.
 		runOpts = append(runOpts, weft.Steering(s.steerSource))
+		// The transcript observer (ADR 0011 §7): each batch of messages
+		// the run emits is appended as it joins, so a crash mid-turn
+		// loses nothing emitted.
+		runOpts = append(runOpts, s.observer(persist, sp))
 		runOpts = append(runOpts, weft.Messages(input...), weft.RunID(t.RunID()))
 		run := s.agent.Stream(ctx, runOpts...)
 		for ev, serr := range run.Events() {
@@ -626,7 +662,17 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 		if attempt == 0 && errors.Is(err, weft.ErrContextOverflow) && s.cfg.reRunOnOverflow && !t.overflowRetried {
 			firstOverflow = err
 			t.overflowRetried = true
-			if cerr := s.compactForOverflow(persist); cerr == nil {
+			// Branch back before compacting: the compaction must walk the
+			// path the re-run will continue from — the failed attempt's
+			// step messages are not part of it (ADR 0020 §5).
+			s.mu.Lock()
+			branched := s.branchBackLocked(persist, sp.startLeaf) == nil
+			if branched {
+				sp.count = 0
+				sp.startLeaf = s.leaf
+			}
+			s.mu.Unlock()
+			if cerr := s.compactForOverflow(persist); cerr == nil && branched {
 				// The shrunken path gets a fresh run id; the consumer
 				// sees one turn, its outcome from the attempt that
 				// answered. Steers the failed attempt drained die with
@@ -647,8 +693,22 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 				s.mu.Unlock()
 				continue
 			} else {
-				s.agent.Logger().Warn("thread: overflow compaction failed; no re-run",
-					"session", s.header.ID, "run", t.RunID(), "err", cerr)
+				// No re-run without the branch-back either: the failed
+				// attempt's step messages would ride the re-run's path,
+				// and ADR 0020 §5 keeps them off it. The turn fails with
+				// the overflow (both errors joined below).
+				if !branched {
+					s.agent.Logger().Warn("thread: overflow re-run skipped; the branch-back did not land",
+						"session", s.header.ID, "run", t.RunID())
+				} else {
+					// The branch-back landed (count already reset) and the
+					// compaction did not: the turn fails with the overflow,
+					// and the failed attempt's repaired tail is written on
+					// the active path by the turn's end — the same bytes a
+					// failed overflow turn always recorded.
+					s.agent.Logger().Warn("thread: overflow compaction failed; no re-run",
+						"session", s.header.ID, "run", t.RunID(), "err", cerr)
+				}
 			}
 		}
 		break
@@ -675,7 +735,7 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 	if err == nil && res != nil && len(res.Pending) > 0 {
 		chain = s.runChain(persist, t, callerOpts, res.Pending)
 	}
-	s.recordTurnEnd(persist, t, res, err, inputLen, chain)
+	s.recordTurnEnd(persist, t, res, err, inputLen, chain, sp)
 	// Steers still live when the run ended defer here (plan §6): the
 	// run met a StopWhen end or parked approvals without draining
 	// them, or they arrived after the last drain point. The follow-ups
@@ -750,22 +810,25 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 	t.finish(res, err)
 }
 
-// recordTurnEnd appends the turn's new messages and its turn entry in
-// one atomic batch, under a WithoutCancel window — the run is over,
-// and its transcript must land whatever happened to the caller's
-// context (ADR 0011 §4). On failure the partial transcript from
-// RunError.Result is kept after weft.Repair; a cancellation is
+// recordTurnEnd closes the turn: it appends the run's new messages
+// that per-step durability has not already written (normally none —
+// the step observer wrote them as they joined, ADR 0011 §7), then the
+// turn entry, in one atomic batch under a WithoutCancel window — the
+// run is over, and its ledger must land whatever happened to the
+// caller's context (ADR 0011 §4). On failure the partial transcript
+// from RunError.Result is kept after weft.Repair; a cancellation is
 // recorded as canceled; the calls a pending approval left unrun are
-// recorded on the entry. inputLen is the run's input length — the
-// messages beyond it are the turn's new ones. chain, when the turn
-// parked calls, carries the decision chain's entries — requests,
-// audits, chain decisions — into the same Append: the request and the
-// turn are atomic, all or none (ADR 0021 §1). A resume turn's entry
-// reuses the receipt id minted when the resume was armed (it has no
-// prompt entry of its own). A persistence failure is logged through
-// the agent's logger and the turn still completes: the session keeps
-// its in-memory tree, and the storage says why.
-func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResult, err error, inputLen int, chain *chainResult) {
+// recorded on the entry. inputLen is the run's input length — sp.count
+// of the messages beyond it are already in the tree, and the batch
+// writes the rest. chain, when the turn parked calls, carries the
+// decision chain's entries — requests, audits, chain decisions — into
+// the same Append: the request and the turn are atomic, all or none
+// (ADR 0021 §1). A resume turn's entry reuses the receipt id minted
+// when the resume was armed (it has no prompt entry of its own). A
+// persistence failure is logged through the agent's logger and the
+// turn still completes: the session keeps its in-memory tree, and the
+// storage says why.
+func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResult, err error, inputLen int, chain *chainResult, sp *stepPersist) {
 	var full []weft.Message
 	if err != nil {
 		var runErr *weft.RunError
@@ -795,30 +858,44 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 		}
 	}
 
+	// What per-step durability has not already written — normally
+	// nothing: the observer wrote every message as it joined. A
+	// successful run's messages are already sound model input (the loop
+	// repairs its input before appending its own), and a pending call
+	// must stay unresolved in the tree so a later decision can resolve
+	// it — so no repair on success. A failed run's partial is repaired
+	// on the way in, the ADR's rule; when the tree already holds the
+	// partial's raw form and repair changes it, the whole repaired tail
+	// is rewritten on a fresh line — branch back to where the turn
+	// started — so the active path holds exactly the bytes the turn-end
+	// batch always wrote, and the raw tail stays on its own branch,
+	// evidence like every abandoned line (ADR 0011 §7).
+	startLeaf := ""
+	if sp != nil {
+		startLeaf = sp.startLeaf
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	newMsgs, rewrite := turnEndMessages(full, inputLen, s.turnTailLocked(startLeaf), err)
+	if rewrite {
+		if bErr := s.branchBackLocked(ctx, startLeaf); bErr != nil {
+			// The rewrite becomes a suffix append: the raw tail stays,
+			// and the next run's input repair answers it.
+			s.agent.Logger().Warn("thread: failed turn tail rewrite did not land",
+				"session", s.header.ID, "run", t.runID, "err", bErr)
+			if sp != nil {
+				newMsgs = newMsgs[min(sp.count, len(newMsgs)):]
+			}
+		}
+	}
 	var entries []Entry
 	parent := s.leaf
-	if len(full) > inputLen {
-		// A successful run's messages are already sound model input
-		// (the loop repairs its input before appending its own), and a
-		// pending call must stay unresolved in the tree so a later
-		// decision can resolve it — so no repair here on success. A
-		// failed run's partial is repaired on the way in, the ADR's
-		// rule. Repairs land exactly at the input's tail (the tree
-		// holds valid prefixes with at most a pending tail), so the
-		// boundary slice stays aligned.
-		newMsgs := full[inputLen:]
-		if err != nil {
-			newMsgs = weft.Repair(newMsgs)
-		}
-		for _, m := range newMsgs {
-			id := s.mintIDLocked()
-			entries = append(entries, MessageEntry{
-				ID: id, ParentID: parent, Created: time.Now().UTC(), Message: cloneMessage(m),
-			})
-			parent = id
-		}
+	for _, m := range newMsgs {
+		id := s.mintIDLocked()
+		entries = append(entries, MessageEntry{
+			ID: id, ParentID: parent, Created: time.Now().UTC(), Message: cloneMessage(m),
+		})
+		parent = id
 	}
 	teID := s.mintIDLocked()
 	if t.resume {
@@ -1145,6 +1222,15 @@ func (t *Turn) finish(res *weft.RunResult, err error) {
 	t.result, t.waitErr, t.done = res, err, true
 	t.mu.Unlock()
 	t.cond.Broadcast()
+}
+
+// isDecided reports whether the turn has landed — finish has run —
+// the runner-epilogue race Send closes with it: a decided in-flight
+// turn is a slot being freed, not a busy session.
+func (t *Turn) isDecided() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.done
 }
 
 // failed reports whether the turn ended with an error — the runner's

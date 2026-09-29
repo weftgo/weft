@@ -174,7 +174,15 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		if err != nil {
 			return fail(0, err)
 		}
-		res.Messages = attachResults(res.Messages, resume, results)
+		var joined []Message
+		res.Messages, joined = attachResults(res.Messages, resume, results)
+		if len(joined) > 0 {
+			// The completed tool message joins the transcript at step 0
+			// of the resume (ADR 0007 §3) — the transcript observers see
+			// it here, where the transcript grew, exactly as they see
+			// every step's messages.
+			a.observeMessages(ctx, cfg, 0, joined)
+		}
 		// Resumed delegations roll into the total only: there is no
 		// StepRecord for resumed calls (ADR 0007), so no per-call map.
 		res.Usage = rollUp(res.Usage, sub)
@@ -367,6 +375,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		}
 		if len(msg.Content) > 0 {
 			res.Messages = append(res.Messages, msg)
+			a.observeMessages(ctx, cfg, step, []Message{msg})
 		}
 
 		rec := StepRecord{
@@ -417,6 +426,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 				toolMsg.Content = append(toolMsg.Content, r)
 			}
 			res.Messages = append(res.Messages, toolMsg)
+			a.observeMessages(ctx, cfg, step, []Message{toolMsg})
 		}
 		res.Steps = append(res.Steps, rec)
 		res.StopReason = finish.Reason
@@ -478,6 +488,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			// source of truth. The event is a snapshot — the transcript
 			// owns the delivered messages, the event carries a copy.
 			res.Messages = append(res.Messages, steered...)
+			a.observeMessages(ctx, cfg, step, steered)
 			emit(Steered{RunID: cfg.id, Seq: seq.Add(1), Step: step, Messages: cloneMessages(steered)})
 		}
 		// The continuation point: the loop is about to spend more, so
@@ -502,6 +513,35 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// transcript, including the final step's tool results, rides on the
 	// error.
 	return fail(a.maxSteps, ErrMaxSteps)
+}
+
+// observeMessages runs the run's transcript observers (OnMessages) over
+// one batch of messages that just joined the run's transcript — a deep
+// copy, so an observer that retains or mutates its slice touches
+// nothing the run sees. The fire sites are the transcript's growth
+// points (the loop goroutine, between event emissions), so the calls
+// come in transcript order without holding the event-ordering lock. A
+// panicking observer is contained and counted like a tap: a broken
+// observer must not break a run, but it must not be invisible either.
+func (a *Agent) observeMessages(ctx context.Context, cfg runConfig, step int, msgs []Message) {
+	if len(cfg.onMessages) == 0 {
+		return
+	}
+	snapshot := cloneMessages(msgs)
+	for _, fn := range cfg.onMessages {
+		a.safeOnMessages(ctx, fn, step, snapshot)
+	}
+}
+
+// safeOnMessages runs one transcript observer, containing a panic and
+// counting it (TapPanics) — the same containment a tap gets.
+func (a *Agent) safeOnMessages(ctx context.Context, fn func(context.Context, int, []Message), step int, msgs []Message) {
+	defer func() {
+		if recover() != nil {
+			a.tapPanics.Add(1)
+		}
+	}()
+	fn(ctx, step, msgs)
 }
 
 // safeTap runs one tap, containing a panic and counting it (TapPanics):
@@ -967,13 +1007,16 @@ func lastAssistantWithCalls(msgs []Message) int {
 // call taking its resumed result when one exists and its earlier one
 // otherwise: Gemini matches functionResponses by name and position, so
 // a reordered tool message could attach a result to the wrong call.
-func attachResults(msgs []Message, calls []ToolCallPart, results []ToolResultPart) []Message {
+// joined returns the tool message when one was created (a message
+// joined the transcript); a rebuild of a message already held is not a
+// join and reports nothing.
+func attachResults(msgs []Message, calls []ToolCallPart, results []ToolResultPart) (out []Message, joined []Message) {
 	if len(results) == 0 {
-		return msgs
+		return msgs, nil
 	}
 	i := lastAssistantWithCalls(msgs)
 	if i < 0 {
-		return msgs
+		return msgs, nil
 	}
 	resumed := make(map[string]ToolResultPart, len(results))
 	for _, r := range results {
@@ -1005,9 +1048,10 @@ func attachResults(msgs []Message, calls []ToolCallPart, results []ToolResultPar
 	if i+1 < len(msgs) && msgs[i+1].Role == RoleTool {
 		out := slices.Clone(msgs)
 		out[i+1].Content = parts
-		return out
+		return out, nil
 	}
-	return slices.Insert(slices.Clone(msgs), i+1, Message{Role: RoleTool, Content: parts})
+	created := Message{Role: RoleTool, Content: parts}
+	return slices.Insert(slices.Clone(msgs), i+1, created), []Message{created}
 }
 
 // composeSystem appends the advertised tools' PromptSnippets to the

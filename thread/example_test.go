@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/thread"
+	"github.com/weftgo/weft/thread/jsonl"
 	"github.com/weftgo/weft/wefttest"
 )
 
@@ -538,4 +540,105 @@ func ExampleReRunOnOverflow() {
 	// Output:
 	// <nil>
 	// recovered after compaction
+}
+
+// Query filters the session list: metadata pairs match the header
+// exactly, and the title search matches the session's current title —
+// the last info entry's — case-insensitively as a substring. Total
+// counts the matches; the cursor and limit page them.
+func ExampleQuery() {
+	ctx := context.Background()
+	st := thread.Memory()
+	created := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	titled := func(id string, meta map[string]string, title string) {
+		h := thread.Header{ID: id, Created: created, Meta: meta}
+		if err := st.Create(ctx, h); err != nil {
+			fmt.Println(err)
+			return
+		}
+		if title != "" {
+			if err := st.Append(ctx, id, thread.InfoEntry{
+				ID: "e_" + id, Created: created, Title: title,
+			}); err != nil {
+				fmt.Println(err)
+			}
+		}
+	}
+	titled("s_prod", map[string]string{"env": "prod"}, "Checkout bug")
+	titled("s_dev", map[string]string{"env": "dev"}, "login flow")
+	titled("s_prod_2", map[string]string{"env": "prod"}, "checkout again")
+
+	p, err := st.List(ctx, thread.Query{Meta: map[string]string{"env": "prod"}})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("env=prod:", p.Total)
+	p, err = st.List(ctx, thread.Query{TitleSearch: "CHECKOUT"})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	for _, h := range p.Sessions {
+		fmt.Println("title match:", h.ID)
+	}
+	// Output:
+	// env=prod: 2
+	// title match: s_prod_2
+	// title match: s_prod
+}
+
+// A watcher tails a session as it is appended to — the live tail a
+// second process reads while the first writes. The stream yields the
+// backlog in arrival order, then each new entry exactly once, and ends
+// when its context is canceled.
+func ExampleWatcher() {
+	ctx := context.Background()
+	dir, err := os.MkdirTemp("", "weft-watch")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	st, err := jsonl.Open(dir)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	if err := st.Create(ctx, thread.Header{ID: "s_demo", Created: time.Now().UTC()}); err != nil {
+		fmt.Println(err)
+		return
+	}
+	if err := st.Append(ctx, "s_demo",
+		thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: weft.User("one")}); err != nil {
+		fmt.Println(err)
+		return
+	}
+	watch := st.(thread.Watcher)
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	seq, err := watch.Watch(wctx, "s_demo", "")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	go func() {
+		for e, err := range seq {
+			if err != nil {
+				return
+			}
+			fmt.Println("watched:", e.(thread.MessageEntry).Message.Text())
+		}
+	}()
+	if err := st.Append(ctx, "s_demo",
+		thread.MessageEntry{ID: "e_2", Created: time.Now().UTC(), Message: weft.User("two")}); err != nil {
+		fmt.Println(err)
+		return
+	}
+	time.Sleep(600 * time.Millisecond) // let the tail catch both
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+	// Output:
+	// watched: one
+	// watched: two
 }

@@ -1,3 +1,71 @@
+## thread 0.4.0 — 2026-09-29
+
+The second backend, per-step durability, and the live tail (plan §7,
+ADR 0011 §7's amendment). The root gains `weft.OnMessages` (its own
+0.5.0 entry below); thread requires it, released in lockstep —
+`thread/v0.4.0` and the new `thread/sqlite/v0.1.0` beside the root
+`v0.5.0` and its requirement bumps (openai, anthropic, google 0.3.8,
+mcp 0.1.9, store 0.1.3, studio 0.2.1).
+
+### Added
+
+- `thread/sqlite` — its own module (`github.com/weftgo/weft/thread/sqlite`)
+  so the modernc driver never enters `thread`'s dependencies: one
+  SQLite file for every session, WAL, embedded migrations (a schema
+  ahead of the binary refuses to open), the same wire lines as jsonl,
+  the full `threadtest` table including the corruption rows, and the
+  one-writer rule as a lock row per session — taken over from a holder
+  whose process died, judged per-host. Crash tests kill a helper
+  mid-append and mid-turn.
+- Per-step durability (ADR 0011 §7): a turn's messages append to the
+  tree as they join the run's transcript, so a crash mid-turn loses
+  nothing emitted. A failed turn whose final form differs from its raw
+  tail (an interrupt's golden completions) rewrites the tail on a fresh
+  line; an overflow re-run's failed attempt keeps its messages on their
+  own branch of the tree.
+- The `thread.Watcher` capability on both durable backends:
+  `Watch(ctx, session, afterEntryID)` tails a session — the backlog in
+  arrival order, then each new entry exactly once, ending with the
+  context. Readers never lock; a watcher is a reader that waits.
+- `thread.Query` filters: `Meta` (every pair matched exactly against
+  the header's metadata) and `TitleSearch` (the session's current title
+  — the last info entry's — matched case-insensitively as a substring),
+  with the existing cursor and limit paging the filtered set. sqlite
+  keeps the title denormalised (migration 0002, backfilled once) so the
+  filter never reads a session's entries.
+
+### Changed
+
+- `thread.Load` (both durable backends) reads one snapshot: a session
+  deleted under a concurrent load answers `ErrNotFound` or the whole
+  session, never a header whose entries vanished.
+- A session header carrying a newer envelope fails `Load` as
+  `ErrNewerFormat` (both durable backends) — the class the format rules
+  name for it — not as line-1 corruption.
+- `Resume` joins an in-flight resume through the arming registry: the
+  armed resume, not the dangling tail, is the idempotency key.
+
+## 0.5.0 / openai, anthropic, google 0.3.8 / mcp 0.1.9 / store 0.1.3 / studio 0.2.1 — 2026-09-29
+
+Version 4 of the phase-3 plan (plan §7): the transcript observer in
+the core, and the session features that need it. Tags cut in two
+phases (ADR 0005): the root at v0.5.0, then the sub-modules — openai,
+anthropic, google, mcp, store and studio as requirement bumps only —
+all requiring the tagged root v0.5.0, beside thread 0.4.0 and the new
+thread/sqlite 0.1.0 above.
+
+### Added — the transcript observer (ADR 0006 note, TODO §5.12 shape (b))
+
+- `weft.OnMessages(fn)` — a run option registering an observer the
+  loop calls whenever messages join the run's transcript: the step's
+  assistant message in its final shape (signed reasoning included),
+  the batched tool message, and the messages a steering drain
+  delivered. Exact bytes, deep-copied, in transcript order — what an
+  incremental persister (a session layer) writes per step equals what
+  `RunResult.Messages` holds at the end, without the lossy rebuild
+  from deltas. Run-scoped like `Steering`; not inherited by Subagent
+  child runs; panics contained and counted (`TapPanics`).
+
 ## 0.4.0 / openai, anthropic, google 0.3.7 / mcp 0.1.8 / store 0.1.2 — 2026-09-29
 
 Version 3 of the phase-3 plan (plan §5): the steering hook in the

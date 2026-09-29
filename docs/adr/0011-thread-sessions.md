@@ -121,8 +121,8 @@ res, err := turn.Wait()                           // or just Wait
   messages and a `turn` entry are appended in a `context.WithoutCancel`
   window. On failure the partial transcript from `RunError.Result` is
   kept after `weft.Repair`; a canceled turn is recorded as canceled.
-- Per-step persistence (a crash mid-turn loses nothing emitted) arrives
-  in v0.4 (plan §7).
+- Per-step persistence (a crash mid-turn loses nothing emitted) is
+  §7's amendment, shipped in v0.4 (plan §7).
 
 ### 5. Storage
 
@@ -175,6 +175,53 @@ The format and the API are designed to grow without breaking:
   `github.com/weftgo/weft/thread/v2` with v1 kept importable and able
   to read v2 files it understands.
 
+### 7. Per-step turns (amended 2026-09-29, v0.4)
+
+Per-step persistence shipped through a core addition, not an event
+rebuild: `weft.OnMessages` (ADR 0006's 2026-09-29 note; TODO §5.12's
+shape (b)) is a run-scoped, read-only transcript observer — the loop
+calls it with the exact messages as they join the run's transcript,
+signatures and part boundaries included. The session appends each
+batch as message entries the moment it joins, so a crash mid-turn
+loses nothing emitted; the turn's end then appends only its
+bookkeeping — the turn entry, receipts, the decision chain's entries —
+never a message twice (the step messages, minus what already landed).
+
+Why not the rebuild (the option plan §7 weighed): the event stream
+cannot carry `ReasoningPart.Signature` (ADR 0004 never streams it), so
+a rebuilt transcript is lossy for thinking models — unverifiable on
+replay — and the loop's assembly rules (empty-turn suppression,
+StopMaxTokens synthetic results, one batched tool message) would live
+a second time in thread. The step put both options to the maintainer
+on 2026-09-29; no answer arrived in the session, so this amendment
+follows the step's own review bar ("the rebuilt or streamed step
+messages equal RunResult.Messages exactly, including signatures") and
+the plan's option-b release contingency (the v0.4 Release prompt
+carries the two-phase root release), and awaits his ratification.
+
+Consequences the amendment owns:
+
+- A turn that dies mid-step may leave a dangling call in the tree: the
+  raw tail is evidence; the loop's input repair answers it with the
+  same golden bytes the turn-end repair used to write, so the model
+  sees an identical transcript either way.
+- A failed turn whose final form differs from its raw tail — an
+  interrupted turn's golden completions, the repair's synthesized
+  results — rewrites the whole tail on a fresh line (a leaf entry back
+  to where the turn started): the active path holds exactly the bytes
+  the turn-end batch always wrote, and the raw tail stays on its own
+  branch, nothing deleted.
+- An overflow re-run's failed attempt keeps its step messages on their
+  own branch: "the failed attempt records nothing" (ADR 0020 §5)
+  becomes "records nothing on the active path" — the leaf entry
+  navigates back before the compaction, and the re-run continues from
+  where the turn started.
+- A resume's completed tool message (the core's attachResults) is a
+  transcript join and persists when it joins, where the turn's end
+  used to write it; and Resume's idempotency key is the armed resume,
+  not the dangling tail — mid-resume, the tail can already read
+  resolved.
+
 ## Consequences
 
 - A session is a file you can read with `jq`, back up with `cp`, and
@@ -182,8 +229,8 @@ The format and the API are designed to grow without breaking:
 - The run store and the session store are separate; linking them is by
   run id (`<session>-t<n>`). A Studio "threads" view groups runs by that
   prefix (a later store/studio change, out of this ADR).
-- Mid-turn crash durability waits for v0.4; until then a crash loses the
-  in-flight turn's model output but never the prompt.
+- Mid-turn crash durability is §7: a crash loses at most the step in
+  flight, never an emitted one, and never the prompt.
 - `weft/thread` is a new module with its own tags (`thread/vX.Y.Z`),
   released after the root it requires (TODO §1.1).
 

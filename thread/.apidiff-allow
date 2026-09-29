@@ -5,3 +5,12 @@
 # gated with no allowances).
 #
 # v0.2 added to the v0.1 surface without breaking it — no entries yet.
+#
+# v0.4 (2026-09-29): one entry — Query grew its filter fields and so
+# stopped being comparable. Reviewed in the v0.4 release pass: Query is
+# a request value handed to List, never a map key or a compared pair;
+# the filters are maps by nature (exact pairs, any count), and the
+# alternative — sorted key/value slices to keep comparability — would
+# tax every caller to preserve a property nothing promises. The v0.8
+# freeze empties this file (plan §10).
+Query: old is comparable, new is not

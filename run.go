@@ -29,6 +29,10 @@ type runConfig struct {
 	// steer is the run's steering source, installed by Steering; nil on
 	// an ordinary run, and never inherited by a Subagent's child runs.
 	steer SteerFunc
+	// onMessages holds the run's transcript observers, installed by
+	// OnMessages; the loop calls them as messages join the transcript.
+	// Empty on an ordinary run, and never inherited by a child.
+	onMessages []func(context.Context, int, []Message)
 }
 
 type decision struct {
@@ -114,6 +118,41 @@ func (o runIDOption) applyRun(c *runConfig) { c.id = string(o) }
 // replays, idempotent retries, and correlating with an outer system's own
 // ids. Empty values are ignored.
 func RunID(id string) RunOption { return runIDOption(id) }
+
+type onMessagesOption struct {
+	fn func(context.Context, int, []Message)
+}
+
+func (o onMessagesOption) applyRun(c *runConfig) {
+	if o.fn != nil {
+		c.onMessages = append(c.onMessages, o.fn)
+	}
+}
+
+// OnMessages returns the RunOption registering an observer the loop
+// calls whenever messages join the run's transcript: the assistant
+// message a step produced (reasoning, text and calls in their final
+// shape, signatures included), the tool message that follows its calls,
+// and the messages a steering drain delivered. msgs is exactly what
+// joined, in transcript order, as a deep copy — retaining or mutating
+// it changes nothing the run sees — and step is the step the messages
+// belong to (a steer's messages name the step whose drain delivered
+// them). The calls are synchronous on the run's goroutine, in transcript
+// order, so a consumer that appends each batch to durable storage
+// persists a mid-run crash's worth of exact transcript; like Tap an
+// observer must be fast and must not block (the run waits for it), and
+// like Tap a panic in one is contained and counted (TapPanics), never
+// breaking the run. Observers cannot change anything — the transcript
+// is the run's; behaviour attaches at the two seams. Several OnMessages
+// options run in registration order. A Subagent's child run does not
+// inherit them: a child's transcript belongs to whoever runs the child
+// (the same rule as Steering). This is TODO §5.12's shape (b), the
+// answer to "reconstruct messages from events (lossy: signatures, block
+// boundaries) or wait for the run to end": the exact bytes, as they
+// join.
+func OnMessages(fn func(ctx context.Context, step int, msgs []Message)) RunOption {
+	return onMessagesOption{fn}
+}
 
 // newRunID returns a random 128-bit hex identifier.
 func newRunID() string {

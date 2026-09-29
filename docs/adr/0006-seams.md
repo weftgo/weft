@@ -211,3 +211,26 @@ an outcome; the panic still reaches the caller); a panic in it is
 contained and counted with the tap panics (`TapPanics`); several run
 in registration order. Pinned by `TestOnRunEnd*` in
 `contract_test.go`.
+
+## Note (2026-09-29 — `OnMessages` observes the transcript; TODO §5.12
+shape (b), root 0.5.0, thread step 4.2)
+
+`weft.OnMessages(fn)` is a run option installing an observer the loop
+calls whenever messages join the run's transcript — the assistant
+message a step produced (signatures included), the batched tool
+message, the messages a steering drain delivered — with exactly what
+joined, as a deep copy, in transcript order. It is not a third seam,
+for the same reason `OnRunEnd` is not: it receives what has already
+happened and cannot change it. It exists because the two existing
+observation paths cannot carry the transcript mid-run: events are
+lossy for this purpose (signatures are never streamed, part boundaries
+are not the model's), and `RunResult` is end-only — the exact friction
+TODO §5.12 filed from bobina's incremental session files. The observer
+is run-scoped (a run option, like `Steering`) and not inherited by a
+Subagent's child run; a panic in it is contained and counted with
+`TapPanics`. §5.12's other candidate shapes — documenting "read Result
+after Wait" (a), and growing `RunResult` into an incremental handle
+(c) — are rejected: (a) is the status quo friction, (c) would put loop
+internals into the result type. Pinned by `TestOnMessages*` in
+`onmessages_test.go`; the consumer it ships for is `weft/thread`'s
+per-step durability (ADR 0011 §7).

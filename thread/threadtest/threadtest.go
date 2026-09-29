@@ -40,6 +40,354 @@ func Run(t *testing.T, open func(t *testing.T) thread.Storage) {
 	t.Run("ConcurrentSessions", concurrent(open))
 	t.Run("ContextCancellation", canceled(open))
 	t.Run("CorruptionIsLoud", corrupt(open))
+	t.Run("ListFilters", filters(open))
+	t.Run("ListPagingUnderWrites", pagingUnderWrites(open))
+}
+
+// pagingUnderWrites pins the paging contract under concurrent inserts:
+// pages never duplicate a session, never go backwards, and terminate —
+// whatever else is being created while the caller pages. New sessions
+// land at the newest edge (a cursor walks away from it), so a walk
+// that started before them simply does not see them; what it must
+// never see is a session twice or out of order.
+func pagingUnderWrites(open func(t *testing.T) thread.Storage) func(*testing.T) {
+	return func(t *testing.T) {
+		st := open(t)
+		base := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+		const stable = 80
+		for i := 0; i < stable; i++ {
+			h := header(fmt.Sprintf("s_pg%03d", i))
+			h.Created = base.Add(time.Duration(i) * time.Second)
+			if err := st.Create(ctx(), h); err != nil {
+				t.Fatal(err)
+			}
+		}
+		stop := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() { // the churn: new sessions, newest-first edge —
+			// bounded and paced, a writer's cadence, not a fork bomb
+			// (a List reads every header, and an unbounded churn makes
+			// each page quadratically dear).
+			defer wg.Done()
+			for i := 0; i < 30; i++ {
+				select {
+				case <-stop:
+					return
+				case <-time.After(5 * time.Millisecond):
+				}
+				h := header(fmt.Sprintf("s_new%03d", i))
+				h.Created = base.Add(time.Duration(stable+i) * time.Second)
+				if err := st.Create(ctx(), h); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
+		var seen []string
+		var before time.Time
+		pages := 0
+		for {
+			p, err := st.List(ctx(), thread.Query{Before: before, Limit: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, h := range p.Sessions {
+				if i > 0 && h.Created.After(p.Sessions[i-1].Created) {
+					t.Fatalf("a page out of order: %v", p.Sessions)
+				}
+				seen = append(seen, h.ID)
+			}
+			if len(p.Sessions) == 0 {
+				break
+			}
+			before = p.Sessions[len(p.Sessions)-1].Created
+			pages++
+			if pages > 30 {
+				t.Fatal("paging did not terminate")
+			}
+		}
+		close(stop)
+		wg.Wait()
+		dup := map[string]bool{}
+		for _, id := range seen {
+			if dup[id] {
+				t.Fatalf("session %s appeared on two pages under concurrent writes", id)
+			}
+			dup[id] = true
+		}
+		if len(seen) < stable {
+			t.Fatalf("paged over %d sessions, want at least the %d that predate the walk", len(seen), stable)
+		}
+	}
+}
+
+// filters pins the Query filter contract: Meta matches every pair
+// exactly against the header's metadata; TitleSearch matches
+// case-insensitively as a substring against the session's current
+// title — the last info entry's; both narrow Total; and the Before
+// cursor and Limit page the filtered set, not the whole directory.
+func filters(open func(t *testing.T) thread.Storage) func(*testing.T) {
+	return func(t *testing.T) {
+		st := open(t)
+		base := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+		// Six sessions: metas split across shapes, titles set by info
+		// entries (one retitled late — the last info entry wins).
+		seed := []struct {
+			id      string
+			created time.Time
+			meta    map[string]string
+			titles  []string
+		}{
+			{"s_f0", base, map[string]string{"env": "prod", "team": "a"}, []string{"Checkout bug"}},
+			{"s_f1", base.Add(time.Second), map[string]string{"env": "dev"}, []string{"login FLOW"}},
+			{"s_f2", base.Add(2 * time.Second), map[string]string{"env": "prod"}, nil},
+			{"s_f3", base.Add(3 * time.Second), nil, []string{"checkout again"}},
+			{"s_f4", base.Add(4 * time.Second), map[string]string{"env": "prod", "team": "b"}, []string{"draft", "Checkout final"}},
+			{"s_f5", base.Add(5 * time.Second), map[string]string{"env": "prod"}, []string{}},
+		}
+		for _, f := range seed {
+			h := header(f.id)
+			h.Created = f.created
+			h.Meta = f.meta
+			if err := st.Create(ctx(), h); err != nil {
+				t.Fatal(err)
+			}
+			for _, title := range f.titles {
+				if err := st.Append(ctx(), f.id, thread.InfoEntry{
+					ID: thread.NewEntryID(), Created: time.Now().UTC(), Title: title,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		ids := func(p thread.Page) []string {
+			out := make([]string, len(p.Sessions))
+			for i, h := range p.Sessions {
+				out[i] = h.ID
+			}
+			return out
+		}
+		eq := func(got []string, want ...string) {
+			t.Helper()
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("ids = %v, want %v", got, want)
+			}
+		}
+		p, err := st.List(ctx(), thread.Query{Meta: map[string]string{"env": "prod"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Total != 4 {
+			t.Fatalf("Meta env=prod Total = %d, want 4", p.Total)
+		}
+		eq(ids(p), "s_f5", "s_f4", "s_f2", "s_f0")
+		p, err = st.List(ctx(), thread.Query{Meta: map[string]string{"env": "prod", "team": "a"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Total != 1 {
+			t.Errorf("two pairs Total = %d, want 1", p.Total)
+		}
+		eq(ids(p), "s_f0")
+		// The title is the LAST info entry's: s_f4 retitled to
+		// "Checkout final", so "draft" no longer matches.
+		p, err = st.List(ctx(), thread.Query{TitleSearch: "checkout"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Total != 3 {
+			t.Fatalf("TitleSearch checkout Total = %d, want 3", p.Total)
+		}
+		eq(ids(p), "s_f4", "s_f3", "s_f0")
+		p, err = st.List(ctx(), thread.Query{TitleSearch: "FLOW"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Total != 1 || ids(p)[0] != "s_f1" {
+			t.Errorf("case-insensitive title: %v (total %d), want [s_f1]", ids(p), p.Total)
+		}
+		// Combined, and paged: the cursor and limit apply to the
+		// filtered set.
+		p, err = st.List(ctx(), thread.Query{
+			Meta:        map[string]string{"env": "prod"},
+			TitleSearch: "checkout",
+			Limit:       2,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Total != 2 || len(p.Sessions) != 2 {
+			t.Fatalf("combined: %d of %d, want a full page of 2", len(p.Sessions), p.Total)
+		}
+		next, err := st.List(ctx(), thread.Query{
+			Meta:        map[string]string{"env": "prod"},
+			TitleSearch: "checkout",
+			Before:      p.Sessions[1].Created,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if next.Total != 2 || len(next.Sessions) != 0 {
+			t.Errorf("after the last filtered session: %d of %d, want 0 of 2", len(next.Sessions), next.Total)
+		}
+	}
+}
+
+// RunWatch runs the Watch capability's conformance table against a
+// backend that implements thread.Watcher (the optional interface,
+// ADR 0011 §5): the whole session yields in arrival order, after
+// names the resume point, entries appended while watching arrive
+// exactly once, a canceled context ends the stream, and the loud
+// failures (unknown session, an after the tree does not hold) are
+// errors before the first yield.
+func RunWatch(t *testing.T, open func(t *testing.T) thread.Storage) {
+	t.Helper()
+	watch, ok := open(t).(thread.Watcher)
+	if !ok {
+		t.Fatalf("%T does not implement thread.Watcher", watch)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h := header("s_watch")
+	if err := watch.(thread.Storage).Create(ctx, h); err != nil {
+		t.Fatal(err)
+	}
+	mk := func(text string) thread.Entry {
+		return thread.MessageEntry{ID: thread.NewEntryID(), Created: time.Now().UTC(), Message: weft.User(text)}
+	}
+	first := mk("one")
+	second := mk("two")
+	if err := watch.(thread.Storage).Append(ctx, h.ID, first, second); err != nil {
+		t.Fatal(err)
+	}
+
+	// The existing entries arrive in order, then the live ones — each
+	// exactly once. got counts (the backlog gate); texts records.
+	got := make(chan string, 8)
+	var mu sync.Mutex
+	var texts []string
+	wctx, wcancel := context.WithCancel(ctx)
+	seq, err := watch.Watch(wctx, h.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		count := 0
+		for e, err := range seq {
+			if err != nil {
+				t.Errorf("watch stream error: %v", err)
+				return
+			}
+			count++
+			txt := e.(thread.MessageEntry).Message.Text()
+			mu.Lock()
+			texts = append(texts, txt)
+			mu.Unlock()
+			got <- txt
+			if count == 3 {
+				wcancel() // the stream ends when ctx is done
+			}
+		}
+		if count != 3 {
+			t.Errorf("the watch yielded %d entries, want 3 (two existing, one live)", count)
+		}
+	}()
+	// Wait for the backlog, then append live.
+	awaitCount(t, got, 2)
+	if err := watch.(thread.Storage).Append(ctx, h.ID, mk("three")); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	if !reflect.DeepEqual(texts, []string{"one", "two", "three"}) {
+		t.Errorf("watched texts = %v, want [one two three]", texts)
+	}
+
+	// after names the resume point.
+	seq, err = watch.Watch(ctx, h.ID, first.(thread.MessageEntry).ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resumed []string
+	for e, err := range seq {
+		if err != nil {
+			t.Fatal(err)
+		}
+		resumed = append(resumed, e.(thread.MessageEntry).Message.Text())
+		if len(resumed) == 2 {
+			break
+		}
+	}
+	if !reflect.DeepEqual(resumed, []string{"two", "three"}) {
+		t.Errorf("resumed texts = %v, want [two three]", resumed)
+	}
+
+	// The loud failures, before the first yield.
+	if _, err := watch.Watch(context.Background(), "s_missing", ""); !errors.Is(err, thread.ErrNotFound) {
+		t.Errorf("Watch on a missing session: err = %v, want ErrNotFound", err)
+	}
+	if _, err := watch.Watch(context.Background(), h.ID, "e_never_seen"); err == nil {
+		t.Error("Watch after an entry the tree does not hold: err = nil, want an error")
+	}
+
+	// A session deleted under its watcher ends the tail with
+	// ErrNotFound — the tail does not hang on a session that is gone.
+	h2 := header("s_watch_del")
+	if err := watch.(thread.Storage).Create(ctx, h2); err != nil {
+		t.Fatal(err)
+	}
+	dctx, dcancel := context.WithCancel(context.Background())
+	defer dcancel()
+	dseq, err := watch.Watch(dctx, h2.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan error, 1)
+	go func() {
+		var last error
+		for _, err := range dseq {
+			if err != nil {
+				last = err
+				break
+			}
+		}
+		ended <- last
+	}()
+	time.Sleep(2 * pollWait) // let the tail settle on the empty session
+	if err := watch.(thread.Storage).Delete(ctx, h2.ID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-ended:
+		if !errors.Is(err, thread.ErrNotFound) {
+			t.Errorf("a deleted session's tail ended with %v, want ErrNotFound", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tail never ended after the session was deleted")
+	}
+}
+
+// pollWait is how long the table waits for a watcher's poll cycle —
+// generous against the backends' 200ms poll, still test-quick.
+const pollWait = 400 * time.Millisecond
+
+// awaitCount blocks until ch holds n values or the deadline passes.
+func awaitCount(t *testing.T, ch <-chan string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for seen := 0; seen < n; {
+		select {
+		case <-ch:
+			seen++
+		case <-time.After(time.Until(deadline)):
+			t.Fatalf("the watch never yielded its backlog (%d of %d)", seen, n)
+			return
+		}
+	}
 }
 
 // RawInjector is the optional hook a durable backend implements so the

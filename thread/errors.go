@@ -64,6 +64,23 @@ var (
 	// raised before any entry lands or any run starts: a session never
 	// records a decision it cannot apply.
 	ErrNotPending = errors.New("thread: call is not pending")
+
+	// The signed-decision failures (ADR 0021 §3), each its own error
+	// because each is its own operational answer: the key the ring
+	// does not hold, the signature that does not verify, the challenge
+	// that lapsed, the nonce that was answered already, and the
+	// arguments that changed under the request. All are fail-closed:
+	// nothing is recorded until every check passes.
+	ErrUnknownKey   = errors.New("thread: signing key not in the keyring")
+	ErrBadSignature = errors.New("thread: decision signature does not verify")
+	ErrExpired      = errors.New("thread: signing challenge expired")
+	ErrReplay       = errors.New("thread: decision signature replayed")
+	ErrArgsChanged  = errors.New("thread: request arguments changed under the signature")
+
+	// ErrSignatureRequired is returned by Decide on a session opened
+	// with RequireSigned: the unsigned door is closed, and only
+	// DecideSigned records caller-held decisions (ADR 0021 §3).
+	ErrSignatureRequired = errors.New("thread: this session requires signed decisions")
 )
 
 // CorruptError is the typed shape ErrCorrupt takes when the failure

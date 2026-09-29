@@ -218,6 +218,13 @@ type ApprovalDecisionEntry struct {
 	Who      string    `json:"who,omitempty"`
 	Via      string    `json:"via,omitempty"`
 	RunID    string    `json:"run_id,omitempty"`
+	// Nonce and KeyID are the signed-decision replay guard's record
+	// (ADR 0021 §3): a decision that arrived signed carries the nonce
+	// it answered and the key that vouched for it, so a replayed
+	// signature is detectable from the file alone — across restarts.
+	// Empty on the in-process paths, which mint no challenge.
+	Nonce string `json:"nonce,omitempty"`
+	KeyID string `json:"key_id,omitempty"`
 }
 
 // ApprovalAuditEntry is the chain's own trail (ADR 0021 §2): every step
@@ -238,6 +245,33 @@ type ApprovalAuditEntry struct {
 	RunID    string    `json:"run_id,omitempty"`
 }
 
+// GrantEntry is a session-scoped grant made durable (ADR 0021 §4): a
+// standing approval — or, with Deny, a standing refusal — for future
+// calls of one tool whose arguments match every predicate. It is the
+// decision chain's first step: a matching live grant decides at once,
+// audited, including the automatic approval. Liveness is derived, never
+// stored: a GrantRevokedEntry naming the grant ends it, an Expiry
+// passes, or its MaxUses is reached — uses counted from the audit
+// entries the chain writes when it matches. It never enters the
+// model's context; the model sees a grant only through the result of
+// the call it allowed or refused.
+type GrantEntry struct {
+	ID       string    `json:"id"`
+	ParentID string    `json:"parent,omitempty"`
+	Created  time.Time `json:"created"`
+	Grant
+}
+
+// GrantRevokedEntry ends a grant (ADR 0021 §4): revocation is an
+// append, never a rewrite — the grant entry stays, the walk reads the
+// revocation after it, and the audit trail keeps both.
+type GrantRevokedEntry struct {
+	ID       string    `json:"id"`
+	ParentID string    `json:"parent,omitempty"`
+	Created  time.Time `json:"created"`
+	GrantID  string    `json:"grant_id"`
+}
+
 func (MessageEntry) isEntry()          {}
 func (TurnEntry) isEntry()             {}
 func (CompactionEntry) isEntry()       {}
@@ -250,6 +284,8 @@ func (CustomMessageEntry) isEntry()    {}
 func (ApprovalRequestEntry) isEntry()  {}
 func (ApprovalDecisionEntry) isEntry() {}
 func (ApprovalAuditEntry) isEntry()    {}
+func (GrantEntry) isEntry()            {}
+func (GrantRevokedEntry) isEntry()     {}
 
 // idOf returns the entry's ID — the tree node's name, the one field
 // every kind carries at the same meaning. The sealed set keeps the
@@ -280,6 +316,10 @@ func idOf(e Entry) string {
 	case ApprovalDecisionEntry:
 		return e.ID
 	case ApprovalAuditEntry:
+		return e.ID
+	case GrantEntry:
+		return e.ID
+	case GrantRevokedEntry:
 		return e.ID
 	}
 	return ""
@@ -315,6 +355,10 @@ func parentOf(e Entry) string {
 		return e.ParentID
 	case ApprovalAuditEntry:
 		return e.ParentID
+	case GrantEntry:
+		return e.ParentID
+	case GrantRevokedEntry:
+		return e.ParentID
 	}
 	return ""
 }
@@ -333,6 +377,8 @@ const (
 	kindApprovalRequest  = "approval_request"
 	kindApprovalDecision = "approval_decision"
 	kindApprovalAudit    = "approval_audit"
+	kindGrant            = "grant"
+	kindGrantRevoked     = "grant_revoked"
 )
 
 // The per-type MarshalJSON methods below are deliberately repetitive,
@@ -355,6 +401,8 @@ type (
 	approvalRequestEntryWire  ApprovalRequestEntry
 	approvalDecisionEntryWire ApprovalDecisionEntry
 	approvalAuditEntryWire    ApprovalAuditEntry
+	grantEntryWire            GrantEntry
+	grantRevokedEntryWire     GrantRevokedEntry
 )
 
 // approvalEntryV is the entry version the approval kinds carry on the
@@ -469,6 +517,26 @@ func (e ApprovalAuditEntry) MarshalJSON() ([]byte, error) {
 	}{kindApprovalAudit, approvalEntryV, approvalAuditEntryWire(e)})
 }
 
+// MarshalJSON encodes the entry with its "type" discriminator and
+// "v":2.
+func (e GrantEntry) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type string `json:"type"`
+		V    int    `json:"v"`
+		grantEntryWire
+	}{kindGrant, approvalEntryV, grantEntryWire(e)})
+}
+
+// MarshalJSON encodes the entry with its "type" discriminator and
+// "v":2.
+func (e GrantRevokedEntry) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type string `json:"type"`
+		V    int    `json:"v"`
+		grantRevokedEntryWire
+	}{kindGrantRevoked, approvalEntryV, grantRevokedEntryWire(e)})
+}
+
 // kindVersion returns the highest entry version this build reads for a
 // wire kind (ADR 0011 §6). Kinds born in format 1 are version 1 and
 // carry no "v" on the wire; a kind added after format 1 — approvals in
@@ -481,7 +549,8 @@ func kindVersion(kind string) (int, bool) {
 	case kindMessage, kindTurn, kindCompaction, kindBranchSummary,
 		kindLeaf, kindLabel, kindInfo, kindCustom, kindCustomMessage:
 		return 1, true
-	case kindApprovalRequest, kindApprovalDecision, kindApprovalAudit:
+	case kindApprovalRequest, kindApprovalDecision, kindApprovalAudit,
+		kindGrant, kindGrantRevoked:
 		return approvalEntryV, true
 	}
 	return 0, false
@@ -585,6 +654,18 @@ func UnmarshalEntry(b []byte) (Entry, error) {
 			return nil, err
 		}
 		return ApprovalAuditEntry(v), nil
+	case kindGrant:
+		var v grantEntryWire
+		if err := json.Unmarshal(b, &v); err != nil {
+			return nil, err
+		}
+		return GrantEntry(v), nil
+	case kindGrantRevoked:
+		var v grantRevokedEntryWire
+		if err := json.Unmarshal(b, &v); err != nil {
+			return nil, err
+		}
+		return GrantRevokedEntry(v), nil
 	default:
 		// Unreachable — kindVersion gates the switch — but a kind
 		// registered there and forgotten here must never decode as

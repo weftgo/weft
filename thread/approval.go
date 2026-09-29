@@ -67,6 +67,12 @@ type Request struct {
 	Expiry time.Time
 	// Created is when the request was persisted.
 	Created time.Time
+	// Nonce and KeyID are the challenge a signed decision answers (ADR
+	// 0021 §3): set by Session.Request — the signing side's handle on
+	// exactly what it vouched for — and empty on the Pending view,
+	// which mints no challenge.
+	Nonce string
+	KeyID string
 }
 
 // Decision is one call's outcome, the value Decide records (ADR 0021
@@ -85,10 +91,16 @@ type Decision struct {
 	// Content is the resolve payload, verbatim; resolve_error marks it
 	// an error.
 	Content string
-	// Who decided, for the audit trail.
+	// Who decided, for the audit trail — and the quorum's identity:
+	// distinct Who values are distinct approvers (ADR 0021 §5).
 	Who string
 	// Via which channel the decision arrived.
 	Via string
+	// Always approves and grants the same thing for the future: the
+	// tool plus the call's exact arguments become a session grant
+	// ("approve and always allow this", ADR 0021 §4), recorded with
+	// the decision in one append. Build it with ApproveAlways.
+	Always bool
 }
 
 // Approve returns a Decision that resumes the call: the run executes
@@ -96,6 +108,16 @@ type Decision struct {
 // 0007).
 func Approve(callID string) Decision {
 	return Decision{CallID: callID, Kind: OutcomeApprove}
+}
+
+// ApproveAlways returns a Decision that approves the call and grants
+// the same thing for the future (ADR 0021 §4's "approve and always
+// allow this command"): the tool plus the call's exact arguments
+// become a session grant, recorded with the decision in one append —
+// so the next such call never parks. A richer grant (a command glob,
+// a path prefix) is s.Grant's to make.
+func ApproveAlways(callID string) Decision {
+	return Decision{CallID: callID, Kind: OutcomeApprove, Always: true}
 }
 
 // Deny returns a Decision that resolves the call without running it:
@@ -183,6 +205,17 @@ type requestExpiryOption time.Duration
 
 func (o requestExpiryOption) applySession(c *sessionConfig) { c.requestExpiry = time.Duration(o) }
 
+type quorumOption int
+
+func (o quorumOption) applySession(c *sessionConfig) { c.quorum = int(o) }
+
+// Quorum sets how many decisions from distinct approver identities a
+// call needs before it resolves (ADR 0021 §5): n approvals with
+// different Who values. Values below 2 read as the default — one
+// decision resolves. Conflicting decisions resolve to deny, with the
+// pinned reason.
+func Quorum(n int) SessionOption { return quorumOption(n) }
+
 // RequestExpiry gives every request the session parks a lifetime: a
 // request strictly past Created plus d is denied with the stated
 // reason on the next resume (ADR 0021 §5). Values <= 0 (the default)
@@ -221,10 +254,15 @@ func (s *Session) Decide(ctx context.Context, ds ...Decision) (*Turn, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.cfg.requireSigned {
+		return nil, fmt.Errorf("%w: session %s", ErrSignatureRequired, s.header.ID)
+	}
 	pending := s.pendingLocked()
-	pendingIDs := make(map[string]string, len(pending)) // call id → parked run id
+	pendingIDs := make(map[string]string, len(pending))     // call id → parked run id
+	pendingByCall := make(map[string]Request, len(pending)) // call id → the request
 	for _, r := range pending {
 		pendingIDs[r.CallID] = r.RunID
+		pendingByCall[r.CallID] = r
 	}
 	for _, d := range ds {
 		if !validOutcome(d.Kind) {
@@ -234,8 +272,9 @@ func (s *Session) Decide(ctx context.Context, ds ...Decision) (*Turn, error) {
 			return nil, fmt.Errorf("%w: call %q", ErrNotPending, d.CallID)
 		}
 	}
-	// One atomic Append carries every decision: a partial recording of
-	// a Decide call cannot happen (the storage's all-or-nothing rule).
+	// One atomic Append carries every decision — and every grant an
+	// Always decision makes: a partial recording of a Decide call
+	// cannot happen (the storage's all-or-nothing rule).
 	var entries []Entry
 	parent := s.leaf
 	for _, d := range ds {
@@ -254,6 +293,18 @@ func (s *Session) Decide(ctx context.Context, ds ...Decision) (*Turn, error) {
 		e.ID, e.ParentID, e.Created = s.mintIDLocked(), parent, time.Now().UTC()
 		entries = append(entries, e)
 		parent = e.ID
+		if d.Always {
+			req := pendingByCall[d.CallID]
+			g := GrantEntry{
+				ID: s.mintIDLocked(), ParentID: parent, Created: time.Now().UTC(),
+				Grant: Grant{
+					Tool: req.Tool,
+					Args: []Arg{ArgEquals("", slices.Clone(req.Args))},
+				},
+			}
+			entries = append(entries, g)
+			parent = g.ID
+		}
 	}
 	if err := s.st.Append(ctx, s.header.ID, entries...); err != nil {
 		return nil, err
@@ -398,14 +449,22 @@ func (s *Session) runChain(ctx context.Context, t *Turn, opts []weft.RunOption, 
 		expiry = time.Now().UTC().Add(s.cfg.requestExpiry)
 	}
 	for _, c := range calls {
-		if d, ok := s.matchGrant(c); ok {
-			// Step 2.2 writes the grant's audit entry beside this
-			// decision; the stub never matches, so this arm is the
-			// seam it fills.
-			if d.Via == "" {
-				d.Via = "grant"
+		if d, ref, ok := s.matchGrant(ctx, c); ok {
+			// The chain's first step decides at once, audited — the
+			// audit's Detail names the grant, and the session counts
+			// its uses from exactly these entries (ADR 0021 §2, §4).
+			d.CallID = c.ID
+			outcome := "approved"
+			if d.Kind == OutcomeDeny {
+				outcome = "denied"
 			}
-			cr.entries = append(cr.entries, decisionFrom(c.ID, d, t.runID))
+			cr.entries = append(cr.entries,
+				ApprovalAuditEntry{
+					CallID: c.ID, Step: StepGrant, Outcome: outcome,
+					Detail: "grant " + ref.id, RunID: t.runID,
+				},
+				decisionFrom(c.ID, d, t.runID),
+			)
 			continue
 		}
 		if s.cfg.approver != nil && s.cfg.approverTimeout > 0 {
@@ -512,14 +571,6 @@ func parkingReason(s *Session, tool string) string {
 	return "unknown tool"
 }
 
-// matchGrant is the chain's first step (ADR 0021 §2, §4): a matching
-// live grant approves at once, audited. Grants arrive in step 2.2;
-// until then no grant can match and the chain falls through to the
-// Approver.
-func (s *Session) matchGrant(c weft.ToolCallPart) (Decision, bool) {
-	return Decision{}, false
-}
-
 // fireOnRequest delivers the chain's parked requests to the OnRequest
 // callback, after the append that made them durable (ADR 0021 §5).
 // Panics are contained — a push notification must not fail a turn
@@ -553,6 +604,27 @@ func (s *Session) fireOnRequest(cr *chainResult) {
 			fn(r)
 		}()
 	}
+}
+
+// Audit returns the session's approval trail (ADR 0021 §5): every
+// request, chain step, decision, grant and revocation entry, in
+// append order, each carrying its entry id and time — the whole file,
+// not only the leaf's path, because the trail is what happened, not
+// what the leaf remembers. An expiry denial reads as its audit entry
+// plus the decision with Via "expiry"; a grant match as the audit
+// entry naming the grant.
+func (s *Session) Audit() []Entry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Entry
+	for _, e := range s.order {
+		switch e.(type) {
+		case ApprovalRequestEntry, ApprovalDecisionEntry, ApprovalAuditEntry,
+			GrantEntry, GrantRevokedEntry:
+			out = append(out, cloneEntry(e))
+		}
+	}
+	return out
 }
 
 // requestFromEntry lifts a stored request entry to its Request value.
@@ -634,25 +706,101 @@ func (s *Session) danglingCallsLocked() []weft.ToolCallPart {
 	return out
 }
 
+// scopedDecisions keeps the decisions that belong to one request: the
+// ones its own run recorded (ADR 0007 lets call ids repeat across
+// turns, so a call id alone names nothing — the parked run does). A
+// request with no run id keeps every decision for its call id, the
+// defensive dangling path where no request entry exists.
+func scopedDecisions(ds []ApprovalDecisionEntry, runID string) []ApprovalDecisionEntry {
+	if runID == "" {
+		return ds
+	}
+	var out []ApprovalDecisionEntry
+	for _, d := range ds {
+		if d.RunID == runID {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // approvalWalkLocked collects the approval entries on the leaf's
-// path: the requests by call id and the decisions by call id, the
-// latest decision winning. Callers hold s.mu.
-func (s *Session) approvalWalkLocked() (map[string]ApprovalRequestEntry, map[string]ApprovalDecisionEntry) {
+// path: the requests by call id, and every decision by call id in
+// append order — the quorum's raw material, folded by
+// effectiveDecision over the run-scoped slice. Callers hold s.mu.
+func (s *Session) approvalWalkLocked() (map[string]ApprovalRequestEntry, map[string][]ApprovalDecisionEntry) {
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
 		return nil, nil
 	}
 	requests := map[string]ApprovalRequestEntry{}
-	decisions := map[string]ApprovalDecisionEntry{}
+	decisions := map[string][]ApprovalDecisionEntry{}
 	for _, e := range path {
 		switch e := e.(type) {
 		case ApprovalRequestEntry:
 			requests[e.CallID] = e
 		case ApprovalDecisionEntry:
-			decisions[e.CallID] = e
+			decisions[e.CallID] = append(decisions[e.CallID], e)
 		}
 	}
 	return requests, decisions
+}
+
+// conflictReason is the model-visible denial text for conflicting
+// decisions under quorum (ADR 0021 §5: pinned bytes).
+const conflictReason = "conflicting decisions"
+
+// effectiveDecision folds a call's recorded decisions into the one
+// that resolves it, under the session's quorum (ADR 0021 §5): a deny
+// alone resolves; a deny beside an approve is a conflict, and a
+// conflict resolves to deny with the pinned reason, so nothing
+// outranks a refusal and a split verdict names itself; one resolve
+// resolves, a resolve beside an approve or a second resolve conflicts;
+// and approvals resolve once n distinct approver identities (distinct
+// Who, the empty string one identity) have approved. ok is false
+// while the call is still pending.
+func effectiveDecision(decisions []ApprovalDecisionEntry, quorum int) (ApprovalDecisionEntry, bool) {
+	if quorum < 1 {
+		quorum = 1
+	}
+	conflict := func(d ApprovalDecisionEntry) (ApprovalDecisionEntry, bool) {
+		return ApprovalDecisionEntry{
+			CallID: d.CallID, Outcome: OutcomeDeny,
+			Reason: conflictReason, Via: "quorum", RunID: d.RunID,
+		}, true
+	}
+	var resolve *ApprovalDecisionEntry
+	sawApprove := false
+	approvers := map[string]bool{}
+	for i := range decisions {
+		d := decisions[i]
+		switch d.Outcome {
+		case OutcomeDeny:
+			if sawApprove {
+				return conflict(d)
+			}
+			return d, true
+		case OutcomeResolve, OutcomeResolveError:
+			if resolve != nil || sawApprove {
+				return ApprovalDecisionEntry{
+					CallID: d.CallID, Outcome: OutcomeDeny,
+					Reason: conflictReason, Via: "quorum", RunID: d.RunID,
+				}, true
+			}
+			resolve = &decisions[i]
+		case OutcomeApprove:
+			sawApprove = true
+			approvers[d.Who] = true
+		}
+	}
+	if resolve != nil {
+		return *resolve, true
+	}
+	if sawApprove && len(approvers) >= quorum {
+		// Any recorded approval serves as the effective one; they agree.
+		return decisions[len(decisions)-1], true
+	}
+	return ApprovalDecisionEntry{}, false
 }
 
 // pendingLocked returns the undecided requests of the open boundary,
@@ -669,7 +817,11 @@ func (s *Session) pendingLocked() []Request {
 	requests, decisions := s.approvalWalkLocked()
 	var out []Request
 	for _, c := range dangling {
-		if _, ok := decisions[c.ID]; ok {
+		run := ""
+		if re, ok := requests[c.ID]; ok {
+			run = re.RunID
+		}
+		if _, ok := effectiveDecision(scopedDecisions(decisions[c.ID], run), s.cfg.quorum); ok {
 			continue
 		}
 		if re, ok := requests[c.ID]; ok {
@@ -720,10 +872,14 @@ func (s *Session) danglingDecisionsLocked(denyUndecided bool) []weft.RunOption {
 	if len(dangling) == 0 {
 		return nil
 	}
-	_, decisions := s.approvalWalkLocked()
+	requests, decisions := s.approvalWalkLocked()
 	var opts []weft.RunOption
 	for _, c := range dangling {
-		d, ok := decisions[c.ID]
+		run := ""
+		if re, ok := requests[c.ID]; ok {
+			run = re.RunID
+		}
+		d, ok := effectiveDecision(scopedDecisions(decisions[c.ID], run), s.cfg.quorum)
 		if !ok {
 			if denyUndecided {
 				opts = append(opts, weft.Deny(c.ID, "no decision"))

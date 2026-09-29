@@ -34,13 +34,20 @@ type sessionConfig struct {
 	compaction compactConfig
 	// The approvals configuration (ADR 0021): the chain's live step
 	// and its timeout, whether a completed boundary resumes on its own
-	// (default on), the OnRequest notification, and the lifetime given
-	// every parked request (0 = never expires).
+	// (default on), the OnRequest notification, the lifetime given
+	// every parked request (0 = never expires), the quorum a call's
+	// approvals must reach (0 and 1 both mean one decision resolves),
+	// the shared grant scope, the signed-decision keyring, and whether
+	// the unsigned Decide door is closed.
 	approver        Approver
 	approverTimeout time.Duration
 	autoResume      bool
 	onRequest       func(Request)
 	requestExpiry   time.Duration
+	quorum          int
+	grantStore      GrantStore
+	keyring         *Keyring
+	requireSigned   bool
 }
 
 func resolveSession(opts ...SessionOption) sessionConfig {
@@ -803,6 +810,14 @@ func cloneEntry(e Entry) Entry {
 	case ApprovalDecisionEntry:
 		return e
 	case ApprovalAuditEntry:
+		return e
+	case GrantEntry:
+		e.Args = append([]Arg(nil), e.Args...)
+		for i := range e.Args {
+			e.Args[i].Equals = slices.Clone(e.Args[i].Equals)
+		}
+		return e
+	case GrantRevokedEntry:
 		return e
 	}
 	return e

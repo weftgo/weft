@@ -1,0 +1,1 @@
+{"type":"grant","v":2,"id":"e_01J8X9M2K7QW4R5N8T6V2B3C4T","parent":"e_01J8X9M2K7QW4R5N8T6V2B3C4S","created":"2026-09-28T12:00:13.123456789Z","tool":"run_command","args":[{"pointer":"/command","glob":"go test*"},{"pointer":"/dir","prefix":"/home/wajih/ws/"}],"reason":"vetted on 2026-09-29"}

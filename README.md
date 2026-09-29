@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/weftgo/weft/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/weftgo/weft/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/weftgo/weft.svg)](https://pkg.go.dev/github.com/weftgo/weft)
-[![Version](https://img.shields.io/badge/version-v0.3.6-orange)](https://github.com/weftgo/weft/releases/tag/v0.3.6)
+[![Version](https://img.shields.io/badge/version-v0.3.7-orange)](https://github.com/weftgo/weft/releases/tag/v0.3.7)
 
 A thin, opinionated core for building AI agents in Go — designed the way
 the standard library is: small interfaces, `context` everywhere, functional
@@ -14,7 +14,7 @@ flight — and nothing else. Concurrency is the point, not a feature: a
 step's tools fan out over goroutines, parallelism is a one-line dial, and
 tool failures never cancel their siblings.
 
-> **Status:** v0.3.6 — experimental, pre-1.0. The three load-bearing
+> **Status:** v0.3.7 — experimental, pre-1.0. The three load-bearing
 > contracts — message model, error model, tool contract — are implemented
 > and tested; the provider adapters (OpenAI + compatible servers,
 > Anthropic, Google) wrap the vendors' official Go SDKs; the two

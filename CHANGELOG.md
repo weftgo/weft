@@ -1,4 +1,4 @@
-## thread 0.2.0 (unreleased)
+## thread 0.2.0 — 2026-09-29
 
 Approvals, complete (ADR 0021): the core's approval boundary made
 durable, signed, granted and audited on the session tree.
@@ -195,7 +195,7 @@ v0.3.7's `Agent.Model()` and imports nothing else from weft.
   deterministic. README "Sessions" section; AGENTS block 8; this
   changelog.
 
-## 0.3.7 (unreleased)
+## 0.3.7 — 2026-09-29
 
 ### Added — the model accessors thread needs (ADR 0006 amendment)
 

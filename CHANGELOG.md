@@ -3,6 +3,68 @@
 Approvals, complete (ADR 0021): the core's approval boundary made
 durable, signed, granted and audited on the session tree.
 
+### The 2026-09-29 review round (deep review of the branch)
+
+Eleven fixes from a full review pass over thread v0.2, each pinned by
+a test that fails on the old code:
+
+- **Quorum vs the chain (P1)**: a grant match or an Approver's single
+  approval under `Quorum(n>=2)` no longer arms an auto-resume that
+  denied the call as "no decision" — the chain-decided hand-off arms
+  only when every dangling call holds an effective decision, so the
+  boundary waits for the second identity.
+- **`Always` on a non-approve mints no grant (P1)**: a `Deny` or
+  `Resolve` built with `Always: true` — through `Decide`, `DecideSigned`
+  or the Approver — records its decision and nothing else; only an
+  approve grants (ADR 0021 §4).
+- **Repeated call ids stay separate occurrences (P1)**: the approval
+  walk resets a call's request and decisions at the message that
+  re-issues it, so ADR 0007's repeatable ids can no longer inherit an
+  earlier occurrence's verdicts (a grant-approved re-issue read as
+  "conflicting decisions").
+- **An approve beside a resolve conflicts** (the fold's own words,
+  both orders now), instead of silently discarding the approve.
+- **A deny-grant's matches count against `MaxUses`** like an approval
+  grant's — a bounded standing refusal stops refusing after its uses.
+- **`Branch` while a turn runs fails with `ErrBusy`**: the runner holds
+  the line the turn's transcript must land on; branching underneath it
+  stranded the turn's messages on a context the model never saw.
+  Branching off a parked boundary stays the documented escape hatch.
+- **Decisions, grants and revocations flush**: under `FsyncOnFlush`,
+  `Decide`, `DecideSigned`, `Resume`'s expiry denials and every
+  `appendLocked` write (Grant, Revoke, Pin, …) are durable when they
+  return — a decision or a revocation no longer lives only in the page
+  cache.
+- **The `Estimator` hook runs outside the session lock**: one that
+  calls back into the Session (`Leaf`, `Pending`) deadlocked the turn's
+  own persistence; every other caller hook was already consulted
+  unlocked.
+- **`nativeOf` never hashes a Model**: the middleware-chain walk
+  compares structurally under a depth cap — an unhashable wrapper
+  (a struct value with a slice field) panicked the map, and a
+  self-wrapping one now terminates instead of walking forever.
+- **`jsonl.readHeader` reads to EOF** (`io.ReadFull`): a short read
+  made a valid header look torn and `List` silently skipped the
+  session.
+
+Also: the compaction log lines carry the `trace` attribute set ADR
+0020 §4 promised; ADR 0020 gains a dated amendment recording that the
+split turn is summarized in one pass (merged output, one model call);
+`SummarizeLeft`'s and `ErrNotImplemented`'s stale docs, the
+"stubbed until step 2.2" comment and the phantom
+`testdata/approvals` golden reference are corrected; `ArgPrefix`
+documents its empty-prefix sharp edge; the write-only `grantRef.shared`
+field is gone; the README status line catches up to v0.3.6.
+
+The release pass (same day) added three more, from the full-version
+verification against ADR 0021 and plan §4: ADR 0021 gains a dated
+amendment deciding the boundary-holds-the-tail-raw rule its citation
+pointed at; a shared grant's audit detail is namespaced ("shared
+grant …") so a store id colliding with a session grant's entry id
+cannot inflate its use count (pinned); and the trigger's re-arm on
+the resolving turn — implemented and cited but never pinned — has its
+pin.
+
 - New entry kinds with `"v":2` — `approval_request`,
   `approval_decision`, `approval_audit`, `grant`, `grant_revoked` —
   with goldens in `thread/testdata/format2/`; a v0.1 reader fails

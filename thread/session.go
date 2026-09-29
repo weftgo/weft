@@ -106,8 +106,17 @@ type Session struct {
 	// while true queues or rejects; the runner clears it when the
 	// queue drains. queue holds the accepted sends waiting for their
 	// turn, in acceptance order.
-	running bool
-	queue   []pendingSend
+	//
+	// inFlight names the turn the runner is currently inside — set
+	// with running whenever an item starts, cleared at the item
+	// boundary under mu, before the runner's epilogue decisions. The
+	// pair is what "a turn is running" means to Branch: running alone
+	// also covers the epilogue window after a turn's finish (its Wait
+	// has returned, its entries have landed), where a navigation is
+	// already safe and must not read ErrBusy.
+	running  bool
+	inFlight *Turn
+	queue    []pendingSend
 	// The approval boundary's runner hand-off (ADR 0021 §1–§2): await
 	// holds the parked boundary's captured turn settings — the extra
 	// run options of the Send that parked and the persistence window

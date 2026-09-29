@@ -91,6 +91,10 @@ func (s *Session) Branch(ctx context.Context, entryID string, opts ...BranchOpti
 		for _, e := range batch {
 			s.adoptLocked(e)
 		}
+		// A navigation off a parked tail may clear the approval
+		// boundary that held queued sends: the runner restarts at the
+		// queue's head (ADR 0021 §5).
+		s.kickRunnerLocked()
 		return nil
 	}
 	s.mu.Lock()
@@ -98,9 +102,15 @@ func (s *Session) Branch(ctx context.Context, entryID string, opts ...BranchOpti
 	if err := s.checkEntryLocked(entryID); err != nil {
 		return err
 	}
-	return s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {
+	if err := s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {
 		return LeafEntry{ID: id, ParentID: parent, Created: created, Entry: entryID}
-	})
+	}); err != nil {
+		return err
+	}
+	// A navigation off a parked tail may clear the approval boundary
+	// that held queued sends: the runner restarts at the queue's head.
+	s.kickRunnerLocked()
+	return nil
 }
 
 // checkEntry validates a branch target without holding the lock.

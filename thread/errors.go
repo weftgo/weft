@@ -56,6 +56,14 @@ var (
 	// so such a session is invisible to an older List — visible again
 	// as soon as its directory is read by a weft that knows the format.
 	ErrNewerFormat = errors.New("thread: session format newer than this build")
+
+	// ErrNotPending is returned by Decide for a decision addressing a
+	// call that is not pending — decided already, resumed already, or
+	// never parked — and by Resume with no open boundary. The core's
+	// rule (ADR 0007: a decision names a pending call) made strict and
+	// raised before any entry lands or any run starts: a session never
+	// records a decision it cannot apply.
+	ErrNotPending = errors.New("thread: call is not pending")
 )
 
 // CorruptError is the typed shape ErrCorrupt takes when the failure

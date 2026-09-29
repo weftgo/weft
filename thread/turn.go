@@ -124,10 +124,13 @@ type pendingSend struct {
 // Settings are captured at turn start: the agent, the extra run
 // options, and the busy policy in force when Send ran. On a busy
 // session the policy decides — Queue (the default) holds the
-// follow-up, in order, and Reject fails with ErrBusy. A pending
-// approval ends the turn with the calls recorded on the turn entry;
-// resuming is a Send whose RunOptions carry weft.Approve or weft.Deny
-// per call, until v0.2 makes approvals first-class.
+// follow-up, in order, and Reject fails with ErrBusy.
+//
+// A Send while approval requests are pending is queued, not run (ADR
+// 0021 §5): the parked boundary must resolve first — Decide (which
+// resumes on its own when AutoResume is on) or Resume — and the queued
+// follow-up then runs with the boundary's transcript completed. Under
+// Reject a pending boundary reads as busy.
 func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption) (*Turn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -139,12 +142,28 @@ func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption
 	extra := append([]weft.RunOption(nil), cfg.runOpts...) // captured at turn start
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.running {
+	if s.running || s.boundaryLocked() {
+		// A running turn holds the session, and so does an open approval
+		// boundary: the follow-up is queued and runs when the boundary
+		// resolves — Decide or Resume resume it, the runner drains the
+		// queue after (ADR 0021 §5). The queue holds acceptance order
+		// across the boundary; the branch that cleared one restarts the
+		// runner at the head on the next Send.
 		if s.cfg.policy == Reject {
 			return nil, fmt.Errorf("%w: session %s", ErrBusy, s.header.ID)
 		}
 		t := s.newTurnLocked()
 		s.queue = append(s.queue, pendingSend{ctx: ctx, msg: msg, opts: extra, turn: t})
+		return t, nil
+	}
+	if len(s.queue) > 0 {
+		// No runner and no boundary, but earlier sends are still queued
+		// (a Branch cleared the boundary that held them): acceptance
+		// order rules — this send queues behind them, the runner starts
+		// at the head.
+		t := s.newTurnLocked()
+		s.queue = append(s.queue, pendingSend{ctx: ctx, msg: msg, opts: extra, turn: t})
+		s.kickRunnerLocked()
 		return t, nil
 	}
 	s.running = true
@@ -157,7 +176,7 @@ func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption
 		return nil, err
 	}
 	t.setPromptDone()
-	go s.execute(pendingSend{ctx: ctx, msg: msg, opts: extra, turn: t})
+	go s.execute(workItem{ps: pendingSend{ctx: ctx, msg: msg, opts: extra, turn: t}})
 	return t, nil
 }
 
@@ -211,24 +230,75 @@ func (s *Session) appendPromptLocked(ctx context.Context, id string, msg weft.Me
 	return nil
 }
 
-// execute runs accepted sends one at a time until the queue is empty:
-// the session's single runner. Each send runs to completion — prompt,
-// run, end-of-turn persistence — before the next starts, in acceptance
-// order. A send that fails before its run starts does not stop the
-// queue.
-func (s *Session) execute(first pendingSend) {
+// workItem is one unit of runner work: an accepted send, or a resume
+// run over a parked approval boundary (whose ps carries only the
+// context and the Turn — a resume has no prompt of its own).
+type workItem struct {
+	ps     pendingSend
+	resume bool
+}
+
+// kickRunnerLocked starts the runner at the queue's head when work is
+// waiting and no runner is alive: Send's queued path and the boundary
+// clears (a Branch off the parked tail) both land here. Callers hold
+// s.mu.
+func (s *Session) kickRunnerLocked() {
+	if s.running || len(s.queue) == 0 || s.boundaryLocked() {
+		return
+	}
+	s.running = true
+	first := s.queue[0]
+	s.queue = s.queue[1:]
+	go s.execute(workItem{ps: first})
+}
+
+// execute runs runner work one item at a time until nothing is
+// runnable: the session's single runner. Each item runs to completion
+// — prompt, run, end-of-turn persistence — before the next starts, in
+// acceptance order; a resume run for a completed boundary takes the
+// slot before any queued send, because the queued sends wait for the
+// boundary by contract (ADR 0021 §5). The runner exits when the queue
+// is empty or an open boundary holds it — Decide, Resume or a later
+// Send restart it.
+func (s *Session) execute(first workItem) {
 	cur := first
 	for {
 		s.runOneContained(cur)
 		s.mu.Lock()
-		if len(s.queue) == 0 {
-			s.running = false
+		if s.resumeWork != nil {
+			rw := *s.resumeWork
+			s.resumeWork = nil
 			s.mu.Unlock()
-			return
+			cur = workItem{ps: pendingSend{ctx: rw.ctx, turn: rw.turn}, resume: true}
+			continue
 		}
-		cur = s.queue[0]
-		s.queue = s.queue[1:]
+		if s.cfg.autoResume && s.boundaryLocked() && len(s.pendingLocked()) == 0 {
+			// The chain decided every call without parking (a grant or
+			// the Approver), or the last decision of a parked boundary
+			// landed while this runner worked: resume at once, under
+			// the settings captured when the turn parked.
+			t := s.newTurnLocked()
+			t.resume = true
+			if s.await.turn != nil {
+				s.await.turn.setNext(t)
+			}
+			ctx := s.await.ctx
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			s.mu.Unlock()
+			cur = workItem{ps: pendingSend{ctx: ctx, turn: t}, resume: true}
+			continue
+		}
+		if len(s.queue) > 0 && !s.boundaryLocked() {
+			cur = workItem{ps: s.queue[0]}
+			s.queue = s.queue[1:]
+			s.mu.Unlock()
+			continue
+		}
+		s.running = false
 		s.mu.Unlock()
+		return
 	}
 }
 
@@ -238,17 +308,21 @@ func (s *Session) execute(first pendingSend) {
 // model panics never reach here — the core contains them as errors
 // (invokeContained, the stream consume) — this guards the session
 // layer's own code and the caller's ids function.
-func (s *Session) runOneContained(ps pendingSend) {
+func (s *Session) runOneContained(item workItem) {
 	defer func() {
 		if p := recover(); p != nil {
 			// The turn may already be decided (the panic came from
 			// after it); finish refuses to overwrite it.
-			ps.turn.finish(nil, fmt.Errorf("thread: turn panicked: %v", p))
+			item.ps.turn.finish(nil, fmt.Errorf("thread: turn panicked: %v", p))
 			s.agent.Logger().Error("thread: turn panicked",
-				"session", s.header.ID, "run", ps.turn.runID, "panic", p)
+				"session", s.header.ID, "run", item.ps.turn.runID, "panic", p)
 		}
 	}()
-	s.runOne(ps)
+	if item.resume {
+		s.runResume(item.ps.ctx, item.ps.turn)
+		return
+	}
+	s.runOne(item.ps)
 }
 
 // runOne runs one accepted send. The idle path wrote the prompt in
@@ -275,24 +349,79 @@ func (s *Session) runOne(ps pendingSend) {
 		// The caller walked away before the turn started: the prompt is
 		// kept, the turn is recorded as canceled, and the queue moves on.
 		errOut := fmt.Errorf("thread: turn canceled before it started: %w", err)
-		s.recordTurnEnd(persist, t, nil, errOut, 0)
+		s.recordTurnEnd(persist, t, nil, errOut, 0, nil)
 		t.finish(nil, errOut)
 		return
 	}
 
 	// The trigger's first site (ADR 0020 §2): before the run, with the
 	// prompt already on the path so the estimate covers what the run
-	// is about to be fed.
+	// is about to be fed. It never fires over an open approval
+	// boundary — the dangling tail must stay raw for its decisions.
 	s.maybeAutoCompact(ps.ctx)
 
+	s.runTurn(persist, ps.ctx, t, ps.opts)
+}
+
+// runResume runs one resume over a parked approval boundary (ADR 0021
+// §1): no prompt of its own — the receipt is the turn entry it writes,
+// reusing the id minted when the resume was armed — and the input is
+// the boundary's dangling transcript, carried raw so the recorded
+// decisions can resolve their calls. The run options the parked send
+// captured ride along (across a restart they are gone: run options are
+// not entries), with the recorded decisions applied after them, so a
+// durable decision always beats a captured option. No compaction runs
+// before a resume: there is no new prompt to cover, and the boundary
+// must stay raw.
+func (s *Session) runResume(ctx context.Context, t *Turn) {
+	persist := context.WithoutCancel(ctx)
+	if err := ctx.Err(); err != nil {
+		errOut := fmt.Errorf("thread: resume canceled before it started: %w", err)
+		s.recordTurnEnd(persist, t, nil, errOut, 0, nil)
+		t.finish(nil, errOut)
+		return
+	}
+	s.mu.Lock()
+	// The audit trail says a resume started before the run does: a
+	// crash between the two leaves the boundary resumable, the audit
+	// honest about the attempt.
+	dangling := len(s.danglingCallsLocked())
+	if err := s.appendLocked(persist, func(id, parent string, created time.Time) Entry {
+		return ApprovalAuditEntry{
+			ID: id, ParentID: parent, Created: created,
+			Step: StepResume, Outcome: "started",
+			Detail: fmt.Sprintf("%d call(s) to resolve", dangling), RunID: t.runID,
+		}
+	}); err != nil {
+		s.mu.Unlock()
+		t.finish(nil, fmt.Errorf("thread: resume audit: %w", err))
+		return
+	}
+	opts := append([]weft.RunOption(nil), s.await.opts...)
+	s.mu.Unlock()
+	s.runTurn(persist, ctx, t, opts)
+}
+
+// runTurn is the shared body of a send's and a resume's run: the raw
+// context in, the stream drained and forwarded, the turn's end
+// recorded and the boundary chain run when the run parks calls
+// (ADR 0021 §2). callerOpts are the run options captured for this
+// turn — the resume inherits the parked send's — and after them come
+// the recorded decisions, which win.
+func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []weft.RunOption) {
 	// The input is the session's context — the walk already includes
-	// the prompt entry appended for this turn — carried raw: the loop
-	// repairs its input itself, leaving a decision's pending calls
-	// unresolved so it can resolve them (the approval resume).
+	// the prompt entry appended for this turn, or the boundary's
+	// dangling calls for a resume — carried raw: the loop repairs its
+	// input itself, leaving a decision's pending calls unresolved so it
+	// can resolve them (the approval resume).
 	input := s.rawContext()
-	runOpts := append([]weft.RunOption(nil), ps.opts...)
+	s.mu.Lock()
+	decisions := s.danglingDecisionsLocked(t.resume)
+	s.mu.Unlock()
+	runOpts := append([]weft.RunOption(nil), callerOpts...)
+	runOpts = append(runOpts, decisions...)
 	runOpts = append(runOpts, weft.Messages(input...), weft.RunID(t.runID))
-	run := s.agent.Stream(ps.ctx, runOpts...)
+	run := s.agent.Stream(ctx, runOpts...)
 	for ev, err := range run.Events() {
 		if err != nil {
 			t.setStreamErr(err)
@@ -301,7 +430,16 @@ func (s *Session) runOne(ps pendingSend) {
 		t.push(ev)
 	}
 	res, err := run.Wait()
-	s.recordTurnEnd(persist, t, res, err, len(input))
+	// The decision chain (ADR 0021 §2) runs before the turn's end is
+	// persisted, so a call about to park is asked — grants, then a
+	// bounded Approver — and its request entry lands in the same
+	// atomic Append as the turn: no window where the turn is durable
+	// and the request is not.
+	var chain *chainResult
+	if err == nil && res != nil && len(res.Pending) > 0 {
+		chain = s.runChain(persist, t, callerOpts, res.Pending)
+	}
+	s.recordTurnEnd(persist, t, res, err, len(input), chain)
 	// The trigger's second site: after the turn, with the new
 	// measurement recorded. It runs before the turn is decided so a
 	// Wait that returns leaves the session fully settled — turn,
@@ -309,7 +447,34 @@ func (s *Session) runOne(ps pendingSend) {
 	// repaint the turn: finish is idempotent and the hooks contain
 	// their own panics.
 	s.maybeAutoCompact(persist)
+	// The parked-request notifications go out before the turn is
+	// decided, so a caller whose Wait returns has already seen every
+	// OnRequest delivery this turn owes: durable first (the append
+	// above), then delivered, then the turn completes. The same rule
+	// links the chain-decided auto-resume: a caller whose Wait returns
+	// can follow Turn.Next at once, so the resume is minted and linked
+	// here — handed to the runner as resumeWork — not after the wake.
+	if chain != nil {
+		s.fireOnRequest(chain)
+		if len(chain.parkedCalls) == 0 && s.cfg.autoResume {
+			s.mu.Lock()
+			rt := s.newTurnLocked()
+			rt.resume = true
+			if s.await.turn != nil {
+				s.await.turn.setNext(rt)
+			}
+			s.resumeWork = &pendingResume{ctx: chain.awaitCtx, turn: rt}
+			s.mu.Unlock()
+		}
+	}
 	t.finish(res, err)
+	if t.resume {
+		s.mu.Lock()
+		if !s.boundaryLocked() {
+			s.await = awaitState{}
+		}
+		s.mu.Unlock()
+	}
 }
 
 // recordTurnEnd appends the turn's new messages and its turn entry in
@@ -319,10 +484,15 @@ func (s *Session) runOne(ps pendingSend) {
 // RunError.Result is kept after weft.Repair; a cancellation is
 // recorded as canceled; the calls a pending approval left unrun are
 // recorded on the entry. inputLen is the run's input length — the
-// messages beyond it are the turn's new ones. A persistence failure is
-// logged through the agent's logger and the turn still completes: the
-// session keeps its in-memory tree, and the storage says why.
-func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResult, err error, inputLen int) {
+// messages beyond it are the turn's new ones. chain, when the turn
+// parked calls, carries the decision chain's entries — requests,
+// audits, chain decisions — into the same Append: the request and the
+// turn are atomic, all or none (ADR 0021 §1). A resume turn's entry
+// reuses the receipt id minted when the resume was armed (it has no
+// prompt entry of its own). A persistence failure is logged through
+// the agent's logger and the turn still completes: the session keeps
+// its in-memory tree, and the storage says why.
+func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResult, err error, inputLen int, chain *chainResult) {
 	var full []weft.Message
 	if err != nil {
 		var runErr *weft.RunError
@@ -359,7 +529,11 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 			parent = id
 		}
 	}
-	te := TurnEntry{ID: s.mintIDLocked(), ParentID: parent, Created: time.Now().UTC(), RunID: t.runID}
+	teID := s.mintIDLocked()
+	if t.resume {
+		teID = t.id // a resume has no prompt entry; its receipt names its turn entry
+	}
+	te := TurnEntry{ID: teID, ParentID: parent, Created: time.Now().UTC(), RunID: t.runID}
 	if res != nil {
 		te.StopReason = res.StopReason
 		te.Usage = res.Usage
@@ -394,6 +568,21 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 		}
 	}
 	entries = append(entries, te)
+	parent = te.ID
+	if chain != nil {
+		// The chain's entries join the turn's batch: ids and parents
+		// assigned here, in call order, after the turn entry (ADR 0021
+		// §1–§2). Their kinds carry no prompt and no messages; they are
+		// bookkeeping the model never sees.
+		now := time.Now().UTC()
+		for _, e := range chain.entries {
+			e = fillApprovalEntry(e, s.mintIDLocked(), parent, now)
+			entries = append(entries, e)
+			if id := idOf(e); id != "" {
+				parent = id
+			}
+		}
+	}
 	if appendErr := s.st.Append(ctx, s.header.ID, entries...); appendErr != nil {
 		s.agent.Logger().Error("thread: turn end not persisted",
 			"session", s.header.ID, "run", t.runID, "err", appendErr)
@@ -401,6 +590,12 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 	}
 	for _, e := range entries {
 		s.adoptLocked(e)
+	}
+	if chain != nil {
+		// The boundary's captured settings: what the resume run
+		// inherits from the send that parked (ADR 0021 §1), and the
+		// turn a resume links back to through Turn.Next.
+		s.await = awaitState{opts: chain.opts, ctx: chain.awaitCtx, runID: chain.runID, turn: t}
 	}
 	if te.LastInput > 0 {
 		// The trigger's new measurement, marked at the turn entry:
@@ -416,10 +611,19 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 	}
 }
 
-// A Turn is the receipt and the handle of one accepted Send.
+// A Turn is the receipt and the handle of one accepted Send — or of a
+// resume run over a parked approval boundary, which has no prompt of
+// its own: its receipt names its turn entry.
 type Turn struct {
 	id    string
 	runID string
+	// resume marks a resume run: no prompt entry, and the turn entry
+	// reuses the receipt id minted when the resume was armed.
+	resume bool
+	// next is the turn this turn's parked boundary resumed under — the
+	// link a caller follows to watch an approval flow through. Written
+	// once, under mu, by the session when it arms a resume.
+	next *Turn
 
 	mu         sync.Mutex
 	cond       *sync.Cond
@@ -432,13 +636,44 @@ type Turn struct {
 }
 
 // ID returns the turn's receipt: the prompt entry's id, minted when
-// the Send was accepted and durable before the run started. Looking a
-// turn up in the tree starts here.
+// the Send was accepted and durable before the run started — or, for
+// a resume turn, its turn entry's id, reused from the mint at arming
+// (a resume writes no prompt of its own). Looking a turn up in the
+// tree starts here.
 func (t *Turn) ID() string { return t.id }
 
 // RunID returns the run's id, <session>-t<n> — the key the run store
 // holds the run's records under, unique across a reopen.
 func (t *Turn) RunID() string { return t.runID }
+
+// Next returns the turn the session resumed this turn's parked
+// approval boundary with, or nil while there is none — this turn did
+// not park, its boundary resumed under a turn the caller already
+// holds (Decide and Resume return it), or the boundary is still
+// undecided. Following Next is how a caller watches an approval flow
+// through: Send's turn parks; the auto-resume the decision chain or a
+// completed decision set starts links here, and its Wait is the
+// conversation's continuation. One boundary resumes at most once, so
+// the link is set at most once.
+func (t *Turn) Next() *Turn {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.next
+}
+
+// setNext links the boundary's resume turn. The first link wins — a
+// boundary resumes once — and a second attempt is dropped silently:
+// the caller who armed the resume holds the same Turn.
+func (t *Turn) setNext(n *Turn) {
+	if n == nil {
+		return
+	}
+	t.mu.Lock()
+	if t.next == nil {
+		t.next = n
+	}
+	t.mu.Unlock()
+}
 
 // Events yields the turn's run events in emission order, forwarded by
 // the session as it observes the run. Unlike the core's Run, a Turn's

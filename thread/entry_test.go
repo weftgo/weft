@@ -32,6 +32,9 @@ const (
 	entryID6  = "e_01J8X9M2K7QW4R5N8T6V2B3C4M"
 	entryID7  = "e_01J8X9M2K7QW4R5N8T6V2B3C4N"
 	entryID8  = "e_01J8X9M2K7QW4R5N8T6V2B3C4P"
+	entryID9  = "e_01J8X9M2K7QW4R5N8T6V2B3C4Q"
+	entryID10 = "e_01J8X9M2K7QW4R5N8T6V2B3C4R"
+	entryID11 = "e_01J8X9M2K7QW4R5N8T6V2B3C4S"
 )
 
 var baseTime = time.Date(2026, 9, 28, 12, 0, 0, 123456789, time.UTC)
@@ -258,6 +261,34 @@ func TestReadEveryGolden(t *testing.T) {
 			}
 			continue
 		}
+		e, err := thread.UnmarshalEntry(line)
+		if err != nil {
+			t.Errorf("%s: %v", path, err)
+			continue
+		}
+		again, err := json.Marshal(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(line, again) {
+			t.Errorf("%s: entry re-marshal differs\n got %s\nwant %s", path, again, line)
+		}
+	}
+	// The format-2 goldens (the approvals kinds, ADR 0021) read the
+	// same way: this build decodes them and re-marshals their bytes.
+	files2, err := filepath.Glob(filepath.Join("testdata", "format2", "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files2) == 0 {
+		t.Fatal("no format2 goldens found")
+	}
+	for _, path := range files2 {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		line := bytes.TrimRight(b, "\n")
 		e, err := thread.UnmarshalEntry(line)
 		if err != nil {
 			t.Errorf("%s: %v", path, err)

@@ -32,10 +32,19 @@ type sessionConfig struct {
 	// compaction is the compaction configuration (ADR 0020): the
 	// defaults until step 1.9's public layers override them.
 	compaction compactConfig
+	// The approvals configuration (ADR 0021): the chain's live step
+	// and its timeout, whether a completed boundary resumes on its own
+	// (default on), the OnRequest notification, and the lifetime given
+	// every parked request (0 = never expires).
+	approver        Approver
+	approverTimeout time.Duration
+	autoResume      bool
+	onRequest       func(Request)
+	requestExpiry   time.Duration
 }
 
 func resolveSession(opts ...SessionOption) sessionConfig {
-	cfg := sessionConfig{compaction: defaultCompactConfig()}
+	cfg := sessionConfig{compaction: defaultCompactConfig(), autoResume: true}
 	for _, o := range opts {
 		if o != nil {
 			o.applySession(&cfg)
@@ -92,6 +101,16 @@ type Session struct {
 	// turn, in acceptance order.
 	running bool
 	queue   []pendingSend
+	// The approval boundary's runner hand-off (ADR 0021 §1–§2): await
+	// holds the parked boundary's captured turn settings — the extra
+	// run options of the Send that parked and the persistence window
+	// the resume inherits (lost across a restart: run options are not
+	// entries) — and resumeWork is a resume run Decide or Resume
+	// minted while a runner was alive, waiting for the runner to pick
+	// it up. The runner itself resumes completed boundaries whenever
+	// AutoResume is on.
+	await      awaitState
+	resumeWork *pendingResume
 
 	// The compaction trigger's state (ADR 0020 §2): lastInput is the
 	// provider-reported input of the last model step the session ran,
@@ -101,6 +120,23 @@ type Session struct {
 	lastInput       int64
 	lastMeasureLeaf string
 	warnedNoWindow  bool
+}
+
+// awaitState is the parked boundary's captured turn settings, plus
+// the Turn that parked — the anchor a resume links back to through
+// Turn.Next.
+type awaitState struct {
+	opts  []weft.RunOption
+	ctx   context.Context
+	runID string
+	turn  *Turn
+}
+
+// pendingResume is a resume run minted by Decide or Resume while a
+// runner was alive: the context it was armed with and its Turn.
+type pendingResume struct {
+	ctx  context.Context
+	turn *Turn
 }
 
 // Create starts a new session in st: a fresh header under a new
@@ -756,6 +792,13 @@ func cloneEntry(e Entry) Entry {
 		e.Data = slices.Clone(e.Data)
 		return e
 	case CustomMessageEntry:
+		return e
+	case ApprovalRequestEntry:
+		e.Args = slices.Clone(e.Args)
+		return e
+	case ApprovalDecisionEntry:
+		return e
+	case ApprovalAuditEntry:
 		return e
 	}
 	return e

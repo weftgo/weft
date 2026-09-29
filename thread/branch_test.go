@@ -406,3 +406,34 @@ func TestBranchDuringRunningTurnFailsBusy(t *testing.T) {
 		t.Fatalf("Branch between turns: %v", err)
 	}
 }
+
+// A caller whose Wait returned may Branch at once: the in-flight
+// mark retires before the turn is decided, so the runner's epilogue
+// can never answer ErrBusy for a turn that already landed — the race
+// CI caught on the first guard (Wait returns at finish; the epilogue
+// still held the busy mark for a scheduling window).
+func TestBranchAfterWaitIsNeverBusy(t *testing.T) {
+	ctx := context.Background()
+	agent := weft.New(
+		wefttest.Script(
+			wefttest.Say("one"), wefttest.Say("two"), wefttest.Say("three"),
+			wefttest.Say("four"), wefttest.Say("five")),
+		weft.Name("branch-after-wait"))
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		turn, err := s.Send(ctx, weft.User("go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := turn.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		// No sleep, no yield: the moment Wait returns, Branch is legal.
+		if err := s.Branch(ctx, turn.ID()); err != nil {
+			t.Fatalf("Branch right after Wait (round %d): %v", i, err)
+		}
+	}
+}

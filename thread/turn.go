@@ -184,11 +184,12 @@ func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption
 	}
 	s.running = true
 	t := s.newTurnLocked()
+	s.inFlight = t
 	// The prompt is durable before anything else happens: appended
 	// under the caller's context and flushed, so a Send that returns
 	// without error has already survived a crash.
 	if err := s.appendPromptLocked(ctx, t.id, msg); err != nil {
-		s.running = false
+		s.running, s.inFlight = false, nil
 		return nil, err
 	}
 	t.setPromptDone()
@@ -265,6 +266,7 @@ func (s *Session) kickRunnerLocked() {
 	s.running = true
 	first := s.queue[0]
 	s.queue = s.queue[1:]
+	s.inFlight = first.turn
 	go s.execute(workItem{ps: first})
 }
 
@@ -287,9 +289,11 @@ func (s *Session) execute(first workItem) {
 		// Send or Resume (both arm it again).
 		retry := !cur.resume || !cur.ps.turn.failed()
 		s.mu.Lock()
+		s.inFlight = nil // the item boundary: a Branch here is already safe
 		if s.resumeWork != nil {
 			rw := *s.resumeWork
 			s.resumeWork = nil
+			s.inFlight = rw.turn
 			s.mu.Unlock()
 			cur = workItem{ps: pendingSend{ctx: rw.ctx, turn: rw.turn}, resume: true}
 			continue
@@ -313,10 +317,12 @@ func (s *Session) execute(first workItem) {
 		if len(s.queue) > 0 && !s.boundaryLocked() {
 			cur = workItem{ps: s.queue[0]}
 			s.queue = s.queue[1:]
+			s.inFlight = cur.ps.turn
 			s.mu.Unlock()
 			continue
 		}
 		s.running = false
+		s.inFlight = nil
 		s.mu.Unlock()
 		return
 	}
@@ -334,11 +340,12 @@ func (s *Session) runOneContained(item workItem) {
 			// The turn may already be decided (the panic came from
 			// after it); finish refuses to overwrite it. A resume's
 			// arming retires first, so its caller can arm again.
+			s.mu.Lock()
 			if item.resume {
-				s.mu.Lock()
 				s.settleResumeLocked(item.ps.turn)
-				s.mu.Unlock()
 			}
+			s.retireInFlightLocked(item.ps.turn)
+			s.mu.Unlock()
 			item.ps.turn.finish(nil, fmt.Errorf("thread: turn panicked: %v", p))
 			s.agent.Logger().Error("thread: turn panicked",
 				"session", s.header.ID, "run", item.ps.turn.runID, "panic", p)
@@ -349,6 +356,17 @@ func (s *Session) runOneContained(item workItem) {
 		return
 	}
 	s.runOne(item.ps)
+}
+
+// retireInFlightLocked drops the in-flight mark when it names t,
+// before the turn is decided — every path that finishes a turn calls
+// it under mu first, so a caller whose Wait returns may Branch at
+// once and never read ErrBusy for a turn that already landed.
+// Callers hold s.mu.
+func (s *Session) retireInFlightLocked(t *Turn) {
+	if s.inFlight == t {
+		s.inFlight = nil
+	}
 }
 
 // runOne runs one accepted send. The idle path wrote the prompt in
@@ -363,6 +381,7 @@ func (s *Session) runOne(ps pendingSend) {
 	s.mu.Lock()
 	if !t.promptWritten() {
 		if err := s.appendPromptLocked(persist, t.id, ps.msg); err != nil {
+			s.retireInFlightLocked(t)
 			s.mu.Unlock()
 			t.finish(nil, fmt.Errorf("thread: prompt append: %w", err))
 			return
@@ -376,6 +395,9 @@ func (s *Session) runOne(ps pendingSend) {
 		// kept, the turn is recorded as canceled, and the queue moves on.
 		errOut := fmt.Errorf("thread: turn canceled before it started: %w", err)
 		s.recordTurnEnd(persist, t, nil, errOut, 0, nil)
+		s.mu.Lock()
+		s.retireInFlightLocked(t)
+		s.mu.Unlock()
 		t.finish(nil, errOut)
 		return
 	}
@@ -413,6 +435,7 @@ func (s *Session) runResume(ctx context.Context, t *Turn) {
 		s.recordTurnEnd(persist, t, nil, errOut, 0, nil)
 		s.mu.Lock()
 		s.settleResumeLocked(t)
+		s.retireInFlightLocked(t)
 		s.mu.Unlock()
 		t.finish(nil, errOut)
 		return
@@ -540,6 +563,14 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 		s.settleResumeLocked(t)
 		s.mu.Unlock()
 	}
+	// The in-flight mark retires before the turn is decided, the same
+	// rule: a caller whose Wait returns may Branch at once, and the
+	// runner's epilogue must not be able to answer ErrBusy for a turn
+	// that already landed. (The runner's own boundary clear stays as
+	// the catch-all.)
+	s.mu.Lock()
+	s.retireInFlightLocked(t)
+	s.mu.Unlock()
 	t.finish(res, err)
 }
 

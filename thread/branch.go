@@ -65,9 +65,9 @@ func (s *Session) Branch(ctx context.Context, entryID string, opts ...BranchOpti
 		// under the lock at the append, but a turn already running
 		// should not make the caller pay for a summary first.
 		s.mu.Lock()
-		running := s.running
+		busy := s.running && s.inFlight != nil
 		s.mu.Unlock()
-		if running {
+		if busy {
 			return fmt.Errorf("%w: session %s is running a turn; branch between turns", ErrBusy, s.header.ID)
 		}
 		// Validate, then summarize with the lock released — the model
@@ -81,7 +81,7 @@ func (s *Session) Branch(ctx context.Context, entryID string, opts ...BranchOpti
 		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if s.running {
+		if s.running && s.inFlight != nil {
 			return fmt.Errorf("%w: session %s is running a turn; branch between turns", ErrBusy, s.header.ID)
 		}
 		nav := s.mintIDLocked()
@@ -119,7 +119,7 @@ func (s *Session) Branch(ctx context.Context, entryID string, opts ...BranchOpti
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.running {
+	if s.running && s.inFlight != nil {
 		return fmt.Errorf("%w: session %s is running a turn; branch between turns", ErrBusy, s.header.ID)
 	}
 	if err := s.checkEntryLocked(entryID); err != nil {

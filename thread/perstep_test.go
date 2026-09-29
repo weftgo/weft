@@ -381,3 +381,120 @@ func TestPerStepOverflowAttemptsKeepTheirOwnLines(t *testing.T) {
 		}
 	})
 }
+
+// turnMessages counts, per text, how often a message body appears in
+// the message entries above the turn's prompt — the shape the
+
+// turnMessages counts, per text, how often a message body appears in
+// the message entries above the turn's prompt — the shape the
+// no-duplicates assertions read.
+func turnMessages(t *testing.T, s *thread.Session, promptID string) map[string]int {
+	t.Helper()
+	counts := map[string]int{}
+	for _, e := range s.Entries() {
+		me, ok := e.(thread.MessageEntry)
+		if !ok || me.ID == promptID {
+			continue
+		}
+		counts[string(me.Message.Role)+"\x00"+me.Message.Text()]++
+	}
+	return counts
+}
+
+// assertOnceEach fails when any message the turn emitted is held more
+// than once, printing the path for the failure.
+func assertOnceEach(t *testing.T, s *thread.Session, promptID string) {
+	t.Helper()
+	for text, n := range turnMessages(t, s, promptID) {
+		if n != 1 {
+			t.Errorf("message %q held %d times, want exactly once:\n%s", text, n, renderContext(s))
+		}
+	}
+}
+
+// Bookkeeping the turn admits between its steps must not uncount the
+// step messages around it. A delivered steer's queued receipt entry
+// lands on the active path between the step batches (accepted input is
+// durable input); the turn's end computes what the tree already holds
+// by walking that path, so a receipt between the messages may not make
+// the batch rewrite messages the observer already wrote — the reply
+// would ride the path twice and every later turn's context would
+// carry the duplicate (the regression: the walk stopped at the first
+// non-message entry it met).
+func TestPerStepSteerReceiptBetweenSteps(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+			return "ok", nil
+		})
+		model := wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "echo"}),
+			wefttest.Say("done"),
+		)
+		var steerRef *thread.Session
+		var steerOnce sync.Once
+		agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
+			if _, ok := ev.(weft.ToolStart); ok {
+				steerOnce.Do(func() {
+					if _, err := steerRef.Send(ctx, weft.User("switch to metric units")); err != nil {
+						t.Errorf("steer Send: %v", err)
+					}
+				})
+			}
+		}))
+		s, err := thread.Create(ctx, st, agent, thread.BusyPolicy(thread.Steer))
+		if err != nil {
+			t.Fatal(err)
+		}
+		steerRef = s
+		t1, err := s.Send(ctx, weft.User("convert this"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := t1.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		assertOnceEach(t, s, t1.ID())
+	})
+}
+
+// The same shape with a label: a caller may label an entry while a
+// turn runs, and the label entry lands between the step messages — the
+// turn's end must still see every step message the observer wrote.
+func TestPerStepLabelBetweenSteps(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		note := weft.Tool("note", "Record a note.", func(_ context.Context, in struct {
+			Text string `json:"text"`
+		}) (string, error) {
+			return "noted: " + in.Text, nil
+		})
+		model := wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "note", Args: `{"text":"hi"}`}),
+			wefttest.Say("done"),
+		)
+		var s *thread.Session
+		var once sync.Once
+		agent := weft.New(model, note, weft.Tap(func(_ context.Context, ev weft.Event) {
+			if _, ok := ev.(weft.ToolStart); ok {
+				once.Do(func() {
+					if err := s.Label(ctx, s.Leaf(), "mid-turn"); err != nil {
+						t.Errorf("mid-run Label: %v", err)
+					}
+				})
+			}
+		}))
+		s, err := thread.Create(ctx, st, agent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t1, err := s.Send(ctx, weft.User("go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := t1.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		assertOnceEach(t, s, t1.ID())
+	})
+}

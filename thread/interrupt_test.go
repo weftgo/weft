@@ -499,20 +499,29 @@ func TestInterruptedPartialOneResultPerCall(t *testing.T) {
 	}
 }
 
-// parkResumes is a model that parks the request whose transcript ends
-// on the gate call — the resume over the approval boundary — until its
-// context dies, then fails with the context error: deterministic
-// cancel-mid-model for the interrupt-during-resume composition.
+// parkResumes is a model that parks the resume's own model call — the
+// request whose transcript ends on the gate call's result, the input
+// the approve resolution completed at step 0 — until its context dies,
+// then fails with the context error: deterministic cancel-mid-model
+// for the interrupt-during-resume composition. parked closes when the
+// park begins, so the test interrupts a resume that is provably inside
+// its model call instead of racing the resume's startup. (Parking on
+// the dangling assistant call instead never fires — by its first model
+// call the resume has already resolved the call — and the test then
+// raced the resume's startup, flaking when the resume finished first.)
 type parkResumes struct {
-	inner weft.Model
+	inner  weft.Model
+	parked chan struct{}
+	once   sync.Once
 }
 
 func (p *parkResumes) Info() weft.ModelInfo { return weft.InfoOf(p.inner) }
 
 func (p *parkResumes) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	if last := len(req.Messages) - 1; last >= 0 && req.Messages[last].Role == weft.RoleAssistant {
+	if last := len(req.Messages) - 1; last >= 0 && req.Messages[last].Role == weft.RoleTool {
 		for _, part := range req.Messages[last].Content {
-			if c, ok := part.(weft.ToolCallPart); ok && c.Name == "gate" {
+			if r, ok := part.(weft.ToolResultPart); ok && r.Name == "gate" {
+				p.once.Do(func() { close(p.parked) })
 				return func(yield func(weft.ModelEvent, error) bool) {
 					<-ctx.Done()
 					yield(nil, ctx.Err())
@@ -536,9 +545,8 @@ func TestInterruptDuringResumeRunsTheMessage(t *testing.T) {
 	}, weft.RequireApproval())
 	model := &parkResumes{inner: wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "gate"}),
-		wefttest.Say("resumed tail"),
 		wefttest.Say("after the interrupt"),
-	)}
+	), parked: make(chan struct{})}
 	agent := weft.New(model, gate)
 	s, err := thread.Create(ctx, thread.Memory(), agent, thread.BusyPolicy(thread.Interrupt))
 	if err != nil {
@@ -556,9 +564,15 @@ func TestInterruptDuringResumeRunsTheMessage(t *testing.T) {
 		t.Fatalf("pending = %d, want the parked call", len(p))
 	}
 	// The approval starts the resume (AutoResume), which parks inside
-	// its model call: the interrupt fells it there.
+	// its model call: the interrupt fells it there — provably, once the
+	// park signal arrives, not by racing the resume's startup.
 	if _, err := s.Decide(ctx, thread.Approve(p[0].CallID)); err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case <-model.parked:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the resume never reached its model call")
 	}
 	t2, err := s.Send(ctx, weft.User("stop, do this instead"))
 	if err != nil {

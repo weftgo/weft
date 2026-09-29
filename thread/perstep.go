@@ -107,36 +107,69 @@ func (s *Session) branchBackLocked(ctx context.Context, entry string) error {
 // completions, the repair's synthesized results): the whole final tail
 // is returned then, for a rewrite on a fresh line, since appending
 // only the changed suffix would leave the raw prefix in place under it.
+//
+// The repair runs over the whole transcript, never the tail slice
+// alone: a resume's completed tool message pairs with an assistant
+// inside the input and would read as an orphan in the slice — dropped,
+// when the boundary it closed must survive the failed resume that
+// recorded it (ADR 0011 §7: mid-resume, the tail can already read
+// resolved). Repairing the whole also keeps the comparison in range:
+// skip never exceeds the repaired tail's own length.
 func turnEndMessages(full []weft.Message, inputLen int, treeTail []weft.Message, err error) (msgs []weft.Message, rewrite bool) {
 	if len(full) <= inputLen {
 		return nil, false
 	}
-	tail := full[inputLen:]
-	skip := min(len(treeTail), len(tail)) // a counting bug clamps to a missed batch, not a panic
 	if err == nil {
+		tail := full[inputLen:]
+		skip := min(len(treeTail), len(tail)) // a counting bug clamps to a missed batch, not a panic
 		return tail[skip:], false
 	}
-	repaired := weft.Repair(tail)
-	if skip > 0 && !reflect.DeepEqual(repaired[:skip], treeTail[:skip]) {
-		return repaired, true
+	repaired := weft.Repair(full)
+	if inputLen > len(repaired) {
+		inputLen = len(repaired) // repair dropped inside the input: nothing beyond it to write
 	}
-	return repaired[skip:], false
+	tail := repaired[inputLen:]
+	skip := min(len(treeTail), len(tail))
+	if skip > 0 && !reflect.DeepEqual(tail[:skip], treeTail[:skip]) {
+		return tail, true
+	}
+	return tail[skip:], false
 }
 
 // turnTailLocked returns the messages the step observer appended for
 // the run that started at startLeaf — the raw form of the turn's tail
-// as the tree holds it. Walking backward from the end of the order,
-// every MessageEntry above startLeaf belongs to this turn's steps:
-// nothing else writes between a run's start and its end. Callers hold
-// s.mu.
+// as the tree holds it — read along the active path from the leaf to
+// startLeaf: the run's message entries above it, in order, and nothing
+// else. Bookkeeping the turn admits between its steps — a queued
+// steer's receipt, a label, an info or custom entry — sits on the same
+// path and is skipped, not counted: only message entries are the
+// run's, and every one of them above startLeaf is (a mid-run Branch is
+// ErrBusy, so the path below the turn's start is fixed). A startLeaf
+// the path does not reach (an empty one, a turn that never ran) owns
+// no step messages. Callers hold s.mu.
 func (s *Session) turnTailLocked(startLeaf string) []weft.Message {
-	var out []weft.Message
-	for i := len(s.order) - 1; i >= 0; i-- {
-		me, ok := s.order[i].(MessageEntry)
-		if !ok || me.ID == startLeaf {
+	if startLeaf == "" {
+		return nil
+	}
+	path, err := s.pathLocked(s.leaf)
+	if err != nil {
+		return nil // the leaf is always an entry the session holds
+	}
+	start := -1
+	for i, e := range path {
+		if idOf(e) == startLeaf {
+			start = i
 			break
 		}
-		out = append([]weft.Message{me.Message}, out...)
+	}
+	if start < 0 {
+		return nil
+	}
+	var out []weft.Message
+	for _, e := range path[start+1:] {
+		if me, ok := e.(MessageEntry); ok {
+			out = append(out, me.Message)
+		}
 	}
 	return out
 }

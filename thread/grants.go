@@ -71,7 +71,10 @@ func ArgEquals(pointer string, value json.RawMessage) Arg {
 }
 
 // ArgPrefix returns the predicate requiring args[pointer] to be a
-// string with prefix — the "path stays under the workspace" shape.
+// string with prefix — the "path stays under the workspace" shape. A
+// prefix is a plain string prefix, nothing more: end it with the
+// separator or it matches siblings too ("/ws" matches "/ws-evil") —
+// the prefix's one sharp edge, documented rather than hidden.
 func ArgPrefix(pointer, prefix string) Arg {
 	return Arg{Pointer: pointer, Prefix: prefix}
 }
@@ -79,9 +82,8 @@ func ArgPrefix(pointer, prefix string) Arg {
 // ArgGlob returns the predicate requiring args[pointer] to be a
 // string matching glob — the "go test …" command shape. A command is
 // not a path: * spans separators, so "go test*" matches
-// "go test ./...". End a path prefix with its separator or it matches
-// siblings too ("/ws" matches "/ws-evil") — the prefix's one sharp
-// edge, documented rather than hidden.
+// "go test ./..." (and anything after it on the line — anchor the
+// glob's tail when that matters).
 func ArgGlob(pointer, glob string) Arg {
 	return Arg{Pointer: pointer, Glob: glob}
 }

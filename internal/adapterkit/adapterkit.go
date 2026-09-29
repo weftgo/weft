@@ -1,13 +1,16 @@
 // Package adapterkit holds the helpers every first-party adapter needs
 // but no vendor SDK touches: schema rendering, the terminal-error
-// rule, and the FilePart exactly-one guard. They lived as byte-identical
-// copies in all three adapters until the 2026-09-18 review flagged the
-// drift risk; they move here rather than into the root's public API —
-// THE-END-GOAL principle 3 names internal/ as the tool that keeps the
-// guaranteed surface small, and Go's path-based internal rule lets
-// github.com/weftgo/weft/{openai,anthropic,google} import the package
-// while third-party adapters cannot. Helpers that mention an SDK type
-// (the stream readers) stay per-adapter by design (ADR 0013).
+// rule (with the context-overflow mapping and the marker table mw's
+// retry classifier reads), and the FilePart exactly-one guard. They
+// lived as byte-identical copies in all three adapters until the
+// 2026-09-18 review flagged the drift risk; they move here rather than
+// into the root's public API — THE-END-GOAL principle 3 names
+// internal/ as the tool that keeps the guaranteed surface small, and
+// Go's path-based internal rule lets
+// github.com/weftgo/weft/{openai,anthropic,google} and weft/mw import
+// the package while third-party adapters cannot. Helpers that mention
+// an SDK type (the stream readers) stay per-adapter by design
+// (ADR 0013).
 package adapterkit
 
 import (
@@ -16,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/weftgo/weft"
 )
@@ -51,13 +55,52 @@ func SchemaMap(s *weft.Schema) map[string]any {
 // TerminalErr reports a stream's terminal error the way the Model
 // contract expects: ctx.Err() when the caller's context ended (the
 // vendor SDKs wrap cancellation in their own error types, and the
-// reader goroutine can exit its handshake with a nil SDK error), the
-// error unchanged otherwise — so callers can errors.As the SDK's type.
+// reader goroutine can exit its handshake with a nil SDK error); a
+// context-window overflow wrapped in weft.ErrContextOverflow when the
+// provider's error names one (ADR 0020 §5 — the caller routes it to
+// compaction, and mw.Retry never retries it); the error unchanged
+// otherwise — so callers can errors.As the SDK's type.
 func TerminalErr(ctx context.Context, err error) error {
 	if cerr := ctx.Err(); cerr != nil {
 		return cerr
 	}
+	if IsContextOverflow(err) {
+		// Both links wrapped, so errors.Is finds the sentinel and
+		// errors.As still reaches the provider's own error type.
+		return fmt.Errorf("%w: %w", weft.ErrContextOverflow, err)
+	}
 	return err
+}
+
+// overflowMarkers are substrings the providers use for a request that
+// exceeds the model's context window. Overflow is a request-shape
+// problem: retrying the same bytes cannot succeed. One table, shared
+// by the adapters' mapping (TerminalErr) and mw.Retry's classifier —
+// the 2026-09-18 review's drift rule applied to the second copy.
+var overflowMarkers = []string{
+	"context_length_exceeded",
+	"context length",
+	"context limit", // anthropic's second shape: "input length and `max_tokens` exceed context limit"
+	"context window",
+	"prompt is too long",
+	"too many tokens",
+	"maximum context",
+	"input token count",
+}
+
+// IsContextOverflow reports whether the error chain's text names a
+// context-window overflow. The vendor SDKs carry the provider's
+// message on the error's own Error() — typed enough for the mapping,
+// string-matched because mw imports no vendor SDK (ADR 0013's
+// structural-lookup rule).
+func IsContextOverflow(err error) bool {
+	msg := strings.ToLower(err.Error())
+	for _, m := range overflowMarkers {
+		if strings.Contains(msg, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // NextCallID synthesises the id for a streamed tool call whose server

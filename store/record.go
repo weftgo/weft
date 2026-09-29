@@ -351,6 +351,8 @@ func eventRunID(ev weft.Event) (string, bool) {
 		return e.RunID, true
 	case weft.StepFinish:
 		return e.RunID, true
+	case weft.Steered:
+		return e.RunID, true
 	case weft.RunFinish:
 		return e.RunID, true
 	case weft.Nested:

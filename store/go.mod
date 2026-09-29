@@ -3,7 +3,7 @@ module github.com/weftgo/weft/store
 go 1.26
 
 require (
-	github.com/weftgo/weft v0.3.6
+	github.com/weftgo/weft v0.4.0
 	modernc.org/sqlite v1.59.0
 )
 

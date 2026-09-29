@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/openai/openai-go v1.12.0
-	github.com/weftgo/weft v0.3.6
+	github.com/weftgo/weft v0.4.0
 )
 
 require (

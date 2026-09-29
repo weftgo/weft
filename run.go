@@ -26,6 +26,9 @@ type runConfig struct {
 	// approve, deny with a reason, or resolve with content
 	// (Approve, Deny, Resolve, ResolveError).
 	decisions map[string]decision
+	// steer is the run's steering source, installed by Steering; nil on
+	// an ordinary run, and never inherited by a Subagent's child runs.
+	steer SteerFunc
 }
 
 type decision struct {

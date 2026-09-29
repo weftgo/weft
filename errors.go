@@ -107,6 +107,22 @@ var (
 	// fails rather than advertising a dereference every adapter would
 	// panic on; Agent.CallTool reports the same condition as an error.
 	ErrNilTool = errors.New("weft: nil tool in tool source snapshot")
+
+	// ErrInvalidSteer is returned when a steering source (Steering)
+	// delivers a message whose role is not RoleUser: the model's own
+	// turns come from the model. The run fails at the drain point with
+	// nothing from that drain appended; earlier steers stay on the
+	// partial transcript riding on RunError (ADR 0019 §3).
+	ErrInvalidSteer = errors.New("weft: steering delivered a message with a role other than user")
+
+	// ErrContextOverflow is wrapped by every first-party adapter around
+	// its provider's error for a request that exceeds the model's
+	// context window (ADR 0020 §5). Overflow is a request-shape
+	// problem: the same bytes cannot succeed, so mw.Retry never retries
+	// it — the session layer (weft/thread, v0.3) routes it to
+	// compaction and one re-run instead. The provider's own error stays
+	// reachable underneath for errors.As.
+	ErrContextOverflow = errors.New("weft: request exceeds the model's context window")
 )
 
 // ToolError is a tool failure with a stable code the model can branch

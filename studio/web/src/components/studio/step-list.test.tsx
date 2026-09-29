@@ -140,3 +140,67 @@ describe("StepList", () => {
     ).toBeGreaterThan(0)
   })
 })
+
+  it("renders a steered user turn between the steps (ADR 0019)", async () => {
+    const events: WireEvent[] = [
+      { type: "run_start", id: "r_st", model: { provider: "p", name: "m" } },
+      { type: "step_start", run_id: "r_st", index: 0 },
+      { type: "text_delta", run_id: "r_st", text: "on it" },
+      {
+        type: "step_finish",
+        run_id: "r_st",
+        index: 0,
+        reason: "stop",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+      {
+        type: "steered",
+        run_id: "r_st",
+        seq: 1,
+        step: 0,
+        messages: [
+          { role: "user", content: [{ type: "text", text: "metric units" }] },
+        ],
+      },
+      { type: "step_start", run_id: "r_st", index: 1 },
+      { type: "text_delta", run_id: "r_st", text: "done in metres" },
+      {
+        type: "step_finish",
+        run_id: "r_st",
+        index: 1,
+        reason: "stop",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+      {
+        type: "run_finish",
+        run_id: "r_st",
+        usage: { input_tokens: 2, output_tokens: 2 },
+        steps: 2,
+      },
+    ]
+    const doc = {
+      ...subDoc,
+      id: "r_st",
+      children: [],
+      status: "succeeded",
+    } as RunDoc
+    await renderWithRouter(
+      <StepList events={events} folded={fold(events)} doc={doc} />
+    )
+    // The delivered words, labelled as the user's steer.
+    expect(screen.getByText("metric units")).toBeTruthy()
+    expect(screen.getByText("steered · user")).toBeTruthy()
+    // The DOM order: step 0's card, the steer, step 1's card.
+    const order = [
+      document.querySelector("[data-step='0']"),
+      document.querySelector("[data-steer]"),
+      document.querySelector("[data-step='1']"),
+    ]
+    expect(order.every(Boolean)).toBe(true)
+    expect(
+      order[0]!.compareDocumentPosition(order[1]!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      order[1]!.compareDocumentPosition(order[2]!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })

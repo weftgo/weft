@@ -11,9 +11,9 @@ import (
 //
 // On the wire every event carries a "type" discriminator (run_start,
 // step_start, text_delta, reasoning_delta, tool_args_delta, tool_start,
-// tool_finish, step_finish, run_finish, nested) and UnmarshalEvent
-// restores it — the same rule and the same compatibility contract as
-// the message parts (ADR 0004).
+// tool_finish, step_finish, steered, run_finish, nested) and
+// UnmarshalEvent restores it — the same rule and the same compatibility
+// contract as the message parts (ADR 0004).
 //
 // Every event except RunStart carries RunID: concurrent runs on one
 // agent emit interleaved streams, and a per-run Seq counter is unique
@@ -107,6 +107,20 @@ type StepFinish struct {
 	Raw    string     `json:"raw,omitempty"`
 }
 
+// Steered reports messages the run's steering source delivered at the
+// step's drain point — after the tool batch, or at a final step whose
+// steer redirected the run into one more step. It sits between that
+// step's StepFinish and the next StepStart, numbered from the run's Seq
+// counter like every Seq-carrying event. Messages are the delivered
+// values (RoleUser) as a snapshot: they do not alias the run's
+// transcript (ADR 0019).
+type Steered struct {
+	RunID    string    `json:"run_id"`
+	Seq      int64     `json:"seq"`
+	Step     int       `json:"step"`
+	Messages []Message `json:"messages"`
+}
+
 // RunFinish is always the final event of a successful run and carries the
 // run's total usage and step count.
 type RunFinish struct {
@@ -143,6 +157,7 @@ func (ToolArgsDelta) isEvent()  {}
 func (ToolStart) isEvent()      {}
 func (ToolFinish) isEvent()     {}
 func (StepFinish) isEvent()     {}
+func (Steered) isEvent()        {}
 func (RunFinish) isEvent()      {}
 func (Nested) isEvent()         {}
 
@@ -156,6 +171,7 @@ const (
 	eventToolStart      = "tool_start"
 	eventToolFinish     = "tool_finish"
 	eventStepFinish     = "step_finish"
+	eventSteered        = "steered"
 	eventRunFinish      = "run_finish"
 	eventNested         = "nested"
 )
@@ -178,6 +194,7 @@ type (
 	toolStartWire      ToolStart
 	toolFinishWire     ToolFinish
 	stepFinishWire     StepFinish
+	steeredWire        Steered
 	runFinishWire      RunFinish
 	nestedWire         Nested
 )
@@ -244,6 +261,14 @@ func (e StepFinish) MarshalJSON() ([]byte, error) {
 		Type string `json:"type"`
 		stepFinishWire
 	}{eventStepFinish, stepFinishWire(e)})
+}
+
+// MarshalJSON encodes the event with its "type" discriminator.
+func (e Steered) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type string `json:"type"`
+		steeredWire
+	}{eventSteered, steeredWire(e)})
 }
 
 // MarshalJSON encodes the event with its "type" discriminator.
@@ -329,6 +354,9 @@ func UnmarshalEvent(b []byte) (Event, error) {
 	case eventStepFinish:
 		var v StepFinish
 		err, ev = json.Unmarshal(b, (*stepFinishWire)(&v)), v
+	case eventSteered:
+		var v Steered
+		err, ev = json.Unmarshal(b, (*steeredWire)(&v)), v
 	case eventRunFinish:
 		var v RunFinish
 		err, ev = json.Unmarshal(b, (*runFinishWire)(&v)), v

@@ -3,8 +3,8 @@ module github.com/weftgo/weft/studio
 go 1.26
 
 require (
-	github.com/weftgo/weft v0.3.6
-	github.com/weftgo/weft/store v0.1.1
+	github.com/weftgo/weft v0.4.0
+	github.com/weftgo/weft/store v0.1.2
 )
 
 require (

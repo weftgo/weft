@@ -79,6 +79,16 @@ res, err := agt.Generate(ctx, weft.Prompt("Where is order 1234?"))
 //   agt.Generate(ctx, weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkHigh}), weft.Prompt("..."))
 // res.Text(), res.Messages (full transcript), res.Steps, res.Usage, res.ID
 
+// 3a. Steer a running turn (ADR 0019): a pull source the loop drains at two
+//     fixed points — after the tool batch (every call paired with its
+//     result), and at what would be the final step, where a delivery
+//     redirects into one more step. Never at the approval boundary or
+//     after StopWhen: those ends stay ends. Delivered messages are ordinary
+//     transcript; non-user roles fail the run with ErrInvalidSteer.
+//     Run option only; a Subagent's child run does not inherit it.
+//   agt.Generate(ctx, weft.Prompt("…"), weft.Steering(func(ctx, at weft.SteerPoint) []weft.Message { … }))
+//   wefttest.NewSteers().At(0, weft.User("…")).Option()  // the deterministic source, replay-safe
+
 // 3b. Or stream it.
 for ev, err := range agt.Stream(ctx, weft.Prompt("...")).Events() {
     if err != nil { return err }            // non-nil at most once, as the last element
@@ -91,6 +101,7 @@ for ev, err := range agt.Stream(ctx, weft.Prompt("...")).Events() {
     case weft.ToolFinish:    // Seq, CallID, Name, Content, IsError
     case weft.Nested:        // Seq, CallID, Event — a subagent's event, numbered from this run's counter
     case weft.StepFinish:    // Index, Reason, Usage
+    case weft.Steered:       // Seq, Step, Messages — delivered by the run's steering source
     case weft.RunFinish:     // Usage, Steps, Pending (calls awaiting Approve/Deny)
     }
 }
@@ -148,6 +159,14 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    WithKeyring, s.Request(id) → thread.SignDecision(key, r, d) → s.DecideSigned (fail-
 //    closed: ErrBadSignature/ErrExpired/ErrReplay/ErrArgsChanged/ErrUnknownKey),
 //    thread.RequireSigned(); a Send while approvals pend queues behind them.
+//    Busy policies (ADR 0019): thread.BusyPolicy(Queue | Reject | Steer | Interrupt |
+//    Rollback), or per Send with thread.As(p). Steer delivers mid-run at the drain
+//    points — receipts are durable entries (queued → delivered | deferred | dropped);
+//    s.Queue(), s.ClearQueue(ctx); a steer meeting StopWhen or approvals defers to a
+//    follow-up (Turn.Next). Interrupt cancels the run (dangling calls record the
+//    interruption text; a parked boundary is denied); Rollback also branches back.
+//    Overflow: ErrContextOverflow → compact (reason overflow) + one re-run
+//    (thread.ReRunOnOverflow(false) off); a second failure joins both errors.
 ```
 
 Test offline with `wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))`;

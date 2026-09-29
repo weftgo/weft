@@ -1,3 +1,106 @@
+## 0.4.0 / openai, anthropic, google 0.3.7 / mcp 0.1.8 / store 0.1.2 — 2026-09-29
+
+Version 3 of the phase-3 plan (plan §5): the steering hook in the
+core, the overflow sentinel, and the modules that learn them. Tags cut
+in two phases (ADR 0005): the root at v0.4.0, then the sub-modules —
+openai, anthropic, google at v0.3.7 (the overflow mapping rides the
+root's adapterkit, with per-adapter fixture tests), mcp at v0.1.8 and
+store at v0.1.2 (the Steered event joins the run-id fold; mcp a
+requirement bump only) — all requiring the tagged root v0.4.0, beside
+studio 0.2.0 and thread 0.3.0 below.
+
+### Added — the steering hook (ADR 0019)
+
+- `weft.Steering(fn)` — a run option installing a steering source for
+  that run: `SteerFunc` returns the messages to deliver at a safe point
+  or nil (it must not block — drain a queue, do not wait on one), told
+  where the run is through `SteerPoint{RunID, Step, Final}`.
+- Two drain points: after a step's tool batch, once every call of the
+  batch has its result — success, error, truncated, or denied — so the
+  call/result pairing cannot be split; and at a final step, where a
+  delivered message redirects the run into one more step instead of
+  ending it. Never drained at the approval boundary or after a
+  `StopWhen` condition fires: an intended end stays an end, and the
+  source keeps its messages for a follow-up.
+- Delivered messages are ordinary transcript, appended before the next
+  step's `PrepareStep` chain runs, so request rewrites see them and the
+  transcript stays the single source of truth. A message with any role
+  other than `RoleUser` fails the run with `ErrInvalidSteer`.
+- `Steered` — the one new event (wire `"steered"`): the delivered
+  messages, between that step's `StepFinish` and the next `StepStart`,
+  numbered from the run's Seq counter. `Nested` wraps it for child runs
+  like any event.
+- A redirect consumes a step and goes through the continuation checks
+  (`MaxSteps`, `UsageLimit`, `DetectLoops`); on failure the steer is in
+  `RunError.Result.Messages`, delivered but unanswered.
+- Run option only: a child run started by a `Subagent` tool does not
+  inherit the source — forwarding a steer to a child is a session
+  decision made explicitly (consumer: `weft/thread` v0.3).
+- `wefttest.NewSteers()` — a deterministic, step-keyed steering source
+  (`.At(step, msgs...)`, `.Option()`), the replay-safe way to steer a
+  recorded conversation: a steer that differs from the recording misses
+  its fixture loudly.
+
+### Added — the overflow sentinel (ADR 0020 §5)
+
+- `weft.ErrContextOverflow` — the adapters wrap their provider's
+  context-window overflow in it (`openai`, `anthropic`, `google`), both
+  links preserved so `errors.Is` finds the sentinel and `errors.As`
+  still reaches the vendor SDK's own error. The marker table the
+  mapping reads (and `mw.Retry`'s classifier has always read) lives in
+  one place now, `internal/adapterkit`; it gains anthropic's second
+  shape ("exceed context limit"). `mw.Retry` never retries the
+  sentinel, as it never retried the marker text — the consumer is
+  `weft/thread` v0.3's compact-and-retry turn.
+
+## thread 0.3.0 — 2026-09-29
+
+Steering, interrupt, overflow (ADR 0019, ADR 0020 §5): everything a
+Send can do with a busy session, on the session tree.
+
+### Added
+
+- **Busy policies**: `Steer`, `Interrupt` and `Rollback` join `Queue`
+  (the default) and `Reject` — per session with `BusyPolicy(p)`, per
+  Send with the new `As(p)`.
+- **`Steer`**: the message is accepted at once — a queued receipt
+  entry, flushed — and delivered into the running turn at the core's
+  drain points (after the tool batch, every call paired with its
+  result, or at what would have been the final step, redirecting it).
+  A steer meeting a `StopWhen` end or an open approval boundary never
+  drains: it defers to a follow-up turn, linked through `Turn.Next`.
+- **Receipts** (`"v":3`, format-3 goldens): `queued → delivered |
+  deferred | dropped` entries — delivered receipts join the turn's
+  end batch atomically, naming the run; deferred entries name the
+  follow-up; dropped is `ClearQueue`. `s.Queue()` lists the live
+  queue. A queued receipt whose fate never landed (a crash) defers on
+  reopen and its follow-up runs — accepted input is durable input.
+  `weft.Steering` in `RunOptions` is refused: the session owns the
+  steer queue.
+- **`Interrupt`**: cancels the in-flight run (the mark survives the
+  arm race — an interrupt landing between Send and the run's start
+  fells it at birth); calls the partial left without a real result
+  record the golden interruption text; an approval boundary the
+  interrupt supersedes is denied with the interrupted reason; the
+  message runs as the next turn.
+- **`Rollback`**: an interrupt that also branches the leaf back to
+  before the interrupted turn's receipt entry — the follow-up answers
+  as though it never happened, its entries keeping their own line of
+  the tree.
+- **The overflow re-run**: a turn failing with
+  `weft.ErrContextOverflow` compacts (reason `overflow`) and re-runs
+  once over the shrunken path under a fresh run id; a second failure
+  fails the turn with both errors joined. `ReRunOnOverflow(false)`
+  turns it off.
+
+## studio 0.2.0 — 2026-09-29
+
+The Steered event in the Inspector: a steer folds as a user turn
+attached to the step it followed, rendered between that step's card
+and the next — accent-bordered, replay-jumpable, its words in the
+event summary line. `Version` now reads v0.2.0; the module requires
+the tagged root v0.4.0 and store v0.1.2.
+
 ## thread 0.2.0 — 2026-09-29
 
 Approvals, complete (ADR 0021): the core's approval boundary made

@@ -361,6 +361,23 @@ func (s *Session) execute(first workItem) {
 		// for whichever turn drains them next (the receipt reaches
 		// its final state on every path).
 		s.settleSteersLocked()
+		if cur.resume && cur.ps.turn.failed() && cur.ps.turn.wasInterrupted() &&
+			s.cfg.autoResume && s.boundaryLocked() {
+			// An Interrupt felled this resume while it was the
+			// boundary's one resolver, and its corpse recorded nothing
+			// beyond the turn entry — the input was carried raw (the
+			// decisions resolve their calls in the run), so the calls
+			// still dangle and the boundary still holds the queue. A
+			// failed resume is not retried on its own, but the interrupt
+			// is the caller's next word: re-arm the resolution so the
+			// interrupting Send's follow-up runs behind it (plan §6
+			// steps 3–4), on a context no caller's walk-away can fell —
+			// the resolution is what frees the message.
+			if _, err := s.armResumeLocked(context.Background()); err != nil {
+				s.agent.Logger().Error("thread: interrupt re-arm failed",
+					"session", s.header.ID, "err", err)
+			}
+		}
 		if s.resumeWork != nil {
 			rw := *s.resumeWork
 			s.resumeWork = nil

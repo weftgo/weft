@@ -3,6 +3,7 @@ package thread_test
 import (
 	"context"
 	"errors"
+	"iter"
 	"strings"
 	"sync"
 	"testing"
@@ -495,5 +496,100 @@ func TestInterruptedPartialOneResultPerCall(t *testing.T) {
 	}
 	if toolMsgs != 1 {
 		t.Fatalf("the partial holds %d tool messages, want exactly one", toolMsgs)
+	}
+}
+
+// parkResumes is a model that parks the request whose transcript ends
+// on the gate call — the resume over the approval boundary — until its
+// context dies, then fails with the context error: deterministic
+// cancel-mid-model for the interrupt-during-resume composition.
+type parkResumes struct {
+	inner weft.Model
+}
+
+func (p *parkResumes) Info() weft.ModelInfo { return weft.InfoOf(p.inner) }
+
+func (p *parkResumes) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	if last := len(req.Messages) - 1; last >= 0 && req.Messages[last].Role == weft.RoleAssistant {
+		for _, part := range req.Messages[last].Content {
+			if c, ok := part.(weft.ToolCallPart); ok && c.Name == "gate" {
+				return func(yield func(weft.ModelEvent, error) bool) {
+					<-ctx.Done()
+					yield(nil, ctx.Err())
+				}
+			}
+		}
+	}
+	return p.inner.Stream(ctx, req)
+}
+
+// An Interrupt that fells a resume mid-model still runs its message:
+// the canceled resume's persistence records the repaired input's tail
+// — the approval resolution — so the boundary it was resolving closes
+// and the interrupting follow-up is not held behind it (plan §6 steps
+// 3–4; the resume was the boundary's resolver, and its corpse
+// completes it).
+func TestInterruptDuringResumeRunsTheMessage(t *testing.T) {
+	ctx := context.Background()
+	gate := weft.Tool("gate", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "g", nil
+	}, weft.RequireApproval())
+	model := &parkResumes{inner: wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "gate"}),
+		wefttest.Say("resumed tail"),
+		wefttest.Say("after the interrupt"),
+	)}
+	agent := weft.New(model, gate)
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.BusyPolicy(thread.Interrupt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := s.Send(ctx, weft.User("run the gate"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	p := s.Pending()
+	if len(p) != 1 {
+		t.Fatalf("pending = %d, want the parked call", len(p))
+	}
+	// The approval starts the resume (AutoResume), which parks inside
+	// its model call: the interrupt fells it there.
+	if _, err := s.Decide(ctx, thread.Approve(p[0].CallID)); err != nil {
+		t.Fatal(err)
+	}
+	t2, err := s.Send(ctx, weft.User("stop, do this instead"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	type outcome struct {
+		res *weft.RunResult
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		res, err := t2.Wait()
+		done <- outcome{res, err}
+	}()
+	select {
+	case o := <-done:
+		if o.err != nil {
+			t.Fatalf("the interrupt's follow-up failed: %v", o.err)
+		}
+		if o.res.Text() != "after the interrupt" {
+			t.Errorf("follow-up reply = %q, want the interrupting message's answer", o.res.Text())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the interrupt's follow-up never ran: it is held behind the boundary the felled resume was resolving")
+	}
+	// The interrupted turn itself failed as canceled, and the boundary
+	// it was resolving is gone.
+	if _, err := t1.Next().Wait(); err == nil {
+		t.Error("the interrupted resume reported success")
+	}
+	if p := s.Pending(); len(p) != 0 {
+		t.Errorf("pending after the interrupt = %d, want the boundary resolved", len(p))
 	}
 }

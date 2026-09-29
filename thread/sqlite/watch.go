@@ -64,9 +64,18 @@ func (b *backend) Watch(ctx context.Context, session string, after string) (iter
 
 	return func(yield func(thread.Entry, error) bool) {
 		for {
+			// A canceled tail ends cleanly, not with the query error a
+			// canceled context would answer: the consumer asked for the
+			// end, and one terminal error means one thing went wrong.
+			if ctx.Err() != nil {
+				return
+			}
 			rows, err := b.db.QueryContext(ctx,
 				`SELECT line FROM entries WHERE session = ? AND seq >= ? ORDER BY seq`, session, next)
 			if err != nil {
+				if ctx.Err() != nil {
+					return // the cancellation won the race
+				}
 				yield(nil, err)
 				return
 			}
@@ -106,8 +115,21 @@ func (b *backend) Watch(ctx context.Context, session string, after string) (iter
 				return
 			}
 			_ = rows.Close()
-			// Nothing new: wait for the next tick or the end.
+			// Nothing new: wait for the next tick or the end. An empty
+			// poll also checks the session still exists — rows vanish
+			// silently under a Delete (the cascade), and a tail of a
+			// session that is gone must end, not wait forever.
 			if !advanced {
+				var one int
+				err := b.db.QueryRowContext(ctx, `SELECT 1 FROM sessions WHERE id = ?`, session).Scan(&one)
+				if errors.Is(err, sql.ErrNoRows) {
+					yield(nil, fmtNotFound(session))
+					return
+				}
+				if err != nil && ctx.Err() == nil {
+					yield(nil, err)
+					return
+				}
 				tick := time.NewTicker(pollInterval)
 				select {
 				case <-ctx.Done():

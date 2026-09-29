@@ -41,6 +41,85 @@ func Run(t *testing.T, open func(t *testing.T) thread.Storage) {
 	t.Run("ContextCancellation", canceled(open))
 	t.Run("CorruptionIsLoud", corrupt(open))
 	t.Run("ListFilters", filters(open))
+	t.Run("ListPagingUnderWrites", pagingUnderWrites(open))
+}
+
+// pagingUnderWrites pins the paging contract under concurrent inserts:
+// pages never duplicate a session, never go backwards, and terminate —
+// whatever else is being created while the caller pages. New sessions
+// land at the newest edge (a cursor walks away from it), so a walk
+// that started before them simply does not see them; what it must
+// never see is a session twice or out of order.
+func pagingUnderWrites(open func(t *testing.T) thread.Storage) func(*testing.T) {
+	return func(t *testing.T) {
+		st := open(t)
+		base := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+		const stable = 80
+		for i := 0; i < stable; i++ {
+			h := header(fmt.Sprintf("s_pg%03d", i))
+			h.Created = base.Add(time.Duration(i) * time.Second)
+			if err := st.Create(ctx(), h); err != nil {
+				t.Fatal(err)
+			}
+		}
+		stop := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() { // the churn: new sessions, newest-first edge —
+			// bounded and paced, a writer's cadence, not a fork bomb
+			// (a List reads every header, and an unbounded churn makes
+			// each page quadratically dear).
+			defer wg.Done()
+			for i := 0; i < 30; i++ {
+				select {
+				case <-stop:
+					return
+				case <-time.After(5 * time.Millisecond):
+				}
+				h := header(fmt.Sprintf("s_new%03d", i))
+				h.Created = base.Add(time.Duration(stable+i) * time.Second)
+				if err := st.Create(ctx(), h); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
+		var seen []string
+		var before time.Time
+		pages := 0
+		for {
+			p, err := st.List(ctx(), thread.Query{Before: before, Limit: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, h := range p.Sessions {
+				if i > 0 && h.Created.After(p.Sessions[i-1].Created) {
+					t.Fatalf("a page out of order: %v", p.Sessions)
+				}
+				seen = append(seen, h.ID)
+			}
+			if len(p.Sessions) == 0 {
+				break
+			}
+			before = p.Sessions[len(p.Sessions)-1].Created
+			pages++
+			if pages > 30 {
+				t.Fatal("paging did not terminate")
+			}
+		}
+		close(stop)
+		wg.Wait()
+		dup := map[string]bool{}
+		for _, id := range seen {
+			if dup[id] {
+				t.Fatalf("session %s appeared on two pages under concurrent writes", id)
+			}
+			dup[id] = true
+		}
+		if len(seen) < stable {
+			t.Fatalf("paged over %d sessions, want at least the %d that predate the walk", len(seen), stable)
+		}
+	}
 }
 
 // filters pins the Query filter contract: Meta matches every pair
@@ -246,7 +325,6 @@ func RunWatch(t *testing.T, open func(t *testing.T) thread.Storage) {
 	if !reflect.DeepEqual(resumed, []string{"two", "three"}) {
 		t.Errorf("resumed texts = %v, want [two three]", resumed)
 	}
-	cancel()
 
 	// The loud failures, before the first yield.
 	if _, err := watch.Watch(context.Background(), "s_missing", ""); !errors.Is(err, thread.ErrNotFound) {
@@ -255,7 +333,47 @@ func RunWatch(t *testing.T, open func(t *testing.T) thread.Storage) {
 	if _, err := watch.Watch(context.Background(), h.ID, "e_never_seen"); err == nil {
 		t.Error("Watch after an entry the tree does not hold: err = nil, want an error")
 	}
+
+	// A session deleted under its watcher ends the tail with
+	// ErrNotFound — the tail does not hang on a session that is gone.
+	h2 := header("s_watch_del")
+	if err := watch.(thread.Storage).Create(ctx, h2); err != nil {
+		t.Fatal(err)
+	}
+	dctx, dcancel := context.WithCancel(context.Background())
+	defer dcancel()
+	dseq, err := watch.Watch(dctx, h2.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan error, 1)
+	go func() {
+		var last error
+		for _, err := range dseq {
+			if err != nil {
+				last = err
+				break
+			}
+		}
+		ended <- last
+	}()
+	time.Sleep(2 * pollWait) // let the tail settle on the empty session
+	if err := watch.(thread.Storage).Delete(ctx, h2.ID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-ended:
+		if !errors.Is(err, thread.ErrNotFound) {
+			t.Errorf("a deleted session's tail ended with %v, want ErrNotFound", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tail never ended after the session was deleted")
+	}
 }
+
+// pollWait is how long the table waits for a watcher's poll cycle —
+// generous against the backends' 200ms poll, still test-quick.
+const pollWait = 400 * time.Millisecond
 
 // awaitCount blocks until ch holds n values or the deadline passes.
 func awaitCount(t *testing.T, ch <-chan string, n int) {

@@ -280,6 +280,12 @@ func (s *Session) execute(first workItem) {
 	cur := first
 	for {
 		s.runOneContained(cur)
+		// A resume that failed without resolving its boundary — its
+		// context died, its persistence failed — is not retried here:
+		// an unbounded auto-retry loop has no backoff and no stop, so
+		// the runner leaves the boundary open for the caller's next
+		// Send or Resume (both arm it again).
+		retry := !(cur.resume && cur.ps.turn.failed())
 		s.mu.Lock()
 		if s.resumeWork != nil {
 			rw := *s.resumeWork
@@ -288,16 +294,14 @@ func (s *Session) execute(first workItem) {
 			cur = workItem{ps: pendingSend{ctx: rw.ctx, turn: rw.turn}, resume: true}
 			continue
 		}
-		if s.cfg.autoResume && s.boundaryLocked() && len(s.pendingLocked()) == 0 {
+		if retry && s.cfg.autoResume && s.boundaryLocked() && len(s.pendingLocked()) == 0 {
 			// The chain decided every call without parking (a grant or
 			// the Approver), or the last decision of a parked boundary
 			// landed while this runner worked: resume at once, under
-			// the settings captured when the turn parked.
-			t := s.newTurnLocked()
-			t.resume = true
-			if s.await.turn != nil {
-				s.await.turn.setNext(t)
-			}
+			// the settings captured when the turn parked. The minted
+			// resume is registered like any arming, so a concurrent
+			// Resume joins it rather than arming a second one.
+			t := s.mintResumeLocked()
 			ctx := s.await.ctx
 			if ctx == nil {
 				ctx = context.Background()
@@ -328,7 +332,13 @@ func (s *Session) runOneContained(item workItem) {
 	defer func() {
 		if p := recover(); p != nil {
 			// The turn may already be decided (the panic came from
-			// after it); finish refuses to overwrite it.
+			// after it); finish refuses to overwrite it. A resume's
+			// arming retires first, so its caller can arm again.
+			if item.resume {
+				s.mu.Lock()
+				s.settleResumeLocked(item.ps.turn)
+				s.mu.Unlock()
+			}
 			item.ps.turn.finish(nil, fmt.Errorf("thread: turn panicked: %v", p))
 			s.agent.Logger().Error("thread: turn panicked",
 				"session", s.header.ID, "run", item.ps.turn.runID, "panic", p)
@@ -389,15 +399,32 @@ func (s *Session) runOne(ps pendingSend) {
 // durable decision always beats a captured option. No compaction runs
 // before a resume: there is no new prompt to cover, and the boundary
 // must stay raw.
+//
+// The boundary must still be open when the resume runs: between arming
+// and this run the caller may have branched away from the parked tail
+// (the documented way out of an unwanted boundary), and resuming then
+// would be a model call over nothing — a ghost turn nobody asked for.
+// The turn instead ends with ErrNotPending, the same class Resume
+// itself raises, and the arming retires.
 func (s *Session) runResume(ctx context.Context, t *Turn) {
 	persist := context.WithoutCancel(ctx)
 	if err := ctx.Err(); err != nil {
 		errOut := fmt.Errorf("thread: resume canceled before it started: %w", err)
 		s.recordTurnEnd(persist, t, nil, errOut, 0, nil)
+		s.mu.Lock()
+		s.settleResumeLocked(t)
+		s.mu.Unlock()
 		t.finish(nil, errOut)
 		return
 	}
 	s.mu.Lock()
+	if !s.boundaryLocked() {
+		errOut := fmt.Errorf("%w: the boundary this resume was armed for is gone (branched away?)", ErrNotPending)
+		s.settleResumeLocked(t)
+		s.mu.Unlock()
+		t.finish(nil, errOut)
+		return
+	}
 	// The audit trail says a resume started before the run does: a
 	// crash between the two leaves the boundary resumable, the audit
 	// honest about the attempt.
@@ -409,6 +436,7 @@ func (s *Session) runResume(ctx context.Context, t *Turn) {
 			Detail: fmt.Sprintf("%d call(s) to resolve", dangling), RunID: t.runID,
 		}
 	}); err != nil {
+		s.settleResumeLocked(t)
 		s.mu.Unlock()
 		t.finish(nil, fmt.Errorf("thread: resume audit: %w", err))
 		return
@@ -473,30 +501,26 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 	if chain != nil {
 		s.fireOnRequest(chain)
 		if len(chain.parkedCalls) == 0 && s.cfg.autoResume {
+			// The runner's own arming goes through the same registration
+			// as Decide and Resume: the minted resume is the boundary's
+			// one armed resume, so a Resume arriving while it flies
+			// returns this turn instead of arming a second one beside
+			// it (one boundary, one resume).
 			s.mu.Lock()
-			rt := s.newTurnLocked()
-			rt.resume = true
-			if s.await.turn != nil {
-				s.await.turn.setNext(rt)
-			}
+			rt := s.mintResumeLocked()
 			s.resumeWork = &pendingResume{ctx: chain.awaitCtx, turn: rt}
 			s.mu.Unlock()
 		}
 	}
-	t.finish(res, err)
 	if t.resume {
+		// Settled before the turn is decided, so a caller whose Wait
+		// returns never sees a stale arming: a failed resume can retry,
+		// a resolved boundary reads ErrNotPending.
 		s.mu.Lock()
-		// The resume completed: re-arming is allowed again (a failed
-		// resume leaves the boundary open for a retry), and a boundary
-		// the resume resolved drops its captured settings entirely.
-		if s.await.resumed == t {
-			s.await.resumed = nil
-		}
-		if !s.boundaryLocked() {
-			s.await = awaitState{}
-		}
+		s.settleResumeLocked(t)
 		s.mu.Unlock()
 	}
+	t.finish(res, err)
 }
 
 // recordTurnEnd appends the turn's new messages and its turn entry in
@@ -786,6 +810,16 @@ func (t *Turn) finish(res *weft.RunResult, err error) {
 	t.result, t.waitErr, t.done = res, err, true
 	t.mu.Unlock()
 	t.cond.Broadcast()
+}
+
+// failed reports whether the turn ended with an error — the runner's
+// signal that a resume work item left its boundary unresolved, so the
+// settled-boundary pickup does not auto-retry it (the caller's next
+// Send or Resume arms the retry).
+func (t *Turn) failed() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.done && t.waitErr != nil
 }
 
 // cloneMessage copies a message's part slice, the one mutable field,

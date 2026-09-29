@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -982,6 +983,165 @@ func TestDecideConcurrent(t *testing.T) {
 	}
 	if got := ran.snapshot(); len(got) != 2 {
 		t.Fatalf("approved calls after concurrent decides: %v", got)
+	}
+}
+
+// secondDeathCtx is a context that dies the moment anyone asks about
+// it twice: the first Err() probe reads healthy, every later one reads
+// canceled. It makes "the caller's context died right after the call
+// checked it" — a race window in production — deterministic in a test.
+// Only Err is probed on the paths under test; Done stays nil.
+type secondDeathCtx struct{ fired bool }
+
+func (c *secondDeathCtx) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c *secondDeathCtx) Done() <-chan struct{}       { return nil }
+func (c *secondDeathCtx) Value(any) any               { return nil }
+func (c *secondDeathCtx) Err() error {
+	if c.fired {
+		return context.Canceled
+	}
+	c.fired = true
+	return nil
+}
+
+// TestResumeRetryAfterCanceledArm: a resume armed under a context that
+// died between Resume's check and the runner's pickup fails its turn —
+// and the arming must retire with it, so a later Resume arms a fresh
+// resume and the boundary still resolves (armResumeLocked's "cleared
+// when the resume completes so a failed one can retry" contract).
+func TestResumeRetryAfterCanceledArm(t *testing.T) {
+	ctx := context.Background()
+	agent, ran := refundAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"6"}`}),
+		wefttest.Say("resumed on retry"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.AutoResume(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := parkSend(t, s, ctx)
+	if _, err := s.Decide(ctx, thread.Approve(call.ID)); err != nil {
+		t.Fatal(err)
+	}
+	dead := &secondDeathCtx{}
+	t1, err := s.Resume(dead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t1.Wait(); err == nil {
+		t.Fatal("the dead-context resume succeeded; the test's window closed")
+	}
+	// The failed arm must not own the boundary: a healthy Resume arms
+	// again and the resume runs.
+	t2, err := s.Resume(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if t2 == t1 {
+		t.Fatal("Resume returned the dead turn; the failed arm was never retired")
+	}
+	if _, err := t2.Wait(); err != nil {
+		t.Fatalf("the retried resume: %v", err)
+	}
+	if got := ran.snapshot(); len(got) != 1 || !got[0] {
+		t.Fatalf("approved call after retry: %v", got)
+	}
+	if got := s.Pending(); len(got) != 0 {
+		t.Fatalf("Pending after the retried resume: %d", len(got))
+	}
+}
+
+// gateModel wraps a scripted model, blocking the n-th model call until
+// released and counting every call — the handle a test holds on a run
+// in flight.
+type gateModel struct {
+	inner   weft.Model
+	mu      sync.Mutex
+	calls   int
+	blockAt int
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (g *gateModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	g.mu.Lock()
+	g.calls++
+	n := g.calls
+	g.mu.Unlock()
+	if n == g.blockAt {
+		g.entered <- struct{}{}
+		<-g.release
+	}
+	return g.inner.Stream(ctx, req)
+}
+
+func (g *gateModel) count() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.calls
+}
+
+// TestResumeDuringInFlightResumeArmsOnce: while the runner is already
+// resuming a completed boundary (the chain-decided path — a grant or
+// the Approver decided everything), a Resume must return the turn in
+// flight, not arm a second resume for the same boundary. The second
+// resume would run the model again over nothing: a ghost turn with no
+// prompt and no decisions.
+func TestResumeDuringInFlightResumeArmsOnce(t *testing.T) {
+	ctx := context.Background()
+	gm := &gateModel{
+		inner:   wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"10"}`}), wefttest.Say("resumed")),
+		blockAt: 2, // the resume run's model call
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	ran := &ranLog{}
+	agent := weft.New(gm, weft.Name("double-resume-test"),
+		weft.Tool("refund", "Refund an order.",
+			func(ctx context.Context, in refundInput) (string, error) {
+				c, _ := weft.CallFromContext(ctx)
+				ran.add(c.Approved)
+				return "refunded " + in.OrderID, nil
+			},
+			weft.RequireApproval()))
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Grant(ctx, thread.Grant{Tool: "refund"}); err != nil {
+		t.Fatal(err)
+	}
+	t1, err := s.Send(ctx, weft.User("refund it"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	// The grant decided the call, so the runner is resuming now; its
+	// model call blocks on the gate. A Resume over the same boundary
+	// arrives while that resume is in flight.
+	<-gm.entered
+	inFlight := t1.Next()
+	if inFlight == nil {
+		t.Fatal("the chain-decided resume never linked")
+	}
+	rt, err := s.Resume(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt != inFlight {
+		t.Fatalf("Resume armed a second resume (%p) while one was in flight (%p)", rt, inFlight)
+	}
+	close(gm.release)
+	if _, err := rt.Wait(); err != nil {
+		t.Fatalf("the in-flight resume: %v", err)
+	}
+	if got := gm.count(); got != 2 {
+		t.Fatalf("model calls: %d, want 2 (a ghost resume ran the model again)", got)
+	}
+	if got := ran.snapshot(); len(got) != 1 || !got[0] {
+		t.Fatalf("approved call: %v", got)
 	}
 }
 

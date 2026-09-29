@@ -285,7 +285,7 @@ func (s *Session) execute(first workItem) {
 		// an unbounded auto-retry loop has no backoff and no stop, so
 		// the runner leaves the boundary open for the caller's next
 		// Send or Resume (both arm it again).
-		retry := !(cur.resume && cur.ps.turn.failed())
+		retry := !cur.resume || !cur.ps.turn.failed()
 		s.mu.Lock()
 		if s.resumeWork != nil {
 			rw := *s.resumeWork

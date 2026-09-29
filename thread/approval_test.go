@@ -1145,6 +1145,64 @@ func TestResumeDuringInFlightResumeArmsOnce(t *testing.T) {
 	}
 }
 
+// TestApproverAlwaysGrants: "approve and always allow" from the live
+// Approver records its grant like the same decision through Decide —
+// the next identical call never parks (ADR 0021 §4: grants are created
+// "explicitly or from a decision").
+func TestApproverAlwaysGrants(t *testing.T) {
+	ctx := context.Background()
+	agent, ran := runAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "run", Args: `{"command":"go build"}`}),
+		wefttest.ToolCalls(wefttest.Call{Name: "run", Args: `{"command":"go build"}`}),
+		wefttest.Say("one"), wefttest.Say("two"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent,
+		thread.WithApprover(func(_ context.Context, r thread.Request) (thread.Decision, bool) {
+			return thread.ApproveAlways(r.CallID), true
+		}),
+		thread.ApproverTimeout(5*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := s.Send(ctx, weft.User("build"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if next := t1.Next(); next != nil {
+		if _, err := next.Wait(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	found := false
+	for _, e := range s.Entries() {
+		if g, ok := e.(thread.GrantEntry); ok && g.Tool == "run" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("an Approver's ApproveAlways recorded no grant")
+	}
+	t2, err := s.Send(ctx, weft.User("build again"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t2.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if next := t2.Next(); next != nil {
+		if _, err := next.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		t.Fatal("the always-granted call still parked")
+	}
+	if got := *ran; len(got) != 2 {
+		t.Fatalf("executions: %v", got)
+	}
+}
+
 // TestResumeTwice: arming the resume twice before it lands must not
 // orphan the first caller's Turn — the second Resume returns the
 // already-armed turn, and both waits complete (one boundary, one

@@ -1,4 +1,13 @@
-## 0.4.0 (unreleased)
+## 0.4.0 / openai, anthropic, google 0.3.7 / mcp 0.1.8 / store 0.1.2 — 2026-09-29
+
+Version 3 of the phase-3 plan (plan §5): the steering hook in the
+core, the overflow sentinel, and the modules that learn them. Tags cut
+in two phases (ADR 0005): the root at v0.4.0, then the sub-modules —
+openai, anthropic, google at v0.3.7 (the overflow mapping rides the
+root's adapterkit, with per-adapter fixture tests), mcp at v0.1.8 and
+store at v0.1.2 (the Steered event joins the run-id fold; mcp a
+requirement bump only) — all requiring the tagged root v0.4.0, beside
+studio 0.2.0 and thread 0.3.0 below.
 
 ### Added — the steering hook (ADR 0019)
 
@@ -44,7 +53,7 @@
   sentinel, as it never retried the marker text — the consumer is
   `weft/thread` v0.3's compact-and-retry turn.
 
-## thread 0.3.0 (unreleased)
+## thread 0.3.0 — 2026-09-29
 
 Steering, interrupt, overflow (ADR 0019, ADR 0020 §5): everything a
 Send can do with a busy session, on the session tree.
@@ -83,6 +92,14 @@ Send can do with a busy session, on the session tree.
   once over the shrunken path under a fresh run id; a second failure
   fails the turn with both errors joined. `ReRunOnOverflow(false)`
   turns it off.
+
+## studio 0.2.0 — 2026-09-29
+
+The Steered event in the Inspector: a steer folds as a user turn
+attached to the step it followed, rendered between that step's card
+and the next — accent-bordered, replay-jumpable, its words in the
+event summary line. `Version` now reads v0.2.0; the module requires
+the tagged root v0.4.0 and store v0.1.2.
 
 ## thread 0.2.0 — 2026-09-29
 

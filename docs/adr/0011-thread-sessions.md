@@ -197,7 +197,10 @@ on 2026-09-29; no answer arrived in the session, so this amendment
 follows the step's own review bar ("the rebuilt or streamed step
 messages equal RunResult.Messages exactly, including signatures") and
 the plan's option-b release contingency (the v0.4 Release prompt
-carries the two-phase root release), and awaits his ratification.
+carries the two-phase root release). **Ratified by the maintainer on
+2026-09-29**, after the v0.4 release: option (b) — the core addition
+`weft.OnMessages` (root v0.5.0, ADR 0006's 2026-09-29 note) — is the
+decided shape.
 
 Consequences the amendment owns:
 

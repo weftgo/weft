@@ -130,6 +130,10 @@ type awaitState struct {
 	ctx   context.Context
 	runID string
 	turn  *Turn
+	// resumed is the resume turn already armed for this boundary —
+	// the idempotency key for arming (one boundary, one resume),
+	// cleared when the resume completes so a failed one can retry.
+	resumed *Turn
 }
 
 // pendingResume is a resume run minted by Decide or Resume while a

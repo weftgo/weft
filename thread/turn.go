@@ -154,6 +154,22 @@ func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption
 		}
 		t := s.newTurnLocked()
 		s.queue = append(s.queue, pendingSend{ctx: ctx, msg: msg, opts: extra, turn: t})
+		if !s.running && s.cfg.autoResume && len(s.pendingLocked()) == 0 {
+			// A boundary with every call decided and no runner alive —
+			// a reopen inside the crash window between Decide's append
+			// and the resume it armed — must not wedge the queue:
+			// AutoResume's contract says the session resumes on its
+			// own, so this Send arms it (under a window that cannot be
+			// canceled by the sender walking away), and the follow-up
+			// runs behind the resume.
+			if _, err := s.armResumeLocked(context.WithoutCancel(ctx)); err != nil {
+				// Arming cannot fail today (it mints and spawns); if it
+				// ever grows a failure, the queued send still runs once
+				// the caller resolves the boundary by hand.
+				s.agent.Logger().Error("thread: auto-resume arm failed",
+					"session", s.header.ID, "err", err)
+			}
+		}
 		return t, nil
 	}
 	if len(s.queue) > 0 {
@@ -470,6 +486,12 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 	t.finish(res, err)
 	if t.resume {
 		s.mu.Lock()
+		// The resume completed: re-arming is allowed again (a failed
+		// resume leaves the boundary open for a retry), and a boundary
+		// the resume resolved drops its captured settings entirely.
+		if s.await.resumed == t {
+			s.await.resumed = nil
+		}
 		if !s.boundaryLocked() {
 			s.await = awaitState{}
 		}

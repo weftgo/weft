@@ -332,6 +332,14 @@ func (s *Session) execute(first workItem) {
 		retry := !cur.resume || !cur.ps.turn.failed()
 		s.mu.Lock()
 		s.inFlight = nil // the item boundary: a Branch here is already safe
+		// Every exit path settles the live steers here, not only
+		// runTurn's own end: a turn that died early — a panicked
+		// session path, a prompt append that failed, a caller who
+		// walked away before the run started — leaves its queued
+		// steers undelivered, and they defer now instead of waiting
+		// for whichever turn drains them next (the receipt reaches
+		// its final state on every path).
+		s.settleSteersLocked()
 		if s.resumeWork != nil {
 			rw := *s.resumeWork
 			s.resumeWork = nil

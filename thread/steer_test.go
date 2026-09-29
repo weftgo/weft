@@ -2,6 +2,7 @@ package thread_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -585,4 +586,133 @@ func TestReceiptsAcrossRestart(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("the resurrected steer never ran")
+}
+
+// Several steers accepted between two drain points deliver in one
+// drain, in acceptance order (the review's ordering focus).
+func TestSteersDeliverInAcceptanceOrder(t *testing.T) {
+	ctx := context.Background()
+	release := make(chan struct{})
+	block := weft.Tool("block", "", func(ctx context.Context, _ struct{}) (string, error) {
+		select {
+		case <-release:
+			return "ok", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	})
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "block"}),
+		wefttest.Say("done"),
+	)
+	var ref *thread.Session
+	agent := weft.New(model, block, weft.Tap(func(_ context.Context, ev weft.Event) {
+		if _, ok := ev.(weft.ToolStart); ok {
+			// All three steers accepted between two drain points — one
+			// tool call, one batch, one drain.
+			for n := 1; n <= 3; n++ {
+				if _, err := ref.Send(ctx, weft.User(fmt.Sprintf("steer number %d", n))); err != nil {
+					t.Errorf("steer %d: %v", n, err)
+				}
+			}
+		}
+	}))
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.BusyPolicy(thread.Steer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref = s
+	t1, _ := s.Send(ctx, weft.User("go"))
+	close(release)
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	// One drain delivered all three, in acceptance order, after the
+	// tool message.
+	second := model.Requests()[1].Messages
+	var got []string
+	for _, m := range second {
+		if m.Role == weft.RoleUser && len(m.Text()) > len("steer number ") && m.Text()[:6] == "steer " {
+			got = append(got, m.Text())
+		}
+	}
+	want := []string{"steer number 1", "steer number 2", "steer number 3"}
+	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("delivered steers = %v, want %v in acceptance order", got, want)
+	}
+	// All three receipts reached delivered.
+	statuses := receiptStatus(receipts(s))
+	if len(statuses) != 3 {
+		t.Fatalf("receipts = %+v, want three", statuses)
+	}
+	for id, st := range statuses {
+		if st != thread.ReceiptDelivered {
+			t.Errorf("receipt %s = %q, want delivered", id, st)
+		}
+	}
+}
+
+// A turn that dies without draining — the caller's context dies before
+// the run starts — still settles its queued steers: they defer and the
+// follow-up runs (the review's every-receipt-final-state focus).
+func TestSteerSettlesWhenTurnDiesEarly(t *testing.T) {
+	ctx := context.Background()
+	model := wefttest.Script(
+		wefttest.Say("first"),
+		wefttest.Say("followed"),
+	)
+	var ref *thread.Session
+	var once sync.Once
+	t1ctx, cancelTurn := context.WithCancel(ctx)
+	agent := weft.New(model, weft.Tap(func(_ context.Context, ev weft.Event) {
+		if _, ok := ev.(weft.TextDelta); ok {
+			once.Do(func() {
+				if _, err := ref.Send(ctx, weft.User("steer the dying turn")); err != nil {
+					t.Errorf("steer Send: %v", err)
+					return
+				}
+				// The TURN dies before any drain point can take the
+				// steer: cancellation wins over delivery.
+				cancelTurn()
+			})
+		}
+	}))
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.BusyPolicy(thread.Steer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref = s
+	t1, _ := s.Send(t1ctx, weft.User("go"))
+	if _, err := t1.Wait(); err == nil {
+		t.Fatal("the canceled turn reported success")
+	}
+	// The steer was queued for the dying run but never drained: it
+	// defers and its follow-up runs the message.
+	deadline := time.Now().Add(5 * time.Second)
+	found := false
+	for time.Now().Before(deadline) && !found {
+		for _, r := range receipts(s) {
+			if r.Status == thread.ReceiptDeferred {
+				found = true
+			}
+		}
+		if !found {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if !found {
+		t.Fatal("the steer never reached a final receipt state")
+	}
+	inContext := false
+	for time.Now().Before(deadline) && !inContext {
+		for _, m := range s.Context() {
+			if m.Text() == "steer the dying turn" {
+				inContext = true
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !inContext {
+		t.Fatal("the deferred steer's follow-up never ran its message")
+	}
 }

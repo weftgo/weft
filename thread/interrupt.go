@@ -163,8 +163,12 @@ func withInterruptedResults(msgs []weft.Message) []weft.Message {
 	}
 	out := slices.Clone(msgs)
 	if i+1 < len(out) && out[i+1].Role == weft.RoleTool {
-		rest := slices.Clone(out[i+1].Content)
-		out[i+1].Content = append(parts, rest...)
+		// The step's results message is rebuilt whole, in call order —
+		// every call of the batch takes its kept result or the golden
+		// text. Keeping the originals beside the rebuild would
+		// duplicate every result, and leave the cancellation noise
+		// beside its replacement: one result per call is the invariant.
+		out[i+1].Content = parts
 		return out
 	}
 	tool := weft.Message{Role: weft.RoleTool, Content: parts}

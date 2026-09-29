@@ -437,3 +437,63 @@ func TestOverflowCompactionThatOverflows(t *testing.T) {
 		}
 	}
 }
+
+// The interrupted partial the consumer reads carries exactly one
+// result per call: the golden interruption text replaces the bare
+// cancellation noise a handler returned as the run died under it —
+// the noise result itself must not survive beside its replacement
+// (the pairing invariant; Repair hides the duplicate from the tree,
+// but Wait's RunError.Result is the caller's copy of the partial).
+func TestInterruptedPartialOneResultPerCall(t *testing.T) {
+	ctx := context.Background()
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "wait"}),
+		wefttest.Say("after the interrupt"),
+	)
+	tool, _ := holdingTool()
+	started := make(chan struct{})
+	var once sync.Once
+	agent := weft.New(model, tool, weft.Tap(func(_ context.Context, ev weft.Event) {
+		if _, ok := ev.(weft.ToolStart); ok {
+			once.Do(func() { close(started) })
+		}
+	}))
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.BusyPolicy(thread.Interrupt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := s.Send(ctx, weft.User("start the work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if _, err := s.Send(ctx, weft.User("stop, do this instead")); err != nil {
+		t.Fatal(err)
+	}
+	_, err = t1.Wait()
+	if err == nil {
+		t.Fatal("the interrupted turn reported success")
+	}
+	var runErr *weft.RunError
+	if !errors.As(err, &runErr) || runErr.Result == nil {
+		t.Fatalf("err = %v, want a RunError carrying the partial transcript", err)
+	}
+	want := "tool call wait was interrupted: the run was canceled for a newer message"
+	toolMsgs := 0
+	for _, m := range runErr.Result.Messages {
+		if m.Role != weft.RoleTool {
+			continue
+		}
+		toolMsgs++
+		if len(m.Content) != 1 {
+			t.Fatalf("the interrupted tool message holds %d results (%+v), want exactly one per call", len(m.Content), m.Content)
+		}
+		r, ok := m.Content[0].(weft.ToolResultPart)
+		if !ok || r.Content != want || !r.IsError {
+			t.Fatalf("the interrupted call's result = %+v, want the golden interruption text", m.Content[0])
+		}
+	}
+	if toolMsgs != 1 {
+		t.Fatalf("the partial holds %d tool messages, want exactly one", toolMsgs)
+	}
+}

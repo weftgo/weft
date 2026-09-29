@@ -169,3 +169,90 @@ default). Two P3 doc drifts: the README and `mcp/doc.go` snippets
 discarded the `*ImportError` with `_`; "first occurrence stands" is
 the first importable one, now stated and pinned.
 
+
+## 12. Deep review of thread v0.2 (2026-09-29, this branch)
+
+A four-axis pass over the whole `thread-v0.2` diff (38 commits, 84
+files) — standards, spec, concurrency/lifecycle, and the
+security-sensitive semantics of approvals/signing/grants/compaction —
+each finding verified against the code before fixing. The full test
+suite was green before and after; every fix below is pinned by a test
+that fails on the old code (mutation-checked by stashing the source
+and running the pins).
+
+Three P1s, all in the approvals logic:
+
+- **Quorum broke the chain's own decisions.** The chain-decided
+  hand-off (turn.go) armed the auto-resume whenever the chain parked
+  nothing — without the `pendingLocked` gate the runner's own pickup
+  and Decide apply. Under `Quorum(n≥2)`, a grant match (Who `""`, one
+  identity) or an Approver's single approval armed a resume that then
+  denied the undecided calls as "no decision", discarding the approval
+  and burning a model call per retry. The hand-off now arms only when
+  every dangling call holds an effective decision; an unmet quorum
+  leaves the boundary open for the second identity, exactly like a
+  parked one.
+- **`Always` on a refusal minted a standing approval.** `Decide` and
+  `DecideSigned` lacked the `Kind == approve` gate the Approver path
+  has: a `Deny` (or `Resolve`) built with `Always: true` recorded a
+  grant for the very thing refused — the identical next call then
+  auto-ran. Both doors now mint grants only on approvals (ADR 0021 §4).
+- **Repeated call ids inherited earlier occurrences' verdicts.** The
+  approval walk scoped decisions by the parked request's RunID, but a
+  chain-decided call writes no request: ADR 0007 lets call ids repeat
+  across turns, so a re-issued id folded the old occurrence's
+  approve+deny into the new one's grant approval and read "DENIED:
+  conflicting decisions". The walk now resets a call's request and
+  decisions at the message that carries it — occurrences are scoped by
+  position, the run-id filter kept as defense.
+
+P2s: an approve beside a resolve now conflicts (the fold's documented
+words, both orders — the approve was silently discarded); a deny-grant's
+matches count against `MaxUses` (only "approved" audits were counted,
+so a bounded standing refusal never expired); `Branch` while a turn
+runs fails with `ErrBusy` instead of stranding the run's transcript on
+a branch whose context the model never saw (branching off a parked
+boundary remains the documented escape hatch — the runner is gone by
+then); `Decide`/`DecideSigned`/`Resume`'s expiry denials and every
+`appendLocked` write now flush under the Flusher capability — a
+decision (its doc's own "durably") and above all a revocation (whose
+crash-loss re-activates the grant) no longer live only in the page
+cache under `FsyncOnFlush`; the `Estimator` hook moved outside the
+session lock — one that calls `Leaf()`/`Pending()` deadlocked the
+turn's own persistence, where every other caller hook is deliberately
+consulted unlocked.
+
+P3s: `nativeOf` never hashes a Model (an unhashable wrapper panicked
+the map; a self-wrapping non-comparable one now terminates under a
+depth cap — found live when the first version of the fix itself
+looped forever and the pin hung); `jsonl.readHeader` uses
+`io.ReadFull` (a short read made a valid header look torn and List
+skipped the session); the write-only `grantRef.shared` field is gone.
+
+Docs caught up with the code: `SummarizeLeft`'s "Not in this build"
+paragraph and `ErrNotImplemented`'s "returned by SummarizeLeft" (it is
+returned by nothing now) corrected; the "stubbed until step 2.2"
+comment and the phantom `testdata/approvals` golden reference fixed;
+`ArgPrefix` documents its empty-prefix sharp edge; the compaction log
+lines carry the `trace` attribute set ADR 0020 §4 promised; ADR 0020
+gains a dated amendment recording that the split turn is summarized in
+one pass; the README status line catches up to v0.3.6.
+
+Two findings deliberately not changed: arming the resume under
+`WithoutCancel` in Decide/Resume (the asymmetry with the queued-send
+path is real, but `TestResumeRetryAfterCanceledArm` pins the loud-
+failure-and-retry contract on purpose — the entries are durable, so a
+dead decider's context costs one retry, and changing it broke the
+pin); and the trim record carrying no payload (a reopen without the
+trimmer configured resurfaces raw results — a documented consequence
+of the re-derive-on-read design; persisting stubs is a format change
+that wants its own ADR). `thread.Proceed`/`thread.Cancel` remain
+package vars — technically against the "no globals" rule, but they are
+value sentinels with unexported fields in the `io.EOF` tradition, and
+changing their shape is API churn on a reviewed branch; noted for the
+v0.2 release decision. `Preparation.SplitPrefix` stays declared and
+nil — speculative until a two-pass split mode exists, but exported API.
+
+Gates after the round: build/vet/test/-race green in all six modules,
+golangci-lint 0 issues, `WEFT_MODEL_REQUESTS=deny` green, apidiff-thread
+skips (no tag yet, as designed).

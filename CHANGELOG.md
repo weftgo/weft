@@ -1,3 +1,37 @@
+## 0.4.0 (unreleased)
+
+### Added — the steering hook (ADR 0019)
+
+- `weft.Steering(fn)` — a run option installing a steering source for
+  that run: `SteerFunc` returns the messages to deliver at a safe point
+  or nil (it must not block — drain a queue, do not wait on one), told
+  where the run is through `SteerPoint{RunID, Step, Final}`.
+- Two drain points: after a step's tool batch, once every call of the
+  batch has its result — success, error, truncated, or denied — so the
+  call/result pairing cannot be split; and at a final step, where a
+  delivered message redirects the run into one more step instead of
+  ending it. Never drained at the approval boundary or after a
+  `StopWhen` condition fires: an intended end stays an end, and the
+  source keeps its messages for a follow-up.
+- Delivered messages are ordinary transcript, appended before the next
+  step's `PrepareStep` chain runs, so request rewrites see them and the
+  transcript stays the single source of truth. A message with any role
+  other than `RoleUser` fails the run with `ErrInvalidSteer`.
+- `Steered` — the one new event (wire `"steered"`): the delivered
+  messages, between that step's `StepFinish` and the next `StepStart`,
+  numbered from the run's Seq counter. `Nested` wraps it for child runs
+  like any event.
+- A redirect consumes a step and goes through the continuation checks
+  (`MaxSteps`, `UsageLimit`, `DetectLoops`); on failure the steer is in
+  `RunError.Result.Messages`, delivered but unanswered.
+- Run option only: a child run started by a `Subagent` tool does not
+  inherit the source — forwarding a steer to a child is a session
+  decision made explicitly (consumer: `weft/thread` v0.3).
+- `wefttest.NewSteers()` — a deterministic, step-keyed steering source
+  (`.At(step, msgs...)`, `.Option()`), the replay-safe way to steer a
+  recorded conversation: a steer that differs from the recording misses
+  its fixture loudly.
+
 ## thread 0.2.0 — 2026-09-29
 
 Approvals, complete (ADR 0021): the core's approval boundary made

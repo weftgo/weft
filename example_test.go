@@ -929,3 +929,31 @@ func ExampleAgent_Model() {
 	// {wefttest script}
 	// true
 }
+
+// Steering delivers a user's message to a running turn at a safe
+// point: after the tool batch (every call paired with its result), or
+// at what would have been the final step, which the steer redirects
+// into one more step. The delivered message is ordinary transcript —
+// the model, the record, and the next turn all see it — reported as a
+// Steered event between StepFinish and the next StepStart (ADR 0019).
+func ExampleSteering() {
+	lookup := weft.Tool("lookup", "Look up an order.",
+		func(_ context.Context, _ struct{}) (string, error) { return "shipped yesterday", nil })
+	src := wefttest.NewSteers().At(0, weft.User("That is order 1234 — I meant 5678."))
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup"}),
+		wefttest.Say("Order 5678 is still pending."),
+	), lookup)
+	res, err := agt.Generate(context.Background(), weft.Prompt("Where is my order?"), src.Option())
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.NumSteps(), "steps")
+	fmt.Println(res.Text())
+	last := res.Messages[len(res.Messages)-2] // the steer, an ordinary user message
+	fmt.Println(last.Role, last.Text())
+	// Output:
+	// 2 steps
+	// Order 5678 is still pending.
+	// user That is order 1234 — I meant 5678.
+}

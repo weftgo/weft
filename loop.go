@@ -438,21 +438,56 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			res.Pending = pending
 			return endRun(step)
 		}
-		if len(calls) == 0 {
-			// A max_tokens finish is recorded, not fatal: RunResult
-			// .StopReason (and the last StepRecord) carry it, so callers
-			// can branch on truncation without indexing. Tool-call
-			// arguments truncated into undecodable JSON already come back
-			// as error results the model recovers from.
+		// final marks the step the run would otherwise end on: the model
+		// made no tool calls (a max_tokens finish with calls is not
+		// final — its calls all carry error results and the loop
+		// continues).
+		final := len(calls) == 0
+		if a.stopped(res.Steps) {
+			// An intended end stays an end: a StopWhen condition firing
+			// ends the run here in every case, before the steering
+			// drain below — a steer cannot un-end it (ADR 0019 §2).
 			return endRun(step)
 		}
-		if a.stopped(res.Steps) {
+		// The steering drain points (ADR 0019 §2): after a step's tool
+		// batch, when every call of the batch has its result — success,
+		// error, truncated, or denied — so the call/result pairing
+		// cannot be split, and at a final step, where a delivered
+		// message redirects the run into one more step instead of
+		// ending. The boundary above and the StopWhen end just passed
+		// are the two non-drain exits: the source keeps its messages
+		// for a follow-up. The loop goroutine is alone here — tools
+		// finished, the next model call not started — so the Seq below
+		// cannot interleave with a tool event's.
+		var steered []Message
+		if cfg.steer != nil {
+			steered = cfg.steer(ctx, SteerPoint{RunID: cfg.id, Step: step, Final: final})
+			for _, m := range steered {
+				if m.Role != RoleUser {
+					return fail(step, fmt.Errorf("%w: role %q at step %d", ErrInvalidSteer, m.Role, step))
+				}
+			}
+		}
+		if final && len(steered) == 0 {
 			return endRun(step)
+		}
+		if len(steered) > 0 {
+			// Delivered messages are transcript (ADR 0019 §3): appended
+			// before the next step's PrepareStep chain runs, so request
+			// rewrites see them and the transcript stays the single
+			// source of truth. The event is a snapshot — the transcript
+			// owns the delivered messages, the event carries a copy.
+			res.Messages = append(res.Messages, steered...)
+			emit(Steered{RunID: cfg.id, Seq: seq.Add(1), Step: step, Messages: cloneMessages(steered)})
 		}
 		// The continuation point: the loop is about to spend more, so
 		// every budget is checked here. A step that ended the run above
 		// succeeded even if it overshot — a budget stops further spend,
-		// it does not discard finished work (ADR 0002).
+		// it does not discard finished work (ADR 0002). A redirect at a
+		// Final point consumes a step and goes through the same checks
+		// as any continuation; if they fail, the steer is in
+		// RunError.Result.Messages, delivered but unanswered (ADR 0019
+		// §5).
 		if err := a.guard(res, &rec, state); err != nil {
 			return fail(step, err)
 		}

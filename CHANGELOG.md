@@ -1,8 +1,11 @@
-## thread 0.4.0 (unreleased)
+## thread 0.4.0 — 2026-09-29
 
 The second backend, per-step durability, and the live tail (plan §7,
 ADR 0011 §7's amendment). The root gains `weft.OnMessages` (its own
-0.5.0 entry below); thread requires it, released in lockstep.
+0.5.0 entry below); thread requires it, released in lockstep —
+`thread/v0.4.0` and the new `thread/sqlite/v0.1.0` beside the root
+`v0.5.0` and its requirement bumps (openai, anthropic, google 0.3.8,
+mcp 0.1.9, store 0.1.3, studio 0.2.1).
 
 ### Added
 
@@ -42,7 +45,14 @@ ADR 0011 §7's amendment). The root gains `weft.OnMessages` (its own
 - `Resume` joins an in-flight resume through the arming registry: the
   armed resume, not the dangling tail, is the idempotency key.
 
-## 0.5.0 (unreleased)
+## 0.5.0 / openai, anthropic, google 0.3.8 / mcp 0.1.9 / store 0.1.3 / studio 0.2.1 — 2026-09-29
+
+Version 4 of the phase-3 plan (plan §7): the transcript observer in
+the core, and the session features that need it. Tags cut in two
+phases (ADR 0005): the root at v0.5.0, then the sub-modules — openai,
+anthropic, google, mcp, store and studio as requirement bumps only —
+all requiring the tagged root v0.5.0, beside thread 0.4.0 and the new
+thread/sqlite 0.1.0 above.
 
 ### Added — the transcript observer (ADR 0006 note, TODO §5.12 shape (b))
 

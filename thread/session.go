@@ -128,6 +128,14 @@ type Session struct {
 	await      awaitState
 	resumeWork *pendingResume
 
+	// The steering state (ADR 0019, plan §6): steerQueue holds the
+	// steers accepted but not yet drained by the running turn, in
+	// acceptance order; handed holds the ones the run's drain took,
+	// whose delivered receipts join that turn's end batch. Both are
+	// guarded by mu; the drain itself (steerSource) never blocks.
+	steerQueue []queuedSteer
+	handed     []queuedSteer
+
 	// The compaction trigger's state (ADR 0020 §2): lastInput is the
 	// provider-reported input of the last model step the session ran,
 	// lastMeasureLeaf the entry that step's request covered up to (the
@@ -262,6 +270,12 @@ func Open(ctx context.Context, st Storage, id string, agent *weft.Agent, opts ..
 		agent.Logger().Warn("thread: session loaded with a repair",
 			"session", id, "torn_line", report.Torn, "skipped_lines", report.Skipped)
 	}
+	// A queued steer whose fate never landed — the writer crashed or
+	// was killed between accepting it and the turn's end batch — is
+	// durable input (ADR 0011 §4): on reopen it defers to a follow-up
+	// that runs when the session next can, so an accepted message is
+	// never lost to the crash window.
+	s.resurrectSteers(ctx)
 	return s, nil
 }
 

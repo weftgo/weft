@@ -272,6 +272,46 @@ type GrantRevokedEntry struct {
 	GrantID  string    `json:"grant_id"`
 }
 
+// ReceiptEntry is the steering receipt (ADR 0019, plan §6): the
+// journey of one message accepted while the session was busy under
+// the Steer policy. One entry records acceptance — Status "queued",
+// the message on Msg — and a second, linked by Receipt, records the
+// fate: "delivered" (the running run's steering drain took it; RunID
+// names the run, and the message landed in that run's transcript),
+// "deferred" (it runs as the next turn instead — a StopWhen end, an
+// open approval boundary, or the run ended before the drain; Turn
+// names the follow-up turn's receipt), or "dropped" (ClearQueue).
+// Receipt entries never enter the model's context: the message
+// reaches the model through the run that delivered it or the
+// follow-up turn that ran it, exactly once.
+type ReceiptEntry struct {
+	ID       string        `json:"id"`
+	ParentID string        `json:"parent,omitempty"`
+	Created  time.Time     `json:"created"`
+	Receipt  string        `json:"receipt,omitempty"`
+	Status   string        `json:"status"`
+	Msg      *weft.Message `json:"msg,omitempty"`
+	RunID    string        `json:"run_id,omitempty"`
+	Turn     string        `json:"turn,omitempty"`
+}
+
+// Receipt statuses — the wire values, pinned by the format-3 goldens.
+const (
+	// ReceiptQueued marks acceptance: the message is held for the
+	// running turn's steering drain.
+	ReceiptQueued = "queued"
+	// ReceiptDelivered marks a message the running run drained: it is
+	// an ordinary transcript message of that run, named by RunID.
+	ReceiptDelivered = "delivered"
+	// ReceiptDeferred marks a message that became a follow-up turn
+	// (Turn names its receipt): a StopWhen end, an open approval
+	// boundary, or the run ended before the drain.
+	ReceiptDeferred = "deferred"
+	// ReceiptDropped marks a message removed by ClearQueue before
+	// delivery: it never reaches the model.
+	ReceiptDropped = "dropped"
+)
+
 func (MessageEntry) isEntry()          {}
 func (TurnEntry) isEntry()             {}
 func (CompactionEntry) isEntry()       {}
@@ -286,6 +326,7 @@ func (ApprovalDecisionEntry) isEntry() {}
 func (ApprovalAuditEntry) isEntry()    {}
 func (GrantEntry) isEntry()            {}
 func (GrantRevokedEntry) isEntry()     {}
+func (ReceiptEntry) isEntry()          {}
 
 // idOf returns the entry's ID — the tree node's name, the one field
 // every kind carries at the same meaning. The sealed set keeps the
@@ -320,6 +361,8 @@ func idOf(e Entry) string {
 	case GrantEntry:
 		return e.ID
 	case GrantRevokedEntry:
+		return e.ID
+	case ReceiptEntry:
 		return e.ID
 	}
 	return ""
@@ -359,6 +402,8 @@ func parentOf(e Entry) string {
 		return e.ParentID
 	case GrantRevokedEntry:
 		return e.ParentID
+	case ReceiptEntry:
+		return e.ParentID
 	}
 	return ""
 }
@@ -379,6 +424,7 @@ const (
 	kindApprovalAudit    = "approval_audit"
 	kindGrant            = "grant"
 	kindGrantRevoked     = "grant_revoked"
+	kindReceipt          = "receipt"
 )
 
 // The per-type MarshalJSON methods below are deliberately repetitive,
@@ -403,6 +449,7 @@ type (
 	approvalAuditEntryWire    ApprovalAuditEntry
 	grantEntryWire            GrantEntry
 	grantRevokedEntryWire     GrantRevokedEntry
+	receiptEntryWire          ReceiptEntry
 )
 
 // approvalEntryV is the entry version the approval kinds carry on the
@@ -410,6 +457,11 @@ type (
 // reader fails loudly on a session that used approvals instead of
 // guessing at kinds it does not know.
 const approvalEntryV = 2
+
+// receiptEntryV is the entry version the steering receipt carries on
+// the wire (ADR 0011 §6, ADR 0019): the steering format is 3, so a
+// v0.2 reader fails loudly on a session that steered.
+const receiptEntryV = 3
 
 // MarshalJSON encodes the entry with its "type" discriminator.
 func (e MessageEntry) MarshalJSON() ([]byte, error) {
@@ -537,6 +589,16 @@ func (e GrantRevokedEntry) MarshalJSON() ([]byte, error) {
 	}{kindGrantRevoked, approvalEntryV, grantRevokedEntryWire(e)})
 }
 
+// MarshalJSON encodes the entry with its "type" discriminator and
+// "v":3.
+func (e ReceiptEntry) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type string `json:"type"`
+		V    int    `json:"v"`
+		receiptEntryWire
+	}{kindReceipt, receiptEntryV, receiptEntryWire(e)})
+}
+
 // kindVersion returns the highest entry version this build reads for a
 // wire kind (ADR 0011 §6). Kinds born in format 1 are version 1 and
 // carry no "v" on the wire; a kind added after format 1 — approvals in
@@ -552,6 +614,8 @@ func kindVersion(kind string) (int, bool) {
 	case kindApprovalRequest, kindApprovalDecision, kindApprovalAudit,
 		kindGrant, kindGrantRevoked:
 		return approvalEntryV, true
+	case kindReceipt:
+		return receiptEntryV, true
 	}
 	return 0, false
 }
@@ -666,6 +730,12 @@ func UnmarshalEntry(b []byte) (Entry, error) {
 			return nil, err
 		}
 		return GrantRevokedEntry(v), nil
+	case kindReceipt:
+		var v receiptEntryWire
+		if err := json.Unmarshal(b, &v); err != nil {
+			return nil, err
+		}
+		return ReceiptEntry(v), nil
 	default:
 		// Unreachable — kindVersion gates the switch — but a kind
 		// registered there and forgotten here must never decode as

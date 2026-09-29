@@ -302,6 +302,34 @@ func TestReadEveryGolden(t *testing.T) {
 			t.Errorf("%s: entry re-marshal differs\n got %s\nwant %s", path, again, line)
 		}
 	}
+	// The format-3 goldens (the steering receipt, ADR 0019) read the
+	// same way: this build decodes them and re-marshals their bytes.
+	files3, err := filepath.Glob(filepath.Join("testdata", "format3", "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files3) == 0 {
+		t.Fatal("no format3 goldens found")
+	}
+	for _, path := range files3 {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		line := bytes.TrimRight(b, "\n")
+		e, err := thread.UnmarshalEntry(line)
+		if err != nil {
+			t.Errorf("%s: %v", path, err)
+			continue
+		}
+		again, err := json.Marshal(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(line, again) {
+			t.Errorf("%s: entry re-marshal differs\n got %s\nwant %s", path, again, line)
+		}
+	}
 	// The full session file: a header, then one entry per line, every
 	// line re-marshalling to itself.
 	raw, err := os.ReadFile(filepath.Join("testdata", "format1", "session.jsonl"))

@@ -25,6 +25,19 @@ const (
 	// Reject fails the send with ErrBusy: one run per session at a
 	// time, and a busy session says so instead of holding work.
 	Reject
+	// Steer delivers the send into the running turn instead of
+	// waiting for it (ADR 0019): the message is accepted at once —
+	// its queued receipt entry durable, flushed — and handed to the
+	// run's next steering drain point: after the step's tool batch,
+	// every call paired with its result, or at what would have been
+	// the final step, which the delivery redirects into one more
+	// step. A steer that meets an intended end (StopWhen) or an open
+	// approval boundary is never drained: it becomes a deferred
+	// follow-up that runs as the next turn, the receipt recording
+	// the fate. The Send's Turn is the receipt: it finishes — nil
+	// result, nil error — when the steer reaches its final state,
+	// and its Next is the follow-up turn a deferred steer became.
+	Steer
 )
 
 type busyPolicyOption Policy
@@ -32,8 +45,8 @@ type busyPolicyOption Policy
 func (o busyPolicyOption) applySession(c *sessionConfig) { c.policy = Policy(o) }
 
 // BusyPolicy returns the SessionOption setting what Send does when the
-// session is busy: Queue (the default) or Reject. Later releases add
-// the steering policies (ADR 0019, plan §6).
+// session is busy: Queue (the default), Reject, or Steer. A single
+// Send overrides it with As.
 func BusyPolicy(p Policy) SessionOption { return busyPolicyOption(p) }
 
 // SendOption configures one Send. Step 1.7 carries one: RunOptions,
@@ -45,6 +58,10 @@ type SendOption interface {
 // sendConfig is one Send's resolved configuration.
 type sendConfig struct {
 	runOpts []weft.RunOption
+	// policy overrides the session's busy policy for this one Send
+	// when policySet (As).
+	policy    Policy
+	policySet bool
 }
 
 func resolveSend(opts ...SendOption) sendConfig {
@@ -56,6 +73,17 @@ func resolveSend(opts ...SendOption) sendConfig {
 	}
 	return cfg
 }
+
+type asOption Policy
+
+func (o asOption) applySend(c *sendConfig) { c.policy, c.policySet = Policy(o), true }
+
+// As returns the SendOption overriding the session's busy policy for
+// this one Send (ADR 0019): As(Steer) steers a message into the
+// running turn on a Queue session; As(Queue) holds a message for the
+// next turn on a Steer session. The policy in force is the one Send
+// ran under, captured with the turn's other settings.
+func As(p Policy) SendOption { return asOption(p) }
 
 type runOptionsOption struct{ opts []weft.RunOption }
 
@@ -80,6 +108,7 @@ var (
 	messagesOptionType = reflect.TypeOf(weft.Messages())
 	promptOptionType   = reflect.TypeOf(weft.Prompt(""))
 	runIDOptionType    = reflect.TypeOf(weft.RunID(""))
+	steeringOptionType = reflect.TypeOf(weft.Steering(nil))
 )
 
 // rejectTranscriptOptions fails a Send whose run options would set the
@@ -97,6 +126,8 @@ func rejectTranscriptOptions(opts []weft.RunOption) error {
 			return fmt.Errorf("thread: weft.Prompt in RunOptions: Send's msg is the prompt (ADR 0011 §4)")
 		case runIDOptionType:
 			return fmt.Errorf("thread: weft.RunID in RunOptions: the session mints <session>-t<n> run ids (ADR 0011 §4)")
+		case steeringOptionType:
+			return fmt.Errorf("thread: weft.Steering in RunOptions: the session owns the steer queue (ADR 0019; Send under the Steer policy)")
 		}
 	}
 	return nil
@@ -140,6 +171,10 @@ func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption
 		return nil, err
 	}
 	extra := append([]weft.RunOption(nil), cfg.runOpts...) // captured at turn start
+	policy := s.cfg.policy
+	if cfg.policySet {
+		policy = cfg.policy // captured at Send, like the run options
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.running || s.boundaryLocked() {
@@ -149,8 +184,15 @@ func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption
 		// queue after (ADR 0021 §5). The queue holds acceptance order
 		// across the boundary; the branch that cleared one restarts the
 		// runner at the head on the next Send.
-		if s.cfg.policy == Reject {
+		if policy == Reject {
 			return nil, fmt.Errorf("%w: session %s", ErrBusy, s.header.ID)
+		}
+		if policy == Steer {
+			// The steering path (ADR 0019): durable acceptance now,
+			// delivery at the running turn's drain point — or, when only
+			// a boundary holds the session, a deferral at once: a steer
+			// never resolves a parked call.
+			return s.steerSendLocked(ctx, msg)
 		}
 		t := s.newTurnLocked()
 		s.queue = append(s.queue, pendingSend{ctx: ctx, msg: msg, opts: extra, turn: t})
@@ -487,6 +529,10 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 	s.mu.Unlock()
 	runOpts := append([]weft.RunOption(nil), callerOpts...)
 	runOpts = append(runOpts, decisions...)
+	// The session's steering source rides every run (ADR 0019): an
+	// empty queue drains nothing, and a Send under the Steer policy
+	// can queue at any moment — including after this run started.
+	runOpts = append(runOpts, weft.Steering(s.steerSource))
 	runOpts = append(runOpts, weft.Messages(input...), weft.RunID(t.runID))
 	run := s.agent.Stream(ctx, runOpts...)
 	for ev, err := range run.Events() {
@@ -507,6 +553,13 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 		chain = s.runChain(persist, t, callerOpts, res.Pending)
 	}
 	s.recordTurnEnd(persist, t, res, err, len(input), chain)
+	// Steers still live when the run ended defer here (plan §6): the
+	// run met a StopWhen end or parked approvals without draining
+	// them, or they arrived after the last drain point. The follow-ups
+	// join the send queue the runner drains next.
+	s.mu.Lock()
+	s.settleSteersLocked()
+	s.mu.Unlock()
 	// The trigger's second site: after the turn, with the new
 	// measurement recorded. It runs before the turn is decided so a
 	// Wait that returns leaves the session fully settled — turn,
@@ -674,6 +727,19 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 	}
 	entries = append(entries, te)
 	parent = te.ID
+	// The delivered steers' receipts join the turn's batch (plan §6):
+	// the messages themselves are already in it — the run's transcript
+	// carries them beyond the input — so the receipt is what ties each
+	// to its queued entry and names the run that drained it.
+	for i := range s.handed {
+		id := s.mintIDLocked()
+		entries = append(entries, ReceiptEntry{ID: id, ParentID: parent,
+			Created: time.Now().UTC(), Receipt: s.handed[i].receipt,
+			Status: ReceiptDelivered, RunID: t.runID})
+		parent = id
+	}
+	handed := s.handed
+	s.handed = nil
 	if chain != nil {
 		// The chain's entries join the turn's batch: ids and parents
 		// assigned here, in call order, after the turn entry (ADR 0021
@@ -691,10 +757,22 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 	if appendErr := s.st.Append(ctx, s.header.ID, entries...); appendErr != nil {
 		s.agent.Logger().Error("thread: turn end not persisted",
 			"session", s.header.ID, "run", t.runID, "err", appendErr)
+		// The steers were handed to the run and are in its transcript:
+		// their receipts finish as delivered even though the batch (the
+		// messages included) did not land — the in-memory tree keeps
+		// them, and the storage error is on the record.
+		for i := range handed {
+			handed[i].turn.finish(nil, nil)
+		}
 		return
 	}
 	for _, e := range entries {
 		s.adoptLocked(e)
+	}
+	for i := range handed {
+		// The delivery is durable: the steer's Turn — the receipt —
+		// reaches its final state with the turn's landing.
+		handed[i].turn.finish(nil, nil)
 	}
 	if chain != nil {
 		// The boundary's captured settings: what the resume run

@@ -100,7 +100,7 @@ const (
 // both compute: every field length-prefixed and semicolon-closed, in
 // this fixed order, under the domain string — no ambiguity between
 // fields is constructible, whatever the bytes hold.
-func challengeMAC(key []byte, session, callID, tool, argsSHA string, expiry time.Time, nonce, keyID string, kind Outcome, reason, content, who string) []byte {
+func challengeMAC(key []byte, session, callID, tool, argsSHA string, expiry time.Time, nonce, keyID string, kind Outcome, always bool, reason, content, who string) []byte {
 	m := hmac.New(sha256.New, key)
 	// The write never fails (hash.Hash.Write's contract); errcheck is
 	// silenced once, here, rather than at every field.
@@ -114,7 +114,11 @@ func challengeMAC(key []byte, session, callID, tool, argsSHA string, expiry time
 	w(strconv.FormatInt(expiry.UnixNano(), 16))
 	w(nonce)
 	w(keyID)
-	w(string(kind))
+	kindTok := string(kind)
+	if always {
+		kindTok += "+always"
+	}
+	w(kindTok)
 	w(reason)
 	w(content)
 	w(who)
@@ -138,9 +142,13 @@ type SignedDecision struct {
 	Reason     string
 	Content    string
 	Who        string
-	Nonce      string
-	KeyID      string
-	MAC        []byte
+	// Always approves and grants the same thing for the future, the
+	// signed ApproveAlways (Decision.Always carries it through
+	// SignDecision).
+	Always bool
+	Nonce  string
+	KeyID  string
+	MAC    []byte
 }
 
 // SignDecision signs d over r's challenge under key — the client-side
@@ -159,13 +167,14 @@ func SignDecision(key []byte, r Request, d Decision) SignedDecision {
 		Reason:     d.Reason,
 		Content:    d.Content,
 		Who:        d.Who,
+		Always:     d.Always,
 		Nonce:      r.Nonce,
 		KeyID:      r.KeyID,
 	}
 	if sd.Who == "" {
 		sd.Who = "signer"
 	}
-	sd.MAC = challengeMAC(key, sd.Session, sd.CallID, sd.Tool, sd.ArgsSHA256, sd.Expiry, sd.Nonce, sd.KeyID, sd.Kind, sd.Reason, sd.Content, sd.Who)
+	sd.MAC = challengeMAC(key, sd.Session, sd.CallID, sd.Tool, sd.ArgsSHA256, sd.Expiry, sd.Nonce, sd.KeyID, sd.Kind, sd.Always, sd.Reason, sd.Content, sd.Who)
 	return sd
 }
 
@@ -225,7 +234,7 @@ func (s *Session) DecideSigned(ctx context.Context, sd SignedDecision) (*Turn, e
 	if !known {
 		return nil, fmt.Errorf("%w: key %q", ErrUnknownKey, sd.KeyID)
 	}
-	want := challengeMAC(key, sd.Session, sd.CallID, sd.Tool, sd.ArgsSHA256, sd.Expiry, sd.Nonce, sd.KeyID, sd.Kind, sd.Reason, sd.Content, sd.Who)
+	want := challengeMAC(key, sd.Session, sd.CallID, sd.Tool, sd.ArgsSHA256, sd.Expiry, sd.Nonce, sd.KeyID, sd.Kind, sd.Always, sd.Reason, sd.Content, sd.Who)
 	if !hmac.Equal(want, sd.MAC) {
 		return nil, fmt.Errorf("%w: call %q", ErrBadSignature, sd.CallID)
 	}
@@ -280,10 +289,23 @@ func (s *Session) DecideSigned(ctx context.Context, sd SignedDecision) (*Turn, e
 		Who: d.Who, Via: d.Via, RunID: req.RunID, Nonce: sd.Nonce, KeyID: sd.KeyID,
 	}
 	e.ID, e.ParentID, e.Created = s.mintIDLocked(), s.leaf, time.Now().UTC()
-	if err := s.st.Append(ctx, s.header.ID, e); err != nil {
+	entries := []Entry{e}
+	if sd.Always {
+		g := GrantEntry{
+			ID: s.mintIDLocked(), ParentID: e.ID, Created: time.Now().UTC(),
+			Grant: Grant{
+				Tool: req.Tool,
+				Args: []Arg{ArgEquals("", slices.Clone(req.Args))},
+			},
+		}
+		entries = append(entries, g)
+	}
+	if err := s.st.Append(ctx, s.header.ID, entries...); err != nil {
 		return nil, err
 	}
-	s.adoptLocked(e)
+	for _, en := range entries {
+		s.adoptLocked(en)
+	}
 	if s.cfg.autoResume && s.boundaryLocked() && len(s.pendingLocked()) == 0 {
 		return s.armResumeLocked(ctx)
 	}

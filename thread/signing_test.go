@@ -321,3 +321,64 @@ func TestKeyringValidation(t *testing.T) {
 		t.Error("duplicate ids accepted")
 	}
 }
+
+// TestSignedApproveAlways: "approve and always allow" travels through
+// the signed path too — the grant lands with the decision, in the
+// same append, and the next identical call never parks.
+func TestSignedApproveAlways(t *testing.T) {
+	ctx := context.Background()
+	ring, secret := signerRing(t)
+	agent, ran := runAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "run", Args: `{"command":"go build"}`}),
+		wefttest.ToolCalls(wefttest.Call{Name: "run", Args: `{"command":"go build"}`}),
+		wefttest.Say("one"), wefttest.Say("two"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.WithKeyring(ring))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := s.Send(ctx, weft.User("build"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	call := s.Pending()[0]
+	r, err := s.Request(call.CallID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt, err := s.DecideSigned(ctx, thread.SignDecision(secret, r, thread.ApproveAlways(call.CallID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range s.Entries() {
+		if g, ok := e.(thread.GrantEntry); ok && g.Tool == "run" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a signed ApproveAlways recorded no grant")
+	}
+	t2, err := s.Send(ctx, weft.User("build again"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t2.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if next := t2.Next(); next != nil {
+		if _, err := next.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		t.Fatal("the always-granted call still parked")
+	}
+	if got := *ran; len(got) != 2 {
+		t.Fatalf("executions: %v", got)
+	}
+}

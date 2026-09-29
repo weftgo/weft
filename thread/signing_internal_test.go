@@ -15,7 +15,7 @@ func TestChallengeCanonical(t *testing.T) {
 	key := []byte("canonical-test-key")
 	at := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
 	mac := func(session, call, tool, args, nonce, keyID, kind, reason, content, who string) []byte {
-		return challengeMAC(key, session, call, tool, args, at, nonce, keyID, Outcome(kind), reason, content, who)
+		return challengeMAC(key, session, call, tool, args, at, nonce, keyID, Outcome(kind), false, reason, content, who)
 	}
 	// The split ambiguity: ("ab","c") vs ("a","bc") differ.
 	a := mac("ab", "c", "tool", "h1", "n1", "k1", "approve", "", "", "avi")
@@ -48,8 +48,13 @@ func TestChallengeCanonical(t *testing.T) {
 		}
 	}
 	// The expiry moves it too.
-	later := challengeMAC(key, "s", "c", "tool", "h1", at.Add(time.Second), "n1", "k1", OutcomeApprove, "", "", "avi")
+	later := challengeMAC(key, "s", "c", "tool", "h1", at.Add(time.Second), "n1", "k1", OutcomeApprove, false, "", "", "avi")
 	if string(later) == string(base) {
 		t.Error("the expiry does not move the MAC")
+	}
+	// The always-grant flag moves it: an "approve and always allow"
+	// cannot be downgraded to a plain approve in flight.
+	if always := challengeMAC(key, "s", "c", "tool", "h1", at, "n1", "k1", OutcomeApprove, true, "", "", "avi"); string(always) == string(base) {
+		t.Error("the always flag does not move the MAC")
 	}
 }

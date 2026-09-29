@@ -25,7 +25,19 @@ type delegate struct {
 	wrapper string // the parked parent call; empty for async children
 	receipt string
 	pumping bool // a pumped resume is in flight
+	// phase is where the child is: queued before its turn starts,
+	// running while it flies, parked at a nested approval. Forward
+	// serves the running phase only (ADR 0022 §8) — a steer into an
+	// idle session would run as its first turn, the task's own prompt
+	// queueing behind its steer.
+	phase int
 }
+
+const (
+	phaseQueued = iota
+	phaseRunning
+	phaseParked
+)
 
 // mirrorCallID namespaces a child's call id for the parent's tree:
 // call ids are unique per step, not per run (ADR 0014's lineage note),
@@ -249,6 +261,13 @@ func (p *Pool) agentForSession(ctx context.Context, parent *thread.Session, chil
 	return nil
 }
 
+// markPhase transitions the delegate's phase under the pool lock.
+func (p *Pool) markPhase(d *delegate, phase int) {
+	p.mu.Lock()
+	d.phase = phase
+	p.mu.Unlock()
+}
+
 // resume drives one child's boundary to its end: replay the recorded
 // decisions into the child session, wait out its resumed turn, then
 // settle — the receipt, the wrapper's resolution, the delegate — or
@@ -403,12 +422,13 @@ func childLabel(d *delegate, reqs []thread.ApprovalRequestEntry) string {
 func (p *Pool) Forward(ctx context.Context, receiptID string, msg weft.Message) (*thread.Turn, error) {
 	p.mu.Lock()
 	d, ok := p.delegates[receiptID]
-	p.mu.Unlock()
-	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrNotRunning, receiptID)
+	phase := phaseQueued
+	if ok {
+		phase = d.phase
 	}
-	if d.child == nil {
-		return nil, fmt.Errorf("%w: %s (no session handle)", ErrNotRunning, receiptID)
+	p.mu.Unlock()
+	if !ok || phase != phaseRunning {
+		return nil, fmt.Errorf("%w: %s (not a running child)", ErrNotRunning, receiptID)
 	}
 	return d.child.Send(ctx, msg, thread.As(thread.Steer))
 }

@@ -556,3 +556,46 @@ func toolResultsOf(msgs []weft.Message) []string {
 	}
 	return out
 }
+
+// Forward refuses a child that has not started: the session is idle,
+// and a steer into an idle session would run as its first turn — the
+// task's own prompt queueing behind its steer (ADR 0022 §8's "running
+// child").
+func TestForwardRequiresRunning(t *testing.T) {
+	ctx := context.Background()
+	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	p := pool.New(1)
+	warmStarted := make(chan struct{})
+	warmRelease := make(chan struct{})
+	warm, err := p.Submit(ctx, s, weft.New(blocking{release: warmRelease, text: "warm",
+		onStart: func() { close(warmStarted) }}), "warm")
+	if err != nil {
+		t.Fatalf("Submit warm: %v", err)
+	}
+	<-warmStarted // the only slot is held before the task queues
+	waitStarted := make(chan struct{})
+	release := make(chan struct{})
+	// Queued behind the warm-up: accepted, not running.
+	r, err := p.Submit(ctx, s, weft.New(blocking{release: release, text: "task",
+		onStart: func() { close(waitStarted) }}), "the task")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := p.Forward(ctx, r.ID, weft.User("early")); !errors.Is(err, pool.ErrNotRunning) {
+		t.Fatalf("Forward to a queued child err = %v, want ErrNotRunning", err)
+	}
+	close(warmRelease)
+	waitState(t, s, thread.PoolDone)
+	<-waitStarted
+	if _, err := p.Forward(ctx, r.ID, weft.User("on time")); err != nil {
+		t.Fatalf("Forward to the now-running child: %v", err)
+	}
+	close(release)
+	waitState(t, s, thread.PoolDone)
+	if _, err := p.Forward(ctx, warm.ID, weft.User("late")); !errors.Is(err, pool.ErrNotRunning) {
+		t.Errorf("Forward after settle err = %v, want ErrNotRunning", err)
+	}
+	if err := p.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}

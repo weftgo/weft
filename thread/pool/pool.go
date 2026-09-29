@@ -366,6 +366,7 @@ func (p *Pool) runChild(runCtx context.Context, d *delegate, prompt string) outc
 	}
 
 	turn, err := child.Send(runCtx, weft.User(prompt))
+	p.markPhase(d, phaseRunning)
 	if err == nil {
 		var res *weft.RunResult
 		res, err = turn.Wait()
@@ -380,6 +381,7 @@ func (p *Pool) runChild(runCtx context.Context, d *delegate, prompt string) outc
 			// delegate at settlement.
 			out.pending = len(res.Pending)
 			out.requests = child.Pending()
+			p.markPhase(d, phaseParked)
 			parked := mirrorRequests(out.requests, child.ID(), d.wrapper)
 			if _, merr := parent.AppendApprovalRequests(settleCtx, parked...); merr != nil {
 				agent.Logger().Error("thread/pool: nested requests not mirrored",

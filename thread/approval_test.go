@@ -1203,6 +1203,40 @@ func TestApproverAlwaysGrants(t *testing.T) {
 	}
 }
 
+// TestResolveErrorDecision: the fourth outcome maps to the core's
+// ResolveError — the content verbatim, marked as an error the model
+// sees (ADR 0021 §1; ADR 0007's amendment).
+func TestResolveErrorDecision(t *testing.T) {
+	ctx := context.Background()
+	agent, _ := refundAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"12"}`}),
+		wefttest.Say("noted the failure"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := parkSend(t, s, ctx)
+	rt, err := s.Decide(ctx, thread.ResolveError(call.ID, "the payments API is down"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	results := toolResults(s.Context())
+	if len(results) != 1 || !results[0].IsError || results[0].Content != "the payments API is down" {
+		t.Fatalf("resolve_error result: %+v", results)
+	}
+	for _, e := range s.Entries() {
+		if d, ok := e.(thread.ApprovalDecisionEntry); ok && d.CallID == call.ID {
+			if d.Outcome != thread.OutcomeResolveError {
+				t.Fatalf("decision entry outcome: %q", d.Outcome)
+			}
+		}
+	}
+}
+
 // TestResumeTwice: arming the resume twice before it lands must not
 // orphan the first caller's Turn — the second Resume returns the
 // already-armed turn, and both waits complete (one boundary, one

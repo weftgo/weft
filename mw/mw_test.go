@@ -80,6 +80,7 @@ func TestRetryNotForClientErrorsOverflowOrMidStream(t *testing.T) {
 		"401":             status(401, nil),
 		"402 quota":       status(402, nil),
 		"overflow":        &apiError{StatusCode: 500, Message: "context_length_exceeded: prompt is too long"},
+		"mapped sentinel": fmt.Errorf("%w: 400 this model's maximum context length is 65536 tokens", weft.ErrContextOverflow),
 		"unsupported":     fmt.Errorf("%w: pdf", weft.ErrUnsupported),
 		"contract":        fmt.Errorf("%w: stream bent", weft.ErrModelContract),
 		"denied":          weft.ErrModelRequestsDenied,

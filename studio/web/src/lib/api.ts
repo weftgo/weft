@@ -132,6 +132,13 @@ export type WireEvent =
       raw?: string
     }
   | {
+      type: "steered"
+      run_id: string
+      seq: number
+      step: number
+      messages: Message[] | null
+    }
+  | {
       type: "run_finish"
       run_id: string
       usage: Usage

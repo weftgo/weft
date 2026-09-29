@@ -9,6 +9,7 @@
 // child run (B7).
 import type {
   ModelInfo,
+  Part,
   ResultDoc,
   ToolCallPart,
   Usage,
@@ -44,6 +45,10 @@ export interface FoldedStep {
   reasoning: string
   toolCalls: FoldedToolCall[]
   finish?: { reason: string; raw?: string; usage: Usage }
+  /** The user turn steering delivered after this step finished (the
+   * Steered event, ADR 0019): rendered between this step and the next.
+   * At most one per step — the loop drains once per drain point. */
+  steer?: { text: string; pos: number }
   /** Stream positions of the first and last event folded into this
    * step (inclusive) — the replay range a step card can jump to. */
   from: number
@@ -198,6 +203,14 @@ export function newFold(): FoldFeed {
             usage: ev.usage,
           }
           break
+        case "steered": {
+          // A user turn delivered inside the run: attached to the step
+          // it followed, rendered after that step's card (ADR 0019 §4).
+          const s = step(ev.step)
+          const text = (ev.messages ?? []).map(messageText).join("\n")
+          s.steer = { text: (s.steer?.text ? s.steer.text + "\n" : "") + text, pos: at }
+          break
+        }
         case "run_finish":
           run.finished = true
           run.usage = ev.usage
@@ -240,8 +253,16 @@ export function newFold(): FoldFeed {
   }
 }
 
-/**
- * callState is what the UI shows for a call that never finished:
+/** The text of a steered message: its text parts joined. Files and
+ * other parts are not rendered — the delivered words are the turn. */
+function messageText(m: { content: Part[] }): string {
+  return m.content
+    .filter((p): p is Extract<Part, { type: "text" }> => p.type === "text")
+    .map((p) => p.text)
+    .join("")
+}
+
+/** callState is what the UI shows for a call that never finished:
  * "running" while the run is live; "never" on a run that ended
  * without the call closing (crash or the repair case) — rendered
  * honestly, never as complete.

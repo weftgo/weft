@@ -387,3 +387,82 @@ describe("truncation markers (B9)", () => {
     expect(truncation("")).toBeNull()
   })
 })
+
+describe("steered events fold as user turns (ADR 0019)", () => {
+  const steered: WireEvent[] = [
+    { type: "run_start", id: "r_s", model: { provider: "p", name: "m" } },
+    { type: "step_start", run_id: "r_s", index: 0 },
+    { type: "text_delta", run_id: "r_s", text: "checking" },
+    {
+      type: "step_finish",
+      run_id: "r_s",
+      index: 0,
+      reason: "stop",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    },
+    {
+      type: "steered",
+      run_id: "r_s",
+      seq: 1,
+      step: 0,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "wait — " },
+            { type: "text", text: "metric units" },
+          ],
+        },
+      ],
+    },
+    { type: "step_start", run_id: "r_s", index: 1 },
+    { type: "text_delta", run_id: "r_s", text: "done in metres" },
+    {
+      type: "step_finish",
+      run_id: "r_s",
+      index: 1,
+      reason: "stop",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    },
+    {
+      type: "run_finish",
+      run_id: "r_s",
+      usage: { input_tokens: 2, output_tokens: 2 },
+      steps: 2,
+    },
+  ]
+
+  it("attaches the delivered turn to the step it followed", () => {
+    const run = fold(steered)
+    expect(run.steps).toHaveLength(2)
+    expect(run.steps[0].steer).toEqual({
+      text: "wait — metric units",
+      pos: 4,
+    })
+    expect(run.steps[1].steer).toBeUndefined()
+    // The step's event range spans through the steer.
+    expect(run.steps[0].to).toBe(4)
+  })
+
+  it("keeps the prefix property across the steer", () => {
+    for (let k = 0; k <= steered.length; k++) {
+      const prefix = fold(steered, k)
+      const full = fold(steered)
+      for (const s of prefix.steps) {
+        const match = full.steps.find((x) => x.index === s.index)
+        expect(match).toBeDefined()
+        // A steer the prefix has seen matches the full fold; before
+        // the event it is simply absent (that is the prefix property).
+        if (s.steer) expect(s.steer).toEqual(match?.steer)
+      }
+    }
+  })
+
+  it("folds a steered event with null messages as an empty turn", () => {
+    const run = fold([
+      ...steered.slice(0, 4),
+      { type: "steered", run_id: "r_s", seq: 1, step: 0, messages: null },
+    ])
+    expect(run.steps[0].steer).toEqual({ text: "", pos: 4 })
+  })
+})

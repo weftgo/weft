@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/internal/adapterkit"
 )
 
 // ErrRetryAfterTooLong is wrapped around a provider error whose
@@ -221,9 +222,12 @@ func sleep(ctx context.Context, d time.Duration) bool {
 // Retryable is Retry's default classifier: true for weft.ErrStreamIdle,
 // net.Error values, and HTTP 408, 409, 429 and 5xx statuses found on
 // the error (see HTTPStatus); false for context errors, the kill
-// switch, weft.ErrUnsupported, every other 4xx, and errors whose text
-// names a context-window overflow. An x-should-retry header, when the
-// provider sends one, overrides the status rule.
+// switch, weft.ErrUnsupported, every other 4xx, a context-window
+// overflow — the mapped sentinel (weft.ErrContextOverflow, what the
+// first-party adapters wrap) or the marker text itself (adapterkit's
+// table, shared here) — which must route to compaction, not to the
+// same request again. An x-should-retry header, when the provider
+// sends one, overrides the status rule.
 func Retryable(err error) bool {
 	switch {
 	case err == nil,
@@ -231,11 +235,12 @@ func Retryable(err error) bool {
 		errors.Is(err, context.DeadlineExceeded),
 		errors.Is(err, weft.ErrModelRequestsDenied),
 		errors.Is(err, weft.ErrUnsupported),
-		errors.Is(err, weft.ErrModelContract):
+		errors.Is(err, weft.ErrModelContract),
+		errors.Is(err, weft.ErrContextOverflow):
 		return false
 	case errors.Is(err, weft.ErrStreamIdle):
 		return true
-	case isContextOverflow(err):
+	case adapterkit.IsContextOverflow(err):
 		return false
 	}
 	if v := headerValue(err, "x-should-retry"); v != "" {
@@ -248,28 +253,8 @@ func Retryable(err error) bool {
 	return errors.As(err, &netErr)
 }
 
-// overflowMarkers are substrings the providers use for a request that
-// exceeds the model's context window. Overflow is a request-shape
-// problem: retrying the same bytes cannot succeed.
-var overflowMarkers = []string{
-	"context_length_exceeded",
-	"context length",
-	"context window",
-	"prompt is too long",
-	"too many tokens",
-	"maximum context",
-	"input token count",
-}
-
-func isContextOverflow(err error) bool {
-	msg := strings.ToLower(err.Error())
-	for _, m := range overflowMarkers {
-		if strings.Contains(msg, m) {
-			return true
-		}
-	}
-	return false
-}
+// The overflow marker table itself lives in internal/adapterkit — one
+// table for the adapters' mapping and this classifier (the drift rule).
 
 // RetryAfter extracts the provider's retry-after ask from the error's
 // HTTP response headers: retry-after-ms (milliseconds), then

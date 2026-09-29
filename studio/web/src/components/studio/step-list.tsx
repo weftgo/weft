@@ -306,6 +306,38 @@ export function StepBody({
   )
 }
 
+/** The user turn steering delivered after a step (the Steered event,
+ * ADR 0019): the words the user typed mid-run, between the step they
+ * interrupted-followed and the one that answers them. */
+function SteerBlock({
+  steer,
+  onJump,
+}: {
+  steer: { text: string; pos: number }
+  onJump?: (t: number) => void
+}) {
+  return (
+    <div
+      className="group/row -mt-1 flex gap-2 rounded-lg border border-thread/40 bg-thread/5 px-4 py-2"
+      data-steer
+    >
+      <div className="min-w-0 flex-1">
+        <span className="eyebrow text-thread/80">steered · user</span>
+        <p className="mt-0.5 text-sm leading-relaxed whitespace-pre-wrap">
+          {steer.text}
+        </p>
+      </div>
+      <span className="flex items-start">
+        <JumpButton
+          pos={steer.pos}
+          onJump={onJump}
+          label={`replay to this steer (event #${steer.pos})`}
+        />
+      </span>
+    </div>
+  )
+}
+
 /** The step's end state as a phrase: honest when it never finished. */
 export function stepOutcome(step: FoldedStep, runStatus: string) {
   if (step.finish) {
@@ -422,14 +454,16 @@ export function StepList({
   return (
     <div className="space-y-3">
       {view.steps.map((step) => (
-        <StepCard
-          key={step.index}
-          step={step}
-          runStatus={runStatus}
-          childLinks={childLinks}
-          highlighted={step.index === highlight}
-          onJump={onJump}
-        />
+        <div key={step.index} className="space-y-3">
+          <StepCard
+            step={step}
+            runStatus={runStatus}
+            childLinks={childLinks}
+            highlighted={step.index === highlight}
+            onJump={onJump}
+          />
+          {step.steer ? <SteerBlock steer={step.steer} onJump={onJump} /> : null}
+        </div>
       ))}
       {view.steps.length === 0 ? (
         <p className="py-6 text-center font-mono text-xs text-faint">

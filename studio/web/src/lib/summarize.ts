@@ -2,7 +2,7 @@
 // the raw explorer and the current-event readout. Pure functions.
 // Nested events unwrap to their inner event with a depth, so a
 // subagent's tool call reads as what it is, one level in.
-import type { WireEvent } from "./api"
+import type { Message, WireEvent } from "./api"
 
 export type EventKind =
   | "step" // run/step boundaries
@@ -131,6 +131,21 @@ export function eventType(ev: WireEvent): string {
   return unwrap(ev).inner.type
 }
 
+/** A steered delivery's words: its messages' text parts, one line
+ * each, whitespace folded — the summary of a user turn (ADR 0019). */
+function steerText(messages: Message[] | null | undefined): string {
+  return (messages ?? [])
+    .map((m) =>
+      m.content
+        .filter((p): p is Extract<(typeof m.content)[number], { type: "text" }> => p.type === "text")
+        .map((p) => p.text)
+        .join("")
+    )
+    .join(" ⏎ ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 /** A one-line, human summary: what happened, in the machine's voice. */
 export function eventSummary(ev: WireEvent, width = 96): string {
   const { inner } = unwrap(ev)
@@ -153,6 +168,11 @@ export function eventSummary(ev: WireEvent, width = 96): string {
       )} · ${clip(inner.content, width)}`
     case "step_finish":
       return `step ${inner.index} · ${inner.reason} · ${inner.usage.input_tokens} in / ${inner.usage.output_tokens} out`
+    case "steered":
+      return `steered · after step ${inner.step} · ${clip(
+        steerText(inner.messages),
+        width
+      )}`
     case "run_finish":
       return `${inner.steps} steps · ${inner.usage.input_tokens} in / ${inner.usage.output_tokens} out${
         inner.pending?.length ? ` · ${inner.pending.length} pending` : ""

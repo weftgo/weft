@@ -389,3 +389,73 @@ func ExampleSession_Pin() {
 	// Output:
 	// pinned
 }
+
+// Approvals make a parked call durable: the turn ends pending, the
+// request survives a restart as an entry, and Decide records the
+// decision and resumes the conversation on its own (ADR 0021).
+func ExampleSession_Decide() {
+	ctx := context.Background()
+	agent := weft.New(
+		wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "call_1", Args: `{"order_id":"1234"}`}),
+			wefttest.Say("Refund issued."),
+		),
+		weft.Tool("refund", "Refund an order.",
+			func(ctx context.Context, in struct {
+				OrderID string `json:"order_id"`
+			}) (string, error) {
+				return "refunded " + in.OrderID, nil
+			},
+			weft.RequireApproval()),
+	)
+	next := 0
+	ids := []string{"s_appr", "e_1", "e_2", "e_3", "e_4", "e_5", "e_6", "e_7", "e_8", "e_9", "e_10", "e_11"}
+	s, _ := thread.Create(ctx, thread.Memory(), agent,
+		thread.IDs(func() string { id := ids[next]; next++; return id }))
+
+	t1, err := s.Send(ctx, weft.User("Refund order 1234."))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	res, err := t1.Wait()
+	if err != nil {
+		fmt.Println(err) // a pending turn is a success
+		return
+	}
+	fmt.Println("parked:", res.Pending[0].Name)
+	for _, r := range s.Pending() {
+		fmt.Println("pending request:", r.CallID, "on", r.Tool)
+	}
+
+	rt, err := s.Decide(ctx, thread.Approve("call_1"))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	if _, err := rt.Wait(); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("pending after decide:", len(s.Pending()))
+	for _, m := range s.Context() {
+		if r, ok := lastResult(m); ok {
+			fmt.Println("result:", r)
+		}
+	}
+	// Output:
+	// parked: refund
+	// pending request: call_1 on refund
+	// pending after decide: 0
+	// result: refunded 1234
+}
+
+// lastResult reports the message's last tool result text, if any.
+func lastResult(m weft.Message) (string, bool) {
+	for i := len(m.Content) - 1; i >= 0; i-- {
+		if r, ok := m.Content[i].(weft.ToolResultPart); ok {
+			return r.Content, true
+		}
+	}
+	return "", false
+}

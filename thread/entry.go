@@ -176,15 +176,80 @@ type CustomMessageEntry struct {
 	Message  weft.Message `json:"message"`
 }
 
-func (MessageEntry) isEntry()       {}
-func (TurnEntry) isEntry()          {}
-func (CompactionEntry) isEntry()    {}
-func (BranchSummaryEntry) isEntry() {}
-func (LeafEntry) isEntry()          {}
-func (LabelEntry) isEntry()         {}
-func (InfoEntry) isEntry()          {}
-func (CustomEntry) isEntry()        {}
-func (CustomMessageEntry) isEntry() {}
+// ApprovalRequestEntry is a parked call made durable (ADR 0021 §1): a
+// call the core's approval boundary left unexecuted, recorded with the
+// arguments and their SHA-256 so a decision can name exactly what it
+// decided, the run that parked it, why it parked, and an optional
+// expiry — a request past its expiry is denied with the stated reason
+// on the next resume (ADR 0021 §5). It is written in the same Append
+// as the turn that parked it, so no window exists where the turn is
+// durable and the request is not. It never enters the model's context;
+// the pending call itself stays unresolved in the transcript until a
+// decision resolves it.
+type ApprovalRequestEntry struct {
+	ID         string          `json:"id"`
+	ParentID   string          `json:"parent,omitempty"`
+	Created    time.Time       `json:"created"`
+	CallID     string          `json:"call_id"`
+	Tool       string          `json:"tool"`
+	Args       json.RawMessage `json:"args,omitempty"`
+	ArgsSHA256 string          `json:"args_sha256"`
+	RunID      string          `json:"run_id"`
+	Reason     string          `json:"reason,omitempty"`
+	Expiry     time.Time       `json:"expiry,omitzero"`
+}
+
+// ApprovalDecisionEntry is one decision over a parked call (ADR 0021
+// §1): approve, deny with a reason, or resolve with content computed
+// outside the process (resolve_error marks it an error). It records
+// Who decided, When (the entry's Created), Via which channel — "user"
+// for a plain Decide, "approver" for the live chain step, "expiry" for
+// an expired request's automatic denial — and the run the decided
+// request belonged to. It never enters the model's context; the model
+// sees the decision only through the result the resumed run produces.
+type ApprovalDecisionEntry struct {
+	ID       string    `json:"id"`
+	ParentID string    `json:"parent,omitempty"`
+	Created  time.Time `json:"created"`
+	CallID   string    `json:"call_id"`
+	Outcome  Outcome   `json:"outcome"`
+	Reason   string    `json:"reason,omitempty"`
+	Content  string    `json:"content,omitempty"`
+	Who      string    `json:"who,omitempty"`
+	Via      string    `json:"via,omitempty"`
+	RunID    string    `json:"run_id,omitempty"`
+}
+
+// ApprovalAuditEntry is the chain's own trail (ADR 0021 §2): every step
+// the decision chain takes over a call — the Approver consulted
+// (decided, declined, timed out), the park, an expiry denial, a resume
+// — leaves one of these, including automatic approvals, so s.Audit()
+// can tell the whole story from the file alone. Step and Outcome name
+// the step and how it ended; Detail carries anything beyond that. It
+// never enters the model's context.
+type ApprovalAuditEntry struct {
+	ID       string    `json:"id"`
+	ParentID string    `json:"parent,omitempty"`
+	Created  time.Time `json:"created"`
+	CallID   string    `json:"call_id,omitempty"`
+	Step     string    `json:"step"`
+	Outcome  string    `json:"outcome,omitempty"`
+	Detail   string    `json:"detail,omitempty"`
+	RunID    string    `json:"run_id,omitempty"`
+}
+
+func (MessageEntry) isEntry()          {}
+func (TurnEntry) isEntry()             {}
+func (CompactionEntry) isEntry()       {}
+func (BranchSummaryEntry) isEntry()    {}
+func (LeafEntry) isEntry()             {}
+func (LabelEntry) isEntry()            {}
+func (InfoEntry) isEntry()             {}
+func (CustomEntry) isEntry()           {}
+func (CustomMessageEntry) isEntry()    {}
+func (ApprovalRequestEntry) isEntry()  {}
+func (ApprovalDecisionEntry) isEntry() {}
+func (ApprovalAuditEntry) isEntry()    {}
 
 // idOf returns the entry's ID — the tree node's name, the one field
 // every kind carries at the same meaning. The sealed set keeps the
@@ -209,6 +274,12 @@ func idOf(e Entry) string {
 	case CustomEntry:
 		return e.ID
 	case CustomMessageEntry:
+		return e.ID
+	case ApprovalRequestEntry:
+		return e.ID
+	case ApprovalDecisionEntry:
+		return e.ID
+	case ApprovalAuditEntry:
 		return e.ID
 	}
 	return ""
@@ -238,21 +309,30 @@ func parentOf(e Entry) string {
 		return e.ParentID
 	case CustomMessageEntry:
 		return e.ParentID
+	case ApprovalRequestEntry:
+		return e.ParentID
+	case ApprovalDecisionEntry:
+		return e.ParentID
+	case ApprovalAuditEntry:
+		return e.ParentID
 	}
 	return ""
 }
 
 // Wire discriminators for entry kinds.
 const (
-	kindMessage       = "message"
-	kindTurn          = "turn"
-	kindCompaction    = "compaction"
-	kindBranchSummary = "branch_summary"
-	kindLeaf          = "leaf"
-	kindLabel         = "label"
-	kindInfo          = "info"
-	kindCustom        = "custom"
-	kindCustomMessage = "custom_message"
+	kindMessage          = "message"
+	kindTurn             = "turn"
+	kindCompaction       = "compaction"
+	kindBranchSummary    = "branch_summary"
+	kindLeaf             = "leaf"
+	kindLabel            = "label"
+	kindInfo             = "info"
+	kindCustom           = "custom"
+	kindCustomMessage    = "custom_message"
+	kindApprovalRequest  = "approval_request"
+	kindApprovalDecision = "approval_decision"
+	kindApprovalAudit    = "approval_audit"
 )
 
 // The per-type MarshalJSON methods below are deliberately repetitive,
@@ -263,16 +343,25 @@ const (
 // struct encoding — the MarshalJSON methods add the discriminator
 // without recursing into themselves.
 type (
-	messageEntryWire       MessageEntry
-	turnEntryWire          TurnEntry
-	compactionEntryWire    CompactionEntry
-	branchSummaryEntryWire BranchSummaryEntry
-	leafEntryWire          LeafEntry
-	labelEntryWire         LabelEntry
-	infoEntryWire          InfoEntry
-	customEntryWire        CustomEntry
-	customMessageEntryWire CustomMessageEntry
+	messageEntryWire          MessageEntry
+	turnEntryWire             TurnEntry
+	compactionEntryWire       CompactionEntry
+	branchSummaryEntryWire    BranchSummaryEntry
+	leafEntryWire             LeafEntry
+	labelEntryWire            LabelEntry
+	infoEntryWire             InfoEntry
+	customEntryWire           CustomEntry
+	customMessageEntryWire    CustomMessageEntry
+	approvalRequestEntryWire  ApprovalRequestEntry
+	approvalDecisionEntryWire ApprovalDecisionEntry
+	approvalAuditEntryWire    ApprovalAuditEntry
 )
+
+// approvalEntryV is the entry version the approval kinds carry on the
+// wire (ADR 0011 §6, ADR 0021): the approvals format is 2, so a v0.1
+// reader fails loudly on a session that used approvals instead of
+// guessing at kinds it does not know.
+const approvalEntryV = 2
 
 // MarshalJSON encodes the entry with its "type" discriminator.
 func (e MessageEntry) MarshalJSON() ([]byte, error) {
@@ -346,6 +435,40 @@ func (e CustomMessageEntry) MarshalJSON() ([]byte, error) {
 	}{kindCustomMessage, customMessageEntryWire(e)})
 }
 
+// The approval kinds marshal with "v":2 — their minimum-reader version
+// (ADR 0011 §6) — beside the "type" discriminator; the format-1 kinds
+// above omit "v" and always will.
+
+// MarshalJSON encodes the entry with its "type" discriminator and
+// "v":2.
+func (e ApprovalRequestEntry) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type string `json:"type"`
+		V    int    `json:"v"`
+		approvalRequestEntryWire
+	}{kindApprovalRequest, approvalEntryV, approvalRequestEntryWire(e)})
+}
+
+// MarshalJSON encodes the entry with its "type" discriminator and
+// "v":2.
+func (e ApprovalDecisionEntry) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type string `json:"type"`
+		V    int    `json:"v"`
+		approvalDecisionEntryWire
+	}{kindApprovalDecision, approvalEntryV, approvalDecisionEntryWire(e)})
+}
+
+// MarshalJSON encodes the entry with its "type" discriminator and
+// "v":2.
+func (e ApprovalAuditEntry) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type string `json:"type"`
+		V    int    `json:"v"`
+		approvalAuditEntryWire
+	}{kindApprovalAudit, approvalEntryV, approvalAuditEntryWire(e)})
+}
+
 // kindVersion returns the highest entry version this build reads for a
 // wire kind (ADR 0011 §6). Kinds born in format 1 are version 1 and
 // carry no "v" on the wire; a kind added after format 1 — approvals in
@@ -358,6 +481,8 @@ func kindVersion(kind string) (int, bool) {
 	case kindMessage, kindTurn, kindCompaction, kindBranchSummary,
 		kindLeaf, kindLabel, kindInfo, kindCustom, kindCustomMessage:
 		return 1, true
+	case kindApprovalRequest, kindApprovalDecision, kindApprovalAudit:
+		return approvalEntryV, true
 	}
 	return 0, false
 }
@@ -442,6 +567,24 @@ func UnmarshalEntry(b []byte) (Entry, error) {
 			return nil, err
 		}
 		return CustomMessageEntry(v), nil
+	case kindApprovalRequest:
+		var v approvalRequestEntryWire
+		if err := json.Unmarshal(b, &v); err != nil {
+			return nil, err
+		}
+		return ApprovalRequestEntry(v), nil
+	case kindApprovalDecision:
+		var v approvalDecisionEntryWire
+		if err := json.Unmarshal(b, &v); err != nil {
+			return nil, err
+		}
+		return ApprovalDecisionEntry(v), nil
+	case kindApprovalAudit:
+		var v approvalAuditEntryWire
+		if err := json.Unmarshal(b, &v); err != nil {
+			return nil, err
+		}
+		return ApprovalAuditEntry(v), nil
 	default:
 		// Unreachable — kindVersion gates the switch — but a kind
 		// registered there and forgotten here must never decode as

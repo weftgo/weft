@@ -538,6 +538,7 @@ func TestSendPendingApprovalResume(t *testing.T) {
 			wefttest.Script(
 				wefttest.ToolCalls(wefttest.Call{Name: "dangerous", ID: "call_9"}),
 				wefttest.Say("the call ran"),
+				wefttest.Say("queued reply"),
 			),
 			weft.Tool("dangerous", "needs a human", func(ctx context.Context, in struct{}) (string, error) {
 				ran <- "ran"
@@ -558,8 +559,11 @@ func TestSendPendingApprovalResume(t *testing.T) {
 			t.Fatalf("Pending = %+v, want call_9", res1.Pending)
 		}
 
-		// The turn entry records the pending call, and the tree keeps
-		// the call unresolved — resume is a Send with the decision.
+		// The turn entry records the pending call, the request entry
+		// makes it durable, and the tree keeps the call unresolved —
+		// v0.2's resume is Decide, which resumes on its own (ADR 0021
+		// §1): the manual Send-with-a-decision path is superseded, and
+		// a Send now queues behind the open boundary instead.
 		open := reopen(t, ctx, st, s)
 		var pending []weft.ToolCallPart
 		for _, e := range open.Entries() {
@@ -570,17 +574,33 @@ func TestSendPendingApprovalResume(t *testing.T) {
 		if len(pending) != 1 || pending[0].ID != "call_9" {
 			t.Fatalf("turn entry Pending = %+v, want call_9", pending)
 		}
+		if pend := open.Pending(); len(pend) != 1 || pend[0].CallID != "call_9" {
+			t.Fatalf("reopened Pending = %+v, want call_9", pend)
+		}
 
-		t2, err := s.Send(ctx, weft.User("approve it"), thread.RunOptions(weft.Approve("call_9")))
+		t2, err := s.Send(ctx, weft.User("approve it"))
 		if err != nil {
 			t.Fatalf("Send 2: %v", err)
 		}
-		res2, err := t2.Wait()
+		rt, err := s.Decide(ctx, thread.Approve("call_9"))
+		if err != nil {
+			t.Fatalf("Decide: %v", err)
+		}
+		if rt == nil {
+			t.Fatal("Decide did not resume the boundary")
+		}
+		res2, err := rt.Wait()
+		if err != nil {
+			t.Fatalf("resume Wait: %v", err)
+		}
+		_ = res2
+		res3, err := t2.Wait()
 		if err != nil {
 			t.Fatalf("Wait 2: %v", err)
 		}
-		if res2.Text() != "the call ran" {
-			t.Errorf("reply = %q, want the post-approval reply", res2.Text())
+		// The queued follow-up ran after the resume, on its own step.
+		if res3.Text() != "queued reply" {
+			t.Errorf("reply = %q, want the queued follow-up's reply", res3.Text())
 		}
 		select {
 		case r := <-ran:

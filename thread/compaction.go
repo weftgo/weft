@@ -199,6 +199,12 @@ func (s *Session) ApplyCompaction(ctx context.Context, c *Compaction) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.boundaryLocked() {
+		// The same rule the trigger follows: a parked tail must stay
+		// raw for its decisions to resolve, so a manual compaction
+		// waits too. Resolve or branch away from the boundary first.
+		return fmt.Errorf("thread: session %s has approval requests pending; compact after they resolve", s.header.ID)
+	}
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
 		return err
@@ -858,6 +864,15 @@ func (s *Session) maybeAutoCompact(ctx context.Context) {
 		return
 	}
 	s.mu.Lock()
+	if s.boundaryLocked() {
+		// An open approval boundary holds the tail raw: its dangling
+		// calls are what the resume's decisions resolve, and a
+		// compaction that summarized them would orphan every decision
+		// (ADR 0021 §1's raw-transcript rule). The trigger re-arms on
+		// the turn that resolves the boundary.
+		s.mu.Unlock()
+		return
+	}
 	lastInput := s.lastInput
 	if s.lastMeasureLeaf == "" {
 		// No model step has ever been measured — there is no reported

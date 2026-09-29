@@ -32,6 +32,13 @@ func FuzzDecodeEntry(f *testing.F) {
 	if len(files) == 0 {
 		f.Fatal("no format1 goldens found")
 	}
+	// The format-2 goldens too (the approvals kinds): a new format's
+	// seeds join the day the format does.
+	files2, err := filepath.Glob(filepath.Join("testdata", "format2", "*"))
+	if err != nil {
+		f.Fatal(err)
+	}
+	files = append(files, files2...)
 	for _, path := range files {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -43,6 +50,9 @@ func FuzzDecodeEntry(f *testing.F) {
 	}
 	f.Add([]byte(`{"type":"approval","id":"e_1"}`))                  // unknown kind
 	f.Add([]byte(`{"type":"message","v":2,"id":"e_1"}`))             // newer version
+	f.Add([]byte(`{"type":"approval_request","v":3,"id":"e_1"}`))    // newer approvals v
+	f.Add([]byte(`{"type":"approval_decision","outcome":"maybe"}`))  // hostile outcome
+	f.Add([]byte(`{"type":"approval_audit","step":""}`))             // hostile step
 	f.Add([]byte(`{"id":"e_1"}`))                                    // no type
 	f.Add([]byte(`{"tYpe":"custom"}`))                               // case-matched key
 	f.Add([]byte(`{"type":"message",`))                              // malformed

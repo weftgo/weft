@@ -459,3 +459,83 @@ func lastResult(m weft.Message) (string, bool) {
 	}
 	return "", false
 }
+
+// As steers one Send into a running turn on a Queue session: the
+// message is accepted at once — its queued receipt durable — and the
+// run's next drain point delivers it after the tool batch, the receipt
+// recording the fate (ADR 0019).
+func ExampleAs() {
+	ctx := context.Background()
+	release := make(chan struct{})
+	wait := weft.Tool("wait", "blocks until released", func(ctx context.Context, _ struct{}) (string, error) {
+		select {
+		case <-release:
+			return "ok", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	})
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "wait"}),
+		wefttest.Say("done, in metric units"),
+	)
+	var s *thread.Session
+	agent := weft.New(model, wait, weft.Tap(func(_ context.Context, ev weft.Event) {
+		if _, ok := ev.(weft.ToolStart); ok {
+			if _, err := s.Send(ctx, weft.User("use metric units"), thread.As(thread.Steer)); err != nil {
+				fmt.Println(err)
+			}
+		}
+	}))
+	s, _ = thread.Create(ctx, thread.Memory(), agent)
+	t, _ := s.Send(ctx, weft.User("convert this"))
+	close(release)
+	res, err := t.Wait()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(res.Text())
+	for _, e := range s.Entries() {
+		r, ok := e.(thread.ReceiptEntry)
+		if !ok {
+			continue
+		}
+		if r.Receipt == "" {
+			fmt.Println("receipt queued:", r.Msg.Text()) // acceptance, durable
+			continue
+		}
+		fmt.Println("receipt", r.Status) // the fate, linked by Receipt
+	}
+	// Output:
+	// done, in metric units
+	// receipt queued: use metric units
+	// receipt delivered
+}
+
+// ReRunOnOverflow arms the overflow recovery (ADR 0020 §5): a turn
+// failing with weft.ErrContextOverflow compacts — reason overflow —
+// and runs once more over the shrunken path, so the caller sees one
+// turn with the re-run's answer.
+func ExampleReRunOnOverflow() {
+	ctx := context.Background()
+	model := wefttest.Script(
+		wefttest.Say("a first answer"),                  // a prior turn, so the compaction has a cut
+		wefttest.Fail(weft.ErrContextOverflow),          // the overflowing request
+		wefttest.Say("the summary of what came before"), // the compaction's summarizer call
+		wefttest.Say("recovered after compaction"),      // the re-run
+	)
+	s, _ := thread.Create(ctx, thread.Memory(), weft.New(model), thread.KeepRecent(1))
+	t0, _ := s.Send(ctx, weft.User("a first question"))
+	if _, err := t0.Wait(); err != nil {
+		fmt.Println(err)
+		return
+	}
+	t1, _ := s.Send(ctx, weft.User("a prompt that overflows"))
+	res, err := t1.Wait()
+	fmt.Println(err)
+	fmt.Println(res.Text())
+	// Output:
+	// <nil>
+	// recovered after compaction
+}

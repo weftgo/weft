@@ -2,7 +2,7 @@ module github.com/weftgo/weft/thread
 
 go 1.26
 
-require github.com/weftgo/weft v0.3.6
+require github.com/weftgo/weft v0.3.7
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

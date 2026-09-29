@@ -353,6 +353,38 @@ func TestSteeringNilReturnIsIdentical(t *testing.T) {
 	}
 }
 
+// Steering(nil) installs no source: the option is a no-op, the same
+// ignore-don't-panic rule as an empty RunID.
+func TestSteeringNilOptionIsNoop(t *testing.T) {
+	res, err := weft.New(wefttest.Script(wefttest.Say("done"))).
+		Generate(context.Background(), weft.Prompt("x"), weft.Steering(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.NumSteps() != 1 || res.Text() != "done" {
+		t.Errorf("run under Steering(nil) = %d steps, %q; want an ordinary one-step run", res.NumSteps(), res.Text())
+	}
+}
+
+// A SteerFunc panic reaches the caller like a PrepareStep panic: the
+// span guard re-panics, OnRunEnd never fires — a crash is not an
+// outcome (ADR 0016's rule, applied to the drain point).
+func TestSteeringPanicReachesCaller(t *testing.T) {
+	calls := 0
+	agt := weft.New(wefttest.Script(wefttest.Say("ok")),
+		weft.OnRunEnd(func(context.Context, *weft.RunResult, error) { calls++ }))
+	defer func() {
+		if recover() == nil {
+			t.Fatal("the SteerFunc panic should have reached the caller")
+		}
+		if calls != 0 {
+			t.Errorf("OnRunEnd fired %d times on a panicked run; a crash is not an outcome", calls)
+		}
+	}()
+	_, _ = agt.Generate(context.Background(), weft.Prompt("hi"), weft.Steering(
+		func(context.Context, weft.SteerPoint) []weft.Message { panic("user code bug") }))
+}
+
 // A steered conversation's transcript is pinned: a delivered steer is a
 // user message at a new position in the model's input — a
 // model-visible change, golden-tested (ADR 0019 consequences).

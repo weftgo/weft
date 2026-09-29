@@ -377,12 +377,7 @@ func (s *Session) armResumeLocked(ctx context.Context) (*Turn, error) {
 	if s.await.resumed != nil {
 		return s.await.resumed, nil // one boundary resumes once
 	}
-	t := s.newTurnLocked()
-	t.resume = true
-	if s.await.turn != nil { // nil after a restart: the parked Turn object is gone
-		s.await.turn.setNext(t)
-	}
-	s.await.resumed = t
+	t := s.mintResumeLocked()
 	if s.running {
 		s.resumeWork = &pendingResume{ctx: ctx, turn: t}
 		return t, nil
@@ -390,6 +385,42 @@ func (s *Session) armResumeLocked(ctx context.Context) (*Turn, error) {
 	s.running = true
 	go s.execute(workItem{ps: pendingSend{ctx: ctx, turn: t}, resume: true})
 	return t, nil
+}
+
+// mintResumeLocked mints a resume turn for the open boundary and
+// registers it as the boundary's one armed resume — the idempotency
+// key Decide, Resume and the runner's own arming paths (the
+// chain-decided hand-off, the settled-boundary pickup) all share, so
+// two paths can never arm two resumes for one boundary. A resume
+// already armed is returned as-is, never displaced. Callers hold s.mu.
+func (s *Session) mintResumeLocked() *Turn {
+	if s.await.resumed != nil {
+		return s.await.resumed
+	}
+	t := s.newTurnLocked()
+	t.resume = true
+	s.await.resumed = t
+	if s.await.turn != nil { // nil after a restart: the parked Turn object is gone
+		s.await.turn.setNext(t)
+	}
+	return t
+}
+
+// settleResumeLocked retires a resume turn's arming and drops the
+// boundary's captured settings when the resume resolved it. Called
+// under s.mu on every path that decides a resume turn — the run
+// completed, the context died first, the persistence failed, the turn
+// panicked — always before the turn is decided, so a caller whose Wait
+// returns faces a settled boundary: a retry after a failure arms
+// fresh, a resolution reads ErrNotPending. Never a stale dead Turn on
+// a wait that cannot end.
+func (s *Session) settleResumeLocked(t *Turn) {
+	if s.await.resumed == t {
+		s.await.resumed = nil
+	}
+	if !s.boundaryLocked() {
+		s.await = awaitState{}
+	}
 }
 
 // validOutcome reports whether o is one of the four decision outcomes.

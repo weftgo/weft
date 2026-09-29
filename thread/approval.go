@@ -316,14 +316,22 @@ func (s *Session) Resume(ctx context.Context) (*Turn, error) {
 
 // armResumeLocked hands the resume run to the runner: the Turn is
 // minted here so Decide and Resume can return it, and the runner —
-// started if no runner is alive — picks the work up. Callers hold
-// s.mu; the boundary is decided (or Resume is forcing it).
+// started if no runner is alive — picks the work up. Arming is
+// idempotent while the armed resume has not landed: a boundary resumes
+// once, so a second Resume before the first lands returns the turn
+// already armed — overwriting it would orphan the first caller's Turn
+// on a wait that never ends. Callers hold s.mu; the boundary is
+// decided (or Resume is forcing it).
 func (s *Session) armResumeLocked(ctx context.Context) (*Turn, error) {
+	if s.await.resumed != nil {
+		return s.await.resumed, nil // one boundary resumes once
+	}
 	t := s.newTurnLocked()
 	t.resume = true
 	if s.await.turn != nil { // nil after a restart: the parked Turn object is gone
 		s.await.turn.setNext(t)
 	}
+	s.await.resumed = t
 	if s.running {
 		s.resumeWork = &pendingResume{ctx: ctx, turn: t}
 		return t, nil

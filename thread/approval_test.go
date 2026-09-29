@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,16 +26,36 @@ type refundInput struct {
 	OrderID string `json:"order_id"`
 }
 
+// ranLog records the Approved flag of each executed call, safely for
+// concurrent tool handlers and polling test goroutines.
+type ranLog struct {
+	mu   sync.Mutex
+	vals []bool
+}
+
+func (r *ranLog) add(b bool) {
+	r.mu.Lock()
+	r.vals = append(r.vals, b)
+	r.mu.Unlock()
+}
+
+// snapshot copies the flags recorded so far.
+func (r *ranLog) snapshot() []bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]bool(nil), r.vals...)
+}
+
 // refundAgent builds an agent whose "refund" tool requires approval,
 // playing turns, and reporting whether each executed call ran with
 // Call.Approved set (ADR 0007: an approved resume runs the ordinary
 // chain, Approved true).
-func refundAgent(turns ...wefttest.Turn) (*weft.Agent, *[]bool) {
-	ran := &[]bool{}
+func refundAgent(turns ...wefttest.Turn) (*weft.Agent, *ranLog) {
+	ran := &ranLog{}
 	tool := weft.Tool("refund", "Refund an order.",
 		func(ctx context.Context, in refundInput) (string, error) {
 			c, _ := weft.CallFromContext(ctx)
-			*ran = append(*ran, c.Approved)
+			ran.add(c.Approved)
 			return "refunded " + in.OrderID, nil
 		},
 		weft.RequireApproval())
@@ -123,8 +144,8 @@ func TestApprovalsParkDecideResume(t *testing.T) {
 	if r.Reason != "tool requires approval" {
 		t.Fatalf("reason: got %q", r.Reason)
 	}
-	if len(*ran) != 0 {
-		t.Fatalf("gated tool ran before any decision")
+	if got := ran.snapshot(); len(got) != 0 {
+		t.Fatalf("gated tool ran before any decision: %v", got)
 	}
 
 	rt, err := s.Decide(ctx, thread.Approve(call.ID))
@@ -137,8 +158,8 @@ func TestApprovalsParkDecideResume(t *testing.T) {
 	if _, err := rt.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	if len(*ran) != 1 || !(*ran)[0] {
-		t.Fatalf("approved resume: Approved flags %v, want [true]", *ran)
+	if got := ran.snapshot(); len(got) != 1 || !got[0] {
+		t.Fatalf("approved resume: Approved flags %v, want [true]", got)
 	}
 	if got := s.Pending(); len(got) != 0 {
 		t.Fatalf("Pending after resume: got %d, want 0", len(got))
@@ -256,8 +277,8 @@ func TestApprovalsPartialDecisions(t *testing.T) {
 	if _, err := rt.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	if len(*ran) != 1 {
-		t.Fatalf("executions: %v, want only the approved one", *ran)
+	if got := ran.snapshot(); len(got) != 1 {
+		t.Fatalf("executions: %v, want only the approved one", got)
 	}
 	results := toolResults(s.Context())
 	if len(results) != 2 {
@@ -441,8 +462,8 @@ func TestApproverDecides(t *testing.T) {
 	if _, err := next.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	if len(*ran) != 1 || !(*ran)[0] {
-		t.Fatalf("approver-approved call: Approved flags %v", *ran)
+	if got := ran.snapshot(); len(got) != 1 || !got[0] {
+		t.Fatalf("approver-approved call: Approved flags %v", got)
 	}
 	counts := countApprovalEntries(s)
 	if counts["audit:approver:approved"] != 1 {
@@ -660,8 +681,8 @@ func TestAutoResumeOff(t *testing.T) {
 	if _, err := manual.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	if len(*ran) != 1 {
-		t.Fatalf("executions: %v", *ran)
+	if got := ran.snapshot(); len(got) != 1 {
+		t.Fatalf("executions: %v", got)
 	}
 	if _, err := t2.Wait(); err != nil {
 		t.Fatal(err)
@@ -831,5 +852,129 @@ func TestApprovalEntryLoud(t *testing.T) {
 	// accept their own v (round trip above).
 	if _, err := os.Stat(filepath.Join("testdata", "format1", "turn.json")); err != nil {
 		t.Fatalf("format1 goldens moved: %v", err)
+	}
+}
+
+// TestSendOverDecidedBoundaryResumes: a boundary whose every call is
+// decided must not wedge a Send — AutoResume's contract holds even
+// when the session was reopened between the decisions' append and the
+// resume that never ran (the crash window), so the Send arms the
+// resume and then takes its own turn (ADR 0021 §1).
+func TestSendOverDecidedBoundaryResumes(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	agent1, _ := refundAgent(wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"4"}`}))
+	s1, err := thread.Create(ctx, st, agent1, thread.AutoResume(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := parkSend(t, s1, ctx)
+	if _, err := s1.Decide(ctx, thread.Approve(call.ID)); err != nil {
+		t.Fatal(err)
+	}
+	// The decisions are durable; the resume never ran. A reopen with
+	// defaults sees a decided boundary and no runner.
+	agent2, ran := refundAgent(wefttest.Say("resumed after reopen"), wefttest.Say("the follow-up"))
+	s2, err := thread.Open(ctx, st, s1.ID(), agent2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(s2.Pending()); got != 0 {
+		t.Fatalf("Pending after reopen: %d, want 0 (all decided)", got)
+	}
+	t2, err := s2.Send(ctx, weft.User("carry on"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := t2.Wait()
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the Send wedged behind a decided boundary")
+	}
+	if got := ran.snapshot(); len(got) != 1 || !got[0] {
+		t.Fatalf("approved call after reopen: %v", got)
+	}
+	results := toolResults(s2.Context())
+	if len(results) != 1 || results[0].Content != "refunded 4" {
+		t.Fatalf("results: %+v", results)
+	}
+}
+
+// TestDecideConcurrent: two goroutines deciding the boundary's calls
+// at once — exactly one resume is armed, both decisions land, and the
+// race detector stays quiet.
+func TestDecideConcurrent(t *testing.T) {
+	ctx := context.Background()
+	agent, ran := refundAgent(
+		wefttest.ToolCalls(
+			wefttest.Call{Name: "refund", ID: "call_1"},
+			wefttest.Call{Name: "refund", ID: "call_2"},
+		),
+		wefttest.Say("both decided"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parkSend(t, s, ctx)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); _, _ = s.Decide(ctx, thread.Approve("call_1")) }()
+	go func() { defer wg.Done(); _, _ = s.Decide(ctx, thread.Approve("call_2")) }()
+	wg.Wait()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(ran.snapshot()) == 2 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := ran.snapshot(); len(got) != 2 {
+		t.Fatalf("approved calls after concurrent decides: %v", got)
+	}
+}
+
+// TestResumeTwice: arming the resume twice before it lands must not
+// orphan the first caller's Turn — the second Resume returns the
+// already-armed turn, and both waits complete (one boundary, one
+// resume).
+func TestResumeTwice(t *testing.T) {
+	ctx := context.Background()
+	agent, ran := refundAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"8"}`}),
+		wefttest.Say("resumed"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.AutoResume(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := parkSend(t, s, ctx)
+	if _, err := s.Decide(ctx, thread.Approve(call.ID)); err != nil {
+		t.Fatal(err)
+	}
+	t1, err := s.Resume(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t2, err := s.Resume(ctx)
+	if err != nil {
+		t.Fatalf("second Resume: %v", err)
+	}
+	if t1 != t2 {
+		t.Fatalf("double Resume armed two turns: %p and %p", t1, t2)
+	}
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := ran.snapshot(); len(got) != 1 || !got[0] {
+		t.Fatalf("executions: %v", got)
 	}
 }

@@ -190,7 +190,13 @@ func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.running || s.boundaryLocked() {
+	// A runner whose in-flight turn is already decided is on its way
+	// out — the epilogue frees the slot moments after the Wait that
+	// returned to this caller. Reading it as busy would answer ErrBusy
+	// (or queue) for a turn that already landed, the same stale-state
+	// race retireInFlightLocked closes for Branch; a Send that takes
+	// the slot here is legitimate, and the epilogue leaves it alone.
+	if (s.running && !s.inFlightDecidedLocked()) || s.boundaryLocked() {
 		// A running turn holds the session, and so does an open approval
 		// boundary: the follow-up is queued and runs when the boundary
 		// resolves — Decide or Resume resume it, the runner drains the
@@ -347,7 +353,16 @@ func (s *Session) execute(first workItem) {
 		// Send or Resume (both arm it again).
 		retry := !cur.resume || !cur.ps.turn.failed()
 		s.mu.Lock()
-		s.inFlight = nil // the item boundary: a Branch here is already safe
+		// The item boundary: a Branch here is already safe. A Send may
+		// have taken the slot while this turn was being decided (the
+		// busy check above reads a decided turn as free): this runner
+		// then owns nothing but its own turn's epilogue — it exits
+		// without touching the slot or the queue, and the new runner's
+		// loop drains what is left.
+		usurped := s.inFlight != nil
+		if !usurped {
+			s.inFlight = nil
+		}
 		// A Rollback turn branches the leaf back before its receipt
 		// entry here — its entries have landed, the follow-up (queued
 		// by the interrupting Send) starts next on the rolled-back
@@ -377,6 +392,12 @@ func (s *Session) execute(first workItem) {
 				s.agent.Logger().Error("thread: interrupt re-arm failed",
 					"session", s.header.ID, "err", err)
 			}
+		}
+		if usurped {
+			// The resume work, the queue and the slot belong to the new
+			// runner's loop now; this one's own turn is settled above.
+			s.mu.Unlock()
+			return
 		}
 		if s.resumeWork != nil {
 			rw := *s.resumeWork
@@ -451,6 +472,12 @@ func (s *Session) runOneContained(item workItem) {
 // it under mu first, so a caller whose Wait returns may Branch at
 // once and never read ErrBusy for a turn that already landed.
 // Callers hold s.mu.
+// inFlightDecidedLocked reports whether the runner slot's turn has
+// already landed: the epilogue is freeing it. Callers hold s.mu.
+func (s *Session) inFlightDecidedLocked() bool {
+	return s.inFlight == nil || s.inFlight.isDecided()
+}
+
 func (s *Session) retireInFlightLocked(t *Turn) {
 	if s.inFlight == t {
 		s.inFlight = nil
@@ -1195,6 +1222,15 @@ func (t *Turn) finish(res *weft.RunResult, err error) {
 	t.result, t.waitErr, t.done = res, err, true
 	t.mu.Unlock()
 	t.cond.Broadcast()
+}
+
+// isDecided reports whether the turn has landed — finish has run —
+// the runner-epilogue race Send closes with it: a decided in-flight
+// turn is a slot being freed, not a busy session.
+func (t *Turn) isDecided() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.done
 }
 
 // failed reports whether the turn ended with an error — the runner's

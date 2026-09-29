@@ -302,3 +302,82 @@ func TestPerStepFailedTailRewritten(t *testing.T) {
 		}
 	})
 }
+
+// The overflow re-run under per-step durability (ADR 0011 §7 with ADR
+// 0020 §5): the failed attempt's emitted messages — a whole first step
+// — survive on their own branch of the tree, and nothing of them rides
+// the active path the re-run continues on: the compaction summarizes a
+// path that does not contain them, and the model's next request reads
+// the re-run's transcript alone.
+func TestPerStepOverflowAttemptsKeepTheirOwnLines(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		model := wefttest.Script(
+			wefttest.Say("the first answer"),                                                // turn 1: history for the cut
+			wefttest.ToolCalls(wefttest.Call{Name: "note", Args: `{"text":"attempt one"}`}), // attempt 1, step 0 — emitted
+			wefttest.Fail(weft.ErrContextOverflow),                                          // attempt 1, step 1 — overflows
+			wefttest.Say("the summary of what came before"),                                 // the compaction's summarizer
+			wefttest.Say("recovered after compaction"),                                      // attempt 2
+		)
+		note := weft.Tool("note", "Record a note.", func(_ context.Context, in struct {
+			Text string `json:"text"`
+		}) (string, error) {
+			return "noted: " + in.Text, nil
+		})
+		s, err := thread.Create(ctx, st, weft.New(model, note), thread.KeepRecent(1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t0, err := s.Send(ctx, weft.User("a first question"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := t0.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		t1, err := s.Send(ctx, weft.User("a prompt that overflows"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := t1.Wait()
+		if err != nil {
+			t.Fatalf("the overflow re-run failed: %v", err)
+		}
+		if res.Text() != "recovered after compaction" {
+			t.Fatalf("reply = %q, want the re-run's answer", res.Text())
+		}
+		turns := 0
+		for _, e := range s.Entries() {
+			if _, ok := e.(thread.TurnEntry); ok {
+				turns++
+			}
+		}
+		if turns != 2 {
+			t.Errorf("turn entries = %d, want 2 (the failed attempt records none on its own)", turns)
+		}
+		// The failed attempt's emitted step exists exactly once — on its
+		// own branch — and never on the path the walk reads.
+		sawAttempt := 0
+		for _, e := range s.Entries() {
+			me, ok := e.(thread.MessageEntry)
+			if !ok {
+				continue
+			}
+			for _, p := range me.Message.Content {
+				if r, ok := p.(weft.ToolResultPart); ok && r.Content == "noted: attempt one" {
+					sawAttempt++
+				}
+			}
+		}
+		if sawAttempt != 1 {
+			t.Errorf("the failed attempt's tool result appears %d times, want exactly once on its branch", sawAttempt)
+		}
+		for _, m := range s.Context() {
+			for _, p := range m.Content {
+				if r, ok := p.(weft.ToolResultPart); ok && r.Content == "noted: attempt one" {
+					t.Error("the failed attempt's work rides the active path — the re-run must not see it")
+				}
+			}
+		}
+	})
+}

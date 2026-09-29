@@ -513,6 +513,19 @@ func (s *Session) runChain(ctx context.Context, t *Turn, opts []weft.RunOption, 
 					d.Via = "approver"
 				}
 				cr.entries = append(cr.entries, decisionFrom(c.ID, d, t.runID))
+				if d.Always && d.Kind == OutcomeApprove {
+					// "Approve and always allow" from the live step
+					// grants like the same decision through Decide or
+					// DecideSigned (ADR 0021 §4): the tool plus the
+					// call's exact arguments, recorded with the
+					// decision in the same append.
+					cr.entries = append(cr.entries, GrantEntry{
+						Grant: Grant{
+							Tool: c.Name,
+							Args: []Arg{ArgEquals("", slices.Clone(c.Args))},
+						},
+					})
+				}
 				continue
 			}
 		}
@@ -679,6 +692,11 @@ func fillApprovalEntry(e Entry, id, parent string, created time.Time) Entry {
 		e.ID, e.ParentID, e.Created = id, parent, created
 		return e
 	case ApprovalAuditEntry:
+		e.ID, e.ParentID, e.Created = id, parent, created
+		return e
+	case GrantEntry:
+		// The approver's "approve and always allow" lands its grant
+		// through the chain's batch, like Decide lands its.
 		e.ID, e.ParentID, e.Created = id, parent, created
 		return e
 	}

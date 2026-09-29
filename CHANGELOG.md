@@ -1,3 +1,17 @@
+## 0.5.0 (unreleased)
+
+### Added — the transcript observer (ADR 0006 note, TODO §5.12 shape (b))
+
+- `weft.OnMessages(fn)` — a run option registering an observer the
+  loop calls whenever messages join the run's transcript: the step's
+  assistant message in its final shape (signed reasoning included),
+  the batched tool message, and the messages a steering drain
+  delivered. Exact bytes, deep-copied, in transcript order — what an
+  incremental persister (a session layer) writes per step equals what
+  `RunResult.Messages` holds at the end, without the lossy rebuild
+  from deltas. Run-scoped like `Steering`; not inherited by Subagent
+  child runs; panics contained and counted (`TapPanics`).
+
 ## 0.4.0 / openai, anthropic, google 0.3.7 / mcp 0.1.8 / store 0.1.2 — 2026-09-29
 
 Version 3 of the phase-3 plan (plan §5): the steering hook in the

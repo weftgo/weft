@@ -23,6 +23,7 @@ import (
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/sqlite"
+	"github.com/weftgo/weft/thread/threadtest"
 )
 
 // The crash test (plan §7, shaped like jsonl's): a helper process is
@@ -282,4 +283,29 @@ func TestFleetHelper(t *testing.T) {
 		os.Exit(2)
 	}
 	fmt.Println("fleet ok")
+}
+
+// The mid-turn crash (plan §7, ADR 0011 §7), the sqlite twin of jsonl's:
+// a child runs a real two-step turn whose second model call blocks; the
+// parent kills it with the first step fully emitted, and everything
+// emitted is durable — the shared harness in threadtest carries the
+// assertions, including the reopened session's continuation. Each
+// Append is a committed transaction, so nothing torn can exist.
+func TestCrashMidTurn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "crashturn.db")
+	threadtest.CrashTurn(t, "TestCrashMidTurnHelper", path, func() (thread.Storage, error) {
+		return sqlite.Open(path)
+	})
+}
+
+// TestCrashMidTurnHelper is the re-executed child; the harness's env
+// gates it.
+func TestCrashMidTurnHelper(t *testing.T) {
+	path := os.Getenv("WEFT_THREADTEST_CRASH_STORAGE")
+	if path == "" {
+		return
+	}
+	threadtest.RunCrashTurnChild(t, func() (thread.Storage, error) {
+		return sqlite.Open(path)
+	})
 }

@@ -344,6 +344,16 @@ func (s *Session) Resume(ctx context.Context) (*Turn, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// The arming registry first: per-step durability (ADR 0011 §7)
+	// appends the resume's step messages as they join, so the boundary's
+	// dangling tail can already read resolved while the resume is still
+	// in flight — the armed resume, not the tail, is the source of truth
+	// for "one boundary resumes once", and a Resume joining it gets the
+	// in-flight turn (which itself answers ErrNotPending if the boundary
+	// it was armed for is gone).
+	if armed := s.await.resumed; armed != nil {
+		return armed, nil
+	}
 	if !s.boundaryLocked() {
 		return nil, fmt.Errorf("%w: no parked approvals to resume", ErrNotPending)
 	}

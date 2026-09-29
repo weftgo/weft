@@ -20,6 +20,7 @@ import (
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
+	"github.com/weftgo/weft/thread/threadtest"
 )
 
 // The crash test (plan §3.4): a helper process is killed mid-append —
@@ -197,4 +198,28 @@ func TestCrashHelper(t *testing.T) {
 		os.Exit(2)
 	}
 	time.Sleep(time.Hour) // unreachable; the kill is immediate
+}
+
+// The mid-turn crash (plan §7, ADR 0011 §7): a child runs a real
+// two-step turn whose second model call blocks; the parent kills it
+// with the first step fully emitted, and everything emitted is durable
+// — the shared harness in threadtest carries the assertions, including
+// the reopened session's continuation.
+func TestCrashMidTurn(t *testing.T) {
+	dir := t.TempDir()
+	threadtest.CrashTurn(t, "TestCrashMidTurnHelper", dir, func() (thread.Storage, error) {
+		return jsonl.Open(dir)
+	})
+}
+
+// TestCrashMidTurnHelper is the re-executed child; the harness's env
+// gates it.
+func TestCrashMidTurnHelper(t *testing.T) {
+	dir := os.Getenv("WEFT_THREADTEST_CRASH_STORAGE")
+	if dir == "" {
+		return
+	}
+	threadtest.RunCrashTurnChild(t, func() (thread.Storage, error) {
+		return jsonl.Open(dir)
+	})
 }

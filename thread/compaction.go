@@ -249,6 +249,7 @@ func (s *Session) ApplyCompaction(ctx context.Context, c *Compaction) error {
 		}
 	}
 	s.agent.Logger().Info("thread: compacted",
+		"trace", "compaction",
 		"session", s.header.ID, "reason", string(c.Reason),
 		"tokens_before", c.TokensBefore, "first_kept", c.FirstKept)
 	s.safeAfter(ctx, e) // the durable record, not the plan
@@ -1071,6 +1072,7 @@ func (s *Session) writeTrim(ctx context.Context) error {
 	}
 	s.adoptLocked(e)
 	s.agent.Logger().Info("thread: trimmed old tool results",
+		"trace", "compaction",
 		"session", s.header.ID, "tokens_before", before)
 	return nil
 }

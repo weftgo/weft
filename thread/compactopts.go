@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -552,19 +553,58 @@ func (preferNativeOption) applySession(c *sessionConfig) { c.compaction.preferNa
 // the fallback.
 func PreferNative() SessionOption { return preferNativeOption{} }
 
+// maxModelChain bounds the native lookup's walk. Comparable chains
+// terminate on their own — a repeated model ends the walk — but a
+// non-comparable Model value (a struct wrapper with a slice field)
+// can never compare equal to itself, so a self-wrapping one would
+// walk forever; the cap ends it, and nil (the text summary's
+// fallback) is the answer.
+const maxModelChain = 64
+
 // nativeOf walks m's middleware chain looking for a NativeCompactor.
 // The walk remembers what it has seen: middleware whose Unwrap loops
 // (a wrapper returning itself, or a cycle) ends the walk instead of
-// hanging it.
+// hanging it — by comparison when the value is comparable, and by the
+// depth cap when it is not. The seen list is a slice, not a map — a
+// Model value need not be hashable (anything but a pointer or another
+// comparable kind would panic the map), and chains are short.
 func nativeOf(m weft.Model) NativeCompactor {
-	seen := map[weft.Model]bool{}
-	for ; m != nil && !seen[m]; m = weft.Unwrap(m) {
-		seen[m] = true
+	var seen []weft.Model
+	for m != nil {
+		if len(seen) >= maxModelChain {
+			return nil
+		}
+		known := false
+		for _, s := range seen {
+			// reflect, not ==: interface comparison panics on a
+			// non-comparable dynamic type, and a Model value need not
+			// be comparable.
+			if equalModel(s, m) {
+				known = true
+				break
+			}
+		}
+		if known {
+			return nil
+		}
+		seen = append(seen, m)
 		if nc, ok := m.(NativeCompactor); ok {
 			return nc
 		}
+		m = weft.Unwrap(m)
 	}
 	return nil
+}
+
+// equalModel compares two Model interface values without hashing:
+// true when they hold identical dynamic types and those types are
+// comparable (a struct wrapper with a slice field is not, and reads
+// as never-equal rather than panicking).
+func equalModel(a, b weft.Model) bool {
+	if reflect.TypeOf(a) != reflect.TypeOf(b) {
+		return false
+	}
+	return reflect.ValueOf(a).Comparable() && reflect.ValueOf(b).Comparable() && reflect.ValueOf(a).Equal(reflect.ValueOf(b))
 }
 
 // ── Extras — pinning ────────────────────────────────────────────────

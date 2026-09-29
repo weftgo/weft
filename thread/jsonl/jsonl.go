@@ -514,8 +514,11 @@ func readHeader(path string) (thread.Header, bool, error) {
 	}
 	defer func() { _ = f.Close() }()
 	bounded := make([]byte, headerBound)
-	n, err := f.Read(bounded)
-	if err != nil && err != io.EOF {
+	// ReadFull, not one Read: a short read would make a valid header
+	// look torn and List would silently skip the session — a regular
+	// file may legally hand back less than was asked for.
+	n, err := io.ReadFull(f, bounded)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 		return thread.Header{}, false, err
 	}
 	// The header is everything before the first newline.

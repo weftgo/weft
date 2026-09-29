@@ -35,12 +35,11 @@ func (summarizeLeftOption) applyBranch(c *branchConfig) { c.summarizeLeft = true
 // SummarizeLeft returns the BranchOption that summarizes the branch
 // being left — back to the common ancestor of the branch and the new
 // branch point — into a branch_summary entry the new branch's context
-// carries in the abandoned branch's place (ADR 0020 §6).
-//
-// Not in this build: step 1.6 appends the navigation only, and a
-// Branch called with SummarizeLeft fails with ErrNotImplemented
-// rather than navigating silently without its summary. Step 1.8 wires
-// the summarizer and makes it work.
+// carries in the abandoned branch's place (ADR 0020 §6). The
+// summarizer runs under the session's compaction chain (SummaryModel
+// or the session's own model, the skeleton prompt) with the lock
+// released, then the navigation and the summary land as one atomic
+// batch.
 func SummarizeLeft() BranchOption { return summarizeLeftOption{} }
 
 // Branch navigates the session to entryID: it appends a leaf entry
@@ -51,8 +50,26 @@ func SummarizeLeft() BranchOption { return summarizeLeftOption{} }
 // including the current leaf (a recorded no-op navigation); "" is the
 // root, restarting the conversation from nothing while the file keeps
 // everything. An id the session does not hold is an error.
+//
+// Branching is a between-turns operation: while a turn runs the
+// session holds the line the run's transcript must land on, and a
+// navigation underneath it would strand the run's messages on a
+// branch whose context the model never saw — so a Branch while a
+// turn is in flight fails with ErrBusy, like a Send under the Reject
+// policy. A parked approval boundary is not a running turn:
+// branching away from it is the documented way out of an unwanted
+// boundary (the armed resume reads ErrNotPending).
 func (s *Session) Branch(ctx context.Context, entryID string, opts ...BranchOption) error {
 	if resolveBranch(opts...).summarizeLeft {
+		// Fail fast before the model call: the authoritative check is
+		// under the lock at the append, but a turn already running
+		// should not make the caller pay for a summary first.
+		s.mu.Lock()
+		running := s.running
+		s.mu.Unlock()
+		if running {
+			return fmt.Errorf("%w: session %s is running a turn; branch between turns", ErrBusy, s.header.ID)
+		}
 		// Validate, then summarize with the lock released — the model
 		// call takes seconds — then append the batch under it.
 		if err := s.checkEntry(entryID); err != nil {
@@ -64,6 +81,9 @@ func (s *Session) Branch(ctx context.Context, entryID string, opts ...BranchOpti
 		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		if s.running {
+			return fmt.Errorf("%w: session %s is running a turn; branch between turns", ErrBusy, s.header.ID)
+		}
 		nav := s.mintIDLocked()
 		sum := s.mintIDLocked()
 		for _, id := range []string{nav, sum} {
@@ -99,6 +119,9 @@ func (s *Session) Branch(ctx context.Context, entryID string, opts ...BranchOpti
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.running {
+		return fmt.Errorf("%w: session %s is running a turn; branch between turns", ErrBusy, s.header.ID)
+	}
 	if err := s.checkEntryLocked(entryID); err != nil {
 		return err
 	}

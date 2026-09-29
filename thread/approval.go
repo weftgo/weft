@@ -293,7 +293,11 @@ func (s *Session) Decide(ctx context.Context, ds ...Decision) (*Turn, error) {
 		e.ID, e.ParentID, e.Created = s.mintIDLocked(), parent, time.Now().UTC()
 		entries = append(entries, e)
 		parent = e.ID
-		if d.Always {
+		if d.Always && d.Kind == OutcomeApprove {
+			// Only an approval grants: a Deny or Resolve built with
+			// Always set must not mint a standing approval — the same
+			// gate the Approver path applies (ADR 0021 §4's "approve
+			// and always allow" names an approve).
 			req := pendingByCall[d.CallID]
 			g := GrantEntry{
 				ID: s.mintIDLocked(), ParentID: parent, Created: time.Now().UTC(),
@@ -312,7 +316,14 @@ func (s *Session) Decide(ctx context.Context, ds ...Decision) (*Turn, error) {
 	for _, e := range entries {
 		s.adoptLocked(e)
 	}
+	if err := s.flushLocked(ctx); err != nil {
+		return nil, fmt.Errorf("thread: decision flush: %w", err)
+	}
 	if s.cfg.autoResume && s.boundaryLocked() && len(s.pendingLocked()) == 0 {
+		// The live context, by design: a decider whose context dies
+		// after the call reads "canceled before it started" and retries
+		// with a live one — the pinned TestResumeRetryAfterCanceledArm
+		// contract. The entries are already durable; nothing is lost.
 		return s.armResumeLocked(ctx)
 	}
 	return nil, nil
@@ -360,6 +371,9 @@ func (s *Session) Resume(ctx context.Context) (*Turn, error) {
 		}
 		for _, e := range entries {
 			s.adoptLocked(e)
+		}
+		if err := s.flushLocked(ctx); err != nil {
+			return nil, fmt.Errorf("thread: expiry flush: %w", err)
 		}
 	}
 	return s.armResumeLocked(ctx)
@@ -433,9 +447,9 @@ func validOutcome(o Outcome) bool {
 }
 
 // expiryReason is the model-visible denial text for an expired request
-// (ADR 0021 §5) — pinned by a golden (testadata/approvals): the reason
-// names the deadline so the model can tell a lapsed request from a
-// refused one.
+// (ADR 0021 §5) — pinned bytes, asserted inline by the approval tests:
+// the reason names the deadline so the model can tell a lapsed request
+// from a refused one.
 func expiryReason(expiry time.Time) string {
 	return "expired: no decision before " + expiry.UTC().Format(time.RFC3339)
 }
@@ -465,8 +479,8 @@ type chainResult struct {
 }
 
 // runChain is the decision chain (ADR 0021 §2): for each call a turn
-// left pending, grants (stubbed until step 2.2), then a bounded
-// Approver, then the park. It runs at the turn's end, before the
+// left pending, grants (ADR 0021 §4), then a bounded Approver, then
+// the park. It runs at the turn's end, before the
 // request is persisted — "before a request parks" is before the
 // durable parked state exists, because the core's run boundary has
 // already ended the run — and every step leaves an audit entry,
@@ -482,17 +496,24 @@ func (s *Session) runChain(ctx context.Context, t *Turn, opts []weft.RunOption, 
 	for _, c := range calls {
 		if d, ref, ok := s.matchGrant(ctx, c); ok {
 			// The chain's first step decides at once, audited — the
-			// audit's Detail names the grant, and the session counts
-			// its uses from exactly these entries (ADR 0021 §2, §4).
+			// audit's Detail names the grant (namespaced "shared grant"
+			// for a store's, so the session's use counting cannot
+			// cross-count an id collision), and the session counts its
+			// own grants' uses from exactly these entries (ADR 0021
+			// §2, §4).
 			d.CallID = c.ID
 			outcome := "approved"
 			if d.Kind == OutcomeDeny {
 				outcome = "denied"
 			}
+			detail := "grant " + ref.id
+			if ref.shared {
+				detail = "shared grant " + ref.id
+			}
 			cr.entries = append(cr.entries,
 				ApprovalAuditEntry{
 					CallID: c.ID, Step: StepGrant, Outcome: outcome,
-					Detail: "grant " + ref.id, RunID: t.runID,
+					Detail: detail, RunID: t.runID,
 				},
 				decisionFrom(c.ID, d, t.runID),
 			)
@@ -776,7 +797,11 @@ func scopedDecisions(ds []ApprovalDecisionEntry, runID string) []ApprovalDecisio
 // approvalWalkLocked collects the approval entries on the leaf's
 // path: the requests by call id, and every decision by call id in
 // append order — the quorum's raw material, folded by
-// effectiveDecision over the run-scoped slice. Callers hold s.mu.
+// effectiveDecision over the run-scoped slice. A call id the model
+// re-issues (ADR 0007 lets call ids repeat across turns) starts a
+// fresh occurrence: the walk resets the call's request and decisions
+// at the message that carries it, so a later occurrence never
+// inherits an earlier one's request or verdicts. Callers hold s.mu.
 func (s *Session) approvalWalkLocked() (map[string]ApprovalRequestEntry, map[string][]ApprovalDecisionEntry) {
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
@@ -786,8 +811,16 @@ func (s *Session) approvalWalkLocked() (map[string]ApprovalRequestEntry, map[str
 	decisions := map[string][]ApprovalDecisionEntry{}
 	for _, e := range path {
 		switch e := e.(type) {
+		case MessageEntry:
+			for _, p := range e.Message.Content {
+				if c, ok := p.(weft.ToolCallPart); ok {
+					delete(requests, c.ID)
+					delete(decisions, c.ID)
+				}
+			}
 		case ApprovalRequestEntry:
 			requests[e.CallID] = e
+			decisions[e.CallID] = nil
 		case ApprovalDecisionEntry:
 			decisions[e.CallID] = append(decisions[e.CallID], e)
 		}
@@ -838,6 +871,11 @@ func effectiveDecision(decisions []ApprovalDecisionEntry, quorum int) (ApprovalD
 			}
 			resolve = &decisions[i]
 		case OutcomeApprove:
+			if resolve != nil {
+				// An approve beside a resolve is the same split verdict
+				// the other order is — the fold's words, both ways.
+				return conflict(d)
+			}
 			sawApprove = true
 			approvers[d.Who] = true
 		}

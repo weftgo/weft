@@ -74,7 +74,10 @@ func ArgEquals(pointer string, value json.RawMessage) Arg {
 // string with prefix — the "path stays under the workspace" shape. A
 // prefix is a plain string prefix, nothing more: end it with the
 // separator or it matches siblings too ("/ws" matches "/ws-evil") —
-// the prefix's one sharp edge, documented rather than hidden.
+// the prefix's one sharp edge, documented rather than hidden. An
+// empty prefix matches nothing (an Arg with no test never matches,
+// the same rule a hand-made Arg follows): the tool-wide grant is no
+// Args at all, not an empty prefix.
 func ArgPrefix(pointer, prefix string) Arg {
 	return Arg{Pointer: pointer, Prefix: prefix}
 }
@@ -158,7 +161,11 @@ func (s *Session) Revoke(ctx context.Context, grantID string) error {
 }
 
 // grantRef names a matched grant for the audit entry: the entry id
-// for a session grant, the store's id for a shared one.
+// for a session grant, the store's id for a shared one — and shared
+// is what keeps the two apart where ids could collide: the audit
+// detail namespaces a shared match ("shared grant …"), so the
+// session's own use counting never counts a shared match against a
+// session grant that happens to hold the same id.
 type grantRef struct {
 	id     string
 	shared bool
@@ -218,9 +225,12 @@ func grantDecision(g Grant) Decision {
 // deny-grant with no reason of its own (ADR 0021 §5: pinned bytes).
 const deniedByGrant = "denied by grant"
 
-// liveGrants returns the session's live grants, newest first: not
-// revoked, not expired, and under their MaxUses where the audit trail
-// can count. Callers hold s.mu.
+// liveGrantsLocked returns the session's live grants, newest first:
+// not revoked, not expired, and under their MaxUses where the audit
+// trail can count — a use is a match, whichever way the grant
+// decided: a deny-grant that matched counts like an approval grant,
+// or its standing refusal would outlive its MaxUses. Callers hold
+// s.mu.
 func (s *Session) liveGrantsLocked(now time.Time) []GrantEntry {
 	revoked := map[string]bool{}
 	uses := map[string]int{}
@@ -229,7 +239,7 @@ func (s *Session) liveGrantsLocked(now time.Time) []GrantEntry {
 		case GrantRevokedEntry:
 			revoked[e.GrantID] = true
 		case ApprovalAuditEntry:
-			if e.Step == StepGrant && e.Outcome == "approved" && strings.HasPrefix(e.Detail, "grant ") {
+			if e.Step == StepGrant && (e.Outcome == "approved" || e.Outcome == "denied") && strings.HasPrefix(e.Detail, "grant ") {
 				uses[strings.TrimPrefix(e.Detail, "grant ")]++
 			}
 		}

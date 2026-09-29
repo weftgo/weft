@@ -213,3 +213,18 @@ and the fallback.
   pick one, and quality decides long sessions; one option away instead.
 - **A chars-per-token trigger** — the pi scars.
 - **Assuming a window** — wrong for small and huge models alike.
+
+## Amendment (2026-09-29 — the split turn is summarized in one pass)
+
+§2 says a single turn larger than `KeepRecent` "is split at an
+assistant message and its prefix summarized separately, then merged".
+The implementation folds the split prefix into the same summarized
+range as the older entries — one pass over the whole range, one model
+call, one merged summary text. The merged result §2 asked for is what
+lands; only the road there differs (pi runs two summarizer calls, weft
+one — the cheaper shape for the same output, at the cost of the
+summarizer seeing the split prefix as ordinary range content).
+`Preparation.SplitPrefix` stays declared for a future two-pass mode
+and is always nil today, as its doc says. Found by the 2026-09-29
+review of the thread v0.2 branch; documented here rather than changed,
+per the standing rule that an ADR divergence is decided, not drifted.

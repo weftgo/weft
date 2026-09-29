@@ -197,6 +197,13 @@ type ApprovalRequestEntry struct {
 	RunID      string          `json:"run_id"`
 	Reason     string          `json:"reason,omitempty"`
 	Expiry     time.Time       `json:"expiry,omitzero"`
+	// Child names the delegated child session this request mirrors,
+	// and Wrapper the parent-side delegating call it parks under (ADR
+	// 0022 §7): a pool child's parked call is requested in its own
+	// session and mirrored here so the parent's Pending surfaces it
+	// with its lineage. Both empty on an ordinary request.
+	Child   string `json:"child,omitempty"`
+	Wrapper string `json:"wrapper,omitempty"`
 }
 
 // ApprovalDecisionEntry is one decision over a parked call (ADR 0021
@@ -312,6 +319,57 @@ const (
 	ReceiptDropped = "dropped"
 )
 
+// PoolReceiptEntry is the pool receipt (ADR 0022 §4): the journey of
+// one child run a thread/pool started for this session. One entry
+// records acceptance — Status "accepted", the child session on Child,
+// the task on Prompt — a second records the slot acquisition and
+// start ("running"), and a third, linked by Receipt, records the
+// settlement: "done" (Stop carries the child's answer, Usage its
+// total), "failed" (Stop the cause), "canceled" (an explicit Cancel),
+// or "capped" (the child died on a budget — MaxSteps or a usage
+// limit). Call names the delegating tool call for wrapped
+// delegations. Pool receipt entries never enter the model's context:
+// the answer reaches the model as the delegating call's result (a
+// sync delegation) or however the application delivers it (an async
+// one); the entry is the ledger, not the channel.
+type PoolReceiptEntry struct {
+	ID       string     `json:"id"`
+	ParentID string     `json:"parent,omitempty"`
+	Created  time.Time  `json:"created"`
+	Receipt  string     `json:"receipt,omitempty"`
+	Status   string     `json:"status"`
+	Child    string     `json:"child,omitempty"`
+	Call     string     `json:"call,omitempty"`
+	Prompt   string     `json:"prompt,omitempty"`
+	Stop     string     `json:"stop,omitempty"`
+	Usage    weft.Usage `json:"usage,omitzero"`
+}
+
+// Pool receipt statuses — the wire values, pinned by the format-4
+// goldens. The machine is accepted → running → exactly one of done,
+// failed, canceled, capped.
+const (
+	// PoolAccepted marks the delegation recorded and queued for a slot.
+	PoolAccepted = "accepted"
+	// PoolRunning marks the slot acquired and the child session's turn
+	// started — the wait between acceptance and running is the pool's
+	// queue, visible.
+	PoolRunning = "running"
+	// PoolDone marks a child that ran to its intended end; Stop is its
+	// answer, Usage its total cost.
+	PoolDone = "done"
+	// PoolFailed marks a child whose run failed; Stop is the cause.
+	PoolFailed = "failed"
+	// PoolCanceled marks a child canceled by an explicit Cancel (or the
+	// pool's Close) — never by the submitting turn's own end, which an
+	// async child survives by design (ADR 0022 D4).
+	PoolCanceled = "canceled"
+	// PoolCapped marks a child that died on a budget — ErrMaxSteps or
+	// ErrUsageLimit (DeerFlow's token-capped/turn-capped collapsed; the
+	// stop reason distinguishes them).
+	PoolCapped = "capped"
+)
+
 func (MessageEntry) isEntry()          {}
 func (TurnEntry) isEntry()             {}
 func (CompactionEntry) isEntry()       {}
@@ -327,6 +385,7 @@ func (ApprovalAuditEntry) isEntry()    {}
 func (GrantEntry) isEntry()            {}
 func (GrantRevokedEntry) isEntry()     {}
 func (ReceiptEntry) isEntry()          {}
+func (PoolReceiptEntry) isEntry()      {}
 
 // idOf returns the entry's ID — the tree node's name, the one field
 // every kind carries at the same meaning. The sealed set keeps the
@@ -363,6 +422,8 @@ func idOf(e Entry) string {
 	case GrantRevokedEntry:
 		return e.ID
 	case ReceiptEntry:
+		return e.ID
+	case PoolReceiptEntry:
 		return e.ID
 	}
 	return ""
@@ -404,6 +465,8 @@ func parentOf(e Entry) string {
 		return e.ParentID
 	case ReceiptEntry:
 		return e.ParentID
+	case PoolReceiptEntry:
+		return e.ParentID
 	}
 	return ""
 }
@@ -425,6 +488,7 @@ const (
 	kindGrant            = "grant"
 	kindGrantRevoked     = "grant_revoked"
 	kindReceipt          = "receipt"
+	kindPoolReceipt      = "pool_receipt"
 )
 
 // The per-type MarshalJSON methods below are deliberately repetitive,
@@ -450,6 +514,7 @@ type (
 	grantEntryWire            GrantEntry
 	grantRevokedEntryWire     GrantRevokedEntry
 	receiptEntryWire          ReceiptEntry
+	poolReceiptEntryWire      PoolReceiptEntry
 )
 
 // approvalEntryV is the entry version the approval kinds carry on the
@@ -462,6 +527,12 @@ const approvalEntryV = 2
 // the wire (ADR 0011 §6, ADR 0019): the steering format is 3, so a
 // v0.2 reader fails loudly on a session that steered.
 const receiptEntryV = 3
+
+// poolReceiptV is the entry version the pool receipt carries on the
+// wire (ADR 0011 §6, ADR 0022): the pool's format is 4, so a reader
+// from before v0.5 fails loudly on a session that used the pool
+// instead of guessing at a kind it does not know.
+const poolReceiptV = 4
 
 // MarshalJSON encodes the entry with its "type" discriminator.
 func (e MessageEntry) MarshalJSON() ([]byte, error) {
@@ -599,6 +670,16 @@ func (e ReceiptEntry) MarshalJSON() ([]byte, error) {
 	}{kindReceipt, receiptEntryV, receiptEntryWire(e)})
 }
 
+// MarshalJSON encodes the entry with its "type" discriminator and
+// "v":4.
+func (e PoolReceiptEntry) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type string `json:"type"`
+		V    int    `json:"v"`
+		poolReceiptEntryWire
+	}{kindPoolReceipt, poolReceiptV, poolReceiptEntryWire(e)})
+}
+
 // kindVersion returns the highest entry version this build reads for a
 // wire kind (ADR 0011 §6). Kinds born in format 1 are version 1 and
 // carry no "v" on the wire; a kind added after format 1 — approvals in
@@ -616,6 +697,8 @@ func kindVersion(kind string) (int, bool) {
 		return approvalEntryV, true
 	case kindReceipt:
 		return receiptEntryV, true
+	case kindPoolReceipt:
+		return poolReceiptV, true
 	}
 	return 0, false
 }
@@ -736,6 +819,12 @@ func UnmarshalEntry(b []byte) (Entry, error) {
 			return nil, err
 		}
 		return ReceiptEntry(v), nil
+	case kindPoolReceipt:
+		var v poolReceiptEntryWire
+		if err := json.Unmarshal(b, &v); err != nil {
+			return nil, err
+		}
+		return PoolReceiptEntry(v), nil
 	default:
 		// Unreachable — kindVersion gates the switch — but a kind
 		// registered there and forgotten here must never decode as

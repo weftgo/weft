@@ -173,6 +173,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    repaired tail is rewritten on a fresh line. Backends: jsonl.Open(dir) |
 //    sqlite.Open(path) (own module, modernc) | thread.Memory(); one writer per
 //    session (ErrLocked), readers never lock. Live tail: st.(thread.Watcher).
+//    Pool (ADR 0022): pool.New(max) — the one FIFO bound (also the depth guard);
+//    p.Wrap(name, desc, agent[, pool.Async()]): sync waits for the child session's
+//    answer, async returns the receipt line; p.Submit/Cancel/Close/Receipts/Forward.
+//    Children are sessions (Header.Lineage), their cost in Usage.Delegated; a parked
+//    child mirrors onto Pending — p.Decide resumes it and resolves the parked call.
 //    Watch(ctx, id, afterEntryID). List filters: thread.Query{Meta, TitleSearch}
 //    (title = last info entry's, case-insensitive substring), Before/Limit page.
 ```

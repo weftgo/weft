@@ -374,6 +374,18 @@ file, WAL, its own module so the driver never enters `thread`). One
 writer per session — a second gets `thread.ErrLocked` — while readers
 never lock, including the live tail:
 
+Delegation is bounded and receipted (ADR 0022): `thread/pool` admits
+at most `pool.New(max)` child runs per process, FIFO. `p.Wrap` turns
+any agent into a delegation tool — sync by default, the call waiting
+for the child session's answer; `pool.Async()` returns a receipt the
+model reads in a later turn — and `p.Submit` hands background work to
+a child session directly, `p.Cancel` and a draining `p.Close` at hand.
+Every child is a session of its own, linked to the parent by lineage,
+its cost in the parent's `Usage.Delegated` bucket. A child that parks
+at an approval surfaces on the parent's `Pending()`; `p.Decide`
+resumes it, and the parent's parked call completes with the child's
+answer.
+
 ```go
 w := st.(thread.Watcher)
 for e, err := range w.Watch(ctx, s.ID(), lastEntryID) { … } // another process's tail

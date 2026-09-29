@@ -43,9 +43,18 @@ type Pool struct {
 	sem chan struct{}
 	ids func() string
 
-	mu      sync.Mutex
-	closed  bool
-	running map[string]context.CancelFunc
+	mu        sync.Mutex
+	closed    bool
+	delegates map[string]*delegate // by receipt id — Cancel's key
+	byChild   map[string]*delegate // by child session id — the bridge's key
+
+	// sessionAgents holds agents registered for child sessions —
+	// creation-time delegates and Register calls (the restart hook,
+	// ADR 0022 §7); nameAgents holds the agents the pool's wraps
+	// stand for, keyed by wrap name, which Wrap-made children record
+	// in their header metadata.
+	sessionAgents map[string]*weft.Agent
+	nameAgents    map[string]*weft.Agent
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -74,9 +83,12 @@ func New(max int, opts ...Option) *Pool {
 		panic(fmt.Sprintf("thread/pool: New called with max=%d; the bound must be at least 1", max))
 	}
 	p := &Pool{
-		max:     max,
-		sem:     make(chan struct{}, max),
-		running: map[string]context.CancelFunc{},
+		max:           max,
+		sem:           make(chan struct{}, max),
+		delegates:     map[string]*delegate{},
+		byChild:       map[string]*delegate{},
+		sessionAgents: map[string]*weft.Agent{},
+		nameAgents:    map[string]*weft.Agent{},
 	}
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	for _, o := range opts {
@@ -109,7 +121,7 @@ type Receipt struct {
 // or Close. agent must not be nil; the receipt's Child names the
 // session to watch (the v0.4 Watcher) or reopen.
 func (p *Pool) Submit(ctx context.Context, parent *thread.Session, agent *weft.Agent, prompt string) (*Receipt, error) {
-	r, _, err := p.submit(ctx, parent, agent, prompt, "", 0, true)
+	r, _, err := p.submit(ctx, parent, agent, prompt, "", "", 0, true)
 	if err != nil {
 		return nil, err
 	}
@@ -124,11 +136,13 @@ func (p *Pool) Submit(ctx context.Context, parent *thread.Session, agent *weft.A
 func (p *Pool) Cancel(receiptID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	cancel, ok := p.running[receiptID]
+	d, ok := p.delegates[receiptID]
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrNotRunning, receiptID)
 	}
-	cancel()
+	if d.cancel != nil {
+		d.cancel()
+	}
 	return nil
 }
 
@@ -148,8 +162,10 @@ func (p *Pool) Close(ctx context.Context) error {
 	}
 	p.closed = true
 	p.cancel()
-	for _, cancel := range p.running {
-		cancel()
+	for _, d := range p.delegates {
+		if d.cancel != nil {
+			d.cancel()
+		}
 	}
 	p.mu.Unlock()
 
@@ -210,13 +226,13 @@ func Receipts(parent *thread.Session) []Receipt {
 }
 
 // outcome is what a sync delegation's child came to: its answer, its
-// error, or the count of calls it left pending at an approval
-// boundary (ADR 0021 §1 — full propagation is ADR 0022 §7, built on
-// this state).
+// error, or the requests it left pending at an approval boundary
+// (ADR 0021 §1 — the pool bridges them, ADR 0022 §7).
 type outcome struct {
-	answer  string
-	err     error
-	pending int
+	answer   string
+	err      error
+	pending  int
+	requests []thread.Request
 }
 
 // submit is the one delegation path under Wrap and Submit: it creates
@@ -227,7 +243,7 @@ type outcome struct {
 // depth is the delegation chain's depth for the deadlock guard. The
 // mutex-checked closed state refuses new work before anything is
 // created.
-func (p *Pool) submit(ctx context.Context, parent *thread.Session, agent *weft.Agent, prompt, callID string, depth int, async bool) (*Receipt, outcome, error) {
+func (p *Pool) submit(ctx context.Context, parent *thread.Session, agent *weft.Agent, prompt, callID, wrapName string, depth int, async bool) (*Receipt, outcome, error) {
 	if parent == nil {
 		return nil, outcome{}, fmt.Errorf("thread/pool: delegation with no parent session")
 	}
@@ -244,11 +260,11 @@ func (p *Pool) submit(ctx context.Context, parent *thread.Session, agent *weft.A
 	}
 	p.mu.Unlock()
 
-	var opts []thread.SessionOption
-	if callID != "" {
-		opts = append(opts, thread.WithLineage(parent.ID(), callID))
-	} else {
-		opts = append(opts, thread.WithLineage(parent.ID(), ""))
+	opts := []thread.SessionOption{thread.WithLineage(parent.ID(), callID)}
+	if wrapName != "" {
+		// The wrap's name is the resume key a restarted process
+		// re-Wraps into existence (ADR 0022 §7).
+		opts = append(opts, thread.WithMeta(map[string]string{"pool_agent": wrapName}))
 	}
 	if p.ids != nil {
 		opts = append(opts, thread.IDs(p.ids))
@@ -277,6 +293,8 @@ func (p *Pool) submit(ctx context.Context, parent *thread.Session, agent *weft.A
 		runCtx, cancel = context.WithCancel(ctx)
 	}
 	runCtx = withDepth(runCtx, depth)
+	d := &delegate{cancel: cancel, child: child, parent: parent, agent: agent,
+		wrapper: callID, receipt: accept.ID}
 	p.mu.Lock()
 	if p.closed { // Close ran between the check and the registration
 		p.mu.Unlock()
@@ -287,7 +305,9 @@ func (p *Pool) submit(ctx context.Context, parent *thread.Session, agent *weft.A
 		})
 		return nil, outcome{}, ErrClosed
 	}
-	p.running[accept.ID] = cancel
+	p.delegates[accept.ID] = d
+	p.byChild[child.ID()] = d
+	p.sessionAgents[child.ID()] = agent
 	p.mu.Unlock()
 
 	rec := &Receipt{ID: accept.ID, State: thread.PoolAccepted, Child: child.ID()}
@@ -295,22 +315,27 @@ func (p *Pool) submit(ctx context.Context, parent *thread.Session, agent *weft.A
 		p.wg.Add(1)
 		go func() {
 			defer p.wg.Done()
-			p.runChild(runCtx, cancel, parent, child, agent, accept.ID, prompt)
+			p.runChild(runCtx, d, prompt)
 		}()
 		return rec, outcome{}, nil
 	}
-	out := p.runChild(runCtx, cancel, parent, child, agent, accept.ID, prompt)
+	out := p.runChild(runCtx, d, prompt)
 	return rec, out, nil
 }
 
 // runChild runs one delegation to its settlement: slot, start, run,
 // settle — in that order on the receipt (ADR 0022 §4). The slot is
-// held from start to settlement; a canceled acquisition settles
-// canceled without a start. Panics in the pool's own work are
-// contained and settle the receipt failed — a background goroutine
-// must not take the process down over a ledger entry, and the child
-// session contains its own run's panics already.
-func (p *Pool) runChild(runCtx context.Context, cancel context.CancelFunc, parent *thread.Session, child *thread.Session, agent *weft.Agent, receiptID, prompt string) outcome {
+// held from start to park-or-settlement — a child parked at a nested
+// approval holds no slot (its run is over; the boundary is
+// bookkeeping), which is what keeps a fleet of parked children from
+// starving the pool. A canceled acquisition settles canceled without
+// a start. Panics in the pool's own work are contained and settle the
+// receipt failed — a background goroutine must not take the process
+// down over a ledger entry, and the child session contains its own
+// run's panics already.
+func (p *Pool) runChild(runCtx context.Context, d *delegate, prompt string) outcome {
+	cancel := d.cancel
+	parent, child, agent, receiptID := d.parent, d.child, d.agent, d.receipt
 	// The settlement (and the running entry) append in a
 	// WithoutCancel window: a receipt that never settles because its
 	// own cancellation also canceled its ledger is a ledger that lies.
@@ -322,7 +347,6 @@ func (p *Pool) runChild(runCtx context.Context, cancel context.CancelFunc, paren
 		}
 	}()
 	defer cancel()
-	defer p.unregister(receiptID)
 
 	var out outcome
 	select {
@@ -347,10 +371,22 @@ func (p *Pool) runChild(runCtx context.Context, cancel context.CancelFunc, paren
 		res, err = turn.Wait()
 		out.answer, out.err = answerOf(res), err
 		if err == nil && res != nil && len(res.Pending) > 0 {
-			// The child parked at an approval boundary: no settlement
-			// yet — the receipt sits at running until the boundary
-			// resolves (ADR 0022 §7's resumption settles it).
+			// The child parked at an approval boundary (ADR 0022 §7):
+			// its requests mirror onto the parent — durably, before
+			// anything else happens — the receipt sits at running, and
+			// the delegate stays as the bridge a decision resumes
+			// through. The slot is already released (the child's run
+			// is over); the cancel registration retires with the
+			// delegate at settlement.
 			out.pending = len(res.Pending)
+			out.requests = child.Pending()
+			parked := mirrorRequests(out.requests, child.ID(), d.wrapper)
+			if _, merr := parent.AppendApprovalRequests(settleCtx, parked...); merr != nil {
+				agent.Logger().Error("thread/pool: nested requests not mirrored",
+					"child", child.ID(), "err", merr)
+				out.err = merr
+			}
+			d.cancel = nil
 			return out
 		}
 		if err == nil {
@@ -375,17 +411,16 @@ func (p *Pool) settle(ctx context.Context, parent *thread.Session, log *slog.Log
 		log.Error("thread/pool: settlement receipt not recorded",
 			"receipt", receiptID, "state", state, "err", err)
 	}
+	p.mu.Lock()
+	if d, ok := p.byChild[child]; ok {
+		delete(p.delegates, d.receipt)
+		delete(p.byChild, child)
+	}
+	p.mu.Unlock()
 }
 
 // release returns one slot.
 func (p *Pool) release() { <-p.sem }
-
-// unregister drops the receipt's cancel registration at settlement.
-func (p *Pool) unregister(receiptID string) {
-	p.mu.Lock()
-	delete(p.running, receiptID)
-	p.mu.Unlock()
-}
 
 // stateOf maps a child run's error to the settlement state (ADR 0022
 // §4): a budget death caps, a cancellation cancels, everything else

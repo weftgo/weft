@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -56,6 +57,9 @@ type sessionConfig struct {
 	// header (ADR 0022 §3): the parent session and the delegating
 	// call. Create-time only — Open reads it from the file.
 	lineage Lineage
+	// meta is caller metadata merged into a created session's header
+	// (WithMeta). Create-time only — later-life edits are info entries.
+	meta map[string]string
 }
 
 func resolveSession(opts ...SessionOption) sessionConfig {
@@ -88,6 +92,22 @@ func (o lineageOption) applySession(c *sessionConfig) { c.lineage = Lineage(o) }
 func WithLineage(parentSession, call string) SessionOption {
 	return lineageOption{Session: parentSession, Call: call}
 }
+
+type metaOption map[string]string
+
+func (o metaOption) applySession(c *sessionConfig) {
+	if c.meta == nil {
+		c.meta = map[string]string{}
+	}
+	for k, v := range o {
+		c.meta[k] = v
+	}
+}
+
+// WithMeta adds keys to a created session's header metadata — the
+// caller metadata List surfaces (ADR 0011 §1). A Create-time option,
+// merged over earlier ones; SetInfo is the later-life edit.
+func WithMeta(meta map[string]string) SessionOption { return metaOption(meta) }
 
 func IDs(id func() string) SessionOption {
 	if id == nil {
@@ -212,6 +232,9 @@ func Create(ctx context.Context, st Storage, agent *weft.Agent, opts ...SessionO
 	if cfg.lineage.Session != "" {
 		l := cfg.lineage
 		h.Lineage = &l
+	}
+	if len(cfg.meta) > 0 {
+		h.Meta = maps.Clone(cfg.meta)
 	}
 	if err := st.Create(ctx, h); err != nil {
 		return nil, err
@@ -800,6 +823,44 @@ func (s *Session) AppendPoolReceipt(ctx context.Context, e PoolReceiptEntry) (Po
 	})
 	if err != nil {
 		return PoolReceiptEntry{}, err
+	}
+	return out, nil
+}
+
+// AppendApprovalRequests appends mirrored approval requests in one
+// atomic batch (ADR 0022 §7): the pool writes a child session's parked
+// calls onto the parent's tree — Child naming the session they park
+// in, Wrapper the delegating call they park under — so the parent's
+// Pending surfaces them and a decision records like any other. The
+// entries' tree fields are minted here; the stored entries return.
+// Mirrors are ledger until decided: they never join the model's
+// context, and their resolution is the pool's to route.
+func (s *Session) AppendApprovalRequests(ctx context.Context, reqs ...ApprovalRequestEntry) ([]ApprovalRequestEntry, error) {
+	if len(reqs) == 0 {
+		return nil, fmt.Errorf("thread: AppendApprovalRequests with no requests")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	entries := make([]Entry, 0, len(reqs))
+	parent := s.leaf
+	out := make([]ApprovalRequestEntry, 0, len(reqs))
+	for _, r := range reqs {
+		r.ID, r.ParentID, r.Created = s.mintIDLocked(), parent, time.Now().UTC()
+		entries = append(entries, r)
+		out = append(out, r)
+		parent = r.ID
+	}
+	if err := s.st.Append(ctx, s.header.ID, entries...); err != nil {
+		return nil, err
+	}
+	for _, e := range entries {
+		s.adoptLocked(e)
+	}
+	if err := s.flushLocked(ctx); err != nil {
+		return nil, fmt.Errorf("thread: mirrored request flush: %w", err)
 	}
 	return out, nil
 }

@@ -197,6 +197,13 @@ type ApprovalRequestEntry struct {
 	RunID      string          `json:"run_id"`
 	Reason     string          `json:"reason,omitempty"`
 	Expiry     time.Time       `json:"expiry,omitzero"`
+	// Child names the delegated child session this request mirrors,
+	// and Wrapper the parent-side delegating call it parks under (ADR
+	// 0022 §7): a pool child's parked call is requested in its own
+	// session and mirrored here so the parent's Pending surfaces it
+	// with its lineage. Both empty on an ordinary request.
+	Child   string `json:"child,omitempty"`
+	Wrapper string `json:"wrapper,omitempty"`
 }
 
 // ApprovalDecisionEntry is one decision over a parked call (ADR 0021

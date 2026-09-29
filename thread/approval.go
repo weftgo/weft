@@ -72,6 +72,12 @@ type Request struct {
 	// exactly what it vouched for — and empty on the Pending view,
 	// which mints no challenge.
 	Nonce string
+	// Child names the delegated session this call parks in, when the
+	// call is a pool child's mirrored onto this parent (ADR 0022 §7):
+	// the lineage a decision routes by — decide it through the pool,
+	// which resumes the child and then completes the delegation. Empty
+	// on an ordinary request.
+	Child string
 	KeyID string
 }
 
@@ -230,7 +236,33 @@ func RequestExpiry(d time.Duration) SessionOption { return requestExpiryOption(d
 func (s *Session) Pending() []Request {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.pendingLocked()
+	return s.offeredPendingLocked()
+}
+
+// offeredPendingLocked is Pending's view of the boundary (ADR 0022 §7):
+// the raw pending, minus a delegating wrapper call a mirrored child
+// request parks under (the wrapper completes through its child, never
+// by a direct decision), plus the mirrored child requests themselves —
+// with their lineage, Child naming the session a decision resumes.
+// pendingLocked stays the raw truth the resume machinery reads: the
+// wrapper is pending there until the pool resolves it, which is what
+// holds a plain Send while a nested approval is open. Callers hold
+// s.mu.
+func (s *Session) offeredPendingLocked() []Request {
+	wrapped := map[string]bool{}
+	for _, e := range s.order {
+		if re, ok := e.(ApprovalRequestEntry); ok && re.Child != "" && re.Wrapper != "" {
+			wrapped[re.Wrapper] = true
+		}
+	}
+	var out []Request
+	for _, r := range s.pendingLocked() {
+		if wrapped[r.CallID] {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // Decide records decisions over the session's pending calls, durably,
@@ -709,6 +741,7 @@ func requestFromEntry(session string, e ApprovalRequestEntry) Request {
 		Session: session, CallID: e.CallID, Tool: e.Tool,
 		Args: slices.Clone(e.Args), ArgsSHA256: e.ArgsSHA256,
 		RunID: e.RunID, Reason: e.Reason, Expiry: e.Expiry, Created: e.Created,
+		Child: e.Child,
 	}
 }
 
@@ -909,9 +942,6 @@ func effectiveDecision(decisions []ApprovalDecisionEntry, quorum int) (ApprovalD
 // Callers hold s.mu.
 func (s *Session) pendingLocked() []Request {
 	dangling := s.danglingCallsLocked()
-	if len(dangling) == 0 {
-		return nil
-	}
 	requests, decisions := s.approvalWalkLocked()
 	var out []Request
 	for _, c := range dangling {
@@ -930,6 +960,22 @@ func (s *Session) pendingLocked() []Request {
 			Session: s.header.ID, CallID: c.ID, Tool: c.Name,
 			Args: slices.Clone(c.Args), ArgsSHA256: hashArgs(c.Args),
 		})
+	}
+	// Mirrored child requests (ADR 0022 §7): a pool child's parked
+	// call is requested in its own session and mirrored here, so the
+	// parent's pending — raw and offered alike — carries it with its
+	// lineage, and a decision addressed to it records like any other.
+	// An async child's mirror is the only shape that surfaces: the
+	// parent's own transcript never dangles for it.
+	for _, e := range s.order {
+		re, ok := e.(ApprovalRequestEntry)
+		if !ok || re.Child == "" {
+			continue
+		}
+		if _, ok := effectiveDecision(scopedDecisions(decisions[re.CallID], re.RunID), s.cfg.quorum); ok {
+			continue
+		}
+		out = append(out, requestFromEntry(s.header.ID, re))
 	}
 	return out
 }

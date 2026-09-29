@@ -70,6 +70,12 @@ func (p *Pool) Wrap(name, description string, agent *weft.Agent, opts ...WrapOpt
 			o.applyWrap(&cfg)
 		}
 	}
+	// The wrap's name is the resume key: children it makes record the
+	// name in their header metadata, and a restarted process that
+	// re-Wraps the same names restores the register (ADR 0022 §7).
+	p.mu.Lock()
+	p.nameAgents[name] = agent
+	p.mu.Unlock()
 	mw := func(next weft.ToolCaller) weft.ToolCaller {
 		return func(ctx context.Context, call weft.ToolCallPart) (string, error) {
 			parent := thread.SessionFromContext(ctx)
@@ -94,17 +100,25 @@ func (p *Pool) Wrap(name, description string, agent *weft.Agent, opts ...WrapOpt
 						name, depth, p.max)}
 			}
 			if cfg.async {
-				r, _, err := p.submit(ctx, parent, agent, in.Prompt, call.ID, depthFromContext(ctx)+1, true)
+				r, _, err := p.submit(ctx, parent, agent, in.Prompt, call.ID, name, depthFromContext(ctx)+1, true)
 				if err != nil {
 					return "", err
 				}
 				return fmt.Sprintf(receiptLine, r.ID), nil
 			}
-			_, out, err := p.submit(ctx, parent, agent, in.Prompt, call.ID, depthFromContext(ctx)+1, false)
+			r, out, err := p.submit(ctx, parent, agent, in.Prompt, call.ID, name, depthFromContext(ctx)+1, false)
 			if err != nil {
 				return "", err
 			}
 			switch {
+			case out.pending > 0:
+				// Park the parent's call (ADR 0022 §7): the child's
+				// requests are mirrored durable on the parent, and
+				// this call completes — resolved with the child's
+				// answer — when they are decided. The park is the one
+				// rule tool middleware already had (ADR 0007).
+				return "", fmt.Errorf("thread/pool: agent %q awaits approval in child session %s: %w",
+					name, r.Child, weft.ErrApprovalRequired)
 			case out.err != nil:
 				if errors.Is(out.err, context.Canceled) || errors.Is(out.err, context.DeadlineExceeded) {
 					// The parent's own cancellation or the tool's
@@ -117,9 +131,6 @@ func (p *Pool) Wrap(name, description string, agent *weft.Agent, opts ...WrapOpt
 				return "", &weft.ToolError{Code: weft.CodeSubagentFailed,
 					Message: fmt.Sprintf("agent %q failed at step %d: %v", name, re.Step, re.Err),
 					Err:     out.err}
-			case out.pending > 0:
-				return "", &weft.ToolError{Code: weft.CodeSubagentPending,
-					Message: fmt.Sprintf("agent %q ended awaiting approval of %d call(s)", name, out.pending)}
 			}
 			return out.answer, nil
 		}

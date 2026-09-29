@@ -1,3 +1,57 @@
+## thread 0.5.0 (unreleased)
+
+`thread/pool` — bounded concurrent child runs, receipts, nested
+approvals, explicit steering forwarding (plan §8, ADR 0022, decided
+2026-09-29).
+
+### Added
+
+- `thread/pool.New(max)` — one process-wide FIFO semaphore over every
+  child run the pool starts, wrapped or submitted; the bound doubles
+  as the depth guard (a sync chain deeper than `max` could only
+  deadlock, refused with `SUBAGENT_CYCLE`). `pool.IDs` for
+  deterministic child session ids in tests.
+- `p.Wrap(name, description, agent, opts...)` — a delegation tool built
+  on the core's Subagent under a tool-level `weft.WrapTools`, no core
+  change. Sync by default (the call waits, the result is the child
+  session's answer); `pool.Async()` returns the receipt line as the
+  tool result (model-visible, golden-pinned) for a later turn to read.
+  `pool.ToolOptions` forwards weft tool options. Outside a session run
+  the wrap falls back to the ordinary subagent path under the slot.
+- Every pool child is a session of its own in the parent's storage,
+  its header naming the origin (`Header.Lineage`: parent_session,
+  parent_call_id) and, for wrapped children, the wrap name in metadata
+  — the resume key a restarted process re-Wraps into existence.
+- `p.Submit(ctx, parent, agent, prompt)` — the async primitive the
+  application calls directly; `p.Cancel(receiptID)`; `p.Close(ctx)`
+  (cancels every running child and drains); `pool.Receipts(parent)`
+  (entry-driven, restart-safe); `p.Register(sessionID, agent)` — the
+  restart hook for children no wrap names.
+- Receipts as entries: the `pool_receipt` kind, `"v":4` (format-4
+  goldens), the machine accepted → running → done | failed | canceled
+  | capped (capped = a budget death: `ErrMaxSteps` or `ErrUsageLimit`),
+  settlement carrying the child's stop text and usage.
+- `thread.Usage.Delegated` — the ledger's third bucket, summed from
+  settled receipts; every pool child bills there (a session-run child
+  has no ride on the core's subagent roll-up, which bare `Subagent`
+  children keep).
+- Nested approvals (ADR 0021 §6 resolved by ADR 0022 §7): a child that
+  parks mirrors its requests onto the parent — namespaced call ids
+  (`<child>/<call>`), `Child`/`Wrapper` on the request entry — so
+  `Pending()` surfaces them with their lineage and hides the parked
+  wrapper; `p.Decide(ctx, parent, ds...)` records in the parent,
+  replays into the child, resumes it, and completes the parent's parked
+  call with the child's answer (resolve for a done child,
+  resolve_error otherwise); a re-parking child mirrors again. Signed
+  decisions verify in the parent (`s.Request`/`DecideSigned`) and the
+  pool's empty `Decide` pumps the children they decided.
+- `p.Forward(receiptID, msg)` — explicit steering of a running child
+  through its session (ADR 0019 §7); nothing forwards implicitly.
+- thread surface the pool builds on: `Session.Storage`, `Lineage`,
+  `SessionFromContext` (a run's context carries its session),
+  `AppendPoolReceipt`, `AppendApprovalRequests`, `WithLineage`,
+  `WithMeta`; `Request.Child`.
+
 ## thread 0.4.0 — 2026-09-29
 
 The second backend, per-step durability, and the live tail (plan §7,

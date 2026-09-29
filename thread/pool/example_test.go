@@ -81,3 +81,52 @@ func ExamplePool_Submit() {
 	// accepted: accepted
 	// settled: done - background answer
 }
+
+// A nested approval, end to end (ADR 0022 §7): the wrapped child parks
+// at its gated tool, the parent's delegating call parks with it, the
+// child's request surfaces on the parent's Pending with its lineage,
+// and one decision through the pool resumes the child and completes
+// the parent's call with the child's answer — the parent model reads
+// it as the tool result and finishes its turn.
+func ExamplePool_Decide() {
+	ctx := context.Background()
+	gated := weft.Tool("refund", "", func(_ context.Context, in struct{ OrderID string }) (string, error) {
+		return "refunded " + in.OrderID, nil
+	}, weft.RequireApproval())
+	child := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"42"}`}),
+		wefttest.Say("refund issued"),
+	), gated)
+	p := pool.New(2)
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research",
+			Args: wefttest.Args(struct{ Prompt string }{"refund order 42"})}),
+		wefttest.Say("handled"),
+	), p.Wrap("research", "delegates the refund flow", child))
+	s, _ := thread.Create(ctx, thread.Memory(), parent)
+	t1, _ := s.Send(ctx, weft.User("refund order 42"))
+	if _, err := t1.Wait(); err != nil {
+		panic(err)
+	}
+	pend := s.Pending()
+	fmt.Println("pending:", pend[0].Tool)
+	childTurn, err := p.Decide(ctx, s, thread.Approve(pend[0].CallID))
+	if err != nil {
+		panic(err)
+	}
+	if _, err := childTurn.Wait(); err != nil {
+		panic(err)
+	}
+	res, err := t1.Next().Wait() // the parent's parked run, resumed with the answer
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("parent:", res.Text())
+	for _, r := range pool.Receipts(s) {
+		fmt.Println("receipt:", r.State, "-", r.Stop)
+	}
+	// Output:
+	// pending: refund
+	// parent: handled
+	// receipt: done - refund issued
+}

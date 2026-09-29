@@ -135,3 +135,59 @@ func TestWithLineage(t *testing.T) {
 		}
 	})
 }
+
+// AppendApprovalRequests mints and batches: one atomic append, tree
+// fields set, the stored entries returned (ADR 0022 §7's mirrors).
+func TestAppendApprovalRequests(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		s, err := thread.Create(ctx, st, weft.New(wefttest.Script()))
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if _, err := s.AppendApprovalRequests(ctx); err == nil {
+			t.Errorf("empty batch accepted")
+		}
+		stored, err := s.AppendApprovalRequests(ctx,
+			thread.ApprovalRequestEntry{CallID: "call_1", Tool: "spend", Child: "s_child", Wrapper: "call_w"},
+			thread.ApprovalRequestEntry{CallID: "call_2", Tool: "spend", Child: "s_child", Wrapper: "call_w"},
+		)
+		if err != nil {
+			t.Fatalf("AppendApprovalRequests: %v", err)
+		}
+		if len(stored) != 2 || stored[0].ID == "" || stored[1].ID == "" {
+			t.Fatalf("stored = %+v", stored)
+		}
+		if stored[1].ParentID != stored[0].ID {
+			t.Errorf("batch not chained: %+v", stored)
+		}
+		// The offered view surfaces both mirrors, never the wrapper
+		// they park under.
+		pend := s.Pending()
+		if len(pend) != 2 || pend[0].Child != "s_child" || pend[0].CallID != "call_1" {
+			t.Fatalf("Pending = %+v", pend)
+		}
+	})
+}
+
+// WithMeta lands in the created header and surfaces through List.
+func TestWithMeta(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		agent := weft.New(wefttest.Script())
+		s, err := thread.Create(ctx, st, agent, thread.WithMeta(map[string]string{"app": "billing"}))
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if got := s.Meta()["app"]; got != "billing" {
+			t.Errorf("meta = %q", got)
+		}
+		page, err := thread.List(ctx, st, thread.Query{})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(page.Sessions) != 1 || page.Sessions[0].Meta["app"] != "billing" {
+			t.Errorf("listed = %+v", page.Sessions)
+		}
+	})
+}

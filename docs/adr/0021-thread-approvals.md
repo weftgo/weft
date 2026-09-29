@@ -141,3 +141,20 @@ A grant approves future requests without asking:
   run-boundary model.
 - **Keys in the session file** — a leaked file must not forge decisions.
 - **Grants that match on tool name only** — Crush #497.
+
+## Amendment (2026-09-29 — the boundary holds the tail raw)
+
+An open approval boundary holds the compaction trigger: a parked
+tail's dangling calls are exactly what the resume's decisions resolve,
+and a compaction that summarized them would orphan every decision.
+While a boundary is open no automatic compaction runs and a manual
+`Compact` refuses, naming the pending approvals; the trigger re-arms
+on the turn that resolves the boundary (the resume's own post-turn
+site). The rule was implemented and pinned from the start
+(`compaction.go` cites "ADR 0021 §1's raw-transcript rule") but stated
+in no ADR — the 2026-09-29 release review asked for it to be decided,
+not drifted; this is that decision. A shared grant's matches are also
+namespaced in the audit detail ("shared grant …"), so a store id that
+collides with a session grant's entry id can never inflate the
+session grant's use count — audit prose is not a data channel between
+the two scopes (§4).

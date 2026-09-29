@@ -176,9 +176,8 @@ func (p *Pool) pump(ctx context.Context, parent *thread.Session) (*thread.Turn, 
 			}
 			continue
 		}
-		if d.pumping {
-			continue
-		}
+		// The pumping check is resume's own, under the pool lock — an
+		// unlocked peek here would race the very write it reads.
 		t, err := p.resume(ctx, parent, d, reqs)
 		if err != nil {
 			if firstErr == nil {
@@ -225,7 +224,10 @@ func (p *Pool) delegateFor(ctx context.Context, parent *thread.Session, childID,
 			"child", childID, "err", err)
 		return nil
 	}
-	d := &delegate{child: child, parent: parent, agent: agent, wrapper: wrapper, receipt: receipt}
+	// A rebuilt delegate bridges a parked child by construction — the
+	// mirrors are why pump looked for it — so its phase starts parked
+	// and it carries no cancel: nothing of its run is left to cancel.
+	d := &delegate{child: child, parent: parent, agent: agent, wrapper: wrapper, receipt: receipt, phase: phaseParked}
 	p.mu.Lock()
 	if existing, ok := p.byChild[childID]; ok {
 		p.mu.Unlock()

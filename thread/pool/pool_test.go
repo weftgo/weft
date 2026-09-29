@@ -446,6 +446,49 @@ func TestSubmitCancel(t *testing.T) {
 	}
 }
 
+// Cancel's contract on a parked receipt (D4, ErrNotRunning's doc): a
+// child at an approval boundary is not running — its fate is the
+// decision, not a cancellation — so Cancel refuses with ErrNotRunning
+// instead of silently succeeding at nothing, and the boundary still
+// decides afterwards.
+func TestCancelParkedRefuses(t *testing.T) {
+	ctx := context.Background()
+	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	p := pool.New(1)
+	child, ran := gatedChild(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}),
+		wefttest.Say("decided, not canceled"),
+	)
+	r, err := p.Submit(ctx, s, child, "refund order 1")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	waitState(t, s, thread.PoolRunning)
+	deadline := time.Now().Add(5 * time.Second)
+	for len(s.Pending()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(s.Pending()) != 1 {
+		t.Fatalf("mirrored requests = %+v", s.Pending())
+	}
+	if err := p.Cancel(r.ID); !errors.Is(err, pool.ErrNotRunning) {
+		t.Errorf("Cancel on a parked receipt err = %v, want ErrNotRunning", err)
+	}
+	if _, err := p.Decide(ctx, s, thread.Approve(s.Pending()[0].CallID)); err != nil {
+		t.Fatalf("Decide after the refused Cancel: %v", err)
+	}
+	final := waitState(t, s, thread.PoolDone)
+	if final.ID != r.ID || final.Stop != "decided, not canceled" {
+		t.Errorf("settled = %+v", final)
+	}
+	if got := ran.snapshot(); len(got) != 1 || !got[0] {
+		t.Errorf("approved flags = %v, want [true]", got)
+	}
+	if err := p.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
 // Close drains: no new work, every child canceled and settled.
 func TestCloseDrains(t *testing.T) {
 	ctx := context.Background()

@@ -25,10 +25,11 @@ import (
 // closing pool takes no new work.
 var ErrClosed = errors.New("thread/pool: pool is closed")
 
-// ErrNotRunning is returned by Cancel for a receipt no running child
-// answers to — settled before the call, or never this pool's (a
-// receipt id from another process is not distinguishable from a
-// settled one, and both refuse the same way).
+// ErrNotRunning is returned by Cancel and Forward for a receipt no
+// running child answers to — settled before the call, parked at an
+// approval (its fate is the decision, not a cancellation or a steer),
+// or never this pool's (a receipt id from another process is not
+// distinguishable from a settled one, and all refuse the same way).
 var ErrNotRunning = errors.New("thread/pool: receipt is not running")
 
 // Pool is a process-wide bound on concurrent child runs (ADR 0022 §1,
@@ -132,17 +133,17 @@ func (p *Pool) Submit(ctx context.Context, parent *thread.Session, agent *weft.A
 // cancellation an async child has (D4). The child's session records
 // the canceled turn and the receipt settles canceled; a receipt that
 // is queued but not yet running is dequeued the same way. A receipt
-// with no running child fails with ErrNotRunning.
+// with no running child — settled, parked at an approval, or never
+// this pool's — fails with ErrNotRunning: a parked child's fate is
+// the decision that resumes it, not a cancellation.
 func (p *Pool) Cancel(receiptID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	d, ok := p.delegates[receiptID]
-	if !ok {
+	if !ok || d.phase == phaseParked || d.cancel == nil {
 		return fmt.Errorf("%w: %s", ErrNotRunning, receiptID)
 	}
-	if d.cancel != nil {
-		d.cancel()
-	}
+	d.cancel()
 	return nil
 }
 
@@ -287,9 +288,15 @@ func (p *Pool) submit(ctx context.Context, parent *thread.Session, agent *weft.A
 	// The child's run context: pool-owned for an async child (it
 	// survives the submitting turn — D4), the delegating call's for a
 	// sync one (it cancels with the parent — ADR 0014's rule). Cancel
-	// reaches either through the registry.
-	runCtx, cancel := context.WithCancel(p.ctx)
-	if !async {
+	// reaches either through the registry. Only the branch taken may
+	// build its context: a pool-owned WithCancel dropped on the sync
+	// path would stay registered on the pool's context until Close,
+	// one leaked child per sync delegation.
+	var runCtx context.Context
+	var cancel context.CancelFunc
+	if async {
+		runCtx, cancel = context.WithCancel(p.ctx)
+	} else {
 		runCtx, cancel = context.WithCancel(ctx)
 	}
 	runCtx = withDepth(runCtx, depth)
@@ -365,8 +372,12 @@ func (p *Pool) runChild(runCtx context.Context, d *delegate, prompt string) outc
 		agent.Logger().Error("thread/pool: running receipt not recorded", "receipt", receiptID, "err", err)
 	}
 
-	turn, err := child.Send(runCtx, weft.User(prompt))
+	// Running before the turn flies: the mark must never trail the run
+	// it names — a Forward arriving the moment the model began would
+	// read a stale queued phase and refuse a running child. The mark
+	// happens-before Send returns, so before anything the run does.
 	p.markPhase(d, phaseRunning)
+	turn, err := child.Send(runCtx, weft.User(prompt))
 	if err == nil {
 		var res *weft.RunResult
 		res, err = turn.Wait()
@@ -377,8 +388,9 @@ func (p *Pool) runChild(runCtx context.Context, d *delegate, prompt string) outc
 			// anything else happens — the receipt sits at running, and
 			// the delegate stays as the bridge a decision resumes
 			// through. The slot is already released (the child's run
-			// is over); the cancel registration retires with the
-			// delegate at settlement.
+			// is over); the delegate retires with the settlement, and
+			// its cancel — the run's own, already-done context — stays
+			// for Close, where canceling it is a no-op.
 			out.pending = len(res.Pending)
 			out.requests = child.Pending()
 			p.markPhase(d, phaseParked)
@@ -388,7 +400,6 @@ func (p *Pool) runChild(runCtx context.Context, d *delegate, prompt string) outc
 					"child", child.ID(), "err", merr)
 				out.err = merr
 			}
-			d.cancel = nil
 			return out
 		}
 		if err == nil {

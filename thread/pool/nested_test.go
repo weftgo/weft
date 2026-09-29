@@ -464,6 +464,84 @@ func TestForward(t *testing.T) {
 	}
 }
 
+// Forward serves the whole running phase, from the turn's start: the
+// running mark lands before the child's Send flies, so a steer sent
+// the moment the model began is never refused as queued — the window
+// between Send returning and the mark was a false ErrNotRunning.
+func TestForwardSeesStart(t *testing.T) {
+	ctx := context.Background()
+	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	p := pool.New(1)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	child := weft.New(blocking{release: release, text: "ran",
+		onStart: func() { once.Do(func() { close(started) }) }})
+	r, err := p.Submit(ctx, s, child, "go")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	<-started // the model is running: Forward must serve it, not refuse
+	if _, err := p.Forward(ctx, r.ID, weft.User("steer")); err != nil {
+		t.Fatalf("Forward at the run's start: %v", err)
+	}
+	close(release)
+	waitState(t, s, thread.PoolDone)
+	if err := p.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+// Concurrent Decides over one parent are safe: pumps racing an
+// approving Decide see the in-flight resume and skip it — one resume
+// per child, whichever call got there first (the pumping flag is pool
+// state, read under the pool lock).
+func TestConcurrentDecide(t *testing.T) {
+	ctx := context.Background()
+	for i := 0; i < 8; i++ {
+		s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+		p := pool.New(1)
+		child, _ := gatedChild(
+			wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}),
+			wefttest.Say("once only"),
+		)
+		if _, err := p.Submit(ctx, s, child, "refund order 1"); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for len(s.Pending()) == 0 && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		if len(s.Pending()) != 1 {
+			t.Fatalf("mirrored requests = %+v", s.Pending())
+		}
+		call := s.Pending()[0].CallID
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for g := 0; g < 3; g++ {
+			wg.Add(1)
+			go func(approve bool) {
+				defer wg.Done()
+				<-start
+				if approve {
+					_, _ = p.Decide(ctx, s, thread.Approve(call))
+					return
+				}
+				_, _ = p.Decide(ctx, s) // a pure pump
+			}(g == 0)
+		}
+		close(start)
+		wg.Wait()
+		final := waitState(t, s, thread.PoolDone)
+		if final.Stop != "once only" {
+			t.Fatalf("iteration %d settled = %+v", i, final)
+		}
+		if err := p.Close(ctx); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	}
+}
+
 // The bare SUBAGENT_PENDING path is untouched: a wrapped tool called
 // outside any session — no parent to mirror onto — keeps the ordinary
 // subagent behaviour, where a child that parks fails the call loudly.

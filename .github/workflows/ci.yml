@@ -90,6 +90,9 @@ jobs:
       - name: apidiff (store module vs last store tag)
         run: scripts/apidiff.sh "" store
 
+      - name: apidiff (thread module vs last thread tag)
+        run: scripts/apidiff.sh "" thread
+
   # The offline gate (ADR 0013's kill-switch clause): the whole
   # workspace stays green under WEFT_MODEL_REQUESTS=deny — suites that
   # must never reach the network get loud failures, not silent egress.

@@ -131,9 +131,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 // 8. Sessions (module weft/thread; jsonl.Open(dir) | thread.Memory()):
 //    s, _ := thread.Create(ctx, st, agent) — the append-only entry tree; every write
 //    through Storage.Append; s.Context() is the leaf's messages, repaired.
-//    turn, _ := s.Send(ctx, weft.User("…"), thread.RunOptions(weft.Deny(...))) —
-//    prompt durable before the run; turn.Wait(); busy: Queue (default) or
-//    thread.BusyPolicy(thread.Reject) → ErrBusy.
+//    turn, _ := s.Send(ctx, weft.User("…")) — prompt durable before the run;
+//    turn.Wait(); busy: Queue (default) or thread.BusyPolicy(thread.Reject) → ErrBusy.
 //    s.Branch(ctx, entryID[, thread.SummarizeLeft()]), s.Fork(ctx, entryID) — the tree,
 //    nothing lost; s.Label, s.SetInfo, s.Custom, s.CustomMessage, s.Pin.
 //    Compaction (ADR 0020): thread.ContextWindow(n) arms the trigger (reported input +
@@ -141,6 +140,14 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    s.PreviewCompaction, s.ApplyCompaction, s.Uncompact; five layers (SummaryModel,
 //    SummaryPrompt/Focus/MaxTokens, WithSummarizer/Compactor/Trimmer, hooks,
 //    thread.PreferNative), thread.ClearOldToolResults(n) — nothing ever deleted.
+//    Approvals (ADR 0021): s.Pending() (restart-safe), s.Decide(ctx, thread.Approve(id) |
+//    Deny/Resolve/ResolveError | ApproveAlways) → auto-resume, turn.Next() the resumed
+//    turn, s.Resume(ctx); chain: s.Grant(ctx, thread.Grant{Tool, Args: ArgEquals/ArgPrefix/
+//    ArgGlob, Deny}), s.Revoke, WithGrantStore, WithApprover + ApproverTimeout, Quorum(n),
+//    thread.RequestExpiry, thread.OnRequest, s.Audit(); signed: thread.NewKeyring +
+//    WithKeyring, s.Request(id) → thread.SignDecision(key, r, d) → s.DecideSigned (fail-
+//    closed: ErrBadSignature/ErrExpired/ErrReplay/ErrArgsChanged/ErrUnknownKey),
+//    thread.RequireSigned(); a Send while approvals pend queues behind them.
 ```
 
 Test offline with `wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))`;

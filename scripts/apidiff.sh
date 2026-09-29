@@ -10,8 +10,11 @@
 #
 # Usage: scripts/apidiff.sh [base-ref] [module-dir]
 #   module-dir "." (the default) is the root module; "store" is the
-#   store module. base-ref defaults to the module's newest matching
-#   tag reachable from HEAD; an explicit empty string means the same.
+#   store module; "thread" is the thread module. base-ref defaults to
+#   the module's newest matching tag reachable from HEAD; an explicit
+#   empty string means the same. A module with no matching tag yet
+#   skips with a note — nothing to diff against, nothing vouched for;
+#   the gate starts at the release after the first tag.
 #
 # Pre-1.0 evolutions that are source-compatible but flagged by apidiff
 # (widening a return type to a superset interface, adding a trailing
@@ -33,11 +36,16 @@ mod="${2:-.}"
 case "$mod" in
   .) tagpat='v*' ;;
   store) tagpat='store/v*' ;;
-  *) echo "apidiff: unknown module dir '$mod' (want . or store)" >&2; exit 2 ;;
+  thread) tagpat='thread/v*' ;;
+  *) echo "apidiff: unknown module dir '$mod' (want ., store or thread)" >&2; exit 2 ;;
 esac
-base="${1:-$(git describe --tags --abbrev=0 --match "$tagpat" HEAD)}"
+base="${1:-$(git describe --tags --abbrev=0 --match "$tagpat" HEAD 2>/dev/null || true)}"
 if [ -z "$base" ]; then
-  base="$(git describe --tags --abbrev=0 --match "$tagpat" HEAD)"
+  base="$(git describe --tags --abbrev=0 --match "$tagpat" HEAD 2>/dev/null || true)"
+fi
+if [ -z "$base" ]; then
+  echo "apidiff: $mod has no $tagpat tag reachable from HEAD — the gate starts at the release after the module's first tag; skipping"
+  exit 0
 fi
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

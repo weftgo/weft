@@ -6,7 +6,7 @@ GO ?= go
 # SDKs are required only by the adapter modules.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-store apidiff-selftest offline fuzz studio-build studio-check
+.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-store apidiff-thread apidiff-selftest offline fuzz studio-build studio-check
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -46,6 +46,12 @@ apidiff: tools
 # same way when they tag.
 apidiff-store: tools
 	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh "" store
+
+# The thread module's half — vs the last thread/v* tag, from
+# thread/v0.2.0 on (plan §10, as store joined at store/v0.1.1). Before
+# the first tag exists the gate skips with a note.
+apidiff-thread: tools
+	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh "" thread
 
 # Exercises the gates' own failure modes — a broken tree must fail
 # them, never read green.

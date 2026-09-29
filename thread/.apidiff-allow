@@ -1,0 +1,7 @@
+# The thread module's pre-1.0 apidiff allowances: one exact apidiff
+# line per acknowledged incompatibility, with the justification that
+# reviewed it. Anything not listed fails the build. Post-1.0 this file
+# is emptied and stays empty (plan §10: v0.8 → v0.9 is the first pair
+# gated with no allowances).
+#
+# v0.2 added to the v0.1 surface without breaking it — no entries yet.

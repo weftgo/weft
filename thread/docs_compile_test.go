@@ -112,4 +112,81 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 	if err := again.Compact(ctx, thread.Instructions("focus on the API design")); err != nil {
 		t.Log("a small session has nothing to compact — fine:", err)
 	}
+
+	// README: the approvals block. A gated tool parks; Pending,
+	// Decide, Turn.Next, the grant, and the signed exchange all exist
+	// exactly as written.
+	apAgent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "deploy"}), wefttest.Say("done")),
+		weft.Tool("deploy", "Deploy.", func(context.Context, struct{}) (string, error) {
+			return "deployed", nil
+		}, weft.RequireApproval()))
+	s4, err := thread.Create(ctx, thread.Memory(), apAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apTurn, err := s4.Send(ctx, weft.User("Deploy to prod."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apRes, err := apTurn.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = apRes
+	for _, r := range s4.Pending() {
+		notify := r.CallID
+		_ = notify
+	}
+	if pend := s4.Pending(); len(pend) > 0 {
+		rt, err := s4.Decide(ctx, thread.Approve(pend[0].CallID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rt != nil {
+			if _, err := rt.Wait(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		follow := apTurn.Next()
+		_ = follow
+	}
+	if err := s4.Grant(ctx, thread.Grant{
+		Tool: "run",
+		Args: []thread.Arg{thread.ArgGlob("/command", "go test*")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ring, err := thread.NewKeyring(thread.Key{ID: "k1", Secret: []byte("docs secret, sixteen bytes"), Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	apAgent2 := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "deploy"}), wefttest.Say("done")),
+		weft.Tool("deploy", "Deploy.", func(context.Context, struct{}) (string, error) {
+			return "deployed", nil
+		}, weft.RequireApproval()))
+	s5, err := thread.Create(ctx, thread.Memory(), apAgent2, thread.WithKeyring(ring))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sdTurn, err := s5.Send(ctx, weft.User("Deploy again."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sdTurn.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if pend := s5.Pending(); len(pend) > 0 {
+		r, err := s5.Request(pend[0].CallID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sd := thread.SignDecision([]byte("docs secret, sixteen bytes"), r, thread.Approve(pend[0].CallID))
+		rt, err := s5.DecideSigned(ctx, sd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = rt
+	}
 }

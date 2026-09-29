@@ -41,6 +41,14 @@ func (s *Session) interruptSendLocked(ctx context.Context, msg weft.Message, rol
 			it.rollback = true
 			if i, ok := s.byID[it.id]; ok {
 				it.preTurn = parentOf(s.order[i]) // the leaf before this turn's receipt entry
+			} else {
+				// The receipt has not landed yet — the runner marks a
+				// turn in-flight before its prompt appends (an
+				// interrupt at birth), and a resume turn's entry lands
+				// only at its end. The leaf now is the line before the
+				// turn either way: the rollback targets it instead of
+				// silently no-op'ing.
+				it.preTurn = s.leaf
 			}
 		}
 		cancel := it.cancel

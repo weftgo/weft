@@ -1,0 +1,1 @@
+{"type":"grant","v":2,"id":"e_01J8X9M2K7QW4R5N8T6V2B3C4V","parent":"e_01J8X9M2K7QW4R5N8T6V2B3C4T","created":"2026-09-28T12:00:14.123456789Z","tool":"run_command","deny":true,"reason":"no network from tests","expiry":"2026-09-28T12:15:00.123456789Z","max_uses":3}

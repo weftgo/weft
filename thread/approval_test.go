@@ -765,6 +765,14 @@ func TestApprovalContextAfterPark(t *testing.T) {
 // The format-2 samples: the approvals entry kinds (ADR 0021 §1–§2),
 // with fixed ids and times so the golden bytes are deterministic.
 
+// Grant golden ids, continuing the entry chain.
+const (
+	grantID0 = "e_01J8X9M2K7QW4R5N8T6V2B3C4T"
+	grantID1 = "e_01J8X9M2K7QW4R5N8T6V2B3C4V"
+)
+
+func entryID12Safe() string { return "e_01J8X9M2K7QW4R5N8T6V2B3C4W" }
+
 func approvalSampleEntries() []thread.Entry {
 	return []thread.Entry{
 		thread.ApprovalRequestEntry{
@@ -793,18 +801,53 @@ func approvalSampleEntries() []thread.Entry {
 			Outcome: "declined",
 			RunID:   sessionID + "-t1",
 		},
+		thread.GrantEntry{
+			ID: grantID0, ParentID: entryID11, Created: at(13),
+			Grant: thread.Grant{
+				Tool: "run_command",
+				Args: []thread.Arg{
+					{Pointer: "/command", Glob: "go test*"},
+					{Pointer: "/dir", Prefix: "/home/wajih/ws/"},
+				},
+				Reason: "vetted on 2026-09-29",
+			},
+		},
+		thread.GrantEntry{
+			ID: grantID1, ParentID: grantID0, Created: at(14),
+			Grant: thread.Grant{
+				Tool:    "run_command",
+				Deny:    true,
+				Reason:  "no network from tests",
+				Expiry:  at(900),
+				MaxUses: 3,
+			},
+		},
+		thread.GrantRevokedEntry{
+			ID: entryID12Safe(), ParentID: grantID1, Created: at(15),
+			GrantID: grantID0,
+		},
 	}
 }
 
 // format2GoldenName maps an approvals entry to its golden file name.
 func format2GoldenName(e thread.Entry) string {
-	switch e.(type) {
+	switch e := e.(type) {
 	case thread.ApprovalRequestEntry:
+		_ = e
 		return "approval_request.json"
 	case thread.ApprovalDecisionEntry:
+		_ = e
 		return "approval_decision.json"
-	default:
+	case thread.ApprovalAuditEntry:
+		_ = e
 		return "approval_audit.json"
+	case thread.GrantEntry:
+		if e.Deny {
+			return "grant_deny.json"
+		}
+		return "grant.json"
+	default:
+		return "grant_revoked.json"
 	}
 }
 

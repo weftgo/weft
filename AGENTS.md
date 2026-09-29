@@ -168,6 +168,13 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    interruption text; a parked boundary is denied); Rollback also branches back.
 //    Overflow: ErrContextOverflow → compact (reason overflow) + one re-run
 //    (thread.ReRunOnOverflow(false) off); a second failure joins both errors.
+//    Durability (ADR 0011 §7): the turn's messages append as they join the run
+//    (weft.OnMessages) — a crash mid-turn loses nothing emitted; a failed turn's
+//    repaired tail is rewritten on a fresh line. Backends: jsonl.Open(dir) |
+//    sqlite.Open(path) (own module, modernc) | thread.Memory(); one writer per
+//    session (ErrLocked), readers never lock. Live tail: st.(thread.Watcher).
+//    Watch(ctx, id, afterEntryID). List filters: thread.Query{Meta, TitleSearch}
+//    (title = last info entry's, case-insensitive substring), Before/Limit page.
 ```
 
 Test offline with `wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))`;

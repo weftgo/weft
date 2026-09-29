@@ -365,6 +365,25 @@ fork, _ := s.Fork(ctx, entryID)                // a new session, self-contained
 again, _ := thread.Open(ctx, st, s.ID(), agent) // reopen from disk, same context
 ```
 
+Durability is per step (ADR 0011 §7): the turn's messages are appended
+as they join the run — through `weft.OnMessages`, the core's transcript
+observer — so a crash mid-turn loses nothing emitted; the prompt was
+already durable before the run started. Two backends carry it:
+`thread/jsonl` (one file per session) and `thread/sqlite` (one SQLite
+file, WAL, its own module so the driver never enters `thread`). One
+writer per session — a second gets `thread.ErrLocked` — while readers
+never lock, including the live tail:
+
+```go
+w := st.(thread.Watcher)
+for e, err := range w.Watch(ctx, s.ID(), lastEntryID) { … } // another process's tail
+
+p, _ := st.List(ctx, thread.Query{
+    Meta:        map[string]string{"env": "prod"}, // every pair, exactly
+    TitleSearch: "checkout",                       // the session's current title
+})                                                 // Before/Limit page the matches
+```
+
 Approvals (ADR 0021) make the core's run boundary durable: a gated
 call parks as a request entry written with its turn, `Pending()`
 survives restarts, and `Decide` records the decision and resumes on

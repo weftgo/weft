@@ -402,3 +402,120 @@ func TestLoadReadsOneSnapshot(t *testing.T) {
 	<-done
 	time.Sleep(50 * time.Millisecond) // let the reader see the last generation
 }
+
+// The Watch capability (plan §7): the shared conformance table, plus
+// the backend's own shape — the tail reads through WAL while another
+// handle keeps writing, the cross-process shape.
+func TestWatch(t *testing.T) {
+	threadtest.RunWatch(t, openFile)
+	path := filepath.Join(t.TempDir(), "tail.db")
+	writer, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := writer.Create(ctx, thread.Header{ID: "s_tail", Created: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	watch, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan string, 4)
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	seq, err := watch.(thread.Watcher).Watch(wctx, "s_tail", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for e, err := range seq {
+			if err != nil {
+				close(got)
+				return
+			}
+			got <- e.(thread.MessageEntry).Message.Text()
+		}
+	}()
+	if err := writer.Append(ctx, "s_tail", thread.MessageEntry{
+		ID: "e_w1", Created: time.Now().UTC(), Message: weft.User("committed while watched"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case txt := <-got:
+		if txt != "committed while watched" {
+			t.Errorf("tailed %q", txt)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tail never saw the other handle's commit")
+	}
+	cancel()
+}
+
+// Migration 0002's backfill: a database as it stood at schema 1 —
+// titles living only in info entries, no column — gains the derived
+// title once, on Open, and the column keeps up with later appends: the
+// last info entry wins.
+func TestTitleBackfillAndMaintenance(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "title.db")
+	// A schema-1 database, hand-built: the sessions and entries tables
+	// migration 0001 defined, migration 0002 not yet applied.
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE sessions (
+		id TEXT PRIMARY KEY, created TEXT NOT NULL, header TEXT NOT NULL);
+		CREATE INDEX sessions_created ON sessions(created DESC);
+		CREATE TABLE entries (
+		session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+		seq INTEGER NOT NULL, line TEXT NOT NULL, torn INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (session, seq));
+		CREATE TABLE session_locks (
+		session TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+		host TEXT NOT NULL, owner TEXT NOT NULL, pid INTEGER NOT NULL, taken TEXT NOT NULL);
+		CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+		INSERT INTO schema_migrations (version, applied_at) VALUES (1, '2026-09-29T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	info := func(id, title string) string {
+		return fmt.Sprintf(`{"type":"info","id":%q,"created":"2026-09-29T00:00:00Z","title":%q}`, id, title)
+	}
+	if _, err := db.Exec(`INSERT INTO sessions (id, created, header) VALUES (?,?,?)`,
+		"s_title", "2026-09-29T12:00:00.000000000Z",
+		`{"type":"session","weft":1,"id":"s_title","created":"2026-09-29T12:00:00Z"}`); err != nil {
+		t.Fatal(err)
+	}
+	for seq, line := range []string{info("e_t1", "the old title"), info("e_t2", "the new title")} {
+		if _, err := db.Exec(`INSERT INTO entries (session, seq, line, torn) VALUES (?,?,?,0)`,
+			"s_title", seq, line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := sqlite.Open(path) // migration 0002 runs and backfills
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.List(ctx, thread.Query{TitleSearch: "new title"})
+	if err != nil || p.Total != 1 {
+		t.Errorf("after the backfill, TitleSearch 'new title': total %d, err %v, want 1", p.Total, err)
+	}
+	if p, err = st.List(ctx, thread.Query{TitleSearch: "old title"}); err != nil || p.Total != 0 {
+		t.Errorf("after the backfill, TitleSearch 'old title': total %d, err %v, want 0 — the last info entry wins", p.Total, err)
+	}
+	// And the column keeps up with appends after the migration.
+	if err := st.Append(ctx, "s_title", thread.InfoEntry{
+		ID: thread.NewEntryID(), Created: time.Now().UTC(), Title: "the maintained title",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if p, err = st.List(ctx, thread.Query{TitleSearch: "maintained"}); err != nil || p.Total != 1 {
+		t.Errorf("maintained TitleSearch: total %d, err %v, want 1", p.Total, err)
+	}
+}

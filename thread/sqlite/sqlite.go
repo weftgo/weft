@@ -234,12 +234,22 @@ func (b *backend) Append(ctx context.Context, id string, entries ...thread.Entry
 		return fmtNotFound(id)
 	}
 	lines := make([]string, len(entries))
+	var title string
+	hasInfo := false
 	for i, e := range entries {
 		line, err := json.Marshal(e)
 		if err != nil {
 			return fmt.Errorf("thread: entry %d of the append does not encode: %w", i, err)
 		}
 		lines[i] = string(line)
+		if ie, ok := e.(thread.InfoEntry); ok {
+			// The last info entry of the batch carries the session's
+			// current title (Query.TitleSearch's rule); maintained here,
+			// in the append's own transaction, so the column can never
+			// disagree with the rows (migration 0002's backfill is the
+			// once-only derivation of the same value).
+			title, hasInfo = ie.Title, true
+		}
 	}
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -248,6 +258,11 @@ func (b *backend) Append(ctx context.Context, id string, entries ...thread.Entry
 	defer rollback(tx)
 	if err := b.write(ctx, tx, id, lines, 0); err != nil {
 		return err
+	}
+	if hasInfo {
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET title = ? WHERE id = ?`, title, id); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -407,30 +422,40 @@ func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.
 // List returns the session headers — headers only, never entries: a
 // list body that read whole sessions would be the storage bloat every
 // surveyed store walked back (ADR 0010's listTracesLight lesson, the
-// same shape here). Newest first by Created (ties by id, descending),
-// the Before cursor, the Total count. A header row that does not decode
-// (which only a newer weft's bytes could be — Create validated the
-// ones it wrote) is skipped, never an error: one undecodable header
-// never blocks listing the others, and Load names what is wrong with it
-// when asked.
+// same shape here). The one column beyond the header is the
+// denormalised title (migration 0002), which is what lets a
+// TitleSearch filter without reading a session's entries — the price
+// the query pays on backends that keep no such column, never paid
+// here. Newest first by Created (ties by id, descending), the Before
+// cursor, the Total count. A header row that does not decode (which
+// only a newer weft's bytes could be — Create validated the ones it
+// wrote) is skipped, never an error: one undecodable header never
+// blocks listing the others, and Load names what is wrong with it when
+// asked.
 func (b *backend) List(ctx context.Context, q thread.Query) (thread.Page, error) {
 	if err := ctx.Err(); err != nil {
 		return thread.Page{}, err
 	}
-	rs, err := b.db.QueryContext(ctx, `SELECT header FROM sessions`)
+	rs, err := b.db.QueryContext(ctx, `SELECT header, title FROM sessions`)
 	if err != nil {
 		return thread.Page{}, err
 	}
 	defer func() { _ = rs.Close() }()
 	headers := []thread.Header{}
 	for rs.Next() {
-		var line string
-		if err := rs.Scan(&line); err != nil {
+		var line, title string
+		if err := rs.Scan(&line, &title); err != nil {
 			return thread.Page{}, err
 		}
 		var h thread.Header
 		if err := json.Unmarshal([]byte(line), &h); err != nil {
 			continue // not ours to list; Load will say why
+		}
+		if !metaMatch(h.Meta, q.Meta) {
+			continue
+		}
+		if q.TitleSearch != "" && !titleMatches(title, q.TitleSearch) {
+			continue
 		}
 		headers = append(headers, h)
 	}
@@ -640,6 +665,22 @@ func limitOf(n int) int {
 	default:
 		return n
 	}
+}
+
+// metaMatch and titleMatches are Query's filter rules, duplicated
+// from thread the way limitOf is; the conformance table pins every
+// copy to one answer.
+func metaMatch(meta, want map[string]string) bool {
+	for k, v := range want {
+		if meta == nil || meta[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func titleMatches(title, search string) bool {
+	return strings.Contains(strings.ToLower(title), strings.ToLower(search))
 }
 
 // fmtNotFound and cloneMeta mirror the other backends' helpers: the

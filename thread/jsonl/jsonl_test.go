@@ -512,3 +512,60 @@ func TestNewerEnvelopeHeaderIsNewerFormat(t *testing.T) {
 		t.Errorf("Load on a newer envelope: err = %v, want ErrNewerFormat", err)
 	}
 }
+
+// The Watch capability (plan §7): the shared conformance table covers
+// order, exactly-once, the resume point and the loud failures; this
+// test adds the backend's own shape — the tail sees appends from
+// another handle over the same directory, the cross-process shape.
+func TestWatch(t *testing.T) {
+	threadtest.RunWatch(t, func(t *testing.T) thread.Storage {
+		st, err := jsonl.Open(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	})
+	dir := t.TempDir()
+	first, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := first.Create(ctx, thread.Header{ID: "s_tail", Created: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	watch, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan string, 4)
+	wctx, cancel := context.WithCancel(ctx)
+	seq, err := watch.(thread.Watcher).Watch(wctx, "s_tail", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for e, err := range seq {
+			if err != nil {
+				close(got)
+				return
+			}
+			got <- e.(thread.MessageEntry).Message.Text()
+		}
+	}()
+	// The writer is another handle entirely — the two-process shape.
+	if err := first.Append(ctx, "s_tail", thread.MessageEntry{
+		ID: "e_w1", Created: time.Now().UTC(), Message: weft.User("from the other handle"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case txt := <-got:
+		if txt != "from the other handle" {
+			t.Errorf("tailed %q", txt)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tail never saw the other handle's append")
+	}
+	cancel()
+}

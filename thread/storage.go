@@ -80,6 +80,19 @@ type Query struct {
 	Before time.Time
 	// Limit caps the page: 0 means 50, values above 500 clamp.
 	Limit int
+	// Meta filters by session metadata: every key must match its value
+	// exactly. A session matches when its header's Meta (the merged
+	// view Load returns) holds every pair. Backends may answer this
+	// from the header alone — the cheap path; the title filter below is
+	// the one that can cost more.
+	Meta map[string]string
+	// TitleSearch filters by the session's current title — the last
+	// info entry's Title — matching case-insensitively as a substring.
+	// A title is entry state, not header state, so this filter is the
+	// one shape of List that may read beyond headers (a backend scans
+	// the session's info entries): opt-in by the query, priced
+	// accordingly, and never paid by a query without it.
+	TitleSearch string
 }
 
 // Page is one List result.

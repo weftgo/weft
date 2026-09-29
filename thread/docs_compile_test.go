@@ -113,6 +113,28 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 		t.Log("a small session has nothing to compact — fine:", err)
 	}
 
+	// README: the v0.4 block — the watcher tail and the list filters.
+	w := st.(thread.Watcher)
+	wctx, wcancel := context.WithCancel(ctx)
+	wseq, err := w.Watch(wctx, s.ID(), turn.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range wseq {
+		wcancel()
+		break
+	}
+	wcancel()
+	page, err := st.List(ctx, thread.Query{
+		Meta:        map[string]string{"env": "prod"},
+		TitleSearch: "checkout",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = page.Sessions
+	_ = page.Total
+
 	// README: the approvals block. A gated tool parks; Pending,
 	// Decide, Turn.Next, the grant, and the signed exchange all exist
 	// exactly as written.

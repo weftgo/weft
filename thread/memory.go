@@ -139,15 +139,36 @@ func (m *memStorage) Load(ctx context.Context, session string) (Header, []Entry,
 	return h, entries, report, nil
 }
 
-// List pages the headers newest first, without the entries.
+// List pages the headers newest first, without the entries — the one
+// exception being a TitleSearch, which reads the info entries to know
+// the current title (Query.TitleSearch's rule): opt-in by the query,
+// paid by the sessions whose header already matched.
 func (m *memStorage) List(ctx context.Context, q Query) (Page, error) {
 	if err := ctx.Err(); err != nil {
 		return Page{}, err
 	}
 	m.mu.Lock()
-	headers := make([]Header, 0, len(m.sessions))
+	type row struct {
+		h     Header
+		title string
+	}
+	rows := make([]row, 0, len(m.sessions))
 	for _, s := range m.sessions {
-		headers = append(headers, s.header)
+		if !metaMatch(s.header.Meta, q.Meta) {
+			continue
+		}
+		r := row{h: s.header}
+		if q.TitleSearch != "" {
+			r.title = titleOf(s.buf)
+		}
+		rows = append(rows, r)
+	}
+	headers := make([]Header, 0, len(rows))
+	for _, r := range rows {
+		if q.TitleSearch != "" && !titleMatches(r.title, q.TitleSearch) {
+			continue
+		}
+		headers = append(headers, r.h)
 	}
 	m.mu.Unlock()
 	total := len(headers)
@@ -211,6 +232,41 @@ func (m *memStorage) Inject(ctx context.Context, session string, data []byte) er
 	s.buf = append(s.buf, data...)
 	m.sessions[session] = s
 	return nil
+}
+
+// metaMatch reports whether meta holds every pair of want, exactly —
+// the Query.Meta rule, shared by every backend's shape of it (the
+// conformance table pins them to one answer).
+func metaMatch(meta, want map[string]string) bool {
+	for k, v := range want {
+		if meta == nil || meta[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// titleOf returns the session's current title from its entry lines —
+// the last info entry's Title, empty when none was ever written.
+func titleOf(buf []byte) string {
+	title := ""
+	for _, line := range splitEntryLines(buf) {
+		var head struct {
+			Type  string `json:"type"`
+			Title string `json:"title"`
+		}
+		if json.Unmarshal(line, &head) == nil && head.Type == "info" {
+			title = head.Title
+		}
+	}
+	return title
+}
+
+// titleMatches reports whether the title contains the search, folding
+// case — the Query.TitleSearch rule, shared by every backend's shape
+// of it.
+func titleMatches(title, search string) bool {
+	return strings.Contains(strings.ToLower(title), strings.ToLower(search))
 }
 
 // fmtNotFound names the session in the ErrNotFound wrap, the shape

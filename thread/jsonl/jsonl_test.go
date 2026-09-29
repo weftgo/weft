@@ -1,6 +1,7 @@
 package jsonl_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -477,5 +478,37 @@ func TestSyncPolicies(t *testing.T) {
 	}
 	if err := lazy.(thread.Flusher).Flush(ctx, "s_missing"); !errors.Is(err, thread.ErrNotFound) {
 		t.Errorf("Flush on unknown session: err = %v, want ErrNotFound", err)
+	}
+}
+
+// A session file whose header line carries a newer envelope fails Load
+// as ErrNewerFormat — the class thread.ErrNewerFormat names the header
+// for — not as line-1 corruption; the class is what a caller branches
+// on. Found by the 4.1 review: sqlite answered the envelope correctly
+// only after its own review fix, and the backends must not differ on a
+// format rule.
+func TestNewerEnvelopeHeaderIsNewerFormat(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	st, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Create(ctx, thread.Header{ID: "s_newer_header", Created: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	// A newer weft's first line, over the header this build wrote.
+	newer := `{"type":"session","weft":2,"id":"s_newer_header","created":"2026-09-29T00:00:00Z"}` + "\n"
+	file := filepath.Join(dir, "s_newer_header.jsonl")
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Everything after this build's header line, kept under the newer one.
+	if err := os.WriteFile(file, append([]byte(newer), raw[bytes.IndexByte(raw, '\n')+1:]...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := st.Load(ctx, "s_newer_header"); !errors.Is(err, thread.ErrNewerFormat) {
+		t.Errorf("Load on a newer envelope: err = %v, want ErrNewerFormat", err)
 	}
 }

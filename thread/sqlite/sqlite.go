@@ -299,9 +299,13 @@ func (b *backend) write(ctx context.Context, tx *sql.Tx, id string, lines []stri
 // is line 1, the first entry line 2); a torn final row — bytes a
 // crashed writer left without their newline, reachable only through
 // threadtest's Inject, whose transactions never tear — is dropped and
-// reported in the LoadReport. The returned values are fresh: decoded
-// from the row bytes every call, never aliasing the database or a
-// previous load.
+// reported in the LoadReport. Both reads run in one transaction, so a
+// concurrent Delete orders entirely before this Load (ErrNotFound) or
+// entirely after it (the session with its entries) — never between the
+// header read and the entries read, which would answer a header whose
+// entries vanished, indistinguishable from data loss. The returned
+// values are fresh: decoded from the row bytes every call, never
+// aliasing the database or a previous load.
 func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.Entry, *thread.LoadReport, error) {
 	if err := ctx.Err(); err != nil {
 		return thread.Header{}, nil, nil, err
@@ -309,8 +313,18 @@ func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.
 	if !thread.ValidID(id) {
 		return thread.Header{}, nil, nil, fmtNotFound(id)
 	}
+	// A read transaction holds one snapshot across both queries
+	// (SQLite's repeatable-read-within-a-transaction). ReadOnly is a
+	// wish, not a guarantee, on this driver — the DSN's immediate-transaction
+	// pragma may make the read tx take the write lock, which costs a
+	// little cross-process serialization and changes nothing here.
+	tx, err := b.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return thread.Header{}, nil, nil, err
+	}
+	defer rollback(tx)
 	var headerLine string
-	err := b.db.QueryRowContext(ctx, `SELECT header FROM sessions WHERE id = ?`, id).Scan(&headerLine)
+	err = tx.QueryRowContext(ctx, `SELECT header FROM sessions WHERE id = ?`, id).Scan(&headerLine)
 	if errors.Is(err, sql.ErrNoRows) {
 		return thread.Header{}, nil, nil, fmtNotFound(id)
 	}
@@ -319,13 +333,18 @@ func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.
 	}
 	var h thread.Header
 	if err := json.Unmarshal([]byte(headerLine), &h); err != nil {
-		// A header row Create validated can only fail to decode if a
-		// newer weft wrote it: the envelope rule reads loud here too.
+		if errors.Is(err, thread.ErrNewerFormat) {
+			// A header from a newer weft: the envelope rule reads loud
+			// as its own class (thread.ErrNewerFormat names the
+			// header), not as line-1 corruption a caller cannot branch
+			// on.
+			return thread.Header{}, nil, nil, err
+		}
 		return thread.Header{}, nil, nil, &thread.CorruptError{Session: id, Line: 1, Err: err}
 	}
 	h.Meta = cloneMeta(h.Meta)
 
-	rows, err := b.db.QueryContext(ctx, `SELECT line, torn FROM entries WHERE session = ? ORDER BY seq`, id)
+	rows, err := tx.QueryContext(ctx, `SELECT line, torn FROM entries WHERE session = ? ORDER BY seq`, id)
 	if err != nil {
 		return thread.Header{}, nil, nil, err
 	}

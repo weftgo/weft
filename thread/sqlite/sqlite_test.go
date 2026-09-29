@@ -283,3 +283,122 @@ func TestMigrationEmptyThenExisting(t *testing.T) {
 		t.Errorf("List after two opens: total %d, err %v — a no-op migration must not lose rows", p.Total, err)
 	}
 }
+
+// A session header written by a newer weft (envelope ahead of this
+// build) fails Load as ErrNewerFormat — the class the format rules
+// promise for it (thread.ErrNewerFormat names the header) — not as
+// line-1 corruption, which callers could not branch on.
+func TestNewerEnvelopeHeaderIsNewerFormat(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "newer-header.db")
+	st, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Create(ctx, thread.Header{ID: "s_newer_header", Created: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer := `{"type":"session","weft":2,"id":"s_newer_header","created":"2026-09-29T00:00:00Z"}`
+	if _, err := db.Exec(`UPDATE sessions SET header = ? WHERE id = ?`, newer, "s_newer_header"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := st.Load(ctx, "s_newer_header"); !errors.Is(err, thread.ErrNewerFormat) {
+		t.Errorf("Load on a newer envelope: err = %v, want ErrNewerFormat", err)
+	}
+	// The session is invisible to List — the documented envelope rule
+	// (thread.ErrNewerFormat: "such a session is invisible to an older
+	// List; Load names why it cannot open it").
+	if p, err := st.List(ctx, thread.Query{}); err != nil || p.Total != 0 {
+		t.Errorf("List over a newer envelope: total %d, err %v, want 0", p.Total, err)
+	}
+}
+
+// Load reads one snapshot: the header and the entries a Load returns
+// come from one instant of the database. The churn rebuilds the session
+// generation after generation, each generation's header (its Meta) and
+// entries (their text) carrying the generation number; a load that
+// reads its header before a rebuild and its entries after it answers a
+// header from one generation with entries from another — the mixed
+// state no committed instant ever held, a read torn across two
+// snapshots. A load may legitimately see ErrNotFound (the delete won)
+// or a just-created header with no entries yet (Create and Append are
+// two commits); what it may never see is the mix.
+func TestLoadReadsOneSnapshot(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "snapshot.db")
+	st, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const id = "s_snap"
+	const generations = 60
+	// The filler widens the gap between a Load's header read and its
+	// entries read — the header's JSON decodes between them — so a
+	// rebuild that commits inside the gap is provoked, not prayed for.
+	meta := map[string]string{"gen": "0"}
+	for k := 0; k < 20000; k++ {
+		meta[fmt.Sprintf("filler%05d", k)] = "x"
+	}
+	seed := func(gen int) error {
+		if err := st.Delete(ctx, id); err != nil && !errors.Is(err, thread.ErrNotFound) {
+			return err
+		}
+		meta["gen"] = fmt.Sprint(gen)
+		if err := st.Create(ctx, thread.Header{
+			ID: id, Created: time.Now().UTC(), Meta: meta,
+		}); err != nil {
+			return err
+		}
+		return st.Append(ctx, id,
+			thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: weft.User(fmt.Sprintf("gen %d", gen))},
+			thread.MessageEntry{ID: "e_2", Created: time.Now().UTC(), Message: weft.User(fmt.Sprintf("gen %d", gen))})
+	}
+	if err := seed(0); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { // the churn: rebuild the session, generation after generation
+		defer close(done)
+		for gen := 1; gen <= generations; gen++ {
+			if err := seed(gen); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}()
+	go func() { // the reader: every answer must be one generation's
+		for {
+			h, entries, _, err := st.Load(ctx, id)
+			if err != nil {
+				select {
+				case <-done:
+					return
+				default:
+					continue
+				}
+			}
+			if len(entries) == 0 {
+				continue // the legitimate just-created instant
+			}
+			got := entries[0].(thread.MessageEntry).Message.Text()
+			if want := "gen " + h.Meta["gen"]; got != want {
+				t.Errorf("a torn load: header of generation %s answered entries %q — two reads, two snapshots", h.Meta["gen"], got)
+				return
+			}
+			select {
+			case <-done:
+				return
+			default:
+			}
+		}
+	}()
+	<-done
+	time.Sleep(50 * time.Millisecond) // let the reader see the last generation
+}

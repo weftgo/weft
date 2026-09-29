@@ -256,6 +256,12 @@ func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.
 	}
 	var h thread.Header
 	if err := json.Unmarshal(lines[0], &h); err != nil {
+		if errors.Is(err, thread.ErrNewerFormat) {
+			// A header from a newer weft reads loud as its own class —
+			// thread.ErrNewerFormat names the header — not as line-1
+			// corruption a caller cannot branch on.
+			return thread.Header{}, nil, nil, err
+		}
 		return thread.Header{}, nil, nil, &thread.CorruptError{Session: id, Line: 1, Err: err}
 	}
 	entries := make([]thread.Entry, 0, len(lines)-1)

@@ -32,6 +32,18 @@
   recorded conversation: a steer that differs from the recording misses
   its fixture loudly.
 
+### Added — the overflow sentinel (ADR 0020 §5)
+
+- `weft.ErrContextOverflow` — the adapters wrap their provider's
+  context-window overflow in it (`openai`, `anthropic`, `google`), both
+  links preserved so `errors.Is` finds the sentinel and `errors.As`
+  still reaches the vendor SDK's own error. The marker table the
+  mapping reads (and `mw.Retry`'s classifier has always read) lives in
+  one place now, `internal/adapterkit`; it gains anthropic's second
+  shape ("exceed context limit"). `mw.Retry` never retries the
+  sentinel, as it never retried the marker text — the consumer is
+  `weft/thread` v0.3's compact-and-retry turn.
+
 ## thread 0.2.0 — 2026-09-29
 
 Approvals, complete (ADR 0021): the core's approval boundary made

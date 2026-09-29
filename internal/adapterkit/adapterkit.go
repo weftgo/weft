@@ -80,6 +80,7 @@ func TerminalErr(ctx context.Context, err error) error {
 var overflowMarkers = []string{
 	"context_length_exceeded",
 	"context length",
+	"context limit", // anthropic's second shape: "input length and `max_tokens` exceed context limit"
 	"context window",
 	"prompt is too long",
 	"too many tokens",

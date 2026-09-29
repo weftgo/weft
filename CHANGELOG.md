@@ -1,4 +1,4 @@
-## thread 0.5.0 (unreleased)
+## thread 0.5.0 — 2026-09-29
 
 `thread/pool` — bounded concurrent child runs, receipts, nested
 approvals, explicit steering forwarding (plan §8, ADR 0022, decided

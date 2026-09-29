@@ -330,6 +330,66 @@ func TestReadEveryGolden(t *testing.T) {
 			t.Errorf("%s: entry re-marshal differs\n got %s\nwant %s", path, again, line)
 		}
 	}
+	// The format-4 goldens (the pool receipt, ADR 0022) read the
+	// same way: this build decodes them and re-marshals their bytes.
+	files4, err := filepath.Glob(filepath.Join("testdata", "format4", "receipt_*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files4) != 6 {
+		t.Fatalf("found %d format4 receipt goldens, want one per status", len(files4))
+	}
+	for _, path := range files4 {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		line := bytes.TrimRight(b, "\n")
+		e, err := thread.UnmarshalEntry(line)
+		if err != nil {
+			t.Errorf("%s: %v", path, err)
+			continue
+		}
+		pr, ok := e.(thread.PoolReceiptEntry)
+		if !ok {
+			t.Errorf("%s: decoded as %T", path, e)
+			continue
+		}
+		if pr.Status == thread.PoolAccepted && pr.Receipt != "" {
+			t.Errorf("%s: acceptance carries a receipt link", path)
+		}
+		if pr.Status != thread.PoolAccepted && pr.Receipt == "" {
+			t.Errorf("%s: %s entry is not linked to its acceptance", path, pr.Status)
+		}
+		again, err := json.Marshal(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(line, again) {
+			t.Errorf("%s: entry re-marshal differs\n got %s\nwant %s", path, again, line)
+		}
+	}
+	// The lineage header golden (ADR 0022 §3): a pool child's first
+	// line round-trips, lineage and all.
+	lb, err := os.ReadFile(filepath.Join("testdata", "format4", "session_lineage.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lline := bytes.TrimRight(lb, "\n")
+	var lh thread.Header
+	if err := json.Unmarshal(lline, &lh); err != nil {
+		t.Fatalf("session_lineage.json: %v", err)
+	}
+	if lh.Lineage == nil || lh.Lineage.Session != "s_01J8X9M2K7QW4R5N8T6V2B3C4D" || lh.Lineage.Call != "call_1" {
+		t.Fatalf("lineage header decoded as %+v", lh.Lineage)
+	}
+	lagain, err := json.Marshal(lh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(lline, lagain) {
+		t.Errorf("lineage header re-marshal differs\n got %s\nwant %s", lagain, lline)
+	}
 	// The full session file: a header, then one entry per line, every
 	// line re-marshalling to itself.
 	raw, err := os.ReadFile(filepath.Join("testdata", "format1", "session.jsonl"))

@@ -1,0 +1,1 @@
+{"type":"pool_receipt","v":4,"id":"e_01J8X9M2K7QW4R5N8T6V2B3C4X","parent":"e_01J8X9M2K7QW4R5N8T6V2B3C4S","created":"2026-09-29T12:00:23.123456789Z","receipt":"e_01J8X9M2K7QW4R5N8T6V2B3C4T","status":"failed","child":"s_01J8X9M2K7QW4R5N8T6V2B3C5D","stop":"model failed at step 2: connection reset","usage":{"input_tokens":900,"output_tokens":40}}

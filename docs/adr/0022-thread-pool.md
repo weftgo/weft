@@ -32,17 +32,23 @@
    settles.
 
 2. **Sync and async, per tool option (D1).** The default is sync —
-   today's behaviour (ADR 0014): the call waits, the result is the
-   child's answer, the child's events arrive wrapped in `Nested`, its
-   usage rolls up through the core. `pool.Async()`, a `Wrap` option,
-   makes the delegation an acceptance: the middleware submits the child
-   and returns the receipt line as the tool result — model-visible
-   bytes, pinned by a golden — and a later turn reads the outcome from
-   the parent session. `pool.Submit(ctx, parent, agent, prompt)` is the
+   the call waits and the result is the child's answer, as an ordinary
+   subagent's is. `pool.Async()`, a `Wrap` option, makes the
+   delegation an acceptance: the middleware submits the child and
+   returns the receipt line as the tool result — model-visible bytes,
+   pinned by a golden — and a later turn reads the outcome from the
+   parent session. `pool.Submit(ctx, parent, agent, prompt)` is the
    one primitive under both paths and the one an application calls
    directly: it creates the child session, records the acceptance
    receipt in the parent session, and starts the child running on a
-   pool-owned goroutine.
+   pool-owned goroutine. One rule covers both paths, forced by §3: a
+   pool child always runs as its own session, so its events are not
+   `Nested` in the parent's stream (ADR 0014's late-event rule would
+   cut them at the call's `ToolFinish` anyway) and its usage bills
+   through its receipt (§5), not the core's roll-up. A bare
+   `weft.Subagent` with no pool keeps ADR 0014's `Nested` and roll-up
+   exactly; a wrapped tool called outside any session run — a bare
+   `Generate` — falls back to that ordinary path under the slot.
 
 3. **Child sessions.** Every child a pool starts is a session of its
    own, in the parent's storage, its header naming the parent session
@@ -68,11 +74,13 @@
    reads, not context.
 
 5. **Budgets (D3).** The parent session's `Usage` gains a third
-   bucket, `Delegated`, summed from settled receipts' usage.
-   `Turns` keeps its meaning — the session's own runs, sync children
-   inside them through ADR 0014's core roll-up — and `Summaries` stays
-   separate (ADR 0020 §4's ledger discipline: costs are attributed,
-   never mixed). The child session keeps its own ledger too.
+   bucket, `Delegated`, summed from settled receipts' usage — every
+   pool child, sync or async, bills there, because a session-run child
+   has no ride on the core's roll-up. `Turns` keeps its meaning — the
+   session's own runs, bare `Subagent` children inside them through
+   ADR 0014's roll-up — and `Summaries` stays separate (ADR 0020 §4's
+   ledger discipline: costs are attributed, never mixed). The child
+   session keeps its own ledger too.
 
 6. **Cancellation (D4).** Async children are independent by
    construction: they run on a pool-owned context, because the
@@ -128,8 +136,10 @@ added additively later if starvation is ever measured in real use.
 The child-ledger-only alternative hides an orchestration session's
 dominant cost exactly where the operator looks for the total; rolling
 into `Turns` mixes kinds, which the ledger exists not to do
-(ADR 0020 §4). Sync children need no rule: ADR 0014's core roll-up
-already lands them in the parent's turns.
+(ADR 0020 §4). The bucket is fed by settled receipts, which makes it
+the one bucket every pool child bills — sync ones included, since a
+session-run child (§2) cannot ride the core's roll-up the way a bare
+`Subagent` child does.
 
 **D4 — cancellation?** Independent plus explicit `Cancel`. The
 coherent alternatives are not: the submitting turn's context dies at
@@ -139,6 +149,13 @@ across restarts that nothing else in this ADR requires. `Cancel` per
 receipt and a draining `Close` cover both operator moves.
 
 ## Consequences
+
+- The pool's bound doubles as its depth guard: a sync delegation chain
+  holds one slot per level while it waits, so a chain deeper than `max`
+  could only deadlock — `Wrap` refuses it with the core's
+  `SUBAGENT_CYCLE` before any child starts. This is not the depth cap
+  ADR 0014 rejected for the core (an arbitrary number); it is the same
+  number as the bound, doing double duty.
 
 - One new entry kind (`pool_receipt`, `"v":4`) and one new header
   linkage (`parent_session`/`parent_call_id`); both additive (ADR

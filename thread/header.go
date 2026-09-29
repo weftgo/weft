@@ -33,7 +33,18 @@ type Header struct {
 	ID      string            `json:"id"`
 	Created time.Time         `json:"created"`
 	Parent  *ParentRef        `json:"parent,omitempty"`
+	Lineage *Lineage          `json:"lineage,omitempty"`
 	Meta    map[string]string `json:"meta,omitempty"`
+}
+
+// Lineage names a pool child's origin (ADR 0022 §3): the parent
+// session and, for a wrapped delegation, the call that delegated. It
+// is a reference, not a copy — unlike Parent, a fork's self-contained
+// path, the child's file holds only its own entries, and the link is
+// how a nested approval finds the session that must resume the child.
+type Lineage struct {
+	Session string `json:"parent_session"`
+	Call    string `json:"parent_call_id,omitempty"`
 }
 
 // ParentRef names a fork's origin: the session the new session was

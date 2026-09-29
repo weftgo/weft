@@ -650,7 +650,7 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 		// loses nothing emitted.
 		runOpts = append(runOpts, s.observer(persist, sp))
 		runOpts = append(runOpts, weft.Messages(input...), weft.RunID(t.RunID()))
-		run := s.agent.Stream(ctx, runOpts...)
+		run := s.agent.Stream(withSession(ctx, s), runOpts...)
 		for ev, serr := range run.Events() {
 			if serr != nil {
 				t.setStreamErr(serr)

@@ -52,6 +52,10 @@ type sessionConfig struct {
 	// failing with weft.ErrContextOverflow compacts — reason overflow —
 	// and runs once more over the shrunken path. Default on.
 	reRunOnOverflow bool
+	// lineage is the pool origin recorded in a created session's
+	// header (ADR 0022 §3): the parent session and the delegating
+	// call. Create-time only — Open reads it from the file.
+	lineage Lineage
 }
 
 func resolveSession(opts ...SessionOption) sessionConfig {
@@ -73,6 +77,18 @@ func (o idsOption) applySession(c *sessionConfig) { c.ids = o }
 // Session appends — from id. Tests and examples pin deterministic ids
 // with it. A nil id is ignored, leaving the default time-sortable ids;
 // a value that fails ValidID fails the write that would carry it.
+type lineageOption Lineage
+
+func (o lineageOption) applySession(c *sessionConfig) { c.lineage = Lineage(o) }
+
+// WithLineage sets a created session's pool lineage (ADR 0022 §3):
+// the parent session and the delegating call it grew from. A
+// Create-time option — the header is immutable once written; Open
+// reads the lineage from the file and ignores it.
+func WithLineage(parentSession, call string) SessionOption {
+	return lineageOption{Session: parentSession, Call: call}
+}
+
 func IDs(id func() string) SessionOption {
 	if id == nil {
 		return nil // an ignored option, the constructor convention
@@ -193,6 +209,10 @@ func Create(ctx context.Context, st Storage, agent *weft.Agent, opts ...SessionO
 		return nil, fmt.Errorf("thread: invalid session id %q", id)
 	}
 	h := Header{ID: id, Created: time.Now().UTC()}
+	if cfg.lineage.Session != "" {
+		l := cfg.lineage
+		h.Lineage = &l
+	}
 	if err := st.Create(ctx, h); err != nil {
 		return nil, err
 	}
@@ -306,6 +326,45 @@ func Delete(ctx context.Context, st Storage, id string) error {
 
 // ID returns the session's id — the header's, and the storage key.
 func (s *Session) ID() string { return s.header.ID }
+
+// Storage returns the storage the session writes through — the handle
+// thread/pool holds to create child sessions in the same place (ADR
+// 0022 §3). It is the app's own storage returned, read-only by
+// convention: every write goes through a Session, never behind one.
+func (s *Session) Storage() Storage { return s.st }
+
+// Lineage returns the session's pool lineage (ADR 0022 §3): the parent
+// session and delegating call it was started from, as recorded in its
+// header at Create. The zero value means the session is nobody's
+// child.
+func (s *Session) Lineage() Lineage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.header.Lineage == nil {
+		return Lineage{}
+	}
+	return *s.header.Lineage
+}
+
+// sessionCtxKey is the context key carrying the *Session whose run is
+// running. Only thread puts a session on a context; SessionFromContext
+// is the read side, for satellite packages (thread/pool, ADR 0022)
+// that need the parent of the delegation they are wrapping.
+type sessionCtxKey struct{}
+
+// SessionFromContext returns the session whose run ctx carries it, or
+// nil outside a session's run — a wrapped tool invoked through a bare
+// Generate has no parent session, and the pool falls back to the
+// ordinary subagent path (ADR 0022 §2).
+func SessionFromContext(ctx context.Context) *Session {
+	s, _ := ctx.Value(sessionCtxKey{}).(*Session)
+	return s
+}
+
+// withSession decorates the run context with its session.
+func withSession(ctx context.Context, s *Session) context.Context {
+	return context.WithValue(ctx, sessionCtxKey{}, s)
+}
 
 // Leaf returns the entry the next appended entry attaches to: the id
 // of the last entry, the target of a trailing leaf entry, or "" while
@@ -722,6 +781,40 @@ func (s *Session) CustomMessage(ctx context.Context, kind string, msg weft.Messa
 	})
 }
 
+// AppendPoolReceipt appends one pool receipt entry (ADR 0022 §4) and
+// returns it as stored, its minted ID the receipt handle a later entry
+// links back to with Receipt. The pool calls this for every state its
+// delegations pass through — acceptance, the start, the settlement —
+// under the rule the entry kind's contract states: pool receipts are
+// ledger, never model context, and a child's answer reaches the model
+// only through its delegating call's result or the application. A
+// hand caller owns the same rules.
+func (s *Session) AppendPoolReceipt(ctx context.Context, e PoolReceiptEntry) (PoolReceiptEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out PoolReceiptEntry
+	err := s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {
+		e.ID, e.ParentID, e.Created = id, parent, created
+		out = e
+		return e
+	})
+	if err != nil {
+		return PoolReceiptEntry{}, err
+	}
+	return out, nil
+}
+
+// isPoolSettled reports whether a pool receipt status is a settlement
+// — the states whose entry carries the child's final usage (ADR 0022
+// §4): exactly one of them follows every acceptance.
+func isPoolSettled(status string) bool {
+	switch status {
+	case PoolDone, PoolFailed, PoolCanceled, PoolCapped:
+		return true
+	}
+	return false
+}
+
 // Usage is a session's cost ledger (ADR 0020 §4): what its turns cost
 // and what its summaries cost, never mixed.
 type Usage struct {
@@ -731,6 +824,11 @@ type Usage struct {
 	// Summaries sums the summarizer usage of every compaction entry —
 	// the cost of keeping the context small, in its own bucket.
 	Summaries weft.Usage
+	// Delegated sums the usage every settled pool receipt carries —
+	// the cost of work handed to thread/pool children (ADR 0022 D3),
+	// in its own bucket: a delegated child's tokens are not this
+	// session's turns, and the ledger never mixes kinds.
+	Delegated weft.Usage
 }
 
 // Usage returns the session's cost ledger over every entry in the
@@ -746,6 +844,10 @@ func (s *Session) Usage() Usage {
 			u.Turns = u.Turns.Add(e.Usage)
 		case CompactionEntry:
 			u.Summaries = u.Summaries.Add(e.SummarizerUsage)
+		case PoolReceiptEntry:
+			if e.Receipt != "" && isPoolSettled(e.Status) {
+				u.Delegated = u.Delegated.Add(e.Usage)
+			}
 		}
 	}
 	return u

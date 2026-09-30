@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"tYpe\":\"session\",\"weft\":1,\"0000\":\"\",\"metA\":{}}")

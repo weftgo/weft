@@ -6,7 +6,7 @@ GO ?= go
 # SDKs are required only by the adapter modules.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-store apidiff-thread apidiff-selftest offline fuzz studio-build studio-check
+.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-store apidiff-thread apidiff-selftest offline fuzz fuzz-thread studio-build studio-check
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -72,6 +72,16 @@ FUZZTIME ?= 10s
 fuzz:
 	for f in $$($(GO) test -list 'Fuzz.*' . | grep '^Fuzz'); do \
 	  $(GO) test -run '^$$' -fuzz "^$$f\$$" -fuzztime $(FUZZTIME) . || exit 1; \
+	done
+
+# The thread module's decoders join the fuzz gate (plan §10, step 7.1):
+# entries, headers, signed decisions and grant predicates — one
+# invocation each, crashers committed as seeds the same way.
+fuzz-thread:
+	for p in . ./jsonl; do \
+	  for f in $$(cd thread && $(GO) test -list 'Fuzz.*' $$p | grep '^Fuzz'); do \
+	    (cd thread && $(GO) test -run '^$$' -fuzz "^$$f\$$" -fuzztime $(FUZZTIME) $$p) || exit 1; \
+	  done; \
 	done
 
 # Live adapter tests behind the `live` build tag; never in CI (no keys).

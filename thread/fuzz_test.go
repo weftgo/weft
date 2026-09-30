@@ -39,6 +39,16 @@ func FuzzDecodeEntry(f *testing.F) {
 		f.Fatal(err)
 	}
 	files = append(files, files2...)
+	// And the format-3 (steering receipts) and format-4 (pool receipts)
+	// goldens, the day they exist — the rule outlives the step that
+	// wrote it (step 7.1's pass made it explicit for every format).
+	for _, dir := range [...]string{"format3", "format4"} {
+		more, err := filepath.Glob(filepath.Join("testdata", dir, "*"))
+		if err != nil {
+			f.Fatal(err)
+		}
+		files = append(files, more...)
+	}
 	for _, path := range files {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -48,20 +58,24 @@ func FuzzDecodeEntry(f *testing.F) {
 			f.Add(line)
 		}
 	}
-	f.Add([]byte(`{"type":"approval","id":"e_1"}`))                  // unknown kind
-	f.Add([]byte(`{"type":"message","v":2,"id":"e_1"}`))             // newer version
-	f.Add([]byte(`{"type":"approval_request","v":3,"id":"e_1"}`))    // newer approvals v
-	f.Add([]byte(`{"type":"approval_decision","outcome":"maybe"}`))  // hostile outcome
-	f.Add([]byte(`{"type":"approval_audit","step":""}`))             // hostile step
-	f.Add([]byte(`{"id":"e_1"}`))                                    // no type
-	f.Add([]byte(`{"tYpe":"custom"}`))                               // case-matched key
-	f.Add([]byte(`{"type":"message",`))                              // malformed
-	f.Add([]byte(`[]`))                                              // not an object
-	f.Add([]byte(""))                                                // empty
-	f.Add([]byte(`{"type":"label","name":"héllo 世界","entry":""}`))   // unicode
-	f.Add([]byte(`{"type":"turn","usage":{"input_tokens":-1e300}}`)) // hostile numbers
-	f.Add([]byte(`{"type":"message","v":-1,"id":"e_1"}`))            // negative v reads as v1
-	f.Add([]byte(`{"type":"custom","id":"e_1","kind":"k"}`))         // absent data stays nil
+	f.Add([]byte(`{"type":"approval","id":"e_1"}`))                      // unknown kind
+	f.Add([]byte(`{"type":"message","v":2,"id":"e_1"}`))                 // newer version
+	f.Add([]byte(`{"type":"approval_request","v":3,"id":"e_1"}`))        // newer approvals v
+	f.Add([]byte(`{"type":"pool_receipt","v":5,"id":"e_1"}`))            // newer pool v
+	f.Add([]byte(`{"type":"pool_receipt","id":"e_1","status":"weird"}`)) // hostile status
+	f.Add([]byte(`{"type":"pool_receipt","id":"e_1","status":"done","usage":{"input_tokens":-1e300}}`))
+	f.Add([]byte(`{"type":"approval_request","id":"e_1","child":"s_1","wrapper":"call_1"}`)) // a mirror
+	f.Add([]byte(`{"type":"approval_decision","outcome":"maybe"}`))                          // hostile outcome
+	f.Add([]byte(`{"type":"approval_audit","step":""}`))                                     // hostile step
+	f.Add([]byte(`{"id":"e_1"}`))                                                            // no type
+	f.Add([]byte(`{"tYpe":"custom"}`))                                                       // case-matched key
+	f.Add([]byte(`{"type":"message",`))                                                      // malformed
+	f.Add([]byte(`[]`))                                                                      // not an object
+	f.Add([]byte(""))                                                                        // empty
+	f.Add([]byte(`{"type":"label","name":"héllo 世界","entry":""}`))                           // unicode
+	f.Add([]byte(`{"type":"turn","usage":{"input_tokens":-1e300}}`))                         // hostile numbers
+	f.Add([]byte(`{"type":"message","v":-1,"id":"e_1"}`))                                    // negative v reads as v1
+	f.Add([]byte(`{"type":"custom","id":"e_1","kind":"k"}`))                                 // absent data stays nil
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		e1, err := thread.UnmarshalEntry(data)

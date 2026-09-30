@@ -20,13 +20,18 @@ v0.5.0 → v0.7.0.)
   span every format's goldens (the steering receipts of 3 and the pool
   receipts of 4 joined), `FuzzLoad` keeping the file-level contract.
 - The kill -9 crash matrix (step 7.1) on jsonl and sqlite over every
-  write point the session layer owns — the prompt entry, the turn-end
-  batch, an approval's park, a decision, a compaction, a steer's
-  acceptance receipt, and thread/pool's acceptance, mirror batch and
-  settlement (`threadtest.CrashMatrix`). At each point a child process
-  proves the write durable and dies; a fresh process reopens and
-  continues the session. sqlite's run re-proves the lock takeover from
-  a dead holder at every point.
+  write point the session layer owns — fourteen storage.Append sites
+  behind twelve crash points (`threadtest.CrashMatrix`): the prompt
+  entry, the turn-end batch, an approval's park, a decision, a
+  compaction, a steer's acceptance receipt, thread/pool's acceptance,
+  mirror batch and settlement, a branch, a fork, the steer queue's
+  dropped-receipt settlement, Resume's in-flight step persistence, and
+  DecideSigned's decision and grant batch; the remaining two sites —
+  Resume's expiry sweep and the auto trim's record — write the same
+  entry shapes as the decision and compaction points. At each point a
+  child process proves the write durable and dies; a fresh process
+  reopens and continues the session. sqlite's run re-proves the lock
+  takeover from a dead holder at every point.
 - The budget suite (step 7.2), enforced in CI like correctness, each
   with its Benchmark for the number: append latency on Memory (time
   and allocs), opening a 100k-entry session on jsonl and sqlite

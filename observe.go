@@ -187,7 +187,14 @@ func usageSplits(u Usage) []attribute.KeyValue {
 // below, and every span a tool handler or child run starts, parents
 // under it. A child run's tree hangs under its delegating tool span
 // exactly as Nested events hang inside ToolStart..ToolFinish.
-func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo) (context.Context, func(res *RunResult, err error)) {
+//
+// extra carries the run-level attributes only the caller knows: the
+// subagent linkage (weft.parent.run.id / weft.parent.call.id), the
+// manifest hash, weft.version, weft.metadata.dropped when the limits
+// dropped pairs. The metadata in force on ctx lands on every span of
+// the run — this one and the model and tool spans below — verbatim,
+// with the semconv mirrors (metadataAttrs).
+func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo, extra []attribute.KeyValue) (context.Context, func(res *RunResult, err error)) {
 	ctx, span := o.tracer.Start(ctx, spanName(semconv.GenAIOperationNameInvokeAgent, agent),
 		trace.WithSpanKind(trace.SpanKindInternal))
 	start := time.Now()
@@ -202,6 +209,8 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo)
 		if info.Name != "" {
 			attrs = append(attrs, semconv.GenAIRequestModel(info.Name))
 		}
+		attrs = append(attrs, extra...)
+		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 	}
 	if l := o.logger(); l.Enabled(ctx, slog.LevelDebug) {
@@ -317,6 +326,7 @@ func (o *observer) model(ctx context.Context, runID string, step int, info Model
 		if info.Name != "" {
 			attrs = append(attrs, semconv.GenAIRequestModel(info.Name))
 		}
+		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 	}
 	return ctx, func(finish ModelFinish, finished bool, calls int, err error) {
@@ -408,6 +418,7 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context
 		if c.Approved {
 			attrs = append(attrs, attrToolApproved.Bool(true))
 		}
+		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 	}
 	return ctx, func(res ToolResultPart, pending bool, err error) {

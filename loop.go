@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // rblock accumulates one provider reasoning block. A block stays open
@@ -36,15 +38,30 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// The run's metadata is merged and placed before any span starts, so
 	// every span and record of this run carries it and a Subagent's child
 	// run inherits it through the tool call's context (ADR 0024 S1.1).
-	md, _ := mergeMetadata(metadataFromCtx(ctx), cfg.metadata)
+	md, mdDropped := mergeMetadata(metadataFromCtx(ctx), cfg.metadata)
 	if md != nil {
 		ctx = withMetadata(ctx, md)
+	}
+	// The run span's own linkage and provenance: a subagent's child run
+	// names its parent (the call it executes under), a named agent its
+	// manifest hash, every run the core version, and a run whose metadata
+	// hit the limits the drop count (ADR 0024 S1.2).
+	var runExtra []attribute.KeyValue
+	if c, ok := CallFromContext(ctx); ok {
+		runExtra = append(runExtra, attrParentRunID.String(c.RunID), attrParentCallID.String(c.CallID))
+	}
+	if a.manifestHash != "" {
+		runExtra = append(runExtra, attrManifestHash.String(a.manifestHash))
+	}
+	runExtra = append(runExtra, attrVersion.String(version))
+	if mdDropped > 0 {
+		runExtra = append(runExtra, attrMetadataDropped.Int(mdDropped))
 	}
 	// The run's own reporting begins here: one invoke_agent span, on this
 	// context, so every chat, execute_tool and tap below parents under
 	// it, ended by every exit with the outcome decided — including
 	// cancellation, which no event reports (ADR 0016).
-	ctx, endSpan := a.obs.run(ctx, cfg.id, a.name, a.modelInfo())
+	ctx, endSpan := a.obs.run(ctx, cfg.id, a.name, a.modelInfo(), runExtra)
 	// A panic nothing contains — PrepareStep functions are arbitrary
 	// user code; model, tool, and tap panics are contained further down
 	// — must not leak the run span: this guard ends it with the panic

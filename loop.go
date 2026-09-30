@@ -210,6 +210,24 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			}
 		}
 	}
+	// Per-run configuration the agent refuses [D5]: a raised limit. The
+	// check runs before any model call and before any resumed call, so a
+	// misconfigured run does not start; errors.Is(err, ErrInvalidRunOption)
+	// is the branch. Tool narrowing (OnlyTools) validates against the
+	// step-0 snapshot just below, with the same rule.
+	if cfg.maxStepsSet && cfg.maxSteps > a.maxSteps {
+		return fail(0, fmt.Errorf("%w: max_steps %d raises the agent's %d; per run it may only lower", ErrInvalidRunOption, cfg.maxSteps, a.maxSteps))
+	}
+	if cfg.parallelismSet && cfg.parallelism > a.parallelism {
+		return fail(0, fmt.Errorf("%w: parallelism %d raises the agent's %d; per run it may only lower", ErrInvalidRunOption, cfg.parallelism, a.parallelism))
+	}
+	// The run's effective configuration, resolved once: the loop reads
+	// these, not the agent's fields, so a run-level option (the dual
+	// Instructions/MaxSteps/Parallelism, the Thinking shape) reaches
+	// every step of this run alone (ADR 0024: configuration the run
+	// carries, not a seam).
+	maxSteps := cfg.effectiveMaxSteps(a.maxSteps)
+	parallelism := cfg.effectiveParallelism(a.parallelism)
 	if len(resume) > 0 {
 		results, pending, sub, err := a.resolvePending(ctx, cfg, resume, seq, emit)
 		if err != nil {
@@ -238,7 +256,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	}
 
 	state := &loopState{retries: map[string]int{}}
-	for step := 0; step < a.maxSteps; step++ {
+	for step := 0; step < maxSteps; step++ {
 		if err := ctx.Err(); err != nil {
 			return fail(step, err)
 		}
@@ -254,12 +272,13 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		emit(StepStart{RunID: cfg.id, Index: step})
 
 		req := ModelRequest{
-			System:   a.system,
+			System:   cfg.effectiveSystem(a.system),
 			Messages: slices.Clone(res.Messages), // adapters cannot reach the run's transcript
 			Tools:    slices.Clone(tools),        // nor the agent's tool list
 			// A run-level Thinking option overrides the agent's default
-			// for this run alone (the thinkingOption applies to both).
-			SequentialTools: a.parallelism == 1,
+			// for this run alone (the thinkingOption applies to both);
+			// so do the dual Instructions/MaxSteps/Parallelism.
+			SequentialTools: parallelism == 1,
 			Thinking:        cfg.effectiveThinking(a.thinking),
 			// The same dual-option rule for a forced tool choice.
 			ToolChoice: cfg.effectiveToolChoice(a.toolChoice),
@@ -453,7 +472,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			}
 		default:
 			var retried []string
-			rec.Results, pending, sub, retried = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, false)
+			rec.Results, pending, sub, retried = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, false, parallelism)
 			for _, name := range retried {
 				state.retries[name]++
 			}
@@ -555,12 +574,12 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// Cancellation during the last allowed step's tools is reported as
 	// cancellation, not as step exhaustion: the cause wins over the budget.
 	if err := ctx.Err(); err != nil {
-		return fail(a.maxSteps-1, err)
+		return fail(maxSteps-1, err)
 	}
 	// The model still wanted tools after its last allowed step. The
 	// transcript, including the final step's tool results, rides on the
 	// error.
-	return fail(a.maxSteps, ErrMaxSteps)
+	return fail(maxSteps, ErrMaxSteps)
 }
 
 // observeMessages runs the run's transcript observers (OnMessages) over
@@ -794,10 +813,10 @@ func (a *Agent) modelInfo() ModelInfo { return InfoOf(a.model) }
 // its child run's events (wrapped in Nested, numbered from this run's
 // counter under emitMu) and usage (the returned per-call map, keyed by
 // call id). The dispatcher otherwise knows nothing about subagents.
-func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage, retried []string) {
+func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool, parallelism int) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage, retried []string) {
 	outcomes := make([]ToolResultPart, len(calls))
 	parked := make([]bool, len(calls))
-	sem := make(chan struct{}, a.parallelism)
+	sem := make(chan struct{}, parallelism)
 	subs := map[string]Usage{}
 	var retryMu sync.Mutex
 
@@ -956,7 +975,7 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 			approved = append(approved, c)
 		}
 	}
-	ran, pending, sub, _ := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, true)
+	ran, pending, sub, _ := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, true, cfg.effectiveParallelism(a.parallelism))
 	byID := make(map[string]ToolResultPart, len(ran))
 	for _, r := range ran {
 		byID[r.CallID] = r

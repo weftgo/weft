@@ -125,6 +125,13 @@ var (
 	ErrContextOverflow = errors.New("weft: request exceeds the model's context window")
 )
 
+// ErrInvalidRunOption marks a per-run configuration the agent refuses:
+// an unknown tool name in OnlyTools, or a MaxSteps/Parallelism raise
+// (per run they may only lower). Returned wrapped in *RunError before
+// any model call — a run that would misconfigure itself does not start
+// (WEFT-PLAYGROUND §10.1 [D5]).
+var ErrInvalidRunOption = errors.New("weft: invalid run option")
+
 // ToolError is a tool failure with a stable code the model can branch
 // on. Code is SCREAMING_SNAKE by convention ("ORDER_NOT_FOUND"); Message
 // is what the model reads; Err is the internal cause — available to

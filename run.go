@@ -37,6 +37,16 @@ type runConfig struct {
 	// options (later key winning); execute overlays it on the context's
 	// inherited metadata before any span starts (metadata.go).
 	metadata map[string]string
+	// The dual options' run-side values (Instructions, MaxSteps,
+	// Parallelism): a *Set flag per knob, the Thinking shape. execute
+	// validates the lower-only rules (a raise is ErrInvalidRunOption,
+	// before any model call) and resolves the effective values.
+	system         string
+	systemSet      bool
+	maxSteps       int
+	maxStepsSet    bool
+	parallelism    int
+	parallelismSet bool
 }
 
 type decision struct {
@@ -200,6 +210,33 @@ func (c *runConfig) effectiveToolChoice(agentDefault ToolChoiceConfig) ToolChoic
 func (c *runConfig) effectiveParams(agentDefault RequestParams) RequestParams {
 	if c.paramsSet {
 		return c.params
+	}
+	return agentDefault
+}
+
+// effectiveSystem resolves the run's system prompt: a run-level
+// Instructions option replaces the agent's; neither set keeps the
+// agent's (the Thinking rule).
+func (c *runConfig) effectiveSystem(agentDefault string) string {
+	if c.systemSet {
+		return c.system
+	}
+	return agentDefault
+}
+
+// effectiveMaxSteps resolves the run's step budget. The caller has
+// already validated the lower-only rule; this only picks the value.
+func (c *runConfig) effectiveMaxSteps(agentDefault int) int {
+	if c.maxStepsSet {
+		return c.maxSteps
+	}
+	return agentDefault
+}
+
+// effectiveParallelism resolves the run's tool width, the same rule.
+func (c *runConfig) effectiveParallelism(agentDefault int) int {
+	if c.parallelismSet {
+		return c.parallelism
 	}
 	return agentDefault
 }

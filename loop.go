@@ -68,15 +68,25 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		}
 	}()
 	// Every event passes through here exactly once: the taps observe it
-	// (synchronously, in emission order, on the emitting goroutine),
-	// then the sink receives it. Nothing is delivered after
-	// cancellation — for taps and sinks alike, so Generate and Stream
-	// agree and a consumer never observes a stream that continues past
-	// its error. It reports whether the event was delivered: the
-	// terminal RunFinish decides the run's outcome by that answer, so
-	// a cancellation landing between a ctx check and the emit can never
-	// produce a success without its RunFinish, or a RunFinish followed
-	// by an error (rule 4; Run.Events' one-terminal-element promise).
+	// (synchronously, in emission order, on the emitting goroutine), the
+	// recorder reports it as an OTel log record (durable events and
+	// deltas on two counters; Nested is not reported — the child run
+	// emits its own), then the sink receives it. Nothing is delivered
+	// after cancellation — for taps, records and sinks alike, so
+	// Generate and Stream agree and a consumer never observes a stream
+	// that continues past its error. It reports whether the event was
+	// delivered: the terminal RunFinish decides the run's outcome by
+	// that answer, so a cancellation landing between a ctx check and the
+	// emit can never produce a success without its RunFinish, or a
+	// RunFinish followed by an error (rule 4; Run.Events'
+	// one-terminal-element promise).
+	rec := recorder{
+		elog:         a.obs.elog,
+		capture:      a.content,
+		runID:        cfg.id,
+		agent:        a.name,
+		manifestHash: a.manifestHash,
+	}
 	deliver := func(ev Event) bool {
 		if ctx.Err() != nil {
 			return false
@@ -84,6 +94,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		for _, tap := range a.taps {
 			a.safeTap(ctx, tap, ev)
 		}
+		rec.recordEvent(ctx, ev)
 		sink(ev)
 		return true
 	}

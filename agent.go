@@ -2,6 +2,8 @@ package weft
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"reflect"
@@ -580,6 +582,11 @@ type Agent struct {
 	// obs is the loop's own reporting at the run's phases (ADR 0016):
 	// spans to the tracer, lines to the logger. Built once, below.
 	obs observer
+	// manifestHash is sha256(Manifest(this agent)) computed once at New
+	// for a named agent — "which version of this agent ran", on every
+	// run's invoke_agent span and run_start record (ADR 0024). "" when
+	// the agent is unnamed (the manifest requires a name).
+	manifestHash string
 	// hasOutput records that Output was applied: a Subagent delegating
 	// to this agent returns the submitted JSON, not the final text.
 	hasOutput bool
@@ -625,6 +632,16 @@ func New(m Model, opts ...Option) *Agent {
 		tracer: tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(version)),
 		elog:   lp.Logger(instrumentationName, log.WithInstrumentationVersion(version)),
 		log:    a.logger,
+	}
+	// The manifest hash is computed once, here, for the named agent: the
+	// agent is immutable after this, so one hash serves every run (the
+	// store used to recompute it per run through AgentFromContext; ADR
+	// 0024 moves it onto the emitter).
+	if a.name != "" {
+		if b, err := Manifest(a); err == nil {
+			sum := sha256.Sum256(b)
+			a.manifestHash = hex.EncodeToString(sum[:])
+		}
 	}
 	// The model chain is built once, here: first registered = outermost.
 	for i := len(a.modelMW) - 1; i >= 0; i-- {

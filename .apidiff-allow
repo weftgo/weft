@@ -6,12 +6,8 @@
 # OnRunEnd, nothing else; no entries; the gate diffs against v0.3.5.
 # (Re-reset at v0.5.0, 2026-09-29: the 0.5.0 cycle was additive.)
 #
-# The 0.6.0 cycle (ADR 0024 step 2, D9): the three dual options widen
-# their return type from Option to a superset interface — the exact
-# pre-1.0 case scripts/apidiff.sh documents. Source-compatible: every
-# existing use as an Option keeps compiling; the widening is what lets
-# the same constructor work per run (PLAYGROUND §10.1). Nothing else in
-# the cycle is incompatible.
-Instructions: changed from func(string) Option to func(string) InstructionsOption
-MaxSteps: changed from func(int) Option to func(int) MaxStepsOption
-Parallelism: changed from func(int) Option to func(int) ParallelismOption
+# Reset at v0.6.0 (2026-10-01): the cycle's three D9 widenings — the
+# dual options' return types, Option → superset interface, source-
+# compatible — shipped in this tag; no entries remain; the gate diffs
+# against v0.6.0.
+

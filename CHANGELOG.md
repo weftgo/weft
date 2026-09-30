@@ -1,9 +1,11 @@
-## 0.6.0 (unreleased)
+## 0.6.0 — 2026-10-01
 
 The observability-data programme's core step (ADR 0024): the run's
 events, deltas and transcript leave the process as standard OpenTelemetry
 log records, and the playground's per-run configuration joins the core.
-All additive — root ships a minor.
+Additive for source — the three dual options widen their return type to
+a superset interface, the cycle's three allow-listed apidiff lines — so
+root ships a minor.
 
 ### Added — observability data out (ADR 0024)
 
@@ -38,12 +40,29 @@ All additive — root ships a minor.
   run span, `weft.parent.run.id` / `weft.parent.call.id` for subagents,
   `weft.manifest.hash` (computed at New for a named agent) and
   `weft.version`.
+- `weft.version` rides at v0.6.0 and is pinned to a source
+  (`version_test`): the const must equal the newest `v*` tag reachable
+  from HEAD or the CHANGELOG's unreleased heading, so it cannot sit
+  stale through a release again.
+- A whole run with no tracer and no logger provider — the default
+  program — is allocation-bounded (128 allocs/op measured, bound 160):
+  the no-SDK path pays nothing for observability nobody asked for.
+- `examples/otel` proves the emission end to end through the real SDK
+  (an in-memory `sdk/log v0.22.0` exporter, a dependency of that
+  example module only): every record correlates to the run's trace,
+  event positions are contiguous, and the `messages` records rebuild
+  the transcript byte-for-byte.
 
 ### Added — per-run configuration [D5, D7]
 
 - `Instructions`, `MaxSteps`, `Parallelism` become dual Option/RunOption
   (the `Thinking` shape); per run the two limits may only lower — a
   raise is `ErrInvalidRunOption`, before any model call.
+- The three allow-listed widenings (D9): the constructors return
+  `InstructionsOption` / `MaxStepsOption` / `ParallelismOption` —
+  superset interfaces every existing use as an `Option` still
+  satisfies, which is what lets the same constructor work per run.
+  The cycle's exact `.apidiff-allow` lines, reset at this tag.
 - `weft.OnlyTools(names...)` narrows the run to named registered tools
   (unknown name → `ErrInvalidRunOption` before any model call);
   `weft.UseModel(m)` replaces the model for the run and rebuilds the

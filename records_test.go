@@ -218,6 +218,9 @@ func TestEventAndDeltaRecords(t *testing.T) {
 	if deltas[0].hasAttr("weft.event.pos") {
 		t.Error("delta record carries weft.event.pos; the counters are separate [D3]")
 	}
+	if deltas[0].eventName != "weft.delta" {
+		t.Errorf("delta record EventName = %q, want weft.delta", deltas[0].eventName)
+	}
 
 	// Bodies are the events' wire JSON, content full (capture is on: the
 	// provider answers Enabled true). Every record decodes back to the
@@ -655,6 +658,9 @@ func TestMessagesRecordsFreshRun(t *testing.T) {
 	}
 	if input == nil {
 		t.Fatal("no input messages record (weft.messages.input)")
+	}
+	if input.eventName != "weft.messages" {
+		t.Errorf("messages record EventName = %q, want weft.messages", input.eventName)
 	}
 	if idx, _ := input.intAttr("weft.messages.index"); idx != 0 {
 		t.Errorf("input record index = %d, want 0", idx)

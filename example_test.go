@@ -990,3 +990,46 @@ func ExampleStripContent() {
 	// Output:
 	// {"type":"tool_finish","run_id":"r","seq":3,"call_id":"c1","name":"lookup","content":"","is_error":false}
 }
+
+// The playground's per-run configuration (WEFT-PLAYGROUND §10.1): one
+// run of an immutable agent, changed without rebuilding it. OnlyTools
+// narrows to registered tools; UseModel swaps in an allowed alternate.
+func ExampleOnlyTools() {
+	lookup := weft.Tool("lookup", "Look up an order.", func(ctx context.Context, in struct {
+		ID string `json:"id"`
+	}) (string, error) {
+		return `{"status":"shipped"}`, nil
+	})
+	agt := weft.New(wefttest.Script(wefttest.Say("order shipped")),
+		weft.Name("support"), lookup)
+	_, _ = agt.Generate(context.Background(),
+		weft.Prompt("where is order 4411?"),
+		weft.OnlyTools("lookup"),                       // narrowing; unknown name → ErrInvalidRunOption
+		weft.Instructions("Answer in one short line."), // this run's prompt
+	)
+	// Output:
+}
+
+// ParkOn parks the named tool's calls at the approval boundary, exactly
+// as RequireApproval would — the breakpoint that reaches a run without
+// touching the immutable agent. Approve resumes it.
+func ExampleParkOn() {
+	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+		return "refunded", nil
+	})
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c1"}),
+		wefttest.Say("refunded"),
+	), refund)
+	res, err := agt.Generate(context.Background(),
+		weft.Prompt("refund order 4411"), weft.ParkOn("refund"))
+	if err != nil {
+		return
+	}
+	fmt.Println("pending:", len(res.Pending))
+	// A human decides; the next run resumes:
+	_, _ = agt.Generate(context.Background(),
+		weft.Messages(res.Messages...), weft.Approve("c1"))
+	// Output:
+	// pending: 1
+}

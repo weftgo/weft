@@ -3,9 +3,15 @@ package weft
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"iter"
+	"strconv"
+	"strings"
 	"sync"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // RunOption configures a single run.
@@ -47,6 +53,16 @@ type runConfig struct {
 	maxStepsSet    bool
 	parallelism    int
 	parallelismSet bool
+	// onlyTools narrows the run to the named tools among the agent's
+	// registered ones (narrowing only; an unknown name fails the run
+	// before any model call). nil keeps the full set.
+	onlyTools []string
+	// model replaces the agent's model for this run; the WrapModel chain
+	// is rebuilt over it. nil keeps the agent's.
+	model Model
+	// parkOn parks calls to the named tools at the approval boundary,
+	// exactly as RequireApproval would (ADR 0007 applied per run).
+	parkOn []string
 }
 
 type decision struct {
@@ -132,6 +148,62 @@ func (o runIDOption) applyRun(c *runConfig) { c.id = string(o) }
 // replays, idempotent retries, and correlating with an outer system's own
 // ids. Empty values are ignored.
 func RunID(id string) RunOption { return runIDOption(id) }
+
+type onlyToolsOption struct{ names []string }
+
+func (o onlyToolsOption) applyRun(c *runConfig) {
+	if len(o.names) > 0 {
+		c.onlyTools = append(c.onlyTools, o.names...)
+	}
+}
+
+// OnlyTools narrows this run to the named tools among the agent's
+// registered ones — the ToolSource snapshot when one exists, fetched
+// fresh per step as ever. Narrowing only: the playground cannot add a
+// tool, because a new tool is code. A name the agent does not have
+// fails the run with ErrInvalidRunOption before any model call. The
+// step's advertisement and its dispatch resolve against the same
+// narrowed snapshot, so what the model was shown is exactly what runs;
+// calls to a tool a PrepareStep function dropped fail as unknown, as
+// today. Manifest and Agent.Tools keep reporting the static set: they
+// describe the code, not one run's experiment (WEFT-PLAYGROUND §10.1
+// [D5]). With no names, the run keeps the agent's full set.
+func OnlyTools(names ...string) RunOption { return onlyToolsOption{names} }
+
+type useModelOption struct{ m Model }
+
+func (o useModelOption) applyRun(c *runConfig) {
+	if o.m != nil && !isNilModel(o.m) {
+		c.model = o.m
+	}
+}
+
+// UseModel replaces the agent's model for this run, rebuilding the
+// WrapModel chain over it (first registered = outermost, the New rule):
+// the run's model calls go through the same middleware over m. Pass a
+// model the runtime registered as an allowed alternate; a nil model is
+// ignored. RunStart.Model and the chat spans report the run's model
+// (middleware forwards Info); Agent.Model and the manifest keep naming
+// the agent's own (WEFT-PLAYGROUND §10.1 [D5]).
+func UseModel(m Model) RunOption { return useModelOption{m} }
+
+type parkOnOption struct{ names []string }
+
+func (o parkOnOption) applyRun(c *runConfig) {
+	if len(o.names) > 0 {
+		c.parkOn = append(c.parkOn, o.names...)
+	}
+}
+
+// ParkOn parks a call to any of the named tools at the approval
+// boundary (ADR 0007), exactly as if the tool had been built with
+// RequireApproval: the call gets its ToolStart and no ToolFinish, the
+// run ends successfully with the call on RunResult.Pending, and
+// Approve/Deny/Resolve on a resuming run decide it. This is how a
+// breakpoint or side-effect parking reaches a runtime-started run
+// without touching the agent, which is immutable after New (ADR 0024
+// D7, WEFT-PLAYGROUND §10.1). With no names, nothing parks.
+func ParkOn(tools ...string) RunOption { return parkOnOption{tools} }
 
 type onMessagesOption struct {
 	fn func(context.Context, int, []Message)
@@ -450,4 +522,113 @@ func (a *Agent) Generate(ctx context.Context, opts ...RunOption) (*RunResult, er
 	}
 	cfg.finish()
 	return a.execute(ctx, cfg, func(Event) {})
+}
+
+// The weft.override.* span attributes (ADR 0024 S1.2, WEFT-PLAYGROUND
+// §10.1): one per knob a RunOption changed, plus the hash over their
+// canonical JSON — an experiment's fingerprint, so two sibling runs
+// with equal changes carry equal hashes and a plain run carries none.
+const (
+	attrOverrideHash         = "weft.override.hash"
+	attrOverrideInstructions = "weft.override.instructions"
+	attrOverrideTools        = "weft.override.tools"
+	attrOverrideModel        = "weft.override.model"
+	attrOverrideParkOn       = "weft.override.park_on"
+	attrOverrideThinking     = "weft.override.thinking"
+	attrOverrideToolChoice   = "weft.override.tool_choice"
+	attrOverrideParams       = "weft.override.params"
+	attrOverrideMaxSteps     = "weft.override.max_steps"
+	attrOverrideParallelism  = "weft.override.parallelism"
+)
+
+// overrideAttrs renders the run's weft.override.* attributes: present
+// only when a RunOption changed the agent's configuration, absent on a
+// plain run. "Changed" means a run-level option was applied — the value
+// may coincide with the agent's own; the fingerprint records what the
+// run carried, not a diff. The instructions text itself is content: the
+// attribute says only that it was replaced (true); the text rides the
+// input messages record when capture is on. The hash covers every
+// changed value, text included, as sha256 over the canonical JSON of a
+// map (encoding/json sorts map keys, so equal changes hash equal).
+func (c *runConfig) overrideAttrs() []attribute.KeyValue {
+	values := map[string]any{}
+	var attrs []attribute.KeyValue
+	add := func(name string, attrValue any, kv attribute.KeyValue) {
+		values[name] = attrValue
+		attrs = append(attrs, kv)
+	}
+	if c.systemSet {
+		add("instructions", c.system, attribute.Bool(attrOverrideInstructions, true))
+	}
+	if len(c.onlyTools) > 0 {
+		add("tools", c.onlyTools, attribute.String(attrOverrideTools, strings.Join(c.onlyTools, ",")))
+	}
+	if c.model != nil {
+		info := InfoOf(c.model)
+		name := info.Name
+		if info.Provider != "" {
+			name = info.Provider + "/" + info.Name
+		}
+		add("model", name, attribute.String(attrOverrideModel, name))
+	}
+	if c.thinkingSet {
+		add("thinking", thinkingOverride(c.thinking), attribute.String(attrOverrideThinking, thinkingOverride(c.thinking)))
+	}
+	if c.toolChoiceSet {
+		tc := c.toolChoice
+		value := string(tc.Mode)
+		if tc.Mode == ToolChoiceNamed {
+			value = string(ToolChoiceNamed) + ":" + tc.Name
+		}
+		add("tool_choice", value, attribute.String(attrOverrideToolChoice, value))
+	}
+	if c.paramsSet {
+		b, err := json.Marshal(c.params)
+		if err != nil {
+			b = []byte("{}")
+		}
+		add("params", json.RawMessage(b), attribute.String(attrOverrideParams, string(b)))
+	}
+	if c.maxStepsSet {
+		add("max_steps", c.maxSteps, attribute.Int(attrOverrideMaxSteps, c.maxSteps))
+	}
+	if c.parallelismSet {
+		add("parallelism", c.parallelism, attribute.Int(attrOverrideParallelism, c.parallelism))
+	}
+	if len(c.parkOn) > 0 {
+		add("park_on", c.parkOn, attribute.String(attrOverrideParkOn, strings.Join(c.parkOn, ",")))
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(values)
+	if err != nil {
+		return attrs // unhashable overrides still name themselves
+	}
+	sum := sha256.Sum256(b)
+	return append([]attribute.KeyValue{attribute.String(attrOverrideHash, hex.EncodeToString(sum[:]))}, attrs...)
+}
+
+// thinkingOverride renders a ThinkingConfig for weft.override.thinking:
+// the level by name, the budget beside it when set.
+func thinkingOverride(cfg ThinkingConfig) string {
+	var level string
+	switch cfg.Level {
+	case ThinkUnset:
+		level = "unset"
+	case ThinkOff:
+		level = "off"
+	case ThinkLow:
+		level = "low"
+	case ThinkMedium:
+		level = "medium"
+	case ThinkHigh:
+		level = "high"
+	default:
+		level = strconv.Itoa(int(cfg.Level))
+	}
+	if cfg.Budget > 0 {
+		return level + "/" + strconv.FormatInt(cfg.Budget, 10)
+	}
+	return level
 }

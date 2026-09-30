@@ -884,3 +884,20 @@ func (a *Agent) Logger() *slog.Logger {
 // contained since construction. A rising counter means an observer is
 // broken; runs are unaffected by design.
 func (a *Agent) TapPanics() int64 { return a.tapPanics.Load() }
+
+// narrowTools keeps the named subset of a snapshot, in the snapshot's
+// own order (registration order for static agents). Duplicates in names
+// are harmless — a definition is kept once. The caller has already
+// validated every name against the run's first snapshot.
+func narrowTools(tools []*ToolDef, names []string) []*ToolDef {
+	keep := make([]*ToolDef, 0, len(tools))
+	for _, t := range tools {
+		for _, n := range names {
+			if t.Name == n {
+				keep = append(keep, t)
+				break
+			}
+		}
+	}
+	return keep
+}

@@ -42,11 +42,29 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	if md != nil {
 		ctx = withMetadata(ctx, md)
 	}
+	// The run's model: the agent's, or — when UseModel replaced it — the
+	// WrapModel chain rebuilt over the alternate, first registered
+	// outermost, exactly as New builds it (ADR 0024: configuration the
+	// run carries, not a seam). Every model call, span and RunStart of
+	// this run resolves against this chain.
+	model := a.model
+	if cfg.model != nil {
+		model = cfg.model
+		for i := len(a.modelMW) - 1; i >= 0; i-- {
+			model = a.modelMW[i](model)
+			if isNilModel(model) {
+				return nil, &RunError{Step: 0, Err: fmt.Errorf("%w: model middleware returned a nil Model", ErrModelContract), Result: &RunResult{ID: cfg.id}}
+			}
+		}
+	}
 	// The run span's own linkage and provenance: a subagent's child run
 	// names its parent (the call it executes under), a named agent its
 	// manifest hash, every run the core version, and a run whose metadata
-	// hit the limits the drop count (ADR 0024 S1.2).
+	// hit the limits the drop count (ADR 0024 S1.2). A run that changed
+	// its configuration carries the experiment's fingerprint
+	// (weft.override.*).
 	var runExtra []attribute.KeyValue
+	runExtra = append(runExtra, cfg.overrideAttrs()...)
 	if c, ok := CallFromContext(ctx); ok {
 		runExtra = append(runExtra, attrParentRunID.String(c.RunID), attrParentCallID.String(c.CallID))
 	}
@@ -61,7 +79,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// context, so every chat, execute_tool and tap below parents under
 	// it, ended by every exit with the outcome decided — including
 	// cancellation, which no event reports (ADR 0016).
-	ctx, endSpan := a.obs.run(ctx, cfg.id, a.name, a.modelInfo(), runExtra)
+	ctx, endSpan := a.obs.run(ctx, cfg.id, a.name, InfoOf(model), runExtra)
 	// A panic nothing contains — PrepareStep functions are arbitrary
 	// user code; model, tool, and tap panics are contained further down
 	// — must not leak the run span: this guard ends it with the panic
@@ -173,7 +191,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	}
 	// A model that can name itself does so on the first event; the
 	// interface stays optional so Model remains one method.
-	emit(RunStart{ID: cfg.id, Model: a.modelInfo(), Agent: a.name})
+	emit(RunStart{ID: cfg.id, Model: InfoOf(model), Agent: a.name})
 	// The input joins the record stream before anything else grows the
 	// transcript: the repaired input, index 0, step 0 (ADR 0024 D1 —
 	// today it is never reported at all, so a stored transcript could
@@ -221,6 +239,32 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	if cfg.parallelismSet && cfg.parallelism > a.parallelism {
 		return fail(0, fmt.Errorf("%w: parallelism %d raises the agent's %d; per run it may only lower", ErrInvalidRunOption, cfg.parallelism, a.parallelism))
 	}
+	// Narrowing validates against the run's first snapshot, before any
+	// model call: an unknown name is a misconfiguration, not a run-time
+	// surprise. A ToolSource that later drops a narrowed tool simply
+	// stops offering it — calls to it fail as unknown, the standing
+	// rule.
+	if len(cfg.onlyTools) > 0 {
+		snapshot, err := a.dispatchTools()
+		if err != nil {
+			return fail(0, err)
+		}
+		for _, name := range cfg.onlyTools {
+			if _, ok := findTool(snapshot, name); !ok {
+				return fail(0, fmt.Errorf("%w: tool %q is not registered on this agent; OnlyTools narrows, it cannot add", ErrInvalidRunOption, name))
+			}
+		}
+	}
+	// The run's tool fetch: the agent's snapshot narrowed to the named
+	// subset. Advertising and dispatch both resolve against it, so what
+	// the model was shown is exactly what runs (the one-snapshot rule).
+	fetchTools := func() ([]*ToolDef, error) {
+		tools, err := a.dispatchTools()
+		if err != nil || len(cfg.onlyTools) == 0 {
+			return tools, err
+		}
+		return narrowTools(tools, cfg.onlyTools), nil
+	}
 	// The run's effective configuration, resolved once: the loop reads
 	// these, not the agent's fields, so a run-level option (the dual
 	// Instructions/MaxSteps/Parallelism, the Thinking shape) reaches
@@ -228,8 +272,15 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// carries, not a seam).
 	maxSteps := cfg.effectiveMaxSteps(a.maxSteps)
 	parallelism := cfg.effectiveParallelism(a.parallelism)
+	// The run's parked set (ParkOn): the approval boundary applied per
+	// run — a call to a named tool parks exactly as RequireApproval
+	// would (ADR 0007; ADR 0024 D7).
+	parkSet := make(map[string]bool, len(cfg.parkOn))
+	for _, name := range cfg.parkOn {
+		parkSet[name] = true
+	}
 	if len(resume) > 0 {
-		results, pending, sub, err := a.resolvePending(ctx, cfg, resume, seq, emit)
+		results, pending, sub, err := a.resolvePending(ctx, cfg, resume, seq, emit, fetchTools, parkSet)
 		if err != nil {
 			return fail(0, err)
 		}
@@ -265,7 +316,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// model was shown is exactly what runs. A source with a
 		// duplicate name fails here rather than silently dropping a
 		// tool.
-		tools, err := a.dispatchTools()
+		tools, err := fetchTools()
 		if err != nil {
 			return fail(step, err)
 		}
@@ -342,7 +393,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// the span measures the chain's outcome (ADR 0016). The stream is
 		// consumed on the span's context, so an adapter's own HTTP spans
 		// parent under chat.
-		mctx, endModel := a.obs.model(ctx, cfg.id, step, a.modelInfo())
+		mctx, endModel := a.obs.model(ctx, cfg.id, step, InfoOf(model))
 		// The Model stream contract (see Model) is enforced here, not just
 		// documented: exactly one ModelFinish, nothing after it, and a
 		// panicking implementation becomes a run error instead of crashing
@@ -353,7 +404,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 					err = fmt.Errorf("%w: model stream panicked: %v", ErrModelContract, p)
 				}
 			}()
-			for mev, serr := range a.model.Stream(mctx, req) {
+			for mev, serr := range model.Stream(mctx, req) {
 				if serr != nil {
 					return fmt.Errorf("model stream: %w", serr)
 				}
@@ -472,7 +523,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			}
 		default:
 			var retried []string
-			rec.Results, pending, sub, retried = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, false, parallelism)
+			rec.Results, pending, sub, retried = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, false, parallelism, parkSet)
 			for _, name := range retried {
 				state.retries[name]++
 			}
@@ -813,7 +864,7 @@ func (a *Agent) modelInfo() ModelInfo { return InfoOf(a.model) }
 // its child run's events (wrapped in Nested, numbered from this run's
 // counter under emitMu) and usage (the returned per-call map, keyed by
 // call id). The dispatcher otherwise knows nothing about subagents.
-func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool, parallelism int) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage, retried []string) {
+func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool, parallelism int, parkSet map[string]bool) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage, retried []string) {
 	outcomes := make([]ToolResultPart, len(calls))
 	parked := make([]bool, len(calls))
 	sem := make(chan struct{}, parallelism)
@@ -912,7 +963,7 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 			callCtx, endTool := a.obs.tool(callCtx, c, startSeq)
 			var retry bool
 			var callErr error
-			outcomes[i], parked[i], retry, callErr = a.callTool(callCtx, call, def)
+			outcomes[i], parked[i], retry, callErr = a.callTool(callCtx, call, def, parkSet)
 			if retry {
 				retryMu.Lock()
 				retried = append(retried, call.Name)
@@ -962,10 +1013,11 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 // resumed calls is reported as 0: the original index is not recoverable
 // from the transcript, and there is no StepRecord for them (ADR 0007).
 // Audit lines should key on the CallID, not the step.
-func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolCallPart, seq *atomic.Int64, emit func(Event)) ([]ToolResultPart, []ToolCallPart, map[string]Usage, error) {
+func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), fetchTools func() ([]*ToolDef, error), parkSet map[string]bool) ([]ToolResultPart, []ToolCallPart, map[string]Usage, error) {
 	// Resumed calls run before any step exists, so they fetch their own
-	// snapshot — a separate consultation, like CallTool's.
-	tools, err := a.dispatchTools()
+	// snapshot — a separate consultation, like CallTool's, through the
+	// run's (possibly narrowed) fetch.
+	tools, err := fetchTools()
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -975,7 +1027,7 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 			approved = append(approved, c)
 		}
 	}
-	ran, pending, sub, _ := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, true, cfg.effectiveParallelism(a.parallelism))
+	ran, pending, sub, _ := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, true, cfg.effectiveParallelism(a.parallelism), parkSet)
 	byID := make(map[string]ToolResultPart, len(ran))
 	for _, r := range ran {
 		byID[r.CallID] = r
@@ -1172,7 +1224,7 @@ func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error)
 	if def != nil && def.strict {
 		strict = true
 	}
-	return a.chain(def, strict)(ctx, call)
+	return a.chain(def, strict, nil)(ctx, call)
 }
 
 // chain builds the tool-call chain for one call: agent middleware
@@ -1181,12 +1233,15 @@ func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error)
 // RequireApproval, decodes, and runs the handler. def is nil for an
 // unknown tool — the chain still runs, so Allow/Audit see the attempt,
 // and the base returns the NO_SUCH_TOOL error.
-func (a *Agent) chain(def *ToolDef, strict bool) ToolCaller {
+func (a *Agent) chain(def *ToolDef, strict bool, parkSet map[string]bool) ToolCaller {
 	base := func(ctx context.Context, call ToolCallPart) (string, error) {
 		if def == nil {
 			return "", noSuchTool(call.Name)
 		}
-		if def.approval {
+		// The approval boundary (ADR 0007): the tool's own RequireApproval,
+		// or the run's ParkOn set naming it. Same boundary, same resume
+		// path — ParkOn is the policy applied per run (ADR 0024 D7).
+		if def.approval || parkSet[def.Name] {
 			if c, _ := CallFromContext(ctx); !c.Approved {
 				return "", fmt.Errorf("%w: tool %q", ErrApprovalRequired, call.Name)
 			}
@@ -1217,7 +1272,7 @@ func (a *Agent) chain(def *ToolDef, strict bool) ToolCaller {
 // folded into the result's text for the model, but typed for the
 // observer's error.type (ADR 0016) — and is nil on success and on a
 // parked call's pending report.
-func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef) (res ToolResultPart, pending, retry bool, err error) {
+func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, parkSet map[string]bool) (res ToolResultPart, pending, retry bool, err error) {
 	res = ToolResultPart{CallID: call.ID, Name: call.Name}
 	resultCap := a.resultCap
 	timeout := a.toolTimeout
@@ -1233,7 +1288,7 @@ func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef) (
 	}
 	defer func() { res.Content = capResult(res.Content, resultCap) }()
 
-	fn := a.chain(def, strict)
+	fn := a.chain(def, strict, parkSet)
 	var out string
 	if timeout <= 0 {
 		out, err = invokeContained(ctx, fn, call)

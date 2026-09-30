@@ -8,12 +8,13 @@ import (
 )
 
 // FuzzGrantMatches (step 7.1): the grant predicate engine over
-// arbitrary grants and call arguments never panics and stays
-// deterministic — the same grant and the same call answer the same way
-// twice, whatever the bytes hold. The engine is internal, so this is
-// an internal fuzz; the shapes it may see on the wire are pinned by
-// the format goldens, and a hand-made Arg with several tests set uses
-// Equals first, then Prefix, then Glob (the documented order).
+// arbitrary grants and call arguments never panics and answers against
+// oracles, whatever the bytes hold: a call naming another tool never
+// matches; a value the pointer reaches matches the Equals grant built
+// from it, and a string value its own Prefix and its own Glob; and the
+// glob matcher agrees with a plain dynamic-programming matcher. The
+// engine is internal, so this is an internal fuzz; the shapes it may
+// see on the wire are pinned by the format goldens.
 func FuzzGrantMatches(f *testing.F) {
 	f.Add([]byte(`{"tool":"refund","args":[{"pointer":"/order_id","equals":"1"}]}`),
 		[]byte(`{"order_id":"1"}`), "/order_id", "refund*")
@@ -32,6 +33,7 @@ func FuzzGrantMatches(f *testing.F) {
 		[]byte(`{"a":[1,2,{"b":"c"}]}`), "/a/2/b", "{*")
 	f.Add([]byte(`{"tool":"unicode","args":[{"pointer":"/名前","equals":"テスト"}]}`),
 		[]byte(`{"名前":"テスト"}`), "/名前", "テ*")
+	f.Add([]byte(`{"tool":"x"}`), []byte(`{"a~b":{"c/d":[1e3,1000.0]}}`), "/a~0b/c~1d/1", "*?*")
 
 	f.Fuzz(func(t *testing.T, grantJSON, argsJSON []byte, pointer, glob string) {
 		var g Grant
@@ -39,23 +41,52 @@ func FuzzGrantMatches(f *testing.F) {
 			return // malformed JSON is loud; the wire shapes are pinned elsewhere
 		}
 		call := weft.ToolCallPart{ID: "c_fuzz", Name: g.Tool, Args: argsJSON}
-		m1, m2 := grantMatches(g, call), grantMatches(g, call)
-		if m1 != m2 {
-			t.Fatalf("nondeterministic match over grant %q, args %q", grantJSON, argsJSON)
+		_ = grantMatches(g, call) // never panics
+		call.Name = g.Tool + "_other"
+		if grantMatches(g, call) {
+			t.Fatalf("grant for %q matched a call naming %q", g.Tool, call.Name)
 		}
-		w1, w2 := wildcardMatch(glob, pointer), wildcardMatch(glob, pointer)
-		if w1 != w2 { // never panics either, whatever the pattern holds
-			t.Fatalf("nondeterministic wildcard %q over %q", glob, pointer)
+		if got, want := wildcardMatch(glob, pointer), refWildcard(glob, pointer); got != want {
+			t.Fatalf("wildcardMatch(%q, %q) = %v, the reference says %v", glob, pointer, got, want)
 		}
-		v1, ok1 := pointerValue(argsJSON, pointer)
-		if ok1 {
-			v2, ok2 := pointerValue(argsJSON, pointer)
-			if !ok2 {
-				t.Fatalf("pointerValue flipped on %q / %q", argsJSON, pointer)
+		v, ok := pointerValue(argsJSON, pointer)
+		if !ok || !json.Valid(v) {
+			return
+		}
+		call.Name = "t"
+		if !grantMatches(Grant{Tool: "t", Args: []Arg{ArgEquals(pointer, v)}}, call) {
+			t.Fatalf("args %q at %q: the Equals grant over the value it reaches (%s) did not match", argsJSON, pointer, v)
+		}
+		if str, isStr := jsonString(v); isStr && str != "" {
+			if !grantMatches(Grant{Tool: "t", Args: []Arg{ArgPrefix(pointer, str)}}, call) {
+				t.Fatalf("args %q at %q: the string's own prefix did not match", argsJSON, pointer)
 			}
-			if v1 == nil || v2 == nil {
-				t.Fatalf("pointerValue found nil on %q / %q", argsJSON, pointer)
+			if !grantMatches(Grant{Tool: "t", Args: []Arg{ArgGlob(pointer, str)}}, call) {
+				t.Fatalf("args %q at %q: the string as its own glob did not match", argsJSON, pointer)
 			}
 		}
 	})
+}
+
+// refWildcard is the oracle for wildcardMatch: the textbook dynamic
+// program over bytes — * any run, ? one byte, everything else itself.
+func refWildcard(pattern, s string) bool {
+	// dp[j]: pattern[:i] matches s[:j], rolled over i.
+	dp := make([]bool, len(s)+1)
+	dp[0] = true
+	for i := 0; i < len(pattern); i++ {
+		next := make([]bool, len(s)+1)
+		if pattern[i] == '*' {
+			next[0] = dp[0]
+			for j := 1; j <= len(s); j++ {
+				next[j] = dp[j] || next[j-1]
+			}
+		} else {
+			for j := 1; j <= len(s); j++ {
+				next[j] = dp[j-1] && (pattern[i] == '?' || pattern[i] == s[j-1])
+			}
+		}
+		dp = next
+	}
+	return dp[len(s)]
 }

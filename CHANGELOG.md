@@ -1,3 +1,34 @@
+## thread — unreleased
+
+### Fixed
+
+- Grant `ArgEquals` compares numbers by exact value, never through
+  float64: two integer ids past 2^53 (9007199254740993 and
+  9007199254740992) read equal before, so one id's standing grant
+  approved the other; numbers past float64's range never matched at
+  all. 1, 1.0 and 0.1e1 still compare equal.
+- `ArgGlob`'s `*` no longer reads as a literal when the value holds a
+  `*` at that position (`"ls *"` failed to match `"ls *.go"`) — a
+  fail-closed miss, never an over-grant. Both found by the post-0.7
+  review's strengthened `FuzzGrantMatches` (oracles in place of the
+  determinism checks that could not fail); the crashers are its seeds.
+
+### Tests
+
+- The crash matrix's `resume_arm` point proves what it names: the
+  resumed run's first persisted step (the approved call's result),
+  the child killed inside the resume's model call — before, the child
+  died racing that write and the point re-asserted the decision's.
+- `FuzzDecideSigned` builds its challenge per input and derives each
+  decision from a signed one (claims overridden, re-signed or
+  tampered, the boundary pre-decided), so every catalogue error and
+  the accepted path are reachable under fuzzing, not only from seeds;
+  a rejection must leave the tree untouched.
+- `FuzzDecodeHeader` seeds every header golden; the budget suite's
+  List walk uses distinct stamps and its context build takes the best
+  of five; CI uploads jsonl's fuzz crashers; `make fuzz`/`fuzz-thread`
+  fail when a package does not list.
+
 ## thread 0.7.0 — 2026-09-30
 
 Hardening (plan §10): no new features. Every decoder fuzzed, every

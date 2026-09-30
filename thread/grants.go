@@ -1,9 +1,12 @@
 package thread
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strconv"
 	"strings"
@@ -285,11 +288,12 @@ func argMatches(a Arg, args json.RawMessage) bool {
 	}
 	switch {
 	case len(a.Equals) > 0:
-		var want, got any
-		if err := json.Unmarshal(a.Equals, &want); err != nil {
+		want, err := decodeExact(a.Equals)
+		if err != nil {
 			return false
 		}
-		if err := json.Unmarshal(v, &got); err != nil {
+		got, err := decodeExact(v)
+		if err != nil {
 			return false
 		}
 		return jsonEqual(want, got)
@@ -315,13 +319,16 @@ func wildcardMatch(pattern, s string) bool {
 	px, sx, star, mark := 0, 0, -1, -1
 	for sx < len(s) {
 		switch {
-		case px < len(pattern) && (pattern[px] == '?' || pattern[px] == s[sx]):
-			px++
-			sx++
+		// The star is tested first: a '*' in s must not consume the
+		// pattern's star as a literal, or the star never records a
+		// restart ("*" over "*0").
 		case px < len(pattern) && pattern[px] == '*':
 			star = px
 			mark = sx
 			px++
+		case px < len(pattern) && (pattern[px] == '?' || pattern[px] == s[sx]):
+			px++
+			sx++
 		case star >= 0:
 			px = star + 1
 			mark++
@@ -346,8 +353,8 @@ func pointerValue(raw json.RawMessage, pointer string) (json.RawMessage, bool) {
 	if !strings.HasPrefix(pointer, "/") {
 		return nil, false
 	}
-	var cur any
-	if err := json.Unmarshal(raw, &cur); err != nil {
+	cur, err := decodeExact(raw)
+	if err != nil {
 		return nil, false
 	}
 	for _, tok := range strings.Split(pointer[1:], "/") {
@@ -382,8 +389,60 @@ func jsonString(raw json.RawMessage) (string, bool) {
 	return s, true
 }
 
+// decodeExact decodes raw JSON with its numbers kept as written
+// (json.Number) — never rounded through float64, where two ids past
+// 2^53 read equal and one id's grant would approve the other. Trailing
+// data is an error, as json.Unmarshal has it.
+func decodeExact(raw []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, err
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("thread: trailing data after the JSON value")
+	}
+	return v, nil
+}
+
+// numberKey renders a JSON number's exact value canonically — sign,
+// significant digits, exponent — so 1, 1.0, 0.1e1 and 10e-1 share a
+// key while 9007199254740993 and 9007199254740992 do not. Pure string
+// work: no float rounding, and no big arithmetic an exponent like
+// 1e999999999 could inflate.
+func numberKey(n json.Number) string {
+	s := string(n)
+	neg := strings.HasPrefix(s, "-")
+	s = strings.TrimPrefix(s, "-")
+	mant, expPart, hasExp := strings.Cut(strings.ToLower(s), "e")
+	exp := int64(0)
+	if hasExp {
+		e, err := strconv.ParseInt(expPart, 10, 64)
+		if err != nil || e > 1<<40 || e < -(1<<40) {
+			return string(n) // out of any sane range: compare as written
+		}
+		exp = e
+	}
+	intPart, frac, _ := strings.Cut(mant, ".")
+	digits := intPart + frac
+	exp -= int64(len(frac))
+	digits = strings.TrimLeft(digits, "0")
+	if digits == "" {
+		return "0" // every zero, -0 included
+	}
+	trimmed := strings.TrimRight(digits, "0")
+	exp += int64(len(digits) - len(trimmed))
+	sign := ""
+	if neg {
+		sign = "-"
+	}
+	return sign + trimmed + "e" + strconv.FormatInt(exp, 10)
+}
+
 // jsonEqual compares two decoded JSON values deeply. Numbers compare
-// as float64 — 1 and 1.0 equal — the encoding's own equality.
+// by exact value — 1 and 1.0 equal, the encoding's own equality — and
+// never through float64's rounding.
 func jsonEqual(a, b any) bool {
 	switch a := a.(type) {
 	case nil:
@@ -391,9 +450,9 @@ func jsonEqual(a, b any) bool {
 	case bool:
 		bb, ok := b.(bool)
 		return ok && a == bb
-	case float64:
-		bb, ok := b.(float64)
-		return ok && a == bb
+	case json.Number:
+		bb, ok := b.(json.Number)
+		return ok && numberKey(a) == numberKey(bb)
 	case string:
 		bb, ok := b.(string)
 		return ok && a == bb

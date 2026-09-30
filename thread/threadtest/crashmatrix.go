@@ -12,11 +12,16 @@
 //	compaction   the compaction entry, summarizer usage and all
 //	steer        a steer's acceptance receipt on a busy session (v0.3)
 //	pool_receipt thread/pool's acceptance, mirror batch and settlement (v0.5)
+//	branch       Branch's navigation and summary batch
+//	fork         Fork's copy of the path into a session of its own
+//	clear_queue  ClearQueue's dropped-receipt settlement
+//	resume_arm   the resumed run's step persistence over a decided boundary
+//	decide_signed DecideSigned's decision and Always-grant batch
 //
 // The child performs the write, proves it is durable (the API returned
 // means the backend synced), prints its marker and dies — SIGKILL, no
 // cleanup, exactly a writer dropping dead at that write point. The
-// prompt and steer points die mid-run instead (the parent kills them
+// prompt, steer and resume_arm points die mid-run instead (the parent kills them
 // once the write is provably durable and the child is parked inside
 // its model): their write happened on the way into the run, and the
 // crash lands in the harder window, between write points. The parent
@@ -28,6 +33,7 @@ package threadtest
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"iter"
@@ -62,7 +68,7 @@ const (
 // the 7.1 review's additions: the five Append sites the first walk
 // missed, found by enumerating every storage.Append call site in the
 // session layer and comparing (branch, fork, the steer queue's drop
-// receipts, Resume's arm entry, and DecideSigned's decision+grant
+// receipts, the resumed run's step persistence, and DecideSigned's decision+grant
 // batch).
 var crashPoints = []string{
 	"prompt", "turn_end", "approval", "decision", "compaction", "steer", "pool_receipt",
@@ -72,7 +78,9 @@ var crashPoints = []string{
 // parentKilled are the points where the parent lands the kill (the
 // child is mid-run, blocked in its model); the rest self-kill right
 // after their write returned.
-func parentKilled(point string) bool { return point == "prompt" || point == "steer" }
+func parentKilled(point string) bool {
+	return point == "prompt" || point == "steer" || point == "resume_arm"
+}
 
 // CrashMatrix runs the parent side over every write point: for each,
 // it re-executes the test binary at helperTest (the backend's child,
@@ -89,6 +97,8 @@ func CrashMatrix(t *testing.T, helperTest string, pathFor func(point string) str
 		t.Run(point, func(t *testing.T) {
 			cmd := exec.Command(os.Args[0], "-test.run=^"+helperTest+"$", "-test.count=1")
 			cmd.Env = append(os.Environ(), crashMatrixEnv+"="+point, "WEFT_THREADTEST_CRASH_STORAGE="+path)
+			var stderr bytes.Buffer // a child's panic trace lands here, not on stdout
+			cmd.Stderr = &stderr
 			out, err := cmd.StdoutPipe()
 			if err != nil {
 				t.Fatal(err)
@@ -116,19 +126,20 @@ func CrashMatrix(t *testing.T, helperTest string, pathFor func(point string) str
 			case <-sawMarker:
 			case <-time.After(20 * time.Second):
 				_ = cmd.Process.Kill()
+				_ = cmd.Wait() // reap the child; closes the pipe and settles stderr
 				mu.Lock()
 				defer mu.Unlock()
-				t.Fatalf("the child never reached %q:\n%s", marker, strings.Join(lines, "\n"))
+				t.Fatalf("the child never reached %q:\n%s\nstderr:\n%s", marker, strings.Join(lines, "\n"), stderr.String())
 			}
 			if parentKilled(point) {
 				_ = cmd.Process.Kill() // SIGKILL mid-run: no cleanup, no flush
 			}
-			_, _ = cmd.Process.Wait()
+			_ = cmd.Wait() // the child died by SIGKILL: the error is expected
 			mu.Lock()
 			got := strings.Join(lines, "\n")
 			mu.Unlock()
 			if !strings.Contains(got, marker) {
-				t.Fatalf("marker %q never printed:\n%s", marker, got)
+				t.Fatalf("marker %q never printed:\n%s\nstderr:\n%s", marker, got, stderr.String())
 			}
 
 			st, err := open(path)
@@ -298,14 +309,24 @@ func assertCrashPoint(t *testing.T, point string, st thread.Storage) {
 		}
 		continueTurn(t, st, CrashMatrixSteerID, -1)
 	case "resume_arm":
-		// Resume's arm entry is durable; the boundary it arms reads
-		// decided, and the reopen continues.
-		_, entries, _, err := st.Load(ctx, CrashMatrixParkID)
-		if err != nil {
-			t.Fatal(err)
+		// The resumed run's step is durable: the approved call's result
+		// follows the decision, and no turn entry — the resumed turn
+		// never ended. The boundary reads resolved, and the reopen
+		// continues.
+		_, entries, report, err := st.Load(ctx, CrashMatrixParkID)
+		if err != nil || report != nil {
+			t.Fatalf("Load: err %v, report %+v", err, report)
 		}
-		if k := kindsOf(entries); !strings.Contains(k, "approval_decision") {
+		if k := kindsOf(entries); !strings.HasSuffix(k, ",turn,approval_request,approval_audit,approval_decision,approval_audit,message") {
 			t.Fatalf("resume_arm kinds = %q", k)
+		}
+		step := entries[len(entries)-1].(thread.MessageEntry).Message
+		if len(step.Content) != 1 {
+			t.Fatalf("the persisted step = %+v, want the approved call's result", step)
+		}
+		if r, ok := step.Content[0].(weft.ToolResultPart); !ok ||
+			r.CallID != "call_mx" || r.Content != "spent" || r.IsError {
+			t.Fatalf("the persisted step = %+v, want the approved call's result", step)
 		}
 		s := openMatrixSession(t, st, CrashMatrixParkID)
 		if p := s.Pending(); len(p) != 0 {
@@ -439,6 +460,9 @@ func continueTurn(t *testing.T, st thread.Storage, id string, minFed int) {
 			t.Fatal("the follow-up made no model call")
 		}
 		last := reqs[len(reqs)-1]
+		if len(last.Messages) == 0 {
+			t.Fatal("the follow-up fed the model no messages")
+		}
 		if len(last.Messages) < minFed || last.Messages[len(last.Messages)-1].Text() != "continue" {
 			t.Fatalf("fed %d messages, last %q", len(last.Messages), last.Messages[len(last.Messages)-1].Text())
 		}
@@ -734,9 +758,9 @@ func crashMatrixQueueChild(st thread.Storage) {
 }
 
 // crashMatrixSignedChild covers the resume_arm and decide_signed
-// points over one parked boundary: Resume's arming write (dying before
-// its turn is waited on), or the signed decision and its Always grant
-// recorded in one batch.
+// points over one parked boundary: the resumed run's first step
+// persisted (the parent killing it inside the resume's model call), or
+// the signed decision and its Always grant recorded in one batch.
 func crashMatrixSignedChild(point string, st thread.Storage) {
 	ctx := context.Background()
 	key := []byte("mx-key-material")
@@ -746,7 +770,11 @@ func crashMatrixSignedChild(point string, st thread.Storage) {
 		os.Exit(2)
 	}
 	spend := matrixSpend()
-	s, err := thread.Create(ctx, st, weft.New(&mxParkModel{}, spend), fixedIDs(CrashMatrixParkID),
+	// At resume_arm the resume's model call blocks: the approved call
+	// runs and its result is persisted by the step observer, then the
+	// run parks inside its model and the parent lands the kill.
+	model := &mxParkModel{blockResume: point == "resume_arm"}
+	s, err := thread.Create(ctx, st, weft.New(model, spend), fixedIDs(CrashMatrixParkID),
 		thread.AutoResume(false), thread.WithKeyring(ring))
 	if err != nil {
 		fmt.Println("helper: create failed:", err)
@@ -771,11 +799,25 @@ func crashMatrixSignedChild(point string, st thread.Storage) {
 			fmt.Println("helper: decide failed:", err)
 			os.Exit(2)
 		}
-		if _, err := s.Resume(ctx); err != nil { // the arm entry lands in here
+		if _, err := s.Resume(ctx); err != nil {
 			fmt.Println("helper: resume failed:", err)
 			os.Exit(2)
 		}
-		dieAt(point) // armed, the resumed turn dying with us
+		// Resume writes nothing itself (no expiry here): the write this
+		// point proves is the resumed run's step persistence — the
+		// approved call's result, appended by the observer before the
+		// run's next model call. Session.Entries adopts an entry only
+		// after its Append returned, so seeing it means it is durable.
+		deadline := time.Now().Add(10 * time.Second)
+		for !resumeStepPersisted(s.Entries()) {
+			if time.Now().After(deadline) {
+				fmt.Println("helper: the resumed step never persisted")
+				os.Exit(2)
+			}
+			time.Sleep(time.Millisecond)
+		}
+		fmt.Println("crashmx:resume_arm:waiting")
+		time.Sleep(time.Hour) // the kill arrives inside the resume's model call
 	}
 	req, err := s.Request(pend[0].CallID)
 	if err != nil {
@@ -788,6 +830,23 @@ func crashMatrixSignedChild(point string, st thread.Storage) {
 		os.Exit(2)
 	}
 	dieAt(point)
+}
+
+// resumeStepPersisted reports whether a message entry follows the
+// approval decision — the resumed run's first persisted step.
+func resumeStepPersisted(entries []thread.Entry) bool {
+	decided := false
+	for _, e := range entries {
+		switch e.(type) {
+		case thread.ApprovalDecisionEntry:
+			decided = true
+		case thread.MessageEntry:
+			if decided {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // mxTurnModel is the turn family's model, shaped by the point it
@@ -828,17 +887,23 @@ func (m *mxTurnModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2
 // gated tool; the second is the resume's continuation; the third is
 // the compaction's summarizer.
 type mxParkModel struct {
-	calls int
+	calls       int
+	blockResume bool // every call after the first blocks until its context dies
 }
 
 func (m *mxParkModel) Info() weft.ModelInfo {
 	return weft.ModelInfo{Provider: "threadtest", Name: "mxpark"}
 }
 
-func (m *mxParkModel) Stream(_ context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *mxParkModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
 	m.calls++
 	first := m.calls == 1
 	return func(yield func(weft.ModelEvent, error) bool) {
+		if !first && m.blockResume {
+			<-ctx.Done()
+			yield(nil, ctx.Err())
+			return
+		}
 		events := []weft.ModelEvent{
 			weft.ModelTextDelta{Text: "mx summary"},
 			weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},

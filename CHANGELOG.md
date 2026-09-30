@@ -32,7 +32,13 @@ v0.5.0 → v0.7.0.)
   and allocs), opening a 100k-entry session on jsonl and sqlite
   (~3s measured, generous bounds), the context build after 50
   compactions, and List over 10k sessions — the Memory walk with a
-  metadata filter, sqlite's with the denormalised title search.
+  metadata filter, sqlite's page, count, title search and meta filter
+  in one call each. The suite's finding, recorded for v0.8: both
+  durable backends' List is a fleet scan per call (every header
+  decoded, sorted in Go, then paged — Meta filtering needs the decoded
+  header), so a full cursor walk pays the scan per page; SQL-side
+  paging with the freeze's index work is the v0.8 proposal, Total
+  already answers "how many" in one call.
 
 ### Reviewed, no findings
 
@@ -47,7 +53,9 @@ v0.5.0 → v0.7.0.)
   has grown to ~175 lines across the release train — the one-screen
   property it was born with is gone, and the v0.8 proposal is to
   restructure it around a one-screen core with godoc carrying the
-  rest.
+  rest; beside it, the budget suite's List finding (SQL-side paging
+  for both durable backends, with the freeze's index work) joins the
+  v0.8 list.
 
 ## thread 0.5.0 — 2026-09-29
 

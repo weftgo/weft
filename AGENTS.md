@@ -63,6 +63,8 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
     weft.OnMessages(func(ctx context.Context, step int, msgs []weft.Message) {...}), // run option: transcript observer — exact messages as they join, for incremental persistence
     // In any observer: weft.AgentFromContext(ctx) → the running *Agent (nil outside a run); agt.Logger() → the run lines' sink.
     weft.TracerProvider(tp),                   // OTel spans: invoke_agent › chat / execute_tool (default: the global provider; no-op until an SDK registers)
+    weft.LoggerProvider(lp),                   // OTel records through the Logs API (ADR 0024): events, deltas, transcript batches; same default
+    weft.Content(true),                        // records carry content: true always, false never; default: as the logger's Enabled answers
     weft.Logger(logger),                       // one Debug line per run, model call, tool call (default: slog.Default, silent unless Debug is on)
     weft.WrapModel(mw.Retry(), mw.Fallback(backup)),           // model seam: first listed = outermost
     weft.WrapTools(mw.Audit(logger), mw.Allow(permits), mw.MapErrors(nil)), // tool seam, same rule
@@ -78,6 +80,16 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
 res, err := agt.Generate(ctx, weft.Prompt("Where is order 1234?"))
 // Thinking also works per run, overriding the agent default — fast by default, think on demand:
 //   agt.Generate(ctx, weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkHigh}), weft.Prompt("..."))
+// Per-run configuration (ADR 0024 D5): Instructions/MaxSteps/Parallelism are dual Option/RunOption like
+// Thinking; MaxSteps/Parallelism lower only per run — a raise is ErrInvalidRunOption, before any model call.
+//   agt.Generate(ctx, weft.Prompt("..."), weft.Instructions("one-run prompt"), weft.MaxSteps(6),
+//       weft.OnlyTools("lookup", "refund"),   // narrow to registered tools; unknown name → ErrInvalidRunOption
+//       weft.UseModel(alt),                    // the WrapModel chain rebuilt over alt, this run alone
+//       weft.ParkOn("refund"),                 // park at the approval boundary (ADR 0007 per run); Approve resumes
+//       weft.Metadata(map[string]string{"tenant": "acme"})) // on every span and record; subagent runs inherit
+//   weft.MetadataFromContext(ctx)   // read the merged pairs back (Tap, tool handler, child run)
+//   weft.StripContent(ev)           // the one content-shaping table: what a content-off destination receives
+// A changed run carries weft.override.hash + weft.override.* on its invoke_agent span (the experiment's fingerprint).
 // res.Text(), res.Messages (full transcript), res.Steps, res.Usage, res.ID
 
 // 3a. Steer a running turn (ADR 0019): a pull source the loop drains at two

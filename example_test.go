@@ -957,3 +957,26 @@ func ExampleSteering() {
 	// Order 5678 is still pending.
 	// user That is order 1234 — I meant 5678.
 }
+
+// Metadata attaches caller key/value pairs to one run: every span and
+// record of the run carries them, and a Subagent's child run inherits
+// them through the context. Keys under "weft." are the weft modules'
+// namespace — thread stamps weft.session.id this way.
+func ExampleMetadata() {
+	agt := weft.New(wefttest.Script(wefttest.Say("ok")),
+		weft.Tap(func(ctx context.Context, ev weft.Event) {
+			if _, ok := ev.(weft.RunStart); !ok {
+				return
+			}
+			md := weft.MetadataFromContext(ctx)
+			fmt.Println("tenant =", md["tenant"], "session =", md["weft.session.id"])
+		}))
+	_, _ = agt.Generate(context.Background(),
+		weft.Metadata(map[string]string{
+			"tenant":          "acme",
+			"weft.session.id": "s_01",
+		}),
+		weft.Prompt("hello"))
+	// Output:
+	// tenant = acme session = s_01
+}

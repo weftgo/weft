@@ -33,6 +33,13 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// one per nesting level, and a Subagent handler refuses a delegation
 	// whose child is already on it (the cycle guard, ADR 0014).
 	ctx = withAncestry(ctx, append(slices.Clone(ancestryOf(ctx)), a))
+	// The run's metadata is merged and placed before any span starts, so
+	// every span and record of this run carries it and a Subagent's child
+	// run inherits it through the tool call's context (ADR 0024 S1.1).
+	md, _ := mergeMetadata(metadataFromCtx(ctx), cfg.metadata)
+	if md != nil {
+		ctx = withMetadata(ctx, md)
+	}
 	// The run's own reporting begins here: one invoke_agent span, on this
 	// context, so every chat, execute_tool and tap below parents under
 	// it, ended by every exit with the outcome decided — including

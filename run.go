@@ -33,6 +33,10 @@ type runConfig struct {
 	// OnMessages; the loop calls them as messages join the transcript.
 	// Empty on an ordinary run, and never inherited by a child.
 	onMessages []func(context.Context, int, []Message)
+	// metadata is the run's own caller pairs, merged across its Metadata
+	// options (later key winning); execute overlays it on the context's
+	// inherited metadata before any span starts (metadata.go).
+	metadata map[string]string
 }
 
 type decision struct {

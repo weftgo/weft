@@ -34,9 +34,13 @@ import (
 
 // instrumentationName names weft's tracer; version rides on it as the
 // instrumentation version (ADR 0005's release process owns the value).
+// The value is the version the NEXT root tag will carry: version_test
+// pins it against the newest v* tag reachable from HEAD or the
+// CHANGELOG's unreleased heading, whichever speaks, so it cannot go
+// stale again (it sat at v0.3.6 through the v0.5.0 release once).
 const (
 	instrumentationName = "github.com/weftgo/weft"
-	version             = "v0.3.6"
+	version             = "v0.6.0"
 )
 
 // The weft.* span attributes and the slog line keys, pinned by tests and

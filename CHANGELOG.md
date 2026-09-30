@@ -1,3 +1,59 @@
+## 0.6.0 (unreleased)
+
+The observability-data programme's core step (ADR 0024): the run's
+events, deltas and transcript leave the process as standard OpenTelemetry
+log records, and the playground's per-run configuration joins the core.
+All additive — root ships a minor.
+
+### Added — observability data out (ADR 0024)
+
+- The OTel Logs API (`go.opentelemetry.io/otel/log v0.22.0`) joins the
+  trace API as the core's one dependency: no version moves (it requires
+  exactly the pinned otel v1.46.0).
+- `weft.LoggerProvider(lp)` selects the Logs API provider (default: the
+  global, delegating, a no-op until an SDK registers).
+- Every durable event (`run_start`…`run_finish`) and every delta is
+  reported from `deliver` as an OTel log record on two counters —
+  `weft.event.pos` contiguous from 0, `weft.delta.pos` for deltas — so
+  dropping deltas never opens a hole in the durable sequence; `Nested`
+  is not reported (the child run numbers its own). Bodies are the wire
+  JSON (ADR 0004), stripped when capture is off; an errored
+  `tool_finish` carries WARN; `run_start` carries the parent linkage,
+  the manifest hash and `weft.version`.
+- `messages` records at the transcript's five growth points — the
+  repaired input at run start (index 0, never reported before), the
+  tool message a resume creates or rebuilds (`attachResults` widened
+  from created-only), each assistant message, each tool message, each
+  steered batch. Their concatenation equals `RunResult.Messages`
+  byte-for-byte; emitted only when capture is on.
+- `weft.Metadata(kv)` (RunOption) and `weft.MetadataFromContext(ctx)`:
+  caller pairs on every span and record of the run, inherited by
+  subagent runs; limits (64 keys / 128 B key / 1 KiB value) drop and
+  count (`weft.metadata.dropped`), never truncate.
+- `weft.Content(bool)`, `weft.StripContent(ev)`, `ContentKind`: capture
+  is resolved at each emission — the agent's option, else the standard
+  `Enabled` question — and the core reads no environment variable.
+- The run's identity on every span (S1.2): metadata verbatim plus the
+  `gen_ai.conversation.id` / `session.id` / `user.id` mirrors; on the
+  run span, `weft.parent.run.id` / `weft.parent.call.id` for subagents,
+  `weft.manifest.hash` (computed at New for a named agent) and
+  `weft.version`.
+
+### Added — per-run configuration [D5, D7]
+
+- `Instructions`, `MaxSteps`, `Parallelism` become dual Option/RunOption
+  (the `Thinking` shape); per run the two limits may only lower — a
+  raise is `ErrInvalidRunOption`, before any model call.
+- `weft.OnlyTools(names...)` narrows the run to named registered tools
+  (unknown name → `ErrInvalidRunOption` before any model call);
+  `weft.UseModel(m)` replaces the model for the run and rebuilds the
+  WrapModel chain over it; `weft.ParkOn(tools...)` parks calls at the
+  approval boundary as `RequireApproval` would (ADR 0007 applied per
+  run). `Manifest` and `Tools()` keep reporting the static set.
+- A changed configuration is recorded on the `invoke_agent` span:
+  `weft.override.hash` (sha256 over the canonical JSON of every changed
+  value) and `weft.override.*` per knob; absent on a plain run.
+
 ## thread 0.7.1 — 2026-09-30
 
 The post-0.7.0 audit's one find (report:

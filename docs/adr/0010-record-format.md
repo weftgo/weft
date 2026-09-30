@@ -2,7 +2,12 @@
 
 - Status: decided (2026-09-27, TODO §11; implementation plan
   `docs/phase2b-store-plan.md` §2, whose §0.1 survey is this ADR's
-  evidence appendix)
+  evidence appendix); **superseded by ADR 0024** (2026-09-30 —
+  observability data: `weft/store` is deleted with no migration; the
+  record contract becomes the `obsdb` schema, versioned by
+  `obsdb_migrations`, plus the OTel record attribute names ADR 0024
+  pins; the survey appendix stays the reference for `obsdb`'s
+  versioning, status derivation and loud-on-unknown rules)
 - Depends on: ADR 0001 (the message wire), ADR 0002 (`RunError.Result`,
   the partial-transcript rule), ADR 0004 (event ordering, the wire
   discriminators, `Nested`), ADR 0005 (the `weft` envelope integer,

@@ -599,13 +599,25 @@ func TestRegisterResumesParkedSubmitChild(t *testing.T) {
 	p2 := pool.New(1)
 	child2, ran2 := gatedChild(wefttest.Say("registered resume done"))
 	p2.Register(r.Child, child2)
+	// The running receipt lands before the child's park mirrors onto
+	// the parent, and a reopened handle is a snapshot: wait on the live
+	// session until the mirror is adopted, then reopen — the restart
+	// must read the parked boundary, not race it (the offline suite's
+	// faster clock caught exactly that).
+	deadline := time.Now().Add(5 * time.Second)
+	for len(s.Pending()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(s.Pending()) != 1 {
+		t.Fatalf("the mirror never landed: %+v", s.Pending())
+	}
 	open, err := thread.Open(ctx, st, s.ID(), weft.New(wefttest.Script()))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	pend := open.Pending()
 	if len(pend) != 1 {
-		t.Fatalf("Pending = %+v", pend)
+		t.Fatalf("Pending after the reopen = %+v", pend)
 	}
 	if _, err := p2.Decide(ctx, open, thread.Approve(pend[0].CallID)); err != nil {
 		t.Fatalf("Decide: %v", err)

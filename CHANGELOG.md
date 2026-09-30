@@ -1,4 +1,4 @@
-## thread 0.7.0 (unreleased)
+## thread 0.7.0 — 2026-09-30
 
 Hardening (plan §10): no new features. Every decoder fuzzed, every
 session-layer write point crashed under kill -9 on both durable

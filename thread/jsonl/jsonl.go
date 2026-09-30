@@ -543,7 +543,7 @@ func titleOf(path string) string {
 		return ""
 	}
 	title := ""
-	for _, line := range splitLines(raw)[1:] {
+	for _, line := range entryLines(raw) {
 		var head struct {
 			Type  string `json:"type"`
 			Title string `json:"title"`
@@ -584,6 +584,18 @@ func readHeader(path string) (thread.Header, bool, error) {
 		return thread.Header{}, false, nil
 	}
 	return h, true, nil
+}
+
+// entryLines is a session file's complete entry lines — every line
+// after the header. A file caught between Create's open and its
+// header's write (another process creating it) holds no line yet:
+// no entries, never a slice past the end.
+func entryLines(raw []byte) [][]byte {
+	lines := splitLines(raw)
+	if len(lines) == 0 {
+		return nil
+	}
+	return lines[1:]
 }
 
 // splitLines splits on '\n', complete lines only — the bytes after the

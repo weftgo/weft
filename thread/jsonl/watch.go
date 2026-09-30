@@ -49,7 +49,7 @@ func (b *backend) Watch(ctx context.Context, session string, after string) (iter
 	if err != nil {
 		return nil, err
 	}
-	entries := splitLines(raw)[1:] // the header is line 1
+	entries := entryLines(raw)
 	next := 0
 	if after != "" {
 		found := false
@@ -119,7 +119,7 @@ func (b *backend) Watch(ctx context.Context, session string, after string) (iter
 				yield(nil, err)
 				return
 			}
-			if !serveNew(splitLines(raw)[1:]) {
+			if !serveNew(entryLines(raw)) {
 				return
 			}
 		}

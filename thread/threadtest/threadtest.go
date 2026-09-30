@@ -334,6 +334,28 @@ func RunWatch(t *testing.T, open func(t *testing.T) thread.Storage) {
 		t.Error("Watch after an entry the tree does not hold: err = nil, want an error")
 	}
 
+	// A consumer canceling inside its own yield, mid-batch, ends the
+	// stream cleanly: the rows behind the batch stop with the
+	// context's error, and that is the end asked for — never a stream
+	// error. The pause inside the yield lets the cancellation land
+	// before the batch's next row is read.
+	for round := 0; round < 5; round++ {
+		cctx, ccancel := context.WithCancel(context.Background())
+		cseq, err := watch.Watch(cctx, h.ID, "")
+		if err != nil {
+			ccancel()
+			t.Fatal(err)
+		}
+		for _, err := range cseq {
+			if err != nil {
+				t.Fatalf("a tail canceled inside its yield ended with %v, want a clean end", err)
+			}
+			ccancel()
+			time.Sleep(20 * time.Millisecond)
+		}
+		ccancel()
+	}
+
 	// A session deleted under its watcher ends the tail with
 	// ErrNotFound — the tail does not hang on a session that is gone.
 	h2 := header("s_watch_del")

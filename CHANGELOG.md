@@ -12,9 +12,24 @@
   fail-closed miss, never an over-grant. Both found by the post-0.7
   review's strengthened `FuzzGrantMatches` (oracles in place of the
   determinism checks that could not fail); the crashers are its seeds.
+- `thread/sqlite`'s Watch ends cleanly when the consumer cancels
+  inside its own yield: the canceled context stopped the batch's rows
+  and the tail yielded `context canceled` as a stream error. This was
+  the post-0.7 audit's open `TestWatch` watch-item, reproduced under
+  load; the Watch conformance table now pins it for every backend.
+- `thread/jsonl` no longer panics on a session file that holds no
+  complete line yet — another process between Create's exclusive open
+  and its header write: Watch (at open and on every poll) and List's
+  title search sliced past the end.
 
 ### Tests
 
+- The crash matrix gains `expiry` (Resume's expiry sweep: the audit
+  and the denial, then the denied result persisted) and `trim` (the
+  auto-compaction trim record): every one of the fourteen session-layer
+  Append sites now has its own crash point, none covered by shape
+  alone. (thread/pool's canceled and capped receipts go through the
+  same `AppendPoolReceipt` site the `pool_receipt` point kills at.)
 - The crash matrix's `resume_arm` point proves what it names: the
   resumed run's first persisted step (the approved call's result),
   the child killed inside the resume's model call — before, the child

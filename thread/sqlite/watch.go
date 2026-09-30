@@ -84,7 +84,9 @@ func (b *backend) Watch(ctx context.Context, session string, after string) (iter
 				var line string
 				if err := rows.Scan(&line); err != nil {
 					_ = rows.Close()
-					yield(nil, err)
+					if ctx.Err() == nil {
+						yield(nil, err)
+					}
 					return
 				}
 				e, err := thread.UnmarshalEntry([]byte(line))
@@ -111,7 +113,12 @@ func (b *backend) Watch(ctx context.Context, session string, after string) (iter
 			}
 			if err := rows.Err(); err != nil {
 				_ = rows.Close()
-				yield(nil, err)
+				// A consumer that canceled mid-batch (inside its own
+				// yield) stops the rows with the context's error: that
+				// is the end it asked for, not a failure to report.
+				if ctx.Err() == nil {
+					yield(nil, err)
+				}
 				return
 			}
 			_ = rows.Close()

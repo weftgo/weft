@@ -569,3 +569,58 @@ func TestWatch(t *testing.T) {
 	}
 	cancel()
 }
+
+// A session file caught between Create's exclusive open and its
+// header's write — another process mid-Create — holds no line yet: a
+// Watch over it serves nothing and tails on, never panics, and yields
+// the first entry once the file is whole.
+func TestWatchHeaderlessFile(t *testing.T) {
+	dir := t.TempDir()
+	st, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	half := filepath.Join(dir, "s_half.jsonl")
+	if err := os.WriteFile(half, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	seq, err := st.(thread.Watcher).Watch(ctx, "s_half", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The other process's whole file, built elsewhere and landed over
+	// the empty one: its header and one entry.
+	other := t.TempDir()
+	writer, err := jsonl.Open(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Create(ctx, thread.Header{ID: "s_half", Created: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Append(ctx, "s_half", thread.MessageEntry{
+		ID: "e_h1", Created: time.Now().UTC(), Message: weft.User("whole now"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	whole, err := os.ReadFile(filepath.Join(other, "s_half.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond) // one poll over the empty file first
+	if err := os.WriteFile(half, whole, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for e, err := range seq {
+		if err != nil {
+			t.Fatalf("the tail ended with %v", err)
+		}
+		if got := e.(thread.MessageEntry).Message.Text(); got != "whole now" {
+			t.Fatalf("tailed %q", got)
+		}
+		return
+	}
+	t.Fatal("the tail ended without the entry")
+}

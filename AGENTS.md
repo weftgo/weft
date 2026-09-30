@@ -185,9 +185,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 Test offline with `wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))`;
 replay a recorded real transcript with `wefttest.Replay(t, dir)` (record it
 once with `wefttest.Record`; ADR 0017) — the adapters' own parsing is proven
-by `wefttest/conformance` fixtures, not by replay; `make fuzz` runs the four
-fuzz targets (a new message part or event type adds a seed; a crasher becomes
-a committed seed).
+by `wefttest/conformance` fixtures, not by replay; `make fuzz` runs the root's five
+fuzz targets and `make fuzz-thread` the thread and jsonl decoders' (a new
+message part, event type or entry kind adds a seed; a crasher becomes a
+committed seed).
 Provider adapters (`weft/openai`, `weft/anthropic`, `weft/google` — own
 modules, official vendor SDKs) pass the shared executable contract
 `wefttest/conformance` (ADR 0013); run it live behind `-tags live`.

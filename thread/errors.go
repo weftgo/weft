@@ -70,7 +70,9 @@ var (
 	// does not hold, the signature that does not verify, the challenge
 	// that lapsed, the nonce that was answered already, and the
 	// arguments that changed under the request. All are fail-closed:
-	// nothing is recorded until every check passes.
+	// nothing is recorded until every check passes. ErrExpired is also
+	// Decide's answer to an approval or resolution of a request past
+	// its expiry.
 	ErrUnknownKey   = errors.New("thread: signing key not in the keyring")
 	ErrBadSignature = errors.New("thread: decision signature does not verify")
 	ErrExpired      = errors.New("thread: signing challenge expired")
@@ -103,6 +105,10 @@ func (e *CorruptError) Error() string {
 	return fmt.Sprintf("thread: session %s holds corrupt data: %v", e.Session, e.Err)
 }
 
-// Unwrap makes errors.Is(err, ErrCorrupt) true — the class — while
-// Err keeps the cause for a caller who wants it.
-func (e *CorruptError) Unwrap() error { return ErrCorrupt }
+// Is makes errors.Is(err, ErrCorrupt) true — the class — whatever the
+// cause.
+func (e *CorruptError) Is(target error) bool { return target == ErrCorrupt }
+
+// Unwrap returns the cause, so errors.Is and errors.As see through to
+// it (a *json.SyntaxError, say) as well as to the class.
+func (e *CorruptError) Unwrap() error { return e.Err }

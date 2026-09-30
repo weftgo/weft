@@ -130,8 +130,9 @@ func (o minTurnsBetweenOption) applySession(c *sessionConfig) {
 }
 
 // MinTurnsBetween returns the SessionOption rate-limiting automatic
-// compaction: no automatic compaction within n turns of the last one
-// (manual Compact always works). Zero, the default, means no limit.
+// compaction: no automatic compaction within n turns of the last
+// automatic one — a threshold compaction or a trim record on the
+// leaf's path (manual Compact always works, and never counts). Zero, the default, means no limit.
 // The stop against a context that re-crosses the line every turn.
 func MinTurnsBetween(n int) SessionOption { return minTurnsBetweenOption(n) }
 
@@ -144,9 +145,10 @@ func (o maxPerSessionOption) applySession(c *sessionConfig) {
 }
 
 // MaxPerSession returns the SessionOption capping how many automatic
-// compactions a session may run — zero (the default) means no cap;
-// after the cap the trigger stops firing and manual Compact keeps
-// working.
+// compactions a session may run — threshold compactions and trim
+// records on the leaf's path; manual, from-hook and overflow
+// compactions do not count. Zero (the default) means no cap; after the
+// cap the trigger stops firing and manual Compact keeps working.
 func MaxPerSession(n int) SessionOption { return maxPerSessionOption(n) }
 
 // Estimator estimates the token weight of messages — the trigger's
@@ -304,12 +306,14 @@ type Summarizer interface {
 
 // Preparation is a computed compaction on its way to becoming one:
 // everything the algorithm and the BeforeCompact hook see. Reason is
-// why it runs; Context is the leaf's whole context; Messages the
-// default cut's range to summarize; SplitPrefix the split turn's
+// why it runs; Context is the leaf's context as the model sees it (a
+// previous summary and its kept range, before repair); Messages the
+// default cut's range to summarize, repaired; SplitPrefix the split turn's
 // prefix when one turn alone overflows (nil in the one-call default,
 // which folds it into Messages with the previous summary); PrevSummary
 // the iterative chain's last link; FirstKept, TokensBefore and Pinned
-// the entry's facts; Instructions the per-call text.
+// the entry's facts (Pinned includes a pinned call's or result's
+// partner); Instructions the per-call text.
 type Preparation struct {
 	Reason       Reason
 	Context      []weft.Message
@@ -444,8 +448,11 @@ func (o clearOldToolResultsOption) applySession(c *sessionConfig) {
 // ClearOldToolResults returns the SessionOption turning on the built-in
 // trimmer: every tool result in the context except the last keepLast
 // is replaced, at compaction time, with the stub naming the call. If
-// the trimmed context fits the window, no summary is made and a trim
-// record lands in the compaction entry instead.
+// the trim brings the context back under the trigger's line — the
+// reported input plus the estimated delta, less the trim's estimated
+// saving — no summary is made and a trim record lands in the
+// compaction entry instead. A trim that clears nothing is never
+// recorded; the summary runs.
 func ClearOldToolResults(keepLast int) SessionOption { return clearOldToolResultsOption(keepLast) }
 
 // ── Layer 4 — hooks ─────────────────────────────────────────────────
@@ -616,8 +623,15 @@ const pinKind = "weft/pin"
 
 // Pin marks an entry to survive every compaction raw — a requirement,
 // a key decision — by appending a pin record (a custom entry, so it
-// survives compaction itself, the way everything custom does). The cut
-// moves forward past pinned entries: no compaction summarizes one.
+// survives compaction itself, the way everything custom does). A pin
+// does not hold the cut back: a pinned entry below the cut is
+// summarized with its range like any other, and then re-enters the
+// context raw right after the summary, in path order (ADR 0020 §4).
+// Pinning a tool call or a tool result keeps its pair: the assistant
+// message with the calls and the tool message with their results
+// re-enter together, never half a pair. A pin applies from the next
+// compaction on; one written after an entry was summarized does not
+// bring it back.
 func (s *Session) Pin(ctx context.Context, entryID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

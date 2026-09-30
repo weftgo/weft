@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -276,31 +278,13 @@ func Open(ctx context.Context, st Storage, id string, agent *weft.Agent, opts ..
 	}
 	s.cfg = resolveSession(opts...)
 	s.cfg.compaction.resolve(agent.Model()) // per-model overrides need the agent
-	leaf := ""
 	for i, e := range entries {
 		if id := idOf(e); id != "" {
 			s.byID[id] = i
 		}
-		if le, ok := e.(LeafEntry); ok {
-			leaf = le.Entry
-		} else if id := idOf(e); id != "" {
-			leaf = id
-		}
-		if _, ok := e.(TurnEntry); ok {
-			s.turns++
-		}
 	}
-	s.leaf = leaf
-	s.turnSeq = s.turns
-	// The trigger's measurement recovers from the last turn entry that
-	// recorded one: its input is the last provider-reported number, and
-	// the messages after its entry are the estimated delta.
-	for _, e := range entries {
-		if te, ok := e.(TurnEntry); ok && te.LastInput > 0 {
-			s.lastInput = te.LastInput
-			s.lastMeasureLeaf = te.ID
-		}
-	}
+	s.leaf = replayLeaf(entries)
+	s.recoverCountersLocked()
 	if s.leaf != "" {
 		if _, ok := s.byID[s.leaf]; !ok {
 			// Loud on the undefined (ADR 0011 §5): a trailing leaf
@@ -324,6 +308,85 @@ func Open(ctx context.Context, st Storage, id string, agent *weft.Agent, opts ..
 	// never lost to the crash window.
 	s.resurrectSteers(ctx)
 	return s, nil
+}
+
+// replayLeaf is the leaf an append-order replay of entries lands on: a
+// leaf entry redirects to its target, any other entry leaves the leaf
+// at itself. Open and Fork both position by it, so a fork reopens
+// where it was returned.
+func replayLeaf(entries []Entry) string {
+	leaf := ""
+	for _, e := range entries {
+		if le, ok := e.(LeafEntry); ok {
+			leaf = le.Entry
+		} else if id := idOf(e); id != "" {
+			leaf = id
+		}
+	}
+	return leaf
+}
+
+// recoverCountersLocked rebuilds what a session derives from its
+// entries rather than records: the turn count, the run-id sequence,
+// and the compaction trigger's last measurement. Open and Fork share
+// it, so a live fork and the same fork reopened agree.
+//
+// The run-id sequence resumes past the highest run number any entry
+// records, not at the turn count: steer receipts and the overflow
+// re-run mint run ids that write no turn entry, and restarting at the
+// count would mint a recorded id again. Callers hold s.mu (or own s).
+func (s *Session) recoverCountersLocked() {
+	s.turns, s.turnSeq = 0, 0
+	for _, e := range s.order {
+		if _, ok := e.(TurnEntry); ok {
+			s.turns++
+		}
+		if n := runSeq(runIDOf(e)); n > s.turnSeq {
+			s.turnSeq = n
+		}
+		// The trigger's measurement recovers from the last turn entry
+		// that recorded one: its input is the last provider-reported
+		// number, and the messages after its entry are the estimated
+		// delta.
+		if te, ok := e.(TurnEntry); ok && te.LastInput > 0 {
+			s.lastInput = te.LastInput
+			s.lastMeasureLeaf = te.ID
+		}
+	}
+	s.turnSeq = max(s.turnSeq, s.turns)
+}
+
+// runIDOf is the run id an entry records, "" for the kinds that record
+// none.
+func runIDOf(e Entry) string {
+	switch e := e.(type) {
+	case TurnEntry:
+		return e.RunID
+	case ApprovalRequestEntry:
+		return e.RunID
+	case ApprovalDecisionEntry:
+		return e.RunID
+	case ApprovalAuditEntry:
+		return e.RunID
+	case ReceiptEntry:
+		return e.RunID
+	}
+	return ""
+}
+
+// runSeq parses the sequence number of a "<session>-t<n>" run id — any
+// session's, so a fork continues past the runs it copied — and 0 for
+// anything else.
+func runSeq(runID string) int {
+	i := strings.LastIndex(runID, "-t")
+	if i < 0 {
+		return 0
+	}
+	n, err := strconv.Atoi(runID[i+2:])
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 // List returns a page of session headers from st — headers only, never

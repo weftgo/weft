@@ -67,8 +67,7 @@ type TurnEntry struct {
 // asked), threshold (the configured trigger), trim (a trimmer pre-pass
 // brought the context under the line, so no summary was made),
 // from_hook (BeforeCompact replaced the plan), and overflow — an
-// ErrContextOverflow turn compacted and re-run, which arrives with
-// thread v0.3.
+// ErrContextOverflow turn compacted and re-run (ADR 0020 §5).
 type Reason string
 
 const (
@@ -76,7 +75,7 @@ const (
 	ReasonThreshold Reason = "threshold"
 	ReasonTrim      Reason = "trim"
 	ReasonFromHook  Reason = "from_hook"
-	ReasonOverflow  Reason = "overflow" // v0.3: overflow compaction and re-run (ADR 0020 §5)
+	ReasonOverflow  Reason = "overflow" // overflow compaction and re-run (ADR 0020 §5)
 )
 
 // CompactionEntry records one compaction (ADR 0020 §1): the summary

@@ -277,6 +277,11 @@ func (s *Session) offeredPendingLocked() []Request {
 // is (nil, nil) and the caller drives Resume. The undecided calls a
 // Resume-driven run carries are denied with the core's "no decision"
 // text; expired ones were denied on the spot with the expiry reason.
+//
+// A request strictly past its expiry takes no approval or resolution:
+// such a decision fails with ErrExpired and nothing is recorded — the
+// expiry's promise is that the call does not run late. A Deny of it is
+// accepted; so is Resume, which denies it with the expiry reason.
 func (s *Session) Decide(ctx context.Context, ds ...Decision) (*Turn, error) {
 	if len(ds) == 0 {
 		return nil, fmt.Errorf("thread: Decide with no decisions")
@@ -289,6 +294,14 @@ func (s *Session) Decide(ctx context.Context, ds ...Decision) (*Turn, error) {
 	if s.cfg.requireSigned {
 		return nil, fmt.Errorf("%w: session %s", ErrSignatureRequired, s.header.ID)
 	}
+	return s.decideLocked(ctx, ds)
+}
+
+// decideLocked is Decide past the RequireSigned gate: the session's
+// own machinery (the interrupt's denials) records through it whatever
+// the gate says. Callers hold s.mu.
+func (s *Session) decideLocked(ctx context.Context, ds []Decision) (*Turn, error) {
+	now := time.Now().UTC()
 	pending := s.pendingLocked()
 	pendingIDs := make(map[string]string, len(pending))     // call id → parked run id
 	pendingByCall := make(map[string]Request, len(pending)) // call id → the request
@@ -302,6 +315,9 @@ func (s *Session) Decide(ctx context.Context, ds ...Decision) (*Turn, error) {
 		}
 		if _, ok := pendingIDs[d.CallID]; !ok {
 			return nil, fmt.Errorf("%w: call %q", ErrNotPending, d.CallID)
+		}
+		if exp := pendingByCall[d.CallID].Expiry; d.Kind != OutcomeDeny && !exp.IsZero() && now.After(exp) {
+			return nil, fmt.Errorf("%w: call %q lapsed %s", ErrExpired, d.CallID, exp.Format(time.RFC3339))
 		}
 	}
 	// One atomic Append carries every decision — and every grant an
@@ -536,8 +552,12 @@ func (s *Session) runChain(ctx context.Context, t *Turn, opts []weft.RunOption, 
 	if s.cfg.requestExpiry > 0 {
 		expiry = time.Now().UTC().Add(s.cfg.requestExpiry)
 	}
+	batch := map[string]int{} // session-grant uses matched in this chain, not yet recorded
 	for _, c := range calls {
-		if d, ref, ok := s.matchGrant(ctx, c); ok {
+		if d, ref, ok := s.matchGrant(ctx, c, batch); ok {
+			if !ref.shared {
+				batch[ref.id]++
+			}
 			// The chain's first step decides at once, audited — the
 			// audit's Detail names the grant (namespaced "shared grant"
 			// for a store's, so the session's use counting cannot
@@ -771,18 +791,24 @@ func fillApprovalEntry(e Entry, id, parent string, created time.Time) Entry {
 // danglingCallsLocked returns the calls the leaf's path leaves
 // unresolved — the tool calls of the last assistant message with
 // calls, minus the results the message after it serves (ADR 0007's
-// unresolved set, read from the tree). Through this package a
-// dangling tail exists only where a successful turn parked: failed
-// turns persist their partial repaired. Callers hold s.mu.
+// unresolved set, read from the tree) — where the path records the
+// park: a turn entry naming pending calls, or an approval entry, after
+// that message. Per-step durability (ADR 0011 §7) persists a call
+// before its result, so a process killed mid-tool — or a tool still
+// running — leaves a dangling tail no run parked on: that is no
+// boundary, and the next run's input repair answers it. Callers hold
+// s.mu.
 func (s *Session) danglingCallsLocked() []weft.ToolCallPart {
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
 		return nil
 	}
 	var msgs []weft.Message
-	for _, e := range path {
+	var at []int // path index of each message
+	for i, e := range path {
 		if me, ok := e.(MessageEntry); ok {
 			msgs = append(msgs, me.Message)
+			at = append(at, i)
 		}
 	}
 	last := -1
@@ -801,6 +827,18 @@ func (s *Session) danglingCallsLocked() []weft.ToolCallPart {
 		}
 	}
 	if last < 0 {
+		return nil
+	}
+	parked := false
+	for _, e := range path[at[last]+1:] {
+		switch e := e.(type) {
+		case TurnEntry:
+			parked = parked || len(e.Pending) > 0
+		case ApprovalRequestEntry, ApprovalDecisionEntry, ApprovalAuditEntry:
+			parked = true
+		}
+	}
+	if !parked {
 		return nil
 	}
 	served := map[string]bool{}

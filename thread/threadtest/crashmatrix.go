@@ -23,7 +23,7 @@
 // The child performs the write, proves it is durable (the API returned
 // means the backend synced), prints its marker and dies — SIGKILL, no
 // cleanup, exactly a writer dropping dead at that write point. The
-// prompt, steer and resume_arm points die mid-run instead (the parent kills them
+// prompt, steer, resume_arm and expiry points die mid-run instead (the parent kills them
 // once the write is provably durable and the child is parked inside
 // its model): their write happened on the way into the run, and the
 // crash lands in the harder window, between write points. The parent

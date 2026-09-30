@@ -70,7 +70,7 @@ import (
 // own and share the main file's directory.
 func Open(path string, opts ...thread.OpenOption) (thread.Storage, error) {
 	cfg := thread.ResolveOpen(opts...)
-	dsn := "file:" + path +
+	dsn := "file:" + uriPath.Replace(path) +
 		"?_txlock=immediate" +
 		"&_pragma=synchronous(NORMAL)" +
 		"&_pragma=busy_timeout(30000)" +
@@ -140,6 +140,12 @@ func Open(path string, opts ...thread.OpenOption) (thread.Storage, error) {
 		held:    map[string]bool{},
 	}, nil
 }
+
+// uriPath escapes the three bytes a file: URI reads as syntax — '?'
+// starts the query, '#' the fragment, '%' an escape — so a path holding
+// them opens the file it names (SQLite decodes %HH in a URI's path).
+// Unescaped, "a#1.db" opened "a" and "a?b.db" fed "b.db" to the query.
+var uriPath = strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23")
 
 // instanceID builds this Storage instance's writer identity — host plus
 // random bytes — so two Storage handles in one process are distinct
@@ -256,7 +262,7 @@ func (b *backend) Append(ctx context.Context, id string, entries ...thread.Entry
 		return err
 	}
 	defer rollback(tx)
-	if err := b.write(ctx, tx, id, lines, 0); err != nil {
+	if err := b.write(ctx, tx, id, lines, 0, true); err != nil {
 		return err
 	}
 	if hasInfo {
@@ -270,8 +276,11 @@ func (b *backend) Append(ctx context.Context, id string, entries ...thread.Entry
 // write is Append and Inject's shared body: existence check, lock row,
 // then the rows themselves after the session's last seq. tornRow marks
 // the final row as a torn tail when it is 1 (Inject's; Append always
-// passes 0).
-func (b *backend) write(ctx context.Context, tx *sql.Tx, id string, lines []string, tornRow int) error {
+// passes 0). dropTorn (Append's) first deletes a torn final row, the
+// same repair jsonl's writer makes on a torn tail: the tail Load
+// promises to drop stays dropped, never a torn row mid-session. Inject
+// passes false — its bytes are the test's, verbatim.
+func (b *backend) write(ctx context.Context, tx *sql.Tx, id string, lines []string, tornRow int, dropTorn bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -287,6 +296,13 @@ func (b *backend) write(ctx context.Context, tx *sql.Tx, id string, lines []stri
 	}
 	if len(lines) == 0 {
 		return nil // an empty append is a lookup, not a write
+	}
+	if dropTorn {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM entries WHERE session = ? AND torn = 1
+			   AND seq = (SELECT MAX(seq) FROM entries WHERE session = ?)`, id, id); err != nil {
+			return err
+		}
 	}
 	var base int
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), -1) + 1 FROM entries WHERE session = ?`, id).Scan(&base); err != nil {
@@ -580,7 +596,7 @@ func (b *backend) Inject(ctx context.Context, id string, data []byte) error {
 		return err
 	}
 	defer rollback(tx)
-	if err := b.write(ctx, tx, id, lines, tornRow); err != nil {
+	if err := b.write(ctx, tx, id, lines, tornRow, false); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -127,7 +127,13 @@ func (p *Pool) Wrap(name, description string, agent *weft.Agent, opts ...WrapOpt
 					return "", out.err
 				}
 				var re *weft.RunError
-				errors.As(out.err, &re)
+				if !errors.As(out.err, &re) {
+					// The child failed outside a run: its session
+					// refused the prompt, or the delegation panicked.
+					return "", &weft.ToolError{Code: weft.CodeSubagentFailed,
+						Message: fmt.Sprintf("agent %q failed: %v", name, out.err),
+						Err:     out.err}
+				}
 				return "", &weft.ToolError{Code: weft.CodeSubagentFailed,
 					Message: fmt.Sprintf("agent %q failed at step %d: %v", name, re.Step, re.Err),
 					Err:     out.err}

@@ -179,10 +179,15 @@ type grantRef struct {
 // store's. A matching grant decides at once — an approval runs the
 // call, a deny-grant refuses it with its reason — and the chain
 // writes the audit entry that counts the match as a use.
-func (s *Session) matchGrant(ctx context.Context, c weft.ToolCallPart) (Decision, grantRef, bool) {
+//
+// batch holds the uses this chain has already matched but not yet
+// recorded — its audit entries land with the chain's one append, after
+// every call is decided — so a MaxUses grant counts the calls of its
+// own batch too: MaxUses 1 over three parallel calls approves one.
+func (s *Session) matchGrant(ctx context.Context, c weft.ToolCallPart, batch map[string]int) (Decision, grantRef, bool) {
 	now := time.Now().UTC()
 	s.mu.Lock()
-	live := s.liveGrantsLocked(now)
+	live := s.liveGrantsLocked(now, batch)
 	s.mu.Unlock()
 	for _, g := range live {
 		if grantMatches(g.Grant, c) {
@@ -232,9 +237,10 @@ const deniedByGrant = "denied by grant"
 // not revoked, not expired, and under their MaxUses where the audit
 // trail can count — a use is a match, whichever way the grant
 // decided: a deny-grant that matched counts like an approval grant,
-// or its standing refusal would outlive its MaxUses. Callers hold
-// s.mu.
-func (s *Session) liveGrantsLocked(now time.Time) []GrantEntry {
+// or its standing refusal would outlive its MaxUses. pending adds uses
+// not yet in the trail (the chain's own batch, keyed by grant id); nil
+// adds none. Callers hold s.mu.
+func (s *Session) liveGrantsLocked(now time.Time, pending map[string]int) []GrantEntry {
 	revoked := map[string]bool{}
 	uses := map[string]int{}
 	for _, e := range s.order {
@@ -256,7 +262,7 @@ func (s *Session) liveGrantsLocked(now time.Time) []GrantEntry {
 		if !g.Expiry.IsZero() && now.After(g.Expiry) {
 			continue
 		}
-		if g.MaxUses > 0 && uses[g.ID] >= g.MaxUses {
+		if g.MaxUses > 0 && uses[g.ID]+pending[g.ID] >= g.MaxUses {
 			continue
 		}
 		out = append(out, g)
@@ -346,6 +352,13 @@ func wildcardMatch(pattern, s string) bool {
 // pointerValue resolves an RFC 6901 JSON pointer in raw bytes,
 // returning the raw JSON at the tip. ~0 and ~1 unescape; the whole
 // document is "/" — pointer "" is the document itself.
+//
+// An object on the path holding a second key that equals the token
+// under case folding is no match: encoding/json binds struct fields
+// case-insensitively, last key winning, so {"command":"go test",
+// "Command":"rm -rf /"} would show the grant one value and hand the
+// tool the other. The grant cannot know which key the tool reads, so
+// it fails closed.
 func pointerValue(raw json.RawMessage, pointer string) (json.RawMessage, bool) {
 	if pointer == "" {
 		return raw, true
@@ -365,6 +378,11 @@ func pointerValue(raw json.RawMessage, pointer string) (json.RawMessage, bool) {
 			next, ok := node[tok]
 			if !ok {
 				return nil, false
+			}
+			for k := range node {
+				if k != tok && strings.EqualFold(k, tok) {
+					return nil, false
+				}
 			}
 			cur = next
 		case []any:

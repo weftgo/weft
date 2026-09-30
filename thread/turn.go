@@ -214,7 +214,7 @@ func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption
 			return s.steerSendLocked(ctx, msg)
 		}
 		if policy == Interrupt || policy == Rollback {
-			return s.interruptSendLocked(ctx, msg, policy == Rollback)
+			return s.interruptSendLocked(ctx, msg, extra, policy == Rollback)
 		}
 		t := s.newTurnLocked()
 		s.queue = append(s.queue, pendingSend{ctx: ctx, msg: msg, opts: extra, turn: t})
@@ -374,8 +374,12 @@ func (s *Session) execute(first workItem) {
 		// walked away before the run started — leaves its queued
 		// steers undelivered, and they defer now instead of waiting
 		// for whichever turn drains them next (the receipt reaches
-		// its final state on every path).
-		s.settleSteersLocked()
+		// its final state on every path). A usurped runner leaves them:
+		// the live steers belong to the new runner's turn now — one it
+		// may already have delivered — and that runner settles them.
+		if !usurped {
+			s.settleSteersLocked()
+		}
 		if cur.resume && cur.ps.turn.failed() && cur.ps.turn.wasInterrupted() &&
 			s.cfg.autoResume && s.boundaryLocked() {
 			// An Interrupt felled this resume while it was the
@@ -419,6 +423,7 @@ func (s *Session) execute(first workItem) {
 			if ctx == nil {
 				ctx = context.Background()
 			}
+			s.inFlight = t // the resume holds the session, like any work item
 			s.mu.Unlock()
 			cur = workItem{ps: pendingSend{ctx: ctx, turn: t}, resume: true}
 			continue

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -568,6 +569,156 @@ func TestWatch(t *testing.T) {
 		t.Fatal("the tail never saw the other handle's append")
 	}
 	cancel()
+}
+
+// A header List could never read is refused at Create: List bounds a
+// header line to headerBound (1 MiB), and a longer one used to be
+// written, load, and silently never list.
+func TestCreateRefusesAnUnlistableHeader(t *testing.T) {
+	ctx := context.Background()
+	st, err := jsonl.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	big := thread.Header{ID: "s_big", Created: time.Now().UTC(),
+		Meta: map[string]string{"blob": strings.Repeat("x", 1<<20)}}
+	if err := st.Create(ctx, big); err == nil {
+		t.Fatal("Create of a header over the 1 MiB bound succeeded, want refused")
+	}
+	if _, _, _, err := st.Load(ctx, "s_big"); !errors.Is(err, thread.ErrNotFound) {
+		t.Errorf("a refused Create left a session behind: Load err = %v", err)
+	}
+	// Just under the bound: created, loaded and listed.
+	fits := thread.Header{ID: "s_fits", Created: time.Now().UTC(),
+		Meta: map[string]string{"blob": strings.Repeat("x", 1<<20-200)}}
+	if err := st.Create(ctx, fits); err != nil {
+		t.Fatal(err)
+	}
+	page, err := st.List(ctx, thread.Query{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 {
+		t.Errorf("List Total = %d, want the one header that fits", page.Total)
+	}
+}
+
+// A crash mid-write leaves a torn tail, which Load drops and reports.
+// The restarted writer's first Append drops it too, before writing:
+// its line never glues onto the torn bytes into a corrupt line
+// mid-file — the session keeps loading, the post-crash entry in it.
+// The same repair runs in-process after an injected torn tail.
+func TestAppendAfterTornTailDropsIt(t *testing.T) {
+	ctx := context.Background()
+	m := func(id string) thread.Entry {
+		return thread.MessageEntry{ID: id, Created: time.Now().UTC(), Message: weft.User(id)}
+	}
+
+	t.Run("RestartedWriter", func(t *testing.T) {
+		dir := t.TempDir()
+		// The file a crashed writer left: a durable header, one
+		// durable entry, then a partial line (power loss, a short
+		// write).
+		body := `{"type":"session","weft":1,"id":"s_torn","created":"2026-09-30T00:00:00Z"}` + "\n" +
+			`{"type":"message","id":"e_1","created":"2026-09-30T00:00:01Z","message":{"role":"user","content":[{"type":"text","text":"before"}]}}` + "\n" +
+			`{"type":"message","id":"e_t`
+		if err := os.WriteFile(filepath.Join(dir, "s_torn.jsonl"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		st, err := jsonl.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, es, rep, err := st.Load(ctx, "s_torn"); err != nil || rep == nil || rep.Torn != 3 || len(es) != 1 {
+			t.Fatalf("before the append: %d entries, report %+v, err %v; want 1, Torn=3", len(es), rep, err)
+		}
+		if err := st.Append(ctx, "s_torn", m("e_after")); err != nil {
+			t.Fatal(err)
+		}
+		_, es, rep, err := st.Load(ctx, "s_torn")
+		if err != nil {
+			t.Fatalf("Load after the post-crash append: %v", err)
+		}
+		if rep != nil || len(es) != 2 || es[1].(thread.MessageEntry).ID != "e_after" {
+			t.Errorf("after the append: %d entries, report %+v; want e_1, e_after and a clean load", len(es), rep)
+		}
+	})
+
+	t.Run("InProcess", func(t *testing.T) {
+		st, err := jsonl.Open(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Create(ctx, thread.Header{ID: "s_torn", Created: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Append(ctx, "s_torn", m("e_1")); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.(threadtest.RawInjector).Inject(ctx, "s_torn", []byte(`{"type":"message","id":"e_t`)); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Append(ctx, "s_torn", m("e_after")); err != nil {
+			t.Fatal(err)
+		}
+		_, es, rep, err := st.Load(ctx, "s_torn")
+		if err != nil || rep != nil || len(es) != 2 {
+			t.Errorf("after the append: %d entries, report %+v, err %v; want 2 and a clean load", len(es), rep, err)
+		}
+	})
+}
+
+// Delete unlinks a session file before it releases the lock. A writer
+// in another instance (another process) that opened the path before
+// the unlink and locked after the release held a lock on a file no
+// name reached: its Append returned nil and the entry was gone. The
+// lock is now checked against the path — such a writer answers
+// ErrNotFound. The race needs many rounds to land; before the fix it
+// landed within a few thousand.
+func TestAppendNeverLandsInADeletedFile(t *testing.T) {
+	ctx := context.Background()
+	rounds := 3000
+	if testing.Short() {
+		rounds = 300
+	}
+	for round := range rounds {
+		dir := t.TempDir()
+		a, err := jsonl.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := jsonl.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Create(ctx, thread.Header{ID: "s_r", Created: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		var appendErr, deleteErr error
+		wg.Add(2)
+		go func() { defer wg.Done(); deleteErr = a.Delete(ctx, "s_r") }()
+		go func() {
+			defer wg.Done()
+			// The creator holds the lock until its Delete, so b's
+			// Append can only ever answer ErrLocked, then ErrNotFound.
+			for {
+				appendErr = b.Append(ctx, "s_r", thread.MessageEntry{
+					ID: "e_x", Created: time.Now().UTC(), Message: weft.User("x"),
+				})
+				if !errors.Is(appendErr, thread.ErrLocked) {
+					return
+				}
+			}
+		}()
+		wg.Wait()
+		if deleteErr != nil {
+			t.Fatal(deleteErr)
+		}
+		if !errors.Is(appendErr, thread.ErrNotFound) {
+			t.Fatalf("round %d: Append racing a Delete answered %v, want ErrNotFound", round, appendErr)
+		}
+	}
 }
 
 // A session file caught between Create's exclusive open and its

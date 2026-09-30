@@ -86,24 +86,28 @@ type Compaction struct {
 	// FirstKept is the id of the first entry the context still shows
 	// raw after this compaction.
 	FirstKept string
-	// TokensBefore is the estimated size of the whole context at
-	// compaction time — the number the compaction was judged against.
+	// TokensBefore is the estimated size of the context at compaction
+	// time — the messages the model saw at the leaf (a previous
+	// summary and its kept range, not the raw history behind it).
 	TokensBefore int64
-	// Reason is why it ran: manual here, threshold for the trigger,
-	// from_hook and trim in step 1.9, overflow in v0.3.
+	// Reason is why it ran: manual, threshold (the trigger), trim (the
+	// trimmer pre-pass sufficed), from_hook (BeforeCompact replaced
+	// the plan), or overflow (an ErrContextOverflow re-run).
 	Reason Reason
 	// SummarizerUsage and SummarizerModel record what the summary
 	// cost and which model made it — the cost ledger's inputs.
 	SummarizerUsage weft.Usage
 	SummarizerModel weft.ModelInfo
 	// FilesRead lists the file URLs the summarized range carried,
-	// sorted and deduplicated; FilesModified fills in when the sandbox
-	// write log lands (v0.6, ADR 0023) — the lists are the summary's
-	// memory across iterative compactions.
+	// sorted and deduplicated. FilesModified is reserved for a write
+	// log (ADR 0023's sandbox, not shipped) and nothing in this module
+	// fills it today; a custom Compactor may.
 	FilesRead     []string
 	FilesModified []string
-	// Pinned lists the pinned entry ids this compaction kept raw; the
-	// Pin call arrives in step 1.9 and the list is its record.
+	// Pinned lists the entry ids this compaction keeps raw below its
+	// cut: every Pin'd entry, plus the tool-call partner of a pinned
+	// call or result, so a pin never re-enters the context as half of
+	// a call/result pair.
 	Pinned []string
 	// RangeHash is the SHA-256 of the serialized range the summarizer
 	// was fed — the audit that a summary summarizes exactly this.
@@ -111,10 +115,10 @@ type Compaction struct {
 }
 
 // compactConfig is the compaction configuration a session resolves —
-// the defaults with, from step 1.9, the public layers' overrides. In
-// step 1.8 no public option sets these: the window is unknown, so the
-// automatic trigger stays off (one warning, ADR 0020 §2) and manual
-// compaction works with the default cut and cap.
+// the defaults overridden by the public layers' options (ADR 0020 §3).
+// With no window configured the automatic trigger stays off (one
+// warning, ADR 0020 §2) and manual compaction works with the default
+// cut and cap.
 type compactConfig struct {
 	window     int64 // 0 = unknown: no automatic compaction
 	reserve    int64
@@ -214,7 +218,7 @@ func (s *Session) ApplyCompaction(ctx context.Context, c *Compaction) error {
 		return fmt.Errorf("thread: compaction keeps first entry %q, which is not on session %s's leaf path", c.FirstKept, s.header.ID)
 	}
 	for i := len(path) - 1; i >= 0; i-- {
-		if prev, ok := path[i].(CompactionEntry); ok {
+		if prev, ok := path[i].(CompactionEntry); ok && !isTrimRecord(prev) {
 			if prevIdx := indexOfID(path, prev.FirstKept); prevIdx >= 0 && keptIdx < prevIdx {
 				return fmt.Errorf("thread: compaction keeps first entry %q, before the previous compaction's kept boundary %q (ADR 0020 §1)", c.FirstKept, prev.FirstKept)
 			}
@@ -359,7 +363,12 @@ func (s *Session) computeCompaction(ctx context.Context, reason Reason, instruct
 	prev := ""
 	rangeStart := 0
 	for i := len(path) - 1; i >= 0; i-- {
-		if c, ok := path[i].(CompactionEntry); ok {
+		// A trim record carries no summary and never governs the walk
+		// (rawContextLocked): the chain's last link is the latest
+		// summary compaction, below any trims — taking the trim would
+		// feed the summarizer no previous summary, and the new
+		// compaction would then drop the old one from the context.
+		if c, ok := path[i].(CompactionEntry); ok && !isTrimRecord(c) {
 			prev = c.Summary // iterative: the previous summary feeds the next
 			// …and the previous kept boundary is where the range to
 			// summarize starts: entries below it exist only inside the
@@ -373,6 +382,10 @@ func (s *Session) computeCompaction(ctx context.Context, reason Reason, instruct
 		}
 	}
 	pinned := s.pinnedIDsLocked()
+	// The context as the model sees it at the leaf — the previous
+	// summary and its kept range, not the raw history behind them —
+	// is what TokensBefore measures and what Preparation.Context shows.
+	contextMsgs := s.rawContextLocked()
 	s.mu.Unlock()
 
 	weight := defaultEntryWeight
@@ -395,27 +408,19 @@ func (s *Session) computeCompaction(ctx context.Context, reason Reason, instruct
 		return nil, fmt.Errorf("%w: session %s has nothing new past the kept boundary", errNothingToCompact, s.header.ID)
 	}
 	kept, summarized := path[cut:], path[rangeStart:cut]
-	var rangeMsgs, contextMsgs []weft.Message
-	for _, e := range path {
-		if m, ok := contextMessage(e); ok {
-			contextMsgs = append(contextMsgs, m)
-		}
-	}
+	var rangeMsgs []weft.Message
 	for _, e := range summarized {
 		if m, ok := contextMessage(e); ok {
 			rangeMsgs = append(rangeMsgs, m)
 		}
 	}
-	// The pinned ids this compaction keeps through: every pin below the
-	// cut, in the range it summarizes and in the older summary's range
-	// alike — the walk re-includes them from the entry, so a pin never
-	// has to hold the cut back (ADR 0020 §4).
-	var pinnedThrough []string
-	for _, e := range path[:cut] {
-		if pinned[idOf(e)] {
-			pinnedThrough = append(pinnedThrough, idOf(e))
-		}
-	}
+	// The summarizer is a model call like any other: its input is a
+	// repaired transcript. A turn that died mid-step can leave a
+	// dangling call in the tree (perstep.go), and a provider rejects a
+	// tool call sent without its result — so the range is repaired
+	// exactly as the loop repairs a run's input.
+	rangeMsgs = weft.Repair(rangeMsgs)
+	pinnedThrough := pinnedWithPartners(path[:cut], pinned)
 	var tokensBefore int64
 	for _, m := range contextMsgs {
 		tokensBefore += s.estimate(m)
@@ -526,6 +531,78 @@ func indexOfID(path []Entry, id string) int {
 		}
 	}
 	return -1
+}
+
+// isTrimRecord reports whether c is a trim record — the summary-less
+// compaction entry the trimmer pre-pass writes. It never governs the
+// context walk, so it is never the iterative chain's previous link.
+func isTrimRecord(c CompactionEntry) bool {
+	return c.Summary == "" && c.Reason == ReasonTrim
+}
+
+// pinnedWithPartners returns, in path order, the ids a compaction keeps
+// raw below its cut: every pinned entry in below, and with a pinned
+// tool call or tool result its partner — the tool message serving an
+// assistant message's calls, or the assistant message whose calls a
+// tool message answers. A pin re-enters the context after the summary
+// (ADR 0020 §4); half a pair would reach the model as a call with a
+// fabricated "interrupted" result, or an orphan result Repair drops.
+func pinnedWithPartners(below []Entry, pinned map[string]bool) []string {
+	if len(pinned) == 0 {
+		return nil
+	}
+	keep := map[string]bool{}
+	for i, e := range below {
+		if !pinned[idOf(e)] {
+			continue
+		}
+		keep[idOf(e)] = true
+		me, ok := e.(MessageEntry)
+		if !ok {
+			continue
+		}
+		switch {
+		case me.Message.Role == weft.RoleAssistant && hasToolCall(me.Message):
+			// The next message on the path serves the calls, when it is
+			// a tool message (bookkeeping entries sit between freely).
+			for j := i + 1; j < len(below); j++ {
+				if _, isMsg := contextMessage(below[j]); !isMsg {
+					continue
+				}
+				if next, ok := below[j].(MessageEntry); ok && next.Message.Role == weft.RoleTool {
+					keep[next.ID] = true
+				}
+				break
+			}
+		case me.Message.Role == weft.RoleTool:
+			for j := i - 1; j >= 0; j-- {
+				if _, isMsg := contextMessage(below[j]); !isMsg {
+					continue
+				}
+				if prev, ok := below[j].(MessageEntry); ok && prev.Message.Role == weft.RoleAssistant && hasToolCall(prev.Message) {
+					keep[prev.ID] = true
+				}
+				break
+			}
+		}
+	}
+	var out []string
+	for _, e := range below {
+		if keep[idOf(e)] {
+			out = append(out, idOf(e))
+		}
+	}
+	return out
+}
+
+// hasToolCall reports whether m carries at least one tool call.
+func hasToolCall(m weft.Message) bool {
+	for _, p := range m.Content {
+		if _, ok := p.(weft.ToolCallPart); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // compactFailed runs the CompactFailed hook when one is set — the
@@ -934,18 +1011,26 @@ func (s *Session) maybeAutoCompact(ctx context.Context) {
 	// The trimmer pre-pass (ADR 0020 §4): a cheap stub of the old tool
 	// results may bring the context back under the line, and then no
 	// summary is made — a lighter trim record lands in the compaction
-	// entry instead.
+	// entry instead. "Under the line" is judged the way the trigger
+	// judged "over" it: the reported input plus the estimated delta,
+	// less the estimated saving of the trim — never an estimate of the
+	// whole context standing in for the report (ADR 0020 §2), which
+	// omits the system prompt and tool schemas. A trim that saves
+	// nothing is never recorded: it cannot have brought anything under.
 	if cfg.trimmer != nil {
 		before := s.rawContext()
 		trimmed, ok := s.safeTrim(ctx, before)
 		if !ok {
 			return // the trimmer panicked: logged, no trim this turn
 		}
-		var after int64
-		for _, m := range trimmed {
-			after += s.estimate(m)
+		var was, now int64
+		for _, m := range before {
+			was += s.estimate(m)
 		}
-		if after <= cfg.window-cfg.reserve {
+		for _, m := range trimmed {
+			now += s.estimate(m)
+		}
+		if save := was - now; save > 0 && in.LastInput+in.Estimated-save <= cfg.window-cfg.reserve {
 			if err := s.writeTrim(ctx); err != nil {
 				s.agent.Logger().Warn("thread: trim record not written", "session", s.header.ID, "err", err)
 			}
@@ -1007,16 +1092,26 @@ func (s *Session) applyAuto(ctx context.Context) error {
 
 // rateLimitAllows reports whether the rate limits (ADR 0020 §4) let an
 // automatic compaction run: MinTurnsBetween turns since the last one,
-// and at most MaxPerSession in the file. Manual Compact never asks.
+// and at most MaxPerSession of them. Only the trigger's own writes
+// count — threshold compactions and trim records — and only on the
+// leaf's path: a manual Compact, a hook's replacement or an overflow
+// recovery never spends the automatic budget, and neither does an
+// abandoned branch. Manual Compact never asks.
 func (s *Session) rateLimitAllows() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	path, err := s.pathLocked(s.leaf)
+	if err != nil {
+		return false
+	}
 	compactions, turnsSince := 0, 1<<30
-	for _, e := range s.order {
-		switch e.(type) {
+	for _, e := range path {
+		switch e := e.(type) {
 		case CompactionEntry:
-			compactions++
-			turnsSince = 0
+			if e.Reason == ReasonThreshold || e.Reason == ReasonTrim {
+				compactions++
+				turnsSince = 0
+			}
 		case TurnEntry:
 			turnsSince++
 		}
@@ -1055,9 +1150,11 @@ func (s *Session) writeTrim(ctx context.Context) error {
 			break
 		}
 	}
+	// TokensBefore measures the context the trim was judged against —
+	// the model's view at the leaf — not the raw history behind it.
 	var before int64
-	for _, e := range path {
-		before += defaultEntryWeight(e)
+	for _, m := range s.rawContextLocked() {
+		before += s.estimate(m)
 	}
 	e := CompactionEntry{
 		ID:           s.mintIDLocked(),
@@ -1137,7 +1234,7 @@ func (s *Session) summarizeBranch(ctx context.Context, target string) (summary, 
 	if len(sumMsgs) == 0 {
 		return "", "", fmt.Errorf("thread: SummarizeLeft with no branch to summarize: the leaf is on %q's path already", target)
 	}
-	view, _ := summarizerView(sumMsgs)
+	view, _ := summarizerView(weft.Repair(sumMsgs)) // a model call's input is repaired (see computeCompaction)
 	cfg := s.cfg.compaction
 	sum, err := s.produceSummary(ctx, SummaryInput{
 		Messages:     view,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,11 +18,14 @@ import (
 // command-shaped tool grants exist for (ADR 0021 §4).
 func runAgent(turns ...wefttest.Turn) (*weft.Agent, *[]string) {
 	ran := &[]string{}
+	var mu sync.Mutex // parallel calls run the handler concurrently
 	tool := weft.Tool("run", "Run a command.",
 		func(ctx context.Context, in struct {
 			Command string `json:"command"`
 			Dir     string `json:"dir"`
 		}) (string, error) {
+			mu.Lock()
+			defer mu.Unlock()
 			*ran = append(*ran, in.Command)
 			return "ran " + in.Command, nil
 		},

@@ -6,6 +6,7 @@ use (
 	./examples/otel
 	./google
 	./mcp
+	./obsdb
 	./openai
 	./store
 	./studio

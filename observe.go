@@ -644,6 +644,50 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 	r.elog.Emit(ctx, rec)
 }
 
+// recordMessages reports one batch of messages joining the run's
+// transcript — the five growth points (S1.3 [D1]): the repaired input at
+// run start, the tool message a resume creates or rebuilds, each
+// assistant message, each tool message, each steered batch. Emitted only
+// when capture is on: pure content, unlike the event records, which keep
+// their stripped shape. step is the step the batch belongs to (0 for the
+// input); input marks index 0. The body is a JSON array of Message,
+// never capped — a capped transcript is not replay-grade (ADR 0024 D1).
+func (r *recorder) recordMessages(ctx context.Context, step int, msgs []Message, input bool) {
+	if len(msgs) == 0 || !r.captureOn(ctx) {
+		return
+	}
+	if !r.elog.Enabled(ctx, log.EnabledParameters{EventName: eventNameMessages}) {
+		return
+	}
+	b, err := json.Marshal(msgs)
+	if err != nil {
+		return
+	}
+
+	var rec log.Record
+	rec.SetTimestamp(time.Now())
+	rec.SetEventName(eventNameMessages)
+	rec.SetSeverity(log.SeverityInfo)
+	rec.SetBody(attribute.StringValue(string(b)))
+	attrs := []attribute.KeyValue{
+		attrRecord.String("messages"),
+		attrRunID.String(r.runID),
+		attrContent.String(contentFull),
+		attrStepIndex.Int(step),
+		attrMessagesIndex.Int64(r.messagesIdx.Add(1) - 1),
+		attrMessagesCount.Int(len(msgs)),
+	}
+	if input {
+		attrs = append(attrs, attrMessagesInput.Bool(true))
+	}
+	if r.agent != "" {
+		attrs = append(attrs, semconv.GenAIAgentName(r.agent))
+	}
+	attrs = append(attrs, metadataAttrs(ctx)...)
+	rec.AddAttributes(attrs...)
+	r.elog.Emit(ctx, rec)
+}
+
 // metadataAttrs renders the metadata in force on ctx as span/record
 // attributes: every key verbatim, sorted, plus the semconv mirrors
 // backends group on — weft.session.id as gen_ai.conversation.id and

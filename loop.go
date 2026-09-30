@@ -80,7 +80,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// emit can never produce a success without its RunFinish, or a
 	// RunFinish followed by an error (rule 4; Run.Events'
 	// one-terminal-element promise).
-	rec := recorder{
+	records := recorder{
 		elog:         a.obs.elog,
 		capture:      a.content,
 		runID:        cfg.id,
@@ -94,7 +94,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		for _, tap := range a.taps {
 			a.safeTap(ctx, tap, ev)
 		}
-		rec.recordEvent(ctx, ev)
+		records.recordEvent(ctx, ev)
 		sink(ev)
 		return true
 	}
@@ -157,6 +157,12 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// A model that can name itself does so on the first event; the
 	// interface stays optional so Model remains one method.
 	emit(RunStart{ID: cfg.id, Model: a.modelInfo(), Agent: a.name})
+	// The input joins the record stream before anything else grows the
+	// transcript: the repaired input, index 0, step 0 (ADR 0024 D1 —
+	// today it is never reported at all, so a stored transcript could
+	// not rebuild what the run was fed). An empty input (a run with no
+	// messages) emits nothing.
+	records.recordMessages(ctx, 0, res.Messages, true)
 
 	// The approval boundary's second half: approved calls run now,
 	// before any model call, and every other pending call is denied.
@@ -195,11 +201,15 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		var joined []Message
 		res.Messages, joined = attachResults(res.Messages, resume, results)
 		if len(joined) > 0 {
-			// The completed tool message joins the transcript at step 0
-			// of the resume (ADR 0007 §3) — the transcript observers see
-			// it here, where the transcript grew, exactly as they see
-			// every step's messages.
+			// The completed tool message — created, or rebuilt over one
+			// the earlier run left partial — joins the transcript at
+			// step 0 of the resume (ADR 0007 §3). The transcript
+			// observers see it here, where the transcript grew, exactly
+			// as they see every step's messages; the record carries it
+			// beside the input record, so a resume's stored transcript
+			// rebuilds too.
 			a.observeMessages(ctx, cfg, 0, joined)
+			records.recordMessages(ctx, 0, joined, false)
 		}
 		// Resumed delegations roll into the total only: there is no
 		// StepRecord for resumed calls (ADR 0007), so no per-call map.
@@ -394,6 +404,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		if len(msg.Content) > 0 {
 			res.Messages = append(res.Messages, msg)
 			a.observeMessages(ctx, cfg, step, []Message{msg})
+			records.recordMessages(ctx, step, []Message{msg}, false)
 		}
 
 		rec := StepRecord{
@@ -445,6 +456,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			}
 			res.Messages = append(res.Messages, toolMsg)
 			a.observeMessages(ctx, cfg, step, []Message{toolMsg})
+			records.recordMessages(ctx, step, []Message{toolMsg}, false)
 		}
 		res.Steps = append(res.Steps, rec)
 		res.StopReason = finish.Reason
@@ -507,6 +519,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			// owns the delivered messages, the event carries a copy.
 			res.Messages = append(res.Messages, steered...)
 			a.observeMessages(ctx, cfg, step, steered)
+			records.recordMessages(ctx, step, steered, false)
 			emit(Steered{RunID: cfg.id, Seq: seq.Add(1), Step: step, Messages: cloneMessages(steered)})
 		}
 		// The continuation point: the loop is about to spend more, so
@@ -1066,7 +1079,7 @@ func attachResults(msgs []Message, calls []ToolCallPart, results []ToolResultPar
 	if i+1 < len(msgs) && msgs[i+1].Role == RoleTool {
 		out := slices.Clone(msgs)
 		out[i+1].Content = parts
-		return out, nil
+		return out, []Message{out[i+1]}
 	}
 	created := Message{Role: RoleTool, Content: parts}
 	return slices.Insert(slices.Clone(msgs), i+1, created), []Message{created}

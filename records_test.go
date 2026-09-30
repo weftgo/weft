@@ -504,6 +504,11 @@ func ExampleLoggerProvider() {
 	lp.mu.Lock()
 	defer lp.mu.Unlock()
 	for _, r := range lp.records {
+		if r.attr("weft.record") == "messages" {
+			idx, _ := r.intAttr("weft.messages.index")
+			fmt.Printf("messages index=%d\n", idx)
+			continue
+		}
 		pos, ok := r.intAttr("weft.event.pos")
 		if !ok {
 			pos, _ = r.intAttr("weft.delta.pos")
@@ -512,12 +517,16 @@ func ExampleLoggerProvider() {
 	}
 	// Output:
 	// event run_start pos=0
+	// messages index=0
 	// event step_start pos=1
+	// messages index=1
 	// event tool_start pos=2
 	// event tool_finish pos=3
+	// messages index=2
 	// event step_finish pos=4
 	// event step_start pos=5
 	// delta text_delta pos=0
+	// messages index=3
 	// event step_finish pos=6
 	// event run_finish pos=7
 }
@@ -546,4 +555,312 @@ func ExampleContent() {
 	}
 	// Output:
 	// {"type":"tool_start","run_id":"r","seq":1,"call_id":"c1","name":"echo","args":null}
+}
+
+// collectMessages concatenates one run's messages-record bodies, in
+// weft.messages.index order, and checks the indexes are contiguous from
+// 0 — the replay rule (S1.3). The provider may hold several runs'
+// records; the run id picks this run's.
+func collectMessages(t *testing.T, lp *recLogProvider, runID string) []weft.Message {
+	t.Helper()
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	var byIndex = map[int64]string{}
+	for _, r := range lp.records {
+		if r.attr("weft.record") != "messages" || r.attr("weft.run.id") != runID {
+			continue
+		}
+		idx, ok := r.intAttr("weft.messages.index")
+		if !ok {
+			t.Fatal("messages record without weft.messages.index")
+		}
+		if _, dup := byIndex[idx]; dup {
+			t.Fatalf("messages index %d recorded twice", idx)
+		}
+		byIndex[idx] = r.body
+	}
+	var msgs []weft.Message
+	for i := int64(0); i < int64(len(byIndex)); i++ {
+		body, ok := byIndex[i]
+		if !ok {
+			t.Fatalf("messages indexes not contiguous: %d missing of %d", i, len(byIndex))
+		}
+		var batch []weft.Message
+		if err := json.Unmarshal([]byte(body), &batch); err != nil {
+			t.Fatalf("messages body does not decode: %v", err)
+		}
+		msgs = append(msgs, batch...)
+	}
+	return msgs
+}
+
+// assertTranscriptEqual proves byte-for-byte equality between the
+// concatenated messages records and the run's transcript: same length,
+// same marshalled bytes per message (signatures included).
+func assertTranscriptEqual(t *testing.T, lp *recLogProvider, res *weft.RunResult) {
+	t.Helper()
+	got := collectMessages(t, lp, res.ID)
+	if len(got) != len(res.Messages) {
+		t.Fatalf("records rebuild %d messages, transcript has %d", len(got), len(res.Messages))
+	}
+	for i := range got {
+		gb, err := json.Marshal(got[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		wb, err := json.Marshal(res.Messages[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(gb) != string(wb) {
+			t.Errorf("message %d: records have %s, transcript has %s", i, gb, wb)
+		}
+	}
+}
+
+// msgEcho echoes its argument, so its result text is assertable.
+func msgEcho() *weft.ToolDef {
+	return weft.Tool("echo", "Echo.", func(ctx context.Context, in struct {
+		Msg string `json:"msg"`
+	}) (string, error) {
+		return "echo: " + in.Msg, nil
+	})
+}
+
+// S1.3 acceptance: for a fresh run the concatenation of the messages
+// records equals RunResult.Messages byte-for-byte — the input record
+// included, which today's OnMessages never sees.
+func TestMessagesRecordsFreshRun(t *testing.T) {
+	lp := newRecLogProvider()
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"msg":"hi"}`, ID: "c1"}),
+		wefttest.Say("done"),
+	), msgEcho(), weft.LoggerProvider(lp))
+	res, err := agt.Generate(context.Background(), weft.Prompt("hello"), weft.RunID("r"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertTranscriptEqual(t, lp, res)
+
+	// The input record's own attributes.
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	var input *recLogRecord
+	for i := range lp.records {
+		r := &lp.records[i]
+		if r.attr("weft.record") == "messages" && r.hasAttr("weft.messages.input") {
+			input = r
+			break
+		}
+	}
+	if input == nil {
+		t.Fatal("no input messages record (weft.messages.input)")
+	}
+	if idx, _ := input.intAttr("weft.messages.index"); idx != 0 {
+		t.Errorf("input record index = %d, want 0", idx)
+	}
+	if step, _ := input.intAttr("weft.step.index"); step != 0 {
+		t.Errorf("input record step = %d, want 0", step)
+	}
+	if n, _ := input.intAttr("weft.messages.count"); n != 1 {
+		t.Errorf("input record count = %d, want 1 (the prompt)", n)
+	}
+	if input.attr("weft.content") != "full" {
+		t.Errorf("input record content = %q, want full", input.attr("weft.content"))
+	}
+}
+
+// A Messages(...) continuation: the input record carries the whole fed
+// transcript (repaired), and the concatenation still equals the final
+// transcript byte-for-byte.
+func TestMessagesRecordsContinuation(t *testing.T) {
+	lp := newRecLogProvider()
+	agt := weft.New(wefttest.Script(
+		wefttest.Say("first"),
+		wefttest.Say("second"),
+	), weft.LoggerProvider(lp))
+	res1, err := agt.Generate(context.Background(), weft.Prompt("one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res2, err := agt.Generate(context.Background(),
+		weft.Messages(res1.Messages...), weft.Prompt("two"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertTranscriptEqual(t, lp, res2)
+}
+
+// A resume over an approval: the run parks, the transcript carries no
+// tool message for the pending call, and the resuming run's records —
+// input (with the dangling call) then the created tool message —
+// concatenate to the resumed transcript byte-for-byte.
+func TestMessagesRecordsResumeCreated(t *testing.T) {
+	lp := newRecLogProvider()
+	gated := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+		return "refunded", nil
+	}, weft.RequireApproval())
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c1"}),
+		wefttest.Say("all set"),
+	), gated, weft.LoggerProvider(lp))
+	res1, err := agt.Generate(context.Background(), weft.Prompt("refund please"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res1.Pending) != 1 {
+		t.Fatalf("first run pending = %v, want one parked call", res1.Pending)
+	}
+	res2, err := agt.Generate(context.Background(),
+		weft.Messages(res1.Messages...), weft.Approve("c1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertTranscriptEqual(t, lp, res2)
+
+	// The second messages record is the tool message the resume created,
+	// at step 0.
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	var toolBatch *recLogRecord
+	for i := range lp.records {
+		r := &lp.records[i]
+		if r.attr("weft.record") == "messages" && r.attr("weft.run.id") == res2.ID && !r.hasAttr("weft.messages.input") {
+			toolBatch = r
+			break
+		}
+	}
+	if toolBatch == nil {
+		t.Fatal("no record for the tool message the resume created")
+	}
+	if step, _ := toolBatch.intAttr("weft.step.index"); step != 0 {
+		t.Errorf("created tool message record step = %d, want 0", step)
+	}
+	var batch []weft.Message
+	if err := json.Unmarshal([]byte(toolBatch.body), &batch); err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 1 || batch[0].Role != weft.RoleTool {
+		t.Fatalf("created-tool record body = %s, want one tool message", toolBatch.body)
+	}
+}
+
+// A resume that rebuilds a partial tool message: the earlier run's
+// transcript already carried the executed sibling's result, and the
+// resume completes the message in place. attachResults now reports the
+// rebuilt message (the D1 widening), so OnMessages sees it and a record
+// carries it. The input record keeps the partial message as the run was
+// fed it — the concatenation then holds both versions, which is the
+// recorded cost of reporting the input before the resume resolves it;
+// the rebuilt record is the authoritative shape.
+func TestMessagesRecordsResumeRebuilt(t *testing.T) {
+	lp := newRecLogProvider()
+	gated := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+		return "refunded", nil
+	}, weft.RequireApproval())
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(
+			wefttest.Call{Name: "echo", Args: `{"msg":"x"}`, ID: "c_e"},
+			wefttest.Call{Name: "refund", ID: "c_r"},
+		),
+		wefttest.Say("all set"),
+	), msgEcho(), gated, weft.LoggerProvider(lp))
+	res1, err := agt.Generate(context.Background(), weft.Prompt("refund please"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res1.Pending) != 1 {
+		t.Fatalf("first run pending = %v, want the refund parked", res1.Pending)
+	}
+
+	// OnMessages must see the rebuilt message (the widened attachResults).
+	var joinedSteps []int
+	res2, err := agt.Generate(context.Background(),
+		weft.Messages(res1.Messages...), weft.Approve("c_r"),
+		weft.OnMessages(func(_ context.Context, step int, msgs []weft.Message) {
+			for _, m := range msgs {
+				if m.Role == weft.RoleTool {
+					joinedSteps = append(joinedSteps, step)
+				}
+			}
+		}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Exactly one: the rebuilt message (the resume's own steps make no
+	// tool message — Say requests no calls). Pre-widening this was zero:
+	// a rebuilt message reported nothing.
+	if len(joinedSteps) != 1 || joinedSteps[0] != 0 {
+		t.Errorf("OnMessages tool batches = %v, want exactly the rebuilt message at step 0", joinedSteps)
+	}
+
+	// The rebuilt record carries both results in call order.
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	var rebuilt *recLogRecord
+	for i := range lp.records {
+		r := &lp.records[i]
+		if r.attr("weft.record") == "messages" && r.attr("weft.run.id") == res2.ID && !r.hasAttr("weft.messages.input") {
+			rebuilt = r // the first non-input batch of the resume
+			break
+		}
+	}
+	if rebuilt == nil {
+		t.Fatal("no record for the rebuilt tool message")
+	}
+	var batch []weft.Message
+	if err := json.Unmarshal([]byte(rebuilt.body), &batch); err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 1 || len(batch[0].Content) != 2 {
+		t.Fatalf("rebuilt record = %s, want one tool message with both results", rebuilt.body)
+	}
+	if res2.Messages == nil {
+		t.Error("no transcript")
+	}
+}
+
+// A steered batch gets its messages record, at the step whose drain
+// delivered it.
+func TestMessagesRecordsSteered(t *testing.T) {
+	lp := newRecLogProvider()
+	steer := func(_ context.Context, at weft.SteerPoint) []weft.Message {
+		if at.Step == 0 && at.Final {
+			return []weft.Message{weft.User("and one more thing")}
+		}
+		return nil
+	}
+	agt := weft.New(wefttest.Script(
+		wefttest.Say("first"),
+		wefttest.Say("second"),
+	), weft.LoggerProvider(lp))
+	res, err := agt.Generate(context.Background(), weft.Prompt("hi"), weft.Steering(steer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertTranscriptEqual(t, lp, res)
+
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	var steeredRec *recLogRecord
+	for i := range lp.records {
+		r := &lp.records[i]
+		if r.attr("weft.record") == "messages" {
+			var batch []weft.Message
+			if err := json.Unmarshal([]byte(r.body), &batch); err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range batch {
+				if m.Role == weft.RoleUser && m.Text() == "and one more thing" {
+					steeredRec = r
+				}
+			}
+		}
+	}
+	if steeredRec == nil {
+		t.Fatal("no messages record for the steered batch")
+	}
+	if step, _ := steeredRec.intAttr("weft.step.index"); step != 0 {
+		t.Errorf("steered record step = %d, want 0 (the drain step)", step)
+	}
 }

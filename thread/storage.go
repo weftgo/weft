@@ -81,10 +81,13 @@ type Query struct {
 	// Limit caps the page: 0 means 50, values above 500 clamp.
 	Limit int
 	// Meta filters by session metadata: every key must match its value
-	// exactly. A session matches when its header's Meta (the merged
-	// view Load returns) holds every pair. Backends may answer this
-	// from the header alone — the cheap path; the title filter below is
-	// the one that can cost more.
+	// exactly. A session matches when its header's create-time Meta
+	// holds every pair — what WithMeta (and PublicID, its sugar) set at
+	// Create, which Load returns as is. No backend merges the info
+	// entries' Meta into this view (that merged view is Session.Meta's,
+	// the runs' runMetadata), so a key a later SetInfo added never
+	// matches here. Backends answer this from the header alone — the
+	// cheap path; the title filter below is the one that can cost more.
 	Meta map[string]string
 	// TitleSearch filters by the session's current title — the last
 	// info entry's Title — matching case-insensitively as a substring.

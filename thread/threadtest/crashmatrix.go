@@ -52,14 +52,21 @@ const crashMatrixEnv = "WEFT_THREADTEST_CRASH_MATRIX"
 // points; the parent asserts over each by id.
 const (
 	CrashMatrixTurnID  = "s_mx_turn"  // prompt and turn_end
-	CrashMatrixParkID  = "s_mx_park"  // approval, decision, compaction
-	CrashMatrixSteerID = "s_mx_steer" // steer
+	CrashMatrixParkID  = "s_mx_park"  // approval, decision, compaction, resume_arm, decide_signed
+	CrashMatrixSteerID = "s_mx_steer" // steer and clear_queue
 	CrashMatrixPoolID  = "s_mx_pool"  // pool_receipt
+	CrashMatrixForkID  = "s_mx_fork"  // fork (the forked session's own id)
 )
 
-// crashPoints is the full matrix, in walk order.
+// crashPoints is the full matrix, in walk order. The second block is
+// the 7.1 review's additions: the five Append sites the first walk
+// missed, found by enumerating every storage.Append call site in the
+// session layer and comparing (branch, fork, the steer queue's drop
+// receipts, Resume's arm entry, and DecideSigned's decision+grant
+// batch).
 var crashPoints = []string{
 	"prompt", "turn_end", "approval", "decision", "compaction", "steer", "pool_receipt",
+	"branch", "fork", "clear_queue", "resume_arm", "decide_signed",
 }
 
 // parentKilled are the points where the parent lands the kill (the
@@ -232,6 +239,81 @@ func assertCrashPoint(t *testing.T, point string, st thread.Storage) {
 		if err := s.SetInfo(ctx, "still alive", nil); err != nil {
 			t.Fatalf("the session is wedged: %v", err)
 		}
+	case "branch":
+		// Branch writes two entries atomically: the navigation off the
+		// old leaf and the summary on the new line. Both are there, and
+		// the session still branches again.
+		_, entries, _, err := st.Load(ctx, CrashMatrixTurnID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if k := kindsOf(entries); k != "message,message,turn,leaf,branch_summary" {
+			t.Fatalf("branch kinds = %q", k)
+		}
+		s := openMatrixSession(t, st, CrashMatrixTurnID)
+		first := s.Entries()[0].(thread.MessageEntry).ID
+		if err := s.Branch(ctx, first, thread.SummarizeLeft()); err != nil {
+			t.Fatalf("the session no longer branches: %v", err)
+		}
+	case "fork":
+		// Fork copies the path into a session of its own: the child
+		// loads with the copied entries — the same kinds, their own
+		// file — and continues.
+		_, entries, _, err := st.Load(ctx, CrashMatrixForkID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if k := kindsOf(entries); k != "message,message,turn" {
+			t.Fatalf("fork kinds = %q", k)
+		}
+		continueTurn(t, st, CrashMatrixForkID, 3) // the copied prompt and answer + the follow-up
+	case "clear_queue":
+		// ClearQueue drops the queued steer's receipt in one batch: the
+		// drop is durable (a second receipt entry) and the queue reads
+		// empty after the reopen.
+		_, entries, _, err := st.Load(ctx, CrashMatrixSteerID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if k := kindsOf(entries); k != "message,message,message,receipt,receipt" {
+			t.Fatalf("clear_queue kinds = %q", k)
+		}
+		s := openMatrixSession(t, st, CrashMatrixSteerID)
+		if n, err := s.ClearQueue(ctx); err != nil || n != 0 {
+			t.Fatalf("ClearQueue after the crash: %d, %v", n, err)
+		}
+		continueTurn(t, st, CrashMatrixSteerID, -1)
+	case "resume_arm":
+		// Resume's arm entry is durable; the boundary it arms reads
+		// decided, and the reopen continues.
+		_, entries, _, err := st.Load(ctx, CrashMatrixParkID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if k := kindsOf(entries); !strings.Contains(k, "approval_decision") {
+			t.Fatalf("resume_arm kinds = %q", k)
+		}
+		s := openMatrixSession(t, st, CrashMatrixParkID)
+		if p := s.Pending(); len(p) != 0 {
+			t.Fatalf("the armed boundary reopened pending: %+v", p)
+		}
+		continueTurn(t, st, CrashMatrixParkID, -1)
+	case "decide_signed":
+		// DecideSigned records the decision and the Always grant in
+		// one batch: both durable, the boundary closed, the grant
+		// readable.
+		_, entries, _, err := st.Load(ctx, CrashMatrixParkID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if k := kindsOf(entries); !strings.Contains(k, "approval_decision") || !strings.Contains(k, "grant") {
+			t.Fatalf("decide_signed kinds = %q", k)
+		}
+		s := openMatrixSession(t, st, CrashMatrixParkID)
+		if p := s.Pending(); len(p) != 0 {
+			t.Fatalf("the decided boundary reopened pending: %+v", p)
+		}
+		continueTurn(t, st, CrashMatrixParkID, -1)
 	default:
 		t.Fatalf("unknown point %q", point)
 	}
@@ -265,6 +347,10 @@ func kindsOf(entries []thread.Entry) string {
 			ks = append(ks, "pool_receipt")
 		case thread.LabelEntry:
 			ks = append(ks, "label")
+		case thread.LeafEntry:
+			ks = append(ks, "leaf")
+		case thread.BranchSummaryEntry:
+			ks = append(ks, "branch_summary")
 		case thread.InfoEntry:
 			ks = append(ks, "info")
 		case thread.CustomEntry:
@@ -369,6 +455,12 @@ func RunCrashMatrixChild(t *testing.T, open func() (thread.Storage, error)) {
 		crashMatrixSteerChild(st)
 	case "pool_receipt":
 		crashMatrixPoolChild(st)
+	case "branch", "fork":
+		crashMatrixBranchChild(point, st)
+	case "clear_queue":
+		crashMatrixQueueChild(st)
+	case "resume_arm", "decide_signed":
+		crashMatrixSignedChild(point, st)
 	default:
 		fmt.Println("helper: unknown point", point)
 		os.Exit(2)
@@ -406,7 +498,7 @@ func fixedIDs(id string) thread.SessionOption {
 func crashMatrixTurnChild(point string, st thread.Storage) {
 	ctx := context.Background()
 	block := make(chan struct{}) // never closed in the child
-	s, err := thread.Create(ctx, st, weft.New(&mxTurnModel{block: block}), fixedIDs(CrashMatrixTurnID))
+	s, err := thread.Create(ctx, st, weft.New(&mxTurnModel{block: block, point: point}), fixedIDs(CrashMatrixTurnID))
 	if err != nil {
 		fmt.Println("helper: create failed:", err)
 		os.Exit(2)
@@ -488,19 +580,14 @@ func crashMatrixParkChild(point string, st thread.Storage) {
 	dieAt(point)
 }
 
-// crashMatrixSteerChild covers the steer point: a two-step turn whose
-// second model call blocks, a steer accepted after the first step is
-// fully emitted — its receipt durable — and the parent kills the child
-// mid-second-step.
-func crashMatrixSteerChild(st thread.Storage) {
+// crashMatrixSteerSession runs the steer walk's setup: a session whose
+// two-step turn is blocked in its second model call with the first
+// step fully emitted, and a steer accepted after it — the steer and
+// clear_queue points share it.
+func crashMatrixSteerSession(st thread.Storage) *thread.Session {
 	ctx := context.Background()
 	block := make(chan struct{}) // never closed in the child
-	note := weft.Tool("note", "Record a note.", func(_ context.Context, in struct {
-		Text string `json:"text"`
-	}) (string, error) {
-		return "noted: " + in.Text, nil
-	})
-	s, err := thread.Create(ctx, st, weft.New(&mxSteerModel{block: block}, note), fixedIDs(CrashMatrixSteerID))
+	s, err := thread.Create(ctx, st, weft.New(&mxSteerModel{block: block}, matrixNote()), fixedIDs(CrashMatrixSteerID))
 	if err != nil {
 		fmt.Println("helper: create failed:", err)
 		os.Exit(2)
@@ -525,12 +612,19 @@ func crashMatrixSteerChild(st thread.Storage) {
 		fmt.Println("helper: the first step never finished")
 		os.Exit(2)
 	}
-	// The receipt lands before the child announces itself; the steer
+	// The receipt lands before the caller announces itself; the steer
 	// never resolves the run, which stays blocked in its model.
 	if _, err := s.Send(ctx, weft.User("steer it"), thread.As(thread.Steer)); err != nil {
 		fmt.Println("helper: steer failed:", err)
 		os.Exit(2)
 	}
+	return s
+}
+
+// crashMatrixSteerChild covers the steer point: the walk above, the
+// child announcing itself, and the parent killing it mid-second-step.
+func crashMatrixSteerChild(st thread.Storage) {
+	crashMatrixSteerSession(st)
 	fmt.Println("crashmx:steer:waiting")
 	time.Sleep(time.Hour) // the kill arrives mid-second-step
 }
@@ -566,6 +660,117 @@ func crashMatrixPoolChild(st thread.Storage) {
 		os.Exit(2)
 	}
 	dieAt("pool_receipt")
+}
+
+// crashMatrixBranchChild covers the branch and fork points: one
+// completed turn, then either Branch — the navigation and summary
+// batch — on the same session, or Fork, which copies the path into a
+// session of its own (its id minted by the fork's own ids option) and
+// dies right after the copy returned.
+func crashMatrixBranchChild(point string, st thread.Storage) {
+	ctx := context.Background()
+	src := CrashMatrixTurnID
+	if point == "fork" {
+		src = "s_mx_forksrc"
+	}
+	s, err := thread.Create(ctx, st, weft.New(&mxTurnModel{block: make(chan struct{}), point: "turn_end"}), fixedIDs(src))
+	if err != nil {
+		fmt.Println("helper: create failed:", err)
+		os.Exit(2)
+	}
+	turn, err := s.Send(ctx, weft.User("mx one"))
+	if err != nil {
+		fmt.Println("helper: send failed:", err)
+		os.Exit(2)
+	}
+	if _, err := turn.Wait(); err != nil {
+		fmt.Println("helper: turn failed:", err)
+		os.Exit(2)
+	}
+	if point == "branch" {
+		// SummarizeLeft needs a left side: branch at the prompt's entry,
+		// the completed turn's answer is the branch that gets summarized.
+		at := s.Entries()[0].(thread.MessageEntry).ID
+		if err := s.Branch(ctx, at, thread.SummarizeLeft()); err != nil {
+			fmt.Println("helper: branch failed:", err)
+			os.Exit(2)
+		}
+		dieAt(point)
+	}
+	if _, err := s.Fork(ctx, s.Leaf(), fixedIDs(CrashMatrixForkID)); err != nil {
+		fmt.Println("helper: fork failed:", err)
+		os.Exit(2)
+	}
+	dieAt(point)
+}
+
+// crashMatrixQueueChild covers the clear_queue point: the steer walk —
+// a turn mid-second-step with a steer accepted — and then the queue
+// dropped, its receipts' settlement durable, and death.
+func crashMatrixQueueChild(st thread.Storage) {
+	s := crashMatrixSteerSession(st)
+	if n, err := s.ClearQueue(context.Background()); err != nil || n != 1 {
+		fmt.Println("helper: clear failed:", n, err)
+		os.Exit(2)
+	}
+	dieAt("clear_queue")
+}
+
+// crashMatrixSignedChild covers the resume_arm and decide_signed
+// points over one parked boundary: Resume's arming write (dying before
+// its turn is waited on), or the signed decision and its Always grant
+// recorded in one batch.
+func crashMatrixSignedChild(point string, st thread.Storage) {
+	ctx := context.Background()
+	key := []byte("mx-key-material")
+	ring, err := thread.NewKeyring(thread.Key{ID: "k1", Secret: key, Active: true})
+	if err != nil {
+		fmt.Println("helper: keyring failed:", err)
+		os.Exit(2)
+	}
+	spend := matrixSpend()
+	s, err := thread.Create(ctx, st, weft.New(&mxParkModel{}, spend), fixedIDs(CrashMatrixParkID),
+		thread.AutoResume(false), thread.WithKeyring(ring))
+	if err != nil {
+		fmt.Println("helper: create failed:", err)
+		os.Exit(2)
+	}
+	turn, err := s.Send(ctx, weft.User("mx spend"))
+	if err != nil {
+		fmt.Println("helper: send failed:", err)
+		os.Exit(2)
+	}
+	if _, err := turn.Wait(); err != nil {
+		fmt.Println("helper: turn failed:", err)
+		os.Exit(2)
+	}
+	pend := s.Pending()
+	if len(pend) != 1 {
+		fmt.Println("helper: the turn did not park:", pend)
+		os.Exit(2)
+	}
+	if point == "resume_arm" {
+		if _, err := s.Decide(ctx, thread.Approve(pend[0].CallID)); err != nil {
+			fmt.Println("helper: decide failed:", err)
+			os.Exit(2)
+		}
+		if _, err := s.Resume(ctx); err != nil { // the arm entry lands in here
+			fmt.Println("helper: resume failed:", err)
+			os.Exit(2)
+		}
+		dieAt(point) // armed, the resumed turn dying with us
+	}
+	req, err := s.Request(pend[0].CallID)
+	if err != nil {
+		fmt.Println("helper: request failed:", err)
+		os.Exit(2)
+	}
+	sd := thread.SignDecision(key, req, thread.ApproveAlways(req.CallID))
+	if _, err := s.DecideSigned(ctx, sd); err != nil {
+		fmt.Println("helper: decide signed failed:", err)
+		os.Exit(2)
+	}
+	dieAt(point)
 }
 
 // mxTurnModel is the turn family's model, shaped by the point it

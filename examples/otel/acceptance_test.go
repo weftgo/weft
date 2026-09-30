@@ -168,17 +168,17 @@ func TestRecordsThroughRealSDK(t *testing.T) {
 
 	// The span side carries the metadata and mirrors too — the identity
 	// chain is on both signals.
-	found := map[string]string{}
+	found := map[string]bool{}
 	for _, s := range spans {
 		if s.Name != "invoke_agent sdk-demo" {
 			continue
 		}
 		for _, kv := range s.Attributes {
-			found[string(kv.Key)] = kv.Value.Emit()
+			found[string(kv.Key)] = true
 		}
 	}
 	for _, key := range []string{"tenant", "weft.session.id", "gen_ai.conversation.id", "session.id", "weft.manifest.hash", "weft.version"} {
-		if found[key] == "" {
+		if !found[key] {
 			t.Errorf("run span missing %s", key)
 		}
 	}

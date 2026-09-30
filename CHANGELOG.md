@@ -1,3 +1,54 @@
+## thread 0.7.0 (unreleased)
+
+Hardening (plan §10): no new features. Every decoder fuzzed, every
+session-layer write point crashed under kill -9 on both durable
+backends, the operator-visible costs budgeted and enforced in CI, and
+the security surface re-reviewed. (v0.6 — `thread/sandbox` — was
+abandoned by the maintainer before this release; the train went
+v0.5.0 → v0.7.0.)
+
+### Added
+
+- The fuzz gate covers the thread module's decoders (step 7.1), 10s
+  per target in CI (`make fuzz-thread`): `FuzzDecodeHeader` — the
+  envelope rule and the canonical fixpoint over arbitrary headers;
+  `FuzzDecideSigned` — the signed-decision verifier over hostile
+  input, which must answer only from its error catalogue and record
+  nothing without the MAC; `FuzzGrantMatches` — the grant predicate
+  engine, deterministic and never panicking over arbitrary grants,
+  pointers, globs and arguments; and `FuzzDecodeEntry`'s seeds now
+  span every format's goldens (the steering receipts of 3 and the pool
+  receipts of 4 joined), `FuzzLoad` keeping the file-level contract.
+- The kill -9 crash matrix (step 7.1) on jsonl and sqlite over every
+  write point the session layer owns — the prompt entry, the turn-end
+  batch, an approval's park, a decision, a compaction, a steer's
+  acceptance receipt, and thread/pool's acceptance, mirror batch and
+  settlement (`threadtest.CrashMatrix`). At each point a child process
+  proves the write durable and dies; a fresh process reopens and
+  continues the session. sqlite's run re-proves the lock takeover from
+  a dead holder at every point.
+- The budget suite (step 7.2), enforced in CI like correctness, each
+  with its Benchmark for the number: append latency on Memory (time
+  and allocs), opening a 100k-entry session on jsonl and sqlite
+  (~3s measured, generous bounds), the context build after 50
+  compactions, and List over 10k sessions — the Memory walk with a
+  metadata filter, sqlite's with the denormalised title search.
+
+### Reviewed, no findings
+
+- Security (step 7.3): HMAC handling (constant-time compare, the
+  length-prefixed canonical encoding, the fail-closed check order),
+  id validation (`ValidID` vetted at every backend entry point — an
+  id is always one path component), file permissions (files 0600
+  umask-exact, created directories 0700), and the lock rules (flock
+  per session, takeover from a dead holder).
+- API (step 7.3): every exported name maps to a feature its ADR
+  names. One observation for v0.8's freeze: the AGENTS.md API block
+  has grown to ~175 lines across the release train — the one-screen
+  property it was born with is gone, and the v0.8 proposal is to
+  restructure it around a one-screen core with godoc carrying the
+  rest.
+
 ## thread 0.5.0 — 2026-09-29
 
 `thread/pool` — bounded concurrent child runs, receipts, nested

@@ -174,6 +174,68 @@ func TestWrapSync(t *testing.T) {
 	}
 }
 
+// A pool child's run carries its lineage identity (ADR 0024 S5): the
+// child session's own weft.session.id and turn, plus
+// weft.session.parent and — for a wrapped delegation, where a call
+// delegated — weft.session.parent_call.
+func TestWrapChildRunIdentity(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	var mu sync.Mutex
+	var md map[string]string
+	child := weft.New(wefttest.Script(wefttest.Say("the bug is in compaction")),
+		weft.Tap(func(ctx context.Context, ev weft.Event) {
+			if _, ok := ev.(weft.RunStart); ok {
+				mu.Lock()
+				md = weft.MetadataFromContext(ctx)
+				mu.Unlock()
+			}
+		}))
+	p := pool.New(2)
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research",
+			Args: wefttest.Args(struct{ Prompt string }{"find the bug"})}),
+		wefttest.Say("done"),
+	), p.Wrap("research", "delegates research", child))
+	s, err := thread.Create(ctx, st, parent)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	turn, err := s.Send(ctx, weft.User("where is the bug?"))
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if _, err := turn.Wait(); err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+
+	rs := pool.Receipts(s)
+	if len(rs) != 1 {
+		t.Fatalf("receipts = %+v, want one", rs)
+	}
+	mu.Lock()
+	got := md
+	mu.Unlock()
+	if got == nil {
+		t.Fatal("the child run never started")
+	}
+	if got["weft.session.parent"] != s.ID() {
+		t.Errorf("weft.session.parent = %q, want the parent session %q", got["weft.session.parent"], s.ID())
+	}
+	if got["weft.session.parent_call"] == "" {
+		t.Errorf("weft.session.parent_call missing: %v — a wrapped delegation names its call", got)
+	}
+	if got["weft.session.id"] != rs[0].Child {
+		t.Errorf("weft.session.id = %q, want the child session %q", got["weft.session.id"], rs[0].Child)
+	}
+	if got["weft.turn"] != "1" {
+		t.Errorf("weft.turn = %q, want 1 — the child's own first turn", got["weft.turn"])
+	}
+	if _, ok := got["weft.session.forked_from"]; ok {
+		t.Errorf("a pool child carries forked_from: %v — lineage is a reference, not a copied path", got)
+	}
+}
+
 // A failing child is a tool error the parent model sees — failure is
 // data (ADR 0014) — and the receipt settles failed. The model-visible
 // failure text is ADR 0014's pinned shape, byte-for-byte: the pool

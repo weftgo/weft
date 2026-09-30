@@ -272,6 +272,7 @@ func (s *Session) newTurnLocked() *Turn {
 	t := &Turn{
 		id:    s.mintIDLocked(),
 		runID: fmt.Sprintf("%s-t%d", s.header.ID, s.turnSeq),
+		turn:  s.turnSeq,
 	}
 	t.cond = sync.NewCond(&t.mu)
 	return t
@@ -689,7 +690,7 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 				s.steerQueue = append(requeue, s.steerQueue...)
 				s.handed = nil
 				s.turnSeq++
-				t.remintRunID(fmt.Sprintf("%s-t%d", s.header.ID, s.turnSeq))
+				t.remintRunID(fmt.Sprintf("%s-t%d", s.header.ID, s.turnSeq), s.turnSeq)
 				s.mu.Unlock()
 				continue
 			} else {
@@ -1004,6 +1005,13 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 type Turn struct {
 	id    string
 	runID string
+	// turn is the turn number the run id was minted from — the
+	// turnSeq counter at mint time, restamped beside the id when the
+	// overflow re-run remints it — so the run's metadata can name the
+	// turn the store records belong to (weft.turn, ADR 0024 S5).
+	// Written under s.mu at mint, under t.mu at remint; read by the
+	// runner goroutine alone (runMetadata).
+	turn int
 	// resume marks a resume run: no prompt entry, and the turn entry
 	// reuses the receipt id minted when the resume was armed.
 	resume bool
@@ -1057,10 +1065,12 @@ func (t *Turn) RunID() string {
 // remintRunID re-ids the turn for its overflow re-run: a fresh
 // <session>-t<n>, spent from the same counter, so the re-run's store
 // records stay addressable (the failed attempt's id is in its run
-// records).
-func (t *Turn) remintRunID(id string) {
+// records). turn is the new number the id was minted from, set beside
+// it, so the re-run's metadata names the turn it now is.
+func (t *Turn) remintRunID(id string, turn int) {
 	t.mu.Lock()
 	t.runID = id
+	t.turn = turn
 	t.mu.Unlock()
 }
 

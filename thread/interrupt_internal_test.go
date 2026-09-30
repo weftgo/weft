@@ -30,7 +30,7 @@ func TestRollbackBeforeReceiptLands(t *testing.T) {
 	inflight := s.newTurnLocked()
 	s.inFlight = inflight
 	s.mu.Lock()
-	if _, err := s.interruptSendLocked(ctx, weft.User("rollback this"), true); err != nil {
+	if _, err := s.interruptSendLocked(ctx, weft.User("rollback this"), nil, true); err != nil {
 		s.mu.Unlock()
 		t.Fatal(err)
 	}

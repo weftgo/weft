@@ -28,11 +28,12 @@ func interruptedCallResult(name string) string {
 // context is canceled (its Turn marked interrupted, and a Rollback
 // remembers where the leaf must return to), or, when only an approval
 // boundary holds the session, its parked calls are denied with the
-// interrupted reason so the follow-up can run (plan §6). Denying runs
-// outside the lock: Decide takes it.
-func (s *Session) interruptSendLocked(ctx context.Context, msg weft.Message, rollback bool) (*Turn, error) {
+// interrupted reason so the follow-up can run (plan §6). The Send's
+// run options travel with the queued message, as the Queue policy's
+// do.
+func (s *Session) interruptSendLocked(ctx context.Context, msg weft.Message, opts []weft.RunOption, rollback bool) (*Turn, error) {
 	t := s.newTurnLocked()
-	s.queue = append(s.queue, pendingSend{ctx: ctx, msg: msg, turn: t})
+	s.queue = append(s.queue, pendingSend{ctx: ctx, msg: msg, opts: opts, turn: t})
 	if s.running && s.inFlight != nil {
 		it := s.inFlight
 		it.mu.Lock()
@@ -66,21 +67,18 @@ func (s *Session) interruptSendLocked(ctx context.Context, msg weft.Message, rol
 		return t, nil
 	}
 	// Only a boundary holds the session: deny its parked calls so the
-	// follow-up is not queued behind it. The unlock/relock pair keeps
-	// the deferred unlock balanced; Decide must not run under mu.
-	var ids []string
+	// follow-up is not queued behind it — in one decision, past the
+	// RequireSigned gate: the interrupt is the session's own machinery,
+	// not a caller's unsigned Decide.
+	var ds []Decision
 	for _, p := range s.pendingLocked() {
-		ids = append(ids, p.CallID)
+		ds = append(ds, Deny(p.CallID, reasonInterrupted))
 	}
-	if len(ids) > 0 {
-		s.mu.Unlock()
-		for _, id := range ids {
-			if _, err := s.Decide(ctx, Deny(id, reasonInterrupted)); err != nil {
-				s.agent.Logger().Warn("thread: interrupt denial failed",
-					"session", s.header.ID, "call", id, "err", err)
-			}
+	if len(ds) > 0 {
+		if _, err := s.decideLocked(ctx, ds); err != nil {
+			s.agent.Logger().Warn("thread: interrupt denial failed",
+				"session", s.header.ID, "err", err)
 		}
-		s.mu.Lock()
 	}
 	return t, nil
 }

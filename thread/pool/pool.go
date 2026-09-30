@@ -315,11 +315,16 @@ func (p *Pool) submit(ctx context.Context, parent *thread.Session, agent *weft.A
 	p.delegates[accept.ID] = d
 	p.byChild[child.ID()] = d
 	p.sessionAgents[child.ID()] = agent
+	if async {
+		// Counted under the lock that saw the pool open: a Close
+		// between the unlock and the Add would Wait on a group that
+		// does not hold this child yet.
+		p.wg.Add(1)
+	}
 	p.mu.Unlock()
 
 	rec := &Receipt{ID: accept.ID, State: thread.PoolAccepted, Child: child.ID()}
 	if async {
-		p.wg.Add(1)
 		go func() {
 			defer p.wg.Done()
 			p.runChild(runCtx, d, prompt)
@@ -339,8 +344,16 @@ func (p *Pool) submit(ctx context.Context, parent *thread.Session, agent *weft.A
 // a start. Panics in the pool's own work are contained and settle the
 // receipt failed — a background goroutine must not take the process
 // down over a ledger entry, and the child session contains its own
-// run's panics already.
-func (p *Pool) runChild(runCtx context.Context, d *delegate, prompt string) outcome {
+// run's panics already; the sync caller reads the panic as the
+// delegation's error, never as an empty answer.
+//
+// A run resumed through Decide holds no slot (see resume): the resume
+// runs under the deciding caller's context, which carries no
+// delegation depth — none survives a restart — so a slot taken there
+// would let the resumed child's own sync delegation wait on the slot
+// the resume holds, a deadlock at max=1 the depth guard can no longer
+// refuse. The bound covers every child's first run.
+func (p *Pool) runChild(runCtx context.Context, d *delegate, prompt string) (out outcome) {
 	cancel := d.cancel
 	parent, child, agent, receiptID := d.parent, d.child, d.agent, d.receipt
 	// The settlement (and the running entry) append in a
@@ -351,11 +364,11 @@ func (p *Pool) runChild(runCtx context.Context, d *delegate, prompt string) outc
 		if r := recover(); r != nil {
 			agent.Logger().Error("thread/pool: delegation panicked", "receipt", receiptID, "panic", r)
 			p.settle(settleCtx, parent, agent.Logger(), receiptID, child.ID(), thread.PoolFailed, fmt.Sprintf("panic: %v", r), weft.Usage{})
+			out = outcome{err: fmt.Errorf("thread/pool: delegation panicked: %v", r)}
 		}
 	}()
 	defer cancel()
 
-	var out outcome
 	select {
 	case p.sem <- struct{}{}:
 	case <-runCtx.Done():
@@ -396,9 +409,15 @@ func (p *Pool) runChild(runCtx context.Context, d *delegate, prompt string) outc
 			p.markPhase(d, phaseParked)
 			parked := mirrorRequests(out.requests, child.ID(), d.wrapper)
 			if _, merr := parent.AppendApprovalRequests(settleCtx, parked...); merr != nil {
+				// Unmirrored, the parent cannot see or decide the
+				// child's requests: the delegation fails, settled —
+				// parking the wrapper instead would offer the wrapper
+				// call itself for a decision and orphan the child.
 				agent.Logger().Error("thread/pool: nested requests not mirrored",
 					"child", child.ID(), "err", merr)
-				out.err = merr
+				out.pending, out.requests = 0, nil
+				out.err = fmt.Errorf("thread/pool: nested requests not mirrored: %w", merr)
+				p.settle(settleCtx, parent, agent.Logger(), receiptID, child.ID(), thread.PoolFailed, out.err.Error(), usageOf(res, nil))
 			}
 			return out
 		}

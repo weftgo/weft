@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,11 +18,14 @@ import (
 // command-shaped tool grants exist for (ADR 0021 §4).
 func runAgent(turns ...wefttest.Turn) (*weft.Agent, *[]string) {
 	ran := &[]string{}
+	var mu sync.Mutex // parallel calls run the handler concurrently
 	tool := weft.Tool("run", "Run a command.",
 		func(ctx context.Context, in struct {
 			Command string `json:"command"`
 			Dir     string `json:"dir"`
 		}) (string, error) {
+			mu.Lock()
+			defer mu.Unlock()
 			*ran = append(*ran, in.Command)
 			return "ran " + in.Command, nil
 		},
@@ -95,6 +99,11 @@ func TestGrantPredicateTable(t *testing.T) {
 		{"equals string", []thread.Arg{thread.ArgEquals("/command", json.RawMessage(`"go test"`))}, `{"command":"go test"}`, true},
 		{"equals number", []thread.Arg{thread.ArgEquals("/tries", json.RawMessage(`3`))}, `{"tries":3}`, true},
 		{"equals number wide", []thread.Arg{thread.ArgEquals("/tries", json.RawMessage(`3.0`))}, `{"tries":3}`, true},
+		{"equals number exponent", []thread.Arg{thread.ArgEquals("/tries", json.RawMessage(`0.3e1`))}, `{"tries":3}`, true},
+		{"equals zero signs", []thread.Arg{thread.ArgEquals("/n", json.RawMessage(`-0`))}, `{"n":0.0}`, true},
+		{"equals id past float precision", []thread.Arg{thread.ArgEquals("/order", json.RawMessage(`9007199254740993`))}, `{"order":9007199254740992}`, false},
+		{"equals id past float precision nested", []thread.Arg{thread.ArgEquals("", json.RawMessage(`{"order":9007199254740993}`))}, `{"order":9007199254740992}`, false},
+		{"equals number past float range", []thread.Arg{thread.ArgEquals("/n", json.RawMessage(`1e400`))}, `{"n":10e399}`, true},
 		{"equals object", []thread.Arg{thread.ArgEquals("/opts", json.RawMessage(`{"a":1,"b":[2]}`))}, `{"opts":{"b":[2],"a":1}}`, true},
 		{"equals miss", []thread.Arg{thread.ArgEquals("/command", json.RawMessage(`"go build"`))}, `{"command":"go test"}`, false},
 		{"prefix", []thread.Arg{thread.ArgPrefix("/dir", "/ws/")}, `{"dir":"/ws/sub"}`, true},
@@ -103,6 +112,8 @@ func TestGrantPredicateTable(t *testing.T) {
 		{"glob", []thread.Arg{thread.ArgGlob("/command", "go test*")}, `{"command":"go test ./..."}`, true},
 		{"glob anchored misses deeper", []thread.Arg{thread.ArgGlob("/command", "go test")}, `{"command":"go test ./..."}`, false},
 		{"glob shell escape", []thread.Arg{thread.ArgGlob("/command", "go test*")}, `{"command":"go test ./... && curl evil.example"}`, true},
+		{"glob star over a literal star", []thread.Arg{thread.ArgGlob("/command", "ls *")}, `{"command":"ls *.go"}`, true},
+		{"glob lone star over a starred value", []thread.Arg{thread.ArgGlob("/command", "*")}, `{"command":"*0"}`, true},
 		{"missing pointer", []thread.Arg{thread.ArgEquals("/nope", json.RawMessage(`1`))}, `{"command":"go test"}`, false},
 		{"non-string prefix", []thread.Arg{thread.ArgPrefix("/tries", "3")}, `{"tries":3}`, false},
 		{"and of two", []thread.Arg{thread.ArgGlob("/command", "go test*"), thread.ArgPrefix("/dir", "/ws/")}, `{"command":"go test ./...","dir":"/ws/x"}`, true},

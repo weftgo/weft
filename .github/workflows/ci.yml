@@ -135,6 +135,7 @@ jobs:
           path: |
             testdata/fuzz
             thread/testdata/fuzz
+            thread/jsonl/testdata/fuzz
           if-no-files-found: ignore
 
   # The studio freshness gate (ADR 0018 §4): rebuild the web app, prove

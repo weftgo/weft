@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"iter"
 	"os"
@@ -34,7 +35,8 @@ const pollInterval = 200 * time.Millisecond
 // Salvage, which skips; a torn final line is a writer mid-append — it
 // yields once complete, never half. Readers never lock: the tail reads
 // the file like Load does. A session deleted under its watcher ends the
-// stream with ErrNotFound.
+// stream with ErrNotFound — also when its id was created again before
+// the next poll: the new file is another session.
 func (b *backend) Watch(ctx context.Context, session string, after string) (iter.Seq2[thread.Entry, error], error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -42,14 +44,15 @@ func (b *backend) Watch(ctx context.Context, session string, after string) (iter
 	if !thread.ValidID(session) {
 		return nil, fmtNotFound(session)
 	}
-	raw, err := os.ReadFile(b.path(session))
+	path := b.path(session)
+	raw, born, err := readWatched(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmtNotFound(session)
 	}
 	if err != nil {
 		return nil, err
 	}
-	entries := splitLines(raw)[1:] // the header is line 1
+	entries := entryLines(raw)
 	next := 0
 	if after != "" {
 		found := false
@@ -110,20 +113,43 @@ func (b *backend) Watch(ctx context.Context, session string, after string) (iter
 				return
 			case <-tick.C:
 			}
-			raw, err := os.ReadFile(b.path(session))
-			if errors.Is(err, fs.ErrNotExist) {
-				yield(nil, fmtNotFound(session)) // the session was deleted
+			raw, fi, err := readWatched(path)
+			if errors.Is(err, fs.ErrNotExist) || (err == nil && !os.SameFile(born, fi)) {
+				// The session was deleted — and perhaps created again
+				// under its id between two polls: a new file is a new
+				// session, and the line cursor means nothing in it.
+				yield(nil, fmtNotFound(session))
 				return
 			}
 			if err != nil {
 				yield(nil, err)
 				return
 			}
-			if !serveNew(splitLines(raw)[1:]) {
+			if !serveNew(entryLines(raw)) {
 				return
 			}
 		}
 	}, nil
+}
+
+// readWatched reads a session file through one handle and returns the
+// handle's identity with the bytes, so the identity always names the
+// file the bytes came from — a tail compares it poll to poll.
+func readWatched(path string) ([]byte, os.FileInfo, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, nil, err
+	}
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		return nil, nil, err
+	}
+	return raw, fi, nil
 }
 
 // entryID pulls one line's entry id without a full decode — the watch

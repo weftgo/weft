@@ -15,7 +15,10 @@ func TestChallengeCanonical(t *testing.T) {
 	key := []byte("canonical-test-key")
 	at := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
 	mac := func(session, call, tool, args, nonce, keyID, kind, reason, content, who string) []byte {
-		return challengeMAC(key, session, call, tool, args, at, nonce, keyID, Outcome(kind), false, reason, content, who)
+		return challengeMAC(key, SignedDecision{
+			Session: session, RunID: "r1", CallID: call, Tool: tool, ArgsSHA256: args, Expiry: at,
+			Nonce: nonce, KeyID: keyID, Kind: Outcome(kind), Reason: reason, Content: content, Who: who,
+		})
 	}
 	// The split ambiguity: ("ab","c") vs ("a","bc") differ.
 	a := mac("ab", "c", "tool", "h1", "n1", "k1", "approve", "", "", "avi")
@@ -48,13 +51,42 @@ func TestChallengeCanonical(t *testing.T) {
 		}
 	}
 	// The expiry moves it too.
-	later := challengeMAC(key, "s", "c", "tool", "h1", at.Add(time.Second), "n1", "k1", OutcomeApprove, false, "", "", "avi")
-	if string(later) == string(base) {
+	sd := SignedDecision{Session: "s", RunID: "r1", CallID: "c", Tool: "tool", ArgsSHA256: "h1", Expiry: at, Nonce: "n1", KeyID: "k1", Kind: OutcomeApprove, Who: "avi"}
+	if string(challengeMAC(key, sd)) != string(base) {
+		t.Fatal("the struct form and the helper disagree")
+	}
+	later := sd
+	later.Expiry = at.Add(time.Second)
+	if string(challengeMAC(key, later)) == string(base) {
 		t.Error("the expiry does not move the MAC")
+	}
+	// UnixNano wraps every 2^64ns: an expiry that far on must not share
+	// the MAC, or a captured expired signature revives with a forged
+	// expiry centuries out.
+	wrapped := sd
+	for range 4 {
+		wrapped.Expiry = wrapped.Expiry.Add(1 << 62)
+	}
+	if string(challengeMAC(key, wrapped)) == string(base) {
+		t.Error("an expiry 2^64ns later shares the MAC")
+	}
+	run := sd
+	run.RunID = "r2"
+	if string(challengeMAC(key, run)) == string(base) {
+		t.Error("the run does not move the MAC")
 	}
 	// The always-grant flag moves it: an "approve and always allow"
 	// cannot be downgraded to a plain approve in flight.
-	if always := challengeMAC(key, "s", "c", "tool", "h1", at, "n1", "k1", OutcomeApprove, true, "", "", "avi"); string(always) == string(base) {
+	always := sd
+	always.Always = true
+	if string(challengeMAC(key, always)) == string(base) {
 		t.Error("the always flag does not move the MAC")
+	}
+	// The flag is its own field: approve+always is not the kind
+	// "approve+always" without it.
+	glued := sd
+	glued.Kind = "approve+always"
+	if string(challengeMAC(key, always)) == string(challengeMAC(key, glued)) {
+		t.Error("the always flag and the kind share bytes")
 	}
 }

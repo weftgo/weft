@@ -90,38 +90,42 @@ func RequireSigned() SessionOption { return requireSignedOption{} }
 // The challenge domain and the outcome set a challenge allows (ADR
 // 0021 §3's "allowed outcomes"): every outcome Decide accepts. A
 // future restriction ships as a new domain string, so old signatures
-// never read as new restrictions.
+// never read as new restrictions. v2 (post-0.7 review) binds the run
+// that parked the call, encodes the expiry without UnixNano's 584-year
+// wrap, and carries the always flag as its own field; a v1 signature
+// fails verification.
 const (
-	challengeDomain   = "weft/approval-challenge/v1"
+	challengeDomain   = "weft/approval-challenge/v2"
 	challengeOutcomes = "approve,deny,resolve,resolve_error"
 )
 
 // challengeMAC is the canonical encoding the signer and the verifier
 // both compute: every field length-prefixed and semicolon-closed, in
 // this fixed order, under the domain string — no ambiguity between
-// fields is constructible, whatever the bytes hold.
-func challengeMAC(key []byte, session, callID, tool, argsSHA string, expiry time.Time, nonce, keyID string, kind Outcome, always bool, reason, content, who string) []byte {
+// fields is constructible, whatever the bytes hold. The expiry is
+// whole seconds and nanoseconds, each exact over time.Time's range:
+// UnixNano wraps, and a wrapped expiry 2^64ns later would share the
+// MAC of the one signed.
+func challengeMAC(key []byte, sd SignedDecision) []byte {
 	m := hmac.New(sha256.New, key)
 	// The write never fails (hash.Hash.Write's contract); errcheck is
 	// silenced once, here, rather than at every field.
 	w := func(f string) { _, _ = fmt.Fprintf(m, "%d:%s;", len(f), f) }
 	w(challengeDomain)
 	w(challengeOutcomes)
-	w(session)
-	w(callID)
-	w(tool)
-	w(argsSHA)
-	w(strconv.FormatInt(expiry.UnixNano(), 16))
-	w(nonce)
-	w(keyID)
-	kindTok := string(kind)
-	if always {
-		kindTok += "+always"
-	}
-	w(kindTok)
-	w(reason)
-	w(content)
-	w(who)
+	w(sd.Session)
+	w(sd.RunID)
+	w(sd.CallID)
+	w(sd.Tool)
+	w(sd.ArgsSHA256)
+	w(strconv.FormatInt(sd.Expiry.Unix(), 10) + "." + strconv.Itoa(sd.Expiry.Nanosecond()))
+	w(sd.Nonce)
+	w(sd.KeyID)
+	w(string(sd.Kind))
+	w(strconv.FormatBool(sd.Always))
+	w(sd.Reason)
+	w(sd.Content)
+	w(sd.Who)
 	return m.Sum(nil)
 }
 
@@ -133,7 +137,11 @@ func challengeMAC(key []byte, session, callID, tool, argsSHA string, expiry time
 // verifier checks them against the pending request, so a stale or
 // retargeted signature fails loudly, each way its own error.
 type SignedDecision struct {
-	Session    string
+	Session string
+	// RunID is the run that parked the call: call ids may repeat
+	// across runs, and a signature minted for one run's request must
+	// not answer the next run's call of the same id.
+	RunID      string
 	CallID     string
 	Tool       string
 	ArgsSHA256 string
@@ -159,6 +167,7 @@ type SignedDecision struct {
 func SignDecision(key []byte, r Request, d Decision) SignedDecision {
 	sd := SignedDecision{
 		Session:    r.Session,
+		RunID:      r.RunID,
 		CallID:     r.CallID,
 		Tool:       r.Tool,
 		ArgsSHA256: r.ArgsSHA256,
@@ -174,7 +183,7 @@ func SignDecision(key []byte, r Request, d Decision) SignedDecision {
 	if sd.Who == "" {
 		sd.Who = "signer"
 	}
-	sd.MAC = challengeMAC(key, sd.Session, sd.CallID, sd.Tool, sd.ArgsSHA256, sd.Expiry, sd.Nonce, sd.KeyID, sd.Kind, sd.Always, sd.Reason, sd.Content, sd.Who)
+	sd.MAC = challengeMAC(key, sd)
 	return sd
 }
 
@@ -218,8 +227,11 @@ func (s *Session) Request(callID string) (Request, error) {
 // recorded decision already answered is ErrReplay; and a signature
 // whose arguments hash names different arguments than the pending
 // request holds is ErrArgsChanged — the call re-parked with new
-// arguments, and the decision was about the old ones. Nothing is
-// recorded until every check passes; ErrNotPending keeps Decide's
+// arguments, and the decision was about the old ones. A signature
+// minted for another run's request of the same call id is
+// ErrNotPending — that request is gone — and a pending request past
+// its own expiry is ErrExpired, whatever the signature claims. Nothing
+// is recorded until every check passes; ErrNotPending keeps Decide's
 // rule, raised before any run starts.
 func (s *Session) DecideSigned(ctx context.Context, sd SignedDecision) (*Turn, error) {
 	if err := ctx.Err(); err != nil {
@@ -234,7 +246,7 @@ func (s *Session) DecideSigned(ctx context.Context, sd SignedDecision) (*Turn, e
 	if !known {
 		return nil, fmt.Errorf("%w: key %q", ErrUnknownKey, sd.KeyID)
 	}
-	want := challengeMAC(key, sd.Session, sd.CallID, sd.Tool, sd.ArgsSHA256, sd.Expiry, sd.Nonce, sd.KeyID, sd.Kind, sd.Always, sd.Reason, sd.Content, sd.Who)
+	want := challengeMAC(key, sd)
 	if !hmac.Equal(want, sd.MAC) {
 		return nil, fmt.Errorf("%w: call %q", ErrBadSignature, sd.CallID)
 	}
@@ -244,7 +256,8 @@ func (s *Session) DecideSigned(ctx context.Context, sd SignedDecision) (*Turn, e
 	if sd.Session != s.header.ID {
 		return nil, fmt.Errorf("%w: challenge names session %q, this is %q", ErrBadSignature, sd.Session, s.header.ID)
 	}
-	if !sd.Expiry.IsZero() && time.Now().UTC().After(sd.Expiry) {
+	now := time.Now().UTC()
+	if !sd.Expiry.IsZero() && now.After(sd.Expiry) {
 		return nil, fmt.Errorf("%w: call %q", ErrExpired, sd.CallID)
 	}
 	// The replay guard runs before the pending check: a replayed
@@ -269,6 +282,17 @@ func (s *Session) DecideSigned(ctx context.Context, sd SignedDecision) (*Turn, e
 	}
 	if req == nil {
 		return nil, fmt.Errorf("%w: call %q", ErrNotPending, sd.CallID)
+	}
+	if req.RunID != sd.RunID {
+		// The same call id parked again by a later run: the request the
+		// signature answered is gone.
+		return nil, fmt.Errorf("%w: call %q was signed for run %q, pending in run %q", ErrNotPending, sd.CallID, sd.RunID, req.RunID)
+	}
+	if !req.Expiry.Equal(sd.Expiry) {
+		return nil, fmt.Errorf("%w: call %q names expiry %s, the request holds %s", ErrBadSignature, sd.CallID, sd.Expiry, req.Expiry)
+	}
+	if !req.Expiry.IsZero() && now.After(req.Expiry) {
+		return nil, fmt.Errorf("%w: call %q", ErrExpired, sd.CallID)
 	}
 	if req.ArgsSHA256 != sd.ArgsSHA256 {
 		return nil, fmt.Errorf("%w: call %q", ErrArgsChanged, sd.CallID)

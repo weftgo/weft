@@ -12,11 +12,18 @@
 //	compaction   the compaction entry, summarizer usage and all
 //	steer        a steer's acceptance receipt on a busy session (v0.3)
 //	pool_receipt thread/pool's acceptance, mirror batch and settlement (v0.5)
+//	branch       Branch's navigation and summary batch
+//	fork         Fork's copy of the path into a session of its own
+//	clear_queue  ClearQueue's dropped-receipt settlement
+//	resume_arm   the resumed run's step persistence over a decided boundary
+//	decide_signed DecideSigned's decision and Always-grant batch
+//	expiry       Resume's expiry sweep: the lapsed request's audit and denial
+//	trim         the auto-compaction trim record (ADR 0020 §4's pre-pass)
 //
 // The child performs the write, proves it is durable (the API returned
 // means the backend synced), prints its marker and dies — SIGKILL, no
 // cleanup, exactly a writer dropping dead at that write point. The
-// prompt and steer points die mid-run instead (the parent kills them
+// prompt, steer, resume_arm and expiry points die mid-run instead (the parent kills them
 // once the write is provably durable and the child is parked inside
 // its model): their write happened on the way into the run, and the
 // crash lands in the harder window, between write points. The parent
@@ -28,6 +35,7 @@ package threadtest
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"iter"
@@ -56,23 +64,29 @@ const (
 	CrashMatrixSteerID = "s_mx_steer" // steer and clear_queue
 	CrashMatrixPoolID  = "s_mx_pool"  // pool_receipt
 	CrashMatrixForkID  = "s_mx_fork"  // fork (the forked session's own id)
+	CrashMatrixTrimID  = "s_mx_trim"  // trim
 )
 
 // crashPoints is the full matrix, in walk order. The second block is
 // the 7.1 review's additions: the five Append sites the first walk
 // missed, found by enumerating every storage.Append call site in the
 // session layer and comparing (branch, fork, the steer queue's drop
-// receipts, Resume's arm entry, and DecideSigned's decision+grant
+// receipts, the resumed run's step persistence, and DecideSigned's decision+grant
 // batch).
 var crashPoints = []string{
 	"prompt", "turn_end", "approval", "decision", "compaction", "steer", "pool_receipt",
 	"branch", "fork", "clear_queue", "resume_arm", "decide_signed",
+	// The post-0.7 review's: the last two Append sites, until then
+	// covered by shape only (the expiry sweep, the auto trim).
+	"expiry", "trim",
 }
 
 // parentKilled are the points where the parent lands the kill (the
 // child is mid-run, blocked in its model); the rest self-kill right
 // after their write returned.
-func parentKilled(point string) bool { return point == "prompt" || point == "steer" }
+func parentKilled(point string) bool {
+	return point == "prompt" || point == "steer" || point == "resume_arm" || point == "expiry"
+}
 
 // CrashMatrix runs the parent side over every write point: for each,
 // it re-executes the test binary at helperTest (the backend's child,
@@ -89,6 +103,8 @@ func CrashMatrix(t *testing.T, helperTest string, pathFor func(point string) str
 		t.Run(point, func(t *testing.T) {
 			cmd := exec.Command(os.Args[0], "-test.run=^"+helperTest+"$", "-test.count=1")
 			cmd.Env = append(os.Environ(), crashMatrixEnv+"="+point, "WEFT_THREADTEST_CRASH_STORAGE="+path)
+			var stderr bytes.Buffer // a child's panic trace lands here, not on stdout
+			cmd.Stderr = &stderr
 			out, err := cmd.StdoutPipe()
 			if err != nil {
 				t.Fatal(err)
@@ -116,19 +132,20 @@ func CrashMatrix(t *testing.T, helperTest string, pathFor func(point string) str
 			case <-sawMarker:
 			case <-time.After(20 * time.Second):
 				_ = cmd.Process.Kill()
+				_ = cmd.Wait() // reap the child; closes the pipe and settles stderr
 				mu.Lock()
 				defer mu.Unlock()
-				t.Fatalf("the child never reached %q:\n%s", marker, strings.Join(lines, "\n"))
+				t.Fatalf("the child never reached %q:\n%s\nstderr:\n%s", marker, strings.Join(lines, "\n"), stderr.String())
 			}
 			if parentKilled(point) {
 				_ = cmd.Process.Kill() // SIGKILL mid-run: no cleanup, no flush
 			}
-			_, _ = cmd.Process.Wait()
+			_ = cmd.Wait() // the child died by SIGKILL: the error is expected
 			mu.Lock()
 			got := strings.Join(lines, "\n")
 			mu.Unlock()
 			if !strings.Contains(got, marker) {
-				t.Fatalf("marker %q never printed:\n%s", marker, got)
+				t.Fatalf("marker %q never printed:\n%s\nstderr:\n%s", marker, got, stderr.String())
 			}
 
 			st, err := open(path)
@@ -298,14 +315,24 @@ func assertCrashPoint(t *testing.T, point string, st thread.Storage) {
 		}
 		continueTurn(t, st, CrashMatrixSteerID, -1)
 	case "resume_arm":
-		// Resume's arm entry is durable; the boundary it arms reads
-		// decided, and the reopen continues.
-		_, entries, _, err := st.Load(ctx, CrashMatrixParkID)
-		if err != nil {
-			t.Fatal(err)
+		// The resumed run's step is durable: the approved call's result
+		// follows the decision, and no turn entry — the resumed turn
+		// never ended. The boundary reads resolved, and the reopen
+		// continues.
+		_, entries, report, err := st.Load(ctx, CrashMatrixParkID)
+		if err != nil || report != nil {
+			t.Fatalf("Load: err %v, report %+v", err, report)
 		}
-		if k := kindsOf(entries); !strings.Contains(k, "approval_decision") {
+		if k := kindsOf(entries); !strings.HasSuffix(k, ",turn,approval_request,approval_audit,approval_decision,approval_audit,message") {
 			t.Fatalf("resume_arm kinds = %q", k)
+		}
+		step := entries[len(entries)-1].(thread.MessageEntry).Message
+		if len(step.Content) != 1 {
+			t.Fatalf("the persisted step = %+v, want the approved call's result", step)
+		}
+		if r, ok := step.Content[0].(weft.ToolResultPart); !ok ||
+			r.CallID != "call_mx" || r.Content != "spent" || r.IsError {
+			t.Fatalf("the persisted step = %+v, want the approved call's result", step)
 		}
 		s := openMatrixSession(t, st, CrashMatrixParkID)
 		if p := s.Pending(); len(p) != 0 {
@@ -328,6 +355,48 @@ func assertCrashPoint(t *testing.T, point string, st thread.Storage) {
 			t.Fatalf("the decided boundary reopened pending: %+v", p)
 		}
 		continueTurn(t, st, CrashMatrixParkID, -1)
+	case "expiry":
+		// Resume's sweep denied the lapsed request — its audit and the
+		// denial, via expiry — and the resumed run persisted the denied
+		// call's error result before the kill. The boundary reads
+		// resolved, and the reopen continues.
+		_, entries, report, err := st.Load(ctx, CrashMatrixParkID)
+		if err != nil || report != nil {
+			t.Fatalf("Load: err %v, report %+v", err, report)
+		}
+		if k := kindsOf(entries); !strings.HasSuffix(k, ",turn,approval_request,approval_audit,approval_audit,approval_decision,approval_audit,message") {
+			t.Fatalf("expiry kinds = %q", k)
+		}
+		d, ok := entries[len(entries)-3].(thread.ApprovalDecisionEntry)
+		if !ok || d.Via != "expiry" || d.Outcome != thread.OutcomeDeny {
+			t.Fatalf("the sweep's decision = %+v", entries[len(entries)-3])
+		}
+		step := entries[len(entries)-1].(thread.MessageEntry).Message
+		if len(step.Content) != 1 {
+			t.Fatalf("the persisted step = %+v, want the denied call's result", step)
+		}
+		if r, ok := step.Content[0].(weft.ToolResultPart); !ok || r.CallID != "call_mx" || !r.IsError {
+			t.Fatalf("the persisted step = %+v, want the denied call's error result", step)
+		}
+		s := openMatrixSession(t, st, CrashMatrixParkID)
+		if p := s.Pending(); len(p) != 0 {
+			t.Fatalf("the swept boundary reopened pending: %+v", p)
+		}
+		continueTurn(t, st, CrashMatrixParkID, -1)
+	case "trim":
+		// The trim record is durable — a compaction entry with the trim
+		// reason and no summary — and the session continues over it.
+		_, entries, report, err := st.Load(ctx, CrashMatrixTrimID)
+		if err != nil || report != nil {
+			t.Fatalf("Load: err %v, report %+v", err, report)
+		}
+		if k := kindsOf(entries); !strings.HasSuffix(k, ",turn,compaction") {
+			t.Fatalf("trim kinds = %q", k)
+		}
+		if c := entries[len(entries)-1].(thread.CompactionEntry); c.Reason != thread.ReasonTrim || c.Summary != "" {
+			t.Fatalf("the trim record = %+v", c)
+		}
+		continueTurn(t, st, CrashMatrixTrimID, -1)
 	default:
 		t.Fatalf("unknown point %q", point)
 	}
@@ -439,6 +508,9 @@ func continueTurn(t *testing.T, st thread.Storage, id string, minFed int) {
 			t.Fatal("the follow-up made no model call")
 		}
 		last := reqs[len(reqs)-1]
+		if len(last.Messages) == 0 {
+			t.Fatal("the follow-up fed the model no messages")
+		}
 		if len(last.Messages) < minFed || last.Messages[len(last.Messages)-1].Text() != "continue" {
 			t.Fatalf("fed %d messages, last %q", len(last.Messages), last.Messages[len(last.Messages)-1].Text())
 		}
@@ -475,6 +547,10 @@ func RunCrashMatrixChild(t *testing.T, open func() (thread.Storage, error)) {
 		crashMatrixQueueChild(st)
 	case "resume_arm", "decide_signed":
 		crashMatrixSignedChild(point, st)
+	case "expiry":
+		crashMatrixExpiryChild(st)
+	case "trim":
+		crashMatrixTrimChild(st)
 	default:
 		fmt.Println("helper: unknown point", point)
 		os.Exit(2)
@@ -734,9 +810,9 @@ func crashMatrixQueueChild(st thread.Storage) {
 }
 
 // crashMatrixSignedChild covers the resume_arm and decide_signed
-// points over one parked boundary: Resume's arming write (dying before
-// its turn is waited on), or the signed decision and its Always grant
-// recorded in one batch.
+// points over one parked boundary: the resumed run's first step
+// persisted (the parent killing it inside the resume's model call), or
+// the signed decision and its Always grant recorded in one batch.
 func crashMatrixSignedChild(point string, st thread.Storage) {
 	ctx := context.Background()
 	key := []byte("mx-key-material")
@@ -746,7 +822,11 @@ func crashMatrixSignedChild(point string, st thread.Storage) {
 		os.Exit(2)
 	}
 	spend := matrixSpend()
-	s, err := thread.Create(ctx, st, weft.New(&mxParkModel{}, spend), fixedIDs(CrashMatrixParkID),
+	// At resume_arm the resume's model call blocks: the approved call
+	// runs and its result is persisted by the step observer, then the
+	// run parks inside its model and the parent lands the kill.
+	model := &mxParkModel{blockResume: point == "resume_arm"}
+	s, err := thread.Create(ctx, st, weft.New(model, spend), fixedIDs(CrashMatrixParkID),
 		thread.AutoResume(false), thread.WithKeyring(ring))
 	if err != nil {
 		fmt.Println("helper: create failed:", err)
@@ -771,11 +851,18 @@ func crashMatrixSignedChild(point string, st thread.Storage) {
 			fmt.Println("helper: decide failed:", err)
 			os.Exit(2)
 		}
-		if _, err := s.Resume(ctx); err != nil { // the arm entry lands in here
+		if _, err := s.Resume(ctx); err != nil {
 			fmt.Println("helper: resume failed:", err)
 			os.Exit(2)
 		}
-		dieAt(point) // armed, the resumed turn dying with us
+		// Resume writes nothing itself (no expiry here): the write this
+		// point proves is the resumed run's step persistence — the
+		// approved call's result, appended by the observer before the
+		// run's next model call. Session.Entries adopts an entry only
+		// after its Append returned, so seeing it means it is durable.
+		waitPersisted(s)
+		fmt.Println("crashmx:resume_arm:waiting")
+		time.Sleep(time.Hour) // the kill arrives inside the resume's model call
 	}
 	req, err := s.Request(pend[0].CallID)
 	if err != nil {
@@ -788,6 +875,137 @@ func crashMatrixSignedChild(point string, st thread.Storage) {
 		os.Exit(2)
 	}
 	dieAt(point)
+}
+
+// crashMatrixExpiryChild covers the expiry point: a request parked
+// with a lifetime that lapses, then Resume — whose sweep writes the
+// audit and the denial in one batch before the resume runs. The
+// resume's model call blocks: the denied call's result persists, the
+// child announces itself, and the parent lands the kill.
+func crashMatrixExpiryChild(st thread.Storage) {
+	ctx := context.Background()
+	s, err := thread.Create(ctx, st, weft.New(&mxParkModel{blockResume: true}, matrixSpend()),
+		fixedIDs(CrashMatrixParkID), thread.AutoResume(false), thread.RequestExpiry(time.Millisecond))
+	if err != nil {
+		fmt.Println("helper: create failed:", err)
+		os.Exit(2)
+	}
+	turn, err := s.Send(ctx, weft.User("mx spend"))
+	if err != nil {
+		fmt.Println("helper: send failed:", err)
+		os.Exit(2)
+	}
+	if _, err := turn.Wait(); err != nil {
+		fmt.Println("helper: turn failed:", err)
+		os.Exit(2)
+	}
+	if len(s.Pending()) != 1 {
+		fmt.Println("helper: the turn did not park:", s.Pending())
+		os.Exit(2)
+	}
+	time.Sleep(10 * time.Millisecond) // strictly past the lifetime
+	if _, err := s.Resume(ctx); err != nil {
+		fmt.Println("helper: resume failed:", err)
+		os.Exit(2)
+	}
+	waitPersisted(s)
+	fmt.Println("crashmx:expiry:waiting")
+	time.Sleep(time.Hour) // the kill arrives inside the resume's model call
+}
+
+// crashMatrixTrimChild covers the trim point: a session whose history
+// carries two bulky tool results, over a window the next turn's usage
+// crosses — the trimmer's stub of the older result brings the context
+// back under the line, so the automatic path writes the trim record,
+// not a summary. The child dies right after the record is durable.
+func crashMatrixTrimChild(st thread.Storage) {
+	ctx := context.Background()
+	opts := []thread.SessionOption{thread.ContextWindow(100_000), thread.ClearOldToolResults(1)}
+	model := &mxTrimModel{}
+	s, err := thread.Create(ctx, st, weft.New(model), append(opts, fixedIDs(CrashMatrixTrimID))...)
+	if err != nil {
+		fmt.Println("helper: create failed:", err)
+		os.Exit(2)
+	}
+	now := time.Now().UTC()
+	if err := st.Append(ctx, s.ID(),
+		thread.MessageEntry{ID: "e_t1", Created: now, Message: weft.User("run the tools")},
+		thread.MessageEntry{ID: "e_t2", ParentID: "e_t1", Created: now, Message: weft.Message{
+			Role: weft.RoleAssistant,
+			Content: []weft.Part{
+				weft.ToolCallPart{ID: "c1", Name: "read", Args: []byte("{}")},
+				weft.ToolCallPart{ID: "c2", Name: "read", Args: []byte("{}")},
+			},
+		}},
+		thread.MessageEntry{ID: "e_t3", ParentID: "e_t2", Created: now, Message: weft.Message{
+			Role: weft.RoleTool,
+			Content: []weft.Part{
+				weft.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 40_000)},
+				weft.ToolResultPart{CallID: "c2", Name: "read", Content: strings.Repeat("r", 40_000)},
+			},
+		}},
+		thread.MessageEntry{ID: "e_t4", ParentID: "e_t3", Created: now, Message: weft.Assistant("done")},
+	); err != nil {
+		fmt.Println("helper: seed failed:", err)
+		os.Exit(2)
+	}
+	// Reopen so the session adopts the seeded history.
+	s, err = thread.Open(ctx, st, CrashMatrixTrimID, weft.New(model), opts...)
+	if err != nil {
+		fmt.Println("helper: reopen failed:", err)
+		os.Exit(2)
+	}
+	turn, err := s.Send(ctx, weft.User("again"))
+	if err != nil {
+		fmt.Println("helper: send failed:", err)
+		os.Exit(2)
+	}
+	if _, err := turn.Wait(); err != nil {
+		fmt.Println("helper: turn failed:", err)
+		os.Exit(2)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		es := s.Entries()
+		if c, ok := es[len(es)-1].(thread.CompactionEntry); ok && c.Reason == thread.ReasonTrim {
+			break // adopted after its Append returned: durable
+		}
+		if time.Now().After(deadline) {
+			fmt.Println("helper: the trim record never landed")
+			os.Exit(2)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	dieAt("trim")
+}
+
+// waitPersisted waits until the resumed run's first step is durable.
+func waitPersisted(s *thread.Session) {
+	deadline := time.Now().Add(10 * time.Second)
+	for !resumeStepPersisted(s.Entries()) {
+		if time.Now().After(deadline) {
+			fmt.Println("helper: the resumed step never persisted")
+			os.Exit(2)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// resumeStepPersisted reports whether a message entry follows the
+// approval decision — the resumed run's first persisted step.
+func resumeStepPersisted(entries []thread.Entry) bool {
+	decided := false
+	for _, e := range entries {
+		switch e.(type) {
+		case thread.ApprovalDecisionEntry:
+			decided = true
+		case thread.MessageEntry:
+			if decided {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // mxTurnModel is the turn family's model, shaped by the point it
@@ -828,17 +1046,23 @@ func (m *mxTurnModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2
 // gated tool; the second is the resume's continuation; the third is
 // the compaction's summarizer.
 type mxParkModel struct {
-	calls int
+	calls       int
+	blockResume bool // every call after the first blocks until its context dies
 }
 
 func (m *mxParkModel) Info() weft.ModelInfo {
 	return weft.ModelInfo{Provider: "threadtest", Name: "mxpark"}
 }
 
-func (m *mxParkModel) Stream(_ context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *mxParkModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
 	m.calls++
 	first := m.calls == 1
 	return func(yield func(weft.ModelEvent, error) bool) {
+		if !first && m.blockResume {
+			<-ctx.Done()
+			yield(nil, ctx.Err())
+			return
+		}
 		events := []weft.ModelEvent{
 			weft.ModelTextDelta{Text: "mx summary"},
 			weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
@@ -896,6 +1120,27 @@ func (m *mxSteerModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq
 			weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
 		}
 		for _, ev := range events {
+			if !yield(ev, nil) {
+				return
+			}
+		}
+	}
+}
+
+// mxTrimModel is the trim point's model: every answer reports a
+// context near the window, the usage the trigger measures.
+type mxTrimModel struct{}
+
+func (mxTrimModel) Info() weft.ModelInfo {
+	return weft.ModelInfo{Provider: "threadtest", Name: "mxtrim"}
+}
+
+func (mxTrimModel) Stream(context.Context, weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	return func(yield func(weft.ModelEvent, error) bool) {
+		for _, ev := range []weft.ModelEvent{
+			weft.ModelTextDelta{Text: "reply"},
+			weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 90_000, OutputTokens: 5}},
+		} {
 			if !yield(ev, nil) {
 				return
 			}

@@ -238,7 +238,9 @@ func filters(open func(t *testing.T) thread.Storage) func(*testing.T) {
 // backend that implements thread.Watcher (the optional interface,
 // ADR 0011 §5): the whole session yields in arrival order, after
 // names the resume point, entries appended while watching arrive
-// exactly once, a canceled context ends the stream, and the loud
+// exactly once, a canceled context ends the stream, a session deleted
+// under its tail — or deleted and created again under its id — ends
+// it with ErrNotFound, and the loud
 // failures (unknown session, an after the tree does not hold) are
 // errors before the first yield.
 func RunWatch(t *testing.T, open func(t *testing.T) thread.Storage) {
@@ -334,6 +336,28 @@ func RunWatch(t *testing.T, open func(t *testing.T) thread.Storage) {
 		t.Error("Watch after an entry the tree does not hold: err = nil, want an error")
 	}
 
+	// A consumer canceling inside its own yield, mid-batch, ends the
+	// stream cleanly: the rows behind the batch stop with the
+	// context's error, and that is the end asked for — never a stream
+	// error. The pause inside the yield lets the cancellation land
+	// before the batch's next row is read.
+	for round := 0; round < 5; round++ {
+		cctx, ccancel := context.WithCancel(context.Background())
+		cseq, err := watch.Watch(cctx, h.ID, "")
+		if err != nil {
+			ccancel()
+			t.Fatal(err)
+		}
+		for _, err := range cseq {
+			if err != nil {
+				t.Fatalf("a tail canceled inside its yield ended with %v, want a clean end", err)
+			}
+			ccancel()
+			time.Sleep(20 * time.Millisecond)
+		}
+		ccancel()
+	}
+
 	// A session deleted under its watcher ends the tail with
 	// ErrNotFound — the tail does not hang on a session that is gone.
 	h2 := header("s_watch_del")
@@ -368,6 +392,69 @@ func RunWatch(t *testing.T, open func(t *testing.T) thread.Storage) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the tail never ended after the session was deleted")
+	}
+
+	// A session deleted and created again under the same id between two
+	// polls is another session: the tail ends with ErrNotFound — it
+	// never carries its cursor into the new one, skipping that
+	// session's first entries and yielding the rest as if they were
+	// the old one's.
+	st := watch.(thread.Storage)
+	h3 := header("s_watch_reborn")
+	if err := st.Create(ctx, h3); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Append(ctx, h3.ID, mk("old one"), mk("old two"), mk("old three")); err != nil {
+		t.Fatal(err)
+	}
+	rctx, rcancel := context.WithCancel(context.Background())
+	defer rcancel()
+	rseq, err := watch.Watch(rctx, h3.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type item struct {
+		text string
+		err  error
+	}
+	items := make(chan item, 16)
+	go func() {
+		defer close(items)
+		for e, err := range rseq {
+			if err != nil {
+				items <- item{err: err}
+				return
+			}
+			items <- item{text: e.(thread.MessageEntry).Message.Text()}
+		}
+	}()
+	for range 3 {
+		select {
+		case <-items:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the watch never yielded its backlog")
+		}
+	}
+	// Delete, Create and Append well inside one poll interval, so the
+	// tail's next poll sees the new session whole.
+	if err := st.Delete(ctx, h3.ID); err != nil {
+		t.Fatal(err)
+	}
+	reborn := h3
+	reborn.Created = h3.Created.Add(time.Second)
+	if err := st.Create(ctx, reborn); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Append(ctx, h3.ID, mk("new one"), mk("new two"), mk("new three"), mk("new four")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case it := <-items:
+		if !errors.Is(it.err, thread.ErrNotFound) {
+			t.Errorf("a deleted-and-recreated session's tail yielded %q / %v, want ErrNotFound", it.text, it.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tail never ended after the session was deleted and created again")
 	}
 }
 

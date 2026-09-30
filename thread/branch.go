@@ -3,6 +3,7 @@ package thread
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -172,7 +173,16 @@ func (s *Session) Fork(ctx context.Context, entryID string, opts ...SessionOptio
 	if err != nil {
 		return nil, err
 	}
+	// The fork is positioned where its own file reopens: a leaf entry
+	// at the tip redirects to its target, which the copied path must
+	// hold — a fork at a navigation to another branch has no line to
+	// stand on.
+	leaf := replayLeaf(path)
+	if leaf != "" && !slices.ContainsFunc(path, func(e Entry) bool { return idOf(e) == leaf }) {
+		return nil, fmt.Errorf("thread: fork at %q: its leaf entry navigates off the copied path", entryID)
+	}
 	cfg := resolveSession(opts...)
+	cfg.compaction.resolve(s.agent.Model()) // per-model overrides, as Create and Open resolve them
 	id := NewSessionID()
 	if cfg.ids != nil {
 		id = cfg.ids()
@@ -190,6 +200,9 @@ func (s *Session) Fork(ctx context.Context, entryID string, opts ...SessionOptio
 	}
 	if len(path) > 0 {
 		if err := s.st.Append(ctx, id, path...); err != nil {
+			// A fork header with no path is a session nothing asked
+			// for: remove it, best-effort, and refuse.
+			_ = s.st.Delete(context.WithoutCancel(ctx), id)
 			return nil, err
 		}
 	}
@@ -200,20 +213,17 @@ func (s *Session) Fork(ctx context.Context, entryID string, opts ...SessionOptio
 		header: h,
 		order:  append([]Entry(nil), path...),
 		byID:   make(map[string]int, len(path)),
-		leaf:   entryID,
+		leaf:   leaf,
 	}
 	for i, e := range path {
 		if id := idOf(e); id != "" {
 			f.byID[id] = i
 		}
-		if _, ok := e.(TurnEntry); ok {
-			f.turns++
-		}
 	}
-	// The copied turns count for run ids the way Open's recovery
-	// counts them: the fork's first Send mints <fork>-t<n+1>, not
-	// <fork>-t1 — the file already holds n turns, and a numbering
-	// that restarts would read as a different session's history.
-	f.turnSeq = f.turns
+	// The copied runs count for run ids the way Open's recovery counts
+	// them: the fork's first Send continues past the highest copied
+	// run, never restarting at t1 — a numbering that restarts would
+	// read as a different session's history.
+	f.recoverCountersLocked()
 	return f, nil
 }

@@ -277,7 +277,8 @@ func (p *Pool) markPhase(d *delegate, phase int) {
 // again. It runs on the caller's goroutine: Decide returns when the
 // children it resumed have completed, so a decision's effect is
 // visible when the call does (the wait is the child's turn, bounded
-// by its own run).
+// by its own run). The resumed run holds no slot — runChild's doc says
+// why a slot here could deadlock.
 func (p *Pool) resume(ctx context.Context, parent *thread.Session, d *delegate, reqs []thread.ApprovalRequestEntry) (*thread.Turn, error) {
 	p.mu.Lock()
 	if d.pumping {

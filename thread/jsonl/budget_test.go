@@ -47,9 +47,11 @@ func buildBigSession(tb testing.TB, st thread.Storage, id string, n int) {
 	}
 }
 
-// budgetOpen100k is opening (Load plus adopt) a 100k-entry session:
-// measured 2026-09-30 at ~3.1s on jsonl (BenchmarkOpen100k carries
-// the number); the bound leaves CI hardware its margin.
+// budgetOpen100k is opening a 100k-entry session — a fresh Storage
+// over the directory and its Load (the adopt is thread.Open's, and
+// Memory's budgets cover it): measured 2026-09-30 at ~1.3s plain and
+// ~6s under -race (BenchmarkOpen100k carries the number); the bound
+// leaves CI hardware its margin.
 const budgetOpen100k = 30 * time.Second
 
 func TestBudgetOpen100k(t *testing.T) {
@@ -62,7 +64,7 @@ func TestBudgetOpen100k(t *testing.T) {
 	buildBigSession(t, st, "s_big", 100_000)
 
 	start := time.Now()
-	fresh, err := jsonl.Open(dir) // the next process's open, cold
+	fresh, err := jsonl.Open(dir) // the next process's open (the page cache stays warm)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -106,6 +106,11 @@ type backend struct {
 type session struct {
 	mu sync.Mutex
 	f  *os.File
+	// suspect marks a tail that may end mid-line — a predecessor's
+	// crash, a failed or short write, Inject's raw bytes: the next
+	// write drops any torn tail first (dropTorn), so its line never
+	// glues onto the torn one.
+	suspect bool
 }
 
 func (b *backend) path(id string) string { return filepath.Join(b.dir, id+".jsonl") }
@@ -144,13 +149,18 @@ func (b *backend) Create(ctx context.Context, h thread.Header) error {
 	if err != nil {
 		return err
 	}
+	if len(line) >= headerBound {
+		// List reads a header within headerBound; a longer one would be
+		// written, load, and never list. Refused at the door instead.
+		return fmt.Errorf("thread: session header encodes to %d bytes; jsonl bounds a header line to %d", len(line), headerBound-1)
+	}
 	buf := append(line, '\n')
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if _, held := b.sessions[h.ID]; held {
 		return fmt.Errorf("%w: %s", thread.ErrExists, h.ID)
 	}
-	f, err := os.OpenFile(b.path(h.ID), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(b.path(h.ID), os.O_CREATE|os.O_EXCL|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return fmt.Errorf("%w: %s", thread.ErrExists, h.ID)
@@ -372,9 +382,7 @@ func (b *backend) Delete(ctx context.Context, id string) error {
 		}
 	}
 	s.mu.Lock()
-	err := os.Remove(b.path(id))
-	_ = unlockFile(s.f)
-	_ = s.f.Close()
+	err := removeLocked(s.f, b.path(id))
 	s.mu.Unlock()
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
@@ -424,6 +432,7 @@ func (b *backend) Inject(ctx context.Context, id string, data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err = s.f.Write(data)
+	s.suspect = true // the bytes are the test's: a torn tail, maybe
 	return err
 }
 
@@ -444,18 +453,15 @@ func (b *backend) sessionFor(id string) (*session, error) {
 	if s, ok := b.sessions[id]; ok {
 		return s, nil
 	}
-	f, err := os.OpenFile(b.path(id), os.O_WRONLY|os.O_APPEND, 0)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmtNotFound(id)
-	}
+	f, err := b.openLocked(id)
 	if err != nil {
 		return nil, err
 	}
-	if err := lockFile(f); err != nil {
-		_ = f.Close()
-		return nil, err
-	}
-	s := &session{f: f}
+	// The first writer since the file was last held: a crashed
+	// predecessor may have left a torn tail, which the first write
+	// drops before it lands — the torn line Load promises to drop
+	// stays droppable instead of becoming a corrupt line mid-file.
+	s := &session{f: f, suspect: true}
 	b.sessions[id] = s
 	return s, nil
 }
@@ -467,32 +473,89 @@ func (b *backend) sessionFor(id string) (*session, error) {
 func (b *backend) lockOnly(id string) (*session, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	f, err := os.OpenFile(b.path(id), os.O_WRONLY|os.O_APPEND, 0)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmtNotFound(id)
-	}
+	f, err := b.openLocked(id)
 	if err != nil {
-		return nil, err
-	}
-	if err := lockFile(f); err != nil {
-		_ = f.Close()
 		return nil, err
 	}
 	return &session{f: f}, nil
 }
 
+// openLocked opens a session file for appending and takes its lock,
+// then proves the locked file is still the one the path names. Delete
+// unlinks a file before it releases the lock; a writer that opened the
+// path before the unlink and locked after the release would hold a
+// lock on a file no name reaches, and every append it made would
+// vanish. So the lock is checked against the path: gone is
+// ErrNotFound; replaced (deleted and created again) is retried against
+// the new file. A held session is ErrLocked.
+func (b *backend) openLocked(id string) (*os.File, error) {
+	path := b.path(id)
+	for attempt := 0; ; attempt++ {
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmtNotFound(id)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := lockFile(f); err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+		same, err := stillNamed(f, path)
+		if err == nil && same {
+			return f, nil
+		}
+		_ = unlockFile(f)
+		_ = f.Close()
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return nil, fmtNotFound(id)
+		case err != nil:
+			return nil, err
+		case attempt >= 3:
+			// Replaced under us again and again: another party is
+			// deleting and creating this id in a loop — it is the
+			// writer here.
+			return nil, fmt.Errorf("%w: %s", thread.ErrLocked, id)
+		}
+	}
+}
+
+// stillNamed reports whether the open file f is the file path names
+// now — false after a replacement, fs.ErrNotExist after an unlink.
+func stillNamed(f *os.File, path string) (bool, error) {
+	fi, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	pi, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(fi, pi), nil
+}
+
 // writeAll appends buf under the session's lock in one write, then
 // fsyncs when asked. A short write is an error — the file may hold a
-// torn tail, which the load rules handle; the append did not happen.
+// torn tail, which the load rules handle; the append did not happen,
+// and the next write drops that tail before it writes (suspect).
 func writeAll(s *session, buf []byte, sync bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	n, err := s.f.Write(buf)
-	if err != nil {
-		return err
+	if s.suspect {
+		if err := dropTorn(s.f.Name()); err != nil {
+			return err
+		}
+		s.suspect = false
 	}
-	if n != len(buf) {
-		return io.ErrShortWrite
+	n, err := s.f.Write(buf)
+	if err != nil || n != len(buf) {
+		s.suspect = true
+		if err == nil {
+			err = io.ErrShortWrite
+		}
+		return err
 	}
 	if sync {
 		return s.f.Sync()
@@ -543,7 +606,7 @@ func titleOf(path string) string {
 		return ""
 	}
 	title := ""
-	for _, line := range splitLines(raw)[1:] {
+	for _, line := range entryLines(raw) {
 		var head struct {
 			Type  string `json:"type"`
 			Title string `json:"title"`
@@ -586,6 +649,18 @@ func readHeader(path string) (thread.Header, bool, error) {
 	return h, true, nil
 }
 
+// entryLines is a session file's complete entry lines — every line
+// after the header. A file caught between Create's open and its
+// header's write (another process creating it) holds no line yet:
+// no entries, never a slice past the end.
+func entryLines(raw []byte) [][]byte {
+	lines := splitLines(raw)
+	if len(lines) == 0 {
+		return nil
+	}
+	return lines[1:]
+}
+
 // splitLines splits on '\n', complete lines only — the bytes after the
 // last newline, if any, are the torn tail and are not returned.
 func splitLines(b []byte) [][]byte {
@@ -599,6 +674,46 @@ func splitLines(b []byte) [][]byte {
 		b = b[i+1:]
 	}
 	return lines
+}
+
+// dropTorn truncates a session file back to just after its last
+// newline: the torn tail a crash or a short write left — which Load
+// drops and reports — removed before the next line lands on it. Only
+// the holder of the session's lock calls it. A file with no newline at
+// all (no complete header) is left alone: there is no line boundary to
+// return to, and Load names it corrupt on line 1. The truncation goes
+// through the path, not the append handle, which cannot truncate on
+// every platform; the file's next fsync (the Append's own, or Flush's)
+// makes the new length durable with the line written after it.
+func dropTorn(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	size := fi.Size()
+	const chunk = 64 << 10
+	buf := make([]byte, chunk)
+	for end := size; end > 0; {
+		start := max(end-chunk, 0)
+		n, err := f.ReadAt(buf[:end-start], start)
+		if err != nil && err != io.EOF {
+			return err
+		}
+		if i := bytes.LastIndexByte(buf[:n], '\n'); i >= 0 {
+			keep := start + int64(i) + 1
+			if keep == size {
+				return nil // complete: nothing torn
+			}
+			return os.Truncate(path, keep)
+		}
+		end = start
+	}
+	return nil
 }
 
 // rawTorn reports whether the bytes end mid-line: a writer cut before

@@ -69,8 +69,11 @@ offline:
 # fuzzes one target at a time), FUZZTIME apiece. A crasher is written
 # to testdata/fuzz/<Target>/ — commit it as a regression seed.
 FUZZTIME ?= 10s
+# A package that fails to list (a compile error) fails the target —
+# an empty list must never read green.
 fuzz:
-	for f in $$($(GO) test -list 'Fuzz.*' . | grep '^Fuzz'); do \
+	list=$$($(GO) test -list 'Fuzz.*' .) || { echo "$$list"; exit 1; }; \
+	for f in $$(echo "$$list" | grep '^Fuzz'); do \
 	  $(GO) test -run '^$$' -fuzz "^$$f\$$" -fuzztime $(FUZZTIME) . || exit 1; \
 	done
 
@@ -79,7 +82,8 @@ fuzz:
 # invocation each, crashers committed as seeds the same way.
 fuzz-thread:
 	for p in . ./jsonl; do \
-	  for f in $$(cd thread && $(GO) test -list 'Fuzz.*' $$p | grep '^Fuzz'); do \
+	  list=$$(cd thread && $(GO) test -list 'Fuzz.*' $$p) || { echo "$$list"; exit 1; }; \
+	  for f in $$(echo "$$list" | grep '^Fuzz'); do \
 	    (cd thread && $(GO) test -run '^$$' -fuzz "^$$f\$$" -fuzztime $(FUZZTIME) $$p) || exit 1; \
 	  done; \
 	done

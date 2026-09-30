@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -234,10 +237,14 @@ func TestFsyncOptionsAccepted(t *testing.T) {
 	}
 }
 
-// Appends after an injected torn row corrupt the session, exactly as
-// appending after a torn tail corrupts a jsonl file: the crash's bytes
-// are mid-session now, and Load says so with the line.
-func TestAppendAfterTornCorruptsLikeJsonl(t *testing.T) {
+// An Append after an injected torn row drops the row first, exactly
+// as jsonl's next write drops a torn tail: the tail Load promised to
+// drop stays dropped instead of turning into a torn row mid-session —
+// the session keeps loading, the post-crash entry in it. (A real
+// sqlite write never tears; the torn row is Inject's, the shape the
+// backends share.) A tail watching the session waits at the torn row
+// and yields the entry that replaces it.
+func TestAppendAfterTornDropsIt(t *testing.T) {
 	ctx := context.Background()
 	st := openFile(t)
 	if err := st.Create(ctx, thread.Header{ID: "s_aftertorn", Created: time.Now().UTC()}); err != nil {
@@ -247,15 +254,124 @@ func TestAppendAfterTornCorruptsLikeJsonl(t *testing.T) {
 	if err := inj.Inject(ctx, "s_aftertorn", []byte(`{"type":"message","id":"e_t`)); err != nil {
 		t.Fatal(err)
 	}
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	seq, err := st.(thread.Watcher).Watch(wctx, "s_aftertorn", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tailed := make(chan string, 1)
+	go func() {
+		for e, err := range seq {
+			if err != nil {
+				tailed <- "error: " + err.Error()
+				return
+			}
+			tailed <- e.(thread.MessageEntry).ID
+			return
+		}
+	}()
+	time.Sleep(300 * time.Millisecond) // one poll at least, parked at the torn row
 	if err := st.Append(ctx, "s_aftertorn", thread.MessageEntry{
 		ID: "e_2", Created: time.Now().UTC(), Message: weft.User("after the crash"),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, err := st.Load(ctx, "s_aftertorn")
-	var ce *thread.CorruptError
-	if !errors.Is(err, thread.ErrCorrupt) || !errors.As(err, &ce) || ce.Line != 2 {
-		t.Fatalf("Load over a torn line mid-session: err = %v, want CorruptError on line 2", err)
+	_, entries, report, err := st.Load(ctx, "s_aftertorn")
+	if err != nil {
+		t.Fatalf("Load after an append over a torn row: %v", err)
+	}
+	if report != nil || len(entries) != 1 || entries[0].(thread.MessageEntry).ID != "e_2" {
+		t.Errorf("after the append: %d entries, report %+v; want e_2 alone and a clean load", len(entries), report)
+	}
+	select {
+	case got := <-tailed:
+		if got != "e_2" {
+			t.Errorf("the tail yielded %q, want e_2", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tail never yielded the entry that replaced the torn row")
+	}
+}
+
+// Watch reads each poll's batch and releases the handle's one
+// connection before it yields: a consumer writing to the same Storage
+// from inside its loop used to block forever on the connection its own
+// tail held (and a slow consumer stalled every other caller).
+func TestWatchYieldReleasesTheConnection(t *testing.T) {
+	ctx := context.Background()
+	st := openFile(t)
+	if err := st.Create(ctx, thread.Header{ID: "s_w", Created: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	msg := func(id string) thread.Entry {
+		return thread.MessageEntry{ID: id, Created: time.Now().UTC(), Message: weft.User(id)}
+	}
+	if err := st.Append(ctx, "s_w", msg("e_1"), msg("e_2")); err != nil {
+		t.Fatal(err)
+	}
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	seq, err := st.(thread.Watcher).Watch(wctx, "s_w", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, err := range seq {
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Mid-batch: e_2 is still unread when this runs.
+		tctx, tcancel := context.WithTimeout(ctx, 5*time.Second)
+		err := st.Append(tctx, "s_w", msg("e_reply"))
+		if err == nil {
+			_, _, _, err = st.Load(tctx, "s_w")
+		}
+		tcancel()
+		if err != nil {
+			t.Fatalf("a call on the watched Storage from inside the watch loop: %v", err)
+		}
+		break
+	}
+}
+
+// A path holding the bytes a file: URI reads as syntax — '#' (the
+// fragment), '?' (the query), '%' (an escape) — opens the file it
+// names. Unescaped, "sessions#1.db" was pre-created empty at 0600 while
+// SQLite wrote the database to "sessions", beside default-mode side
+// files.
+func TestOpenPathWithURISyntax(t *testing.T) {
+	ctx := context.Background()
+	for _, name := range []string{"sessions#1.db", "sessions?mode=ro.db", "sessions%41.db"} {
+		t.Run(name, func(t *testing.T) {
+			if runtime.GOOS == "windows" && strings.Contains(name, "?") {
+				t.Skip("'?' is not a legal file name byte on Windows")
+			}
+			dir := t.TempDir()
+			path := filepath.Join(dir, name)
+			st, err := sqlite.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := st.Create(ctx, thread.Header{ID: "s_h", Created: time.Now().UTC()}); err != nil {
+				t.Fatal(err)
+			}
+			ents, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, e := range ents {
+				if !strings.HasPrefix(e.Name(), name) {
+					t.Errorf("Open(%q) wrote %q: the database is not the file the path names", name, e.Name())
+				}
+			}
+			again, err := sqlite.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, _, err := again.Load(ctx, "s_h"); err != nil {
+				t.Errorf("reopening %q: %v", name, err)
+			}
+		})
 	}
 }
 

@@ -1,3 +1,166 @@
+## thread — unreleased
+
+### Security
+
+Found by the post-0.7 full review (five parallel passes, each finding
+pinned by a test that failed before its fix).
+
+- A grant no longer approves a call whose arguments hold a case-folded
+  twin of a key on its pointer's path. `encoding/json` binds
+  `"Command"` to a `command` field (the last key wins), so
+  `{"command":"go test ./...","Command":"rm -rf /"}` matched
+  `ArgGlob("/command","go test*")` while the tool ran `rm -rf /`. A
+  deny-grant could be slipped the same way. Such a pointer now fails
+  closed.
+- `MaxUses` counts the uses in the chain's own batch. Before, a
+  `MaxUses: 1` grant approved every parallel call of one step, because
+  their audits landed after all of them matched.
+- The signed-decision challenge moves to
+  `weft/approval-challenge/v2`, and v1 signatures no longer verify. The
+  changes:
+  - The expiry is encoded without `UnixNano`'s 2^64 ns wrap. Before, a
+    captured expired signature whose expiry was moved 2^64 ns later
+    verified, and its call ran.
+  - The challenge binds the run that parked the call through the new
+    `SignedDecision.RunID`. Call ids repeat across runs, and an
+    unsubmitted signature for run 1's `call_1` used to approve run 2's.
+  - The always flag is its own field, no longer glued onto the kind.
+  - `DecideSigned` also checks the pending request's own expiry.
+- `Decide` refuses to approve or resolve a request past its expiry,
+  with `ErrExpired`, and records nothing. A Deny is still accepted.
+  Before, only `Resume`'s sweep read the expiry, so a late approval ran
+  the call.
+
+### Fixed
+
+- A crash while a tool runs no longer wedges the reopened session. The
+  call that per-step durability persisted before its result read as an
+  approval boundary: `Pending` listed it, and every `Send` queued
+  behind it forever. A boundary now needs a recorded park (a turn
+  entry naming pending calls, or an approval entry); an unrecorded
+  dangling call goes to the next run's input repair (ADR 0011 §7).
+- The Interrupt policy under `RequireSigned` denies the parked boundary
+  through the session's own machinery. Before, it went through the
+  public `Decide`, failed, and the follow-up waited forever.
+- Run ids are no longer reused after a reopen or in a fork: the
+  sequence resumes past the highest recorded run id, not at the turn
+  count, which steer receipts and overflow re-runs outpace.
+- `Fork` positions the new session where its own file reopens, and
+  shares `Open`'s recovery (per-model compaction overrides, the
+  trigger's last measurement). A fork at a leaf entry that navigates
+  off the copied path is refused before anything is written. A fork
+  whose path append fails removes its header.
+- A runner displaced by a new `Send` no longer settles the new turn's
+  steers, which delivered a steer twice. An Interrupt or Rollback
+  `Send` keeps its `RunOption`s. The auto-resume marks its turn in
+  flight.
+- Compaction:
+  - A trim record no longer breaks the iterative summary chain. Before,
+    it was taken as the previous summary, and the earlier summary
+    dropped out of the context.
+  - The trim pre-pass judges "under the line" from the reported input
+    less the trim's saving (ADR 0020 §2). A trim that clears nothing
+    is never recorded, so the summary runs.
+  - Pinning a tool call or a tool result keeps its pair together.
+  - The summarizer's input is repaired, so no orphan `tool_use`
+    reaches the provider.
+  - `TokensBefore` and `Preparation.Context` measure the context the
+    model sees, not the raw history.
+  - `MaxPerSession` and `MinTurnsBetween` count only automatic
+    compactions (threshold and trim) on the leaf's path, as documented.
+- `CorruptError` exposes its cause to `errors.Is` and `errors.As` while
+  still matching `ErrCorrupt` (new `Is` method).
+- `thread/pool`:
+  - A sync delegation that fails outside a run returns
+    `SUBAGENT_FAILED`. Before, the wrap dereferenced a nil `*RunError`
+    and panicked.
+  - A contained panic reaches the sync caller as an error, where it
+    used to read as an empty success.
+  - A failed mirror of a child's requests fails the delegation. Before,
+    the parent was left parked on the wrapper call itself.
+  - `Close` racing an async `Submit` no longer races the `WaitGroup`.
+  - The resumed run's slot exemption is documented, with the deadlock
+    it avoids.
+- `thread/jsonl`:
+  - An Append racing a Delete in another process could lock the
+    deleted file and "succeed" into it. The lock is now checked against
+    the path after it is taken.
+  - The first Append after a crash drops the torn tail before writing.
+    Before, it glued onto the torn line, so the session stopped
+    loading, or Salvage lost the post-crash entry.
+  - Create refuses a header over List's 1 MiB bound.
+  - Create's handle appends (`O_APPEND`), and Delete closes the file
+    before removing it where there is no lock (Windows).
+- `thread/sqlite`:
+  - Watch no longer holds the handle's only connection while it
+    yields. Before, a consumer calling the same Storage from its loop
+    deadlocked, and a slow consumer stalled every writer.
+  - `Open` escapes `#`, `?` and `%` in the path. Before,
+    `sessions#1.db` opened `sessions`, beside side files that were not
+    0600.
+  - A torn final row is dropped before the next append.
+- Both Watch implementations end with `ErrNotFound` when the session is
+  deleted and created again under the same id between polls. Before,
+  they skipped the new session's first entries. `threadtest.RunWatch`
+  pins this.
+
+### Known, for v0.8
+
+- A message entry holding a part type from a newer core decodes as
+  corrupt, not `ErrNewerFormat`, so Salvage skips it. The fix needs a
+  sentinel from the root module.
+- A steer deferred to a follow-up runs without the `Send`'s
+  `RunOption`s.
+- `Memory` still glues an append onto a torn tail that was injected
+  with `RawInjector`, so the torn-tail row is pinned per backend, not
+  in the shared table.
+- `thread/sqlite`'s go.mod still requires `thread v0.4.0`; its next tag
+  tidies against the thread tag first (two-phase release).
+
+### Fixed (earlier post-0.7 rounds)
+
+- Grant `ArgEquals` compares numbers by exact value, never through
+  float64: two integer ids past 2^53 (9007199254740993 and
+  9007199254740992) read equal before, so one id's standing grant
+  approved the other; numbers past float64's range never matched at
+  all. 1, 1.0 and 0.1e1 still compare equal.
+- `ArgGlob`'s `*` no longer reads as a literal when the value holds a
+  `*` at that position (`"ls *"` failed to match `"ls *.go"`) — a
+  fail-closed miss, never an over-grant. Both found by the post-0.7
+  review's strengthened `FuzzGrantMatches` (oracles in place of the
+  determinism checks that could not fail); the crashers are its seeds.
+- `thread/sqlite`'s Watch ends cleanly when the consumer cancels
+  inside its own yield: the canceled context stopped the batch's rows
+  and the tail yielded `context canceled` as a stream error. This was
+  the post-0.7 audit's open `TestWatch` watch-item, reproduced under
+  load; the Watch conformance table now pins it for every backend.
+- `thread/jsonl` no longer panics on a session file that holds no
+  complete line yet — another process between Create's exclusive open
+  and its header write: Watch (at open and on every poll) and List's
+  title search sliced past the end.
+
+### Tests
+
+- The crash matrix gains `expiry` (Resume's expiry sweep: the audit
+  and the denial, then the denied result persisted) and `trim` (the
+  auto-compaction trim record): every one of the fourteen session-layer
+  Append sites now has its own crash point, none covered by shape
+  alone. (thread/pool's canceled and capped receipts go through the
+  same `AppendPoolReceipt` site the `pool_receipt` point kills at.)
+- The crash matrix's `resume_arm` point proves what it names: the
+  resumed run's first persisted step (the approved call's result),
+  the child killed inside the resume's model call — before, the child
+  died racing that write and the point re-asserted the decision's.
+- `FuzzDecideSigned` builds its challenge per input and derives each
+  decision from a signed one (claims overridden, re-signed or
+  tampered, the boundary pre-decided), so every catalogue error and
+  the accepted path are reachable under fuzzing, not only from seeds;
+  a rejection must leave the tree untouched.
+- `FuzzDecodeHeader` seeds every header golden; the budget suite's
+  List walk uses distinct stamps and its context build takes the best
+  of five; CI uploads jsonl's fuzz crashers; `make fuzz`/`fuzz-thread`
+  fail when a package does not list.
+
 ## thread 0.7.0 — 2026-09-30
 
 Hardening (plan §10): no new features. Every decoder fuzzed, every

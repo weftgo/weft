@@ -34,9 +34,10 @@ func newID(prefix string) string {
 // — so an id contains no character a human or a filename misreads.
 const idAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
-// encodeID renders 128 bits as 26 Crockford base32 characters (the
-// final two bits are zero padding), most significant first, so the
-// string sorts exactly as the bytes do.
+// encodeID renders 128 bits as 26 Crockford base32 characters, most
+// significant first, so the string sorts exactly as the bytes do. 26
+// characters hold 130 bits: the two padding bits are the leading ones,
+// so the first character is always 0-7.
 func encodeID(b [16]byte) string {
 	var out [26]byte
 	for i := 25; i >= 0; i-- {

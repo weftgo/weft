@@ -19,17 +19,21 @@ import (
 // pinned by TestHeaderEnvelope; here it is the never-panic and the
 // fixpoint that fuzz owes.
 func FuzzDecodeHeader(f *testing.F) {
-	// Seeds: every committed session golden's first line — the pins the
-	// decoder must always accept — and the hostile shapes.
-	for _, dir := range [...]string{"format1", "format2", "format3", "format4"} {
-		raw, err := os.ReadFile(filepath.Join("testdata", dir, "session.jsonl"))
+	// Seeds: every committed header golden — the session file's first
+	// line and the standalone pins (format1's header, format4's
+	// lineage), which the decoder must always accept — and the hostile
+	// shapes. A missing golden is a renamed pin, never a skip.
+	raw, err := os.ReadFile(filepath.Join("testdata", "format1", "session.jsonl"))
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(bytes.SplitN(raw, []byte("\n"), 2)[0])
+	for _, golden := range [...]string{"format1/header.json", "format4/session_lineage.json"} {
+		raw, err := os.ReadFile(filepath.Join("testdata", golden))
 		if err != nil {
-			continue // a format without a committed session file
+			f.Fatal(err)
 		}
-		lines := bytes.Split(raw, []byte("\n"))
-		if len(lines) > 0 && len(lines[0]) > 0 {
-			f.Add(lines[0])
-		}
+		f.Add(bytes.TrimSpace(raw))
 	}
 	f.Add([]byte(`{"type":"session","weft":99,"id":"s_1"}`))       // a newer envelope
 	f.Add([]byte(`{"type":"session","weft":0,"id":"s_1"}`))        // no format wrote zero

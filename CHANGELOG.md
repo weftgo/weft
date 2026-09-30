@@ -1,3 +1,22 @@
+## thread 0.7.1 — 2026-09-30
+
+The post-0.7.0 audit's one find (report:
+`WEFT-POST-0.7.0-AUDIT-2026-09-30.md`), in the conformance harness,
+not the session layer. No API change.
+
+### Fixed
+
+- `threadtest.CrashMatrix`: the steer and clear_queue points accept
+  both legitimate durable orderings. A steer accepted while the second
+  model call is in flight stays queued (receipt only), and a steer
+  accepted in the between-steps window is drained into the next call
+  and its message persisted after the receipt (ADR 0019's drain point,
+  ADR 0011 §7). A `-race -count=10` soak on a loaded box tripped the
+  old single-shape assertion. The clear_queue child no longer fails
+  when the queue was already drained (n == 0 is a landing).
+- The 0.7.0 entry's crash-matrix bullet now names all twelve crash
+  points and the fourteen Append sites behind them.
+
 ## thread 0.7.0 — 2026-09-30
 
 Hardening (plan §10): no new features. Every decoder fuzzed, every

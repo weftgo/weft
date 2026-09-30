@@ -39,10 +39,14 @@ func FuzzGrantMatches(f *testing.F) {
 			return // malformed JSON is loud; the wire shapes are pinned elsewhere
 		}
 		call := weft.ToolCallPart{ID: "c_fuzz", Name: g.Tool, Args: argsJSON}
-		if grantMatches(g, call) != grantMatches(g, call) {
+		m1, m2 := grantMatches(g, call), grantMatches(g, call)
+		if m1 != m2 {
 			t.Fatalf("nondeterministic match over grant %q, args %q", grantJSON, argsJSON)
 		}
-		wildcardMatch(glob, pointer) // never panics, whatever the pattern holds
+		w1, w2 := wildcardMatch(glob, pointer), wildcardMatch(glob, pointer)
+		if w1 != w2 { // never panics either, whatever the pattern holds
+			t.Fatalf("nondeterministic wildcard %q over %q", glob, pointer)
+		}
 		v1, ok1 := pointerValue(argsJSON, pointer)
 		if ok1 {
 			v2, ok2 := pointerValue(argsJSON, pointer)

@@ -603,6 +603,14 @@ func TestRegisterResumesParkedSubmitChild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	// The running receipt lands before the child's park mirrors onto
+	// the parent; wait for the mirror, not the state — the reopen is
+	// otherwise a race with it (the offline suite's faster clock
+	// caught exactly that).
+	deadline := time.Now().Add(5 * time.Second)
+	for len(open.Pending()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
 	pend := open.Pending()
 	if len(pend) != 1 {
 		t.Fatalf("Pending = %+v", pend)

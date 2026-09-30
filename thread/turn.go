@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"reflect"
+	"strconv"
 	"sync"
 	"time"
 
@@ -650,6 +651,11 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 		// the run emits is appended as it joins, so a crash mid-turn
 		// loses nothing emitted.
 		runOpts = append(runOpts, s.observer(persist, sp))
+		// The session's identity rides every run (ADR 0024 S5), appended
+		// after the caller's options and before the transcript — a later
+		// weft.Metadata wins (S1.1), so the session's keys win over a
+		// caller's colliding thread.RunOptions(weft.Metadata(...)).
+		runOpts = append(runOpts, weft.Metadata(s.runMetadata(t)))
 		runOpts = append(runOpts, weft.Messages(input...), weft.RunID(t.RunID()))
 		run := s.agent.Stream(withSession(ctx, s), runOpts...)
 		for ev, serr := range run.Events() {
@@ -809,6 +815,35 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 	s.retireInFlightLocked(t)
 	s.mu.Unlock()
 	t.finish(res, err)
+}
+
+// runMetadata is the identity every run of this session carries
+// (ADR 0024 S5): the session id and the turn number always, the public
+// id when the session has one, and the fork origin or pool lineage
+// when the header names one. The public id reads Session.Meta — the
+// header overlaid with every InfoEntry's meta, in order — so a later
+// SetInfo can add other keys; the header itself is never rewritten,
+// which is why the create-time public id is what List's Meta filter
+// matches. Caller-side, a run built by hand (not through a session)
+// carries none of this: the session is the only minter.
+func (s *Session) runMetadata(t *Turn) map[string]string {
+	md := map[string]string{
+		"weft.session.id": s.header.ID,
+		"weft.turn":       strconv.Itoa(t.turn), // the turnSeq the run id was minted from
+	}
+	if v := s.Meta()["weft.public_id"]; v != "" { // header ⊕ every InfoEntry
+		md["weft.public_id"] = v
+	}
+	if p := s.header.Parent; p != nil { // a fork
+		md["weft.session.forked_from"] = p.Session + "#" + p.Entry
+	}
+	if l := s.header.Lineage; l != nil { // a pool child
+		md["weft.session.parent"] = l.Session
+		if l.Call != "" {
+			md["weft.session.parent_call"] = l.Call
+		}
+	}
+	return md
 }
 
 // recordTurnEnd closes the turn: it appends the run's new messages

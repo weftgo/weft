@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/log"
+	logglobal "go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -570,7 +572,11 @@ type Agent struct {
 	modelMW         []ModelMiddleware
 	toolMW          []ToolMiddleware
 	tracerProvider  trace.TracerProvider
+	loggerProvider  log.LoggerProvider
 	logger          *slog.Logger
+	// content is the Content option's override of the capture question:
+	// nil means "as the logger in force says", resolved at each emission.
+	content *bool
 	// obs is the loop's own reporting at the run's phases (ADR 0016):
 	// spans to the tracer, lines to the logger. Built once, below.
 	obs observer
@@ -602,15 +608,22 @@ func New(m Model, opts ...Option) *Agent {
 			o.apply(a)
 		}
 	}
-	// The tracer is resolved once, here: the option's provider, or the
-	// global one — which delegates, so an SDK registered after New is
-	// still picked up and zero-config instrumentation holds.
+	// The tracer and the record logger are resolved once, here: the
+	// option's provider, or the global one — which delegates, so an SDK
+	// registered after New is still picked up and zero-config
+	// instrumentation holds. The logger is the Logs API's; capture is
+	// still resolved per emission, on the logger in force (ADR 0024).
 	tp := otel.GetTracerProvider()
 	if a.tracerProvider != nil {
 		tp = a.tracerProvider
 	}
+	lp := logglobal.GetLoggerProvider()
+	if a.loggerProvider != nil {
+		lp = a.loggerProvider
+	}
 	a.obs = observer{
 		tracer: tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(version)),
+		elog:   lp.Logger(instrumentationName, log.WithInstrumentationVersion(version)),
 		log:    a.logger,
 	}
 	// The model chain is built once, here: first registered = outermost.

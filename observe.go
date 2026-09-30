@@ -8,6 +8,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/semconv/v1.41.0"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -100,7 +101,12 @@ func providerName(p string) string {
 // no goroutine, no lock, no state between calls.
 type observer struct {
 	tracer trace.Tracer
-	log    *slog.Logger
+	// elog is the Logs API logger the run's records go through: the
+	// LoggerProvider option's, or the global one, which delegates (an
+	// SDK registered after New is still picked up) and answers Enabled
+	// false until one does — so a program with no SDK pays nothing.
+	elog log.Logger
+	log  *slog.Logger
 }
 
 // logger resolves the destination once per line: the option's logger

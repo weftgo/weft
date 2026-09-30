@@ -980,3 +980,13 @@ func ExampleMetadata() {
 	// Output:
 	// tenant = acme session = s_01
 }
+
+// StripContent empties every content field of an event — what a
+// content-off destination receives. Identity survives; content does not.
+func ExampleStripContent() {
+	ev := weft.ToolFinish{RunID: "r", Seq: 3, CallID: "c1", Name: "lookup", Content: `{"status":"shipped"}`}
+	b, _ := json.Marshal(weft.StripContent(ev))
+	fmt.Println(string(b))
+	// Output:
+	// {"type":"tool_finish","run_id":"r","seq":3,"call_id":"c1","name":"lookup","content":"","is_error":false}
+}

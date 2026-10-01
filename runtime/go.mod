@@ -2,23 +2,16 @@ module github.com/weftgo/weft/runtime
 
 go 1.26.0
 
-// Root (v0.6.0) and thread (v0.8.0) are pinned to their releases
-// (resolved from the module proxy, no replace). obsdb, otel and studio
-// have no tag yet — they release together with this module (step 8's
-// release), so until then they resolve through the workspace with
-// directory replaces. The release step tags them and drops these lines.
-replace github.com/weftgo/weft/obsdb => ../obsdb
-
-replace github.com/weftgo/weft/otel => ../otel
-
-replace github.com/weftgo/weft/studio => ../studio
-
+// Every weft module is pinned to its released tag (resolved from the
+// module proxy, no replace — the two-phase rule, ADR 0005): root
+// v0.7.0 (ReplayPolicy), thread v0.8.1, obsdb v0.1.0, otel v0.1.0,
+// studio v0.3.0.
 require (
-	github.com/weftgo/weft v0.6.0
-	github.com/weftgo/weft/obsdb v0.0.0-00010101000000-000000000000
-	github.com/weftgo/weft/otel v0.0.0-00010101000000-000000000000
-	github.com/weftgo/weft/studio v0.0.0-00010101000000-000000000000
-	github.com/weftgo/weft/thread v0.8.0
+	github.com/weftgo/weft v0.7.0
+	github.com/weftgo/weft/obsdb v0.1.0
+	github.com/weftgo/weft/otel v0.1.0
+	github.com/weftgo/weft/studio v0.3.0
+	github.com/weftgo/weft/thread v0.8.1
 	go.opentelemetry.io/otel/sdk v1.46.0
 )
 

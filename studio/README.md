@@ -60,7 +60,7 @@ read-only, truncation/gap/stripped honesty, the raw JSON, a live tail,
 backend mints per page via `POST /api/panel-tokens`). No Studio
 answering: the panel removes itself silently. The artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 38,245 B raw / 11.5 KiB gzip;
+committed `studio/dist/panel/panel.js`, 63,475 B raw / 17.0 KiB gzip;
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 

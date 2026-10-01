@@ -680,14 +680,27 @@ wefttest/             scripted mock model + the conformance suite
 openai/               OpenAI Chat Completions (+ compatible servers)
 anthropic/            Anthropic Messages (thinking, signatures)
 google/               Gemini via genai
+thread/ (+ sqlite/)   sessions: the append-only conversation tree, durable Storage backends
 otel/                 the observability pipeline: destinations, content policies, heartbeats
 obsdb/                the observability database: model, DB interface, sqlite backend, obsdbtest
 obsdb/clickhouse/     the hosted backend (collector-compatible schema, materialized views)
 studio/               the Inspector on obsdb: UI + JSON API + OTLP ingest + live (web/ is its
                       Bun source, cmd/ the setup-B binary)
+runtime/              the playground's in-app side: the Studio link, the experiment executor
 examples/             runnable examples (otel, studio-local; per-adapter: <adapter>/example)
 docs/adr/             decision records for the contracts
 ```
+
+Each module directory tags independently (ADR 0005's monorepo rule).
+The step 8 release (2026-10-01) tags the observability-data set —
+root `v0.7.0`, `thread` `v0.8.1` (with `thread/sqlite` `v0.2.0`),
+`obsdb` `v0.1.0`, `obsdb/clickhouse` `v0.1.0`, `otel` `v0.1.0`,
+`studio` `v0.3.0`, `studio/cmd` `v0.1.0`, `runtime` `v0.1.0` — and
+every module resolves from its tag, no replaces. The whole
+recorder-and-inspector story is two lines: `defer otel.Install()()`
+and `studio.Handler(studio.DB(otel.LocalDB()))` (Recording runs and
+Inspecting runs above); `weft/runtime` adds the playground with one
+deferred `runtime.Install(...)` call.
 
 ## Development
 

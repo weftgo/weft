@@ -320,6 +320,10 @@ func (s *Session) endDroppedLocked() {
 // with are gone — they are not entries. ctx is detached from Open's
 // cancellation: a turn restored here must not die with the call that
 // loaded the session.
+//
+// A fork does not inherit its origin's queue: Fork settles the steers
+// it copied as dropped, and an accepted receipt on the copied path is
+// skipped here — the send it stands for belongs to the origin session.
 func (s *Session) resurrectSteers(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -330,9 +334,21 @@ func (s *Session) resurrectSteers(ctx context.Context) {
 			settled[r.Receipt] = true
 		}
 	}
-	for _, e := range s.order {
+	// The entries a Fork copied sit at and before the fork point in
+	// append order. An accepted receipt among them is the origin
+	// session's queued send, not this one's: the origin runs it.
+	inherited := -1
+	if p := s.header.Parent; p != nil && p.Entry != "" {
+		if i, ok := s.byID[p.Entry]; ok {
+			inherited = i
+		}
+	}
+	for i, e := range s.order {
 		r, ok := e.(ReceiptEntry)
 		if !ok || r.Msg == nil || settled[r.ID] {
+			continue
+		}
+		if r.Status == ReceiptAccepted && i <= inherited {
 			continue
 		}
 		switch r.Status {

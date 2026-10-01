@@ -585,3 +585,42 @@ func deadline(t *testing.T, d time.Duration) context.Context {
 	t.Cleanup(cancel)
 	return ctx
 }
+
+// A fork does not inherit its origin's queue: a queued send's accepted
+// receipt may sit on the path the fork copies, but the send is the
+// origin's to run — a reopened fork restores nothing.
+func TestForkDoesNotInheritQueuedSends(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	agent, _, started, rel := heldAgent("done", "the queued send's reply")
+	s, _ := thread.Create(ctx, st, agent)
+	t1, _ := s.Send(ctx, weft.User("long work"))
+	<-started
+	queued, err := s.Send(ctx, weft.User("queued on the origin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fork works mid-turn: the copied path ends at the accepted receipt.
+	f, err := s.Fork(ctx, s.Leaf())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	forked, err := thread.Open(ctx, st, f.ID(), weft.New(wefttest.Script()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q := forked.Queue(); len(q) != 0 {
+		t.Errorf("the reopened fork's Queue = %+v, want empty: the send is the origin's", q)
+	}
+	// The origin still runs it.
+	rel.open()
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := queued.Wait(); err != nil || res.Text() != "the queued send's reply" {
+		t.Fatalf("the origin's queued send: %v, %v", res, err)
+	}
+}

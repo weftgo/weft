@@ -14,12 +14,16 @@ import (
 )
 
 // The migrations are embedded SQL files applied in order on Open,
-// tracked in schema_migrations — the store's shape (goose's, without
-// the dependency), so a thread database and a run-record database age
-// the same way. A file whose recorded version is ahead of this
-// binary's highest fails Open with ErrNewerSchema: never run nothing
-// and say nothing (LangGraph's four burned checkpoint formats, ADR
-// 0010 §2.3, are the reason both modules refuse).
+// tracked in thread_migrations — the store's shape (goose's, without
+// the dependency) under this module's own name, so a thread database
+// and an observability database can share one SQLite file with each
+// module owning its versions table (ADR 0024, WEFT-OTEL-DATA-
+// ARCHITECTURE §3.4). A file written before the rename tracked its
+// versions under the old goose name; Open moves it across once
+// (renameLegacyMigrations). A file whose recorded version is ahead of
+// this binary's highest fails Open with ErrNewerSchema: never run
+// nothing and say nothing (LangGraph's four burned checkpoint
+// formats, ADR 0010 §2.3, are the reason both modules refuse).
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
@@ -58,7 +62,7 @@ func highestMigration() int {
 	return versions[len(versions)-1]
 }
 
-// ErrNewerSchema is returned by Open when the file's schema_migrations
+// ErrNewerSchema is returned by Open when the file's thread_migrations
 // is ahead of this binary's highest migration: a database written by a
 // newer weft fails loudly instead of running nothing and saying
 // nothing — the store's rule (its ErrNewerSchema), verbatim, because
@@ -119,16 +123,52 @@ func isConstraint(err error) bool {
 	return serr.Code()&0xff == 19
 }
 
+// renameLegacyMigrations moves the versions table of a file written
+// before the rename onto the name this module owns, so a thread
+// database can share a file with the local sink — each module owning
+// its migrations table (ADR 0024, WEFT-OTEL-DATA-ARCHITECTURE §3.4).
+// One statement, and only when this is a thread file that still tracks
+// under the old name: the sessions table must exist (a store database,
+// or a fresh file, is never renamed — a store keeps its own tracking
+// table whatever tables sit beside it) and the new name must not (a
+// file that already renamed does not carry a second table under the
+// old name for us). A file with sessions but no legacy table at all is
+// left alone; the migration pass below says what is missing from it.
+func renameLegacyMigrations(db *sql.DB) error {
+	var hasSessions, renamed bool
+	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions'),
+		EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='thread_migrations')`).Scan(&hasSessions, &renamed); err != nil {
+		return err
+	}
+	if !hasSessions || renamed {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE schema_migrations RENAME TO thread_migrations`); err != nil {
+		var serr *msqlite.Error
+		if errors.As(err, &serr) && serr.Code()&0xff == 1 {
+			// SQLITE_ERROR, "no such table": nothing to rename. Only a
+			// hand-built file reaches here; the pass below fails loudly
+			// on whatever it is missing.
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 // migrate applies pending migrations, each in its own transaction, and
 // refuses a schema ahead of this binary.
 func migrate(db *sql.DB) error {
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+	if err := renameLegacyMigrations(db); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS thread_migrations (
 		version    INTEGER PRIMARY KEY,
 		applied_at TEXT NOT NULL)`); err != nil {
 		return err
 	}
 	var current sql.NullInt64
-	if err := db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&current); err != nil {
+	if err := db.QueryRow(`SELECT MAX(version) FROM thread_migrations`).Scan(&current); err != nil {
 		return err
 	}
 	if current.Valid && int(current.Int64) > highestMigration() {
@@ -158,7 +198,7 @@ func migrate(db *sql.DB) error {
 		// fresh file). The loser skips what the winner applied instead
 		// of failing on a table or primary key that now exists.
 		var applied sql.NullInt64
-		if err := tx.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&applied); err != nil {
+		if err := tx.QueryRow(`SELECT MAX(version) FROM thread_migrations`).Scan(&applied); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
@@ -170,7 +210,7 @@ func migrate(db *sql.DB) error {
 			_ = tx.Rollback()
 			return fmt.Errorf("sqlite: migration %s: %w", migrations[v], err)
 		}
-		if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
+		if _, err := tx.Exec(`INSERT INTO thread_migrations (version, applied_at) VALUES (?, ?)`,
 			v, time.Now().UTC().Format(time.RFC3339)); err != nil {
 			_ = tx.Rollback()
 			return err

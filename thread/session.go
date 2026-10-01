@@ -109,6 +109,20 @@ func (o metaOption) applySession(c *sessionConfig) {
 // merged over earlier ones; SetInfo is the later-life edit.
 func WithMeta(meta map[string]string) SessionOption { return metaOption(meta) }
 
+// PublicID sets the session's public id: an opaque, browser-safe
+// handle stamped on every run as weft.public_id
+// (WEFT-OTEL-DATA-ARCHITECTURE §5). It is WithMeta sugar —
+// create-time only, like every WithMeta (session.go:107-110) — so it
+// lands in the header, which is what every backend's List Meta filter
+// matches (memory.go:157, jsonl/jsonl.go:313, sqlite/sqlite.go:454:
+// header meta only; Load returns the header as is). runMetadata reads
+// Session.Meta() (the header overlaid with every InfoEntry's meta, in
+// order) so a later SetInfo can add other keys, but never rotates the
+// public id.
+func PublicID(id string) SessionOption {
+	return WithMeta(map[string]string{"weft.public_id": id})
+}
+
 func IDs(id func() string) SessionOption {
 	if id == nil {
 		return nil // an ignored option, the constructor convention

@@ -542,6 +542,32 @@ func ExampleReRunOnOverflow() {
 	// recovered after compaction
 }
 
+// PublicID sets the session's public id: an opaque, browser-safe
+// handle for the session (WEFT-OTEL-DATA-ARCHITECTURE §5), stamped on
+// every run as weft.public_id — beside the session id and turn number
+// the session adds — and read back, like every metadata pair, with
+// weft.MetadataFromContext inside the run.
+func ExamplePublicID() {
+	ctx := context.Background()
+	var public, session, turn string
+	agent := weft.New(wefttest.Script(wefttest.Say("a reply")),
+		weft.Tap(func(ctx context.Context, ev weft.Event) {
+			if _, ok := ev.(weft.RunStart); ok {
+				md := weft.MetadataFromContext(ctx)
+				public, session, turn = md["weft.public_id"], md["weft.session.id"], md["weft.turn"]
+			}
+		}))
+	s, _ := thread.Create(ctx, thread.Memory(), agent, thread.PublicID("support-42"))
+	t, _ := s.Send(ctx, weft.User("hello"))
+	if _, err := t.Wait(); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(public, session == s.ID(), turn)
+	// Output:
+	// support-42 true 1
+}
+
 // Query filters the session list: metadata pairs match the header
 // exactly, and the title search matches the session's current title —
 // the last info entry's — case-insensitively as a substring. Total

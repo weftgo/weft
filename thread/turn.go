@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"reflect"
+	"strconv"
 	"sync"
 	"time"
 
@@ -272,6 +273,7 @@ func (s *Session) newTurnLocked() *Turn {
 	t := &Turn{
 		id:    s.mintIDLocked(),
 		runID: fmt.Sprintf("%s-t%d", s.header.ID, s.turnSeq),
+		turn:  s.turnSeq,
 	}
 	t.cond = sync.NewCond(&t.mu)
 	return t
@@ -649,6 +651,11 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 		// the run emits is appended as it joins, so a crash mid-turn
 		// loses nothing emitted.
 		runOpts = append(runOpts, s.observer(persist, sp))
+		// The session's identity rides every run (ADR 0024 S5), appended
+		// after the caller's options and before the transcript — a later
+		// weft.Metadata wins (S1.1), so the session's keys win over a
+		// caller's colliding thread.RunOptions(weft.Metadata(...)).
+		runOpts = append(runOpts, weft.Metadata(s.runMetadata(t)))
 		runOpts = append(runOpts, weft.Messages(input...), weft.RunID(t.RunID()))
 		run := s.agent.Stream(withSession(ctx, s), runOpts...)
 		for ev, serr := range run.Events() {
@@ -689,7 +696,7 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 				s.steerQueue = append(requeue, s.steerQueue...)
 				s.handed = nil
 				s.turnSeq++
-				t.remintRunID(fmt.Sprintf("%s-t%d", s.header.ID, s.turnSeq))
+				t.remintRunID(fmt.Sprintf("%s-t%d", s.header.ID, s.turnSeq), s.turnSeq)
 				s.mu.Unlock()
 				continue
 			} else {
@@ -808,6 +815,35 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 	s.retireInFlightLocked(t)
 	s.mu.Unlock()
 	t.finish(res, err)
+}
+
+// runMetadata is the identity every run of this session carries
+// (ADR 0024 S5): the session id and the turn number always, the public
+// id when the session has one, and the fork origin or pool lineage
+// when the header names one. The public id reads Session.Meta — the
+// header overlaid with every InfoEntry's meta, in order — so a later
+// SetInfo can add other keys; the header itself is never rewritten,
+// which is why the create-time public id is what List's Meta filter
+// matches. Caller-side, a run built by hand (not through a session)
+// carries none of this: the session is the only minter.
+func (s *Session) runMetadata(t *Turn) map[string]string {
+	md := map[string]string{
+		"weft.session.id": s.header.ID,
+		"weft.turn":       strconv.Itoa(t.turn), // the turnSeq the run id was minted from
+	}
+	if v := s.Meta()["weft.public_id"]; v != "" { // header ⊕ every InfoEntry
+		md["weft.public_id"] = v
+	}
+	if p := s.header.Parent; p != nil { // a fork
+		md["weft.session.forked_from"] = p.Session + "#" + p.Entry
+	}
+	if l := s.header.Lineage; l != nil { // a pool child
+		md["weft.session.parent"] = l.Session
+		if l.Call != "" {
+			md["weft.session.parent_call"] = l.Call
+		}
+	}
+	return md
 }
 
 // recordTurnEnd closes the turn: it appends the run's new messages
@@ -1004,6 +1040,13 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, res *weft.RunResul
 type Turn struct {
 	id    string
 	runID string
+	// turn is the turn number the run id was minted from — the
+	// turnSeq counter at mint time, restamped beside the id when the
+	// overflow re-run remints it — so the run's metadata can name the
+	// turn the store records belong to (weft.turn, ADR 0024 S5).
+	// Written under s.mu at mint, under t.mu at remint; read by the
+	// runner goroutine alone (runMetadata).
+	turn int
 	// resume marks a resume run: no prompt entry, and the turn entry
 	// reuses the receipt id minted when the resume was armed.
 	resume bool
@@ -1057,10 +1100,12 @@ func (t *Turn) RunID() string {
 // remintRunID re-ids the turn for its overflow re-run: a fresh
 // <session>-t<n>, spent from the same counter, so the re-run's store
 // records stay addressable (the failed attempt's id is in its run
-// records).
-func (t *Turn) remintRunID(id string) {
+// records). turn is the new number the id was minted from, set beside
+// it, so the re-run's metadata names the turn it now is.
+func (t *Turn) remintRunID(id string, turn int) {
 	t.mu.Lock()
 	t.runID = id
+	t.turn = turn
 	t.mu.Unlock()
 }
 

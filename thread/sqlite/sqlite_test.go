@@ -130,9 +130,10 @@ func TestReopenReadsWhatWasWritten(t *testing.T) {
 	}
 }
 
-// A schema_migrations ahead of this binary fails Open with
-// ErrNewerSchema: a database written by a newer weft never runs with
-// nothing said (the store's rule, shared here).
+// A thread file whose versions table (schema_migrations, the name a
+// pre-rename binary wrote; thread_migrations after) is ahead of this
+// binary fails Open with ErrNewerSchema: a database written by a newer
+// weft never runs with nothing said (the store's rule, shared here).
 func TestNewerSchemaIsRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "newer.db")
 	db, err := sql.Open("sqlite", "file:"+path)
@@ -140,7 +141,8 @@ func TestNewerSchemaIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(
-		`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+		`CREATE TABLE sessions (id TEXT PRIMARY KEY, created TEXT NOT NULL, header TEXT NOT NULL);
+		 CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 		 INSERT INTO schema_migrations (version, applied_at) VALUES (999, '2030-01-01T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}

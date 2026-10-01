@@ -1,5 +1,30 @@
 ## Unreleased
 
+### otel
+
+- `weftVersion()` reports v0.7.0 — the release step that owns the bump
+  missed it (its own comment says so), so every span carried
+  `weft.version=v0.6.0` past the release. The pushed `otel/v0.1.0` tag
+  carries the stale string (owner: consider a patch tag).
+
+### runtime
+
+- Registration reports `weft_version: v0.7.0` — the same missed bump
+  as otel's. The pushed `runtime/v0.1.0` tag carries the stale string
+  (owner: consider a patch tag).
+
+### CI / repo
+
+- ci.yml: the `apidiff.sh "" store` step is gone (the store module was
+  deleted; the script exits 2 for any module but root and thread, so
+  the first CI run after push would have failed), and the gated
+  ClickHouse job from `obsdb/clickhouse/README.md` runs the
+  conformance suite (plus studio/cmd's hosted-backend test) against a
+  `clickhouse-server` service container.
+- `studio/web/dist-release/` — where `make studio-panel-asset` stages
+  the release asset — is gitignored, so a staged release no longer
+  shows as an untracked stray.
+
 ### studio/cmd
 
 - The dev token the banner prints is the token the API wall checks:

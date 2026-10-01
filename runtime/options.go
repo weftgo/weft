@@ -171,4 +171,4 @@ func Install(opts ...Option) (shutdown func()) {
 // weftVersion is the root module's version this runtime reports at
 // registration. Hard-coded like otel's own weftVersion (the root
 // exports no Version); the release step bumps it with the tag.
-func weftVersion() string { return "v0.6.0" }
+func weftVersion() string { return "v0.7.0" }

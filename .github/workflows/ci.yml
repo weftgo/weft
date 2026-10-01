@@ -85,13 +85,39 @@ jobs:
         run: scripts/apidiff-selftest.sh
       - name: apidiff (root module vs last tag)
         run: scripts/apidiff.sh
-      # The store module joined the gate at its second tag, store/v0.1.1
-      # (the store plan §3.1); adapters get their own step when they tag.
-      - name: apidiff (store module vs last store tag)
-        run: scripts/apidiff.sh "" store
-
       - name: apidiff (thread module vs last thread tag)
         run: scripts/apidiff.sh "" thread
+
+  # The gated ClickHouse suite (obsdb/clickhouse's README "CI job
+  # (service container)" block): the conformance table and the
+  # collector-shape insert test need a server; each test creates and
+  # drops its own database. The same DSN also un-gates studio/cmd's
+  # hosted-backend test.
+  clickhouse:
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8-alpine
+        env:
+          CLICKHOUSE_PASSWORD: weft
+        ports:
+          - 9000:9000
+        ulimits:
+          nofile: 262144:262144
+    env:
+      WEFT_CLICKHOUSE_DSN: clickhouse://default:weft@127.0.0.1:9000/default
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+      - name: test (obsdb/clickhouse, gated suite)
+        run: |
+          cd obsdb/clickhouse && go test -race ./...
+      - name: test (studio/cmd, gated --db clickhouse:// test)
+        run: |
+          cd studio/cmd && go test -race -run TestNewServerClickhouse ./...
 
   # The offline gate (ADR 0013's kill-switch clause): the whole
   # workspace stays green under WEFT_MODEL_REQUESTS=deny — suites that

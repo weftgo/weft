@@ -267,12 +267,15 @@ func TestBuildResourcePrecedence(t *testing.T) {
 		t.Errorf("(b) service.name = %q, want the Resource option's", got)
 	}
 
-	// (d) weft.version rides on every shape.
-	for name, r := range map[string]*sdkresource.Resource{
-		"base": base, "service": svc, "resource": top,
-	} {
-		if got := resAttr(r, "weft.version"); got != "v0.6.0" {
-			t.Errorf("(d) %s: weft.version = %q, want v0.6.0", name, got)
+	// (d) weft.version rides on every shape. The literal is the pin:
+	// the release step bumps weftVersion() with the tag and this line
+	// must follow it (the 0.7.0 release missed the bump — the audits'
+	// P0-3).
+		for name, r := range map[string]*sdkresource.Resource{
+			"base": base, "service": svc, "resource": top,
+		} {
+		if got := resAttr(r, "weft.version"); got != "v0.7.0" {
+			t.Errorf("(d) %s: weft.version = %q, want v0.7.0", name, got)
 		}
 	}
 }

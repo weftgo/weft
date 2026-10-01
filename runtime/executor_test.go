@@ -48,7 +48,9 @@ func TestRegistryRegistration(t *testing.T) {
 	if payload.Host == "" || payload.Pid == 0 {
 		t.Errorf("host/pid empty: %q/%d", payload.Host, payload.Pid)
 	}
-	if payload.WeftVersion != "v0.6.0" {
+	// The literal is the pin: the release step bumps weftVersion()
+	// with the tag and this line must follow it (0.7.0 missed it).
+	if payload.WeftVersion != "v0.7.0" {
 		t.Errorf("weft_version = %q", payload.WeftVersion)
 	}
 	if payload.Budget != (budgetWire{MaxTokensPerExperiment: 200_000, MaxRunsPerExperiment: 60}) {

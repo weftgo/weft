@@ -203,7 +203,9 @@ func TestLinkRegisterCommandAckRun(t *testing.T) {
 	if !strings.HasPrefix(reg.RuntimeID, "rt_") {
 		t.Errorf("runtime_id = %q, want an rt_ prefix", reg.RuntimeID)
 	}
-	if reg.WeftVersion != "v0.6.0" || reg.Pid == 0 || reg.Host == "" {
+	// v0.7.0 is the pin: this line follows weftVersion() at every
+	// release bump (0.7.0 itself missed it).
+	if reg.WeftVersion != "v0.7.0" || reg.Pid == 0 || reg.Host == "" {
 		t.Errorf("registration identity incomplete: %+v", reg)
 	}
 	if len(reg.Agents) != 1 || reg.Agents[0].Name != "acme-support" {

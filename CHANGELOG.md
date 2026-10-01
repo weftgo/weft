@@ -313,7 +313,7 @@ dates at the step 8 release.
 - The devtools panel `<weft-devtools>` (WEFT-DEVTOOLS.md §5): a
   self-contained custom element built as a separate Vite library-mode
   artifact (`studio/web/vite.panel.config.ts`, committed at
-  `studio/dist/panel/panel.js`, 38,245 B raw / 11.5 KiB gzip — budget
+  `studio/dist/panel/panel.js`, 63,475 B raw / 17.0 KiB gzip — budget
   80), sharing `lib/api.ts`, `lib/live.ts`, `lib/events.ts` and
   `lib/format.ts` with the Studio UI (V6, no React in the bundle).
   Rung 1 (§8.1): the header, the turn list scoped by public id with
@@ -410,6 +410,17 @@ dates at the step 8 release.
 - The panel changes no public Go API beyond the bundle route:
   `panel.go` registers through the step-6 route-group hook; the panel
   token endpoints and CORS defaults were already step 6's.
+
+#### Release asset
+
+- `panel-v0.3.0.js` (sha256
+  `29652795bc9ab349838bcad951b492af610363c5c1f8a6059c370acf78d672e4`
+  beside it) — the devtools panel for non-Go backends; serve it from
+  your app and add `<script type="module"
+  src="/static/panel-v0.3.0.js" data-endpoint=… data-token=…
+  data-public-id=…></script>`. Staged by `make studio-panel-asset`
+  (RELEASE_DIR, default `dist-release` relative to `studio/web`);
+  byte-identical to the committed `studio/dist/panel/panel.js`.
 
 ### studio/cmd (new module)
 

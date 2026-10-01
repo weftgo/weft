@@ -5,6 +5,8 @@
 package obsdbtest
 
 import (
+	"encoding/json"
+
 	"context"
 
 	"errors"
@@ -30,6 +32,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("HeartbeatRule", heartbeatRule(open))
 	t.Run("NonWeft", nonWeft(open))
 	t.Run("NotFound", notFound(open))
+	t.Run("Experiments", experiments(open))
 }
 
 func ctx() context.Context { return context.Background() }
@@ -636,5 +639,107 @@ func notFound(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if _, err := db.RunSpans(ctx(), "nope"); !errors.Is(err, obsdb.ErrNotFound) {
 			t.Errorf("RunSpans: %v", err)
 		}
+	}
+}
+
+// experiments pins the saved-experiment rows (WEFT-PLAYGROUND §10.4,
+// PQ4) every backend must serve: an upsert keeps the id and refreshes
+// the definition, the list reads newest-first, a missing id is
+// ErrNotFound, and RunQuery.ExperimentID selects the runs the
+// experiment's commands labelled.
+func experiments(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
+	return func(t *testing.T) {
+		ctx := context.Background()
+		db := open(t)
+		defer func() { _ = db.Close() }()
+
+		e := obsdb.Experiment{
+			ID: "exp_1", Name: "tracking-link prompt", Agent: "acme-support",
+			Variants: []obsdb.ExperimentVariant{
+				{Key: "A", Overrides: json.RawMessage(`{}`)},
+				{Key: "B", Overrides: json.RawMessage(`{"instructions":"new"}`)},
+			},
+			Inputs: []obsdb.ExperimentInput{
+				{Key: "1", SourceRunID: "s_1-t1"},
+				{Key: "2", Text: "angry user"},
+			},
+		}
+		if err := db.SaveExperiment(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+		e.Name = "tracking-link prompt v2"
+		if err := db.SaveExperiment(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := db.Experiment(ctx, "exp_1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Name != "tracking-link prompt v2" || got.Agent != "acme-support" {
+			t.Errorf("experiment = %+v, want the refreshed definition", got)
+		}
+		if len(got.Variants) != 2 || got.Variants[1].Key != "B" || string(got.Variants[1].Overrides) != `{"instructions":"new"}` {
+			t.Errorf("variants = %+v, want the wire shapes verbatim", got.Variants)
+		}
+		if len(got.Inputs) != 2 || got.Inputs[1].Text != "angry user" {
+			t.Errorf("inputs = %+v", got.Inputs)
+		}
+
+		// An older experiment (saved before exp_1's updates) sorts
+		// behind it.
+		older := obsdb.Experiment{ID: "exp_0", Name: "older"}
+		if err := db.SaveExperiment(ctx, older); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SaveExperiment(ctx, older); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SaveExperiment(ctx, e); err != nil { // exp_1's refresh is newest
+			t.Fatal(err)
+		}
+		list, err := db.Experiments(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) != 2 || list[0].ID != "exp_1" {
+			t.Errorf("list = %+v, want the newest update first", list)
+		}
+
+		if _, err := db.Experiment(ctx, "exp_nope"); !errors.Is(err, obsdb.ErrNotFound) {
+			t.Errorf("missing experiment err = %v, want ErrNotFound", err)
+		}
+
+		// The runs of one experiment: labelled with its id, excluded
+		// from the others'.
+		writeRun(ctx, t, db, "r_exp1", "exp_1")
+		writeRun(ctx, t, db, "r_exp2", "exp_2")
+		page, err := db.Runs(ctx, obsdb.RunQuery{ExperimentID: "exp_1", ParentRunID: "*"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Runs) != 1 || page.Runs[0].ID != "r_exp1" {
+			t.Errorf("experiment runs = %+v, want exactly r_exp1", page.Runs)
+		}
+		if page.Runs[0].ExperimentID != "exp_1" || !page.Runs[0].Playground {
+			t.Errorf("run row = %+v, want the experiment id and the playground flag", page.Runs[0])
+		}
+	}
+}
+
+// writeRun lands one minimal playground run row labelled with the
+// experiment, through the ordinary write path (the record helper's
+// shapes; the extra attrs carry the experiment identity the row keeps).
+func writeRun(ctx context.Context, t *testing.T, db obsdb.DB, runID, experiment string) {
+	t.Helper()
+	extra := map[string]any{
+		"weft.playground":    true,
+		"weft.experiment.id": experiment,
+	}
+	start := record(runID, "event", "run_start", 0, `{"type":"run_start","id":"`+runID+`"}`, extra)
+	finish := record(runID, "event", "run_finish", 1, `{"type":"run_finish","run_id":"`+runID+`"}`, extra)
+	finish.Time = at(2 * time.Second)
+	if err := db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{start, finish}}); err != nil {
+		t.Fatal(err)
 	}
 }

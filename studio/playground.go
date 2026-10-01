@@ -62,6 +62,9 @@ func registerPlayground(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/playground/commands/{id}", s.servePlaygroundCommand(rs))
 	mux.HandleFunc("POST /api/runs/{id}/approvals", s.servePlaygroundApproval(rs))
 	mux.HandleFunc("POST /api/playground/fixtures", s.servePlaygroundFixture)
+	mux.HandleFunc("GET /api/experiments", s.serveExperiments)
+	mux.HandleFunc("POST /api/experiments", s.serveExperiments)
+	mux.HandleFunc("GET /api/experiments/{id}", s.serveExperiment)
 	// The runtime link's own block (§10.3), as its own capability.
 	s.addGroup(routeGroup{
 		name:       "runtimes",

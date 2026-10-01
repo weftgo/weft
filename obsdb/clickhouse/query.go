@@ -123,6 +123,10 @@ func runsInner(q obsdb.RunQuery) (string, []any) {
 		conds = append(conds, "Playground = ?")
 		args = append(args, *q.Playground)
 	}
+	if q.ExperimentID != "" {
+		conds = append(conds, "ExperimentID = ?")
+		args = append(args, q.ExperimentID)
+	}
 	for k, v := range q.Meta {
 		// Meta holds the caller metadata (contract keys filtered at the
 		// view); a subset match asks for the key's exact string.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -982,5 +983,97 @@ func TestPlaygroundForkMode(t *testing.T) {
 	}
 	if want := fmt.Sprintf("%s-t%d", session, n+1); st2.RunID != want {
 		t.Errorf("continuation run id = %q, want %q (the same fork's next turn)", st2.RunID, want)
+	}
+}
+
+// TestPlaygroundMatrixBudget is §10.6's P5 gate: a 3×10 matrix runs
+// within its budget cap (30 commands of one experiment, all
+// finished), and the 31st run of that experiment is refused with
+// budget_exceeded — the cap counts the experiment, never the app's
+// own runs.
+func TestPlaygroundMatrixBudget(t *testing.T) {
+	e := newE2E(t)
+	// A model that never exhausts: every call answers with a short
+	// text (the matrix's cells are cheap).
+	model := countingEchoModel{}
+	e.agent = weft.New(&model, weft.Name("acme-support"),
+		weft.Instructions("You are Acme's support agent."),
+		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()))
+	runID := e.appTurn(t, "hello")
+	e.waitTranscript(t, runID, "About")
+
+	shutdown := runtime.Install(
+		runtime.Studio(e.ts.URL, ""),
+		runtime.Agents(e.agent),
+		runtime.Limits(runtime.Budget{MaxRunsPerExperiment: 30}),
+		runtime.Enabled(true),
+	)
+	defer shutdown()
+	e.waitRuntime(t)
+	_, rtJSON := e.api(t, http.MethodGet, "/api/runtimes", "")
+	var runtimes struct {
+		Runtimes []struct {
+			ID string `json:"id"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal([]byte(rtJSON), &runtimes); err != nil || len(runtimes.Runtimes) == 0 {
+		t.Fatalf("runtimes: %v %s", err, rtJSON)
+	}
+	rt := runtimes.Runtimes[0].ID
+
+	// 3 variants × 10 inputs = 30 commands under exp_matrix.
+	cell := func(v, i int) string {
+		return fmt.Sprintf(`{
+		  "command_id": "cmd_m_%d_%d", "runtime": %q, "agent": "acme-support",
+		  "input": "cell %d-%d",
+		  "engine": "live", "side_effects": "substitute", "thread": "ephemeral",
+		  "experiment_id": "exp_matrix"
+		}`, v, i, rt, v, i)
+	}
+	for v := 1; v <= 3; v++ {
+		for i := 1; i <= 10; i++ {
+			if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", cell(v, i)); code != http.StatusAccepted {
+				t.Fatalf("cell %d-%d = %d %s", v, i, code, resp)
+			}
+		}
+	}
+	for v := 1; v <= 3; v++ {
+		for i := 1; i <= 10; i++ {
+			row := e.waitCommand(t, fmt.Sprintf("cmd_m_%d_%d", v, i), "finished")
+			if strings.Contains(row, `"state":"rejected"`) || strings.Contains(row, `"state":"lost"`) {
+				t.Fatalf("cell %d-%d inside the cap: %s", v, i, row)
+			}
+		}
+	}
+
+	// The 31st: refused with budget_exceeded.
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", cell(4, 1)); code != http.StatusAccepted {
+		t.Fatalf("the 31st command = %d %s", code, resp)
+	}
+	row := e.waitCommand(t, "cmd_m_4_1", "rejected")
+	if !strings.Contains(row, "budget_exceeded") {
+		t.Errorf("the 31st row = %s, want budget_exceeded", row)
+	}
+}
+
+// countingEchoModel answers every call with a deterministic line — a
+// matrix's cheap cell.
+type countingEchoModel struct {
+	n int
+}
+
+func (m *countingEchoModel) Info() weft.ModelInfo {
+	return weft.ModelInfo{Provider: "wefttest", Name: "echo"}
+}
+
+func (m *countingEchoModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	m.n++
+	return func(yield func(weft.ModelEvent, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(nil, err)
+			return
+		}
+		yield(weft.ModelTextDelta{Text: fmt.Sprintf("About cell %d.", m.n)}, nil)
+		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
 	}
 }

@@ -87,6 +87,10 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		conds = append(conds, "session_id = ?")
 		args = append(args, q.SessionID)
 	}
+	if q.ExperimentID != "" {
+		conds = append(conds, "experiment_id = ?")
+		args = append(args, q.ExperimentID)
+	}
 	if q.PublicID != "" {
 		conds = append(conds, "public_id = ?")
 		args = append(args, q.PublicID)

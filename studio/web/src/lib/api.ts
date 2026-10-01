@@ -619,6 +619,33 @@ export function postFixtures(runID: string, tools: string[]) {
   )
 }
 
+/** One saved experiment (§10.4): the definition; the detail adds the
+ * runs grouped under it. */
+export interface ExperimentRow {
+  id: string
+  name: string
+  agent: string
+  variants: { key: string; overrides?: unknown }[]
+  inputs: { key: string; source_run_id?: string; text?: string }[]
+  created?: string
+  updated?: string
+  runs?: RunRow[]
+}
+
+/** GET /api/experiments — the history. */
+export function experimentsQuery() {
+  return queryOptions({
+    queryKey: ["experiments"],
+    staleTime: 10_000,
+    queryFn: () => get<{ experiments: ExperimentRow[] }>("experiments"),
+  })
+}
+
+/** POST /api/experiments — create or update a definition. */
+export function postExperiment(body: ExperimentRow) {
+  return post<ExperimentRow>("experiments", body)
+}
+
 /** POST /api/runs/{id}/approvals: a parked runtime-started run's
  * continue / skip / resolve (ADR 0007's verbs, WEFT-DEVTOOLS §8.2). */
 export function postApproval(

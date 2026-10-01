@@ -10,13 +10,15 @@
 // The same drawer fields as the panel (prompt, tools off, model,
 // thinking, input), the same POST /api/playground/runs, the same live
 // result — V6: one API, two clients.
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useSearch } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react"
 
 import {
   apiBase,
   asTranscript,
+  experimentsQuery,
+  postExperiment,
   postFixtures,
   fetchCommand,
   postPlaygroundRun,
@@ -143,6 +145,8 @@ function Playground() {
   const [active, setActive] = useState(0)
   const variant = variants[active] ?? variants[0]
   const [error, setError] = useState("")
+  /** The E9 matrix: the cells' experiments, keyed variant×input. */
+  const [cells, setCells] = useState<Record<string, Experiment>>({})
 
   const [sourceRunID, setSourceRunID] = useState(search.run ?? "")
   const [fromStep, setFromStep] = useState(search.step ?? 0)
@@ -197,6 +201,80 @@ function Playground() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
+  }
+
+  /** runMatrix is E9's verb: save the definition, then one command
+   * per variant × input cell, all under the experiment's id (the
+   * budget caps the whole matrix — §6 rule 6). */
+  const runMatrix = async (inputs: { key: string; text: string }[], experimentID: string) => {
+    setError("")
+    if (!firstRuntime || !agent) return
+    const next: Record<string, Experiment> = {}
+    try {
+      await postExperiment({
+        id: experimentID,
+        name: experimentID,
+        agent: agent.name,
+        variants: variants.map((v) => ({
+          key: v.key,
+          overrides: {
+            ...(v.instructions && v.instructions !== registered
+              ? { instructions: v.instructions }
+              : {}),
+            ...(v.toolsOff.size
+              ? { tools_enabled: agent.tools.map((t) => t.name).filter((n) => !v.toolsOff.has(n)) }
+              : {}),
+            ...(v.model ? { model: v.model } : {}),
+            ...(v.thinking ? { thinking: v.thinking } : {}),
+          },
+        })),
+        inputs: inputs.map((i) => ({
+          key: i.key,
+          ...(sourceRunID ? { source_run_id: sourceRunID } : {}),
+          text: i.text,
+        })),
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      return
+    }
+    for (const v of variants) {
+      for (const i of inputs) {
+        const overrides: NonNullable<PlaygroundRunBody["overrides"]> = {}
+        if (v.instructions && v.instructions !== registered)
+          overrides.instructions = v.instructions
+        const enabled = (agent?.tools ?? []).map((t) => t.name).filter((n) => !v.toolsOff.has(n))
+        if (v.toolsOff.size) overrides.tools_enabled = enabled
+        if (v.model) overrides.model = v.model
+        if (v.thinking) overrides.thinking = v.thinking
+        try {
+          const out = await postPlaygroundRun({
+            runtime: firstRuntime.id,
+            agent: agent.name,
+            source: sourceRunID ? { run_id: sourceRunID, from_step: 0 } : null,
+            input: i.text || undefined,
+            overrides,
+            engine: v.engine,
+            side_effects: v.sideEffects,
+            thread: "ephemeral",
+            experiment_id: experimentID,
+          })
+          next[`${v.key}\u0000${i.key}`] = {
+            commandID: out.command_id,
+            state: "queued",
+            runID: "",
+            error: null,
+            label: `${v.key}×${i.key}`,
+            row: null,
+            events: [],
+          }
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e))
+          return
+        }
+      }
+    }
+    setCells((cur) => ({ ...cur, ...next }))
   }
 
   useCommandTracking(variant?.result ?? null, (upd) =>
@@ -418,13 +496,26 @@ function Playground() {
                   b={variants.filter((v) => v.result)[1]!}
                 />
               )}
+              <Matrix
+                variants={variants}
+                runMatrix={runMatrix}
+                cells={cells}
+                setCells={setCells}
+                sourceRunID={sourceRunID}
+              />
+              <History />
             </>
           ) : (
-            <p className="text-xs text-muted-foreground">
-              Configure a variant and run it. The run executes in your app through the
-              runtime link; the result streams here (WEFT-PLAYGROUND §5.2). Add variants
-              to compare them side by side on text, tool calls, tokens and latency.
-            </p>
+            <>
+              <Matrix
+                variants={variants}
+                runMatrix={runMatrix}
+                cells={cells}
+                setCells={setCells}
+                sourceRunID={sourceRunID}
+              />
+              <History />
+            </>
           )}
         </section>
       </div>
@@ -803,6 +894,179 @@ function VariantDiff({ a, b }: { a: Variant; b: Variant }) {
             {r.text}
           </div>
         ))}
+    </div>
+  )
+}
+
+/** Matrix is E9's variants × inputs runner: an experiment name, a row
+ * per input, one "Run matrix" that saves the definition and issues
+ * every cell under its id. The cells' lifecycle states render in the
+ * grid; the budget cap (§6 rule 6) is the runtime's — a breach refuses
+ * the next command of the experiment.
+ */
+function Matrix({
+  variants,
+  runMatrix,
+  cells,
+  setCells,
+  sourceRunID,
+}: {
+  variants: Variant[]
+  runMatrix: (inputs: { key: string; text: string }[], experimentID: string) => Promise<void>
+  cells: Record<string, Experiment>
+  setCells: React.Dispatch<React.SetStateAction<Record<string, Experiment>>>
+  sourceRunID: string
+}) {
+  const [inputs, setInputs] = useState<{ key: string; text: string }[]>([
+    { key: "1", text: "" },
+  ])
+  const [name, setName] = useState("")
+  const qc = useQueryClient()
+  const experimentID = name || `exp_${new Date().toISOString().slice(0, 16)}`
+
+  // Poll the cells' lifecycle while any is queued or accepted.
+  useEffect(() => {
+    const pending = Object.values(cells).filter((c) => c.state === "queued" || c.state === "accepted")
+    if (!pending.length) return
+    const timer = setTimeout(async () => {
+      for (const c of pending) {
+        try {
+          const st = await fetchCommand(c.commandID)
+          setCells((cur) => ({
+            ...cur,
+            [Object.keys(cur).find((k) => cur[k].commandID === c.commandID) ?? ""]: {
+              ...c,
+              state: st.state,
+              runID: st.run_id || c.runID,
+              error: st.error,
+            },
+          }))
+        } catch {
+          // the next tick retries
+        }
+      }
+      void qc.invalidateQueries({ queryKey: ["experiments"] })
+    }, 800)
+    return () => clearTimeout(timer)
+  }, [cells, qc, setCells])
+
+  return (
+    <div className="rounded border">
+      <div className="border-b px-3 py-2 text-xs text-muted-foreground">
+        Experiment matrix · {variants.length} variants × {inputs.length} inputs
+        {sourceRunID ? " · over the source run" : ""}
+      </div>
+      <div className="space-y-2 p-3 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="rounded border bg-transparent px-2 py-1"
+            placeholder="experiment name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <code className="text-faint">{experimentID}</code>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void runMatrix(inputs.filter((i) => i.text || !sourceRunID), experimentID)}
+          >
+            Run matrix
+          </Button>
+        </div>
+        {inputs.map((inp, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <span className="w-6 text-faint">{inp.key}</span>
+            <input
+              className="flex-1 rounded border bg-transparent px-2 py-1"
+              placeholder={sourceRunID ? "the input's text (over the source run)" : "the input"}
+              value={inp.text}
+              onChange={(e) =>
+                setInputs((cur) =>
+                  cur.map((x, j) => (j === i ? { ...x, text: e.target.value } : x))
+                )
+              }
+            />
+            {inputs.length > 1 && (
+              <button
+                className="text-faint hover:underline"
+                onClick={() => setInputs((cur) => cur.filter((_, j) => j !== i))}
+              >
+                −
+              </button>
+            )}
+          </div>
+        ))}
+        <button
+          className="text-faint hover:underline"
+          onClick={() =>
+            setInputs((cur) => [...cur, { key: String(cur.length + 1), text: "" }])
+          }
+        >
+          + input
+        </button>
+        {Object.keys(cells).length > 0 && (
+          <table className="w-full">
+            <thead>
+              <tr className="text-left text-faint">
+                <th className="py-1 font-normal">input</th>
+                {variants.map((v) => (
+                  <th key={v.key} className="py-1 font-normal">
+                    variant {v.key}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {[...new Set(Object.keys(cells).map((k) => k.split("\u0000")[1]))].map((ik) => (
+                <tr key={ik} className="border-t">
+                  <td className="py-1">{ik}</td>
+                  {variants.map((v) => {
+                    const cell = cells[`${v.key}\u0000${ik}`]
+                    return (
+                      <td key={v.key} className="py-1">
+                        {cell ? (
+                          <span className={cell.state === "finished" ? "text-emerald-500" : "text-muted-foreground"}>
+                            {cell.state}
+                            {cell.error ? ` (${cell.error})` : ""}
+                          </span>
+                        ) : (
+                          <span className="text-faint">—</span>
+                        )}
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** History is the experiment list (§4: "experiment history"): the
+ * saved definitions, newest first, with their run counts. */
+function History() {
+  const experiments = useQuery(experimentsQuery())
+  if (!experiments.data?.experiments.length) return null
+  return (
+    <div className="rounded border">
+      <div className="border-b px-3 py-2 text-xs text-muted-foreground">
+        Experiment history
+      </div>
+      <div className="divide-y text-xs">
+        {experiments.data.experiments.map((e) => (
+          <div key={e.id} className="flex items-center gap-2 px-3 py-1.5">
+            <code className="text-faint">{e.id}</code>
+            <span>{e.name || "—"}</span>
+            <span className="text-faint">
+              {e.variants?.length ?? 0}×{e.inputs?.length ?? 0}
+            </span>
+            <span className="text-faint">{e.runs ? `${e.runs.length} runs` : ""}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

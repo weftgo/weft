@@ -31,6 +31,13 @@ type DB interface {
 	Session(ctx context.Context, id string) (SessionDetail, error)
 	ResolvePublicID(ctx context.Context, publicID string) (sessionID string, err error)
 
+	// The playground's saved experiments (WEFT-PLAYGROUND §10.4,
+	// PQ4): the definition rows keyed by the weft.experiment.id the
+	// runs carry — one small table beside runs.
+	SaveExperiment(ctx context.Context, e Experiment) error // upsert by ID
+	Experiments(ctx context.Context) ([]Experiment, error)  // newest update first
+	Experiment(ctx context.Context, id string) (Experiment, error)
+
 	Close() error
 }
 
@@ -40,9 +47,37 @@ type RunQuery struct {
 	Agent, SessionID, PublicID, ParentRunID string            // ParentRunID: "" top-level only, "*" all
 	Status                                  Status            // "" any
 	Playground                              *bool             // nil any
+	ExperimentID                            string            // the runs of one experiment
 	Meta                                    map[string]string // subset match on metadata
 	Before                                  time.Time         // cursor on Started; zero = newest
 	Limit                                   int               // 0 = 50, max 500
+}
+
+// Experiment is one saved playground group: a name, the variants and
+// inputs that define it, keyed by the id its runs carry as
+// weft.experiment.id (§10.4). Variants and inputs are the wire shapes
+// verbatim (overrides JSON included); the runs themselves stay in the
+// runs table.
+type Experiment struct {
+	ID, Name, Agent string
+	Created, Updated time.Time
+	Variants        []ExperimentVariant
+	Inputs          []ExperimentInput
+}
+
+// ExperimentVariant is one column of the matrix: a key and the
+// overrides object it applies.
+type ExperimentVariant struct {
+	Key       string          `json:"key"`
+	Overrides json.RawMessage `json:"overrides,omitempty"`
+}
+
+// ExperimentInput is one row of the matrix: a key, a source run to
+// take the turn from, or a literal text.
+type ExperimentInput struct {
+	Key         string `json:"key"`
+	SourceRunID string `json:"source_run_id,omitempty"`
+	Text        string `json:"text,omitempty"`
 }
 
 // Status is a run's derived state. running, succeeded and failed are

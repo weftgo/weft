@@ -9,7 +9,6 @@ use (
 	./obsdb
 	./openai
 	./otel
-	./store
 	./studio
 	./thread
 	./thread/sqlite

@@ -1,16 +1,15 @@
 #!/usr/bin/env sh
 # The selvedge (TODO §1.7): fail on any incompatible change to a
 # module's public Go API since that module's last tag. The root module
-# gates against the newest v* tag; the store module gates against the
-# newest store/v* tag, from its second tag on (plan §3.1). The other
-# sub-modules get their own gate when they tag: thread joins at its
-# second tag (thread/v0.2.0, plan §10 — as store joined at
-# store/v0.1.1); add a `thread` case beside `store` and an
-# apidiff-thread target then.
+# gates against the newest v* tag; the thread module gates against the
+# newest thread/v* tag (plan §10). The other sub-modules get their own
+# gate when they tag: add a case beside `thread` and an apidiff-*
+# target then. (The store module's gate died with the module, step 5
+# of ADR 0024.)
 #
 # Usage: scripts/apidiff.sh [base-ref] [module-dir]
-#   module-dir "." (the default) is the root module; "store" is the
-#   store module; "thread" is the thread module. base-ref defaults to
+#   module-dir "." (the default) is the root module; "thread" is the
+#   thread module. base-ref defaults to
 #   the module's newest matching tag reachable from HEAD; an explicit
 #   empty string means the same. A module with no matching tag yet
 #   skips with a note — nothing to diff against, nothing vouched for;
@@ -19,8 +18,8 @@
 # Pre-1.0 evolutions that are source-compatible but flagged by apidiff
 # (widening a return type to a superset interface, adding a trailing
 # variadic) can be acknowledged by listing the exact apidiff line in
-# the module's .apidiff-allow (root: ./.apidiff-allow; store:
-# store/.apidiff-allow). Anything not listed fails the build. Post-1.0
+# the module's .apidiff-allow (root: ./.apidiff-allow). Anything not
+# listed fails the build. Post-1.0
 # the allowlist is emptied and stays empty.
 #
 # The gate fails closed: a tree that does not compile, or an apidiff
@@ -35,9 +34,8 @@ cd "$(dirname "$0")/.."
 mod="${2:-.}"
 case "$mod" in
   .) tagpat='v*' ;;
-  store) tagpat='store/v*' ;;
   thread) tagpat='thread/v*' ;;
-  *) echo "apidiff: unknown module dir '$mod' (want ., store or thread)" >&2; exit 2 ;;
+  *) echo "apidiff: unknown module dir '$mod' (want . or thread)" >&2; exit 2 ;;
 esac
 base="${1:-$(git describe --tags --abbrev=0 --match "$tagpat" HEAD 2>/dev/null || true)}"
 if [ -z "$base" ]; then
@@ -69,9 +67,9 @@ trap 'git worktree remove --force "$tmp/base" >/dev/null 2>&1 || true; rm -rf "$
 # then compared against the working tree. The base must build too: a
 # base that cannot load leaves an empty export and an empty report —
 # the same fail-closed hole as above, on the other side. GOWORK=off
-# holds for the store module too: its root requirement resolves from
-# the module graph (the repo is public; the proxy serves the tags), so
-# the gate never leans on the working tree's go.work.
+# for the sub-modules too: their requirements resolve from the module
+# graph (the repo is public; the proxy serves the tags), so the gate
+# never leans on the working tree's go.work.
 if ! (cd "$tmp/base/$mod" && GOWORK=off go build ./...); then
   echo "apidiff: the base ref $base ($mod) does not compile — the gate cannot vouch for it" >&2
   exit 1

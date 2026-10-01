@@ -506,6 +506,7 @@ export class PanelModel {
       edits: [],
       step,
       instructions: agent.instructions ?? "",
+      registeredInstructions: agent.instructions ?? "",
       tools,
       model: "",
       thinking: "",

@@ -618,7 +618,7 @@ function se(e, t) {
 }
 function ce(e, t) {
 	let n = Object.entries(e.tools).filter(([, e]) => e).map(([e]) => e), r = {};
-	e.instructions && (r.instructions = e.instructions), n.length && n.length < Object.keys(e.tools).length && (r.tools_enabled = n), e.model && (r.model = e.model), e.thinking && (r.thinking = e.thinking);
+	e.instructions && e.instructions !== e.registeredInstructions && (r.instructions = e.instructions), n.length && n.length < Object.keys(e.tools).length && (r.tools_enabled = n), e.model && (r.model = e.model), e.thinking && (r.thinking = e.thinking);
 	let i = {
 		runtime: e.runtimeId,
 		agent: e.agent,
@@ -937,6 +937,7 @@ var ue = class {
 			edits: [],
 			step: t,
 			instructions: a.instructions ?? "",
+			registeredInstructions: a.instructions ?? "",
 			tools: o,
 			model: "",
 			thinking: "",

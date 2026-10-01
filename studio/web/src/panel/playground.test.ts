@@ -230,6 +230,7 @@ describe("the pure halves", () => {
       edits: [],
       step: 0,
       instructions: "new prompt",
+      registeredInstructions: "old prompt",
       tools: { lookup_order: true, refund: false },
       model: "glm-5.3-flash",
       thinking: "off",
@@ -251,6 +252,21 @@ describe("the pure halves", () => {
       model: "glm-5.3-flash",
       thinking: "off",
     })
+    // An unchanged prompt is not an override (§10.1) — the drawer
+    // pre-fills the registered one, and the scripted engine 400s on
+    // an instructions override (§5.5), so sending it unchanged made
+    // every scripted run of an agent that registers instructions
+    // unusable (programme audit P1-8).
+    const samePrompt = buildRunBody(
+      { ...draft, instructions: draft.registeredInstructions, engine: "scripted" },
+      "pub_orders"
+    ) as Record<string, any>
+    expect(samePrompt.overrides.instructions).toBeUndefined()
+    const noPromptRegistered = buildRunBody(
+      { ...draft, registeredInstructions: "", engine: "scripted" },
+      "pub_orders"
+    ) as Record<string, any>
+    expect(noPromptRegistered.overrides.instructions).toBe("new prompt")
     // A continued run may not replace the turn's message (400).
     const cont = buildRunBody({ ...draft, step: 2 }, "pub_orders") as Record<string, any>
     expect(cont.input).toBeUndefined()
@@ -283,6 +299,7 @@ describe("the pure halves", () => {
       edits: [],
       step: 0,
       instructions: "new prompt",
+      registeredInstructions: "old prompt",
       tools: { lookup_order: true, refund: false },
       model: "glm-5.3-flash",
       thinking: "off",

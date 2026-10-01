@@ -28,6 +28,12 @@ export interface ExperimentDraft {
   /** The step to continue from (0 re-runs the whole turn). */
   step: number
   instructions: string
+  /** The agent's registered instructions as the drawer was opened
+   * with them: an unchanged prompt is not an override (§10.1), and
+   * the scripted engine 400s on an instructions override (§5.5) —
+   * without this the drawer's pre-filled prompt made every scripted
+   * run of an agent that registers instructions unusable. */
+  registeredInstructions: string
   /** Tools by name; false = turned off (narrowing only). */
   tools: Record<string, boolean>
   model: string
@@ -78,7 +84,10 @@ export function buildRunBody(draft: ExperimentDraft, publicId: string): Record<s
     .filter(([, on]) => on)
     .map(([name]) => name)
   const overrides: Record<string, unknown> = {}
-  if (draft.instructions) overrides.instructions = draft.instructions
+  // An unchanged prompt is not an override (§10.1, the same diff
+  // Studio's playground applies: variant.instructions !== registered).
+  if (draft.instructions && draft.instructions !== draft.registeredInstructions)
+    overrides.instructions = draft.instructions
   if (toolsEnabled.length && toolsEnabled.length < Object.keys(draft.tools).length)
     overrides.tools_enabled = toolsEnabled
   if (draft.model) overrides.model = draft.model

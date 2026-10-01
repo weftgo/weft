@@ -254,6 +254,7 @@ func (l *link) executeFork(ctx context.Context, cmd command) (string, string) {
 			l.mu.Lock()
 			delete(l.steerSess, turn.RunID())
 			l.mu.Unlock()
+			releaseFork(ctx, agent, s)
 		}()
 		res, werr := turn.Wait()
 		return l.outcome(cmd, turn.RunID(), res, werr), turn.RunID()
@@ -285,9 +286,20 @@ func (l *link) executeFork(ctx context.Context, cmd command) (string, string) {
 		l.mu.Lock()
 		delete(l.steerSess, turn.RunID())
 		l.mu.Unlock()
+		releaseFork(ctx, agent, forked)
 	}()
 	res, werr := turn.Wait()
 	return l.outcome(cmd, turn.RunID(), res, werr), turn.RunID()
+}
+
+// releaseFork closes a fork's Session once its turn has landed: the
+// Session is the fork's one writer for as long as it is open (the
+// lease its first write took), and the next fork command opens a new
+// one — which could not write while this one still held the session.
+func releaseFork(ctx context.Context, agent *weft.Agent, s *thread.Session) {
+	if err := s.Close(context.WithoutCancel(ctx)); err != nil {
+		agent.Logger().Warn("runtime: forked session not released", "session", s.ID(), "err", err)
+	}
 }
 
 // turnEntryOf finds the TurnEntry that closed the source run's turn —

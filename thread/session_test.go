@@ -18,7 +18,7 @@ import (
 	"github.com/weftgo/weft/wefttest"
 )
 
-// eachBackend runs test against the two v0.1 storages, Memory and
+// eachBackend runs test against the two in-module storages, Memory and
 // jsonl on a fresh temp dir — the shared helper every Session test
 // goes through, so both backends answer the same table (the threadtest
 // rule, carried up to the Session API).

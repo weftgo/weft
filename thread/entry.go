@@ -288,7 +288,7 @@ type GrantRevokedEntry struct {
 	GrantID  string    `json:"grant_id"`
 }
 
-// ReceiptEntry is the steering receipt (ADR 0019, plan §6): the
+// ReceiptEntry is the steering receipt (ADR 0019): the
 // journey of one message accepted while the session was busy under
 // the Steer policy. One entry records acceptance — Status "queued",
 // the message on Msg — and a second, linked by Receipt, records the

@@ -287,6 +287,11 @@ type backend struct {
 type lease struct {
 	holder  any
 	entries int
+	// created is the session row's created column — the header's
+	// Created — read by the hold's first Acquire (stamped says it
+	// was); zero when it does not parse.
+	created time.Time
+	stamped bool
 }
 
 // unknownEntries marks a held session whose entry rows have not been
@@ -877,15 +882,15 @@ func (b *backend) release(ctx context.Context, id string, by any) error {
 // refusing a different holder with ErrLocked. The complete entry rows
 // are counted once per hold and kept current by this instance's own
 // appends: for the holder a repeated Acquire touches no database.
-func (b *backend) Acquire(ctx context.Context, id string, holder any) (int, error) {
+func (b *backend) Acquire(ctx context.Context, id string, holder any) (int, time.Time, error) {
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return 0, time.Time{}, err
 	}
 	if holder == nil {
-		return 0, errNilHolder
+		return 0, time.Time{}, errNilHolder
 	}
 	if !thread.ValidID(id) {
-		return 0, fmtNotFound(id)
+		return 0, time.Time{}, fmtNotFound(id)
 	}
 	b.leaseMu.Lock()
 	defer b.leaseMu.Unlock()
@@ -895,39 +900,43 @@ func (b *backend) Acquire(ctx context.Context, id string, holder any) (int, erro
 	if l := b.held[id]; l != nil {
 		if l.holder != nil && l.holder != holder {
 			b.mu.Unlock()
-			return 0, locked
+			return 0, time.Time{}, locked
 		}
-		if l.entries != unknownEntries {
+		if l.entries != unknownEntries && l.stamped {
 			l.holder = holder
-			n := l.entries
+			n, created := l.entries, l.created
 			b.mu.Unlock()
-			return n, nil
+			return n, created, nil
 		}
 	}
 	b.mu.Unlock()
 
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, time.Time{}, err
 	}
 	defer rollback(tx)
-	var exists bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)`, id).Scan(&exists); err != nil {
-		return 0, err
+	var stamp string
+	err = tx.QueryRowContext(ctx, `SELECT created FROM sessions WHERE id = ?`, id).Scan(&stamp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, time.Time{}, fmtNotFound(id)
 	}
-	if !exists {
-		return 0, fmtNotFound(id)
+	if err != nil {
+		return 0, time.Time{}, err
 	}
+	// The column is the header's Created (Create writes both from one
+	// value); a row some other hand wrote reads as the zero time.
+	created, _ := time.Parse(time.RFC3339Nano, stamp)
 	did, err := b.acquire(ctx, tx, id)
 	if err != nil {
-		return 0, err
+		return 0, time.Time{}, err
 	}
 	var n int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM entries WHERE session = ? AND torn = 0`, id).Scan(&n); err != nil {
-		return 0, err
+		return 0, time.Time{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, err
+		return 0, time.Time{}, err
 	}
 	b.committed(id, did)
 	b.mu.Lock()
@@ -939,11 +948,11 @@ func (b *backend) Acquire(ctx context.Context, id string, holder any) (int, erro
 		l = &lease{entries: unknownEntries}
 		b.held[id] = l
 	}
-	l.holder = holder
+	l.holder, l.created, l.stamped = holder, created, true
 	if b.writes == seen {
 		l.entries = n // nothing was written while the rows were counted
 	}
-	return n, nil
+	return n, created, nil
 }
 
 // Inject appends raw bytes to a session as entry rows, verbatim — the

@@ -33,12 +33,15 @@ var (
 	ErrLocked = errors.New("thread: session is locked by another writer")
 
 	// ErrStale is returned by a Session's write when the stored
-	// session holds entries the Session never loaded: another writer
-	// appended to it after this Session was opened, and a write now
-	// would attach to a leaf that is no longer the session's — a fork
-	// nobody asked for. Nothing is written and the Session's tree is
-	// unchanged. Terminal for the Session value: Open the session
-	// again to write from what it now holds.
+	// session is not the one the Session loaded: another writer
+	// appended to it after this Session was opened — a write now
+	// would attach to a leaf that is no longer the session's, a fork
+	// nobody asked for — or the session was deleted and created again
+	// under the same id. The check is the stored header's Created and
+	// the number of entry lines, not a comparison of contents. Nothing
+	// is written and the Session's tree is unchanged. Terminal for the
+	// Session value: Open the session again to write from what it now
+	// holds.
 	ErrStale = errors.New("thread: session changed since it was opened")
 
 	// ErrCorrupt wraps the failures a backend reports for stored data

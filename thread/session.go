@@ -237,9 +237,12 @@ func PublicID(id string) SessionOption { return publicIDOption(id) }
 // the storage holds entries the Session never loaded — another
 // Session wrote and closed since this one was opened — its write
 // fails with ErrStale instead of attaching to a leaf the session has
-// moved past. Open the session again. On a backend without the
-// Leaser capability neither check exists, and a second Session on
-// the same Storage value is the caller's to avoid.
+// moved past; so does a write to a session that was deleted and
+// created again under the same id since. The check compares two
+// things the lease reports — the stored header's Created and the
+// number of entry lines — not contents. Open the session again. On a
+// backend without the Leaser capability neither check exists, and a
+// second Session on the same Storage value is the caller's to avoid.
 //
 // One run at a time. A Send while a turn runs — or while an approval
 // boundary is open — follows the busy policy captured at that Send:
@@ -616,7 +619,7 @@ func newSession(st Storage, agent *weft.Agent, cfg sessionConfig, h Header, entr
 		seen += len(report.Skipped)
 	}
 	s := &Session{
-		st:     leasedStorage(st, h.ID, seen),
+		st:     leasedStorage(st, h, seen),
 		agent:  agent,
 		cfg:    cfg,
 		header: h,
@@ -1734,14 +1737,17 @@ type leased struct {
 	lease   Leaser
 	session string
 	seen    int
+	// created is the header's Created as this Session loaded or wrote
+	// it: the stored session's identity, compared on every acquire.
+	created time.Time
 }
 
 // leasedStorage returns the write path newSession installs: st behind
 // its lease when it offers one, st itself when it does not — such a
 // backend keeps whatever writer rule it enforces on its own.
-func leasedStorage(st Storage, session string, seen int) Storage {
+func leasedStorage(st Storage, h Header, seen int) Storage {
 	if l, ok := st.(Leaser); ok {
-		return &leased{Storage: st, lease: l, session: session, seen: seen}
+		return &leased{Storage: st, lease: l, session: h.ID, seen: seen, created: h.Created}
 	}
 	return st
 }
@@ -1749,15 +1755,20 @@ func leasedStorage(st Storage, session string, seen int) Storage {
 // acquire makes the Session its session's writer, or says why it is
 // not: ErrLocked while another Session on this storage holds the
 // lease (or another storage holds the backend's lock), ErrNotFound for
-// a session deleted since, ErrStale when the storage holds a different
-// number of entries than this Session has seen — written by a writer
-// that came and went since the Session loaded. It is asked before
-// every write and costs the holder nothing: the backend answers from
-// memory.
+// a session deleted since, ErrStale when the storage holds another
+// session than this Session has seen: one created under a different
+// header time — the id deleted and created again — or one holding a
+// different number of entries, written by a writer that came and went
+// since the Session loaded. It is asked before every write and costs
+// the holder nothing: the backend answers from memory.
 func (w *leased) acquire(ctx context.Context) error {
-	n, err := w.lease.Acquire(ctx, w.session, w)
+	n, created, err := w.lease.Acquire(ctx, w.session, w)
 	if err != nil {
 		return err
+	}
+	if !created.IsZero() && !created.Equal(w.created) {
+		return fmt.Errorf("%w: session %s was deleted and created again (its header is of %s, this Session loaded %s); open it again",
+			ErrStale, w.session, created.UTC().Format(time.RFC3339Nano), w.created.UTC().Format(time.RFC3339Nano))
 	}
 	if n != w.seen {
 		return fmt.Errorf("%w: session %s holds %d entries, this Session has seen %d; open it again",

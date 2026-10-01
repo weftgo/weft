@@ -35,6 +35,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/weftgo/weft/thread"
 	threadbackend "github.com/weftgo/weft/thread/backend"
@@ -170,6 +171,11 @@ type session struct {
 	dirty   bool
 	holder  any
 	lines   int
+	// created is the header's Created, read by the hold's first
+	// Acquire (stamped says it was); the zero time when the header
+	// does not decode.
+	created time.Time
+	stamped bool
 }
 
 // unknownLines marks a held session whose entry lines have not been
@@ -686,46 +692,54 @@ var errNilHolder = errors.New("jsonl: lease holder is nil")
 // own appends: for the holder a repeated Acquire is a map lookup.
 // Under NoLock the count is this instance's view only — a writer the
 // lock would have refused is not seen until the session is held anew.
-func (b *backend) Acquire(ctx context.Context, id string, holder any) (int, error) {
+func (b *backend) Acquire(ctx context.Context, id string, holder any) (int, time.Time, error) {
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return 0, time.Time{}, err
 	}
 	if holder == nil {
-		return 0, errNilHolder
+		return 0, time.Time{}, errNilHolder
 	}
 	for {
 		s, err := b.sessionFor(ctx, id)
 		if err != nil {
-			return 0, err
+			return 0, time.Time{}, err
 		}
-		n, err := b.lease(id, s, holder)
+		n, created, err := b.lease(id, s, holder)
 		if !errors.Is(err, errStale) {
-			return n, err
+			return n, created, err
 		}
 	}
 }
 
 // lease records holder on a held session and returns its entry-line
-// count. errStale means the session was released or deleted under the
-// caller, who acquires again.
-func (b *backend) lease(id string, s *session, holder any) (int, error) {
+// count and its header's Created. errStale means the session was
+// released or deleted under the caller, who acquires again.
+func (b *backend) lease(id string, s *session, holder any) (int, time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return 0, errStale
+		return 0, time.Time{}, errStale
 	}
 	if s.holder != nil && s.holder != holder {
-		return 0, fmt.Errorf("%w: %s", thread.ErrLocked, id)
+		return 0, time.Time{}, fmt.Errorf("%w: %s", thread.ErrLocked, id)
 	}
 	if s.lines == unknownLines {
 		n, err := countEntryLines(id, s.f)
 		if err != nil {
-			return 0, err
+			return 0, time.Time{}, err
 		}
 		s.lines = n
 	}
+	if !s.stamped {
+		// The header is read once per hold: the file behind a hold is
+		// one session for as long as it is held.
+		if h, ok, err := newHeaderReader().read(b.path(id)); err == nil && ok {
+			s.created = h.Created
+		}
+		s.stamped = true
+	}
 	s.holder = holder
-	return s.lines, nil
+	return s.lines, s.created, nil
 }
 
 // countEntryLines counts the complete lines after the header in a held

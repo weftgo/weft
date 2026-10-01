@@ -4,6 +4,7 @@ import (
 	"context"
 	"iter"
 	"log/slog"
+	"time"
 
 	"github.com/weftgo/weft/thread/internal/opencfg"
 )
@@ -164,6 +165,14 @@ type Leaser interface {
 	// compares: a different number means the session changed behind
 	// its view (ErrStale is the Session's answer).
 	//
+	// created is the stored header's Created — which session this is,
+	// not only how long: a session deleted and created again under
+	// the same id carries a new one, so a writer that loaded the old
+	// session is told apart even when the two happen to hold the same
+	// number of entries. It is the zero time when the storage cannot
+	// read the header's (a header line this build does not decode);
+	// the writer then has only the count to go by.
+	//
 	// Acquire takes the backend's cross-instance lock exactly as a
 	// first Append does — ErrLocked when another Storage or process
 	// holds the session, a torn tail repaired — and then the lease:
@@ -176,7 +185,7 @@ type Leaser interface {
 	// The lease ends when its holder yields, when the session is
 	// released or deleted through this Storage value, or with the
 	// process.
-	Acquire(ctx context.Context, session string, holder any) (entries int, err error)
+	Acquire(ctx context.Context, session string, holder any) (entries int, created time.Time, err error)
 
 	// Yield ends holder's lease and the storage's hold with it, as
 	// Release does. It is Release for a writer that must not let go

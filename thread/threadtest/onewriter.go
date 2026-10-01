@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/thread"
@@ -30,6 +31,7 @@ func RunOneWriter(t *testing.T, open func(t *testing.T) thread.Storage) {
 	t.Run("CreateTakesTheLease", createTakesLease(open))
 	t.Run("ForkTakesTheLease", forkTakesLease(open))
 	t.Run("DeleteUnderALiveSession", deleteUnderSession(open))
+	t.Run("RecreatedSessionIsStale", recreatedSession(open))
 	t.Run("TwoSessionsRaceForTheLease", sessionsRace(open))
 }
 
@@ -352,6 +354,59 @@ func deleteUnderSession(open func(t *testing.T) thread.Storage) func(*testing.T)
 		}
 		if err := a.Close(ctx); !errors.Is(err, thread.ErrNotFound) {
 			t.Errorf("Close of a deleted session: err = %v, want ErrNotFound", err)
+		}
+	}
+}
+
+// A session deleted and created again under the same id is another
+// session, however much it resembles the first: a Session that loaded
+// the old one is refused with ErrStale even when the new one holds
+// exactly as many entries — the count alone would wave it through —
+// because the lease also reports the stored header's Created.
+func recreatedSession(open func(t *testing.T) thread.Storage) func(*testing.T) {
+	return func(t *testing.T) {
+		ctx := context.Background()
+		st := open(t)
+		agent := weft.New(wefttest.Script())
+		at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+		same := func() func() string { // every incarnation mints the same ids
+			return sequence("r_")
+		}
+		old, err := thread.Create(ctx, st, agent, thread.IDs(same()), thread.Clock(func() time.Time { return at }))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := old.SetInfo(ctx, "the first incarnation", nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := thread.Delete(ctx, st, old.ID()); err != nil {
+			t.Fatal(err)
+		}
+		// The same id, the same number of entries, a later header.
+		later := at.Add(time.Minute)
+		again, err := thread.Create(ctx, st, agent, thread.IDs(same()), thread.Clock(func() time.Time { return later }))
+		if err != nil {
+			t.Fatalf("Create under the deleted session's id: %v", err)
+		}
+		if again.ID() != old.ID() {
+			t.Fatalf("the second incarnation is %q, want the id %q again", again.ID(), old.ID())
+		}
+		if err := again.SetInfo(ctx, "the second incarnation", nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := again.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+		before := entryIDs(t, st, old.ID())
+		err = old.SetInfo(ctx, "written into the wrong session", nil)
+		if !errors.Is(err, thread.ErrStale) {
+			t.Fatalf("a write from the Session of the deleted incarnation: err = %v, want ErrStale", err)
+		}
+		if after := entryIDs(t, st, old.ID()); len(after) != len(before) {
+			t.Fatalf("the refused write stored %d entries", len(after)-len(before))
+		}
+		if got := old.Title(); got != "the first incarnation" {
+			t.Errorf("the stale Session's tree changed: Title = %q", got)
 		}
 	}
 }

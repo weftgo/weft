@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/weftgo/weft/thread/internal/rules"
 )
@@ -313,25 +314,26 @@ func (m *memStorage) release(ctx context.Context, session string, by any) error 
 // Acquire is the Leaser capability: the lease is the only writer
 // state Memory keeps — one value, one process, no lock beneath it — so
 // a second holder is the one writer Memory ever refuses.
-func (m *memStorage) Acquire(ctx context.Context, session string, holder any) (int, error) {
+func (m *memStorage) Acquire(ctx context.Context, session string, holder any) (int, time.Time, error) {
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return 0, time.Time{}, err
 	}
 	if holder == nil {
-		return 0, errNilHolder
+		return 0, time.Time{}, errNilHolder
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.sessions[session]
 	if !ok {
-		return 0, fmtNotFound(session)
+		return 0, time.Time{}, fmtNotFound(session)
 	}
 	if s.holder != nil && s.holder != holder {
-		return 0, fmt.Errorf("%w: %s", ErrLocked, session)
+		return 0, time.Time{}, fmt.Errorf("%w: %s", ErrLocked, session)
 	}
 	s.holder = holder
 	m.sessions[session] = s
-	return s.lines, nil
+	h, _ := s.head() // an unreadable injected header has no Created to report
+	return s.lines, h.Created, nil
 }
 
 // errNilHolder refuses a lease nobody could be told apart by.

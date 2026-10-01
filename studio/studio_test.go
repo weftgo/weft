@@ -350,18 +350,26 @@ func TestMetaGolden(t *testing.T) {
 	golden(t, "meta.golden.json", body)
 
 	// Capabilities are computed from the registered route groups
-	// (S4.2): the read API names none, so the open handler reports an
-	// empty list — live and ingest join with their groups (S4.4/S4.5),
-	// the panel and playground with theirs (step 7/8).
+	// (S4.2): the read API names none and ingest is registered, so the
+	// open handler reports exactly [ingest] — live joins with its
+	// group (S4.5), the panel and playground with theirs (step 7/8).
 	_, _, plain := get(t, Handler(DB(fixtureDB(t))), "/studio/api/meta")
-	if !strings.Contains(plain, `"capabilities":[]`) {
-		t.Errorf("default capabilities = %s, want []", plain)
+	if !strings.Contains(plain, `"capabilities":["ingest"]`) {
+		t.Errorf("default capabilities = %s, want [ingest]", plain)
 	}
-	// NoIngest drops the ingest group with its routes and capability
-	// (asserted once the group exists; the option stays accepted).
+	// Ingest is open on loopback without a token, and meta says so
+	// (S4.4); a configured token closes it.
+	if !strings.Contains(body, `"ingest_open":true`) {
+		t.Errorf("meta ingest_open: %s", body)
+	}
+	_, _, tok := get(t, Handler(DB(fixtureDB(t)), IngestToken("s3cr3t")), "/studio/api/meta")
+	if !strings.Contains(tok, `"ingest_open":false`) {
+		t.Errorf("meta ingest_open with token: %s", tok)
+	}
+	// NoIngest drops the ingest group with its routes and capability.
 	_, _, ro := get(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/api/meta")
-	if !strings.Contains(ro, `"capabilities":[]`) {
-		t.Errorf("NoIngest capabilities = %s", ro)
+	if !strings.Contains(ro, `"capabilities":[]`) || !strings.Contains(ro, `"ingest_open":false`) {
+		t.Errorf("NoIngest meta: %s", ro)
 	}
 	if code, _, _ := post(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/v1/logs", "application/json", "{}"); code != http.StatusNotFound {
 		t.Errorf("NoIngest /v1/logs: %d, want 404", code)
@@ -369,13 +377,52 @@ func TestMetaGolden(t *testing.T) {
 	// Playground(true) is accepted but adds nothing until step 8's
 	// playground.go registers its group.
 	_, _, pg := get(t, Handler(DB(fixtureDB(t)), Playground(true)), "/studio/api/meta")
-	if !strings.Contains(pg, `"capabilities":[]`) {
+	if !strings.Contains(pg, `"capabilities":["ingest"]`) {
 		t.Errorf("Playground capabilities = %s", pg)
 	}
 	// A hosting wrapper declares its own verbs beside the groups'.
 	_, _, caps := get(t, Handler(DB(fixtureDB(t)), Capabilities("fleet")), "/studio/api/meta")
-	if !strings.Contains(caps, `"capabilities":["fleet"]`) {
+	if !strings.Contains(caps, `"capabilities":["ingest","fleet"]`) {
 		t.Errorf("declared capabilities = %s", caps)
+	}
+}
+
+// TestIngestAuth pins S4.4's ingest auth through the server: the
+// configured token as a bearer, or — with none — loopback peers only.
+func TestIngestAuth(t *testing.T) {
+	pb, err := os.ReadFile(filepath.Join("..", "obsdb", "testdata", "logs.pb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	postTo := func(h http.Handler, remote, bearer string) int {
+		req := httptest.NewRequest(http.MethodPost, "/v1/logs", bytes.NewReader(pb))
+		req.RemoteAddr = remote
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		req.Header.Set("Content-Type", "application/x-protobuf")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w.Code
+	}
+	// No token: loopback open (setup B), a remote peer refused.
+	open := New(DB(fixtureDB(t))).Handler()
+	if c := postTo(open, "127.0.0.1:51234", ""); c != http.StatusOK {
+		t.Errorf("loopback without token: %d", c)
+	}
+	if c := postTo(open, "10.0.0.5:51234", ""); c != http.StatusUnauthorized {
+		t.Errorf("remote without token: %d, want 401", c)
+	}
+	// With a token: only the bearer works, from anywhere.
+	tok := New(DB(fixtureDB(t)), IngestToken("s3cr3t")).Handler()
+	if c := postTo(tok, "127.0.0.1:51234", ""); c != http.StatusUnauthorized {
+		t.Errorf("loopback without bearer: %d, want 401", c)
+	}
+	if c := postTo(tok, "127.0.0.1:51234", "wrong"); c != http.StatusUnauthorized {
+		t.Errorf("wrong bearer: %d, want 401", c)
+	}
+	if c := postTo(tok, "10.0.0.5:51234", "s3cr3t"); c != http.StatusOK {
+		t.Errorf("remote with bearer: %d", c)
 	}
 }
 

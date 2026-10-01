@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -232,6 +233,33 @@ func (s *Server) Close() error {
 		return s.db.Close()
 	}
 	return nil
+}
+
+// ingestAuthorized is S4.4's ingest auth: the configured ingest token
+// as a bearer, or — with none configured — loopback peers only
+// (setup B's dev mode; a Studio bound wide without a token refuses
+// remote exporters).
+func (s *Server) ingestAuthorized(r *http.Request) bool {
+	if s.ingestToken != "" {
+		return r.Header.Get("Authorization") == "Bearer "+s.ingestToken
+	}
+	return remoteIsLoopback(r)
+}
+
+// remoteIsLoopback reports whether the request's peer is on this
+// machine, which is the best a library can know of its bind: a
+// loopback bind only ever sees loopback peers.
+func remoteIsLoopback(r *http.Request) bool {
+	host := r.RemoteAddr
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	switch host {
+	case "127.0.0.1", "::1", "localhost":
+		return true
+	}
+	return false
 }
 
 // ServeHTTP routes one request: the registered route groups (the API,

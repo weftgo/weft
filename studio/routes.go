@@ -1,6 +1,10 @@
 package studio
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/weftgo/weft/studio/ingest"
+)
 
 // The route registry (S4.2): Studio's surface is a list of route
 // groups, and api/meta's capabilities are computed from that list —
@@ -73,6 +77,14 @@ func (s *Server) registerGroups() {
 		name:     "api",
 		register: registerReadAPI,
 	})
+	// OTLP ingest (S4.4), unless NoIngest turned the receiver off.
+	if !s.noIngest {
+		s.addGroup(routeGroup{
+			name:       "ingest",
+			capability: "ingest",
+			register:   registerIngest,
+		})
+	}
 	if panelGroupHook != nil {
 		s.addGroup(panelGroupHook()) // step 7: always on
 	}
@@ -102,6 +114,13 @@ func registerReadAPI(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/manifest", s.serveManifest)
 	mux.HandleFunc("GET /api/runs", s.serveRuns)
 	mux.HandleFunc("GET /api/runs/", s.serveRunRoutes)
+}
+
+// registerIngest mounts the OTLP/HTTP receiver (studio/ingest, S4.4).
+func registerIngest(mux *http.ServeMux, s *Server) {
+	ok := s.ingestAuthorized
+	mux.HandleFunc("POST /v1/traces", ingest.Traces(s.db, s.live, ok))
+	mux.HandleFunc("POST /v1/logs", ingest.Logs(s.db, s.live, ok))
 }
 
 // RuntimeServer is the runtime link server's in-process side

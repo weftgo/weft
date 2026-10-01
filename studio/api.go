@@ -154,7 +154,8 @@ type eventsPage struct {
 }
 
 // serveMeta answers api/meta: versions, whether a manifest is present,
-// the title, a best-effort database backend name, and the
+// the title, a best-effort database backend name, whether ingest is
+// open without a token (S4.4 says meta must say so), and the
 // capabilities the registered route groups provide (computed, never
 // hard-coded) plus any the backing server declared.
 func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
@@ -164,6 +165,7 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 		HasManifest   bool     `json:"has_manifest"`
 		Title         string   `json:"title"`
 		Store         string   `json:"store"`
+		IngestOpen    bool     `json:"ingest_open"`
 		Capabilities  []string `json:"capabilities"`
 	}{
 		WeftVersion:   weftVersion(),
@@ -171,6 +173,7 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 		HasManifest:   len(s.manifest) > 0,
 		Title:         s.title,
 		Store:         dbKind(s.db),
+		IngestOpen:    !s.noIngest && s.ingestToken == "",
 		Capabilities:  s.capabilityList(),
 	})
 }

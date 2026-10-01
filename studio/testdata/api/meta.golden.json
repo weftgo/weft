@@ -4,6 +4,9 @@
   "has_manifest": true,
   "title": "weft studio",
   "store": "sqlite",
-  "capabilities": []
+  "ingest_open": true,
+  "capabilities": [
+    "ingest"
+  ]
 }
 

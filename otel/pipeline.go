@@ -420,31 +420,37 @@ func samplerOf(cfg config) sdktrace.Sampler {
 	return sdktrace.ParentBased(sdktrace.AlwaysSample())
 }
 
-// buildResource assembles the resource: service.name from the Service
-// option, OTEL_SERVICE_NAME or the binary's name, the standard
-// OTEL_RESOURCE_ATTRIBUTES, the caller's Resource option merged over,
-// and weft.version.
+// buildResource assembles the resource in precedence order, lowest
+// first: the binary's name, the standard OTEL_SERVICE_NAME /
+// OTEL_RESOURCE_ATTRIBUTES, the Service option, and the caller's
+// Resource option over everything — the SDK's own WithResource order
+// (sdk/trace/provider.go: Merge(resource.Environment(), r)); explicit
+// wins over detected, and Merge's second argument wins. weft.version
+// rides on the base.
 func buildResource(cfg config) (*sdkresource.Resource, error) {
-	name := cfg.service
-	if name == "" {
-		name = envGetenv("OTEL_SERVICE_NAME")
-	}
-	if name == "" {
-		name = filepath.Base(os.Args[0])
-	}
-	attrs := []attribute.KeyValue{
-		semconv.ServiceName(name),
-		attribute.String("weft.version", weftVersion()),
-	}
 	base, err := sdkresource.New(context.Background(),
-		sdkresource.WithAttributes(attrs...),
+		sdkresource.WithAttributes(
+			semconv.ServiceName(filepath.Base(os.Args[0])),
+			attribute.String("weft.version", weftVersion()),
+		),
 		sdkresource.WithFromEnv(),
 	)
 	if err != nil {
 		return nil, err
 	}
+	if cfg.service != "" {
+		// The explicit name merges over the detected one. It cannot be
+		// an attribute of base itself: inside one New call the later
+		// fromEnv detector would overwrite it.
+		base, err = sdkresource.Merge(base, sdkresource.NewSchemaless(
+			semconv.ServiceName(cfg.service),
+		))
+		if err != nil {
+			return nil, err
+		}
+	}
 	if cfg.resource != nil {
-		return sdkresource.Merge(cfg.resource, base)
+		return sdkresource.Merge(base, cfg.resource)
 	}
 	return base, nil
 }

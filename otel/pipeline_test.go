@@ -3,6 +3,9 @@ package otel
 import (
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	sdkresource "go.opentelemetry.io/otel/sdk/resource"
 )
 
 // destsOf collects what destination options build — S2.2's defaults
@@ -211,6 +214,75 @@ func TestEnvDedup(t *testing.T) {
 	if kept := dedupe(other, env); len(kept) != 2 {
 		t.Errorf("dedupe dropped unrelated env destinations: %+v", kept)
 	}
+}
+
+// buildResource precedence (S2.1:899): the caller's Resource merges
+// over the detected base, the Service option over the environment, and
+// the environment over the binary-name fallback — Merge's second
+// argument wins, the SDK's own WithResource order
+// (sdk/trace/provider.go: Merge(resource.Environment(), r)). With the
+// merge inverted the detected base overwrote every explicit attribute.
+func TestBuildResourcePrecedence(t *testing.T) {
+	t.Setenv("OTEL_SERVICE_NAME", "svc-from-env")
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment=prod")
+
+	// (c) Without either option the env name and the env attributes
+	// apply over the binary-name fallback.
+	base, err := buildResource(config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resAttr(base, "service.name"); got != "svc-from-env" {
+		t.Errorf("(c) service.name = %q, want the env name", got)
+	}
+	if got := resAttr(base, "deployment.environment"); got != "prod" {
+		t.Errorf("(c) deployment.environment = %q, want the env attributes kept", got)
+	}
+
+	// (a) Service wins over the environment; the env attributes stay.
+	svcCfg := config{}
+	Service("explicit").apply(&svcCfg)
+	svc, err := buildResource(svcCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resAttr(svc, "service.name"); got != "explicit" {
+		t.Errorf("(a) service.name = %q, want the Service option's", got)
+	}
+	if got := resAttr(svc, "deployment.environment"); got != "prod" {
+		t.Errorf("(a) deployment.environment = %q, want the env attributes kept", got)
+	}
+
+	// (b) Resource wins over both.
+	topCfg := config{}
+	Service("explicit").apply(&topCfg)
+	Resource(sdkresource.NewSchemaless(
+		attribute.String("service.name", "from-resource"),
+	)).apply(&topCfg)
+	top, err := buildResource(topCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resAttr(top, "service.name"); got != "from-resource" {
+		t.Errorf("(b) service.name = %q, want the Resource option's", got)
+	}
+
+	// (d) weft.version rides on every shape.
+	for name, r := range map[string]*sdkresource.Resource{
+		"base": base, "service": svc, "resource": top,
+	} {
+		if got := resAttr(r, "weft.version"); got != "v0.6.0" {
+			t.Errorf("(d) %s: weft.version = %q, want v0.6.0", name, got)
+		}
+	}
+}
+
+// resAttr reads one string attribute off a resource.
+func resAttr(r *sdkresource.Resource, key string) string {
+	if v, ok := r.Set().Value(attribute.Key(key)); ok {
+		return v.AsString()
+	}
+	return ""
 }
 
 // The pipeline's Enabled question: a provider whose every destination is

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/thread"
 )
 
 // The executor (WEFT-PLAYGROUND.md §5.2): a command becomes one run
@@ -46,7 +47,22 @@ func (l *link) validate(cmd command) (string, bool) {
 	switch cmd.Thread {
 	case "", "ephemeral":
 	case "fork":
-		return "thread fork is not yet available", false
+		// §5.4: fork needs thread storage and a message to send — the
+		// fork keeps the conversation, the input opens the new turn.
+		// from_step is ephemeral's verb (a mid-turn re-run); a fork
+		// re-runs nothing, it continues.
+		if l.cfg.threads == nil {
+			return "fork mode needs runtime.Threads(store)", false
+		}
+		if cmd.Source == nil || cmd.Source.RunID == "" {
+			return "fork mode forks a source turn's session: a source run is required", false
+		}
+		if cmd.Input == nil || *cmd.Input == "" {
+			return "fork mode continues the conversation: an input is required", false
+		}
+		if cmd.Source.FromStep > 0 {
+			return "fork mode re-runs no steps (from_step is the ephemeral verb); send an input instead", false
+		}
 	default:
 		return fmt.Sprintf("unknown thread mode %q", cmd.Thread), false
 	}
@@ -132,6 +148,9 @@ func enabledTools(cmd command, tools map[string]bool) []string {
 // call awaiting a decision) ends successfully with Pending set — the
 // state is kept so a later approval decision can resume it.
 func (l *link) execute(ctx context.Context, cmd command, runID string) (string, string) {
+	if cmd.Thread == "fork" {
+		return l.executeFork(ctx, cmd)
+	}
 	agent, _ := l.reg.agent(cmd.Agent)
 	res, err := agent.Generate(ctx, l.runOptions(cmd, runID)...)
 
@@ -173,6 +192,80 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) (string, 
 		}
 	}
 	return l.outcome(cmd, runID, res, err), runID
+}
+
+// executeFork runs §5.4's fork mode: the source session opens
+// read-side, Fork copies it (a new session with lineage — the original
+// is only read), and the command's input becomes the fork's next turn
+// under the same shaping options. The runtime holds the forked
+// session's writer for the command and releases it when the turn lands
+// (the reference drops; a later fork command targeting the fork reopens
+// it, so the panel can keep chatting in it).
+func (l *link) executeFork(ctx context.Context, cmd command) (string, string) {
+	agent, _ := l.reg.agent(cmd.Agent)
+	session, _, err := parseThreadRunID(cmd.Source.RunID)
+	if err != nil {
+		return "failed: " + err.Error(), ""
+	}
+	opts := l.overrideOptions(cmd)
+
+	l.mu.Lock()
+	known := l.forked[session]
+	l.mu.Unlock()
+
+	var turn *thread.Turn
+	if known {
+		// A session this runtime forked: continue the conversation in
+		// it (§5.4's "keep chatting").
+		s, err := thread.Open(ctx, l.cfg.threads, session, agent)
+		if err == nil {
+			turn, err = s.Send(ctx, weft.User(*cmd.Input), thread.RunOptions(opts...))
+		}
+		if err != nil {
+			return "failed: " + err.Error(), ""
+		}
+		res, werr := turn.Wait()
+		return l.outcome(cmd, turn.RunID(), res, werr), turn.RunID()
+	}
+
+	// The app's session: open read-side (readers never lock), find the
+	// source turn's closing entry, fork at it.
+	src, err := thread.Open(ctx, l.cfg.threads, session, agent)
+	if err != nil {
+		return "failed: " + err.Error(), ""
+	}
+	entryID, err := turnEntryOf(ctx, l.cfg.threads, session, cmd.Source.RunID)
+	if err != nil {
+		return "failed: " + err.Error(), ""
+	}
+	forked, err := src.Fork(ctx, entryID)
+	if err != nil {
+		return "failed: " + err.Error(), ""
+	}
+	turn, err = forked.Send(ctx, weft.User(*cmd.Input), thread.RunOptions(opts...))
+	if err != nil {
+		return "failed: " + err.Error(), ""
+	}
+	l.mu.Lock()
+	l.forked[forked.ID()] = true // its turns continue in-place later
+	l.mu.Unlock()
+	res, werr := turn.Wait()
+	return l.outcome(cmd, turn.RunID(), res, werr), turn.RunID()
+}
+
+// turnEntryOf finds the TurnEntry that closed the source run's turn —
+// the fork point (the fork keeps the whole conversation through it).
+func turnEntryOf(ctx context.Context, st thread.Storage, session, runID string) (string, error) {
+	_, entries, _, err := st.Load(ctx, session)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if te, ok := e.(thread.TurnEntry); ok && te.RunID == runID {
+			return te.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no turn %q in session %q", runID, session)
 }
 
 // sourceMsgs resolves the command's source transcript once per run

@@ -36,6 +36,7 @@ type link struct {
 	inFlight map[string]context.CancelFunc
 	tally    map[string]*budgetState // per experiment_id
 	parked   map[string]*parkState   // run id → the parked run this runtime started
+	forked   map[string]bool         // sessions this runtime forked (their turns continue in place)
 
 	reconnect func() time.Duration // backoff; indirected by tests
 }
@@ -53,6 +54,7 @@ func newLink(c *config, reg *registry, url, token string) *link {
 		inFlight: map[string]context.CancelFunc{},
 		tally:    map[string]*budgetState{},
 		parked:   map[string]*parkState{},
+		forked:   map[string]bool{},
 	}
 	if c.local != nil {
 		l.client = inProcessClient(c.local)

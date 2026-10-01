@@ -579,6 +579,27 @@ export class WeftDevtools extends HTMLElement {
       el("span", undefined, stats),
       el("span", "weft-grow"),
     ])
+    // P4's saves (§3's row): keep-as-prompt is the copy-the-text
+    // fallback (PQ2: the weft/prompt version lands with that module);
+    // save-as-fixture hands off to Studio (the files download there).
+    const keep = el("button", "weft-btn", "keep as prompt ⤴", {
+      title: "copy the edited prompt (weft/prompt versions are post-v1, PQ2)",
+    })
+    keep.addEventListener("click", () => {
+      const text = this.model?.state.drawer?.instructions ?? ""
+      void navigator.clipboard?.writeText(text)
+    })
+    head.appendChild(keep)
+    const fixtureURL = new URL("playground", this.cfg.endpoint)
+    if (r.runID) fixtureURL.searchParams.set("run", r.runID)
+    const fixture = el("a", "weft-btn", "save as fixture", {
+      href: fixtureURL.toString(),
+      target: "_blank",
+      rel: "noopener",
+      title: "hand off to Studio: the run's records as wefttest replay fixtures (D4)",
+    })
+    fixture.style.textDecoration = "none"
+    head.appendChild(fixture)
     const compare = el("a", "weft-btn", "compare in Studio", {
       href: studioPlaygroundLink(this.cfg.endpoint, s.drawer, s.selectedStep ?? null),
       target: "_blank",

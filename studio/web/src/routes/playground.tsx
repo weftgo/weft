@@ -17,6 +17,7 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateActio
 import {
   apiBase,
   asTranscript,
+  postFixtures,
   fetchCommand,
   postPlaygroundRun,
   runtimesQuery,
@@ -405,6 +406,8 @@ function Playground() {
                       experiment={v.result!}
                       sourceText={sourceText}
                       sourceRunID={sourceRunID}
+                      variant={v}
+                      tools={agent?.tools.map((t) => t.name) ?? []}
                     />
                   ))}
               </div>
@@ -442,6 +445,22 @@ async function getJSON(path: string): Promise<RawTranscript | RunRow> {
   const res = await fetch(new URL(path, apiBase()).toString(), { headers })
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   return (await res.json()) as RawTranscript | RunRow
+}
+
+/** saveFixtures downloads the run's wefttest replay fixtures, one
+ * file each (the browser writes them; Studio never touches the user's
+ * tree). */
+async function saveFixtures(runID: string, tools: string[]) {
+  if (!runID) return
+  const doc = await postFixtures(runID, tools)
+  for (const f of doc.files) {
+    const url = URL.createObjectURL(new Blob([f.body], { type: "application/json" }))
+    const a = document.createElement("a")
+    a.href = url
+    a.download = f.name
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 }
 
 /** runLabel shortens a run id for the variant card's header. */
@@ -538,10 +557,14 @@ function ResultCard({
   experiment,
   sourceText,
   sourceRunID,
+  variant,
+  tools,
 }: {
   experiment: Experiment
   sourceText: string
   sourceRunID: string
+  variant: Variant
+  tools: string[]
 }) {
   const [events, setEvents] = useState<{ pos: number; event: WireEvent }[]>([])
   const [transcriptText, setTranscriptText] = useState<string | null>(null)
@@ -611,6 +634,24 @@ function ResultCard({
         {experiment.runID && (
           <span className="font-mono text-faint">{experiment.runID}</span>
         )}
+        <span className="grow" />
+        {/* P4's saves: the fixture is a wefttest replay test of this
+            run (D4); keep-as-prompt is the copy-the-text fallback
+            (PQ2: the weft/prompt version lands with that module). */}
+        <button
+          className="text-faint hover:underline"
+          title="write this run's records as wefttest replay fixtures"
+          onClick={() => void saveFixtures(experiment.runID, tools)}
+        >
+          save as fixture
+        </button>
+        <button
+          className="text-faint hover:underline"
+          title="copy the edited prompt (weft/prompt versions are post-v1, PQ2)"
+          onClick={() => void navigator.clipboard?.writeText(variant.instructions)}
+        >
+          keep as prompt
+        </button>
       </div>
       <div className="space-y-2 p-3 text-xs">
         {experiment.error && <p className="text-red-500">{experiment.error}</p>}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/wefttest"
 )
 
@@ -188,6 +189,7 @@ func TestValidate(t *testing.T) {
 		models: map[string]weft.Model{"glm-5.3-flash": alt},
 		allow:  map[string]bool{"lookup_order": true},
 	}), "", "")
+	l.cfg.threads = thread.Memory() // fork mode's storage requirement
 	agentCmd := func(mutate func(*command)) command {
 		cmd := command{CommandID: "cmd_t", Agent: "a", Engine: "live", Thread: "ephemeral"}
 		if mutate != nil {
@@ -220,7 +222,13 @@ func TestValidate(t *testing.T) {
 			c.Source = &sourceSpec{RunID: "s_x", FromStep: 0}
 			c.Overrides.Model = "glm-5.3-flash"
 		}, "silently replay"},
-		{"thread fork", func(c *command) { c.Thread = "fork" }, "not yet available"},
+		// fork-without-threads is asserted below on its own link (this
+		// one carries storage for the from_step case).
+		{"thread fork with from_step", func(c *command) {
+			c.Thread = "fork"
+			c.Source = &sourceSpec{RunID: "s_x", FromStep: 2}
+			c.Input = &[]string{"hi"}[0]
+		}, "the ephemeral verb"},
 		{"transcript edits without a source", func(c *command) { c.TranscriptEdits = []transcriptEdit{{Step: 1}} }, "need a source run"},
 		{"side-effects allow not opted in", func(c *command) {
 			c.SideEffects = "allow"
@@ -248,6 +256,13 @@ func TestValidate(t *testing.T) {
 	}
 	if _, ok := l.validate(agentCmd(func(c *command) { c.Overrides.Model = "glm-5.3-flash" })); !ok {
 		t.Error("a registered alternate was refused")
+	}
+
+	// Fork mode without thread storage is rejected before anything
+	// else (this link carries none).
+	bare := newLink(&config{agents: []*weft.Agent{agent}}, newRegistry(&config{agents: []*weft.Agent{agent}}), "", "")
+	if reason, ok := bare.validate(agentCmd(func(c *command) { c.Thread = "fork" })); ok || !strings.Contains(reason, "runtime.Threads") {
+		t.Errorf("fork without threads: reason = %q ok = %v, want the Threads requirement", reason, ok)
 	}
 
 	// The budget cap: one run per experiment, so the second command of

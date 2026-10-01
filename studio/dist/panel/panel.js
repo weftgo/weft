@@ -1390,48 +1390,62 @@ var fe = class extends HTMLElement {
 			b("span", void 0, `Result · ${t.label}`),
 			b("span", void 0, i),
 			b("span", "weft-grow")
-		]), c = b("a", "weft-btn", "compare in Studio", {
+		]), c = b("button", "weft-btn", "keep as prompt ⤴", { title: "copy the edited prompt (weft/prompt versions are post-v1, PQ2)" });
+		c.addEventListener("click", () => {
+			let e = this.model?.state.drawer?.instructions ?? "";
+			navigator.clipboard?.writeText(e);
+		}), a.appendChild(c);
+		let l = new URL("playground", this.cfg.endpoint);
+		t.runID && l.searchParams.set("run", t.runID);
+		let u = b("a", "weft-btn", "save as fixture", {
+			href: l.toString(),
+			target: "_blank",
+			rel: "noopener",
+			title: "hand off to Studio: the run's records as wefttest replay fixtures (D4)"
+		});
+		u.style.textDecoration = "none", a.appendChild(u);
+		let d = b("a", "weft-btn", "compare in Studio", {
 			href: ve(this.cfg.endpoint, e.drawer, e.selectedStep ?? null),
 			target: "_blank",
 			rel: "noopener",
 			title: "open the Studio playground with this run, step and the current overrides carried over"
 		});
-		c.style.textDecoration = "none", a.appendChild(c);
-		let l = b("button", "weft-btn", "discard", { title: "clear the result pane" });
-		l.addEventListener("click", () => this.model?.discardResult()), a.appendChild(l), n.appendChild(a);
-		let u = b("div", "weft-step-b");
-		t.error && u.appendChild(b("div", "weft-note weft-warn", t.error));
+		d.style.textDecoration = "none", a.appendChild(d);
+		let f = b("button", "weft-btn", "discard", { title: "clear the result pane" });
+		f.addEventListener("click", () => this.model?.discardResult()), a.appendChild(f), n.appendChild(a);
+		let p = b("div", "weft-step-b");
+		t.error && p.appendChild(b("div", "weft-note weft-warn", t.error));
 		for (let e of t.folded.steps) {
-			e.text && u.appendChild(b("div", void 0, e.text));
-			for (let n of e.toolCalls) u.appendChild(J(n, t.row?.status ?? "running"));
+			e.text && p.appendChild(b("div", void 0, e.text));
+			for (let n of e.toolCalls) p.appendChild(J(n, t.row?.status ?? "running"));
 		}
-		!t.folded.steps.length && !t.error && u.appendChild(b("div", "weft-note", "queued — waiting for the runtime to ack…"));
-		let d = [{
+		!t.folded.steps.length && !t.error && p.appendChild(b("div", "weft-note", "queued — waiting for the runtime to ack…"));
+		let m = [{
 			id: "",
 			label: X(t.label)
 		}, ...(e.experiments.get(e.drawer?.runId ?? "") ?? []).map((e) => ({
 			id: e.id,
 			label: e.id.startsWith("pg_") ? Y(e.id) : e.id
 		}))];
-		if (d.length > 1) {
+		if (m.length > 1) {
 			let e = b("select", "weft-input");
-			for (let t of d) {
+			for (let t of m) {
 				let n = b("option", void 0, `compare vs ${t.label || "source"}`);
 				n.value = t.id, e.appendChild(n);
 			}
-			e.value = t.compareWith, e.addEventListener("change", () => void this.model?.setCompare(e.value)), u.appendChild(e);
+			e.value = t.compareWith, e.addEventListener("change", () => void this.model?.setCompare(e.value)), p.appendChild(e);
 		}
-		let f = t.folded.steps.map((e) => e.text).filter(Boolean).join("\n"), p = t.compareWith ? this.model?.compareText.get(t.compareWith) ?? "" : t.sourceText, m = t.compareWith ? Y(t.compareWith) : X(t.label);
-		if (f && p) {
-			let e = o(p, f), n = s(e), r = b("div", "weft-diff");
-			r.appendChild(b("div", "weft-diff-h", `diff vs ${m}:  ${n}`));
+		let h = t.folded.steps.map((e) => e.text).filter(Boolean).join("\n"), g = t.compareWith ? this.model?.compareText.get(t.compareWith) ?? "" : t.sourceText, v = t.compareWith ? Y(t.compareWith) : X(t.label);
+		if (h && g) {
+			let e = o(g, h), n = s(e), r = b("div", "weft-diff");
+			r.appendChild(b("div", "weft-diff-h", `diff vs ${v}:  ${n}`));
 			for (let t of e) t.kind !== "same" && r.appendChild(b("div", `weft-diff-row weft-diff-${t.kind}`, `${t.kind === "add" ? "+" : "−"} ${t.text}`));
 			let i = t.compareWith ? this.model?.compareCalls.get(t.compareWith) ?? [] : (this.model?.state.turn?.folded.steps ?? []).flatMap((e) => e.toolCalls).map((e) => `${e.name}(${e.args === void 0 ? "" : JSON.stringify(e.args)})`), a = t.folded.steps.flatMap((e) => e.toolCalls).map((e) => `${e.name}(${e.args === void 0 ? "" : JSON.stringify(e.args)})`), c = o(i.join("\n"), a.join("\n"));
 			if (c.some((e) => e.kind !== "same")) {
 				r.appendChild(b("div", "weft-diff-h", `tool calls:  ${s(c)}`));
 				for (let e of c) e.kind !== "same" && r.appendChild(b("div", `weft-diff-row weft-diff-${e.kind}`, `${e.kind === "add" ? "+" : "−"} ${e.text}`));
 			}
-			u.appendChild(r);
+			p.appendChild(r);
 		}
 		if (t.folded.pending.length && t.runID) {
 			let e = b("div", "weft-step");
@@ -1446,9 +1460,9 @@ var fe = class extends HTMLElement {
 				};
 				r.append(i("continue", "approve", "Approve: the handler runs for real"), i("skip", "deny", "Deny: the model sees a denied result"), i("resolve…", "resolve", "Resolve with the recorded result pasted outside the process", "")), t.appendChild(r), n.appendChild(t);
 			}
-			e.appendChild(n), u.appendChild(e);
+			e.appendChild(n), p.appendChild(e);
 		}
-		return n.appendChild(u), n;
+		return n.appendChild(p), n;
 	}
 	turnView(e) {
 		let t = e.turn;

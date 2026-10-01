@@ -862,3 +862,125 @@ func TestScriptedEngineEndToEnd(t *testing.T) {
 		t.Errorf("scripted reply = %q, want the recorded one", text)
 	}
 }
+
+// TestPlaygroundForkMode is §10.6's P4 gate: fork mode creates a new
+// session whose runs carry weft.session.forked_from (thread's stamp)
+// beside the playground labels, the original session's thread files
+// are byte-identical, and a second fork command continues the
+// conversation in the same fork (the runtime holds its writer for the
+// command and reopens on the next).
+func TestPlaygroundForkMode(t *testing.T) {
+	e := newE2E(t)
+	// Enough turns: the app's own turn, the fork's reply, the
+	// continuation's reply.
+	script := wefttest.Script(
+		wefttest.Say("hello from the app"),
+		wefttest.Say("hello from the fork"),
+		wefttest.Say("hello again from the fork"),
+	)
+	e.agent = weft.New(script, weft.Name("acme-support"),
+		weft.Instructions("You are Acme's support agent."),
+		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()))
+	runID := e.appTurn(t, "hello app")
+	e.waitTranscript(t, runID, "hello from the app")
+
+	threadsDir := filepath.Join(e.dir, "threads")
+	before := dirSnapshot(t, threadsDir)
+
+	shutdown := runtime.Install(
+		runtime.Studio(e.ts.URL, ""),
+		runtime.Agents(e.agent),
+		runtime.Threads(e.store),
+		runtime.Enabled(true),
+	)
+	defer shutdown()
+	e.waitRuntime(t)
+	_, rtJSON := e.api(t, http.MethodGet, "/api/runtimes", "")
+	var runtimes struct {
+		Runtimes []struct {
+			ID      string `json:"id"`
+			Threads bool   `json:"threads"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal([]byte(rtJSON), &runtimes); err != nil || len(runtimes.Runtimes) == 0 {
+		t.Fatalf("runtimes: %v %s", err, rtJSON)
+	}
+	rt := runtimes.Runtimes[0].ID
+
+	fork := fmt.Sprintf(`{
+	  "command_id": "cmd_fork_1", "runtime": %q, "agent": "acme-support",
+	  "source": {"run_id": %q, "from_step": 0},
+	  "input": "and now the fork continues",
+	  "engine": "live", "side_effects": "substitute", "thread": "fork",
+	  "experiment_id": "exp_fork"
+	}`, rt, runID)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", fork); code != http.StatusAccepted {
+		t.Fatalf("fork = %d %s", code, resp)
+	}
+	row := e.waitCommand(t, "cmd_fork_1", "finished")
+	var st struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(row), &st); err != nil {
+		t.Fatal(err)
+	}
+	// The fork's run id is thread's: <new session>-t<n>, never a pg_ id
+	// (§5.1: only the runtime knows it, thread mints it).
+	if !strings.Contains(st.RunID, "-t") || strings.HasPrefix(st.RunID, "pg_") {
+		t.Fatalf("fork run id = %q, want a thread-minted <session>-t<n>", st.RunID)
+	}
+	// The fork's run carries weft.session.forked_from (thread's stamp)
+	// and weft.session.id of the NEW session, beside the playground
+	// labels. The original is untouched: byte-compare the store.
+	attrs := e.rec.playgroundSpan(t)
+	if attrs["weft.session.forked_from"] == "" {
+		t.Errorf("weft.session.forked_from missing on the fork's run span: %v", attrs)
+	}
+	if attrs["weft.playground"] != "true" || attrs["weft.experiment.id"] != "exp_fork" {
+		t.Errorf("the fork's run lost its playground labels: %v", attrs)
+	}
+	// The original is untouched: every file it had is byte-identical.
+	// The fork's own new file beside it is the point of fork mode.
+	after := dirSnapshot(t, threadsDir)
+	if len(after) < len(before) {
+		t.Errorf("thread store lost files: %d before, %d after", len(before), len(after))
+	}
+	for path, sum := range before {
+		if after[path] != sum {
+			t.Errorf("the original session's file changed: %s", path)
+		}
+	}
+
+	// The second fork command continues the SAME fork (no second
+	// session): the runtime reopens the session it forked.
+	fork2 := fmt.Sprintf(`{
+	  "command_id": "cmd_fork_2", "runtime": %q, "agent": "acme-support",
+	  "source": {"run_id": %q, "from_step": 0},
+	  "input": "one more turn in the fork",
+	  "engine": "live", "side_effects": "substitute", "thread": "fork",
+	  "experiment_id": "exp_fork"
+	}`, rt, st.RunID)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", fork2); code != http.StatusAccepted {
+		t.Fatalf("fork continuation = %d %s", code, resp)
+	}
+	row2 := e.waitCommand(t, "cmd_fork_2", "finished")
+	var st2 struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(row2), &st2); err != nil {
+		t.Fatal(err)
+	}
+	// The fork's first turn is -t2 (the copied turn counts); the
+	// continuation is the same fork session's next turn.
+	i := strings.LastIndex(st.RunID, "-t")
+	if i <= 0 {
+		t.Fatalf("fork run id %q is not a thread turn id", st.RunID)
+	}
+	session, n := st.RunID[:i], 0
+	if _, err := fmt.Sscanf(st.RunID[i+2:], "%d", &n); err != nil {
+		t.Fatalf("fork run id %q: %v", st.RunID, err)
+	}
+	if want := fmt.Sprintf("%s-t%d", session, n+1); st2.RunID != want {
+		t.Errorf("continuation run id = %q, want %q (the same fork's next turn)", st2.RunID, want)
+	}
+}

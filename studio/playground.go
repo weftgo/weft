@@ -61,6 +61,7 @@ func registerPlayground(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST /api/playground/runs", s.servePlaygroundRun(rs))
 	mux.HandleFunc("GET /api/playground/commands/{id}", s.servePlaygroundCommand(rs))
 	mux.HandleFunc("POST /api/runs/{id}/approvals", s.servePlaygroundApproval(rs))
+	mux.HandleFunc("POST /api/playground/fixtures", s.servePlaygroundFixture)
 	// The runtime link's own block (§10.3), as its own capability.
 	s.addGroup(routeGroup{
 		name:       "runtimes",
@@ -172,8 +173,23 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 		switch req.Thread {
 		case "", "ephemeral":
 		case "fork":
-			badRequest(w, r, "thread fork is not yet available")
-			return
+			// §5.4: fork continues the conversation in a new session
+			// with lineage — it needs a source turn and an input;
+			// from_step is the ephemeral verb (a mid-turn re-run),
+			// never the fork's. The runtime's own threads availability
+			// is checked against its registration below.
+			if req.Source == nil || req.Source.RunID == "" {
+				badRequest(w, r, "fork mode forks a source turn's session: a source run is required")
+				return
+			}
+			if req.Input == nil || *req.Input == "" {
+				badRequest(w, r, "fork mode continues the conversation: an input is required")
+				return
+			}
+			if req.Source.FromStep > 0 {
+				badRequest(w, r, "fork mode re-runs no steps (from_step is the ephemeral verb); send an input instead")
+				return
+			}
 		default:
 			badRequest(w, r, "unknown thread mode "+req.Thread)
 			return
@@ -197,6 +213,10 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 		if !rs.Connected(req.Runtime) {
 			writeError(w, r, http.StatusServiceUnavailable, "unavailable",
 				"runtime "+req.Runtime+" is not connected")
+			return
+		}
+		if req.Thread == "fork" && !reg.Threads {
+			badRequest(w, r, "fork mode needs runtime.Threads(store) on this runtime")
 			return
 		}
 		agent, ok := reg.Agent(req.Agent)

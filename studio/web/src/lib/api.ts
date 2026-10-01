@@ -608,6 +608,17 @@ export function fetchCommand(id: string): Promise<CommandStatus> {
   return get<CommandStatus>(`playground/commands/${encodeURIComponent(id)}`)
 }
 
+/** POST /api/playground/fixtures: the run's transcript as wefttest
+ * replay fixtures (P4, D4) — one file per recorded assistant turn,
+ * named the way Replay loads them. The user drops them into
+ * testdata; the loop they just lived becomes a CI regression test. */
+export function postFixtures(runID: string, tools: string[]) {
+  return post<{ run_id: string; agent: string; files: { name: string; body: string }[] }>(
+    "playground/fixtures",
+    { run_id: runID, tools }
+  )
+}
+
 /** POST /api/runs/{id}/approvals: a parked runtime-started run's
  * continue / skip / resolve (ADR 0007's verbs, WEFT-DEVTOOLS §8.2). */
 export function postApproval(

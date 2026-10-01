@@ -191,28 +191,33 @@ func (r *registry) entry(name string) (agentRegistration, bool) {
 	return e, ok
 }
 
-// parkedTools names the tools a command's run must park on: every
-// registered tool of the agent except the ones the runtime opted in
-// with AllowSideEffects and the ones the command turned off. Until
-// ReplayPolicy exists every tool counts as "never" (§7 P1's rule), so
-// a side effect never re-fires silently (§6 rule 3).
+// parkedTools names the tools a command's run must park on: every tool
+// the command leaves on (the override subset when set, else the agent's
+// full set) that the runtime has not opted in with AllowSideEffects —
+// the on-set minus the opted-in. A tool the command turned off is not
+// offered and cannot fire, so it needs no park. Until ReplayPolicy
+// exists every tool counts as "never" (§7 P1's rule), so a side effect
+// never re-fires silently (§6 rule 3).
 func (r *registry) parkedTools(agent string, enabled []string) []string {
 	e, ok := r.entries[agent]
 	if !ok {
 		return nil
 	}
-	off := map[string]bool{}
+	on := map[string]bool{}
 	for _, t := range enabled {
-		off[t] = true
+		on[t] = true
 	}
 	var parked []string
 	for tool := range e.SideEffects {
-		if e.isAllowed(tool) || off[tool] {
+		if e.isAllowed(tool) {
 			continue
+		}
+		if len(enabled) > 0 && !on[tool] {
+			continue // turned off: not offered, cannot fire
 		}
 		parked = append(parked, tool)
 	}
-	sort.Strings(parked)
+	sort.Strings(parked) // the override hash and park_on are order-sensitive
 	return parked
 }
 

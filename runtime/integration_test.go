@@ -340,6 +340,11 @@ func TestPlaygroundEndToEnd(t *testing.T) {
 	if h := attrs["weft.override.hash"]; len(h) != 64 {
 		t.Errorf("weft.override.hash = %q, want 64 hex chars", h)
 	}
+	// The command's only enabled tool is opted in: nothing parks (the
+	// on-set minus the opted-in is empty — §6 rule 3, TestParkedTools).
+	if p := attrs["weft.override.park_on"]; p != "" {
+		t.Errorf("weft.override.park_on = %q, want none for an opted-in tool set", p)
+	}
 	if sid := attrs["weft.session.id"]; sid != "" {
 		t.Errorf("an ephemeral run carries weft.session.id = %q (§5.2: never)", sid)
 	}
@@ -381,5 +386,72 @@ func TestPlaygroundEndToEnd(t *testing.T) {
 	}
 	if err := e.p.ForceFlush(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestPlaygroundParkOnSpan pins §6 rule 3's observable fingerprint
+// (§10.1): a command that enables a tool the runtime did not opt in
+// runs with weft.override.park_on naming exactly the enabled
+// non-opted-in set — the model's call to it parks (the run finishes
+// successfully with the call pending) instead of firing the side
+// effect. The opted-in-only command's absence is pinned in
+// TestPlaygroundEndToEnd.
+func TestPlaygroundParkOnSpan(t *testing.T) {
+	e := newE2E(t,
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"4411"}`}),
+		wefttest.Say("Your order shipped yesterday."), // the app's own turn
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"4411"}`}),
+		wefttest.Say("Refunded."), // never reached: the parked run ends at the call
+	)
+	ctx := context.Background()
+	// Consume the app's own turn (no session: this run is not the
+	// experiment's source), so the experiment's run starts at the
+	// refund call.
+	if _, err := e.agent.Generate(ctx, weft.Prompt("where is my order #4411?")); err != nil {
+		t.Fatal(err)
+	}
+
+	shutdown := runtime.Install(
+		runtime.Studio(e.ts.URL, ""),
+		runtime.Agents(e.agent),
+		runtime.Models(map[string]weft.Model{"glm-5.3-flash": e.alt}),
+		runtime.AllowSideEffects("lookup_order"),
+		runtime.Enabled(true),
+	)
+	defer shutdown()
+	e.waitRuntime(t)
+
+	_, rtJSON := e.api(t, http.MethodGet, "/api/runtimes", "")
+	var runtimes struct {
+		Runtimes []struct {
+			ID string `json:"id"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal([]byte(rtJSON), &runtimes); err != nil || len(runtimes.Runtimes) == 0 {
+		t.Fatalf("runtimes: %v %s", err, runtimes)
+	}
+
+	// The command enables refund (not opted in; lookup_order is) and
+	// turns lookup_order off: only refund parks.
+	body := fmt.Sprintf(`{
+	  "command_id": "cmd_park",
+	  "runtime": %q,
+	  "agent": "acme-support",
+	  "input": "please refund order #4411",
+	  "overrides": {"tools_enabled": ["refund"]},
+	  "engine": "live",
+	  "side_effects": "substitute",
+	  "thread": "ephemeral",
+	  "experiment_id": "exp_park"
+	}`, runtimes.Runtimes[0].ID)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", body); code != http.StatusAccepted {
+		t.Fatalf("park command = %d %s", code, resp)
+	}
+	if row := e.waitCommand(t, "cmd_park", "finished"); !strings.Contains(row, `"run_id":"pg_`) {
+		t.Errorf("park command row = %s, want the run's pg_ id", row)
+	}
+	if attrs := e.rec.playgroundSpan(t); attrs["weft.override.park_on"] != "refund" {
+		t.Errorf("weft.override.park_on = %q, want %q (the enabled tool the runtime did not opt in)",
+			attrs["weft.override.park_on"], "refund")
 	}
 }

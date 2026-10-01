@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/weftgo/weft"
@@ -78,10 +79,12 @@ func TestRegistryRegistration(t *testing.T) {
 	}
 }
 
-// TestParkedTools pins the §7 P1 rule the executor applies: every
-// registered tool parks unless the runtime opted in (AllowSideEffects)
-// or the command turned it off (OnlyTools) — a side effect never
-// re-fires silently before ReplayPolicy exists.
+// TestParkedTools pins the §7 P1 rule the executor applies: every tool
+// the command leaves on parks unless the runtime opted in
+// (AllowSideEffects) — the on-set minus the opted-in. A tool the
+// command turned off is not offered and cannot fire, so it needs no
+// park; a side effect never re-fires silently before ReplayPolicy
+// exists.
 func TestParkedTools(t *testing.T) {
 	lookup := weft.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
 	refund := weft.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
@@ -92,11 +95,72 @@ func TestParkedTools(t *testing.T) {
 	if got := reg.parkedTools("a", nil); !reflect.DeepEqual(got, []string{"escalate", "refund"}) {
 		t.Errorf("parked (no narrowing) = %v, want [escalate refund]", got)
 	}
-	if got := reg.parkedTools("a", []string{"refund"}); !reflect.DeepEqual(got, []string{"escalate"}) {
-		t.Errorf("parked (refund on) = %v, want [escalate]", got)
+	if got := reg.parkedTools("a", []string{"refund"}); !reflect.DeepEqual(got, []string{"refund"}) {
+		t.Errorf("parked (refund on) = %v, want [refund] — the enabled non-opted-in tool parks", got)
 	}
-	if got := reg.parkedTools("a", []string{"refund", "escalate", "lookup_order"}); got != nil {
-		t.Errorf("parked (all on) = %v, want none", got)
+	if got := reg.parkedTools("a", []string{"refund", "escalate", "lookup_order"}); !reflect.DeepEqual(got, []string{"escalate", "refund"}) {
+		t.Errorf("parked (all on) = %v, want [escalate refund] — every non-opted-in tool the command enabled parks", got)
+	}
+	if got := reg.parkedTools("a", []string{"lookup_order"}); got != nil {
+		t.Errorf("parked (only the opted-in tool on) = %v, want none", got)
+	}
+}
+
+// TestExecuteParksEnabledNonOptInTool pins §6 rule 3 through the
+// executor's own option list: a command that enables a tool the runtime
+// has not opted in runs with that tool parked — the scripted model's
+// call lands on RunResult.Pending and the tool's handler never
+// executes — while the opted-in tool, enabled the same way, runs for
+// real (a turned-off tool parks nothing: it is not offered at all).
+func TestExecuteParksEnabledNonOptInTool(t *testing.T) {
+	var refundRan, lookupRan atomic.Bool
+	lookup := weft.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) {
+		lookupRan.Store(true)
+		return "shipped", nil
+	})
+	refund := weft.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) {
+		refundRan.Store(true)
+		return "refunded", nil
+	})
+	agent := weft.New(
+		wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{}`}),
+			wefttest.Say("refunded"), // never reached: the run parks at the call
+			wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{}`}),
+			wefttest.Say("shipped"),
+		),
+		weft.Name("a"), lookup, refund)
+	l := newLink(&config{agents: []*weft.Agent{agent}},
+		newRegistry(&config{agents: []*weft.Agent{agent}, allow: map[string]bool{"lookup_order": true}}), "", "")
+
+	run := func(id, input, tool string) *weft.RunResult {
+		t.Helper()
+		in := input
+		cmd := command{CommandID: id, Agent: "a", Engine: "live", Thread: "ephemeral",
+			Input: &in, Overrides: overrides{ToolsEnabled: []string{tool}}}
+		res, err := agent.Generate(context.Background(), l.runOptions(cmd, "pg_"+id)...)
+		if err != nil {
+			t.Fatalf("command %s failed: %v", id, err)
+		}
+		return res
+	}
+
+	// The enabled non-opted-in tool parks: the call is Pending.
+	if res := run("park", "refund it", "refund"); len(res.Pending) != 1 || res.Pending[0].Name != "refund" {
+		t.Errorf("pending = %+v, want the parked refund call", res.Pending)
+	}
+
+	// The opted-in tool enabled the same way parks nothing (run 2's
+	// model turn is the Say the parked run never reached) and runs for
+	// real on the next one (run 3 calls lookup_order).
+	if res := run("live", "where is it?", "lookup_order"); len(res.Pending) != 0 {
+		t.Errorf("pending = %+v, want none for the opted-in tool", res.Pending)
+	}
+	if res := run("live", "and again", "lookup_order"); res.Text() == "" || !lookupRan.Load() {
+		t.Errorf("the opted-in run: text = %q, lookup ran = %v — want the handler to have run", res.Text(), lookupRan.Load())
+	}
+	if refundRan.Load() {
+		t.Error("the refund handler ran although the runtime did not opt in")
 	}
 }
 

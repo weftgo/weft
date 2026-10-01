@@ -28,7 +28,9 @@
 // wears its predecessor's pid (a container's PID 1) takes its own
 // sessions back, and an unrelated process wearing a dead holder's pid
 // does not keep them locked. Readers never lock — Load and List always
-// work.
+// work. Between Sessions sharing one Storage the same rule is the
+// lease (the thread.Leaser capability): the instance remembers which
+// writer has the row it took.
 package sqlite
 
 import (
@@ -153,7 +155,7 @@ func Open(path string, opts ...thread.OpenOption) (thread.Storage, error) {
 		pid:     os.Getpid(),
 		alive:   pidAlive,
 		startOf: procStart,
-		held:    map[string]bool{},
+		held:    map[string]*lease{},
 	}
 	b.started = b.startOf(b.pid)
 	if memory {
@@ -237,8 +239,13 @@ var processToken = sync.OnceValues(func() (string, error) {
 })
 
 // backend is the thread.Storage over one SQLite file. held names the
-// sessions this instance has taken the writer's lock row for; mu guards
-// it and nothing else — the database serializes the writes themselves.
+// sessions this instance has taken the writer's lock row for, each
+// with its lease (the thread.Leaser capability); mu guards it and
+// writes, and nothing else — the database serializes the writes
+// themselves. leaseMu serializes the operations that take or end a
+// hold — Acquire, Yield, Release, Delete — against each other, held
+// across their transactions, so a lease is never recorded on a hold
+// another of them is ending; Append does not take it.
 type backend struct {
 	db      *sql.DB
 	salvage bool
@@ -261,9 +268,33 @@ type backend struct {
 	alive   func(pid int) bool
 	startOf func(pid int) string
 
+	leaseMu sync.Mutex
+
 	mu   sync.Mutex
-	held map[string]bool
+	held map[string]*lease
+	// writes counts this instance's committed entry writes: an Acquire
+	// that counted a session's rows keeps the count only if nothing
+	// was written while it looked.
+	writes uint64
 }
+
+// lease is this instance's hold on one session: the lock row is ours,
+// holder is the writer the lease belongs to — nil while the instance
+// holds the session for its direct users only — and entries is the
+// number of complete entry rows the session holds, unknownEntries
+// until an Acquire has counted them.
+type lease struct {
+	holder  any
+	entries int
+}
+
+// unknownEntries marks a held session whose entry rows have not been
+// counted, or were changed in a way this instance did not count
+// (Inject's raw bytes).
+const unknownEntries = -1
+
+// errNilHolder refuses a lease nobody could be told apart by.
+var errNilHolder = errors.New("sqlite: lease holder is nil")
 
 // Create writes the session's header row and takes its lock row in one
 // transaction: an id that is not one path component, an envelope other
@@ -320,7 +351,7 @@ func (b *backend) insertSession(ctx context.Context, id, created, header string,
 		return err
 	}
 	b.mu.Lock()
-	b.held[id] = true
+	b.held[id] = &lease{} // a header and no entries
 	b.mu.Unlock()
 	return nil
 }
@@ -355,14 +386,15 @@ func (b *backend) Append(ctx context.Context, id string, entries ...thread.Entry
 			title = ie.Title
 		}
 	}
-	return b.commit(ctx, id, lines, 0, title)
+	return b.commit(ctx, id, lines, 0, title, len(lines))
 }
 
 // commit is Append and Inject's shared transaction: the rows, the
 // title column when the batch set one, then the reports — a lock taken
 // over and a torn row removed are logged only once the transaction
-// that did them has committed.
-func (b *backend) commit(ctx context.Context, id string, lines []string, tornRow int, title string) error {
+// that did them has committed. added is how many complete entry rows
+// the batch adds, unknownEntries when the caller cannot say (Inject).
+func (b *backend) commit(ctx context.Context, id string, lines []string, tornRow int, title string, added int) error {
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -381,6 +413,16 @@ func (b *backend) commit(ctx context.Context, id string, lines []string, tornRow
 		return err
 	}
 	b.committed(id, did)
+	b.mu.Lock()
+	b.writes++
+	if l := b.held[id]; l != nil {
+		if added == unknownEntries {
+			l.entries = unknownEntries
+		} else if l.entries != unknownEntries {
+			l.entries += added
+		}
+	}
+	b.mu.Unlock()
 	return nil
 }
 
@@ -397,7 +439,9 @@ type wrote struct {
 func (b *backend) committed(id string, did wrote) {
 	if did.acquired {
 		b.mu.Lock()
-		b.held[id] = true
+		if b.held[id] == nil {
+			b.held[id] = &lease{entries: unknownEntries}
+		}
 		b.mu.Unlock()
 	}
 	if did.takeover != "" {
@@ -695,7 +739,9 @@ func (b *backend) List(ctx context.Context, q thread.Query) (thread.Page, error)
 // held by a live writer other than this instance fails with ErrLocked:
 // deleting under a live writer would lose the writes it is about to
 // make. A dead holder's lock is taken over first, so a crashed
-// writer's session can always be deleted.
+// writer's session can always be deleted. A lease on this instance
+// (Acquire) does not refuse it: Delete through the holder's own
+// Storage removes the session and the lease with it.
 func (b *backend) Delete(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -703,6 +749,8 @@ func (b *backend) Delete(ctx context.Context, id string) error {
 	if !thread.ValidID(id) {
 		return fmtNotFound(id)
 	}
+	b.leaseMu.Lock()
+	defer b.leaseMu.Unlock()
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -756,17 +804,46 @@ func (b *backend) Flush(ctx context.Context, id string) error {
 
 // Release is the thread.Releaser capability: it deletes this
 // instance's lock row for the session, so another Storage or process
-// may write it. There is nothing to flush — every Append already
-// committed. A later Append here takes the row again, or fails with
-// ErrLocked if another writer holds it by then. Releasing a session
-// another writer holds releases nothing; one the database does not
-// hold fails with ErrNotFound.
+// may write it, and ends the lease on it (Acquire), whoever has it.
+// There is nothing to flush — every Append already committed. A later
+// Append here takes the row again, or fails with ErrLocked if another
+// writer holds it by then. Releasing a session another writer holds
+// releases nothing; one the database does not hold fails with
+// ErrNotFound.
 func (b *backend) Release(ctx context.Context, id string) error {
+	return b.release(ctx, id, nil)
+}
+
+// Yield is the thread.Leaser capability's release: Release, unless a
+// holder other than the caller's has the session's lease — then the
+// hold is that writer's and nothing is let go.
+func (b *backend) Yield(ctx context.Context, id string, holder any) error {
+	if holder == nil {
+		return errNilHolder
+	}
+	return b.release(ctx, id, holder)
+}
+
+// release is Release and Yield's shared body: by is nil for Release,
+// which lets go whoever holds the lease, and the yielding holder
+// otherwise.
+func (b *backend) release(ctx context.Context, id string, by any) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if !thread.ValidID(id) {
 		return fmtNotFound(id)
+	}
+	b.leaseMu.Lock()
+	defer b.leaseMu.Unlock()
+	b.mu.Lock()
+	l := b.held[id]
+	others := by != nil && l != nil && l.holder != nil && l.holder != by
+	b.mu.Unlock()
+	if others {
+		// Another writer's lease, on a session this instance holds —
+		// so it exists, and it is not ours to end.
+		return nil
 	}
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -791,6 +868,81 @@ func (b *backend) Release(ctx context.Context, id string) error {
 	delete(b.held, id)
 	b.mu.Unlock()
 	return nil
+}
+
+// Acquire is the thread.Leaser capability: it takes the session's lock
+// row as a first Append would — a dead holder's taken over — and
+// records holder as the session's one writer on this instance,
+// refusing a different holder with ErrLocked. The complete entry rows
+// are counted once per hold and kept current by this instance's own
+// appends: for the holder a repeated Acquire touches no database.
+func (b *backend) Acquire(ctx context.Context, id string, holder any) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if holder == nil {
+		return 0, errNilHolder
+	}
+	if !thread.ValidID(id) {
+		return 0, fmtNotFound(id)
+	}
+	b.leaseMu.Lock()
+	defer b.leaseMu.Unlock()
+	locked := fmt.Errorf("%w: %s", thread.ErrLocked, id)
+	b.mu.Lock()
+	seen := b.writes
+	if l := b.held[id]; l != nil {
+		if l.holder != nil && l.holder != holder {
+			b.mu.Unlock()
+			return 0, locked
+		}
+		if l.entries != unknownEntries {
+			l.holder = holder
+			n := l.entries
+			b.mu.Unlock()
+			return n, nil
+		}
+	}
+	b.mu.Unlock()
+
+	tx, err := b.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer rollback(tx)
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)`, id).Scan(&exists); err != nil {
+		return 0, err
+	}
+	if !exists {
+		return 0, fmtNotFound(id)
+	}
+	did, err := b.acquire(ctx, tx, id)
+	if err != nil {
+		return 0, err
+	}
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM entries WHERE session = ? AND torn = 0`, id).Scan(&n); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	b.committed(id, did)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	l := b.held[id]
+	if l == nil {
+		// The row is ours by an earlier transaction this instance lost
+		// track of: recorded now.
+		l = &lease{entries: unknownEntries}
+		b.held[id] = l
+	}
+	l.holder = holder
+	if b.writes == seen {
+		l.entries = n // nothing was written while the rows were counted
+	}
+	return n, nil
 }
 
 // Inject appends raw bytes to a session as entry rows, verbatim — the
@@ -818,7 +970,7 @@ func (b *backend) Inject(ctx context.Context, id string, data []byte) error {
 		lines = append(lines, string(torn))
 		tornRow = 1
 	}
-	return b.commit(ctx, id, lines, tornRow, "")
+	return b.commit(ctx, id, lines, tornRow, "", unknownEntries)
 }
 
 // InjectHeader creates a session whose header row is the given bytes,
@@ -882,7 +1034,7 @@ func (b *backend) insertLock(ctx context.Context, tx *sql.Tx, id string) error {
 // record after its transaction commits.
 func (b *backend) acquire(ctx context.Context, tx *sql.Tx, id string) (wrote, error) {
 	b.mu.Lock()
-	held := b.held[id]
+	held := b.held[id] != nil
 	b.mu.Unlock()
 	if held {
 		return wrote{}, nil // this instance already holds the row

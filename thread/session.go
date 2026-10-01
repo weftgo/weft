@@ -1339,11 +1339,25 @@ func (s *Session) Custom(ctx context.Context, kind string, data json.RawMessage)
 // application puts a note the model must see without attributing it to
 // the user (ADR 0011 §2). An empty kind is rejected. The message is
 // copied: the caller's value is not retained.
+//
+// It is a between-turns write, like Branch and Compact: while a turn
+// is in flight CustomMessage fails with ErrBusy and writes nothing. A
+// message that joined the context mid-run would land between the
+// run's own messages — between an assistant's calls and their results
+// — where the running model never saw it and every later run would
+// read a transcript no run produced. Append it before the Send, or
+// after the turn (Turn.Wait); to reach a running turn, Send with the
+// Steer policy. A parked approval boundary is not a running turn: a
+// note written there is accepted and reads after the boundary's
+// results. Custom, which never enters the context, is not restricted.
 func (s *Session) CustomMessage(ctx context.Context, kind string, msg weft.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if kind == "" {
 		return fmt.Errorf("thread: CustomMessage with empty kind")
+	}
+	if s.running && s.inFlight != nil {
+		return fmt.Errorf("%w: session %s is running a turn; append the message between turns", ErrBusy, s.header.ID)
 	}
 	msg = deepCloneMessage(msg)
 	return s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {

@@ -7,10 +7,11 @@ import (
 
 var (
 	// ErrBusy is returned by Send under the Reject busy policy when the
-	// session is already running a turn, and by Branch while a turn is
-	// in flight: the call was not accepted and nothing was written
-	// (ADR 0011 §4). Retryable — the same call succeeds once the turn
-	// has ended.
+	// session is already running a turn, and by the between-turns
+	// operations while a turn is in flight — Branch, Compact,
+	// ApplyCompaction, Uncompact and CustomMessage: the call was not
+	// accepted and nothing was written (ADR 0011 §4). Retryable — the
+	// same call succeeds once the turn has ended.
 	ErrBusy = errors.New("thread: session is busy with another turn")
 
 	// ErrNotFound is returned by Load, Append, and Delete for a session

@@ -1412,9 +1412,12 @@ func (s *Session) Usage() Usage {
 //     turn, recorded on its receipt, and runs them in acceptance
 //     order under ctx;
 //   - sends restored by Open — accepted while the session was busy,
-//     their turns never started (Queue lists them too) — and sends
-//     queued behind an approval boundary that has since been cleared
-//     or decided;
+//     their turns never started (Queue lists them too). The Send that
+//     accepted each is gone, and its context with it: Continue runs
+//     them under ctx, so canceling ctx cancels a restored turn, as it
+//     does a restored steer's follow-up;
+//   - sends queued behind an approval boundary that has since been
+//     cleared or decided, each still under its own Send's context;
 //   - an approval boundary whose every call is decided but whose
 //     resume never ran (the writer died between the two): with
 //     AutoResume on, Continue arms the resume, and the queue follows
@@ -1437,6 +1440,13 @@ func (s *Session) Continue(ctx context.Context) (*Turn, error) {
 	defer s.mu.Unlock()
 	if err := s.admitLocked(); err != nil {
 		return nil, err
+	}
+	// A restored send answers to this call from here on: whoever
+	// continues the session is the caller its turn runs for.
+	for i := range s.queue {
+		if s.queue[i].restored {
+			s.queue[i].ctx, s.queue[i].restored = ctx, false
+		}
 	}
 	var first *Turn
 	if !s.running {

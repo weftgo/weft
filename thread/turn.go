@@ -211,6 +211,10 @@ type pendingSend struct {
 	opts    []weft.RunOption
 	turn    *Turn
 	receipt string
+	// restored marks a send Open put back in the queue from its
+	// accepted receipt: its ctx is a detached placeholder — the Send
+	// that accepted it is gone — until Continue binds it to its own.
+	restored bool
 }
 
 // Send appends the prompt and runs the session's agent on the leaf's

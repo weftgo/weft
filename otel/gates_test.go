@@ -13,7 +13,8 @@ import (
 // most one a minute.
 func TestDropCounterThrottlesWarn(t *testing.T) {
 	buf := &threadSafeBuffer{}
-	d := &dropCounter{name: "test", log: slog.New(slog.NewTextHandler(buf, nil))}
+	d := newDropCounter("test")
+	d.log = slog.New(slog.NewTextHandler(buf, nil))
 	for i := 0; i < 100; i++ {
 		d.dropped(1)
 	}

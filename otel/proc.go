@@ -217,7 +217,9 @@ func addAttr(r *sdklog.Record, key string, value attribute.Value) {
 
 // dropCounter counts one destination's dropped records and logs a WARN
 // at most once a minute while drops happen — a slow or failing
-// destination starves only itself.
+// destination starves only itself. newDropCounter fixes the logger at
+// construction, before any goroutine can emit; the field is immutable
+// from then on (the old lazy assignment raced concurrent runs).
 type dropCounter struct {
 	name  string
 	count atomic.Int64
@@ -225,14 +227,15 @@ type dropCounter struct {
 	log   *slog.Logger
 }
 
+func newDropCounter(name string) *dropCounter {
+	return &dropCounter{name: name, log: slog.Default()}
+}
+
 func (d *dropCounter) dropped(n int64) {
 	total := d.count.Add(n)
 	now := time.Now().UnixNano()
 	last := d.last.Load()
 	if now-last > int64(time.Minute) && d.last.CompareAndSwap(last, now) {
-		if d.log == nil {
-			d.log = slog.Default()
-		}
 		d.log.Warn("weft/otel: destination dropped records",
 			"dest", d.name, "dropped", total)
 	}

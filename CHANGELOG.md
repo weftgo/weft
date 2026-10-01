@@ -52,6 +52,11 @@
   missed it (its own comment says so), so every span carried
   `weft.version=v0.6.0` past the release. The pushed `otel/v0.1.0` tag
   carries the stale string (owner: consider a patch tag).
+- The drop counter's logger is fixed at construction
+  (`newDropCounter`): `dropped()`'s lazy `d.log` assignment wrote a
+  plain field outside the atomics, a data race under concurrent agent
+  runs (the existing WARN-throttle test covers the behaviour; tests
+  now build the counter through the constructor).
 
 ### runtime
 

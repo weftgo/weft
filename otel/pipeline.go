@@ -267,7 +267,11 @@ func buildDest(ctx context.Context, d dest, cfg config) (*destRuntime, error) {
 	if d.contentCfg != nil {
 		contentCfg = *d.contentCfg
 	}
-	drops := &dropCounter{name: d.name}
+	// The drop counter's logger is fixed here, at construction, before
+	// any goroutine can emit (dropped()'s old lazy assignment raced
+	// concurrent runs — the atomics guarded the counters, not the
+	// field).
+	drops := newDropCounter(d.name)
 
 	logDelay, spanDelay := d.batchDelays()
 	switch d.kind {

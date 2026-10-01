@@ -604,7 +604,7 @@ func TestShapeEventCapsAndRedacts(t *testing.T) {
 	p := &destProc{content: true, contentC: ContentConfig{
 		MaxBytes: 10,
 		Redact:   func(kind weft.ContentKind, s string) string { return strings.ReplaceAll(s, "secret", "[redacted]") },
-	}, drops: &dropCounter{name: "test"}}
+	}, drops: newDropCounter("test")}
 	r := sdkRecordWith(t, "weft.delta",
 		`{"type":"text_delta","run_id":"r","text":"secret `+long+`"}`,
 		attribute.String("weft.record", "delta"))
@@ -637,7 +637,7 @@ func TestShapeEventCapsAndRedacts(t *testing.T) {
 // Strip path: a content-off chain marks records stripped and keeps the
 // shape.
 func TestStripEventMarksStripped(t *testing.T) {
-	p := &destProc{content: false, drops: &dropCounter{name: "test"}}
+	p := &destProc{content: false, drops: newDropCounter("test")}
 	r := sdkRecordWith(t, "weft.event",
 		`{"type":"tool_finish","run_id":"r","seq":1,"call_id":"c","name":"slow","content":"result text"}`,
 		attribute.String("weft.record", "event"))

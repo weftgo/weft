@@ -434,7 +434,11 @@ func (b *backend) write(ctx context.Context, tx *sql.Tx, id string, lines []stri
 	if len(lines) == 0 {
 		return did, nil // an empty append is a lookup, not a write
 	}
-	res, err := tx.ExecContext(ctx, `DELETE FROM entries WHERE session = ? AND torn = 1`, id)
+	// Only a session's final row can be torn, so the repair is one
+	// primary-key probe of that row — never a scan of the session.
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM entries WHERE session = ? AND torn = 1
+		   AND seq = (SELECT MAX(seq) FROM entries WHERE session = ?)`, id, id)
 	if err != nil {
 		return did, err
 	}

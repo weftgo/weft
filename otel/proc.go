@@ -48,7 +48,6 @@ type destProc struct {
 	contentC ContentConfig
 	noDeltas bool
 	drops    *dropCounter
-	logger   *slog.Logger
 }
 
 var _ sdklog.Processor = (*destProc)(nil)

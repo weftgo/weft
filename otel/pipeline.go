@@ -47,8 +47,6 @@ type Pipeline struct {
 	studioToken string
 
 	tracker  *runTracker
-	procs    []*destProc
-	stop     map[string]func() // per-destination heartbeat-independent stops
 	beatMu   sync.Mutex
 	beatStop chan struct{}
 	beatDone chan struct{}

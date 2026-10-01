@@ -1,7 +1,6 @@
 package studio
 
 import (
-	"container/list"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,29 +8,23 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/store"
+	"github.com/weftgo/weft/obsdb"
 )
 
 // The JSON API (plan §3). Every response is application/json; errors
 // are {"error": {"code", "message"}}. The DTOs below are the contract:
-// snake_case by hand, because RunRecord and RunResult carry no tags of
-// their own, while events, usage, and model info marshal through the
-// core's own codecs. api.ts mirrors these types on the TS side, and
+// snake_case by hand, because obsdb's rows carry no tags of their own,
+// while events, usage, and model info marshal through the core's own
+// codecs. api.ts mirrors these types on the TS side, and
 // testdata/api/*.golden.json pins the bytes on both.
 
 // Events paging (ADR 0018 §8): constants for the endpoint.
 const (
 	eventsDefaultLimit = 500
 	eventsMaxLimit     = 5000
-	// finishedRunCache is how many finished runs' event streams the
-	// paged endpoint keeps sliced in memory, so paging through a run
-	// is one store Get, not one per page. Running runs are never
-	// cached — their streams grow.
-	finishedRunCache = 8
 )
 
 func writeJSON(w http.ResponseWriter, r *http.Request, status int, v any) {
@@ -55,20 +48,15 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, msg st
 	}{code, msg}})
 }
 
-// storeError maps a store error onto the API's error codes: unknown
-// ids are 404, a recording this weft cannot decode (a newer format or
-// an unknown event type) is 409 newer_format with the upgrade message,
-// everything else is a 500 that names the failure (loud over silent,
-// ADR 0010 §2.5).
-func (a *app) storeError(w http.ResponseWriter, r *http.Request, op, id string, err error) {
+// dbError maps an obsdb error onto the API's error codes: unknown ids
+// are 404, everything else is a 500 that names the failure (loud over
+// silent, ADR 0010 §2.5's rule, carried over).
+func (a *app) dbError(w http.ResponseWriter, r *http.Request, op, id string, err error) {
 	switch {
-	case errors.Is(err, store.ErrNotFound):
+	case errors.Is(err, obsdb.ErrNotFound):
 		writeError(w, r, http.StatusNotFound, "not_found", "no run "+id)
-	case errors.Is(err, store.ErrUnknownEvent), errors.Is(err, store.ErrNewerFormat):
-		writeError(w, r, http.StatusConflict, "newer_format",
-			"recorded by a newer weft; upgrade studio")
 	default:
-		writeError(w, r, http.StatusInternalServerError, "store",
+		writeError(w, r, http.StatusInternalServerError, "internal",
 			op+" "+id+": "+err.Error())
 	}
 }
@@ -98,7 +86,7 @@ func (a *app) serveAPI(w http.ResponseWriter, r *http.Request, path string) {
 		// Everything else after /api/runs/ is a run id, slashes included:
 		// a subagent's child id is <parent>/<step>/<callID> (the core's
 		// childRunID), and its page is a full run page (B7). An unknown
-		// id still answers 404 — from the store, naming the run.
+		// id still answers 404 — from the database, naming the run.
 		if rest == "" {
 			writeError(w, r, http.StatusNotFound, "not_found", "no such api route "+path)
 			return
@@ -108,7 +96,7 @@ func (a *app) serveAPI(w http.ResponseWriter, r *http.Request, path string) {
 }
 
 // modelDTO, usage: the core types already marshal snake_case; usage is
-// embedded as-is. RunRecord does not, hence runRow.
+// embedded as-is. obsdb.RunRow does not, hence runRow.
 
 type runRow struct {
 	ID           string            `json:"id"`
@@ -127,34 +115,35 @@ type runRow struct {
 	Err          string            `json:"err"`
 }
 
-// row maps a record onto the list DTO, deriving the status the reader
-// concludes (store.DeriveStatus): a crash-orphaned running row reads
-// interrupted and is shown, never hidden (A1).
-func (a *app) row(rec store.RunRecord) runRow {
-	status := store.DeriveStatus(rec.Status, rec.Heartbeat, a.now())
-	row := runRow{
+// row maps an obsdb run row onto the list DTO. The status is the
+// database's derived one: a crash-orphaned running row reads
+// interrupted and is shown, never hidden (A1). The JSON keys are the
+// store-era ones (tags reads the row's metadata) so the existing UI
+// keeps rendering history recorded by the new sinks.
+func row(rec obsdb.RunRow) runRow {
+	out := runRow{
 		ID:           rec.ID,
-		ParentID:     rec.ParentID,
+		ParentID:     rec.ParentRunID,
 		ParentCallID: rec.ParentCallID,
 		Agent:        rec.Agent,
-		Model:        rec.Model,
+		Model:        weft.ModelInfo{Provider: rec.Provider, Name: rec.Model},
 		ManifestHash: rec.ManifestHash,
 		WeftVersion:  rec.WeftVersion,
 		Started:      rec.Started,
-		Status:       string(status),
+		Status:       string(rec.Status),
 		Steps:        rec.Steps,
 		Usage:        rec.Usage,
-		Tags:         rec.Tags,
+		Tags:         rec.Meta,
 		Err:          rec.Err,
 	}
-	if rec.Tags == nil {
-		row.Tags = map[string]string{}
+	if out.Tags == nil {
+		out.Tags = map[string]string{}
 	}
-	if !rec.Finished.IsZero() {
-		f := rec.Finished
-		row.Finished = &f
+	if rec.Finished != nil {
+		f := *rec.Finished
+		out.Finished = &f
 	}
-	return row
+	return out
 }
 
 type runsPage struct {
@@ -168,11 +157,11 @@ type runDoc struct {
 	// EventCount sizes the replay scrubber before the pages arrive
 	// (plan §3); the run document itself never carries events — they
 	// are paged (ADR 0018 §8).
-	EventCount int `json:"event_count"`
-	// Result is the store's own result document (store.MarshalResult,
-	// envelope unwrapped): the store is the single owner of
-	// RunResult's JSON shape, so a step field added there appears here
-	// without a studio change. null while running.
+	EventCount int64 `json:"event_count"`
+	// Result is always null on obsdb: the store's result document died
+	// with the store. What replaces it — the transcript (messages
+	// bodies) plus the run_finish event — arrives with step 6's
+	// /transcript route; the field keeps the shape the UI reads.
 	Result   json.RawMessage `json:"result"`
 	Children []runRow        `json:"children"`
 }
@@ -181,16 +170,16 @@ type runDoc struct {
 // the event itself, so a client can verify continuity page to page and
 // replay scrubs on an explicit index (plan §3).
 type posEvent struct {
-	Pos   int64      `json:"pos"`
-	Event weft.Event `json:"event"`
+	Pos   int64           `json:"pos"`
+	Event json.RawMessage `json:"event"`
 }
 
 type eventsPage struct {
-	// Events is the slice [after, after+len) of the run's stream, in
-	// Seq order, Nested inline. Empty (not null) past the end.
+	// Events is the page's slice of the run's durable stream, in pos
+	// order. Empty (not null) past the end.
 	Events []posEvent `json:"events"`
-	// NextAfter is the position after the last event returned, when
-	// more buffered events remain; else null.
+	// NextAfter is the first position of the next page when more
+	// buffered events remain; else null.
 	NextAfter *int64 `json:"next_after"`
 	// Done is true only when the run has finished (succeeded, failed,
 	// or interrupted — never running) and every event has been
@@ -200,7 +189,7 @@ type eventsPage struct {
 }
 
 // serveMeta answers api/meta: versions, whether a manifest is present,
-// the title, a best-effort store backend name, and the capabilities
+// the title, a best-effort database backend name, and the capabilities
 // the backing server declared (the open Handler: none).
 func (a *app) serveMeta(w http.ResponseWriter, r *http.Request) {
 	caps := a.capabilities
@@ -219,23 +208,24 @@ func (a *app) serveMeta(w http.ResponseWriter, r *http.Request) {
 		StudioVersion: Version,
 		HasManifest:   len(a.manifest) > 0,
 		Title:         a.title,
-		Store:         storeKind(a.store),
+		Store:         dbKind(a.db),
 		Capabilities:  caps,
 	})
 }
 
 // serveRuns answers api/runs: the query params map 1:1 onto
-// store.Query. parent is absent (top-level runs only — children never
-// flood the list), "*" (every run), or a run id (its children).
-// tag.<k>=<v> pairs all must match. before is the paging cursor
-// (RFC 3339); next_before is the last row's started when the page was
-// full, else null.
+// obsdb.RunQuery. parent is absent (top-level runs only — children
+// never flood the list), "*" (every run), or a run id (its children).
+// tag.<k>=<v> pairs all must match (the row's metadata, what the store
+// era called tags). before is the paging cursor (RFC 3339);
+// next_before is the last row's started when the page was full, else
+// null.
 func (a *app) serveRuns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	query := store.Query{
-		Agent:    q.Get("agent"),
-		Status:   store.Status(q.Get("status")),
-		ParentID: parentParam(q),
+	query := obsdb.RunQuery{
+		Agent:       q.Get("agent"),
+		Status:      obsdb.Status(q.Get("status")),
+		ParentRunID: parentParam(q),
 	}
 	if v := q.Get("before"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
@@ -257,35 +247,35 @@ func (a *app) serveRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	for k, vs := range q {
 		if name, ok := strings.CutPrefix(k, "tag."); ok && name != "" {
-			if query.Tags == nil {
-				query.Tags = map[string]string{}
+			if query.Meta == nil {
+				query.Meta = map[string]string{}
 			}
-			query.Tags[name] = vs[0]
+			query.Meta[name] = vs[0]
 		}
 	}
 
-	page, err := a.store.List(r.Context(), query)
+	page, err := a.db.Runs(r.Context(), query)
 	if err != nil {
-		a.storeError(w, r, "list", "", err)
+		a.dbError(w, r, "list", "", err)
 		return
 	}
 	out := runsPage{Total: page.Total, Runs: make([]runRow, 0, len(page.Runs))}
 	for _, rec := range page.Runs {
-		out.Runs = append(out.Runs, a.row(rec))
+		out.Runs = append(out.Runs, row(rec))
 	}
-	// The page was full when it hit the store's effective limit, so a
-	// younger run may exist: hand the client the cursor. effectiveLimit
-	// mirrors the store's clamps (Query.Limit: 0 means 50, above 500
-	// clamp to 500) — golden-pinned together.
-	if eff := effectiveLimit(query.Limit); len(page.Runs) == eff && len(page.Runs) > 0 {
+	// The page was full when it hit the database's effective limit, so
+	// a younger run may exist: hand the client the cursor.
+	// obsdb.LimitOf is the clamp the backend applies (0 means 50,
+	// above 500 clamps to 500) — golden-pinned together.
+	if eff := obsdb.LimitOf(query.Limit); len(page.Runs) == eff && len(page.Runs) > 0 {
 		next := page.Runs[len(page.Runs)-1].Started
 		out.NextBefore = &next
 	}
 	writeJSON(w, r, http.StatusOK, out)
 }
 
-// parentParam resolves the parent query param onto Query.ParentID,
-// whose zero value already means "top-level only" (store.Query):
+// parentParam resolves the parent query param onto RunQuery.ParentRunID,
+// whose zero value already means "top-level only" (obsdb.RunQuery):
 // absent → top-level; "*" → every run; a concrete id → that run's
 // children.
 func parentParam(q map[string][]string) string {
@@ -299,63 +289,35 @@ func parentParam(q map[string][]string) string {
 	return vs[0]
 }
 
-// effectiveLimit mirrors store's unexported limitOf: 0 means the
-// default 50, values above 500 clamp to 500.
-func effectiveLimit(n int) int {
-	switch {
-	case n <= 0:
-		return 50
-	case n > 500:
-		return 500
-	default:
-		return n
-	}
-}
-
-// serveRun answers api/runs/{id}: the row, the result document (the
-// store's own JSON, envelope unwrapped), and the child runs. Events
-// are deliberately not here — they are paged (ADR 0018 §8).
+// serveRun answers api/runs/{id}: the row and the child runs (obsdb's
+// Run detail carries both). Events are deliberately not here — they
+// are paged (ADR 0018 §8).
 func (a *app) serveRun(w http.ResponseWriter, r *http.Request, id string) {
-	rec, err := a.store.Get(r.Context(), id)
+	det, err := a.db.Run(r.Context(), id)
 	if err != nil {
-		a.storeError(w, r, "get", id, err)
-		return
-	}
-	kids, err := a.store.List(r.Context(), store.Query{ParentID: id})
-	if err != nil {
-		a.storeError(w, r, "list", id, err)
+		a.dbError(w, r, "get", id, err)
 		return
 	}
 	doc := runDoc{
-		runRow:     a.row(rec),
-		EventCount: len(rec.Events),
+		runRow:     row(det.RunRow),
+		EventCount: det.EventCount,
 		Result:     json.RawMessage("null"),
-		Children:   make([]runRow, 0, len(kids.Runs)),
+		Children:   make([]runRow, 0, len(det.Children)),
 	}
-	for _, kid := range kids.Runs {
-		doc.Children = append(doc.Children, a.row(kid))
-	}
-	if b, err := store.MarshalResult(rec.Result); err == nil {
-		var env struct {
-			Result json.RawMessage `json:"result"`
-		}
-		if json.Unmarshal(b, &env) == nil && len(env.Result) > 0 {
-			doc.Result = env.Result
-		}
+	for _, kid := range det.Children {
+		doc.Children = append(doc.Children, row(kid))
 	}
 	writeJSON(w, r, http.StatusOK, doc)
 }
 
 // serveRunEvents answers api/runs/{id}/events?after=&limit=: one page
-// of the run's event stream, 0-based positions. `after` is the first
-// position returned (next_after feeds straight back in);
-// -1 and 0 both read from the start (-1 is the documented default for
-// "the whole stream"). The whole stream is one store Get, sliced;
-// runs whose stored status is terminal are cached (finishedRunCache)
-// so a multi-page walk costs one Get, and anything still stored
-// running — including a row that only *reads* interrupted through a
-// stale heartbeat — is re-read on every call, so a resumed run's tail
-// is never served from a stale snapshot.
+// of the run's durable event stream, 0-based positions. `after` is the
+// first position returned (next_after feeds straight back in); -1 and
+// 0 both read from the start (-1 is the documented default for "the
+// whole stream"). The database pages natively; done is its Done flag
+// OR the row reading terminal through derivation (a crash orphan —
+// running in the table, interrupted at read time — is finished in
+// effect, exactly as the store era served it).
 func (a *app) serveRunEvents(w http.ResponseWriter, r *http.Request, id string) {
 	q := r.URL.Query()
 	after := int64(0)
@@ -381,37 +343,38 @@ func (a *app) serveRunEvents(w http.ResponseWriter, r *http.Request, id string) 
 		}
 	}
 
-	events, finished, ok := a.events.get(id)
-	if !ok {
-		rec, err := a.store.Get(r.Context(), id)
+	// The API's cursor is inclusive (the first position to return);
+	// obsdb's is exclusive (positions strictly after). One page is the
+	// limit events from after: events at pos >= after.
+	page, err := a.db.Events(r.Context(), id, after-1, limit)
+	if err != nil {
+		a.dbError(w, r, "events", id, err)
+		return
+	}
+	done := page.Done
+	if !done {
+		// A row that reads interrupted at derivation time is terminal
+		// in effect: its tail must report done, or a polling client
+		// never stops. Queried only when the database itself did not
+		// answer done (a running or interrupted row).
+		det, err := a.db.Run(r.Context(), id)
 		if err != nil {
-			a.storeError(w, r, "get", id, err)
+			a.dbError(w, r, "events", id, err)
 			return
 		}
-		events = rec.Events
-		finished = store.DeriveStatus(rec.Status, rec.Heartbeat, a.now()) != store.Running
-		if rec.Status == store.Succeeded || rec.Status == store.Failed {
-			a.events.put(id, events)
+		if det.Status != obsdb.StatusRunning {
+			done = true
 		}
 	}
-
-	// A cursor past the end (a stale client, a hand-typed URL) reads as
-	// the end: an empty page, never a negative slice capacity.
-	after = min(after, int64(len(events)))
-	end := after + int64(limit)
-	if end > int64(len(events)) || end < 0 {
-		end = int64(len(events))
+	out := eventsPage{Events: make([]posEvent, 0, len(page.Events)), Done: done}
+	for _, pe := range page.Events {
+		out.Events = append(out.Events, posEvent{Pos: pe.Pos, Event: pe.Event})
 	}
-	page := eventsPage{Events: make([]posEvent, 0, end-after)}
-	for pos := after; pos < end; pos++ {
-		page.Events = append(page.Events, posEvent{Pos: pos, Event: events[pos]})
+	if page.NextAfter != nil {
+		next := *page.NextAfter + 1
+		out.NextAfter = &next
 	}
-	if end < int64(len(events)) {
-		next := end
-		page.NextAfter = &next
-	}
-	page.Done = finished && end >= int64(len(events))
-	writeJSON(w, r, http.StatusOK, page)
+	writeJSON(w, r, http.StatusOK, out)
 }
 
 // serveManifest answers api/manifest with the bytes passed to
@@ -430,69 +393,11 @@ func (a *app) serveManifest(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(a.manifest)
 }
 
-// eventCache is the finished-run LRU behind the events endpoint: at
-// most max finished runs' streams, most recently served first. The
-// slices are shared, never mutated — pages copy out of them — so one
-// cached stream serves any number of concurrent readers.
-type eventCache struct {
-	mu    sync.Mutex
-	max   int
-	order *list.List // front = most recently served; values are *cachedEvents
-	byID  map[string]*list.Element
-}
-
-type cachedEvents struct {
-	id     string
-	events []weft.Event
-}
-
-func newEventCache(max int) *eventCache {
-	return &eventCache{
-		max:   max,
-		order: list.New(),
-		byID:  map[string]*list.Element{},
-	}
-}
-
-// get returns the run's cached stream. The third return is whether the
-// run was confirmed finished when cached; a miss means "ask the store".
-func (c *eventCache) get(id string) (events []weft.Event, finished, ok bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	el, hit := c.byID[id]
-	if !hit {
-		return nil, false, false
-	}
-	c.order.MoveToFront(el)
-	ce := el.Value.(*cachedEvents)
-	return ce.events, true, true
-}
-
-// put caches a finished run's stream, evicting past max.
-func (c *eventCache) put(id string, events []weft.Event) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if el, ok := c.byID[id]; ok {
-		c.order.MoveToFront(el)
-		el.Value.(*cachedEvents).events = events
-		return
-	}
-	c.byID[id] = c.order.PushFront(&cachedEvents{id: id, events: events})
-	for c.order.Len() > c.max {
-		oldest := c.order.Back()
-		if oldest == nil {
-			break
-		}
-		c.order.Remove(oldest)
-		delete(c.byID, oldest.Value.(*cachedEvents).id)
-	}
-}
-
-// storeKind names the store's backend for api/meta, best effort: the
-// dynamic type's full name ("*store.memStore" → "memory", anything
-// carrying "sqlite" → "sqlite"), else its bare type name.
-func storeKind(s store.Store) string {
-	full := fmt.Sprintf("%T", s)
+// dbKind names the database's backend for api/meta, best effort: the
+// dynamic type's full name ("*sqlite.DB" → "sqlite", anything else
+// carrying "mem" → "memory"), else its bare type name.
+func dbKind(db obsdb.DB) string {
+	full := fmt.Sprintf("%T", db)
 	lower := strings.ToLower(full)
 	switch {
 	case strings.Contains(lower, "mem"):

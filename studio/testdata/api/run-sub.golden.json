@@ -7,136 +7,40 @@
     "provider": "wefttest",
     "name": "script"
   },
-  "manifest_hash": "786a2e04dd01168fc5ad4e20e979f2138ae9337cda2a8ce2473bb0ab16cff896",
+  "manifest_hash": "sha256:demo-fleet",
   "weft_version": "(test)",
   "started": "2020-01-01T09:02:00.123Z",
   "finished": "2020-01-01T09:02:05.123Z",
   "status": "succeeded",
-  "steps": 2,
+  "steps": 1,
   "usage": {
-    "input_tokens": 30,
-    "output_tokens": 15
+    "input_tokens": 12,
+    "output_tokens": 6
   },
   "tags": {
     "cwd": "/tmp/demo"
   },
   "err": "",
-  "event_count": 14,
-  "result": {
-    "id": "r_sub",
-    "stop_reason": "stop",
-    "messages": [
-      {
-        "role": "user",
-        "content": [
-          {
-            "type": "text",
-            "text": "Where is order 42?"
-          }
-        ]
-      },
-      {
-        "role": "assistant",
-        "content": [
-          {
-            "type": "tool_call",
-            "id": "call_1",
-            "name": "research",
-            "args": {
-              "prompt": "status of order 42"
-            }
-          }
-        ]
-      },
-      {
-        "role": "tool",
-        "content": [
-          {
-            "type": "tool_result",
-            "call_id": "call_1",
-            "name": "research",
-            "content": "order 42 shipped this morning",
-            "is_error": false
-          }
-        ]
-      },
-      {
-        "role": "assistant",
-        "content": [
-          {
-            "type": "text",
-            "text": "Order 42 shipped."
-          }
-        ]
-      }
-    ],
-    "steps": [
-      {
-        "index": 0,
-        "stop_reason": "tool_calls",
-        "usage": {
-          "input_tokens": 10,
-          "output_tokens": 5
-        },
-        "tool_calls": [
-          {
-            "type": "tool_call",
-            "id": "call_1",
-            "name": "research",
-            "args": {
-              "prompt": "status of order 42"
-            }
-          }
-        ],
-        "results": [
-          {
-            "type": "tool_result",
-            "call_id": "call_1",
-            "name": "research",
-            "content": "order 42 shipped this morning",
-            "is_error": false
-          }
-        ],
-        "subagent_usage": {
-          "call_1": {
-            "input_tokens": 10,
-            "output_tokens": 5
-          }
-        }
-      },
-      {
-        "index": 1,
-        "stop_reason": "stop",
-        "usage": {
-          "input_tokens": 10,
-          "output_tokens": 5
-        },
-        "text": "Order 42 shipped."
-      }
-    ],
-    "usage": {
-      "input_tokens": 30,
-      "output_tokens": 15
-    }
-  },
+  "event_count": 6,
+  "result": null,
   "children": [
     {
-      "id": "r_sub/0/call_1",
+      "id": "r_sub/0/call_3",
       "parent_id": "r_sub",
-      "parent_call_id": "call_1",
+      "parent_call_id": "call_3",
       "agent": "researcher",
       "model": {
         "provider": "wefttest",
         "name": "script"
       },
-      "manifest_hash": "32c46a4912573f352b152bd2f1ee3ce18ff52d2ed3a4fabdb7c8e7c4d6c412bb",
+      "manifest_hash": "sha256:demo-fleet",
       "weft_version": "(test)",
       "started": "2020-01-01T09:02:03.123Z",
       "finished": "2020-01-01T09:02:04.123Z",
       "status": "succeeded",
       "steps": 1,
       "usage": {
-        "input_tokens": 10,
+        "input_tokens": 9,
         "output_tokens": 5
       },
       "tags": {

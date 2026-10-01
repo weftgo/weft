@@ -2,99 +2,27 @@
   "id": "r_fail",
   "parent_id": "",
   "parent_call_id": "",
-  "agent": "support",
+  "agent": "orders",
   "model": {
     "provider": "wefttest",
     "name": "script"
   },
-  "manifest_hash": "b9d9df86cf77c5476cfe727b80ac1f0c45173c84920e1d4e081a014b32174ae3",
+  "manifest_hash": "sha256:demo-fleet",
   "weft_version": "(test)",
   "started": "2020-01-01T09:01:00.123Z",
   "finished": "2020-01-01T09:01:02.123Z",
   "status": "failed",
   "steps": 1,
   "usage": {
-    "input_tokens": 10,
-    "output_tokens": 5
+    "input_tokens": 8,
+    "output_tokens": 2
   },
   "tags": {
     "cwd": "/tmp/demo"
   },
-  "err": "weft: run failed at step 1: model stream: wefttest: injected provider 500",
-  "event_count": 7,
-  "result": {
-    "id": "r_fail",
-    "stop_reason": "tool_calls",
-    "messages": [
-      {
-        "role": "user",
-        "content": [
-          {
-            "type": "text",
-            "text": "Where is order 43?"
-          }
-        ]
-      },
-      {
-        "role": "assistant",
-        "content": [
-          {
-            "type": "tool_call",
-            "id": "call_1",
-            "name": "lookup_order",
-            "args": {
-              "order_id": "43"
-            }
-          }
-        ]
-      },
-      {
-        "role": "tool",
-        "content": [
-          {
-            "type": "tool_result",
-            "call_id": "call_1",
-            "name": "lookup_order",
-            "content": "order 43: shipped",
-            "is_error": false
-          }
-        ]
-      }
-    ],
-    "steps": [
-      {
-        "index": 0,
-        "stop_reason": "tool_calls",
-        "usage": {
-          "input_tokens": 10,
-          "output_tokens": 5
-        },
-        "tool_calls": [
-          {
-            "type": "tool_call",
-            "id": "call_1",
-            "name": "lookup_order",
-            "args": {
-              "order_id": "43"
-            }
-          }
-        ],
-        "results": [
-          {
-            "type": "tool_result",
-            "call_id": "call_1",
-            "name": "lookup_order",
-            "content": "order 43: shipped",
-            "is_error": false
-          }
-        ]
-      }
-    ],
-    "usage": {
-      "input_tokens": 10,
-      "output_tokens": 5
-    }
-  },
+  "err": "wefttest: injected provider 500",
+  "event_count": 4,
+  "result": null,
   "children": []
 }
 

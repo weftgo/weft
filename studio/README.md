@@ -1,7 +1,7 @@
 # weft studio — the Inspector
 
-A read-only UI over a [run store](../store): the runs list, the run
-page (steps, tool calls and results, subagents inline, truncation
+A read-only UI over an [obsdb](../obsdb) database: the runs list, the
+run page (steps, tool calls and results, subagents inline, truncation
 badged), guaranteed replay over the event index, raw JSON, and agent
 and tool cards from the manifest. One `http.Handler`, no build step
 for users, fully offline.
@@ -10,10 +10,14 @@ for users, fully offline.
 
 ```go
 mux.Handle("/studio/", http.StripPrefix("/studio",
-    studio.Handler(myStore, studio.Manifest(manifestBytes)))
+    studio.Handler(studio.DB(myDB), studio.Manifest(manifestBytes))))
 ```
 
-Then record runs with `store.Record` (see
+`studio.DB(db)` serves the `obsdb.DB` you pass (setup A:
+`studio.DB(otel.LocalDB())` — the same database weft/otel's Local
+destination writes); `studio.Open(path)` opens an obsdb sqlite file;
+with neither, Handler opens `$WEFT_DB` or `./.weft/weft.db`. Record
+runs with a weft/otel pipeline pointed at the same path (see
 [examples/basic](./examples/basic)) and open
 `http://127.0.0.1:7331/studio/`. Try the example end to end:
 
@@ -126,4 +130,6 @@ The dev loop is two terminals: `go run ./studio/examples/basic
 dev -- --base /studio/` (Vite on :3000 proxying `/studio/api`).
 
 Go module: `github.com/weftgo/weft/studio`, requiring the tagged
-`weft` and `weft/store` — standalone-importable, no `replace`.
+`weft` and (until they tag, step 8's release) `weft/obsdb` through a
+directory `replace` that the release step drops — standalone-importable
+after that, no `replace`.

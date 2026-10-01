@@ -9,144 +9,249 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/store"
+	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/obsdb/sqlite"
 	"github.com/weftgo/weft/wefttest"
 )
 
-// The fixtures (plan §3): a success with a tool call, a failure, a
-// parent with a subagent (the child records itself), and a
-// crash-orphaned "running" row whose stale heartbeat reads
-// interrupted. Records run through real wefttest agents and
-// store.Record, then their times are pinned so the goldens are
-// byte-stable; the only normalization left is weft_version, which
-// depends on where the test runs.
+// The fixtures (plan §3, rebuilt on obsdb for the step-5 interim read
+// path): a success with a tool call, a failure, a parent with a
+// subagent (the child is its own run, linked by parent_run_id and
+// parent_call_id), and a crash-orphaned "running" row whose stale
+// last-seen reads interrupted. Each run is one obsdb Batch — the
+// events, messages and invoke span a real pipeline would write — with
+// every time pinned, so the goldens are byte-stable. The only
+// normalization left is weft_version, which depends on where the test
+// runs.
 
 var fixtureTags = map[string]string{"cwd": "/tmp/demo"}
 
 // fixtureT0 anchors every fixture time: 2020-01-01T09:00:00Z — far
-// enough in the past that DeriveStatus concludes interrupted for the
-// stale row at any future "now", so the goldens never flip.
+// enough in the past that the derived status of the stale row reads
+// interrupted at any future "now", so the goldens never flip.
 var fixtureT0 = time.Date(2020, 1, 1, 9, 0, 0, 123000000, time.UTC)
 
-func fixtureStore(t *testing.T) store.Store {
-	t.Helper()
-	s := store.Memory()
-	ctx := context.Background()
+const (
+	fxTrace = "0102030405060708090a0b0c0d0e0f10"
+	fxSpan  = "0102030405060708"
+	// fxHash mirrors what weft.New stamps at construction (the
+	// manifest hash rides every record and span).
+	fxHash = "sha256:demo-fleet"
+)
 
-	lookup := weft.Tool("lookup_order", "Look up an order by ID.",
-		func(_ context.Context, in struct {
-			OrderID string `json:"order_id"`
-		}) (string, error) {
-			return "order " + in.OrderID + ": shipped", nil
-		})
-
-	// r_ok: one tool call, then the answer.
-	ok := weft.New(wefttest.Script(
-		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"42"}`}),
-		wefttest.Say("Order 42 shipped this morning."),
-	), weft.Name("orders"), lookup, store.Record(s, store.Tags(fixtureTags)))
-	if _, err := ok.Generate(ctx, weft.Prompt("Where is order 42?"), weft.RunID("r_ok")); err != nil {
-		t.Fatal(err)
+// fxRecord builds one weft log record for run at time at: kind is
+// event | messages, pos its durable position, body its wire JSON.
+// The identity chain, the record contract attributes and the caller
+// metadata a real run carries ride Attrs.
+func fxRecord(run, kind, eventType string, pos int64, at time.Time, body string) obsdb.Record {
+	attrs := map[string]any{
+		"weft.run.id":        run,
+		"weft.record":        kind,
+		"weft.version":       "v0.6.0",
+		"weft.manifest.hash": fxHash,
+		"gen_ai.agent.name":  "orders",
 	}
-
-	// r_fail: the model stream fails mid-run; the partial transcript
-	// and the error text are part of the record.
-	fail := weft.New(wefttest.Script(
-		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"43"}`}),
-		wefttest.SayThenFail("Let me look that up…", errors.New("wefttest: injected provider 500")),
-	), weft.Name("support"), lookup, store.Record(s, store.Tags(fixtureTags)))
-	if _, err := fail.Generate(ctx, weft.Prompt("Where is order 43?"), weft.RunID("r_fail")); err == nil {
-		t.Fatal("r_fail: want the injected failure")
+	switch kind {
+	case "event":
+		attrs["weft.event.type"] = eventType
+		attrs["weft.event.pos"] = pos
+	case "messages":
+		attrs["weft.messages.index"] = pos
 	}
-
-	// r_sub: a parent that delegates to a researcher subagent; the
-	// child's record links back via parent_id and parent_call_id.
-	researcher := weft.New(wefttest.Script(
-		wefttest.Say("order 42 shipped this morning"),
-	), weft.Name("researcher"), store.Record(s, store.Tags(fixtureTags)))
-	sub := weft.New(wefttest.Script(
-		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"status of order 42"}`}),
-		wefttest.Say("Order 42 shipped."),
-	), weft.Name("orders"), store.Record(s, store.Tags(fixtureTags)),
-		weft.Subagent("research", "Summarize an order's status.", researcher))
-	if _, err := sub.Generate(ctx, weft.Prompt("Where is order 42?"), weft.RunID("r_sub")); err != nil {
-		t.Fatal(err)
+	for k, v := range fixtureTags {
+		attrs[k] = v
 	}
-
-	// r_stale: a hand-built crash orphan — status running, heartbeat
-	// minutes stale, events mid-step and no RunFinish.
-	staleStart := fixtureT0.Add(3 * time.Minute)
-	stale := store.RunRecord{
-		ID:        "r_stale",
-		Agent:     "orders",
-		Model:     weft.ModelInfo{Provider: "wefttest", Name: "script"},
-		Started:   staleStart,
-		Heartbeat: staleStart,
-		Status:    store.Running,
-		Tags:      map[string]string{"cwd": "/tmp/demo"},
-		Events: []weft.Event{
-			weft.RunStart{ID: "r_stale", Agent: "orders", Model: weft.ModelInfo{Provider: "wefttest", Name: "script"}},
-			weft.StepStart{RunID: "r_stale", Index: 0},
-			weft.TextDelta{RunID: "r_stale", Text: "Let me check that order…"},
-		},
+	return obsdb.Record{
+		Time: at, TraceID: fxTrace, SpanID: fxSpan, Severity: 9,
+		EventName: "weft." + kind, Body: body, Service: "studio-test",
+		Attrs: attrs, Resource: map[string]any{"service.name": "studio-test"},
 	}
-	if err := s.Save(ctx, stale); err != nil {
-		t.Fatal(err)
-	}
-
-	// Pin the recorded times: started/finished/heartbeat per run, in
-	// list order (newest first) — r_stale, r_sub (+child), r_fail, r_ok.
-	pins := map[string][3]time.Time{
-		"r_ok":   {fixtureT0, fixtureT0.Add(2 * time.Second), fixtureT0.Add(2 * time.Second)},
-		"r_fail": {fixtureT0.Add(time.Minute), fixtureT0.Add(time.Minute + 2*time.Second), fixtureT0.Add(time.Minute + 2*time.Second)},
-		"r_sub":  {fixtureT0.Add(2 * time.Minute), fixtureT0.Add(2*time.Minute + 5*time.Second), fixtureT0.Add(2*time.Minute + 5*time.Second)},
-	}
-	for _, rec := range allRuns(t, s) {
-		p, ok := pins[rec.ID]
-		if !ok {
-			continue // r_stale is pinned at construction; children below
-		}
-		rec.Started, rec.Finished, rec.Heartbeat = p[0], p[1], p[2]
-		if err := s.Save(ctx, rec); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// The child's window sits inside the parent's.
-	for _, rec := range allRuns(t, s) {
-		if rec.ParentID != "r_sub" {
-			continue
-		}
-		rec.Started = fixtureT0.Add(2*time.Minute + 3*time.Second)
-		rec.Finished = fixtureT0.Add(2*time.Minute + 4*time.Second)
-		rec.Heartbeat = rec.Finished
-		if err := s.Save(ctx, rec); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return s
 }
 
-func allRuns(t *testing.T, s store.Store) []store.RunRecord {
+// fxSpanRec builds a run's invoke_agent span: status 1 ok or 2 error,
+// ending at end with the usage and step count the core reports.
+func fxSpanRec(run string, start, end time.Time, status int, statusMsg string, inTok, outTok int64) obsdb.Span {
+	attrs := map[string]any{
+		"gen_ai.operation.name":      "invoke_agent",
+		"weft.run.id":                run,
+		"gen_ai.agent.name":          "orders",
+		"gen_ai.provider.name":       "wefttest",
+		"gen_ai.request.model":       "script",
+		"gen_ai.usage.input_tokens":  inTok,
+		"gen_ai.usage.output_tokens": outTok,
+		"weft.run.steps":             int64(1),
+		"weft.version":               "v0.6.0",
+		"weft.manifest.hash":         fxHash,
+	}
+	for k, v := range fixtureTags {
+		attrs[k] = v
+	}
+	return obsdb.Span{
+		TraceID: fxTrace, SpanID: fxSpan, Name: "invoke_agent", Kind: 1,
+		Start: start, End: end, StatusCode: status, StatusMessage: statusMsg,
+		Service: "studio-test", Attrs: attrs, Resource: map[string]any{"service.name": "studio-test"},
+	}
+}
+
+// fixtureDB writes the four fixture runs into one in-memory obsdb.
+//
+//   - r_ok: one tool call, then the answer (t0 .. t0+2s).
+//   - r_fail: the model stream fails mid-run; the partial transcript
+//     and the error text are part of the row (t0+1m .. +2s).
+//   - r_sub: a parent that delegates to a researcher subagent; the
+//     child run records itself and links back (t0+2m .. +5s, child
+//     +3s .. +4s). The child's id carries slashes (childRunID).
+//   - r_stale: a hand-built crash orphan — no run_finish, no span, a
+//     last-seen minutes stale, events mid-step (t0+3m).
+func fixtureDB(t *testing.T) obsdb.DB {
 	t.Helper()
-	page, err := s.List(context.Background(), store.Query{ParentID: "*"})
+	db, err := sqlite.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out []store.RunRecord
-	for _, rec := range page.Runs {
-		full, err := s.Get(context.Background(), rec.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out = append(out, full)
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+
+	okAt := func(d time.Duration) time.Time { return fixtureT0.Add(d) }
+
+	// r_ok
+	okEvents := []obsdb.Record{
+		fxRecord("r_ok", "event", "run_start", 0, okAt(0),
+			`{"type":"run_start","id":"r_ok","model":{"provider":"wefttest","name":"script"},"agent":"orders"}`),
+		fxRecord("r_ok", "event", "step_start", 1, okAt(300*time.Millisecond),
+			`{"type":"step_start","run_id":"r_ok","index":0}`),
+		fxRecord("r_ok", "event", "tool_start", 2, okAt(500*time.Millisecond),
+			`{"type":"tool_start","run_id":"r_ok","seq":1,"call_id":"call_1","name":"lookup_order","args":{"order_id":"42"}}`),
+		fxRecord("r_ok", "event", "tool_finish", 3, okAt(time.Second),
+			`{"type":"tool_finish","run_id":"r_ok","seq":1,"call_id":"call_1","name":"lookup_order","content":"order 42: shipped","is_error":false}`),
+		fxRecord("r_ok", "event", "step_finish", 4, okAt(1500*time.Millisecond),
+			`{"type":"step_finish","run_id":"r_ok","index":0,"reason":"end_turn","usage":{"input_tokens":10,"output_tokens":4}}`),
+		fxRecord("r_ok", "event", "run_finish", 5, okAt(2*time.Second),
+			`{"type":"run_finish","run_id":"r_ok","usage":{"input_tokens":10,"output_tokens":4},"steps":1}`),
+		fxRecord("r_ok", "messages", "", 0, okAt(100*time.Millisecond),
+			`[{"role":"user","content":[{"type":"text","text":"Where is order 42?"}]}]`),
+		fxRecord("r_ok", "messages", "", 1, okAt(2*time.Second),
+			`[{"role":"assistant","content":[{"type":"text","text":"Order 42 shipped this morning."}]}]`),
 	}
-	return out
+	if err := db.Write(ctx, obsdb.Batch{Records: okEvents, Spans: []obsdb.Span{
+		fxSpanRec("r_ok", okAt(0), okAt(2*time.Second), 1, "", 10, 4),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// r_fail
+	failAt := func(d time.Duration) time.Time { return fixtureT0.Add(time.Minute + d) }
+	failEvents := []obsdb.Record{
+		fxRecord("r_fail", "event", "run_start", 0, failAt(0),
+			`{"type":"run_start","id":"r_fail","model":{"provider":"wefttest","name":"script"},"agent":"orders"}`),
+		fxRecord("r_fail", "event", "step_start", 1, failAt(300*time.Millisecond),
+			`{"type":"step_start","run_id":"r_fail","index":0}`),
+		fxRecord("r_fail", "event", "tool_start", 2, failAt(500*time.Millisecond),
+			`{"type":"tool_start","run_id":"r_fail","seq":1,"call_id":"call_2","name":"lookup_order","args":{"order_id":"43"}}`),
+		fxRecord("r_fail", "event", "tool_finish", 3, failAt(time.Second),
+			`{"type":"tool_finish","run_id":"r_fail","seq":1,"call_id":"call_2","name":"lookup_order","content":"order 43: backordered","is_error":false}`),
+		fxRecord("r_fail", "messages", "", 0, failAt(100*time.Millisecond),
+			`[{"role":"user","content":[{"type":"text","text":"Where is order 43?"}]}]`),
+	}
+	if err := db.Write(ctx, obsdb.Batch{Records: failEvents, Spans: []obsdb.Span{
+		fxSpanRec("r_fail", failAt(0), failAt(2*time.Second), 2, "wefttest: injected provider 500", 8, 2),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// r_sub and its child. The parent's durable stream carries no
+	// Nested wrappers — the child is its own run, joined by
+	// parent_run_id / parent_call_id (S4.3's fold input, step 6).
+	subAt := func(d time.Duration) time.Time { return fixtureT0.Add(2*time.Minute + d) }
+	const childID = "r_sub/0/call_3"
+	subEvents := []obsdb.Record{
+		fxRecord("r_sub", "event", "run_start", 0, subAt(0),
+			`{"type":"run_start","id":"r_sub","model":{"provider":"wefttest","name":"script"},"agent":"orders"}`),
+		fxRecord("r_sub", "event", "step_start", 1, subAt(300*time.Millisecond),
+			`{"type":"step_start","run_id":"r_sub","index":0}`),
+		fxRecord("r_sub", "event", "tool_start", 2, subAt(500*time.Millisecond),
+			`{"type":"tool_start","run_id":"r_sub","seq":1,"call_id":"call_3","name":"research","args":{"prompt":"status of order 42"}}`),
+		fxRecord("r_sub", "event", "tool_finish", 3, subAt(4*time.Second),
+			`{"type":"tool_finish","run_id":"r_sub","seq":1,"call_id":"call_3","name":"research","content":"order 42 shipped this morning","is_error":false}`),
+		fxRecord("r_sub", "event", "step_finish", 4, subAt(4500*time.Millisecond),
+			`{"type":"step_finish","run_id":"r_sub","index":0,"reason":"end_turn","usage":{"input_tokens":12,"output_tokens":6}}`),
+		fxRecord("r_sub", "event", "run_finish", 5, subAt(5*time.Second),
+			`{"type":"run_finish","run_id":"r_sub","usage":{"input_tokens":12,"output_tokens":6},"steps":1}`),
+		fxRecord("r_sub", "messages", "", 0, subAt(100*time.Millisecond),
+			`[{"role":"user","content":[{"type":"text","text":"Where is order 42?"}]}]`),
+		fxRecord("r_sub", "messages", "", 1, subAt(5*time.Second),
+			`[{"role":"assistant","content":[{"type":"text","text":"Order 42 shipped."}]}]`),
+	}
+	if err := db.Write(ctx, obsdb.Batch{Records: subEvents, Spans: []obsdb.Span{
+		fxSpanRec("r_sub", subAt(0), subAt(5*time.Second), 1, "", 12, 6),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	childEvents := []obsdb.Record{
+		fxRecord(childID, "event", "run_start", 0, subAt(3*time.Second),
+			`{"type":"run_start","id":"`+childID+`","model":{"provider":"wefttest","name":"script"},"agent":"researcher"}`),
+		fxRecord(childID, "event", "step_start", 1, subAt(3200*time.Millisecond),
+			`{"type":"step_start","run_id":"`+childID+`","index":0}`),
+		fxRecord(childID, "event", "step_finish", 2, subAt(3700*time.Millisecond),
+			`{"type":"step_finish","run_id":"`+childID+`","index":0,"reason":"end_turn","usage":{"input_tokens":9,"output_tokens":5}}`),
+		fxRecord(childID, "event", "run_finish", 3, subAt(4*time.Second),
+			`{"type":"run_finish","run_id":"`+childID+`","usage":{"input_tokens":9,"output_tokens":5},"steps":1}`),
+		fxRecord(childID, "messages", "", 0, subAt(3*time.Second),
+			`[{"role":"user","content":[{"type":"text","text":"status of order 42"}]}]`),
+		fxRecord(childID, "messages", "", 1, subAt(4*time.Second),
+			`[{"role":"assistant","content":[{"type":"text","text":"order 42 shipped this morning"}]}]`),
+	}
+	// The child's records carry the parent link the subagent stamps.
+	for i := range childEvents {
+		childEvents[i].Attrs["weft.parent.run.id"] = "r_sub"
+		childEvents[i].Attrs["weft.parent.call.id"] = "call_3"
+		childEvents[i].Attrs["gen_ai.agent.name"] = "researcher"
+	}
+	if err := db.Write(ctx, obsdb.Batch{Records: childEvents, Spans: []obsdb.Span{
+		{TraceID: fxTrace, SpanID: "0a0b0c0d0e0f0102", ParentSpanID: fxSpan,
+			Name: "invoke_agent", Kind: 1,
+			Start: subAt(3 * time.Second), End: subAt(4 * time.Second), StatusCode: 1,
+			Service: "studio-test",
+			Attrs: map[string]any{
+				"gen_ai.operation.name":      "invoke_agent",
+				"weft.run.id":                childID,
+				"weft.parent.run.id":         "r_sub",
+				"weft.parent.call.id":        "call_3",
+				"gen_ai.agent.name":          "researcher",
+				"gen_ai.provider.name":       "wefttest",
+				"gen_ai.request.model":       "script",
+				"gen_ai.usage.input_tokens":  int64(9),
+				"gen_ai.usage.output_tokens": int64(5),
+				"weft.run.steps":             int64(1),
+				"weft.version":               "v0.6.0",
+				"weft.manifest.hash":         fxHash,
+				"cwd":                        "/tmp/demo",
+			},
+			Resource: map[string]any{"service.name": "studio-test"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// r_stale: the crash orphan. No run_finish, no span; its two events
+	// are all the table ever learns.
+	staleStart := fixtureT0.Add(3 * time.Minute)
+	stale := []obsdb.Record{
+		fxRecord("r_stale", "event", "run_start", 0, staleStart,
+			`{"type":"run_start","id":"r_stale","model":{"provider":"wefttest","name":"script"},"agent":"orders"}`),
+		fxRecord("r_stale", "event", "step_start", 1, staleStart.Add(200*time.Millisecond),
+			`{"type":"step_start","run_id":"r_stale","index":0}`),
+	}
+	if err := db.Write(ctx, obsdb.Batch{Records: stale}); err != nil {
+		t.Fatal(err)
+	}
+	return db
 }
 
 // fixtureManifest is a minimal manifest document for the manifest
@@ -217,26 +322,29 @@ func golden(t *testing.T, name, body string) {
 }
 
 func TestMetaGolden(t *testing.T) {
-	h := Handler(fixtureStore(t), Manifest([]byte(fixtureManifest)))
+	h := Handler(DB(fixtureDB(t)), Manifest([]byte(fixtureManifest)))
 	code, _, body := get(t, h, "/studio/api/meta")
 	if code != http.StatusOK {
 		t.Fatalf("meta: %d", code)
 	}
+	if !strings.Contains(body, `"store":"sqlite"`) {
+		t.Errorf("meta store kind = %s", body)
+	}
 	golden(t, "meta.golden.json", body)
 
 	// The open handler reports no capabilities; a server declares them.
-	_, _, plain := get(t, Handler(fixtureStore(t)), "/studio/api/meta")
+	_, _, plain := get(t, Handler(DB(fixtureDB(t))), "/studio/api/meta")
 	if !strings.Contains(plain, `"capabilities":[]`) {
 		t.Errorf("default capabilities = %s, want []", plain)
 	}
-	_, _, caps := get(t, Handler(fixtureStore(t), Capabilities("live", "ingest")), "/studio/api/meta")
+	_, _, caps := get(t, Handler(DB(fixtureDB(t)), Capabilities("live", "ingest")), "/studio/api/meta")
 	if !strings.Contains(caps, `"capabilities":["live","ingest"]`) {
 		t.Errorf("declared capabilities = %s", caps)
 	}
 }
 
 func TestRunsGolden(t *testing.T) {
-	h := Handler(fixtureStore(t), Manifest([]byte(fixtureManifest)))
+	h := Handler(DB(fixtureDB(t)), Manifest([]byte(fixtureManifest)))
 	code, _, body := get(t, h, "/studio/api/runs")
 	if code != http.StatusOK {
 		t.Fatalf("runs: %d", code)
@@ -255,11 +363,15 @@ func TestRunsGolden(t *testing.T) {
 	if strings.Contains(body, `"r_sub/`) {
 		t.Error("runs list includes a child run")
 	}
+	// The store-era tags key reads the row's metadata.
+	if !strings.Contains(body, `"tags":{"cwd":"/tmp/demo"}`) {
+		t.Errorf("runs list missing metadata under tags: %s", body)
+	}
 	golden(t, "runs.golden.json", body)
 }
 
 func TestRunGolden(t *testing.T) {
-	h := Handler(fixtureStore(t), Manifest([]byte(fixtureManifest)))
+	h := Handler(DB(fixtureDB(t)), Manifest([]byte(fixtureManifest)))
 	code, _, body := get(t, h, "/studio/api/runs/r_sub")
 	if code != http.StatusOK {
 		t.Fatalf("run: %d", code)
@@ -272,15 +384,16 @@ func TestRunGolden(t *testing.T) {
 	if !strings.Contains(body, `"parent_id":"r_sub"`) {
 		t.Errorf("run document misses children: %s", body)
 	}
-	if !strings.Contains(body, `"event_count":`) {
+	if !strings.Contains(body, `"event_count":6`) {
 		t.Errorf("run document misses event_count: %s", body)
 	}
 	golden(t, "run-sub.golden.json", body)
 
-	// A failed run's document keeps the error text and the partial
-	// result (the store's own result document, envelope unwrapped).
+	// A failed run's document keeps the error text; the result
+	// document itself is null on obsdb (the store's MarshalResult is
+	// gone; the transcript replaces it in step 6).
 	_, _, fail := get(t, h, "/studio/api/runs/r_fail")
-	for _, want := range []string{`"status":"failed"`, `"err":"`, `"result"`} {
+	for _, want := range []string{`"status":"failed"`, `"err":"`, `"result":null`} {
 		if !strings.Contains(fail, want) {
 			t.Errorf("r_fail missing %s", want)
 		}
@@ -289,7 +402,7 @@ func TestRunGolden(t *testing.T) {
 }
 
 func TestEventsGolden(t *testing.T) {
-	h := Handler(fixtureStore(t), Manifest([]byte(fixtureManifest)))
+	h := Handler(DB(fixtureDB(t)), Manifest([]byte(fixtureManifest)))
 	code, _, body := get(t, h, "/studio/api/runs/r_ok/events?limit=1000")
 	if code != http.StatusOK {
 		t.Fatalf("events: %d", code)
@@ -302,9 +415,12 @@ func TestEventsGolden(t *testing.T) {
 	_, _, paged := get(t, h, "/studio/api/runs/r_ok/events?after=2&limit=3")
 	golden(t, "events-ok-paged.golden.json", paged)
 
-	// The subagent run's stream is the nested-fold fixture for the TS
-	// side (B7) — Nested wrappers inline in the parent's order.
+	// The subagent parent's stream: no Nested wrappers inline — the
+	// child run is a separate row joined by parent_call_id (S4.3).
 	_, _, sub := get(t, h, "/studio/api/runs/r_sub/events?limit=1000")
+	if strings.Contains(sub, `"nested"`) {
+		t.Errorf("parent stream carries nested wrappers: %s", sub)
+	}
 	golden(t, "events-sub.golden.json", sub)
 
 	// A child run's id carries slashes (childRunID: parent/step/callID)
@@ -337,25 +453,24 @@ func childID(t *testing.T, h http.Handler, parent string) string {
 }
 
 func TestEventsPaging(t *testing.T) {
-	s := fixtureStore(t)
-	rec, err := s.Get(context.Background(), "r_ok")
+	db := fixtureDB(t)
+	h := Handler(DB(db))
+	ctx := context.Background()
+
+	// The store of record for the walk: the database's own event order.
+	full, err := db.Events(ctx, "r_ok", -1, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
-	total := len(rec.Events)
-	h := Handler(s)
+	total := len(full.Events)
+	want := make([]string, total)
+	for i, pe := range full.Events {
+		want[i] = string(pe.Event)
+	}
 
 	// Walk the whole stream in pages of 2 and reassemble it: the pages
-	// concatenated must equal the store's order (byte-for-byte, each
-	// event through its own codec), and the last page reports done.
-	want := make([]string, total)
-	for i, ev := range rec.Events {
-		b, err := json.Marshal(ev)
-		if err != nil {
-			t.Fatal(err)
-		}
-		want[i] = string(b)
-	}
+	// concatenated must equal the database's order byte-for-byte, and
+	// the last page reports done.
 	var walked int
 	after := 0
 	for {
@@ -391,7 +506,7 @@ func TestEventsPaging(t *testing.T) {
 		after = int(*page.NextAfter)
 	}
 	if walked != total {
-		t.Fatalf("walked %d events, store holds %d", walked, total)
+		t.Fatalf("walked %d events, database holds %d", walked, total)
 	}
 
 	// -1 is the documented "from the start" default and reads like 0.
@@ -409,21 +524,21 @@ func TestEventsPaging(t *testing.T) {
 		}
 	}
 
-	// A live run (fresh heartbeat) is never done and is not cached.
-	live := store.RunRecord{
-		ID: "r_live", Agent: "orders", Status: store.Running,
-		Started: time.Now(), Heartbeat: time.Now(),
-		Events: []weft.Event{weft.RunStart{ID: "r_live", Agent: "orders"}},
+	// A run that is live right now (fresh last-seen, no run_finish) is
+	// never done.
+	liveAt := time.Now()
+	live := []obsdb.Record{
+		fxRecord("r_live", "event", "run_start", 0, liveAt,
+			`{"type":"run_start","id":"r_live","model":{"provider":"wefttest","name":"script"},"agent":"orders"}`),
+		fxRecord("r_live", "event", "step_start", 1, liveAt.Add(50*time.Millisecond),
+			`{"type":"step_start","run_id":"r_live","index":0}`),
 	}
-	if err := s.Save(context.Background(), live); err != nil {
+	if err := db.Write(ctx, obsdb.Batch{Records: live}); err != nil {
 		t.Fatal(err)
 	}
 	_, _, body := get(t, h, "/studio/api/runs/r_live/events")
 	if !strings.Contains(body, `"done":false`) {
 		t.Errorf("live run reported done: %s", body)
-	}
-	if _, _, ok := h.(*app).events.get("r_live"); ok {
-		t.Error("running run was cached")
 	}
 	// The stale orphan is finished-in-effect: done once drained.
 	_, _, stale := get(t, h, "/studio/api/runs/r_stale/events")
@@ -432,28 +547,8 @@ func TestEventsPaging(t *testing.T) {
 	}
 }
 
-func TestEventCacheLRU(t *testing.T) {
-	c := newEventCache(2)
-	ev := []weft.Event{weft.RunStart{ID: "x"}}
-	c.put("a", ev)
-	c.put("b", ev)
-	if _, _, ok := c.get("a"); !ok {
-		t.Fatal("a evicted early")
-	}
-	c.put("c", ev) // a was just touched, so b is the least recent
-	if _, _, ok := c.get("a"); !ok {
-		t.Error("a evicted while hot")
-	}
-	if _, _, ok := c.get("b"); ok {
-		t.Error("b survived eviction")
-	}
-	if c.order.Len() != 2 {
-		t.Errorf("cache holds %d, want 2", c.order.Len())
-	}
-}
-
 func TestAPIErrors(t *testing.T) {
-	h := Handler(fixtureStore(t))
+	h := Handler(DB(fixtureDB(t)))
 	code, _, body := get(t, h, "/studio/api/runs/nope")
 	if code != http.StatusNotFound || !strings.Contains(body, `"not_found"`) {
 		t.Errorf("unknown id: %d %s", code, body)
@@ -486,40 +581,61 @@ func TestAPIErrors(t *testing.T) {
 		t.Errorf("Allow = %q", allow)
 	}
 
-	// A recording this weft cannot decode is a 409 with the upgrade
-	// message (Memory cannot hold such a doc by construction — it
-	// re-marshals — so the mapping is proven against a stub).
-	for _, target := range []struct {
-		name string
-		err  error
-	}{{"newer format", fmt.Errorf("store: %w", store.ErrNewerFormat)},
-		{"unknown event", fmt.Errorf("store: %w", store.ErrUnknownEvent)}} {
-		stub := stubStore{getErr: target.err}
-		code, _, b := get(t, Handler(stub), "/studio/api/runs/r_x")
-		if code != http.StatusConflict || !strings.Contains(b, "newer_format") ||
-			!strings.Contains(b, "upgrade studio") {
-			t.Errorf("%s: %d %s", target.name, code, b)
-		}
-		code, _, b = get(t, Handler(stub), "/studio/api/runs/r_x/events")
-		if code != http.StatusConflict {
-			t.Errorf("%s (events): %d %s", target.name, code, b)
+	// A database that fails reads answers 500 internal naming the op —
+	// loud over silent.
+	stub := stubDB{err: errors.New("disk on fire")}
+	for _, path := range []string{"/studio/api/runs", "/studio/api/runs/r_x", "/studio/api/runs/r_x/events"} {
+		code, _, b := get(t, Handler(DB(stub)), path)
+		if code != http.StatusInternalServerError || !strings.Contains(b, `"internal"`) {
+			t.Errorf("%s: %d %s", path, code, b)
 		}
 	}
 }
 
-// stubStore fails every Get with the wrapped error; List answers from
-// the embedded Memory so the rest of the API still works.
-type stubStore struct {
-	store.Store
-	getErr error
+// stubDB fails every read with err.
+type stubDB struct {
+	obsdb.DB
+	err error
 }
 
-func (s stubStore) Get(context.Context, string) (store.RunRecord, error) {
-	return store.RunRecord{}, s.getErr
+func (s stubDB) Runs(context.Context, obsdb.RunQuery) (obsdb.RunPage, error) {
+	return obsdb.RunPage{}, s.err
+}
+func (s stubDB) Run(context.Context, string) (obsdb.RunDetail, error) {
+	return obsdb.RunDetail{}, s.err
+}
+func (s stubDB) Events(context.Context, string, int64, int) (obsdb.EventPage, error) {
+	return obsdb.EventPage{}, s.err
+}
+
+// TestOpenOption pins S4.1's Open and the $WEFT_DB default: Open(path)
+// opens (creating) the sqlite file, and Handler without DB or Open
+// opens $WEFT_DB.
+func TestOpenOption(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sub", "dev.db") // Open creates the parent
+	h := Handler(Open(path))
+	code, _, body := get(t, h, "/studio/api/meta")
+	if code != http.StatusOK || !strings.Contains(body, `"store":"sqlite"`) {
+		t.Errorf("Open: %d %s", code, body)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("Open did not create %s: %v", path, err)
+	}
+
+	envDB := filepath.Join(dir, "env.db")
+	t.Setenv("WEFT_DB", envDB)
+	_, _, body = get(t, Handler(), "/studio/api/meta")
+	if !strings.Contains(body, `"store":"sqlite"`) {
+		t.Errorf("WEFT_DB default: %s", body)
+	}
+	if _, err := os.Stat(envDB); err != nil {
+		t.Errorf("default did not open %s: %v", envDB, err)
+	}
 }
 
 func TestManifestEndpoint(t *testing.T) {
-	h := Handler(fixtureStore(t), Manifest([]byte(fixtureManifest)))
+	h := Handler(DB(fixtureDB(t)), Manifest([]byte(fixtureManifest)))
 	code, _, body := get(t, h, "/studio/api/manifest")
 	if code != http.StatusOK {
 		t.Fatalf("manifest: %d", code)
@@ -527,14 +643,14 @@ func TestManifestEndpoint(t *testing.T) {
 	if body != fixtureManifest {
 		t.Errorf("manifest bytes not passed through verbatim")
 	}
-	code, _, body = get(t, Handler(fixtureStore(t)), "/studio/api/manifest")
+	code, _, body = get(t, Handler(DB(fixtureDB(t))), "/studio/api/manifest")
 	if code != http.StatusNotFound {
 		t.Errorf("manifest without option: %d %s", code, body)
 	}
 }
 
 func TestShellAndFallback(t *testing.T) {
-	h := Handler(fixtureStore(t))
+	h := Handler(DB(fixtureDB(t)))
 	code, hdr, body := get(t, h, "/studio/")
 	if code != http.StatusOK {
 		t.Fatalf("shell: %d", code)
@@ -565,16 +681,16 @@ func TestShellAndFallback(t *testing.T) {
 	// Base and Title rewrite. The handler cannot see the mount prefix
 	// (StripPrefix removed it), so Base only decides what the shell
 	// says — the caller mounts consistently.
-	if _, _, b := get(t, Handler(fixtureStore(t), Base("/x/")), "/studio/runs/r_ok"); !strings.Contains(b, `<base href="/x/">`) {
+	if _, _, b := get(t, Handler(DB(fixtureDB(t)), Base("/x/")), "/studio/runs/r_ok"); !strings.Contains(b, `<base href="/x/">`) {
 		t.Errorf("Base(/x/) not rewritten: %s", b)
 	}
-	if _, _, b := get(t, Handler(fixtureStore(t), Base("x")), "/studio/"); !strings.Contains(b, `<base href="/x/">`) {
+	if _, _, b := get(t, Handler(DB(fixtureDB(t)), Base("x")), "/studio/"); !strings.Contains(b, `<base href="/x/">`) {
 		t.Errorf("Base(x) not normalized: %s", b)
 	}
-	if _, _, b := get(t, Handler(fixtureStore(t), Title("dev studio")), "/studio/"); !strings.Contains(b, "<title>dev studio</title>") {
+	if _, _, b := get(t, Handler(DB(fixtureDB(t)), Title("dev studio")), "/studio/"); !strings.Contains(b, "<title>dev studio</title>") {
 		t.Errorf("Title not rewritten: %s", b)
 	}
-	if _, _, b := get(t, Handler(fixtureStore(t), Title("a <b> & c")), "/studio/"); !strings.Contains(b, "<title>a &lt;b&gt; &amp; c</title>") {
+	if _, _, b := get(t, Handler(DB(fixtureDB(t)), Title("a <b> & c")), "/studio/"); !strings.Contains(b, "<title>a &lt;b&gt; &amp; c</title>") {
 		t.Errorf("Title not escaped: %s", b)
 	}
 	if code, hdr, _ := get(t, h, "/studio/assets/missing-0000.js"); code != http.StatusNotFound ||
@@ -584,7 +700,7 @@ func TestShellAndFallback(t *testing.T) {
 }
 
 func TestAssetHeaders(t *testing.T) {
-	h := Handler(fixtureStore(t))
+	h := Handler(DB(fixtureDB(t)))
 	// Meaningful once the web build is committed (step 2): hashed
 	// assets are immutable, other files revalidate.
 	for _, name := range files() {
@@ -603,10 +719,10 @@ func TestAssetHeaders(t *testing.T) {
 func TestHandlerNilPanics(t *testing.T) {
 	defer func() {
 		if recover() == nil {
-			t.Error("Handler(nil) did not panic")
+			t.Error("Handler(DB(nil)) did not panic")
 		}
 	}()
-	_ = Handler(nil)
+	_ = Handler(DB(nil))
 }
 
 // The CSP hashes must match what the browser computes over the PARSED

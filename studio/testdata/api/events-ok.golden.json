@@ -38,7 +38,7 @@
       "event": {
         "type": "tool_finish",
         "run_id": "r_ok",
-        "seq": 2,
+        "seq": 1,
         "call_id": "call_1",
         "name": "lookup_order",
         "content": "order 42: shipped",
@@ -51,52 +51,23 @@
         "type": "step_finish",
         "run_id": "r_ok",
         "index": 0,
-        "reason": "tool_calls",
+        "reason": "end_turn",
         "usage": {
           "input_tokens": 10,
-          "output_tokens": 5
+          "output_tokens": 4
         }
       }
     },
     {
       "pos": 5,
       "event": {
-        "type": "step_start",
-        "run_id": "r_ok",
-        "index": 1
-      }
-    },
-    {
-      "pos": 6,
-      "event": {
-        "type": "text_delta",
-        "run_id": "r_ok",
-        "text": "Order 42 shipped this morning."
-      }
-    },
-    {
-      "pos": 7,
-      "event": {
-        "type": "step_finish",
-        "run_id": "r_ok",
-        "index": 1,
-        "reason": "stop",
-        "usage": {
-          "input_tokens": 10,
-          "output_tokens": 5
-        }
-      }
-    },
-    {
-      "pos": 8,
-      "event": {
         "type": "run_finish",
         "run_id": "r_ok",
         "usage": {
-          "input_tokens": 20,
-          "output_tokens": 10
+          "input_tokens": 10,
+          "output_tokens": 4
         },
-        "steps": 2
+        "steps": 1
       }
     }
   ],

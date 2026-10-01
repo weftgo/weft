@@ -2,10 +2,12 @@ package studio
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft/store"
+	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/obsdb/sqlite"
 )
 
 // Version is the studio module's tag, reported by api/meta. It moves
@@ -18,10 +20,31 @@ const defaultTitle = "weft studio"
 type Option func(*config)
 
 type config struct {
+	db           obsdb.DB
+	dbSet        bool   // DB appeared among the options (DB(nil) is an error)
+	dbPath       string // set by Open: opened at Handler time
 	base         string
 	title        string
 	manifest     []byte
 	capabilities []string
+}
+
+// DB serves Studio over db (setup A: DB(otel.LocalDB()) — the same
+// handle weft/otel's Local destination writes, so the UI reads what the
+// run wrote, live). Without DB or Open, Handler opens the history
+// database at $WEFT_DB or ./.weft/weft.db (S4.1's default). A nil db
+// panics at Handler time — a Studio with nothing to read is a
+// construction error.
+func DB(db obsdb.DB) Option {
+	return func(c *config) { c.db, c.dbSet, c.dbPath = db, true, "" }
+}
+
+// Open is shorthand for DB(sqlite.Open(path)): Studio over an obsdb
+// sqlite file, created when missing. Opening happens at Handler time
+// and panics on failure — a Studio that cannot reach its database is a
+// construction error, not a serving one.
+func Open(path string) Option {
+	return func(c *config) { c.dbPath = path }
 }
 
 // Base is the URL path Studio is mounted at, with leading and trailing
@@ -68,42 +91,58 @@ func Capabilities(names ...string) Option {
 }
 
 // Handler serves Studio: the embedded UI and its read-only JSON API
-// over s. Mount it under a prefix with http.StripPrefix, or at the
-// root of its own mux:
+// over one obsdb.DB (S4.1's interim shape; the full Server — live
+// stream, ingest, playground — is step 6). Mount it under a prefix
+// with http.StripPrefix, or at the root of its own mux:
 //
-//	mux.Handle("/studio/", http.StripPrefix("/studio", studio.Handler(s)))
+//	mux.Handle("/studio/", http.StripPrefix("/studio", studio.Handler(studio.DB(db))))
 //
-// T1 calls only List and Get on s (plan §0 D5). The handler does not
-// bind a port — the caller chooses the address; bind loopback until
-// token auth exists (features doc L4).
-func Handler(s store.Store, opts ...Option) http.Handler {
-	if s == nil {
-		panic("studio: Handler called with a nil store")
-	}
+// The handler does not bind a port — the caller chooses the address;
+// bind loopback until token auth exists (features doc L4).
+func Handler(opts ...Option) http.Handler {
 	c := config{base: "/studio/", title: defaultTitle, capabilities: []string{}}
 	for _, o := range opts {
 		if o != nil {
 			o(&c)
 		}
 	}
+	if c.dbSet && c.db == nil {
+		panic("studio: Handler called with a nil DB")
+	}
+	if c.db == nil {
+		path := c.dbPath
+		if path == "" {
+			path = defaultDBPath()
+		}
+		db, err := sqlite.Open(path)
+		if err != nil {
+			panic("studio: open " + path + ": " + err.Error())
+		}
+		c.db = db
+	}
 	a := &app{
 		config: c,
-		store:  s,
 		now:    time.Now,
-		events: newEventCache(finishedRunCache),
 	}
 	a.prepareShell()
 	return a
 }
 
-// app is one Handler's serving state: the resolved configuration, the
-// shell bytes with the CSP for exactly those bytes, and the finished-
-// run event cache behind the paged events endpoint.
+// defaultDBPath is S4.1's default history database: $WEFT_DB, else
+// ./.weft/weft.db.
+func defaultDBPath() string {
+	if p := os.Getenv("WEFT_DB"); p != "" {
+		return p
+	}
+	return ".weft/weft.db"
+}
+
+// app is one Handler's serving state: the resolved configuration
+// (including the database under config.db, reached as a.db), the
+// shell bytes with the CSP for exactly those bytes, and the clock.
 type app struct {
 	config
-	store  store.Store
-	now    func() time.Time
-	events *eventCache
+	now func() time.Time
 
 	shell []byte
 	csp   string

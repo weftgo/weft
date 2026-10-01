@@ -10,6 +10,8 @@
         "provider": "wefttest",
         "name": "script"
       },
+      "manifest_hash": "sha256:demo-fleet",
+      "weft_version": "(test)",
       "started": "2020-01-01T09:03:00.123Z",
       "finished": null,
       "status": "interrupted",
@@ -32,15 +34,15 @@
         "provider": "wefttest",
         "name": "script"
       },
-      "manifest_hash": "786a2e04dd01168fc5ad4e20e979f2138ae9337cda2a8ce2473bb0ab16cff896",
+      "manifest_hash": "sha256:demo-fleet",
       "weft_version": "(test)",
       "started": "2020-01-01T09:02:00.123Z",
       "finished": "2020-01-01T09:02:05.123Z",
       "status": "succeeded",
-      "steps": 2,
+      "steps": 1,
       "usage": {
-        "input_tokens": 30,
-        "output_tokens": 15
+        "input_tokens": 12,
+        "output_tokens": 6
       },
       "tags": {
         "cwd": "/tmp/demo"
@@ -51,25 +53,25 @@
       "id": "r_fail",
       "parent_id": "",
       "parent_call_id": "",
-      "agent": "support",
+      "agent": "orders",
       "model": {
         "provider": "wefttest",
         "name": "script"
       },
-      "manifest_hash": "b9d9df86cf77c5476cfe727b80ac1f0c45173c84920e1d4e081a014b32174ae3",
+      "manifest_hash": "sha256:demo-fleet",
       "weft_version": "(test)",
       "started": "2020-01-01T09:01:00.123Z",
       "finished": "2020-01-01T09:01:02.123Z",
       "status": "failed",
       "steps": 1,
       "usage": {
-        "input_tokens": 10,
-        "output_tokens": 5
+        "input_tokens": 8,
+        "output_tokens": 2
       },
       "tags": {
         "cwd": "/tmp/demo"
       },
-      "err": "weft: run failed at step 1: model stream: wefttest: injected provider 500"
+      "err": "wefttest: injected provider 500"
     },
     {
       "id": "r_ok",
@@ -80,15 +82,15 @@
         "provider": "wefttest",
         "name": "script"
       },
-      "manifest_hash": "bf2580cbcb3e115a8591cf8c71f28b6f26e0322b405d65cefaf154cbfa23186e",
+      "manifest_hash": "sha256:demo-fleet",
       "weft_version": "(test)",
       "started": "2020-01-01T09:00:00.123Z",
       "finished": "2020-01-01T09:00:02.123Z",
       "status": "succeeded",
-      "steps": 2,
+      "steps": 1,
       "usage": {
-        "input_tokens": 20,
-        "output_tokens": 10
+        "input_tokens": 10,
+        "output_tokens": 4
       },
       "tags": {
         "cwd": "/tmp/demo"

@@ -3,7 +3,7 @@
   "studio_version": "v0.2.1",
   "has_manifest": true,
   "title": "weft studio",
-  "store": "memory",
+  "store": "sqlite",
   "capabilities": []
 }
 

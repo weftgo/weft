@@ -1,5 +1,6 @@
-// Package studio is the Inspector: a read-only UI over a run store,
-// served by Go alone.
+// Package studio is the Inspector: a read-only UI over an obsdb
+// database (the observability schema weft/otel writes), served by Go
+// alone.
 //
 // T1 (TODO §12, plan docs/phase2b-studio-plan.md) shows the runs list
 // and the run page — steps with their tool calls and results, subagents
@@ -10,7 +11,8 @@
 //
 // Handler is the whole mount surface:
 //
-//	mux.Handle("/studio/", http.StripPrefix("/studio", studio.Handler(s)))
+//	mux.Handle("/studio/", http.StripPrefix("/studio",
+//		studio.Handler(studio.DB(db))))
 //
 // It serves the embedded UI with a history fallback (deep links
 // survive reload) and a read-only JSON API under api/: meta, runs,

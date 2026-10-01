@@ -26,7 +26,7 @@
         "type": "tool_start",
         "run_id": "r_sub",
         "seq": 1,
-        "call_id": "call_1",
+        "call_id": "call_3",
         "name": "research",
         "args": {
           "prompt": "status of order 42"
@@ -36,150 +36,38 @@
     {
       "pos": 3,
       "event": {
-        "type": "nested",
-        "run_id": "r_sub",
-        "seq": 2,
-        "call_id": "call_1",
-        "event": {
-          "type": "run_start",
-          "id": "r_sub/0/call_1",
-          "model": {
-            "provider": "wefttest",
-            "name": "script"
-          },
-          "agent": "researcher"
-        }
-      }
-    },
-    {
-      "pos": 4,
-      "event": {
-        "type": "nested",
-        "run_id": "r_sub",
-        "seq": 3,
-        "call_id": "call_1",
-        "event": {
-          "type": "step_start",
-          "run_id": "r_sub/0/call_1",
-          "index": 0
-        }
-      }
-    },
-    {
-      "pos": 5,
-      "event": {
-        "type": "nested",
-        "run_id": "r_sub",
-        "seq": 4,
-        "call_id": "call_1",
-        "event": {
-          "type": "text_delta",
-          "run_id": "r_sub/0/call_1",
-          "text": "order 42 shipped this morning"
-        }
-      }
-    },
-    {
-      "pos": 6,
-      "event": {
-        "type": "nested",
-        "run_id": "r_sub",
-        "seq": 5,
-        "call_id": "call_1",
-        "event": {
-          "type": "step_finish",
-          "run_id": "r_sub/0/call_1",
-          "index": 0,
-          "reason": "stop",
-          "usage": {
-            "input_tokens": 10,
-            "output_tokens": 5
-          }
-        }
-      }
-    },
-    {
-      "pos": 7,
-      "event": {
-        "type": "nested",
-        "run_id": "r_sub",
-        "seq": 6,
-        "call_id": "call_1",
-        "event": {
-          "type": "run_finish",
-          "run_id": "r_sub/0/call_1",
-          "usage": {
-            "input_tokens": 10,
-            "output_tokens": 5
-          },
-          "steps": 1
-        }
-      }
-    },
-    {
-      "pos": 8,
-      "event": {
         "type": "tool_finish",
         "run_id": "r_sub",
-        "seq": 7,
-        "call_id": "call_1",
+        "seq": 1,
+        "call_id": "call_3",
         "name": "research",
         "content": "order 42 shipped this morning",
         "is_error": false
       }
     },
     {
-      "pos": 9,
+      "pos": 4,
       "event": {
         "type": "step_finish",
         "run_id": "r_sub",
         "index": 0,
-        "reason": "tool_calls",
+        "reason": "end_turn",
         "usage": {
-          "input_tokens": 10,
-          "output_tokens": 5
+          "input_tokens": 12,
+          "output_tokens": 6
         }
       }
     },
     {
-      "pos": 10,
-      "event": {
-        "type": "step_start",
-        "run_id": "r_sub",
-        "index": 1
-      }
-    },
-    {
-      "pos": 11,
-      "event": {
-        "type": "text_delta",
-        "run_id": "r_sub",
-        "text": "Order 42 shipped."
-      }
-    },
-    {
-      "pos": 12,
-      "event": {
-        "type": "step_finish",
-        "run_id": "r_sub",
-        "index": 1,
-        "reason": "stop",
-        "usage": {
-          "input_tokens": 10,
-          "output_tokens": 5
-        }
-      }
-    },
-    {
-      "pos": 13,
+      "pos": 5,
       "event": {
         "type": "run_finish",
         "run_id": "r_sub",
         "usage": {
-          "input_tokens": 30,
-          "output_tokens": 15
+          "input_tokens": 12,
+          "output_tokens": 6
         },
-        "steps": 2
+        "steps": 1
       }
     }
   ],

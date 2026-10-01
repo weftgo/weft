@@ -3,11 +3,16 @@
 // so the committed tree is always exactly this script's output and the
 // freshness gate (make studio-check) can diff it byte-for-byte.
 //
+// It also copies the devtools panel's library-mode output (step 7,
+// S4.7) from dist/panel-tmp to ../dist/panel/panel.js, beside the
+// app: studio.Handler serves that file at /panel.js, and non-Go
+// backends ship it as a release asset (V2).
+//
 // Dropped on the way: the server bundle and prerender scratch (the SPA
 // build runs the server once to render the shell), sourcemaps, and any
 // Vite internals — nothing the Go handler must not serve.
 
-import { cp, readFile, rm, writeFile } from "node:fs/promises"
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 
 const src = new URL("../dist/client", import.meta.url).pathname
 const dst = new URL("../../dist", import.meta.url).pathname
@@ -24,6 +29,12 @@ await cp(src, dst, {
     return true
   },
 })
+
+// The panel (vite.panel.config.ts wrote dist/panel-tmp/panel.js).
+const panelSrc = new URL("../dist/panel-tmp/panel.js", import.meta.url).pathname
+const panelDst = new URL("../../dist/panel", import.meta.url).pathname
+await mkdir(panelDst, { recursive: true })
+await cp(panelSrc, `${panelDst}/panel.js`)
 
 // The router renders preload URLs as "/./assets/…" — root-absolute,
 // which would escape the mount (ADR 0018 §6). Under the runtime

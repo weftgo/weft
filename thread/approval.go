@@ -342,9 +342,13 @@ func (s *Session) Pending() []Request {
 // which is what holds a plain Send while a nested approval is open.
 // Callers hold s.mu.
 func (s *Session) offeredPendingLocked() []Request {
+	pending := s.pendingLocked()
+	if len(pending) == 0 {
+		return nil // nothing to hide a wrapper from: no walk owed
+	}
 	wrappers := s.approvalWalkLocked().wrappers
 	var out []Request
-	for _, r := range s.pendingLocked() {
+	for _, r := range pending {
 		if r.Child == "" && wrappers[r.CallID] != "" {
 			continue
 		}
@@ -1202,45 +1206,48 @@ func (s *Session) danglingCallsLocked() []weft.ToolCallPart {
 // message with calls that no tool message directly after it answers —
 // parked or not (danglingCallsLocked tells which). Callers hold s.mu.
 func (s *Session) unansweredCallsLocked() []weft.ToolCallPart {
-	path, err := s.pathLocked(s.leaf)
+	path, err := s.walkLocked(s.leaf) // read-only: the calls returned are copied below
 	if err != nil {
 		return nil
 	}
-	var msgs []weft.Message
-	for _, e := range path {
-		if me, ok := e.(MessageEntry); ok {
-			msgs = append(msgs, me.Message)
-		}
-	}
+	// Only message entries are transcript here: the scan reads them
+	// straight off the path, from the leaf back, and builds nothing —
+	// it runs on every turn, over the whole path.
 	last := -1
-	for j := len(msgs) - 1; j >= 0; j-- {
-		if msgs[j].Role != weft.RoleAssistant {
+	for j := len(path) - 1; j >= 0 && last < 0; j-- {
+		me, ok := path[j].(MessageEntry)
+		if !ok || me.Message.Role != weft.RoleAssistant {
 			continue
 		}
-		for _, p := range msgs[j].Content {
+		for _, p := range me.Message.Content {
 			if _, ok := p.(weft.ToolCallPart); ok {
 				last = j
 				break
 			}
-		}
-		if last >= 0 {
-			break
 		}
 	}
 	if last < 0 {
 		return nil
 	}
 	served := map[string]bool{}
-	for j := last + 1; j < len(msgs) && msgs[j].Role == weft.RoleTool; j++ {
-		for _, p := range msgs[j].Content {
+	for j := last + 1; j < len(path); j++ {
+		me, ok := path[j].(MessageEntry)
+		if !ok {
+			continue
+		}
+		if me.Message.Role != weft.RoleTool {
+			break
+		}
+		for _, p := range me.Message.Content {
 			if r, ok := p.(weft.ToolResultPart); ok {
 				served[r.CallID] = true
 			}
 		}
 	}
 	var out []weft.ToolCallPart
-	for _, p := range msgs[last].Content {
+	for _, p := range path[last].(MessageEntry).Message.Content {
 		if c, ok := p.(weft.ToolCallPart); ok && !served[c.ID] {
+			c.Args = slices.Clone(c.Args) // the caller's bytes, not the tree's
 			out = append(out, c)
 		}
 	}
@@ -1315,7 +1322,10 @@ func (s *Session) approvalWalkLocked() approvalWalk {
 		decisions: map[string][]ApprovalDecisionEntry{},
 		wrappers:  map[string]string{},
 	}
-	path, err := s.pathLocked(s.leaf)
+	// Read-only: the walk keeps entry values, and the one reference a
+	// request entry carries — its argument bytes — is copied wherever
+	// a request leaves the session (requestFromEntry).
+	path, err := s.walkLocked(s.leaf)
 	if err != nil {
 		return w
 	}
@@ -1496,6 +1506,13 @@ func effectiveDecision(decisions []ApprovalDecisionEntry, quorum int) (ApprovalD
 // Callers hold s.mu.
 func (s *Session) pendingLocked() []Request {
 	dangling := s.danglingCallsLocked()
+	mirrors := s.liveMirrorsLocked()
+	if len(dangling) == 0 && len(mirrors) == 0 {
+		// No boundary and no nested request: nothing can be pending,
+		// and the approval walk — a pass over the whole path — is not
+		// owed. This is every turn of a session that never parks.
+		return nil
+	}
 	walk := s.approvalWalkLocked()
 	var out []Request
 	for _, c := range dangling {
@@ -1519,7 +1536,7 @@ func (s *Session) pendingLocked() []Request {
 	// lineage, and a decision addressed to it records like any other.
 	// An async child's mirror is the only shape that surfaces: the
 	// parent's own transcript never dangles for it.
-	for _, re := range s.liveMirrorsLocked() {
+	for _, re := range mirrors {
 		if _, ok := effectiveDecision(scopedDecisions(walk.decisions[re.CallID], re.RunID), s.cfg.quorum); ok {
 			continue
 		}

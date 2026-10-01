@@ -882,14 +882,39 @@ func (s *Session) Path(entryID string) ([]Entry, error) {
 	return s.pathLocked(entryID)
 }
 
-// pathLocked is Path with s.mu held. Open's validation makes every
-// parent link name an earlier entry, so the walk only ever moves
-// backwards through the append order and ends at a root or at an
-// orphan the load report named. It checks both facts anyway: a link
-// that does not hold is an error — the tree in memory is not the tree
-// Open vetted — never a silent stop, because a path cut short is a
-// model context cut short.
+// pathLocked is Path with s.mu held: the walk, every entry a deep
+// copy. It is what leaves the session — Path, Fork's snapshot, the
+// context a run or a hook is handed — and what any caller that edits
+// or keeps the entries must use.
 func (s *Session) pathLocked(entryID string) ([]Entry, error) {
+	path, err := s.walkLocked(entryID)
+	if err != nil {
+		return nil, err
+	}
+	for i, e := range path {
+		path[i] = cloneEntry(e)
+	}
+	return path, nil
+}
+
+// walkLocked returns the entries from a root to entryID with s.mu
+// held — the tree's own entries, not copies. It is for the session's
+// internal reads, which run several times a turn over the whole path
+// (the boundary, the approval walk, the turn's tail) and must not
+// each pay a deep copy of the transcript. The contract is the
+// caller's: the slice is fresh, but what its entries point to — a
+// message's parts, argument bytes, maps — is the tree's. Read it
+// under the lock; never write through it, and copy whatever is
+// returned to a caller or kept past the lock (cloneEntry,
+// deepCloneMessage, slices.Clone).
+//
+// Open's validation makes every parent link name an earlier entry, so
+// the walk only ever moves backwards through the append order and
+// ends at a root or at an orphan the load report named. It checks
+// both facts anyway: a link that does not hold is an error — the tree
+// in memory is not the tree Open vetted — never a silent stop,
+// because a path cut short is a model context cut short.
+func (s *Session) walkLocked(entryID string) ([]Entry, error) {
 	if entryID == "" {
 		return nil, nil
 	}
@@ -897,10 +922,13 @@ func (s *Session) pathLocked(entryID string) ([]Entry, error) {
 	if !ok {
 		return nil, fmt.Errorf("thread: session %s holds no entry %q", s.header.ID, entryID)
 	}
-	path := make([]Entry, 0, 8)
+	// A parent always precedes its child in the append order, so the
+	// path to the entry at index i holds at most i+1 entries: one
+	// allocation, exact on a session that never branched.
+	path := make([]Entry, 0, i+1)
 	for {
 		e := s.order[i]
-		path = append(path, cloneEntry(e))
+		path = append(path, e)
 		parent := parentOf(e)
 		if parent == "" {
 			break

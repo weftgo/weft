@@ -332,8 +332,15 @@ func (m *memStorage) Acquire(ctx context.Context, session string, holder any) (i
 	}
 	s.holder = holder
 	m.sessions[session] = s
-	h, _ := s.head() // an unreadable injected header has no Created to report
-	return s.lines, h.Created, nil
+	// Asked before every write of a Session: the stored header's time
+	// is read in place — only an injected first line is decoded, and
+	// one that does not decode has no Created to report.
+	created := s.header.Created
+	if s.rawHeader != nil {
+		h, _ := s.head()
+		created = h.Created
+	}
+	return s.lines, created, nil
 }
 
 // errNilHolder refuses a lease nobody could be told apart by.

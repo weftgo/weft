@@ -3,6 +3,7 @@ package thread
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/weftgo/weft"
@@ -169,9 +170,15 @@ func (s *Session) settleSteersLocked() {
 }
 
 // Queue returns the session's live steer queue: the messages accepted
-// under the Steer busy policy that are waiting for the running turn's
+// under the Steer busy policy that are waiting for a running turn's
 // drain, in acceptance order. Delivered and deferred steers are not
 // listed — their stories live on the receipt entries (Entries).
+//
+// On a session that was just opened, the queue holds the steers Open
+// restored: accepted by a writer that died before settling them.
+// They wait here — Open runs nothing — until the session's next turn
+// drains them, Continue runs them as turns of their own, or
+// ClearQueue drops them.
 func (s *Session) Queue() []QueuedSteer {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -222,10 +229,16 @@ func (s *Session) ClearQueue(ctx context.Context) (int, error) {
 // resurrectSteers recovers the crash window a reopen can see: a
 // ReceiptEntry still queued — no delivered, deferred or dropped entry
 // links back to it — means the writer died between acceptance and the
-// steer's fate. Each defers now (the deferred receipt entry, then the
-// follow-up in the send queue), and the runner starts if the session
-// is otherwise idle: an accepted steer is durable input, and it runs
-// rather than waits (ADR 0011 §4, plan §6).
+// steer's fate. An accepted steer is durable input (ADR 0011 §4), so
+// each returns to the live steer queue, in acceptance order, exactly
+// as it stood when the writer died — and that is all Open does with
+// it: nothing is written and no run starts (Open's rule). From the
+// queue it meets one of a queued steer's ordinary fates: the next
+// turn the session runs drains it (delivered), that turn's end or
+// Continue defers it to a follow-up, ClearQueue drops it. The Turn
+// built here is the receipt's handle for those paths; no caller holds
+// it. ctx is detached from Open's cancellation: a follow-up the steer
+// defers to must not die with the call that loaded the session.
 func (s *Session) resurrectSteers(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -240,10 +253,10 @@ func (s *Session) resurrectSteers(ctx context.Context) {
 		if !ok || r.Status != ReceiptQueued || r.Msg == nil || settled[r.ID] {
 			continue
 		}
-		// The settle's own rule: a deferral the storage refuses still
-		// runs the follow-up in memory (the message is in hand), and
-		// the queued entry stays for the next reopen to retry.
-		s.settleSteerLocked(queuedSteer{receipt: r.ID, msg: *r.Msg, ctx: context.WithoutCancel(ctx)})
+		t := &Turn{id: r.ID}
+		t.cond = sync.NewCond(&t.mu)
+		s.steerQueue = append(s.steerQueue, queuedSteer{
+			receipt: r.ID, msg: cloneMessage(*r.Msg), ctx: context.WithoutCancel(ctx), turn: t,
+		})
 	}
-	s.kickRunnerLocked()
 }

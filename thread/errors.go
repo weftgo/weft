@@ -6,17 +6,11 @@ import (
 )
 
 var (
-	// ErrNotImplemented named the pieces of the v0.1 design whose step
-	// had not landed yet — SummarizeLeft until step 1.8 wrote branch
-	// summaries (ADR 0020 §6). Every such step has since shipped and
-	// nothing returns it today; it stays exported so code written
-	// against the v0.1 shape — callers that matched it to degrade
-	// gracefully — still compiles and matches.
-	ErrNotImplemented = errors.New("thread: feature not implemented in this build")
-
 	// ErrBusy is returned by Send under the Reject busy policy when the
-	// session is already running a turn: the follow-up was not
-	// accepted and nothing was written (ADR 0011 §4).
+	// session is already running a turn, and by Branch while a turn is
+	// in flight: the call was not accepted and nothing was written
+	// (ADR 0011 §4). Retryable — the same call succeeds once the turn
+	// has ended.
 	ErrBusy = errors.New("thread: session is busy with another turn")
 
 	// ErrNotFound is returned by Load, Append, and Delete for a session
@@ -31,7 +25,8 @@ var (
 	// ErrLocked is returned by a backend that enforces the one-writer
 	// rule (ADR 0011 §5) when a session is already held by another
 	// writer — another process, or another Storage in this one.
-	// Readers never lock: Load and List always work.
+	// Readers never lock: Load and List always work. Retryable — the
+	// same call succeeds once the other writer has let go.
 	ErrLocked = errors.New("thread: session is locked by another writer")
 
 	// ErrCorrupt wraps the failures a backend reports for stored data
@@ -65,44 +60,99 @@ var (
 	// records a decision it cannot apply.
 	ErrNotPending = errors.New("thread: call is not pending")
 
-	// The signed-decision failures (ADR 0021 §3), each its own error
-	// because each is its own operational answer: the key the ring
-	// does not hold, the signature that does not verify, the challenge
-	// that lapsed, the nonce that was answered already, and the
-	// arguments that changed under the request. All are fail-closed:
-	// nothing is recorded until every check passes.
-	ErrUnknownKey   = errors.New("thread: signing key not in the keyring")
+	// The signed-decision failures (ADR 0021 §3) follow, each its own
+	// error because each is its own operational answer. All are
+	// fail-closed: nothing is recorded until every check passes.
+
+	// ErrUnknownKey is returned by DecideSigned for a decision signed
+	// under a key id the session's Keyring does not hold: the signer
+	// is not one this session trusts.
+	ErrUnknownKey = errors.New("thread: signing key not in the keyring")
+
+	// ErrBadSignature is returned by DecideSigned when the signature
+	// does not verify under the named key: the decision was altered
+	// after signing, or signed with another key.
 	ErrBadSignature = errors.New("thread: decision signature does not verify")
-	ErrExpired      = errors.New("thread: signing challenge expired")
-	ErrReplay       = errors.New("thread: decision signature replayed")
-	ErrArgsChanged  = errors.New("thread: request arguments changed under the signature")
+
+	// ErrExpired is returned by DecideSigned when the challenge the
+	// signature answers has lapsed: ask for a fresh Request and sign
+	// that one.
+	ErrExpired = errors.New("thread: signing challenge expired")
+
+	// ErrReplay is returned by DecideSigned when the challenge's nonce
+	// was already answered by a recorded decision: a signature decides
+	// once, across restarts.
+	ErrReplay = errors.New("thread: decision signature replayed")
+
+	// ErrArgsChanged is returned by DecideSigned when the parked
+	// call's arguments no longer hash to what the signature covered:
+	// the signer approved a different call.
+	ErrArgsChanged = errors.New("thread: request arguments changed under the signature")
 
 	// ErrSignatureRequired is returned by Decide on a session opened
 	// with RequireSigned: the unsigned door is closed, and only
 	// DecideSigned records caller-held decisions (ADR 0021 §3).
 	ErrSignatureRequired = errors.New("thread: this session requires signed decisions")
+
+	// ErrClosed is returned by Send, Continue and every write on a
+	// Session whose Close has run: a closed session accepts no new
+	// work and writes nothing. Reads keep answering from the tree the
+	// session held when it closed. Terminal for the Session value —
+	// Open the session again to continue it.
+	ErrClosed = errors.New("thread: session is closed")
+
+	// ErrCreateOnly is returned by Open when it is handed an option
+	// that only means something while a session's header is being
+	// written — WithMeta, PublicID, WithLineage. The header is
+	// immutable once stored, so Open refuses the option instead of
+	// ignoring it; Create and Fork honour it.
+	ErrCreateOnly = errors.New("thread: option applies only when a session is created")
+
+	// ErrReservedKey is returned by SetInfo for a metadata key under
+	// the reserved "weft." prefix: those keys are the session's
+	// identity (weft.public_id), set once in the header at Create —
+	// WithMeta, PublicID — and never edited afterwards.
+	ErrReservedKey = errors.New("thread: metadata key is reserved")
 )
 
 // CorruptError is the typed shape ErrCorrupt takes when the failure
-// belongs to one line of a stored session (ADR 0011 §5: "ErrCorrupt
-// naming the line"): it carries the session and the 1-based line
-// number — the header is line 1 — so a caller, a log, or a UI can
-// point at the place. Match the class with errors.Is(err, ErrCorrupt)
-// and take the place with errors.As; backends construct it directly
-// through their own decode-failure paths.
+// belongs to one place in a stored session (ADR 0011 §5: "ErrCorrupt
+// naming the line"): it carries the session, the 1-based line number
+// — the header is line 1 — and, when the failure is an entry the tree
+// cannot hold (Open's validation: an empty, invalid or duplicate id, a
+// parent the session does not hold before it), that entry's id, so a
+// caller, a log, or a UI can point at the place. Match the class with
+// errors.Is(err, ErrCorrupt), take the place with errors.As, and reach
+// the cause through Err or errors.Is — Unwrap exposes both. Backends
+// construct it directly through their own decode-failure paths.
 type CorruptError struct {
 	Session string
-	Line    int // 1-based; 0 when the failure is not one line's
+	Line    int    // 1-based; 0 when the failure is not one line's
+	Entry   string // the entry id the failure names; empty when it has none
 	Err     error
 }
 
+// Error names the session and the place — the line, the entry, or
+// neither — and then the cause.
 func (e *CorruptError) Error() string {
-	if e.Line > 0 {
+	switch {
+	case e.Line > 0 && e.Entry != "":
+		return fmt.Sprintf("thread: session %s line %d (entry %s) is corrupt: %v", e.Session, e.Line, e.Entry, e.Err)
+	case e.Line > 0:
 		return fmt.Sprintf("thread: session %s line %d is corrupt: %v", e.Session, e.Line, e.Err)
+	case e.Entry != "":
+		return fmt.Sprintf("thread: session %s entry %s is corrupt: %v", e.Session, e.Entry, e.Err)
 	}
 	return fmt.Sprintf("thread: session %s holds corrupt data: %v", e.Session, e.Err)
 }
 
-// Unwrap makes errors.Is(err, ErrCorrupt) true — the class — while
-// Err keeps the cause for a caller who wants it.
-func (e *CorruptError) Unwrap() error { return ErrCorrupt }
+// Unwrap returns the class and the cause: errors.Is(err, ErrCorrupt)
+// is true for every CorruptError, and errors.Is and errors.As also
+// reach whatever Err wraps — a JSON syntax error, a sentinel of the
+// backend's own.
+func (e *CorruptError) Unwrap() []error {
+	if e.Err == nil {
+		return []error{ErrCorrupt}
+	}
+	return []error{ErrCorrupt, e.Err}
+}

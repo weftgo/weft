@@ -527,8 +527,9 @@ func TestSteeringRejectedInRunOptions(t *testing.T) {
 }
 
 // Receipts survive a restart, and the crash window closes: a queued
-// receipt with no fate defers on reopen and its follow-up runs —
-// accepted input is durable input (ADR 0011 §4).
+// receipt with no fate returns to the steer queue on reopen — Open
+// itself writes nothing and runs nothing — and Continue runs it as a
+// follow-up: accepted input is durable input (ADR 0011 §4).
 func TestReceiptsAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -582,38 +583,52 @@ func TestReceiptsAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Reopen: the delivered story reads back, and the orphan defers.
+	// Reopen: the delivered story reads back, and the unsettled steer
+	// is back in the queue — still queued on disk, nothing written,
+	// nothing run.
+	onDisk := len(s.Entries()) + 1 // the session's entries and the hand-written receipt
 	s2, err := thread.Open(ctx, st, s.ID(), agent, thread.BusyPolicy(thread.Steer))
 	if err != nil {
 		t.Fatal(err)
 	}
 	status := receiptStatus(receipts(s2))
-	if got := status["e_crashwindow"]; got != thread.ReceiptDeferred {
-		t.Fatalf("crash-window receipt after reopen = %q, want deferred", got)
+	if got := status["e_crashwindow"]; got != thread.ReceiptQueued {
+		t.Fatalf("crash-window receipt after reopen = %q, want queued — Open writes nothing", got)
 	}
 	for id, st := range status {
 		if id != "e_crashwindow" && st != thread.ReceiptDelivered {
 			t.Errorf("receipt %s after reopen = %q, want delivered", id, st)
 		}
 	}
-	if got := status["e_crashwindow"]; got != thread.ReceiptDeferred {
-		t.Fatalf("crash-window receipt after reopen = %q, want deferred", got)
+	if q := s2.Queue(); len(q) != 1 || q[0].Receipt != "e_crashwindow" || q[0].Msg.Text() != "lost in the crash" {
+		t.Fatalf("Queue after reopen = %+v, want the restored steer", q)
 	}
-	// The resurrected follow-up ran: the lost message reached the model.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		found := false
-		for _, m := range s2.Context() {
-			if m.Text() == "lost in the crash" {
-				found = true
-			}
-		}
-		if found {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	if got := len(s2.Entries()); got != onDisk {
+		t.Fatalf("Open appended %d entries; it must write nothing", got-onDisk)
 	}
-	t.Fatal("the resurrected steer never ran")
+
+	// Continue runs it: the receipt defers, the follow-up turn carries
+	// the lost message to the model.
+	ft, err := s2.Continue(ctx)
+	if err != nil || ft == nil {
+		t.Fatalf("Continue = %v, %v; want the follow-up turn", ft, err)
+	}
+	res, err := ft.Wait()
+	if err != nil {
+		t.Fatalf("follow-up Wait: %v", err)
+	}
+	if res.Text() != "resurrected" {
+		t.Errorf("follow-up answered %q, want the scripted reply", res.Text())
+	}
+	if !steerInContext(s2, "lost in the crash") {
+		t.Error("the restored steer never reached the model")
+	}
+	if got := receiptStatus(receipts(s2))["e_crashwindow"]; got != thread.ReceiptDeferred {
+		t.Errorf("crash-window receipt after Continue = %q, want deferred", got)
+	}
+	if q := s2.Queue(); len(q) != 0 {
+		t.Errorf("Queue after Continue = %+v, want empty", q)
+	}
 }
 
 // Several steers accepted between two drain points deliver in one
@@ -1064,10 +1079,11 @@ func (f *failDeferredStorage) Append(ctx context.Context, session string, entrie
 	return f.Storage.Append(ctx, session, entries...)
 }
 
-// A crashed steer resurrected on reopen whose deferral cannot be
-// persisted still runs: the follow-up is queued in memory, the same
-// recovery settleSteersLocked uses — the message is in hand, and only
-// the receipt entry stays queued on disk.
+// A crashed steer restored on reopen whose deferral cannot be
+// persisted still runs once the caller continues the session: the
+// follow-up is queued in memory, the same recovery settleSteersLocked
+// uses — the message is in hand, and only the receipt entry stays
+// queued on disk.
 func TestResurrectSteerSurvivesFailedDeferral(t *testing.T) {
 	ctx := context.Background()
 	inner := thread.Memory()
@@ -1088,6 +1104,9 @@ func TestResurrectSteerSurvivesFailedDeferral(t *testing.T) {
 	s, err := thread.Open(ctx, st, s0.ID(), agent)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := s.Continue(ctx); err != nil {
+		t.Fatalf("Continue: %v", err)
 	}
 	waitUntil(t, "the resurrected steer never ran despite the failed deferral write", func() bool {
 		return steerInContext(s, "lost in the crash")

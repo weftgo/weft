@@ -191,6 +191,11 @@ func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A session whose Close has been called accepts no new work
+	// (session.go: admitLocked, ErrClosed).
+	if err := s.admitLocked(); err != nil {
+		return nil, err
+	}
 	// A runner whose in-flight turn is already decided is on its way
 	// out — the epilogue frees the slot moments after the Wait that
 	// returned to this caller. Reading it as busy would answer ErrBusy

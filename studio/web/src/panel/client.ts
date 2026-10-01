@@ -210,6 +210,47 @@ export function postApproval(
   return panelPost(ep, `runs/${encodeURIComponent(runID)}/approvals`, body)
 }
 
+/** PUT /api/runtimes/{id}/breakpoints — the rung-3 verb (§8.3): the
+ * tools every run the runtime starts parks on from then on. */
+export function putBreakpoints(
+  ep: PanelEndpoint,
+  runtimeID: string,
+  tools: string[]
+): Promise<{ tools: string[] }> {
+  return panelPut(ep, `runtimes/${encodeURIComponent(runtimeID)}/breakpoints`, { tools })
+}
+
+/** POST /api/runs/{id}/steer — the rung-4 verb (§8.4): one user
+ * message delivered into a runtime-started run mid-flight. */
+export function postSteer(ep: PanelEndpoint, runID: string, message: string): Promise<{ steered: boolean }> {
+  return panelPost(ep, `runs/${encodeURIComponent(runID)}/steer`, { message })
+}
+
+/** put one JSON document and decode the answer. */
+async function panelPut<T>(ep: PanelEndpoint, path: string, body: unknown): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  }
+  if (ep.token) headers.Authorization = `Bearer ${ep.token}`
+  const res = await fetch(apiUrl(ep, path), { method: "PUT", headers, body: JSON.stringify(body) })
+  if (!res.ok) {
+    let code = "network"
+    let message = `${res.status} ${res.statusText}`
+    try {
+      const doc = (await res.json()) as { error?: { code?: string; message?: string } }
+      if (doc.error) {
+        code = doc.error.code ?? code
+        message = doc.error.message ?? message
+      }
+    } catch {
+      // not JSON — the status line says enough
+    }
+    throw new PanelApiError(res.status, code, message)
+  }
+  return (await res.json()) as T
+}
+
 /** post one JSON document and decode the answer (the panel's write
  * verbs are few; errors are PanelApiError like the reads). */
 export async function panelPost<T>(ep: PanelEndpoint, path: string, body: unknown): Promise<T> {

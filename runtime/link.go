@@ -12,6 +12,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/thread"
 )
 
 // link is the runtime link's client side: it dials out to Studio,
@@ -31,12 +34,15 @@ type link struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 
-	mu       sync.Mutex
-	seen     map[string]bool // command ids already acked (at-most-once)
-	inFlight map[string]context.CancelFunc
-	tally    map[string]*budgetState // per experiment_id
-	parked   map[string]*parkState   // run id → the parked run this runtime started
-	forked   map[string]bool         // sessions this runtime forked (their turns continue in place)
+	mu          sync.Mutex
+	seen        map[string]bool // command ids already acked (at-most-once)
+	inFlight    map[string]context.CancelFunc
+	tally       map[string]*budgetState      // per experiment_id
+	parked      map[string]*parkState        // run id → the parked run this runtime started
+	forked      map[string]bool              // sessions this runtime forked (their turns continue in place)
+	breakpoints map[string]bool              // the debugger's tool set (§8.3): parked on every run
+	steerQ      map[string]chan weft.Message // run id → the in-flight run's steering queue
+	steerSess   map[string]*thread.Session   // fork turns in flight: steered through the session
 
 	reconnect func() time.Duration // backoff; indirected by tests
 }
@@ -45,16 +51,19 @@ type link struct {
 // socket), else a plain HTTP client on url.
 func newLink(c *config, reg *registry, url, token string) *link {
 	l := &link{
-		cfg:      c,
-		reg:      reg,
-		token:    token,
-		id:       newID("rt_"),
-		done:     make(chan struct{}),
-		seen:     map[string]bool{},
-		inFlight: map[string]context.CancelFunc{},
-		tally:    map[string]*budgetState{},
-		parked:   map[string]*parkState{},
-		forked:   map[string]bool{},
+		cfg:         c,
+		reg:         reg,
+		token:       token,
+		id:          newID("rt_"),
+		done:        make(chan struct{}),
+		seen:        map[string]bool{},
+		inFlight:    map[string]context.CancelFunc{},
+		tally:       map[string]*budgetState{},
+		parked:      map[string]*parkState{},
+		forked:      map[string]bool{},
+		breakpoints: map[string]bool{},
+		steerQ:      map[string]chan weft.Message{},
+		steerSess:   map[string]*thread.Session{},
 	}
 	if c.local != nil {
 		l.client = inProcessClient(c.local)
@@ -216,6 +225,18 @@ func (l *link) readStream(ctx context.Context, r io.Reader) error {
 				continue
 			}
 			go l.dispatchDecision(d)
+		case "breakpoints":
+			var b breakpointsFrame
+			if err := json.Unmarshal(ev.data, &b); err != nil {
+				continue
+			}
+			l.setBreakpoints(b.Tools)
+		case "steer":
+			var st steerFrame
+			if err := json.Unmarshal(ev.data, &st); err != nil || st.RunID == "" {
+				continue
+			}
+			l.steer(st)
 		case "":
 			// A comment or keep-alive line before any event field.
 		default:
@@ -450,4 +471,47 @@ func (b *backoff) next() time.Duration {
 		d = 30 * time.Second
 	}
 	return d
+}
+
+// setBreakpoints stores the debugger's tool set (§8.3): every run this
+// runtime starts from now on parks calls to these tools — the
+// breakpoint is rule-driven parking over ADR 0007's boundary, applied
+// per run because the agent itself is immutable (D7).
+func (l *link) setBreakpoints(tools []string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.breakpoints = map[string]bool{}
+	for _, t := range tools {
+		if t != "" {
+			l.breakpoints[t] = true
+		}
+	}
+	slog.Debug("weft/runtime: breakpoints set", "tools", tools)
+}
+
+// steer delivers one user message into a runtime-started run (§8.4):
+// the ephemeral run's steering queue (weft.Steering's source drains it
+// at the loop's two fixed points), or the fork's session — a Send
+// with thread's Steer policy, delivered mid-turn by ADR 0019. The
+// app's own turns are never steerable from here (PQ7): this link
+// holds no handle to them.
+func (l *link) steer(st steerFrame) {
+	l.mu.Lock()
+	q := l.steerQ[st.RunID]
+	sess := l.steerSess[st.RunID]
+	l.mu.Unlock()
+	switch {
+	case q != nil:
+		select {
+		case q <- weft.User(st.Message):
+		default:
+			slog.Debug("weft/runtime: steer dropped (queue full or run ending)", "run_id", st.RunID)
+		}
+	case sess != nil:
+		if _, err := sess.Send(context.Background(), weft.User(st.Message), thread.As(thread.Steer)); err != nil {
+			slog.Debug("weft/runtime: steer into the fork refused", "run_id", st.RunID, "err", err)
+		}
+	default:
+		slog.Debug("weft/runtime: steer for a run not in flight here", "run_id", st.RunID)
+	}
 }

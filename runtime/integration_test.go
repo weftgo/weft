@@ -1077,3 +1077,181 @@ func (m *countingEchoModel) Stream(ctx context.Context, req weft.ModelRequest) i
 		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
 	}
 }
+
+// TestDebuggerBreakpointsAndSteer pins rungs 3–4 on runtime-started
+// runs (WEFT-DEVTOOLS §8.3/§8.4, D7): PUT breakpoints parks a safe,
+// opted-in tool that would otherwise run for real — on every command
+// from then on — and POST steer delivers a user message into an
+// ephemeral run mid-flight (a steered event in its records). The
+// app's own turn is refused on both verbs: viewer-only (PQ7).
+func TestDebuggerBreakpointsAndSteer(t *testing.T) {
+	e := newE2E(t)
+	gate := make(chan struct{})
+	model := &gatedModel{gate: gate}
+	safeLookup := weft.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
+		OrderID string `json:"order_id"`
+	}) (string, error) {
+		return "shipped", nil
+	}, weft.Replay(weft.ReplaySafe))
+	e.agent = weft.New(model, weft.Name("acme-support"),
+		weft.Instructions("You are Acme's support agent."),
+		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), safeLookup)
+	runID := e.appTurn(t, "hello")
+
+	shutdown := runtime.Install(
+		runtime.Studio(e.ts.URL, ""),
+		runtime.Agents(e.agent),
+		runtime.AllowSideEffects("lookup_order"),
+		runtime.Enabled(true),
+	)
+	defer shutdown()
+	e.waitRuntime(t)
+	_, rtJSON := e.api(t, http.MethodGet, "/api/runtimes", "")
+	var runtimes struct {
+		Runtimes []struct {
+			ID string `json:"id"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal([]byte(rtJSON), &runtimes); err != nil || len(runtimes.Runtimes) == 0 {
+		t.Fatalf("runtimes: %v %s", err, rtJSON)
+	}
+	rt := runtimes.Runtimes[0].ID
+
+	// Rung 3: the breakpoint parks an opted-in safe tool (§8.3).
+	cell := func(id string) string {
+		return fmt.Sprintf(`{
+		  "command_id": %q, "runtime": %q, "agent": "acme-support",
+		  "input": "break on me",
+		  "overrides": {"tools_enabled": ["lookup_order"]},
+		  "engine": "live", "side_effects": "allow", "thread": "ephemeral"
+		}`, id, rt)
+	}
+	// An unknown tool name is a 400.
+	if code, resp := e.api(t, http.MethodPut, "/api/runtimes/"+rt+"/breakpoints",
+		`{"tools": ["nope"]}`); code != http.StatusBadRequest {
+		t.Errorf("breakpoint on an unknown tool = %d %s, want 400", code, resp)
+	}
+	if code, resp := e.api(t, http.MethodPut, "/api/runtimes/"+rt+"/breakpoints",
+		`{"tools": ["lookup_order"]}`); code != http.StatusOK {
+		t.Fatalf("breakpoints = %d %s", code, resp)
+	}
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", cell("cmd_brk")); code != http.StatusAccepted {
+		t.Fatalf("breakpoint command = %d %s", code, resp)
+	}
+	row := e.waitCommand(t, "cmd_brk", "finished")
+	var st struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(row), &st); err != nil {
+		t.Fatal(err)
+	}
+	// The run parked on the breakpoint: its row reads pending 1 (the
+	// tool never ran although allow + opted-in would have let it).
+	e.p.ForceFlush(context.Background())
+	if attrs := e.rec.playgroundSpan(t); attrs["weft.override.park_on"] != "lookup_order" {
+		t.Errorf("park_on = %q, want the breakpoint's tool", attrs["weft.override.park_on"])
+	}
+	// Clear: the same command shape runs for real again.
+	if code, _ := e.api(t, http.MethodPut, "/api/runtimes/"+rt+"/breakpoints", `{"tools": []}`); code != http.StatusOK {
+		t.Fatalf("clear = %d", code)
+	}
+
+	// Rung 4: steer the gated run mid-flight (§8.4). The app's own
+	// turn is refused first (PQ7).
+	if code, _ := e.api(t, http.MethodPost, "/api/runs/"+runID+"/steer",
+		`{"message": "no"}`); code != http.StatusForbidden {
+		t.Errorf("steer on the app's own run = %d, want 403 (viewer-only, PQ7)", code)
+	}
+	steerCmd := fmt.Sprintf(`{
+	  "command_id": "cmd_steer", "runtime": %q, "agent": "acme-support",
+	  "input": "a slow question",
+	  "engine": "live", "side_effects": "substitute", "thread": "ephemeral"
+	}`, rt)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", steerCmd); code != http.StatusAccepted {
+		t.Fatalf("steer command = %d %s", code, resp)
+	}
+	// Wait for the run id, steer it while the model is held, release.
+	e.waitCommand(t, "cmd_steer", "accepted")
+	steeredAt := ""
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && steeredAt == "" {
+		_, body := e.api(t, http.MethodGet, "/api/playground/commands/cmd_steer", "")
+		var c struct {
+			RunID string `json:"run_id"`
+		}
+		if json.Unmarshal([]byte(body), &c) == nil && strings.HasPrefix(c.RunID, "pg_") {
+			steeredAt = c.RunID
+		} else {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	if steeredAt == "" {
+		t.Fatal("the steered run id never arrived")
+	}
+	if code, resp := e.api(t, http.MethodPost, "/api/runs/"+steeredAt+"/steer",
+		`{"message": "also check the tracking link"}`); code != http.StatusAccepted {
+		t.Fatalf("steer = %d %s", code, resp)
+	}
+	close(gate) // the model finishes; the loop drains the steer at its point
+	e.waitCommand(t, "cmd_steer", "finished")
+	// The steered event is in the run's records.
+	e.p.ForceFlush(context.Background())
+	found := false
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && !found {
+		_, body := e.api(t, http.MethodGet, "/api/runs/"+steeredAt+"/events?after=-1&limit=100", "")
+		if strings.Contains(body, "steered") && strings.Contains(body, "tracking link") {
+			found = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !found {
+		t.Error("no steered event in the run's records — the message never landed")
+	}
+}
+
+// gatedModel answers its first call at once (the app's own turn) and
+// holds every later one until the gate closes — so a steer arrives
+// while the experiment's run is in flight.
+type gatedModel struct {
+	gate  chan struct{}
+	mu    sync.Mutex
+	calls int
+}
+
+func (m *gatedModel) Info() weft.ModelInfo {
+	return weft.ModelInfo{Provider: "wefttest", Name: "gated"}
+}
+
+func (m *gatedModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	m.mu.Lock()
+	m.calls++
+	n := m.calls
+	m.mu.Unlock()
+	switch n {
+	case 1: // the app's own turn: a plain reply
+		return func(yield func(weft.ModelEvent, error) bool) {
+			yield(weft.ModelTextDelta{Text: "done"}, nil)
+			yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+		}
+	case 2: // the breakpoint command: call the tool (the run parks)
+		return func(yield func(weft.ModelEvent, error) bool) {
+			yield(weft.ModelToolCall{ID: "c_brk", Name: "lookup_order",
+				Args: []byte(`{"order_id":"4411"}`)}, nil)
+			yield(weft.ModelFinish{Reason: weft.StopToolCalls}, nil)
+		}
+	}
+	// Later calls hold until the gate closes — the steered run sits
+	// mid-flight, and the steer lands when it drains.
+	return func(yield func(weft.ModelEvent, error) bool) {
+		select {
+		case <-m.gate:
+		case <-ctx.Done():
+			yield(nil, ctx.Err())
+			return
+		}
+		yield(weft.ModelTextDelta{Text: "done"}, nil)
+		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+	}
+}

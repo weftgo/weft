@@ -159,6 +159,10 @@ export interface Meta {
   ingest_open: boolean
   interrupted_after_ms: number
   capabilities: string[]
+  /** What the debugger's write verbs (breakpoints, steer) may act on
+   * — "runtime-started runs" (PQ7: the app's own turns are
+   * viewer-only). */
+  debug_scope?: string
 }
 
 /** A panel token minted by the backend (S4.6). */

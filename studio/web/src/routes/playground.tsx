@@ -17,6 +17,7 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateActio
 import {
   apiBase,
   asTranscript,
+  metaQuery,
   experimentsQuery,
   postExperiment,
   postFixtures,
@@ -68,7 +69,7 @@ function PlaygroundPage() {
   const caps = useCapabilities()
   if (caps.loading) return <p className="p-6 text-xs text-muted-foreground">loading…</p>
   if (!caps.has("playground")) return <NoPlayground />
-  return <Playground />
+  return <Playground caps={caps.caps} />
 }
 
 function NoPlayground() {
@@ -129,9 +130,10 @@ function variantA(search: PlaygroundSearch, agent?: AgentView): Variant {
   }
 }
 
-function Playground() {
+function Playground({ caps }: { caps: string[] }) {
   const search = useSearch({ from: "/playground" })
   const runtimes = useQuery(runtimesQuery())
+  const meta = useQuery(metaQuery())
 
   const firstRuntime = runtimes.data?.runtimes.find((r) => r.agents.length > 0)
   const agent: AgentView | undefined = firstRuntime?.agents[0]
@@ -293,6 +295,12 @@ function Playground() {
         Playground · {agent?.name ?? "no runtime connected"} ·{" "}
         {firstRuntime ? `${firstRuntime.service} · ${firstRuntime.env || "?"} · ${firstRuntime.host}` : "—"}
         {runtimes.isPending && <span className="text-faint">connecting…</span>}
+        {meta.data?.debug_scope && (
+          <span className="text-faint">
+            · breakpoints &amp; steer act on {meta.data.debug_scope} only (the app's own turns are
+            viewer-only)
+          </span>
+        )}
       </header>
       <div className="flex min-h-0 flex-1">
         {/* The config column (§4's left half). */}
@@ -449,6 +457,15 @@ function Playground() {
               </select>
             </label>
           </div>
+          {/* Rung 3 (§8.3): break on tools — PUT /api/runtimes/{id}/
+              breakpoints; the runtime parks them on every run it
+              starts. */}
+          {caps.includes("breakpoints") && agent?.tools.length ? (
+            <div className="space-y-1">
+              <span className="text-xs text-muted-foreground">Break on (parks every run)</span>
+              <Breakpoints runtimeID={firstRuntime?.id ?? ""} tools={agent.tools.map((t) => t.name)} />
+            </div>
+          ) : null}
           {fromStep === 0 && (
             <label className="block space-y-1">
               <span className="text-xs text-muted-foreground">
@@ -1067,6 +1084,38 @@ function History() {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+
+/** Breakpoints is the rung-3 control (§8.3): one checkbox per tool,
+ * applied on change — the runtime parks them on every run it starts
+ * from then on, whatever the command asked for. */
+function Breakpoints({ runtimeID, tools }: { runtimeID: string; tools: string[] }) {
+  const [set, setSet] = useState<Set<string>>(new Set())
+  const toggle = async (name: string, on: boolean) => {
+    const next = new Set(set)
+    if (on) next.add(name)
+    else next.delete(name)
+    setSet(next)
+    const headers: Record<string, string> = { "Content-Type": "application/json" }
+    const tok = studioToken()
+    if (tok) headers.Authorization = `Bearer ${tok}`
+    await fetch(new URL(`api/runtimes/${encodeURIComponent(runtimeID)}/breakpoints`, apiBase()).toString(), {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ tools: [...next].sort() }),
+    })
+  }
+  return (
+    <div className="flex flex-wrap gap-2">
+      {tools.map((t) => (
+        <label key={t} className="flex items-center gap-1">
+          <input type="checkbox" checked={set.has(t)} onChange={(e) => void toggle(t, e.target.checked)} />
+          {t}
+        </label>
+      ))}
     </div>
   )
 }

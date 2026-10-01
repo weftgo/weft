@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/thread"
@@ -152,7 +153,29 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) (string, 
 		return l.executeFork(ctx, cmd)
 	}
 	agent, _ := l.reg.agent(cmd.Agent)
-	res, err := agent.Generate(ctx, l.runOptions(cmd, runID)...)
+
+	// The steer queue (§8.4): every ephemeral run this link starts
+	// carries a weft.Steering source draining it, so a steer frame
+	// finds the run mid-flight. Dropped when the run ends.
+	steerQ := make(chan weft.Message, 8)
+	l.mu.Lock()
+	l.steerQ[runID] = steerQ
+	l.mu.Unlock()
+	defer func() {
+		l.mu.Lock()
+		delete(l.steerQ, runID)
+		l.mu.Unlock()
+	}()
+
+	res, err := agent.Generate(ctx, append(l.runOptions(cmd, runID),
+		weft.Steering(func(_ context.Context, _ weft.SteerPoint) []weft.Message {
+			select {
+			case m := <-steerQ:
+				return []weft.Message{m}
+			default:
+				return nil
+			}
+		}))...)
 
 	// Substitute (§6 rule 3, the default mode): a parked side-effect
 	// call that matches a recorded call of the source (same tool, same
@@ -224,6 +247,14 @@ func (l *link) executeFork(ctx context.Context, cmd command) (string, string) {
 		if err != nil {
 			return "failed: " + err.Error(), ""
 		}
+		l.mu.Lock()
+		l.steerSess[turn.RunID()] = s
+		l.mu.Unlock()
+		defer func() {
+			l.mu.Lock()
+			delete(l.steerSess, turn.RunID())
+			l.mu.Unlock()
+		}()
 		res, werr := turn.Wait()
 		return l.outcome(cmd, turn.RunID(), res, werr), turn.RunID()
 	}
@@ -247,8 +278,14 @@ func (l *link) executeFork(ctx context.Context, cmd command) (string, string) {
 		return "failed: " + err.Error(), ""
 	}
 	l.mu.Lock()
-	l.forked[forked.ID()] = true // its turns continue in-place later
+	l.forked[forked.ID()] = true       // its turns continue in-place later
+	l.steerSess[turn.RunID()] = forked // steered through the session while in flight
 	l.mu.Unlock()
+	defer func() {
+		l.mu.Lock()
+		delete(l.steerSess, turn.RunID())
+		l.mu.Unlock()
+	}()
 	res, werr := turn.Wait()
 	return l.outcome(cmd, turn.RunID(), res, werr), turn.RunID()
 }
@@ -280,6 +317,30 @@ func (l *link) sourceMsgs(cmd command) []weft.Message {
 		return nil
 	}
 	return msgs
+}
+
+// breakpointTools names the stored breakpoint set this run parks on,
+// restricted to the agent's tools (a name it does not have cannot
+// fire anyway).
+func (l *link) breakpointTools(agent string) []string {
+	a, ok := l.reg.agent(agent)
+	if !ok || a == nil {
+		return nil
+	}
+	have := map[string]bool{}
+	for _, t := range a.Tools() {
+		have[t.Name] = true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []string
+	for t := range l.breakpoints {
+		if have[t] {
+			out = append(out, t)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // scriptedFor builds the scripted engine over the command's source
@@ -487,6 +548,12 @@ func (l *link) overrideOptions(cmd command) []weft.RunOption {
 	// of running. A tool marked ReplaySafe is not a side effect.
 	if parked := l.reg.parkedTools(cmd.Agent, o.ToolsEnabled); len(parked) > 0 {
 		opts = append(opts, weft.ParkOn(parked...))
+	}
+	// The debugger's breakpoints (§8.3): parked on every run this
+	// runtime starts, whatever the command asked for — D7's rule,
+	// applied per run because the agent is immutable.
+	if breaks := l.breakpointTools(cmd.Agent); len(breaks) > 0 {
+		opts = append(opts, weft.ParkOn(breaks...))
 	}
 
 	meta := map[string]string{

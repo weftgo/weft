@@ -337,6 +337,11 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 		IngestOpen         bool     `json:"ingest_open"`
 		InterruptedAfterMs int64    `json:"interrupted_after_ms"`
 		Capabilities       []string `json:"capabilities"`
+		// DebugScope says what the debugger's write verbs (breakpoints,
+		// steer) can act on — the runtime-started runs only. The app's
+		// own turns are viewer-only (D7, PQ7); meta says so plainly
+		// (WEFT-DEVTOOLS §8.5 item 6).
+		DebugScope string `json:"debug_scope,omitempty"`
 	}{
 		WeftVersion:        weftVersion(),
 		StudioVersion:      Version,
@@ -346,7 +351,19 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 		IngestOpen:         !s.noIngest && s.ingestToken == "",
 		InterruptedAfterMs: obsdb.InterruptedAfter.Milliseconds(),
 		Capabilities:       s.capabilityList(),
+		DebugScope:         s.debugScope(),
 	})
+}
+
+// debugScope names what the debugger's write verbs may act on: the
+// runtime-started runs, only when those verbs are registered.
+func (s *Server) debugScope() string {
+	for _, g := range s.groups {
+		if g.capability == "breakpoints" {
+			return "runtime-started runs"
+		}
+	}
+	return ""
 }
 
 // serveRuns answers api/runs (S4.2): agent, status, session,

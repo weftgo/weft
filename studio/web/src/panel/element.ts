@@ -713,6 +713,23 @@ export class WeftDevtools extends HTMLElement {
       approvals.appendChild(abody)
       body.appendChild(approvals)
     }
+    // Rung 4 (§8.4): steer the running experiment — one user message
+    // delivered mid-flight into the run the runtime holds.
+    if (hasCapability(s, "steer") && r.state === "accepted" && r.runID) {
+      const box = el("div", "weft-step")
+      box.appendChild(el("div", "weft-step-h", [el("span", undefined, "steer this run")]))
+      const b = el("div", "weft-step-b")
+      const input = el("input", "weft-input") as HTMLInputElement
+      input.placeholder = "a message delivered mid-flight"
+      const send = el("button", "weft-btn", "steer", { title: "POST /api/runs/{id}/steer (ADR 0019)" })
+      send.addEventListener("click", () => {
+        void this.model?.steer(input.value)
+        input.value = ""
+      })
+      b.append(input, send)
+      box.appendChild(b)
+      body.appendChild(box)
+    }
     card.appendChild(body)
     return card
   }

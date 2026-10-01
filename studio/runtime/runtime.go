@@ -176,6 +176,13 @@ type Command struct {
 	// (WEFT-DEVTOOLS §8.2), routed as a command so the at-most-once
 	// ack path carries it.
 	approval *ApprovalDecision `json:"-"`
+	// breakpoints marks a breakpoints frame instead of a run
+	// (WEFT-DEVTOOLS §8.3): the tools every run the runtime starts
+	// parks on from then on.
+	breakpoints *Breakpoints `json:"-"`
+	// steer marks a steer frame instead of a run (§8.4): a message
+	// delivered into a run the runtime started, mid-flight.
+	steer *SteerMessage `json:"-"`
 	// seq orders commands within this server (a monotonic counter,
 	// independent of the id's own ordering).
 	seq uint64
@@ -221,6 +228,23 @@ type TranscriptEdit struct {
 	ToolResult string `json:"tool_result,omitempty"`
 	CallID     string `json:"call_id,omitempty"`
 	Content    string `json:"content,omitempty"`
+}
+
+// Breakpoints is an `event: breakpoints` frame's data (§8.3): the
+// runtime passes the named tools as weft.ParkOn on every run it starts
+// from then on [D7] — it cannot alter agents it did not build. An
+// empty set clears.
+type Breakpoints struct {
+	Tools []string `json:"tools"`
+}
+
+// SteerMessage is an `event: steer` frame's data (§8.4): a user
+// message delivered into a runtime-started run — weft.Steering on an
+// ephemeral run, thread's Steer policy on a fork the runtime owns.
+// The app's own turns are never steerable from here (PQ7).
+type SteerMessage struct {
+	RunID   string `json:"run_id"`
+	Message string `json:"message"`
 }
 
 // Ack is the POST /api/runtime/acks body: accepted/rejected before
@@ -341,6 +365,9 @@ type connected struct {
 	connectedSince time.Time
 	lastSeen       time.Time
 	feed           chan Command // nil when no live stream
+	// breakpoints is the debugger's tool set (§8.3), applied to every
+	// run this runtime starts; GET /api/runtimes reports it.
+	breakpoints []string
 }
 
 // commandRow is one command's lifecycle state.
@@ -537,6 +564,24 @@ func writeRunFrame(w http.ResponseWriter, flusher http.Flusher, cmd Command) {
 			return
 		}
 		_, _ = fmt.Fprintf(w, "id: %s\nevent: approve\ndata: %s\n\n", cmd.CommandID, data)
+		flusher.Flush()
+		return
+	}
+	if cmd.breakpoints != nil {
+		data, err := json.Marshal(cmd.breakpoints)
+		if err != nil {
+			return
+		}
+		_, _ = fmt.Fprintf(w, "id: %s\nevent: breakpoints\ndata: %s\n\n", cmd.CommandID, data)
+		flusher.Flush()
+		return
+	}
+	if cmd.steer != nil {
+		data, err := json.Marshal(cmd.steer)
+		if err != nil {
+			return
+		}
+		_, _ = fmt.Fprintf(w, "id: %s\nevent: steer\ndata: %s\n\n", cmd.CommandID, data)
 		flusher.Flush()
 		return
 	}
@@ -908,4 +953,64 @@ func orDefault(s, def string) string {
 		return s
 	}
 	return def
+}
+
+// ── rungs 3–4 (WEFT-DEVTOOLS §8.3/§8.4, D7) ────────────────────────
+
+// SetBreakpoints stores the runtime's breakpoint set and forwards it
+// (an `event: breakpoints` frame): the runtime passes the named tools
+// as weft.ParkOn on every run it starts from then on. It cannot alter
+// agents it did not build — the app's own turns are not breakable
+// from here (PQ7), and meta says so.
+func (rs *RuntimeServer) SetBreakpoints(runtimeID string, tools []string) error {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	c := rs.runtimes[runtimeID]
+	if c == nil {
+		return ErrUnknownRuntime
+	}
+	c.breakpoints = tools
+	if c.feed == nil {
+		return ErrNotConnected
+	}
+	select {
+	case c.feed <- Command{CommandID: newCommandID(), Runtime: runtimeID, breakpoints: &Breakpoints{Tools: tools}}:
+	default:
+		c.feed = nil
+		return ErrNotConnected
+	}
+	return nil
+}
+
+// BreakpointsOf returns the runtime's stored breakpoint set.
+func (rs *RuntimeServer) BreakpointsOf(runtimeID string) []string {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if c := rs.runtimes[runtimeID]; c != nil {
+		return c.breakpoints
+	}
+	return nil
+}
+
+// Steer forwards one user message into a runtime-started run (an
+// `event: steer` frame): weft.Steering on an ephemeral run the runtime
+// holds, thread's Steer policy on a fork it owns. Best effort — the
+// run may have ended between the read and the delivery.
+func (rs *RuntimeServer) Steer(runtimeID, runID, message string) error {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	c := rs.runtimes[runtimeID]
+	if c == nil {
+		return ErrUnknownRuntime
+	}
+	if c.feed == nil {
+		return ErrNotConnected
+	}
+	select {
+	case c.feed <- Command{CommandID: newCommandID(), Runtime: runtimeID, steer: &SteerMessage{RunID: runID, Message: message}}:
+	default:
+		c.feed = nil
+		return ErrNotConnected
+	}
+	return nil
 }

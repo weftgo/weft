@@ -65,6 +65,11 @@ func registerPlayground(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/experiments", s.serveExperiments)
 	mux.HandleFunc("POST /api/experiments", s.serveExperiments)
 	mux.HandleFunc("GET /api/experiments/{id}", s.serveExperiment)
+	// The debugger's rungs 3–4 (WEFT-DEVTOOLS §8.3/§8.4), each its own
+	// capability: the panel and the Studio UI render a control only
+	// when meta reports it (§8.5 item 3).
+	mux.HandleFunc("PUT /api/runtimes/{id}/breakpoints", s.serveBreakpoints(rs))
+	mux.HandleFunc("POST /api/runs/{id}/steer", s.serveSteer(rs))
 	// The runtime link's own block (§10.3), as its own capability.
 	s.addGroup(routeGroup{
 		name:       "runtimes",
@@ -72,6 +77,16 @@ func registerPlayground(mux *http.ServeMux, s *Server) {
 		register: func(mux *http.ServeMux, s *Server) {
 			rs.Mount(mux)
 		},
+	})
+	s.addGroup(routeGroup{
+		name:       "breakpoints",
+		capability: "breakpoints",
+		register:   func(mux *http.ServeMux, s *Server) { /* mounted above */ },
+	})
+	s.addGroup(routeGroup{
+		name:       "steer",
+		capability: "steer",
+		register:   func(mux *http.ServeMux, s *Server) { /* mounted above */ },
 	})
 }
 

@@ -515,17 +515,44 @@ function ne(e, t, n) {
 	let r = new URLSearchParams(t).toString();
 	return O(e, `sessions${r ? `?${r}` : ""}`, n);
 }
-function P(e, t) {
+function re(e, t) {
 	return O(e, "runtimes", t);
 }
-function F(e, t) {
+function ie(e, t) {
 	return L(e, "playground/runs", t);
 }
-function I(e, t) {
+function ae(e, t) {
 	return O(e, `playground/commands/${encodeURIComponent(t)}`);
 }
-function re(e, t, n) {
+function oe(e, t, n) {
 	return L(e, `runs/${encodeURIComponent(t)}/approvals`, n);
+}
+function P(e, t, n) {
+	return I(e, `runtimes/${encodeURIComponent(t)}/breakpoints`, { tools: n });
+}
+function F(e, t, n) {
+	return L(e, `runs/${encodeURIComponent(t)}/steer`, { message: n });
+}
+async function I(e, t, n) {
+	let r = {
+		Accept: "application/json",
+		"Content-Type": "application/json"
+	};
+	e.token && (r.Authorization = `Bearer ${e.token}`);
+	let i = await fetch(E(e, t), {
+		method: "PUT",
+		headers: r,
+		body: JSON.stringify(n)
+	});
+	if (!i.ok) {
+		let e = "network", t = `${i.status} ${i.statusText}`;
+		try {
+			let n = await i.json();
+			n.error && (e = n.error.code ?? e, t = n.error.message ?? t);
+		} catch {}
+		throw new D(i.status, e, t);
+	}
+	return await i.json();
 }
 async function L(e, t, n) {
 	let r = {
@@ -585,11 +612,11 @@ function R(e, t) {
 }
 //#endregion
 //#region src/panel/playground.ts
-function ie(e, t) {
+function se(e, t) {
 	let n = /-t(\d+)$/.exec(e);
 	return `${n ? `t${n[1]}` : e.slice(-8)}·x${t + 1}`;
 }
-function ae(e, t) {
+function ce(e, t) {
 	let n = Object.entries(e.tools).filter(([, e]) => e).map(([e]) => e), r = {};
 	e.instructions && (r.instructions = e.instructions), n.length && n.length < Object.keys(e.tools).length && (r.tools_enabled = n), e.model && (r.model = e.model), e.thinking && (r.thinking = e.thinking);
 	let i = {
@@ -611,7 +638,7 @@ function ae(e, t) {
 		...e.content ? { content: e.content } : {}
 	}))), e.step === 0 && e.input && (i.input = e.input), t && (i.public_id = t), i;
 }
-function oe(e, t) {
+function le(e, t) {
 	let n = e.filter((e) => e.agents.some((e) => e.name === t));
 	return n.length ? n[0] : e[0] ?? null;
 }
@@ -620,7 +647,7 @@ function oe(e, t) {
 function z() {
 	return "v0.2.1";
 }
-function se(e, t) {
+function B(e, t) {
 	let n = e.replace(/^v/, "").split(/[.-]/), r = t.replace(/^v/, "").split(/[.-]/);
 	for (let e = 0; e < Math.max(n.length, r.length); e++) {
 		let t = n[e] ?? "", i = r[e] ?? "", a = Number(t), o = Number(i);
@@ -633,12 +660,12 @@ function se(e, t) {
 	}
 	return 0;
 }
-function B(e) {
-	return se(e, z()) > 0;
+function V(e) {
+	return B(e, z()) > 0;
 }
 //#endregion
 //#region src/panel/state.ts
-function V() {
+function H() {
 	return {
 		meta: null,
 		tooNew: !1,
@@ -652,11 +679,12 @@ function V() {
 		drawer: null,
 		runtimes: [],
 		result: null,
+		breakpoints: [],
 		live: !1,
 		raw: !1
 	};
 }
-function H(e) {
+function U(e) {
 	let t = c();
 	return {
 		id: e,
@@ -671,7 +699,7 @@ function H(e) {
 		expanded: /* @__PURE__ */ new Set()
 	};
 }
-function U(e) {
+function W(e) {
 	let t = [], n = /* @__PURE__ */ new Map();
 	for (let r of e) {
 		let e = r.forked_from ? r.forked_from.split("#")[0] : "";
@@ -687,10 +715,10 @@ function U(e) {
 		experiments: n
 	};
 }
-function W(e) {
+function G(e) {
 	return e ? e.some((e) => e.attrs?.["weft.content"] === "stripped") : !1;
 }
-var G = class {
+var K = class {
 	publicId;
 	state = {
 		meta: null,
@@ -705,6 +733,7 @@ var G = class {
 		drawer: null,
 		runtimes: [],
 		result: null,
+		breakpoints: [],
 		live: !1,
 		raw: !1
 	};
@@ -726,7 +755,7 @@ var G = class {
 		} catch {
 			return this.state.gone = !0, !1;
 		}
-		return !this.disposed && (this.state.meta = e, this.state.tooNew = B(e.studio_version), this.emit(), this.state.tooNew || await this.scope(), !0);
+		return !this.disposed && (this.state.meta = e, this.state.tooNew = V(e.studio_version), this.emit(), this.state.tooNew || await this.scope(), !0);
 	}
 	async rescope(e) {
 		e !== this.publicId && (this.publicId = e, this.state.meta && await this.scope());
@@ -760,12 +789,12 @@ var G = class {
 					limit: "50"
 				});
 				if (e !== this.loadSeq) return;
-				let { turns: r, experiments: i } = U(n.runs);
+				let { turns: r, experiments: i } = W(n.runs);
 				this.state.turns = r, this.state.experiments = i;
 			} else {
 				let t = await k(this.ep, { limit: "10" });
 				if (e !== this.loadSeq) return;
-				let { turns: n, experiments: r } = U(t.runs);
+				let { turns: n, experiments: r } = W(t.runs);
 				this.state.turns = n, this.state.experiments = r;
 			}
 		} catch {
@@ -793,7 +822,7 @@ var G = class {
 			let i = r.filter((t) => t.id !== e.id);
 			i.length && n.set(t, i);
 		}
-		let r = U([e, ...t]);
+		let r = W([e, ...t]);
 		this.state.turns = r.turns;
 		for (let [e, t] of r.experiments) n.set(e, [...n.get(e) ?? [], ...t]);
 		this.state.experiments = n;
@@ -801,7 +830,7 @@ var G = class {
 	async select(e) {
 		let t = this.loadSeq;
 		this.runSub?.close(), this.runSub = void 0, this.state.selected = e;
-		let n = H(e);
+		let n = U(e);
 		this.state.turn = n, this.emit();
 		let r = this.ep, [i, a, o, s] = await Promise.all([
 			A(r, e).catch(() => null),
@@ -891,14 +920,14 @@ var G = class {
 		let r = this.state.runtimes;
 		if (!r.length) {
 			try {
-				r = (await P(this.ep)).runtimes;
+				r = (await re(this.ep)).runtimes;
 			} catch {
 				return;
 			}
 			if (this.disposed) return;
 			this.state.runtimes = r;
 		}
-		let i = oe(r, n.agent), a = i?.agents.find((e) => e.name === n.agent);
+		let i = le(r, n.agent), a = i?.agents.find((e) => e.name === n.agent);
 		if (!i || !a) return;
 		let o = {};
 		for (let e of a.tools) o[e.name] = !0;
@@ -911,7 +940,7 @@ var G = class {
 			tools: o,
 			model: "",
 			thinking: "",
-			input: t === 0 ? le(this.state.turn) : "",
+			input: t === 0 ? de(this.state.turn) : "",
 			engine: "live",
 			sideEffects: "",
 			thread: "ephemeral",
@@ -932,7 +961,7 @@ var G = class {
 		if (!e) return;
 		let t;
 		try {
-			t = await F(this.ep, ae(e, this.publicId));
+			t = await ie(this.ep, ce(e, this.publicId));
 		} catch (e) {
 			this.setExperimentError(e instanceof Error ? e.message : String(e));
 			return;
@@ -943,8 +972,8 @@ var G = class {
 			state: "queued",
 			runID: "",
 			error: null,
-			label: ie(e.runId, n),
-			sourceText: ce(this.state.turn),
+			label: se(e.runId, n),
+			sourceText: ue(this.state.turn),
 			compareWith: "",
 			row: null,
 			events: [],
@@ -957,7 +986,7 @@ var G = class {
 		if (!r || !r.runID) return;
 		let i;
 		try {
-			i = await re(this.ep, r.runID, {
+			i = await oe(this.ep, r.runID, {
 				call_id: e,
 				decision: t,
 				content: n
@@ -1002,6 +1031,30 @@ var G = class {
 	}
 	compareText = /* @__PURE__ */ new Map();
 	compareCalls = /* @__PURE__ */ new Map();
+	async setBreakpoints(e) {
+		let t = this.state.drawer;
+		if (t) {
+			try {
+				await P(this.ep, t.runtimeId, e);
+			} catch (e) {
+				this.setExperimentError(e instanceof Error ? e.message : String(e));
+				return;
+			}
+			this.state.breakpoints = e, this.emit();
+		}
+	}
+	async steer(e) {
+		let t = this.state.result;
+		if (t && t.runID && e) {
+			try {
+				await F(this.ep, t.runID, e);
+			} catch (e) {
+				this.setExperimentError(e instanceof Error ? e.message : String(e));
+				return;
+			}
+			this.emit();
+		}
+	}
 	discardResult() {
 		this.expSub?.close(), this.expSub = void 0, this.state.result = null, this.emit();
 	}
@@ -1028,7 +1081,7 @@ var G = class {
 			if (this.disposed) return;
 			let t;
 			try {
-				t = await I(this.ep, e);
+				t = await ae(this.ep, e);
 			} catch {
 				this.schedulePoll(e);
 				return;
@@ -1099,25 +1152,25 @@ var G = class {
 		this.disposed = !0, this.raf && cancelAnimationFrame(this.raf), this.pollTimer && clearTimeout(this.pollTimer), this.scopeSub?.close(), this.runSub?.close(), this.expSub?.close();
 	}
 };
-function ce(e) {
+function ue(e) {
 	return e ? e.folded.steps.map((e) => e.text).filter(Boolean).join("\n") : "";
 }
-function le(e) {
+function de(e) {
 	return e?.transcript ? e.transcript.batches.flatMap((e) => e.messages).filter((e) => e.role === "user").flatMap((e) => e.content).filter((e) => e.type === "text").map((e) => e.text).join("\n") : "";
 }
 //#endregion
 //#region src/panel/element.ts
-function K(e, t) {
+function q(e, t) {
 	return e.meta?.capabilities?.includes(t) ?? !1;
 }
-function ue(e) {
+function fe(e) {
 	return e.status === "succeeded" && e.pending > 0 ? "parked" : e.status;
 }
-function de(e, t, n) {
+function pe(e, t, n) {
 	let r = new URL(`runs/${t}`, e);
 	return n !== void 0 && (r.searchParams.set("step", String(n)), r.searchParams.set("view", "story")), r.toString();
 }
-var fe = class extends HTMLElement {
+var me = class extends HTMLElement {
 	static observedAttributes = [
 		"data-endpoint",
 		"data-public-id",
@@ -1135,7 +1188,7 @@ var fe = class extends HTMLElement {
 	body;
 	onKey = (e) => this.keydown(e);
 	constructor() {
-		super(), this.cfg = i(this), this.open = this.cfg.open, this.shadow = this.attachShadow({ mode: "open" }), this.body = b("div", "weft-root"), this.shadow.append(b("style", void 0, w), this.body), this.render(V());
+		super(), this.cfg = i(this), this.open = this.cfg.open, this.shadow = this.attachShadow({ mode: "open" }), this.body = b("div", "weft-root"), this.shadow.append(b("style", void 0, w), this.body), this.render(H());
 	}
 	connectedCallback() {
 		this.cfg = i(this), this.opened || (this.opened = !0, this.open = this.cfg.open), window.addEventListener("keydown", this.onKey), this.start();
@@ -1151,12 +1204,12 @@ var fe = class extends HTMLElement {
 				return;
 			}
 			if (e.key === "Escape") {
-				this.keys ? (this.keys = !1, this.render(this.model?.state ?? V())) : this.open && this.toggle();
+				this.keys ? (this.keys = !1, this.render(this.model?.state ?? H())) : this.open && this.toggle();
 				return;
 			}
 			if (this.open) {
 				if (e.key === "?") {
-					e.preventDefault(), this.keys = !this.keys, this.render(this.model?.state ?? V());
+					e.preventDefault(), this.keys = !this.keys, this.render(this.model?.state ?? H());
 					return;
 				}
 				(e.key === "r" || e.key === "R") && (e.preventDefault(), this.toggleRaw());
@@ -1168,14 +1221,14 @@ var fe = class extends HTMLElement {
 	}
 	async start() {
 		this.model?.dispose();
-		let e = new G({
+		let e = new K({
 			base: this.cfg.endpoint,
 			token: this.cfg.token
 		}, this.cfg.publicId, (e) => this.render(e));
 		this.model = e, !await e.start() && this.cfg.auto && this.remove();
 	}
 	toggle() {
-		this.open = !this.open, this.render(this.model?.state ?? V());
+		this.open = !this.open, this.render(this.model?.state ?? H());
 	}
 	toggleRaw() {
 		this.model?.toggleRaw();
@@ -1214,7 +1267,7 @@ var fe = class extends HTMLElement {
 		let o = e.turns.reduce((e, t) => e + (t.usage?.input_tokens ?? 0), 0), s = e.turns.reduce((e, t) => e + (t.usage?.output_tokens ?? 0), 0), c = `${e.turns.length} turns · ${y(o)}→${y(s)} tok`;
 		if (t.appendChild(b("span", void 0, c, { title: c })), e.turns.length && e.selected) {
 			let n = b("a", "weft-btn", "⤢", {
-				href: de(this.cfg.endpoint, e.selected, e.selectedStep ?? void 0),
+				href: pe(this.cfg.endpoint, e.selected, e.selectedStep ?? void 0),
 				target: "_blank",
 				rel: "noopener",
 				title: "open in Studio (run, and the step you are reading)"
@@ -1241,7 +1294,7 @@ var fe = class extends HTMLElement {
 		return t;
 	}
 	turnRow(e, t) {
-		let n = ue(e), r = b("button", `weft-turn${e.id === t ? " weft-sel" : ""}`), i = b("div", "weft-row1", [
+		let n = fe(e), r = b("button", `weft-turn${e.id === t ? " weft-sel" : ""}`), i = b("div", "weft-row1", [
 			b("span", `weft-chip weft-${n}`, n),
 			b("span", "weft-id", e.id, { title: e.id }),
 			b("span", "weft-when", g(e.last_seen || e.started))
@@ -1272,7 +1325,7 @@ var fe = class extends HTMLElement {
 	}
 	playgroundArea(e) {
 		let t = b("div");
-		return e.result && t.appendChild(this.experimentResult(e)), K(e, "playground") && e.drawer && t.appendChild(this.drawer(e)), t;
+		return e.result && t.appendChild(this.experimentResult(e)), q(e, "playground") && e.drawer && t.appendChild(this.drawer(e)), t;
 	}
 	drawer(e) {
 		let t = e.drawer;
@@ -1405,7 +1458,7 @@ var fe = class extends HTMLElement {
 		});
 		u.style.textDecoration = "none", a.appendChild(u);
 		let d = b("a", "weft-btn", "compare in Studio", {
-			href: ve(this.cfg.endpoint, e.drawer, e.selectedStep ?? null),
+			href: be(this.cfg.endpoint, e.drawer, e.selectedStep ?? null),
 			target: "_blank",
 			rel: "noopener",
 			title: "open the Studio playground with this run, step and the current overrides carried over"
@@ -1417,15 +1470,15 @@ var fe = class extends HTMLElement {
 		t.error && p.appendChild(b("div", "weft-note weft-warn", t.error));
 		for (let e of t.folded.steps) {
 			e.text && p.appendChild(b("div", void 0, e.text));
-			for (let n of e.toolCalls) p.appendChild(J(n, t.row?.status ?? "running"));
+			for (let n of e.toolCalls) p.appendChild(Y(n, t.row?.status ?? "running"));
 		}
 		!t.folded.steps.length && !t.error && p.appendChild(b("div", "weft-note", "queued — waiting for the runtime to ack…"));
 		let m = [{
 			id: "",
-			label: X(t.label)
+			label: Z(t.label)
 		}, ...(e.experiments.get(e.drawer?.runId ?? "") ?? []).map((e) => ({
 			id: e.id,
-			label: e.id.startsWith("pg_") ? Y(e.id) : e.id
+			label: e.id.startsWith("pg_") ? X(e.id) : e.id
 		}))];
 		if (m.length > 1) {
 			let e = b("select", "weft-input");
@@ -1435,7 +1488,7 @@ var fe = class extends HTMLElement {
 			}
 			e.value = t.compareWith, e.addEventListener("change", () => void this.model?.setCompare(e.value)), p.appendChild(e);
 		}
-		let h = t.folded.steps.map((e) => e.text).filter(Boolean).join("\n"), g = t.compareWith ? this.model?.compareText.get(t.compareWith) ?? "" : t.sourceText, v = t.compareWith ? Y(t.compareWith) : X(t.label);
+		let h = t.folded.steps.map((e) => e.text).filter(Boolean).join("\n"), g = t.compareWith ? this.model?.compareText.get(t.compareWith) ?? "" : t.sourceText, v = t.compareWith ? X(t.compareWith) : Z(t.label);
 		if (h && g) {
 			let e = o(g, h), n = s(e), r = b("div", "weft-diff");
 			r.appendChild(b("div", "weft-diff-h", `diff vs ${v}:  ${n}`));
@@ -1462,6 +1515,16 @@ var fe = class extends HTMLElement {
 			}
 			e.appendChild(n), p.appendChild(e);
 		}
+		if (q(e, "steer") && t.state === "accepted" && t.runID) {
+			let e = b("div", "weft-step");
+			e.appendChild(b("div", "weft-step-h", [b("span", void 0, "steer this run")]));
+			let t = b("div", "weft-step-b"), n = b("input", "weft-input");
+			n.placeholder = "a message delivered mid-flight";
+			let r = b("button", "weft-btn", "steer", { title: "POST /api/runs/{id}/steer (ADR 0019)" });
+			r.addEventListener("click", () => {
+				this.model?.steer(n.value), n.value = "";
+			}), t.append(n, r), e.appendChild(t), p.appendChild(e);
+		}
 		return n.appendChild(p), n;
 	}
 	turnView(e) {
@@ -1470,9 +1533,9 @@ var fe = class extends HTMLElement {
 		let n = b("div");
 		n.appendChild(this.notes(t));
 		let r = S(t.spans ?? []);
-		r.length && n.appendChild(me(r));
-		let i = pe(t);
-		return i && n.appendChild(b("div", "weft-note", i)), n.appendChild(q(t.folded, this.rowOf(t.id)?.status ?? "running", t, e.selectedStep)), t.folded.pending.length && n.appendChild(this.approvals(t.folded.pending)), K(e, "playground") && n.appendChild(this.actions(e)), n;
+		r.length && n.appendChild(ge(r));
+		let i = he(t);
+		return i && n.appendChild(b("div", "weft-note", i)), n.appendChild(J(t.folded, this.rowOf(t.id)?.status ?? "running", t, e.selectedStep)), t.folded.pending.length && n.appendChild(this.approvals(t.folded.pending)), q(e, "playground") && n.appendChild(this.actions(e)), n;
 	}
 	actions(e) {
 		let t = e.turn;
@@ -1488,7 +1551,7 @@ var fe = class extends HTMLElement {
 	}
 	notes(e) {
 		let t = b("div"), n = this.rowOf(e.id);
-		return n?.status === "interrupted" && t.appendChild(b("div", "weft-note weft-warn", "never completed — this run was interrupted")), e.gaps.length && t.appendChild(b("div", "weft-note weft-warn", `${e.gaps.length} events missing (positions skipped)`, { title: e.gaps.join(", ") })), n?.stop_reason === "max_tokens" && t.appendChild(b("div", "weft-note weft-warn", "stopped at the output token limit (max_tokens)")), W(e.spans) && t.appendChild(b("div", "weft-note", "content not captured by this app (weft.content = stripped)")), t;
+		return n?.status === "interrupted" && t.appendChild(b("div", "weft-note weft-warn", "never completed — this run was interrupted")), e.gaps.length && t.appendChild(b("div", "weft-note weft-warn", `${e.gaps.length} events missing (positions skipped)`, { title: e.gaps.join(", ") })), n?.stop_reason === "max_tokens" && t.appendChild(b("div", "weft-note weft-warn", "stopped at the output token limit (max_tokens)")), G(e.spans) && t.appendChild(b("div", "weft-note", "content not captured by this app (weft.content = stripped)")), t;
 	}
 	approvals(e) {
 		let t = b("div", "weft-step");
@@ -1506,7 +1569,7 @@ var fe = class extends HTMLElement {
 	}
 	footer(e) {
 		let t = "prompts, args and results from your app, via your Studio";
-		return W(e.turn?.spans ?? null) ? b("div", "weft-footer", [b("span", void 0, t), b("span", void 0, " · content is stripped for this destination")]) : b("div", "weft-footer", t);
+		return G(e.turn?.spans ?? null) ? b("div", "weft-footer", [b("span", void 0, t), b("span", void 0, " · content is stripped for this destination")]) : b("div", "weft-footer", t);
 	}
 	rawView(e) {
 		return b("pre", "weft-raw", x({
@@ -1519,10 +1582,10 @@ var fe = class extends HTMLElement {
 		return this.model?.rowOf(e);
 	}
 };
-function pe(e) {
+function he(e) {
 	return e.transcript ? e.transcript.batches.flatMap((e) => e.messages).filter((e) => e.role === "user").flatMap((e) => e.content).filter((e) => e.type === "text").map((e) => e.text).join("\n") : "";
 }
-function me(e) {
+function ge(e) {
 	let t = b("div", "weft-wf");
 	for (let n of e) {
 		let e = b("div", "weft-wf-row");
@@ -1532,52 +1595,52 @@ function me(e) {
 	}
 	return t;
 }
-function q(e, t, n, r) {
+function J(e, t, n, r) {
 	let i = b("div");
 	e.model?.name && i.appendChild(b("div", "weft-reason", `${e.model.provider}/${e.model.name}`));
-	for (let a of e.steps) i.appendChild(he(a, t, n, r));
+	for (let a of e.steps) i.appendChild(_e(a, t, n, r));
 	return i;
 }
-function he(e, t, n, r) {
+function _e(e, t, n, r) {
 	let i = b("div", "weft-step");
 	i.setAttribute("data-weft-step", String(e.index)), r === e.index && (i.style.outline = "1px solid var(--w-accent)");
 	let a = b("div", "weft-step-h", [b("span", void 0, `step ${e.index}`), b("span", "weft-grow")]);
-	e.finish && (a.appendChild(b("span", void 0, e.finish.reason)), a.appendChild(b("span", void 0, ye(e.finish.usage)))), i.appendChild(a);
+	e.finish && (a.appendChild(b("span", void 0, e.finish.reason)), a.appendChild(b("span", void 0, Se(e.finish.usage)))), i.appendChild(a);
 	let o = b("div", "weft-step-b");
 	if (e.reasoning) {
 		let t = b("details", "weft-collapsible");
 		t.appendChild(b("summary", void 0, "reasoning")), t.appendChild(b("div", void 0, e.reasoning)), o.appendChild(t);
 	}
 	e.text && o.appendChild(b("div", void 0, e.text)), e.steer && o.appendChild(b("div", "weft-note", `steered: ${e.steer.text}`));
-	for (let r of e.toolCalls) o.appendChild(J(r, t, n));
+	for (let r of e.toolCalls) o.appendChild(Y(r, t, n));
 	return i.appendChild(o), i;
 }
-function J(e, t, n) {
-	let r = b("div", "weft-call"), i = f(e, t), a = b("div", "weft-call-h", [b("span", "weft-name", e.name), b("span", "weft-args", Z(e))]);
-	if (r.appendChild(a), e.childRunId && n && (a.appendChild(b("span", "weft-badge weft-info", "subagent", { title: e.childRunId })), r.appendChild(_e(e.childRunId, n))), e.result) {
-		let t = ge(n, e);
+function Y(e, t, n) {
+	let r = b("div", "weft-call"), i = f(e, t), a = b("div", "weft-call-h", [b("span", "weft-name", e.name), b("span", "weft-args", xe(e))]);
+	if (r.appendChild(a), e.childRunId && n && (a.appendChild(b("span", "weft-badge weft-info", "subagent", { title: e.childRunId })), r.appendChild(ye(e.childRunId, n))), e.result) {
+		let t = ve(n, e);
 		t && a.appendChild(b("span", "weft-badge weft-info", t));
 		let i = h(e.result.content);
 		i && a.appendChild(b("span", "weft-badge", i.kind === "bytes" ? `truncated ${i.bytes} bytes` : "not executed (max_tokens)")), e.result.isError && a.appendChild(b("span", "weft-badge weft-err", "error")), r.appendChild(b("div", "weft-res", e.result.content));
 	} else i === "running" ? r.appendChild(b("div", "weft-res", "running…")) : r.appendChild(b("div", "weft-res weft-warn", "never completed"));
 	return r;
 }
-function ge(e, t) {
+function ve(e, t) {
 	if (!e?.spans) return "";
 	let n = e.spans.find((e) => e.name === "execute_tool" && e.attrs?.["gen_ai.tool.name"] === t.name);
 	if (!n) return "";
 	let r = Date.parse(n.end) - Date.parse(n.start);
 	return !Number.isFinite(r) || r < 0 ? "" : `${Math.round(r)}ms`;
 }
-function _e(e, t) {
+function ye(e, t) {
 	let n = t.children.get(e), r = b("details", "weft-collapsible");
-	return r.setAttribute("data-weft-child", e), t.expanded.has(e) && r.setAttribute("open", ""), r.appendChild(b("summary", void 0, `subagent ${Y(e)}`)), n ? r.appendChild(q(n.folded, "succeeded")) : r.appendChild(b("div", void 0, "loading the subagent's turn…")), r;
+	return r.setAttribute("data-weft-child", e), t.expanded.has(e) && r.setAttribute("open", ""), r.appendChild(b("summary", void 0, `subagent ${X(e)}`)), n ? r.appendChild(J(n.folded, "succeeded")) : r.appendChild(b("div", void 0, "loading the subagent's turn…")), r;
 }
-function Y(e) {
+function X(e) {
 	let t = e.split("/");
 	return t[t.length - 1] || e;
 }
-function ve(e, t, n) {
+function be(e, t, n) {
 	let r = new URL("playground", e);
 	if (t) {
 		t.runId && r.searchParams.set("run", t.runId), n != null && n > 0 && r.searchParams.set("step", String(n)), t.instructions && r.searchParams.set("instructions", t.instructions);
@@ -1586,10 +1649,10 @@ function ve(e, t, n) {
 	}
 	return r.toString();
 }
-function X(e) {
+function Z(e) {
 	return e.split("·")[0] || e;
 }
-function Z(e) {
+function xe(e) {
 	if (e.args !== void 0) try {
 		return `(${JSON.stringify(e.args)})`;
 	} catch {
@@ -1597,13 +1660,13 @@ function Z(e) {
 	}
 	return e.streamedArgs ? `(${e.streamedArgs}…)` : "(…)";
 }
-function ye(e) {
+function Se(e) {
 	let t = [`${y(e.input_tokens)}→${y(e.output_tokens)} tok`];
 	return e.cached_input_tokens && t.push(`${y(e.cached_input_tokens)} cached`), e.reasoning_tokens && t.push(`${y(e.reasoning_tokens)} reasoning`), e.cache_write_tokens && t.push(`${y(e.cache_write_tokens)} cache-write`), t.join(" · ");
 }
 //#endregion
 //#region src/panel/main.ts
-customElements.get("weft-devtools") || customElements.define("weft-devtools", fe);
+customElements.get("weft-devtools") || customElements.define("weft-devtools", me);
 function Q(e) {
 	let t = window.__WEFT__?.publicId ?? "", n = t;
 	try {
@@ -1617,7 +1680,7 @@ function Q(e) {
 	} catch {}
 	t && e(t);
 }
-function be(e) {
+function Ce(e) {
 	let t = document.createElement("weft-devtools");
 	e || Q((e) => {
 		e && t.setAttribute("data-public-id", e);
@@ -1625,8 +1688,8 @@ function be(e) {
 	let n = () => document.body.appendChild(t);
 	document.body ? n() : document.addEventListener("DOMContentLoaded", n, { once: !0 });
 }
-var xe = i(), $ = document.querySelector("weft-devtools");
+var we = i(), $ = document.querySelector("weft-devtools");
 $ ? $.hasAttribute("data-public-id") || Q((e) => {
 	e && $.setAttribute("data-public-id", e);
-}) : (xe.auto || a()) && be(n()?.getAttribute("data-public-id") !== null);
+}) : (we.auto || a()) && Ce(n()?.getAttribute("data-public-id") !== null);
 //#endregion

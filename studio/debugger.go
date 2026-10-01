@@ -1,0 +1,127 @@
+package studio
+
+// The debugger's rungs 3–4 on runtime-started runs (WEFT-DEVTOOLS
+// §8.3/§8.4, ADR 0024 D7): breakpoints park calls to named tools on
+// every run the runtime starts from then on, and steer delivers one
+// user message into a run it holds — weft.Steering on an ephemeral
+// run, thread's Steer policy on a fork it owns. The app's own turns
+// are viewer-only: an agent is immutable after New and a session's
+// writer is the app's, so a run no runtime started is refused here,
+// and meta (and both UIs) say so (PQ7).
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+
+	"github.com/weftgo/weft/obsdb"
+	linkruntime "github.com/weftgo/weft/studio/runtime"
+)
+
+// breakpointsRequest is PUT /api/runtimes/{id}/breakpoints: the tools
+// to break on (an empty set clears).
+type breakpointsRequest struct {
+	Tools []string `json:"tools"`
+}
+
+// serveBreakpoints is the rung-3 verb (capability `breakpoints`).
+func (s *Server) serveBreakpoints(rs *linkruntime.RuntimeServer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		var req breakpointsRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			badRequest(w, r, "breakpoints body: "+err.Error())
+			return
+		}
+		reg, ok := rs.Registration(id)
+		if !ok {
+			notFound(w, r, "unknown runtime "+id)
+			return
+		}
+		// Every name must be a tool of some registered agent: a
+		// breakpoint on a name nobody exposes can never fire and is a
+		// typo, not a rule.
+		known := map[string]bool{}
+		for _, a := range reg.Agents {
+			for _, t := range a.ManifestToolNames() {
+				known[t] = true
+			}
+		}
+		for _, t := range req.Tools {
+			if !known[t] {
+				badRequest(w, r, "tool "+t+" is not registered by any agent of runtime "+id)
+				return
+			}
+		}
+		if err := rs.SetBreakpoints(id, req.Tools); err != nil {
+			switch {
+			case errors.Is(err, linkruntime.ErrUnknownRuntime):
+				notFound(w, r, "unknown runtime "+id)
+			case errors.Is(err, linkruntime.ErrNotConnected):
+				writeError(w, r, http.StatusServiceUnavailable, "unavailable",
+					"runtime "+id+" is not connected")
+			default:
+				writeError(w, r, http.StatusInternalServerError, "internal", err.Error())
+			}
+			return
+		}
+		writeJSON(w, r, http.StatusOK, breakpointsRequest{Tools: rs.BreakpointsOf(id)})
+	}
+}
+
+// steerRequest is POST /api/runs/{id}/steer: one user message.
+type steerRequest struct {
+	Message string `json:"message"`
+}
+
+// serveSteer is the rung-4 verb (capability `steer`). The run must be
+// one a runtime started; the app's own turns are refused — viewer-only
+// (D7, PQ7).
+func (s *Server) serveSteer(rs *linkruntime.RuntimeServer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		runID := r.PathValue("id")
+		var req steerRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
+			badRequest(w, r, "steer body: message is required")
+			return
+		}
+		runtimeID, ok := rs.RuntimeOf(runID)
+		if !ok {
+			// Not a runtime-started run. An unknown id is a 404; the
+			// app's own turns exist and stay viewer-only (D7, PQ7).
+			if _, err := s.db.Run(r.Context(), runID); err != nil {
+				if errors.Is(err, obsdb.ErrNotFound) {
+					notFound(w, r, "unknown run "+runID)
+					return
+				}
+				dbError(w, r, "run", runID, err)
+				return
+			}
+			writeError(w, r, http.StatusForbidden, "forbidden",
+				"only runs a runtime started can be steered — the app's own turns are viewer-only (PQ7)")
+			return
+		}
+		// A panel token steers inside its public id only (S4.6).
+		if pid := idFrom(r).panel; pid != nil {
+			if pub, ok := rs.PublicOf(runID); ok && pub != pid.PublicID {
+				forbidden(w, r)
+				return
+			}
+		}
+		if err := rs.Steer(runtimeID, runID, req.Message); err != nil {
+			switch {
+			case errors.Is(err, linkruntime.ErrUnknownRuntime):
+				notFound(w, r, "unknown runtime "+runtimeID)
+			case errors.Is(err, linkruntime.ErrNotConnected):
+				writeError(w, r, http.StatusServiceUnavailable, "unavailable",
+					"runtime "+runtimeID+" is not connected")
+			default:
+				writeError(w, r, http.StatusInternalServerError, "internal", err.Error())
+			}
+			return
+		}
+		writeJSON(w, r, http.StatusAccepted, struct {
+			Steered bool `json:"steered"`
+		}{true})
+	}
+}

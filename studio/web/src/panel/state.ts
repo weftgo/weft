@@ -28,7 +28,14 @@ import {
   type PanelLiveHandle,
 } from "./client"
 import type { CommandStatus, RuntimeView } from "./client"
-import { fetchCommand, fetchRuntimes, postApproval, postPlaygroundRun } from "./client"
+import {
+  fetchCommand,
+  fetchRuntimes,
+  postApproval,
+  postPlaygroundRun,
+  postSteer,
+  putBreakpoints,
+} from "./client"
 import { buildRunBody, experimentLabel, pickRuntime, type ExperimentDraft, type ExperimentResult } from "./playground"
 import { studioIsTooNew } from "./version"
 
@@ -85,6 +92,8 @@ export interface PanelState {
   runtimes: RuntimeView[]
   /** The drawer's running or finished experiment (the result pane). */
   result: ExperimentResult | null
+  /** The runtime's breakpoint set (§8.3), as last set from here. */
+  breakpoints: string[]
   /** The scope subscription is open (the live dot). */
   live: boolean
   raw: boolean
@@ -107,6 +116,7 @@ export function emptyPanelState(): PanelState {
     drawer: null,
     runtimes: [],
     result: null,
+    breakpoints: [],
     live: false,
     raw: false,
   }
@@ -177,6 +187,7 @@ export class PanelModel {
     drawer: null,
     runtimes: [],
     result: null,
+    breakpoints: [],
     live: false,
     raw: false,
   }
@@ -620,6 +631,36 @@ export class PanelModel {
    * lines of each compare target (P3's 2-way diff needs both sides). */
   compareText = new Map<string, string>()
   compareCalls = new Map<string, string[]>()
+
+  /** setBreakpoints is the rung-3 verb (§8.3): the tools every run
+   * this runtime starts parks on from then on. Rendered only when
+   * meta reports the breakpoints capability. */
+  async setBreakpoints(tools: string[]) {
+    const drawer = this.state.drawer
+    if (!drawer) return
+    try {
+      await putBreakpoints(this.ep, drawer.runtimeId, tools)
+    } catch (err) {
+      this.setExperimentError(err instanceof Error ? err.message : String(err))
+      return
+    }
+    this.state.breakpoints = tools
+    this.emit()
+  }
+
+  /** steer delivers one user message into the result's run mid-flight
+   * (§8.4) — weft.Steering on the ephemeral run the runtime holds. */
+  async steer(message: string) {
+    const res = this.state.result
+    if (!res || !res.runID || !message) return
+    try {
+      await postSteer(this.ep, res.runID, message)
+    } catch (err) {
+      this.setExperimentError(err instanceof Error ? err.message : String(err))
+      return
+    }
+    this.emit()
+  }
 
   /** discardResult clears the result pane (the run itself stays in the
    * turn list, nested under its source turn). */

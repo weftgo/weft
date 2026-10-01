@@ -129,6 +129,21 @@ type approvalDecision struct {
 	Actor     string `json:"actor,omitempty"`
 }
 
+// breakpointsFrame is an `event: breakpoints` frame's data (§8.3):
+// the runtime parks calls to these tools on every run it starts from
+// then on — the debugger's breakpoint, rule-driven parking over ADR
+// 0007's boundary. An empty set clears.
+type breakpointsFrame struct {
+	Tools []string `json:"tools"`
+}
+
+// steerFrame is an `event: steer` frame's data (§8.4): one user
+// message delivered into a runtime-started run, mid-flight.
+type steerFrame struct {
+	RunID   string `json:"run_id"`
+	Message string `json:"message"`
+}
+
 // ack is the POST /api/runtime/acks body, sent before execution
 // ("accepted"/"rejected", the at-most-once rule) and again when the
 // run ends ("finished" with its status). The run's content itself

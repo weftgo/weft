@@ -159,6 +159,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    turn.Wait(); busy: Queue (default) or thread.BusyPolicy(thread.Reject) → ErrBusy.
 //    s.Branch(ctx, entryID[, thread.SummarizeLeft()]), s.Fork(ctx, entryID) — the tree,
 //    nothing lost; s.Label, s.SetInfo, s.Custom, s.CustomMessage, s.Pin.
+//    thread.PublicID(id) — the session's browser-safe handle, create-time only: on
+//    every run as weft.public_id beside weft.session.id and weft.turn; List's Meta
+//    filter matches the header's copy, so a SetInfo-written id never matches.
 //    Compaction (ADR 0020): thread.ContextWindow(n) arms the trigger (reported input +
 //    estimated delta > window − Reserve); s.Compact(ctx[, thread.Instructions("…")]),
 //    s.PreviewCompaction, s.ApplyCompaction, s.Uncompact; five layers (SummaryModel,
@@ -192,6 +195,21 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    child mirrors onto Pending — p.Decide resumes it and resolves the parked call.
 //    Watch(ctx, id, afterEntryID). List filters: thread.Query{Meta, TitleSearch}
 //    (title = last info entry's, case-insensitive substring), Before/Limit page.
+
+// 9. Observability pipeline (module weft/otel; several destinations at once,
+//    each with its own content policy; defer on exit):
+//    defer otel.Install(
+//        otel.Local("weft.db"),                       // local sink: replay-grade, content on
+//        otel.Studio("https://studio.example", token), // OTLP/HTTP, content on
+//        otel.Datadog(),                               // the Agent's OTLP intake, content off
+//        otel.Exporters(myLogExporter),                // your own exporters
+//        otel.Content(otel.ContentConfig{MaxBytes: 32 << 10, Redact: redact}),
+//    )()
+//    p, err := otel.Start(ctx, opts...)               // Install with errors; otel.NoGlobal() for tests
+//    otel.LocalDB()   // the installed pipeline's obsdb.DB (nil without a Local destination)
+//    otel.StudioEndpoint()  // the Studio destination weft/runtime dials
+//    studio.DB(otel.LocalDB())  // step 6 (ADR 0024 S4): the Studio rewrite mounts the local
+//                               // sink's handle [D4] — placeholder until the B1 lane lands
 ```
 
 Test offline with `wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))`;

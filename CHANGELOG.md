@@ -1,3 +1,140 @@
+## Unreleased
+
+Lanes A of the observability-data programme (ADR 0024), merged to main:
+the thread identity step, and the two new modules — the observability
+database and the pipeline. Each block dates at its own release (thread
+0.8.0; obsdb and otel tag at the step 8 release).
+
+### thread 0.8.0
+
+The observability-data programme's thread step (ADR 0024 S5): the
+session stamps its identity on every run it starts, and `thread/sqlite`
+owns its migrations table so a session database can share one SQLite
+file with the local sink. Additive for source (one option, one
+unexported field); the migrations rename is the one breaking edge,
+carried by a one-statement rename on Open.
+
+#### Added
+
+- `thread.PublicID(id)` — the session's public id: an opaque,
+  browser-safe handle (WEFT-OTEL-DATA-ARCHITECTURE §5), `WithMeta`
+  sugar stamped into the header as `weft.public_id`. Create-time only,
+  so it is what every backend's `List` Meta filter matches; a later
+  `SetInfo` can add other keys but never rotates it.
+- Every run a session starts — a send, a resume, an overflow re-run —
+  carries `weft.Metadata` with `weft.session.id`, `weft.turn` (the
+  counter the run id was minted from; the re-run names its new turn),
+  `weft.public_id` when the session has one, `weft.session.forked_from`
+  (`<session>#<entry>`) for a fork, and `weft.session.parent` (+
+  `weft.session.parent_call`) for a pool child. It is appended after
+  the caller's run options, so the session's keys win over a caller's
+  colliding `thread.RunOptions(weft.Metadata(...))`; keys the session
+  does not claim pass through. On spans and records alike (the core's
+  S1.2/S1.3 wiring); the runs read `Session.Meta()` — the header
+  overlaid with every info entry — while `List` keeps matching the
+  header's create-time layer.
+- The OTel API (`otel`, `otel/log`, `otel/trace`) becomes a direct
+  requirement of the thread module (test-only imports; the versions
+  the root pins). The SDK stays out — the identity tests implement the
+  tracer and Logs API providers on the API's embedded types, the root
+  module's stance.
+
+#### Changed
+
+- `thread/sqlite`: the migrations table is `thread_migrations`
+  (renamed from the goose-shaped `schema_migrations`), so a thread
+  database and the local sink's `obsdb_migrations` can share one file
+  with each module owning its versions (WEFT-OTEL-DATA-ARCHITECTURE
+  §3.4). `Open` moves a pre-rename file across with one `ALTER TABLE`,
+  run only when the `sessions` table exists and the new name does not:
+  a `store` database pointed at the same `Open` keeps its own tracking
+  table and rows untouched — including one whose recorded store
+  version used to read as ahead of ours and refuse the open. Old
+  thread files keep opening; the versions carry across and the
+  migrations resume from the recorded number.
+
+#### Fixed
+
+- `thread.Storage`'s `Query.Meta` doc claimed the `List` filter
+  matched "the merged view `Load` returns"; no backend merges info-entry
+  meta and `Load` returns the header as is (review 2026-09-30 §8.1
+  item 4). Now says the header's create-time Meta. Doc only; behaviour
+  unchanged.
+
+### obsdb (new module)
+
+- **The observability database** (ADR 0024 S3): the OTLP-shaped model
+  (`Span`, `Record`, `Batch`), the derived weft identity (`Weft`,
+  `DeriveSpan`/`DeriveRecord`), the `DB` interface (runs, sessions, the
+  positioned event page with its gap detector, the transcript replay
+  reads, spans by run or trace, public-id resolution), `DeriveStatus`
+  (the four-row table: error span → failed; run_finish → succeeded;
+  fresh last-seen → running; stale → interrupted, after
+  `InterruptedAfter` = 30 s), and the live-lane hub (`Hub`, `Frame`,
+  one hub-wide monotonic `Seq`, bounded per-subscriber queues, overflow
+  drops the subscriber).
+- **`obsdb/sqlite`**: the default backend — the S3.4 schema
+  (`obsdb_migrations`, `spans`, `records`, `other_logs`, `runs` and the
+  indexes), one writer connection plus a read pool, `Open(path,
+  KeepDeltas())`. `Write` is one idempotent transaction: `INSERT OR
+  IGNORE` on (run, kind, pos) and (trace, span); deltas counted and
+  never stored (their own counter, so their absence never looks like a
+  lost event); heartbeats never stored, they only move last-seen; a
+  reordered batch's provisional start corrected when `run_start` lands.
+  The returned DB implements `Hub()` and publishes every Write's frames
+  before returning.
+- **`obsdb/obsdbtest`**: the conformance table every backend runs (the
+  storetest pattern) — round trip, idempotence, reordering, gaps,
+  status at every boundary including the crash, sessions and public
+  ids, children, paging cursors, the delta rule, the heartbeat rule,
+  non-weft spans and records stored and returned by `Trace`.
+- **`obsdb.FromOTLPTraces` / `obsdb.FromOTLPLogs`**: OTLP/HTTP export
+  requests decoded into the model (scalars verbatim, arrays as `[]any`,
+  kvlists as maps, bytes as base64), with golden protobuf and JSON
+  fixtures under `obsdb/testdata` that step 6's ingest and the SDK path
+  both pin against.
+
+### otel (new module)
+
+- **`otel.Install(...)`** — one line, several destinations at once, all
+  active: `Local(path)` (the obsdb/sqlite sink, written synchronously,
+  content on), `Studio(url, token)` (OTLP/HTTP protobuf, bearer token,
+  logs 200 ms / spans 1 s batches, content on), `Datadog()` (the local
+  Agent's OTLP intake on `localhost:4318`, content off), `Langfuse(host,
+  pk, sk)` (`<host>/api/public/otel`, Basic `pk:sk`, traces only),
+  `OTLP(url)` and `Exporters(spans, logs)` (content off). The returned
+  function flushes and shuts down; call it on exit
+  (`defer otel.Install(...)()`). With no options it writes the local
+  sink only. `otel.Start` is Install with errors (and `NoGlobal` for
+  tests); Install never panics or fails the program.
+- **Per-destination content** (`WithContent(cfg…)`, `NoContent()`,
+  `Signals`, `NoDeltas()`, `BatchDelay`, `Headers`, `Timeout`,
+  `Insecure`, `DatadogEndpoint`): content-off chains clone each record,
+  strip it with `weft.StripContent`, mark it `weft.content=stripped`
+  and drop `messages` records; content-on chains apply the
+  destination's `Redact` and `MaxBytes` (event and delta bodies only —
+  never the transcript) and set `weft.content.truncated_bytes` when a
+  cap cut. Every processor on the provider answers the Logs API's
+  `Enabled` by event name, so a content-off-only pipeline makes the
+  core emit no `messages` records at all.
+- **Heartbeats**: the run tracker keeps the open runs (from
+  `run_start`/`run_finish` records and the `invoke_agent` span end) and
+  emits one `weft.heartbeat` record per open run every interval
+  (`Heartbeat(d)`, default 10 s, 0 disables) — a long quiet tool call
+  reads running, a crashed process stops heartbeating, and the sinks
+  never store a heartbeat row.
+- **`otel.FromSDKSpans` / `otel.FromSDKRecords`**: SDK data into the
+  obsdb model, value-identical to the OTLP path (pinned against
+  obsdb's golden fixtures; the SDK's status codes map onto OTLP's
+  numbering).
+- The standard variables configure extra destinations
+  (`WEFT_STUDIO_URL`, `OTEL_EXPORTER_OTLP_ENDPOINT`/`_HEADERS`,
+  `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`, `WEFT_DB`);
+  explicit options and env destinations combine, same-URL duplicates
+  de-duplicate with the explicit one winning; `NoEnv()` turns them off.
+  The core reads no environment variable — this module does, here
+  only.
+
 ## 0.6.0 — 2026-10-01
 
 The observability-data programme's core step (ADR 0024): the run's

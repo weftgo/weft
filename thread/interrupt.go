@@ -28,12 +28,11 @@ func interruptedCallResult(name string) string {
 // context is canceled (its Turn marked interrupted, and a Rollback
 // remembers where the leaf must return to), or, when only an approval
 // boundary holds the session, its parked calls are denied with the
-// interrupted reason so the follow-up can run (plan §6). Denying runs
-// outside the lock: Decide takes it.
+// interrupted reason so the follow-up can run (plan §6).
 func (s *Session) interruptSendLocked(ctx context.Context, msg weft.Message, rollback bool) (*Turn, error) {
 	t := s.newTurnLocked()
-	s.queue = append(s.queue, pendingSend{ctx: ctx, msg: msg, turn: t})
 	if s.running && s.inFlight != nil {
+		s.queue = append(s.queue, pendingSend{ctx: ctx, msg: msg, turn: t})
 		it := s.inFlight
 		it.mu.Lock()
 		it.interrupted = true
@@ -66,22 +65,18 @@ func (s *Session) interruptSendLocked(ctx context.Context, msg weft.Message, rol
 		return t, nil
 	}
 	// Only a boundary holds the session: deny its parked calls so the
-	// follow-up is not queued behind it. The unlock/relock pair keeps
-	// the deferred unlock balanced; Decide must not run under mu.
-	var ids []string
-	for _, p := range s.pendingLocked() {
-		ids = append(ids, p.CallID)
+	// follow-up is not queued behind it. The denial goes through the
+	// session's own recorder (Via "interrupt"), not the exported
+	// Decide: an interrupt is the session's path, so it records under
+	// RequireSigned too instead of wedging on the unsigned door. And
+	// it fails loudly: when the denial cannot be recorded the boundary
+	// still holds the session, so the Send returns the error and the
+	// message is not queued — a follow-up accepted behind a boundary
+	// nothing will clear would never run.
+	if err := s.denyPendingLocked(ctx, reasonInterrupted, viaInterrupt); err != nil {
+		return nil, fmt.Errorf("thread: interrupt could not deny the parked approvals: %w", err)
 	}
-	if len(ids) > 0 {
-		s.mu.Unlock()
-		for _, id := range ids {
-			if _, err := s.Decide(ctx, Deny(id, reasonInterrupted)); err != nil {
-				s.agent.Logger().Warn("thread: interrupt denial failed",
-					"session", s.header.ID, "call", id, "err", err)
-			}
-		}
-		s.mu.Lock()
-	}
+	s.queue = append(s.queue, pendingSend{ctx: ctx, msg: msg, turn: t})
 	return t, nil
 }
 

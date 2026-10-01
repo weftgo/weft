@@ -389,13 +389,10 @@ func (p *Pool) complete(ctx context.Context, parent *thread.Session, d *delegate
 // auto-resume machinery turns into the core's Resolve on the resumed
 // run (ADR 0021 §1, ADR 0022 §7).
 func (p *Pool) resolveWrapper(ctx context.Context, parent *thread.Session, d *delegate, kind thread.Outcome, content string) {
-	_, err := parent.Decide(ctx, thread.Decision{
-		CallID:  d.wrapper,
-		Kind:    kind,
-		Content: content,
-		Who:     "thread/pool",
-		Via:     "child",
-	})
+	// The session's own delegation path, not the caller's Decide: the
+	// resolution is recorded with Via "child" and lands under
+	// RequireSigned too.
+	_, err := parent.ResolveDelegation(ctx, d.wrapper, content, kind == thread.OutcomeResolveError)
 	if err != nil {
 		d.agent.Logger().Error("thread/pool: wrapper call not resolved",
 			"wrapper", d.wrapper, "child", d.child.ID(), "err", err)

@@ -55,6 +55,7 @@ const (
 	viaGrant     = "grant"
 	viaExpiry    = "expiry"
 	viaInterrupt = "interrupt"
+	viaChild     = "child"
 	viaQuorum    = "quorum"
 )
 
@@ -391,6 +392,38 @@ func (s *Session) Decide(ctx context.Context, ds ...Decision) (*Turn, error) {
 	return s.decideLocked(ctx, batch, s.header.Lineage == nil)
 }
 
+// ResolveDelegation records the outcome of a pool delegation as the
+// resolution of the parent-side call that delegated it (ADR 0022 §7):
+// content becomes the call's result, marked as an error when isError,
+// recorded with Who "thread/pool" and Via "child", and the boundary
+// resumes when that completes it, like Decide. It is thread/pool's
+// plumbing, not a second way to decide: callID must be the delegating
+// call of a mirrored child request — a call some request entry names
+// as its Wrapper — and anything else fails with ErrNotPending. A
+// delegation's answer is not an approval, so the call records under
+// RequireSigned too (the approvals that let the child run were
+// signed where they were decided), and it is not subject to the
+// request's expiry: the child ran, and its answer is the result.
+func (s *Session) ResolveDelegation(ctx context.Context, callID, content string, isError bool) (*Turn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.approvalWalkLocked().wrappers[callID] {
+		return nil, fmt.Errorf("%w: call %q delegates to no child session", ErrNotPending, callID)
+	}
+	d := Resolve(callID, content)
+	if isError {
+		d = ResolveError(callID, content)
+	}
+	d.Who, d.Via = "thread/pool", viaChild
+	if err := s.recordDecisionsLocked(ctx, []recordedDecision{{Decision: d}}, true); err != nil {
+		return nil, err
+	}
+	return s.armSettledLocked(ctx)
+}
+
 // recordedDecision is a decision on its way into the file: what was
 // decided, plus the signed path's record — the nonce it answered and
 // the key that vouched for it, both empty on every unsigned path.
@@ -443,7 +476,8 @@ func (s *Session) decideLocked(ctx context.Context, batch []recordedDecision, on
 // recordDecisionsLocked validates a batch against the pending calls
 // and records it in one atomic append — the recorder every path that
 // decides a parked call ends in: Decide and DecideSigned through
-// decideLocked. It holds no signature rule (RequireSigned is the
+// decideLocked, the interrupting Send, the pool's delegation
+// resolution. It holds no signature rule (RequireSigned is the
 // exported Decide's own) and resolves no expiry (its callers do).
 // With onePerCall a batch naming one call twice is refused; without
 // it — the pool's replay into a child session — the decisions for one
@@ -549,6 +583,32 @@ func anyAlways(ds []ApprovalDecisionEntry) bool {
 		}
 	}
 	return false
+}
+
+// denyPendingLocked denies every pending call with reason, recorded
+// under via — the interrupting Send's path (Via "interrupt"). Expiry
+// is resolved first, so a lapsed request keeps its own reason; the
+// rest are denied in one atomic append, and the boundary resumes when
+// that completes it. A session-internal path: no signature rule
+// applies. Callers hold s.mu.
+func (s *Session) denyPendingLocked(ctx context.Context, reason, via string) error {
+	if _, err := s.resolveExpiredLocked(ctx); err != nil {
+		return err
+	}
+	pending := s.pendingLocked()
+	if len(pending) > 0 {
+		batch := make([]recordedDecision, 0, len(pending))
+		for _, r := range pending {
+			d := Deny(r.CallID, reason)
+			d.Via = via
+			batch = append(batch, recordedDecision{Decision: d})
+		}
+		if err := s.recordDecisionsLocked(ctx, batch, true); err != nil {
+			return err
+		}
+	}
+	_, err := s.armSettledLocked(ctx)
+	return err
 }
 
 // resolveExpiredLocked denies every pending request strictly past its

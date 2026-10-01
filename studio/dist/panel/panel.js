@@ -838,7 +838,7 @@ var ue = class {
 				let t = [], n = [], i = 0;
 				for (let a = 0; a < 20; a++) {
 					let a = await N(r, e, i);
-					if (t.push(...a.events), n.push(...a.gaps), a.done || a.next_after === null) break;
+					if (t.push(...a.events), n.push(...a.gaps), a.next_after === null) break;
 					i = a.next_after;
 				}
 				return {
@@ -896,7 +896,7 @@ var ue = class {
 			let t = 0;
 			for (let n = 0; n < 20; n++) {
 				let n = await N(this.ep, e, t);
-				if (i.push(...n.events), n.done || n.next_after === null) break;
+				if (i.push(...n.events), n.next_after === null) break;
 				t = n.next_after;
 			}
 		} catch {
@@ -1023,7 +1023,7 @@ var ue = class {
 			for (let n = 0; n < 20; n++) {
 				let n = await N(this.ep, e, t);
 				for (let e of n.events) r.push(e.event, e.pos);
-				if (n.done || n.next_after === null) break;
+				if (n.next_after === null) break;
 				t = n.next_after;
 			}
 		} catch {}

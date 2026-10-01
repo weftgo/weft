@@ -261,8 +261,47 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     expect(summary?.textContent).toBe("reasoning") // collapsed by default
   })
 
-  it("honesty: gaps badge, interrupted note, stripped footer note", async () => {
-    const routes = runRoutes([
+  // The Go contract (events-ok-paged.golden.json): done means the run
+  // is terminal — even on a full page — and next_after is the cursor
+  // to follow until null. The panel used to break on done too, so a
+  // finished run with >500 events silently lost every later page
+  // (programme audit P1-5).
+  it("paging: a terminal run's full first page (done:true with next_after set) walks on", async () => {
+    const routes = runRoutes([runRow({ id: "r_page", event_count: 7 })])
+    routes["runs/r_page"] = { ...runRow({ id: "r_page" }), children: [] }
+    routes["runs/r_page/transcript"] = TRANSCRIPT
+    routes["runs/r_page/spans"] = { spans: [] }
+    routes["runs/r_page/events?after=0&limit=500"] = {
+      events: EVENTS.events.slice(0, 5), // run_start … step_finish
+      next_after: 5, // the page is full — and done (the run finished)
+      done: true,
+      gaps: [],
+    }
+    routes["runs/r_page/events?after=5&limit=500"] = {
+      events: [
+        { pos: 5, time: T0, event: { type: "tool_start", run_id: "r_page", seq: 2, call_id: "call_2", name: "refund", args: { order_id: "43" } } },
+        { pos: 6, time: T0, event: { type: "tool_finish", run_id: "r_page", seq: 2, call_id: "call_2", name: "refund", content: "refunded", is_error: false } },
+      ],
+      next_after: null,
+      done: true,
+      gaps: [],
+    }
+    const { fetchMock } = fakeStudio(routes)
+    vi.stubGlobal("fetch", fetchMock)
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-public-id": "pub_orders",
+      "data-open": "true",
+    })
+    // The second page was fetched …
+    const second = fetchMock.mock.calls.some((c) => String(c[0]).includes("after=5"))
+    expect(second).toBe(true)
+    // … and its events render: the tool pair only page two carries.
+    expect(text(el, ".weft-main")).toContain('refund({"order_id":"43"})')
+    expect(text(el, ".weft-main")).toContain("refunded")
+  })
+
+  it("honesty: gaps badge, interrupted note, stripped footer note", async () => {    const routes = runRoutes([
       runRow({ id: "r_int", status: "interrupted" }),
     ])
     routes["runs/r_int"] = { ...runRow({ id: "r_int", status: "interrupted" }), children: [] }

@@ -361,11 +361,18 @@ export class PanelModel {
         const out: PosEvent[] = []
         const gaps: number[] = []
         let after = 0
+        // The cursor to follow is next_after until it reads null:
+        // done only means the run is terminal — a terminal run's page
+        // can still be full (events-ok-paged.golden.json pins
+        // done:true with next_after set), and breaking on done lost
+        // every later event of a long finished turn. The page cap
+        // bounds the walk; a run still generating continues through
+        // the live tail below.
         for (let page = 0; page < 20; page++) {
           const p = await fetchEvents(ep, id, after)
           out.push(...p.events)
           gaps.push(...p.gaps)
-          if (p.done || p.next_after === null) break
+          if (p.next_after === null) break
           after = p.next_after
         }
         return { out, gaps }
@@ -445,10 +452,12 @@ export class PanelModel {
     const events: PosEvent[] = []
     try {
       let after = 0
+      // next_after is the cursor (done:true on a full page is not the
+      // end — see select); the cap bounds the walk.
       for (let page = 0; page < 20; page++) {
         const p = await fetchEvents(this.ep, childId, after)
         events.push(...p.events)
-        if (p.done || p.next_after === null) break
+        if (p.next_after === null) break
         after = p.next_after
       }
     } catch {
@@ -607,10 +616,12 @@ export class PanelModel {
     const feed = newFold()
     try {
       let after = 0
+      // next_after is the cursor (done:true on a full page is not the
+      // end — see select); the cap bounds the walk.
       for (let page = 0; page < 20; page++) {
         const p = await fetchEvents(this.ep, runID, after)
         for (const pe of p.events) feed.push(pe.event, pe.pos)
-        if (p.done || p.next_after === null) break
+        if (p.next_after === null) break
         after = p.next_after
       }
     } catch {

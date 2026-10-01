@@ -1,20 +1,28 @@
-// The Dv0/Dv1/Dv2 panel gates (WEFT-DEVTOOLS.md §10): drive the BUILT
+// The Dv0–Dv2 panel gates (WEFT-DEVTOOLS.md §10): drive the BUILT
 // panel bundle — dist/panel/panel.js, exactly what studio.Handler
 // serves — inside a plain HTML page (jsdom), over a real HTTP Studio.
 // This is the spike's gate harness: "a scripted turn streams into the
-// docked panel on a plain HTML page" and the five-line-setup gate
-// "a thread's turns live, grouped, with content and timing".
+// docked panel on a plain HTML page", the five-line-setup gate
+// "a thread's turns live, grouped, with content and timing", and the
+// setups-B/C gate "a non-Go app's OTLP export appears in the panel,
+// cross-origin, behind a token".
 //
-// Usage (the Studio must be running; examples/studio-local is the
-// setup-A shape, studio/cmd the setup-B one):
+// Setup A (examples/studio-local is the shape):
 //
 //   bun run scripts/panel-gate.ts --endpoint http://127.0.0.1:7331/studio \
 //       --page http://127.0.0.1:7331/ --trigger http://127.0.0.1:7331/run \
-//       [--public-id pub_demo] [--token dev_…] [--turns 2] [--text "…"]
+//       [--public-id pub_demo] [--turns 2]
 //
-// --page is the host page's own origin (any origin works: the script
-// tag is cross-origin already in setups B and C). Prints PASS lines
-// and exits non-zero on the first failed expectation.
+// Setup B/C (a token-walled Studio, the page on another origin, no
+// app to trigger — an OTLP fixture is posted to /v1/traces first,
+// standing in for the Python app; panel-otlp-fixture.json beside this
+// script is the recorded export, replayed byte-for-byte):
+//
+//   bun run scripts/panel-gate.ts --endpoint http://127.0.0.1:7331/studio \
+//       --page http://127.0.0.1:8000/ --token dev_… --otlp scripts/panel-otlp-fixture.json
+//
+// Prints PASS lines and exits non-zero on the first failed
+// expectation.
 
 import { readFileSync } from "node:fs"
 import { JSDOM } from "jsdom"
@@ -27,6 +35,7 @@ interface Args {
   token: string
   turns: number
   text: string
+  otlp: string
 }
 
 function parseArgs(argv: string[]): Args {
@@ -38,10 +47,13 @@ function parseArgs(argv: string[]): Args {
     endpoint,
     page: a.page ?? new URL("/", endpoint).toString(),
     trigger: a.trigger ?? new URL("run", endpoint).toString(),
-    publicId: a["public-id"] ?? "pub_demo",
+    publicId: a["public-id"] ?? (a.otlp ? "pub_pyapp" : "pub_demo"),
     token: a.token ?? "",
     turns: Number(a.turns ?? 1),
     text: a.text ?? "where is order 42?",
+    /** The setups-B/C mode: post this recorded OTLP JSON export to
+     * /v1/traces (the Python app's stand-in) instead of triggering. */
+    otlp: a.otlp ?? "",
   }
 }
 
@@ -183,59 +195,94 @@ async function main() {
     `header scoped to ${args.publicId}`
   )
 
-  // 2. a scripted turn streams into the docked panel.
-  for (let t = 0; t < args.turns; t++) {
-    const res = await fetch(args.trigger, {
+  // 2a. setups B/C (--otlp): replay the recorded export into
+  // /v1/traces — the Python app's stand-in — and let the panel read
+  // the run it lands as, cross-origin, behind the token.
+  if (args.otlp) {
+    const body = readFileSync(new URL(args.otlp, "file://" + process.cwd() + "/"), "utf8")
+    const headers: Record<string, string> = { "content-type": "application/json" }
+    if (args.token) headers.Authorization = `Bearer ${args.token}`
+    const ingest = await fetch(new URL("v1/traces", args.endpoint), {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: `text=${encodeURIComponent(`${args.text} (#${t + 1})`)}`,
+      headers,
+      body,
     })
-    if (!res.ok) throw new Error(`trigger failed: ${res.status} ${await res.text()}`)
+    if (ingest.status !== 200)
+      throw new Error(`FAIL OTLP ingest: ${ingest.status} ${await ingest.text()}`)
+    console.log("PASS OTLP JSON export accepted by /v1/traces")
     await waitFor(
-      () => ($(".weft-turn") ? "row" : null),
-      `turn ${t + 1}: run row appears in the turn list`
+      () => ($(".weft-turn")?.textContent?.includes(args.publicId === "pub_pyapp" ? "py_run_1" : args.publicId) ? "row" : null),
+      "the exported run appears in the panel's turn list"
     )
-    await waitFor(() => {
-      const body = text(".weft-step-b")
-      // The second Say chunk streams while the tail subscription is
-      // live; the first can beat the subscription's round trip and is
-      // transcript-era (Dv1's applyTranscript covers it).
-      return body.includes("shipped this morning") ? body : null
-    }, `turn ${t + 1}: model text streams into the turn view`)
+    const rowText = $(".weft-turn")?.textContent ?? ""
+    if (!rowText.includes("gpt-4o") || !rowText.includes("410"))
+      throw new Error(`FAIL the GenAI run row lacks model/usage: ${rowText}`)
+    console.log("PASS the GenAI run row carries model and token usage")
   }
 
+  // 2b. setup A: a scripted turn streams into the docked panel.
+  if (!args.otlp) {
+    for (let t = 0; t < args.turns; t++) {
+      const res = await fetch(args.trigger, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: `text=${encodeURIComponent(`${args.text} (#${t + 1})`)}`,
+      })
+      if (!res.ok) throw new Error(`trigger failed: ${res.status} ${await res.text()}`)
+      await waitFor(
+        () => ($(".weft-turn") ? "row" : null),
+        `turn ${t + 1}: run row appears in the turn list`
+      )
+      await waitFor(() => {
+        const body = text(".weft-step-b")
+        // The second Say chunk streams while the tail subscription is
+        // live; the first can beat the subscription's round trip and is
+        // transcript-era (Dv1's applyTranscript covers it).
+        return body.includes("shipped this morning") ? body : null
+      }, `turn ${t + 1}: model text streams into the turn view`)
+    }
+  }
+
+  // 3. grouping + timing (Dv1's gate): every turn of the conversation
+  // is in the list, and the turn view carries content and timing.
   // 3. grouping + timing (Dv1's gate): every turn of the conversation
   // is in the list, and the turn view carries content and timing.
   const rows = dom.window.document
     .querySelector("weft-devtools")
     ?.shadowRoot?.querySelectorAll(".weft-turn")
   console.log(`PASS turns listed: ${rows?.length ?? 0}`)
-  if ((rows?.length ?? 0) < args.turns) throw new Error("FAIL not all turns listed")
+  if ((rows?.length ?? 0) < (args.otlp ? 1 : args.turns))
+    throw new Error("FAIL not all turns listed")
 
-  // Grouped: Studio resolves the public id to one thread whose turn
-  // count covers the conversation (S4.3's SessionRow).
-  const sess = await fetch(new URL("api/sessions?public_id=" + args.publicId, args.endpoint))
-  if (!sess.ok) throw new Error(`FAIL sessions: ${sess.status}`)
-  const sessDoc = (await sess.json()) as { total: number; sessions: { turns: number }[] }
-  const thread = sessDoc.sessions[0]
-  if (!thread || thread.turns < args.turns)
-    throw new Error(`FAIL grouping: ${JSON.stringify(thread)}`)
-  console.log(`PASS grouped: one session, ${thread.turns} turns`)
-
-  // Content and timing, in the open turn: the tool call with its
-  // arguments and result, the streamed text, and a real duration.
-  await waitFor(() => {
-    const main = text(".weft-main")
-    return main.includes("lookup_order") && main.includes("shipped this morning")
-      ? main
-      : null
-  }, "content: the tool call (name + args + result) and the reply render")
+  // Timing on the rows either way; grouping and content are the
+  // setup-A shapes (a spans-only export has no events to fold).
   const row2 = Array.from(
     dom.window.document.querySelector("weft-devtools")?.shadowRoot?.querySelectorAll(".weft-row2") ?? []
   ).map((n) => n.textContent)
   if (!row2.some((t) => /(\d+m?s|\d+ms)/.test(t ?? "")))
     throw new Error(`FAIL timing: no duration on the turn rows (${row2.join(" | ")})`)
   console.log("PASS timing: the turn rows carry durations")
+
+  if (!args.otlp) {
+    // Grouped: Studio resolves the public id to one thread whose turn
+    // count covers the conversation (S4.3's SessionRow).
+    const sess = await fetch(new URL("api/sessions?public_id=" + args.publicId, args.endpoint))
+    if (!sess.ok) throw new Error(`FAIL sessions: ${sess.status}`)
+    const sessDoc = (await sess.json()) as { total: number; sessions: { turns: number }[] }
+    const thread = sessDoc.sessions[0]
+    if (!thread || thread.turns < args.turns)
+      throw new Error(`FAIL grouping: ${JSON.stringify(thread)}`)
+    console.log(`PASS grouped: one session, ${thread.turns} turns`)
+
+    // Content and timing, in the open turn: the tool call with its
+    // arguments and result, the streamed text.
+    await waitFor(() => {
+      const main = text(".weft-main")
+      return main.includes("lookup_order") && main.includes("shipped this morning")
+        ? main
+        : null
+    }, "content: the tool call (name + args + result) and the reply render")
+  }
 
   // 4. studio.Handler serves the panel bundle itself (Dv1): the file
   // the script tag names is the committed, embedded artifact.

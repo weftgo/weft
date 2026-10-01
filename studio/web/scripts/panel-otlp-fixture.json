@@ -1,0 +1,76 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "py-support-api" } },
+          { "key": "service.version", "value": { "stringValue": "1.0.0" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "openinference.instrumentation.openai", "version": "0.1.0" },
+          "spans": [
+            {
+              "traceId": "cHl0cmFjZTAwMDAwMDAwMQ==",
+              "spanId": "cHlzcGFuMDAwMDAwMDE=",
+              "name": "invoke_agent py-support",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1790845923120000000",
+              "endTimeUnixNano": "1790845924210000000",
+              "attributes": [
+                { "key": "gen_ai.operation.name", "value": { "stringValue": "invoke_agent" } },
+                { "key": "gen_ai.agent.name", "value": { "stringValue": "py-support" } },
+                { "key": "gen_ai.provider.name", "value": { "stringValue": "openai" } },
+                { "key": "gen_ai.request.model", "value": { "stringValue": "gpt-4o" } },
+                { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "410" } },
+                { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "88" } },
+                { "key": "gen_ai.conversation.id", "value": { "stringValue": "py_sess_1" } },
+                { "key": "gen_ai.response.finish_reasons", "value": { "stringValue": "stop" } },
+                { "key": "weft.run.id", "value": { "stringValue": "py_run_1" } },
+                { "key": "weft.session.id", "value": { "stringValue": "py_sess_1" } },
+                { "key": "weft.public_id", "value": { "stringValue": "pub_pyapp" } },
+                { "key": "weft.turn", "value": { "intValue": "1" } },
+                { "key": "enduser.id", "value": { "stringValue": "user_9" } }
+              ]
+            },
+            {
+              "traceId": "cHl0cmFjZTAwMDAwMDAwMQ==",
+              "spanId": "cHlzcGFuMDAwMDAwMDI=",
+              "parentSpanId": "cHlzcGFuMDAwMDAwMDE=",
+              "name": "chat gpt-4o",
+              "kind": "SPAN_KIND_CLIENT",
+              "startTimeUnixNano": "1790845923150000000",
+              "endTimeUnixNano": "1790845923960000000",
+              "attributes": [
+                { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
+                { "key": "gen_ai.provider.name", "value": { "stringValue": "openai" } },
+                { "key": "gen_ai.request.model", "value": { "stringValue": "gpt-4o" } },
+                { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "410" } },
+                { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "88" } },
+                { "key": "gen_ai.output.type", "value": { "stringValue": "text" } },
+                { "key": "weft.run.id", "value": { "stringValue": "py_run_1" } },
+                { "key": "weft.public_id", "value": { "stringValue": "pub_pyapp" } }
+              ]
+            },
+            {
+              "traceId": "cHl0cmFjZTAwMDAwMDAwMQ==",
+              "spanId": "cHlzcGFuMDAwMDAwMDM=",
+              "parentSpanId": "cHlzcGFuMDAwMDAwMDE=",
+              "name": "kb_lookup",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1790845923970000000",
+              "endTimeUnixNano": "1790845924180000000",
+              "attributes": [
+                { "key": "gen_ai.tool.name", "value": { "stringValue": "kb_lookup" } },
+                { "key": "gen_ai.tool.call.id", "value": { "stringValue": "call_py1" } },
+                { "key": "weft.run.id", "value": { "stringValue": "py_run_1" } },
+                { "key": "weft.public_id", "value": { "stringValue": "pub_pyapp" } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -180,10 +180,13 @@ type CustomMessageEntry struct {
 // call the core's approval boundary left unexecuted, recorded with the
 // arguments and their SHA-256 so a decision can name exactly what it
 // decided, the run that parked it, why it parked, and an optional
-// expiry — a request past its expiry is denied with the stated reason
-// on the next resume (ADR 0021 §5). It is written in the same Append
-// as the turn that parked it, so no window exists where the turn is
-// durable and the request is not. It never enters the model's context;
+// expiry — a request past its expiry takes no decision and is denied
+// with the stated reason the next time the session looks at the
+// boundary (ADR 0021 §5). It is written in the same Append as the
+// turn that parked it, so no window exists where the turn is durable
+// and the request is not. Its ID names this one occurrence of the
+// call: call ids repeat across turns, the entry id never does, and a
+// signed decision is bound to it. It never enters the model's context;
 // the pending call itself stays unresolved in the transcript until a
 // decision resolves it.
 type ApprovalRequestEntry struct {
@@ -210,10 +213,13 @@ type ApprovalRequestEntry struct {
 // §1): approve, deny with a reason, or resolve with content computed
 // outside the process (resolve_error marks it an error). It records
 // Who decided, When (the entry's Created), Via which channel — "user"
-// for a plain Decide, "approver" for the live chain step, "expiry" for
-// an expired request's automatic denial — and the run the decided
-// request belonged to. It never enters the model's context; the model
-// sees the decision only through the result the resumed run produces.
+// for Decide, "signed" for DecideSigned, "approver" for the live chain
+// step, "grant" for a grant's approval, "expiry" for an expired
+// request's automatic denial, "interrupt" for the denial an
+// interrupting Send records, "child" for a pool delegation's
+// resolution — and the run the decided request belonged to. It never
+// enters the model's context; the model sees the decision only
+// through the result the resumed run produces.
 type ApprovalDecisionEntry struct {
 	ID       string    `json:"id"`
 	ParentID string    `json:"parent,omitempty"`
@@ -229,18 +235,36 @@ type ApprovalDecisionEntry struct {
 	// (ADR 0021 §3): a decision that arrived signed carries the nonce
 	// it answered and the key that vouched for it, so a replayed
 	// signature is detectable from the file alone — across restarts.
-	// Empty on the in-process paths, which mint no challenge.
+	// KeyID is also the signed decision's identity under Quorum: one
+	// key is one approver, whatever Who says. Empty on the in-process
+	// paths, which mint no challenge.
 	Nonce string `json:"nonce,omitempty"`
 	KeyID string `json:"key_id,omitempty"`
+	// RequestID is the id of the request entry the decision answers —
+	// the occurrence of the call, which a call id alone does not name.
+	// Set on every decision recorded over a parked request — Decide,
+	// DecideSigned (whose challenge is bound to it), an expiry or
+	// interrupt denial; empty on a chain step's decision (a grant, the
+	// Approver), written in the same append as the request or without
+	// one, and RunID names the occurrence either way.
+	RequestID string `json:"request_id,omitempty"`
+	// Always records that the decision was an "approve and always
+	// allow" (ApproveAlways): the grant is minted when the call's
+	// effective verdict becomes approve — at once without a quorum,
+	// with the completing approval under one — and never when the
+	// verdict is anything else.
+	Always bool `json:"always,omitempty"`
 }
 
 // ApprovalAuditEntry is the chain's own trail (ADR 0021 §2): every step
-// the decision chain takes over a call — the Approver consulted
-// (decided, declined, timed out), the park, an expiry denial, a resume
-// — leaves one of these, including automatic approvals, so s.Audit()
+// the decision chain takes over a call — a grant matched, the Approver
+// consulted (decided, declined, timed out), the park, an expiry
+// denial, a signed decision refused, a resume started —
+// leaves one of these, including automatic approvals, so s.Audit()
 // can tell the whole story from the file alone. Step and Outcome name
-// the step and how it ended; Detail carries anything beyond that. It
-// never enters the model's context.
+// the step and how it ended; Detail is prose for a human reader and
+// never parsed — what the session reads back lives in the typed
+// fields. It never enters the model's context.
 type ApprovalAuditEntry struct {
 	ID       string    `json:"id"`
 	ParentID string    `json:"parent,omitempty"`
@@ -250,6 +274,22 @@ type ApprovalAuditEntry struct {
 	Outcome  string    `json:"outcome,omitempty"`
 	Detail   string    `json:"detail,omitempty"`
 	RunID    string    `json:"run_id,omitempty"`
+	// GrantID names the grant a StepGrant entry matched — a session
+	// grant's entry id, or with GrantShared the GrantStore's own id
+	// for it. A session grant's MaxUses is counted from these fields:
+	// one entry is one use.
+	GrantID     string `json:"grant_id,omitempty"`
+	GrantShared bool   `json:"grant_shared,omitempty"`
+	// KeyID names the keyring key a refused signed decision claimed
+	// (StepSigned), when the ring holds it.
+	KeyID string `json:"key_id,omitempty"`
+	// Decisions lists the decision entries a resume applied
+	// (StepResume, outcome "started"). A decision is spent by the
+	// resume that applied it: it resolves its call on that resume's
+	// own line of the tree and nowhere else, so a Branch back to the
+	// decided boundary asks for a new decision instead of running the
+	// call again on the old one.
+	Decisions []string `json:"decisions,omitempty"`
 }
 
 // GrantEntry is a session-scoped grant made durable (ADR 0021 §4): a
@@ -259,7 +299,7 @@ type ApprovalAuditEntry struct {
 // audited, including the automatic approval. Liveness is derived, never
 // stored: a GrantRevokedEntry naming the grant ends it, an Expiry
 // passes, or its MaxUses is reached — uses counted from the audit
-// entries the chain writes when it matches. It never enters the
+// entries the chain writes when it matches (their GrantID). It never enters the
 // model's context; the model sees a grant only through the result of
 // the call it allowed or refused.
 type GrantEntry struct {

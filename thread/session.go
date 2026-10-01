@@ -250,6 +250,9 @@ func Create(ctx context.Context, st Storage, agent *weft.Agent, opts ...SessionO
 	if len(cfg.meta) > 0 {
 		h.Meta = maps.Clone(cfg.meta)
 	}
+	if err := cfg.sealApprovals(&h); err != nil { // RequireSigned is durable: the header carries it
+		return nil, err
+	}
 	if err := st.Create(ctx, h); err != nil {
 		return nil, err
 	}
@@ -289,6 +292,9 @@ func Open(ctx context.Context, st Storage, id string, agent *weft.Agent, opts ..
 		byID:   make(map[string]int, len(entries)),
 	}
 	s.cfg = resolveSession(opts...)
+	if err := s.cfg.adoptApprovals(h); err != nil { // RequireSigned is the header's to keep
+		return nil, err
+	}
 	s.cfg.compaction.resolve(agent.Model()) // per-model overrides need the agent
 	leaf := ""
 	for i, e := range entries {
@@ -1031,6 +1037,7 @@ func cloneEntry(e Entry) Entry {
 	case ApprovalDecisionEntry:
 		return e
 	case ApprovalAuditEntry:
+		e.Decisions = slices.Clone(e.Decisions)
 		return e
 	case GrantEntry:
 		e.Args = append([]Arg(nil), e.Args...)

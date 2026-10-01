@@ -207,9 +207,9 @@ func normalArgs(args json.RawMessage) json.RawMessage {
 // grantRef names a matched grant for the audit entry: the entry id
 // for a session grant, the store's id for a shared one — and shared
 // is what keeps the two apart where ids could collide: the audit
-// detail namespaces a shared match ("shared grant …"), so the
-// session's own use counting never counts a shared match against a
-// session grant that happens to hold the same id.
+// entry marks a shared match (GrantShared), so the session's own use
+// counting never counts a shared match against a session grant that
+// happens to hold the same id.
 type grantRef struct {
 	id     string
 	shared bool
@@ -219,11 +219,14 @@ type grantRef struct {
 // §2, §4): the session's live grants, newest first, then the shared
 // store's. A matching grant decides at once — an approval runs the
 // call, a deny-grant refuses it with its reason — and the chain
-// writes the audit entry that counts the match as a use.
-func (s *Session) matchGrant(ctx context.Context, c weft.ToolCallPart) (Decision, grantRef, bool) {
-	now := time.Now().UTC()
+// writes the audit entry that counts the match as a use. chainUses
+// are the matches the running chain has already made and not yet
+// appended — the audit entries land with the turn — so MaxUses holds
+// inside one turn too.
+func (s *Session) matchGrant(ctx context.Context, c weft.ToolCallPart, chainUses map[string]int) (Decision, grantRef, bool) {
+	now := s.approvalNow()
 	s.mu.Lock()
-	live := s.liveGrantsLocked(now)
+	live := s.liveGrantsLocked(now, chainUses)
 	s.mu.Unlock()
 	for _, g := range live {
 		if grantMatches(g.Grant, c) {
@@ -270,12 +273,14 @@ func grantDecision(g Grant) Decision {
 const deniedByGrant = "denied by grant"
 
 // liveGrantsLocked returns the session's live grants, newest first:
-// not revoked, not expired, and under their MaxUses where the audit
-// trail can count — a use is a match, whichever way the grant
-// decided: a deny-grant that matched counts like an approval grant,
-// or its standing refusal would outlive its MaxUses. Callers hold
-// s.mu.
-func (s *Session) liveGrantsLocked(now time.Time) []GrantEntry {
+// not revoked, not expired, and under their MaxUses — a use is a
+// match, whichever way the grant decided: a deny-grant that matched
+// counts like an approval grant, or its standing refusal would outlive
+// its MaxUses. Uses are counted from the audit entries' GrantID field
+// (never from their prose), plus pending — the matches a running
+// chain has made whose audit entries have not landed yet. Callers
+// hold s.mu.
+func (s *Session) liveGrantsLocked(now time.Time, pending map[string]int) []GrantEntry {
 	revoked := map[string]bool{}
 	uses := map[string]int{}
 	for _, e := range s.order {
@@ -283,8 +288,8 @@ func (s *Session) liveGrantsLocked(now time.Time) []GrantEntry {
 		case GrantRevokedEntry:
 			revoked[e.GrantID] = true
 		case ApprovalAuditEntry:
-			if e.Step == StepGrant && (e.Outcome == "approved" || e.Outcome == "denied") && strings.HasPrefix(e.Detail, "grant ") {
-				uses[strings.TrimPrefix(e.Detail, "grant ")]++
+			if e.Step == StepGrant && e.GrantID != "" && !e.GrantShared {
+				uses[e.GrantID]++
 			}
 		}
 	}
@@ -297,7 +302,7 @@ func (s *Session) liveGrantsLocked(now time.Time) []GrantEntry {
 		if !g.Expiry.IsZero() && now.After(g.Expiry) {
 			continue
 		}
-		if g.MaxUses > 0 && uses[g.ID] >= g.MaxUses {
+		if g.MaxUses > 0 && uses[g.ID]+pending[g.ID] >= g.MaxUses {
 			continue
 		}
 		out = append(out, g)

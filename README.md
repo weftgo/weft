@@ -303,44 +303,56 @@ model returned, because a log is the caller's
 
 ### Recording runs
 
-Module `weft/store` (v0.1.1) records what a run did and reads it back:
-one record per run — identity (agent, model, manifest hash, tags),
-every event in order, and the result, kept on failure as the partial
-transcript. Install `store.Record` on every agent of a fleet; a
-subagent's child records itself and links to the parent's call. Events
-are appended as they arrive, so a crash loses nothing emitted and a
-reader can tail a live run; a run whose heartbeat goes stale reads
-`interrupted`. The record is not a checkpoint — replay is the
-Inspector's job ([ADR 0010](docs/adr/0010-record-format.md)).
+The pipeline is the recorder ([ADR 0024](docs/adr/0024-observability-data.md)):
+`defer otel.Install()()` writes the local sink (`./.weft/weft.db`,
+content on, no network) and every event, delta, transcript record and
+span leaves as it happens — a crash loses nothing emitted. Caller
+pairs ride `weft.Metadata`; a quiet run heartbeats, so a live run
+reads `running` and a crashed one `interrupted`. The recorder's
+database is module `weft/obsdb`: the OTLP-shaped model with the
+derived weft identity, read back through one `obsdb.DB` interface —
+runs, sessions, positioned event pages, transcripts, spans by run or
+trace, public ids — with `obsdb/sqlite` as the default backend and
+`obsdb/clickhouse` as the hosted one (column-compatible with the OTel
+Collector's ClickHouse exporter, so a stock collector can feed the
+same database).
 
 ```go
-s, _ := sqlite.Open(".weft/dev.db")            // ":memory:" works too; store.Memory() in tests
-agt := weft.New(model, store.Record(s, store.Tags(map[string]string{"cwd": wd})), tools...)
-page, _ := s.List(ctx, store.Query{})          // no events in rows, a Total, a Before cursor
-rec, _  := s.Get(ctx, page.Runs[0].ID)         // everything: stream, result, tags
-_ = s.Delete(ctx, rec.ID)                      // children survive, orphaned
+defer otel.Install()()                          // the recorder: local sink, content on
+db := otel.LocalDB()                            // the same handle Studio reads [D4]
+page, _ := db.Runs(ctx, obsdb.RunQuery{})       // identity chain, status derived
+rec, _ := db.Run(ctx, page.Runs[0].ID)          // the row + its subagent children
+evs, _ := db.Events(ctx, rec.ID, 0, 50)         // positioned events, inclusive cursor
 ```
-
-`go run ./store/examples/basic` records a run with a tool call and a
-subagent into `.weft/dev.db` and prints the table, the event stream,
-and the child run — the shape the Inspector reads.
 
 ### Inspecting runs
 
-Module `weft/studio` (v0.1.0) is the Inspector: a read-only UI over a
-run store, served as one `http.Handler` with the UI embedded — no
-build step, no Node at runtime, nothing leaves the process. The runs
-list, the run page with its trace waterfall, guaranteed replay over
-the event index, raw JSON, and agent and tool cards from the
-manifest ([studio/README.md](studio/README.md), ADR 0018).
+Module `weft/studio` is the Inspector, rewritten on obsdb (ADR 0024
+S4): the UI, a JSON API (runs with their filters, transcripts, spans,
+traces, sessions, public ids), the OTLP/HTTP ingest receiver, and the
+live SSE stream — served as one `http.Handler` with the UI embedded,
+no build step, nothing leaves the process. Setup A embeds it beside
+the app and passes the pipeline's handle for the live lane; a token
+(`studio.Token`) walls the API when it leaves loopback. Setup B is the
+binary — module `weft/studio/cmd`, the one place that imports the
+ClickHouse driver — for any language's OTel app: UI + ingest + a dev
+token on `127.0.0.1:7331`, `--db sqlite://path` or
+`clickhouse://user:pass@host:9000/db` ([studio/README.md](studio/README.md)).
 
 ```go
 mux.Handle("/studio/", http.StripPrefix("/studio",
-    studio.Handler(s, studio.Manifest(manifestBytes))))  // bind loopback: no auth yet
+    studio.Handler(studio.DB(otel.LocalDB()))))   // history + live [D4]
 ```
 
-`go run ./studio/examples/basic` records three demo runs and serves
-Studio on `127.0.0.1:7331/studio/`.
+```sh
+go run ./studio/cmd --db sqlite://.weft/dev.db    # OTel app: point
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 # its exporter here
+```
+
+`go run ./studio/examples/basic` records demo runs (a tool call, a
+subagent, a failure) into an obsdb database and serves Studio on
+`127.0.0.1:7331`; `examples/studio-local` is setup A's five lines with
+a live thread session.
 
 ## Sessions — `weft/thread`
 
@@ -668,9 +680,12 @@ wefttest/             scripted mock model + the conformance suite
 openai/               OpenAI Chat Completions (+ compatible servers)
 anthropic/            Anthropic Messages (thinking, signatures)
 google/               Gemini via genai
-store/                run records: Record tap, Memory + sqlite backends, storetest
-studio/               the Inspector: read-only handler + embedded UI (web/ is its Bun source)
-examples/             runnable core example (per-adapter: <adapter>/example)
+otel/                 the observability pipeline: destinations, content policies, heartbeats
+obsdb/                the observability database: model, DB interface, sqlite backend, obsdbtest
+obsdb/clickhouse/     the hosted backend (collector-compatible schema, materialized views)
+studio/               the Inspector on obsdb: UI + JSON API + OTLP ingest + live (web/ is its
+                      Bun source, cmd/ the setup-B binary)
+examples/             runnable examples (otel, studio-local; per-adapter: <adapter>/example)
 docs/adr/             decision records for the contracts
 ```
 
@@ -732,8 +747,9 @@ an exported symbol always fails.
    usage limits, loop detection, `PrepareStep`; ADR 0014).
 4. ~~MCP interop~~ — **done** (consume and expose; ADR 0015). ~~Core
    observability~~ — **done** (OTel spans + slog lines; ADR 0016).
-5. The satellites: ~~`store`~~ — **done** (v0.1.1; ADR 0010).
-   ~~`studio`~~ — **T1 done** (the Inspector, v0.1.0; ADR 0018).
+5. The satellites: ~~`store`~~ — **removed** (step 5 of ADR 0024;
+   v0.1.3 remains on the module proxy). ~~`studio`~~ — **done** (the
+   Inspector, v0.1.0, ADR 0018; rewritten on obsdb, ADR 0024 S4).
    Next: `thread` — sessions, branching, compaction, approvals,
    steering, pool, sandbox, v0.1 → v1.0 (designed in
    [ADR 0011](docs/adr/0011-thread-sessions.md) and ADRs 0019–0023),

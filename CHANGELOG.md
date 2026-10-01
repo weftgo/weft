@@ -1,8 +1,10 @@
 ## Unreleased
 
-Lane A2 of the observability-data programme (ADR 0024), merged to
-main: the two new modules — the observability database and the
-pipeline. Both date at the step 8 release.
+Lanes A2, B1 and B2 of the observability-data programme (ADR 0024),
+merged to main: the two new modules from A2 (the observability
+database and the pipeline), B1's Studio rewrite on obsdb with the
+store module deleted, and B2's ClickHouse backend. All of it dates at
+the step 8 release.
 
 ### obsdb (new module)
 
@@ -77,6 +79,175 @@ pipeline. Both date at the step 8 release.
   de-duplicate with the explicit one winning; `NoEnv()` turns them off.
   The core reads no environment variable — this module does, here
   only.
+
+### obsdb/clickhouse (new module)
+
+- The ClickHouse backend of `obsdb` (ADR 0024 S3.6, open-source per
+  Q5): `Open(dsn string, opts ...Option) (obsdb.DB, error)` connects
+  through clickhouse-go v2 with `async_insert=1,
+  wait_for_async_insert=1` (a write returns once the server has
+  flushed its batch), creates and versions the schema in
+  `obsdb_migrations` — the SQLite backend's numbering rule, refusing a
+  database whose schema is newer with `ErrNewerSchema` — and serves
+  every `obsdb.DB` read (`Runs` through `GROUP BY RunId` with the same
+  aggregates the AggregatingMergeTree columns carry, single-run pages
+  through `FINAL`, `Sessions` as a `GROUP BY SessionId` over
+  per-run-collapsed rows, status always derived through
+  `obsdb.DeriveStatus`, never stored).
+- Column compatibility with the OTel Collector ClickHouse exporter,
+  pinned at **v0.162.0** (the version named in
+  `migrations/0001_init.sql`): `otel_traces` and `otel_logs` keep
+  every column name and type its `INSERT` names — `EventName`
+  included (the one feature column the exporter probes the table
+  for); the optional `*AttributesKeys` columns deliberately absent
+  because the pinned exporter's default `INSERT` never names them
+  (they belong to its json-mode tables) —
+  and add the weft identity as materialized columns with
+  `bloom_filter` skip indexes on `SessionId`, `PublicId`, `Agent` and
+  `TraceId` (S3.6). A stock collector pinned to that version, with
+  `create_schema: false`, writes into the same database; the
+  collector-shape test inserts with its verbatim template column
+  lists and proves the views feed the weft tables from those rows.
+- `weft_records` as `ReplacingMergeTree(InsertTime) ORDER BY (RunId,
+  Kind, Pos)` — the transport idempotency key (I4) — filled by a
+  materialized view from `otel_logs` where `weft.record IN ('event',
+  'messages')`: never `delta` (counted in `weft_runs`' `DeltaCount`
+  high-water mark, never stored — D3/Q4), never `heartbeat` (no
+  position; it only moves a run's last-seen). It carries its own
+  content TTL, because a source table's TTL does not cascade through
+  a view.
+- `weft_runs` as `AggregatingMergeTree ORDER BY RunId` filled by two
+  materialized views (from `otel_logs`, heartbeats included for
+  last-seen, `run_start`/`run_finish` bodies parsed in SQL; and from
+  `otel_traces`, the `invoke_agent` span detected exactly the way
+  `obsdb/sqlite`'s `isInvokeAgent` does), its columns
+  `SimpleAggregateFunction`: `min` for started, `max` for finished,
+  last-seen, identity strings, the terminal flags and usage. Caller
+  metadata is stored as the contract-filtered attribute JSON (the
+  `obsdb.MetaOf` exclusion set, embedded in the view and pinned to
+  `MetaOf` by a test), so `max` keeps real metadata and the metadata
+  contract stays in one implementation.
+- `TTL(content, meta time.Duration) Option`: overrides the retention
+  windows — content (`otel_logs`, `weft_records`, `weft_deltas`) 30
+  days, spans and runs 90 by default. Open applies a configured
+  non-default window with `ALTER TABLE ... MODIFY TTL` after the
+  migrations (idempotent, so the schema stays inspectable); the
+  defaults are the migration's own and skip the ALTER. Values ≤ 0
+  keep that class's default.
+- `KeepDeltas() Option`: turns delta storage on for debugging —
+  `Write` additionally inserts delta rows into `weft_deltas`
+  (`ReplacingMergeTree` on `(RunId, Pos)`, their own counter so they
+  can never touch the durable sequence); the option lives in `Write`,
+  not the schema, because a view cannot be option-gated.
+- The conformance table `obsdbtest.Run` (S3.5) runs against a live
+  server, gated on `WEFT_CLICKHOUSE_DSN`, each subtest on a fresh
+  database; the package README carries the one-line container recipe
+  (clickhouse/clickhouse-server:25.8-alpine), the docker-compose
+  equivalent, and the CI job with the service container.
+
+### studio (breaking 0.x — the step 6 rewrite)
+
+#### Added
+
+- `New(opts ...Option) *Server` with `Handler()`, `Close()` (closes
+  only the database New opened itself — a DB passed through `DB(...)`
+  stays its owner's) and `Runtime()` (nil until step 8 provides
+  `studio/runtime`). Options: `Live(hub)` (default the DB's own hub
+  when it implements `Hub()`, else an in-process `obsdb.NewHub()` fed
+  by ingest), `NoIngest()`, `IngestToken(tok)`, `Token(tok)`,
+  `AllowOrigins(...)`, `Playground(bool)` beside the kept `DB`, `Open`,
+  `Base`, `Manifest`, `Title`, `Capabilities`.
+- `studio/ingest`: the OTLP/HTTP receiver — `POST /v1/traces` and
+  `POST /v1/logs`, protobuf and JSON, optional gzip, a 16 MiB limit
+  after decompression (413 above), the publish-then-write pipeline
+  (frames reach the hub before `DB.Write`; 503 `unavailable` on a write
+  failure so the exporter retries), and the ingest token (loopback
+  open without one — `api/meta` says so via `ingest_open`).
+- `GET /api/live`: the SSE live stream — exactly one selector
+  (`run`/`session`/`public_id`/`agent`), `kinds` over
+  event/delta/messages/run (default `event,run`; heartbeats never
+  forwarded), frame ids are the hub's Seq, `Last-Event-ID` resume with
+  the gap backfilled from the database and deduped on
+  `(run, kind, pos)`, a ping every 15 s, and `event: overflow` plus a
+  close when a subscriber's queue drops it.
+- Routes: `GET runs/{id}/transcript`, `runs/{id}/spans`,
+  `traces/{trace_id}` (any trace, weft or not), `sessions`,
+  `sessions/{id}`, `public/{public_id}`, `POST /api/panel-tokens`
+  (mint an HMAC-signed `{public_id, scope, exp}` scoped to one public
+  id; every data route refuses anything outside it, the agent live
+  selector included). Runs and sessions lists gained the session,
+  public-id and (runs) playground filters.
+- `routes.go`'s route groups: the registration point later steps add
+  to in their own files (`panel.go`, `playground.go` set package-level
+  hooks through var initializers; `Playground(true)` enables the
+  playground's), with `api/meta`'s capabilities computed from the
+  registered groups — never hard-coded.
+
+#### Changed
+
+- `Handler` is `Handler(opts ...Option)` over an `obsdb.DB` instead of
+  `Handler(s store.Store, opts ...)`: `DB(db)` serves the database you
+  pass (setup A: `DB(otel.LocalDB())` — the same handle weft/otel's
+  Local destination writes), `Open(path)` opens an obsdb sqlite file
+  (created when missing; panics at Handler time when it cannot), and
+  with neither option Handler opens the history database at `$WEFT_DB`
+  or `./.weft/weft.db`. The five read routes keep their JSON shapes as
+  far as the new model allows: `tags` reads the run row's metadata,
+  `model` rebuilds from the row's provider/model, `result` is always
+  `null` (the store's result document is gone; the transcript route
+  that replaces it is step 6), and events page through
+  `obsdb.DB.Events` with the same inclusive `after` cursor, `done`
+  now also covering rows that read interrupted at derivation time (a
+  crash orphan's polling tail terminates).
+- The JSON shapes are S4.3's: the run row carries the identity chain
+  in full (`parent_run_id`, `trace_id`, `service`, `session_id`,
+  `public_id`, `turn`, `playground`, `experiment_id`, `forked_from`,
+  `meta`, `last_seen`, `pending`, `stop_reason`, `message_count`);
+  `meta` reports `db`, `ingest_open` and `interrupted_after_ms`; event
+  page entries carry `time` and the page carries `gaps`; spans map
+  OTLP statuses to `unset`/`ok`/`error`. The UI follows: the live
+  client (`lib/live.ts`), the transcript overlay on the fold, children
+  joined by `parent_call_id` (subagent blocks fetch on expand), the
+  time-axis waterfall when a run has spans, and the sessions, traces
+  and live routes.
+- `Token(tok)` now walls the whole API (bearer, or `?token=` for
+  EventSource); CORS defaults to localhost/127.0.0.1 on any port when
+  a token is configured, none in setup A.
+
+#### Removed
+
+- The store-era JSON keys `tags` (now `meta`) and `parent_id` (now
+  `parent_run_id`), the dead `result` field on the run document, the
+  inline `Nested` folding in the UI (children are separate runs), and
+  `meta`'s `store` key (now `db`).
+- `eventCache`, `storeKind`, everything typed on `store.RunRecord`,
+  and the `weft/store` dependency; the 409 `newer_format` mapping went
+  with the store's decode errors (unknown ids stay 404, other database
+  errors 500 `internal`). `api/meta`'s `store` field reports the
+  obsdb backend (best effort, dynamic type).
+
+### studio/cmd (new module)
+
+- Setup B's binary (S4.6, §10.1): UI + ingest + a dev token on
+  `127.0.0.1:7331`, `--db sqlite://path` (an obsdb sqlite file,
+  created when missing) or `--db
+  clickhouse://user:pass@host:9000/db` (the hosted backend, wired at
+  merge-B — this module is the one place that imports the
+  obsdb/clickhouse driver, so the studio library never carries it),
+  `--addr`, `--token`; `WEFT_STUDIO_TOKEN` fixes the token, else one
+  is generated and printed. `DevToken()` generates it.
+
+### store
+
+#### Removed
+
+- The module, entirely (step 5 of ADR 0024). Consumers read `obsdb`:
+  weft-arena through per-scenario `weft/otel` pipelines
+  (`weft.LoggerProvider`/`weft.TracerProvider` from
+  `otel.Start(otel.Local(":memory:"), otel.NoGlobal())`, metadata via
+  `weft.Metadata` on the run), Studio through `studio.DB`.
+  `store/v0.1.3` remains resolvable from the module proxy for
+  consumers pinned to it by tag.
 
 ## thread 0.8.0 — 2026-10-01
 

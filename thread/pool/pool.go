@@ -3,9 +3,9 @@
 // subagent tools whose children hold a slot, child sessions linked to
 // the parent session and call, and receipts recording every
 // delegation's journey. The pool imports the root module and
-// weft/thread, never weft/store (ADR 0011 §1's module rule, one level
-// down), and changes nothing in the core: it is a tool middleware,
-// session entries, and pool-owned goroutines.
+// weft/thread, never a persistence module (ADR 0011 §1's module rule,
+// one level down), and changes nothing in the core: it is a tool
+// middleware, session entries, and pool-owned goroutines.
 package pool
 
 import (

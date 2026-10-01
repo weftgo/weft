@@ -166,10 +166,10 @@ func TestLegacyMigrationsTableRenamed(t *testing.T) {
 }
 
 // buildStoreFile writes a store-shaped database by hand: the runs and
-// run_events tables weft/store's 0001 defines (trimmed to the columns
-// this test reads) and the goose-shaped versions table holding store
-// versions — 6, ahead of this binary's highest, which the pre-rename
-// code would have refused on.
+// run_events tables the store-era 0001 that shared the file defined
+// (trimmed to the columns this test reads) and the goose-shaped
+// versions table holding store versions — 6, ahead of this binary's
+// highest, which the pre-rename code would have refused on.
 func buildStoreFile(t *testing.T, path string) {
 	t.Helper()
 	db, err := sql.Open("sqlite", "file:"+path)

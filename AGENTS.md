@@ -59,7 +59,7 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
     weft.ToolChoice(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}), // force a tool call every step (Named/None too; PrepareStep can rewrite per step)
     weft.Params(weft.RequestParams{Temperature: ptr(0.2)}), // per-run/step sampling (TopP, MaxTokens, Stop, Seed; nil = construction default; a negative MaxTokens fails the step)
     weft.Tap(func(ctx context.Context, ev weft.Event) {...}), // observer: sees every event, changes nothing
-    weft.OnRunEnd(func(ctx context.Context, res *weft.RunResult, err error) {...}), // outcome observer: once per run, even on failure — the store pairs it with Tap
+    weft.OnRunEnd(func(ctx context.Context, res *weft.RunResult, err error) {...}), // outcome observer: once per run, even on failure — the otel pipeline pairs it with Tap
     weft.OnMessages(func(ctx context.Context, step int, msgs []weft.Message) {...}), // run option: transcript observer — exact messages as they join, for incremental persistence
     // In any observer: weft.AgentFromContext(ctx) → the running *Agent (nil outside a run); agt.Logger() → the run lines' sink.
     weft.TracerProvider(tp),                   // OTel spans: invoke_agent › chat / execute_tool (default: the global provider; no-op until an SDK registers)
@@ -140,17 +140,30 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 // 5. Describe the fleet: weft.Manifest(agents...) → weft.json (generated,
 //    committed, golden-gated; never read back).
 
-// 6. Record runs (module weft/store; sqlite.Open(path) | store.Memory()):
-//    store.Record(s, store.Tags({"cwd": wd})) — a Tap + OnRunEnd pair: events appended
-//    as they arrive, the result written at the run's end (the partial on failure);
-//    s.List(ctx, store.Query{}) pages without events; s.Get(ctx, id) returns everything;
-//    a stale heartbeat reads interrupted; s.Delete orphans children by design.
+// 6. Record runs (module weft/otel — the store is gone, ADR 0024 step 5; the
+//    pipeline is the recorder now, block 9 has the full destination menu):
+//    defer otel.Install()()  // local sink ./.weft/weft.db, content on, no network —
+//    // every event, delta, transcript record and span leaves as it happens
+//    // (weft.Heartbeat keeps a quiet run reading running); the durable run
+//    // reads back through obsdb — otel.LocalDB() — never through the process.
+//    weft.Metadata({"cwd": wd})  // caller pairs on every record/span of the run
+//    // (inherited by subagents; thread sessions stamp weft.session.id,
+//    // weft.public_id, weft.turn — block 8).
 
-// 7. Serve the Inspector (module weft/studio): one read-only handler over a store —
+// 7. Serve the Inspector (module weft/studio; S4 on obsdb — UI, JSON API,
+//    OTLP ingest, live): setup A, embedded beside the app (§10.1's five lines):
 //    mux.Handle("/studio/", http.StripPrefix("/studio",
-//        studio.Handler(s, studio.Manifest(bytes), studio.Capabilities("live"))))
-//    serves the embedded UI (committed dist, no build step) and the JSON API:
-//    meta/runs/runs/{id}/run events (paged)/manifest. Base(path) mounts it anywhere.
+//        studio.Handler(studio.DB(otel.LocalDB()))))  // the pipeline's handle: history + live [D4]
+//    // or studio.New(opts...) *Server with Handler()/Close()/Runtime() (step 8),
+//    //    options DB/Open/Base/Manifest/Title/Capabilities/Token/Live/NoIngest/
+//    //    IngestToken/AllowOrigins/Playground; routes register through
+//    //    routes.go's groups (panel/playground add theirs in their own files).
+//    // API: meta, runs (+session/public/playground filters), runs/{id}/transcript,
+//    //    spans, traces/{id}, sessions, public/{public_id}, /api/live (SSE),
+//    //    /api/panel-tokens; Token(tok) walls everything (bearer or ?token=).
+//    // Setup B, any language (module studio/cmd — the one place the clickhouse
+//    // driver lives): studio --db sqlite://path | clickhouse://user:pass@host:9000/db
+//    //    [--addr --token] serves UI + OTLP ingest on 127.0.0.1:7331.
 
 // 8. Sessions (module weft/thread; jsonl.Open(dir) | thread.Memory()):
 //    s, _ := thread.Create(ctx, st, agent) — the append-only entry tree; every write
@@ -208,8 +221,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    p, err := otel.Start(ctx, opts...)               // Install with errors; otel.NoGlobal() for tests
 //    otel.LocalDB()   // the installed pipeline's obsdb.DB (nil without a Local destination)
 //    otel.StudioEndpoint()  // the Studio destination weft/runtime dials
-//    studio.DB(otel.LocalDB())  // step 6 (ADR 0024 S4): the Studio rewrite mounts the local
-//                               // sink's handle [D4] — placeholder until the B1 lane lands
+//    studio.Handler(studio.DB(otel.LocalDB()))  // setup A (block 7): the Inspector over the
+//                               // local sink's handle, history + live [D4]
 ```
 
 Test offline with `wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))`;

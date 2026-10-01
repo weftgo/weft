@@ -170,6 +170,63 @@ func TestErrClosed(t *testing.T) {
 	}
 }
 
+// The behavioural pin of Runs(Meta:) — the offline test pins only the
+// SQL shape (TestRunsInnerMetaFilter); sqlite pins the behaviour
+// (sqlite's TestRunsMetaFilter). Two tenants' runs, a subset filter
+// returns the matching rows with their Meta present. The same
+// fixtures pin the Playground pointer bind: &false scopes the list to
+// non-playground runs.
+func TestRunsMetaFilterBehaviour(t *testing.T) {
+	db, _ := openFresh(t)
+	at := time.Unix(0, 1790845923120000000).UTC()
+	rec := func(id string, extra map[string]any) obsdb.Record {
+		attrs := map[string]any{
+			"weft.record": "event", "weft.run.id": id,
+			"weft.event.type": "run_start", "weft.event.pos": int64(0),
+		}
+		for k, v := range extra {
+			attrs[k] = v
+		}
+		return obsdb.Record{
+			Time: at, EventName: "weft.event",
+			Body: `{"type":"run_start","id":"` + id + `"}`, Service: "conf-svc",
+			Attrs: attrs,
+		}
+	}
+	if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+		rec("r1", map[string]any{"tenant": "acme", "pr": "77"}),
+		rec("r2", map[string]any{"tenant": "globex"}),
+		rec("r3", map[string]any{"tenant": "acme", "weft.playground": true}),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := db.Runs(ctx(), obsdb.RunQuery{Meta: map[string]string{"tenant": "acme"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 2 || len(page.Runs) != 2 {
+		t.Fatalf("meta filter = total %d / %d rows, want the two acme runs", page.Total, len(page.Runs))
+	}
+	for _, r := range page.Runs {
+		if r.ID == "r1" {
+			if r.Meta["tenant"] != "acme" || r.Meta["pr"] != "77" {
+				t.Errorf("r1 meta = %v, want tenant=acme pr=77", r.Meta)
+			}
+		}
+	}
+	notPlayground := false
+	page, err = db.Runs(ctx(), obsdb.RunQuery{
+		Meta:       map[string]string{"tenant": "acme"},
+		Playground: &notPlayground,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || len(page.Runs) != 1 || page.Runs[0].ID != "r1" {
+		t.Fatalf("meta + Playground=&false = total %d / %d rows, want only r1", page.Total, len(page.Runs))
+	}
+}
+
 // A span event's attributes round-trip typed (S3.1/S3.3): an int64
 // event attribute written through Write reads back int64 from both
 // span reads, exactly like the top-level span attributes — the

@@ -1,0 +1,13 @@
+go 1.26.0
+
+// Lane-local workspace (step 6b): the root go.work and Makefile belong
+// to lane B1, so this file makes `go test` work in this directory by
+// picking up the module, obsdb and the root. Go uses the nearest
+// go.work upward, so commands run here see this one, not the root's.
+// merge-B deletes it and adds ./obsdb/clickhouse to the root go.work
+// and MODULES.
+use (
+	.
+	..
+	../..
+)

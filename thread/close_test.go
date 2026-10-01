@@ -264,6 +264,14 @@ func TestCloseContextEndCancelsTheTurn(t *testing.T) {
 	if _, err := s.Send(ctx, weft.User("late")); !errors.Is(err, thread.ErrClosed) {
 		t.Errorf("Send after an abandoned Close: err = %v, want ErrClosed", err)
 	}
+	// Not yet sealed — the canceled turn may still be landing — but
+	// already refusing the session-level appends a resume would need.
+	if err := s.Label(ctx, t1.ID(), "late"); !errors.Is(err, thread.ErrClosed) {
+		t.Errorf("Label after an abandoned Close: err = %v, want ErrClosed", err)
+	}
+	if n := st.released.Load(); n != 0 {
+		t.Errorf("an abandoned Close released the storage (%d calls); the second Close does", n)
+	}
 
 	if err := s.Close(ctx); err != nil {
 		t.Fatalf("second Close: %v", err)
@@ -483,5 +491,68 @@ func TestClearQueueDropsRestoredSteer(t *testing.T) {
 	}
 	if got := receiptStatus(receipts(open))["e_steer"]; got != thread.ReceiptDropped {
 		t.Errorf("receipt = %q, want dropped", got)
+	}
+}
+
+// A Close that gives up while an approval resume is running fells the
+// resume and nothing takes its place: no re-armed resume, no model
+// call, whatever the boundary's state.
+func TestCloseContextEndDuringResume(t *testing.T) {
+	ctx := context.Background()
+	st := &releasing{Storage: thread.Memory()}
+	started := make(chan struct{})
+	var once sync.Once
+	refund := weft.Tool("refund", "Refund an order.",
+		func(ctx context.Context, _ struct{}) (string, error) {
+			once.Do(func() { close(started) })
+			<-ctx.Done() // runs only once approved; ends only with its run
+			return "", ctx.Err()
+		},
+		weft.RequireApproval())
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund"}),
+		wefttest.Say("never said"),
+		wefttest.Say("never said either"),
+	)
+	s, err := thread.Create(ctx, st, weft.New(model, refund))
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, _ := s.Send(ctx, weft.User("refund it"))
+	if _, err := turn.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	resume, err := s.Decide(ctx, thread.Approve(s.Pending()[0].CallID))
+	if err != nil || resume == nil {
+		t.Fatalf("Decide = %v, %v; want the resume turn", resume, err)
+	}
+	waitStarted(t, started)
+
+	short, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	if err := s.Close(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close under a dead context: err = %v, want DeadlineExceeded", err)
+	}
+	if _, err := resume.Wait(); err == nil {
+		t.Error("the resume ran to a successful end after Close gave up")
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+	if n := len(model.Requests()); n != 1 {
+		t.Errorf("model calls = %d, want 1 — the parked turn's, and nothing after Close gave up", n)
+	}
+	if n := st.released.Load(); n != 1 {
+		t.Errorf("Release calls = %d, want 1", n)
+	}
+	// Whatever the canceled resume left, a later decision or resume on
+	// the closed session starts nothing.
+	if rt, err := s.Resume(ctx); err == nil {
+		if _, werr := rt.Wait(); werr == nil {
+			t.Error("Resume after Close ran")
+		}
+	}
+	if n := len(model.Requests()); n != 1 {
+		t.Errorf("model calls after a late Resume = %d, want 1", n)
 	}
 }

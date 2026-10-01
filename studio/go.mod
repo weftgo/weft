@@ -5,13 +5,13 @@ go 1.26.0
 // Root and obsdb are pinned to their released tags (resolved from the
 // module proxy, no replace — the two-phase rule, ADR 0005).
 require (
-	github.com/weftgo/weft v0.6.0
-	github.com/weftgo/weft/obsdb v0.1.0
+	github.com/weftgo/weft v0.7.0
+	github.com/weftgo/weft/obsdb v0.1.1
 	go.opentelemetry.io/proto/otlp v1.11.1
 	google.golang.org/protobuf v1.36.12
 )
 
-require github.com/weftgo/weft/otel v0.1.0
+require github.com/weftgo/weft/otel v0.1.1
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

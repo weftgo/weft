@@ -417,10 +417,11 @@ func TestMetaGolden(t *testing.T) {
 	if code, _, _ := post(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/v1/logs", "application/json", "{}"); code != http.StatusNotFound {
 		t.Errorf("NoIngest /v1/logs: %d, want 404", code)
 	}
-	// Playground(true) is accepted but adds nothing until step 8's
-	// playground.go registers its group.
+	// Playground(true) adds the playground group's capability and the
+	// runtime link's (step 8's playground.go registers both; the
+	// step-6 pin asserted neither existed yet).
 	_, _, pg := get(t, Handler(DB(fixtureDB(t)), Playground(true)), "/studio/api/meta")
-	if !strings.Contains(pg, `"capabilities":["live","ingest"]`) {
+	if !strings.Contains(pg, `"capabilities":["live","ingest","runtimes","playground"]`) {
 		t.Errorf("Playground capabilities = %s", pg)
 	}
 	// A hosting wrapper declares its own verbs beside the groups'.

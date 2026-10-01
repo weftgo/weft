@@ -38,7 +38,18 @@ func (l *link) validate(cmd command) (string, bool) {
 		return fmt.Sprintf("unknown thread mode %q", cmd.Thread), false
 	}
 	if len(cmd.TranscriptEdits) > 0 {
-		return "transcript_edits are not yet available", false
+		// The runtime's copy is authoritative (§10.4): the edits must
+		// apply to the transcript it will feed the run.
+		if cmd.Source == nil || cmd.Source.RunID == "" {
+			return "transcript_edits need a source run", false
+		}
+		msgs, err := l.sourceTranscript(context.Background(), cmd.Source.RunID)
+		if err != nil {
+			return fmt.Sprintf("source transcript unresolved: %v", err), false
+		}
+		if _, err := applyTranscriptEdits(msgs, cmd.Source.FromStep, cmd.TranscriptEdits); err != nil {
+			return err.Error(), false
+		}
 	}
 	entry, _ := l.reg.entry(cmd.Agent)
 	tools := map[string]bool{}
@@ -101,17 +112,79 @@ func enabledTools(cmd command, tools map[string]bool) []string {
 }
 
 // execute runs the command as one ephemeral run of its agent and
-// returns the run's status for the finished ack ("succeeded" or
-// "failed"). The run's content reaches Studio through the normal OTel
-// pipeline; the link carries only the acks. A run that parks (a call
-// awaiting a decision) ends successfully with Pending set — the state
-// is kept so a later approval decision can resume it.
-func (l *link) execute(ctx context.Context, cmd command, runID string) string {
+// returns the run's status and the run id the result lives under (a
+// substitute-mode chain resumes under fresh ids; the finished ack
+// names the last). The run's content reaches Studio through the normal
+// OTel pipeline; the link carries only the acks. A run that parks (a
+// call awaiting a decision) ends successfully with Pending set — the
+// state is kept so a later approval decision can resume it.
+func (l *link) execute(ctx context.Context, cmd command, runID string) (string, string) {
 	agent, _ := l.reg.agent(cmd.Agent)
-	opts := l.runOptions(cmd, runID)
-	res, err := agent.Generate(ctx, opts...)
-	status := l.outcome(cmd, runID, res, err)
-	return status
+	res, err := agent.Generate(ctx, l.runOptions(cmd, runID)...)
+
+	// Substitute (§6 rule 3, the default mode): a parked side-effect
+	// call that matches a recorded call of the source (same tool, same
+	// args) is answered with the recorded result — the handler never
+	// re-fires; the runtime acts as ADR 0007's resolver over a chain of
+	// fresh run ids. A miss stays parked for the human, and every
+	// pending call must match: a partial match left pending would be
+	// denied "no decision" by the resume.
+	if source := l.sourceMsgs(cmd); len(source) > 0 {
+		records := recordedCalls(source)
+		for err == nil && res != nil && len(res.Pending) > 0 &&
+			(cmd.SideEffects == "" || cmd.SideEffects == "substitute") {
+			resolves := make([]weft.RunOption, 0, len(res.Pending))
+			all := true
+			for _, call := range res.Pending {
+				recorded, ok := records[call.Name+"\x00"+string(call.Args)]
+				if !ok {
+					all = false
+					break
+				}
+				resolves = append(resolves, weft.Resolve(call.ID, recorded))
+			}
+			if !all {
+				break // a real miss: parked for a human decision
+			}
+			runID = newID("pg_")
+			opts := l.overrideOptions(cmd)
+			opts = append(opts, weft.Messages(res.Messages...))
+			opts = append(opts, resolves...)
+			opts = append(opts, weft.RunID(runID))
+			var next *weft.RunResult
+			next, err = agent.Generate(ctx, opts...)
+			if next != nil && res != nil {
+				next.Usage = addUsage(res.Usage, next.Usage)
+			}
+			res = next
+		}
+	}
+	return l.outcome(cmd, runID, res, err), runID
+}
+
+// sourceMsgs resolves the command's source transcript once per run
+// (nil when the command has no source or it cannot be resolved — the
+// same honest degradation runOptions logs).
+func (l *link) sourceMsgs(cmd command) []weft.Message {
+	if cmd.Source == nil || cmd.Source.RunID == "" {
+		return nil
+	}
+	msgs, err := l.sourceTranscript(context.Background(), cmd.Source.RunID)
+	if err != nil {
+		return nil
+	}
+	return msgs
+}
+
+// addUsage sums two usage rows (the substitute chain's budget counts
+// every run it spent).
+func addUsage(a, b weft.Usage) weft.Usage {
+	a.InputTokens += b.InputTokens
+	a.OutputTokens += b.OutputTokens
+	a.CachedInputTokens += b.CachedInputTokens
+	a.CacheWriteTokens += b.CacheWriteTokens
+	a.ReasoningTokens += b.ReasoningTokens
+	return a
 }
 
 // outcome records the run's end: the finished-ack status, the budget
@@ -182,7 +255,7 @@ type parkState = parkedRun
 // same overrides, the same parked set for the calls still to come, the
 // same experiment labels — under a fresh run id; a resume that parks
 // again updates the state so the next decision finds it.
-func (l *link) resume(ctx context.Context, pr *parkedRun, d approvalDecision, runID string) string {
+func (l *link) resume(ctx context.Context, pr *parkedRun, d approvalDecision, runID string) (string, string) {
 	agent, _ := l.reg.agent(pr.cmd.Agent)
 	opts := l.overrideOptions(pr.cmd)
 	opts = append(opts, weft.Messages(pr.msgs...))
@@ -199,7 +272,7 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, d approvalDecision, ru
 	delete(l.parked, d.RunID) // a resume that parks again re-members under its own id
 	l.mu.Unlock()
 	res, err := agent.Generate(ctx, opts...)
-	return l.outcome(pr.cmd, runID, res, err)
+	return l.outcome(pr.cmd, runID, res, err), runID
 }
 
 // runOptions composes the run exactly as §5.2's snippet does: the
@@ -213,13 +286,26 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, d approvalDecision, ru
 func (l *link) runOptions(cmd command, runID string) []weft.RunOption {
 	opts := l.overrideOptions(cmd)
 	// The source turn's context: the transcript through step from_step
-	// − 1, repaired by the loop. A fresh command (no source) starts
-	// from the input alone.
+	// − 1, the transcript edits applied to the kept prefix (D2/D3),
+	// repaired by the loop — the edits were validated so Repair has
+	// nothing to synthesize. A fresh command (no source) starts from
+	// the input alone.
 	if cmd.Source != nil && cmd.Source.RunID != "" {
 		msgs, err := l.sourceTranscript(context.Background(), cmd.Source.RunID)
 		if err != nil {
 			slog.Warn("weft/runtime: source transcript unresolved; running without it",
 				"run_id", cmd.Source.RunID, "err", err)
+		} else if len(cmd.TranscriptEdits) > 0 {
+			patched, err := applyTranscriptEdits(msgs, cmd.Source.FromStep, cmd.TranscriptEdits)
+			if err != nil {
+				// Studio validated the same edits against its own copy
+				// (§10.4); this copy disagrees — refuse rather than run
+				// on a transcript nobody wrote.
+				slog.Warn("weft/runtime: transcript edits rejected against the runtime's copy",
+					"run_id", cmd.Source.RunID, "err", err)
+			} else if cut := len(patched); cut > 0 {
+				opts = append(opts, weft.Messages(patched...))
+			}
 		} else if cut := cutAtStep(msgs, cmd.Source.FromStep); cut > 0 {
 			opts = append(opts, weft.Messages(msgs[:cut]...))
 		}

@@ -483,6 +483,7 @@ export class PanelModel {
     this.state.drawer = {
       runId,
       agent: row.agent,
+      edits: [],
       step,
       instructions: agent.instructions ?? "",
       tools,

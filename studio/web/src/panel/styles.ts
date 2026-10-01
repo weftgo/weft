@@ -165,6 +165,7 @@ select.weft-input { width: auto; min-width: 120px; }
 .weft-fields { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 7px; }
 .weft-tool { display: inline-flex; gap: 4px; align-items: baseline; margin-right: 10px;
   color: var(--w-fg); cursor: pointer; }
+.weft-edit { display: block; margin: 3px 0; color: var(--w-dim); }
 .weft-warn-badge { color: var(--w-warn); border-color: var(--w-warn); }
 .weft-run-btn {
   background: var(--w-accent); color: #101418; border: none; border-radius: 5px;

@@ -295,7 +295,10 @@ func TestPlaygroundRunValidation(t *testing.T) {
 		{"unknown option", mutate(`"temperature": 0.2`, `"temperature": 0.2, "timeout_ms": 500`), http.StatusBadRequest, "unknown option"},
 		{"engine scripted", mutate(`"engine": "live"`, `"engine": "scripted"`), http.StatusBadRequest, "not yet available"},
 		{"thread fork", mutate(`"thread": "ephemeral"`, `"thread": "fork"`), http.StatusBadRequest, "not yet available"},
-		{"transcript edits", mutate(`"experiment_id": "exp_1"`, `"transcript_edits": [{"step": 1}], "experiment_id": "exp_1"`), http.StatusBadRequest, "not yet available"},
+		// An empty edit (neither tool_result nor content) is a shape
+		// error; the transcript-dependent rules are pinned in
+		// TestTranscriptEditValidation.
+		{"transcript edits need a source", mutate(`"experiment_id": "exp_1"`, `"transcript_edits": [{"step": 1}], "experiment_id": "exp_1"`), http.StatusBadRequest, "need a source run"},
 		{"side effects allow refused tool", mutate(`"side_effects": "substitute"`, `"side_effects": "allow"`), http.StatusForbidden, "not opted in"},
 		{"bad thinking", mutate(`"thinking": "off"`, `"thinking": "sideways"`), http.StatusBadRequest, "unknown thinking"},
 		{"no runtime", mutate(`"rt_test"`, `""`), http.StatusBadRequest, "needs a runtime"},

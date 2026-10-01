@@ -144,6 +144,7 @@ func newE2E(t *testing.T, appTurns ...wefttest.Turn) *e2e {
 		weft.MaxSteps(10),
 		weft.Parallelism(4),
 		weft.TracerProvider(p.TracerProvider()),
+		weft.LoggerProvider(p.LoggerProvider()), // the messages records — replay-grade, D1
 		lookup, refund,
 	)
 	store, err := jsonl.Open(filepath.Join(dir, "threads"))
@@ -590,4 +591,168 @@ func TestPlaygroundApprovalVerbs(t *testing.T) {
 	if !refundRan.Load() {
 		t.Error("approve (continue) did not run the handler for real")
 	}
+}
+
+// TestPlaygroundContinueFromStepWithEdits is §10.6's P2 gate: continue
+// from step 2 with a patched tool result (the model sees the
+// counterfactual, not the record), and a never tool provably does not
+// re-fire in substitute mode — a counting refund's handler stays at
+// zero while the model still receives the recorded result.
+func TestPlaygroundContinueFromStepWithEdits(t *testing.T) {
+	var refunds atomic.Int64
+	refund := weft.Tool("refund", "Refund an order.",
+		func(ctx context.Context, in struct {
+			OrderID string `json:"order_id"`
+		}) (string, error) {
+			refunds.Add(1)
+			return "refunded-for-real", nil
+		})
+	lookup := weft.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
+		OrderID string `json:"order_id"`
+	}) (string, error) {
+		return "shipped", nil
+	}, weft.Replay(weft.ReplaySafe))
+	// The app's own turn: lookup (step 0), refund (step 1), reply
+	// (step 2). The experiment continues from step 2 with the refund
+	// result patched, and — the counting case — re-runs step 1 fresh
+	// under substitute.
+	script := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"4411"}`, ID: "c1"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"4411"}`, ID: "c2"}),
+		wefttest.Say("Refunded — anything else?"),                                                // the app's own turn ends
+		wefttest.Say("The refund failed with 429."),                                              // from_step 2's fresh step 2
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"4411"}`, ID: "c2"}), // from_step 1 re-runs it
+		wefttest.Say("Refunded, on the record."),                                                 // the substitute chain's continuation
+	)
+	e := newE2E(t)
+	e.agent = weft.New(script, weft.Name("acme-support"),
+		weft.Instructions("You are Acme's support agent."),
+		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), lookup, refund)
+	runID := e.appTurn(t, "refund order #4411 please")
+	// The Studio destination batches logs; the transcript route can
+	// answer before the turn's last records land. Wait for the final
+	// reply so the edit validates against the whole turn.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_, body := e.api(t, http.MethodGet, "/api/runs/"+runID+"/transcript", "")
+		if strings.Contains(body, "anything else") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	refunds.Store(0) // the app's own turn really refunded; the experiments must not
+
+	shutdown := runtime.Install(
+		runtime.Studio(e.ts.URL, ""),
+		runtime.Agents(e.agent),
+		runtime.Enabled(true),
+	)
+	defer shutdown()
+	e.waitRuntime(t)
+	_, rtJSON := e.api(t, http.MethodGet, "/api/runtimes", "")
+	var runtimes struct {
+		Runtimes []struct {
+			ID string `json:"id"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal([]byte(rtJSON), &runtimes); err != nil || len(runtimes.Runtimes) == 0 {
+		t.Fatalf("runtimes: %v %s", err, rtJSON)
+	}
+	rt := runtimes.Runtimes[0].ID
+
+	// Continue from step 2 with the refund result patched to 429: the
+	// fresh step 2's model turn answers the counterfactual.
+	body := fmt.Sprintf(`{
+	  "command_id": "cmd_edit_1", "runtime": %q, "agent": "acme-support",
+	  "source": {"run_id": %q, "from_step": 2},
+	  "transcript_edits": [{"step": 1, "tool_result": "429 Too Many Requests", "call_id": "c2"}],
+	  "engine": "live", "side_effects": "substitute", "thread": "ephemeral"
+	}`, rt, runID)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", body); code != http.StatusAccepted {
+		t.Fatalf("edited continue = %d %s", code, resp)
+	}
+	row := e.waitCommand(t, "cmd_edit_1", "finished")
+	var st struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(row), &st); err != nil || !strings.HasPrefix(st.RunID, "pg_") {
+		t.Fatalf("finished row = %s", row)
+	}
+	// The patched counterfactual reached the model: the fresh step 2
+	// answered it.
+	e.p.ForceFlush(context.Background())
+	if text := e.commandText(t, st.RunID); !strings.Contains(text, "429") {
+		t.Errorf("the fresh step's reply = %q, want it to answer the patched 429", text)
+	}
+
+	// A bad edit is a 400 before any run: a call the prefix does not hold.
+	bad := fmt.Sprintf(`{
+	  "runtime": %q, "agent": "acme-support",
+	  "source": {"run_id": %q, "from_step": 2},
+	  "transcript_edits": [{"step": 1, "tool_result": "x", "call_id": "c_nope"}],
+	  "engine": "live", "thread": "ephemeral"
+	}`, rt, runID)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", bad); code != http.StatusBadRequest {
+		t.Errorf("unknown call edit = %d %s, want 400", code, resp)
+	}
+
+	// The counting case: from_step 1 re-runs step 1 fresh — the model
+	// re-issues the refund call, the run parks (never), substitute
+	// answers it with the recorded result, and the handler never fires.
+	count := fmt.Sprintf(`{
+	  "command_id": "cmd_edit_2", "runtime": %q, "agent": "acme-support",
+	  "source": {"run_id": %q, "from_step": 1},
+	  "engine": "live", "side_effects": "substitute", "thread": "ephemeral"
+	}`, rt, runID)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", count); code != http.StatusAccepted {
+		t.Fatalf("counting command = %d %s", code, resp)
+	}
+	e.waitCommand(t, "cmd_edit_2", "finished")
+	if n := refunds.Load(); n != 0 {
+		t.Errorf("the refund handler fired %d times in substitute mode — a never tool must not re-fire", n)
+	}
+}
+
+// commandText reads a run's final reply out of Studio's transcript.
+func (e *e2e) commandText(t *testing.T, runID string) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		code, body := e.api(t, http.MethodGet, "/api/runs/"+runID+"/transcript", "")
+		if code == http.StatusOK && strings.Contains(body, "assistant") {
+			var doc struct {
+				Batches []struct {
+					Messages []struct {
+						Role    string `json:"role"`
+						Content []struct {
+							Type string `json:"type"`
+							Text string `json:"text"`
+						} `json:"content"`
+					} `json:"messages"`
+				} `json:"batches"`
+			}
+			if err := json.Unmarshal([]byte(body), &doc); err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, b := range doc.Batches {
+				for _, m := range b.Messages {
+					if m.Role != "assistant" {
+						continue
+					}
+					for _, p := range m.Content {
+						if p.Type == "text" && p.Text != "" {
+							out = append(out, p.Text)
+						}
+					}
+				}
+			}
+			if len(out) > 0 {
+				return strings.Join(out, "\n")
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("the transcript of %s never carried an assistant reply", runID)
+	return ""
 }

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/weftgo/weft"
+
 	"github.com/weftgo/weft/obsdb"
 	linkruntime "github.com/weftgo/weft/studio/runtime"
 )
@@ -113,10 +115,35 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 			return
 		}
 
-		// What 8b defers: in the schema, refused on the wire.
+		// The transcript edits (D2/D3) validate against the source
+		// transcript: the boundary rule and the no-call-without-result
+		// rule are 400s (§10.4), so Repair never synthesizes what
+		// nobody wrote.
 		if len(req.TranscriptEdits) > 0 {
-			badRequest(w, r, "transcript_edits are not yet available")
-			return
+			switch {
+			case req.Source == nil || req.Source.RunID == "":
+				badRequest(w, r, "transcript_edits need a source run")
+				return
+			case req.Source.FromStep <= 0:
+				badRequest(w, r, "transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)")
+				return
+			}
+			bodies, terr := s.db.Transcript(r.Context(), req.Source.RunID)
+			if terr != nil {
+				badRequest(w, r, "the source run has no readable transcript to edit")
+				return
+			}
+			var msgs []weft.Message
+			for _, body := range bodies {
+				var batch []weft.Message
+				if err := json.Unmarshal(body, &batch); err == nil {
+					msgs = append(msgs, batch...)
+				}
+			}
+			if verr := validateTranscriptEdits(msgs, req.Source.FromStep, req.TranscriptEdits); verr != nil {
+				badRequest(w, r, verr.Error())
+				return
+			}
 		}
 		switch req.Engine {
 		case "", "live":

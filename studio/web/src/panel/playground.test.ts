@@ -217,6 +217,7 @@ describe("the pure halves", () => {
     const draft: ExperimentDraft = {
       runId: "s_01-t1",
       agent: "acme-support",
+      edits: [],
       step: 0,
       instructions: "new prompt",
       tools: { lookup_order: true, refund: false },
@@ -243,6 +244,14 @@ describe("the pure halves", () => {
     // A continued run may not replace the turn's message (400).
     const cont = buildRunBody({ ...draft, step: 2 }, "pub_orders") as Record<string, any>
     expect(cont.input).toBeUndefined()
+    // Transcript edits ride along on a continued run (§5.1's shape).
+    const edited = buildRunBody(
+      { ...draft, step: 2, edits: [{ step: 1, callID: "c2", toolResult: "429" }] },
+      ""
+    ) as Record<string, any>
+    expect(edited.transcript_edits).toEqual([
+      { step: 1, call_id: "c2", tool_result: "429" },
+    ])
     // An unchanged tool set carries no override (§10.1).
     const sameTools = buildRunBody(
       { ...draft, tools: { lookup_order: true, refund: true }, instructions: "" },
@@ -261,6 +270,7 @@ describe("the pure halves", () => {
     const draft: ExperimentDraft = {
       runId: "s_01-t2",
       agent: "acme-support",
+      edits: [],
       step: 0,
       instructions: "new prompt",
       tools: { lookup_order: true, refund: false },

@@ -457,6 +457,85 @@ export class WeftDevtools extends HTMLElement {
       body.appendChild(inputRow)
     }
 
+    // The side-effect mode (§6 rule 3): substitute (the default — a
+    // recorded call answers from the record, a miss parks), park
+    // (always), allow (only tools the runtime opted in).
+    const seRow = el("div", "weft-fields")
+    const seSel = el("select", "weft-input") as HTMLSelectElement
+    const seLabel = el("option", undefined, "side effects: substitute") as unknown as HTMLOptionElement
+    seLabel.value = ""
+    seSel.appendChild(seLabel)
+    const parkOpt = el("option", undefined, "park") as unknown as HTMLOptionElement
+    parkOpt.value = "park"
+    seSel.appendChild(parkOpt)
+    const allowOpt = el("option", undefined, "allow (opted-in tools only)") as unknown as HTMLOptionElement
+    allowOpt.value = "allow"
+    seSel.appendChild(allowOpt)
+    seSel.value = d.sideEffects
+    seSel.addEventListener("change", () => this.model?.setDraft({ sideEffects: seSel.value as ExperimentDraft["sideEffects"] }))
+    seRow.appendChild(seSel)
+    body.appendChild(seRow)
+
+    // The transcript edits (D2/D3): when continuing from a step, the
+    // kept steps' results are patchable and their call-free replies
+    // rewritable — the counterfactual the fresh step answers.
+    if (d.step > 0 && this.model?.state.turn) {
+      const t = this.model.state.turn
+      const editsBox = el("div", "weft-field")
+      editsBox.appendChild(el("span", undefined, `Transcript edits (steps 0..${d.step - 1} are kept)`))
+      for (const step of t.folded.steps) {
+        if (step.index >= d.step) break
+        for (const call of step.toolCalls) {
+          if (!call.result) continue
+          const lab = el("label", "weft-edit")
+          lab.appendChild(el("span", undefined, `step ${step.index} · ${call.name} →`))
+          const inp = el("input", "weft-input") as HTMLInputElement
+          inp.placeholder = call.result.content.slice(0, 60)
+          const editOf = () => d.edits.find((e) => e.step === step.index && e.callID === call.callId)
+          inp.value = editOf()?.toolResult ?? ""
+          inp.addEventListener("input", () => {
+            const cur = editOf()
+            const next = [...d.edits]
+            const i = cur ? next.indexOf(cur) : -1
+            if (inp.value === "") {
+              if (i >= 0) next.splice(i, 1)
+            } else if (i >= 0) {
+              next[i] = { ...cur, toolResult: inp.value, step: step.index, callID: call.callId }
+            } else {
+              next.push({ step: step.index, callID: call.callId, toolResult: inp.value })
+            }
+            this.model?.setDraft({ edits: next })
+          })
+          lab.appendChild(inp)
+          editsBox.appendChild(lab)
+        }
+        if (step.text && !step.toolCalls.length) {
+          const lab = el("label", "weft-edit")
+          lab.appendChild(el("span", undefined, `step ${step.index} · reply`))
+          const ta = el("textarea", "weft-input") as HTMLTextAreaElement
+          ta.rows = 2
+          const editOf = () => d.edits.find((e) => e.step === step.index && !e.callID)
+          ta.value = editOf()?.content ?? ""
+          ta.addEventListener("input", () => {
+            const cur = editOf()
+            const next = [...d.edits]
+            const i = cur ? next.indexOf(cur) : -1
+            if (ta.value === "") {
+              if (i >= 0) next.splice(i, 1)
+            } else if (i >= 0) {
+              next[i] = { ...cur, content: ta.value, step: step.index }
+            } else {
+              next.push({ step: step.index, content: ta.value })
+            }
+            this.model?.setDraft({ edits: next })
+          })
+          lab.appendChild(ta)
+          editsBox.appendChild(lab)
+        }
+      }
+      if (editsBox.childElementCount > 1) body.appendChild(editsBox)
+    }
+
     const run = el("button", "weft-run-btn", "Run experiment ▶", {
       title: "POST /api/playground/runs — the runtime in your app executes it",
     })

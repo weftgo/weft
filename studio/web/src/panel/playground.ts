@@ -7,9 +7,21 @@ import type { FoldFeed, FoldedRun } from "../lib/events"
 import type { PosEvent } from "../lib/api"
 import type { CommandStatus, RuntimeView } from "./client"
 
+/** One transcript edit (D2/D3): patch a kept step's tool result (the
+ * "what if the API returned 429?" counterfactual) or rewrite its
+ * call-free assistant reply. The wire shape is §5.1's. */
+export interface TranscriptEditDraft {
+  step: number
+  callID?: string
+  toolResult?: string
+  content?: string
+}
+
 /** The drawer's editable experiment (§1's knobs): prompt, tools off,
  * model, thinking, input, start point, engine, side-effect mode. */
 export interface ExperimentDraft {
+  /** Transcript edits on the kept prefix (step < from_step only). */
+  edits: TranscriptEditDraft[]
   /** The source turn the experiment hangs off. */
   runId: string
   agent: string
@@ -77,6 +89,13 @@ export function buildRunBody(draft: ExperimentDraft, publicId: string): Record<s
     thread: draft.thread,
     overrides,
   }
+  if (draft.step > 0 && draft.edits.length)
+    body.transcript_edits = draft.edits.map((e) => ({
+      step: e.step,
+      ...(e.callID ? { call_id: e.callID } : {}),
+      ...(e.toolResult ? { tool_result: e.toolResult } : {}),
+      ...(e.content ? { content: e.content } : {}),
+    }))
   // Input replaces the turn's user message, and only when the run
   // starts the turn over (§10.4's table).
   if (draft.step === 0 && draft.input) body.input = draft.input

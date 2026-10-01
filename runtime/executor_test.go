@@ -211,7 +211,7 @@ func TestValidate(t *testing.T) {
 		{"raised parallelism", func(c *command) { c.Overrides.Options = map[string]float64{"parallelism": 8} }, "raises the agent's cap"},
 		{"engine scripted", func(c *command) { c.Engine = "scripted" }, "not yet available"},
 		{"thread fork", func(c *command) { c.Thread = "fork" }, "not yet available"},
-		{"transcript edits", func(c *command) { c.TranscriptEdits = []transcriptEdit{{Step: 1}} }, "not yet available"},
+		{"transcript edits without a source", func(c *command) { c.TranscriptEdits = []transcriptEdit{{Step: 1}} }, "need a source run"},
 		{"side-effects allow not opted in", func(c *command) {
 			c.SideEffects = "allow"
 			c.Overrides.ToolsEnabled = []string{"refund"}

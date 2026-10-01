@@ -260,8 +260,8 @@ func (l *link) dispatch(cmd command) {
 		l.mu.Unlock()
 	}()
 
-	status := l.execute(ctx, cmd, runID)
-	l.postAck(ack{CommandID: cmd.CommandID, State: "finished", RunID: runID, Status: status})
+	status, finalRun := l.execute(ctx, cmd, runID)
+	l.postAck(ack{CommandID: cmd.CommandID, State: "finished", RunID: finalRun, Status: status})
 }
 
 // cancelCommand cancels a run this runtime started (never the app's
@@ -318,8 +318,8 @@ func (l *link) dispatchDecision(d approvalDecision) {
 		l.mu.Unlock()
 	}()
 
-	status := l.resume(ctx, ps, d, runID)
-	l.postAck(ack{CommandID: d.CommandID, State: "finished", RunID: runID, Status: status})
+	status, finalRun := l.resume(ctx, ps, d, runID)
+	l.postAck(ack{CommandID: d.CommandID, State: "finished", RunID: finalRun, Status: status})
 }
 
 // lastEventID returns the newest command id seen — the SSE resume

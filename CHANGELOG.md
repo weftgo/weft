@@ -1,65 +1,8 @@
 ## Unreleased
 
-Lanes A of the observability-data programme (ADR 0024), merged to main:
-the thread identity step, and the two new modules — the observability
-database and the pipeline. Each block dates at its own release (thread
-0.8.0; obsdb and otel tag at the step 8 release).
-
-### thread 0.8.0
-
-The observability-data programme's thread step (ADR 0024 S5): the
-session stamps its identity on every run it starts, and `thread/sqlite`
-owns its migrations table so a session database can share one SQLite
-file with the local sink. Additive for source (one option, one
-unexported field); the migrations rename is the one breaking edge,
-carried by a one-statement rename on Open.
-
-#### Added
-
-- `thread.PublicID(id)` — the session's public id: an opaque,
-  browser-safe handle (WEFT-OTEL-DATA-ARCHITECTURE §5), `WithMeta`
-  sugar stamped into the header as `weft.public_id`. Create-time only,
-  so it is what every backend's `List` Meta filter matches; a later
-  `SetInfo` can add other keys but never rotates it.
-- Every run a session starts — a send, a resume, an overflow re-run —
-  carries `weft.Metadata` with `weft.session.id`, `weft.turn` (the
-  counter the run id was minted from; the re-run names its new turn),
-  `weft.public_id` when the session has one, `weft.session.forked_from`
-  (`<session>#<entry>`) for a fork, and `weft.session.parent` (+
-  `weft.session.parent_call`) for a pool child. It is appended after
-  the caller's run options, so the session's keys win over a caller's
-  colliding `thread.RunOptions(weft.Metadata(...))`; keys the session
-  does not claim pass through. On spans and records alike (the core's
-  S1.2/S1.3 wiring); the runs read `Session.Meta()` — the header
-  overlaid with every info entry — while `List` keeps matching the
-  header's create-time layer.
-- The OTel API (`otel`, `otel/log`, `otel/trace`) becomes a direct
-  requirement of the thread module (test-only imports; the versions
-  the root pins). The SDK stays out — the identity tests implement the
-  tracer and Logs API providers on the API's embedded types, the root
-  module's stance.
-
-#### Changed
-
-- `thread/sqlite`: the migrations table is `thread_migrations`
-  (renamed from the goose-shaped `schema_migrations`), so a thread
-  database and the local sink's `obsdb_migrations` can share one file
-  with each module owning its versions (WEFT-OTEL-DATA-ARCHITECTURE
-  §3.4). `Open` moves a pre-rename file across with one `ALTER TABLE`,
-  run only when the `sessions` table exists and the new name does not:
-  a `store` database pointed at the same `Open` keeps its own tracking
-  table and rows untouched — including one whose recorded store
-  version used to read as ahead of ours and refuse the open. Old
-  thread files keep opening; the versions carry across and the
-  migrations resume from the recorded number.
-
-#### Fixed
-
-- `thread.Storage`'s `Query.Meta` doc claimed the `List` filter
-  matched "the merged view `Load` returns"; no backend merges info-entry
-  meta and `Load` returns the header as is (review 2026-09-30 §8.1
-  item 4). Now says the header's create-time Meta. Doc only; behaviour
-  unchanged.
+Lane A2 of the observability-data programme (ADR 0024), merged to
+main: the two new modules — the observability database and the
+pipeline. Both date at the step 8 release.
 
 ### obsdb (new module)
 
@@ -134,6 +77,64 @@ carried by a one-statement rename on Open.
   de-duplicate with the explicit one winning; `NoEnv()` turns them off.
   The core reads no environment variable — this module does, here
   only.
+
+## thread 0.8.0 — 2026-10-01
+
+The observability-data programme's thread step (ADR 0024 S5): the
+session stamps its identity on every run it starts, and `thread/sqlite`
+owns its migrations table so a session database can share one SQLite
+file with the local sink. Additive for source (one option, one
+unexported field); the migrations rename is the one breaking edge,
+carried by a one-statement rename on Open. Tagged in lockstep with
+`thread/sqlite/v0.2.0`, which bumps to weft v0.6.0 / thread v0.8.0 and
+carries that rename; the module requires the tagged root v0.6.0.
+
+### Added
+
+- `thread.PublicID(id)` — the session's public id: an opaque,
+  browser-safe handle (WEFT-OTEL-DATA-ARCHITECTURE §5), `WithMeta`
+  sugar stamped into the header as `weft.public_id`. Create-time only,
+  so it is what every backend's `List` Meta filter matches; a later
+  `SetInfo` can add other keys but never rotates it.
+- Every run a session starts — a send, a resume, an overflow re-run —
+  carries `weft.Metadata` with `weft.session.id`, `weft.turn` (the
+  counter the run id was minted from; the re-run names its new turn),
+  `weft.public_id` when the session has one, `weft.session.forked_from`
+  (`<session>#<entry>`) for a fork, and `weft.session.parent` (+
+  `weft.session.parent_call`) for a pool child. It is appended after
+  the caller's run options, so the session's keys win over a caller's
+  colliding `thread.RunOptions(weft.Metadata(...))`; keys the session
+  does not claim pass through. On spans and records alike (the core's
+  S1.2/S1.3 wiring); the runs read `Session.Meta()` — the header
+  overlaid with every info entry — while `List` keeps matching the
+  header's create-time layer.
+- The OTel API (`otel`, `otel/log`, `otel/trace`) becomes a direct
+  requirement of the thread module (test-only imports; the versions
+  the root pins). The SDK stays out — the identity tests implement the
+  tracer and Logs API providers on the API's embedded types, the root
+  module's stance.
+
+### Changed
+
+- `thread/sqlite`: the migrations table is `thread_migrations`
+  (renamed from the goose-shaped `schema_migrations`), so a thread
+  database and the local sink's `obsdb_migrations` can share one file
+  with each module owning its versions (WEFT-OTEL-DATA-ARCHITECTURE
+  §3.4). `Open` moves a pre-rename file across with one `ALTER TABLE`,
+  run only when the `sessions` table exists and the new name does not:
+  a `store` database pointed at the same `Open` keeps its own tracking
+  table and rows untouched — including one whose recorded store
+  version used to read as ahead of ours and refuse the open. Old
+  thread files keep opening; the versions carry across and the
+  migrations resume from the recorded number.
+
+### Fixed
+
+- `thread.Storage`'s `Query.Meta` doc claimed the `List` filter
+  matched "the merged view `Load` returns"; no backend merges info-entry
+  meta and `Load` returns the header as is (review 2026-09-30 §8.1
+  item 4). Now says the header's create-time Meta. Doc only; behaviour
+  unchanged.
 
 ## 0.6.0 — 2026-10-01
 

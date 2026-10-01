@@ -141,41 +141,99 @@ func (p *destProc) shapeEvent(clone *sdklog.Record) {
 	if cfg.MaxBytes == 0 {
 		cfg.MaxBytes = 32 << 10
 	}
-	var cut int
-	redact := cfg.Redact
-	if e, ok := ev.(weft.TextDelta); ok {
-		e.Text, cut = shapeString(e.Text, weft.ContentText, redact, cfg.MaxBytes)
-		ev = e
-	} else if e, ok := ev.(weft.ReasoningDelta); ok {
-		e.Text, cut = shapeString(e.Text, weft.ContentReasoning, redact, cfg.MaxBytes)
-		ev = e
-	} else if e, ok := ev.(weft.ToolArgsDelta); ok {
-		e.Args, cut = shapeString(e.Args, weft.ContentArgs, redact, cfg.MaxBytes)
-		ev = e
-	} else if e, ok := ev.(weft.ToolStart); ok {
+	shaped, cut, changed := shapeEventValue(ev, cfg.Redact, cfg.MaxBytes)
+	if !changed && cut == 0 {
+		return
+	}
+	b, err := json.Marshal(shaped)
+	if err != nil {
+		return
+	}
+	clone.SetBody(attribute.StringValue(string(b)))
+	if cut > 0 {
+		addAttr(clone, attrTruncated, attribute.Int64Value(int64(cut)))
+	}
+}
+
+// shapeEventValue is the shaping table for one event: redact then cap
+// the content fields the core's own StripContent table names (content.go)
+// — the same classes the content-off chain strips must not ride
+// unredacted on a content-on chain with Redact configured. Steered
+// message texts are user text (redacted like any other); run_finish
+// pending args follow the adjudicated ToolStart.Args rule —
+// redact-not-cap, because a byte cap mid-JSON would make the args
+// undecodable; Nested recurses into the child event.
+func shapeEventValue(ev weft.Event, redact func(weft.ContentKind, string) string, maxBytes int) (out weft.Event, cut int, changed bool) {
+	switch e := ev.(type) {
+	case weft.TextDelta:
+		s, c := shapeString(e.Text, weft.ContentText, redact, maxBytes)
+		e.Text, cut, changed = s, c, s != ev.(weft.TextDelta).Text
+		return e, cut, changed
+	case weft.ReasoningDelta:
+		s, c := shapeString(e.Text, weft.ContentReasoning, redact, maxBytes)
+		e.Text, cut, changed = s, c, s != ev.(weft.ReasoningDelta).Text
+		return e, cut, changed
+	case weft.ToolArgsDelta:
+		s, c := shapeString(e.Args, weft.ContentArgs, redact, maxBytes)
+		e.Args, cut, changed = s, c, s != ev.(weft.ToolArgsDelta).Args
+		return e, cut, changed
+	case weft.ToolStart:
 		// Args is a JSON document: a byte cap mid-document would make it
 		// undecodable, so redaction may rewrite it but the cap does not
 		// touch it.
 		if redact != nil {
-			e.Args = json.RawMessage(redact(weft.ContentArgs, string(e.Args)))
+			s := redact(weft.ContentArgs, string(e.Args))
+			if s != string(e.Args) {
+				e.Args, changed = json.RawMessage(s), true
+			}
 		}
-		ev = e
-	} else if e, ok := ev.(weft.ToolFinish); ok {
-		e.Content, cut = shapeString(e.Content, weft.ContentResult, redact, cfg.MaxBytes)
-		ev = e
-	}
-	// Steered messages and run_finish pending args stay: they are
-	// transcript batches and identifiers, and the messages records are
-	// the transcript contract.
-	if redact != nil || cut > 0 {
-		b, err := json.Marshal(ev)
-		if err != nil {
-			return
+		return e, 0, changed
+	case weft.ToolFinish:
+		s, c := shapeString(e.Content, weft.ContentResult, redact, maxBytes)
+		e.Content, cut, changed = s, c, s != ev.(weft.ToolFinish).Content
+		return e, cut, changed
+	case weft.Steered:
+		// The delivered messages are ordinary transcript; their text
+		// parts are user content (the core's StripContent empties them
+		// on content-off chains).
+		for i := range e.Messages {
+			for j, part := range e.Messages[i].Content {
+				tp, ok := part.(weft.TextPart)
+				if !ok {
+					continue
+				}
+				s, c := shapeString(tp.Text, weft.ContentText, redact, maxBytes)
+				if s != tp.Text || c > 0 {
+					changed = true
+					cut += c
+					tp.Text = s
+					e.Messages[i].Content[j] = tp
+				}
+			}
 		}
-		clone.SetBody(attribute.StringValue(string(b)))
-		if cut > 0 {
-			addAttr(clone, attrTruncated, attribute.Int64Value(int64(cut)))
+		return e, cut, changed
+	case weft.RunFinish:
+		// Pending[].Args is the same class as the adjudicated
+		// ToolStart.Args: redact, never cap.
+		if redact != nil {
+			for i, c := range e.Pending {
+				s := redact(weft.ContentArgs, string(c.Args))
+				if s != string(c.Args) {
+					changed = true
+					c.Args = json.RawMessage(s)
+					e.Pending[i] = c
+				}
+			}
 		}
+		return e, 0, changed
+	case weft.Nested:
+		inner, c, ch := shapeEventValue(e.Event, redact, maxBytes)
+		if ch || c > 0 {
+			e.Event, changed, cut = inner, true, c
+		}
+		return e, cut, changed
+	default:
+		return ev, 0, false
 	}
 }
 

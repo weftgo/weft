@@ -710,3 +710,95 @@ func TestShutdownIdempotent(t *testing.T) {
 		t.Fatalf("second Shutdown: %v", err)
 	}
 }
+
+// The shaping table covers every content class the core's own
+// StripContent names (content.go): with Redact configured, steered
+// user text and run_finish pending args must not ride unredacted to a
+// content-on destination (the programme audit's P1-7 — only ToolStart
+// had been adjudicated, and Pending[].Args is the same class:
+// redact-not-cap, a cut mid-JSON would make the args undecodable).
+// Nested recurses into the child event.
+func TestShapeEventRedactsSteeredPendingNested(t *testing.T) {
+	red := func(kind weft.ContentKind, s string) string {
+		return strings.ReplaceAll(s, "secret", "[redacted]")
+	}
+	p := &destProc{content: true, contentC: ContentConfig{MaxBytes: 40, Redact: red}, drops: newDropCounter("test")}
+
+	shape := func(t *testing.T, body string) weft.Event {
+		t.Helper()
+		r := sdkRecordWith(t, "weft.event", body, attribute.String("weft.record", "event"))
+		p.shapeEvent(r)
+		ev, err := weft.UnmarshalEvent([]byte(r.Body().AsString()))
+		if err != nil {
+			t.Fatalf("shaped body is not a valid event: %v (%s)", err, r.Body().AsString())
+		}
+		return ev
+	}
+
+	// Steered: the delivered user message's text is redacted (and
+	// capped like other user text).
+	st := shape(t, `{"type":"steered","run_id":"r","seq":1,"step":0,`+
+		`"messages":[{"role":"user","content":[{"type":"text","text":"the secret word"}]}]}`)
+	s, ok := st.(weft.Steered)
+	if !ok || len(s.Messages) != 1 {
+		t.Fatalf("steered shape lost: %#v", st)
+	}
+	tp, ok := s.Messages[0].Content[0].(weft.TextPart)
+	if !ok || !strings.Contains(tp.Text, "[redacted]") || strings.Contains(tp.Text, "secret") {
+		t.Errorf("steered text not redacted: %q", tp.Text)
+	}
+
+	// RunFinish: pending args are redacted (adjudicated
+	// ToolStart.Args class) and never capped — a 100-byte args
+	// document survives the 40-byte cap intact.
+	long := `{"note":"` + strings.Repeat("y", 100) + `","secret":"k"}`
+	finishBody, err := json.Marshal(weft.RunFinish{
+		RunID: "r", Steps: 1,
+		Pending: []weft.ToolCallPart{{ID: "c1", Name: "refund", Args: json.RawMessage(long)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rf := shape(t, string(finishBody))
+	f, ok := rf.(weft.RunFinish)
+	if !ok || len(f.Pending) != 1 {
+		t.Fatalf("run_finish shape lost: %#v", rf)
+	}
+	if args := string(f.Pending[0].Args); !strings.Contains(args, "[redacted]") || strings.Contains(args, "secret") {
+		t.Errorf("pending args not redacted: %s", args)
+	}
+	if len(f.Pending[0].Args) != len(long)-len("secret")+len("[redacted]") {
+		t.Errorf("pending args were capped: %d bytes, want the full document", len(f.Pending[0].Args))
+	}
+
+	// Nested: the child event is shaped with the same rules.
+	nestedBody := `{"type":"nested","run_id":"r","seq":2,"call_id":"c0",`+
+		`"event":{"type":"text_delta","run_id":"r","text":"a secret and a good deal more text well past the cap"}}`
+	nestedRec := sdkRecordWith(t, "weft.event", nestedBody, attribute.String("weft.record", "event"))
+	p.shapeEvent(nestedRec)
+	nestedEv, err := weft.UnmarshalEvent([]byte(nestedRec.Body().AsString()))
+	if err != nil {
+		t.Fatalf("shaped nested body invalid: %v", err)
+	}
+	n, ok := nestedEv.(weft.Nested)
+	if !ok {
+		t.Fatalf("nested shape lost: %#v", nestedEv)
+	}
+	td, ok := n.Event.(weft.TextDelta)
+	if !ok || !strings.Contains(td.Text, "[redacted]") || strings.Contains(td.Text, "secret") {
+		t.Errorf("nested child not redacted: %q", td.Text)
+	}
+	if len(td.Text) > 40 {
+		t.Errorf("nested child not capped: %q (%d bytes)", td.Text, len(td.Text))
+	}
+	var truncated bool
+	nestedRec.WalkAttributes(func(kv attribute.KeyValue) bool {
+		if string(kv.Key) == "weft.content.truncated_bytes" {
+			truncated = true
+		}
+		return true
+	})
+	if !truncated {
+		t.Error("the nested cut did not record weft.content.truncated_bytes")
+	}
+}

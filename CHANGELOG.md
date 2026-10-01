@@ -57,6 +57,15 @@
   plain field outside the atomics, a data race under concurrent agent
   runs (the existing WARN-throttle test covers the behaviour; tests
   now build the counter through the constructor).
+- Content-on chains shape every content class the core's own
+  `StripContent` table names: `Steered` message texts are redacted
+  like other user text, `RunFinish.Pending[].Args` follows the
+  adjudicated `ToolStart.Args` rule (redact-not-cap), and `Nested`
+  recurses into the child event (its cut propagates to
+  `weft.content.truncated_bytes`). With `ContentConfig.Redact`
+  configured, steered user text and pending-approval tool args no
+  longer ride unredacted to Studio/Local. Pinned by
+  `TestShapeEventRedactsSteeredPendingNested`.
 
 ### runtime
 

@@ -19,12 +19,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/weftgo/weft/obsdb/clickhouse"
 	"github.com/weftgo/weft/studio"
@@ -53,11 +57,41 @@ func serve(dbFlag, addr, tokenFlag string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	err = http.ListenAndServe(addr, srv.Handler())
+	err = listen(&http.Server{Addr: addr, Handler: srv.Handler()}, stdout)
 	if cerr := srv.Close(); err == nil {
 		err = cerr
 	}
 	return err
+}
+
+// listen runs the HTTP server until SIGINT or SIGTERM — a graceful
+// stop (the audit's P2-20: a bare ListenAndServe cut SSE streams mid-
+// frame and skipped srv.Close): the listener closes at once, in-flight
+// requests get a five-second grace window (an SSE stream ends when its
+// request context cancels), and streams that outlive the window are
+// force-closed — the studio resources close after, in serve.
+func listen(httpSrv *http.Server, stdout io.Writer) error {
+	// Signal delivery is armed before the listener starts: a signal
+	// that lands while nobody is notified takes the process down.
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(stop)
+	errCh := make(chan error, 1)
+	go func() { errCh <- httpSrv.ListenAndServe() }()
+	select {
+	case err := <-errCh:
+		return err
+	case sig := <-stop:
+		_, _ = fmt.Fprintf(stdout, "studio: shutting down (%v)\n", sig)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := httpSrv.Shutdown(ctx); err != nil {
+			// Streams never go idle: after the grace window the socket
+			// force-closes so the process can still exit.
+			_ = httpSrv.Close()
+		}
+		return nil
+	}
 }
 
 // serveBoot is everything serve does before listening: resolve the
@@ -123,7 +157,10 @@ func srvToken(tokenFlag string) string {
 	return studio.DevToken()
 }
 
-// dbLabel names the database for the banner.
+// dbLabel names the database for the banner. A DSN's password is
+// never echoed (the audit's P2-20): clickhouse://user:pass@host/db
+// prints clickhouse://user:***@host/db — the host and database are
+// the useful part of the banner.
 func dbLabel(dbFlag string) string {
 	switch {
 	case dbFlag == "":
@@ -131,8 +168,25 @@ func dbLabel(dbFlag string) string {
 	case strings.HasPrefix(dbFlag, "sqlite://"):
 		return strings.TrimPrefix(dbFlag, "sqlite://")
 	default:
-		// clickhouse:// and friends: the DSN as given, host and
-		// database are the useful part of the banner.
-		return dbFlag
+		return maskDSN(dbFlag)
 	}
+}
+
+// maskDSN replaces a DSN userinfo's password with ***. A DSN without
+// a password is returned unchanged; so is anything that does not parse
+// as scheme://…@host (the banner stays honest rather than empty).
+func maskDSN(dsn string) string {
+	scheme, rest, ok := strings.Cut(dsn, "://")
+	if !ok {
+		return dsn
+	}
+	userinfo, hostPart, found := strings.Cut(rest, "@")
+	if !found {
+		return dsn
+	}
+	user, _, hasPassword := strings.Cut(userinfo, ":")
+	if !hasPassword {
+		return dsn
+	}
+	return scheme + "://" + user + ":***@" + hostPart
 }

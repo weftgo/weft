@@ -6,12 +6,15 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 )
@@ -229,5 +232,75 @@ func TestBootBannerTokenAuthenticates(t *testing.T) {
 	// second draw for the wall.
 	if n := strings.Count(banner.String(), "dev token"); n != 1 {
 		t.Errorf("banner names the dev token %d times, want 1:\n%s", n, banner.String())
+	}
+}
+
+// TestDBLabelMasksPassword pins the banner's credential rule: a DSN's
+// password never reaches stdout (the audit's P2-20), while the host
+// and database — the useful part — stay readable.
+func TestDBLabelMasksPassword(t *testing.T) {
+	if got := dbLabel("clickhouse://default:hunter2@127.0.0.1:9000/weft?secure=1"); got !=
+		"clickhouse://default:***@127.0.0.1:9000/weft?secure=1" {
+		t.Errorf("dbLabel = %q, want the masked DSN", got)
+	}
+	// A DSN without a password, and the sqlite/default forms, unchanged.
+	for dsn, want := range map[string]string{
+		"clickhouse://default@127.0.0.1:9000/weft": "clickhouse://default@127.0.0.1:9000/weft",
+		"sqlite:///tmp/weft.db":                    "/tmp/weft.db",
+		"":                                         "$WEFT_DB or ./.weft/weft.db (default)",
+	} {
+		if got := dbLabel(dsn); got != want {
+			t.Errorf("dbLabel(%q) = %q, want %q", dsn, got, want)
+		}
+	}
+}
+
+// TestListenShutsDownGracefully pins the P2-20 half serve()'s old bare
+// ListenAndServe missed: SIGTERM stops the listener and listen returns
+// nil (serve then closes the studio's resources) — the process can
+// exit on a signal at all, and the port actually closes.
+func TestListenShutsDownGracefully(t *testing.T) {
+	// A free port, proven by binding and letting go of it.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	httpSrv := &http.Server{Addr: addr, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })}
+	done := make(chan error, 1)
+	go func() { done <- listen(httpSrv, io.Discard) }()
+
+	// The server came up; then SIGTERM (to ourselves — listen's
+	// signal.Notify catches it before the default disposition).
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("server never listened on %s: %v", addr, err)
+		}
+	}
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("listen after SIGTERM: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("listen never returned after SIGTERM")
+	}
+	if conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond); err == nil {
+		_ = conn.Close()
+		t.Error("the port still accepts after the graceful shutdown")
 	}
 }

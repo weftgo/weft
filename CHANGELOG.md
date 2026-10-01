@@ -54,6 +54,12 @@
   control goes through the panel's `panelPut`, and the preflight
   failed it in cross-origin setups B/C; the CORS pin asserts the verb
   (P1-9).
+- The runtime link's full-feed drop terminates the stalled stream
+  (the feed channel closes; the SSE ends instead of pinging forever
+  while every POST 503s on the nil feed) — `TestFullFeedEndsStalledStream`;
+  and a late accepted-ack that resurrects a row the lost sweep took
+  arms the finish watch, so a runtime that never finishes cannot leave
+  it accepted forever — `TestLateAcceptedAckArmsFinishWatch`.
 
 ### otel
 
@@ -104,6 +110,13 @@
   setup B's documented "token printed at start" hand-off was broken.
   The pushed `studio/cmd/v0.1.0` tag carries the bug (owner: consider
   a patch tag).
+- SIGINT/SIGTERM shut the server down gracefully (the listener closes,
+  in-flight requests get five seconds, streams that outlive the window
+  force-close, then the studio's resources close) — a bare
+  `ListenAndServe` cut SSE streams mid-frame and skipped `srv.Close`;
+  and the banner no longer echoes a DSN's password
+  (`clickhouse://user:***@host`). Pinned by
+  `TestListenShutsDownGracefully` and `TestDBLabelMasksPassword`.
 
 ### obsdb/clickhouse
 

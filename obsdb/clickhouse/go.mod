@@ -7,7 +7,7 @@ go 1.26.0
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
 	github.com/weftgo/weft v0.6.0
-	github.com/weftgo/weft/obsdb v0.1.0
+	github.com/weftgo/weft/obsdb v0.1.1
 )
 
 require (

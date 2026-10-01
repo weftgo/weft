@@ -2,17 +2,12 @@ module github.com/weftgo/weft/obsdb/clickhouse
 
 go 1.26.0
 
-// Root is pinned to the released v0.6.0 (resolved from the module
-// proxy, no replace). obsdb has no tag yet — this module releases
-// together with it (step 8's release), so until then obsdb resolves
-// through the workspace with a directory replace, exactly like
-// weft/otel's. The release step tags obsdb and drops this line.
-replace github.com/weftgo/weft/obsdb => ../
-
+// Root and obsdb are pinned to their released tags (resolved from the
+// module proxy, no replace — the two-phase rule, ADR 0005).
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
 	github.com/weftgo/weft v0.6.0
-	github.com/weftgo/weft/obsdb v0.0.0-00010101000000-000000000000
+	github.com/weftgo/weft/obsdb v0.1.0
 )
 
 require (

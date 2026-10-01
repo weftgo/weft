@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/weftgo/weft/studio/ingest"
+	linkrt "github.com/weftgo/weft/studio/runtime"
 )
 
 // The route registry (S4.2): Studio's surface is a list of route
@@ -147,8 +148,10 @@ func registerIngest(mux *http.ServeMux, s *Server) {
 }
 
 // RuntimeServer is the runtime link server's in-process side
-// (studio/runtime, step 8): the registry of connected runtimes that
+// (studio/runtime): the registry of connected runtimes that
 // weft/runtime's runtime.Local(srv) drives and Server.Runtime
-// returns. Step 8 replaces this placeholder with the real type; until
-// then Runtime returns nil and no runtime-link routes exist.
-type RuntimeServer struct{}
+// returns — an alias, so the S4.1 name stays in this package while
+// the type lives where the routes do. Nil on a Server built without
+// Playground(true); the runtime-link routes register with the
+// playground group.
+type RuntimeServer = linkrt.RuntimeServer

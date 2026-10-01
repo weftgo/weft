@@ -866,11 +866,17 @@ func TestHandlerNilPanics(t *testing.T) {
 
 // TestServerLifecycle pins S4.1's New/Server surface: Handler() is the
 // server's handler, Close closes only what New opened, and Runtime is
-// nil until step 8.
+// nil without Playground(true) and the link server with it.
 func TestServerLifecycle(t *testing.T) {
 	srv := New(DB(fixtureDB(t)))
 	if srv.Runtime() != nil {
-		t.Error("Runtime() is not nil before step 8")
+		t.Error("Runtime() is not nil without Playground(true)")
+	}
+	// Playground(true) builds the runtime link server: Runtime()
+	// returns it (the merge-C wiring of studio.go's runtimeSrv).
+	pg := New(DB(fixtureDB(t)), Playground(true))
+	if pg.Runtime() == nil {
+		t.Error("Playground(true): Runtime() is nil")
 	}
 	code, _, body := get(t, srv.Handler(), "/studio/api/meta")
 	if code != http.StatusOK || !strings.Contains(body, `"studio_version"`) {

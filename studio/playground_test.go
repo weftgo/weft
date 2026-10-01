@@ -47,10 +47,13 @@ func newPlaygroundServer(t *testing.T, token string) *playgroundTestServer {
 	t.Cleanup(ts.Close)
 	pt := &playgroundTestServer{Server: srv, ts: ts, cmd: make(chan linkruntime.Command, 16), token: token}
 
-	pt.rs = linkruntime.New()
-	// The link server the routes built is not exposed by the Server
-	// (Runtime() stays nil until the merge wires it), so the fake
-	// runtime talks over HTTP like any real one.
+	// The link server the routes built is exposed by the Server
+	// (Runtime() returns it under Playground(true)); the fake runtime
+	// still talks over HTTP like any real one.
+	pt.rs = srv.Runtime()
+	if pt.rs == nil {
+		t.Fatal("Playground(true): Runtime() is nil")
+	}
 	reg := linkruntime.Registration{
 		RuntimeID:   "rt_test",
 		Host:        "tester",

@@ -80,14 +80,8 @@ func TestPanelJSRoute(t *testing.T) {
 	}
 }
 
-func contains(list []string, want string) bool {
-	for _, v := range list {
-		if v == want {
-			return true
-		}
-	}
-	return false
-}
+// (The package's contains — playground.go — serves this file too; the
+// lanes each declared one, the merge keeps the production copy.)
 
 // TestPanelJSHead pins the HEAD shape: headers without the body.
 func TestPanelJSHead(t *testing.T) {

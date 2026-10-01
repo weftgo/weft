@@ -19,10 +19,9 @@ import (
 // process.
 //
 // Server.Runtime() is the typed shortcut S4.1 names for this
-// (studio/runtime's RuntimeServer); until step 8's merge wires it
-// into the studio.Server placeholder (see notes-lane-c2.md), the
-// handler is the public in-process side and this transport is how
-// Local(srv) reaches it.
+// (studio/runtime's RuntimeServer, wired into studio.Server at the
+// lane-C merge); the handler is still the public in-process side and
+// this transport is how Local(srv) reaches it.
 func inProcessClient(srv *studio.Server) *http.Client {
 	return &http.Client{
 		Transport:     &handlerTransport{h: srv.Handler()},

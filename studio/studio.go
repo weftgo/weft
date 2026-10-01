@@ -159,6 +159,12 @@ type Server struct {
 	// the caller's — otel owns it in setup A.
 	ownsDB bool
 
+	// runtimeSrv is the runtime link server Playground(true) builds
+	// (registerPlayground, one per Server); Runtime() returns it. Nil
+	// without the option, and the playground and runtime-link routes
+	// do not exist.
+	runtimeSrv *RuntimeServer
+
 	shell []byte
 	csp   string
 }
@@ -167,7 +173,7 @@ type Server struct {
 // serves the UI, the panel, the JSON API, the live stream and —
 // unless disabled — OTLP ingest. Runtime() is the runtime link
 // server's in-process side, which weft/runtime takes in setup A; nil
-// until step 8.
+// unless Playground(true) built it.
 func New(opts ...Option) *Server {
 	c := config{base: "/studio/", title: defaultTitle}
 	for _, o := range opts {
@@ -220,9 +226,10 @@ func Handler(opts ...Option) http.Handler {
 }
 
 // Runtime returns the runtime link server's in-process side (what
-// weft/runtime's runtime.Local takes). Step 8 provides it; until then
-// it is nil and the playground routes do not exist.
-func (s *Server) Runtime() *RuntimeServer { return nil }
+// weft/runtime's runtime.Local takes): the server Playground(true)
+// built, nil without the option — and without it the playground
+// routes do not exist either.
+func (s *Server) Runtime() *RuntimeServer { return s.runtimeSrv }
 
 // Close releases what the server owns: the database when New opened
 // it (Open or the default path). A DB passed through DB(...) stays

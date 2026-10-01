@@ -50,12 +50,11 @@ var _ = playgroundGroupInstalled
 
 // registerPlayground mounts the playground routes and the runtime
 // link. The link server is per-Server (a Studio embeds one), built
-// here because New is not this lane's to edit; Server.Runtime — the
-// accessor S4.1 names for it — returns the studio package's
-// placeholder until the merge wires the field (notes-lane-c2.md
-// carries the exact lines).
+// here on Playground(true); Server.Runtime — the accessor S4.1 names
+// for it — returns it.
 func registerPlayground(mux *http.ServeMux, s *Server) {
 	rs := linkruntime.New()
+	s.runtimeSrv = rs
 	mux.HandleFunc("GET /api/runtimes", s.serveRuntimes(rs))
 	mux.HandleFunc("POST /api/playground/runs", s.servePlaygroundRun(rs))
 	mux.HandleFunc("GET /api/playground/commands/{id}", s.servePlaygroundCommand(rs))

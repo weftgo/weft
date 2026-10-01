@@ -89,13 +89,13 @@ func subscribe(t *testing.T, rs *RuntimeServer, tsURL, runtimeID, lastEventID st
 	}
 }
 
-// nextEvent reads one SSE frame.
-func nextEvent(t *testing.T, r *bufio.Reader) (id, event string, data []byte) {
-	t.Helper()
+// readEvent reads one SSE frame; nextEvent's error-returning core, for
+// callers that must not touch t (the bounded reader's goroutine).
+func readEvent(r *bufio.Reader) (id, event string, data []byte, err error) {
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil {
-			t.Fatalf("stream: %v", err)
+			return "", "", nil, err
 		}
 		line = strings.TrimRight(line, "\r\n")
 		switch {
@@ -107,10 +107,20 @@ func nextEvent(t *testing.T, r *bufio.Reader) (id, event string, data []byte) {
 			data = []byte(strings.TrimSpace(strings.TrimPrefix(line, "data:")))
 		case line == "":
 			if event != "" || id != "" || data != nil {
-				return id, event, data
+				return id, event, data, nil
 			}
 		}
 	}
+}
+
+// nextEvent reads one SSE frame.
+func nextEvent(t *testing.T, r *bufio.Reader) (id, event string, data []byte) {
+	t.Helper()
+	id, event, data, err := readEvent(r)
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	return id, event, data
 }
 
 // nextRun reads the next non-ping frame (the stream opens with one).
@@ -123,6 +133,45 @@ func nextRun(t *testing.T, r *bufio.Reader) (id string, data []byte) {
 		}
 		return id, data
 	}
+}
+
+// nextRunBounded is nextRun behind a deadline: a frame that never
+// comes fails the test within wait instead of blocking forever. The
+// ping stream makes an unbounded read especially dangerous — pings
+// keep it alive every PingEvery, so a read whose supply depends on
+// the expectation under test wedges the whole binary for go test's
+// default ten minutes. Every read like that goes through here.
+func nextRunBounded(t *testing.T, r *bufio.Reader, wait time.Duration) (id string, data []byte) {
+	t.Helper()
+	type frame struct {
+		id   string
+		data []byte
+	}
+	frames := make(chan frame, 1)
+	errs := make(chan error, 1)
+	go func() {
+		for {
+			id, event, data, err := readEvent(r)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if event == "ping" {
+				continue
+			}
+			frames <- frame{id: id, data: data}
+			return
+		}
+	}()
+	select {
+	case f := <-frames:
+		return f.id, f.data
+	case err := <-errs:
+		t.Fatalf("stream: %v", err)
+	case <-time.After(wait):
+		t.Fatalf("no run frame within %v", wait)
+	}
+	return "", nil // unreachable; Fatalf does not return
 }
 
 func mustEnqueue(t *testing.T, rs *RuntimeServer, runtimeID string, cmd Command) Command {
@@ -305,46 +354,76 @@ func TestLostOnDisconnect(t *testing.T) {
 }
 
 // TestResumeWithLastEventID pins the SSE resume: a reconnect carrying
-// Last-Event-ID is re-sent the queued commands after that cursor, and
-// nothing the runtime already saw that is no longer queued.
+// Last-Event-ID is re-sent the still-queued commands after that
+// cursor, and nothing the runtime already saw that is no longer
+// queued. An unacked queued row has two real removers — the ack timer
+// and the disconnect sweep (§10.5) — and which one governs after an
+// unacked delivery plus a disconnect is an ordering race, so the test
+// controls the ordering instead of asserting blind:
+//
+//   - the resume stream is subscribed BEFORE stream 1 dies, so
+//     serveCommands has already replaced the runtime's feed when the
+//     sweep runs and the sweep deterministically no-ops on the stale
+//     feed guard (runtime.go:496) — cmd2 provably reaches the resume
+//     queued and the backlog rule governs. The other ordering (the
+//     sweep winning) is already pinned by TestLostOnDisconnect.
+//   - the ack deadline stays a real timer at New's production scale,
+//     not fastServer's 40 ms: this test pins §10.3's backlog rule,
+//     not the timer (TestLostUnacked owns that one), and no
+//     test-scale step can reach 30 s.
+//
+// Every read whose supply would depend on the expectation above it is
+// bounded, so a wrong expectation fails in seconds instead of wedging
+// on the ping stream.
 func TestResumeWithLastEventID(t *testing.T) {
 	rs := fastServer()
-	// No ack timer: the still-queued row must stay queued until the
-	// resume reads it, whatever the machine's timing (the 40 ms timer
-	// racing the second subscribe is what made this test flake).
-	rs.AckDeadline = 0
+	rs.AckDeadline = 30 * time.Second
 	ts := httptest.NewServer(mux(rs))
 	defer ts.Close()
 	register(t, mux(rs), regBody("rt_resume"))
 
-	// First stream: two commands, both delivered; cmd1 acked, cmd2
-	// left queued (delivery changes nothing — only an ack does); then
-	// the stream dies.
+	// Stream 1: two commands, both delivered; cmd1 acked (the cursor
+	// row), cmd2 left queued — delivery changes nothing, only an ack
+	// does.
 	r1, close1 := subscribe(t, rs, ts.URL, "rt_resume", "")
+	defer close1()
 	cmd1 := mustEnqueue(t, rs, "rt_resume", Command{})
 	cmd2 := mustEnqueue(t, rs, "rt_resume", Command{})
 	id1, _ := nextRun(t, r1)
 	id2, _ := nextRun(t, r1)
-	defer close1()
 	if id1 != cmd1.CommandID || id2 != cmd2.CommandID {
 		t.Fatalf("delivery order = %s, %s", id1, id2)
 	}
 	ack(t, rs, Ack{CommandID: cmd1.CommandID, State: "accepted", RunID: "pg_1"})
-	close1()
+	waitState(t, rs, cmd1.CommandID, StateAccepted)
 
-	// The resume (cursor = cmd1, now accepted, so not re-sent) first
-	// re-delivers the still-queued cmd2: it sits after the cursor and
-	// an unacked command stays queued (the backlog rule §10.3).
+	// The resume — subscribed before stream 1 dies. serveCommands
+	// replaces c.feed and snapshots the backlog under one lock hold
+	// (runtime.go:404-411) before its opening ping reaches the wire,
+	// so once that ping is read the replacement is settled: the later
+	// close1 sweep no-ops on the stale-feed guard instead of racing
+	// the resume for cmd2.
 	r2, close2 := subscribe(t, rs, ts.URL, "rt_resume", cmd1.CommandID)
 	defer close2()
-	if id, _ := nextRun(t, r2); id != cmd2.CommandID {
+	if _, event, _ := nextEvent(t, r2); event != "ping" {
+		t.Fatalf("the resume opened with %q, want the initial ping", event)
+	}
+	close1()
+
+	// The accepted cursor cmd1 is not re-sent (a wrongly re-sent
+	// cursor would sort before cmd2 and be the first frame); the
+	// still-queued cmd2 is re-delivered after it (backlogLocked,
+	// runtime.go:465). Bounded read: a wrong backlog fails within 2 s
+	// instead of wedging on the ping stream.
+	if id, _ := nextRunBounded(t, r2, 2*time.Second); id != cmd2.CommandID {
 		t.Errorf("after resume, first frame = %s, want the still-queued %s", id, cmd2.CommandID)
 	}
 
 	// A command enqueued under the new stream arrives after the
-	// backlog.
+	// backlog — enqueued before the read so this read's supply, too,
+	// never depends on the expectation above it.
 	cmd3 := mustEnqueue(t, rs, "rt_resume", Command{})
-	if id3, _ := nextRun(t, r2); id3 != cmd3.CommandID {
+	if id3, _ := nextRunBounded(t, r2, 2*time.Second); id3 != cmd3.CommandID {
 		t.Errorf("after resume, next frame = %s, want the new command %s", id3, cmd3.CommandID)
 	}
 }

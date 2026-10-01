@@ -988,6 +988,104 @@ func TestPlaygroundForkMode(t *testing.T) {
 	}
 }
 
+// echoPromptModel answers with the conversation's last user message —
+// the observable for §5.1's default: a whole-turn re-run that sends no
+// input must feed the model the ORIGINAL user message, not an empty
+// conversation.
+type echoPromptModel struct{}
+
+func (echoPromptModel) Info() weft.ModelInfo {
+	return weft.ModelInfo{Provider: "wefttest", Name: "echo-prompt"}
+}
+
+func (echoPromptModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	last := ""
+	for _, m := range req.Messages {
+		if m.Role == weft.RoleUser {
+			last = m.Text()
+		}
+	}
+	return func(yield func(weft.ModelEvent, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(nil, err)
+			return
+		}
+		yield(weft.ModelTextDelta{Text: "you asked: " + last}, nil)
+		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+	}
+}
+
+// TestPlaygroundWholeTurnRerunDefaultsInput pins §5.1's rule the step
+// 8b review proved broken live (fix 5): input "replaces the turn's
+// user message" — the original exists by default. A from_step 0
+// command with input null runs the turn on the recorded user message
+// on both engines: live (the model sees the original words; before the
+// fix it was fed an empty conversation) and scripted (the recorded
+// answer replays; before the fix the run failed "no recorded turn").
+func TestPlaygroundWholeTurnRerunDefaultsInput(t *testing.T) {
+	e := newE2E(t)
+	e.agent = weft.New(echoPromptModel{}, weft.Name("acme-support"),
+		weft.Instructions("You are Acme's support agent."),
+		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()))
+	runID := e.appTurn(t, "what is your refund policy?")
+	e.waitTranscript(t, runID, "you asked: what is your refund policy?")
+
+	shutdown := runtime.Install(
+		runtime.Studio(e.ts.URL, ""),
+		runtime.Agents(e.agent),
+		runtime.Enabled(true),
+	)
+	defer shutdown()
+	e.waitRuntime(t)
+	_, rtJSON := e.api(t, http.MethodGet, "/api/runtimes", "")
+	var runtimes struct {
+		Runtimes []struct {
+			ID string `json:"id"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal([]byte(rtJSON), &runtimes); err != nil || len(runtimes.Runtimes) == 0 {
+		t.Fatalf("runtimes: %v %s", err, rtJSON)
+	}
+	rt := runtimes.Runtimes[0].ID
+
+	// Live, input null: the original user message reached the model.
+	live := fmt.Sprintf(`{
+	  "command_id": "cmd_def_1", "runtime": %q, "agent": "acme-support",
+	  "source": {"run_id": %q, "from_step": 0},
+	  "engine": "live", "side_effects": "substitute", "thread": "ephemeral"
+	}`, rt, runID)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", live); code != http.StatusAccepted {
+		t.Fatalf("live no-input re-run = %d %s", code, resp)
+	}
+	row := e.waitCommand(t, "cmd_def_1", "finished")
+	var st struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(row), &st); err != nil || !strings.HasPrefix(st.RunID, "pg_") {
+		t.Fatalf("live finished row = %s", row)
+	}
+	if text := e.commandText(t, st.RunID); text != "you asked: what is your refund policy?" {
+		t.Errorf("live no-input reply = %q, want the model to have seen the original user message", text)
+	}
+
+	// Scripted, input null: the recorded answer replays at zero tokens.
+	scripted := fmt.Sprintf(`{
+	  "command_id": "cmd_def_2", "runtime": %q, "agent": "acme-support",
+	  "source": {"run_id": %q, "from_step": 0},
+	  "engine": "scripted", "side_effects": "substitute", "thread": "ephemeral"
+	}`, rt, runID)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", scripted); code != http.StatusAccepted {
+		t.Fatalf("scripted no-input re-run = %d %s", code, resp)
+	}
+	row = e.waitCommand(t, "cmd_def_2", "finished")
+	if err := json.Unmarshal([]byte(row), &st); err != nil || !strings.HasPrefix(st.RunID, "pg_") {
+		t.Fatalf("scripted finished row = %s", row)
+	}
+	if text := e.commandText(t, st.RunID); text != "you asked: what is your refund policy?" {
+		t.Errorf("scripted no-input reply = %q, want the recorded answer (the run keys on the original user message)", text)
+	}
+}
+
 // TestPlaygroundMatrixBudget is §10.6's P5 gate: a 3×10 matrix runs
 // within its budget cap (30 commands of one experiment, all
 // finished), and the 31st run of that experiment is refused with

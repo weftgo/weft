@@ -477,19 +477,22 @@ func (l *link) runOptions(cmd command, runID string) []weft.RunOption {
 	// repaired by the loop — the edits were validated so Repair has
 	// nothing to synthesize. A fresh command (no source) starts from
 	// the input alone.
+	var msgs []weft.Message
 	if cmd.Source != nil && cmd.Source.RunID != "" {
-		msgs, err := l.sourceTranscript(context.Background(), cmd.Source.RunID)
-		if err != nil {
+		var err error
+		if msgs, err = l.sourceTranscript(context.Background(), cmd.Source.RunID); err != nil {
 			slog.Warn("weft/runtime: source transcript unresolved; running without it",
 				"run_id", cmd.Source.RunID, "err", err)
+			msgs = nil
 		} else if len(cmd.TranscriptEdits) > 0 {
-			patched, err := applyTranscriptEdits(msgs, cmd.Source.FromStep, cmd.TranscriptEdits)
-			if err != nil {
+			patched, perr := applyTranscriptEdits(msgs, cmd.Source.FromStep, cmd.TranscriptEdits)
+			if perr != nil {
 				// Studio validated the same edits against its own copy
 				// (§10.4); this copy disagrees — refuse rather than run
 				// on a transcript nobody wrote.
 				slog.Warn("weft/runtime: transcript edits rejected against the runtime's copy",
-					"run_id", cmd.Source.RunID, "err", err)
+					"run_id", cmd.Source.RunID, "err", perr)
+				msgs = nil
 			} else if cut := len(patched); cut > 0 {
 				opts = append(opts, weft.Messages(patched...))
 			}
@@ -499,9 +502,31 @@ func (l *link) runOptions(cmd command, runID string) []weft.RunOption {
 	}
 	if cmd.Input != nil && *cmd.Input != "" {
 		opts = append(opts, weft.Prompt(*cmd.Input))
+	} else if cmd.Source != nil && cmd.Source.RunID != "" && cmd.Source.FromStep == 0 {
+		// §5.1 (step 8b review fix 5): input "replaces the turn's user
+		// message" — the original exists by default. A whole-turn
+		// re-run that sends no input runs the turn on the words the
+		// user actually sent (both engines); before this it fed the
+		// model an empty conversation.
+		if prompt := firstUserMessage(msgs); prompt != "" {
+			opts = append(opts, weft.Prompt(prompt))
+		}
 	}
 	opts = append(opts, weft.RunID(runID))
 	return opts
+}
+
+// firstUserMessage lifts the transcript's opening user message — the
+// turn's own input, the default a whole-turn re-run replays (§5.1).
+// Steered messages later in the turn are not turn openers; the first
+// user message is.
+func firstUserMessage(msgs []weft.Message) string {
+	for _, m := range msgs {
+		if m.Role == weft.RoleUser {
+			return m.Text()
+		}
+	}
+	return ""
 }
 
 // overrideOptions is the command's shaping alone — every knob §5.2

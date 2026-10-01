@@ -1,15 +1,15 @@
 package thread
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
+	"log/slog"
 	"slices"
-	"strings"
 	"sync"
+
+	"github.com/weftgo/weft/thread/internal/rules"
 )
 
 // memStorage is the in-process Storage behind Memory: a map of
@@ -27,7 +27,28 @@ type memStorage struct {
 
 type memSession struct {
 	header Header
-	buf    []byte // the encoded entry lines, exactly as the file would hold them
+	// rawHeader, when set, is a first line threadtest injected verbatim
+	// (InjectHeader): it is decoded on every read, the way a file's
+	// first line is, so a header this build cannot read is loud here
+	// too.
+	rawHeader []byte
+	buf       []byte // the encoded entry lines, exactly as the file would hold them
+}
+
+// head decodes the session's header the way a durable backend reads a
+// first line: the stored value for a session Create made, the injected
+// bytes otherwise.
+func (s memSession) head() (Header, error) {
+	if s.rawHeader == nil {
+		h := s.header
+		h.Meta = rules.CloneMeta(h.Meta)
+		return h, nil
+	}
+	var h Header
+	if err := json.Unmarshal(s.rawHeader, &h); err != nil {
+		return Header{}, err
+	}
+	return h, nil
 }
 
 // Memory returns a ready-to-use in-process session storage: sessions
@@ -35,7 +56,10 @@ type memSession struct {
 // examples, and as the reference behaviour the durable backends are
 // compared against — every backend runs the same threadtest table,
 // corruption rows included (Memory implements the table's
-// threadtest.RawInjector hook by holding the raw bytes).
+// threadtest.RawInjector hooks by holding the raw bytes). There is no
+// second writer to refuse — one map, one process — so Memory never
+// answers ErrLocked, and its Release (the Releaser capability) only
+// checks that the session exists.
 func Memory() Storage { return &memStorage{sessions: map[string]memSession{}} }
 
 // Create validates the header — one path component of an id, the
@@ -63,25 +87,19 @@ func (m *memStorage) Create(ctx context.Context, h Header) error {
 	if _, ok := m.sessions[h.ID]; ok {
 		return fmt.Errorf("%w: %s", ErrExists, h.ID)
 	}
-	h.Meta = cloneMeta(h.Meta)
+	h.Meta = rules.CloneMeta(h.Meta)
 	m.sessions[h.ID] = memSession{header: h}
 	return nil
 }
 
 // Append encodes the batch — all of it or none — and appends the lines
-// as one write to the session's bytes.
+// as one write to the session's bytes. A torn tail the bytes end in
+// (only threadtest's Inject can leave one here) is removed first and
+// logged, the writer's repair every backend performs: new lines never
+// join a half-written one.
 func (m *memStorage) Append(ctx context.Context, session string, entries ...Entry) error {
 	if err := ctx.Err(); err != nil {
 		return err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	s, ok := m.sessions[session]
-	if !ok {
-		return fmtNotFound(session)
-	}
-	if len(entries) == 0 {
-		return nil
 	}
 	var buf []byte
 	for i, e := range entries {
@@ -91,6 +109,23 @@ func (m *memStorage) Append(ctx context.Context, session string, entries ...Entr
 		}
 		buf = append(buf, line...)
 		buf = append(buf, '\n')
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[session]
+	if !ok {
+		return fmtNotFound(session)
+	}
+	if len(buf) == 0 {
+		return nil
+	}
+	if rules.Torn(s.buf) {
+		keep := rules.CompleteLen(s.buf)
+		slog.Default().Warn("thread: removed a torn tail before appending",
+			"session", session, "dropped_bytes", len(s.buf)-keep)
+		// Clipped, so the append below reallocates: a concurrent Load's
+		// snapshot of the old array is never overwritten.
+		s.buf = slices.Clip(s.buf[:keep])
 	}
 	s.buf = append(s.buf, buf...)
 	m.sessions[session] = s
@@ -114,13 +149,24 @@ func (m *memStorage) Load(ctx context.Context, session string) (Header, []Entry,
 	m.mu.Lock()
 	s, ok := m.sessions[session]
 	m.mu.Unlock()
+	// The stored bytes are append-only as an array: Append's repair
+	// clips before it appends, so a tail is never overwritten in place
+	// and this snapshot needs no copy.
+	raw := s.buf
 	if !ok {
 		return Header{}, nil, nil, fmtNotFound(session)
 	}
-	lines := splitEntryLines(s.buf)
+	h, err := s.head()
+	if err != nil {
+		if errors.Is(err, ErrNewerFormat) {
+			return Header{}, nil, nil, err
+		}
+		return Header{}, nil, nil, &CorruptError{Session: session, Line: 1, Err: err}
+	}
+	lines := rules.SplitLines(raw)
 	entries := make([]Entry, 0, len(lines))
 	var report *LoadReport
-	if rawTorn(s.buf) {
+	if rules.Torn(raw) {
 		report = &LoadReport{Torn: len(lines) + 2} // the header is line 1
 	}
 	for i, line := range lines {
@@ -134,69 +180,50 @@ func (m *memStorage) Load(ctx context.Context, session string) (Header, []Entry,
 		}
 		return Header{}, nil, nil, &CorruptError{Session: session, Line: i + 2, Err: err}
 	}
-	h := s.header
-	h.Meta = cloneMeta(h.Meta)
 	return h, entries, report, nil
 }
 
 // List pages the headers newest first, without the entries — the one
 // exception being a TitleSearch, which reads the info entries to know
 // the current title (Query.TitleSearch's rule): opt-in by the query,
-// paid by the sessions whose header already matched.
+// paid by the sessions whose header already matched. A session whose
+// header does not decode (threadtest's InjectHeader) is skipped, as a
+// durable backend skips a first line it cannot read.
 func (m *memStorage) List(ctx context.Context, q Query) (Page, error) {
 	if err := ctx.Err(); err != nil {
 		return Page{}, err
 	}
 	m.mu.Lock()
-	type row struct {
-		h     Header
-		title string
-	}
-	rows := make([]row, 0, len(m.sessions))
+	headers := make([]Header, 0, len(m.sessions))
 	for _, s := range m.sessions {
-		if !metaMatch(s.header.Meta, q.Meta) {
+		h, err := s.head()
+		if err != nil || !rules.MetaMatch(h.Meta, q.Meta) {
 			continue
 		}
-		r := row{h: s.header}
-		if q.TitleSearch != "" {
-			r.title = titleOf(s.buf)
-		}
-		rows = append(rows, r)
-	}
-	headers := make([]Header, 0, len(rows))
-	for _, r := range rows {
-		if q.TitleSearch != "" && !titleMatches(r.title, q.TitleSearch) {
+		if q.TitleSearch != "" && !rules.TitleMatches(rules.TitleOf(rules.SplitLines(s.buf)), q.TitleSearch) {
 			continue
 		}
-		headers = append(headers, r.h)
+		headers = append(headers, h)
 	}
 	m.mu.Unlock()
 	total := len(headers)
 
 	// Newest first; the id tiebreak keeps the order deterministic when
-	// two sessions share a creation time.
+	// two sessions share a creation time, and is what the (Before,
+	// BeforeID) cursor walks.
 	slices.SortFunc(headers, func(a, b Header) int {
-		if c := b.Created.Compare(a.Created); c != 0 {
-			return c
-		}
-		return strings.Compare(b.ID, a.ID)
+		return rules.CompareNewestFirst(a.Created, a.ID, b.Created, b.ID)
 	})
-	start := 0
-	if !q.Before.IsZero() {
-		start = len(headers)
-		for i, h := range headers {
-			if h.Created.Before(q.Before) {
-				start = i
-				break
-			}
+	start := len(headers)
+	for i, h := range headers {
+		if rules.AfterCursor(h.Created, h.ID, q.Before, q.BeforeID) {
+			start = i
+			break
 		}
 	}
 	page := headers[start:]
-	if n := limitOf(q.Limit); len(page) > n {
+	if n := rules.LimitOf(q.Limit); len(page) > n {
 		page = page[:n]
-	}
-	for i := range page {
-		page[i].Meta = cloneMeta(page[i].Meta)
 	}
 	return Page{Sessions: page, Total: total}, nil
 }
@@ -212,6 +239,22 @@ func (m *memStorage) Delete(ctx context.Context, session string) error {
 		return fmtNotFound(session)
 	}
 	delete(m.sessions, session)
+	return nil
+}
+
+// Release is the Releaser capability on a backend with no lock to let
+// go of: it answers whether the session exists (ErrNotFound when not)
+// and otherwise has nothing to do, so a caller releasing at close gets
+// the same answers from every backend.
+func (m *memStorage) Release(ctx context.Context, session string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[session]; !ok {
+		return fmtNotFound(session)
+	}
 	return nil
 }
 
@@ -234,39 +277,21 @@ func (m *memStorage) Inject(ctx context.Context, session string, data []byte) er
 	return nil
 }
 
-// metaMatch reports whether meta holds every pair of want, exactly —
-// the Query.Meta rule, shared by every backend's shape of it (the
-// conformance table pins them to one answer).
-func metaMatch(meta, want map[string]string) bool {
-	for k, v := range want {
-		if meta == nil || meta[k] != v {
-			return false
-		}
+// InjectHeader creates a session whose first line is the given bytes,
+// verbatim — the threadtest.RawHeaderInjector hook, the way a newer or
+// broken writer would have left a header. An existing session fails
+// with ErrExists.
+func (m *memStorage) InjectHeader(ctx context.Context, session string, line []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	return true
-}
-
-// titleOf returns the session's current title from its entry lines —
-// the last info entry's Title, empty when none was ever written.
-func titleOf(buf []byte) string {
-	title := ""
-	for _, line := range splitEntryLines(buf) {
-		var head struct {
-			Type  string `json:"type"`
-			Title string `json:"title"`
-		}
-		if json.Unmarshal(line, &head) == nil && head.Type == "info" {
-			title = head.Title
-		}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[session]; ok {
+		return fmt.Errorf("%w: %s", ErrExists, session)
 	}
-	return title
-}
-
-// titleMatches reports whether the title contains the search, folding
-// case — the Query.TitleSearch rule, shared by every backend's shape
-// of it.
-func titleMatches(title, search string) bool {
-	return strings.Contains(strings.ToLower(title), strings.ToLower(search))
+	m.sessions[session] = memSession{rawHeader: slices.Clone(line)}
+	return nil
 }
 
 // fmtNotFound names the session in the ErrNotFound wrap, the shape
@@ -278,28 +303,5 @@ func fmtNotFound(id string) error {
 // cloneMeta copies a metadata map so a header never aliases the
 // caller's.
 func cloneMeta(kv map[string]string) map[string]string {
-	if len(kv) == 0 {
-		return nil
-	}
-	return maps.Clone(kv)
-}
-
-// splitEntryLines and rawTorn are the line rules a session file's
-// bytes obey, duplicated from jsonl the way the backends duplicate
-// limitOf: the conformance table pins both copies to the same rule.
-func splitEntryLines(b []byte) [][]byte {
-	var lines [][]byte
-	for len(b) > 0 {
-		i := bytes.IndexByte(b, '\n')
-		if i < 0 {
-			break
-		}
-		lines = append(lines, b[:i])
-		b = b[i+1:]
-	}
-	return lines
-}
-
-func rawTorn(b []byte) bool {
-	return len(b) > 0 && b[len(b)-1] != '\n'
+	return rules.CloneMeta(kv)
 }

@@ -6,7 +6,8 @@ import (
 )
 
 // Storage is a session backend: Memory in process, jsonl on disk,
-// sqlite later — all running the threadtest conformance table.
+// sqlite in one database file (its own module) — all running the
+// threadtest conformance table.
 // Implementations must be safe for concurrent use: one writer per
 // session is the policy (ADR 0011 §5), and readers may read at any
 // time. context.Context comes first in every signature; a canceled
@@ -21,11 +22,18 @@ type Storage interface {
 	Create(ctx context.Context, h Header) error
 
 	// Append adds entries to a session in arrival order, after the
-	// entries it already holds. Appending several entries is atomic —
-	// all or none become visible: they are validated (an entry must
-	// encode) before anything is written, and a backend that cannot
-	// write the whole batch writes none of it. Appending to a session
-	// the storage does not hold fails with ErrNotFound.
+	// entries it already holds. A batch is validated whole — every
+	// entry must encode — before anything is written, and is atomic
+	// against the writer's death: after a crash, a later Load returns
+	// all of the batch or none of it, never a prefix that decodes as
+	// fewer entries. What it is not is isolated from a reader in
+	// another process on a file backend: such a reader can catch the
+	// write in flight and see a torn final line, which Load drops and
+	// reports (LoadReport.Torn) and Watch waits out. A writer that
+	// finds a torn tail left by a crashed predecessor removes it before
+	// its first append, so new entries never join a dead writer's
+	// half-line. Appending to a session the storage does not hold fails
+	// with ErrNotFound; one another writer holds, with ErrLocked.
 	Append(ctx context.Context, session string, entries ...Entry) error
 
 	// Load returns a session's header and every entry in append order,
@@ -54,13 +62,12 @@ type Storage interface {
 // session — a repair is never silent (ADR 0011 §5). A clean load
 // returns a nil report.
 type LoadReport struct {
-	// Torn is the 1-based line number of a torn final line dropped
-	// from the session file — a writer cut mid-write, so the bytes
-	// after the last complete newline are not an entry — or 0 when
-	// the file ended cleanly.
+	// Torn is the 1-based line number of the incomplete final line the
+	// load dropped — bytes after the last newline, left by a writer cut
+	// mid-write — or 0 when the session ended on a complete line.
 	Torn int
 	// Skipped lists the 1-based line numbers of malformed lines the
-	// load skipped under Salvage (the jsonl open option), in file
+	// load skipped under Salvage (the open option), in file
 	// order. Without Salvage, a malformed line fails the load with
 	// ErrCorrupt instead.
 	Skipped []int
@@ -69,32 +76,38 @@ type LoadReport struct {
 // Query selects sessions for List. The zero value lists every session,
 // newest first, 50 at a time.
 type Query struct {
-	// Before is the paging cursor: only sessions created strictly
-	// before it are returned; zero means start at the newest. Offsets
-	// are deliberately absent — they drift under concurrent inserts
-	// (the store's rule, ADR 0010 §0.1, inherited here). Sessions
-	// sharing a Created time are ordered by id, so pages are
-	// deterministic; a cursor that lands inside such a group needs the
-	// last page's ids as well — callers paging through distinct times,
-	// the normal shape, never see the seam.
-	Before time.Time
-	// Limit caps the page: 0 means 50, values above 500 clamp.
+	// Before and BeforeID are the paging cursor, a keyset over List's
+	// own order (Created descending, ties by ID descending): pass the
+	// last session of the previous page — its Created as Before, its
+	// ID as BeforeID — and the next page starts right after it, however
+	// many sessions share that creation time. A zero Before means start
+	// at the newest (BeforeID is then ignored). Before alone, with an
+	// empty BeforeID, returns only sessions created strictly before it:
+	// correct when creation times are distinct, but it skips the rest
+	// of a group of sessions sharing the cursor's time — set BeforeID
+	// to walk through ties. Offsets are deliberately absent: they drift
+	// under concurrent inserts (ADR 0010 §0.1's rule, inherited here).
+	Before   time.Time
+	BeforeID string
+	// Limit caps the page: 0 means 50, a negative value reads as 0
+	// (50), and values above 500 clamp to 500.
 	Limit int
-	// Meta filters by session metadata: every key must match its value
-	// exactly. A session matches when its header's create-time Meta
-	// holds every pair — what WithMeta (and PublicID, its sugar) set at
-	// Create, which Load returns as is. No backend merges the info
+	// Meta filters by session metadata: every key must be present and
+	// match its value exactly. A session matches when its header's
+	// create-time Meta holds every pair — what WithMeta (and PublicID,
+	// its sugar) set at Create, which Load returns as is. No backend merges the info
 	// entries' Meta into this view (that merged view is Session.Meta's,
 	// the runs' runMetadata), so a key a later SetInfo added never
 	// matches here. Backends answer this from the header alone — the
 	// cheap path; the title filter below is the one that can cost more.
 	Meta map[string]string
 	// TitleSearch filters by the session's current title — the last
-	// info entry's Title — matching case-insensitively as a substring.
-	// A title is entry state, not header state, so this filter is the
-	// one shape of List that may read beyond headers (a backend scans
-	// the session's info entries): opt-in by the query, priced
-	// accordingly, and never paid by a query without it.
+	// info entry carrying a non-empty Title, what Session.Title
+	// returns — matching case-insensitively as a substring. A title is
+	// entry state, not header state, so this filter is the one shape of
+	// List that may read beyond headers (a backend without a title
+	// column scans the session's info entries): opt-in by the query,
+	// priced accordingly, and never paid by a query without it.
 	TitleSearch string
 }
 
@@ -103,21 +116,8 @@ type Page struct {
 	// Sessions is the page, newest first by Created (ties by id,
 	// descending), headers only — Load returns the entries.
 	Sessions []Header
-	// Total is the number of sessions matching the query, ignoring
-	// Before and Limit — the "how many pages are there" number.
+	// Total is the number of sessions matching the query's filters,
+	// ignoring the cursor (Before, BeforeID) and Limit — the "how many
+	// pages are there" number.
 	Total int
-}
-
-// limitOf normalizes Query.Limit: 0 means the default 50, values above
-// 500 clamp, negatives read as the default — the store's paging rule,
-// kept identical so backends cannot disagree.
-func limitOf(n int) int {
-	switch {
-	case n <= 0:
-		return 50
-	case n > 500:
-		return 500
-	default:
-		return n
-	}
 }

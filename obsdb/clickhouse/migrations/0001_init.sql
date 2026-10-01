@@ -14,9 +14,10 @@
 -- engines, the TTLs and the materialized weft columns, and a stock
 -- collector pinned to v0.162.0 can write into these tables (the
 -- collector-shape test inserts with its exact column lists). The
--- collector's optional *AttributesKeys columns are not created, so a
--- pinned collector detects them absent and omits them, as it does for
--- its own older tables.
+-- exporter's optional *AttributesKeys columns are not created
+-- because its default INSERT never names them — they exist only in
+-- its json-mode table variants (logs_json_table.sql and friends) —
+-- so their absence here is safe.
 --
 -- TTLs are the S3.6 defaults: content (otel_logs, weft_records,
 -- weft_deltas) 30 days, spans and runs 90 days; clickhouse.TTL(...)

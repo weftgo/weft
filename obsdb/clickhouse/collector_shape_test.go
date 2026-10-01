@@ -22,12 +22,14 @@ import (
 // test renders it the same way. The logs template is
 // `{{ident .Database}}.{{ident .TableName}}` with a
 // {{.FeatureColumnNames}}/{{.FeatureColumnPositions}} pair the exporter
-// fills after probing the table with DESC TABLE: EventName is probed
-// (ours exists, so it is included — exporter_logs.go's
-// logsColumnEventName), the *AttributesKeys columns are probed (ours
-// do not exist, so a pinned collector omits them, exactly as it does
-// for its own older tables). The values follow the append order of
-// exporter_traces.go and exporter_logs.go at the same tag.
+// fills after probing the table with DESC TABLE: EventName is the one
+// feature column it probes for (exporter_logs.go's
+// detectSchemaFeatures; ours exists, so it is included). The
+// *AttributesKeys columns are neither created nor named by the
+// default INSERT — they exist only in the exporter's json-mode
+// tables — so their absence here is safe. The values follow the
+// append order of exporter_traces.go and exporter_logs.go at the same
+// tag.
 
 const collectorTracesInsert = `INSERT INTO %q.%q (
     Timestamp,

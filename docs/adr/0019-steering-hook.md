@@ -169,3 +169,76 @@ explicitly (ADR 0011, pool milestone).
 - **Stop and restart from the session** — splits run identity, budgets
   and traces, and demotes late steers silently. Kept only as the
   fallback a caller on an older core can build.
+
+## Amendment 2026-10-01 — what a steer's receipt says, in `weft/thread`
+
+The core mechanism above is unchanged. This amendment records how
+`weft/thread` reports a steer's fate, where §5 and the Consequences
+left it to "the session".
+
+**Every end has a name.** A Send under the Steer policy returns a
+`Turn` that is the message's receipt. Its `Wait` used to return
+`nil, nil` for three different ends, and `Next` was nil for two of
+them. `Turn.Outcome()` now tells them apart, and the receipt entry
+records the same thing durably:
+
+| The steer… | `Turn.Outcome()` | `Turn.Wait()` | `Turn.Next()` | Receipt entry |
+|---|---|---|---|---|
+| was drained by the running run (§2, points 2–3) | `TurnDelivered` | `nil, nil` | nil | `delivered`, `run_id` |
+| met a non-drain exit — pending approvals, `StopWhen`, or a run that ended before its drain (§2, points 1 and 4) | `TurnDeferred` | `nil, nil` | the follow-up turn | `deferred`, `turn` |
+| was removed by `ClearQueue` before delivery | `TurnDropped` | `nil`, an error wrapping `thread.ErrDropped` | nil | `dropped` |
+
+The outcomes of a turn with a run of its own (`TurnAnswered`,
+`TurnParked`, `TurnFailed`, `TurnCanceled`) and the not-yet-ended
+`TurnRunning` complete the set; they are ADR 0011 §4's.
+
+**Delivered but unanswered (§5).** §5 promises that a steer delivered
+into a run that then fails — the continuation guard, a model error, a
+cancellation — is "delivered but unanswered", and that the session
+reports it on the receipt. It does now: the `delivered` receipt entry
+carries `unanswered: true` when the run recorded no completed model
+step after the step whose drain delivered the message. The steer's
+`Turn` still ends `TurnDelivered` — the message is in that run's
+recorded transcript, so the next turn's model sees it — and the field
+is what tells an application that no reply to it exists. The field is
+additive (`omitempty`, the receipt kind stays at `"v":3`).
+
+**A deferred steer's follow-up is durable.** The follow-up turn a
+deferred steer becomes is a queued send, and a queued send is durable
+at acceptance (ADR 0011 §4, amended the same day): the `deferred`
+receipt and the follow-up's `accepted` receipt land in one atomic
+append. A writer that stops between the deferral and the follow-up's
+turn loses nothing; `Open` restores the follow-up to the queue.
+
+**A steer on an idle session runs as a plain turn.** Steering is what a
+Send does *when the session is busy*. With no turn in flight and no
+approval boundary open there is nothing to steer into: the Send
+appends its prompt and runs, exactly as under `Queue`, and its `Turn`
+is that run's handle (`TurnAnswered`, a result from `Wait`). The same
+holds in the window between a turn's end and the session's
+between-turn housekeeping: the Send is accepted and runs next. The
+turn entry records the policy the Send was called under
+(`TurnEntry.Policy` — `"steer"` here, and on a deferred steer's
+follow-up), so the difference is on the record even though the
+behaviour is a plain turn's.
+
+**Run options.** A steer's run options do not apply to the run that
+drains it — the message joins another turn's run, under that run's
+options. They apply to the follow-up turn when the steer defers.
+
+**The live steer queue is unbounded.** Each accepted steer costs one
+durable receipt entry and stays queued until a drain point, the turn's
+end, or `ClearQueue` takes it; the session does not cap how many may
+wait. `Session.Queue()` lists them (and the queued sends behind them),
+so an application that must bound what a user can pile onto a running
+turn checks its length before sending. A `MaxQueue` option was
+considered and left out: the right bound, and what to do at it (reject,
+drop the oldest, coalesce), is product policy, and one more
+`ErrBusy`-shaped path is not free.
+
+**Errors.** A steered message with a role other than `RoleUser` is
+refused by `Send` with an error wrapping `weft.ErrInvalidSteer` — the
+same sentinel the loop raises for a source that returns one — before
+any receipt is written. `weft.Steering` passed through
+`thread.RunOptions` is refused with `weft.ErrInvalidRunOption`: the
+session owns the steering source of every run it starts.

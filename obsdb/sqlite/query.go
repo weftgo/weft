@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -380,23 +381,71 @@ func (d *DB) querySpans(ctx context.Context, where string, arg any) ([]obsdb.Spa
 		}
 		s.Start, s.End = time.Unix(0, start).UTC(), time.Unix(0, end).UTC()
 		if attrs != "" && attrs != "null" {
-			if err := json.Unmarshal([]byte(attrs), &s.Attrs); err != nil {
+			if err := unmarshalAttrs([]byte(attrs), &s.Attrs); err != nil {
 				return nil, fmt.Errorf("sqlite: span %s attrs: %w", s.SpanID, err)
 			}
 		}
 		if resource != "" && resource != "null" {
-			if err := json.Unmarshal([]byte(resource), &s.Resource); err != nil {
+			if err := unmarshalAttrs([]byte(resource), &s.Resource); err != nil {
 				return nil, fmt.Errorf("sqlite: span %s resource: %w", s.SpanID, err)
 			}
 		}
 		if events != "" && events != "[]" && events != "null" {
-			if err := json.Unmarshal([]byte(events), &s.Events); err != nil {
+			if err := unmarshalAttrs([]byte(events), &s.Events); err != nil {
 				return nil, fmt.Errorf("sqlite: span %s events: %w", s.SpanID, err)
 			}
 		}
 		out = append(out, s)
 	}
 	return out, rs.Err()
+}
+
+// unmarshalAttrs decodes a JSON column keeping integral numbers as
+// int64, so a stored attribute map equals the OTLP-decoded one (plain
+// json.Unmarshal would turn every number into float64).
+func unmarshalAttrs(b []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	normalizeNumbers(v)
+	return nil
+}
+
+func normalizeNumbers(v any) {
+	switch x := v.(type) {
+	case *map[string]any:
+		for k, e := range *x {
+			(*x)[k] = normalized(e)
+		}
+	case *[]obsdb.SpanEvent:
+		for i := range *x {
+			normalizeNumbers(&(*x)[i].Attrs)
+		}
+	}
+}
+
+func normalized(v any) any {
+	switch x := v.(type) {
+	case json.Number:
+		if i, err := x.Int64(); err == nil {
+			return i
+		}
+		f, _ := x.Float64()
+		return f
+	case map[string]any:
+		for k, e := range x {
+			x[k] = normalized(e)
+		}
+		return x
+	case []any:
+		for i := range x {
+			x[i] = normalized(x[i])
+		}
+		return x
+	}
+	return v
 }
 
 func (d *DB) runExists(ctx context.Context, runID string) error {

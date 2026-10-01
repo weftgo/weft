@@ -76,18 +76,15 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) error {
 			}
 		case "delta":
 			if d.keepDeltasOn() {
-				inserted, err := insertRecord(ctx, tx, r, w)
-				if err != nil {
+				if _, err := insertRecord(ctx, tx, r, w); err != nil {
 					return err
 				}
-				if inserted {
-					u.count("delta", 1)
-				}
-			} else {
-				// Counted, never kept (Q4): the count is the streaming
-				// volume signal, so it counts arrivals.
-				u.count("delta", 1)
 			}
+			// Counted, never kept (Q4). The count is a high-water mark
+			// over the delta counter — positions 0..max seen — so a
+			// retried batch cannot inflate it, the same protection the
+			// row counts get from INSERT OR IGNORE.
+			u.markDelta(w.Pos)
 		case "heartbeat":
 			// Never a row: no position, so the (run, kind, pos) key
 			// could not hold it anyway. It moves last_seen only, which
@@ -268,6 +265,14 @@ func (u *runUpdate) count(kind string, n int64) {
 		u.deltaCount += n
 	case "messages":
 		u.messageCount += n
+	}
+}
+
+// markDelta raises the delta high-water mark: the count is one past the
+// highest delta position seen, retry-proof.
+func (u *runUpdate) markDelta(pos int64) {
+	if hw := pos + 1; hw > u.deltaCount {
+		u.deltaCount = hw
 	}
 }
 
@@ -583,7 +588,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		started_ns = ?, finished_ns = ?, last_seen_ns = ?, finished_ok = ?, failed = ?, err = ?,
 		steps = ?, pending = ?, stop_reason = ?,
 		input_tokens = ?, output_tokens = ?, cached_input_tokens = ?, cache_write_tokens = ?, reasoning_tokens = ?,
-		event_count = event_count + ?, delta_count = delta_count + ?, message_count = message_count + ?
+		event_count = event_count + ?, delta_count = MAX(delta_count, ?), message_count = message_count + ?
 		WHERE run_id = ?`,
 		coalesce(ex.parentRun, u.parentRunID), coalesce(ex.parentC, u.parentCallID),
 		coalesce(ex.traceID, u.traceID), coalesce(ex.agent, u.agent),

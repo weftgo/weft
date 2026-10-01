@@ -288,6 +288,16 @@ func (s *Session) Compact(ctx context.Context, opts ...CompactOption) error {
 // turn's housekeeping), and no approval boundary open — a parked tail
 // must stay raw for its decisions to resolve. Callers hold s.mu.
 func (s *Session) compactGateLocked(runner bool) error {
+	// A closed session compacts nothing, and says so before a summary
+	// is paid for: a caller's compaction stops at Close, the runner's
+	// own stops once the session can no longer be written.
+	if runner {
+		if err := s.writableLocked(); err != nil {
+			return err
+		}
+	} else if err := s.admitLocked(); err != nil {
+		return err
+	}
 	if !runner && s.running && s.inFlight != nil {
 		return fmt.Errorf("%w: session %s is running a turn; compact between turns", ErrBusy, s.header.ID)
 	}

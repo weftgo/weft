@@ -326,9 +326,8 @@ Still open, known, documented:
   one pool owns a storage's delegations.
 - `examples/refund-plan` (untracked in the maintainer's checkout) is
   neither committed nor removed.
-- The sentinel table test the closing pass planned
-  (`TestSentinelsAreMatchable`) was not written; the sentinels are
-  pinned per feature by their own `errors.Is` tests.
+- `Session.Request` without a keyring fails with a plain error (no
+  sentinel) before any other check.
 
 Closed by the final code pass (lane `tfix/final`):
 
@@ -351,6 +350,7 @@ Closed by the final code pass (lane `tfix/final`):
 | `sqlite.BreakLock` | `effcb31` |
 | Internal path reads no longer deep-copy the transcript | `6cf8e43` |
 | Comments describe behaviour, not plan steps | `36108b1` |
+| `TestSentinelsAreMatchable` (thread: 31 sentinels; pool: 7), and a closed session refuses `Compact` before any work | the closing commit |
 
 Before a release: maintainer review, merge to `main`, the two-phase
 tags (root first), and a re-run of the `-race -count=10` soak and the

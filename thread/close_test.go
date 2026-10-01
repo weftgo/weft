@@ -558,3 +558,20 @@ func TestCloseContextEndDuringResume(t *testing.T) {
 		t.Errorf("model calls after a late Resume = %d, want 1", n)
 	}
 }
+
+// A closed session refuses a compaction up front — before the
+// nothing-to-compact answer, and before a summary model call is paid
+// for (the script holds no turn: a model call would fail otherwise).
+func TestCompactAfterCloseIsClosedBeforeAnyWork(t *testing.T) {
+	ctx := context.Background()
+	s, err := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Compact(ctx); !errors.Is(err, thread.ErrClosed) {
+		t.Fatalf("Compact after Close = %v, want ErrClosed", err)
+	}
+}

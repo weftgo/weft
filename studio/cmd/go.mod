@@ -2,19 +2,15 @@ module github.com/weftgo/weft/studio/cmd
 
 go 1.26.0
 
-// The studio library and the hosted backend are resolved through the
-// workspace while studio and obsdb release together (step 8's release
-// tags them and the release step drops these lines). The clickhouse
-// driver arrives only here: this module is the one place that imports
-// obsdb/clickhouse, so the studio library never carries it.
-replace github.com/weftgo/weft/obsdb => ../../obsdb
-
-replace github.com/weftgo/weft/obsdb/clickhouse => ../../obsdb/clickhouse
-
+// Studio, obsdb and the ClickHouse backend are pinned to their
+// released tags (resolved from the module proxy, no replace — the
+// two-phase rule, ADR 0005). The clickhouse driver arrives only
+// here: this module is the one place that imports obsdb/clickhouse,
+// so the studio library never carries it.
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
-	github.com/weftgo/weft/obsdb/clickhouse v0.0.0-00010101000000-000000000000
-	github.com/weftgo/weft/studio v0.0.0
+	github.com/weftgo/weft/obsdb/clickhouse v0.1.0
+	github.com/weftgo/weft/studio v0.3.0
 )
 
 require (
@@ -37,7 +33,7 @@ require (
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/weftgo/weft v0.6.0 // indirect
-	github.com/weftgo/weft/obsdb v0.0.0-00010101000000-000000000000 // indirect
+	github.com/weftgo/weft/obsdb v0.1.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.46.0 // indirect
 	go.opentelemetry.io/otel/log v0.22.0 // indirect
@@ -56,5 +52,3 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 	modernc.org/sqlite v1.60.1 // indirect
 )
-
-replace github.com/weftgo/weft/studio => ..

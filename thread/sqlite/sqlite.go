@@ -30,8 +30,9 @@
 // holder's process token and start time, so a restarted process that
 // wears its predecessor's pid (a container's PID 1) takes its own
 // sessions back, and an unrelated process wearing a dead holder's pid
-// does not keep them locked. Readers never lock — Load and List always
-// work. Between Sessions sharing one Storage the same rule is the
+// does not keep them locked. A holder on another host is never judged
+// from here: its row stands until it releases or an operator removes
+// it (BreakLock). Readers never lock — Load and List always work. Between Sessions sharing one Storage the same rule is the
 // lease (the thread.Leaser capability): the instance remembers which
 // writer has the row it took.
 package sqlite
@@ -1075,7 +1076,10 @@ func (b *backend) insertLock(ctx context.Context, tx *sql.Tx, id string) error {
 //   - Ours (this instance wrote it): proceed.
 //   - A holder on another host cannot be judged dead from here, so it
 //     is ErrLocked: a database on a shared filesystem is outside
-//     SQLite's supported envelope, and the lock refuses to guess.
+//     SQLite's supported envelope, and the lock refuses to guess. A
+//     row a host that no longer exists left behind — a replaced
+//     container, a restored backup — is an operator's to remove
+//     (BreakLock).
 //   - The holder's process token is this process's: another Storage in
 //     this very process, exactly as alive as we are — ErrLocked.
 //   - The holder's pid is ours but its process token is not: a pid
@@ -1089,6 +1093,13 @@ func (b *backend) insertLock(ctx context.Context, tx *sql.Tx, id string) error {
 //     Otherwise the holder is alive, or cannot be told from alive:
 //     ErrLocked, the safe side.
 //
+// An instance that already holds the session still reads the row: it
+// must name this instance. A row that is gone, or another writer's,
+// means the lock was broken under it (BreakLock) — the hold is
+// forgotten and the write refused with ErrLocked, so a holder an
+// operator wrongly took for dead finds out at its next write instead
+// of writing beside the session's new writer.
+//
 // What acquire did beyond checking is returned for the caller to
 // record after its transaction commits.
 func (b *backend) acquire(ctx context.Context, tx *sql.Tx, id string) (wrote, error) {
@@ -1096,7 +1107,18 @@ func (b *backend) acquire(ctx context.Context, tx *sql.Tx, id string) (wrote, er
 	held := b.held[id] != nil
 	b.mu.Unlock()
 	if held {
-		return wrote{}, nil // this instance already holds the row
+		var owner string
+		err := tx.QueryRowContext(ctx, `SELECT owner FROM session_locks WHERE session = ?`, id).Scan(&owner)
+		switch {
+		case err == nil && owner == b.owner:
+			return wrote{}, nil // this instance holds the row
+		case err != nil && !errors.Is(err, sql.ErrNoRows):
+			return wrote{}, err
+		}
+		b.mu.Lock()
+		delete(b.held, id)
+		b.mu.Unlock()
+		return wrote{}, fmt.Errorf("%w: %s (this writer's lock was broken; the session may have been written since — open it again)", thread.ErrLocked, id)
 	}
 	var host, owner, proc, started string
 	var pid int
@@ -1132,6 +1154,76 @@ func (b *backend) acquire(ctx context.Context, tx *sql.Tx, id string) (wrote, er
 		`UPDATE session_locks SET host = ?, owner = ?, pid = ?, taken = ?, process = ?, started = ? WHERE session = ?`,
 		b.host(), b.owner, b.pid, formatTime(time.Now().UTC()), b.proc, b.started, id)
 	return wrote{acquired: true, takeover: fmt.Sprintf("pid %d", pid)}, err
+}
+
+// BreakLock removes the writer lock on a session, whoever holds it. It
+// is an operator's action, for the one case the lock cannot decide on
+// its own: a row left by a holder on another host. The lock never
+// judges such a holder dead (acquire's rule), so when that host is
+// gone for good — a container replaced under a new hostname, a
+// database restored from a backup that carried its lock rows — every
+// write to the session fails with thread.ErrLocked until the row is
+// removed. The caller vouches that the holder is gone: nothing here
+// can check it.
+//
+// st is the Storage this package's Open returned. The next writer
+// takes the lock as on an unheld session. A holder that was alive
+// after all is not left writing beside it: its next write finds the
+// row is no longer its own and fails with thread.ErrLocked, and a
+// Session it serves then answers thread.ErrStale if the session was
+// written in between. The removal is logged at Warn on the storage's
+// logger (thread.OpenLogger), naming the holder it removed.
+//
+// A session with no lock row is left as it is and BreakLock returns
+// nil; one the database does not hold fails with thread.ErrNotFound.
+// To clear a whole database after a host change, List the sessions
+// and break each.
+func BreakLock(ctx context.Context, st thread.Storage, session string) error {
+	b, ok := st.(*backend)
+	if !ok {
+		return fmt.Errorf("sqlite: BreakLock needs a Storage opened by this package, got %T", st)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !thread.ValidID(session) {
+		return fmtNotFound(session)
+	}
+	b.leaseMu.Lock()
+	defer b.leaseMu.Unlock()
+	tx, err := b.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer rollback(tx)
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)`, session).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return fmtNotFound(session)
+	}
+	var host, taken string
+	var pid int
+	err = tx.QueryRowContext(ctx, `SELECT host, pid, taken FROM session_locks WHERE session = ?`, session).Scan(&host, &pid, &taken)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // nothing holds it
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM session_locks WHERE session = ?`, session); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	delete(b.held, session)
+	b.mu.Unlock()
+	b.log.Warn("thread/sqlite: writer lock broken on request",
+		"session", session, "holder_host", host, "holder_pid", pid, "taken", taken)
+	return nil
 }
 
 // host is this instance's machine name, the prefix of owner — split

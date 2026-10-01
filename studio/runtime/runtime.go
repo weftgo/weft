@@ -628,6 +628,18 @@ func (rs *RuntimeServer) Command(id string) (CommandStatus, error) {
 	return row.view(), nil
 }
 
+// CommandOf returns the command as enqueued (its public id names the
+// page a panel token is scoped to); ok is false for an unknown id.
+func (rs *RuntimeServer) CommandOf(id string) (Command, bool) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	row := rs.commands[id]
+	if row == nil {
+		return Command{}, false
+	}
+	return row.Command, true
+}
+
 // Registration returns the runtime's current registration (the
 // authoritative copy of its agents, allow-lists and caps) when it has
 // registered; ok is false for an unknown id.

@@ -772,7 +772,7 @@ func TestShapeEventRedactsSteeredPendingNested(t *testing.T) {
 	}
 
 	// Nested: the child event is shaped with the same rules.
-	nestedBody := `{"type":"nested","run_id":"r","seq":2,"call_id":"c0",`+
+	nestedBody := `{"type":"nested","run_id":"r","seq":2,"call_id":"c0",` +
 		`"event":{"type":"text_delta","run_id":"r","text":"a secret and a good deal more text well past the cap"}}`
 	nestedRec := sdkRecordWith(t, "weft.event", nestedBody, attribute.String("weft.record", "event"))
 	p.shapeEvent(nestedRec)

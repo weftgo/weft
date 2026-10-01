@@ -604,7 +604,7 @@ func TestStep8RoutesRefusePanelTokens(t *testing.T) {
 				attrs[k] = v
 			}
 			return obsdb.Record{
-				Time: time.Now().UTC().Add(time.Duration(pos) * time.Second),
+				Time:      time.Now().UTC().Add(time.Duration(pos) * time.Second),
 				EventName: "weft." + kind, Severity: 9, Body: body, Service: "svc",
 				Attrs: attrs, Resource: map[string]any{"service.name": "svc"},
 			}

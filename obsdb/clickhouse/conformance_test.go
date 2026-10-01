@@ -115,7 +115,7 @@ func TestTurnStringAttrDerives(t *testing.T) {
 			attrs[k] = v
 		}
 		recs = append(recs, obsdb.Record{
-			Time: time.Now().UTC().Add(time.Duration(i) * time.Second),
+			Time:      time.Now().UTC().Add(time.Duration(i) * time.Second),
 			EventName: "weft.event", TraceID: "0102030405060708090a0b0c0d0e0f10",
 			SpanID: "0102030405060708", Severity: 9, Body: ev, Service: "conf-svc",
 			Attrs: attrs, Resource: map[string]any{"service.name": "conf-svc"},
@@ -161,7 +161,7 @@ func TestCursorSubSecondPaging(t *testing.T) {
 		}
 		rec := obsdb.Record{
 			Time: at, EventName: "weft.event", Severity: 9,
-			Body: `{"type":"run_start","id":"` + runID + `","model":{"provider":"wefttest","name":"script"},"agent":"conf"}`,
+			Body:    `{"type":"run_start","id":"` + runID + `","model":{"provider":"wefttest","name":"script"},"agent":"conf"}`,
 			Service: "conf-svc", Attrs: attrs, Resource: map[string]any{"service.name": "conf-svc"},
 		}
 		if err := db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{rec}}); err != nil {
@@ -238,7 +238,7 @@ func TestSessionBeyondNewestPage(t *testing.T) {
 		}
 		batch = append(batch, obsdb.Record{
 			Time: base.Add(at), EventName: "weft.event", Severity: 9,
-			Body: `{"type":"run_start","id":"` + id + `-t1","model":{"provider":"wefttest","name":"script"},"agent":"conf"}`,
+			Body:    `{"type":"run_start","id":"` + id + `-t1","model":{"provider":"wefttest","name":"script"},"agent":"conf"}`,
 			Service: "conf-svc", Attrs: attrs, Resource: map[string]any{"service.name": "conf-svc"},
 		})
 	}

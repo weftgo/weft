@@ -52,6 +52,23 @@ func TestConformanceMemory(t *testing.T) {
 	})
 }
 
+// The session-level table: the turn machinery's promises that depend
+// on what the backend stores — the mixed batch's resume join, a
+// queued send restored after a restart — on a file database and on
+// ":memory:".
+func TestConformanceTurns(t *testing.T) {
+	t.Run("file", func(t *testing.T) { threadtest.RunTurns(t, openFile) })
+	t.Run("memory", func(t *testing.T) {
+		threadtest.RunTurns(t, func(t *testing.T) thread.Storage {
+			st, err := sqlite.Open(":memory:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			return st
+		})
+	})
+}
+
 // The one-writer sub-table: two Storages over one file are the
 // in-process shape of two processes — the second writer is ErrLocked,
 // and Release hands the session over.

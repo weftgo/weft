@@ -6,15 +6,20 @@
 // The durability rules (ADR 0011 §4–§5): Create writes the header and
 // fsyncs the file and the directory; Append writes all of its entries
 // in one write and fsyncs (FsyncOnFlush defers that to Flush). One
-// writer per session, enforced with an advisory lock held from a
-// session's first write until the process exits or the session is
-// deleted — a second writer, in this process or another, fails with
-// thread.ErrLocked. Readers never lock: Load and List read at any
-// time, and a load that catches a torn final line (a crash mid-write)
-// drops it and says so in the LoadReport.
+// writer per session, enforced with an advisory lock (flock on unix,
+// LockFileEx on Windows) taken on a session's first write and held
+// until the session is released (the thread.Releaser capability),
+// deleted, or the process exits — a second writer, in this process or
+// another, fails with thread.ErrLocked. Readers never lock: Load and
+// List read at any time, and a load that catches a torn final line (a
+// crash mid-write, or a write in flight) drops it and says so in the
+// LoadReport. The next writer to take the session removes a torn tail
+// before its first append, so a crash costs the half-written line and
+// nothing after it.
 package jsonl
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -22,7 +27,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"maps"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -30,20 +35,34 @@ import (
 	"sync"
 
 	"github.com/weftgo/weft/thread"
+	"github.com/weftgo/weft/thread/internal/rules"
 )
 
 // headerBound is how much of a session file List reads: the header
-// line and nothing more (plan §3.4). A file whose first megabyte holds
-// no newline was never written by this backend and is skipped.
+// line and nothing more. A file whose first megabyte holds no newline
+// was never written by this backend and is skipped.
 const headerBound = 1 << 20
+
+// headerChunk is List's read buffer: a header line is a few hundred
+// bytes, so one small buffer serves a whole directory and grows only
+// for the rare long header, up to headerBound.
+const headerChunk = 4 << 10
 
 // Open returns a thread.Storage rooted at dir: one <id>.jsonl file per
 // session, the directory created 0700 when missing and files created
 // 0600. opts are the shared open vocabulary — Salvage, the fsync
-// policy — resolved with the defaults by thread.ResolveOpen.
+// policy, NoLock, OpenLogger — resolved with the defaults by
+// thread.ResolveOpen. On a platform with no advisory file lock (not
+// unix, not Windows) Open fails wrapping errors.ErrUnsupported unless
+// thread.NoLock is passed: the one-writer rule is never dropped
+// silently.
 func Open(dir string, opts ...thread.OpenOption) (thread.Storage, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("jsonl: open called with an empty directory")
+	}
+	cfg := thread.ResolveOpen(opts...)
+	if err := checkLockSupport(lockSupported, cfg.NoLock); err != nil {
+		return nil, err
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -77,38 +96,135 @@ func Open(dir string, opts ...thread.OpenOption) (thread.Storage, error) {
 	case err != nil:
 		return nil, err
 	}
-	cfg := thread.ResolveOpen(opts...)
 	return &backend{
 		dir:             abs,
 		salvage:         cfg.Salvage,
 		syncEveryAppend: cfg.SyncEveryAppend,
+		noLock:          cfg.NoLock,
+		log:             cfg.Logger,
 		sessions:        map[string]*session{},
 	}, nil
 }
 
+// checkLockSupport is Open's platform gate: a platform without a file
+// lock opens only when the caller said NoLock.
+func checkLockSupport(supported, noLock bool) error {
+	if supported || noLock {
+		return nil
+	}
+	return fmt.Errorf("jsonl: this platform has no advisory file lock to enforce one writer per session; "+
+		"open with thread.NoLock() to write without one: %w", errors.ErrUnsupported)
+}
+
 // backend is the Storage over a directory of session files. The
-// sessions map holds every session this instance has written: an open
-// append file carrying the advisory lock, held until the process exits
-// or the session is deleted — Storage has no Close, by design, and the
-// lock is the one-writer rule's teeth.
+// sessions map holds every session this instance currently holds as a
+// writer: an open append file carrying the advisory lock, from the
+// session's first write until Release, Delete, or process exit. mu
+// guards the map and nothing else — no file I/O runs under it.
 type backend struct {
 	dir             string
 	salvage         bool
 	syncEveryAppend bool
+	noLock          bool
+	log             *slog.Logger
 
 	mu       sync.Mutex
 	sessions map[string]*session
 }
 
 // session is one held session: the append file and the lock that makes
-// this instance (or this process) its only writer. mu serializes this
-// session's writes against each other and against Delete.
+// this instance (or this process) its only writer.
+//
+// A session enters the map as a reservation before its file is opened
+// or created: ready is closed when that setup ends, and err holds its
+// failure (the reservation is already out of the map by then). Whoever
+// finds a reservation waits for ready instead of opening the file a
+// second time — a second open would read this instance's own lock as a
+// foreign writer.
+//
+// mu serializes the session's writes against each other and against
+// Release and Delete. closed marks a session that was released or
+// deleted: its file is gone from this instance, and a caller holding
+// the stale value re-acquires. suspect marks a file that may end
+// mid-line (a failed write, raw injected bytes): the next write checks
+// and repairs the tail first. dirty marks writes not yet fsynced.
 type session struct {
-	mu sync.Mutex
-	f  *os.File
+	ready chan struct{}
+	err   error
+
+	mu      sync.Mutex
+	f       *os.File
+	closed  bool
+	suspect bool
+	dirty   bool
 }
 
+// errStale is the internal signal that a held session was released or
+// deleted between a caller finding it and locking it: the caller
+// acquires again. It never leaves the package.
+var errStale = errors.New("jsonl: session handle is stale")
+
 func (b *backend) path(id string) string { return filepath.Join(b.dir, id+".jsonl") }
+
+// hold returns the held session for id, reserving a slot and running
+// setup to fill it when this instance does not hold the session yet.
+// created reports that this call ran setup. The reservation is taken
+// under the instance mutex; setup — all of the file I/O — runs outside
+// it, so one session's fsync never stalls another session's first
+// touch. A caller that finds another goroutine's reservation waits for
+// it: a successful one is shared, a failed one is retried with the
+// caller's own setup.
+func (b *backend) hold(ctx context.Context, id string, setup func(*session) error) (s *session, created bool, err error) {
+	for {
+		b.mu.Lock()
+		cur, ok := b.sessions[id]
+		if !ok {
+			s := &session{ready: make(chan struct{})}
+			b.sessions[id] = s
+			b.mu.Unlock()
+			if err := setup(s); err != nil {
+				b.mu.Lock()
+				if b.sessions[id] == s {
+					delete(b.sessions, id)
+				}
+				b.mu.Unlock()
+				s.err = err
+				close(s.ready)
+				return nil, false, err
+			}
+			close(s.ready)
+			return s, true, nil
+		}
+		b.mu.Unlock()
+		select {
+		case <-cur.ready:
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		}
+		if cur.err == nil {
+			return cur, false, nil
+		}
+		// The reservation failed and is out of the map: try our own.
+	}
+}
+
+// drop ends a held session: the lock released, the file closed, the
+// slot out of the map. The caller holds s.mu; the map is updated
+// before s.mu is released, so a stale holder that then re-acquires
+// finds no slot and opens the file fresh.
+func (b *backend) drop(id string, s *session) {
+	if !b.noLock {
+		_ = unlockFile(s.f)
+	}
+	_ = s.f.Close()
+	s.f = nil
+	s.closed = true
+	b.mu.Lock()
+	if b.sessions[id] == s {
+		delete(b.sessions, id)
+	}
+	b.mu.Unlock()
+}
 
 // Create writes the session's header as a new file, exclusively: an
 // id that is not one path component, an envelope other than the
@@ -116,17 +232,14 @@ func (b *backend) path(id string) string { return filepath.Join(b.dir, id+".json
 // here or in any other process sharing the directory — fails, and a
 // session is never silently replaced.
 //
-// The whole setup — create, lock, header write, dirent sync — runs
-// under the instance lock, and the session is published only after its
-// header is durable. An Append racing Create therefore lands in one of
-// two clean places: it waits on the instance lock and finds the
-// published session (the header is always first, and never below an
-// entry), or it ran before the file existed and answers ErrNotFound.
-// Neither this instance's own appends nor its Create can read the
-// other as a foreign writer, and Create's failure path can never
-// discard a file a goroutine of ours is appending to. The cost is the
-// setup's two fsyncs under the instance lock — once per session, not
-// per append.
+// The session is reserved under the instance mutex and created outside
+// it — the exclusive create, the lock, the header write and both
+// fsyncs — and becomes usable only once its header is durable. An
+// Append racing Create therefore lands in one of two clean places: it
+// finds the reservation, waits, and appends below the header; or it
+// ran first, found no file, and answers ErrNotFound. Neither can read
+// the other as a foreign writer, and other sessions never wait on this
+// one's fsyncs.
 func (b *backend) Create(ctx context.Context, h thread.Header) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -144,54 +257,85 @@ func (b *backend) Create(ctx context.Context, h thread.Header) error {
 	if err != nil {
 		return err
 	}
-	buf := append(line, '\n')
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if _, held := b.sessions[h.ID]; held {
-		return fmt.Errorf("%w: %s", thread.ErrExists, h.ID)
+	return b.createRaw(ctx, h.ID, append(line, '\n'))
+}
+
+// createRaw creates the session file holding exactly first — Create's
+// body, shared with InjectHeader.
+func (b *backend) createRaw(ctx context.Context, id string, first []byte) error {
+	for {
+		s, created, err := b.hold(ctx, id, func(s *session) error { return b.createFile(s, id, first) })
+		if err != nil {
+			return err
+		}
+		if created {
+			return nil
+		}
+		s.mu.Lock()
+		closed := s.closed
+		s.mu.Unlock()
+		if !closed {
+			return fmt.Errorf("%w: %s", thread.ErrExists, id)
+		}
+		// Released or deleted while we waited: the file decides.
 	}
-	f, err := os.OpenFile(b.path(h.ID), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+}
+
+// createFile is Create's setup: the exclusive create, the lock, the
+// first line durable, the directory entry durable.
+func (b *backend) createFile(s *session, id string, first []byte) error {
+	f, err := os.OpenFile(b.path(id), os.O_CREATE|os.O_EXCL|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
-			return fmt.Errorf("%w: %s", thread.ErrExists, h.ID)
+			return fmt.Errorf("%w: %s", thread.ErrExists, id)
 		}
 		return err
 	}
 	if err := f.Chmod(0o600); err != nil { // exact, whatever the umask
-		discardSession(f)
+		b.discard(f)
 		return err
 	}
-	if err := lockFile(f); err != nil {
-		discardSession(f)
+	if !b.noLock {
+		if err := lockFile(f, id); err != nil {
+			b.discard(f)
+			return err
+		}
+	}
+	if err := writeFull(f, first); err != nil {
+		b.discard(f)
 		return err
 	}
-	s := &session{f: f}
-	if err := writeAll(s, buf, true); err != nil {
-		discardSession(f)
+	if err := f.Sync(); err != nil {
+		b.discard(f)
 		return err
 	}
 	if err := syncDir(b.dir); err != nil { // the new file's dirent, durable
-		discardSession(f)
+		b.discard(f)
 		return err
 	}
-	b.sessions[h.ID] = s
+	s.f = f
 	return nil
 }
 
-// discardSession is Create's failure cleanup: unlock, close, remove —
+// discard is createFile's failure cleanup: unlock, close, remove —
 // best effort, because the error that caused it is what the caller
 // needs, not the cleanup's.
-func discardSession(f *os.File) {
-	_ = unlockFile(f)
+func (b *backend) discard(f *os.File) {
+	if !b.noLock {
+		_ = unlockFile(f)
+	}
 	_ = f.Close()
 	_ = os.Remove(f.Name())
 }
 
 // Append adds entries in arrival order as one write of all their
-// lines — all or none: the batch is encoded and validated before the
-// first byte is written. Appending to a session the directory does not
-// hold fails with ErrNotFound; one another writer holds fails with
-// ErrLocked.
+// lines: the batch is encoded and validated before the first byte is
+// written, so a batch that cannot encode writes nothing, and a writer
+// that dies mid-write leaves at most a torn final line — which Load
+// drops and reports, and which the next writer removes before it
+// appends. Appending to a session the directory does not hold fails
+// with ErrNotFound; one another writer holds fails with ErrLocked; one
+// whose file holds no complete header line fails with ErrCorrupt.
 func (b *backend) Append(ctx context.Context, id string, entries ...thread.Entry) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -208,23 +352,28 @@ func (b *backend) Append(ctx context.Context, id string, entries ...thread.Entry
 		buf = append(buf, line...)
 		buf = append(buf, '\n')
 	}
-	s, err := b.sessionFor(id)
-	if err != nil {
-		return err
+	for {
+		s, err := b.sessionFor(ctx, id)
+		if err != nil {
+			return err
+		}
+		if len(buf) == 0 {
+			return nil
+		}
+		if err := b.write(id, s, buf, b.syncEveryAppend, false); !errors.Is(err, errStale) {
+			return err
+		}
 	}
-	if len(buf) == 0 {
-		return nil
-	}
-	return writeAll(s, buf, b.syncEveryAppend)
 }
 
 // Load returns the whole session: the header decoded from the first
 // line, then every entry in file order. The loud rules (ADR 0011 §5):
 // unknown kinds and newer versions are ErrNewerFormat, never skipped,
 // salvage or not; a malformed line is ErrCorrupt naming the line —
-// skipped and reported under Salvage; a torn final line is a crash,
-// dropped and reported in the LoadReport. The returned values are
-// fresh: they never alias the file or a previous load.
+// skipped and reported under Salvage; a torn final line is a crash or
+// a write in flight, dropped and reported in the LoadReport. The
+// returned values are fresh: they never alias the file or a previous
+// load.
 func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.Entry, *thread.LoadReport, error) {
 	if err := ctx.Err(); err != nil {
 		return thread.Header{}, nil, nil, err
@@ -242,16 +391,14 @@ func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.
 	// The bytes after the last complete newline are a torn final line:
 	// a writer cut mid-write (this backend always ends a line with
 	// '\n'). Dropped, reported — never an error.
-	lines := splitLines(raw)
+	lines := rules.SplitLines(raw)
 	if len(lines) == 0 {
 		// Not one complete line — not even a header. Bytes at all are
 		// a torn first line; either way this is not a loadable session.
-		return thread.Header{}, nil, nil, &thread.CorruptError{
-			Session: id, Line: 1, Err: errors.New("no complete header line"),
-		}
+		return thread.Header{}, nil, nil, errNoHeader(id)
 	}
 	report := &thread.LoadReport{}
-	if rawTorn(raw) {
+	if rules.Torn(raw) {
 		report.Torn = len(lines) + 1
 	}
 	var h thread.Header
@@ -284,11 +431,20 @@ func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.
 	return h, entries, report, nil
 }
 
-// List reads headers only — bounded to headerBound a file — newest
-// first with the Total count. A file that does not decode as a session
-// header (torn, malformed, a newer envelope) is skipped, never an
-// error: one corrupt file never blocks listing the others, and Load
-// names what is wrong with it when asked (ADR 0011 §5).
+// errNoHeader is the failure of a session file without one complete
+// line: line 1 is corrupt, and there is nothing to salvage.
+func errNoHeader(id string) error {
+	return &thread.CorruptError{Session: id, Line: 1, Err: errors.New("no complete header line")}
+}
+
+// List reads headers only — one small shared buffer, bounded to
+// headerBound a file — newest first with the Total count. A file that
+// does not decode as a session header (torn, malformed, a newer
+// envelope) is skipped, never an error: one corrupt file never blocks
+// listing the others, and Load names what is wrong with it when asked
+// (ADR 0011 §5). The cursor is the (Before, BeforeID) keyset over that
+// order. A directory is the index here: every call reads every header,
+// so the cost of a page grows with the fleet, not with the page.
 func (b *backend) List(ctx context.Context, q thread.Query) (thread.Page, error) {
 	if err := ctx.Err(); err != nil {
 		return thread.Page{}, err
@@ -301,43 +457,37 @@ func (b *backend) List(ctx context.Context, q thread.Query) (thread.Page, error)
 		return thread.Page{}, err
 	}
 	headers := make([]thread.Header, 0, len(names))
+	hr := newHeaderReader()
 	for _, name := range names {
 		id, ok := strings.CutSuffix(name.Name(), ".jsonl")
 		if !ok || name.IsDir() || !thread.ValidID(id) {
 			continue
 		}
-		h, ok, err := readHeader(b.path(id))
+		h, ok, err := hr.read(b.path(id))
 		if err != nil || !ok {
 			continue // not ours to list; Load will say why
 		}
-		if !metaMatch(h.Meta, q.Meta) {
+		if !rules.MetaMatch(h.Meta, q.Meta) {
 			continue
 		}
-		if q.TitleSearch != "" && !titleMatches(titleOf(b.path(id)), q.TitleSearch) {
+		if q.TitleSearch != "" && !rules.TitleMatches(titleOf(b.path(id)), q.TitleSearch) {
 			continue
 		}
-		h.Meta = cloneMeta(h.Meta)
 		headers = append(headers, h)
 	}
 	total := len(headers)
 	slices.SortFunc(headers, func(a, b thread.Header) int {
-		if c := b.Created.Compare(a.Created); c != 0 {
-			return c
-		}
-		return strings.Compare(b.ID, a.ID)
+		return rules.CompareNewestFirst(a.Created, a.ID, b.Created, b.ID)
 	})
-	start := 0
-	if !q.Before.IsZero() {
-		start = len(headers)
-		for i, h := range headers {
-			if h.Created.Before(q.Before) {
-				start = i
-				break
-			}
+	start := len(headers)
+	for i, h := range headers {
+		if rules.AfterCursor(h.Created, h.ID, q.Before, q.BeforeID) {
+			start = i
+			break
 		}
 	}
 	page := headers[start:]
-	if n := limitOf(q.Limit); len(page) > n {
+	if n := rules.LimitOf(q.Limit); len(page) > n {
 		page = page[:n]
 	}
 	return thread.Page{Sessions: page, Total: total}, nil
@@ -348,7 +498,8 @@ func (b *backend) List(ctx context.Context, q thread.Query) (thread.Page, error)
 // fails with ErrLocked — deleting under a live writer would lose the
 // writes it is about to make. Delete and Append on one session do not
 // race in a correct program (one writer per session, ADR 0011 §5);
-// when they do, Delete waits for the in-flight write before removing.
+// when they do, Delete waits for the in-flight write before removing,
+// and an Append that arrives after answers ErrNotFound.
 func (b *backend) Delete(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -356,27 +507,63 @@ func (b *backend) Delete(ctx context.Context, id string) error {
 	if !thread.ValidID(id) {
 		return fmtNotFound(id)
 	}
-	b.mu.Lock()
-	s, held := b.sessions[id]
-	if held {
-		delete(b.sessions, id)
-	}
-	b.mu.Unlock()
-	if !held {
-		// Not ours: take the lock first, so a live writer in another
-		// process (or another instance) keeps its session.
-		var err error
-		s, err = b.lockOnly(id)
+	for {
+		// Not ours yet: take the lock first, so a live writer in another
+		// process (or another instance) keeps its session. No tail
+		// repair — the file is about to go — so the slot is marked
+		// suspect for any writer that shares it before the remove.
+		s, _, err := b.hold(ctx, id, func(s *session) error { return b.openFile(s, id, false) })
 		if err != nil {
 			return err
 		}
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			continue
+		}
+		path := b.path(id)
+		err = os.Remove(path)
+		b.drop(id, s)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			// A platform that refuses to remove an open file: the file
+			// is closed now.
+			err = os.Remove(path)
+		}
+		s.mu.Unlock()
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return nil
 	}
-	s.mu.Lock()
-	err := os.Remove(b.path(id))
-	_ = unlockFile(s.f)
-	_ = s.f.Close()
-	s.mu.Unlock()
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+}
+
+// held returns the session this instance holds for id, waiting out a
+// reservation in progress; nil when it holds none.
+func (b *backend) held(ctx context.Context, id string) (*session, error) {
+	b.mu.Lock()
+	s, ok := b.sessions[id]
+	b.mu.Unlock()
+	if !ok {
+		return nil, nil
+	}
+	select {
+	case <-s.ready:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if s.err != nil {
+		return nil, nil
+	}
+	return s, nil
+}
+
+// exists answers for a session this instance does not hold: nil when
+// its file is there, ErrNotFound when it is not.
+func (b *backend) exists(id string) error {
+	if _, err := os.Stat(b.path(id)); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fmtNotFound(id)
+		}
 		return err
 	}
 	return nil
@@ -390,23 +577,61 @@ func (b *backend) Flush(ctx context.Context, id string) error {
 	if !thread.ValidID(id) {
 		return fmtNotFound(id)
 	}
-	b.mu.Lock()
-	s, held := b.sessions[id]
-	b.mu.Unlock()
-	if !held {
-		// Nothing of ours is buffered for a session we do not hold; it
-		// exists or it does not.
-		if _, err := os.Stat(b.path(id)); err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				return fmtNotFound(id)
+	s, err := b.held(ctx, id)
+	if err != nil {
+		return err
+	}
+	if s != nil {
+		s.mu.Lock()
+		if !s.closed {
+			defer s.mu.Unlock()
+			if err := s.f.Sync(); err != nil {
+				return err
 			}
+			s.dirty = false
+			return nil
+		}
+		s.mu.Unlock()
+	}
+	// Nothing of ours is buffered for a session we do not hold; it
+	// exists or it does not.
+	return b.exists(id)
+}
+
+// Release is the thread.Releaser capability: it fsyncs what this
+// instance wrote without syncing (FsyncOnFlush), drops the session's
+// advisory lock and closes its file, so another Storage or process may
+// write the session — and this instance holds one file descriptor
+// fewer. A later Append here opens and locks the file again, or fails
+// with ErrLocked if another writer holds it by then. Releasing a
+// session this instance does not hold is a no-op that still answers
+// ErrNotFound for a session the directory does not hold.
+func (b *backend) Release(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !thread.ValidID(id) {
+		return fmtNotFound(id)
+	}
+	s, err := b.held(ctx, id)
+	if err != nil {
+		return err
+	}
+	if s != nil {
+		s.mu.Lock()
+		if !s.closed {
+			defer s.mu.Unlock()
+			var err error
+			if s.dirty {
+				err = s.f.Sync()
+				s.dirty = false
+			}
+			b.drop(id, s)
 			return err
 		}
-		return nil
+		s.mu.Unlock()
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.f.Sync()
+	return b.exists(id)
 }
 
 // Inject appends raw bytes to a session file verbatim — the
@@ -417,207 +642,274 @@ func (b *backend) Inject(ctx context.Context, id string, data []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s, err := b.sessionFor(id)
-	if err != nil {
+	for {
+		s, err := b.sessionFor(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := b.write(id, s, data, false, true); !errors.Is(err, errStale) {
+			return err
+		}
+	}
+}
+
+// InjectHeader creates a session file whose first line is the given
+// bytes, verbatim — the threadtest.RawHeaderInjector hook, the way a
+// newer or broken writer would have left a header. An existing session
+// fails with ErrExists.
+func (b *backend) InjectHeader(ctx context.Context, id string, line []byte) error {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, err = s.f.Write(data)
-	return err
+	if !thread.ValidID(id) {
+		return fmt.Errorf("thread: invalid session id %q", id)
+	}
+	return b.createRaw(ctx, id, append(slices.Clone(line), '\n'))
 }
 
 // sessionFor returns the held session state for id, opening and
-// locking the file on first touch. A missing session is ErrNotFound;
+// locking the file on first touch — and, on that first touch, removing
+// a torn tail a crashed writer left. A missing session is ErrNotFound;
 // a session held by another writer — another process, or another
-// Storage instance — is ErrLocked. The open, the lock and the store
-// happen under the instance lock: flock never blocks, so the hold is
-// two syscalls, and two goroutines of this instance racing to the same
-// session share one held file instead of reading each other as the
-// foreign writer the second flock would report.
-func (b *backend) sessionFor(id string) (*session, error) {
+// Storage instance — is ErrLocked. Two goroutines of this instance
+// racing to the same session share one held file (the second waits on
+// the first's reservation) instead of reading each other as the
+// foreign writer a second lock attempt would report.
+func (b *backend) sessionFor(ctx context.Context, id string) (*session, error) {
 	if !thread.ValidID(id) {
 		return nil, fmtNotFound(id)
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if s, ok := b.sessions[id]; ok {
-		return s, nil
-	}
-	f, err := os.OpenFile(b.path(id), os.O_WRONLY|os.O_APPEND, 0)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmtNotFound(id)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := lockFile(f); err != nil {
-		_ = f.Close()
-		return nil, err
-	}
-	s := &session{f: f}
-	b.sessions[id] = s
-	return s, nil
+	s, _, err := b.hold(ctx, id, func(s *session) error { return b.openFile(s, id, true) })
+	return s, err
 }
 
-// lockOnly takes a session's lock without keeping state — Delete's
-// path for a session this instance does not hold, under the instance
-// lock for the same reason as sessionFor. A missing session is
-// ErrNotFound; a held one, ErrLocked.
-func (b *backend) lockOnly(id string) (*session, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	f, err := os.OpenFile(b.path(id), os.O_WRONLY|os.O_APPEND, 0)
+// openFile is the first-touch setup of an existing session: open for
+// append, take the writer's lock, confirm the locked file is still the
+// one the directory names (a Delete by the previous holder may have
+// landed between the open and the lock), and — when repair is set —
+// remove a torn tail. Without repair the session is marked suspect, so
+// a write through it checks the tail first.
+func (b *backend) openFile(s *session, id string, repair bool) error {
+	f, err := os.OpenFile(b.path(id), os.O_RDWR|os.O_APPEND, 0)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmtNotFound(id)
+		return fmtNotFound(id)
 	}
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := lockFile(f); err != nil {
+	fail := func(err error, locked bool) error {
+		if locked && !b.noLock {
+			_ = unlockFile(f)
+		}
 		_ = f.Close()
-		return nil, err
+		return err
 	}
-	return &session{f: f}, nil
+	if !b.noLock {
+		if err := lockFile(f, id); err != nil {
+			return fail(err, false)
+		}
+	}
+	held, err := f.Stat()
+	if err != nil {
+		return fail(err, true)
+	}
+	named, err := os.Stat(b.path(id))
+	if errors.Is(err, fs.ErrNotExist) || (err == nil && !os.SameFile(held, named)) {
+		// The file we locked was deleted (and perhaps created again)
+		// under us: writing to it would write to nothing.
+		return fail(fmtNotFound(id), true)
+	}
+	if err != nil {
+		return fail(err, true)
+	}
+	if repair {
+		if err := b.repairTail(id, f); err != nil {
+			return fail(err, true)
+		}
+	} else {
+		s.suspect = true
+	}
+	s.f = f
+	return nil
 }
 
-// writeAll appends buf under the session's lock in one write, then
-// fsyncs when asked. A short write is an error — the file may hold a
-// torn tail, which the load rules handle; the append did not happen.
-func writeAll(s *session, buf []byte, sync bool) error {
+// repairTail makes the file end on a complete line before this writer
+// appends to it. A file that ends mid-line holds a torn tail — a
+// writer died (or failed) inside a write — and an append glued onto it
+// would turn two entries into one malformed line. The caller holds the
+// session's exclusive lock, so no live writer owns those bytes: they
+// are truncated back to the last newline, the truncation is fsynced,
+// and the repair is logged. A file with no complete line at all is not
+// a session to append to: ErrCorrupt on line 1, nothing truncated.
+func (b *backend) repairTail(id string, f *os.File) error {
+	fi, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	size := fi.Size()
+	if size == 0 {
+		return errNoHeader(id)
+	}
+	// Scan back from the end for the last newline, a chunk at a time:
+	// the common case reads one byte's worth and returns.
+	const chunk = 64 << 10
+	buf := make([]byte, 1, chunk)
+	if _, err := f.ReadAt(buf, size-1); err != nil {
+		return err
+	}
+	if buf[0] == '\n' {
+		return nil
+	}
+	keep := int64(0)
+	for end := size; end > 0 && keep == 0; {
+		start := max(end-chunk, 0)
+		buf = buf[:end-start]
+		if _, err := f.ReadAt(buf, start); err != nil {
+			return err
+		}
+		if i := bytes.LastIndexByte(buf, '\n'); i >= 0 {
+			keep = start + int64(i) + 1
+		}
+		end = start
+	}
+	if keep == 0 {
+		return errNoHeader(id)
+	}
+	if err := f.Truncate(keep); err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	b.log.Warn("thread/jsonl: removed a torn tail before appending",
+		"session", id, "dropped_bytes", size-keep)
+	return nil
+}
+
+// write appends buf to the held session in one write, then fsyncs when
+// asked. raw marks bytes that may not end a line (Inject's): the file
+// is suspect afterwards. A failed or short write is an error and
+// leaves the file suspect too — it may hold a torn tail, which the
+// next write through this session repairs before appending; the
+// append did not happen. errStale means the session was released or
+// deleted under the caller, who acquires again.
+func (b *backend) write(id string, s *session, buf []byte, sync, raw bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	n, err := s.f.Write(buf)
+	if s.closed {
+		return errStale
+	}
+	if s.suspect {
+		if err := b.repairTail(id, s.f); err != nil {
+			return err
+		}
+		s.suspect = false
+	}
+	if err := writeFull(s.f, buf); err != nil {
+		s.suspect = true
+		return err
+	}
+	if raw {
+		s.suspect = true
+	}
+	if !sync {
+		s.dirty = true
+		return nil
+	}
+	if err := s.f.Sync(); err != nil {
+		return err
+	}
+	s.dirty = false
+	return nil
+}
+
+// writeFull writes buf in one write; a short write is an error.
+func writeFull(f *os.File, buf []byte) error {
+	n, err := f.Write(buf)
 	if err != nil {
 		return err
 	}
 	if n != len(buf) {
 		return io.ErrShortWrite
 	}
-	if sync {
-		return s.f.Sync()
-	}
 	return nil
 }
 
-// limitOf normalizes Query.Limit — the shared paging rule (0 means 50,
-// above 500 clamps), duplicated from thread the way store's backends
-// duplicate theirs: the conformance table pins both to the same rule.
-func limitOf(n int) int {
-	switch {
-	case n <= 0:
-		return 50
-	case n > 500:
-		return 500
-	default:
-		return n
-	}
-}
-
-// metaMatch reports whether meta holds every pair of want, exactly —
-// Query.Meta's rule, duplicated from thread the way limitOf is; the
-// conformance table pins both copies to the same answer.
-func metaMatch(meta, want map[string]string) bool {
-	for k, v := range want {
-		if meta == nil || meta[k] != v {
-			return false
-		}
-	}
-	return true
-}
-
-// titleMatches reports whether the title contains the search, folding
-// case — Query.TitleSearch's rule, duplicated from thread like
-// metaMatch.
-func titleMatches(title, search string) bool {
-	return strings.Contains(strings.ToLower(title), strings.ToLower(search))
-}
-
 // titleOf returns the session's current title from its file — the last
-// info entry's Title, empty when none was ever written. This is the
-// one read beyond headers List ever does, and only for a TitleSearch:
-// the query shape pays for it (Query.TitleSearch's rule).
+// info entry carrying a non-empty Title, empty when none ever did. This
+// is the one read beyond headers List ever does, and only for a
+// TitleSearch: the query shape pays for it (Query.TitleSearch's rule).
 func titleOf(path string) string {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
-	title := ""
-	for _, line := range splitLines(raw)[1:] {
-		var head struct {
-			Type  string `json:"type"`
-			Title string `json:"title"`
-		}
-		if json.Unmarshal(line, &head) == nil && head.Type == "info" {
-			title = head.Title
-		}
+	lines := rules.SplitLines(raw)
+	if len(lines) == 0 {
+		return "" // no complete header line: no entries, no title
 	}
-	return title
+	return rules.TitleOf(lines[1:])
 }
 
-// readHeader reads and decodes a session file's first line, bounded to
+// headerReader reads session files' first lines through one reused
+// buffer: List over a large directory allocates per header it keeps,
+// not per file it opens.
+type headerReader struct {
+	br   *bufio.Reader
+	line []byte
+}
+
+func newHeaderReader() *headerReader {
+	return &headerReader{br: bufio.NewReaderSize(nil, headerChunk)}
+}
+
+// read reads and decodes a session file's first line, bounded to
 // headerBound. ok is false when the line is absent (a torn or
 // oversized first line) or does not decode as a current header —
 // including a newer envelope, which List cannot report per-file; Load
 // names it when asked.
-func readHeader(path string) (thread.Header, bool, error) {
+func (r *headerReader) read(path string) (thread.Header, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return thread.Header{}, false, err
 	}
 	defer func() { _ = f.Close() }()
-	bounded := make([]byte, headerBound)
-	// ReadFull, not one Read: a short read would make a valid header
-	// look torn and List would silently skip the session — a regular
-	// file may legally hand back less than was asked for.
-	n, err := io.ReadFull(f, bounded)
-	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+	r.br.Reset(f)
+	r.line = r.line[:0]
+	for {
+		// ReadSlice hands back what the buffer holds up to the newline;
+		// a line longer than the buffer arrives in pieces, accumulated
+		// only as far as the bound.
+		chunk, err := r.br.ReadSlice('\n')
+		r.line = append(r.line, chunk...)
+		if err == nil {
+			break
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			if len(r.line) >= headerBound {
+				return thread.Header{}, false, nil // no newline within the bound
+			}
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			return thread.Header{}, false, nil // a torn first line, or an empty file
+		}
 		return thread.Header{}, false, err
 	}
-	// The header is everything before the first newline.
-	idx := bytes.IndexByte(bounded[:n], '\n')
-	if idx < 0 {
+	if len(r.line) > headerBound {
 		return thread.Header{}, false, nil
 	}
 	var h thread.Header
-	if err := json.Unmarshal(bounded[:idx], &h); err != nil {
+	if err := json.Unmarshal(r.line[:len(r.line)-1], &h); err != nil {
 		return thread.Header{}, false, nil
 	}
 	return h, true, nil
 }
 
-// splitLines splits on '\n', complete lines only — the bytes after the
-// last newline, if any, are the torn tail and are not returned.
-func splitLines(b []byte) [][]byte {
-	var lines [][]byte
-	for len(b) > 0 {
-		i := bytes.IndexByte(b, '\n')
-		if i < 0 {
-			break
-		}
-		lines = append(lines, b[:i])
-		b = b[i+1:]
-	}
-	return lines
-}
-
-// rawTorn reports whether the bytes end mid-line: a writer cut before
-// the newline. A file ending in '\n' is complete.
-func rawTorn(b []byte) bool {
-	return len(b) > 0 && b[len(b)-1] != '\n'
-}
-
-// fmtNotFound and cloneMeta mirror the memory backend's helpers: the
-// shared shapes of the Storage contract.
+// fmtNotFound names the session in the ErrNotFound wrap, the shape
+// every backend shares.
 func fmtNotFound(id string) error {
 	return fmt.Errorf("%w: %s", thread.ErrNotFound, id)
-}
-
-func cloneMeta(kv map[string]string) map[string]string {
-	if len(kv) == 0 {
-		return nil
-	}
-	return maps.Clone(kv)
 }
 
 // syncDir fsyncs a directory so a newly created file's name is

@@ -170,3 +170,70 @@ func attrBool(m map[string]any, k string) bool {
 	b, _ := m[k].(bool)
 	return b
 }
+
+// nonMetaAttr names every attribute key that is part of the record and
+// span contract (the identity chain, the counters, the semconv fields
+// and the mirrors the core adds) rather than caller metadata. Backends
+// use it through MetaOf to decide what lands in a run row's meta
+// column. Mirrors (session.id, user.id, gen_ai.conversation.id) are
+// excluded because their originals (weft.session.id, enduser.id) are
+// identity or metadata already.
+var nonMetaAttr = map[string]struct{}{
+	attrRunID: {}, attrParentRunID: {}, attrParentCallID: {},
+	attrSessionID: {}, attrPublicID: {}, attrTurn: {}, attrAgentName: {},
+	attrRecord: {}, attrEventType: {}, attrEventPos: {}, attrDeltaPos: {},
+	attrMessagesIdx: {}, attrStepIndex: {}, attrToolSeq: {},
+	attrPlayground: {}, attrExperimentID: {}, attrForkedFrom: {},
+	"weft.messages.count":                      {},
+	"weft.messages.input":                      {},
+	"weft.content":                             {},
+	"weft.content.truncated_bytes":             {},
+	"weft.version":                             {},
+	"weft.manifest.hash":                       {},
+	"weft.run.steps":                           {},
+	"weft.run.pending":                         {},
+	"weft.run.stop_reason":                     {},
+	"weft.stop.raw":                            {},
+	"weft.model.tool_calls":                    {},
+	"weft.tool.approved":                       {},
+	"weft.tool.pending":                        {},
+	"weft.tool.result_bytes":                   {},
+	"weft.metadata.dropped":                    {},
+	"weft.override.hash":                       {},
+	"gen_ai.operation.name":                    {},
+	"gen_ai.provider.name":                     {},
+	"gen_ai.request.model":                     {},
+	"gen_ai.response.finish_reasons":           {},
+	"gen_ai.usage.input_tokens":                {},
+	"gen_ai.usage.output_tokens":               {},
+	"gen_ai.usage.cache_read.input_tokens":     {},
+	"gen_ai.usage.cache_creation.input_tokens": {},
+	"gen_ai.usage.reasoning.output_tokens":     {},
+	"gen_ai.tool.name":                         {},
+	"gen_ai.tool.call.id":                      {},
+	"gen_ai.conversation.id":                   {},
+	"session.id":                               {},
+	"user.id":                                  {},
+	"error.type":                               {},
+}
+
+// MetaOf returns the caller metadata a set of attributes carries: every
+// string value under a key outside the record/span contract (what
+// weft.Metadata put there, enduser.id included). Keys under "weft."
+// that are not part of the contract — thread's weft.session.parent, a
+// future module's own — are metadata and are kept.
+func MetaOf(attrs map[string]any) map[string]string {
+	var meta map[string]string
+	for k, v := range attrs {
+		if _, contract := nonMetaAttr[k]; contract {
+			continue
+		}
+		if s, ok := v.(string); ok {
+			if meta == nil {
+				meta = map[string]string{}
+			}
+			meta[k] = s
+		}
+	}
+	return meta
+}

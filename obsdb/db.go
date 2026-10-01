@@ -153,6 +153,9 @@ type SessionDetail struct {
 // hold.
 var ErrNotFound = errors.New("obsdb: not found")
 
+// ErrClosed is returned by a backend used after Close.
+var ErrClosed = errors.New("obsdb: closed")
+
 // InterruptedAfter is the "last seen" age that turns a non-terminal run
 // interrupted: three missed heartbeats.
 const InterruptedAfter = 30 * time.Second

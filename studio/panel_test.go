@@ -37,7 +37,7 @@ func TestPanelJSRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("GET /panel.js: %s", res.Status)
 	}
@@ -91,7 +91,7 @@ func TestPanelJSHead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("HEAD /panel.js: %s", res.Status)
 	}
@@ -163,7 +163,7 @@ func TestPanelTokenMintExample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("mint: %s", res.Status)
 	}
@@ -194,7 +194,7 @@ func TestPanelTokenMintExample(t *testing.T) {
 		return res
 	}
 	res = get("/api/runs?public_id=pub_orders")
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("scoped runs: %s", res.Status)
 	}

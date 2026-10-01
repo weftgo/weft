@@ -39,6 +39,11 @@ var panelGroupInstalled = func() bool {
 	return true
 }()
 
+// The wiring's value is its side effect; this read keeps the var
+// referenced for the unused checker (the var itself is the no-init
+// mechanism routes.go documents, same as the playground's).
+var _ = panelGroupInstalled
+
 // servePanelJS answers GET /panel.js (S4.2): static, versioned, no
 // auth — the page that includes it may be any page on any origin
 // (setups A/B/C), and the panel itself carries the API token, never

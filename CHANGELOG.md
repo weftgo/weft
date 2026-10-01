@@ -1,3 +1,16 @@
+## Unreleased
+
+### studio/cmd
+
+- The dev token the banner prints is the token the API wall checks:
+  `serve` resolves the token once (new `serveBoot`) and hands the one
+  value to both the wall and the banner. With no `--token` and no
+  `WEFT_STUDIO_TOKEN` the old code drew two independent generated
+  tokens, so the printed token 401'd against every `/api` call —
+  setup B's documented "token printed at start" hand-off was broken.
+  The pushed `studio/cmd/v0.1.0` tag carries the bug (owner: consider
+  a patch tag).
+
 ## 0.7.0 — 2026-10-01
 
 The step 8b playground programme (ADR 0024, WEFT-PLAYGROUND.md P1–P5):

@@ -49,16 +49,10 @@ func main() {
 // the process is stopped. Split from main so the construction and the
 // banner are testable without a port.
 func serve(dbFlag, addr, tokenFlag string, stdout io.Writer) error {
-	srv, err := newServer(dbFlag, tokenFlag)
+	srv, err := serveBoot(dbFlag, addr, tokenFlag, stdout)
 	if err != nil {
 		return err
 	}
-	token := srvToken(tokenFlag)
-	// The banner is best-effort by design: a closed stdout must not
-	// keep the server from serving.
-	_, _ = fmt.Fprintf(stdout, "studio: http://%s/\n", addr)
-	_, _ = fmt.Fprintf(stdout, "studio: dev token %s (WEFT_STUDIO_TOKEN fixes it)\n", token)
-	_, _ = fmt.Fprintf(stdout, "studio: db %s\n", dbLabel(dbFlag))
 	err = http.ListenAndServe(addr, srv.Handler())
 	if cerr := srv.Close(); err == nil {
 		err = cerr
@@ -66,13 +60,36 @@ func serve(dbFlag, addr, tokenFlag string, stdout io.Writer) error {
 	return err
 }
 
+// serveBoot is everything serve does before listening: resolve the
+// token, build the server, print the banner. The token is resolved
+// exactly once — the wall newServer builds and the banner it prints
+// are the same value (a generated dev token is fresh randomness per
+// srvToken call; resolving twice minted two different tokens and the
+// printed one could not open the API it advertised). Split out so the
+// boot path — token resolution, banner, wall — is testable without a
+// port.
+func serveBoot(dbFlag, addr, tokenFlag string, stdout io.Writer) (*studio.Server, error) {
+	token := srvToken(tokenFlag)
+	srv, err := newServer(dbFlag, token)
+	if err != nil {
+		return nil, err
+	}
+	// The banner is best-effort by design: a closed stdout must not
+	// keep the server from serving.
+	_, _ = fmt.Fprintf(stdout, "studio: http://%s/\n", addr)
+	_, _ = fmt.Fprintf(stdout, "studio: dev token %s (WEFT_STUDIO_TOKEN fixes it)\n", token)
+	_, _ = fmt.Fprintf(stdout, "studio: db %s\n", dbLabel(dbFlag))
+	return srv, nil
+}
+
 // newServer builds setup B's server from the flags: the UI at the
 // root, ingest on, the database under --db or the default path, and
-// the token wall (the dev token by default). sqlite:// and the
-// default open the local sink's file; clickhouse:// opens the hosted
-// backend — this is the only place that imports the driver.
-func newServer(dbFlag, tokenFlag string) (*studio.Server, error) {
-	opts := []studio.Option{studio.Base("/"), studio.Token(srvToken(tokenFlag))}
+// the token wall. The token arrives already resolved (serveBoot is
+// the one resolver — the wall and the banner share it). sqlite:// and
+// the default open the local sink's file; clickhouse:// opens the
+// hosted backend — this is the only place that imports the driver.
+func newServer(dbFlag, token string) (*studio.Server, error) {
+	opts := []studio.Option{studio.Base("/"), studio.Token(token)}
 	switch {
 	case dbFlag == "":
 		// The default: the otel local sink's path (S4.1).

@@ -194,3 +194,40 @@ func TestTokenPrecedence(t *testing.T) {
 		t.Errorf("generated token repeats: %q", a)
 	}
 }
+
+// TestBootBannerTokenAuthenticates pins the P0 the programme audit
+// found: with no --token and no WEFT_STUDIO_TOKEN the banner's dev
+// token must open the API of the very server that printed it. The
+// token is resolved once in serveBoot and shared by the wall and the
+// banner; the pre-fix code drew srvToken twice and the printed token
+// 401'd against /api/meta, breaking setup B's documented hand-off.
+func TestBootBannerTokenAuthenticates(t *testing.T) {
+	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFT_DB", t.TempDir()+"/boot.db")
+	var banner strings.Builder
+	srv, err := serveBoot("", "127.0.0.1:7331", "", &banner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = srv.Close() }()
+
+	// The banner's "dev token <tok>" line names the one token.
+	var token string
+	for _, line := range strings.Split(banner.String(), "\n") {
+		if rest, ok := strings.CutPrefix(line, "studio: dev token "); ok {
+			token = strings.TrimSpace(strings.TrimSuffix(rest, "(WEFT_STUDIO_TOKEN fixes it)"))
+		}
+	}
+	if token == "" {
+		t.Fatalf("banner carries no dev token:\n%s", banner.String())
+	}
+
+	// That token authenticates against this server's API.
+	assertSetupB(t, srv.Handler(), token, os.Getenv("WEFT_DB"))
+
+	// And the banner is printed exactly once — one resolution, not a
+	// second draw for the wall.
+	if n := strings.Count(banner.String(), "dev token"); n != 1 {
+		t.Errorf("banner names the dev token %d times, want 1:\n%s", n, banner.String())
+	}
+}

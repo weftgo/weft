@@ -1,8 +1,11 @@
 package jsonl
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +15,7 @@ import (
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/thread"
+	"github.com/weftgo/weft/wefttest"
 )
 
 func openBackend(t *testing.T, dir string, opts ...thread.OpenOption) *backend {
@@ -366,5 +370,163 @@ func TestDeleteRacingAppends(t *testing.T) {
 		if _, _, _, err := b.Load(ctx, "s_race"); !errors.Is(err, thread.ErrNotFound) {
 			t.Errorf("Load after Delete: %v", err)
 		}
+	}
+}
+
+// shortWrite fails the next append write after letting through keep
+// bytes of it — the shape of a disk filling up mid-batch.
+func shortWrite(b *backend, keep int, cause error) {
+	b.put = func(f *os.File, buf []byte) (int, error) {
+		b.put = nil
+		n, err := f.Write(buf[:min(keep, len(buf))])
+		if err != nil {
+			return n, err
+		}
+		return n, cause
+	}
+}
+
+// An Append is all or nothing: a write that fails after part of the
+// batch reached the file — its first entry whole, its second torn —
+// leaves nothing of the batch behind. The complete first line used to
+// survive as an entry the caller was told was not written, so the
+// Session that retried found the storage one entry ahead of it
+// (ErrStale) for a write it never made.
+func TestFailedAppendLeavesNoPrefix(t *testing.T) {
+	ctx := context.Background()
+	errDisk := errors.New("no space left on device")
+	for name, cause := range map[string]error{"error": errDisk, "short": nil} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			b := openBackend(t, dir)
+			h := thread.Header{ID: "s_atomic", Created: time.Now().UTC()}
+			if err := b.Create(ctx, h); err != nil {
+				t.Fatal(err)
+			}
+			if err := b.Append(ctx, h.ID, entry("e_1")); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, h.ID+".jsonl")
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			holder := &struct{}{}
+			if n, _, err := b.Acquire(ctx, h.ID, holder); err != nil || n != 1 {
+				t.Fatalf("Acquire = %d, %v; want 1", n, err)
+			}
+
+			// The first entry's line and half of the second's reach the file.
+			first, _ := json.Marshal(entry("e_2"))
+			shortWrite(b, len(first)+1+10, cause)
+			err = b.Append(ctx, h.ID, entry("e_2"), entry("e_3"), entry("e_4"))
+			want := cause
+			if want == nil {
+				want = io.ErrShortWrite
+			}
+			if !errors.Is(err, want) {
+				t.Fatalf("the failed Append: %v, want %v", err, want)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(before) {
+				t.Fatalf("the failed append left bytes behind:\n%q\nwant the file as it stood:\n%q", after, before)
+			}
+			// The writer's view is intact: same count, no repair owed.
+			if n, _, err := b.Acquire(ctx, h.ID, holder); err != nil || n != 1 {
+				t.Fatalf("Acquire after the failed append = %d, %v; want 1", n, err)
+			}
+			_, entries, report, err := b.Load(ctx, h.ID)
+			if err != nil || report != nil || len(entries) != 1 {
+				t.Fatalf("Load after the failed append: %d entries, report %+v, err %v", len(entries), report, err)
+			}
+			// And the retry lands whole.
+			if err := b.Append(ctx, h.ID, entry("e_2"), entry("e_3"), entry("e_4")); err != nil {
+				t.Fatalf("the retried Append: %v", err)
+			}
+			_, entries, report, err = b.Load(ctx, h.ID)
+			if err != nil || report != nil || len(entries) != 4 {
+				t.Fatalf("Load after the retry: %d entries, report %+v, err %v", len(entries), report, err)
+			}
+		})
+	}
+}
+
+// The same failure seen from a Session, on a batch of two entries:
+// the write fails, the tree is unchanged, and the next write goes
+// through — the Session and its file never disagree about what was
+// written. With the batch's first line left in the file the Session's
+// next write was ErrStale, for an entry it was told it had not
+// written.
+func TestSessionSurvivesAFailedBatch(t *testing.T) {
+	ctx := context.Background()
+	b := openBackend(t, t.TempDir())
+	s, err := thread.Create(ctx, b, weft.New(wefttest.Script()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetInfo(ctx, "one", nil); err != nil {
+		t.Fatal(err)
+	}
+	errDisk := errors.New("no space left on device")
+	// The batch's first line and ten bytes of its second reach the file.
+	b.put = func(f *os.File, buf []byte) (int, error) {
+		b.put = nil
+		n, err := f.Write(buf[:bytes.IndexByte(buf, '\n')+1+10])
+		if err != nil {
+			return n, err
+		}
+		return n, errDisk
+	}
+	req := func(call string) thread.ApprovalRequestEntry {
+		return thread.ApprovalRequestEntry{CallID: call, Tool: "refund", Child: "s_child", RunID: "s_child-t1"}
+	}
+	if _, err := s.AppendApprovalRequests(ctx, req("s_child/c1"), req("s_child/c2")); !errors.Is(err, errDisk) {
+		t.Fatalf("the failed batch: %v", err)
+	}
+	if n := len(s.Entries()); n != 1 {
+		t.Fatalf("the failed batch left %d entries in the tree, want 1", n)
+	}
+	if err := s.SetInfo(ctx, "two", nil); err != nil {
+		t.Fatalf("the write after a failed batch: %v (the Session and its file disagree)", err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, entries, report, err := b.Load(ctx, s.ID())
+	if err != nil || report != nil || len(entries) != 2 {
+		t.Fatalf("Load: %d entries, report %+v, err %v; want the two writes that succeeded", len(entries), report, err)
+	}
+}
+
+// Under NoLock the last bytes of the file are not provably this
+// writer's, so nothing is cut by arithmetic: the file is left to the
+// tail repair, which removes the torn line before the next append —
+// the documented limit of a backend opened without its lock.
+func TestFailedAppendUnderNoLockFallsBackToTailRepair(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	b := openBackend(t, dir, thread.NoLock())
+	h := thread.Header{ID: "s_nolock", Created: time.Now().UTC()}
+	if err := b.Create(ctx, h); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := json.Marshal(entry("e_1"))
+	shortWrite(b, len(first)+1+10, nil)
+	if err := b.Append(ctx, h.ID, entry("e_1"), entry("e_2")); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("the short Append: %v", err)
+	}
+	if err := b.Append(ctx, h.ID, entry("e_3")); err != nil {
+		t.Fatal(err)
+	}
+	_, entries, report, err := b.Load(ctx, h.ID)
+	if err != nil || report != nil {
+		t.Fatalf("Load: report %+v, err %v", report, err)
+	}
+	// The torn second line is gone; the first, complete line stayed.
+	if len(entries) != 2 {
+		t.Fatalf("Load holds %d entries, want the surviving first line and the later append", len(entries))
 	}
 }

@@ -131,6 +131,10 @@ type backend struct {
 	syncEveryAppend bool
 	noLock          bool
 	log             *slog.Logger
+	// put, when set, replaces the file write of an append — the seam
+	// the tests fail a write through (a short write, an I/O error).
+	// Nil outside tests: the write is f.Write.
+	put func(f *os.File, buf []byte) (int, error)
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -950,12 +954,18 @@ func truncate(f *os.File, size int64) error {
 }
 
 // write appends buf to the held session in one write, then fsyncs when
-// asked. raw marks bytes that may not end a line (Inject's): the file
-// is suspect afterwards. A failed or short write is an error and
-// leaves the file suspect too — it may hold a torn tail, which the
-// next write through this session repairs before appending; the
-// append did not happen. errStale means the session was released or
-// deleted under the caller, who acquires again.
+// asked. An append is all or nothing as far as this process can make
+// it: when the write fails or comes up short — or the fsync after it
+// fails — the bytes that did reach the file are cut off again, back to
+// where the file stood, under the same lock (unwrite). A batch's
+// complete first lines would otherwise survive as entries the caller
+// was told were not written. Only when the cut itself cannot be made
+// is the file left suspect — it may hold a torn tail, which the next
+// write through this session repairs before appending — and its line
+// count unknown. raw marks bytes that may not end a line (Inject's):
+// the file is suspect afterwards, and a failed raw write is not cut.
+// errStale means the session was released or deleted under the
+// caller, who acquires again.
 func (b *backend) write(id string, s *session, buf []byte, sync, raw bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -968,9 +978,22 @@ func (b *backend) write(id string, s *session, buf []byte, sync, raw bool) error
 		}
 		s.suspect = false
 	}
-	if err := writeFull(s.f, buf); err != nil {
-		s.suspect = true
-		s.lines = unknownLines // part of the batch may be in the file
+	put := b.put
+	if put == nil {
+		put = (*os.File).Write
+	}
+	n, err := put(s.f, buf)
+	if err == nil && n != len(buf) {
+		err = io.ErrShortWrite
+	}
+	if err == nil && sync {
+		err = s.f.Sync()
+	}
+	if err != nil {
+		if raw || !b.unwrite(id, s, n, err) {
+			s.suspect = true
+			s.lines = unknownLines // part of the batch may be in the file
+		}
 		return err
 	}
 	if raw {
@@ -980,15 +1003,42 @@ func (b *backend) write(id string, s *session, buf []byte, sync, raw bool) error
 		// Append's bytes: whole lines, one per entry.
 		s.lines += bytes.Count(buf, []byte{'\n'})
 	}
-	if !sync {
-		s.dirty = true
-		return nil
-	}
-	if err := s.f.Sync(); err != nil {
-		return err
-	}
-	s.dirty = false
+	s.dirty = !sync
 	return nil
+}
+
+// unwrite removes the n bytes a failed append left at the end of the
+// held file, so no prefix of the batch survives, and reports whether
+// the file is back where it stood. The caller holds the session's
+// mutex and — unless the backend was opened with NoLock — its
+// exclusive lock, which is what makes the last n bytes this write's
+// own: under NoLock another writer may have appended since, the
+// arithmetic proves nothing, and the file is left to the tail repair.
+// The cut is fsynced and logged; a cut that fails is logged too and
+// reported as not made.
+func (b *backend) unwrite(id string, s *session, n int, cause error) bool {
+	if n == 0 {
+		return true // nothing reached the file
+	}
+	if b.noLock {
+		return false
+	}
+	fi, err := s.f.Stat()
+	if err == nil {
+		if fi.Size() < int64(n) {
+			err = fmt.Errorf("file is %d bytes, shorter than the %d written", fi.Size(), n)
+		} else if err = truncate(s.f, fi.Size()-int64(n)); err == nil {
+			err = s.f.Sync()
+		}
+	}
+	if err != nil {
+		b.log.Error("thread/jsonl: a failed append's bytes could not be removed; the next write repairs the tail",
+			"session", id, "bytes", n, "append_err", cause, "err", err)
+		return false
+	}
+	b.log.Warn("thread/jsonl: removed the bytes of a failed append",
+		"session", id, "dropped_bytes", n, "append_err", cause)
+	return true
 }
 
 // writeFull writes buf in one write; a short write is an error.

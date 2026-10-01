@@ -516,3 +516,61 @@ func TestTurnsConformance(t *testing.T) {
 		})
 	})
 }
+
+// A mixed batch whose parked call delegates to a pool child: the
+// child's request is mirrored onto this session and decided here, the
+// delegation's answer resolves the parked call, and the resume's join
+// moves the active path off the line that holds the mirror and its
+// decision. The mirror is ledger, not transcript — it stays decided
+// wherever the leaf goes.
+func TestMixedBatchKeepsMirroredRequestsDecided(t *testing.T) {
+	ctx := context.Background()
+	agent, _, ran := mixedAgent()
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, _ := s.Send(ctx, weft.User("do both"))
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	// The parked call stands for a child session's parked call.
+	if _, err := s.AppendApprovalRequests(ctx, thread.ApprovalRequestEntry{
+		CallID: "child_call", Tool: "spend", Args: []byte(`{}`),
+		RunID: "s_child-t1", Child: "s_child", Wrapper: "call_d",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if p := s.Pending(); len(p) != 1 || p[0].CallID != "child_call" || p[0].Child != "s_child" {
+		t.Fatalf("Pending = %+v, want the mirrored child request", p)
+	}
+	if rt, err := s.Decide(ctx, thread.Approve("child_call")); err != nil || rt != nil {
+		t.Fatalf("Decide on the mirror = %v, %v; want it recorded, no resume yet", rt, err)
+	}
+	rt, err := s.ResolveDelegation(ctx, "call_d", "the child's answer", false)
+	if err != nil || rt == nil {
+		t.Fatalf("ResolveDelegation = %v, %v", rt, err)
+	}
+	if _, err := rt.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if ran.Load() != 0 {
+		t.Error("the delegating call's handler ran: its result is the child's answer")
+	}
+	if p := s.Pending(); len(p) != 0 {
+		t.Errorf("Pending after the resume = %+v, want none: the mirror was decided", p)
+	}
+	tools := toolMessages(s)
+	if len(tools) != 1 || len(tools[0].Content) != 2 {
+		t.Fatalf("tool messages = %+v, want one with both results", tools)
+	}
+	// And after the leaf moves again.
+	if err := s.Branch(ctx, t1.ID()); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range s.Pending() {
+		if r.CallID == "child_call" {
+			t.Errorf("the mirrored request reads pending again after a Branch: %+v", r)
+		}
+	}
+}

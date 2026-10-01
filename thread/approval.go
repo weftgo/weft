@@ -1359,6 +1359,33 @@ func (s *Session) approvalWalkLocked() approvalWalk {
 			w.decisions[e.CallID] = append(w.decisions[e.CallID], e)
 		}
 	}
+	// A mirrored child request (ADR 0022 §7) parks in another session:
+	// on this tree it is ledger, not part of any line's transcript, and
+	// Pending reads it from the whole file. Its decisions are read the
+	// same way — a decision recorded for a mirror stays in force
+	// wherever the leaf has moved since (a Branch, a resume's join),
+	// instead of the request reading undecided again from every line
+	// that does not hold the decision. They are matched by call id and
+	// run id, the child's own, so a mirror's decision is never lent to
+	// a call of this session that happens to share its id.
+	mirrors := map[string]map[string]bool{} // call id → the child runs that parked it
+	for _, e := range s.order {
+		if re, ok := e.(ApprovalRequestEntry); ok && re.Child != "" {
+			if mirrors[re.CallID] == nil {
+				mirrors[re.CallID] = map[string]bool{}
+			}
+			mirrors[re.CallID][re.RunID] = true
+		}
+	}
+	if len(mirrors) > 0 {
+		for i, e := range s.order {
+			d, ok := e.(ApprovalDecisionEntry)
+			if !ok || !mirrors[d.CallID][d.RunID] || onPath[d.ID] || spent[d.ID] || i <= inherited {
+				continue
+			}
+			w.decisions[d.CallID] = append(w.decisions[d.CallID], d)
+		}
+	}
 	return w
 }
 

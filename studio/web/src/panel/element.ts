@@ -8,7 +8,7 @@ import type { RunRow, Usage } from "../lib/api"
 import { callState, truncation, type FoldedRun, type FoldedStep, type FoldedToolCall } from "../lib/events"
 import { duration, relativeTime, tokens } from "../lib/format"
 import { readConfig, type PanelConfig } from "./config"
-import { el, fmtJSON } from "./render"
+import { el, fmtJSON, waterfall } from "./render"
 import { PANEL_CSS } from "./styles"
 import { emptyPanelState, PanelModel, strippedContent, type PanelState, type TurnView } from "./state"
 import { panelStudioVersion } from "./version"
@@ -46,7 +46,10 @@ export class WeftDevtools extends HTMLElement {
   private open: boolean
   /** data-open was adopted (on first connect); toggles own it after. */
   private opened = false
+  /** The ? shortcuts overlay (Dv3). */
+  private keys = false
   private body!: HTMLElement
+  private onKey = (e: KeyboardEvent) => this.keydown(e)
 
   constructor() {
     super()
@@ -67,12 +70,56 @@ export class WeftDevtools extends HTMLElement {
       this.opened = true
       this.open = this.cfg.open
     }
+    // §5.2's keyboard: Alt+W (and Ctrl+Shift+W where the browser
+    // delivers it — Q4) toggles the dock, ? lists the keys, r flips
+    // the raw JSON, Esc closes. Keys never fire while the user types
+    // in the host page's own inputs.
+    window.addEventListener("keydown", this.onKey)
     this.start()
   }
 
   disconnectedCallback() {
+    window.removeEventListener("keydown", this.onKey)
     this.model?.dispose()
     this.model = null
+  }
+
+  /** keydown is the whole keyboard surface; bare presses only. */
+  private keydown(e: KeyboardEvent): void {
+    const t = e.target as HTMLElement | null
+    if (
+      t &&
+      (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" ||
+        t.isContentEditable)
+    )
+      return
+    const toggleCombo =
+      (e.altKey && !e.ctrlKey && !e.shiftKey && e.code === "KeyW") || // Q4's pick
+      (e.ctrlKey && e.shiftKey && !e.altKey && e.code === "KeyW") // where delivered
+    if (toggleCombo) {
+      e.preventDefault()
+      this.keys = false
+      this.toggle()
+      return
+    }
+    if (e.key === "Escape") {
+      if (this.keys) {
+        this.keys = false
+        this.render(this.model?.state ?? emptyPanelState())
+      } else if (this.open) this.toggle()
+      return
+    }
+    if (!this.open) return
+    if (e.key === "?") {
+      e.preventDefault()
+      this.keys = !this.keys
+      this.render(this.model?.state ?? emptyPanelState())
+      return
+    }
+    if (e.key === "r" || e.key === "R") {
+      e.preventDefault()
+      this.toggleRaw()
+    }
   }
 
   attributeChangedCallback() {
@@ -141,6 +188,26 @@ export class WeftDevtools extends HTMLElement {
       if (scrolls[i]) (n as HTMLElement).scrollTop = scrolls[i]
     })
     if (s.raw && s.turn) root.appendChild(this.rawView(s.turn))
+    if (this.keys) root.appendChild(this.shortcuts())
+  }
+
+  /** shortcuts is §5.2's ? overlay: the keys, and the collision Q4
+   * records (Alt+W is the primary because Chrome eats Ctrl+Shift+W
+   * as close-window before any page can see it). */
+  private shortcuts(): HTMLElement {
+    const box = el("div", "weft-keys")
+    const dl = el("dl")
+    for (const [k, v] of [
+      ["Alt+W", "toggle the dock (Ctrl+Shift+W too, where the browser delivers it)"],
+      ["r", "raw JSON of the open turn"],
+      ["Esc", "close"],
+      ["?", "this list"],
+    ] as const) {
+      dl.appendChild(el("dt", undefined, k))
+      dl.appendChild(el("dd", undefined, v))
+    }
+    box.appendChild(dl)
+    return box
   }
 
   private header(s: PanelState): HTMLElement {
@@ -162,10 +229,10 @@ export class WeftDevtools extends HTMLElement {
     h.appendChild(el("span", undefined, stats, { title: stats }))
     if (s.turns.length && s.selected) {
       const a = el("a", "weft-btn", "⤢", {
-        href: studioLink(this.cfg.endpoint, s.selected),
+        href: studioLink(this.cfg.endpoint, s.selected, s.selectedStep ?? undefined),
         target: "_blank",
         rel: "noopener",
-        title: "open in Studio",
+        title: "open in Studio (run, and the step you are reading)",
       })
       a.style.textDecoration = "none"
       h.appendChild(a)
@@ -243,6 +310,14 @@ export class WeftDevtools extends HTMLElement {
         turn.expanded.delete(child)
       }
     })
+    // A step card click marks the step the user is reading — what ⤢
+    // carries into Studio (Dv3).
+    main.addEventListener("click", (e) => {
+      const target = (e.target as HTMLElement).closest?.("[data-weft-step]")
+      if (!target) return
+      const n = Number(target.getAttribute("data-weft-step"))
+      if (Number.isFinite(n)) void this.model?.selectStep(n)
+    })
     if (s.tooNew && s.meta) {
       main.appendChild(
         el("div", "weft-note weft-warn", [
@@ -273,9 +348,11 @@ export class WeftDevtools extends HTMLElement {
     if (!t) return el("div")
     const wrap = el("div")
     wrap.appendChild(this.notes(t))
+    const wf = waterfall(t.spans ?? [])
+    if (wf.length) wrap.appendChild(renderWaterfall(wf))
     const prompt = promptText(t)
     if (prompt) wrap.appendChild(el("div", "weft-note", prompt))
-    wrap.appendChild(renderFolded(t.folded, this.rowOf(t.id)?.status ?? "running", t))
+    wrap.appendChild(renderFolded(t.folded, this.rowOf(t.id)?.status ?? "running", t, s.selectedStep))
     if (t.folded.pending.length) wrap.appendChild(this.approvals(t.folded.pending))
     return wrap
   }
@@ -362,18 +439,50 @@ function promptText(t: TurnView): string {
     .join("\n")
 }
 
+/** renderWaterfall draws §2's timing mini-waterfall: one bar per
+ * span over the run's own window, wall milliseconds beside. */
+export function renderWaterfall(bars: { name: string; left: number; width: number; ms: number }[]): HTMLElement {
+  const box = el("div", "weft-wf")
+  for (const b of bars) {
+    const row = el("div", "weft-wf-row")
+    row.appendChild(el("span", "weft-wf-name", b.name, { title: b.name }))
+    const track = el("span", "weft-wf-track")
+    const bar = el("span", "weft-wf-bar")
+    bar.style.left = `${(b.left * 100).toFixed(2)}%`
+    bar.style.width = `${(b.width * 100).toFixed(2)}%`
+    track.appendChild(bar)
+    row.appendChild(track)
+    row.appendChild(el("span", "weft-wf-ms", `${b.ms}ms`))
+    box.appendChild(row)
+  }
+  return box
+}
+
 /** renderFolded draws the turn view (§2). */
-export function renderFolded(view: FoldedRun, runStatus: string, t?: TurnView): HTMLElement {
+export function renderFolded(
+  view: FoldedRun,
+  runStatus: string,
+  t?: TurnView,
+  selectedStep?: number | null
+): HTMLElement {
   const wrap = el("div")
   if (view.model?.name) {
     wrap.appendChild(el("div", "weft-reason", `${view.model.provider}/${view.model.name}`))
   }
-  for (const step of view.steps) wrap.appendChild(renderStep(step, runStatus, t))
+  for (const step of view.steps)
+    wrap.appendChild(renderStep(step, runStatus, t, selectedStep))
   return wrap
 }
 
-function renderStep(step: FoldedStep, runStatus: string, t?: TurnView): HTMLElement {
+function renderStep(
+  step: FoldedStep,
+  runStatus: string,
+  t?: TurnView,
+  selectedStep?: number | null
+): HTMLElement {
   const card = el("div", "weft-step")
+  card.setAttribute("data-weft-step", String(step.index))
+  if (selectedStep === step.index) card.style.outline = "1px solid var(--w-accent)"
   const head = el("div", "weft-step-h", [
     el("span", undefined, `step ${step.index}`),
     el("span", "weft-grow"),

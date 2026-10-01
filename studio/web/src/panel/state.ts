@@ -71,6 +71,9 @@ export interface PanelState {
    * playground on; the slot exists (§2). */
   experiments: Map<string, RunRow[]>
   selected: string
+  /** The step the user is reading (Dv3): carried into Studio by the ⤢
+   * deep link (?step=N&view=story). */
+  selectedStep: number | null
   turn: TurnView | null
   /** The scope subscription is open (the live dot). */
   live: boolean
@@ -89,6 +92,7 @@ export function emptyPanelState(): PanelState {
     turns: [],
     experiments: new Map(),
     selected: "",
+    selectedStep: null,
     turn: null,
     live: false,
     raw: false,
@@ -155,6 +159,7 @@ export class PanelModel {
     turns: [],
     experiments: new Map(),
     selected: "",
+    selectedStep: null,
     turn: null,
     live: false,
     raw: false,
@@ -388,12 +393,16 @@ export class PanelModel {
     const seq = this.loadSeq
     const feed = newFold()
     const events: PosEvent[] = []
-    let after = 0
-    for (let page = 0; page < 20; page++) {
-      const p = await fetchEvents(this.ep, childId, after)
-      events.push(...p.events)
-      if (p.done || p.next_after === null) break
-      after = p.next_after
+    try {
+      let after = 0
+      for (let page = 0; page < 20; page++) {
+        const p = await fetchEvents(this.ep, childId, after)
+        events.push(...p.events)
+        if (p.done || p.next_after === null) break
+        after = p.next_after
+      }
+    } catch {
+      return // the child's history is unreachable: leave the expander
     }
     for (const p of events) feed.push(p.event, p.pos)
     let folded = feed.result()
@@ -411,6 +420,13 @@ export class PanelModel {
   /** toggleRaw flips the raw JSON view (§2: one keypress away). */
   toggleRaw() {
     this.state.raw = !this.state.raw
+    this.emit()
+  }
+
+  /** selectStep marks the step the user is reading: the ⤢ deep link
+   * carries it into Studio (Dv3, §2 "with the context carried over"). */
+  selectStep(index: number) {
+    this.state.selectedStep = index
     this.emit()
   }
 

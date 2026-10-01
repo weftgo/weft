@@ -171,14 +171,14 @@ function l(e) {
 function u(e, t) {
 	return e.state === "done" ? "done" : t === "running" ? "running" : "never";
 }
-var ee = /…\[truncated (\d+) bytes\]/u, d = /^tool call (.+) was not executed: the response hit the output token limit$/;
+var d = /…\[truncated (\d+) bytes\]/u, ee = /^tool call (.+) was not executed: the response hit the output token limit$/;
 function f(e) {
-	let t = ee.exec(e);
+	let t = d.exec(e);
 	if (t) return {
 		kind: "bytes",
 		bytes: Number(t[1])
 	};
-	let n = d.exec(e);
+	let n = ee.exec(e);
 	return n ? {
 		kind: "call",
 		tool: n[1]
@@ -231,9 +231,24 @@ function v(e) {
 		return String(e);
 	}
 }
+function y(e) {
+	let t = e.map((e) => ({
+		name: e.name,
+		a: Date.parse(e.start),
+		b: Date.parse(e.end)
+	})).filter((e) => Number.isFinite(e.a) && Number.isFinite(e.b) && e.b >= e.a);
+	if (!t.length) return [];
+	let n = Math.min(...t.map((e) => e.a)), r = Math.max(...t.map((e) => e.b)), i = Math.max(1, r - n);
+	return t.map((e) => ({
+		name: e.name,
+		left: (e.a - n) / i,
+		width: Math.max(.005, (e.b - e.a) / i),
+		ms: e.b - e.a
+	}));
+}
 //#endregion
 //#region src/panel/styles.ts
-var y = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", monospace", b = `
+var b = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", monospace", te = `
 :host { all: initial; box-sizing: border-box; }
 *, *::before, *::after { box-sizing: inherit; }
 .weft-root {
@@ -241,7 +256,7 @@ var y = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", mon
   --w-fg: #d7dee6; --w-dim: #8b98a5; --w-faint: #5c6873;
   --w-line: #2a333d; --w-accent: #4cc38a; --w-warn: #e5b567;
   --w-err: #e06c75; --w-info: #6cb6ff;
-  font: 12px/1.45 ${y};
+  font: 12px/1.45 ${b};
   color: var(--w-fg);
 }
 .weft-root * { margin: 0; padding: 0; font: inherit; color: inherit; }
@@ -267,7 +282,7 @@ var y = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", mon
   right: 16px; bottom: 16px; width: 40px; height: 40px;
   border-radius: 50%; border: 1px solid var(--w-line);
   background: var(--w-bg); color: var(--w-fg); cursor: pointer;
-  font: 13px ${y};
+  font: 13px ${b};
   display: flex; align-items: center; justify-content: center;
 }
 .weft-fab:hover { background: var(--w-bg2); }
@@ -385,7 +400,7 @@ function x(e) {
 }
 //#endregion
 //#region src/lib/live.ts
-function te(e) {
+function ne(e) {
 	let [[t, n]] = Object.entries(e);
 	return `${encodeURIComponent(t)}=${encodeURIComponent(n)}`;
 }
@@ -442,7 +457,7 @@ function j(e, t, n) {
 	return w(e, `sessions${r ? `?${r}` : ""}`, n);
 }
 function M(e, t) {
-	let n = new URLSearchParams(te(t.selector));
+	let n = new URLSearchParams(ne(t.selector));
 	n.set("kinds", (t.kinds ?? ["event", "run"]).join(",")), e.token && n.set("token", e.token);
 	let r = S(e, `live?${n.toString()}`), i = !1, a = /* @__PURE__ */ new Set(), o = new EventSource(r);
 	return o.addEventListener("record", (e) => {
@@ -508,6 +523,7 @@ function I() {
 		turns: [],
 		experiments: /* @__PURE__ */ new Map(),
 		selected: "",
+		selectedStep: null,
 		turn: null,
 		live: !1,
 		raw: !1
@@ -557,6 +573,7 @@ var B = class {
 		turns: [],
 		experiments: /* @__PURE__ */ new Map(),
 		selected: "",
+		selectedStep: null,
 		turn: null,
 		live: !1,
 		raw: !1
@@ -702,19 +719,24 @@ var B = class {
 	async expandChild(e) {
 		let t = this.state.turn;
 		if (!t || t.children.has(e)) return;
-		let n = this.loadSeq, r = o(), i = [], a = 0;
-		for (let t = 0; t < 20; t++) {
-			let t = await O(this.ep, e, a);
-			if (i.push(...t.events), t.done || t.next_after === null) break;
-			a = t.next_after;
+		let n = this.loadSeq, r = o(), i = [];
+		try {
+			let t = 0;
+			for (let n = 0; n < 20; n++) {
+				let n = await O(this.ep, e, t);
+				if (i.push(...n.events), n.done || n.next_after === null) break;
+				t = n.next_after;
+			}
+		} catch {
+			return;
 		}
 		for (let e of i) r.push(e.event, e.pos);
-		let s = r.result(), l = await k(this.ep, e).catch(() => null);
-		n === this.loadSeq && this.state.turn === t && (l && (s = c(s, l.batches)), t.children.set(e, {
+		let a = r.result(), s = await k(this.ep, e).catch(() => null);
+		n === this.loadSeq && this.state.turn === t && (s && (a = c(a, s.batches)), t.children.set(e, {
 			events: i,
 			feed: r,
-			folded: s,
-			transcript: l
+			folded: a,
+			transcript: s
 		}), this.emit());
 	}
 	rowOf(e) {
@@ -722,6 +744,9 @@ var B = class {
 	}
 	toggleRaw() {
 		this.state.raw = !this.state.raw, this.emit();
+	}
+	selectStep(e) {
+		this.state.selectedStep = e, this.emit();
 	}
 	raf = 0;
 	emit() {
@@ -756,15 +781,37 @@ var U = class extends HTMLElement {
 	model = null;
 	open;
 	opened = !1;
+	keys = !1;
 	body;
+	onKey = (e) => this.keydown(e);
 	constructor() {
-		super(), this.cfg = i(this), this.open = this.cfg.open, this.shadow = this.attachShadow({ mode: "open" }), this.body = _("div", "weft-root"), this.shadow.append(_("style", void 0, b), this.body), this.render(I());
+		super(), this.cfg = i(this), this.open = this.cfg.open, this.shadow = this.attachShadow({ mode: "open" }), this.body = _("div", "weft-root"), this.shadow.append(_("style", void 0, te), this.body), this.render(I());
 	}
 	connectedCallback() {
-		this.cfg = i(this), this.opened || (this.opened = !0, this.open = this.cfg.open), this.start();
+		this.cfg = i(this), this.opened || (this.opened = !0, this.open = this.cfg.open), window.addEventListener("keydown", this.onKey), this.start();
 	}
 	disconnectedCallback() {
-		this.model?.dispose(), this.model = null;
+		window.removeEventListener("keydown", this.onKey), this.model?.dispose(), this.model = null;
+	}
+	keydown(e) {
+		let t = e.target;
+		if (!t || t.tagName !== "INPUT" && t.tagName !== "TEXTAREA" && t.tagName !== "SELECT" && !t.isContentEditable) {
+			if (e.altKey && !e.ctrlKey && !e.shiftKey && e.code === "KeyW" || e.ctrlKey && e.shiftKey && !e.altKey && e.code === "KeyW") {
+				e.preventDefault(), this.keys = !1, this.toggle();
+				return;
+			}
+			if (e.key === "Escape") {
+				this.keys ? (this.keys = !1, this.render(this.model?.state ?? I())) : this.open && this.toggle();
+				return;
+			}
+			if (this.open) {
+				if (e.key === "?") {
+					e.preventDefault(), this.keys = !this.keys, this.render(this.model?.state ?? I());
+					return;
+				}
+				(e.key === "r" || e.key === "R") && (e.preventDefault(), this.toggleRaw());
+			}
+		}
 	}
 	attributeChangedCallback() {
 		this.cfg = i(this), this.isConnected && this.start();
@@ -797,7 +844,17 @@ var U = class extends HTMLElement {
 		let a = _("div", "weft-cols");
 		a.appendChild(this.turnList(e)), a.appendChild(this.main(e)), i.appendChild(a), i.appendChild(this.footer(e)), t.appendChild(i), t.querySelectorAll(".weft-turns, .weft-main").forEach((e, t) => {
 			r[t] && (e.scrollTop = r[t]);
-		}), e.raw && e.turn && t.appendChild(this.rawView(e.turn));
+		}), e.raw && e.turn && t.appendChild(this.rawView(e.turn)), this.keys && t.appendChild(this.shortcuts());
+	}
+	shortcuts() {
+		let e = _("div", "weft-keys"), t = _("dl");
+		for (let [e, n] of [
+			["Alt+W", "toggle the dock (Ctrl+Shift+W too, where the browser delivers it)"],
+			["r", "raw JSON of the open turn"],
+			["Esc", "close"],
+			["?", "this list"]
+		]) t.appendChild(_("dt", void 0, e)), t.appendChild(_("dd", void 0, n));
+		return e.appendChild(t), e;
 	}
 	header(e) {
 		let t = _("div", "weft-head"), n = e.turns.some((e) => e.status === "running");
@@ -807,10 +864,10 @@ var U = class extends HTMLElement {
 		let o = e.turns.reduce((e, t) => e + (t.usage?.input_tokens ?? 0), 0), s = e.turns.reduce((e, t) => e + (t.usage?.output_tokens ?? 0), 0), c = `${e.turns.length} turns · ${g(o)}→${g(s)} tok`;
 		if (t.appendChild(_("span", void 0, c, { title: c })), e.turns.length && e.selected) {
 			let n = _("a", "weft-btn", "⤢", {
-				href: H(this.cfg.endpoint, e.selected),
+				href: H(this.cfg.endpoint, e.selected, e.selectedStep ?? void 0),
 				target: "_blank",
 				rel: "noopener",
-				title: "open in Studio"
+				title: "open in Studio (run, and the step you are reading)"
 			});
 			n.style.textDecoration = "none", t.appendChild(n);
 		}
@@ -856,6 +913,11 @@ var U = class extends HTMLElement {
 			if (!n) return;
 			let r = this.model?.state.turn;
 			r && (t.open ? (r.expanded.add(n), this.model?.expandChild(n)) : r.expanded.delete(n));
+		}), t.addEventListener("click", (e) => {
+			let t = e.target.closest?.("[data-weft-step]");
+			if (!t) return;
+			let n = Number(t.getAttribute("data-weft-step"));
+			Number.isFinite(n) && this.model?.selectStep(n);
 		}), e.tooNew && e.meta ? (t.appendChild(_("div", "weft-note weft-warn", [_("span", "weft-warn", "Studio is newer than this panel; update panel.js"), _("span", void 0, `studio_version ${e.meta.studio_version} · panel built for ${N()}`)])), t) : e.turn ? (t.appendChild(this.turnView(e)), t) : (t.appendChild(_("div", "weft-splash", "select a turn")), t);
 	}
 	turnView(e) {
@@ -863,8 +925,10 @@ var U = class extends HTMLElement {
 		if (!t) return _("div");
 		let n = _("div");
 		n.appendChild(this.notes(t));
-		let r = W(t);
-		return r && n.appendChild(_("div", "weft-note", r)), n.appendChild(G(t.folded, this.rowOf(t.id)?.status ?? "running", t)), t.folded.pending.length && n.appendChild(this.approvals(t.folded.pending)), n;
+		let r = y(t.spans ?? []);
+		r.length && n.appendChild(G(r));
+		let i = W(t);
+		return i && n.appendChild(_("div", "weft-note", i)), n.appendChild(K(t.folded, this.rowOf(t.id)?.status ?? "running", t, e.selectedStep)), t.folded.pending.length && n.appendChild(this.approvals(t.folded.pending)), n;
 	}
 	notes(e) {
 		let t = _("div"), n = this.rowOf(e.id);
@@ -902,50 +966,62 @@ var U = class extends HTMLElement {
 function W(e) {
 	return e.transcript ? e.transcript.batches.flatMap((e) => e.messages).filter((e) => e.role === "user").flatMap((e) => e.content).filter((e) => e.type === "text").map((e) => e.text).join("\n") : "";
 }
-function G(e, t, n) {
-	let r = _("div");
-	e.model?.name && r.appendChild(_("div", "weft-reason", `${e.model.provider}/${e.model.name}`));
-	for (let i of e.steps) r.appendChild(K(i, t, n));
-	return r;
+function G(e) {
+	let t = _("div", "weft-wf");
+	for (let n of e) {
+		let e = _("div", "weft-wf-row");
+		e.appendChild(_("span", "weft-wf-name", n.name, { title: n.name }));
+		let r = _("span", "weft-wf-track"), i = _("span", "weft-wf-bar");
+		i.style.left = `${(n.left * 100).toFixed(2)}%`, i.style.width = `${(n.width * 100).toFixed(2)}%`, r.appendChild(i), e.appendChild(r), e.appendChild(_("span", "weft-wf-ms", `${n.ms}ms`)), t.appendChild(e);
+	}
+	return t;
 }
-function K(e, t, n) {
-	let r = _("div", "weft-step"), i = _("div", "weft-step-h", [_("span", void 0, `step ${e.index}`), _("span", "weft-grow")]);
-	e.finish && (i.appendChild(_("span", void 0, e.finish.reason)), i.appendChild(_("span", void 0, ne(e.finish.usage)))), r.appendChild(i);
-	let a = _("div", "weft-step-b");
+function K(e, t, n, r) {
+	let i = _("div");
+	e.model?.name && i.appendChild(_("div", "weft-reason", `${e.model.provider}/${e.model.name}`));
+	for (let a of e.steps) i.appendChild(q(a, t, n, r));
+	return i;
+}
+function q(e, t, n, r) {
+	let i = _("div", "weft-step");
+	i.setAttribute("data-weft-step", String(e.index)), r === e.index && (i.style.outline = "1px solid var(--w-accent)");
+	let a = _("div", "weft-step-h", [_("span", void 0, `step ${e.index}`), _("span", "weft-grow")]);
+	e.finish && (a.appendChild(_("span", void 0, e.finish.reason)), a.appendChild(_("span", void 0, ie(e.finish.usage)))), i.appendChild(a);
+	let o = _("div", "weft-step-b");
 	if (e.reasoning) {
 		let t = _("details", "weft-collapsible");
-		t.appendChild(_("summary", void 0, "reasoning")), t.appendChild(_("div", void 0, e.reasoning)), a.appendChild(t);
+		t.appendChild(_("summary", void 0, "reasoning")), t.appendChild(_("div", void 0, e.reasoning)), o.appendChild(t);
 	}
-	e.text && a.appendChild(_("div", void 0, e.text)), e.steer && a.appendChild(_("div", "weft-note", `steered: ${e.steer.text}`));
-	for (let r of e.toolCalls) a.appendChild(q(r, t, n));
-	return r.appendChild(a), r;
+	e.text && o.appendChild(_("div", void 0, e.text)), e.steer && o.appendChild(_("div", "weft-note", `steered: ${e.steer.text}`));
+	for (let r of e.toolCalls) o.appendChild(J(r, t, n));
+	return i.appendChild(o), i;
 }
-function q(e, t, n) {
-	let r = _("div", "weft-call"), i = u(e, t), a = _("div", "weft-call-h", [_("span", "weft-name", e.name), _("span", "weft-args", Z(e))]);
-	if (r.appendChild(a), e.childRunId && n && (a.appendChild(_("span", "weft-badge weft-info", "subagent", { title: e.childRunId })), r.appendChild(Y(e.childRunId, n))), e.result) {
-		let t = J(n, e);
+function J(e, t, n) {
+	let r = _("div", "weft-call"), i = u(e, t), a = _("div", "weft-call-h", [_("span", "weft-name", e.name), _("span", "weft-args", re(e))]);
+	if (r.appendChild(a), e.childRunId && n && (a.appendChild(_("span", "weft-badge weft-info", "subagent", { title: e.childRunId })), r.appendChild(X(e.childRunId, n))), e.result) {
+		let t = Y(n, e);
 		t && a.appendChild(_("span", "weft-badge weft-info", t));
 		let i = f(e.result.content);
 		i && a.appendChild(_("span", "weft-badge", i.kind === "bytes" ? `truncated ${i.bytes} bytes` : "not executed (max_tokens)")), e.result.isError && a.appendChild(_("span", "weft-badge weft-err", "error")), r.appendChild(_("div", "weft-res", e.result.content));
 	} else i === "running" ? r.appendChild(_("div", "weft-res", "running…")) : r.appendChild(_("div", "weft-res weft-warn", "never completed"));
 	return r;
 }
-function J(e, t) {
+function Y(e, t) {
 	if (!e?.spans) return "";
 	let n = e.spans.find((e) => e.name === "execute_tool" && e.attrs?.["gen_ai.tool.name"] === t.name);
 	if (!n) return "";
 	let r = Date.parse(n.end) - Date.parse(n.start);
 	return !Number.isFinite(r) || r < 0 ? "" : `${Math.round(r)}ms`;
 }
-function Y(e, t) {
+function X(e, t) {
 	let n = t.children.get(e), r = _("details", "weft-collapsible");
-	return r.setAttribute("data-weft-child", e), t.expanded.has(e) && r.setAttribute("open", ""), r.appendChild(_("summary", void 0, `subagent ${X(e)}`)), n ? r.appendChild(G(n.folded, "succeeded")) : r.appendChild(_("div", void 0, "loading the subagent's turn…")), r;
+	return r.setAttribute("data-weft-child", e), t.expanded.has(e) && r.setAttribute("open", ""), r.appendChild(_("summary", void 0, `subagent ${Z(e)}`)), n ? r.appendChild(K(n.folded, "succeeded")) : r.appendChild(_("div", void 0, "loading the subagent's turn…")), r;
 }
-function X(e) {
+function Z(e) {
 	let t = e.split("/");
 	return t[t.length - 1] || e;
 }
-function Z(e) {
+function re(e) {
 	if (e.args !== void 0) try {
 		return `(${JSON.stringify(e.args)})`;
 	} catch {
@@ -953,7 +1029,7 @@ function Z(e) {
 	}
 	return e.streamedArgs ? `(${e.streamedArgs}…)` : "(…)";
 }
-function ne(e) {
+function ie(e) {
 	let t = [`${g(e.input_tokens)}→${g(e.output_tokens)} tok`];
 	return e.cached_input_tokens && t.push(`${g(e.cached_input_tokens)} cached`), e.reasoning_tokens && t.push(`${g(e.reasoning_tokens)} reasoning`), e.cache_write_tokens && t.push(`${g(e.cache_write_tokens)} cache-write`), t.join(" · ");
 }
@@ -973,7 +1049,7 @@ function Q(e) {
 	} catch {}
 	t && e(t);
 }
-function re(e) {
+function ae(e) {
 	let t = document.createElement("weft-devtools");
 	e || Q((e) => {
 		e && t.setAttribute("data-public-id", e);
@@ -981,8 +1057,8 @@ function re(e) {
 	let n = () => document.body.appendChild(t);
 	document.body ? n() : document.addEventListener("DOMContentLoaded", n, { once: !0 });
 }
-var ie = i(), $ = document.querySelector("weft-devtools");
+var oe = i(), $ = document.querySelector("weft-devtools");
 $ ? $.hasAttribute("data-public-id") || Q((e) => {
 	e && $.setAttribute("data-public-id", e);
-}) : (ie.auto || a()) && re(n()?.getAttribute("data-public-id") !== null);
+}) : (oe.auto || a()) && ae(n()?.getAttribute("data-public-id") !== null);
 //#endregion

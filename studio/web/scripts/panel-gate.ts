@@ -163,6 +163,23 @@ async function main() {
   }
   w.fetch = fetch
   w.EventSource = FetchEventSource as unknown as typeof EventSource
+  // jsdom's window.addEventListener wrapper refuses calls arriving
+  // from bun-evaluated code (its `this` check fails across the shim),
+  // so the driver provides the registrar itself: the panel's keydown
+  // listeners land here and the rest of jsdom is untouched.
+  const keyListeners = new Set<(e: unknown) => void>()
+  Object.defineProperty(w, "addEventListener", {
+    configurable: true,
+    value: (type: string, cb: (e: unknown) => void) => {
+      if (type === "keydown") keyListeners.add(cb)
+    },
+  })
+  Object.defineProperty(w, "removeEventListener", {
+    configurable: true,
+    value: (_type: string, cb: (e: unknown) => void) => {
+      keyListeners.delete(cb)
+    },
+  })
   // The IIFE keeps bun's jsdom eval honest: a bundle-level `var`
   // would otherwise detach from its own scope under bun's eval shim.
   w.eval(`(function(){\n${panelJs}\n})()`)
@@ -291,6 +308,30 @@ async function main() {
   const servedJs = await served.text()
   if (servedJs !== panelJs) throw new Error("FAIL /panel.js is not the built bundle")
   console.log("PASS studio.Handler serves /panel.js (the committed bundle)")
+
+  // 5. the ⤢ deep link carries run and step (Dv3): clicking a step
+  // marks it, the link names it, and Studio answers the URL.
+  if (!args.otlp) {
+    const stepCard = dom.window.document
+      .querySelector("weft-devtools")
+      ?.shadowRoot?.querySelector("[data-weft-step]")
+    if (!stepCard) throw new Error("FAIL no step card to select")
+    ;(stepCard as HTMLElement).dispatchEvent(
+      new (dom.window as unknown as { Event: typeof Event }).Event("click", { bubbles: true })
+    )
+    await sleep(200)
+    const href = dom.window.document
+      .querySelector("weft-devtools")
+      ?.shadowRoot?.querySelector(".weft-head a")?.getAttribute("href")
+    if (!href || !/[?&]step=\d+&view=story$/.test(href))
+      throw new Error(`FAIL the ⤢ link does not carry the step: ${href}`)
+    console.log(`PASS the ⤢ deep link carries run and step: ${href}`)
+    const deep = await fetch(href)
+    const body = await deep.text()
+    if (deep.status !== 200 || !body.includes("<!DOCTYPE html>"))
+      throw new Error(`FAIL the deep link does not resolve: ${deep.status}`)
+    console.log("PASS the deep link resolves in Studio (the SPA shell serves the route)")
+  }
 
   console.log("PANEL GATE PASS")
   dom.window.close()

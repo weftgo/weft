@@ -49,3 +49,37 @@ export function fmtJSON(v: unknown): string {
     return String(v)
   }
 }
+
+// ── The timing waterfall (§2 Timing, Dv3) ─────────────────────────
+// Spans are available now (unlike v1), so per-step and per-tool
+// durations draw as a mini waterfall over the run's own window: one
+// bar per span, placed by (start − window start) / window width.
+
+export interface WaterfallBar {
+  name: string
+  /** Left offset and width, both 0..1 over the run's window. */
+  left: number
+  width: number
+  /** Wall time in ms. */
+  ms: number
+}
+
+/** waterfall lays spans over the run's [min start, max end] window.
+ * Spanless runs and unparseable times yield nothing. */
+export function waterfall(
+  spans: { name: string; start: string; end: string }[]
+): WaterfallBar[] {
+  const parsed = spans
+    .map((s) => ({ name: s.name, a: Date.parse(s.start), b: Date.parse(s.end) }))
+    .filter((s) => Number.isFinite(s.a) && Number.isFinite(s.b) && s.b >= s.a)
+  if (!parsed.length) return []
+  const from = Math.min(...parsed.map((s) => s.a))
+  const to = Math.max(...parsed.map((s) => s.b))
+  const span = Math.max(1, to - from)
+  return parsed.map((s) => ({
+    name: s.name,
+    left: (s.a - from) / span,
+    width: Math.max(0.005, (s.b - s.a) / span),
+    ms: s.b - s.a,
+  }))
+}

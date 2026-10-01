@@ -97,10 +97,13 @@ function fakeStudio(routes: Record<string, unknown>, meta: unknown = metaOK) {
   const calls: string[] = []
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), "http://studio.test/studio/api/")
-    const path = url.pathname.replace(/^.*\/api\//, "") + (url.search || "")
+    // Run ids carry slashes and travel percent-encoded; Go's mux
+    // decodes them before routing, so the fake keys the decoded path.
+    const path =
+      decodeURIComponent(url.pathname).replace(/^.*\/api\//, "") + (url.search || "")
     calls.push(path)
     if (url.pathname.endsWith("/meta")) return json(meta)
-    const hit = routes[url.pathname.replace(/^.*\/api\//, "") + (url.search || "")]
+    const hit = routes[path]
     if (hit) return json(hit)
     return new Response(JSON.stringify({ error: { code: "not_found", message: path } }), {
       status: 404,
@@ -372,6 +375,36 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     scope?.emit("run", { run: runRow({ id: "r_live", steps: 1 }) })
     await new Promise((r) => setTimeout(r, 20))
     expect(text(el, ".weft-turns")).toContain("1 steps")
+  })
+
+  it("subagents load lazily: the expander fetches the child's own events on open (Dv3)", async () => {
+    const child = { id: "r_ok/0/call_1", parent_call_id: "call_1" }
+    const routes = runRoutes([runRow({})])
+    routes["runs/r_ok"] = { ...runRow({}), children: [runRow({ ...child, session_id: "" })] }
+    routes["runs/r_ok/0/call_1"] = { ...runRow({ ...child, session_id: "" }), children: [] }
+    routes["runs/r_ok/0/call_1/events?after=0&limit=500"] = EVENTS
+    routes["runs/r_ok/0/call_1/transcript"] = TRANSCRIPT
+    routes["runs/r_ok/0/call_1/spans"] = { spans: [] }
+    const { fetchMock } = fakeStudio(routes)
+    vi.stubGlobal("fetch", fetchMock)
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-public-id": "pub_orders",
+      "data-open": "true",
+    })
+    const expander = $(el, '[data-weft-child="r_ok/0/call_1"]') as HTMLDetailsElement | null
+    expect(expander).toBeTruthy() // the slot exists, collapsed
+    expect(expander?.textContent).toContain("loading the subagent's turn")
+    expander?.setAttribute("open", "")
+    expander?.dispatchEvent(new Event("toggle", { bubbles: true }))
+    await new Promise((r) => setTimeout(r, 30))
+    const childCalls = fetchMock.mock.calls.map((c) => String(c[0])).filter((u) =>
+      u.includes(encodeURIComponent("r_ok/0/call_1"))
+    )
+    expect(childCalls.some((u) => u.includes("/events"))).toBe(true)
+    const reloaded = $(el, '[data-weft-child="r_ok/0/call_1"]')
+    expect(reloaded?.getAttribute("open")).toBe("") // the open state survived
+    expect(reloaded?.textContent).toContain("Order 42 shipped this morning.")
   })
 })
 

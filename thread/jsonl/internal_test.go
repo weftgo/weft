@@ -273,3 +273,98 @@ func TestTitleOfWithoutHeader(t *testing.T) {
 		t.Errorf("titleOf(empty file) = %q", got)
 	}
 }
+
+// Release racing the instance's own appends is not a correct program —
+// Release is a writer's last call — but it must stay safe: an append
+// that finds its session released under it re-acquires, so every
+// append lands, none is refused as if another writer held the lock,
+// and the file holds every line whole.
+func TestReleaseRacingAppendsLosesNothing(t *testing.T) {
+	ctx := context.Background()
+	b := openBackend(t, t.TempDir(), thread.FsyncOnFlush())
+	if err := b.Create(ctx, thread.Header{ID: "s_race", Created: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	const writers, each = 4, 100
+	errs := make(chan error, writers+1)
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stop:
+				errs <- nil
+				return
+			default:
+			}
+			if err := b.Release(ctx, "s_race"); err != nil {
+				errs <- err
+				return
+			}
+			if err := b.Flush(ctx, "s_race"); err != nil {
+				errs <- err
+				return
+			}
+		}
+	}()
+	done := make(chan error, writers)
+	for w := 0; w < writers; w++ {
+		go func() {
+			for i := 0; i < each; i++ {
+				if err := b.Append(ctx, "s_race", entry(thread.NewEntryID())); err != nil {
+					done <- err
+					return
+				}
+			}
+			done <- nil
+		}()
+	}
+	for w := 0; w < writers; w++ {
+		if err := <-done; err != nil {
+			t.Errorf("an append racing Release: %v", err)
+		}
+	}
+	close(stop)
+	if err := <-errs; err != nil {
+		t.Errorf("Release/Flush racing appends: %v", err)
+	}
+	_, entries, report, err := b.Load(ctx, "s_race")
+	if err != nil || report != nil || len(entries) != writers*each {
+		t.Fatalf("after the race: %d entries, report %+v, err %v; want %d", len(entries), report, err, writers*each)
+	}
+}
+
+// Delete racing the instance's own appends: every append answers nil
+// (it landed before the delete) or ErrNotFound (it arrived after) —
+// never ErrLocked, and never a write into a file that is gone.
+func TestDeleteRacingAppends(t *testing.T) {
+	ctx := context.Background()
+	for round := 0; round < 20; round++ {
+		b := openBackend(t, t.TempDir())
+		if err := b.Create(ctx, thread.Header{ID: "s_race", Created: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 4)
+		for w := 0; w < 4; w++ {
+			go func() {
+				for i := 0; i < 20; i++ {
+					if err := b.Append(ctx, "s_race", entry(thread.NewEntryID())); err != nil {
+						done <- err
+						return
+					}
+				}
+				done <- nil
+			}()
+		}
+		if err := b.Delete(ctx, "s_race"); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		for w := 0; w < 4; w++ {
+			if err := <-done; err != nil && !errors.Is(err, thread.ErrNotFound) {
+				t.Errorf("an append racing Delete: %v, want nil or ErrNotFound", err)
+			}
+		}
+		if _, _, _, err := b.Load(ctx, "s_race"); !errors.Is(err, thread.ErrNotFound) {
+			t.Errorf("Load after Delete: %v", err)
+		}
+	}
+}

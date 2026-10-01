@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -112,4 +113,99 @@ func ExampleOpen_release() {
 	// Output:
 	// while held: true
 	// after release: <nil>
+}
+
+// A writer that died mid-append leaves a torn final line. Load reports
+// it; the next writer removes it before appending — and says so
+// through the logger named at open — so the session loads clean
+// afterwards.
+func ExampleOpen_tornTail() {
+	dir, err := os.MkdirTemp("", "weft-jsonl-example")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	// The storage reports its repairs here; the timestamp is dropped
+	// so the example's output is stable.
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	}))
+	st, err := jsonl.Open(dir, thread.OpenLogger(logger))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	ctx := context.Background()
+	created := time.Date(2026, 9, 29, 9, 0, 0, 0, time.UTC)
+	if err := st.Create(ctx, thread.Header{ID: "s_demo", Created: created}); err != nil {
+		fmt.Println(err)
+		return
+	}
+	// The crash: the writer lets go, half a line in the file.
+	if err := st.(thread.Releaser).Release(ctx, "s_demo"); err != nil {
+		fmt.Println(err)
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "s_demo.jsonl"), os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	_, _ = f.WriteString(`{"type":"mess`)
+	_ = f.Close()
+
+	_, _, report, _ := st.Load(ctx, "s_demo")
+	fmt.Println("torn line:", report.Torn)
+
+	if err := st.Append(ctx, "s_demo", thread.MessageEntry{
+		ID: "e_1", Created: created.Add(time.Second), Message: weft.User("after the crash"),
+	}); err != nil {
+		fmt.Println(err)
+		return
+	}
+	_, entries, report, err := st.Load(ctx, "s_demo")
+	fmt.Println(len(entries), report == nil, err)
+	// Output:
+	// torn line: 2
+	// level=WARN msg="thread/jsonl: removed a torn tail before appending" session=s_demo dropped_bytes=13
+	// 1 true <nil>
+}
+
+// NoLock opens the directory without the cross-process writer lock:
+// the caller promises one writer per session, and a second Storage is
+// no longer refused. It is what a platform without file locks needs —
+// there Open fails without it — and a choice everywhere else.
+func ExampleOpen_noLock() {
+	dir, err := os.MkdirTemp("", "weft-jsonl-example")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	first, err := jsonl.Open(dir, thread.NoLock())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	second, err := jsonl.Open(dir, thread.NoLock())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	ctx := context.Background()
+	created := time.Date(2026, 9, 29, 9, 0, 0, 0, time.UTC)
+	if err := first.Create(ctx, thread.Header{ID: "s_shared", Created: created}); err != nil {
+		fmt.Println(err)
+		return
+	}
+	err = second.Append(ctx, "s_shared", thread.MessageEntry{ID: "e_1", Created: created, Message: weft.User("unrefused")})
+	fmt.Println("second writer:", err)
+	// Output:
+	// second writer: <nil>
 }

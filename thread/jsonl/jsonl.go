@@ -775,7 +775,7 @@ func (b *backend) repairTail(id string, f *os.File) error {
 	if keep == 0 {
 		return errNoHeader(id)
 	}
-	if err := f.Truncate(keep); err != nil {
+	if err := truncate(f, keep); err != nil {
 		return err
 	}
 	if err := f.Sync(); err != nil {
@@ -784,6 +784,33 @@ func (b *backend) repairTail(id string, f *os.File) error {
 	b.log.Warn("thread/jsonl: removed a torn tail before appending",
 		"session", id, "dropped_bytes", size-keep)
 	return nil
+}
+
+// truncate cuts the held file back to size. The session's own handle
+// is tried first; a platform that opens append-mode files without the
+// right to shorten them (Windows) refuses, and the cut is then made
+// through a second, plain write handle on the same file — safe because
+// the caller holds the session's writer lock and has just confirmed
+// the name still points at the file it locked.
+func truncate(f *os.File, size int64) error {
+	err := f.Truncate(size)
+	if err == nil {
+		return nil
+	}
+	w, openErr := os.OpenFile(f.Name(), os.O_WRONLY, 0)
+	if openErr != nil {
+		return err // the first failure is the one to report
+	}
+	defer func() { _ = w.Close() }()
+	held, statErr := f.Stat()
+	named, nameErr := w.Stat()
+	if statErr != nil || nameErr != nil || !os.SameFile(held, named) {
+		return err
+	}
+	if err := w.Truncate(size); err != nil {
+		return err
+	}
+	return w.Sync()
 }
 
 // write appends buf to the held session in one write, then fsyncs when

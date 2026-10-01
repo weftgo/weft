@@ -403,9 +403,29 @@ func New() *RuntimeServer {
 // (the Studio destination's token, S4.6) applies: nothing in-process
 // (setup A), the bearer token otherwise.
 func (rs *RuntimeServer) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/runtime/register", rs.serveRegister)
-	mux.HandleFunc("GET /api/runtime/commands", rs.serveCommands)
-	mux.HandleFunc("POST /api/runtime/acks", rs.serveAcks)
+	rs.MountGuarded(mux, nil)
+}
+
+// MountGuarded is Mount wrapping each route with guard when it is
+// non-nil. The studio side passes its server-identity guard: the link
+// speaks server-to-server (a runtime dials Studio with the server
+// token, or nothing in setup A), and a panel token that passes the
+// wall must not reach it — register overwrites any runtime's
+// registration, the commands stream replaces its feed, and acks forge
+// the accepted/finished state that steer and approval routing trust.
+// None of that is public-id-shaped, so S4.6's per-public-id scoping
+// cannot apply; the guard is the refusal.
+func (rs *RuntimeServer) MountGuarded(mux *http.ServeMux, guard func(http.Handler) http.Handler) {
+	mount := func(pattern string, h http.HandlerFunc) {
+		var handler http.Handler = h
+		if guard != nil {
+			handler = guard(handler)
+		}
+		mux.Handle(pattern, handler)
+	}
+	mount("POST /api/runtime/register", rs.serveRegister)
+	mount("GET /api/runtime/commands", rs.serveCommands)
+	mount("POST /api/runtime/acks", rs.serveAcks)
 }
 
 // ── register ──────────────────────────────────────────────────────

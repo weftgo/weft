@@ -27,6 +27,15 @@ type breakpointsRequest struct {
 // serveBreakpoints is the rung-3 verb (capability `breakpoints`).
 func (s *Server) serveBreakpoints(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// A runtime-wide effect — it parks every future run of the
+		// runtime — so it is not public-id-shaped and S4.6's scoping
+		// cannot apply: a panel token is refused outright, the server
+		// token or setup A's open API passes.
+		if idFrom(r).panel != nil {
+			writeError(w, r, http.StatusForbidden, "forbidden",
+				"breakpoints park every future run of the runtime: the server token, not a panel token")
+			return
+		}
 		id := r.PathValue("id")
 		var req breakpointsRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -101,9 +110,18 @@ func (s *Server) serveSteer(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 				"only runs a runtime started can be steered — the app's own turns are viewer-only (PQ7)")
 			return
 		}
-		// A panel token steers inside its public id only (S4.6).
+		// A panel token steers inside its public id only (S4.6) — the
+		// approval route's rule: the scope the command carried, else
+		// the run row's own public id, and empty is a refusal (a run
+		// with no public id is outside every panel token).
 		if pid := idFrom(r).panel; pid != nil {
-			if pub, ok := rs.PublicOf(runID); ok && pub != pid.PublicID {
+			publicID, _ := rs.PublicOf(runID)
+			if publicID == "" {
+				if row, err := s.db.Run(r.Context(), runID); err == nil {
+					publicID = row.PublicID
+				}
+			}
+			if publicID != pid.PublicID {
 				forbidden(w, r)
 				return
 			}

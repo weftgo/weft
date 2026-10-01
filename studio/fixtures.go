@@ -155,6 +155,12 @@ func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) 
 		badRequest(w, r, "fixture body: run_id is required")
 		return
 	}
+	// A panel token fixtures inside its public id only (S4.6) — like
+	// every run-id route in api.go. The export is a full transcript:
+	// a read-scoped token must not read another public id's turns.
+	if !s.scopeRunID(w, r, req.RunID) {
+		return
+	}
 	row, err := s.db.Run(r.Context(), req.RunID)
 	if err != nil {
 		notFound(w, r, "unknown run "+req.RunID)

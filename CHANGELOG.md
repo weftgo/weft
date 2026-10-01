@@ -15,6 +15,24 @@
   `obsdb/v0.1.0` and `obsdb/clickhouse/v0.1.0` tags carry the
   Go-side read bug (owner: consider a patch tag).
 
+### studio
+
+- The step 8b routes no longer escape S4.6's panel-token scoping rule
+  (programme audit P1-2): the fixtures export (`POST
+  /api/playground/fixtures`) scopes by public id like every run-id
+  route; the runtime link (`/api/runtime/register|commands|acks`,
+  mounted behind a new server-identity guard via
+  `RuntimeServer.MountGuarded`) and the breakpoints control refuse
+  panel tokens outright — they are server-to-server and not
+  public-id-shaped (register could overwrite a victim runtime's
+  registration, the commands stream could replace its feed, acks
+  could forge the state steer/approval routing trusts); steer now
+  mirrors the approval route's fallback (the db row's public id; a
+  run with no public id is outside every panel token). Pinned by
+  `TestStep8RoutesRefusePanelTokens` (read-scoped token → 403 on each
+  surface; the server token keeps working). The pushed `studio/v0.3.0`
+  tag carries the gap (owner: consider a patch tag).
+
 ### otel
 
 - `weftVersion()` reports v0.7.0 — the release step that owns the bump

@@ -2,6 +2,7 @@ package studio
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/weftgo/weft/obsdb"
 	linkruntime "github.com/weftgo/weft/studio/runtime"
 )
 
@@ -560,5 +562,155 @@ func TestPlaygroundPanelTokenScope(t *testing.T) {
 	pt.waitCommand(t, "cmd_foreign")
 	if code, body := pt.authed(t, http.MethodGet, "/api/playground/commands/cmd_foreign", pgTok, ""); code != http.StatusForbidden {
 		t.Errorf("playground-scoped read, another public id's command = %d (%s), want 403", code, body)
+	}
+}
+
+// TestStep8RoutesRefusePanelTokens pins the programme audit's P1-2:
+// the step 8b routes must not escape S4.6's rule. The runtime link
+// (register/commands/acks) and the breakpoints control are
+// server-to-server — a panel token is refused outright, whatever its
+// scope; the fixtures export scopes by public id like every run-id
+// route in api.go; steer mirrors the approval route's db-row fallback
+// so a run with no public id is outside every panel token. The server
+// token keeps every route working.
+func TestStep8RoutesRefusePanelTokens(t *testing.T) {
+	pt := newPlaygroundServer(t, "srv-token")
+
+	// Seed two runs with readable transcripts: one of another public
+	// id, one of the token's own.
+	seed := func(runID, publicID string) {
+		t.Helper()
+		base := map[string]any{
+			"weft.run.id": runID, "weft.session.id": "s_" + publicID,
+			"weft.public_id": publicID, "weft.turn": "1",
+			"gen_ai.agent.name": "acme-support",
+		}
+		mk := func(kind, evType string, pos int64, body string, extra map[string]any) obsdb.Record {
+			attrs := map[string]any{"weft.record": kind, "weft.run.id": runID}
+			if evType != "" {
+				attrs["weft.event.type"] = evType
+			}
+			switch kind {
+			case "event":
+				attrs["weft.event.pos"] = pos
+			case "messages":
+				attrs["weft.messages.index"] = pos
+				attrs["weft.messages.count"] = int64(1)
+			}
+			for k, v := range base {
+				attrs[k] = v
+			}
+			for k, v := range extra {
+				attrs[k] = v
+			}
+			return obsdb.Record{
+				Time: time.Now().UTC().Add(time.Duration(pos) * time.Second),
+				EventName: "weft." + kind, Severity: 9, Body: body, Service: "svc",
+				Attrs: attrs, Resource: map[string]any{"service.name": "svc"},
+			}
+		}
+		recs := []obsdb.Record{
+			mk("event", "run_start", 0, `{"type":"run_start","id":"`+runID+`","model":{"provider":"wefttest","name":"script"},"agent":"acme-support"}`, nil),
+			mk("messages", "", 0, `[{"role":"user","content":[{"type":"text","text":"go"}]}]`, nil),
+			mk("messages", "", 1, `[{"role":"assistant","content":[{"type":"text","text":"done"}]}]`, nil),
+			mk("event", "run_finish", 1, `{"type":"run_finish","run_id":"`+runID+`","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`, nil),
+		}
+		if err := pt.db.Write(context.Background(), obsdb.Batch{Records: recs}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed("run_other", "pub_other")
+	seed("run_mine", "pub_mine")
+
+	// A read-scoped panel token for pub_mine, minted the real way.
+	code, out := pt.authed(t, http.MethodPost, "/api/panel-tokens", pt.token, `{"public_id":"pub_mine","ttl":"10m"}`)
+	if code != http.StatusOK {
+		t.Fatalf("mint = %d %s", code, out)
+	}
+	var minted struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal([]byte(out), &minted); err != nil {
+		t.Fatal(err)
+	}
+	readTok := minted.Token
+
+	// Fixtures: another public id's run is refused; the token's own
+	// run exports (a readable transcript was seeded).
+	if code, body := pt.authed(t, http.MethodPost, "/api/playground/fixtures", readTok, `{"run_id":"run_other"}`); code != http.StatusForbidden {
+		t.Errorf("fixtures, another public id's run = %d (%s), want 403", code, body)
+	}
+	if code, body := pt.authed(t, http.MethodPost, "/api/playground/fixtures", readTok, `{"run_id":"run_mine"}`); code != http.StatusOK {
+		t.Errorf("fixtures, own run = %d (%s), want 200", code, body)
+	}
+	if code, body := pt.authed(t, http.MethodPost, "/api/playground/fixtures", pt.token, `{"run_id":"run_other"}`); code != http.StatusOK {
+		t.Errorf("fixtures, server token = %d (%s), want 200", code, body)
+	}
+
+	// The runtime link: a panel token never reaches register, the
+	// command stream, or the acks — each can hijack or poison another
+	// runtime (register overwrites, commands replaces the feed, acks
+	// forge state), none of it public-id-shaped.
+	regBody := `{"runtime_id":"rt_hijack","agents":[{"name":"evil","manifest":"{\"weft\":1,\"agents\":[{\"name\":\"evil\",\"model\":{\"provider\":\"p\",\"name\":\"m\"},\"policy\":{},\"tools\":[]}]}"}]}`
+	if code, body := pt.authed(t, http.MethodPost, "/api/runtime/register", readTok, regBody); code != http.StatusForbidden {
+		t.Errorf("register, panel token = %d (%s), want 403", code, body)
+	}
+	if code, _, _ := getWith(t, pt.Handler(), "/studio/api/runtime/commands?runtime=rt_test", readTok, ""); code != http.StatusForbidden {
+		t.Errorf("commands stream, panel token = %d, want 403", code)
+	}
+	if code, body := pt.authed(t, http.MethodPost, "/api/runtime/acks", readTok, `{"command_id":"cmd_x","state":"accepted"}`); code != http.StatusForbidden {
+		t.Errorf("acks, panel token = %d (%s), want 403", code, body)
+	}
+	// The server token keeps the link: register answers 200 (the
+	// harness itself registered and holds the stream, so acks' 404 for
+	// an unknown command id proves it passed the guard).
+	if code, body := pt.authed(t, http.MethodPost, "/api/runtime/register", pt.token, regBody); code != http.StatusOK {
+		t.Errorf("register, server token = %d (%s), want 200", code, body)
+	}
+	if code, _ := pt.authed(t, http.MethodPost, "/api/runtime/acks", pt.token, `{"command_id":"cmd_none","state":"accepted"}`); code != http.StatusNotFound {
+		t.Errorf("acks, server token = %d, want 404 (past the guard)", code)
+	}
+
+	// Breakpoints park every future run of the runtime — a server-level
+	// control, refused for a panel token, working for the server token.
+	if code, body := pt.authed(t, http.MethodPut, "/api/runtimes/rt_test/breakpoints", readTok, `{"tools":[]}`); code != http.StatusForbidden {
+		t.Errorf("breakpoints, panel token = %d (%s), want 403", code, body)
+	}
+	if code, body := pt.authed(t, http.MethodPut, "/api/runtimes/rt_test/breakpoints", pt.token, `{"tools":[]}`); code != http.StatusOK {
+		t.Errorf("breakpoints, server token = %d (%s), want 200", code, body)
+	}
+
+	// Steer: the approval route's fallback rule. A runtime-started run
+	// of another public id is refused; one with no public id at all is
+	// outside every panel token; the token's own run steers.
+	startRun := func(name, publicID, runID string) {
+		t.Helper()
+		body := `{"runtime":"rt_test","agent":"acme-support","command_id":"` + name + `",` +
+			`"input":"go","engine":"live","side_effects":"substitute","thread":"ephemeral"`
+		if publicID != "" {
+			body += `,"public_id":"` + publicID + `"`
+		}
+		body += `}`
+		if code, out := pt.authed(t, http.MethodPost, "/api/playground/runs", pt.token, body); code != http.StatusAccepted {
+			t.Fatalf("enqueue %s = %d %s", name, code, out)
+		}
+		pt.waitCommand(t, name)
+		pt.ack(t, `{"command_id":"`+name+`","state":"accepted","run_id":"`+runID+`"}`)
+	}
+	startRun("cmd_other", "pub_other", "run_rt_other")
+	startRun("cmd_anon", "", "run_rt_anon")
+	startRun("cmd_mine", "pub_mine", "run_rt_mine")
+
+	if code, body := pt.authed(t, http.MethodPost, "/api/runs/run_rt_other/steer", readTok, `{"message":"hi"}`); code != http.StatusForbidden {
+		t.Errorf("steer, another public id's run = %d (%s), want 403", code, body)
+	}
+	if code, body := pt.authed(t, http.MethodPost, "/api/runs/run_rt_anon/steer", readTok, `{"message":"hi"}`); code != http.StatusForbidden {
+		t.Errorf("steer, a run with no public id = %d (%s), want 403", code, body)
+	}
+	if code, body := pt.authed(t, http.MethodPost, "/api/runs/run_rt_mine/steer", readTok, `{"message":"hi"}`); code != http.StatusAccepted {
+		t.Errorf("steer, own run = %d (%s), want 202", code, body)
+	}
+	if code, body := pt.authed(t, http.MethodPost, "/api/runs/run_rt_other/steer", pt.token, `{"message":"hi"}`); code != http.StatusAccepted {
+		t.Errorf("steer, server token = %d (%s), want 202", code, body)
 	}
 }

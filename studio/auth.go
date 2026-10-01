@@ -284,6 +284,23 @@ func (s *Server) scopeLive(w http.ResponseWriter, r *http.Request, sel obsdb.Sel
 	}
 }
 
+// serverOnly refuses panel tokens. It wraps the routes that speak
+// server-to-server — the runtime link's register/commands/acks, the
+// debugger's breakpoints — where S4.6's per-public-id scoping cannot
+// apply because the effect is not public-id-shaped (a runtime's whole
+// feed, every future run's parking). The server token passes, and so
+// does setup A's open API (no Token configured).
+func (s *Server) serverOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if idFrom(r).panel != nil {
+			writeError(w, r, http.StatusForbidden, "forbidden",
+				"this route speaks server-to-server: it needs the server token, not a panel token")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // servePanelTokens mints a panel token (S4.6 setup C): your backend
 // calls POST /api/panel-tokens {"public_id":"pub_…","ttl":"1h"}
 // with its server token and hands the signed token to the page —

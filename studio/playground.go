@@ -70,12 +70,17 @@ func registerPlayground(mux *http.ServeMux, s *Server) {
 	// when meta reports it (§8.5 item 3).
 	mux.HandleFunc("PUT /api/runtimes/{id}/breakpoints", s.serveBreakpoints(rs))
 	mux.HandleFunc("POST /api/runs/{id}/steer", s.serveSteer(rs))
-	// The runtime link's own block (§10.3), as its own capability.
+	// The runtime link's own block (§10.3), as its own capability —
+	// mounted behind the server-identity guard: the link speaks
+	// server-to-server (register overwrites a runtime's registration,
+	// the commands stream replaces its feed, acks forge the state the
+	// steer/approval routing trusts), so a panel token that passes the
+	// wall must still be refused here (S4.6).
 	s.addGroup(routeGroup{
 		name:       "runtimes",
 		capability: "runtimes",
 		register: func(mux *http.ServeMux, s *Server) {
-			rs.Mount(mux)
+			rs.MountGuarded(mux, s.serverOnly)
 		},
 	})
 	s.addGroup(routeGroup{

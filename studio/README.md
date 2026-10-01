@@ -36,12 +36,60 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 python app.py
 
 The dev token is printed at start (`WEFT_STUDIO_TOKEN` or `--token`
 fixes it); ingest is open on loopback; `--db sqlite://path` picks the
-file (`clickhouse://` arrives with step 6b).
+file, `--db clickhouse://user:pass@host:9000/db` the hosted backend
+(its own module, the one place the driver is imported).
 
 **C · hosted** — the same handler behind `studio.Token`: the panel's
 scoped tokens are HMAC-signed `{public_id, scope, exp}` minted by your
 backend through `POST /api/panel-tokens`; every data route refuses
 anything outside the token's public id.
+
+## The devtools panel (WEFT-DEVTOOLS.md)
+
+One script tag puts the run loop in the corner of your own page —
+`/panel.js` is served by the same handler:
+
+    <script type="module" src="/studio/panel.js" data-public-id="pub_…"></script>
+
+Rung 1 is a viewer scoped to that conversation: the turns (parked
+shown), the step story with tool calls, usage splits, approvals
+read-only, truncation/gap/stripped honesty, the raw JSON, a live tail,
+⤢ deep links into Studio, lazy subagents and a spans waterfall.
+`Alt+W` toggles (Q4), `?` lists keys, `r` flips raw. Setups B/C add
+`data-endpoint` and `data-token` (a dev token, or a panel token your
+backend mints per page via `POST /api/panel-tokens`). No Studio
+answering: the panel removes itself silently. The artifact is built by
+`studio/web/vite.panel.config.ts` (a separate library-mode build), the
+committed `studio/dist/panel/panel.js`, 38,245 B raw / 11.5 KiB gzip;
+`make studio-panel-asset` stages it as `panel-<version>.js` + sha256
+for non-Go backends.
+
+## The playground (WEFT-PLAYGROUND.md)
+
+Your app dials Studio out and executes experiment commands as runs of
+the agents it registers — setup A is five lines
+([runtime/examples/local](../runtime/examples/local) is the runnable
+demo behind the P0 curl gate):
+
+```go
+defer runtime.Install(runtime.Local(srv), // or runtime.Studio(url, tok)
+    runtime.Agents(support), runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000}),
+    runtime.AllowSideEffects("lookup_order"))()
+```
+
+Studio's side is `studio.New(..., studio.Playground(true))`, which
+serves `GET /api/runtimes` (the connected runtimes),
+`POST /api/playground/runs` (the §10.4 validation table: 400 unknown
+tool/model names and unsupported 8b modes, 403 raised limits or a
+refused side-effect tool, 404 unknown runtime/agent/source run, 409 a
+reused command id, 503 with no runtime connected) and
+`GET /api/playground/commands/{id}`, plus the runtime link's own
+routes (`POST /api/runtime/register`, `GET /api/runtime/commands` SSE,
+`POST /api/runtime/acks`). Safety: off unless `WEFT_ENV=dev` or
+`runtime.Enabled(true)`; overrides only narrow; every tool parks until
+`AllowSideEffects` names it; budgets cap each experiment; the app's
+own runs are never touched. P0 executes `engine: live` + thread
+ephemeral only — scripted, fork and `transcript_edits` arrive with 8b.
 
 The runs list (light): status as a dot and a word, the error under a
 failed run's id, session/public-id/experiment filters that mirror the
@@ -82,7 +130,8 @@ status, session, public id, playground and tag filters, cursor-paged),
 `runs/{id}/transcript` (the messages bodies), `runs/{id}/spans`,
 `traces/{trace_id}` (any trace), `sessions`, `sessions/{id}` (turns in
 order), `public/{public_id}`, `manifest`, `POST /api/panel-tokens`
-(mint; the panel itself is step 7), and `GET /api/live` — the SSE
+(mint; the panel's scoped tokens — see the devtools panel above), and
+`GET /api/live` — the SSE
 stream whose frame ids are the hub's Seq: exactly one selector
 (`run`/`session`/`public_id`/`agent`), `kinds` over
 event/delta/messages/run (default `event,run`; deltas are opt-in,
@@ -91,14 +140,20 @@ gap backfilled from the database and deduped on `(run, kind, pos)`,
 and `event: overflow` when a slow subscriber's queue drops it. OTLP
 ingest is `POST /v1/traces` and `/v1/logs` (protobuf and JSON, gzip,
 16 MiB after decompression, publish-then-write, 503 on a write failure
-so the exporter retries).
+so the exporter retries). Under `Playground(true)` the playground's
+routes join (`GET /api/runtimes`, `POST /api/playground/runs`, `GET
+/api/playground/commands/{id}`) beside the runtime link's own
+(`POST /api/runtime/register`, `GET /api/runtime/commands` SSE, `POST
+/api/runtime/acks`); `/panel.js` serves the devtools panel bundle —
+static and unauthenticated.
 
 Capabilities are computed from the registered route groups
-(`routes.go`) — never hard-coded: `live`, `ingest`, `auth` today, plus
+(`routes.go`) — never hard-coded: `live`, `ingest`, `auth` (with a
+token), and `playground` + `runtimes` under `Playground(true)`, plus
 anything a hosting wrapper declares with `studio.Capabilities(…)`.
-Later steps add their groups in their own files (`panel.go`,
-`playground.go`) through the package's group hooks; nothing edits
-`routes.go`.
+The panel group registers always on and names no capability;
+`panel.go` and `playground.go` add their groups through the package's
+hooks — nothing edits `routes.go`.
 
 Errors are `{"error": {"code", "message"}}` with the codes `not_found`,
 `bad_request`, `unauthorized`, `forbidden`, `conflict`, `unsupported`,
@@ -118,7 +173,8 @@ make studio-check   # rebuild, prove dist is fresh, check the 600 KiB gzip budge
 
 `make studio-check` is the freshness gate (ADR 0018 §4): it fails if
 `dist/` does not match `web/` or if the gzipped total exceeds 600 KiB
-(currently ~329 KiB). The build is deterministic — two builds from
+(currently ~341 KiB: the app's ~329 plus the panel bundle's 11.5).
+The build is deterministic — two builds from
 one tree are byte-identical (`scripts/clean-dist.ts` pins the router's
 prerender timestamp and keeps `<base href>` first in `<head>`).
 
@@ -130,5 +186,4 @@ Go module: `github.com/weftgo/weft/studio`, requiring the tagged
 `weft` and (until they tag, step 8's release) `weft/obsdb` through a
 directory `replace` that the release step drops — standalone-importable
 after that, no `replace`. The binary is its own module
-([cmd/](./cmd)), the only place that will import the clickhouse
-driver (step 6b).
+([cmd/](./cmd)), the one place that imports the clickhouse driver.

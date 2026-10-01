@@ -1,10 +1,11 @@
 ## Unreleased
 
-Lanes A2, B1 and B2 of the observability-data programme (ADR 0024),
-merged to main: the two new modules from A2 (the observability
+Lanes A2, B1, B2, C1 and C2 of the observability-data programme (ADR
+0024), merged to main: the two new modules from A2 (the observability
 database and the pipeline), B1's Studio rewrite on obsdb with the
-store module deleted, and B2's ClickHouse backend. All of it dates at
-the step 8 release.
+store module deleted, B2's ClickHouse backend, C1's devtools panel,
+and C2's `weft/runtime` module with the playground API. All of it
+dates at the step 8 release.
 
 ### obsdb (new module)
 
@@ -145,14 +146,49 @@ the step 8 release.
   (clickhouse/clickhouse-server:25.8-alpine), the docker-compose
   equivalent, and the CI job with the service container.
 
-### studio (breaking 0.x — the step 6 rewrite)
+### runtime (new module)
+
+- **New module `weft/runtime`** (WEFT-PLAYGROUND.md §10.2, ADR 0024
+  [D6]): the playground's in-app side. One deferred call is the whole
+  integration — `defer runtime.Install(
+  runtime.Studio(url, token), runtime.Agents(...), runtime.Models(...),
+  runtime.Limits(...), runtime.AllowSideEffects(...),
+  runtime.Threads(store), runtime.Enabled(true))()`. Without Install
+  nothing opens; even with it, only under `WEFT_ENV=dev` or
+  `Enabled(true)` (§6 rule 1). The default endpoint is
+  `otel.StudioEndpoint()`.
+- The runtime link (§10.3): registers on connect and after every
+  reconnect (manifests, model allow-lists, per-agent caps, budget,
+  side-effect classes — all tools `never` until `ReplayPolicy` lands),
+  receives commands over SSE with `Last-Event-ID` resume, acks every
+  command **before** executing it (at-most-once: repeated ids
+  ignored), handles `cancel` and `ping`. `runtime.Local(srv)` talks to
+  the embedded Studio in-process — no socket.
+- The executor (§5.2): `engine: live` + `thread: ephemeral` only
+  (fork, scripted and `transcript_edits` are 8b); composes the run
+  from plain RunOptions (`Instructions`, `OnlyTools`, `UseModel`,
+  `Thinking`, lower-only `MaxSteps`/`Parallelism`, `temperature`,
+  `ParkOn` for every tool not opted in with `AllowSideEffects`), and
+  labels the run `weft.playground`, `weft.playground.command`,
+  `weft.experiment.id`, `weft.forked_from`, `weft.public_id`,
+  `weft.playground.actor` — never `weft.session.id`. Source
+  transcripts resolve thread storage → local obsdb →
+  `GET /api/runs/{id}/transcript`, cut at the `from_step` boundary.
+  The runtime re-validates tool/model names and limits against its own
+  registry and answers `rejected` when Studio's copy disagrees;
+  per-experiment budget caps are counted from each command's own
+  usage, a breach rejects the next command (`budget_exceeded`), and
+  the app's own runs are never touched.
+
+### studio 0.3.0 (breaking — the step 6 rewrite, the devtools panel, the playground)
 
 #### Added
 
 - `New(opts ...Option) *Server` with `Handler()`, `Close()` (closes
   only the database New opened itself — a DB passed through `DB(...)`
-  stays its owner's) and `Runtime()` (nil until step 8 provides
-  `studio/runtime`). Options: `Live(hub)` (default the DB's own hub
+  stays its owner's) and `Runtime()` (the runtime link's in-process
+  side — `studio/runtime` — when `Playground(true)` built it, else
+  nil). Options: `Live(hub)` (default the DB's own hub
   when it implements `Hub()`, else an in-process `obsdb.NewHub()` fed
   by ingest), `NoIngest()`, `IngestToken(tok)`, `Token(tok)`,
   `AllowOrigins(...)`, `Playground(bool)` beside the kept `DB`, `Open`,
@@ -177,11 +213,62 @@ the step 8 release.
   id; every data route refuses anything outside it, the agent live
   selector included). Runs and sessions lists gained the session,
   public-id and (runs) playground filters.
-- `routes.go`'s route groups: the registration point later steps add
-  to in their own files (`panel.go`, `playground.go` set package-level
-  hooks through var initializers; `Playground(true)` enables the
-  playground's), with `api/meta`'s capabilities computed from the
-  registered groups — never hard-coded.
+- `routes.go`'s route groups: the registration point the panel and
+  the playground hook into from their own files (`panel.go`,
+  `playground.go` set package-level hooks through var initializers;
+  `Playground(true)` enables the playground's), with `api/meta`'s
+  capabilities computed from the registered groups — never hard-coded.
+- The devtools panel `<weft-devtools>` (WEFT-DEVTOOLS.md §5): a
+  self-contained custom element built as a separate Vite library-mode
+  artifact (`studio/web/vite.panel.config.ts`, committed at
+  `studio/dist/panel/panel.js`, 38,245 B raw / 11.5 KiB gzip — budget
+  80), sharing `lib/api.ts`, `lib/live.ts`, `lib/events.ts` and
+  `lib/format.ts` with the Studio UI (V6, no React in the bundle).
+  Rung 1 (§8.1): the header, the turn list scoped by public id with
+  `parked` and the (inert-until-step-8) experiment slot, the turn view
+  through the shared fold with reasoning collapsed, tool calls
+  `name(args)` → result with truncation badges and span times, usage
+  with cached/reasoning splits, read-only approvals, the honesty
+  rules (interrupted, gaps, stripped content, max_tokens), the raw
+  JSON toggle, the live tail with deltas, ⤢ deep links carrying run
+  and step, lazy subagent expansion, a spans waterfall, and the §5.2
+  keyboard (Alt+W primary — Q4 closed; Ctrl+Shift+W where delivered).
+  The live tail upserts `run` frames by id (T20's fix) — one row per
+  run, the newest state winning.
+- `GET /panel.js` on `studio.Handler` (S4.2): the embedded bundle,
+  static and unauthenticated, registered through routes.go's
+  panel-group hook (always on, no capability of its own; `live` is
+  what rung 1 gates on). A build without the bundle answers 500 in the
+  API error shape.
+- Panel mounting per §5.2/§5.3: `data-endpoint` / `data-public-id` /
+  `data-token` / `data-position` / `data-open` / `data-auto` on the
+  script tag or the element, the `window.__WEFT__.publicId` watch by a
+  setter, `?weft=debug` and `localStorage.weft_debug=1` overrides, the
+  studio-version check ("Studio is newer than this panel; update
+  panel.js"), and fail-silent removal when `/api/meta` does not answer
+  (one request, no retries, no console output).
+- `studio/web/scripts/panel-gate.ts`: the Dv0–Dv2 gate driver (jsdom
+  over a live Studio, driving the committed bundle — the self-hosting
+  harness page is `examples/studio-local`'s `/`), and
+  `scripts/panel-asset.ts`: stages `panel-<version>.js` + sha256 as
+  the release asset for non-Go backends (V2; wired as `make
+  studio-panel-asset`).
+- **New package `studio/runtime`**: the runtime link's server side —
+  `POST /api/runtime/register`, `GET /api/runtime/commands` (SSE),
+  `POST /api/runtime/acks`, the registry of connected runtimes with
+  `last_seen`, and §10.5's lost-command timers (30 s unacked; queued
+  lost at disconnect; accepted lost after 10 min without a finish; a
+  late ack still lands).
+- **`studio/playground.go`** (routes.go's `playgroundGroupHook`,
+  enabled by `Playground(true)`): the playground API — `GET
+  /api/runtimes`, `POST /api/playground/runs`, `GET
+  /api/playground/commands/{id}` — with §10.4's validation table (400
+  unknown tool/model name, `input` with `from_step > 0`, and the
+  8b-deferred modes answered "not yet available"; 403 raised limits,
+  a refused side-effect tool, a panel token out of scope; 404 unknown
+  runtime/agent/source run; 409 a reused command id; 503 no connected
+  runtime). Capabilities `playground` and `runtimes` appear in
+  `GET /api/meta` when `Playground(true)`.
 
 #### Changed
 
@@ -225,6 +312,12 @@ the step 8 release.
   with the store's decode errors (unknown ids stay 404, other database
   errors 500 `internal`). `api/meta`'s `store` field reports the
   obsdb backend (best effort, dynamic type).
+
+#### Notes
+
+- The panel changes no public Go API beyond the bundle route:
+  `panel.go` registers through the step-6 route-group hook; the panel
+  token endpoints and CORS defaults were already step 6's.
 
 ### studio/cmd (new module)
 

@@ -151,19 +151,33 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    // weft.public_id, weft.turn — block 8).
 
 // 7. Serve the Inspector (module weft/studio; S4 on obsdb — UI, JSON API,
-//    OTLP ingest, live): setup A, embedded beside the app (§10.1's five lines):
+//    OTLP ingest, live, the devtools panel, the playground): setup A,
+//    embedded beside the app (§10.1's five lines):
 //    mux.Handle("/studio/", http.StripPrefix("/studio",
 //        studio.Handler(studio.DB(otel.LocalDB()))))  // the pipeline's handle: history + live [D4]
-//    // or studio.New(opts...) *Server with Handler()/Close()/Runtime() (step 8),
+//    // or studio.New(opts...) *Server with Handler()/Close()/Runtime()
+//    //    (the runtime link's server under Playground(true), else nil),
 //    //    options DB/Open/Base/Manifest/Title/Capabilities/Token/Live/NoIngest/
 //    //    IngestToken/AllowOrigins/Playground; routes register through
-//    //    routes.go's groups (panel/playground add theirs in their own files).
+//    //    routes.go's groups (panel.go/playground.go add theirs in their own files).
 //    // API: meta, runs (+session/public/playground filters), runs/{id}/transcript,
 //    //    spans, traces/{id}, sessions, public/{public_id}, /api/live (SSE),
-//    //    /api/panel-tokens; Token(tok) walls everything (bearer or ?token=).
+//    //    /api/panel-tokens, /panel.js (the devtools panel, WEFT-DEVTOOLS §5);
+//    //    Token(tok) walls everything but /panel.js (bearer or ?token=).
 //    // Setup B, any language (module studio/cmd — the one place the clickhouse
 //    // driver lives): studio --db sqlite://path | clickhouse://user:pass@host:9000/db
 //    //    [--addr --token] serves UI + OTLP ingest on 127.0.0.1:7331.
+
+// 7a. The playground (module weft/runtime): your app dials Studio out and
+//     executes experiment commands as runs of the agents you register:
+//     defer runtime.Install(runtime.Studio(url, tok) /* or runtime.Local(srv) */,
+//         runtime.Agents(support), runtime.Models(map[string]weft.Model{"glm": m}),
+//         runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000}),
+//         runtime.AllowSideEffects("lookup_order"), runtime.Threads(store))()
+//     // WEFT_ENV=dev (or runtime.Enabled(true)) opens the link; commands ack
+//     // before they run (at-most-once), tools park unless opted in, budgets
+//     // cap each experiment; runs carry weft.playground and never touch
+//     // weft.session.id. Studio side: studio.New(..., studio.Playground(true)).
 
 // 8. Sessions (module weft/thread; jsonl.Open(dir) | thread.Memory()):
 //    s, _ := thread.Create(ctx, st, agent) — the append-only entry tree; every write

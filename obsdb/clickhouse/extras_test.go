@@ -170,6 +170,67 @@ func TestErrClosed(t *testing.T) {
 	}
 }
 
+// A span event's attributes round-trip typed (S3.1/S3.3): an int64
+// event attribute written through Write reads back int64 from both
+// span reads, exactly like the top-level span attributes — the
+// WeftEvents JSON column decoded with the UseNumber rule. (T17 review
+// fix 2: the plain json.Unmarshal decode read int64(3) back as
+// float64(3); sqlite keeps int64.)
+func TestSpanEventAttrsTypedRoundTrip(t *testing.T) {
+	db, _ := openFresh(t)
+	at := time.Unix(0, 1790845923120000000).UTC()
+	span := obsdb.Span{
+		TraceID: "0102030405060708090a0b0c0d0e0f10", SpanID: "0a0b0c0d0e0f0102",
+		Name: "invoke_agent conf", Kind: 1, Start: at, End: at.Add(time.Second),
+		StatusCode: 1, Service: "conf-svc",
+		Attrs:    map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.id": "c1"},
+		Resource: map[string]any{"service.name": "conf-svc"},
+		Events: []obsdb.SpanEvent{{
+			Time: at.Add(100 * time.Millisecond), Name: "gen_ai.content.prompt",
+			Attrs: map[string]any{"retry.count": int64(3), "ratio": 0.5},
+		}},
+	}
+	if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{span}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, spans := range [][]obsdb.Span{
+		mustRunSpans(t, db, "c1"),
+		mustTrace(t, db, span.TraceID),
+	} {
+		if len(spans) != 1 || len(spans[0].Events) != 1 {
+			t.Fatalf("span events = %d spans / %d events, want 1/1", len(spans), len(spans[0].Events))
+		}
+		ev := spans[0].Events[0]
+		if n, ok := ev.Attrs["retry.count"].(int64); !ok || n != 3 {
+			t.Errorf("int64 event attr = %#v, want int64(3)", ev.Attrs["retry.count"])
+		}
+		if f, ok := ev.Attrs["ratio"].(float64); !ok || f != 0.5 {
+			t.Errorf("float event attr = %#v, want float64(0.5)", ev.Attrs["ratio"])
+		}
+		if ev.Name != "gen_ai.content.prompt" {
+			t.Errorf("event name = %q", ev.Name)
+		}
+	}
+}
+
+func mustRunSpans(t *testing.T, db obsdb.DB, runID string) []obsdb.Span {
+	t.Helper()
+	spans, err := db.RunSpans(ctx(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return spans
+}
+
+func mustTrace(t *testing.T, db obsdb.DB, traceID string) []obsdb.Span {
+	t.Helper()
+	spans, err := db.Trace(ctx(), traceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return spans
+}
+
 // Write is idempotent on (trace, span) — S3.2, the promise doc.go
 // makes ("FINAL or LIMIT 1 BY on the dedup key") and sqlite keeps with
 // INSERT OR IGNORE. otel_traces is a plain MergeTree and keeps the

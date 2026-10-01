@@ -517,20 +517,21 @@ func attrsFromJSONOrMap(js string, m map[string]string) map[string]any {
 	return out
 }
 
+// eventsFromJSONOrNested restores span events: the weft JSON column
+// when this package wrote the row — decoded through unmarshalAttrs, so
+// an int64 event attribute survives as int64 exactly as on the
+// top-level Attrs (S3.1/S3.3; plain json.Unmarshal would produce
+// float64, the bug T17's review proved) — and the collector's nested
+// arrays otherwise (string values, what a stock collector stored).
 func eventsFromJSONOrNested(js string, times []time.Time, names []string, attrs []map[string]string) []obsdb.SpanEvent {
 	if js != "" {
-		type wireEvent struct {
-			Time  time.Time      `json:"Time"`
-			Name  string         `json:"Name"`
-			Attrs map[string]any `json:"Attrs"`
-		}
-		var events []wireEvent
-		if err := json.Unmarshal([]byte(js), &events); err == nil && len(events) > 0 {
-			out := make([]obsdb.SpanEvent, len(events))
-			for i, e := range events {
-				out[i] = obsdb.SpanEvent{Time: e.Time.UTC(), Name: e.Name, Attrs: e.Attrs}
+		// obsdb.SpanEvent's fields carry the wire keys Time/Name/Attrs.
+		var events []obsdb.SpanEvent
+		if err := unmarshalAttrs([]byte(js), &events); err == nil && len(events) > 0 {
+			for i := range events {
+				events[i].Time = events[i].Time.UTC()
 			}
-			return out
+			return events
 		}
 	}
 	if len(times) == 0 {

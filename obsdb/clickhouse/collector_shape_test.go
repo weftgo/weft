@@ -120,7 +120,6 @@ const collectorLogsInsert = `INSERT INTO ` + "`%s`" + `.` + "`%s`" + ` (
 // the collector fills.
 func TestCollectorShapeInserts(t *testing.T) {
 	db, dsn := openFresh(t)
-	_ = db
 	conn := openRaw(t, dsn)
 	defer func() { _ = conn.Close() }()
 	ctx := context.Background()
@@ -146,7 +145,9 @@ func TestCollectorShapeInserts(t *testing.T) {
 			"weft.turn": "1", "gen_ai.usage.input_tokens": "42",
 		},
 		uint64(9000000000), "STATUS_CODE_OK", "",
-		[]time.Time{}, []string{}, []map[string]string{},
+		[]time.Time{at, at.Add(time.Second)},
+		[]string{"gen_ai.content.prompt", "exception"},
+		[]map[string]string{{"gen_ai.system.prompt": "short"}, {"exception.type": "RuntimeError"}},
 		[]string{}, []string{}, []string{}, []map[string]string{},
 	); err != nil {
 		t.Fatalf("append: %v", err)
@@ -210,6 +211,24 @@ func TestCollectorShapeInserts(t *testing.T) {
 	}
 	if body != `{"type":"run_start","id":"collector"}` {
 		t.Errorf("collector-fed record body = %q", body)
+	}
+
+	// The collector-written span reads back through the same API, its
+	// events from the nested arrays (WeftEvents is '' for a collector
+	// row, so the read takes the fallback path) with string attribute
+	// values — what that schema actually stored.
+	trace, err := db.Trace(ctx, "0102030405060708090a0b0c0d0e0f10")
+	if err != nil {
+		t.Fatalf("trace read of collector rows: %v", err)
+	}
+	if len(trace) != 1 || len(trace[0].Events) != 2 {
+		t.Fatalf("collector span = %d spans / %d events, want 1/2", len(trace), len(trace[0].Events))
+	}
+	if p := trace[0].Events[0].Attrs["gen_ai.system.prompt"]; p != "short" {
+		t.Errorf("collector event attr = %#v, want the stored string %q", p, "short")
+	}
+	if et := trace[0].Events[1].Attrs["exception.type"]; et != "RuntimeError" {
+		t.Errorf("collector exception.type = %#v", et)
 	}
 }
 

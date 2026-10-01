@@ -242,6 +242,42 @@ func TestJSONColumns(t *testing.T) {
 	}
 }
 
+// eventsFromJSONOrNested must decode the weft events column with the
+// UseNumber rule — an int64 event attribute stays int64 (S3.1/S3.3,
+// the same guarantee the top-level Attrs round trip pins; plain
+// json.Unmarshal would return float64) — and the collector's nested
+// arrays carry their string values through.
+func TestEventsDecodeTyped(t *testing.T) {
+	at := time.Unix(0, 1790845923120000000).UTC()
+	js := eventsJSON([]obsdb.SpanEvent{{
+		Time:  at,
+		Name:  "gen_ai.content.prompt",
+		Attrs: map[string]any{"retry.count": int64(3), "ratio": 0.5, "ok": true},
+	}})
+	got := eventsFromJSONOrNested(js, nil, nil, nil)
+	if len(got) != 1 {
+		t.Fatalf("events from json = %d, want 1", len(got))
+	}
+	if n, ok := got[0].Attrs["retry.count"].(int64); !ok || n != 3 {
+		t.Errorf("int64 event attr = %#v, want int64(3)", got[0].Attrs["retry.count"])
+	}
+	if f, ok := got[0].Attrs["ratio"].(float64); !ok || f != 0.5 {
+		t.Errorf("float event attr = %#v, want float64(0.5)", got[0].Attrs["ratio"])
+	}
+	if b, ok := got[0].Attrs["ok"].(bool); !ok || !b {
+		t.Errorf("bool event attr = %#v, want true", got[0].Attrs["ok"])
+	}
+	if !got[0].Time.Equal(at) || got[0].Name != "gen_ai.content.prompt" {
+		t.Errorf("event = %v %q, want %v %q", got[0].Time, got[0].Name, at, "gen_ai.content.prompt")
+	}
+	fallback := eventsFromJSONOrNested("", []time.Time{at}, []string{"exception"},
+		[]map[string]string{{"exception.type": "RuntimeError"}})
+	if len(fallback) != 1 || fallback[0].Name != "exception" ||
+		fallback[0].Attrs["exception.type"] != "RuntimeError" {
+		t.Errorf("nested fallback = %+v", fallback)
+	}
+}
+
 func TestSpanDuration(t *testing.T) {
 	start := time.Now()
 	if d := spanDuration(start, start.Add(1500*time.Millisecond)); d != 1500000000 {

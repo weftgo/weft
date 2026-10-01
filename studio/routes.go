@@ -77,6 +77,14 @@ func (s *Server) registerGroups() {
 		name:     "api",
 		register: registerReadAPI,
 	})
+	// The live stream (S4.5).
+	s.addGroup(routeGroup{
+		name:       "live",
+		capability: "live",
+		register: func(mux *http.ServeMux, s *Server) {
+			mux.HandleFunc("GET /api/live", s.serveLive)
+		},
+	})
 	// OTLP ingest (S4.4), unless NoIngest turned the receiver off.
 	if !s.noIngest {
 		s.addGroup(routeGroup{

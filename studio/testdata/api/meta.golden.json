@@ -6,6 +6,7 @@
   "store": "sqlite",
   "ingest_open": true,
   "capabilities": [
+    "live",
     "ingest"
   ]
 }

@@ -148,9 +148,9 @@ Consequences for a deployment:
   hold whoever has it — the escape hatch, to be used only when that
   Session is truly abandoned (its next write is refused once another
   writer has written).
-- The Windows paths (the `LockFileEx` lock, process liveness) are
-  compiled and vetted in CI but have never been executed by a test.
-  Treat Windows as untested.
+- The Windows paths (the `LockFileEx` lock, process liveness) compile
+  and pass `GOOS=windows go vet`, run by hand — CI has no Windows job
+  — and have never been executed by a test. Treat Windows as untested.
 
 ## 5. Close and shutdown
 

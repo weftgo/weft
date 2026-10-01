@@ -311,15 +311,18 @@ breaking change with what to write instead.
   `Session.Meta()` never lets an info entry override one.
 - **Fork copies the path and nothing that acts for the original.**
   The fork is built as `Open` builds a session and takes its own
-  options (nothing is inherited from the origin's options or header).
+  options; nothing is inherited from the origin's options or header,
+  with one exception — a fork of a `RequireSigned` session requires
+  signed decisions too, and takes the origin's keyring when given
+  none.
   On the copied path: steers still queued are recorded as dropped in
   the fork; queued sends (accepted receipts) are the origin's — a
   reopened fork restores nothing from them; mirrored child approval
   requests are left out (the one case where a copied entry's parent
   link is rewritten, to the nearest entry the fork holds); unsettled
   pool receipts are settled `canceled`. An open approval boundary *is*
-  inherited — each session resolves its own copy — and so is a
-  `RequireSigned` header. A leaf entry is not a fork target. A fork
+  inherited — each session resolves its own copy. A leaf entry is not
+  a fork target. A fork
   that cannot write its entries is deleted again. `Fork` is a snapshot
   and is allowed while a turn runs; `Branch` is not (`ErrBusy`).
 - **Snapshots share nothing.** `Entries`, `Path` and `Audit` return

@@ -75,8 +75,8 @@ func TestMemoryHoldsRawBytes(t *testing.T) {
 	}
 
 	// A torn tail is a crash: dropped, reported, never an error — and
-	// the entry appended after it merges with it, exactly as a file
-	// would, leaving one malformed line where two were written.
+	// the next append removes it first, exactly as a file writer does,
+	// so the new entry is its own line and the session loads clean.
 	if err := st.Delete(ctx, id); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,8 @@ func TestMemoryHoldsRawBytes(t *testing.T) {
 	if err := st.Append(ctx, id, thread.MessageEntry{ID: "e_raw2", Created: created.Add(2 * time.Second), Message: weft.User("two")}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := st.Load(ctx, id); !errors.Is(err, thread.ErrCorrupt) {
-		t.Errorf("append after a torn tail: err = %v, want ErrCorrupt — the bytes merge as in a file", err)
+	_, loaded, report, err = st.Load(ctx, id)
+	if err != nil || report != nil || len(loaded) != 2 {
+		t.Errorf("append after a torn tail: %d entries, report %+v, err %v; want the 2 complete entries and a clean load", len(loaded), report, err)
 	}
 }

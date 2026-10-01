@@ -3,6 +3,7 @@ package thread
 import (
 	"context"
 	"iter"
+	"log/slog"
 )
 
 // OpenOption configures a Storage backend at open, one value per
@@ -26,6 +27,13 @@ type OpenConfig struct {
 	// fsyncs every Append before it returns; false defers the fsync to
 	// the Flusher capability — the turn-end cadence a Session drives.
 	SyncEveryAppend bool
+	// NoLock turns off the backend's cross-process writer lock (the
+	// NoLock option): the caller vouches that one process writes.
+	NoLock bool
+	// Logger receives the backend's own reports — a repaired torn
+	// tail, a taken-over lock. Never nil after ResolveOpen: the
+	// default is slog.Default(), read at open.
+	Logger *slog.Logger
 }
 
 // ResolveOpen folds opts over the defaults. Exported because backends
@@ -37,6 +45,9 @@ func ResolveOpen(opts ...OpenOption) OpenConfig {
 		if o != nil {
 			o.applyOpen(&cfg)
 		}
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
 	}
 	return cfg
 }
@@ -67,10 +78,44 @@ func FsyncEveryAppend() OpenOption { return syncEveryAppendOption(true) }
 // Flusher capability — the turn-end cadence, cheaper than an fsync per
 // append. A crash between appends and the flush can lose the tail of a
 // turn, never a synced one; the file stays readable (a torn final line
-// is dropped and reported). The caller who flushes at turn ends —
-// Session, from v0.1 commit 7 — owns the durability window; a plain
-// Flush after the prompt keeps ADR 0011 §4's promise.
+// is dropped and reported). The caller who flushes at turn ends — a
+// Session does — owns the durability window; a plain Flush after the
+// prompt keeps ADR 0011 §4's promise.
 func FsyncOnFlush() OpenOption { return syncEveryAppendOption(false) }
+
+type noLockOption struct{}
+
+func (noLockOption) applyOpen(c *OpenConfig) { c.NoLock = true }
+
+// NoLock returns the open option that opens a file backend without its
+// cross-process writer lock. It exists for platforms with no advisory
+// file lock to take — there jsonl.Open fails unless NoLock says the
+// caller knows — and for filesystems whose locks cannot be trusted.
+// With it, one-writer-per-session (ADR 0011 §5) is the caller's
+// promise instead of the backend's check: goroutines of one Storage
+// are still serialized, but a second Storage or a second process
+// writing the same session is not refused with ErrLocked and can
+// interleave its lines with the first's. Backends whose lock needs no
+// platform support (sqlite's lock row, Memory) accept the option and
+// keep locking.
+func NoLock() OpenOption { return noLockOption{} }
+
+type openLoggerOption struct{ l *slog.Logger }
+
+func (o openLoggerOption) applyOpen(c *OpenConfig) {
+	if o.l != nil {
+		c.Logger = o.l
+	}
+}
+
+// OpenLogger returns the open option that names where a backend
+// reports what it repairs on its own: a torn tail a crashed writer
+// left, truncated before the next append; a dead holder's lock, taken
+// over. Each is one Warn line carrying the session id. The default is
+// slog.Default() as it stands at open; a nil logger keeps the default.
+// What a load had to drop is still the LoadReport's to say — the
+// logger covers the write path, where no report is returned.
+func OpenLogger(l *slog.Logger) OpenOption { return openLoggerOption{l} }
 
 // Flusher is the optional Storage capability that completes buffered
 // durability work — the small-interface rule (ADR 0011 §5: capabilities
@@ -84,15 +129,38 @@ type Flusher interface {
 	Flush(ctx context.Context, session string) error
 }
 
+// Releaser is the optional Storage capability that ends this writer's
+// hold on a session — the same small-interface rule. A backend takes
+// the one-writer lock on a session's first write and, without Release,
+// keeps it for the life of the process (and, on jsonl, an open file
+// with it). Release flushes what the writer buffered and lets go: from
+// then on another Storage — in this process or another — may write the
+// session. The hold is a lease the writer renews by writing: a later
+// Append through the releasing Storage re-acquires the lock, and fails
+// with ErrLocked if another writer took the session in between.
+// Releasing a session this Storage does not hold is a no-op; one the
+// storage does not hold at all fails with ErrNotFound. Release must
+// not race the session's own Append — it is the last call of a writer
+// that is done, which is what Session.Close is.
+type Releaser interface {
+	Release(ctx context.Context, session string) error
+}
+
 // Watcher is the optional Storage capability that tails a session as
-// it is appended to — the same small-interface rule. It arrives in
-// v0.4 (plan §7, the live tail); it is declared now, unimplemented,
-// so the capability pattern and its vocabulary ship with the first
-// release instead of being retrofitted. Watch yields the session's
-// entries in arrival order, starting after the entry named by after
-// (empty — from the beginning), and ends when ctx is done; a session
-// the storage does not hold fails with ErrNotFound before the first
-// yield. Readers never lock: a watcher is a reader that waits.
+// it is appended to — the same small-interface rule; jsonl and sqlite
+// implement it. Watch yields the session's entries in arrival order,
+// each exactly once, starting after the entry named by after (empty —
+// from the beginning), then keeps yielding as appends land, and ends
+// when ctx is done. A session the storage does not hold fails with
+// ErrNotFound before the first yield, as does an after the session
+// does not hold (a plain error). The stream ends with one terminal
+// error when the session is deleted, or deleted and created again,
+// under the watcher (ErrNotFound: the session being tailed is gone),
+// or when it meets data it cannot decode (ErrNewerFormat, or
+// ErrCorrupt naming the line — skipped instead under Salvage). A torn
+// final line is a write in flight: it is yielded once complete, never
+// half. Readers never lock: a watcher is a reader that waits, and the
+// consumer is free to call the same Storage from inside the loop.
 type Watcher interface {
 	Watch(ctx context.Context, session string, after string) (iter.Seq2[Entry, error], error)
 }

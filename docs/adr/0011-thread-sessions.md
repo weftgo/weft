@@ -387,9 +387,11 @@ storage holds (a torn tail and the header are not counted). A Session
 compares that with what it has loaded and written; a different number
 means another writer appended since this Session opened, and the write
 fails with `ErrStale`, nothing written — instead of attaching to a
-leaf the session has moved past. It is a count, not a content
-comparison: a session deleted and re-created to the same length behind
-an open Session is not detected.
+leaf the session has moved past. `Acquire` also reports the stored
+header's `Created`, and the Session compares it before every write, so
+a session deleted and created again under its id is stale to the old
+Session whatever its length. It is a count and a creation time, not a
+content comparison of the entries.
 
 **Delete under a lease.** `Delete` through the `Storage` value the
 writer uses removes the session whether or not a Session holds its

@@ -298,9 +298,8 @@ wait for it:
 - the format spec as a **compatibility promise** (ADR 0011's appendix
   documents the current format and says it is not one);
 - `thread.Migrate` (the symbol still does not exist);
-- emptying `thread/.apidiff-allow` (it holds its one v0.4 entry, and
-  this train adds breaking changes the gate must be told about at the
-  tag);
+- emptying `thread/.apidiff-allow` (it now lists this train's
+  deliberate breaks against `thread/v0.8.1` under a dated block);
 - one option dialect — `With*`, bare and `Require*`/`On*` names still
   coexist; moving the compaction options to their own package or
   collapsing the hooks. Renames wait for the freeze.
@@ -314,53 +313,44 @@ Still open, known, documented:
   grew in this train; "small surface" is not met.
 - The Windows code paths (jsonl's `LockFileEx`, sqlite's liveness and
   start time) compile and vet; they have never been executed.
-- Stale-writer detection is a count of entry lines, not a content
-  comparison.
-- sqlite's lock is never taken over across hostnames (a replacement
-  container with a new hostname; `docs/thread-operations.md` §4).
+- Stale-writer detection is a count plus the header's creation time,
+  not a content comparison of the entries.
+- sqlite's lock is never taken over across hostnames on its own; the
+  operator calls `sqlite.BreakLock` (`docs/thread-operations.md` §4).
 - `Audit()` is an index, not evidence; quorum over unsigned decisions
   counts declared names.
 - The steer queue is unbounded.
 - jsonl `List` reads every header per call.
-- §5's "`-count=10` race soak in CI" and an apidiff gate for
-  `thread/sqlite` are not in CI on this branch.
-- `examples/refund-plan` (untracked in the maintainer's checkout) is
-  neither committed nor removed.
-
-In the final code pass (open in the lane notes when this was written;
-not verified either way on the docs branch — check the final lane's
-commits before reading these as fixed or not):
-
-- the parent's decision chain (a grant, a live `Approver`) still runs
-  over a delegating wrapper call when it parks, and an approval there
-  re-runs the delegation (ADR 0022 amendment §D records it as a known
-  gap; `Pool.Decide`'s godoc warns);
-- an interrupting `Send` on a parent holding nested approvals denies
-  the mirrors and nothing pumps: the children resume on the next
-  `Pool.Decide` or `Recover`;
 - `Recover` reads a finished child's answer as its last assistant
   text, cannot rebuild the ancestry above a rebuilt child, and assumes
-  one pool owns a storage's delegations (documented in the operations
-  page and the CHANGELOG's known limits);
-- `threadtest.RunTurns` is called for Memory and jsonl
-  (`TestTurnsConformance`) but not from `thread/sqlite`'s tests;
-- a fork's copy of an `accepted` receipt is skipped at restore, not
-  settled as `dropped` in the fork's entries;
-- sends restored by `Open` run under a context detached from the
-  caller's (`Continue` does not rebind it);
-- a `CustomMessage` written mid-run makes `Context()` differ from the
-  running run's view (pre-existing);
-- `TestReadEveryGolden` globs formats 1–4; format 5's golden is read
-  by `TestTrimRecordGolden` only;
-- godoc that disagrees with the code, found by the docs pass:
-  `Turn.Next` (says nil after `Decide`; the parked turn's `Next` is
-  the resume `Decide` returned), `Clock` (says expiry arithmetic is
-  not routed through it; it is), `Session.Fork` (says nothing is
-  inherited from the origin's options; `RequireSigned` and the keyring
-  are), `FormatVersion` (promises "readers read every version forever"
-  and names a `Migrate` that does not exist);
-- `examples/studio-local` reopens its session on every request without
-  closing the previous `Session`, which the writer lease now refuses.
+  one pool owns a storage's delegations.
+- `examples/refund-plan` (untracked in the maintainer's checkout) is
+  neither committed nor removed.
+- The sentinel table test the closing pass planned
+  (`TestSentinelsAreMatchable`) was not written; the sentinels are
+  pinned per feature by their own `errors.Is` tests.
+
+Closed by the final code pass (lane `tfix/final`):
+
+| Item | Commit |
+|---|---|
+| The decision chain never decides a delegating call | `699de6a` |
+| A parent-recorded decision (interrupt, expiry, direct Decide) pumps the child | `f150c60` |
+| A fork settles a copied queued send as dropped | `5229b1c` |
+| `Continue` runs restored queued sends under its own context | `3658cdf` |
+| `threadtest.RunTurns` on jsonl and sqlite | `cf806ab` |
+| `CustomMessage` refused with `ErrBusy` while a turn runs | `bac2cb6` |
+| Delete + re-Create under an open Session is stale | `d1e2ed0` |
+| jsonl: a failed append leaves no prefix of its batch | `baba0c9` |
+| Crash matrix: eight more points | `7347555` |
+| CI: sqlite apidiff gate, nightly soak, self-test fixed, allow file lists the breaks | `25d5d33` |
+| Fuzz seeds and the golden walk cover every format directory | `88047b5` |
+| `examples/studio-local` keeps one Session | `5f12a06` |
+| sqlite fsync policy is the synchronous level; Flush checkpoints | `72f52a9` |
+| Godoc corrected: `Turn.Next`, `Clock`, `Fork`, `FormatVersion`, `Outcome` | `603d0f1` |
+| `sqlite.BreakLock` | `effcb31` |
+| Internal path reads no longer deep-copy the transcript | `6cf8e43` |
+| Comments describe behaviour, not plan steps | `36108b1` |
 
 Before a release: maintainer review, merge to `main`, the two-phase
 tags (root first), and a re-run of the `-race -count=10` soak and the

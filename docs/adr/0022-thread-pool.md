@@ -303,11 +303,14 @@ reused by a later delegation must not take an earlier child's
 answer). `Pending()` hides it by occurrence, not by id: an ordinary
 call that later reuses the id is offered like any other.
 
-Known gap, outside this ADR's reach: the parent's own decision
-*chain* (ADR 0021 §2 — a grant, a live `Approver`) still runs over
-the delegating call when it parks, and an approval there re-executes
-the delegation. Do not put a blanket Approver in front of pool wraps
-until the chain learns the same rule.
+The parent's own decision *chain* (ADR 0021 §2 — a grant, a live
+`Approver`) obeys the same rule: it skips both steps for a call a
+live mirror names as Wrapper. Such a call always parks, and only
+`ResolveDelegation` resolves it. A decision the parent records for a
+mirrored request by any other path — an interrupting Send's denial,
+an expiry, a `Session.Decide` used directly — reaches the child too:
+the pool installs a notification on every parent it delegates from
+(`Session.WatchMirrors`, plumbing) and runs its pump when one lands.
 
 ### E. `Decide` arms; it does not wait
 

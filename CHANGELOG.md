@@ -206,7 +206,46 @@ Pool (ADR 0022, amendment 2026-10-01)
   next fork command's reopened `Session` could not write ("keep
   chatting" failed with `ErrLocked`).
 
+The closing pass
+- The parent's decision chain never decides a delegating call: a grant
+  or a live `Approver` matching a pool wrap's tool approved the wrapper
+  when it parked, and the resume re-ran the delegation in a second
+  child session. Such a call now always parks and only
+  `ResolveDelegation` resolves it.
+- A decision the parent records on its own reaches the child: an
+  interrupting Send's denial, an expiry or a direct `Session.Decide`
+  on a mirrored request used to leave the child parked until the next
+  `Pool.Decide`. The pool now pumps when one lands.
+- A session deleted and created again under its id is stale to the old
+  `Session` (`ErrStale`): `Leaser.Acquire` also reports the stored
+  header's `Created`.
+- jsonl: a failed or short append leaves no prefix of its batch; the
+  bytes are cut off again under the session's lock.
+- A fork settles a copied queued send as dropped in its own entries.
+  `Continue` runs restored queued sends under its own context.
+- A `CustomMessage` appended while a turn runs is refused with
+  `ErrBusy`: it landed between the run's step entries and `Context`
+  read a transcript no run produced.
+- `examples/studio-local` keeps one `Session` for the demo's life; it
+  reopened per request and the writer lease refused the second.
+- Internal path reads no longer deep-copy the transcript (on a
+  1000-turn session a turn costs 1.31 ms, `Pending` 0.11 ms and one
+  allocation). `Context`, `Path` and `Entries` still return copies.
+
 ### Added
+
+- **`sqlite.BreakLock(ctx, st, session)`** — the operator's way out of
+  a lock row another host left (a container replaced under a new
+  hostname, a restored backup). A holder that was alive after all
+  fails its next write with `ErrLocked`.
+- **Crash matrix**: eight more points — the expiry sweep, the automatic
+  trim record, a queued send's accepted receipt, the resume join, a
+  fork's settling entries, and the pool's parked, canceled and capped
+  receipts. `threadtest.RunTurns` runs on jsonl and sqlite too.
+- **CI**: an apidiff gate for `thread/sqlite` (`make apidiff-sqlite`),
+  a nightly soak (`make soak-thread`: thread `-race -count=10`,
+  thread/sqlite `-race -count=3`); the gate's self-test no longer
+  exercises the deleted store module.
 
 - **`Session.Close(ctx)`** — stop new work, drain, seal (`ErrClosed`),
   release the storage's hold.
@@ -373,6 +412,11 @@ Behaviour (the compiler does not find these):
   a binary from before it refuses the database
   (`sqlite.ErrNewerSchema`). The module needs the `thread` release
   that carries `thread/backend`.
+- **`thread/sqlite` durability**: the fsync policy is now SQLite's
+  `synchronous` level. `FsyncEveryAppend` (the default) is
+  `synchronous=FULL` — an entry survives a power cut; the backend used
+  to run `NORMAL` whatever was asked. `FsyncOnFlush` is `NORMAL` and
+  `Flush` checkpoints the log. Expect slower appends on the default.
 
 ### Wire
 
@@ -463,22 +507,17 @@ Session core
   Windows liveness and start-time checks compile and pass
   `GOOS=windows go vet` (run by hand; CI has no Windows job). No test
   has ever run them.
-- **Stale-writer detection is a count** of entry lines, not a content
-  comparison: a session deleted and re-created to the same length
-  behind an open `Session` is not detected.
-- **sqlite's lock does not cross hostnames.** A lock row left by a
-  holder with another hostname is never taken over; a replacement
-  container with a new hostname needs the rows cleared
+- **Stale-writer detection is a count and the header's creation
+  time**, not a content comparison of the entries.
+- **sqlite's lock does not cross hostnames on its own.** A lock row
+  left by a holder with another hostname is never taken over; a
+  replacement container with a new hostname calls `sqlite.BreakLock`
   (`docs/thread-operations.md` §4).
 - **`Recover`** never re-runs a child; reads a finished child's answer
   as its last assistant text (a structured `Output` answer is not
   recovered as such); cannot rebuild the agent ancestry above a
   rebuilt child (the depth limit still holds); and assumes one pool
   owns a storage's delegations.
-- **The parent's decision chain is not yet bound by the delegating-call
-  rule**: a grant or a live `Approver` that approves a pool wrap's
-  call when it parks re-runs the delegation. Keep the chain from
-  matching wrap names.
 - **`Audit()` is an index, not evidence**: entries are unsigned and
   unchained; whoever can write the storage can change them.
 - **`s.Grant` is an unsigned, in-process call** under `RequireSigned`

@@ -41,13 +41,14 @@ live, never in what they say.
   to the turn's end — the session flushes the prompt before the run
   and again when the turn lands — which is cheaper and can lose the
   unsynced tail of a turn in a crash, never a synced one.
-- **sqlite** commits every `Append` as one transaction, in WAL mode
-  with `synchronous=NORMAL`. That is durable against the process
-  dying. It is SQLite's documented trade for a power loss or kernel
-  crash: the most recent commits can be rolled back (the database is
-  not corrupted). The fsync options are accepted and change nothing
-  on this backend. If "the prompt is durable before the run starts"
-  must hold through a power cut, use jsonl with its default policy.
+- **sqlite** commits every `Append` as one transaction, in WAL mode.
+  The fsync policy is SQLite's `synchronous` level. The default,
+  `thread.FsyncEveryAppend()`, is `synchronous=FULL`: the log is
+  fsynced at every commit, so an entry survives a power cut as well as
+  the process dying. `thread.FsyncOnFlush()` is `synchronous=NORMAL`:
+  durable against the process dying, and a power loss or kernel crash
+  can roll back the most recent commits (the database is not
+  corrupted); `Flush` checkpoints the log, which syncs it.
 - An `Append` batch is atomic against the writer's death: after a
   crash a load returns all of it or none of it.
 
@@ -125,9 +126,13 @@ Consequences for a deployment:
   token). A *replacement* container with a new hostname — the default
   for a new pod or `docker run` — does not: the old rows read as
   another host's. Give session writers a stable hostname, or close
-  sessions on shutdown (§5) so no rows are left, or clear the stale
-  rows by hand once the old host is known to be gone:
-  `DELETE FROM session_locks WHERE host = '<old hostname>';`
+  sessions on shutdown (§5) so no rows are left. Once the old host is
+  known to be gone, `sqlite.BreakLock(ctx, st, session)` removes a
+  session's lock row; the same applies to a database restored from a
+  backup that carried its lock rows. You vouch that the holder is
+  gone: nothing can check it. A holder that was alive after all is
+  stopped at its next write, which finds the row is no longer its own
+  and fails with `ErrLocked`.
 - **Several hosts.** jsonl's lock is only as good as the filesystem's
   `flock` (network filesystems vary; some lie). A sqlite database on a
   shared filesystem is outside SQLite's own supported envelope. Run
@@ -139,10 +144,12 @@ Consequences for a deployment:
   then becomes your promise: two processes writing one session will
   interleave lines. sqlite and Memory accept the option and keep
   locking.
-- **Stale detection is a count.** A Session compares the number of
-  complete entry lines the storage holds with the number it has seen.
-  It catches a writer that appended behind it; it does not catch a
-  session deleted and re-created to the same length.
+- **Stale detection is a count plus the header's creation time.** A
+  Session compares the number of complete entry lines the storage
+  holds with the number it has seen, and the stored header's `Created`
+  with the one it loaded. It catches a writer that appended behind it
+  and a session deleted and re-created under the same id; it is not a
+  content comparison of the entries.
 - **A Session someone forgot to close** holds its lease for the life
   of the process. `st.(thread.Releaser).Release(ctx, id)` ends the
   hold whoever has it — the escape hatch, to be used only when that

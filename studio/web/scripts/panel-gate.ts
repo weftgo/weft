@@ -32,7 +32,8 @@ interface Args {
 function parseArgs(argv: string[]): Args {
   const a: Record<string, string> = {}
   for (let i = 0; i < argv.length; i += 2) a[argv[i]?.replace(/^--/, "")] = argv[i + 1]
-  const endpoint = a.endpoint ?? "http://127.0.0.1:7331/studio"
+  let endpoint = a.endpoint ?? "http://127.0.0.1:7331/studio"
+  if (!endpoint.endsWith("/")) endpoint += "/" // a base URL, not a file
   return {
     endpoint,
     page: a.page ?? new URL("/", endpoint).toString(),
@@ -121,7 +122,12 @@ class FetchEventSource {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
-  const panelJs = readFileSync(new URL("../dist/panel-tmp/panel.js", import.meta.url), "utf8")
+  // The committed artifact — the exact bytes studio.Handler embeds —
+  // so the gate drives what ships, not what lies beside the build.
+  const panelJs = readFileSync(
+    new URL("../../dist/panel/panel.js", import.meta.url),
+    "utf8"
+  )
 
   const scriptAttrs = [`src="${args.endpoint}panel.js"`, `data-public-id="${args.publicId}"`]
   if (args.token) scriptAttrs.push(`data-token="${args.token}"`)
@@ -199,12 +205,45 @@ async function main() {
   }
 
   // 3. grouping + timing (Dv1's gate): every turn of the conversation
-  // is in the list, and the turn view carries a step with a finish.
+  // is in the list, and the turn view carries content and timing.
   const rows = dom.window.document
     .querySelector("weft-devtools")
     ?.shadowRoot?.querySelectorAll(".weft-turn")
-  console.log(`PASS turns listed: ${rows?.length ?? 0} (asked for ${args.turns})`)
+  console.log(`PASS turns listed: ${rows?.length ?? 0}`)
   if ((rows?.length ?? 0) < args.turns) throw new Error("FAIL not all turns listed")
+
+  // Grouped: Studio resolves the public id to one thread whose turn
+  // count covers the conversation (S4.3's SessionRow).
+  const sess = await fetch(new URL("api/sessions?public_id=" + args.publicId, args.endpoint))
+  if (!sess.ok) throw new Error(`FAIL sessions: ${sess.status}`)
+  const sessDoc = (await sess.json()) as { total: number; sessions: { turns: number }[] }
+  const thread = sessDoc.sessions[0]
+  if (!thread || thread.turns < args.turns)
+    throw new Error(`FAIL grouping: ${JSON.stringify(thread)}`)
+  console.log(`PASS grouped: one session, ${thread.turns} turns`)
+
+  // Content and timing, in the open turn: the tool call with its
+  // arguments and result, the streamed text, and a real duration.
+  await waitFor(() => {
+    const main = text(".weft-main")
+    return main.includes("lookup_order") && main.includes("shipped this morning")
+      ? main
+      : null
+  }, "content: the tool call (name + args + result) and the reply render")
+  const row2 = Array.from(
+    dom.window.document.querySelector("weft-devtools")?.shadowRoot?.querySelectorAll(".weft-row2") ?? []
+  ).map((n) => n.textContent)
+  if (!row2.some((t) => /(\d+m?s|\d+ms)/.test(t ?? "")))
+    throw new Error(`FAIL timing: no duration on the turn rows (${row2.join(" | ")})`)
+  console.log("PASS timing: the turn rows carry durations")
+
+  // 4. studio.Handler serves the panel bundle itself (Dv1): the file
+  // the script tag names is the committed, embedded artifact.
+  const served = await fetch(new URL("panel.js", args.endpoint))
+  if (!served.ok) throw new Error(`FAIL /panel.js: ${served.status}`)
+  const servedJs = await served.text()
+  if (servedJs !== panelJs) throw new Error("FAIL /panel.js is not the built bundle")
+  console.log("PASS studio.Handler serves /panel.js (the committed bundle)")
 
   console.log("PANEL GATE PASS")
   dom.window.close()

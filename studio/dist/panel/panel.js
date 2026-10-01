@@ -70,60 +70,60 @@ function o() {
 		}
 	}, o = () => e.steps.length ? e.steps[e.steps.length - 1].index : 0;
 	return {
-		push(c, l) {
-			switch (r = l ?? n, n++, c.type) {
+		push(s, c) {
+			switch (r = c ?? n, n++, s.type) {
 				case "run_start":
-					e.runId = c.id, e.agent = c.agent, e.model = c.model, e.startPos = r;
+					e.runId = s.id, e.agent = s.agent, e.model = s.model, e.startPos = r;
 					break;
 				case "step_start":
-					i(c.index);
+					i(s.index);
 					break;
 				case "text_delta":
-					i(o()).text += c.text;
+					i(o()).text += s.text;
 					break;
 				case "reasoning_delta":
-					i(o()).reasoning += c.text;
+					i(o()).reasoning += s.text;
 					break;
 				case "tool_args_delta":
-					t.set(c.name, (t.get(c.name) ?? "") + c.args);
+					t.set(s.name, (t.get(s.name) ?? "") + s.args);
 					break;
 				case "tool_start":
 					i(o()).toolCalls.push({
-						callId: c.call_id,
-						name: c.name,
-						args: c.args,
-						streamedArgs: t.get(c.name) ?? "",
+						callId: s.call_id,
+						name: s.name,
+						args: s.args,
+						streamedArgs: t.get(s.name) ?? "",
 						state: "running",
 						startPos: r
-					}), t.delete(c.name);
+					}), t.delete(s.name);
 					break;
 				case "tool_finish": {
-					let t = a(c.call_id);
+					let t = a(s.call_id);
 					if (t) {
 						t.result = {
-							content: c.content,
-							isError: c.is_error
+							content: s.content,
+							isError: s.is_error
 						}, t.state = "done", t.finishPos = r;
 						for (let n of e.steps) n.toolCalls.includes(t) && r > n.to && (n.to = r);
 					}
 					break;
 				}
 				case "step_finish":
-					i(c.index).finish = {
-						reason: c.reason,
-						raw: c.raw,
-						usage: c.usage
+					i(s.index).finish = {
+						reason: s.reason,
+						raw: s.raw,
+						usage: s.usage
 					};
 					break;
 				case "steered": {
-					let e = i(c.step), t = (c.messages ?? []).map(s).join("\n");
+					let e = i(s.step), t = (s.messages ?? []).map(l).join("\n");
 					e.steer = {
 						text: (e.steer?.text ? e.steer.text + "\n" : "") + t,
 						pos: r
 					};
 					break;
 				}
-				case "run_finish": e.finished = !0, e.usage = c.usage, e.pending = c.pending ?? [], e.finishPos = r;
+				case "run_finish": e.finished = !0, e.usage = s.usage, e.pending = s.pending ?? [], e.finishPos = r;
 			}
 		},
 		result() {
@@ -141,37 +141,99 @@ function o() {
 		}
 	};
 }
-function s(e) {
-	return e.content.filter((e) => e.type === "text").map((e) => e.text).join("");
+function s(e, t) {
+	for (let n of t) if (n.parent_call_id) for (let t of e.steps) {
+		let e = t.toolCalls.find((e) => e.callId === n.parent_call_id);
+		if (e && !e.childRunId) {
+			e.childRunId = n.id;
+			break;
+		}
+	}
+	return e;
 }
 function c(e, t) {
+	return t.flatMap((e) => e.messages).filter((e) => e.role === "assistant").forEach((t, n) => {
+		let r = e.steps[n];
+		if (!r) return;
+		let i = t.content.filter((e) => e.type === "text").map((e) => e.text).join("");
+		i && !r.text && (r.text = i);
+		let a = t.content.filter((e) => e.type === "reasoning").map((e) => e.text).join("");
+		a && !r.reasoning && (r.reasoning = a);
+		for (let e of t.content) if (e.type === "tool_call") for (let t of [r]) {
+			let n = t.toolCalls.find((t) => t.callId === e.id);
+			n && n.args === void 0 && e.args !== void 0 && (n.args = e.args);
+		}
+	}), e;
+}
+function l(e) {
+	return e.content.filter((e) => e.type === "text").map((e) => e.text).join("");
+}
+function u(e, t) {
 	return e.state === "done" ? "done" : t === "running" ? "running" : "never";
 }
-var l = /…\[truncated (\d+) bytes\]/u, u = /^tool call (.+) was not executed: the response hit the output token limit$/;
-function d(e) {
-	let t = l.exec(e);
+var ee = /…\[truncated (\d+) bytes\]/u, d = /^tool call (.+) was not executed: the response hit the output token limit$/;
+function f(e) {
+	let t = ee.exec(e);
 	if (t) return {
 		kind: "bytes",
 		bytes: Number(t[1])
 	};
-	let n = u.exec(e);
+	let n = d.exec(e);
 	return n ? {
 		kind: "call",
 		tool: n[1]
 	} : null;
 }
 //#endregion
+//#region src/lib/format.ts
+function p(e, t = Date.now()) {
+	let n = Date.parse(e);
+	if (Number.isNaN(n)) return "—";
+	let r = Math.max(0, Math.round((t - n) / 1e3));
+	if (r < 45) return "just now";
+	let i = Math.round(r / 60);
+	if (i < 60) return `${i}m ago`;
+	let a = Math.round(i / 60);
+	if (a < 24) return `${a}h ago`;
+	let o = Math.round(a / 24);
+	return o < 14 ? `${o}d ago` : new Date(n).toLocaleDateString(void 0, {
+		month: "short",
+		day: "numeric"
+	});
+}
+function m(e, t) {
+	let n = Date.parse(e), r = t ? Date.parse(t) : NaN;
+	return Number.isNaN(n) || Number.isNaN(r) || r < n ? "—" : h(r - n);
+}
+function h(e) {
+	if (e < 1e3) return `${Math.round(e)}ms`;
+	let t = e / 1e3;
+	if (t < 60) return `${t.toFixed(1)}s`;
+	let n = Math.floor(t / 60);
+	return n < 60 ? `${n}m${String(Math.round(t % 60)).padStart(2, "0")}s` : `${Math.floor(n / 60)}h${String(n % 60).padStart(2, "0")}m`;
+}
+function g(e) {
+	return Math.abs(e) >= 1e3 ? `${(e / 1e3).toFixed(1)}k` : String(e);
+}
+//#endregion
 //#region src/panel/render.ts
-function f(e, t, n, r) {
+function _(e, t, n, r) {
 	let i = document.createElement(e);
 	if (t && (i.className = t), typeof n == "string") i.textContent = n;
 	else if (Array.isArray(n)) for (let e of n) i.appendChild(e);
 	if (r) for (let [e, t] of Object.entries(r)) i.setAttribute(e, t);
 	return i;
 }
+function v(e) {
+	try {
+		return JSON.stringify(e, null, 2) ?? String(e);
+	} catch {
+		return String(e);
+	}
+}
 //#endregion
 //#region src/panel/styles.ts
-var p = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", monospace", m = `
+var y = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", monospace", b = `
 :host { all: initial; box-sizing: border-box; }
 *, *::before, *::after { box-sizing: inherit; }
 .weft-root {
@@ -179,7 +241,7 @@ var p = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", mon
   --w-fg: #d7dee6; --w-dim: #8b98a5; --w-faint: #5c6873;
   --w-line: #2a333d; --w-accent: #4cc38a; --w-warn: #e5b567;
   --w-err: #e06c75; --w-info: #6cb6ff;
-  font: 12px/1.45 ${p};
+  font: 12px/1.45 ${y};
   color: var(--w-fg);
 }
 .weft-root * { margin: 0; padding: 0; font: inherit; color: inherit; }
@@ -205,7 +267,7 @@ var p = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", mon
   right: 16px; bottom: 16px; width: 40px; height: 40px;
   border-radius: 50%; border: 1px solid var(--w-line);
   background: var(--w-bg); color: var(--w-fg); cursor: pointer;
-  font: 13px ${p};
+  font: 13px ${y};
   display: flex; align-items: center; justify-content: center;
 }
 .weft-fab:hover { background: var(--w-bg2); }
@@ -313,27 +375,36 @@ details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 .weft-splash .weft-warn { color: var(--w-warn); display: block; margin-bottom: 6px; }
 `;
 //#endregion
+//#region src/lib/api.ts
+function x(e) {
+	return { batches: e.batches.map((e) => ({
+		index: e.index,
+		step: e.step,
+		messages: e.messages
+	})) };
+}
+//#endregion
 //#region src/lib/live.ts
-function h(e) {
+function te(e) {
 	let [[t, n]] = Object.entries(e);
 	return `${encodeURIComponent(t)}=${encodeURIComponent(n)}`;
 }
 //#endregion
 //#region src/panel/client.ts
-function g(e, t) {
+function S(e, t) {
 	return new URL(t, new URL("api/", e.base)).toString();
 }
-var _ = class extends Error {
+var C = class extends Error {
 	status;
 	code;
 	constructor(e, t, n) {
 		super(n), this.status = e, this.code = t;
 	}
 };
-async function v(e, t, n) {
+async function w(e, t, n) {
 	let r = { Accept: "application/json" };
 	e.token && (r.Authorization = `Bearer ${e.token}`);
-	let i = await fetch(g(e, t), {
+	let i = await fetch(S(e, t), {
 		headers: r,
 		signal: n
 	});
@@ -343,20 +414,37 @@ async function v(e, t, n) {
 			let n = await i.json();
 			n.error && (e = n.error.code ?? e, t = n.error.message ?? t);
 		} catch {}
-		throw new _(i.status, e, t);
+		throw new C(i.status, e, t);
 	}
 	return await i.json();
 }
-function y(e, t) {
-	return v(e, "meta", t);
+function T(e, t) {
+	return w(e, "meta", t);
 }
-function b(e, t, n, r) {
-	return v(e, `runs/${encodeURIComponent(t)}/events?after=${n}&limit=500`, r);
+function E(e, t, n) {
+	let r = new URLSearchParams(t).toString();
+	return w(e, `runs${r ? `?${r}` : ""}`, n);
 }
-function x(e, t) {
-	let n = new URLSearchParams(h(t.selector));
+function D(e, t, n) {
+	return w(e, `runs/${encodeURIComponent(t)}`, n);
+}
+function O(e, t, n, r) {
+	return w(e, `runs/${encodeURIComponent(t)}/events?after=${n}&limit=500`, r);
+}
+function k(e, t, n) {
+	return w(e, `runs/${encodeURIComponent(t)}/transcript`, n).then(x);
+}
+function A(e, t, n) {
+	return w(e, `runs/${encodeURIComponent(t)}/spans`, n);
+}
+function j(e, t, n) {
+	let r = new URLSearchParams(t).toString();
+	return w(e, `sessions${r ? `?${r}` : ""}`, n);
+}
+function M(e, t) {
+	let n = new URLSearchParams(te(t.selector));
 	n.set("kinds", (t.kinds ?? ["event", "run"]).join(",")), e.token && n.set("token", e.token);
-	let r = g(e, `live?${n.toString()}`), i = !1, a = /* @__PURE__ */ new Set(), o = new EventSource(r);
+	let r = S(e, `live?${n.toString()}`), i = !1, a = /* @__PURE__ */ new Set(), o = new EventSource(r);
 	return o.addEventListener("record", (e) => {
 		let n = JSON.parse(e.data), r = `${n.run_id}\u0000${n.kind}\u0000${n.pos}`;
 		if (a.has(r)) return;
@@ -390,8 +478,10 @@ function x(e, t) {
 }
 //#endregion
 //#region src/panel/version.ts
-var S = "v0.2.1";
-function C(e, t) {
+function N() {
+	return "v0.2.1";
+}
+function P(e, t) {
 	let n = e.replace(/^v/, "").split(/[.-]/), r = t.replace(/^v/, "").split(/[.-]/);
 	for (let e = 0; e < Math.max(n.length, r.length); e++) {
 		let t = n[e] ?? "", i = r[e] ?? "", a = Number(t), o = Number(i);
@@ -404,61 +494,183 @@ function C(e, t) {
 	}
 	return 0;
 }
-function w(e) {
-	return C(e, S) > 0;
+function F(e) {
+	return P(e, N()) > 0;
 }
 //#endregion
 //#region src/panel/state.ts
-var T = class {
+function I() {
+	return {
+		meta: null,
+		tooNew: !1,
+		gone: !1,
+		session: null,
+		turns: [],
+		experiments: /* @__PURE__ */ new Map(),
+		selected: "",
+		turn: null,
+		live: !1,
+		raw: !1
+	};
+}
+function L(e) {
+	let t = o();
+	return {
+		id: e,
+		doc: null,
+		events: [],
+		gaps: [],
+		feed: t,
+		folded: t.result(),
+		transcript: null,
+		spans: null,
+		children: /* @__PURE__ */ new Map(),
+		expanded: /* @__PURE__ */ new Set()
+	};
+}
+function R(e) {
+	let t = [], n = /* @__PURE__ */ new Map();
+	for (let r of e) {
+		let e = r.forked_from ? r.forked_from.split("#")[0] : "";
+		if (r.playground || r.experiment_id || e) {
+			let t = e || r.id, i = n.get(t) ?? [];
+			i.push(r), n.set(t, i);
+			continue;
+		}
+		t.push(r);
+	}
+	return t.sort((e, t) => Date.parse(t.started) - Date.parse(e.started)), {
+		turns: t,
+		experiments: n
+	};
+}
+function z(e) {
+	return e ? e.some((e) => e.attrs?.["weft.content"] === "stripped") : !1;
+}
+var B = class {
+	publicId;
 	state = {
 		meta: null,
 		tooNew: !1,
-		view: null,
-		runs: [],
-		runId: ""
+		gone: !1,
+		session: null,
+		turns: [],
+		experiments: /* @__PURE__ */ new Map(),
+		selected: "",
+		turn: null,
+		live: !1,
+		raw: !1
 	};
 	notify;
 	ep;
 	scopeSub;
 	runSub;
-	feed = null;
 	disposed = !1;
+	loadSeq = 0;
 	constructor(e, t, n) {
-		this.ep = e, this.notify = n, this.publicId = t;
+		this.publicId = t, this.ep = e, this.notify = n;
 	}
-	publicId;
 	async start() {
 		let e;
 		try {
-			e = await y(this.ep);
+			e = await T(this.ep);
 		} catch {
-			return !1;
+			return this.state.gone = !0, !1;
 		}
-		return !this.disposed && (this.state.meta = e, this.state.tooNew = w(e.studio_version), this.notify(this.state), this.state.tooNew || this.watchScope(), !0);
+		return !this.disposed && (this.state.meta = e, this.state.tooNew = F(e.studio_version), this.emit(), this.state.tooNew || await this.scope(), !0);
 	}
-	watchScope() {
-		this.publicId && (this.scopeSub = x(this.ep, {
-			selector: { public_id: this.publicId },
-			kinds: ["event", "run"],
-			onRun: (e) => this.onRunFrame(e)
-		}));
+	async rescope(e) {
+		e !== this.publicId && (this.publicId = e, this.state.meta && await this.scope());
+	}
+	async scope() {
+		let e = ++this.loadSeq;
+		if (this.scopeSub?.close(), this.runSub?.close(), this.scopeSub = this.runSub = void 0, this.state.live = !1, this.state.selected = "", this.state.turn = null, this.emit(), await this.refresh(), !(e !== this.loadSeq || this.disposed)) {
+			if (!this.publicId) {
+				this.state.live = !0, this.emit();
+				return;
+			}
+			this.scopeSub = M(this.ep, {
+				selector: { public_id: this.publicId },
+				kinds: ["event", "run"],
+				onRun: (e) => this.onRunFrame(e),
+				onOverflow: () => {
+					this.state.live = !1, this.emit(), this.scope();
+				}
+			}), this.state.live = !0, this.emit();
+		}
+	}
+	async refresh() {
+		let e = this.loadSeq;
+		try {
+			if (this.publicId) {
+				let t = await j(this.ep, { public_id: this.publicId });
+				if (e !== this.loadSeq) return;
+				this.state.session = t.sessions[0] ?? null;
+				let n = await E(this.ep, {
+					public_id: this.publicId,
+					limit: "50"
+				});
+				if (e !== this.loadSeq) return;
+				let { turns: r, experiments: i } = R(n.runs);
+				this.state.turns = r, this.state.experiments = i;
+			} else {
+				let t = await E(this.ep, { limit: "10" });
+				if (e !== this.loadSeq) return;
+				let { turns: n, experiments: r } = R(t.runs);
+				this.state.turns = n, this.state.experiments = r;
+			}
+		} catch {
+			return;
+		}
+		if (this.state.selected) this.emit();
+		else {
+			let e = this.state.turns.find((e) => e.status === "running") ?? this.state.turns[0];
+			e ? await this.select(e.id) : this.emit();
+		}
 	}
 	onRunFrame(e) {
 		if (e.run.public_id && e.run.public_id !== this.publicId) return;
-		let t = this.state.runs.filter((t) => t.id !== e.run.id);
-		t.unshift(e.run), t.sort((e, t) => Date.parse(t.started) - Date.parse(e.started)), this.state.runs = t;
-		let n = this.state.runs.find((e) => e.status === "running") ?? this.state.runs[0];
-		n && n.id !== this.state.runId && this.watch(n.id), this.emit();
+		let { turns: t, experiments: n } = R([e.run, ...this.state.turns]);
+		if (this.state.turns = t, this.state.experiments = n, !this.state.selected && this.state.turns.length) {
+			let e = this.state.turns.find((e) => e.status === "running");
+			this.select((e ?? this.state.turns[0]).id);
+			return;
+		}
+		this.state.selected === e.run.id && e.run.status !== "running" && this.refreshTurn(e.run.id), this.emit();
 	}
-	async watch(e) {
-		this.runSub?.close(), this.runSub = void 0, this.feed = o(), this.state.runId = e, this.state.view = this.feed.result();
-		let t = this.feed;
-		try {
-			let n = await b(this.ep, e, 0);
-			for (let e of n.events) t.push(e.event, e.pos);
-			this.state.view = t.result();
-		} catch {}
-		this.disposed || this.state.runId !== e || (this.emit(), this.runSub = x(this.ep, {
+	async select(e) {
+		let t = this.loadSeq;
+		this.runSub?.close(), this.runSub = void 0, this.state.selected = e;
+		let n = L(e);
+		this.state.turn = n, this.emit();
+		let r = this.ep, [i, a, o, l] = await Promise.all([
+			D(r, e).catch(() => null),
+			(async () => {
+				let t = [], n = [], i = 0;
+				for (let a = 0; a < 20; a++) {
+					let a = await O(r, e, i);
+					if (t.push(...a.events), n.push(...a.gaps), a.done || a.next_after === null) break;
+					i = a.next_after;
+				}
+				return {
+					out: t,
+					gaps: n
+				};
+			})().catch(() => ({
+				out: [],
+				gaps: []
+			})),
+			k(r, e).catch(() => null),
+			A(r, e).then((e) => e.spans).catch(() => null)
+		]);
+		if (!(t !== this.loadSeq || this.disposed || this.state.selected !== e)) {
+			n.doc = i, n.events = a.out, n.gaps = a.gaps;
+			for (let e of a.out) n.feed.push(e.event, e.pos);
+			n.folded = n.feed.result(), n.transcript = o, o && (n.folded = c(n.folded, o.batches)), i && (n.folded = s(n.folded, i.children)), n.spans = l, this.emit(), this.rowOf(e)?.status === "running" && this.follow(e);
+		}
+	}
+	follow(e) {
+		this.runSub = M(this.ep, {
 			selector: { run: e },
 			kinds: [
 				"event",
@@ -466,9 +678,50 @@ var T = class {
 				"run"
 			],
 			onRecord: (e) => {
-				this.state.runId === e.run_id && (t.push(e.event, Number(e.pos)), this.state.view = t.result(), this.emit());
+				let t = this.state.turn;
+				t && t.id === e.run_id && (t.feed.push(e.event, Number(e.pos)), t.folded = t.feed.result(), this.emit());
+			},
+			onRun: (t) => {
+				t.run.id === e && t.run.status !== "running" && this.refreshTurn(e);
+			},
+			onOverflow: () => {
+				this.select(e);
 			}
-		}));
+		});
+	}
+	async refreshTurn(e) {
+		let t = this.loadSeq, n = this.state.turn;
+		if (!n || n.id !== e) return;
+		let [r, i, a] = await Promise.all([
+			k(this.ep, e).catch(() => null),
+			A(this.ep, e).then((e) => e.spans).catch(() => null),
+			D(this.ep, e).catch(() => null)
+		]);
+		t !== this.loadSeq || this.disposed || this.state.turn !== n || (n.transcript = r, r && (n.folded = c(n.folded, r.batches)), n.spans = i, n.doc = a ?? n.doc, a && (n.folded = s(n.folded, a.children)), this.emit());
+	}
+	async expandChild(e) {
+		let t = this.state.turn;
+		if (!t || t.children.has(e)) return;
+		let n = this.loadSeq, r = o(), i = [], a = 0;
+		for (let t = 0; t < 20; t++) {
+			let t = await O(this.ep, e, a);
+			if (i.push(...t.events), t.done || t.next_after === null) break;
+			a = t.next_after;
+		}
+		for (let e of i) r.push(e.event, e.pos);
+		let s = r.result(), l = await k(this.ep, e).catch(() => null);
+		n === this.loadSeq && this.state.turn === t && (l && (s = c(s, l.batches)), t.children.set(e, {
+			events: i,
+			feed: r,
+			folded: s,
+			transcript: l
+		}), this.emit());
+	}
+	rowOf(e) {
+		return this.state.turns.find((t) => t.id === e);
+	}
+	toggleRaw() {
+		this.state.raw = !this.state.raw, this.emit();
 	}
 	raf = 0;
 	emit() {
@@ -479,13 +732,17 @@ var T = class {
 	dispose() {
 		this.disposed = !0, this.raf && cancelAnimationFrame(this.raf), this.scopeSub?.close(), this.runSub?.close();
 	}
-}, E = /* @__PURE__ */ new Set([
-	"running",
-	"succeeded",
-	"failed",
-	"interrupted",
-	"parked"
-]), D = class extends HTMLElement {
+};
+//#endregion
+//#region src/panel/element.ts
+function V(e) {
+	return e.status === "succeeded" && e.pending > 0 ? "parked" : e.status;
+}
+function H(e, t, n) {
+	let r = new URL(`runs/${t}`, e);
+	return n !== void 0 && (r.searchParams.set("step", String(n)), r.searchParams.set("view", "story")), r.toString();
+}
+var U = class extends HTMLElement {
 	static observedAttributes = [
 		"data-endpoint",
 		"data-public-id",
@@ -496,115 +753,199 @@ var T = class {
 	];
 	cfg;
 	shadow;
-	run = null;
+	model = null;
 	open;
+	opened = !1;
 	body;
 	constructor() {
-		super(), this.cfg = i(this), this.open = this.cfg.open, this.shadow = this.attachShadow({ mode: "open" });
-		let e = f("style", void 0, m);
-		this.shadow.append(e, this.hostRoot()), this.renderChrome();
+		super(), this.cfg = i(this), this.open = this.cfg.open, this.shadow = this.attachShadow({ mode: "open" }), this.body = _("div", "weft-root"), this.shadow.append(_("style", void 0, b), this.body), this.render(I());
 	}
 	connectedCallback() {
-		this.start();
+		this.cfg = i(this), this.opened || (this.opened = !0, this.open = this.cfg.open), this.start();
 	}
 	disconnectedCallback() {
-		this.run?.dispose(), this.run = null;
+		this.model?.dispose(), this.model = null;
 	}
 	attributeChangedCallback() {
-		this.isConnected && (this.cfg = i(this), this.start());
+		this.cfg = i(this), this.isConnected && this.start();
 	}
 	async start() {
-		this.run?.dispose();
-		let e = new T({
+		this.model?.dispose();
+		let e = new B({
 			base: this.cfg.endpoint,
 			token: this.cfg.token
 		}, this.cfg.publicId, (e) => this.render(e));
-		this.run = e, !await e.start() && this.auto && this.remove();
+		this.model = e, !await e.start() && this.cfg.auto && this.remove();
 	}
-	get auto() {
-		return this.cfg.auto;
-	}
-	hostRoot() {
-		return this.body = f("div", "weft-root"), this.body;
-	}
-	renderChrome() {}
 	toggle() {
-		this.open = !this.open, this.render(this.run?.state ?? {
-			meta: null,
-			tooNew: !1,
-			view: null,
-			runs: [],
-			runId: ""
-		});
+		this.open = !this.open, this.render(this.model?.state ?? I());
+	}
+	toggleRaw() {
+		this.model?.toggleRaw();
 	}
 	render(e) {
-		let t = this.body;
+		let t = this.body, n = (e) => t.querySelector(e)?.scrollTop ?? 0, r = [n(".weft-turns"), n(".weft-main")];
 		for (; t.firstChild;) t.removeChild(t.firstChild);
 		if (!this.open) {
-			let e = f("button", "weft-fab", "devtools", { title: "weft devtools — Alt+W" });
+			let e = _("button", "weft-fab", "devtools", { title: "weft devtools — Alt+W" });
 			e.addEventListener("click", () => this.toggle()), t.appendChild(e);
 			return;
 		}
-		let n = f("div", `weft-dock weft-${this.cfg.position} weft-open`);
-		n.appendChild(this.header(e));
-		let r = f("div", "weft-cols");
-		r.appendChild(this.turnList(e)), r.appendChild(this.main(e)), n.appendChild(r), n.appendChild(this.footer()), t.appendChild(n);
+		if (e.gone) return;
+		let i = _("div", `weft-dock weft-${this.cfg.position} weft-open`);
+		i.appendChild(this.header(e));
+		let a = _("div", "weft-cols");
+		a.appendChild(this.turnList(e)), a.appendChild(this.main(e)), i.appendChild(a), i.appendChild(this.footer(e)), t.appendChild(i), t.querySelectorAll(".weft-turns, .weft-main").forEach((e, t) => {
+			r[t] && (e.scrollTop = r[t]);
+		}), e.raw && e.turn && t.appendChild(this.rawView(e.turn));
 	}
 	header(e) {
-		let t = f("div", "weft-head"), n = e.meta && !e.tooNew, r = e.runs.some((e) => e.status === "running");
-		t.appendChild(f("span", `weft-dot${n ? r ? " weft-run" : " weft-on" : ""}`)), t.appendChild(f("span", "weft-title", this.cfg.publicId ? `weft · ${this.cfg.publicId}` : "weft · latest (dev)")), t.appendChild(f("span", "weft-grow"));
-		let i = f("button", "weft-btn", "–", { title: "collapse (Alt+W)" });
-		return i.addEventListener("click", () => this.toggle()), t.appendChild(i), t;
+		let t = _("div", "weft-head"), n = e.turns.some((e) => e.status === "running");
+		t.appendChild(_("span", `weft-dot${e.live ? n ? " weft-run" : " weft-on" : ""}`, void 0, { title: e.live ? "live" : "history" }));
+		let r = e.session?.agent ?? e.turns[0]?.agent ?? "", i = this.cfg.publicId || e.session?.public_id || "", a = i ? `${r ? r + " · " : ""}${i}` : "latest (dev)";
+		t.appendChild(_("span", "weft-title", a, { title: a })), t.appendChild(_("span", "weft-grow"));
+		let o = e.turns.reduce((e, t) => e + (t.usage?.input_tokens ?? 0), 0), s = e.turns.reduce((e, t) => e + (t.usage?.output_tokens ?? 0), 0), c = `${e.turns.length} turns · ${g(o)}→${g(s)} tok`;
+		if (t.appendChild(_("span", void 0, c, { title: c })), e.turns.length && e.selected) {
+			let n = _("a", "weft-btn", "⤢", {
+				href: H(this.cfg.endpoint, e.selected),
+				target: "_blank",
+				rel: "noopener",
+				title: "open in Studio"
+			});
+			n.style.textDecoration = "none", t.appendChild(n);
+		}
+		let l = _("button", `weft-btn${e.raw ? " weft-active" : ""}`, "raw", { title: "the JSON, one keypress away (r)" });
+		l.addEventListener("click", () => this.toggleRaw()), t.appendChild(l);
+		let u = _("button", "weft-btn", "–", { title: "collapse (Alt+W)" });
+		return u.addEventListener("click", () => this.toggle()), t.appendChild(u), t;
 	}
 	turnList(e) {
-		let t = f("div", "weft-turns");
-		if (!e.runs.length) return t.appendChild(f("div", "weft-splash", "no turns yet — run your app")), t;
-		for (let n of e.runs) t.appendChild(this.turnRow(n, e.runId));
+		let t = _("div", "weft-turns");
+		if (!e.turns.length) return t.appendChild(_("div", "weft-splash", this.cfg.publicId ? "no turns yet — run your app" : "no runs yet (dev)")), t;
+		for (let n of e.turns) {
+			t.appendChild(this.turnRow(n, e.selected));
+			let r = e.experiments.get(n.id) ?? [];
+			if (r.length) {
+				let n = _("div", "weft-expts");
+				for (let t of r) n.appendChild(this.turnRow(t, e.selected));
+				t.appendChild(n);
+			}
+		}
 		return t;
 	}
 	turnRow(e, t) {
-		let n = f("button", `weft-turn${e.id === t ? " weft-sel" : ""}`), r = e.status === "succeeded" && e.pending > 0 ? "parked" : e.status, i = f("div", "weft-row1", [f("span", `weft-chip weft-${E.has(r) ? r : "interrupted"}`, r), f("span", "weft-id", e.id)]);
-		return n.appendChild(i), n.addEventListener("click", () => this.run?.watch(e.id)), n;
+		let n = V(e), r = _("button", `weft-turn${e.id === t ? " weft-sel" : ""}`), i = _("div", "weft-row1", [
+			_("span", `weft-chip weft-${n}`, n),
+			_("span", "weft-id", e.id, { title: e.id }),
+			_("span", "weft-when", p(e.last_seen || e.started))
+		]), a = e.usage ?? {
+			input_tokens: 0,
+			output_tokens: 0
+		}, o = _("div", "weft-row2", [
+			_("span", void 0, e.model?.name ? `${e.model.provider}/${e.model.name}` : ""),
+			_("span", void 0, `${e.steps} steps`),
+			_("span", void 0, `${g(a.input_tokens)}→${g(a.output_tokens)}`),
+			_("span", void 0, m(e.started, e.finished) || "…")
+		]);
+		return r.append(i, o), e.err && r.appendChild(_("div", "weft-reason", e.err)), r.addEventListener("click", () => void this.model?.select(e.id)), r;
 	}
 	main(e) {
-		let t = f("div", "weft-main");
-		if (e.tooNew && e.meta) {
-			let n = f("div", "weft-note weft-warn", [f("span", "weft-warn", "Studio is newer than this panel; update panel.js"), f("span", void 0, `studio_version ${e.meta.studio_version} · panel built for ${S}`)]);
-			return t.appendChild(n), t;
-		}
-		return !e.view || !e.view.steps.length ? (t.appendChild(f("div", "weft-splash", "waiting for the first turn…")), t) : (t.appendChild(O(e.view, e.runs.find((t) => t.id === e.runId)?.status ?? "running")), t);
+		let t = _("div", "weft-main");
+		return t.addEventListener("toggle", (e) => {
+			let t = e.target, n = t.getAttribute?.("data-weft-child");
+			if (!n) return;
+			let r = this.model?.state.turn;
+			r && (t.open ? (r.expanded.add(n), this.model?.expandChild(n)) : r.expanded.delete(n));
+		}), e.tooNew && e.meta ? (t.appendChild(_("div", "weft-note weft-warn", [_("span", "weft-warn", "Studio is newer than this panel; update panel.js"), _("span", void 0, `studio_version ${e.meta.studio_version} · panel built for ${N()}`)])), t) : e.turn ? (t.appendChild(this.turnView(e)), t) : (t.appendChild(_("div", "weft-splash", "select a turn")), t);
 	}
-	footer() {
-		return f("div", "weft-footer", "prompts, args and results from your app, via your Studio");
+	turnView(e) {
+		let t = e.turn;
+		if (!t) return _("div");
+		let n = _("div");
+		n.appendChild(this.notes(t));
+		let r = W(t);
+		return r && n.appendChild(_("div", "weft-note", r)), n.appendChild(G(t.folded, this.rowOf(t.id)?.status ?? "running", t)), t.folded.pending.length && n.appendChild(this.approvals(t.folded.pending)), n;
+	}
+	notes(e) {
+		let t = _("div"), n = this.rowOf(e.id);
+		return n?.status === "interrupted" && t.appendChild(_("div", "weft-note weft-warn", "never completed — this run was interrupted")), e.gaps.length && t.appendChild(_("div", "weft-note weft-warn", `${e.gaps.length} events missing (positions skipped)`, { title: e.gaps.join(", ") })), n?.stop_reason === "max_tokens" && t.appendChild(_("div", "weft-note weft-warn", "stopped at the output token limit (max_tokens)")), z(e.spans) && t.appendChild(_("div", "weft-note", "content not captured by this app (weft.content = stripped)")), t;
+	}
+	approvals(e) {
+		let t = _("div", "weft-step");
+		t.appendChild(_("div", "weft-step-h", [_("span", void 0, "awaiting decision (read-only)")]));
+		let n = _("div", "weft-step-b");
+		for (let t of e) {
+			let e = _("div", "weft-call");
+			e.appendChild(_("div", "weft-call-h", [
+				_("span", "weft-name", t.name),
+				_("span", "weft-args", t.args === void 0 ? "(…)" : v(t.args)),
+				_("span", "weft-badge weft-info", "parked")
+			])), e.appendChild(_("div", "weft-res", "continue / skip / resolve need the playground capability")), n.appendChild(e);
+		}
+		return t.appendChild(n), t;
+	}
+	footer(e) {
+		let t = "prompts, args and results from your app, via your Studio";
+		return z(e.turn?.spans ?? null) ? _("div", "weft-footer", [_("span", void 0, t), _("span", void 0, " · content is stripped for this destination")]) : _("div", "weft-footer", t);
+	}
+	rawView(e) {
+		return _("pre", "weft-raw", v({
+			doc: e.doc,
+			events: e.events,
+			transcript: e.transcript
+		}));
+	}
+	rowOf(e) {
+		return this.model?.rowOf(e);
 	}
 };
-function O(e, t) {
-	let n = f("div");
-	e.model && n.appendChild(f("div", "weft-reason", `${e.model.provider}/${e.model.name}`));
-	for (let r of e.steps) n.appendChild(k(r, t));
-	return n;
+function W(e) {
+	return e.transcript ? e.transcript.batches.flatMap((e) => e.messages).filter((e) => e.role === "user").flatMap((e) => e.content).filter((e) => e.type === "text").map((e) => e.text).join("\n") : "";
 }
-function k(e, t) {
-	let n = f("div", "weft-step"), r = f("div", "weft-step-h", [f("span", void 0, `step ${e.index}`), f("span", "weft-grow")]);
-	e.finish && r.appendChild(f("span", void 0, e.finish.reason)), n.appendChild(r);
-	let i = f("div", "weft-step-b");
+function G(e, t, n) {
+	let r = _("div");
+	e.model?.name && r.appendChild(_("div", "weft-reason", `${e.model.provider}/${e.model.name}`));
+	for (let i of e.steps) r.appendChild(K(i, t, n));
+	return r;
+}
+function K(e, t, n) {
+	let r = _("div", "weft-step"), i = _("div", "weft-step-h", [_("span", void 0, `step ${e.index}`), _("span", "weft-grow")]);
+	e.finish && (i.appendChild(_("span", void 0, e.finish.reason)), i.appendChild(_("span", void 0, ne(e.finish.usage)))), r.appendChild(i);
+	let a = _("div", "weft-step-b");
 	if (e.reasoning) {
-		let t = f("details", "weft-collapsible");
-		t.appendChild(f("summary", void 0, "reasoning")), t.appendChild(f("div", void 0, e.reasoning)), i.appendChild(t);
+		let t = _("details", "weft-collapsible");
+		t.appendChild(_("summary", void 0, "reasoning")), t.appendChild(_("div", void 0, e.reasoning)), a.appendChild(t);
 	}
-	e.text && i.appendChild(f("div", void 0, e.text));
-	for (let n of e.toolCalls) i.appendChild(A(n, t));
-	return n.appendChild(i), n;
+	e.text && a.appendChild(_("div", void 0, e.text)), e.steer && a.appendChild(_("div", "weft-note", `steered: ${e.steer.text}`));
+	for (let r of e.toolCalls) a.appendChild(q(r, t, n));
+	return r.appendChild(a), r;
 }
-function A(e, t) {
-	let n = f("div", "weft-call"), r = c(e, t), i = f("div", "weft-call-h", [f("span", "weft-name", e.name), f("span", "weft-args", j(e))]);
-	if (n.appendChild(i), e.result) {
-		let t = f("div", "weft-res", e.result.content), r = d(e.result.content);
-		r && i.appendChild(f("span", "weft-badge", r.kind === "bytes" ? `truncated ${r.bytes} bytes` : "not executed (max_tokens)")), e.result.isError && i.appendChild(f("span", "weft-badge weft-err", "error")), n.appendChild(t);
-	} else r === "running" ? n.appendChild(f("div", "weft-res", "running…")) : n.appendChild(f("div", "weft-res weft-warn", "never completed"));
-	return n;
+function q(e, t, n) {
+	let r = _("div", "weft-call"), i = u(e, t), a = _("div", "weft-call-h", [_("span", "weft-name", e.name), _("span", "weft-args", Z(e))]);
+	if (r.appendChild(a), e.childRunId && n && (a.appendChild(_("span", "weft-badge weft-info", "subagent", { title: e.childRunId })), r.appendChild(Y(e.childRunId, n))), e.result) {
+		let t = J(n, e);
+		t && a.appendChild(_("span", "weft-badge weft-info", t));
+		let i = f(e.result.content);
+		i && a.appendChild(_("span", "weft-badge", i.kind === "bytes" ? `truncated ${i.bytes} bytes` : "not executed (max_tokens)")), e.result.isError && a.appendChild(_("span", "weft-badge weft-err", "error")), r.appendChild(_("div", "weft-res", e.result.content));
+	} else i === "running" ? r.appendChild(_("div", "weft-res", "running…")) : r.appendChild(_("div", "weft-res weft-warn", "never completed"));
+	return r;
 }
-function j(e) {
+function J(e, t) {
+	if (!e?.spans) return "";
+	let n = e.spans.find((e) => e.name === "execute_tool" && e.attrs?.["gen_ai.tool.name"] === t.name);
+	if (!n) return "";
+	let r = Date.parse(n.end) - Date.parse(n.start);
+	return !Number.isFinite(r) || r < 0 ? "" : `${Math.round(r)}ms`;
+}
+function Y(e, t) {
+	let n = t.children.get(e), r = _("details", "weft-collapsible");
+	return r.setAttribute("data-weft-child", e), t.expanded.has(e) && r.setAttribute("open", ""), r.appendChild(_("summary", void 0, `subagent ${X(e)}`)), n ? r.appendChild(G(n.folded, "succeeded")) : r.appendChild(_("div", void 0, "loading the subagent's turn…")), r;
+}
+function X(e) {
+	let t = e.split("/");
+	return t[t.length - 1] || e;
+}
+function Z(e) {
 	if (e.args !== void 0) try {
 		return `(${JSON.stringify(e.args)})`;
 	} catch {
@@ -612,10 +953,14 @@ function j(e) {
 	}
 	return e.streamedArgs ? `(${e.streamedArgs}…)` : "(…)";
 }
+function ne(e) {
+	let t = [`${g(e.input_tokens)}→${g(e.output_tokens)} tok`];
+	return e.cached_input_tokens && t.push(`${g(e.cached_input_tokens)} cached`), e.reasoning_tokens && t.push(`${g(e.reasoning_tokens)} reasoning`), e.cache_write_tokens && t.push(`${g(e.cache_write_tokens)} cache-write`), t.join(" · ");
+}
 //#endregion
 //#region src/panel/main.ts
-customElements.get("weft-devtools") || customElements.define("weft-devtools", D);
-function M(e) {
+customElements.get("weft-devtools") || customElements.define("weft-devtools", U);
+function Q(e) {
 	let t = window.__WEFT__?.publicId ?? "", n = t;
 	try {
 		Object.defineProperty(window, "__WEFT__", {
@@ -628,16 +973,16 @@ function M(e) {
 	} catch {}
 	t && e(t);
 }
-function N(e) {
+function re(e) {
 	let t = document.createElement("weft-devtools");
-	e || M((e) => {
+	e || Q((e) => {
 		e && t.setAttribute("data-public-id", e);
 	});
 	let n = () => document.body.appendChild(t);
 	document.body ? n() : document.addEventListener("DOMContentLoaded", n, { once: !0 });
 }
-var P = i(), F = document.querySelector("weft-devtools");
-F ? F.hasAttribute("data-public-id") || M((e) => {
-	e && F.setAttribute("data-public-id", e);
-}) : (P.auto || a()) && N(n()?.getAttribute("data-public-id") !== null);
+var ie = i(), $ = document.querySelector("weft-devtools");
+$ ? $.hasAttribute("data-public-id") || Q((e) => {
+	e && $.setAttribute("data-public-id", e);
+}) : (ie.auto || a()) && re(n()?.getAttribute("data-public-id") !== null);
 //#endregion

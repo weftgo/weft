@@ -23,13 +23,10 @@ const studioVersion = (() => {
   return m[1]
 })()
 
-// The Dv0 spike (§10) builds two candidates — vanilla TS (src/panel/
-// main.ts) and Preact (src/panel/preact.tsx) — and the smaller gzip
-// wins (§11 Q1). PANEL_CANDIDATE=preact builds the Preact one to
-// dist/panel-spike (never shipped); the default build is the vanilla
-// panel, whose output scripts/clean-dist.ts copies to ../dist/panel.
-const candidate = process.env.PANEL_CANDIDATE ?? "vanilla"
-const isPreact = candidate === "preact"
+// The Dv0 decision (§11 Q1, closed): vanilla TS won on gzip
+// (7,187 vs Preact's 12,202 on the same surfaces), so the vanilla
+// entry is the panel. The Preact candidate lived in the spike commit
+// (f80f7e5) and is gone.
 
 export default defineConfig({
   define: {
@@ -38,17 +35,13 @@ export default defineConfig({
   // The app's public/ files (favicon, fonts) are the SPA's; a library
   // build emits the bundle and nothing else.
   publicDir: false,
-  // preact.tsx carries its own /** @jsxImportSource preact */ pragma;
-  // the vanilla entry has no JSX at all.
   build: {
-    outDir: isPreact ? "dist/panel-spike" : "dist/panel-tmp",
+    outDir: "dist/panel-tmp",
     emptyOutDir: true,
     sourcemap: false,
     minify: true,
     lib: {
-      entry: isPreact
-        ? new URL("./src/panel/preact.tsx", import.meta.url).pathname
-        : new URL("./src/panel/main.ts", import.meta.url).pathname,
+      entry: new URL("./src/panel/main.ts", import.meta.url).pathname,
       formats: ["es"],
       name: "WeftDevtools",
       fileName: () => "panel.js",

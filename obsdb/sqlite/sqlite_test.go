@@ -104,8 +104,19 @@ func rec(runID, kind, eventType string, pos int64, body string, extra map[string
 	}
 }
 
+// The fixture clock is anchored once per process at init to the real
+// wall clock (the f74eee1 obsdbtest pattern): these tests read through
+// DeriveStatus with the real now, so a frozen epoch expires the moment
+// wall time passes lastSeen+InterruptedAfter — the heartbeat, session,
+// and status-filter running assertions would flip to interrupted. One
+// package-level anchor keeps every fixture time on a single
+// deterministic timeline; UTC strips the monotonic reading and matches
+// what the read paths return, so round-tripped times compare equal to
+// the fixture.
+var testBase = time.Now().UTC()
+
 func base(d time.Duration) time.Time {
-	return time.Unix(0, 1790845923120000000).UTC().Add(d)
+	return testBase.Add(d)
 }
 
 func scriptedRun() []obsdb.Record {

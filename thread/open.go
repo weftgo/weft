@@ -4,57 +4,35 @@ import (
 	"context"
 	"iter"
 	"log/slog"
+
+	"github.com/weftgo/weft/thread/internal/opencfg"
 )
 
 // OpenOption configures a Storage backend at open, one value per
 // concern, applied over the defaults. The options live here — in the
 // package that owns the Storage contract — so every backend accepts
 // the same vocabulary and a caller never learns a backend to say
-// Salvage (ADR 0011 §5 names it thread.Salvage).
+// Salvage (ADR 0011 §5 names it thread.Salvage). Memory, jsonl.Open
+// and sqlite.Open all take them; a backend an option means nothing to
+// accepts it and says so. The set is sealed: the options are the ones
+// this package returns. Backend authors resolve them with
+// thread/backend.Resolve.
 type OpenOption interface {
-	applyOpen(*OpenConfig)
+	openOption()
 }
 
-// OpenConfig is the resolved configuration of an open: the defaults
-// with every option applied. Backends resolve it through ResolveOpen;
-// callers never construct it.
-type OpenConfig struct {
-	// Salvage downgrades a malformed line from a load failure
-	// (ErrCorrupt) to a skip reported in the LoadReport. The unknown
-	// and the newer stay loud: ErrNewerFormat is never salvaged.
-	Salvage bool
-	// SyncEveryAppend is the durability cadence: true (the default)
-	// fsyncs every Append before it returns; false defers the fsync to
-	// the Flusher capability — the turn-end cadence a Session drives.
-	SyncEveryAppend bool
-	// NoLock turns off the backend's cross-process writer lock (the
-	// NoLock option): the caller vouches that one process writes.
-	NoLock bool
-	// Logger receives the backend's own reports — a repaired torn
-	// tail, a taken-over lock. Never nil after ResolveOpen: the
-	// default is slog.Default(), read at open.
-	Logger *slog.Logger
-}
-
-// ResolveOpen folds opts over the defaults. Exported because backends
-// outside this package resolve the same option vocabulary into the
-// same configuration.
-func ResolveOpen(opts ...OpenOption) OpenConfig {
-	cfg := OpenConfig{SyncEveryAppend: true}
-	for _, o := range opts {
-		if o != nil {
-			o.applyOpen(&cfg)
-		}
-	}
-	if cfg.Logger == nil {
-		cfg.Logger = slog.Default()
-	}
-	return cfg
+// resolveOpen folds opts over the defaults for the in-package backend
+// (Memory); thread/backend.Resolve is the same fold for the others.
+func resolveOpen(opts []OpenOption) opencfg.Config {
+	return opencfg.Resolve(opts)
 }
 
 type salvageOption struct{}
 
-func (salvageOption) applyOpen(c *OpenConfig) { c.Salvage = true }
+func (salvageOption) openOption() {}
+
+// ApplyOpen is the option's effect (opencfg.Applier).
+func (salvageOption) ApplyOpen(c *opencfg.Config) { c.Salvage = true }
 
 // Salvage returns the open option that skips malformed lines instead
 // of failing the load: each skip is reported in Load's LoadReport
@@ -66,7 +44,10 @@ func Salvage() OpenOption { return salvageOption{} }
 
 type syncEveryAppendOption bool
 
-func (o syncEveryAppendOption) applyOpen(c *OpenConfig) { c.SyncEveryAppend = bool(o) }
+func (syncEveryAppendOption) openOption() {}
+
+// ApplyOpen is the option's effect (opencfg.Applier).
+func (o syncEveryAppendOption) ApplyOpen(c *opencfg.Config) { c.SyncEveryAppend = bool(o) }
 
 // FsyncEveryAppend returns the open option that restores the default
 // durability: every Append fsyncs before returning, so an accepted
@@ -85,7 +66,10 @@ func FsyncOnFlush() OpenOption { return syncEveryAppendOption(false) }
 
 type noLockOption struct{}
 
-func (noLockOption) applyOpen(c *OpenConfig) { c.NoLock = true }
+func (noLockOption) openOption() {}
+
+// ApplyOpen is the option's effect (opencfg.Applier).
+func (noLockOption) ApplyOpen(c *opencfg.Config) { c.NoLock = true }
 
 // NoLock returns the open option that opens a file backend without its
 // cross-process writer lock. It exists for platforms with no advisory
@@ -102,7 +86,10 @@ func NoLock() OpenOption { return noLockOption{} }
 
 type openLoggerOption struct{ l *slog.Logger }
 
-func (o openLoggerOption) applyOpen(c *OpenConfig) {
+func (openLoggerOption) openOption() {}
+
+// ApplyOpen is the option's effect (opencfg.Applier).
+func (o openLoggerOption) ApplyOpen(c *opencfg.Config) {
 	if o.l != nil {
 		c.Logger = o.l
 	}

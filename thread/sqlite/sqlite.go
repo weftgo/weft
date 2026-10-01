@@ -52,6 +52,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/thread"
+	threadbackend "github.com/weftgo/weft/thread/backend"
 
 	// CGO-free driver, the store's choice; the import registers it.
 	_ "modernc.org/sqlite"
@@ -81,7 +82,7 @@ const connParams = "_txlock=immediate" +
 // path is a file name, taken literally: characters that mean something
 // in a SQLite URI ('?', '#', '%') are part of the name, never options.
 //
-// The shared open vocabulary (thread.ResolveOpen) applies: Salvage
+// The shared open vocabulary (thread/backend.Resolve) applies: Salvage
 // downgrades a malformed line from a load failure to a skip reported in
 // the LoadReport; OpenLogger names where a lock takeover and a removed
 // torn row are reported; the fsync-policy options are accepted and are
@@ -92,7 +93,7 @@ const connParams = "_txlock=immediate" +
 // 0700, matching jsonl's rule (ADR 0011 §5); the -wal and -shm side
 // files are SQLite's own and share the main file's directory.
 func Open(path string, opts ...thread.OpenOption) (thread.Storage, error) {
-	cfg := thread.ResolveOpen(opts...)
+	cfg := threadbackend.Resolve(opts...)
 	owner, err := instanceID()
 	if err != nil {
 		return nil, err

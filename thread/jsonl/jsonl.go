@@ -37,6 +37,7 @@ import (
 	"sync"
 
 	"github.com/weftgo/weft/thread"
+	threadbackend "github.com/weftgo/weft/thread/backend"
 	"github.com/weftgo/weft/thread/internal/rules"
 )
 
@@ -54,7 +55,7 @@ const headerChunk = 4 << 10
 // session, the directory created 0700 when missing and files created
 // 0600. opts are the shared open vocabulary — Salvage, the fsync
 // policy, NoLock, OpenLogger — resolved with the defaults by
-// thread.ResolveOpen. On a platform with no advisory file lock (not
+// thread/backend.Resolve. On a platform with no advisory file lock (not
 // unix, not Windows) Open fails wrapping errors.ErrUnsupported unless
 // thread.NoLock is passed: the one-writer rule is never dropped
 // silently.
@@ -62,7 +63,7 @@ func Open(dir string, opts ...thread.OpenOption) (thread.Storage, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("jsonl: open called with an empty directory")
 	}
-	cfg := thread.ResolveOpen(opts...)
+	cfg := threadbackend.Resolve(opts...)
 	if err := checkLockSupport(lockSupported, cfg.NoLock); err != nil {
 		return nil, err
 	}

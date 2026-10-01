@@ -22,6 +22,9 @@ import (
 // caller does to a value after passing it in — or receiving it back —
 // reaches the stored session.
 type memStorage struct {
+	salvage bool         // Salvage: a malformed line is skipped and reported
+	log     *slog.Logger // OpenLogger: where the torn-tail repair is reported
+
 	mu       sync.Mutex
 	sessions map[string]memSession
 }
@@ -62,13 +65,26 @@ func (s memSession) head() (Header, error) {
 // examples, and as the reference behaviour the durable backends are
 // compared against — every backend runs the same threadtest table,
 // corruption rows included (Memory implements the table's
-// threadtest.RawInjector hooks by holding the raw bytes). There is no
-// second Storage or process to refuse — one map, one process — so the
-// Storage methods never answer ErrLocked; the one writer Memory tells
-// from another is a lease holder (the Leaser capability, which is how
-// two Sessions on one Memory are kept to one writer), and its Release
-// (the Releaser capability) ends that lease.
-func Memory() Storage { return &memStorage{sessions: map[string]memSession{}} }
+// threadtest.RawInjector hooks by holding the raw bytes).
+//
+// opts are the open vocabulary every backend takes. Salvage and
+// OpenLogger mean here what they mean on disk: a malformed line is
+// skipped and reported instead of failing the load, and the one
+// repair Memory makes on its own — a torn tail removed before an
+// append — is reported to the given logger (slog.Default() as it
+// stands at the call, without the option). The fsync options and
+// NoLock are accepted and are no-ops: nothing here is buffered, and
+// there is no cross-process lock to turn off.
+//
+// There is no second Storage or process to refuse — one map, one
+// process — so the Storage methods never answer ErrLocked; the one
+// writer Memory tells from another is a lease holder (the Leaser
+// capability, which is how two Sessions on one Memory are kept to one
+// writer), and its Release (the Releaser capability) ends that lease.
+func Memory(opts ...OpenOption) Storage {
+	cfg := resolveOpen(opts)
+	return &memStorage{salvage: cfg.Salvage, log: cfg.Logger, sessions: map[string]memSession{}}
+}
 
 // Create validates the header — one path component of an id, the
 // current envelope — and stores it as the session's first line.
@@ -129,7 +145,7 @@ func (m *memStorage) Append(ctx context.Context, session string, entries ...Entr
 	}
 	if rules.Torn(s.buf) {
 		keep := rules.CompleteLen(s.buf)
-		slog.Default().Warn("thread: removed a torn tail before appending",
+		m.log.Warn("thread: removed a torn tail before appending",
 			"session", session, "dropped_bytes", len(s.buf)-keep)
 		// Clipped, so the append below reallocates: a concurrent Load's
 		// snapshot of the old array is never overwritten.
@@ -148,9 +164,9 @@ func (m *memStorage) Append(ctx context.Context, session string, entries ...Entr
 // never a skip; anything else that fails to decode is ErrCorrupt
 // naming the line (the header is line 1); the bytes after the last
 // complete newline are a torn tail — dropped and reported, never an
-// error. There is no salvage mode here — Memory is opened with no
-// options — so a malformed line it holds (through threadtest's Inject)
-// always fails the load, which is what the table's corruption row pins.
+// error. Under Salvage a malformed line (only threadtest's Inject can
+// leave one here) is skipped and reported; without it, it fails the
+// load, which is what the table's corruption row pins.
 func (m *memStorage) Load(ctx context.Context, session string) (Header, []Entry, *LoadReport, error) {
 	if err := ctx.Err(); err != nil {
 		return Header{}, nil, nil, err
@@ -185,9 +201,15 @@ func (m *memStorage) Load(ctx context.Context, session string) (Header, []Entry,
 			continue
 		}
 		if errors.Is(err, ErrNewerFormat) {
-			return Header{}, nil, nil, err // loud, always
+			return Header{}, nil, nil, err // loud, salvage or not
 		}
-		return Header{}, nil, nil, &CorruptError{Session: session, Line: i + 2, Err: err}
+		if !m.salvage {
+			return Header{}, nil, nil, &CorruptError{Session: session, Line: i + 2, Err: err}
+		}
+		if report == nil {
+			report = &LoadReport{}
+		}
+		report.Skipped = append(report.Skipped, i+2)
 	}
 	return h, entries, report, nil
 }

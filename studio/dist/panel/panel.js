@@ -459,26 +459,26 @@ function T(e) {
 }
 //#endregion
 //#region src/lib/live.ts
-function ee(e) {
+function E(e) {
 	let [[t, n]] = Object.entries(e);
 	return `${encodeURIComponent(t)}=${encodeURIComponent(n)}`;
 }
 //#endregion
 //#region src/panel/client.ts
-function E(e, t) {
+function D(e, t) {
 	return new URL(t, new URL("api/", e.base)).toString();
 }
-var D = class extends Error {
+var O = class extends Error {
 	status;
 	code;
 	constructor(e, t, n) {
 		super(n), this.status = e, this.code = t;
 	}
 };
-async function O(e, t, n) {
+async function k(e, t, n) {
 	let r = { Accept: "application/json" };
 	e.token && (r.Authorization = `Bearer ${e.token}`);
-	let i = await fetch(E(e, t), {
+	let i = await fetch(D(e, t), {
 		headers: r,
 		signal: n
 	});
@@ -488,58 +488,58 @@ async function O(e, t, n) {
 			let n = await i.json();
 			n.error && (e = n.error.code ?? e, t = n.error.message ?? t);
 		} catch {}
-		throw new D(i.status, e, t);
+		throw new O(i.status, e, t);
 	}
 	return await i.json();
 }
-function te(e, t) {
-	return O(e, "meta", t);
+function A(e, t) {
+	return k(e, "meta", t);
 }
-function k(e, t, n) {
+function j(e, t, n) {
 	let r = new URLSearchParams(t).toString();
-	return O(e, `runs${r ? `?${r}` : ""}`, n);
-}
-function A(e, t, n) {
-	return O(e, `runs/${encodeURIComponent(t)}`, n);
-}
-function j(e, t, n, r) {
-	return O(e, `runs/${encodeURIComponent(t)}/events?after=${n}&limit=500`, r);
+	return k(e, `runs${r ? `?${r}` : ""}`, n);
 }
 function M(e, t, n) {
-	return O(e, `runs/${encodeURIComponent(t)}/transcript`, n).then(T);
+	return k(e, `runs/${encodeURIComponent(t)}`, n);
 }
-function N(e, t, n) {
-	return O(e, `runs/${encodeURIComponent(t)}/spans`, n);
-}
-function ne(e, t, n) {
-	let r = new URLSearchParams(t).toString();
-	return O(e, `sessions${r ? `?${r}` : ""}`, n);
-}
-function re(e, t) {
-	return O(e, "runtimes", t);
-}
-function ie(e, t) {
-	return L(e, "playground/runs", t);
-}
-function ae(e, t) {
-	return O(e, `playground/commands/${encodeURIComponent(t)}`);
-}
-function oe(e, t, n) {
-	return L(e, `runs/${encodeURIComponent(t)}/approvals`, n);
+function N(e, t, n, r) {
+	return k(e, `runs/${encodeURIComponent(t)}/events?after=${n}&limit=500`, r);
 }
 function P(e, t, n) {
-	return I(e, `runtimes/${encodeURIComponent(t)}/breakpoints`, { tools: n });
+	return k(e, `runs/${encodeURIComponent(t)}/transcript`, n).then(T);
 }
 function F(e, t, n) {
+	return k(e, `runs/${encodeURIComponent(t)}/spans`, n);
+}
+function ee(e, t, n) {
+	let r = new URLSearchParams(t).toString();
+	return k(e, `sessions${r ? `?${r}` : ""}`, n);
+}
+function te(e, t) {
+	return k(e, "runtimes", t);
+}
+function ne(e, t) {
+	return L(e, "playground/runs", t);
+}
+function re(e, t) {
+	return k(e, `playground/commands/${encodeURIComponent(t)}`);
+}
+function ie(e, t, n) {
+	return L(e, `runs/${encodeURIComponent(t)}/approvals`, n);
+}
+function ae(e, t, n) {
+	return oe(e, `runtimes/${encodeURIComponent(t)}/breakpoints`, { tools: n });
+}
+function I(e, t, n) {
 	return L(e, `runs/${encodeURIComponent(t)}/steer`, { message: n });
 }
-async function I(e, t, n) {
+async function oe(e, t, n) {
 	let r = {
 		Accept: "application/json",
 		"Content-Type": "application/json"
 	};
 	e.token && (r.Authorization = `Bearer ${e.token}`);
-	let i = await fetch(E(e, t), {
+	let i = await fetch(D(e, t), {
 		method: "PUT",
 		headers: r,
 		body: JSON.stringify(n)
@@ -550,7 +550,7 @@ async function I(e, t, n) {
 			let n = await i.json();
 			n.error && (e = n.error.code ?? e, t = n.error.message ?? t);
 		} catch {}
-		throw new D(i.status, e, t);
+		throw new O(i.status, e, t);
 	}
 	return await i.json();
 }
@@ -560,7 +560,7 @@ async function L(e, t, n) {
 		"Content-Type": "application/json"
 	};
 	e.token && (r.Authorization = `Bearer ${e.token}`);
-	let i = await fetch(E(e, t), {
+	let i = await fetch(D(e, t), {
 		method: "POST",
 		headers: r,
 		body: JSON.stringify(n)
@@ -571,14 +571,14 @@ async function L(e, t, n) {
 			let n = await i.json();
 			n.error && (e = n.error.code ?? e, t = n.error.message ?? t);
 		} catch {}
-		throw new D(i.status, e, t);
+		throw new O(i.status, e, t);
 	}
 	return await i.json();
 }
 function R(e, t) {
-	let n = new URLSearchParams(ee(t.selector));
+	let n = new URLSearchParams(E(t.selector));
 	n.set("kinds", (t.kinds ?? ["event", "run"]).join(",")), e.token && n.set("token", e.token);
-	let r = E(e, `live?${n.toString()}`), i = !1, a = /* @__PURE__ */ new Set(), o = new EventSource(r);
+	let r = D(e, `live?${n.toString()}`), i = !1, a = /* @__PURE__ */ new Set(), o = new EventSource(r);
 	return o.addEventListener("record", (e) => {
 		let n = JSON.parse(e.data), r = `${n.run_id}\u0000${n.kind}\u0000${n.pos}`;
 		if (a.has(r)) return;
@@ -718,7 +718,7 @@ function W(e) {
 function G(e) {
 	return e ? e.some((e) => e.attrs?.["weft.content"] === "stripped") : !1;
 }
-var K = class {
+var ue = class {
 	publicId;
 	state = {
 		meta: null,
@@ -751,7 +751,7 @@ var K = class {
 	async start() {
 		let e;
 		try {
-			e = await te(this.ep);
+			e = await A(this.ep);
 		} catch {
 			return this.state.gone = !0, !1;
 		}
@@ -781,10 +781,10 @@ var K = class {
 		let e = this.loadSeq;
 		try {
 			if (this.publicId) {
-				let t = await ne(this.ep, { public_id: this.publicId });
+				let t = await ee(this.ep, { public_id: this.publicId });
 				if (e !== this.loadSeq) return;
 				this.state.session = t.sessions[0] ?? null;
-				let n = await k(this.ep, {
+				let n = await j(this.ep, {
 					public_id: this.publicId,
 					limit: "50"
 				});
@@ -792,7 +792,7 @@ var K = class {
 				let { turns: r, experiments: i } = W(n.runs);
 				this.state.turns = r, this.state.experiments = i;
 			} else {
-				let t = await k(this.ep, { limit: "10" });
+				let t = await j(this.ep, { limit: "10" });
 				if (e !== this.loadSeq) return;
 				let { turns: n, experiments: r } = W(t.runs);
 				this.state.turns = n, this.state.experiments = r;
@@ -833,11 +833,11 @@ var K = class {
 		let n = U(e);
 		this.state.turn = n, this.emit();
 		let r = this.ep, [i, a, o, s] = await Promise.all([
-			A(r, e).catch(() => null),
+			M(r, e).catch(() => null),
 			(async () => {
 				let t = [], n = [], i = 0;
 				for (let a = 0; a < 20; a++) {
-					let a = await j(r, e, i);
+					let a = await N(r, e, i);
 					if (t.push(...a.events), n.push(...a.gaps), a.done || a.next_after === null) break;
 					i = a.next_after;
 				}
@@ -849,8 +849,8 @@ var K = class {
 				out: [],
 				gaps: []
 			})),
-			M(r, e).catch(() => null),
-			N(r, e).then((e) => e.spans).catch(() => null)
+			P(r, e).catch(() => null),
+			F(r, e).then((e) => e.spans).catch(() => null)
 		]);
 		if (!(t !== this.loadSeq || this.disposed || this.state.selected !== e)) {
 			n.doc = i, n.events = a.out, n.gaps = a.gaps;
@@ -882,9 +882,9 @@ var K = class {
 		let t = this.loadSeq, n = this.state.turn;
 		if (!n || n.id !== e) return;
 		let [r, i, a] = await Promise.all([
-			M(this.ep, e).catch(() => null),
-			N(this.ep, e).then((e) => e.spans).catch(() => null),
-			A(this.ep, e).catch(() => null)
+			P(this.ep, e).catch(() => null),
+			F(this.ep, e).then((e) => e.spans).catch(() => null),
+			M(this.ep, e).catch(() => null)
 		]);
 		t !== this.loadSeq || this.disposed || this.state.turn !== n || (n.transcript = r, r && (n.folded = u(n.folded, r.batches)), n.spans = i, n.doc = a ?? n.doc, a && (n.folded = l(n.folded, a.children)), this.emit());
 	}
@@ -895,7 +895,7 @@ var K = class {
 		try {
 			let t = 0;
 			for (let n = 0; n < 20; n++) {
-				let n = await j(this.ep, e, t);
+				let n = await N(this.ep, e, t);
 				if (i.push(...n.events), n.done || n.next_after === null) break;
 				t = n.next_after;
 			}
@@ -903,7 +903,7 @@ var K = class {
 			return;
 		}
 		for (let e of i) r.push(e.event, e.pos);
-		let a = r.result(), o = await M(this.ep, e).catch(() => null);
+		let a = r.result(), o = await P(this.ep, e).catch(() => null);
 		n === this.loadSeq && this.state.turn === t && (o && (a = u(a, o.batches)), t.children.set(e, {
 			events: i,
 			feed: r,
@@ -920,7 +920,7 @@ var K = class {
 		let r = this.state.runtimes;
 		if (!r.length) {
 			try {
-				r = (await re(this.ep)).runtimes;
+				r = (await te(this.ep)).runtimes;
 			} catch {
 				return;
 			}
@@ -961,7 +961,7 @@ var K = class {
 		if (!e) return;
 		let t;
 		try {
-			t = await ie(this.ep, ce(e, this.publicId));
+			t = await ne(this.ep, ce(e, this.publicId));
 		} catch (e) {
 			this.setExperimentError(e instanceof Error ? e.message : String(e));
 			return;
@@ -973,7 +973,7 @@ var K = class {
 			runID: "",
 			error: null,
 			label: se(e.runId, n),
-			sourceText: ue(this.state.turn),
+			sourceText: K(this.state.turn),
 			compareWith: "",
 			row: null,
 			events: [],
@@ -986,7 +986,7 @@ var K = class {
 		if (!r || !r.runID) return;
 		let i;
 		try {
-			i = await oe(this.ep, r.runID, {
+			i = await ie(this.ep, r.runID, {
 				call_id: e,
 				decision: t,
 				content: n
@@ -1010,7 +1010,7 @@ var K = class {
 	async setCompare(e) {
 		let t = this.state.result;
 		if (!t || (t.compareWith = e, this.emit(), !e)) return;
-		let n = await M(this.ep, e).catch(() => null);
+		let n = await P(this.ep, e).catch(() => null);
 		if (this.state.result !== t) return;
 		if (n) {
 			let t = [];
@@ -1021,7 +1021,7 @@ var K = class {
 		try {
 			let t = 0;
 			for (let n = 0; n < 20; n++) {
-				let n = await j(this.ep, e, t);
+				let n = await N(this.ep, e, t);
 				for (let e of n.events) r.push(e.event, e.pos);
 				if (n.done || n.next_after === null) break;
 				t = n.next_after;
@@ -1035,7 +1035,7 @@ var K = class {
 		let t = this.state.drawer;
 		if (t) {
 			try {
-				await P(this.ep, t.runtimeId, e);
+				await ae(this.ep, t.runtimeId, e);
 			} catch (e) {
 				this.setExperimentError(e instanceof Error ? e.message : String(e));
 				return;
@@ -1047,7 +1047,7 @@ var K = class {
 		let t = this.state.result;
 		if (t && t.runID && e) {
 			try {
-				await F(this.ep, t.runID, e);
+				await I(this.ep, t.runID, e);
 			} catch (e) {
 				this.setExperimentError(e instanceof Error ? e.message : String(e));
 				return;
@@ -1081,7 +1081,7 @@ var K = class {
 			if (this.disposed) return;
 			let t;
 			try {
-				t = await ae(this.ep, e);
+				t = await re(this.ep, e);
 			} catch {
 				this.schedulePoll(e);
 				return;
@@ -1133,7 +1133,7 @@ var K = class {
 	async finishExperiment(e) {
 		let t = this.state.result;
 		if (!t || t.runID !== e) return;
-		let [n, r] = await Promise.all([M(this.ep, e).catch(() => null), A(this.ep, e).catch(() => null)]);
+		let [n, r] = await Promise.all([P(this.ep, e).catch(() => null), M(this.ep, e).catch(() => null)]);
 		this.disposed || this.state.result !== t || (r && (t.row = r), n && (t.folded = u(t.folded, n.batches)), this.emit());
 	}
 	toggleRaw() {
@@ -1152,7 +1152,7 @@ var K = class {
 		this.disposed = !0, this.raf && cancelAnimationFrame(this.raf), this.pollTimer && clearTimeout(this.pollTimer), this.scopeSub?.close(), this.runSub?.close(), this.expSub?.close();
 	}
 };
-function ue(e) {
+function K(e) {
 	return e ? e.folded.steps.map((e) => e.text).filter(Boolean).join("\n") : "";
 }
 function de(e) {
@@ -1221,7 +1221,7 @@ var me = class extends HTMLElement {
 	}
 	async start() {
 		this.model?.dispose();
-		let e = new K({
+		let e = new ue({
 			base: this.cfg.endpoint,
 			token: this.cfg.token
 		}, this.cfg.publicId, (e) => this.render(e));
@@ -1382,7 +1382,23 @@ var me = class extends HTMLElement {
 		let S = b("select", "weft-input"), C = b("option", void 0, "engine: live");
 		C.value = "live", S.appendChild(C);
 		let w = b("option", void 0, "scripted (zero tokens)");
-		if (w.value = "scripted", S.appendChild(w), S.value = t.engine, S.addEventListener("change", () => this.model?.setDraft({ engine: S.value })), g.appendChild(S), o.appendChild(g), t.step > 0 && this.model?.state.turn) {
+		w.value = "scripted", S.appendChild(w), S.value = t.engine, S.addEventListener("change", () => this.model?.setDraft({ engine: S.value })), g.appendChild(S);
+		let T = b("select", "weft-input"), E = b("option", void 0, "thread: ephemeral");
+		E.value = "ephemeral", T.appendChild(E);
+		let D = b("option", void 0, "fork (new session)");
+		if (D.value = "fork", T.appendChild(D), T.value = t.thread, T.title = "fork continues the conversation in a new session (needs an input)", T.addEventListener("change", () => this.model?.setDraft({ thread: T.value })), g.appendChild(T), o.appendChild(g), q(e, "breakpoints") && n?.tools.length) {
+			let t = b("div", "weft-field");
+			t.appendChild(b("span", void 0, "Break on (parks every run)"));
+			for (let r of n.tools) {
+				let n = b("input");
+				n.type = "checkbox", n.checked = e.breakpoints.includes(r.name), n.addEventListener("change", () => {
+					let t = e.breakpoints.filter((e) => e !== r.name);
+					n.checked && t.push(r.name), t.sort(), this.model?.setBreakpoints(t);
+				}), t.appendChild(b("label", "weft-tool", [n, b("span", void 0, r.name)]));
+			}
+			o.appendChild(t);
+		}
+		if (t.step > 0 && this.model?.state.turn) {
 			let e = this.model.state.turn, n = b("div", "weft-field");
 			n.appendChild(b("span", void 0, `Transcript edits (steps 0..${t.step - 1} are kept)`));
 			for (let r of e.folded.steps) {
@@ -1429,8 +1445,8 @@ var me = class extends HTMLElement {
 			}
 			n.childElementCount > 1 && o.appendChild(n);
 		}
-		let T = b("button", "weft-run-btn", "Run experiment ▶", { title: "POST /api/playground/runs — the runtime in your app executes it" });
-		return T.addEventListener("click", () => void this.model?.runExperiment()), o.appendChild(T), r.appendChild(o), r;
+		let O = b("button", "weft-run-btn", "Run experiment ▶", { title: "POST /api/playground/runs — the runtime in your app executes it" });
+		return O.addEventListener("click", () => void this.model?.runExperiment()), o.appendChild(O), r.appendChild(o), r;
 	}
 	experimentResult(e) {
 		let t = e.result;

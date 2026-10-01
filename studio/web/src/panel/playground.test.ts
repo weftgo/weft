@@ -120,12 +120,22 @@ const metaPlayground = {
 /** The fake Studio: keyed on the decoded path like panel.test's. */
 function fakeStudio(routes: Record<string, unknown>, meta: unknown = metaPlayground) {
   const posts: { path: string; body: unknown }[] = []
+  const puts: { path: string; body: unknown }[] = []
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://studio.test/studio/api/")
     const path = decodeURIComponent(url.pathname).replace(/^.*\/api\//, "") + (url.search || "")
     if (init?.method === "POST") {
       posts.push({ path, body: JSON.parse(String(init.body)) })
       const hit = routes["POST " + path]
+      if (hit) return json(hit)
+      return new Response(JSON.stringify({ error: { code: "not_found", message: path } }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      })
+    }
+    if (init?.method === "PUT") {
+      puts.push({ path, body: JSON.parse(String(init.body)) })
+      const hit = routes["PUT " + path]
       if (hit) return json(hit)
       return new Response(JSON.stringify({ error: { code: "not_found", message: path } }), {
         status: 404,
@@ -140,7 +150,7 @@ function fakeStudio(routes: Record<string, unknown>, meta: unknown = metaPlaygro
       headers: { "content-type": "application/json" },
     })
   })
-  return { fetchMock, posts }
+  return { fetchMock, posts, puts }
 }
 
 function json(v: unknown): Response {
@@ -461,5 +471,79 @@ describe("the drawer against a fake Studio", () => {
     await settle(1200)
     const decided = posts.find((p) => p.path === "runs/pg_p1/approvals")
     expect(decided?.body).toEqual({ call_id: "call_1", decision: "approve" })
+  })
+
+  it("offers the thread mode (ephemeral | fork) and the command carries it (review fix 4a)", async () => {
+    const routes: Record<string, unknown> = {
+      ...baseRoutes(),
+      "POST playground/runs": { command_id: "cmd_t1", state: "queued" },
+      "playground/commands/cmd_t1": {
+        command_id: "cmd_t1",
+        state: "rejected",
+        run_id: "",
+        error: null,
+        created: T0,
+        updated: T0,
+      },
+    }
+    const { fetchMock, posts } = fakeStudio(routes)
+    vi.stubGlobal("fetch", fetchMock)
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-public-id": "pub_orders",
+      "data-open": "true",
+    })
+    const btn = all(el, ".weft-actions .weft-btn").find((b) => b.textContent === "✎ Experiment")
+    btn!.dispatchEvent(new Event("click"))
+    await settle()
+    // The thread select sits beside the engine select: ephemeral by
+    // default, fork selectable.
+    const thread = all(el, ".weft-drawer select").find((s) =>
+      s.textContent?.includes("fork (new session)")
+    ) as HTMLSelectElement
+    expect(thread).toBeTruthy()
+    expect(thread.value).toBe("ephemeral")
+    thread.value = "fork"
+    thread.dispatchEvent(new Event("change"))
+    await settle()
+    const run = all(el, ".weft-drawer button").find((b) => b.textContent === "Run experiment ▶")
+    run!.dispatchEvent(new Event("click"))
+    await settle()
+    const posted = posts.find((p) => p.path === "playground/runs")
+    expect((posted!.body as Record<string, unknown>).thread).toBe("fork")
+  })
+
+  it("renders the rung-3 breakpoint set when the capability is on and PUTs it (review fix 4c)", async () => {
+    const routes: Record<string, unknown> = {
+      ...baseRoutes(),
+      "PUT runtimes/rt_01/breakpoints": { tools: ["refund"] },
+    }
+    const { fetchMock, puts } = fakeStudio(routes, {
+      ...metaPlayground,
+      capabilities: ["live", "ingest", "runtimes", "playground", "breakpoints"],
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-public-id": "pub_orders",
+      "data-open": "true",
+    })
+    const btn = all(el, ".weft-actions .weft-btn").find((b) => b.textContent === "✎ Experiment")
+    btn!.dispatchEvent(new Event("click"))
+    await settle()
+    // The breakpoint checkboxes render (gated on the capability).
+    const field = all(el, ".weft-drawer .weft-field").find((n) =>
+      n.textContent?.includes("Break on (parks every run)")
+    )
+    expect(field).toBeTruthy()
+    const refund = field!.querySelectorAll("label.weft-tool")[1] as HTMLLabelElement
+    const cb = refund.querySelector("input") as HTMLInputElement
+    cb.checked = true
+    cb.dispatchEvent(new Event("change"))
+    await settle()
+    // The dead setBreakpoints path is live: the set went to the
+    // runtime's breakpoint verb.
+    const put = puts.find((p) => p.path === "runtimes/rt_01/breakpoints")
+    expect(put?.body).toEqual({ tools: ["refund"] })
   })
 })

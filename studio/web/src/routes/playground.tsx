@@ -21,11 +21,14 @@ import {
   experimentsQuery,
   postExperiment,
   postFixtures,
+  postApproval,
+  postSteer,
   fetchCommand,
   postPlaygroundRun,
   runtimesQuery,
   type AgentView,
   type CommandStatus,
+  type Message,
   type PlaygroundRunBody,
   type RunRow,
   type WireEvent,
@@ -108,6 +111,10 @@ interface Variant {
   input: string
   engine: "live" | "scripted"
   sideEffects: "substitute" | "park" | "allow"
+  /** §5.4's thread mode (review fix 4a): ephemeral — an experiment,
+   * never a turn — or fork, a new session with lineage whose next
+   * turn is the input. */
+  thread: "ephemeral" | "fork"
   result: Experiment | null
 }
 
@@ -126,8 +133,81 @@ function variantA(search: PlaygroundSearch, agent?: AgentView): Variant {
     input: search.input ?? "",
     engine: "live",
     sideEffects: "substitute",
+    thread: "ephemeral",
     result: null,
   }
+}
+
+/** One transcript edit draft (§5.1's wire shape — review fix 4b): a
+ * patched tool result (pinned by call_id) or a rewritten call-free
+ * reply, on a kept step. */
+export interface EditDraft {
+  step: number
+  callID?: string
+  toolResult?: string
+  content?: string
+}
+
+/** One editable field of a kept step, derived from the source
+ * transcript. */
+export interface EditField {
+  step: number
+  callID?: string
+  /** The tool's name, or "reply". */
+  name: string
+  placeholder: string
+}
+
+/** editFieldsOf derives the kept steps' editable fields from the
+ * source transcript (steps 0..fromStep−1): every tool result the
+ * prefix holds, and each step's reply when that step carried no tool
+ * calls (a reply rewrite may not drop a step's calls — D2/D3). The
+ * panel's per-step fields are the shape (element.ts's drawer). */
+export function editFieldsOf(
+  batches: { step: number; messages: Message[] }[],
+  fromStep: number
+): EditField[] {
+  const steps = new Map<number, { results: { callID: string; name: string; content: string }[]; text: string; hadCalls: boolean }>()
+  for (const b of batches) {
+    if (b.step >= fromStep) continue
+    let st = steps.get(b.step)
+    if (!st) {
+      st = { results: [], text: "", hadCalls: false }
+      steps.set(b.step, st)
+    }
+    for (const m of b.messages) {
+      if (m.role === "assistant") {
+        for (const p of m.content) {
+          if (p.type === "tool_call") st.hadCalls = true
+          if (p.type === "text" && p.text) st.text += p.text
+        }
+      } else if (m.role === "tool") {
+        for (const p of m.content) {
+          if (p.type === "tool_result")
+            st.results.push({ callID: p.call_id, name: p.name, content: p.content })
+        }
+      }
+    }
+  }
+  const fields: EditField[] = []
+  for (const [step, st] of [...steps.entries()].sort((a, b) => a[0] - b[0])) {
+    for (const r of st.results)
+      fields.push({ step, callID: r.callID, name: r.name || r.callID, placeholder: r.content })
+    if (st.text && !st.hadCalls)
+      fields.push({ step, name: "reply", placeholder: st.text })
+  }
+  return fields
+}
+
+/** wireEdits maps the drafts to §5.1's flattened wire shape — the
+ * same mapping the panel's buildRunBody makes. */
+export function wireEdits(drafts: EditDraft[]): unknown[] {
+  return drafts.map((e) => ({
+    step: e.step,
+    ...(e.callID ? { call_id: e.callID } : {}),
+    ...(e.toolResult ? { tool_result: e.toolResult } : {}),
+    ...(e.content ? { content: e.content } : {}),
+  }))
 }
 
 function Playground({ caps }: { caps: string[] }) {
@@ -152,6 +232,10 @@ function Playground({ caps }: { caps: string[] }) {
 
   const [sourceRunID, setSourceRunID] = useState(search.run ?? "")
   const [fromStep, setFromStep] = useState(search.step ?? 0)
+  /** The kept prefix's edits (review fix 4b): patched tool results and
+   * rewritten call-free replies — the counterfactual the fresh step
+   * answers. Source-shaped, not variant-shaped, so they live here. */
+  const [editDrafts, setEditDrafts] = useState<EditDraft[]>([])
 
   const registered = agent?.instructions ?? ""
   useEffect(() => {
@@ -167,6 +251,39 @@ function Playground({ caps }: { caps: string[] }) {
     setVariants((cur) => cur.map((v, i) => (i === active ? { ...v, ...p } : v)))
 
   const sourceText = useSourceText(sourceRunID)
+
+  /** decide answers one parked call of the variant's run with the
+   * approval verbs (ADR 0007) — the panel's controls, rendered here
+   * too (§2's parity rule). The resumed run replaces the card. */
+  const decide = async (
+    runID: string,
+    callID: string,
+    decision: "approve" | "deny" | "resolve"
+  ) => {
+    try {
+      const out = await postApproval(runID, { call_id: callID, decision })
+      setVariants((cur) =>
+        cur.map((v, i) =>
+          i === active
+            ? {
+                ...v,
+                result: {
+                  commandID: out.command_id,
+                  state: "queued",
+                  runID: "",
+                  error: null,
+                  label: v.result?.label ?? v.key,
+                  row: null,
+                  events: [],
+                },
+              }
+            : v
+        )
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
 
   const run = async () => {
     setError("")
@@ -186,8 +303,9 @@ function Playground({ caps }: { caps: string[] }) {
       overrides,
       engine: variant.engine,
       side_effects: variant.sideEffects,
-      thread: "ephemeral",
+      thread: variant.thread,
     }
+    if (fromStep > 0 && editDrafts.length) body.transcript_edits = wireEdits(editDrafts)
     try {
       const out = await postPlaygroundRun(body)
       const experiment: Experiment = {
@@ -258,7 +376,7 @@ function Playground({ caps }: { caps: string[] }) {
             overrides,
             engine: v.engine,
             side_effects: v.sideEffects,
-            thread: "ephemeral",
+            thread: v.thread,
             experiment_id: experimentID,
           })
           next[`${v.key}\u0000${i.key}`] = {
@@ -358,6 +476,18 @@ function Playground({ caps }: { caps: string[] }) {
               />
             </label>
           )}
+          {/* The kept prefix's edits (D2/D3, review fix 4b — the
+              panel's per-step fields, rendered here too): when
+              continuing from a step, the kept steps' tool results are
+              patchable and their call-free replies rewritable. */}
+          {sourceRunID && fromStep > 0 && (
+            <TranscriptEdits
+              runID={sourceRunID}
+              fromStep={fromStep}
+              drafts={editDrafts}
+              setDrafts={setEditDrafts}
+            />
+          )}
           <label className="block space-y-1">
             <span className="text-xs text-muted-foreground">System prompt</span>
             <textarea
@@ -456,6 +586,20 @@ function Playground({ caps }: { caps: string[] }) {
                 <option value="allow">allow</option>
               </select>
             </label>
+            {/* §5.4's thread mode (review fix 4a): fork continues the
+                conversation in a new session with lineage — it needs a
+                source turn and an input. */}
+            <label className="block flex-1 space-y-1">
+              <span className="text-xs text-muted-foreground">Thread</span>
+              <select
+                className="w-full rounded border bg-transparent px-1 py-1 text-xs"
+                value={variant.thread}
+                onChange={(e) => patch({ thread: e.target.value as "ephemeral" | "fork" })}
+              >
+                <option value="ephemeral">ephemeral</option>
+                <option value="fork">fork (new session)</option>
+              </select>
+            </label>
           </div>
           {/* Rung 3 (§8.3): break on tools — PUT /api/runtimes/{id}/
               breakpoints; the runtime parks them on every run it
@@ -497,12 +641,14 @@ function Playground({ caps }: { caps: string[] }) {
                   .filter((v) => v.result)
                   .map((v) => (
                     <ResultCard
-                      key={v.key}
+                      key={v.result!.commandID || v.key}
                       experiment={v.result!}
                       sourceText={sourceText}
                       sourceRunID={sourceRunID}
                       variant={v}
                       tools={agent?.tools.map((t) => t.name) ?? []}
+                      caps={caps}
+                      decide={decide}
                     />
                   ))}
               </div>
@@ -667,15 +813,21 @@ function ResultCard({
   sourceRunID,
   variant,
   tools,
+  caps,
+  decide,
 }: {
   experiment: Experiment
   sourceText: string
   sourceRunID: string
   variant: Variant
   tools: string[]
+  caps: string[]
+  decide: (runID: string, callID: string, decision: "approve" | "deny" | "resolve") => Promise<void>
 }) {
   const [events, setEvents] = useState<{ pos: number; event: WireEvent }[]>([])
   const [transcriptText, setTranscriptText] = useState<string | null>(null)
+  const [steerText, setSteerText] = useState("")
+  const [steerErr, setSteerErr] = useState("")
 
   // The live tail of the run the ack named.
   useEffect(() => {
@@ -786,6 +938,69 @@ function ResultCard({
           {toolCalls.length > 0 && <span>{toolCalls.map((c) => c.split("(")[0]).join(", ")}</span>}
         </div>
         {text && <div className="whitespace-pre-wrap">{text}</div>}
+        {/* The parked calls' decision verbs (ADR 0007) — the panel's
+            controls on this surface too (§2's parity rule, review fix
+            4's approvals note). */}
+        {folded.pending.length > 0 && experiment.runID && (
+          <div className="rounded border border-dashed p-2">
+            <div className="mb-1 text-faint">awaiting decision</div>
+            {folded.pending.map((c) => (
+              <div key={c.id} className="flex items-center gap-2">
+                <span className="font-mono">{c.name}</span>
+                <button
+                  className="text-faint hover:underline"
+                  title="Approve: the handler runs for real"
+                  onClick={() => void decide(experiment.runID, c.id, "approve")}
+                >
+                  continue
+                </button>
+                <button
+                  className="text-faint hover:underline"
+                  title="Deny: the model sees a denied result"
+                  onClick={() => void decide(experiment.runID, c.id, "deny")}
+                >
+                  skip
+                </button>
+                <button
+                  className="text-faint hover:underline"
+                  title="Resolve with a result pasted outside the process"
+                  onClick={() => void decide(experiment.runID, c.id, "resolve")}
+                >
+                  resolve…
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Rung 4 (§8.4, review fix 4d): steer the in-flight run — one
+            user message delivered mid-flight. */}
+        {caps.includes("steer") && experiment.state === "accepted" && experiment.runID && (
+          <div className="flex items-center gap-2">
+            <input
+              className="flex-1 rounded border bg-transparent px-2 py-1"
+              placeholder="a message delivered mid-flight"
+              value={steerText}
+              onChange={(e) => setSteerText(e.target.value)}
+            />
+            <button
+              className="text-faint hover:underline"
+              title="POST /api/runs/{id}/steer (ADR 0019)"
+              onClick={() => {
+                const message = steerText
+                setSteerText("")
+                setSteerErr("")
+                void postSteer(experiment.runID, message)
+                  .then(() => undefined)
+                  .catch((e: unknown) =>
+                    setSteerErr(e instanceof Error ? e.message : String(e))
+                  )
+              }}
+            >
+              steer
+            </button>
+          </div>
+        )}
+        {steerErr && <p className="text-xs text-red-500">{steerErr}</p>}
         {diff && (
           <div className="rounded border border-dashed p-2">
             <div className="text-faint">
@@ -1086,6 +1301,101 @@ function History() {
       </div>
     </div>
   )
+}
+
+
+/** TranscriptEdits renders the kept prefix's editable fields (review
+ * fix 4b): when continuing from a step, the kept steps' tool results
+ * are patchable and their call-free replies rewritable — the
+ * counterfactual the fresh step answers. The panel's drawer is the
+ * shape; this is the same wire. */
+function TranscriptEdits({
+  runID,
+  fromStep,
+  drafts,
+  setDrafts,
+}: {
+  runID: string
+  fromStep: number
+  drafts: EditDraft[]
+  setDrafts: React.Dispatch<React.SetStateAction<EditDraft[]>>
+}) {
+  const all = useSourceEditFields(runID)
+  const fields = all.filter((f) => f.step < fromStep)
+  if (!fields.length) return null
+  const draftOf = (f: EditField) => drafts.find((d) => d.step === f.step && d.callID === f.callID)
+  const set = (f: EditField, v: string) => {
+    const at = (d: EditDraft) => d.step === f.step && d.callID === f.callID
+    setDrafts((cur) => {
+      const i = cur.findIndex(at)
+      if (v === "") return i >= 0 ? cur.filter((_, j) => j !== i) : cur
+      const draft: EditDraft = f.callID
+        ? { step: f.step, callID: f.callID, toolResult: v }
+        : { step: f.step, content: v }
+      return i >= 0 ? cur.map((d, j) => (j === i ? draft : d)) : [...cur, draft]
+    })
+  }
+  return (
+    <div className="space-y-1">
+      <span className="text-xs text-muted-foreground">
+        Transcript edits (steps 0..{fromStep - 1} are kept)
+      </span>
+      {fields.map((f, i) =>
+        f.callID ? (
+          <label key={i} className="flex items-center gap-1 text-xs">
+            <span className="shrink-0 text-faint">
+              step {f.step} · {f.name} →
+            </span>
+            <input
+              className="w-full rounded border bg-transparent px-2 py-1"
+              placeholder={f.placeholder.slice(0, 60)}
+              value={draftOf(f)?.toolResult ?? ""}
+              onChange={(e) => set(f, e.target.value)}
+            />
+          </label>
+        ) : (
+          <label key={i} className="block space-y-1 text-xs">
+            <span className="text-faint">step {f.step} · reply</span>
+            <textarea
+              rows={2}
+              className="w-full rounded border bg-transparent px-2 py-1"
+              placeholder={f.placeholder.slice(0, 80)}
+              value={draftOf(f)?.content ?? ""}
+              onChange={(e) => set(f, e.target.value)}
+            />
+          </label>
+        )
+      )}
+    </div>
+  )
+}
+
+/** useSourceEditFields loads every editable field of the source
+ * transcript (the fromStep filter is applied at render, so a changed
+ * step needs no refetch). */
+function useSourceEditFields(runID: string): EditField[] {
+  const [fields, setFields] = useState<EditField[]>([])
+  useEffect(() => {
+    if (!runID) {
+      setFields([])
+      return
+    }
+    let alive = true
+    void (async () => {
+      try {
+        const doc = asTranscript(
+          (await getJSON(`runs/${encodeURIComponent(runID)}/transcript`)) as RawTranscript
+        )
+        if (alive) setFields(editFieldsOf(doc.batches, Number.MAX_SAFE_INTEGER))
+      } catch {
+        if (alive) setFields([])
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [runID])
+  return fields
 }
 
 

@@ -487,7 +487,44 @@ export class WeftDevtools extends HTMLElement {
     engSel.value = d.engine
     engSel.addEventListener("change", () => this.model?.setDraft({ engine: engSel.value as ExperimentDraft["engine"] }))
     seRow.appendChild(engSel)
+    // Fork mode (§5.4, review fix 4a — P4 renders in both surfaces):
+    // ephemeral (an experiment, never a turn) or fork (a new session
+    // with lineage, the input its next turn). Fork needs an input —
+    // the runtime refuses the command otherwise.
+    const thrSel = el("select", "weft-input") as HTMLSelectElement
+    const thrEphemeral = el("option", undefined, "thread: ephemeral") as unknown as HTMLOptionElement
+    thrEphemeral.value = "ephemeral"
+    thrSel.appendChild(thrEphemeral)
+    const thrFork = el("option", undefined, "fork (new session)") as unknown as HTMLOptionElement
+    thrFork.value = "fork"
+    thrSel.appendChild(thrFork)
+    thrSel.value = d.thread
+    thrSel.title = "fork continues the conversation in a new session (needs an input)"
+    thrSel.addEventListener("change", () => this.model?.setDraft({ thread: thrSel.value as ExperimentDraft["thread"] }))
+    seRow.appendChild(thrSel)
     body.appendChild(seRow)
+
+    // Rung 3 in the panel (§8.3, review fix 4c — "all in the panel"
+    // per WEFT-DEVTOOLS §10's rung-3 gate): the tools every run the
+    // runtime starts parks on. Rendered only when meta reports the
+    // breakpoints capability.
+    if (hasCapability(s, "breakpoints") && agent?.tools.length) {
+      const brkRow = el("div", "weft-field")
+      brkRow.appendChild(el("span", undefined, "Break on (parks every run)"))
+      for (const t of agent.tools) {
+        const cb = el("input") as HTMLInputElement
+        cb.type = "checkbox"
+        cb.checked = s.breakpoints.includes(t.name)
+        cb.addEventListener("change", () => {
+          const next = s.breakpoints.filter((n) => n !== t.name)
+          if (cb.checked) next.push(t.name)
+          next.sort()
+          void this.model?.setBreakpoints(next)
+        })
+        brkRow.appendChild(el("label", "weft-tool", [cb, el("span", undefined, t.name)]))
+      }
+      body.appendChild(brkRow)
+    }
 
     // The transcript edits (D2/D3): when continuing from a step, the
     // kept steps' results are patchable and their call-free replies

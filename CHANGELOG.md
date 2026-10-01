@@ -219,7 +219,10 @@ dates at the step 8 release.
   `weft.experiment.id`, `weft.forked_from`, `weft.public_id`,
   `weft.playground.actor` — never `weft.session.id`. Source
   transcripts resolve thread storage → local obsdb →
-  `GET /api/runs/{id}/transcript`, cut at the `from_step` boundary.
+  `GET /api/runs/{id}/transcript`, cut at the `from_step` boundary; a
+  whole-turn re-run that sends no input defaults its prompt to the
+  source's own user message (§5.1: input *replaces* the turn's user
+  message — the original exists by default).
   The runtime re-validates tool/model names and limits against its own
   registry and answers `rejected` when Studio's copy disagrees;
   per-experiment budget caps are counted from each command's own
@@ -233,7 +236,8 @@ dates at the step 8 release.
 - The playground's P1–P5 in both surfaces: the panel's experiment
   drawer (§3 — registered-config pre-fill, tools off with the
   side-effect warning, model, thinking, input, engine, side-effect
-  mode, transcript edits on the kept steps), the result streaming in
+  mode, thread mode `ephemeral | fork`, transcript edits on the kept
+  steps, and the rung-3 breakpoint set), the result streaming in
   place labelled t·xN with the inline diff (the shared `lib/diff`),
   continue/skip/resolve on a parked experiment run
   (`POST /api/runs/{id}/approvals`, routed to the runtime that started
@@ -246,7 +250,11 @@ dates at the step 8 release.
   the compare table, E9's variants × inputs matrix (the definition
   saved via `POST /api/experiments`, every cell issued under the
   experiment's id so the budget caps the whole matrix), and the
-  experiment history. The panel hands off into it with run, step and
+  experiment history. The config column carries the thread mode and,
+  on a continued run, the kept steps' transcript edits; the run card
+  steers an in-flight run and decides parked calls (§2's parity rule —
+  every verb renders in the panel or Studio, never neither). The
+  panel hands off into it with run, step and
   the current overrides as query params.
 - `POST /api/playground/fixtures`: a run's records as wefttest replay
   fixtures — wefttest's own file shape, key and naming, pinned by a
@@ -257,7 +265,9 @@ dates at the step 8 release.
   `POST /api/runs/{id}/steer` (capability `steer`), both acting on
   runtime-started runs only — `meta.debug_scope` says so, and both UIs
   repeat it (PQ7). The controls render only for the reported
-  capabilities.
+  capabilities: the panel's drawer carries the breakpoint set (the
+  rung-3 gate's "all in the panel"), Studio steers the in-flight run —
+  both verbs in both surfaces' reach, §2's parity rule.
 - obsdb: the `experiments` table (§10.4, PQ4) behind
   `SaveExperiment`/`Experiments`/`Experiment` on both backends (sqlite
   migration 0002; clickhouse 0002 as a ReplacingMergeTree), with

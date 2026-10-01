@@ -623,6 +623,12 @@ export function postFixtures(runID: string, tools: string[]) {
   )
 }
 
+/** POST /api/runs/{id}/steer — the rung-4 verb (WEFT-DEVTOOLS §8.4):
+ * one user message delivered into a runtime-started run mid-flight. */
+export function postSteer(runID: string, message: string) {
+  return post<{ steered: boolean }>(`runs/${encodeURIComponent(runID)}/steer`, { message })
+}
+
 /** One saved experiment (§10.4): the definition; the detail adds the
  * runs grouped under it. */
 export interface ExperimentRow {

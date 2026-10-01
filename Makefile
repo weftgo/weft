@@ -1,12 +1,17 @@
 GO ?= go
 
+# Where the release steps stage their artifacts (step 8's release
+# uploads from here); overridable per invocation:
+#   make studio-panel-asset RELEASE_DIR=/tmp/rel
+RELEASE_DIR ?= dist-release
+
 # The workspace is the monorepo layout: every adapter is its own module
 # (ADR 0005), so build/test/vet/lint loop over the modules `go list -m`
 # reports from go.work. The root module stays dependency-free; vendor
 # SDKs are required only by the adapter modules.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-thread apidiff-selftest offline fuzz fuzz-thread studio-build studio-check
+.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-thread apidiff-selftest offline fuzz fuzz-thread studio-build studio-check studio-panel-asset
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -88,6 +93,11 @@ live:
 
 studio-build:
 	cd studio/web && bun install --frozen-lockfile && bun run build
+
+# The devtools panel as a release asset (WEFT-DEVTOOLS §5.1): non-Go
+# backends serve this file themselves (V2).
+studio-panel-asset: studio-build
+	cd studio/web && bun run scripts/panel-asset.ts $(RELEASE_DIR)
 
 # The freshness gate (ADR 0018 §4): rebuild the web app and prove the
 # committed dist matches, fits the 600 KiB gzip budget (§7), and that

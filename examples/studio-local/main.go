@@ -1,9 +1,12 @@
 // Command studio-local is §10.1's setup A, the whole thing: a Go app
 // with exactly the five configured lines, running a thread session
 // whose turns appear live in Studio, grouped under one session, with
-// content and timing — and nothing else configured.
+// content and timing — and nothing else configured. Its own landing
+// page carries the devtools panel's script tag (WEFT-DEVTOOLS §5.3
+// setup A), so the example is the panel demo too.
 //
 //	go run ./examples/studio-local
+//	# open http://127.0.0.1:7331/        (the panel docks on the plain page)
 //	# open http://127.0.0.1:7331/studio/
 //	# then, from anywhere:
 //	curl -s -XPOST localhost:7331/run -d 'where is order 42?'
@@ -13,8 +16,10 @@
 // pipeline's own handle — the same DB, the same live hub — and serve.
 // The /run endpoint is the demo's own surface, not configuration: one
 // turn of a thread session per call, on a scripted model so the
-// example runs offline; a real app replaces it with its own agent and
-// model and changes nothing else.
+// example runs offline; the turn makes one lookup_order tool call so
+// the panel's step story and the waterfall have a tool to show. A
+// real app replaces it with its own agent and model and changes
+// nothing else.
 package main
 
 import (
@@ -36,6 +41,15 @@ import (
 	"github.com/weftgo/weft/wefttest"
 )
 
+// page is the host app's own landing page: a plain HTML document
+// whose only weft-ness is the panel's script tag (setup A, §5.3 —
+// same origin as Studio, no token, the session's public id baked in).
+const page = `<!doctype html><html><head><title>host app</title></head><body>
+<h1>the host app's own page</h1>
+<p>the devtools panel below is a script tag and nothing else</p>
+<script type="module" src="/studio/panel.js" data-public-id="pub_demo" data-open="true"></script>
+</body></html>`
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:7331", "listen address")
 	flag.Parse()
@@ -53,14 +67,16 @@ func serve(addr string) error {
 	mux.Handle("/studio/", http.StripPrefix("/studio",
 		studio.Handler(studio.DB(otel.LocalDB())))) // the pipeline's handle: same DB, same live hub [D4]
 
-	// The demo's own surface: one thread turn per call.
+	// The demo's own surface: one thread turn per call, and the plain
+	// page the panel docks on (the gate harness drives both).
 	demo := newDemo()
 	mux.HandleFunc("POST /run", demo.run)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprint(w, "studio-local: POST /run with a question, and watch /studio/live\n")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprint(w, page)
 	})
 
-	log.Printf("studio-local: studio at http://%s/studio/ (live at /studio/live)", addr)
+	log.Printf("studio-local: studio at http://%s/studio/ (live at /studio/live), panel at http://%s/", addr, addr)
 	log.Printf("studio-local: try: curl -s -XPOST %s/run -d 'where is order 42?'", addr)
 	return http.ListenAndServe(addr, mux)
 }
@@ -136,19 +152,28 @@ func (d *demo) run(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	model := pacing{150 * time.Millisecond, wefttest.Script(
-		wefttest.Say(fmt.Sprintf("You asked: %q. Let me look…", question)),
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"42"}`}),
 		wefttest.Say(fmt.Sprintf("About %q: order 42 shipped this morning.", question)),
 	)}
+	// One tool call per turn, so the panel's step story and the
+	// waterfall have a tool to show; the beat inside makes its timing
+	// visible.
+	lookup := weft.Tool("lookup_order", "Look up an order.", func(_ context.Context, in struct {
+		OrderID string `json:"order_id"`
+	}) (string, error) {
+		time.Sleep(200 * time.Millisecond) // visible tool timing in the waterfall
+		return "order 42: shipped this morning", nil
+	})
 	d.mu.Lock()
 	var err error
 	if d.s == nil {
-		d.s, err = thread.Create(ctx, d.st, weft.New(model, weft.Name("studio-local")),
+		d.s, err = thread.Create(ctx, d.st, weft.New(model, weft.Name("studio-local"), lookup),
 			thread.PublicID("pub_demo"))
 	} else {
 		// The next turn reopens the session over the same storage with
 		// a fresh scripted model.
 		var reopenErr error
-		d.s, reopenErr = thread.Open(ctx, d.st, d.s.ID(), weft.New(model, weft.Name("studio-local")))
+		d.s, reopenErr = thread.Open(ctx, d.st, d.s.ID(), weft.New(model, weft.Name("studio-local"), lookup))
 		if reopenErr != nil {
 			err = reopenErr
 		}

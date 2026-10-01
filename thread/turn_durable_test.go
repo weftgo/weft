@@ -605,6 +605,26 @@ func TestForkDoesNotInheritQueuedSends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The fork's own file says what became of the copied receipt: one
+	// dropped entry settles it, as for a copied steer.
+	var accepted string
+	settled := map[string]string{}
+	for _, e := range f.Entries() {
+		if r, ok := e.(thread.ReceiptEntry); ok {
+			switch {
+			case r.Status == thread.ReceiptAccepted:
+				accepted = r.ID
+			case r.Receipt != "":
+				settled[r.Receipt] = r.Status
+			}
+		}
+	}
+	if accepted == "" || settled[accepted] != thread.ReceiptDropped {
+		t.Errorf("the fork's copy of the accepted receipt %q is settled %q, want dropped", accepted, settled[accepted])
+	}
+	if q := f.Queue(); len(q) != 0 {
+		t.Errorf("the fork's Queue = %+v, want empty", q)
+	}
 	if err := f.Close(ctx); err != nil {
 		t.Fatal(err)
 	}

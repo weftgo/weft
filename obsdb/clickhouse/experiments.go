@@ -3,6 +3,7 @@ package clickhouse
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
@@ -31,10 +32,19 @@ func (d *DB) SaveExperiment(ctx context.Context, e obsdb.Experiment) error {
 	if err != nil {
 		return err
 	}
-	// Created survives an update: read the row's own, else now.
+	// Created survives an update: the row's own, else now. Only a
+	// genuine ErrNotFound means "first save" — any other read error
+	// must surface, not silently reset Created on an update (the
+	// audit's P2-4: a transient read failure reset every experiment's
+	// created-at to the save time).
 	created := now
-	if prior, err := d.Experiment(ctx, e.ID); err == nil {
+	prior, err := d.Experiment(ctx, e.ID)
+	switch {
+	case err == nil:
 		created = prior.Created
+	case errors.Is(err, obsdb.ErrNotFound):
+	default:
+		return err
 	}
 	return d.conn.Exec(ctx, `INSERT INTO experiments
 		(Id, Name, Agent, Created, Updated, Variants, Inputs) VALUES (?, ?, ?, ?, ?, ?, ?)`,

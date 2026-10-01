@@ -435,3 +435,45 @@ func TestAsyncInsertsAreWaited(t *testing.T) {
 		t.Errorf("wait_for_async_insert = %q, want 1", value)
 	}
 }
+
+// Created survives an update (the audit's P2-4): the save's prior
+// read keeps the row's own Created, and only ErrNotFound means "first
+// save" — any other read error must surface instead of silently
+// resetting the created-at to the save time. The distinctive literal
+// makes survival deterministic; a reset would read as now.
+func TestExperimentCreatedSurvivesUpdate(t *testing.T) {
+	db, dsn := openFresh(t)
+	conn := openRaw(t, dsn)
+	defer func() { _ = conn.Close() }()
+	first := time.Date(2026, 9, 17, 0, 0, 0, 0, time.UTC)
+	if err := conn.Exec(ctx(), `INSERT INTO experiments
+		(Id, Name, Agent, Created, Updated, Variants, Inputs) VALUES
+		('exp_c', 'first', 'ag', toDateTime64('2026-09-17 00:00:00', 9, 'UTC'),
+		 toDateTime64('2026-09-17 00:00:00', 9, 'UTC'), '[]', '[]')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveExperiment(ctx(), obsdb.Experiment{ID: "exp_c", Name: "refresh"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.Experiment(ctx(), "exp_c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "refresh" {
+		t.Errorf("name = %q, want the update", got.Name)
+	}
+	if !got.Created.Equal(first) {
+		t.Errorf("created = %v, want the first save's %v — an update must not reset it", got.Created, first)
+	}
+	// A genuinely new id stamps now (ErrNotFound is the reset case).
+	if err := db.SaveExperiment(ctx(), obsdb.Experiment{ID: "exp_new", Name: "n"}); err != nil {
+		t.Fatal(err)
+	}
+	gotNew, err := db.Experiment(ctx(), "exp_new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(gotNew.Created) > time.Minute {
+		t.Errorf("a first save's created = %v, want now", gotNew.Created)
+	}
+}

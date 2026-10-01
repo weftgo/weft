@@ -294,12 +294,12 @@ func TestApprovalsPartialDecisions(t *testing.T) {
 }
 
 // TestApprovalsExpiry: a request past its expiry is denied with the
-// stated reason on the next resume (ADR 0021 §5), audited, and the
-// denial text is a pinned golden.
+// stated reason by the resume that finds it lapsed (ADR 0021 §5),
+// audited, and the denial text is a pinned golden.
 func TestApprovalsExpiry(t *testing.T) {
 	ctx := context.Background()
 	agent, _ := refundAgent(wefttest.ToolCalls(wefttest.Call{Name: "refund"}), wefttest.Say("expired noted"))
-	s, err := thread.Create(ctx, thread.Memory(), agent, thread.RequestExpiry(40*time.Millisecond))
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.RequestExpiry(20*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,9 +309,11 @@ func TestApprovalsExpiry(t *testing.T) {
 		t.Fatal("RequestExpiry gave the request no expiry")
 	}
 
-	// Not yet expired: a resume before the deadline denies undecided
-	// calls with the core's "no decision", the expiry text nowhere.
-	time.Sleep(60 * time.Millisecond)
+	// Wait until the request is strictly past its expiry — the
+	// request's own deadline, not a guessed sleep — then resume: the
+	// call is denied with the expiry reason, not the core's "no
+	// decision".
+	time.Sleep(time.Until(pend.Expiry) + 5*time.Millisecond)
 	rt, err := s.Resume(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -384,7 +386,7 @@ func TestApproverDeclines(t *testing.T) {
 		return thread.Decision{}, false
 	}
 	s, err := thread.Create(ctx, thread.Memory(), agent,
-		thread.WithApprover(approver), thread.ApproverTimeout(5*time.Second))
+		thread.WithApprover(approver, 5*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +403,7 @@ func TestApproverDeclines(t *testing.T) {
 	}
 }
 
-// TestApproverTimesOut: an Approver that blocks past ApproverTimeout
+// TestApproverTimesOut: an Approver that blocks past its timeout
 // is abandoned, audited as a timeout, and the call parks — the chain
 // never blocks forever (ADR 0021 §2).
 func TestApproverTimesOut(t *testing.T) {
@@ -412,7 +414,7 @@ func TestApproverTimesOut(t *testing.T) {
 		return thread.Decision{}, false
 	}
 	s, err := thread.Create(ctx, thread.Memory(), agent,
-		thread.WithApprover(approver), thread.ApproverTimeout(50*time.Millisecond))
+		thread.WithApprover(approver, 50*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +444,7 @@ func TestApproverDecides(t *testing.T) {
 		return d, true
 	}
 	s, err := thread.Create(ctx, thread.Memory(), agent,
-		thread.WithApprover(approver), thread.ApproverTimeout(5*time.Second))
+		thread.WithApprover(approver, 5*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,7 +504,7 @@ func TestApproverPanicContained(t *testing.T) {
 		panic("no tty")
 	}
 	s, err := thread.Create(ctx, thread.Memory(), agent,
-		thread.WithApprover(approver), thread.ApproverTimeout(5*time.Second))
+		thread.WithApprover(approver, 5*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1159,8 +1161,7 @@ func TestApproverAlwaysGrants(t *testing.T) {
 	s, err := thread.Create(ctx, thread.Memory(), agent,
 		thread.WithApprover(func(_ context.Context, r thread.Request) (thread.Decision, bool) {
 			return thread.ApproveAlways(r.CallID), true
-		}),
-		thread.ApproverTimeout(5*time.Second))
+		}, 5*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1336,8 +1337,7 @@ func TestQuorumApproverApprovalWaitsForSecondDecision(t *testing.T) {
 		thread.Quorum(2),
 		thread.WithApprover(func(ctx context.Context, r thread.Request) (thread.Decision, bool) {
 			return thread.Decision{CallID: r.CallID, Kind: thread.OutcomeApprove, Who: "terminal"}, true
-		}),
-		thread.ApproverTimeout(5*time.Second),
+		}, 5*time.Second),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1413,7 +1413,7 @@ func TestDenyAlwaysMintsNoGrant(t *testing.T) {
 // A call id the model re-issues starts a fresh occurrence: the walk
 // resets the call's request and decisions at the message that carries
 // it, so a grant-decided second occurrence is not folded together
-// with the first one's conflicting decisions (ADR 0007 lets call ids
+// with the first one's denial (ADR 0007 lets call ids
 // repeat across turns; ADR 0021 scopes by occurrence).
 func TestRepeatedCallIDOccurrencesStaySeparate(t *testing.T) {
 	ctx := context.Background()
@@ -1427,11 +1427,8 @@ func TestRepeatedCallIDOccurrencesStaySeparate(t *testing.T) {
 		t.Fatal(err)
 	}
 	call := parkSend(t, s, ctx)
-	// Conflicting decisions resolve the first occurrence to deny.
-	if _, err := s.Decide(ctx,
-		thread.Decision{CallID: call.ID, Kind: thread.OutcomeApprove, Who: "a"},
-		thread.Deny(call.ID, "changed my mind"),
-	); err != nil {
+	// The first occurrence is denied.
+	if _, err := s.Decide(ctx, thread.Deny(call.ID, "changed my mind")); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Grant(ctx, thread.Grant{
@@ -1460,11 +1457,11 @@ func TestRepeatedCallIDOccurrencesStaySeparate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := ran.snapshot(); len(got) != 1 || !got[0] {
-		t.Fatalf("granted re-issue: Approved flags %v, want [true] — the old occurrence's conflict must not deny it", got)
+		t.Fatalf("granted re-issue: Approved flags %v, want [true] — the old occurrence's denial must not deny it", got)
 	}
 	// The transcript holds both occurrences' results — the first's
-	// pinned conflict denial, then the granted run's own — in that
-	// order; the second occurrence's is the one that must be last.
+	// denial, then the granted run's own — in that order; the second
+	// occurrence's is the one that must be last.
 	var last string
 	for _, r := range toolResults(s.Context()) {
 		if r.CallID == call.ID {
@@ -1472,27 +1469,31 @@ func TestRepeatedCallIDOccurrencesStaySeparate(t *testing.T) {
 		}
 	}
 	if last != "refunded 1" {
-		t.Fatalf("the second occurrence's result: got %q, want the granted run's %q (the old occurrence's conflict leaked)", last, "refunded 1")
+		t.Fatalf("the second occurrence's result: got %q, want the granted run's %q (the old occurrence's denial leaked)", last, "refunded 1")
 	}
 }
 
-// An approve beside a resolve is a conflict both ways — the fold's
-// own words — not a silently discarded approve (ADR 0021 §5).
+// A resolve beside an approve is a conflict — the fold's own words —
+// not a silently discarded approve (ADR 0021 §5): under a quorum one
+// approval leaves the call open, and a resolve arriving beside it
+// splits the verdict. (The other order cannot be recorded: a resolve
+// resolves its call at once. The fold itself is pinned both ways by
+// TestEffectiveDecisionFold.)
 func TestResolveBesideApproveConflicts(t *testing.T) {
 	ctx := context.Background()
 	agent, ran := refundAgent(
 		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}),
 		wefttest.Say("ok"),
 	)
-	s, err := thread.Create(ctx, thread.Memory(), agent)
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.Quorum(2))
 	if err != nil {
 		t.Fatal(err)
 	}
 	call := parkSend(t, s, ctx)
-	rt, err := s.Decide(ctx,
-		thread.Resolve(call.ID, "42"),
-		thread.Decision{CallID: call.ID, Kind: thread.OutcomeApprove, Who: "bob"},
-	)
+	if rt, err := s.Decide(ctx, thread.Decision{CallID: call.ID, Kind: thread.OutcomeApprove, Who: "bob"}); err != nil || rt != nil {
+		t.Fatalf("one approval of two: turn %v, err %v", rt, err)
+	}
+	rt, err := s.Decide(ctx, thread.Resolve(call.ID, "42"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1509,7 +1510,7 @@ func TestResolveBesideApproveConflicts(t *testing.T) {
 		}
 	}
 	if saw != "DENIED: conflicting decisions" {
-		t.Fatalf("resolve-then-approve: got result %q, want the pinned conflict denial", saw)
+		t.Fatalf("approve-then-resolve: got result %q, want the pinned conflict denial", saw)
 	}
 }
 

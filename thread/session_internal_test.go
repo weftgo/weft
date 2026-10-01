@@ -49,7 +49,7 @@ func kindSamples() []Entry {
 		ApprovalRequestEntry{ID: "e_request", ParentID: "e_p", Created: at, CallID: "call_1", Tool: "refund",
 			Args: json.RawMessage(`{"order":1}`), ArgsSHA256: "abc", RunID: "s-t1"},
 		ApprovalDecisionEntry{ID: "e_decision", ParentID: "e_p", Created: at, CallID: "call_1", Outcome: OutcomeApprove},
-		ApprovalAuditEntry{ID: "e_audit", ParentID: "e_p", Created: at, CallID: "call_1", Step: StepResume},
+		ApprovalAuditEntry{ID: "e_audit", ParentID: "e_p", Created: at, CallID: "call_1", Step: StepResume, Decisions: []string{"e_d"}},
 		GrantEntry{ID: "e_grant", ParentID: "e_p", Created: at, Grant: Grant{Tool: "refund",
 			Args: []Arg{ArgEquals("/order", json.RawMessage(`1`)), ArgEquals("/sku", json.RawMessage(`"a"`))}}},
 		GrantRevokedEntry{ID: "e_revoked", ParentID: "e_p", Created: at, GrantID: "e_grant"},

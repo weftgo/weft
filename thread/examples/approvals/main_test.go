@@ -21,6 +21,7 @@ func TestRunOutput(t *testing.T) {
 parked: deploy as call_1
 == the process restarts; the pending request survived
 pending after reopen: 1
+unsigned: true
 == the UI asks for a challenge and signs a decision
 challenge: call call_1 key k1
 resumed: Deployed. The change is live.
@@ -30,7 +31,9 @@ replay: thread: decision signature replayed: nonce already decided call "call_1"
 request call_1 on deploy
 audit park parked
 decision call_1 approve via signed
-audit resume started
+audit resume started (1 call(s) to resolve)
+resume ended: stop error: false
+audit signed refused (replayed)
 `
 	if buf.String() != want {
 		t.Errorf("output =\n%q\nwant\n%q", buf.String(), want)

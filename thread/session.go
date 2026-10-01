@@ -439,6 +439,9 @@ func Create(ctx context.Context, st Storage, agent *weft.Agent, opts ...SessionO
 	if err != nil {
 		return nil, err
 	}
+	if err := cfg.sealApprovals(&h); err != nil { // RequireSigned is durable: the header carries it
+		return nil, err
+	}
 	if err := st.Create(ctx, h); err != nil {
 		return nil, err
 	}
@@ -540,6 +543,11 @@ func newSession(st Storage, agent *weft.Agent, cfg sessionConfig, h Header, entr
 	// Per-model overrides need the agent; a compaction configuration
 	// that cannot work is an error, not a session that never compacts.
 	if err := cfg.compaction.resolve(agent.Model()); err != nil {
+		return nil, err
+	}
+	// RequireSigned is the header's to keep: an Open adopts it, and a
+	// Create or Fork has already sealed it there.
+	if err := cfg.adoptApprovals(h); err != nil {
 		return nil, err
 	}
 	s := &Session{
@@ -1813,6 +1821,7 @@ func cloneEntry(e Entry) Entry {
 	case ApprovalDecisionEntry:
 		return e
 	case ApprovalAuditEntry:
+		e.Decisions = slices.Clone(e.Decisions)
 		return e
 	case GrantEntry:
 		e.Args = slices.Clone(e.Args)

@@ -224,14 +224,16 @@ func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption
 		}
 		t := s.newTurnLocked()
 		s.queue = append(s.queue, pendingSend{ctx: ctx, msg: msg, opts: extra, turn: t})
-		if !s.running && s.cfg.autoResume && len(s.pendingLocked()) == 0 {
+		if !s.running && s.cfg.autoResume && s.settledBoundaryLocked() {
 			// A boundary with every call decided and no runner alive —
 			// a reopen inside the crash window between Decide's append
 			// and the resume it armed — must not wedge the queue:
 			// AutoResume's contract says the session resumes on its
 			// own, so this Send arms it (under a window that cannot be
 			// canceled by the sender walking away), and the follow-up
-			// runs behind the resume.
+			// runs behind the resume. Expiry is resolved first, like
+			// on every arming path (ADR 0021 §5): a boundary whose
+			// only undecided requests lapsed settles here too.
 			if _, err := s.armResumeLocked(context.WithoutCancel(ctx)); err != nil {
 				// Arming cannot fail today (it mints and spawns); if it
 				// ever grows a failure, the queued send still runs once
@@ -414,7 +416,7 @@ func (s *Session) execute(first workItem) {
 			cur = workItem{ps: pendingSend{ctx: rw.ctx, turn: rw.turn}, resume: true}
 			continue
 		}
-		if retry && s.cfg.autoResume && s.boundaryLocked() && len(s.pendingLocked()) == 0 {
+		if retry && s.cfg.autoResume && s.settledBoundaryLocked() { // expiry resolved first
 			// The chain decided every call without parking (a grant or
 			// the Approver), or the last decision of a parked boundary
 			// landed while this runner worked: resume at once, under
@@ -586,14 +588,7 @@ func (s *Session) runResume(ctx context.Context, t *Turn) {
 	// The audit trail says a resume started before the run does: a
 	// crash between the two leaves the boundary resumable, the audit
 	// honest about the attempt.
-	dangling := len(s.danglingCallsLocked())
-	if err := s.appendLocked(persist, func(id, parent string, created time.Time) Entry {
-		return ApprovalAuditEntry{
-			ID: id, ParentID: parent, Created: created,
-			Step: StepResume, Outcome: "started",
-			Detail: fmt.Sprintf("%d call(s) to resolve", dangling), RunID: t.runID,
-		}
-	}); err != nil {
+	if err := s.auditResumeStartLocked(persist, t); err != nil {
 		s.settleResumeLocked(t)
 		s.mu.Unlock()
 		t.finish(nil, fmt.Errorf("thread: resume audit: %w", err))
@@ -781,7 +776,10 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 			// leaves it open for the next decision instead of arming a
 			// resume that would deny the undecided calls as "no
 			// decision" (the same gate the runner's own pickup and
-			// Decide apply, ADR 0021 §5).
+			// Decide apply, ADR 0021 §5). The chain parks such a call
+			// with its request entry (parkedCalls holds it), so this
+			// branch sees only boundaries the chain fully decided.
+			s.sweepExpiredLocked() // expiry resolved on every arming path
 			undecided = len(s.pendingLocked())
 			if undecided == 0 && s.cfg.autoResume {
 				// The runner's own arming goes through the same
@@ -795,10 +793,12 @@ func (s *Session) runTurn(persist, ctx context.Context, t *Turn, callerOpts []we
 		}
 		s.mu.Unlock()
 		if undecided > 0 {
-			// A chain-decided boundary that stayed open: the turn is
-			// done, but Pending() still shows the calls awaiting their
-			// quorum — the log line is the operator's signal; nothing
-			// parked, so OnRequest owes no notification.
+			// A chain-decided boundary that stayed open — a mirrored
+			// child request still undecided beside it: the turn is
+			// done, and Pending() shows what it waits for; the log line
+			// is the operator's signal. Every call the chain left open
+			// parked with a request, so OnRequest has already fired
+			// for each.
 			s.agent.Logger().Debug("thread: chain decided without completing the boundary",
 				"session", s.header.ID, "run", t.runID, "undecided", undecided)
 		}

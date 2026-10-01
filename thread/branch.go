@@ -245,6 +245,11 @@ func (s *Session) Fork(ctx context.Context, entryID string, opts ...SessionOptio
 		return nil, err
 	}
 	h.Parent = &ParentRef{Session: s.header.ID, Entry: entryID}
+	// A fork of a session that requires signed decisions requires
+	// them too, and takes the origin's keyring when given none.
+	if err := cfg.inheritApprovals(&s.cfg, &h); err != nil {
+		return nil, err
+	}
 
 	// The snapshot: everything Fork reads of this session, under its
 	// lock; the writes below go to another session and need no lock

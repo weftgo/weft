@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { RunRow, SessionRow } from "../lib/api"
 import { diffLines, diffSummary } from "../lib/diff"
-import { WeftDevtools } from "./element"
+import { studioPlaygroundLink, WeftDevtools } from "./element"
 import { buildRunBody, experimentLabel, pickRuntime } from "./playground"
 import type { ExperimentDraft } from "./playground"
 
@@ -255,6 +255,38 @@ describe("the pure halves", () => {
   it("experimentLabel names the turn and the experiment's index", () => {
     expect(experimentLabel("s_01M3-t3", 0)).toBe("t3·x1")
     expect(experimentLabel("s_01M3-t3", 2)).toBe("t3·x3")
+  })
+
+  it("studioPlaygroundLink carries run, step and the current overrides", () => {
+    const draft: ExperimentDraft = {
+      runId: "s_01-t2",
+      agent: "acme-support",
+      step: 0,
+      instructions: "new prompt",
+      tools: { lookup_order: true, refund: false },
+      model: "glm-5.3-flash",
+      thinking: "off",
+      input: "another question",
+      engine: "live",
+      sideEffects: "",
+      thread: "ephemeral",
+      runtimeId: "rt_01",
+    }
+    const link = new URL(
+      studioPlaygroundLink("http://studio.test/studio/", draft, 2)
+    )
+    expect(link.pathname).toBe("/studio/playground")
+    expect(link.searchParams.get("run")).toBe("s_01-t2")
+    expect(link.searchParams.get("step")).toBe("2")
+    expect(link.searchParams.get("instructions")).toBe("new prompt")
+    expect(link.searchParams.get("tools")).toBe("lookup_order")
+    expect(link.searchParams.get("model")).toBe("glm-5.3-flash")
+    expect(link.searchParams.get("input")).toBe("another question")
+    // Nothing changed, nothing carried: the run and the step alone.
+    const bare = new URL(
+      studioPlaygroundLink("http://studio.test/studio/", null, null)
+    )
+    expect(bare.search).toBe("")
   })
 
   it("pickRuntime prefers the runtime exposing the agent", () => {

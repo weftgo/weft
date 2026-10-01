@@ -23,6 +23,7 @@ import {
 import {
   Activity,
   Bot,
+  FlaskConical,
   Keyboard,
   List,
   MessagesSquare,
@@ -98,6 +99,11 @@ function Nav() {
           {item("/live", "Live", <Activity data-slot="icon" />)}
           {meta.data?.has_manifest &&
             item("/agents", "Agents", <Bot data-slot="icon" />)}
+          {/* The playground (step 8): offered exactly when the runtime
+              link's routes are registered (the capability is computed
+              from them, never hard-coded). */}
+          {meta.data?.capabilities?.includes("playground") &&
+            item("/playground", "Playground", <FlaskConical data-slot="icon" />)}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>

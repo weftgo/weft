@@ -498,3 +498,124 @@ export function manifestQuery() {
     queryFn: () => get<Manifest>("manifest"),
   })
 }
+
+// ── The playground (WEFT-PLAYGROUND §10.4; the panel posts the same
+// bodies — V6, one API two clients) ───────────────────────────────
+
+/** One tool of a connected runtime's agent: its side-effect class
+ * (ReplayPolicy; "never" or absent is the ⚠) and its allow flag. */
+export interface ToolView {
+  name: string
+  side_effects: string
+  allow: boolean
+}
+
+export interface AgentView {
+  name: string
+  models: string[]
+  tools: ToolView[]
+  /** The registered system prompt (the drawer pre-fills from it). */
+  instructions?: string
+}
+
+/** GET /api/runtimes: one connected runtime. */
+export interface RuntimeView {
+  id: string
+  host: string
+  pid: number
+  service: string
+  env: string
+  connected_since: string
+  last_seen: string
+  agents: AgentView[]
+}
+
+export function runtimesQuery() {
+  return queryOptions({
+    queryKey: ["runtimes"],
+    staleTime: 5_000,
+    queryFn: () => get<{ runtimes: RuntimeView[] }>("runtimes"),
+  })
+}
+
+/** §5.1's command body (the overrides carry only what changed). */
+export interface PlaygroundRunBody {
+  runtime: string
+  agent: string
+  source?: { run_id: string; from_step: number } | null
+  input?: string | null
+  overrides?: {
+    instructions?: string
+    tools_enabled?: string[]
+    model?: string
+    thinking?: string
+    options?: Record<string, number>
+  }
+  transcript_edits?: unknown[]
+  engine?: string
+  side_effects?: string
+  thread?: string
+  experiment_id?: string
+  public_id?: string
+}
+
+/** post one JSON document (the playground's write verbs). */
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  }
+  const tok = studioToken()
+  if (tok) headers.Authorization = `Bearer ${tok}`
+  const res = await fetch(new URL(path, apiBase()).toString(), {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    let code = "network"
+    let message = `${res.status} ${res.statusText}`
+    try {
+      const doc = (await res.json()) as { error?: { code?: string; message?: string } }
+      if (doc.error) {
+        code = doc.error.code ?? code
+        message = doc.error.message ?? message
+      }
+    } catch {
+      // not JSON — the status line says enough
+    }
+    throw new ApiError(res.status, code, message)
+  }
+  return (await res.json()) as T
+}
+
+/** POST /api/playground/runs → 202 { command_id, state }. */
+export function postPlaygroundRun(body: PlaygroundRunBody) {
+  return post<{ command_id: string; state: string }>("playground/runs", body)
+}
+
+/** GET /api/playground/commands/{id} — §10.5's lifecycle row. */
+export interface CommandStatus {
+  command_id: string
+  state: "queued" | "accepted" | "rejected" | "finished" | "lost"
+  run_id: string
+  error: string | null
+  created: string
+  updated: string
+}
+
+export function fetchCommand(id: string): Promise<CommandStatus> {
+  return get<CommandStatus>(`playground/commands/${encodeURIComponent(id)}`)
+}
+
+/** POST /api/runs/{id}/approvals: a parked runtime-started run's
+ * continue / skip / resolve (ADR 0007's verbs, WEFT-DEVTOOLS §8.2). */
+export function postApproval(
+  runID: string,
+  body: { call_id: string; decision: "approve" | "deny" | "resolve"; reason?: string; content?: string }
+) {
+  return post<{ command_id: string; state: string }>(
+    `runs/${encodeURIComponent(runID)}/approvals`,
+    body
+  )
+}

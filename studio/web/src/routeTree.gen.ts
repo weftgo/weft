@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LiveRouteImport } from './routes/live'
+import { Route as PlaygroundRouteImport } from './routes/playground'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
 import { Route as RunsIndexRouteImport } from './routes/runs.index'
 import { Route as RunsIdRouteImport } from './routes/runs.$id'
@@ -26,6 +27,11 @@ const IndexRoute = IndexRouteImport.update({
 const LiveRoute = LiveRouteImport.update({
   id: '/live',
   path: '/live',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlaygroundRoute = PlaygroundRouteImport.update({
+  id: '/playground',
+  path: '/playground',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
@@ -62,6 +68,7 @@ const TracesIdRoute = TracesIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/live': typeof LiveRoute
+  '/playground': typeof PlaygroundRoute
   '/runs/$id': typeof RunsIdRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/traces/$id': typeof TracesIdRoute
@@ -72,6 +79,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/live': typeof LiveRoute
+  '/playground': typeof PlaygroundRoute
   '/runs/$id': typeof RunsIdRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/traces/$id': typeof TracesIdRoute
@@ -83,6 +91,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/live': typeof LiveRoute
+  '/playground': typeof PlaygroundRoute
   '/runs/$id': typeof RunsIdRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/traces/$id': typeof TracesIdRoute
@@ -95,6 +104,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/live'
+    | '/playground'
     | '/runs/$id'
     | '/sessions/$id'
     | '/traces/$id'
@@ -105,6 +115,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/live'
+    | '/playground'
     | '/runs/$id'
     | '/sessions/$id'
     | '/traces/$id'
@@ -115,6 +126,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/live'
+    | '/playground'
     | '/runs/$id'
     | '/sessions/$id'
     | '/traces/$id'
@@ -126,6 +138,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LiveRoute: typeof LiveRoute
+  PlaygroundRoute: typeof PlaygroundRoute
   RunsIdRoute: typeof RunsIdRoute
   SessionsIdRoute: typeof SessionsIdRoute
   TracesIdRoute: typeof TracesIdRoute
@@ -148,6 +161,13 @@ declare module '@tanstack/react-router' {
       path: '/live'
       fullPath: '/live'
       preLoaderRoute: typeof LiveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/playground': {
+      id: '/playground'
+      path: '/playground'
+      fullPath: '/playground'
+      preLoaderRoute: typeof PlaygroundRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/': {
@@ -198,6 +218,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LiveRoute: LiveRoute,
+  PlaygroundRoute: PlaygroundRoute,
   RunsIdRoute: RunsIdRoute,
   SessionsIdRoute: SessionsIdRoute,
   TracesIdRoute: TracesIdRoute,

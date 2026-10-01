@@ -12,6 +12,7 @@ import { readConfig, type PanelConfig } from "./config"
 import { el, fmtJSON, waterfall } from "./render"
 import { PANEL_CSS } from "./styles"
 import { emptyPanelState, PanelModel, strippedContent, type PanelState, type TurnView } from "./state"
+import type { ExperimentDraft } from "./playground"
 import { panelStudioVersion } from "./version"
 
 /** hasCapability reports whether meta lists the named capability (the
@@ -486,6 +487,14 @@ export class WeftDevtools extends HTMLElement {
       el("span", undefined, stats),
       el("span", "weft-grow"),
     ])
+    const compare = el("a", "weft-btn", "compare in Studio", {
+      href: studioPlaygroundLink(this.cfg.endpoint, s.drawer, s.selectedStep ?? null),
+      target: "_blank",
+      rel: "noopener",
+      title: "open the Studio playground with this run, step and the current overrides carried over",
+    })
+    compare.style.textDecoration = "none"
+    head.appendChild(compare)
     const discard = el("button", "weft-btn", "discard", { title: "clear the result pane" })
     discard.addEventListener("click", () => this.model?.discardResult())
     head.appendChild(discard)
@@ -814,6 +823,32 @@ function childBlock(childId: string, t: TurnView): HTMLElement {
 function shortId(id: string): string {
   const parts = id.split("/")
   return parts[parts.length - 1] || id
+}
+
+/** studioPlaygroundLink builds the §2 hand-off: "compare in Studio"
+ * with the context carried over — the run, the step being read, and
+ * the drawer's current overrides — so nothing is retyped (the parity
+ * rule's documented hand-off for the Studio-only surfaces). */
+export function studioPlaygroundLink(
+  endpoint: string,
+  draft: ExperimentDraft | null,
+  step: number | null
+): string {
+  const u = new URL("playground", endpoint)
+  if (draft) {
+    if (draft.runId) u.searchParams.set("run", draft.runId)
+    if (step != null && step > 0) u.searchParams.set("step", String(step))
+    if (draft.instructions) u.searchParams.set("instructions", draft.instructions)
+    const on = Object.entries(draft.tools)
+      .filter(([, enabled]) => enabled)
+      .map(([name]) => name)
+    if (on.length && on.length < Object.keys(draft.tools).length)
+      u.searchParams.set("tools", on.join(","))
+    if (draft.model) u.searchParams.set("model", draft.model)
+    if (draft.thinking) u.searchParams.set("thinking", draft.thinking)
+    if (draft.input && draft.step === 0) u.searchParams.set("input", draft.input)
+  }
+  return u.toString()
 }
 
 /** sourceLabel takes the turn part back out of a `t3·x1` label (the

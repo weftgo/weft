@@ -1301,21 +1301,28 @@ var ue = class extends HTMLElement {
 			b("span", void 0, `Result · ${t.label}`),
 			b("span", void 0, i),
 			b("span", "weft-grow")
-		]), c = b("button", "weft-btn", "discard", { title: "clear the result pane" });
-		c.addEventListener("click", () => this.model?.discardResult()), a.appendChild(c), n.appendChild(a);
-		let l = b("div", "weft-step-b");
-		t.error && l.appendChild(b("div", "weft-note weft-warn", t.error));
+		]), c = b("a", "weft-btn", "compare in Studio", {
+			href: ge(this.cfg.endpoint, e.drawer, e.selectedStep ?? null),
+			target: "_blank",
+			rel: "noopener",
+			title: "open the Studio playground with this run, step and the current overrides carried over"
+		});
+		c.style.textDecoration = "none", a.appendChild(c);
+		let l = b("button", "weft-btn", "discard", { title: "clear the result pane" });
+		l.addEventListener("click", () => this.model?.discardResult()), a.appendChild(l), n.appendChild(a);
+		let u = b("div", "weft-step-b");
+		t.error && u.appendChild(b("div", "weft-note weft-warn", t.error));
 		for (let e of t.folded.steps) {
-			e.text && l.appendChild(b("div", void 0, e.text));
-			for (let n of e.toolCalls) l.appendChild(X(n, t.row?.status ?? "running"));
+			e.text && u.appendChild(b("div", void 0, e.text));
+			for (let n of e.toolCalls) u.appendChild(X(n, t.row?.status ?? "running"));
 		}
-		!t.folded.steps.length && !t.error && l.appendChild(b("div", "weft-note", "queued — waiting for the runtime to ack…"));
-		let u = t.folded.steps.map((e) => e.text).filter(Boolean).join("\n");
-		if (u && t.sourceText) {
-			let e = o(t.sourceText, u), n = s(e), r = b("div", "weft-diff");
-			r.appendChild(b("div", "weft-diff-h", `diff vs ${ge(t.label)}:  ${n}`));
+		!t.folded.steps.length && !t.error && u.appendChild(b("div", "weft-note", "queued — waiting for the runtime to ack…"));
+		let d = t.folded.steps.map((e) => e.text).filter(Boolean).join("\n");
+		if (d && t.sourceText) {
+			let e = o(t.sourceText, d), n = s(e), r = b("div", "weft-diff");
+			r.appendChild(b("div", "weft-diff-h", `diff vs ${_e(t.label)}:  ${n}`));
 			for (let t of e) t.kind !== "same" && r.appendChild(b("div", `weft-diff-row weft-diff-${t.kind}`, `${t.kind === "add" ? "+" : "−"} ${t.text}`));
-			l.appendChild(r);
+			u.appendChild(r);
 		}
 		if (t.folded.pending.length && t.runID) {
 			let e = b("div", "weft-step");
@@ -1330,9 +1337,9 @@ var ue = class extends HTMLElement {
 				};
 				r.append(i("continue", "approve", "Approve: the handler runs for real"), i("skip", "deny", "Deny: the model sees a denied result"), i("resolve…", "resolve", "Resolve with the recorded result pasted outside the process", "")), t.appendChild(r), n.appendChild(t);
 			}
-			e.appendChild(n), l.appendChild(e);
+			e.appendChild(n), u.appendChild(e);
 		}
-		return n.appendChild(l), n;
+		return n.appendChild(u), n;
 	}
 	turnView(e) {
 		let t = e.turn;
@@ -1412,7 +1419,7 @@ function pe(e, t, n, r) {
 	let i = b("div", "weft-step");
 	i.setAttribute("data-weft-step", String(e.index)), r === e.index && (i.style.outline = "1px solid var(--w-accent)");
 	let a = b("div", "weft-step-h", [b("span", void 0, `step ${e.index}`), b("span", "weft-grow")]);
-	e.finish && (a.appendChild(b("span", void 0, e.finish.reason)), a.appendChild(b("span", void 0, ve(e.finish.usage)))), i.appendChild(a);
+	e.finish && (a.appendChild(b("span", void 0, e.finish.reason)), a.appendChild(b("span", void 0, ye(e.finish.usage)))), i.appendChild(a);
 	let o = b("div", "weft-step-b");
 	if (e.reasoning) {
 		let t = b("details", "weft-collapsible");
@@ -1423,7 +1430,7 @@ function pe(e, t, n, r) {
 	return i.appendChild(o), i;
 }
 function X(e, t, n) {
-	let r = b("div", "weft-call"), i = f(e, t), a = b("div", "weft-call-h", [b("span", "weft-name", e.name), b("span", "weft-args", _e(e))]);
+	let r = b("div", "weft-call"), i = f(e, t), a = b("div", "weft-call-h", [b("span", "weft-name", e.name), b("span", "weft-args", ve(e))]);
 	if (r.appendChild(a), e.childRunId && n && (a.appendChild(b("span", "weft-badge weft-info", "subagent", { title: e.childRunId })), r.appendChild(he(e.childRunId, n))), e.result) {
 		let t = me(n, e);
 		t && a.appendChild(b("span", "weft-badge weft-info", t));
@@ -1447,10 +1454,19 @@ function Z(e) {
 	let t = e.split("/");
 	return t[t.length - 1] || e;
 }
-function ge(e) {
-	return e.split("·")[0] || e;
+function ge(e, t, n) {
+	let r = new URL("playground", e);
+	if (t) {
+		t.runId && r.searchParams.set("run", t.runId), n != null && n > 0 && r.searchParams.set("step", String(n)), t.instructions && r.searchParams.set("instructions", t.instructions);
+		let e = Object.entries(t.tools).filter(([, e]) => e).map(([e]) => e);
+		e.length && e.length < Object.keys(t.tools).length && r.searchParams.set("tools", e.join(",")), t.model && r.searchParams.set("model", t.model), t.thinking && r.searchParams.set("thinking", t.thinking), t.input && t.step === 0 && r.searchParams.set("input", t.input);
+	}
+	return r.toString();
 }
 function _e(e) {
+	return e.split("·")[0] || e;
+}
+function ve(e) {
 	if (e.args !== void 0) try {
 		return `(${JSON.stringify(e.args)})`;
 	} catch {
@@ -1458,7 +1474,7 @@ function _e(e) {
 	}
 	return e.streamedArgs ? `(${e.streamedArgs}…)` : "(…)";
 }
-function ve(e) {
+function ye(e) {
 	let t = [`${y(e.input_tokens)}→${y(e.output_tokens)} tok`];
 	return e.cached_input_tokens && t.push(`${y(e.cached_input_tokens)} cached`), e.reasoning_tokens && t.push(`${y(e.reasoning_tokens)} reasoning`), e.cache_write_tokens && t.push(`${y(e.cache_write_tokens)} cache-write`), t.join(" · ");
 }
@@ -1478,7 +1494,7 @@ function Q(e) {
 	} catch {}
 	t && e(t);
 }
-function ye(e) {
+function be(e) {
 	let t = document.createElement("weft-devtools");
 	e || Q((e) => {
 		e && t.setAttribute("data-public-id", e);
@@ -1486,8 +1502,8 @@ function ye(e) {
 	let n = () => document.body.appendChild(t);
 	document.body ? n() : document.addEventListener("DOMContentLoaded", n, { once: !0 });
 }
-var be = i(), $ = document.querySelector("weft-devtools");
+var xe = i(), $ = document.querySelector("weft-devtools");
 $ ? $.hasAttribute("data-public-id") || Q((e) => {
 	e && $.setAttribute("data-public-id", e);
-}) : (be.auto || a()) && ye(n()?.getAttribute("data-public-id") !== null);
+}) : (xe.auto || a()) && be(n()?.getAttribute("data-public-id") !== null);
 //#endregion

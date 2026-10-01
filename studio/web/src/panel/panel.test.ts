@@ -377,6 +377,43 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     expect(text(el, ".weft-turns")).toContain("1 steps")
   })
 
+  it("the live turn list upserts: two run frames for one id leave one row, its chip on the latest frame", async () => {
+    // The server sends one run frame per change and never dedupes
+    // (studio/live.go's liveDedupKey), so the panel must upsert by id
+    // — the Studio UI invalidates its runs query, the panel merges.
+    const runs = [
+      runRow({ id: "r_live", status: "running", finished: null }),
+      runRow({ id: "r_old", turn: 2 }),
+    ]
+    const routes = runRoutes(runs)
+    routes["runs/r_live"] = { ...runRow({ id: "r_live", status: "running", finished: null }), children: [] }
+    routes["runs/r_live/events?after=0&limit=500"] = { ...EVENTS, events: EVENTS.events.slice(0, 2), gaps: [] }
+    const { fetchMock } = fakeStudio(routes)
+    vi.stubGlobal("fetch", fetchMock)
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-public-id": "pub_orders",
+      "data-open": "true",
+    })
+    const scope = FakeEventSource.instances.find((i) => i.url.includes("public_id="))
+    const rowsFor = (id: string) =>
+      all(el, ".weft-turn").filter((n) => n.querySelector(".weft-id")?.textContent === id)
+    const chipOf = (id: string) =>
+      rowsFor(id)[0]?.querySelector(".weft-row1 > .weft-chip")?.textContent ?? ""
+    scope?.emit("run", { run: runRow({ id: "r_live", status: "running", finished: null }) })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(all(el, ".weft-turn")).toHaveLength(2)
+    expect(rowsFor("r_live")).toHaveLength(1)
+    expect(chipOf("r_live")).toBe("running")
+    // The second frame for the same id (the run finished): the row is
+    // replaced, never appended.
+    scope?.emit("run", { run: runRow({ id: "r_live", status: "succeeded" }) })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(all(el, ".weft-turn")).toHaveLength(2)
+    expect(rowsFor("r_live")).toHaveLength(1)
+    expect(chipOf("r_live")).toBe("succeeded")
+  })
+
   it("subagents load lazily: the expander fetches the child's own events on open (Dv3)", async () => {
     const child = { id: "r_ok/0/call_1", parent_call_id: "call_1" }
     const routes = runRoutes([runRow({})])

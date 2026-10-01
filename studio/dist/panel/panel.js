@@ -646,14 +646,25 @@ var B = class {
 		}
 	}
 	onRunFrame(e) {
-		if (e.run.public_id && e.run.public_id !== this.publicId) return;
-		let { turns: t, experiments: n } = R([e.run, ...this.state.turns]);
-		if (this.state.turns = t, this.state.experiments = n, !this.state.selected && this.state.turns.length) {
-			let e = this.state.turns.find((e) => e.status === "running");
-			this.select((e ?? this.state.turns[0]).id);
-			return;
+		if (!(e.run.public_id && e.run.public_id !== this.publicId)) {
+			if (this.upsertRun(e.run), !this.state.selected && this.state.turns.length) {
+				let e = this.state.turns.find((e) => e.status === "running");
+				this.select((e ?? this.state.turns[0]).id);
+				return;
+			}
+			this.state.selected === e.run.id && e.run.status !== "running" && this.refreshTurn(e.run.id), this.emit();
 		}
-		this.state.selected === e.run.id && e.run.status !== "running" && this.refreshTurn(e.run.id), this.emit();
+	}
+	upsertRun(e) {
+		let t = this.state.turns.filter((t) => t.id !== e.id), n = /* @__PURE__ */ new Map();
+		for (let [t, r] of this.state.experiments) {
+			let i = r.filter((t) => t.id !== e.id);
+			i.length && n.set(t, i);
+		}
+		let r = R([e, ...t]);
+		this.state.turns = r.turns;
+		for (let [e, t] of r.experiments) n.set(e, [...n.get(e) ?? [], ...t]);
+		this.state.experiments = n;
 	}
 	async select(e) {
 		let t = this.loadSeq;

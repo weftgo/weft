@@ -261,15 +261,37 @@ async function main() {
   }
 
   // 3. grouping + timing (Dv1's gate): every turn of the conversation
-  // is in the list, and the turn view carries content and timing.
-  // 3. grouping + timing (Dv1's gate): every turn of the conversation
-  // is in the list, and the turn view carries content and timing.
-  const rows = dom.window.document
-    .querySelector("weft-devtools")
-    ?.shadowRoot?.querySelectorAll(".weft-turn")
-  console.log(`PASS turns listed: ${rows?.length ?? 0}`)
-  if ((rows?.length ?? 0) < (args.otlp ? 1 : args.turns))
+  // is in the list exactly once, and the turn view carries content and
+  // timing. The live lane forwards every change of a run and never
+  // dedupes (studio/live.go's liveDedupKey), so the row count must be
+  // exact: one row per distinct run id, and precisely the id set the
+  // API reports for the public id.
+  const rows = Array.from(
+    dom.window.document
+      .querySelector("weft-devtools")
+      ?.shadowRoot?.querySelectorAll(".weft-turn") ?? []
+  )
+  const ids = rows.map((n) => n.querySelector(".weft-id")?.textContent ?? "")
+  const panelIds = new Set(ids)
+  console.log(`PASS turns listed: ${rows.length} (${panelIds.size} distinct)`)
+  if (rows.length < (args.otlp ? 1 : args.turns))
     throw new Error("FAIL not all turns listed")
+  if (rows.length !== panelIds.size)
+    throw new Error(
+      `FAIL duplicate turn rows: ${rows.length} rows for ${panelIds.size} run ids (${ids.join(", ")})`
+    )
+  const apiRuns = await fetch(new URL(`api/runs?public_id=${args.publicId}&limit=50`, args.endpoint), {
+    headers: args.token ? { Authorization: `Bearer ${args.token}` } : {},
+  })
+  if (!apiRuns.ok) throw new Error(`FAIL the runs page: ${apiRuns.status}`)
+  const apiIds = new Set(
+    ((await apiRuns.json()) as { runs: { id: string }[] }).runs.map((r) => r.id)
+  )
+  if (panelIds.size !== apiIds.size || [...apiIds].some((id) => !panelIds.has(id)))
+    throw new Error(
+      `FAIL the turn list is not exactly the API's runs: ${panelIds.size} panel rows vs ${apiIds.size} api runs`
+    )
+  console.log(`PASS one row per run: the list is exactly the API's ${apiIds.size} runs`)
 
   // Timing on the rows either way; grouping and content are the
   // setup-A shapes (a spans-only export has no events to fold).

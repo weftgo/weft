@@ -279,9 +279,7 @@ export class PanelModel {
    * transcript's, not the deltas'). */
   private onRunFrame(f: LiveRun) {
     if (f.run.public_id && f.run.public_id !== this.publicId) return
-    const { turns, experiments } = partitionRuns([f.run, ...this.state.turns])
-    this.state.turns = turns
-    this.state.experiments = experiments
+    this.upsertRun(f.run)
     if (!this.state.selected && this.state.turns.length) {
       const running = this.state.turns.find((r) => r.status === "running")
       void this.select((running ?? this.state.turns[0]).id)
@@ -291,6 +289,29 @@ export class PanelModel {
       void this.refreshTurn(f.run.id)
     }
     this.emit()
+  }
+
+  /** upsertRun merges one run row by id: the live lane forwards every
+   * change of a run and never dedupes ("a run row may legitimately
+   * change", studio/live.go's liveDedupKey), so a later frame replaces
+   * the row instead of appending a duplicate — the Studio UI
+   * invalidates its runs query on these frames; the panel merges in
+   * place. Drop any existing row (turn or experiment) with the id,
+   * then insert per partitionRuns's rule: prepend to turns with the
+   * newest-first sort kept, or append to its experiments bucket. */
+  private upsertRun(run: RunRow) {
+    const turns = this.state.turns.filter((r) => r.id !== run.id)
+    const experiments = new Map<string, RunRow[]>()
+    for (const [key, list] of this.state.experiments) {
+      const kept = list.filter((r) => r.id !== run.id)
+      if (kept.length) experiments.set(key, kept)
+    }
+    const part = partitionRuns([run, ...turns])
+    this.state.turns = part.turns
+    for (const [key, list] of part.experiments) {
+      experiments.set(key, [...(experiments.get(key) ?? []), ...list])
+    }
+    this.state.experiments = experiments
   }
 
   /** select loads one turn: the doc (subagent children), every events

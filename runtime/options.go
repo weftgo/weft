@@ -3,7 +3,6 @@ package runtime
 import (
 	"log/slog"
 	"os"
-	"sync/atomic"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/otel"
@@ -171,7 +170,3 @@ func Install(opts ...Option) (shutdown func()) {
 // registration. Hard-coded like otel's own weftVersion (the root
 // exports no Version); the release step bumps it with the tag.
 func weftVersion() string { return "v0.6.0" }
-
-// runtimeSeq makes link ids unique within a process even in the same
-// millisecond.
-var runtimeSeq atomic.Uint64

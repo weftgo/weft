@@ -58,7 +58,7 @@ func (r *spanRecorder) playgroundSpan(t *testing.T) map[string]string {
 			}
 			attrs := map[string]string{}
 			for _, kv := range s.Attributes() {
-				attrs[string(kv.Key)] = kv.Value.Emit()
+				attrs[string(kv.Key)] = kv.Value.String()
 			}
 			if attrs["weft.playground"] == "true" {
 				r.mu.Unlock()
@@ -167,7 +167,7 @@ func (e *e2e) api(t *testing.T, method, path, body string) (int, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(b)
 }

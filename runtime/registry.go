@@ -70,9 +70,7 @@ func (r *registry) entryFor(a *weft.Agent, name string) agentRegistration {
 		}
 	}
 	e.Limits = manifestLimits(manifest)
-	for _, name := range r.modelNames() {
-		e.Models = append(e.Models, name)
-	}
+	e.Models = append(e.Models, r.modelNames()...)
 	return e
 }
 
@@ -227,20 +225,6 @@ func (e agentRegistration) isAllowed(tool string) bool {
 		}
 	}
 	return false
-}
-
-// toolNames lists the agent's registered tool names in manifest
-// order.
-func (r *registry) toolNames(agent string) []string {
-	e, ok := r.entries[agent]
-	if !ok {
-		return nil
-	}
-	_, tools, err := parseManifest([]byte(e.Manifest))
-	if err != nil {
-		return nil
-	}
-	return tools
 }
 
 // ownModel returns the agent's own model name from its manifest.

@@ -51,7 +51,7 @@ func register(t *testing.T, h http.Handler, reg Registration) RegisterResponse {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("register: %d", resp.StatusCode)
 	}
@@ -160,7 +160,7 @@ func ack(t *testing.T, rs *RuntimeServer, a Ack) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("ack %s: %d", a.State, resp.StatusCode)
 	}
@@ -445,7 +445,7 @@ func TestCommandStatusUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("ack for an unknown command = %d, want 404", resp.StatusCode)
 	}

@@ -69,13 +69,13 @@ func (f *fakeStudio) handler() http.Handler {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher := w.(http.Flusher)
 		w.WriteHeader(200)
-		fmt.Fprint(w, "event: ping\ndata: {}\n\n")
+		_, _ = fmt.Fprint(w, "event: ping\ndata: {}\n\n")
 		flusher.Flush()
 		ctx := r.Context()
 		for {
 			select {
 			case fr := <-f.frames:
-				fmt.Fprint(w, fr)
+				_, _ = fmt.Fprint(w, fr)
 				flusher.Flush()
 			case <-f.drop:
 				return // the break: the stream dies, the link reconnects

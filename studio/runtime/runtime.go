@@ -415,7 +415,7 @@ func (rs *RuntimeServer) serveCommands(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Type", "text/event-stream; charset=utf-8")
 	h.Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, "event: ping\ndata: {}\n\n")
+	_, _ = fmt.Fprint(w, "event: ping\ndata: {}\n\n")
 	flusher.Flush()
 	for _, cmd := range backlog {
 		writeRunFrame(w, flusher, cmd)
@@ -430,7 +430,7 @@ func (rs *RuntimeServer) serveCommands(w http.ResponseWriter, r *http.Request) {
 			writeRunFrame(w, flusher, cmd)
 		case <-ping.C:
 			rs.touch(id)
-			fmt.Fprint(w, "event: ping\ndata: {}\n\n")
+			_, _ = fmt.Fprint(w, "event: ping\ndata: {}\n\n")
 			flusher.Flush()
 		case <-ctx.Done():
 			rs.streamEnded(id, feed)
@@ -459,7 +459,7 @@ func (rs *RuntimeServer) backlogLocked(runtimeID, lastEventID string) []Command 
 	}
 	var out []Command
 	for _, row := range rs.commands {
-		if row.Command.Runtime != "" && row.Command.Runtime != runtimeID {
+		if row.Runtime != "" && row.Runtime != runtimeID {
 			continue
 		}
 		if row.state == StateQueued && row.seq > afterSeq {
@@ -474,7 +474,7 @@ func (rs *RuntimeServer) backlogLocked(runtimeID, lastEventID string) []Command 
 // command id as its SSE id, or `event: cancel` (§10.3's shapes).
 func writeRunFrame(w http.ResponseWriter, flusher http.Flusher, cmd Command) {
 	if cmd.cancel {
-		fmt.Fprintf(w, "event: cancel\ndata: {\"command_id\":%q}\n\n", cmd.CommandID)
+		_, _ = fmt.Fprintf(w, "event: cancel\ndata: {\"command_id\":%q}\n\n", cmd.CommandID)
 		flusher.Flush()
 		return
 	}
@@ -482,7 +482,7 @@ func writeRunFrame(w http.ResponseWriter, flusher http.Flusher, cmd Command) {
 	if err != nil {
 		return
 	}
-	fmt.Fprintf(w, "id: %s\nevent: run\ndata: %s\n\n", cmd.CommandID, data)
+	_, _ = fmt.Fprintf(w, "id: %s\nevent: run\ndata: %s\n\n", cmd.CommandID, data)
 	flusher.Flush()
 }
 
@@ -499,7 +499,7 @@ func (rs *RuntimeServer) streamEnded(id string, feed chan Command) {
 	c.feed = nil
 	c.lastSeen = rs.now()
 	for _, row := range rs.commands {
-		if row.Command.Runtime != id {
+		if row.Runtime != id {
 			continue
 		}
 		switch row.state {

@@ -32,7 +32,7 @@ func ExampleRuntimeServer() {
 		fmt.Println("register:", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	fmt.Println("register:", resp.StatusCode)
 
 	views := rs.Snapshot()

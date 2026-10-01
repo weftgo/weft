@@ -40,7 +40,7 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {

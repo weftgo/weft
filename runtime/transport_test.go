@@ -28,7 +28,7 @@ func TestInProcessClient(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fl := w.(http.Flusher)
 		for i := 0; i < 3; i++ {
-			fmt.Fprintf(w, "id: %d\nevent: tick\ndata: {\"n\":%d}\n\n", i, i)
+			_, _ = fmt.Fprintf(w, "id: %d\nevent: tick\ndata: {\"n\":%d}\n\n", i, i)
 			fl.Flush()
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -58,7 +58,7 @@ func TestInProcessClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sresp.Body.Close()
+	defer func() { _ = sresp.Body.Close() }()
 	if ct := sresp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
 		t.Errorf("content type = %q", ct)
 	}

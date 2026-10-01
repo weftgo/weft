@@ -12,16 +12,6 @@ func testAgent(name string) *weft.Agent {
 	return weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name(name))
 }
 
-// toolAgent builds a named agent with tools, for the parking tests.
-func toolAgent(t *testing.T, name string, tools ...*weft.ToolDef) *weft.Agent {
-	t.Helper()
-	opts := []weft.Option{weft.Name(name)}
-	for _, tool := range tools {
-		opts = append(opts, tool)
-	}
-	return weft.New(wefttest.Script(wefttest.Say("ok")), opts...)
-}
-
 // TestInstallOpensNothing pins §6 rule 1 and §10.2's "without
 // Install, nothing opens": every refusal path returns a callable
 // shutdown without panicking and without dialing anything.

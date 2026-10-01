@@ -43,6 +43,11 @@ var playgroundGroupInstalled = func() bool {
 	return true
 }()
 
+// The wiring's value is its side effect; this read keeps the var
+// referenced for the unused checker (the var itself is the no-init
+// mechanism routes.go documents, same as the panel's).
+var _ = playgroundGroupInstalled
+
 // registerPlayground mounts the playground routes and the runtime
 // link. The link server is per-Server (a Studio embeds one), built
 // here because New is not this lane's to edit; Server.Runtime — the
@@ -338,14 +343,4 @@ func (s *Server) servePlaygroundCommand(rs *linkruntime.RuntimeServer) http.Hand
 		}
 		writeJSON(w, r, http.StatusOK, st)
 	}
-}
-
-// The route paths this group owns, for the doc test that pins them.
-var playgroundRoutes = []string{
-	"GET /api/runtimes",
-	"POST /api/playground/runs",
-	"GET /api/playground/commands/{id}",
-	"POST /api/runtime/register",
-	"GET /api/runtime/commands",
-	"POST /api/runtime/acks",
 }

@@ -201,7 +201,7 @@ func TestBudgetState(t *testing.T) {
 	}
 
 	var r budgetState
-	if r.over(cap, 1) || r.over(cap, 1) {
+	if r.over(cap, 1) {
 		t.Error("runs miscounted before spend")
 	}
 	r.spend(0)

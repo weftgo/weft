@@ -111,7 +111,7 @@ func (pt *playgroundTestServer) post(t *testing.T, body string) (int, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(b)
 }
@@ -122,7 +122,7 @@ func (pt *playgroundTestServer) get(t *testing.T, path string) (int, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(b)
 }
@@ -133,7 +133,7 @@ func (pt *playgroundTestServer) ack(t *testing.T, body string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("ack: %d", resp.StatusCode)
 	}
@@ -400,7 +400,7 @@ func TestPlaygroundNotConnected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 	if resp2.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("not connected = %d, want 503", resp2.StatusCode)
 	}

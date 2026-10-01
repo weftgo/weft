@@ -4,9 +4,24 @@ import (
 	"encoding/hex"
 
 	"github.com/weftgo/weft/obsdb"
+	otelcodes "go.opentelemetry.io/otel/codes"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
+
+// otlpStatusCode maps the SDK's codes (Unset=0, Error=1, Ok=2) onto
+// OTLP's (unset=0, ok=1, error=2) — the model is OTLP-shaped, and the
+// two numberings differ. The golden test pins the mapping.
+func otlpStatusCode(c otelcodes.Code) int {
+	switch c {
+	case otelcodes.Error:
+		return 2
+	case otelcodes.Ok:
+		return 1
+	default:
+		return 0
+	}
+}
 
 // FromSDKSpans converts SDK spans (what a SpanExporter receives) into
 // the obsdb model. It lives in this module because it needs the SDK; a
@@ -30,7 +45,7 @@ func FromSDKSpans(spans []sdktrace.ReadOnlySpan) []obsdb.Span {
 			Kind:          int(s.SpanKind()),
 			Start:         s.StartTime().UTC(),
 			End:           s.EndTime().UTC(),
-			StatusCode:    int(s.Status().Code),
+			StatusCode:    otlpStatusCode(s.Status().Code),
 			StatusMessage: s.Status().Description,
 			Service:       service,
 			Attrs:         attrMap(s.Attributes()),

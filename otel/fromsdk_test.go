@@ -233,7 +233,7 @@ func TestFromSDKSpansMatchesOTLPFixture(t *testing.T) {
 	span3 := mustSpanID(t, "e08a5f2b53bd1e3d")
 	spans := []sdktrace.ReadOnlySpan{
 		stubSpan(res, traceID, span1, trace.SpanID{}, "invoke_agent demo", 1,
-			fixtureTime(0), fixtureTime(9410*time.Millisecond), 1, "",
+			fixtureTime(0), fixtureTime(9410*time.Millisecond), 2, "",
 			[]attribute.KeyValue{
 				attribute.String("gen_ai.operation.name", "invoke_agent"),
 				attribute.String("weft.run.id", "r_20261001_1"),
@@ -257,7 +257,7 @@ func TestFromSDKSpansMatchesOTLPFixture(t *testing.T) {
 				attribute.String("user.id", "user_77"),
 			}, nil),
 		stubSpan(res, traceID, span2, span1, "chat script", 3,
-			fixtureTime(10*time.Millisecond), fixtureTime(1250*time.Millisecond), 1, "",
+			fixtureTime(10*time.Millisecond), fixtureTime(1250*time.Millisecond), 2, "",
 			[]attribute.KeyValue{
 				attribute.String("gen_ai.operation.name", "chat"),
 				attribute.String("weft.run.id", "r_20261001_1"),
@@ -266,7 +266,7 @@ func TestFromSDKSpansMatchesOTLPFixture(t *testing.T) {
 				attribute.String("gen_ai.request.model", "script"),
 			}, nil),
 		stubSpan(res, traceID, span3, trace.SpanID{}, "GET /orders", 2,
-			fixtureTime(0), fixtureTime(6*time.Second), 2, "upstream timed out",
+			fixtureTime(0), fixtureTime(6*time.Second), 1, "upstream timed out",
 			[]attribute.KeyValue{
 				attribute.String("http.request.method", "GET"),
 				attribute.String("url.path", "/orders"),
@@ -291,6 +291,9 @@ func TestFromSDKSpansMatchesOTLPFixture(t *testing.T) {
 	}
 }
 
+// stubSpan builds a snapshot span; statusCode is the SDK's code
+// (codes.Ok=2, codes.Error=1) — the conversion to OTLP's numbering is
+// part of what the golden test pins.
 func stubSpan(res *sdkresource.Resource, traceID trace.TraceID, spanID, parent trace.SpanID, name string, kind int, start, end time.Time, statusCode int, statusMsg string, attrs []attribute.KeyValue, events []sdktrace.Event) sdktrace.ReadOnlySpan {
 	return tracetest.SpanStub{
 		Name:        name,

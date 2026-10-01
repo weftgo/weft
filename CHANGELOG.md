@@ -32,6 +32,19 @@
   `TestStep8RoutesRefusePanelTokens` (read-scoped token → 403 on each
   surface; the server token keeps working). The pushed `studio/v0.3.0`
   tag carries the gap (owner: consider a patch tag).
+- The web app's run page sends the bearer token on its paged events
+  walk (the one raw fetch without it — under setups B/C every page
+  401'd and the run page showed the error instead of the story);
+  pinned by `use-run-events.test.tsx` (P1-3).
+- The panel follows `next_after` past a terminal full page in all
+  three event walks (`done` only means the run ended — a finished
+  run with more than one page of events silently lost the rest);
+  pinned by a panel test with `done:true` + `next_after` set (P1-5).
+- The panel's experiment drawer omits an unchanged instructions
+  override (the drawer pre-fills the registered prompt, and the
+  scripted engine 400s on an instructions override — agents that
+  register instructions could never run scripted); pinned in
+  `playground.test.ts` (P1-8).
 
 ### otel
 

@@ -50,10 +50,20 @@ func ExampleHandler() {
 
 // ExampleServer shows the Server surface (S4.1): New when the
 // playground is in play, Handler() to serve, Close for what New
-// opened, Runtime() nil until step 8 provides it.
+// opened, Runtime() nil until step 8 provides it. New without DB or
+// Open would open the default path ($WEFT_DB or ./.weft/weft.db) —
+// pinned by TestOpenOption — so the example opens a throwaway sqlite
+// file instead of writing into the package directory.
 func ExampleServer() {
-	srv := studio.New(studio.NoIngest()) // read-only: no OTLP receiver
-	defer func() { _ = srv.Close() }()   // New opened the default DB: closed here
+	dir, err := os.MkdirTemp("", "weft-studio-example-")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	srv := studio.New(studio.Open(dir+"/weft.db"), studio.NoIngest()) // read-only: no OTLP receiver
+	defer func() { _ = srv.Close() }()                                // New opened that DB: closed here
 
 	_ = srv.Handler() // mount it; the binary in studio/cmd does
 	_ = srv.Runtime() // nil until step 8 (studio/runtime)

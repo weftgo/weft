@@ -974,8 +974,10 @@ func TestSteerRedeliveredWhenTurnEndNotPersisted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := t1.Wait(); err != nil {
-		t.Fatalf("the run itself succeeded; only its persistence failed: %v", err)
+	// The run itself succeeded; its end did not land, and the turn says
+	// so — the result riding beside the error.
+	if res, err := t1.Wait(); !errors.Is(err, thread.ErrNotPersisted) || res == nil || res.Text() != "done" {
+		t.Fatalf("Wait = %v, %v; want the run's result and ErrNotPersisted", res, err)
 	}
 	// The message re-runs: it is in no tree until a follow-up carries it.
 	waitUntil(t, "the steer of an unpersisted turn never reached a final receipt state", func() bool {

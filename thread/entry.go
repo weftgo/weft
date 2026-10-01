@@ -61,6 +61,13 @@ type TurnEntry struct {
 	// are the signal; only what the report cannot cover is estimated).
 	// Absent on turns that ran no step.
 	LastInput int64 `json:"last_input,omitempty"`
+	// LateSteps counts the per-step appends that failed while the turn
+	// ran (ADR 0011 §7): each batch was held and written late — by the
+	// next step's append or by this entry's own batch — so nothing was
+	// lost, but for that long a crash would have lost messages the run
+	// had already emitted. Zero, and absent on the wire, for a turn
+	// whose every step landed as it joined.
+	LateSteps int `json:"late_steps,omitempty"`
 }
 
 // Reason is why a compaction ran (ADR 0020 §1) — the value a

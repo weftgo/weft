@@ -1159,13 +1159,48 @@ func fillApprovalEntry(e Entry, id, parent string, created time.Time) Entry {
 	return e
 }
 
-// danglingCallsLocked returns the calls the leaf's path leaves
-// unresolved — the tool calls of the last assistant message with
-// calls, minus the results the message after it serves (ADR 0007's
-// unresolved set, read from the tree). Through this package a
-// dangling tail exists only where a successful turn parked: failed
-// turns persist their partial repaired. Callers hold s.mu.
+// danglingCallsLocked returns the calls parked on the leaf's path: the
+// tool calls of the last assistant message with calls that have no
+// result in the tool messages directly after it (ADR 0007's unresolved
+// set, read from the tree) and that a turn recorded as pending — a
+// request entry names the call, or the turn entry that ended the step
+// lists it. That second half is what tells an approval boundary from a
+// crash: per-step durability (ADR 0011 §7) writes an assistant message
+// the moment it joins, so a writer that died before the step's tool
+// message leaves a call with no result and no turn entry. Nothing
+// parked it and no decision can address it; it is not a boundary, the
+// next run's input repair answers it, and holding the session for it
+// would hold it forever.
+//
+// A parked step's tool message is partial when some of its calls ran,
+// and the resume's completed one takes its place on the path (ADR 0011
+// §7: the join attaches to the assistant entry), so the path holds one
+// tool message after the assistant. A session file written before
+// that rule holds both, the partial and then the complete one: every
+// tool message directly following the assistant is read here, so such
+// a boundary reads closed — as it was resolved — instead of holding
+// the session forever. Callers hold s.mu.
 func (s *Session) danglingCallsLocked() []weft.ToolCallPart {
+	unanswered := s.unansweredCallsLocked()
+	if len(unanswered) == 0 {
+		return nil
+	}
+	walk := s.approvalWalkLocked()
+	var out []weft.ToolCallPart
+	for _, c := range unanswered {
+		_, requested := walk.requests[c.ID]
+		_, recorded := walk.runs[c.ID]
+		if requested || recorded {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// unansweredCallsLocked returns the calls of the path's last assistant
+// message with calls that no tool message directly after it answers —
+// parked or not (danglingCallsLocked tells which). Callers hold s.mu.
+func (s *Session) unansweredCallsLocked() []weft.ToolCallPart {
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
 		return nil
@@ -1195,8 +1230,8 @@ func (s *Session) danglingCallsLocked() []weft.ToolCallPart {
 		return nil
 	}
 	served := map[string]bool{}
-	if last+1 < len(msgs) && msgs[last+1].Role == weft.RoleTool {
-		for _, p := range msgs[last+1].Content {
+	for j := last + 1; j < len(msgs) && msgs[j].Role == weft.RoleTool; j++ {
+		for _, p := range msgs[j].Content {
 			if r, ok := p.(weft.ToolResultPart); ok {
 				served[r.CallID] = true
 			}

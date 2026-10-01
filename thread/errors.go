@@ -101,6 +101,16 @@ var (
 	// Open the session again to continue it.
 	ErrClosed = errors.New("thread: session is closed")
 
+	// ErrNotPersisted is wrapped by the error Turn.Wait returns when
+	// the turn ran but its end could not be written: the storage
+	// refused the batch that carries the turn entry (and whatever
+	// messages the steps had not already written), so the session's
+	// tree holds no record of how the turn ended and its usage is in
+	// no ledger. The run's result still rides beside the error — the
+	// model answered; the storage did not keep it. Messages the steps
+	// wrote as they joined are in the tree.
+	ErrNotPersisted = errors.New("thread: turn end not persisted")
+
 	// ErrCreateOnly is returned by Open when it is handed an option
 	// that only means something while a session's header is being
 	// written — WithMeta, PublicID, WithLineage. The header is

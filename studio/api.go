@@ -111,9 +111,9 @@ func row(rec obsdb.RunRow) runRow {
 }
 
 type runsPage struct {
-	Total      int         `json:"total"`
-	Runs       []runRow    `json:"runs"`
-	NextBefore *time.Time  `json:"next_before"`
+	Total      int        `json:"total"`
+	Runs       []runRow   `json:"runs"`
+	NextBefore *time.Time `json:"next_before"`
 }
 
 type runDoc struct {

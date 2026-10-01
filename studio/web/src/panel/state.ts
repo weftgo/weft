@@ -27,6 +27,9 @@ import {
   type PanelEndpoint,
   type PanelLiveHandle,
 } from "./client"
+import type { CommandStatus, RuntimeView } from "./client"
+import { fetchCommand, fetchRuntimes, postApproval, postPlaygroundRun } from "./client"
+import { buildRunBody, experimentLabel, pickRuntime, type ExperimentDraft, type ExperimentResult } from "./playground"
 import { studioIsTooNew } from "./version"
 
 /** One loaded subagent child (Dv3 expands them lazily; the fetch is
@@ -75,6 +78,13 @@ export interface PanelState {
    * deep link (?step=N&view=story). */
   selectedStep: number | null
   turn: TurnView | null
+  /** The experiment drawer's draft (WEFT-PLAYGROUND §3); null when
+   * closed. Rendered only when meta reports the playground. */
+  drawer: ExperimentDraft | null
+  /** The connected runtimes the drawer picks from (§10.4). */
+  runtimes: RuntimeView[]
+  /** The drawer's running or finished experiment (the result pane). */
+  result: ExperimentResult | null
   /** The scope subscription is open (the live dot). */
   live: boolean
   raw: boolean
@@ -94,6 +104,9 @@ export function emptyPanelState(): PanelState {
     selected: "",
     selectedStep: null,
     turn: null,
+    drawer: null,
+    runtimes: [],
+    result: null,
     live: false,
     raw: false,
   }
@@ -161,6 +174,9 @@ export class PanelModel {
     selected: "",
     selectedStep: null,
     turn: null,
+    drawer: null,
+    runtimes: [],
+    result: null,
     live: false,
     raw: false,
   }
@@ -169,8 +185,10 @@ export class PanelModel {
   private ep: PanelEndpoint
   private scopeSub?: PanelLiveHandle
   private runSub?: PanelLiveHandle
+  private expSub?: PanelLiveHandle
   private disposed = false
   private loadSeq = 0 // selects the freshest async load after a rescope
+  private pollTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(ep: PanelEndpoint, public publicId: string, notify: PanelNotify) {
     this.ep = ep
@@ -438,6 +456,225 @@ export class PanelModel {
     return this.state.turns.find((r) => r.id === id)
   }
 
+  // ── The playground (WEFT-PLAYGROUND §3, WEFT-DEVTOOLS §8.2) ──────
+
+  /** openExperiment opens the drawer pre-filled from the run's
+   * registered config — instructions, tools and models come from the
+   * runtime's manifest, never guessed from the trace. step 0 re-runs
+   * the whole turn; the Continue-from button passes the read step. */
+  async openExperiment(runId: string, step = 0) {
+    const row = this.rowOf(runId) ?? this.state.turns.find((r) => r.id === runId)
+    if (!row) return
+    let runtimes = this.state.runtimes
+    if (!runtimes.length) {
+      try {
+        runtimes = (await fetchRuntimes(this.ep)).runtimes
+      } catch {
+        return // no runtime connected: the verb is not offered
+      }
+      if (this.disposed) return
+      this.state.runtimes = runtimes
+    }
+    const rt = pickRuntime(runtimes, row.agent)
+    const agent = rt?.agents.find((a) => a.name === row.agent)
+    if (!rt || !agent) return
+    const tools: Record<string, boolean> = {}
+    for (const t of agent.tools) tools[t.name] = true
+    this.state.drawer = {
+      runId,
+      agent: row.agent,
+      step,
+      instructions: agent.instructions ?? "",
+      tools,
+      model: "",
+      thinking: "",
+      input: step === 0 ? promptOf(this.state.turn) : "",
+      engine: "live",
+      sideEffects: "",
+      thread: "ephemeral",
+      runtimeId: rt.id,
+    }
+    this.emit()
+  }
+
+  /** setDraft patches the drawer's editable fields. */
+  setDraft(patch: Partial<ExperimentDraft>) {
+    if (!this.state.drawer) return
+    this.state.drawer = { ...this.state.drawer, ...patch }
+    this.emit()
+  }
+
+  /** closeExperiment drops the drawer (the result stays until the next
+   * run replaces or discards it). */
+  closeExperiment() {
+    this.state.drawer = null
+    this.emit()
+  }
+
+  /** runExperiment posts §5.1's command and follows it: the lifecycle
+   * row until the run id arrives, then the live lane for the run. */
+  async runExperiment() {
+    const draft = this.state.drawer
+    if (!draft) return
+    let out: { command_id: string; state: string }
+    try {
+      out = await postPlaygroundRun(this.ep, buildRunBody(draft, this.publicId))
+    } catch (err) {
+      this.setExperimentError(err instanceof Error ? err.message : String(err))
+      return
+    }
+    const forked = this.state.experiments.get(draft.runId)?.length ?? 0
+    const feed = newFold()
+    this.expSub?.close()
+    this.expSub = undefined
+    this.state.result = {
+      commandID: out.command_id,
+      state: "queued",
+      runID: "",
+      error: null,
+      label: experimentLabel(draft.runId, forked),
+      sourceText: sourceTextOf(this.state.turn),
+      row: null,
+      events: [],
+      feed,
+      folded: feed.result(),
+    }
+    this.emit()
+    this.trackCommand(out.command_id)
+  }
+
+  /** decide answers one parked call of the experiment's run with the
+   * approval verbs (continue / skip / resolve, ADR 0007) and follows
+   * the resumed run in the same result pane. */
+  async decide(callID: string, decision: "approve" | "deny" | "resolve", content?: string) {
+    const res = this.state.result
+    if (!res || !res.runID) return
+    let out: { command_id: string; state: string }
+    try {
+      out = await postApproval(this.ep, res.runID, {
+        call_id: callID,
+        decision,
+        content,
+      })
+    } catch (err) {
+      this.setExperimentError(err instanceof Error ? err.message : String(err))
+      return
+    }
+    // The resumed run replaces the pane's stream; the label and the
+    // diff base stay (it is the same experiment continuing).
+    const feed = newFold()
+    this.expSub?.close()
+    this.expSub = undefined
+    this.state.result = { ...res, commandID: out.command_id, state: "queued", runID: "", error: null, events: [], feed, folded: feed.result() }
+    this.emit()
+    this.trackCommand(out.command_id)
+  }
+
+  /** discardResult clears the result pane (the run itself stays in the
+   * turn list, nested under its source turn). */
+  discardResult() {
+    this.expSub?.close()
+    this.expSub = undefined
+    this.state.result = null
+    this.emit()
+  }
+
+  private setExperimentError(message: string) {
+    if (this.state.result) {
+      this.state.result = { ...this.state.result, error: message }
+    } else {
+      this.state.result = {
+        commandID: "",
+        state: "rejected",
+        runID: "",
+        error: message,
+        label: "—",
+        sourceText: "",
+        row: null,
+        events: [],
+        feed: newFold(),
+        folded: newFold().result(),
+      }
+    }
+    this.emit()
+  }
+
+  /** trackCommand polls the lifecycle row (§10.5) until the run id
+   * arrives — then the live lane takes over — and until the terminal
+   * state, when the final text (the transcript, not the deltas) and
+   * the row load for the diff. */
+  private trackCommand(commandID: string) {
+    const tick = async () => {
+      if (this.disposed) return
+      let st: CommandStatus
+      try {
+        st = await fetchCommand(this.ep, commandID)
+      } catch {
+        this.schedulePoll(commandID)
+        return
+      }
+      const res = this.state.result
+      if (!res || res.commandID !== commandID) return // replaced or discarded
+      this.state.result = { ...res, state: st.state, runID: st.run_id || res.runID, error: st.error }
+      this.emit()
+      if (st.run_id && !this.expSub) this.followExperiment(st.run_id)
+      if (st.state === "finished" || st.state === "rejected" || st.state === "lost") {
+        if (st.run_id) await this.finishExperiment(st.run_id)
+        return
+      }
+      this.schedulePoll(commandID)
+    }
+    void tick()
+  }
+
+  private schedulePoll(commandID: string) {
+    this.pollTimer = setTimeout(() => this.trackCommand(commandID), 700)
+  }
+
+  /** followExperiment streams the experiment's run in place (§3: "the
+   * result streams in place from the live lane"). */
+  private followExperiment(runID: string) {
+    this.expSub = openPanelLive(this.ep, {
+      selector: { run: runID },
+      kinds: ["event", "delta", "run"],
+      onRecord: (rec) => {
+        const res = this.state.result
+        if (!res || res.runID !== rec.run_id) return
+        res.events.push({ pos: Number(rec.pos), time: rec.time, event: rec.event })
+        res.feed.push(rec.event, Number(rec.pos))
+        res.folded = res.feed.result()
+        this.emit()
+      },
+      onRun: (f) => {
+        const res = this.state.result
+        if (!res || f.run.id !== res.runID) return
+        res.row = f.run
+        this.emit()
+      },
+      onOverflow: () => {
+        const res = this.state.result
+        if (res) res.events = []
+        this.expSub?.close()
+        this.expSub = undefined
+      },
+    })
+  }
+
+  /** finishExperiment loads the finished run's final words and row:
+   * the diff is taken against the transcript, never the deltas. */
+  private async finishExperiment(runID: string) {
+    const res = this.state.result
+    if (!res || res.runID !== runID) return
+    const [transcript, row] = await Promise.all([
+      fetchTranscript(this.ep, runID).catch(() => null),
+      fetchRun(this.ep, runID).catch(() => null),
+    ])
+    if (this.disposed || this.state.result !== res) return
+    if (row) res.row = row
+    if (transcript) res.folded = applyTranscript(res.folded, transcript.batches)
+    this.emit()
+  }
+
   /** toggleRaw flips the raw JSON view (§2: one keypress away). */
   toggleRaw() {
     this.state.raw = !this.state.raw
@@ -463,7 +700,29 @@ export class PanelModel {
   dispose() {
     this.disposed = true
     if (this.raf) cancelAnimationFrame(this.raf)
+    if (this.pollTimer) clearTimeout(this.pollTimer)
     this.scopeSub?.close()
     this.runSub?.close()
+    this.expSub?.close()
   }
+}
+
+/** sourceText is the run's final reply text — the inline diff's base
+ * (the source turn's own words). */
+function sourceTextOf(t: TurnView | null): string {
+  if (!t) return ""
+  return t.folded.steps.map((s) => s.text).filter(Boolean).join("\n")
+}
+
+/** promptOf lifts the turn's input, so a whole-turn re-run starts from
+ * the words the user actually sent. */
+function promptOf(t: TurnView | null): string {
+  if (!t?.transcript) return ""
+  return t.transcript.batches
+    .flatMap((b) => b.messages)
+    .filter((m) => m.role === "user")
+    .flatMap((m) => m.content)
+    .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
+    .map((p) => p.text)
+    .join("\n")
 }

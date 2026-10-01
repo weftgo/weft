@@ -35,6 +35,7 @@ type link struct {
 	seen     map[string]bool // command ids already acked (at-most-once)
 	inFlight map[string]context.CancelFunc
 	tally    map[string]*budgetState // per experiment_id
+	parked   map[string]*parkState   // run id → the parked run this runtime started
 
 	reconnect func() time.Duration // backoff; indirected by tests
 }
@@ -51,6 +52,7 @@ func newLink(c *config, reg *registry, url, token string) *link {
 		seen:     map[string]bool{},
 		inFlight: map[string]context.CancelFunc{},
 		tally:    map[string]*budgetState{},
+		parked:   map[string]*parkState{},
 	}
 	if c.local != nil {
 		l.client = inProcessClient(c.local)
@@ -206,6 +208,12 @@ func (l *link) readStream(ctx context.Context, r io.Reader) error {
 				continue
 			}
 			l.cancelCommand(c.CommandID)
+		case "approve":
+			var d approvalDecision
+			if err := json.Unmarshal(ev.data, &d); err != nil || d.CommandID == "" {
+				continue
+			}
+			go l.dispatchDecision(d)
 		case "":
 			// A comment or keep-alive line before any event field.
 		default:
@@ -268,6 +276,50 @@ func (l *link) cancelCommand(id string) {
 		cancel()
 		slog.Debug("weft/runtime: command canceled", "command_id", id)
 	}
+}
+
+// dispatchDecision is one approval decision's whole life: the
+// at-most-once check, the parkState lookup (its copy is authoritative
+// — a decision for a run it never started, or one already resumed, is
+// rejected), the ack BEFORE resuming, the resume, the finished ack.
+func (l *link) dispatchDecision(d approvalDecision) {
+	l.mu.Lock()
+	if l.seen[d.CommandID] {
+		l.mu.Unlock()
+		return
+	}
+	l.seen[d.CommandID] = true
+	ps, ok := l.parked[d.RunID]
+	l.mu.Unlock()
+	if !ok || ps == nil {
+		l.postAck(ack{CommandID: d.CommandID, State: "rejected",
+			Error: "no parked run " + d.RunID + " on this runtime (it may already have been resumed)"})
+		return
+	}
+	switch d.Decision {
+	case "approve", "deny", "resolve":
+	default:
+		l.postAck(ack{CommandID: d.CommandID, State: "rejected",
+			Error: "unknown decision " + d.Decision})
+		return
+	}
+
+	runID := newID("pg_")
+	l.postAck(ack{CommandID: d.CommandID, State: "accepted", RunID: runID})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	l.mu.Lock()
+	l.inFlight[d.CommandID] = cancel
+	l.mu.Unlock()
+	defer func() {
+		cancel()
+		l.mu.Lock()
+		delete(l.inFlight, d.CommandID)
+		l.mu.Unlock()
+	}()
+
+	status := l.resume(ctx, ps, d, runID)
+	l.postAck(ack{CommandID: d.CommandID, State: "finished", RunID: runID, Status: status})
 }
 
 // lastEventID returns the newest command id seen — the SSE resume

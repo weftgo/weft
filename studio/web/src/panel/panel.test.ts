@@ -324,7 +324,7 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     expect(main).toContain("awaiting decision (read-only)")
     expect(main).toContain("refund")
     expect(main).toContain('{"order_id":"42"}')
-    expect(main).toContain("continue / skip / resolve need the playground capability")
+    expect(main).toContain("the app's own turns are viewer-only (PQ7)")
   })
 
   it("the raw toggle shows the JSON of the same pages", async () => {

@@ -1,10 +1,11 @@
 // <weft-devtools> — the panel custom element (§5): shadow DOM, no
 // host-framework dependency (V1, the Dv0 decision), the §5.2
 // attributes and defaults. The element owns presentation only;
-// state.ts owns the data. Rung 1 is a viewer (§8.1): every control
-// the playground would add waits on meta.capabilities, so nothing
-// write-shaped renders until the server reports it.
+// state.ts owns the data. Rung 1 is a viewer (§8.1); rung 2's
+// experiment drawer and approval controls render only when
+// meta.capabilities reports the playground (§8.5 item 3).
 import type { RunRow, Usage } from "../lib/api"
+import { diffLines, diffSummary } from "../lib/diff"
 import { callState, truncation, type FoldedRun, type FoldedStep, type FoldedToolCall } from "../lib/events"
 import { duration, relativeTime, tokens } from "../lib/format"
 import { readConfig, type PanelConfig } from "./config"
@@ -12,6 +13,12 @@ import { el, fmtJSON, waterfall } from "./render"
 import { PANEL_CSS } from "./styles"
 import { emptyPanelState, PanelModel, strippedContent, type PanelState, type TurnView } from "./state"
 import { panelStudioVersion } from "./version"
+
+/** hasCapability reports whether meta lists the named capability (the
+ * panel renders a control only when the server reports it, §8.5). */
+export function hasCapability(s: PanelState, name: string): boolean {
+  return s.meta?.capabilities?.includes(name) ?? false
+}
 
 /** statusChip maps a row to the §2 turn-list status word: parked is
  * how the panel shows succeeded with pending calls. */
@@ -336,13 +343,217 @@ export class WeftDevtools extends HTMLElement {
       return main
     }
     main.appendChild(this.turnView(s))
+    main.appendChild(this.playgroundArea(s))
     return main
+  }
+
+  /** playgroundArea draws rung 2 (§8.2) under the turn view: the
+   * experiment drawer, and — once a command was posted — the result
+   * streaming in place with its inline diff and approval controls.
+   * Rendered only when the server reports the playground capability. */
+  private playgroundArea(s: PanelState): HTMLElement {
+    const box = el("div")
+    if (s.result) box.appendChild(this.experimentResult(s))
+    if (!hasCapability(s, "playground")) return box
+    if (s.drawer) box.appendChild(this.drawer(s))
+    return box
+  }
+
+  /** drawer is §3's edit form, pre-filled from the run's registered
+   * config: prompt, tools off, model, thinking, input — and the ⚠ on
+   * every side-effect tool (ReplayPolicy never or unannotated). */
+  private drawer(s: PanelState): HTMLElement {
+    const d = s.drawer
+    if (!d) return el("div")
+    const rt = s.runtimes.find((r) => r.id === d.runtimeId)
+    const agent = rt?.agents.find((a) => a.name === d.agent)
+    const card = el("div", "weft-step weft-drawer")
+    const head = el("div", "weft-step-h", [
+      el("span", undefined, `Experiment · ${d.agent}${d.step > 0 ? ` · continue from step ${d.step}` : ""}`),
+      el("span", "weft-grow"),
+    ])
+    const close = el("button", "weft-btn", "–", { title: "close the drawer" })
+    close.addEventListener("click", () => this.model?.closeExperiment())
+    head.appendChild(close)
+    card.appendChild(head)
+    const body = el("div", "weft-step-b")
+
+    // System prompt, with the registered config one reset away.
+    const promptRow = el("label", "weft-field", [el("span", undefined, "System prompt")])
+    const ta = el("textarea", "weft-input") as HTMLTextAreaElement
+    ta.rows = 3
+    ta.value = d.instructions
+    ta.addEventListener("input", () => this.model?.setDraft({ instructions: ta.value }))
+    const reset = el("button", "weft-btn", "↺", { title: "reset to the registered prompt" })
+    reset.addEventListener("click", () => {
+      ta.value = agent?.instructions ?? ""
+      this.model?.setDraft({ instructions: ta.value })
+    })
+    promptRow.append(ta, reset)
+    body.appendChild(promptRow)
+
+    // Tools: turning off is narrowing; ⚠ marks the side-effect class.
+    if (agent?.tools.length) {
+      const toolsRow = el("div", "weft-field", [el("span", undefined, "Tools")])
+      for (const t of agent.tools) {
+        const cb = el("input") as HTMLInputElement
+        cb.type = "checkbox"
+        cb.checked = d.tools[t.name] ?? true
+        cb.addEventListener("change", () =>
+          this.model?.setDraft({ tools: { ...d.tools, [t.name]: cb.checked } })
+        )
+        const lab = el("label", "weft-tool", [cb, el("span", undefined, t.name)])
+        if (t.side_effects === "never" || !t.side_effects) {
+          lab.appendChild(
+            el("span", "weft-badge weft-warn-badge", "⚠", {
+              title: "side-effect tool (ReplayPolicy never): its calls substitute or park, never re-fire silently",
+            })
+          )
+        }
+        toolsRow.appendChild(lab)
+      }
+      body.appendChild(toolsRow)
+    }
+
+    // Model, thinking, input — the row of small selects.
+    const opts = el("div", "weft-fields")
+    const modelSel = el("select", "weft-input") as HTMLSelectElement
+    const own = s.turn?.doc?.model?.name ?? ""
+    const ownOpt = el("option", undefined, `model: ${own || "—"}`) as unknown as HTMLOptionElement
+    ownOpt.value = ""
+    modelSel.appendChild(ownOpt)
+    for (const m of agent?.models ?? []) {
+      if (m === own) continue
+      const o = el("option", undefined, m) as unknown as HTMLOptionElement
+      o.value = m
+      modelSel.appendChild(o)
+    }
+    modelSel.value = d.model
+    modelSel.addEventListener("change", () => this.model?.setDraft({ model: modelSel.value }))
+    opts.appendChild(modelSel)
+    const thinkSel = el("select", "weft-input") as HTMLSelectElement
+    const defOpt = el("option", undefined, "thinking: default") as unknown as HTMLOptionElement
+    defOpt.value = ""
+    thinkSel.appendChild(defOpt)
+    for (const lvl of ["off", "low", "medium", "high"]) {
+      const o = el("option", undefined, lvl) as unknown as HTMLOptionElement
+      o.value = lvl
+      thinkSel.appendChild(o)
+    }
+    thinkSel.value = d.thinking
+    thinkSel.addEventListener("change", () => this.model?.setDraft({ thinking: thinkSel.value }))
+    opts.appendChild(thinkSel)
+    body.appendChild(opts)
+
+    // Input replaces the turn's user message (a whole-turn re-run).
+    if (d.step === 0) {
+      const inputRow = el("label", "weft-field", [el("span", undefined, "Input (replaces the user message)")])
+      const inTa = el("textarea", "weft-input") as HTMLTextAreaElement
+      inTa.rows = 2
+      inTa.value = d.input
+      inTa.addEventListener("input", () => this.model?.setDraft({ input: inTa.value }))
+      inputRow.appendChild(inTa)
+      body.appendChild(inputRow)
+    }
+
+    const run = el("button", "weft-run-btn", "Run experiment ▶", {
+      title: "POST /api/playground/runs — the runtime in your app executes it",
+    })
+    run.addEventListener("click", () => void this.model?.runExperiment())
+    body.appendChild(run)
+    card.appendChild(body)
+    return card
+  }
+
+  /** experimentResult is §3's Result pane: the label (`t3·x1`), the
+   * stream in place, the inline diff against the source turn, and —
+   * when the run parked — the approval controls (continue / skip /
+   * resolve, the runtime-started run's own verbs). */
+  private experimentResult(s: PanelState): HTMLElement {
+    const r = s.result
+    if (!r) return el("div")
+    const card = el("div", "weft-step weft-xres")
+    const usage = r.row?.usage
+    const stats = [
+      r.state,
+      usage ? `${tokens(usage.input_tokens)}→${tokens(usage.output_tokens)} tok` : "",
+      r.row ? duration(r.row.started, r.row.finished) : "",
+    ]
+      .filter(Boolean)
+      .join(" · ")
+    const head = el("div", "weft-step-h", [
+      el("span", undefined, `Result · ${r.label}`),
+      el("span", undefined, stats),
+      el("span", "weft-grow"),
+    ])
+    const discard = el("button", "weft-btn", "discard", { title: "clear the result pane" })
+    discard.addEventListener("click", () => this.model?.discardResult())
+    head.appendChild(discard)
+    card.appendChild(head)
+    const body = el("div", "weft-step-b")
+    if (r.error) body.appendChild(el("div", "weft-note weft-warn", r.error))
+    for (const step of r.folded.steps) {
+      if (step.text) body.appendChild(el("div", undefined, step.text))
+      for (const call of step.toolCalls) body.appendChild(renderCall(call, r.row?.status ?? "running"))
+    }
+    if (!r.folded.steps.length && !r.error) body.appendChild(el("div", "weft-note", "queued — waiting for the runtime to ack…"))
+
+    // The inline diff (§3: `diff vs t3:`), once there is final text.
+    const text = r.folded.steps.map((st) => st.text).filter(Boolean).join("\n")
+    if (text && r.sourceText) {
+      const rows = diffLines(r.sourceText, text)
+      const summary = diffSummary(rows)
+      const diffBox = el("div", "weft-diff")
+      diffBox.appendChild(el("div", "weft-diff-h", `diff vs ${sourceLabel(r.label)}:  ${summary}`))
+      for (const row of rows) {
+        if (row.kind === "same") continue
+        diffBox.appendChild(
+          el("div", `weft-diff-row weft-diff-${row.kind}`, `${row.kind === "add" ? "+" : "−"} ${row.text}`)
+        )
+      }
+      body.appendChild(diffBox)
+    }
+
+    // The parked calls' controls: the runtime-started run's approval
+    // verbs (§8.2), through POST /api/runs/{id}/approvals.
+    if (r.folded.pending.length && r.runID) {
+      const approvals = el("div", "weft-step")
+      approvals.appendChild(el("div", "weft-step-h", [el("span", undefined, "awaiting decision")]))
+      const abody = el("div", "weft-step-b")
+      for (const call of r.folded.pending) {
+        const line = el("div", "weft-call")
+        line.appendChild(
+          el("div", "weft-call-h", [
+            el("span", "weft-name", call.name),
+            el("span", "weft-args", call.args === undefined ? "(…)" : fmtJSON(call.args)),
+          ])
+        )
+        const ctl = el("div", "weft-res")
+        const mk = (label: string, decision: "approve" | "deny" | "resolve", title: string, content?: string) => {
+          const b = el("button", "weft-btn", label, { title })
+          b.addEventListener("click", () => void this.model?.decide(call.id, decision, content))
+          return b
+        }
+        ctl.append(
+          mk("continue", "approve", "Approve: the handler runs for real"),
+          mk("skip", "deny", "Deny: the model sees a denied result"),
+          mk("resolve…", "resolve", "Resolve with the recorded result pasted outside the process", "")
+        )
+        line.appendChild(ctl)
+        abody.appendChild(line)
+      }
+      approvals.appendChild(abody)
+      body.appendChild(approvals)
+    }
+    card.appendChild(body)
+    return card
   }
 
   /** turnView draws the step story (§2): the prompt, per step the
    * model text (reasoning collapsed), tool calls name(args) → result,
    * finish reason and usage with cached/reasoning splits, pending
-   * approvals read-only, and the honesty notes. */
+   * approvals read-only, and the honesty notes. With the playground
+   * capability on, the experiment actions follow (§3's row). */
   private turnView(s: PanelState): HTMLElement {
     const t = s.turn
     if (!t) return el("div")
@@ -354,7 +565,35 @@ export class WeftDevtools extends HTMLElement {
     if (prompt) wrap.appendChild(el("div", "weft-note", prompt))
     wrap.appendChild(renderFolded(t.folded, this.rowOf(t.id)?.status ?? "running", t, s.selectedStep))
     if (t.folded.pending.length) wrap.appendChild(this.approvals(t.folded.pending))
+    if (hasCapability(s, "playground")) wrap.appendChild(this.actions(s))
     return wrap
+  }
+
+  /** actions is §3's row: ✎ Experiment (the drawer), ↻ Re-run (the
+   * whole turn with the drawer's current edits), ⎇ Continue from the
+   * step being read. */
+  private actions(s: PanelState): HTMLElement {
+    const t = s.turn
+    if (!t) return el("div")
+    const row = el("div", "weft-actions")
+    const experiment = el("button", "weft-btn", "✎ Experiment", {
+      title: "open the experiment drawer, pre-filled from the registered config",
+    })
+    experiment.addEventListener("click", () => void this.model?.openExperiment(t.id, 0))
+    row.appendChild(experiment)
+    const rerun = el("button", "weft-btn", "↻ Re-run", {
+      title: "re-run the whole turn with the drawer's current edits",
+    })
+    rerun.addEventListener("click", () => void this.model?.openExperiment(t.id, 0))
+    row.appendChild(rerun)
+    if (s.selectedStep != null && s.selectedStep > 0) {
+      const cont = el("button", "weft-btn", `⎇ Continue from step ${s.selectedStep}`, {
+        title: "keep the transcript through the previous step (edits apply) and run this step fresh",
+      })
+      cont.addEventListener("click", () => void this.model?.openExperiment(t.id, s.selectedStep ?? 0))
+      row.appendChild(cont)
+    }
+    return row
   }
 
   /** notes renders the honesty rules (§2): truncation badges live on
@@ -382,10 +621,9 @@ export class WeftDevtools extends HTMLElement {
     return box
   }
 
-  /** approvals shows parked calls read-only (§2): continue / skip /
-   * resolve need the playground verbs (rung 2+, §8.2) — the panel
-   * renders controls only for capabilities meta reports, and v1
-   * reports none. */
+  /** approvals shows the app's own parked calls read-only (§2): the
+   * decision verbs act on runs a runtime started (§8.2) — the app's
+   * own turns are viewer-only (D7, PQ7), and the note says so. */
   private approvals(pending: { id: string; name: string; args?: unknown }[]): HTMLElement {
     const box = el("div", "weft-step")
     box.appendChild(el("div", "weft-step-h", [el("span", undefined, "awaiting decision (read-only)")]))
@@ -399,7 +637,7 @@ export class WeftDevtools extends HTMLElement {
           el("span", "weft-badge weft-info", "parked"),
         ])
       )
-      line.appendChild(el("div", "weft-res", "continue / skip / resolve need the playground capability"))
+      line.appendChild(el("div", "weft-res", "the app's own turns are viewer-only (PQ7) — decide from your app"))
       body.appendChild(line)
     }
     box.appendChild(body)
@@ -576,6 +814,12 @@ function childBlock(childId: string, t: TurnView): HTMLElement {
 function shortId(id: string): string {
   const parts = id.split("/")
   return parts[parts.length - 1] || id
+}
+
+/** sourceLabel takes the turn part back out of a `t3·x1` label (the
+ * diff header reads "diff vs t3"). */
+function sourceLabel(label: string): string {
+  return label.split("·")[0] || label
 }
 
 function argsText(call: FoldedToolCall): string {

@@ -149,4 +149,32 @@ details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 .weft-keys dd { color: var(--w-dim); }
 .weft-splash { padding: 24px; color: var(--w-dim); text-align: center; }
 .weft-splash .weft-warn { color: var(--w-warn); display: block; margin-bottom: 6px; }
+
+/* ── Rung 2: the experiment drawer and its result (§3, §8.2) ───── */
+.weft-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
+.weft-drawer { border-color: var(--w-accent); }
+.weft-field { display: block; margin-bottom: 7px; color: var(--w-dim); }
+.weft-field > span { display: block; margin-bottom: 3px; }
+.weft-input {
+  width: 100%; box-sizing: border-box; background: var(--w-bg3); color: var(--w-fg);
+  border: 1px solid var(--w-line); border-radius: 5px; padding: 4px 6px;
+  font: inherit; font-size: 11.5px;
+}
+textarea.weft-input { resize: vertical; }
+select.weft-input { width: auto; min-width: 120px; }
+.weft-fields { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 7px; }
+.weft-tool { display: inline-flex; gap: 4px; align-items: baseline; margin-right: 10px;
+  color: var(--w-fg); cursor: pointer; }
+.weft-warn-badge { color: var(--w-warn); border-color: var(--w-warn); }
+.weft-run-btn {
+  background: var(--w-accent); color: #101418; border: none; border-radius: 5px;
+  padding: 5px 12px; font: inherit; font-weight: 600; cursor: pointer;
+}
+.weft-xres { border-color: var(--w-info); }
+.weft-diff { margin-top: 8px; border: 1px dashed var(--w-line); border-radius: 6px;
+  padding: 6px 9px; }
+.weft-diff-h { color: var(--w-dim); margin-bottom: 4px; }
+.weft-diff-row { white-space: pre-wrap; word-break: break-word; }
+.weft-diff-add { color: var(--w-info); }
+.weft-diff-del { color: var(--w-warn); text-decoration: line-through; }
 `

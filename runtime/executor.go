@@ -103,11 +103,20 @@ func enabledTools(cmd command, tools map[string]bool) []string {
 // execute runs the command as one ephemeral run of its agent and
 // returns the run's status for the finished ack ("succeeded" or
 // "failed"). The run's content reaches Studio through the normal OTel
-// pipeline; the link carries only the acks.
+// pipeline; the link carries only the acks. A run that parks (a call
+// awaiting a decision) ends successfully with Pending set — the state
+// is kept so a later approval decision can resume it.
 func (l *link) execute(ctx context.Context, cmd command, runID string) string {
 	agent, _ := l.reg.agent(cmd.Agent)
 	opts := l.runOptions(cmd, runID)
 	res, err := agent.Generate(ctx, opts...)
+	status := l.outcome(cmd, runID, res, err)
+	return status
+}
+
+// outcome records the run's end: the finished-ack status, the budget
+// tally, and — when the run parked — the parkedRun a decision resumes.
+func (l *link) outcome(cmd command, runID string, res *weft.RunResult, err error) string {
 	status := "succeeded"
 	if err != nil {
 		status = "failed"
@@ -127,7 +136,70 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) string {
 		st.spend(res.Usage.InputTokens + res.Usage.OutputTokens)
 		l.mu.Unlock()
 	}
+	if res != nil && len(res.Pending) > 0 && err == nil {
+		l.rememberPark(runID, &parkedRun{cmd: cmd, msgs: res.Messages})
+	}
 	return status
+}
+
+// rememberPark keeps one parked run for a later decision, bounded:
+// a dev process that parks a thousand experiments keeps the newest
+// 128, and an evicted id answers "no parked run" (re-issue the run).
+func (l *link) rememberPark(runID string, pr *parkedRun) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.parked) >= 128 {
+		var oldest string
+		for id := range l.parked {
+			if oldest == "" || id < oldest {
+				oldest = id
+			}
+		}
+		if oldest != "" && oldest != runID {
+			delete(l.parked, oldest)
+		}
+	}
+	l.parked[runID] = pr
+}
+
+// parkedRun is one parked run this runtime started: the transcript
+// through the park and the command that shaped it — what a decision
+// (panel continue/skip/resolve, or substitute's recorded result) needs
+// to resume it.
+type parkedRun struct {
+	cmd  command
+	msgs []weft.Message
+}
+
+// parkState is the parked map's value (an indirection so a later
+// substitute path can hold more without churning every site).
+type parkState = parkedRun
+
+// resume continues a parked run under one decision on one call:
+// Approve runs the handler for real, Deny skips it, Resolve pastes a
+// content computed outside the process (ADR 0007's verbs, called by
+// their plain names from the panel). The run keeps its shaping — the
+// same overrides, the same parked set for the calls still to come, the
+// same experiment labels — under a fresh run id; a resume that parks
+// again updates the state so the next decision finds it.
+func (l *link) resume(ctx context.Context, pr *parkedRun, d approvalDecision, runID string) string {
+	agent, _ := l.reg.agent(pr.cmd.Agent)
+	opts := l.overrideOptions(pr.cmd)
+	opts = append(opts, weft.Messages(pr.msgs...))
+	switch d.Decision {
+	case "approve":
+		opts = append(opts, weft.Approve(d.CallID))
+	case "deny":
+		opts = append(opts, weft.Deny(d.CallID, orDefault(d.Reason, "skipped from the devtools panel")))
+	default: // resolve
+		opts = append(opts, weft.Resolve(d.CallID, d.Content))
+	}
+	opts = append(opts, weft.RunID(runID))
+	l.mu.Lock()
+	delete(l.parked, d.RunID) // a resume that parks again re-members under its own id
+	l.mu.Unlock()
+	res, err := agent.Generate(ctx, opts...)
+	return l.outcome(pr.cmd, runID, res, err)
 }
 
 // runOptions composes the run exactly as §5.2's snippet does: the
@@ -139,6 +211,30 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) string {
 // never weft.session.id (an ephemeral experiment is not a turn of the
 // session; §5.2).
 func (l *link) runOptions(cmd command, runID string) []weft.RunOption {
+	opts := l.overrideOptions(cmd)
+	// The source turn's context: the transcript through step from_step
+	// − 1, repaired by the loop. A fresh command (no source) starts
+	// from the input alone.
+	if cmd.Source != nil && cmd.Source.RunID != "" {
+		msgs, err := l.sourceTranscript(context.Background(), cmd.Source.RunID)
+		if err != nil {
+			slog.Warn("weft/runtime: source transcript unresolved; running without it",
+				"run_id", cmd.Source.RunID, "err", err)
+		} else if cut := cutAtStep(msgs, cmd.Source.FromStep); cut > 0 {
+			opts = append(opts, weft.Messages(msgs[:cut]...))
+		}
+	}
+	if cmd.Input != nil && *cmd.Input != "" {
+		opts = append(opts, weft.Prompt(*cmd.Input))
+	}
+	opts = append(opts, weft.RunID(runID))
+	return opts
+}
+
+// overrideOptions is the command's shaping alone — every knob §5.2
+// names except the transcript, the input and the run id, which belong
+// to the run that carries them (a resume replaces all three).
+func (l *link) overrideOptions(cmd command) []weft.RunOption {
 	var opts []weft.RunOption
 	o := cmd.Overrides
 
@@ -167,27 +263,11 @@ func (l *link) runOptions(cmd command, runID string) []weft.RunOption {
 		opts = append(opts, weft.Params(weft.RequestParams{Temperature: &temp}))
 	}
 
-	// Side-effect safety until ReplayPolicy exists (8b): every tool
-	// the runtime has not opted in parks at the approval boundary
-	// instead of running (§6 rule 3, §7 P1's rule).
+	// Side-effect safety (§6 rule 3): every side-effect tool the
+	// runtime has not opted in parks at the approval boundary instead
+	// of running. A tool marked ReplaySafe is not a side effect.
 	if parked := l.reg.parkedTools(cmd.Agent, o.ToolsEnabled); len(parked) > 0 {
 		opts = append(opts, weft.ParkOn(parked...))
-	}
-
-	// The source turn's context: the transcript through step from_step
-	// − 1, repaired by the loop. A fresh command (no source) starts
-	// from the input alone.
-	if cmd.Source != nil && cmd.Source.RunID != "" {
-		msgs, err := l.sourceTranscript(context.Background(), cmd.Source.RunID)
-		if err != nil {
-			slog.Warn("weft/runtime: source transcript unresolved; running without it",
-				"run_id", cmd.Source.RunID, "err", err)
-		} else if cut := cutAtStep(msgs, cmd.Source.FromStep); cut > 0 {
-			opts = append(opts, weft.Messages(msgs[:cut]...))
-		}
-	}
-	if cmd.Input != nil && *cmd.Input != "" {
-		opts = append(opts, weft.Prompt(*cmd.Input))
 	}
 
 	meta := map[string]string{
@@ -207,7 +287,6 @@ func (l *link) runOptions(cmd command, runID string) []weft.RunOption {
 		meta["weft.playground.actor"] = cmd.Actor
 	}
 	opts = append(opts, weft.Metadata(meta))
-	opts = append(opts, weft.RunID(runID))
 	return opts
 }
 
@@ -255,4 +334,12 @@ func cutAtStep(msgs []weft.Message, fromStep int) int {
 		}
 	}
 	return len(msgs) // fewer steps than asked: keep it all
+}
+
+// orDefault returns s when set, def otherwise.
+func orDefault(s, def string) string {
+	if s != "" {
+		return s
+	}
+	return def
 }

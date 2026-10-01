@@ -24,7 +24,7 @@
 // Prints PASS lines and exits non-zero on the first failed
 // expectation.
 
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync, statSync } from "node:fs"
 import { JSDOM } from "jsdom"
 
 interface Args {
@@ -36,6 +36,10 @@ interface Args {
   turns: number
   text: string
   otlp: string
+  /** The app's thread store directory (jsonl): the P1 gate
+   * byte-compares it across a playground re-run — the original
+   * session's files must not change. Empty skips that half. */
+  threads: string
 }
 
 function parseArgs(argv: string[]): Args {
@@ -54,6 +58,7 @@ function parseArgs(argv: string[]): Args {
     /** The setups-B/C mode: post this recorded OTLP JSON export to
      * /v1/traces (the Python app's stand-in) instead of triggering. */
     otlp: a.otlp ?? "",
+    threads: a.threads ?? "",
   }
 }
 
@@ -353,6 +358,82 @@ async function main() {
     if (deep.status !== 200 || !body.includes("<!DOCTYPE html>"))
       throw new Error(`FAIL the deep link does not resolve: ${deep.status}`)
     console.log("PASS the deep link resolves in Studio (the SPA shell serves the route)")
+  }
+
+  // 6. rung 2's P1 gate (WEFT-PLAYGROUND §10.6, setup A's shape): edit
+  // the prompt in the panel, re-run through the runtime link, see the
+  // result stream in place with the inline diff — and the original
+  // session's thread files are byte-identical afterwards.
+  if (!args.otlp) {
+    const snapDir = (dir: string): Map<string, string> => {
+      const out = new Map<string, string>()
+      for (const f of readdirSync(dir, { recursive: true }) as string[]) {
+        const p = dir + "/" + f
+        if (statSync(p).isFile()) out.set(p, readFileSync(p, "utf8"))
+      }
+      return out
+    }
+    const before = args.threads ? snapDir(args.threads) : null
+    if (before) console.log(`PASS thread store snapshot: ${before.size} files`)
+    const experiment = Array.from(
+      dom.window.document
+        .querySelector("weft-devtools")
+        ?.shadowRoot?.querySelectorAll(".weft-actions .weft-btn") ?? []
+    ).find((b) => b.textContent === "✎ Experiment")
+    if (!experiment) throw new Error("FAIL no ✎ Experiment action (is the playground capability on?)")
+    ;(experiment as HTMLElement).dispatchEvent(
+      new (dom.window as unknown as { Event: typeof Event }).Event("click", { bubbles: true })
+    )
+    await waitFor(() => ($(".weft-drawer") ? "drawer" : null), "the experiment drawer opens")
+    const drawerText = text(".weft-drawer")
+    if (!drawerText.includes("studio-local")) throw new Error("FAIL the drawer names no agent")
+    if (!drawerText.includes("lookup_order"))
+      throw new Error("FAIL the drawer lists no registered tools")
+    // Edit the input (the drawer's second textarea is the input), then
+    // re-run: the demo model quotes the question, so the answer — and
+    // the diff — carry the edit.
+    const textareas = Array.from(
+      dom.window.document.querySelector("weft-devtools")?.shadowRoot?.querySelectorAll(
+        ".weft-drawer textarea"
+      ) ?? []
+    ) as HTMLTextAreaElement[]
+    const input = textareas[textareas.length - 1]
+    if (!input) throw new Error("FAIL the drawer has no input field")
+    const edited = "where is order 4242?"
+    input.value = edited
+    input.dispatchEvent(
+      new (dom.window as unknown as { Event: typeof Event }).Event("input", { bubbles: true })
+    )
+    await sleep(100)
+    const runBtn = Array.from(
+      dom.window.document
+        .querySelector("weft-devtools")
+        ?.shadowRoot?.querySelectorAll(".weft-drawer button") ?? []
+    ).find((b) => b.textContent?.includes("Run experiment"))
+    if (!runBtn) throw new Error("FAIL no Run experiment button")
+    ;(runBtn as HTMLElement).dispatchEvent(
+      new (dom.window as unknown as { Event: typeof Event }).Event("click", { bubbles: true })
+    )
+    await waitFor(() => {
+      const res = text(".weft-xres")
+      return res.includes("·x1") && res.includes(edited) ? res : null
+    }, "the experiment's result streams in place, labelled t·x1, answering the edited input")
+    console.log("PASS the experiment result streams in place (labelled ·x1)")
+    await waitFor(() => {
+      const diff = text(".weft-diff-h")
+      return diff.includes("diff vs") && diff !== "identical" ? diff : null
+    }, "the inline diff against the source turn renders")
+    console.log(`PASS inline diff against the source turn: ${text(".weft-diff-h")}`)
+    // The original session's thread files are byte-identical.
+    if (before !== null) {
+      await sleep(500) // any writer that was going to touch them has
+      const after = snapDir(args.threads)
+      if (after.size !== before.size)
+        throw new Error(`FAIL thread store changed: ${before.size} files before, ${after.size} after`)
+      for (const [p, body] of before)
+        if (after.get(p) !== body) throw new Error(`FAIL thread file changed: ${p}`)
+      console.log(`PASS the original session's thread files are byte-identical (${after.size} files)`)
+    }
   }
 
   console.log("PANEL GATE PASS")

@@ -58,6 +58,7 @@ func registerPlayground(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/runtimes", s.serveRuntimes(rs))
 	mux.HandleFunc("POST /api/playground/runs", s.servePlaygroundRun(rs))
 	mux.HandleFunc("GET /api/playground/commands/{id}", s.servePlaygroundCommand(rs))
+	mux.HandleFunc("POST /api/runs/{id}/approvals", s.servePlaygroundApproval(rs))
 	// The runtime link's own block (§10.3), as its own capability.
 	s.addGroup(routeGroup{
 		name:       "runtimes",
@@ -341,5 +342,105 @@ func (s *Server) servePlaygroundCommand(rs *linkruntime.RuntimeServer) http.Hand
 			return
 		}
 		writeJSON(w, r, http.StatusOK, st)
+	}
+}
+
+// ── POST /api/runs/{id}/approvals ─────────────────────────────────
+
+// approvalRequest is the decision body: continue (approve — the
+// handler runs for real), skip (deny with a reason), or resolve (a
+// result pasted from outside the process). These are the approval
+// verbs of a parked experiment run (WEFT-DEVTOOLS §8.2, ADR 0007),
+// forwarded to the runtime that started the run.
+type approvalRequest struct {
+	CallID   string `json:"call_id"`
+	Decision string `json:"decision"` // approve | deny | resolve
+	Reason   string `json:"reason"`
+	Content  string `json:"content"`
+}
+
+// servePlaygroundApproval forwards one decision on one parked call of
+// a runtime-started run (P1's approval controls; WEFT-DEVTOOLS §8.2).
+// The app's own turns are viewer-only (D7, PQ7): a run no runtime
+// started is refused here, and meta/both UIs say so.
+func (s *Server) servePlaygroundApproval(rs *linkruntime.RuntimeServer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		runID := r.PathValue("id")
+		var req approvalRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			badRequest(w, r, "approval body: "+err.Error())
+			return
+		}
+		switch req.Decision {
+		case "approve", "deny", "resolve":
+		default:
+			badRequest(w, r, "unknown decision "+req.Decision)
+			return
+		}
+		if req.CallID == "" {
+			badRequest(w, r, "an approval needs a call_id")
+			return
+		}
+		row, dbErr := s.db.Run(r.Context(), runID)
+		runtimeID, started := rs.RuntimeOf(runID)
+		if !started {
+			// Not a runtime-started run. An unknown id is a 404; the
+			// app's own turns exist and stay viewer-only (D7, PQ7).
+			if dbErr != nil {
+				if errors.Is(dbErr, obsdb.ErrNotFound) {
+					notFound(w, r, "unknown run "+runID)
+					return
+				}
+				dbError(w, r, "run", runID, dbErr)
+				return
+			}
+			writeError(w, r, http.StatusForbidden, "forbidden",
+				"only runs a runtime started can be decided — the app's own turns are viewer-only (PQ7)")
+			return
+		}
+		// A panel token decides inside its public id only (S4.6): the
+		// scope the command carried, or the row's when it has landed.
+		if pid := idFrom(r).panel; pid != nil {
+			publicID, _ := rs.PublicOf(runID)
+			if publicID == "" && dbErr == nil {
+				publicID = row.PublicID
+			}
+			if publicID != pid.PublicID {
+				forbidden(w, r)
+				return
+			}
+		}
+		if !rs.Connected(runtimeID) {
+			writeError(w, r, http.StatusServiceUnavailable, "unavailable",
+				"runtime "+runtimeID+" is not connected")
+			return
+		}
+		d, err := rs.EnqueueApproval(runtimeID, linkruntime.ApprovalDecision{
+			RunID:    runID,
+			CallID:   req.CallID,
+			Decision: req.Decision,
+			Reason:   req.Reason,
+			Content:  req.Content,
+			Actor:    actorOf(r),
+		})
+		if err != nil {
+			switch {
+			case errors.Is(err, linkruntime.ErrUnknownRuntime):
+				notFound(w, r, "unknown runtime "+runtimeID)
+			case errors.Is(err, linkruntime.ErrNotConnected):
+				writeError(w, r, http.StatusServiceUnavailable, "unavailable",
+					"runtime "+runtimeID+" is not connected")
+			case errors.Is(err, linkruntime.ErrDuplicateCommand):
+				writeError(w, r, http.StatusConflict, "conflict",
+					"command id "+d.CommandID+" was already used")
+			default:
+				writeError(w, r, http.StatusInternalServerError, "internal", err.Error())
+			}
+			return
+		}
+		writeJSON(w, r, http.StatusAccepted, struct {
+			CommandID string `json:"command_id"`
+			State     string `json:"state"`
+		}{d.CommandID, linkruntime.StateQueued})
 	}
 }

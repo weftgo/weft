@@ -145,6 +145,101 @@ export function fetchPublic(
   return panelGet<PublicResolution>(ep, `public/${encodeURIComponent(publicId)}`, signal)
 }
 
+// ── The playground's verbs (WEFT-PLAYGROUND §10.4, P1–P5) ────────
+
+/** GET /api/runtimes: the connected runtimes with, per agent, the
+ * alternate models and every tool with its side-effect class (the ⚠
+ * the drawer draws) and allow flag. */
+export interface ToolView {
+  name: string
+  side_effects: string
+  allow: boolean
+}
+export interface AgentView {
+  name: string
+  models: string[]
+  tools: ToolView[]
+  /** The agent's registered system prompt (the drawer pre-fills from
+   * the code's own words, not a guess from the trace). */
+  instructions?: string
+}
+export interface RuntimeView {
+  id: string
+  host: string
+  pid: number
+  service: string
+  env: string
+  connected_since: string
+  last_seen: string
+  agents: AgentView[]
+}
+
+export function fetchRuntimes(ep: PanelEndpoint, signal?: AbortSignal): Promise<{ runtimes: RuntimeView[] }> {
+  return panelGet<{ runtimes: RuntimeView[] }>(ep, "runtimes", signal)
+}
+
+/** POST /api/playground/runs → 202 { command_id, state }. */
+export function postPlaygroundRun(
+  ep: PanelEndpoint,
+  body: Record<string, unknown>
+): Promise<{ command_id: string; state: string }> {
+  return panelPost(ep, "playground/runs", body)
+}
+
+/** GET /api/playground/commands/{id} — §10.5's lifecycle row. */
+export interface CommandStatus {
+  command_id: string
+  state: "queued" | "accepted" | "rejected" | "finished" | "lost"
+  run_id: string
+  error: string | null
+  created: string
+  updated: string
+}
+
+export function fetchCommand(ep: PanelEndpoint, id: string): Promise<CommandStatus> {
+  return panelGet<CommandStatus>(ep, `playground/commands/${encodeURIComponent(id)}`)
+}
+
+/** POST /api/runs/{id}/approvals — the parked experiment's continue /
+ * skip / resolve (WEFT-DEVTOOLS §8.2), on the runtime-started run. */
+export function postApproval(
+  ep: PanelEndpoint,
+  runID: string,
+  body: { call_id: string; decision: "approve" | "deny" | "resolve"; reason?: string; content?: string }
+): Promise<{ command_id: string; state: string }> {
+  return panelPost(ep, `runs/${encodeURIComponent(runID)}/approvals`, body)
+}
+
+/** post one JSON document and decode the answer (the panel's write
+ * verbs are few; errors are PanelApiError like the reads). */
+export async function panelPost<T>(ep: PanelEndpoint, path: string, body: unknown): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  }
+  if (ep.token) headers.Authorization = `Bearer ${ep.token}`
+  const res = await fetch(apiUrl(ep, path), {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    let code = "network"
+    let message = `${res.status} ${res.statusText}`
+    try {
+      const doc = (await res.json()) as { error?: { code?: string; message?: string } }
+      if (doc.error) {
+        code = doc.error.code ?? code
+        message = doc.error.message ?? message
+      }
+    } catch {
+      // not JSON — the status line says enough
+    }
+    throw new PanelApiError(res.status, code, message)
+  }
+  return (await res.json()) as T
+}
+
 // ── The live stream, endpoint-addressed (S4.5) ─────────────────────
 
 export interface PanelLiveOptions {

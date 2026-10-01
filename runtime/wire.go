@@ -113,6 +113,22 @@ type cancelCommand struct {
 	CommandID string `json:"command_id"`
 }
 
+// approvalDecision is an `event: approve` frame's data (WEFT-DEVTOOLS
+// §8.2): a human decision on one parked call of a run this runtime
+// started. The runtime resumes the parked run with the core's own
+// verbs — Approve runs the handler, Deny skips it, Resolve pastes a
+// result computed outside the process (ADR 0007) — under the same
+// at-most-once ack path as a run command.
+type approvalDecision struct {
+	CommandID string `json:"command_id"`
+	RunID     string `json:"run_id"`
+	CallID    string `json:"call_id"`
+	Decision  string `json:"decision"` // approve | deny | resolve
+	Reason    string `json:"reason,omitempty"`
+	Content   string `json:"content,omitempty"`
+	Actor     string `json:"actor,omitempty"`
+}
+
 // ack is the POST /api/runtime/acks body, sent before execution
 // ("accepted"/"rejected", the at-most-once rule) and again when the
 // run ends ("finished" with its status). The run's content itself

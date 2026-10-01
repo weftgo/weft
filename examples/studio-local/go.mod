@@ -17,6 +17,7 @@ require (
 	github.com/weftgo/weft v0.6.0
 	github.com/weftgo/weft/obsdb v0.0.0-00010101000000-000000000000
 	github.com/weftgo/weft/otel v0.0.0-00010101000000-000000000000
+	github.com/weftgo/weft/runtime v0.0.0-00010101000000-000000000000
 	github.com/weftgo/weft/studio v0.0.0
 	github.com/weftgo/weft/thread v0.8.0
 )
@@ -55,3 +56,5 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 	modernc.org/sqlite v1.60.1 // indirect
 )
+
+replace github.com/weftgo/weft/runtime => ../../runtime

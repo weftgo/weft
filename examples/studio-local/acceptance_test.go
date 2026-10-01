@@ -21,6 +21,7 @@ import (
 	"github.com/weftgo/weft/obsdb/sqlite"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/studio"
+	"github.com/weftgo/weft/thread"
 )
 
 // TestOutOfTheBoxLive is the S7 step-6 gate for §10.1.
@@ -72,7 +73,7 @@ func TestOutOfTheBoxLive(t *testing.T) {
 	started := make(chan struct{})
 	go func() {
 		defer close(started)
-		d := newDemo()
+		d := newDemo(thread.Memory(), demoAgent())
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodPost, "/run",
 			strings.NewReader("where is order 42?"))

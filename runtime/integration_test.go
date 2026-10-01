@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -451,5 +452,142 @@ func TestPlaygroundParkOnSpan(t *testing.T) {
 	if attrs := e.rec.playgroundSpan(t); attrs["weft.override.park_on"] != "refund" {
 		t.Errorf("weft.override.park_on = %q, want %q (the enabled tool the runtime did not opt in)",
 			attrs["weft.override.park_on"], "refund")
+	}
+}
+
+// TestPlaygroundApprovalVerbs pins P1's approval controls end to end
+// (WEFT-DEVTOOLS §8.2): a parked experiment run's continue / skip /
+// resolve go through POST /api/runs/{id}/approvals to the runtime that
+// started the run and land as ADR 0007's own verbs — approve runs the
+// handler for real, resolve pastes a content computed outside the
+// process. A run no runtime started (the app's own turn) is refused:
+// viewer-only, PQ7.
+func TestPlaygroundApprovalVerbs(t *testing.T) {
+	var refundRan atomic.Bool
+	e := newE2E(t,
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"4411"}`, ID: "call_refund"}),
+		wefttest.Say("refunded, anything else?"),
+	)
+	// A second, uninstrumented refund tool so the handler's "ran for
+	// real" is observable without side effects.
+	refund := weft.Tool("refund", "Refund an order.",
+		func(ctx context.Context, in struct {
+			OrderID string `json:"order_id"`
+		}) (string, error) {
+			refundRan.Store(true)
+			return "refunded", nil
+		})
+	// One shared script across every run below: the app's own turn
+	// (call + reply), the first park (the model re-issues the call on
+	// the kept prefix), the resolve's continuation, the second park
+	// (a fresh input re-issues it), and the approve's continuation.
+	script := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"4411"}`, ID: "call_refund"}),
+		wefttest.Say("refunded, anything else?"),
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"4411"}`, ID: "call_refund"}),
+		wefttest.Say("resolved then."),
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"4411"}`, ID: "call_refund"}),
+		wefttest.Say("approved then."),
+	)
+	e.agent = weft.New(script, weft.Name("acme-support"), weft.TracerProvider(e.p.TracerProvider()), refund)
+	runID := e.appTurn(t, "please refund order #4411")
+	refundRan.Store(false) // the app's own turn really ran it; the experiment must not
+
+	shutdown := runtime.Install(
+		runtime.Studio(e.ts.URL, ""),
+		runtime.Agents(e.agent),
+		runtime.Enabled(true),
+	)
+	defer shutdown()
+	e.waitRuntime(t)
+	_, rtJSON := e.api(t, http.MethodGet, "/api/runtimes", "")
+	var runtimes struct {
+		Runtimes []struct {
+			ID string `json:"id"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal([]byte(rtJSON), &runtimes); err != nil || len(runtimes.Runtimes) == 0 {
+		t.Fatalf("runtimes: %v %s", err, rtJSON)
+	}
+
+	body := fmt.Sprintf(`{
+	  "command_id": "cmd_appr_1",
+	  "runtime": %q,
+	  "agent": "acme-support",
+	  "source": {"run_id": %q, "from_step": 1},
+	  "engine": "live", "side_effects": "park", "thread": "ephemeral"
+	}`, runtimes.Runtimes[0].ID, runID)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", body); code != http.StatusAccepted {
+		t.Fatalf("park command = %d %s", code, resp)
+	}
+	row := e.waitCommand(t, "cmd_appr_1", "finished")
+	var st struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(row), &st); err != nil || !strings.HasPrefix(st.RunID, "pg_") {
+		t.Fatalf("finished row = %s", row)
+	}
+	if refundRan.Load() {
+		t.Fatal("the refund handler ran although the run parks")
+	}
+
+	// The app's own turn is not decidable (PQ7): viewer-only.
+	if code, _ := e.api(t, http.MethodPost, "/api/runs/"+runID+"/approvals",
+		`{"call_id":"x","decision":"approve"}`); code != http.StatusForbidden {
+		t.Errorf("decision on the app's own run = %d, want 403 (viewer-only, PQ7)", code)
+	}
+
+	// Resolve pastes a result computed outside the process: the handler
+	// still never runs, and the model sees the pasted content.
+	resolveCode, resolveResp := e.api(t, http.MethodPost, "/api/runs/"+st.RunID+"/approvals",
+		`{"call_id":"call_refund","decision":"resolve","content":"REFUNDED (resolved from the panel)"}`)
+	if resolveCode != http.StatusAccepted {
+		t.Fatalf("resolve = %d %s", resolveCode, resolveResp)
+	}
+	var resolveCmd struct {
+		CommandID string `json:"command_id"`
+	}
+	if err := json.Unmarshal([]byte(resolveResp), &resolveCmd); err != nil {
+		t.Fatal(err)
+	}
+	e.waitCommand(t, resolveCmd.CommandID, "finished")
+	if refundRan.Load() {
+		t.Error("resolve ran the handler although a result was pasted")
+	}
+
+	// Approve (continue) runs the handler for real: prove it on a
+	// second park of the same experiment.
+	approveBody := fmt.Sprintf(`{
+	  "command_id": "cmd_appr_2",
+	  "runtime": %q,
+	  "agent": "acme-support",
+	  "input": "refund it again please",
+	  "overrides": {"tools_enabled": ["refund"]},
+	  "engine": "live", "side_effects": "park", "thread": "ephemeral"
+	}`, runtimes.Runtimes[0].ID)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", approveBody); code != http.StatusAccepted {
+		t.Fatalf("second park = %d %s", code, resp)
+	}
+	row2 := e.waitCommand(t, "cmd_appr_2", "finished")
+	var st2 struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(row2), &st2); err != nil || !strings.HasPrefix(st2.RunID, "pg_") {
+		t.Fatalf("second finished row = %s", row2)
+	}
+	approveCode, approveResp := e.api(t, http.MethodPost, "/api/runs/"+st2.RunID+"/approvals",
+		`{"call_id":"call_refund","decision":"approve"}`)
+	if approveCode != http.StatusAccepted {
+		t.Fatalf("approve = %d %s", approveCode, approveResp)
+	}
+	var cmdID struct {
+		CommandID string `json:"command_id"`
+	}
+	if err := json.Unmarshal([]byte(approveResp), &cmdID); err != nil {
+		t.Fatal(err)
+	}
+	e.waitCommand(t, cmdID.CommandID, "finished")
+	if !refundRan.Load() {
+		t.Error("approve (continue) did not run the handler for real")
 	}
 }

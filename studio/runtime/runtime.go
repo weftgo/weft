@@ -130,6 +130,21 @@ func (a AgentRegistration) ManifestModelName() string {
 	return doc.Agents[0].Model.Name
 }
 
+// ManifestInstructions returns the agent's registered system prompt —
+// what an experiment drawer pre-fills from (the code's own words, not
+// a guess from the trace).
+func (a AgentRegistration) ManifestInstructions() string {
+	var doc struct {
+		Agents []struct {
+			Instructions string `json:"instructions"`
+		} `json:"agents"`
+	}
+	if err := json.Unmarshal([]byte(a.Manifest), &doc); err != nil || len(doc.Agents) == 0 {
+		return ""
+	}
+	return doc.Agents[0].Instructions
+}
+
 // RegisterResponse answers a registration.
 type RegisterResponse struct {
 	RuntimeID   string `json:"runtime_id"`
@@ -156,9 +171,32 @@ type Command struct {
 	Runtime string `json:"-"`
 	// cancel marks a cancel frame instead of a run (Cancel).
 	cancel bool `json:"-"`
+	// approval marks an approve frame instead of a run (Approval): the
+	// debugger's continue/skip/resolve on a parked runtime-started run
+	// (WEFT-DEVTOOLS §8.2), routed as a command so the at-most-once
+	// ack path carries it.
+	approval *ApprovalDecision `json:"-"`
 	// seq orders commands within this server (a monotonic counter,
 	// independent of the id's own ordering).
 	seq uint64
+}
+
+// ApprovalDecision is an `event: approve` frame's data (WEFT-DEVTOOLS
+// §8.2's continue / skip / resolve): a human decision on one parked
+// call of a run the runtime started. The runtime resumes the parked
+// run with the matching core verb — Approve runs the handler, Deny
+// skips it, Resolve pastes a result computed outside the process
+// (ADR 0007).
+type ApprovalDecision struct {
+	CommandID string `json:"command_id"`
+	RunID     string `json:"run_id"`
+	CallID    string `json:"call_id"`
+	Decision  string `json:"decision"` // approve | deny | resolve
+	Reason    string `json:"reason,omitempty"`
+	Content   string `json:"content,omitempty"`
+	// Actor names who decided (§6 rule 4's spirit); carried for the
+	// record, the runtime logs it.
+	Actor string `json:"actor,omitempty"`
 }
 
 // SourceSpec names the run to re-run.
@@ -233,6 +271,10 @@ type AgentView struct {
 	Name   string     `json:"name"`
 	Models []string   `json:"models"`
 	Tools  []ToolView `json:"tools"`
+	// Instructions is the agent's registered system prompt, read from
+	// its manifest: the experiment drawer pre-fills from the registered
+	// config, never a guess from the trace (WEFT-PLAYGROUND §3).
+	Instructions string `json:"instructions,omitempty"`
 }
 
 // ToolView is one tool of a connected runtime's agent.
@@ -281,8 +323,16 @@ type RuntimeServer struct {
 	mu       sync.Mutex
 	runtimes map[string]*connected
 	commands map[string]*commandRow
-	nextSeq  uint64
-	now      func() time.Time
+	// runs maps a run id to the runtime that started it (learned from
+	// the acks) — what routes a steer or an approval decision to the
+	// one runtime that holds the run (WEFT-DEVTOOLS §8.3/§8.4). runPub
+	// carries the public id the run was scoped to at enqueue, recorded
+	// with the run id the ack names, so a panel token can be checked
+	// before the run's row reaches the database.
+	runs    map[string]string
+	runPub  map[string]string
+	nextSeq uint64
+	now     func() time.Time
 }
 
 // connected is one registered runtime and its live command stream.
@@ -315,6 +365,8 @@ func New() *RuntimeServer {
 		feedSize:       256,
 		runtimes:       map[string]*connected{},
 		commands:       map[string]*commandRow{},
+		runs:           map[string]string{},
+		runPub:         map[string]string{},
 		now:            time.Now,
 	}
 }
@@ -471,10 +523,20 @@ func (rs *RuntimeServer) backlogLocked(runtimeID, lastEventID string) []Command 
 }
 
 // writeRunFrame writes one command frame — `event: run` with the
-// command id as its SSE id, or `event: cancel` (§10.3's shapes).
+// command id as its SSE id, `event: cancel`, or `event: approve`
+// (§10.3's shapes; the approve frame is WEFT-DEVTOOLS §8.2's verb).
 func writeRunFrame(w http.ResponseWriter, flusher http.Flusher, cmd Command) {
 	if cmd.cancel {
 		_, _ = fmt.Fprintf(w, "event: cancel\ndata: {\"command_id\":%q}\n\n", cmd.CommandID)
+		flusher.Flush()
+		return
+	}
+	if cmd.approval != nil {
+		data, err := json.Marshal(cmd.approval)
+		if err != nil {
+			return
+		}
+		_, _ = fmt.Fprintf(w, "id: %s\nevent: approve\ndata: %s\n\n", cmd.CommandID, data)
 		flusher.Flush()
 		return
 	}
@@ -535,6 +597,12 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rs.stopTimersLocked(row)
+	if a.RunID != "" {
+		rs.runs[a.RunID] = row.Runtime
+		if row.Command.PublicID != "" {
+			rs.runPub[a.RunID] = row.Command.PublicID
+		}
+	}
 	switch a.State {
 	case "accepted":
 		if row.state == StateQueued || row.state == StateLost {
@@ -616,6 +684,64 @@ func (rs *RuntimeServer) Cancel(runtimeID, commandID string) {
 	}
 }
 
+// RuntimeOf names the runtime that started runID (learned from its
+// acks). ok is false for a run no runtime started — the app's own
+// turns, which stay viewer-only (D7, PQ7).
+func (rs *RuntimeServer) RuntimeOf(runID string) (string, bool) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	id, ok := rs.runs[runID]
+	return id, ok
+}
+
+// PublicOf returns the public id a runtime-started run was scoped to
+// at enqueue. ok is false when it carried none.
+func (rs *RuntimeServer) PublicOf(runID string) (string, bool) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	id, ok := rs.runPub[runID]
+	return id, ok
+}
+
+// EnqueueApproval forwards a human decision on one parked call of a
+// runtime-started run (WEFT-DEVTOOLS §8.2) as an `event: approve`
+// command, minting the command id. The runtime acks it before resuming
+// (at-most-once like every command) and reports the resumed run in its
+// finished ack. Errors match Enqueue's.
+func (rs *RuntimeServer) EnqueueApproval(runtimeID string, d ApprovalDecision) (ApprovalDecision, error) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	c := rs.runtimes[runtimeID]
+	if c == nil {
+		return d, ErrUnknownRuntime
+	}
+	if d.CommandID == "" {
+		d.CommandID = newCommandID()
+	}
+	if _, dup := rs.commands[d.CommandID]; dup {
+		return d, ErrDuplicateCommand
+	}
+	if c.feed == nil {
+		return d, ErrNotConnected
+	}
+	cmd := Command{
+		CommandID: d.CommandID,
+		Runtime:   runtimeID,
+		approval:  &d,
+		seq:       rs.nextSeq + 1,
+	}
+	rs.nextSeq = cmd.seq
+	now := rs.now()
+	rs.commands[cmd.CommandID] = &commandRow{Command: cmd, state: StateQueued, created: now, updated: now}
+	select {
+	case c.feed <- cmd:
+	default:
+		c.feed = nil
+	}
+	rs.armAckLocked(rs.commands[d.CommandID])
+	return d, nil
+}
+
 // Command returns the command's lifecycle row; ErrUnknownCommand
 // otherwise.
 func (rs *RuntimeServer) Command(id string) (CommandStatus, error) {
@@ -680,7 +806,7 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			LastSeen:       c.lastSeen,
 		}
 		for _, a := range c.reg.Agents {
-			av := AgentView{Name: a.Name, Models: a.Models}
+			av := AgentView{Name: a.Name, Models: a.Models, Instructions: a.ManifestInstructions()}
 			if av.Models == nil {
 				av.Models = []string{}
 			}

@@ -39,19 +39,19 @@ var (
 // dist/index.html, its title swapped for the configured one, and the
 // CSP for exactly those bytes — inline script hashes included, so the
 // build can change the bootstrap without a Go change (plan §2).
-func (a *app) prepareShell() {
+func (s *Server) prepareShell() {
 	shell, err := dist.ReadFile("dist/index.html")
 	if err != nil {
 		panic("studio: dist/index.html missing — the committed web build is required (make studio-build)")
 	}
-	if a.title != "" {
+	if s.title != "" {
 		if t := titleTag.FindIndex(shell); t != nil {
 			shell = bytes.Replace(shell, shell[t[0]:t[1]],
-				[]byte("<title>"+html.EscapeString(a.title)+"</title>"), 1)
+				[]byte("<title>"+html.EscapeString(s.title)+"</title>"), 1)
 		}
 	}
-	a.shell = shell
-	a.csp = cspFor(shell)
+	s.shell = shell
+	s.csp = cspFor(shell)
 }
 
 // cspFor builds the Content-Security-Policy for the shell:
@@ -83,7 +83,7 @@ func cspFor(shell []byte) string {
 // one (anything but the shell itself): hashed assets under assets/
 // are immutable; every other file is revalidated. Returns false when
 // the path is not a file — the caller serves the shell instead.
-func (a *app) serveFile(w http.ResponseWriter, r *http.Request, urlPath string) bool {
+func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, urlPath string) bool {
 	name := strings.TrimPrefix(path.Clean(urlPath), "/")
 	if name == "" || name == "index.html" {
 		return false
@@ -110,16 +110,16 @@ func (a *app) serveFile(w http.ResponseWriter, r *http.Request, urlPath string) 
 // serveShell answers with the SPA shell, its <base href> rewritten to
 // the mount base — the history fallback that keeps a deep link like
 // /studio/runs/r_123 alive on reload (plan §2).
-func (a *app) serveShell(w http.ResponseWriter, r *http.Request) {
-	body := a.shell
+func (s *Server) serveShell(w http.ResponseWriter, r *http.Request) {
+	body := s.shell
 	if bytes.Contains(body, baseTag) {
 		body = bytes.Replace(body, baseTag,
-			[]byte(`<base href="`+html.EscapeString(a.base)+`">`), 1)
+			[]byte(`<base href="`+html.EscapeString(s.base)+`">`), 1)
 	} else if i := bytes.Index(body, []byte("<head>")); i >= 0 {
 		// The build dropped the marker: inject rather than misroute.
 		i += len("<head>")
 		body = append(append([]byte{}, body[:i]...),
-			append([]byte(`<base href="`+html.EscapeString(a.base)+`">`), body[i:]...)...)
+			append([]byte(`<base href="`+html.EscapeString(s.base)+`">`), body[i:]...)...)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")

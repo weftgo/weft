@@ -14,7 +14,7 @@ import (
 	"github.com/weftgo/weft/obsdb"
 )
 
-// The JSON API (plan §3). Every response is application/json; errors
+// The JSON API (S4.2/S4.3). Every response is application/json; errors
 // are {"error": {"code", "message"}}. The DTOs below are the contract:
 // snake_case by hand, because obsdb's rows carry no tags of their own,
 // while events, usage, and model info marshal through the core's own
@@ -51,47 +51,13 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, msg st
 // dbError maps an obsdb error onto the API's error codes: unknown ids
 // are 404, everything else is a 500 that names the failure (loud over
 // silent, ADR 0010 §2.5's rule, carried over).
-func (a *app) dbError(w http.ResponseWriter, r *http.Request, op, id string, err error) {
+func (s *Server) dbError(w http.ResponseWriter, r *http.Request, op, id string, err error) {
 	switch {
 	case errors.Is(err, obsdb.ErrNotFound):
 		writeError(w, r, http.StatusNotFound, "not_found", "no run "+id)
 	default:
 		writeError(w, r, http.StatusInternalServerError, "internal",
 			op+" "+id+": "+err.Error())
-	}
-}
-
-// serveAPI dispatches the api/ subtree. Run ids may contain slashes
-// (a subagent's child id is parent/step/callID), so the run routes
-// take everything after /api/runs/ as the id, with at most a trailing
-// "/events" segment.
-func (a *app) serveAPI(w http.ResponseWriter, r *http.Request, path string) {
-	switch path {
-	case "/api/meta":
-		a.serveMeta(w, r)
-	case "/api/runs":
-		a.serveRuns(w, r)
-	case "/api/manifest":
-		a.serveManifest(w, r)
-	default:
-		rest, ok := strings.CutPrefix(path, "/api/runs/")
-		if !ok {
-			writeError(w, r, http.StatusNotFound, "not_found", "no such api route "+path)
-			return
-		}
-		if id, ok := strings.CutSuffix(rest, "/events"); ok && id != "" {
-			a.serveRunEvents(w, r, id)
-			return
-		}
-		// Everything else after /api/runs/ is a run id, slashes included:
-		// a subagent's child id is <parent>/<step>/<callID> (the core's
-		// childRunID), and its page is a full run page (B7). An unknown
-		// id still answers 404 — from the database, naming the run.
-		if rest == "" {
-			writeError(w, r, http.StatusNotFound, "not_found", "no such api route "+path)
-			return
-		}
-		a.serveRun(w, r, rest)
 	}
 }
 
@@ -117,9 +83,7 @@ type runRow struct {
 
 // row maps an obsdb run row onto the list DTO. The status is the
 // database's derived one: a crash-orphaned running row reads
-// interrupted and is shown, never hidden (A1). The JSON keys are the
-// store-era ones (tags reads the row's metadata) so the existing UI
-// keeps rendering history recorded by the new sinks.
+// interrupted and is shown, never hidden (A1).
 func row(rec obsdb.RunRow) runRow {
 	out := runRow{
 		ID:           rec.ID,
@@ -147,9 +111,9 @@ func row(rec obsdb.RunRow) runRow {
 }
 
 type runsPage struct {
-	Total      int        `json:"total"`
-	Runs       []runRow   `json:"runs"`
-	NextBefore *time.Time `json:"next_before"`
+	Total      int         `json:"total"`
+	Runs       []runRow    `json:"runs"`
+	NextBefore *time.Time  `json:"next_before"`
 }
 
 type runDoc struct {
@@ -190,13 +154,10 @@ type eventsPage struct {
 }
 
 // serveMeta answers api/meta: versions, whether a manifest is present,
-// the title, a best-effort database backend name, and the capabilities
-// the backing server declared (the open Handler: none).
-func (a *app) serveMeta(w http.ResponseWriter, r *http.Request) {
-	caps := a.capabilities
-	if caps == nil {
-		caps = []string{}
-	}
+// the title, a best-effort database backend name, and the
+// capabilities the registered route groups provide (computed, never
+// hard-coded) plus any the backing server declared.
+func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, struct {
 		WeftVersion   string   `json:"weft_version"`
 		StudioVersion string   `json:"studio_version"`
@@ -207,10 +168,10 @@ func (a *app) serveMeta(w http.ResponseWriter, r *http.Request) {
 	}{
 		WeftVersion:   weftVersion(),
 		StudioVersion: Version,
-		HasManifest:   len(a.manifest) > 0,
-		Title:         a.title,
-		Store:         dbKind(a.db),
-		Capabilities:  caps,
+		HasManifest:   len(s.manifest) > 0,
+		Title:         s.title,
+		Store:         dbKind(s.db),
+		Capabilities:  s.capabilityList(),
 	})
 }
 
@@ -221,7 +182,7 @@ func (a *app) serveMeta(w http.ResponseWriter, r *http.Request) {
 // era called tags). before is the paging cursor (RFC 3339);
 // next_before is the last row's started when the page was full, else
 // null.
-func (a *app) serveRuns(w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := obsdb.RunQuery{
 		Agent:       q.Get("agent"),
@@ -255,9 +216,9 @@ func (a *app) serveRuns(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	page, err := a.db.Runs(r.Context(), query)
+	page, err := s.db.Runs(r.Context(), query)
 	if err != nil {
-		a.dbError(w, r, "list", "", err)
+		s.dbError(w, r, "list", "", err)
 		return
 	}
 	out := runsPage{Total: page.Total, Runs: make([]runRow, 0, len(page.Runs))}
@@ -290,13 +251,40 @@ func parentParam(q map[string][]string) string {
 	return vs[0]
 }
 
+// serveRunRoutes dispatches the /api/runs/ subtree: run documents and
+// their paged events. Everything after /api/runs/ is the run id,
+// slashes included — a subagent's child id is
+// <parent>/<step>/<callID> (the core's childRunID), and its page is a
+// full run page (B7). An unknown id still answers 404 — from the
+// database, naming the run.
+func (s *Server) serveRunRoutes(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/runs/")
+	if rest == "" {
+		writeError(w, r, http.StatusNotFound, "not_found",
+			"no such api route "+r.URL.Path)
+		return
+	}
+	for _, suffix := range []struct {
+		ext   string
+		serve func(http.ResponseWriter, *http.Request, string)
+	}{
+		{"events", s.serveRunEvents},
+	} {
+		if id, ok := strings.CutSuffix(rest, "/"+suffix.ext); ok && id != "" {
+			suffix.serve(w, r, id)
+			return
+		}
+	}
+	s.serveRun(w, r, rest)
+}
+
 // serveRun answers api/runs/{id}: the row and the child runs (obsdb's
 // Run detail carries both). Events are deliberately not here — they
 // are paged (ADR 0018 §8).
-func (a *app) serveRun(w http.ResponseWriter, r *http.Request, id string) {
-	det, err := a.db.Run(r.Context(), id)
+func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
+	det, err := s.db.Run(r.Context(), id)
 	if err != nil {
-		a.dbError(w, r, "get", id, err)
+		s.dbError(w, r, "get", id, err)
 		return
 	}
 	doc := runDoc{
@@ -319,7 +307,7 @@ func (a *app) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 // OR the row reading terminal through derivation (a crash orphan —
 // running in the table, interrupted at read time — is finished in
 // effect, exactly as the store era served it).
-func (a *app) serveRunEvents(w http.ResponseWriter, r *http.Request, id string) {
+func (s *Server) serveRunEvents(w http.ResponseWriter, r *http.Request, id string) {
 	q := r.URL.Query()
 	after := int64(0)
 	if v := q.Get("after"); v != "" {
@@ -347,9 +335,9 @@ func (a *app) serveRunEvents(w http.ResponseWriter, r *http.Request, id string) 
 	// The API's cursor is inclusive (the first position to return);
 	// obsdb's is exclusive (positions strictly after). One page is the
 	// limit events from after: events at pos >= after.
-	page, err := a.db.Events(r.Context(), id, after-1, limit)
+	page, err := s.db.Events(r.Context(), id, after-1, limit)
 	if err != nil {
-		a.dbError(w, r, "events", id, err)
+		s.dbError(w, r, "events", id, err)
 		return
 	}
 	done := page.Done
@@ -358,9 +346,9 @@ func (a *app) serveRunEvents(w http.ResponseWriter, r *http.Request, id string) 
 		// in effect: its tail must report done, or a polling client
 		// never stops. Queried only when the database itself did not
 		// answer done (a running or interrupted row).
-		det, err := a.db.Run(r.Context(), id)
+		det, err := s.db.Run(r.Context(), id)
 		if err != nil {
-			a.dbError(w, r, "events", id, err)
+			s.dbError(w, r, "events", id, err)
 			return
 		}
 		if det.Status != obsdb.StatusRunning {
@@ -381,8 +369,8 @@ func (a *app) serveRunEvents(w http.ResponseWriter, r *http.Request, id string) 
 // serveManifest answers api/manifest with the bytes passed to
 // Manifest(...), or 404 when none was given (the UI hides the Agents
 // nav).
-func (a *app) serveManifest(w http.ResponseWriter, r *http.Request) {
-	if len(a.manifest) == 0 {
+func (s *Server) serveManifest(w http.ResponseWriter, r *http.Request) {
+	if len(s.manifest) == 0 {
 		writeError(w, r, http.StatusNotFound, "not_found", "no manifest configured")
 		return
 	}
@@ -391,7 +379,7 @@ func (a *app) serveManifest(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodHead {
 		return
 	}
-	_, _ = w.Write(a.manifest)
+	_, _ = w.Write(s.manifest)
 }
 
 // dbKind names the database's backend for api/meta, best effort: the

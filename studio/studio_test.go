@@ -305,6 +305,23 @@ func mounted(h http.Handler) http.Handler {
 	return mux
 }
 
+// post issues a POST with a body against a mounted handler.
+func post(t *testing.T, h http.Handler, path, ctype, body string) (int, http.Header, string) {
+	t.Helper()
+	srv := httptest.NewServer(mounted(h))
+	t.Cleanup(srv.Close)
+	resp, err := http.Post(srv.URL+path, ctype, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.StatusCode, resp.Header, string(b)
+}
+
 // pretty re-indents a compact JSON body so goldens read like the API.
 func pretty(t *testing.T, body string) string {
 	t.Helper()
@@ -332,13 +349,32 @@ func TestMetaGolden(t *testing.T) {
 	}
 	golden(t, "meta.golden.json", body)
 
-	// The open handler reports no capabilities; a server declares them.
+	// Capabilities are computed from the registered route groups
+	// (S4.2): the read API names none, so the open handler reports an
+	// empty list — live and ingest join with their groups (S4.4/S4.5),
+	// the panel and playground with theirs (step 7/8).
 	_, _, plain := get(t, Handler(DB(fixtureDB(t))), "/studio/api/meta")
 	if !strings.Contains(plain, `"capabilities":[]`) {
 		t.Errorf("default capabilities = %s, want []", plain)
 	}
-	_, _, caps := get(t, Handler(DB(fixtureDB(t)), Capabilities("live", "ingest")), "/studio/api/meta")
-	if !strings.Contains(caps, `"capabilities":["live","ingest"]`) {
+	// NoIngest drops the ingest group with its routes and capability
+	// (asserted once the group exists; the option stays accepted).
+	_, _, ro := get(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/api/meta")
+	if !strings.Contains(ro, `"capabilities":[]`) {
+		t.Errorf("NoIngest capabilities = %s", ro)
+	}
+	if code, _, _ := post(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/v1/logs", "application/json", "{}"); code != http.StatusNotFound {
+		t.Errorf("NoIngest /v1/logs: %d, want 404", code)
+	}
+	// Playground(true) is accepted but adds nothing until step 8's
+	// playground.go registers its group.
+	_, _, pg := get(t, Handler(DB(fixtureDB(t)), Playground(true)), "/studio/api/meta")
+	if !strings.Contains(pg, `"capabilities":[]`) {
+		t.Errorf("Playground capabilities = %s", pg)
+	}
+	// A hosting wrapper declares its own verbs beside the groups'.
+	_, _, caps := get(t, Handler(DB(fixtureDB(t)), Capabilities("fleet")), "/studio/api/meta")
+	if !strings.Contains(caps, `"capabilities":["fleet"]`) {
 		t.Errorf("declared capabilities = %s", caps)
 	}
 }
@@ -566,7 +602,9 @@ func TestAPIErrors(t *testing.T) {
 		t.Errorf("unknown api route: %d %s", code, b)
 	}
 
-	// POST is refused with Allow, everywhere.
+	// POST is refused everywhere on the API: read routes answer the
+	// error shape (the registered patterns are GET-only), the UI says
+	// GET only with Allow.
 	srv := httptest.NewServer(mounted(h))
 	t.Cleanup(srv.Close)
 	resp, err := http.Post(srv.URL+"/studio/api/runs", "application/json", nil)
@@ -574,8 +612,16 @@ func TestAPIErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusMethodNotAllowed {
+	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("POST api/runs: %d", resp.StatusCode)
+	}
+	resp, err = http.Post(srv.URL+"/studio/runs", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("POST ui: %d", resp.StatusCode)
 	}
 	if allow := resp.Header.Get("Allow"); allow != "GET, HEAD" {
 		t.Errorf("Allow = %q", allow)
@@ -723,6 +769,56 @@ func TestHandlerNilPanics(t *testing.T) {
 		}
 	}()
 	_ = Handler(DB(nil))
+}
+
+// TestServerLifecycle pins S4.1's New/Server surface: Handler() is the
+// server's handler, Close closes only what New opened, and Runtime is
+// nil until step 8.
+func TestServerLifecycle(t *testing.T) {
+	srv := New(DB(fixtureDB(t)))
+	if srv.Runtime() != nil {
+		t.Error("Runtime() is not nil before step 8")
+	}
+	code, _, body := get(t, srv.Handler(), "/studio/api/meta")
+	if code != http.StatusOK || !strings.Contains(body, `"studio_version"`) {
+		t.Errorf("Server.Handler(): %d %s", code, body)
+	}
+	// A passed-in DB stays the caller's: Close must not close it (the
+	// fixture's cleanup would then fail on a second close, and later
+	// reads would hit ErrClosed).
+	if err := srv.Close(); err != nil {
+		t.Errorf("Close: %v", err)
+	}
+	if _, err := srv.db.Run(context.Background(), "r_ok"); err != nil {
+		t.Errorf("Close closed a caller-owned DB: %v", err)
+	}
+
+	// What New opened itself, Close closes.
+	dir := t.TempDir()
+	owned := New(Open(filepath.Join(dir, "owned.db")))
+	if err := owned.Close(); err != nil {
+		t.Errorf("Close(owned): %v", err)
+	}
+	if _, err := owned.db.Run(context.Background(), "nope"); !errors.Is(err, obsdb.ErrClosed) {
+		t.Errorf("owned DB not closed: %v", err)
+	}
+}
+
+// TestLiveDefault pins S4.1's Live default: the DB's own hub when it
+// implements Hub() (setup A's lane), else a fresh hub.
+func TestLiveDefault(t *testing.T) {
+	db := fixtureDB(t)
+	srv := New(DB(db))
+	if srv.live == nil {
+		t.Fatal("no live hub")
+	}
+	if h, ok := db.(interface{ Hub() obsdb.Hub }); !ok || srv.live != h.Hub() {
+		t.Error("Live default is not the DB's own hub")
+	}
+	custom := obsdb.NewHub()
+	if s2 := New(DB(db), Live(custom)); s2.live != custom {
+		t.Error("Live(h) not honoured")
+	}
 }
 
 // The CSP hashes must match what the browser computes over the PARSED

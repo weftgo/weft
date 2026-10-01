@@ -17,11 +17,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/sqlite"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/studio"
 	"github.com/weftgo/weft/thread"
+	"github.com/weftgo/weft/thread/jsonl"
 )
 
 // TestOutOfTheBoxLive is the S7 step-6 gate for §10.1.
@@ -164,5 +166,46 @@ func TestOutOfTheBoxLive(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("run never succeeded: %s", det.Status)
 		}
+	}
+}
+
+// Every /run is a turn of the demo's one session: the second request
+// lands on the Session the first created — it used to open the
+// session again without closing the first Session, and the writer
+// lease refused its Send with ErrLocked. Durable storage, as serve
+// wires it.
+func TestRunTwiceIsOneSession(t *testing.T) {
+	st, err := jsonl.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := newDemo(st, weft.New(echoModel{}, lookupOrder))
+	var bodies []string
+	for _, q := range []string{"where is order 42?", "and order 43?", "thanks"} {
+		w := httptest.NewRecorder()
+		d.run(w, httptest.NewRequest(http.MethodPost, "/run", strings.NewReader(q)))
+		if w.Code != http.StatusOK {
+			t.Fatalf("/run %q: %d %s", q, w.Code, w.Body.String())
+		}
+		bodies = append(bodies, w.Body.String())
+	}
+	id := d.s.ID()
+	for i, b := range bodies {
+		if !strings.Contains(b, "("+id+")") || strings.Contains(b, "locked") {
+			t.Errorf("run %d answered %q, want a turn of session %s", i+1, b, id)
+		}
+	}
+	turns := 0
+	for _, e := range d.s.Entries() {
+		if _, ok := e.(thread.TurnEntry); ok {
+			turns++
+		}
+	}
+	if turns != len(bodies) {
+		t.Errorf("the session holds %d turns, want %d", turns, len(bodies))
+	}
+	page, err := thread.List(context.Background(), st, thread.Query{})
+	if err != nil || len(page.Sessions) != 1 {
+		t.Fatalf("the storage holds %d sessions (%v), want the one", len(page.Sessions), err)
 	}
 }

@@ -246,13 +246,13 @@ func (p *Pool) Register(sessionID string, agent *weft.Agent) error {
 //
 // The delegating call a child is parked under is never decided: it
 // is not in Pending, and a decision naming it fails with
-// thread.ErrDelegated — it completes with the child's answer. (The
-// parent session's own decision chain is not yet bound by that rule:
-// a grant or a live Approver that approves the delegating call when
-// it parks re-runs the delegation. Keep such a chain from matching a
-// pool wrap's tool.) Decisions for the parent's own, ordinary calls
-// may ride in the same batch; a resume they arm is the parked turn's
-// Next, as with Session.Decide.
+// thread.ErrDelegated — it completes with the child's answer. The
+// parent session's own decision chain is bound by the same rule: no
+// grant and no live Approver is consulted for a delegating call when
+// it parks, whatever they would match — the call parks, and the
+// child's mirrored requests are what there is to decide. Decisions
+// for the parent's own, ordinary calls may ride in the same batch; a
+// resume they arm is the parked turn's Next, as with Session.Decide.
 //
 // Decide returns once the decisions are recorded and the ready
 // children queued; ctx bounds that, not the children. Follow a child

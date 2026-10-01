@@ -999,3 +999,99 @@ func TestDecisionDuringTheDelegatingTurn(t *testing.T) {
 		t.Errorf("the delegating call's resolution = %+v", resolved)
 	}
 }
+
+// The parent's own decision chain never decides a delegating call:
+// a live Approver that approves everything, or a grant matching the
+// wrap's tool, used to approve the wrapper when it parked — the
+// resume re-ran the delegation in a second child session, the side
+// effect twice. The call parks whatever the chain holds, and only
+// the child's answer resolves it.
+func TestChainNeverDecidesWrapper(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		opts  func(consulted *[]string) []thread.SessionOption
+		grant *thread.Grant
+	}{
+		{name: "approver", opts: func(consulted *[]string) []thread.SessionOption {
+			var mu sync.Mutex
+			return []thread.SessionOption{thread.WithApprover(func(_ context.Context, r thread.Request) (thread.Decision, bool) {
+				mu.Lock()
+				*consulted = append(*consulted, r.Tool)
+				mu.Unlock()
+				return thread.Approve(r.CallID), true
+			}, time.Second)}
+		}},
+		{name: "grant", grant: &thread.Grant{Tool: "research"}},
+		{name: "deny grant", grant: &thread.Grant{Tool: "research", Deny: true, Reason: "never"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := thread.Memory()
+			p := pool.New(2)
+			child, ran := gatedChild(
+				wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c-a", Args: `{"order_id":"1"}`}),
+				wefttest.Say("refunded"),
+			)
+			var consulted []string
+			var opts []thread.SessionOption
+			if tc.opts != nil {
+				opts = tc.opts(&consulted)
+			}
+			s, err := thread.Create(ctx, st, delegating(p, child), opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.grant != nil {
+				if err := s.Grant(ctx, *tc.grant); err != nil {
+					t.Fatalf("Grant: %v", err)
+				}
+			}
+			t1, rc := park(t, s)
+			if t1.Next() != nil {
+				t.Fatal("the chain decided the delegating call: the parent resumed with its child still parked")
+			}
+			if len(consulted) != 0 {
+				t.Errorf("the Approver was consulted for %v; a delegating call is never offered to the chain", consulted)
+			}
+			for _, e := range s.Audit() {
+				switch e := e.(type) {
+				case thread.ApprovalDecisionEntry:
+					if e.CallID == "c-wrapper" {
+						t.Errorf("a decision was recorded for the delegating call: %+v", e)
+					}
+				case thread.ApprovalAuditEntry:
+					if e.CallID == "c-wrapper" && e.Step != thread.StepPark {
+						t.Errorf("chain step %q ran over the delegating call", e.Step)
+					}
+				}
+			}
+			pend := s.Pending()
+			if len(pend) != 1 || pend[0].CallID != rc.Child+"/c-a" {
+				t.Fatalf("Pending = %+v, want the child's one request", pend)
+			}
+			if n := len(mustList(ctx, t, st)); n != 2 {
+				t.Fatalf("%d sessions exist, want the parent and its one child", n)
+			}
+			if err := p.Decide(ctx, s, thread.Approve(rc.Child+"/c-a")); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, p, s, rc.ID, pool.Done)
+			next := t1.Next()
+			if next == nil {
+				t.Fatal("no continuation after the child's answer resolved the call")
+			}
+			if _, err := next.Wait(); err != nil {
+				t.Fatalf("the parent's resume: %v", err)
+			}
+			if got := toolResultsOf(s.Context()); len(got) != 1 || got[0] != "refunded" {
+				t.Errorf("the delegating call's result = %v, want the child's answer", got)
+			}
+			if n := len(mustList(ctx, t, st)); n != 2 {
+				t.Fatalf("%d sessions exist after the flow, want exactly one child", n)
+			}
+			if got := ran.snapshot(); len(got) != 1 {
+				t.Fatalf("the gated tool ran %d times, want once", len(got))
+			}
+		})
+	}
+}

@@ -72,7 +72,9 @@ var ErrInvalidDecision = errors.New("thread: invalid decision")
 // call some mirrored child request names as its Wrapper. Such a call
 // is parked because its child is, and it completes with the child's
 // answer — never by a decision of its own: approving it would run the
-// delegation a second time, in a second child session. Decide the
+// delegation a second time, in a second child session. The session's
+// own decision chain keeps the same rule without an error: a grant or
+// an Approver is never consulted for such a call. Decide the
 // child's requests (Pending lists them, Child naming the session);
 // the pool resolves the call when the child ends.
 var ErrDelegated = errors.New("thread: call is delegated to a child session")
@@ -818,7 +820,8 @@ type chainResult struct {
 
 // runChain is the decision chain (ADR 0021 §2): for each call a turn
 // left pending, grants (ADR 0021 §4), then a bounded Approver, then
-// the park. It runs at the turn's end, before the
+// the park — except a call that delegates to a thread/pool child,
+// which skips both and parks. It runs at the turn's end, before the
 // request is persisted — "before a request parks" is before the
 // durable parked state exists, because the core's run boundary has
 // already ended the run — and every step leaves an audit entry,
@@ -842,12 +845,23 @@ func (s *Session) runChain(ctx context.Context, t *Turn, opts []weft.RunOption, 
 	// audit entries that count them land with the turn, after the
 	// chain, so MaxUses is tallied here for the calls of one step.
 	uses := map[string]int{}
+	// The delegating calls among them (ADR 0022 §7): a call a mirrored
+	// child request names as its Wrapper parked because its child did.
+	// The chain has nothing to say about it — no grant and no Approver
+	// is consulted, it always parks, and only the child's answer
+	// resolves it (ResolveDelegation): an approval here would run the
+	// delegation again in a second child session, a denial would
+	// abandon a child that is still parked.
+	var wrappers map[string]string
+	s.locked(func() { wrappers = s.approvalWalkLocked().wrappers })
 	for _, c := range calls {
 		// steps are this call's chain entries in order; resolved says
 		// they hold the call's effective verdict.
 		var steps []Entry
 		resolved := false
-		if d, ref, ok := s.matchGrant(ctx, c, uses); ok {
+		if wrappers[c.ID] != "" {
+			// Delegated: straight to the park.
+		} else if d, ref, ok := s.matchGrant(ctx, c, uses); ok {
 			// The chain's first step decides at once, audited — the
 			// audit names the grant (GrantShared marking a store's, so
 			// the session's use counting cannot cross-count an id

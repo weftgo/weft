@@ -3,10 +3,12 @@ module github.com/weftgo/weft/thread/sqlite
 go 1.26.0
 
 require (
-	github.com/weftgo/weft v0.5.0
-	github.com/weftgo/weft/thread v0.4.0
+	github.com/weftgo/weft v0.6.0
+	github.com/weftgo/weft/thread v0.8.0
 	modernc.org/sqlite v1.60.1
 )
+
+require go.opentelemetry.io/otel/log v0.22.0 // indirect
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

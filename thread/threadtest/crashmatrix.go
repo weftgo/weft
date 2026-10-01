@@ -1,6 +1,6 @@
 //go:build unix
 
-// The crash matrix (plan §10, step 7.1): every write point the session
+// The crash matrix: every write point the session
 // layer has, each proved under SIGKILL on a real backend. The write
 // points, enumerated from the code (every storage.Append site the
 // session layer owns):
@@ -10,8 +10,8 @@
 //	approval     a run parking: its approval request entries
 //	decision     Decide's decision entries over the parked boundary
 //	compaction   the compaction entry, summarizer usage and all
-//	steer        a steer's acceptance receipt on a busy session (v0.3)
-//	pool_receipt thread/pool's acceptance, mirror batch and settlement (v0.5)
+//	steer        a steer's acceptance receipt on a busy session
+//	pool_receipt thread/pool's acceptance, mirror batch and settlement
 //
 // and the writes the machinery makes on its own, each with a point of
 // its own:
@@ -74,12 +74,11 @@ const (
 	CrashMatrixKidID   = "s_mx_kid"   // the pool points' child session
 )
 
-// crashPoints is the full matrix, in walk order. The second block is
-// the 7.1 review's additions: the five Append sites the first walk
-// missed, found by enumerating every storage.Append call site in the
-// session layer and comparing (branch, fork, the steer queue's drop
-// receipts, Resume's arm entry, and DecideSigned's decision+grant
-// batch).
+// crashPoints is the full matrix, in walk order. The second block
+// holds the five Append sites found by enumerating every
+// storage.Append call site in the session layer (branch, fork, the
+// steer queue's drop receipts, Resume's arm entry, and DecideSigned's
+// decision+grant batch).
 var crashPoints = []string{
 	"prompt", "turn_end", "approval", "decision", "compaction", "steer", "pool_receipt",
 	"branch", "fork", "clear_queue", "resume_arm", "decide_signed",
@@ -942,7 +941,7 @@ func crashMatrixSteerChild(st thread.Storage) {
 	time.Sleep(time.Hour) // the kill arrives mid-second-step
 }
 
-// crashMatrixPoolChild covers the pool_receipt point: the three v0.5
+// crashMatrixPoolChild covers the pool_receipt point: the three
 // writes a pool performs on a parent session — acceptance, the mirror
 // batch, the settlement — each durable, then death.
 func crashMatrixPoolChild(st thread.Storage) {

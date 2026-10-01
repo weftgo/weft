@@ -26,7 +26,7 @@ import (
 	"github.com/weftgo/weft/thread/threadtest"
 )
 
-// The crash test (plan §7, shaped like jsonl's): a helper process is
+// The crash test (shaped like jsonl's): a helper process is
 // SIGKILLed mid-turn — after committing some appends, before the rest —
 // and the session must load with exactly the committed entries, every
 // one a whole transaction, none torn, none half: sqlite's atomic commit
@@ -285,7 +285,7 @@ func TestFleetHelper(t *testing.T) {
 	fmt.Println("fleet ok")
 }
 
-// The mid-turn crash (plan §7, ADR 0011 §7), the sqlite twin of jsonl's:
+// The mid-turn crash (ADR 0011 §7), the sqlite twin of jsonl's:
 // a child runs a real two-step turn whose second model call blocks; the
 // parent kills it with the first step fully emitted, and everything
 // emitted is durable — the shared harness in threadtest carries the

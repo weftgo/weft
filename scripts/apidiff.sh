@@ -2,7 +2,7 @@
 # The selvedge (TODO §1.7): fail on any incompatible change to a
 # module's public Go API since that module's last tag. The root module
 # gates against the newest v* tag; the thread module against the
-# newest thread/v* tag (plan §10); thread/sqlite against the newest
+# newest thread/v* tag; thread/sqlite against the newest
 # thread/sqlite/v* tag. The other sub-modules get their own gate when
 # they tag: add a case beside these and an apidiff-* target then. (The
 # store module's gate died with the module, step 5 of ADR 0024.)

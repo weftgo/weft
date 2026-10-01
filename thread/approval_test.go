@@ -750,8 +750,8 @@ func TestCompactionWaitsForBoundary(t *testing.T) {
 
 // TestApprovalContextAfterPark: the parked boundary in the caller's
 // view is repaired (the dangling call reads interrupted), while the
-// raw transcript the resume feeds stays dangling — v0.1's rule,
-// unchanged.
+// raw transcript the resume feeds stays dangling — the rule plain
+// sessions follow, unchanged by approvals.
 func TestApprovalContextAfterPark(t *testing.T) {
 	ctx := context.Background()
 	agent, _ := refundAgent(wefttest.ToolCalls(wefttest.Call{Name: "refund"}))
@@ -894,7 +894,7 @@ func TestApprovalEntryLoud(t *testing.T) {
 	if _, err := thread.UnmarshalEntry([]byte(`{"type":"approval","id":"e_1"}`)); !errors.Is(err, thread.ErrNewerFormat) {
 		t.Fatalf("unknown kind near approvals: %v, want ErrNewerFormat", err)
 	}
-	// A v0.1-shaped kind list stays read-write identical: the format-1
+	// The first format's kinds stay read-write identical: the format-1
 	// goldens still read (TestReadEveryGolden), and the approval kinds
 	// accept their own v (round trip above).
 	if _, err := os.Stat(filepath.Join("testdata", "format1", "turn.json")); err != nil {

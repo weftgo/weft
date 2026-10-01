@@ -79,7 +79,7 @@ fuzz:
 	  $(GO) test -run '^$$' -fuzz "^$$f\$$" -fuzztime $(FUZZTIME) . || exit 1; \
 	done
 
-# The thread module's decoders join the fuzz gate (plan §10, step 7.1):
+# The thread module's decoders join the fuzz gate:
 # entries, headers, signed decisions and grant predicates — one
 # invocation each, crashers committed as seeds the same way.
 fuzz-thread:

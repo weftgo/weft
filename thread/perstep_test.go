@@ -99,8 +99,8 @@ func TestPerStepEntriesEqualRunResult(t *testing.T) {
 // Mid-run, the emitted steps are already durable: a reader — another
 // Storage handle, the shape of another process — sees the first step's
 // messages while the run is still blocked in its second, and nothing is
-// torn. That is the whole v0.4 promise: a crash mid-turn loses nothing
-// emitted.
+// torn. That is the whole per-step promise: a crash mid-turn loses
+// nothing emitted.
 func TestPerStepDurableWhileRunning(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

@@ -12,7 +12,7 @@ import (
 	"github.com/weftgo/weft/thread/jsonl"
 )
 
-// FuzzLoad (plan §3.4): Load over arbitrary bytes never panics and
+// FuzzLoad: Load over arbitrary bytes never panics and
 // never returns a partial tree without an error or a report. The
 // invariant, exactly: when Load returns no error, the file's complete
 // lines (the ones ending in '\n') all decoded — the header plus one

@@ -142,7 +142,7 @@ jobs:
           done
 
   # The fuzz gate (TODO §9.4): every Fuzz* target of the root module
-  # and of thread's decoders (plan §10, step 7.1) runs for FUZZTIME on
+  # and of thread's decoders runs for FUZZTIME on
   # stable Go. Not under -race (the seeds already run under -race in
   # `test`). A crasher fails the job and its input is uploaded so the
   # fix PR can commit it as a seed.

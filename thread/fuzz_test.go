@@ -11,7 +11,7 @@ import (
 	"github.com/weftgo/weft/thread"
 )
 
-// FuzzDecodeEntry (step 1.2): UnmarshalEntry over arbitrary bytes
+// FuzzDecodeEntry: UnmarshalEntry over arbitrary bytes
 // never panics, whatever it accepts always re-encodes, and the wire's
 // canonical form is a fixpoint — decode∘encode once, and a second
 // decode∘encode yields the same value and the same bytes again. The

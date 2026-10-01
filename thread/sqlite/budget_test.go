@@ -44,7 +44,7 @@ func buildBigSession(tb testing.TB, st thread.Storage, id string, n int) {
 	}
 }
 
-// The sqlite half of the budget suite (plan §10, step 7.2): the same
+// The sqlite half of the budget suite: the same
 // 100k-entry open as jsonl's (the second backend's decode path is the
 // database's, and its own cost to bound), and List over 10k sessions —
 // the paged walk and the title filter that migration 0002 denormalised

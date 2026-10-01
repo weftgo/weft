@@ -11,7 +11,7 @@ import (
 	"github.com/weftgo/weft/thread"
 )
 
-// FuzzDecodeHeader (step 7.1): the session header's decoder over
+// FuzzDecodeHeader: the session header's decoder over
 // arbitrary bytes never panics, enforces the envelope rule loudly, and
 // whatever it accepts round-trips — the canonical encoding is a
 // fixpoint, the same rule the entries' decoder holds. The envelope's

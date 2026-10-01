@@ -15,7 +15,7 @@ import (
 	"github.com/weftgo/weft/thread/jsonl"
 )
 
-// The jsonl half of the budget suite (plan §10, step 7.2): opening a
+// The jsonl half of the budget suite: opening a
 // 100k-entry session — the decode-and-adopt cost a restart pays — and
 // the per-append cost with the backend's own durability in the loop.
 

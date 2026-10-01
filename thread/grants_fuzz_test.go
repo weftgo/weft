@@ -7,7 +7,7 @@ import (
 	"github.com/weftgo/weft"
 )
 
-// FuzzGrantMatches (step 7.1): the grant predicate engine over
+// FuzzGrantMatches: the grant predicate engine over
 // arbitrary grants and call arguments never panics and stays
 // deterministic — the same grant and the same call answer the same way
 // twice, whatever the bytes hold. The engine is internal, so this is

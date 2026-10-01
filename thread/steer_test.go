@@ -587,6 +587,7 @@ func TestReceiptsAcrossRestart(t *testing.T) {
 	// is back in the queue — still queued on disk, nothing written,
 	// nothing run.
 	onDisk := len(s.Entries()) + 1 // the session's entries and the hand-written receipt
+	abandon(t, st, s.ID())
 	s2, err := thread.Open(ctx, st, s.ID(), agent, thread.BusyPolicy(thread.Steer))
 	if err != nil {
 		t.Fatal(err)

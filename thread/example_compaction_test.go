@@ -33,6 +33,11 @@ func longSession(agent *weft.Agent, opts ...thread.SessionOption) *thread.Sessio
 	if err := st.Append(ctx, s.ID(), batch...); err != nil {
 		panic(err)
 	}
+	// The entries went in behind the Session's back: close it — it is
+	// the session's writer since Create — and open one that sees them.
+	if err := s.Close(ctx); err != nil {
+		panic(err)
+	}
 	s, err = thread.Open(ctx, st, s.ID(), agent, opts...)
 	if err != nil {
 		panic(err)
@@ -113,6 +118,10 @@ func ExampleSummarizeLeft() {
 		fmt.Println(err)
 		return
 	}
+	// The entries went in behind the Session's back, and it is the
+	// session's writer since Create: close it, and open one that
+	// sees them.
+	_ = s.Close(ctx)
 	s, _ = thread.Open(ctx, st, s.ID(), agent)
 
 	// Back to the question, summarizing the detour on the way out.
@@ -155,6 +164,10 @@ func ExampleBeforeCompact() {
 		fmt.Println(err)
 		return
 	}
+	// The entries went in behind the Session's back, and it is the
+	// session's writer since Create: close it, and open one that
+	// sees them.
+	_ = s.Close(ctx)
 	s, _ = thread.Open(ctx, st, s.ID(), agent, redact)
 	if err := s.Compact(ctx); err != nil {
 		fmt.Println(err)
@@ -249,6 +262,10 @@ func ExampleClearOldToolResults() {
 		fmt.Println(err)
 		return
 	}
+	// The entries went in behind the Session's back, and it is the
+	// session's writer since Create: close it, and open one that
+	// sees them.
+	_ = s.Close(ctx)
 	s, _ = thread.Open(ctx, st, s.ID(), agent, opts...)
 
 	// The turn reports 90,000 input tokens: over the line, so the

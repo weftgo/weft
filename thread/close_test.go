@@ -422,6 +422,7 @@ func TestOpenStartsNoRun(t *testing.T) {
 			t.Fatal(err)
 		}
 		cctx, cancel := context.WithCancel(ctx)
+		abandon(t, st, s.ID())
 		open, err := thread.Open(cctx, st, s.ID(), agent)
 		cancel() // Open's context ending must not strand what it restored
 		if err != nil {
@@ -472,6 +473,7 @@ func TestClearQueueDropsRestoredSteer(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	abandon(t, st, s.ID())
 	open, err := thread.Open(ctx, st, s.ID(), agent)
 	if err != nil {
 		t.Fatal(err)

@@ -223,6 +223,10 @@ func ExampleSession_Branch() {
 		fmt.Println(err)
 		return
 	}
+	// The entries went in behind the Session's back, and it is the
+	// session's writer since Create: close it, and open one that
+	// sees them.
+	_ = s.Close(ctx)
 	s, err = thread.Open(ctx, st, s.ID(), agent, thread.IDs(func() string { id := ids[next]; next++; return id }))
 	if err != nil {
 		fmt.Println(err)
@@ -329,6 +333,10 @@ func ExampleSession_Compact() {
 		fmt.Println(err)
 		return
 	}
+	// The entries went in behind the Session's back, and it is the
+	// session's writer since Create: close it, and open one that
+	// sees them.
+	_ = s.Close(ctx)
 	s, err := thread.Open(ctx, st, s.ID(), agent)
 	if err != nil {
 		fmt.Println(err)
@@ -382,6 +390,10 @@ func ExampleSession_Pin() {
 		fmt.Println(err)
 		return
 	}
+	// The entries went in behind the Session's back, and it is the
+	// session's writer since Create: close it, and open one that
+	// sees them.
+	_ = s.Close(ctx)
 	open, _ := thread.Open(ctx, st, s.ID(), agent)
 	if err := open.Pin(ctx, "e_req"); err != nil {
 		fmt.Println(err)

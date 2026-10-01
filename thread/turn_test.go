@@ -624,6 +624,7 @@ func TestSendRunIDUniqueAcrossReopen(t *testing.T) {
 		}
 		// Reopen: the counter recovers from the turn entries, so the
 		// next run id continues the sequence.
+		abandon(t, st, s.ID())
 		s2, err := thread.Open(ctx, st, s.ID(), agent)
 		if err != nil {
 			t.Fatal(err)

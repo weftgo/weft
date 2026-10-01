@@ -50,6 +50,7 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = fork
+	abandon(t, st, s.ID())
 	again, err := thread.Open(ctx, st, s.ID(), agent)
 	if err != nil {
 		t.Fatal(err)

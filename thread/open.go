@@ -141,9 +141,64 @@ type Flusher interface {
 // Releasing a session this Storage does not hold is a no-op; one the
 // storage does not hold at all fails with ErrNotFound. Release must
 // not race the session's own Append — it is the last call of a writer
-// that is done, which is what Session.Close is.
+// that is done. Release speaks for the whole Storage value: it ends a
+// Leaser lease whoever holds it, which is why a Session — one writer
+// among possibly several on the value — closes through Yield instead
+// when the backend offers it.
 type Releaser interface {
 	Release(ctx context.Context, session string) error
+}
+
+// Leaser is the optional Storage capability that makes the one-writer
+// rule hold between Session values sharing one Storage value — the
+// same small-interface rule. The backend's own lock tells Storage
+// values and processes apart; it cannot tell two Sessions on one
+// Storage value apart, because Append names a session and not who is
+// writing. A lease can: the writer names itself with holder, an opaque
+// comparable token — a pointer the writer owns — and the storage
+// remembers which holder has the session.
+//
+// A Session takes the lease before every write, so the first write is
+// what makes it the session's writer, and it stays so until its Close
+// yields. Reading never takes it: Load, List and Watch — and so Open
+// and every read of a Session — are not refused by a lease and do not
+// stand in a writer's way.
+//
+// The lease is bookkeeping over the backend's lock, not a second
+// lock: the Storage methods do not consult it. A Storage value used
+// directly, without Sessions, enforces one writer per instance;
+// Sessions enforce one writer per Session.
+type Leaser interface {
+	// Acquire takes the session's writer lease for holder and reports
+	// how many complete entry lines the storage holds for the session
+	// at that moment: every line a Load accounts for — the entries it
+	// returns and the lines it skips under Salvage — and never a torn
+	// tail. A writer that knows how many it has loaded and written
+	// compares: a different number means the session changed behind
+	// its view (ErrStale is the Session's answer).
+	//
+	// Acquire takes the backend's cross-instance lock exactly as a
+	// first Append does — ErrLocked when another Storage or process
+	// holds the session, a torn tail repaired — and then the lease:
+	// ErrLocked naming the session when a different holder has it on
+	// this Storage value. For the holder that already has it Acquire
+	// is idempotent and cheap: no I/O. A session the storage does not
+	// hold fails with ErrNotFound, a nil holder with a plain error,
+	// and nothing is taken either way.
+	//
+	// The lease ends when its holder yields, when the session is
+	// released or deleted through this Storage value, or with the
+	// process.
+	Acquire(ctx context.Context, session string, holder any) (entries int, err error)
+
+	// Yield ends holder's lease and the storage's hold with it, as
+	// Release does. It is Release for a writer that must not let go
+	// of what is not its own: when a different holder has the lease,
+	// Yield releases nothing and returns nil. When no holder has it —
+	// the session is held by this Storage value's direct use, or not
+	// held — Yield is Release. A session the storage does not hold
+	// fails with ErrNotFound.
+	Yield(ctx context.Context, session string, holder any) error
 }
 
 // Watcher is the optional Storage capability that tails a session as

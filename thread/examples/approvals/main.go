@@ -91,6 +91,12 @@ func run(w io.Writer, dir string) error {
 	if err := p(w, "== the process restarts; the pending request survived"); err != nil {
 		return err
 	}
+	// Inside one process the restart is a Close: the Session lets go
+	// of the session, as its process ending would, and the next one
+	// opened is the writer.
+	if err := s.Close(ctx); err != nil {
+		return err
+	}
 	// RequireSigned is not passed again: the session's header carries
 	// it, so the reopened session still refuses an unsigned Decide.
 	reopened, err := thread.Open(ctx, st, s.ID(), agent, thread.WithKeyring(ring))

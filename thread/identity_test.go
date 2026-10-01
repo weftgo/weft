@@ -554,6 +554,7 @@ func TestListByPublicID(t *testing.T) {
 		}
 		col := &mdCollector{}
 		rotated := weft.New(wefttest.Script(wefttest.Say("r")), col.tap())
+		abandon(t, st, c.ID())
 		cAgent, err := thread.Open(ctx, st, c.ID(), rotated)
 		if err != nil {
 			t.Fatalf("Open c: %v", err)

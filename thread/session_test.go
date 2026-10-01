@@ -315,6 +315,7 @@ func TestSessionLabelSetInfoCustom(t *testing.T) {
 		agent := weft.New(wefttest.Script())
 		s, _ := thread.Create(ctx, st, agent)
 		ids := appendChain(t, ctx, st, s, thread.MessageEntry{Message: weft.User("one")})
+		abandon(t, st, s.ID())
 		open, err := thread.Open(ctx, st, s.ID(), agent)
 		if err != nil {
 			t.Fatalf("Open: %v", err)
@@ -446,6 +447,7 @@ func TestSessionIDsOption(t *testing.T) {
 	if id := entries[0].(thread.CustomEntry).ID; id != "e_alpha" {
 		t.Errorf("entry id = %q, want e_alpha", id)
 	}
+	abandon(t, st, "s_fixed")
 	again, _ := thread.Open(ctx, st, "s_fixed", agent, thread.IDs(func() string { return "e_gamma" }))
 	if err := again.Custom(ctx, "k2", nil); err != nil {
 		t.Fatal(err)

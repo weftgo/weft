@@ -190,6 +190,7 @@ func TestApprovalsRestartDecideResume(t *testing.T) {
 	// recovery: the new Session Loads the tree from disk and rebuilds
 	// its pending approvals from the entries.
 	resumed, _ := refundAgent(wefttest.Say("denied noted"))
+	abandon(t, st, id)
 	s2, err := thread.Open(ctx, st, id, resumed)
 	if err != nil {
 		t.Fatal(err)
@@ -921,6 +922,7 @@ func TestSendOverDecidedBoundaryResumes(t *testing.T) {
 	// The decisions are durable; the resume never ran. A reopen with
 	// defaults sees a decided boundary and no runner.
 	agent2, ran := refundAgent(wefttest.Say("resumed after reopen"), wefttest.Say("the follow-up"))
+	abandon(t, st, s1.ID())
 	s2, err := thread.Open(ctx, st, s1.ID(), agent2)
 	if err != nil {
 		t.Fatal(err)

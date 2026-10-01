@@ -222,12 +222,23 @@ func PublicID(id string) SessionOption { return publicIDOption(id) }
 //
 // One writer. The Session is its session's only writer: entries
 // appended to the storage behind its back are invisible to it until
-// the next Open, and the tree it holds would then disagree with the
-// file. Keep one Session value per session id per process. Backends
-// refuse a second writer from another process or another Storage
-// value with ErrLocked; a second Open of the same id on the same
-// Storage value is not refused today and its behaviour is undefined —
-// both values would append, each blind to the other.
+// the next Open. Backends refuse a second writer from another process
+// or another Storage value with ErrLocked. Between Session values on
+// one Storage value the rule is a lease (the Leaser capability, which
+// Memory, jsonl and sqlite implement): a Session takes it with its
+// first write — Create is one — and holds it until Close. While it is
+// held, every write of another Session on that Storage value fails
+// with ErrLocked and changes nothing, in its tree or in the storage.
+// Reading takes no lease: any number of Sessions may be open on a
+// session to read it, and Open never fails for a writer elsewhere.
+//
+// A Session whose view has fallen behind does not write either: when
+// the storage holds entries the Session never loaded — another
+// Session wrote and closed since this one was opened — its write
+// fails with ErrStale instead of attaching to a leaf the session has
+// moved past. Open the session again. On a backend without the
+// Leaser capability neither check exists, and a second Session on
+// the same Storage value is the caller's to avoid.
 //
 // One run at a time. A Send while a turn runs — or while an approval
 // boundary is open — follows the busy policy captured at that Send:
@@ -260,14 +271,19 @@ func PublicID(id string) SessionOption { return publicIDOption(id) }
 // answering from the tree the session held. See Close for what a
 // canceled wait leaves behind.
 //
-// Delete. Delete removes the stored session whether or not a Session
-// value is open on it. An open Session keeps its in-memory tree; its
-// next write fails with ErrNotFound, and a turn running at that
-// moment loses its remaining entries (the failure is logged through
-// the agent's logger). Close a session before deleting it.
+// Delete. Delete through the Storage value a Session writes with
+// removes the stored session whether or not a Session is open on it,
+// lease or no lease (through another Storage value it fails with
+// ErrLocked while the writer holds the session). An open Session
+// keeps its in-memory tree; its next write fails with ErrNotFound,
+// and a turn running at that moment loses its remaining entries (the
+// failure is logged through the agent's logger). Close a session
+// before deleting it.
 type Session struct {
-	mu     sync.Mutex
-	st     Storage // the write path; sealed by Close
+	mu sync.Mutex
+	// st is the write path: the application's storage, behind the
+	// lease (leased) when the backend offers one, and sealed by Close.
+	st     Storage
 	agent  *weft.Agent
 	cfg    sessionConfig
 	header Header         // immutable after construction: read without mu
@@ -421,7 +437,9 @@ type OpenReport struct {
 // compaction summarizes with its model — and must not be nil, like
 // the core's New. The header is all that is written: nothing else
 // lands in the storage until the first append. An id the storage
-// already holds fails with ErrExists.
+// already holds fails with ErrExists. Create is the new Session's
+// first write: it holds the session's writer lease from here (see
+// Session, One writer).
 func Create(ctx context.Context, st Storage, agent *weft.Agent, opts ...SessionOption) (*Session, error) {
 	if st == nil {
 		return nil, fmt.Errorf("thread: Create with nil storage")
@@ -445,7 +463,18 @@ func Create(ctx context.Context, st Storage, agent *weft.Agent, opts ...SessionO
 	if err := st.Create(ctx, h); err != nil {
 		return nil, err
 	}
-	return newSession(st, agent, cfg, h, nil, nil)
+	s, err := newSession(st, agent, cfg, h, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	// Create is the creating Session's first write: it is the
+	// session's writer from here, not from its first entry.
+	if w, ok := s.st.(*leased); ok {
+		if err := w.acquire(ctx); err != nil {
+			return nil, fmt.Errorf("thread: session %s created, but not held: %w", h.ID, err)
+		}
+	}
+	return s, nil
 }
 
 // newHeader builds the header Create and Fork write: the minted id,
@@ -550,8 +579,12 @@ func newSession(st Storage, agent *weft.Agent, cfg sessionConfig, h Header, entr
 	if err := cfg.adoptApprovals(h); err != nil {
 		return nil, err
 	}
+	seen := len(entries)
+	if report != nil {
+		seen += len(report.Skipped)
+	}
 	s := &Session{
-		st:     st,
+		st:     leasedStorage(st, h.ID, seen),
 		agent:  agent,
 		cfg:    cfg,
 		header: h,
@@ -685,10 +718,13 @@ func List(ctx context.Context, st Storage, q Query) (Page, error) {
 // does not hold fails with ErrNotFound. History is removed with the
 // session, never rewritten (ADR 0011 §5).
 //
-// Delete does not look for open Session values. One already loaded
-// keeps its in-memory tree, its next write fails with ErrNotFound,
-// and a turn it is running loses the entries it has yet to write —
-// Close the session first.
+// Delete does not look for open Session values, and a Session's lease
+// does not stop it: through the Storage value the session's writer
+// uses, Delete always removes (Storage.Delete's rule; through another
+// Storage value it fails with ErrLocked while the writer holds the
+// session). A Session already loaded keeps its in-memory tree, its
+// next write fails with ErrNotFound, and a turn it is running loses
+// the entries it has yet to write — Close the session first.
 func Delete(ctx context.Context, st Storage, id string) error {
 	if st == nil {
 		return fmt.Errorf("thread: Delete with nil storage")
@@ -713,8 +749,11 @@ func (s *Session) Storage() Storage {
 // storageLocked is the storage beneath the seal Close puts on the
 // write path. Callers hold s.mu.
 func (s *Session) storageLocked() Storage {
-	if c, ok := s.st.(sealedStorage); ok {
-		return c.Storage
+	switch st := s.st.(type) {
+	case sealedStorage:
+		return st.Storage
+	case *leased:
+		return st.Storage
 	}
 	return s.st
 }
@@ -1491,8 +1530,10 @@ func (s *Session) writableLocked() error {
 //     answering from the tree the session held, and Fork still works:
 //     it writes another session.
 //  4. The storage's hold on the session is released, when the backend
-//     offers that — a Release(ctx, session) method — so another
-//     writer can open it. Its error is Close's result.
+//     offers that, so another writer can take it: the Session's own
+//     lease through the Leaser capability (Yield — a Session that
+//     never held the lease lets go of nobody else's), or the storage's
+//     hold through Releaser. Its error is Close's result.
 //
 // If ctx ends while Close is waiting, Close gives up: it cancels the
 // running turn (which records as canceled, its unanswered calls
@@ -1580,6 +1621,7 @@ func (s *Session) sealLocked(ctx context.Context) error {
 	closed := fmt.Errorf("%w: session %s", ErrClosed, s.header.ID)
 	queued := s.queue
 	s.queue = nil
+	w, _ := s.st.(*leased)
 	st := s.storageLocked()
 	s.st = sealedStorage{Storage: st, session: s.header.ID}
 	s.closing = stateSealed
@@ -1590,13 +1632,14 @@ func (s *Session) sealLocked(ctx context.Context) error {
 	for _, ps := range queued {
 		ps.turn.finish(nil, closed)
 	}
+	// The release must not die with the caller's context: the session
+	// is sealed either way, and a hold left behind would lock the next
+	// writer out.
 	var err error
-	if r, ok := st.(interface {
-		Release(ctx context.Context, session string) error
-	}); ok {
-		// The release must not die with the caller's context: the
-		// session is sealed either way, and a hold left behind would
-		// lock the next writer out.
+	if w != nil {
+		// The Session's own lease, and nothing another Session holds.
+		err = w.lease.Yield(context.WithoutCancel(ctx), s.header.ID, w)
+	} else if r, ok := st.(Releaser); ok {
 		err = r.Release(context.WithoutCancel(ctx), s.header.ID)
 	}
 	s.mu.Lock()
@@ -1682,6 +1725,80 @@ func (c sealedStorage) Append(ctx context.Context, session string, entries ...En
 		return fmt.Errorf("%w: session %s", ErrClosed, session)
 	}
 	return c.Storage.Append(ctx, session, entries...)
+}
+
+// leased is the write path of a Session on a storage with the Leaser
+// capability: the application's storage, with every write to the
+// Session's own session made as the session's one writer. It is what
+// s.st holds until Close seals it, so every append site in the
+// package — whichever file it lives in — takes the lease and passes
+// the stale check without each having to ask. The value itself is the
+// lease's holder token: one per Session, never shared.
+//
+// seen is the number of complete entry lines the Session has loaded
+// or written — its view of the stored session's length. The Session
+// calls Append and Flush under its mutex, which is what guards seen.
+type leased struct {
+	Storage
+	lease   Leaser
+	session string
+	seen    int
+}
+
+// leasedStorage returns the write path newSession installs: st behind
+// its lease when it offers one, st itself when it does not — such a
+// backend keeps whatever writer rule it enforces on its own.
+func leasedStorage(st Storage, session string, seen int) Storage {
+	if l, ok := st.(Leaser); ok {
+		return &leased{Storage: st, lease: l, session: session, seen: seen}
+	}
+	return st
+}
+
+// acquire makes the Session its session's writer, or says why it is
+// not: ErrLocked while another Session on this storage holds the
+// lease (or another storage holds the backend's lock), ErrNotFound for
+// a session deleted since, ErrStale when the storage holds a different
+// number of entries than this Session has seen — written by a writer
+// that came and went since the Session loaded. It is asked before
+// every write and costs the holder nothing: the backend answers from
+// memory.
+func (w *leased) acquire(ctx context.Context) error {
+	n, err := w.lease.Acquire(ctx, w.session, w)
+	if err != nil {
+		return err
+	}
+	if n != w.seen {
+		return fmt.Errorf("%w: session %s holds %d entries, this Session has seen %d; open it again",
+			ErrStale, w.session, n, w.seen)
+	}
+	return nil
+}
+
+// Append writes to the Session's own session as its lease holder; a
+// write to any other session — Fork's — passes through.
+func (w *leased) Append(ctx context.Context, session string, entries ...Entry) error {
+	if session != w.session {
+		return w.Storage.Append(ctx, session, entries...)
+	}
+	if err := w.acquire(ctx); err != nil {
+		return err
+	}
+	if err := w.Storage.Append(ctx, session, entries...); err != nil {
+		return err
+	}
+	w.seen += len(entries)
+	return nil
+}
+
+// Flush passes the Flusher capability through the lease: the append
+// sites find it on s.st by type assertion. A storage without it has
+// nothing to flush.
+func (w *leased) Flush(ctx context.Context, session string) error {
+	if f, ok := w.Storage.(Flusher); ok {
+		return f.Flush(ctx, session)
+	}
+	return nil
 }
 
 // appendLocked is the Session's single-entry write: it mints the

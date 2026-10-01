@@ -543,29 +543,3 @@ func TestAppendApprovalRequestsGuardsIDs(t *testing.T) {
 		t.Errorf("the tree's args changed under the caller's hands: %s", got)
 	}
 }
-
-// One Session per session id per process: a second Open of an id the
-// same Storage value already has open must fail with ErrLocked — the
-// in-process half of the one-writer rule (ADR 0011 §5).
-func TestSecondOpenIsLocked(t *testing.T) {
-	t.Skip("enforced after the storage Hold capability lands")
-	ctx := context.Background()
-	st := thread.Memory()
-	agent := weft.New(wefttest.Script())
-	s, err := thread.Create(ctx, st, agent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The first Session is still open: a second writer on the same
-	// Storage value would append blind to it.
-	if _, err := thread.Open(ctx, st, s.ID(), agent); !errors.Is(err, thread.ErrLocked) {
-		t.Fatalf("second Open of an open session: err = %v, want ErrLocked", err)
-	}
-	// Close lets go of the hold; the next Open succeeds.
-	if err := s.Close(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := thread.Open(ctx, st, s.ID(), agent); err != nil {
-		t.Fatalf("Open after Close: %v", err)
-	}
-}

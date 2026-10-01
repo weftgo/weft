@@ -252,6 +252,7 @@ func TestRequireSignedIsDurable(t *testing.T) {
 	call := parkSend(t, s, ctx)
 
 	// Reopened without the option: still signed.
+	abandon(t, st, s.ID())
 	again, err := thread.Open(ctx, st, s.ID(), agent, thread.WithKeyring(ring))
 	if err != nil {
 		t.Fatal(err)
@@ -462,6 +463,7 @@ func TestKeyRotationAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	abandon(t, st, s.ID())
 	s2, err := thread.Open(ctx, st, s.ID(), agent, thread.WithKeyring(rotated))
 	if err != nil {
 		t.Fatal(err)

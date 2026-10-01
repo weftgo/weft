@@ -22,12 +22,23 @@ var (
 	// backend. A session is never silently replaced (ADR 0011 §5).
 	ErrExists = errors.New("thread: session already exists")
 
-	// ErrLocked is returned by a backend that enforces the one-writer
-	// rule (ADR 0011 §5) when a session is already held by another
-	// writer — another process, or another Storage in this one.
-	// Readers never lock: Load and List always work. Retryable — the
-	// same call succeeds once the other writer has let go.
+	// ErrLocked is returned when a session is already held by another
+	// writer (the one-writer rule, ADR 0011 §5): by a backend, for a
+	// writer in another process or another Storage in this one; and by
+	// a Session's writes, for another Session value on the same
+	// Storage (the Leaser capability). Readers never lock: Load, List
+	// and Open always work. Retryable — the same call succeeds once
+	// the other writer has let go, which for a Session is its Close.
 	ErrLocked = errors.New("thread: session is locked by another writer")
+
+	// ErrStale is returned by a Session's write when the stored
+	// session holds entries the Session never loaded: another writer
+	// appended to it after this Session was opened, and a write now
+	// would attach to a leaf that is no longer the session's — a fork
+	// nobody asked for. Nothing is written and the Session's tree is
+	// unchanged. Terminal for the Session value: Open the session
+	// again to write from what it now holds.
+	ErrStale = errors.New("thread: session changed since it was opened")
 
 	// ErrCorrupt wraps the failures a backend reports for stored data
 	// it cannot decode: a malformed line that is not a torn tail (a

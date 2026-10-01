@@ -1,6 +1,7 @@
 package jsonl_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -28,6 +29,33 @@ func FuzzLoad(f *testing.F) {
 		f.Fatal(err)
 	}
 	f.Add(golden)
+	// A session built from the later formats' goldens — the lines the
+	// 2026-10-01 fixes added to the wire: a trim record (v5), a queued
+	// send's accepted receipt, a parked pool receipt, the audit entries'
+	// new fields, a signed decision bound to its request — whole, and
+	// torn inside its last line.
+	header := []byte(`{"type":"session","weft":1,"id":"s_f"}` + "\n")
+	later := bytes.Clone(header)
+	for _, name := range []string{
+		"format5/compaction_trim.json",
+		"format3/receipt_accepted.json",
+		"format3/receipt_delivered_unanswered.json",
+		"format4/receipt_parked.json",
+		"format2/approval_audit_grant.json",
+		"format2/approval_audit_resume_completed.json",
+		"format2/approval_audit_signed.json",
+		"format2/approval_decision_signed.json",
+		"format1/turn_overflow_attempt.json",
+	} {
+		line, err := os.ReadFile(filepath.Join("..", "testdata", filepath.FromSlash(name)))
+		if err != nil {
+			f.Fatal(err)
+		}
+		later = append(later, line...)
+	}
+	f.Add(later)
+	f.Add(later[:len(later)-7])
+	f.Add(append(bytes.Clone(header), []byte(`{"type":"compaction","v":6,"id":"e_1","reason":"trim"}`+"\n")...)) // a newer trim record
 	f.Add([]byte(`{"type":"session","weft":1,"id":"s_f"}` + "\n" + `{"type":"message","id":"e_1"}` + "\n" + `{"type":"mess`))
 	f.Add([]byte(`{"type":"session","weft":1,"id":"s_f"}` + "\n" + "not json\n"))
 	f.Add([]byte(`{"type":"session","weft":1,"id":"s_f"}` + "\n" + `{"type":"approval","id":"e_1"}` + "\n"))

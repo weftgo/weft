@@ -21,23 +21,48 @@ import (
 func FuzzDecodeHeader(f *testing.F) {
 	// Seeds: every committed session golden's first line — the pins the
 	// decoder must always accept — and the hostile shapes.
-	for _, dir := range [...]string{"format1", "format2", "format3", "format4"} {
-		raw, err := os.ReadFile(filepath.Join("testdata", dir, "session.jsonl"))
+	sessions, err := filepath.Glob(filepath.Join("testdata", "format*", "session.jsonl"))
+	if err != nil {
+		f.Fatal(err)
+	}
+	for _, path := range sessions {
+		raw, err := os.ReadFile(path)
 		if err != nil {
-			continue // a format without a committed session file
+			f.Fatal(err)
 		}
 		lines := bytes.Split(raw, []byte("\n"))
 		if len(lines) > 0 && len(lines[0]) > 0 {
 			f.Add(lines[0])
 		}
 	}
-	f.Add([]byte(`{"type":"session","weft":99,"id":"s_1"}`))       // a newer envelope
-	f.Add([]byte(`{"type":"session","weft":0,"id":"s_1"}`))        // no format wrote zero
-	f.Add([]byte(`{"type":"session","id":"s_1"}`))                 // the field absent
-	f.Add([]byte(`{"type":"message","id":"e_1"}`))                 // not a session line
-	f.Add([]byte(`{"type":"session","weft":1}`))                   // no id
-	f.Add([]byte(`{"tYpe":"session","weft":1,"id":"s_1"}`))        // case-matched key
-	f.Add([]byte(`{"type":"session","weft":1,"id":"s","weft":2}`)) // duplicated key
+	// And every header golden: the plain header, the one carrying the
+	// durable RequireSigned mark, the pool child's with its lineage.
+	headers, err := filepath.Glob(filepath.Join("testdata", "format*", "*header.json"))
+	if err != nil {
+		f.Fatal(err)
+	}
+	lineage, err := filepath.Glob(filepath.Join("testdata", "format*", "session_lineage.json"))
+	if err != nil {
+		f.Fatal(err)
+	}
+	if len(headers) < 2 || len(lineage) != 1 {
+		f.Fatalf("header goldens moved: %v, %v", headers, lineage)
+	}
+	for _, path := range append(headers, lineage...) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			f.Fatal(err)
+		}
+		f.Add(bytes.TrimRight(raw, "\n"))
+	}
+	f.Add([]byte(`{"type":"session","weft":1,"id":"s_1","meta":{"weft.require_signed":"maybe","weft.public_id":""}}`)) // reserved keys, hostile values
+	f.Add([]byte(`{"type":"session","weft":99,"id":"s_1"}`))                                                           // a newer envelope
+	f.Add([]byte(`{"type":"session","weft":0,"id":"s_1"}`))                                                            // no format wrote zero
+	f.Add([]byte(`{"type":"session","id":"s_1"}`))                                                                     // the field absent
+	f.Add([]byte(`{"type":"message","id":"e_1"}`))                                                                     // not a session line
+	f.Add([]byte(`{"type":"session","weft":1}`))                                                                       // no id
+	f.Add([]byte(`{"tYpe":"session","weft":1,"id":"s_1"}`))                                                            // case-matched key
+	f.Add([]byte(`{"type":"session","weft":1,"id":"s","weft":2}`))                                                     // duplicated key
 	f.Add([]byte(`{"type":"session","weft":1,"created":"not a time","id":"s_1"}`))
 	f.Add([]byte(`{"type":"session","weft":-1,"id":"s_1"}`))
 	f.Add([]byte(`{"type":"session","weft":1,"lineage":{"parent_session":"s_0","parent_call_id":"call_1"},"meta":{"pool_agent":"research"},"id":"s_1"}`))

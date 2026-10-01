@@ -1,13 +1,13 @@
-## 0.7.0 (unreleased)
+## 0.7.0 — 2026-10-01
 
 The step 8b playground programme (ADR 0024, WEFT-PLAYGROUND.md P1–P5):
 `ReplayPolicy` in the core, the playground's P1–P5 verbs across the
 runtime link, Studio and the devtools panel, the experiments table in
 obsdb, and the debugger rungs 3–4 (breakpoints, steer) on
-runtime-started runs. Root is additive and targets 0.7.0; the lanes'
-modules below date at the step 8 release with it.
+runtime-started runs. Root is additive; the lanes' modules below
+release and date here with it (the step 8 release, 2026-10-01).
 
-### weft 0.7.0 target
+### weft 0.7.0
 
 #### Added
 

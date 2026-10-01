@@ -192,49 +192,31 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // {id}/breakpoints, /api/runs/{id}/steer; the panel drawer and /playground
 //     // (the Studio UI) render them, gated on capabilities.
 
-// 8. Sessions (module weft/thread; jsonl.Open(dir) | thread.Memory()):
-//    s, _ := thread.Create(ctx, st, agent) — the append-only entry tree; every write
-//    through Storage.Append; s.Context() is the leaf's messages, repaired.
-//    turn, _ := s.Send(ctx, weft.User("…")) — prompt durable before the run;
-//    turn.Wait(); busy: Queue (default) or thread.BusyPolicy(thread.Reject) → ErrBusy.
-//    s.Branch(ctx, entryID[, thread.SummarizeLeft()]), s.Fork(ctx, entryID) — the tree,
-//    nothing lost; s.Label, s.SetInfo, s.Custom, s.CustomMessage, s.Pin.
-//    thread.PublicID(id) — the session's browser-safe handle, create-time only: on
-//    every run as weft.public_id beside weft.session.id and weft.turn; List's Meta
-//    filter matches the header's copy, so a SetInfo-written id never matches.
-//    Compaction (ADR 0020): thread.ContextWindow(n) arms the trigger (reported input +
-//    estimated delta > window − Reserve); s.Compact(ctx[, thread.Instructions("…")]),
-//    s.PreviewCompaction, s.ApplyCompaction, s.Uncompact; five layers (SummaryModel,
-//    SummaryPrompt/Focus/MaxTokens, WithSummarizer/Compactor/Trimmer, hooks,
-//    thread.PreferNative), thread.ClearOldToolResults(n) — nothing ever deleted.
-//    Approvals (ADR 0021): s.Pending() (restart-safe), s.Decide(ctx, thread.Approve(id) |
-//    Deny/Resolve/ResolveError | ApproveAlways) → auto-resume, turn.Next() the resumed
-//    turn, s.Resume(ctx); chain: s.Grant(ctx, thread.Grant{Tool, Args: ArgEquals/ArgPrefix/
-//    ArgGlob, Deny}), s.Revoke, WithGrantStore, WithApprover + ApproverTimeout, Quorum(n),
-//    thread.RequestExpiry, thread.OnRequest, s.Audit(); signed: thread.NewKeyring +
-//    WithKeyring, s.Request(id) → thread.SignDecision(key, r, d) → s.DecideSigned (fail-
-//    closed: ErrBadSignature/ErrExpired/ErrReplay/ErrArgsChanged/ErrUnknownKey),
-//    thread.RequireSigned(); a Send while approvals pend queues behind them.
-//    Busy policies (ADR 0019): thread.BusyPolicy(Queue | Reject | Steer | Interrupt |
-//    Rollback), or per Send with thread.As(p). Steer delivers mid-run at the drain
-//    points — receipts are durable entries (queued → delivered | deferred | dropped);
-//    s.Queue(), s.ClearQueue(ctx); a steer meeting StopWhen or approvals defers to a
-//    follow-up (Turn.Next). Interrupt cancels the run (dangling calls record the
-//    interruption text; a parked boundary is denied); Rollback also branches back.
-//    Overflow: ErrContextOverflow → compact (reason overflow) + one re-run
-//    (thread.ReRunOnOverflow(false) off); a second failure joins both errors.
-//    Durability (ADR 0011 §7): the turn's messages append as they join the run
-//    (weft.OnMessages) — a crash mid-turn loses nothing emitted; a failed turn's
-//    repaired tail is rewritten on a fresh line. Backends: jsonl.Open(dir) |
-//    sqlite.Open(path) (own module, modernc) | thread.Memory(); one writer per
-//    session (ErrLocked), readers never lock. Live tail: st.(thread.Watcher).
-//    Pool (ADR 0022): pool.New(max) — the one FIFO bound (also the depth guard);
-//    p.Wrap(name, desc, agent[, pool.Async()]): sync waits for the child session's
-//    answer, async returns the receipt line; p.Submit/Cancel/Close/Receipts/Forward.
-//    Children are sessions (Header.Lineage), their cost in Usage.Delegated; a parked
-//    child mirrors onto Pending — p.Decide resumes it and resolves the parked call.
-//    Watch(ctx, id, afterEntryID). List filters: thread.Query{Meta, TitleSearch}
-//    (title = last info entry's, case-insensitive substring), Before/Limit page.
+// 8. Sessions (module weft/thread) — the map; godoc is the reference, docs/thread-operations.md the
+//    operator's page; pre-1.0, API and format not frozen. st: jsonl.Open(dir) | sqlite.Open(path) (own
+//    module) | thread.Memory(); options thread.Salvage(), FsyncOnFlush(), NoLock(), OpenLogger(l); the live
+//    tail is st.(thread.Watcher).Watch(ctx, id, afterEntryID). s, _ := thread.Create(ctx, st, agent, opts...)
+//    | thread.Open(ctx, st, id, agent); defer s.Close(ctx); thread.List(ctx, st, thread.Query{…}); thread.Delete.
+//    Turns: turn, _ := s.Send(ctx, weft.User("…")[, thread.As(p), thread.RunOptions(…)]) — prompt durable
+//    before the run; turn.Wait() | WaitContext(ctx) | Done() | Events() | Outcome() | Next(); s.WaitIdle(ctx).
+//    Runs carry weft.session.id, weft.turn and, with thread.PublicID(id) (Create only), weft.public_id.
+//    Busy (ADR 0019): thread.BusyPolicy(Queue | Reject → ErrBusy | Steer | Interrupt | Rollback), or
+//    thread.As(p) per Send; queued sends and steers are receipt entries, durable at acceptance —
+//    s.Queue(), s.ClearQueue(ctx) (their Turns end ErrDropped), s.Continue(ctx) runs what Open restored.
+//    Tree: s.Context(), s.Entries(), s.Path(id), s.Branch(ctx, id[, thread.SummarizeLeft()]), s.Fork(ctx,
+//    id), s.Label, s.SetInfo (rejects "weft." keys), s.Custom, s.CustomMessage, s.Pin.
+//    Compaction (ADR 0020): thread.ContextWindow(n) arms it; s.Compact(ctx[, thread.SummaryInstructions(
+//    "…")]), s.PreviewCompaction, s.ApplyCompaction, s.Uncompact; thread.NoAutoCompact(), SummaryModel,
+//    ClearOldToolResults(n), BeforeCompact (thread.Proceed() | Cancel() | Replace(c)); overflow re-runs once.
+//    Approvals (ADR 0021): s.Pending(); s.Decide(ctx, thread.Approve(id) | Deny | Resolve | ResolveError |
+//    ApproveAlways) → auto-resume (turn.Next()) or s.Resume(ctx); s.Grant, s.Revoke, thread.WithApprover(a,
+//    timeout), Quorum(n), RequestExpiry(d), OnRequest(fn), s.Audit(). Signed: NewKeyring + WithKeyring (+
+//    RequireSigned(), durable in the header); s.Request(callID) → ring.Sign(r, d) | key.Sign → s.DecideSigned.
+//    Pool (ADR 0022, thread/pool): p := pool.New(max), the bound per Pool value; p.MustWrap(name, desc,
+//    agent[, pool.Async()]) (p.Wrap returns (tool, error)); p.Submit(ctx, parent, agent, prompt);
+//    p.Decide(ctx, parent, ds...) error records and arms, p.Wait(ctx, parent, id) follows; p.Cancel,
+//    p.Forward, p.Recover(ctx, parent) after a restart, p.Close(ctx); pool.Receipts, Children, Descendants.
+//    Errors: retry ErrBusy, ErrLocked · reopen ErrStale, ErrClosed · terminal ErrCorrupt, ErrNewerFormat.
 
 // 9. Observability pipeline (module weft/otel; several destinations at once,
 //    each with its own content policy; defer on exit):
@@ -328,6 +310,38 @@ ignore it.
     when the loop would call the model again; a step that ends the
     run succeeds. A breach is `*RunError` with the partial transcript.
     Child runs are tools: their failure is data, their usage is yours.
+    Exception: a `thread/pool` child is a session, not a tool-call
+    child — its usage is on its receipt and in the parent session's
+    `Usage.Delegated`, never on the parent run's `RunResult.Usage` or
+    `StepRecord.SubagentUsage`, so a budget that must cover delegated
+    work reads `Delegated`.
+
+### Thread rules (module `weft/thread`; its tests pin them)
+
+- **T1. One writer per Session.** A `Session` takes its session's
+  writer lease with its first write (`Create` and `Fork` are one) and
+  holds it until `Close`. Another Session's write fails with
+  `ErrLocked` and changes nothing; one whose view fell behind fails
+  with `ErrStale` — open the session again. Never write a session
+  behind its Session (`st.Append` on a session a Session holds).
+- **T2. Close what you opened to write.** `s.Close(ctx)` stops new
+  work, drains the running turn and the queue, seals the Session
+  (`ErrClosed`) and gives the lease up. A second Session opened while
+  the writer is still open reads fine and fails its first write with
+  `ErrLocked`.
+- **T3. `Open` is read-only.** It writes no entry, takes no lock and
+  starts no run; what a stopped writer left queued is restored to
+  `s.Queue()` and runs with the next `Send` or `s.Continue(ctx)`.
+- **T4. Accepted input is durable input.** A `Send` that returns a
+  `Turn` has written and flushed its prompt or its receipt entry; a
+  run's messages are appended as they join it, each step once; nothing
+  is deleted or rewritten in place.
+- **T5. Readers fail loudly.** An unknown entry kind or a newer `"v"`
+  is `ErrNewerFormat` — never skipped, `thread.Salvage()` or not. A
+  damaged line is `ErrCorrupt`; under `Salvage` it is skipped and the
+  skip reported (`s.LoadReport()`), as a dropped torn tail always is.
+  The format is documented in ADR 0011's format reference; it is not
+  frozen before 1.0.
 
 ## Working in this repo
 
@@ -341,5 +355,11 @@ ignore it.
   `scripts/apidiff.sh`) against the last tag and fails on incompatible
   changes; pre-1.0 a deliberate source-compatible widening is
   acknowledged line-by-line in `.apidiff-allow`. Renames always fail.
-- Docs: `README.md` (usage), `docs/adr/` (why), this file (map). Update
-  the one that applies in the same change.
+  `weft/thread` is not frozen yet (`make apidiff-thread` gates it
+  against its last tag): a deliberate breaking change there is
+  acknowledged the same way, its exact apidiff line in
+  `thread/.apidiff-allow`, and gets a line in the CHANGELOG's
+  migration checklist saying what to write instead.
+- Docs: `README.md` (usage), `docs/adr/` (why), this file (map),
+  `docs/thread-operations.md` (running `weft/thread` in production).
+  Update the one that applies in the same change.

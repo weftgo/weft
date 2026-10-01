@@ -2,24 +2,15 @@ module github.com/weftgo/weft/examples/studio-local
 
 go 1.26.0
 
-// Root and thread are pinned to their released tags (resolved from
-// the module proxy, no replace). obsdb has no tag yet — it releases
-// with studio at step 8 — so obsdb, otel and studio resolve through
-// the workspace with directory replaces until then; the release step
-// tags them and drops these lines.
-replace github.com/weftgo/weft/obsdb => ../../obsdb
-
-replace github.com/weftgo/weft/otel => ../../otel
-
-replace github.com/weftgo/weft/studio => ../../studio
-
+// Every weft module resolves from its released tag (the module
+// proxy, no replace — the two-phase rule, ADR 0005).
 require (
-	github.com/weftgo/weft v0.6.0
-	github.com/weftgo/weft/obsdb v0.0.0-00010101000000-000000000000
-	github.com/weftgo/weft/otel v0.0.0-00010101000000-000000000000
-	github.com/weftgo/weft/runtime v0.0.0-00010101000000-000000000000
-	github.com/weftgo/weft/studio v0.0.0
-	github.com/weftgo/weft/thread v0.8.0
+	github.com/weftgo/weft v0.7.0
+	github.com/weftgo/weft/obsdb v0.1.0
+	github.com/weftgo/weft/otel v0.1.0
+	github.com/weftgo/weft/runtime v0.1.0
+	github.com/weftgo/weft/studio v0.3.0
+	github.com/weftgo/weft/thread v0.8.1
 )
 
 require (
@@ -56,5 +47,3 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 	modernc.org/sqlite v1.60.1 // indirect
 )
-
-replace github.com/weftgo/weft/runtime => ../../runtime

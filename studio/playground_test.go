@@ -15,23 +15,37 @@ import (
 )
 
 // playgroundTestServer is a Studio with Playground(true) over a temp
-// database, plus one connected fake runtime.
+// database, plus one connected fake runtime. token is the server token
+// when one is configured (the panel-token tests); empty is setup A's
+// open API.
 type playgroundTestServer struct {
 	*Server
-	ts  *httptest.Server
-	rs  *linkruntime.RuntimeServer
-	cmd chan linkruntime.Command // what the fake runtime receives
+	ts    *httptest.Server
+	rs    *linkruntime.RuntimeServer
+	cmd   chan linkruntime.Command // what the fake runtime receives
+	token string
 }
 
 // newPlaygroundTestServer starts the Studio and connects one runtime
 // with a two-tool agent (lookup_order opted in, refund not), its own
 // model script, one alternate glm-5.3-flash, and caps 10/4.
 func newPlaygroundTestServer(t *testing.T) *playgroundTestServer {
+	return newPlaygroundServer(t, "")
+}
+
+// newPlaygroundServer is newPlaygroundTestServer with a server token
+// configured: every call the fake runtime and the tests make carries
+// it as the bearer (S4.6 setup B/C).
+func newPlaygroundServer(t *testing.T, token string) *playgroundTestServer {
 	t.Helper()
-	srv := New(Open(t.TempDir()+"/studio.db"), Playground(true))
+	opts := []Option{Open(t.TempDir() + "/studio.db"), Playground(true)}
+	if token != "" {
+		opts = append(opts, Token(token))
+	}
+	srv := New(opts...)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	pt := &playgroundTestServer{Server: srv, ts: ts, cmd: make(chan linkruntime.Command, 16)}
+	pt := &playgroundTestServer{Server: srv, ts: ts, cmd: make(chan linkruntime.Command, 16), token: token}
 
 	pt.rs = linkruntime.New()
 	// The link server the routes built is not exposed by the Server
@@ -58,7 +72,10 @@ func newPlaygroundTestServer(t *testing.T) *playgroundTestServer {
 	}
 	// Register over the real route, then hold the command stream open.
 	b, _ := json.Marshal(reg)
-	resp, err := http.Post(ts.URL+"/api/runtime/register", "application/json", strings.NewReader(string(b)))
+	regReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/runtime/register", strings.NewReader(string(b)))
+	regReq.Header.Set("Content-Type", "application/json")
+	pt.auth(regReq)
+	resp, err := http.DefaultClient.Do(regReq)
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -68,6 +85,7 @@ func newPlaygroundTestServer(t *testing.T) *playgroundTestServer {
 	_ = resp.Body.Close()
 
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runtime/commands?runtime=rt_test", nil)
+	pt.auth(req)
 	stream, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("commands: %v", err)
@@ -103,22 +121,40 @@ func newPlaygroundTestServer(t *testing.T) *playgroundTestServer {
 	return pt
 }
 
+// auth stamps the server token's bearer on a request when one is
+// configured; setup A's requests carry nothing.
+func (pt *playgroundTestServer) auth(req *http.Request) {
+	if pt.token != "" {
+		req.Header.Set("Authorization", "Bearer "+pt.token)
+	}
+}
+
 // post runs a playground command and returns the HTTP status and
 // body.
 func (pt *playgroundTestServer) post(t *testing.T, body string) (int, string) {
 	t.Helper()
-	resp, err := http.Post(pt.ts.URL+"/api/playground/runs", "application/json", strings.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, pt.ts.URL+"/api/playground/runs", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	b, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, string(b)
+	req.Header.Set("Content-Type", "application/json")
+	pt.auth(req)
+	return pt.do(t, req)
 }
 
 func (pt *playgroundTestServer) get(t *testing.T, path string) (int, string) {
 	t.Helper()
-	resp, err := http.Get(pt.ts.URL + path)
+	req, err := http.NewRequest(http.MethodGet, pt.ts.URL+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pt.auth(req)
+	return pt.do(t, req)
+}
+
+func (pt *playgroundTestServer) do(t *testing.T, req *http.Request) (int, string) {
+	t.Helper()
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,13 +165,15 @@ func (pt *playgroundTestServer) get(t *testing.T, path string) (int, string) {
 
 func (pt *playgroundTestServer) ack(t *testing.T, body string) {
 	t.Helper()
-	resp, err := http.Post(pt.ts.URL+"/api/runtime/acks", "application/json", strings.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, pt.ts.URL+"/api/runtime/acks", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ack: %d", resp.StatusCode)
+	req.Header.Set("Content-Type", "application/json")
+	pt.auth(req)
+	code, out := pt.do(t, req)
+	if code != http.StatusOK {
+		t.Fatalf("ack: %d %s", code, out)
 	}
 }
 
@@ -407,5 +445,102 @@ func TestPlaygroundNotConnected(t *testing.T) {
 	b2, _ := io.ReadAll(resp2.Body)
 	if !strings.Contains(string(b2), "unavailable") {
 		t.Errorf("body = %s", b2)
+	}
+}
+
+// authed is one request with a named bearer.
+func (pt *playgroundTestServer) authed(t *testing.T, method, path, token, body string) (int, string) {
+	t.Helper()
+	var rd io.Reader
+	if body != "" {
+		rd = strings.NewReader(body)
+	}
+	req, err := http.NewRequest(method, pt.ts.URL+path, rd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	return pt.do(t, req)
+}
+
+// TestPlaygroundPanelTokenScope pins §10.4's 403 row and S4.6's
+// "read-only unless playground" against really minted panel tokens
+// (the branches at playground.go's panel check and the command read):
+// a read-scoped token may not start a run at all; a playground-scoped
+// token may, inside its own public id only — on the POST and on the
+// command read — and the run's actor records the panel identity.
+func TestPlaygroundPanelTokenScope(t *testing.T) {
+	pt := newPlaygroundServer(t, "srv-token")
+
+	// Mint through the real route with the server token (S4.6 setup C).
+	mint := func(playground bool) string {
+		t.Helper()
+		body := `{"public_id":"pub_7Hk2","ttl":"10m"}`
+		if playground {
+			body = `{"public_id":"pub_7Hk2","ttl":"10m","playground":true}`
+		}
+		code, out := pt.authed(t, http.MethodPost, "/api/panel-tokens", pt.token, body)
+		if code != http.StatusOK {
+			t.Fatalf("mint = %d %s", code, out)
+		}
+		var tok struct {
+			Token string `json:"token"`
+			Scope string `json:"scope"`
+		}
+		if err := json.Unmarshal([]byte(out), &tok); err != nil {
+			t.Fatal(err)
+		}
+		want := "read"
+		if playground {
+			want = "playground"
+		}
+		if tok.Scope != want {
+			t.Fatalf("minted scope = %q, want %q", tok.Scope, want)
+		}
+		return tok.Token
+	}
+	readTok := mint(false)
+	pgTok := mint(true)
+
+	// A read-scoped panel token may not act (S4.6).
+	if code, body := pt.authed(t, http.MethodPost, "/api/playground/runs", readTok, validRun); code != http.StatusForbidden {
+		t.Errorf("read-scoped POST = %d (%s), want 403", code, body)
+	}
+
+	// A playground-scoped token runs inside its own public id, and the
+	// command's actor records the panel identity.
+	own := strings.Replace(validRun, `"experiment_id": "exp_1"`,
+		`"command_id": "cmd_pg_own", "experiment_id": "exp_1"`, 1)
+	if code, body := pt.authed(t, http.MethodPost, "/api/playground/runs", pgTok, own); code != http.StatusAccepted {
+		t.Fatalf("playground-scoped POST, own public id = %d (%s), want 202", code, body)
+	}
+	if cmd := pt.waitCommand(t, "cmd_pg_own"); cmd.Actor != "panel:pub_7Hk2" {
+		t.Errorf("actor = %q, want panel:pub_7Hk2", cmd.Actor)
+	}
+
+	// The same token naming another public id is refused before the
+	// enqueue.
+	other := strings.Replace(validRun, `"public_id": "pub_7Hk2"`, `"public_id": "pub_other"`, 1)
+	if code, body := pt.authed(t, http.MethodPost, "/api/playground/runs", pgTok, other); code != http.StatusForbidden {
+		t.Errorf("playground-scoped POST, another public id = %d (%s), want 403", code, body)
+	}
+
+	// The command read scopes the same way: its own row reads, another
+	// public id's row does not (the foreign command enqueued under the
+	// server token, which no panel identity scopes).
+	if code, body := pt.authed(t, http.MethodGet, "/api/playground/commands/cmd_pg_own", pgTok, ""); code != http.StatusOK {
+		t.Errorf("playground-scoped read, own command = %d (%s), want 200", code, body)
+	}
+	foreign := strings.Replace(other, `"experiment_id": "exp_1"`,
+		`"command_id": "cmd_foreign", "experiment_id": "exp_1"`, 1)
+	if code, body := pt.authed(t, http.MethodPost, "/api/playground/runs", pt.token, foreign); code != http.StatusAccepted {
+		t.Fatalf("server-token POST, another public id = %d (%s), want 202", code, body)
+	}
+	pt.waitCommand(t, "cmd_foreign")
+	if code, body := pt.authed(t, http.MethodGet, "/api/playground/commands/cmd_foreign", pgTok, ""); code != http.StatusForbidden {
+		t.Errorf("playground-scoped read, another public id's command = %d (%s), want 403", code, body)
 	}
 }

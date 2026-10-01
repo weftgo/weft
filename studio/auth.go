@@ -365,7 +365,9 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			h := w.Header()
 			h.Add("Vary", "Origin")
 			h.Set("Access-Control-Allow-Origin", origin)
-			h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			// PUT carries the breakpoints control (the panel's
+			// panelPut); GET/POST/OPTIONS cover the rest.
+			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 			h.Set("Access-Control-Allow-Headers",
 				"Authorization, Content-Type, Last-Event-ID")
 			if r.Method == http.MethodOptions {

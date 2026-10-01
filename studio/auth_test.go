@@ -282,6 +282,12 @@ func TestCORS(t *testing.T) {
 		if vary := hdr.Get("Vary"); !strings.Contains(vary, "Origin") {
 			t.Errorf("Vary: %q", vary)
 		}
+		// PUT is allowed: the panel's breakpoints control goes through
+		// panelPut, and a preflight without it fails the verb in
+		// cross-origin setups B/C (programme audit P1-9).
+		if m := hdr.Get("Access-Control-Allow-Methods"); !strings.Contains(m, "PUT") {
+			t.Errorf("%s: Allow-Methods = %q, want PUT among them", origin, m)
+		}
 	}
 	// A foreign origin gets no CORS headers; the preflight falls
 	// through to the API's own answer (here the token check's 401),

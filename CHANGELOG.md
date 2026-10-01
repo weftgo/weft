@@ -45,6 +45,10 @@
   scripted engine 400s on an instructions override — agents that
   register instructions could never run scripted); pinned in
   `playground.test.ts` (P1-8).
+- CORS `Access-Control-Allow-Methods` includes `PUT` — the breakpoints
+  control goes through the panel's `panelPut`, and the preflight
+  failed it in cross-origin setups B/C; the CORS pin asserts the verb
+  (P1-9).
 
 ### otel
 

@@ -57,7 +57,7 @@ func serve(addr string) error {
 	demo := newDemo()
 	mux.HandleFunc("POST /run", demo.run)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, "studio-local: POST /run with a question, and watch /studio/live\n")
+		_, _ = fmt.Fprint(w, "studio-local: POST /run with a question, and watch /studio/live\n")
 	})
 
 	log.Printf("studio-local: studio at http://%s/studio/ (live at /studio/live)", addr)
@@ -170,9 +170,9 @@ func (d *demo) run(w http.ResponseWriter, r *http.Request) {
 	// a watcher of /studio/live saw it stream in meanwhile.
 	res, err := turn.Wait()
 	if err != nil {
-		fmt.Fprintf(w, "run %s (%s): %v\n", turn.RunID(), session.ID(), err)
+		_, _ = fmt.Fprintf(w, "run %s (%s): %v\n", turn.RunID(), session.ID(), err)
 		return
 	}
-	fmt.Fprintf(w, "run %s (%s): %s\n", turn.RunID(), session.ID(),
+	_, _ = fmt.Fprintf(w, "run %s (%s): %s\n", turn.RunID(), session.ID(),
 		strings.TrimSpace(res.Text()))
 }

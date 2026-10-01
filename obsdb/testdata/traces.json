@@ -1,0 +1,95 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "acme-api" } },
+          { "key": "service.version", "value": { "stringValue": "1.4.2" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "github.com/weftgo/weft", "version": "v0.6.0" },
+          "spans": [
+            {
+              "traceId": "S/kvNXezTaajzpKdDg5HNg==",
+              "spanId": "APBnqgupArc=",
+              "name": "invoke_agent demo",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1790845923120000000",
+              "endTimeUnixNano": "1790845932530000000",
+              "attributes": [
+                { "key": "gen_ai.operation.name", "value": { "stringValue": "invoke_agent" } },
+                { "key": "weft.run.id", "value": { "stringValue": "r_20261001_1" } },
+                { "key": "gen_ai.agent.name", "value": { "stringValue": "demo" } },
+                { "key": "gen_ai.provider.name", "value": { "stringValue": "wefttest" } },
+                { "key": "gen_ai.request.model", "value": { "stringValue": "script" } },
+                { "key": "weft.manifest.hash", "value": { "stringValue": "sha256:0f2c9a" } },
+                { "key": "weft.version", "value": { "stringValue": "v0.6.0" } },
+                { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "1012" } },
+                { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "209" } },
+                { "key": "gen_ai.usage.cache_read.input_tokens", "value": { "intValue": "120" } },
+                { "key": "weft.run.steps", "value": { "intValue": "2" } },
+                { "key": "weft.run.stop_reason", "value": { "stringValue": "end_turn" } },
+                { "key": "weft.session.id", "value": { "stringValue": "s_01M3" } },
+                { "key": "gen_ai.conversation.id", "value": { "stringValue": "s_01M3" } },
+                { "key": "session.id", "value": { "stringValue": "s_01M3" } },
+                { "key": "weft.turn", "value": { "intValue": "3" } },
+                { "key": "weft.public_id", "value": { "stringValue": "pub_7Hk2" } },
+                { "key": "tenant", "value": { "stringValue": "acme" } },
+                { "key": "enduser.id", "value": { "stringValue": "user_77" } },
+                { "key": "user.id", "value": { "stringValue": "user_77" } }
+              ],
+              "status": { "code": "STATUS_CODE_OK" }
+            },
+            {
+              "traceId": "S/kvNXezTaajzpKdDg5HNg==",
+              "spanId": "s60LbZwvSgg=",
+              "parentSpanId": "APBnqgupArc=",
+              "name": "chat script",
+              "kind": "SPAN_KIND_CLIENT",
+              "startTimeUnixNano": "1790845923130000000",
+              "endTimeUnixNano": "1790845924370000000",
+              "attributes": [
+                { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
+                { "key": "weft.run.id", "value": { "stringValue": "r_20261001_1" } },
+                { "key": "weft.step.index", "value": { "intValue": "0" } },
+                { "key": "gen_ai.provider.name", "value": { "stringValue": "wefttest" } },
+                { "key": "gen_ai.request.model", "value": { "stringValue": "script" } }
+              ],
+              "status": { "code": "STATUS_CODE_OK" }
+            }
+          ]
+        },
+        {
+          "scope": { "name": "myapp/http" },
+          "spans": [
+            {
+              "traceId": "S/kvNXezTaajzpKdDg5HNg==",
+              "spanId": "4IpfK1O9Hj0=",
+              "name": "GET /orders",
+              "kind": "SPAN_KIND_SERVER",
+              "startTimeUnixNano": "1790845923120000000",
+              "endTimeUnixNano": "1790845929120000000",
+              "attributes": [
+                { "key": "http.request.method", "value": { "stringValue": "GET" } },
+                { "key": "url.path", "value": { "stringValue": "/orders" } }
+              ],
+              "events": [
+                {
+                  "timeUnixNano": "1790845929110000000",
+                  "name": "exception",
+                  "attributes": [
+                    { "key": "exception.type", "value": { "stringValue": "timeout" } },
+                    { "key": "exception.message", "value": { "stringValue": "upstream timed out" } }
+                  ]
+                }
+              ],
+              "status": { "code": "STATUS_CODE_ERROR", "message": "upstream timed out" }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

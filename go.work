@@ -1,4 +1,4 @@
-go 1.26
+go 1.26.0
 
 use (
 	.
@@ -6,7 +6,9 @@ use (
 	./examples/otel
 	./google
 	./mcp
+	./obsdb
 	./openai
+	./otel
 	./store
 	./studio
 	./thread

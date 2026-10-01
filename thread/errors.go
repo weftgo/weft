@@ -111,6 +111,29 @@ var (
 	// wrote as they joined are in the tree.
 	ErrNotPersisted = errors.New("thread: turn end not persisted")
 
+	// ErrNotRun is wrapped by the error Turn.Wait returns for a turn
+	// whose run never started: the context its Send carried ended
+	// first (the error also wraps context.Canceled or
+	// context.DeadlineExceeded), its prompt entry could not be written
+	// (the storage's error is wrapped too), or — a resume — the
+	// boundary it was armed for was gone (ErrNotPending) or its audit
+	// entry could not be written. No model was called.
+	ErrNotRun = errors.New("thread: turn did not run")
+
+	// ErrDropped is wrapped by the error Turn.Wait returns for a
+	// message ClearQueue removed before it reached a model — a queued
+	// steer or a queued send — and for a send an interrupting Send had
+	// to take back. The receipt entry records the drop.
+	ErrDropped = errors.New("thread: message dropped from the queue")
+
+	// ErrTurnPanicked is wrapped by the error Turn.Wait returns when
+	// the session's own turn machinery panicked — which includes the
+	// caller's IDs and Clock functions, called under the session's
+	// lock. The panic is contained: the turn ends with this error, the
+	// lock is released, and the session keeps working. Tool and model
+	// panics never surface here; the core reports them as run errors.
+	ErrTurnPanicked = errors.New("thread: turn panicked")
+
 	// ErrCreateOnly is returned by Open when it is handed an option
 	// that only means something while a session's header is being
 	// written — WithMeta, PublicID, WithLineage. The header is

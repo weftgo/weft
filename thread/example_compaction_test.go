@@ -262,6 +262,12 @@ func ExampleClearOldToolResults() {
 		fmt.Println(err)
 		return
 	}
+	// The trigger runs between turns, after the turn is decided: wait
+	// for the session to go quiet before reading what it did.
+	if err := s.WaitIdle(ctx); err != nil {
+		fmt.Println(err)
+		return
+	}
 	for _, e := range s.Entries() {
 		if c, ok := e.(thread.CompactionEntry); ok {
 			fmt.Println("compaction entry:", c.Reason, "— stubbed", len(c.Trim.Stubs), "result")
@@ -300,6 +306,10 @@ func ExampleTriggerFunc() {
 		return
 	}
 	if _, err := turn.Wait(); err != nil {
+		fmt.Println(err)
+		return
+	}
+	if err := s.WaitIdle(ctx); err != nil { // the trigger runs between turns
 		fmt.Println(err)
 		return
 	}

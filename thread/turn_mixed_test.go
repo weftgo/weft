@@ -392,6 +392,9 @@ func TestBoundaryReadsLegacyDoubleToolMessageAsClosed(t *testing.T) {
 		thread.MessageEntry{ID: "e_4", ParentID: "e_3", Created: at, Message: weft.Message{Role: weft.RoleTool,
 			Content: []weft.Part{result("call_s", "safe"), result("call_d", "dangerous")}}},
 	}
+	if err := s.Close(ctx); err != nil { // the old writer is gone
+		t.Fatal(err)
+	}
 	if err := st.Append(ctx, s.ID(), entries...); err != nil {
 		t.Fatal(err)
 	}
@@ -432,10 +435,11 @@ func TestCrashDanglingCallIsNoBoundary(t *testing.T) {
 			thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: at, Message: weft.Message{Role: weft.RoleAssistant,
 				Content: []weft.Part{weft.ToolCallPart{ID: "call_x", Name: "work", Args: []byte(`{}`)}}}},
 		}
-		if err := st.Append(ctx, s.ID(), crashed...); err != nil {
+		// The crashed writer is gone; what it left is in the file.
+		if err := s.Close(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.Close(ctx); err != nil {
+		if err := st.Append(ctx, s.ID(), crashed...); err != nil {
 			t.Fatal(err)
 		}
 		s2 := reopenWith(t, ctx, st, s, agent)

@@ -56,7 +56,7 @@ func TestRunResumeWithoutBoundaryMakesNoGhostRun(t *testing.T) {
 	if err := s.Branch(ctx, turn.ID()); err != nil { // the prompt entry: below the parked tail
 		t.Fatal(err)
 	}
-	s.runResume(ctx, rt)
+	s.runResume(workItem{ps: pendingSend{ctx: ctx, turn: rt}, resume: true})
 	rt.mu.Lock()
 	rerr := rt.waitErr
 	rt.mu.Unlock()

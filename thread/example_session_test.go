@@ -383,7 +383,7 @@ func ExampleSession_Continue() {
 		return
 	}
 
-	open, err := thread.Open(ctx, st, "s_crashed", agent, exampleIDs("e_followup", "e_deferred", "e_reply", "e_turn"))
+	open, err := thread.Open(ctx, st, "s_crashed", agent, exampleIDs("e_followup", "e_deferred", "e_accepted", "e_reply", "e_turn"))
 	if err != nil {
 		fmt.Println(err)
 		return

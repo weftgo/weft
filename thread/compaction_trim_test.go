@@ -82,6 +82,11 @@ func sendAndWait(t *testing.T, s *thread.Session, text string) {
 	if _, err := turn.Wait(); err != nil {
 		t.Fatal(err)
 	}
+	// The post-turn trigger runs after the turn is decided: wait for
+	// the session to go quiet before reading what it compacted.
+	if err := s.WaitIdle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // A custom Trimmer changes what the model sees, durably: its output is
@@ -483,6 +488,7 @@ func TestTriggerStandsDownAfterACompaction(t *testing.T) {
 	if _, err := turn.Wait(); err == nil {
 		t.Fatal("the scripted failure did not fail")
 	}
+	_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 	if thresholds() != 1 {
 		t.Errorf("threshold compactions = %d after a turn with no new report, want 1: the stale measurement re-fired", thresholds())
 	}

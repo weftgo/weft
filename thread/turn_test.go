@@ -423,19 +423,33 @@ func TestSendPromptDurableWhenRunNeverStarts(t *testing.T) {
 func TestSendRunOptionsRejected(t *testing.T) {
 	ctx := context.Background()
 	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	// What the session owns: the transcript, the run id, the steering
+	// source, and the approval decisions — a Send never reaches a parked
+	// call, so a decision passed here would apply to nothing.
 	for name, opt := range map[string]weft.RunOption{
-		"Messages": weft.Messages(weft.User("x")),
-		"Prompt":   weft.Prompt("x"),
-		"RunID":    weft.RunID("mine"),
+		"Messages":     weft.Messages(weft.User("x")),
+		"Prompt":       weft.Prompt("x"),
+		"RunID":        weft.RunID("mine"),
+		"Steering":     weft.Steering(func(context.Context, weft.SteerPoint) []weft.Message { return nil }),
+		"Approve":      weft.Approve("call_1"),
+		"Deny":         weft.Deny("call_1", "not mine"),
+		"Resolve":      weft.Resolve("call_1", "done by hand"),
+		"ResolveError": weft.ResolveError("call_1", "failed by hand"),
 	} {
-		if _, err := s.Send(ctx, weft.User("q"), thread.RunOptions(opt)); err == nil {
-			t.Errorf("RunOptions(%s): no error", name)
+		_, err := s.Send(ctx, weft.User("q"), thread.RunOptions(weft.MaxSteps(2), opt))
+		if !errors.Is(err, weft.ErrInvalidRunOption) {
+			t.Errorf("RunOptions(%s): %v, want weft.ErrInvalidRunOption", name, err)
 		}
 	}
-	// Without the rejected options the run carries the caller's extras.
-	if _, err := s.Send(ctx, weft.User("q"), thread.RunOptions(weft.Deny("call_1", "not mine"))); err != nil {
-		t.Errorf("RunOptions(Deny): %v", err)
+	if n := len(s.Entries()); n != 0 {
+		t.Errorf("a rejected Send wrote %d entries", n)
 	}
+	// Without the rejected options the run carries the caller's extras.
+	turn, err := s.Send(ctx, weft.User("q"), thread.RunOptions(weft.Metadata(map[string]string{"tenant": "acme"})))
+	if err != nil {
+		t.Fatalf("RunOptions(Metadata): %v", err)
+	}
+	_, _ = turn.Wait()
 }
 
 func TestSendQueuedPromptSurvivesCancel(t *testing.T) {
@@ -519,8 +533,16 @@ func TestSendConcurrentSessionsAndReads(t *testing.T) {
 			}
 		}()
 		wg.Wait()
-		if len(open2(t, ctx, st, s).Entries()) != 4*3 { // prompt + reply + turn, four times
-			t.Error("wrong entry count after concurrent sends")
+		// prompt + reply + turn, four times — beside the accepted
+		// receipts of the sends that queued.
+		n := 0
+		for _, e := range open2(t, ctx, st, s).Entries() {
+			if _, receipt := e.(thread.ReceiptEntry); !receipt {
+				n++
+			}
+		}
+		if n != 4*3 {
+			t.Errorf("%d entries after concurrent sends, want 12", n)
 		}
 	})
 }

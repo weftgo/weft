@@ -42,7 +42,7 @@ const (
 	StepApprover = "approver" // the live chain step, consulted and bounded
 	StepPark     = "park"     // the request persisted, the turn ended pending
 	StepExpiry   = "expiry"   // an expired request denied
-	StepResume   = "resume"   // the boundary's resume run started; its TurnEntry (same RunID) is how it ended
+	StepResume   = "resume"   // the boundary's resume run: one entry "started" before the run, one "completed" or "failed" with its end
 	StepSigned   = "signed"   // a signed decision refused; Detail names why, no decision recorded
 )
 
@@ -1060,16 +1060,15 @@ func (s *Session) fireOnRequest(cr *chainResult) {
 // entry naming the grant in GrantID; a refused signed decision as a
 // StepSigned audit entry with no decision beside it.
 //
-// A resume reads as two entries sharing its run id: the StepResume
-// audit entry written before the run starts ("started", listing the
-// decisions it applies), and the run's own TurnEntry, written when it
-// ends — how it ended is the turn entry's to say (Err, Canceled,
-// StopReason, the calls it parked again). A started entry with no
-// turn entry after it is a resume that never finished: a crash, or a
-// run still in flight — or, the one case the run id does not follow,
-// a resume that re-ran after a context overflow, whose turn entry
-// carries the re-run's id. Turn entries of ordinary sends are not
-// part of the trail.
+// A resume reads as two StepResume audit entries: "started", written
+// before the run starts and listing the decisions it applies, and
+// "completed" or "failed" (Detail carrying the error), written in the
+// same atomic append as the resume's turn entry. Each carries the run
+// id it was written under; they agree unless the resume re-ran after a
+// context overflow, where the second names the re-run. A started entry
+// with no second entry after it is a resume that never finished: a
+// crash, or a run still in flight. Turn entries are not part of the
+// trail — the turn's ledger is Entries'.
 //
 // The trail is an index of the session's log, not evidence that
 // stands on its own: entries are plain appended lines, unsigned and
@@ -1081,21 +1080,11 @@ func (s *Session) fireOnRequest(cr *chainResult) {
 func (s *Session) Audit() []Entry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	resumes := map[string]bool{} // the run ids of the resumes the trail has seen start
 	var out []Entry
 	for _, e := range s.order {
 		switch e := e.(type) {
-		case ApprovalAuditEntry:
-			if e.Step == StepResume {
-				resumes[e.RunID] = true
-			}
+		case ApprovalAuditEntry, ApprovalRequestEntry, ApprovalDecisionEntry, GrantEntry, GrantRevokedEntry:
 			out = append(out, cloneEntry(e))
-		case ApprovalRequestEntry, ApprovalDecisionEntry, GrantEntry, GrantRevokedEntry:
-			out = append(out, cloneEntry(e))
-		case TurnEntry:
-			if resumes[e.RunID] {
-				out = append(out, cloneEntry(e))
-			}
 		}
 	}
 	return out

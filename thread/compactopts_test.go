@@ -74,6 +74,7 @@ func TestContextWindowFiresTrigger(t *testing.T) {
 			if _, err := turn.Wait(); err != nil {
 				t.Fatal(err)
 			}
+			_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 		}
 		waitFor(t, "an automatic compaction", func() bool { return hasCompaction(s) > 0 })
 		for _, e := range s.Entries() {
@@ -105,6 +106,7 @@ func TestModelWindowsOverride(t *testing.T) {
 	if _, err := turn.Wait(); err != nil {
 		t.Fatal(err)
 	}
+	_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 	waitFor(t, "the per-model window to fire", func() bool { return hasCompaction(s) > 0 })
 
 	// A window for a different model leaves the session window-less.
@@ -134,6 +136,7 @@ func TestDisabledAndNoWindow(t *testing.T) {
 		if _, err := turn.Wait(); err != nil {
 			t.Fatal(err)
 		}
+		_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 	}
 	if hasCompaction(s) != 0 {
 		t.Error("Disabled session auto-compacted")
@@ -183,10 +186,11 @@ func TestTriggerFuncAndRateLimits(t *testing.T) {
 		if _, err := turn.Wait(); err != nil {
 			t.Fatal(err)
 		}
+		_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 	}
-	// The trigger runs in the session's runner goroutine; the waits
-	// above cover it (a Wait returns with the between-turn
-	// housekeeping done), and the counts read under the mutex.
+	// The trigger runs in the session's runner goroutine, between
+	// turns; the WaitIdle calls above cover it, and the counts read
+	// under the mutex.
 	waitFor(t, "the custom trigger to be consulted", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
@@ -639,6 +643,7 @@ func TestTrimmerOnlyPath(t *testing.T) {
 		if _, err := turn.Wait(); err != nil {
 			t.Fatal(err)
 		}
+		_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 		waitFor(t, "the trim record", func() bool {
 			for _, e := range s.Entries() {
 				if c, ok := e.(thread.CompactionEntry); ok && c.Reason == thread.ReasonTrim {

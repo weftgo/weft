@@ -278,8 +278,6 @@ func ExampleSession_Audit() {
 			fmt.Println("step:", e.Step, e.Outcome)
 		case thread.ApprovalDecisionEntry:
 			fmt.Println("decision:", e.Outcome, "by", e.Who, "via", e.Via, "-", e.Reason)
-		case thread.TurnEntry:
-			fmt.Println("resume ended:", e.StopReason)
 		}
 	}
 	// Output:
@@ -287,7 +285,7 @@ func ExampleSession_Audit() {
 	// step: park parked
 	// decision: deny by avi via user - change freeze
 	// step: resume started
-	// resume ended: stop
+	// step: resume completed
 }
 
 // With AutoResume off the caller drives the boundary: decisions are

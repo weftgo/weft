@@ -70,7 +70,7 @@ func receiptStatus(rs []thread.ReceiptEntry) map[string]string {
 // A steer sent while a parallel tool batch runs is delivered after the
 // batch: every call of the batch keeps its result beside it, the
 // delivered message lands after the tool message, and the receipts
-// tell the story (plan §6; ADR 0019 §2.2).
+// tell the story (ADR 0019 §2).
 func TestSteerDuringParallelBatch(t *testing.T) {
 	ctx := context.Background()
 	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
@@ -193,7 +193,7 @@ func TestSteerAtFinalStepRedirects(t *testing.T) {
 
 // A steer never resolves a parked call: a run that ends at the
 // approval boundary leaves the steer undelivered, and it defers to a
-// follow-up that runs once the boundary resolves (plan §6). A steer
+// follow-up that runs once the boundary resolves. A steer
 // sent while only the boundary is open defers at once.
 func TestSteerVsApprovals(t *testing.T) {
 	ctx := context.Background()
@@ -261,7 +261,7 @@ func TestSteerVsApprovals(t *testing.T) {
 }
 
 // A steer that meets a StopWhen end defers: an intended end stays an
-// end, and the message runs as the follow-up turn (plan §6).
+// end, and the message runs as the follow-up turn.
 func TestSteerDeferredAtStopWhen(t *testing.T) {
 	ctx := context.Background()
 	submit := weft.Tool("submit", "", func(_ context.Context, _ struct{}) (string, error) {
@@ -411,8 +411,21 @@ func TestAsOverridesPolicy(t *testing.T) {
 	if !found {
 		t.Fatal("As(Queue) send never ran as its own turn")
 	}
-	if rs := receipts(s2); len(rs) != 0 {
-		t.Errorf("a Queue-policy send writes no receipts; got %+v", rs)
+	// A Queue send on a busy session is accepted durably — one accepted
+	// receipt naming the prompt entry its turn then wrote — and nothing
+	// of the steering kind.
+	rs := receipts(s2)
+	if len(rs) != 1 || rs[0].Status != thread.ReceiptAccepted || rs[0].Msg == nil || rs[0].Msg.Text() != "hold this one" {
+		t.Fatalf("a queued send's receipts = %+v, want one accepted receipt carrying the message", rs)
+	}
+	started := false
+	for _, e := range s2.Entries() {
+		if me, ok := e.(thread.MessageEntry); ok && me.ID == rs[0].Turn {
+			started = me.Message.Text() == "hold this one"
+		}
+	}
+	if !started {
+		t.Errorf("the accepted receipt names %q, which is not the send's prompt entry", rs[0].Turn)
 	}
 }
 
@@ -479,8 +492,14 @@ func TestClearQueue(t *testing.T) {
 			t.Error("a dropped steer reached the model's context")
 		}
 	}
-	if res, err := steerTurn.Wait(); res != nil || err != nil {
-		t.Errorf("a dropped steer's Turn finished with %v, %v; want nil, nil", res, err)
+	if res, err := steerTurn.Wait(); res != nil || !errors.Is(err, thread.ErrDropped) {
+		t.Errorf("a dropped steer's Turn finished with %v, %v; want nil and ErrDropped", res, err)
+	}
+	if got := steerTurn.Outcome(); got != thread.TurnDropped {
+		t.Errorf("a dropped steer's Outcome = %v, want dropped", got)
+	}
+	if steerTurn.Next() != nil {
+		t.Error("a dropped steer has a follow-up")
 	}
 }
 
@@ -495,8 +514,9 @@ func TestSteerRejectsNonUserRole(t *testing.T) {
 	agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
 		if _, ok := ev.(weft.ToolStart); ok {
 			once.Do(func() {
-				if _, err := steerRef.Send(ctx, weft.Message{Role: weft.RoleAssistant, Content: []weft.Part{weft.TextPart{Text: "I speak for the model"}}}); err == nil {
-					t.Error("an assistant-role steer was accepted")
+				_, err := steerRef.Send(ctx, weft.Message{Role: weft.RoleAssistant, Content: []weft.Part{weft.TextPart{Text: "I speak for the model"}}})
+				if !errors.Is(err, weft.ErrInvalidSteer) {
+					t.Errorf("an assistant-role steer: %v, want weft.ErrInvalidSteer", err)
 				}
 			})
 		}
@@ -518,8 +538,8 @@ func TestSteeringRejectedInRunOptions(t *testing.T) {
 	ctx := context.Background()
 	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script(wefttest.Say("x"))))
 	_, err := s.Send(ctx, weft.User("go"), thread.RunOptions(weft.Steering(func(context.Context, weft.SteerPoint) []weft.Message { return nil })))
-	if err == nil || !strings.Contains(err.Error(), "weft.Steering") {
-		t.Fatalf("err = %v, want the refusal naming weft.Steering", err)
+	if !errors.Is(err, weft.ErrInvalidRunOption) || !strings.Contains(err.Error(), "weft.Steering") {
+		t.Fatalf("err = %v, want weft.ErrInvalidRunOption naming weft.Steering", err)
 	}
 	if rs := receipts(s); len(rs) != 0 {
 		t.Errorf("a refused Send wrote receipts: %+v", rs)

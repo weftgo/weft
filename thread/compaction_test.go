@@ -251,6 +251,7 @@ func TestCompactionNoWindow(t *testing.T) {
 			if _, err := turn.Wait(); err != nil {
 				t.Fatal(err)
 			}
+			_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 		}
 		// Both turns ran; the two trigger sites each found no window,
 		// and exactly one warning was logged — never one per turn.
@@ -840,6 +841,7 @@ func TestLastInputCarriesTheUnreportedTail(t *testing.T) {
 		if _, err := turn.Wait(); err != nil {
 			t.Fatal(err)
 		}
+		_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 		var te *thread.TurnEntry
 		for _, e := range s.Entries() {
 			if x, ok := e.(thread.TurnEntry); ok {
@@ -899,6 +901,9 @@ func TestTriggerStandsDownOnAnOffPathMark(t *testing.T) {
 	if _, err := turn.Wait(); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.WaitIdle(ctx); err != nil { // the post-turn trigger follows the turn
+		t.Fatal(err)
+	}
 	compacted := false
 	for _, e := range s.Entries() {
 		if c, ok := e.(thread.CompactionEntry); ok && c.Reason == thread.ReasonThreshold {
@@ -929,6 +934,7 @@ func TestTriggerStandsDownOnAnOffPathMark(t *testing.T) {
 	} else if _, err := turn.Wait(); err == nil {
 		t.Fatal("the scripted failure did not fail")
 	}
+	_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 	for _, e := range s.Entries() {
 		if c, ok := e.(thread.CompactionEntry); ok && c.Reason == thread.ReasonThreshold && !before[c.ID] {
 			t.Errorf("threshold compaction %s ran off a mark that is not on the path", c.ID)
@@ -1002,6 +1008,7 @@ func TestForkMintsRunIDsPastTheCopiedTurns(t *testing.T) {
 		if _, err := turn.Wait(); err != nil {
 			t.Fatal(err)
 		}
+		_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 		f, err := s.Fork(ctx, s.Leaf())
 		if err != nil {
 			t.Fatal(err)
@@ -1317,6 +1324,7 @@ func TestTriggerReArmsAfterTheBoundaryResolves(t *testing.T) {
 	if _, err := turn.Wait(); err != nil {
 		t.Fatal(err)
 	}
+	_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 	if got := s.Pending(); len(got) != 1 {
 		t.Fatalf("Pending after the parked turn: got %d, want 1", len(got))
 	}
@@ -1332,6 +1340,9 @@ func TestTriggerReArmsAfterTheBoundaryResolves(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := rt.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WaitIdle(ctx); err != nil { // the post-turn trigger follows the turn
 		t.Fatal(err)
 	}
 	rearmed := false

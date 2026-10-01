@@ -304,7 +304,7 @@ func TestBranchBackToDecisionNeedsNewDecision(t *testing.T) {
 	// The resume's audit entry lists the decision it applied.
 	applied := false
 	for _, e := range s.Audit() {
-		if a, ok := e.(thread.ApprovalAuditEntry); ok && a.Step == thread.StepResume {
+		if a, ok := e.(thread.ApprovalAuditEntry); ok && a.Step == thread.StepResume && a.Outcome == "started" {
 			applied = len(a.Decisions) == 1 && a.Decisions[0] == decision.ID
 		}
 	}

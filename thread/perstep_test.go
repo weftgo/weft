@@ -347,14 +347,29 @@ func TestPerStepOverflowAttemptsKeepTheirOwnLines(t *testing.T) {
 		if res.Text() != "recovered after compaction" {
 			t.Fatalf("reply = %q, want the re-run's answer", res.Text())
 		}
-		turns := 0
-		for _, e := range s.Entries() {
-			if _, ok := e.(thread.TurnEntry); ok {
-				turns++
-			}
+		// Three turn entries: the first turn's, the failed attempt's own
+		// ledger — its run id, the overflow, the step it completed and
+		// paid for, the re-run it led to — and the re-run's.
+		tes := turnEntries(s)
+		if len(tes) != 3 {
+			t.Fatalf("turn entries = %d, want 3 (the first turn, the failed attempt, the re-run)", len(tes))
 		}
-		if turns != 2 {
-			t.Errorf("turn entries = %d, want 2 (the failed attempt records none on its own)", turns)
+		attempt, rerun := tes[1], tes[2]
+		if attempt.RunID != s.ID()+"-t2" || attempt.ReRun != s.ID()+"-t3" || rerun.RunID != s.ID()+"-t3" {
+			t.Errorf("run ids: attempt %q (re-run %q), re-run %q; want -t2 (-t3), -t3", attempt.RunID, attempt.ReRun, rerun.RunID)
+		}
+		if attempt.Err == "" || attempt.Steps != 1 || attempt.Usage.InputTokens != 10 {
+			t.Errorf("the attempt's ledger = %+v, want the overflow, one step and its usage", attempt)
+		}
+		if rerun.Err != "" || rerun.ReRun != "" {
+			t.Errorf("the re-run's entry = %+v", rerun)
+		}
+		// The attempt's tokens were spent: the ledger counts them. Four
+		// model steps of 10 input tokens ran as turns (the first turn,
+		// the attempt's step, the re-run) — the summarizer's is its own
+		// bucket.
+		if u := s.Usage(); u.Turns.InputTokens != 30 {
+			t.Errorf("Usage.Turns = %+v, want the attempt's step counted (30 input tokens)", u.Turns)
 		}
 		// The failed attempt's emitted step exists exactly once — on its
 		// own branch — and never on the path the walk reads.

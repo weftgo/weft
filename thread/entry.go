@@ -34,6 +34,12 @@ type MessageEntry struct {
 	ParentID string       `json:"parent,omitempty"`
 	Created  time.Time    `json:"created"`
 	Message  weft.Message `json:"message"`
+	// RunID is set on a turn's prompt entry: the run id minted for the
+	// turn the message starts (<session>-t<n>), written before the run
+	// does anything — so the id is on the record even when the turn's
+	// end never lands, and a reopened session never mints it again.
+	// Empty on every other message entry.
+	RunID string `json:"run_id,omitempty"`
 }
 
 // TurnEntry is the per-turn ledger: the run's id (<session>-t<n>), its
@@ -42,6 +48,13 @@ type MessageEntry struct {
 // was canceled. It records the turn's outcome, never its content — the
 // messages are MessageEntries — and it does not enter the model's
 // context.
+//
+// One run, one turn entry. A Send is one entry — except a turn that
+// overflowed and re-ran (ADR 0020 §5), which leaves two: the failed
+// attempt's, under the attempt's run id, with the overflow in Err, the
+// usage of the steps it completed, and ReRun naming the run that
+// followed; then the re-run's own. Session.Usage sums both: the
+// attempt's tokens were spent.
 type TurnEntry struct {
 	ID         string              `json:"id"`
 	ParentID   string              `json:"parent,omitempty"`
@@ -52,7 +65,20 @@ type TurnEntry struct {
 	Steps      int                 `json:"steps,omitempty"`
 	Err        string              `json:"err,omitempty"`
 	Pending    []weft.ToolCallPart `json:"pending,omitempty"`
-	Canceled   bool                `json:"canceled,omitempty"`
+	// Canceled marks a turn whose context ended — canceled (the caller
+	// walked away, an Interrupt or Rollback send, Close) or past its
+	// deadline. Err says which.
+	Canceled bool `json:"canceled,omitempty"`
+	// Policy is the busy policy the turn's Send was called under —
+	// "queue", "reject", "steer", "interrupt" or "rollback"
+	// (Policy.String) — captured at Send, the session's or the Send's
+	// own (As). A steer's follow-up turn records "steer". Empty on a
+	// resume turn, which no Send started, and on entries written
+	// before the field existed.
+	Policy string `json:"policy,omitempty"`
+	// ReRun, on the entry of an overflow attempt that was re-run, is
+	// the run id of the re-run — written before the re-run starts.
+	ReRun string `json:"rerun,omitempty"`
 	// LastInput is the compaction trigger's baseline for the turn:
 	// the provider-reported input of the run's final model step, plus
 	// the estimated tokens of the tail that report cannot cover (the
@@ -382,18 +408,30 @@ type GrantRevokedEntry struct {
 	GrantID  string    `json:"grant_id"`
 }
 
-// ReceiptEntry is the steering receipt (ADR 0019): the
-// journey of one message accepted while the session was busy under
-// the Steer policy. One entry records acceptance — Status "queued",
-// the message on Msg — and a second, linked by Receipt, records the
-// fate: "delivered" (the running run's steering drain took it; RunID
-// names the run, and the message landed in that run's transcript),
-// "deferred" (it runs as the next turn instead — a StopWhen end, an
-// open approval boundary, or the run ended before the drain; Turn
-// names the follow-up turn's receipt), or "dropped" (ClearQueue).
-// Receipt entries never enter the model's context: the message
-// reaches the model through the run that delivered it or the
-// follow-up turn that ran it, exactly once.
+// ReceiptEntry is the receipt of a message accepted while the session
+// was busy (ADR 0019, ADR 0011 §4): the durable record that the
+// session took it, and of what became of it. Receipt entries never
+// enter the model's context: the message reaches the model through the
+// run that delivered it or the turn that ran it, exactly once.
+//
+// A steer — a Send under the Steer policy — is two entries. One
+// records acceptance: Status "queued", the message on Msg. A second,
+// linked by Receipt, records the fate: "delivered" (the running run's
+// steering drain took it; RunID names the run, the message landed in
+// that run's transcript, and Unanswered says the run ended before the
+// model answered it), "deferred" (it runs as the next turn instead — a
+// StopWhen end, an open approval boundary, or the run ended before the
+// drain; Turn names the follow-up turn's prompt entry), or "dropped"
+// (ClearQueue).
+//
+// A queued send — a Send that waits for a turn of its own: the Queue
+// policy on a busy session, an interrupting send, a deferred steer's
+// follow-up — is one entry: Status "accepted", the message on Msg,
+// Turn the id its prompt entry will take, RunID the run id minted for
+// it. It is settled by that prompt entry landing (the turn started),
+// or by a "dropped" entry linked by Receipt (ClearQueue, a refused
+// interrupt). An accepted receipt with neither is a send the writer
+// never got to: Open restores it to the queue.
 type ReceiptEntry struct {
 	ID       string        `json:"id"`
 	ParentID string        `json:"parent,omitempty"`
@@ -403,22 +441,37 @@ type ReceiptEntry struct {
 	Msg      *weft.Message `json:"msg,omitempty"`
 	RunID    string        `json:"run_id,omitempty"`
 	Turn     string        `json:"turn,omitempty"`
+	// Unanswered, on a delivered receipt, marks a steer the run took
+	// and never answered (ADR 0019 §5): the run failed — a budget, a
+	// model error, a cancellation — before another model step
+	// completed. The message is in that run's recorded transcript, so
+	// the next turn's model sees it; no reply to it exists.
+	Unanswered bool `json:"unanswered,omitempty"`
 }
 
 // Receipt statuses — the wire values, pinned by the format-3 goldens.
+// "accepted" joined them without a format bump: a reader from before
+// it restores only "queued" receipts and reads an accepted one as a
+// receipt it has nothing to do for — the queued send is not run by
+// that reader, exactly as before the status existed, and nothing is
+// misread.
 const (
-	// ReceiptQueued marks acceptance: the message is held for the
-	// running turn's steering drain.
+	// ReceiptQueued marks a steer's acceptance: the message is held
+	// for the running turn's steering drain.
 	ReceiptQueued = "queued"
+	// ReceiptAccepted marks a queued send's acceptance: the message is
+	// held for a turn of its own, whose prompt entry will take the id
+	// in Turn.
+	ReceiptAccepted = "accepted"
 	// ReceiptDelivered marks a message the running run drained: it is
 	// an ordinary transcript message of that run, named by RunID.
 	ReceiptDelivered = "delivered"
-	// ReceiptDeferred marks a message that became a follow-up turn
-	// (Turn names its receipt): a StopWhen end, an open approval
+	// ReceiptDeferred marks a steer that became a follow-up turn
+	// (Turn names its prompt entry): a StopWhen end, an open approval
 	// boundary, or the run ended before the drain.
 	ReceiptDeferred = "deferred"
-	// ReceiptDropped marks a message removed by ClearQueue before
-	// delivery: it never reaches the model.
+	// ReceiptDropped marks a message removed before it reached a
+	// model: ClearQueue, or an interrupting send that was refused.
 	ReceiptDropped = "dropped"
 )
 

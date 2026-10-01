@@ -166,10 +166,6 @@ func run(w io.Writer, dir string) error {
 			if err := p(w, line...); err != nil {
 				return err
 			}
-		case thread.TurnEntry: // how the resume the trail saw start ended
-			if err := p(w, "resume ended:", e.StopReason, "error:", e.Err != ""); err != nil {
-				return err
-			}
 		}
 	}
 	return nil

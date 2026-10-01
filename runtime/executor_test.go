@@ -209,7 +209,17 @@ func TestValidate(t *testing.T) {
 		{"unknown model", func(c *command) { c.Overrides.Model = "gpt-9" }, "not on this runtime's allow-list"},
 		{"raised max_steps", func(c *command) { c.Overrides.Options = map[string]float64{"max_steps": 9} }, "raises the agent's cap"},
 		{"raised parallelism", func(c *command) { c.Overrides.Options = map[string]float64{"parallelism": 8} }, "raises the agent's cap"},
-		{"engine scripted", func(c *command) { c.Engine = "scripted" }, "not yet available"},
+		{"scripted without a source", func(c *command) { c.Engine = "scripted" }, "source run is required"},
+		{"scripted with an instructions override", func(c *command) {
+			c.Engine = "scripted"
+			c.Source = &sourceSpec{RunID: "s_x", FromStep: 0}
+			c.Overrides.Instructions = "new prompt"
+		}, "silently replay"},
+		{"scripted with a model override", func(c *command) {
+			c.Engine = "scripted"
+			c.Source = &sourceSpec{RunID: "s_x", FromStep: 0}
+			c.Overrides.Model = "glm-5.3-flash"
+		}, "silently replay"},
 		{"thread fork", func(c *command) { c.Thread = "fork" }, "not yet available"},
 		{"transcript edits without a source", func(c *command) { c.TranscriptEdits = []transcriptEdit{{Step: 1}} }, "need a source run"},
 		{"side-effects allow not opted in", func(c *command) {

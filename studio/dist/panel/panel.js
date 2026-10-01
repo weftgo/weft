@@ -450,7 +450,7 @@ select.weft-input { width: auto; min-width: 120px; }
 `;
 //#endregion
 //#region src/lib/api.ts
-function ee(e) {
+function T(e) {
 	return { batches: e.batches.map((e) => ({
 		index: e.index,
 		step: e.step,
@@ -459,26 +459,26 @@ function ee(e) {
 }
 //#endregion
 //#region src/lib/live.ts
-function te(e) {
+function ee(e) {
 	let [[t, n]] = Object.entries(e);
 	return `${encodeURIComponent(t)}=${encodeURIComponent(n)}`;
 }
 //#endregion
 //#region src/panel/client.ts
-function T(e, t) {
+function E(e, t) {
 	return new URL(t, new URL("api/", e.base)).toString();
 }
-var E = class extends Error {
+var D = class extends Error {
 	status;
 	code;
 	constructor(e, t, n) {
 		super(n), this.status = e, this.code = t;
 	}
 };
-async function D(e, t, n) {
+async function O(e, t, n) {
 	let r = { Accept: "application/json" };
 	e.token && (r.Authorization = `Bearer ${e.token}`);
-	let i = await fetch(T(e, t), {
+	let i = await fetch(E(e, t), {
 		headers: r,
 		signal: n
 	});
@@ -488,52 +488,52 @@ async function D(e, t, n) {
 			let n = await i.json();
 			n.error && (e = n.error.code ?? e, t = n.error.message ?? t);
 		} catch {}
-		throw new E(i.status, e, t);
+		throw new D(i.status, e, t);
 	}
 	return await i.json();
 }
-function O(e, t) {
-	return D(e, "meta", t);
+function te(e, t) {
+	return O(e, "meta", t);
 }
 function k(e, t, n) {
 	let r = new URLSearchParams(t).toString();
-	return D(e, `runs${r ? `?${r}` : ""}`, n);
+	return O(e, `runs${r ? `?${r}` : ""}`, n);
 }
 function A(e, t, n) {
-	return D(e, `runs/${encodeURIComponent(t)}`, n);
+	return O(e, `runs/${encodeURIComponent(t)}`, n);
 }
 function j(e, t, n, r) {
-	return D(e, `runs/${encodeURIComponent(t)}/events?after=${n}&limit=500`, r);
+	return O(e, `runs/${encodeURIComponent(t)}/events?after=${n}&limit=500`, r);
 }
 function M(e, t, n) {
-	return D(e, `runs/${encodeURIComponent(t)}/transcript`, n).then(ee);
+	return O(e, `runs/${encodeURIComponent(t)}/transcript`, n).then(T);
 }
 function N(e, t, n) {
-	return D(e, `runs/${encodeURIComponent(t)}/spans`, n);
+	return O(e, `runs/${encodeURIComponent(t)}/spans`, n);
 }
 function P(e, t, n) {
 	let r = new URLSearchParams(t).toString();
-	return D(e, `sessions${r ? `?${r}` : ""}`, n);
+	return O(e, `sessions${r ? `?${r}` : ""}`, n);
 }
 function F(e, t) {
-	return D(e, "runtimes", t);
+	return O(e, "runtimes", t);
 }
-function ne(e, t) {
-	return I(e, "playground/runs", t);
+function I(e, t) {
+	return R(e, "playground/runs", t);
 }
-function re(e, t) {
-	return D(e, `playground/commands/${encodeURIComponent(t)}`);
+function L(e, t) {
+	return O(e, `playground/commands/${encodeURIComponent(t)}`);
 }
-function ie(e, t, n) {
-	return I(e, `runs/${encodeURIComponent(t)}/approvals`, n);
+function ne(e, t, n) {
+	return R(e, `runs/${encodeURIComponent(t)}/approvals`, n);
 }
-async function I(e, t, n) {
+async function R(e, t, n) {
 	let r = {
 		Accept: "application/json",
 		"Content-Type": "application/json"
 	};
 	e.token && (r.Authorization = `Bearer ${e.token}`);
-	let i = await fetch(T(e, t), {
+	let i = await fetch(E(e, t), {
 		method: "POST",
 		headers: r,
 		body: JSON.stringify(n)
@@ -544,14 +544,14 @@ async function I(e, t, n) {
 			let n = await i.json();
 			n.error && (e = n.error.code ?? e, t = n.error.message ?? t);
 		} catch {}
-		throw new E(i.status, e, t);
+		throw new D(i.status, e, t);
 	}
 	return await i.json();
 }
-function L(e, t) {
-	let n = new URLSearchParams(te(t.selector));
+function z(e, t) {
+	let n = new URLSearchParams(ee(t.selector));
 	n.set("kinds", (t.kinds ?? ["event", "run"]).join(",")), e.token && n.set("token", e.token);
-	let r = T(e, `live?${n.toString()}`), i = !1, a = /* @__PURE__ */ new Set(), o = new EventSource(r);
+	let r = E(e, `live?${n.toString()}`), i = !1, a = /* @__PURE__ */ new Set(), o = new EventSource(r);
 	return o.addEventListener("record", (e) => {
 		let n = JSON.parse(e.data), r = `${n.run_id}\u0000${n.kind}\u0000${n.pos}`;
 		if (a.has(r)) return;
@@ -585,11 +585,11 @@ function L(e, t) {
 }
 //#endregion
 //#region src/panel/playground.ts
-function ae(e, t) {
+function re(e, t) {
 	let n = /-t(\d+)$/.exec(e);
 	return `${n ? `t${n[1]}` : e.slice(-8)}·x${t + 1}`;
 }
-function R(e, t) {
+function ie(e, t) {
 	let n = Object.entries(e.tools).filter(([, e]) => e).map(([e]) => e), r = {};
 	e.instructions && (r.instructions = e.instructions), n.length && n.length < Object.keys(e.tools).length && (r.tools_enabled = n), e.model && (r.model = e.model), e.thinking && (r.thinking = e.thinking);
 	let i = {
@@ -611,7 +611,7 @@ function R(e, t) {
 		...e.content ? { content: e.content } : {}
 	}))), e.step === 0 && e.input && (i.input = e.input), t && (i.public_id = t), i;
 }
-function z(e, t) {
+function ae(e, t) {
 	let n = e.filter((e) => e.agents.some((e) => e.name === t));
 	return n.length ? n[0] : e[0] ?? null;
 }
@@ -722,7 +722,7 @@ var q = class {
 	async start() {
 		let e;
 		try {
-			e = await O(this.ep);
+			e = await te(this.ep);
 		} catch {
 			return this.state.gone = !0, !1;
 		}
@@ -738,7 +738,7 @@ var q = class {
 				this.state.live = !0, this.emit();
 				return;
 			}
-			this.scopeSub = L(this.ep, {
+			this.scopeSub = z(this.ep, {
 				selector: { public_id: this.publicId },
 				kinds: ["event", "run"],
 				onRun: (e) => this.onRunFrame(e),
@@ -830,7 +830,7 @@ var q = class {
 		}
 	}
 	follow(e) {
-		this.runSub = L(this.ep, {
+		this.runSub = z(this.ep, {
 			selector: { run: e },
 			kinds: [
 				"event",
@@ -898,7 +898,7 @@ var q = class {
 			if (this.disposed) return;
 			this.state.runtimes = r;
 		}
-		let i = z(r, n.agent), a = i?.agents.find((e) => e.name === n.agent);
+		let i = ae(r, n.agent), a = i?.agents.find((e) => e.name === n.agent);
 		if (!i || !a) return;
 		let o = {};
 		for (let e of a.tools) o[e.name] = !0;
@@ -932,7 +932,7 @@ var q = class {
 		if (!e) return;
 		let t;
 		try {
-			t = await ne(this.ep, R(e, this.publicId));
+			t = await I(this.ep, ie(e, this.publicId));
 		} catch (e) {
 			this.setExperimentError(e instanceof Error ? e.message : String(e));
 			return;
@@ -943,7 +943,7 @@ var q = class {
 			state: "queued",
 			runID: "",
 			error: null,
-			label: ae(e.runId, n),
+			label: re(e.runId, n),
 			sourceText: oe(this.state.turn),
 			row: null,
 			events: [],
@@ -956,7 +956,7 @@ var q = class {
 		if (!r || !r.runID) return;
 		let i;
 		try {
-			i = await ie(this.ep, r.runID, {
+			i = await ne(this.ep, r.runID, {
 				call_id: e,
 				decision: t,
 				content: n
@@ -1002,7 +1002,7 @@ var q = class {
 			if (this.disposed) return;
 			let t;
 			try {
-				t = await re(this.ep, e);
+				t = await L(this.ep, e);
 			} catch {
 				this.schedulePoll(e);
 				return;
@@ -1026,7 +1026,7 @@ var q = class {
 		this.pollTimer = setTimeout(() => this.trackCommand(e), 700);
 	}
 	followExperiment(e) {
-		this.expSub = L(this.ep, {
+		this.expSub = z(this.ep, {
 			selector: { run: e },
 			kinds: [
 				"event",
@@ -1299,7 +1299,11 @@ var ue = class extends HTMLElement {
 		let y = b("option", void 0, "park");
 		y.value = "park", _.appendChild(y);
 		let x = b("option", void 0, "allow (opted-in tools only)");
-		if (x.value = "allow", _.appendChild(x), _.value = t.sideEffects, _.addEventListener("change", () => this.model?.setDraft({ sideEffects: _.value })), g.appendChild(_), o.appendChild(g), t.step > 0 && this.model?.state.turn) {
+		x.value = "allow", _.appendChild(x), _.value = t.sideEffects, _.addEventListener("change", () => this.model?.setDraft({ sideEffects: _.value })), g.appendChild(_);
+		let S = b("select", "weft-input"), C = b("option", void 0, "engine: live");
+		C.value = "live", S.appendChild(C);
+		let w = b("option", void 0, "scripted (zero tokens)");
+		if (w.value = "scripted", S.appendChild(w), S.value = t.engine, S.addEventListener("change", () => this.model?.setDraft({ engine: S.value })), g.appendChild(S), o.appendChild(g), t.step > 0 && this.model?.state.turn) {
 			let e = this.model.state.turn, n = b("div", "weft-field");
 			n.appendChild(b("span", void 0, `Transcript edits (steps 0..${t.step - 1} are kept)`));
 			for (let r of e.folded.steps) {
@@ -1346,8 +1350,8 @@ var ue = class extends HTMLElement {
 			}
 			n.childElementCount > 1 && o.appendChild(n);
 		}
-		let S = b("button", "weft-run-btn", "Run experiment ▶", { title: "POST /api/playground/runs — the runtime in your app executes it" });
-		return S.addEventListener("click", () => void this.model?.runExperiment()), o.appendChild(S), r.appendChild(o), r;
+		let T = b("button", "weft-run-btn", "Run experiment ▶", { title: "POST /api/playground/runs — the runtime in your app executes it" });
+		return T.addEventListener("click", () => void this.model?.runExperiment()), o.appendChild(T), r.appendChild(o), r;
 	}
 	experimentResult(e) {
 		let t = e.result;

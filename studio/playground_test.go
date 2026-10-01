@@ -293,7 +293,12 @@ func TestPlaygroundRunValidation(t *testing.T) {
 		{"raised max_steps", mutate(`"max_steps": 6`, `"max_steps": 60`), http.StatusForbidden, "only lower"},
 		{"raised parallelism", mutate(`"temperature": 0.2`, `"temperature": 0.2, "parallelism": 8`), http.StatusForbidden, "only lower"},
 		{"unknown option", mutate(`"temperature": 0.2`, `"temperature": 0.2, "timeout_ms": 500`), http.StatusBadRequest, "unknown option"},
-		{"engine scripted", mutate(`"engine": "live"`, `"engine": "scripted"`), http.StatusBadRequest, "not yet available"},
+		// The body carries an instructions override, so scripted hits
+		// §5.5's guard first; the source-run requirement is pinned in
+		// TestScriptedEngineEndToEnd.
+		{"scripted with an instructions override", mutate(`"engine": "live"`, `"engine": "scripted"`), http.StatusBadRequest, "silently replay"},
+		{"scripted with instructions", mutate(`"engine": "live"`, `"engine": "scripted", "source": {"run_id": "s_1-t1", "from_step": 0}`), http.StatusBadRequest, "silently replay"},
+		{"scripted with a model", mutate(`"engine": "live"`, `"engine": "scripted", "source": {"run_id": "s_1-t1", "from_step": 0}, "overrides": {"model": "glm-5.3-flash"}`), http.StatusBadRequest, "silently replay"},
 		{"thread fork", mutate(`"thread": "ephemeral"`, `"thread": "fork"`), http.StatusBadRequest, "not yet available"},
 		// An empty edit (neither tool_result nor content) is a shape
 		// error; the transcript-dependent rules are pinned in

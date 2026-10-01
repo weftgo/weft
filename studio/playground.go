@@ -148,8 +148,23 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 		switch req.Engine {
 		case "", "live":
 		case "scripted":
-			badRequest(w, r, "engine scripted is not yet available")
-			return
+			// §5.5's prompt trap: the replay key ignores the system
+			// prompt by design, so an instructions or model override
+			// would silently replay the old answer — refused. Changes
+			// that alter the key miss instead and fail the step with
+			// "no recorded turn".
+			if req.Overrides.Instructions != "" {
+				badRequest(w, r, "scripted engine with an instructions override would silently replay the old answer (WEFT-PLAYGROUND §5.5)")
+				return
+			}
+			if req.Overrides.Model != "" {
+				badRequest(w, r, "scripted engine with a model override would silently replay the old answer (WEFT-PLAYGROUND §5.5)")
+				return
+			}
+			if req.Source == nil || req.Source.RunID == "" {
+				badRequest(w, r, "the scripted engine replays a source run's recorded turns: a source run is required")
+				return
+			}
 		default:
 			badRequest(w, r, "unknown engine "+req.Engine)
 			return

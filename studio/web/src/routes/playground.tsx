@@ -113,6 +113,8 @@ function Playground() {
   const [model, setModel] = useState(search.model ?? "")
   const [thinking, setThinking] = useState(search.thinking ?? "")
   const [input, setInput] = useState(search.input ?? "")
+  const [engine, setEngine] = useState<"live" | "scripted">("live")
+  const [sideEffects, setSideEffects] = useState<"substitute" | "park" | "allow">("substitute")
   const [experiment, setExperiment] = useState<Experiment | null>(null)
   const [error, setError] = useState("")
 
@@ -151,8 +153,8 @@ function Playground() {
       source: sourceRunID ? { run_id: sourceRunID, from_step: fromStep } : null,
       input: fromStep === 0 && input ? input : undefined,
       overrides,
-      engine: "live",
-      side_effects: "substitute",
+      engine,
+      side_effects: sideEffects,
       thread: "ephemeral",
     }
     try {
@@ -274,6 +276,33 @@ function Playground() {
                     {l}
                   </option>
                 ))}
+              </select>
+            </label>
+          </div>
+          <div className="flex gap-2">
+            <label className="block flex-1 space-y-1">
+              <span className="text-xs text-muted-foreground">Engine</span>
+              <select
+                className="w-full rounded border bg-transparent px-1 py-1 text-xs"
+                value={engine}
+                onChange={(e) => setEngine(e.target.value as "live" | "scripted")}
+              >
+                <option value="live">live</option>
+                <option value="scripted">scripted (zero tokens)</option>
+              </select>
+            </label>
+            <label className="block flex-1 space-y-1">
+              <span className="text-xs text-muted-foreground">Side effects</span>
+              <select
+                className="w-full rounded border bg-transparent px-1 py-1 text-xs"
+                value={sideEffects}
+                onChange={(e) =>
+                  setSideEffects(e.target.value as "substitute" | "park" | "allow")
+                }
+              >
+                <option value="substitute">substitute</option>
+                <option value="park">park</option>
+                <option value="allow">allow</option>
               </select>
             </label>
           </div>

@@ -26,7 +26,20 @@ func (l *link) validate(cmd command) (string, bool) {
 	switch cmd.Engine {
 	case "", "live":
 	case "scripted":
-		return "engine scripted is not yet available", false
+		// §5.5's prompt trap: the replay key deliberately ignores the
+		// system prompt, so an instructions or model override would
+		// silently replay the old answer — refuse; a key-altering
+		// change (tools off, thinking, edited messages) misses instead
+		// and fails the step with "no recorded turn".
+		if cmd.Overrides.Instructions != "" {
+			return "scripted engine with an instructions override would silently replay the old answer", false
+		}
+		if cmd.Overrides.Model != "" {
+			return "scripted engine with a model override would silently replay the old answer", false
+		}
+		if cmd.Source == nil || cmd.Source.RunID == "" {
+			return "the scripted engine replays a source run's recorded turns: a source run is required", false
+		}
 	default:
 		return fmt.Sprintf("unknown engine %q", cmd.Engine), false
 	}
@@ -174,6 +187,26 @@ func (l *link) sourceMsgs(cmd command) []weft.Message {
 		return nil
 	}
 	return msgs
+}
+
+// scriptedFor builds the scripted engine over the command's source
+// transcript (nil when it cannot be resolved — the run then proceeds
+// on the agent's own model, the same honest degradation as an
+// unresolvable prefix, logged).
+func (l *link) scriptedFor(cmd command) weft.Model {
+	agent, ok := l.reg.agent(cmd.Agent)
+	if !ok || agent == nil {
+		return nil
+	}
+	msgs := l.sourceMsgs(cmd)
+	if len(msgs) == 0 {
+		return nil
+	}
+	var tools []string
+	for _, t := range agent.Tools() {
+		tools = append(tools, t.Name)
+	}
+	return newScriptedModel(msgs, tools)
 }
 
 // addUsage sums two usage rows (the substitute chain's budget counts
@@ -333,6 +366,13 @@ func (l *link) overrideOptions(cmd command) []weft.RunOption {
 	if m := o.Model; m != "" {
 		if alt, ok := l.reg.model(m); ok && alt != nil {
 			opts = append(opts, weft.UseModel(alt))
+		}
+	} else if cmd.Engine == "scripted" {
+		// The scripted engine (§5.5): the source run's recorded turns
+		// answer each model call, zero tokens. Keyed on the agent's
+		// registered tool list — a narrowed set misses, loudly.
+		if scripted := l.scriptedFor(cmd); scripted != nil {
+			opts = append(opts, weft.UseModel(scripted))
 		}
 	}
 	if lvl, ok := thinkingLevel(o.Thinking); ok {

@@ -456,6 +456,22 @@ func TestPlaygroundParkOnSpan(t *testing.T) {
 	}
 }
 
+// waitTranscript waits until the run's transcript contains text (the
+// Studio destination batches logs; a transcript route that answers
+// before the last records land is partial).
+func (e *e2e) waitTranscript(t *testing.T, runID, contains string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_, body := e.api(t, http.MethodGet, "/api/runs/"+runID+"/transcript", "")
+		if strings.Contains(body, contains) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the transcript of %s never contained %q", runID, contains)
+}
+
 // TestPlaygroundApprovalVerbs pins P1's approval controls end to end
 // (WEFT-DEVTOOLS §8.2): a parked experiment run's continue / skip /
 // resolve go through POST /api/runs/{id}/approvals to the runtime that
@@ -632,14 +648,7 @@ func TestPlaygroundContinueFromStepWithEdits(t *testing.T) {
 	// The Studio destination batches logs; the transcript route can
 	// answer before the turn's last records land. Wait for the final
 	// reply so the edit validates against the whole turn.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		_, body := e.api(t, http.MethodGet, "/api/runs/"+runID+"/transcript", "")
-		if strings.Contains(body, "anything else") {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	e.waitTranscript(t, runID, "anything else")
 	refunds.Store(0) // the app's own turn really refunded; the experiments must not
 
 	shutdown := runtime.Install(
@@ -755,4 +764,101 @@ func (e *e2e) commandText(t *testing.T, runID string) string {
 	}
 	t.Fatalf("the transcript of %s never carried an assistant reply", runID)
 	return ""
+}
+
+// TestScriptedEngineEndToEnd is §10.6's P2 scripted row: a scripted
+// command replays the source turn's recorded answers at zero tokens
+// (the reply is the recorded one), a scripted run without a source run
+// is a 400, and scripted + an instructions override is refused (the
+// §5.5 prompt trap — never a silent replay).
+func TestScriptedEngineEndToEnd(t *testing.T) {
+	e := newE2E(t)
+	// The app's own turn: lookup (step 0), reply (step 1).
+	script := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"4411"}`, ID: "c1"}),
+		wefttest.Say("Your order shipped yesterday."),
+		// The scripted replay consumes from the RECORD, not this
+		// script — a third turn here would prove nothing.
+	)
+	e.agent = weft.New(script, weft.Name("acme-support"),
+		weft.Instructions("You are Acme's support agent."),
+		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()),
+		func() *weft.ToolDef {
+			return weft.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
+				OrderID string `json:"order_id"`
+			}) (string, error) {
+				return "shipped", nil
+			}, weft.Replay(weft.ReplaySafe))
+		}())
+	runID := e.appTurn(t, "where is my order #4411?")
+
+	shutdown := runtime.Install(
+		runtime.Studio(e.ts.URL, ""),
+		runtime.Agents(e.agent),
+		runtime.AllowSideEffects("lookup_order"),
+		runtime.Enabled(true),
+	)
+	defer shutdown()
+	e.waitRuntime(t)
+	_, rtJSON := e.api(t, http.MethodGet, "/api/runtimes", "")
+	var runtimes struct {
+		Runtimes []struct {
+			ID string `json:"id"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal([]byte(rtJSON), &runtimes); err != nil || len(runtimes.Runtimes) == 0 {
+		t.Fatalf("runtimes: %v %s", err, rtJSON)
+	}
+	rt := runtimes.Runtimes[0].ID
+
+	// The scripted engine keys the record from the transcript: wait
+	// for the turn's last records to land.
+	e.waitTranscript(t, runID, "shipped yesterday")
+
+	// Scripted without a source: 400.
+	nosrc := fmt.Sprintf(`{"runtime": %q, "agent": "acme-support", "engine": "scripted"}`, rt)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", nosrc); code != http.StatusBadRequest {
+		t.Errorf("scripted without a source = %d %s, want 400", code, resp)
+	}
+	// Scripted + an instructions override: refused (§5.5).
+	trap := fmt.Sprintf(`{"runtime": %q, "agent": "acme-support", "engine": "scripted",
+	  "source": {"run_id": %q, "from_step": 0},
+	  "overrides": {"instructions": "a new prompt"}}`, rt, runID)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", trap); code != http.StatusBadRequest {
+		t.Errorf("scripted + prompt edit = %d %s, want 400", code, resp)
+	}
+
+	// The scripted re-run: the same input re-sent (§5.5: the engine
+	// fits experiments that don't change the model's input), the
+	// recorded answer, zero tokens.
+	body := fmt.Sprintf(`{
+	  "command_id": "cmd_scripted_1", "runtime": %q, "agent": "acme-support",
+	  "source": {"run_id": %q, "from_step": 0},
+	  "input": "where is my order #4411?",
+	  "engine": "scripted", "side_effects": "substitute", "thread": "ephemeral"
+	}`, rt, runID)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", body); code != http.StatusAccepted {
+		t.Fatalf("scripted run = %d %s", code, resp)
+	}
+	row := e.waitCommand(t, "cmd_scripted_1", "finished")
+	var st struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(row), &st); err != nil || !strings.HasPrefix(st.RunID, "pg_") {
+		t.Fatalf("scripted row = %s", row)
+	}
+	if os.Getenv("WEFT_DEBUG_E2E") != "" {
+		t.Logf("ROW %s", row)
+		_, body := e.api(t, http.MethodGet, "/api/runs/"+st.RunID, "")
+		t.Logf("RUN %s", body)
+		_, ev := e.api(t, http.MethodGet, "/api/runs/"+st.RunID+"/events?after=-1&limit=50", "")
+		t.Logf("EVENTS %s", ev)
+		_, tr := e.api(t, http.MethodGet, "/api/runs/"+st.RunID+"/transcript", "")
+		t.Logf("TRANSCRIPT %s", tr)
+		_, src := e.api(t, http.MethodGet, "/api/runs/"+runID+"/transcript", "")
+		t.Logf("SOURCE TRANSCRIPT %s", src)
+	}
+	if text := e.commandText(t, st.RunID); text != "Your order shipped yesterday." {
+		t.Errorf("scripted reply = %q, want the recorded one", text)
+	}
 }

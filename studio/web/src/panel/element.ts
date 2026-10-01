@@ -474,6 +474,19 @@ export class WeftDevtools extends HTMLElement {
     seSel.value = d.sideEffects
     seSel.addEventListener("change", () => this.model?.setDraft({ sideEffects: seSel.value as ExperimentDraft["sideEffects"] }))
     seRow.appendChild(seSel)
+    // The engine (§5.5): live, or scripted — the source run's recorded
+    // turns at zero tokens, refused with an instructions/model
+    // override (the prompt trap).
+    const engSel = el("select", "weft-input") as HTMLSelectElement
+    const engLive = el("option", undefined, "engine: live") as unknown as HTMLOptionElement
+    engLive.value = "live"
+    engSel.appendChild(engLive)
+    const engScripted = el("option", undefined, "scripted (zero tokens)") as unknown as HTMLOptionElement
+    engScripted.value = "scripted"
+    engSel.appendChild(engScripted)
+    engSel.value = d.engine
+    engSel.addEventListener("change", () => this.model?.setDraft({ engine: engSel.value as ExperimentDraft["engine"] }))
+    seRow.appendChild(engSel)
     body.appendChild(seRow)
 
     // The transcript edits (D2/D3): when continuing from a step, the

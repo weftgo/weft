@@ -81,16 +81,16 @@ func TestBudgetOpen100k(t *testing.T) {
 	}
 }
 
-// budgetList10k prices one List call over a 10k fleet — a page, the
-// count, the title search, and a meta filter — not a full cursor walk:
-// this backend's List is a fleet scan per call (every header decoded
-// and sorted in Go, then paged — Meta filtering needs the decoded
-// header, so the scan is the documented cost, and SQL-side paging
-// wants the v0.8 freeze's index work). A full walk pays the scan per
-// page, which is the caller's choice to make; Total answers "how
-// many" in one call. The timed part measured 2026-09-30 at well under
-// a second per call.
-const budgetList10k = 15 * time.Second
+// budgetList10k prices List over a 10k fleet: the full keyset walk —
+// a hundred pages of a hundred, each an index range read plus the
+// count — then the title search and a meta filter. The page no longer
+// costs a scan of the fleet (it used to decode and sort every header
+// per call, which made a full walk quadratic); what still reads every
+// row is the count, over an index, and a title search's pass over the
+// title column. Measured 2026-10-01 at ~0.17s for the whole walk, ~7s
+// under -race (the driver is transpiled C, and the detector prices
+// it); the bound covers a loaded box running the latter.
+const budgetList10k = 30 * time.Second
 
 func TestBudgetList10k(t *testing.T) {
 	ctx := context.Background()
@@ -101,25 +101,44 @@ func TestBudgetList10k(t *testing.T) {
 	}
 	for i := 0; i < 10_000; i++ {
 		h := thread.Header{ID: "s_l" + strconv.Itoa(i), Created: time.Now().UTC()}
+		if i == 0 {
+			h.Meta = map[string]string{"tier": "gold"}
+		}
 		if err := st.Create(ctx, h); err != nil {
 			t.Fatal(err)
 		}
 	}
 	start := time.Now()
-	page, err := thread.List(ctx, st, thread.Query{Limit: 100})
-	if err != nil {
-		t.Fatal(err)
+	seen := 0
+	q := thread.Query{Limit: 100}
+	for {
+		page, err := thread.List(ctx, st, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if page.Total != 10_000 {
+			t.Fatalf("Total = %d, want 10000", page.Total)
+		}
+		if len(page.Sessions) == 0 {
+			break
+		}
+		seen += len(page.Sessions)
+		last := page.Sessions[len(page.Sessions)-1]
+		q.Before, q.BeforeID = last.Created, last.ID
 	}
-	if len(page.Sessions) != 100 || page.Total != 10_000 {
-		t.Fatalf("page = %d sessions, total %d; want 100 of 10000", len(page.Sessions), page.Total)
+	if seen != 10_000 {
+		t.Fatalf("the keyset walk saw %d sessions, want 10000", seen)
 	}
 	if _, err := thread.List(ctx, st, thread.Query{Limit: 100, TitleSearch: "s_l1"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := thread.List(ctx, st, thread.Query{Limit: 100, Meta: map[string]string{"tier": "gold"}}); err != nil {
-		t.Fatal(err)
+	gold, err := thread.List(ctx, st, thread.Query{Limit: 100, Meta: map[string]string{"tier": "gold"}})
+	if err != nil || gold.Total != 1 || len(gold.Sessions) != 1 {
+		t.Fatalf("meta filter over the fleet: %d of %d, err %v; want the one gold session", len(gold.Sessions), gold.Total, err)
 	}
-	if d := time.Since(start); d > budgetList10k {
-		t.Errorf("list over 10k (page + count + title + meta) = %s, budget %s", d, budgetList10k)
+	d := time.Since(start)
+	t.Logf("list over 10k (full walk + title + meta) = %s", d)
+	if d > budgetList10k {
+		t.Errorf("list over 10k (full walk + title + meta) = %s, budget %s", d, budgetList10k)
 	}
 }

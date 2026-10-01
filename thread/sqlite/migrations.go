@@ -5,6 +5,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,13 +29,21 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-// migrations maps version → file name; the list is derived from the
-// embedded directory so a new .sql file is picked up by adding it.
-var migrations = func() map[int]string {
+// loadMigrations reads the embedded directory into version → file
+// name, so a new .sql file is picked up by adding it. It runs on every
+// Open rather than at package init: a malformed embed is an error Open
+// returns, never a panic at import.
+func loadMigrations() (map[int]string, error) {
 	entries, err := migrationsFS.ReadDir("migrations")
 	if err != nil {
-		panic("sqlite: embedded migrations unreadable: " + err.Error())
+		return nil, fmt.Errorf("sqlite: embedded migrations unreadable: %w", err)
 	}
+	return parseMigrations(entries)
+}
+
+// parseMigrations maps each .sql entry to its numeric version prefix.
+// A file without one, or two files claiming one version, is an error.
+func parseMigrations(entries []fs.DirEntry) (map[int]string, error) {
 	out := map[int]string{}
 	for _, e := range entries {
 		name := e.Name()
@@ -43,23 +52,24 @@ var migrations = func() map[int]string {
 		}
 		v, err := strconv.Atoi(strings.SplitN(name, "_", 2)[0])
 		if err != nil {
-			panic("sqlite: migration " + name + " must start with its numeric version")
+			return nil, fmt.Errorf("sqlite: migration %s must start with its numeric version", name)
+		}
+		if prev, dup := out[v]; dup {
+			return nil, fmt.Errorf("sqlite: migrations %s and %s claim the same version %d", prev, name, v)
 		}
 		out[v] = name
 	}
-	return out
-}()
+	return out, nil
+}
 
-func highestMigration() int {
+// sortedVersions returns the migration versions in apply order.
+func sortedVersions(migrations map[int]string) []int {
 	versions := make([]int, 0, len(migrations))
 	for v := range migrations {
 		versions = append(versions, v)
 	}
 	sort.Ints(versions)
-	if len(versions) == 0 {
-		return 0
-	}
-	return versions[len(versions)-1]
+	return versions
 }
 
 // ErrNewerSchema is returned by Open when the file's thread_migrations
@@ -159,6 +169,15 @@ func renameLegacyMigrations(db *sql.DB) error {
 // migrate applies pending migrations, each in its own transaction, and
 // refuses a schema ahead of this binary.
 func migrate(db *sql.DB) error {
+	migrations, err := loadMigrations()
+	if err != nil {
+		return err
+	}
+	versions := sortedVersions(migrations)
+	highest := 0
+	if len(versions) > 0 {
+		highest = versions[len(versions)-1]
+	}
 	if err := renameLegacyMigrations(db); err != nil {
 		return err
 	}
@@ -171,15 +190,10 @@ func migrate(db *sql.DB) error {
 	if err := db.QueryRow(`SELECT MAX(version) FROM thread_migrations`).Scan(&current); err != nil {
 		return err
 	}
-	if current.Valid && int(current.Int64) > highestMigration() {
+	if current.Valid && int(current.Int64) > highest {
 		return fmt.Errorf("%w: file has migration %d, this binary knows up to %d",
-			ErrNewerSchema, current.Int64, highestMigration())
+			ErrNewerSchema, current.Int64, highest)
 	}
-	versions := make([]int, 0, len(migrations))
-	for v := range migrations {
-		versions = append(versions, v)
-	}
-	sort.Ints(versions)
 	for _, v := range versions {
 		if current.Valid && int(current.Int64) >= v {
 			continue

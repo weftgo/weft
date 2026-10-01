@@ -132,7 +132,7 @@ func TestLegacyMigrationsTableRenamed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	buildLegacySchema1(t, path)
 
-	st, err := sqlite.Open(path) // the rename, then migration 0002
+	st, err := sqlite.Open(path) // the rename, then migrations 0002 and 0003
 	if err != nil {
 		t.Fatalf("Open on a legacy file: %v", err)
 	}
@@ -142,8 +142,8 @@ func TestLegacyMigrationsTableRenamed(t *testing.T) {
 	if !tableExists(t, path, "thread_migrations") {
 		t.Fatal("thread_migrations missing after Open")
 	}
-	if got := rowsOf(t, path, "thread_migrations"); len(got) != 2 {
-		t.Errorf("thread_migrations rows = %v, want the carried version 1 plus the applied 0002", got)
+	if got := rowsOf(t, path, "thread_migrations"); len(got) != 3 {
+		t.Errorf("thread_migrations rows = %v, want the carried version 1 plus the applied 0002 and 0003", got)
 	}
 	// The data survived, and the header's create-time public id still
 	// finds the session (S5's List row, on a renamed file).

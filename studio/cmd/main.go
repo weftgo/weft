@@ -8,12 +8,14 @@
 //
 // The database defaults to the otel local sink's path ($WEFT_DB or
 // ./.weft/weft.db), so the same file serves an in-process app and the
-// binary. --db sqlite://path picks another file; clickhouse:// is
-// wired in step 6b. The dev token is printed at start and fixed by
-// WEFT_STUDIO_TOKEN or --token.
+// binary. --db sqlite://path picks another file; --db
+// clickhouse://user:pass@host:9000/db serves the hosted backend
+// (obsdb/clickhouse, wired at merge-B). The dev token is printed at
+// start and fixed by WEFT_STUDIO_TOKEN or --token.
 //
 // This is its own module so the studio library never carries what
-// only the binary needs (the clickhouse driver joins it in 6b).
+// only the binary needs — it is the one place that imports the
+// clickhouse driver.
 package main
 
 import (
@@ -24,6 +26,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/weftgo/weft/obsdb/clickhouse"
 	"github.com/weftgo/weft/studio"
 )
 
@@ -31,7 +34,7 @@ const defaultAddr = "127.0.0.1:7331"
 
 func main() {
 	db := flag.String("db", "",
-		"`sqlite://path` (default: $WEFT_DB or ./.weft/weft.db); clickhouse:// arrives with step 6b")
+		"`sqlite://path` or `clickhouse://user:pass@host:9000/db` (default: $WEFT_DB or ./.weft/weft.db)")
 	addr := flag.String("addr", defaultAddr, "listen address (loopback by default)")
 	token := flag.String("token", "",
 		"API token (default: $WEFT_STUDIO_TOKEN, else a generated dev token printed at start)")
@@ -64,8 +67,10 @@ func serve(dbFlag, addr, tokenFlag string, stdout io.Writer) error {
 }
 
 // newServer builds setup B's server from the flags: the UI at the
-// root, ingest on, SQLite under --db or the default path, and the
-// token wall (the dev token by default).
+// root, ingest on, the database under --db or the default path, and
+// the token wall (the dev token by default). sqlite:// and the
+// default open the local sink's file; clickhouse:// opens the hosted
+// backend — this is the only place that imports the driver.
 func newServer(dbFlag, tokenFlag string) (*studio.Server, error) {
 	opts := []studio.Option{studio.Base("/"), studio.Token(srvToken(tokenFlag))}
 	switch {
@@ -74,10 +79,17 @@ func newServer(dbFlag, tokenFlag string) (*studio.Server, error) {
 	case strings.HasPrefix(dbFlag, "sqlite://"):
 		opts = append(opts, studio.Open(strings.TrimPrefix(dbFlag, "sqlite://")))
 	case strings.HasPrefix(dbFlag, "clickhouse://"):
-		return nil, fmt.Errorf(
-			"--db clickhouse:// is wired in step 6b (merge-B); use sqlite:// for now")
+		// The hosted backend (S3.6): Open takes the full DSN (scheme
+		// included), creates and versions the schema, so a fresh
+		// database is ready to serve. A closed port surfaces the
+		// driver's dial error here.
+		db, err := clickhouse.Open(dbFlag)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, studio.DB(db))
 	default:
-		return nil, fmt.Errorf("--db must be sqlite://path (clickhouse:// arrives with step 6b)")
+		return nil, fmt.Errorf("--db must be sqlite://path or clickhouse://user:pass@host:9000/db")
 	}
 	return studio.New(opts...), nil
 }
@@ -102,6 +114,8 @@ func dbLabel(dbFlag string) string {
 	case strings.HasPrefix(dbFlag, "sqlite://"):
 		return strings.TrimPrefix(dbFlag, "sqlite://")
 	default:
+		// clickhouse:// and friends: the DSN as given, host and
+		// database are the useful part of the banner.
 		return dbFlag
 	}
 }

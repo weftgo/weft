@@ -740,7 +740,8 @@ func (s *Server) serveManifest(w http.ResponseWriter, r *http.Request) {
 
 // dbKind names the database's backend for api/meta, best effort: the
 // dynamic type's full name ("*sqlite.DB" → "sqlite", anything else
-// carrying "mem" → "memory"), else its bare type name.
+// carrying "mem" → "memory", the hosted backend → "clickhouse"), else
+// its bare type name.
 func dbKind(db obsdb.DB) string {
 	full := fmt.Sprintf("%T", db)
 	lower := strings.ToLower(full)
@@ -749,6 +750,8 @@ func dbKind(db obsdb.DB) string {
 		return "memory"
 	case strings.Contains(lower, "sqlite"):
 		return "sqlite"
+	case strings.Contains(lower, "clickhouse"):
+		return "clickhouse"
 	}
 	name := strings.TrimPrefix(full, "*")
 	if i := strings.LastIndex(name, "."); i >= 0 {

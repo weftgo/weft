@@ -1025,6 +1025,23 @@ func TestSpanKindName(t *testing.T) {
 	}
 }
 
+// TestDBKind pins the meta db field's backend naming by dynamic type —
+// the studio library never imports the driver, so the clickhouse case
+// is pinned through a stand-in type with the same package name in its
+// dynamic type string.
+func TestDBKind(t *testing.T) {
+	type memDB struct{ obsdb.DB }
+	type sqliteDB struct{ obsdb.DB }
+	type clickhouseDB struct{ obsdb.DB }
+	for db, want := range map[obsdb.DB]string{
+		memDB{}: "memory", sqliteDB{}: "sqlite", clickhouseDB{}: "clickhouse",
+	} {
+		if got := dbKind(db); got != want {
+			t.Errorf("dbKind(%T) = %q, want %q", db, got, want)
+		}
+	}
+}
+
 // TestTranscriptAndSpans pins the run-scoped transcript and spans
 // shapes (S4.3) and the trace route any application can use.
 func TestTranscriptAndSpans(t *testing.T) {

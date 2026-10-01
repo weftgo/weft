@@ -115,9 +115,3 @@ service:
         --health-timeout 5s
         --health-retries 10
 ```
-
-## Lane note
-
-This module is lane B2's deliverable (step 6b). A lane-local `go.work`
-sits beside this README until the merge step adds the module to the
-workspace root files and deletes it.

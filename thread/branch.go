@@ -177,7 +177,12 @@ const forkedStop = "forked: the delegation belongs to the session this one was f
 // header metadata, WithLineage its pool lineage; the busy policy,
 // compaction and approval options are the fork's own. Nothing is
 // inherited from this session's options or header — not its public
-// id, not its header metadata: a fork is another session.
+// id, not its header metadata: a fork is another session — with one
+// exception, the signing rule: a fork of a session that requires
+// signed decisions (RequireSigned) requires them too, recorded in its
+// own header, and takes this session's keyring when opts give it
+// none. A copy must not be a way around the rule its origin's
+// approvals were held to.
 //
 // # What a fork inherits
 //

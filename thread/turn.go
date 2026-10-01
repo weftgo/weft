@@ -1736,13 +1736,16 @@ func (t *Turn) clearStreamErr() {
 // none: the resume the session started for the approval boundary this
 // turn parked (TurnParked), or the follow-up turn a deferred steer
 // became (TurnDeferred). It is nil for every other outcome, and for a
-// parked turn whose boundary is still undecided or resumed under a
-// turn the caller already holds (Decide and Resume return it).
+// parked turn whose boundary has not been resumed yet.
 // Following Next is how a caller watches an approval flow through:
-// Send's turn parks; the auto-resume the decision chain or a completed
-// decision set starts links here, and its Wait is the conversation's
-// continuation. One boundary resumes at most once and a steer defers
-// at most once, so the link is set at most once.
+// Send's turn parks, and the resume links here whichever path armed it
+// — the decision chain, a Decide or DecideSigned that completed the
+// boundary, Resume — so the Turn those calls return is this same
+// Turn, and its Wait is the conversation's continuation. One boundary
+// resumes at most once and a steer defers at most once, so the link is
+// set at most once. The link is the live Session's: after a restart
+// the parked Turn value is gone, and the resume is reached through
+// what Decide, Resume or Continue return.
 func (t *Turn) Next() *Turn {
 	t.mu.Lock()
 	defer t.mu.Unlock()

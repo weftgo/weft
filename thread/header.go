@@ -10,9 +10,17 @@ import (
 // module writes (ADR 0011 §6) — the integer every weft wire document
 // carries ("weft": 1, ADR 0005). It moves only for a layout change a
 // reader cannot handle additively: a new entry kind, a new optional
-// key, a new entry version never move it. Readers read every version
-// forever; writers write the latest; a layout change ships its reader
-// plus an explicit, atomic Migrate — never a silent rewrite on open.
+// key, a new entry version never move it. A header carrying a higher
+// number fails with ErrNewerFormat; nothing is ever rewritten on
+// open.
+//
+// The format is not frozen. This build reads every file an earlier
+// thread release wrote — the committed goldens of every format pin
+// that, and a release that could not read one would fail its own
+// tests — but no compatibility promise beyond what the tests hold is
+// made before the module's API and format are declared stable; there
+// is no migration tool, and none is needed while every change so far
+// has been additive.
 const FormatVersion = 1
 
 // kindSession is the header line's wire discriminator: a session

@@ -16,8 +16,10 @@ import (
 // Outcome is a decision's kind (ADR 0021 §1): approve (run the call
 // through the ordinary chain), deny with a reason, or resolve with
 // content computed outside the process, resolve_error marking it an
-// error. The wire values are the decision entry's "outcome" field;
-// they never change without a format version.
+// error. The wire values are the decision entry's "outcome" field:
+// stored bytes, so a value this build writes is one it keeps reading
+// (the format goldens pin them); a decision entry carrying any other
+// value never resolves a call.
 type Outcome string
 
 const (

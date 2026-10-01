@@ -124,15 +124,20 @@ type clockOption func() time.Time
 func (o clockOption) applySession(c *sessionConfig) { c.clock = o }
 
 // Clock returns the SessionOption that makes now the session's time
-// source: the header's Created at Create and Fork, and the Created of
-// every entry the Session appends, are read from it (converted to
-// UTC). The default is time.Now. Tests and examples pin time with it,
-// the way IDs pins ids; a nil now is ignored.
+// source, for everything the session reads a time for: the header's
+// Created at Create and Fork, the Created of every entry the Session
+// appends, and the approval machinery's arithmetic — when a request
+// or a grant expires, and whether a signed decision arrived in time
+// (all converted to UTC). The default is time.Now. Tests and examples
+// pin time with it, the way IDs pins ids; a nil now is ignored. A
+// thread/pool child inherits its parent's (InheritApprovals), so a
+// nested request lapses on the same clock.
 //
-// Like the IDs function, now is called with the session's lock held:
-// it must return quickly and must not call back into the Session.
-// Expiry arithmetic that compares against the wall clock — request
-// and grant expiries, signing challenges — is not routed through it.
+// Like the IDs function, now may be called with the session's lock
+// held, and from the runner's goroutine: it must be safe for
+// concurrent use, return quickly, and never call back into the
+// Session. Entry ids are not read from it: the default ids are
+// time-sortable by the wall clock (IDs replaces them).
 func Clock(now func() time.Time) SessionOption {
 	if now == nil {
 		return nil

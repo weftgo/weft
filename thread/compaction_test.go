@@ -469,6 +469,7 @@ func TestCompactionGoldens(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	abandon(t, st, s.ID())
 	open, err := thread.Open(ctx, st, s.ID(), weft.New(wefttest.Script()))
 	if err != nil {
 		t.Fatal(err)
@@ -598,6 +599,7 @@ func TestTrimAfterCompactionKeepsTheBoundary(t *testing.T) {
 		if err := st.Append(ctx, s.ID(), entries...); err != nil {
 			t.Fatal(err)
 		}
+		abandon(t, st, s.ID())
 		if again, err := thread.Open(ctx, st, s.ID(), agent, thread.ClearOldToolResults(0)); err != nil {
 			t.Fatal(err)
 		} else {
@@ -888,6 +890,7 @@ func TestTriggerStandsDownOnAnOffPathMark(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	abandon(t, st, s.ID())
 	s, err := thread.Open(ctx, st, s.ID(), agent, thread.ContextWindow(100_000))
 	if err != nil {
 		t.Fatal(err)
@@ -1208,6 +1211,7 @@ func TestUncompactOfATrim(t *testing.T) {
 	if err := st.Append(ctx, s.ID(), entries...); err != nil {
 		t.Fatal(err)
 	}
+	abandon(t, st, s.ID())
 	s, err := thread.Open(ctx, st, s.ID(), agent, thread.ClearOldToolResults(0))
 	if err != nil {
 		t.Fatal(err)
@@ -1218,6 +1222,7 @@ func TestUncompactOfATrim(t *testing.T) {
 		t.Fatalf("trim: %v", err)
 	}
 	// The stub view: the result reads as the cleared stub.
+	abandon(t, st, s.ID())
 	s, _ = thread.Open(ctx, st, s.ID(), agent, thread.ClearOldToolResults(0))
 	stubbed := false
 	for _, m := range s.Context() {
@@ -1306,6 +1311,7 @@ func TestTriggerReArmsAfterTheBoundaryResolves(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	abandon(t, st, s.ID())
 	s, err := thread.Open(ctx, st, s.ID(), agent, thread.ContextWindow(100_000))
 	if err != nil {
 		t.Fatal(err)

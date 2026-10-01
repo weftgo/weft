@@ -383,6 +383,8 @@ func ExampleSession_Continue() {
 		return
 	}
 
+	// The crashed process took its hold on the session with it.
+	_ = s.Close(ctx)
 	open, err := thread.Open(ctx, st, "s_crashed", agent, exampleIDs("e_followup", "e_deferred", "e_reply", "e_turn"))
 	if err != nil {
 		fmt.Println(err)

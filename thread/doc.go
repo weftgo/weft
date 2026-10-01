@@ -116,9 +116,11 @@
 //
 // A Session is safe for concurrent use; one mutex guards its tree and
 // is held across each storage write, so a returned write is durable
-// and the tree in memory equals the stored one. Keep one Session per
-// session id per process: backends refuse a second writer from
-// another process or Storage value with ErrLocked. Hooks and
+// and the tree in memory equals the stored one. One Session writes a
+// session: backends refuse a second writer from another process or
+// Storage value with ErrLocked, and a second Session on the same
+// Storage value is refused the same way from its first write until
+// the writer's Close — opening and reading are never refused. Hooks and
 // callbacks run without the session's lock, except the IDs and Clock
 // functions. The Session type documents the whole contract — what
 // concurrent Sends do under each policy, Close, and Delete of an open
@@ -132,6 +134,8 @@
 // session). Two are terminal for the stored data as this build reads
 // it: ErrCorrupt (carried by *CorruptError, naming the line and
 // entry) and ErrNewerFormat (written by a newer weft). The rest name
-// a refused call: ErrNotFound, ErrExists, ErrClosed, ErrCreateOnly,
-// ErrReservedKey, ErrNotPending, and the signed-decision failures.
+// a refused call: ErrNotFound, ErrExists, ErrClosed, ErrStale (the
+// session moved on behind this Session — open it again),
+// ErrCreateOnly, ErrReservedKey, ErrNotPending, and the
+// signed-decision failures.
 package thread

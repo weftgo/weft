@@ -45,6 +45,29 @@ func (f *flags) snapshot() []bool {
 }
 
 // nestedParent builds the parent agent whose model delegates once to
+// restart ends every writer's hold on st's sessions without closing a
+// Session — what the process holding them dying does. The tests that
+// stand a second pool and reopened sessions in for a restarted process
+// call it first: one Session writes a session, and the ones left
+// behind by the "old process" would otherwise still be the writers.
+func restart(t *testing.T, st thread.Storage) {
+	t.Helper()
+	ctx := context.Background()
+	r, ok := st.(thread.Releaser)
+	if !ok {
+		return
+	}
+	page, err := st.List(ctx, thread.Query{Limit: 500})
+	if err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	for _, h := range page.Sessions {
+		if err := r.Release(ctx, h.ID); err != nil {
+			t.Fatalf("restart: release %s: %v", h.ID, err)
+		}
+	}
+}
+
 // the wrapped child, then concludes.
 func nestedParent(p *pool.Pool, child *weft.Agent, opts ...pool.WrapOption) *weft.Agent {
 	return weft.New(wefttest.Script(
@@ -236,6 +259,7 @@ func TestNestedAcrossRestart(t *testing.T) {
 	// make, not the delegation it already made.
 	resumeParent := weft.New(wefttest.Script(wefttest.Say("all done")),
 		p2.Wrap("research", "delegates the refund flow", child2))
+	restart(t, st)
 	open, err := thread.Open(ctx, st, s.ID(), resumeParent)
 	if err != nil {
 		t.Fatalf("Open parent: %v", err)
@@ -611,6 +635,7 @@ func TestRegisterResumesParkedSubmitChild(t *testing.T) {
 	if len(s.Pending()) != 1 {
 		t.Fatalf("the mirror never landed: %+v", s.Pending())
 	}
+	restart(t, st)
 	open, err := thread.Open(ctx, st, s.ID(), weft.New(wefttest.Script()))
 	if err != nil {
 		t.Fatalf("Open: %v", err)

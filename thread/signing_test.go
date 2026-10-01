@@ -225,6 +225,7 @@ func TestSignedReplayAcrossRestart(t *testing.T) {
 	sd := thread.SignDecision(secret, r, thread.Deny(call.ID, "first answer stands"))
 
 	resumed, _ := refundAgent(wefttest.Say("denied"))
+	abandon(t, st, s.ID())
 	s2, err := thread.Open(ctx, st, s.ID(), resumed, thread.WithKeyring(ring))
 	if err != nil {
 		t.Fatal(err)

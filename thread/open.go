@@ -4,57 +4,35 @@ import (
 	"context"
 	"iter"
 	"log/slog"
+
+	"github.com/weftgo/weft/thread/internal/opencfg"
 )
 
 // OpenOption configures a Storage backend at open, one value per
 // concern, applied over the defaults. The options live here — in the
 // package that owns the Storage contract — so every backend accepts
 // the same vocabulary and a caller never learns a backend to say
-// Salvage (ADR 0011 §5 names it thread.Salvage).
+// Salvage (ADR 0011 §5 names it thread.Salvage). Memory, jsonl.Open
+// and sqlite.Open all take them; a backend an option means nothing to
+// accepts it and says so. The set is sealed: the options are the ones
+// this package returns. Backend authors resolve them with
+// thread/backend.Resolve.
 type OpenOption interface {
-	applyOpen(*OpenConfig)
+	openOption()
 }
 
-// OpenConfig is the resolved configuration of an open: the defaults
-// with every option applied. Backends resolve it through ResolveOpen;
-// callers never construct it.
-type OpenConfig struct {
-	// Salvage downgrades a malformed line from a load failure
-	// (ErrCorrupt) to a skip reported in the LoadReport. The unknown
-	// and the newer stay loud: ErrNewerFormat is never salvaged.
-	Salvage bool
-	// SyncEveryAppend is the durability cadence: true (the default)
-	// fsyncs every Append before it returns; false defers the fsync to
-	// the Flusher capability — the turn-end cadence a Session drives.
-	SyncEveryAppend bool
-	// NoLock turns off the backend's cross-process writer lock (the
-	// NoLock option): the caller vouches that one process writes.
-	NoLock bool
-	// Logger receives the backend's own reports — a repaired torn
-	// tail, a taken-over lock. Never nil after ResolveOpen: the
-	// default is slog.Default(), read at open.
-	Logger *slog.Logger
-}
-
-// ResolveOpen folds opts over the defaults. Exported because backends
-// outside this package resolve the same option vocabulary into the
-// same configuration.
-func ResolveOpen(opts ...OpenOption) OpenConfig {
-	cfg := OpenConfig{SyncEveryAppend: true}
-	for _, o := range opts {
-		if o != nil {
-			o.applyOpen(&cfg)
-		}
-	}
-	if cfg.Logger == nil {
-		cfg.Logger = slog.Default()
-	}
-	return cfg
+// resolveOpen folds opts over the defaults for the in-package backend
+// (Memory); thread/backend.Resolve is the same fold for the others.
+func resolveOpen(opts []OpenOption) opencfg.Config {
+	return opencfg.Resolve(opts)
 }
 
 type salvageOption struct{}
 
-func (salvageOption) applyOpen(c *OpenConfig) { c.Salvage = true }
+func (salvageOption) openOption() {}
+
+// ApplyOpen is the option's effect (opencfg.Applier).
+func (salvageOption) ApplyOpen(c *opencfg.Config) { c.Salvage = true }
 
 // Salvage returns the open option that skips malformed lines instead
 // of failing the load: each skip is reported in Load's LoadReport
@@ -66,7 +44,10 @@ func Salvage() OpenOption { return salvageOption{} }
 
 type syncEveryAppendOption bool
 
-func (o syncEveryAppendOption) applyOpen(c *OpenConfig) { c.SyncEveryAppend = bool(o) }
+func (syncEveryAppendOption) openOption() {}
+
+// ApplyOpen is the option's effect (opencfg.Applier).
+func (o syncEveryAppendOption) ApplyOpen(c *opencfg.Config) { c.SyncEveryAppend = bool(o) }
 
 // FsyncEveryAppend returns the open option that restores the default
 // durability: every Append fsyncs before returning, so an accepted
@@ -85,7 +66,10 @@ func FsyncOnFlush() OpenOption { return syncEveryAppendOption(false) }
 
 type noLockOption struct{}
 
-func (noLockOption) applyOpen(c *OpenConfig) { c.NoLock = true }
+func (noLockOption) openOption() {}
+
+// ApplyOpen is the option's effect (opencfg.Applier).
+func (noLockOption) ApplyOpen(c *opencfg.Config) { c.NoLock = true }
 
 // NoLock returns the open option that opens a file backend without its
 // cross-process writer lock. It exists for platforms with no advisory
@@ -102,7 +86,10 @@ func NoLock() OpenOption { return noLockOption{} }
 
 type openLoggerOption struct{ l *slog.Logger }
 
-func (o openLoggerOption) applyOpen(c *OpenConfig) {
+func (openLoggerOption) openOption() {}
+
+// ApplyOpen is the option's effect (opencfg.Applier).
+func (o openLoggerOption) ApplyOpen(c *opencfg.Config) {
 	if o.l != nil {
 		c.Logger = o.l
 	}
@@ -141,9 +128,64 @@ type Flusher interface {
 // Releasing a session this Storage does not hold is a no-op; one the
 // storage does not hold at all fails with ErrNotFound. Release must
 // not race the session's own Append — it is the last call of a writer
-// that is done, which is what Session.Close is.
+// that is done. Release speaks for the whole Storage value: it ends a
+// Leaser lease whoever holds it, which is why a Session — one writer
+// among possibly several on the value — closes through Yield instead
+// when the backend offers it.
 type Releaser interface {
 	Release(ctx context.Context, session string) error
+}
+
+// Leaser is the optional Storage capability that makes the one-writer
+// rule hold between Session values sharing one Storage value — the
+// same small-interface rule. The backend's own lock tells Storage
+// values and processes apart; it cannot tell two Sessions on one
+// Storage value apart, because Append names a session and not who is
+// writing. A lease can: the writer names itself with holder, an opaque
+// comparable token — a pointer the writer owns — and the storage
+// remembers which holder has the session.
+//
+// A Session takes the lease before every write, so the first write is
+// what makes it the session's writer, and it stays so until its Close
+// yields. Reading never takes it: Load, List and Watch — and so Open
+// and every read of a Session — are not refused by a lease and do not
+// stand in a writer's way.
+//
+// The lease is bookkeeping over the backend's lock, not a second
+// lock: the Storage methods do not consult it. A Storage value used
+// directly, without Sessions, enforces one writer per instance;
+// Sessions enforce one writer per Session.
+type Leaser interface {
+	// Acquire takes the session's writer lease for holder and reports
+	// how many complete entry lines the storage holds for the session
+	// at that moment: every line a Load accounts for — the entries it
+	// returns and the lines it skips under Salvage — and never a torn
+	// tail. A writer that knows how many it has loaded and written
+	// compares: a different number means the session changed behind
+	// its view (ErrStale is the Session's answer).
+	//
+	// Acquire takes the backend's cross-instance lock exactly as a
+	// first Append does — ErrLocked when another Storage or process
+	// holds the session, a torn tail repaired — and then the lease:
+	// ErrLocked naming the session when a different holder has it on
+	// this Storage value. For the holder that already has it Acquire
+	// is idempotent and cheap: no I/O. A session the storage does not
+	// hold fails with ErrNotFound, a nil holder with a plain error,
+	// and nothing is taken either way.
+	//
+	// The lease ends when its holder yields, when the session is
+	// released or deleted through this Storage value, or with the
+	// process.
+	Acquire(ctx context.Context, session string, holder any) (entries int, err error)
+
+	// Yield ends holder's lease and the storage's hold with it, as
+	// Release does. It is Release for a writer that must not let go
+	// of what is not its own: when a different holder has the lease,
+	// Yield releases nothing and returns nil. When no holder has it —
+	// the session is held by this Storage value's direct use, or not
+	// held — Yield is Release. A session the storage does not hold
+	// fails with ErrNotFound.
+	Yield(ctx context.Context, session string, holder any) error
 }
 
 // Watcher is the optional Storage capability that tails a session as

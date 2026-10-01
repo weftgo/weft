@@ -1,6 +1,7 @@
 package thread
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,9 @@ import (
 // caller does to a value after passing it in — or receiving it back —
 // reaches the stored session.
 type memStorage struct {
+	salvage bool         // Salvage: a malformed line is skipped and reported
+	log     *slog.Logger // OpenLogger: where the torn-tail repair is reported
+
 	mu       sync.Mutex
 	sessions map[string]memSession
 }
@@ -33,6 +37,11 @@ type memSession struct {
 	// too.
 	rawHeader []byte
 	buf       []byte // the encoded entry lines, exactly as the file would hold them
+	// lines counts the complete lines in buf — what Acquire reports —
+	// and holder is the writer holding the session's lease (Leaser),
+	// nil while none does.
+	lines  int
+	holder any
 }
 
 // head decodes the session's header the way a durable backend reads a
@@ -56,11 +65,26 @@ func (s memSession) head() (Header, error) {
 // examples, and as the reference behaviour the durable backends are
 // compared against — every backend runs the same threadtest table,
 // corruption rows included (Memory implements the table's
-// threadtest.RawInjector hooks by holding the raw bytes). There is no
-// second writer to refuse — one map, one process — so Memory never
-// answers ErrLocked, and its Release (the Releaser capability) only
-// checks that the session exists.
-func Memory() Storage { return &memStorage{sessions: map[string]memSession{}} }
+// threadtest.RawInjector hooks by holding the raw bytes).
+//
+// opts are the open vocabulary every backend takes. Salvage and
+// OpenLogger mean here what they mean on disk: a malformed line is
+// skipped and reported instead of failing the load, and the one
+// repair Memory makes on its own — a torn tail removed before an
+// append — is reported to the given logger (slog.Default() as it
+// stands at the call, without the option). The fsync options and
+// NoLock are accepted and are no-ops: nothing here is buffered, and
+// there is no cross-process lock to turn off.
+//
+// There is no second Storage or process to refuse — one map, one
+// process — so the Storage methods never answer ErrLocked; the one
+// writer Memory tells from another is a lease holder (the Leaser
+// capability, which is how two Sessions on one Memory are kept to one
+// writer), and its Release (the Releaser capability) ends that lease.
+func Memory(opts ...OpenOption) Storage {
+	cfg := resolveOpen(opts)
+	return &memStorage{salvage: cfg.Salvage, log: cfg.Logger, sessions: map[string]memSession{}}
+}
 
 // Create validates the header — one path component of an id, the
 // current envelope — and stores it as the session's first line.
@@ -121,13 +145,14 @@ func (m *memStorage) Append(ctx context.Context, session string, entries ...Entr
 	}
 	if rules.Torn(s.buf) {
 		keep := rules.CompleteLen(s.buf)
-		slog.Default().Warn("thread: removed a torn tail before appending",
+		m.log.Warn("thread: removed a torn tail before appending",
 			"session", session, "dropped_bytes", len(s.buf)-keep)
 		// Clipped, so the append below reallocates: a concurrent Load's
 		// snapshot of the old array is never overwritten.
 		s.buf = slices.Clip(s.buf[:keep])
 	}
 	s.buf = append(s.buf, buf...)
+	s.lines += len(entries)
 	m.sessions[session] = s
 	return nil
 }
@@ -139,9 +164,9 @@ func (m *memStorage) Append(ctx context.Context, session string, entries ...Entr
 // never a skip; anything else that fails to decode is ErrCorrupt
 // naming the line (the header is line 1); the bytes after the last
 // complete newline are a torn tail — dropped and reported, never an
-// error. There is no salvage mode here — Memory is opened with no
-// options — so a malformed line it holds (through threadtest's Inject)
-// always fails the load, which is what the table's corruption row pins.
+// error. Under Salvage a malformed line (only threadtest's Inject can
+// leave one here) is skipped and reported; without it, it fails the
+// load, which is what the table's corruption row pins.
 func (m *memStorage) Load(ctx context.Context, session string) (Header, []Entry, *LoadReport, error) {
 	if err := ctx.Err(); err != nil {
 		return Header{}, nil, nil, err
@@ -176,9 +201,15 @@ func (m *memStorage) Load(ctx context.Context, session string) (Header, []Entry,
 			continue
 		}
 		if errors.Is(err, ErrNewerFormat) {
-			return Header{}, nil, nil, err // loud, always
+			return Header{}, nil, nil, err // loud, salvage or not
 		}
-		return Header{}, nil, nil, &CorruptError{Session: session, Line: i + 2, Err: err}
+		if !m.salvage {
+			return Header{}, nil, nil, &CorruptError{Session: session, Line: i + 2, Err: err}
+		}
+		if report == nil {
+			report = &LoadReport{}
+		}
+		report.Skipped = append(report.Skipped, i+2)
 	}
 	return h, entries, report, nil
 }
@@ -242,21 +273,69 @@ func (m *memStorage) Delete(ctx context.Context, session string) error {
 	return nil
 }
 
-// Release is the Releaser capability on a backend with no lock to let
-// go of: it answers whether the session exists (ErrNotFound when not)
-// and otherwise has nothing to do, so a caller releasing at close gets
-// the same answers from every backend.
+// Release is the Releaser capability on a backend with no lock of its
+// own to let go of: it ends the session's lease, whoever holds it, and
+// answers whether the session exists (ErrNotFound when not), so a
+// caller releasing at close gets the same answers from every backend.
 func (m *memStorage) Release(ctx context.Context, session string) error {
+	return m.release(ctx, session, nil)
+}
+
+// Yield is the Leaser capability's release: Release, unless a holder
+// other than the caller's has the lease — then nothing is let go.
+func (m *memStorage) Yield(ctx context.Context, session string, holder any) error {
+	if holder == nil {
+		return errNilHolder
+	}
+	return m.release(ctx, session, holder)
+}
+
+// release ends the session's lease: unconditionally for a nil by
+// (Release), and only when by holds it or nobody does otherwise.
+func (m *memStorage) release(ctx context.Context, session string, by any) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.sessions[session]; !ok {
+	s, ok := m.sessions[session]
+	if !ok {
 		return fmtNotFound(session)
 	}
+	if by != nil && s.holder != nil && s.holder != by {
+		return nil // another writer's lease: not ours to end
+	}
+	s.holder = nil
+	m.sessions[session] = s
 	return nil
 }
+
+// Acquire is the Leaser capability: the lease is the only writer
+// state Memory keeps — one value, one process, no lock beneath it — so
+// a second holder is the one writer Memory ever refuses.
+func (m *memStorage) Acquire(ctx context.Context, session string, holder any) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if holder == nil {
+		return 0, errNilHolder
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[session]
+	if !ok {
+		return 0, fmtNotFound(session)
+	}
+	if s.holder != nil && s.holder != holder {
+		return 0, fmt.Errorf("%w: %s", ErrLocked, session)
+	}
+	s.holder = holder
+	m.sessions[session] = s
+	return s.lines, nil
+}
+
+// errNilHolder refuses a lease nobody could be told apart by.
+var errNilHolder = errors.New("thread: lease holder is nil")
 
 // Inject appends raw bytes to the session's stored data verbatim — the
 // threadtest.RawInjector hook, so the table's corruption rows run
@@ -273,6 +352,7 @@ func (m *memStorage) Inject(ctx context.Context, session string, data []byte) er
 		return fmtNotFound(session)
 	}
 	s.buf = append(s.buf, data...)
+	s.lines = bytes.Count(s.buf, []byte{'\n'})
 	m.sessions[session] = s
 	return nil
 }

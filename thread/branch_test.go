@@ -45,6 +45,9 @@ func reopen(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Sess
 // fresh scripted one on the way back in.
 func reopenWith(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Session, agent *weft.Agent, opts ...thread.SessionOption) *thread.Session {
 	t.Helper()
+	// One Session writes a session: the lease of the one being
+	// replaced ends first, as its process ending would end it.
+	abandon(t, st, s.ID())
 	again, err := thread.Open(ctx, st, s.ID(), agent, opts...)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)

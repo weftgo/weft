@@ -10,7 +10,9 @@
 // LockFileEx on Windows) taken on a session's first write and held
 // until the session is released (the thread.Releaser capability),
 // deleted, or the process exits — a second writer, in this process or
-// another, fails with thread.ErrLocked. Readers never lock: Load and
+// another, fails with thread.ErrLocked. Between Sessions sharing one
+// Storage the same rule is the lease (the thread.Leaser capability):
+// the held file remembers which writer has it. Readers never lock: Load and
 // List read at any time, and a load that catches a torn final line (a
 // crash mid-write, or a write in flight) drops it and says so in the
 // LoadReport. The next writer to take the session removes a torn tail
@@ -35,6 +37,7 @@ import (
 	"sync"
 
 	"github.com/weftgo/weft/thread"
+	threadbackend "github.com/weftgo/weft/thread/backend"
 	"github.com/weftgo/weft/thread/internal/rules"
 )
 
@@ -52,7 +55,7 @@ const headerChunk = 4 << 10
 // session, the directory created 0700 when missing and files created
 // 0600. opts are the shared open vocabulary — Salvage, the fsync
 // policy, NoLock, OpenLogger — resolved with the defaults by
-// thread.ResolveOpen. On a platform with no advisory file lock (not
+// thread/backend.Resolve. On a platform with no advisory file lock (not
 // unix, not Windows) Open fails wrapping errors.ErrUnsupported unless
 // thread.NoLock is passed: the one-writer rule is never dropped
 // silently.
@@ -60,7 +63,7 @@ func Open(dir string, opts ...thread.OpenOption) (thread.Storage, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("jsonl: open called with an empty directory")
 	}
-	cfg := thread.ResolveOpen(opts...)
+	cfg := threadbackend.Resolve(opts...)
 	if err := checkLockSupport(lockSupported, cfg.NoLock); err != nil {
 		return nil, err
 	}
@@ -148,6 +151,14 @@ type backend struct {
 // the stale value re-acquires. suspect marks a file that may end
 // mid-line (a failed write, raw injected bytes): the next write checks
 // and repairs the tail first. dirty marks writes not yet fsynced.
+//
+// holder is the writer holding the session's lease (the thread.Leaser
+// capability), nil while the instance holds the session for its direct
+// users only; it goes with the slot, so Release and Delete end it.
+// lines is the number of complete entry lines the file holds — what
+// Acquire reports — or unknownLines until an Acquire has counted them
+// and after anything that may have changed the file without this
+// instance knowing how (a failed write, raw bytes).
 type session struct {
 	ready chan struct{}
 	err   error
@@ -157,7 +168,13 @@ type session struct {
 	closed  bool
 	suspect bool
 	dirty   bool
+	holder  any
+	lines   int
 }
+
+// unknownLines marks a held session whose entry lines have not been
+// counted.
+const unknownLines = -1
 
 // errStale is the internal signal that a held session was released or
 // deleted between a caller finding it and locking it: the caller
@@ -179,7 +196,7 @@ func (b *backend) hold(ctx context.Context, id string, setup func(*session) erro
 		b.mu.Lock()
 		cur, ok := b.sessions[id]
 		if !ok {
-			s := &session{ready: make(chan struct{})}
+			s := &session{ready: make(chan struct{}), lines: unknownLines}
 			b.sessions[id] = s
 			b.mu.Unlock()
 			if err := setup(s); err != nil {
@@ -314,6 +331,7 @@ func (b *backend) createFile(s *session, id string, first []byte) error {
 		return err
 	}
 	s.f = f
+	s.lines = 0 // a header and nothing else
 	return nil
 }
 
@@ -494,9 +512,11 @@ func (b *backend) List(ctx context.Context, q thread.Query) (thread.Page, error)
 }
 
 // Delete removes the session's file and releases its lock. An unknown
-// session fails with ErrNotFound; a session held by another writer
-// fails with ErrLocked — deleting under a live writer would lose the
-// writes it is about to make. Delete and Append on one session do not
+// session fails with ErrNotFound; a session held by another writer —
+// another Storage, another process — fails with ErrLocked: deleting
+// under a live writer would lose the writes it is about to make. A
+// lease on this instance (Acquire) does not refuse it: Delete through
+// the holder's own Storage removes the session and the lease with it. Delete and Append on one session do not
 // race in a correct program (one writer per session, ADR 0011 §5);
 // when they do, Delete waits for the in-flight write before removing,
 // and an Append that arrives after answers ErrNotFound.
@@ -602,11 +622,29 @@ func (b *backend) Flush(ctx context.Context, id string) error {
 // instance wrote without syncing (FsyncOnFlush), drops the session's
 // advisory lock and closes its file, so another Storage or process may
 // write the session — and this instance holds one file descriptor
-// fewer. A later Append here opens and locks the file again, or fails
-// with ErrLocked if another writer holds it by then. Releasing a
-// session this instance does not hold is a no-op that still answers
-// ErrNotFound for a session the directory does not hold.
+// fewer. The lease on the session (Acquire) ends with the hold,
+// whoever has it. A later Append here opens and locks the file again,
+// or fails with ErrLocked if another writer holds it by then.
+// Releasing a session this instance does not hold is a no-op that
+// still answers ErrNotFound for a session the directory does not hold.
 func (b *backend) Release(ctx context.Context, id string) error {
+	return b.release(ctx, id, nil)
+}
+
+// Yield is the thread.Leaser capability's release: Release, unless a
+// holder other than the caller's has the session's lease — then the
+// hold is that writer's and nothing is let go.
+func (b *backend) Yield(ctx context.Context, id string, holder any) error {
+	if holder == nil {
+		return errNilHolder
+	}
+	return b.release(ctx, id, holder)
+}
+
+// release is Release and Yield's shared body: by is nil for Release,
+// which lets go whoever holds the lease, and the yielding holder
+// otherwise.
+func (b *backend) release(ctx context.Context, id string, by any) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -621,6 +659,9 @@ func (b *backend) Release(ctx context.Context, id string) error {
 		s.mu.Lock()
 		if !s.closed {
 			defer s.mu.Unlock()
+			if by != nil && s.holder != nil && s.holder != by {
+				return nil // another writer's lease: not ours to end
+			}
 			var err error
 			if s.dirty {
 				err = s.f.Sync()
@@ -632,6 +673,87 @@ func (b *backend) Release(ctx context.Context, id string) error {
 		s.mu.Unlock()
 	}
 	return b.exists(id)
+}
+
+// errNilHolder refuses a lease nobody could be told apart by.
+var errNilHolder = errors.New("jsonl: lease holder is nil")
+
+// Acquire is the thread.Leaser capability: it holds the session as a
+// first Append would — the file opened and locked, a torn tail removed
+// — and records holder as its one writer on this instance, refusing a
+// different holder with ErrLocked. The entry lines are counted once
+// per hold, by reading the file, and kept current by this instance's
+// own appends: for the holder a repeated Acquire is a map lookup.
+// Under NoLock the count is this instance's view only — a writer the
+// lock would have refused is not seen until the session is held anew.
+func (b *backend) Acquire(ctx context.Context, id string, holder any) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if holder == nil {
+		return 0, errNilHolder
+	}
+	for {
+		s, err := b.sessionFor(ctx, id)
+		if err != nil {
+			return 0, err
+		}
+		n, err := b.lease(id, s, holder)
+		if !errors.Is(err, errStale) {
+			return n, err
+		}
+	}
+}
+
+// lease records holder on a held session and returns its entry-line
+// count. errStale means the session was released or deleted under the
+// caller, who acquires again.
+func (b *backend) lease(id string, s *session, holder any) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return 0, errStale
+	}
+	if s.holder != nil && s.holder != holder {
+		return 0, fmt.Errorf("%w: %s", thread.ErrLocked, id)
+	}
+	if s.lines == unknownLines {
+		n, err := countEntryLines(id, s.f)
+		if err != nil {
+			return 0, err
+		}
+		s.lines = n
+	}
+	s.holder = holder
+	return s.lines, nil
+}
+
+// countEntryLines counts the complete lines after the header in a held
+// session file: every newline but the header's. Bytes after the last
+// newline are a torn tail and not a line. A file without a complete
+// header line is ErrCorrupt on line 1.
+func countEntryLines(id string, f *os.File) (int, error) {
+	fi, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	r := io.NewSectionReader(f, 0, fi.Size())
+	buf := make([]byte, 64<<10)
+	lines := 0
+	for {
+		n, err := r.Read(buf)
+		lines += bytes.Count(buf[:n], []byte{'\n'})
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return 0, err
+		}
+	}
+	if lines == 0 {
+		return 0, errNoHeader(id)
+	}
+	return lines - 1, nil
 }
 
 // Inject appends raw bytes to a session file verbatim — the
@@ -834,10 +956,15 @@ func (b *backend) write(id string, s *session, buf []byte, sync, raw bool) error
 	}
 	if err := writeFull(s.f, buf); err != nil {
 		s.suspect = true
+		s.lines = unknownLines // part of the batch may be in the file
 		return err
 	}
 	if raw {
 		s.suspect = true
+		s.lines = unknownLines
+	} else if s.lines != unknownLines {
+		// Append's bytes: whole lines, one per entry.
+		s.lines += bytes.Count(buf, []byte{'\n'})
 	}
 	if !sync {
 		s.dirty = true

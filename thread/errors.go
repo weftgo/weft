@@ -22,19 +22,30 @@ var (
 	// backend. A session is never silently replaced (ADR 0011 §5).
 	ErrExists = errors.New("thread: session already exists")
 
-	// ErrLocked is returned by a backend that enforces the one-writer
-	// rule (ADR 0011 §5) when a session is already held by another
-	// writer — another process, or another Storage in this one.
-	// Readers never lock: Load and List always work. Retryable — the
-	// same call succeeds once the other writer has let go.
+	// ErrLocked is returned when a session is already held by another
+	// writer (the one-writer rule, ADR 0011 §5): by a backend, for a
+	// writer in another process or another Storage in this one; and by
+	// a Session's writes, for another Session value on the same
+	// Storage (the Leaser capability). Readers never lock: Load, List
+	// and Open always work. Retryable — the same call succeeds once
+	// the other writer has let go, which for a Session is its Close.
 	ErrLocked = errors.New("thread: session is locked by another writer")
+
+	// ErrStale is returned by a Session's write when the stored
+	// session holds entries the Session never loaded: another writer
+	// appended to it after this Session was opened, and a write now
+	// would attach to a leaf that is no longer the session's — a fork
+	// nobody asked for. Nothing is written and the Session's tree is
+	// unchanged. Terminal for the Session value: Open the session
+	// again to write from what it now holds.
+	ErrStale = errors.New("thread: session changed since it was opened")
 
 	// ErrCorrupt wraps the failures a backend reports for stored data
 	// it cannot decode: a malformed line that is not a torn tail (a
 	// torn final line is a crash, dropped and reported through Load's
 	// LoadReport; data from a newer weft is ErrNewerFormat, never
-	// skipped). Salvage, the jsonl open option, downgrades this to a
-	// skip reported in the LoadReport.
+	// skipped). Salvage, the open option every backend accepts,
+	// downgrades this to a skip reported in the LoadReport.
 	ErrCorrupt = errors.New("thread: stored session data is corrupt")
 
 	// ErrNewerFormat wraps the decode failures UnmarshalEntry and
@@ -52,41 +63,48 @@ var (
 	// as soon as its directory is read by a weft that knows the format.
 	ErrNewerFormat = errors.New("thread: session format newer than this build")
 
-	// ErrNotPending is returned by Decide for a decision addressing a
-	// call that is not pending — decided already, resumed already, or
-	// never parked — and by Resume with no open boundary. The core's
-	// rule (ADR 0007: a decision names a pending call) made strict and
-	// raised before any entry lands or any run starts: a session never
-	// records a decision it cannot apply.
+	// ErrNotPending is returned by Decide and DecideSigned for a
+	// decision addressing a call that is not pending — decided already,
+	// resumed already, or never parked — or, signed, carrying a
+	// signature for another occurrence of the call; by Request for a
+	// call that is not pending; by ResolveDelegation on a call that
+	// delegates to no child; and by Resume with no open boundary. The
+	// core's rule (ADR 0007: a decision names a pending call) made
+	// strict and raised before any entry lands or any run starts: a
+	// session never records a decision it cannot apply.
 	ErrNotPending = errors.New("thread: call is not pending")
 
-	// The signed-decision failures (ADR 0021 §3) follow, each its own
+	// The approval failures (ADR 0021 §3, §5) follow, each its own
 	// error because each is its own operational answer. All are
 	// fail-closed: nothing is recorded until every check passes.
 
-	// ErrUnknownKey is returned by DecideSigned for a decision signed
-	// under a key id the session's Keyring does not hold: the signer
-	// is not one this session trusts.
+	// ErrUnknownKey is returned by Keyring.Sign when the ring does not
+	// hold the challenge's key. DecideSigned never returns it: a
+	// signature under a key id the session's ring does not hold is
+	// ErrBadSignature, so a caller probing key ids learns nothing.
 	ErrUnknownKey = errors.New("thread: signing key not in the keyring")
 
-	// ErrBadSignature is returned by DecideSigned when the signature
-	// does not verify under the named key: the decision was altered
-	// after signing, or signed with another key.
+	// ErrBadSignature is returned by DecideSigned when the signed
+	// decision does not verify against the session's keyring and the
+	// pending request: a MAC mismatch, an unknown key id, an outcome
+	// that is none of the four, a session other than this one, an
+	// empty nonce or one this session never issued for the request,
+	// or an expiry or a tool that is not the request's.
 	ErrBadSignature = errors.New("thread: decision signature does not verify")
 
-	// ErrExpired is returned by DecideSigned when the challenge the
-	// signature answers has lapsed: ask for a fresh Request and sign
-	// that one.
-	ErrExpired = errors.New("thread: signing challenge expired")
+	// ErrExpired means the request is past its expiry: returned by
+	// Decide, DecideSigned and Request. No decision can approve a
+	// lapsed request — the session denies it on its own (ADR 0021 §5).
+	ErrExpired = errors.New("thread: approval request expired")
 
-	// ErrReplay is returned by DecideSigned when the challenge's nonce
-	// was already answered by a recorded decision: a signature decides
-	// once, across restarts.
+	// ErrReplay is returned by DecideSigned when the nonce already
+	// answered a recorded decision: a signature decides once, across
+	// restarts.
 	ErrReplay = errors.New("thread: decision signature replayed")
 
-	// ErrArgsChanged is returned by DecideSigned when the parked
-	// call's arguments no longer hash to what the signature covered:
-	// the signer approved a different call.
+	// ErrArgsChanged is returned by DecideSigned when the signed
+	// arguments hash is not the pending request's: the signer approved
+	// a different call.
 	ErrArgsChanged = errors.New("thread: request arguments changed under the signature")
 
 	// ErrSignatureRequired is returned by Decide on a session opened

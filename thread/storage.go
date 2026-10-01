@@ -12,6 +12,26 @@ import (
 // session is the policy (ADR 0011 §5), and readers may read at any
 // time. context.Context comes first in every signature; a canceled
 // context fails the call before anything is written.
+//
+// # One writer
+//
+// Who "one writer" is depends on who is asking. A Storage value used
+// directly, without Sessions, enforces one writer per instance: its
+// methods name a session, not a caller, so every goroutine using the
+// value is the same writer, and the writer a backend refuses with
+// ErrLocked is another Storage value or another process. Sessions
+// enforce one writer per Session: a Session takes the session's lease
+// through the optional Leaser capability before it writes, and a
+// second Session on the same Storage value is refused. A backend that
+// does not implement Leaser gives Sessions no such check — two
+// Sessions on one value of it both write, each blind to the other —
+// and keeps whatever rule its own lock enforces.
+//
+// Delete is not refused by a lease: through the Storage value that
+// holds a session — the one its writer uses — Delete removes the
+// session and ends the lease with it, and that writer's next write
+// fails with ErrNotFound. Through any other Storage value, Delete of
+// a session a writer holds fails with ErrLocked.
 type Storage interface {
 	// Create writes a session's header as its first line. The header's
 	// ID must satisfy ValidID — an id is a path component in some
@@ -53,8 +73,10 @@ type Storage interface {
 	List(ctx context.Context, q Query) (Page, error)
 
 	// Delete removes a session and its entries; an unknown session
-	// fails with ErrNotFound. History is otherwise forever — nothing
-	// else in the interface removes data.
+	// fails with ErrNotFound, and one another Storage or process holds
+	// as its writer, with ErrLocked. A hold or a lease of this Storage
+	// value's own does not refuse it (see One writer). History is
+	// otherwise forever — nothing else in the interface removes data.
 	Delete(ctx context.Context, session string) error
 }
 

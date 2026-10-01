@@ -31,9 +31,10 @@ import (
 // skip otherwise: Memory holds the raw bytes (it implements the
 // hooks), and a backend that cannot hold them at all pins its loudness
 // where its format lives. The capability rows run when the backend has
-// the capability: Flusher and Releaser each get their row, and a
-// backend that implements thread.Watcher runs the whole RunWatch table
-// as the Watch subtest. The one thing Run cannot reach is a second
+// the capability: Flusher and Releaser each get their row, a backend
+// that implements thread.Leaser runs the RunLeaser table as the Leaser
+// subtest, and one that implements thread.Watcher runs the whole
+// RunWatch table as the Watch subtest. The one thing Run cannot reach is a second
 // Storage over the same sessions — RunTwoWriters takes that factory.
 func Run(t *testing.T, open func(t *testing.T) thread.Storage) {
 	t.Run("CreateLoadRoundTrip", roundTrip(open))
@@ -57,6 +58,12 @@ func Run(t *testing.T, open func(t *testing.T) thread.Storage) {
 	t.Run("ListPagingUnderWrites", pagingUnderWrites(open))
 	t.Run("Flusher", flusher(open))
 	t.Run("Releaser", releaser(open))
+	t.Run("Leaser", func(t *testing.T) {
+		if _, ok := open(t).(thread.Leaser); !ok {
+			t.Skip("the backend does not implement thread.Leaser")
+		}
+		RunLeaser(t, open)
+	})
 	t.Run("Watch", func(t *testing.T) {
 		if _, ok := open(t).(thread.Watcher); !ok {
 			t.Skip("the backend does not implement thread.Watcher")
@@ -1687,7 +1694,8 @@ func releaser(open func(t *testing.T) thread.Storage) func(*testing.T) {
 // deleted by the other, and Delete frees the name. When the backend
 // implements thread.Releaser the hold is a lease: Release hands the
 // session to the other writer, and the first one is refused in turn
-// until it is handed back.
+// until it is handed back. When it implements thread.Leaser, a holder
+// on one Storage is refused on the other, and Yield hands over.
 func RunTwoWriters(t *testing.T, open func(t *testing.T) (first, second thread.Storage)) {
 	t.Helper()
 	t.Run("SecondWriterIsLocked", func(t *testing.T) {
@@ -1784,5 +1792,9 @@ func RunTwoWriters(t *testing.T, open func(t *testing.T) (first, second thread.S
 		if !reflect.DeepEqual(texts, []string{"first 1", "second 1", "first 2"}) {
 			t.Errorf("entries across the hand-overs = %v", texts)
 		}
+	})
+	t.Run("LeaseAcrossInstances", func(t *testing.T) {
+		first, second := open(t)
+		leaseAcrossInstances(t, first, second)
 	})
 }

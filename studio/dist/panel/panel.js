@@ -645,7 +645,7 @@ function le(e, t) {
 //#endregion
 //#region src/panel/version.ts
 function z() {
-	return "v0.3.0";
+	return "v0.3.1";
 }
 function B(e, t) {
 	let n = e.replace(/^v/, "").split(/[.-]/), r = t.replace(/^v/, "").split(/[.-]/);

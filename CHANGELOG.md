@@ -4,16 +4,15 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
-## thread — unreleased (the 2026-10-01 review fix train)
+## thread 0.9.0 / thread/sqlite 0.3.0 — 2026-10-02 (the 2026-10-01 review fix train)
 
 The fixes for the 2026-10-01 production-readiness review
 (`WEFT-THREAD-REVIEW-2026-10-01.md`: twelve P1s, some forty-five P2s),
 built as seven lanes — session core, compaction, backends, approvals,
-the writer lease, the pool, the turn machinery — on branch
-`thread-prod-fixes`. The version number is the maintainer's call at
-the tag. It is a **breaking minor for `thread` and for
-`thread/sqlite`** (a schema migration, and it needs the new `thread`);
-`runtime` carries one fix. Pre-1.0: breaking changes ship without
+the writer lease, the pool, the turn machinery — and a closing pass. It
+is a **breaking minor for `thread` and for `thread/sqlite`** (a schema
+migration, and it needs the new `thread`); `runtime` carries one fix
+and ships as 0.1.1 in the entry below. Pre-1.0: breaking changes ship without
 deprecation shims, and the migration checklist below names every one.
 
 **Not a freeze.** The plan's "v0.8 freeze" — the format as a
@@ -530,7 +529,12 @@ Session core
   dialects (`With*`, bare, `Require*`/`On*`); both wait for the
   freeze.
 
-## Unreleased
+## obsdb 0.1.1 / obsdb/clickhouse 0.1.1 / otel 0.1.1 / studio 0.3.1 / studio/cmd 0.1.1 / runtime 0.1.1 — 2026-10-02
+
+Patch releases for the fixes found after the 0.7.0 programme, tagged in
+dependency order behind `thread/v0.9.0`: obsdb, then obsdb/clickhouse
+and otel, then studio, then studio/cmd and runtime (which requires
+thread v0.9.0). The root module is unchanged at v0.7.0.
 
 ### obsdb
 

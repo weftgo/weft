@@ -48,8 +48,9 @@ type ToolDef struct {
 	resultCap  int
 	capSet     bool
 	strict     bool
-	sequential bool   // barrier: runs alone in its step
-	approval   bool   // RequireApproval: never runs unapproved
+	sequential bool // barrier: runs alone in its step
+	approval   bool // RequireApproval: never runs unapproved
+	replay     ReplayPolicy
 	snippet    string // PromptSnippet: composed into the system prompt
 	mw         []ToolMiddleware
 
@@ -562,6 +563,48 @@ func (approvalOption) applyTool(t *ToolDef) { t.approval = true }
 // the model sees. This is a policy and UX seam, not a security
 // boundary: the boundary is the sandbox a tool runs in.
 func RequireApproval() ToolOption { return approvalOption{} }
+
+// ReplayPolicy is a tool's side-effect class: what a re-run of a
+// recorded conversation (a playground experiment, a replay fixture) may
+// do with a call to this tool. The zero value, ReplayNever, is what an
+// unannotated tool counts as — nobody has vouched for it, so its calls
+// are substituted with the recorded result or parked for a human
+// decision, never silently re-fired (WEFT-PLAYGROUND.md §6 rule 3; the
+// one class a refund belongs to).
+type ReplayPolicy string
+
+const (
+	// ReplayNever is the default: the call has side effects, or nobody
+	// has said otherwise. A re-run answers it from the record or parks.
+	ReplayNever ReplayPolicy = "never"
+	// ReplaySafe vouches that the call is idempotent and side-effect
+	// free (a read): a re-run may execute it for real.
+	ReplaySafe ReplayPolicy = "safe"
+)
+
+type replayOption struct{ p ReplayPolicy }
+
+func (o replayOption) applyTool(t *ToolDef) {
+	if ReplayPolicy(o.p) == ReplaySafe {
+		t.replay = ReplaySafe
+	}
+}
+
+// Replay sets the tool's ReplayPolicy. Only ReplaySafe needs to be
+// said: ReplayNever is the zero value and the default, and any other
+// value is ignored rather than trusted (an unknown class is never's,
+// the safe default). The manifest records the class.
+func Replay(p ReplayPolicy) ToolOption { return replayOption{p} }
+
+// ReplayPolicy reports the tool's side-effect class. Unannotated tools
+// answer ReplayNever — the honest class, and what the runtime link
+// registers (WEFT-PLAYGROUND.md §10.3's side_effects).
+func (t *ToolDef) ReplayPolicy() ReplayPolicy {
+	if t.replay == ReplaySafe {
+		return ReplaySafe
+	}
+	return ReplayNever
+}
 
 // Call identifies the tool invocation a handler is serving. Retrieve it
 // with CallFromContext — for audit logs, per-call idempotency keys, or

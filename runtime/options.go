@@ -84,9 +84,11 @@ func Limits(b Budget) Option {
 }
 
 // AllowSideEffects names the tools whose handlers may really run for a
-// playground command that asks for side_effects "allow". Every other
-// tool counts as "never" until tool ReplayPolicy exists (8b): its calls
-// park at the approval boundary instead of executing.
+// playground command that asks for side_effects "allow". Every
+// side-effect tool (ReplayPolicy never, the unannotated default) parks
+// at the approval boundary in the other modes; a tool marked
+// weft.Replay(weft.ReplaySafe) is not a side effect and may run in any
+// mode.
 func AllowSideEffects(tools ...string) Option {
 	return func(c *config) {
 		if c.allow == nil {

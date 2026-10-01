@@ -48,8 +48,9 @@ func newRegistry(c *config) *registry {
 // entryFor builds one agent's registration: its weft.Manifest bytes
 // (the description of the code — names, instructions, policy, tools),
 // the alternate models the runtime allows, its own caps as the
-// lower-only bounds, every tool marked "never" (the honest class
-// until tool ReplayPolicy exists, 8b), and the AllowSideEffects set.
+// lower-only bounds, each tool's real side-effect class (its
+// ReplayPolicy; unannotated is "never", WEFT-PLAYGROUND §6 rule 3),
+// and the AllowSideEffects set.
 func (r *registry) entryFor(a *weft.Agent, name string) agentRegistration {
 	manifest, err := weft.Manifest(a)
 	if err != nil {
@@ -64,7 +65,7 @@ func (r *registry) entryFor(a *weft.Agent, name string) agentRegistration {
 		SideEffects: map[string]string{},
 	}
 	for _, t := range a.Tools() {
-		e.SideEffects[t.Name] = "never"
+		e.SideEffects[t.Name] = string(t.ReplayPolicy())
 		if r.cfg.allow[t.Name] {
 			e.Allow = append(e.Allow, t.Name)
 		}
@@ -191,13 +192,13 @@ func (r *registry) entry(name string) (agentRegistration, bool) {
 	return e, ok
 }
 
-// parkedTools names the tools a command's run must park on: every tool
-// the command leaves on (the override subset when set, else the agent's
-// full set) that the runtime has not opted in with AllowSideEffects —
-// the on-set minus the opted-in. A tool the command turned off is not
-// offered and cannot fire, so it needs no park. Until ReplayPolicy
-// exists every tool counts as "never" (§7 P1's rule), so a side effect
-// never re-fires silently (§6 rule 3).
+// parkedTools names the tools a command's run must park on: every
+// side-effect tool the command leaves on (the override subset when set,
+// else the agent's full set) that the runtime has not opted in with
+// AllowSideEffects — the on-set minus the opted-in, minus the tools
+// whose ReplayPolicy is safe (they are not side effects; a re-run may
+// execute them for real, WEFT-PLAYGROUND §6 rule 3). A tool the command
+// turned off is not offered and cannot fire, so it needs no park.
 func (r *registry) parkedTools(agent string, enabled []string) []string {
 	e, ok := r.entries[agent]
 	if !ok {
@@ -208,8 +209,8 @@ func (r *registry) parkedTools(agent string, enabled []string) []string {
 		on[t] = true
 	}
 	var parked []string
-	for tool := range e.SideEffects {
-		if e.isAllowed(tool) {
+	for tool, class := range e.SideEffects {
+		if class == "safe" || e.isAllowed(tool) {
 			continue
 		}
 		if len(enabled) > 0 && !on[tool] {

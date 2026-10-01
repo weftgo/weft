@@ -14,12 +14,13 @@ import (
 // TestRegistryRegistration pins the §10.3 register payload the
 // registry builds: process identity fields, the per-runtime budget
 // and threads flag, and per agent the manifest, the model allow-list,
-// the manifest-derived limits, every tool's side effect class "never"
-// (until ReplayPolicy exists, 8b) and the AllowSideEffects set.
+// the manifest-derived limits, every tool's real side-effect class
+// (its ReplayPolicy; unannotated is "never") and the AllowSideEffects
+// set.
 func TestRegistryRegistration(t *testing.T) {
 	lookup := weft.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct{ ID string }) (string, error) {
 		return "shipped", nil
-	})
+	}, weft.Replay(weft.ReplaySafe))
 	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{ ID string }) (string, error) {
 		return "refunded", nil
 	})
@@ -68,8 +69,8 @@ func TestRegistryRegistration(t *testing.T) {
 	if a.Limits != (agentLimits{MaxSteps: 7, Parallelism: 3}) {
 		t.Errorf("limits = %+v, want the manifest policy's caps", a.Limits)
 	}
-	if want := map[string]string{"lookup_order": "never", "refund": "never"}; !reflect.DeepEqual(a.SideEffects, want) {
-		t.Errorf("side_effects = %v, want every tool %q (8b: ReplayPolicy)", a.SideEffects, want)
+	if want := map[string]string{"lookup_order": "safe", "refund": "never"}; !reflect.DeepEqual(a.SideEffects, want) {
+		t.Errorf("side_effects = %v, want each tool's ReplayPolicy (safe/never), got %v", a.SideEffects, want)
 	}
 	if want := []string{"lookup_order"}; !reflect.DeepEqual(a.Allow, want) {
 		t.Errorf("allow = %v, want %v", a.Allow, want)
@@ -77,32 +78,37 @@ func TestRegistryRegistration(t *testing.T) {
 	if !strings.Contains(a.Manifest, `"acme-support"`) || !strings.Contains(a.Manifest, `"lookup_order"`) {
 		t.Errorf("manifest = %s, want the agent's weft.Manifest", a.Manifest)
 	}
+	if !strings.Contains(a.Manifest, `"replay_policy": "safe"`) {
+		t.Errorf("manifest = %s, want the safe class recorded", a.Manifest)
+	}
 }
 
-// TestParkedTools pins the §7 P1 rule the executor applies: every tool
-// the command leaves on parks unless the runtime opted in
-// (AllowSideEffects) — the on-set minus the opted-in. A tool the
-// command turned off is not offered and cannot fire, so it needs no
-// park; a side effect never re-fires silently before ReplayPolicy
-// exists.
+// TestParkedTools pins the §6 rule 3 set the executor parks on: every
+// side-effect tool the command leaves on (ReplayPolicy never, the
+// unannotated default) unless the runtime opted in
+// (AllowSideEffects) — the on-set minus the opted-in minus the safe
+// tools. A tool the command turned off is not offered and cannot fire,
+// so it needs no park; a safe tool is not a side effect and never
+// parks (WEFT-PLAYGROUND §6 rule 3).
 func TestParkedTools(t *testing.T) {
-	lookup := weft.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
+	lookup := weft.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) { return "", nil },
+		weft.Replay(weft.ReplaySafe))
 	refund := weft.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
 	escalate := weft.Tool("escalate", "Escalate.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
 	agent := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("a"), lookup, refund, escalate)
 	reg := newRegistry(&config{agents: []*weft.Agent{agent}, allow: map[string]bool{"lookup_order": true}})
 
 	if got := reg.parkedTools("a", nil); !reflect.DeepEqual(got, []string{"escalate", "refund"}) {
-		t.Errorf("parked (no narrowing) = %v, want [escalate refund]", got)
+		t.Errorf("parked (no narrowing) = %v, want [escalate refund] — the safe tool does not park", got)
 	}
 	if got := reg.parkedTools("a", []string{"refund"}); !reflect.DeepEqual(got, []string{"refund"}) {
 		t.Errorf("parked (refund on) = %v, want [refund] — the enabled non-opted-in tool parks", got)
 	}
 	if got := reg.parkedTools("a", []string{"refund", "escalate", "lookup_order"}); !reflect.DeepEqual(got, []string{"escalate", "refund"}) {
-		t.Errorf("parked (all on) = %v, want [escalate refund] — every non-opted-in tool the command enabled parks", got)
+		t.Errorf("parked (all on) = %v, want [escalate refund] — every non-opted-in side-effect tool the command enabled parks", got)
 	}
 	if got := reg.parkedTools("a", []string{"lookup_order"}); got != nil {
-		t.Errorf("parked (only the opted-in tool on) = %v, want none", got)
+		t.Errorf("parked (only the safe, opted-in tool on) = %v, want none", got)
 	}
 }
 

@@ -29,8 +29,9 @@ type registration struct {
 // agentRegistration is one exposed agent: its weft.Manifest (names,
 // instructions, policy, tools), the alternate models a command may
 // switch to, the lower-only bounds on its knobs, every tool's side
-// effect class ("never" for all of them until ReplayPolicy exists,
-// 8b), and the tools opted in with AllowSideEffects.
+// effect class (its ReplayPolicy; unannotated is "never",
+// WEFT-PLAYGROUND §6 rule 3), and the tools opted in with
+// AllowSideEffects.
 type agentRegistration struct {
 	Name        string            `json:"name"`
 	Manifest    string            `json:"manifest"` // weft.Manifest JSON for this one agent

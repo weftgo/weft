@@ -1,4 +1,28 @@
-## Unreleased
+## 0.7.0 (unreleased)
+
+The step 8b playground programme (ADR 0024, WEFT-PLAYGROUND.md P1–P5):
+`ReplayPolicy` in the core, the playground's P1–P5 verbs across the
+runtime link, Studio and the devtools panel, the experiments table in
+obsdb, and the debugger rungs 3–4 (breakpoints, steer) on
+runtime-started runs. Root is additive and targets 0.7.0; the lanes'
+modules below date at the step 8 release with it.
+
+### weft 0.7.0 target
+
+#### Added
+
+- `weft.ReplayPolicy` — a tool's side-effect class for re-runs
+  (WEFT-PLAYGROUND.md §6 rule 3): `ReplayNever` (the zero value, and
+  what an unannotated tool counts as — its calls are substituted with
+  the recorded result or parked, never silently re-fired) and
+  `ReplaySafe` (idempotent, side-effect free — a re-run may execute it
+  for real). Set with `weft.Replay(weft.ReplaySafe)` beside the tool's
+  other options; read back with `ToolDef.ReplayPolicy()`. The manifest
+  records `replay_policy: "safe"` — never is the default and renders
+  exactly as before, so no committed weft.json churns. This is the root
+  change step 8b needed: the runtime link's register payload now
+  reports each tool's real class instead of the honest-all-never
+  placeholder of step 8a.
 
 Lanes A2, B1, B2, C1 and C2 of the observability-data programme (ADR
 0024), merged to main: the two new modules from A2 (the observability

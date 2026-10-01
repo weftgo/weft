@@ -1033,3 +1033,21 @@ func ExampleParkOn() {
 	// Output:
 	// pending: 1
 }
+
+// Replay declares a tool's side-effect class for re-runs: safe vouches
+// the call is idempotent (a re-run may execute it for real); every
+// unannotated tool counts as never — substituted or parked, never
+// silently re-fired (WEFT-PLAYGROUND.md §6 rule 3).
+func ExampleReplay() {
+	lookup := weft.Tool("lookup_order", "Look up an order.", func(_ context.Context, _ struct{}) (string, error) {
+		return "shipped", nil
+	}, weft.Replay(weft.ReplaySafe))
+	refund := weft.Tool("refund", "Refund an order.", func(_ context.Context, _ struct{}) (string, error) {
+		return "refunded", nil
+	})
+	fmt.Println("lookup:", lookup.ReplayPolicy())
+	fmt.Println("refund:", refund.ReplayPolicy())
+	// Output:
+	// lookup: safe
+	// refund: never
+}

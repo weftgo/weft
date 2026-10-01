@@ -181,10 +181,11 @@ type eventsPage struct {
 	// NextAfter is the first position of the next page when more
 	// buffered events remain; else null.
 	NextAfter *int64 `json:"next_after"`
-	// Done is true only when the run has finished (succeeded, failed,
-	// or interrupted — never running) and every event has been
-	// returned. A live tail is this endpoint polled from the last
-	// position until done.
+	// Done is true whenever the run reads terminal at derivation time
+	// (succeeded, failed, or interrupted — never running), even on a
+	// partial page with next_after set: it says the poll cadence can
+	// stop, not that every event has been returned. next_after is the
+	// paging cursor — follow it (not done) until it reads null.
 	Done bool `json:"done"`
 }
 

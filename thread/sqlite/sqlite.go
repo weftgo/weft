@@ -2,6 +2,9 @@
 // in one SQLite file on the CGO-free modernc.org/sqlite driver — the
 // store's choice (store/sqlite, Crush's before it), reused so one
 // dependency serves both modules — with WAL and embedded migrations.
+// An Append that returned survives the process dying; whether it also
+// survives a power cut is the fsync policy's choice (see Open: the
+// default fsyncs every commit).
 // It is its own module because the driver would otherwise leak into
 // thread's go.mod (ADR 0011 §1: "own module only if its driver would
 // leak into thread" — it would; thread stays root-and-stdlib only).
@@ -70,14 +73,34 @@ const connParams = "_txlock=immediate" +
 // brings its schema up to date, returning a thread.Storage. ":memory:"
 // works — one private in-process database per Open, for tests and
 // examples, alive for as long as the returned Storage is. Connections
-// carry synchronous=NORMAL, busy_timeout=30000, foreign_keys=ON, and
-// immediate write transactions (preventing deferred-to-writer upgrade
-// deadlocks; read-only transactions stay deferred and take no write
-// lock), and the handle uses a single working connection so every
-// write is serialized. WAL is not a connection pragma: it is a
-// persistent property of the file, switched once by the first Open
-// (setWAL), so a reader in another process — a watcher, the Inspector
-// — reads concurrently through its own Open.
+// carry busy_timeout=30000, foreign_keys=ON, and immediate write
+// transactions (preventing deferred-to-writer upgrade deadlocks;
+// read-only transactions stay deferred and take no write lock), and
+// the handle uses a single working connection so every write is
+// serialized. WAL is not a connection pragma: it is a persistent
+// property of the file, switched once by the first Open (setWAL), so a
+// reader in another process — a watcher, the Inspector — reads
+// concurrently through its own Open.
+//
+// # Durability
+//
+// Every Append is one committed transaction, so a process that dies —
+// a crash, a SIGKILL — never loses an Append that returned, under
+// either fsync policy. What the policy decides is power loss and
+// kernel crashes:
+//
+//   - thread.FsyncEveryAppend, the default: synchronous=FULL. Each
+//     commit fsyncs the write-ahead log before Append returns — an
+//     accepted entry survives losing power, the same promise jsonl
+//     makes for its default.
+//   - thread.FsyncOnFlush: synchronous=NORMAL. A commit is written
+//     but not fsynced; the entries since the last sync can be lost to
+//     a power cut (the database stays consistent — WAL's guarantee —
+//     it only ends earlier). Flush is the sync point: it checkpoints
+//     the log, which fsyncs it. SQLite also checkpoints on its own
+//     as the log grows.
+//
+// ":memory:" has nothing to sync and ignores both.
 //
 // path is a file name, taken literally: characters that mean something
 // in a SQLite URI ('?', '#', '%') are part of the name, never options.
@@ -85,11 +108,10 @@ const connParams = "_txlock=immediate" +
 // The shared open vocabulary (thread/backend.Resolve) applies: Salvage
 // downgrades a malformed line from a load failure to a skip reported in
 // the LoadReport; OpenLogger names where a lock takeover and a removed
-// torn row are reported; the fsync-policy options are accepted and are
-// no-ops here — every Append is one committed transaction, so sqlite's
-// commit cadence already is per-append and there is no buffer to defer
-// — and so is NoLock: the lock is a row, it needs no platform support,
-// and it stays on. The database file is created 0600 and its directory
+// torn row are reported; the fsync-policy options choose the sync
+// cadence described above; NoLock is accepted and is a no-op: the lock
+// is a row, it needs no platform support, and it stays on. The
+// database file is created 0600 and its directory
 // 0700, matching jsonl's rule (ADR 0011 §5); the -wal and -shm side
 // files are SQLite's own and share the main file's directory.
 func Open(path string, opts ...thread.OpenOption) (thread.Storage, error) {
@@ -141,7 +163,14 @@ func Open(path string, opts ...thread.OpenOption) (thread.Storage, error) {
 		default:
 			return nil, err
 		}
-		dsn = "file:" + escapeURIPath(path) + "?" + connParams + "&_pragma=synchronous(NORMAL)"
+		// The fsync policy is SQLite's synchronous level (see
+		// Durability on Open): FULL fsyncs the log at every commit,
+		// NORMAL leaves it to checkpoints — and to Flush.
+		level := "FULL"
+		if !cfg.SyncEveryAppend {
+			level = "NORMAL"
+		}
+		dsn = "file:" + escapeURIPath(path) + "?" + connParams + "&_pragma=synchronous(" + level + ")"
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -157,6 +186,9 @@ func Open(path string, opts ...thread.OpenOption) (thread.Storage, error) {
 		alive:   pidAlive,
 		startOf: procStart,
 		held:    map[string]*lease{},
+		// Flush has commits to sync only where commits do not sync
+		// themselves: a file database under FsyncOnFlush.
+		syncOnFlush: !memory && !cfg.SyncEveryAppend,
 	}
 	b.started = b.startOf(b.pid)
 	if memory {
@@ -277,6 +309,9 @@ type backend struct {
 	// that counted a session's rows keeps the count only if nothing
 	// was written while it looked.
 	writes uint64
+	// syncOnFlush says commits are not fsynced as they land
+	// (FsyncOnFlush on a file database), so Flush owes the sync.
+	syncOnFlush bool
 }
 
 // lease is this instance's hold on one session: the lock row is ours,
@@ -787,12 +822,19 @@ func (b *backend) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// Flush is the thread.Flusher capability: every Append here is one
-// committed transaction, so nothing is ever buffered — Flush answers
-// whether the session exists (ErrNotFound for one it does not hold) and
-// otherwise has nothing to do. It exists so the shared flush cadence —
-// a Session opened with thread.FsyncOnFlush — is portable across
-// backends without the caller learning which one it holds.
+// Flush is the thread.Flusher capability. It answers whether the
+// session exists (ErrNotFound for one the database does not hold),
+// and under thread.FsyncOnFlush it is the sync point for everything
+// committed so far: it checkpoints the write-ahead log, which fsyncs
+// the log and then the database file — the whole database's, not one
+// session's; there is one log — and costs next to nothing when the
+// log holds nothing new. Under the default policy every commit
+// already fsynced, and Flush has nothing to add.
+//
+// The checkpoint is SQLite's passive one: it never waits for a reader.
+// A reader holding a snapshot from before the previous checkpoint — a
+// long read transaction in another process — can leave it nothing to
+// do, and the sync then waits for the Flush after that reader ends.
 func (b *backend) Flush(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -805,13 +847,20 @@ func (b *backend) Flush(ctx context.Context, id string) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmtNotFound(id)
 	}
-	return err
+	if err != nil || !b.syncOnFlush {
+		return err
+	}
+	var busy, logged, checkpointed int
+	if err := b.db.QueryRowContext(ctx, `PRAGMA wal_checkpoint(PASSIVE)`).Scan(&busy, &logged, &checkpointed); err != nil {
+		return fmt.Errorf("sqlite: flush checkpoint: %w", err)
+	}
+	return nil
 }
 
 // Release is the thread.Releaser capability: it deletes this
 // instance's lock row for the session, so another Storage or process
 // may write it, and ends the lease on it (Acquire), whoever has it.
-// There is nothing to flush — every Append already committed. A later
+// Nothing is buffered — every Append already committed. A later
 // Append here takes the row again, or fails with ErrLocked if another
 // writer holds it by then. Releasing a session another writer holds
 // releases nothing; one the database does not hold fails with

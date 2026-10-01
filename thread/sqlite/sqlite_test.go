@@ -234,7 +234,7 @@ func TestSalvageSkipsMalformedLines(t *testing.T) {
 }
 
 // The Flusher capability exists and answers existence: everything here
-// is already committed, so Flush has nothing to buffer.
+// is already committed, and under the default policy already fsynced.
 func TestFlusher(t *testing.T) {
 	ctx := context.Background()
 	st := openFile(t)
@@ -253,9 +253,10 @@ func TestFlusher(t *testing.T) {
 	}
 }
 
-// The fsync-policy options are accepted: the shared vocabulary stays
-// portable across backends, and a Session driving a flush cadence gets
-// the same answers from every one of them.
+// The fsync-policy options are honoured through the shared
+// vocabulary: a Session driving a flush cadence gets the same answers
+// from every backend (the policy itself is pinned by
+// TestFsyncPolicyIsTheSynchronousLevel).
 func TestFsyncOptionsAccepted(t *testing.T) {
 	ctx := context.Background()
 	st, err := sqlite.Open(filepath.Join(t.TempDir(), "cadence.db"), thread.FsyncOnFlush())

@@ -310,10 +310,8 @@ func TestPlaygroundEndToEnd(t *testing.T) {
 	}
 
 	row := e.waitCommand(t, "cmd_e2e_1", "finished")
-	if !strings.Contains(row, `"status"`) && !strings.Contains(row, `"run_id":"pg_`) {
-		// the ack's run id and status live on the row; both pinned below
-		// through the span and the finished state.
-		_ = row
+	if !strings.Contains(row, `"run_id":"pg_`) || !strings.Contains(row, `"error":null`) {
+		t.Errorf("finished row = %s, want the pg_ run id and a null error", row)
 	}
 
 	// §10.6's P0 gate: the run's span carries the experiment labels

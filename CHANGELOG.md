@@ -434,6 +434,14 @@ dates at the step 8 release.
   `store/v0.1.3` remains resolvable from the module proxy for
   consumers pinned to it by tag.
 
+## thread 0.8.1 — 2026-10-01
+
+The step 8 release's lockstep tag: the module's only change since
+0.8.0 is a comment reword in `thread/pool` (the store-era prose T18's
+grep gate cleaned up), and the requirement moves to the tagged root
+v0.7.0 (the two-phase rule, ADR 0005). Tagged so the step 8 train —
+obsdb, otel, studio, runtime — releases against a current thread.
+
 ## thread 0.8.0 — 2026-10-01
 
 The observability-data programme's thread step (ADR 0024 S5): the

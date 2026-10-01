@@ -383,3 +383,26 @@ func TestRunsInnerParentScoping(t *testing.T) {
 		t.Error("'*' must not scope parentage")
 	}
 }
+
+// Migration 0002's engine shape (offline): the two properties the
+// step 8b review fixes rest on — ReplacingMergeTree(InsertTime) (the
+// newest write wins under FINAL; the version column, not a timestamp
+// of ours) and InsertTime DEFAULT now64(9) (the engine's own
+// microsecond-precise write time the ordering reads). TestSpecEnginesPresent
+// reads only 0001; without this pin a 0002 regression is caught by
+// nothing offline (the audit's P2-5).
+func TestSpecExperimentsEnginePresent(t *testing.T) {
+	body, err := migrationsFS.ReadFile("migrations/" + migrations[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	ddl := string(body)
+	for _, want := range []string{
+		"InsertTime DateTime64(9, 'UTC') DEFAULT now64(9)",
+		"ENGINE = ReplacingMergeTree(InsertTime)\nORDER BY Id",
+	} {
+		if !strings.Contains(ddl, want) {
+			t.Errorf("migration 0002 missing %q:\n%s", want, ddl)
+		}
+	}
+}

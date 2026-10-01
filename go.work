@@ -8,6 +8,7 @@ use (
 	./mcp
 	./obsdb
 	./openai
+	./otel
 	./store
 	./studio
 	./thread

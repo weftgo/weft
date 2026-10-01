@@ -195,9 +195,15 @@ type Session struct {
 	// lastMeasureLeaf the entry that step's request covered up to (the
 	// turn's prompt — the messages after it are the estimated delta),
 	// and warnedNoWindow keeps the no-window warning to one line.
+	// warnedNothing keeps the "trigger fired, nothing to compact"
+	// warning to one line until a compaction lands, and warnedUnusable
+	// names the last unusable compaction entry the context walk warned
+	// about, so one bad entry is one line, not one per context build.
 	lastInput       int64
 	lastMeasureLeaf string
 	warnedNoWindow  bool
+	warnedNothing   bool
+	warnedUnusable  string
 }
 
 // awaitState is the parked boundary's captured turn settings, plus
@@ -250,10 +256,14 @@ func Create(ctx context.Context, st Storage, agent *weft.Agent, opts ...SessionO
 	if len(cfg.meta) > 0 {
 		h.Meta = maps.Clone(cfg.meta)
 	}
+	// Per-model overrides need the agent; a compaction configuration
+	// that cannot work fails here, before anything is written.
+	if err := cfg.compaction.resolve(agent.Model()); err != nil {
+		return nil, err
+	}
 	if err := st.Create(ctx, h); err != nil {
 		return nil, err
 	}
-	cfg.compaction.resolve(agent.Model()) // per-model overrides need the agent
 	return &Session{
 		st:     st,
 		agent:  agent,
@@ -289,7 +299,11 @@ func Open(ctx context.Context, st Storage, id string, agent *weft.Agent, opts ..
 		byID:   make(map[string]int, len(entries)),
 	}
 	s.cfg = resolveSession(opts...)
-	s.cfg.compaction.resolve(agent.Model()) // per-model overrides need the agent
+	// Per-model overrides need the agent; a compaction configuration
+	// that cannot work is an error, not a session that never compacts.
+	if err := s.cfg.compaction.resolve(agent.Model()); err != nil {
+		return nil, err
+	}
 	leaf := ""
 	for i, e := range entries {
 		if id := idOf(e); id != "" {
@@ -469,21 +483,24 @@ func (s *Session) pathLocked(entryID string) ([]Entry, error) {
 	return path, nil
 }
 
-// Context returns the messages the model sees at the session's leaf:
-// the message and custom_message entries on the leaf's path, in
-// conversation order, with weft.Repair applied last — every call the
-// transcript shows has a result (ADR 0011 §2, ADR 0001). Entries of
-// the bookkeeping kinds never reach it; a custom entry's whole point
-// is to survive outside it. A call left pending by its turn is shown
-// repaired here — the caller's view; the run Send starts repairs
+// Context returns the messages the model sees at the session's leaf,
+// in conversation order, with weft.Repair applied last — every call
+// the transcript shows has a result (ADR 0011 §2, ADR 0001). Entries
+// of the bookkeeping kinds never reach it; a custom entry's whole
+// point is to survive outside it. A call left pending by its turn is
+// shown repaired here — the caller's view; the run Send starts repairs
 // pending calls itself, so the decision options can resolve them.
 //
-// This walk is where compaction lands: from step 1.8, the latest
-// compaction entry on the path contributes its summary ahead of the
-// entries from its first kept id onward, and a branch_summary entry
-// contributes the abandoned branch's summary in that branch's place
-// (ADR 0020 §1, §6). Nothing before step 1.8 writes either kind, so
-// the walk below reads the whole path raw.
+// Without a compaction on the path that is every message and
+// custom_message entry, and every branch_summary as its marked
+// summary. With one, it is the compacted view (ADR 0020 §1 and its
+// 2026-10-01 amendment), in this order: the latest summary
+// compaction's summary behind the fixed marker; the entries that
+// compaction pinned, raw, in path order; then the entries from its
+// first kept entry onward — with every trim record above the
+// compaction replayed (the stubs the record names, nothing else), and
+// signed reasoning stripped from entries recorded before the latest
+// compaction or trim.
 func (s *Session) Context() []weft.Message {
 	return weft.Repair(s.rawContext())
 }
@@ -501,174 +518,220 @@ func (s *Session) rawContext() []weft.Message {
 	return s.rawContextLocked()
 }
 
-// rawContextLocked is the walk (callers hold s.mu): the latest
-// compaction entry on the path leads with its summary behind the fixed
-// marker, and the context then reads from its first kept entry onward
-// (ADR 0020 §1); a branch_summary entry contributes its summary in
-// the abandoned branch's place wherever it sits (§6); and reasoning
-// parts carrying a signature are stripped from entries recorded before
-// the compaction — their prefix changed, and a resent signature breaks
-// (pi #9391, Anthropic prefix_binding_mismatch). Entries recorded
-// after the compaction keep theirs: they were made over a prefix that
-// already held the summary. A FirstKept the path does not reach (a
-// hand-made file) makes the compaction unusable, and the walk falls
-// back to the whole path rather than a summary of nothing.
-//
-// A trim record (no summary of its own) never governs the boundary:
-// the latest summary compaction at or below it keeps supplying the
-// marker and the first-kept id, and the trim only layers its stubs
-// over that kept range. A trim that reset the boundary to the root
-// would resurface, raw, everything the summary had replaced — a
-// context larger than the one the trimmer measured.
-// pinnedKept is one pinned entry the walk re-includes: its path
-// index (for the trim's stub set) and its stripped message.
-type pinnedKept struct {
-	idx int
-	msg weft.Message
-}
-
+// rawContextLocked is the context walk's messages (callers hold
+// s.mu); contextViewLocked is the walk itself.
 func (s *Session) rawContextLocked() []weft.Message {
-	path, err := s.pathLocked(s.leaf)
-	if err != nil {
+	view, err := s.contextViewLocked()
+	if err != nil || len(view.msgs) == 0 {
 		return nil // the leaf is always an entry the session holds
 	}
-	var msgs []weft.Message
-	var pinnedMsgs []pinnedKept
-	start, compactionAt, trimAt := 0, -1, -1
-	for i := len(path) - 1; i >= 0; i-- {
-		c, ok := path[i].(CompactionEntry)
-		if !ok {
-			continue
-		}
-		if c.Summary == "" && c.Reason == ReasonTrim {
-			if trimAt < 0 {
-				trimAt = i // the latest trim: where its stubs reach up to
-			}
-			continue // a trim does not govern; the summary below it does
-		}
-		msgs = append(msgs, summaryMessage(c.Summary))
-		compactionAt = i
-		for j := 0; j <= i; j++ {
-			if idOf(path[j]) == c.FirstKept {
-				start = j
-				break
-			}
-		}
-		// The pinned ids the compaction kept through: message-kind
-		// entries below the boundary re-enter the context after the
-		// summary, in path order — a pin survives every compaction
-		// without holding the cut back (ADR 0020 §4). Collected here,
-		// appended once the trim's stub set is known.
-		if len(c.Pinned) > 0 {
-			pinnedSet := make(map[string]bool, len(c.Pinned))
-			for _, id := range c.Pinned {
-				pinnedSet[id] = true
-			}
-			for j := 0; j < start; j++ {
-				if m, ok := contextMessage(path[j]); ok && pinnedSet[idOf(path[j])] {
-					pinnedMsgs = append(pinnedMsgs, pinnedKept{idx: j, msg: stripSignedReasoning(m)})
-				}
-			}
-		}
-		break
-	}
-	// A trim record re-derives the built-in trimmer's view on read:
-	// every tool result in the kept range recorded before the trim
-	// reads as the golden stub, except the newest keepLast of them
-	// (the same rule the trimmer applied when it decided the trim was
-	// enough). A custom trimmer's record is not re-derived — its view
-	// was its own; the raw messages read as stored.
-	var stubParts map[struct{ msg, part int }]bool
-	if trimAt >= 0 && trimAt > start {
-		if t, ok := s.cfg.compaction.trimmer.(clearResultsTrimmer); ok {
-			// The mirror of the trimmer's rule, per result part (a
-			// step's results batch on one message): the newest keepLast
-			// parts in the pre-trim range survive, every older one's
-			// message is stubbed.
-			type at = struct{ msg, part int }
-			var parts []at // oldest first
-			for i := start; i < trimAt; i++ {
-				if m, ok := path[i].(MessageEntry); ok {
-					for j := range m.Message.Content {
-						if _, isResult := m.Message.Content[j].(weft.ToolResultPart); isResult {
-							parts = append(parts, at{i, j})
-						}
-					}
-				}
-			}
-			stubParts = map[at]bool{}
-			for _, p := range parts {
-				stubParts[p] = true
-			}
-			for n := 0; n < min(t.keepLast, len(parts)); n++ {
-				delete(stubParts, parts[len(parts)-1-n]) // the newest survive
-			}
-		}
-	}
-	for _, pk := range pinnedMsgs {
-		msgs = append(msgs, stubMessageParts(pk.msg, pk.idx, stubParts))
-	}
-	// Below the governing compaction entry the recorded entries are
-	// pre-compaction (signed reasoning stripped, trim stubs applied).
-	// A trim's stubs rewrite prefixes below the trim itself, so when
-	// one exists the strip boundary is the trim — the lower of the two
-	// positions, since the trim always sits above the governor.
-	stripBelow := compactionAt
-	if trimAt >= 0 {
-		stripBelow = trimAt
-	}
-	for i := start; i < len(path); i++ {
-		switch e := path[i].(type) {
-		case MessageEntry:
-			m := e.Message
-			if stripBelow >= 0 && i < stripBelow {
-				m = stripSignedReasoning(m)
-				m = stubMessageParts(m, i, stubParts)
-			}
-			msgs = append(msgs, m)
-		case CustomMessageEntry:
-			m := e.Message
-			if stripBelow >= 0 && i < stripBelow {
-				m = stripSignedReasoning(m)
-			}
-			msgs = append(msgs, m)
-		case BranchSummaryEntry:
-			msgs = append(msgs, summaryMessage(e.Summary))
-		}
+	msgs := make([]weft.Message, len(view.msgs))
+	for i, vm := range view.msgs {
+		msgs[i] = vm.msg
 	}
 	return msgs
 }
 
-// stubMessageParts replaces this message's trimmed result parts — the
-// ones the walk marked — with the golden stub naming the call.
-func stubMessageParts(m weft.Message, pathIdx int, stubParts map[struct{ msg, part int }]bool) weft.Message {
-	if len(stubParts) == 0 {
-		return m
+// viewMsg is one message of the context walk with where it came from:
+// the entry that contributed it and that entry's index on the path.
+// The governing compaction's summary has no source entry (entry is
+// empty; idx is the compaction entry's index).
+type viewMsg struct {
+	msg   weft.Message
+	entry string
+	idx   int
+}
+
+// contextView is the context walk's result: the leaf's path, the
+// messages the model is shown with their sources, and the boundary
+// they were read from — the governing summary compaction's index (-1
+// when none) and its first kept entry's (0 when none).
+type contextView struct {
+	path     []Entry
+	msgs     []viewMsg
+	governor int
+	start    int
+}
+
+// contextViewLocked is the walk (callers hold s.mu): the latest
+// summary compaction on the path leads with its summary behind the
+// fixed marker, the entries it pinned follow in path order, and the
+// context then reads from its first kept entry onward (ADR 0020 §1); a
+// branch_summary entry contributes its summary in the abandoned
+// branch's place wherever it sits (§6); and reasoning parts carrying a
+// signature are stripped from entries recorded before the compaction —
+// their prefix changed, and a resent signature breaks (pi #9391,
+// Anthropic prefix_binding_mismatch). Entries recorded after the
+// compaction keep theirs: they were made over a prefix that already
+// held the summary.
+//
+// A trim record (no summary of its own) never governs the boundary:
+// the latest summary compaction at or below it keeps supplying the
+// marker and the first-kept id, and the trim only layers its stubs
+// over the kept range. Every trim record above the governing
+// compaction is replayed strictly from the entry — each stub replaces
+// the content of the tool result it names, in the entry it names —
+// whatever Trimmer the session is configured with now (see
+// trimStubsLocked for the one legacy exception). A summary compaction
+// supersedes the trims below it: its kept tail reads raw again.
+//
+// A summary compaction whose FirstKept the path does not reach below
+// it (a hand-made file; ApplyCompaction never writes one) is
+// unusable: the walk skips it with one warning and lets the next
+// older summary compaction govern — the whole path, raw, when there
+// is none. It never shows a summary on top of the range that summary
+// was supposed to replace.
+func (s *Session) contextViewLocked() (contextView, error) {
+	path, err := s.pathLocked(s.leaf)
+	if err != nil {
+		return contextView{governor: -1}, err
 	}
-	var any bool
-	for j := range m.Content {
-		if stubParts[struct{ msg, part int }{pathIdx, j}] {
-			any = true
-			break
+	b := boundaryOf(path)
+	for _, c := range b.unusable {
+		if s.warnedUnusable != c.ID {
+			s.warnedUnusable = c.ID
+			s.agent.Logger().Warn("thread: compaction entry is unusable and was skipped: its first kept entry is not on the path below it",
+				"session", s.header.ID, "compaction", c.ID, "first_kept", c.FirstKept)
 		}
 	}
-	if !any {
-		return m
+	view := contextView{path: path, governor: b.governor, start: b.start}
+	stubs := s.trimStubsLocked(path, b)
+	// Below the governing compaction entry the recorded entries are
+	// pre-compaction (signed reasoning stripped). A trim's stubs
+	// rewrite prefixes below the trim itself, so when one exists the
+	// strip boundary is the latest trim — it always sits above the
+	// governor.
+	stripBelow := b.governor
+	if len(b.trims) > 0 {
+		stripBelow = b.trims[0]
 	}
-	content := make([]weft.Part, len(m.Content))
-	copy(content, m.Content)
-	for j := range content {
-		if stubParts[struct{ msg, part int }{pathIdx, j}] {
-			if r, ok := content[j].(weft.ToolResultPart); ok {
-				content[j] = weft.ToolResultPart{
-					CallID:  r.CallID,
-					Name:    r.Name,
-					Content: clearedResultStub(r.CallID, r.Name),
+	if b.governor >= 0 {
+		c := path[b.governor].(CompactionEntry)
+		view.msgs = append(view.msgs, viewMsg{msg: summaryMessage(c.Summary), idx: b.governor})
+		// The pinned ids the compaction kept through: message-kind
+		// entries below the boundary re-enter the context after the
+		// summary, in path order — a pin survives every compaction
+		// without holding the cut back (ADR 0020 §4).
+		if len(c.Pinned) > 0 {
+			pinned := make(map[string]bool, len(c.Pinned))
+			for _, id := range c.Pinned {
+				pinned[id] = true
+			}
+			for j := 0; j < b.start; j++ {
+				id := idOf(path[j])
+				if m, ok := contextMessage(path[j]); ok && pinned[id] {
+					view.msgs = append(view.msgs, viewMsg{msg: applyStubs(stripSignedReasoning(m), stubs[id]), entry: id, idx: j})
 				}
 			}
 		}
 	}
-	m.Content = content
+	for i := b.start; i < len(path); i++ {
+		switch e := path[i].(type) {
+		case MessageEntry:
+			m := e.Message
+			if i < stripBelow {
+				m = applyStubs(stripSignedReasoning(m), stubs[e.ID])
+			}
+			view.msgs = append(view.msgs, viewMsg{msg: m, entry: e.ID, idx: i})
+		case CustomMessageEntry:
+			m := e.Message
+			if i < stripBelow {
+				m = applyStubs(stripSignedReasoning(m), stubs[e.ID])
+			}
+			view.msgs = append(view.msgs, viewMsg{msg: m, entry: e.ID, idx: i})
+		case BranchSummaryEntry:
+			view.msgs = append(view.msgs, viewMsg{msg: summaryMessage(e.Summary), entry: e.ID, idx: i})
+		}
+	}
+	return view, nil
+}
+
+// trimStubsLocked collects the stubs the walk applies, by entry id:
+// the union of every trim record above the governing compaction,
+// oldest first, so a later trim's stub for the same result wins. The
+// records are the whole story — the configured Trimmer is not asked.
+//
+// The legacy exception: a trim entry written before trim records
+// existed carries none. It is read the way it always was — if the
+// session is configured with ClearOldToolResults, every tool result
+// in the kept range below the newest such trim reads as the built-in
+// stub except the newest keepLast of them; under any other
+// configuration it stubs nothing. Only such old entries depend on the
+// options; nothing this build writes does. Callers hold s.mu.
+func (s *Session) trimStubsLocked(path []Entry, b pathBoundary) map[string][]TrimStub {
+	if len(b.trims) == 0 {
+		return nil
+	}
+	stubs := map[string][]TrimStub{}
+	set := func(st TrimStub) {
+		for i, have := range stubs[st.Entry] {
+			if have.CallID == st.CallID {
+				stubs[st.Entry][i] = st
+				return
+			}
+		}
+		stubs[st.Entry] = append(stubs[st.Entry], st)
+	}
+	legacyAt := -1
+	for _, i := range b.trims { // newest first
+		if path[i].(CompactionEntry).Trim == nil {
+			legacyAt = i
+			break
+		}
+	}
+	if t, ok := s.cfg.compaction.trimmer.(clearResultsTrimmer); ok && legacyAt >= 0 {
+		var results []TrimStub // oldest first
+		for i := b.start; i < legacyAt; i++ {
+			if m, ok := path[i].(MessageEntry); ok {
+				for _, p := range m.Message.Content {
+					if r, isResult := p.(weft.ToolResultPart); isResult {
+						results = append(results, TrimStub{Entry: m.ID, CallID: r.CallID, Content: clearedResultStub(r.CallID, r.Name)})
+					}
+				}
+			}
+		}
+		for n := 0; n < len(results)-t.keepLast; n++ { // the newest keepLast survive
+			set(results[n])
+		}
+	}
+	for n := len(b.trims) - 1; n >= 0; n-- { // oldest first
+		if c := path[b.trims[n]].(CompactionEntry); c.Trim != nil {
+			for _, st := range c.Trim.Stubs {
+				set(st)
+			}
+		}
+	}
+	return stubs
+}
+
+// applyStubs replaces the tool results the stubs name with their
+// recorded content — the trim's view of the message, never a change to
+// what the file holds.
+func applyStubs(m weft.Message, stubs []TrimStub) weft.Message {
+	if len(stubs) == 0 {
+		return m
+	}
+	var content []weft.Part
+	for j, p := range m.Content {
+		r, ok := p.(weft.ToolResultPart)
+		if !ok {
+			continue
+		}
+		for _, st := range stubs {
+			if st.CallID != r.CallID {
+				continue
+			}
+			if content == nil {
+				content = make([]weft.Part, len(m.Content))
+				copy(content, m.Content)
+			}
+			content[j] = weft.ToolResultPart{CallID: r.CallID, Name: r.Name, Content: st.Content, IsError: st.IsError}
+			break
+		}
+	}
+	if content != nil {
+		m.Content = content
+	}
 	return m
 }
 
@@ -1010,6 +1073,7 @@ func cloneEntry(e Entry) Entry {
 		e.FilesRead = slices.Clone(e.FilesRead)
 		e.FilesModified = slices.Clone(e.FilesModified)
 		e.Pinned = slices.Clone(e.Pinned)
+		e.Trim = cloneTrim(e.Trim)
 		return e
 	case BranchSummaryEntry:
 		return e

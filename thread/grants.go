@@ -1,6 +1,7 @@
 package thread
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -64,8 +65,14 @@ type Arg struct {
 }
 
 // ArgEquals returns the predicate requiring args[pointer] to equal
-// value as JSON: numbers compare numerically, strings and booleans
-// exactly, arrays and objects deeply.
+// value as JSON: strings and booleans exactly, arrays and objects
+// deeply (key order never matters), and numbers by this rule — two
+// integers (no fraction, no exponent) compare exactly, digit for
+// digit, however large; as soon as either side has a fraction or an
+// exponent both compare as float64, so 1, 1.0 and 1e0 are equal and
+// two values a float64 cannot tell apart are equal too. Pointer "" is
+// the whole arguments document; a call that carried no arguments reads
+// as the empty object {}.
 func ArgEquals(pointer string, value json.RawMessage) Arg {
 	return Arg{Pointer: pointer, Equals: slices.Clone(value)}
 }
@@ -83,10 +90,15 @@ func ArgPrefix(pointer, prefix string) Arg {
 }
 
 // ArgGlob returns the predicate requiring args[pointer] to be a
-// string matching glob — the "go test …" command shape. A command is
-// not a path: * spans separators, so "go test*" matches
-// "go test ./..." (and anything after it on the line — anchor the
-// glob's tail when that matters).
+// string matching glob — the "go test …" command shape. * matches any
+// run of characters, the empty run included, and ? exactly one
+// character (one Unicode code point, never one byte of it); every
+// other character is itself. There is no escape and there are no
+// classes: a literal * or ? cannot be asked for — use ArgEquals or
+// ArgPrefix when the value holds one. A command is not a path: *
+// spans separators, so "go test*" matches "go test ./..." (and
+// anything after it on the line — anchor the glob's tail when that
+// matters).
 func ArgGlob(pointer, glob string) Arg {
 	return Arg{Pointer: pointer, Glob: glob}
 }
@@ -110,12 +122,25 @@ func WithGrantStore(gs GrantStore) SessionOption { return grantStoreOption{gs} }
 // grants that outlive any one session, consulted by every session
 // handed the store. The store owns their lifetime — expiry, revocation,
 // use counts — because only it can see every session's matches; the
-// session's entry-scoped grants keep their own rules.
+// session's entry-scoped grants keep their own rules, and a
+// SharedGrant's Expiry and MaxUses are the store's to enforce: the
+// session matches whatever Grants returns.
+//
+// An implementation must be safe for concurrent use: every session
+// handed the store calls it from its own runner goroutine, and
+// sessions run concurrently.
 type GrantStore interface {
-	// Grants returns the store's live grants. The chain consults it
-	// once per parked call, before parking; an error reads as no
-	// match, with a warning through the agent's logger — a broken
-	// store never parks nothing silently, and never decides either.
+	// Grants returns the store's live grants, in the order they are
+	// tried (first match wins). The chain calls it once for every call
+	// about to park that no session grant matched — so once per gated
+	// call per turn, never on a timer — on the session's runner
+	// goroutine, with the turn's persistence context, holding no
+	// session lock. The turn waits for the answer: a slow store is a
+	// slow turn, so answer from memory or bound the lookup with ctx.
+	// The returned slice is read, never kept or changed. An error
+	// reads as no match, with a warning through the agent's logger — a
+	// broken store never parks nothing silently, and never decides
+	// either.
 	Grants(ctx context.Context) ([]SharedGrant, error)
 }
 
@@ -158,6 +183,25 @@ func (s *Session) Revoke(ctx context.Context, grantID string) error {
 	return s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {
 		return GrantRevokedEntry{ID: id, ParentID: parent, Created: created, GrantID: grantID}
 	})
+}
+
+// exactArgsGrant is the grant "approve and always allow this" mints
+// (ADR 0021 §4): the tool plus the call's exact arguments. A call that
+// carried no arguments is granted as the empty object — the same
+// reading argMatches gives absent arguments — so the grant matches the
+// next such call instead of matching nothing.
+func exactArgsGrant(tool string, args json.RawMessage) Grant {
+	return Grant{Tool: tool, Args: []Arg{ArgEquals("", normalArgs(args))}}
+}
+
+// normalArgs reads absent arguments — nil, empty, or only whitespace —
+// as the empty object: a tool call without arguments and one with {}
+// are the same call. Everything else is returned as it is (a copy).
+func normalArgs(args json.RawMessage) json.RawMessage {
+	if len(bytes.TrimSpace(args)) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	return slices.Clone(args)
 }
 
 // grantRef names a matched grant for the audit entry: the entry id
@@ -277,19 +321,20 @@ func grantMatches(g Grant, c weft.ToolCallPart) bool {
 
 // argMatches evaluates one predicate against the call's arguments. A
 // pointer the arguments do not reach is no match — loudly absent, not
-// silently null.
+// silently null. Absent arguments read as the empty object.
 func argMatches(a Arg, args json.RawMessage) bool {
-	v, ok := pointerValue(args, a.Pointer)
+	v, ok := pointerValue(normalArgs(args), a.Pointer)
 	if !ok {
 		return false
 	}
 	switch {
 	case len(a.Equals) > 0:
-		var want, got any
-		if err := json.Unmarshal(a.Equals, &want); err != nil {
+		want, err := decodeJSON(a.Equals)
+		if err != nil {
 			return false
 		}
-		if err := json.Unmarshal(v, &got); err != nil {
+		got, err := decodeJSON(v)
+		if err != nil {
 			return false
 		}
 		return jsonEqual(want, got)
@@ -308,20 +353,22 @@ func argMatches(a Arg, args json.RawMessage) bool {
 
 // wildcardMatch is the ArgGlob matcher: * matches any run of
 // characters including separators (a command is not a path — "go
-// test*" must span "./..."), ? one character, everything else itself.
-// The classic two-pointer scan, no backtracking beyond a starred
-// restart.
+// test*" must span "./..."), ? exactly one character, everything else
+// itself. Characters are runes: ? never matches half of a multi-byte
+// character. There is no escape — a backslash is a backslash. The
+// classic two-pointer scan, no backtracking beyond a starred restart.
 func wildcardMatch(pattern, s string) bool {
+	p, r := []rune(pattern), []rune(s)
 	px, sx, star, mark := 0, 0, -1, -1
-	for sx < len(s) {
+	for sx < len(r) {
 		switch {
-		case px < len(pattern) && (pattern[px] == '?' || pattern[px] == s[sx]):
-			px++
-			sx++
-		case px < len(pattern) && pattern[px] == '*':
+		case px < len(p) && p[px] == '*':
 			star = px
 			mark = sx
 			px++
+		case px < len(p) && (p[px] == '?' || p[px] == r[sx]):
+			px++
+			sx++
 		case star >= 0:
 			px = star + 1
 			mark++
@@ -330,15 +377,52 @@ func wildcardMatch(pattern, s string) bool {
 			return false
 		}
 	}
-	for px < len(pattern) && pattern[px] == '*' {
+	for px < len(p) && p[px] == '*' {
 		px++
 	}
-	return px == len(pattern)
+	return px == len(p)
+}
+
+// decodeJSON decodes one JSON value keeping numbers as their literals
+// (json.Number), so integer comparison stays exact, and refusing
+// trailing data.
+func decodeJSON(raw []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, err
+	}
+	if dec.More() {
+		return nil, fmt.Errorf("thread: trailing data after a JSON value")
+	}
+	return v, nil
+}
+
+// arrayIndex parses an RFC 6901 array reference token: "0", or digits
+// with no leading zero — nothing else. A sign, a space, a leading
+// zero, or "-" (the element after the last, which never exists to
+// read) is no index.
+func arrayIndex(tok string) (int, bool) {
+	if tok == "" || (len(tok) > 1 && tok[0] == '0') {
+		return 0, false
+	}
+	for i := 0; i < len(tok); i++ {
+		if tok[i] < '0' || tok[i] > '9' {
+			return 0, false
+		}
+	}
+	i, err := strconv.Atoi(tok)
+	if err != nil { // out of range
+		return 0, false
+	}
+	return i, true
 }
 
 // pointerValue resolves an RFC 6901 JSON pointer in raw bytes,
-// returning the raw JSON at the tip. ~0 and ~1 unescape; the whole
-// document is "/" — pointer "" is the document itself.
+// returning the raw JSON at the tip. ~0 and ~1 unescape; pointer ""
+// is the document itself; an array is indexed by the RFC's strict
+// token (arrayIndex). Numbers keep their literal through the walk.
 func pointerValue(raw json.RawMessage, pointer string) (json.RawMessage, bool) {
 	if pointer == "" {
 		return raw, true
@@ -346,8 +430,8 @@ func pointerValue(raw json.RawMessage, pointer string) (json.RawMessage, bool) {
 	if !strings.HasPrefix(pointer, "/") {
 		return nil, false
 	}
-	var cur any
-	if err := json.Unmarshal(raw, &cur); err != nil {
+	cur, err := decodeJSON(raw)
+	if err != nil {
 		return nil, false
 	}
 	for _, tok := range strings.Split(pointer[1:], "/") {
@@ -361,8 +445,8 @@ func pointerValue(raw json.RawMessage, pointer string) (json.RawMessage, bool) {
 			}
 			cur = next
 		case []any:
-			i, err := strconv.Atoi(tok)
-			if err != nil || i < 0 || i >= len(node) {
+			i, ok := arrayIndex(tok)
+			if !ok || i >= len(node) {
 				return nil, false
 			}
 			cur = node[i]
@@ -382,8 +466,36 @@ func jsonString(raw json.RawMessage) (string, bool) {
 	return s, true
 }
 
-// jsonEqual compares two decoded JSON values deeply. Numbers compare
-// as float64 — 1 and 1.0 equal — the encoding's own equality.
+// integerLiteral reports whether a JSON number literal is an integer
+// — no fraction, no exponent — and returns it with "-0" folded to
+// "0", so two integer literals are equal exactly when their text is.
+func integerLiteral(n json.Number) (string, bool) {
+	s := string(n)
+	if strings.ContainsAny(s, ".eE") {
+		return "", false
+	}
+	if s == "-0" {
+		s = "0"
+	}
+	return s, true
+}
+
+// numberEqual is ArgEquals' number rule: two integers compare exactly
+// by their digits, whatever their size; otherwise both compare as
+// float64, the encoding's own widening (1 equals 1.0).
+func numberEqual(a, b json.Number) bool {
+	ai, aInt := integerLiteral(a)
+	bi, bInt := integerLiteral(b)
+	if aInt && bInt {
+		return ai == bi
+	}
+	af, errA := a.Float64()
+	bf, errB := b.Float64()
+	return errA == nil && errB == nil && af == bf
+}
+
+// jsonEqual compares two values decoded by decodeJSON deeply; numbers
+// by numberEqual.
 func jsonEqual(a, b any) bool {
 	switch a := a.(type) {
 	case nil:
@@ -391,9 +503,9 @@ func jsonEqual(a, b any) bool {
 	case bool:
 		bb, ok := b.(bool)
 		return ok && a == bb
-	case float64:
-		bb, ok := b.(float64)
-		return ok && a == bb
+	case json.Number:
+		bb, ok := b.(json.Number)
+		return ok && numberEqual(a, bb)
 	case string:
 		bb, ok := b.(string)
 		return ok && a == bb

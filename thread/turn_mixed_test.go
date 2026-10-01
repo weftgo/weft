@@ -10,6 +10,8 @@ import (
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/thread"
+	"github.com/weftgo/weft/thread/jsonl"
+	"github.com/weftgo/weft/thread/threadtest"
 	"github.com/weftgo/weft/wefttest"
 )
 
@@ -495,4 +497,22 @@ func countAssistantText(s *thread.Session, text string) int {
 		}
 	}
 	return n
+}
+
+// The session-level conformance rows every backend runs (threadtest):
+// the mixed batch's resume and a restored queued send, from the file
+// alone.
+func TestTurnsConformance(t *testing.T) {
+	t.Run("memory", func(t *testing.T) {
+		threadtest.RunTurns(t, func(*testing.T) thread.Storage { return thread.Memory() })
+	})
+	t.Run("jsonl", func(t *testing.T) {
+		threadtest.RunTurns(t, func(t *testing.T) thread.Storage {
+			st, err := jsonl.Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return st
+		})
+	})
 }

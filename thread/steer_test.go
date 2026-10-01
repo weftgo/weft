@@ -1134,3 +1134,63 @@ func TestResurrectSteerSurvivesFailedDeferral(t *testing.T) {
 		return steerInContext(s, "lost in the crash")
 	})
 }
+
+// A steer's run options do not reach the run that drains it — the
+// message joins another turn's run. When the steer defers, they are
+// its follow-up turn's.
+func TestDeferredSteerFollowUpKeepsItsRunOptions(t *testing.T) {
+	ctx := context.Background()
+	var mu sync.Mutex
+	tenants := map[string]string{} // run id → the tenant its metadata carried
+	tool := weft.Tool("refund", "Refund an order.", func(context.Context, struct{}) (string, error) {
+		return "refunded", nil
+	}, weft.RequireApproval())
+	agent := weft.New(
+		wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "call_r"}),
+			wefttest.Say("not refunded"),
+			wefttest.Say("the follow-up's reply"),
+		), tool,
+		weft.Tap(func(ctx context.Context, ev weft.Event) {
+			if rs, ok := ev.(weft.RunStart); ok {
+				mu.Lock()
+				tenants[rs.ID] = weft.MetadataFromContext(ctx)["tenant"]
+				mu.Unlock()
+			}
+		}))
+	s, _ := thread.Create(ctx, thread.Memory(), agent)
+	parked, _ := s.Send(ctx, weft.User("refund it"))
+	if _, err := parked.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	steer, err := s.Send(ctx, weft.User("and tell me when it is done"), thread.As(thread.Steer),
+		thread.RunOptions(weft.Metadata(map[string]string{"tenant": "acme"})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := steer.Wait(); err != nil || steer.Next() == nil {
+		t.Fatalf("the steer: %v, next %v", err, steer.Next())
+	}
+	rt, err := s.Decide(ctx, thread.Deny("call_r", "no"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	followUp := steer.Next()
+	if res, err := followUp.Wait(); err != nil || res.Text() != "the follow-up's reply" {
+		t.Fatalf("the follow-up: %v, %v", res, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got := tenants[followUp.RunID()]; got != "acme" {
+		t.Errorf("the follow-up's run carried tenant %q, want the steer's run options (acme)", got)
+	}
+	if got := tenants[rt.RunID()]; got != "" {
+		t.Errorf("the resume's run carried tenant %q: the steer's options are not its", got)
+	}
+	if tes := turnEntries(s); tes[len(tes)-1].Policy != "steer" {
+		t.Errorf("the follow-up's recorded policy = %q, want steer", tes[len(tes)-1].Policy)
+	}
+}

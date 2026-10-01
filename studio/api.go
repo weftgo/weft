@@ -360,6 +360,9 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		}
 		query.Before = t
 	}
+	if !scopeRunsQuery(w, r, &query, q.Get("public_id")) {
+		return
+	}
 	limit, ok := limitParam(w, r, q)
 	if !ok {
 		return
@@ -464,6 +467,9 @@ func (s *Server) serveRunRoutes(w http.ResponseWriter, r *http.Request) {
 // Run detail carries both). Events are deliberately not here — they
 // are paged (ADR 0018 §8).
 func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
+	if !s.scopeRunID(w, r, id) {
+		return
+	}
 	det, err := s.db.Run(r.Context(), id)
 	if err != nil {
 		dbError(w, r, "run", id, err)
@@ -485,6 +491,9 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 // running in the table, interrupted at read time — is finished in
 // effect, exactly as the store era served it).
 func (s *Server) serveRunEvents(w http.ResponseWriter, r *http.Request, id string) {
+	if !s.scopeRunID(w, r, id) {
+		return
+	}
 	q := r.URL.Query()
 	after := int64(0)
 	if v := q.Get("after"); v != "" {
@@ -549,6 +558,9 @@ func (s *Server) serveRunEvents(w http.ResponseWriter, r *http.Request, id strin
 // the store's result document; the fold takes finished text from
 // here, because deltas are not stored).
 func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id string) {
+	if !s.scopeRunID(w, r, id) {
+		return
+	}
 	bodies, err := s.db.Transcript(r.Context(), id)
 	if err != nil {
 		dbError(w, r, "transcript of run", id, err)
@@ -567,6 +579,9 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 // spans — the chat calls, tool executions and the invoke_agent span
 // itself, with times.
 func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string) {
+	if !s.scopeRunID(w, r, id) {
+		return
+	}
 	list, err := s.db.RunSpans(r.Context(), id)
 	if err != nil {
 		dbError(w, r, "spans of run", id, err)
@@ -595,7 +610,11 @@ func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
 		notFound(w, r, "no trace "+id)
 		return
 	}
-	writeJSON(w, r, http.StatusOK, spans(list))
+	doc := spans(list)
+	if !scopeSpans(w, r, doc.Spans) {
+		return
+	}
+	writeJSON(w, r, http.StatusOK, doc)
 }
 
 // serveSessions answers api/sessions (S4.2): public_id and agent
@@ -603,6 +622,13 @@ func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := obsdb.SessionQuery{Agent: q.Get("agent"), PublicID: q.Get("public_id")}
+	if id := idFrom(r); id.panel != nil {
+		if asked := q.Get("public_id"); asked != "" && asked != id.panel.PublicID {
+			forbidden(w, r)
+			return
+		}
+		query.PublicID = id.panel.PublicID
+	}
 	if v := q.Get("before"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {
@@ -640,6 +666,9 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		notFound(w, r, "no such api route "+r.URL.Path)
 		return
 	}
+	if !s.scopeSessionID(w, r, id) {
+		return
+	}
 	det, err := s.db.Session(r.Context(), id)
 	if err != nil {
 		dbError(w, r, "session", id, err)
@@ -659,6 +688,10 @@ func (s *Server) servePublic(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/public/")
 	if id == "" || strings.Contains(id, "/") {
 		notFound(w, r, "no such api route "+r.URL.Path)
+		return
+	}
+	if pid := idFrom(r).panel; pid != nil && id != pid.PublicID {
+		forbidden(w, r)
 		return
 	}
 	sid, err := s.db.ResolvePublicID(r.Context(), id)

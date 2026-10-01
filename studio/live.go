@@ -128,6 +128,10 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 		after = n
 	}
 
+	if !s.scopeLive(w, r, sel) {
+		return
+	}
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, r, http.StatusInternalServerError, "internal",

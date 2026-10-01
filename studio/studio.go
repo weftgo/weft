@@ -271,7 +271,43 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("Content-Security-Policy", s.csp)
-	s.mux.ServeHTTP(w, r)
+	s.routed().ServeHTTP(w, r)
+}
+
+// routed wraps the mux with the cross-cutting concerns in order
+// (S4.6): CORS on the API and ingest trees, token auth on the API
+// tree only — ingest carries its own token (S4.4).
+func (s *Server) routed() http.Handler {
+	return s.cors(prefixRouter{
+		prefixes: []prefixRoute{
+			{"/api/", s.auth(s.mux)},
+			{"/v1/", s.mux},
+		},
+		def: s.mux,
+	})
+}
+
+// prefixRoute routes one path prefix to one handler.
+type prefixRoute struct {
+	prefix  string
+	handler http.Handler
+}
+
+// prefixRouter sends each request to the first prefix that fits, else
+// to the default (the UI).
+type prefixRouter struct {
+	prefixes []prefixRoute
+	def      http.Handler
+}
+
+func (p prefixRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	for _, pr := range p.prefixes {
+		if strings.HasPrefix(r.URL.Path, pr.prefix) {
+			pr.handler.ServeHTTP(w, r)
+			return
+		}
+	}
+	p.def.ServeHTTP(w, r)
 }
 
 // serveUI answers with the embedded UI: a build file when the path

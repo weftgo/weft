@@ -93,6 +93,17 @@ func (s *Server) registerGroups() {
 			register:   registerIngest,
 		})
 	}
+	// Panel-token minting (S4.6): present exactly when a server token
+	// is configured — there is nothing to sign without one.
+	if s.token != "" {
+		s.addGroup(routeGroup{
+			name:       "auth",
+			capability: "auth",
+			register: func(mux *http.ServeMux, s *Server) {
+				mux.HandleFunc("POST /api/panel-tokens", s.servePanelTokens)
+			},
+		})
+	}
 	if panelGroupHook != nil {
 		s.addGroup(panelGroupHook()) // step 7: always on
 	}

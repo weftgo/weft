@@ -336,7 +336,7 @@ func TestReadEveryGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files4) != 6 {
+	if len(files4) != 7 {
 		t.Fatalf("found %d format4 receipt goldens, want one per status", len(files4))
 	}
 	for _, path := range files4 {

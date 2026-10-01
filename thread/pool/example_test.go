@@ -24,7 +24,7 @@ func ExamplePool_Wrap() {
 		wefttest.ToolCalls(wefttest.Call{Name: "research",
 			Args: wefttest.Args(struct{ Prompt string }{"find the answer"})}),
 		wefttest.Say("done"),
-	), p.Wrap("research", "delegates research to a child session", child))
+	), p.MustWrap("research", "delegates research to a child session", child))
 	s, _ := thread.Create(ctx, st, parent)
 	turn, err := s.Send(ctx, weft.User("what is the answer?"))
 	if err != nil {
@@ -102,7 +102,7 @@ func ExamplePool_Decide() {
 		wefttest.ToolCalls(wefttest.Call{Name: "research",
 			Args: wefttest.Args(struct{ Prompt string }{"refund order 42"})}),
 		wefttest.Say("handled"),
-	), p.Wrap("research", "delegates the refund flow", child))
+	), p.MustWrap("research", "delegates the refund flow", child))
 	s, _ := thread.Create(ctx, thread.Memory(), parent)
 	t1, _ := s.Send(ctx, weft.User("refund order 42"))
 	if _, err := t1.Wait(); err != nil {
@@ -110,11 +110,13 @@ func ExamplePool_Decide() {
 	}
 	pend := s.Pending()
 	fmt.Println("pending:", pend[0].Tool)
-	childTurn, err := p.Decide(ctx, s, thread.Approve(pend[0].CallID))
-	if err != nil {
+	if err := p.Decide(ctx, s, thread.Approve(pend[0].CallID)); err != nil {
 		panic(err)
 	}
-	if _, err := childTurn.Wait(); err != nil {
+	// Decide queued the child's resume and returned; Wait follows the
+	// delegation to rest — here its settlement, which also resolved
+	// the parent's parked call.
+	if _, err := p.Wait(ctx, s, pool.Receipts(s)[0].ID); err != nil {
 		panic(err)
 	}
 	res, err := t1.Next().Wait() // the parent's parked run, resumed with the answer

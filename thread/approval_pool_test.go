@@ -29,7 +29,7 @@ func TestPoolDelegationCompletesUnderRequireSigned(t *testing.T) {
 	parent := weft.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"go"}`}),
 		wefttest.Say("all done"),
-	), p.Wrap("research", "", child))
+	), p.MustWrap("research", "", child))
 	s, err := thread.Create(ctx, thread.Memory(), parent, thread.WithKeyring(ring), thread.RequireSigned())
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestPoolDelegationCompletesUnderRequireSigned(t *testing.T) {
 		t.Fatalf("no mirrored child request surfaced: %+v", req)
 	}
 	// The pool's unsigned route is the caller's Decide: refused.
-	if _, err := p.Decide(ctx, s, thread.Approve(req.CallID)); !errors.Is(err, thread.ErrSignatureRequired) {
+	if err := p.Decide(ctx, s, thread.Approve(req.CallID)); !errors.Is(err, thread.ErrSignatureRequired) {
 		t.Fatalf("an unsigned decision through the pool: %v, want ErrSignatureRequired", err)
 	}
 	challenge, err := s.Request(req.CallID)
@@ -70,8 +70,11 @@ func TestPoolDelegationCompletesUnderRequireSigned(t *testing.T) {
 	if _, err := s.DecideSigned(ctx, thread.SignDecision(secret, challenge, thread.Approve(req.CallID))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.Decide(ctx, s); err != nil { // the pump: resume the child, settle the delegation
+	if err := p.Decide(ctx, s); err != nil { // the pump: resume the child, settle the delegation
 		t.Fatal(err)
+	}
+	if rc, err := p.Wait(ctx, s, pool.Receipts(s)[0].ID); err != nil || rc.State != pool.Done {
+		t.Fatalf("the delegation after the signed decision: %+v, %v", rc, err)
 	}
 	// The wrapper resolved with the child's answer and the parent ran
 	// to its end.
@@ -99,9 +102,9 @@ func TestPoolDelegationCompletesUnderRequireSigned(t *testing.T) {
 }
 
 // A parent's quorum survives the pool's replay: the two approvals the
-// parent recorded for a child's call arrive in the child as one batch
-// naming the call twice — the one session shape whose Decide takes
-// that — and the delegation completes.
+// parent recorded for a child's call arrive in the child — which
+// inherited the quorum — as one replay naming the call twice, each
+// keeping its approver's identity, and the delegation completes.
 func TestPoolReplaysAQuorumIntoTheChild(t *testing.T) {
 	ctx := context.Background()
 	p := pool.New(1)
@@ -112,7 +115,7 @@ func TestPoolReplaysAQuorumIntoTheChild(t *testing.T) {
 	parent := weft.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"go"}`}),
 		wefttest.Say("all done"),
-	), p.Wrap("research", "", child))
+	), p.MustWrap("research", "", child))
 	s, err := thread.Create(ctx, thread.Memory(), parent, thread.Quorum(2))
 	if err != nil {
 		t.Fatal(err)
@@ -139,9 +142,32 @@ func TestPoolReplaysAQuorumIntoTheChild(t *testing.T) {
 	for _, who := range []string{"alice", "bob"} {
 		d := thread.Approve(req.CallID)
 		d.Who = who
-		if _, err := p.Decide(ctx, s, d); err != nil {
+		if err := p.Decide(ctx, s, d); err != nil {
 			t.Fatalf("%s's approval through the pool: %v", who, err)
 		}
+	}
+	rc, err := p.Wait(ctx, s, pool.Receipts(s)[0].ID)
+	if err != nil || rc.State != pool.Done {
+		t.Fatalf("the delegation after the quorum: %+v, %v", rc, err)
+	}
+	// The child's own record: both approvals, each under its
+	// approver's name, recorded as the parent's — never as the user's
+	// own door, which the child was not decided through.
+	childSess, err := thread.Open(ctx, s.Storage(), rc.Child, child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var who []string
+	for _, e := range childSess.Entries() {
+		if d, ok := e.(thread.ApprovalDecisionEntry); ok {
+			if d.Via != "parent" {
+				t.Errorf("a replayed decision's Via = %q, want parent", d.Via)
+			}
+			who = append(who, d.Who)
+		}
+	}
+	if len(who) != 2 || who[0] != "alice" || who[1] != "bob" {
+		t.Fatalf("the child's replayed approvers: %v", who)
 	}
 	next := t1.Next()
 	if next == nil {
@@ -159,12 +185,14 @@ func TestPoolReplaysAQuorumIntoTheChild(t *testing.T) {
 	}
 }
 
-// A pool child's Decide records the replay in order, and the grant an
-// "approve and always allow" asks for is minted once — with the
-// decision that makes the verdict — however many approvals follow.
+// ReplayDecisions records a parent's decisions in a pool child in
+// order, and the grant an "approve and always allow" asks for is
+// minted once — with the decision that makes the verdict — however
+// many approvals follow. The exported Decide takes no such batch, on
+// a pool child as on any session.
 func TestChildReplayBatchMintsOneGrant(t *testing.T) {
 	ctx := context.Background()
-	agent, ran := refundAgent(wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"5"}`}), wefttest.Say("done"))
+	agent, ran := refundAgent(wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c-refund", Args: `{"order_id":"5"}`}), wefttest.Say("done"))
 	s, err := thread.Create(ctx, thread.Memory(), agent, thread.WithLineage("s_parent", "call_w"))
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +202,18 @@ func TestChildReplayBatchMintsOneGrant(t *testing.T) {
 	first.Who = "alice"
 	second := thread.ApproveAlways(call.ID)
 	second.Who = "bob"
-	rt, err := s.Decide(ctx, first, second)
+	// The user's door rejects a batch naming one call twice — the
+	// pool-child carve-out is gone.
+	if _, err := s.Decide(ctx, first, second); !errors.Is(err, thread.ErrInvalidDecision) {
+		t.Fatalf("Decide with a duplicate call on a pool child: %v, want ErrInvalidDecision", err)
+	}
+	if got := len(decisionsFor(s, call.ID)); got != 0 {
+		t.Fatalf("the refused batch recorded %d decisions", got)
+	}
+	rt, err := s.ReplayDecisions(ctx,
+		thread.ApprovalDecisionEntry{CallID: call.ID, Outcome: thread.OutcomeApprove, Who: "alice", Always: true},
+		thread.ApprovalDecisionEntry{CallID: call.ID, Outcome: thread.OutcomeApprove, Who: "bob", Always: true},
+	)
 	if err != nil {
 		t.Fatalf("a replay batch into a pool child: %v", err)
 	}

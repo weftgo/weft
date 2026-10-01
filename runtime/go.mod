@@ -19,6 +19,7 @@ require (
 	github.com/weftgo/weft/otel v0.0.0-00010101000000-000000000000
 	github.com/weftgo/weft/studio v0.0.0-00010101000000-000000000000
 	github.com/weftgo/weft/thread v0.8.0
+	go.opentelemetry.io/otel/sdk v1.46.0
 )
 
 require (
@@ -39,7 +40,6 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.46.0 // indirect
 	go.opentelemetry.io/otel/log v0.22.0 // indirect
 	go.opentelemetry.io/otel/metric v1.46.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.46.0 // indirect
 	go.opentelemetry.io/otel/sdk/log v0.22.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.11.1 // indirect

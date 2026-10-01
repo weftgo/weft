@@ -66,45 +66,91 @@ type TurnEntry struct {
 // Reason is why a compaction ran (ADR 0020 §1): manual (the caller
 // asked), threshold (the configured trigger), trim (a trimmer pre-pass
 // brought the context under the line, so no summary was made),
-// from_hook (BeforeCompact replaced the plan), and overflow — an
-// ErrContextOverflow turn compacted and re-run, which arrives with
-// thread v0.3.
+// from_hook (BeforeCompact replaced the plan), and overflow (a turn
+// that failed with weft.ErrContextOverflow compacted and re-ran).
 type Reason string
 
+// The reasons a compaction entry records.
 const (
 	ReasonManual    Reason = "manual"
 	ReasonThreshold Reason = "threshold"
 	ReasonTrim      Reason = "trim"
 	ReasonFromHook  Reason = "from_hook"
-	ReasonOverflow  Reason = "overflow" // v0.3: overflow compaction and re-run (ADR 0020 §5)
+	ReasonOverflow  Reason = "overflow"
 )
 
 // CompactionEntry records one compaction (ADR 0020 §1): the summary
-// text, the id of the first entry kept raw after it, the token count
-// before, the reason it ran, the summarizer's cost and identity, the
-// details (files read, files modified, pinned entries kept through),
-// and a hash of the summarized range. Nothing is deleted — the
-// summarized entries stay in the file, and the context at a leaf is
-// the latest compaction's summary on the path plus the entries from
-// its first kept id onward. A trim that needed no summary is the same
-// entry with an empty Summary and Reason "trim".
+// text, the id of the first entry kept raw after it, the estimated
+// size of the model's context before it, the reason it ran, the
+// summarizer's cost and identity, the details (files read, pinned
+// entries kept through), and a hash of the summarized range. Nothing
+// is deleted — the summarized entries stay in the file, and the
+// context at a leaf is the latest summary compaction's summary on the
+// path, the entries it pinned, then the entries from its first kept
+// id onward.
+//
+// A trim that needed no summary is the same entry with an empty
+// Summary, Reason "trim" and a Trim record naming exactly what was
+// stubbed. A trim never moves the boundary: the latest summary
+// compaction below it keeps governing the context, the trim's stubs
+// layer over the kept range, and its FirstKept only repeats the
+// boundary in force when it landed.
 type CompactionEntry struct {
-	ID           string    `json:"id"`
-	ParentID     string    `json:"parent,omitempty"`
-	Created      time.Time `json:"created"`
-	Summary      string    `json:"summary,omitempty"`
-	FirstKept    string    `json:"first_kept"`
-	TokensBefore int64     `json:"tokens_before"`
-	Reason       Reason    `json:"reason,omitempty"`
+	ID        string    `json:"id"`
+	ParentID  string    `json:"parent,omitempty"`
+	Created   time.Time `json:"created"`
+	Summary   string    `json:"summary,omitempty"`
+	FirstKept string    `json:"first_kept"`
+	// TokensBefore is the estimated size of the context the model was
+	// shown when the compaction ran — the compacted view, not the raw
+	// path.
+	TokensBefore int64  `json:"tokens_before"`
+	Reason       Reason `json:"reason,omitempty"`
 	// SummarizerUsage and SummarizerModel name what the summary cost
 	// and which model made it (the cost ledger, ADR 0020 §4) — absent
 	// on a trim, which summarizes nothing.
 	SummarizerUsage weft.Usage     `json:"summarizer_usage,omitzero"`
 	SummarizerModel weft.ModelInfo `json:"summarizer_model,omitzero"`
 	FilesRead       []string       `json:"files_read,omitempty"`
-	FilesModified   []string       `json:"files_modified,omitempty"`
-	Pinned          []string       `json:"pinned,omitempty"`
-	RangeHash       string         `json:"range_hash,omitempty"`
+	// FilesModified is a format-1 wire field kept readable: no build
+	// writes it (the sandbox write log it was reserved for was
+	// abandoned), and a file that carries it round-trips unchanged.
+	FilesModified []string `json:"files_modified,omitempty"`
+	Pinned        []string `json:"pinned,omitempty"`
+	RangeHash     string   `json:"range_hash,omitempty"`
+	// Trim is the trim record: present exactly on a trim, absent on a
+	// summary compaction. An entry carrying one is written with "v":5
+	// — a reader that does not know the record would replay the trim
+	// wrongly, so it must fail loudly instead (ADR 0011 §6).
+	Trim *TrimRecord `json:"trim,omitempty"`
+}
+
+// isTrim reports whether the entry is a trim record rather than a
+// summary compaction: no summary, reason trim. A trim never governs
+// the context's boundary and never feeds the iterative summary chain.
+func (e CompactionEntry) isTrim() bool {
+	return e.Summary == "" && e.Reason == ReasonTrim
+}
+
+// TrimRecord is what a trim did, persisted so the context replays it
+// from the file alone (ADR 0020, amendment 2026-10-01): every tool
+// result the trimmer replaced, with the replacement text. The walk
+// applies exactly these stubs — it never consults the session's
+// configured Trimmer — so a recorded trim reads the same under any
+// options, in any process.
+type TrimRecord struct {
+	Stubs []TrimStub `json:"stubs"`
+}
+
+// TrimStub is one stubbed tool result: the entry that holds it, the
+// call it answers, and the content the model sees in its place. The
+// stored result is untouched; IsError is what the stubbed part
+// reports (false for the built-in trimmer's stub).
+type TrimStub struct {
+	Entry   string `json:"entry"`
+	CallID  string `json:"call_id"`
+	Content string `json:"content"`
+	IsError bool   `json:"is_error,omitempty"`
 }
 
 // BranchSummaryEntry summarizes the branch a Session.Branch leaves
@@ -534,6 +580,14 @@ const receiptEntryV = 3
 // instead of guessing at a kind it does not know.
 const poolReceiptV = 4
 
+// trimRecordV is the entry version a compaction entry carries on the
+// wire when it holds a trim record (ADR 0011 §6, ADR 0020's 2026-10-01
+// amendment): the record is what the context replays, so a reader
+// from before it fails loudly on such an entry instead of replaying
+// the trim from its own options. A compaction entry without a trim
+// record stays a format-1 line with no "v".
+const trimRecordV = 5
+
 // MarshalJSON encodes the entry with its "type" discriminator.
 func (e MessageEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
@@ -550,12 +604,19 @@ func (e TurnEntry) MarshalJSON() ([]byte, error) {
 	}{kindTurn, turnEntryWire(e)})
 }
 
-// MarshalJSON encodes the entry with its "type" discriminator.
+// MarshalJSON encodes the entry with its "type" discriminator. A
+// summary compaction is a format-1 line and carries no "v"; an entry
+// holding a trim record carries "v":5, its minimum reader version.
 func (e CompactionEntry) MarshalJSON() ([]byte, error) {
+	v := 0
+	if e.Trim != nil {
+		v = trimRecordV
+	}
 	return json.Marshal(struct {
 		Type string `json:"type"`
+		V    int    `json:"v,omitempty"`
 		compactionEntryWire
-	}{kindCompaction, compactionEntryWire(e)})
+	}{kindCompaction, v, compactionEntryWire(e)})
 }
 
 // MarshalJSON encodes the entry with its "type" discriminator.
@@ -684,14 +745,20 @@ func (e PoolReceiptEntry) MarshalJSON() ([]byte, error) {
 // wire kind (ADR 0011 §6). Kinds born in format 1 are version 1 and
 // carry no "v" on the wire; a kind added after format 1 — approvals in
 // v0.2, steering receipts in v0.3 — is written with "v":N, its minimum
-// reader version, and registers here at that version. A reader that
+// reader version, and registers here at that version. A format-1 kind
+// that later gains a field an older reader would misread writes "v":N
+// on the entries that carry it, and registers at N the same way (the
+// compaction entry's trim record). A reader that
 // does not know a kind at all, or knows it only at a lower version,
 // fails loudly (UnmarshalEntry) instead of guessing.
 func kindVersion(kind string) (int, bool) {
 	switch kind {
-	case kindMessage, kindTurn, kindCompaction, kindBranchSummary,
+	case kindMessage, kindTurn, kindBranchSummary,
 		kindLeaf, kindLabel, kindInfo, kindCustom, kindCustomMessage:
 		return 1, true
+	case kindCompaction:
+		// Born in format 1; read up to the trim record's version.
+		return trimRecordV, true
 	case kindApprovalRequest, kindApprovalDecision, kindApprovalAudit,
 		kindGrant, kindGrantRevoked:
 		return approvalEntryV, true

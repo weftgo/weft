@@ -25,10 +25,30 @@
 // they opt in explicitly. Commands can only narrow: tools the agent
 // registered can be turned off, never added (OnlyTools); models come
 // from the Models allow-list; MaxSteps and Parallelism only lower.
-// Until tool ReplayPolicy exists (8b), every tool counts as "never":
-// a tool the runtime has not opted in with AllowSideEffects is parked
-// at the approval boundary (weft.ParkOn) instead of running, so an
-// experiment can never silently re-fire a side effect.
+// Side effects never re-fire silently (§6 rule 3): a tool counts as
+// "never" unless its code vouched weft.Replay(weft.ReplaySafe). In
+// side_effects "substitute" (the default), a parked call that matches
+// a recorded call of the source (same tool, same args) is answered
+// with the recorded result — the runtime acts as ADR 0007's resolver,
+// the handler never runs; a miss stays parked for a human (the panel's
+// continue / skip / resolve). "park" keeps every side-effect call at
+// the boundary; "allow" runs for real, but only tools the runtime
+// opted in with AllowSideEffects. The debugger's breakpoints (§8.3)
+// park their tools on every run this package starts, and steer (§8.4)
+// delivers into a run it holds — the app's own turns are never
+// breakable or steerable from here (D7, PQ7).
+//
+// The engines: "live" runs the agent's own model (or a Models
+// alternate); "scripted" (§5.5) answers each model call with the
+// source run's recorded turn at zero tokens — its own weft.Model over
+// the messages records, keyed like wefttest's fixtures and missing
+// loudly ("no recorded turn") when the input changed, never silently
+// answering a prompt experiment. Thread modes: "ephemeral" (nothing
+// written to thread storage) and "fork" (§5.4) — the source session
+// opens read-side, Fork copies it to a new session with lineage
+// (thread mints the run ids, stamps weft.session.forked_from), and the
+// command's input becomes the fork's next turn under the same shaping;
+// a later fork command on the fork continues it in place.
 //
 // Runs this package starts are ordinary weft runs: they flow through
 // the weft/otel pipeline to every destination, carrying

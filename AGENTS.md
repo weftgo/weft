@@ -27,7 +27,9 @@ lookup := weft.Tool("lookup_order", "Look up an order by ID.",
 // Ask the model to fix its arguments; the loop counts and bounds it:
 //   return "", weft.ModelRetry("date must be ISO-8601")   // RETRY: … (MaxModelRetries, default 3)
 // More per-tool options: weft.Sequential() (barrier), weft.RequireApproval(),
-// weft.PromptSnippet("…"), weft.WrapTools(mw...).
+// weft.PromptSnippet("…"), weft.Replay(weft.ReplaySafe) (the side-effect class for
+// re-runs: unannotated counts as never — substitute-or-park, never silently re-fired),
+// weft.WrapTools(mw...).
 
 // 1b. Tools defined outside Go source: explicit schema, raw args.
 //     weft.RawTool("parse_invoice", "…", schema, func(ctx, raw) (string, error))
@@ -175,9 +177,20 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //         runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000}),
 //         runtime.AllowSideEffects("lookup_order"), runtime.Threads(store))()
 //     // WEFT_ENV=dev (or runtime.Enabled(true)) opens the link; commands ack
-//     // before they run (at-most-once), tools park unless opted in, budgets
-//     // cap each experiment; runs carry weft.playground and never touch
-//     // weft.session.id. Studio side: studio.New(..., studio.Playground(true)).
+//     // before they run (at-most-once), a never-class tool's call is substituted
+//     // with its recorded result or parked (weft.Replay(weft.ReplaySafe) vouches a
+//     // read), budgets cap each experiment; runs carry weft.playground and never
+//     // touch weft.session.id (ephemeral). Engines live | scripted (the source
+//     // run's recorded turns, zero tokens); thread ephemeral | fork (a new session
+//     // with lineage, the panel keeps chatting in it). Breakpoints and steer act
+//     // on the runs this runtime starts only (D7). Studio side:
+//     // studio.New(..., studio.Playground(true)): /api/playground/runs (the §5.1
+//     // command, transcript_edits validated on both sides), /api/playground/
+//     // commands/{id}, /api/runs/{id}/approvals (a parked run's own verbs),
+//     // /api/playground/fixtures (wefttest replay fixtures from a run's records),
+//     // /api/experiments (the saved groups + the runs they label), /api/runtimes/
+//     // {id}/breakpoints, /api/runs/{id}/steer; the panel drawer and /playground
+//     // (the Studio UI) render them, gated on capabilities.
 
 // 8. Sessions (module weft/thread; jsonl.Open(dir) | thread.Memory()):
 //    s, _ := thread.Create(ctx, st, agent) — the append-only entry tree; every write

@@ -86,10 +86,30 @@ reused command id, 503 with no runtime connected) and
 `GET /api/playground/commands/{id}`, plus the runtime link's own
 routes (`POST /api/runtime/register`, `GET /api/runtime/commands` SSE,
 `POST /api/runtime/acks`). Safety: off unless `WEFT_ENV=dev` or
-`runtime.Enabled(true)`; overrides only narrow; every tool parks until
-`AllowSideEffects` names it; budgets cap each experiment; the app's
-own runs are never touched. P0 executes `engine: live` + thread
-ephemeral only — scripted, fork and `transcript_edits` arrive with 8b.
+`runtime.Enabled(true)`; overrides only narrow; a side-effect tool's
+call is substituted with its recorded result or parked
+(`weft.Replay(weft.ReplaySafe)` vouches a read, `AllowSideEffects`
+opts a tool into allow mode); budgets cap each experiment; the app's
+own runs are never touched.
+
+P1–P5 ride the same command: `transcript_edits` (validated on both
+sides — a patch names a call in the kept prefix, the prefix ends at a
+step boundary with every call answered), `engine: scripted` (the
+source run's recorded turns at zero tokens; scripted + an
+instructions/model override is refused — the §5.5 prompt trap), thread
+`fork` (a new session with lineage the panel can keep chatting in),
+`POST /api/runs/{id}/approvals` (a parked run's continue/skip/resolve
+— ADR 0007's own verbs), `POST /api/playground/fixtures` (the run's
+records as wefttest replay fixtures), and `GET/POST /api/experiments`
+with `GET /api/experiments/{id}` (the saved groups, PQ4). The
+debugger's rungs 3–4 act on runtime-started runs only (D7, PQ7):
+`PUT /api/runtimes/{id}/breakpoints` (capability `breakpoints`) and
+`POST /api/runs/{id}/steer` (capability `steer`) — `meta.debug_scope`
+says so. The panel's experiment drawer (the §3 form, the live result
+with the inline diff, the approvals, the 2-way compare) and the
+Studio `/playground` page (variants side by side with the metrics, the
+E9 variants × inputs matrix, the experiment history) both render them,
+each control only for its reported capability.
 
 The runs list (light): status as a dot and a word, the error under a
 failed run's id, session/public-id/experiment filters that mirror the

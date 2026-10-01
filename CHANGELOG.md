@@ -172,6 +172,28 @@ dates at the step 8 release.
 
 ### runtime (new module)
 
+#### Added (step 8b)
+
+- The playground's P1–P5 verbs over the link: `transcript_edits`
+  (D2/D3 — a patch must name a call in the kept prefix, a rewrite may
+  not drop a step's calls, the patched prefix must leave no call
+  without a result and end at a step boundary, validated on both
+  sides); `side_effects` `substitute` (the default: a parked call that
+  matches a recorded call is answered with the recorded result over a
+  chain of fresh run ids, the handler provably never re-fires; a miss
+  stays parked), `park`, and `allow` (the opted-in set); the scripted
+  engine (§5.5) — its own `weft.Model` over the source run's messages
+  records, keyed like wefttest's fixtures, zero tokens, "no recorded
+  turn" on a key miss, and the prompt trap closed (scripted +
+  instructions/model override refused on both sides); fork mode (§5.4)
+  — `Fork` at the source turn, the input becomes the fork's next turn,
+  the fork stays open to the runtime so the panel can keep chatting;
+  approval decisions on parked runs (ADR 0007's Approve/Deny/Resolve
+  forwarded as `event: approve` commands); breakpoints (§8.3 — the
+  stored tool set parked on every run this runtime starts) and steer
+  (§8.4 — every ephemeral run carries a `weft.Steering` source; a fork
+  in flight steers through thread's Steer policy).
+
 - **New module `weft/runtime`** (WEFT-PLAYGROUND.md §10.2, ADR 0024
   [D6]): the playground's in-app side. One deferred call is the whole
   integration — `defer runtime.Install(
@@ -205,6 +227,42 @@ dates at the step 8 release.
   the app's own runs are never touched.
 
 ### studio 0.3.0 (breaking — the step 6 rewrite, the devtools panel, the playground)
+
+#### Added (step 8b)
+
+- The playground's P1–P5 in both surfaces: the panel's experiment
+  drawer (§3 — registered-config pre-fill, tools off with the
+  side-effect warning, model, thinking, input, engine, side-effect
+  mode, transcript edits on the kept steps), the result streaming in
+  place labelled t·xN with the inline diff (the shared `lib/diff`),
+  continue/skip/resolve on a parked experiment run
+  (`POST /api/runs/{id}/approvals`, routed to the runtime that started
+  it — the app's own turns are 403 there, viewer-only per PQ7), the
+  2-way sibling compare (PQ3), and the saves (`keep as prompt` copies
+  the text, PQ2 is post-v1; `save as fixture` hands off to Studio).
+- The Studio playground (`/playground`, capability-gated): the split
+  view with the variant switcher, per-variant runs side by side with
+  their metrics (tokens, latency, tool calls), the pairwise diff and
+  the compare table, E9's variants × inputs matrix (the definition
+  saved via `POST /api/experiments`, every cell issued under the
+  experiment's id so the budget caps the whole matrix), and the
+  experiment history. The panel hands off into it with run, step and
+  the current overrides as query params.
+- `POST /api/playground/fixtures`: a run's records as wefttest replay
+  fixtures — wefttest's own file shape, key and naming, pinned by a
+  round-trip (the files load under `wefttest.Replay` and answer
+  byte-for-byte).
+- The debugger's rungs 3–4 (WEFT-DEVTOOLS §8.3/§8.4):
+  `PUT /api/runtimes/{id}/breakpoints` (capability `breakpoints`) and
+  `POST /api/runs/{id}/steer` (capability `steer`), both acting on
+  runtime-started runs only — `meta.debug_scope` says so, and both UIs
+  repeat it (PQ7). The controls render only for the reported
+  capabilities.
+- obsdb: the `experiments` table (§10.4, PQ4) behind
+  `SaveExperiment`/`Experiments`/`Experiment` on both backends (sqlite
+  migration 0002; clickhouse 0002 as a ReplacingMergeTree), with
+  `RunQuery.ExperimentID` selecting an experiment's runs and an
+  obsdbtest conformance subtest.
 
 #### Added
 

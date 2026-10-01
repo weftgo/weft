@@ -93,6 +93,39 @@ interface Experiment {
   events: { pos: number; event: unknown }[]
 }
 
+/** One variant of the experiment (§4's columns): its overrides and its
+ * own run, side by side with its siblings. */
+interface Variant {
+  key: string
+  instructions: string
+  toolsOff: Set<string>
+  model: string
+  thinking: string
+  input: string
+  engine: "live" | "scripted"
+  sideEffects: "substitute" | "park" | "allow"
+  result: Experiment | null
+}
+
+/** variantA seeds the first variant from the panel's carried-over
+ * context (§2: run, step, current overrides — nothing retyped). */
+function variantA(search: PlaygroundSearch, agent?: AgentView): Variant {
+  const on = search.tools ? new Set(search.tools.split(",")) : null
+  return {
+    key: "A",
+    instructions: search.instructions ?? "",
+    toolsOff: new Set(
+      agent && on ? agent.tools.map((t) => t.name).filter((n) => !on.has(n)) : []
+    ),
+    model: search.model ?? "",
+    thinking: search.thinking ?? "",
+    input: search.input ?? "",
+    engine: "live",
+    sideEffects: "substitute",
+    result: null,
+  }
+}
+
 function Playground() {
   const search = useSearch({ from: "/playground" })
   const runtimes = useQuery(runtimesQuery())
@@ -100,22 +133,14 @@ function Playground() {
   const firstRuntime = runtimes.data?.runtimes.find((r) => r.agents.length > 0)
   const agent: AgentView | undefined = firstRuntime?.agents[0]
 
-  // The variant's fields, pre-filled from the registered config, then
-  // the panel's carried-over overrides on top (nothing is retyped).
-  const [instructions, setInstructions] = useState(search.instructions ?? "")
-  const [toolsOff, setToolsOff] = useState<Set<string>>(
-    new Set(
-      agent && search.tools
-        ? agent.tools.map((t) => t.name).filter((n) => !search.tools!.split(",").includes(n))
-        : []
-    )
-  )
-  const [model, setModel] = useState(search.model ?? "")
-  const [thinking, setThinking] = useState(search.thinking ?? "")
-  const [input, setInput] = useState(search.input ?? "")
-  const [engine, setEngine] = useState<"live" | "scripted">("live")
-  const [sideEffects, setSideEffects] = useState<"substitute" | "park" | "allow">("substitute")
-  const [experiment, setExperiment] = useState<Experiment | null>(null)
+  // The variants (§4): A starts as the original, more are added with
+  // "+ variant"; each carries its own overrides and its own run. The
+  // panel's carried-over context seeds A (nothing is retyped).
+  const [variants, setVariants] = useState<Variant[]>(() => [
+    variantA(search, agent),
+  ])
+  const [active, setActive] = useState(0)
+  const variant = variants[active] ?? variants[0]
   const [error, setError] = useState("")
 
   const [sourceRunID, setSourceRunID] = useState(search.run ?? "")
@@ -123,18 +148,16 @@ function Playground() {
 
   const registered = agent?.instructions ?? ""
   useEffect(() => {
-    if (search.instructions === undefined && registered)
-      setInstructions((cur) => (cur ? cur : registered))
-  }, [registered, search.instructions])
-  useEffect(() => {
-    if (agent && search.tools) {
-      const on = new Set(search.tools.split(","))
-      setToolsOff(new Set(agent.tools.map((t) => t.name).filter((n) => !on.has(n))))
-    }
-  }, [agent, search.tools])
+    if (search.instructions === undefined && registered && !variant.instructions)
+      patch({ instructions: registered })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [registered])
   useEffect(() => {
     if (search.run) setSourceRunID(search.run)
   }, [search.run])
+
+  const patch = (p: Partial<Variant>) =>
+    setVariants((cur) => cur.map((v, i) => (i === active ? { ...v, ...p } : v)))
 
   const sourceText = useSourceText(sourceRunID)
 
@@ -142,38 +165,48 @@ function Playground() {
     setError("")
     if (!firstRuntime || !agent) return
     const overrides: NonNullable<PlaygroundRunBody["overrides"]> = {}
-    if (instructions && instructions !== registered) overrides.instructions = instructions
-    const enabled = (agent?.tools ?? []).map((t) => t.name).filter((n) => !toolsOff.has(n))
-    if (toolsOff.size) overrides.tools_enabled = enabled
-    if (model) overrides.model = model
-    if (thinking) overrides.thinking = thinking
+    if (variant.instructions && variant.instructions !== registered)
+      overrides.instructions = variant.instructions
+    const enabled = (agent?.tools ?? []).map((t) => t.name).filter((n) => !variant.toolsOff.has(n))
+    if (variant.toolsOff.size) overrides.tools_enabled = enabled
+    if (variant.model) overrides.model = variant.model
+    if (variant.thinking) overrides.thinking = variant.thinking
     const body: PlaygroundRunBody = {
       runtime: firstRuntime.id,
       agent: agent.name,
       source: sourceRunID ? { run_id: sourceRunID, from_step: fromStep } : null,
-      input: fromStep === 0 && input ? input : undefined,
+      input: fromStep === 0 && variant.input ? variant.input : undefined,
       overrides,
-      engine,
-      side_effects: sideEffects,
+      engine: variant.engine,
+      side_effects: variant.sideEffects,
       thread: "ephemeral",
     }
     try {
       const out = await postPlaygroundRun(body)
-      setExperiment({
+      const experiment: Experiment = {
         commandID: out.command_id,
         state: "queued",
         runID: "",
         error: null,
-        label: `A${sourceRunID ? ` · ${runLabel(sourceRunID)}` : ""}`,
+        label: `${variant.key}${sourceRunID ? ` · ${runLabel(sourceRunID)}` : ""}`,
         row: null,
         events: [],
-      })
+      }
+      setVariants((cur) => cur.map((v, i) => (i === active ? { ...v, result: experiment } : v)))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
   }
 
-  useCommandTracking(experiment, setExperiment)
+  useCommandTracking(variant?.result ?? null, (upd) =>
+    setVariants((cur) =>
+      cur.map((v, i) => {
+        if (i !== active) return v
+        const next = typeof upd === "function" ? upd(v.result) : upd
+        return next ? { ...v, result: next } : v
+      })
+    )
+  )
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -185,7 +218,38 @@ function Playground() {
       <div className="flex min-h-0 flex-1">
         {/* The config column (§4's left half). */}
         <section className="w-80 shrink-0 space-y-3 overflow-y-auto border-r p-4">
-          <h2 className="text-sm font-medium">Variant A</h2>
+          {/* The variant switcher (§4's "+ variant"): each column of the
+              N-way view is one variant's overrides and run. */}
+          <div className="flex items-center gap-1">
+            {variants.map((v, i) => (
+              <button
+                key={v.key}
+                onClick={() => setActive(i)}
+                className={
+                  "rounded border px-2 py-0.5 text-xs " +
+                  (i === active ? "border-foreground font-medium" : "text-muted-foreground")
+                }
+              >
+                {v.key}
+              </button>
+            ))}
+            <button
+              className="rounded border px-2 py-0.5 text-xs text-muted-foreground"
+              onClick={() =>
+                setVariants((cur) => [
+                  ...cur,
+                  {
+                    ...cur[active],
+                    key: String.fromCharCode("A".charCodeAt(0) + cur.length),
+                    result: null,
+                  },
+                ])
+              }
+            >
+              + variant
+            </button>
+          </div>
+          <h2 className="text-sm font-medium">Variant {variant.key}</h2>
           <label className="block space-y-1">
             <span className="text-xs text-muted-foreground">Source run</span>
             <input
@@ -212,12 +276,12 @@ function Playground() {
             <textarea
               rows={4}
               className="w-full rounded border bg-transparent px-2 py-1 text-xs"
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
+              value={variant.instructions}
+              onChange={(e) => patch({ instructions: e.target.value })}
             />
             <button
               className="text-xs text-muted-foreground hover:underline"
-              onClick={() => setInstructions(registered)}
+              onClick={() => patch({ instructions: registered })}
             >
               ↺ reset to the registered prompt
             </button>
@@ -229,12 +293,12 @@ function Playground() {
                 <label key={t.name} className="flex items-center gap-2 text-xs">
                   <input
                     type="checkbox"
-                    checked={!toolsOff.has(t.name)}
+                    checked={!variant.toolsOff.has(t.name)}
                     onChange={(e) => {
-                      const next = new Set(toolsOff)
+                      const next = new Set(variant.toolsOff)
                       if (e.target.checked) next.delete(t.name)
                       else next.add(t.name)
-                      setToolsOff(next)
+                      patch({ toolsOff: next })
                     }}
                   />
                   {t.name}
@@ -252,8 +316,8 @@ function Playground() {
               <span className="text-xs text-muted-foreground">Model</span>
               <select
                 className="w-full rounded border bg-transparent px-1 py-1 text-xs"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
+                value={variant.model}
+                onChange={(e) => patch({ model: e.target.value })}
               >
                 <option value="">(the agent's own)</option>
                 {agent?.models.map((m) => (
@@ -267,8 +331,8 @@ function Playground() {
               <span className="text-xs text-muted-foreground">Thinking</span>
               <select
                 className="rounded border bg-transparent px-1 py-1 text-xs"
-                value={thinking}
-                onChange={(e) => setThinking(e.target.value)}
+                value={variant.thinking}
+                onChange={(e) => patch({ thinking: e.target.value })}
               >
                 <option value="">default</option>
                 {["off", "low", "medium", "high"].map((l) => (
@@ -284,8 +348,8 @@ function Playground() {
               <span className="text-xs text-muted-foreground">Engine</span>
               <select
                 className="w-full rounded border bg-transparent px-1 py-1 text-xs"
-                value={engine}
-                onChange={(e) => setEngine(e.target.value as "live" | "scripted")}
+                value={variant.engine}
+                onChange={(e) => patch({ engine: e.target.value as "live" | "scripted" })}
               >
                 <option value="live">live</option>
                 <option value="scripted">scripted (zero tokens)</option>
@@ -295,9 +359,9 @@ function Playground() {
               <span className="text-xs text-muted-foreground">Side effects</span>
               <select
                 className="w-full rounded border bg-transparent px-1 py-1 text-xs"
-                value={sideEffects}
+                value={variant.sideEffects}
                 onChange={(e) =>
-                  setSideEffects(e.target.value as "substitute" | "park" | "allow")
+                  patch({ sideEffects: e.target.value as "substitute" | "park" | "allow" })
                 }
               >
                 <option value="substitute">substitute</option>
@@ -314,29 +378,49 @@ function Playground() {
               <textarea
                 rows={2}
                 className="w-full rounded border bg-transparent px-2 py-1 text-xs"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
+                value={variant.input}
+                onChange={(e) => patch({ input: e.target.value })}
               />
             </label>
           )}
           {error && <p className="text-xs text-red-500">{error}</p>}
           <Button onClick={() => void run()} disabled={!firstRuntime || !agent}>
-            Run experiment
+            Run {variant.key}
           </Button>
         </section>
         {/* The runs column (§4's right half): the variant's run, side
             by side with its source once P3 adds the N-way view. */}
         <section className="min-w-0 flex-1 space-y-3 overflow-y-auto p-4">
-          {experiment ? (
-            <ResultCard
-              experiment={experiment}
-              sourceText={sourceText}
-              sourceRunID={sourceRunID}
-            />
+          {variants.some((v) => v.result) ? (
+            <>
+              {/* The N-way compare (P3): one card per variant, side by
+                  side, with the tokens/latency/tool-call metrics row —
+                  and the pairwise text diff of the first two below. */}
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
+                {variants
+                  .filter((v) => v.result)
+                  .map((v) => (
+                    <ResultCard
+                      key={v.key}
+                      experiment={v.result!}
+                      sourceText={sourceText}
+                      sourceRunID={sourceRunID}
+                    />
+                  ))}
+              </div>
+              <CompareTable variants={variants} />
+              {variants.filter((v) => v.result).length >= 2 && (
+                <VariantDiff
+                  a={variants.filter((v) => v.result)[0]!}
+                  b={variants.filter((v) => v.result)[1]!}
+                />
+              )}
+            </>
           ) : (
             <p className="text-xs text-muted-foreground">
               Configure a variant and run it. The run executes in your app through the
-              runtime link; the result streams here (WEFT-PLAYGROUND §5.2).
+              runtime link; the result streams here (WEFT-PLAYGROUND §5.2). Add variants
+              to compare them side by side on text, tool calls, tokens and latency.
             </p>
           )}
         </section>
@@ -351,13 +435,13 @@ interface RawTranscript {
   batches: { index: number; step: number; messages: unknown }[]
 }
 
-async function getJSON(path: string): Promise<RawTranscript> {
+async function getJSON(path: string): Promise<RawTranscript | RunRow> {
   const headers: Record<string, string> = { Accept: "application/json" }
   const tok = studioToken()
   if (tok) headers.Authorization = `Bearer ${tok}`
   const res = await fetch(new URL(path, apiBase()).toString(), { headers })
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return (await res.json()) as RawTranscript
+  return (await res.json()) as RawTranscript | RunRow
 }
 
 /** runLabel shortens a run id for the variant card's header. */
@@ -377,7 +461,7 @@ function useSourceText(runID: string): string {
     let alive = true
     void (async () => {
       try {
-        const doc = asTranscript(await getJSON(`runs/${encodeURIComponent(runID)}/transcript`))
+        const doc = asTranscript((await getJSON(`runs/${encodeURIComponent(runID)}/transcript`)) as RawTranscript)
         if (!alive) return
         // The source's own words: the assistant text parts straight
         // from the transcript (final words, never deltas).
@@ -426,6 +510,17 @@ function useCommandTracking(
           ? { ...cur, state: st.state, runID: st.run_id || cur.runID, error: st.error }
           : cur
       )
+      if (st.run_id) {
+        // The metrics row (P3: tokens, latency) once the run lands.
+        try {
+          const row = (await getJSON(`runs/${encodeURIComponent(st.run_id)}`)) as unknown as RunRow
+          setRef.current((cur) =>
+            cur && cur.commandID === experiment.commandID ? { ...cur, row } : cur
+          )
+        } catch {
+          // the row loads on the next poll
+        }
+      }
       if (st.state === "finished" || st.state === "rejected" || st.state === "lost") return
       timer = setTimeout(tick, 700)
     }
@@ -470,7 +565,7 @@ function ResultCard({
     let alive = true
     void (async () => {
       try {
-        const doc = asTranscript(await getJSON(`runs/${encodeURIComponent(experiment.runID)}/transcript`))
+        const doc = asTranscript((await getJSON(`runs/${encodeURIComponent(experiment.runID)}/transcript`)) as RawTranscript)
         if (!alive) return
         const parts: string[] = []
         for (const b of doc.batches)
@@ -500,6 +595,14 @@ function ResultCard({
     [sourceText, text]
   )
 
+  const toolCalls = useMemo(
+    () =>
+      folded.steps
+        .flatMap((st) => st.toolCalls)
+        .map((c) => `${c.name}(${c.args === undefined ? "" : JSON.stringify(c.args)})`),
+    [folded]
+  )
+
   return (
     <div className="rounded border">
       <div className="flex items-center gap-2 border-b px-3 py-2 text-xs">
@@ -514,6 +617,25 @@ function ResultCard({
         {experiment.state === "queued" && !experiment.runID && (
           <p className="text-muted-foreground">waiting for the runtime to ack…</p>
         )}
+        {/* The metrics row P3 names: tokens, latency, the tool calls. */}
+        <div className="flex flex-wrap gap-2 text-faint">
+          {experiment.row && (
+            <>
+              <span>
+                {experiment.row.usage.input_tokens}→{experiment.row.usage.output_tokens} tok
+              </span>
+              <span>
+                {experiment.row.finished
+                  ? `${Math.max(
+                      0,
+                      Date.parse(experiment.row.finished) - Date.parse(experiment.row.started)
+                    )}ms`
+                  : "…"}
+              </span>
+            </>
+          )}
+          {toolCalls.length > 0 && <span>{toolCalls.map((c) => c.split("(")[0]).join(", ")}</span>}
+        </div>
         {text && <div className="whitespace-pre-wrap">{text}</div>}
         {diff && (
           <div className="rounded border border-dashed p-2">
@@ -539,6 +661,107 @@ function ResultCard({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+
+/** CompareTable is P3's metrics row across the N variants: the
+ * finish, tokens, latency and tool calls of each, one column each. */
+function CompareTable({ variants }: { variants: Variant[] }) {
+  const ran = variants.filter((v) => v.result?.row)
+  if (ran.length < 2) return null
+  return (
+    <div className="rounded border">
+      <div className="border-b px-3 py-2 text-xs text-muted-foreground">
+        compare · {ran.length} variants
+      </div>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-left text-faint">
+            <th className="px-3 py-1 font-normal">variant</th>
+            <th className="px-3 py-1 font-normal">tokens</th>
+            <th className="px-3 py-1 font-normal">latency</th>
+            <th className="px-3 py-1 font-normal">steps</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ran.map((v) => {
+            const row = v.result!.row!
+            return (
+              <tr key={v.key} className="border-t">
+                <td className="px-3 py-1 font-medium">{v.key}</td>
+                <td className="px-3 py-1">
+                  {row.usage.input_tokens}→{row.usage.output_tokens}
+                </td>
+                <td className="px-3 py-1">
+                  {row.finished
+                    ? `${Math.max(0, Date.parse(row.finished) - Date.parse(row.started))}ms`
+                    : "…"}
+                </td>
+                <td className="px-3 py-1">{row.steps}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/** VariantDiff is the pairwise text+tool-call diff of the first two
+ * run variants (the panel's 2-way view is PQ3's closed rule; Studio's
+ * N-way page shows the leading pair and the table above covers the
+ * rest). */
+function VariantDiff({ a, b }: { a: Variant; b: Variant }) {
+  const [texts, setTexts] = useState<[string, string] | null>(null)
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      const read = async (id: string) => {
+        try {
+          const doc = asTranscript((await getJSON(`runs/${encodeURIComponent(id)}/transcript`)) as RawTranscript)
+          const parts: string[] = []
+          for (const bt of doc.batches)
+            for (const m of bt.messages)
+              if (m.role === "assistant")
+                for (const p of m.content)
+                  if (p.type === "text" && p.text) parts.push(p.text)
+          return parts.join("\n")
+        } catch {
+          return ""
+        }
+      }
+      const [ta, tb] = await Promise.all([read(a.result!.runID), read(b.result!.runID)])
+      if (alive) setTexts([ta, tb])
+    })()
+    return () => {
+      alive = false
+    }
+  }, [a.result?.runID, b.result?.runID])
+  if (!texts) return null
+  const rows = diffLines(texts[0], texts[1])
+  if (rows.every((r) => r.kind === "same")) return null
+  return (
+    <div className="rounded border border-dashed p-3 text-xs">
+      <div className="mb-1 text-faint">
+        diff {a.key} ↔ {b.key}: {diffSummary(rows)}
+      </div>
+      {rows
+        .filter((r) => r.kind !== "same")
+        .map((r, i) => (
+          <div
+            key={i}
+            className={
+              r.kind === "add"
+                ? "whitespace-pre-wrap text-emerald-500"
+                : "whitespace-pre-wrap text-amber-500 line-through"
+            }
+          >
+            {r.kind === "add" ? "+ " : "− "}
+            {r.text}
+          </div>
+        ))}
     </div>
   )
 }

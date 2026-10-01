@@ -535,6 +535,7 @@ export class PanelModel {
       error: null,
       label: experimentLabel(draft.runId, forked),
       sourceText: sourceTextOf(this.state.turn),
+      compareWith: "",
       row: null,
       events: [],
       feed,
@@ -571,6 +572,55 @@ export class PanelModel {
     this.trackCommand(out.command_id)
   }
 
+  /** setCompare points the 2-way diff at another run of the same
+   * source (PQ3: the panel stays 2-way): "" is the source turn. */
+  async setCompare(runID: string) {
+    const res = this.state.result
+    if (!res) return
+    res.compareWith = runID
+    this.emit()
+    if (!runID) return
+    // The other side's final words, from its transcript.
+    const doc = await fetchTranscript(this.ep, runID).catch(() => null)
+    if (this.state.result !== res) return
+    if (doc) {
+      const parts: string[] = []
+      for (const b of doc.batches)
+        for (const m of b.messages)
+          if (m.role === "assistant")
+            for (const p of m.content)
+              if (p.type === "text" && p.text) parts.push(p.text)
+      this.compareText.set(runID, parts.join("\n"))
+    }
+    // The sibling's tool calls, folded from its events.
+    const feed = newFold()
+    try {
+      let after = 0
+      for (let page = 0; page < 20; page++) {
+        const p = await fetchEvents(this.ep, runID, after)
+        for (const pe of p.events) feed.push(pe.event, pe.pos)
+        if (p.done || p.next_after === null) break
+        after = p.next_after
+      }
+    } catch {
+      // the text side still compares
+    }
+    if (this.state.result !== res || this.disposed) return
+    this.compareCalls.set(
+      runID,
+      feed
+        .result()
+        .steps.flatMap((st) => st.toolCalls)
+        .map((c) => `${c.name}(${c.args === undefined ? "" : JSON.stringify(c.args)})`)
+    )
+    this.emit()
+  }
+
+  /** compareText and compareCalls hold the loaded text and tool-call
+   * lines of each compare target (P3's 2-way diff needs both sides). */
+  compareText = new Map<string, string>()
+  compareCalls = new Map<string, string[]>()
+
   /** discardResult clears the result pane (the run itself stays in the
    * turn list, nested under its source turn). */
   discardResult() {
@@ -591,6 +641,7 @@ export class PanelModel {
         error: message,
         label: "—",
         sourceText: "",
+        compareWith: "",
         row: null,
         events: [],
         feed: newFold(),

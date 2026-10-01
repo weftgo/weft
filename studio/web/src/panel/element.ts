@@ -599,18 +599,64 @@ export class WeftDevtools extends HTMLElement {
     }
     if (!r.folded.steps.length && !r.error) body.appendChild(el("div", "weft-note", "queued — waiting for the runtime to ack…"))
 
-    // The inline diff (§3: `diff vs t3:`), once there is final text.
+    // The 2-way compare (P3, PQ3 — the panel stays 2-way): the diff's
+    // other side is the source turn by default, or any sibling of it.
+    const siblings = [
+      { id: "", label: sourceLabel(r.label) },
+      ...(s.experiments.get(s.drawer?.runId ?? "") ?? []).map((x) => ({
+        id: x.id,
+        label: x.id.startsWith("pg_") ? shortId(x.id) : x.id,
+      })),
+    ]
+    if (siblings.length > 1) {
+      const cmp = el("select", "weft-input") as HTMLSelectElement
+      for (const sb of siblings) {
+        const o = el("option", undefined, `compare vs ${sb.label || "source"}`) as unknown as HTMLOptionElement
+        o.value = sb.id
+        cmp.appendChild(o)
+      }
+      cmp.value = r.compareWith
+      cmp.addEventListener("change", () => void this.model?.setCompare(cmp.value))
+      body.appendChild(cmp)
+    }
+
+    // The inline diff (§3: `diff vs t3:`), once there is final text —
+    // on text, and on the tool calls beside it.
     const text = r.folded.steps.map((st) => st.text).filter(Boolean).join("\n")
-    if (text && r.sourceText) {
-      const rows = diffLines(r.sourceText, text)
+    const otherText = r.compareWith
+      ? this.model?.compareText.get(r.compareWith) ?? ""
+      : r.sourceText
+    const otherLabel = r.compareWith
+      ? shortId(r.compareWith)
+      : sourceLabel(r.label)
+    if (text && otherText) {
+      const rows = diffLines(otherText, text)
       const summary = diffSummary(rows)
       const diffBox = el("div", "weft-diff")
-      diffBox.appendChild(el("div", "weft-diff-h", `diff vs ${sourceLabel(r.label)}:  ${summary}`))
+      diffBox.appendChild(el("div", "weft-diff-h", `diff vs ${otherLabel}:  ${summary}`))
       for (const row of rows) {
         if (row.kind === "same") continue
         diffBox.appendChild(
           el("div", `weft-diff-row weft-diff-${row.kind}`, `${row.kind === "add" ? "+" : "−"} ${row.text}`)
         )
+      }
+      // The tool-call diff beside the text: name(args) lines.
+      const otherCalls = r.compareWith
+        ? this.model?.compareCalls.get(r.compareWith) ?? []
+        : (this.model?.state.turn?.folded.steps ?? []).flatMap((st) => st.toolCalls)
+            .map((c) => `${c.name}(${c.args === undefined ? "" : JSON.stringify(c.args)})`)
+      const myCalls = r.folded.steps
+        .flatMap((st) => st.toolCalls)
+        .map((c) => `${c.name}(${c.args === undefined ? "" : JSON.stringify(c.args)})`)
+      const callRows = diffLines(otherCalls.join("\n"), myCalls.join("\n"))
+      if (callRows.some((row) => row.kind !== "same")) {
+        diffBox.appendChild(el("div", "weft-diff-h", `tool calls:  ${diffSummary(callRows)}`))
+        for (const row of callRows) {
+          if (row.kind === "same") continue
+          diffBox.appendChild(
+            el("div", `weft-diff-row weft-diff-${row.kind}`, `${row.kind === "add" ? "+" : "−"} ${row.text}`)
+          )
+        }
       }
       body.appendChild(diffBox)
     }
@@ -763,6 +809,7 @@ export class WeftDevtools extends HTMLElement {
   private rowOf(id: string): RunRow | undefined {
     return this.model?.rowOf(id)
   }
+
 }
 
 /** promptText lifts the turn's input (the transcript's user messages)

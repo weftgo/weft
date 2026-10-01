@@ -52,6 +52,9 @@ export interface ExperimentResult {
   label: string
   /** The source turn's final text (the diff base). */
   sourceText: string
+  /** The other side of the 2-way compare (P3, PQ3): a sibling run id
+   * whose text the diff is taken against; "" is the source turn. */
+  compareWith: string
   row: RunRow | null
   events: PosEvent[]
   feed: FoldFeed

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/weftgo/weft"
@@ -228,8 +229,23 @@ func (p *Pool) Register(sessionID string, agent *weft.Agent) error {
 // parent whose currently pending calls all hold an effective verdict
 // in the parent — decided, or lapsed past their expiry and denied by
 // the parent's sweep — is queued to resume. With no decisions Decide
-// is the pump alone, which is how decisions taken on the session
-// itself, and expiries, reach the children.
+// is the pump alone.
+//
+// Decisions the parent session records by a path of its own reach the
+// children the same way, without a call: the pool watches every
+// parent it delegates from (and every one handed to Decide,
+// DecideSigned or Recover), and a decision recorded for a mirrored
+// request — Session.Decide or DecideSigned used directly, the denial
+// an interrupting Send (thread.Interrupt, thread.Rollback) gives a
+// parked boundary, a request lapsing past its expiry when the session
+// is next touched — runs the pump on a pool goroutine. An interrupted
+// child is therefore resumed with the denial ("DENIED: interrupted by
+// a newer message"), runs to its end and settles; its delegating
+// call, denied by the same interrupt, is no longer there to resolve,
+// and the child's answer stays on its receipt. The watch is the live
+// Session's: after a restart nothing is watched until Recover or
+// Decide is called for the parent, which is also what pumps whatever
+// was decided in between.
 //
 // A resumed child is pool work like its first run: on a pool-owned
 // goroutine and context, behind the queue, holding a slot while it
@@ -246,13 +262,13 @@ func (p *Pool) Register(sessionID string, agent *weft.Agent) error {
 //
 // The delegating call a child is parked under is never decided: it
 // is not in Pending, and a decision naming it fails with
-// thread.ErrDelegated — it completes with the child's answer. (The
-// parent session's own decision chain is not yet bound by that rule:
-// a grant or a live Approver that approves the delegating call when
-// it parks re-runs the delegation. Keep such a chain from matching a
-// pool wrap's tool.) Decisions for the parent's own, ordinary calls
-// may ride in the same batch; a resume they arm is the parked turn's
-// Next, as with Session.Decide.
+// thread.ErrDelegated — it completes with the child's answer. The
+// parent session's own decision chain is bound by the same rule: no
+// grant and no live Approver is consulted for a delegating call when
+// it parks, whatever they would match — the call parks, and the
+// child's mirrored requests are what there is to decide. Decisions
+// for the parent's own, ordinary calls may ride in the same batch; a
+// resume they arm is the parked turn's Next, as with Session.Decide.
 //
 // Decide returns once the decisions are recorded and the ready
 // children queued; ctx bounds that, not the children. Follow a child
@@ -269,6 +285,7 @@ func (p *Pool) Decide(ctx context.Context, parent *thread.Session, ds ...thread.
 	if err := p.open(ctx); err != nil {
 		return err
 	}
+	p.attach(parent)
 	if len(ds) > 0 {
 		// Recording only: a nested boundary is the children's to
 		// resume, and the parent arms nothing of its own while a
@@ -290,10 +307,43 @@ func (p *Pool) DecideSigned(ctx context.Context, parent *thread.Session, sd thre
 	if err := p.open(ctx); err != nil {
 		return err
 	}
+	p.attach(parent)
 	if _, err := parent.DecideSigned(ctx, sd); err != nil {
 		return err
 	}
 	return p.pump(ctx, parent)
+}
+
+// attach installs the pool's notification on a parent session: a
+// decision the session records for a mirrored request by a path of
+// its own — an interrupting Send's denial, an expiry, a Decide made
+// on the session directly — runs the pump, so the decision reaches
+// the child without waiting for the next Pool.Decide. One
+// notification per pool and session; attaching again replaces it.
+func (p *Pool) attach(parent *thread.Session) {
+	parent.WatchMirrors(p, func(log *slog.Logger) {
+		// Called under the session's lock: the pump reads the session,
+		// so it runs on a pool goroutine, joined to the drain.
+		go p.pumpAsync(parent, log)
+	})
+}
+
+// pumpAsync is the pump as pool-owned background work: counted in
+// the drain, on the pool's context, its failures logged — nobody
+// waits on it. A closed pool pumps nothing.
+func (p *Pool) pumpAsync(parent *thread.Session, log *slog.Logger) {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
+	p.wg.Add(1)
+	p.mu.Unlock()
+	defer p.wg.Done()
+	if err := p.pump(p.ctx, parent); err != nil && p.ctx.Err() == nil {
+		log.Error("thread/pool: a decision recorded on the parent did not reach its children; Pool.Decide retries",
+			"session", parent.ID(), "err", err)
+	}
 }
 
 // open reports whether the pool takes work under ctx.

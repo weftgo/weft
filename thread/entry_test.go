@@ -233,105 +233,68 @@ func TestEntryRoundTrip(t *testing.T) {
 // one — still decodes, and re-marshals to the same bytes. A release
 // that cannot read a golden cannot read a user's session file.
 func TestReadEveryGolden(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join("testdata", "format1", "*.json"))
+	// One row per format directory: how many goldens it holds. A
+	// directory without a row, or a count that moved, fails here — a
+	// golden is added with its row and never silently lost.
+	counts := map[string]int{"format1": 15, "format2": 13, "format3": 6, "format4": 8, "format5": 1}
+	dirs, err := filepath.Glob(filepath.Join("testdata", "format*"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) == 0 {
-		t.Fatal("no format1 goldens found")
+	if len(dirs) != len(counts) {
+		t.Errorf("testdata holds %d format directories, this test knows %d", len(dirs), len(counts))
 	}
-	for _, path := range files {
-		b, err := os.ReadFile(path)
+	for _, dir := range dirs {
+		want, known := counts[filepath.Base(dir)]
+		if !known {
+			t.Errorf("%s has no row in this test: add its golden count", dir)
+			continue
+		}
+		files, err := filepath.Glob(filepath.Join(dir, "*.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		line := bytes.TrimRight(b, "\n")
-		if strings.HasSuffix(path, "header.json") {
-			var h thread.Header
-			if err := json.Unmarshal(line, &h); err != nil {
+		if len(files) != want {
+			t.Errorf("%s holds %d goldens, want %d", dir, len(files), want)
+		}
+		for _, path := range files {
+			b, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			line := bytes.TrimRight(b, "\n")
+			if strings.HasSuffix(path, "header.json") || strings.HasSuffix(path, "session_lineage.json") {
+				// A header golden: a session's first line.
+				var h thread.Header
+				if err := json.Unmarshal(line, &h); err != nil {
+					t.Errorf("%s: %v", path, err)
+					continue
+				}
+				again, err := json.Marshal(h)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(line, again) {
+					t.Errorf("%s: header re-marshal differs\n got %s\nwant %s", path, again, line)
+				}
+				continue
+			}
+			e, err := thread.UnmarshalEntry(line)
+			if err != nil {
 				t.Errorf("%s: %v", path, err)
 				continue
 			}
-			again, err := json.Marshal(h)
+			again, err := json.Marshal(e)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !bytes.Equal(line, again) {
-				t.Errorf("%s: header re-marshal differs\n got %s\nwant %s", path, again, line)
+				t.Errorf("%s: entry re-marshal differs\n got %s\nwant %s", path, again, line)
 			}
-			continue
-		}
-		e, err := thread.UnmarshalEntry(line)
-		if err != nil {
-			t.Errorf("%s: %v", path, err)
-			continue
-		}
-		again, err := json.Marshal(e)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(line, again) {
-			t.Errorf("%s: entry re-marshal differs\n got %s\nwant %s", path, again, line)
 		}
 	}
-	// The format-2 goldens (the approvals kinds, ADR 0021) read the
-	// same way: this build decodes them and re-marshals their bytes.
-	files2, err := filepath.Glob(filepath.Join("testdata", "format2", "*.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files2) == 0 {
-		t.Fatal("no format2 goldens found")
-	}
-	for _, path := range files2 {
-		b, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		line := bytes.TrimRight(b, "\n")
-		e, err := thread.UnmarshalEntry(line)
-		if err != nil {
-			t.Errorf("%s: %v", path, err)
-			continue
-		}
-		again, err := json.Marshal(e)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(line, again) {
-			t.Errorf("%s: entry re-marshal differs\n got %s\nwant %s", path, again, line)
-		}
-	}
-	// The format-3 goldens (the steering receipt, ADR 0019) read the
-	// same way: this build decodes them and re-marshals their bytes.
-	files3, err := filepath.Glob(filepath.Join("testdata", "format3", "*.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files3) == 0 {
-		t.Fatal("no format3 goldens found")
-	}
-	for _, path := range files3 {
-		b, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		line := bytes.TrimRight(b, "\n")
-		e, err := thread.UnmarshalEntry(line)
-		if err != nil {
-			t.Errorf("%s: %v", path, err)
-			continue
-		}
-		again, err := json.Marshal(e)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(line, again) {
-			t.Errorf("%s: entry re-marshal differs\n got %s\nwant %s", path, again, line)
-		}
-	}
-	// The format-4 goldens (the pool receipt, ADR 0022) read the
-	// same way: this build decodes them and re-marshals their bytes.
+	// The format-4 receipt goldens (ADR 0022) cover every status, and
+	// each is linked the way its status says.
 	files4, err := filepath.Glob(filepath.Join("testdata", "format4", "receipt_*.json"))
 	if err != nil {
 		t.Fatal(err)

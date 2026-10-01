@@ -2,6 +2,7 @@ package thread_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"sync/atomic"
@@ -572,5 +573,64 @@ func TestMixedBatchKeepsMirroredRequestsDecided(t *testing.T) {
 		if r.CallID == "child_call" {
 			t.Errorf("the mirrored request reads pending again after a Branch: %+v", r)
 		}
+	}
+}
+
+// CustomMessage is a between-turns write, like Branch and Compact: a
+// message that joined the model's context while a run was in flight
+// would sit in the tree between that run's own messages — between an
+// assistant's calls and their results — where the run never saw it
+// and Context would no longer be what the core was given. It is
+// refused with ErrBusy and nothing is written; after the turn it
+// lands, behind everything the turn recorded.
+func TestCustomMessageRefusedWhileATurnRuns(t *testing.T) {
+	ctx := context.Background()
+	agent, model, started, rel := heldAgent("done")
+	defer rel.open()
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := s.Send(ctx, weft.User("long work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	before := len(s.Entries())
+	if err := s.CustomMessage(ctx, "note", weft.User("slipped in mid-run")); !errors.Is(err, thread.ErrBusy) {
+		t.Fatalf("CustomMessage while a turn runs: %v, want ErrBusy", err)
+	}
+	if got := len(s.Entries()); got != before {
+		t.Fatalf("the refused CustomMessage wrote %d entries", got-before)
+	}
+	// Application state that is not model context stays writable.
+	if err := s.Custom(ctx, "cart", nil); err != nil {
+		t.Fatalf("Custom while a turn runs: %v", err)
+	}
+	rel.open()
+	res, err := turn.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// What the session holds is what the core ran over.
+	if got, want := s.Context(), res.Messages; !reflect.DeepEqual(got, want) {
+		t.Errorf("Context after the turn differs from the run's transcript:\n got %+v\nwant %+v", got, want)
+	}
+	for _, req := range model.Requests() {
+		for _, m := range req.Messages {
+			if m.Text() == "slipped in mid-run" {
+				t.Fatal("the refused note reached the model")
+			}
+		}
+	}
+	if err := s.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CustomMessage(ctx, "note", weft.User("between turns")); err != nil {
+		t.Fatalf("CustomMessage between turns: %v", err)
+	}
+	c := s.Context()
+	if last := c[len(c)-1]; last.Text() != "between turns" {
+		t.Errorf("the note is not the context's tail: %+v", last)
 	}
 }

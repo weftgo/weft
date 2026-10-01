@@ -15,6 +15,7 @@ import (
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/thread"
+	"github.com/weftgo/weft/wefttest"
 )
 
 func openBackend(t *testing.T, path string, opts ...thread.OpenOption) *backend {
@@ -314,5 +315,124 @@ func TestListPageUsesTheIndex(t *testing.T) {
 	joined := strings.Join(plan, "; ")
 	if !strings.Contains(joined, "sessions_order") || strings.Contains(joined, "TEMP B-TREE") {
 		t.Errorf("the page query does not walk the (created, id) index in order: %s", joined)
+	}
+}
+
+// A lock row from another host is never taken over — and when that
+// host is gone for good (a replaced container, a restored backup) the
+// session would stay ErrLocked forever. BreakLock is the operator's
+// way out: the row is removed, reported, and the next write takes the
+// lock like any first write.
+func TestBreakLockClearsAForeignHostRow(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "moved.db")
+	old := openBackend(t, path)
+	old.owner = "old-host/" + old.owner // the predecessor, on a hostname that no longer exists
+	if err := old.Create(ctx, thread.Header{ID: "s_moved", Created: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := old.Append(ctx, "s_moved", entry("e_1")); err != nil {
+		t.Fatal(err)
+	}
+
+	var logged bytes.Buffer
+	b := openBackend(t, path, thread.OpenLogger(slog.New(slog.NewTextHandler(&logged, nil))))
+	b.alive = func(int) bool { return false } // nothing on this host could save the row
+	if err := b.Append(ctx, "s_moved", entry("e_2")); !errors.Is(err, thread.ErrLocked) {
+		t.Fatalf("a foreign-host row: err = %v, want ErrLocked", err)
+	}
+	if err := BreakLock(ctx, b, "s_moved"); err != nil {
+		t.Fatalf("BreakLock: %v", err)
+	}
+	if !strings.Contains(logged.String(), "writer lock broken on request") ||
+		!strings.Contains(logged.String(), "session=s_moved") || !strings.Contains(logged.String(), "holder_host=old-host") {
+		t.Errorf("the break was not reported with its holder:\n%s", logged.String())
+	}
+	if err := b.Append(ctx, "s_moved", entry("e_2")); err != nil {
+		t.Fatalf("the write after BreakLock: %v", err)
+	}
+	if _, entries, report, err := b.Load(ctx, "s_moved"); err != nil || report != nil || len(entries) != 2 {
+		t.Fatalf("Load: %d entries, report %+v, err %v", len(entries), report, err)
+	}
+	// Breaking a lock nobody holds changes nothing; a session that is
+	// not there, and a Storage that is not this package's, are errors.
+	if err := b.Release(ctx, "s_moved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := BreakLock(ctx, b, "s_moved"); err != nil {
+		t.Errorf("BreakLock on an unheld session: %v", err)
+	}
+	if err := BreakLock(ctx, b, "s_missing"); !errors.Is(err, thread.ErrNotFound) {
+		t.Errorf("BreakLock on a missing session: %v, want ErrNotFound", err)
+	}
+	if err := BreakLock(ctx, thread.Memory(), "s_moved"); err == nil {
+		t.Error("BreakLock accepted a Storage that is not sqlite's")
+	}
+}
+
+// A holder whose lock was broken while it was alive after all does not
+// keep writing: its next write reads the row, finds it is not its own,
+// and fails with ErrLocked — never a second writer beside the new
+// one. Once the session is free again it writes as any writer would,
+// and a Session on it has by then been told the session moved on
+// (ErrStale).
+func TestBrokenLockStopsTheOldHolder(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "zombie.db")
+	holder := openBackend(t, path)
+	s, err := thread.Create(ctx, holder, weft.New(wefttest.Script()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetInfo(ctx, "the holder's", nil); err != nil {
+		t.Fatal(err)
+	}
+	other := openBackend(t, path)
+	if err := BreakLock(ctx, other, s.ID()); err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Append(ctx, s.ID(), entry("e_other")); err != nil {
+		t.Fatalf("the new writer after BreakLock: %v", err)
+	}
+	// The old holder — the raw Storage and the Session on it — is
+	// refused while the new writer holds the session.
+	if err := s.SetInfo(ctx, "written beside the new writer", nil); !errors.Is(err, thread.ErrLocked) {
+		t.Fatalf("the old holder's write: err = %v, want ErrLocked", err)
+	}
+	if err := holder.Append(ctx, s.ID(), entry("e_zombie")); !errors.Is(err, thread.ErrLocked) {
+		t.Fatalf("the old holder's raw write: err = %v, want ErrLocked", err)
+	}
+	if _, entries, _, err := other.Load(ctx, s.ID()); err != nil || len(entries) != 2 {
+		t.Fatalf("the session holds %d entries (%v), want the holder's one and the new writer's one", len(entries), err)
+	}
+	// The new writer lets go: the old Session's view is behind, and
+	// it is told so instead of forking the tree.
+	if err := other.Release(ctx, s.ID()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetInfo(ctx, "after the new writer", nil); !errors.Is(err, thread.ErrStale) {
+		t.Fatalf("the old Session's write after the session moved on: err = %v, want ErrStale", err)
+	}
+}
+
+// A lock broken with nobody taking the session since: the old holder's
+// next write is refused once — it learns its lock was broken — and the
+// one after it takes the lock afresh.
+func TestBrokenLockWithNoNewWriter(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "broken.db")
+	holder := openBackend(t, path)
+	if err := holder.Create(ctx, thread.Header{ID: "s_broken", Created: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := BreakLock(ctx, openBackend(t, path), "s_broken"); err != nil {
+		t.Fatal(err)
+	}
+	err := holder.Append(ctx, "s_broken", entry("e_1"))
+	if !errors.Is(err, thread.ErrLocked) || !strings.Contains(err.Error(), "lock was broken") {
+		t.Fatalf("the first write after the break: err = %v, want ErrLocked saying the lock was broken", err)
+	}
+	if err := holder.Append(ctx, "s_broken", entry("e_1")); err != nil {
+		t.Fatalf("the write after that: %v", err)
 	}
 }

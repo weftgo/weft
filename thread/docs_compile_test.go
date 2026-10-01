@@ -145,7 +145,7 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 		t.Log("a small session has nothing to compact — fine:", err)
 	}
 
-	// README: the v0.4 block — the watcher tail and the list filters.
+	// README: the watcher tail and the list filters.
 	w := st.(thread.Watcher)
 	wctx, wcancel := context.WithCancel(ctx)
 	wseq, err := w.Watch(wctx, s.ID(), turn.ID())

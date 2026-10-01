@@ -61,10 +61,11 @@ jobs:
             (cd "$m" && golangci-lint run --config "$GITHUB_WORKSPACE/.golangci.yml")
           done
 
-  # The selvedge (TODO §1.7): the root module's public API is compared
-  # against the last root tag and any incompatible change fails the
-  # build unless it is acknowledged in .apidiff-allow (pre-1.0 only).
-  # Adapters are separate modules and get their own gate when they tag.
+  # The selvedge (TODO §1.7): a module's public API is compared against
+  # its last tag and any incompatible change fails the build unless it
+  # is acknowledged in the module's .apidiff-allow (pre-1.0 only). The
+  # root, thread and thread/sqlite modules are gated; the adapters are
+  # separate modules and get their own gate when they tag.
   apidiff:
     runs-on: ubuntu-latest
     steps:
@@ -87,6 +88,10 @@ jobs:
         run: scripts/apidiff.sh
       - name: apidiff (thread module vs last thread tag)
         run: scripts/apidiff.sh "" thread
+      # thread/sqlite loads through go.work on both sides (the script
+      # says why): it is released after thread, against the new tag.
+      - name: apidiff (thread/sqlite module vs last thread/sqlite tag)
+        run: scripts/apidiff.sh "" thread/sqlite
 
   # The gated ClickHouse suite (obsdb/clickhouse's README "CI job
   # (service container)" block): the conformance table and the
@@ -137,7 +142,7 @@ jobs:
           done
 
   # The fuzz gate (TODO §9.4): every Fuzz* target of the root module
-  # and of thread's decoders (plan §10, step 7.1) runs for FUZZTIME on
+  # and of thread's decoders runs for FUZZTIME on
   # stable Go. Not under -race (the seeds already run under -race in
   # `test`). A crasher fails the job and its input is uploaded so the
   # fix PR can commit it as a seed.

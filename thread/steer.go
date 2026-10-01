@@ -319,7 +319,9 @@ func (s *Session) endDroppedLocked() {
 // (Continue returns the first). The run options a send was accepted
 // with are gone — they are not entries. ctx is detached from Open's
 // cancellation: a turn restored here must not die with the call that
-// loaded the session.
+// loaded the session. Continue binds the restored steers and sends to
+// its own context; one that runs because of a later Send instead runs
+// detached, with nobody's cancellation to answer to but Close's.
 //
 // A fork does not inherit its origin's queue: Fork settles the steers
 // it copied as dropped, and an accepted receipt on the copied path is
@@ -374,6 +376,7 @@ func (s *Session) resurrectSteers(ctx context.Context) {
 			}
 			s.queue = append(s.queue, pendingSend{
 				ctx: ctx, msg: deepCloneMessage(*r.Msg), turn: t, receipt: r.ID,
+				restored: true,
 			})
 		}
 	}

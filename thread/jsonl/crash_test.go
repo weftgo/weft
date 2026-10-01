@@ -25,7 +25,7 @@ import (
 	"github.com/weftgo/weft/thread/threadtest"
 )
 
-// The crash test (plan §3.4): a helper process is killed mid-append —
+// The crash test: a helper process is killed mid-append —
 // a partial line, no newline, the writer dead — and the session must
 // load with everything the crash left durable: the prompt and every
 // synced entry, the torn tail dropped and reported (ADR 0011 §4–§5).
@@ -160,7 +160,7 @@ func TestCrashMidAppendThenNextWriterAppends(t *testing.T) {
 	}
 }
 
-// The crash matrix's second point (step 1.4 review: "can a crash at
+// The crash matrix's second point ("can a crash at
 // any point leave a file that Load rejects without Salvage? Try it"):
 // a writer killed while writing the header itself. The corpse is a
 // file whose only bytes are a torn first line — no complete header,
@@ -277,7 +277,7 @@ func TestCrashHelper(t *testing.T) {
 	time.Sleep(time.Hour) // unreachable; the kill is immediate
 }
 
-// The mid-turn crash (plan §7, ADR 0011 §7): a child runs a real
+// The mid-turn crash (ADR 0011 §7): a child runs a real
 // two-step turn whose second model call blocks; the parent kills it
 // with the first step fully emitted, and everything emitted is durable
 // — the shared harness in threadtest carries the assertions, including

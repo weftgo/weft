@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -123,15 +124,20 @@ type clockOption func() time.Time
 func (o clockOption) applySession(c *sessionConfig) { c.clock = o }
 
 // Clock returns the SessionOption that makes now the session's time
-// source: the header's Created at Create and Fork, and the Created of
-// every entry the Session appends, are read from it (converted to
-// UTC). The default is time.Now. Tests and examples pin time with it,
-// the way IDs pins ids; a nil now is ignored.
+// source, for everything the session reads a time for: the header's
+// Created at Create and Fork, the Created of every entry the Session
+// appends, and the approval machinery's arithmetic — when a request
+// or a grant expires, and whether a signed decision arrived in time
+// (all converted to UTC). The default is time.Now. Tests and examples
+// pin time with it, the way IDs pins ids; a nil now is ignored. A
+// thread/pool child inherits its parent's (InheritApprovals), so a
+// nested request lapses on the same clock.
 //
-// Like the IDs function, now is called with the session's lock held:
-// it must return quickly and must not call back into the Session.
-// Expiry arithmetic that compares against the wall clock — request
-// and grant expiries, signing challenges — is not routed through it.
+// Like the IDs function, now may be called with the session's lock
+// held, and from the runner's goroutine: it must be safe for
+// concurrent use, return quickly, and never call back into the
+// Session. Entry ids are not read from it: the default ids are
+// time-sortable by the wall clock (IDs replaces them).
 func Clock(now func() time.Time) SessionOption {
 	if now == nil {
 		return nil
@@ -236,9 +242,12 @@ func PublicID(id string) SessionOption { return publicIDOption(id) }
 // the storage holds entries the Session never loaded — another
 // Session wrote and closed since this one was opened — its write
 // fails with ErrStale instead of attaching to a leaf the session has
-// moved past. Open the session again. On a backend without the
-// Leaser capability neither check exists, and a second Session on
-// the same Storage value is the caller's to avoid.
+// moved past; so does a write to a session that was deleted and
+// created again under the same id since. The check compares two
+// things the lease reports — the stored header's Created and the
+// number of entry lines — not contents. Open the session again. On a
+// backend without the Leaser capability neither check exists, and a
+// second Session on the same Storage value is the caller's to avoid.
 //
 // One run at a time. A Send while a turn runs — or while an approval
 // boundary is open — follows the busy policy captured at that Send:
@@ -342,6 +351,10 @@ type Session struct {
 	// AutoResume is on.
 	await      awaitState
 	resumeWork *pendingResume
+	// mirrorWatch holds the notifications thread/pool installed
+	// (WatchMirrors), keyed by their owner: each is called, under mu,
+	// when a decision for a mirrored child request has been recorded.
+	mirrorWatch map[any]func(*slog.Logger)
 
 	// The steering state (ADR 0019): steerQueue holds the steers
 	// accepted but not yet drained by a running turn, in acceptance
@@ -611,7 +624,7 @@ func newSession(st Storage, agent *weft.Agent, cfg sessionConfig, h Header, entr
 		seen += len(report.Skipped)
 	}
 	s := &Session{
-		st:     leasedStorage(st, h.ID, seen),
+		st:     leasedStorage(st, h, seen),
 		agent:  agent,
 		cfg:    cfg,
 		header: h,
@@ -869,14 +882,39 @@ func (s *Session) Path(entryID string) ([]Entry, error) {
 	return s.pathLocked(entryID)
 }
 
-// pathLocked is Path with s.mu held. Open's validation makes every
-// parent link name an earlier entry, so the walk only ever moves
-// backwards through the append order and ends at a root or at an
-// orphan the load report named. It checks both facts anyway: a link
-// that does not hold is an error — the tree in memory is not the tree
-// Open vetted — never a silent stop, because a path cut short is a
-// model context cut short.
+// pathLocked is Path with s.mu held: the walk, every entry a deep
+// copy. It is what leaves the session — Path, Fork's snapshot, the
+// context a run or a hook is handed — and what any caller that edits
+// or keeps the entries must use.
 func (s *Session) pathLocked(entryID string) ([]Entry, error) {
+	path, err := s.walkLocked(entryID)
+	if err != nil {
+		return nil, err
+	}
+	for i, e := range path {
+		path[i] = cloneEntry(e)
+	}
+	return path, nil
+}
+
+// walkLocked returns the entries from a root to entryID with s.mu
+// held — the tree's own entries, not copies. It is for the session's
+// internal reads, which run several times a turn over the whole path
+// (the boundary, the approval walk, the turn's tail) and must not
+// each pay a deep copy of the transcript. The contract is the
+// caller's: the slice is fresh, but what its entries point to — a
+// message's parts, argument bytes, maps — is the tree's. Read it
+// under the lock; never write through it, and copy whatever is
+// returned to a caller or kept past the lock (cloneEntry,
+// deepCloneMessage, slices.Clone).
+//
+// Open's validation makes every parent link name an earlier entry, so
+// the walk only ever moves backwards through the append order and
+// ends at a root or at an orphan the load report named. It checks
+// both facts anyway: a link that does not hold is an error — the tree
+// in memory is not the tree Open vetted — never a silent stop,
+// because a path cut short is a model context cut short.
+func (s *Session) walkLocked(entryID string) ([]Entry, error) {
 	if entryID == "" {
 		return nil, nil
 	}
@@ -884,10 +922,13 @@ func (s *Session) pathLocked(entryID string) ([]Entry, error) {
 	if !ok {
 		return nil, fmt.Errorf("thread: session %s holds no entry %q", s.header.ID, entryID)
 	}
-	path := make([]Entry, 0, 8)
+	// A parent always precedes its child in the append order, so the
+	// path to the entry at index i holds at most i+1 entries: one
+	// allocation, exact on a session that never branched.
+	path := make([]Entry, 0, i+1)
 	for {
 		e := s.order[i]
-		path = append(path, cloneEntry(e))
+		path = append(path, e)
 		parent := parentOf(e)
 		if parent == "" {
 			break
@@ -1334,11 +1375,25 @@ func (s *Session) Custom(ctx context.Context, kind string, data json.RawMessage)
 // application puts a note the model must see without attributing it to
 // the user (ADR 0011 §2). An empty kind is rejected. The message is
 // copied: the caller's value is not retained.
+//
+// It is a between-turns write, like Branch and Compact: while a turn
+// is in flight CustomMessage fails with ErrBusy and writes nothing. A
+// message that joined the context mid-run would land between the
+// run's own messages — between an assistant's calls and their results
+// — where the running model never saw it and every later run would
+// read a transcript no run produced. Append it before the Send, or
+// after the turn (Turn.Wait); to reach a running turn, Send with the
+// Steer policy. A parked approval boundary is not a running turn: a
+// note written there is accepted and reads after the boundary's
+// results. Custom, which never enters the context, is not restricted.
 func (s *Session) CustomMessage(ctx context.Context, kind string, msg weft.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if kind == "" {
 		return fmt.Errorf("thread: CustomMessage with empty kind")
+	}
+	if s.running && s.inFlight != nil {
+		return fmt.Errorf("%w: session %s is running a turn; append the message between turns", ErrBusy, s.header.ID)
 	}
 	msg = deepCloneMessage(msg)
 	return s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {
@@ -1407,9 +1462,12 @@ func (s *Session) Usage() Usage {
 //     turn, recorded on its receipt, and runs them in acceptance
 //     order under ctx;
 //   - sends restored by Open — accepted while the session was busy,
-//     their turns never started (Queue lists them too) — and sends
-//     queued behind an approval boundary that has since been cleared
-//     or decided;
+//     their turns never started (Queue lists them too). The Send that
+//     accepted each is gone, and its context with it: Continue runs
+//     them under ctx, so canceling ctx cancels a restored turn, as it
+//     does a restored steer's follow-up;
+//   - sends queued behind an approval boundary that has since been
+//     cleared or decided, each still under its own Send's context;
 //   - an approval boundary whose every call is decided but whose
 //     resume never ran (the writer died between the two): with
 //     AutoResume on, Continue arms the resume, and the queue follows
@@ -1432,6 +1490,13 @@ func (s *Session) Continue(ctx context.Context) (*Turn, error) {
 	defer s.mu.Unlock()
 	if err := s.admitLocked(); err != nil {
 		return nil, err
+	}
+	// A restored send answers to this call from here on: whoever
+	// continues the session is the caller its turn runs for.
+	for i := range s.queue {
+		if s.queue[i].restored {
+			s.queue[i].ctx, s.queue[i].restored = ctx, false
+		}
 	}
 	var first *Turn
 	if !s.running {
@@ -1705,14 +1770,17 @@ type leased struct {
 	lease   Leaser
 	session string
 	seen    int
+	// created is the header's Created as this Session loaded or wrote
+	// it: the stored session's identity, compared on every acquire.
+	created time.Time
 }
 
 // leasedStorage returns the write path newSession installs: st behind
 // its lease when it offers one, st itself when it does not — such a
 // backend keeps whatever writer rule it enforces on its own.
-func leasedStorage(st Storage, session string, seen int) Storage {
+func leasedStorage(st Storage, h Header, seen int) Storage {
 	if l, ok := st.(Leaser); ok {
-		return &leased{Storage: st, lease: l, session: session, seen: seen}
+		return &leased{Storage: st, lease: l, session: h.ID, seen: seen, created: h.Created}
 	}
 	return st
 }
@@ -1720,15 +1788,20 @@ func leasedStorage(st Storage, session string, seen int) Storage {
 // acquire makes the Session its session's writer, or says why it is
 // not: ErrLocked while another Session on this storage holds the
 // lease (or another storage holds the backend's lock), ErrNotFound for
-// a session deleted since, ErrStale when the storage holds a different
-// number of entries than this Session has seen — written by a writer
-// that came and went since the Session loaded. It is asked before
-// every write and costs the holder nothing: the backend answers from
-// memory.
+// a session deleted since, ErrStale when the storage holds another
+// session than this Session has seen: one created under a different
+// header time — the id deleted and created again — or one holding a
+// different number of entries, written by a writer that came and went
+// since the Session loaded. It is asked before every write and costs
+// the holder nothing: the backend answers from memory.
 func (w *leased) acquire(ctx context.Context) error {
-	n, err := w.lease.Acquire(ctx, w.session, w)
+	n, created, err := w.lease.Acquire(ctx, w.session, w)
 	if err != nil {
 		return err
+	}
+	if !created.IsZero() && !created.Equal(w.created) {
+		return fmt.Errorf("%w: session %s was deleted and created again (its header is of %s, this Session loaded %s); open it again",
+			ErrStale, w.session, created.UTC().Format(time.RFC3339Nano), w.created.UTC().Format(time.RFC3339Nano))
 	}
 	if n != w.seen {
 		return fmt.Errorf("%w: session %s holds %d entries, this Session has seen %d; open it again",

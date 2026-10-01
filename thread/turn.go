@@ -52,7 +52,13 @@ const (
 	// text, an approval boundary that holds the session is denied with
 	// the interrupted reason, and the message runs as the next turn.
 	// The interrupted turn's entries stay on the tree — evidence,
-	// never deleted.
+	// never deleted. A boundary holding nested approvals (thread/pool,
+	// ADR 0022 §7) is denied whole — the delegating call and the
+	// child's mirrored requests: the pool that made the child replays
+	// the denial into it and the child runs to its end, its answer on
+	// its receipt; in a process whose pool has not taken the session
+	// over yet (after a restart, before Recover) the child stays
+	// parked until it does.
 	Interrupt
 	// Rollback is an Interrupt that also branches the leaf back to
 	// before the interrupted turn's receipt entry: the follow-up runs
@@ -205,6 +211,10 @@ type pendingSend struct {
 	opts    []weft.RunOption
 	turn    *Turn
 	receipt string
+	// restored marks a send Open put back in the queue from its
+	// accepted receipt: its ctx is a detached placeholder — the Send
+	// that accepted it is gone — until Continue binds it to its own.
+	restored bool
 }
 
 // Send appends the prompt and runs the session's agent on the leaf's
@@ -1726,13 +1736,16 @@ func (t *Turn) clearStreamErr() {
 // none: the resume the session started for the approval boundary this
 // turn parked (TurnParked), or the follow-up turn a deferred steer
 // became (TurnDeferred). It is nil for every other outcome, and for a
-// parked turn whose boundary is still undecided or resumed under a
-// turn the caller already holds (Decide and Resume return it).
+// parked turn whose boundary has not been resumed yet.
 // Following Next is how a caller watches an approval flow through:
-// Send's turn parks; the auto-resume the decision chain or a completed
-// decision set starts links here, and its Wait is the conversation's
-// continuation. One boundary resumes at most once and a steer defers
-// at most once, so the link is set at most once.
+// Send's turn parks, and the resume links here whichever path armed it
+// — the decision chain, a Decide or DecideSigned that completed the
+// boundary, Resume — so the Turn those calls return is this same
+// Turn, and its Wait is the conversation's continuation. One boundary
+// resumes at most once and a steer defers at most once, so the link is
+// set at most once. The link is the live Session's: after a restart
+// the parked Turn value is gone, and the resume is reached through
+// what Decide, Resume or Continue return.
 func (t *Turn) Next() *Turn {
 	t.mu.Lock()
 	defer t.mu.Unlock()

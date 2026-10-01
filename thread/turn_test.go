@@ -583,7 +583,7 @@ func TestSendPendingApprovalResume(t *testing.T) {
 
 		// The turn entry records the pending call, the request entry
 		// makes it durable, and the tree keeps the call unresolved —
-		// v0.2's resume is Decide, which resumes on its own (ADR 0021
+		// the resume is Decide's, which resumes on its own (ADR 0021
 		// §1): the manual Send-with-a-decision path is superseded, and
 		// a Send now queues behind the open boundary instead.
 		open := reopen(t, ctx, st, s)

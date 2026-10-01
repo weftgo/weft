@@ -16,8 +16,10 @@ import (
 // Outcome is a decision's kind (ADR 0021 §1): approve (run the call
 // through the ordinary chain), deny with a reason, or resolve with
 // content computed outside the process, resolve_error marking it an
-// error. The wire values are the decision entry's "outcome" field;
-// they never change without a format version.
+// error. The wire values are the decision entry's "outcome" field:
+// stored bytes, so a value this build writes is one it keeps reading
+// (the format goldens pin them); a decision entry carrying any other
+// value never resolves a call.
 type Outcome string
 
 const (
@@ -72,7 +74,9 @@ var ErrInvalidDecision = errors.New("thread: invalid decision")
 // call some mirrored child request names as its Wrapper. Such a call
 // is parked because its child is, and it completes with the child's
 // answer — never by a decision of its own: approving it would run the
-// delegation a second time, in a second child session. Decide the
+// delegation a second time, in a second child session. The session's
+// own decision chain keeps the same rule without an error: a grant or
+// an Approver is never consulted for such a call. Decide the
 // child's requests (Pending lists them, Child naming the session);
 // the pool resolves the call when the child ends.
 var ErrDelegated = errors.New("thread: call is delegated to a child session")
@@ -338,9 +342,13 @@ func (s *Session) Pending() []Request {
 // which is what holds a plain Send while a nested approval is open.
 // Callers hold s.mu.
 func (s *Session) offeredPendingLocked() []Request {
+	pending := s.pendingLocked()
+	if len(pending) == 0 {
+		return nil // nothing to hide a wrapper from: no walk owed
+	}
 	wrappers := s.approvalWalkLocked().wrappers
 	var out []Request
-	for _, r := range s.pendingLocked() {
+	for _, r := range pending {
 		if r.Child == "" && wrappers[r.CallID] != "" {
 			continue
 		}
@@ -553,6 +561,14 @@ func (s *Session) recordDecisionsLocked(ctx context.Context, batch []recordedDec
 	if err := s.flushLocked(ctx); err != nil {
 		return fmt.Errorf("thread: decision flush: %w", err)
 	}
+	for _, d := range batch {
+		if byCall[d.CallID].Child != "" {
+			// A mirrored child request was decided: the pool that
+			// mirrored it carries the decision to the child.
+			s.mirrorsDecidedLocked()
+			break
+		}
+	}
 	return nil
 }
 
@@ -632,6 +648,12 @@ func (s *Session) resolveExpiredLocked(ctx context.Context) ([]Request, error) {
 	}
 	if err := s.flushLocked(ctx); err != nil {
 		return nil, fmt.Errorf("thread: expiry flush: %w", err)
+	}
+	for _, r := range expired {
+		if r.Child != "" {
+			s.mirrorsDecidedLocked() // the lapse reaches the child through its pool
+			break
+		}
 	}
 	return expired, nil
 }
@@ -818,7 +840,8 @@ type chainResult struct {
 
 // runChain is the decision chain (ADR 0021 §2): for each call a turn
 // left pending, grants (ADR 0021 §4), then a bounded Approver, then
-// the park. It runs at the turn's end, before the
+// the park — except a call that delegates to a thread/pool child,
+// which skips both and parks. It runs at the turn's end, before the
 // request is persisted — "before a request parks" is before the
 // durable parked state exists, because the core's run boundary has
 // already ended the run — and every step leaves an audit entry,
@@ -842,12 +865,23 @@ func (s *Session) runChain(ctx context.Context, t *Turn, opts []weft.RunOption, 
 	// audit entries that count them land with the turn, after the
 	// chain, so MaxUses is tallied here for the calls of one step.
 	uses := map[string]int{}
+	// The delegating calls among them (ADR 0022 §7): a call a mirrored
+	// child request names as its Wrapper parked because its child did.
+	// The chain has nothing to say about it — no grant and no Approver
+	// is consulted, it always parks, and only the child's answer
+	// resolves it (ResolveDelegation): an approval here would run the
+	// delegation again in a second child session, a denial would
+	// abandon a child that is still parked.
+	var wrappers map[string]string
+	s.locked(func() { wrappers = s.approvalWalkLocked().wrappers })
 	for _, c := range calls {
 		// steps are this call's chain entries in order; resolved says
 		// they hold the call's effective verdict.
 		var steps []Entry
 		resolved := false
-		if d, ref, ok := s.matchGrant(ctx, c, uses); ok {
+		if wrappers[c.ID] != "" {
+			// Delegated: straight to the park.
+		} else if d, ref, ok := s.matchGrant(ctx, c, uses); ok {
 			// The chain's first step decides at once, audited — the
 			// audit names the grant (GrantShared marking a store's, so
 			// the session's use counting cannot cross-count an id
@@ -1172,45 +1206,48 @@ func (s *Session) danglingCallsLocked() []weft.ToolCallPart {
 // message with calls that no tool message directly after it answers —
 // parked or not (danglingCallsLocked tells which). Callers hold s.mu.
 func (s *Session) unansweredCallsLocked() []weft.ToolCallPart {
-	path, err := s.pathLocked(s.leaf)
+	path, err := s.walkLocked(s.leaf) // read-only: the calls returned are copied below
 	if err != nil {
 		return nil
 	}
-	var msgs []weft.Message
-	for _, e := range path {
-		if me, ok := e.(MessageEntry); ok {
-			msgs = append(msgs, me.Message)
-		}
-	}
+	// Only message entries are transcript here: the scan reads them
+	// straight off the path, from the leaf back, and builds nothing —
+	// it runs on every turn, over the whole path.
 	last := -1
-	for j := len(msgs) - 1; j >= 0; j-- {
-		if msgs[j].Role != weft.RoleAssistant {
+	for j := len(path) - 1; j >= 0 && last < 0; j-- {
+		me, ok := path[j].(MessageEntry)
+		if !ok || me.Message.Role != weft.RoleAssistant {
 			continue
 		}
-		for _, p := range msgs[j].Content {
+		for _, p := range me.Message.Content {
 			if _, ok := p.(weft.ToolCallPart); ok {
 				last = j
 				break
 			}
-		}
-		if last >= 0 {
-			break
 		}
 	}
 	if last < 0 {
 		return nil
 	}
 	served := map[string]bool{}
-	for j := last + 1; j < len(msgs) && msgs[j].Role == weft.RoleTool; j++ {
-		for _, p := range msgs[j].Content {
+	for j := last + 1; j < len(path); j++ {
+		me, ok := path[j].(MessageEntry)
+		if !ok {
+			continue
+		}
+		if me.Message.Role != weft.RoleTool {
+			break
+		}
+		for _, p := range me.Message.Content {
 			if r, ok := p.(weft.ToolResultPart); ok {
 				served[r.CallID] = true
 			}
 		}
 	}
 	var out []weft.ToolCallPart
-	for _, p := range msgs[last].Content {
+	for _, p := range path[last].(MessageEntry).Message.Content {
 		if c, ok := p.(weft.ToolCallPart); ok && !served[c.ID] {
+			c.Args = slices.Clone(c.Args) // the caller's bytes, not the tree's
 			out = append(out, c)
 		}
 	}
@@ -1285,7 +1322,10 @@ func (s *Session) approvalWalkLocked() approvalWalk {
 		decisions: map[string][]ApprovalDecisionEntry{},
 		wrappers:  map[string]string{},
 	}
-	path, err := s.pathLocked(s.leaf)
+	// Read-only: the walk keeps entry values, and the one reference a
+	// request entry carries — its argument bytes — is copied wherever
+	// a request leaves the session (requestFromEntry).
+	path, err := s.walkLocked(s.leaf)
 	if err != nil {
 		return w
 	}
@@ -1466,6 +1506,13 @@ func effectiveDecision(decisions []ApprovalDecisionEntry, quorum int) (ApprovalD
 // Callers hold s.mu.
 func (s *Session) pendingLocked() []Request {
 	dangling := s.danglingCallsLocked()
+	mirrors := s.liveMirrorsLocked()
+	if len(dangling) == 0 && len(mirrors) == 0 {
+		// No boundary and no nested request: nothing can be pending,
+		// and the approval walk — a pass over the whole path — is not
+		// owed. This is every turn of a session that never parks.
+		return nil
+	}
 	walk := s.approvalWalkLocked()
 	var out []Request
 	for _, c := range dangling {
@@ -1489,7 +1536,7 @@ func (s *Session) pendingLocked() []Request {
 	// lineage, and a decision addressed to it records like any other.
 	// An async child's mirror is the only shape that surfaces: the
 	// parent's own transcript never dangles for it.
-	for _, re := range s.liveMirrorsLocked() {
+	for _, re := range mirrors {
 		if _, ok := effectiveDecision(scopedDecisions(walk.decisions[re.CallID], re.RunID), s.cfg.quorum); ok {
 			continue
 		}

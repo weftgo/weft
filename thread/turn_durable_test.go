@@ -605,6 +605,26 @@ func TestForkDoesNotInheritQueuedSends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The fork's own file says what became of the copied receipt: one
+	// dropped entry settles it, as for a copied steer.
+	var accepted string
+	settled := map[string]string{}
+	for _, e := range f.Entries() {
+		if r, ok := e.(thread.ReceiptEntry); ok {
+			switch {
+			case r.Status == thread.ReceiptAccepted:
+				accepted = r.ID
+			case r.Receipt != "":
+				settled[r.Receipt] = r.Status
+			}
+		}
+	}
+	if accepted == "" || settled[accepted] != thread.ReceiptDropped {
+		t.Errorf("the fork's copy of the accepted receipt %q is settled %q, want dropped", accepted, settled[accepted])
+	}
+	if q := f.Queue(); len(q) != 0 {
+		t.Errorf("the fork's Queue = %+v, want empty", q)
+	}
 	if err := f.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -622,5 +642,58 @@ func TestForkDoesNotInheritQueuedSends(t *testing.T) {
 	}
 	if res, err := queued.Wait(); err != nil || res.Text() != "the queued send's reply" {
 		t.Fatalf("the origin's queued send: %v, %v", res, err)
+	}
+}
+
+// A restored queued send runs under Continue's context: the Send that
+// accepted it died with its process, so the caller who continues the
+// session is the one whose cancellation the turn answers to — as for
+// a restored steer. It used to run detached, deaf to everyone.
+func TestContinueBindsRestoredSendsToItsContext(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	agent, _, started, rel := heldAgent("never reached")
+	defer rel.open()
+	s, err := thread.Create(ctx, st, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Send(ctx, weft.User("long work")); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if _, err := s.Send(ctx, weft.User("queued, then restored")); err != nil {
+		t.Fatal(err)
+	}
+	closeNow(t, s)
+
+	// The reopened session's agent blocks in a tool, so the restored
+	// turn is in flight when its caller walks away.
+	agent2, _, started2, rel2 := heldAgent("never reached either")
+	defer rel2.open()
+	s2 := reopenWith(t, ctx, st, s, agent2)
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	turn, err := s2.Continue(cctx)
+	if err != nil || turn == nil {
+		t.Fatalf("Continue = %v, %v", turn, err)
+	}
+	<-started2
+	cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := turn.Wait()
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("the restored turn ended with %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceling Continue's context did not cancel the restored turn")
+	}
+	if turn.Outcome() != thread.TurnCanceled {
+		t.Errorf("outcome = %v, want canceled", turn.Outcome())
 	}
 }

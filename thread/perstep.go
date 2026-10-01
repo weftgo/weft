@@ -348,7 +348,7 @@ func (s *Session) turnTailLocked(startLeaf string) []tailEntry {
 	if startLeaf == "" {
 		return nil
 	}
-	path, err := s.pathLocked(s.leaf)
+	path, err := s.walkLocked(s.leaf) // read-only: the tail is compared, never kept or edited
 	if err != nil {
 		return nil // the leaf is always an entry the session holds
 	}

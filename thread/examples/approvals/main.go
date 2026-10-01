@@ -1,6 +1,6 @@
 // Command approvals walks one weft/thread session through the
-// approval flow v0.2 exists for (ADR 0021): a gated call parks, the
-// process "restarts" — the session is reopened from the JSONL file —
+// approval flow (ADR 0021): a gated call parks, the process
+// "restarts" — the session is reopened from the JSONL file —
 // a decision arrives signed over the challenge the session minted,
 // and the conversation resumes under it. The session requires signed
 // decisions, a rule its header keeps across the restart. Everything

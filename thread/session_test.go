@@ -132,9 +132,9 @@ func TestSessionListDelete(t *testing.T) {
 
 // appendChain writes entries through the storage the way a session
 // would (each entry's parent the previous one, ids from fixed), and
-// returns the ids in order. Step 1.5 has no message-writing Session
-// method yet — Send arrives in 1.7 — so message-path tests go through
-// the storage and reopen.
+// returns the ids in order: the tests here are about the tree, not
+// turns, so their messages go through the storage and a reopen rather
+// than through Send.
 func appendChain(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Session, entries ...thread.Entry) []string {
 	t.Helper()
 	ids := make([]string, len(entries))

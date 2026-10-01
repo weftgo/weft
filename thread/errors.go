@@ -7,10 +7,11 @@ import (
 
 var (
 	// ErrBusy is returned by Send under the Reject busy policy when the
-	// session is already running a turn, and by Branch while a turn is
-	// in flight: the call was not accepted and nothing was written
-	// (ADR 0011 §4). Retryable — the same call succeeds once the turn
-	// has ended.
+	// session is already running a turn, and by the between-turns
+	// operations while a turn is in flight — Branch, Compact,
+	// ApplyCompaction, Uncompact and CustomMessage: the call was not
+	// accepted and nothing was written (ADR 0011 §4). Retryable — the
+	// same call succeeds once the turn has ended.
 	ErrBusy = errors.New("thread: session is busy with another turn")
 
 	// ErrNotFound is returned by Load, Append, and Delete for a session
@@ -32,12 +33,15 @@ var (
 	ErrLocked = errors.New("thread: session is locked by another writer")
 
 	// ErrStale is returned by a Session's write when the stored
-	// session holds entries the Session never loaded: another writer
-	// appended to it after this Session was opened, and a write now
-	// would attach to a leaf that is no longer the session's — a fork
-	// nobody asked for. Nothing is written and the Session's tree is
-	// unchanged. Terminal for the Session value: Open the session
-	// again to write from what it now holds.
+	// session is not the one the Session loaded: another writer
+	// appended to it after this Session was opened — a write now
+	// would attach to a leaf that is no longer the session's, a fork
+	// nobody asked for — or the session was deleted and created again
+	// under the same id. The check is the stored header's Created and
+	// the number of entry lines, not a comparison of contents. Nothing
+	// is written and the Session's tree is unchanged. Terminal for the
+	// Session value: Open the session again to write from what it now
+	// holds.
 	ErrStale = errors.New("thread: session changed since it was opened")
 
 	// ErrCorrupt wraps the failures a backend reports for stored data

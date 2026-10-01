@@ -44,7 +44,7 @@ func buildBigSession(tb testing.TB, st thread.Storage, id string, n int) {
 	}
 }
 
-// The sqlite half of the budget suite (plan §10, step 7.2): the same
+// The sqlite half of the budget suite: the same
 // 100k-entry open as jsonl's (the second backend's decode path is the
 // database's, and its own cost to bound), and List over 10k sessions —
 // the paged walk and the title filter that migration 0002 denormalised
@@ -58,11 +58,14 @@ const budgetOpen100k = 30 * time.Second
 func TestBudgetOpen100k(t *testing.T) {
 	ctx := context.Background()
 	db := filepath.Join(t.TempDir(), "big.db")
-	st, err := sqlite.Open(db)
+	st, err := sqlite.Open(db, thread.FsyncOnFlush()) // a fixture: bulk-loaded
 	if err != nil {
 		t.Fatal(err)
 	}
 	buildBigSession(t, st, "s_big", 100_000)
+	if err := st.(thread.Flusher).Flush(ctx, "s_big"); err != nil {
+		t.Fatal(err)
+	}
 
 	start := time.Now()
 	fresh, err := sqlite.Open(db)
@@ -95,7 +98,11 @@ const budgetList10k = 30 * time.Second
 func TestBudgetList10k(t *testing.T) {
 	ctx := context.Background()
 	db := filepath.Join(t.TempDir(), "fleet.db")
-	st, err := sqlite.Open(db)
+	// The fleet is a fixture: seeded under FsyncOnFlush, the policy
+	// for bulk loads — the default fsyncs each of the ten thousand
+	// Creates, which is the durability a live session wants and
+	// seconds of disk time the list budget is not about.
+	st, err := sqlite.Open(db, thread.FsyncOnFlush())
 	if err != nil {
 		t.Fatal(err)
 	}

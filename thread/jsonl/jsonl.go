@@ -35,6 +35,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/weftgo/weft/thread"
 	threadbackend "github.com/weftgo/weft/thread/backend"
@@ -130,6 +131,10 @@ type backend struct {
 	syncEveryAppend bool
 	noLock          bool
 	log             *slog.Logger
+	// put, when set, replaces the file write of an append — the seam
+	// the tests fail a write through (a short write, an I/O error).
+	// Nil outside tests: the write is f.Write.
+	put func(f *os.File, buf []byte) (int, error)
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -170,6 +175,11 @@ type session struct {
 	dirty   bool
 	holder  any
 	lines   int
+	// created is the header's Created, read by the hold's first
+	// Acquire (stamped says it was); the zero time when the header
+	// does not decode.
+	created time.Time
+	stamped bool
 }
 
 // unknownLines marks a held session whose entry lines have not been
@@ -686,46 +696,54 @@ var errNilHolder = errors.New("jsonl: lease holder is nil")
 // own appends: for the holder a repeated Acquire is a map lookup.
 // Under NoLock the count is this instance's view only — a writer the
 // lock would have refused is not seen until the session is held anew.
-func (b *backend) Acquire(ctx context.Context, id string, holder any) (int, error) {
+func (b *backend) Acquire(ctx context.Context, id string, holder any) (int, time.Time, error) {
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return 0, time.Time{}, err
 	}
 	if holder == nil {
-		return 0, errNilHolder
+		return 0, time.Time{}, errNilHolder
 	}
 	for {
 		s, err := b.sessionFor(ctx, id)
 		if err != nil {
-			return 0, err
+			return 0, time.Time{}, err
 		}
-		n, err := b.lease(id, s, holder)
+		n, created, err := b.lease(id, s, holder)
 		if !errors.Is(err, errStale) {
-			return n, err
+			return n, created, err
 		}
 	}
 }
 
 // lease records holder on a held session and returns its entry-line
-// count. errStale means the session was released or deleted under the
-// caller, who acquires again.
-func (b *backend) lease(id string, s *session, holder any) (int, error) {
+// count and its header's Created. errStale means the session was
+// released or deleted under the caller, who acquires again.
+func (b *backend) lease(id string, s *session, holder any) (int, time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return 0, errStale
+		return 0, time.Time{}, errStale
 	}
 	if s.holder != nil && s.holder != holder {
-		return 0, fmt.Errorf("%w: %s", thread.ErrLocked, id)
+		return 0, time.Time{}, fmt.Errorf("%w: %s", thread.ErrLocked, id)
 	}
 	if s.lines == unknownLines {
 		n, err := countEntryLines(id, s.f)
 		if err != nil {
-			return 0, err
+			return 0, time.Time{}, err
 		}
 		s.lines = n
 	}
+	if !s.stamped {
+		// The header is read once per hold: the file behind a hold is
+		// one session for as long as it is held.
+		if h, ok, err := newHeaderReader().read(b.path(id)); err == nil && ok {
+			s.created = h.Created
+		}
+		s.stamped = true
+	}
 	s.holder = holder
-	return s.lines, nil
+	return s.lines, s.created, nil
 }
 
 // countEntryLines counts the complete lines after the header in a held
@@ -936,12 +954,18 @@ func truncate(f *os.File, size int64) error {
 }
 
 // write appends buf to the held session in one write, then fsyncs when
-// asked. raw marks bytes that may not end a line (Inject's): the file
-// is suspect afterwards. A failed or short write is an error and
-// leaves the file suspect too — it may hold a torn tail, which the
-// next write through this session repairs before appending; the
-// append did not happen. errStale means the session was released or
-// deleted under the caller, who acquires again.
+// asked. An append is all or nothing as far as this process can make
+// it: when the write fails or comes up short — or the fsync after it
+// fails — the bytes that did reach the file are cut off again, back to
+// where the file stood, under the same lock (unwrite). A batch's
+// complete first lines would otherwise survive as entries the caller
+// was told were not written. Only when the cut itself cannot be made
+// is the file left suspect — it may hold a torn tail, which the next
+// write through this session repairs before appending — and its line
+// count unknown. raw marks bytes that may not end a line (Inject's):
+// the file is suspect afterwards, and a failed raw write is not cut.
+// errStale means the session was released or deleted under the
+// caller, who acquires again.
 func (b *backend) write(id string, s *session, buf []byte, sync, raw bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -954,9 +978,22 @@ func (b *backend) write(id string, s *session, buf []byte, sync, raw bool) error
 		}
 		s.suspect = false
 	}
-	if err := writeFull(s.f, buf); err != nil {
-		s.suspect = true
-		s.lines = unknownLines // part of the batch may be in the file
+	put := b.put
+	if put == nil {
+		put = (*os.File).Write
+	}
+	n, err := put(s.f, buf)
+	if err == nil && n != len(buf) {
+		err = io.ErrShortWrite
+	}
+	if err == nil && sync {
+		err = s.f.Sync()
+	}
+	if err != nil {
+		if raw || !b.unwrite(id, s, n, err) {
+			s.suspect = true
+			s.lines = unknownLines // part of the batch may be in the file
+		}
 		return err
 	}
 	if raw {
@@ -966,15 +1003,42 @@ func (b *backend) write(id string, s *session, buf []byte, sync, raw bool) error
 		// Append's bytes: whole lines, one per entry.
 		s.lines += bytes.Count(buf, []byte{'\n'})
 	}
-	if !sync {
-		s.dirty = true
-		return nil
-	}
-	if err := s.f.Sync(); err != nil {
-		return err
-	}
-	s.dirty = false
+	s.dirty = !sync
 	return nil
+}
+
+// unwrite removes the n bytes a failed append left at the end of the
+// held file, so no prefix of the batch survives, and reports whether
+// the file is back where it stood. The caller holds the session's
+// mutex and — unless the backend was opened with NoLock — its
+// exclusive lock, which is what makes the last n bytes this write's
+// own: under NoLock another writer may have appended since, the
+// arithmetic proves nothing, and the file is left to the tail repair.
+// The cut is fsynced and logged; a cut that fails is logged too and
+// reported as not made.
+func (b *backend) unwrite(id string, s *session, n int, cause error) bool {
+	if n == 0 {
+		return true // nothing reached the file
+	}
+	if b.noLock {
+		return false
+	}
+	fi, err := s.f.Stat()
+	if err == nil {
+		if fi.Size() < int64(n) {
+			err = fmt.Errorf("file is %d bytes, shorter than the %d written", fi.Size(), n)
+		} else if err = truncate(s.f, fi.Size()-int64(n)); err == nil {
+			err = s.f.Sync()
+		}
+	}
+	if err != nil {
+		b.log.Error("thread/jsonl: a failed append's bytes could not be removed; the next write repairs the tail",
+			"session", id, "bytes", n, "append_err", cause, "err", err)
+		return false
+	}
+	b.log.Warn("thread/jsonl: removed the bytes of a failed append",
+		"session", id, "dropped_bytes", n, "append_err", cause)
+	return true
 }
 
 // writeFull writes buf in one write; a short write is an error.

@@ -34,6 +34,13 @@ func TestConformance(t *testing.T) {
 	threadtest.Run(t, open)
 }
 
+// The session-level table: the turn machinery's promises that depend
+// on what the backend stores — the mixed batch's resume join, a
+// queued send restored after a restart.
+func TestConformanceTurns(t *testing.T) {
+	threadtest.RunTurns(t, open)
+}
+
 // The one-writer sub-table: two Storages over one directory are the
 // in-process shape of two processes — the second writer is ErrLocked,
 // and Release hands the session over.

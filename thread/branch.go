@@ -177,7 +177,12 @@ const forkedStop = "forked: the delegation belongs to the session this one was f
 // header metadata, WithLineage its pool lineage; the busy policy,
 // compaction and approval options are the fork's own. Nothing is
 // inherited from this session's options or header — not its public
-// id, not its header metadata: a fork is another session.
+// id, not its header metadata: a fork is another session — with one
+// exception, the signing rule: a fork of a session that requires
+// signed decisions (RequireSigned) requires them too, recorded in its
+// own header, and takes this session's keyring when opts give it
+// none. A copy must not be a way around the rule its origin's
+// approvals were held to.
 //
 // # What a fork inherits
 //
@@ -201,12 +206,14 @@ const forkedStop = "forked: the delegation belongs to the session this one was f
 // And what it does not — the fork copies nothing that would start a
 // run, and nothing that reaches into this session's work:
 //
-//   - queued sends and the running turn: they live in this Session
-//     value, not in the tree;
-//   - queued steers: a steer still waiting on the path is recorded as
-//     dropped in the fork (one receipt entry appended after the
-//     copy), so reopening the fork never restores it — the message
-//     belongs to this session;
+//   - the running turn: it lives in this Session value, not in the
+//     tree;
+//   - queued sends and queued steers: a send accepted and still
+//     waiting for its turn, or a steer still waiting, on the path is
+//     recorded as dropped in the fork (one receipt entry each,
+//     appended after the copy), so the fork's file says what became
+//     of it and reopening the fork never restores it — the message
+//     belongs to this session, which runs it;
 //   - mirrored child approval requests (thread/pool): they are
 //     handles on this session's children, so they are left out of
 //     the copy — the one case where a copied entry's parent link is
@@ -314,9 +321,9 @@ func (s *Session) writeFork(ctx context.Context, st Storage, cfg sessionConfig, 
 // forkEntries turns a copied path into the entries a fork's file
 // holds (Fork's inheritance rules): the path itself, minus the
 // mirrored child requests, each entry attached to the one before it
-// in the copy; then one settling entry per steer still queued and per
-// pool delegation still unsettled on it, minted through the fork's
-// own ids and clock.
+// in the copy; then one settling entry per steer still queued, per
+// send accepted and not yet started, and per pool delegation still
+// unsettled on it, minted through the fork's own ids and clock.
 func forkEntries(cfg *sessionConfig, path []Entry) ([]Entry, error) {
 	entries := make([]Entry, 0, len(path))
 	last := ""
@@ -372,7 +379,16 @@ func forkEntries(cfg *sessionConfig, path []Entry) ([]Entry, error) {
 		var settle Entry
 		switch e := e.(type) {
 		case ReceiptEntry:
-			if e.Status != ReceiptQueued || e.Receipt != "" || settledSteer[e.ID] {
+			if e.Receipt != "" || settledSteer[e.ID] {
+				continue
+			}
+			switch e.Status {
+			case ReceiptQueued:
+			case ReceiptAccepted:
+				if held[e.Turn] {
+					continue // its prompt entry is on the path: the turn started
+				}
+			default:
 				continue
 			}
 			settle = ReceiptEntry{Receipt: e.ID, Status: ReceiptDropped}

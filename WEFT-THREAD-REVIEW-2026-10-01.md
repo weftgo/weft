@@ -166,3 +166,202 @@ Stale trigger re-fires on the Send after a compaction (extra summarizer calls); 
 19. Docs: rewrite `doc.go` to the shipped surface with the concurrency rules in one paragraph; scrub step-number godoc; godoc for the 14 bare names; examples for Interrupt, Rollback, Resume/Revoke, signing flow, quorum, each compaction layer, pool Forward/Cancel; `docs/thread-operations.md` (layout, backup incl. sqlite WAL, locks and takeover, limits incl. List fleet scan, error classes, retention); STATUS.md thread section; AGENTS.md block 8 cut to ≤15 lines; commit or remove `examples/refund-plan` (untracked, untested, skews local vs CI apidiff); `examples/session` fails on second run (fixed id in TempDir).
 
 All seven areas reviewed; scratch probes live only in the session scratchpad, the repo tree is unmodified apart from this file.
+
+## Resolution (2026-10-01/02)
+
+The findings above were fixed as a train of seven lanes on branch
+`thread-prod-fixes` — session core, compaction, backends, approvals,
+the writer lease, the pool, the turn machinery — followed by a final
+code pass and this docs pass. Commits are named by their lane sha
+(each is an ancestor of the branch head); tests are the ones that fail
+on the old code. Test paths are under `thread/` unless a package is
+named. The CHANGELOG's fix-train entry is the user-facing record; the
+ADR amendments of 2026-10-01 (0011, 0019, 0020, 0021, 0022) are the
+decisions.
+
+### P1 — all twelve fixed
+
+| # | Finding | Lane | Fix | Pinned by |
+|---|---|---|---|---|
+| 1 | signed decision not bound to its occurrence | approvals | `b73f4aa` | `TestSignedDecisionBoundToItsOccurrence`, `TestRepeatedCallIDOccurrencesStaySeparate` |
+| 2 | empty nonce skips the replay scan; client-chosen expiry | approvals | `b73f4aa` | `TestSignedDecisionNeedsAnIssuedNonce`, `TestSignedDecisionCannotChooseItsExpiry` |
+| 3 | `AfterCompact` under the lock deadlocks | compaction | `5fc1c09` | `TestAfterCompactMayCallTheSession`, `TestEveryCompactionHookMayCallTheSession` |
+| 4 | a trim cuts the iterative summary chain | compaction | `406c685`, `5fc1c09` | `TestCompactTrimCompactKeepsTheChain` |
+| 5 | mixed tool batch never closes its boundary | turn | `dec5959` | `TestMixedBatchAutoResume`, `TestMixedBatchManualResume`, `TestMixedBatchAcrossReopen`; `threadtest.RunTurns` / `MixedBatchResume` |
+| 6 | one failed per-step append drops and duplicates | turn | `dec5959` | `TestPerStepOneFailedAppendLosesAndDuplicatesNothing`, `TestMixedBatchResumeSurvivesAFailedAppend` |
+| 7 | pool deadlocks under fan-out × depth | pool | `1b9070f` | `pool`: `TestHandoffNoDeadlock`, `TestSlotHandOff`, `TestDepthLimit` |
+| 8 | a child that parks twice cannot resume | pool | `e8e0aa2` | `pool`: `TestChildParksTwice` |
+| 9 | a torn tail poisons the next append | backends | `55e8bd3` (Memory), `4cd9d41` (jsonl), `e4e58e9` + `6ec3590` (sqlite) | `jsonl`: `TestCrashMidAppendThenNextWriterAppends`, `TestTornTailRepairedBeforeAppend`; `sqlite`: `TestAppendAfterTornRepairs`; `threadtest.Run` / `AppendAfterTornTail` |
+| 10 | sqlite `Watch` deadlocks a writing consumer | backends | `e4e58e9` | `threadtest.RunWatch` / `ConsumerWritesInsideLoop` |
+| 11 | sqlite lock reads a reused pid as a live holder | backends | `e4e58e9` | `sqlite`: `TestLockTakeoverRules`, `TestProcessTokenIsPerProcess`, `TestProcStart` |
+| 12 | jsonl `Watch` panics on a file with no complete line | backends | `4cd9d41` | `jsonl`: `TestWatchWithoutHeaderIsCorrupt` |
+
+### P2 — by group
+
+| Group | Finding | Lane | Fix | Pinned by |
+|---|---|---|---|---|
+| Turn | run-id collision across reopen | turn | `80883b4` | `TestRunIDRecoversAfterAnOverflowReRun`, `TestRunIDRecoversAfterALostTurnEnd`, `TestRunIDRecoversPastIDsThatLeftNoTurnEntry` |
+| Turn | interrupt under `RequireSigned` / a failed denial hangs `Wait` | approvals, turn | `d0bba20`, `80883b4` | `TestInterruptDeniesUnderRequireSigned`, `TestInterruptDenialFailureFailsTheSend`, `TestInterruptRefusedLeavesNothingQueued` |
+| Turn | prompt flush failure duplicates the prompt | turn | `80883b4` | `TestPromptFlushFailureLeavesNoOrphanPrompt` |
+| Turn | settled-boundary pickup not in flight | turn | `80883b4` | `TestSettledBoundaryPickupIsInFlight` |
+| Turn | queued sends not durable at acceptance | turn | `80883b4` | `TestQueuedSendSurvivesARestart`, `TestRestoredQueuedSendRunsBeforeTheNextSend`; `threadtest.RunTurns` / `QueuedSendRestored` |
+| Turn | `Wait` cannot be abandoned; compaction before the turn is decided | turn | `80883b4` | `TestTurnDoneAndWaitContext`, `TestWaitReturnsBeforeTheBetweenTurnCompaction` |
+| Turn | steer outcome overloaded | turn | `80883b4` (ADR 0019 amendment, `5c6c2b0`) | `TestTurnOutcomes`, `TestClearQueue` |
+| Pool | the wrapper call accepts a direct `Decide` | pool | `e8e0aa2` | `TestDecideRefusesDelegatingCall`; `pool`: `TestWrapperNotDecidable` |
+| Pool | a `RequireSigned` parent never gets its child's answer | approvals, pool | `d0bba20`, `e8e0aa2` | `TestPoolDelegationCompletesUnderRequireSigned`; `pool`: `TestNestedSignedDecision` |
+| Pool | a resumed child runs outside the semaphore | pool | `e8e0aa2` | `pool`: `TestResumeHoldsSlot` |
+| Pool | mirror-append failure; a crash before the mirror | pool | `e8e0aa2` | `pool`: `TestMirrorFailureFailsDelegation`, `TestRecoverParkedUnmirrored` |
+| Pool | nested approvals cannot expire | pool | `e8e0aa2` | `pool`: `TestNestedExpiry`, `TestMirrorExpiresWrapperDoesNot` |
+| Core | Open/Load accept a malformed tree | core | `11c7cd6` | `TestOpenRejectsMalformedTree`, `TestOpenSalvageReportsOrphans`, `TestPathFailsOnABrokenLink` |
+| Core | snapshots share memory with the tree | core | `11c7cd6` | `TestSnapshotsShareNothingWithTheSession` |
+| Core | `PublicID` rotated by `SetInfo` | core | `11c7cd6` | `TestSetInfoRules`, `TestMetaReservedKeyFirstWriteWins` |
+| Core | `Fork` drops options and skips Open's derivations | core | `11c7cd6` | `TestForkHonoursHeaderOptions`, `TestForkDerivesStateLikeOpen`, `TestForkNeutralisesPoolState` |
+| Core | `Open` can start a run | core | `11c7cd6` | `TestOpenStartsNoRun` |
+| Core | no in-process one-writer rule | writer | `43cf085`, `6560bb5` | `threadtest.RunLeaser`, `threadtest.RunOneWriter` (`TestSecondOpenIsLocked`) |
+| Core | no `Session.Close` | core | `11c7cd6` | `TestCloseDrainsRunningTurnAndQueue`, `TestCloseContextEndCancelsTheTurn`, `TestCloseConcurrent` |
+| Approvals | expiry enforced only by `Resume` | approvals | `b73f4aa` | `TestDecideOnExpiredRequestIsRefused`, `TestSendOverExpiredBoundaryResumes`, `TestSweepWritesOneDenialPerExpiredRequest` |
+| Approvals | `MaxUses` not enforced within one turn | approvals | `b73f4aa` | `TestGrantMaxUsesWithinOneTurn` |
+| Approvals | `RequireSigned` is a process flag | approvals | `b73f4aa`, `d0bba20` | `TestRequireSignedIsDurable`, `TestForkInheritsRequireSigned`, `TestRequireSignedHeaderGolden` |
+| Approvals | quorum-open chain approval parks with no request | approvals | `b73f4aa` | `TestQuorumChainApprovalStillParksARequest` |
+| Approvals | duplicate call ids; `ApproveAlways` beside a deny | approvals | `b73f4aa` | `TestDecideRejectsInvalidBatches`, `TestApproveAlwaysGrantsOnlyAnEffectiveApproval`, `TestDenyAlwaysMintsNoGrant` |
+| Approvals | quorum identity is a free-text `Who` | approvals | `b73f4aa` | `TestSignedQuorumCountsKeys` (unsigned `Who` stays a declaration, documented on `Quorum`) |
+| Compaction | custom `Trimmer` never changes the context | compaction | `5fc1c09` | `TestCustomTrimmerChangesTheContext`, `TestUnrepresentableTrimIsLoud` |
+| Compaction | trim replay depends on runtime options | compaction | `406c685`, `5fc1c09` | `TestTrimReplayIgnoresTheCurrentOptions`, `TestTrimRecordGolden` |
+| Compaction | `TokensBefore` counts the raw path | compaction | `5fc1c09` | `TestTokensBeforeCountsTheCompactedView` |
+| Compaction | truncated summary accepted | compaction | `5fc1c09` | `TestTruncatedSummaryIsNeverStored` |
+| Compaction | `BeforeCompact` edits ignored | compaction | `5fc1c09` | `TestBeforeCompactEditsAreHonoured` |
+| Compaction | `SummarizeLeft` feeds the raw range | compaction | `5fc1c09` | `TestSummarizeLeftKeepsTheBranchCompaction` |
+| Backends | `Watch` stalls after Delete+Create | backends | `4cd9d41`, `e4e58e9` | `threadtest.RunWatch` / `ReplacedSessionEndsTheTail` |
+| Backends | `Query.Before` skips ties | backends | `55e8bd3` | `threadtest.Run` / `ListPagesThroughTies` |
+| Backends | jsonl `List` allocates 1 MiB per file | backends | `4cd9d41` | `jsonl`: `TestBudgetList10k`, `TestListBoundedSkipsOversized` |
+| Backends | jsonl holds an fd and a lock per session for ever | backends, writer | `55e8bd3`, `4cd9d41` | `threadtest.Run` / `Releaser`; `jsonl`: `TestReleaseDropsTheFile` |
+| Backends | jsonl `Watch` malformed line is not `ErrCorrupt` | backends | `4cd9d41` | `threadtest.RunWatch` / `CorruptLineIsErrCorrupt` |
+| Backends | `List` is a fleet scan (sqlite) | backends | `e4e58e9` | `sqlite`: `TestListPageUsesTheIndex`, `TestBudgetList10k`. jsonl still reads every header per call — bounded and budgeted, documented |
+| Backends | jsonl `Watch` re-reads the whole file per tick | backends | `4cd9d41` | `jsonl`: `TestWatchPollReadsOnlyNewBytes` |
+| Backends | threadtest has no rows for the rules above | backends, writer, turn | `17f8d06`, `43cf085`, `7199e14` | the rows themselves; `Run` calls `RunWatch` |
+
+### P3
+
+Fixed with their lanes, each with a test: the Windows liveness reading
+of access-denied (vet-only, see below), the non-unix jsonl lock
+(`TestLockSupportGate`), one title rule on every backend
+(`TestTitleRules`, migration 0003), sqlite `:memory:` across a replaced
+connection, paths with URI characters, migrations returning errors,
+jsonl `Create` off the instance mutex
+(`TestSlowSetupBlocksOnlyItsOwnSession`), the shared backend rules in
+`thread/internal/rules`, `ErrLocked` naming the session; the wrapped
+`weft.ErrInvalidSteer` and `weft.ErrInvalidRunOption`, the overflow
+attempt's usage, `Canceled` on a deadline, the interrupted partial
+completed on a copy, `Close` over the bare wrap path,
+`SUBAGENT_DEPTH` and a real cycle guard, the pinned cancel text,
+pruned registrations, duplicate wrap names, idempotent settlement, the
+split `ErrNotRunning`, `Children`/`Descendants` for a deleted parent,
+a fork that leaves the origin's mirrors out; the trigger's stand-down,
+the same-boundary refusal, `Pin`'s refusal, the validated window
+knobs, id guards on `AppendApprovalRequests`, spent decisions, the
+grant predicate fixes, `Via` always `user` on `Decide`, audited signed
+refusals, `CorruptError.Unwrap`, `Proceed()`/`Cancel()`, the exported
+compaction sentinels, and `thread.Clock`.
+
+The "all or none become visible" claim is restated rather than made
+true: `Append` is atomic against the writer's death, not isolated from
+a concurrent cross-process reader (`Storage.Append`'s godoc, ADR 0011
+amendment §B). sqlite keeps its own copies of the list rules — it is
+its own module and cannot import `thread/internal`; the conformance
+table holds the copies to one answer.
+
+### Principles and docs (§4, §6 item 19)
+
+- Godoc: no exported name in `thread`, `pool`, `jsonl`, `backend`,
+  `threadtest` or `sqlite` is without a doc comment (checked with an
+  AST walk on this branch); the step-number narration is gone
+  (`e90aeff`); `doc.go` describes the shipped surface with the
+  concurrency contract in one place.
+- Examples: added across sessions, turns, steering, compaction,
+  approvals and signing, the pool and the backends (`2aaa84a`,
+  `3ec4a73`, `1a8495a`, `298d6aa`, `32bbff8`, `fe2fb23`).
+  `examples/session` is re-runnable (`e78792b`).
+- `docs/thread-operations.md` exists; AGENTS block 8 is 25 lines with
+  the thread rules beside it; README's snippets compile
+  (`TestDocsSessionsBlocksCompile`); ADR 0011 carries the amendment
+  and a format reference; ADR 0023 is marked abandoned.
+- `OpenConfig`/`ResolveOpen` moved to `thread/backend`;
+  `thread.Instructions`, `Disabled`, the mixed `int`/`int64` token
+  types and the dead public fields are gone.
+
+### Not fixed / deferred
+
+By decision (maintainer, 2026-10-01) — the freeze is deferred until
+the API has proven stable in real use; production readiness does not
+wait for it:
+
+- the format spec as a **compatibility promise** (ADR 0011's appendix
+  documents the current format and says it is not one);
+- `thread.Migrate` (the symbol still does not exist);
+- emptying `thread/.apidiff-allow` (it holds its one v0.4 entry, and
+  this train adds breaking changes the gate must be told about at the
+  tag);
+- one option dialect — `With*`, bare and `Require*`/`On*` names still
+  coexist; moving the compaction options to their own package or
+  collapsing the hooks. Renames wait for the freeze.
+
+Still open, known, documented:
+
+- The pool's plumbing is still exported on `Session`
+  (`thread/poolplumbing.go`: `ReplayDecisions`, `CancelDelegated`,
+  `MirroredRequests`, `DenyMirrored`, `ResolveDelegation`,
+  `AppendApprovalRequests`, `AppendPoolReceipt`). The exported surface
+  grew in this train; "small surface" is not met.
+- The Windows code paths (jsonl's `LockFileEx`, sqlite's liveness and
+  start time) compile and vet; they have never been executed.
+- Stale-writer detection is a count of entry lines, not a content
+  comparison.
+- sqlite's lock is never taken over across hostnames (a replacement
+  container with a new hostname; `docs/thread-operations.md` §4).
+- `Audit()` is an index, not evidence; quorum over unsigned decisions
+  counts declared names.
+- The steer queue is unbounded.
+- jsonl `List` reads every header per call.
+- §5's "`-count=10` race soak in CI" and an apidiff gate for
+  `thread/sqlite` are not in CI on this branch.
+- `examples/refund-plan` (untracked in the maintainer's checkout) is
+  neither committed nor removed.
+
+In the final code pass (open in the lane notes when this was written;
+not verified either way on the docs branch — check the final lane's
+commits before reading these as fixed or not):
+
+- the parent's decision chain (a grant, a live `Approver`) still runs
+  over a delegating wrapper call when it parks, and an approval there
+  re-runs the delegation (ADR 0022 amendment §D records it as a known
+  gap; `Pool.Decide`'s godoc warns);
+- an interrupting `Send` on a parent holding nested approvals denies
+  the mirrors and nothing pumps: the children resume on the next
+  `Pool.Decide` or `Recover`;
+- `Recover` reads a finished child's answer as its last assistant
+  text, cannot rebuild the ancestry above a rebuilt child, and assumes
+  one pool owns a storage's delegations (documented in the operations
+  page and the CHANGELOG's known limits);
+- `threadtest.RunTurns` is called for Memory and jsonl
+  (`TestTurnsConformance`) but not from `thread/sqlite`'s tests;
+- a fork's copy of an `accepted` receipt is skipped at restore, not
+  settled as `dropped` in the fork's entries;
+- sends restored by `Open` run under a context detached from the
+  caller's (`Continue` does not rebind it);
+- a `CustomMessage` written mid-run makes `Context()` differ from the
+  running run's view (pre-existing);
+- `TestReadEveryGolden` globs formats 1–4; format 5's golden is read
+  by `TestTrimRecordGolden` only;
+- godoc that disagrees with the code, found by the docs pass:
+  `Turn.Next` (says nil after `Decide`; the parked turn's `Next` is
+  the resume `Decide` returned), `Clock` (says expiry arithmetic is
+  not routed through it; it is), `Session.Fork` (says nothing is
+  inherited from the origin's options; `RequireSigned` and the keyring
+  are), `FormatVersion` (promises "readers read every version forever"
+  and names a `Migrate` that does not exist);
+- `examples/studio-local` reopens its session on every request without
+  closing the previous `Session`, which the writer lease now refuses.
+
+Before a release: maintainer review, merge to `main`, the two-phase
+tags (root first), and a re-run of the `-race -count=10` soak and the
+full fuzz pass.

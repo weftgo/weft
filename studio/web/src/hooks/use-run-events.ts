@@ -8,7 +8,7 @@
 // which refetches pages exactly like a reconnect (S4.5).
 import { useEffect, useRef, useState } from "react"
 
-import { apiBase } from "@/lib/api"
+import { apiBase, studioToken } from "@/lib/api"
 import type { EventsPage, WireEvent } from "@/lib/api"
 import { openLive } from "@/lib/live"
 import { foldMore, newFold } from "@/lib/events"
@@ -19,9 +19,14 @@ async function fetchPage(id: string, after: number): Promise<EventsPage> {
     `runs/${encodeURIComponent(id)}/events?after=${after}&limit=500`,
     apiBase()
   )
-  const res = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
-  })
+  // The bearer lib/api's get/post send, when the Studio is token-walled
+  // (S4.6): this is a raw fetch, so the wall's 401 would otherwise
+  // kill the initial walk, the fallback poll and every overflow
+  // refetch — the run page showed the error instead of the story.
+  const headers: Record<string, string> = { Accept: "application/json" }
+  const tok = studioToken()
+  if (tok) headers.Authorization = `Bearer ${tok}`
+  const res = await fetch(url.toString(), { headers })
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`
     try {

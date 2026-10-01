@@ -231,7 +231,8 @@ per the standing rule that an ADR divergence is decided, not drifted.
 
 ## Amendment 2026-10-01 — the context shape, the trim record, the hook rules, and what is not built
 
-Found by the post-0.7.0 audit of `weft/thread`. Pre-1.0, so the API and
+Found by the 2026-10-01 review of `weft/thread`
+(`WEFT-THREAD-REVIEW-2026-10-01.md`). Pre-1.0, so the API and
 the wire moved where the fix needed it; each point below is pinned by a
 test, and the model-visible ones by goldens in
 `thread/testdata/compaction` and `thread/testdata/format5`.

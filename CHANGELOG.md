@@ -119,6 +119,14 @@
   (two runs/sessions within one wall second, paged through the
   boundary). The pushed `obsdb/clickhouse/v0.1.0` tag carries the bug
   (owner: consider a patch tag).
+- `SaveExperiment` surfaces every prior-read error except
+  `ErrNotFound` (only a genuine not-found means "first save"): a
+  transient read failure no longer silently resets an update's
+  `Created` to the save time. Pinned by `TestExperimentCreatedSurvivesUpdate`.
+- Migration 0002's engine shape is pinned offline
+  (`TestSpecExperimentsEnginePresent`): `ReplacingMergeTree(InsertTime)`
+  and `InsertTime DEFAULT now64(9)` — the two properties the step 8b
+  review fixes rest on, previously guarded by nothing offline.
 
 ## 0.7.0 — 2026-10-01
 

@@ -113,7 +113,7 @@ func ExampleMemory() {
 // deterministic ids so the output is stable.
 func ExampleCreate() {
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script()) // no run happens here; Send arrives in step 1.7
+	agent := weft.New(wefttest.Script()) // no run happens here: the example only appends
 	st := thread.Memory()
 
 	next := 0
@@ -166,7 +166,7 @@ func ExampleSession_Usage() {
 		fmt.Println(err)
 		return
 	}
-	// A finished turn, recorded the way Send will from step 1.7.
+	// A finished turn, recorded the way Send records one.
 	if err := st.Append(ctx, s.ID(),
 		thread.MessageEntry{ID: "e_q", Created: time.Now().UTC(), Message: weft.User("Summarize the plan.")},
 		thread.TurnEntry{
@@ -215,7 +215,7 @@ func ExampleSession_Branch() {
 		fmt.Println(err)
 		return
 	}
-	// Two messages of history, appended the way Send will from step 1.7.
+	// Two messages of history, appended the way Send appends them.
 	if err := st.Append(ctx, s.ID(),
 		thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: weft.User("draft the intro")},
 		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: time.Now().UTC(), Message: weft.Assistant("done")},

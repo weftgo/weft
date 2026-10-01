@@ -63,20 +63,29 @@ type TurnEntry struct {
 	LastInput int64 `json:"last_input,omitempty"`
 }
 
-// Reason is why a compaction ran (ADR 0020 §1): manual (the caller
-// asked), threshold (the configured trigger), trim (a trimmer pre-pass
-// brought the context under the line, so no summary was made),
-// from_hook (BeforeCompact replaced the plan), and overflow — an
-// ErrContextOverflow turn compacted and re-run, which arrives with
-// thread v0.3.
+// Reason is why a compaction ran (ADR 0020 §1) — the value a
+// CompactionEntry records on the wire.
 type Reason string
 
 const (
-	ReasonManual    Reason = "manual"
+	// ReasonManual marks a compaction the caller asked for: Compact,
+	// or ApplyCompaction over a previewed plan.
+	ReasonManual Reason = "manual"
+	// ReasonThreshold marks a compaction the configured trigger
+	// started: the measured context crossed the window minus the
+	// reserve (ADR 0020 §2).
 	ReasonThreshold Reason = "threshold"
-	ReasonTrim      Reason = "trim"
-	ReasonFromHook  Reason = "from_hook"
-	ReasonOverflow  Reason = "overflow" // v0.3: overflow compaction and re-run (ADR 0020 §5)
+	// ReasonTrim marks a trim: a trimmer pre-pass brought the context
+	// under the line, so no summary was made — the entry's Summary is
+	// empty.
+	ReasonTrim Reason = "trim"
+	// ReasonFromHook marks a compaction whose plan a BeforeCompact
+	// hook replaced.
+	ReasonFromHook Reason = "from_hook"
+	// ReasonOverflow marks the compaction that follows a turn failing
+	// with weft.ErrContextOverflow, before the turn's one re-run
+	// (ADR 0020 §5).
+	ReasonOverflow Reason = "overflow"
 )
 
 // CompactionEntry records one compaction (ADR 0020 §1): the summary
@@ -279,7 +288,7 @@ type GrantRevokedEntry struct {
 	GrantID  string    `json:"grant_id"`
 }
 
-// ReceiptEntry is the steering receipt (ADR 0019, plan §6): the
+// ReceiptEntry is the steering receipt (ADR 0019): the
 // journey of one message accepted while the session was busy under
 // the Steer policy. One entry records acceptance — Status "queued",
 // the message on Msg — and a second, linked by Receipt, records the
@@ -471,6 +480,65 @@ func parentOf(e Entry) string {
 	return ""
 }
 
+// withParent returns the entry with its ParentID replaced — the one
+// rewrite a copy of a path may need (Fork): an entry whose stored
+// parent the copy does not carry attaches to the nearest entry the
+// copy does. The entry's id and everything else are untouched, and
+// the stored original is never rewritten — only the copy differs.
+func withParent(e Entry, parent string) Entry {
+	switch e := e.(type) {
+	case MessageEntry:
+		e.ParentID = parent
+		return e
+	case TurnEntry:
+		e.ParentID = parent
+		return e
+	case CompactionEntry:
+		e.ParentID = parent
+		return e
+	case BranchSummaryEntry:
+		e.ParentID = parent
+		return e
+	case LeafEntry:
+		e.ParentID = parent
+		return e
+	case LabelEntry:
+		e.ParentID = parent
+		return e
+	case InfoEntry:
+		e.ParentID = parent
+		return e
+	case CustomEntry:
+		e.ParentID = parent
+		return e
+	case CustomMessageEntry:
+		e.ParentID = parent
+		return e
+	case ApprovalRequestEntry:
+		e.ParentID = parent
+		return e
+	case ApprovalDecisionEntry:
+		e.ParentID = parent
+		return e
+	case ApprovalAuditEntry:
+		e.ParentID = parent
+		return e
+	case GrantEntry:
+		e.ParentID = parent
+		return e
+	case GrantRevokedEntry:
+		e.ParentID = parent
+		return e
+	case ReceiptEntry:
+		e.ParentID = parent
+		return e
+	case PoolReceiptEntry:
+		e.ParentID = parent
+		return e
+	}
+	return e
+}
+
 // Wire discriminators for entry kinds.
 const (
 	kindMessage          = "message"
@@ -518,19 +586,19 @@ type (
 )
 
 // approvalEntryV is the entry version the approval kinds carry on the
-// wire (ADR 0011 §6, ADR 0021): the approvals format is 2, so a v0.1
-// reader fails loudly on a session that used approvals instead of
-// guessing at kinds it does not know.
+// wire (ADR 0011 §6, ADR 0021): the approvals format is 2, so a
+// format-1 reader fails loudly on a session that used approvals
+// instead of guessing at kinds it does not know.
 const approvalEntryV = 2
 
 // receiptEntryV is the entry version the steering receipt carries on
 // the wire (ADR 0011 §6, ADR 0019): the steering format is 3, so a
-// v0.2 reader fails loudly on a session that steered.
+// format-2 reader fails loudly on a session that steered.
 const receiptEntryV = 3
 
 // poolReceiptV is the entry version the pool receipt carries on the
-// wire (ADR 0011 §6, ADR 0022): the pool's format is 4, so a reader
-// from before v0.5 fails loudly on a session that used the pool
+// wire (ADR 0011 §6, ADR 0022): the pool's format is 4, so a
+// format-3 reader fails loudly on a session that used the pool
 // instead of guessing at a kind it does not know.
 const poolReceiptV = 4
 
@@ -682,9 +750,9 @@ func (e PoolReceiptEntry) MarshalJSON() ([]byte, error) {
 
 // kindVersion returns the highest entry version this build reads for a
 // wire kind (ADR 0011 §6). Kinds born in format 1 are version 1 and
-// carry no "v" on the wire; a kind added after format 1 — approvals in
-// v0.2, steering receipts in v0.3 — is written with "v":N, its minimum
-// reader version, and registers here at that version. A reader that
+// carry no "v" on the wire; a kind added after format 1 — approvals,
+// steering receipts, pool receipts — is written with "v":N, its
+// minimum reader version, and registers here at that version. A reader that
 // does not know a kind at all, or knows it only at a lower version,
 // fails loudly (UnmarshalEntry) instead of guessing.
 func kindVersion(kind string) (int, bool) {

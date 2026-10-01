@@ -1,8 +1,12 @@
 // Command session walks one weft/thread session through its whole
-// v0.1 life: two turns, a label, a branch off the first answer, a fork
-// of the branch, a manual compaction with preview, and a reopen from
-// disk — everything on a JSONL backend, everything offline through a
-// scripted model, every id deterministic.
+// life: two turns, a label, a branch off the first answer, a fork of
+// the branch, a manual compaction with preview, a close, and a reopen
+// from disk — everything on a JSONL backend, everything offline
+// through a scripted model, every id deterministic.
+//
+// By default the session files go to a fresh temporary directory that
+// is removed when the command exits, so it can be run any number of
+// times; -dir keeps them somewhere you can read them.
 package main
 
 import (
@@ -11,7 +15,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/thread"
@@ -20,12 +23,30 @@ import (
 )
 
 func main() {
-	dir := flag.String("dir", filepath.Join(os.TempDir(), "weft-session-example"), "directory for the session files")
+	dir := flag.String("dir", "", "keep the session files in this directory, which must not already hold\nthe example's sessions (default: a temporary directory, removed at exit)")
 	flag.Parse()
-	if err := run(os.Stdout, *dir); err != nil {
+	if err := runIn(os.Stdout, *dir); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// runIn runs the example in dir, or — when dir is empty — in a fresh
+// temporary directory it removes afterwards: the ids are fixed, so a
+// directory that already holds s_demo would fail the Create.
+func runIn(w io.Writer, dir string) (err error) {
+	if dir == "" {
+		dir, err = os.MkdirTemp("", "weft-session-example-")
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if rerr := os.RemoveAll(dir); rerr != nil && err == nil {
+				err = rerr
+			}
+		}()
+	}
+	return run(w, dir)
 }
 
 // p prints one line to the example's writer; a failed write ends the
@@ -133,6 +154,12 @@ func run(w io.Writer, dir string) error {
 		return err
 	}
 	if err := p(w, "compacted; context holds", len(s.Context()), "messages; file holds", len(s.Entries()), "entries"); err != nil {
+		return err
+	}
+
+	// One Session per session id: close this one — it drains, seals
+	// and lets go of the file — before the session is opened again.
+	if err := s.Close(ctx); err != nil {
 		return err
 	}
 

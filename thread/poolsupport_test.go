@@ -2,6 +2,7 @@ package thread_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/weftgo/weft"
@@ -105,8 +106,9 @@ func TestSessionFromContext(t *testing.T) {
 	})
 }
 
-// The lineage: set at Create, read back from the file, ignored by
-// Open's options (the header is the truth).
+// The lineage: set at Create, read back from the file, and refused as
+// an Open option — the header is the truth, and an option Open cannot
+// honour is an error, not a silent drop.
 func TestWithLineage(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
@@ -119,12 +121,15 @@ func TestWithLineage(t *testing.T) {
 		if lin.Session != "s_parent" || lin.Call != "call_1" {
 			t.Errorf("Lineage = %+v", lin)
 		}
-		open, err := thread.Open(ctx, st, s.ID(), agent, thread.WithLineage("s_other", ""))
+		if _, err := thread.Open(ctx, st, s.ID(), agent, thread.WithLineage("s_other", "")); !errors.Is(err, thread.ErrCreateOnly) {
+			t.Fatalf("Open with WithLineage: err = %v, want ErrCreateOnly", err)
+		}
+		open, err := thread.Open(ctx, st, s.ID(), agent)
 		if err != nil {
 			t.Fatalf("Open: %v", err)
 		}
 		if got := open.Lineage(); got.Session != "s_parent" || got.Call != "call_1" {
-			t.Errorf("Lineage after reopen = %+v; Open must not rewrite it", got)
+			t.Errorf("Lineage after reopen = %+v, want the header's", got)
 		}
 		plain, err := thread.Create(ctx, st, agent)
 		if err != nil {

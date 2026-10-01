@@ -110,7 +110,7 @@ func sampleEntries() []thread.Entry {
 }
 
 // goldenName maps an entry to its golden file name: one file per kind,
-// the format-1 pin (plan §3.2).
+// the format-1 pin.
 func goldenName(e thread.Entry) string {
 	switch e.(type) {
 	case thread.MessageEntry:
@@ -573,7 +573,7 @@ func TestHeaderEnvelope(t *testing.T) {
 	}
 }
 
-// TestIDs pins the id rules (plan §3.2): the shapes, uniqueness, and
+// TestIDs pins the id rules: the shapes, uniqueness, and
 // sortability to the millisecond; ValidID's boundary table.
 func TestIDs(t *testing.T) {
 	s := thread.NewSessionID()

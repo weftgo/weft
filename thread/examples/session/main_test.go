@@ -35,3 +35,23 @@ reopened: 3 messages, leaf true
 		}
 	}
 }
+
+// The command is re-runnable: with no -dir each run gets a fresh
+// temporary directory and removes it, so the fixed session ids never
+// meet a previous run's files.
+func TestRunTwice(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	for i := 0; i < 2; i++ {
+		var buf bytes.Buffer
+		if err := runIn(&buf, ""); err != nil {
+			t.Fatalf("run %d: %v", i+1, err)
+		}
+		if !strings.Contains(buf.String(), "reopened: 3 messages") {
+			t.Errorf("run %d output = %q", i+1, buf.String())
+		}
+	}
+	left, err := os.ReadDir(os.TempDir())
+	if err != nil || len(left) != 0 {
+		t.Errorf("the runs left %d entries in the temp dir (%v)", len(left), err)
+	}
+}

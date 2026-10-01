@@ -107,8 +107,12 @@ jobs:
           CLICKHOUSE_PASSWORD: weft
         ports:
           - 9000:9000
-        ulimits:
-          nofile: 262144:262144
+        options: >-
+          --ulimit nofile=262144:262144
+          --health-cmd "clickhouse-client --password weft --query 'SELECT 1'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       WEFT_CLICKHOUSE_DSN: clickhouse://default:weft@127.0.0.1:9000/default
     steps:

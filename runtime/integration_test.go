@@ -690,7 +690,9 @@ func TestPlaygroundContinueFromStepWithEdits(t *testing.T) {
 	}
 	// The patched counterfactual reached the model: the fresh step 2
 	// answered it.
-	e.p.ForceFlush(context.Background())
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if text := e.commandText(t, st.RunID); !strings.Contains(text, "429") {
 		t.Errorf("the fresh step's reply = %q, want it to answer the patched 429", text)
 	}
@@ -1147,7 +1149,9 @@ func TestDebuggerBreakpointsAndSteer(t *testing.T) {
 	}
 	// The run parked on the breakpoint: its row reads pending 1 (the
 	// tool never ran although allow + opted-in would have let it).
-	e.p.ForceFlush(context.Background())
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if attrs := e.rec.playgroundSpan(t); attrs["weft.override.park_on"] != "lookup_order" {
 		t.Errorf("park_on = %q, want the breakpoint's tool", attrs["weft.override.park_on"])
 	}
@@ -1195,7 +1199,9 @@ func TestDebuggerBreakpointsAndSteer(t *testing.T) {
 	close(gate) // the model finishes; the loop drains the steer at its point
 	e.waitCommand(t, "cmd_steer", "finished")
 	// The steered event is in the run's records.
-	e.p.ForceFlush(context.Background())
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	found := false
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) && !found {

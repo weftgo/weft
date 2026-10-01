@@ -211,9 +211,7 @@ type demo struct {
 	st    thread.Storage
 	agent *weft.Agent
 	s     *thread.Session
-	semMu sync.Mutex
 	sem   chan struct{} // one writer per session (thread's rule)
-	turns int
 }
 
 func newDemo(st thread.Storage, agent *weft.Agent) *demo {

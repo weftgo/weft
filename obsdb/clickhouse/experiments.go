@@ -36,9 +36,9 @@ func (d *DB) SaveExperiment(ctx context.Context, e obsdb.Experiment) error {
 	if prior, err := d.Experiment(ctx, e.ID); err == nil {
 		created = prior.Created
 	}
-	return d.conn.AsyncInsert(ctx, `INSERT INTO experiments
+	return d.conn.Exec(ctx, `INSERT INTO experiments
 		(Id, Name, Agent, Created, Updated, Variants, Inputs) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		false, e.ID, e.Name, e.Agent, created, now, string(variants), string(inputs))
+		e.ID, e.Name, e.Agent, created, now, string(variants), string(inputs))
 }
 
 // Experiments lists the saved definitions, newest update first.

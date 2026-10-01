@@ -644,8 +644,8 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 	rs.stopTimersLocked(row)
 	if a.RunID != "" {
 		rs.runs[a.RunID] = row.Runtime
-		if row.Command.PublicID != "" {
-			rs.runPub[a.RunID] = row.Command.PublicID
+		if row.PublicID != "" {
+			rs.runPub[a.RunID] = row.PublicID
 		}
 	}
 	switch a.State {

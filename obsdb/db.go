@@ -59,10 +59,10 @@ type RunQuery struct {
 // verbatim (overrides JSON included); the runs themselves stay in the
 // runs table.
 type Experiment struct {
-	ID, Name, Agent string
+	ID, Name, Agent  string
 	Created, Updated time.Time
-	Variants        []ExperimentVariant
-	Inputs          []ExperimentInput
+	Variants         []ExperimentVariant
+	Inputs           []ExperimentInput
 }
 
 // ExperimentVariant is one column of the matrix: a key and the

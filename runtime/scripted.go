@@ -76,7 +76,7 @@ func eventsOf(msg weft.Message) []weft.ModelEvent {
 			// run's rebuilt transcript carries no signatures.
 			out = append(out, weft.ModelReasoningDelta{Text: p.Text})
 		case weft.TextPart:
-			out = append(out, weft.ModelTextDelta{Text: p.Text})
+			out = append(out, weft.ModelTextDelta(p))
 		case weft.ToolCallPart:
 			calls++
 			args := p.Args

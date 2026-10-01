@@ -170,6 +170,63 @@ func TestErrClosed(t *testing.T) {
 	}
 }
 
+// Write is idempotent on (trace, span) — S3.2, the promise doc.go
+// makes ("FINAL or LIMIT 1 BY on the dedup key") and sqlite keeps with
+// INSERT OR IGNORE. otel_traces is a plain MergeTree and keeps the
+// retried batch's duplicate rows, so this pins the read-side dedup:
+// the identical batch written twice yields one copy of each span from
+// both RunSpans and Trace, and distinct spans are never collapsed.
+// (obsdbtest's Idempotence subtest never reads spans back; merge-B is
+// asked to add that read — notes-lane-b2 §9. This is the pin until
+// then.)
+func TestSpanWritesAreIdempotent(t *testing.T) {
+	db, _ := openFresh(t)
+	at := time.Unix(0, 1790845923120000000).UTC()
+	span := func(id string) obsdb.Span {
+		return obsdb.Span{
+			TraceID: "0102030405060708090a0b0c0d0e0f10", SpanID: id,
+			Name: "invoke_agent conf", Kind: 1, Start: at, End: at.Add(9 * time.Second),
+			StatusCode: 1, Service: "conf-svc",
+			Attrs: map[string]any{
+				"gen_ai.operation.name": "invoke_agent", "weft.run.id": "c1",
+				"gen_ai.agent.name": "conf", "weft.session.id": "s_conf", "weft.turn": int64(1),
+			},
+			Resource: map[string]any{"service.name": "conf-svc"},
+		}
+	}
+	batch := obsdb.Batch{
+		Spans: []obsdb.Span{span("0a0b0c0d0e0f0102"), span("0a0b0c0d0e0f0304")},
+		Records: []obsdb.Record{{
+			Time: at, EventName: "weft.event", Body: `{"type":"run_start","id":"c1"}`,
+			Service: "conf-svc",
+			Attrs: map[string]any{"weft.record": "event", "weft.run.id": "c1",
+				"weft.event.type": "run_start", "weft.event.pos": int64(0)},
+		}},
+	}
+	for i := 0; i < 2; i++ {
+		if err := db.Write(ctx(), batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := db.RunSpans(ctx(), "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("RunSpans after a rewrite = %d spans, want 2 (one per span id)", len(got))
+	}
+	tr, err := db.Trace(ctx(), "0102030405060708090a0b0c0d0e0f10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr) != 2 {
+		t.Fatalf("Trace after a rewrite = %d spans, want 2 (one per span id)", len(tr))
+	}
+	if got[0].SpanID == got[1].SpanID {
+		t.Errorf("RunSpans returned the same span id twice: %s", got[0].SpanID)
+	}
+}
+
 // A write is visible to the very next read: wait_for_async_insert=1 on
 // the connection (S3.6), pinned here so a settings regression on the
 // driver or server cannot quietly make writes lag.

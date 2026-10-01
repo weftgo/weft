@@ -441,7 +441,8 @@ func (d *DB) RunSpans(ctx context.Context, runID string) ([]obsdb.Span, error) {
 	if err := d.runExists(ctx, runID); err != nil {
 		return nil, err
 	}
-	return d.querySpans(ctx, "SELECT "+spanColumns+" FROM otel_traces WHERE RunId = ? ORDER BY Timestamp, SpanId", runID)
+	return d.querySpans(ctx, "SELECT "+spanColumns+" FROM otel_traces WHERE RunId = ?"+
+		spanDedup, runID)
 }
 
 // Trace returns any trace's spans — weft and non-weft alike (the
@@ -451,8 +452,17 @@ func (d *DB) Trace(ctx context.Context, traceID string) ([]obsdb.Span, error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
-	return d.querySpans(ctx, "SELECT "+spanColumns+" FROM otel_traces WHERE TraceId = ? ORDER BY Timestamp, SpanId", traceID)
+	return d.querySpans(ctx, "SELECT "+spanColumns+" FROM otel_traces WHERE TraceId = ?"+
+		spanDedup, traceID)
 }
+
+// spanDedup makes the span reads idempotent on (trace, span) — the
+// promise doc.go makes and obsdb/sqlite keeps with INSERT OR IGNORE.
+// otel_traces is a plain MergeTree (a replacing key would collapse
+// non-weft spans), so a retried batch's duplicates are removed at
+// read: span rows are immutable by construction, so LIMIT 1 BY on the
+// identity pair is exact and never hides a real second version.
+const spanDedup = " ORDER BY Timestamp, SpanId LIMIT 1 BY TraceId, SpanId"
 
 func (d *DB) querySpans(ctx context.Context, sql string, arg any) ([]obsdb.Span, error) {
 	rs, err := d.conn.Query(ctx, sql, arg)

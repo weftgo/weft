@@ -309,11 +309,17 @@ func TestLostOnDisconnect(t *testing.T) {
 // nothing the runtime already saw that is no longer queued.
 func TestResumeWithLastEventID(t *testing.T) {
 	rs := fastServer()
+	// No ack timer: the still-queued row must stay queued until the
+	// resume reads it, whatever the machine's timing (the 40 ms timer
+	// racing the second subscribe is what made this test flake).
+	rs.AckDeadline = 0
 	ts := httptest.NewServer(mux(rs))
 	defer ts.Close()
 	register(t, mux(rs), regBody("rt_resume"))
 
-	// First stream: two commands, both acked; then it dies.
+	// First stream: two commands, both delivered; cmd1 acked, cmd2
+	// left queued (delivery changes nothing — only an ack does); then
+	// the stream dies.
 	r1, close1 := subscribe(t, rs, ts.URL, "rt_resume", "")
 	cmd1 := mustEnqueue(t, rs, "rt_resume", Command{})
 	cmd2 := mustEnqueue(t, rs, "rt_resume", Command{})
@@ -326,17 +332,21 @@ func TestResumeWithLastEventID(t *testing.T) {
 	ack(t, rs, Ack{CommandID: cmd1.CommandID, State: "accepted", RunID: "pg_1"})
 	close1()
 
-	// A queued command lands while no stream exists: it cannot be
-	// delivered (the route would have refused), so enqueue it after
-	// the new stream opens.
+	// The resume (cursor = cmd1, now accepted, so not re-sent) first
+	// re-delivers the still-queued cmd2: it sits after the cursor and
+	// an unacked command stays queued (the backlog rule §10.3).
 	r2, close2 := subscribe(t, rs, ts.URL, "rt_resume", cmd1.CommandID)
 	defer close2()
-	cmd3 := mustEnqueue(t, rs, "rt_resume", Command{})
-	id3, _ := nextRun(t, r2)
-	if id3 != cmd3.CommandID {
-		t.Errorf("after resume, first frame = %s, want the new command %s", id3, cmd3.CommandID)
+	if id, _ := nextRun(t, r2); id != cmd2.CommandID {
+		t.Errorf("after resume, first frame = %s, want the still-queued %s", id, cmd2.CommandID)
 	}
-	_ = cmd2
+
+	// A command enqueued under the new stream arrives after the
+	// backlog.
+	cmd3 := mustEnqueue(t, rs, "rt_resume", Command{})
+	if id3, _ := nextRun(t, r2); id3 != cmd3.CommandID {
+		t.Errorf("after resume, next frame = %s, want the new command %s", id3, cmd3.CommandID)
+	}
 }
 
 // TestPingKeepalive pins the SSE housekeeping: ping frames flow on the

@@ -5,7 +5,7 @@
       "span_id": "030405060708090a",
       "parent_span_id": "",
       "name": "invoke_agent",
-      "kind": 1,
+      "kind": "internal",
       "start": "2020-01-01T09:02:00.123Z",
       "end": "2020-01-01T09:02:05.123Z",
       "status": "ok",

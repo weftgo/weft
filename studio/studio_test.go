@@ -1012,6 +1012,19 @@ func TestRunsFilters(t *testing.T) {
 	}
 }
 
+// TestSpanKindName pins the OTLP int → name mapping S4.3's example
+// requires ("kind": "client"): the wire ints never reach the API.
+func TestSpanKindName(t *testing.T) {
+	for kind, want := range map[int]string{
+		0: "unspecified", 1: "internal", 2: "server", 3: "client",
+		4: "producer", 5: "consumer", 99: "unspecified",
+	} {
+		if got := spanKindName(kind); got != want {
+			t.Errorf("spanKindName(%d) = %q, want %q", kind, got, want)
+		}
+	}
+}
+
 // TestTranscriptAndSpans pins the run-scoped transcript and spans
 // shapes (S4.3) and the trace route any application can use.
 func TestTranscriptAndSpans(t *testing.T) {
@@ -1039,7 +1052,7 @@ func TestTranscriptAndSpans(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"spans":[`,
-		`"name":"invoke_agent"`, `"kind":1`, `"status":"ok"`,
+		`"name":"invoke_agent"`, `"kind":"internal"`, `"status":"ok"`,
 		`"trace_id":"0102030405060708090a0b0c0d0e0f10"`, `"span_id":"030405060708090a"`,
 		`"service":"studio-test"`, `"events":[]`,
 		`"gen_ai.agent.name":"researcher"`, `"weft.session.id":"s_research"`,

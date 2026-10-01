@@ -107,7 +107,7 @@ export interface Span {
   span_id: string
   parent_span_id: string
   name: string
-  kind: number
+  kind: "unspecified" | "internal" | "server" | "client" | "producer" | "consumer"
   start: string
   end: string
   status: "unset" | "ok" | "error"

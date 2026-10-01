@@ -100,7 +100,7 @@ describe("spansFromTimed (the time axis, S4.7)", () => {
     span_id: id,
     parent_span_id: parent,
     name,
-    kind: 1,
+    kind: "internal",
     start: new Date(t0 + startMs).toISOString(),
     end: new Date(t0 + endMs).toISOString(),
     status: "ok",

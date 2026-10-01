@@ -215,12 +215,32 @@ func spanStatus(code int) string {
 	}
 }
 
+// spanKindName names an OTLP span kind the way a reader expects it
+// (S4.3's example writes "kind": "client", not the wire int) — the
+// same mapping spanStatus makes for the status code.
+func spanKindName(kind int) string {
+	switch kind {
+	case 1:
+		return "internal"
+	case 2:
+		return "server"
+	case 3:
+		return "client"
+	case 4:
+		return "producer"
+	case 5:
+		return "consumer"
+	default:
+		return "unspecified"
+	}
+}
+
 type spanDTO struct {
 	TraceID       string         `json:"trace_id"`
 	SpanID        string         `json:"span_id"`
 	ParentSpanID  string         `json:"parent_span_id"`
 	Name          string         `json:"name"`
-	Kind          int            `json:"kind"`
+	Kind          string         `json:"kind"`
 	Start         time.Time      `json:"start"`
 	End           time.Time      `json:"end"`
 	Status        string         `json:"status"`
@@ -245,7 +265,7 @@ func spans(in []obsdb.Span) spansDoc {
 	for _, s := range in {
 		dto := spanDTO{
 			TraceID: s.TraceID, SpanID: s.SpanID, ParentSpanID: s.ParentSpanID,
-			Name: s.Name, Kind: s.Kind, Start: s.Start, End: s.End,
+			Name: s.Name, Kind: spanKindName(s.Kind), Start: s.Start, End: s.End,
 			Status: spanStatus(s.StatusCode), StatusMessage: s.StatusMessage,
 			Service: s.Service, Attrs: s.Attrs, Events: []spanEventDTO{},
 		}

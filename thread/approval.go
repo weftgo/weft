@@ -1066,8 +1066,10 @@ func (s *Session) fireOnRequest(cr *chainResult) {
 // ends — how it ended is the turn entry's to say (Err, Canceled,
 // StopReason, the calls it parked again). A started entry with no
 // turn entry after it is a resume that never finished: a crash, or a
-// run still in flight. Turn entries of ordinary sends are not part of
-// the trail.
+// run still in flight — or, the one case the run id does not follow,
+// a resume that re-ran after a context overflow, whose turn entry
+// carries the re-run's id. Turn entries of ordinary sends are not
+// part of the trail.
 //
 // The trail is an index of the session's log, not evidence that
 // stands on its own: entries are plain appended lines, unsigned and

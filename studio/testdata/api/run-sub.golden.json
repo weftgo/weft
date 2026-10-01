@@ -1,33 +1,45 @@
 {
   "id": "r_sub",
-  "parent_id": "",
+  "parent_run_id": "",
   "parent_call_id": "",
-  "agent": "orders",
+  "trace_id": "0102030405060708090a0b0c0d0e0f10",
+  "agent": "researcher",
   "model": {
     "provider": "wefttest",
     "name": "script"
   },
   "manifest_hash": "sha256:demo-fleet",
   "weft_version": "(test)",
+  "service": "studio-test",
+  "session_id": "s_research",
+  "public_id": "pub_research",
+  "turn": 1,
+  "playground": false,
+  "experiment_id": "",
+  "forked_from": "",
+  "meta": {
+    "cwd": "/tmp/demo"
+  },
   "started": "2020-01-01T09:02:00.123Z",
   "finished": "2020-01-01T09:02:05.123Z",
+  "last_seen": "2020-01-01T09:02:05.123Z",
   "status": "succeeded",
+  "err": "",
   "steps": 1,
+  "pending": 0,
+  "stop_reason": "",
   "usage": {
     "input_tokens": 12,
     "output_tokens": 6
   },
-  "tags": {
-    "cwd": "/tmp/demo"
-  },
-  "err": "",
   "event_count": 6,
-  "result": null,
+  "message_count": 2,
   "children": [
     {
       "id": "r_sub/0/call_3",
-      "parent_id": "r_sub",
+      "parent_run_id": "r_sub",
       "parent_call_id": "call_3",
+      "trace_id": "0102030405060708090a0b0c0d0e0f10",
       "agent": "researcher",
       "model": {
         "provider": "wefttest",
@@ -35,18 +47,30 @@
       },
       "manifest_hash": "sha256:demo-fleet",
       "weft_version": "(test)",
+      "service": "studio-test",
+      "session_id": "",
+      "public_id": "",
+      "turn": 0,
+      "playground": false,
+      "experiment_id": "",
+      "forked_from": "",
+      "meta": {
+        "cwd": "/tmp/demo"
+      },
       "started": "2020-01-01T09:02:03.123Z",
       "finished": "2020-01-01T09:02:04.123Z",
+      "last_seen": "2020-01-01T09:02:04.123Z",
       "status": "succeeded",
+      "err": "",
       "steps": 1,
+      "pending": 0,
+      "stop_reason": "",
       "usage": {
         "input_tokens": 9,
         "output_tokens": 5
       },
-      "tags": {
-        "cwd": "/tmp/demo"
-      },
-      "err": ""
+      "event_count": 4,
+      "message_count": 2
     }
   ]
 }

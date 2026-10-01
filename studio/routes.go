@@ -112,16 +112,20 @@ func (s *Server) serveAPINotFound(w http.ResponseWriter, r *http.Request) {
 		"no such api route "+r.URL.Path)
 }
 
-// registerReadAPI mounts the read routes. Run ids contain slashes (a
-// subagent's child id is <parent>/<step>/<callID>), so the run
+// registerReadAPI mounts the S4.2 read routes. Run ids contain slashes
+// (a subagent's child id is <parent>/<step>/<callID>), so the run
 // subtree is one handler that takes everything after /api/runs/ as
 // the id, with at most a trailing /events, /transcript or /spans
-// segment.
+// segment; session, trace and public ids never carry one.
 func registerReadAPI(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/meta", s.serveMeta)
 	mux.HandleFunc("GET /api/manifest", s.serveManifest)
 	mux.HandleFunc("GET /api/runs", s.serveRuns)
 	mux.HandleFunc("GET /api/runs/", s.serveRunRoutes)
+	mux.HandleFunc("GET /api/sessions", s.serveSessions)
+	mux.HandleFunc("GET /api/sessions/", s.serveSessionRoutes)
+	mux.HandleFunc("GET /api/traces/", s.serveTrace)
+	mux.HandleFunc("GET /api/public/", s.servePublic)
 }
 
 // registerIngest mounts the OTLP/HTTP receiver (studio/ingest, S4.4).

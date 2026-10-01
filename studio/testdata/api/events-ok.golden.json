@@ -2,6 +2,7 @@
   "events": [
     {
       "pos": 0,
+      "time": "2020-01-01T09:00:00.123Z",
       "event": {
         "type": "run_start",
         "id": "r_ok",
@@ -14,6 +15,7 @@
     },
     {
       "pos": 1,
+      "time": "2020-01-01T09:00:00.423Z",
       "event": {
         "type": "step_start",
         "run_id": "r_ok",
@@ -22,6 +24,7 @@
     },
     {
       "pos": 2,
+      "time": "2020-01-01T09:00:00.623Z",
       "event": {
         "type": "tool_start",
         "run_id": "r_ok",
@@ -35,6 +38,7 @@
     },
     {
       "pos": 3,
+      "time": "2020-01-01T09:00:01.123Z",
       "event": {
         "type": "tool_finish",
         "run_id": "r_ok",
@@ -47,6 +51,7 @@
     },
     {
       "pos": 4,
+      "time": "2020-01-01T09:00:01.623Z",
       "event": {
         "type": "step_finish",
         "run_id": "r_ok",
@@ -60,6 +65,7 @@
     },
     {
       "pos": 5,
+      "time": "2020-01-01T09:00:02.123Z",
       "event": {
         "type": "run_finish",
         "run_id": "r_ok",
@@ -72,6 +78,7 @@
     }
   ],
   "next_after": null,
-  "done": true
+  "done": true,
+  "gaps": []
 }
 

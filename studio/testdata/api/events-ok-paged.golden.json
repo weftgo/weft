@@ -2,6 +2,7 @@
   "events": [
     {
       "pos": 2,
+      "time": "2020-01-01T09:00:00.623Z",
       "event": {
         "type": "tool_start",
         "run_id": "r_ok",
@@ -15,6 +16,7 @@
     },
     {
       "pos": 3,
+      "time": "2020-01-01T09:00:01.123Z",
       "event": {
         "type": "tool_finish",
         "run_id": "r_ok",
@@ -27,6 +29,7 @@
     },
     {
       "pos": 4,
+      "time": "2020-01-01T09:00:01.623Z",
       "event": {
         "type": "step_finish",
         "run_id": "r_ok",
@@ -40,6 +43,7 @@
     }
   ],
   "next_after": 5,
-  "done": true
+  "done": true,
+  "gaps": []
 }
 

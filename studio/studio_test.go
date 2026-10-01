@@ -78,6 +78,9 @@ func fxRecord(run, kind, eventType string, pos int64, at time.Time, body string)
 // fxSpanRec builds a run's invoke_agent span: status 1 ok or 2 error,
 // ending at end with the usage and step count the core reports.
 func fxSpanRec(run string, start, end time.Time, status int, statusMsg string, inTok, outTok int64) obsdb.Span {
+	spanID := map[string]string{
+		"r_ok": fxSpan, "r_fail": "0203040506070809", "r_sub": "030405060708090a",
+	}[run]
 	attrs := map[string]any{
 		"gen_ai.operation.name":      "invoke_agent",
 		"weft.run.id":                run,
@@ -93,11 +96,50 @@ func fxSpanRec(run string, start, end time.Time, status int, statusMsg string, i
 	for k, v := range fixtureTags {
 		attrs[k] = v
 	}
+	if spanID == "" {
+		spanID = fxSpan
+	}
 	return obsdb.Span{
-		TraceID: fxTrace, SpanID: fxSpan, Name: "invoke_agent", Kind: 1,
+		TraceID: fxTrace, SpanID: spanID, Name: "invoke_agent", Kind: 1,
 		Start: start, End: end, StatusCode: status, StatusMessage: statusMsg,
 		Service: "studio-test", Attrs: attrs, Resource: map[string]any{"service.name": "studio-test"},
 	}
+}
+
+// sessionOf maps each fixture run onto its thread identity: r_ok,
+// r_fail and r_stale are turns 1..3 of one session (pub_orders);
+// r_sub is a session of its own (pub_research); the subagent child
+// runs under its parent, not a session.
+var sessionOf = map[string]struct {
+	session, public, agent string
+	turn                   int
+}{
+	"r_ok":    {"s_orders", "pub_orders", "orders", 1},
+	"r_fail":  {"s_orders", "pub_orders", "orders", 2},
+	"r_stale": {"s_orders", "pub_orders", "orders", 3},
+	"r_sub":   {"s_research", "pub_research", "researcher", 1},
+}
+
+// stampSession writes a run's thread identity onto its records and
+// spans (what thread's runMetadata puts there).
+func stampSession(recs []obsdb.Record, spans []obsdb.Span, run string) ([]obsdb.Record, []obsdb.Span) {
+	id, ok := sessionOf[run]
+	if !ok {
+		return recs, spans
+	}
+	for i := range recs {
+		recs[i].Attrs["weft.session.id"] = id.session
+		recs[i].Attrs["weft.public_id"] = id.public
+		recs[i].Attrs["weft.turn"] = id.turn
+		recs[i].Attrs["gen_ai.agent.name"] = id.agent
+	}
+	for i := range spans {
+		spans[i].Attrs["weft.session.id"] = id.session
+		spans[i].Attrs["weft.public_id"] = id.public
+		spans[i].Attrs["weft.turn"] = id.turn
+		spans[i].Attrs["gen_ai.agent.name"] = id.agent
+	}
+	return recs, spans
 }
 
 // fixtureDB writes the four fixture runs into one in-memory obsdb.
@@ -140,9 +182,9 @@ func fixtureDB(t *testing.T) obsdb.DB {
 		fxRecord("r_ok", "messages", "", 1, okAt(2*time.Second),
 			`[{"role":"assistant","content":[{"type":"text","text":"Order 42 shipped this morning."}]}]`),
 	}
-	if err := db.Write(ctx, obsdb.Batch{Records: okEvents, Spans: []obsdb.Span{
-		fxSpanRec("r_ok", okAt(0), okAt(2*time.Second), 1, "", 10, 4),
-	}}); err != nil {
+	okEvents, okSpans := stampSession(okEvents, []obsdb.Span{
+		fxSpanRec("r_ok", okAt(0), okAt(2*time.Second), 1, "", 10, 4)}, "r_ok")
+	if err := db.Write(ctx, obsdb.Batch{Records: okEvents, Spans: okSpans}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -160,9 +202,9 @@ func fixtureDB(t *testing.T) obsdb.DB {
 		fxRecord("r_fail", "messages", "", 0, failAt(100*time.Millisecond),
 			`[{"role":"user","content":[{"type":"text","text":"Where is order 43?"}]}]`),
 	}
-	if err := db.Write(ctx, obsdb.Batch{Records: failEvents, Spans: []obsdb.Span{
-		fxSpanRec("r_fail", failAt(0), failAt(2*time.Second), 2, "wefttest: injected provider 500", 8, 2),
-	}}); err != nil {
+	failEvents, failSpans := stampSession(failEvents, []obsdb.Span{
+		fxSpanRec("r_fail", failAt(0), failAt(2*time.Second), 2, "wefttest: injected provider 500", 8, 2)}, "r_fail")
+	if err := db.Write(ctx, obsdb.Batch{Records: failEvents, Spans: failSpans}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -189,9 +231,9 @@ func fixtureDB(t *testing.T) obsdb.DB {
 		fxRecord("r_sub", "messages", "", 1, subAt(5*time.Second),
 			`[{"role":"assistant","content":[{"type":"text","text":"Order 42 shipped."}]}]`),
 	}
-	if err := db.Write(ctx, obsdb.Batch{Records: subEvents, Spans: []obsdb.Span{
-		fxSpanRec("r_sub", subAt(0), subAt(5*time.Second), 1, "", 12, 6),
-	}}); err != nil {
+	subEvents, subSpans := stampSession(subEvents, []obsdb.Span{
+		fxSpanRec("r_sub", subAt(0), subAt(5*time.Second), 1, "", 12, 6)}, "r_sub")
+	if err := db.Write(ctx, obsdb.Batch{Records: subEvents, Spans: subSpans}); err != nil {
 		t.Fatal(err)
 	}
 	childEvents := []obsdb.Record{
@@ -248,6 +290,7 @@ func fixtureDB(t *testing.T) obsdb.DB {
 		fxRecord("r_stale", "event", "step_start", 1, staleStart.Add(200*time.Millisecond),
 			`{"type":"step_start","run_id":"r_stale","index":0}`),
 	}
+	stale, _ = stampSession(stale, nil, "r_stale")
 	if err := db.Write(ctx, obsdb.Batch{Records: stale}); err != nil {
 		t.Fatal(err)
 	}
@@ -344,8 +387,8 @@ func TestMetaGolden(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("meta: %d", code)
 	}
-	if !strings.Contains(body, `"store":"sqlite"`) {
-		t.Errorf("meta store kind = %s", body)
+	if !strings.Contains(body, `"db":"sqlite"`) || !strings.Contains(body, `"interrupted_after_ms":30000`) {
+		t.Errorf("meta db kind / clock: %s", body)
 	}
 	golden(t, "meta.golden.json", body)
 
@@ -446,9 +489,9 @@ func TestRunsGolden(t *testing.T) {
 	if strings.Contains(body, `"r_sub/`) {
 		t.Error("runs list includes a child run")
 	}
-	// The store-era tags key reads the row's metadata.
-	if !strings.Contains(body, `"tags":{"cwd":"/tmp/demo"}`) {
-		t.Errorf("runs list missing metadata under tags: %s", body)
+	// The row's metadata (what the store era called tags).
+	if !strings.Contains(body, `"meta":{"cwd":"/tmp/demo"}`) {
+		t.Errorf("runs list missing metadata: %s", body)
 	}
 	golden(t, "runs.golden.json", body)
 }
@@ -464,22 +507,24 @@ func TestRunGolden(t *testing.T) {
 	if strings.Contains(body, `"events"`) {
 		t.Error("run document carries inline events")
 	}
-	if !strings.Contains(body, `"parent_id":"r_sub"`) {
+	if !strings.Contains(body, `"parent_run_id":"r_sub"`) {
 		t.Errorf("run document misses children: %s", body)
 	}
-	if !strings.Contains(body, `"event_count":6`) {
-		t.Errorf("run document misses event_count: %s", body)
+	if !strings.Contains(body, `"event_count":6`) || !strings.Contains(body, `"message_count":2`) {
+		t.Errorf("run document misses the counts: %s", body)
 	}
 	golden(t, "run-sub.golden.json", body)
 
 	// A failed run's document keeps the error text; the result
-	// document itself is null on obsdb (the store's MarshalResult is
-	// gone; the transcript replaces it in step 6).
+	// document died with the store — the transcript replaces it.
 	_, _, fail := get(t, h, "/studio/api/runs/r_fail")
-	for _, want := range []string{`"status":"failed"`, `"err":"`, `"result":null`} {
+	for _, want := range []string{`"status":"failed"`, `"err":"wefttest: injected provider 500"`} {
 		if !strings.Contains(fail, want) {
 			t.Errorf("r_fail missing %s", want)
 		}
+	}
+	if strings.Contains(fail, `"result"`) {
+		t.Errorf("run document still carries a result field: %s", fail)
 	}
 	golden(t, "run-fail.golden.json", fail)
 }
@@ -511,7 +556,7 @@ func TestEventsGolden(t *testing.T) {
 	// endpoint must both answer for it.
 	kid := childID(t, h, "r_sub")
 	if code, _, b := get(t, h, "/studio/api/runs/"+kid); code != http.StatusOK ||
-		!strings.Contains(b, `"id":"`+kid+`"`) || !strings.Contains(b, `"parent_id":"r_sub"`) {
+		!strings.Contains(b, `"id":"`+kid+`"`) || !strings.Contains(b, `"parent_run_id":"r_sub"`) {
 		t.Errorf("child run document: %d %s", code, b)
 	}
 	if code, _, b := get(t, h, "/studio/api/runs/"+kid+"/events"); code != http.StatusOK ||
@@ -709,7 +754,7 @@ func TestOpenOption(t *testing.T) {
 	path := filepath.Join(dir, "sub", "dev.db") // Open creates the parent
 	h := Handler(Open(path))
 	code, _, body := get(t, h, "/studio/api/meta")
-	if code != http.StatusOK || !strings.Contains(body, `"store":"sqlite"`) {
+	if code != http.StatusOK || !strings.Contains(body, `"db":"sqlite"`) {
 		t.Errorf("Open: %d %s", code, body)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -719,7 +764,7 @@ func TestOpenOption(t *testing.T) {
 	envDB := filepath.Join(dir, "env.db")
 	t.Setenv("WEFT_DB", envDB)
 	_, _, body = get(t, Handler(), "/studio/api/meta")
-	if !strings.Contains(body, `"store":"sqlite"`) {
+	if !strings.Contains(body, `"db":"sqlite"`) {
 		t.Errorf("WEFT_DB default: %s", body)
 	}
 	if _, err := os.Stat(envDB); err != nil {
@@ -881,5 +926,147 @@ func TestCSPHashMatchesParsedText(t *testing.T) {
 	}
 	if !strings.Contains(withNUL, "'sha256-") {
 		t.Errorf("no hash emitted: %s", withNUL)
+	}
+}
+
+// TestSessionsAndPublic pin the S4.3 sessions shapes: the list, the
+// detail with its turns in order, and the public-id resolution.
+func TestSessionsAndPublic(t *testing.T) {
+	h := Handler(DB(fixtureDB(t)))
+
+	code, _, body := get(t, h, "/studio/api/sessions")
+	if code != http.StatusOK {
+		t.Fatalf("sessions: %d", code)
+	}
+	for _, want := range []string{
+		`"total":2`,
+		`"id":"s_orders"`, `"public_id":"pub_orders"`, `"agent":"orders"`, `"turns":3`,
+		`"id":"s_research"`, `"turns":1`,
+		`"status":"interrupted"`, // the newest turn's (r_stale)
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("sessions missing %s: %s", want, body)
+		}
+	}
+	golden(t, "sessions.golden.json", body)
+
+	// Filters: public_id and agent.
+	_, _, pub := get(t, h, "/studio/api/sessions?public_id=pub_research")
+	if !strings.Contains(pub, `"total":1`) || !strings.Contains(pub, `"id":"s_research"`) {
+		t.Errorf("sessions?public_id: %s", pub)
+	}
+	_, _, ag := get(t, h, "/studio/api/sessions?agent=orders")
+	if strings.Contains(ag, `"id":"s_research"`) {
+		t.Errorf("sessions?agent=orders leaked s_research: %s", ag)
+	}
+
+	code, _, det := get(t, h, "/studio/api/sessions/s_orders")
+	if code != http.StatusOK {
+		t.Fatalf("session detail: %d %s", code, det)
+	}
+	// Turns in order (1, 2, 3), each a run row.
+	for _, want := range []string{
+		`"runs":[`, `"id":"r_ok"`, `"id":"r_fail"`, `"id":"r_stale"`,
+		`"turn":1`, `"turn":2`, `"turn":3`,
+	} {
+		if !strings.Contains(det, want) {
+			t.Errorf("session detail missing %s: %s", want, det)
+		}
+	}
+	golden(t, "session-orders.golden.json", det)
+
+	// The public id resolves to the session.
+	code, _, res := get(t, h, "/studio/api/public/pub_orders")
+	if code != http.StatusOK || !strings.Contains(res, `{"session_id":"s_orders"}`) {
+		t.Errorf("public resolve: %d %s", code, res)
+	}
+	golden(t, "public.golden.json", res)
+	if code, _, _ := get(t, h, "/studio/api/public/pub_nope"); code != http.StatusNotFound {
+		t.Errorf("unknown public id: %d", code)
+	}
+}
+
+// TestRunsFilters pins the runs list's session, public-id and
+// playground filters (S4.2).
+func TestRunsFilters(t *testing.T) {
+	h := Handler(DB(fixtureDB(t)))
+	_, _, bySession := get(t, h, "/studio/api/runs?session=s_orders")
+	if !strings.Contains(bySession, `"total":3`) || strings.Contains(bySession, `"id":"r_sub"`) {
+		t.Errorf("runs?session: %s", bySession)
+	}
+	_, _, byPub := get(t, h, "/studio/api/runs?public_id=pub_research")
+	if !strings.Contains(byPub, `"total":1`) || !strings.Contains(byPub, `"id":"r_sub"`) {
+		t.Errorf("runs?public_id: %s", byPub)
+	}
+	for _, v := range []string{"true", "false"} {
+		_, _, pg := get(t, h, "/studio/api/runs?playground="+v)
+		if v == "false" && !strings.Contains(pg, `"total":4`) {
+			t.Errorf("runs?playground=false: %s", pg)
+		}
+		if v == "true" && !strings.Contains(pg, `"total":0`) {
+			t.Errorf("runs?playground=true: %s", pg)
+		}
+	}
+	if code, _, b := get(t, h, "/studio/api/runs?playground=maybe"); code != http.StatusBadRequest || !strings.Contains(b, "bad_request") {
+		t.Errorf("bad playground: %d %s", code, b)
+	}
+}
+
+// TestTranscriptAndSpans pins the run-scoped transcript and spans
+// shapes (S4.3) and the trace route any application can use.
+func TestTranscriptAndSpans(t *testing.T) {
+	h := Handler(DB(fixtureDB(t)))
+
+	code, _, tr := get(t, h, "/studio/api/runs/r_ok/transcript")
+	if code != http.StatusOK {
+		t.Fatalf("transcript: %d", code)
+	}
+	for _, want := range []string{
+		`"batches":[`,
+		`"index":0,"step":0,"messages":[{"role":"user","content":[{"type":"text","text":"Where is order 42?"}]}]`,
+		`"index":1`,
+		`[{"role":"assistant","content":[{"type":"text","text":"Order 42 shipped this morning."}]}]`,
+	} {
+		if !strings.Contains(tr, want) {
+			t.Errorf("transcript missing %s: %s", want, tr)
+		}
+	}
+	golden(t, "transcript-ok.golden.json", tr)
+
+	code, _, sp := get(t, h, "/studio/api/runs/r_sub/spans")
+	if code != http.StatusOK {
+		t.Fatalf("spans: %d", code)
+	}
+	for _, want := range []string{
+		`"spans":[`,
+		`"name":"invoke_agent"`, `"kind":1`, `"status":"ok"`,
+		`"trace_id":"0102030405060708090a0b0c0d0e0f10"`, `"span_id":"030405060708090a"`,
+		`"service":"studio-test"`, `"events":[]`,
+		`"gen_ai.agent.name":"researcher"`, `"weft.session.id":"s_research"`,
+	} {
+		if !strings.Contains(sp, want) {
+			t.Errorf("spans missing %s: %s", want, sp)
+		}
+	}
+	golden(t, "spans-sub.golden.json", sp)
+
+	// A failed run's span reads error with the message.
+	_, _, failSp := get(t, h, "/studio/api/runs/r_fail/spans")
+	if !strings.Contains(failSp, `"status":"error"`) || !strings.Contains(failSp, "injected provider 500") {
+		t.Errorf("failed run spans: %s", failSp)
+	}
+
+	// The trace route: everything under the fixture trace id — the
+	// parent and the child's invoke_agent spans.
+	code, _, trace := get(t, h, "/studio/api/traces/"+fxTrace)
+	if code != http.StatusOK {
+		t.Fatalf("trace: %d", code)
+	}
+	if !strings.Contains(trace, `"name":"invoke_agent"`) || !strings.Contains(trace, `"parent_span_id":"0102030405060708"`) {
+		t.Errorf("trace spans: %s", trace)
+	}
+	golden(t, "trace.golden.json", trace)
+	if code, _, _ := get(t, h, "/studio/api/traces/nope"); code != http.StatusNotFound {
+		t.Errorf("unknown trace: %d", code)
 	}
 }

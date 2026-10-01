@@ -1,7 +1,8 @@
 {
   "id": "r_fail",
-  "parent_id": "",
+  "parent_run_id": "",
   "parent_call_id": "",
+  "trace_id": "0102030405060708090a0b0c0d0e0f10",
   "agent": "orders",
   "model": {
     "provider": "wefttest",
@@ -9,20 +10,30 @@
   },
   "manifest_hash": "sha256:demo-fleet",
   "weft_version": "(test)",
+  "service": "studio-test",
+  "session_id": "s_orders",
+  "public_id": "pub_orders",
+  "turn": 2,
+  "playground": false,
+  "experiment_id": "",
+  "forked_from": "",
+  "meta": {
+    "cwd": "/tmp/demo"
+  },
   "started": "2020-01-01T09:01:00.123Z",
   "finished": "2020-01-01T09:01:02.123Z",
+  "last_seen": "2020-01-01T09:01:02.123Z",
   "status": "failed",
+  "err": "wefttest: injected provider 500",
   "steps": 1,
+  "pending": 0,
+  "stop_reason": "",
   "usage": {
     "input_tokens": 8,
     "output_tokens": 2
   },
-  "tags": {
-    "cwd": "/tmp/demo"
-  },
-  "err": "wefttest: injected provider 500",
   "event_count": 4,
-  "result": null,
+  "message_count": 1,
   "children": []
 }
 

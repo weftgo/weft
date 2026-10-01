@@ -355,6 +355,11 @@ ignore it.
   `scripts/apidiff.sh`) against the last tag and fails on incompatible
   changes; pre-1.0 a deliberate source-compatible widening is
   acknowledged line-by-line in `.apidiff-allow`. Renames always fail.
+  `weft/thread` is not frozen yet (`make apidiff-thread` gates it
+  against its last tag): a deliberate breaking change there is
+  acknowledged the same way, its exact apidiff line in
+  `thread/.apidiff-allow`, and gets a line in the CHANGELOG's
+  migration checklist saying what to write instead.
 - Docs: `README.md` (usage), `docs/adr/` (why), this file (map),
   `docs/thread-operations.md` (running `weft/thread` in production).
   Update the one that applies in the same change.

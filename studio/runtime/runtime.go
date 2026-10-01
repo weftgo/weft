@@ -525,7 +525,14 @@ func (rs *RuntimeServer) serveCommands(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	for {
 		select {
-		case cmd := <-feed:
+		case cmd, ok := <-feed:
+			if !ok {
+				// The feed was dropped full (a stalled stream, Enqueue's
+				// close): end this response — the runtime reconnects and
+				// the backlog re-sends what is still queued. Staying
+				// open would keep pinging and look connected.
+				return
+			}
 			writeRunFrame(w, flusher, cmd)
 		case <-ping.C:
 			rs.touch(id)
@@ -671,9 +678,18 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 	switch a.State {
 	case "accepted":
 		if row.state == StateQueued || row.state == StateLost {
+			revived := row.state == StateLost
 			row.state = StateAccepted
 			row.runID = a.RunID
 			row.updated = rs.now()
+			if revived {
+				// The lost sweep already ran for this row, so the
+				// finish watch it would have armed is gone: arm one
+				// now, or a runtime that never finishes leaves the
+				// resurrected row accepted forever (the audit's
+				// P2-10).
+				rs.armLostLocked(row, rs.FinishDeadline, "accepted after a lost sweep, no finish")
+			}
 		}
 	case "rejected":
 		if row.state == StateQueued || row.state == StateLost {
@@ -728,8 +744,15 @@ func (rs *RuntimeServer) Enqueue(runtimeID string, cmd Command) (Command, error)
 	case c.feed <- cmd:
 	default:
 		// A full feed is a stalled stream: drop it (the runtime
-		// reconnects; the backlog re-sends what is still queued).
+		// reconnects; the backlog re-sends what is still queued) and
+		// close the channel so the stalled SSE ends now — its ping
+		// loop would otherwise keep the runtime looking connected
+		// while every POST 503s on the nil feed (the audit's P2-9).
+		// Closing is safe: every writer sends through c.feed while
+		// holding rs.mu, and c.feed is nil from here on.
+		stalled := c.feed
 		c.feed = nil
+		close(stalled)
 	}
 	rs.armAckLocked(row)
 	return cmd, nil

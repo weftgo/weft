@@ -571,3 +571,79 @@ func TestRegisterReplacesCopy(t *testing.T) {
 		t.Errorf("registration after re-register = %+v ok=%v", got, ok)
 	}
 }
+
+// TestFullFeedEndsStalledStream pins the audit's P2-9: when Enqueue
+// drops a full feed, the stalled stream must be terminated — the old
+// code nilled the feed and left the SSE open, so its pings kept the
+// runtime looking connected while every POST 503'd on the nil feed
+// until the stream happened to break. The drop is driven at the unit
+// level (a live stream drains its feed into the socket buffer as fast
+// as it fills, so a full feed needs a reader that is not reading).
+func TestFullFeedEndsStalledStream(t *testing.T) {
+	rs := fastServer()
+	rs.mu.Lock()
+	stalled := make(chan Command, 1)
+	stalled <- Command{CommandID: "cmd_stuck"} // full: cap 1, no reader
+	rs.runtimes["rt_stall"] = &connected{reg: regBody("rt_stall"), feed: stalled}
+	rs.mu.Unlock()
+
+	// The next enqueue finds the feed full: the stream is dropped, the
+	// channel closed, the runtime disconnected.
+	dropped, err := rs.Enqueue("rt_stall", Command{})
+	if err != nil {
+		t.Fatalf("enqueue onto a full feed: %v (the drop, not an error)", err)
+	}
+	if rs.Connected("rt_stall") {
+		t.Error("runtime still connected after the feed drop")
+	}
+	if _, err := rs.Enqueue("rt_stall", Command{}); err != ErrNotConnected {
+		t.Errorf("enqueue after the drop = %v, want ErrNotConnected", err)
+	}
+	// The terminated stream sees its feed closed — a reader parked on
+	// it wakes with ok=false instead of pinging forever (the buffered
+	// frame delivers first, then the close).
+	<-stalled
+	if _, ok := <-stalled; ok {
+		t.Error("the dropped feed was not closed")
+	}
+
+	// The queued command survived (the backlog re-sends it), and a
+	// reconnect on a real stream serves it.
+	ts := httptest.NewServer(mux(rs))
+	defer ts.Close()
+	r, closeStream := subscribe(t, rs, ts.URL, "rt_stall", "")
+	defer closeStream()
+	if _, event, _ := nextEvent(t, r); event != "ping" {
+		t.Fatalf("the reconnect opened with %q, want the initial ping", event)
+	}
+	if !rs.Connected("rt_stall") {
+		t.Error("runtime not connected after the reconnect")
+	}
+	if id, _ := nextRunBounded(t, r, 2*time.Second); id != dropped.CommandID {
+		t.Errorf("after the reconnect, first frame = %s, want the queued %s", id, dropped.CommandID)
+	}
+}
+
+// TestLateAcceptedAckArmsFinishWatch pins the audit's P2-10: a late
+// accepted-ack that resurrects a row the lost sweep already took must
+// arm the finish watch — the old code left the resurrected row
+// accepted forever if the runtime never finished.
+func TestLateAcceptedAckArmsFinishWatch(t *testing.T) {
+	rs := fastServer()
+	ts := httptest.NewServer(mux(rs))
+	defer ts.Close()
+	register(t, mux(rs), regBody("rt_late"))
+	r, closeStream := subscribe(t, rs, ts.URL, "rt_late", "")
+	defer closeStream()
+
+	cmd := mustEnqueue(t, rs, "rt_late", Command{CommandID: "cmd_late"})
+	nextRun(t, r) // delivered; no ack
+	waitState(t, rs, cmd.CommandID, StateLost)
+
+	// The late accepted-ack resurrects the row...
+	ack(t, rs, Ack{CommandID: "cmd_late", State: "accepted", RunID: "pg_late"})
+	waitState(t, rs, "cmd_late", StateAccepted)
+	// ...and the finish watch is armed: without a finish the row is
+	// lost again, not accepted forever.
+	waitState(t, rs, "cmd_late", StateLost)
+}

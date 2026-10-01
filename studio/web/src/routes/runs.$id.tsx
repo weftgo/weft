@@ -1,26 +1,35 @@
-// The run page (B1, B2, B7, B9, B10). Three views, all URLs (A3):
+// The run page (B1, B2, B7, B9, B10; S4.5/S4.7): three views, all
+// URLs (A3):
 //
-//   trace  (default) the flow strip, then a waterfall | detail split:
-//          steps, tool calls and subagents as spans on the event axis
-//          on the left, the selected span's data on the right
-//          (detail / events / json). ?sel= names the span.
-//   story  the step cards top to bottom.
+//   trace  (default) the flow strip, then a waterfall | detail split.
+//          The waterfall's axis is time when the run has spans
+//          (S4.7), positions otherwise — ?axis= picks, and replay
+//          (the playhead) belongs to the position axis.
+//   story  the step cards top to bottom, subagents lazy (S4.3).
 //   raw    the events explorer and the document tree.
 //
-// The replay playhead (?t=) drives every view: the waterfall veils
-// what is past it, and the story and the detail panel render the fold
-// AT the playhead, so scrubbing replays the whole page. A running
-// run's document and stream refresh every 2 s until the status leaves
-// running (plan §4.5); that is the only live-ish behaviour in T1.
-import { useQuery } from "@tanstack/react-query"
+// The replay playhead (?t=) drives every view on the position axis.
+// A running run's tail is the /api/live stream when the server has
+// the lane (S4.5): deltas stream, run frames refresh the document,
+// overflow falls back to the paged poll. The document and transcript
+// refresh every 2 s while running as the poll-shaped fallback.
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Columns2, Rows3 } from "lucide-react"
 
-import { runQuery } from "@/lib/api"
-import { crossCheck, fold } from "@/lib/events"
+import { runQuery, transcriptQuery, spansQuery } from "@/lib/api"
+import type { Span as TimedSpan } from "@/lib/api"
+import { applyTranscript, fold } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
-import { defaultSelection, flowFromFold, spansFromFold } from "@/lib/trace"
+import {
+  defaultSelection,
+  flowFromFold,
+  spansFromFold,
+  spansFromTimed,
+  timeDomain,
+} from "@/lib/trace"
+import { openLive } from "@/lib/live"
 import { FlowStrip } from "@/components/studio/flow-strip"
 import { RunHeader } from "@/components/studio/run-header"
 import { RawView } from "@/components/studio/raw-view"
@@ -33,6 +42,7 @@ import { Button } from "@/components/ui/button"
 import { Kbd } from "@/components/ui/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useCapabilities } from "@/hooks/use-capabilities"
 import { useRunEvents } from "@/hooks/use-run-events"
 
 type View = "trace" | "story" | "raw"
@@ -54,10 +64,12 @@ interface RunSearch {
   step?: number
   view?: View
   raw?: "events" | "doc"
-  /** The selected span's key (trace view): s0, c:call_1, r:<runId>. */
+  /** The selected span's key (trace view): s0, c:call_1, t:<span id>. */
   sel?: string
   /** The detail panel's mode (trace view). */
   d?: DetailMode
+  /** The waterfall's axis: positions (replay) or time (spans). */
+  axis?: "events" | "time"
   t?: number
 }
 
@@ -71,6 +83,7 @@ export const Route = createFileRoute("/runs/$id")({
     raw: search.raw === "doc" ? "doc" : undefined,
     sel: typeof search.sel === "string" && search.sel ? search.sel : undefined,
     d: search.d === "events" || search.d === "json" ? search.d : undefined,
+    axis: search.axis === "time" ? "time" : undefined,
     t:
       typeof search.t === "number" && search.t >= 0
         ? Math.floor(search.t)
@@ -85,6 +98,8 @@ function RunPage() {
   const navigate = useNavigate({ from: "/runs/$id" })
   const view: View = search.view ?? "trace"
   const [layout, setLayout] = useState<Layout>(readLayout)
+  const { has } = useCapabilities()
+  const liveCapable = has("live")
   const cycleLayout = () =>
     setLayout((l) => {
       const next: Layout =
@@ -97,9 +112,6 @@ function RunPage() {
       }
       return next
     })
-  // The split keys on the CONTENT width (a container query), not the
-  // viewport — the sidebar takes 16rem of the window — and can be
-  // forced either way.
   const gridCols =
     layout === "split"
       ? "grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]"
@@ -113,12 +125,44 @@ function RunPage() {
         ? ""
         : "@3xl/trace:sticky @3xl/trace:top-3 @3xl/trace:max-h-[calc(100vh-8rem)]"
 
+  const queryClient = useQueryClient()
   const run = useQuery({
     ...runQuery(id),
     refetchInterval: (q) => (q.state.data?.status === "running" ? 2000 : false),
   })
-  const stream = useRunEvents(id, run.data?.status ?? "running")
+  const transcript = useQuery({
+    ...transcriptQuery(id),
+    // The transcript is the finished words: refresh while running,
+    // settle when terminal.
+    refetchInterval: () => (run.data?.status === "running" ? 2000 : false),
+  })
   const runStatus = run.data?.status ?? "running"
+  const stream = useRunEvents(id, runStatus, { live: liveCapable })
+
+  // The run's timed spans (the time axis's rows, S4.7), fetched when
+  // the trace view is on and the run has a trace.
+  const spans = useQuery({
+    ...spansQuery(id),
+    enabled: view === "trace" && Boolean(run.data?.trace_id),
+    refetchInterval: runStatus === "running" ? 5000 : false,
+  })
+  const timed: TimedSpan[] = spans.data?.spans ?? []
+  const haveTime = timed.length > 0
+  const axis: "events" | "time" = search.axis ?? (haveTime ? "time" : "events")
+
+  // Run frames refresh the document (usage, status, counts) without
+  // waiting for the poll.
+  useEffect(() => {
+    if (!liveCapable || runStatus !== "running") return
+    const live = openLive({
+      selector: { run: id },
+      kinds: ["run"],
+      onRun: () => {
+        void queryClient.invalidateQueries({ queryKey: ["run", id] })
+      },
+    })
+    return () => live.close()
+  }, [id, liveCapable, runStatus, queryClient])
 
   // The replay playhead: null = live. Seeks and pauses write t to the
   // URL (a paste reproduces the exact view, A3); playback ticks do
@@ -142,21 +186,29 @@ function RunPage() {
     setPlayhead(search.t ?? null)
   }, [search.t])
 
-  // Everything below renders the fold AT the playhead: one fold, one
-  // shape, whether live or scrubbed (B2).
-  const replaying = playhead !== null && playhead < stream.events.length
+  // Everything below renders the fold AT the playhead on the position
+  // axis: one fold, one shape, whether live or scrubbed (B2). The
+  // time axis has no playhead — durations do not replay.
+  const replaying =
+    axis === "events" && playhead !== null && playhead < stream.events.length
+  const foldedNow =
+    transcript.data && runStatus !== "running"
+      ? applyTranscript(stream.folded, transcript.data.batches)
+      : stream.folded
   const atPlayhead = useMemo(
-    () => (replaying ? fold(stream.events, playhead) : stream.folded),
-    [replaying, stream.events, stream.folded, playhead]
+    () => (replaying ? fold(stream.events, playhead) : foldedNow),
+    [replaying, stream.events, foldedNow, playhead]
   )
   // While scrubbing the run reads as running: calls past the playhead
   // are "running", not "never completed".
   const viewStatus = replaying ? "running" : runStatus
 
-  const spans = useMemo(
+  const posSpans = useMemo(
     () => spansFromFold(atPlayhead, stream.events.length, viewStatus),
     [atPlayhead, stream.events.length, viewStatus]
   )
+  const timeSpans = useMemo(() => spansFromTimed(timed), [timed])
+  const traceSpans = axis === "time" && haveTime ? timeSpans : posSpans
   const flow = useMemo(
     () => flowFromFold(atPlayhead, viewStatus),
     [atPlayhead, viewStatus]
@@ -168,7 +220,7 @@ function RunPage() {
     [stream.folded, stream.events.length, runStatus]
   )
   const selKey = search.sel ?? defaultSelection(fullSpans)?.key
-  const selected = spans.find((s) => s.key === selKey)
+  const selected = traceSpans.find((s) => s.key === selKey)
   const select = useCallback(
     (key: string) =>
       void navigate({
@@ -182,7 +234,13 @@ function RunPage() {
   const jump = useCallback(
     (t: number) => {
       setPlayhead(t)
-      void navigate({ search: (prev) => ({ ...prev, t }) })
+      void navigate({
+        search: (prev) => ({
+          ...prev,
+          t,
+          axis: prev.axis === "time" ? undefined : prev.axis,
+        }),
+      })
     },
     [navigate]
   )
@@ -203,24 +261,14 @@ function RunPage() {
       else if (e.key === "s") setView("story")
       else if (e.key === "e") setView("trace")
       else if ((e.key === "j" || e.key === "k") && view === "trace") {
-        const i = spans.findIndex((s) => s.key === selKey)
-        const next = spans.at(e.key === "j" ? i + 1 : Math.max(i - 1, 0))
+        const i = traceSpans.findIndex((s) => s.key === selKey)
+        const next = traceSpans.at(e.key === "j" ? i + 1 : Math.max(i - 1, 0))
         if (next) select(next.key)
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [navigate, run.data, view, spans, selKey, select])
-
-  // Dev-only bug signal: the folded stream and the store's result
-  // document are two recordings of one run — mismatches are ours.
-  useEffect(() => {
-    if (import.meta.env.DEV && run.data?.result && stream.done) {
-      for (const m of crossCheck(stream.folded, run.data.result)) {
-        console.warn(`studio fold mismatch (step ${m.step}): ${m.detail}`)
-      }
-    }
-  }, [stream.folded, stream.done, run.data?.result])
+  }, [navigate, run.data, view, traceSpans, selKey, select])
 
   if (run.isPending) {
     return (
@@ -255,16 +303,19 @@ function RunPage() {
     <div className="space-y-4">
       <RunHeader
         doc={doc}
-        folded={stream.folded}
+        folded={atPlayhead}
         eventCount={Math.max(doc.event_count, stream.events.length)}
+        transcript={transcript.data}
       />
-      <ReplayBar
-        events={stream.events}
-        eventCount={doc.event_count}
-        playhead={playhead}
-        onTick={setPlayhead}
-        onSeek={seek}
-      />
+      {axis === "events" ? (
+        <ReplayBar
+          events={stream.events}
+          eventCount={doc.event_count}
+          playhead={playhead}
+          onTick={setPlayhead}
+          onSeek={seek}
+        />
+      ) : null}
       {stream.error && (
         <div className="rounded-md border border-status-bad/30 px-3 py-2 font-mono text-xs text-status-bad">
           event stream: {stream.error}
@@ -287,6 +338,38 @@ function RunPage() {
             <TabsTrigger value="story">story</TabsTrigger>
             <TabsTrigger value="raw">raw</TabsTrigger>
           </TabsList>
+          {view === "trace" && haveTime ? (
+            <div className="flex gap-1">
+              {(["events", "time"] as const).map((a) => (
+                <button
+                  key={a}
+                  type="button"
+                  className={`rounded-md border px-2 py-1 font-mono text-[11px] ${
+                    axis === a
+                      ? "border-thread/60 bg-secondary"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  title={
+                    a === "events"
+                      ? "the event axis: order, and the replay playhead"
+                      : "the time axis: real durations from the run's spans"
+                  }
+                  onClick={() =>
+                    void navigate({
+                      search: (prev) => ({
+                        ...prev,
+                        axis: a === "time" ? "time" : undefined,
+                        sel: undefined,
+                      }),
+                      replace: true,
+                    })
+                  }
+                >
+                  {a}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <span className="hidden items-center gap-1 text-[11px] text-faint md:flex">
             <Kbd>e</Kbd>
             <Kbd>s</Kbd>
@@ -334,10 +417,15 @@ function RunPage() {
           </div>
           <div className={`grid items-start gap-3 ${gridCols}`}>
             <Waterfall
-              spans={spans}
-              domain={[0, Math.max(0, stream.events.length - 1)]}
-              playhead={playhead}
-              onSeek={seek}
+              spans={traceSpans}
+              domain={
+                axis === "time" && haveTime
+                  ? timeDomain(timed)
+                  : [0, Math.max(0, stream.events.length - 1)]
+              }
+              unit={axis === "time" ? "ms" : "event"}
+              playhead={axis === "events" ? playhead : null}
+              onSeek={axis === "events" ? seek : undefined}
               onSelect={(sp) => select(sp.key)}
               selectedId={selected?.id}
               className="max-h-[60vh] @3xl/trace:max-h-[calc(100vh-8rem)]"
@@ -349,7 +437,7 @@ function RunPage() {
                 events={stream.events}
                 doc={doc}
                 runStatus={viewStatus}
-                playhead={playhead}
+                playhead={axis === "events" ? playhead : null}
                 mode={search.d ?? "detail"}
                 onMode={(m) =>
                   void navigate({
@@ -374,9 +462,9 @@ function RunPage() {
         <TabsContent value="story" className="mt-3">
           <StepList
             events={stream.events}
-            folded={stream.folded}
+            folded={foldedNow}
             doc={doc}
-            upTo={playhead ?? undefined}
+            upTo={axis === "events" ? (playhead ?? undefined) : undefined}
             highlight={search.step}
             onJump={jump}
           />

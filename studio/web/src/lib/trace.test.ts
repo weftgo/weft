@@ -6,7 +6,15 @@ import { describe, expect, it } from "vitest"
 
 import type { EventsPage, WireEvent } from "./api"
 import { fold } from "./events"
-import { defaultSelection, flowFromFold, spansFromFold } from "./trace"
+import type { Span as TimedSpan } from "./api"
+import {
+  defaultSelection,
+  flowFromFold,
+  isGenAISpan,
+  spansFromFold,
+  spansFromTimed,
+  timeDomain,
+} from "./trace"
 
 function golden(name: string): WireEvent[] {
   const path = resolve(process.cwd(), `../testdata/api/${name}`)
@@ -16,100 +24,35 @@ function golden(name: string): WireEvent[] {
 }
 
 describe("spansFromFold", () => {
-  it("nests the subagent under its call, on the parent's axis", () => {
+  it("lays the durable stream out: run, steps, calls (no nested rows)", () => {
     const events = golden("events-sub.golden.json")
     const spans = spansFromFold(fold(events), events.length, "succeeded")
+    // A subagent's child run is NOT in the parent's stream (S4.3):
+    // the rows are the parent's own; the child joins by
+    // parent_call_id on the page, not in the fold.
     const kinds = spans.map((s) => `${s.depth}:${s.kind}:${s.label}`)
-    expect(kinds).toEqual([
-      "0:run:orders",
-      "1:step:step 0",
-      "2:tool:research",
-      "3:subagent:researcher",
-      "4:step:step 0",
-      "1:step:step 1",
-    ])
-    const [run, step0, call, child, childStep, step1] = spans
-    expect([run.from, run.to]).toEqual([0, 13])
-    expect([step0.from, step0.to]).toEqual([1, 9])
-    expect([call.from, call.to]).toEqual([2, 8]) // tool_start … tool_finish
-    expect([child.from, child.to]).toEqual([3, 7]) // nested run_start … run_finish
-    expect([childStep.from, childStep.to]).toEqual([4, 6])
-    expect([step1.from, step1.to]).toEqual([10, 12])
+    expect(kinds).toEqual(["0:run:orders", "1:step:step 0", "2:tool:research"])
+    const [run, step0, call] = spans
+    expect([run.from, run.to]).toEqual([0, 5])
+    expect([step0.from, step0.to]).toEqual([1, 4])
+    expect([call.from, call.to]).toEqual([2, 3]) // tool_start … tool_finish
     expect(call.tone).toBe("tool")
     expect(call.badge).toBe("ok")
-    expect(call.sub).toBe("29 B")
-    expect(child.parent).toBe(call.id)
-    expect(step1.target).toEqual({ step: 1 })
-    // Short, URL-safe keys; a child's step names its run.
-    expect(spans.map((s) => s.key)).toEqual([
-      "run",
-      "s0",
-      "c:call_1",
-      "r:r_sub/0/call_1",
-      "s:r_sub/0/call_1:0",
-      "s1",
-    ])
+    expect(spans.map((s) => s.key)).toEqual(["run", "s0", "c:call_3"])
     // Nothing went wrong: start at the first step.
     expect(defaultSelection(spans)?.key).toBe("s0")
-    // The flow strip: one pill per top-level step.
+    // The flow strip: one pill per top-level step; no stored text, so
+    // the pill is the call.
     expect(flowFromFold(fold(events), "succeeded")).toEqual([
       {
         key: "s0",
         index: 0,
         gist: 'research({"prompt":"status of order 42"})',
-        finish: "tool_calls",
-        bad: false,
-        open: false,
-      },
-      {
-        key: "s1",
-        index: 1,
-        gist: "Order 42 shipped.",
-        finish: "stop",
+        finish: "end_turn",
         bad: false,
         open: false,
       },
     ])
-  })
-
-  it("keys a subagent's call apart from a parent call with the same id", () => {
-    // Fake and test providers reuse ids like call_1 in every run; the
-    // ?sel= key must still name exactly one span.
-    const events = golden("events-sub.golden.json")
-    const child = "r_sub/0/call_1"
-    const nest = (seq: number, event: WireEvent): WireEvent =>
-      ({
-        type: "nested",
-        run_id: "r_sub",
-        seq,
-        call_id: "call_1",
-        event,
-      }) as unknown as WireEvent
-    const inner = [
-      nest(4, {
-        type: "tool_start",
-        run_id: child,
-        seq: 1,
-        call_id: "call_1",
-        name: "lookup_order",
-        args: { order_id: "42" },
-      } as unknown as WireEvent),
-      nest(4, {
-        type: "tool_finish",
-        run_id: child,
-        seq: 2,
-        call_id: "call_1",
-        name: "lookup_order",
-        content: "shipped",
-        is_error: false,
-      } as unknown as WireEvent),
-    ]
-    const spliced = [...events.slice(0, 5), ...inner, ...events.slice(5)]
-    const spans = spansFromFold(fold(spliced), spliced.length, "succeeded")
-    const keys = spans.map((s) => s.key)
-    expect(keys).toContain("c:call_1")
-    expect(keys).toContain(`c:${child}:call_1`)
-    expect(new Set(keys).size).toBe(keys.length)
   })
 
   it("draws an open call as running while live and never after", () => {
@@ -140,5 +83,57 @@ describe("spansFromFold", () => {
   it("is empty for an empty stream", () => {
     expect(spansFromFold(fold([]), 0, "running")).toHaveLength(1)
     expect(spansFromFold(fold([]), 0, "running")[0].kind).toBe("run")
+  })
+})
+
+describe("spansFromTimed (the time axis, S4.7)", () => {
+  const t0 = Date.parse("2026-10-01T09:00:00Z")
+  const span = (
+    id: string,
+    parent: string,
+    name: string,
+    startMs: number,
+    endMs: number,
+    attrs: Record<string, unknown> = {}
+  ): TimedSpan => ({
+    trace_id: "tr",
+    span_id: id,
+    parent_span_id: parent,
+    name,
+    kind: 1,
+    start: new Date(t0 + startMs).toISOString(),
+    end: new Date(t0 + endMs).toISOString(),
+    status: "ok",
+    status_message: "",
+    service: "svc",
+    attrs,
+    events: [],
+  })
+
+  it("nests by parent_span_id on a millisecond domain", () => {
+    const timed = [
+      span("a", "", "invoke_agent", 0, 100, { "weft.run.id": "r" }),
+      span("b", "a", "chat glm", 5, 40, {
+        "gen_ai.operation.name": "chat",
+      }),
+      span("c", "b", "execute_tool", 10, 20),
+    ]
+    const spans = spansFromTimed(timed)
+    expect(spans.map((s) => `${s.depth}:${s.label}`)).toEqual([
+      "0:invoke_agent",
+      "1:chat glm",
+      "2:execute_tool",
+    ])
+    expect([spans[0].from, spans[0].to]).toEqual([0, 100])
+    expect([spans[1].from, spans[1].to]).toEqual([5, 40])
+    expect(spans[1].timed?.span.attrs["gen_ai.operation.name"]).toBe("chat")
+    expect(timeDomain(timed)).toEqual([0, 100])
+    expect(isGenAISpan(timed[1])).toBe(true)
+    expect(isGenAISpan(timed[0])).toBe(false)
+  })
+
+  it("is empty without spans", () => {
+    expect(spansFromTimed([])).toEqual([])
+    expect(timeDomain([])).toEqual([0, 1])
   })
 })

@@ -9,7 +9,6 @@ import {
   eventSummary,
   eventType,
   isBoundary,
-  unwrap,
 } from "./summarize"
 
 const start: WireEvent = {
@@ -30,20 +29,6 @@ const finishErr: WireEvent = {
   is_error: true,
 }
 const delta: WireEvent = { type: "text_delta", run_id: "r", text: "hi there" }
-const nested: WireEvent = {
-  type: "nested",
-  run_id: "r",
-  seq: 3,
-  call_id: "c1",
-  event: {
-    type: "nested",
-    run_id: "r/0/c1",
-    seq: 1,
-    call_id: "c2",
-    event: start,
-  },
-}
-
 describe("summarize", () => {
   it("classifies kinds and boundaries", () => {
     expect(eventKind(start)).toBe("tool")
@@ -52,10 +37,9 @@ describe("summarize", () => {
     expect(isBoundary(start)).toBe(true)
     expect(isBoundary(delta)).toBe(false)
   })
-  it("unwraps nested envelopes to the inner event with a depth", () => {
-    expect(unwrap(nested)).toEqual({ inner: start, depth: 2 })
-    expect(eventType(nested)).toBe("tool_start")
-    expect(eventKind(nested)).toBe("tool")
+  it("names the event's type as the wire spells it", () => {
+    expect(eventType(start)).toBe("tool_start")
+    expect(eventType(delta)).toBe("text_delta")
   })
   it("summarizes in one line", () => {
     expect(eventSummary(start)).toBe('lookup_order({"order_id":"42"})')

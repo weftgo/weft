@@ -1,12 +1,12 @@
-// The typed client for the Go handler's JSON API (plan §3). These
-// types mirror studio/api.go's DTOs by hand — that mirroring is the
-// contract boundary (ADR 0018 Consequences): the Go side is pinned by
-// golden tests, this side type-checks against the same golden files
-// (src/test/goldens.d.ts loads them as fixtures).
+// The typed client for the Go handler's JSON API (S4.3). These types
+// mirror studio/api.go's DTOs by hand — that mirroring is the contract
+// boundary (ADR 0018 Consequences): the Go side is pinned by golden
+// tests against testdata/api/*.golden.json, this side type-checks
+// against the same shapes.
 
 import { queryOptions } from "@tanstack/react-query"
 
-// ── DTO mirrors ────────────────────────────────────────────────────
+// ── DTO mirrors (S4.3) ─────────────────────────────────────────────
 
 export interface ModelInfo {
   provider: string
@@ -23,60 +23,54 @@ export interface Usage {
 
 export type RunStatus = "running" | "succeeded" | "failed" | "interrupted"
 
+/** RunRow — every list and detail (S4.3). */
 export interface RunRow {
   id: string
-  parent_id: string
+  parent_run_id: string
   parent_call_id: string
+  trace_id: string
   agent: string
   model: ModelInfo
-  manifest_hash?: string
-  weft_version?: string
+  manifest_hash: string
+  weft_version: string
+  service: string
+  session_id: string
+  public_id: string
+  turn: number
+  playground: boolean
+  experiment_id: string
+  forked_from: string
+  meta: Record<string, string>
   started: string
   finished: string | null
+  last_seen: string
   status: RunStatus
-  steps: number
-  usage: Usage
-  tags: Record<string, string>
   err: string
+  steps: number
+  pending: number
+  stop_reason: string
+  usage: Usage
+  event_count: number
+  message_count: number
 }
 
+/** GET /api/runs → RunsPage. */
 export interface RunsPage {
   total: number
   runs: RunRow[]
   next_before: string | null
 }
 
-/** The store's own result document (store.MarshalResult), verbatim. */
-export interface ResultDoc {
-  id?: string
-  stop_reason?: string
-  messages?: Message[]
-  steps?: StepDoc[]
-  usage: Usage
-  pending?: ToolCallPart[]
-}
-
-export interface StepDoc {
-  index: number
-  stop_reason: string
-  raw_stop_reason?: string
-  usage: Usage
-  text?: string
-  tool_calls?: ToolCallPart[]
-  results?: ToolResultPart[]
-  subagent_usage?: Record<string, Usage>
-}
-
+/** GET /api/runs/{id} → RunDetail: the row and the subagent children,
+ * joined by parent_call_id — each child's events load lazily. */
 export interface RunDoc extends RunRow {
-  /** The stream's length — sizes the replay scrubber before pages land. */
-  event_count: number
-  result: ResultDoc | null
   children: RunRow[]
 }
 
-/** One positioned event in a paged stream (plan §3). */
+/** One positioned event in a paged stream (S4.3's EventsPage entry). */
 export interface PosEvent {
   pos: number
+  time: string
   event: WireEvent
 }
 
@@ -85,20 +79,100 @@ export interface EventsPage {
   events: PosEvent[]
   next_after: number | null
   done: boolean
+  /** Durable positions missing below the high-water mark: a lost
+   * batch, never a delta. */
+  gaps: number[]
+}
+
+/** GET /api/runs/{id}/transcript: the messages bodies, one batch per
+ * messages record — the fold's source of finished text, because
+ * deltas are not stored. */
+export interface Transcript {
+  batches: { index: number; step: number; messages: Message[] }[]
+}
+
+interface RawTranscript {
+  batches: { index: number; step: number; messages: unknown }[]
+}
+
+export interface SpanEvent {
+  time: string
+  name: string
+  attrs: Record<string, unknown>
+}
+
+/** GET /api/runs/{id}/spans and /api/traces/{trace_id}. */
+export interface Span {
+  trace_id: string
+  span_id: string
+  parent_span_id: string
+  name: string
+  kind: number
+  start: string
+  end: string
+  status: "unset" | "ok" | "error"
+  status_message: string
+  service: string
+  attrs: Record<string, unknown>
+  events: SpanEvent[]
+}
+
+export interface SpansDoc {
+  spans: Span[]
+}
+
+export interface SessionRow {
+  id: string
+  public_id: string
+  agent: string
+  turns: number
+  first_seen: string
+  last_seen: string
+  status: RunStatus
+  usage: Usage
+}
+
+/** GET /api/sessions → SessionsPage. */
+export interface SessionsPage {
+  total: number
+  sessions: SessionRow[]
+  next_before: string | null
+}
+
+/** GET /api/sessions/{id}: the thread and its turns in order;
+ * experiments hang off runs via forked_from. */
+export interface SessionDoc extends SessionRow {
+  runs: RunRow[]
+}
+
+/** GET /api/public/{public_id}. */
+export interface PublicResolution {
+  session_id: string
 }
 
 export interface Meta {
   weft_version: string
   studio_version: string
-  has_manifest: boolean
+  db: string
   title: string
-  store: string
+  has_manifest: boolean
+  ingest_open: boolean
+  interrupted_after_ms: number
   capabilities: string[]
 }
 
+/** A panel token minted by the backend (S4.6). */
+export interface PanelToken {
+  token: string
+  public_id: string
+  scope: "read" | "playground"
+  exp: string
+}
+
 // The core's wire events (weft/events.go): a "type"-discriminated
-// union; nested recurses. Events carry no timestamps — order is the
-// run's Seq order, and replay indexes position, not time (D6).
+// union. The events the database keeps carry positions (deltas live
+// only on the live stream); nested is gone — a subagent's child is
+// its own run, joined by parent_call_id.
 
 export type WireEvent =
   | { type: "run_start"; id: string; model: ModelInfo; agent?: string }
@@ -144,13 +218,6 @@ export type WireEvent =
       usage: Usage
       steps: number
       pending?: ToolCallPart[]
-    }
-  | {
-      type: "nested"
-      run_id: string
-      seq: number
-      call_id: string
-      event: WireEvent
     }
 
 export interface ToolCallPart {
@@ -233,6 +300,29 @@ export function apiBase(): string {
   return new URL("api/", document.baseURI).toString()
 }
 
+/**
+ * The bearer token, when the serving Studio is token-walled (setup B
+ * and C). The UI stores it in localStorage under the site's key after
+ * the reader pastes it; every request — EventSource included, via the
+ * token query parameter — carries it.
+ */
+const TOKEN_KEY = "studio.token"
+export function studioToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_KEY) ?? ""
+  } catch {
+    return ""
+  }
+}
+export function setStudioToken(tok: string) {
+  try {
+    if (tok) localStorage.setItem(TOKEN_KEY, tok)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    // unwritable storage: this page only
+  }
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -244,9 +334,10 @@ export class ApiError extends Error {
 }
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(new URL(path, apiBase()).toString(), {
-    headers: { Accept: "application/json" },
-  })
+  const headers: Record<string, string> = { Accept: "application/json" }
+  const tok = studioToken()
+  if (tok) headers.Authorization = `Bearer ${tok}`
+  const res = await fetch(new URL(path, apiBase()).toString(), { headers })
   if (!res.ok) {
     let code = "network"
     let message = `${res.status} ${res.statusText}`
@@ -266,11 +357,25 @@ async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T
 }
 
-// ── Query options (plan §4.5) ──────────────────────────────────────
+/** A transcript's messages arrive as raw JSON: coerce one page. */
+export function asTranscript(doc: RawTranscript): Transcript {
+  return {
+    batches: doc.batches.map((b) => ({
+      index: b.index,
+      step: b.step,
+      messages: b.messages as Message[],
+    })),
+  }
+}
+
+// ── Query options ──────────────────────────────────────────────────
 
 export interface RunsFilters {
   agent?: string
   status?: RunStatus | ""
+  session?: string
+  public_id?: string
+  playground?: boolean
   parent?: string // "" top-level (default), "*" all, or a run id
   tag?: Record<string, string>
   before?: string
@@ -280,6 +385,9 @@ export function runsSearch(filters: RunsFilters): string {
   const params = new URLSearchParams()
   if (filters.agent) params.set("agent", filters.agent)
   if (filters.status) params.set("status", filters.status)
+  if (filters.session) params.set("session", filters.session)
+  if (filters.public_id) params.set("public_id", filters.public_id)
+  if (filters.playground !== undefined) params.set("playground", String(filters.playground))
   if (filters.parent) params.set("parent", filters.parent)
   if (filters.before) params.set("before", filters.before)
   for (const [k, v] of Object.entries(filters.tag ?? {}))
@@ -296,7 +404,7 @@ export function runsQuery(filters: RunsFilters = {}) {
   return queryOptions({
     queryKey: ["runs", filters],
     // The list is live enough at 5 s stale; a manual refresh covers
-    // the rest (plan §4.5). No other polling.
+    // the rest. No other polling — the live rows come from /api/live.
     staleTime: 5_000,
     queryFn: () => fetchRuns(filters),
   })
@@ -316,6 +424,62 @@ export function eventsQuery(id: string, after: number, limit = 500) {
       get<EventsPage>(
         `runs/${encodeURIComponent(id)}/events?after=${after}&limit=${limit}`
       ),
+  })
+}
+
+export function transcriptQuery(id: string) {
+  return queryOptions({
+    queryKey: ["transcript", id],
+    staleTime: 30_000,
+    queryFn: () => get<Transcript>(`runs/${encodeURIComponent(id)}/transcript`),
+  })
+}
+
+export function spansQuery(id: string) {
+  return queryOptions({
+    queryKey: ["spans", id],
+    staleTime: 30_000,
+    queryFn: () => get<SpansDoc>(`runs/${encodeURIComponent(id)}/spans`),
+  })
+}
+
+export function traceQuery(traceId: string) {
+  return queryOptions({
+    queryKey: ["trace", traceId],
+    queryFn: () => get<SpansDoc>(`traces/${encodeURIComponent(traceId)}`),
+  })
+}
+
+export interface SessionFilters {
+  agent?: string
+  public_id?: string
+  before?: string
+}
+
+export function sessionsQuery(filters: SessionFilters = {}) {
+  const params = new URLSearchParams()
+  if (filters.agent) params.set("agent", filters.agent)
+  if (filters.public_id) params.set("public_id", filters.public_id)
+  if (filters.before) params.set("before", filters.before)
+  const qs = params.toString()
+  return queryOptions({
+    queryKey: ["sessions", filters],
+    staleTime: 5_000,
+    queryFn: () => get<SessionsPage>(`sessions${qs ? `?${qs}` : ""}`),
+  })
+}
+
+export function sessionQuery(id: string) {
+  return queryOptions({
+    queryKey: ["session", id],
+    queryFn: () => get<SessionDoc>(`sessions/${encodeURIComponent(id)}`),
+  })
+}
+
+export function publicQuery(publicId: string) {
+  return queryOptions({
+    queryKey: ["public", publicId],
+    queryFn: () => get<PublicResolution>(`public/${encodeURIComponent(publicId)}`),
   })
 }
 

@@ -6,12 +6,13 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
-import type { EventsPage, ResultDoc, WireEvent } from "./api"
+import type { EventsPage, WireEvent } from "./api"
 import {
+  applyTranscript,
   callState,
-  crossCheck,
   fold,
   foldMore,
+  linkView,
   newFold,
   truncation,
 } from "./events"
@@ -20,16 +21,6 @@ function golden(name: string): WireEvent[] {
   const path = resolve(process.cwd(), `../testdata/api/${name}`)
   const page = JSON.parse(readFileSync(path, "utf8")) as EventsPage
   return page.events.map((pe) => pe.event)
-}
-
-/** Wrap one event as the wire would: a nested envelope. */
-function nest(
-  runId: string,
-  seq: number,
-  callId: string,
-  event: WireEvent
-): WireEvent {
-  return { type: "nested", run_id: runId, seq, call_id: callId, event }
 }
 
 const okEvents = golden("events-ok.golden.json")
@@ -41,9 +32,12 @@ describe("fold on the goldens", () => {
     expect(run.runId).toBe("r_ok")
     expect(run.agent).toBe("orders")
     expect(run.finished).toBe(true)
-    expect(run.steps).toHaveLength(2)
+    // The stored stream is durable events only: one step, its tool
+    // call closed, no deltas (the finished text comes from the
+    // transcript — see applyTranscript below).
+    expect(run.steps).toHaveLength(1)
 
-    const [first, second] = run.steps
+    const [first] = run.steps
     expect(first.toolCalls).toHaveLength(1)
     const call = first.toolCalls[0]
     expect(call.name).toBe("lookup_order")
@@ -53,58 +47,31 @@ describe("fold on the goldens", () => {
       isError: false,
     })
     expect((call.args as { order_id: string }).order_id).toBe("42")
-    expect(first.finish?.reason).toBe("tool_calls")
-    expect(second.text).toBe("Order 42 shipped this morning.")
-    expect(second.finish?.reason).toBe("stop")
-    expect(run.usage?.input_tokens).toBe(20)
+    expect(first.finish?.reason).toBe("end_turn")
+    expect(first.text).toBe("")
+    expect(run.usage?.input_tokens).toBe(10)
   })
 
-  it("folds the subagent run with its nested child (B7)", () => {
-    const run = fold(subEvents)
-    const call = run.steps[0].toolCalls[0]
+  it("folds the subagent run; the child joins by parent_call_id (S4.3)", () => {
+    const feed = newFold()
+    foldMore(feed, subEvents)
+    // The child is its own run: the parent's stream has no nested
+    // envelopes, and the link is data (parent_call_id), not events.
+    const view = linkView(feed.result(), [
+      { id: "r_sub/0/call_3", parent_call_id: "call_3" },
+      { id: "r_other", parent_call_id: "call_none" }, // links nothing
+    ])
+    const call = view.steps[0].toolCalls[0]
     expect(call.name).toBe("research")
-    const child = call.child
-    expect(child).toBeDefined()
-    expect(child!.runId).toBe("r_sub/0/call_1")
-    expect(child!.agent).toBe("researcher")
-    expect(child!.finished).toBe(true)
-    expect(child!.steps[0].text).toBe("order 42 shipped this morning")
+    expect(call.childRunId).toBe("r_sub/0/call_3")
     expect(call.result!.content).toBe("order 42 shipped this morning")
-    expect(run.steps[1].text).toBe("Order 42 shipped.")
+    // An unlinked call stays unlinked.
+    const none = view.steps.flatMap((s) => s.toolCalls).find(
+      (c) => c.callId === "call_none"
+    )
+    expect(none).toBeUndefined()
   })
 
-  it("cross-checks the fold against the store's result document", () => {
-    const run = fold(okEvents)
-    // The recorded result of r_ok (run-ok's steps), hand-mirrored from
-    // the run document golden's shape.
-    const result: ResultDoc = {
-      steps: [
-        {
-          index: 0,
-          stop_reason: "tool_calls",
-          usage: { input_tokens: 10, output_tokens: 5 },
-          tool_calls: [
-            { type: "tool_call", id: "call_1", name: "lookup_order", args: {} },
-          ],
-        },
-        {
-          index: 1,
-          stop_reason: "stop",
-          usage: { input_tokens: 10, output_tokens: 5 },
-          text: "Order 42 shipped this morning.",
-        },
-      ],
-      usage: { input_tokens: 20, output_tokens: 10 },
-    }
-    expect(crossCheck(run, result)).toEqual([])
-    const altered: ResultDoc = {
-      ...result,
-      steps: result.steps?.map((s, i) =>
-        i === 1 ? { ...s, text: "different" } : s
-      ),
-    }
-    expect(crossCheck(run, altered)).not.toEqual([])
-  })
 })
 
 describe("hand-written edge cases", () => {
@@ -207,93 +174,94 @@ describe("hand-written edge cases", () => {
     expect(run.steps[0].toolCalls[0].streamedArgs).toBe('{"path":"/tmp"}')
   })
 
-  it("folds nested within nested (a grandchild run)", () => {
-    // The parent delegates to `outer`; outer's own run calls `gc`
-    // (itself a subagent), so gc's events arrive nested INSIDE
-    // outer's stream (ADR 0014's late-event rule keeps them there).
+  it("applies the transcript over a history-loaded run (S4.3)", () => {
+    // A run loaded from history has no deltas: the events fold with
+    // empty text, and the messages records supply the final words.
     const events: WireEvent[] = [
-      { type: "run_start", id: "r_n", model: { provider: "p", name: "m" } },
-      { type: "step_start", run_id: "r_n", index: 0 },
+      { type: "run_start", id: "r_t", model: { provider: "p", name: "m" } },
+      { type: "step_start", run_id: "r_t", index: 0 },
       {
         type: "tool_start",
-        run_id: "r_n",
+        run_id: "r_t",
         seq: 1,
-        call_id: "outer",
-        name: "outer",
-        args: {},
+        call_id: "c1",
+        name: "lookup",
       },
-      nest("r_n", 2, "outer", {
-        type: "run_start",
-        id: "child",
-        model: { provider: "p", name: "m" },
-        agent: "outer-agent",
-      }),
-      nest("r_n", 3, "outer", {
-        type: "step_start",
-        run_id: "child",
-        index: 0,
-      }),
-      nest("r_n", 4, "outer", {
-        type: "tool_start",
-        run_id: "child",
-        seq: 1,
-        call_id: "gc",
-        name: "gc",
-        args: {},
-      }),
-      nest(
-        "r_n",
-        5,
-        "outer",
-        nest("child", 1, "gc", {
-          type: "run_start",
-          id: "gc",
-          model: { provider: "p", name: "m" },
-          agent: "gc-agent",
-        })
-      ),
-      nest(
-        "r_n",
-        6,
-        "outer",
-        nest("child", 2, "gc", {
-          type: "text_delta",
-          run_id: "gc",
-          text: "deep",
-        })
-      ),
-      nest("r_n", 7, "outer", {
-        type: "tool_finish",
-        run_id: "child",
-        seq: 2,
-        call_id: "gc",
-        name: "gc",
-        content: "deep",
-        is_error: false,
-      }),
-      nest("r_n", 8, "outer", {
-        type: "run_finish",
-        run_id: "child",
-        usage: { input_tokens: 1, output_tokens: 1 },
-        steps: 1,
-      }),
       {
         type: "tool_finish",
-        run_id: "r_n",
-        seq: 9,
-        call_id: "outer",
-        name: "outer",
-        content: "deep",
+        run_id: "r_t",
+        seq: 1,
+        call_id: "c1",
+        name: "lookup",
+        content: "found",
         is_error: false,
+      },
+      {
+        type: "step_finish",
+        run_id: "r_t",
+        index: 0,
+        reason: "tool_calls",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+      { type: "step_start", run_id: "r_t", index: 1 },
+      {
+        type: "step_finish",
+        run_id: "r_t",
+        index: 1,
+        reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 2 },
+      },
+      {
+        type: "run_finish",
+        run_id: "r_t",
+        usage: { input_tokens: 2, output_tokens: 3 },
+        steps: 2,
       },
     ]
-    const run = fold(events)
-    const outer = run.steps[0].toolCalls.find((c) => c.callId === "outer")
-    expect(outer!.child!.runId).toBe("child")
-    expect(outer!.child!.agent).toBe("outer-agent")
-    const gc = outer!.child!.steps[0].toolCalls.find((c) => c.callId === "gc")
-    expect(gc!.child!.agent).toBe("gc-agent")
-    expect(gc!.child!.steps[0].text).toBe("deep")
+    const view = applyTranscript(fold(events), [
+      {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      },
+      {
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_call", id: "c1", name: "lookup", args: { q: 1 } },
+            ],
+          },
+        ],
+      },
+      {
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "the answer" }],
+          },
+        ],
+      },
+    ])
+    expect(view.steps[0].toolCalls[0].args).toEqual({ q: 1 })
+    expect(view.steps[1].text).toBe("the answer")
+  })
+
+  it("applyTranscript never overwrites streamed text (live wins)", () => {
+    const events: WireEvent[] = [
+      { type: "run_start", id: "r_l", model: { provider: "p", name: "m" } },
+      { type: "text_delta", run_id: "r_l", text: "streamed " },
+      { type: "text_delta", run_id: "r_l", text: "words" },
+    ]
+    const view = applyTranscript(fold(events), [
+      {
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "different words" }],
+          },
+        ],
+      },
+    ])
+    expect(view.steps[0].text).toBe("streamed words")
   })
 })
 

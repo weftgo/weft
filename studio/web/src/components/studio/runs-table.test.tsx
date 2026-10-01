@@ -28,14 +28,18 @@ describe("RunsTable", () => {
     for (const id of ["r_stale", "r_sub", "r_fail", "r_ok"]) {
       expect(screen.getByText(id, { exact: false })).toBeTruthy()
     }
-    expect(screen.getAllByText("orders").length).toBeGreaterThanOrEqual(3)
-    expect(screen.getByText("support")).toBeTruthy()
+    expect(screen.getAllByText("orders").length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText("researcher")).toBeTruthy()
 
     // wefttest/script model chip
     expect(screen.getAllByText("wefttest/script").length).toBe(4)
 
-    // Token columns: r_ok carries 20/10.
-    expect(screen.getByText("20 / 10")).toBeTruthy()
+    // Token columns: r_ok carries 10/4 (S4.3's row).
+    expect(screen.getByText("10 / 4")).toBeTruthy()
+
+    // The session column links each turn to its thread (S4.7).
+    expect(screen.getAllByText(/s_orders/).length).toBeGreaterThanOrEqual(3)
+    expect(screen.getByText(/s_research/)).toBeTruthy()
   })
 
   it("renders an empty list without rows", async () => {

@@ -173,6 +173,7 @@ export function RunsTable({ runs, selectedId, now }: RunsTableProps) {
           <TableHead className="w-28">status</TableHead>
           <TableHead>run</TableHead>
           <TableHead>agent</TableHead>
+          <TableHead title="the thread this run is a turn of">session</TableHead>
           <TableHead>model</TableHead>
           <TableHead className="text-right">steps</TableHead>
           <TableHead className="text-right" title="input / output tokens">
@@ -226,6 +227,21 @@ export function RunsTable({ runs, selectedId, now }: RunsTableProps) {
               </TableCell>
               <TableCell className="whitespace-nowrap">
                 {run.agent || <span className="text-faint">—</span>}
+              </TableCell>
+              <TableCell className="whitespace-nowrap">
+                {run.session_id ? (
+                  <Link
+                    to="/sessions/$id"
+                    params={{ id: run.session_id }}
+                    className="font-mono text-[11px] text-muted-foreground hover:text-thread-ink hover:underline"
+                    title={`the session (${run.public_id || "no public id"})`}
+                  >
+                    {run.session_id}
+                    {run.turn ? ` ·t${run.turn}` : ""}
+                  </Link>
+                ) : (
+                  <span className="text-faint">—</span>
+                )}
               </TableCell>
               <TableCell>
                 <Badge

@@ -20,7 +20,15 @@ import {
   useLocation,
   useRouter,
 } from "@tanstack/react-router"
-import { Bot, Keyboard, List, Search, SunMoon } from "lucide-react"
+import {
+  Activity,
+  Bot,
+  Keyboard,
+  List,
+  MessagesSquare,
+  Search,
+  SunMoon,
+} from "lucide-react"
 
 import { metaQuery, runsQuery } from "@/lib/api"
 import { isPlainShortcut } from "@/lib/keys"
@@ -86,6 +94,8 @@ function Nav() {
       <SidebarGroupContent>
         <SidebarMenu>
           {item("/runs", "Runs", <List data-slot="icon" />)}
+          {item("/sessions", "Sessions", <MessagesSquare data-slot="icon" />)}
+          {item("/live", "Live", <Activity data-slot="icon" />)}
           {meta.data?.has_manifest &&
             item("/agents", "Agents", <Bot data-slot="icon" />)}
         </SidebarMenu>
@@ -185,7 +195,7 @@ export function AppShell() {
             <div className="space-y-0.5 px-3 pb-2 font-mono text-[10px] text-faint group-data-[collapsible=icon]:hidden">
               <div>weft {meta.data.weft_version || "(unknown)"}</div>
               <div>
-                studio {meta.data.studio_version} · {meta.data.store}
+                studio {meta.data.studio_version} · {meta.data.db}
               </div>
             </div>
           )}
@@ -261,6 +271,14 @@ export function AppShell() {
             <CommandItem value="runs list" onSelect={() => go("/runs")}>
               <List data-slot="icon" />
               Runs
+            </CommandItem>
+            <CommandItem value="sessions threads" onSelect={() => go("/sessions")}>
+              <MessagesSquare data-slot="icon" />
+              Sessions
+            </CommandItem>
+            <CommandItem value="live streaming" onSelect={() => go("/live")}>
+              <Activity data-slot="icon" />
+              Live
             </CommandItem>
             {meta.data?.has_manifest && (
               <CommandItem

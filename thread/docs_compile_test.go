@@ -85,7 +85,7 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	queued, err := s3.Send(ctx, weft.User("x"), thread.RunOptions(weft.Deny("call_1", "not now")))
+	queued, err := s3.Send(ctx, weft.User("x"), thread.RunOptions(weft.Metadata(map[string]string{"tenant": "acme"})))
 	if err != nil {
 		t.Fatal(err)
 	}

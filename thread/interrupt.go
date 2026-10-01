@@ -15,28 +15,41 @@ import (
 const reasonInterrupted = "interrupted by a newer message"
 
 // interruptedCallResult is the model-visible completion an interrupted
-// turn gives a call that never got its result — the golden text
-// (plan §6; the pairing invariant: a fed-back transcript must be
-// sound, and the model must see why the call has no answer).
+// turn gives a call that never got its result — the golden text (the
+// pairing invariant: a fed-back transcript must be sound, and the
+// model must see why the call has no answer).
 func interruptedCallResult(name string) string {
 	return fmt.Sprintf("tool call %s was interrupted: the run was canceled for a newer message", name)
 }
 
 // interruptSendLocked is Send's Interrupt and Rollback path (called
-// under mu): the message is queued as the next turn exactly like the
-// Queue policy, then the busy state is felled — the in-flight run's
-// context is canceled (its Turn marked interrupted, and a Rollback
-// remembers where the leaf must return to), or, when only an approval
-// boundary holds the session, its parked calls are denied with the
-// interrupted reason so the follow-up can run (plan §6).
-func (s *Session) interruptSendLocked(ctx context.Context, msg weft.Message, rollback bool) (*Turn, error) {
-	t := s.newTurnLocked()
+// under mu, in one critical section — no other Send can slip between
+// its steps): the message is accepted as the next turn exactly like
+// the Queue policy — durably, an accepted receipt first — and then the
+// busy state is felled: the in-flight run's context is canceled (its
+// Turn marked interrupted, and a Rollback remembers where the leaf
+// must return to), or, when only an approval boundary holds the
+// session, its parked calls are denied with the interrupted reason so
+// the follow-up can run.
+//
+// The denial goes through the session's own recorder (Via
+// "interrupt"), not the exported Decide: an interrupt is the session's
+// path, so it records under RequireSigned too instead of wedging on
+// the unsigned door. And it fails loudly: when the denial cannot be
+// recorded the boundary still holds the session, so the Send returns
+// the error and the message leaves the queue again — its receipt
+// marked dropped — because a follow-up accepted behind a boundary
+// nothing will clear would never run.
+func (s *Session) interruptSendLocked(ctx context.Context, msg weft.Message, opts []weft.RunOption, policy Policy) (*Turn, error) {
+	t, err := s.enqueueLocked(ctx, msg, opts, policy)
+	if err != nil {
+		return nil, err
+	}
 	if s.running && s.inFlight != nil {
-		s.queue = append(s.queue, pendingSend{ctx: ctx, msg: msg, turn: t})
 		it := s.inFlight
 		it.mu.Lock()
 		it.interrupted = true
-		if rollback {
+		if policy == Rollback {
 			it.rollback = true
 			if i, ok := s.byID[it.id]; ok {
 				it.preTurn = parentOf(s.order[i]) // the leaf before this turn's receipt entry
@@ -44,10 +57,11 @@ func (s *Session) interruptSendLocked(ctx context.Context, msg weft.Message, rol
 				// The receipt has not landed yet — the runner marks a
 				// turn in-flight before its prompt appends (an
 				// interrupt at birth), and a resume turn's entry lands
-				// only at its end. The leaf now is the line before the
-				// turn either way: the rollback targets it instead of
-				// silently no-op'ing.
-				it.preTurn = s.leaf
+				// only at its end. The leaf before this Send's own
+				// accepted receipt is the line before the turn either
+				// way: the rollback targets it instead of silently
+				// no-op'ing.
+				it.preTurn = s.leafBeforeLocked(t)
 			}
 		}
 		cancel := it.cancel
@@ -65,30 +79,55 @@ func (s *Session) interruptSendLocked(ctx context.Context, msg weft.Message, rol
 		return t, nil
 	}
 	// Only a boundary holds the session: deny its parked calls so the
-	// follow-up is not queued behind it. The denial goes through the
-	// session's own recorder (Via "interrupt"), not the exported
-	// Decide: an interrupt is the session's path, so it records under
-	// RequireSigned too instead of wedging on the unsigned door. And
-	// it fails loudly: when the denial cannot be recorded the boundary
-	// still holds the session, so the Send returns the error and the
-	// message is not queued — a follow-up accepted behind a boundary
-	// nothing will clear would never run.
+	// follow-up is not queued behind it.
 	if err := s.denyPendingLocked(ctx, reasonInterrupted, viaInterrupt); err != nil {
+		s.dequeueLocked(context.WithoutCancel(ctx), t)
 		return nil, fmt.Errorf("thread: interrupt could not deny the parked approvals: %w", err)
 	}
-	s.queue = append(s.queue, pendingSend{ctx: ctx, msg: msg, turn: t})
 	return t, nil
+}
+
+// leafBeforeLocked returns the leaf as it stood before t's accepted
+// receipt entry was appended — the receipt is the queue's bookkeeping,
+// not part of the line a rollback returns to. Callers hold s.mu.
+func (s *Session) leafBeforeLocked(t *Turn) string {
+	for _, ps := range s.queue {
+		if ps.turn == t && ps.receipt != "" {
+			if i, ok := s.byID[ps.receipt]; ok {
+				return parentOf(s.order[i])
+			}
+		}
+	}
+	return s.leaf
+}
+
+// dequeueLocked takes t back out of the send queue — an acceptance
+// that is being refused after all — and settles its accepted receipt
+// as dropped, so neither this session nor a reopened one runs it.
+// Callers hold s.mu.
+func (s *Session) dequeueLocked(ctx context.Context, t *Turn) {
+	for i, ps := range s.queue {
+		if ps.turn != t {
+			continue
+		}
+		s.queue = append(s.queue[:i], s.queue[i+1:]...)
+		s.dropAcceptedLocked(ctx, ps.receipt)
+		t.finishAs(TurnDropped, nil, fmt.Errorf("%w: session %s: the send was refused", ErrDropped, s.header.ID))
+		return
+	}
 }
 
 // rollbackLocked branches the leaf back to before the interrupted
 // turn's receipt entry — nothing is deleted, the interrupted turn
-// keeps its entries on its own line of the tree (plan §6). Callers
-// hold mu; it runs at the runner's item boundary, after the
-// interrupted turn's entries have landed and before the follow-up
-// starts, so the follow-up's prompt attaches to the rolled-back leaf.
+// keeps its entries on its own line of the tree. The target is the
+// root when the interrupted turn was the session's first: the
+// follow-up then starts a new line from nothing. Callers hold mu; it
+// runs at the runner's item boundary, after the interrupted turn's
+// entries have landed and before the follow-up starts, so the
+// follow-up's prompt attaches to the rolled-back leaf.
 func (s *Session) rollbackLocked(t *Turn) {
 	rollback, preTurn := t.rollbackTarget()
-	if !rollback || preTurn == "" {
+	if !rollback {
 		return
 	}
 	if err := s.checkEntryLocked(preTurn); err != nil {
@@ -153,7 +192,7 @@ func withInterruptedResults(msgs []weft.Message) []weft.Message {
 		}
 		// No result at all, or the bare cancellation noise a handler
 		// returned as the run died under it — the model sees the golden
-		// interruption text either way (plan §6).
+		// interruption text either way.
 		parts = append(parts, weft.ToolResultPart{
 			CallID:  c.ID,
 			Name:    c.Name,

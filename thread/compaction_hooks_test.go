@@ -202,6 +202,7 @@ func TestEveryCompactionHookMayCallTheSession(t *testing.T) {
 			if _, err := turn.Wait(); err != nil {
 				t.Errorf("Wait: %v", err)
 			}
+			_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 		})
 		if !triggered.Load() || !trimmed.Load() {
 			t.Errorf("TriggerFunc ran = %v, Trimmer ran = %v; want both", triggered.Load(), trimmed.Load())
@@ -386,6 +387,7 @@ func TestCompactWhileATurnRunsIsBusy(t *testing.T) {
 	if _, err := turn.Wait(); err != nil {
 		t.Fatal(err)
 	}
+	_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 	// Between turns it works again.
 	if err := s.Compact(ctx); err != nil {
 		t.Errorf("Compact after the turn: %v", err)

@@ -303,8 +303,9 @@ type Session struct {
 	report  *OpenReport
 	// turns counts the turn entries ever appended, branches included,
 	// and turnSeq is the run-id counter Send mints <session>-t<n> ids
-	// from: it recovers from turns on a reopen and moves at mint time,
-	// so a crashed turn's id is never reused.
+	// from: it moves at mint time and recovers on a reopen from the
+	// highest id the entries record anywhere (recoverTurnSeq) — never
+	// below turns — so a crashed turn's id is never reused.
 	turns   int
 	turnSeq int
 	// running is the one-runner flag behind the busy policy: a Send
@@ -319,9 +320,18 @@ type Session struct {
 	// also covers the epilogue window after a turn's finish (its Wait
 	// has returned, its entries have landed), where a navigation is
 	// already safe and must not read ErrBusy.
-	running  bool
-	inFlight *Turn
-	queue    []pendingSend
+	//
+	// between marks the other half of a live runner's life: the item's
+	// turn has landed and the runner has not yet taken its next one —
+	// the between-turn compaction runs here. With a runner alive,
+	// exactly one of inFlight and between is set (busyInvariantLocked).
+	// runnerMoved, when a Close is waiting, is closed the next time the
+	// runner takes an item or exits.
+	running     bool
+	inFlight    *Turn
+	between     bool
+	runnerMoved chan struct{}
+	queue       []pendingSend
 	// The approval boundary's runner hand-off (ADR 0021 §1–§2): await
 	// holds the parked boundary's captured turn settings — the extra
 	// run options of the Send that parked and the persistence window
@@ -530,10 +540,11 @@ func newHeader(cfg *sessionConfig) (Header, error) {
 // refused.
 //
 // Open reads and nothing else: it writes no entry and starts no run.
-// A steer the file shows accepted but never settled — the writer
-// crashed between the two — is restored to the steer queue (Queue
-// lists it) and waits there: the next turn the session runs delivers
-// it, Continue runs it as a turn of its own, ClearQueue drops it.
+// Input the file shows accepted but never settled — the writer stopped
+// between the two — is restored to the queue (Queue lists it) and
+// waits there: a steer is delivered by the next turn the session runs,
+// a queued send runs ahead of the next Send, Continue runs either now,
+// ClearQueue drops them.
 //
 // The header options (WithMeta, PublicID, WithLineage) fail Open with
 // ErrCreateOnly: the stored header is what the session has.
@@ -690,9 +701,11 @@ func newSession(st Storage, agent *weft.Agent, cfg sessionConfig, h Header, entr
 			}
 		}
 	}
-	// The copied or reloaded turns count for run ids: the next Send
-	// mints <session>-t<n+1>, never an id the file already holds.
-	s.turnSeq = s.turns
+	// The copied or reloaded turns count for run ids, and so does every
+	// run id of this session the entries record anywhere — a turn
+	// entry is not the only place one lands (recoverTurnSeq): the next
+	// Send mints an id the file does not hold.
+	s.turnSeq = max(s.turns, recoverTurnSeq(h.ID, entries))
 	if report != nil {
 		s.report = &OpenReport{
 			LoadReport: LoadReport{Torn: report.Torn, Skipped: slices.Clone(report.Skipped)},
@@ -1393,8 +1406,10 @@ func (s *Session) Usage() Usage {
 //     settled (Queue lists them). Continue defers each to a follow-up
 //     turn, recorded on its receipt, and runs them in acceptance
 //     order under ctx;
-//   - sends queued behind an approval boundary that has since been
-//     cleared or decided;
+//   - sends restored by Open — accepted while the session was busy,
+//     their turns never started (Queue lists them too) — and sends
+//     queued behind an approval boundary that has since been cleared
+//     or decided;
 //   - an approval boundary whose every call is decided but whose
 //     resume never ran (the writer died between the two): with
 //     AutoResume on, Continue arms the resume, and the queue follows
@@ -1472,8 +1487,9 @@ func (s *Session) writableLocked() error {
 //     sends queued behind it, and any approval resume those turns
 //     arm. Sends queued behind an approval boundary nobody is going
 //     to decide cannot drain: once no turn is running their Turns end
-//     with ErrClosed (a queued send's prompt is not yet durable, so
-//     nothing stored is lost).
+//     with ErrClosed. Their accepted receipts stay in the file, and
+//     the next Open restores them to the queue (Queue lists them,
+//     ClearQueue drops them).
 //  3. The session is sealed: every later write — Label, SetInfo,
 //     Branch, Decide, Compact, any of them — fails with ErrClosed.
 //     Reads (Entries, Path, Context, Pending, Usage, …) keep
@@ -1503,7 +1519,6 @@ func (s *Session) writableLocked() error {
 // inside the session's own run (a tool, a hook): it would wait for
 // the turn that is calling it.
 func (s *Session) Close(ctx context.Context) error {
-	backoff := 50 * time.Microsecond
 	for {
 		s.mu.Lock()
 		if s.closing == stateSealed {
@@ -1525,37 +1540,34 @@ func (s *Session) Close(ctx context.Context) error {
 		if !s.running {
 			return s.sealLocked(ctx) // unlocks
 		}
+		// The runner is alive: wait for its next move — the turn in
+		// flight landing, the runner taking its next item, or its exit
+		// — each a signal, none a poll.
 		t, aborted := s.inFlight, s.closing == stateAborted
+		moved := s.runnerMovedLocked()
 		s.mu.Unlock()
-		if aborted && t != nil {
-			// A Close that gave up left the session refusing work, yet
-			// a turn is in flight: fell it too, so the wait is short.
-			t.fell()
-		}
+		var landed <-chan struct{}
 		if t != nil && !t.isDecided() {
-			backoff = 50 * time.Microsecond
-			done := make(chan struct{})
-			go func() {
-				_, _ = t.Wait() // ends with the turn; a canceled one lands at once
-				close(done)
-			}()
+			if aborted {
+				// A Close that gave up left the session refusing work,
+				// yet a turn is in flight: fell it too, so the wait is
+				// short.
+				t.fell()
+			}
+			landed = t.Done()
+		}
+		select {
+		case <-landed:
+			// The turn landed; the runner's epilogue is next. Wait for
+			// it rather than spin on a turn that is already decided.
 			select {
-			case <-done:
-				continue
+			case <-moved:
 			case <-ctx.Done():
 				s.abandon()
 				return ctx.Err()
 			}
-		}
-		// Between a turn's landing and the runner's next decision —
-		// its next item, or its exit — there is nothing to wait on
-		// but the runner itself: look again shortly.
-		timer := time.NewTimer(backoff)
-		select {
-		case <-timer.C:
-			backoff = min(2*backoff, 5*time.Millisecond)
+		case <-moved:
 		case <-ctx.Done():
-			timer.Stop()
 			s.abandon()
 			return ctx.Err()
 		}

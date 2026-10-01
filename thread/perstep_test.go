@@ -3,6 +3,7 @@ package thread_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"reflect"
 	"sync"
@@ -346,14 +347,29 @@ func TestPerStepOverflowAttemptsKeepTheirOwnLines(t *testing.T) {
 		if res.Text() != "recovered after compaction" {
 			t.Fatalf("reply = %q, want the re-run's answer", res.Text())
 		}
-		turns := 0
-		for _, e := range s.Entries() {
-			if _, ok := e.(thread.TurnEntry); ok {
-				turns++
-			}
+		// Three turn entries: the first turn's, the failed attempt's own
+		// ledger — its run id, the overflow, the step it completed and
+		// paid for, the re-run it led to — and the re-run's.
+		tes := turnEntries(s)
+		if len(tes) != 3 {
+			t.Fatalf("turn entries = %d, want 3 (the first turn, the failed attempt, the re-run)", len(tes))
 		}
-		if turns != 2 {
-			t.Errorf("turn entries = %d, want 2 (the failed attempt records none on its own)", turns)
+		attempt, rerun := tes[1], tes[2]
+		if attempt.RunID != s.ID()+"-t2" || attempt.ReRun != s.ID()+"-t3" || rerun.RunID != s.ID()+"-t3" {
+			t.Errorf("run ids: attempt %q (re-run %q), re-run %q; want -t2 (-t3), -t3", attempt.RunID, attempt.ReRun, rerun.RunID)
+		}
+		if attempt.Err == "" || attempt.Steps != 1 || attempt.Usage.InputTokens != 10 {
+			t.Errorf("the attempt's ledger = %+v, want the overflow, one step and its usage", attempt)
+		}
+		if rerun.Err != "" || rerun.ReRun != "" {
+			t.Errorf("the re-run's entry = %+v", rerun)
+		}
+		// The attempt's tokens were spent: the ledger counts them. Four
+		// model steps of 10 input tokens ran as turns (the first turn,
+		// the attempt's step, the re-run) — the summarizer's is its own
+		// bucket.
+		if u := s.Usage(); u.Turns.InputTokens != 30 {
+			t.Errorf("Usage.Turns = %+v, want the attempt's step counted (30 input tokens)", u.Turns)
 		}
 		// The failed attempt's emitted step exists exactly once — on its
 		// own branch — and never on the path the walk reads.
@@ -497,4 +513,127 @@ func TestPerStepLabelBetweenSteps(t *testing.T) {
 		}
 		assertOnceEach(t, s, t1.ID())
 	})
+}
+
+// failNthAppend fails the nth Append it sees (1-based), once, and
+// behaves otherwise — the storage hiccup of the exactly-once rows.
+type failNthAppend struct {
+	thread.Storage
+	mu sync.Mutex
+	n  int
+	at int
+}
+
+func (f *failNthAppend) Append(ctx context.Context, session string, entries ...thread.Entry) error {
+	f.mu.Lock()
+	f.n++
+	hit := f.n == f.at
+	f.mu.Unlock()
+	if hit {
+		return errors.New("disk hiccup")
+	}
+	return f.Storage.Append(ctx, session, entries...)
+}
+
+// arm makes the nth Append from now fail.
+func (f *failNthAppend) arm(nth int) {
+	f.mu.Lock()
+	f.n, f.at = 0, nth
+	f.mu.Unlock()
+}
+
+// turnEntries lists the session's turn entries, in append order.
+func turnEntries(s *thread.Session) []thread.TurnEntry {
+	var out []thread.TurnEntry
+	for _, e := range s.Entries() {
+		if te, ok := e.(thread.TurnEntry); ok {
+			out = append(out, te)
+		}
+	}
+	return out
+}
+
+// Exactly once (ADR 0011 §7): whichever single append of a tool turn
+// the storage refuses — the first step's assistant message, its tool
+// message, the closing step, the turn's end — the context afterwards
+// is the run's transcript exactly: no message lost, none written
+// twice, none out of order. A failed step append is on the turn entry
+// (LateSteps); a failed end is on the Turn (ErrNotPersisted).
+func TestPerStepOneFailedAppendLosesAndDuplicatesNothing(t *testing.T) {
+	// A tool turn's appends, in order: 1 the prompt (Send's own), 2 the
+	// tool step's assistant message, 3 its tool message, 4 the closing
+	// assistant message, 5 the turn's end.
+	for nth := 2; nth <= 5; nth++ {
+		t.Run(fmt.Sprintf("append_%d", nth), func(t *testing.T) {
+			ctx := context.Background()
+			st := &failNthAppend{Storage: thread.Memory()}
+			agent, _ := stepAgent(t)
+			s, err := thread.Create(ctx, st, agent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			st.arm(nth)
+			turn, err := s.Send(ctx, weft.User("go"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, err := turn.Wait()
+			if nth == 5 {
+				if !errors.Is(err, thread.ErrNotPersisted) || res == nil {
+					t.Fatalf("Wait = %v, %v; want the result and ErrNotPersisted", res, err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if got := s.Context(); !reflect.DeepEqual(got, res.Messages) {
+				t.Errorf("Context differs from the run's transcript:\n got %+v\nwant %+v", got, res.Messages)
+			}
+			// The raw path, not only the repaired view: every message of
+			// the transcript sits on it once, in order.
+			path, err := s.Path(s.Leaf())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var raw []weft.Message
+			for _, e := range path {
+				if me, ok := e.(thread.MessageEntry); ok {
+					raw = append(raw, me.Message)
+				}
+			}
+			if !reflect.DeepEqual(raw, res.Messages) {
+				t.Errorf("the active path differs from the run's transcript:\n got %+v\nwant %+v", raw, res.Messages)
+			}
+			tes := turnEntries(s)
+			if nth == 5 {
+				if len(tes) != 0 {
+					t.Errorf("%d turn entries after a refused end, want 0", len(tes))
+				}
+				return
+			}
+			if len(tes) != 1 {
+				t.Fatalf("%d turn entries, want 1", len(tes))
+			}
+			if tes[0].LateSteps != 1 {
+				t.Errorf("TurnEntry.LateSteps = %d, want 1: the gap is on the record", tes[0].LateSteps)
+			}
+			// The session keeps working, and a reopen reads the same.
+			if got := reopenWith(t, ctx, st.Storage, s, agent).Context(); !reflect.DeepEqual(got, res.Messages) {
+				t.Errorf("the stored context differs from the run's transcript:\n got %+v", got)
+			}
+		})
+	}
+}
+
+// A turn whose every step landed records no gap.
+func TestPerStepCleanTurnRecordsNoLateSteps(t *testing.T) {
+	ctx := context.Background()
+	agent, _ := stepAgent(t)
+	s, _ := thread.Create(ctx, thread.Memory(), agent)
+	turn, _ := s.Send(ctx, weft.User("go"))
+	if _, err := turn.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if tes := turnEntries(s); len(tes) != 1 || tes[0].LateSteps != 0 {
+		t.Errorf("turn entries = %+v, want one with no late steps", tes)
+	}
 }

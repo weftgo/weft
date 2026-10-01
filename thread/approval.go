@@ -42,7 +42,7 @@ const (
 	StepApprover = "approver" // the live chain step, consulted and bounded
 	StepPark     = "park"     // the request persisted, the turn ended pending
 	StepExpiry   = "expiry"   // an expired request denied
-	StepResume   = "resume"   // the boundary's resume run started; its TurnEntry (same RunID) is how it ended
+	StepResume   = "resume"   // the boundary's resume run: one entry "started" before the run, one "completed" or "failed" with its end
 	StepSigned   = "signed"   // a signed decision refused; Detail names why, no decision recorded
 )
 
@@ -1042,16 +1042,15 @@ func (s *Session) fireOnRequest(cr *chainResult) {
 // entry naming the grant in GrantID; a refused signed decision as a
 // StepSigned audit entry with no decision beside it.
 //
-// A resume reads as two entries sharing its run id: the StepResume
-// audit entry written before the run starts ("started", listing the
-// decisions it applies), and the run's own TurnEntry, written when it
-// ends — how it ended is the turn entry's to say (Err, Canceled,
-// StopReason, the calls it parked again). A started entry with no
-// turn entry after it is a resume that never finished: a crash, or a
-// run still in flight — or, the one case the run id does not follow,
-// a resume that re-ran after a context overflow, whose turn entry
-// carries the re-run's id. Turn entries of ordinary sends are not
-// part of the trail.
+// A resume reads as two StepResume audit entries: "started", written
+// before the run starts and listing the decisions it applies, and
+// "completed" or "failed" (Detail carrying the error), written in the
+// same atomic append as the resume's turn entry. Each carries the run
+// id it was written under; they agree unless the resume re-ran after a
+// context overflow, where the second names the re-run. A started entry
+// with no second entry after it is a resume that never finished: a
+// crash, or a run still in flight. Turn entries are not part of the
+// trail — the turn's ledger is Entries'.
 //
 // The trail is an index of the session's log, not evidence that
 // stands on its own: entries are plain appended lines, unsigned and
@@ -1063,21 +1062,11 @@ func (s *Session) fireOnRequest(cr *chainResult) {
 func (s *Session) Audit() []Entry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	resumes := map[string]bool{} // the run ids of the resumes the trail has seen start
 	var out []Entry
 	for _, e := range s.order {
 		switch e := e.(type) {
-		case ApprovalAuditEntry:
-			if e.Step == StepResume {
-				resumes[e.RunID] = true
-			}
+		case ApprovalAuditEntry, ApprovalRequestEntry, ApprovalDecisionEntry, GrantEntry, GrantRevokedEntry:
 			out = append(out, cloneEntry(e))
-		case ApprovalRequestEntry, ApprovalDecisionEntry, GrantEntry, GrantRevokedEntry:
-			out = append(out, cloneEntry(e))
-		case TurnEntry:
-			if resumes[e.RunID] {
-				out = append(out, cloneEntry(e))
-			}
 		}
 	}
 	return out
@@ -1141,13 +1130,48 @@ func fillApprovalEntry(e Entry, id, parent string, created time.Time) Entry {
 	return e
 }
 
-// danglingCallsLocked returns the calls the leaf's path leaves
-// unresolved — the tool calls of the last assistant message with
-// calls, minus the results the message after it serves (ADR 0007's
-// unresolved set, read from the tree). Through this package a
-// dangling tail exists only where a successful turn parked: failed
-// turns persist their partial repaired. Callers hold s.mu.
+// danglingCallsLocked returns the calls parked on the leaf's path: the
+// tool calls of the last assistant message with calls that have no
+// result in the tool messages directly after it (ADR 0007's unresolved
+// set, read from the tree) and that a turn recorded as pending — a
+// request entry names the call, or the turn entry that ended the step
+// lists it. That second half is what tells an approval boundary from a
+// crash: per-step durability (ADR 0011 §7) writes an assistant message
+// the moment it joins, so a writer that died before the step's tool
+// message leaves a call with no result and no turn entry. Nothing
+// parked it and no decision can address it; it is not a boundary, the
+// next run's input repair answers it, and holding the session for it
+// would hold it forever.
+//
+// A parked step's tool message is partial when some of its calls ran,
+// and the resume's completed one takes its place on the path (ADR 0011
+// §7: the join attaches to the assistant entry), so the path holds one
+// tool message after the assistant. A session file written before
+// that rule holds both, the partial and then the complete one: every
+// tool message directly following the assistant is read here, so such
+// a boundary reads closed — as it was resolved — instead of holding
+// the session forever. Callers hold s.mu.
 func (s *Session) danglingCallsLocked() []weft.ToolCallPart {
+	unanswered := s.unansweredCallsLocked()
+	if len(unanswered) == 0 {
+		return nil
+	}
+	walk := s.approvalWalkLocked()
+	var out []weft.ToolCallPart
+	for _, c := range unanswered {
+		_, requested := walk.requests[c.ID]
+		_, recorded := walk.runs[c.ID]
+		if requested || recorded {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// unansweredCallsLocked returns the calls of the path's last assistant
+// message with calls that no tool message directly after it answers —
+// parked or not (danglingCallsLocked tells which). Callers hold s.mu.
+func (s *Session) unansweredCallsLocked() []weft.ToolCallPart {
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
 		return nil
@@ -1177,8 +1201,8 @@ func (s *Session) danglingCallsLocked() []weft.ToolCallPart {
 		return nil
 	}
 	served := map[string]bool{}
-	if last+1 < len(msgs) && msgs[last+1].Role == weft.RoleTool {
-		for _, p := range msgs[last+1].Content {
+	for j := last + 1; j < len(msgs) && msgs[j].Role == weft.RoleTool; j++ {
+		for _, p := range msgs[j].Content {
 			if r, ok := p.(weft.ToolResultPart); ok {
 				served[r.CallID] = true
 			}
@@ -1316,6 +1340,33 @@ func (s *Session) approvalWalkLocked() approvalWalk {
 				continue
 			}
 			w.decisions[e.CallID] = append(w.decisions[e.CallID], e)
+		}
+	}
+	// A mirrored child request (ADR 0022 §7) parks in another session:
+	// on this tree it is ledger, not part of any line's transcript, and
+	// Pending reads it from the whole file. Its decisions are read the
+	// same way — a decision recorded for a mirror stays in force
+	// wherever the leaf has moved since (a Branch, a resume's join),
+	// instead of the request reading undecided again from every line
+	// that does not hold the decision. They are matched by call id and
+	// run id, the child's own, so a mirror's decision is never lent to
+	// a call of this session that happens to share its id.
+	mirrors := map[string]map[string]bool{} // call id → the child runs that parked it
+	for _, e := range s.order {
+		if re, ok := e.(ApprovalRequestEntry); ok && re.Child != "" {
+			if mirrors[re.CallID] == nil {
+				mirrors[re.CallID] = map[string]bool{}
+			}
+			mirrors[re.CallID][re.RunID] = true
+		}
+	}
+	if len(mirrors) > 0 {
+		for i, e := range s.order {
+			d, ok := e.(ApprovalDecisionEntry)
+			if !ok || !mirrors[d.CallID][d.RunID] || onPath[d.ID] || spent[d.ID] || i <= inherited {
+				continue
+			}
+			w.decisions[d.CallID] = append(w.decisions[d.CallID], d)
 		}
 	}
 	return w

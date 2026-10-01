@@ -603,15 +603,13 @@ func TestAuditTellsTheWholeStory(t *testing.T) {
 			kinds = append(kinds, "grant")
 		case thread.GrantRevokedEntry:
 			kinds = append(kinds, "revoked")
-		case thread.TurnEntry:
-			kinds = append(kinds, "resume turn") // how a started resume ended
 		default:
 			t.Fatalf("non-approval entry in Audit: %T", e)
 		}
 	}
-	want := []string{"request", "decision", "grant", "audit", "resume turn", "audit", "revoked"}
-	// request → decision(+grant, same append) → resume audit → the
-	// resume's turn entry → grant-matched audit → revocation
+	want := []string{"request", "decision", "grant", "audit", "revoked"}
+	// request → decision(+grant, same append) → the resume's started
+	// and completed audit steps → grant-matched audit → revocation
 	if len(kinds) < 5 {
 		t.Fatalf("audit trail too thin: %v", kinds)
 	}

@@ -32,7 +32,7 @@ request call_1 on deploy
 audit park parked
 decision call_1 approve via signed
 audit resume started (1 call(s) to resolve)
-resume ended: stop error: false
+audit resume completed
 audit signed refused (replayed)
 `
 	if buf.String() != want {

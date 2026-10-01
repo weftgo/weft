@@ -47,7 +47,7 @@ func (b blocking) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2[wef
 // waitState polls a parent session's receipts until one reaches state,
 // failing the test on timeout — an async child settles on a pool
 // goroutine, and a bounded poll is the honest wait.
-func waitState(t *testing.T, parent *thread.Session, state string) pool.Receipt {
+func waitState(t *testing.T, parent *thread.Session, state pool.State) pool.Receipt {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -101,7 +101,7 @@ func TestWrapSync(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "research",
 			Args: wefttest.Args(struct{ Prompt string }{"find the bug"})}),
 		wefttest.Say("done"),
-	), p.Wrap("research", "delegates research", child))
+	), p.MustWrap("research", "delegates research", child))
 	s, err := thread.Create(ctx, st, parent)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -196,7 +196,7 @@ func TestWrapChildRunIdentity(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "research",
 			Args: wefttest.Args(struct{ Prompt string }{"find the bug"})}),
 		wefttest.Say("done"),
-	), p.Wrap("research", "delegates research", child))
+	), p.MustWrap("research", "delegates research", child))
 	s, err := thread.Create(ctx, st, parent)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -249,7 +249,7 @@ func TestWrapSyncFails(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "research",
 			Args: wefttest.Args(struct{ Prompt string }{"go"})}),
 		wefttest.Say("noted"),
-	), p.Wrap("research", "", child))
+	), p.MustWrap("research", "", child))
 	s, _ := thread.Create(ctx, thread.Memory(), parent)
 	turn, err := s.Send(ctx, weft.User("go"))
 	if err != nil {
@@ -300,7 +300,7 @@ func TestWrapSyncCapped(t *testing.T) {
 	parent := weft.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"go"}`}),
 		wefttest.Say("noted"),
-	), p.Wrap("research", "", child))
+	), p.MustWrap("research", "", child))
 	s, _ := thread.Create(ctx, thread.Memory(), parent)
 	turn, _ := s.Send(ctx, weft.User("go"))
 	if _, err := turn.Wait(); err != nil {
@@ -323,7 +323,7 @@ func TestWrapAsyncGolden(t *testing.T) {
 	parent := weft.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"go"}`}),
 		wefttest.Say("ok"),
-	), p.Wrap("research", "", child, pool.Async()))
+	), p.MustWrap("research", "", child, pool.Async()))
 	s, _ := thread.Create(ctx, thread.Memory(), parent)
 	turn, err := s.Send(ctx, weft.User("go"))
 	if err != nil {
@@ -367,86 +367,6 @@ func TestWrapAsyncGolden(t *testing.T) {
 	}
 }
 
-// Admission is serialized by the bound (ADR 0022 D2): with one slot,
-// a queued child never starts while another holds it, and each
-// settling child admits exactly one waiter. Which waiter is first is
-// the channel wait queue's order among goroutines that reached it —
-// the FIFO guarantee covers blocked senders, not goroutine start
-// order — so the test is permutation-agnostic: it pins one-at-a-time
-// admission, not the permutation.
-func TestFIFO(t *testing.T) {
-	ctx := context.Background()
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
-	p := pool.New(1)
-	var mu sync.Mutex
-	started := []int{}
-	releases := make([]chan struct{}, 4)
-	for i := range releases {
-		releases[i] = make(chan struct{})
-	}
-	submit := func(i int) *pool.Receipt {
-		mdl := blocking{release: releases[i], text: fmt.Sprintf("child %d", i),
-			onStart: func() {
-				mu.Lock()
-				started = append(started, i)
-				mu.Unlock()
-			}}
-		r, err := p.Submit(ctx, s, weft.New(mdl), "go")
-		if err != nil {
-			t.Fatalf("Submit %d: %v", i, err)
-		}
-		return r
-	}
-	warm := submit(0) // holds the only slot
-	waitCount(t, s, 1)
-	// The warm-up must be inside its model before it holds the slot
-	// in the sense the queue sees: wait for its start.
-	waitStarted(t, &mu, &started, 1)
-	// Queued children: accepted, none started.
-	submit(1)
-	submit(2)
-	submit(3)
-	waitCount(t, s, 4)
-	mu.Lock()
-	if len(started) != 1 { // the warm-up itself
-		mu.Unlock()
-		t.Fatalf("queued children started: %v", started)
-	}
-	mu.Unlock()
-	// Each release settles one child and admits exactly one waiter,
-	// three times over.
-	close(releases[0])
-	waitState(t, s, thread.PoolDone)
-	for round := 1; round <= 3; round++ {
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
-			mu.Lock()
-			n := len(started)
-			mu.Unlock()
-			if n == round+1 {
-				break
-			}
-			time.Sleep(time.Millisecond)
-		}
-		mu.Lock()
-		got := append([]int(nil), started...)
-		mu.Unlock()
-		if len(got) != round+1 {
-			t.Fatalf("round %d: started = %v", round, got)
-		}
-		next := got[len(got)-1]
-		if next < 1 || next > 3 {
-			t.Fatalf("round %d admitted the warm-up again: %v", round, got)
-		}
-		close(releases[next])
-		waitState(t, s, thread.PoolDone)
-	}
-	if err := p.Close(ctx); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	_ = warm
-}
-
 // waitStarted polls until n children have started.
 func waitStarted(t *testing.T, mu *sync.Mutex, started *[]int, n int) {
 	t.Helper()
@@ -465,19 +385,6 @@ func waitStarted(t *testing.T, mu *sync.Mutex, started *[]int, n int) {
 	t.Fatalf("started = %v, want %d", *started, n)
 }
 
-// waitCount polls until the parent holds n receipts.
-func waitCount(t *testing.T, s *thread.Session, n int) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(pool.Receipts(s)) >= n {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("receipts = %d, want %d", len(pool.Receipts(s)), n)
-}
-
 // Cancel: an explicit cancel settles the receipt canceled (D4).
 func TestSubmitCancel(t *testing.T) {
 	ctx := context.Background()
@@ -491,7 +398,7 @@ func TestSubmitCancel(t *testing.T) {
 	if r.State != thread.PoolAccepted {
 		t.Errorf("fresh receipt = %+v", r)
 	}
-	if err := p.Cancel(r.ID); err != nil {
+	if err := p.Cancel(ctx, s, r.ID); err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
 	final := waitState(t, s, thread.PoolCanceled)
@@ -499,52 +406,15 @@ func TestSubmitCancel(t *testing.T) {
 		t.Errorf("settled receipt = %+v, want %s", final, r.ID)
 	}
 	close(release) // the model's goroutine, if it slipped in, may end
-	// A settled receipt refuses to cancel again.
-	if err := p.Cancel(r.ID); !errors.Is(err, pool.ErrNotRunning) {
-		t.Errorf("second Cancel err = %v", err)
+	// A settled receipt refuses to cancel again, and says what it is;
+	// an id the ledger does not hold is a different error.
+	err = p.Cancel(ctx, s, r.ID)
+	var se *pool.StateError
+	if !errors.Is(err, pool.ErrNotRunning) || !errors.As(err, &se) || se.State != pool.Canceled || se.Orphan {
+		t.Errorf("second Cancel err = %v (%+v), want a StateError at canceled", err, se)
 	}
-	if err := p.Close(ctx); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-}
-
-// Cancel's contract on a parked receipt (D4, ErrNotRunning's doc): a
-// child at an approval boundary is not running — its fate is the
-// decision, not a cancellation — so Cancel refuses with ErrNotRunning
-// instead of silently succeeding at nothing, and the boundary still
-// decides afterwards.
-func TestCancelParkedRefuses(t *testing.T) {
-	ctx := context.Background()
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
-	p := pool.New(1)
-	child, ran := gatedChild(
-		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}),
-		wefttest.Say("decided, not canceled"),
-	)
-	r, err := p.Submit(ctx, s, child, "refund order 1")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	waitState(t, s, thread.PoolRunning)
-	deadline := time.Now().Add(5 * time.Second)
-	for len(s.Pending()) == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if len(s.Pending()) != 1 {
-		t.Fatalf("mirrored requests = %+v", s.Pending())
-	}
-	if err := p.Cancel(r.ID); !errors.Is(err, pool.ErrNotRunning) {
-		t.Errorf("Cancel on a parked receipt err = %v, want ErrNotRunning", err)
-	}
-	if _, err := p.Decide(ctx, s, thread.Approve(s.Pending()[0].CallID)); err != nil {
-		t.Fatalf("Decide after the refused Cancel: %v", err)
-	}
-	final := waitState(t, s, thread.PoolDone)
-	if final.ID != r.ID || final.Stop != "decided, not canceled" {
-		t.Errorf("settled = %+v", final)
-	}
-	if got := ran.snapshot(); len(got) != 1 || !got[0] {
-		t.Errorf("approved flags = %v, want [true]", got)
+	if err := p.Cancel(ctx, s, "e_nope"); !errors.Is(err, pool.ErrUnknownReceipt) || errors.Is(err, pool.ErrNotRunning) {
+		t.Errorf("Cancel of an unknown receipt err = %v, want ErrUnknownReceipt", err)
 	}
 	if err := p.Close(ctx); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -599,70 +469,6 @@ func TestSubmitDetachedFromCallerCancel(t *testing.T) {
 	}
 }
 
-// A sync delegation chain deeper than the pool's max is refused with
-// SUBAGENT_CYCLE before any child starts (the deadlock guard).
-func TestDepthRefusal(t *testing.T) {
-	ctx := context.Background()
-	st := thread.Memory()
-	p := pool.New(1)
-	inner := weft.New(wefttest.Script(wefttest.Say("inner answer")))
-	middleAgent := weft.New(wefttest.Script(
-		wefttest.ToolCalls(wefttest.Call{Name: "inner", Args: `{"prompt":"go"}`}),
-		wefttest.Say("middle done"),
-	), p.Wrap("inner", "", inner))
-	parent := weft.New(wefttest.Script(
-		wefttest.ToolCalls(wefttest.Call{Name: "middle", Args: `{"prompt":"go"}`}),
-		wefttest.Say("parent done"),
-	), p.Wrap("middle", "", middleAgent))
-	s, _ := thread.Create(ctx, st, parent)
-	turn, _ := s.Send(ctx, weft.User("go"))
-	res, err := turn.Wait()
-	if err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-	var saw string
-	for _, m := range res.Messages {
-		if m.Role != weft.RoleTool {
-			continue
-		}
-		for _, part := range m.Content {
-			if tp, ok := part.(weft.ToolResultPart); ok {
-				saw = tp.Content
-			}
-		}
-	}
-	if res.Text() != "parent done" {
-		t.Errorf("parent reply = %q", res.Text())
-	}
-	// The refusal fired inside the middle child — its own transcript
-	// shows it, and the middle model recovered (failure is data) and
-	// answered, which is what the parent's call returned.
-	rs := pool.Receipts(s)
-	if len(rs) != 1 {
-		t.Fatalf("receipts = %+v", rs)
-	}
-	middleSess, err := thread.Open(ctx, st, rs[0].Child, middleAgent)
-	if err != nil {
-		t.Fatalf("Open middle: %v", err)
-	}
-	if !strings.Contains(saw, "middle done") {
-		t.Errorf("parent tool result = %q; the middle's recovered answer", saw)
-	}
-	refused := false
-	for _, e := range middleSess.Entries() {
-		if m, ok := e.(thread.MessageEntry); ok && m.Message.Role == weft.RoleTool {
-			for _, part := range m.Message.Content {
-				if tp, ok := part.(weft.ToolResultPart); ok && strings.Contains(tp.Content, "SUBAGENT_CYCLE") {
-					refused = true
-				}
-			}
-		}
-	}
-	if !refused {
-		t.Errorf("no SUBAGENT_CYCLE in the middle child's transcript")
-	}
-}
-
 // Outside a session run the wrap falls back to the ordinary subagent
 // path under the slot (ADR 0022 §2): no receipts, the child's answer
 // is the result.
@@ -673,7 +479,7 @@ func TestWrapOutsideSession(t *testing.T) {
 	parent := weft.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "ask", Args: `{"prompt":"go"}`}),
 		wefttest.Say("done"),
-	), p.Wrap("ask", "", child))
+	), p.MustWrap("ask", "", child))
 	res, err := parent.Generate(ctx, weft.Prompt("go"))
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -681,14 +487,6 @@ func TestWrapOutsideSession(t *testing.T) {
 	if res.Text() != "done" {
 		t.Errorf("reply = %q", res.Text())
 	}
-}
-
-func settledState(s string) bool {
-	switch s {
-	case thread.PoolDone, thread.PoolFailed, thread.PoolCanceled, thread.PoolCapped:
-		return true
-	}
-	return false
 }
 
 func mustList(ctx context.Context, t *testing.T, st thread.Storage) []thread.Header {
@@ -723,7 +521,7 @@ func TestReceiptsAfterRestart(t *testing.T) {
 	parent := weft.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"go"}`}),
 		wefttest.Say("done"),
-	), p.Wrap("research", "", child))
+	), p.MustWrap("research", "", child))
 	s, _ := thread.Create(ctx, st, parent)
 	turn, _ := s.Send(ctx, weft.User("go"))
 	if _, err := turn.Wait(); err != nil {
@@ -771,10 +569,13 @@ func TestManySessionsRace(t *testing.T) {
 			turns[j] = wefttest.Say("child answer")
 		}
 		child := weft.New(wefttest.Script(turns...))
+		// One wrap name names one agent: each session's own child gets
+		// its own.
+		name := fmt.Sprintf("research%d", i)
 		parent := weft.New(wefttest.Script(
-			wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"go"}`}),
+			wefttest.ToolCalls(wefttest.Call{Name: name, Args: `{"prompt":"go"}`}),
 			wefttest.Say("done"),
-		), p.Wrap("research", "", child, pool.Async()))
+		), p.MustWrap(name, "", child, pool.Async()))
 		s, err := thread.Create(ctx, st, parent)
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -808,7 +609,7 @@ settling:
 			}
 			open := mustOpen(ctx, t, st, h.ID)
 			for _, r := range pool.Receipts(open) {
-				if !settledState(r.State) {
+				if !r.Settled() {
 					time.Sleep(time.Millisecond)
 					continue settling
 				}

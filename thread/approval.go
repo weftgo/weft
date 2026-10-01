@@ -56,6 +56,7 @@ const (
 	viaExpiry    = "expiry"
 	viaInterrupt = "interrupt"
 	viaChild     = "child"
+	viaParent    = "parent" // a pool child's record of a decision its parent session took (ADR 0022 §7)
 	viaQuorum    = "quorum"
 )
 
@@ -65,6 +66,16 @@ const (
 // verdict per Decide, and a batch that both approves and denies it
 // says nothing the session could apply. Nothing is recorded.
 var ErrInvalidDecision = errors.New("thread: invalid decision")
+
+// ErrDelegated is returned by Decide, DecideSigned and Request for a
+// call that delegates to a thread/pool child session (ADR 0022 §7): a
+// call some mirrored child request names as its Wrapper. Such a call
+// is parked because its child is, and it completes with the child's
+// answer — never by a decision of its own: approving it would run the
+// delegation a second time, in a second child session. Decide the
+// child's requests (Pending lists them, Child naming the session);
+// the pool resolves the call when the child ends.
+var ErrDelegated = errors.New("thread: call is delegated to a child session")
 
 // Request is a parked call awaiting a decision (ADR 0021 §1): what the
 // model asked for, hashed and named so a decision can state exactly
@@ -317,22 +328,20 @@ func (s *Session) Pending() []Request {
 // offeredPendingLocked is Pending's view of the boundary (ADR 0022 §7):
 // the raw pending, minus a delegating wrapper call a mirrored child
 // request parks under (the wrapper completes through its child, never
-// by a direct decision), plus the mirrored child requests themselves —
-// with their lineage, Child naming the session a decision resumes.
-// pendingLocked stays the raw truth the resume machinery reads: the
-// wrapper is pending there until the pool resolves it, which is what
-// holds a plain Send while a nested approval is open. Callers hold
-// s.mu.
+// by a direct decision — Decide refuses it with ErrDelegated), plus
+// the mirrored child requests themselves — with their lineage, Child
+// naming the session a decision resumes. A wrapper is hidden by
+// occurrence, not by id: call ids repeat across turns (ADR 0007), and
+// a later, ordinary call that reuses a wrapper's id is offered like
+// any other. pendingLocked stays the raw truth the resume machinery
+// reads: the wrapper is pending there until the pool resolves it,
+// which is what holds a plain Send while a nested approval is open.
+// Callers hold s.mu.
 func (s *Session) offeredPendingLocked() []Request {
-	wrapped := map[string]bool{}
-	for _, e := range s.order {
-		if re, ok := e.(ApprovalRequestEntry); ok && re.Child != "" && re.Wrapper != "" {
-			wrapped[re.Wrapper] = true
-		}
-	}
+	wrappers := s.approvalWalkLocked().wrappers
 	var out []Request
 	for _, r := range s.pendingLocked() {
-		if wrapped[r.CallID] {
+		if r.Child == "" && wrappers[r.CallID] != "" {
 			continue
 		}
 		out = append(out, r)
@@ -351,15 +360,15 @@ func (s *Session) offeredPendingLocked() []Request {
 // recorded in one atomic append: no decisions, a decision without an
 // outcome, or two decisions for one call fail with ErrInvalidDecision;
 // a decision for a call that is not pending fails with ErrNotPending;
-// a decision for a request past its expiry fails with ErrExpired. On
+// one for a delegating call with ErrDelegated; a decision for a
+// request past its expiry fails with ErrExpired. On
 // any of them none of the batch is recorded and no run starts on its
 // account.
 //
-// One session takes several decisions for one call in a batch: a pool
-// child (a session with a Lineage). Its Decide is how thread/pool
-// replays the decisions the parent recorded for the child's call —
-// several under the parent's Quorum — in the order they were made
-// (ADR 0022 §7).
+// A call that delegates to a thread/pool child (ADR 0022 §7) takes no
+// decision: a batch naming one fails with ErrDelegated. The rule is
+// the same on every session — a pool child included, whose parent's
+// decisions reach it through the pool's own replay, not this door.
 //
 // Expiry is resolved first, on every call: each pending request
 // strictly past its expiry is denied on the spot with the stated
@@ -384,44 +393,16 @@ func (s *Session) Decide(ctx context.Context, ds ...Decision) (*Turn, error) {
 	if s.cfg.requireSigned {
 		return nil, fmt.Errorf("%w: session %s", ErrSignatureRequired, s.header.ID)
 	}
+	wrappers := s.approvalWalkLocked().wrappers
 	batch := make([]recordedDecision, len(ds))
 	for i, d := range ds {
+		if child := wrappers[d.CallID]; child != "" {
+			return nil, fmt.Errorf("%w: call %q completes with child session %s", ErrDelegated, d.CallID, child)
+		}
 		d.Via = viaUser // the door names the channel, never the caller
 		batch[i] = recordedDecision{Decision: d}
 	}
-	return s.decideLocked(ctx, batch, s.header.Lineage == nil)
-}
-
-// ResolveDelegation records the outcome of a pool delegation as the
-// resolution of the parent-side call that delegated it (ADR 0022 §7):
-// content becomes the call's result, marked as an error when isError,
-// recorded with Who "thread/pool" and Via "child", and the boundary
-// resumes when that completes it, like Decide. It is thread/pool's
-// plumbing, not a second way to decide: callID must be the delegating
-// call of a mirrored child request — a call some request entry names
-// as its Wrapper — and anything else fails with ErrNotPending. A
-// delegation's answer is not an approval, so the call records under
-// RequireSigned too (the approvals that let the child run were
-// signed where they were decided), and it is not subject to the
-// request's expiry: the child ran, and its answer is the result.
-func (s *Session) ResolveDelegation(ctx context.Context, callID, content string, isError bool) (*Turn, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.approvalWalkLocked().wrappers[callID] {
-		return nil, fmt.Errorf("%w: call %q delegates to no child session", ErrNotPending, callID)
-	}
-	d := Resolve(callID, content)
-	if isError {
-		d = ResolveError(callID, content)
-	}
-	d.Who, d.Via = "thread/pool", viaChild
-	if err := s.recordDecisionsLocked(ctx, []recordedDecision{{Decision: d}}, true); err != nil {
-		return nil, err
-	}
-	return s.armSettledLocked(ctx)
+	return s.decideLocked(ctx, batch, true)
 }
 
 // recordedDecision is a decision on its way into the file: what was
@@ -480,8 +461,9 @@ func (s *Session) decideLocked(ctx context.Context, batch []recordedDecision, on
 // resolution. It holds no signature rule (RequireSigned is the
 // exported Decide's own) and resolves no expiry (its callers do).
 // With onePerCall a batch naming one call twice is refused; without
-// it — the pool's replay into a child session — the decisions for one
-// call are recorded in the order given, like so many batches. The
+// it — ReplayDecisions, the pool's replay into a child session — the
+// decisions for one call are recorded in the order given, like so
+// many batches. The
 // grant an Always decision asks for joins the same append — but only
 // with the decision that makes the call's effective verdict, over
 // every decision the occurrence then holds, an approve. Callers hold
@@ -1236,10 +1218,11 @@ type approvalWalk struct {
 	requests  map[string]ApprovalRequestEntry
 	runs      map[string]string
 	decisions map[string][]ApprovalDecisionEntry
-	// wrappers holds the calls that delegate to a pool child: the
-	// current occurrence of the call is named as Wrapper by a mirrored
-	// child request (ADR 0022 §7).
-	wrappers map[string]bool
+	// wrappers holds the calls that delegate to a pool child, each
+	// mapped to that child's session id: the current occurrence of
+	// the call is named as Wrapper by a mirrored child request (ADR
+	// 0022 §7).
+	wrappers map[string]string
 }
 
 // occurrence returns the run that names a call's current occurrence —
@@ -1276,7 +1259,7 @@ func (s *Session) approvalWalkLocked() approvalWalk {
 		requests:  map[string]ApprovalRequestEntry{},
 		runs:      map[string]string{},
 		decisions: map[string][]ApprovalDecisionEntry{},
-		wrappers:  map[string]bool{},
+		wrappers:  map[string]string{},
 	}
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
@@ -1323,7 +1306,7 @@ func (s *Session) approvalWalkLocked() approvalWalk {
 			w.requests[e.CallID] = e
 			w.decisions[e.CallID] = nil
 			if e.Child != "" && e.Wrapper != "" {
-				w.wrappers[e.Wrapper] = true
+				w.wrappers[e.Wrapper] = e.Child
 			}
 		case ApprovalDecisionEntry:
 			if spent[e.ID] {
@@ -1455,15 +1438,39 @@ func (s *Session) pendingLocked() []Request {
 	// lineage, and a decision addressed to it records like any other.
 	// An async child's mirror is the only shape that surfaces: the
 	// parent's own transcript never dangles for it.
-	for _, e := range s.order {
-		re, ok := e.(ApprovalRequestEntry)
-		if !ok || re.Child == "" {
-			continue
-		}
+	for _, re := range s.liveMirrorsLocked() {
 		if _, ok := effectiveDecision(scopedDecisions(walk.decisions[re.CallID], re.RunID), s.cfg.quorum); ok {
 			continue
 		}
 		out = append(out, requestFromEntry(s.header.ID, re))
+	}
+	return out
+}
+
+// liveMirrorsLocked returns the mirrored child requests in force, in
+// append order (ADR 0022 §7): every mirror entry but the superseded
+// ones. A child that parks again on a call id it parked on before is
+// mirrored again under the same namespaced id, and the later entry is
+// the request — the earlier one would otherwise read undecided for
+// ever, its decisions reset by the entry that replaced it. Callers
+// hold s.mu.
+func (s *Session) liveMirrorsLocked() []ApprovalRequestEntry {
+	last := map[string]int{}
+	for i, e := range s.order {
+		if re, ok := e.(ApprovalRequestEntry); ok && re.Child != "" {
+			last[re.CallID] = i
+		}
+	}
+	if len(last) == 0 {
+		return nil
+	}
+	var out []ApprovalRequestEntry
+	for i, e := range s.order {
+		re, ok := e.(ApprovalRequestEntry)
+		if !ok || re.Child == "" || last[re.CallID] != i {
+			continue
+		}
+		out = append(out, re)
 	}
 	return out
 }
@@ -1478,10 +1485,17 @@ func (s *Session) boundaryLocked() bool {
 }
 
 // expiredPendingLocked filters the pending requests strictly past
-// their expiry. Callers hold s.mu.
+// their expiry. A delegating wrapper call never expires on its own
+// (ADR 0022 §7): its fate is its child's — the child's mirrored
+// requests carry the expiry, their denial resumes the child, and the
+// child's answer resolves the wrapper. Callers hold s.mu.
 func (s *Session) expiredPendingLocked(now time.Time) []Request {
+	wrappers := s.approvalWalkLocked().wrappers
 	var out []Request
 	for _, r := range s.pendingLocked() {
+		if r.Child == "" && wrappers[r.CallID] != "" {
+			continue
+		}
 		if !r.Expiry.IsZero() && now.After(r.Expiry) {
 			out = append(out, r)
 		}

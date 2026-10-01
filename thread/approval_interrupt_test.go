@@ -134,10 +134,10 @@ func TestResolveDelegation(t *testing.T) {
 
 	// A parked call that delegates to no child is not the pool's to
 	// resolve.
-	if _, err := s.ResolveDelegation(ctx, call.ID, "forged", false); !errors.Is(err, thread.ErrNotPending) {
+	if _, err := s.ResolveDelegation(ctx, call.ID, "s_child", "forged", false); !errors.Is(err, thread.ErrNotPending) {
 		t.Fatalf("ResolveDelegation on an ordinary call: %v, want ErrNotPending", err)
 	}
-	if _, err := s.ResolveDelegation(ctx, "call_nope", "forged", false); !errors.Is(err, thread.ErrNotPending) {
+	if _, err := s.ResolveDelegation(ctx, "call_nope", "s_child", "forged", false); !errors.Is(err, thread.ErrNotPending) {
 		t.Fatalf("ResolveDelegation on an unknown call: %v, want ErrNotPending", err)
 	}
 
@@ -157,8 +157,14 @@ func TestResolveDelegation(t *testing.T) {
 	if rt, err := s.DecideSigned(ctx, thread.SignDecision(secret, r, thread.Approve(mirror))); err != nil || rt != nil {
 		t.Fatalf("deciding the mirror: turn %v, err %v", rt, err)
 	}
+	// ...another child's answer does not resolve it: the wrapper is
+	// this child's, and a call id reused by a later delegation must
+	// never take an earlier child's answer...
+	if _, err := s.ResolveDelegation(ctx, call.ID, "s_other", "forged", false); !errors.Is(err, thread.ErrNotPending) {
+		t.Fatalf("ResolveDelegation naming another child: %v, want ErrNotPending", err)
+	}
 	// ...and the child's answer resolves the wrapper.
-	rt, err := s.ResolveDelegation(ctx, call.ID, "wired 40", false)
+	rt, err := s.ResolveDelegation(ctx, call.ID, "s_child", "wired 40", false)
 	if err != nil {
 		t.Fatal(err)
 	}

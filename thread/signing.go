@@ -406,15 +406,20 @@ func SignDecision(key []byte, r Request, d Decision) SignedDecision {
 // challenge for the same request.
 //
 // It fails with ErrNotPending when callID is not pending, with
-// ErrExpired when the request is past its expiry (no decision could
-// be accepted for it), and when the session has no keyring with an
-// active key.
+// ErrDelegated when it is a call delegating to a pool child (which
+// takes no decision), with ErrExpired when the request is past its
+// expiry (no decision could be accepted for it), and when the session
+// has no keyring with an active key.
 func (s *Session) Request(callID string) (Request, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ring := s.cfg.keyring
 	if ring == nil || ring.active == "" {
 		return Request{}, fmt.Errorf("thread: Request needs a keyring with an active key")
+	}
+	if child := s.approvalWalkLocked().wrappers[callID]; child != "" {
+		// A delegating call takes no decision, so it gets no challenge.
+		return Request{}, fmt.Errorf("%w: call %q completes with child session %s", ErrDelegated, callID, child)
 	}
 	now := s.approvalNow()
 	for _, r := range s.pendingLocked() {
@@ -469,6 +474,10 @@ const maxSignedRefusals = 16
 //   - an arguments hash that differs from the request's —
 //     ErrArgsChanged.
 //
+// A signature that passes every check and names a call delegating to
+// a pool child fails with ErrDelegated, unrecorded and unaudited: the
+// call completes with its child's answer (ADR 0022 §7).
+//
 // A refusal is audited: a StepSigned entry names the reason, the call
 // and, when the ring holds it, the key — and carries no decision. Two
 // bounds keep the log from growing at a stranger's will: a signature
@@ -484,6 +493,14 @@ func (s *Session) DecideSigned(ctx context.Context, sd SignedDecision) (*Turn, e
 		return nil, fmt.Errorf("thread: DecideSigned needs a keyring")
 	}
 	v := s.verifySignedLocked(ctx, sd)
+	if v.err == nil {
+		// A verified signature over a delegating call is still no
+		// decision (ADR 0022 §7): the call completes with its child.
+		// Checked after the signature, so a stranger learns nothing.
+		if child := s.approvalWalkLocked().wrappers[sd.CallID]; child != "" && (v.request == nil || v.request.Child == "") {
+			v.err = fmt.Errorf("%w: call %q completes with child session %s", ErrDelegated, sd.CallID, child)
+		}
+	}
 	if v.err == nil {
 		d := Decision{
 			CallID: sd.CallID, Kind: sd.Kind, Reason: sd.Reason, Content: sd.Content,

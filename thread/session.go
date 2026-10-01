@@ -1333,72 +1333,6 @@ func (s *Session) CustomMessage(ctx context.Context, kind string, msg weft.Messa
 	})
 }
 
-// AppendPoolReceipt appends one pool receipt entry (ADR 0022 §4) and
-// returns it as stored, its minted ID the receipt handle a later entry
-// links back to with Receipt. The pool calls this for every state its
-// delegations pass through — acceptance, the start, the settlement —
-// under the rule the entry kind's contract states: pool receipts are
-// ledger, never model context, and a child's answer reaches the model
-// only through its delegating call's result or the application. A
-// hand caller owns the same rules.
-func (s *Session) AppendPoolReceipt(ctx context.Context, e PoolReceiptEntry) (PoolReceiptEntry, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out PoolReceiptEntry
-	err := s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {
-		e.ID, e.ParentID, e.Created = id, parent, created
-		out = e
-		return e
-	})
-	if err != nil {
-		return PoolReceiptEntry{}, err
-	}
-	return out, nil
-}
-
-// AppendApprovalRequests appends mirrored approval requests in one
-// atomic batch (ADR 0022 §7): the pool writes a child session's parked
-// calls onto the parent's tree — Child naming the session they park
-// in, Wrapper the delegating call they park under — so the parent's
-// Pending surfaces them and a decision records like any other. The
-// entries' tree fields are minted here, each id vetted like every
-// other the session mints (valid, and new to the tree and to the
-// batch); the stored entries return. Mirrors are ledger until
-// decided: they never join the model's context, and their resolution
-// is the pool's to route.
-func (s *Session) AppendApprovalRequests(ctx context.Context, reqs ...ApprovalRequestEntry) ([]ApprovalRequestEntry, error) {
-	if len(reqs) == 0 {
-		return nil, fmt.Errorf("thread: AppendApprovalRequests with no requests")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	entries := make([]Entry, 0, len(reqs))
-	parent := s.leaf
-	now := s.now()
-	out := make([]ApprovalRequestEntry, 0, len(reqs))
-	for _, r := range reqs {
-		id, err := s.mintCheckedLocked(entries)
-		if err != nil {
-			return nil, err
-		}
-		r.ID, r.ParentID, r.Created = id, parent, now
-		r.Args = slices.Clone(r.Args)
-		entries = append(entries, r)
-		out = append(out, r)
-		parent = id
-	}
-	if err := s.appendEntriesLocked(ctx, entries...); err != nil {
-		return nil, err
-	}
-	for i := range out {
-		out[i].Args = slices.Clone(out[i].Args) // the caller's copy, not the tree's
-	}
-	return out, nil
-}
-
 // isPoolSettled reports whether a pool receipt status is a settlement
 // — the states whose entry carries the child's final usage (ADR 0022
 // §4): exactly one of them follows every acceptance.
@@ -1407,7 +1341,7 @@ func isPoolSettled(status string) bool {
 	case PoolDone, PoolFailed, PoolCanceled, PoolCapped:
 		return true
 	}
-	return false
+	return false // accepted, running, parked
 }
 
 // Usage is a session's cost ledger (ADR 0020 §4): what its turns cost

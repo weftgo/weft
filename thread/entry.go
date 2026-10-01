@@ -273,7 +273,9 @@ type ApprovalRequestEntry struct {
 // step, "grant" for a grant's approval, "expiry" for an expired
 // request's automatic denial, "interrupt" for the denial an
 // interrupting Send records, "child" for a pool delegation's
-// resolution — and the run the decided request belonged to. It never
+// resolution, "parent" for a decision a pool child's parent session
+// took and the pool replayed into the child — and the run the decided
+// request belonged to. It never
 // enters the model's context; the model sees the decision only
 // through the result the resumed run produces.
 type ApprovalDecisionEntry struct {
@@ -416,15 +418,18 @@ const (
 )
 
 // PoolReceiptEntry is the pool receipt (ADR 0022 §4): the journey of
-// one child run a thread/pool started for this session. One entry
+// one delegation a thread/pool started for this session. One entry
 // records acceptance — Status "accepted", the child session on Child,
-// the task on Prompt — a second records the slot acquisition and
-// start ("running"), and a third, linked by Receipt, records the
-// settlement: "done" (Stop carries the child's answer, Usage its
-// total), "failed" (Stop the cause), "canceled" (an explicit Cancel),
-// or "capped" (the child died on a budget — MaxSteps or a usage
-// limit). Call names the delegating tool call for wrapped
-// delegations. Pool receipt entries never enter the model's context:
+// the task on Prompt — and every later one links back to it by
+// Receipt: "running" when a slot is acquired and the child's run
+// starts, "parked" when that run ends at an approval boundary (the
+// two alternate, once per park and resume), and exactly one
+// settlement — "done" (Stop carries the child's answer), "failed"
+// (Stop the cause), "canceled" (Cancel, or the pool's Close), or
+// "capped" (the child died on a budget — MaxSteps or a usage limit).
+// A settlement's Usage is the child session's whole cost — every run
+// it made for the delegation, the ones before a park included. Call
+// names the delegating tool call for wrapped delegations. Pool receipt entries never enter the model's context:
 // the answer reaches the model as the delegating call's result (a
 // sync delegation) or however the application delivers it (an async
 // one); the entry is the ledger, not the channel.
@@ -442,8 +447,9 @@ type PoolReceiptEntry struct {
 }
 
 // Pool receipt statuses — the wire values, pinned by the format-4
-// goldens. The machine is accepted → running → exactly one of done,
-// failed, canceled, capped.
+// goldens. The machine is accepted → running ⇄ parked → exactly one
+// of done, failed, canceled, capped; a delegation canceled or failed
+// before its child ever ran settles straight from accepted.
 const (
 	// PoolAccepted marks the delegation recorded and queued for a slot.
 	PoolAccepted = "accepted"
@@ -451,13 +457,20 @@ const (
 	// started — the wait between acceptance and running is the pool's
 	// queue, visible.
 	PoolRunning = "running"
+	// PoolParked marks a child whose run ended at an approval boundary
+	// (ADR 0022 §7): it holds no slot and waits for decisions on the
+	// requests mirrored onto this session. The next "running" entry is
+	// its resume. A status, not a new kind: a reader from before it
+	// sees one more unsettled state, which is what it is.
+	PoolParked = "parked"
 	// PoolDone marks a child that ran to its intended end; Stop is its
 	// answer, Usage its total cost.
 	PoolDone = "done"
 	// PoolFailed marks a child whose run failed; Stop is the cause.
 	PoolFailed = "failed"
-	// PoolCanceled marks a child canceled by an explicit Cancel (or the
-	// pool's Close) — never by the submitting turn's own end, which an
+	// PoolCanceled marks a child canceled — by an explicit Cancel, by
+	// the pool's Close, or, for a sync child, with the delegating call
+	// it ran under — never by the submitting turn's own end, which an
 	// async child survives by design (ADR 0022 D4).
 	PoolCanceled = "canceled"
 	// PoolCapped marks a child that died on a budget — ErrMaxSteps or

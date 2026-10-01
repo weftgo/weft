@@ -74,7 +74,7 @@ func nestedParent(p *pool.Pool, child *weft.Agent, opts ...pool.WrapOption) *wef
 		wefttest.ToolCalls(wefttest.Call{Name: "research",
 			Args: wefttest.Args(struct{ Prompt string }{"refund order 1234"})}),
 		wefttest.Say("all done"),
-	), p.Wrap("research", "delegates the refund flow", child, opts...))
+	), p.MustWrap("research", "delegates the refund flow", child, opts...))
 }
 
 // TestNestedSyncFullFlow is ADR 0022 §7's sync half, end to end: the
@@ -128,15 +128,11 @@ func TestNestedSyncFullFlow(t *testing.T) {
 	// Decide through the pool: records in the parent, replays into
 	// the child, resumes it, and completes the wrapper with the
 	// child's answer.
-	ct, err := p.Decide(ctx, s, thread.Approve(req.CallID))
-	if err != nil {
+	if err := p.Decide(ctx, s, thread.Approve(req.CallID)); err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
-	if ct == nil {
-		t.Fatalf("Decide resumed no child turn")
-	}
-	if _, err := ct.Wait(); err != nil {
-		t.Fatalf("child resume: %v", err)
+	if rc, err := p.Wait(ctx, s, pool.Receipts(s)[0].ID); err != nil || !rc.Settled() {
+		t.Fatalf("child resume: %+v, %v", rc, err)
 	}
 	// The parent's own continuation, through its parked boundary.
 	next := t1.Next()
@@ -200,7 +196,7 @@ func TestNestedAsyncParkAndDecide(t *testing.T) {
 	if len(pend) != 1 || pend[0].Tool != "refund" || pend[0].Child == "" {
 		t.Fatalf("Pending = %+v", pend)
 	}
-	if _, err := p.Decide(ctx, s, thread.Approve(pend[0].CallID)); err != nil {
+	if err := p.Decide(ctx, s, thread.Approve(pend[0].CallID)); err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
 	final := waitState(t, s, thread.PoolDone)
@@ -248,17 +244,26 @@ func TestNestedAcrossRestart(t *testing.T) {
 		t.Fatalf("parked = %+v", pend)
 	}
 
-	// The restart: new pool, new session objects, same wrap name. The
-	// resumed child's agent starts at the continuation — the session's
-	// transcript is the state; the agent's script only stands in for
-	// the model the resumed run is about to call.
+	// The restart: the old process lets go — the pool's Close closes
+	// the parked child's session, the parent's Close its own, each
+	// giving up its writer's hold — and then new pool, new session
+	// objects, same wrap name. The resumed child's agent starts at the
+	// continuation — the session's transcript is the state; the
+	// agent's script only stands in for the model the resumed run is
+	// about to call.
+	if err := p.Close(ctx); err != nil {
+		t.Fatalf("Close the old pool: %v", err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatalf("Close the old parent: %v", err)
+	}
 	p2 := pool.New(2)
 	child2, ran2 := gatedChild(wefttest.Say("resumed after the restart"))
 	// The restarted parent's agent resumes positioned too: its first
 	// model call is the continuation the boundary's resume is about to
 	// make, not the delegation it already made.
 	resumeParent := weft.New(wefttest.Script(wefttest.Say("all done")),
-		p2.Wrap("research", "delegates the refund flow", child2))
+		p2.MustWrap("research", "delegates the refund flow", child2))
 	restart(t, st)
 	open, err := thread.Open(ctx, st, s.ID(), resumeParent)
 	if err != nil {
@@ -268,15 +273,11 @@ func TestNestedAcrossRestart(t *testing.T) {
 	if len(pend) != 1 || pend[0].Tool != "refund" {
 		t.Fatalf("Pending after restart = %+v", pend)
 	}
-	ct, err := p2.Decide(ctx, open, thread.Approve(pend[0].CallID))
-	if err != nil {
+	if err := p2.Decide(ctx, open, thread.Approve(pend[0].CallID)); err != nil {
 		t.Fatalf("Decide after restart: %v", err)
 	}
-	if ct == nil {
-		t.Fatalf("no resumed child turn")
-	}
-	if _, err := ct.Wait(); err != nil {
-		t.Fatalf("child resume: %v", err)
+	if rc, err := p2.Wait(ctx, open, pool.Receipts(open)[0].ID); err != nil || !rc.Settled() {
+		t.Fatalf("child resume: %+v, %v", rc, err)
 	}
 	if got := ran.snapshot(); len(got) != 0 {
 		t.Errorf("the pre-restart agent ran: %v", got)
@@ -326,7 +327,7 @@ func TestNestedSignedDecision(t *testing.T) {
 	parent := weft.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"go"}`}),
 		wefttest.Say("all done"),
-	), p.Wrap("research", "", child))
+	), p.MustWrap("research", "", child))
 	s, err := thread.Create(ctx, thread.Memory(), parent, thread.WithKeyring(ring))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -357,7 +358,7 @@ func TestNestedSignedDecision(t *testing.T) {
 		t.Fatalf("DecideSigned: %v", err)
 	}
 	// The signed decision recorded; the pump drives the child.
-	if _, err := p.Decide(ctx, s); err != nil {
+	if err := p.Decide(ctx, s); err != nil {
 		t.Fatalf("pump: %v", err)
 	}
 	final := waitState(t, s, thread.PoolDone)
@@ -389,15 +390,11 @@ func TestNestedDeny(t *testing.T) {
 	if len(pend) != 1 {
 		t.Fatalf("Pending = %+v", pend)
 	}
-	ct, err := p.Decide(ctx, s, thread.Deny(pend[0].CallID, "out of policy"))
-	if err != nil {
+	if err := p.Decide(ctx, s, thread.Deny(pend[0].CallID, "out of policy")); err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
-	if ct == nil {
-		t.Fatalf("no resumed turn")
-	}
-	if _, err := ct.Wait(); err != nil {
-		t.Fatalf("child resume: %v", err)
+	if rc, err := p.Wait(ctx, s, pool.Receipts(s)[0].ID); err != nil || !rc.Settled() {
+		t.Fatalf("child resume: %+v, %v", rc, err)
 	}
 	next := t1.Next()
 	if next == nil {
@@ -452,7 +449,7 @@ func TestForward(t *testing.T) {
 	}
 	<-inTool // the child is mid-run inside its tool
 
-	st, err := p.Forward(ctx, r.ID, weft.User("switch to euros"))
+	st, err := p.Forward(ctx, s, r.ID, weft.User("switch to euros"))
 	if err != nil {
 		t.Fatalf("Forward: %v", err)
 	}
@@ -480,7 +477,7 @@ func TestForward(t *testing.T) {
 		t.Errorf("the forwarded message never reached the child's transcript")
 	}
 	// A settled receipt refuses.
-	if _, err := p.Forward(ctx, r.ID, weft.User("late")); !errors.Is(err, pool.ErrNotRunning) {
+	if _, err := p.Forward(ctx, s, r.ID, weft.User("late")); !errors.Is(err, pool.ErrNotRunning) {
 		t.Errorf("Forward after settle err = %v", err)
 	}
 	if err := p.Close(ctx); err != nil {
@@ -506,7 +503,7 @@ func TestForwardSeesStart(t *testing.T) {
 		t.Fatalf("Submit: %v", err)
 	}
 	<-started // the model is running: Forward must serve it, not refuse
-	if _, err := p.Forward(ctx, r.ID, weft.User("steer")); err != nil {
+	if _, err := p.Forward(ctx, s, r.ID, weft.User("steer")); err != nil {
 		t.Fatalf("Forward at the run's start: %v", err)
 	}
 	close(release)
@@ -548,10 +545,10 @@ func TestConcurrentDecide(t *testing.T) {
 				defer wg.Done()
 				<-start
 				if approve {
-					_, _ = p.Decide(ctx, s, thread.Approve(call))
+					_ = p.Decide(ctx, s, thread.Approve(call))
 					return
 				}
-				_, _ = p.Decide(ctx, s) // a pure pump
+				_ = p.Decide(ctx, s) // a pure pump
 			}(g == 0)
 		}
 		close(start)
@@ -581,7 +578,7 @@ func TestBareSubagentPendingUnchanged(t *testing.T) {
 	parent := weft.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "ask", Args: `{"prompt":"go"}`}),
 		wefttest.Say("noted the failure"),
-	), p.Wrap("ask", "", child))
+	), p.MustWrap("ask", "", child))
 	res, err := parent.Generate(ctx, weft.Prompt("go"))
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -618,11 +615,13 @@ func TestRegisterResumesParkedSubmitChild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	waitState(t, s, thread.PoolRunning)
+	waitState(t, s, pool.Parked)
 	// A "restart": a new pool holding nothing but a registration.
 	p2 := pool.New(1)
 	child2, ran2 := gatedChild(wefttest.Say("registered resume done"))
-	p2.Register(r.Child, child2)
+	if err := p2.Register(r.Child, child2); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
 	// The running receipt lands before the child's park mirrors onto
 	// the parent, and a reopened handle is a snapshot: wait on the live
 	// session until the mirror is adopted, then reopen — the restart
@@ -635,7 +634,14 @@ func TestRegisterResumesParkedSubmitChild(t *testing.T) {
 	if len(s.Pending()) != 1 {
 		t.Fatalf("the mirror never landed: %+v", s.Pending())
 	}
-	restart(t, st)
+	// The old process lets go of its sessions before the new one
+	// writes them.
+	if err := p.Close(ctx); err != nil {
+		t.Fatalf("Close the old pool: %v", err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatalf("Close the old parent: %v", err)
+	}
 	open, err := thread.Open(ctx, st, s.ID(), weft.New(wefttest.Script()))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -644,7 +650,7 @@ func TestRegisterResumesParkedSubmitChild(t *testing.T) {
 	if len(pend) != 1 {
 		t.Fatalf("Pending after the reopen = %+v", pend)
 	}
-	if _, err := p2.Decide(ctx, open, thread.Approve(pend[0].CallID)); err != nil {
+	if err := p2.Decide(ctx, open, thread.Approve(pend[0].CallID)); err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
 	final := waitState(t, open, thread.PoolDone)
@@ -696,18 +702,18 @@ func TestForwardRequiresRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if _, err := p.Forward(ctx, r.ID, weft.User("early")); !errors.Is(err, pool.ErrNotRunning) {
+	if _, err := p.Forward(ctx, s, r.ID, weft.User("early")); !errors.Is(err, pool.ErrNotRunning) {
 		t.Fatalf("Forward to a queued child err = %v, want ErrNotRunning", err)
 	}
 	close(warmRelease)
 	waitState(t, s, thread.PoolDone)
 	<-waitStarted
-	if _, err := p.Forward(ctx, r.ID, weft.User("on time")); err != nil {
+	if _, err := p.Forward(ctx, s, r.ID, weft.User("on time")); err != nil {
 		t.Fatalf("Forward to the now-running child: %v", err)
 	}
 	close(release)
 	waitState(t, s, thread.PoolDone)
-	if _, err := p.Forward(ctx, warm.ID, weft.User("late")); !errors.Is(err, pool.ErrNotRunning) {
+	if _, err := p.Forward(ctx, s, warm.ID, weft.User("late")); !errors.Is(err, pool.ErrNotRunning) {
 		t.Errorf("Forward after settle err = %v, want ErrNotRunning", err)
 	}
 	if err := p.Close(ctx); err != nil {

@@ -11,6 +11,18 @@ import (
 	"github.com/weftgo/weft"
 )
 
+// The compaction options (ADR 0020 §3). The naming rule of this file:
+// With* injects an implementation of an interface (WithEstimator,
+// WithSummarizer, WithCompactor, WithTrimmer — the bare names are the
+// interface types); bare names set values or functions.
+//
+// The lock rule of this file: every caller-supplied function or
+// implementation — TriggerFunc, Estimator, Trimmer, Summarizer,
+// Compactor, BeforeCompact, AfterCompact, CompactFailed, CheckSummary
+// — runs without the session lock and may call the session
+// (Context, Usage, Leaf, Entries, …). The write that follows a hook
+// re-validates against the tree as it is then.
+
 // ── Layer 1 — knobs ─────────────────────────────────────────────────
 
 type contextWindowOption int64
@@ -24,7 +36,10 @@ func (o contextWindowOption) applySession(c *sessionConfig) {
 // ContextWindow returns the SessionOption setting the context window
 // the trigger budgets against, in tokens. Zero or negative is ignored
 // (the window stays unknown: no automatic compaction, one warning).
-// ModelWindows overrides it per model.
+// ModelWindows overrides it per model. A known window must leave room
+// for the other two knobs — Reserve < window and KeepRecent < window −
+// Reserve — or Create and Open fail with ErrCompactConfig: a window
+// too small for its reserve would otherwise never compact, silently.
 func ContextWindow(n int64) SessionOption { return contextWindowOption(n) }
 
 type modelWindowsOption map[weft.ModelInfo]int64
@@ -41,10 +56,13 @@ func (o modelWindowsOption) applySession(c *sessionConfig) {
 }
 
 // ModelWindows returns the SessionOption setting per-model context
-// windows, keyed by ModelInfo (provider + name): the session's own
-// model is looked up at Create/Open, and its entry overrides
-// ContextWindow for this session — pi's per-model settings, for the
-// agent that switches models mid-project.
+// windows, keyed by ModelInfo (provider + name): the session agent's
+// model is looked up once, at Create or Open, and its entry overrides
+// ContextWindow for the life of that Session value — one options list
+// shared by sessions that run different agents. The lookup is not
+// repeated per turn: a run that swaps its model (weft.UseModel) keeps
+// the window resolved for the agent's own model, and a session
+// reopened with another agent resolves again for that agent.
 func ModelWindows(windows map[weft.ModelInfo]int64) SessionOption {
 	return modelWindowsOption(windows)
 }
@@ -63,8 +81,9 @@ func (o modelReservesOption) applySession(c *sessionConfig) {
 }
 
 // ModelReserves returns the SessionOption setting per-model reserves,
-// keyed by ModelInfo, overriding Reserve for this session's model —
-// the small-window model that needs more headroom than the default.
+// keyed by ModelInfo, overriding Reserve for the session agent's model
+// — the small-window model that needs a different headroom than the
+// default. Resolved once at Create or Open, like ModelWindows.
 func ModelReserves(reserves map[weft.ModelInfo]int64) SessionOption {
 	return modelReservesOption(reserves)
 }
@@ -79,7 +98,9 @@ func (o reserveOption) applySession(c *sessionConfig) {
 
 // Reserve returns the SessionOption setting the trigger's headroom:
 // compaction fires before the context is within Reserve tokens of the
-// window. Zero or negative keeps the default 16,384.
+// window. Zero or negative keeps the default 16,384. It also sizes the
+// summarizer's output cap (0.8 × Reserve unless SummaryMaxTokens says
+// otherwise).
 func Reserve(n int64) SessionOption { return reserveOption(n) }
 
 type keepRecentOption int64
@@ -111,9 +132,12 @@ type triggerFuncOption func(TriggerInput) bool
 func (o triggerFuncOption) applySession(c *sessionConfig) { c.compaction.trigger = o }
 
 // TriggerFunc returns the SessionOption replacing the trigger's
-// condition — fire when in says so. It is consulted only when a window
-// is known and a provider-reported input exists: the no-estimated-
-// signal rule stands under a custom trigger too.
+// condition — fire when fn says so. It is consulted only when a window
+// is known and a provider-reported input describes the current path:
+// the no-estimated-signal rule stands under a custom trigger too, and
+// so does the stand-down after a compaction (the trigger waits for the
+// next provider report). fn runs without the session lock; it may call
+// the session. A panic in fn is contained and reads as "do not fire".
 func TriggerFunc(fn func(TriggerInput) bool) SessionOption {
 	if fn == nil {
 		return nil
@@ -130,9 +154,12 @@ func (o minTurnsBetweenOption) applySession(c *sessionConfig) {
 }
 
 // MinTurnsBetween returns the SessionOption rate-limiting automatic
-// compaction: no automatic compaction within n turns of the last one
-// (manual Compact always works). Zero, the default, means no limit.
-// The stop against a context that re-crosses the line every turn.
+// compaction: no automatic compaction or trim within n turns of the
+// last compaction entry on the leaf's path (manual Compact always
+// works). Zero, the default, means no limit. The count runs along the
+// leaf's path, so a compaction on another branch does not hold this
+// one back. The stop against a context that re-crosses the line every
+// turn.
 func MinTurnsBetween(n int) SessionOption { return minTurnsBetweenOption(n) }
 
 type maxPerSessionOption int
@@ -144,16 +171,22 @@ func (o maxPerSessionOption) applySession(c *sessionConfig) {
 }
 
 // MaxPerSession returns the SessionOption capping how many automatic
-// compactions a session may run — zero (the default) means no cap;
-// after the cap the trigger stops firing and manual Compact keeps
-// working.
+// compactions (every reason but manual, trims included) may sit on the
+// leaf's path — zero (the default) means no cap; at the cap the
+// trigger stops firing and manual Compact keeps working. The count
+// runs along the leaf's path: an abandoned branch's compactions are
+// not this line's.
 func MaxPerSession(n int) SessionOption { return maxPerSessionOption(n) }
 
 // Estimator estimates the token weight of messages — the trigger's
-// delta and the cut's walk. The default is a quarter of the wire
-// bytes; a provider-aware implementation can do better.
+// delta, the cut's walk and the entry's TokensBefore. The default is a
+// quarter of the wire bytes; a provider-aware implementation can do
+// better. Estimate returns the total for msgs, in tokens, the unit
+// every other number here uses; it is called with one message when the
+// walk weighs entries one by one and with a batch otherwise. It runs
+// without the session lock and may call the session.
 type Estimator interface {
-	Estimate(msgs []weft.Message) int
+	Estimate(msgs []weft.Message) int64
 }
 
 type estimatorOption struct{ est Estimator }
@@ -165,20 +198,20 @@ func (o estimatorOption) applySession(c *sessionConfig) {
 }
 
 // WithEstimator returns the SessionOption replacing the token
-// estimator. (The ADR sketches thread.Estimator(est); the interface
-// already owns that name, so the option takes the With* shape its
-// layer-3 neighbours use.)
+// estimator. A nil est is ignored.
 func WithEstimator(est Estimator) SessionOption { return estimatorOption{est} }
 
-type disabledOption struct{}
+type noAutoCompactOption struct{}
 
-func (disabledOption) applySession(c *sessionConfig) { c.compaction.disabled = true }
+func (noAutoCompactOption) applySession(c *sessionConfig) { c.compaction.disabled = true }
 
-// Disabled returns the SessionOption turning automatic compaction off
-// entirely — no trigger, no warning: the session that compacts only by
-// hand. Manual Compact, PreviewCompaction and Uncompact are unaffected
-// (ADR 0020 §3).
-func Disabled() SessionOption { return disabledOption{} }
+// NoAutoCompact returns the SessionOption turning automatic compaction
+// off entirely — no trigger, no trim, no no-window warning: the
+// session that compacts only by hand. Manual Compact,
+// PreviewCompaction, ApplyCompaction and Uncompact are unaffected, and
+// so is the overflow compaction a failed turn runs (ReRunOnOverflow
+// governs that one).
+func NoAutoCompact() SessionOption { return noAutoCompactOption{} }
 
 // ── Layer 2 — the summary ───────────────────────────────────────────
 
@@ -191,10 +224,11 @@ func (o summaryModelOption) applySession(c *sessionConfig) {
 }
 
 // SummaryModel returns the SessionOption setting a different model for
-// summaries — a cheap one. On failure it falls back to the session's
-// own model (the chain: SummaryModel → session model → no compaction,
-// reported through CompactFailed), because a weak summary costs more
-// in rework than a cheap model saves only when it works at all.
+// summaries — a cheap one. When it fails — an error, a summary
+// CheckSummary rejects twice, or one cut off at the output cap twice —
+// the session's own model takes over (the chain: SummaryModel →
+// session model → no compaction, the error returned and reported
+// through CompactFailed).
 func SummaryModel(m weft.Model) SessionOption { return summaryModelOption{m} }
 
 type summaryPromptOption string
@@ -224,17 +258,19 @@ func (o summaryFocusOption) applySession(c *sessionConfig) {
 // own rules.
 func SummaryFocus(focus string) SessionOption { return summaryFocusOption(focus) }
 
-type summaryMaxTokensOption int
+type summaryMaxTokensOption int64
 
 func (o summaryMaxTokensOption) applySession(c *sessionConfig) {
 	if o > 0 {
-		c.compaction.summaryMaxTokens = int(o)
+		c.compaction.summaryMaxTokens = int64(o)
 	}
 }
 
 // SummaryMaxTokens returns the SessionOption overriding the summarizer
-// output cap (the default 0.8 × Reserve).
-func SummaryMaxTokens(n int) SessionOption { return summaryMaxTokensOption(n) }
+// output cap, in tokens (the default 0.8 × Reserve). Zero or negative
+// keeps the default. A summary that reaches the cap is not stored: it
+// fails as ErrSummaryTruncated through the retry-and-fallback chain.
+func SummaryMaxTokens(n int64) SessionOption { return summaryMaxTokensOption(n) }
 
 // CompactOption configures one compaction call.
 type CompactOption interface {
@@ -255,39 +291,46 @@ func resolveCompact(opts ...CompactOption) compactCall {
 	return c
 }
 
-type instructionsOption string
+type summaryInstructionsOption string
 
-func (o instructionsOption) applyCompact(c *compactCall) {
+func (o summaryInstructionsOption) applyCompact(c *compactCall) {
 	if o != "" {
 		c.instructions = string(o)
 	}
 }
 
-// Instructions returns the CompactOption appending per-call
+// SummaryInstructions returns the CompactOption appending per-call
 // instructions to this compaction's summary prompt: s.Compact(ctx,
-// thread.Instructions("focus on the API design")).
-func Instructions(text string) CompactOption { return instructionsOption(text) }
+// thread.SummaryInstructions("focus on the API design")). They guide
+// the summarizer for this one call; the agent's own instructions
+// (weft.Instructions) are untouched.
+func SummaryInstructions(text string) CompactOption { return summaryInstructionsOption(text) }
 
 // ── Layer 3 — swap the parts ────────────────────────────────────────
 
-// SummaryInput is everything a Summarizer needs: the range already
-// serialized for summarizing (tool results capped, signed reasoning
-// dropped, files as names), the previous summary when one exists, the
-// per-call instructions, the output cap, and the reason it runs.
+// SummaryInput is what a Summarizer is asked to summarize: Messages is
+// the range, already serialized for summarizing (tool results capped,
+// signed reasoning dropped, files as names); PrevSummary is the
+// previous summary when one exists — the iterative chain's last link,
+// which the new summary must carry forward; Instructions is the
+// per-call text (SummaryInstructions, possibly edited by BeforeCompact);
+// MaxTokens the output cap; Reason why the compaction runs.
+// SystemPrompt is the prompt the default summarizer would send — the
+// skeleton or SummaryPrompt, then SummaryFocus and Instructions —
+// handed over so a custom Summarizer can reuse it; it may ignore it.
 type SummaryInput struct {
 	Messages     []weft.Message
 	PrevSummary  string
 	Instructions string
-	MaxTokens    int
+	MaxTokens    int64
 	Reason       Reason
 	SystemPrompt string
-	SummaryModel weft.Model
 }
 
-// Summary is a summarizer's output: the text, and the reason it ran.
+// Summary is a summarizer's output: the text, and what it cost.
 type Summary struct {
-	Text   string
-	Reason Reason
+	// Text is the summary. Empty text is a failed summary.
+	Text string
 	// Usage and Model are what the summary cost and which model made
 	// it — the cost ledger's inputs; a custom Summarizer that runs no
 	// model leaves them zero.
@@ -295,37 +338,62 @@ type Summary struct {
 	Model weft.ModelInfo
 }
 
-// Summarizer produces summary text — just the text: the cut, the
-// serialization and the entry are the session's. Implemented over a
-// model by default (the session's own, or SummaryModel).
+// Summarizer produces the summary text and nothing else: the cut, the
+// serialization, the entry and the retry chain stay the session's. The
+// default runs a model (SummaryModel, then the session's own). A
+// Summarizer that knows its output was cut short returns an error
+// wrapping ErrSummaryTruncated. It runs without the session lock and
+// may call the session; a panic in it fails the compaction.
 type Summarizer interface {
 	Summarize(ctx context.Context, in SummaryInput) (Summary, error)
 }
 
 // Preparation is a computed compaction on its way to becoming one:
-// everything the algorithm and the BeforeCompact hook see. Reason is
-// why it runs; Context is the leaf's whole context; Messages the
-// default cut's range to summarize; SplitPrefix the split turn's
-// prefix when one turn alone overflows (nil in the one-call default,
-// which folds it into Messages with the previous summary); PrevSummary
-// the iterative chain's last link; FirstKept, TokensBefore and Pinned
-// the entry's facts; Instructions the per-call text.
+// what the algorithm, the BeforeCompact hook and a custom Compactor
+// see.
+//
+// The hook may edit four fields, and the compaction proceeds with the
+// edited values: Messages (the range to summarize — redact here),
+// Instructions, Pinned, and FirstKept. An edited FirstKept must name a
+// user or assistant message on the leaf's path, past the previous
+// compaction's boundary, that does not split a tool call from its
+// result; when the hook moves it and leaves Messages alone, the range
+// is rebuilt for the new boundary. Reason, Context, PrevSummary and
+// TokensBefore are the session's facts: edits to them are ignored.
 type Preparation struct {
-	Reason       Reason
-	Context      []weft.Message
-	Messages     []weft.Message
-	SplitPrefix  []weft.Message
-	PrevSummary  string
-	FirstKept    string
+	// Reason is why the compaction runs.
+	Reason Reason
+	// Context is the context the model is shown now — the compacted
+	// view at the leaf: the previous summary, pinned entries, the kept
+	// tail with recorded trims applied.
+	Context []weft.Message
+	// Messages is the range this compaction summarizes: the entries
+	// from the previous boundary up to FirstKept, as stored. A split
+	// turn's prefix is part of it (one pass, ADR 0020's 2026-09-29
+	// amendment).
+	Messages []weft.Message
+	// PrevSummary is the iterative chain's last link: the latest
+	// summary compaction's text on the path, trims skipped.
+	PrevSummary string
+	// FirstKept is the id of the first entry kept raw.
+	FirstKept string
+	// TokensBefore is the estimated size of Context.
 	TokensBefore int64
+	// Instructions is the per-call text (SummaryInstructions).
 	Instructions string
-	Pinned       []string
+	// Pinned lists the pinned entry ids below the cut that the context
+	// keeps showing after the summary.
+	Pinned []string
 }
 
 // Compactor is the whole compaction algorithm, swapped in whole: it
-// receives the Preparation and returns the Compaction to write. The
-// default cuts, serializes, summarizes and hashes; a replacement may
-// ignore the suggested cut and keep any FirstKept it can name.
+// receives the Preparation (after BeforeCompact's edits) and returns
+// the Compaction to write. The default serializes, summarizes and
+// hashes; a replacement may ignore the suggested cut and keep any
+// FirstKept on the leaf's path past the previous boundary. A returned
+// Compaction with no Reason takes the Preparation's. It runs without
+// the session lock and may call the session; a panic in it fails the
+// compaction.
 type Compactor interface {
 	Compact(ctx context.Context, p Preparation) (*Compaction, error)
 }
@@ -340,6 +408,8 @@ func (o withSummarizerOption) applySession(c *sessionConfig) {
 
 // WithSummarizer returns the SessionOption replacing text production
 // — just the text; the cut and the entry stay the session's.
+// SummaryModel and PreferNative do not apply under it; CheckSummary
+// does (one retry, then the compaction fails). A nil s is ignored.
 func WithSummarizer(s Summarizer) SessionOption { return withSummarizerOption{s} }
 
 type withCompactorOption struct{ c Compactor }
@@ -351,23 +421,34 @@ func (o withCompactorOption) applySession(c *sessionConfig) {
 }
 
 // WithCompactor returns the SessionOption replacing the whole
-// algorithm.
+// algorithm past the cut: the summary layers (SummaryModel,
+// WithSummarizer, CheckSummary, PreferNative) do not run under it. A
+// nil c is ignored.
 func WithCompactor(c Compactor) SessionOption { return withCompactorOption{c} }
 
-// TrimReport says what a trimmer did: how many tool results it
-// replaced with the stub, and roughly how many estimated tokens that
-// saved.
-type TrimReport struct {
-	Cleared       int
-	EstimatedSave int64
-}
-
 // Trimmer is the cheap pre-pass: before summarizing, replace old tool
-// results with a stub naming the call, and the context may fit again
-// (Anthropic clear_tool_uses, Vercel pruneMessages). It runs on the
-// automatic path only — a manual Compact summarizes.
+// results with a stub, and the context may fit again (Anthropic
+// clear_tool_uses, Vercel pruneMessages). It runs on the automatic
+// path only — a manual Compact summarizes.
+//
+// Trim receives the context the model is shown (a copy it may edit)
+// and returns the trimmed context. The session diffs the two and
+// persists the difference as the compaction entry's trim record, which
+// is what every later context build replays — the Trimmer itself is
+// never consulted on read. The representable change is exactly one:
+// replace a tool result's Content (and IsError); the messages, their
+// order, every other part, and each result's CallID and Name must come
+// back as given. Any other change fails the trim with
+// ErrInvalidCompaction — reported through the logger and
+// CompactFailed — and the summary compaction runs instead. A trim
+// that changes nothing, or that does not bring the estimated context
+// under window − Reserve, writes nothing and the summary compaction
+// runs.
+//
+// Trim runs without the session lock and may call the session; an
+// error or a panic is logged and the summary compaction runs.
 type Trimmer interface {
-	Trim(ctx context.Context, msgs []weft.Message) ([]weft.Message, TrimReport)
+	Trim(ctx context.Context, msgs []weft.Message) ([]weft.Message, error)
 }
 
 type withTrimmerOption struct{ t Trimmer }
@@ -380,6 +461,7 @@ func (o withTrimmerOption) applySession(c *sessionConfig) {
 
 // WithTrimmer returns the SessionOption setting a custom trimmer. The
 // default trimmer is off; ClearOldToolResults turns a built-in one on.
+// A nil t is ignored.
 func WithTrimmer(t Trimmer) SessionOption { return withTrimmerOption{t} }
 
 // The stub that replaces a cleared tool result — model-visible bytes,
@@ -393,7 +475,7 @@ func clearedResultStub(callID, name string) string {
 // replaced with the stub, newest kept first.
 type clearResultsTrimmer struct{ keepLast int }
 
-func (t clearResultsTrimmer) Trim(ctx context.Context, msgs []weft.Message) ([]weft.Message, TrimReport) {
+func (t clearResultsTrimmer) Trim(ctx context.Context, msgs []weft.Message) ([]weft.Message, error) {
 	// A step's results batch on one tool message (ADR 0001), so the
 	// unit is the result part: the newest keepLast parts in the whole
 	// context survive, every older one reads as the stub.
@@ -412,12 +494,10 @@ func (t clearResultsTrimmer) Trim(ctx context.Context, msgs []weft.Message) ([]w
 	}
 	out := make([]weft.Message, len(msgs))
 	copy(out, msgs)
-	var rep TrimReport
 	for _, p := range parts {
 		if keep[p] {
 			continue
 		}
-		before := estimateMessage(out[p.msg])
 		m := out[p.msg]
 		if r, ok := m.Content[p.part].(weft.ToolResultPart); ok {
 			stubbed := weft.ToolResultPart{CallID: r.CallID, Name: r.Name, Content: clearedResultStub(r.CallID, r.Name)}
@@ -426,11 +506,9 @@ func (t clearResultsTrimmer) Trim(ctx context.Context, msgs []weft.Message) ([]w
 			content[p.part] = stubbed
 			m.Content = content
 			out[p.msg] = m
-			rep.Cleared++
-			rep.EstimatedSave += before - estimateMessage(m)
 		}
 	}
-	return out, rep
+	return out, nil
 }
 
 type clearOldToolResultsOption int
@@ -442,29 +520,38 @@ func (o clearOldToolResultsOption) applySession(c *sessionConfig) {
 }
 
 // ClearOldToolResults returns the SessionOption turning on the built-in
-// trimmer: every tool result in the context except the last keepLast
-// is replaced, at compaction time, with the stub naming the call. If
-// the trimmed context fits the window, no summary is made and a trim
-// record lands in the compaction entry instead.
+// trimmer: when the trigger fires, every tool result in the context
+// except the newest keepLast is replaced with the stub naming the call
+// ("[cleared tool result NAME CALLID]"). If the trimmed context fits
+// window − Reserve, no summary is made and a compaction entry with
+// Reason trim lands instead, its Trim record naming each stubbed
+// result — the record, not this option, is what later context builds
+// replay, so reopening with another keepLast (or none) never changes
+// what a recorded trim shows. A negative keepLast is ignored.
 func ClearOldToolResults(keepLast int) SessionOption { return clearOldToolResultsOption(keepLast) }
 
 // ── Layer 4 — hooks ─────────────────────────────────────────────────
 
-// Verdict is what a BeforeCompact hook returns: proceed with the
-// computed compaction, cancel it, or replace it with a hook-made one
-// (recorded from_hook).
+// Verdict is what a BeforeCompact hook returns: Proceed with the
+// computed compaction, Cancel it, or Replace it with a hook-made one
+// (recorded from_hook). The zero Verdict proceeds.
 type Verdict struct {
 	action   int // 0 proceed, 1 cancel, 2 replace
 	replaces *Compaction
 }
 
-// Proceed runs the compaction as computed.
-var Proceed = Verdict{}
+// Proceed returns the Verdict that runs the compaction as prepared —
+// with whatever the hook edited on the Preparation.
+func Proceed() Verdict { return Verdict{} }
 
-// Cancel stops it: nothing is written.
-var Cancel = Verdict{action: 1}
+// Cancel returns the Verdict that stops the compaction: nothing is
+// written, and the call fails with ErrCompactCanceled (the automatic
+// path stays quiet about it).
+func Cancel() Verdict { return Verdict{action: 1} }
 
-// Replace writes c instead — the hook's summary, recorded from_hook.
+// Replace returns the Verdict that writes c instead — the hook's own
+// summary, recorded with Reason from_hook. c.FirstKept must name an
+// entry the session holds; ApplyCompaction's rules decide the rest.
 func Replace(c *Compaction) Verdict { return Verdict{action: 2, replaces: c} }
 
 func (v Verdict) isReplace() bool          { return v.action == 2 }
@@ -476,9 +563,14 @@ type beforeCompactOption func(context.Context, *Preparation) (Verdict, error)
 func (o beforeCompactOption) applySession(c *sessionConfig) { c.compaction.before = o }
 
 // BeforeCompact returns the SessionOption setting the hook that sees
-// every computed compaction before it is written, told the reason, and
-// decides: Proceed, Cancel, or Replace with a hook-made summary. A hook
-// error fails the compaction with that error.
+// every computed summary compaction before the summarizer runs, told
+// the reason, and decides: Proceed (with its edits to the Preparation
+// — see Preparation for the editable fields; a redaction hook rewrites
+// p.Messages), Cancel, or Replace with a hook-made summary. A hook
+// error or panic fails the compaction with that error. A trim does
+// not pass through it: a trim summarizes nothing.
+//
+// fn runs without the session lock; it may call the session.
 func BeforeCompact(fn func(ctx context.Context, p *Preparation) (Verdict, error)) SessionOption {
 	if fn == nil {
 		return nil
@@ -492,7 +584,13 @@ func (o afterCompactOption) applySession(c *sessionConfig) { c.compaction.after 
 
 // AfterCompact returns the SessionOption setting the hook that runs
 // after a compaction entry lands, with the entry — the durable record,
-// not the plan.
+// not the plan. It runs for every entry, however it was written:
+// Compact, ApplyCompaction, the automatic trigger, the overflow
+// re-run, and a trim (e.Reason is ReasonTrim and e.Trim holds the
+// record). A panic in fn is contained and logged.
+//
+// fn runs without the session lock; it may call the session — the
+// Context it reads already shows the compaction.
 func AfterCompact(fn func(ctx context.Context, e CompactionEntry)) SessionOption {
 	if fn == nil {
 		return nil
@@ -505,9 +603,18 @@ type compactFailedOption func(context.Context, Reason, error)
 func (o compactFailedOption) applySession(c *sessionConfig) { c.compaction.failed = o }
 
 // CompactFailed returns the SessionOption setting the hook that runs
-// when a compaction fails after every fallback — the session is
+// when a compaction that was to be written is not — the session is
 // unchanged, and the caller is told why, with the reason it was
-// attempted for.
+// attempted for. That covers Compact and the automatic paths failing
+// at any stage after every fallback (the hook, the Compactor, the
+// summary chain, an unrepresentable trim), and ApplyCompaction failing
+// to validate or store its entry. It does not run for
+// PreviewCompaction — a dry run writes nothing and returns its error
+// to its caller — nor for the refusals that attempt nothing:
+// ErrNothingToCompact, ErrCompactCanceled, ErrBusy and
+// ErrAwaitingApproval. A panic in fn is contained and logged.
+//
+// fn runs without the session lock; it may call the session.
 func CompactFailed(fn func(ctx context.Context, r Reason, err error)) SessionOption {
 	if fn == nil {
 		return nil
@@ -519,11 +626,16 @@ type checkSummaryOption func(Summary) error
 
 func (o checkSummaryOption) applySession(c *sessionConfig) { c.compaction.check = o }
 
-// CheckSummary returns the SessionOption validating each summary. A
-// failure retries the same model once, then falls back down the chain
-// (SummaryModel → session model → no compaction, reported through
-// CompactFailed) — the headings-present, length-floor checks a careful
-// caller writes.
+// CheckSummary returns the SessionOption validating each summary — the
+// headings-present, length-floor checks a careful caller writes. A
+// failure retries the same summarizer once, then falls back down the
+// chain (SummaryModel → session model → no compaction: the error is
+// returned and reported through CompactFailed). A summary cut off at
+// the output cap never reaches fn: it is rejected as
+// ErrSummaryTruncated on the same retry-and-fallback road.
+//
+// fn runs without the session lock; it may call the session. A panic
+// in fn counts as a rejection.
 func CheckSummary(fn func(Summary) error) SessionOption {
 	if fn == nil {
 		return nil
@@ -547,10 +659,13 @@ func (preferNativeOption) applySession(c *sessionConfig) { c.compaction.preferNa
 // PreferNative returns the SessionOption asking thread to use the
 // provider's own compaction when the summarizer model (or the one it
 // wraps) implements NativeCompactor — found by following Unwrap()
-// through middleware. The returned message's text is stored as the
-// summary and the entry records the model that made it. On any other
-// model, a switch, or an error, the text summary runs: the seam, with
-// the fallback.
+// through middleware. Only the returned message's text is kept: it is
+// stored as the summary, shown behind the same marker as any other,
+// and the entry records the model that made it. An opaque
+// provider-native compaction item is not stored or replayed — that
+// part of ADR 0020 §7 is not implemented. On a model without the
+// interface, an error (logged) or an empty text, the text summary
+// runs: the seam, with the fallback.
 func PreferNative() SessionOption { return preferNativeOption{} }
 
 // maxModelChain bounds the native lookup's walk. Comparable chains
@@ -614,15 +729,30 @@ func equalModel(a, b weft.Model) bool {
 // owns; callers' kinds stay their own.
 const pinKind = "weft/pin"
 
-// Pin marks an entry to survive every compaction raw — a requirement,
-// a key decision — by appending a pin record (a custom entry, so it
-// survives compaction itself, the way everything custom does). The cut
-// moves forward past pinned entries: no compaction summarizes one.
+// Pin marks an entry to stay in the model's context through every
+// compaction — a requirement, a key decision — by appending a pin
+// record (a custom entry, which survives compaction the way everything
+// custom does). A pin does not constrain the cut: compactions
+// summarize past a pinned entry like any other, record its id in the
+// entry's Pinned list, and the context re-includes the pinned
+// message, raw, right after the summary — so a pin near the root never
+// holds the whole context raw.
+//
+// Only an entry that contributes a message to the context can be
+// pinned — a message, a custom_message or a branch_summary; any other
+// kind fails with ErrNotPinnable, and an id the session does not hold
+// with ErrNoEntry. A pin is read when a compaction is computed: one
+// made on an entry already below the boundary takes effect at the
+// next compaction, not immediately.
 func (s *Session) Pin(ctx context.Context, entryID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.byID[entryID]; !ok {
-		return fmt.Errorf("thread: session %s holds no entry %q", s.header.ID, entryID)
+	i, ok := s.byID[entryID]
+	if !ok {
+		return fmt.Errorf("%w: session %s holds no entry %q", ErrNoEntry, s.header.ID, entryID)
+	}
+	if _, ok := contextMessage(s.order[i]); !ok {
+		return fmt.Errorf("%w: entry %q carries no message the context could keep showing", ErrNotPinnable, entryID)
 	}
 	data, err := json.Marshal(entryID)
 	if err != nil {
@@ -675,9 +805,9 @@ func (c *compactConfig) summarySystemPrompt(instructions string) string {
 
 // maxTokens is the summarizer output cap: the override or 0.8 ×
 // Reserve.
-func (c *compactConfig) maxTokens() int {
+func (c *compactConfig) maxTokens() int64 {
 	if c.summaryMaxTokens > 0 {
 		return c.summaryMaxTokens
 	}
-	return int(float64(c.reserve) * summaryCapShare)
+	return int64(float64(c.reserve) * summaryCapShare)
 }

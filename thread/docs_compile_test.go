@@ -63,7 +63,7 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 		thread.SummaryFocus("keep file paths"),
 		thread.ClearOldToolResults(4),
 		thread.BeforeCompact(func(ctx context.Context, p *thread.Preparation) (thread.Verdict, error) {
-			return thread.Proceed, nil
+			return thread.Proceed(), nil
 		}),
 	)
 	if err != nil {
@@ -109,7 +109,7 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 	if err := again.Pin(ctx, turn.ID()); err != nil {
 		t.Fatal(err)
 	}
-	if err := again.Compact(ctx, thread.Instructions("focus on the API design")); err != nil {
+	if err := again.Compact(ctx, thread.SummaryInstructions("focus on the API design")); err != nil {
 		t.Log("a small session has nothing to compact — fine:", err)
 	}
 

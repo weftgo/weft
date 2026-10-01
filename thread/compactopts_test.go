@@ -120,12 +120,12 @@ func TestDisabledAndNoWindow(t *testing.T) {
 	ctx := context.Background()
 	agent, _ := scriptedAgent(bigUsage(), 4)
 	st := thread.Memory()
-	s, _ := thread.Create(ctx, st, agent, thread.ContextWindow(100_000), thread.Disabled())
+	s, _ := thread.Create(ctx, st, agent, thread.ContextWindow(100_000), thread.NoAutoCompact())
 	msgs(t, ctx, st, s,
 		strings.Repeat("a", 30_000),
 		strings.Repeat("b", 30_000),
 		strings.Repeat("c", 30_000))
-	s = reopenWith(t, ctx, st, s, agent, thread.ContextWindow(100_000), thread.Disabled())
+	s = reopenWith(t, ctx, st, s, agent, thread.ContextWindow(100_000), thread.NoAutoCompact())
 	for i := 0; i < 2; i++ {
 		turn, err := s.Send(ctx, weft.User("go"))
 		if err != nil {
@@ -237,7 +237,7 @@ func TestKeepRecentAndEstimator(t *testing.T) {
 
 type unitEstimator struct{}
 
-func (unitEstimator) Estimate(msgs []weft.Message) int { return len(msgs) }
+func (unitEstimator) Estimate(msgs []weft.Message) int64 { return int64(len(msgs)) }
 
 func TestSummaryModelFallbackChain(t *testing.T) {
 	ctx := context.Background()
@@ -300,7 +300,7 @@ func TestSummaryPromptFocusInstructions(t *testing.T) {
 		strings.Repeat("c", 30_000),
 	)
 	s = reopenWith(t, ctx, st, s, agent, promptOpts...)
-	if err := s.Compact(ctx, thread.Instructions("focus on the API design")); err != nil {
+	if err := s.Compact(ctx, thread.SummaryInstructions("focus on the API design")); err != nil {
 		t.Fatal(err)
 	}
 	reqs := rec.saw()
@@ -364,7 +364,7 @@ func TestBeforeCompactVerdicts(t *testing.T) {
 	var sawReason thread.Reason
 	proceed := thread.BeforeCompact(func(ctx context.Context, p *thread.Preparation) (thread.Verdict, error) {
 		sawReason = p.Reason
-		return thread.Proceed, nil
+		return thread.Proceed(), nil
 	})
 	history := func(s *thread.Session, opts ...thread.SessionOption) *thread.Session {
 		msgs(t, ctx, st, s,
@@ -385,7 +385,7 @@ func TestBeforeCompactVerdicts(t *testing.T) {
 
 	// Cancel.
 	cancel := thread.BeforeCompact(func(ctx context.Context, p *thread.Preparation) (thread.Verdict, error) {
-		return thread.Cancel, nil
+		return thread.Cancel(), nil
 	})
 	s2, _ := thread.Create(ctx, st, agent, cancel)
 	s2 = history(s2, cancel)

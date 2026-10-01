@@ -38,6 +38,7 @@ func kindSamples() []Entry {
 		TurnEntry{ID: "e_turn", ParentID: "e_p", Created: at, RunID: "s-t1",
 			Pending: []weft.ToolCallPart{{ID: "call_9", Name: "refund", Args: json.RawMessage(`{"a":1}`)}}},
 		CompactionEntry{ID: "e_compaction", ParentID: "e_p", Created: at, Summary: "s", FirstKept: "e_k",
+			Trim:      &TrimRecord{Stubs: []TrimStub{{Entry: "e_k", CallID: "c1", Content: "stub"}}},
 			FilesRead: []string{"a.go"}, FilesModified: []string{"b.go"}, Pinned: []string{"e_pin"}},
 		BranchSummaryEntry{ID: "e_branch_summary", ParentID: "e_p", Created: at, Summary: "s", FromEntry: "e_f"},
 		LeafEntry{ID: "e_leaf", ParentID: "e_p", Created: at, Entry: "e_message"},

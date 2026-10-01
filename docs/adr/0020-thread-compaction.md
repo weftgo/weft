@@ -228,3 +228,189 @@ summarizer seeing the split prefix as ordinary range content).
 and is always nil today, as its doc says. Found by the 2026-09-29
 review of the thread v0.2 branch; documented here rather than changed,
 per the standing rule that an ADR divergence is decided, not drifted.
+
+## Amendment 2026-10-01 — the context shape, the trim record, the hook rules, and what is not built
+
+Found by the post-0.7.0 audit of `weft/thread`. Pre-1.0, so the API and
+the wire moved where the fix needed it; each point below is pinned by a
+test, and the model-visible ones by goldens in
+`thread/testdata/compaction` and `thread/testdata/format5`.
+
+### A. The compacted context, exactly
+
+With a summary compaction on the leaf's path, `Session.Context()` is, in
+this order:
+
+1. **The summary message** — one user message with one text part:
+   `<weft-summary>\n` + summary + `\n</weft-summary>` (golden
+   `summary-marker.txt`). It is the *latest summary compaction's*; a
+   trim record above it never replaces it.
+2. **The pinned entries** that compaction recorded (`Pinned`), raw, in
+   path order — the message-kind entries below the boundary. A pin does
+   not constrain the cut (§4 said "keeps an entry in the context"; the
+   mechanism is re-inclusion here, not a held-back cut). A pin made on
+   an entry already below the boundary takes effect at the next
+   compaction. `Pin` refuses entries that carry no message
+   (`ErrNotPinnable`).
+3. **The kept tail**: the entries from `first_kept` onward. Entries
+   recorded before the latest compaction or trim lose their signed
+   reasoning parts; every trim record above the compaction is replayed
+   (C below).
+4. **Branch summaries** ride where they sit on the path, each as the
+   same marked user message.
+
+The whole shape is pinned by `compacted-context-full.txt` (a summary, a
+pinned entry, a trim record and a branch summary together).
+
+**Branch summaries share the `<weft-summary>` marker** with compaction
+summaries. A distinguishing attribute (`<weft-summary kind="branch">`)
+was considered and not taken in this change: it changes model-visible
+text that tests outside the compaction files pin, and whether a model
+benefits from telling the two apart has not been measured. It stays an
+open question for its own decision.
+
+A summary compaction whose `first_kept` the path does not reach below
+it (a hand-made file; `ApplyCompaction` never writes one) is skipped
+with one warning and the next older usable compaction governs — the
+whole path, raw, when there is none. The walk never shows a summary on
+top of the range it was meant to replace.
+
+### B. `TokensBefore` and `Preparation.Context`
+
+Both describe **what the model was shown** — the compacted view of A —
+not the raw path. After a first compaction the two differ by everything
+the summary replaced; counting the raw path overstated every later
+entry.
+
+### C. The trim record and its replay rule
+
+A trim is a compaction entry with no summary, reason `trim`, and a
+**trim record**:
+
+```json
+{"type":"compaction","v":5,…,"reason":"trim",
+ "trim":{"stubs":[{"entry":"e_…","call_id":"call_1","content":"[cleared tool result read call_1]"}]}}
+```
+
+- Each stub names the entry holding a tool result, the call it answers,
+  and the content the model sees in its place (`is_error` when set).
+- **Replay rule**: the context walk applies exactly the stubs of every
+  trim record above the governing summary compaction, oldest first (a
+  later record wins for the same result). It never consults the
+  session's configured `Trimmer`: a recorded trim reads the same under
+  any options, in any process. A summary compaction supersedes the
+  trims below it — its kept tail reads raw again.
+- **Where the record comes from**: the `Trimmer` (built-in or custom) is
+  shown the model's context and returns the trimmed one; the session
+  diffs the two. The representable change is one: a tool result's
+  `content` (and `is_error`) replaced in place. Anything else — a
+  message added, dropped or reordered, another part changed, a call id
+  or name changed — fails the trim with `ErrInvalidCompaction`
+  (logged, reported through `CompactFailed`) and the summary compaction
+  runs instead. `Trimmer.Trim` now returns `([]weft.Message, error)`;
+  `TrimReport` is gone (the record is the report).
+- **Wire**: an entry carrying a trim record is written with `"v":5`, its
+  minimum reader version (ADR 0011 §6) — an older reader would replay
+  the trim from its own options, so it must fail loudly instead. A
+  summary compaction stays a format-1 line with no `"v"`. Golden:
+  `testdata/format5/compaction_trim.json`.
+- **Legacy**: a trim entry written before this amendment has no record.
+  It is read as it always was: under `ClearOldToolResults(n)` the walk
+  re-derives the built-in stubs with the *configured* `n`; under any
+  other configuration it stubs nothing. Only such old entries depend on
+  options.
+- A trim never moves the boundary and never feeds the iterative chain:
+  the next compaction's previous summary and range start come from the
+  latest *summary* compaction. (The bug this fixes: a trim's empty
+  summary was taken as "previous" and the earlier summary fell out of
+  the chain.)
+
+### D. Not implemented — stated, not implied
+
+- **The adapter "safe to resend" seam for signed reasoning** (§2, "unless
+  the adapter declares them safe to resend"): there is no such
+  declaration. Signed reasoning recorded before the latest compaction
+  or trim is always stripped from the context.
+- **Opaque provider-native summary storage** (§7, "possibly an opaque
+  provider part … the entry records the provider that can replay it"):
+  `PreferNative` keeps **only the returned message's text**, stored and
+  shown like any other summary. No opaque part is stored or replayed,
+  and no first-party adapter implements `NativeCompactor` yet. A native
+  error or an empty text is logged and the text summary runs.
+- **`files_modified`** (§1): nothing writes it — the sandbox write log
+  it was reserved for was abandoned. The wire field stays readable;
+  `Compaction.FilesModified` is removed.
+- **Per-turn model windows**: `ModelWindows` / `ModelReserves` are
+  resolved once, at Create or Open, for the session agent's model. A
+  run that swaps its model (`weft.UseModel`) does not re-resolve.
+
+### E. The hook lock rule
+
+Every caller-supplied function or implementation — `TriggerFunc`,
+`Estimator`, `Trimmer`, `Summarizer`, `Compactor`, `BeforeCompact`,
+`AfterCompact`, `CompactFailed`, `CheckSummary` — runs **without the
+session lock and may call the session**. (The bug: `AfterCompact` ran
+under the lock and any hook reading the session deadlocked.)
+
+What fires when:
+
+- `AfterCompact` runs for every landed compaction entry — manual,
+  threshold, overflow, from_hook, **and trim** (`Reason` tells them
+  apart).
+- `CompactFailed` runs when a compaction that was to be written is not:
+  `Compact` and the automatic paths failing at any stage, an
+  unrepresentable trim, and `ApplyCompaction` failing to validate or
+  store. It does not run for `PreviewCompaction` (a dry run), nor for
+  the refusals `ErrNothingToCompact`, `ErrCompactCanceled`, `ErrBusy`,
+  `ErrAwaitingApproval`.
+- `BeforeCompact` may edit `Messages`, `Instructions`, `Pinned` and
+  `FirstKept` on the `Preparation`; the compaction proceeds with the
+  edited values (a redaction hook works). A moved `FirstKept` must be a
+  valid cut past the previous boundary. `Preparation.SplitPrefix` is
+  removed (always nil, see the 2026-09-29 amendment).
+
+### F. The truncated-summary rule
+
+A summary whose model finished with `max_tokens` is **never stored**. It
+is a failed summary on the `CheckSummary` road — one retry on the same
+model, then the fallback (SummaryModel → session model) — and with no
+fallback left the compaction fails wrapping `ErrSummaryTruncated`. A
+custom `Summarizer` reports the same condition by returning that
+sentinel. An empty summary is a failure too.
+
+### G. Smaller decisions made with these
+
+- **Between turns only**: `Compact`, `ApplyCompaction` and `Uncompact`
+  fail with `ErrBusy` while a turn is in flight (Branch's rule) — a
+  manual compaction never lands between a running turn's per-step
+  entries. The trigger's and the overflow re-run's own writes are the
+  turn's housekeeping and pass.
+- **The trigger stands down after a compaction**: a compaction or trim
+  entry after the measured turn makes the reported input stale; the
+  trigger waits for the next provider report instead of re-firing on a
+  context that just shrank.
+- **Same boundary twice**: a summary compaction naming the boundary the
+  previous one left is refused (`ErrNothingToCompact`).
+- **Rate limits count along the leaf's path**, not over the file: an
+  abandoned branch's compactions and turns are not this line's.
+- **Configuration is validated**: with a known window, `Reserve <
+  window` and `KeepRecent < window − Reserve`, or Create/Open fail with
+  `ErrCompactConfig` — a session that could never compact under its
+  line is an error, not a silence. A trigger that fires over a tail
+  that fits `KeepRecent` warns once.
+- **`SummarizeLeft` summarizes the branch's compacted view** — its own
+  compaction's summary plus the entries from that compaction's first
+  kept entry — never the raw range beside the summary of that range.
+- **Sentinels**: `ErrNothingToCompact`, `ErrCompactCanceled`,
+  `ErrNoEntry`, `ErrSummaryTruncated`, `ErrInvalidCompaction`,
+  `ErrCompactConfig`, `ErrNotPinnable`, `ErrAwaitingApproval`.
+- **Names** (§3's sketch, corrected): there is no `thread.Compaction(…)`
+  wrapper — the options are plain `SessionOption`s. `With*` injects an
+  implementation of an interface (`WithEstimator`, `WithSummarizer`,
+  `WithCompactor`, `WithTrimmer`); bare names set values.
+  `thread.Disabled()` is `thread.NoAutoCompact()`; the per-call
+  `thread.Instructions(…)` is `thread.SummaryInstructions(…)` (it never
+  meant `weft.Instructions`); `Proceed` and `Cancel` are functions
+  (`thread.Proceed()`), not reassignable package variables.
+  `Estimator.Estimate` returns `int64` tokens like every other number
+  here, and `SummaryMaxTokens` takes `int64`.

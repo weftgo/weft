@@ -610,6 +610,9 @@ func TestTrimAfterCompactionKeepsTheBoundary(t *testing.T) {
 		// the value writeTrim resolves on the automatic path.
 		if err := s.ApplyCompaction(ctx, &thread.Compaction{
 			FirstKept: "e_mid", Reason: thread.ReasonTrim, TokensBefore: 1,
+			Trim: &thread.TrimRecord{Stubs: []thread.TrimStub{
+				{Entry: "e_c1", CallID: "c1", Content: "[cleared tool result read c1]"},
+			}},
 		}); err != nil {
 			t.Fatalf("ApplyCompaction trim: %v", err)
 		}
@@ -1062,13 +1065,16 @@ func TestPinKeepsACustomMessageThroughCompaction(t *testing.T) {
 	})
 }
 
-// A branch summary keeps the abandoned branch's own compaction: its
-// summary is the only record of that branch's older part, and losing
-// it would lose the branch's history twice over.
+// A branch summary is made from what the model was shown of the
+// branch being left — its compacted view: the branch's own compaction
+// summary (the only record the context kept of the range it replaced)
+// plus the entries from that compaction's first kept entry. The bug:
+// the summarizer was fed the raw pre-boundary range AND the summary of
+// that same range.
 func TestSummarizeLeftKeepsTheBranchCompaction(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		rec := &summaryRecorder{reply: "branch summary"}
+		rec := &summaryRecorder{reply: "MAIN-SUMMARY"}
 		agent := weft.New(rec)
 		s, _ := thread.Create(ctx, st, agent)
 		msgs(t, ctx, st, s,
@@ -1095,27 +1101,51 @@ func TestSummarizeLeftKeepsTheBranchCompaction(t *testing.T) {
 		if err := s.Branch(ctx, firstID); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.Append(ctx, s.ID(), thread.MessageEntry{
-			ID: "e_side", ParentID: firstID, Created: timeUTC(),
-			Message: weft.User("side note " + strings.Repeat("s", 60_000)),
-		}); err != nil {
+		if err := st.Append(ctx, s.ID(),
+			thread.MessageEntry{ID: "e_side1", ParentID: firstID, Created: timeUTC(),
+				Message: weft.User("SIDE-ONE " + strings.Repeat("s", 60_000))},
+			thread.MessageEntry{ID: "e_side2", ParentID: "e_side1", Created: timeUTC(),
+				Message: weft.User("SIDE-TWO " + strings.Repeat("t", 60_000))},
+		); err != nil {
 			t.Fatal(err)
 		}
+		rec.mu.Lock()
+		rec.reply = "SIDE-SUMMARY"
+		rec.mu.Unlock()
 		s = reopenWith(t, ctx, st, s, agent)
 		if err := s.Compact(ctx); err != nil {
 			t.Fatalf("the side branch's own Compact: %v", err)
 		}
+		var side thread.CompactionEntry
+		for _, e := range s.Entries() {
+			if c, ok := e.(thread.CompactionEntry); ok {
+				side = c
+			}
+		}
+		if side.FirstKept != "e_side2" {
+			t.Fatalf("the side compaction keeps from %q; the scenario expects e_side2", side.FirstKept)
+		}
+		rec.mu.Lock()
+		rec.reply = "BRANCH-SUMMARY"
+		rec.mu.Unlock()
 		if err := s.Branch(ctx, mainLeaf, thread.SummarizeLeft()); err != nil {
 			t.Fatalf("SummarizeLeft over a compacted branch: %v", err)
 		}
-		// The summarizer saw both the side note and the abandoned
-		// compaction's summary.
+		// The summarizer saw the branch's compacted view: its
+		// compaction's summary and the kept entry — never the raw range
+		// that summary had replaced.
 		saw := fmt.Sprint(rec.saw()[len(rec.saw())-1].Messages)
-		if !strings.Contains(saw, "side note") {
-			t.Error("the branch summary input lost the side branch's messages")
+		if !strings.Contains(saw, "SIDE-TWO") {
+			t.Error("the branch summary input lost the side branch's kept messages")
 		}
-		if !strings.Contains(saw, "summary") {
+		if !strings.Contains(saw, "SIDE-SUMMARY") {
 			t.Error("the branch summary input lost the branch's own compaction summary")
+		}
+		if strings.Contains(saw, "SIDE-ONE") {
+			t.Error("the branch summary input carries the raw range its own compaction summary already replaced")
+		}
+		if strings.Contains(saw, strings.Repeat("a", 100)) {
+			t.Error("the branch summary input carries entries below the divergence")
 		}
 	})
 }
@@ -1182,7 +1212,9 @@ func TestUncompactOfATrim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ApplyCompaction(ctx, &thread.Compaction{FirstKept: "e_c0", Reason: thread.ReasonTrim, TokensBefore: 1}); err != nil {
+	if err := s.ApplyCompaction(ctx, &thread.Compaction{FirstKept: "e_c0", Reason: thread.ReasonTrim, TokensBefore: 1,
+		Trim: &thread.TrimRecord{Stubs: []thread.TrimStub{{Entry: "e_c1", CallID: "c1", Content: "[cleared tool result read c1]"}}},
+	}); err != nil {
 		t.Fatalf("trim: %v", err)
 	}
 	// The stub view: the result reads as the cleared stub.
@@ -1219,9 +1251,9 @@ func TestUncompactOfATrim(t *testing.T) {
 // on its own mutex (the 2026-09-29 review's finding).
 type leafReadingEstimator struct{ s *thread.Session }
 
-func (e leafReadingEstimator) Estimate(msgs []weft.Message) int {
+func (e leafReadingEstimator) Estimate(msgs []weft.Message) int64 {
 	_ = e.s.Leaf()
-	return len(msgs)
+	return int64(len(msgs))
 }
 
 func TestEstimatorMayCallTheSession(t *testing.T) {

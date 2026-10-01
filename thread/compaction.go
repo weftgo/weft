@@ -1,12 +1,14 @@
 package thread
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -74,6 +76,56 @@ Keep every file path, identifier, number, and decision exact. A detail
 you drop is a detail the conversation loses. Do not add commentary
 about this task.`
 
+// The compaction sentinels. Match with errors.Is; every error this
+// file returns for one of these conditions wraps its sentinel.
+var (
+	// ErrNothingToCompact is the refusal of a compaction that would
+	// summarize nothing: the tail fits inside KeepRecent, nothing new
+	// sits past the previous boundary, or the plan names the boundary
+	// the previous compaction already left. Nothing is written.
+	ErrNothingToCompact = errors.New("thread: nothing to compact")
+
+	// ErrCompactCanceled is returned when a BeforeCompact hook answered
+	// Cancel. Nothing is written.
+	ErrCompactCanceled = errors.New("thread: compaction canceled")
+
+	// ErrNoEntry is returned when an operation names an entry the
+	// session does not hold — Pin's target, a compaction's FirstKept —
+	// or asks for one the leaf's path does not have (Uncompact with no
+	// compaction to undo).
+	ErrNoEntry = errors.New("thread: session holds no such entry")
+
+	// ErrSummaryTruncated is the failure of a summary the model cut
+	// off at its output cap (a max_tokens finish). A cut summary is
+	// never stored: the attempt is retried once, the chain falls back,
+	// and with no fallback left the compaction fails wrapping this.
+	// Raise SummaryMaxTokens (or Reserve, which sizes the default cap).
+	ErrSummaryTruncated = errors.New("thread: summary truncated at the output cap")
+
+	// ErrInvalidCompaction is returned for a Compaction that cannot be
+	// written as given: a FirstKept off the leaf's path or before the
+	// previous boundary, a summary-less plan that is not a trim, a trim
+	// without its record, a trim record naming a result the path does
+	// not hold — and for a Trimmer whose output the trim record cannot
+	// represent.
+	ErrInvalidCompaction = errors.New("thread: invalid compaction")
+
+	// ErrCompactConfig is returned by Create and Open when the
+	// compaction knobs cannot work together: with a known window,
+	// Reserve must be below it and KeepRecent below window − Reserve.
+	ErrCompactConfig = errors.New("thread: invalid compaction configuration")
+
+	// ErrNotPinnable is returned by Pin for an entry that contributes
+	// no message to the context (a turn, a label, a custom entry, …):
+	// there is nothing a compaction could keep showing.
+	ErrNotPinnable = errors.New("thread: entry cannot be pinned")
+
+	// ErrAwaitingApproval is returned by Compact and ApplyCompaction
+	// while approval requests are pending: the parked tail must stay
+	// raw for its decisions to resolve. Decide, or branch away, first.
+	ErrAwaitingApproval = errors.New("thread: approval requests pending")
+)
+
 // Compaction is one computed compaction: the plan PreviewCompaction
 // returns, ApplyCompaction writes as a compaction entry, and Compact
 // does both. It carries everything the entry records (ADR 0020 §1) —
@@ -81,40 +133,46 @@ about this task.`
 // recomputed.
 type Compaction struct {
 	// Summary is the summarizer's text, shown in the context behind
-	// the fixed marker from the entry's first kept entry onward.
+	// the fixed marker from the entry's first kept entry onward. Empty
+	// only on a trim.
 	Summary string
 	// FirstKept is the id of the first entry the context still shows
 	// raw after this compaction.
 	FirstKept string
-	// TokensBefore is the estimated size of the whole context at
-	// compaction time — the number the compaction was judged against.
+	// TokensBefore is the estimated size of the context the model was
+	// shown at compaction time — the compacted view (the previous
+	// summary, pinned entries, the kept tail with trims applied), not
+	// the raw path.
 	TokensBefore int64
-	// Reason is why it ran: manual here, threshold for the trigger,
-	// from_hook and trim in step 1.9, overflow in v0.3.
+	// Reason is why it ran: manual, threshold, overflow, from_hook, or
+	// trim. ApplyCompaction records an empty Reason as manual.
 	Reason Reason
 	// SummarizerUsage and SummarizerModel record what the summary
 	// cost and which model made it — the cost ledger's inputs.
 	SummarizerUsage weft.Usage
 	SummarizerModel weft.ModelInfo
 	// FilesRead lists the file URLs the summarized range carried,
-	// sorted and deduplicated; FilesModified fills in when the sandbox
-	// write log lands (v0.6, ADR 0023) — the lists are the summary's
-	// memory across iterative compactions.
-	FilesRead     []string
-	FilesModified []string
-	// Pinned lists the pinned entry ids this compaction kept raw; the
-	// Pin call arrives in step 1.9 and the list is its record.
+	// sorted and deduplicated.
+	FilesRead []string
+	// Pinned lists the pinned entry ids below FirstKept: the context
+	// re-includes each of them, raw, after the summary.
 	Pinned []string
 	// RangeHash is the SHA-256 of the serialized range the summarizer
 	// was fed — the audit that a summary summarizes exactly this.
 	RangeHash string
+	// Trim is the trim record: required when Reason is trim, forbidden
+	// otherwise. The session's Trimmer pre-pass builds it; see
+	// TrimRecord.
+	Trim *TrimRecord
+
+	// runner marks a plan computed on the session's own runner — the
+	// trigger and the overflow re-run — whose write is part of the turn
+	// in flight and so passes ApplyCompaction's busy guard.
+	runner bool
 }
 
-// compactConfig is the compaction configuration a session resolves —
-// the defaults with, from step 1.9, the public layers' overrides. In
-// step 1.8 no public option sets these: the window is unknown, so the
-// automatic trigger stays off (one warning, ADR 0020 §2) and manual
-// compaction works with the default cut and cap.
+// compactConfig is the compaction configuration a session resolves:
+// the defaults with the options' overrides.
 type compactConfig struct {
 	window     int64 // 0 = unknown: no automatic compaction
 	reserve    int64
@@ -131,7 +189,7 @@ type compactConfig struct {
 	summaryModel     weft.Model
 	summaryPrompt    string
 	summaryFocus     string
-	summaryMaxTokens int
+	summaryMaxTokens int64
 	summarizer       Summarizer
 	compactor        Compactor
 	trimmer          Trimmer
@@ -146,88 +204,214 @@ func defaultCompactConfig() compactConfig {
 	return compactConfig{reserve: defaultReserve, keepRecent: defaultKeepRecent}
 }
 
-// resolve folds the per-model overrides for the session's own model —
-// Create and Open call it once, after the options and with the agent
-// known; the effective window and reserve land in the plain fields.
-func (c *compactConfig) resolve(m weft.Model) {
+// resolve folds the per-model overrides for the session agent's model
+// into the plain fields and validates the result — Create and Open
+// call it once, after the options and with the agent known. With a
+// known window the knobs must leave room for each other: a Reserve at
+// or above the window makes the trigger line zero or negative, and a
+// KeepRecent at or above window − Reserve keeps a tail that alone
+// crosses it — either way compaction could never bring the context
+// under the line, so the configuration is an error (ErrCompactConfig)
+// instead of a session that silently never compacts. With no window
+// known nothing is validated: only manual compaction runs.
+func (c *compactConfig) resolve(m weft.Model) error {
 	if n, ok := c.modelWindows[weft.InfoOf(m)]; ok {
 		c.window = n
 	}
 	if n, ok := c.modelReserves[weft.InfoOf(m)]; ok {
 		c.reserve = n
 	}
+	if c.window <= 0 {
+		return nil
+	}
+	if c.reserve >= c.window {
+		return fmt.Errorf("%w: Reserve %d must be below the context window %d", ErrCompactConfig, c.reserve, c.window)
+	}
+	if c.keepRecent >= c.window-c.reserve {
+		return fmt.Errorf("%w: KeepRecent %d must be below window − Reserve (%d − %d = %d)",
+			ErrCompactConfig, c.keepRecent, c.window, c.reserve, c.window-c.reserve)
+	}
+	return nil
 }
 
 // PreviewCompaction computes the session's next compaction without
 // writing anything: the cut, the summarized range, the summary text,
-// and the entry fields a Compact would record. It runs the summarizer
-// — the session's own model (ADR 0020 §2) — with the skeleton prompt,
-// the previous summary (iterative compaction) as the range's first
-// message, prompt-cache writes left off (the request carries no cache
-// hints) and the output capped at 0.8 × Reserve. A session whose tail
-// fits inside KeepRecent has nothing to compact and gets an error, not
-// a no-op entry.
+// and the entry fields a Compact would record. It runs the whole
+// algorithm — the BeforeCompact hook, then the Compactor or the
+// summary chain (SummaryModel, then the session's own model, ADR 0020
+// §2) with the skeleton prompt, the previous summary (iterative
+// compaction) as the range's first message, no cache hints, and the
+// output capped at SummaryMaxTokens or 0.8 × Reserve.
+//
+// A session whose tail fits inside KeepRecent has nothing to compact
+// and gets ErrNothingToCompact, not a no-op plan; a hook's Cancel is
+// ErrCompactCanceled; a summary cut off at the cap with no fallback
+// left is ErrSummaryTruncated. A dry run is not a failed compaction:
+// CompactFailed does not run for a PreviewCompaction error. It may be
+// called while a turn runs — it reads a snapshot — but the plan's
+// ApplyCompaction then waits for the turn (ErrBusy).
 func (s *Session) PreviewCompaction(ctx context.Context, opts ...CompactOption) (*Compaction, error) {
-	return s.computeCompaction(ctx, ReasonManual, resolveCompact(opts...).instructions)
+	return s.planCompaction(ctx, ReasonManual, resolveCompact(opts...).instructions)
 }
 
 // Compact computes and applies the session's next compaction in one
 // call: PreviewCompaction, then ApplyCompaction. Nothing is deleted —
 // the summarized entries stay in the file, and the context at the leaf
-// becomes the summary, then the entries from the compaction's first
-// kept entry onward.
+// becomes the summary, the pinned entries, then the entries from the
+// compaction's first kept entry onward.
+//
+// Compaction is a between-turns operation: while a turn is in flight
+// Compact fails with ErrBusy before any model call, and while approval
+// requests are pending with ErrAwaitingApproval. A failure past those
+// gates — other than ErrNothingToCompact and ErrCompactCanceled —
+// also reaches the CompactFailed hook.
 func (s *Session) Compact(ctx context.Context, opts ...CompactOption) error {
-	c, err := s.PreviewCompaction(ctx, opts...)
+	// Fail fast before the model call: the authoritative checks run
+	// under the lock at the append, but a turn already running should
+	// not make the caller pay for a summary first.
+	s.mu.Lock()
+	err := s.compactGateLocked(false)
+	s.mu.Unlock()
 	if err != nil {
+		return err
+	}
+	c, err := s.planCompaction(ctx, ReasonManual, resolveCompact(opts...).instructions)
+	if err != nil {
+		s.reportFailed(ctx, ReasonManual, err)
 		return err
 	}
 	return s.ApplyCompaction(ctx, c)
 }
 
+// compactGateLocked is the between-turns rule every compaction write
+// passes: no turn in flight (unless the write is the runner's own, the
+// turn's housekeeping), and no approval boundary open — a parked tail
+// must stay raw for its decisions to resolve. Callers hold s.mu.
+func (s *Session) compactGateLocked(runner bool) error {
+	if !runner && s.running && s.inFlight != nil {
+		return fmt.Errorf("%w: session %s is running a turn; compact between turns", ErrBusy, s.header.ID)
+	}
+	if s.boundaryLocked() {
+		return fmt.Errorf("%w: session %s; compact after they resolve", ErrAwaitingApproval, s.header.ID)
+	}
+	return nil
+}
+
 // ApplyCompaction writes a computed Compaction as the session's next
-// compaction entry, appended at the leaf. c must name a FirstKept on
-// the leaf's path — a value the walk could never reach is an error,
-// not a fallback — and one at or after the previous compaction's kept
-// boundary: an iterative compaction never summarizes what a summary
-// already replaced (ADR 0020 §1). A summary-less compaction must be a
-// trim. Anything else is an error, and nothing is written. The entry
-// lands whatever else happened between its computation and this call —
-// the tree only grew, so the kept range stays correct.
+// compaction entry, appended at the leaf, and then runs the
+// AfterCompact hook with the entry. The entry lands whatever else
+// happened between its computation and this call — the tree only grew,
+// so the kept range stays correct — provided the plan still fits the
+// leaf's path:
+//
+//   - c.FirstKept must name an entry on the leaf's path (ErrNoEntry
+//     when the session does not hold it, ErrInvalidCompaction when it
+//     sits on another branch), at or after the previous summary
+//     compaction's boundary — an iterative compaction never summarizes
+//     what a summary already replaced (ADR 0020 §1).
+//   - A summary compaction naming the very boundary the previous one
+//     left adds nothing and is refused with ErrNothingToCompact.
+//   - A compaction without a summary must be a trim (Reason trim), and
+//     a trim must carry its TrimRecord, every stub naming a tool
+//     result on the path; a summary compaction must carry none.
+//
+// Like Compact, it is a between-turns operation: ErrBusy while a turn
+// is in flight, ErrAwaitingApproval while approval requests are
+// pending. Nothing is written on any error; a validation or storage
+// failure also reaches the CompactFailed hook. An empty c.Reason is
+// recorded as manual.
 func (s *Session) ApplyCompaction(ctx context.Context, c *Compaction) error {
 	if c == nil {
-		return fmt.Errorf("thread: ApplyCompaction with no Compaction")
+		return fmt.Errorf("%w: ApplyCompaction with no Compaction", ErrInvalidCompaction)
+	}
+	plan := *c
+	if plan.Reason == "" {
+		plan.Reason = ReasonManual
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.boundaryLocked() {
-		// The same rule the trigger follows: a parked tail must stay
-		// raw for its decisions to resolve, so a manual compaction
-		// waits too. Resolve or branch away from the boundary first.
-		return fmt.Errorf("thread: session %s has approval requests pending; compact after they resolve", s.header.ID)
+	e, flushErr, err := s.applyCompactionLocked(ctx, &plan)
+	s.mu.Unlock()
+	// Everything below runs without the lock: the logger and both
+	// hooks are the caller's code, and a hook that reads the session
+	// (Context, Usage, Leaf) must not deadlock on the write it is
+	// being told about.
+	if err != nil {
+		s.reportFailed(ctx, plan.Reason, err)
+		return err
+	}
+	if flushErr != nil {
+		s.agent.Logger().Warn("thread: compaction flush failed", "session", s.header.ID, "err", flushErr)
+	}
+	if e.Trim != nil {
+		s.agent.Logger().Info("thread: trimmed old tool results",
+			"trace", "compaction",
+			"session", s.header.ID, "reason", string(e.Reason),
+			"tokens_before", e.TokensBefore, "cleared", len(e.Trim.Stubs))
+	} else {
+		s.agent.Logger().Info("thread: compacted",
+			"trace", "compaction",
+			"session", s.header.ID, "reason", string(e.Reason),
+			"tokens_before", e.TokensBefore, "first_kept", e.FirstKept)
+	}
+	s.safeAfter(ctx, e) // the durable record, not the plan
+	return nil
+}
+
+// applyCompactionLocked validates c against the leaf's path and
+// appends its entry. It returns the entry, a flush error to log (the
+// entry is adopted either way), and the error that stopped the write.
+// Callers hold s.mu.
+func (s *Session) applyCompactionLocked(ctx context.Context, c *Compaction) (CompactionEntry, error, error) {
+	if err := s.compactGateLocked(c.runner); err != nil {
+		return CompactionEntry{}, nil, err
 	}
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
-		return err
+		return CompactionEntry{}, nil, err
 	}
 	keptIdx := indexOfID(path, c.FirstKept)
 	if keptIdx < 0 {
-		return fmt.Errorf("thread: compaction keeps first entry %q, which is not on session %s's leaf path", c.FirstKept, s.header.ID)
+		if _, held := s.byID[c.FirstKept]; !held {
+			return CompactionEntry{}, nil, fmt.Errorf("%w: compaction keeps first entry %q, which session %s does not hold", ErrNoEntry, c.FirstKept, s.header.ID)
+		}
+		return CompactionEntry{}, nil, fmt.Errorf("%w: compaction keeps first entry %q, which is not on session %s's leaf path", ErrInvalidCompaction, c.FirstKept, s.header.ID)
 	}
-	for i := len(path) - 1; i >= 0; i-- {
-		if prev, ok := path[i].(CompactionEntry); ok {
-			if prevIdx := indexOfID(path, prev.FirstKept); prevIdx >= 0 && keptIdx < prevIdx {
-				return fmt.Errorf("thread: compaction keeps first entry %q, before the previous compaction's kept boundary %q (ADR 0020 §1)", c.FirstKept, prev.FirstKept)
-			}
-			break
+	// The previous boundary is the latest summary compaction's — a trim
+	// record in between never moved it.
+	b := boundaryOf(path)
+	if b.governor >= 0 && keptIdx < b.start {
+		return CompactionEntry{}, nil, fmt.Errorf("%w: compaction keeps first entry %q, before the previous compaction's kept boundary %q (ADR 0020 §1)",
+			ErrInvalidCompaction, c.FirstKept, idOf(path[b.start]))
+	}
+	if c.Reason == ReasonTrim {
+		if c.Summary != "" {
+			return CompactionEntry{}, nil, fmt.Errorf("%w: a trim carries no summary", ErrInvalidCompaction)
+		}
+		if err := validTrimRecord(path, c.Trim); err != nil {
+			return CompactionEntry{}, nil, err
+		}
+	} else {
+		if c.Trim != nil {
+			return CompactionEntry{}, nil, fmt.Errorf("%w: only a trim (Reason trim) carries a trim record", ErrInvalidCompaction)
+		}
+		if c.Summary == "" {
+			return CompactionEntry{}, nil, fmt.Errorf("%w: a compaction without a summary must be a trim (ADR 0020 §1)", ErrInvalidCompaction)
+		}
+		if b.governor >= 0 && keptIdx == b.start {
+			return CompactionEntry{}, nil, fmt.Errorf("%w: session %s's previous compaction already keeps from %q", ErrNothingToCompact, s.header.ID, c.FirstKept)
 		}
 	}
-	if c.Summary == "" && c.Reason != ReasonTrim {
-		return fmt.Errorf("thread: a compaction without a summary must be a trim (ADR 0020 §1)")
+	id := s.mintIDLocked()
+	if !ValidID(id) {
+		return CompactionEntry{}, nil, fmt.Errorf("thread: invalid entry id %q", id)
+	}
+	if _, dup := s.byID[id]; dup {
+		return CompactionEntry{}, nil, fmt.Errorf("thread: entry id %q already held by session %s", id, s.header.ID)
 	}
 	e := CompactionEntry{
-		ID:              s.mintIDLocked(),
+		ID:              id,
 		ParentID:        s.leaf,
-		Created:         time.Now().UTC(),
+		Created:         s.now(),
 		Summary:         c.Summary,
 		FirstKept:       c.FirstKept,
 		TokensBefore:    c.TokensBefore,
@@ -235,32 +419,106 @@ func (s *Session) ApplyCompaction(ctx context.Context, c *Compaction) error {
 		SummarizerUsage: c.SummarizerUsage,
 		SummarizerModel: c.SummarizerModel,
 		FilesRead:       slices.Clone(c.FilesRead),
-		FilesModified:   slices.Clone(c.FilesModified),
 		Pinned:          slices.Clone(c.Pinned),
 		RangeHash:       c.RangeHash,
+		Trim:            cloneTrim(c.Trim),
 	}
 	if err := s.st.Append(ctx, s.header.ID, e); err != nil {
-		return err
+		return CompactionEntry{}, nil, err
 	}
 	s.adoptLocked(e)
-	if f, ok := s.st.(Flusher); ok {
-		if err := f.Flush(ctx, s.header.ID); err != nil {
-			s.agent.Logger().Warn("thread: compaction flush failed", "session", s.header.ID, "err", err)
+	// A compaction landed: the next "nothing to compact" after a
+	// trigger fire is news again.
+	s.warnedNothing = false
+	out := cloneEntry(e).(CompactionEntry) // the hook's copy, never the tree's slices
+	return out, s.flushLocked(ctx), nil
+}
+
+// cloneTrim copies a trim record so a caller's Compaction and the
+// tree's entry never share a stub slice.
+func cloneTrim(t *TrimRecord) *TrimRecord {
+	if t == nil {
+		return nil
+	}
+	return &TrimRecord{Stubs: slices.Clone(t.Stubs)}
+}
+
+// validTrimRecord checks a trim's record against the path it lands on:
+// present, non-empty, and every stub naming a tool result an entry on
+// the path really holds — the walk replays the record literally, so a
+// stub pointing at nothing would be a silent no-op forever.
+func validTrimRecord(path []Entry, t *TrimRecord) error {
+	if t == nil || len(t.Stubs) == 0 {
+		return fmt.Errorf("%w: a trim must carry a trim record naming at least one stubbed tool result", ErrInvalidCompaction)
+	}
+	for _, st := range t.Stubs {
+		i := indexOfID(path, st.Entry)
+		if i < 0 {
+			return fmt.Errorf("%w: trim record names entry %q, which is not on the leaf's path", ErrInvalidCompaction, st.Entry)
+		}
+		m, ok := contextMessage(path[i])
+		found := false
+		if ok {
+			for _, p := range m.Content {
+				if r, isResult := p.(weft.ToolResultPart); isResult && r.CallID == st.CallID {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			return fmt.Errorf("%w: trim record names tool result %q in entry %q, which holds none", ErrInvalidCompaction, st.CallID, st.Entry)
 		}
 	}
-	s.agent.Logger().Info("thread: compacted",
-		"trace", "compaction",
-		"session", s.header.ID, "reason", string(c.Reason),
-		"tokens_before", c.TokensBefore, "first_kept", c.FirstKept)
-	s.safeAfter(ctx, e) // the durable record, not the plan
 	return nil
+}
+
+// pathBoundary is where a path's context begins: the governing summary
+// compaction, its first kept entry, and the trim records layered above
+// it.
+type pathBoundary struct {
+	governor int   // index of the governing summary compaction; -1 when none
+	start    int   // index of the first kept entry; 0 when none governs
+	trims    []int // indices of the trim records above the governor, newest first
+	// unusable lists summary compactions the walk had to skip: their
+	// FirstKept is not on the path below them (a hand-made file).
+	unusable []CompactionEntry
+}
+
+// boundaryOf finds the path's boundary: walking back from the leaf,
+// the first summary compaction whose FirstKept the path reaches below
+// it governs. Trim records never govern — a trim that reset the
+// boundary would resurface, raw, everything the summary had replaced —
+// and a summary compaction whose FirstKept the path does not reach is
+// skipped, so the next older one governs (none: the whole path).
+func boundaryOf(path []Entry) pathBoundary {
+	b := pathBoundary{governor: -1}
+	for i := len(path) - 1; i >= 0; i-- {
+		c, ok := path[i].(CompactionEntry)
+		if !ok {
+			continue
+		}
+		if c.isTrim() {
+			b.trims = append(b.trims, i)
+			continue
+		}
+		j := indexOfID(path[:i], c.FirstKept)
+		if j < 0 {
+			b.unusable = append(b.unusable, c)
+			continue
+		}
+		b.governor, b.start = i, j
+		break
+	}
+	return b
 }
 
 // The hook wrappers: a panicking hook is contained — the deciding
 // hooks (before, compactor, summarizer, check) turn the panic into
 // the compaction's error, and the observing hooks (after, failed)
 // log it through the agent's logger and move on. A hook must not
-// take the turn machinery with it (the review's containment row).
+// take the turn machinery with it. Every one of them runs without
+// s.mu: a hook may call the session.
 func safeBefore(fn func(context.Context, *Preparation) (Verdict, error), ctx context.Context, p *Preparation) (v Verdict, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -310,15 +568,24 @@ func (s *Session) safeAfter(ctx context.Context, e CompactionEntry) {
 	fn(ctx, e)
 }
 
-// Uncompact undoes the latest compaction on the leaf's path the only
-// way the format allows: a branch back to the entry before the
-// compaction entry (ADR 0020 §1) — a leaf entry, no rewrite, nothing
-// deleted. The context is exactly what it was before the compaction
-// ran; the compaction and everything after it stay in the file, off
-// the path.
+// Uncompact undoes the latest compaction entry on the leaf's path —
+// a summary compaction or a trim, whichever landed last — the only
+// way the format allows: a branch back to the entry before it (ADR
+// 0020 §1), a leaf entry, no rewrite, nothing deleted. The context is
+// exactly what it was before that entry landed; the entry and
+// everything after it stay in the file, off the path. After a
+// compaction followed by a trim, the first Uncompact undoes the trim
+// and a second one the compaction.
+//
+// It is a navigation, so Branch's rule applies: ErrBusy while a turn
+// is in flight. With no compaction on the path it fails wrapping
+// ErrNoEntry.
 func (s *Session) Uncompact(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.running && s.inFlight != nil {
+		return fmt.Errorf("%w: session %s is running a turn; uncompact between turns", ErrBusy, s.header.ID)
+	}
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
 		return err
@@ -327,106 +594,106 @@ func (s *Session) Uncompact(ctx context.Context) error {
 		if _, ok := path[i].(CompactionEntry); ok {
 			target := parentOf(path[i])
 			if target == "" {
-				return fmt.Errorf("thread: session %s's compaction has no entry before it to branch back to", s.header.ID)
+				return fmt.Errorf("%w: session %s's compaction has no entry before it to branch back to", ErrNoEntry, s.header.ID)
 			}
 			if _, ok := s.byID[target]; !ok {
-				return fmt.Errorf("thread: session %s holds no entry %q to branch back to", s.header.ID, target)
+				return fmt.Errorf("%w: session %s holds no entry %q to branch back to", ErrNoEntry, s.header.ID, target)
 			}
-			return s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {
+			if err := s.appendLocked(ctx, func(id, parent string, created time.Time) Entry {
 				return LeafEntry{ID: id, ParentID: parent, Created: created, Entry: target}
-			})
+			}); err != nil {
+				return err
+			}
+			// Like any navigation off a parked tail, the undo may clear
+			// what held queued sends.
+			s.kickRunnerLocked()
+			return nil
 		}
 	}
-	return fmt.Errorf("thread: session %s has no compaction on its leaf's path to undo", s.header.ID)
+	return fmt.Errorf("%w: session %s has no compaction on its leaf's path to undo", ErrNoEntry, s.header.ID)
 }
 
-// computeCompaction is the algorithm: snapshot the leaf's path, cut
-// it, build the Preparation, let the BeforeCompact hook decide, then
-// summarize — through the configured layers: a custom Compactor
-// replaces the whole thing, a custom Summarizer just the text, and the
-// default runs the model chain (SummaryModel → session model) with the
-// CheckSummary retry and the PreferNative seam. The model calls run
-// without the session lock — they take seconds — and the tree only
-// grows meanwhile, so the snapshot's cut stays valid to apply.
+// computeCompaction is the runner's planCompaction: the trigger and
+// the overflow re-run compute through it. A failure reaches the
+// CompactFailed hook (the refusals aside), and the plan it returns is
+// marked as the runner's own, so its ApplyCompaction passes the busy
+// guard — the write is part of the turn in flight, placed by the
+// runner between that turn's steps or at its edges.
 func (s *Session) computeCompaction(ctx context.Context, reason Reason, instructions string) (*Compaction, error) {
+	c, err := s.planCompaction(ctx, reason, instructions)
+	if err != nil {
+		s.reportFailed(ctx, reason, err)
+		return nil, err
+	}
+	c.runner = true
+	return c, nil
+}
+
+// planCompaction is the algorithm: snapshot the leaf's context and
+// path, cut, build the Preparation, let the BeforeCompact hook decide
+// and edit, then summarize — through the configured layers: a custom
+// Compactor replaces the rest, a custom Summarizer just the text, and
+// the default runs the model chain (SummaryModel → session model) with
+// the CheckSummary retry and the PreferNative seam. Every caller hook
+// and every model call runs without the session lock — they take
+// seconds and may call the session — and the tree only grows
+// meanwhile, so the snapshot's cut stays valid to apply. It writes
+// nothing and reports to no hook: its callers decide what a failure
+// means.
+func (s *Session) planCompaction(ctx context.Context, reason Reason, instructions string) (*Compaction, error) {
 	s.mu.Lock()
-	path, err := s.pathLocked(s.leaf)
+	view, err := s.contextViewLocked()
 	if err != nil {
 		s.mu.Unlock()
 		return nil, err
 	}
 	cfg := s.cfg.compaction
-	prev := ""
-	rangeStart := 0
-	for i := len(path) - 1; i >= 0; i-- {
-		if c, ok := path[i].(CompactionEntry); ok {
-			prev = c.Summary // iterative: the previous summary feeds the next
-			// …and the previous kept boundary is where the range to
-			// summarize starts: entries below it exist only inside the
-			// previous summary, and re-serializing them would feed the
-			// summarizer the whole history every time — an input that
-			// itself outgrows the window (ADR 0020 §1).
-			if j := indexOfID(path, c.FirstKept); j >= 0 {
-				rangeStart = j
-			}
-			break
-		}
-	}
 	pinned := s.pinnedIDsLocked()
 	s.mu.Unlock()
 
-	weight := defaultEntryWeight
-	if cfg.estimator != nil {
-		weight = func(e Entry) int64 {
-			if m, ok := contextMessage(e); ok {
-				return int64(cfg.estimator.Estimate([]weft.Message{m}))
-			}
-			return 0
-		}
+	path := view.path
+	// The iterative chain: the previous summary is the governing
+	// summary compaction's — a trim record above it is skipped, or its
+	// empty summary would cut the chain and drop everything the earlier
+	// summaries held. The previous kept boundary is where the range to
+	// summarize starts: entries below it exist only inside the previous
+	// summary, and re-serializing them would feed the summarizer the
+	// whole history every time — an input that itself outgrows the
+	// window (ADR 0020 §1).
+	prev, rangeStart := "", 0
+	if view.governor >= 0 {
+		prev = path[view.governor].(CompactionEntry).Summary
+		rangeStart = view.start
 	}
-	cut := cutIndexWeighted(path, cfg.keepRecent, weight)
+
+	cut := cutIndexWeighted(path, cfg.keepRecent, s.entryWeight)
 	if cut < 0 {
-		return nil, fmt.Errorf("%w: session %s's tail fits inside KeepRecent", errNothingToCompact, s.header.ID)
+		return nil, fmt.Errorf("%w: session %s's tail fits inside KeepRecent", ErrNothingToCompact, s.header.ID)
 	}
 	if cut <= rangeStart {
 		// Nothing new to summarize: everything past the previous kept
 		// boundary still fits — the iterative chain is fed nothing it
 		// does not already hold.
-		return nil, fmt.Errorf("%w: session %s has nothing new past the kept boundary", errNothingToCompact, s.header.ID)
+		return nil, fmt.Errorf("%w: session %s has nothing new past the kept boundary", ErrNothingToCompact, s.header.ID)
 	}
-	kept, summarized := path[cut:], path[rangeStart:cut]
-	var rangeMsgs, contextMsgs []weft.Message
-	for _, e := range path {
-		if m, ok := contextMessage(e); ok {
-			contextMsgs = append(contextMsgs, m)
-		}
+	rangeMsgs := rangeMessages(path, rangeStart, cut)
+	pinnedThrough := pinnedBelow(path, cut, pinned)
+	// What the model was shown: the compacted view, not the raw path —
+	// after a first compaction the two differ by everything the summary
+	// replaced. Each message carries its own Content slice: the hook
+	// and the Compactor are handed copies, never the tree's.
+	contextMsgs := make([]weft.Message, len(view.msgs))
+	for i, vm := range view.msgs {
+		contextMsgs[i] = cloneMessage(vm.msg)
 	}
-	for _, e := range summarized {
-		if m, ok := contextMessage(e); ok {
-			rangeMsgs = append(rangeMsgs, m)
-		}
-	}
-	// The pinned ids this compaction keeps through: every pin below the
-	// cut, in the range it summarizes and in the older summary's range
-	// alike — the walk re-includes them from the entry, so a pin never
-	// has to hold the cut back (ADR 0020 §4).
-	var pinnedThrough []string
-	for _, e := range path[:cut] {
-		if pinned[idOf(e)] {
-			pinnedThrough = append(pinnedThrough, idOf(e))
-		}
-	}
-	var tokensBefore int64
-	for _, m := range contextMsgs {
-		tokensBefore += s.estimate(m)
-	}
+	tokensBefore := s.estimateAll(contextMsgs)
 
 	prep := Preparation{
 		Reason:       reason,
 		Context:      contextMsgs,
 		Messages:     rangeMsgs,
 		PrevSummary:  prev,
-		FirstKept:    idOf(kept[0]),
+		FirstKept:    idOf(path[cut]),
 		TokensBefore: tokensBefore,
 		Instructions: instructions,
 		Pinned:       pinnedThrough,
@@ -434,55 +701,65 @@ func (s *Session) computeCompaction(ctx context.Context, reason Reason, instruct
 	if cfg.before != nil {
 		v, err := safeBefore(cfg.before, ctx, &prep)
 		if err != nil {
-			s.compactFailed(ctx, reason, err)
 			return nil, err
 		}
 		switch {
 		case v.isCancel():
-			return nil, fmt.Errorf("%w: BeforeCompact canceled it", errCompactCanceled)
+			return nil, fmt.Errorf("%w: BeforeCompact canceled it", ErrCompactCanceled)
 		case v.isReplace():
 			c := v.replacement()
 			if c == nil {
-				return nil, fmt.Errorf("thread: BeforeCompact replaced the compaction with nothing")
+				return nil, fmt.Errorf("%w: BeforeCompact replaced the compaction with nothing", ErrInvalidCompaction)
 			}
-			c.Reason = ReasonFromHook
+			out := *c
+			out.Reason = ReasonFromHook
 			s.mu.Lock()
-			_, held := s.byID[c.FirstKept]
+			_, held := s.byID[out.FirstKept]
 			s.mu.Unlock()
 			if !held {
-				return nil, fmt.Errorf("thread: BeforeCompact replacement keeps first entry %q, which the session does not hold", c.FirstKept)
+				return nil, fmt.Errorf("%w: BeforeCompact replacement keeps first entry %q", ErrNoEntry, out.FirstKept)
 			}
-			return c, nil
+			return &out, nil
 		}
+		// Proceed: the hook's edits are the plan. The four editable
+		// fields are read back; the session's facts are restored.
+		edited, err := adoptEdits(path, rangeStart, cut, pinned, prep, sameSlice(prep.Messages, rangeMsgs), sameSlice(prep.Pinned, pinnedThrough))
+		if err != nil {
+			return nil, err
+		}
+		prep = edited
+		prep.Reason, prep.Context, prep.PrevSummary, prep.TokensBefore = reason, contextMsgs, prev, tokensBefore
 	}
 	if cfg.compactor != nil {
 		c, err := safeCompactor(cfg.compactor, ctx, prep)
 		if err != nil {
-			s.compactFailed(ctx, reason, err)
 			return nil, err
 		}
 		if c == nil {
-			return nil, fmt.Errorf("thread: the Compactor returned no Compaction")
+			return nil, fmt.Errorf("%w: the Compactor returned no Compaction", ErrInvalidCompaction)
 		}
-		return c, nil
+		out := *c
+		if out.Reason == "" {
+			out.Reason = reason
+		}
+		return &out, nil
 	}
-	view, files := summarizerView(rangeMsgs)
+	sumView, files := summarizerView(prep.Messages)
 	slices.Sort(files)
 	files = slices.Compact(files)
 
 	summary, err := s.produceSummary(ctx, SummaryInput{
-		Messages:     view,
-		PrevSummary:  prev,
-		Instructions: instructions,
+		Messages:     sumView,
+		PrevSummary:  prep.PrevSummary,
+		Instructions: prep.Instructions,
 		MaxTokens:    cfg.maxTokens(),
 		Reason:       reason,
-		SystemPrompt: cfg.summarySystemPrompt(instructions),
-		SummaryModel: cfg.summaryModel,
-	}, reason)
+		SystemPrompt: cfg.summarySystemPrompt(prep.Instructions),
+	})
 	if err != nil {
 		return nil, err
 	}
-	hash := sha256.Sum256(mustJSON(view))
+	hash := sha256.Sum256(mustJSON(sumView))
 	c := &Compaction{
 		Summary:         summary.Text,
 		FirstKept:       prep.FirstKept,
@@ -491,7 +768,7 @@ func (s *Session) computeCompaction(ctx context.Context, reason Reason, instruct
 		SummarizerUsage: summary.Usage,
 		SummarizerModel: summary.Model,
 		FilesRead:       files,
-		Pinned:          pinnedThrough,
+		Pinned:          prep.Pinned,
 		RangeHash:       hex.EncodeToString(hash[:]),
 	}
 	if cfg.preferNative && c.SummarizerModel == (weft.ModelInfo{}) {
@@ -500,6 +777,83 @@ func (s *Session) computeCompaction(ctx context.Context, reason Reason, instruct
 		c.SummarizerModel = weft.InfoOf(s.agent.Model())
 	}
 	return c, nil
+}
+
+// rangeMessages returns the messages of path[from:to] — the range a
+// compaction summarizes — each with its own Content slice, so a
+// BeforeCompact hook that edits a message in place edits its copy and
+// never the tree.
+func rangeMessages(path []Entry, from, to int) []weft.Message {
+	var out []weft.Message
+	for _, e := range path[from:to] {
+		if m, ok := contextMessage(e); ok {
+			out = append(out, cloneMessage(m))
+		}
+	}
+	return out
+}
+
+// pinnedBelow lists the pinned ids a compaction cutting at cut keeps
+// through: every pin below the cut, in the range it summarizes and in
+// the older summaries' ranges alike — the walk re-includes them from
+// the entry, so a pin never has to hold the cut back (ADR 0020 §4).
+func pinnedBelow(path []Entry, cut int, pinned map[string]bool) []string {
+	var out []string
+	for _, e := range path[:cut] {
+		if pinned[idOf(e)] {
+			out = append(out, idOf(e))
+		}
+	}
+	return out
+}
+
+// sameSlice reports whether a is still the slice b — same length, same
+// backing array — which is how a hook's "left it alone" reads: an
+// assignment of a new slice changes it, an in-place edit does not.
+func sameSlice[T any](a, b []T) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return len(a) == 0 || &a[0] == &b[0]
+}
+
+// adoptEdits validates what a BeforeCompact hook left on the
+// Preparation and returns the plan to proceed with. FirstKept may
+// move: it must stay on the path, past the previous boundary, at a
+// valid cut (a user or assistant message that does not split a tool
+// call from its result). When it moved and the hook did not assign
+// Messages (or Pinned), the range (or the pinned list) is rebuilt for
+// the new boundary; an assigned Messages is summarized as given — the
+// redaction hook's whole point. Assigned Pinned ids must be entries on
+// the path.
+func adoptEdits(path []Entry, rangeStart, cut int, pinned map[string]bool, prep Preparation, msgsUntouched, pinnedUntouched bool) (Preparation, error) {
+	if prep.FirstKept != idOf(path[cut]) {
+		idx := indexOfID(path, prep.FirstKept)
+		switch {
+		case idx < 0:
+			return prep, fmt.Errorf("%w: BeforeCompact moved FirstKept to %q, which is not on the leaf's path", ErrNoEntry, prep.FirstKept)
+		case idx < rangeStart:
+			return prep, fmt.Errorf("%w: BeforeCompact moved FirstKept to %q, before the previous compaction's kept boundary", ErrInvalidCompaction, prep.FirstKept)
+		case idx == rangeStart:
+			return prep, fmt.Errorf("%w: BeforeCompact moved FirstKept to %q, which leaves nothing to summarize", ErrNothingToCompact, prep.FirstKept)
+		case !validCut(path, idx):
+			return prep, fmt.Errorf("%w: BeforeCompact moved FirstKept to %q, which is not a user or assistant message or splits a tool call from its result", ErrInvalidCompaction, prep.FirstKept)
+		}
+		if msgsUntouched {
+			prep.Messages = rangeMessages(path, rangeStart, idx)
+		}
+		if pinnedUntouched {
+			prep.Pinned = pinnedBelow(path, idx, pinned)
+		}
+	}
+	if !pinnedUntouched {
+		for _, id := range prep.Pinned {
+			if indexOfID(path, id) < 0 {
+				return prep, fmt.Errorf("%w: BeforeCompact pinned %q, which is not on the leaf's path", ErrNoEntry, id)
+			}
+		}
+	}
+	return prep, nil
 }
 
 // contextMessage returns the message an entry contributes to the
@@ -528,9 +882,22 @@ func indexOfID(path []Entry, id string) int {
 	return -1
 }
 
+// reportFailed tells the CompactFailed hook that a compaction which
+// was to be written was not — unless err is one of the refusals that
+// attempt nothing (nothing to compact, canceled by the hook, busy,
+// awaiting approval). Callers must not hold s.mu.
+func (s *Session) reportFailed(ctx context.Context, reason Reason, err error) {
+	if errors.Is(err, ErrNothingToCompact) || errors.Is(err, ErrCompactCanceled) ||
+		errors.Is(err, ErrBusy) || errors.Is(err, ErrAwaitingApproval) {
+		return
+	}
+	s.compactFailed(ctx, reason, err)
+}
+
 // compactFailed runs the CompactFailed hook when one is set — the
 // session is unchanged, and the caller is told why. A panicking hook
-// is contained: the failure it reports is already the story.
+// is contained: the failure it reports is already the story. Callers
+// must not hold s.mu.
 func (s *Session) compactFailed(ctx context.Context, reason Reason, err error) {
 	fn := s.cfg.compaction.failed
 	if fn == nil {
@@ -546,63 +913,58 @@ func (s *Session) compactFailed(ctx context.Context, reason Reason, err error) {
 
 // produceSummary runs the summary chain: a custom Summarizer if one is
 // set, else the models — SummaryModel first when configured, the
-// session's own after it — each retried once on a CheckSummary failure
-// before the chain moves on. Exhausted, the compaction fails and
-// CompactFailed hears why (ADR 0020 §4).
-func (s *Session) produceSummary(ctx context.Context, in SummaryInput, reason Reason) (Summary, error) {
-	if fn := s.cfg.compaction.summarizer; fn != nil {
-		sum, err := safeSummarize(fn, ctx, in)
-		if err == nil && s.cfg.compaction.check != nil {
-			if err = safeCheck(s.cfg.compaction.check, sum); err == nil {
+// session's own after it. Each source gets one retry when its summary
+// is rejected — by CheckSummary, or as ErrSummaryTruncated when the
+// model stopped at the output cap — before the chain moves on; a
+// source that errors outright is not retried. A summary with no text
+// is a failure. Exhausted, the chain returns its last error wrapped
+// (errors.Is finds ErrSummaryTruncated when that was it) and nothing
+// is stored: a cut or rejected summary never becomes the context (ADR
+// 0020 §4).
+func (s *Session) produceSummary(ctx context.Context, in SummaryInput) (Summary, error) {
+	cfg := s.cfg.compaction
+	var sources []func() (Summary, error)
+	if fn := cfg.summarizer; fn != nil {
+		sources = append(sources, func() (Summary, error) { return safeSummarize(fn, ctx, in) })
+	} else {
+		if cfg.summaryModel != nil {
+			m := cfg.summaryModel
+			sources = append(sources, func() (Summary, error) { return s.summarizeWith(ctx, m, in) })
+		}
+		sources = append(sources, func() (Summary, error) { return s.summarizeWith(ctx, s.agent.Model(), in) })
+	}
+	var lastErr error
+	for _, run := range sources {
+		for attempt := 0; attempt < 2; attempt++ {
+			sum, err := run()
+			rejected := false
+			if err == nil && strings.TrimSpace(sum.Text) == "" {
+				err = errors.New("thread: summarizer returned no text")
+			}
+			if err == nil && cfg.check != nil {
+				if err = safeCheck(cfg.check, sum); err != nil {
+					rejected = true
+				}
+			}
+			if err == nil {
 				return sum, nil
 			}
-			// One retry, then the chain is exhausted for a custom
-			// summarizer: there is nothing to fall back to.
-			sum, err = safeSummarize(fn, ctx, in)
-			if err == nil {
-				if err = safeCheck(s.cfg.compaction.check, sum); err == nil {
-					return sum, nil
-				}
+			lastErr = err
+			if !rejected && !errors.Is(err, ErrSummaryTruncated) {
+				break // the source itself failed: the chain falls back
 			}
 		}
-		if err != nil {
-			s.compactFailed(ctx, reason, err)
-			return Summary{}, err
-		}
-		return sum, nil
 	}
-	models := []weft.Model{}
-	if in.SummaryModel != nil {
-		models = append(models, in.SummaryModel)
-	}
-	models = append(models, s.agent.Model())
-	var lastErr error
-	for _, m := range models {
-		for attempt := 0; attempt < 2; attempt++ {
-			sum, err := s.summarizeWith(ctx, m, in)
-			if err != nil {
-				lastErr = err
-				break // model error: the chain falls back
-			}
-			if s.cfg.compaction.check != nil {
-				if err := safeCheck(s.cfg.compaction.check, sum); err != nil {
-					lastErr = err
-					continue // retry once on the same model
-				}
-			}
-			return sum, nil
-		}
-	}
-	err := fmt.Errorf("thread: every summarizer failed, last error: %w", lastErr)
-	s.compactFailed(ctx, reason, err)
-	return Summary{}, err
+	return Summary{}, fmt.Errorf("thread: every summarizer failed, last error: %w", lastErr)
 }
 
 // summarizeWith makes one model produce the summary: the provider's
 // own compaction when PreferNative is set and the model (or something
 // it wraps) offers it, else a single text step under the system prompt
 // with the output cap. No cache hints are sent, so no prompt-cache
-// writes happen on the summary call.
+// writes happen on the summary call. A max_tokens finish is
+// ErrSummaryTruncated — the text that fit under the cap is half a
+// summary, and storing it would silently lose the other half.
 func (s *Session) summarizeWith(ctx context.Context, m weft.Model, in SummaryInput) (Summary, error) {
 	input := in.Messages
 	if in.PrevSummary != "" {
@@ -614,18 +976,23 @@ func (s *Session) summarizeWith(ctx context.Context, m weft.Model, in SummaryInp
 				System:   in.SystemPrompt,
 				Messages: input,
 			}, in.Instructions)
-			if err == nil && msg.Text() != "" {
-				return Summary{Text: strings.TrimSpace(msg.Text()), Reason: in.Reason, Usage: usage, Model: weft.InfoOf(m)}, nil
+			if err == nil && strings.TrimSpace(msg.Text()) != "" {
+				return Summary{Text: strings.TrimSpace(msg.Text()), Usage: usage, Model: weft.InfoOf(m)}, nil
 			}
-			// Any other model, a switch, or an error: the text summary
-			// is the fallback (ADR 0020 §7).
+			// An error or a text-less answer: the text summary is the
+			// fallback (ADR 0020 §7) — said out loud, never swallowed.
+			if err == nil {
+				err = errors.New("the provider returned no text")
+			}
+			s.agent.Logger().Warn("thread: provider-native compaction failed; falling back to the text summary",
+				"session", s.header.ID, "err", err)
 		}
 	}
-	cap := in.MaxTokens
+	maxTokens := int(in.MaxTokens)
 	req := weft.ModelRequest{
 		System:   in.SystemPrompt,
 		Messages: input,
-		Params:   weft.RequestParams{MaxTokens: &cap},
+		Params:   weft.RequestParams{MaxTokens: &maxTokens},
 	}
 	// The stream contract, enforced the way the loop enforces it:
 	// exactly one ModelFinish, nothing after it (ErrModelContract) —
@@ -633,6 +1000,7 @@ func (s *Session) summarizeWith(ctx context.Context, m weft.Model, in SummaryInp
 	// whatever text happened to arrive.
 	var sb strings.Builder
 	var usage weft.Usage
+	var stop weft.StopReason
 	finished := false
 	for ev, err := range m.Stream(ctx, req) {
 		if err != nil {
@@ -645,17 +1013,20 @@ func (s *Session) summarizeWith(ctx context.Context, m weft.Model, in SummaryInp
 		case weft.ModelTextDelta:
 			sb.WriteString(ev.Text)
 		case weft.ModelFinish:
-			usage, finished = ev.Usage, true
+			usage, stop, finished = ev.Usage, ev.Reason, true
 		}
 	}
 	if !finished {
 		return Summary{}, fmt.Errorf("%w: the summarizer stream ended without ModelFinish", weft.ErrModelContract)
 	}
+	if stop == weft.StopMaxTokens {
+		return Summary{}, fmt.Errorf("%w: the summarizer stopped at %d output tokens (raise SummaryMaxTokens or Reserve)", ErrSummaryTruncated, maxTokens)
+	}
 	summary := strings.TrimSpace(sb.String())
 	if summary == "" {
-		return Summary{}, fmt.Errorf("thread: summarizer returned no text")
+		return Summary{}, errors.New("thread: summarizer returned no text")
 	}
-	return Summary{Text: summary, Reason: in.Reason, Usage: usage, Model: weft.InfoOf(m)}, nil
+	return Summary{Text: summary, Usage: usage, Model: weft.InfoOf(m)}, nil
 }
 
 // cutIndex finds where the path cuts: the earliest boundary such that
@@ -792,29 +1163,64 @@ func summarizerView(msgs []weft.Message) ([]weft.Message, []string) {
 
 // estimate is the session's token estimate for one message: the
 // configured Estimator when one is set, the default quarter-of-wire-
-// bytes otherwise.
+// bytes otherwise. The Estimator is a caller's hook: callers must not
+// hold s.mu.
 func (s *Session) estimate(m weft.Message) int64 {
 	if est := s.cfg.compaction.estimator; est != nil {
-		return int64(est.Estimate([]weft.Message{m}))
+		return est.Estimate([]weft.Message{m})
 	}
 	return estimateMessage(m)
+}
+
+// estimateAll is estimate over a batch — one Estimator call for the
+// lot, so a provider-aware estimator can count them together. Callers
+// must not hold s.mu.
+func (s *Session) estimateAll(msgs []weft.Message) int64 {
+	if len(msgs) == 0 {
+		return 0
+	}
+	if est := s.cfg.compaction.estimator; est != nil {
+		return est.Estimate(msgs)
+	}
+	var n int64
+	for _, m := range msgs {
+		n += estimateMessage(m)
+	}
+	return n
+}
+
+// entryWeight is the cut walk's per-entry weight under the session's
+// estimator: what the entry costs in the window — its message, or the
+// summary a compaction or branch summary shows for it. Trim records
+// and the bookkeeping kinds weigh nothing. Callers must not hold s.mu.
+func (s *Session) entryWeight(e Entry) int64 {
+	if c, ok := e.(CompactionEntry); ok {
+		if c.isTrim() {
+			return 0
+		}
+		return s.estimate(summaryMessage(c.Summary))
+	}
+	if m, ok := contextMessage(e); ok {
+		return s.estimate(m)
+	}
+	return 0
 }
 
 // estimateMessage is the default token estimate for one message: a
 // quarter of its wire bytes, rounded up. It estimates the DELTA the
 // trigger adds to provider-reported input — the signal itself is never
-// an estimate (ADR 0020 §2's rule); the Estimator interface in step
-// 1.9 makes this replaceable.
+// an estimate (ADR 0020 §2's rule); WithEstimator replaces it.
 func estimateMessage(m weft.Message) int64 {
 	return (int64(len(mustJSON(m))) + 3) / 4
 }
 
-// estimateEntry estimates the context weight of one path entry:
-// message and custom_message entries carry their message; a branch
-// summary and a compaction carry the summary the context shows for
-// them; the bookkeeping kinds weigh nothing (they never reach the
-// context). The summaries weigh what they cost in the window — a cut
-// that ignored them would keep more than KeepRecent really allows.
+// estimateEntry estimates the context weight of one path entry with
+// the default estimate: message and custom_message entries carry their
+// message; a branch summary and a summary compaction carry the summary
+// the context shows for them; a trim record and the bookkeeping kinds
+// weigh nothing (they never reach the context). The summaries weigh
+// what they cost in the window — a cut that ignored them would keep
+// more than KeepRecent really allows.
 func estimateEntry(e Entry) int64 {
 	switch e := e.(type) {
 	case MessageEntry:
@@ -824,6 +1230,9 @@ func estimateEntry(e Entry) int64 {
 	case BranchSummaryEntry:
 		return estimateMessage(summaryMessage(e.Summary))
 	case CompactionEntry:
+		if e.isTrim() {
+			return 0
+		}
 		return estimateMessage(summaryMessage(e.Summary))
 	}
 	return 0
@@ -843,12 +1252,19 @@ func mustJSON(v any) []byte {
 // maybeAutoCompact is the trigger (ADR 0020 §2), run from the session's
 // single runner before a turn starts — after the prompt is on the
 // path, so the estimated delta covers what the run is about to be fed
-// — and after each turn ends: compact when the provider-reported input of the last
-// model step plus the estimated messages added since crosses window −
-// Reserve. The reported input is the signal, never a chars-per-token
-// guess at the whole context; only the delta is estimated. With no
-// window known there is no automatic compaction, and one warning says
-// so through the agent's logger.
+// — and after each turn ends: compact when the provider-reported input
+// of the last model step plus the estimated messages added since
+// crosses window − Reserve. The reported input is the signal, never a
+// chars-per-token guess at the whole context; only the delta is
+// estimated. With no window known there is no automatic compaction,
+// and one warning says so through the agent's logger.
+//
+// The trigger stands down whenever the report no longer describes the
+// path: no step was ever measured, the measured turn is off the leaf's
+// path (a Branch moved the line), or a compaction entry landed after
+// it — the report predates the compaction, and firing on it again
+// would compact a context that just shrank. The next turn's report
+// re-arms it.
 func (s *Session) maybeAutoCompact(ctx context.Context) {
 	cfg := s.cfg.compaction
 	if cfg.disabled {
@@ -889,7 +1305,7 @@ func (s *Session) maybeAutoCompact(ctx context.Context) {
 		return
 	}
 	var since []weft.Message
-	counting := false
+	counting, stale := false, false
 	for _, e := range path {
 		if !counting {
 			if idOf(e) == s.lastMeasureLeaf {
@@ -897,26 +1313,28 @@ func (s *Session) maybeAutoCompact(ctx context.Context) {
 			}
 			continue
 		}
+		if _, ok := e.(CompactionEntry); ok {
+			// A compaction or a trim landed after the measurement: the
+			// reported number describes the context before it.
+			stale = true
+			break
+		}
 		if m, ok := contextMessage(e); ok {
 			since = append(since, m) // branch summaries count: the context carries them
 		}
 	}
 	s.mu.Unlock()
-	if !counting {
+	if !counting || stale {
 		// The mark is off the leaf's path — a Branch or an Uncompact
-		// moved the line since the measurement. There is no honest
-		// delta against a report that no longer describes this path,
-		// so this trigger stands down; the next turn's report becomes
-		// the signal again (the same rule as a never-measured
-		// session).
+		// moved the line since the measurement — or a compaction
+		// rewrote the context under it. There is no honest delta
+		// against a report that no longer describes this context, so
+		// the trigger stands down; the next turn's report becomes the
+		// signal again (the same rule as a never-measured session).
 		return
 	}
 
-	var est int64
-	for _, m := range since {
-		est += s.estimate(m)
-	}
-	in := TriggerInput{LastInput: lastInput, Estimated: est, Window: cfg.window, Reserve: cfg.reserve}
+	in := TriggerInput{LastInput: lastInput, Estimated: s.estimateAll(since), Window: cfg.window, Reserve: cfg.reserve}
 	if cfg.trigger != nil {
 		if !s.safeTrigger(in) {
 			return
@@ -935,28 +1353,30 @@ func (s *Session) maybeAutoCompact(ctx context.Context) {
 	// results may bring the context back under the line, and then no
 	// summary is made — a lighter trim record lands in the compaction
 	// entry instead.
-	if cfg.trimmer != nil {
-		before := s.rawContext()
-		trimmed, ok := s.safeTrim(ctx, before)
-		if !ok {
-			return // the trimmer panicked: logged, no trim this turn
-		}
-		var after int64
-		for _, m := range trimmed {
-			after += s.estimate(m)
-		}
-		if after <= cfg.window-cfg.reserve {
-			if err := s.writeTrim(ctx); err != nil {
-				s.agent.Logger().Warn("thread: trim record not written", "session", s.header.ID, "err", err)
-			}
-			return
-		}
+	if cfg.trimmer != nil && s.tryTrim(ctx) {
+		return
 	}
 
 	if err := s.applyAuto(ctx); err != nil {
 		// A failed compaction leaves the session unchanged — the next
 		// trigger tries again; the caller's turn still runs.
-		if !errors.Is(err, errNothingToCompact) && !errors.Is(err, errCompactCanceled) {
+		switch {
+		case errors.Is(err, ErrNothingToCompact):
+			// The trigger fired and there was nothing to cut: the
+			// context is over the line and compaction cannot help — the
+			// first time is worth a line, a line per turn is not.
+			s.mu.Lock()
+			warned := s.warnedNothing
+			s.warnedNothing = true
+			s.mu.Unlock()
+			if !warned {
+				s.agent.Logger().Warn("thread: the compaction trigger fired but there is nothing to compact; the context stays over window − Reserve until the tail outgrows KeepRecent",
+					"session", s.header.ID, "last_input", in.LastInput, "estimated", in.Estimated,
+					"window", in.Window, "reserve", in.Reserve, "keep_recent", cfg.keepRecent, "err", err)
+			}
+		case errors.Is(err, ErrCompactCanceled):
+			// The hook's decision; nothing to say.
+		default:
 			s.agent.Logger().Warn("thread: automatic compaction failed", "session", s.header.ID, "err", err)
 		}
 	}
@@ -972,6 +1392,7 @@ func firesAt(in TriggerInput) bool {
 
 // safeTrigger consults the trigger function, containing a panic as a
 // no-fire with a log line — the runner must survive its caller's hook.
+// Callers must not hold s.mu.
 func (s *Session) safeTrigger(in TriggerInput) (fire bool) {
 	fn := s.cfg.compaction.trigger
 	defer func() {
@@ -983,16 +1404,122 @@ func (s *Session) safeTrigger(in TriggerInput) (fire bool) {
 	return fn(in)
 }
 
-// safeTrim runs the trimmer, containing a panic as no-trim.
-func (s *Session) safeTrim(ctx context.Context, before []weft.Message) (trimmed []weft.Message, ok bool) {
+// safeTrim runs the trimmer, containing a panic as an error. A nil
+// result is an error too: a trimmer that returns nothing has not
+// trimmed the context to nothing. Callers must not hold s.mu.
+func (s *Session) safeTrim(ctx context.Context, before []weft.Message) (trimmed []weft.Message, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			trimmed, ok = nil, false
-			s.agent.Logger().Error("thread: the Trimmer panicked", "panic", r)
+			trimmed, err = nil, fmt.Errorf("thread: the Trimmer panicked: %v", r)
 		}
 	}()
-	trimmed, _ = s.cfg.compaction.trimmer.Trim(ctx, before)
-	return trimmed, true
+	trimmed, err = s.cfg.compaction.trimmer.Trim(ctx, before)
+	if err != nil {
+		return nil, err
+	}
+	if trimmed == nil {
+		return nil, errors.New("thread: the Trimmer returned no messages")
+	}
+	return trimmed, nil
+}
+
+// tryTrim runs the trimmer pre-pass and reports whether it settled
+// this trigger fire: the trimmer is shown the model's context, its
+// output is diffed against that input into a trim record, and when the
+// trimmed context fits under window − Reserve the record lands as a
+// compaction entry with Reason trim. False means the summary
+// compaction should run: the trimmer failed, changed nothing, made a
+// change the record cannot represent (logged and reported through
+// CompactFailed), or did not trim enough.
+func (s *Session) tryTrim(ctx context.Context) bool {
+	cfg := s.cfg.compaction
+	s.mu.Lock()
+	view, err := s.contextViewLocked()
+	s.mu.Unlock()
+	if err != nil || len(view.msgs) == 0 {
+		return false
+	}
+	before := make([]weft.Message, len(view.msgs))
+	input := make([]weft.Message, len(view.msgs))
+	for i, vm := range view.msgs {
+		before[i] = vm.msg
+		input[i] = cloneMessage(vm.msg) // the trimmer's own copy: an in-place edit must not reach the tree
+	}
+	trimmed, err := s.safeTrim(ctx, input)
+	if err != nil {
+		s.agent.Logger().Warn("thread: the trimmer failed; summarizing instead", "session", s.header.ID, "err", err)
+		return false
+	}
+	rec, err := deriveTrim(view.msgs, trimmed)
+	if err != nil {
+		s.agent.Logger().Warn("thread: the trim cannot be recorded; summarizing instead", "session", s.header.ID, "err", err)
+		s.compactFailed(ctx, ReasonTrim, err)
+		return false
+	}
+	if len(rec.Stubs) == 0 {
+		return false // nothing left to trim: only a summary can shrink this context
+	}
+	if s.estimateAll(trimmed) > cfg.window-cfg.reserve {
+		return false // the trim alone is not enough
+	}
+	c := &Compaction{
+		// A trim drops nothing, so it keeps the boundary in force: the
+		// governing compaction's, or the root when none governs.
+		FirstKept:    idOf(view.path[view.start]),
+		TokensBefore: s.estimateAll(before),
+		Reason:       ReasonTrim,
+		Trim:         rec,
+		runner:       true,
+	}
+	if err := s.ApplyCompaction(ctx, c); err != nil {
+		s.agent.Logger().Warn("thread: trim record not written", "session", s.header.ID, "err", err)
+	}
+	return true
+}
+
+// deriveTrim turns a trimmer's output into the trim record the entry
+// persists: the diff of the trimmed context against the view the
+// trimmer was shown. The one representable change is a tool result's
+// Content (and IsError) replaced in place; a message added, dropped or
+// reordered, a part other than a tool result changed, or a result's
+// CallID or Name changed is an error wrapping ErrInvalidCompaction — a
+// change the walk could not replay must not be silently lost. An
+// unchanged context yields an empty record.
+func deriveTrim(view []viewMsg, trimmed []weft.Message) (*TrimRecord, error) {
+	if len(trimmed) != len(view) {
+		return nil, fmt.Errorf("%w: the Trimmer returned %d messages for %d; a trim may only replace tool-result content", ErrInvalidCompaction, len(trimmed), len(view))
+	}
+	rec := &TrimRecord{}
+	for i, vm := range view {
+		in, out := vm.msg, trimmed[i]
+		if in.Role != out.Role || len(in.Content) != len(out.Content) {
+			return nil, fmt.Errorf("%w: the Trimmer changed the shape of message %d; a trim may only replace tool-result content", ErrInvalidCompaction, i)
+		}
+		for j := range in.Content {
+			if samePart(in.Content[j], out.Content[j]) {
+				continue
+			}
+			ir, inOK := in.Content[j].(weft.ToolResultPart)
+			or, outOK := out.Content[j].(weft.ToolResultPart)
+			if !inOK || !outOK || ir.CallID != or.CallID || ir.Name != or.Name || vm.entry == "" {
+				return nil, fmt.Errorf("%w: the Trimmer changed part %d of message %d, which is not a tool result's content", ErrInvalidCompaction, j, i)
+			}
+			rec.Stubs = append(rec.Stubs, TrimStub{Entry: vm.entry, CallID: or.CallID, Content: or.Content, IsError: or.IsError})
+		}
+	}
+	return rec, nil
+}
+
+// samePart reports whether two message parts are the same on the wire
+// — the comparison that matters, since the wire is what the model
+// sees.
+func samePart(a, b weft.Part) bool {
+	if reflect.DeepEqual(a, b) {
+		return true
+	}
+	ja, errA := json.Marshal(a)
+	jb, errB := json.Marshal(b)
+	return errA == nil && errB == nil && bytes.Equal(ja, jb)
 }
 
 // applyAuto is the trigger's Compact: compute and apply with the
@@ -1006,23 +1533,33 @@ func (s *Session) applyAuto(ctx context.Context) error {
 }
 
 // rateLimitAllows reports whether the rate limits (ADR 0020 §4) let an
-// automatic compaction run: MinTurnsBetween turns since the last one,
-// and at most MaxPerSession in the file. Manual Compact never asks.
+// automatic compaction run: MinTurnsBetween turns since the last
+// compaction entry, and fewer than MaxPerSession automatic ones — both
+// counted along the leaf's path, in path order. Another branch's
+// compactions and turns are not this line's: counting the whole file
+// would let an abandoned branch starve the live one. Manual Compact
+// never asks.
 func (s *Session) rateLimitAllows() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	compactions, turnsSince := 0, 1<<30
-	for _, e := range s.order {
-		switch e.(type) {
+	path, err := s.pathLocked(s.leaf)
+	if err != nil {
+		return false
+	}
+	automatic, turnsSince := 0, 1<<30
+	for _, e := range path {
+		switch e := e.(type) {
 		case CompactionEntry:
-			compactions++
+			if e.Reason != ReasonManual {
+				automatic++
+			}
 			turnsSince = 0
 		case TurnEntry:
 			turnsSince++
 		}
 	}
 	cfg := s.cfg.compaction
-	if cfg.maxPerSession > 0 && compactions >= cfg.maxPerSession {
+	if cfg.maxPerSession > 0 && automatic >= cfg.maxPerSession {
 		return false
 	}
 	if cfg.minTurnsBetween > 0 && turnsSince < cfg.minTurnsBetween {
@@ -1031,72 +1568,28 @@ func (s *Session) rateLimitAllows() bool {
 	return true
 }
 
-// writeTrim records a trim: the same compaction entry, no summary, the
-// kept boundary the last compaction left (the root when none has — a
-// trim drops nothing, so everything is kept), and the trimmed view
-// re-derived on read from the configured trimmer — the built-in one
-// is deterministic over the file.
-func (s *Session) writeTrim(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	path, err := s.pathLocked(s.leaf)
-	if err != nil || len(path) == 0 {
-		return fmt.Errorf("thread: no path to trim")
-	}
-	firstKept := idOf(path[0])
-	for i := len(path) - 1; i >= 0; i-- {
-		if c, ok := path[i].(CompactionEntry); ok {
-			// The boundary the walk already reads from: a trim on a
-			// compacted session keeps it, so its record satisfies the
-			// same iterative rule every compaction does.
-			if indexOfID(path, c.FirstKept) >= 0 {
-				firstKept = c.FirstKept
-			}
-			break
-		}
-	}
-	var before int64
-	for _, e := range path {
-		before += defaultEntryWeight(e)
-	}
-	e := CompactionEntry{
-		ID:           s.mintIDLocked(),
-		ParentID:     s.leaf,
-		Created:      time.Now().UTC(),
-		FirstKept:    firstKept,
-		TokensBefore: before,
-		Reason:       ReasonTrim,
-	}
-	if err := s.st.Append(ctx, s.header.ID, e); err != nil {
-		return err
-	}
-	s.adoptLocked(e)
-	s.agent.Logger().Info("thread: trimmed old tool results",
-		"trace", "compaction",
-		"session", s.header.ID, "tokens_before", before)
-	return nil
-}
-
-// errCompactCanceled names a compaction a BeforeCompact hook stopped.
-var errCompactCanceled = errors.New("thread: compaction canceled")
-
-// errNothingToCompact names the no-op path of the trigger: a context
-// that crossed the line by estimate but whose tail still fits the keep
-// window — nothing to write, nothing to warn about twice.
-var errNothingToCompact = errors.New("thread: nothing to compact")
-
 // summarizeBranch summarizes the branch a SummarizeLeft Branch leaves
-// behind — the messages from the divergence up to the current leaf —
-// with the same skeleton, marker and model as compaction (ADR 0020
-// §6): one summary, cache prefix shared with nothing, the cost
-// documented rather than hidden. The divergence is the common
-// ancestor of the current leaf and the branch target: a target on
-// another branch summarizes everything this branch grew since the two
-// parted, and the returned from-entry names that ancestor ("" when
-// the branch being left is the whole session, grown from the root).
+// behind — what the model was shown of it, from the divergence up to
+// the current leaf — with the same skeleton, marker and model chain as
+// compaction (ADR 0020 §6): one summary, cache prefix shared with
+// nothing, the cost documented rather than hidden. The divergence is
+// the common ancestor of the current leaf and the branch target: a
+// target on another branch summarizes everything this branch grew
+// since the two parted, and the returned from-entry names that
+// ancestor ("" when the branch being left is the whole session, grown
+// from the root).
+//
+// The input is the branch's part of the compacted view, never the raw
+// path: when the branch compacted itself, its summary stands in for
+// the range it replaced (that summary is the only record the context
+// kept of it) followed by the entries from its first kept entry on —
+// feeding the raw range beside its own summary would double the
+// history and could alone outgrow the window. A failure is the
+// Branch's error; it is not a compaction and does not reach
+// CompactFailed.
 func (s *Session) summarizeBranch(ctx context.Context, target string) (summary, fromEntry string, err error) {
 	s.mu.Lock()
-	leafPath, err := s.pathLocked(s.leaf)
+	view, err := s.contextViewLocked()
 	if err != nil {
 		s.mu.Unlock()
 		return "", "", err
@@ -1106,6 +1599,8 @@ func (s *Session) summarizeBranch(ctx context.Context, target string) (summary, 
 		s.mu.Unlock()
 		return "", "", err
 	}
+	s.mu.Unlock()
+	leafPath := view.path
 	common := 0
 	for common < len(leafPath) && common < len(targetPath) &&
 		idOf(leafPath[common]) == idOf(targetPath[common]) {
@@ -1116,34 +1611,30 @@ func (s *Session) summarizeBranch(ctx context.Context, target string) (summary, 
 		fromEntry = idOf(leafPath[common-1])
 	}
 	var sumMsgs []weft.Message
-	for _, e := range leafPath[common:] {
-		switch e := e.(type) {
-		case MessageEntry:
-			sumMsgs = append(sumMsgs, e.Message)
-		case CustomMessageEntry:
-			sumMsgs = append(sumMsgs, e.Message)
-		case BranchSummaryEntry:
-			sumMsgs = append(sumMsgs, summaryMessage(e.Summary))
-		case CompactionEntry:
-			// The abandoned branch may hold its own compaction; its
-			// summary is the only record of that branch's older part,
-			// and the branch summary must keep it.
-			if e.Summary != "" {
-				sumMsgs = append(sumMsgs, summaryMessage(e.Summary))
+	for _, vm := range view.msgs {
+		if vm.entry == "" {
+			// The governing compaction's summary: the branch's own when
+			// both the compaction and the range it replaced sit past
+			// the divergence.
+			if view.governor >= common && view.start >= common {
+				sumMsgs = append(sumMsgs, vm.msg)
 			}
+			continue
+		}
+		if vm.idx >= common {
+			sumMsgs = append(sumMsgs, vm.msg)
 		}
 	}
-	s.mu.Unlock()
 	if len(sumMsgs) == 0 {
 		return "", "", fmt.Errorf("thread: SummarizeLeft with no branch to summarize: the leaf is on %q's path already", target)
 	}
-	view, _ := summarizerView(sumMsgs)
+	sumView, _ := summarizerView(sumMsgs)
 	cfg := s.cfg.compaction
 	sum, err := s.produceSummary(ctx, SummaryInput{
-		Messages:     view,
+		Messages:     sumView,
 		MaxTokens:    cfg.maxTokens(),
+		Reason:       ReasonManual,
 		SystemPrompt: cfg.summarySystemPrompt(""),
-		SummaryModel: cfg.summaryModel,
-	}, ReasonManual)
+	})
 	return sum.Text, fromEntry, err
 }

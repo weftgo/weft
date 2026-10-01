@@ -82,6 +82,21 @@
   The pushed `studio/cmd/v0.1.0` tag carries the bug (owner: consider
   a patch tag).
 
+### obsdb/clickhouse
+
+- Paging cursors compare in integer nanoseconds
+  (`toUnixTimestamp64Nano` with an int64 bind): the driver renders a
+  positional `time.Time` bind at whole-second scale, so the runs
+  cursor (`Started < ?`) and the sessions cursor
+  (`max(LastSeen) < ?`) floored S.<nanos> to S.000 and silently
+  skipped every row in the same second before the boundary — rows
+  lost at essentially every page boundary. The status cutoff
+  (`LastSeen >= ?`) binds nanoseconds for the same reason (no more
+  sub-second running band). Pinned by `TestCursorSubSecondPaging`
+  (two runs/sessions within one wall second, paged through the
+  boundary). The pushed `obsdb/clickhouse/v0.1.0` tag carries the bug
+  (owner: consider a patch tag).
+
 ## 0.7.0 — 2026-10-01
 
 The step 8b playground programme (ADR 0024, WEFT-PLAYGROUND.md P1–P5):

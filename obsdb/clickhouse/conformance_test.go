@@ -132,3 +132,88 @@ func TestTurnStringAttrDerives(t *testing.T) {
 		t.Errorf("run row turn = %d, want 3 (the string attr parsed by toInt32OrZero)", det.Turn)
 	}
 }
+
+// Cursors must be exact to the nanosecond: the driver renders a
+// positional time.Time bind at Seconds scale, so a `Started < ?`
+// cursor carrying S.<nanos> compared against S.000000000 and every
+// row in the same second before the boundary was skipped forever —
+// rows silently dropped at essentially every page boundary (the
+// programme audit's P1-4). The fix compares in integer nanoseconds;
+// this pin writes two runs (and two sessions) started within one wall
+// second with distinct nanos and pages through the boundary.
+func TestCursorSubSecondPaging(t *testing.T) {
+	if os.Getenv("WEFT_CLICKHOUSE_DSN") == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: needs a clickhouse server (README has the one-line container recipe)")
+	}
+	db, _ := openFresh(t)
+	ctx := context.Background()
+
+	// writeRun leaves one run whose Started (min over records) and
+	// LastSeen (max) sit at base+off, all within the same wall second.
+	base := time.Now().UTC().Truncate(time.Second).Add(-time.Minute)
+	writeRun := func(runID, session string, off time.Duration) {
+		t.Helper()
+		at := base.Add(off)
+		attrs := map[string]any{
+			"weft.record": "event", "weft.run.id": runID,
+			"weft.event.type": "run_start", "weft.event.pos": int64(0),
+			"weft.session.id": session, "gen_ai.agent.name": "conf",
+		}
+		rec := obsdb.Record{
+			Time: at, EventName: "weft.event", Severity: 9,
+			Body: `{"type":"run_start","id":"` + runID + `","model":{"provider":"wefttest","name":"script"},"agent":"conf"}`,
+			Service: "conf-svc", Attrs: attrs, Resource: map[string]any{"service.name": "conf-svc"},
+		}
+		if err := db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{rec}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeRun("sub_late", "sess_late", 700*time.Millisecond)
+	writeRun("sub_early", "sess_early", 100*time.Millisecond)
+
+	// Runs: page one holds the later run; the cursor it hands back is
+	// the full-precision Started. Page two must still return the
+	// earlier run — the seconds-floor cursor excluded it
+	// (S.100ms >= S.000ms).
+	p1, err := db.Runs(ctx, obsdb.RunQuery{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p1.Runs) != 1 || p1.Runs[0].ID != "sub_late" || p1.NextBefore == nil {
+		t.Fatalf("page one = %+v (next %v)", p1.Runs, p1.NextBefore)
+	}
+	p2, err := db.Runs(ctx, obsdb.RunQuery{Limit: 1, Before: *p1.NextBefore})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p2.Runs) != 1 || p2.Runs[0].ID != "sub_early" {
+		t.Fatalf("page two = %v, want sub_early (the sub-second band must not be skipped)", idsOf(p2.Runs))
+	}
+	if !p2.Runs[0].Started.After(base) && p2.Runs[0].Started.Before(base.Add(time.Second)) {
+		t.Fatalf("fixture drifted out of its wall second: %v", p2.Runs[0].Started)
+	}
+
+	// Sessions page on max(LastSeen) — the same boundary.
+	s1, err := db.Sessions(ctx, obsdb.SessionQuery{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s1.Sessions) != 1 || s1.Sessions[0].ID != "sess_late" || s1.NextBefore == nil {
+		t.Fatalf("sessions page one = %+v (next %v)", s1.Sessions, s1.NextBefore)
+	}
+	s2, err := db.Sessions(ctx, obsdb.SessionQuery{Limit: 1, Before: *s1.NextBefore})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s2.Sessions) != 1 || s2.Sessions[0].ID != "sess_early" {
+		t.Fatalf("sessions page two = %+v, want sess_early", s2.Sessions)
+	}
+}
+
+func idsOf(rows []obsdb.RunRow) []string {
+	out := make([]string, len(rows))
+	for i, r := range rows {
+		out[i] = r.ID
+	}
+	return out
+}

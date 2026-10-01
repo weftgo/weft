@@ -46,10 +46,12 @@ const runAggregates = `RunId, max(ParentRunID) AS ParentRunID, max(ParentCallID)
 // statusCase is the four-row table in SQL over weft_runs' columns: it
 // must agree with obsdb.DeriveStatus, whose test pins the boundaries.
 // One bind parameter precedes it: the interrupted cutoff
-// (now - InterruptedAfter).
+// (now - InterruptedAfter) as integer nanoseconds — a positional
+// time.Time bind renders at Seconds scale (clickhouse-go's bind.go),
+// which would widen the running band by up to a second.
 const statusCase = `CASE WHEN Failed = 1 THEN 'failed'
 	WHEN FinishedOK = 1 THEN 'succeeded'
-	WHEN LastSeen >= ? THEN 'running'
+	WHEN toUnixTimestamp64Nano(LastSeen) >= ? THEN 'running'
 	ELSE 'interrupted' END`
 
 func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (obsdb.RunPage, error) {
@@ -61,7 +63,7 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (obsdb.RunPage, error) 
 	var conds []string
 	var outerArgs []any
 	if q.Status != "" {
-		outerArgs = append(outerArgs, now.Add(-obsdb.InterruptedAfter), string(q.Status))
+		outerArgs = append(outerArgs, now.Add(-obsdb.InterruptedAfter).UnixNano(), string(q.Status))
 		conds = append(conds, "("+statusCase+") = ?")
 	}
 	total, err := d.countRows(ctx,
@@ -72,8 +74,14 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (obsdb.RunPage, error) 
 	pageArgs := append(append([]any{}, args...), outerArgs...)
 	frag := "SELECT * FROM (" + inner + ") WHERE " + strings.Join(or1(conds), " AND ")
 	if !q.Before.IsZero() {
-		frag += " AND Started < ?"
-		pageArgs = append(pageArgs, q.Before)
+		// Integer nanoseconds, not a time.Time bind: the driver renders
+		// positional time.Time at Seconds scale, so `Started < ?`
+		// compared against S.000000000 and every row in
+		// [S.000, S.<nanos>) sorted right after the boundary row — no
+		// later page ever returned it (rows silently skipped at
+		// essentially every page boundary).
+		frag += " AND toUnixTimestamp64Nano(Started) < ?"
+		pageArgs = append(pageArgs, q.Before.UnixNano())
 	}
 	frag += " ORDER BY Started DESC, RunId DESC LIMIT ?"
 	pageArgs = append(pageArgs, obsdb.LimitOf(q.Limit))
@@ -602,8 +610,10 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (obsdb.SessionP
 		hargs = append(hargs, q.PublicID)
 	}
 	if !q.Before.IsZero() {
-		having = append(having, "max(LastSeen) < ?")
-		hargs = append(hargs, q.Before)
+		// Integer nanoseconds (the Runs cursor's rule): a time.Time
+		// bind floors to whole seconds and drops the sub-second band.
+		having = append(having, "toUnixTimestamp64Nano(max(LastSeen)) < ?")
+		hargs = append(hargs, q.Before.UnixNano())
 	}
 	havingSQL := ""
 	if len(having) > 0 {

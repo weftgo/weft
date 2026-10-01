@@ -11,6 +11,7 @@ use (
 	./obsdb/clickhouse
 	./openai
 	./otel
+	./runtime
 	./studio
 	./studio/cmd
 	./thread

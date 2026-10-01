@@ -52,7 +52,13 @@ const (
 	// text, an approval boundary that holds the session is denied with
 	// the interrupted reason, and the message runs as the next turn.
 	// The interrupted turn's entries stay on the tree — evidence,
-	// never deleted.
+	// never deleted. A boundary holding nested approvals (thread/pool,
+	// ADR 0022 §7) is denied whole — the delegating call and the
+	// child's mirrored requests: the pool that made the child replays
+	// the denial into it and the child runs to its end, its answer on
+	// its receipt; in a process whose pool has not taken the session
+	// over yet (after a restart, before Recover) the child stays
+	// parked until it does.
 	Interrupt
 	// Rollback is an Interrupt that also branches the leaf back to
 	// before the interrupted turn's receipt entry: the follow-up runs

@@ -555,6 +555,14 @@ func (s *Session) recordDecisionsLocked(ctx context.Context, batch []recordedDec
 	if err := s.flushLocked(ctx); err != nil {
 		return fmt.Errorf("thread: decision flush: %w", err)
 	}
+	for _, d := range batch {
+		if byCall[d.CallID].Child != "" {
+			// A mirrored child request was decided: the pool that
+			// mirrored it carries the decision to the child.
+			s.mirrorsDecidedLocked()
+			break
+		}
+	}
 	return nil
 }
 
@@ -634,6 +642,12 @@ func (s *Session) resolveExpiredLocked(ctx context.Context) ([]Request, error) {
 	}
 	if err := s.flushLocked(ctx); err != nil {
 		return nil, fmt.Errorf("thread: expiry flush: %w", err)
+	}
+	for _, r := range expired {
+		if r.Child != "" {
+			s.mirrorsDecidedLocked() // the lapse reaches the child through its pool
+			break
+		}
 	}
 	return expired, nil
 }

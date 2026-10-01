@@ -50,6 +50,7 @@ func (p *Pool) Recover(ctx context.Context, parent *thread.Session) error {
 	if err := p.open(ctx); err != nil {
 		return err
 	}
+	p.attach(parent)
 	var errs []error
 	open := openWrappers(parent)
 	offered := map[string]bool{} // children with a request still pending

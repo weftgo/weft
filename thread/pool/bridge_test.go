@@ -1095,3 +1095,100 @@ func TestChainNeverDecidesWrapper(t *testing.T) {
 		})
 	}
 }
+
+// An interrupting Send over a parent parked on a nested approval
+// denies the boundary — the delegating call and the child's mirrored
+// request — and the denial reaches the child without anyone calling
+// Pool.Decide: the pool watches the parent, replays the denial, and
+// the child runs to its end instead of staying parked on a request
+// nobody is offered any more.
+func TestInterruptReachesParkedChild(t *testing.T) {
+	for _, policy := range []thread.Policy{thread.Interrupt, thread.Rollback} {
+		t.Run(policy.String(), func(t *testing.T) {
+			ctx := context.Background()
+			st := thread.Memory()
+			p := pool.New(2)
+			child, ran := gatedChild(
+				wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c-a", Args: `{"order_id":"1"}`}),
+				wefttest.Say("stood down"),
+			)
+			parent := weft.New(wefttest.Script(
+				wefttest.ToolCalls(wefttest.Call{Name: "research", ID: "c-wrapper", Args: `{"prompt":"refund the orders"}`}),
+				wefttest.Say("resumed tail"),
+				wefttest.Say("the new plan"),
+			), p.MustWrap("research", "delegates the refund flow", child))
+			s, err := thread.Create(ctx, st, parent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, rc := park(t, s)
+
+			follow, err := s.Send(ctx, weft.User("forget the refund"), thread.As(policy))
+			if err != nil {
+				t.Fatalf("the interrupting Send: %v", err)
+			}
+			if res, err := follow.Wait(); err != nil || res.Text() != "the new plan" {
+				t.Fatalf("the follow-up: %v, %v", res, err)
+			}
+			// No Pool.Decide: the watch pumps.
+			final := waitState(t, s, pool.Done)
+			if final.ID != rc.ID || final.Stop != "stood down" {
+				t.Fatalf("the child's receipt = %+v", final)
+			}
+			if got := ran.snapshot(); len(got) != 0 {
+				t.Fatalf("the interrupted child's gated call ran: %v", got)
+			}
+			if pend := s.Pending(); len(pend) != 0 {
+				t.Errorf("Pending after the interrupt = %+v", pend)
+			}
+			if err := p.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+			childSess := mustOpen(ctx, t, st, rc.Child)
+			var denial string
+			for _, r := range toolResultsOf(childSess.Context()) {
+				if strings.HasPrefix(r, "DENIED: ") {
+					denial = r
+				}
+			}
+			if denial != "DENIED: interrupted by a newer message" {
+				t.Errorf("the child's model read %q, want the interrupt's denial", denial)
+			}
+			if n := len(mustList(ctx, t, st)); n != 2 {
+				t.Fatalf("%d sessions exist, want the parent and its one child", n)
+			}
+		})
+	}
+}
+
+// A decision taken on the parent session itself — not through the
+// pool — reaches the child all the same: the pool watches the
+// parents it delegates from.
+func TestSessionDecideReachesChild(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	p := pool.New(2)
+	child, ran := gatedChild(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c-a", Args: `{"order_id":"1"}`}),
+		wefttest.Say("refunded"),
+	)
+	s, _ := thread.Create(ctx, st, delegating(p, child))
+	t1, rc := park(t, s)
+	if _, err := s.Decide(ctx, thread.Approve(rc.Child+"/c-a")); err != nil {
+		t.Fatalf("Session.Decide on the mirrored request: %v", err)
+	}
+	waitState(t, s, pool.Done)
+	deadline := time.Now().Add(10 * time.Second)
+	for t1.Next() == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("the parent never resumed on the child's answer")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if res, err := t1.Next().Wait(); err != nil || res.Text() != "all done" {
+		t.Fatalf("the parent's continuation: %v, %v", res, err)
+	}
+	if got := ran.snapshot(); len(got) != 1 || !got[0] {
+		t.Fatalf("the gated call: %v, want one approved run", got)
+	}
+}

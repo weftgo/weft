@@ -753,6 +753,9 @@ func (p *Pool) submit(ctx context.Context, parent *thread.Session, agent *weft.A
 		child: child, parent: parent, agent: agent, info: info,
 		phase: phaseQueued,
 	}
+	// Decisions the parent records on its own paths reach this child
+	// through the pool's watch (bridge.go).
+	p.attach(parent)
 	if !async {
 		// Only a sync delegation's call waits on the child: an async
 		// one returned its receipt line, and nothing parks under it.

@@ -3,6 +3,7 @@ package thread
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 )
@@ -326,6 +327,44 @@ func (s *Session) CancelDelegated(ctx context.Context, reason string) error {
 		batch = append(batch, recordedDecision{Decision: d})
 	}
 	return s.recordDecisionsLocked(ctx, batch, true)
+}
+
+// WatchMirrors installs fn as owner's notification that this session
+// recorded a decision for a mirrored child request (ADR 0022 §7) —
+// by any path: Decide and DecideSigned, the denial an interrupting
+// Send gives a parked boundary, the expiry sweep. The pool installs
+// one per parent it delegates from, so a decision reaches the child
+// it is for without a caller having to pump: the session records, the
+// pool replays.
+//
+// fn is called after the decision is durable, with the session's lock
+// held: it must not call the session and must return at once — the
+// pool hands the work to a goroutine of its own. It is handed the
+// session's logger, the place its failures are reported. One owner
+// holds one notification: installing again under the same owner
+// replaces it, and a nil fn removes it. The notification is the live
+// Session's, never the file's: a session opened again has none until
+// its pool attaches (Recover, Decide, a new delegation).
+func (s *Session) WatchMirrors(owner any, fn func(log *slog.Logger)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if fn == nil {
+		delete(s.mirrorWatch, owner)
+		return
+	}
+	if s.mirrorWatch == nil {
+		s.mirrorWatch = map[any]func(*slog.Logger){}
+	}
+	s.mirrorWatch[owner] = fn
+}
+
+// mirrorsDecidedLocked calls the installed notifications: a decision
+// for a mirrored child request has just been recorded. Callers hold
+// s.mu.
+func (s *Session) mirrorsDecidedLocked() {
+	for _, fn := range s.mirrorWatch {
+		fn(s.agent.Logger())
+	}
 }
 
 // inheritApprovalsOption carries a parent session's approval policy

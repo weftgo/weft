@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -342,6 +343,10 @@ type Session struct {
 	// AutoResume is on.
 	await      awaitState
 	resumeWork *pendingResume
+	// mirrorWatch holds the notifications thread/pool installed
+	// (WatchMirrors), keyed by their owner: each is called, under mu,
+	// when a decision for a mirrored child request has been recorded.
+	mirrorWatch map[any]func(*slog.Logger)
 
 	// The steering state (ADR 0019): steerQueue holds the steers
 	// accepted but not yet drained by a running turn, in acceptance

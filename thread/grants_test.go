@@ -607,8 +607,9 @@ func TestAuditTellsTheWholeStory(t *testing.T) {
 			t.Fatalf("non-approval entry in Audit: %T", e)
 		}
 	}
-	want := []string{"request", "decision", "grant", "audit", "audit", "revoked"}
-	// request → decision(+grant, same append) → resume audit → grant-matched audit → revocation
+	want := []string{"request", "decision", "grant", "audit", "revoked"}
+	// request → decision(+grant, same append) → the resume's started
+	// and completed audit steps → grant-matched audit → revocation
 	if len(kinds) < 5 {
 		t.Fatalf("audit trail too thin: %v", kinds)
 	}
@@ -748,5 +749,135 @@ func TestSharedGrantIDCollisionDoesNotInflateSessionUses(t *testing.T) {
 	}
 	if got := s.Pending(); len(got) != 0 {
 		t.Fatalf("Pending after the session grant's own match: got %d, want 0 (the shared match must not have spent its MaxUses)", len(got))
+	}
+}
+
+// MaxUses holds inside one turn: two matching calls in one step spend
+// a one-use grant once — the first runs under it, the second parks —
+// though the audit entries that count the uses land only with the
+// turn.
+func TestGrantMaxUsesWithinOneTurn(t *testing.T) {
+	ctx := context.Background()
+	agent, ran := runAgent(
+		wefttest.ToolCalls(
+			wefttest.Call{Name: "run", Args: `{"command":"go vet"}`},
+			wefttest.Call{Name: "run", Args: `{"command":"go vet"}`},
+		),
+		wefttest.Say("one ran"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.AutoResume(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Grant(ctx, thread.Grant{Tool: "run", MaxUses: 1}); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := s.Send(ctx, weft.User("vet twice"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := turn.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Pending) != 2 {
+		t.Fatalf("the step parked %d calls, want both gated calls at the boundary", len(res.Pending))
+	}
+	pend := s.Pending()
+	if len(pend) != 1 || pend[0].CallID != res.Pending[1].ID {
+		t.Fatalf("Pending after a one-use grant over two calls: %+v, want the second call only", pend)
+	}
+	counts := countApprovalEntries(s)
+	if counts["audit:grant:approved"] != 1 || counts["audit:park:parked"] != 1 {
+		t.Fatalf("chain steps: %v, want one grant match and one park", counts)
+	}
+	rt, err := s.Resume(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if got := *ran; len(got) != 1 {
+		t.Fatalf("executions under a one-use grant: %v, want 1", got)
+	}
+}
+
+// A grant match's audit entry names the grant it matched in GrantID —
+// the field the use count reads (TestGrantUsesIgnoreProse pins that
+// nothing else is).
+func TestGrantMatchAuditNamesTheGrant(t *testing.T) {
+	ctx := context.Background()
+	agent, _ := runAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "run", Args: `{"command":"go vet"}`}),
+		wefttest.Say("ran"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Grant(ctx, thread.Grant{Tool: "run", MaxUses: 1}); err != nil {
+		t.Fatal(err)
+	}
+	var grantID string
+	for _, e := range s.Entries() {
+		if g, ok := e.(thread.GrantEntry); ok {
+			grantID = g.ID
+		}
+	}
+	turn, err := s.Send(ctx, weft.User("vet"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := turn.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if next := turn.Next(); next != nil {
+		if _, err := next.Wait(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var match *thread.ApprovalAuditEntry
+	for _, e := range s.Audit() {
+		if a, ok := e.(thread.ApprovalAuditEntry); ok && a.Step == thread.StepGrant {
+			match = &a
+		}
+	}
+	if match == nil || match.GrantID != grantID || match.GrantShared {
+		t.Fatalf("the grant match's audit entry: %+v, want GrantID %s", match, grantID)
+	}
+}
+
+// "Approve and always allow" over a call that carried no arguments
+// grants the next such call: absent arguments read as the empty
+// object on both sides instead of minting a grant that never matches.
+func TestApproveAlwaysWithoutArguments(t *testing.T) {
+	ctx := context.Background()
+	agent, ran := refundAgent(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "refund"}),
+		wefttest.Say("both ran"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := parkSend(t, s, ctx)
+	rt, err := s.Decide(ctx, thread.ApproveAlways(call.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.Wait(); err != nil { // the resume asks again; the grant decides at once
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && len(ran.snapshot()) < 2 {
+		time.Sleep(time.Millisecond)
+	}
+	if got := ran.snapshot(); len(got) != 2 {
+		t.Fatalf("executions: %v, want the second call run under the minted grant", got)
+	}
+	if got := len(s.Pending()); got != 0 {
+		t.Fatalf("the second argument-less call parked: Pending=%d", got)
 	}
 }

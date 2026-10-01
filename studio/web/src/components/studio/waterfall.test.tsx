@@ -34,9 +34,9 @@ describe("Waterfall", () => {
     )
     expect(screen.getAllByRole("treeitem")).toHaveLength(spans.length)
     expect(screen.getByText("research")).toBeTruthy()
-    expect(screen.getByText("2–8")).toBeTruthy() // the call's positions
+    expect(screen.getByText("2–3")).toBeTruthy() // the call's positions
     expect(screen.getByText("ok")).toBeTruthy()
-    expect(screen.getByText("tool_calls")).toBeTruthy()
+    expect(screen.getByText("end_turn")).toBeTruthy()
   })
 
   it("selects on click and on arrow keys", () => {
@@ -66,8 +66,8 @@ describe("Waterfall", () => {
         playhead={null}
       />
     )
-    // Fold the call: its subagent (and the subagent's step) disappear.
-    fireEvent.click(screen.getAllByLabelText("collapse")[2])
-    expect(screen.getAllByRole("treeitem")).toHaveLength(spans.length - 2)
+    // Fold the step: its call disappears.
+    fireEvent.click(screen.getAllByLabelText("collapse")[1])
+    expect(screen.getAllByRole("treeitem")).toHaveLength(spans.length - 1)
   })
 })

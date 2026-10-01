@@ -91,6 +91,7 @@ type manifestTool struct {
 	StrictInput     bool    `json:"strict_input,omitempty"`
 	Sequential      bool    `json:"sequential,omitempty"`
 	RequireApproval bool    `json:"require_approval,omitempty"`
+	ReplayPolicy    string  `json:"replay_policy,omitempty"` // safe; never is the default and omitted
 	PromptSnippet   string  `json:"prompt_snippet,omitempty"`
 	Source          string  `json:"source,omitempty"`
 	// Subagent names the child agent of a Subagent tool, so Studio can
@@ -142,6 +143,12 @@ func (a *Agent) manifestEntry() manifestAgent {
 		if t.capSet {
 			resultCap := t.resultCap
 			mt.MaxResultBytes = &resultCap
+		}
+		// The replay class renders only when it is safe: never is the
+		// default, so an unannotated tool keeps rendering exactly as
+		// before (the committed weft.json must not churn).
+		if t.ReplayPolicy() == ReplaySafe {
+			mt.ReplayPolicy = string(ReplaySafe)
 		}
 		ma.Tools = append(ma.Tools, mt)
 	}

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -231,8 +232,19 @@ func TestSpansRunTree(t *testing.T) {
 			t.Errorf("run span attr %s = %q, want %q", k, got[k], v)
 		}
 	}
+	// The run's provenance (ADR 0024 S1.2): the manifest hash of the
+	// named agent and the core version, values that track the agent's
+	// configuration and the release — asserted by shape, not literal.
+	if h := got["weft.manifest.hash"]; len(h) != 64 {
+		t.Errorf("weft.manifest.hash = %q, want 64 hex chars", h)
+	}
+	if v := got["weft.version"]; len(v) < 2 || v[0] != 'v' {
+		t.Errorf("weft.version = %q, want a v-prefixed version", v)
+	}
+	delete(got, "weft.manifest.hash")
+	delete(got, "weft.version")
 	if len(got) != len(want) {
-		t.Errorf("run span attrs = %v, want exactly %v", got, want)
+		t.Errorf("run span attrs = %v, want exactly %v (+ hash, version)", got, want)
 	}
 }
 
@@ -847,5 +859,116 @@ func TestSpansUsageSplits(t *testing.T) {
 				t.Errorf("%s span attr %s = %q, want %q", name, k, got[k], v)
 			}
 		}
+	}
+}
+
+// S1.2 (ADR 0024): the metadata in force lands verbatim on every span
+// of the run — invoke_agent, chat, execute_tool — with the semconv
+// mirrors: weft.session.id as gen_ai.conversation.id and session.id
+// (Logfire reads the first, Langfuse and Phoenix the second), enduser.id
+// as user.id. A plain key rides as itself.
+func TestSpansMetadataOnEverySpan(t *testing.T) {
+	tp := newRecProvider()
+	agt := spanAgent(tp)
+	if _, err := agt.Generate(context.Background(), weft.RunID("r1"), weft.Prompt("x"),
+		weft.Metadata(map[string]string{
+			"tenant":          "acme",
+			"weft.session.id": "s_7",
+			"enduser.id":      "u_3",
+		})); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"tenant":                 "acme",
+		"weft.session.id":        "s_7",
+		"enduser.id":             "u_3",
+		"gen_ai.conversation.id": "s_7",
+		"session.id":             "s_7",
+		"user.id":                "u_3",
+	}
+	// Every span of the run — invoke_agent, each chat, each execute_tool —
+	// carries the metadata and the mirrors; a tool-calling run has two
+	// chat spans, so assert per span, not on a unique name.
+	tp.mu.Lock()
+	spans := append([]*recSpan(nil), tp.spans...)
+	tp.mu.Unlock()
+	if len(spans) == 0 {
+		t.Fatal("no spans recorded")
+	}
+	checked := map[string]int{}
+	for _, s := range spans {
+		got := s.attrsMap()
+		for k, v := range want {
+			if got[k] != v {
+				t.Errorf("%s: attr %s = %q, want %q", s.name, k, got[k], v)
+			}
+		}
+		checked[s.name]++
+	}
+	for _, name := range []string{"invoke_agent demo", "chat script", "execute_tool echo"} {
+		if checked[name] == 0 {
+			t.Errorf("no %s span recorded; have %v", name, checked)
+		}
+	}
+}
+
+// The linkage row: a subagent's child run names its parent on its
+// invoke_agent span — the parent's run id and the delegating call's id.
+func TestSpansSubagentParentLinkage(t *testing.T) {
+	tp := newRecProvider()
+	child := weft.New(wefttest.Script(wefttest.Say("done")), weft.Name("research"), weft.TracerProvider(tp))
+	parent := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"x"}`, ID: "c_r"}),
+		wefttest.Say("final"),
+	), weft.Name("demo"), weft.TracerProvider(tp), weft.Subagent("research", "Do the research.", child))
+	res, err := parent.Generate(context.Background(), weft.RunID("p1"), weft.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := tp.find(t, "invoke_agent research")
+	got := run.attrsMap()
+	if got["weft.parent.run.id"] != res.ID {
+		t.Errorf("child run span weft.parent.run.id = %q, want %q", got["weft.parent.run.id"], res.ID)
+	}
+	if got["weft.parent.call.id"] != "c_r" {
+		t.Errorf("child run span weft.parent.call.id = %q, want c_r", got["weft.parent.call.id"])
+	}
+	top := tp.find(t, "invoke_agent demo")
+	if _, has := top.attrsMap()["weft.parent.run.id"]; has {
+		t.Error("top-level run span carries weft.parent.run.id")
+	}
+}
+
+// The metadata limits are visible: a run whose Metadata dropped pairs
+// carries weft.metadata.dropped with the count on its run span.
+func TestSpansMetadataDroppedCounted(t *testing.T) {
+	tp := newRecProvider()
+	agt := spanAgent(tp)
+	kv := map[string]string{"keep": "v", "": "empty key drops"}
+	for i := 0; i < 70; i++ {
+		kv[fmt.Sprintf("k%02d", i)] = "v"
+	}
+	if _, err := agt.Generate(context.Background(), weft.RunID("r1"), weft.Prompt("x"),
+		weft.Metadata(kv)); err != nil {
+		t.Fatal(err)
+	}
+	run := tp.find(t, "invoke_agent demo")
+	got := run.attrsMap()
+	n, err := strconv.Atoi(got["weft.metadata.dropped"])
+	if err != nil {
+		t.Fatalf("weft.metadata.dropped = %q, want an integer", got["weft.metadata.dropped"])
+	}
+	if n < 7 { // 71 valid candidates for 64 slots + the empty key
+		t.Errorf("weft.metadata.dropped = %d, want at least 7", n)
+	}
+	// Count the metadata keys that landed: at most 64 of the 70 offered.
+	survived := 0
+	for k := range kv {
+		if k != "" && got[k] == "v" {
+			survived++
+		}
+	}
+	if survived > 64 {
+		t.Errorf("%d metadata keys on the span, want at most 64", survived)
 	}
 }

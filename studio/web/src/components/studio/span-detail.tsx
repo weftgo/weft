@@ -7,9 +7,9 @@
 import { ArrowUpRight } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
-import type { RunDoc, WireEvent } from "@/lib/api"
+import type { RunDoc, RunRow, WireEvent } from "@/lib/api"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "@/lib/events"
-import { usageSummary } from "@/lib/format"
+import { spanMs, usageSummary } from "@/lib/format"
 import type { Span } from "@/lib/trace"
 import { JsonTree } from "@/components/studio/json-tree"
 import { EventsExplorer } from "@/components/studio/raw-view"
@@ -49,7 +49,7 @@ function RunDetail({
   doc: RunDoc
   runStatus: string
   onJump: (t: number) => void
-  childLinks: Map<string, { id: string; label: string }>
+  childLinks: Map<string, RunRow>
 }) {
   const isChild = span.kind === "subagent"
   const link = isChild
@@ -147,7 +147,7 @@ function StepDetail({
   step: FoldedStep
   runStatus: string
   onJump: (t: number) => void
-  childLinks: Map<string, { id: string; label: string }>
+  childLinks: Map<string, RunRow>
 }) {
   return (
     <div className="space-y-3">
@@ -181,7 +181,7 @@ function CallDetail({
   call: FoldedToolCall
   runStatus: string
   onJump: (t: number) => void
-  childLinks: Map<string, { id: string; label: string }>
+  childLinks: Map<string, RunRow>
 }) {
   return (
     <div className="space-y-3">
@@ -203,7 +203,7 @@ function CallDetail({
       <ToolCallRow
         call={call}
         runStatus={runStatus}
-        childLink={childLinks.get(call.callId)}
+        child={call.childRunId ? childLinks.get(call.callId) : undefined}
         onJump={onJump}
       />
     </div>
@@ -233,9 +233,9 @@ export function SpanDetail({
   onJump: (t: number) => void
 }) {
   const childLinks = new Map(
-    doc.children.map((c) => [c.parent_call_id, { id: c.id, label: c.agent }])
+    doc.children.map((c) => [c.parent_call_id, c])
   )
-  const modes: DetailMode[] = ["detail", "events", "json"]
+  const modes: DetailMode[] = span?.timed ? ["detail"] : ["detail", "events", "json"]
   const rangeEnd =
     span?.to ??
     (playhead !== null ? Math.max(playhead - 1, 0) : events.length - 1)
@@ -298,6 +298,8 @@ export function SpanDetail({
               <JsonTree value={span.node} openDepth={3} />
             </div>
           </div>
+        ) : span.timed ? (
+          <TimedDetail span={span} />
         ) : span.kind === "run" || span.kind === "subagent" ? (
           <RunDetail
             run={span.node as FoldedRun}
@@ -334,6 +336,51 @@ export function SpanDetail({
         ) : null}
       </div>
       {view.finished ? null : null}
+    </div>
+  )
+}
+
+/** A time-axis row's facts: the timed span itself — name, service,
+ * times, status, and its attributes as a tree (S4.7's time axis). */
+function TimedDetail({ span }: { span: Span }) {
+  const t = span.timed!
+  const sp = t.span
+  return (
+    <div className="space-y-3">
+      <Facts
+        rows={[
+          ["span", sp.name],
+          ["span id", sp.span_id],
+          ["service", sp.service || "—"],
+          ["status", sp.status_message ? `${sp.status} · ${sp.status_message}` : sp.status],
+          [
+            "time",
+            t.toMs == null
+              ? `${spanMs(t.fromMs)}– (open)`
+              : `${spanMs(t.fromMs)}–${spanMs(t.toMs)} (${spanMs(t.toMs - t.fromMs)})`,
+          ],
+        ]}
+      />
+      <div className="codewin">
+        <div className="codewin-bar">
+          <span className="font-mono text-[11px] text-code-mut">attrs</span>
+        </div>
+        <div className="overflow-auto px-3 py-3">
+          <JsonTree value={sp.attrs} openDepth={2} />
+        </div>
+      </div>
+      {sp.events.length > 0 ? (
+        <div className="codewin">
+          <div className="codewin-bar">
+            <span className="font-mono text-[11px] text-code-mut">
+              span events
+            </span>
+          </div>
+          <div className="overflow-auto px-3 py-3">
+            <JsonTree value={sp.events} openDepth={1} />
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

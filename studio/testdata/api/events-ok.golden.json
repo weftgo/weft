@@ -2,6 +2,7 @@
   "events": [
     {
       "pos": 0,
+      "time": "2020-01-01T09:00:00.123Z",
       "event": {
         "type": "run_start",
         "id": "r_ok",
@@ -14,6 +15,7 @@
     },
     {
       "pos": 1,
+      "time": "2020-01-01T09:00:00.423Z",
       "event": {
         "type": "step_start",
         "run_id": "r_ok",
@@ -22,6 +24,7 @@
     },
     {
       "pos": 2,
+      "time": "2020-01-01T09:00:00.623Z",
       "event": {
         "type": "tool_start",
         "run_id": "r_ok",
@@ -35,10 +38,11 @@
     },
     {
       "pos": 3,
+      "time": "2020-01-01T09:00:01.123Z",
       "event": {
         "type": "tool_finish",
         "run_id": "r_ok",
-        "seq": 2,
+        "seq": 1,
         "call_id": "call_1",
         "name": "lookup_order",
         "content": "order 42: shipped",
@@ -47,60 +51,34 @@
     },
     {
       "pos": 4,
+      "time": "2020-01-01T09:00:01.623Z",
       "event": {
         "type": "step_finish",
         "run_id": "r_ok",
         "index": 0,
-        "reason": "tool_calls",
+        "reason": "end_turn",
         "usage": {
           "input_tokens": 10,
-          "output_tokens": 5
+          "output_tokens": 4
         }
       }
     },
     {
       "pos": 5,
-      "event": {
-        "type": "step_start",
-        "run_id": "r_ok",
-        "index": 1
-      }
-    },
-    {
-      "pos": 6,
-      "event": {
-        "type": "text_delta",
-        "run_id": "r_ok",
-        "text": "Order 42 shipped this morning."
-      }
-    },
-    {
-      "pos": 7,
-      "event": {
-        "type": "step_finish",
-        "run_id": "r_ok",
-        "index": 1,
-        "reason": "stop",
-        "usage": {
-          "input_tokens": 10,
-          "output_tokens": 5
-        }
-      }
-    },
-    {
-      "pos": 8,
+      "time": "2020-01-01T09:00:02.123Z",
       "event": {
         "type": "run_finish",
         "run_id": "r_ok",
         "usage": {
-          "input_tokens": 20,
-          "output_tokens": 10
+          "input_tokens": 10,
+          "output_tokens": 4
         },
-        "steps": 2
+        "steps": 1
       }
     }
   ],
   "next_after": null,
-  "done": true
+  "done": true,
+  "gaps": []
 }
 

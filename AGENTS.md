@@ -27,7 +27,9 @@ lookup := weft.Tool("lookup_order", "Look up an order by ID.",
 // Ask the model to fix its arguments; the loop counts and bounds it:
 //   return "", weft.ModelRetry("date must be ISO-8601")   // RETRY: … (MaxModelRetries, default 3)
 // More per-tool options: weft.Sequential() (barrier), weft.RequireApproval(),
-// weft.PromptSnippet("…"), weft.WrapTools(mw...).
+// weft.PromptSnippet("…"), weft.Replay(weft.ReplaySafe) (the side-effect class for
+// re-runs: unannotated counts as never — substitute-or-park, never silently re-fired),
+// weft.WrapTools(mw...).
 
 // 1b. Tools defined outside Go source: explicit schema, raw args.
 //     weft.RawTool("parse_invoice", "…", schema, func(ctx, raw) (string, error))
@@ -59,10 +61,12 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
     weft.ToolChoice(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}), // force a tool call every step (Named/None too; PrepareStep can rewrite per step)
     weft.Params(weft.RequestParams{Temperature: ptr(0.2)}), // per-run/step sampling (TopP, MaxTokens, Stop, Seed; nil = construction default; a negative MaxTokens fails the step)
     weft.Tap(func(ctx context.Context, ev weft.Event) {...}), // observer: sees every event, changes nothing
-    weft.OnRunEnd(func(ctx context.Context, res *weft.RunResult, err error) {...}), // outcome observer: once per run, even on failure — the store pairs it with Tap
+    weft.OnRunEnd(func(ctx context.Context, res *weft.RunResult, err error) {...}), // outcome observer: once per run, even on failure — the otel pipeline pairs it with Tap
     weft.OnMessages(func(ctx context.Context, step int, msgs []weft.Message) {...}), // run option: transcript observer — exact messages as they join, for incremental persistence
     // In any observer: weft.AgentFromContext(ctx) → the running *Agent (nil outside a run); agt.Logger() → the run lines' sink.
     weft.TracerProvider(tp),                   // OTel spans: invoke_agent › chat / execute_tool (default: the global provider; no-op until an SDK registers)
+    weft.LoggerProvider(lp),                   // OTel records through the Logs API (ADR 0024): events, deltas, transcript batches; same default
+    weft.Content(true),                        // records carry content: true always, false never; default: as the logger's Enabled answers
     weft.Logger(logger),                       // one Debug line per run, model call, tool call (default: slog.Default, silent unless Debug is on)
     weft.WrapModel(mw.Retry(), mw.Fallback(backup)),           // model seam: first listed = outermost
     weft.WrapTools(mw.Audit(logger), mw.Allow(permits), mw.MapErrors(nil)), // tool seam, same rule
@@ -78,6 +82,16 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
 res, err := agt.Generate(ctx, weft.Prompt("Where is order 1234?"))
 // Thinking also works per run, overriding the agent default — fast by default, think on demand:
 //   agt.Generate(ctx, weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkHigh}), weft.Prompt("..."))
+// Per-run configuration (ADR 0024 D5): Instructions/MaxSteps/Parallelism are dual Option/RunOption like
+// Thinking; MaxSteps/Parallelism lower only per run — a raise is ErrInvalidRunOption, before any model call.
+//   agt.Generate(ctx, weft.Prompt("..."), weft.Instructions("one-run prompt"), weft.MaxSteps(6),
+//       weft.OnlyTools("lookup", "refund"),   // narrow to registered tools; unknown name → ErrInvalidRunOption
+//       weft.UseModel(alt),                    // the WrapModel chain rebuilt over alt, this run alone
+//       weft.ParkOn("refund"),                 // park at the approval boundary (ADR 0007 per run); Approve resumes
+//       weft.Metadata(map[string]string{"tenant": "acme"})) // on every span and record; subagent runs inherit
+//   weft.MetadataFromContext(ctx)   // read the merged pairs back (Tap, tool handler, child run)
+//   weft.StripContent(ev)           // the one content-shaping table: what a content-off destination receives
+// A changed run carries weft.override.hash + weft.override.* on its invoke_agent span (the experiment's fingerprint).
 // res.Text(), res.Messages (full transcript), res.Steps, res.Usage, res.ID
 
 // 3a. Steer a running turn (ADR 0019): a pull source the loop drains at two
@@ -128,58 +142,96 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 // 5. Describe the fleet: weft.Manifest(agents...) → weft.json (generated,
 //    committed, golden-gated; never read back).
 
-// 6. Record runs (module weft/store; sqlite.Open(path) | store.Memory()):
-//    store.Record(s, store.Tags({"cwd": wd})) — a Tap + OnRunEnd pair: events appended
-//    as they arrive, the result written at the run's end (the partial on failure);
-//    s.List(ctx, store.Query{}) pages without events; s.Get(ctx, id) returns everything;
-//    a stale heartbeat reads interrupted; s.Delete orphans children by design.
+// 6. Record runs (module weft/otel — the store is gone, ADR 0024 step 5; the
+//    pipeline is the recorder now, block 9 has the full destination menu):
+//    defer otel.Install()()  // local sink ./.weft/weft.db, content on, no network —
+//    // every event, delta, transcript record and span leaves as it happens
+//    // (weft.Heartbeat keeps a quiet run reading running); the durable run
+//    // reads back through obsdb — otel.LocalDB() — never through the process.
+//    weft.Metadata({"cwd": wd})  // caller pairs on every record/span of the run
+//    // (inherited by subagents; thread sessions stamp weft.session.id,
+//    // weft.public_id, weft.turn — block 8).
 
-// 7. Serve the Inspector (module weft/studio): one read-only handler over a store —
+// 7. Serve the Inspector (module weft/studio; S4 on obsdb — UI, JSON API,
+//    OTLP ingest, live, the devtools panel, the playground): setup A,
+//    embedded beside the app (§10.1's five lines):
 //    mux.Handle("/studio/", http.StripPrefix("/studio",
-//        studio.Handler(s, studio.Manifest(bytes), studio.Capabilities("live"))))
-//    serves the embedded UI (committed dist, no build step) and the JSON API:
-//    meta/runs/runs/{id}/run events (paged)/manifest. Base(path) mounts it anywhere.
+//        studio.Handler(studio.DB(otel.LocalDB()))))  // the pipeline's handle: history + live [D4]
+//    // or studio.New(opts...) *Server with Handler()/Close()/Runtime()
+//    //    (the runtime link's server under Playground(true), else nil),
+//    //    options DB/Open/Base/Manifest/Title/Capabilities/Token/Live/NoIngest/
+//    //    IngestToken/AllowOrigins/Playground; routes register through
+//    //    routes.go's groups (panel.go/playground.go add theirs in their own files).
+//    // API: meta, runs (+session/public/playground filters), runs/{id}/transcript,
+//    //    spans, traces/{id}, sessions, public/{public_id}, /api/live (SSE),
+//    //    /api/panel-tokens, /panel.js (the devtools panel, WEFT-DEVTOOLS §5);
+//    //    Token(tok) walls everything but /panel.js (bearer or ?token=).
+//    // Setup B, any language (module studio/cmd — the one place the clickhouse
+//    // driver lives): studio --db sqlite://path | clickhouse://user:pass@host:9000/db
+//    //    [--addr --token] serves UI + OTLP ingest on 127.0.0.1:7331.
 
-// 8. Sessions (module weft/thread; jsonl.Open(dir) | thread.Memory()):
-//    s, _ := thread.Create(ctx, st, agent) — the append-only entry tree; every write
-//    through Storage.Append; s.Context() is the leaf's messages, repaired.
-//    turn, _ := s.Send(ctx, weft.User("…")) — prompt durable before the run;
-//    turn.Wait(); busy: Queue (default) or thread.BusyPolicy(thread.Reject) → ErrBusy.
-//    s.Branch(ctx, entryID[, thread.SummarizeLeft()]), s.Fork(ctx, entryID) — the tree,
-//    nothing lost; s.Label, s.SetInfo, s.Custom, s.CustomMessage, s.Pin.
-//    Compaction (ADR 0020): thread.ContextWindow(n) arms the trigger (reported input +
-//    estimated delta > window − Reserve); s.Compact(ctx[, thread.Instructions("…")]),
-//    s.PreviewCompaction, s.ApplyCompaction, s.Uncompact; five layers (SummaryModel,
-//    SummaryPrompt/Focus/MaxTokens, WithSummarizer/Compactor/Trimmer, hooks,
-//    thread.PreferNative), thread.ClearOldToolResults(n) — nothing ever deleted.
-//    Approvals (ADR 0021): s.Pending() (restart-safe), s.Decide(ctx, thread.Approve(id) |
-//    Deny/Resolve/ResolveError | ApproveAlways) → auto-resume, turn.Next() the resumed
-//    turn, s.Resume(ctx); chain: s.Grant(ctx, thread.Grant{Tool, Args: ArgEquals/ArgPrefix/
-//    ArgGlob, Deny}), s.Revoke, WithGrantStore, WithApprover + ApproverTimeout, Quorum(n),
-//    thread.RequestExpiry, thread.OnRequest, s.Audit(); signed: thread.NewKeyring +
-//    WithKeyring, s.Request(id) → thread.SignDecision(key, r, d) → s.DecideSigned (fail-
-//    closed: ErrBadSignature/ErrExpired/ErrReplay/ErrArgsChanged/ErrUnknownKey),
-//    thread.RequireSigned(); a Send while approvals pend queues behind them.
-//    Busy policies (ADR 0019): thread.BusyPolicy(Queue | Reject | Steer | Interrupt |
-//    Rollback), or per Send with thread.As(p). Steer delivers mid-run at the drain
-//    points — receipts are durable entries (queued → delivered | deferred | dropped);
-//    s.Queue(), s.ClearQueue(ctx); a steer meeting StopWhen or approvals defers to a
-//    follow-up (Turn.Next). Interrupt cancels the run (dangling calls record the
-//    interruption text; a parked boundary is denied); Rollback also branches back.
-//    Overflow: ErrContextOverflow → compact (reason overflow) + one re-run
-//    (thread.ReRunOnOverflow(false) off); a second failure joins both errors.
-//    Durability (ADR 0011 §7): the turn's messages append as they join the run
-//    (weft.OnMessages) — a crash mid-turn loses nothing emitted; a failed turn's
-//    repaired tail is rewritten on a fresh line. Backends: jsonl.Open(dir) |
-//    sqlite.Open(path) (own module, modernc) | thread.Memory(); one writer per
-//    session (ErrLocked), readers never lock. Live tail: st.(thread.Watcher).
-//    Pool (ADR 0022): pool.New(max) — the one FIFO bound (also the depth guard);
-//    p.Wrap(name, desc, agent[, pool.Async()]): sync waits for the child session's
-//    answer, async returns the receipt line; p.Submit/Cancel/Close/Receipts/Forward.
-//    Children are sessions (Header.Lineage), their cost in Usage.Delegated; a parked
-//    child mirrors onto Pending — p.Decide resumes it and resolves the parked call.
-//    Watch(ctx, id, afterEntryID). List filters: thread.Query{Meta, TitleSearch}
-//    (title = last info entry's, case-insensitive substring), Before/Limit page.
+// 7a. The playground (module weft/runtime): your app dials Studio out and
+//     executes experiment commands as runs of the agents you register:
+//     defer runtime.Install(runtime.Studio(url, tok) /* or runtime.Local(srv) */,
+//         runtime.Agents(support), runtime.Models(map[string]weft.Model{"glm": m}),
+//         runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000}),
+//         runtime.AllowSideEffects("lookup_order"), runtime.Threads(store))()
+//     // WEFT_ENV=dev (or runtime.Enabled(true)) opens the link; commands ack
+//     // before they run (at-most-once), a never-class tool's call is substituted
+//     // with its recorded result or parked (weft.Replay(weft.ReplaySafe) vouches a
+//     // read), budgets cap each experiment; runs carry weft.playground and never
+//     // touch weft.session.id (ephemeral). Engines live | scripted (the source
+//     // run's recorded turns, zero tokens); thread ephemeral | fork (a new session
+//     // with lineage, the panel keeps chatting in it). Breakpoints and steer act
+//     // on the runs this runtime starts only (D7). Studio side:
+//     // studio.New(..., studio.Playground(true)): /api/playground/runs (the §5.1
+//     // command, transcript_edits validated on both sides), /api/playground/
+//     // commands/{id}, /api/runs/{id}/approvals (a parked run's own verbs),
+//     // /api/playground/fixtures (wefttest replay fixtures from a run's records),
+//     // /api/experiments (the saved groups + the runs they label), /api/runtimes/
+//     // {id}/breakpoints, /api/runs/{id}/steer; the panel drawer and /playground
+//     // (the Studio UI) render them, gated on capabilities.
+
+// 8. Sessions (module weft/thread) — the map; godoc is the reference, docs/thread-operations.md the
+//    operator's page; pre-1.0, API and format not frozen. st: jsonl.Open(dir) | sqlite.Open(path) (own
+//    module) | thread.Memory(); options thread.Salvage(), FsyncOnFlush(), NoLock(), OpenLogger(l); the live
+//    tail is st.(thread.Watcher).Watch(ctx, id, afterEntryID). s, _ := thread.Create(ctx, st, agent, opts...)
+//    | thread.Open(ctx, st, id, agent); defer s.Close(ctx); thread.List(ctx, st, thread.Query{…}); thread.Delete.
+//    Turns: turn, _ := s.Send(ctx, weft.User("…")[, thread.As(p), thread.RunOptions(…)]) — prompt durable
+//    before the run; turn.Wait() | WaitContext(ctx) | Done() | Events() | Outcome() | Next(); s.WaitIdle(ctx).
+//    Runs carry weft.session.id, weft.turn and, with thread.PublicID(id) (Create only), weft.public_id.
+//    Busy (ADR 0019): thread.BusyPolicy(Queue | Reject → ErrBusy | Steer | Interrupt | Rollback), or
+//    thread.As(p) per Send; queued sends and steers are receipt entries, durable at acceptance —
+//    s.Queue(), s.ClearQueue(ctx) (their Turns end ErrDropped), s.Continue(ctx) runs what Open restored.
+//    Tree: s.Context(), s.Entries(), s.Path(id), s.Branch(ctx, id[, thread.SummarizeLeft()]), s.Fork(ctx,
+//    id), s.Label, s.SetInfo (rejects "weft." keys), s.Custom, s.CustomMessage, s.Pin.
+//    Compaction (ADR 0020): thread.ContextWindow(n) arms it; s.Compact(ctx[, thread.SummaryInstructions(
+//    "…")]), s.PreviewCompaction, s.ApplyCompaction, s.Uncompact; thread.NoAutoCompact(), SummaryModel,
+//    ClearOldToolResults(n), BeforeCompact (thread.Proceed() | Cancel() | Replace(c)); overflow re-runs once.
+//    Approvals (ADR 0021): s.Pending(); s.Decide(ctx, thread.Approve(id) | Deny | Resolve | ResolveError |
+//    ApproveAlways) → auto-resume (turn.Next()) or s.Resume(ctx); s.Grant, s.Revoke, thread.WithApprover(a,
+//    timeout), Quorum(n), RequestExpiry(d), OnRequest(fn), s.Audit(). Signed: NewKeyring + WithKeyring (+
+//    RequireSigned(), durable in the header); s.Request(callID) → ring.Sign(r, d) | key.Sign → s.DecideSigned.
+//    Pool (ADR 0022, thread/pool): p := pool.New(max), the bound per Pool value; p.MustWrap(name, desc,
+//    agent[, pool.Async()]) (p.Wrap returns (tool, error)); p.Submit(ctx, parent, agent, prompt);
+//    p.Decide(ctx, parent, ds...) error records and arms, p.Wait(ctx, parent, id) follows; p.Cancel,
+//    p.Forward, p.Recover(ctx, parent) after a restart, p.Close(ctx); pool.Receipts, Children, Descendants.
+//    Errors: retry ErrBusy, ErrLocked · reopen ErrStale, ErrClosed · terminal ErrCorrupt, ErrNewerFormat.
+
+// 9. Observability pipeline (module weft/otel; several destinations at once,
+//    each with its own content policy; defer on exit):
+//    defer otel.Install(
+//        otel.Local("weft.db"),                       // local sink: replay-grade, content on
+//        otel.Studio("https://studio.example", token), // OTLP/HTTP, content on
+//        otel.Datadog(),                               // the Agent's OTLP intake, content off
+//        otel.Exporters(myLogExporter),                // your own exporters
+//        otel.Content(otel.ContentConfig{MaxBytes: 32 << 10, Redact: redact}),
+//    )()
+//    p, err := otel.Start(ctx, opts...)               // Install with errors; otel.NoGlobal() for tests
+//    otel.LocalDB()   // the installed pipeline's obsdb.DB (nil without a Local destination)
+//    otel.StudioEndpoint()  // the Studio destination weft/runtime dials
+//    studio.Handler(studio.DB(otel.LocalDB()))  // setup A (block 7): the Inspector over the
+//                               // local sink's handle, history + live [D4]
 ```
 
 Test offline with `wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))`;
@@ -258,6 +310,38 @@ ignore it.
     when the loop would call the model again; a step that ends the
     run succeeds. A breach is `*RunError` with the partial transcript.
     Child runs are tools: their failure is data, their usage is yours.
+    Exception: a `thread/pool` child is a session, not a tool-call
+    child — its usage is on its receipt and in the parent session's
+    `Usage.Delegated`, never on the parent run's `RunResult.Usage` or
+    `StepRecord.SubagentUsage`, so a budget that must cover delegated
+    work reads `Delegated`.
+
+### Thread rules (module `weft/thread`; its tests pin them)
+
+- **T1. One writer per Session.** A `Session` takes its session's
+  writer lease with its first write (`Create` and `Fork` are one) and
+  holds it until `Close`. Another Session's write fails with
+  `ErrLocked` and changes nothing; one whose view fell behind fails
+  with `ErrStale` — open the session again. Never write a session
+  behind its Session (`st.Append` on a session a Session holds).
+- **T2. Close what you opened to write.** `s.Close(ctx)` stops new
+  work, drains the running turn and the queue, seals the Session
+  (`ErrClosed`) and gives the lease up. A second Session opened while
+  the writer is still open reads fine and fails its first write with
+  `ErrLocked`.
+- **T3. `Open` is read-only.** It writes no entry, takes no lock and
+  starts no run; what a stopped writer left queued is restored to
+  `s.Queue()` and runs with the next `Send` or `s.Continue(ctx)`.
+- **T4. Accepted input is durable input.** A `Send` that returns a
+  `Turn` has written and flushed its prompt or its receipt entry; a
+  run's messages are appended as they join it, each step once; nothing
+  is deleted or rewritten in place.
+- **T5. Readers fail loudly.** An unknown entry kind or a newer `"v"`
+  is `ErrNewerFormat` — never skipped, `thread.Salvage()` or not. A
+  damaged line is `ErrCorrupt`; under `Salvage` it is skipped and the
+  skip reported (`s.LoadReport()`), as a dropped torn tail always is.
+  The format is documented in ADR 0011's format reference; it is not
+  frozen before 1.0.
 
 ## Working in this repo
 
@@ -271,5 +355,11 @@ ignore it.
   `scripts/apidiff.sh`) against the last tag and fails on incompatible
   changes; pre-1.0 a deliberate source-compatible widening is
   acknowledged line-by-line in `.apidiff-allow`. Renames always fail.
-- Docs: `README.md` (usage), `docs/adr/` (why), this file (map). Update
-  the one that applies in the same change.
+  `weft/thread` is not frozen yet (`make apidiff-thread` gates it
+  against its last tag): a deliberate breaking change there is
+  acknowledged the same way, its exact apidiff line in
+  `thread/.apidiff-allow`, and gets a line in the CHANGELOG's
+  migration checklist saying what to write instead.
+- Docs: `README.md` (usage), `docs/adr/` (why), this file (map),
+  `docs/thread-operations.md` (running `weft/thread` in production).
+  Update the one that applies in the same change.

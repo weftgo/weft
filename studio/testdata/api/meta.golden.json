@@ -1,9 +1,14 @@
 {
   "weft_version": "(test)",
-  "studio_version": "v0.2.1",
-  "has_manifest": true,
+  "studio_version": "v0.3.1",
+  "db": "sqlite",
   "title": "weft studio",
-  "store": "memory",
-  "capabilities": []
+  "has_manifest": true,
+  "ingest_open": true,
+  "interrupted_after_ms": 30000,
+  "capabilities": [
+    "live",
+    "ingest"
+  ]
 }
 

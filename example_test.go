@@ -957,3 +957,97 @@ func ExampleSteering() {
 	// Order 5678 is still pending.
 	// user That is order 1234 — I meant 5678.
 }
+
+// Metadata attaches caller key/value pairs to one run: every span and
+// record of the run carries them, and a Subagent's child run inherits
+// them through the context. Keys under "weft." are the weft modules'
+// namespace — thread stamps weft.session.id this way.
+func ExampleMetadata() {
+	agt := weft.New(wefttest.Script(wefttest.Say("ok")),
+		weft.Tap(func(ctx context.Context, ev weft.Event) {
+			if _, ok := ev.(weft.RunStart); !ok {
+				return
+			}
+			md := weft.MetadataFromContext(ctx)
+			fmt.Println("tenant =", md["tenant"], "session =", md["weft.session.id"])
+		}))
+	_, _ = agt.Generate(context.Background(),
+		weft.Metadata(map[string]string{
+			"tenant":          "acme",
+			"weft.session.id": "s_01",
+		}),
+		weft.Prompt("hello"))
+	// Output:
+	// tenant = acme session = s_01
+}
+
+// StripContent empties every content field of an event — what a
+// content-off destination receives. Identity survives; content does not.
+func ExampleStripContent() {
+	ev := weft.ToolFinish{RunID: "r", Seq: 3, CallID: "c1", Name: "lookup", Content: `{"status":"shipped"}`}
+	b, _ := json.Marshal(weft.StripContent(ev))
+	fmt.Println(string(b))
+	// Output:
+	// {"type":"tool_finish","run_id":"r","seq":3,"call_id":"c1","name":"lookup","content":"","is_error":false}
+}
+
+// The playground's per-run configuration (WEFT-PLAYGROUND §10.1): one
+// run of an immutable agent, changed without rebuilding it. OnlyTools
+// narrows to registered tools; UseModel swaps in an allowed alternate.
+func ExampleOnlyTools() {
+	lookup := weft.Tool("lookup", "Look up an order.", func(ctx context.Context, in struct {
+		ID string `json:"id"`
+	}) (string, error) {
+		return `{"status":"shipped"}`, nil
+	})
+	agt := weft.New(wefttest.Script(wefttest.Say("order shipped")),
+		weft.Name("support"), lookup)
+	_, _ = agt.Generate(context.Background(),
+		weft.Prompt("where is order 4411?"),
+		weft.OnlyTools("lookup"),                       // narrowing; unknown name → ErrInvalidRunOption
+		weft.Instructions("Answer in one short line."), // this run's prompt
+	)
+	// Output:
+}
+
+// ParkOn parks the named tool's calls at the approval boundary, exactly
+// as RequireApproval would — the breakpoint that reaches a run without
+// touching the immutable agent. Approve resumes it.
+func ExampleParkOn() {
+	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+		return "refunded", nil
+	})
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c1"}),
+		wefttest.Say("refunded"),
+	), refund)
+	res, err := agt.Generate(context.Background(),
+		weft.Prompt("refund order 4411"), weft.ParkOn("refund"))
+	if err != nil {
+		return
+	}
+	fmt.Println("pending:", len(res.Pending))
+	// A human decides; the next run resumes:
+	_, _ = agt.Generate(context.Background(),
+		weft.Messages(res.Messages...), weft.Approve("c1"))
+	// Output:
+	// pending: 1
+}
+
+// Replay declares a tool's side-effect class for re-runs: safe vouches
+// the call is idempotent (a re-run may execute it for real); every
+// unannotated tool counts as never — substituted or parked, never
+// silently re-fired (WEFT-PLAYGROUND.md §6 rule 3).
+func ExampleReplay() {
+	lookup := weft.Tool("lookup_order", "Look up an order.", func(_ context.Context, _ struct{}) (string, error) {
+		return "shipped", nil
+	}, weft.Replay(weft.ReplaySafe))
+	refund := weft.Tool("refund", "Refund an order.", func(_ context.Context, _ struct{}) (string, error) {
+		return "refunded", nil
+	})
+	fmt.Println("lookup:", lookup.ReplayPolicy())
+	fmt.Println("refund:", refund.ReplayPolicy())
+	// Output:
+	// lookup: safe
+	// refund: never
+}

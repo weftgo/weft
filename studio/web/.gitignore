@@ -8,8 +8,14 @@ dist-ssr
 .wrangler
 .output
 .vinxi
+.vite
 __unconfig*
 todos.json
+
+# The release staging dir make studio-panel-asset writes into from
+# here (RELEASE_DIR ?= dist-release): the panel asset is uploaded
+# from it at release time, never committed.
+/dist-release/
 
 # typescript
 *.tsbuildinfo

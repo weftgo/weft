@@ -2,6 +2,8 @@ package weft
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"reflect"
@@ -11,6 +13,8 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/log"
+	logglobal "go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -49,12 +53,34 @@ func (o optionsOption) apply(a *Agent) {
 // tool names still panic at New. Nesting composes by construction.
 func Options(opts ...Option) Option { return optionsOption(opts) }
 
+// InstructionsOption is accepted by both New and Stream/Generate (the
+// ThinkingOption shape): the system prompt is as per-question as
+// reasoning depth. On an agent it is every run's default; on a run it
+// replaces that default for the run alone.
+type InstructionsOption interface {
+	Option
+	RunOption
+}
+
 type instructionsOption struct{ text string }
 
-func (o instructionsOption) apply(a *Agent) { a.system = o.text }
+func (o instructionsOption) apply(a *Agent)        { a.system = o.text }
+func (o instructionsOption) applyRun(c *runConfig) { c.system, c.systemSet = o.text, true }
 
-// Instructions sets the agent's system prompt.
-func Instructions(text string) Option { return instructionsOption{text} }
+// Instructions sets the agent's system prompt. As an Option it is every
+// run's default; as a RunOption it replaces the prompt for one run —
+// the playground's prompt experiment, one run wide, no second agent
+// built (WEFT-PLAYGROUND §10.1 [D5]). Manifest keeps reporting the
+// agent's construction-time prompt.
+func Instructions(text string) InstructionsOption { return instructionsOption{text} }
+
+// MaxStepsOption is accepted by both New and Stream/Generate (the
+// ThinkingOption shape), with one rule on the run side: a run may only
+// lower the agent's budget.
+type MaxStepsOption interface {
+	Option
+	RunOption
+}
 
 type maxStepsOption struct{ n int }
 
@@ -64,11 +90,21 @@ func (o maxStepsOption) apply(a *Agent) {
 	}
 }
 
+func (o maxStepsOption) applyRun(c *runConfig) {
+	if o.n >= 1 {
+		c.maxSteps, c.maxStepsSet = o.n, true
+	}
+}
+
 // MaxSteps is the safety budget: the most model calls a run may make
 // (default 10). Exceeding it fails the run with ErrMaxSteps — a runaway
 // loop is a failure to surface, never a quiet success. Use StopWhen for
-// the intended end of a run. Values below 1 are ignored.
-func MaxSteps(n int) Option { return maxStepsOption{n} }
+// the intended end of a run. As an Option it bounds every run; as a
+// RunOption it may only LOWER the agent's value for the run — a raise
+// fails the run with ErrInvalidRunOption before any model call, because
+// a per-run raise is not a budget, it is the budget escaping
+// (WEFT-PLAYGROUND §10.1 [D5]). Values below 1 are ignored.
+func MaxSteps(n int) MaxStepsOption { return maxStepsOption{n} }
 
 type usageLimitOption struct{ max Usage }
 
@@ -155,6 +191,14 @@ func DetectLoops(repeats int) Option { return detectLoopsOption{repeats} }
 // step (ADR 0007). Values below 1 are ignored.
 func MaxModelRetries(n int) Option { return maxModelRetriesOption{n} }
 
+// ParallelismOption is accepted by both New and Stream/Generate (the
+// ThinkingOption shape), with the MaxStepsOption rule: a run may only
+// lower the agent's width.
+type ParallelismOption interface {
+	Option
+	RunOption
+}
+
 type parallelismOption struct{ n int }
 
 func (o parallelismOption) apply(a *Agent) {
@@ -163,9 +207,19 @@ func (o parallelismOption) apply(a *Agent) {
 	}
 }
 
+func (o parallelismOption) applyRun(c *runConfig) {
+	if o.n >= 1 {
+		c.parallelism, c.parallelismSet = o.n, true
+	}
+}
+
 // Parallelism sets the maximum number of a step's tool calls executing at
-// once (default 4). Values below 1 are ignored.
-func Parallelism(n int) Option { return parallelismOption{n} }
+// once (default 4). As an Option it bounds every run; as a RunOption it
+// may only LOWER the agent's value for the run — a raise fails with
+// ErrInvalidRunOption before any model call (the MaxSteps rule; the
+// per-run knob is for safety, not for escape). Values below 1 are
+// ignored.
+func Parallelism(n int) ParallelismOption { return parallelismOption{n} }
 
 type sequentialOption struct{}
 
@@ -570,10 +624,19 @@ type Agent struct {
 	modelMW         []ModelMiddleware
 	toolMW          []ToolMiddleware
 	tracerProvider  trace.TracerProvider
+	loggerProvider  log.LoggerProvider
 	logger          *slog.Logger
+	// content is the Content option's override of the capture question:
+	// nil means "as the logger in force says", resolved at each emission.
+	content *bool
 	// obs is the loop's own reporting at the run's phases (ADR 0016):
 	// spans to the tracer, lines to the logger. Built once, below.
 	obs observer
+	// manifestHash is sha256(Manifest(this agent)) computed once at New
+	// for a named agent — "which version of this agent ran", on every
+	// run's invoke_agent span and run_start record (ADR 0024). "" when
+	// the agent is unnamed (the manifest requires a name).
+	manifestHash string
 	// hasOutput records that Output was applied: a Subagent delegating
 	// to this agent returns the submitted JSON, not the final text.
 	hasOutput bool
@@ -602,16 +665,33 @@ func New(m Model, opts ...Option) *Agent {
 			o.apply(a)
 		}
 	}
-	// The tracer is resolved once, here: the option's provider, or the
-	// global one — which delegates, so an SDK registered after New is
-	// still picked up and zero-config instrumentation holds.
+	// The tracer and the record logger are resolved once, here: the
+	// option's provider, or the global one — which delegates, so an SDK
+	// registered after New is still picked up and zero-config
+	// instrumentation holds. The logger is the Logs API's; capture is
+	// still resolved per emission, on the logger in force (ADR 0024).
 	tp := otel.GetTracerProvider()
 	if a.tracerProvider != nil {
 		tp = a.tracerProvider
 	}
+	lp := logglobal.GetLoggerProvider()
+	if a.loggerProvider != nil {
+		lp = a.loggerProvider
+	}
 	a.obs = observer{
 		tracer: tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(version)),
+		elog:   lp.Logger(instrumentationName, log.WithInstrumentationVersion(version)),
 		log:    a.logger,
+	}
+	// The manifest hash is computed once, here, for the named agent: the
+	// agent is immutable after this, so one hash serves every run (the
+	// store used to recompute it per run through AgentFromContext; ADR
+	// 0024 moves it onto the emitter).
+	if a.name != "" {
+		if b, err := Manifest(a); err == nil {
+			sum := sha256.Sum256(b)
+			a.manifestHash = hex.EncodeToString(sum[:])
+		}
 	}
 	// The model chain is built once, here: first registered = outermost.
 	for i := len(a.modelMW) - 1; i >= 0; i-- {
@@ -804,3 +884,20 @@ func (a *Agent) Logger() *slog.Logger {
 // contained since construction. A rising counter means an observer is
 // broken; runs are unaffected by design.
 func (a *Agent) TapPanics() int64 { return a.tapPanics.Load() }
+
+// narrowTools keeps the named subset of a snapshot, in the snapshot's
+// own order (registration order for static agents). Duplicates in names
+// are harmless — a definition is kept once. The caller has already
+// validated every name against the run's first snapshot.
+func narrowTools(tools []*ToolDef, names []string) []*ToolDef {
+	keep := make([]*ToolDef, 0, len(tools))
+	for _, t := range tools {
+		for _, n := range names {
+			if t.Name == n {
+				keep = append(keep, t)
+				break
+			}
+		}
+	}
+	return keep
+}

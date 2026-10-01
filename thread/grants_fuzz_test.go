@@ -7,7 +7,7 @@ import (
 	"github.com/weftgo/weft"
 )
 
-// FuzzGrantMatches (step 7.1): the grant predicate engine over
+// FuzzGrantMatches: the grant predicate engine over
 // arbitrary grants and call arguments never panics and stays
 // deterministic — the same grant and the same call answer the same way
 // twice, whatever the bytes hold. The engine is internal, so this is
@@ -32,6 +32,18 @@ func FuzzGrantMatches(f *testing.F) {
 		[]byte(`{"a":[1,2,{"b":"c"}]}`), "/a/2/b", "{*")
 	f.Add([]byte(`{"tool":"unicode","args":[{"pointer":"/名前","equals":"テスト"}]}`),
 		[]byte(`{"名前":"テスト"}`), "/名前", "テ*")
+	// The exact-reading rules (strict RFC 6901 indexes, a rune-wise ?,
+	// integers compared digit for digit, an argument-less call as {}).
+	f.Add([]byte(`{"tool":"x","args":[{"pointer":"/a/01","equals":2}]}`),
+		[]byte(`{"a":[1,2]}`), "/a/01", "?")
+	f.Add([]byte(`{"tool":"x","args":[{"pointer":"/a/-","equals":1}]}`),
+		[]byte(`{"a":[1]}`), "/a/+1", "??")
+	f.Add([]byte(`{"tool":"x","args":[{"pointer":"/n","equals":9007199254740993}]}`),
+		[]byte(`{"n":9007199254740992}`), "/n", "é?")
+	f.Add([]byte(`{"tool":"x","args":[{"pointer":"/n","equals":1.0}]}`),
+		[]byte(`{"n":1e0}`), "/n", "世?界")
+	f.Add([]byte(`{"tool":"x","args":[{"pointer":"","equals":{}}]}`),
+		[]byte(nil), "", "\xff?")
 
 	f.Fuzz(func(t *testing.T, grantJSON, argsJSON []byte, pointer, glob string) {
 		var g Grant
@@ -47,9 +59,14 @@ func FuzzGrantMatches(f *testing.F) {
 		if w1 != w2 { // never panics either, whatever the pattern holds
 			t.Fatalf("nondeterministic wildcard %q over %q", glob, pointer)
 		}
-		v1, ok1 := pointerValue(argsJSON, pointer)
+		// The pointer walk as the engine runs it: over the normalized
+		// arguments (an argument-less call reads as {}), never the raw
+		// bytes — pointer "" is the document itself, and the engine
+		// never hands the walk an absent one.
+		doc := normalArgs(argsJSON)
+		v1, ok1 := pointerValue(doc, pointer)
 		if ok1 {
-			v2, ok2 := pointerValue(argsJSON, pointer)
+			v2, ok2 := pointerValue(doc, pointer)
 			if !ok2 {
 				t.Fatalf("pointerValue flipped on %q / %q", argsJSON, pointer)
 			}

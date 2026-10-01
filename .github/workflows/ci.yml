@@ -61,10 +61,11 @@ jobs:
             (cd "$m" && golangci-lint run --config "$GITHUB_WORKSPACE/.golangci.yml")
           done
 
-  # The selvedge (TODO §1.7): the root module's public API is compared
-  # against the last root tag and any incompatible change fails the
-  # build unless it is acknowledged in .apidiff-allow (pre-1.0 only).
-  # Adapters are separate modules and get their own gate when they tag.
+  # The selvedge (TODO §1.7): a module's public API is compared against
+  # its last tag and any incompatible change fails the build unless it
+  # is acknowledged in the module's .apidiff-allow (pre-1.0 only). The
+  # root, thread and thread/sqlite modules are gated; the adapters are
+  # separate modules and get their own gate when they tag.
   apidiff:
     runs-on: ubuntu-latest
     steps:
@@ -85,13 +86,47 @@ jobs:
         run: scripts/apidiff-selftest.sh
       - name: apidiff (root module vs last tag)
         run: scripts/apidiff.sh
-      # The store module joined the gate at its second tag, store/v0.1.1
-      # (the store plan §3.1); adapters get their own step when they tag.
-      - name: apidiff (store module vs last store tag)
-        run: scripts/apidiff.sh "" store
-
       - name: apidiff (thread module vs last thread tag)
         run: scripts/apidiff.sh "" thread
+      # thread/sqlite loads through go.work on both sides (the script
+      # says why): it is released after thread, against the new tag.
+      - name: apidiff (thread/sqlite module vs last thread/sqlite tag)
+        run: scripts/apidiff.sh "" thread/sqlite
+
+  # The gated ClickHouse suite (obsdb/clickhouse's README "CI job
+  # (service container)" block): the conformance table and the
+  # collector-shape insert test need a server; each test creates and
+  # drops its own database. The same DSN also un-gates studio/cmd's
+  # hosted-backend test.
+  clickhouse:
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8-alpine
+        env:
+          CLICKHOUSE_PASSWORD: weft
+        ports:
+          - 9000:9000
+        options: >-
+          --ulimit nofile=262144:262144
+          --health-cmd "clickhouse-client --password weft --query 'SELECT 1'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      WEFT_CLICKHOUSE_DSN: clickhouse://default:weft@127.0.0.1:9000/default
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+      - name: test (obsdb/clickhouse, gated suite)
+        run: |
+          cd obsdb/clickhouse && go test -race ./...
+      - name: test (studio/cmd, gated --db clickhouse:// test)
+        run: |
+          cd studio/cmd && go test -race -run TestNewServerClickhouse ./...
 
   # The offline gate (ADR 0013's kill-switch clause): the whole
   # workspace stays green under WEFT_MODEL_REQUESTS=deny — suites that
@@ -111,7 +146,7 @@ jobs:
           done
 
   # The fuzz gate (TODO §9.4): every Fuzz* target of the root module
-  # and of thread's decoders (plan §10, step 7.1) runs for FUZZTIME on
+  # and of thread's decoders runs for FUZZTIME on
   # stable Go. Not under -race (the seeds already run under -race in
   # `test`). A crasher fails the job and its input is uploaded so the
   # fix PR can commit it as a seed.

@@ -2,6 +2,9 @@
 // in one SQLite file on the CGO-free modernc.org/sqlite driver — the
 // store's choice (store/sqlite, Crush's before it), reused so one
 // dependency serves both modules — with WAL and embedded migrations.
+// An Append that returned survives the process dying; whether it also
+// survives a power cut is the fsync policy's choice (see Open: the
+// default fsyncs every commit).
 // It is its own module because the driver would otherwise leak into
 // thread's go.mod (ADR 0011 §1: "own module only if its driver would
 // leak into thread" — it would; thread stays root-and-stdlib only).
@@ -16,13 +19,22 @@
 // not) are thread's own decode path, not a reimplementation.
 //
 // The one-writer rule (ADR 0011 §5) is a lock row per session, taken
-// on a session's first write and held until Delete or process exit: a
-// second writer — another Storage in this process, or a process on
-// this machine — fails with thread.ErrLocked. A holder that has died
-// (checked by pid, on the holder's own host) is taken over, so a
-// crashed writer never strands its session: flock's death-release
-// semantics, rebuilt on the database the backend already needs.
-// Readers never lock — Load and List always work.
+// on a session's first write and held until the session is released
+// (the thread.Releaser capability), deleted, or the holder's process
+// exits: a second writer — another Storage in this process, or a
+// process on this machine — fails with thread.ErrLocked. A holder that
+// has died is taken over, so a crashed writer never strands its
+// session: flock's death-release semantics, rebuilt on the database
+// the backend already needs. "Died" is judged on the holder's own host
+// by more than its pid, because pids are reused: the row carries the
+// holder's process token and start time, so a restarted process that
+// wears its predecessor's pid (a container's PID 1) takes its own
+// sessions back, and an unrelated process wearing a dead holder's pid
+// does not keep them locked. A holder on another host is never judged
+// from here: its row stands until it releases or an operator removes
+// it (BreakLock). Readers never lock — Load and List always work. Between Sessions sharing one Storage the same rule is the
+// lease (the thread.Leaser capability): the instance remembers which
+// writer has the row it took.
 package sqlite
 
 import (
@@ -35,57 +47,100 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/weftgo/weft/thread"
+	threadbackend "github.com/weftgo/weft/thread/backend"
 
 	// CGO-free driver, the store's choice; the import registers it.
 	_ "modernc.org/sqlite"
 )
 
+// connParams are the per-connection settings every DSN carries:
+// immediate write transactions (a deferred transaction upgrading to a
+// writer can deadlock against another), a long busy timeout, and
+// foreign keys on — the entries and lock rows go with their session.
+const connParams = "_txlock=immediate" +
+	"&_pragma=busy_timeout(30000)" +
+	"&_pragma=foreign_keys(ON)"
+
 // Open opens (creating if needed) the sessions database at path and
 // brings its schema up to date, returning a thread.Storage. ":memory:"
-// works — one in-process database for tests and examples, a shape the
-// store's Open shares. Connections carry synchronous=NORMAL,
-// busy_timeout=30000, foreign_keys=ON, and immediate write transactions
-// (preventing deferred-to-writer upgrade deadlocks), and the handle
-// allows a single connection so every write is serialized. WAL is not a
-// connection pragma: it is a persistent property of the file, switched
-// once by the first Open (setWAL), so a reader in another process — a
-// watcher, the Inspector — reads concurrently through its own Open.
+// works — one private in-process database per Open, for tests and
+// examples, alive for as long as the returned Storage is. Connections
+// carry busy_timeout=30000, foreign_keys=ON, and immediate write
+// transactions (preventing deferred-to-writer upgrade deadlocks;
+// read-only transactions stay deferred and take no write lock), and
+// the handle uses a single working connection so every write is
+// serialized. WAL is not a connection pragma: it is a persistent
+// property of the file, switched once by the first Open (setWAL), so a
+// reader in another process — a watcher, the Inspector — reads
+// concurrently through its own Open.
 //
-// The shared open vocabulary (thread.ResolveOpen) applies: Salvage
+// # Durability
+//
+// Every Append is one committed transaction, so a process that dies —
+// a crash, a SIGKILL — never loses an Append that returned, under
+// either fsync policy. What the policy decides is power loss and
+// kernel crashes:
+//
+//   - thread.FsyncEveryAppend, the default: synchronous=FULL. Each
+//     commit fsyncs the write-ahead log before Append returns — an
+//     accepted entry survives losing power, the same promise jsonl
+//     makes for its default.
+//   - thread.FsyncOnFlush: synchronous=NORMAL. A commit is written
+//     but not fsynced; the entries since the last sync can be lost to
+//     a power cut (the database stays consistent — WAL's guarantee —
+//     it only ends earlier). Flush is the sync point: it checkpoints
+//     the log, which fsyncs it. SQLite also checkpoints on its own
+//     as the log grows.
+//
+// ":memory:" has nothing to sync and ignores both.
+//
+// path is a file name, taken literally: characters that mean something
+// in a SQLite URI ('?', '#', '%') are part of the name, never options.
+//
+// The shared open vocabulary (thread/backend.Resolve) applies: Salvage
 // downgrades a malformed line from a load failure to a skip reported in
-// the LoadReport, and the fsync-policy options are accepted and are
-// no-ops here — every Append is one committed transaction, so sqlite's
-// commit cadence already is per-append and there is no buffer to defer.
-// The database file is created 0600 and its directory 0700, matching
-// jsonl's rule (ADR 0011 §5); the -wal and -shm side files are SQLite's
-// own and share the main file's directory.
+// the LoadReport; OpenLogger names where a lock takeover and a removed
+// torn row are reported; the fsync-policy options choose the sync
+// cadence described above; NoLock is accepted and is a no-op: the lock
+// is a row, it needs no platform support, and it stays on. The
+// database file is created 0600 and its directory
+// 0700, matching jsonl's rule (ADR 0011 §5); the -wal and -shm side
+// files are SQLite's own and share the main file's directory.
 func Open(path string, opts ...thread.OpenOption) (thread.Storage, error) {
-	cfg := thread.ResolveOpen(opts...)
-	dsn := "file:" + path +
-		"?_txlock=immediate" +
-		"&_pragma=synchronous(NORMAL)" +
-		"&_pragma=busy_timeout(30000)" +
-		"&_pragma=foreign_keys(ON)"
-	switch path {
-	case ":memory:":
-		// One shared in-memory database per handle: a second connection
-		// would see its own empty copy.
-		dsn = "file::memory:" +
-			"?_txlock=immediate" +
+	cfg := threadbackend.Resolve(opts...)
+	owner, err := instanceID()
+	if err != nil {
+		return nil, err
+	}
+	proc, err := processToken()
+	if err != nil {
+		return nil, err
+	}
+	memory := path == ":memory:"
+	var dsn string
+	switch {
+	case memory:
+		// A named shared-cache memory database, private to this Open by
+		// its random name. A plain ":memory:" database belongs to one
+		// connection and dies with it — and database/sql is free to
+		// replace a connection (one the driver reports bad, one a pool
+		// setting retires) — so the handle below pins a second
+		// connection that keeps the database alive across any such
+		// replacement.
+		_, name, _ := strings.Cut(owner, "/")
+		dsn = "file:weft-thread-" + name + "?mode=memory&cache=shared&" + connParams +
 			"&_pragma=journal_mode(MEMORY)" +
-			"&_pragma=synchronous(OFF)" +
-			"&_pragma=busy_timeout(30000)" +
-			"&_pragma=foreign_keys(ON)"
-	case "":
+			"&_pragma=synchronous(OFF)"
+	case path == "":
 		return nil, fmt.Errorf("sqlite: open called with an empty path")
 	default:
 		if dir := filepath.Dir(path); dir != "" && dir != "." {
@@ -109,14 +164,51 @@ func Open(path string, opts ...thread.OpenOption) (thread.Storage, error) {
 		default:
 			return nil, err
 		}
+		// The fsync policy is SQLite's synchronous level (see
+		// Durability on Open): FULL fsyncs the log at every commit,
+		// NORMAL leaves it to checkpoints — and to Flush.
+		level := "FULL"
+		if !cfg.SyncEveryAppend {
+			level = "NORMAL"
+		}
+		dsn = "file:" + escapeURIPath(path) + "?" + connParams + "&_pragma=synchronous(" + level + ")"
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	if path != ":memory:" {
+	b := &backend{
+		db:      db,
+		salvage: cfg.Salvage,
+		log:     cfg.Logger,
+		owner:   owner,
+		proc:    proc,
+		pid:     os.Getpid(),
+		alive:   pidAlive,
+		startOf: procStart,
+		held:    map[string]*lease{},
+		// Flush has commits to sync only where commits do not sync
+		// themselves: a file database under FsyncOnFlush.
+		syncOnFlush: !memory && !cfg.SyncEveryAppend,
+	}
+	b.started = b.startOf(b.pid)
+	if memory {
+		// Two connections: the pinned keeper, which never runs a
+		// statement after this, and the one working connection.
+		db.SetMaxOpenConns(2)
+		db.SetMaxIdleConns(2)
+		keeper, err := db.Conn(context.Background())
+		if err == nil {
+			err = keeper.PingContext(context.Background())
+		}
+		if err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		b.keeper = keeper
+	} else {
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(1)
 		if err := setWAL(db); err != nil {
 			_ = db.Close()
 			return nil, err
@@ -126,52 +218,125 @@ func Open(path string, opts ...thread.OpenOption) (thread.Storage, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	owner, err := instanceID()
-	if err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	return &backend{
-		db:      db,
-		salvage: cfg.Salvage,
-		owner:   owner,
-		pid:     os.Getpid(),
-		alive:   pidAlive,
-		held:    map[string]bool{},
-	}, nil
+	return b, nil
+}
+
+// escapeURIPath makes a file name safe inside a "file:" URI: SQLite
+// reads '?' as the start of the query, '#' as a fragment, and '%' as an
+// escape, so each is written as its own %HH escape and the name on
+// disk is exactly the one the caller gave.
+func escapeURIPath(path string) string {
+	return strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23").Replace(path)
 }
 
 // instanceID builds this Storage instance's writer identity — host plus
 // random bytes — so two Storage handles in one process are distinct
-// holders (the same pid, different owners) and a takeover across
-// restarts never mistakes the new instance for the dead one.
+// holders and a takeover never mistakes one instance for another.
 func instanceID() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
+	tok, err := randomToken()
+	if err != nil {
 		return "", fmt.Errorf("sqlite: instance id: %w", err)
 	}
 	host, err := os.Hostname()
 	if err != nil || host == "" {
 		host = "unknown-host"
 	}
-	return host + "/" + hex.EncodeToString(b[:]), nil
+	return host + "/" + tok, nil
 }
 
+// randomToken returns 128 random bits as hex.
+func randomToken() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+// processToken is this process's identity in lock rows: random, drawn
+// once, the same for every Storage the process opens. It is the one
+// package-level value in the backend, and it is one on purpose. The
+// lock must tell "another Storage in this very process holds the
+// session" (locked: that Storage is as alive as we are) from "a
+// previous process that had our pid held it" (dead: take over). The
+// pid cannot — it is the same number in both — and a start time cannot
+// where the platform does not report one. Only something every Open in
+// this process shares and no other process has can, and two unrelated
+// Open calls share nothing but the process's memory. It is written
+// once and never changes; nothing else is keyed on it.
+var processToken = sync.OnceValues(func() (string, error) {
+	tok, err := randomToken()
+	if err != nil {
+		return "", fmt.Errorf("sqlite: process token: %w", err)
+	}
+	return tok, nil
+})
+
 // backend is the thread.Storage over one SQLite file. held names the
-// sessions this instance has taken the writer's lock row for; mu guards
-// it and nothing else — the database serializes the writes themselves.
+// sessions this instance has taken the writer's lock row for, each
+// with its lease (the thread.Leaser capability); mu guards it and
+// writes, and nothing else — the database serializes the writes
+// themselves. leaseMu serializes the operations that take or end a
+// hold — Acquire, Yield, Release, Delete — against each other, held
+// across their transactions, so a lease is never recorded on a hold
+// another of them is ending; Append does not take it.
 type backend struct {
 	db      *sql.DB
 	salvage bool
+	log     *slog.Logger
+	// keeper is the pinned connection that keeps a ":memory:" database
+	// alive; nil for a file.
+	keeper *sql.Conn
+
+	// The writer's identity in a lock row: owner names this Storage
+	// (host/random), proc this process, pid and started the process as
+	// the OS knows it.
 	owner   string
+	proc    string
 	pid     int
-	// alive is the holder-liveness check the lock row consults; a field
-	// so tests can answer it for a dead process without killing one.
-	alive func(pid int) bool
+	started string
+	// alive and startOf are the holder-liveness checks the lock row
+	// consults — is the pid a live process, and when did that process
+	// start ("" when the platform cannot say); fields so tests can
+	// answer them for a dead or a reused pid without killing anything.
+	alive   func(pid int) bool
+	startOf func(pid int) string
+
+	leaseMu sync.Mutex
 
 	mu   sync.Mutex
-	held map[string]bool
+	held map[string]*lease
+	// writes counts this instance's committed entry writes: an Acquire
+	// that counted a session's rows keeps the count only if nothing
+	// was written while it looked.
+	writes uint64
+	// syncOnFlush says commits are not fsynced as they land
+	// (FsyncOnFlush on a file database), so Flush owes the sync.
+	syncOnFlush bool
 }
+
+// lease is this instance's hold on one session: the lock row is ours,
+// holder is the writer the lease belongs to — nil while the instance
+// holds the session for its direct users only — and entries is the
+// number of complete entry rows the session holds, unknownEntries
+// until an Acquire has counted them.
+type lease struct {
+	holder  any
+	entries int
+	// created is the session row's created column — the header's
+	// Created — read by the hold's first Acquire (stamped says it
+	// was); zero when it does not parse.
+	created time.Time
+	stamped bool
+}
+
+// unknownEntries marks a held session whose entry rows have not been
+// counted, or were changed in a way this instance did not count
+// (Inject's raw bytes).
+const unknownEntries = -1
+
+// errNilHolder refuses a lease nobody could be told apart by.
+var errNilHolder = errors.New("sqlite: lease holder is nil")
 
 // Create writes the session's header row and takes its lock row in one
 // transaction: an id that is not one path component, an envelope other
@@ -195,37 +360,50 @@ func (b *backend) Create(ctx context.Context, h thread.Header) error {
 	if err != nil {
 		return err
 	}
+	return b.insertSession(ctx, h.ID, formatTime(h.Created), string(line), h.Weft)
+}
+
+// insertSession is Create's body, shared with InjectHeader: the header
+// row under a fresh generation token, with its envelope integer beside
+// it for List, and the creator's lock row — the creator is the
+// session's writer from birth, the same rule jsonl's create-and-lock
+// follows.
+func (b *backend) insertSession(ctx context.Context, id, created, header string, envelope int) error {
+	gen, err := randomToken()
+	if err != nil {
+		return fmt.Errorf("sqlite: session generation: %w", err)
+	}
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer rollback(tx)
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO sessions (id, created, header) VALUES (?,?,?)`,
-		h.ID, formatTime(h.Created), string(line)); err != nil {
+		`INSERT INTO sessions (id, created, header, gen, envelope) VALUES (?,?,?,?,?)`,
+		id, created, header, gen, envelope); err != nil {
 		if isConstraint(err) {
-			return fmt.Errorf("%w: %s", thread.ErrExists, h.ID)
+			return fmt.Errorf("%w: %s", thread.ErrExists, id)
 		}
 		return err
 	}
-	if err := b.insertLock(ctx, tx, h.ID); err != nil {
+	if err := b.insertLock(ctx, tx, id); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 	b.mu.Lock()
-	b.held[h.ID] = true
+	b.held[id] = &lease{} // a header and no entries
 	b.mu.Unlock()
 	return nil
 }
 
-// Append adds entries in arrival order — all or none become visible:
-// the batch is encoded and validated before the transaction starts, and
-// the inserts are one transaction, so a crash or an error mid-batch
-// leaves none of it. Appending to a session the database does not hold
-// fails with ErrNotFound; one another writer holds fails with
-// ErrLocked.
+// Append adds entries in arrival order, atomically: the batch is
+// encoded and validated before the transaction starts, and the inserts
+// are one transaction, so a crash or an error mid-batch leaves none of
+// it and no reader ever sees part of it. Appending to a session the
+// database does not hold fails with ErrNotFound; one another writer
+// holds fails with ErrLocked.
 func (b *backend) Append(ctx context.Context, id string, entries ...thread.Entry) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -234,63 +412,128 @@ func (b *backend) Append(ctx context.Context, id string, entries ...thread.Entry
 		return fmtNotFound(id)
 	}
 	lines := make([]string, len(entries))
-	var title string
-	hasInfo := false
+	title := ""
 	for i, e := range entries {
 		line, err := json.Marshal(e)
 		if err != nil {
 			return fmt.Errorf("thread: entry %d of the append does not encode: %w", i, err)
 		}
 		lines[i] = string(line)
-		if ie, ok := e.(thread.InfoEntry); ok {
-			// The last info entry of the batch carries the session's
-			// current title (Query.TitleSearch's rule); maintained here,
-			// in the append's own transaction, so the column can never
-			// disagree with the rows (migration 0002's backfill is the
-			// once-only derivation of the same value).
-			title, hasInfo = ie.Title, true
+		if ie, ok := e.(thread.InfoEntry); ok && ie.Title != "" {
+			// The last info entry carrying a non-empty title is the
+			// session's current title (Query.TitleSearch's rule, and
+			// Session.Title's); maintained here, in the append's own
+			// transaction, so the column can never disagree with the
+			// rows. An info entry without a title leaves it standing.
+			title = ie.Title
 		}
 	}
+	return b.commit(ctx, id, lines, 0, title, len(lines))
+}
+
+// commit is Append and Inject's shared transaction: the rows, the
+// title column when the batch set one, then the reports — a lock taken
+// over and a torn row removed are logged only once the transaction
+// that did them has committed. added is how many complete entry rows
+// the batch adds, unknownEntries when the caller cannot say (Inject).
+func (b *backend) commit(ctx context.Context, id string, lines []string, tornRow int, title string, added int) error {
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer rollback(tx)
-	if err := b.write(ctx, tx, id, lines, 0); err != nil {
+	did, err := b.write(ctx, tx, id, lines, tornRow)
+	if err != nil {
 		return err
 	}
-	if hasInfo {
+	if title != "" {
 		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET title = ? WHERE id = ?`, title, id); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	b.committed(id, did)
+	b.mu.Lock()
+	b.writes++
+	if l := b.held[id]; l != nil {
+		if added == unknownEntries {
+			l.entries = unknownEntries
+		} else if l.entries != unknownEntries {
+			l.entries += added
+		}
+	}
+	b.mu.Unlock()
+	return nil
+}
+
+// wrote is what a write transaction did beyond its rows, for the
+// caller to act on once the transaction has committed.
+type wrote struct {
+	acquired bool   // the lock row became ours in this transaction
+	takeover string // non-empty: the dead holder it was taken from
+	repaired int64  // torn rows removed before appending
+}
+
+// committed records a committed transaction's side effects: the lock
+// this instance now holds, and the two repairs worth a log line.
+func (b *backend) committed(id string, did wrote) {
+	if did.acquired {
+		b.mu.Lock()
+		if b.held[id] == nil {
+			b.held[id] = &lease{entries: unknownEntries}
+		}
+		b.mu.Unlock()
+	}
+	if did.takeover != "" {
+		b.log.Warn("thread/sqlite: took over a dead writer's lock", "session", id, "dead_holder", did.takeover)
+	}
+	if did.repaired > 0 {
+		b.log.Warn("thread/sqlite: removed a torn tail before appending", "session", id, "dropped_rows", did.repaired)
+	}
 }
 
 // write is Append and Inject's shared body: existence check, lock row,
-// then the rows themselves after the session's last seq. tornRow marks
-// the final row as a torn tail when it is 1 (Inject's; Append always
-// passes 0).
-func (b *backend) write(ctx context.Context, tx *sql.Tx, id string, lines []string, tornRow int) error {
+// the writer's repair, then the rows themselves after the session's
+// last seq. The repair is the rule every backend follows: a torn final
+// row — bytes a crashed writer left without their newline — is removed
+// before anything is appended, so new entries never sit behind a
+// half-line. tornRow marks the final new row as a torn tail when it is
+// 1 (Inject's; Append always passes 0).
+func (b *backend) write(ctx context.Context, tx *sql.Tx, id string, lines []string, tornRow int) (wrote, error) {
+	var did wrote
 	if err := ctx.Err(); err != nil {
-		return err
+		return did, err
 	}
 	var exists bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)`, id).Scan(&exists); err != nil {
-		return err
+		return did, err
 	}
 	if !exists {
-		return fmtNotFound(id)
+		return did, fmtNotFound(id)
 	}
-	if err := b.acquire(ctx, tx, id); err != nil {
-		return err
+	did, err := b.acquire(ctx, tx, id)
+	if err != nil {
+		return did, err
 	}
 	if len(lines) == 0 {
-		return nil // an empty append is a lookup, not a write
+		return did, nil // an empty append is a lookup, not a write
+	}
+	// Only a session's final row can be torn, so the repair is one
+	// primary-key probe of that row — never a scan of the session.
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM entries WHERE session = ? AND torn = 1
+		   AND seq = (SELECT MAX(seq) FROM entries WHERE session = ?)`, id, id)
+	if err != nil {
+		return did, err
+	}
+	if did.repaired, err = res.RowsAffected(); err != nil {
+		return did, err
 	}
 	var base int
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), -1) + 1 FROM entries WHERE session = ?`, id).Scan(&base); err != nil {
-		return err
+		return did, err
 	}
 	for i, line := range lines {
 		torn := 0
@@ -300,10 +543,10 @@ func (b *backend) write(ctx context.Context, tx *sql.Tx, id string, lines []stri
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO entries (session, seq, line, torn) VALUES (?,?,?,?)`,
 			id, base+i, line, torn); err != nil {
-			return err
+			return did, err
 		}
 	}
-	return nil
+	return did, nil
 }
 
 // Load returns the whole session: the header decoded from its row, then
@@ -313,8 +556,8 @@ func (b *backend) write(ctx context.Context, tx *sql.Tx, id string, lines []stri
 // else that fails to decode is ErrCorrupt naming the line (the header
 // is line 1, the first entry line 2); a torn final row — bytes a
 // crashed writer left without their newline, reachable only through
-// threadtest's Inject, whose transactions never tear — is dropped and
-// reported in the LoadReport. Both reads run in one transaction, so a
+// threadtest's Inject, since this backend's own transactions never
+// tear — is dropped and reported in the LoadReport. Both reads run in one transaction, so a
 // concurrent Delete orders entirely before this Load (ErrNotFound) or
 // entirely after it (the session with its entries) — never between the
 // header read and the entries read, which would answer a header whose
@@ -329,10 +572,11 @@ func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.
 		return thread.Header{}, nil, nil, fmtNotFound(id)
 	}
 	// A read transaction holds one snapshot across both queries
-	// (SQLite's repeatable-read-within-a-transaction). ReadOnly is a
-	// wish, not a guarantee, on this driver — the DSN's immediate-transaction
-	// pragma may make the read tx take the write lock, which costs a
-	// little cross-process serialization and changes nothing here.
+	// (SQLite's repeatable-read-within-a-transaction). ReadOnly matters
+	// on this driver: it begins a plain deferred transaction, where the
+	// DSN's _txlock=immediate would otherwise make every transaction
+	// take the write lock at BEGIN — so a Load never queues behind
+	// another process's writer, and never makes one wait.
 	tx, err := b.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return thread.Header{}, nil, nil, err
@@ -391,9 +635,10 @@ func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.
 				report = &thread.LoadReport{Torn: line}
 				break
 			}
-			// Torn bytes mid-session: a writer appended after a crash
-			// left its tail behind. Corrupt, like the same bytes in a
-			// jsonl file.
+			// Torn bytes mid-session: rows written behind a tail no
+			// writer repaired — not something this backend's write
+			// path produces (it removes a torn row before appending),
+			// so the file was written by something else. Corrupt.
 			return thread.Header{}, nil, nil, &thread.CorruptError{
 				Session: id, Line: line, Err: errors.New("a torn line mid-session"),
 			}
@@ -419,82 +664,126 @@ func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.
 	return h, entries, report, nil
 }
 
-// List returns the session headers — headers only, never entries: a
-// list body that read whole sessions would be the storage bloat every
-// surveyed store walked back (ADR 0010's listTracesLight lesson, the
-// same shape here). The one column beyond the header is the
-// denormalised title (migration 0002), which is what lets a
-// TitleSearch filter without reading a session's entries — the price
-// the query pays on backends that keep no such column, never paid
-// here. Newest first by Created (ties by id, descending), the Before
-// cursor, the Total count. A header row that does not decode (which
-// only a newer weft's bytes could be — Create validated the ones it
-// wrote) is skipped, never an error: one undecodable header never
-// blocks listing the others, and Load names what is wrong with it when
-// asked.
+// List returns a page of session headers — headers only, never
+// entries — paged in SQL: the page is one index range read over
+// (created, id), newest first, bounded by Limit and started by the
+// (Before, BeforeID) keyset cursor, and Total is a COUNT over the same
+// filter. Which headers this build can read is a column (envelope,
+// migration 0003), so neither query parses a header to find out; a
+// Meta filter is answered by the database from the header's JSON. A
+// List never loads the fleet's headers to return fifty of them. The
+// denormalised title (migration 0002) is what lets a TitleSearch
+// filter without reading a session's entries; the match itself — a
+// case-insensitive substring, Unicode-aware — is Go's, so a
+// TitleSearch reads the title column of every session the other
+// filters admit and decodes only the page. A header from a newer weft,
+// or one that is not a session header, is skipped and not counted,
+// never an error: one undecodable header never blocks listing the
+// others, and Load names what is wrong with it when asked. Page and
+// Total come from one read snapshot.
 func (b *backend) List(ctx context.Context, q thread.Query) (thread.Page, error) {
 	if err := ctx.Err(); err != nil {
 		return thread.Page{}, err
 	}
-	rs, err := b.db.QueryContext(ctx, `SELECT header, title FROM sessions`)
+	// The filter both queries share: a header this build reads, holding
+	// every wanted meta pair. json_valid guards json_each, which raises
+	// on malformed text (and SQL promises no evaluation order that
+	// would let the envelope test shield it).
+	var where strings.Builder
+	args := []any{thread.FormatVersion}
+	where.WriteString(`envelope = ?`)
+	for k, v := range q.Meta {
+		where.WriteString(` AND CASE WHEN json_valid(header) THEN EXISTS (SELECT 1 FROM json_each(header, '$.meta')` +
+			` WHERE key = ? AND type = 'text' AND value = ?) ELSE 0 END`)
+		args = append(args, k, v)
+	}
+	limit := limitOf(q.Limit)
+	before := ""
+	if !q.Before.IsZero() {
+		before = formatTime(q.Before)
+	}
+
+	tx, err := b.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return thread.Page{}, err
 	}
-	defer func() { _ = rs.Close() }()
-	headers := []thread.Header{}
-	for rs.Next() {
-		var line, title string
-		if err := rs.Scan(&line, &title); err != nil {
+	defer rollback(tx)
+	page := thread.Page{Sessions: []thread.Header{}}
+
+	if q.TitleSearch != "" {
+		// One ordered pass over the admitted rows: every title is
+		// matched (that is the count), and rows past the cursor fill
+		// the page until it is full.
+		rows, err := tx.QueryContext(ctx,
+			`SELECT header, title, created, id FROM sessions WHERE `+where.String()+
+				` ORDER BY created DESC, id DESC`, args...)
+		if err != nil {
+			return thread.Page{}, err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var line, title, created, id string
+			if err := rows.Scan(&line, &title, &created, &id); err != nil {
+				return thread.Page{}, err
+			}
+			if !titleMatches(title, q.TitleSearch) {
+				continue
+			}
+			page.Total++
+			if len(page.Sessions) >= limit || !afterCursor(created, id, before, q.BeforeID) {
+				continue
+			}
+			var h thread.Header
+			if err := json.Unmarshal([]byte(line), &h); err != nil {
+				page.Total-- // not ours to list; Load will say why
+				continue
+			}
+			page.Sessions = append(page.Sessions, h)
+		}
+		return page, rows.Err()
+	}
+
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions WHERE `+where.String(), args...).Scan(&page.Total); err != nil {
+		return thread.Page{}, err
+	}
+	query := `SELECT header FROM sessions WHERE ` + where.String()
+	if before != "" {
+		// The keyset: strictly after (before, beforeID) in list order.
+		// An empty BeforeID admits nothing at the cursor's own instant
+		// — no id sorts below the empty string.
+		query += ` AND (created < ? OR (created = ? AND id < ?))`
+		args = append(args, before, before, q.BeforeID)
+	}
+	query += ` ORDER BY created DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return thread.Page{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
 			return thread.Page{}, err
 		}
 		var h thread.Header
 		if err := json.Unmarshal([]byte(line), &h); err != nil {
-			continue // not ours to list; Load will say why
-		}
-		if !metaMatch(h.Meta, q.Meta) {
+			page.Total-- // passed the SQL filter, not the decoder: skipped, uncounted
 			continue
 		}
-		if q.TitleSearch != "" && !titleMatches(title, q.TitleSearch) {
-			continue
-		}
-		headers = append(headers, h)
+		page.Sessions = append(page.Sessions, h)
 	}
-	if err := rs.Err(); err != nil {
-		return thread.Page{}, err
-	}
-	total := len(headers)
-	slices.SortFunc(headers, func(a, b thread.Header) int {
-		if c := b.Created.Compare(a.Created); c != 0 {
-			return c
-		}
-		return strings.Compare(b.ID, a.ID)
-	})
-	start := 0
-	if !q.Before.IsZero() {
-		start = len(headers)
-		for i, h := range headers {
-			if h.Created.Before(q.Before) {
-				start = i
-				break
-			}
-		}
-	}
-	page := headers[start:]
-	if n := limitOf(q.Limit); len(page) > n {
-		page = page[:n]
-	}
-	for i := range page {
-		page[i].Meta = cloneMeta(page[i].Meta)
-	}
-	return thread.Page{Sessions: page, Total: total}, nil
+	return page, rows.Err()
 }
 
 // Delete removes the session's rows — header, entries, lock — in one
 // transaction. An unknown session fails with ErrNotFound; a session
-// held by a live writer — this instance or another — fails with
-// ErrLocked: deleting under a live writer would lose the writes it is
-// about to make. A dead holder's lock is taken over first, so a crashed
-// writer's session can always be deleted.
+// held by a live writer other than this instance fails with ErrLocked:
+// deleting under a live writer would lose the writes it is about to
+// make. A dead holder's lock is taken over first, so a crashed
+// writer's session can always be deleted. A lease on this instance
+// (Acquire) does not refuse it: Delete through the holder's own
+// Storage removes the session and the lease with it.
 func (b *backend) Delete(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -502,6 +791,8 @@ func (b *backend) Delete(ctx context.Context, id string) error {
 	if !thread.ValidID(id) {
 		return fmtNotFound(id)
 	}
+	b.leaseMu.Lock()
+	defer b.leaseMu.Unlock()
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -514,7 +805,8 @@ func (b *backend) Delete(ctx context.Context, id string) error {
 	if !exists {
 		return fmtNotFound(id)
 	}
-	if err := b.acquire(ctx, tx, id); err != nil {
+	did, err := b.acquire(ctx, tx, id)
+	if err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, id); err != nil {
@@ -523,18 +815,27 @@ func (b *backend) Delete(ctx context.Context, id string) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	did.acquired = false // the row went with the session
+	b.committed(id, did)
 	b.mu.Lock()
 	delete(b.held, id)
 	b.mu.Unlock()
 	return nil
 }
 
-// Flush is the thread.Flusher capability: every Append here is one
-// committed transaction, so nothing is ever buffered — Flush answers
-// whether the session exists (ErrNotFound for one it does not hold) and
-// otherwise has nothing to do. It exists so the shared flush cadence —
-// a Session opened with thread.FsyncOnFlush — is portable across
-// backends without the caller learning which one it holds.
+// Flush is the thread.Flusher capability. It answers whether the
+// session exists (ErrNotFound for one the database does not hold),
+// and under thread.FsyncOnFlush it is the sync point for everything
+// committed so far: it checkpoints the write-ahead log, which fsyncs
+// the log and then the database file — the whole database's, not one
+// session's; there is one log — and costs next to nothing when the
+// log holds nothing new. Under the default policy every commit
+// already fsynced, and Flush has nothing to add.
+//
+// The checkpoint is SQLite's passive one: it never waits for a reader.
+// A reader holding a snapshot from before the previous checkpoint — a
+// long read transaction in another process — can leave it nothing to
+// do, and the sync then waits for the Flush after that reader ends.
 func (b *backend) Flush(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -547,7 +848,161 @@ func (b *backend) Flush(ctx context.Context, id string) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmtNotFound(id)
 	}
-	return err
+	if err != nil || !b.syncOnFlush {
+		return err
+	}
+	var busy, logged, checkpointed int
+	if err := b.db.QueryRowContext(ctx, `PRAGMA wal_checkpoint(PASSIVE)`).Scan(&busy, &logged, &checkpointed); err != nil {
+		return fmt.Errorf("sqlite: flush checkpoint: %w", err)
+	}
+	return nil
+}
+
+// Release is the thread.Releaser capability: it deletes this
+// instance's lock row for the session, so another Storage or process
+// may write it, and ends the lease on it (Acquire), whoever has it.
+// Nothing is buffered — every Append already committed. A later
+// Append here takes the row again, or fails with ErrLocked if another
+// writer holds it by then. Releasing a session another writer holds
+// releases nothing; one the database does not hold fails with
+// ErrNotFound.
+func (b *backend) Release(ctx context.Context, id string) error {
+	return b.release(ctx, id, nil)
+}
+
+// Yield is the thread.Leaser capability's release: Release, unless a
+// holder other than the caller's has the session's lease — then the
+// hold is that writer's and nothing is let go.
+func (b *backend) Yield(ctx context.Context, id string, holder any) error {
+	if holder == nil {
+		return errNilHolder
+	}
+	return b.release(ctx, id, holder)
+}
+
+// release is Release and Yield's shared body: by is nil for Release,
+// which lets go whoever holds the lease, and the yielding holder
+// otherwise.
+func (b *backend) release(ctx context.Context, id string, by any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !thread.ValidID(id) {
+		return fmtNotFound(id)
+	}
+	b.leaseMu.Lock()
+	defer b.leaseMu.Unlock()
+	b.mu.Lock()
+	l := b.held[id]
+	others := by != nil && l != nil && l.holder != nil && l.holder != by
+	b.mu.Unlock()
+	if others {
+		// Another writer's lease, on a session this instance holds —
+		// so it exists, and it is not ours to end.
+		return nil
+	}
+	tx, err := b.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer rollback(tx)
+	var one int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM sessions WHERE id = ?`, id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmtNotFound(id)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM session_locks WHERE session = ? AND owner = ?`, id, b.owner); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	delete(b.held, id)
+	b.mu.Unlock()
+	return nil
+}
+
+// Acquire is the thread.Leaser capability: it takes the session's lock
+// row as a first Append would — a dead holder's taken over — and
+// records holder as the session's one writer on this instance,
+// refusing a different holder with ErrLocked. The complete entry rows
+// are counted once per hold and kept current by this instance's own
+// appends: for the holder a repeated Acquire touches no database.
+func (b *backend) Acquire(ctx context.Context, id string, holder any) (int, time.Time, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, time.Time{}, err
+	}
+	if holder == nil {
+		return 0, time.Time{}, errNilHolder
+	}
+	if !thread.ValidID(id) {
+		return 0, time.Time{}, fmtNotFound(id)
+	}
+	b.leaseMu.Lock()
+	defer b.leaseMu.Unlock()
+	locked := fmt.Errorf("%w: %s", thread.ErrLocked, id)
+	b.mu.Lock()
+	seen := b.writes
+	if l := b.held[id]; l != nil {
+		if l.holder != nil && l.holder != holder {
+			b.mu.Unlock()
+			return 0, time.Time{}, locked
+		}
+		if l.entries != unknownEntries && l.stamped {
+			l.holder = holder
+			n, created := l.entries, l.created
+			b.mu.Unlock()
+			return n, created, nil
+		}
+	}
+	b.mu.Unlock()
+
+	tx, err := b.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	defer rollback(tx)
+	var stamp string
+	err = tx.QueryRowContext(ctx, `SELECT created FROM sessions WHERE id = ?`, id).Scan(&stamp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, time.Time{}, fmtNotFound(id)
+	}
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	// The column is the header's Created (Create writes both from one
+	// value); a row some other hand wrote reads as the zero time.
+	created, _ := time.Parse(time.RFC3339Nano, stamp)
+	did, err := b.acquire(ctx, tx, id)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM entries WHERE session = ? AND torn = 0`, id).Scan(&n); err != nil {
+		return 0, time.Time{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, time.Time{}, err
+	}
+	b.committed(id, did)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	l := b.held[id]
+	if l == nil {
+		// The row is ours by an earlier transaction this instance lost
+		// track of: recorded now.
+		l = &lease{entries: unknownEntries}
+		b.held[id] = l
+	}
+	l.holder, l.created, l.stamped = holder, created, true
+	if b.writes == seen {
+		l.entries = n // nothing was written while the rows were counted
+	}
+	return n, created, nil
 }
 
 // Inject appends raw bytes to a session as entry rows, verbatim — the
@@ -575,63 +1030,200 @@ func (b *backend) Inject(ctx context.Context, id string, data []byte) error {
 		lines = append(lines, string(torn))
 		tornRow = 1
 	}
+	return b.commit(ctx, id, lines, tornRow, "", unknownEntries)
+}
+
+// InjectHeader creates a session whose header row is the given bytes,
+// verbatim — the threadtest.RawHeaderInjector hook, the way a newer or
+// broken writer would have left a header. An existing session fails
+// with ErrExists.
+func (b *backend) InjectHeader(ctx context.Context, id string, line []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !thread.ValidID(id) {
+		return fmt.Errorf("thread: invalid session id %q", id)
+	}
+	// The envelope column says what the bytes say: the header's format
+	// integer when they are a session header, 0 when they are not one.
+	var head struct {
+		Type string `json:"type"`
+		Weft int    `json:"weft"`
+	}
+	envelope := 0
+	if json.Unmarshal(line, &head) == nil && head.Type == "session" {
+		envelope = head.Weft
+	}
+	return b.insertSession(ctx, id, "", string(line), envelope)
+}
+
+// insertLock writes this instance's lock row for a session that has
+// none.
+func (b *backend) insertLock(ctx context.Context, tx *sql.Tx, id string) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO session_locks (session, host, owner, pid, taken, process, started) VALUES (?,?,?,?,?,?,?)`,
+		id, b.host(), b.owner, b.pid, formatTime(time.Now().UTC()), b.proc, b.started)
+	return err
+}
+
+// acquire takes the session's lock row inside the caller's write
+// transaction — one writer per session (ADR 0011 §5). The row names
+// its holder four ways: the Storage (owner), the machine (host), the
+// process (a random token, and the pid with its start time). The
+// rules, in order:
+//
+//   - No row: take it.
+//   - Ours (this instance wrote it): proceed.
+//   - A holder on another host cannot be judged dead from here, so it
+//     is ErrLocked: a database on a shared filesystem is outside
+//     SQLite's supported envelope, and the lock refuses to guess. A
+//     row a host that no longer exists left behind — a replaced
+//     container, a restored backup — is an operator's to remove
+//     (BreakLock).
+//   - The holder's process token is this process's: another Storage in
+//     this very process, exactly as alive as we are — ErrLocked.
+//   - The holder's pid is ours but its process token is not: a pid
+//     names one live process, and that is us, so the holder was an
+//     earlier process that wore this pid — a restarted container's
+//     PID 1. Dead: take over.
+//   - The holder's pid is not a live process: dead, take over.
+//   - The pid is live. If both the row and the OS report a start time
+//     and they differ, the live process is not the one that took the
+//     lock — the pid was reused — and the holder is dead: take over.
+//     Otherwise the holder is alive, or cannot be told from alive:
+//     ErrLocked, the safe side.
+//
+// An instance that already holds the session still reads the row: it
+// must name this instance. A row that is gone, or another writer's,
+// means the lock was broken under it (BreakLock) — the hold is
+// forgotten and the write refused with ErrLocked, so a holder an
+// operator wrongly took for dead finds out at its next write instead
+// of writing beside the session's new writer.
+//
+// What acquire did beyond checking is returned for the caller to
+// record after its transaction commits.
+func (b *backend) acquire(ctx context.Context, tx *sql.Tx, id string) (wrote, error) {
+	b.mu.Lock()
+	held := b.held[id] != nil
+	b.mu.Unlock()
+	if held {
+		var owner string
+		err := tx.QueryRowContext(ctx, `SELECT owner FROM session_locks WHERE session = ?`, id).Scan(&owner)
+		switch {
+		case err == nil && owner == b.owner:
+			return wrote{}, nil // this instance holds the row
+		case err != nil && !errors.Is(err, sql.ErrNoRows):
+			return wrote{}, err
+		}
+		b.mu.Lock()
+		delete(b.held, id)
+		b.mu.Unlock()
+		return wrote{}, fmt.Errorf("%w: %s (this writer's lock was broken; the session may have been written since — open it again)", thread.ErrLocked, id)
+	}
+	var host, owner, proc, started string
+	var pid int
+	err := tx.QueryRowContext(ctx,
+		`SELECT host, owner, pid, process, started FROM session_locks WHERE session = ?`, id).
+		Scan(&host, &owner, &pid, &proc, &started)
+	locked := func() (wrote, error) {
+		return wrote{}, fmt.Errorf("%w: %s (held by pid %d on host %s)", thread.ErrLocked, id, pid, host)
+	}
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return wrote{acquired: true}, b.insertLock(ctx, tx, id)
+	case err != nil:
+		return wrote{}, err
+	case owner == b.owner:
+		return wrote{acquired: true}, nil // ours — state this instance lost and recovered
+	case host != b.host():
+		return locked()
+	case proc != "" && proc == b.proc:
+		return locked()
+	case pid == b.pid:
+		// An earlier incarnation under our pid: dead.
+	case !b.alive(pid):
+		// No such process: dead.
+	default:
+		now := b.startOf(pid)
+		if started == "" || now == "" || now == started {
+			return locked()
+		}
+		// A live process, but not the one that took the lock: dead.
+	}
+	_, err = tx.ExecContext(ctx,
+		`UPDATE session_locks SET host = ?, owner = ?, pid = ?, taken = ?, process = ?, started = ? WHERE session = ?`,
+		b.host(), b.owner, b.pid, formatTime(time.Now().UTC()), b.proc, b.started, id)
+	return wrote{acquired: true, takeover: fmt.Sprintf("pid %d", pid)}, err
+}
+
+// BreakLock removes the writer lock on a session, whoever holds it. It
+// is an operator's action, for the one case the lock cannot decide on
+// its own: a row left by a holder on another host. The lock never
+// judges such a holder dead (acquire's rule), so when that host is
+// gone for good — a container replaced under a new hostname, a
+// database restored from a backup that carried its lock rows — every
+// write to the session fails with thread.ErrLocked until the row is
+// removed. The caller vouches that the holder is gone: nothing here
+// can check it.
+//
+// st is the Storage this package's Open returned. The next writer
+// takes the lock as on an unheld session. A holder that was alive
+// after all is not left writing beside it: its next write finds the
+// row is no longer its own and fails with thread.ErrLocked, and a
+// Session it serves then answers thread.ErrStale if the session was
+// written in between. The removal is logged at Warn on the storage's
+// logger (thread.OpenLogger), naming the holder it removed.
+//
+// A session with no lock row is left as it is and BreakLock returns
+// nil; one the database does not hold fails with thread.ErrNotFound.
+// To clear a whole database after a host change, List the sessions
+// and break each.
+func BreakLock(ctx context.Context, st thread.Storage, session string) error {
+	b, ok := st.(*backend)
+	if !ok {
+		return fmt.Errorf("sqlite: BreakLock needs a Storage opened by this package, got %T", st)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !thread.ValidID(session) {
+		return fmtNotFound(session)
+	}
+	b.leaseMu.Lock()
+	defer b.leaseMu.Unlock()
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer rollback(tx)
-	if err := b.write(ctx, tx, id, lines, tornRow); err != nil {
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)`, session).Scan(&exists); err != nil {
 		return err
 	}
-	return tx.Commit()
-}
-
-// insertLock writes this instance's lock row for a session Create just
-// made: the creator is the session's writer from birth, the same rule
-// jsonl's create-and-flock follows.
-func (b *backend) insertLock(ctx context.Context, tx *sql.Tx, id string) error {
-	_, err := tx.ExecContext(ctx,
-		`INSERT INTO session_locks (session, host, owner, pid, taken) VALUES (?,?,?,?,?)`,
-		id, b.host(), b.owner, b.pid, formatTime(time.Now().UTC()))
-	return err
-}
-
-// acquire takes the session's lock row inside the caller's write
-// transaction — one writer per session (ADR 0011 §5). No row: take it.
-// Ours (this instance wrote it): proceed. Another live holder — another
-// Storage in this process, or a live process on this host — is
-// ErrLocked. A holder on another host cannot be judged dead from here,
-// so it is ErrLocked too: a database on a shared filesystem is outside
-// SQLite's supported envelope, and the lock refuses to guess. A holder
-// whose process has died is taken over — the crash never strands the
-// session. Pid reuse can delay a takeover while an unrelated process
-// wears the dead pid; it can never cause a false takeover, which is
-// the safe side to err on.
-func (b *backend) acquire(ctx context.Context, tx *sql.Tx, id string) error {
-	b.mu.Lock()
-	held := b.held[id]
-	b.mu.Unlock()
-	if held {
-		return nil // this instance already holds the row
+	if !exists {
+		return fmtNotFound(session)
 	}
-	var host, owner string
+	var host, taken string
 	var pid int
-	err := tx.QueryRowContext(ctx,
-		`SELECT host, owner, pid FROM session_locks WHERE session = ?`, id).Scan(&host, &owner, &pid)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return b.insertLock(ctx, tx, id)
-	case err != nil:
-		return err
-	case owner == b.owner:
-		return nil // ours — state this instance lost and recovered
-	case host != b.host() || b.alive(pid):
-		return fmt.Errorf("%w: %s (held by %s, pid %d)", thread.ErrLocked, id, owner, pid)
+	err = tx.QueryRowContext(ctx, `SELECT host, pid, taken FROM session_locks WHERE session = ?`, session).Scan(&host, &pid, &taken)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // nothing holds it
 	}
-	_, err = tx.ExecContext(ctx,
-		`UPDATE session_locks SET host = ?, owner = ?, pid = ?, taken = ? WHERE session = ?`,
-		b.host(), b.owner, b.pid, formatTime(time.Now().UTC()), id)
-	return err
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM session_locks WHERE session = ?`, session); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	delete(b.held, session)
+	b.mu.Unlock()
+	b.log.Warn("thread/sqlite: writer lock broken on request",
+		"session", session, "holder_host", host, "holder_pid", pid, "taken", taken)
+	return nil
 }
 
 // host is this instance's machine name, the prefix of owner — split
@@ -653,9 +1245,13 @@ func formatTime(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000000000Z")
 }
 
-// limitOf normalizes Query.Limit — the shared paging rule (0 means 50,
-// above 500 clamps), duplicated from thread the way both backends
-// duplicate theirs: the conformance table pins every copy to one rule.
+// The Query rules below are this module's copies of the ones thread
+// and jsonl share through thread/internal/rules — an internal package
+// this module, being its own, cannot import. The threadtest
+// conformance table is what holds every copy to one answer.
+
+// limitOf normalizes Query.Limit: zero and negatives mean 50, values
+// above 500 clamp.
 func limitOf(n int) int {
 	switch {
 	case n <= 0:
@@ -667,20 +1263,21 @@ func limitOf(n int) int {
 	}
 }
 
-// metaMatch and titleMatches are Query's filter rules, duplicated
-// from thread the way limitOf is; the conformance table pins every
-// copy to one answer.
-func metaMatch(meta, want map[string]string) bool {
-	for k, v := range want {
-		if meta == nil || meta[k] != v {
-			return false
-		}
-	}
-	return true
-}
-
+// titleMatches reports whether the title contains the search as a
+// substring, folding case.
 func titleMatches(title, search string) bool {
 	return strings.Contains(strings.ToLower(title), strings.ToLower(search))
+}
+
+// afterCursor reports whether a session (created, id) lies strictly
+// after the paging cursor in List order, over the schema's sortable
+// timestamp strings — the Go form of the page query's keyset
+// predicate. An empty before is no cursor.
+func afterCursor(created, id, before, beforeID string) bool {
+	if before == "" {
+		return true
+	}
+	return created < before || (beforeID != "" && created == before && id < beforeID)
 }
 
 // fmtNotFound and cloneMeta mirror the other backends' helpers: the

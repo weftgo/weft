@@ -8,19 +8,23 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft/store"
+	"github.com/weftgo/weft/obsdb/sqlite"
 )
 
 // The example's acceptance shape (plan §7): record the demo runs into
-// an in-memory store, serve the handler over httptest, and both the
+// an in-memory database, serve the handler over httptest, and both the
 // API and the shell answer — a deep link gets the shell with the base
 // rewrite.
 func TestServe(t *testing.T) {
-	s := store.Memory()
-	if err := record(context.Background(), s); err != nil {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(handler(s))
+	t.Cleanup(func() { _ = db.Close() })
+	if err := record(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(handler(db))
 	t.Cleanup(srv.Close)
 
 	resp, err := http.Get(srv.URL + "/studio/api/runs")

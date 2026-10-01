@@ -1,3 +1,1267 @@
+# Changelog
+
+Notable changes to weft, newest first. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.0.0/); the project
+is pre-1.0 and tags per module (ADR 0005).
+
+## thread 0.9.0 / thread/sqlite 0.3.0 — 2026-10-02 (the 2026-10-01 review fix train)
+
+The fixes for the 2026-10-01 production-readiness review
+(`WEFT-THREAD-REVIEW-2026-10-01.md`: twelve P1s, some forty-five P2s),
+built as seven lanes — session core, compaction, backends, approvals,
+the writer lease, the pool, the turn machinery — and a closing pass. It
+is a **breaking minor for `thread` and for `thread/sqlite`** (a schema
+migration, and it needs the new `thread`); `runtime` carries one fix
+and ships as 0.1.1 in the entry below. Pre-1.0: breaking changes ship without
+deprecation shims, and the migration checklist below names every one.
+
+**Not a freeze.** The plan's "v0.8 freeze" — the format as a
+compatibility promise, `thread.Migrate`, an emptied `.apidiff-allow` —
+is deferred by maintainer decision until the API has proven stable in
+real use. The API and the stored format may still change. What holds
+today is the reader's rule: an unknown entry kind, a newer entry
+version or a newer header envelope fails with `ErrNewerFormat`, never
+a skip, and goldens pin each format version the build reads. ADR 0011
+gained the amendment that records the train's decisions and a format
+reference for the format as it is; `docs/thread-operations.md` is new.
+
+### Security
+
+- **A signed decision is bound to the occurrence it was minted for.**
+  The challenge covered the call id, and call ids repeat across turns:
+  a signature minted for one turn's `call_1` approved the next turn's.
+  The request entry's id and the run id are now signed and checked
+  against the pending request (`SignedDecision.RequestID`, `RunID`;
+  `Request.ID`); a signature for another occurrence is
+  `ErrNotPending`. The challenge domain moved to
+  `weft/approval-challenge/v2`, so no v1 signature verifies.
+- **An empty nonce is a bad signature**, and a nonce must be one the
+  session's ring minted for that request. A blank nonce used to skip
+  the replay scan, so the same bytes verified twice.
+- **The session enforces the request's own expiry**, on every path
+  that records a decision or arms a resume — `Decide`, `DecideSigned`,
+  `Resume`, `Send`, the runner's pickup — not the expiry the signer
+  stated, and not only in `Resume`. `Decide(Approve)` on a lapsed
+  request used to run the tool.
+- **`RequireSigned` is the session's, durably.** It was a process
+  flag, lost on reopen and on `Fork`. `Create` now writes it into the
+  header (`weft.require_signed`), every `Open` enforces it, a fork
+  inherits it, pool children inherit it, and it no longer wedges the
+  session's own machinery: an interrupting `Send`'s denial, an expiry
+  denial and a pool delegation's resolution all record under it.
+- **A decision is spent by the resume that applied it.** A `Branch`
+  back to a decided boundary used to run the approved call again on
+  the old approval; the calls are now pending again and need new
+  decisions.
+- **Quorum counts keys, not names**, for signed approvals: one key
+  that signs as two `Who`s is one approver.
+- **An unknown key id is indistinguishable from a bad MAC**
+  (`ErrBadSignature` for both): `DecideSigned` no longer tells a
+  caller which key ids exist.
+- Refused signed decisions are audited (`StepSigned`), bounded: at
+  most 16 per request, and nothing for a signature that fails its MAC
+  and names no pending call.
+- Grant predicates read arguments exactly: RFC 6901 array indexes are
+  strict (`/01` is not `/1`), `?` in a glob is one code point, integers
+  compare digit for digit, and a grant's `MaxUses` holds within one
+  turn.
+
+### Fixed
+
+Session core
+- `Open` validates the entry tree: an empty, invalid or duplicate
+  entry id, a parent that is not an earlier entry, or a leaf entry
+  navigating to an entry the file does not hold fails with a
+  `*CorruptError` (`ErrCorrupt`) naming the line and the entry. A
+  dangling parent used to cut the model's context short, silently.
+- `Entries`, `Path` and `Audit` return deep copies of every entry
+  kind; mutating a snapshot used to corrupt the in-memory tree.
+- A public id can no longer be rotated: `SetInfo` rejects `weft.`
+  keys, and `Session.Meta` never lets an info entry override one.
+- `Fork` builds its session as `Open` does (compaction resolved,
+  measurements recovered), honours the header options, rejects a leaf
+  entry as its target, and removes a fork it could not write.
+- `Open` never starts a run. Steers a crashed writer left queued used
+  to be re-run in the background from inside `Open`.
+- `examples/session` runs twice in a row.
+
+Turns
+- **A mixed tool batch — one call runs, one parks — resumes.** The
+  resume's completed tool message was appended as a second tool
+  message, the parked call read dangling for ever, and the session
+  either looped on resume or queued every later `Send` silently. The
+  completed message now replaces the partial one on the active path
+  (ADR 0011 §7, amended).
+- **Step writes are exactly-once.** One failed per-step append used to
+  drop a message and duplicate another. A failed batch is held and
+  written in order by the next step or the turn's end;
+  `TurnEntry.LateSteps` counts them, and a turn whose end cannot be
+  written says so (`ErrNotPersisted`).
+- Run ids are unique across a reopen: the counter is recovered from
+  the highest id any entry records (prompt entries now carry theirs),
+  not from the number of turn entries.
+- A prompt whose flush fails no longer leaves a second copy of the
+  user message when the `Send` is retried.
+- An interrupting `Send` whose denial cannot be recorded fails and
+  leaves nothing queued; `Wait` used to hang.
+- `Rollback` of a session's first turn returns to the root.
+- A `Branch` or a `Reject` send can no longer slip in while the runner
+  picks up a settled boundary.
+- A panic in the session's turn machinery, or in the caller's `IDs` or
+  `Clock` function, ends the turn with `ErrTurnPanicked` instead of
+  wedging the session.
+- A call left dangling by a crash mid-step is not read as an approval
+  boundary.
+- `TurnEntry.Canceled` is set for a deadline as well as a
+  cancellation; an overflow attempt's usage is kept (its own turn
+  entry).
+- A mirrored child request stays decided wherever the leaf moves.
+
+Compaction (ADR 0020, amendment 2026-10-01)
+- **`AfterCompact` no longer deadlocks** a hook that touches the
+  session: every compaction hook and swap-in runs without the
+  session's lock and may call the session.
+- **A trim no longer cuts the iterative summary chain**: the previous
+  summary is the latest *summary* compaction's, so the first summary
+  stays in the model's context.
+- **Trims replay from the entry.** A trim records each stubbed tool
+  result; the context applies exactly those stubs under any options,
+  in any process. A custom `Trimmer` now changes the model's context
+  (it never did), and a trim the record cannot represent fails loudly
+  (`ErrInvalidCompaction`) and the summary runs instead.
+- A summary cut off at `max_tokens` is never stored
+  (`ErrSummaryTruncated`: one retry, then the fallback).
+- `BeforeCompact`'s edits to `Messages`, `Instructions`, `Pinned` and
+  `FirstKept` are honoured — a redaction hook works.
+- `TokensBefore` and `Preparation.Context` count the compacted view;
+  `SummarizeLeft` summarizes the branch's compacted view, not the raw
+  range beside its own summary.
+- The trigger stands down after a compaction until the next provider
+  report; the rate limits count along the leaf's path; a second
+  compaction at the same boundary is refused.
+- `AfterCompact` fires for trims; `CompactFailed` fires for failed
+  writes and not for dry runs.
+
+Backends
+- **A torn final line no longer poisons the session.** The next writer
+  removes it before appending — jsonl truncates and fsyncs under its
+  lock, sqlite deletes the torn row, Memory clips — and logs it. It
+  used to glue the next entry onto the half-line; from the third
+  process on the session was `ErrCorrupt`.
+- **sqlite `Watch` no longer deadlocks** a consumer that calls the
+  same `Storage` inside the loop.
+- **sqlite's lock no longer treats a pid as an identity.** A restarted
+  container (PID 1 again) was locked out of its own sessions for
+  ever. Lock rows carry a process token and the process start time.
+- **jsonl `Watch` no longer panics** on a file with no complete line;
+  a malformed line ends it with `ErrCorrupt`; it reads only new bytes
+  per poll instead of the whole file.
+- Both `Watch`es end with `ErrNotFound` when the session is deleted
+  and created again under them (they stalled for ever).
+- `Query.Before` no longer skips sessions that share a creation time:
+  `Query.BeforeID` completes the keyset cursor.
+- sqlite `List` pages in SQL (keyset, `LIMIT`, `COUNT` over a new
+  index); it was a fleet scan per page.
+- jsonl `List` no longer allocates 1 MiB per session file per call;
+  jsonl `Create` no longer holds the instance mutex across fsyncs.
+- jsonl no longer keeps a file descriptor and a lock per session for
+  the life of the process: `Session.Close` gives both up, and
+  `Releaser.Release` does it for a `Storage` used directly.
+- The listed title is the last non-empty info title on every backend;
+  `ErrLocked` names the session id, not a path; sqlite `:memory:`
+  survives a replaced connection; a path containing `?`, `#` or `%`
+  opens the file named; sqlite migrations return errors instead of
+  panicking at init; Windows liveness reads access-denied as alive.
+
+Approvals
+- Under `Quorum(n ≥ 2)` a call the chain approved once parks with a
+  request entry and fires `OnRequest` (it parked with neither, and
+  could never expire).
+- `ApproveAlways` mints its grant only when the call's effective
+  verdict is approve — never beside a denial — and works on a call
+  with no arguments.
+
+Pool (ADR 0022, amendment 2026-10-01)
+- **Fan-out × depth no longer deadlocks.** A run whose sync delegation
+  is running a child hands its slot back and re-acquires it through
+  the queue: slots bound work, not waiting.
+- **A child that parks twice resumes.** Only the calls pending in the
+  child now are replayed; the decisions of an earlier park are not.
+- **The delegating call cannot be decided into a second child**:
+  `Decide`, `DecideSigned` and `Request` refuse it with
+  `ErrDelegated`.
+- A `RequireSigned` parent receives its child's answer; a resumed
+  child takes a slot and its receipt records `running` again; a park
+  the parent cannot record fails the delegation instead of leaving it
+  parked for nobody; nested requests carry a real expiry.
+- Receipts always end: settlement is idempotent (`Delegated` counts a
+  child once) and bills the child's whole ledger, not its last run.
+- `Close` covers wrapped calls made outside any session; the pool
+  closes each child's session when its delegation settles.
+
+`runtime`
+- The playground's fork mode closes the forked `Session` when its turn
+  lands. It only dropped the reference, and under the writer lease the
+  next fork command's reopened `Session` could not write ("keep
+  chatting" failed with `ErrLocked`).
+
+The closing pass
+- The parent's decision chain never decides a delegating call: a grant
+  or a live `Approver` matching a pool wrap's tool approved the wrapper
+  when it parked, and the resume re-ran the delegation in a second
+  child session. Such a call now always parks and only
+  `ResolveDelegation` resolves it.
+- A decision the parent records on its own reaches the child: an
+  interrupting Send's denial, an expiry or a direct `Session.Decide`
+  on a mirrored request used to leave the child parked until the next
+  `Pool.Decide`. The pool now pumps when one lands.
+- A session deleted and created again under its id is stale to the old
+  `Session` (`ErrStale`): `Leaser.Acquire` also reports the stored
+  header's `Created`.
+- jsonl: a failed or short append leaves no prefix of its batch; the
+  bytes are cut off again under the session's lock.
+- A fork settles a copied queued send as dropped in its own entries.
+  `Continue` runs restored queued sends under its own context.
+- A `CustomMessage` appended while a turn runs is refused with
+  `ErrBusy`: it landed between the run's step entries and `Context`
+  read a transcript no run produced.
+- `examples/studio-local` keeps one `Session` for the demo's life; it
+  reopened per request and the writer lease refused the second.
+- Internal path reads no longer deep-copy the transcript (on a
+  1000-turn session a turn costs 1.31 ms, `Pending` 0.11 ms and one
+  allocation). `Context`, `Path` and `Entries` still return copies.
+
+### Added
+
+- **`sqlite.BreakLock(ctx, st, session)`** — the operator's way out of
+  a lock row another host left (a container replaced under a new
+  hostname, a restored backup). A holder that was alive after all
+  fails its next write with `ErrLocked`.
+- **Crash matrix**: eight more points — the expiry sweep, the automatic
+  trim record, a queued send's accepted receipt, the resume join, a
+  fork's settling entries, and the pool's parked, canceled and capped
+  receipts. `threadtest.RunTurns` runs on jsonl and sqlite too.
+- **CI**: an apidiff gate for `thread/sqlite` (`make apidiff-sqlite`),
+  a nightly soak (`make soak-thread`: thread `-race -count=10`,
+  thread/sqlite `-race -count=3`); the gate's self-test no longer
+  exercises the deleted store module.
+
+- **`Session.Close(ctx)`** — stop new work, drain, seal (`ErrClosed`),
+  release the storage's hold.
+- **The per-Session writer lease**: optional capability `thread.Leaser`
+  (`Acquire`, `Yield`), implemented by Memory, jsonl and sqlite, and
+  `ErrStale` for a Session whose view fell behind.
+- `thread.Releaser` (end a backend's hold on a session),
+  `thread.NoLock()`, `thread.OpenLogger(l)`; `thread.Memory` takes the
+  open options. jsonl has a real writer lock on Windows (`LockFileEx`);
+  a platform with no file lock fails `jsonl.Open` unless `NoLock`.
+- Package **`thread/backend`** — `Config` and `Resolve`, for backend
+  authors.
+- `Session.LoadReport()` (`*OpenReport`: torn, skipped, orphaned);
+  `CorruptError.Entry`, and `CorruptError` unwraps to its cause too.
+- `Session.Continue(ctx)` — run what `Open` restored, now.
+- **Queued sends are durable at acceptance** (an `accepted` receipt);
+  `Open` restores them, `Session.Queue` lists them
+  (`QueuedSteer.Policy`), `ClearQueue` drops them.
+- `Turn.Done()`, `Turn.WaitContext(ctx)`, `Turn.Outcome()`
+  (`TurnOutcome`: running, answered, parked, delivered, deferred,
+  dropped, failed, canceled), `Session.WaitIdle(ctx)`.
+- `ErrNotRun`, `ErrDropped`, `ErrTurnPanicked`, `ErrNotPersisted`,
+  `ErrClosed`, `ErrCreateOnly`, `ErrReservedKey`.
+- `Policy.String()`; `TurnEntry.Policy`, `ReRun`, `LateSteps`;
+  `MessageEntry.RunID`; `ReceiptEntry.Unanswered`; `ReceiptAccepted`.
+- `thread.Clock(func() time.Time)`.
+- `Query.BeforeID`.
+- Compaction: `TrimRecord`, `TrimStub`, `Compaction.Trim`,
+  `CompactionEntry.Trim`; the sentinels `ErrNothingToCompact`,
+  `ErrCompactCanceled`, `ErrNoEntry`, `ErrSummaryTruncated`,
+  `ErrInvalidCompaction`, `ErrCompactConfig`, `ErrNotPinnable`,
+  `ErrAwaitingApproval`.
+- Approvals: `Keyring.Sign`, `Key.Sign`, `Request.ID`,
+  `SignedDecision.RequestID`/`RunID`, `ErrInvalidDecision`,
+  `ErrDelegated`, `StepSigned`; `ApprovalDecisionEntry.RequestID`,
+  `Always`; `ApprovalAuditEntry.GrantID`, `GrantShared`, `KeyID`,
+  `Decisions`.
+- Pool: `MustWrap`, `Wait`, `Recover`, `DecideSigned`, `MaxDepth`
+  (default 8), `Children`, `Descendants`, `State` with `Settled()`,
+  `Receipt.Call`, `StateError`, `ErrUnknownReceipt`, `ErrNoAgent`,
+  `ErrDepth`, `ErrCycle`, `ErrDuplicateWrap`, `CodeSubagentDepth`,
+  `CodeSubagentCanceled`; in `thread`, `PoolParked`,
+  `InheritApprovals`, `MirroredRequest` and the pool's plumbing on
+  `Session` (`ReplayDecisions`, `CancelDelegated`, `MirroredRequests`,
+  `DenyMirrored`, `ResolveDelegation`).
+- `threadtest`: `RunTwoWriters`, `RunLeaser`, `RunOneWriter`,
+  `RunTurns`, `RawHeaderInjector`; `Run` now runs the `Watch` table for
+  a `Watcher`, and gained rows a careless backend cannot pass (invalid
+  ids on every method, paging through ties, limit normalisation,
+  concurrent appends to one session, a load under a concurrent delete,
+  an append after a torn tail, a loud header, `Flusher`, `Releaser`).
+- Godoc examples across the surface (sessions, turns, steering,
+  compaction, approvals and signing, the pool, the backends).
+
+### Changed (breaking) — the migration checklist
+
+Renamed, removed, re-signed (the compiler finds these):
+
+| Was | Write now |
+|---|---|
+| `thread.Instructions("…")` (a `CompactOption`) | `thread.SummaryInstructions("…")` |
+| `thread.Disabled()` | `thread.NoAutoCompact()` |
+| `thread.Proceed`, `thread.Cancel` (variables) | `thread.Proceed()`, `thread.Cancel()` |
+| `thread.WithApprover(a)` + `thread.ApproverTimeout(d)` | `thread.WithApprover(a, d)` — `d` must be positive |
+| `thread.SignDecision(secret, r, d)` with a hand-kept key map | `ring.Sign(r, d)` or `key.Sign(r, d)` (both return an error); `SignDecision` stays for a bare secret |
+| `thread.OpenConfig`, `thread.ResolveOpen` | `backend.Config`, `backend.Resolve` (package `thread/backend`) |
+| `Estimator.Estimate(...) int` | returns `int64` |
+| `thread.SummaryMaxTokens(int)`, `SummaryInput.MaxTokens int` | `int64` |
+| `Trimmer.Trim(ctx, msgs) ([]weft.Message, TrimReport)` | returns `([]weft.Message, error)`; `TrimReport` is gone — the entry's `TrimRecord` is the report |
+| `Preparation.SplitPrefix`, `Summary.Reason`, `SummaryInput.SummaryModel`, `Compaction.FilesModified` | removed; nothing set or read them (`files_modified` stays readable on the wire) |
+| `thread.ErrNotImplemented` | removed; nothing returned it |
+| `(*CorruptError).Unwrap() error` | `Unwrap() []error` — `errors.Is`/`As` reach the class and the cause |
+| `thread.Memory()` as a `func() Storage` value | it is `func(...OpenOption) Storage`; calls are unchanged |
+| `p.Wrap(name, desc, agent, opts...)` returning a tool | `p.MustWrap(...)`, or `tool, err := p.Wrap(...)`; one name wraps one agent (`ErrDuplicateWrap`) |
+| `p.Register(id, agent)` | returns an `error` |
+| `p.Decide(ctx, parent, ds...) (*thread.Turn, error)`, blocking | `err := p.Decide(ctx, parent, ds...)` records and arms; then `p.Wait(ctx, parent, receiptID)`, or the parked turn's `Next()` |
+| `p.Cancel(receiptID)` | `p.Cancel(ctx, parent, receiptID)` |
+| `p.Forward(ctx, receiptID, msg)` | `p.Forward(ctx, parent, receiptID, msg)` |
+| `pool.Receipt.State` as a `string` | `pool.State` (same wire strings; `r.State.Settled()`) |
+| `errors.Is(err, pool.ErrNotRunning)` for a wrong id | `pool.ErrUnknownReceipt`; `ErrNotRunning` is now only "the receipt exists and is in another state" (`*pool.StateError` says which) |
+
+Behaviour (the compiler does not find these):
+
+- **Close before reopening.** One `Session` writes a session: it holds
+  the writer lease from its first write (`Create` is one) until
+  `Close`. Code that opened a session a second time without closing
+  the first `Session` now gets `ErrLocked` from the second one's first
+  write. Call `s.Close(ctx)`; in a test that stands in a fresh process,
+  `st.(thread.Releaser).Release(ctx, id)`.
+- **Never append behind a `Session`.** A `Session` whose stored session
+  gained entries it did not write fails its next write with
+  `ErrStale`. Open the session again.
+- **`Open` runs nothing and refuses header options.** `WithMeta`,
+  `PublicID` and `WithLineage` passed to `Open` fail with
+  `ErrCreateOnly` (they were ignored). Steers a crashed writer left
+  are restored to `s.Queue()` and wait: send, or `s.Continue(ctx)`.
+- **`Open` can now refuse a file it used to open**: a malformed tree
+  is `ErrCorrupt`. Open the backend with `thread.Salvage()` to read
+  around damage; `s.LoadReport()` says what was skipped and orphaned.
+- **`SetInfo` rejects `weft.` keys** (`ErrReservedKey`); set them at
+  `Create`. A `SetInfo` with nothing to record writes no entry.
+- **A dropped turn returns `ErrDropped`.** `turn.Wait()` on a message
+  `ClearQueue` removed returned `nil, nil`; it now returns an error
+  wrapping `ErrDropped`. Use `turn.Outcome()` to tell a delivered
+  steer from a deferred one (both still `nil, nil`).
+- **`Wait` returns before the between-turn compaction.** A turn is
+  decided when its entries land. Code that read the session right
+  after `Wait` and relied on the automatic compaction having run
+  calls `s.WaitIdle(ctx)`.
+- **`s.Audit()` returns approval entries only** — requests, chain
+  steps, decisions, grants, revocations. Turn entries are no longer in
+  it; read them from `s.Entries()`. A resume is two `StepResume`
+  entries: `started`, then `completed` or `failed`.
+- **`thread.RunOptions` rejects `weft.Approve`, `Deny`, `Resolve`,
+  `ResolveError`** (and still `Messages`, `Prompt`, `RunID`,
+  `Steering`), with an error wrapping `weft.ErrInvalidRunOption`.
+  Record decisions with `s.Decide`.
+- **`Query.Meta` needs the key present.** A filter `{"k": ""}` no
+  longer matches sessions that lack `k`.
+- **`Decide`** rejects two decisions for one call, an empty batch and
+  a decision with no outcome (`ErrInvalidDecision`), a decision for an
+  expired request (`ErrExpired`) and one for a delegating call
+  (`ErrDelegated`); it always records `Via: "user"`.
+- **`ErrExpired` reads `thread: approval request expired`** (match
+  with `errors.Is`, not the text); `Session.Request` returns it for a
+  lapsed request.
+- **`DecideSigned`** returns `ErrBadSignature` for an unknown key id
+  (was `ErrUnknownKey`, which only `Keyring.Sign` returns now) and
+  `ErrNotPending` for a signature minted for an earlier occurrence.
+  Signatures minted before this version do not verify: request a new
+  challenge.
+- **`NewKeyring` needs at least one key**; `RequireSigned` without a
+  keyring that has an active key fails `Create` and `Open`;
+  `SignDecision` signs an empty `Who` as the key's id.
+- **Compaction is between turns**: `Compact`, `ApplyCompaction` and
+  `Uncompact` return `ErrBusy` while a turn runs, and
+  `ErrAwaitingApproval` while requests are pending. `Create` and `Open`
+  validate the knobs (`ErrCompactConfig`: `Reserve` below the window,
+  `KeepRecent` below window − `Reserve`). `Pin` refuses an entry that
+  carries no message (`ErrNotPinnable`).
+- **A custom `Trimmer` may only replace tool-result content**; any
+  other change fails the trim and the summary runs.
+- **An overflow that is re-run leaves two turn entries** (the failed
+  attempt's, then the re-run's); code counting turn entries per `Send`
+  reads `TurnEntry.ReRun`.
+- **A non-user steer** is refused by `Send` with an error wrapping
+  `weft.ErrInvalidSteer`.
+- **Pool**: the bound is per `Pool` value; a delegation deeper than
+  `MaxDepth` is refused (`SUBAGENT_DEPTH`), a real cycle with
+  `SUBAGENT_CYCLE`; `Decide` no longer waits for the child; a resumed
+  child queues for a slot; children inherit the parent's
+  `RequestExpiry`, `Clock`, `Quorum`, keyring and `RequireSigned`;
+  after a restart call `p.Recover(ctx, parent)`.
+- **`Fork`** takes its own options (`WithMeta`, `PublicID` and
+  `WithLineage` were dropped) and inherits nothing from the origin's
+  header or options, with one exception: a fork of a `RequireSigned` session
+  requires signed decisions too and takes the origin's keyring when
+  given none. Copied queued steers are recorded as dropped, mirrored
+  child requests are left out, unsettled pool receipts are settled
+  canceled.
+- **`jsonl.Open` fails on a platform with no file lock** unless
+  `thread.NoLock()` is passed (it used to run unlocked, silently).
+- **`thread/sqlite`**: migration 0003 runs on `Open` and is one-way —
+  a binary from before it refuses the database
+  (`sqlite.ErrNewerSchema`). The module needs the `thread` release
+  that carries `thread/backend`.
+- **`thread/sqlite` durability**: the fsync policy is now SQLite's
+  `synchronous` level. `FsyncEveryAppend` (the default) is
+  `synchronous=FULL` — an entry survives a power cut; the backend used
+  to run `NORMAL` whatever was asked. `FsyncOnFlush` is `NORMAL` and
+  `Flush` checkpoints the log. Expect slower appends on the default.
+
+### Wire
+
+Everything is additive except the trim record; no entry kind was
+added and the header envelope is still `"weft": 1`.
+
+- **`compaction` entries carrying a trim record are written with
+  `"v": 5`** (`trim: {stubs: [{entry, call_id, content, is_error}]}`;
+  golden `testdata/format5/compaction_trim.json`). An older build
+  fails on such an entry with `ErrNewerFormat` — on purpose: it would
+  replay the trim from its own options. A summary compaction is
+  unchanged and carries no `"v"`. A trim entry written before this
+  version (no record) is read as it was.
+- `message`: `run_id` on a turn's prompt entry.
+- `turn`: `policy`, `rerun`, `late_steps`; `canceled` now also set on
+  a deadline.
+- `receipt` (`"v": 3`): the status `accepted` with `msg`, `turn` and
+  `run_id` — a queued send; `unanswered` on a delivered receipt. A
+  build from before `accepted` reads the entry and does not restore
+  the send.
+- `pool_receipt` (`"v": 4`): the status `parked`
+  (`testdata/format4/receipt_parked.json`).
+- `approval_decision` (`"v": 2`): `request_id`, `always`; new `via`
+  values `interrupt`, `child`, `parent`.
+- `approval_audit` (`"v": 2`): `grant_id`, `grant_shared`, `key_id`,
+  `decisions`; the step `signed`; the `resume` step's outcomes
+  `started`, `completed`, `failed`.
+- Header metadata key `weft.require_signed` (`"true"`). A build from
+  before it ignores the key and does not enforce the rule.
+- The signing challenge's domain string is
+  `weft/approval-challenge/v2`, covering the request entry id and the
+  run id. Not stored; in-flight v1 signatures do not verify.
+- `thread/sqlite` migration `0003_leases_keyset`: `session_locks`
+  gains `process` and `started`; `sessions` gains `gen` and `envelope`;
+  the index `sessions_order(envelope, created DESC, id DESC)` replaces
+  `sessions_created`; the title column is re-derived under the
+  last-non-empty rule.
+- Grant uses are counted from `approval_audit.grant_id`. A file whose
+  uses were recorded only as prose (`detail`) is not counted: a
+  `MaxUses` grant in such a file starts again.
+
+### Model-visible changes (AGENTS rule 5)
+
+Pool — every string is pinned by a test (ADR 0022 amendment §I):
+- `SUBAGENT_DEPTH: delegation depth <n> exceeds the pool's limit <m>`
+  — new; the depth refusal used to read `SUBAGENT_CYCLE`.
+- `SUBAGENT_CYCLE: …` only for a real cycle.
+- `SUBAGENT_CANCELED: agent "<name>" was canceled before it finished`
+  — new, when `Cancel` or `Close` ends a sync child.
+- `SUBAGENT_FAILED: agent "<name>" parked at an approval the pool could
+  not surface: <cause>` and `SUBAGENT_FAILED: agent "<name>" failed:
+  <cause>` (a failure outside a child run, or recovered from the
+  ledger) — new.
+- `DENIED: the delegation was canceled while awaiting approval` — what
+  a canceled, parked child's model reads if its session is resumed.
+- A delegating call is no longer re-executed by a decision; its result
+  is the child's answer, once.
+
+Turns
+- After a mixed tool batch resumes, the model sees one complete tool
+  message for the step. It used to see the partial one, with the
+  parked call unanswered.
+- A step whose write failed is no longer shown to the next turn as an
+  interrupted call beside a duplicated message.
+- A retried `Send` after a failed prompt flush shows the user message
+  once.
+
+Approvals
+- No text changed. One case moved: a request that expired, or was
+  interrupted, after it already held an approval is denied with the
+  expiry or interrupt reason, not "conflicting decisions".
+
+Compaction
+- A recorded trim shows the same stubs under any options; a custom
+  `Trimmer`'s stubs now reach the model; the first summary survives a
+  trim; a truncated summary is never shown; `BeforeCompact`'s edits
+  shape the summarizer's input; a branch summary made with
+  `SummarizeLeft` is built from the compacted view. The marker, the
+  stub text and the summary prompt are unchanged.
+
+Session core
+- A context is never built across a broken parent link (the file is
+  refused); a salvaged session's context starts at the orphaned entry.
+
+### Known limits
+
+- **Windows is unexecuted.** jsonl's `LockFileEx` lock and sqlite's
+  Windows liveness and start-time checks compile and pass
+  `GOOS=windows go vet` (run by hand; CI has no Windows job). No test
+  has ever run them.
+- **Stale-writer detection is a count and the header's creation
+  time**, not a content comparison of the entries.
+- **sqlite's lock does not cross hostnames on its own.** A lock row
+  left by a holder with another hostname is never taken over; a
+  replacement container with a new hostname calls `sqlite.BreakLock`
+  (`docs/thread-operations.md` §4).
+- **`Recover`** never re-runs a child; reads a finished child's answer
+  as its last assistant text (a structured `Output` answer is not
+  recovered as such); cannot rebuild the agent ancestry above a
+  rebuilt child (the depth limit still holds); and assumes one pool
+  owns a storage's delegations.
+- **`Audit()` is an index, not evidence**: entries are unsigned and
+  unchained; whoever can write the storage can change them.
+- **`s.Grant` is an unsigned, in-process call** under `RequireSigned`
+  too.
+- **The steer queue is unbounded**; an application that must cap what
+  users pile onto a running turn checks `len(s.Queue())`.
+- **jsonl `List` reads every header per call**; sqlite pages in SQL.
+- **Session plumbing for the pool is still exported** on `Session`
+  (`thread/poolplumbing.go`), and the option names still mix three
+  dialects (`With*`, bare, `Require*`/`On*`); both wait for the
+  freeze.
+
+## obsdb 0.1.1 / obsdb/clickhouse 0.1.1 / otel 0.1.1 / studio 0.3.1 / studio/cmd 0.1.1 / runtime 0.1.1 — 2026-10-02
+
+Patch releases for the fixes found after the 0.7.0 programme, tagged in
+dependency order behind `thread/v0.9.0`: obsdb, then obsdb/clickhouse
+and otel, then studio, then studio/cmd and runtime (which requires
+thread v0.9.0). The root module is unchanged at v0.7.0.
+
+### obsdb
+
+- `DeriveSpan`/`DeriveRecord` read a numeric string attribute as the
+  number it spells: thread mints `weft.turn` through metadata
+  (`strconv.Itoa`) and the core stamps every metadata value as
+  `attribute.String`, so the real chain delivered `"3"` — a spelling
+  `attrIntOr` rejected, and every studio/obsdb run row read turn 0
+  (sqlite never set the column; the recorded "thread off-by-one"
+  diagnosis is refuted, the mint was always correct). Numeric
+  spellings still read as before; a non-numeric string stays the
+  default. ClickHouse already parsed the string via `toInt32OrZero`
+  in its views — now pinned by a live test too. The pushed
+  `obsdb/v0.1.0` and `obsdb/clickhouse/v0.1.0` tags carry the
+  Go-side read bug (fixed by this patch tag).
+- `Session(id)` (sqlite and clickhouse) reads the session's own
+  grouped row directly instead of scanning the newest 500 sessions —
+  a session older than the newest page 404'd in the detail while the
+  list still showed it. Pinned on both backends
+  (`TestSessionBeyondNewestPage`: 502 sessions, the oldest resolves).
+
+### studio
+
+- The step 8b routes no longer escape S4.6's panel-token scoping rule
+  (programme audit P1-2): the fixtures export (`POST
+  /api/playground/fixtures`) scopes by public id like every run-id
+  route; the runtime link (`/api/runtime/register|commands|acks`,
+  mounted behind a new server-identity guard via
+  `RuntimeServer.MountGuarded`) and the breakpoints control refuse
+  panel tokens outright — they are server-to-server and not
+  public-id-shaped (register could overwrite a victim runtime's
+  registration, the commands stream could replace its feed, acks
+  could forge the state steer/approval routing trusts); steer now
+  mirrors the approval route's fallback (the db row's public id; a
+  run with no public id is outside every panel token). Pinned by
+  `TestStep8RoutesRefusePanelTokens` (read-scoped token → 403 on each
+  surface; the server token keeps working). The pushed `studio/v0.3.0`
+  tag carries the gap (fixed by this patch tag).
+- The web app's run page sends the bearer token on its paged events
+  walk (the one raw fetch without it — under setups B/C every page
+  401'd and the run page showed the error instead of the story);
+  pinned by `use-run-events.test.tsx` (P1-3).
+- The panel follows `next_after` past a terminal full page in all
+  three event walks (`done` only means the run ended — a finished
+  run with more than one page of events silently lost the rest);
+  pinned by a panel test with `done:true` + `next_after` set (P1-5).
+- The panel's experiment drawer omits an unchanged instructions
+  override (the drawer pre-fills the registered prompt, and the
+  scripted engine 400s on an instructions override — agents that
+  register instructions could never run scripted); pinned in
+  `playground.test.ts` (P1-8).
+- CORS `Access-Control-Allow-Methods` includes `PUT` — the breakpoints
+  control goes through the panel's `panelPut`, and the preflight
+  failed it in cross-origin setups B/C; the CORS pin asserts the verb
+  (P1-9).
+- The runtime link's full-feed drop terminates the stalled stream
+  (the feed channel closes; the SSE ends instead of pinging forever
+  while every POST 503s on the nil feed) — `TestFullFeedEndsStalledStream`;
+  and a late accepted-ack that resurrects a row the lost sweep took
+  arms the finish watch, so a runtime that never finishes cannot leave
+  it accepted forever — `TestLateAcceptedAckArmsFinishWatch`.
+
+### otel
+
+- `weftVersion()` reports v0.7.0 — the release step that owns the bump
+  missed it (its own comment says so), so every span carried
+  `weft.version=v0.6.0` past the release. The pushed `otel/v0.1.0` tag
+  carries the stale string (fixed by this patch tag).
+- The drop counter's logger is fixed at construction
+  (`newDropCounter`): `dropped()`'s lazy `d.log` assignment wrote a
+  plain field outside the atomics, a data race under concurrent agent
+  runs (the existing WARN-throttle test covers the behaviour; tests
+  now build the counter through the constructor).
+- Content-on chains shape every content class the core's own
+  `StripContent` table names: `Steered` message texts are redacted
+  like other user text, `RunFinish.Pending[].Args` follows the
+  adjudicated `ToolStart.Args` rule (redact-not-cap), and `Nested`
+  recurses into the child event (its cut propagates to
+  `weft.content.truncated_bytes`). With `ContentConfig.Redact`
+  configured, steered user text and pending-approval tool args no
+  longer ride unredacted to Studio/Local. Pinned by
+  `TestShapeEventRedactsSteeredPendingNested`.
+
+### runtime
+
+- Registration reports `weft_version: v0.7.0` — the same missed bump
+  as otel's. The pushed `runtime/v0.1.0` tag carries the stale string (fixed by this patch tag).
+
+### CI / repo
+
+- ci.yml: the `apidiff.sh "" store` step is gone (the store module was
+  deleted; the script exits 2 for any module but root and thread, so
+  the first CI run after push would have failed), and the gated
+  ClickHouse job from `obsdb/clickhouse/README.md` runs the
+  conformance suite (plus studio/cmd's hosted-backend test) against a
+  `clickhouse-server` service container.
+- `studio/web/dist-release/` — where `make studio-panel-asset` stages
+  the release asset — is gitignored, so a staged release no longer
+  shows as an untracked stray.
+
+### studio/cmd
+
+- The dev token the banner prints is the token the API wall checks:
+  `serve` resolves the token once (new `serveBoot`) and hands the one
+  value to both the wall and the banner. With no `--token` and no
+  `WEFT_STUDIO_TOKEN` the old code drew two independent generated
+  tokens, so the printed token 401'd against every `/api` call —
+  setup B's documented "token printed at start" hand-off was broken.
+  The pushed `studio/cmd/v0.1.0` tag carries the bug (fixed by this patch tag).
+- SIGINT/SIGTERM shut the server down gracefully (the listener closes,
+  in-flight requests get five seconds, streams that outlive the window
+  force-close, then the studio's resources close) — a bare
+  `ListenAndServe` cut SSE streams mid-frame and skipped `srv.Close`;
+  and the banner no longer echoes a DSN's password
+  (`clickhouse://user:***@host`). Pinned by
+  `TestListenShutsDownGracefully` and `TestDBLabelMasksPassword`.
+
+### obsdb/clickhouse
+
+- Paging cursors compare in integer nanoseconds
+  (`toUnixTimestamp64Nano` with an int64 bind): the driver renders a
+  positional `time.Time` bind at whole-second scale, so the runs
+  cursor (`Started < ?`) and the sessions cursor
+  (`max(LastSeen) < ?`) floored S.<nanos> to S.000 and silently
+  skipped every row in the same second before the boundary — rows
+  lost at essentially every page boundary. The status cutoff
+  (`LastSeen >= ?`) binds nanoseconds for the same reason (no more
+  sub-second running band). Pinned by `TestCursorSubSecondPaging`
+  (two runs/sessions within one wall second, paged through the
+  boundary). The pushed `obsdb/clickhouse/v0.1.0` tag carries the bug (fixed by this patch tag).
+- `SaveExperiment` surfaces every prior-read error except
+  `ErrNotFound` (only a genuine not-found means "first save"): a
+  transient read failure no longer silently resets an update's
+  `Created` to the save time. Pinned by `TestExperimentCreatedSurvivesUpdate`.
+- Migration 0002's engine shape is pinned offline
+  (`TestSpecExperimentsEnginePresent`): `ReplacingMergeTree(InsertTime)`
+  and `InsertTime DEFAULT now64(9)` — the two properties the step 8b
+  review fixes rest on, previously guarded by nothing offline.
+
+## 0.7.0 — 2026-10-01
+
+The step 8b playground programme (ADR 0024, WEFT-PLAYGROUND.md P1–P5):
+`ReplayPolicy` in the core, the playground's P1–P5 verbs across the
+runtime link, Studio and the devtools panel, the experiments table in
+obsdb, and the debugger rungs 3–4 (breakpoints, steer) on
+runtime-started runs. Root is additive; the lanes' modules below
+release and date here with it (the step 8 release, 2026-10-01).
+
+### weft 0.7.0
+
+#### Added
+
+- `weft.ReplayPolicy` — a tool's side-effect class for re-runs
+  (WEFT-PLAYGROUND.md §6 rule 3): `ReplayNever` (the zero value, and
+  what an unannotated tool counts as — its calls are substituted with
+  the recorded result or parked, never silently re-fired) and
+  `ReplaySafe` (idempotent, side-effect free — a re-run may execute it
+  for real). Set with `weft.Replay(weft.ReplaySafe)` beside the tool's
+  other options; read back with `ToolDef.ReplayPolicy()`. The manifest
+  records `replay_policy: "safe"` — never is the default and renders
+  exactly as before, so no committed weft.json churns. This is the root
+  change step 8b needed: the runtime link's register payload now
+  reports each tool's real class instead of the honest-all-never
+  placeholder of step 8a.
+
+Lanes A2, B1, B2, C1 and C2 of the observability-data programme (ADR
+0024), merged to main: the two new modules from A2 (the observability
+database and the pipeline), B1's Studio rewrite on obsdb with the
+store module deleted, B2's ClickHouse backend, C1's devtools panel,
+and C2's `weft/runtime` module with the playground API. All of it
+dates at the step 8 release.
+
+### obsdb (new module)
+
+- **The observability database** (ADR 0024 S3): the OTLP-shaped model
+  (`Span`, `Record`, `Batch`), the derived weft identity (`Weft`,
+  `DeriveSpan`/`DeriveRecord`), the `DB` interface (runs, sessions, the
+  positioned event page with its gap detector, the transcript replay
+  reads, spans by run or trace, public-id resolution), `DeriveStatus`
+  (the four-row table: error span → failed; run_finish → succeeded;
+  fresh last-seen → running; stale → interrupted, after
+  `InterruptedAfter` = 30 s), and the live-lane hub (`Hub`, `Frame`,
+  one hub-wide monotonic `Seq`, bounded per-subscriber queues, overflow
+  drops the subscriber).
+- **`obsdb/sqlite`**: the default backend — the S3.4 schema
+  (`obsdb_migrations`, `spans`, `records`, `other_logs`, `runs` and the
+  indexes), one writer connection plus a read pool, `Open(path,
+  KeepDeltas())`. `Write` is one idempotent transaction: `INSERT OR
+  IGNORE` on (run, kind, pos) and (trace, span); deltas counted and
+  never stored (their own counter, so their absence never looks like a
+  lost event); heartbeats never stored, they only move last-seen; a
+  reordered batch's provisional start corrected when `run_start` lands.
+  The returned DB implements `Hub()` and publishes every Write's frames
+  before returning.
+- **`obsdb/obsdbtest`**: the conformance table every backend runs (the
+  storetest pattern) — round trip, idempotence, reordering, gaps,
+  status at every boundary including the crash, sessions and public
+  ids, children, paging cursors, the delta rule, the heartbeat rule,
+  non-weft spans and records stored and returned by `Trace`.
+- **`obsdb.FromOTLPTraces` / `obsdb.FromOTLPLogs`**: OTLP/HTTP export
+  requests decoded into the model (scalars verbatim, arrays as `[]any`,
+  kvlists as maps, bytes as base64), with golden protobuf and JSON
+  fixtures under `obsdb/testdata` that step 6's ingest and the SDK path
+  both pin against.
+
+### otel (new module)
+
+- **`otel.Install(...)`** — one line, several destinations at once, all
+  active: `Local(path)` (the obsdb/sqlite sink, written synchronously,
+  content on), `Studio(url, token)` (OTLP/HTTP protobuf, bearer token,
+  logs 200 ms / spans 1 s batches, content on), `Datadog()` (the local
+  Agent's OTLP intake on `localhost:4318`, content off), `Langfuse(host,
+  pk, sk)` (`<host>/api/public/otel`, Basic `pk:sk`, traces only),
+  `OTLP(url)` and `Exporters(spans, logs)` (content off). The returned
+  function flushes and shuts down; call it on exit
+  (`defer otel.Install(...)()`). With no options it writes the local
+  sink only. `otel.Start` is Install with errors (and `NoGlobal` for
+  tests); Install never panics or fails the program.
+- **Per-destination content** (`WithContent(cfg…)`, `NoContent()`,
+  `Signals`, `NoDeltas()`, `BatchDelay`, `Headers`, `Timeout`,
+  `Insecure`, `DatadogEndpoint`): content-off chains clone each record,
+  strip it with `weft.StripContent`, mark it `weft.content=stripped`
+  and drop `messages` records; content-on chains apply the
+  destination's `Redact` and `MaxBytes` (event and delta bodies only —
+  never the transcript) and set `weft.content.truncated_bytes` when a
+  cap cut. Every processor on the provider answers the Logs API's
+  `Enabled` by event name, so a content-off-only pipeline makes the
+  core emit no `messages` records at all.
+- **Heartbeats**: the run tracker keeps the open runs (from
+  `run_start`/`run_finish` records and the `invoke_agent` span end) and
+  emits one `weft.heartbeat` record per open run every interval
+  (`Heartbeat(d)`, default 10 s, 0 disables) — a long quiet tool call
+  reads running, a crashed process stops heartbeating, and the sinks
+  never store a heartbeat row.
+- **`otel.FromSDKSpans` / `otel.FromSDKRecords`**: SDK data into the
+  obsdb model, value-identical to the OTLP path (pinned against
+  obsdb's golden fixtures; the SDK's status codes map onto OTLP's
+  numbering).
+- The standard variables configure extra destinations
+  (`WEFT_STUDIO_URL`, `OTEL_EXPORTER_OTLP_ENDPOINT`/`_HEADERS`,
+  `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`, `WEFT_DB`);
+  explicit options and env destinations combine, same-URL duplicates
+  de-duplicate with the explicit one winning; `NoEnv()` turns them off.
+  The core reads no environment variable — this module does, here
+  only.
+
+### obsdb/clickhouse (new module)
+
+- The ClickHouse backend of `obsdb` (ADR 0024 S3.6, open-source per
+  Q5): `Open(dsn string, opts ...Option) (obsdb.DB, error)` connects
+  through clickhouse-go v2 with `async_insert=1,
+  wait_for_async_insert=1` (a write returns once the server has
+  flushed its batch), creates and versions the schema in
+  `obsdb_migrations` — the SQLite backend's numbering rule, refusing a
+  database whose schema is newer with `ErrNewerSchema` — and serves
+  every `obsdb.DB` read (`Runs` through `GROUP BY RunId` with the same
+  aggregates the AggregatingMergeTree columns carry, single-run pages
+  through `FINAL`, `Sessions` as a `GROUP BY SessionId` over
+  per-run-collapsed rows, status always derived through
+  `obsdb.DeriveStatus`, never stored).
+- Column compatibility with the OTel Collector ClickHouse exporter,
+  pinned at **v0.162.0** (the version named in
+  `migrations/0001_init.sql`): `otel_traces` and `otel_logs` keep
+  every column name and type its `INSERT` names — `EventName`
+  included (the one feature column the exporter probes the table
+  for); the optional `*AttributesKeys` columns deliberately absent
+  because the pinned exporter's default `INSERT` never names them
+  (they belong to its json-mode tables) —
+  and add the weft identity as materialized columns with
+  `bloom_filter` skip indexes on `SessionId`, `PublicId`, `Agent` and
+  `TraceId` (S3.6). A stock collector pinned to that version, with
+  `create_schema: false`, writes into the same database; the
+  collector-shape test inserts with its verbatim template column
+  lists and proves the views feed the weft tables from those rows.
+- `weft_records` as `ReplacingMergeTree(InsertTime) ORDER BY (RunId,
+  Kind, Pos)` — the transport idempotency key (I4) — filled by a
+  materialized view from `otel_logs` where `weft.record IN ('event',
+  'messages')`: never `delta` (counted in `weft_runs`' `DeltaCount`
+  high-water mark, never stored — D3/Q4), never `heartbeat` (no
+  position; it only moves a run's last-seen). It carries its own
+  content TTL, because a source table's TTL does not cascade through
+  a view.
+- `weft_runs` as `AggregatingMergeTree ORDER BY RunId` filled by two
+  materialized views (from `otel_logs`, heartbeats included for
+  last-seen, `run_start`/`run_finish` bodies parsed in SQL; and from
+  `otel_traces`, the `invoke_agent` span detected exactly the way
+  `obsdb/sqlite`'s `isInvokeAgent` does), its columns
+  `SimpleAggregateFunction`: `min` for started, `max` for finished,
+  last-seen, identity strings, the terminal flags and usage. Caller
+  metadata is stored as the contract-filtered attribute JSON (the
+  `obsdb.MetaOf` exclusion set, embedded in the view and pinned to
+  `MetaOf` by a test), so `max` keeps real metadata and the metadata
+  contract stays in one implementation.
+- `TTL(content, meta time.Duration) Option`: overrides the retention
+  windows — content (`otel_logs`, `weft_records`, `weft_deltas`) 30
+  days, spans and runs 90 by default. Open applies a configured
+  non-default window with `ALTER TABLE ... MODIFY TTL` after the
+  migrations (idempotent, so the schema stays inspectable); the
+  defaults are the migration's own and skip the ALTER. Values ≤ 0
+  keep that class's default.
+- `KeepDeltas() Option`: turns delta storage on for debugging —
+  `Write` additionally inserts delta rows into `weft_deltas`
+  (`ReplacingMergeTree` on `(RunId, Pos)`, their own counter so they
+  can never touch the durable sequence); the option lives in `Write`,
+  not the schema, because a view cannot be option-gated.
+- The conformance table `obsdbtest.Run` (S3.5) runs against a live
+  server, gated on `WEFT_CLICKHOUSE_DSN`, each subtest on a fresh
+  database; the package README carries the one-line container recipe
+  (clickhouse/clickhouse-server:25.8-alpine), the docker-compose
+  equivalent, and the CI job with the service container.
+
+### runtime (new module)
+
+#### Added (step 8b)
+
+- The playground's P1–P5 verbs over the link: `transcript_edits`
+  (D2/D3 — a patch must name a call in the kept prefix, a rewrite may
+  not drop a step's calls, the patched prefix must leave no call
+  without a result and end at a step boundary, validated on both
+  sides); `side_effects` `substitute` (the default: a parked call that
+  matches a recorded call is answered with the recorded result over a
+  chain of fresh run ids, the handler provably never re-fires; a miss
+  stays parked), `park`, and `allow` (the opted-in set); the scripted
+  engine (§5.5) — its own `weft.Model` over the source run's messages
+  records, keyed like wefttest's fixtures, zero tokens, "no recorded
+  turn" on a key miss, and the prompt trap closed (scripted +
+  instructions/model override refused on both sides); fork mode (§5.4)
+  — `Fork` at the source turn, the input becomes the fork's next turn,
+  the fork stays open to the runtime so the panel can keep chatting;
+  approval decisions on parked runs (ADR 0007's Approve/Deny/Resolve
+  forwarded as `event: approve` commands); breakpoints (§8.3 — the
+  stored tool set parked on every run this runtime starts) and steer
+  (§8.4 — every ephemeral run carries a `weft.Steering` source; a fork
+  in flight steers through thread's Steer policy).
+
+- **New module `weft/runtime`** (WEFT-PLAYGROUND.md §10.2, ADR 0024
+  [D6]): the playground's in-app side. One deferred call is the whole
+  integration — `defer runtime.Install(
+  runtime.Studio(url, token), runtime.Agents(...), runtime.Models(...),
+  runtime.Limits(...), runtime.AllowSideEffects(...),
+  runtime.Threads(store), runtime.Enabled(true))()`. Without Install
+  nothing opens; even with it, only under `WEFT_ENV=dev` or
+  `Enabled(true)` (§6 rule 1). The default endpoint is
+  `otel.StudioEndpoint()`.
+- The runtime link (§10.3): registers on connect and after every
+  reconnect (manifests, model allow-lists, per-agent caps, budget,
+  side-effect classes — all tools `never` until `ReplayPolicy` lands),
+  receives commands over SSE with `Last-Event-ID` resume, acks every
+  command **before** executing it (at-most-once: repeated ids
+  ignored), handles `cancel` and `ping`. `runtime.Local(srv)` talks to
+  the embedded Studio in-process — no socket.
+- The executor (§5.2): `engine: live` + `thread: ephemeral` only
+  (fork, scripted and `transcript_edits` are 8b); composes the run
+  from plain RunOptions (`Instructions`, `OnlyTools`, `UseModel`,
+  `Thinking`, lower-only `MaxSteps`/`Parallelism`, `temperature`,
+  `ParkOn` for every tool not opted in with `AllowSideEffects`), and
+  labels the run `weft.playground`, `weft.playground.command`,
+  `weft.experiment.id`, `weft.forked_from`, `weft.public_id`,
+  `weft.playground.actor` — never `weft.session.id`. Source
+  transcripts resolve thread storage → local obsdb →
+  `GET /api/runs/{id}/transcript`, cut at the `from_step` boundary; a
+  whole-turn re-run that sends no input defaults its prompt to the
+  source's own user message (§5.1: input *replaces* the turn's user
+  message — the original exists by default).
+  The runtime re-validates tool/model names and limits against its own
+  registry and answers `rejected` when Studio's copy disagrees;
+  per-experiment budget caps are counted from each command's own
+  usage, a breach rejects the next command (`budget_exceeded`), and
+  the app's own runs are never touched.
+
+### studio 0.3.0 (breaking — the step 6 rewrite, the devtools panel, the playground)
+
+#### Added (step 8b)
+
+- The playground's P1–P5 in both surfaces: the panel's experiment
+  drawer (§3 — registered-config pre-fill, tools off with the
+  side-effect warning, model, thinking, input, engine, side-effect
+  mode, thread mode `ephemeral | fork`, transcript edits on the kept
+  steps, and the rung-3 breakpoint set), the result streaming in
+  place labelled t·xN with the inline diff (the shared `lib/diff`),
+  continue/skip/resolve on a parked experiment run
+  (`POST /api/runs/{id}/approvals`, routed to the runtime that started
+  it — the app's own turns are 403 there, viewer-only per PQ7), the
+  2-way sibling compare (PQ3), and the saves (`keep as prompt` copies
+  the text, PQ2 is post-v1; `save as fixture` hands off to Studio).
+- The Studio playground (`/playground`, capability-gated): the split
+  view with the variant switcher, per-variant runs side by side with
+  their metrics (tokens, latency, tool calls), the pairwise diff and
+  the compare table, E9's variants × inputs matrix (the definition
+  saved via `POST /api/experiments`, every cell issued under the
+  experiment's id so the budget caps the whole matrix), and the
+  experiment history. The config column carries the thread mode and,
+  on a continued run, the kept steps' transcript edits; the run card
+  steers an in-flight run and decides parked calls (§2's parity rule —
+  every verb renders in the panel or Studio, never neither). The
+  panel hands off into it with run, step and
+  the current overrides as query params.
+- `POST /api/playground/fixtures`: a run's records as wefttest replay
+  fixtures — wefttest's own file shape, key and naming, pinned by a
+  round-trip (the files load under `wefttest.Replay` and answer
+  byte-for-byte).
+- The debugger's rungs 3–4 (WEFT-DEVTOOLS §8.3/§8.4):
+  `PUT /api/runtimes/{id}/breakpoints` (capability `breakpoints`) and
+  `POST /api/runs/{id}/steer` (capability `steer`), both acting on
+  runtime-started runs only — `meta.debug_scope` says so, and both UIs
+  repeat it (PQ7). The controls render only for the reported
+  capabilities: the panel's drawer carries the breakpoint set (the
+  rung-3 gate's "all in the panel"), Studio steers the in-flight run —
+  both verbs in both surfaces' reach, §2's parity rule.
+- obsdb: the `experiments` table (§10.4, PQ4) behind
+  `SaveExperiment`/`Experiments`/`Experiment` on both backends (sqlite
+  migration 0002; clickhouse 0002 as a ReplacingMergeTree), with
+  `RunQuery.ExperimentID` selecting an experiment's runs and an
+  obsdbtest conformance subtest.
+
+#### Added
+
+- `New(opts ...Option) *Server` with `Handler()`, `Close()` (closes
+  only the database New opened itself — a DB passed through `DB(...)`
+  stays its owner's) and `Runtime()` (the runtime link's in-process
+  side — `studio/runtime` — when `Playground(true)` built it, else
+  nil). Options: `Live(hub)` (default the DB's own hub
+  when it implements `Hub()`, else an in-process `obsdb.NewHub()` fed
+  by ingest), `NoIngest()`, `IngestToken(tok)`, `Token(tok)`,
+  `AllowOrigins(...)`, `Playground(bool)` beside the kept `DB`, `Open`,
+  `Base`, `Manifest`, `Title`, `Capabilities`.
+- `studio/ingest`: the OTLP/HTTP receiver — `POST /v1/traces` and
+  `POST /v1/logs`, protobuf and JSON, optional gzip, a 16 MiB limit
+  after decompression (413 above), the publish-then-write pipeline
+  (frames reach the hub before `DB.Write`; 503 `unavailable` on a write
+  failure so the exporter retries), and the ingest token (loopback
+  open without one — `api/meta` says so via `ingest_open`).
+- `GET /api/live`: the SSE live stream — exactly one selector
+  (`run`/`session`/`public_id`/`agent`), `kinds` over
+  event/delta/messages/run (default `event,run`; heartbeats never
+  forwarded), frame ids are the hub's Seq, `Last-Event-ID` resume with
+  the gap backfilled from the database and deduped on
+  `(run, kind, pos)`, a ping every 15 s, and `event: overflow` plus a
+  close when a subscriber's queue drops it.
+- Routes: `GET runs/{id}/transcript`, `runs/{id}/spans`,
+  `traces/{trace_id}` (any trace, weft or not), `sessions`,
+  `sessions/{id}`, `public/{public_id}`, `POST /api/panel-tokens`
+  (mint an HMAC-signed `{public_id, scope, exp}` scoped to one public
+  id; every data route refuses anything outside it, the agent live
+  selector included). Runs and sessions lists gained the session,
+  public-id and (runs) playground filters.
+- `routes.go`'s route groups: the registration point the panel and
+  the playground hook into from their own files (`panel.go`,
+  `playground.go` set package-level hooks through var initializers;
+  `Playground(true)` enables the playground's), with `api/meta`'s
+  capabilities computed from the registered groups — never hard-coded.
+- The devtools panel `<weft-devtools>` (WEFT-DEVTOOLS.md §5): a
+  self-contained custom element built as a separate Vite library-mode
+  artifact (`studio/web/vite.panel.config.ts`, committed at
+  `studio/dist/panel/panel.js`, 63,475 B raw / 17.0 KiB gzip — budget
+  80), sharing `lib/api.ts`, `lib/live.ts`, `lib/events.ts` and
+  `lib/format.ts` with the Studio UI (V6, no React in the bundle).
+  Rung 1 (§8.1): the header, the turn list scoped by public id with
+  `parked` and the (inert-until-step-8) experiment slot, the turn view
+  through the shared fold with reasoning collapsed, tool calls
+  `name(args)` → result with truncation badges and span times, usage
+  with cached/reasoning splits, read-only approvals, the honesty
+  rules (interrupted, gaps, stripped content, max_tokens), the raw
+  JSON toggle, the live tail with deltas, ⤢ deep links carrying run
+  and step, lazy subagent expansion, a spans waterfall, and the §5.2
+  keyboard (Alt+W primary — Q4 closed; Ctrl+Shift+W where delivered).
+  The live tail upserts `run` frames by id (T20's fix) — one row per
+  run, the newest state winning.
+- `GET /panel.js` on `studio.Handler` (S4.2): the embedded bundle,
+  static and unauthenticated, registered through routes.go's
+  panel-group hook (always on, no capability of its own; `live` is
+  what rung 1 gates on). A build without the bundle answers 500 in the
+  API error shape.
+- Panel mounting per §5.2/§5.3: `data-endpoint` / `data-public-id` /
+  `data-token` / `data-position` / `data-open` / `data-auto` on the
+  script tag or the element, the `window.__WEFT__.publicId` watch by a
+  setter, `?weft=debug` and `localStorage.weft_debug=1` overrides, the
+  studio-version check ("Studio is newer than this panel; update
+  panel.js"), and fail-silent removal when `/api/meta` does not answer
+  (one request, no retries, no console output).
+- `studio/web/scripts/panel-gate.ts`: the Dv0–Dv2 gate driver (jsdom
+  over a live Studio, driving the committed bundle — the self-hosting
+  harness page is `examples/studio-local`'s `/`), and
+  `scripts/panel-asset.ts`: stages `panel-<version>.js` + sha256 as
+  the release asset for non-Go backends (V2; wired as `make
+  studio-panel-asset`).
+- **New package `studio/runtime`**: the runtime link's server side —
+  `POST /api/runtime/register`, `GET /api/runtime/commands` (SSE),
+  `POST /api/runtime/acks`, the registry of connected runtimes with
+  `last_seen`, and §10.5's lost-command timers (30 s unacked; queued
+  lost at disconnect; accepted lost after 10 min without a finish; a
+  late ack still lands).
+- **`studio/playground.go`** (routes.go's `playgroundGroupHook`,
+  enabled by `Playground(true)`): the playground API — `GET
+  /api/runtimes`, `POST /api/playground/runs`, `GET
+  /api/playground/commands/{id}` — with §10.4's validation table (400
+  unknown tool/model name, `input` with `from_step > 0`, and the
+  8b-deferred modes answered "not yet available"; 403 raised limits,
+  a refused side-effect tool, a panel token out of scope; 404 unknown
+  runtime/agent/source run; 409 a reused command id; 503 no connected
+  runtime). Capabilities `playground` and `runtimes` appear in
+  `GET /api/meta` when `Playground(true)`.
+
+#### Changed
+
+- `Handler` is `Handler(opts ...Option)` over an `obsdb.DB` instead of
+  `Handler(s store.Store, opts ...)`: `DB(db)` serves the database you
+  pass (setup A: `DB(otel.LocalDB())` — the same handle weft/otel's
+  Local destination writes), `Open(path)` opens an obsdb sqlite file
+  (created when missing; panics at Handler time when it cannot), and
+  with neither option Handler opens the history database at `$WEFT_DB`
+  or `./.weft/weft.db`. The five read routes keep their JSON shapes as
+  far as the new model allows: `tags` reads the run row's metadata,
+  `model` rebuilds from the row's provider/model, `result` is always
+  `null` (the store's result document is gone; the transcript route
+  that replaces it is step 6), and events page through
+  `obsdb.DB.Events` with the same inclusive `after` cursor, `done`
+  now also covering rows that read interrupted at derivation time (a
+  crash orphan's polling tail terminates).
+- The JSON shapes are S4.3's: the run row carries the identity chain
+  in full (`parent_run_id`, `trace_id`, `service`, `session_id`,
+  `public_id`, `turn`, `playground`, `experiment_id`, `forked_from`,
+  `meta`, `last_seen`, `pending`, `stop_reason`, `message_count`);
+  `meta` reports `db`, `ingest_open` and `interrupted_after_ms`; event
+  page entries carry `time` and the page carries `gaps`; spans map
+  OTLP statuses to `unset`/`ok`/`error`. The UI follows: the live
+  client (`lib/live.ts`), the transcript overlay on the fold, children
+  joined by `parent_call_id` (subagent blocks fetch on expand), the
+  time-axis waterfall when a run has spans, and the sessions, traces
+  and live routes.
+- `Token(tok)` now walls the whole API (bearer, or `?token=` for
+  EventSource); CORS defaults to localhost/127.0.0.1 on any port when
+  a token is configured, none in setup A.
+
+#### Removed
+
+- The store-era JSON keys `tags` (now `meta`) and `parent_id` (now
+  `parent_run_id`), the dead `result` field on the run document, the
+  inline `Nested` folding in the UI (children are separate runs), and
+  `meta`'s `store` key (now `db`).
+- `eventCache`, `storeKind`, everything typed on `store.RunRecord`,
+  and the `weft/store` dependency; the 409 `newer_format` mapping went
+  with the store's decode errors (unknown ids stay 404, other database
+  errors 500 `internal`). `api/meta`'s `store` field reports the
+  obsdb backend (best effort, dynamic type).
+
+#### Notes
+
+- The panel changes no public Go API beyond the bundle route:
+  `panel.go` registers through the step-6 route-group hook; the panel
+  token endpoints and CORS defaults were already step 6's.
+
+#### Release asset
+
+- `panel-v0.3.0.js` (sha256
+  `29652795bc9ab349838bcad951b492af610363c5c1f8a6059c370acf78d672e4`
+  beside it) — the devtools panel for non-Go backends; serve it from
+  your app and add `<script type="module"
+  src="/static/panel-v0.3.0.js" data-endpoint=… data-token=…
+  data-public-id=…></script>`. Staged by `make studio-panel-asset`
+  (RELEASE_DIR, default `dist-release` relative to `studio/web`);
+  byte-identical to the committed `studio/dist/panel/panel.js`.
+
+### studio/cmd (new module)
+
+- Setup B's binary (S4.6, §10.1): UI + ingest + a dev token on
+  `127.0.0.1:7331`, `--db sqlite://path` (an obsdb sqlite file,
+  created when missing) or `--db
+  clickhouse://user:pass@host:9000/db` (the hosted backend, wired at
+  merge-B — this module is the one place that imports the
+  obsdb/clickhouse driver, so the studio library never carries it),
+  `--addr`, `--token`; `WEFT_STUDIO_TOKEN` fixes the token, else one
+  is generated and printed. `DevToken()` generates it.
+
+### store
+
+#### Removed
+
+- The module, entirely (step 5 of ADR 0024). Consumers read `obsdb`:
+  weft-arena through per-scenario `weft/otel` pipelines
+  (`weft.LoggerProvider`/`weft.TracerProvider` from
+  `otel.Start(otel.Local(":memory:"), otel.NoGlobal())`, metadata via
+  `weft.Metadata` on the run), Studio through `studio.DB`.
+  `store/v0.1.3` remains resolvable from the module proxy for
+  consumers pinned to it by tag.
+
+## thread 0.8.1 — 2026-10-01
+
+The step 8 release's lockstep tag: the module's only change since
+0.8.0 is a comment reword in `thread/pool` (the store-era prose T18's
+grep gate cleaned up), and the requirement moves to the tagged root
+v0.7.0 (the two-phase rule, ADR 0005). Tagged so the step 8 train —
+obsdb, otel, studio, runtime — releases against a current thread.
+
+## thread 0.8.0 — 2026-10-01
+
+The observability-data programme's thread step (ADR 0024 S5): the
+session stamps its identity on every run it starts, and `thread/sqlite`
+owns its migrations table so a session database can share one SQLite
+file with the local sink. Additive for source (one option, one
+unexported field); the migrations rename is the one breaking edge,
+carried by a one-statement rename on Open. Tagged in lockstep with
+`thread/sqlite/v0.2.0`, which bumps to weft v0.6.0 / thread v0.8.0 and
+carries that rename; the module requires the tagged root v0.6.0.
+
+### Added
+
+- `thread.PublicID(id)` — the session's public id: an opaque,
+  browser-safe handle (WEFT-OTEL-DATA-ARCHITECTURE §5), `WithMeta`
+  sugar stamped into the header as `weft.public_id`. Create-time only,
+  so it is what every backend's `List` Meta filter matches; a later
+  `SetInfo` can add other keys but never rotates it.
+- Every run a session starts — a send, a resume, an overflow re-run —
+  carries `weft.Metadata` with `weft.session.id`, `weft.turn` (the
+  counter the run id was minted from; the re-run names its new turn),
+  `weft.public_id` when the session has one, `weft.session.forked_from`
+  (`<session>#<entry>`) for a fork, and `weft.session.parent` (+
+  `weft.session.parent_call`) for a pool child. It is appended after
+  the caller's run options, so the session's keys win over a caller's
+  colliding `thread.RunOptions(weft.Metadata(...))`; keys the session
+  does not claim pass through. On spans and records alike (the core's
+  S1.2/S1.3 wiring); the runs read `Session.Meta()` — the header
+  overlaid with every info entry — while `List` keeps matching the
+  header's create-time layer.
+- The OTel API (`otel`, `otel/log`, `otel/trace`) becomes a direct
+  requirement of the thread module (test-only imports; the versions
+  the root pins). The SDK stays out — the identity tests implement the
+  tracer and Logs API providers on the API's embedded types, the root
+  module's stance.
+
+### Changed
+
+- `thread/sqlite`: the migrations table is `thread_migrations`
+  (renamed from the goose-shaped `schema_migrations`), so a thread
+  database and the local sink's `obsdb_migrations` can share one file
+  with each module owning its versions (WEFT-OTEL-DATA-ARCHITECTURE
+  §3.4). `Open` moves a pre-rename file across with one `ALTER TABLE`,
+  run only when the `sessions` table exists and the new name does not:
+  a `store` database pointed at the same `Open` keeps its own tracking
+  table and rows untouched — including one whose recorded store
+  version used to read as ahead of ours and refuse the open. Old
+  thread files keep opening; the versions carry across and the
+  migrations resume from the recorded number.
+
+### Fixed
+
+- `thread.Storage`'s `Query.Meta` doc claimed the `List` filter
+  matched "the merged view `Load` returns"; no backend merges info-entry
+  meta and `Load` returns the header as is (review 2026-09-30 §8.1
+  item 4). Now says the header's create-time Meta. Doc only; behaviour
+  unchanged.
+
+## 0.6.0 — 2026-10-01
+
+The observability-data programme's core step (ADR 0024): the run's
+events, deltas and transcript leave the process as standard OpenTelemetry
+log records, and the playground's per-run configuration joins the core.
+Additive for source — the three dual options widen their return type to
+a superset interface, the cycle's three allow-listed apidiff lines — so
+root ships a minor.
+
+### Added — observability data out (ADR 0024)
+
+- The OTel Logs API (`go.opentelemetry.io/otel/log v0.22.0`) joins the
+  trace API as the core's one dependency: no version moves (it requires
+  exactly the pinned otel v1.46.0).
+- `weft.LoggerProvider(lp)` selects the Logs API provider (default: the
+  global, delegating, a no-op until an SDK registers).
+- Every durable event (`run_start`…`run_finish`) and every delta is
+  reported from `deliver` as an OTel log record on two counters —
+  `weft.event.pos` contiguous from 0, `weft.delta.pos` for deltas — so
+  dropping deltas never opens a hole in the durable sequence; `Nested`
+  is not reported (the child run numbers its own). Bodies are the wire
+  JSON (ADR 0004), stripped when capture is off; an errored
+  `tool_finish` carries WARN; `run_start` carries the parent linkage,
+  the manifest hash and `weft.version`.
+- `messages` records at the transcript's five growth points — the
+  repaired input at run start (index 0, never reported before), the
+  tool message a resume creates or rebuilds (`attachResults` widened
+  from created-only), each assistant message, each tool message, each
+  steered batch. Their concatenation equals `RunResult.Messages`
+  byte-for-byte; emitted only when capture is on.
+- `weft.Metadata(kv)` (RunOption) and `weft.MetadataFromContext(ctx)`:
+  caller pairs on every span and record of the run, inherited by
+  subagent runs; limits (64 keys / 128 B key / 1 KiB value) drop and
+  count (`weft.metadata.dropped`), never truncate.
+- `weft.Content(bool)`, `weft.StripContent(ev)`, `ContentKind`: capture
+  is resolved at each emission — the agent's option, else the standard
+  `Enabled` question — and the core reads no environment variable.
+- The run's identity on every span (S1.2): metadata verbatim plus the
+  `gen_ai.conversation.id` / `session.id` / `user.id` mirrors; on the
+  run span, `weft.parent.run.id` / `weft.parent.call.id` for subagents,
+  `weft.manifest.hash` (computed at New for a named agent) and
+  `weft.version`.
+- `weft.version` rides at v0.6.0 and is pinned to a source
+  (`version_test`): the const must equal the newest `v*` tag reachable
+  from HEAD or the CHANGELOG's unreleased heading, so it cannot sit
+  stale through a release again.
+- A whole run with no tracer and no logger provider — the default
+  program — is allocation-bounded (128 allocs/op measured, bound 160):
+  the no-SDK path pays nothing for observability nobody asked for.
+- `examples/otel` proves the emission end to end through the real SDK
+  (an in-memory `sdk/log v0.22.0` exporter, a dependency of that
+  example module only): every record correlates to the run's trace,
+  event positions are contiguous, and the `messages` records rebuild
+  the transcript byte-for-byte.
+
+### Added — per-run configuration [D5, D7]
+
+- `Instructions`, `MaxSteps`, `Parallelism` become dual Option/RunOption
+  (the `Thinking` shape); per run the two limits may only lower — a
+  raise is `ErrInvalidRunOption`, before any model call.
+- The three allow-listed widenings (D9): the constructors return
+  `InstructionsOption` / `MaxStepsOption` / `ParallelismOption` —
+  superset interfaces every existing use as an `Option` still
+  satisfies, which is what lets the same constructor work per run.
+  The cycle's exact `.apidiff-allow` lines, reset at this tag.
+- `weft.OnlyTools(names...)` narrows the run to named registered tools
+  (unknown name → `ErrInvalidRunOption` before any model call);
+  `weft.UseModel(m)` replaces the model for the run and rebuilds the
+  WrapModel chain over it; `weft.ParkOn(tools...)` parks calls at the
+  approval boundary as `RequireApproval` would (ADR 0007 applied per
+  run). `Manifest` and `Tools()` keep reporting the static set.
+- A changed configuration is recorded on the `invoke_agent` span:
+  `weft.override.hash` (sha256 over the canonical JSON of every changed
+  value) and `weft.override.*` per knob; absent on a plain run.
+
 ## thread 0.7.1 — 2026-09-30
 
 The post-0.7.0 audit's one find (report:
@@ -417,13 +1681,10 @@ pin.
 - `thread/examples/approvals`: park, restart, a signed decision,
   resume, a rejected replay, the audit trail — offline, output pinned.
 
-# Changelog
+## thread 0.1.0 — never tagged (shipped inside thread/v0.2.0, 2026-09-29)
 
-Notable changes to weft, newest first. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.0.0/); the project
-is pre-1.0 and tags per module (ADR 0005).
-
-## thread 0.1.0 (unreleased)
+The v0.1 window passed without a tag: the module's first tag is
+`thread/v0.2.0`, whose history holds everything below.
 
 First release of `weft/thread`: sessions as an append-only entry tree
 (ADR 0011), durable through `jsonl.Open(dir)` or `thread.Memory()`,

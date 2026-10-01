@@ -1,12 +1,17 @@
 GO ?= go
 
+# Where the release steps stage their artifacts (step 8's release
+# uploads from here); overridable per invocation:
+#   make studio-panel-asset RELEASE_DIR=/tmp/rel
+RELEASE_DIR ?= dist-release
+
 # The workspace is the monorepo layout: every adapter is its own module
 # (ADR 0005), so build/test/vet/lint loop over the modules `go list -m`
 # reports from go.work. The root module stays dependency-free; vendor
 # SDKs are required only by the adapter modules.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-store apidiff-thread apidiff-selftest offline fuzz fuzz-thread studio-build studio-check
+.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-thread apidiff-sqlite apidiff-selftest offline fuzz fuzz-thread soak-thread studio-build studio-check studio-panel-asset
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -41,17 +46,17 @@ tools:
 apidiff: tools
 	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh
 
-# The store module's half of the gate — vs the last store/v* tag, from
-# the store's second tag on (plan §3.1). Other sub-modules join the
-# same way when they tag.
-apidiff-store: tools
-	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh "" store
-
-# The thread module's half — vs the last thread/v* tag, from
-# thread/v0.2.0 on (plan §10, as store joined at store/v0.1.1). Before
-# the first tag exists the gate skips with a note.
+# The thread module's half — vs the last thread/v* tag. Deliberate
+# pre-1.0 breaks are listed in thread/.apidiff-allow.
 apidiff-thread: tools
 	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh "" thread
+
+# The SQLite backend's half — vs the last thread/sqlite/v* tag. Both
+# sides load through their tree's go.work (scripts/apidiff.sh says
+# why): between two thread tags the backend only compiles against the
+# thread module beside it.
+apidiff-sqlite: tools
+	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh "" thread/sqlite
 
 # Exercises the gates' own failure modes — a broken tree must fail
 # them, never read green.
@@ -74,7 +79,7 @@ fuzz:
 	  $(GO) test -run '^$$' -fuzz "^$$f\$$" -fuzztime $(FUZZTIME) . || exit 1; \
 	done
 
-# The thread module's decoders join the fuzz gate (plan §10, step 7.1):
+# The thread module's decoders join the fuzz gate:
 # entries, headers, signed decisions and grant predicates — one
 # invocation each, crashers committed as seeds the same way.
 fuzz-thread:
@@ -83,6 +88,13 @@ fuzz-thread:
 	    (cd thread && $(GO) test -run '^$$' -fuzz "^$$f\$$" -fuzztime $(FUZZTIME) $$p) || exit 1; \
 	  done; \
 	done
+
+# The race soak CI runs nightly (.github/workflows/soak.yml): the
+# thread module's suite ten times under the race detector, and
+# thread/sqlite's three times.
+soak-thread:
+	cd thread && $(GO) test -race -count=10 -timeout 45m ./...
+	cd thread/sqlite && $(GO) test -race -count=3 -timeout 30m ./...
 
 # Live adapter tests behind the `live` build tag; never in CI (no keys).
 live:
@@ -94,6 +106,11 @@ live:
 
 studio-build:
 	cd studio/web && bun install --frozen-lockfile && bun run build
+
+# The devtools panel as a release asset (WEFT-DEVTOOLS §5.1): non-Go
+# backends serve this file themselves (V2).
+studio-panel-asset: studio-build
+	cd studio/web && bun run scripts/panel-asset.ts $(RELEASE_DIR)
 
 # The freshness gate (ADR 0018 §4): rebuild the web app and prove the
 # committed dist matches, fits the 600 KiB gzip budget (§7), and that

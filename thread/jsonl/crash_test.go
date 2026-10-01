@@ -7,9 +7,11 @@
 package jsonl_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -23,7 +25,7 @@ import (
 	"github.com/weftgo/weft/thread/threadtest"
 )
 
-// The crash test (plan §3.4): a helper process is killed mid-append —
+// The crash test: a helper process is killed mid-append —
 // a partial line, no newline, the writer dead — and the session must
 // load with everything the crash left durable: the prompt and every
 // synced entry, the torn tail dropped and reported (ADR 0011 §4–§5).
@@ -83,7 +85,82 @@ func TestCrashMidAppend(t *testing.T) {
 	}
 }
 
-// The crash matrix's second point (step 1.4 review: "can a crash at
+// The crash's sequel — the writer died INSIDE a write, a partial line
+// in the file and no newline — and the next process takes the session
+// and keeps writing. The new writer removes the torn tail before its
+// first append, so a third process loads a clean session holding every
+// complete entry: the prompt from before the crash and the entries
+// written after it. Without the repair the first post-crash append
+// glued itself onto the half-line, and every later Load failed with
+// ErrCorrupt (or, under Salvage, silently lost the post-crash turn).
+func TestCrashMidAppendThenNextWriterAppends(t *testing.T) {
+	dir := t.TempDir()
+	st, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	h := thread.Header{ID: "s_crash", Created: time.Now().UTC()}
+	if err := st.Create(ctx, h); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Append(ctx, h.ID, thread.MessageEntry{
+		ID: "e_crash1", Created: h.Created.Add(time.Second), Message: weft.User("before the crash"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The writer's process ends with the crash; its lock dies with it.
+	if err := st.(thread.Releaser).Release(ctx, h.ID); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=TestCrashHelper", "-test.count=1")
+	cmd.Env = append(os.Environ(), "WEFT_JSONL_CRASH_FILE="+dir+"/s_crash.jsonl")
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "about to die mid-append") {
+		t.Fatalf("the helper did not die mid-append (err %v):\n%s", err, out)
+	}
+
+	// The next process: sees the torn tail, then writes a turn.
+	var logged bytes.Buffer
+	next, err := jsonl.Open(dir, thread.OpenLogger(slog.New(slog.NewTextHandler(&logged, nil))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, report, err := next.Load(ctx, h.ID); err != nil || report == nil || report.Torn != 3 {
+		t.Fatalf("the reopen before any write: report %+v, err %v; want Torn=3", report, err)
+	}
+	if err := next.Append(ctx, h.ID,
+		thread.MessageEntry{ID: "e_after1", Created: time.Now().UTC(), Message: weft.User("after the crash")},
+		thread.MessageEntry{ID: "e_after2", Created: time.Now().UTC(), Message: weft.Assistant("still here")},
+	); err != nil {
+		t.Fatalf("Append after the crash: %v", err)
+	}
+	if !strings.Contains(logged.String(), "removed a torn tail") || !strings.Contains(logged.String(), "session=s_crash") {
+		t.Errorf("the repair was not reported:\n%s", logged.String())
+	}
+
+	// The process after that: a clean load, nothing lost but the
+	// half-line the crash never finished.
+	last, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, entries, report, err := last.Load(ctx, h.ID)
+	if err != nil {
+		t.Fatalf("Load after the post-crash append: %v", err)
+	}
+	if report != nil {
+		t.Errorf("the repaired session still reports %+v", report)
+	}
+	var ids []string
+	for _, e := range entries {
+		ids = append(ids, e.(thread.MessageEntry).ID)
+	}
+	if strings.Join(ids, ",") != "e_crash1,e_after1,e_after2" {
+		t.Errorf("entries after the crash and the next writer = %v, want every complete entry", ids)
+	}
+}
+
+// The crash matrix's second point ("can a crash at
 // any point leave a file that Load rejects without Salvage? Try it"):
 // a writer killed while writing the header itself. The corpse is a
 // file whose only bytes are a torn first line — no complete header,
@@ -200,7 +277,7 @@ func TestCrashHelper(t *testing.T) {
 	time.Sleep(time.Hour) // unreachable; the kill is immediate
 }
 
-// The mid-turn crash (plan §7, ADR 0011 §7): a child runs a real
+// The mid-turn crash (ADR 0011 §7): a child runs a real
 // two-step turn whose second model call blocks; the parent kills it
 // with the first step fully emitted, and everything emitted is durable
 // — the shared harness in threadtest carries the assertions, including

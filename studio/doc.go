@@ -1,33 +1,53 @@
-// Package studio is the Inspector: a read-only UI over a run store,
-// served by Go alone.
+// Package studio is the Inspector: the UI, the JSON API, the live
+// stream and the OTLP receiver over one observability database
+// (weft/obsdb), served by Go alone.
 //
-// T1 (TODO §12, plan docs/phase2b-studio-plan.md) shows the runs list
-// and the run page — steps with their tool calls and results, subagents
-// inline, truncation badged, event replay at 1×/4×, raw JSON — plus
-// agent and tool cards from the manifest. The UI is a TanStack Start
-// SPA (ADR 0018), prebuilt into the committed dist/ and embedded here;
-// users of this module never run Bun.
+// # The three setups (S4.6)
 //
-// Handler is the whole mount surface:
+// Setup A embeds the handler next to the app's own pipeline — the
+// five lines of WEFT-OTEL-DATA-ARCHITECTURE §10.1:
 //
-//	mux.Handle("/studio/", http.StripPrefix("/studio", studio.Handler(s)))
+//	defer otel.Install()() // local sink ./.weft/weft.db, content on, no network
+//	mux.Handle("/studio/", http.StripPrefix("/studio",
+//		studio.Handler(studio.DB(otel.LocalDB())))) // same DB, same live hub [D4]
 //
-// It serves the embedded UI with a history fallback (deep links
-// survive reload) and a read-only JSON API under api/: meta, runs,
-// runs/{id}, runs/{id}/events, manifest. The API is the contract
-// boundary (ADR 0018 Consequences): its types are written by hand in
-// api.go and mirrored in web/src/lib/api.ts, pinned on the Go side by
-// golden tests and on the TS side by type-checking against the same
-// golden files.
+// Passing the pipeline's handle is what makes it live: writes publish
+// to the handle's hub and the /api/live stream follows, no network
+// (examples/studio-local is the whole thing, with a thread session).
 //
-// Two rules keep one bundle able to serve local, self-hosted and
-// hosted Studio without hosting code in T1 (ADR 0018 §8):
+// Setup B runs the binary (studio/cmd): the UI, OTLP ingest, SQLite
+// and a dev token on 127.0.0.1:7331 — any language's app points
+// WEFT_STUDIO_URL or OTEL_EXPORTER_OTLP_ENDPOINT at it.
 //
-//   - api/meta reports capabilities — the open Handler reports none.
-//     The UI gates every deployment-specific screen on a named
-//     capability; a hosted server declares them with Capabilities(…).
-//   - a run's events are paged through api/runs/{id}/events, never
-//     inline in the run document, so neither response size nor client
-//     memory grows with run length and a live tail is the same
-//     endpoint read from the last position.
+// Setup C hosts it behind a Token: the panel's scoped tokens are
+// HMAC-signed public-id handles minted through POST /api/panel-tokens.
+//
+// # Routes are groups; capabilities are computed
+//
+// The serving surface is a list of route groups (routes.go): New
+// registers the core groups (the read API, the live stream, ingest,
+// panel-token minting), and the lanes that follow add theirs in their
+// own files without editing anyone else's:
+//
+//   - step 7 (lane C1) adds studio/panel.go, which sets
+//     panelGroupHook through a package-level var initializer — no
+//     init(), no registry — and the panel group is always on;
+//   - step 8 (lane C2) adds studio/playground.go the same way
+//     (playgroundGroupHook), enabled by the Playground(true) option.
+//
+// A hook is nil until its file exists, so this build reports no panel
+// or playground capability: the group is simply not registered.
+// api/meta's capabilities list is computed from the registered groups
+// — never hard-coded — plus anything a hosting wrapper declares with
+// Capabilities(...). The UI gates every deployment-specific screen on
+// those names (ADR 0018 §8).
+//
+// # The API is the contract
+//
+// The JSON API (S4.2/S4.3) is the one contract between Go and the UI
+// (and the panel): its types are written by hand in api.go and
+// mirrored in web/src/lib/api.ts, pinned on the Go side by golden
+// tests (testdata/api) and on the TS side by type-checking. Events are
+// paged (ADR 0018 §8); the live tail is GET /api/live, an SSE stream
+// whose frame ids are the hub's Seq — the resume cursor.
 package studio

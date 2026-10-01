@@ -1,15 +1,24 @@
-//go:build !unix
+//go:build !unix && !windows
 
 package jsonl
 
-import "os"
+import (
+	"errors"
+	"fmt"
+	"os"
+)
 
-// lockFile is the platform without advisory file locks: there is no
-// flock to take, so cross-process exclusion is unenforced — the
-// instance mutex still serializes writers within one process, and the
-// documented contract (one writer per session) is all that protects a
-// shared directory. The unix build carries the real lock.
-func lockFile(f *os.File) error { return nil }
+// lockSupported reports that this platform has no advisory file lock:
+// Open refuses to run without thread.NoLock, so the one-writer rule is
+// never dropped silently.
+const lockSupported = false
+
+// lockFile has no lock to take here. It is unreachable through Open —
+// a backend on this platform exists only with NoLock, which never
+// calls it — and fails loudly if that ever changes.
+func lockFile(_ *os.File, id string) error {
+	return fmt.Errorf("jsonl: no file lock on this platform for session %s: %w", id, errors.ErrUnsupported)
+}
 
 // unlockFile mirrors lockFile: nothing to release.
-func unlockFile(f *os.File) error { return nil }
+func unlockFile(_ *os.File) error { return nil }

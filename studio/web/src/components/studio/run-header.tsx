@@ -8,7 +8,7 @@ import { Link } from "@tanstack/react-router"
 import { ArrowUpRight, ChevronRight } from "lucide-react"
 import { useEffect, useState } from "react"
 
-import type { Part, RunDoc } from "@/lib/api"
+import type { Part, RunDoc, Transcript } from "@/lib/api"
 import type { FoldedRun } from "@/lib/events"
 import {
   absoluteTime,
@@ -33,27 +33,38 @@ function shortHash(hash: string | undefined): string {
 }
 
 /** The first user text in the transcript: the prompt. */
-function promptOf(doc: RunDoc): string | null {
-  const msgs = doc.result?.messages ?? []
-  for (const m of msgs) {
-    if (m.role !== "user") continue
-    const text = m.content
-      .filter((p): p is Extract<Part, { type: "text" }> => p.type === "text")
-      .map((p) => p.text)
-      .join("\n")
-    if (text) return text
+function promptOf(batches: Transcript["batches"] | undefined): string | null {
+  for (const b of batches ?? []) {
+    for (const m of b.messages) {
+      if (m.role !== "user") continue
+      const text = m.content
+        .filter((p): p is Extract<Part, { type: "text" }> => p.type === "text")
+        .map((p) => p.text)
+        .join("\n")
+      if (text) return text
+    }
   }
   return null
 }
 
-/** The run's last assistant text: the answer, from the record or the fold. */
-function answerOf(doc: RunDoc, folded: FoldedRun): string | null {
-  const steps = doc.result?.steps
-  if (steps?.length) {
-    for (let i = steps.length - 1; i >= 0; i--) {
-      if (steps[i].text) return steps[i].text ?? null
+/** The run's last assistant text: the answer — from the transcript
+ * (the messages records are the finished words, S4.3) or the fold. */
+function answerOf(
+  batches: Transcript["batches"] | undefined,
+  folded: FoldedRun
+): string | null {
+  const texts: string[] = []
+  for (const b of batches ?? []) {
+    for (const m of b.messages) {
+      if (m.role !== "assistant") continue
+      const text = m.content
+        .filter((p): p is Extract<Part, { type: "text" }> => p.type === "text")
+        .map((p) => p.text)
+        .join("")
+      if (text) texts.push(text)
     }
   }
+  if (texts.length) return texts[texts.length - 1]
   for (let i = folded.steps.length - 1; i >= 0; i--) {
     if (folded.steps[i].text) return folded.steps[i].text
   }
@@ -117,14 +128,18 @@ export function RunHeader({
   doc,
   folded,
   eventCount,
+  transcript,
 }: {
   doc: RunDoc
   folded: FoldedRun
   eventCount: number
+  /** The messages records: the finished words (deltas are not
+   * stored), fetched by the page beside the fold. */
+  transcript?: Transcript
 }) {
   const now = useNow(doc.status === "running")
-  const prompt = promptOf(doc)
-  const answer = answerOf(doc, folded)
+  const prompt = promptOf(transcript?.batches)
+  const answer = answerOf(transcript?.batches, folded)
   const timing =
     doc.status === "running"
       ? `running for ${elapsed(doc.started, now)}`
@@ -138,17 +153,17 @@ export function RunHeader({
           <BreadcrumbItem>
             <BreadcrumbLink render={<Link to="/runs" />}>runs</BreadcrumbLink>
           </BreadcrumbItem>
-          {doc.parent_id ? (
+          {doc.parent_run_id ? (
             <>
               <BreadcrumbSeparator />
               <BreadcrumbItem>
                 <BreadcrumbLink
                   render={
-                    <Link to="/runs/$id" params={{ id: doc.parent_id }} />
+                    <Link to="/runs/$id" params={{ id: doc.parent_run_id }} />
                   }
                   title="the parent run"
                 >
-                  {doc.parent_id}
+                  {doc.parent_run_id}
                 </BreadcrumbLink>
               </BreadcrumbItem>
             </>
@@ -227,9 +242,9 @@ export function RunHeader({
       {answer && !doc.err ? (
         <Quote label="answer" text={answer} tone="answer" />
       ) : null}
-      {doc.result?.stop_reason && doc.status !== "succeeded" ? (
+      {doc.stop_reason && doc.status !== "succeeded" ? (
         <div className="font-mono text-xs text-muted-foreground">
-          stop reason: {doc.result.stop_reason}
+          stop reason: {doc.stop_reason}
         </div>
       ) : null}
 
@@ -240,12 +255,37 @@ export function RunHeader({
         {doc.weft_version ? (
           <span className="font-mono">weft {doc.weft_version}</span>
         ) : null}
-        {Object.entries(doc.tags).map(([k, v]) => (
-          <span key={k} className="font-mono" title={`tag ${k}`}>
+        {doc.session_id ? (
+          <Link
+            to="/sessions/$id"
+            params={{ id: doc.session_id }}
+            className="font-mono hover:text-foreground hover:underline"
+            title="the thread this run belongs to (a turn of it)"
+          >
+            session {doc.session_id}
+            {doc.turn ? ` · turn ${doc.turn}` : ""}
+          </Link>
+        ) : null}
+        {doc.public_id ? (
+          <span className="font-mono" title="the public id (the browser-safe handle)">
+            {doc.public_id}
+          </span>
+        ) : null}
+        {Object.entries(doc.meta).map(([k, v]) => (
+          <span key={k} className="font-mono" title={`metadata ${k}`}>
             {k}={v}
           </span>
         ))}
-        <span>recorded locally by store.Record — content included</span>
+        {doc.trace_id ? (
+          <Link
+            to="/traces/$id"
+            params={{ id: doc.trace_id }}
+            className="font-mono hover:text-foreground hover:underline"
+            title="the OTel trace (correlation, polyglot)"
+          >
+            trace {doc.trace_id.slice(0, 8)}…
+          </Link>
+        ) : null}
       </div>
 
       {doc.children.length > 0 && (

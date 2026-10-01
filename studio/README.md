@@ -1,107 +1,183 @@
 # weft studio — the Inspector
 
-A read-only UI over a [run store](../store): the runs list, the run
-page (steps, tool calls and results, subagents inline, truncation
-badged), guaranteed replay over the event index, raw JSON, and agent
-and tool cards from the manifest. One `http.Handler`, no build step
-for users, fully offline.
+The UI, the JSON API, the live stream and the OTLP receiver over one
+[obsdb](../obsdb) database: the runs list, the run page (steps, tool
+calls and results, subagents lazy, truncation badged, replay over the
+event index, a time-axis waterfall when the run has spans), sessions
+(threads), any trace — weft or not — a live page, and agent and tool
+cards from the manifest. One `http.Handler`, no build step for users,
+fully offline.
 
-## Use it
+## The three setups (S4.6)
+
+**A · embedded** — the five lines beside your app
+([examples/studio-local](../examples/studio-local) is the whole thing,
+with a thread session whose turns stream in live):
 
 ```go
+defer otel.Install()() // local sink ./.weft/weft.db, content on, no network
 mux.Handle("/studio/", http.StripPrefix("/studio",
-    studio.Handler(myStore, studio.Manifest(manifestBytes)))
+    studio.Handler(studio.DB(otel.LocalDB())))) // same DB, same live hub
 ```
 
-Then record runs with `store.Record` (see
-[examples/basic](./examples/basic)) and open
-`http://127.0.0.1:7331/studio/`. Try the example end to end:
+Passing the pipeline's handle is what makes it live: writes publish to
+the handle's hub and `/api/live` follows, sub-100 ms, no network.
+`studio.Open(path)` opens an obsdb sqlite file; with neither, New
+opens `$WEFT_DB` or `./.weft/weft.db` (history only — a second handle
+on the file, no live lane).
+
+**B · local binary** — any language's app, several services:
 
 ```sh
-go run ./studio/examples/basic        # records three demo runs, serves :7331
-go run ./studio/examples/basic -serve # serve an existing database only
+go run ./studio/cmd                    # UI + OTLP + SQLite + dev token on 127.0.0.1:7331
+WEFT_STUDIO_URL=http://127.0.0.1:7331 ./my-go-app
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 python app.py
 ```
 
+The dev token is printed at start (`WEFT_STUDIO_TOKEN` or `--token`
+fixes it); ingest is open on loopback; `--db sqlite://path` picks the
+file, `--db clickhouse://user:pass@host:9000/db` the hosted backend
+(its own module, the one place the driver is imported).
+
+**C · hosted** — the same handler behind `studio.Token`: the panel's
+scoped tokens are HMAC-signed `{public_id, scope, exp}` minted by your
+backend through `POST /api/panel-tokens`; every data route refuses
+anything outside the token's public id.
+
+## The devtools panel (WEFT-DEVTOOLS.md)
+
+One script tag puts the run loop in the corner of your own page —
+`/panel.js` is served by the same handler:
+
+    <script type="module" src="/studio/panel.js" data-public-id="pub_…"></script>
+
+Rung 1 is a viewer scoped to that conversation: the turns (parked
+shown), the step story with tool calls, usage splits, approvals
+read-only, truncation/gap/stripped honesty, the raw JSON, a live tail,
+⤢ deep links into Studio, lazy subagents and a spans waterfall.
+`Alt+W` toggles (Q4), `?` lists keys, `r` flips raw. Setups B/C add
+`data-endpoint` and `data-token` (a dev token, or a panel token your
+backend mints per page via `POST /api/panel-tokens`). No Studio
+answering: the panel removes itself silently. The artifact is built by
+`studio/web/vite.panel.config.ts` (a separate library-mode build), the
+committed `studio/dist/panel/panel.js`, 63,475 B raw / 17.0 KiB gzip;
+`make studio-panel-asset` stages it as `panel-<version>.js` + sha256
+for non-Go backends.
+
+## The playground (WEFT-PLAYGROUND.md)
+
+Your app dials Studio out and executes experiment commands as runs of
+the agents it registers — setup A is five lines
+([runtime/examples/local](../runtime/examples/local) is the runnable
+demo behind the P0 curl gate):
+
+```go
+defer runtime.Install(runtime.Local(srv), // or runtime.Studio(url, tok)
+    runtime.Agents(support), runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000}),
+    runtime.AllowSideEffects("lookup_order"))()
+```
+
+Studio's side is `studio.New(..., studio.Playground(true))`, which
+serves `GET /api/runtimes` (the connected runtimes),
+`POST /api/playground/runs` (the §10.4 validation table: 400 unknown
+tool/model names and unsupported 8b modes, 403 raised limits or a
+refused side-effect tool, 404 unknown runtime/agent/source run, 409 a
+reused command id, 503 with no runtime connected) and
+`GET /api/playground/commands/{id}`, plus the runtime link's own
+routes (`POST /api/runtime/register`, `GET /api/runtime/commands` SSE,
+`POST /api/runtime/acks`). Safety: off unless `WEFT_ENV=dev` or
+`runtime.Enabled(true)`; overrides only narrow; a side-effect tool's
+call is substituted with its recorded result or parked
+(`weft.Replay(weft.ReplaySafe)` vouches a read, `AllowSideEffects`
+opts a tool into allow mode); budgets cap each experiment; the app's
+own runs are never touched.
+
+P1–P5 ride the same command: `transcript_edits` (validated on both
+sides — a patch names a call in the kept prefix, the prefix ends at a
+step boundary with every call answered), `engine: scripted` (the
+source run's recorded turns at zero tokens; scripted + an
+instructions/model override is refused — the §5.5 prompt trap), thread
+`fork` (a new session with lineage the panel can keep chatting in),
+`POST /api/runs/{id}/approvals` (a parked run's continue/skip/resolve
+— ADR 0007's own verbs), `POST /api/playground/fixtures` (the run's
+records as wefttest replay fixtures), and `GET/POST /api/experiments`
+with `GET /api/experiments/{id}` (the saved groups, PQ4). The
+debugger's rungs 3–4 act on runtime-started runs only (D7, PQ7):
+`PUT /api/runtimes/{id}/breakpoints` (capability `breakpoints`) and
+`POST /api/runs/{id}/steer` (capability `steer`) — `meta.debug_scope`
+says so. The panel's experiment drawer (the §3 form, the live result
+with the inline diff, the approvals, the 2-way compare) and the
+Studio `/playground` page (variants side by side with the metrics, the
+E9 variants × inputs matrix, the experiment history) both render them,
+each control only for its reported capability.
+
 The runs list (light): status as a dot and a word, the error under a
-failed run's id, filters that mirror the URL, the whole row opens the
-run:
+failed run's id, session/public-id/experiment filters that mirror the
+URL, the session column linking each turn to its thread, and a follow
+toggle that streams an agent's runs as they happen:
 
 ![runs list, light theme](screenshots/runs-light.png)
 
-The run page (light) — the prompt and the answer first, then the
-facts and the replay bar; below, the **trace**: the flow strip (one
-pill per step, arrows for results fed back), then the waterfall on
-the left — the run, its steps, tool calls and subagent runs (their
-own steps and calls nested) as spans on one axis — and the selected
-span's data on the right, read as *detail* (the same step and call
-bodies as the story), *events* (only that span's slice of the
-stream) or *json* (the folded node). The trace opens on whatever
-went wrong, else the first step; `j`/`k` or the arrow keys walk it;
-`?sel=` names the selection. The split appears when the content is
-about 768px wide (collapse the sidebar on a small screen), and the
-toggle beside the flow strip forces side by side or stacked:
+The run page (light) — the prompt and the answer first (the answer now
+comes from the transcript: deltas are live-only), then the facts; the
+**trace** draws on the **time axis** when the run has spans (real
+durations, `?axis=` picks; the position axis keeps the replay
+playhead), and subagent children expand lazily — their events are
+their own runs', fetched on demand:
 
 ![run page with the trace, light theme](screenshots/run-light.png)
 
-The axis is the event position: events carry no timestamps, so this
-is order, not duration (T2a's spans put time on the same component).
-Scrubbed to event 6 of 14, the replay playhead crosses every row,
-everything past it is veiled, and the detail panel renders the fold
-*at* the playhead — the call reads `running` until its finish is
-revealed:
-
-![trace scrubbed mid-run, light theme](screenshots/trace-light.png)
-
-A failed run (dark): the error at the top, the flow strip's step 1
-red, the `ORDER_NOT_FOUND` tool error as data (mustard, never red)
-selected first, and the step that had no `step_finish` saying so:
-
-![failed run with the trace, dark theme](screenshots/run-dark.png)
-
-The story view (`s`) is the step cards top to bottom, the same
-bodies as the detail panel:
-
-![story view, light theme](screenshots/story-light.png)
-
-Raw (light) — the events explorer: every event by position with its
-kind, type and a one-line summary, filtered by kind, searched by any
-JSON text, opened to the full event, and sent to the replay playhead
-with one click. The `document` surface is the run document as a
-collapsible tree; both copy and download whole:
-
-![raw events explorer, light theme](screenshots/raw-light.png)
-
-Replay (dark), scrubbed to event 6 of 14 — the readout names the
-event at the playhead, the steps show exactly the folded prefix, and
-a call without its finish yet reads *running…*:
-
-![replay, dark theme](screenshots/replay-dark.png)
-
-Dark and light follow the system; the sidebar footer's toggle (or the
-palette) cycles system → light → dark:
-
-![runs list, dark theme](screenshots/runs-dark.png)
+Sessions list a thread's turns in order with usage and the newest
+status; `/live` shows everything streaming right now; `/traces/{id}`
+renders any trace — a stock OTel GenAI app's included — as a span tree
+plus a chat view when semconv content was captured.
 
 Every view is a URL: filters, `view=story|raw` (and `raw=doc`), the
-selected span `sel` and detail mode `d`, the selected step, and the
-replay position `t` all live in search params — paste a link into an
-issue and it reproduces exactly. Keyboard: `⌘K` jumps to any recent
-run, `/` filters, `j`/`k` move (rows in the list, spans in the
-trace), `enter` opens, `e`/`s`/`r` switch trace/story/raw, `space`
-replays, `[`/`]` jump by step or tool event, `,`/`.` move one event,
-`?` lists everything, `g r`/`g a` navigate.
-Keys fire only on a bare press outside a text box — ctrl/⌘ always go
-to the browser.
+selected span `sel` and detail mode `d`, the axis, the selected step,
+and the replay position `t` all live in search params. Keyboard:
+`⌘K` jumps to any recent run, `/` filters, `j`/`k` move, `enter`
+opens, `e`/`s`/`r` switch trace/story/raw, `space` replays, `[`/`]`
+jump by step or tool event, `,`/`.` move one event, `?` lists
+everything. Keys fire only on a bare press outside a text box.
 
-## The API (plan §3 of docs/phase2b-studio-plan.md)
+## The API (S4.2/S4.3)
 
-Read-only JSON under `{base}api/`: `meta` (versions, capabilities),
-`runs` (list, filtered, paged by cursor), `runs/{id}` (the run
-document — never events), `runs/{id}/events?after=&limit=` (the paged
-event stream; a live tail is the same endpoint read from the last
-position), `manifest`. Capabilities are the hosting seam (ADR 0018
-§8): the open handler reports none; a hosted server declares them
-with `studio.Capabilities(…)`.
+JSON under `{base}api/`: `meta` (versions, the DB kind,
+`ingest_open`, `interrupted_after_ms`, capabilities), `runs` (agent,
+status, session, public id, playground and tag filters, cursor-paged),
+`runs/{id}` (the row and the subagent children — never events),
+`runs/{id}/events?after=&limit=` (the paged durable stream),
+`runs/{id}/transcript` (the messages bodies), `runs/{id}/spans`,
+`traces/{trace_id}` (any trace), `sessions`, `sessions/{id}` (turns in
+order), `public/{public_id}`, `manifest`, `POST /api/panel-tokens`
+(mint; the panel's scoped tokens — see the devtools panel above), and
+`GET /api/live` — the SSE
+stream whose frame ids are the hub's Seq: exactly one selector
+(`run`/`session`/`public_id`/`agent`), `kinds` over
+event/delta/messages/run (default `event,run`; deltas are opt-in,
+heartbeats never), a ping every 15 s, `Last-Event-ID` resume with the
+gap backfilled from the database and deduped on `(run, kind, pos)`,
+and `event: overflow` when a slow subscriber's queue drops it. OTLP
+ingest is `POST /v1/traces` and `/v1/logs` (protobuf and JSON, gzip,
+16 MiB after decompression, publish-then-write, 503 on a write failure
+so the exporter retries). Under `Playground(true)` the playground's
+routes join (`GET /api/runtimes`, `POST /api/playground/runs`, `GET
+/api/playground/commands/{id}`) beside the runtime link's own
+(`POST /api/runtime/register`, `GET /api/runtime/commands` SSE, `POST
+/api/runtime/acks`); `/panel.js` serves the devtools panel bundle —
+static and unauthenticated.
+
+Capabilities are computed from the registered route groups
+(`routes.go`) — never hard-coded: `live`, `ingest`, `auth` (with a
+token), and `playground` + `runtimes` under `Playground(true)`, plus
+anything a hosting wrapper declares with `studio.Capabilities(…)`.
+The panel group registers always on and names no capability;
+`panel.go` and `playground.go` add their groups through the package's
+hooks — nothing edits `routes.go`.
+
+Errors are `{"error": {"code", "message"}}` with the codes `not_found`,
+`bad_request`, `unauthorized`, `forbidden`, `conflict`, `unsupported`,
+`unavailable`, `internal`.
 
 ## Contributing to the UI
 
@@ -117,7 +193,8 @@ make studio-check   # rebuild, prove dist is fresh, check the 600 KiB gzip budge
 
 `make studio-check` is the freshness gate (ADR 0018 §4): it fails if
 `dist/` does not match `web/` or if the gzipped total exceeds 600 KiB
-(currently ~313 KiB). The build is deterministic — two builds from
+(currently ~341 KiB: the app's ~329 plus the panel bundle's 11.5).
+The build is deterministic — two builds from
 one tree are byte-identical (`scripts/clean-dist.ts` pins the router's
 prerender timestamp and keeps `<base href>` first in `<head>`).
 
@@ -126,4 +203,7 @@ The dev loop is two terminals: `go run ./studio/examples/basic
 dev -- --base /studio/` (Vite on :3000 proxying `/studio/api`).
 
 Go module: `github.com/weftgo/weft/studio`, requiring the tagged
-`weft` and `weft/store` — standalone-importable, no `replace`.
+`weft` and (until they tag, step 8's release) `weft/obsdb` through a
+directory `replace` that the release step drops — standalone-importable
+after that, no `replace`. The binary is its own module
+([cmd/](./cmd)), the one place that imports the clickhouse driver.

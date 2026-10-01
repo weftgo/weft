@@ -1,16 +1,21 @@
-// The runs list page (A1–A4). Every view, selection, and filter is in
-// the URL (A3): agent, status, tag, before paste into an issue. The
-// filter boxes mirror the URL (back/forward updates them), active
-// filters read as chips with a clear, and an empty result under a
-// filter says so instead of claiming nothing was ever recorded.
+// The runs list page (A1–A4, S4.7). Every view, selection, and filter
+// is in the URL (A3): agent, status, session, public id, experiments
+// on/off, before. The filter boxes mirror the URL (back/forward
+// updates them), active filters read as chips with a clear, and an
+// empty result under a filter says so instead of claiming nothing was
+// ever recorded. When an agent filter is set (the live stream's
+// selector), a follow toggle streams that agent's run frames and
+// refreshes the list as runs start and finish (S4.7's live rows).
 import { useEffect, useRef, useState } from "react"
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
-import { RefreshCw, X } from "lucide-react"
+import { RefreshCw, Radio, X } from "lucide-react"
 
 import { fetchRuns } from "@/lib/api"
 import type { RunsFilters, RunStatus } from "@/lib/api"
+import { openLive } from "@/lib/live"
 import { isPlainShortcut } from "@/lib/keys"
+import { useCapabilities } from "@/hooks/use-capabilities"
 import { EmptyState } from "@/components/studio/empty-state"
 import { RunsTable } from "@/components/studio/runs-table"
 import { Button } from "@/components/ui/button"
@@ -28,11 +33,20 @@ import { Spinner } from "@/components/ui/spinner"
 interface RunsSearch {
   agent?: string
   status?: RunStatus
+  session?: string
+  public_id?: string
+  /** Experiments on/off: absent = all runs; "off" excludes playground
+   * runs, "on" only those (S4.7). */
+  experiments?: "on" | "off"
   tag?: string // "k=v" — a single pair; more is T2
   before?: string
 }
 
 const STATUSES: RunStatus[] = ["running", "succeeded", "failed", "interrupted"]
+
+function experimentsLabel(v: "on" | "off" | undefined): string {
+  return v === "on" ? "experiments only" : v === "off" ? "experiments off" : "any runs"
+}
 const statusLabel: Record<string, string> = {
   all: "any status",
   running: "running",
@@ -52,6 +66,18 @@ export const Route = createFileRoute("/runs/")({
       (STATUSES as string[]).includes(search.status)
         ? (search.status as RunStatus)
         : undefined,
+    session:
+      typeof search.session === "string" && search.session
+        ? search.session
+        : undefined,
+    public_id:
+      typeof search.public_id === "string" && search.public_id
+        ? search.public_id
+        : undefined,
+    experiments:
+      search.experiments === "on" || search.experiments === "off"
+        ? search.experiments
+        : undefined,
     tag: typeof search.tag === "string" && search.tag ? search.tag : undefined,
     before:
       typeof search.before === "string" && search.before
@@ -66,6 +92,9 @@ export function filtersFromSearch(s: RunsSearch): RunsFilters {
   const filters: RunsFilters = {}
   if (s.agent) filters.agent = s.agent
   if (s.status) filters.status = s.status
+  if (s.session) filters.session = s.session
+  if (s.public_id) filters.public_id = s.public_id
+  if (s.experiments) filters.playground = s.experiments === "on"
   if (s.before) filters.before = s.before
   if (s.tag) {
     const i = s.tag.indexOf("=")
@@ -136,7 +165,27 @@ function RunsPage() {
   })
   const runs = page.data?.pages.flatMap((p) => p.runs) ?? []
   const total = page.data?.pages[0]?.total ?? 0
-  const filtered = Boolean(search.agent || search.status || search.tag)
+  const filtered = Boolean(
+    search.agent || search.status || search.tag || search.session || search.public_id || search.experiments
+  )
+  // Live rows (S4.7): with an agent filter — the live stream's one
+  // selector shape — a follow toggle subscribes to that agent's run
+  // frames and refreshes the list as runs start and finish.
+  const { has } = useCapabilities()
+  const [follow, setFollow] = useState(false)
+  const agentKey = search.agent ?? ""
+  useEffect(() => {
+    if (!follow || !agentKey || !has("live")) return
+    const live = openLive({
+      selector: { agent: agentKey },
+      kinds: ["run"],
+      onRun: () =>
+        void queryClient.invalidateQueries({ queryKey: ["runs", "infinite"] }),
+      onOverflow: () =>
+        void queryClient.invalidateQueries({ queryKey: ["runs", "infinite"] }),
+    })
+    return () => live.close()
+  }, [follow, agentKey, has("live"), queryClient])
 
   // j/k selection, enter opens, "/" focuses the filter box (A4). The
   // selection starts unset — nothing is highlighted until a key moves
@@ -203,6 +252,15 @@ function RunsPage() {
   if (search.agent) chips.push({ key: "agent", label: `agent ${search.agent}` })
   if (search.status)
     chips.push({ key: "status", label: `status ${search.status}` })
+  if (search.session)
+    chips.push({ key: "session", label: `session ${search.session}` })
+  if (search.public_id)
+    chips.push({ key: "public_id", label: `public id ${search.public_id}` })
+  if (search.experiments)
+    chips.push({
+      key: "experiments",
+      label: experimentsLabel(search.experiments),
+    })
   if (search.tag) chips.push({ key: "tag", label: `tag ${search.tag}` })
 
   return (
@@ -224,11 +282,57 @@ function RunsPage() {
           onApply={(v) => setSearch({ agent: v || undefined })}
         />
         <FilterBox
+          value={search.session ?? ""}
+          placeholder="session"
+          label="filter by session"
+          onApply={(v) => setSearch({ session: v || undefined })}
+        />
+        <FilterBox
+          value={search.public_id ?? ""}
+          placeholder="public id"
+          label="filter by public id"
+          onApply={(v) => setSearch({ public_id: v || undefined })}
+        />
+        <FilterBox
           value={search.tag ?? ""}
           placeholder="tag k=v"
           label="filter by tag"
           onApply={(v) => setSearch({ tag: v || undefined })}
         />
+        <Select
+          value={search.experiments ?? "any"}
+          onValueChange={(v) =>
+            setSearch({
+              experiments: v === "on" || v === "off" ? v : undefined,
+            })
+          }
+        >
+          <SelectTrigger className="h-8 w-36 text-xs" aria-label="experiments">
+            <SelectValue>{() => experimentsLabel(search.experiments)}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">any runs</SelectItem>
+            <SelectItem value="off">experiments off</SelectItem>
+            <SelectItem value="on">experiments only</SelectItem>
+          </SelectContent>
+        </Select>
+        {search.agent && has("live") ? (
+          <Button
+            variant={follow ? "default" : "outline"}
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            aria-pressed={follow}
+            title={
+              follow
+                ? "following this agent's runs live (/api/live?agent=)"
+                : "follow this agent's runs live (/api/live?agent=)"
+            }
+            onClick={() => setFollow((f) => !f)}
+          >
+            <Radio data-slot="icon" className={follow ? "animate-pulse" : ""} />
+            {follow ? "following" : "follow"}
+          </Button>
+        ) : null}
         <Select
           value={search.status ?? "all"}
           onValueChange={(v) =>
@@ -292,7 +396,14 @@ function RunsPage() {
             type="button"
             className="font-mono text-[11px] text-thread-ink hover:underline"
             onClick={() =>
-              setSearch({ agent: undefined, status: undefined, tag: undefined })
+              setSearch({
+                agent: undefined,
+                status: undefined,
+                tag: undefined,
+                session: undefined,
+                public_id: undefined,
+                experiments: undefined,
+              })
             }
           >
             clear all
@@ -327,6 +438,9 @@ function RunsPage() {
                   agent: undefined,
                   status: undefined,
                   tag: undefined,
+                  session: undefined,
+                  public_id: undefined,
+                  experiments: undefined,
                 })
               }
             >

@@ -10,13 +10,28 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LiveRouteImport } from './routes/live'
+import { Route as PlaygroundRouteImport } from './routes/playground'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
 import { Route as RunsIndexRouteImport } from './routes/runs.index'
 import { Route as RunsIdRouteImport } from './routes/runs.$id'
+import { Route as SessionsIndexRouteImport } from './routes/sessions.index'
+import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
+import { Route as TracesIdRouteImport } from './routes/traces.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LiveRoute = LiveRouteImport.update({
+  id: '/live',
+  path: '/live',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlaygroundRoute = PlaygroundRouteImport.update({
+  id: '/playground',
+  path: '/playground',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
@@ -34,39 +49,102 @@ const RunsIdRoute = RunsIdRouteImport.update({
   path: '/runs/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SessionsIndexRoute = SessionsIndexRouteImport.update({
+  id: '/sessions/',
+  path: '/sessions/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SessionsIdRoute = SessionsIdRouteImport.update({
+  id: '/sessions/$id',
+  path: '/sessions/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TracesIdRoute = TracesIdRouteImport.update({
+  id: '/traces/$id',
+  path: '/traces/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/live': typeof LiveRoute
+  '/playground': typeof PlaygroundRoute
   '/runs/$id': typeof RunsIdRoute
+  '/sessions/$id': typeof SessionsIdRoute
+  '/traces/$id': typeof TracesIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/runs/': typeof RunsIndexRoute
+  '/sessions/': typeof SessionsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/live': typeof LiveRoute
+  '/playground': typeof PlaygroundRoute
   '/runs/$id': typeof RunsIdRoute
+  '/sessions/$id': typeof SessionsIdRoute
+  '/traces/$id': typeof TracesIdRoute
   '/agents': typeof AgentsIndexRoute
   '/runs': typeof RunsIndexRoute
+  '/sessions': typeof SessionsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/live': typeof LiveRoute
+  '/playground': typeof PlaygroundRoute
   '/runs/$id': typeof RunsIdRoute
+  '/sessions/$id': typeof SessionsIdRoute
+  '/traces/$id': typeof TracesIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/runs/': typeof RunsIndexRoute
+  '/sessions/': typeof SessionsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/runs/$id' | '/agents/' | '/runs/'
+  fullPaths:
+    | '/'
+    | '/live'
+    | '/playground'
+    | '/runs/$id'
+    | '/sessions/$id'
+    | '/traces/$id'
+    | '/agents/'
+    | '/runs/'
+    | '/sessions/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/runs/$id' | '/agents' | '/runs'
-  id: '__root__' | '/' | '/runs/$id' | '/agents/' | '/runs/'
+  to:
+    | '/'
+    | '/live'
+    | '/playground'
+    | '/runs/$id'
+    | '/sessions/$id'
+    | '/traces/$id'
+    | '/agents'
+    | '/runs'
+    | '/sessions'
+  id:
+    | '__root__'
+    | '/'
+    | '/live'
+    | '/playground'
+    | '/runs/$id'
+    | '/sessions/$id'
+    | '/traces/$id'
+    | '/agents/'
+    | '/runs/'
+    | '/sessions/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  LiveRoute: typeof LiveRoute
+  PlaygroundRoute: typeof PlaygroundRoute
   RunsIdRoute: typeof RunsIdRoute
+  SessionsIdRoute: typeof SessionsIdRoute
+  TracesIdRoute: typeof TracesIdRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
   RunsIndexRoute: typeof RunsIndexRoute
+  SessionsIndexRoute: typeof SessionsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -76,6 +154,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/live': {
+      id: '/live'
+      path: '/live'
+      fullPath: '/live'
+      preLoaderRoute: typeof LiveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/playground': {
+      id: '/playground'
+      path: '/playground'
+      fullPath: '/playground'
+      preLoaderRoute: typeof PlaygroundRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/': {
@@ -99,14 +191,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RunsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sessions/': {
+      id: '/sessions/'
+      path: '/sessions'
+      fullPath: '/sessions/'
+      preLoaderRoute: typeof SessionsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sessions/$id': {
+      id: '/sessions/$id'
+      path: '/sessions/$id'
+      fullPath: '/sessions/$id'
+      preLoaderRoute: typeof SessionsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/traces/$id': {
+      id: '/traces/$id'
+      path: '/traces/$id'
+      fullPath: '/traces/$id'
+      preLoaderRoute: typeof TracesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  LiveRoute: LiveRoute,
+  PlaygroundRoute: PlaygroundRoute,
   RunsIdRoute: RunsIdRoute,
+  SessionsIdRoute: SessionsIdRoute,
+  TracesIdRoute: TracesIdRoute,
   AgentsIndexRoute: AgentsIndexRoute,
   RunsIndexRoute: RunsIndexRoute,
+  SessionsIndexRoute: SessionsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -2,12 +2,17 @@ package weft
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
+	"slices"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/semconv/v1.41.0"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -29,9 +34,13 @@ import (
 
 // instrumentationName names weft's tracer; version rides on it as the
 // instrumentation version (ADR 0005's release process owns the value).
+// The value is the version the NEXT root tag will carry: version_test
+// pins it against the newest v* tag reachable from HEAD or the
+// CHANGELOG's unreleased heading, whichever speaks, so it cannot go
+// stale again (it sat at v0.3.6 through the v0.5.0 release once).
 const (
 	instrumentationName = "github.com/weftgo/weft"
-	version             = "v0.3.6"
+	version             = "v0.7.0"
 )
 
 // The weft.* span attributes and the slog line keys, pinned by tests and
@@ -51,6 +60,32 @@ const (
 	attrToolApproved    = attribute.Key("weft.tool.approved")
 	attrToolPending     = attribute.Key("weft.tool.pending")
 	attrToolResultBytes = attribute.Key("weft.tool.result_bytes")
+)
+
+// The record attributes and event names (ADR 0024's record contract),
+// pinned by tests the same way. weft.record mirrors the EventName for
+// backends that drop it; the two positions are the two counters [D3].
+const (
+	attrRecord          = attribute.Key("weft.record")
+	attrEventType       = attribute.Key("weft.event.type")
+	attrEventPos        = attribute.Key("weft.event.pos")
+	attrDeltaPos        = attribute.Key("weft.delta.pos")
+	attrMessagesIndex   = attribute.Key("weft.messages.index")
+	attrMessagesCount   = attribute.Key("weft.messages.count")
+	attrMessagesInput   = attribute.Key("weft.messages.input")
+	attrContent         = attribute.Key("weft.content")
+	attrParentRunID     = attribute.Key("weft.parent.run.id")
+	attrParentCallID    = attribute.Key("weft.parent.call.id")
+	attrManifestHash    = attribute.Key("weft.manifest.hash")
+	attrVersion         = attribute.Key("weft.version")
+	attrMetadataDropped = attribute.Key("weft.metadata.dropped")
+
+	eventNameEvent    = "weft.event"
+	eventNameDelta    = "weft.delta"
+	eventNameMessages = "weft.messages"
+
+	contentFull = "full"
+	contentNone = "none"
 )
 
 // Log-line keys (ADR 0016's log table). A log is the caller's, unlike a
@@ -100,7 +135,12 @@ func providerName(p string) string {
 // no goroutine, no lock, no state between calls.
 type observer struct {
 	tracer trace.Tracer
-	log    *slog.Logger
+	// elog is the Logs API logger the run's records go through: the
+	// LoggerProvider option's, or the global one, which delegates (an
+	// SDK registered after New is still picked up) and answers Enabled
+	// false until one does — so a program with no SDK pays nothing.
+	elog log.Logger
+	log  *slog.Logger
 }
 
 // logger resolves the destination once per line: the option's logger
@@ -151,7 +191,14 @@ func usageSplits(u Usage) []attribute.KeyValue {
 // below, and every span a tool handler or child run starts, parents
 // under it. A child run's tree hangs under its delegating tool span
 // exactly as Nested events hang inside ToolStart..ToolFinish.
-func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo) (context.Context, func(res *RunResult, err error)) {
+//
+// extra carries the run-level attributes only the caller knows: the
+// subagent linkage (weft.parent.run.id / weft.parent.call.id), the
+// manifest hash, weft.version, weft.metadata.dropped when the limits
+// dropped pairs. The metadata in force on ctx lands on every span of
+// the run — this one and the model and tool spans below — verbatim,
+// with the semconv mirrors (metadataAttrs).
+func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo, extra []attribute.KeyValue) (context.Context, func(res *RunResult, err error)) {
 	ctx, span := o.tracer.Start(ctx, spanName(semconv.GenAIOperationNameInvokeAgent, agent),
 		trace.WithSpanKind(trace.SpanKindInternal))
 	start := time.Now()
@@ -166,6 +213,8 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo)
 		if info.Name != "" {
 			attrs = append(attrs, semconv.GenAIRequestModel(info.Name))
 		}
+		attrs = append(attrs, extra...)
+		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 	}
 	if l := o.logger(); l.Enabled(ctx, slog.LevelDebug) {
@@ -281,6 +330,7 @@ func (o *observer) model(ctx context.Context, runID string, step int, info Model
 		if info.Name != "" {
 			attrs = append(attrs, semconv.GenAIRequestModel(info.Name))
 		}
+		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 	}
 	return ctx, func(finish ModelFinish, finished bool, calls int, err error) {
@@ -372,6 +422,7 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context
 		if c.Approved {
 			attrs = append(attrs, attrToolApproved.Bool(true))
 		}
+		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 	}
 	return ctx, func(res ToolResultPart, pending bool, err error) {
@@ -486,4 +537,224 @@ func toolErrorType(err error) string {
 		return name
 	}
 	return "tool_error"
+}
+
+// recorder emits the run's OTel log records (ADR 0024): every durable
+// event and every delta through deliver — the one place each passes
+// exactly once — and the transcript's batches at their growth points
+// (recordMessages). Two counters [D3]: weft.event.pos numbers the seven
+// durable types, weft.delta.pos the three deltas, so dropping deltas
+// never opens a hole in the durable sequence; Nested takes neither (a
+// child run numbers its own). Records go out on the run's context, so
+// the SDK derives their trace/span ids from the invoke_agent span, and
+// nothing is emitted after that context ends (deliver checks first).
+//
+// Cost rule: Enabled is asked before anything is marshalled, so a
+// program with no SDK pays no JSON encoding; the no-SDK logger answers
+// false.
+type recorder struct {
+	elog log.Logger
+	// capture is the Content option's override; nil = as the logger in
+	// force says, resolved at each emission (agents are usually built
+	// before the pipeline installs; the global provider delegates).
+	capture *bool
+	runID   string
+	agent   string
+	// manifestHash is sha256(Manifest(a)) computed at New for a named
+	// agent; "" when unnamed. Reported on the run_start record and the
+	// invoke_agent span only.
+	manifestHash string
+
+	eventPos    atomic.Int64
+	deltaPos    atomic.Int64
+	messagesIdx atomic.Int64
+}
+
+// captureOn resolves the content question for one emission: the agent's
+// Content option when set; else whether any destination wants message
+// content, through the one standard Enabled question the pipeline's
+// processors answer per destination (S1.1 [D2]).
+func (r *recorder) captureOn(ctx context.Context) bool {
+	if r.capture != nil {
+		return *r.capture
+	}
+	return r.elog.Enabled(ctx, log.EnabledParameters{EventName: eventNameMessages})
+}
+
+// recordEvent reports one event from deliver, after the taps and before
+// the sink. Nested is not reported: the child run emitted (or dropped)
+// its own records, and recording the parent's wrapper copy would store
+// every child event twice (ADR 0024 D3).
+func (r *recorder) recordEvent(ctx context.Context, ev Event) {
+	var kind, eventName string
+	switch ev.(type) {
+	case RunStart, StepStart, ToolStart, ToolFinish, StepFinish, Steered, RunFinish:
+		kind, eventName = "event", eventNameEvent
+	case TextDelta, ReasoningDelta, ToolArgsDelta:
+		kind, eventName = "delta", eventNameDelta
+	default:
+		return
+	}
+	if !r.elog.Enabled(ctx, log.EnabledParameters{EventName: eventName}) {
+		return
+	}
+
+	var rec log.Record
+	rec.SetTimestamp(time.Now())
+	rec.SetEventName(eventName)
+	rec.SetSeverity(log.SeverityInfo)
+	if tf, ok := ev.(ToolFinish); ok && tf.IsError {
+		rec.SetSeverity(log.SeverityWarn)
+	}
+	body := ev
+	content := contentFull
+	if !r.captureOn(ctx) {
+		body, content = StripContent(ev), contentNone
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		return // an event that cannot encode is dropped, never fatal
+	}
+	rec.SetBody(attribute.StringValue(string(b)))
+
+	attrs := []attribute.KeyValue{
+		attrRecord.String(kind),
+		attrRunID.String(r.runID),
+		attrEventType.String(eventDiscriminator(ev)),
+		attrContent.String(content),
+	}
+	if r.agent != "" {
+		attrs = append(attrs, semconv.GenAIAgentName(r.agent))
+	}
+	if kind == "delta" {
+		attrs = append(attrs, attrDeltaPos.Int64(r.deltaPos.Add(1)-1))
+	} else {
+		attrs = append(attrs, attrEventPos.Int64(r.eventPos.Add(1)-1))
+	}
+	switch e := ev.(type) {
+	case StepStart:
+		attrs = append(attrs, attrStepIndex.Int(e.Index))
+	case StepFinish:
+		attrs = append(attrs, attrStepIndex.Int(e.Index))
+	case Steered:
+		attrs = append(attrs, attrStepIndex.Int(e.Step))
+	case ToolStart:
+		attrs = append(attrs, attrToolSeq.Int64(e.Seq), semconv.GenAIToolCallID(e.CallID), semconv.GenAIToolName(e.Name))
+	case ToolFinish:
+		attrs = append(attrs, attrToolSeq.Int64(e.Seq), semconv.GenAIToolCallID(e.CallID), semconv.GenAIToolName(e.Name))
+	case RunStart:
+		// The linkage a child run reports: the parent's ids from the call
+		// its context carries (CallFromContext is the parent's tool call
+		// the child executes under). Absent on a top-level run.
+		if c, ok := CallFromContext(ctx); ok {
+			attrs = append(attrs, attrParentRunID.String(c.RunID), attrParentCallID.String(c.CallID))
+		}
+		if r.manifestHash != "" {
+			attrs = append(attrs, attrManifestHash.String(r.manifestHash))
+		}
+		attrs = append(attrs, attrVersion.String(version))
+	}
+	attrs = append(attrs, metadataAttrs(ctx)...)
+	rec.AddAttributes(attrs...)
+	r.elog.Emit(ctx, rec)
+}
+
+// recordMessages reports one batch of messages joining the run's
+// transcript — the five growth points (S1.3 [D1]): the repaired input at
+// run start, the tool message a resume creates or rebuilds, each
+// assistant message, each tool message, each steered batch. Emitted only
+// when capture is on: pure content, unlike the event records, which keep
+// their stripped shape. step is the step the batch belongs to (0 for the
+// input); input marks index 0. The body is a JSON array of Message,
+// never capped — a capped transcript is not replay-grade (ADR 0024 D1).
+func (r *recorder) recordMessages(ctx context.Context, step int, msgs []Message, input bool) {
+	if len(msgs) == 0 || !r.captureOn(ctx) {
+		return
+	}
+	if !r.elog.Enabled(ctx, log.EnabledParameters{EventName: eventNameMessages}) {
+		return
+	}
+	b, err := json.Marshal(msgs)
+	if err != nil {
+		return
+	}
+
+	var rec log.Record
+	rec.SetTimestamp(time.Now())
+	rec.SetEventName(eventNameMessages)
+	rec.SetSeverity(log.SeverityInfo)
+	rec.SetBody(attribute.StringValue(string(b)))
+	attrs := []attribute.KeyValue{
+		attrRecord.String("messages"),
+		attrRunID.String(r.runID),
+		attrContent.String(contentFull),
+		attrStepIndex.Int(step),
+		attrMessagesIndex.Int64(r.messagesIdx.Add(1) - 1),
+		attrMessagesCount.Int(len(msgs)),
+	}
+	if input {
+		attrs = append(attrs, attrMessagesInput.Bool(true))
+	}
+	if r.agent != "" {
+		attrs = append(attrs, semconv.GenAIAgentName(r.agent))
+	}
+	attrs = append(attrs, metadataAttrs(ctx)...)
+	rec.AddAttributes(attrs...)
+	r.elog.Emit(ctx, rec)
+}
+
+// metadataAttrs renders the metadata in force on ctx as span/record
+// attributes: every key verbatim, sorted, plus the semconv mirrors
+// backends group on — weft.session.id as gen_ai.conversation.id and
+// session.id (Logfire reads the first, Langfuse and Phoenix the second),
+// enduser.id as user.id (ADR 0024's identity chain).
+func metadataAttrs(ctx context.Context) []attribute.KeyValue {
+	md := metadataFromCtx(ctx)
+	if len(md) == 0 {
+		return nil
+	}
+	attrs := make([]attribute.KeyValue, 0, len(md)+3)
+	for _, k := range slices.Sorted(maps.Keys(md)) {
+		attrs = append(attrs, attribute.String(k, md[k]))
+	}
+	if v := md["weft.session.id"]; v != "" {
+		attrs = append(attrs,
+			semconv.GenAIConversationIDKey.String(v),
+			semconv.SessionIDKey.String(v))
+	}
+	if v := md["enduser.id"]; v != "" {
+		attrs = append(attrs, semconv.UserIDKey.String(v))
+	}
+	return attrs
+}
+
+// eventDiscriminator returns ev's wire "type" (ADR 0004) — the value
+// weft.event.type reports.
+func eventDiscriminator(ev Event) string {
+	switch ev.(type) {
+	case RunStart:
+		return eventRunStart
+	case StepStart:
+		return eventStepStart
+	case TextDelta:
+		return eventTextDelta
+	case ReasoningDelta:
+		return eventReasoningDelta
+	case ToolArgsDelta:
+		return eventToolArgsDelta
+	case ToolStart:
+		return eventToolStart
+	case ToolFinish:
+		return eventToolFinish
+	case StepFinish:
+		return eventStepFinish
+	case Steered:
+		return eventSteered
+	case RunFinish:
+		return eventRunFinish
+	case Nested:
+		return eventNested
+	default:
+		return ""
+	}
 }

@@ -1,11 +1,15 @@
 package sqlite_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +49,41 @@ func TestConformanceMemory(t *testing.T) {
 			t.Fatal(err)
 		}
 		return st
+	})
+}
+
+// The session-level table: the turn machinery's promises that depend
+// on what the backend stores — the mixed batch's resume join, a
+// queued send restored after a restart — on a file database and on
+// ":memory:".
+func TestConformanceTurns(t *testing.T) {
+	t.Run("file", func(t *testing.T) { threadtest.RunTurns(t, openFile) })
+	t.Run("memory", func(t *testing.T) {
+		threadtest.RunTurns(t, func(t *testing.T) thread.Storage {
+			st, err := sqlite.Open(":memory:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			return st
+		})
+	})
+}
+
+// The one-writer sub-table: two Storages over one file are the
+// in-process shape of two processes — the second writer is ErrLocked,
+// and Release hands the session over.
+func TestConformanceTwoWriters(t *testing.T) {
+	threadtest.RunTwoWriters(t, func(t *testing.T) (thread.Storage, thread.Storage) {
+		path := filepath.Join(t.TempDir(), "sessions.db")
+		first, err := sqlite.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := sqlite.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return first, second
 	})
 }
 
@@ -130,9 +169,10 @@ func TestReopenReadsWhatWasWritten(t *testing.T) {
 	}
 }
 
-// A schema_migrations ahead of this binary fails Open with
-// ErrNewerSchema: a database written by a newer weft never runs with
-// nothing said (the store's rule, shared here).
+// A thread file whose versions table (schema_migrations, the name a
+// pre-rename binary wrote; thread_migrations after) is ahead of this
+// binary fails Open with ErrNewerSchema: a database written by a newer
+// weft never runs with nothing said (the store's rule, shared here).
 func TestNewerSchemaIsRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "newer.db")
 	db, err := sql.Open("sqlite", "file:"+path)
@@ -140,7 +180,8 @@ func TestNewerSchemaIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(
-		`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+		`CREATE TABLE sessions (id TEXT PRIMARY KEY, created TEXT NOT NULL, header TEXT NOT NULL);
+		 CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 		 INSERT INTO schema_migrations (version, applied_at) VALUES (999, '2030-01-01T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +234,7 @@ func TestSalvageSkipsMalformedLines(t *testing.T) {
 }
 
 // The Flusher capability exists and answers existence: everything here
-// is already committed, so Flush has nothing to buffer.
+// is already committed, and under the default policy already fsynced.
 func TestFlusher(t *testing.T) {
 	ctx := context.Background()
 	st := openFile(t)
@@ -212,9 +253,10 @@ func TestFlusher(t *testing.T) {
 	}
 }
 
-// The fsync-policy options are accepted: the shared vocabulary stays
-// portable across backends, and a Session driving a flush cadence gets
-// the same answers from every one of them.
+// The fsync-policy options are honoured through the shared
+// vocabulary: a Session driving a flush cadence gets the same answers
+// from every backend (the policy itself is pinned by
+// TestFsyncPolicyIsTheSynchronousLevel).
 func TestFsyncOptionsAccepted(t *testing.T) {
 	ctx := context.Background()
 	st, err := sqlite.Open(filepath.Join(t.TempDir(), "cadence.db"), thread.FsyncOnFlush())
@@ -234,12 +276,22 @@ func TestFsyncOptionsAccepted(t *testing.T) {
 	}
 }
 
-// Appends after an injected torn row corrupt the session, exactly as
-// appending after a torn tail corrupts a jsonl file: the crash's bytes
-// are mid-session now, and Load says so with the line.
-func TestAppendAfterTornCorruptsLikeJsonl(t *testing.T) {
+// An Append after an injected torn row removes it first — the writer's
+// repair, the rule jsonl follows with a truncate: the new entry takes
+// the torn row's place in the order, the session loads clean, and the
+// repair is logged. sqlite's own writes cannot tear (an append is one
+// transaction), so the torn row exists only through threadtest's
+// Inject; the rule is kept identical anyway, so the conformance table
+// has one answer for every backend. Before it, the appended row sat
+// behind the torn one and every later Load failed with ErrCorrupt.
+func TestAppendAfterTornRepairs(t *testing.T) {
 	ctx := context.Background()
-	st := openFile(t)
+	var logged bytes.Buffer
+	st, err := sqlite.Open(filepath.Join(t.TempDir(), "torn.db"),
+		thread.OpenLogger(slog.New(slog.NewTextHandler(&logged, nil))))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := st.Create(ctx, thread.Header{ID: "s_aftertorn", Created: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
@@ -247,16 +299,173 @@ func TestAppendAfterTornCorruptsLikeJsonl(t *testing.T) {
 	if err := inj.Inject(ctx, "s_aftertorn", []byte(`{"type":"message","id":"e_t`)); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, report, err := st.Load(ctx, "s_aftertorn"); err != nil || report == nil || report.Torn != 2 {
+		t.Fatalf("before the repair: report %+v, err %v; want Torn=2", report, err)
+	}
 	if err := st.Append(ctx, "s_aftertorn", thread.MessageEntry{
 		ID: "e_2", Created: time.Now().UTC(), Message: weft.User("after the crash"),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, err := st.Load(ctx, "s_aftertorn")
+	_, entries, report, err := st.Load(ctx, "s_aftertorn")
+	if err != nil || report != nil || len(entries) != 1 {
+		t.Fatalf("after the repair: %d entries, report %+v, err %v; want the one complete entry and a clean load", len(entries), report, err)
+	}
+	if !strings.Contains(logged.String(), "removed a torn tail") || !strings.Contains(logged.String(), "session=s_aftertorn") {
+		t.Errorf("the repair was not reported:\n%s", logged.String())
+	}
+}
+
+// A torn row with rows behind it is not something this backend writes
+// — its write path removes a torn row before appending — so a database
+// that holds one was written by something else, and Load says so:
+// ErrCorrupt naming the line, never a silent skip.
+func TestTornRowMidSessionIsCorrupt(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "midtorn.db")
+	st, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Create(ctx, thread.Header{ID: "s_midtorn", Created: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(`INSERT INTO entries (session, seq, line, torn) VALUES
+		('s_midtorn', 0, '{"type":"mess', 1),
+		('s_midtorn', 1, '{"type":"message","id":"e_2","created":"2026-09-29T00:00:00Z","message":{"role":"user","content":[]}}', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err = st.Load(ctx, "s_midtorn")
 	var ce *thread.CorruptError
 	if !errors.Is(err, thread.ErrCorrupt) || !errors.As(err, &ce) || ce.Line != 2 {
-		t.Fatalf("Load over a torn line mid-session: err = %v, want CorruptError on line 2", err)
+		t.Fatalf("Load over a torn row mid-session: err = %v, want CorruptError on line 2", err)
 	}
+}
+
+// A database path is a file name, taken literally: '?', '#' and '%'
+// are characters of the name, not URI syntax. Unescaped, the '?'
+// started the DSN's query — the database landed in a file named for
+// the part before it, and the pragmas after it were lost.
+func TestOpenPathWithURICharacters(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "what?now#100%.db")
+	st, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Create(ctx, thread.Header{ID: "s_named", Created: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.Size() == 0 {
+		t.Fatalf("the database is not in the file the caller named: %v (size %d)", err, fi.Size())
+	}
+	names, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range names {
+		if !strings.HasPrefix(n.Name(), "what?now#100%.db") {
+			t.Errorf("a stray file beside the database: %q", n.Name())
+		}
+	}
+	again, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err := again.List(ctx, thread.Query{}); err != nil || p.Total != 1 {
+		t.Errorf("reopen: total %d, err %v", p.Total, err)
+	}
+}
+
+// Migration 0003 on a database written before it: the sessions and
+// their locks survive, the title is re-derived under the non-empty
+// rule, a keyset page works, and a watcher over an old session (the
+// empty generation) still sees it replaced.
+func TestMigration0003OnExistingData(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "v2.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE sessions (
+		id TEXT PRIMARY KEY, created TEXT NOT NULL, header TEXT NOT NULL, title TEXT NOT NULL DEFAULT '');
+		CREATE INDEX sessions_created ON sessions(created DESC);
+		CREATE TABLE entries (
+		session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+		seq INTEGER NOT NULL, line TEXT NOT NULL, torn INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (session, seq));
+		CREATE TABLE session_locks (
+		session TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+		host TEXT NOT NULL, owner TEXT NOT NULL, pid INTEGER NOT NULL, taken TEXT NOT NULL);
+		CREATE TABLE thread_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+		INSERT INTO thread_migrations (version, applied_at) VALUES (1, 'x'), (2, 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	// Two sessions sharing one creation time; the first was retitled
+	// and then had a metadata-only info entry (an empty title) — which
+	// migration 0002's rule had stored as its title — and a line that
+	// is not JSON at all.
+	for _, id := range []string{"s_a", "s_b"} {
+		if _, err := db.Exec(`INSERT INTO sessions (id, created, header, title) VALUES (?,?,?,'')`,
+			id, "2026-09-29T12:00:00.000000000Z",
+			`{"type":"session","weft":1,"id":"`+id+`","created":"2026-09-29T12:00:00Z"}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for seq, line := range []string{
+		`{"type":"info","id":"e_1","created":"2026-09-29T00:00:00Z","title":"kept title"}`,
+		`{"type":"info","id":"e_2","created":"2026-09-29T00:00:00Z","meta":{"k":"v"}}`,
+		`not json at all`,
+	} {
+		if _, err := db.Exec(`INSERT INTO entries (session, seq, line, torn) VALUES ('s_a',?,?,0)`, seq, line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A lock row from before the migration, its holder long dead.
+	if _, err := db.Exec(`INSERT INTO session_locks (session, host, owner, pid, taken) VALUES ('s_b', ?, 'gone/owner', 1073741824, 'x')`,
+		hostname(t)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatalf("Open over a schema-2 database: %v", err)
+	}
+	if p, err := st.List(ctx, thread.Query{TitleSearch: "kept"}); err != nil || p.Total != 1 || p.Sessions[0].ID != "s_a" {
+		t.Errorf("the re-derived title: %+v, err %v; want s_a under its last non-empty title", p, err)
+	}
+	first, err := st.List(ctx, thread.Query{Limit: 1})
+	if err != nil || len(first.Sessions) != 1 || first.Sessions[0].ID != "s_b" || first.Total != 2 {
+		t.Fatalf("first keyset page: %+v, err %v", first, err)
+	}
+	next, err := st.List(ctx, thread.Query{Limit: 1, Before: first.Sessions[0].Created, BeforeID: first.Sessions[0].ID})
+	if err != nil || len(next.Sessions) != 1 || next.Sessions[0].ID != "s_a" {
+		t.Fatalf("second keyset page through the tie: %+v, err %v", next, err)
+	}
+	// The old lock row's dead holder is taken over.
+	if err := st.Append(ctx, "s_b", thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: weft.User("x")}); err != nil {
+		t.Errorf("Append over a pre-migration lock row whose holder is dead: %v", err)
+	}
+}
+
+func hostname(t *testing.T) string {
+	t.Helper()
+	h, err := os.Hostname()
+	if err != nil || h == "" {
+		return "unknown-host"
+	}
+	return h
 }
 
 // An empty database migrates on Open; a second Open over the migrated
@@ -403,11 +612,13 @@ func TestLoadReadsOneSnapshot(t *testing.T) {
 	time.Sleep(50 * time.Millisecond) // let the reader see the last generation
 }
 
-// The Watch capability (plan §7): the shared conformance table, plus
-// the backend's own shape — the tail reads through WAL while another
-// handle keeps writing, the cross-process shape.
+// The Watch capability: the shared conformance table runs under
+// TestConformanceFile and TestConformanceMemory (Run adds RunWatch for
+// a thread.Watcher — including the consumer that writes inside the
+// loop, which the single working connection used to deadlock); this
+// test adds the backend's own shape — the tail reads through WAL while
+// another handle keeps writing, the cross-process shape.
 func TestWatch(t *testing.T) {
-	threadtest.RunWatch(t, openFile)
 	path := filepath.Join(t.TempDir(), "tail.db")
 	writer, err := sqlite.Open(path)
 	if err != nil {

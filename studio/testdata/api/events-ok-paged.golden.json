@@ -2,6 +2,7 @@
   "events": [
     {
       "pos": 2,
+      "time": "2020-01-01T09:00:00.623Z",
       "event": {
         "type": "tool_start",
         "run_id": "r_ok",
@@ -15,10 +16,11 @@
     },
     {
       "pos": 3,
+      "time": "2020-01-01T09:00:01.123Z",
       "event": {
         "type": "tool_finish",
         "run_id": "r_ok",
-        "seq": 2,
+        "seq": 1,
         "call_id": "call_1",
         "name": "lookup_order",
         "content": "order 42: shipped",
@@ -27,19 +29,21 @@
     },
     {
       "pos": 4,
+      "time": "2020-01-01T09:00:01.623Z",
       "event": {
         "type": "step_finish",
         "run_id": "r_ok",
         "index": 0,
-        "reason": "tool_calls",
+        "reason": "end_turn",
         "usage": {
           "input_tokens": 10,
-          "output_tokens": 5
+          "output_tokens": 4
         }
       }
     }
   ],
   "next_after": 5,
-  "done": false
+  "done": true,
+  "gaps": []
 }
 

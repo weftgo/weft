@@ -31,7 +31,6 @@ import {
   eventType,
   isBoundary,
   kindClass,
-  unwrap,
 } from "@/lib/summarize"
 import { Button } from "@/components/ui/button"
 
@@ -319,7 +318,6 @@ export function ReplayBar({
         ) : current ? (
           <>
             <span className="text-faint tabular-nums">#{at - 1}</span>
-            <NestedMark ev={current} />
             <span className={kindClass(eventKind(current))}>
               {eventType(current)}
             </span>
@@ -332,16 +330,5 @@ export function ReplayBar({
         )}
       </div>
     </div>
-  )
-}
-
-/** "↳ ×2" for an event two levels into a subagent. */
-export function NestedMark({ ev }: { ev: WireEvent }) {
-  const { depth } = unwrap(ev)
-  if (depth === 0) return null
-  return (
-    <span className="text-faint" title={`nested ${depth} deep (subagent)`}>
-      {"↳".repeat(depth)}
-    </span>
   )
 }

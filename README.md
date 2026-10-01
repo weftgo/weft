@@ -303,44 +303,56 @@ model returned, because a log is the caller's
 
 ### Recording runs
 
-Module `weft/store` (v0.1.1) records what a run did and reads it back:
-one record per run — identity (agent, model, manifest hash, tags),
-every event in order, and the result, kept on failure as the partial
-transcript. Install `store.Record` on every agent of a fleet; a
-subagent's child records itself and links to the parent's call. Events
-are appended as they arrive, so a crash loses nothing emitted and a
-reader can tail a live run; a run whose heartbeat goes stale reads
-`interrupted`. The record is not a checkpoint — replay is the
-Inspector's job ([ADR 0010](docs/adr/0010-record-format.md)).
+The pipeline is the recorder ([ADR 0024](docs/adr/0024-observability-data.md)):
+`defer otel.Install()()` writes the local sink (`./.weft/weft.db`,
+content on, no network) and every event, delta, transcript record and
+span leaves as it happens — a crash loses nothing emitted. Caller
+pairs ride `weft.Metadata`; a quiet run heartbeats, so a live run
+reads `running` and a crashed one `interrupted`. The recorder's
+database is module `weft/obsdb`: the OTLP-shaped model with the
+derived weft identity, read back through one `obsdb.DB` interface —
+runs, sessions, positioned event pages, transcripts, spans by run or
+trace, public ids — with `obsdb/sqlite` as the default backend and
+`obsdb/clickhouse` as the hosted one (column-compatible with the OTel
+Collector's ClickHouse exporter, so a stock collector can feed the
+same database).
 
 ```go
-s, _ := sqlite.Open(".weft/dev.db")            // ":memory:" works too; store.Memory() in tests
-agt := weft.New(model, store.Record(s, store.Tags(map[string]string{"cwd": wd})), tools...)
-page, _ := s.List(ctx, store.Query{})          // no events in rows, a Total, a Before cursor
-rec, _  := s.Get(ctx, page.Runs[0].ID)         // everything: stream, result, tags
-_ = s.Delete(ctx, rec.ID)                      // children survive, orphaned
+defer otel.Install()()                          // the recorder: local sink, content on
+db := otel.LocalDB()                            // the same handle Studio reads [D4]
+page, _ := db.Runs(ctx, obsdb.RunQuery{})       // identity chain, status derived
+rec, _ := db.Run(ctx, page.Runs[0].ID)          // the row + its subagent children
+evs, _ := db.Events(ctx, rec.ID, 0, 50)         // positioned events, inclusive cursor
 ```
-
-`go run ./store/examples/basic` records a run with a tool call and a
-subagent into `.weft/dev.db` and prints the table, the event stream,
-and the child run — the shape the Inspector reads.
 
 ### Inspecting runs
 
-Module `weft/studio` (v0.1.0) is the Inspector: a read-only UI over a
-run store, served as one `http.Handler` with the UI embedded — no
-build step, no Node at runtime, nothing leaves the process. The runs
-list, the run page with its trace waterfall, guaranteed replay over
-the event index, raw JSON, and agent and tool cards from the
-manifest ([studio/README.md](studio/README.md), ADR 0018).
+Module `weft/studio` is the Inspector, rewritten on obsdb (ADR 0024
+S4): the UI, a JSON API (runs with their filters, transcripts, spans,
+traces, sessions, public ids), the OTLP/HTTP ingest receiver, and the
+live SSE stream — served as one `http.Handler` with the UI embedded,
+no build step, nothing leaves the process. Setup A embeds it beside
+the app and passes the pipeline's handle for the live lane; a token
+(`studio.Token`) walls the API when it leaves loopback. Setup B is the
+binary — module `weft/studio/cmd`, the one place that imports the
+ClickHouse driver — for any language's OTel app: UI + ingest + a dev
+token on `127.0.0.1:7331`, `--db sqlite://path` or
+`clickhouse://user:pass@host:9000/db` ([studio/README.md](studio/README.md)).
 
 ```go
 mux.Handle("/studio/", http.StripPrefix("/studio",
-    studio.Handler(s, studio.Manifest(manifestBytes))))  // bind loopback: no auth yet
+    studio.Handler(studio.DB(otel.LocalDB()))))   // history + live [D4]
 ```
 
-`go run ./studio/examples/basic` records three demo runs and serves
-Studio on `127.0.0.1:7331/studio/`.
+```sh
+go run ./studio/cmd --db sqlite://.weft/dev.db    # OTel app: point
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 # its exporter here
+```
+
+`go run ./studio/examples/basic` records demo runs (a tool call, a
+subagent, a failure) into an obsdb database and serves Studio on
+`127.0.0.1:7331`; `examples/studio-local` is setup A's five lines with
+a live thread session.
 
 ## Sessions — `weft/thread`
 
@@ -362,39 +374,76 @@ for ev, err := range turn.Events() { ... }     // forwarded run events, replayab
 
 s.Branch(ctx, entryID)                         // navigate the tree; nothing lost
 fork, _ := s.Fork(ctx, entryID)                // a new session, self-contained
+s.Close(ctx)                                   // drain, seal, give up the writer's lease
 again, _ := thread.Open(ctx, st, s.ID(), agent) // reopen from disk, same context
 ```
+
+**One Session writes a session, and `Close` is how it stops.** A
+`Session` takes its session's writer lease with its first write
+(`Create` is one) and holds it until `s.Close(ctx)`, which stops new
+work, drains the running turn and the queue, and seals the value
+(`thread.ErrClosed`). Until then a second `Session` on the same
+session opens and reads, and its writes fail with `thread.ErrLocked`;
+one that fell behind another writer fails with `thread.ErrStale` —
+open the session again. `Open` itself only reads: it writes nothing,
+locks nothing and starts no run. A `Turn` can be waited on three ways
+— `turn.Wait()`, `turn.WaitContext(ctx)`, `<-turn.Done()` — and
+`turn.Outcome()` names how it ended; `s.WaitIdle(ctx)` also waits for
+the compaction a turn may trigger after it is decided.
 
 Durability is per step (ADR 0011 §7): the turn's messages are appended
 as they join the run — through `weft.OnMessages`, the core's transcript
 observer — so a crash mid-turn loses nothing emitted; the prompt was
 already durable before the run started. Two backends carry it:
 `thread/jsonl` (one file per session) and `thread/sqlite` (one SQLite
-file, WAL, its own module so the driver never enters `thread`). One
-writer per session — a second gets `thread.ErrLocked` — while readers
-never lock, including the live tail:
-
-Delegation is bounded and receipted (ADR 0022): `thread/pool` admits
-at most `pool.New(max)` child runs per process, FIFO. `p.Wrap` turns
-any agent into a delegation tool — sync by default, the call waiting
-for the child session's answer; `pool.Async()` returns a receipt the
-model reads in a later turn — and `p.Submit` hands background work to
-a child session directly, `p.Cancel` and a draining `p.Close` at hand.
-Every child is a session of its own, linked to the parent by lineage,
-its cost in the parent's `Usage.Delegated` bucket. A child that parks
-at an approval surfaces on the parent's `Pending()`; `p.Decide`
-resumes it, and the parent's parked call completes with the child's
-answer.
+file, WAL, its own module so the driver never enters `thread`). A
+crash mid-append leaves at most a torn final line, which the next
+writer removes before it appends. Across processes and `Storage`
+values a second writer gets `thread.ErrLocked`, while readers never
+lock, including the live tail:
 
 ```go
 w := st.(thread.Watcher)
 for e, err := range w.Watch(ctx, s.ID(), lastEntryID) { … } // another process's tail
 
 p, _ := st.List(ctx, thread.Query{
-    Meta:        map[string]string{"env": "prod"}, // every pair, exactly
+    Meta:        map[string]string{"env": "prod"}, // every pair present, exactly
     TitleSearch: "checkout",                       // the session's current title
-})                                                 // Before/Limit page the matches
+})                                                 // newest first; page with Before + BeforeID
 ```
+
+[docs/thread-operations.md](docs/thread-operations.md) is the
+operator's page: file layout and backups, locks and leases, shutdown,
+torn-tail repair, costs and limits, and which errors to retry.
+
+Delegation is bounded and receipted (ADR 0022): a `thread/pool` admits
+at most `max` child runs at work at once — the bound is the `Pool`
+value's, FIFO, and a run that is only waiting on its own child holds
+no slot. `p.MustWrap` turns any agent into a delegation tool (`p.Wrap`
+returns the error instead of panicking) — sync by default, the call
+waiting for the child session's answer; with `pool.Async()` the tool
+result is the receipt and the child runs on — and `p.Submit` hands
+background work to a child session directly:
+
+```go
+pl := pool.New(4)                                       // at most 4 child runs at work
+research := pl.MustWrap("research", "Research a topic.", researcher)
+rc, _ := pl.Submit(ctx, s, researcher, "survey the options") // a receipt, at once
+rc2, _ := pl.Wait(ctx, s, rc.ID)                        // settled, or parked at an approval
+err := pl.Decide(ctx, s, thread.Approve(childCallID))   // records and arms; does not wait
+err = pl.Recover(ctx, s)                                // after a restart, once per parent
+err = pl.Close(ctx)                                     // cancel what runs, drain
+```
+
+Every child is a session of its own, linked to the parent by lineage,
+its cost in the parent's `Usage.Delegated` bucket (not in the parent
+run's usage). A child that parks at an approval surfaces on the
+parent's `Pending()`; `pl.Decide` records the decisions in the parent
+and queues the child's resume — follow it with `pl.Wait` — and the
+parent's parked call completes with the child's answer. `pl.Cancel`
+ends one delegation, `pool.Receipts(s)` reads the ledger, and
+`pl.Recover` reattaches, settles or fails what a dead process left
+unsettled; it never re-runs a child.
 
 Approvals (ADR 0021) make the core's run boundary durable: a gated
 call parks as a request entry written with its turn, `Pending()`
@@ -408,22 +457,34 @@ res, _ = turn.Wait()                       // res.Pending: the gated calls
 for _, r := range s.Pending() { notify(r) } // durable, restart-safe
 
 rt, _ := s.Decide(ctx, thread.Approve(id)) // resumes when the boundary completes
-follow := turn.Next()                      // the auto-resume's turn, when one ran
+follow := turn.Next()                      // the same resume, from the parked turn
 
 s.Grant(ctx, thread.Grant{                 // "always allow go test"
     Tool: "run",
     Args: []thread.Arg{thread.ArgGlob("/command", "go test*")},
 })
-rt, _ = s.DecideSigned(ctx, sd)            // decisions that crossed a process:
-r, _ := s.Request(callID)                  // a challenge under the session's Keyring
-sd = thread.SignDecision(key, r, thread.Approve(callID))
+
+// Decisions that cross a process boundary are signed.
+ring, _ := thread.NewKeyring(thread.Key{ID: "k1", Secret: secret, Active: true})
+s, _ = thread.Create(ctx, st, agent,
+    thread.WithKeyring(ring),
+    thread.RequireSigned(),                       // stored in the header: every Open enforces it
+    thread.WithApprover(ask, 30*time.Second))     // the live step and the time it is given
+r, _ := s.Request(callID)                         // a challenge bound to this request entry
+sd, _ := ring.Sign(r, thread.Approve(callID))     // or key.Sign: one key is one approver
+rt, _ = s.DecideSigned(ctx, sd)                   // verified fail-closed, single-use
 ```
 
 Grants match tool plus argument predicates (`ArgEquals`, `ArgPrefix`,
 `ArgGlob`), expire, count uses, revoke, and can deny outright;
-`Quorum(n)` needs n distinct approvers; `RequireSigned()` closes the
-unsigned door; `s.Audit()` tells the whole story from the file. A
-`Send` while approvals pend queues behind them.
+`Quorum(n)` needs n distinct approvers (a signed approval counts as its
+key); `RequestExpiry(d)` lapses a request nobody decided;
+`RequireSigned()` closes the unsigned door for the session's whole
+life. A signed decision is bound to the request entry it was minted
+for, so it can never approve a later call that reuses the id.
+`s.Audit()` returns the approval trail from the file — an index of
+what the session recorded, not tamper-evidence. A `Send` while
+approvals pend queues behind them.
 
 `go run ./thread/examples/approvals` parks a call, restarts, decides
 signed, resumes, and replays a rejected signature — offline, pinned.
@@ -435,9 +496,10 @@ busy policy, per session or per Send:
 s, _ := thread.Create(ctx, st, agent, thread.BusyPolicy(thread.Steer))
 
 steer, _ := s.Send(ctx, weft.User("wait — metric units"))  // mid-run
-steer.Wait()                                  // nil result: the receipt's fate
-s.Queue()                                     // the live steer queue
-n, _ := s.ClearQueue(ctx)                     // drop the undelivered: receipts
+steer.Wait()                                  // nil result: a steer has no run of its own
+steer.Outcome()                               // delivered, deferred or dropped
+s.Queue()                                     // steers and sends accepted, not yet run
+n, _ := s.ClearQueue(ctx)                     // drop them: receipts, Turns end ErrDropped
 
 turn, _ := s.Send(ctx, weft.User("stop, do this instead"),
     thread.As(thread.Interrupt))              // cancel the run, run this next
@@ -450,15 +512,20 @@ after the tool batch, or at what would have been the final step —
 through a receipt that is durable from acceptance: `queued → delivered
 | deferred | dropped`, entries in the file. A steer that meets an
 intended end (`StopWhen`) or an open approval boundary never drains:
-it defers to a follow-up turn (`steer.Next()`). `Interrupt` cancels
-the in-flight run — its dangling calls record the interruption text —
-and denies a parked boundary it supersedes; `Rollback` also branches
-the leaf back, so the follow-up answers as though the interrupted turn
-never happened (its entries stay on their own line: nothing lost). A
-turn that overflows the window (`weft.ErrContextOverflow`, mapped by
-every adapter) compacts — reason `overflow` — and re-runs once
-(`thread.ReRunOnOverflow(false)` to turn it off); a second overflow
-fails the turn with both errors joined.
+it defers to a follow-up turn (`steer.Next()`). A send that waits for
+a turn of its own — the default `Queue` policy on a busy session — is
+durable the same way (an `accepted` receipt), so a crash loses no
+accepted message: the next `Open` restores it to `s.Queue()`, and it
+runs ahead of the next `Send` or at once with `s.Continue(ctx)`.
+`Interrupt` cancels the in-flight run — its dangling calls record the
+interruption text — and denies a parked boundary it supersedes;
+`Rollback` also branches the leaf back, so the follow-up answers as
+though the interrupted turn never happened (its entries stay on their
+own line: nothing lost). A turn that overflows the window
+(`weft.ErrContextOverflow`, mapped by every adapter) compacts —
+reason `overflow` — and re-runs once (`thread.ReRunOnOverflow(false)`
+to turn it off); a second overflow fails the turn with both errors
+joined.
 
 Compaction (ADR 0020) keeps long sessions inside the window without
 losing anything: the older part is summarized behind a fixed marker,
@@ -474,16 +541,31 @@ s, _ = thread.Create(ctx, st, agent,
     thread.SummaryModel(cheap),          // falls back to the session model
     thread.SummaryFocus("keep file paths"),
     thread.ClearOldToolResults(4),       // stub old tool results before summarizing
-    thread.BeforeCompact(hook),          // Proceed / Cancel / Replace
+    thread.BeforeCompact(hook),          // thread.Proceed() / Cancel() / Replace(c)
 )
 plan, _ := s.PreviewCompaction(ctx)      // the cut and the summary, no write
 s.ApplyCompaction(ctx, plan)             // or s.Compact(ctx) for both
+s.Compact(ctx, thread.SummaryInstructions("focus on the API design")) // per-call guidance
 s.Uncompact(ctx)                         // branch back — undo is a navigation
 ```
+
+`thread.NoAutoCompact()` turns the automatic trigger off and leaves the
+manual calls. Compaction is a between-turns operation: `Compact`,
+`ApplyCompaction` and `Uncompact` fail with `thread.ErrBusy` while a
+turn runs. Hooks run without the session's lock and may call the
+session.
 
 `go run ./thread/examples/session` walks a session through turns, a
 label, a branch, a fork, a previewed compaction and a reopen from
 disk, offline through a scripted model.
+
+`weft/thread` is pre-1.0 and **not frozen**: its API and its stored
+format may still change between minor versions, each change recorded
+in the CHANGELOG with what to write instead. What holds today: a
+reader fails loudly (`ErrNewerFormat`) on an entry kind or version it
+does not know, never skipping it, and golden files pin every format
+version the current build reads
+([ADR 0011](docs/adr/0011-thread-sessions.md), format reference).
 
 ## The manifest — `weft.json`
 
@@ -668,11 +750,27 @@ wefttest/             scripted mock model + the conformance suite
 openai/               OpenAI Chat Completions (+ compatible servers)
 anthropic/            Anthropic Messages (thinking, signatures)
 google/               Gemini via genai
-store/                run records: Record tap, Memory + sqlite backends, storetest
-studio/               the Inspector: read-only handler + embedded UI (web/ is its Bun source)
-examples/             runnable core example (per-adapter: <adapter>/example)
+thread/ (+ sqlite/)   sessions: the append-only conversation tree, durable Storage backends
+otel/                 the observability pipeline: destinations, content policies, heartbeats
+obsdb/                the observability database: model, DB interface, sqlite backend, obsdbtest
+obsdb/clickhouse/     the hosted backend (collector-compatible schema, materialized views)
+studio/               the Inspector on obsdb: UI + JSON API + OTLP ingest + live (web/ is its
+                      Bun source, cmd/ the setup-B binary)
+runtime/              the playground's in-app side: the Studio link, the experiment executor
+examples/             runnable examples (otel, studio-local; per-adapter: <adapter>/example)
 docs/adr/             decision records for the contracts
 ```
+
+Each module directory tags independently (ADR 0005's monorepo rule).
+The current set (2026-10-02) is root `v0.7.0`, `thread` `v0.9.0`
+(with `thread/sqlite` `v0.3.0`), `obsdb` `v0.1.1`, `obsdb/clickhouse`
+`v0.1.1`, `otel` `v0.1.1`, `studio` `v0.3.1`, `studio/cmd` `v0.1.1`,
+`runtime` `v0.1.1` — and every module resolves from its tag, no
+replaces. The whole
+recorder-and-inspector story is two lines: `defer otel.Install()()`
+and `studio.Handler(studio.DB(otel.LocalDB()))` (Recording runs and
+Inspecting runs above); `weft/runtime` adds the playground with one
+deferred `runtime.Install(...)` call.
 
 ## Development
 
@@ -732,12 +830,15 @@ an exported symbol always fails.
    usage limits, loop detection, `PrepareStep`; ADR 0014).
 4. ~~MCP interop~~ — **done** (consume and expose; ADR 0015). ~~Core
    observability~~ — **done** (OTel spans + slog lines; ADR 0016).
-5. The satellites: ~~`store`~~ — **done** (v0.1.1; ADR 0010).
-   ~~`studio`~~ — **T1 done** (the Inspector, v0.1.0; ADR 0018).
-   Next: `thread` — sessions, branching, compaction, approvals,
-   steering, pool, sandbox, v0.1 → v1.0 (designed in
-   [ADR 0011](docs/adr/0011-thread-sessions.md) and ADRs 0019–0023),
-   then `serve` and the eval/prompt/mem/trace modules.
+5. The satellites: ~~`store`~~ — **removed** (step 5 of ADR 0024;
+   v0.1.3 remains on the module proxy). ~~`studio`~~ — **done** (the
+   Inspector, v0.1.0, ADR 0018; rewritten on obsdb, ADR 0024 S4).
+   ~~`thread`~~ — **shipped** (sessions, branching, compaction,
+   approvals, steering, pool; [ADR 0011](docs/adr/0011-thread-sessions.md)
+   and ADRs 0019–0022; the sandbox, ADR 0023, was abandoned). Pre-1.0
+   and not frozen: the 2026-10-01 review's fix train is the current
+   work, then a field trial in real use before any API or format
+   freeze. After it: `serve` and the eval/prompt/mem/trace modules.
 
 ## License
 

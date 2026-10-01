@@ -1,14 +1,19 @@
-go 1.26
+go 1.26.0
 
 use (
 	.
 	./anthropic
 	./examples/otel
+	./examples/studio-local
 	./google
 	./mcp
+	./obsdb
+	./obsdb/clickhouse
 	./openai
-	./store
+	./otel
+	./runtime
 	./studio
+	./studio/cmd
 	./thread
 	./thread/sqlite
 )

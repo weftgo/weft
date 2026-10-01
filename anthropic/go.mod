@@ -1,6 +1,6 @@
 module github.com/weftgo/weft/anthropic
 
-go 1.26
+go 1.26.0
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.72.0
@@ -25,5 +25,5 @@ require (
 	go.opentelemetry.io/otel/metric v1.46.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
-	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
 )

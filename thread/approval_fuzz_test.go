@@ -5,21 +5,25 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/wefttest"
 )
 
-// FuzzDecideSigned (step 7.1): the signed-decision verifier over
-// arbitrary input never panics, answers only from its error catalogue,
-// and records nothing unless every check passed — a fuzzed decision is
-// a client that turned hostile, and the door is the MAC. The seed set
-// holds one properly signed decision (the mutator starts a byte away
-// from acceptance), so every error path is reachable and the accepted
-// path is exercised too: the one input that verifies closes the
-// boundary, and everything after it answers ErrNotPending or ErrReplay
-// — both catalogued.
+// FuzzDecideSigned: the signed-decision verifier over arbitrary input
+// never panics, answers only from its error catalogue, and records no
+// decision unless every check passed — a fuzzed decision is a client
+// that turned hostile, and the door is the MAC. The seed set holds one
+// properly signed decision (the mutator starts a byte away from
+// acceptance) and the near misses a hostile signer would try — a
+// blank nonce, a made-up one, a zeroed expiry, another occurrence —
+// each properly MAC'd, so the checks behind the MAC are reachable.
+// The one input that verifies closes the boundary, and everything
+// after it answers ErrNotPending or ErrReplay — both catalogued.
+// ErrUnknownKey is not in DecideSigned's catalogue: an unknown key id
+// reads as a bad signature.
 func FuzzDecideSigned(f *testing.F) {
 	ctx := context.Background()
 	key := []byte("fuzz-key-material")
@@ -47,38 +51,70 @@ func FuzzDecideSigned(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	valid, err := json.Marshal(thread.SignDecision(key, req, thread.Approve(req.CallID)))
-	if err != nil {
-		f.Fatal(err)
+	seed := func(edit func(*thread.Request)) {
+		r := req
+		if edit != nil {
+			edit(&r)
+		}
+		b, err := json.Marshal(thread.SignDecision(key, r, thread.Approve(r.CallID)))
+		if err != nil {
+			f.Fatal(err)
+		}
+		f.Add(b)
 	}
-	f.Add(valid)
+	seed(nil)
+	seed(func(r *thread.Request) { r.Nonce = "" })
+	seed(func(r *thread.Request) { r.Nonce = "00000000000000000000000000000000.00000000000000000000000000000000" })
+	seed(func(r *thread.Request) { r.Expiry = time.Unix(1, 0) })
+	seed(func(r *thread.Request) { r.ID, r.RunID = "e_another", r.Session+"-t99" })
+	seed(func(r *thread.Request) { r.KeyID = "k9" })
+	seed(func(r *thread.Request) { r.ArgsSHA256 = "00" })
 	f.Add([]byte(`{}`))
 	f.Add([]byte(`not json`))
-	f.Add([]byte(`{"key_id":"nope","mac":"AAAA"}`))
-	f.Add([]byte(`{"key_id":"k1","kind":"approve","expiry":"2030-01-01T00:00:00Z","mac":"AAAA"}`))
+	f.Add([]byte(`{"KeyID":"nope","MAC":"AAAA"}`))
+	f.Add([]byte(`{"KeyID":"k1","Kind":"approve","Expiry":"2030-01-01T00:00:00Z","MAC":"AAAA"}`))
 
+	decisions := func() int {
+		n := 0
+		for _, e := range s.Entries() {
+			if _, ok := e.(thread.ApprovalDecisionEntry); ok {
+				n++
+			}
+		}
+		return n
+	}
 	f.Fuzz(func(t *testing.T, data []byte) {
 		var sd thread.SignedDecision
 		if err := json.Unmarshal(data, &sd); err != nil {
 			return // malformed JSON is the decoder's loud, not the verifier's
 		}
+		before := decisions()
 		_, err := s.DecideSigned(ctx, sd)
 		switch {
 		case err == nil:
 			if p := s.Pending(); len(p) != 0 {
 				t.Fatalf("a verified decision left the boundary open: %+v", p)
 			}
-		case errors.Is(err, thread.ErrUnknownKey),
-			errors.Is(err, thread.ErrBadSignature),
+			if sd.Nonce == "" {
+				t.Fatal("a decision with no nonce verified")
+			}
+			if got := decisions(); got != before+1 {
+				t.Fatalf("a verified decision recorded %d decision entries, want 1", got-before)
+			}
+		case errors.Is(err, thread.ErrUnknownKey):
+			t.Fatalf("DecideSigned named an unknown key: %v", err)
+		case errors.Is(err, thread.ErrBadSignature),
 			errors.Is(err, thread.ErrExpired),
 			errors.Is(err, thread.ErrReplay),
 			errors.Is(err, thread.ErrNotPending),
 			errors.Is(err, thread.ErrArgsChanged):
-			// the catalogue, in the order DecideSigned checks
+			// the catalogue — and fail-closed: a refusal records no
+			// decision (its audit step is not one)
+			if got := decisions(); got != before {
+				t.Fatalf("a refused signature recorded %d decision entries: %v", got-before, err)
+			}
 		default:
 			t.Fatalf("an error outside the catalogue: %v", err)
 		}
 	})
 }
-
-var _ = weft.User // the parked walk's shape, kept honest

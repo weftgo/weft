@@ -4,3 +4,14 @@
 #
 # Reset at v0.3.5 (2026-09-27): the 0.3.4 → 0.3.5 cycle is additive —
 # OnRunEnd, nothing else; no entries; the gate diffs against v0.3.5.
+# (Re-reset at v0.5.0, 2026-09-29: the 0.5.0 cycle was additive.)
+#
+# Reset at v0.6.0 (2026-10-01): the cycle's three D9 widenings — the
+# dual options' return types, Option → superset interface, source-
+# compatible — shipped in this tag; no entries remain; the gate diffs
+# against v0.6.0.
+#
+# Reset at v0.7.0 (2026-10-01): the cycle is additive — ReplayPolicy,
+# Replay, ReplaySafe, ReplayNever, ToolDef.ReplayPolicy; no entries;
+# the gate diffs against v0.7.0.
+

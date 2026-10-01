@@ -15,10 +15,10 @@ import (
 	"github.com/weftgo/weft/thread"
 )
 
-// The mid-turn crash harness (plan §7, ADR 0011 §7): a child process
+// The mid-turn crash harness (ADR 0011 §7): a child process
 // runs a two-step turn against a real backend — the first step calls a
 // tool, the second blocks in the model — and the parent SIGKILLs it
-// once the first step is fully emitted. The assertions pin the v0.4
+// once the first step is fully emitted. The assertions pin the per-step
 // promise: everything emitted is durable (prompt, the signed assistant
 // message, the tool message), nothing is torn, the turn entry never
 // landed (the turn never ended), and a reopened session continues from

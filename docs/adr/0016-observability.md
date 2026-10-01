@@ -384,3 +384,40 @@ the gap, both observation-scoped, neither a seam:
 In the same spirit as `CallFromContext` (an accessor over data the
 context already carries), both are taps-see-not-change surface. Pinned
 by `TestAgentFromContext*` and `TestAgentLogger`.
+
+## Amendment (2026-09-30 — observability data: the Logs API joins the trace API; ADR 0024)
+
+The observability-data programme (ADR 0024, which decides it) widens
+this ADR's dependency sentence: "the OTel trace API is the one
+dependency" becomes "the OTel trace **and logs** APIs".
+`go.opentelemetry.io/otel/log v0.22.0` requires exactly the pinned
+`otel v1.46.0` and shares its `attribute` package, so no version moves;
+the pre-1.0 risk is confined to `observe.go`, and the move to the
+stable line when v1.47.0 is final will amend this note. On top of the
+spans, the observer now emits **records** through the Logs API: every
+durable event as a log record (`weft.record = event`, `weft.event.type`,
+`weft.event.pos` contiguous from 0 per run), the three deltas as records
+of kind `delta` on their own counter `weft.delta.pos`, and `messages`
+records at five emission points including the run's repaired input —
+their concatenation equals `RunResult.Messages` byte-for-byte. A new
+run option, `weft.Metadata(map[string]string)`, rides the context, lands
+on every span and record of the run (keys under `weft.` are the weft
+modules' namespace), and is inherited by subagents; `thread` stamps
+`weft.session.id` and `weft.turn` through it.
+
+O7 holds: content is still off by default, and spans still carry none.
+`weft/otel`'s `Install` turns capture on, and the core learns "on"
+through one standard call at each emission —
+`Logger.Enabled(ctx, EnabledParameters{EventName: "weft.messages"})` —
+because the global provider delegates `Enabled` faithfully and the SDK
+answers true when any processor does. Caps and redaction are
+`weft/otel`'s, per destination; the core reads no environment variable
+and never truncates content (`weft.StripContent` is the satellite's one
+shaping tool). The manifest hash moves onto the run's `invoke_agent`
+span and its `run_start` record as `weft.manifest.hash`, computed at
+`New` for a named agent — the store computed it per run through
+`AgentFromContext`, and the store is deleted (ADR 0010 is superseded by
+ADR 0024). The span table above gains the new attribute families (the
+linkage, provenance, metadata and override rows) unchanged in meaning;
+the full contract, including the record attribute families and the
+identity chain, is ADR 0024's.

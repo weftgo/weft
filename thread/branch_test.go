@@ -12,8 +12,8 @@ import (
 	"github.com/weftgo/weft/wefttest"
 )
 
-// msgs appends one message entry per text through the storage (Send
-// arrives in step 1.7), each entry's parent the session's current
+// msgs appends one message entry per text through the storage (no
+// model run needed), each entry's parent the session's current
 // leaf, then reopens the session — a write behind a Session's back is
 // invisible to it until the next Open — returning the refreshed
 // session and the ids.
@@ -45,6 +45,9 @@ func reopen(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Sess
 // fresh scripted one on the way back in.
 func reopenWith(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Session, agent *weft.Agent, opts ...thread.SessionOption) *thread.Session {
 	t.Helper()
+	// One Session writes a session: the lease of the one being
+	// replaced ends first, as its process ending would end it.
+	abandon(t, st, s.ID())
 	again, err := thread.Open(ctx, st, s.ID(), agent, opts...)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
@@ -191,13 +194,12 @@ func TestBranchValidation(t *testing.T) {
 		if n := len(restarted.Entries()); n != 4 { // one, two, and the two leaf entries
 			t.Errorf("Entries after branch to root = %d, want 4 (nothing deleted)", n)
 		}
-		// SummarizeLeft now summarizes (step 1.8); its shape is
-		// pinned by TestBranchSummarizeLeft.
+		// SummarizeLeft's shape is pinned by TestBranchSummarizeLeft.
 		_ = restarted
 	})
 }
 
-// The SummarizeLeft option, wired by step 1.8: the branch being left
+// The SummarizeLeft option: the branch being left
 // is summarized with the compaction summarizer, and the new line's
 // context carries the summary in the abandoned branch's place
 // (ADR 0020 §6).

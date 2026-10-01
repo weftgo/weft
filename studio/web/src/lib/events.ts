@@ -1,16 +1,21 @@
-// Event folding (plan §4.4): turn a run's raw wire-event stream into
-// the shape the run page renders. Pure functions, no React — the
+// Event folding (plan §4.4, S4.3): turn a run's raw wire-event stream
+// into the shape the run page renders. Pure functions, no React — the
 // hardest-tested module in the app.
 //
-// Events carry no timestamps, so nothing here knows time: steps and
-// calls are ordered by stream position (the run's Seq order, D6). A
-// tool call keyed by call_id opens at tool_start and closes at
-// tool_finish; nested events fold recursively into the owning call's
-// child run (B7).
+// Events carry their positions, so steps and calls order by stream
+// position (the run's Seq order, D6); each PosEvent from the API also
+// carries its time. A tool call keyed by call_id opens at tool_start
+// and closes at tool_finish. Subagents are no longer nested in the
+// stream: a child is its own run joined by parent_call_id — the page
+// links children onto the folded calls (linkChildren) and the
+// subagent block fetches each child's events on expand (B7, lazy).
+// Deltas are not stored, so a finished run's text comes from its
+// transcript, not from text_delta events: applyTranscript overlays
+// the final words and arguments (S4.3).
 import type {
+  Message,
   ModelInfo,
   Part,
-  ResultDoc,
   ToolCallPart,
   Usage,
   WireEvent,
@@ -31,8 +36,9 @@ export interface FoldedToolCall {
   streamedArgs: string
   state: "running" | "done"
   result?: ToolCallResult
-  /** The subagent run this call owns, folded from nested events. */
-  child?: FoldedRun
+  /** The subagent run this call owns, linked by parent_call_id
+   * (linkChildren); its events are fetched on expand, never inline. */
+  childRunId?: string
   /** Stream position of tool_start — replay "to here" lands after it. */
   startPos: number
   /** Stream position of tool_finish, once seen. */
@@ -79,9 +85,7 @@ export interface FoldedRun {
  */
 export interface FoldFeed {
   /** Feed one event. pos is its stream position; it defaults to the
-   * number of events fed so far (the top-level stream's own count).
-   * A nested child stream is fed with its parent's positions, so
-   * "replay to here" on a child call still names a top-level index. */
+   * number of events fed so far (the top-level stream's own count). */
   push: (ev: WireEvent, pos?: number) => void
   /** A fresh view of everything fed so far; the feed keeps accepting. */
   result: () => FoldedRun
@@ -103,13 +107,6 @@ export function fold(
   return feed.result()
 }
 
-/** fold over (event, position) pairs — a nested child's sub-stream. */
-function foldAt(events: { ev: WireEvent; pos: number }[]): FoldedRun {
-  const feed = newFold()
-  for (const { ev, pos } of events) feed.push(ev, pos)
-  return feed.result()
-}
-
 /**
  * foldMore extends a previous fold with one events page — the seam the
  * paged reader and T2a's live tail stream through (plan §4.4): pages
@@ -124,10 +121,6 @@ export function newFold(): FoldFeed {
   const run: FoldedRun = { runId: "", steps: [], pending: [], finished: false }
   // tool_args_delta carries no call id — keyed by best-known name.
   const streamedArgs = new Map<string, string>()
-  // A call's child events, collected in arrival order and folded at
-  // result() time: nested is just a sub-stream (nested within nested
-  // included), so one recursive fold covers all depths.
-  const nested = new Map<string, { ev: WireEvent; pos: number }[]>()
   let count = 0
   let at = 0 // the position of the event being pushed
 
@@ -217,17 +210,6 @@ export function newFold(): FoldFeed {
           run.pending = ev.pending ?? []
           run.finishPos = at
           break
-        case "nested": {
-          const entry = { ev: ev.event, pos: at }
-          const list = nested.get(ev.call_id)
-          if (list) list.push(entry)
-          else nested.set(ev.call_id, [entry])
-          const c = findCall(ev.call_id)
-          if (c)
-            for (const s of run.steps)
-              if (s.toolCalls.includes(c) && at > s.to) s.to = at
-          break
-        }
       }
     },
     result(): FoldedRun {
@@ -244,13 +226,77 @@ export function newFold(): FoldFeed {
         startPos: run.startPos,
         finishPos: run.finishPos,
       }
-      for (const [callId, events] of nested) {
-        const call = findCall(callId)
-        if (call) call.child = foldAt(events)
-      }
       return out
     },
   }
+}
+
+/**
+ * linkView stamps a run's subagent runs onto a folded view's calls: a
+ * child's parent_call_id names the parent's tool call (S4.3). The
+ * page calls it on every view it renders (the fold itself knows
+ * nothing about the run's children — they are data, not events), and
+ * the subagent block fetches each child's events on expand.
+ */
+export function linkView(
+  view: FoldedRun,
+  children: { id: string; parent_call_id: string }[]
+): FoldedRun {
+  for (const child of children) {
+    if (!child.parent_call_id) continue
+    for (const step of view.steps) {
+      const call = step.toolCalls.find((c) => c.callId === child.parent_call_id)
+      if (call && !call.childRunId) {
+        call.childRunId = child.id
+        break
+      }
+    }
+  }
+  return view
+}
+
+/**
+ * applyTranscript overlays the finished words onto a fold: the sinks
+ * do not store deltas (S4.3/S4.7), so a run loaded from history has
+ * no text_delta events — its text and tool arguments come from the
+ * messages records instead. Assistant messages map onto steps in
+ * order (each step produces one), and a message's tool-call parts
+ * carry the arguments the model finally sent. Live runs keep what the
+ * deltas streamed; this only fills steps whose text is still empty,
+ * so a live tail and a reload agree.
+ */
+export function applyTranscript(
+  view: FoldedRun,
+  batches: { messages: Message[] }[]
+): FoldedRun {
+  const assistants = batches
+    .flatMap((b) => b.messages)
+    .filter((m) => m.role === "assistant")
+  assistants.forEach((msg, i) => {
+    const step = view.steps[i]
+    if (!step) return
+    const text = msg.content
+      .filter((p): p is Extract<Part, { type: "text" }> => p.type === "text")
+      .map((p) => p.text)
+      .join("")
+    if (text && !step.text) step.text = text
+    const reasoning = msg.content
+      .filter(
+        (p): p is Extract<Part, { type: "reasoning" }> => p.type === "reasoning"
+      )
+      .map((p) => p.text)
+      .join("")
+    if (reasoning && !step.reasoning) step.reasoning = reasoning
+    for (const part of msg.content) {
+      if (part.type !== "tool_call") continue
+      for (const s of [step]) {
+        const call = s.toolCalls.find((c) => c.callId === part.id)
+        if (call && call.args === undefined && part.args !== undefined)
+          call.args = part.args
+      }
+    }
+  })
+  return view
 }
 
 /** The text of a steered message: its text parts joined. Files and
@@ -296,53 +342,4 @@ export function truncation(content: string): Truncation | null {
   const call = TRUNCATED_CALL.exec(content)
   if (call) return { kind: "call", tool: call[1] }
   return null
-}
-
-// ── Cross-check against the store's result document (§4.4) ────────
-
-export interface CrossCheckMismatch {
-  step: number
-  detail: string
-}
-
-/**
- * Compare the folded stream against result.steps — the store's own
- * record of the same run. Dev builds log every mismatch as a bug
- * signal; production ignores the result.
- */
-export function crossCheck(
-  folded: FoldedRun,
-  result: ResultDoc | null
-): CrossCheckMismatch[] {
-  if (!result?.steps) return []
-  const out: CrossCheckMismatch[] = []
-  for (const doc of result.steps) {
-    const step = folded.steps.find((s) => s.index === doc.index)
-    if (!step) {
-      out.push({ step: doc.index, detail: "missing in fold" })
-      continue
-    }
-    if (doc.text && doc.text !== step.text) {
-      out.push({
-        step: doc.index,
-        detail: `text differs (${step.text.length} vs ${doc.text.length} chars)`,
-      })
-    }
-    if (
-      step.finish &&
-      doc.usage.input_tokens + doc.usage.output_tokens !==
-        step.finish.usage.input_tokens + step.finish.usage.output_tokens
-    ) {
-      out.push({ step: doc.index, detail: "usage differs from step_finish" })
-    }
-    const docCalls = (doc.tool_calls ?? []).map((c) => c.id).join(",")
-    const foldCalls = step.toolCalls.map((c) => c.callId).join(",")
-    if (docCalls !== foldCalls) {
-      out.push({
-        step: doc.index,
-        detail: `call ids differ: [${foldCalls}] vs [${docCalls}]`,
-      })
-    }
-  }
-  return out
 }

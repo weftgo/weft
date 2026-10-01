@@ -1,14 +1,16 @@
-// The paged events reader behind the run page (ADR 0018 §8): walk
-// api/runs/{id}/events page by page into one incremental fold
-// (foldMore — events are folded exactly once as they arrive), and
-// while the run is live, read ONLY the tail after the last position
-// every 2 s — the stream is never re-walked from the top, which is
-// also how T2a's live view will consume this endpoint, pushed instead
-// of polled.
+// The events reader behind the run page (ADR 0018 §8, S4.5/S4.7):
+// walk api/runs/{id}/events page by page into one incremental fold
+// (foldMore — events are folded exactly once as they arrive). While
+// the run is live, the /api/live stream is the tail when the server
+// reports the capability — record frames are folded as they arrive
+// (deltas included: they are live-only) — and the 2 s poll is the
+// fallback for a server without the live lane or after an overflow,
+// which refetches pages exactly like a reconnect (S4.5).
 import { useEffect, useRef, useState } from "react"
 
-import { apiBase } from "@/lib/api"
+import { apiBase, studioToken } from "@/lib/api"
 import type { EventsPage, WireEvent } from "@/lib/api"
+import { openLive } from "@/lib/live"
 import { foldMore, newFold } from "@/lib/events"
 import type { FoldedRun, FoldFeed } from "@/lib/events"
 
@@ -17,9 +19,14 @@ async function fetchPage(id: string, after: number): Promise<EventsPage> {
     `runs/${encodeURIComponent(id)}/events?after=${after}&limit=500`,
     apiBase()
   )
-  const res = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
-  })
+  // The bearer lib/api's get/post send, when the Studio is token-walled
+  // (S4.6): this is a raw fetch, so the wall's 401 would otherwise
+  // kill the initial walk, the fallback poll and every overflow
+  // refetch — the run page showed the error instead of the story.
+  const headers: Record<string, string> = { Accept: "application/json" }
+  const tok = studioToken()
+  if (tok) headers.Authorization = `Bearer ${tok}`
+  const res = await fetch(url.toString(), { headers })
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`
     try {
@@ -79,7 +86,11 @@ function apply(s: Walk, page: EventsPage): boolean {
   return changed
 }
 
-export function useRunEvents(id: string, status: string): RunStream {
+export function useRunEvents(
+  id: string,
+  status: string,
+  opts?: { live?: boolean }
+): RunStream {
   // The walk's accumulated state lives in a ref, not react-query: the
   // pages are folded once and the tail extends them in place, so a
   // poll is one small request regardless of how long the run is. The
@@ -122,6 +133,10 @@ export function useRunEvents(id: string, status: string): RunStream {
 
     // The initial walk: pages until the cursor stops. An error stops
     // it loudly — the run page shows it rather than an empty story.
+    // Until it completes, live frames are ignored: the pages cover
+    // everything stored, and a frame's position must not race the
+    // walk's cursor.
+    let walked = false
     void (async () => {
       try {
         for (;;) {
@@ -130,7 +145,10 @@ export function useRunEvents(id: string, status: string): RunStream {
           if (isCancelled()) return
           apply(walk.current, page)
           publish(page.next_after != null)
-          if (page.next_after == null) return
+          if (page.next_after == null) {
+            walked = true
+            return
+          }
         }
       } catch (e) {
         if (!isCancelled())
@@ -138,11 +156,45 @@ export function useRunEvents(id: string, status: string): RunStream {
       }
     })()
 
-    // The tail: while the run is running, ask only for what is new.
-    // A failed probe keeps the last good view; the next tick retries.
+    // The tail: the live stream when the option says the server has
+    // the lane, else the 2 s poll. Both fold into the same walk; the
+    // (run, kind, pos) dedup in the client keeps the overlap between
+    // a backfill and the stream to one delivery.
+    let live: { close: () => void; overflowed: () => boolean } | null = null
+    if (opts?.live) {
+      live = openLive({
+        selector: { run: id },
+        kinds: ["event", "delta"],
+        onRecord: (rec) => {
+          if (isCancelled() || !walked) return
+          const s = walk.current
+          if (rec.kind === "event") {
+            // Positions are the durable counter: never fold one the
+            // walk already paged past (a resume's backfill overlap).
+            if (rec.pos <= s.pos) return
+            s.pos = rec.pos
+          }
+          foldMore(s.feed, [rec.event])
+          s.events = s.events.concat([rec.event])
+          publish(false)
+        },
+        onOverflow: () => {
+          // Refetch pages and keep going through the poll below.
+          next()
+            .then((page) => {
+              if (isCancelled()) return
+              if (apply(walk.current, page)) publish(false)
+            })
+            .catch(() => {})
+        },
+      })
+    }
     const timer = setInterval(() => {
       if (isCancelled() || statusRef.current !== "running" || walk.current.done)
         return
+      // The live stream is the tail; poll only without it (or after it
+      // overflowed, which closed it).
+      if (live && !live.overflowed()) return
       next()
         .then((page) => {
           if (isCancelled()) return
@@ -154,8 +206,9 @@ export function useRunEvents(id: string, status: string): RunStream {
     return () => {
       ctrl.cancelled = true
       clearInterval(timer)
+      live?.close()
     }
-  }, [id])
+  }, [id, opts?.live])
 
   // When the run's status leaves "running", drain what is left: the
   // closing events (run_finish) can land between the last tail probe

@@ -1,10 +1,11 @@
-// The trace: a folded run as spans on one axis. T1's axis is the
-// stream position (events carry no timestamps, D6), so a span is
-// "from event #a to event #b" — order, not duration. The shape is
-// deliberately axis-agnostic: when T2a spans carry times, the same
-// spans render on a time domain and the Waterfall component does not
-// change. Subagents fold in with their parent's positions, so one
-// trace covers the whole tree and one playhead replays all of it.
+// The trace: a run as spans on one axis. The position axis (the
+// stream's own order, D6) is what replay scrubs; the time axis is
+// what /spans serves — timed spans exist, S4.7 says the trace draws
+// on time when they do. The shape is deliberately axis-agnostic: the
+// Waterfall draws Span[] over a numeric domain either way, and the
+// run page picks (spansFromTimed for time, spansFromFold for
+// positions).
+import type { Span as TimedSpan } from "./api"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "./events"
 
 export type SpanKind = "run" | "step" | "tool" | "subagent"
@@ -39,10 +40,21 @@ export interface Span {
   to: number | null
   /** What a "select" should land on: a step index or a call id. */
   target?: { step?: number; call?: string }
-  /** The folded node behind the span, for the detail panel. */
-  node: FoldedRun | FoldedStep | FoldedToolCall
+  /** The folded node behind the span, for the detail panel (absent on
+   * the time axis, where rows come from timed spans). */
+  node?: FoldedRun | FoldedStep | FoldedToolCall
+  /** The timed span behind a time-axis row, for the detail panel. */
+  timed?: TimedRow
   /** For steps and calls inside a subagent: which run they belong to. */
   runId: string
+}
+
+/** A time-axis row's own data: the span, with from/to in milliseconds
+ * since the trace's earliest start. */
+export interface TimedRow {
+  span: TimedSpan
+  fromMs: number
+  toMs: number | null
 }
 
 function usage(u?: { input_tokens: number; output_tokens: number }): string {
@@ -99,7 +111,9 @@ function callSpans(
     node: call,
     runId,
   })
-  if (call.child) runSpans(call.child, id, depth + 1, runStatus, out, true)
+  // A subagent's child run is its own run (S4.3): its span appears
+  // only on the time axis (from /spans) or its own page — never folded
+  // into the parent's positions.
 }
 
 function stepSpans(
@@ -250,4 +264,77 @@ export function flowFromFold(folded: FoldedRun, runStatus: string): FlowPill[] {
       open: !s.finish && runStatus === "running",
     }
   })
+}
+
+/**
+ * spansFromTimed builds the time-axis trace from /spans (S4.7): rows
+ * are the timed spans themselves — the invoke_agent span, the chat
+ * calls, the tool executions — nested by parent_span_id, positioned
+ * in milliseconds since the earliest start. The domain is
+ * timeDomain(spans); replay does not apply here (nothing to scrub:
+ * these are durations), so the playhead is null.
+ */
+export function spansFromTimed(timed: TimedSpan[]): Span[] {
+  if (timed.length === 0) return []
+  const t0 = Math.min(
+    ...timed.map((s) => Date.parse(s.start)).filter((t) => Number.isFinite(t))
+  )
+  const byID = new Map(timed.map((s) => [s.span_id, s]))
+  const depthOf = (s: TimedSpan): number => {
+    let depth = 0
+    let cur = s
+    const seen = new Set<string>()
+    while (cur.parent_span_id && byID.has(cur.parent_span_id) && !seen.has(cur.span_id)) {
+      seen.add(cur.span_id)
+      cur = byID.get(cur.parent_span_id)!
+      depth++
+    }
+    return depth
+  }
+  const out: Span[] = []
+  for (const sp of timed) {
+    const fromMs = Date.parse(sp.start) - t0
+    const endMs = Date.parse(sp.end)
+    const toMs = Number.isFinite(endMs) ? endMs - t0 : null
+    const runID = typeof sp.attrs["weft.run.id"] === "string"
+      ? (sp.attrs["weft.run.id"] as string)
+      : ""
+    const name = typeof sp.attrs["gen_ai.operation.name"] === "string"
+      ? `${sp.name}`
+      : sp.name
+    out.push({
+      id: `t:${sp.span_id}`,
+      key: `t:${sp.span_id}`,
+      parent: sp.parent_span_id ? `t:${sp.parent_span_id}` : undefined,
+      depth: depthOf(sp),
+      kind: name === "invoke_agent" ? "run" : "tool",
+      label: name,
+      sub: sp.service || undefined,
+      badge: sp.status === "error" ? "error" : sp.status === "ok" ? "ok" : undefined,
+      tone: sp.status === "error" ? "bad" : sp.status === "ok" ? "tool" : "step",
+      from: Math.max(0, fromMs),
+      to: toMs,
+      timed: { span: sp, fromMs: Math.max(0, fromMs), toMs },
+      runId: runID,
+    })
+  }
+  return out
+}
+
+/** The time axis's domain: [0, the latest end] in milliseconds. */
+export function timeDomain(timed: TimedSpan[]): [number, number] {
+  if (timed.length === 0) return [0, 1]
+  const t0 = Math.min(
+    ...timed.map((s) => Date.parse(s.start)).filter((t) => Number.isFinite(t))
+  )
+  const ends = timed
+    .map((s) => Date.parse(s.end))
+    .filter((t) => Number.isFinite(t))
+  const hi = ends.length ? Math.max(...ends) - t0 : 1
+  return [0, Math.max(1, hi)]
+}
+
+/** Whether a span is a GenAI semconv span (the chat view's rows). */
+export function isGenAISpan(sp: TimedSpan): boolean {
+  return typeof sp.attrs["gen_ai.operation.name"] === "string"
 }

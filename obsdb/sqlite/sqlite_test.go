@@ -805,3 +805,35 @@ func TestNonWeftRecords(t *testing.T) {
 		t.Errorf("other_logs body = %q", body)
 	}
 }
+
+// The turn attr arrives as a string in the real chain: thread mints
+// weft.turn through metadata (strconv.Itoa in turn.go) and the core
+// stamps every metadata value as attribute.String (observe.go) — the
+// int64 fixtures everywhere else are a spelling the pipeline never
+// produces. The row must carry turn 3, not the 0 that made every
+// studio run row read "t0" (the programme audit's P1-1).
+func TestTurnStringAttrEndToEnd(t *testing.T) {
+	db := openMem(t)
+	ctx := context.Background()
+	extra := map[string]any{"weft.turn": "3"}
+	if err := db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{
+		rec("s1-t3", "event", "run_start", 0, `{"type":"run_start","id":"s1-t3","model":{"provider":"wefttest","name":"script"},"agent":"demo"}`, extra),
+		rec("s1-t3", "event", "run_finish", 1, `{"type":"run_finish","run_id":"s1-t3","usage":{"input_tokens":10,"output_tokens":2},"steps":1}`, extra),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	det, err := db.Run(ctx, "s1-t3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if det.Turn != 3 {
+		t.Errorf("run row turn = %d, want 3 (the string attr's number)", det.Turn)
+	}
+	page, err := db.Runs(ctx, obsdb.RunQuery{SessionID: "s1"})
+	if err != nil || page.Total != 1 {
+		t.Fatalf("runs = %d/%d, %v", page.Total, len(page.Runs), err)
+	}
+	if page.Runs[0].Turn != 3 {
+		t.Errorf("run list turn = %d, want 3", page.Runs[0].Turn)
+	}
+}

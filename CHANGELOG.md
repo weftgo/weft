@@ -1,5 +1,20 @@
 ## Unreleased
 
+### obsdb
+
+- `DeriveSpan`/`DeriveRecord` read a numeric string attribute as the
+  number it spells: thread mints `weft.turn` through metadata
+  (`strconv.Itoa`) and the core stamps every metadata value as
+  `attribute.String`, so the real chain delivered `"3"` — a spelling
+  `attrIntOr` rejected, and every studio/obsdb run row read turn 0
+  (sqlite never set the column; the recorded "thread off-by-one"
+  diagnosis is refuted, the mint was always correct). Numeric
+  spellings still read as before; a non-numeric string stays the
+  default. ClickHouse already parsed the string via `toInt32OrZero`
+  in its views — now pinned by a live test too. The pushed
+  `obsdb/v0.1.0` and `obsdb/clickhouse/v0.1.0` tags carry the
+  Go-side read bug (owner: consider a patch tag).
+
 ### otel
 
 - `weftVersion()` reports v0.7.0 — the release step that owns the bump

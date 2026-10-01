@@ -1,6 +1,9 @@
 package obsdb
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 // Span is one finished span, OTLP-shaped.
 type Span struct {
@@ -151,7 +154,14 @@ func has(m map[string]any, k string) bool { _, ok := m[k]; return ok }
 // attrInt reads an integer attribute; missing and non-numeric read 0.
 func attrInt(m map[string]any, k string) int { return attrIntOr(m, k, 0) }
 
-// attrIntOr reads an integer attribute with a default for absent.
+// attrIntOr reads an integer attribute with a default for absent. A
+// numeric string counts as the number it spells: the core renders
+// every metadata value as a string attribute (observe.go's
+// attribute.String), and thread mints weft.turn through that metadata
+// path (strconv.Itoa in turn.go) — so the string spelling is the one
+// the pipeline actually produces, and the numeric spellings are what
+// OTLP hand-built fixtures carry. ClickHouse's views read the same
+// tolerance (toInt32OrZero over the stringified attrs).
 func attrIntOr(m map[string]any, k string, def int) int {
 	switch v := m[k].(type) {
 	case int64:
@@ -160,6 +170,10 @@ func attrIntOr(m map[string]any, k string, def int) int {
 		return v
 	case float64:
 		return int(v)
+	case string:
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return int(n)
+		}
 	}
 	return def
 }

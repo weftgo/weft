@@ -122,6 +122,32 @@ func TestDeriveNumericTolerance(t *testing.T) {
 	}
 }
 
+// The string spelling of weft.turn is the one the real chain
+// produces: thread mints it as metadata (strconv.Itoa in turn.go) and
+// the core stamps every metadata value as attribute.String
+// (observe.go) — the whole programme read turn 0 off every studio run
+// row because attrIntOr accepted only the numeric spellings OTLP
+// fixtures hand-build. Derive* must read "3" as 3; a non-numeric
+// string stays the default (never a fabrication).
+func TestDeriveTurnAsStringAttr(t *testing.T) {
+	if w := DeriveRecord(Record{Attrs: map[string]any{
+		"weft.run.id": "s_01M3-t3", "weft.record": "event",
+		"weft.session.id": "s_01M3", "weft.turn": "3",
+	}}); w.Turn != 3 {
+		t.Fatalf("DeriveRecord turn = %d, want 3 (string attr)", w.Turn)
+	}
+	if w := DeriveSpan(Span{Attrs: map[string]any{
+		"weft.run.id": "s_01M3-t3", "weft.turn": "3",
+	}}); w.Turn != 3 {
+		t.Fatalf("DeriveSpan turn = %d, want 3 (string attr)", w.Turn)
+	}
+	if w := DeriveSpan(Span{Attrs: map[string]any{
+		"weft.run.id": "s_01M3-t3", "weft.turn": "third",
+	}}); w.Turn != 0 {
+		t.Fatalf("non-numeric turn = %d, want the 0 default", w.Turn)
+	}
+}
+
 // Step and ToolSeq default to -1 (absent), never 0.
 func TestDeriveAbsentStepAndToolSeq(t *testing.T) {
 	if w := DeriveSpan(Span{Attrs: map[string]any{"weft.run.id": "r"}}); w.Step != -1 || w.ToolSeq != -1 {

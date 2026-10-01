@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"testing"
+	"time"
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 
@@ -83,4 +84,51 @@ func openRaw(t *testing.T, dsn string) ch.Conn {
 		t.Fatalf("connect %s: %v", dsn, err)
 	}
 	return conn
+}
+
+// The string spelling of weft.turn is the one the real chain produces
+// (thread mints it as metadata, the core stamps metadata values as
+// attribute.String). The views derive Turn through
+// toInt32OrZero over the stringified attrs, so the hosted backend must
+// read "3" as 3 — the programme audit's P1-1 read turn 0 on the Go
+// side; this pins the backend's half against the live server.
+func TestTurnStringAttrDerives(t *testing.T) {
+	if os.Getenv("WEFT_CLICKHOUSE_DSN") == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: needs a clickhouse server (README has the one-line container recipe)")
+	}
+	db, _ := openFresh(t)
+	runID := "s_conf-t3"
+	turn := map[string]any{
+		"weft.session.id": "s_conf", "weft.public_id": "pub_conf",
+		"gen_ai.agent.name": "conf", "weft.turn": "3",
+	}
+	recs := []obsdb.Record{}
+	for i, ev := range []string{
+		`{"type":"run_start","id":"` + runID + `","model":{"provider":"wefttest","name":"script"},"agent":"conf"}`,
+		`{"type":"run_finish","run_id":"` + runID + `","usage":{"input_tokens":9,"output_tokens":3},"steps":1}`,
+	} {
+		attrs := map[string]any{"weft.record": "event", "weft.run.id": runID, "weft.event.pos": int64(i)}
+		if i == 0 {
+			attrs["weft.event.type"] = "run_start"
+		}
+		for k, v := range turn {
+			attrs[k] = v
+		}
+		recs = append(recs, obsdb.Record{
+			Time: time.Now().UTC().Add(time.Duration(i) * time.Second),
+			EventName: "weft.event", TraceID: "0102030405060708090a0b0c0d0e0f10",
+			SpanID: "0102030405060708", Severity: 9, Body: ev, Service: "conf-svc",
+			Attrs: attrs, Resource: map[string]any{"service.name": "conf-svc"},
+		})
+	}
+	if err := db.Write(context.Background(), obsdb.Batch{Records: recs}); err != nil {
+		t.Fatal(err)
+	}
+	det, err := db.Run(context.Background(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if det.Turn != 3 {
+		t.Errorf("run row turn = %d, want 3 (the string attr parsed by toInt32OrZero)", det.Turn)
+	}
 }

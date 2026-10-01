@@ -4,6 +4,7 @@ use (
 	.
 	./anthropic
 	./examples/otel
+	./examples/studio-local
 	./google
 	./mcp
 	./obsdb

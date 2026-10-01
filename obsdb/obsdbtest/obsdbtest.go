@@ -34,9 +34,17 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 
 func ctx() context.Context { return context.Background() }
 
-// The fixture clock is fixed so every backend derives identical times.
+// The fixture clock is anchored once per process at init to the real
+// wall clock, so reads that derive status with the real now always see
+// the fixture as fresh — the table can never expire the way a frozen
+// epoch does. One package-level anchor keeps the table deterministic:
+// every backend in a process derives identical times. UTC strips the
+// monotonic reading and matches what the read paths return, so
+// round-tripped times compare equal to the fixture.
+var base = time.Now().UTC()
+
 func at(d time.Duration) time.Time {
-	return time.Unix(0, 1790845923120000000).UTC().Add(d)
+	return base.Add(d)
 }
 
 func record(runID, kind, eventType string, pos int64, body string, extra map[string]any) obsdb.Record {

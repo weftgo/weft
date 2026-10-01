@@ -549,7 +549,7 @@ thread v0.9.0). The root module is unchanged at v0.7.0.
   default. ClickHouse already parsed the string via `toInt32OrZero`
   in its views — now pinned by a live test too. The pushed
   `obsdb/v0.1.0` and `obsdb/clickhouse/v0.1.0` tags carry the
-  Go-side read bug (owner: consider a patch tag).
+  Go-side read bug (fixed by this patch tag).
 - `Session(id)` (sqlite and clickhouse) reads the session's own
   grouped row directly instead of scanning the newest 500 sessions —
   a session older than the newest page 404'd in the detail while the
@@ -572,7 +572,7 @@ thread v0.9.0). The root module is unchanged at v0.7.0.
   run with no public id is outside every panel token). Pinned by
   `TestStep8RoutesRefusePanelTokens` (read-scoped token → 403 on each
   surface; the server token keeps working). The pushed `studio/v0.3.0`
-  tag carries the gap (owner: consider a patch tag).
+  tag carries the gap (fixed by this patch tag).
 - The web app's run page sends the bearer token on its paged events
   walk (the one raw fetch without it — under setups B/C every page
   401'd and the run page showed the error instead of the story);
@@ -602,7 +602,7 @@ thread v0.9.0). The root module is unchanged at v0.7.0.
 - `weftVersion()` reports v0.7.0 — the release step that owns the bump
   missed it (its own comment says so), so every span carried
   `weft.version=v0.6.0` past the release. The pushed `otel/v0.1.0` tag
-  carries the stale string (owner: consider a patch tag).
+  carries the stale string (fixed by this patch tag).
 - The drop counter's logger is fixed at construction
   (`newDropCounter`): `dropped()`'s lazy `d.log` assignment wrote a
   plain field outside the atomics, a data race under concurrent agent
@@ -621,8 +621,7 @@ thread v0.9.0). The root module is unchanged at v0.7.0.
 ### runtime
 
 - Registration reports `weft_version: v0.7.0` — the same missed bump
-  as otel's. The pushed `runtime/v0.1.0` tag carries the stale string
-  (owner: consider a patch tag).
+  as otel's. The pushed `runtime/v0.1.0` tag carries the stale string (fixed by this patch tag).
 
 ### CI / repo
 
@@ -644,8 +643,7 @@ thread v0.9.0). The root module is unchanged at v0.7.0.
   `WEFT_STUDIO_TOKEN` the old code drew two independent generated
   tokens, so the printed token 401'd against every `/api` call —
   setup B's documented "token printed at start" hand-off was broken.
-  The pushed `studio/cmd/v0.1.0` tag carries the bug (owner: consider
-  a patch tag).
+  The pushed `studio/cmd/v0.1.0` tag carries the bug (fixed by this patch tag).
 - SIGINT/SIGTERM shut the server down gracefully (the listener closes,
   in-flight requests get five seconds, streams that outlive the window
   force-close, then the studio's resources close) — a bare
@@ -666,8 +664,7 @@ thread v0.9.0). The root module is unchanged at v0.7.0.
   (`LastSeen >= ?`) binds nanoseconds for the same reason (no more
   sub-second running band). Pinned by `TestCursorSubSecondPaging`
   (two runs/sessions within one wall second, paged through the
-  boundary). The pushed `obsdb/clickhouse/v0.1.0` tag carries the bug
-  (owner: consider a patch tag).
+  boundary). The pushed `obsdb/clickhouse/v0.1.0` tag carries the bug (fixed by this patch tag).
 - `SaveExperiment` surfaces every prior-read error except
   `ErrNotFound` (only a genuine not-found means "first save"): a
   transient read failure no longer silently resets an update's

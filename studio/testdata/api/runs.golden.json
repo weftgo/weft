@@ -3,97 +3,151 @@
   "runs": [
     {
       "id": "r_stale",
-      "parent_id": "",
+      "parent_run_id": "",
       "parent_call_id": "",
+      "trace_id": "0102030405060708090a0b0c0d0e0f10",
       "agent": "orders",
       "model": {
         "provider": "wefttest",
         "name": "script"
       },
+      "manifest_hash": "sha256:demo-fleet",
+      "weft_version": "(test)",
+      "service": "studio-test",
+      "session_id": "s_orders",
+      "public_id": "pub_orders",
+      "turn": 3,
+      "playground": false,
+      "experiment_id": "",
+      "forked_from": "",
+      "meta": {
+        "cwd": "/tmp/demo"
+      },
       "started": "2020-01-01T09:03:00.123Z",
       "finished": null,
+      "last_seen": "2020-01-01T09:03:00.323Z",
       "status": "interrupted",
+      "err": "",
       "steps": 0,
+      "pending": 0,
+      "stop_reason": "",
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0
       },
-      "tags": {
-        "cwd": "/tmp/demo"
-      },
-      "err": ""
+      "event_count": 2,
+      "message_count": 0
     },
     {
       "id": "r_sub",
-      "parent_id": "",
+      "parent_run_id": "",
       "parent_call_id": "",
-      "agent": "orders",
+      "trace_id": "0102030405060708090a0b0c0d0e0f10",
+      "agent": "researcher",
       "model": {
         "provider": "wefttest",
         "name": "script"
       },
-      "manifest_hash": "786a2e04dd01168fc5ad4e20e979f2138ae9337cda2a8ce2473bb0ab16cff896",
+      "manifest_hash": "sha256:demo-fleet",
       "weft_version": "(test)",
-      "started": "2020-01-01T09:02:00.123Z",
-      "finished": "2020-01-01T09:02:05.123Z",
-      "status": "succeeded",
-      "steps": 2,
-      "usage": {
-        "input_tokens": 30,
-        "output_tokens": 15
-      },
-      "tags": {
+      "service": "studio-test",
+      "session_id": "s_research",
+      "public_id": "pub_research",
+      "turn": 1,
+      "playground": false,
+      "experiment_id": "",
+      "forked_from": "",
+      "meta": {
         "cwd": "/tmp/demo"
       },
-      "err": ""
+      "started": "2020-01-01T09:02:00.123Z",
+      "finished": "2020-01-01T09:02:05.123Z",
+      "last_seen": "2020-01-01T09:02:05.123Z",
+      "status": "succeeded",
+      "err": "",
+      "steps": 1,
+      "pending": 0,
+      "stop_reason": "",
+      "usage": {
+        "input_tokens": 12,
+        "output_tokens": 6
+      },
+      "event_count": 6,
+      "message_count": 2
     },
     {
       "id": "r_fail",
-      "parent_id": "",
+      "parent_run_id": "",
       "parent_call_id": "",
-      "agent": "support",
-      "model": {
-        "provider": "wefttest",
-        "name": "script"
-      },
-      "manifest_hash": "b9d9df86cf77c5476cfe727b80ac1f0c45173c84920e1d4e081a014b32174ae3",
-      "weft_version": "(test)",
-      "started": "2020-01-01T09:01:00.123Z",
-      "finished": "2020-01-01T09:01:02.123Z",
-      "status": "failed",
-      "steps": 1,
-      "usage": {
-        "input_tokens": 10,
-        "output_tokens": 5
-      },
-      "tags": {
-        "cwd": "/tmp/demo"
-      },
-      "err": "weft: run failed at step 1: model stream: wefttest: injected provider 500"
-    },
-    {
-      "id": "r_ok",
-      "parent_id": "",
-      "parent_call_id": "",
+      "trace_id": "0102030405060708090a0b0c0d0e0f10",
       "agent": "orders",
       "model": {
         "provider": "wefttest",
         "name": "script"
       },
-      "manifest_hash": "bf2580cbcb3e115a8591cf8c71f28b6f26e0322b405d65cefaf154cbfa23186e",
+      "manifest_hash": "sha256:demo-fleet",
       "weft_version": "(test)",
-      "started": "2020-01-01T09:00:00.123Z",
-      "finished": "2020-01-01T09:00:02.123Z",
-      "status": "succeeded",
-      "steps": 2,
-      "usage": {
-        "input_tokens": 20,
-        "output_tokens": 10
-      },
-      "tags": {
+      "service": "studio-test",
+      "session_id": "s_orders",
+      "public_id": "pub_orders",
+      "turn": 2,
+      "playground": false,
+      "experiment_id": "",
+      "forked_from": "",
+      "meta": {
         "cwd": "/tmp/demo"
       },
-      "err": ""
+      "started": "2020-01-01T09:01:00.123Z",
+      "finished": "2020-01-01T09:01:02.123Z",
+      "last_seen": "2020-01-01T09:01:02.123Z",
+      "status": "failed",
+      "err": "wefttest: injected provider 500",
+      "steps": 1,
+      "pending": 0,
+      "stop_reason": "",
+      "usage": {
+        "input_tokens": 8,
+        "output_tokens": 2
+      },
+      "event_count": 4,
+      "message_count": 1
+    },
+    {
+      "id": "r_ok",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "0102030405060708090a0b0c0d0e0f10",
+      "agent": "orders",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "manifest_hash": "sha256:demo-fleet",
+      "weft_version": "(test)",
+      "service": "studio-test",
+      "session_id": "s_orders",
+      "public_id": "pub_orders",
+      "turn": 1,
+      "playground": false,
+      "experiment_id": "",
+      "forked_from": "",
+      "meta": {
+        "cwd": "/tmp/demo"
+      },
+      "started": "2020-01-01T09:00:00.123Z",
+      "finished": "2020-01-01T09:00:02.123Z",
+      "last_seen": "2020-01-01T09:00:02.123Z",
+      "status": "succeeded",
+      "err": "",
+      "steps": 1,
+      "pending": 0,
+      "stop_reason": "",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 4
+      },
+      "event_count": 6,
+      "message_count": 2
     }
   ],
   "next_before": null

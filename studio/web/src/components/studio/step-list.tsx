@@ -8,8 +8,8 @@
 import { ChevronRight, Play } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
-import type { RunDoc, WireEvent } from "@/lib/api"
-import { callState, fold, truncation } from "@/lib/events"
+import type { RunDoc, RunRow, WireEvent } from "@/lib/api"
+import { callState, fold, linkView, truncation } from "@/lib/events"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "@/lib/events"
 import { tokens } from "@/lib/format"
 import { bytes } from "@/lib/summarize"
@@ -142,13 +142,13 @@ function CallPill({
 export function ToolCallRow({
   call,
   runStatus,
-  childLink,
+  child,
   onJump,
   compact,
 }: {
   call: FoldedToolCall
   runStatus: string
-  childLink?: { id: string; label: string }
+  child?: RunRow
   onJump?: (t: number) => void
   compact?: boolean
 }) {
@@ -223,13 +223,8 @@ export function ToolCallRow({
               <span className="text-faint">{call.streamedArgs}</span>
             </div>
           ) : null}
-          {call.child ? (
-            <SubagentBlock
-              run={call.child}
-              link={childLink}
-              runStatus={runStatus}
-              onJump={onJump}
-            />
+          {child ? (
+            <SubagentBlock child={child} onJump={onJump} />
           ) : null}
           {call.result ? (
             <CodeWin
@@ -257,7 +252,9 @@ export function StepBody({
 }: {
   step: FoldedStep
   runStatus: string
-  childLinks: Map<string, { id: string; label: string }>
+  /** A subagent's child run per owning call id (parent_call_id,
+   * S4.3) — the block fetches its events on expand. */
+  childLinks: Map<string, RunRow>
   onJump?: (t: number) => void
   compact?: boolean
 }) {
@@ -287,7 +284,7 @@ export function StepBody({
               key={call.callId}
               call={call}
               runStatus={runStatus}
-              childLink={childLinks.get(call.callId)}
+              child={call.childRunId ? childLinks.get(call.callId) : undefined}
               onJump={onJump}
               compact={compact}
             />
@@ -378,7 +375,7 @@ function StepCard({
 }: {
   step: FoldedStep
   runStatus: string
-  childLinks: Map<string, { id: string; label: string }>
+  childLinks: Map<string, RunRow>
   highlighted?: boolean
   onJump?: (t: number) => void
 }) {
@@ -443,10 +440,14 @@ export function StepList({
   onJump?: (t: number) => void
 }) {
   const replaying = upTo != null && upTo < events.length
-  const view = upTo == null ? folded : fold(events, upTo)
-  // A child link per call id: the store's own child rows (B7).
+  const view = linkView(
+    upTo == null ? folded : fold(events, upTo),
+    doc.children
+  )
+  // A child row per owning call id, joined by parent_call_id (S4.3);
+  // the block expands lazily.
   const childLinks = new Map(
-    doc.children.map((c) => [c.parent_call_id, { id: c.id, label: c.agent }])
+    doc.children.map((c) => [c.parent_call_id, c])
   )
   // While scrubbing, the run reads as running: calls past the
   // playhead are "running", not "never completed".

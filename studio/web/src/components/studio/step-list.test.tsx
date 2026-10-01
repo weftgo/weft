@@ -21,31 +21,30 @@ const subEvents = (
 ).events.map((pe) => pe.event)
 
 describe("StepList", () => {
-  it("renders steps with the subagent block inline (B1, B7)", async () => {
+  it("renders steps with the subagent block under its call (B1, B7, S4.3)", async () => {
     await renderWithRouter(
       <StepList events={subEvents} folded={fold(subEvents)} doc={subDoc} />
     )
 
-    // The parent's steps: the delegation call and the final answer.
+    // The parent's step: the delegation call (no stored text — the
+    // transcript owns the finished words).
     expect(screen.getAllByText(/research/).length).toBeGreaterThan(0)
-    expect(screen.getByText("Order 42 shipped.")).toBeTruthy()
 
-    // The subagent block: the child's own text inline, its agent name,
-    // and the child's usage rollup.
+    // The subagent block is collapsed by default (the child's events
+    // are fetched on expand, never inline); the row shows the child's
+    // agent, its own usage, and the link to its own run page.
     expect(screen.getByText(/subagent/)).toBeTruthy()
     expect(screen.getByText("researcher")).toBeTruthy()
-    // The child's text appears twice by design: inline in the
-    // subagent block and as the parent call's tool result.
-    expect(screen.getAllByText("order 42 shipped this morning").length).toBe(2)
-    // (the step header carries the same numbers, so more than one)
-    expect(screen.getAllByText(/10 in \/ 5 out/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/9 in \/ 5 out/).length).toBeGreaterThan(0)
     // The call row: name, an args summary, the ok pill and the size.
     expect(screen.getByText('{"prompt":"status of order 42"}')).toBeTruthy()
     expect(screen.getByText("ok")).toBeTruthy()
     expect(screen.getAllByText("29 B").length).toBeGreaterThan(0)
 
-    // The child link (the store's own children rows).
+    // The child link.
     expect(screen.getByText("open run")).toBeTruthy()
+    // Collapsed: the child's inner text is NOT in the DOM.
+    expect(screen.queryByText("no events from the child yet")).toBeNull()
   })
 
   it("badges a truncated result (B9)", async () => {
@@ -124,8 +123,9 @@ describe("StepList", () => {
         upTo={3}
       />
     )
-    // Before the delegation's tool_finish: no child text yet.
-    expect(screen.queryByText("order 42 shipped this morning")).toBeNull()
+    // Before the delegation's tool_finish: the call reads running and
+    // no result is revealed.
+    expect(screen.getByText("running…")).toBeTruthy()
     first.unmount()
     await renderWithRouter(
       <StepList
@@ -135,6 +135,8 @@ describe("StepList", () => {
         upTo={subEvents.length}
       />
     )
+    // The full stream: the call closed with the child's answer as its
+    // tool result (the child's own steps stay in its collapsed block).
     expect(
       screen.getAllByText("order 42 shipped this morning").length
     ).toBeGreaterThan(0)

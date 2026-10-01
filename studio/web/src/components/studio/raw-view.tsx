@@ -18,12 +18,10 @@ import {
   eventSummary,
   eventType,
   kindClass,
-  unwrap,
 } from "@/lib/summarize"
 import type { EventKind } from "@/lib/summarize"
 import { CopyButton, JsonText } from "@/components/studio/codewin"
 import { JsonTree } from "@/components/studio/json-tree"
-import { NestedMark } from "@/components/studio/replay-bar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -85,7 +83,6 @@ function EventRow({
 }) {
   const [open, setOpen] = useState(false)
   const kind = eventKind(ev)
-  const { depth } = unwrap(ev)
   const text = useMemo(() => (open ? pretty(ev) : ""), [open, ev])
   return (
     <div
@@ -110,13 +107,9 @@ function EventRow({
           className={`size-3 text-faint transition-transform ${open ? "rotate-90" : ""}`}
         />
         <span className={`flex items-center gap-1 truncate ${kindClass(kind)}`}>
-          <NestedMark ev={ev} />
           {eventType(ev)}
         </span>
-        <span
-          className="truncate text-muted-foreground"
-          style={{ paddingLeft: depth ? `${depth * 0.75}rem` : undefined }}
-        >
+        <span className="truncate text-muted-foreground">
           {eventSummary(ev, 160)}
         </span>
         <span className="flex items-center gap-0.5 opacity-0 group-hover/ev:opacity-100 focus-within:opacity-100">
@@ -180,7 +173,6 @@ export function EventsExplorer({
       error: 0,
       reasoning: 0,
       delta: 0,
-      nested: 0,
     }
     for (const ev of events) c[eventKind(ev)]++
     return c

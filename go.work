@@ -4,13 +4,14 @@ use (
 	.
 	./anthropic
 	./examples/otel
+	./examples/studio-local
 	./google
 	./mcp
 	./obsdb
 	./openai
 	./otel
-	./store
 	./studio
+	./studio/cmd
 	./thread
 	./thread/sqlite
 )

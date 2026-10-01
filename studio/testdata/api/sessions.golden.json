@@ -1,0 +1,33 @@
+{
+  "total": 2,
+  "sessions": [
+    {
+      "id": "s_orders",
+      "public_id": "pub_orders",
+      "agent": "orders",
+      "turns": 3,
+      "first_seen": "2020-01-01T09:00:00.123Z",
+      "last_seen": "2020-01-01T09:03:00.323Z",
+      "status": "interrupted",
+      "usage": {
+        "input_tokens": 18,
+        "output_tokens": 6
+      }
+    },
+    {
+      "id": "s_research",
+      "public_id": "pub_research",
+      "agent": "researcher",
+      "turns": 1,
+      "first_seen": "2020-01-01T09:02:00.123Z",
+      "last_seen": "2020-01-01T09:02:05.123Z",
+      "status": "succeeded",
+      "usage": {
+        "input_tokens": 12,
+        "output_tokens": 6
+      }
+    }
+  ],
+  "next_before": null
+}
+

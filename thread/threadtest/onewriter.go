@@ -28,6 +28,7 @@ func RunOneWriter(t *testing.T, open func(t *testing.T) thread.Storage) {
 	t.Run("SecondSessionIsLocked", secondSessionLocked(open))
 	t.Run("StaleSessionIsRefused", staleSession(open))
 	t.Run("CreateTakesTheLease", createTakesLease(open))
+	t.Run("ForkTakesTheLease", forkTakesLease(open))
 	t.Run("DeleteUnderALiveSession", deleteUnderSession(open))
 	t.Run("TwoSessionsRaceForTheLease", sessionsRace(open))
 }
@@ -274,6 +275,53 @@ func createTakesLease(open func(t *testing.T) thread.Storage) func(*testing.T) {
 		}
 		if err := a.SetInfo(ctx, "a", nil); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+// Fork creates a session too: the Session it returns is the fork's
+// writer from birth, and the origin's lease is not involved — a fork
+// is another session.
+func forkTakesLease(open func(t *testing.T) thread.Storage) func(*testing.T) {
+	return func(t *testing.T) {
+		ctx := context.Background()
+		st := open(t)
+		agent := weft.New(wefttest.Script())
+		a, err := thread.Create(ctx, st, agent, thread.IDs(sequence("a_")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.SetInfo(ctx, "origin", nil); err != nil {
+			t.Fatal(err)
+		}
+		f, err := a.Fork(ctx, "a_2", thread.IDs(sequence("f_")))
+		if err != nil {
+			t.Fatalf("Fork: %v", err)
+		}
+		g, err := thread.Open(ctx, st, f.ID(), agent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := g.SetInfo(ctx, "g", nil); !errors.Is(err, thread.ErrLocked) {
+			t.Fatalf("a write against the forking Session: err = %v, want ErrLocked", err)
+		}
+		if err := f.SetInfo(ctx, "fork", nil); err != nil {
+			t.Fatalf("the fork's own write: %v", err)
+		}
+		if err := a.SetInfo(ctx, "origin still writes", nil); err != nil {
+			t.Fatalf("the origin's write after the fork: %v", err)
+		}
+		// A fork of a session read by a Session that is not its
+		// writer works: Fork reads one session and writes another.
+		b, err := thread.Open(ctx, st, a.ID(), agent, thread.IDs(sequence("b_")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.Fork(ctx, "a_2"); err != nil {
+			t.Fatalf("Fork by a reading Session: %v", err)
+		}
+		if n := oneChain(t, st, f.ID()); n != 2 {
+			t.Errorf("the fork holds %d entries, want the copied one and its own", n)
 		}
 	}
 }

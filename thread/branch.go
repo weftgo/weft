@@ -302,6 +302,9 @@ func (s *Session) writeFork(ctx context.Context, st Storage, cfg sessionConfig, 
 	if err != nil {
 		return nil, err
 	}
+	if err := f.claim(ctx); err != nil { // the fork's Session is its writer from birth, like Create's
+		return nil, err
+	}
 	if err := f.flushLocked(ctx); err != nil { // f is not shared yet: no lock to take
 		return nil, fmt.Errorf("thread: fork flush: %w", err)
 	}

@@ -2,12 +2,52 @@ package thread_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
+
+	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/wefttest"
 
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
 	"github.com/weftgo/weft/thread/threadtest"
 )
+
+// One Session writes a session. A second Session on the same storage
+// opens and reads, but its writes are refused until the writer
+// closes — and by then the session has moved on, so the reader opens
+// it again to write from what it now holds.
+func ExampleSession_Close_handOver() {
+	ctx := context.Background()
+	st := thread.Memory()
+	agent := weft.New(wefttest.Script())
+
+	writer, _ := thread.Create(ctx, st, agent)
+	_ = writer.SetInfo(ctx, "Order 1234", nil)
+
+	reader, _ := thread.Open(ctx, st, writer.ID(), agent)
+	fmt.Println("the reader sees:", reader.Title())
+	err := reader.SetInfo(ctx, "Order 1234 (refunded)", nil)
+	fmt.Println("locked while the writer is open:", errors.Is(err, thread.ErrLocked))
+
+	_ = writer.SetInfo(ctx, "Order 1234 — shipped", nil)
+	_ = writer.Close(ctx)
+
+	err = reader.SetInfo(ctx, "Order 1234 (refunded)", nil)
+	fmt.Println("stale after the writer wrote and closed:", errors.Is(err, thread.ErrStale))
+	_ = reader.Close(ctx)
+
+	again, _ := thread.Open(ctx, st, writer.ID(), agent)
+	fmt.Println("reopened:", again.Title())
+	fmt.Println("writes:", again.SetInfo(ctx, "Order 1234 (refunded)", nil))
+	// Output:
+	// the reader sees: Order 1234
+	// locked while the writer is open: true
+	// stale after the writer wrote and closed: true
+	// reopened: Order 1234 — shipped
+	// writes: <nil>
+}
 
 // abandon ends the writer's hold on a session without closing any
 // Session — what the writer's process dying does to its lease. It is

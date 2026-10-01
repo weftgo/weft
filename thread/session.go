@@ -467,14 +467,23 @@ func Create(ctx context.Context, st Storage, agent *weft.Agent, opts ...SessionO
 	if err != nil {
 		return nil, err
 	}
-	// Create is the creating Session's first write: it is the
-	// session's writer from here, not from its first entry.
-	if w, ok := s.st.(*leased); ok {
-		if err := w.acquire(ctx); err != nil {
-			return nil, fmt.Errorf("thread: session %s created, but not held: %w", h.ID, err)
-		}
+	if err := s.claim(ctx); err != nil {
+		return nil, err
 	}
 	return s, nil
+}
+
+// claim makes a Session that has just written its session into the
+// storage — Create, Fork — its writer at once: creating is the first
+// write, so the lease is the creator's from the header on, not from
+// its first entry. s is not shared yet: no lock to take.
+func (s *Session) claim(ctx context.Context) error {
+	if w, ok := s.st.(*leased); ok {
+		if err := w.acquire(ctx); err != nil {
+			return fmt.Errorf("thread: session %s created, but not held: %w", s.header.ID, err)
+		}
+	}
+	return nil
 }
 
 // newHeader builds the header Create and Fork write: the minted id,
@@ -528,6 +537,13 @@ func newHeader(cfg *sessionConfig) (Header, error) {
 //
 // The header options (WithMeta, PublicID, WithLineage) fail Open with
 // ErrCreateOnly: the stored header is what the session has.
+//
+// Open reads and takes nothing: it succeeds while another Session —
+// or another process — is the session's writer, and stands in no
+// writer's way. The Session it returns becomes the writer with its
+// first write, which fails with ErrLocked while another holds the
+// session and with ErrStale once the session has moved past what
+// this Open loaded (see Session, One writer).
 func Open(ctx context.Context, st Storage, id string, agent *weft.Agent, opts ...SessionOption) (*Session, error) {
 	if st == nil {
 		return nil, fmt.Errorf("thread: Open with nil storage")

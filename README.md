@@ -762,11 +762,11 @@ docs/adr/             decision records for the contracts
 ```
 
 Each module directory tags independently (ADR 0005's monorepo rule).
-The step 8 release (2026-10-01) tags the observability-data set —
-root `v0.7.0`, `thread` `v0.8.1` (with `thread/sqlite` `v0.2.0`),
-`obsdb` `v0.1.0`, `obsdb/clickhouse` `v0.1.0`, `otel` `v0.1.0`,
-`studio` `v0.3.0`, `studio/cmd` `v0.1.0`, `runtime` `v0.1.0` — and
-every module resolves from its tag, no replaces. The whole
+The current set (2026-10-02) is root `v0.7.0`, `thread` `v0.9.0`
+(with `thread/sqlite` `v0.3.0`), `obsdb` `v0.1.1`, `obsdb/clickhouse`
+`v0.1.1`, `otel` `v0.1.1`, `studio` `v0.3.1`, `studio/cmd` `v0.1.1`,
+`runtime` `v0.1.1` — and every module resolves from its tag, no
+replaces. The whole
 recorder-and-inspector story is two lines: `defer otel.Install()()`
 and `studio.Handler(studio.DB(otel.LocalDB()))` (Recording runs and
 Inspecting runs above); `weft/runtime` adds the playground with one

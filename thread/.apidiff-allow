@@ -10,59 +10,6 @@
 # with this file empty — is deferred until the API is stable. Until
 # then a deliberate break is listed here, never smuggled past the gate.
 #
-# 2026-10-01 review fix train (WEFT-THREAD-REVIEW-2026-10-01.md) —
-# pre-1.0, not frozen. Every line below is a deliberate break made by
-# the train against thread/v0.8.1, reviewed in its lanes:
-#
-#   approvals   WithApprover takes its timeout (ApproverTimeout is
-#               gone: an Approver without a bound was either never
-#               consulted or blocked the turn); ApprovalAuditEntry
-#               lists the decisions a resume applies (a slice field).
-#   compaction  the hook verdicts Proceed and Cancel are functions,
-#               not mutable package variables; token counts are int64
-#               throughout (Estimator.Estimate, SummaryMaxTokens,
-#               SummaryInput.MaxTokens); Trimmer.Trim returns an error
-#               and the trim is recorded in the entry (TrimReport is
-#               gone); Instructions is SummaryInstructions and
-#               Disabled is NoAutoCompact (the old names collided with
-#               the core's and said nothing); the dead fields
-#               Compaction.FilesModified, Preparation.SplitPrefix,
-#               Summary.Reason and SummaryInput.SummaryModel are
-#               removed.
-#   core        ErrNotImplemented is removed (nothing returned it);
-#               CorruptError unwraps to ErrCorrupt and its cause.
-#   backends    OpenConfig and ResolveOpen moved to thread/backend
-#               (Config, Resolve): backend plumbing, off the user
-#               package; Memory accepts the open options.
-#   pool        Wrap and Register return errors; Cancel and Forward
-#               take a context and the parent session (a receipt is
-#               its session's); Decide records and arms and no longer
-#               waits, so it returns no Turn; Receipt.State is the
-#               typed State.
-(*CorruptError).Unwrap: changed from func() error to func() []error
-./pool.(*Pool).Cancel: changed from func(string) error to func(context.Context, *github.com/weftgo/weft/thread.Session, string) error
-./pool.(*Pool).Decide: changed from func(context.Context, *github.com/weftgo/weft/thread.Session, ...github.com/weftgo/weft/thread.Decision) (*github.com/weftgo/weft/thread.Turn, error) to func(context.Context, *github.com/weftgo/weft/thread.Session, ...github.com/weftgo/weft/thread.Decision) error
-./pool.(*Pool).Forward: changed from func(context.Context, string, github.com/weftgo/weft.Message) (*github.com/weftgo/weft/thread.Turn, error) to func(context.Context, *github.com/weftgo/weft/thread.Session, string, github.com/weftgo/weft.Message) (*github.com/weftgo/weft/thread.Turn, error)
-./pool.(*Pool).Register: changed from func(string, *github.com/weftgo/weft.Agent) to func(string, *github.com/weftgo/weft.Agent) error
-./pool.(*Pool).Wrap: changed from func(string, string, *github.com/weftgo/weft.Agent, ...WrapOption) *github.com/weftgo/weft.ToolDef to func(string, string, *github.com/weftgo/weft.Agent, ...WrapOption) (*github.com/weftgo/weft.ToolDef, error)
-./pool.Receipt.State: changed from string to State
-ApprovalAuditEntry: old is comparable, new is not
-ApproverTimeout: removed
-Cancel: changed from var to func
-Compaction.FilesModified: removed
-Disabled: removed
-ErrNotImplemented: removed
-Estimator.Estimate: changed from func([]github.com/weftgo/weft.Message) int to func([]github.com/weftgo/weft.Message) int64
-Instructions: removed
-Memory: changed from func() Storage to func(...OpenOption) Storage
-OpenConfig: removed
-Preparation.SplitPrefix: removed
-Proceed: changed from var to func
-ResolveOpen: removed
-Summary.Reason: removed
-SummaryInput.MaxTokens: changed from int to int64
-SummaryInput.SummaryModel: removed
-SummaryMaxTokens: changed from func(int) SessionOption to func(int64) SessionOption
-TrimReport: removed
-Trimmer.Trim: changed from func(context.Context, []github.com/weftgo/weft.Message) ([]github.com/weftgo/weft.Message, TrimReport) to func(context.Context, []github.com/weftgo/weft.Message) ([]github.com/weftgo/weft.Message, error)
-WithApprover: changed from func(Approver) SessionOption to func(Approver, time.Duration) SessionOption
+# The 2026-10-01 review fix train's breaks shipped as thread/v0.9.0;
+# their entries left with that tag. Nothing is acknowledged against
+# thread/v0.9.0 yet.

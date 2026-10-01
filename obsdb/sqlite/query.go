@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -542,20 +543,39 @@ func (d *DB) Session(ctx context.Context, id string) (obsdb.SessionDetail, error
 	if err := d.checkOpen(); err != nil {
 		return obsdb.SessionDetail{}, err
 	}
-	page, err := d.Sessions(ctx, obsdb.SessionQuery{Limit: 500})
+	// The session's own grouped row, queried directly: the old read
+	// scanned the newest 500 sessions, so an older session 404'd here
+	// while the list still showed it (the audit's P2-1). Same shape as
+	// Sessions' select, scoped to the one session_id.
+	cutoff := time.Now().Add(-obsdb.InterruptedAfter).UnixNano()
+	var row obsdb.SessionRow
+	var first, last int64
+	var inTok, outTok, cached, cacheW, reason sql.NullInt64
+	var status string
+	err := d.reads.QueryRowContext(ctx, `SELECT session_id, MAX(public_id), MAX(agent), COUNT(*),
+		MIN(started_ns), MAX(last_seen_ns),
+		SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens), SUM(cache_write_tokens), SUM(reasoning_tokens),
+		(SELECT `+statusExpr+` FROM runs r2 WHERE r2.session_id = runs.session_id
+		 AND r2.parent_run_id = '' AND r2.playground = 0
+		 ORDER BY r2.turn DESC, r2.started_ns DESC LIMIT 1)
+		FROM runs
+		WHERE parent_run_id = '' AND playground = 0 AND session_id <> '' AND session_id = ?
+		GROUP BY session_id`, cutoff, id).
+		Scan(&row.ID, &row.PublicID, &row.Agent, &row.Turns,
+			&first, &last, &inTok, &outTok, &cached, &cacheW, &reason, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return obsdb.SessionDetail{}, fmt.Errorf("%w: session %s", obsdb.ErrNotFound, id)
+	}
 	if err != nil {
 		return obsdb.SessionDetail{}, err
 	}
-	var row obsdb.SessionRow
-	found := false
-	for _, s := range page.Sessions {
-		if s.ID == id {
-			row, found = s, true
-			break
-		}
-	}
-	if !found {
-		return obsdb.SessionDetail{}, fmt.Errorf("%w: session %s", obsdb.ErrNotFound, id)
+	row.FirstSeen = time.Unix(0, first).UTC()
+	row.LastSeen = time.Unix(0, last).UTC()
+	row.Status = obsdb.Status(status)
+	row.Usage = weft.Usage{
+		InputTokens: inTok.Int64, OutputTokens: outTok.Int64,
+		CachedInputTokens: cached.Int64, CacheWriteTokens: cacheW.Int64,
+		ReasoningTokens: reason.Int64,
 	}
 	runs, err := d.queryRunRows(ctx,
 		`session_id = ? AND parent_run_id = '' AND playground = 0 ORDER BY turn, started_ns, run_id LIMIT ?`,

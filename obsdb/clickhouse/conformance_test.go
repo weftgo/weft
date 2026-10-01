@@ -217,3 +217,53 @@ func idsOf(rows []obsdb.RunRow) []string {
 	}
 	return out
 }
+
+// Session(id) reads the session's own row directly on the hosted
+// backend too (the P2-1 fix): a session older than the newest 500
+// must still resolve while the list still shows it.
+func TestSessionBeyondNewestPage(t *testing.T) {
+	if os.Getenv("WEFT_CLICKHOUSE_DSN") == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: needs a clickhouse server (README has the one-line container recipe)")
+	}
+	db, _ := openFresh(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Add(-time.Hour)
+	const target = "s_old_target"
+	var batch []obsdb.Record
+	session := func(id string, at time.Duration) {
+		attrs := map[string]any{
+			"weft.record": "event", "weft.run.id": id + "-t1",
+			"weft.event.type": "run_start", "weft.event.pos": int64(0),
+			"weft.session.id": id, "gen_ai.agent.name": "conf",
+		}
+		batch = append(batch, obsdb.Record{
+			Time: base.Add(at), EventName: "weft.event", Severity: 9,
+			Body: `{"type":"run_start","id":"` + id + `-t1","model":{"provider":"wefttest","name":"script"},"agent":"conf"}`,
+			Service: "conf-svc", Attrs: attrs, Resource: map[string]any{"service.name": "conf-svc"},
+		})
+	}
+	session(target, 0)
+	for i := 0; i < 501; i++ {
+		session(fmt.Sprintf("s_new_%03d", i), time.Duration(i+2)*time.Minute)
+	}
+	if err := db.Write(ctx, obsdb.Batch{Records: batch}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := db.Sessions(ctx, obsdb.SessionQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.Total != 502 {
+		t.Fatalf("sessions total = %d, want 502", list.Total)
+	}
+	det, err := db.Session(ctx, target)
+	if err != nil {
+		t.Fatalf("Session(%s): %v (a session older than the newest page must still resolve)", target, err)
+	}
+	if det.ID != target || det.Turns != 1 {
+		t.Errorf("detail = %+v", det.SessionRow)
+	}
+	if _, err := db.Session(ctx, "nope"); err == nil {
+		t.Error("unknown session resolved")
+	}
+}

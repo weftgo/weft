@@ -590,15 +590,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (obsdb.SessionP
 	if err := d.checkOpen(); err != nil {
 		return obsdb.SessionPage{}, err
 	}
-	runs := `(SELECT RunId, SessionID, max(PublicID) AS PublicID, max(Agent) AS Agent,
-			max(Turn) AS Turn, min(Started) AS Started, max(LastSeen) AS LastSeen,
-			max(FinishedOK) AS FinishedOK, max(Failed) AS Failed,
-			max(InputTokens) AS InputTokens, max(OutputTokens) AS OutputTokens,
-			max(CachedInputTokens) AS CachedInputTokens, max(CacheWriteTokens) AS CacheWriteTokens,
-			max(ReasoningTokens) AS ReasoningTokens
-		FROM weft_runs
-		WHERE ParentRunID = '' AND Playground = 0 AND SessionID != ''
-		GROUP BY RunId, SessionID)`
+	runs := sessionRuns("")
 	var having []string
 	var hargs []any
 	if q.Agent != "" {
@@ -671,25 +663,69 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (obsdb.SessionP
 	return page, nil
 }
 
+// sessionRuns builds the per-run subquery both Sessions and Session
+// group over. cond appends to the WHERE (Session appends the
+// session-id equality so the detail reads the one session's row
+// directly instead of scanning the newest page).
+func sessionRuns(cond string) string {
+	return `(SELECT RunId, SessionID, max(PublicID) AS PublicID, max(Agent) AS Agent,
+			max(Turn) AS Turn, min(Started) AS Started, max(LastSeen) AS LastSeen,
+			max(FinishedOK) AS FinishedOK, max(Failed) AS Failed,
+			max(InputTokens) AS InputTokens, max(OutputTokens) AS OutputTokens,
+			max(CachedInputTokens) AS CachedInputTokens, max(CacheWriteTokens) AS CacheWriteTokens,
+			max(ReasoningTokens) AS ReasoningTokens
+		FROM weft_runs
+		WHERE ParentRunID = '' AND Playground = 0 AND SessionID != ''` + cond + `
+		GROUP BY RunId, SessionID)`
+}
+
 func (d *DB) Session(ctx context.Context, id string) (obsdb.SessionDetail, error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.SessionDetail{}, err
 	}
-	page, err := d.Sessions(ctx, obsdb.SessionQuery{Limit: 500})
+	// The session's own grouped row, queried directly (the sqlite
+	// backend's P2-1 fix): the old read scanned the newest 500
+	// sessions, so an older session 404'd here while the list still
+	// showed it.
+	rs, err := d.conn.Query(ctx, `SELECT SessionID, max(PublicID) AS sPublicID, max(Agent) AS sAgent,
+		uniqExact(RunId) AS sTurns, min(Started) AS sFirstSeen, max(LastSeen) AS sLastSeen,
+		sum(InputTokens) AS sInputTokens, sum(OutputTokens) AS sOutputTokens,
+		sum(CachedInputTokens) AS sCachedInputTokens, sum(CacheWriteTokens) AS sCacheWriteTokens,
+		sum(ReasoningTokens) AS sReasoningTokens,
+		argMax(FinishedOK, (Turn, Started)) AS sNewestOK, argMax(Failed, (Turn, Started)) AS sNewestFailed,
+		argMax(LastSeen, (Turn, Started)) AS sNewestLastSeen
+		FROM `+sessionRuns(" AND SessionID = ?")+` GROUP BY SessionID`, id)
 	if err != nil {
 		return obsdb.SessionDetail{}, err
 	}
+	defer func() { _ = rs.Close() }()
 	var row obsdb.SessionRow
-	found := false
-	for _, s := range page.Sessions {
-		if s.ID == id {
-			row, found = s, true
-			break
+	var turns uint64
+	var inTok, outTok, cached, cacheW, reason int64
+	var ok, failed bool
+	var newestSeen time.Time
+	if !rs.Next() {
+		if err := rs.Err(); err != nil {
+			return obsdb.SessionDetail{}, err
 		}
-	}
-	if !found {
 		return obsdb.SessionDetail{}, fmt.Errorf("%w: session %s", obsdb.ErrNotFound, id)
 	}
+	if err := rs.Scan(&row.ID, &row.PublicID, &row.Agent, &turns,
+		&row.FirstSeen, &row.LastSeen, &inTok, &outTok, &cached, &cacheW, &reason,
+		&ok, &failed, &newestSeen); err != nil {
+		return obsdb.SessionDetail{}, err
+	}
+	if err := rs.Err(); err != nil {
+		return obsdb.SessionDetail{}, err
+	}
+	row.Turns = int(turns)
+	row.FirstSeen, row.LastSeen = row.FirstSeen.UTC(), row.LastSeen.UTC()
+	row.Usage = weft.Usage{
+		InputTokens: inTok, OutputTokens: outTok,
+		CachedInputTokens: cached, CacheWriteTokens: cacheW,
+		ReasoningTokens: reason,
+	}
+	row.Status = obsdb.DeriveStatus(failed, ok, newestSeen, time.Now())
 	runs, err := d.queryRunRows(ctx,
 		`SELECT `+runColumns+` FROM weft_runs FINAL
 		WHERE SessionID = ? AND ParentRunID = '' AND Playground = 0

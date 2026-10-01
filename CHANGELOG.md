@@ -14,6 +14,11 @@
   in its views — now pinned by a live test too. The pushed
   `obsdb/v0.1.0` and `obsdb/clickhouse/v0.1.0` tags carry the
   Go-side read bug (owner: consider a patch tag).
+- `Session(id)` (sqlite and clickhouse) reads the session's own
+  grouped row directly instead of scanning the newest 500 sessions —
+  a session older than the newest page 404'd in the detail while the
+  list still showed it. Pinned on both backends
+  (`TestSessionBeyondNewestPage`: 502 sessions, the oldest resolves).
 
 ### studio
 

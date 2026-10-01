@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -835,5 +836,52 @@ func TestTurnStringAttrEndToEnd(t *testing.T) {
 	}
 	if page.Runs[0].Turn != 3 {
 		t.Errorf("run list turn = %d, want 3", page.Runs[0].Turn)
+	}
+}
+
+// Session(id) reads the session's own row directly: the old
+// implementation scanned the newest 500 sessions, so an older session
+// 404'd in the detail while the list still showed it (the audit's
+// P2-1).
+func TestSessionBeyondNewestPage(t *testing.T) {
+	db := openMem(t)
+	ctx := context.Background()
+	// 502 sessions; the target is the oldest.
+	const target = "s_target"
+	write := func(sessionID string, at time.Duration) {
+		extra := map[string]any{"weft.session.id": sessionID}
+		start := rec(sessionID+"-t1", "event", "run_start", 0,
+			`{"type":"run_start","id":"`+sessionID+`-t1","model":{"provider":"wefttest","name":"script"},"agent":"demo"}`, extra)
+		start.Time = base(at)
+		finish := rec(sessionID+"-t1", "event", "run_finish", 1,
+			`{"type":"run_finish","run_id":"`+sessionID+`-t1","usage":{"input_tokens":3,"output_tokens":1},"steps":1}`, extra)
+		finish.Time = base(at + time.Second)
+		if err := db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{start, finish}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(target, 0)
+	for i := 0; i < 501; i++ {
+		write(fmt.Sprintf("s_new_%03d", i), time.Duration(i+2)*time.Minute)
+	}
+	list, err := db.Sessions(ctx, obsdb.SessionQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.Total != 502 {
+		t.Fatalf("sessions total = %d, want 502", list.Total)
+	}
+	det, err := db.Session(ctx, target)
+	if err != nil {
+		t.Fatalf("Session(%s): %v (a session older than the newest page must still resolve)", target, err)
+	}
+	if det.ID != target || det.Turns != 1 || det.Status != obsdb.StatusSucceeded {
+		t.Errorf("detail = %+v", det.SessionRow)
+	}
+	if len(det.Runs) != 1 || det.Runs[0].ID != target+"-t1" {
+		t.Errorf("runs = %+v", det.Runs)
+	}
+	if _, err := db.Session(ctx, "nope"); !errors.Is(err, obsdb.ErrNotFound) {
+		t.Errorf("unknown session: %v, want ErrNotFound", err)
 	}
 }

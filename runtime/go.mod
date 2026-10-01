@@ -8,10 +8,10 @@ go 1.26.0
 // studio v0.3.0.
 require (
 	github.com/weftgo/weft v0.7.0
-	github.com/weftgo/weft/obsdb v0.1.0
-	github.com/weftgo/weft/otel v0.1.0
-	github.com/weftgo/weft/studio v0.3.0
-	github.com/weftgo/weft/thread v0.8.1
+	github.com/weftgo/weft/obsdb v0.1.1
+	github.com/weftgo/weft/otel v0.1.1
+	github.com/weftgo/weft/studio v0.3.1
+	github.com/weftgo/weft/thread v0.9.0
 	go.opentelemetry.io/otel/sdk v1.46.0
 )
 

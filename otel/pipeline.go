@@ -80,9 +80,17 @@ func (p *Pipeline) StudioEndpoint() (string, string) { return p.studioURL, p.stu
 
 // ForceFlush flushes every destination.
 func (p *Pipeline) ForceFlush(ctx context.Context) error {
-	errTP := p.tp.ForceFlush(ctx)
-	errLP := p.lp.ForceFlush(ctx)
-	return errors.Join(errTP, errLP)
+	// A pipeline whose build failed has no providers yet (Start shuts
+	// the half-built value down on its error path); flush is then a
+	// no-op, not a panic.
+	var err error
+	if p.tp != nil {
+		err = errors.Join(err, p.tp.ForceFlush(ctx))
+	}
+	if p.lp != nil {
+		err = errors.Join(err, p.lp.ForceFlush(ctx))
+	}
+	return err
 }
 
 // Shutdown runs S2.4's order: stop heartbeats → flush every destination
@@ -94,8 +102,12 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 		flushCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		_ = p.ForceFlush(flushCtx)
 		cancel()
-		_ = p.lp.Shutdown(ctx)
-		_ = p.tp.Shutdown(ctx)
+		if p.lp != nil {
+			_ = p.lp.Shutdown(ctx)
+		}
+		if p.tp != nil {
+			_ = p.tp.Shutdown(ctx)
+		}
 		if p.local != nil {
 			p.closeErr = p.local.Close()
 		}

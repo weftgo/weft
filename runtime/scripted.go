@@ -99,20 +99,44 @@ func eventsOf(msg weft.Message) []weft.ModelEvent {
 // wefttest's key (replay.go's keyDoc): the transcript verbatim, the
 // tool catalogue by name only, the thinking and tool-choice requests,
 // the sequential flag. The system prompt is deliberately absent.
-// Thinking, tool choice and sequentialness are recorded as their zero
-// values: an agent configured with non-zero defaults for them records
-// requests this key cannot reproduce (documented limitation — the miss
-// is loud, never a silent wrong answer).
 type scriptedKeyDoc struct {
-	Messages   []weft.Message       `json:"messages"`
-	Tools      []string             `json:"tools,omitempty"`
-	Thinking   *weft.ThinkingConfig `json:"thinking,omitempty"`
-	ToolChoice *struct{}            `json:"tool_choice,omitempty"`
-	Sequential bool                 `json:"sequential,omitempty"`
+	Messages   []weft.Message         `json:"messages"`
+	Tools      []string               `json:"tools,omitempty"`
+	Thinking   *weft.ThinkingConfig   `json:"thinking,omitempty"`
+	ToolChoice *weft.ToolChoiceConfig `json:"tool_choice,omitempty"`
+	Sequential bool                   `json:"sequential,omitempty"`
 }
 
+// scriptedKey indexes the record (step 8b review fix 3): messages and
+// tool names only — thinking, tool choice and sequentialness index as
+// their zero values, because the stored transcript does not record
+// them. The request side (scriptedRequestKey) carries them
+// nil-when-zero exactly like wefttest's canonical, so a request that
+// sets any of them misses the record loudly instead of replaying the
+// recorded answer — §5.5 names thinking among the key-altering
+// changes. (An agent configured with non-zero defaults for them
+// therefore records a transcript its own scripted re-runs cannot
+// answer: the miss is loud, never a silent wrong answer.)
 func scriptedKey(prefix []weft.Message, tools []string) string {
-	doc := scriptedKeyDoc{Messages: prefix, Tools: tools}
+	return hashScriptedKey(scriptedKeyDoc{Messages: prefix, Tools: tools})
+}
+
+// scriptedRequestKey is the request side of the same key: wefttest's
+// canonical rules verbatim (replay.go:89-104).
+func scriptedRequestKey(req weft.ModelRequest) string {
+	doc := scriptedKeyDoc{Messages: req.Messages, Tools: toolNames(req.Tools), Sequential: req.SequentialTools}
+	if req.Thinking != (weft.ThinkingConfig{}) {
+		tc := req.Thinking
+		doc.Thinking = &tc
+	}
+	if req.ToolChoice != (weft.ToolChoiceConfig{}) {
+		cc := req.ToolChoice
+		doc.ToolChoice = &cc
+	}
+	return hashScriptedKey(doc)
+}
+
+func hashScriptedKey(doc scriptedKeyDoc) string {
 	b, err := json.Marshal(doc)
 	if err != nil {
 		// Messages round-trip through encoding/json by contract.
@@ -126,7 +150,7 @@ func scriptedKey(prefix []weft.Message, tools []string) string {
 func (m *scriptedModel) Info() weft.ModelInfo { return m.info }
 
 func (m *scriptedModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	key := scriptedKey(req.Messages, toolNames(req.Tools))
+	key := scriptedRequestKey(req)
 	m.mu.Lock()
 	queue := m.byKey[key]
 	var events []weft.ModelEvent

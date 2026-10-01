@@ -99,6 +99,61 @@ func TestScriptedEngineNoSilentPromptReplay(t *testing.T) {
 	}
 }
 
+// TestScriptedEngineKeyAlteringRequestMisses pins §5.5's rule the step
+// 8b review found silently broken (review fix 3): thinking, tool
+// choice and sequentialness are key inputs — wefttest's canonical
+// carries them, so the scripted engine must too — and a request that
+// sets any of them misses the record loudly. Before the fix a
+// thinking override replayed the recorded answer silently: the exact
+// trap §5.5 exists to close.
+func TestScriptedEngineKeyAlteringRequestMisses(t *testing.T) {
+	lookup := weft.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) {
+		return "shipped", nil
+	})
+	msgs := scriptedTranscript()
+	tools := []string{"lookup_order"}
+
+	// The full agent path — the trap the review proved live. Even
+	// thinking "off" misses: ThinkUnset is the zero level, so "off" is
+	// a non-zero key input the record never answers.
+	agt := weft.New(newScriptedModel(msgs, tools), weft.Name("a"), lookup)
+	for _, lvl := range []weft.ThinkingLevel{weft.ThinkLow, weft.ThinkOff} {
+		_, err := agt.Generate(context.Background(), weft.Prompt("where is my order #4411?"),
+			weft.Thinking(weft.ThinkingConfig{Level: lvl}))
+		if err == nil || !strings.Contains(err.Error(), "no recorded turn") {
+			t.Errorf("thinking %d override err = %v, want the no-recorded-turn miss", lvl, err)
+		}
+	}
+
+	// The other two key inputs, pinned at the Stream seam the way
+	// wefttest's canonical carries them: a tool-choice request and a
+	// sequential-tools request each miss the plain-record key.
+	miss := func(req weft.ModelRequest) error {
+		var err error
+		newScriptedModel(msgs, tools).Stream(context.Background(), req)(
+			func(_ weft.ModelEvent, e error) bool {
+				if e != nil {
+					err = e
+				}
+				return true
+			})
+		return err
+	}
+	if err := miss(weft.ModelRequest{Messages: msgs[:1], ToolChoice: weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}}); err == nil || !strings.Contains(err.Error(), "no recorded turn") {
+		t.Errorf("tool-choice override err = %v, want the no-recorded-turn miss", err)
+	}
+	if err := miss(weft.ModelRequest{Messages: msgs[:1], SequentialTools: true}); err == nil || !strings.Contains(err.Error(), "no recorded turn") {
+		t.Errorf("sequential override err = %v, want the no-recorded-turn miss", err)
+	}
+
+	// The same request with none of them set still hits: only the
+	// key-altering changes miss.
+	res, err := agt.Generate(context.Background(), weft.Prompt("where is my order #4411?"))
+	if err != nil || res.Text() != "Your order shipped yesterday." {
+		t.Errorf("plain scripted re-run = %q, %v — want the recorded answer", res.Text(), err)
+	}
+}
+
 // TestScriptedModelReasoningParts documents ADR 0004's consequence:
 // signatures never stream back, so a scripted run's rebuilt transcript
 // lacks them.

@@ -46,8 +46,15 @@ func (d *DB) Experiments(ctx context.Context) ([]obsdb.Experiment, error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
+	// InsertTime, not Updated, orders the FINAL read (step 8b review
+	// fix 2): Updated goes in through a bound time.Time parameter,
+	// which the driver writes at whole-second precision — saves made
+	// within the same second tie on Updated and ORDER BY Updated DESC,
+	// Id falls back to Id ascending, so the older id outranks the
+	// newer write. The table's own InsertTime DEFAULT now64(9) keeps
+	// the engine's write order at microsecond precision.
 	rows, err := d.conn.Query(ctx, `SELECT Id, Name, Agent, Created, Updated, Variants, Inputs
-		FROM experiments FINAL ORDER BY Updated DESC, Id`)
+		FROM experiments FINAL ORDER BY InsertTime DESC, Id`)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +82,7 @@ func (d *DB) Experiment(ctx context.Context, id string) (obsdb.Experiment, error
 		return obsdb.Experiment{}, err
 	}
 	rows, err := d.conn.Query(ctx, `SELECT Id, Name, Agent, Created, Updated, Variants, Inputs
-		FROM experiments FINAL WHERE Id = ?`, id)
+		FROM experiments FINAL WHERE Id = ? ORDER BY InsertTime DESC`, id)
 	if err != nil {
 		return obsdb.Experiment{}, err
 	}

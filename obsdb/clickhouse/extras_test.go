@@ -151,8 +151,68 @@ func TestReopenIsANoop(t *testing.T) {
 	if err := conn.QueryRow(ctx(), "SELECT count() FROM obsdb_migrations").Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 1 {
-		t.Errorf("obsdb_migrations rows after reopen = %d, want 1", versions)
+	// One row per migration: 0001 (init) and 0002 (experiments) — the
+	// same count TestMigrationPinsExporterVersion pins as the highest
+	// version. (Step 8b review fix 1: this read still wanted 1 after
+	// 0002 landed, failing only on a real server, where the gated suite
+	// first ran.)
+	if versions != 2 {
+		t.Errorf("obsdb_migrations rows after reopen = %d, want 2 (0001, 0002)", versions)
+	}
+}
+
+// TestExperimentsOrderByWriteTime pins the list order against the
+// binding the step 8b review found live (review fix 2): Updated goes
+// in through a bound time.Time parameter, which the driver writes at
+// whole-second precision — saves within one second tie on Updated, so
+// the newest-first list must order by the engine's own write time
+// (InsertTime, DEFAULT now64(9), microsecond-precise), never fall
+// back to the id. The conformance subtest pins the same rule through
+// the public write path; the second leg here removes the timing luck
+// with rows whose Updated is identical by construction.
+func TestExperimentsOrderByWriteTime(t *testing.T) {
+	db, _ := openFresh(t)
+	// The review's probe shape: three saves 80 ms apart, the newest
+	// write on exp_1.
+	saves := []obsdb.Experiment{
+		{ID: "exp_0", Name: "older"},
+		{ID: "exp_1", Name: "newer"},
+		{ID: "exp_1", Name: "newer refresh"},
+	}
+	for _, e := range saves {
+		if err := db.SaveExperiment(ctx(), e); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(80 * time.Millisecond)
+	}
+	list, err := db.Experiments(ctx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 || list[0].ID != "exp_1" || list[0].Name != "newer refresh" {
+		t.Errorf("list = %+v, want exp_1's newest write first", list)
+	}
+
+	// The hard pin: two rows whose Updated is identical at whole-second
+	// precision (exactly what the bound parameter writes), the older
+	// write on the alphabetically-first id — InsertTime decides. The
+	// timestamps are SQL literals so sub-second precision survives by
+	// construction (a bound time.Time is the coarse path under test).
+	db2, dsn := openFresh(t)
+	conn := openRaw(t, dsn)
+	defer func() { _ = conn.Close() }()
+	if err := conn.Exec(ctx(), `INSERT INTO experiments
+		(Id, Name, Agent, Created, Updated, Variants, Inputs, InsertTime) VALUES
+		('exp_a', 'written first', 'ag', toDateTime64('2026-09-17 00:00:00', 9, 'UTC'), toDateTime64('2026-09-17 00:00:00', 9, 'UTC'), '[]', '[]', toDateTime64('2026-09-17 00:00:00.010', 9, 'UTC')),
+		('exp_z', 'written last',  'ag', toDateTime64('2026-09-17 00:00:00', 9, 'UTC'), toDateTime64('2026-09-17 00:00:00', 9, 'UTC'), '[]', '[]', toDateTime64('2026-09-17 00:00:00.090', 9, 'UTC'))`); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := db2.Experiments(ctx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 2 || raw[0].ID != "exp_z" {
+		t.Errorf("list with tied Updated = %+v, want exp_z (the newest write) before exp_a — InsertTime, never the id, breaks the tie", raw)
 	}
 }
 

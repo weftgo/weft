@@ -2662,7 +2662,7 @@ function Mt(e, t, n, r, i, a) {
 	o.setAttribute("data-weft-step", String(e.index)), r === e.index && (o.style.outline = "1px solid var(--w-accent)");
 	let s = V("div", "weft-step-h", [V("span", void 0, `step ${e.index}`), V("span", "weft-grow")]), c = a?.child ? a.child.requests : n?.requests, l = c?.steps.get(e.index)?.rows ?? [], u = !c?.error && (!c?.truncated || e.index < Pt(c));
 	e.finish && (s.appendChild(V("span", void 0, e.finish.reason)), s.appendChild(V("span", void 0, Gt(e.finish.usage))));
-	let d = u ? Ge(We(l, !!e.finish, t === "running")) : null;
+	let d = u ? Ge(We(l, !!e.finish || e.toolCalls.length > 0, t === "running")) : null;
 	if (d && s.appendChild(V("span", "weft-badge weft-info", d, { "data-weft-attempts": "" })), e.finish) {
 		let t = qe(e.finish.latencyMs, e.finish.ttftMs, "ttft");
 		t && s.appendChild(V("span", void 0, t, { "data-weft-timing": "" }));

@@ -114,4 +114,20 @@ describe("the panel's step line (A4.2)", () => {
     expect($(el, '[data-weft-step="1"] [data-weft-attempts]')).toBeNull()
     expect($(el, '[data-weft-step="1"] [data-weft-timing]')?.textContent).toBe("40 ms")
   })
+
+  it("a run that died while a step's tools ran says that step answered", async () => {
+    const r = routes(null, step0Rows())
+    // The process died after tool_start: no tool_finish, no step_finish.
+    r[`runs/${RUN}/events?after=0&limit=500`] = page([
+      { type: "run_start", id: RUN, model: { provider: "wefttest", name: "glm-a" }, agent: "acme-support" },
+      { type: "step_start", run_id: RUN, index: 0 },
+      { type: "tool_start", run_id: RUN, seq: 1, call_id: "c_lookup", name: "lookup_order", args: { order_id: "42" } },
+    ])
+    r["runs?public_id=pub_orders&limit=50"] = { total: 1, runs: [runRow({ status: "interrupted" })], next_before: null }
+    r[`runs/${RUN}`] = { ...runRow({ status: "interrupted" }), children: [] }
+    fakeStudio(r, metaWithRequests)
+    const el = await mount()
+    const head = $(el, '[data-weft-step="0"] .weft-step-h')!
+    expect(head.querySelector("[data-weft-attempts]")?.textContent).toBe("attempt 4 of 4 · fallback to glm-b")
+  })
 })

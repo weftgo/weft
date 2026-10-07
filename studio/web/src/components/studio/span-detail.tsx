@@ -14,9 +14,11 @@ import { spanMs, usageSummary } from "@/lib/format"
 import type { Span } from "@/lib/trace"
 import { JsonTree } from "@/components/studio/json-tree"
 import { EventsExplorer } from "@/components/studio/raw-view"
+import { HoleBadges } from "@/components/studio/hole-badge"
 import {
   AttemptsSection,
   StepHeadline,
+  stepAttemptsHole,
 } from "@/components/studio/step-attempts"
 import { RequestSection } from "@/components/studio/step-request"
 import type { RunRequests } from "@/components/studio/step-request"
@@ -174,6 +176,9 @@ function StepDetail({
             runStatus={runStatus}
             requests={requests}
           />
+        ) : null}
+        {runId ? (
+          <HoleBadges holes={stepAttemptsHole(step, requests)} />
         ) : null}
         <span className="ml-auto font-mono text-[10px] text-faint tabular-nums">
           events {step.from}–{step.to}

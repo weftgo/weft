@@ -144,7 +144,10 @@ const step0 = golden<StepDoc>("step-0")
  * invoke_agent span, the chat span (glm-a asked, glm-b answered, TTFT
  * 180 ms), and its four attempt spans — three stream_idle errors, the
  * fourth ok. */
-function chatSpans(run: string): Span[] {
+function chatSpans(
+  run: string,
+  statuses: Span["status"][] = ["error", "error", "error", "ok"]
+): Span[] {
   const t0 = Date.parse(rOK.started)
   const at = (ms: number) => new Date(t0 + ms).toISOString()
   const span = (
@@ -169,23 +172,23 @@ function chatSpans(run: string): Span[] {
     attrs: { "weft.run.id": run, ...attrs },
     events: [],
   })
-  const models = ["glm-a", "glm-b", "glm-a", "glm-b"]
+  const models = ["glm-a", "glm-b", "glm-a", "glm-b"].slice(0, statuses.length)
+  const ok = statuses.lastIndexOf("ok")
   const spans: Span[] = [
     span("a", "", "invoke_agent orders", 0, 100, "ok", {
       "gen_ai.operation.name": "invoke_agent",
     }),
-    span("b", "a", "chat glm-a", 1, 90, "ok", {
+    span("b", "a", "chat glm-a", 1, 90, ok < 0 ? "error" : "ok", {
       "gen_ai.operation.name": "chat",
       "weft.step.index": 0,
       "gen_ai.request.model": "glm-a",
-      "gen_ai.response.model": "glm-b",
-      "weft.ttft_ms": 180,
+      ...(ok < 0 ? {} : { "gen_ai.response.model": models[ok], "weft.ttft_ms": 180 }),
     }),
     ...models.map((m, i) =>
-      span(`c${i + 1}`, "b", "attempt", 2 + i * 20, 20 + i * 20, i < 3 ? "error" : "ok", {
+      span(`c${i + 1}`, "b", "attempt", 2 + i * 20, 20 + i * 20, statuses[i], {
         "weft.attempt.index": i + 1,
         "gen_ai.request.model": m,
-        ...(i < 3 ? { "error.type": "stream_idle" } : {}),
+        ...(statuses[i] === "error" ? { "error.type": "stream_idle" } : {}),
       })
     ),
   ]
@@ -402,5 +405,88 @@ describe("the step story's attempts and timing (A4.2)", () => {
     expect(line.textContent).toBe("attempt 4 of 4 · fallback to glm-b")
     expect(document.querySelector("[data-attempts]")).toBeNull()
     expect(studio.calls(`GET runs/${run}/steps/0`)).toEqual([])
+  })
+
+  it("a run that died while a step's tools ran says that step answered", async () => {
+    const run = step0.run_id
+    serve({
+      run,
+      // The process died after tool_start: no tool_finish, no
+      // step_finish, no run_finish.
+      events: streamOf(run, step0.events.map((e) => e.event)).slice(0, 3),
+      steps: ["0"],
+      requests: recorded(),
+      status: "interrupted",
+    })
+    renderApp(`/runs/${run}?view=story`)
+    await waitFor(() =>
+      expect(card().querySelector("[data-attempt-line]")?.textContent).toBe(
+        "attempt 4 of 4 · fallback to glm-b"
+      )
+    )
+  })
+
+  it("the trace view's step detail badges a pre-A4 step without the steps capability", async () => {
+    const run = "old3"
+    serve({
+      run,
+      events: streamOf(run, bareStep(run, {})),
+      capabilities: ["ingest"],
+    })
+    renderApp(`/runs/${run}?sel=s0`)
+    const badge = await waitFor(() => {
+      const b = document.querySelector<HTMLElement>(
+        '[data-holes] [data-hole="not_recorded"]'
+      )
+      expect(b).toBeTruthy()
+      return b!
+    })
+    expect(badge.getAttribute("title")).toContain(
+      "recorded by a weft before attempt reporting (A4)"
+    )
+    expect(studio.calls(`GET runs/${run}/steps/0`)).toEqual([])
+  })
+
+  /** The chat span's facts as the trace view's detail lists them. */
+  async function chatFacts(spans: Span[]): Promise<Record<string, string>> {
+    const run = step0.run_id
+    serve({
+      run,
+      events: streamOf(run, step0.events.map((e) => e.event)),
+      requests: recorded(),
+      spans,
+      capabilities: ["requests", "ingest"],
+    })
+    renderApp(`/runs/${run}?axis=time&sel=t:b`)
+    const dl = await waitFor(() => {
+      const d = Array.from(document.querySelectorAll("dl")).find((x) =>
+        x.textContent.includes("requested")
+      )
+      expect(d).toBeTruthy()
+      return d!
+    })
+    const out: Record<string, string> = {}
+    for (const dt of Array.from(dl.querySelectorAll("dt")))
+      out[dt.textContent] = dt.nextElementSibling?.textContent ?? ""
+    return out
+  }
+
+  it("the trace view's chat span with no ok attempt says none answered", async () => {
+    const facts = await chatFacts(chatSpans(step0.run_id, ["error", "error", "error"]))
+    expect(facts.attempts).toBe("3 attempts · none answered")
+    expect(facts.answered).toBe("not reported")
+  })
+
+  it("the trace view's chat span counts attempts only past one", async () => {
+    const one = await chatFacts(chatSpans(step0.run_id, ["ok"]))
+    expect(one.attempts).toBeUndefined()
+    expect(one.answered).toBe("glm-a")
+    cleanup()
+    // A call still open with two failed attempts: no line yet, the
+    // count.
+    const open = chatSpans(step0.run_id, ["error", "error"])
+    open[1] = { ...open[1], status: "unset" }
+    const two = await chatFacts(open)
+    expect(two.attempts).toBe("2")
   })
 })

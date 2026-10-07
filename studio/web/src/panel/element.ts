@@ -1453,7 +1453,9 @@ function renderStep(
     head.appendChild(el("span", undefined, step.finish.reason))
     head.appendChild(el("span", undefined, usageLine(step.finish.usage)))
   }
-  const line = complete ? attemptLine(factsFromRows(rows, !!step.finish, runStatus === "running")) : null
+  // A step whose tools started has answered (tools run only after a
+  // successful model call), finished or not.
+  const line = complete ? attemptLine(factsFromRows(rows, !!step.finish || step.toolCalls.length > 0, runStatus === "running")) : null
   if (line) head.appendChild(el("span", "weft-badge weft-info", line, { "data-weft-attempts": "" }))
   if (step.finish) {
     const timing = timingLine(step.finish.latencyMs, step.finish.ttftMs, "ttft")

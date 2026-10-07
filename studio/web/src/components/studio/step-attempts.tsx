@@ -49,11 +49,15 @@ export function StepHeadline({
 }) {
   const doc = useQuery({ ...stepQuery(runId, step.index), enabled: false })
   const d = doc.data
+  // Tools run only after a successful model call: a step whose tools
+  // started has answered, finished or not (a run that died mid-tools).
+  const answered = stepAnswered(step)
+  const fromDoc = d ? factsFromStep(d) : null
   const line = attemptLine(
-    (d ? factsFromStep(d) : null) ??
+    (fromDoc && !(fromDoc.n === 0 && answered) ? fromDoc : null) ??
       factsFromRows(
         requests?.steps.get(step.index)?.rows,
-        !!step.finish,
+        answered,
         runStatus === "running"
       )
   )
@@ -84,6 +88,12 @@ export function StepHeadline({
       ) : null}
     </>
   )
+}
+
+/** stepAnswered says the step's model call answered: it finished, or
+ * its tools started (they run only after a successful call). */
+export function stepAnswered(step: Pick<FoldedStep, "finish" | "toolCalls">): boolean {
+  return !!step.finish || step.toolCalls.length > 0
 }
 
 /**

@@ -8,11 +8,14 @@ import (
 
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftgo/weft/version"
 )
 
-// Version is the studio module's tag, reported by api/meta. It moves
-// when the module is released, nothing else.
-const Version = "v0.4.1"
+// Version is the version Studio reports as api/meta's studio_version
+// and the devtools panel is built against: the framework module's tag,
+// [version.Version] — one version for every layer. It moves with the
+// module's release, nothing else.
+const Version = version.Version
 
 const defaultTitle = "weft studio"
 

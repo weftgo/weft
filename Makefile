@@ -116,6 +116,12 @@ live:
 # ── Studio (TODO §12, ADR 0018) ─────────────────────────────────────
 # Needs Bun. Contributors run these only when the UI changes; users of
 # the module get the committed, embedded studio/dist.
+#
+# The panel is stamped with the one version (B6): vite.panel.config.ts
+# reads `const Version` from version/version.go (studio/web/scripts/
+# weft-version.ts), so bumping that line at release and rerunning this
+# target is the whole bump; studio's TestVersionIsTheModules fails on a
+# stale or hand-edited stamp.
 
 studio-build:
 	cd studio/web && bun install --frozen-lockfile && bun run build

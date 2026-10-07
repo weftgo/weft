@@ -10,6 +10,7 @@ import (
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
+	"github.com/weftgo/weft/version"
 )
 
 // TestRegistryRegistration pins the §10.3 register payload the
@@ -48,9 +49,9 @@ func TestRegistryRegistration(t *testing.T) {
 	if payload.Host == "" || payload.Pid == 0 {
 		t.Errorf("host/pid empty: %q/%d", payload.Host, payload.Pid)
 	}
-	// The literal is the pin: the release step bumps weftVersion()
-	// with the tag and this line must follow it (0.7.0 missed it).
-	if payload.WeftVersion != "v0.9.0" {
+	// The one source's tag (TestWeftVersionMatchesRoot pins it to the
+	// core's, so a missed release bump fails there).
+	if payload.WeftVersion != version.Version {
 		t.Errorf("weft_version = %q", payload.WeftVersion)
 	}
 	if payload.Budget != (budgetWire{MaxTokensPerExperiment: 200_000, MaxRunsPerExperiment: 60}) {

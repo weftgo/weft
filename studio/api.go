@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/version"
 )
 
 // The JSON API (S4.2/S4.3). Every response is application/json; errors
@@ -877,24 +877,7 @@ func dbKind(db obsdb.DB) string {
 	return name
 }
 
-// weftVersion reports the core module version this process built
-// against, from the build info — "(devel)" inside the workspace, the
-// tag in a consumer's build. Best effort: provenance, not a gate.
-func weftVersion() string {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return ""
-	}
-	for _, dep := range bi.Deps {
-		if dep.Path != "github.com/weftgo/weft/core" {
-			continue
-		}
-		if dep.Replace != nil && dep.Replace.Version != "" {
-			return dep.Replace.Version
-		}
-		if dep.Version != "" {
-			return dep.Version
-		}
-	}
-	return "(devel)"
-}
+// weftVersion reports the framework module version this process built
+// against ([version.Runtime]): the tag in a consumer's build, the
+// source's own tag inside the workspace. Provenance, not a gate.
+func weftVersion() string { return version.Runtime() }

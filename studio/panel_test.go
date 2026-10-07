@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/weftgo/weft/version"
 )
 
 // The devtools panel's Go side (WEFT-DEVTOOLS.md §5.1, S4.2): the
@@ -125,7 +128,7 @@ func TestPanelJSMissingBuild(t *testing.T) {
 
 // TestPanelEmbedMatchesCommitted pins the artifact contract (§5.1):
 // the embedded bundle is the committed dist/panel/panel.js, and it
-// was built by this module's own panel config — the studio version it
+// was built by this module's own panel config — the version it
 // understands is stamped into it and must equal studio.Version, or
 // the panel would refuse the Studio it shipped with (§5.1's version
 // check would see "newer").
@@ -135,13 +138,39 @@ func TestPanelEmbedMatchesCommitted(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(b)
-	if !strings.Contains(body, Version) {
+	if !strings.Contains(body, `"`+Version+`"`) {
 		t.Errorf("panel.js does not carry the studio version %q it was built against", Version)
 	}
 	if strings.Contains(body, "react") {
 		t.Error("panel.js contains 'react': a component import leaked into the panel build")
 	}
 }
+
+// TestVersionIsTheModules pins B6's one version: studio.Version is
+// version.Version (a hand edit of either fails here), and the embedded
+// panel's stamp — panelStudioVersion's one returned string literal,
+// read by vite.panel.config.ts from version/version.go — is the same
+// string, so a hand-edited bundle or a stale dist fails too.
+func TestVersionIsTheModules(t *testing.T) {
+	if Version != version.Version {
+		t.Errorf("studio.Version = %q, version.Version = %q: studio.Version is version.Version, never its own literal", Version, version.Version)
+	}
+	b, err := panelJS.ReadFile("dist/panel/panel.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := panelStampRe.FindAllSubmatch(b, -1)
+	if len(m) != 1 {
+		t.Fatalf("panel.js: want exactly one version.ts region with a returned literal, found %d", len(m))
+	}
+	if got := string(m[0][1]); got != version.Version {
+		t.Errorf("panel.js is stamped %q, version.Version is %q: run 'make studio-build' and commit", got, version.Version)
+	}
+}
+
+// panelStampRe finds panelStudioVersion's body in the built bundle:
+// the define folds it to a single returned string literal.
+var panelStampRe = regexp.MustCompile(`//#region src/panel/version\.ts\s*function \w+\(\)\s*\{\s*return "([^"]*)";?\s*\}`)
 
 // TestPanelTokenMintExample pins the setup-C flow end to end against
 // the fixture server: a backend holding the server token mints a

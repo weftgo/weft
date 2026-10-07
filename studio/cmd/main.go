@@ -11,7 +11,9 @@
 // binary. --db sqlite://path picks another file; --db
 // clickhouse://user:pass@host:9000/db serves the hosted backend
 // (obsdb/clickhouse, wired at merge-B). The dev token is printed at
-// start and fixed by WEFT_STUDIO_TOKEN or --token.
+// start and fixed by WEFT_STUDIO_TOKEN or --token. --version prints
+// the weft version (version.Runtime: the module tag this binary was
+// built from) and exits.
 //
 // This is its own module so the studio library never carries what
 // only the binary needs — it is the one place that imports the
@@ -33,6 +35,7 @@ import (
 
 	"github.com/weftgo/weft/obsdb/clickhouse"
 	"github.com/weftgo/weft/studio"
+	"github.com/weftgo/weft/version"
 )
 
 const defaultAddr = "127.0.0.1:7331"
@@ -43,7 +46,12 @@ func main() {
 	addr := flag.String("addr", defaultAddr, "listen address (loopback by default)")
 	token := flag.String("token", "",
 		"API token (default: $WEFT_STUDIO_TOKEN, else a generated dev token printed at start)")
+	showVersion := flag.Bool("version", false, "print the weft version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(version.Runtime())
+		return
+	}
 	if err := serve(*db, *addr, *token, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "studio:", err)
 		os.Exit(1)

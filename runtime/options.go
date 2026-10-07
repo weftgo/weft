@@ -10,6 +10,7 @@ import (
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/studio"
 	"github.com/weftgo/weft/thread"
+	"github.com/weftgo/weft/version"
 )
 
 // Option configures Install.
@@ -206,8 +207,7 @@ func cleartext(rawURL string) bool {
 	return true
 }
 
-// weftVersion is the root module's version this runtime reports at
-// registration. Hard-coded like otel's own weftVersion (the root
-// exports no Version); the release step bumps it with the tag, and
-// TestWeftVersionMatchesRoot fails until it does.
-func weftVersion() string { return "v0.9.0" }
+// weftVersion is the framework module's version, from the one source
+// ([version.Runtime]: the build info's tag, else [version.Version]);
+// TestWeftVersionMatchesRoot pins it to what the core reports.
+func weftVersion() string { return version.Runtime() }

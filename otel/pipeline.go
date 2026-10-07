@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/version"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otlploghttp "go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
@@ -569,8 +570,10 @@ func buildResource(cfg config) (*sdkresource.Resource, error) {
 	return base, nil
 }
 
-// weftVersion is the root module's version attribute value.
-func weftVersion() string { return "v0.9.0" }
+// weftVersion is the framework module's version, from the one source
+// ([version.Runtime]: the build info's tag, else [version.Version]);
+// TestWeftVersionMatchesRoot pins it to what the core reports.
+func weftVersion() string { return version.Runtime() }
 
 // The installed pipeline, for the package-level accessors.
 var (

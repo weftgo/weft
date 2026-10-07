@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/weftgo/weft/version"
 	"go.opentelemetry.io/otel/attribute"
 	sdkresource "go.opentelemetry.io/otel/sdk/resource"
 )
@@ -267,15 +268,14 @@ func TestBuildResourcePrecedence(t *testing.T) {
 		t.Errorf("(b) service.name = %q, want the Resource option's", got)
 	}
 
-	// (d) weft.version rides on every shape. The literal is the pin:
-	// the release step bumps weftVersion() with the tag and this line
-	// must follow it (the 0.7.0 release missed the bump — the audits'
-	// P0-3).
+	// (d) weft.version rides on every shape: the one source's tag
+	// (version.Version; TestWeftVersionMatchesRoot pins it to the
+	// core's, so a missed release bump — the audits' P0-3 — fails).
 	for name, r := range map[string]*sdkresource.Resource{
 		"base": base, "service": svc, "resource": top,
 	} {
-		if got := resAttr(r, "weft.version"); got != "v0.9.0" {
-			t.Errorf("(d) %s: weft.version = %q, want v0.8.0", name, got)
+		if got := resAttr(r, "weft.version"); got != version.Version {
+			t.Errorf("(d) %s: weft.version = %q, want %q", name, got, version.Version)
 		}
 	}
 }

@@ -7,14 +7,15 @@
 // fonts from the system mono stack — no webfonts, the dock works
 // offline (V2).
 //
-// __PANEL_STUDIO_VERSION__ is the studio module version the panel
-// understands; panel.js refuses to render against a newer Studio
-// (§5.1 Versioning). studio/panel_test.go pins that this string
-// matches studio.Version.
-import { readFileSync } from "node:fs"
+// __PANEL_STUDIO_VERSION__ is the Studio version the panel
+// understands — the framework module's one version, read from
+// version/version.go (scripts/weft-version.ts); panel.js refuses to
+// render against a newer Studio (§5.1 Versioning).
+// studio/panel_test.go pins the stamp to version.Version.
 import { gzipSync } from "node:zlib"
 import { defineConfig } from "vite"
 import type { Plugin } from "vite"
+import { weftVersion } from "./scripts/weft-version"
 
 /** §5.1's budget: panel.js is ≤ 80 KiB gzip. */
 const PANEL_GZIP_BUDGET = 80 * 1024
@@ -53,14 +54,10 @@ function panelBudget(): Plugin {
   }
 }
 
-// The version the Go module reports (studio/studio.go's Version) —
-// read from the source so the panel can never drift from it silently.
-const studioVersion = (() => {
-  const go = readFileSync(new URL("../studio.go", import.meta.url), "utf8")
-  const m = /^const Version = "([^"]+)"/m.exec(go)
-  if (!m) throw new Error("vite.panel.config: studio.Version not found in studio.go")
-  return m[1]
-})()
+// The version the Go module reports (version.Version, which
+// studio.Version is) — read from the source so the panel can never
+// drift from it silently.
+const studioVersion = weftVersion()
 
 // The Dv0 decision (§11 Q1, closed): vanilla TS won on gzip
 // (7,187 vs Preact's 12,202 on the same surfaces), so the vanilla

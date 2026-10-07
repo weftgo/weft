@@ -2,6 +2,7 @@
 // up to the one it was built against, and a newer Studio says so with
 // exactly the words the spec names.
 import { describe, expect, it } from "vitest"
+import { weftVersion } from "../../scripts/weft-version"
 import { compareVersions, panelStudioVersion, studioIsTooNew } from "./version"
 
 describe("compareVersions", () => {
@@ -62,5 +63,23 @@ describe("studioIsTooNew (§5.1)", () => {
     // test seam set, the fallback understands nothing; the Go test
     // pins the built bundle's stamp instead.
     expect(panelStudioVersion()).toBe("v0.0.0")
+  })
+})
+
+describe("the guard against the one version (B6)", () => {
+  it("a panel built from version/version.go accepts the Studio that reports the same string, refuses a newer one", () => {
+    // The string vite.panel.config.ts stamps and studio.Version serves
+    // as studio_version: both read version/version.go.
+    const v = weftVersion()
+    expect(v).toMatch(/^v\d+\.\d+\.\d+/)
+    ;(globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ = v
+    try {
+      expect(panelStudioVersion()).toBe(v)
+      expect(studioIsTooNew(v)).toBe(false)
+      const [major, minor, patch] = v.replace(/^v/, "").split(".")
+      expect(studioIsTooNew(`v${major}.${minor}.${Number(patch) + 1}`)).toBe(true)
+    } finally {
+      delete (globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__
+    }
   })
 })

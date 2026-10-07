@@ -25,8 +25,9 @@ import (
 
 // The golden test (S3.3): the SDK path and the OTLP path produce the
 // same rows for the same data, against obsdb's checked-in fixtures.
-// The fixtures live in obsdb/testdata so step 6's ingest (the receiver)
-// and this module pin the identical bytes.
+// The fixtures are obsdb/testdata's, copied to testdata/otlp so the
+// test runs from the module cache; TestOTLPFixturesMatchObsdb keeps the
+// copies identical, so studio's ingest and this module pin the same bytes.
 
 func loadLogsFixture(t *testing.T) []obsdb.Record {
 	t.Helper()

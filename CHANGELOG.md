@@ -4,6 +4,14 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## otel 0.2.1 — 2026-10-07
+
+### Fixed
+
+- The OTLP golden fixtures live in the module's own `testdata/otlp`, so
+  `go test` runs from the module cache (it read `../obsdb/testdata`,
+  which a module zip does not carry). Test-only; no code change.
+
 ## studio 0.4.1 — 2026-10-07
 
 ### Fixed

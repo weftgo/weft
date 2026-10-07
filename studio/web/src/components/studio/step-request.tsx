@@ -21,7 +21,7 @@ import type {
 import {
   byStep,
   paramFields,
-  REQUEST_HOLES,
+  REQUEST_NOT_RECORDED_LABEL,
   REQUEST_NOT_STORED,
   shortHash,
 } from "@/lib/requests"
@@ -51,7 +51,7 @@ export function runRequests(
 
 /** The not_recorded badge's words on this surface (ADR 0028: the
  * record exists from the release after v0.9.0). */
-const NOT_RECORDED_LABEL = REQUEST_HOLES.not_recorded.label
+const NOT_RECORDED_LABEL = REQUEST_NOT_RECORDED_LABEL
 
 /** Lines of system prompt shown before "show all". */
 const PROMPT_LINES = 12

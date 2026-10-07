@@ -6,6 +6,8 @@
 
 import { queryOptions } from "@tanstack/react-query"
 
+import type { ContentAttrs } from "./honesty"
+
 // ── DTO mirrors (S4.3) ─────────────────────────────────────────────
 
 export interface ModelInfo {
@@ -97,6 +99,10 @@ export function nextCursor(
  * joined by parent_call_id — each child's events load lazily. */
 export interface RunDoc extends RunRow {
   children: RunRow[]
+  /** The run's own holes (ADR 0028 §11, api.go's runHoles):
+   * not_recorded, interrupted, derived, stripped, gap — each with its
+   * reason and fix. Absent from a Studio older than A3. */
+  holes?: StepHole[]
 }
 
 /** One positioned event in a paged stream (S4.3's EventsPage entry). */
@@ -104,6 +110,10 @@ export interface PosEvent {
   pos: number
   time: string
   event: WireEvent
+  /** The stored record's weft.content.* attributes — what the
+   * recorder did to the content (lib/honesty.ts reads them); absent
+   * when it left it as emitted. */
+  attrs?: ContentAttrs
 }
 
 /** One page of a run's event stream (ADR 0018 §8: paged, never inline). */

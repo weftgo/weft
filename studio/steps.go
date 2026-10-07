@@ -201,8 +201,8 @@ func (hs holeSet) add(h obsdb.Hole, reason, fix string) {
 }
 
 func (hs holeSet) note(h obsdb.Hole) {
-	n := holeNotes[h]
-	hs.add(h, n.reason, n.fix)
+	reason, fix := obsdb.HoleNote(h)
+	hs.add(h, reason, fix)
 }
 
 func (hs holeSet) list() []stepHole {
@@ -387,7 +387,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		doc.Usage = evs.finishBody.Usage
 	}
 	if len(evs.gaps) > 0 {
-		holes.add(obsdb.HoleGap, "positions are missing from this step's event stream: a destination dropped a batch", holeNotes[obsdb.HoleGap].fix)
+		holes.add(obsdb.HoleGap, "positions are missing from this step's event stream: a destination dropped a batch", holeFix(obsdb.HoleGap))
 	}
 	if doc.Reason == string(core.StopMaxTokens) {
 		holes.add(obsdb.HoleMaxTokens, "the step finished on the output token limit: its tool calls were not executed", "raise max_tokens")
@@ -444,7 +444,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		stripped = stripped || rec.Content == obsdb.HoleStripped
 	}
 	if stripped {
-		holes.add(obsdb.HoleStripped, "this run's records were content-off: the step's system prompt, catalog, messages, tool arguments and results were dropped before they were stored", holeNotes[obsdb.HoleStripped].fix)
+		holes.add(obsdb.HoleStripped, "this run's records were content-off: the step's system prompt, catalog, messages, tool arguments and results were dropped before they were stored", holeFix(obsdb.HoleStripped))
 	}
 	for _, pe := range evs.events {
 		var h eventHead
@@ -518,7 +518,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 	case !evs.found:
 		// Counted by the run row or named by a request, but no event
 		// records the step: the run's outcome, and the gap said.
-		holes.add(obsdb.HoleGap, "the run counts this step, but no event of it was stored: a destination dropped its records", holeNotes[obsdb.HoleGap].fix)
+		holes.add(obsdb.HoleGap, "the run counts this step, but no event of it was stored: a destination dropped its records", holeFix(obsdb.HoleGap))
 		doc.Status = stepOK
 		if det.Status == obsdb.StatusFailed && n == det.Steps-1 {
 			doc.Status = stepError
@@ -606,7 +606,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 			}
 		}
 	case modelCalled:
-		gap := badgeFields{Badge: string(obsdb.HoleGap), Reason: "the step called the model, but no request record of it was stored", Fix: holeNotes[obsdb.HoleGap].fix}
+		gap := badgeFields{Badge: string(obsdb.HoleGap), Reason: "the step called the model, but no request record of it was stored", Fix: holeFix(obsdb.HoleGap)}
 		doc.Request = gap
 		holes.add(obsdb.HoleGap, gap.Reason, gap.Fix)
 	}
@@ -689,7 +689,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		attBadge, attReason = obsdb.HoleNotRecorded, "the step's chat span has no attempt spans and no A4 timing: it was recorded by a weft before attempt reporting"
 	}
 	if attBadge != "" {
-		fix := holeNotes[attBadge].fix
+		fix := holeFix(attBadge)
 		doc.AttemptsBadge = &badgeFields{Badge: string(attBadge), Reason: attReason, Fix: fix}
 		holes.add(attBadge, attReason, fix)
 	}
@@ -716,7 +716,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		doc.MessagesIn.badgeFields = badgeOf(reqHole)
 	case first == nil:
 		if modelCalled {
-			doc.MessagesIn.badgeFields = badgeFields{Badge: string(obsdb.HoleGap), Reason: "no request record of the step was stored", Fix: holeNotes[obsdb.HoleGap].fix}
+			doc.MessagesIn.badgeFields = badgeFields{Badge: string(obsdb.HoleGap), Reason: "no request record of the step was stored", Fix: holeFix(obsdb.HoleGap)}
 		}
 	default:
 		ref := first.Body.MessagesRef
@@ -725,7 +725,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		case first.Content == obsdb.HoleStripped:
 			doc.MessagesIn.badgeFields = badgeFields{Badge: string(obsdb.HoleStripped),
 				Reason: "a content-off chain removes messages_ref.index: the count is kept, the messages are not stored",
-				Fix:    holeNotes[obsdb.HoleStripped].fix}
+				Fix:    holeFix(obsdb.HoleStripped)}
 		case doc.Compaction != nil && ref.Index != nil && *ref.Index == doc.Compaction.Index:
 			doc.MessagesIn.badgeFields = doc.Compaction.badgeFields
 		}

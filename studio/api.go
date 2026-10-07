@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -205,17 +206,95 @@ type runsPage struct {
 // runDoc is GET /api/runs/{id}: the row and the subagent children
 // (obsdb's RunDetail). Events are deliberately not here — they are
 // paged (ADR 0018 §8); the UI loads each child's events lazily.
+//
+// Holes are the run's own, from ADR 0028 §11's closed table, each with
+// its reason and, where one exists, its fix (runHoles) — what the run
+// header badges; [] when the run has none.
 type runDoc struct {
 	runRow
-	Children []runRow `json:"children"`
+	Children []runRow   `json:"children"`
+	Holes    []stepHole `json:"holes"`
 }
 
 // posEvent is one event in a paged stream: its 0-based position and
-// time beside the event itself (S4.3's EventsPage entry).
+// time beside the event itself (S4.3's EventsPage entry). Attrs is the
+// stored record's weft.content.* attributes and nothing else — what
+// the destination's chain did to the content (ADR 0028 §11: stripped,
+// a cap's truncated_bytes); absent when it did nothing.
 type posEvent struct {
 	Pos   int64           `json:"pos"`
 	Time  time.Time       `json:"time"`
 	Event json.RawMessage `json:"event"`
+	Attrs map[string]any  `json:"attrs,omitempty"`
+}
+
+// Content attribute keys a posEvent and a live record frame carry.
+const (
+	attrContent   = "weft.content"
+	attrTruncated = "weft.content.truncated_bytes"
+)
+
+// contentFull is the core's weft.content mark on an event emitted with
+// its content: the content as emitted, no hole — the one value the
+// attrs object leaves out ("none", the core's own capture-off mark,
+// and "stripped", a content-off chain's, are kept).
+const contentFull = "full"
+
+// contentAttrs is the attrs object of a stored event: nil when the
+// chain left the content as emitted.
+func contentAttrs(content string, truncated int64) map[string]any {
+	if content == contentFull {
+		content = ""
+	}
+	if content == "" && truncated <= 0 {
+		return nil
+	}
+	out := map[string]any{}
+	if content != "" {
+		out[attrContent] = content
+	}
+	if truncated > 0 {
+		out[attrTruncated] = truncated
+	}
+	return out
+}
+
+// contentAttrsOf limits an ingested record's attributes to the
+// weft.content.* keys (the same object posEvent carries): a number
+// arrives as int64, float64 or a numeric string and leaves as an
+// integer; nil when there are none.
+func contentAttrsOf(attrs map[string]any) map[string]any {
+	var out map[string]any
+	for k, v := range attrs {
+		if k != attrContent && !strings.HasPrefix(k, attrContent+".") || k == attrContent && v == contentFull {
+			continue
+		}
+		if k == attrTruncated {
+			var n int64
+			switch x := v.(type) {
+			case int64:
+				n = x
+			case float64:
+				n = int64(x)
+			case string:
+				n, _ = strconv.ParseInt(x, 10, 64)
+			}
+			if n <= 0 {
+				continue
+			}
+			v = n
+		}
+		if out == nil {
+			out = map[string]any{}
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// posEventOf is the API's event row of a stored event.
+func posEventOf(pe obsdb.PosEvent) posEvent {
+	return posEvent{Pos: pe.Pos, Time: pe.Time, Event: pe.Event, Attrs: contentAttrs(pe.Content, pe.TruncatedBytes)}
 }
 
 type eventsPage struct {
@@ -585,7 +664,60 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	for _, kid := range det.Children {
 		doc.Children = append(doc.Children, row(kid))
 	}
+	holes, err := s.runHoles(r.Context(), det.RunRow)
+	if err != nil {
+		dbError(w, r, "run", id, err)
+		return
+	}
+	doc.Holes = holes
 	writeJSON(w, r, http.StatusOK, doc)
+}
+
+// runHoles is the run's own holes, from what obsdb can tell about the
+// whole run (ADR 0028 §11; plan A3):
+//
+//   - not_recorded: RequestsHole — written before the request record;
+//   - interrupted: the derived status (obsdb.InterruptedAfter);
+//   - derived: no stored event, yet the run is no longer running and
+//     never finished — its row was built from its spans alone;
+//   - stripped: its events came through a content-off chain, or the
+//     core captured none (the run_start's weft.content: stripped or
+//     none);
+//   - gap: event positions missing below the run's high-water mark
+//     (EventPage.Gaps) once the run is no longer running — a running
+//     run's missing positions may still be in flight.
+//
+// One one-event read answers the last two; truncated, redacted,
+// max_tokens and compacted are facts of an event or a step, badged
+// there.
+func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, error) {
+	holes := holeSet{}
+	if h := rec.RequestsHole(); h != "" {
+		holes.note(h)
+	}
+	if rec.Status == obsdb.StatusInterrupted {
+		holes.note(obsdb.HoleInterrupted)
+	}
+	if rec.EventCount == 0 && rec.Status != obsdb.StatusRunning && rec.Status != obsdb.StatusSucceeded {
+		holes.add(obsdb.HoleDerived, "this run has spans but no stored events: its row was built from its spans by the reader", holeFix(obsdb.HoleDerived))
+	}
+	if rec.EventCount > 0 {
+		page, err := s.db.Events(ctx, rec.ID, -1, 1)
+		if err != nil {
+			return nil, err
+		}
+		if len(page.Events) > 0 && (page.Events[0].Content == "stripped" || page.Events[0].Content == "none") {
+			holes.note(obsdb.HoleStripped)
+		}
+		if len(page.Gaps) > 0 && rec.Status != obsdb.StatusRunning {
+			n := strconv.Itoa(len(page.Gaps))
+			if len(page.Gaps) >= obsdb.MaxGaps {
+				n += "+"
+			}
+			holes.add(obsdb.HoleGap, n+" of the run's event positions are missing: a destination dropped a batch", holeFix(obsdb.HoleGap))
+		}
+	}
+	return holes.list(), nil
 }
 
 // serveRunEvents answers api/runs/{id}/events?after=&limit=: one page
@@ -649,7 +781,7 @@ func (s *Server) serveRunEvents(w http.ResponseWriter, r *http.Request, id strin
 		out.Gaps = []int64{}
 	}
 	for _, pe := range page.Events {
-		out.Events = append(out.Events, posEvent{Pos: pe.Pos, Time: pe.Time, Event: pe.Event})
+		out.Events = append(out.Events, posEventOf(pe))
 	}
 	if page.NextAfter != nil {
 		next := *page.NextAfter + 1

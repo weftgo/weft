@@ -1,0 +1,133 @@
+{
+  "events": [
+    {
+      "pos": 0,
+      "time": "(time)",
+      "event": {
+        "type": "run_start",
+        "id": "r_strip",
+        "model": {
+          "provider": "wefttest",
+          "name": "script"
+        },
+        "agent": "logs",
+        "instructions_hash": "10a4da3d5b7977eae53123189aabc3c111153224398a186e926acd52d8cce8ef"
+      },
+      "attrs": {
+        "weft.content": "stripped"
+      }
+    },
+    {
+      "pos": 1,
+      "time": "(time)",
+      "event": {
+        "type": "step_start",
+        "run_id": "r_strip",
+        "index": 0
+      },
+      "attrs": {
+        "weft.content": "stripped"
+      }
+    },
+    {
+      "pos": 2,
+      "time": "(time)",
+      "event": {
+        "type": "tool_start",
+        "run_id": "r_strip",
+        "seq": 1,
+        "call_id": "c1",
+        "name": "read_logs",
+        "args": null
+      },
+      "attrs": {
+        "weft.content": "stripped"
+      }
+    },
+    {
+      "pos": 3,
+      "time": "(time)",
+      "event": {
+        "type": "tool_finish",
+        "run_id": "r_strip",
+        "seq": 2,
+        "call_id": "c1",
+        "name": "read_logs",
+        "content": "",
+        "is_error": false
+      },
+      "attrs": {
+        "weft.content": "stripped"
+      }
+    },
+    {
+      "pos": 4,
+      "time": "(time)",
+      "event": {
+        "type": "step_finish",
+        "run_id": "r_strip",
+        "index": 0,
+        "reason": "tool_calls",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "latency_ms": 1
+      },
+      "attrs": {
+        "weft.content": "stripped"
+      }
+    },
+    {
+      "pos": 5,
+      "time": "(time)",
+      "event": {
+        "type": "step_start",
+        "run_id": "r_strip",
+        "index": 1
+      },
+      "attrs": {
+        "weft.content": "stripped"
+      }
+    },
+    {
+      "pos": 6,
+      "time": "(time)",
+      "event": {
+        "type": "step_finish",
+        "run_id": "r_strip",
+        "index": 1,
+        "reason": "stop",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "latency_ms": 1,
+        "ttft_ms": 1
+      },
+      "attrs": {
+        "weft.content": "stripped"
+      }
+    },
+    {
+      "pos": 7,
+      "time": "(time)",
+      "event": {
+        "type": "run_finish",
+        "run_id": "r_strip",
+        "usage": {
+          "input_tokens": 20,
+          "output_tokens": 10
+        },
+        "steps": 2
+      },
+      "attrs": {
+        "weft.content": "stripped"
+      }
+    }
+  ],
+  "next_after": null,
+  "done": true,
+  "gaps": []
+}
+

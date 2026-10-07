@@ -19,11 +19,16 @@ import { openLive } from "@/lib/live"
 import type { LiveHandle, LiveRecord } from "@/lib/live"
 import { foldMore, newFold } from "@/lib/events"
 import type { FoldedRun, FoldFeed } from "@/lib/events"
+import type { ContentAttrs } from "@/lib/honesty"
 
 export interface RunStream {
   /** The stream so far. A fresh array on every publish, so memoized
    * consumers see the change; never mutated after publish. */
   events: WireEvent[]
+  /** Each event's weft.content.* attributes, by index in events
+   * (undefined where the recorder left the content as emitted): what a
+   * replay fold of a prefix needs to keep the recorder's badges. */
+  attrs: (ContentAttrs | undefined)[]
   folded: FoldedRun
   /** True when the endpoint says the run is over and drained. */
   done: boolean
@@ -44,6 +49,7 @@ const LIVE_PUBLISH_MAX_MS = 400
 
 const emptyStream: RunStream = {
   events: [],
+  attrs: [],
   folded: newFold().result(),
   done: false,
   lastPos: -1,
@@ -59,6 +65,7 @@ const idleStream: RunStream = { ...emptyStream, loading: false }
 interface Walk {
   feed: FoldFeed
   events: WireEvent[]
+  attrs: (ContentAttrs | undefined)[]
   pos: number
   done: boolean
   gaps: number[]
@@ -70,8 +77,10 @@ function apply(s: Walk, page: EventsPage): boolean {
   const fresh = page.events.filter((pe) => pe.pos > s.pos)
   if (fresh.length > 0) {
     const evs = fresh.map((pe) => pe.event)
-    foldMore(s.feed, evs)
+    const attrs = fresh.map((pe) => pe.attrs)
+    foldMore(s.feed, evs, attrs)
     s.events = s.events.concat(evs)
+    s.attrs = s.attrs.concat(attrs)
     s.pos = fresh[fresh.length - 1].pos
   }
   // The endpoint's done says the run reads terminal — even on a
@@ -107,6 +116,7 @@ export function useRunEvents(
   const walk = useRef<Walk>({
     feed: newFold(),
     events: [],
+    attrs: [],
     pos: -1,
     done: false,
     gaps: [],
@@ -123,7 +133,7 @@ export function useRunEvents(
   const [stream, setStream] = useState<RunStream>(id ? emptyStream : idleStream)
 
   useEffect(() => {
-    walk.current = { feed: newFold(), events: [], pos: -1, done: false, gaps: [] }
+    walk.current = { feed: newFold(), events: [], attrs: [], pos: -1, done: false, gaps: [] }
     catchUp.current = () => {}
     // No id, nothing to read: a collapsed subagent block mounts this
     // hook before it has a child to show.
@@ -143,6 +153,7 @@ export function useRunEvents(
       const s = walk.current
       setStream({
         events: s.events,
+        attrs: s.attrs,
         folded: s.feed.result(),
         done: s.done,
         lastPos: s.pos,
@@ -197,8 +208,9 @@ export function useRunEvents(
         if (rec.pos <= s.pos) return false
         s.pos = rec.pos
       } else if (rec.kind !== "delta") return false
-      foldMore(s.feed, [rec.event])
+      foldMore(s.feed, [rec.event], [rec.attrs])
       s.events = s.events.concat([rec.event])
+      s.attrs = s.attrs.concat([rec.attrs])
       return true
     }
 

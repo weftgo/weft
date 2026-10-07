@@ -1,0 +1,100 @@
+// The honesty table against Go's (plan A3, ADR 0028 §11): the ten
+// badges, in order, with obsdb.HoleNote's reason and fix word for word.
+// studio/testdata/holes.golden.json is written by obsdb's
+// TestHoleNotesGolden — one file both trees are checked against, so the
+// two tables cannot drift.
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
+import { describe, expect, it } from "vitest"
+
+import {
+  HOLE_ORDER,
+  HOLES,
+  contentHoles,
+  holeWords,
+  isHole,
+  kib,
+  mergeHoles,
+} from "./honesty"
+
+interface GoHole {
+  hole: string
+  reason: string
+  fix?: string
+}
+
+const golden = JSON.parse(
+  readFileSync(resolve(process.cwd(), "../testdata/holes.golden.json"), "utf8")
+) as GoHole[]
+
+describe("the honesty table", () => {
+  it("is Go's closed table: the same ten holes, in order", () => {
+    expect(golden.map((g) => g.hole)).toEqual(HOLE_ORDER)
+    expect(HOLE_ORDER).toEqual([
+      "truncated",
+      "stripped",
+      "redacted",
+      "max_tokens",
+      "interrupted",
+      "gap",
+      "not_recorded",
+      "derived",
+      "hidden",
+      "compacted",
+    ])
+  })
+
+  it("words every hole as obsdb.HoleNote does, key by key", () => {
+    for (const g of golden) {
+      expect(isHole(g.hole)).toBe(true)
+      if (!isHole(g.hole)) continue
+      const note = HOLES[g.hole]
+      expect(note.reason, g.hole).toBe(g.reason)
+      expect(note.fix, g.hole).toBe(g.fix)
+      expect(note.label, g.hole).toBeTruthy()
+      expect(["loss", "note"]).toContain(note.tone)
+    }
+  })
+
+  it("reads an event's attrs: the recorder's cut and the content-off mark", () => {
+    expect(contentHoles(undefined)).toEqual([])
+    expect(contentHoles({ "weft.content": "full" })).toEqual([])
+    expect(contentHoles({ "weft.content": "stripped" })).toEqual([
+      { hole: "stripped" },
+    ])
+    // The core's own capture-off mark reads the same.
+    expect(contentHoles({ "weft.content": "none" })).toEqual([
+      { hole: "stripped" },
+    ])
+    expect(
+      contentHoles({ "weft.content.truncated_bytes": 12595 })
+    ).toEqual([{ hole: "truncated", bytes: 12595 }])
+  })
+
+  it("says what the recorder cut, in bytes", () => {
+    expect(kib(92)).toBe("92 B")
+    expect(kib(12595)).toBe("12.3 KiB")
+    const w = holeWords({ hole: "truncated", bytes: 12595 })
+    expect(w.label).toBe("shortened by the recorder: 12.3 KiB cut")
+    expect(w.reason).toBe(HOLES.truncated.reason)
+    expect(w.fix).toBe(HOLES.truncated.fix)
+    expect(holeWords({ hole: "stripped" }).label).toBe(
+      "content not captured by this app"
+    )
+    // A response's words win; an unknown badge renders verbatim.
+    expect(holeWords({ hole: "gap", reason: "mine" }).reason).toBe("mine")
+    expect(holeWords({ hole: "brand_new" }).label).toBe("brand_new")
+  })
+
+  it("merges lists: one badge per hole, bytes summed, the table's order", () => {
+    const merged = mergeHoles(
+      [{ hole: "not_recorded" }, { hole: "truncated", bytes: 10 }],
+      [{ hole: "truncated", bytes: 5 }, { hole: "stripped" }]
+    )
+    expect(merged).toEqual([
+      { hole: "truncated", bytes: 15 },
+      { hole: "stripped" },
+      { hole: "not_recorded" },
+    ])
+  })
+})

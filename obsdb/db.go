@@ -241,11 +241,18 @@ type RunDetail struct {
 }
 
 // PosEvent is one positioned event of a run: the body verbatim, at its
-// durable position.
+// durable position, with the two content attributes the destination's
+// chain stamped on it (ADR 0028 §11): Content is weft.content
+// ("stripped" from a content-off chain, "" as emitted) and
+// TruncatedBytes weft.content.truncated_bytes (what a content-on
+// chain's cap cut, 0 for none). A ClickHouse row written before
+// migration 0004 carries neither.
 type PosEvent struct {
-	Pos   int64
-	Time  time.Time
-	Event json.RawMessage // the body, verbatim
+	Pos            int64
+	Time           time.Time
+	Event          json.RawMessage // the body, verbatim
+	Content        string
+	TruncatedBytes int64
 }
 
 // EventPage is one page of a run's durable events. Gaps are durable

@@ -13,7 +13,7 @@
   },
   "request": {
     "badge": "hidden",
-    "reason": "a read-scoped panel token does not read system prompts or tool catalogs",
+    "reason": "your token's scope may not read this: a read-scoped panel token does not read system prompts or tool catalogs",
     "fix": "use a playground-scoped token"
   },
   "attempts": [
@@ -126,7 +126,7 @@
   "holes": [
     {
       "hole": "hidden",
-      "reason": "a read-scoped panel token does not read system prompts or tool catalogs",
+      "reason": "your token's scope may not read this: a read-scoped panel token does not read system prompts or tool catalogs",
       "fix": "use a playground-scoped token"
     }
   ]

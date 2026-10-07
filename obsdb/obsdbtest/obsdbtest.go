@@ -27,6 +27,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("Idempotence", idempotence(open))
 	t.Run("Reordering", reordering(open))
 	t.Run("Gaps", gaps(open))
+	t.Run("EventContentAttrs", eventContentAttrs(open))
 	t.Run("StatusAtBoundaries", status(open))
 	t.Run("Sessions", sessions(open))
 	t.Run("Children", children(open))
@@ -328,6 +329,42 @@ func gaps(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		if len(page.Gaps) != 2 || page.Gaps[0] != 2 || page.Gaps[1] != 3 {
 			t.Errorf("gaps = %v, want [2 3]", page.Gaps)
+		}
+	}
+}
+
+// eventContentAttrs: an event carries the content attributes its
+// destination's chain stamped (ADR 0028 §11) — weft.content from a
+// content-off chain, weft.content.truncated_bytes from a cap — as a
+// number or a numeric string; an event with neither reads zero.
+func eventContentAttrs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		recs := []obsdb.Record{
+			record("ca1", "event", "run_start", 0, `{"type":"run_start","id":"ca1"}`, map[string]any{"weft.content": "stripped"}),
+			record("ca1", "event", "tool_finish", 1, `{"type":"tool_finish","run_id":"ca1"}`, map[string]any{"weft.content.truncated_bytes": int64(12595)}),
+			record("ca1", "event", "tool_finish", 2, `{"type":"tool_finish","run_id":"ca1"}`, map[string]any{"weft.content.truncated_bytes": "7"}),
+			record("ca1", "event", "step_finish", 3, `{"type":"step_finish","run_id":"ca1"}`, nil),
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Records: recs}); err != nil {
+			t.Fatal(err)
+		}
+		page, err := db.Events(ctx(), "ca1", -1, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		type got struct {
+			content string
+			cut     int64
+		}
+		want := []got{{"stripped", 0}, {"", 12595}, {"", 7}, {"", 0}}
+		if len(page.Events) != len(want) {
+			t.Fatalf("events = %d, want %d", len(page.Events), len(want))
+		}
+		for i, ev := range page.Events {
+			if g := (got{ev.Content, ev.TruncatedBytes}); g != want[i] {
+				t.Errorf("event %d content attrs = %+v, want %+v", i, g, want[i])
+			}
 		}
 	}
 }

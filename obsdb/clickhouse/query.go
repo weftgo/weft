@@ -408,7 +408,7 @@ func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (
 	}
 	// One row past the limit answers "is there more" in the same read.
 	rs, err := d.conn.Query(ctx,
-		`SELECT Pos, Time, Body FROM weft_records FINAL
+		`SELECT Pos, Time, Body, Content, TruncatedBytes FROM weft_records FINAL
 		WHERE RunId = ? AND Kind = 'event' AND Pos > ? ORDER BY Pos LIMIT ?`,
 		runID, after, limit+1)
 	if err != nil {
@@ -418,7 +418,7 @@ func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (
 	var page obsdb.EventPage
 	for rs.Next() {
 		var ev obsdb.PosEvent
-		if err := rs.Scan(&ev.Pos, &ev.Time, &ev.Event); err != nil {
+		if err := rs.Scan(&ev.Pos, &ev.Time, &ev.Event, &ev.Content, &ev.TruncatedBytes); err != nil {
 			return obsdb.EventPage{}, err
 		}
 		ev.Time = timeOf(ev.Time)

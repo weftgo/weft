@@ -1,0 +1,114 @@
+{
+  "events": [
+    {
+      "pos": 0,
+      "time": "(time)",
+      "event": {
+        "type": "run_start",
+        "id": "r_cap",
+        "model": {
+          "provider": "wefttest",
+          "name": "script"
+        },
+        "agent": "logs",
+        "instructions_hash": "10a4da3d5b7977eae53123189aabc3c111153224398a186e926acd52d8cce8ef"
+      }
+    },
+    {
+      "pos": 1,
+      "time": "(time)",
+      "event": {
+        "type": "step_start",
+        "run_id": "r_cap",
+        "index": 0
+      }
+    },
+    {
+      "pos": 2,
+      "time": "(time)",
+      "event": {
+        "type": "tool_start",
+        "run_id": "r_cap",
+        "seq": 1,
+        "call_id": "c1",
+        "name": "read_logs",
+        "args": {
+          "q": "1"
+        }
+      }
+    },
+    {
+      "pos": 3,
+      "time": "(time)",
+      "event": {
+        "type": "tool_finish",
+        "run_id": "r_cap",
+        "seq": 2,
+        "call_id": "c1",
+        "name": "read_logs",
+        "content": "log line log lin",
+        "is_error": false
+      },
+      "attrs": {
+        "weft.content.truncated_bytes": 92
+      }
+    },
+    {
+      "pos": 4,
+      "time": "(time)",
+      "event": {
+        "type": "step_finish",
+        "run_id": "r_cap",
+        "index": 0,
+        "reason": "tool_calls",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "latency_ms": 1
+      }
+    },
+    {
+      "pos": 5,
+      "time": "(time)",
+      "event": {
+        "type": "step_start",
+        "run_id": "r_cap",
+        "index": 1
+      }
+    },
+    {
+      "pos": 6,
+      "time": "(time)",
+      "event": {
+        "type": "step_finish",
+        "run_id": "r_cap",
+        "index": 1,
+        "reason": "stop",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "latency_ms": 1,
+        "ttft_ms": 1
+      }
+    },
+    {
+      "pos": 7,
+      "time": "(time)",
+      "event": {
+        "type": "run_finish",
+        "run_id": "r_cap",
+        "usage": {
+          "input_tokens": 20,
+          "output_tokens": 10
+        },
+        "steps": 2
+      }
+    }
+  ],
+  "next_after": null,
+  "done": true,
+  "gaps": []
+}
+

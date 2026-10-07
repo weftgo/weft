@@ -5,15 +5,30 @@
 // and result windows, then finish reason and usage with the
 // cached/reasoning splits. Every step and call can send the replay
 // playhead to the moment it happened (the fold carries positions).
+import { useQuery } from "@tanstack/react-query"
 import { ChevronRight, Play } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
+import { stepQuery } from "@/lib/api"
 import type { RunDoc, RunRow, WireEvent } from "@/lib/api"
-import { callState, fold, linkView, truncation } from "@/lib/events"
-import type { FoldedRun, FoldedStep, FoldedToolCall } from "@/lib/events"
+import {
+  callState,
+  fold,
+  linkView,
+  stepHoles,
+  truncation,
+} from "@/lib/events"
+import type {
+  FoldedRun,
+  FoldedStep,
+  FoldedToolCall,
+  PlacedBatch,
+} from "@/lib/events"
+import type { HoleMark } from "@/lib/honesty"
 import { tokens } from "@/lib/format"
 import { bytes } from "@/lib/summarize"
 import { CodeWin } from "@/components/studio/codewin"
+import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
 import { RequestSection } from "@/components/studio/step-request"
 import type { RunRequests } from "@/components/studio/step-request"
 import { SubagentBlock } from "@/components/studio/subagent-block"
@@ -137,6 +152,7 @@ function CallPill({
         {bytes(new TextEncoder().encode(r.content).length)}
       </span>
       {cut ? <TruncationBadge content={r.content} /> : null}
+      {call.holes?.length ? <HoleBadges holes={call.holes} /> : null}
     </span>
   )
 }
@@ -370,6 +386,8 @@ export function stepOutcome(step: FoldedStep, runStatus: string) {
 
 function StepCard({
   step,
+  runId,
+  runHoles,
   runStatus,
   childLinks,
   highlighted,
@@ -377,6 +395,10 @@ function StepCard({
   requests,
 }: {
   step: FoldedStep
+  runId: string
+  /** The run document's holes: those that hold for every step badge
+   * each card (stepHoles). */
+  runHoles?: HoleMark[]
   runStatus: string
   childLinks: Map<string, RunRow>
   highlighted?: boolean
@@ -384,6 +406,10 @@ function StepCard({
   requests?: RunRequests
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  // The step route's assembled holes when the page has it (A7): read
+  // from the cache only — the card never fetches it.
+  const stepDoc = useQuery({ ...stepQuery(runId, step.index), enabled: false })
+  const holes = stepHoles(step, runHoles, stepDoc.data)
   // A ?step= link (A3) lands on the card it names.
   useEffect(() => {
     if (highlighted) ref.current?.scrollIntoView({ block: "center" })
@@ -400,6 +426,7 @@ function StepCard({
       <div className="flex flex-wrap items-center gap-2">
         <span className="eyebrow">step {step.index}</span>
         {stepOutcome(step, runStatus)}
+        <HoleBadges holes={holes} />
         <span className="ml-auto flex items-center gap-1">
           <span
             className="font-mono text-[10px] text-faint tabular-nums"
@@ -425,9 +452,44 @@ function StepCard({
   )
 }
 
+/** The words of transcript batches whose step the record holds no
+ * events for (applyTranscript's view.unplaced): kept, under the last
+ * step, with the hole that says why — never dropped. */
+function Unplaced({ batches }: { batches: PlacedBatch[] }) {
+  const steps = [...new Set(batches.map((b) => b.step))].sort((a, b) => a - b)
+  const words = batches
+    .flatMap((b) => b.messages)
+    .filter((m) => m.role === "assistant")
+    .map((m) =>
+      m.content
+        .map((p) => (p.type === "text" ? p.text : ""))
+        .join("")
+    )
+    .filter(Boolean)
+  return (
+    <div
+      className="space-y-1.5 rounded-lg border border-dashed px-4 py-3"
+      data-unplaced
+    >
+      <HoleBadge
+        hole="not_recorded"
+        reason={`the transcript has words for step ${steps.join(", ")}, but no event of ${steps.length === 1 ? "that step" : "those steps"} is in the record`}
+        fix="check the exporter's drops"
+        detail
+      />
+      {words.map((w, i) => (
+        <div key={i} className="text-sm leading-relaxed whitespace-pre-wrap">
+          {w}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function StepList({
   events,
   folded,
+  atPlayhead,
   doc,
   upTo,
   highlight,
@@ -436,6 +498,10 @@ export function StepList({
 }: {
   events: WireEvent[]
   folded: FoldedRun
+  /** The page's fold at the playhead (the transcript overlaid, the
+   * recorder's badges kept): used while replaying instead of folding
+   * the bare prefix here. */
+  atPlayhead?: FoldedRun
   doc: RunDoc
   /** Replay playhead: render only events up to this position — the
    * same fold over a prefix, never a second shape (B2). */
@@ -451,7 +517,7 @@ export function StepList({
 }) {
   const replaying = upTo != null && upTo < events.length
   const view = linkView(
-    upTo == null ? folded : fold(events, upTo),
+    upTo == null ? folded : (atPlayhead ?? fold(events, upTo)),
     doc.children
   )
   // A child row per owning call id, joined by parent_call_id (S4.3);
@@ -468,6 +534,8 @@ export function StepList({
         <div key={step.index} className="space-y-3">
           <StepCard
             step={step}
+            runId={doc.id}
+            runHoles={doc.holes}
             runStatus={runStatus}
             childLinks={childLinks}
             highlighted={step.index === highlight}
@@ -477,6 +545,7 @@ export function StepList({
           {step.steer ? <SteerBlock steer={step.steer} onJump={onJump} /> : null}
         </div>
       ))}
+      {view.unplaced?.length ? <Unplaced batches={view.unplaced} /> : null}
       {view.steps.length === 0 ? (
         <p className="py-6 text-center font-mono text-xs text-faint">
           {replaying || upTo === 0

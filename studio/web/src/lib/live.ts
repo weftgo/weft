@@ -7,6 +7,7 @@
 // connection) is reopened here with backoff. The token rides the URL
 // because EventSource cannot send headers.
 import type { RunRow, WireEvent } from "./api"
+import type { ContentAttrs } from "./honesty"
 import { apiBase, studioToken } from "./api"
 
 /** Exactly one of run, session, public_id or agent (S4.5). */
@@ -32,6 +33,9 @@ export interface LiveRecord {
   pos: number
   time: string
   event: WireEvent
+  /** The record's weft.content.* attributes (live.go's
+   * recordFrameDTO, the events route's posEvent attrs). */
+  attrs?: ContentAttrs
 }
 
 /** A run frame: the row that changed. */
@@ -76,6 +80,7 @@ interface RawRecordFrame {
   pos: number
   time: string
   event: unknown
+  attrs?: unknown
 }
 
 /** Reconnect delays after a stream that ended for good: 1 s doubling
@@ -176,6 +181,9 @@ export function openLive(opts: LiveOptions): LiveHandle {
         pos: raw.pos,
         time: raw.time,
         event: raw.event as WireEvent,
+        ...(typeof raw.attrs === "object" && raw.attrs !== null
+          ? { attrs: raw.attrs }
+          : {}),
       })
     })
     src.addEventListener("run", (e) => {

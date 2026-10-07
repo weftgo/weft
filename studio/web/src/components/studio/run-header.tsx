@@ -7,7 +7,7 @@ import { ArrowUpRight, ChevronRight } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import type { RunDoc, Transcript } from "@/lib/api"
-import { producedTexts, turnPrompt } from "@/lib/events"
+import { producedTexts, runHoles, turnPrompt } from "@/lib/events"
 import type { FoldedRun } from "@/lib/events"
 import {
   absoluteTime,
@@ -17,6 +17,7 @@ import {
   usageSummary,
 } from "@/lib/format"
 import { CopyButton } from "@/components/studio/codewin"
+import { HoleBadge } from "@/components/studio/hole-badge"
 import { StatusChip } from "@/components/studio/runs-table"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -124,6 +125,9 @@ export function RunHeader({
       : doc.finished
         ? `took ${duration(doc.started, doc.finished)}`
         : "no finish recorded"
+  // The run's holes (ADR 0028 §11): what the record cannot say about
+  // this run, and why — never a pane left silently empty.
+  const holes = runHoles(doc, folded)
   return (
     <div className="space-y-2.5">
       <Breadcrumb>
@@ -200,6 +204,14 @@ export function RunHeader({
           {timing}
         </span>
       </div>
+
+      {holes.length > 0 ? (
+        <div className="space-y-1" data-run-holes>
+          {holes.map((h) => (
+            <HoleBadge key={h.hole} {...h} detail />
+          ))}
+        </div>
+      ) : null}
 
       {prompt ? <Quote label="prompt" text={prompt} tone="prompt" /> : null}
       {doc.err ? (

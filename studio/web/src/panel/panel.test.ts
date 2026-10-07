@@ -6,6 +6,7 @@
 // raw toggle, the footer — and §5.3's fail-silent mounting.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { RunRow, SessionRow } from "../lib/api"
+import { HOLES } from "../lib/honesty"
 import { statusChip, studioLink, WeftDevtools } from "./element"
 import { partitionRuns, strippedContent } from "./state"
 import { idle } from "./testkit"
@@ -328,13 +329,58 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       "data-open": "true",
     })
     const main = text(el, ".weft-main")
-    expect(main).toContain("never completed — this run was interrupted")
+    expect(main).toContain("interrupted — the run stopped reporting")
+    expect(el.shadowRoot?.querySelector(`[data-weft-hole="interrupted"]`)).toBeTruthy()
     expect(main).toContain("2 events missing")
     expect(main).toContain("content not captured by this app")
     expect(text(el, ".weft-footer")).toContain(
       "prompts, args and results from your app, via your Studio"
     )
     expect(text(el, ".weft-footer")).toContain("content is stripped")
+  })
+
+  it("honesty: the step lines and the turn header badge from the shared table (A3)", async () => {
+    const routes = runRoutes([runRow({ id: "r_cap" })])
+    routes["runs/r_cap"] = {
+      ...runRow({ id: "r_cap" }),
+      children: [],
+      holes: [{ hole: "not_recorded", reason: HOLES.not_recorded.reason, fix: HOLES.not_recorded.fix }],
+    }
+    routes["runs/r_cap/events?after=0&limit=500"] = {
+      ...EVENTS,
+      gaps: [],
+      events: EVENTS.events.map((pe) => {
+        const p = pe as { pos: number; event: { type: string } }
+        return p.event.type === "tool_finish"
+          ? { ...p, attrs: { "weft.content.truncated_bytes": 12595 } }
+          : p
+      }),
+    }
+    routes["runs/r_cap/transcript"] = TRANSCRIPT
+    const { fetchMock } = fakeStudio(routes)
+    vi.stubGlobal("fetch", fetchMock)
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-public-id": "pub_orders",
+      "data-open": "true",
+    })
+    await vi.waitFor(() => expect($(el, '[data-weft-step="0"] [data-weft-hole="truncated"]')).toBeTruthy())
+    // The step line: the recorder's cut in bytes, the table's reason and
+    // fix as its title; the run's not_recorded holds for the step too.
+    const cut = $(el, '[data-weft-step="0"] .weft-step-h [data-weft-hole="truncated"]')!
+    expect(cut.textContent).toBe("shortened by the recorder: 12.3 KiB cut")
+    expect(cut.getAttribute("title")).toBe(`${HOLES.truncated.reason} — fix: ${HOLES.truncated.fix}`)
+    expect($(el, '[data-weft-step="0"] .weft-step-h [data-weft-hole="not_recorded"]')?.textContent).toBe(
+      HOLES.not_recorded.label
+    )
+    // The call that was cut carries it too.
+    expect($(el, '[data-weft-step="0"] .weft-call-h [data-weft-hole="truncated"]')).toBeTruthy()
+    // The turn header: every hole of the turn, with the table's words.
+    const notes = all(el, "[data-weft-turn-holes] [data-weft-hole]")
+    expect(notes.map((n) => n.getAttribute("data-weft-hole"))).toEqual(["truncated", "not_recorded"])
+    expect(notes[1].textContent).toBe(
+      `${HOLES.not_recorded.label} — ${HOLES.not_recorded.reason} · fix: ${HOLES.not_recorded.fix}`
+    )
   })
 
   it("approvals: pending calls render read-only, with the capability note", async () => {

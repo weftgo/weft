@@ -17,7 +17,7 @@ type Hole string
 const (
 	HoleTruncated   Hole = "truncated"    // a destination's cap cut the content (weft.content.truncated_bytes)
 	HoleStripped    Hole = "stripped"     // the destination's chain is content-off (weft.content = stripped)
-	HoleRedacted    Hole = "redacted"     // the destination's Redact changed the content
+	HoleRedacted    Hole = "redacted"     // the destination's Redact changed the content (reserved: weft's pipeline does not mark a redaction)
 	HoleMaxTokens   Hole = "max_tokens"   // the step finished on the output token limit
 	HoleInterrupted Hole = "interrupted"  // the run stopped reporting (DeriveStatus)
 	HoleGap         Hole = "gap"          // a hole in a contiguous counter, or a record a destination dropped
@@ -34,6 +34,64 @@ func Holes() []Hole {
 		HoleTruncated, HoleStripped, HoleRedacted, HoleMaxTokens, HoleInterrupted,
 		HoleGap, HoleNotRecorded, HoleDerived, HoleHidden, HoleCompacted,
 	}
+}
+
+// HoleNote is a badge's one-line reason and, where one exists, its
+// one-line fix ("" when the hole has none: a redaction is by design,
+// a derived value has nothing to repair) — ADR 0028 §11's table in
+// words, the one source both Studio surfaces render (its golden,
+// studio/testdata/holes.golden.json, is what Studio's TypeScript table
+// is checked against). A reader that knows more (a step's own gap, a
+// run built from spans) says so in its own reason and keeps this fix.
+// An unknown hole has neither.
+func HoleNote(h Hole) (reason, fix string) {
+	n := holeNotes[h]
+	return n.reason, n.fix
+}
+
+type holeNote struct{ reason, fix string }
+
+var holeNotes = map[Hole]holeNote{
+	HoleTruncated: {
+		"a destination's size cap cut this content before it was stored (weft.content.truncated_bytes)",
+		"raise the destination's cap: otel.Content(otel.ContentConfig{MaxBytes: …}), -1 for unlimited",
+	},
+	HoleStripped: {
+		"content not captured by this app: the destination's chain is content-off (weft.content = stripped), so prompts, catalogs, messages, tool arguments and results were dropped before they were stored",
+		"turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent",
+	},
+	HoleRedacted: {
+		"the destination's Redact hook rewrote this content before it was stored",
+		"",
+	},
+	HoleMaxTokens: {
+		"the step finished on the output token limit: the response was cut",
+		"raise max_tokens: weft.Params(weft.RequestParams{MaxTokens: …})",
+	},
+	HoleInterrupted: {
+		"the run stopped reporting: no finish arrived and nothing was heard from it for over 30 s",
+		"",
+	},
+	HoleGap: {
+		"a record the run counts is missing: a destination dropped it on the way",
+		"check the exporter's drops",
+	},
+	HoleNotRecorded: {
+		"the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
+		"upgrade weft and re-run",
+	},
+	HoleDerived: {
+		"computed by the reader, not stored as emitted: the record that would say it is absent",
+		"",
+	},
+	HoleHidden: {
+		"your token's scope may not read this: a read-scoped panel token does not read system prompts or tool catalogs",
+		"use a playground-scoped token",
+	},
+	HoleCompacted: {
+		"the model saw a compacted view: compaction replaced part of the transcript for this request",
+		"open the compaction record",
+	},
 }
 
 // RequestQuery selects a run's request records for DB.Requests, in

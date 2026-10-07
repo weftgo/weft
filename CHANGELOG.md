@@ -80,6 +80,33 @@ module, ADR 0005).
 
 ### Added
 
+- **Every hole is a badge from one closed table, on both surfaces
+  (plan A3, ADR 0028 §11).** `obsdb.HoleNote(h)` holds each of the ten
+  holes' one-line reason and, where one exists, its fix — Studio's
+  routes read it (no second copy of the words), and its golden,
+  `studio/testdata/holes.golden.json`, is what the web's
+  `lib/honesty.ts` (the run page and the devtools panel's one table) is
+  checked against, key by key. The events route's rows and the live
+  record frames carry `attrs`, limited to the `weft.content.*` keys
+  (`weft.content` when not `full` — `stripped`, or the core's own
+  `none` — and `weft.content.truncated_bytes`), absent when the chain
+  left the content as emitted; `obsdb.PosEvent` gains `Content` and
+  `TruncatedBytes` (both backends read them; a ClickHouse row from
+  before migration 0004 has neither). `GET /api/runs/{id}` gains
+  `holes: [{hole, reason, fix?}]` — the run's own: `not_recorded`
+  (written before the request record), `interrupted`, `derived` (no
+  stored event: a row built from spans), `stripped` (a content-off
+  run) and `gap` (event positions missing, once the run is over). The
+  fold turns `attrs` into badges on the event, its call, its step and
+  the run ("shortened by the recorder: 12.3 KiB cut", "content not
+  captured by this app" with its fix); the run header, every step card,
+  the raw view's event rows and the panel's turn header and step lines
+  draw them; transcript words whose step has no events render as a
+  "not recorded" row under the last step, and the replay playhead goes
+  through the transcript overlay, so holes survive scrubbing. The
+  request routes' reasons are now the table's words. `redacted` stays
+  reserved: weft's pipeline does not mark a redaction.
+
 - **Studio's step route (plan A7, with A4's attempts and A10's
   children).** `GET /api/runs/{id}/steps/{n}` (`n` the step ordinal)
   answers one step assembled server-side from `obsdb`: `status` (`ok`,

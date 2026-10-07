@@ -253,10 +253,20 @@ function RunPage() {
     transcript.data && runStatus !== "running"
       ? applyTranscript(stream.folded, transcript.data.batches, { replace: true })
       : stream.folded
-  const atPlayhead = useMemo(
-    () => (replaying ? fold(stream.events, playhead) : foldedNow),
-    [replaying, stream.events, foldedNow, playhead]
-  )
+  // The replay fold goes through the same overlay: the transcript's
+  // words and `derived` placements, and the recorder's badges (the
+  // events' attrs), survive scrubbing. Its unplaced batches are the
+  // whole run's — a batch whose step the playhead has not reached yet
+  // is not a hole.
+  const batches = transcript.data?.batches
+  const atPlayhead = useMemo(() => {
+    if (!replaying) return foldedNow
+    const prefix = fold(stream.events, playhead, stream.attrs)
+    if (!batches || runStatus === "running") return prefix
+    const overlaid = applyTranscript(prefix, batches, { replace: true })
+    overlaid.unplaced = foldedNow.unplaced
+    return overlaid
+  }, [replaying, stream.events, stream.attrs, foldedNow, playhead, batches, runStatus])
   // While scrubbing the run reads as running: calls past the playhead
   // are "running", not "never completed".
   const viewStatus = replaying ? "running" : runStatus
@@ -533,6 +543,7 @@ function RunPage() {
           <StepList
             events={stream.events}
             folded={foldedNow}
+            atPlayhead={atPlayhead}
             doc={doc}
             upTo={axis === "events" ? (playhead ?? undefined) : undefined}
             highlight={search.step}
@@ -544,6 +555,7 @@ function RunPage() {
           <RawView
             doc={doc}
             events={stream.events}
+            eventHoles={stream.folded.eventHoles}
             playhead={playhead}
             onJump={jump}
             surface={search.raw ?? "events"}

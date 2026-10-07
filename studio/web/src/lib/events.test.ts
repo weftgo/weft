@@ -16,7 +16,9 @@ import {
   newFold,
   placeBatches,
   producedText,
+  runHoles,
   splitTranscript,
+  stepHoles,
   truncation,
   turnPrompt,
 } from "./events"
@@ -852,5 +854,99 @@ describe("transcript placement by the stored step", () => {
       [0, true, true],
       [0, false, false],
     ])
+  })
+})
+
+// The recorder's own cuts (plan A3, ADR 0028 §11): the events route's
+// attrs, as Go writes them (events-capped / events-stripped goldens),
+// fold into badges on the event, its step and call, and the run.
+describe("content attrs → badges", () => {
+  function page(name: string): EventsPage {
+    return JSON.parse(
+      readFileSync(resolve(process.cwd(), `../testdata/api/${name}`), "utf8")
+    ) as EventsPage
+  }
+
+  it("a capped tool result is truncated on the event, the call, the step and the run", () => {
+    const p = page("events-capped.golden.json")
+    const view = fold(
+      p.events.map((pe) => pe.event),
+      undefined,
+      p.events.map((pe) => pe.attrs)
+    )
+    const finish = p.events.find((pe) => pe.event.type === "tool_finish")!
+    const cut = finish.attrs?.["weft.content.truncated_bytes"] ?? 0
+    expect(cut).toBeGreaterThan(0)
+    expect(view.eventHoles?.[finish.pos]).toEqual([{ hole: "truncated", bytes: cut }])
+    const step = view.steps[0]
+    expect(step.toolCalls[0].holes).toEqual([{ hole: "truncated", bytes: cut }])
+    expect(step.holes?.[0].hole).toBe("truncated")
+    expect(view.holes?.map((h) => h.hole)).toEqual(["truncated"])
+    // The run's bytes are every event's, summed.
+    const total = p.events.reduce(
+      (n, pe) => n + (pe.attrs?.["weft.content.truncated_bytes"] ?? 0),
+      0
+    )
+    expect(view.holes?.[0].bytes).toBe(total)
+    // run_start was not cut: no badge of its own.
+    expect(view.eventHoles?.[0]).toBeUndefined()
+  })
+
+  it("a content-off run is stripped on every event, every step and the run, once", () => {
+    const p = page("events-stripped.golden.json")
+    const view = fold(
+      p.events.map((pe) => pe.event),
+      undefined,
+      p.events.map((pe) => pe.attrs)
+    )
+    expect(Object.keys(view.eventHoles ?? {}).length).toBe(p.events.length)
+    for (const s of view.steps)
+      expect(s.holes).toEqual([{ hole: "stripped" }])
+    expect(view.holes).toEqual([{ hole: "stripped" }])
+    expect(runHoles({ holes: [{ hole: "stripped", reason: "doc's" }] }, view)).toEqual([
+      { hole: "stripped", reason: "doc's" },
+    ])
+  })
+
+  it("a prefix fold keeps the badges it has seen (replay)", () => {
+    const p = page("events-capped.golden.json")
+    const evs = p.events.map((pe) => pe.event)
+    const attrs = p.events.map((pe) => pe.attrs)
+    const finish = p.events.findIndex((pe) => pe.event.type === "tool_finish")
+    expect(fold(evs, finish, attrs).holes).toBeUndefined()
+    expect(fold(evs, finish + 1, attrs).holes?.[0].hole).toBe("truncated")
+    // foldMore carries them the same way.
+    const feed = newFold()
+    foldMore(feed, evs, attrs)
+    expect(feed.result().holes).toEqual(fold(evs, undefined, attrs).holes)
+  })
+
+  it("a step card's holes: its own, a derived placement, max_tokens, and the run's that hold for every step", () => {
+    const view = fold([
+      { type: "run_start", id: "r", model: { provider: "p", name: "m" } },
+      { type: "step_start", run_id: "r", index: 0 },
+      {
+        type: "step_finish",
+        run_id: "r",
+        index: 0,
+        reason: "max_tokens",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    ] as WireEvent[])
+    const step = { ...view.steps[0], derived: true }
+    const run = [
+      { hole: "not_recorded" },
+      { hole: "interrupted" },
+      { hole: "gap", reason: "run-level" },
+    ]
+    expect(stepHoles(step, run).map((h) => h.hole)).toEqual([
+      "max_tokens",
+      "not_recorded",
+      "derived",
+    ])
+    // The step route's assembled holes win when loaded.
+    expect(
+      stepHoles(step, run, { holes: [{ hole: "compacted", reason: "r" }] })
+    ).toEqual([{ hole: "compacted", reason: "r" }])
   })
 })

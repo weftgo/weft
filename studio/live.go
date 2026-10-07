@@ -131,6 +131,9 @@ type recordFrameDTO struct {
 	TraceID   string          `json:"trace_id"`
 	SpanID    string          `json:"span_id"`
 	Event     json.RawMessage `json:"event"`
+	// Attrs is the record's weft.content.* attributes, as the events
+	// route's rows carry them (posEvent); absent when there are none.
+	Attrs map[string]any `json:"attrs,omitempty"`
 }
 
 // runFrameDTO is the data of an `event: run` frame.
@@ -368,6 +371,7 @@ func writeFrame(sw *sseWriter, f obsdb.Frame) {
 			TraceID:   f.Record.TraceID,
 			SpanID:    f.Record.SpanID,
 			Event:     rawOrNull(f.Record.Body),
+			Attrs:     contentAttrsOf(f.Record.Attrs),
 		}
 		data, err := json.Marshal(dto)
 		if err != nil {
@@ -463,6 +467,7 @@ func (s *Server) backfillRun(
 						Kind: "event", Pos: pe.Pos, Time: pe.Time,
 						TraceID: rec.TraceID,
 						Event:   rawOrNull(string(pe.Event)),
+						Attrs:   contentAttrs(pe.Content, pe.TruncatedBytes),
 					}
 					if data, err := json.Marshal(dto); err == nil {
 						sw.frame("event: record\ndata: %s\n\n", data)

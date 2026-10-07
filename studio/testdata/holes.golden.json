@@ -1,0 +1,49 @@
+[
+  {
+    "hole": "truncated",
+    "reason": "a destination's size cap cut this content before it was stored (weft.content.truncated_bytes)",
+    "fix": "raise the destination's cap: otel.Content(otel.ContentConfig{MaxBytes: …}), -1 for unlimited"
+  },
+  {
+    "hole": "stripped",
+    "reason": "content not captured by this app: the destination's chain is content-off (weft.content = stripped), so prompts, catalogs, messages, tool arguments and results were dropped before they were stored",
+    "fix": "turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent"
+  },
+  {
+    "hole": "redacted",
+    "reason": "the destination's Redact hook rewrote this content before it was stored"
+  },
+  {
+    "hole": "max_tokens",
+    "reason": "the step finished on the output token limit: the response was cut",
+    "fix": "raise max_tokens: weft.Params(weft.RequestParams{MaxTokens: …})"
+  },
+  {
+    "hole": "interrupted",
+    "reason": "the run stopped reporting: no finish arrived and nothing was heard from it for over 30 s"
+  },
+  {
+    "hole": "gap",
+    "reason": "a record the run counts is missing: a destination dropped it on the way",
+    "fix": "check the exporter's drops"
+  },
+  {
+    "hole": "not_recorded",
+    "reason": "the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
+    "fix": "upgrade weft and re-run"
+  },
+  {
+    "hole": "derived",
+    "reason": "computed by the reader, not stored as emitted: the record that would say it is absent"
+  },
+  {
+    "hole": "hidden",
+    "reason": "your token's scope may not read this: a read-scoped panel token does not read system prompts or tool catalogs",
+    "fix": "use a playground-scoped token"
+  },
+  {
+    "hole": "compacted",
+    "reason": "the model saw a compacted view: compaction replaced part of the transcript for this request",
+    "fix": "open the compaction record"
+  }
+]

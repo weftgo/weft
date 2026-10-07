@@ -27,27 +27,12 @@ import (
 // RequestQuery.PageLimit cap): a larger limit is clamped, not refused.
 const maxRequestsLimit = 1000
 
-// holeNote is a badge's one-line reason and fix (ADR 0028 §11's table)
-// as these routes word them.
-type holeNote struct{ reason, fix string }
-
-var holeNotes = map[obsdb.Hole]holeNote{
-	obsdb.HoleNotRecorded: {
-		"this run was recorded before the request record existed (weft v0.9.0 or earlier, ADR 0028): it has no request, prompt or tools records",
-		"upgrade weft and re-run",
-	},
-	obsdb.HoleStripped: {
-		"this run's records were content-off: its system prompts and tool catalogs were dropped before they were stored",
-		"turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent",
-	},
-	obsdb.HoleGap: {
-		"a request names this record, but the destination dropped it",
-		"check the exporter's drops",
-	},
-	obsdb.HoleHidden: {
-		"a read-scoped panel token does not read system prompts or tool catalogs",
-		"use a playground-scoped token",
-	},
+// holeFix is the table's fix for a hole (obsdb.HoleNote: ADR 0028
+// §11's words, the one source both surfaces render), for a reader that
+// words its own reason.
+func holeFix(h obsdb.Hole) string {
+	_, fix := obsdb.HoleNote(h)
+	return fix
 }
 
 // badgeFields is the envelope's hole: the badge, its reason and its
@@ -62,8 +47,8 @@ func badgeOf(h obsdb.Hole) badgeFields {
 	if h == "" {
 		return badgeFields{}
 	}
-	n := holeNotes[h]
-	return badgeFields{Badge: string(h), Reason: n.reason, Fix: n.fix}
+	reason, fix := obsdb.HoleNote(h)
+	return badgeFields{Badge: string(h), Reason: reason, Fix: fix}
 }
 
 // requestRow is one request record: one model-call attempt. Content is

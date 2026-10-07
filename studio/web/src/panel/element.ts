@@ -6,10 +6,12 @@
 // meta.capabilities reports the playground (§8.5 item 3).
 import type { RunRow, ToolCallPart, Usage } from "../lib/api"
 import { isHoleRef } from "../lib/api"
-import { paramsLine, REQUEST_HOLES, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
+import { holeWords, mergeHoles } from "../lib/honesty"
+import type { HoleMark } from "../lib/honesty"
+import { paramsLine, REQUEST_NOT_RECORDED_LABEL, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
 import { MAX_REQUEST_PAGES, REQUEST_PAGE } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
-import { callState, truncation } from "../lib/events"
+import { callState, runHoles, stepHoles, truncation } from "../lib/events"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
 import { duration, relativeTime, tokens } from "../lib/format"
 import { readConfig, tokenScope } from "./config"
@@ -1251,21 +1253,22 @@ export class WeftDevtools extends HTMLElement {
   }
 
   /** notes renders the honesty rules (§2): truncation badges live on
-   * the calls themselves (renderCall); these are the run-level notes —
-   * interrupted, gaps, stripped content, a max_tokens finish, and a
-   * story longer than the panel reads. */
+   * the calls themselves (renderCall); these are the turn's holes from
+   * the shared table (lib/honesty.ts, as the run page's header) — the
+   * run document's (not_recorded, interrupted, derived, stripped,
+   * gap), the recorder's cuts, the gaps the walk saw, a max_tokens
+   * finish, content-off spans — each a badge with its reason and fix,
+   * and a story longer than the panel reads. */
   private notes(t: TurnView): HTMLElement {
     const box = el("div")
+    box.setAttribute("data-weft-turn-holes", "")
     const row = this.rowOf(t.id)
-    if (row?.status === "interrupted") {
-      box.appendChild(el("div", "weft-note weft-warn", "never completed — this run was interrupted"))
-    }
-    if (t.gaps.length) {
-      box.appendChild(
-        el("div", "weft-note weft-warn", `${t.gaps.length} events missing (positions skipped)`, {
-          title: t.gaps.join(", "),
-        })
-      )
+    const holes = turnHoles(t, row)
+    for (const m of holes) {
+      const w = holeWords(m)
+      const note = el("div", `weft-note${w.tone === "loss" ? " weft-warn" : ""}`, `${w.label} — ${w.reason}${w.fix ? ` · fix: ${w.fix}` : ""}`)
+      note.setAttribute("data-weft-hole", m.hole)
+      box.appendChild(note)
     }
     if (t.capped) {
       box.appendChild(
@@ -1275,12 +1278,6 @@ export class WeftDevtools extends HTMLElement {
           `a long run: the first ${MAX_EVENT_PAGES * 500} events are shown — the whole story is in Studio (⤢)`
         )
       )
-    }
-    if (row?.stop_reason === "max_tokens") {
-      box.appendChild(el("div", "weft-note weft-warn", "stopped at the output token limit (max_tokens)"))
-    }
-    if (strippedContent(t.spans)) {
-      box.appendChild(el("div", "weft-note", "content not captured by this app (weft.content = stripped)"))
     }
     return box
   }
@@ -1336,6 +1333,23 @@ export class WeftDevtools extends HTMLElement {
     return this.model?.rowOf(id)
   }
 
+}
+
+/** turnHoles is a turn's holes, from the shared table: the run
+ * document's and the fold's (runHoles, the run page's header), the
+ * row's interrupted status and max_tokens stop, the walk's gaps and
+ * content-off spans. */
+export function turnHoles(t: TurnView, row?: RunRow): HoleMark[] {
+  const extra: HoleMark[] = []
+  if (row?.status === "interrupted") extra.push({ hole: "interrupted" })
+  if (t.gaps.length)
+    extra.push({
+      hole: "gap",
+      reason: `${t.gaps.length} events missing (positions ${t.gaps.slice(0, 8).join(", ")}${t.gaps.length > 8 ? ", …" : ""}): a destination dropped a batch`,
+    })
+  if (row?.stop_reason === "max_tokens") extra.push({ hole: "max_tokens" })
+  if (strippedContent(t.spans)) extra.push({ hole: "stripped" })
+  return mergeHoles(runHoles(t.doc, t.folded), extra)
 }
 
 /** stepOrdinal is the step being read as source.from_step counts it:
@@ -1400,6 +1414,8 @@ function renderStep(
     head.appendChild(el("span", undefined, step.finish.reason))
     head.appendChild(el("span", undefined, usageLine(step.finish.usage)))
   }
+  const holes = holeBadges(stepHoles(step, t?.doc?.holes))
+  if (holes) head.appendChild(holes)
   card.appendChild(head)
   const body = el("div", "weft-step-b")
   if (t?.requests) body.appendChild(requestLine(step.index, t.requests, runStatus, open))
@@ -1423,24 +1439,36 @@ function renderStep(
   return card
 }
 
-/** A request hole's badge as the panel words it: the shared label
- * (lib/requests.ts's REQUEST_HOLES — A3 moves it into the one honesty
- * module), prefixed where the label does not name the request. */
+/** A request hole's badge as the panel words it: the shared honesty
+ * table's label (lib/honesty.ts — the run page reads the same table),
+ * prefixed where the label does not name the request. */
 function holeLabel(badge: string): string {
-  const h = (REQUEST_HOLES as Record<string, { label: string } | undefined>)[badge]
-  const label = h?.label ?? badge
+  const label = badge === "not_recorded" ? REQUEST_NOT_RECORDED_LABEL : holeWords({ hole: badge }).label
   return label.startsWith("request") ? label : `request: ${label}`
 }
 
 /** holeNote draws one hole: the badge, then its reason and fix as
  * words (the response's when it gave them, the shared table's else). */
 function holeNote(box: HTMLElement, badge: string, reason?: string, fix?: string): void {
-  const h = (REQUEST_HOLES as Record<string, { reason: string; fix: string } | undefined>)[badge]
-  const why = reason || h?.reason
-  const remedy = fix || h?.fix
+  const w = holeWords({ hole: badge, reason, fix })
   box.appendChild(el("span", "weft-badge weft-info", holeLabel(badge)))
-  if (why || remedy)
-    box.appendChild(el("div", "weft-reason", [why, remedy && `fix: ${remedy}`].filter(Boolean).join(" — ")))
+  box.appendChild(el("div", "weft-reason", [w.reason, w.fix && `fix: ${w.fix}`].filter(Boolean).join(" — ")))
+}
+
+/** holeBadges draws a list of holes (a step's, a turn's) from the
+ * shared table: one badge each, its reason and fix as the title. */
+export function holeBadges(holes: HoleMark[]): HTMLElement | null {
+  if (!holes.length) return null
+  const box = el("span", "weft-holes")
+  for (const m of holes) {
+    const w = holeWords(m)
+    const b = el("span", `weft-badge ${w.tone === "loss" ? "weft-warn-badge" : "weft-info"}`, w.label, {
+      title: w.fix ? `${w.reason} — fix: ${w.fix}` : w.reason,
+    })
+    b.setAttribute("data-weft-hole", m.hole)
+    box.appendChild(b)
+  }
+  return box
 }
 
 /** requestLine is the step's request (ADR 0028 §10, the Studio run
@@ -1541,6 +1569,8 @@ function renderCall(
       )
     }
     if (call.result.isError) head.appendChild(el("span", "weft-badge weft-err", "error"))
+    const holes = holeBadges(call.holes ?? [])
+    if (holes) head.appendChild(holes)
     box.appendChild(el("div", "weft-res", call.result.content))
   } else if (state === "running") {
     box.appendChild(el("div", "weft-res", "running…"))

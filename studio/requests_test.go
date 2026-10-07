@@ -378,12 +378,11 @@ func TestRequestsNoModelCall(t *testing.T) {
 	}
 }
 
-// TestRequestsNotRecorded: a file written before ADR 0028 (migrations
-// 0001 and 0002 applied by hand, one run inserted) opens through 0003;
-// its run reads requests_badge not_recorded, and both routes answer
-// 200 with the badge, its reason and fix beside an empty list — never
-// an empty list alone.
-func TestRequestsNotRecorded(t *testing.T) {
+// preA1File is a sqlite file as weft v0.9.0 left it: migrations 0001
+// and 0002 only, and one finished run (old1) written before the request
+// record — the stand-in for a database written by the previous release.
+func preA1File(t *testing.T) string {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "old.db")
 	raw, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
@@ -411,6 +410,16 @@ func TestRequestsNotRecorded(t *testing.T) {
 	if err := raw.Close(); err != nil {
 		t.Fatal(err)
 	}
+	return path
+}
+
+// TestRequestsNotRecorded: a file written before ADR 0028 (migrations
+// 0001 and 0002 applied by hand, one run inserted) opens through 0003;
+// its run reads requests_badge not_recorded, and both routes answer
+// 200 with the badge, its reason and fix beside an empty list — never
+// an empty list alone.
+func TestRequestsNotRecorded(t *testing.T) {
+	path := preA1File(t)
 	srv := New(Open(path))
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())

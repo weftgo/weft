@@ -12,6 +12,7 @@ import { ChevronRight, Download, Play } from "lucide-react"
 import { useMemo, useState } from "react"
 
 import type { RunDoc, WireEvent } from "@/lib/api"
+import type { HoleMark } from "@/lib/honesty"
 import { copyText, download, pretty } from "@/lib/json"
 import {
   eventKind,
@@ -21,6 +22,7 @@ import {
 } from "@/lib/summarize"
 import type { EventKind } from "@/lib/summarize"
 import { CopyButton, JsonText } from "@/components/studio/codewin"
+import { HoleBadges } from "@/components/studio/hole-badge"
 import { JsonTree } from "@/components/studio/json-tree"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -75,11 +77,14 @@ function EventRow({
   ev,
   revealed,
   onJump,
+  holes,
 }: {
   pos: number
   ev: WireEvent
   revealed: boolean
   onJump?: (t: number) => void
+  /** What the recorder did to this event's content (its attrs). */
+  holes?: HoleMark[]
 }) {
   const [open, setOpen] = useState(false)
   const kind = eventKind(ev)
@@ -109,8 +114,11 @@ function EventRow({
         <span className={`flex items-center gap-1 truncate ${kindClass(kind)}`}>
           {eventType(ev)}
         </span>
-        <span className="truncate text-muted-foreground">
-          {eventSummary(ev, 160)}
+        <span className="flex min-w-0 items-center gap-1.5">
+          {holes?.length ? <HoleBadges holes={holes} /> : null}
+          <span className="truncate text-muted-foreground">
+            {eventSummary(ev, 160)}
+          </span>
         </span>
         <span className="flex items-center gap-0.5 opacity-0 group-hover/ev:opacity-100 focus-within:opacity-100">
           {onJump ? (
@@ -152,10 +160,13 @@ export function EventsExplorer({
   onJump,
   range,
   compact,
+  eventHoles,
 }: {
   events: WireEvent[]
   playhead: number | null
   onJump?: (t: number) => void
+  /** Each event's recorder holes by position (the fold's eventHoles). */
+  eventHoles?: Record<number, HoleMark[]>
   /** Only positions within [from, to] (inclusive) — a span's slice. */
   range?: [number, number]
   /** A tighter toolbar for a side panel. */
@@ -268,6 +279,7 @@ export function EventsExplorer({
                 ev={ev}
                 revealed={pos < at}
                 onJump={onJump}
+                holes={eventHoles?.[pos]}
               />
             ))
         )}
@@ -298,6 +310,7 @@ export function EventsExplorer({
 export function RawView({
   doc,
   events,
+  eventHoles,
   playhead,
   onJump,
   surface,
@@ -305,6 +318,7 @@ export function RawView({
 }: {
   doc: RunDoc
   events: WireEvent[]
+  eventHoles?: Record<number, HoleMark[]>
   playhead: number | null
   onJump?: (t: number) => void
   surface: "events" | "doc"
@@ -376,7 +390,12 @@ export function RawView({
         </span>
       </div>
       {surface === "events" ? (
-        <EventsExplorer events={events} playhead={playhead} onJump={onJump} />
+        <EventsExplorer
+          events={events}
+          eventHoles={eventHoles}
+          playhead={playhead}
+          onJump={onJump}
+        />
       ) : (
         <div className="codewin">
           <div className="codewin-bar">

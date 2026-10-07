@@ -1,11 +1,13 @@
 package obsdb_test
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/wefttest"
 )
 
 // The hole vocabulary is ADR 0028 §11's closed table, in its order:
@@ -20,6 +22,39 @@ func TestHolesClosedTable(t *testing.T) {
 	if strings.Join(got, " ") != want {
 		t.Errorf("Holes() = %s\nwant      %s", strings.Join(got, " "), want)
 	}
+}
+
+// The badge table in words (ADR 0028 §11, plan A3): every hole has a
+// one-line reason; a fix exactly where one exists. The golden lives
+// beside Studio's API goldens because Studio's TypeScript table
+// (studio/web/src/lib/honesty.ts) is checked against it key by key —
+// one file, so the two trees cannot drift.
+func TestHoleNotesGolden(t *testing.T) {
+	type row struct {
+		Hole   obsdb.Hole `json:"hole"`
+		Reason string     `json:"reason"`
+		Fix    string     `json:"fix,omitempty"`
+	}
+	var rows []row
+	noFix := map[obsdb.Hole]bool{obsdb.HoleRedacted: true, obsdb.HoleInterrupted: true, obsdb.HoleDerived: true}
+	for _, h := range obsdb.Holes() {
+		reason, fix := obsdb.HoleNote(h)
+		if reason == "" || strings.Contains(reason, "\n") {
+			t.Errorf("%s: reason %q, want one line", h, reason)
+		}
+		if (fix == "") != noFix[h] {
+			t.Errorf("%s: fix %q, want one exactly where the table has one", h, fix)
+		}
+		rows = append(rows, row{h, reason, fix})
+	}
+	if r, f := obsdb.HoleNote("nope"); r != "" || f != "" {
+		t.Errorf("unknown hole = %q %q, want neither", r, f)
+	}
+	b, err := json.MarshalIndent(rows, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wefttest.Golden(t, "../studio/testdata/holes.golden.json", append(b, '\n'))
 }
 
 // The reading table (ADR 0028 §10) over a run row.

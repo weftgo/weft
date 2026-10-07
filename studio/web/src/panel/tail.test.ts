@@ -294,7 +294,7 @@ describe("the live tail", () => {
     await settle()
     expect(studio.gets("runs?public_id=").length).toBe(before + 1)
     expect(row(el, "s_01-t1")?.querySelector(".weft-chip")?.textContent).toBe("interrupted")
-    expect(text(el, ".weft-main")).toContain("this run was interrupted")
+    expect(text(el, ".weft-main")).toContain("interrupted — the run stopped reporting")
     expect(FakeEventSource.live("run=s_01-t1")).toHaveLength(0)
     // Nothing reads running any more: no more reads.
     await vi.advanceTimersByTimeAsync(5 * META.interrupted_after_ms)

@@ -181,13 +181,13 @@ describe("the run page's request section (A1.4)", () => {
     await waitFor(() =>
       expect(
         within(section(0)).getAllByText(
-          "content not recorded for this destination"
+          "content not captured by this app"
         ).length
       ).toBeGreaterThan(0)
     )
     for (const step of [0, 1, 2]) {
       expect(section(step).textContent).toContain(
-        "content not recorded for this destination"
+        "content not captured by this app"
       )
     }
     open(0)
@@ -220,7 +220,7 @@ describe("the run page's request section (A1.4)", () => {
         within(s).getByText("request not recorded by weft v0.9.0 or earlier")
       ).toBeTruthy()
       expect(s.textContent).toContain(
-        "recorded before the request record existed"
+        "the record did not exist in the weft that wrote this run"
       )
       expect(s.textContent).toContain("upgrade weft and re-run")
     }

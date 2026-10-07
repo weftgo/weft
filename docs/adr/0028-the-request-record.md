@@ -544,6 +544,14 @@ this ADR.
 | `hidden` | the reader's scope may not see it (a read-scoped token and a system prompt) | use a playground-scoped token |
 | `compacted` | the model saw a compacted view (§8) | open the compaction record |
 
+The table's words — each badge's one-line reason and fix — live in one
+place, `obsdb.HoleNote` (beside the `obsdb.Hole` enum and `Holes()`),
+golden-tested into `studio/testdata/holes.golden.json`; Studio's web
+table (`studio/web/src/lib/honesty.ts`, read by the run page and the
+devtools panel) is checked against that golden key by key, so the two
+trees cannot drift (A3). `redacted` is reserved: weft's pipeline does
+not yet mark a redaction on the record.
+
 ## Why this is a record-contract change, not a model-visible one
 
 AGENTS.md rule 5 makes model-visible behaviour a contract: tool result

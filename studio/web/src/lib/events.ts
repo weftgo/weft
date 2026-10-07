@@ -20,6 +20,8 @@ import type {
   Usage,
   WireEvent,
 } from "./api"
+import { contentHoles, mergeHoles } from "./honesty"
+import type { ContentAttrs, HoleMark } from "./honesty"
 
 export interface ToolCallResult {
   content: string
@@ -43,6 +45,9 @@ export interface FoldedToolCall {
   startPos: number
   /** Stream position of tool_finish, once seen. */
   finishPos?: number
+  /** What the recorder did to this call's content (its tool_start and
+   * tool_finish attrs: truncated, stripped — lib/honesty.ts). */
+  holes?: HoleMark[]
 }
 
 export interface FoldedStep {
@@ -59,6 +64,10 @@ export interface FoldedStep {
    * step was inferred, not stored (ADR 0028 §11's `derived` badge;
    * applyTranscript). */
   derived?: boolean
+  /** What the recorder did to this step's events' content (their
+   * attrs: truncated with the bytes cut, stripped) — stepHoles adds
+   * what the step's record and the run say. */
+  holes?: HoleMark[]
   /** Stream positions of the first and last event folded into this
    * step (inclusive) — the replay range a step card can jump to. */
   from: number
@@ -83,6 +92,12 @@ export interface FoldedRun {
   /** Stream positions of run_start and run_finish, when seen. */
   startPos?: number
   finishPos?: number
+  /** What the recorder did to the content of any of the run's events
+   * (the union of every event's attrs holes, bytes summed). */
+  holes?: HoleMark[]
+  /** Each event's own holes, by stream position — only events with
+   * any. */
+  eventHoles?: Record<number, HoleMark[]>
 }
 
 /**
@@ -93,8 +108,10 @@ export interface FoldedRun {
  */
 export interface FoldFeed {
   /** Feed one event. pos is its stream position; it defaults to the
-   * number of events fed so far (the top-level stream's own count). */
-  push: (ev: WireEvent, pos?: number) => void
+   * number of events fed so far (the top-level stream's own count).
+   * attrs is the row's weft.content.* attributes (api.go's posEvent):
+   * what the recorder did to the content, folded into badges. */
+  push: (ev: WireEvent, pos?: number, attrs?: ContentAttrs) => void
   /** A fresh view of everything fed so far; the feed keeps accepting. */
   result: () => FoldedRun
 }
@@ -107,11 +124,12 @@ export interface FoldFeed {
  */
 export function fold(
   events: WireEvent[],
-  upTo: number = events.length
+  upTo: number = events.length,
+  attrs?: (ContentAttrs | undefined)[]
 ): FoldedRun {
   const feed = newFold()
   const n = Math.max(0, Math.min(upTo, events.length))
-  for (let i = 0; i < n; i++) feed.push(events[i])
+  for (let i = 0; i < n; i++) feed.push(events[i], undefined, attrs?.[i])
   return feed.result()
 }
 
@@ -120,8 +138,12 @@ export function fold(
  * paged reader and T2a's live tail stream through (plan §4.4): pages
  * are folded once as they arrive, never re-folded from the top.
  */
-export function foldMore(feed: FoldFeed, page: WireEvent[]): FoldFeed {
-  for (const ev of page) feed.push(ev)
+export function foldMore(
+  feed: FoldFeed,
+  page: WireEvent[],
+  attrs?: (ContentAttrs | undefined)[]
+): FoldFeed {
+  page.forEach((ev, i) => feed.push(ev, undefined, attrs?.[i]))
   return feed
 }
 
@@ -147,6 +169,7 @@ function usageOf(u: Usage | undefined): Usage {
 
 export function newFold(): FoldFeed {
   const run: FoldedRun = { runId: "", steps: [], pending: [], finished: false }
+  const eventHoles: Record<number, HoleMark[]> = {}
   // tool_args_delta carries no call id — keyed by best-known name.
   const streamedArgs = new Map<string, string>()
   let count = 0
@@ -172,9 +195,18 @@ export function newFold(): FoldFeed {
     run.steps.length ? run.steps[run.steps.length - 1].index : 0
 
   return {
-    push(ev: WireEvent, pos?: number) {
+    push(ev: WireEvent, pos?: number, attrs?: ContentAttrs) {
       at = pos ?? count
       count++
+      const marks = contentHoles(attrs)
+      if (marks.length) {
+        eventHoles[at] = marks
+        run.holes = mergeHoles(run.holes, marks)
+      }
+      // The step and call the event's content belongs to: its holes
+      // land there too (run_start and run_finish are the run's alone).
+      let into: FoldedStep | undefined
+      let call: FoldedToolCall | undefined
       // The stream is stored as ingested (obsdb does not validate a
       // body): a null, a bare string or an untyped object is not an
       // event. It keeps its position — replay indexes the stream —
@@ -190,13 +222,15 @@ export function newFold(): FoldFeed {
           run.startPos = at
           break
         case "step_start":
-          step(stepIndex(ev.index, last())) // a resumed index keeps its accumulated state
+          into = step(stepIndex(ev.index, last())) // a resumed index keeps its accumulated state
           break
         case "text_delta":
-          step(last()).text += text(ev.text)
+          into = step(last())
+          into.text += text(ev.text)
           break
         case "reasoning_delta":
-          step(last()).reasoning += text(ev.text)
+          into = step(last())
+          into.reasoning += text(ev.text)
           break
         case "tool_args_delta":
           streamedArgs.set(
@@ -205,30 +239,37 @@ export function newFold(): FoldFeed {
           )
           break
         case "tool_start":
-          step(last()).toolCalls.push({
+          into = step(last())
+          call = {
             callId: text(ev.call_id),
             name: text(ev.name),
             args: ev.args,
             streamedArgs: streamedArgs.get(ev.name) ?? "",
             state: "running",
             startPos: at,
-          })
+          }
+          into.toolCalls.push(call)
           streamedArgs.delete(ev.name)
           break
         case "tool_finish": {
           const c = findCall(ev.call_id)
+          call = c
           if (c) {
             c.result = { content: text(ev.content), isError: Boolean(ev.is_error) }
             c.state = "done"
             c.finishPos = at
             // the call's step spans through its finish
             for (const s of run.steps)
-              if (s.toolCalls.includes(c) && at > s.to) s.to = at
+              if (s.toolCalls.includes(c)) {
+                into = s
+                if (at > s.to) s.to = at
+              }
           }
           break
         }
         case "step_finish":
-          step(stepIndex(ev.index, last())).finish = {
+          into = step(stepIndex(ev.index, last()))
+          into.finish = {
             reason: text(ev.reason),
             raw: ev.raw,
             usage: usageOf(ev.usage),
@@ -238,6 +279,7 @@ export function newFold(): FoldFeed {
           // A user turn delivered inside the run: attached to the step
           // it followed, rendered after that step's card (ADR 0019 §4).
           const s = step(stepIndex(ev.step, last()))
+          into = s
           const words = (Array.isArray(ev.messages) ? ev.messages : [])
             .map((m) => messageText(m))
             .filter(Boolean)
@@ -254,6 +296,10 @@ export function newFold(): FoldFeed {
         // Anything else — a type from a newer core, a store-era
         // "nested" envelope — is not part of the story: skipped.
       }
+      if (marks.length) {
+        if (into) into.holes = mergeHoles(into.holes, marks)
+        if (call) call.holes = mergeHoles(call.holes, marks)
+      }
     },
     result(): FoldedRun {
       const out: FoldedRun = {
@@ -269,6 +315,8 @@ export function newFold(): FoldFeed {
         startPos: run.startPos,
         finishPos: run.finishPos,
       }
+      if (run.holes) out.holes = [...run.holes]
+      if (Object.keys(eventHoles).length) out.eventHoles = { ...eventHoles }
       return out
     },
   }
@@ -511,6 +559,48 @@ export function applyTranscript(
     }
   }
   return view
+}
+
+/**
+ * stepHoles is what a step card badges (ADR 0028 §11): the step
+ * route's holes when the page loaded them (A7's assembled step), the
+ * fold's otherwise — the recorder's cuts on the step's events, a
+ * `derived` placement of its words, a `max_tokens` finish — plus the
+ * run's holes that hold for every step of it (not_recorded: a run
+ * written before the request record; stripped: a content-off chain).
+ * In the table's order, one badge per hole.
+ */
+export function stepHoles(
+  step: FoldedStep,
+  inherited?: HoleMark[],
+  stepDoc?: { holes?: HoleMark[] }
+): HoleMark[] {
+  if (stepDoc && Array.isArray(stepDoc.holes))
+    return mergeHoles(stepDoc.holes, step.holes)
+  const own: HoleMark[] = [...(step.holes ?? [])]
+  if (step.derived)
+    own.push({
+      hole: "derived",
+      reason:
+        "this step's words come from a transcript batch whose step was inferred, not stored",
+    })
+  if (step.finish?.reason === "max_tokens") own.push({ hole: "max_tokens" })
+  return mergeHoles(
+    own,
+    (inherited ?? []).filter(
+      (h) => h.hole === "not_recorded" || h.hole === "stripped"
+    )
+  )
+}
+
+/** runHoles is what the run header badges: the run document's own
+ * (api.go's runHoles: not_recorded, interrupted, derived, stripped,
+ * gap) and the fold's (the recorder's cuts on any event). */
+export function runHoles(
+  doc: { holes?: HoleMark[] } | null | undefined,
+  view: FoldedRun
+): HoleMark[] {
+  return mergeHoles(Array.isArray(doc?.holes) ? doc.holes : [], view.holes)
 }
 
 /** callState is what the UI shows for a call that never finished:

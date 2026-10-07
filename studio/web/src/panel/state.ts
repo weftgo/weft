@@ -13,7 +13,8 @@
 // bounded, and a response that arrives for a view the user has left
 // is dropped.
 import type { Holed, Meta, PosEvent, RunDoc, RunRow, SessionRow, Span, Transcript } from "../lib/api"
-import { byStep, REQUEST_HOLES } from "../lib/requests"
+import { HOLES } from "../lib/honesty"
+import { byStep } from "../lib/requests"
 import type { StepRequests } from "../lib/requests"
 import { tokenScope } from "./config"
 import { applyTranscript, linkView, newFold } from "../lib/events"
@@ -296,10 +297,10 @@ interface EventWalk {
  * stored as ingested, so a body may be null, a string or an object
  * with no type: skipped, and a fold that throws on a shape it does not
  * know is contained — nothing here may throw into the host page. */
-function feedEvent(feed: FoldFeed, ev: unknown, pos: number): void {
+function feedEvent(feed: FoldFeed, ev: unknown, pos: number, attrs?: PosEvent["attrs"]): void {
   if (!ev || typeof ev !== "object" || typeof (ev as { type?: unknown }).type !== "string") return
   try {
-    feed.push(ev as PosEvent["event"], pos)
+    feed.push(ev as PosEvent["event"], pos, attrs)
   } catch {
     // an event the fold cannot read: skipped
   }
@@ -310,7 +311,7 @@ function foldInto(feed: FoldFeed, seen: Set<number>, events: (PosEvent | null)[]
   for (const p of events) {
     if (!p || typeof p.pos !== "number" || seen.has(p.pos)) continue
     seen.add(p.pos)
-    feedEvent(feed, p.event, p.pos)
+    feedEvent(feed, p.event, p.pos, p.attrs)
   }
 }
 
@@ -339,10 +340,10 @@ function foldLive(lane: Lane, rec: LiveRecord, force = false): "folded" | "skip"
     if (!Number.isFinite(pos) || lane.seen.has(pos)) return "skip"
     if (!force && pos > lane.pos + 1) return "gap"
     lane.seen.add(pos)
-    lane.events.push({ pos, time: rec.time, event: rec.event })
+    lane.events.push({ pos, time: rec.time, event: rec.event, ...(rec.attrs ? { attrs: rec.attrs } : {}) })
     if (pos > lane.pos) lane.pos = pos
   } else if (rec.kind !== "delta") return "skip"
-  feedEvent(lane.feed, rec.event, pos)
+  feedEvent(lane.feed, rec.event, pos, rec.attrs)
   lane.stale = true
   return "folded"
 }
@@ -821,7 +822,7 @@ export class PanelModel {
    * so the hole is known without a request. */
   private async readRequests(id: string): Promise<PanelRequests | null> {
     if (!this.state.meta?.capabilities.includes("requests")) return null
-    if (tokenScope(this.ep.token) === "read") return { badge: "hidden", reason: REQUEST_HOLES.hidden.reason, fix: REQUEST_HOLES.hidden.fix, steps: new Map() }
+    if (tokenScope(this.ep.token) === "read") return { badge: "hidden", reason: HOLES.hidden.reason, fix: HOLES.hidden.fix, steps: new Map() }
     try {
       const doc = await fetchRequests(this.ep, id)
       return {
@@ -894,7 +895,7 @@ export class PanelModel {
               if (!e || typeof e.pos !== "number" || lane.seen.has(e.pos)) continue
               lane.seen.add(e.pos)
               lane.events.push(e)
-              feedEvent(lane.feed, e.event, e.pos)
+              feedEvent(lane.feed, e.event, e.pos, e.attrs)
               if (e.pos > lane.pos) lane.pos = e.pos
               lane.stale = true
             }

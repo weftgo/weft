@@ -98,7 +98,7 @@ describe("the panel's request line (A1.4)", () => {
       )
       // The hole says why and what to do, with nothing asked.
       expect(l.querySelector(".weft-reason")?.textContent).toBe(
-        "a read-scoped panel token does not read system prompts or tool catalogs — fix: use a playground-scoped token"
+        "your token's scope may not read this: a read-scoped panel token does not read system prompts or tool catalogs — fix: use a playground-scoped token"
       )
     }
     expect(studio.gets(`runs/${RUN}/requests`)).toEqual([])
@@ -172,7 +172,7 @@ describe("the panel's request line (A1.4)", () => {
     el = await mount()
     const l0 = $(el, '[data-weft-request="0"]')!
     expect(l0.textContent).toContain(
-      "content not recorded for this destination"
+      "content not captured by this app"
     )
     expect(l0.textContent).toContain("system prompt 57e8f485cbb5")
     expect(l0.querySelector(".weft-reason")?.textContent).toContain(

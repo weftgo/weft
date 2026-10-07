@@ -284,7 +284,7 @@ func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (
 	}
 	// One row past the limit answers "is there more" in the same read.
 	rs, err := d.reads.QueryContext(ctx,
-		`SELECT pos, time_ns, body FROM records WHERE run_id = ? AND kind = 'event' AND pos > ? ORDER BY pos LIMIT ?`,
+		`SELECT pos, time_ns, body, attrs FROM records WHERE run_id = ? AND kind = 'event' AND pos > ? ORDER BY pos LIMIT ?`,
 		runID, after, limit+1)
 	if err != nil {
 		return obsdb.EventPage{}, err
@@ -294,12 +294,17 @@ func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (
 	for rs.Next() {
 		var ev obsdb.PosEvent
 		var ns int64
-		var body []byte
-		if err := rs.Scan(&ev.Pos, &ns, &body); err != nil {
+		var body, attrs []byte
+		if err := rs.Scan(&ev.Pos, &ns, &body, &attrs); err != nil {
 			return obsdb.EventPage{}, err
 		}
 		ev.Time = timeOf(ns)
 		ev.Event = json.RawMessage(body)
+		var st obsdb.StoredRecord
+		if err := storedAttrs(attrs, &st); err != nil {
+			return obsdb.EventPage{}, err
+		}
+		ev.Content, ev.TruncatedBytes = st.Content, st.TruncatedBytes
 		page.Events = append(page.Events, ev)
 	}
 	if err := rs.Err(); err != nil {

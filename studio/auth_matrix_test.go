@@ -467,7 +467,8 @@ func TestAuthMatrix(t *testing.T) {
 		}
 		b, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		hidden := strings.Contains(string(b), `"request":{"badge":"hidden","reason":"a read-scoped panel token does not read system prompts or tool catalogs","fix":"use a playground-scoped token"}`)
+		reason, fix := obsdb.HoleNote(obsdb.HoleHidden)
+		hidden := strings.Contains(string(b), `"request":{"badge":"hidden","reason":"`+reason+`","fix":"`+fix+`"}`)
 		if resp.StatusCode != ok || hidden != (id.kind == "read") {
 			t.Errorf("steps/0 as %s = %d %s, want 200 with the request hidden = %v", id.name, resp.StatusCode, b, id.kind == "read")
 		}

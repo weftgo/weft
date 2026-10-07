@@ -129,6 +129,10 @@ is pre-1.0 and tags per module (ADR 0005).
   set with per-call decisions; read-scoped tokens are offered no write
   verb; the hand-off rides the URL fragment; the build fails on any
   package code or over the 80 KiB gzip budget.
+- Playground: `side_effects: "allow"` accepts a ReplaySafe tool that is
+  not opted in (it was refused 403); the panel drawer and `/playground`
+  side-effect selects say what each mode does — only `allow` runs the
+  app's `AllowSideEffects` tools for real.
 
 ### otel
 
@@ -232,6 +236,12 @@ is pre-1.0 and tags per module (ADR 0005).
     fork, and a fork whose grant revocation fails is closed. A turn
     re-run after an overflow no longer leaves its first run id in the
     steer registry.
+- `AllowSideEffects` is honoured only in `side_effects: "allow"`
+  (WEFT-PLAYGROUND §5.1/§6.3; behaviour change): an opted-in tool used to
+  run for real in every mode. In `substitute` (the default) it is now
+  answered from the source's recorded result or parked, in `park` it
+  parks; ReplaySafe tools still run in every mode. `allow` no longer
+  refuses a ReplaySafe tool that is not opted in.
 
 ### thread
 

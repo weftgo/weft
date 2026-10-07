@@ -45,24 +45,38 @@ type logRow struct {
 // page. A run whose logs cannot be attributed (it has no span) carries
 // the not_recorded badge beside an empty list.
 //
+// Holes is every hole of the page, deduped, in ADR 0028 §11's order —
+// the step route's shape ({hole, reason, fix?}); [] when none:
+//
+//   - not_recorded: the run has no span to attribute logs through;
+//   - truncated: the run's traces hold more than obsdb.MaxLogCandidates
+//     log lines in its window — the cap applies before attribution, so
+//     a flooding subagent or sibling counts — and later lines of this
+//     run may be missing;
+//   - gap: lines in the run's trace and window name a span that is not
+//     stored (dropped, or an enclosing app span still open); they may
+//     be this run's or another's in the same trace.
+//
+// badge, reason and fix are the first hole, for the simplest client.
+//
 // Partial is a live condition, not a hole (the badge table is closed):
 // the run is running, so lines under its in-flight spans are not
 // attributable yet and indexes may shift when those spans arrive — a
 // client paging with from may re-read lines and miss as many until
 // the run ends (obsdb.ReadOtherLogs; a stable cursor is phase-2 work).
-// The reason says so, beside any badge's own.
-//
-// The badge, when the page is not the whole story: truncated when the
-// run's traces hold more than obsdb.MaxLogCandidates lines (only the
-// first are read), else gap when lines in the run's trace name a span
-// that was never stored (a dropped batch, a process that exited) —
-// with the count; truncated's reason then carries the gap's too.
+// PartialReason says so; with no hole, reason carries it too, so a
+// page can be partial with a reason and no badge.
 type logsPage struct {
-	Logs     []logRow `json:"logs"`
-	NextFrom *int64   `json:"next_from,omitempty"`
-	Partial  bool     `json:"partial,omitempty"`
+	Logs          []logRow   `json:"logs"`
+	NextFrom      *int64     `json:"next_from,omitempty"`
+	Partial       bool       `json:"partial,omitempty"`
+	PartialReason string     `json:"partial_reason,omitempty"`
+	Holes         []stepHole `json:"holes"`
 	badgeFields
 }
+
+// logsTruncatedFix is the truncated hole's fix on this route.
+const logsTruncatedFix = "log less in the run's trace (a busy subagent or sibling run counts too); phase 2 filters by span before the cap"
 
 // logsCap is obsdb.MaxLogCandidates as the reason spells it: digits in
 // groups of three ("10 000").
@@ -145,16 +159,19 @@ func (s *Server) serveRunLogs(w http.ResponseWriter, r *http.Request, id string)
 	page, err := s.db.OtherLogs(r.Context(), id, query)
 	logs := page.Logs
 	out := logsPage{Logs: []logRow{}}
+	holes := holeSet{}
 	var he *obsdb.HoleError
 	switch {
 	case errors.As(err, &he):
-		out.badgeFields = badgeOf(he.Hole)
 		if he.Hole == obsdb.HoleNotRecorded {
 			// A run with no span: the reason is this route's, the fix
 			// the no-spans cause's (install a tracer).
 			_, fix := obsdb.HoleNoteFor(obsdb.HoleNotRecorded, obsdb.CauseNoSpans)
-			out.badgeFields = badgeFields{Badge: string(he.Hole), Reason: logsNoSpansReason, Fix: fix}
+			holes.add(he.Hole, logsNoSpansReason, fix)
+		} else {
+			holes.note(he.Hole)
 		}
+		out.setHoles(holes.list())
 		writeJSON(w, r, http.StatusOK, out)
 		return
 	case err != nil:
@@ -175,19 +192,35 @@ func (s *Server) serveRunLogs(w http.ResponseWriter, r *http.Request, id string)
 		next := logs[n-1].Index + 1
 		out.NextFrom = &next
 	}
-	var reasons []string
-	if page.Gap > 0 {
-		out.Badge, out.Fix = string(obsdb.HoleGap), holeFix(obsdb.HoleGap)
-		reasons = append(reasons, strconv.Itoa(page.Gap)+" log lines in the run's trace name a span that was never stored")
-	}
 	if page.Truncated {
-		out.Badge, out.Fix = string(obsdb.HoleTruncated), ""
-		reasons = append([]string{"the first " + logsCap + " app log lines are shown"}, reasons...)
+		holes.add(obsdb.HoleTruncated, "the run's traces hold more than "+logsCap+" log lines in its window: only lines among the first "+
+			logsCap+" by time were read; later lines of this run may be missing", logsTruncatedFix)
 	}
+	if page.Gap > 0 {
+		holes.add(obsdb.HoleGap, gapReason(page.Gap), holeFix(obsdb.HoleGap))
+	}
+	out.setHoles(holes.list())
 	if page.Partial {
-		out.Partial = true
-		reasons = append(reasons, logsPartialReason)
+		out.Partial, out.PartialReason = true, logsPartialReason
+		if out.Badge == "" {
+			out.Reason = logsPartialReason
+		}
 	}
-	out.Reason = strings.Join(reasons, "; ")
 	writeJSON(w, r, http.StatusOK, out)
+}
+
+// setHoles sets the page's holes and, from the first, its badge.
+func (p *logsPage) setHoles(hs []stepHole) {
+	p.Holes = hs
+	if len(hs) > 0 {
+		p.badgeFields = badgeFields{Badge: hs[0].Hole, Reason: hs[0].Reason, Fix: hs[0].Fix}
+	}
+}
+
+// gapReason words the gap hole for n lines.
+func gapReason(n int) string {
+	if n == 1 {
+		return "1 log line in this run's trace and time window names a span that is not stored (dropped, or still open): it may belong to this run or to another in the same trace"
+	}
+	return strconv.Itoa(n) + " log lines in this run's trace and time window name a span that is not stored (dropped, or still open): they may belong to this run or to another in the same trace"
 }

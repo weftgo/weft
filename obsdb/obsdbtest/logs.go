@@ -199,6 +199,28 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			last.Logs[0].Body != fmt.Sprintf("line %d", obsdb.MaxLogCandidates-1) {
 			t.Errorf("past the cap = truncated %v, %d rows %+v, %v; want the first %d lines and truncated", last.Truncated, len(last.Logs), last.Logs, err, obsdb.MaxLogCandidates)
 		}
+
+		// The cap applies before attribution: a subagent flooding the
+		// shared trace with MaxLogCandidates earlier lines leaves the
+		// parent's own later line unread — truncated, not shown.
+		parent := invokeSpan("r_flood", 1, nil)
+		parent.TraceID, parent.SpanID = "e1"+trace[2:], "5000000000000001"
+		kidSpan := parent
+		kidSpan.SpanID, kidSpan.ParentSpanID = "5000000000000002", parent.SpanID
+		kidSpan.Attrs = map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.id": "r_flood/0/c1"}
+		flood := append(finishedRun("r_flood"), obsdb.Record{Time: at(2 * time.Second), TraceID: parent.TraceID,
+			SpanID: parent.SpanID, Severity: 9, Body: "the parent's own line", Service: "conf-svc"})
+		for i := 0; i < obsdb.MaxLogCandidates; i++ {
+			flood = append(flood, obsdb.Record{Time: at(time.Second + time.Duration(i)*time.Microsecond),
+				TraceID: parent.TraceID, SpanID: kidSpan.SpanID, Severity: 9, Body: fmt.Sprintf("child %d", i), Service: "conf-svc"})
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{parent, kidSpan}, Records: flood}); err != nil {
+			t.Fatal(err)
+		}
+		fl, err := db.OtherLogs(ctx(), "r_flood", obsdb.LogQuery{})
+		if err != nil || !fl.Truncated || len(fl.Logs) != 0 {
+			t.Errorf("a flooded trace = truncated %v, %d rows, %v; want truncated and none of the parent's", fl.Truncated, len(fl.Logs), err)
+		}
 	}
 }
 

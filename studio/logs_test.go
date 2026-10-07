@@ -2,6 +2,7 @@ package studio
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -27,8 +28,8 @@ func TestLogsRoute(t *testing.T) {
 		t.Fatalf("logs: %d %s", code, body)
 	}
 	golden(t, "logs-ok.golden.json", body)
-	if strings.Contains(body, "partial") || strings.Contains(body, "badge") {
-		t.Errorf("a finished run's logs = %s, want neither partial nor a badge", body)
+	if strings.Contains(body, "partial") || strings.Contains(body, "badge") || !strings.Contains(body, `"holes":[]`) {
+		t.Errorf("a finished run's logs = %s, want neither partial nor a badge, and no holes", body)
 	}
 
 	code, _, body = get(t, h, "/studio/api/runs/r_ok/logs?limit=1")
@@ -41,7 +42,7 @@ func TestLogsRoute(t *testing.T) {
 		t.Errorf("logs?from=1&limit=1 = %d %s, want index 1 and next_from 2 (a full page)", code, body)
 	}
 	code, _, body = get(t, h, "/studio/api/runs/r_ok/logs?from=2")
-	if code != http.StatusOK || strings.TrimSpace(body) != `{"logs":[]}` {
+	if code != http.StatusOK || strings.TrimSpace(body) != `{"logs":[],"holes":[]}` {
 		t.Errorf("logs?from=2 = %d %q, want an empty last page", code, body)
 	}
 
@@ -64,7 +65,7 @@ func TestLogsRoute(t *testing.T) {
 
 	// r_fail has a span and logged nothing: empty, no badge.
 	code, _, body = get(t, h, "/studio/api/runs/r_fail/logs")
-	if code != http.StatusOK || strings.Contains(body, "badge") || !strings.HasPrefix(body, `{"logs":[]`) {
+	if code != http.StatusOK || strings.Contains(body, "badge") || !strings.HasPrefix(body, `{"logs":[]`) || !strings.Contains(body, `"holes":[]`) {
 		t.Errorf("r_fail logs = %d %s, want an empty list without a badge", code, body)
 	}
 	// r_stale was recorded without a tracer: nothing to attribute
@@ -96,11 +97,14 @@ func TestRunRowDeltaCount(t *testing.T) {
 }
 
 // TestLogsLiveGapTruncated: what the page cannot show is said. A
-// running run's page is partial with the reason (no badge: a live
-// condition, not a hole); a finished run's line under a span that was
-// never stored is the gap badge with its count; past
-// obsdb.MaxLogCandidates lines the page is truncated.
+// running run's page is partial with its reason (no badge: a live
+// condition, not a hole); a finished run's lines under a span that is
+// not stored are the gap hole with their count, worded as anyone's;
+// past obsdb.MaxLogCandidates lines in the trace the page is
+// truncated — even when a subagent's lines filled the cap and the
+// page shows none; holes lists every hole, the badge the first.
 func TestLogsLiveGapTruncated(t *testing.T) {
+	h0 := func(db obsdb.DB) http.Handler { return Handler(DB(db)) }
 	db, err := sqlite.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -149,23 +153,94 @@ func TestLogsLiveGapTruncated(t *testing.T) {
 	}
 	write(obsdb.Batch{Spans: []obsdb.Span{span("r_many", manyTrace, "3333333333333331", fixtureT0)}, Records: many})
 
-	h := Handler(DB(db))
-	code, _, body := get(t, h, "/studio/api/runs/r_live/logs")
-	if code != http.StatusOK || !strings.Contains(body, `"partial":true`) ||
-		!strings.Contains(body, `"reason":"`+logsPartialReason+`"`) || strings.Contains(body, "badge") ||
-		!strings.Contains(body, `"body":"started"`) || strings.Contains(body, "inside the open tool") {
-		t.Errorf("a running run's logs = %d %s, want the attributable line, partial and its reason, no badge", code, body)
+	// r_gap2: finished, two lines under spans never stored.
+	const gap2Trace = "44444444444444444444444444444444"
+	write(obsdb.Batch{Spans: []obsdb.Span{span("r_gap2", gap2Trace, "4444444444444441", fixtureT0)}, Records: []obsdb.Record{
+		fxRecord("r_gap2", "event", "run_start", 0, fixtureT0, `{"type":"run_start","id":"r_gap2"}`),
+		fxRecord("r_gap2", "event", "run_finish", 1, fixtureT0.Add(time.Second), `{"type":"run_finish","run_id":"r_gap2"}`),
+		line(gap2Trace, "dead00000000bee1", fixtureT0.Add(time.Millisecond), "lost 1"),
+		line(gap2Trace, "dead00000000bee2", fixtureT0.Add(2*time.Millisecond), "lost 2"),
+	}})
+	// r_flood: finished; its subagent floods the shared trace with
+	// MaxLogCandidates early lines, so the parent's own later line is
+	// past the cap — the cap applies before attribution.
+	const floodTrace = "55555555555555555555555555555555"
+	child := span("r_flood/0/c1", floodTrace, "5555555555555552", fixtureT0)
+	child.ParentSpanID = "5555555555555551"
+	flood := []obsdb.Record{
+		fxRecord("r_flood", "event", "run_start", 0, fixtureT0, `{"type":"run_start","id":"r_flood"}`),
+		fxRecord("r_flood", "event", "run_finish", 1, fixtureT0.Add(time.Second), `{"type":"run_finish","run_id":"r_flood"}`),
+		line(floodTrace, "5555555555555551", fixtureT0.Add(500*time.Millisecond), "the parent's own line"),
 	}
-	code, _, body = get(t, h, "/studio/api/runs/r_gap/logs")
-	if code != http.StatusOK || strings.Contains(body, "partial") || !strings.Contains(body, `"badge":"gap"`) ||
-		!strings.Contains(body, `"reason":"1 log lines in the run's trace name a span that was never stored"`) ||
-		!strings.Contains(body, `"body":"kept"`) || strings.Contains(body, "lost span") {
-		t.Errorf("a gap = %d %s, want the kept line and the gap badge", code, body)
+	for i := 0; i < obsdb.MaxLogCandidates; i++ {
+		flood = append(flood, line(floodTrace, "5555555555555552", fixtureT0.Add(time.Duration(i)*time.Microsecond), fmt.Sprintf("child %d", i)))
 	}
-	code, _, body = get(t, h, fmt.Sprintf("/studio/api/runs/r_many/logs?from=%d", obsdb.MaxLogCandidates-1))
-	if code != http.StatusOK || !strings.Contains(body, `"badge":"truncated"`) ||
-		!strings.Contains(body, `"reason":"the first 10 000 app log lines are shown"`) ||
-		!strings.Contains(body, fmt.Sprintf(`"index":%d`, obsdb.MaxLogCandidates-1)) || strings.Contains(body, fmt.Sprintf("line %d", obsdb.MaxLogCandidates)) {
-		t.Errorf("past the cap = %d %.400s, want the last kept line and the truncated badge", code, body)
+	write(obsdb.Batch{Spans: []obsdb.Span{span("r_flood", floodTrace, "5555555555555551", fixtureT0), child}, Records: flood})
+
+	type hole struct {
+		Hole, Reason, Fix string
+	}
+	type doc struct {
+		Logs          []logRow `json:"logs"`
+		Partial       bool     `json:"partial"`
+		PartialReason string   `json:"partial_reason"`
+		Holes         []hole   `json:"holes"`
+		Badge         string   `json:"badge"`
+		Reason        string   `json:"reason"`
+		Fix           string   `json:"fix"`
+	}
+	read := func(path string) doc {
+		t.Helper()
+		code, _, body := get(t, h0(db), path)
+		var d doc
+		if code != http.StatusOK || json.Unmarshal([]byte(body), &d) != nil || d.Holes == nil {
+			t.Fatalf("%s = %d %s, want 200 with holes", path, code, body)
+		}
+		return d
+	}
+	bodies := func(d doc) []string {
+		out := []string{}
+		for _, l := range d.Logs {
+			out = append(out, l.Body)
+		}
+		return out
+	}
+
+	// Running: partial with its reason, and — no hole — reason too.
+	live := read("/studio/api/runs/r_live/logs")
+	if !live.Partial || live.PartialReason != logsPartialReason || live.Reason != logsPartialReason || live.Badge != "" ||
+		len(live.Holes) != 0 || strings.Join(bodies(live), "|") != "started" {
+		t.Errorf("a running run's logs = %+v, want the attributable line, partial with its reason, no hole", live)
+	}
+	// A gap: one line, singular; the lines may be anyone's.
+	gap := read("/studio/api/runs/r_gap/logs")
+	const gap1 = "1 log line in this run's trace and time window names a span that is not stored (dropped, or still open): it may belong to this run or to another in the same trace"
+	if gap.Partial || gap.Badge != "gap" || gap.Reason != gap1 || gap.Fix == "" || len(gap.Holes) != 1 ||
+		gap.Holes[0] != (hole{"gap", gap1, gap.Fix}) || strings.Join(bodies(gap), "|") != "kept" {
+		t.Errorf("a gap = %+v, want the kept line and the gap hole", gap)
+	}
+	gap2 := read("/studio/api/runs/r_gap2/logs")
+	if want := "2 log lines in this run's trace and time window name a span that is not stored (dropped, or still open): they may belong to this run or to another in the same trace"; gap2.Reason != want {
+		t.Errorf("two gap lines: reason %q, want %q", gap2.Reason, want)
+	}
+	// Past the cap: truncated with the honest reason and a fix.
+	const truncReason = "the run's traces hold more than 10 000 log lines in its window: only lines among the first 10 000 by time were read; later lines of this run may be missing"
+	capped := read(fmt.Sprintf("/studio/api/runs/r_many/logs?from=%d", obsdb.MaxLogCandidates-1))
+	if capped.Badge != "truncated" || capped.Reason != truncReason || capped.Fix != logsTruncatedFix || len(capped.Holes) != 1 ||
+		len(capped.Logs) != 1 || capped.Logs[0].Index != obsdb.MaxLogCandidates-1 {
+		t.Errorf("past the cap = %+v holes %+v, want the last kept line and the truncated hole", capped.Badge, capped.Holes)
+	}
+	// A flooding subagent: the parent's own line is past the cap; the
+	// page is empty and says why, never "10 000 shown".
+	fl := read("/studio/api/runs/r_flood/logs")
+	if len(fl.Logs) != 0 || fl.Badge != "truncated" || fl.Reason != truncReason || strings.Contains(fl.Reason, "shown") {
+		t.Errorf("a flooded trace = %d lines, badge %q reason %q; want none, truncated, the honest reason", len(fl.Logs), fl.Badge, fl.Reason)
+	}
+	// Every hole a page has, deduped, in the table's order: a truncated
+	// page with a lost span lists truncated then gap.
+	write(obsdb.Batch{Records: []obsdb.Record{line(floodTrace, "dead00000000beef", fixtureT0.Add(time.Microsecond/2), "lost early")}})
+	both := read("/studio/api/runs/r_flood/logs")
+	if len(both.Holes) != 2 || both.Holes[0].Hole != "truncated" || both.Holes[1].Hole != "gap" || both.Badge != "truncated" {
+		t.Errorf("truncated and a gap = %+v, want [truncated gap] with the badge the first", both.Holes)
 	}
 }

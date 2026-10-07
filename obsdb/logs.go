@@ -110,9 +110,11 @@ func ParseSeverity(s string) (n int, ok bool) {
 	return 0, false
 }
 
-// MaxLogCandidates caps how many app log records one DB.OtherLogs read
-// loads: the first records of the run's traces in its time window, by
-// time. A run whose traces hold more reads LogPage.Truncated.
+// MaxLogCandidates caps how many log records one DB.OtherLogs read
+// loads: the first non-weft records of the run's traces in its time
+// window, by time — before attribution, so a subagent's or a sibling
+// run's lines in the same trace (and duplicates) count against it. A
+// run whose traces hold more reads LogPage.Truncated.
 const MaxLogCandidates = 10_000
 
 // LogPage is one DB.OtherLogs answer: the page and what the reader
@@ -124,12 +126,16 @@ const MaxLogCandidates = 10_000
 //     arrives, and it may then take an index below lines already
 //     served — indexes are stable only once the run has ended.
 //   - Gap: lines in the run's traces (deduplicated, in its window) that
-//     name a span no stored span has — a dropped batch, a process that
-//     exited before exporting. They belong to no run and are not in
-//     Logs. Always 0 while Partial (the span may still be on its way).
-//   - Truncated: the run's traces hold more than MaxLogCandidates lines
-//     in its window; only the first MaxLogCandidates, by time, were
-//     read.
+//     name a span no stored span has — dropped (a lost batch, a process
+//     that exited before exporting), or still open (an app span that
+//     encloses the run and has not ended). They may belong to this run
+//     or to another in the same trace, and are not in Logs. Always 0
+//     while Partial (the span may still be on its way).
+//   - Truncated: the run's traces hold more than MaxLogCandidates log
+//     lines in its window — anyone's, the cap applies before
+//     attribution — so only lines among the first MaxLogCandidates by
+//     time were read: later lines of this run may be missing, and Logs
+//     may hold far fewer than MaxLogCandidates.
 type LogPage struct {
 	Logs      []OtherLog
 	Partial   bool
@@ -139,8 +145,8 @@ type LogPage struct {
 
 // LogCandidates is a backend's half of DB.OtherLogs: the non-weft log
 // records (no weft.run.id) of the given traces whose time is within
-// [from, to], the first limit of them by time. ReadOtherLogs does the
-// rest.
+// [from, to]: the first limit of them, returned in time order (ties in
+// a stable order of the backend's). ReadOtherLogs does the rest.
 type LogCandidates func(ctx context.Context, traceIDs []string, from, to time.Time, limit int) ([]OtherLog, error)
 
 // ReadOtherLogs is DB.OtherLogs for every backend, so both attribute,
@@ -171,8 +177,10 @@ type LogCandidates func(ctx context.Context, traceIDs []string, from, to time.Ti
 // miss as many. TODO(phase 2): a stable cursor — (time, span, seq)
 // rather than an index — so a live walk neither repeats nor skips.
 //
-// At most MaxLogCandidates records are read (Truncated past it); lines
-// naming a span never stored are counted, not shown (Gap).
+// At most MaxLogCandidates records are read (Truncated past it), chosen
+// before attribution. TODO(phase 2): filter by the attributed span set
+// in the backends' SQL, so the cap counts this run's lines only.
+// Lines naming a span never stored are counted, not shown (Gap).
 func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candidates LogCandidates) (LogPage, error) {
 	det, err := db.Run(ctx, runID)
 	if err != nil {
@@ -213,7 +221,8 @@ func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candida
 		return LogPage{}, err
 	}
 	if len(cands) > MaxLogCandidates {
-		sort.SliceStable(cands, func(i, j int) bool { return cands[i].Time.Before(cands[j].Time) })
+		// The candidates arrive in time order (LogCandidates), so the
+		// first MaxLogCandidates are the cap's.
 		cands, page.Truncated = cands[:MaxLogCandidates], true
 	}
 	stored := map[spanKey]bool{}

@@ -64,7 +64,13 @@ func fxRecord(run, kind, eventType string, pos int64, at time.Time, body string)
 		attrs["weft.event.type"] = eventType
 		attrs["weft.event.pos"] = pos
 	case "messages":
+		// Every fixture run makes one model call: its input record and
+		// its one assistant batch both joined at step 0.
 		attrs["weft.messages.index"] = pos
+		attrs["weft.step.index"] = int64(0)
+		if pos == 0 {
+			attrs["weft.messages.input"] = true
+		}
 	}
 	for k, v := range fixtureTags {
 		attrs[k] = v

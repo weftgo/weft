@@ -363,7 +363,12 @@ func (d *DB) eventGaps(ctx context.Context, runID string, count int64) ([]int64,
 	return gaps, rs.Err()
 }
 
-func (d *DB) Transcript(ctx context.Context, runID string) (_ []json.RawMessage, err error) {
+func (d *DB) Transcript(ctx context.Context, runID string) ([]json.RawMessage, error) {
+	batches, err := d.TranscriptBatches(ctx, runID)
+	return obsdb.TranscriptBodies(batches), err
+}
+
+func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.TranscriptBatch, err error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
@@ -371,26 +376,52 @@ func (d *DB) Transcript(ctx context.Context, runID string) (_ []json.RawMessage,
 	if err := d.runExists(ctx, runID); err != nil {
 		return nil, err
 	}
+	// step is the record's weft.step.index, stored by the write path
+	// (-1 when absent); the input flag is read from the attribute column.
 	rs, err := d.reads.QueryContext(ctx,
-		`SELECT body FROM records WHERE run_id = ? AND kind = 'messages' ORDER BY pos`, runID)
+		`SELECT pos, step, body, attrs FROM records WHERE run_id = ? AND kind = 'messages' ORDER BY pos`, runID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rs.Close() }()
-	var out []json.RawMessage
+	var out []obsdb.TranscriptBatch
 	for rs.Next() {
-		var body []byte
-		if err := rs.Scan(&body); err != nil {
+		var (
+			b     obsdb.TranscriptBatch
+			body  []byte
+			attrs []byte
+		)
+		if err := rs.Scan(&b.Index, &b.Step, &body, &attrs); err != nil {
 			return nil, err
 		}
-		out = append(out, json.RawMessage(body))
+		b.Messages = json.RawMessage(body)
+		b.Input = messagesInput(attrs)
+		out = append(out, b)
 	}
 	if err := rs.Err(); err != nil {
 		return nil, err
 	}
 	// A resume's rebuilt tool message supersedes the partial one its
 	// input record carried (the later record is the authoritative one).
-	return obsdb.DedupTranscript(out), nil
+	return obsdb.DedupBatches(out), nil
+}
+
+// messagesInput reads weft.messages.input from a record's stored
+// attributes: a bool, or the string an OTLP sender may have sent.
+func messagesInput(attrs []byte) bool {
+	var a struct {
+		Input any `json:"weft.messages.input"`
+	}
+	if json.Unmarshal(attrs, &a) != nil {
+		return false
+	}
+	switch v := a.Input.(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true"
+	}
+	return false
 }
 
 func (d *DB) RunSpans(ctx context.Context, runID string) (_ []obsdb.Span, err error) {

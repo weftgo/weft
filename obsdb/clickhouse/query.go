@@ -479,7 +479,12 @@ func (d *DB) eventGaps(ctx context.Context, runID string) ([]int64, error) {
 	return gaps, rs.Err()
 }
 
-func (d *DB) Transcript(ctx context.Context, runID string) (_ []json.RawMessage, err error) {
+func (d *DB) Transcript(ctx context.Context, runID string) ([]json.RawMessage, error) {
+	batches, err := d.TranscriptBatches(ctx, runID)
+	return obsdb.TranscriptBodies(batches), err
+}
+
+func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.TranscriptBatch, err error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
@@ -487,27 +492,36 @@ func (d *DB) Transcript(ctx context.Context, runID string) (_ []json.RawMessage,
 	if err := d.runExists(ctx, runID); err != nil {
 		return nil, err
 	}
+	// Step is weft_records.Step (0004; -1 on rows written before it).
+	// weft_records keeps no attribute column, so the input flag is
+	// read as index 0 (obsdb.TranscriptBatch).
 	rs, err := d.conn.Query(ctx,
-		`SELECT Body FROM weft_records FINAL
+		`SELECT Pos, Step, Body FROM weft_records FINAL
 		WHERE RunId = ? AND Kind = 'messages' ORDER BY Pos`, runID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rs.Close() }()
-	var out []json.RawMessage
+	var out []obsdb.TranscriptBatch
 	for rs.Next() {
-		var body string
-		if err := rs.Scan(&body); err != nil {
+		var (
+			pos  int64
+			step int32
+			body string
+		)
+		if err := rs.Scan(&pos, &step, &body); err != nil {
 			return nil, err
 		}
-		out = append(out, json.RawMessage(body))
+		out = append(out, obsdb.TranscriptBatch{
+			Index: pos, Step: int(step), Input: pos == 0, Messages: json.RawMessage(body),
+		})
 	}
 	if err := rs.Err(); err != nil {
 		return nil, err
 	}
 	// The later record of a rebuilt tool message is the authoritative
 	// one (the rule every backend reads through).
-	return obsdb.DedupTranscript(out), nil
+	return obsdb.DedupBatches(out), nil
 }
 
 const spanColumns = `Timestamp, TraceId, SpanId, ParentSpanId, SpanName, SpanKind, ServiceName,

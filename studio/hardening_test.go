@@ -915,46 +915,71 @@ func TestFixturesCoverTheRunsOwnSteps(t *testing.T) {
 // answered step 0 for every batch and did not say which batch is the
 // run's input record, so a client had to guess — by shape — where the
 // context ends and the run's own steps begin (the split from_step and
-// transcript_edits count over). Each batch names its step (the
-// step_start / step_finish index it belongs to) and whether it is the
-// input.
+// transcript_edits count over). Each batch names its step and whether
+// it is the input — as the record stored them (ADR 0028 §8), never
+// inferred from the batches' order: here the stored steps disagree
+// with what an assistant-order walk would derive, and the stored ones
+// win. A record without weft.step.index answers step -1 with the
+// not_recorded badge; the route never fills the hole itself.
 func TestTranscriptBatchesNameTheirStepAndInput(t *testing.T) {
 	db, err := sqlite.Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	// input, then: step 0's call and result, step 1's, step 2's reply,
+	// the steered message (delivered after step 2), step 3's reply —
+	// stamped 7 for the last batch, which no order walk would say.
+	stamped := []int{0, 0, 0, 1, 1, 2, 2, 7}
 	var recs []obsdb.Record
 	for i, body := range multiTurnBodies {
-		recs = append(recs, fxRecord("run_multi", "messages", "", int64(i), time.Now().UTC(), body))
+		r := fxRecord("run_multi", "messages", "", int64(i), time.Now().UTC(), body)
+		r.Attrs["weft.step.index"] = int64(stamped[i])
+		r.Attrs["weft.messages.input"] = i == 0
+		recs = append(recs, r)
+		bare := fxRecord("run_bare", "messages", "", int64(i), time.Now().UTC(), body)
+		delete(bare.Attrs, "weft.step.index")
+		delete(bare.Attrs, "weft.messages.input")
+		recs = append(recs, bare)
 	}
 	if err := db.Write(context.Background(), obsdb.Batch{Records: recs}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, body := get(t, Handler(DB(db)), "/studio/api/runs/run_multi/transcript")
-	var doc struct {
-		Batches []struct {
-			Index int64 `json:"index"`
-			Step  int   `json:"step"`
-			Input *bool `json:"input"`
-		} `json:"batches"`
+	type batch struct {
+		Index int64   `json:"index"`
+		Step  int     `json:"step"`
+		Input *bool   `json:"input"`
+		Badge *string `json:"badge"`
 	}
-	if err := json.Unmarshal([]byte(body), &doc); err != nil {
-		t.Fatal(err)
-	}
-	// input, then: step 0's call and result, step 1's, step 2's reply,
-	// the steered message (delivered in step 2), step 3's reply.
-	wantStep := []int{0, 0, 0, 1, 1, 2, 2, 3}
-	if len(doc.Batches) != len(wantStep) {
-		t.Fatalf("batches = %d, want %d", len(doc.Batches), len(wantStep))
-	}
-	for i, b := range doc.Batches {
-		if b.Input == nil {
-			t.Fatalf("batch %d carries no input field: %s", i, body)
+	read := func(run string) []batch {
+		t.Helper()
+		_, _, body := get(t, Handler(DB(db)), "/studio/api/runs/"+run+"/transcript")
+		var doc struct {
+			Batches []batch `json:"batches"`
 		}
-		if b.Index != int64(i) || b.Step != wantStep[i] || *b.Input != (i == 0) {
-			t.Errorf("batch %d = index %d step %d input %v, want index %d step %d input %v",
-				i, b.Index, b.Step, *b.Input, i, wantStep[i], i == 0)
+		if err := json.Unmarshal([]byte(body), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if len(doc.Batches) != len(stamped) {
+			t.Fatalf("%s: batches = %d, want %d", run, len(doc.Batches), len(stamped))
+		}
+		for i, b := range doc.Batches {
+			if b.Input == nil {
+				t.Fatalf("%s: batch %d carries no input field: %s", run, i, body)
+			}
+		}
+		return doc.Batches
+	}
+	for i, b := range read("run_multi") {
+		if b.Index != int64(i) || b.Step != stamped[i] || *b.Input != (i == 0) || b.Badge != nil {
+			t.Errorf("batch %d = index %d step %d input %v badge %v, want index %d step %d input %v and no badge",
+				i, b.Index, b.Step, *b.Input, b.Badge, i, stamped[i], i == 0)
+		}
+	}
+	for i, b := range read("run_bare") {
+		if b.Step != -1 || b.Badge == nil || *b.Badge != "not_recorded" || *b.Input {
+			t.Errorf("unstamped batch %d = step %d input %v badge %v, want step -1, input false, badge not_recorded",
+				i, b.Step, *b.Input, b.Badge)
 		}
 	}
 }

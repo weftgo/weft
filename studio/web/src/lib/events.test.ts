@@ -14,6 +14,7 @@ import {
   foldMore,
   linkView,
   newFold,
+  placeBatches,
   producedText,
   splitTranscript,
   truncation,
@@ -589,5 +590,239 @@ describe("fold on malformed and unknown events", () => {
     expect(run.steps[0].steer?.text).toBe("")
     expect(run.pending).toEqual([])
     expect(run.finished).toBe(true)
+  })
+})
+
+// ADR 0028 §8: each batch carries the step it joined, as the core
+// stamped it — the steered batch the step that just finished, a resumed
+// run's rebuilt tool message step 0. The client places batches by that
+// value, never by counting assistant messages; only a batch with no
+// stored step (-1, badge not_recorded) is placed by inference, and that
+// placement is marked derived.
+describe("transcript placement by the stored step", () => {
+  const msg = (role: Message["role"], text: string): Message => ({
+    role,
+    content: [{ type: "text", text }],
+  })
+  const call = (id: string, name: string): Message => ({
+    role: "assistant",
+    content: [{ type: "tool_call", id, name, args: { order_id: "42" } }],
+  })
+  const result = (id: string, name: string): Message => ({
+    role: "tool",
+    content: [
+      {
+        type: "tool_result",
+        call_id: id,
+        name,
+        content: "ok",
+        is_error: false,
+      },
+    ],
+  })
+  const twoSteps = (run: string, calls: [string, string][]): WireEvent[] => [
+    { type: "run_start", id: run, model: { provider: "p", name: "m" } },
+    ...calls.flatMap(([id, name], index): WireEvent[] => [
+      { type: "step_start", run_id: run, index },
+      ...(id
+        ? ([
+            {
+              type: "tool_start",
+              run_id: run,
+              seq: index + 1,
+              call_id: id,
+              name,
+              args: null,
+            },
+          ] as WireEvent[])
+        : []),
+      {
+        type: "step_finish",
+        run_id: run,
+        index,
+        reason: "stop",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    ]),
+  ]
+
+  // Run 1: step 0 looks the order up, a steer arrives after it, step 1
+  // asks for the refund, which parks.
+  const steered = [
+    { index: 0, step: 0, input: true, messages: [msg("user", "where is 42?")] },
+    {
+      index: 1,
+      step: 0,
+      input: false,
+      messages: [call("c_lookup", "lookup_order")],
+    },
+    {
+      index: 2,
+      step: 0,
+      input: false,
+      messages: [result("c_lookup", "lookup_order")],
+    },
+    {
+      index: 3,
+      step: 0,
+      input: false,
+      messages: [msg("user", "and refund it")],
+    },
+    {
+      index: 4,
+      step: 1,
+      input: false,
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "refunding" },
+            ...call("c_refund", "refund").content,
+          ],
+        } as Message,
+      ],
+    },
+  ]
+  // Run 2 resumes it: the approved call's result joins at step 0, then
+  // step 0 calls again and step 1 answers. Batch 3 (step 0's result) is
+  // lost in transit: the stored steps still place step 1's answer.
+  const resumed = [
+    {
+      index: 0,
+      step: 0,
+      input: true,
+      messages: [msg("user", "where is 42?"), call("c_refund", "refund")],
+    },
+    {
+      index: 1,
+      step: 0,
+      input: false,
+      messages: [result("c_refund", "refund")],
+    },
+    {
+      index: 2,
+      step: 0,
+      input: false,
+      messages: [call("c_again", "lookup_order")],
+    },
+    {
+      index: 4,
+      step: 1,
+      input: false,
+      messages: [msg("assistant", "Refunded order 42.")],
+    },
+  ]
+
+  it("places every batch under the step it joined, steer and resume included", () => {
+    expect(
+      placeBatches(steered).map((b) => [b.step, b.input, b.derived])
+    ).toEqual([
+      [0, true, false],
+      [0, false, false],
+      [0, false, false],
+      [0, false, false],
+      [1, false, false],
+    ])
+    const view = applyTranscript(
+      fold(
+        twoSteps("r1", [
+          ["c_lookup", "lookup_order"],
+          ["c_refund", "refund"],
+        ])
+      ),
+      steered
+    )
+    expect(view.steps[0].toolCalls[0].args).toEqual({ order_id: "42" })
+    expect(view.steps[1].text).toBe("refunding")
+    expect(view.steps[1].toolCalls[0].args).toEqual({ order_id: "42" })
+    expect(view.steps.some((s) => s.derived)).toBe(false)
+
+    const placed = placeBatches(resumed)
+    expect(placed.map((b) => [b.step, b.input, b.derived])).toEqual([
+      [0, true, false],
+      [0, false, false],
+      [0, false, false],
+      [1, false, false],
+    ])
+    const again = applyTranscript(
+      fold(
+        twoSteps("r2", [
+          ["c_again", "lookup_order"],
+          ["", ""],
+        ])
+      ),
+      resumed
+    )
+    expect(again.steps[0].text).toBe("")
+    expect(again.steps[0].toolCalls[0].args).toEqual({ order_id: "42" })
+    expect(again.steps[1].text).toBe("Refunded order 42.")
+    expect(again.steps.some((s) => s.derived)).toBe(false)
+  })
+
+  it("believes the stored step over the batches' order", () => {
+    // Step 0's assistant batch is missing: an order walk would put
+    // step 1's words on step 0.
+    const view = applyTranscript(
+      fold(
+        twoSteps("r3", [
+          ["", ""],
+          ["", ""],
+        ])
+      ),
+      [
+        { step: 0, input: true, messages: [msg("user", "hi")] },
+        { step: 1, input: false, messages: [msg("assistant", "step one")] },
+      ]
+    )
+    expect(view.steps[0].text).toBe("")
+    expect(view.steps[1].text).toBe("step one")
+  })
+
+  it("places a step -1 batch by inference and marks it derived", () => {
+    const old = [
+      {
+        step: -1,
+        badge: "not_recorded",
+        input: true,
+        messages: [msg("user", "hi")],
+      },
+      {
+        step: -1,
+        badge: "not_recorded",
+        input: false,
+        messages: [msg("assistant", "a0")],
+      },
+      {
+        step: -1,
+        badge: "not_recorded",
+        input: false,
+        messages: [msg("user", "steer")],
+      },
+      {
+        step: -1,
+        badge: "not_recorded",
+        input: false,
+        messages: [msg("assistant", "a1")],
+      },
+    ]
+    expect(placeBatches(old).map((b) => [b.step, b.input, b.derived])).toEqual([
+      [0, true, true],
+      [0, false, true],
+      [0, false, true],
+      [1, false, true],
+    ])
+    const view = applyTranscript(
+      fold(
+        twoSteps("r4", [
+          ["", ""],
+          ["", ""],
+        ])
+      ),
+      old
+    )
+    expect(view.steps.map((s) => [s.text, s.derived])).toEqual([
+      ["a0", true],
+      ["a1", true],
+    ])
   })
 })

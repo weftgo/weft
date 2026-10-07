@@ -223,50 +223,25 @@ type eventsPage struct {
 	Gaps []int64 `json:"gaps"`
 }
 
-// transcriptBatch is one messages record: the bodies at their index,
-// the step they belong to and whether the record is the run's input.
-//
-// obsdb's Transcript carries the bodies in index order and nothing
-// else, so input and step are derived here from the order the core
-// writes the records in (weft's recordMessages, ADR 0024 D1) — the
-// same reading weft/runtime makes of a source transcript:
-//
-//   - the first record is the run's input (the conversation it was fed
-//     and the turn's prompt): input true, step 0. It is context, never
-//     a step;
-//   - each assistant message after it opens a step — step N is the
-//     run's (N+1)th model call, the index its step_start and
-//     step_finish events carry — and the tool results and steered
-//     messages recorded until the next one belong to that step (a
-//     resumed run's rebuilt tool message, recorded before the first
-//     model call, is step 0's, as the core stamps it).
-//
-// Exact as long as no messages record is missing; a lost record shifts
-// index as well, which only obsdb can see (it holds weft.messages.index,
-// weft.step.index and weft.messages.input per record).
+// transcriptBatch is one messages record: the body at its index, the
+// step it joined and whether it is the run's input — all three as
+// obsdb stored them (ADR 0028 §8), never derived from the order of the
+// batches. Step is -1 when the record carried no weft.step.index (a
+// ClickHouse row written before migration 0004, a producer that never
+// stamped it); such a batch says so with Badge "not_recorded", and a
+// client that places it anyway infers the step and marks the result
+// derived (ADR 0028 §11's closed table).
 type transcriptBatch struct {
 	Index    int64           `json:"index"`
 	Step     int             `json:"step"`
 	Input    bool            `json:"input"`
+	Badge    string          `json:"badge,omitempty"`
 	Messages json.RawMessage `json:"messages"`
 }
 
-// batchOpensStep reports whether a messages body holds an assistant
-// message — the record that opens a step.
-func batchOpensStep(body json.RawMessage) bool {
-	var msgs []struct {
-		Role string `json:"role"`
-	}
-	if json.Unmarshal(body, &msgs) != nil {
-		return false
-	}
-	for _, m := range msgs {
-		if m.Role == string(core.RoleAssistant) {
-			return true
-		}
-	}
-	return false
-}
+// badgeNotRecorded is ADR 0028 §11's badge for a value the record does
+// not carry.
+const badgeNotRecorded = "not_recorded"
 
 type transcript struct {
 	Batches []transcriptBatch `json:"batches"`
@@ -676,20 +651,20 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 	if !s.scopeRunID(w, r, id) {
 		return
 	}
-	bodies, err := s.db.Transcript(r.Context(), id)
+	batches, err := s.db.TranscriptBatches(r.Context(), id)
 	if err != nil {
 		dbError(w, r, "transcript of run", id, err)
 		return
 	}
-	out := transcript{Batches: make([]transcriptBatch, 0, len(bodies))}
-	step := -1 // the step the walk is in; -1 before the run's first model call
-	for i, body := range bodies {
-		if i > 0 && batchOpensStep(body) {
-			step++
+	out := transcript{Batches: make([]transcriptBatch, 0, len(batches))}
+	for _, b := range batches {
+		tb := transcriptBatch{
+			Index: b.Index, Step: b.Step, Input: b.Input, Messages: rawOrNull(string(b.Messages)),
 		}
-		out.Batches = append(out.Batches, transcriptBatch{
-			Index: int64(i), Step: max(step, 0), Input: i == 0, Messages: rawOrNull(string(body)),
-		})
+		if b.Step < 0 {
+			tb.Step, tb.Badge = -1, badgeNotRecorded
+		}
+		out.Batches = append(out.Batches, tb)
 	}
 	writeJSON(w, r, http.StatusOK, out)
 }

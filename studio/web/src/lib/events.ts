@@ -55,6 +55,10 @@ export interface FoldedStep {
    * Steered event, ADR 0019): rendered between this step and the next.
    * At most one per step — the loop drains once per drain point. */
   steer?: { text: string; pos: number }
+  /** True when this step's words came from a transcript batch whose
+   * step was inferred, not stored (ADR 0028 §11's `derived` badge;
+   * applyTranscript). */
+  derived?: boolean
   /** Stream positions of the first and last event folded into this
    * step (inclusive) — the replay range a step card can jump to. */
   from: number
@@ -291,11 +295,17 @@ export function linkView(
 }
 
 /** A transcript batch as the fold reads it: its messages, and the
- * server's input flag when the API carries one. */
+ * stored facts the API carries beside them (api.go's transcriptBatch,
+ * ADR 0028 §8). */
 export interface TranscriptBatch {
   messages: Message[]
+  /** The step the batch joined (weft.step.index, as the core stamped
+   * it); -1 when the record carried none (badge "not_recorded"). */
+  step?: number
   /** True on the run's input record (weft.messages.input). */
   input?: boolean
+  /** "not_recorded" when the record carried no step. */
+  badge?: string
 }
 
 /** A batch's messages, whatever the body held: only objects count,
@@ -330,37 +340,79 @@ function messageText(m: { content: Part[] } | null | undefined, sep = ""): strin
     .join(sep)
 }
 
+/** A batch placed: the step it joined and whether it is the run's
+ * input. `derived` is ADR 0028 §11's badge — the record stored no step
+ * (a pre-0004 ClickHouse row, a Studio older than the field), so the
+ * reader inferred it; a stored placement never carries it. */
+export interface PlacedBatch {
+  step: number
+  input: boolean
+  derived: boolean
+  messages: Message[]
+}
+
+/**
+ * placeBatches reads each batch's step and input from the batch — the
+ * stored values (ADR 0028 §8); nothing is inferred from the order of
+ * the batches. Only a batch without a stored step falls back to
+ * inference, and that placement is marked `derived`: step -1 (the
+ * record carried none, badge not_recorded), or no input flag beside
+ * the step — a Studio older than the flag served a step it did not
+ * store (0 for every batch).
+ */
+export function placeBatches(batches: TranscriptBatch[]): PlacedBatch[] {
+  const list = Array.isArray(batches) ? batches : []
+  const derived = derivedPlacement(list)
+  return list.map((b, i) => {
+    const messages = messagesOf(b)
+    const step = (b as TranscriptBatch | null)?.step
+    const input = (b as TranscriptBatch | null)?.input
+    if (typeof step === "number" && step >= 0 && typeof input === "boolean") {
+      return { step, input, derived: false, messages }
+    }
+    return { ...derived[i], derived: true, messages }
+  })
+}
+
+/**
+ * derivedPlacement is the fallback for batches with no stored step —
+ * the ONLY place a step is inferred, and every result is badged
+ * `derived` by placeBatches. It is the pre-ADR-0028 reading: the first
+ * record is the input (the server's flag when present; else unless it
+ * is exactly one assistant message — a run with no input), and each
+ * later batch holding an assistant message opens the next step.
+ */
+function derivedPlacement(
+  list: TranscriptBatch[]
+): { step: number; input: boolean }[] {
+  let step = -1
+  return list.map((b, i) => {
+    const msgs = messagesOf(b)
+    const flag = (b as TranscriptBatch | null)?.input
+    const input =
+      typeof flag === "boolean"
+        ? flag
+        : i === 0 && !(msgs.length === 1 && msgs[0].role === "assistant")
+    if (!input && msgs.some((m) => m.role === "assistant")) step++
+    return { step: Math.max(step, 0), input }
+  })
+}
+
 /**
  * splitTranscript separates what a run was FED from what it PRODUCED.
- * The run's first messages record is its input (ADR 0024 D1) — and for
- * turn 2+ of a thread that is the whole conversation so far, earlier
- * assistant replies and tool results included. Everything after it is
- * the run's own: one assistant message per step, the tool messages,
- * steered user turns. Reading the flattened transcript as "this run's
- * messages" shows a previous turn's reply as this run's first step.
- *
- * The server marks the input record (`input: true` on batch 0,
- * api.go's transcriptBatch) and that flag is believed. Only a batch
- * without the flag (a Studio older than it) is told by its shape: a
- * record the loop wrote for a step is exactly one assistant message;
- * anything else in first place is the input.
+ * The run's input record (ADR 0024 D1) is everything it was fed — for
+ * turn 2+ of a thread the whole conversation so far, earlier assistant
+ * replies and tool results included; everything else is the run's own.
+ * The server's input flag says which is which (placeBatches).
  */
 export function splitTranscript(batches: TranscriptBatch[]): {
   input: Message[]
   produced: Message[]
 } {
-  const list = Array.isArray(batches) ? batches : []
   const input: Message[] = []
   const produced: Message[] = []
-  list.forEach((b, i) => {
-    const msgs = messagesOf(b)
-    const flag = (b as TranscriptBatch | null)?.input
-    const isInput =
-      typeof flag === "boolean"
-        ? flag
-        : i === 0 && !(msgs.length === 1 && msgs[0].role === "assistant")
-    ;(isInput ? input : produced).push(...msgs)
-  })
+  for (const b of placeBatches(batches))
+    (b.input ? input : produced).push(...b.messages)
   return { input, produced }
 }
 
@@ -395,15 +447,17 @@ export function producedText(batches: TranscriptBatch[]): string {
  * applyTranscript overlays the finished words onto a fold: the sinks
  * do not store deltas (S4.3/S4.7), so a run loaded from history has
  * no text_delta events — its text and tool arguments come from the
- * messages records instead. The run's own assistant messages map onto
- * steps in order (each step produces one; the input record's history
- * is not the run's — splitTranscript), and a message's tool-call parts
- * carry the arguments the model finally sent. By default it only
- * fills steps whose text is still empty (a running run keeps what the
- * deltas streamed). With `replace` — a run that is over — the
- * transcript's words win over streamed ones: deltas are live-only, so
- * text streamed across a dropped connection has a hole the transcript
- * does not, and a live tail must end where a reload starts.
+ * messages records instead. Each of the run's own assistant messages
+ * lands on the step its batch joined (placeBatches: the stored step;
+ * the input record's history is never the run's), and a message's
+ * tool-call parts carry the arguments the model finally sent. A step
+ * filled from a batch placed by inference is marked `derived`. By
+ * default it only fills steps whose text is still empty (a running run
+ * keeps what the deltas streamed). With `replace` — a run that is over
+ * — the transcript's words win over streamed ones: deltas are
+ * live-only, so text streamed across a dropped connection has a hole
+ * the transcript does not, and a live tail must end where a reload
+ * starts.
  */
 export function applyTranscript(
   view: FoldedRun,
@@ -411,32 +465,34 @@ export function applyTranscript(
   opts?: { replace?: boolean }
 ): FoldedRun {
   const replace = opts?.replace === true
-  const assistants = splitTranscript(batches).produced.filter(
-    (m) => m.role === "assistant"
-  )
-  assistants.forEach((msg, i) => {
-    const step = view.steps.at(i)
-    if (!step) return
-    const words = messageText(msg)
-    if (words && (replace || !step.text)) step.text = words
-    const reasoning = msg.content
-      .filter(
-        (p): p is Extract<Part, { type: "reasoning" }> =>
-          (p as Part | null)?.type === "reasoning" &&
-          typeof (p as { text?: unknown }).text === "string"
-      )
-      .map((p) => p.text)
-      .join("")
-    if (reasoning && (replace || !step.reasoning)) step.reasoning = reasoning
-    for (const part of msg.content) {
-      if ((part as Part | null)?.type !== "tool_call") continue
-      const tc = part as ToolCallPart
-      const call = step.toolCalls.find((c) => c.callId === tc.id)
-      // A content-stripped tool_start carries null args: the
-      // transcript's are the ones the model sent.
-      if (call && call.args == null && tc.args != null) call.args = tc.args
+  for (const b of placeBatches(batches)) {
+    if (b.input) continue
+    const step = view.steps.find((s) => s.index === b.step)
+    if (!step) continue
+    for (const msg of b.messages) {
+      if (msg.role !== "assistant") continue
+      if (b.derived) step.derived = true
+      const words = messageText(msg)
+      if (words && (replace || !step.text)) step.text = words
+      const reasoning = msg.content
+        .filter(
+          (p): p is Extract<Part, { type: "reasoning" }> =>
+            (p as Part | null)?.type === "reasoning" &&
+            typeof (p as { text?: unknown }).text === "string"
+        )
+        .map((p) => p.text)
+        .join("")
+      if (reasoning && (replace || !step.reasoning)) step.reasoning = reasoning
+      for (const part of msg.content) {
+        if ((part as Part | null)?.type !== "tool_call") continue
+        const tc = part as ToolCallPart
+        const call = step.toolCalls.find((c) => c.callId === tc.id)
+        // A content-stripped tool_start carries null args: the
+        // transcript's are the ones the model sent.
+        if (call && call.args == null && tc.args != null) call.args = tc.args
+      }
     }
-  })
+  }
   return view
 }
 

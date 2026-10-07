@@ -40,6 +40,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("PagingTies", pagingTies(open))
 	t.Run("SessionPaging", sessionPaging(open))
 	t.Run("TranscriptRebuilt", transcriptRebuilt(open))
+	t.Run("TranscriptSteps", transcriptSteps(open))
 	t.Run("NonFiniteAttrs", nonFiniteAttrs(open))
 	t.Run("ZeroTimes", zeroTimes(open))
 	t.Run("OutOfOrder", outOfOrder(open))
@@ -977,6 +978,64 @@ func sessionPaging(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 // as the authoritative one (obsdb.DedupTranscript): its bodies
 // concatenate to the transcript the run held — one tool message, not
 // the partial and the rebuilt side by side — one body per record still.
+// transcriptSteps: a messages record's weft.step.index is stored and
+// read back by TranscriptBatches (ADR 0028 §8) — the step it joined,
+// whatever its neighbours hold — with the input flag and the index; a
+// record without the attribute reads -1, never a guess. The steered
+// batch below joins step 0 though step 1's call precedes it in no
+// order a reader could walk; the resumed run's rebuilt tool message
+// joins step 0 before any assistant message.
+func transcriptSteps(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		msg := func(role, text string) string {
+			return `[{"role":"` + role + `","content":[{"type":"text","text":"` + text + `"}]}]`
+		}
+		step := func(n int) map[string]any { return map[string]any{"weft.step.index": int64(n)} }
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+			record("c1", "event", "run_start", 0, `{"type":"run_start","id":"c1"}`, nil),
+			record("c1", "messages", "", 0, msg("user", "q"),
+				map[string]any{"weft.messages.input": true, "weft.step.index": int64(0)}),
+			record("c1", "messages", "", 1, msg("tool", "rebuilt"), step(0)),
+			record("c1", "messages", "", 2, msg("assistant", "a0"), step(0)),
+			record("c1", "messages", "", 3, msg("user", "steer"), step(0)),
+			record("c1", "messages", "", 4, msg("assistant", "a1"), step(1)),
+			record("c1", "messages", "", 5, msg("assistant", "unstamped"), nil),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := db.TranscriptBatches(ctx(), "c1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantStep := []int{0, 0, 0, 0, 1, -1}
+		if len(got) != len(wantStep) {
+			t.Fatalf("batches = %d, want %d", len(got), len(wantStep))
+		}
+		for i, b := range got {
+			if b.Index != int64(i) || b.Step != wantStep[i] || b.Input != (i == 0) {
+				t.Errorf("batch %d = index %d step %d input %v, want index %d step %d input %v",
+					i, b.Index, b.Step, b.Input, i, wantStep[i], i == 0)
+			}
+		}
+		if string(got[4].Messages) != msg("assistant", "a1") {
+			t.Errorf("batch 4 body = %s", got[4].Messages)
+		}
+		tr, err := db.Transcript(ctx(), "c1")
+		if err != nil || len(tr) != len(got) {
+			t.Fatalf("Transcript = %d bodies, %v; want %d, the batches' bodies", len(tr), err, len(got))
+		}
+		for i := range tr {
+			if string(tr[i]) != string(got[i].Messages) {
+				t.Errorf("Transcript body %d = %s, batch body %s", i, tr[i], got[i].Messages)
+			}
+		}
+		if _, err := db.TranscriptBatches(ctx(), "nope"); !errors.Is(err, obsdb.ErrNotFound) {
+			t.Errorf("TranscriptBatches of an unknown run = %v, want ErrNotFound", err)
+		}
+	}
+}
+
 func transcriptRebuilt(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	const (
 		user      = `{"role":"user","content":[{"type":"text","text":"refund please"}]}`

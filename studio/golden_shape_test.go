@@ -154,3 +154,152 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		}
 	}
 }
+
+// TestTranscriptStepsFromARealRun: a run with a steered message and a
+// parked call, then the run that resumes it, both driven through the
+// real pipeline (otel → OTLP ingest → obsdb). Every transcript batch
+// carries the step the core stamped on its messages record (ADR 0028
+// §8) and the input flag of its record — never a step derived from the
+// batches' order: the steered batch joins the step that just finished,
+// and the resumed run's rebuilt tool message joins its step 0.
+func TestTranscriptStepsFromARealRun(t *testing.T) {
+	dir := t.TempDir()
+	srv := studio.New(studio.Open(filepath.Join(dir, "weft.db")))
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	t.Cleanup(func() { _ = srv.Close() })
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(ts.URL, ""), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	type orderIn struct {
+		OrderID string `json:"order_id"`
+	}
+	lookup := core.Tool("lookup_order", "Look up an order.", func(context.Context, orderIn) (string, error) {
+		return "order shipped", nil
+	})
+	refund := core.Tool("refund", "Refund an order.", func(context.Context, orderIn) (string, error) {
+		return "refunded", nil
+	}, core.RequireApproval())
+	agent := core.New(wefttest.Script(
+		// run 1: step 0 looks the order up; a steer arrives; step 1 asks
+		// for the refund, which parks.
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"42"}`, ID: "c_lookup"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"42"}`, ID: "c_refund"}),
+		// run 2 (the resume): step 0 looks again, step 1 answers.
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"42"}`, ID: "c_again"}),
+		wefttest.Say("Refunded order 42."),
+	), core.Name("orders"), core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()), lookup, refund)
+
+	first, err := agent.Generate(ctx, core.Prompt("where is order 42?"),
+		wefttest.NewSteers().At(0, core.User("and refund it")).Option())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Pending) != 1 || first.Pending[0].ID != "c_refund" {
+		t.Fatalf("first run pending = %+v, want the refund parked", first.Pending)
+	}
+	second, err := agent.Generate(ctx, core.Messages(first.Messages...), core.Approve("c_refund"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	type batch struct {
+		Index    int64             `json:"index"`
+		Step     int               `json:"step"`
+		Input    bool              `json:"input"`
+		Badge    *string           `json:"badge"`
+		Messages []json.RawMessage `json:"messages"`
+	}
+	read := func(path string, doc any) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+			resp, err := http.Get(ts.URL + path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				if err := json.Unmarshal(b, doc); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("GET %s = %d %s", path, resp.StatusCode, b)
+			}
+		}
+	}
+	roleOf := func(raw json.RawMessage) string {
+		var m struct {
+			Role string `json:"role"`
+		}
+		_ = json.Unmarshal(raw, &m)
+		return m.Role
+	}
+	type want struct {
+		step  int
+		input bool
+		roles string
+	}
+	check := func(run string, wants []want) []batch {
+		t.Helper()
+		var doc struct {
+			Batches []batch `json:"batches"`
+		}
+		read("/api/runs/"+run+"/transcript", &doc)
+		if len(doc.Batches) != len(wants) {
+			t.Fatalf("%s: %d batches, want %d: %+v", run, len(doc.Batches), len(wants), doc.Batches)
+		}
+		for i, b := range doc.Batches {
+			var roles []string
+			for _, m := range b.Messages {
+				roles = append(roles, roleOf(m))
+			}
+			got := want{b.Step, b.Input, strings.Join(roles, ",")}
+			if b.Index != int64(i) || got != wants[i] || b.Badge != nil {
+				t.Errorf("%s batch %d = index %d %+v badge %v, want %+v and no badge", run, i, b.Index, got, b.Badge, wants[i])
+			}
+		}
+		return doc.Batches
+	}
+	check(first.ID, []want{
+		{0, true, "user"},       // the input
+		{0, false, "assistant"}, // step 0: the lookup call
+		{0, false, "tool"},      // its result
+		{0, false, "user"},      // the steer, delivered after step 0
+		{1, false, "assistant"}, // step 1: the refund call, parked
+	})
+	check(second.ID, []want{
+		{0, true, "user,assistant,tool,user,assistant"}, // run 1's transcript, fed back
+		{0, false, "tool"},      // the approved refund's result, joined at step 0
+		{0, false, "assistant"}, // step 0: the second lookup
+		{0, false, "tool"},
+		{1, false, "assistant"}, // step 1: the answer
+	})
+
+	// The steered batch's step is the one the Steered event names.
+	var events struct {
+		Events []struct {
+			Event struct {
+				Type string `json:"type"`
+				Step int    `json:"step"`
+			} `json:"event"`
+		} `json:"events"`
+	}
+	read("/api/runs/"+first.ID+"/events", &events)
+	steered := -1
+	for _, e := range events.Events {
+		if e.Event.Type == "steered" {
+			steered = e.Event.Step
+		}
+	}
+	if steered != 0 {
+		t.Errorf("steered event step = %d, want 0 (the step its batch is stored under)", steered)
+	}
+}

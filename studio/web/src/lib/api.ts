@@ -122,14 +122,20 @@ export interface EventsPage {
 export interface Transcript {
   batches: {
     index: number
-    /** The step the batch belongs to (step N = the run's (N+1)th model
-     * call, step_start.index); the input record and a resumed run's
-     * rebuilt tool message read 0 (api.go's transcriptBatch). */
+    /** The step the batch joined, as the core stamped it on the
+     * messages record (weft.step.index, ADR 0028 §8): step N = the
+     * run's (N+1)th model call, step_start.index; the input record and
+     * a resumed run's rebuilt tool message read 0, a steered batch the
+     * step that just finished. -1 when the record carried none (badge
+     * "not_recorded"); lib/events' placeBatches then infers it and
+     * marks the placement derived. */
     step: number
-    /** True on the run's input record — batch 0, everything the run
-     * was fed; never a step. Absent only on a Studio older than the
-     * field (lib/events' splitTranscript then tells it by shape). */
+    /** True on the run's input record (weft.messages.input) —
+     * everything the run was fed; never a step. Absent only on a
+     * Studio older than the field. */
     input?: boolean
+    /** "not_recorded" when the record carried no step (step -1). */
+    badge?: "not_recorded"
     messages: Message[]
   }[]
 }
@@ -138,7 +144,13 @@ export interface Transcript {
  * record body embedded verbatim — any JSON value (api.go's rawOrNull
  * turns a non-JSON body into a JSON string). */
 export interface RawTranscript {
-  batches: { index: number; step: number; input?: boolean; messages: unknown }[]
+  batches: {
+    index: number
+    step: number
+    input?: boolean
+    badge?: "not_recorded"
+    messages: unknown
+  }[]
 }
 
 export interface SpanEvent {

@@ -31,6 +31,12 @@ type DB interface {
 	// messages record, read through DedupTranscript — so they
 	// concatenate to the transcript the run held.
 	Transcript(ctx context.Context, runID string) ([]json.RawMessage, error)
+	// TranscriptBatches is Transcript with what each messages record
+	// stored beside its body: its index, the step it joined
+	// (weft.step.index, -1 when the record carried none) and whether
+	// it is the run's input (weft.messages.input). The bodies are
+	// Transcript's, through DedupTranscript, one per record.
+	TranscriptBatches(ctx context.Context, runID string) ([]TranscriptBatch, error)
 	RunSpans(ctx context.Context, runID string) ([]Span, error)
 	Trace(ctx context.Context, traceID string) ([]Span, error) // empty, not an error, for an unknown trace
 
@@ -46,6 +52,46 @@ type DB interface {
 	Experiment(ctx context.Context, id string) (Experiment, error)
 
 	Close() error
+}
+
+// TranscriptBatch is one messages record as stored (ADR 0028 §8):
+// readers place a batch by its Step, never by its neighbours. Step is
+// -1 when the record carried no weft.step.index — a ClickHouse row
+// written before migration 0004, or a producer that never stamped it;
+// a reader that places such a batch anyway infers the step and says
+// so (the derived badge, ADR 0028 §11). Input is the record's
+// weft.messages.input; a backend that keeps no attribute column
+// (ClickHouse) reads it as Index 0, which is the input record whenever
+// the run was fed any messages (the core writes the input first, and
+// writes none for an empty input).
+type TranscriptBatch struct {
+	Index    int64
+	Step     int
+	Input    bool
+	Messages json.RawMessage
+}
+
+// TranscriptBodies returns the batches' bodies in order — Transcript's
+// answer, for a backend that reads both through one query.
+func TranscriptBodies(batches []TranscriptBatch) []json.RawMessage {
+	if batches == nil {
+		return nil
+	}
+	out := make([]json.RawMessage, len(batches))
+	for i, b := range batches {
+		out[i] = b.Messages
+	}
+	return out
+}
+
+// DedupBatches runs DedupTranscript over the batches' bodies; the
+// number of batches and their stored fields never change.
+func DedupBatches(batches []TranscriptBatch) []TranscriptBatch {
+	bodies := DedupTranscript(TranscriptBodies(batches))
+	for i := range batches {
+		batches[i].Messages = bodies[i]
+	}
+	return batches
 }
 
 // RunQuery selects runs for Runs. The zero value lists top-level runs,

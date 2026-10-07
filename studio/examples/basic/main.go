@@ -171,7 +171,7 @@ func demoRun(run, agent string, start time.Time, took time.Duration, status int,
 		demoRecord(run, "event", "step_start", 1, start.Add(300*time.Millisecond), meta,
 			`{"type":"step_start","run_id":"`+run+`","index":0}`),
 		demoRecord(run, "event", "step_finish", 4, start.Add(took-500*time.Millisecond), meta,
-			`{"type":"step_finish","run_id":"`+run+`","index":0,"reason":"end_turn","usage":`+usage+`}`),
+			`{"type":"step_finish","run_id":"`+run+`","index":0,"reason":"stop","usage":`+usage+`}`),
 		demoRecord(run, "event", "run_finish", 5, start.Add(took), meta,
 			`{"type":"run_finish","run_id":"`+run+`","usage":`+usage+`,"steps":1}`),
 		demoRecord(run, "messages", "", 0, start.Add(100*time.Millisecond), meta,
@@ -191,7 +191,7 @@ func demoRun(run, agent string, start time.Time, took time.Duration, status int,
 		"cwd":                        "/tmp/demo",
 	}
 	span := obsdb.Span{
-		Name: "invoke_agent", Kind: 1,
+		Name: "invoke_agent " + agent, Kind: 1,
 		Start: start, End: start.Add(took), StatusCode: status, StatusMessage: statusMsg,
 		Service: "studio-demo", Attrs: spanAttrs, Resource: map[string]any{"service.name": "studio-demo"},
 	}

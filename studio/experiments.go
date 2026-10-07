@@ -1,9 +1,9 @@
 package studio
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
@@ -17,7 +17,11 @@ import (
 // cells' commands); GET lists the history and reads one with its runs.
 //
 // These are Studio-only surfaces by nature (§2): the panel reaches
-// them through "open in Studio" with the context carried over.
+// them through "open in Studio" with the context carried over. Nothing
+// here is public-id-shaped — the history lists every definition
+// (prompts and input texts included) and the detail every run of the
+// experiment, whatever its public id — so a panel token is refused on
+// all three routes (S4.6), the reads like the write.
 
 // experimentBody is the POST body and the wire shape of one
 // experiment: the §10.4 document, dates read-only.
@@ -41,6 +45,10 @@ type experimentView struct {
 // serveExperiments is GET /api/experiments (the history) and POST
 // /api/experiments (create or update a definition by id).
 func (s *Server) serveExperiments(w http.ResponseWriter, r *http.Request) {
+	if idFrom(r).panel != nil {
+		forbidden(w, r)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		list, err := s.db.Experiments(r.Context())
@@ -57,8 +65,7 @@ func (s *Server) serveExperiments(w http.ResponseWriter, r *http.Request) {
 		}{out})
 	case http.MethodPost:
 		var body experimentBody
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			badRequest(w, r, "experiment body: "+err.Error())
+		if !decodeBody(w, r, "experiment body", &body) {
 			return
 		}
 		if body.ID == "" {
@@ -67,12 +74,6 @@ func (s *Server) serveExperiments(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(body.Variants) == 0 || len(body.Inputs) == 0 {
 			badRequest(w, r, "an experiment defines at least one variant and one input")
-			return
-		}
-		// A panel token does not write experiment definitions (the
-		// matrix is Studio's surface; the panel hands off).
-		if idFrom(r).panel != nil {
-			forbidden(w, r)
 			return
 		}
 		if err := s.db.SaveExperiment(r.Context(), obsdb.Experiment{
@@ -98,9 +99,20 @@ func (s *Server) serveExperiments(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// experimentRunPages caps the detail's walk of an experiment's runs:
+// 20 pages of 500.
+const experimentRunPages = 20
+
 // serveExperiment is GET /api/experiments/{id}: the definition with
 // the runs grouped under it, newest last (matrix order reads better).
+// The runs are the experiment's own — the top-level ones: a variant's
+// subagent children inherit weft.experiment.id with the rest of the
+// metadata, and they are reached through their parent like any child.
 func (s *Server) serveExperiment(w http.ResponseWriter, r *http.Request) {
+	if idFrom(r).panel != nil {
+		forbidden(w, r)
+		return
+	}
 	id := r.PathValue("id")
 	e, err := s.db.Experiment(r.Context(), id)
 	if err != nil {
@@ -111,15 +123,24 @@ func (s *Server) serveExperiment(w http.ResponseWriter, r *http.Request) {
 		dbError(w, r, "experiment", id, err)
 		return
 	}
-	page, err := s.db.Runs(r.Context(), obsdb.RunQuery{ExperimentID: id, ParentRunID: "*"})
-	if err != nil {
-		dbError(w, r, "experiment runs", id, err)
-		return
+	// Every run, not the default page's newest 50: a 3×20 matrix is 60.
+	query := obsdb.RunQuery{ExperimentID: id, Limit: 500}
+	runs := []runRow{}
+	for pages := 0; pages < experimentRunPages; pages++ {
+		page, err := s.db.Runs(r.Context(), query)
+		if err != nil {
+			dbError(w, r, "experiment runs", id, err)
+			return
+		}
+		for _, rec := range page.Runs {
+			runs = append(runs, row(rec))
+		}
+		if page.NextBefore == nil || len(page.Runs) == 0 {
+			break
+		}
+		query.Before, query.BeforeID = *page.NextBefore, page.NextBeforeID
 	}
-	runs := make([]runRow, 0, len(page.Runs))
-	for _, rec := range page.Runs {
-		runs = append(runs, row(rec))
-	}
+	slices.Reverse(runs) // the database lists newest first
 	writeJSON(w, r, http.StatusOK, experimentView{
 		experimentBody: experimentBody{ID: e.ID, Name: e.Name, Agent: e.Agent, Variants: e.Variants, Inputs: e.Inputs},
 		Created:        e.Created,

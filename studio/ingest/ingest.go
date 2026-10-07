@@ -18,6 +18,7 @@ package ingest
 import (
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -227,26 +228,14 @@ func writeIngestError(w http.ResponseWriter, r *http.Request, status int, code, 
 }
 
 // quoteJSON renders s as a JSON string. Codes and messages are plain
-// text; this keeps the error path free of an encoder allocation.
+// text, but a message may echo request bytes (a header value, a
+// decoder's complaint), so the encoder does the quoting: it escapes
+// every control character and replaces invalid UTF-8 — the body is
+// JSON whatever the client sent.
 func quoteJSON(s string) string {
-	var b []byte
-	for _, c := range []byte(s) {
-		switch c {
-		case '"', '\\':
-			b = append(b, '\\', c)
-		case '\n':
-			b = append(b, '\\', 'n')
-		case '\r':
-			b = append(b, '\\', 'r')
-		case '\t':
-			b = append(b, '\\', 't')
-		default:
-			if c < 0x20 {
-				b = append(b, []byte(fmt.Sprintf(`\u%04x`, c))...)
-			} else {
-				b = append(b, c)
-			}
-		}
+	b, err := json.Marshal(s)
+	if err != nil {
+		return `""` // a string always marshals
 	}
-	return `"` + string(b) + `"`
+	return string(b)
 }

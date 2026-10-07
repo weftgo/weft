@@ -123,12 +123,20 @@ func nextEvent(t *testing.T, r *bufio.Reader) (id, event string, data []byte) {
 	return id, event, data
 }
 
-// nextRun reads the next non-ping frame (the stream opens with one).
+// idle reports a frame that carries no command: a ping, or the empty
+// breakpoint set every stream open is told (a runtime with no stored
+// set — the handshake's own tests read these frames unfiltered).
+func idle(event string, data []byte) bool {
+	return event == "ping" || (event == "breakpoints" && string(data) == `{"tools":[]}`)
+}
+
+// nextRun reads the next frame that is not idle (the stream opens with
+// a ping and the breakpoint set).
 func nextRun(t *testing.T, r *bufio.Reader) (id string, data []byte) {
 	t.Helper()
 	for {
 		id, event, data := nextEvent(t, r)
-		if event == "ping" {
+		if idle(event, data) {
 			continue
 		}
 		return id, data
@@ -156,7 +164,7 @@ func nextRunBounded(t *testing.T, r *bufio.Reader, wait time.Duration) (id strin
 				errs <- err
 				return
 			}
-			if event == "ping" {
+			if idle(event, data) {
 				continue
 			}
 			frames <- frame{id: id, data: data}
@@ -513,7 +521,7 @@ func TestCancelFrame(t *testing.T) {
 	rs.Cancel("rt_cancel", "cmd_x")
 	for {
 		_, event, data := nextEvent(t, r)
-		if event == "ping" {
+		if idle(event, data) {
 			continue
 		}
 		if event != "cancel" || !strings.Contains(string(data), `"command_id":"cmd_x"`) {

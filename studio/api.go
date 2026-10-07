@@ -50,6 +50,30 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, msg st
 	}{code, msg}})
 }
 
+// maxBody bounds a JSON request body on the API (the playground,
+// debugger, fixture, experiment and panel-token routes): 4 MiB — a
+// run command carries an input and transcript edits, nothing larger.
+// Above it the route answers 413. Ingest has its own limit (S4.4).
+const maxBody = 4 << 20
+
+// decodeBody reads one JSON body into v under maxBody, answering the
+// client itself on failure: 413 for a body over the limit, 400 for
+// anything that does not decode. what names the body in the message.
+func decodeBody(w http.ResponseWriter, r *http.Request, what string, v any) bool {
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(v)
+	if err == nil {
+		return true
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, r, http.StatusRequestEntityTooLarge, "bad_request",
+			what+": larger than the 4 MiB limit")
+		return false
+	}
+	badRequest(w, r, what+": "+err.Error())
+	return false
+}
+
 // notFound and badRequest keep call sites to one line each.
 func notFound(w http.ResponseWriter, r *http.Request, msg string) {
 	writeError(w, r, http.StatusNotFound, "not_found", msg)
@@ -61,11 +85,16 @@ func badRequest(w http.ResponseWriter, r *http.Request, msg string) {
 
 // dbError maps an obsdb error onto the API's error codes: unknown ids
 // are 404, everything else is a 500 that names the failure (loud over
-// silent, ADR 0010 §2.5's rule, carried over).
+// silent, ADR 0010 §2.5's rule, carried over). A panel token lives in
+// a page, so its holder gets the code and the operation, never the
+// database's own error text (paths, SQL, hosts).
 func dbError(w http.ResponseWriter, r *http.Request, noun, id string, err error) {
 	switch {
 	case errors.Is(err, obsdb.ErrNotFound):
 		notFound(w, r, "no "+noun+" "+id)
+	case idFrom(r).panel != nil:
+		writeError(w, r, http.StatusInternalServerError, "internal",
+			"read "+noun+" "+id+" failed")
 	default:
 		writeError(w, r, http.StatusInternalServerError, "internal",
 			"read "+noun+" "+id+": "+err.Error())
@@ -152,6 +181,11 @@ type runsPage struct {
 	Total      int        `json:"total"`
 	Runs       []runRow   `json:"runs"`
 	NextBefore *time.Time `json:"next_before"`
+	// NextBeforeID is the cursor's second half: with next_before, the
+	// pair (started, id) resumes exactly inside a group of runs sharing
+	// one started — a page rides a tie along only up to obsdb.MaxTies.
+	// Null on the last page, like next_before.
+	NextBeforeID *string `json:"next_before_id"`
 }
 
 // runDoc is GET /api/runs/{id}: the row and the subagent children
@@ -189,14 +223,49 @@ type eventsPage struct {
 	Gaps []int64 `json:"gaps"`
 }
 
-// transcriptBatch is one messages record: the bodies at their index.
-// obsdb's Transcript carries the bodies in order but not the step
-// they belong to (the column exists; the read does not expose it) —
-// step reads 0 until a later obsdb widens it.
+// transcriptBatch is one messages record: the bodies at their index,
+// the step they belong to and whether the record is the run's input.
+//
+// obsdb's Transcript carries the bodies in index order and nothing
+// else, so input and step are derived here from the order the core
+// writes the records in (weft's recordMessages, ADR 0024 D1) — the
+// same reading weft/runtime makes of a source transcript:
+//
+//   - the first record is the run's input (the conversation it was fed
+//     and the turn's prompt): input true, step 0. It is context, never
+//     a step;
+//   - each assistant message after it opens a step — step N is the
+//     run's (N+1)th model call, the index its step_start and
+//     step_finish events carry — and the tool results and steered
+//     messages recorded until the next one belong to that step (a
+//     resumed run's rebuilt tool message, recorded before the first
+//     model call, is step 0's, as the core stamps it).
+//
+// Exact as long as no messages record is missing; a lost record shifts
+// index as well, which only obsdb can see (it holds weft.messages.index,
+// weft.step.index and weft.messages.input per record).
 type transcriptBatch struct {
 	Index    int64           `json:"index"`
 	Step     int             `json:"step"`
+	Input    bool            `json:"input"`
 	Messages json.RawMessage `json:"messages"`
+}
+
+// batchOpensStep reports whether a messages body holds an assistant
+// message — the record that opens a step.
+func batchOpensStep(body json.RawMessage) bool {
+	var msgs []struct {
+		Role string `json:"role"`
+	}
+	if json.Unmarshal(body, &msgs) != nil {
+		return false
+	}
+	for _, m := range msgs {
+		if m.Role == string(weft.RoleAssistant) {
+			return true
+		}
+	}
+	return false
 }
 
 type transcript struct {
@@ -305,6 +374,8 @@ type sessionsPage struct {
 	Total      int          `json:"total"`
 	Sessions   []sessionRow `json:"sessions"`
 	NextBefore *time.Time   `json:"next_before"`
+	// NextBeforeID pairs with next_before as in runsPage: (last_seen, id).
+	NextBeforeID *string `json:"next_before_id"`
 }
 
 // sessionDoc is GET /api/sessions/{id}: the row and its top-level
@@ -369,8 +440,9 @@ func (s *Server) debugScope() string {
 // serveRuns answers api/runs (S4.2): agent, status, session,
 // public_id, playground, parent ("" top-level only, "*" all, or a run
 // id for its children), tag.<k>=<v> metadata matches, before (the
-// RFC 3339 paging cursor on started) and limit. next_before is the
-// last row's started when the page was full, else null.
+// RFC 3339 paging cursor on started) with before_id (the cursor's run
+// id: exact inside a tie) and limit. next_before / next_before_id are
+// the next page's before / before_id, null on the last page.
 func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := obsdb.RunQuery{
@@ -396,6 +468,7 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		query.Before = t
+		query.BeforeID = q.Get("before_id")
 	}
 	if !scopeRunsQuery(w, r, &query, q.Get("public_id")) {
 		return
@@ -415,13 +488,18 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 	for _, rec := range page.Runs {
 		out.Runs = append(out.Runs, row(rec))
 	}
-	// The page was full when it hit the database's effective limit, so
-	// a younger run may exist: hand the client the cursor.
-	// obsdb.LimitOf is the clamp the backend applies (0 means 50,
-	// above 500 clamps to 500) — golden-pinned together.
-	if eff := obsdb.LimitOf(query.Limit); len(page.Runs) == eff && len(page.Runs) > 0 {
-		next := page.Runs[len(page.Runs)-1].Started
+	// The cursor is the database's own: it knows whether the page was
+	// cut at its limit. Counting rows here cannot — a page may exceed
+	// the limit by the runs tied on the cursor time (they ride along so
+	// the time cursor does not skip them), and a count that expects
+	// exactly limit rows would read such a page as the last one.
+	if page.NextBefore != nil {
+		next := *page.NextBefore
 		out.NextBefore = &next
+		if page.NextBeforeID != "" {
+			id := page.NextBeforeID
+			out.NextBeforeID = &id
+		}
 	}
 	writeJSON(w, r, http.StatusOK, out)
 }
@@ -604,9 +682,13 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 		return
 	}
 	out := transcript{Batches: make([]transcriptBatch, 0, len(bodies))}
+	step := -1 // the step the walk is in; -1 before the run's first model call
 	for i, body := range bodies {
+		if i > 0 && batchOpensStep(body) {
+			step++
+		}
 		out.Batches = append(out.Batches, transcriptBatch{
-			Index: int64(i), Step: 0, Messages: rawOrNull(string(body)),
+			Index: int64(i), Step: max(step, 0), Input: i == 0, Messages: rawOrNull(string(body)),
 		})
 	}
 	writeJSON(w, r, http.StatusOK, out)
@@ -655,7 +737,8 @@ func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveSessions answers api/sessions (S4.2): public_id and agent
-// filters, before (RFC 3339, on last-seen) and limit.
+// filters, before (RFC 3339, on last-seen) with before_id (the
+// cursor's session id) and limit.
 func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := obsdb.SessionQuery{Agent: q.Get("agent"), PublicID: q.Get("public_id")}
@@ -673,6 +756,7 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		query.Before = t
+		query.BeforeID = q.Get("before_id")
 	}
 	if n, ok := limitParam(w, r, q); !ok {
 		return
@@ -688,9 +772,13 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	for _, sr := range page.Sessions {
 		out.Sessions = append(out.Sessions, sessRow(sr))
 	}
-	if eff := obsdb.LimitOf(query.Limit); len(page.Sessions) == eff && len(page.Sessions) > 0 {
-		next := page.Sessions[len(page.Sessions)-1].LastSeen
+	if page.NextBefore != nil { // the database's own cursor, as in serveRuns
+		next := *page.NextBefore
 		out.NextBefore = &next
+		if page.NextBeforeID != "" {
+			id := page.NextBeforeID
+			out.NextBeforeID = &id
+		}
 	}
 	writeJSON(w, r, http.StatusOK, out)
 }
@@ -743,6 +831,15 @@ func (s *Server) servePublic(w http.ResponseWriter, r *http.Request) {
 // Manifest(...), or 404 when none was given (the UI hides the Agents
 // nav).
 func (s *Server) serveManifest(w http.ResponseWriter, r *http.Request) {
+	// The manifest carries every agent's system prompt, which a
+	// read-scoped panel token's page does not get (serveRuntimes strips
+	// the same field for it): only an identity that may start
+	// experiments reads it. The panel itself never asks for it.
+	if p := idFrom(r).panel; p != nil && p.Scope != scopePlayground {
+		writeError(w, r, http.StatusForbidden, "forbidden",
+			"the manifest carries the agents' system prompts: a read-scoped panel token does not read it")
+		return
+	}
 	if len(s.manifest) == 0 {
 		notFound(w, r, "no manifest configured")
 		return

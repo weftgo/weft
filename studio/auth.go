@@ -147,7 +147,7 @@ func (s *Server) auth(next http.Handler) http.Handler {
 				"the API requires a token: Authorization: Bearer <token>")
 			return
 		}
-		if tok == s.token {
+		if tokenEqual(tok, s.token) {
 			identify(identity{server: true})
 			return
 		}
@@ -158,6 +158,13 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		}
 		identify(identity{panel: &claims})
 	})
+}
+
+// tokenEqual compares a presented token with the configured one in
+// constant time (the length aside): the comparison must not tell a
+// remote caller how much of its guess was right.
+func tokenEqual(got, want string) bool {
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 // ── Panel-token scoping (S4.6) ─────────────────────────────────────
@@ -189,9 +196,24 @@ func scopeRunsQuery(w http.ResponseWriter, r *http.Request, query *obsdb.RunQuer
 	return true
 }
 
+// mayAct refuses a read-scoped panel token on a write verb (starting a
+// run, deciding a parked call, steering): S4.6 — a panel token is
+// read-only unless it was minted with "playground": true. The server
+// token and setup A's open API pass.
+func mayAct(w http.ResponseWriter, r *http.Request) bool {
+	if p := idFrom(r).panel; p != nil && p.Scope != scopePlayground {
+		writeError(w, r, http.StatusForbidden, "forbidden",
+			"this token is read-only: mint it with \"playground\": true to act")
+		return false
+	}
+	return true
+}
+
 // scopeRunID checks a run id lands inside the token's public id. An
 // unknown id passes here so the read that follows answers 404 —
-// scoping must not reveal whether another public id's run exists.
+// scoping must not reveal whether another public id's run exists. Any
+// other read failure is the request's 500: a scope that could not be
+// checked is not a scope that passed.
 func (s *Server) scopeRunID(w http.ResponseWriter, r *http.Request, runID string) bool {
 	id := idFrom(r)
 	if id.panel == nil {
@@ -199,7 +221,11 @@ func (s *Server) scopeRunID(w http.ResponseWriter, r *http.Request, runID string
 	}
 	det, err := s.db.Run(r.Context(), runID)
 	if err != nil {
-		return true
+		if errors.Is(err, obsdb.ErrNotFound) {
+			return true
+		}
+		dbError(w, r, "run", runID, err)
+		return false
 	}
 	if det.PublicID != id.panel.PublicID {
 		forbidden(w, r)
@@ -217,7 +243,11 @@ func (s *Server) scopeSessionID(w http.ResponseWriter, r *http.Request, sessionI
 	}
 	det, err := s.db.Session(r.Context(), sessionID)
 	if err != nil {
-		return true
+		if errors.Is(err, obsdb.ErrNotFound) {
+			return true
+		}
+		dbError(w, r, "session", sessionID, err)
+		return false
 	}
 	if det.PublicID != id.panel.PublicID {
 		forbidden(w, r)
@@ -245,7 +275,10 @@ func scopeSpans(w http.ResponseWriter, r *http.Request, spans []spanDTO) bool {
 // scopeLive checks the live stream's selector: a public_id selector
 // must be the token's; run and session selectors resolve through the
 // database first; an agent selector cannot be scoped, so a panel
-// token gets a 403 rather than a leak.
+// token gets a 403 rather than a leak. A run or session nothing has
+// stored yet passes — there is no row to read a public id from — which
+// is why serveLive also checks every frame against the token's public
+// id before forwarding it.
 func (s *Server) scopeLive(w http.ResponseWriter, r *http.Request, sel obsdb.Selector) bool {
 	id := idFrom(r)
 	if id.panel == nil {
@@ -259,25 +292,9 @@ func (s *Server) scopeLive(w http.ResponseWriter, r *http.Request, sel obsdb.Sel
 		}
 		return true
 	case sel.RunID != "":
-		det, err := s.db.Run(r.Context(), sel.RunID)
-		if err != nil {
-			return true // the data read that follows answers
-		}
-		if det.PublicID != id.panel.PublicID {
-			forbidden(w, r)
-			return false
-		}
-		return true
+		return s.scopeRunID(w, r, sel.RunID)
 	case sel.SessionID != "":
-		det, err := s.db.Session(r.Context(), sel.SessionID)
-		if err != nil {
-			return true
-		}
-		if det.PublicID != id.panel.PublicID {
-			forbidden(w, r)
-			return false
-		}
-		return true
+		return s.scopeSessionID(w, r, sel.SessionID)
 	default: // agent: not a public-id-shaped scope
 		forbidden(w, r)
 		return false
@@ -316,8 +333,7 @@ func (s *Server) servePanelTokens(w http.ResponseWriter, r *http.Request) {
 		TTL        string `json:"ttl"`
 		Playground bool   `json:"playground"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
-		badRequest(w, r, "body must be JSON: "+err.Error())
+	if !decodeBody(w, r, "body must be JSON", &req) {
 		return
 	}
 	if req.PublicID == "" {
@@ -361,9 +377,14 @@ func (s *Server) servePanelTokens(w http.ResponseWriter, r *http.Request) {
 func (s *Server) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
+		if s.token != "" || len(s.origins) > 0 {
+			// The answer depends on the Origin whenever CORS is in play
+			// — the refusals too: a shared cache must not hand an answer
+			// made for a refused origin to an allowed one.
+			w.Header().Add("Vary", "Origin")
+		}
 		if origin != "" && originAllowed(s.origins, s.token != "", origin) {
 			h := w.Header()
-			h.Add("Vary", "Origin")
 			h.Set("Access-Control-Allow-Origin", origin)
 			// PUT carries the breakpoints control (the panel's
 			// panelPut); GET/POST/OPTIONS cover the rest.

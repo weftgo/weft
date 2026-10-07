@@ -135,6 +135,19 @@ func TestNewServerClickhouse(t *testing.T) {
 	if code, body := get("/", ""); code != http.StatusOK || !strings.Contains(body, `<base href="/">`) {
 		t.Errorf("shell: %d %.80s", code, body)
 	}
+
+	// The binary opened this handle, so the binary closes it: studio's
+	// own Close leaves a DB(...) handle to its owner, and the shutdown
+	// path used to leave the ClickHouse connections open.
+	if code, body := get("/api/runs", "tok"); code != http.StatusOK {
+		t.Fatalf("runs before Close: %d %s", code, body)
+	}
+	if err := srv.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if code, body := get("/api/runs", "tok"); code != http.StatusInternalServerError {
+		t.Errorf("runs after Close: %d %s, want 500 (the handle is closed)", code, body)
+	}
 }
 
 func assertSetupB(t *testing.T, h http.Handler, token, dbPath string) {

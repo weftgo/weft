@@ -246,27 +246,53 @@ func (s *Server) Close() error {
 // as a bearer, or — with none configured — loopback peers only
 // (setup B's dev mode; a Studio bound wide without a token refuses
 // remote exporters).
+//
+// "Loopback" is the socket's peer, and two kinds of remote caller
+// arrive from it too, so the open rule refuses both:
+//
+//   - a request a reverse proxy forwarded (it says so: Forwarded,
+//     X-Forwarded-For, X-Real-IP) — behind a proxy on the same host
+//     every client is a loopback peer, and the open rule would hand
+//     ingest to all of them; such a deployment sets IngestToken;
+//   - a browser page on an origin nobody allowed (a POST carries its
+//     Origin) — any site can aim a form or a DNS-rebound fetch at
+//     127.0.0.1. Localhost origins and AllowOrigins pass, the same
+//     rule CORS applies.
 func (s *Server) ingestAuthorized(r *http.Request) bool {
 	if s.ingestToken != "" {
-		return r.Header.Get("Authorization") == "Bearer "+s.ingestToken
+		tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		return ok && tokenEqual(tok, s.ingestToken)
 	}
-	return remoteIsLoopback(r)
+	if !remoteIsLoopback(r) {
+		return false
+	}
+	for _, h := range []string{"Forwarded", "X-Forwarded-For", "X-Real-Ip"} {
+		if r.Header.Get(h) != "" {
+			return false
+		}
+	}
+	if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(s.origins, true, origin) {
+		return false
+	}
+	return true
 }
 
 // remoteIsLoopback reports whether the request's peer is on this
 // machine, which is the best a library can know of its bind: a
-// loopback bind only ever sees loopback peers.
+// loopback bind only ever sees loopback peers. All of 127.0.0.0/8,
+// ::1 and the IPv4-mapped form (a dual-stack listener reports
+// ::ffff:127.0.0.1) are loopback.
 func remoteIsLoopback(r *http.Request) bool {
 	host := r.RemoteAddr
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
 	host = strings.Trim(host, "[]")
-	switch host {
-	case "127.0.0.1", "::1", "localhost":
+	if host == "localhost" {
 		return true
 	}
-	return false
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // ServeHTTP routes one request: the registered route groups (the API,

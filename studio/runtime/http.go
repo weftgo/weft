@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -35,6 +36,29 @@ func writeErr(w http.ResponseWriter, r *http.Request, status int, code, msg stri
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	}{code, msg}})
+}
+
+// maxBody bounds a link request body (register, acks): 8 MiB — a
+// registration carries one manifest per agent, tool schemas included.
+// Above it the route answers 413.
+const maxBody = 8 << 20
+
+// decodeBody reads one JSON body into v under maxBody, answering the
+// client itself on failure: 413 for a body over the limit, 400 for
+// anything that does not decode. what names the body in the message.
+func decodeBody(w http.ResponseWriter, r *http.Request, what string, v any) bool {
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(v)
+	if err == nil {
+		return true
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeErr(w, r, http.StatusRequestEntityTooLarge, "bad_request",
+			what+": larger than the 8 MiB limit")
+		return false
+	}
+	writeErr(w, r, http.StatusBadRequest, "bad_request", what+": "+err.Error())
+	return false
 }
 
 // Command ids (§10.4: "cmd_01J…"): a ULID — 48-bit millisecond

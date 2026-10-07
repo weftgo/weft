@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -42,14 +43,19 @@ import (
 
 // Registration is the POST /api/runtime/register body.
 type Registration struct {
-	RuntimeID   string              `json:"runtime_id"`
-	Host        string              `json:"host"`
-	Pid         int                 `json:"pid"`
-	Service     string              `json:"service"`
-	Env         string              `json:"env"`
-	WeftVersion string              `json:"weft_version"`
-	Budget      Budget              `json:"budget"`
-	Threads     bool                `json:"threads"`
+	RuntimeID   string `json:"runtime_id"`
+	Host        string `json:"host"`
+	Pid         int    `json:"pid"`
+	Service     string `json:"service"`
+	Env         string `json:"env"`
+	WeftVersion string `json:"weft_version"`
+	Budget      Budget `json:"budget"`
+	Threads     bool   `json:"threads"`
+	// Breakpoints is the debugger's tool set the runtime holds right
+	// now (WEFT-DEVTOOLS §8.3). The set lives in the runtime's process,
+	// so it outlives a Studio restart: a Studio that holds no set for
+	// the runtime adopts this one (serveRegister).
+	Breakpoints []string            `json:"breakpoints"`
 	Agents      []AgentRegistration `json:"agents"`
 }
 
@@ -204,6 +210,12 @@ type ApprovalDecision struct {
 	// Actor names who decided (§6 rule 4's spirit); carried for the
 	// record, the runtime logs it.
 	Actor string `json:"actor,omitempty"`
+	// PublicID is the public id the decided run is scoped to — the
+	// server's bookkeeping, never on the wire. The approval's command
+	// row carries it (a panel token polls its own decision) and so does
+	// the resumed run its acks name. Empty takes the run's recorded
+	// scope.
+	PublicID string `json:"-"`
 }
 
 // SourceSpec names the run to re-run.
@@ -248,7 +260,8 @@ type SteerMessage struct {
 }
 
 // Ack is the POST /api/runtime/acks body: accepted/rejected before
-// execution, finished at the run's end.
+// execution, finished at the run's end — Status succeeded | failed,
+// and Error why (a rejection's reason, a failed run's error).
 type Ack struct {
 	CommandID string `json:"command_id"`
 	State     string `json:"state"`
@@ -268,12 +281,18 @@ const (
 
 // CommandStatus is the GET /api/playground/commands/{id} row (§10.4).
 type CommandStatus struct {
-	CommandID string    `json:"command_id"`
-	State     string    `json:"state"`
-	RunID     string    `json:"run_id"`
-	Error     *string   `json:"error"`
-	Created   time.Time `json:"created"`
-	Updated   time.Time `json:"updated"`
+	CommandID string `json:"command_id"`
+	State     string `json:"state"`
+	RunID     string `json:"run_id"`
+	// Status is the finished run's own outcome, succeeded | failed, as
+	// the runtime's finished ack named it; absent until the command is
+	// finished.
+	Status string `json:"status,omitempty"`
+	// Error is why, when there is a why: a failed run's error text, a
+	// rejection's reason, what made the command lost. Null otherwise.
+	Error   *string   `json:"error"`
+	Created time.Time `json:"created"`
+	Updated time.Time `json:"updated"`
 }
 
 // RuntimeView is one connected runtime in GET /api/runtimes (§10.4's
@@ -288,6 +307,11 @@ type RuntimeView struct {
 	ConnectedSince time.Time   `json:"connected_since"`
 	LastSeen       time.Time   `json:"last_seen"`
 	Agents         []AgentView `json:"agents"`
+	// Breakpoints is the debugger's stored tool set for this runtime
+	// (WEFT-DEVTOOLS §8.3) — what PUT …/breakpoints last delivered, so a
+	// reloaded UI shows the rule that is parking its runs. Empty, never
+	// null.
+	Breakpoints []string `json:"breakpoints"`
 }
 
 // AgentView is one agent of a connected runtime.
@@ -320,7 +344,37 @@ var (
 	ErrDuplicateCommand = fmt.Errorf("studio/runtime: command id already used")
 	// ErrUnknownCommand: no command under the id.
 	ErrUnknownCommand = fmt.Errorf("studio/runtime: unknown command")
+	// ErrInvalidCommandID: a caller-supplied command id that is not 1
+	// to 128 characters of [A-Za-z0-9._:-] (400). The id is written
+	// verbatim as the SSE frame's id line, so anything that could break
+	// a line — and with it forge a frame on the runtime's stream — is
+	// refused before it reaches a row or the wire.
+	ErrInvalidCommandID = fmt.Errorf("studio/runtime: invalid command id")
 )
+
+// maxCommandID bounds a caller-supplied command id.
+const maxCommandID = 128
+
+// ValidCommandID reports whether id may be used as a command id: 1 to
+// 128 characters of [A-Za-z0-9._:-] (the minted "cmd_" + ULID form is
+// inside it). The id doubles as the SSE frame id, so a control
+// character in it would write the caller's own fields onto the
+// runtime's command stream.
+func ValidCommandID(id string) bool {
+	if id == "" || len(id) > maxCommandID {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9',
+			c == '.', c == '_', c == ':', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 // RuntimeServer is the registry of connected runtimes and their
 // commands: it mounts the three §10.3 routes (Mount), hands the
@@ -339,6 +393,19 @@ type RuntimeServer struct {
 	FinishDeadline time.Duration
 	// PingEvery is the SSE keep-alive cadence (15 s).
 	PingEvery time.Duration
+	// Retention is how long a terminal command (finished, rejected,
+	// lost), a run's route and a disconnected runtime that still holds
+	// a breakpoint set stay in memory (24 h). A disconnected runtime
+	// with nothing pending goes after FinishDeadline: a runtime id
+	// lives one process, so every app restart would otherwise leave an
+	// entry in GET /api/runtimes forever. A field so tests can tighten
+	// it.
+	Retention time.Duration
+	// WriteTimeout bounds one frame's write to the command stream
+	// (30 s): a runtime that stopped reading without closing must not
+	// hold the handler in Write forever. A field so tests can tighten
+	// it.
+	WriteTimeout time.Duration
 	// feedSize bounds one stream's queued frames (obsdb.QueueSize's
 	// spirit); beyond it the stream is dropped and the runtime
 	// reconnects.
@@ -353,8 +420,18 @@ type RuntimeServer struct {
 	// carries the public id the run was scoped to at enqueue, recorded
 	// with the run id the ack names, so a panel token can be checked
 	// before the run's row reaches the database.
-	runs    map[string]string
-	runPub  map[string]string
+	runs   map[string]string
+	runPub map[string]string
+	// runFork marks the runs a fork-mode command (thread=fork) started —
+	// learned like runs, from the acks that name them (a fork's accepted
+	// ack names none; its finished ack names the thread turn). The
+	// runtime refuses to steer those (a steer it cannot deliver would
+	// become a follow-up turn outside the playground's park rule), so
+	// Studio refuses up front instead of answering steered.
+	runFork map[string]bool
+	// runSeen is when an ack last named the run: the retention clock
+	// of its runs/runPub entries.
+	runSeen map[string]time.Time
 	nextSeq uint64
 	now     func() time.Time
 }
@@ -389,11 +466,15 @@ func New() *RuntimeServer {
 		AckDeadline:    30 * time.Second,
 		FinishDeadline: 10 * time.Minute,
 		PingEvery:      15 * time.Second,
+		Retention:      24 * time.Hour,
+		WriteTimeout:   30 * time.Second,
 		feedSize:       256,
 		runtimes:       map[string]*connected{},
 		commands:       map[string]*commandRow{},
 		runs:           map[string]string{},
 		runPub:         map[string]string{},
+		runFork:        map[string]bool{},
+		runSeen:        map[string]time.Time{},
 		now:            time.Now,
 	}
 }
@@ -435,8 +516,7 @@ func (rs *RuntimeServer) MountGuarded(mux *http.ServeMux, guard func(http.Handle
 // this handler may overwrite a previous registration freely.
 func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 	var reg Registration
-	if err := json.NewDecoder(r.Body).Decode(&reg); err != nil {
-		writeErr(w, r, http.StatusBadRequest, "bad_request", "register body: "+err.Error())
+	if !decodeBody(w, r, "register body", &reg) {
 		return
 	}
 	if reg.RuntimeID == "" {
@@ -448,9 +528,16 @@ func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rs.mu.Lock()
+	rs.pruneLocked()
 	c := rs.runtimes[reg.RuntimeID]
 	if c == nil {
-		c = &connected{}
+		// A runtime this Studio has not seen — a Studio restart, or an
+		// entry pruned while the runtime was away. Its breakpoint set
+		// is the only copy there is: adopt it, or GET /api/runtimes
+		// would report an empty set while the runtime keeps parking.
+		// For a runtime Studio already holds, Studio's set is the
+		// authority and every stream open sends it (serveCommands).
+		c = &connected{breakpoints: append([]string(nil), reg.Breakpoints...)}
 		rs.runtimes[reg.RuntimeID] = c
 	}
 	c.reg = reg
@@ -462,7 +549,7 @@ func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("studio/runtime: registered", "runtime_id", reg.RuntimeID, "agents", len(reg.Agents))
 	writeJSON(w, r, http.StatusOK, RegisterResponse{
 		RuntimeID:   reg.RuntimeID,
-		CommandsURL: "/api/runtime/commands?runtime=" + reg.RuntimeID,
+		CommandsURL: "/api/runtime/commands?runtime=" + url.QueryEscape(reg.RuntimeID),
 	})
 }
 
@@ -483,6 +570,13 @@ func (rs *RuntimeServer) touch(id string) {
 // saw, and any still-queued commands after it are re-sent (the
 // runtime's own seen-set makes that harmless; §5.3 at-most-once).
 func (rs *RuntimeServer) serveCommands(w http.ResponseWriter, r *http.Request) {
+	// ServeMux routes HEAD to a GET pattern. Opening the stream takes
+	// the runtime's feed, so only a real GET may.
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		writeErr(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "the commands stream is GET only")
+		return
+	}
 	id := r.URL.Query().Get("runtime")
 	if id == "" {
 		writeErr(w, r, http.StatusBadRequest, "bad_request", "the commands stream needs ?runtime=<id>")
@@ -500,7 +594,14 @@ func (rs *RuntimeServer) serveCommands(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, http.StatusNotFound, "not_found", "unknown runtime "+id)
 		return
 	}
-	// Replace any previous stream: a runtime holds one.
+	// Replace any previous stream: a runtime holds one. The replaced
+	// feed is closed so its response ends now — left open it would ping
+	// a socket nobody feeds (and touch last-seen) until TCP noticed.
+	// Closing is safe: every writer sends through c.feed while holding
+	// rs.mu, and c.feed is the new channel from here on.
+	if c.feed != nil {
+		close(c.feed)
+	}
 	feed := make(chan Command, rs.feedSize)
 	c.feed = feed
 	c.lastSeen = rs.now()
@@ -508,16 +609,44 @@ func (rs *RuntimeServer) serveCommands(w http.ResponseWriter, r *http.Request) {
 		c.connectedSince = c.lastSeen
 	}
 	backlog := rs.backlogLocked(id, r.Header.Get("Last-Event-ID"))
+	// The stored breakpoint set is what GET /api/runtimes reports, so
+	// every stream is told it — the empty set too (the runtime replaces
+	// its own with the frame's): a set or a clear whose frame died with
+	// the previous stream must not leave the two sides disagreeing.
+	breakpoints := append([]string{}, c.breakpoints...)
 	rs.mu.Unlock()
 
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream; charset=utf-8")
 	h.Set("Cache-Control", "no-cache")
+	h.Set("X-Accel-Buffering", "no") // a buffering proxy would hold commands back
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprint(w, "event: ping\ndata: {}\n\n")
-	flusher.Flush()
+	// Every write carries a deadline: a peer that stopped reading
+	// without closing fails the write (net/http then cancels the
+	// request context) instead of holding this goroutine in Write.
+	rc := http.NewResponseController(w)
+	write := func(frame func()) {
+		if rs.WriteTimeout > 0 {
+			// Unsupported on the in-process transport (setup A's pipe):
+			// there the reader is this process and cannot stall the socket.
+			_ = rc.SetWriteDeadline(time.Now().Add(rs.WriteTimeout))
+		}
+		frame()
+	}
+	write(func() {
+		_, _ = fmt.Fprint(w, "event: ping\ndata: {}\n\n")
+		flusher.Flush()
+	})
+	// The breakpoint set goes before the backlog: the runtime starts a
+	// run frame on its own goroutine as it arrives, so a re-sent command
+	// read ahead of the set would run under the set the runtime held
+	// before — the one whose frame died with the previous stream.
+	write(func() {
+		writeRunFrame(w, flusher, Command{CommandID: newCommandID(), Runtime: id,
+			breakpoints: &Breakpoints{Tools: breakpoints}})
+	})
 	for _, cmd := range backlog {
-		writeRunFrame(w, flusher, cmd)
+		write(func() { writeRunFrame(w, flusher, cmd) })
 	}
 
 	ping := time.NewTicker(rs.PingEvery)
@@ -527,17 +656,20 @@ func (rs *RuntimeServer) serveCommands(w http.ResponseWriter, r *http.Request) {
 		select {
 		case cmd, ok := <-feed:
 			if !ok {
-				// The feed was dropped full (a stalled stream, Enqueue's
-				// close): end this response — the runtime reconnects and
-				// the backlog re-sends what is still queued. Staying
-				// open would keep pinging and look connected.
+				// The feed was closed: dropped full (a stalled stream,
+				// dropFeedLocked) or replaced by a newer stream. End
+				// this response — the runtime reconnects and the
+				// backlog re-sends what is still queued. Staying open
+				// would keep pinging and look connected.
 				return
 			}
-			writeRunFrame(w, flusher, cmd)
+			write(func() { writeRunFrame(w, flusher, cmd) })
 		case <-ping.C:
 			rs.touch(id)
-			_, _ = fmt.Fprint(w, "event: ping\ndata: {}\n\n")
-			flusher.Flush()
+			write(func() {
+				_, _ = fmt.Fprint(w, "event: ping\ndata: {}\n\n")
+				flusher.Flush()
+			})
 		case <-ctx.Done():
 			rs.streamEnded(id, feed)
 			return
@@ -653,8 +785,7 @@ func (rs *RuntimeServer) streamEnded(id string, feed chan Command) {
 // the truth wins over the timers.
 func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 	var a Ack
-	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
-		writeErr(w, r, http.StatusBadRequest, "bad_request", "ack body: "+err.Error())
+	if !decodeBody(w, r, "ack body", &a) {
 		return
 	}
 	if a.CommandID == "" {
@@ -668,43 +799,60 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, http.StatusNotFound, "not_found", "unknown command "+a.CommandID)
 		return
 	}
-	rs.stopTimersLocked(row)
+	switch a.State {
+	case "accepted", "rejected", "finished":
+	default:
+		writeErr(w, r, http.StatusBadRequest, "bad_request", "ack body: unknown state "+a.State)
+		return
+	}
 	if a.RunID != "" {
 		rs.runs[a.RunID] = row.Runtime
+		rs.runSeen[a.RunID] = rs.now()
 		if row.PublicID != "" {
 			rs.runPub[a.RunID] = row.PublicID
 		}
+		if row.Thread == "fork" {
+			rs.runFork[a.RunID] = true
+		}
 	}
+	// The timers stop only when the ack moves the row: a repeated ack
+	// (a retried POST) on an accepted row must not cancel the finish
+	// watch the disconnect sweep armed, or the row stays accepted
+	// forever.
 	switch a.State {
 	case "accepted":
 		if row.state == StateQueued || row.state == StateLost {
 			revived := row.state == StateLost
+			rs.stopTimersLocked(row)
 			row.state = StateAccepted
 			row.runID = a.RunID
 			row.updated = rs.now()
-			if revived {
-				// The lost sweep already ran for this row, so the
-				// finish watch it would have armed is gone: arm one
-				// now, or a runtime that never finishes leaves the
-				// resurrected row accepted forever (the audit's
-				// P2-10).
-				rs.armLostLocked(row, rs.FinishDeadline, "accepted after a lost sweep, no finish")
+			if c := rs.runtimes[row.Runtime]; revived || c == nil || c.feed == nil {
+				// No sweep will arm the finish watch for this row: the
+				// lost sweep already ran (the audit's P2-10), or the
+				// runtime holds no stream — a feed dropped full ends
+				// without the disconnect sweep. Arm one now, or a
+				// runtime that never finishes leaves the row accepted
+				// forever.
+				rs.armLostLocked(row, rs.FinishDeadline, "accepted while the runtime was disconnected, no finish")
 			}
 		}
 	case "rejected":
 		if row.state == StateQueued || row.state == StateLost {
+			rs.stopTimersLocked(row)
 			row.state = StateRejected
 			row.errText = a.Error
 			row.updated = rs.now()
 		}
 	case "finished":
+		rs.stopTimersLocked(row)
 		row.state = StateFinished
 		row.runID = orDefault(a.RunID, row.runID)
 		row.status = a.Status
+		// The run's own error, or none: whatever a timer wrote here
+		// when it guessed the command lost is not the outcome.
+		row.errText = a.Error
 		row.updated = rs.now()
-	default:
-		writeErr(w, r, http.StatusBadRequest, "bad_request", "ack body: unknown state "+a.State)
-		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -714,16 +862,20 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 // Enqueue validates nothing (that is the playground route's job) and
 // hands cmd to the named runtime's stream, minting the command id
 // when the caller did not. Errors: ErrUnknownRuntime (404),
-// ErrNotConnected (503), ErrDuplicateCommand (409).
+// ErrNotConnected (503), ErrDuplicateCommand (409),
+// ErrInvalidCommandID (400: a caller's id outside ValidCommandID).
 func (rs *RuntimeServer) Enqueue(runtimeID string, cmd Command) (Command, error) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
+	rs.pruneLocked()
 	c := rs.runtimes[runtimeID]
 	if c == nil {
 		return cmd, ErrUnknownRuntime
 	}
 	if cmd.CommandID == "" {
 		cmd.CommandID = newCommandID()
+	} else if !ValidCommandID(cmd.CommandID) {
+		return cmd, ErrInvalidCommandID
 	}
 	if _, dup := rs.commands[cmd.CommandID]; dup {
 		return cmd, ErrDuplicateCommand
@@ -743,19 +895,35 @@ func (rs *RuntimeServer) Enqueue(runtimeID string, cmd Command) (Command, error)
 	select {
 	case c.feed <- cmd:
 	default:
-		// A full feed is a stalled stream: drop it (the runtime
-		// reconnects; the backlog re-sends what is still queued) and
-		// close the channel so the stalled SSE ends now — its ping
-		// loop would otherwise keep the runtime looking connected
-		// while every POST 503s on the nil feed (the audit's P2-9).
-		// Closing is safe: every writer sends through c.feed while
-		// holding rs.mu, and c.feed is nil from here on.
-		stalled := c.feed
-		c.feed = nil
-		close(stalled)
+		rs.dropFeedLocked(runtimeID, c)
 	}
 	rs.armAckLocked(row)
 	return cmd, nil
+}
+
+// dropFeedLocked ends a stalled stream: a full feed means the runtime
+// stopped reading. The feed is closed so the SSE response ends now —
+// its ping loop would otherwise keep the runtime looking connected
+// while every POST 503s on the nil feed (the audit's P2-9) — and the
+// runtime reconnects, the backlog re-sending what is still queued.
+// Closing is safe: every writer sends through c.feed while holding
+// rs.mu, and c.feed is nil from here on. The accepted commands get
+// their finish watch here: the stream ends on the closed feed, not on
+// its context, so the disconnect sweep (streamEnded) never runs for
+// it, and a runtime that stalled for good would otherwise leave them
+// accepted forever. Queued ones keep their ack timers. Caller holds mu.
+func (rs *RuntimeServer) dropFeedLocked(runtimeID string, c *connected) {
+	if c.feed == nil {
+		return
+	}
+	close(c.feed)
+	c.feed = nil
+	c.lastSeen = rs.now()
+	for _, row := range rs.commands {
+		if row.Runtime == runtimeID && row.state == StateAccepted {
+			rs.armLostLocked(row, rs.FinishDeadline, "runtime stalled, no finish")
+		}
+	}
 }
 
 // Cancel sends an `event: cancel` frame for a command (the debugger
@@ -791,6 +959,14 @@ func (rs *RuntimeServer) PublicOf(runID string) (string, bool) {
 	return id, ok
 }
 
+// ForkRun reports whether runID was started by a fork-mode command
+// (thread=fork, or the resume of one): a run the runtime never steers.
+func (rs *RuntimeServer) ForkRun(runID string) bool {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	return rs.runFork[runID]
+}
+
 // EnqueueApproval forwards a human decision on one parked call of a
 // runtime-started run (WEFT-DEVTOOLS §8.2) as an `event: approve`
 // command, minting the command id. The runtime acks it before resuming
@@ -799,12 +975,15 @@ func (rs *RuntimeServer) PublicOf(runID string) (string, bool) {
 func (rs *RuntimeServer) EnqueueApproval(runtimeID string, d ApprovalDecision) (ApprovalDecision, error) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
+	rs.pruneLocked()
 	c := rs.runtimes[runtimeID]
 	if c == nil {
 		return d, ErrUnknownRuntime
 	}
 	if d.CommandID == "" {
 		d.CommandID = newCommandID()
+	} else if !ValidCommandID(d.CommandID) {
+		return d, ErrInvalidCommandID
 	}
 	if _, dup := rs.commands[d.CommandID]; dup {
 		return d, ErrDuplicateCommand
@@ -812,9 +991,18 @@ func (rs *RuntimeServer) EnqueueApproval(runtimeID string, d ApprovalDecision) (
 	if c.feed == nil {
 		return d, ErrNotConnected
 	}
+	if d.PublicID == "" {
+		d.PublicID = rs.runPub[d.RunID]
+	}
+	thread := ""
+	if rs.runFork[d.RunID] {
+		thread = "fork" // a fork's resume is its session's next turn: a fork run too
+	}
 	cmd := Command{
 		CommandID: d.CommandID,
 		Runtime:   runtimeID,
+		PublicID:  d.PublicID,
+		Thread:    thread,
 		approval:  &d,
 		seq:       rs.nextSeq + 1,
 	}
@@ -824,7 +1012,7 @@ func (rs *RuntimeServer) EnqueueApproval(runtimeID string, d ApprovalDecision) (
 	select {
 	case c.feed <- cmd:
 	default:
-		c.feed = nil
+		rs.dropFeedLocked(runtimeID, c)
 	}
 	rs.armAckLocked(rs.commands[d.CommandID])
 	return d, nil
@@ -878,10 +1066,12 @@ func (rs *RuntimeServer) Connected(runtimeID string) bool {
 // Snapshot lists the runtimes that ever registered, newest-seen
 // first, with their liveness and agents in §10.4's shape. A runtime
 // that registered but holds no stream stays visible until its
-// FinishDeadline-watched commands resolve (the UI reads last_seen).
+// FinishDeadline-watched commands resolve (the UI reads last_seen),
+// then it is pruned (pruneLocked).
 func (rs *RuntimeServer) Snapshot() []RuntimeView {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
+	rs.pruneLocked()
 	views := make([]RuntimeView, 0, len(rs.runtimes))
 	for id, c := range rs.runtimes {
 		v := RuntimeView{
@@ -892,6 +1082,7 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			Env:            c.reg.Env,
 			ConnectedSince: c.connectedSince,
 			LastSeen:       c.lastSeen,
+			Breakpoints:    append([]string{}, c.breakpoints...),
 		}
 		for _, a := range c.reg.Agents {
 			av := AgentView{Name: a.Name, Models: a.Models, Instructions: a.ManifestInstructions()}
@@ -942,7 +1133,10 @@ func (rs *RuntimeServer) armAckLocked(row *commandRow) {
 
 // armLostLocked starts a finish watch on an accepted command.
 func (rs *RuntimeServer) armLostLocked(row *commandRow, d time.Duration, why string) {
-	if d <= 0 {
+	if d <= 0 || row.lostTimer != nil {
+		// A watch already armed keeps its (earlier) deadline: a second
+		// disconnect must not push the row's loss back, nor orphan a
+		// timer stopTimersLocked can no longer reach.
 		return
 	}
 	row.lostTimer = time.AfterFunc(d, func() {
@@ -985,6 +1179,7 @@ func (row *commandRow) view() CommandStatus {
 		CommandID: row.CommandID,
 		State:     row.state,
 		RunID:     row.runID,
+		Status:    row.status,
 		Error:     err,
 		Created:   row.created,
 		Updated:   row.updated,
@@ -1012,16 +1207,18 @@ func (rs *RuntimeServer) SetBreakpoints(runtimeID string, tools []string) error 
 	if c == nil {
 		return ErrUnknownRuntime
 	}
-	c.breakpoints = tools
 	if c.feed == nil {
+		// Nothing is stored for a set that could not be delivered: the
+		// stored set is what GET /api/runtimes reports as in force.
 		return ErrNotConnected
 	}
 	select {
-	case c.feed <- Command{CommandID: newCommandID(), Runtime: runtimeID, breakpoints: &Breakpoints{Tools: tools}}:
+	case c.feed <- Command{CommandID: newCommandID(), Runtime: runtimeID, breakpoints: &Breakpoints{Tools: append([]string{}, tools...)}}:
 	default:
-		c.feed = nil
+		rs.dropFeedLocked(runtimeID, c)
 		return ErrNotConnected
 	}
+	c.breakpoints = append([]string(nil), tools...)
 	return nil
 }
 
@@ -1052,8 +1249,93 @@ func (rs *RuntimeServer) Steer(runtimeID, runID, message string) error {
 	select {
 	case c.feed <- Command{CommandID: newCommandID(), Runtime: runtimeID, steer: &SteerMessage{RunID: runID, Message: message}}:
 	default:
-		c.feed = nil
+		rs.dropFeedLocked(runtimeID, c)
 		return ErrNotConnected
 	}
 	return nil
+}
+
+// ── retention (the audit's P2-8) ───────────────────────────────────
+
+// maxCommands is the hard cap on command rows kept in memory; beyond
+// it the oldest terminal rows go first, whatever their age.
+const maxCommands = 10000
+
+// pruneLocked drops what nothing can act on any more, so a long-lived
+// Studio's memory is bounded by its recent traffic:
+//
+//   - a terminal command (finished, rejected, lost) Retention after
+//     its last change — until then a late ack still lands and a reused
+//     id still answers 409;
+//   - a run's route (runs, runPub) Retention after the last ack that
+//     named it, unless a live command still does;
+//   - a disconnected runtime with no queued or accepted command,
+//     FinishDeadline after it was last seen (Retention when it still
+//     holds a breakpoint set a reconnect would be told again). A
+//     runtime registers before every stream, so a pruned one that
+//     comes back simply registers anew.
+//
+// Caller holds mu.
+func (rs *RuntimeServer) pruneLocked() {
+	if rs.Retention <= 0 {
+		return
+	}
+	now := rs.now()
+	cutoff := now.Add(-rs.Retention)
+	terminal := func(row *commandRow) bool {
+		return row.state == StateFinished || row.state == StateRejected || row.state == StateLost
+	}
+	for id, row := range rs.commands {
+		if terminal(row) && row.updated.Before(cutoff) {
+			rs.stopTimersLocked(row)
+			delete(rs.commands, id)
+		}
+	}
+	if over := len(rs.commands) - maxCommands; over > 0 {
+		var done []*commandRow
+		for _, row := range rs.commands {
+			if terminal(row) {
+				done = append(done, row)
+			}
+		}
+		sort.Slice(done, func(i, j int) bool { return done[i].seq < done[j].seq })
+		for _, row := range done[:min(over, len(done))] {
+			rs.stopTimersLocked(row)
+			delete(rs.commands, row.CommandID)
+		}
+	}
+	liveRun := map[string]bool{}
+	liveRuntime := map[string]bool{}
+	for _, row := range rs.commands {
+		if !terminal(row) {
+			liveRuntime[row.Runtime] = true
+			if row.runID != "" {
+				liveRun[row.runID] = true
+			}
+		}
+	}
+	for run, seen := range rs.runSeen {
+		if seen.Before(cutoff) && !liveRun[run] {
+			delete(rs.runSeen, run)
+			delete(rs.runs, run)
+			delete(rs.runPub, run)
+			delete(rs.runFork, run)
+		}
+	}
+	linger := rs.FinishDeadline
+	if linger <= 0 {
+		linger = rs.Retention
+	}
+	for id, c := range rs.runtimes {
+		if c.feed != nil || liveRuntime[id] {
+			continue
+		}
+		keep := linger
+		if len(c.breakpoints) > 0 {
+			keep = rs.Retention
+		}
+		if c.lastSeen.Before(now.Add(-keep)) {
+			delete(rs.runtimes, id)
+		}
+	}
 }

@@ -100,7 +100,7 @@ func fxSpanRec(run string, start, end time.Time, status int, statusMsg string, i
 		spanID = fxSpan
 	}
 	return obsdb.Span{
-		TraceID: fxTrace, SpanID: spanID, Name: "invoke_agent", Kind: 1,
+		TraceID: fxTrace, SpanID: spanID, Name: "invoke_agent orders", Kind: 1,
 		Start: start, End: end, StatusCode: status, StatusMessage: statusMsg,
 		Service: "studio-test", Attrs: attrs, Resource: map[string]any{"service.name": "studio-test"},
 	}
@@ -138,6 +138,8 @@ func stampSession(recs []obsdb.Record, spans []obsdb.Span, run string) ([]obsdb.
 		spans[i].Attrs["weft.public_id"] = id.public
 		spans[i].Attrs["weft.turn"] = id.turn
 		spans[i].Attrs["gen_ai.agent.name"] = id.agent
+		// The span's name as the core writes it: "<operation> <agent>".
+		spans[i].Name = "invoke_agent " + id.agent
 	}
 	return recs, spans
 }
@@ -174,7 +176,7 @@ func fixtureDB(t *testing.T) obsdb.DB {
 		fxRecord("r_ok", "event", "tool_finish", 3, okAt(time.Second),
 			`{"type":"tool_finish","run_id":"r_ok","seq":1,"call_id":"call_1","name":"lookup_order","content":"order 42: shipped","is_error":false}`),
 		fxRecord("r_ok", "event", "step_finish", 4, okAt(1500*time.Millisecond),
-			`{"type":"step_finish","run_id":"r_ok","index":0,"reason":"end_turn","usage":{"input_tokens":10,"output_tokens":4}}`),
+			`{"type":"step_finish","run_id":"r_ok","index":0,"reason":"stop","usage":{"input_tokens":10,"output_tokens":4}}`),
 		fxRecord("r_ok", "event", "run_finish", 5, okAt(2*time.Second),
 			`{"type":"run_finish","run_id":"r_ok","usage":{"input_tokens":10,"output_tokens":4},"steps":1}`),
 		fxRecord("r_ok", "messages", "", 0, okAt(100*time.Millisecond),
@@ -223,7 +225,7 @@ func fixtureDB(t *testing.T) obsdb.DB {
 		fxRecord("r_sub", "event", "tool_finish", 3, subAt(4*time.Second),
 			`{"type":"tool_finish","run_id":"r_sub","seq":1,"call_id":"call_3","name":"research","content":"order 42 shipped this morning","is_error":false}`),
 		fxRecord("r_sub", "event", "step_finish", 4, subAt(4500*time.Millisecond),
-			`{"type":"step_finish","run_id":"r_sub","index":0,"reason":"end_turn","usage":{"input_tokens":12,"output_tokens":6}}`),
+			`{"type":"step_finish","run_id":"r_sub","index":0,"reason":"stop","usage":{"input_tokens":12,"output_tokens":6}}`),
 		fxRecord("r_sub", "event", "run_finish", 5, subAt(5*time.Second),
 			`{"type":"run_finish","run_id":"r_sub","usage":{"input_tokens":12,"output_tokens":6},"steps":1}`),
 		fxRecord("r_sub", "messages", "", 0, subAt(100*time.Millisecond),
@@ -242,7 +244,7 @@ func fixtureDB(t *testing.T) obsdb.DB {
 		fxRecord(childID, "event", "step_start", 1, subAt(3200*time.Millisecond),
 			`{"type":"step_start","run_id":"`+childID+`","index":0}`),
 		fxRecord(childID, "event", "step_finish", 2, subAt(3700*time.Millisecond),
-			`{"type":"step_finish","run_id":"`+childID+`","index":0,"reason":"end_turn","usage":{"input_tokens":9,"output_tokens":5}}`),
+			`{"type":"step_finish","run_id":"`+childID+`","index":0,"reason":"stop","usage":{"input_tokens":9,"output_tokens":5}}`),
 		fxRecord(childID, "event", "run_finish", 3, subAt(4*time.Second),
 			`{"type":"run_finish","run_id":"`+childID+`","usage":{"input_tokens":9,"output_tokens":5},"steps":1}`),
 		fxRecord(childID, "messages", "", 0, subAt(3*time.Second),
@@ -258,7 +260,7 @@ func fixtureDB(t *testing.T) obsdb.DB {
 	}
 	if err := db.Write(ctx, obsdb.Batch{Records: childEvents, Spans: []obsdb.Span{
 		{TraceID: fxTrace, SpanID: "0a0b0c0d0e0f0102", ParentSpanID: fxSpan,
-			Name: "invoke_agent", Kind: 1,
+			Name: "invoke_agent researcher", Kind: 1,
 			Start: subAt(3 * time.Second), End: subAt(4 * time.Second), StatusCode: 1,
 			Service: "studio-test",
 			Attrs: map[string]any{
@@ -1060,8 +1062,8 @@ func TestTranscriptAndSpans(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"batches":[`,
-		`"index":0,"step":0,"messages":[{"role":"user","content":[{"type":"text","text":"Where is order 42?"}]}]`,
-		`"index":1`,
+		`"index":0,"step":0,"input":true,"messages":[{"role":"user","content":[{"type":"text","text":"Where is order 42?"}]}]`,
+		`"index":1,"step":0,"input":false`,
 		`[{"role":"assistant","content":[{"type":"text","text":"Order 42 shipped this morning."}]}]`,
 	} {
 		if !strings.Contains(tr, want) {
@@ -1076,7 +1078,7 @@ func TestTranscriptAndSpans(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"spans":[`,
-		`"name":"invoke_agent"`, `"kind":"internal"`, `"status":"ok"`,
+		`"name":"invoke_agent researcher"`, `"kind":"internal"`, `"status":"ok"`,
 		`"trace_id":"0102030405060708090a0b0c0d0e0f10"`, `"span_id":"030405060708090a"`,
 		`"service":"studio-test"`, `"events":[]`,
 		`"gen_ai.agent.name":"researcher"`, `"weft.session.id":"s_research"`,
@@ -1099,7 +1101,7 @@ func TestTranscriptAndSpans(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("trace: %d", code)
 	}
-	if !strings.Contains(trace, `"name":"invoke_agent"`) || !strings.Contains(trace, `"parent_span_id":"0102030405060708"`) {
+	if !strings.Contains(trace, `"name":"invoke_agent researcher"`) || !strings.Contains(trace, `"parent_span_id":"0102030405060708"`) {
 		t.Errorf("trace spans: %s", trace)
 	}
 	golden(t, "trace.golden.json", trace)

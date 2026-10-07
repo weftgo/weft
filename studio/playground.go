@@ -1,11 +1,13 @@
 package studio
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
-
-	"github.com/weftgo/weft"
+	"strings"
 
 	"github.com/weftgo/weft/obsdb"
 	linkruntime "github.com/weftgo/weft/studio/runtime"
@@ -100,12 +102,24 @@ func registerPlayground(mux *http.ServeMux, s *Server) {
 // serveRuntimes answers §10.4's connected-runtimes view: every
 // runtime that registered, with liveness and its agents. Open to any
 // authenticated reader (a panel's read token included): this is the
-// picker's data, not per-public-id content.
+// picker's data, not per-public-id content — except each agent's
+// registered system prompt, which only an identity that may start
+// experiments needs (the drawer pre-fills from it). A read-scoped
+// panel token lives in a page that only views: it gets the picker
+// without the prompts.
 func (s *Server) serveRuntimes(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		views := rs.Snapshot()
+		if p := idFrom(r).panel; p != nil && p.Scope != scopePlayground {
+			for i := range views {
+				for j := range views[i].Agents {
+					views[i].Agents[j].Instructions = ""
+				}
+			}
+		}
 		writeJSON(w, r, http.StatusOK, struct {
 			Runtimes []linkruntime.RuntimeView `json:"runtimes"`
-		}{rs.Snapshot()})
+		}{views})
 	}
 }
 
@@ -134,8 +148,41 @@ type runRequest struct {
 func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req runRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			badRequest(w, r, "run body: "+err.Error())
+		if !decodeBody(w, r, "run body", &req) {
+			return
+		}
+
+		// A panel token may act inside its public id only, and a
+		// read-scoped one may not act at all (S4.6) — checked before
+		// anything below reads the database, so no validation message
+		// can describe another public id's run. The source run is
+		// inside the scope too: the new run would carry the token's
+		// public id and the source's whole transcript with it.
+		if id := idFrom(r); id.panel != nil {
+			if !mayAct(w, r) {
+				return
+			}
+			if req.PublicID != id.panel.PublicID {
+				forbidden(w, r)
+				return
+			}
+			// Experiments are the server token's (experiments.go): an id
+			// here would file the page's run under the operator's
+			// experiment and spend its runtime budget (capped per id).
+			if req.ExperimentID != "" {
+				writeError(w, r, http.StatusForbidden, "forbidden",
+					"experiment_id is the server token's: a panel token runs outside experiments")
+				return
+			}
+			if req.Source != nil && req.Source.RunID != "" && !s.scopeRunID(w, r, req.Source.RunID) {
+				return
+			}
+		}
+		// The caller's command id is written as the SSE frame id on the
+		// runtime's stream: anything that could break a line there is
+		// refused (linkruntime.ValidCommandID).
+		if req.CommandID != "" && !linkruntime.ValidCommandID(req.CommandID) {
+			badRequest(w, r, "command_id must be 1 to 128 characters of [A-Za-z0-9._:-]")
 			return
 		}
 
@@ -157,14 +204,14 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 				badRequest(w, r, "the source run has no readable transcript to edit")
 				return
 			}
-			var msgs []weft.Message
-			for _, body := range bodies {
-				var batch []weft.Message
-				if err := json.Unmarshal(body, &batch); err == nil {
-					msgs = append(msgs, batch...)
-				}
+			// The run's own steps: its first messages record is the
+			// input (context, never a step) — the runtime's split.
+			_, steps, serr := sourceSteps(bodies)
+			if serr != nil {
+				badRequest(w, r, "the source run has no readable transcript to edit")
+				return
 			}
-			if verr := validateTranscriptEdits(msgs, req.Source.FromStep, req.TranscriptEdits); verr != nil {
+			if verr := validateTranscriptEdits(steps, req.Source.FromStep, req.TranscriptEdits); verr != nil {
 				badRequest(w, r, verr.Error())
 				return
 			}
@@ -295,9 +342,24 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 			badRequest(w, r, "unknown thinking level "+req.Overrides.Thinking)
 			return
 		}
-		for key := range req.Overrides.Options {
+		for key, v := range req.Overrides.Options {
 			switch key {
-			case "max_steps", "parallelism", "temperature":
+			case "max_steps", "parallelism":
+				// A whole number from 1: the lower-only checks below
+				// compare it as an int, and a negative, fractional or
+				// out-of-range value would slip under them.
+				if v < 1 || v > 1e6 || v != math.Trunc(v) {
+					badRequest(w, r, key+" must be a whole number from 1")
+					return
+				}
+			case "temperature":
+				// The range every provider accepts — the runtime's own
+				// check (validOptions), answered here as a 400 instead of
+				// a rejected command.
+				if v < 0 || v > 2 {
+					badRequest(w, r, "temperature must be between 0 and 2")
+					return
+				}
 			default:
 				badRequest(w, r, "unknown option "+key)
 				return
@@ -324,19 +386,6 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 						"tool "+name+" is not opted in for real side effects")
 					return
 				}
-			}
-		}
-
-		// A panel token may act inside its public id only, and a
-		// read-scoped one may not act at all (S4.6).
-		if id := idFrom(r); id.panel != nil {
-			if id.panel.Scope != scopePlayground {
-				forbidden(w, r)
-				return
-			}
-			if req.PublicID != id.panel.PublicID {
-				forbidden(w, r)
-				return
 			}
 		}
 
@@ -373,6 +422,8 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 			case errors.Is(err, linkruntime.ErrDuplicateCommand):
 				writeError(w, r, http.StatusConflict, "conflict",
 					"command id "+cmd.CommandID+" was already used")
+			case errors.Is(err, linkruntime.ErrInvalidCommandID):
+				badRequest(w, r, "command_id must be 1 to 128 characters of [A-Za-z0-9._:-]")
 			default:
 				writeError(w, r, http.StatusInternalServerError, "internal", err.Error())
 			}
@@ -452,8 +503,12 @@ func (s *Server) servePlaygroundApproval(rs *linkruntime.RuntimeServer) http.Han
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := r.PathValue("id")
 		var req approvalRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			badRequest(w, r, "approval body: "+err.Error())
+		if !decodeBody(w, r, "approval body", &req) {
+			return
+		}
+		// A decision is a write verb: the handler may run for real. A
+		// read-scoped panel token does not decide (S4.6).
+		if !mayAct(w, r) {
 			return
 		}
 		switch req.Decision {
@@ -485,13 +540,36 @@ func (s *Server) servePlaygroundApproval(rs *linkruntime.RuntimeServer) http.Han
 		}
 		// A panel token decides inside its public id only (S4.6): the
 		// scope the command carried, or the row's when it has landed.
-		if pid := idFrom(r).panel; pid != nil {
-			publicID, _ := rs.PublicOf(runID)
-			if publicID == "" && dbErr == nil {
-				publicID = row.PublicID
+		// The decision's own command carries the same scope — the page
+		// polls it, and its acks name the resumed run.
+		publicID, _ := rs.PublicOf(runID)
+		if publicID == "" && dbErr == nil {
+			publicID = row.PublicID
+		}
+		if pid := idFrom(r).panel; pid != nil && publicID != pid.PublicID {
+			forbidden(w, r)
+			return
+		}
+		// The call must be one the parked run is waiting on (the
+		// audit's P2-16): the core resumes with exactly the decisions it
+		// is handed and answers every other pending call "DENIED: no
+		// decision", so a stale or mistyped id would silently deny the
+		// call the human meant to decide. The run's own run_finish names
+		// the pending set; until it has landed there is nothing to check
+		// against and the runtime's own check is the only one.
+		if dbErr == nil {
+			pending, known, err := s.pendingCalls(r.Context(), runID)
+			if err != nil {
+				dbError(w, r, "events of run", runID, err)
+				return
 			}
-			if publicID != pid.PublicID {
-				forbidden(w, r)
+			if known && !contains(pending, req.CallID) {
+				if len(pending) == 0 {
+					badRequest(w, r, "run "+runID+" is not parked: it finished with no pending call")
+					return
+				}
+				badRequest(w, r, "call "+req.CallID+" is not pending on run "+runID+
+					" (pending: "+strings.Join(pending, ", ")+")")
 				return
 			}
 		}
@@ -507,6 +585,7 @@ func (s *Server) servePlaygroundApproval(rs *linkruntime.RuntimeServer) http.Han
 			Reason:   req.Reason,
 			Content:  req.Content,
 			Actor:    actorOf(r),
+			PublicID: publicID,
 		})
 		if err != nil {
 			switch {
@@ -527,5 +606,45 @@ func (s *Server) servePlaygroundApproval(rs *linkruntime.RuntimeServer) http.Han
 			CommandID string `json:"command_id"`
 			State     string `json:"state"`
 		}{d.CommandID, linkruntime.StateQueued})
+	}
+}
+
+// pendingCalls reads the call ids a run parked on from its stored
+// run_finish event (RunFinish.Pending — the ids survive content-off
+// capture; only the args are stripped). known is false while no
+// run_finish has landed: the run is still running, or its records are
+// in flight.
+func (s *Server) pendingCalls(ctx context.Context, runID string) (ids []string, known bool, err error) {
+	after := int64(-1)
+	for {
+		page, err := s.db.Events(ctx, runID, after, 1000)
+		if err != nil {
+			if errors.Is(err, obsdb.ErrNotFound) {
+				return nil, false, nil
+			}
+			return nil, false, err
+		}
+		for _, pe := range page.Events {
+			if !bytes.Contains(pe.Event, []byte(`"run_finish"`)) {
+				continue
+			}
+			var ev struct {
+				Type    string `json:"type"`
+				Pending []struct {
+					ID string `json:"id"`
+				} `json:"pending"`
+			}
+			if json.Unmarshal(pe.Event, &ev) != nil || ev.Type != "run_finish" {
+				continue
+			}
+			ids, known = ids[:0], true
+			for _, p := range ev.Pending {
+				ids = append(ids, p.ID)
+			}
+		}
+		if page.NextAfter == nil || len(page.Events) == 0 {
+			return ids, known, nil
+		}
+		after = *page.NextAfter
 	}
 }

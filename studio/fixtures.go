@@ -2,12 +2,14 @@ package studio
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"net/http"
 	"sort"
 
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/obsdb"
 )
 
 // "Save as fixture" (WEFT-PLAYGROUND §7 P4, D4): turn a recorded run
@@ -37,16 +39,21 @@ type fixtureFile struct {
 	Body string `json:"body"`
 }
 
-// buildFixtures renders one file per recorded assistant message:
-// dir/test/<seq>-<key>.json in wefttest's naming (five-digit sequence,
-// the key Replay matches on).
-func buildFixtures(msgs []weft.Message, tools []string) []fixtureFile {
+// buildFixtures renders one file per step of the run — per model call
+// it made: dir/test/<seq>-<key>.json in wefttest's naming (five-digit
+// sequence, the key Replay matches on). input is the run's input
+// record (the conversation it was fed and the turn's prompt — context,
+// whose assistant messages are earlier turns' and not this run's
+// calls); steps is everything it recorded after (sourceSteps). Each
+// step's request is the input plus the steps before it.
+func buildFixtures(input, steps []weft.Message, tools []string) []fixtureFile {
 	var files []fixtureFile
 	sorted := append([]string(nil), tools...)
 	sort.Strings(sorted)
+	msgs := append(append([]weft.Message(nil), input...), steps...)
 	seq := 0
 	for i, msg := range msgs {
-		if msg.Role != weft.RoleAssistant {
+		if i < len(input) || msg.Role != weft.RoleAssistant {
 			continue
 		}
 		seq++
@@ -151,7 +158,10 @@ func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) 
 		RunID string   `json:"run_id"`
 		Tools []string `json:"tools"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RunID == "" {
+	if !decodeBody(w, r, "fixture body", &req) {
+		return
+	}
+	if req.RunID == "" {
 		badRequest(w, r, "fixture body: run_id is required")
 		return
 	}
@@ -163,25 +173,33 @@ func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) 
 	}
 	row, err := s.db.Run(r.Context(), req.RunID)
 	if err != nil {
-		notFound(w, r, "unknown run "+req.RunID)
+		if errors.Is(err, obsdb.ErrNotFound) {
+			notFound(w, r, "unknown run "+req.RunID)
+			return
+		}
+		dbError(w, r, "run", req.RunID, err)
 		return
 	}
 	bodies, err := s.db.Transcript(r.Context(), req.RunID)
+	if err != nil && !errors.Is(err, obsdb.ErrNotFound) {
+		dbError(w, r, "transcript of run", req.RunID, err)
+		return
+	}
 	if err != nil || len(bodies) == 0 {
 		badRequest(w, r, "the run has no readable transcript to fixture (content capture off?)")
 		return
 	}
-	var msgs []weft.Message
-	for _, body := range bodies {
-		var batch []weft.Message
-		if err := json.Unmarshal(body, &batch); err == nil {
-			msgs = append(msgs, batch...)
-		}
+	// A batch dropped here would shift every later request key:
+	// fixtures that silently never match. Refuse instead.
+	input, steps, err := sourceSteps(bodies)
+	if err != nil {
+		badRequest(w, r, fmt.Sprintf("the run's transcript is not readable as messages: %v", err))
+		return
 	}
 	// The tool catalogue the run's requests carried — the caller names
 	// it (the drawer knows the registered set); a run without tools
 	// keys on the messages alone.
-	files := buildFixtures(msgs, req.Tools)
+	files := buildFixtures(input, steps, req.Tools)
 	if len(files) == 0 {
 		badRequest(w, r, "the run recorded no assistant turns to fixture")
 		return

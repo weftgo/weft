@@ -56,7 +56,7 @@
         "type": "step_finish",
         "run_id": "r_sub",
         "index": 0,
-        "reason": "end_turn",
+        "reason": "stop",
         "usage": {
           "input_tokens": 12,
           "output_tokens": 6

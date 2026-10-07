@@ -4,7 +4,7 @@
       "trace_id": "0102030405060708090a0b0c0d0e0f10",
       "span_id": "030405060708090a",
       "parent_span_id": "",
-      "name": "invoke_agent",
+      "name": "invoke_agent researcher",
       "kind": "internal",
       "start": "2020-01-01T09:02:00.123Z",
       "end": "2020-01-01T09:02:05.123Z",

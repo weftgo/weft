@@ -10,7 +10,6 @@ package studio
 // and meta (and both UIs) say so (PQ7).
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -38,8 +37,7 @@ func (s *Server) serveBreakpoints(rs *linkruntime.RuntimeServer) http.HandlerFun
 		}
 		id := r.PathValue("id")
 		var req breakpointsRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			badRequest(w, r, "breakpoints body: "+err.Error())
+		if !decodeBody(w, r, "breakpoints body", &req) {
 			return
 		}
 		reg, ok := rs.Registration(id)
@@ -90,8 +88,16 @@ func (s *Server) serveSteer(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := r.PathValue("id")
 		var req steerRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
+		if !decodeBody(w, r, "steer body", &req) {
+			return
+		}
+		if req.Message == "" {
 			badRequest(w, r, "steer body: message is required")
+			return
+		}
+		// Steering writes into a run: a read-scoped panel token does
+		// not (S4.6).
+		if !mayAct(w, r) {
 			return
 		}
 		runtimeID, ok := rs.RuntimeOf(runID)
@@ -125,6 +131,15 @@ func (s *Server) serveSteer(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 				forbidden(w, r)
 				return
 			}
+		}
+		// A fork-mode run is the runtime's own thread turn, and the
+		// runtime refuses to steer it: thread would turn a steer it
+		// cannot deliver into a follow-up turn outside the playground's
+		// park rule. Answering steered would tell the user it landed.
+		if rs.ForkRun(runID) {
+			writeError(w, r, http.StatusConflict, "conflict",
+				"run "+runID+" is a fork-mode turn: steering reaches ephemeral runs only — send the message as the fork's next input instead")
+			return
 		}
 		if err := rs.Steer(runtimeID, runID, req.Message); err != nil {
 			switch {

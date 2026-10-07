@@ -531,9 +531,10 @@ func TestPlaygroundPanelTokenScope(t *testing.T) {
 	}
 
 	// A playground-scoped token runs inside its own public id, and the
-	// command's actor records the panel identity.
-	own := strings.Replace(validRun, `"experiment_id": "exp_1"`,
-		`"command_id": "cmd_pg_own", "experiment_id": "exp_1"`, 1)
+	// command's actor records the panel identity. (No experiment_id: the
+	// panel never sends one, and a panel token's is refused —
+	// TestPanelTokenCannotLabelAnExperiment.)
+	own := strings.Replace(validRun, `"experiment_id": "exp_1"`, `"command_id": "cmd_pg_own"`, 1)
 	if code, body := pt.authed(t, http.MethodPost, "/api/playground/runs", pgTok, own); code != http.StatusAccepted {
 		t.Fatalf("playground-scoped POST, own public id = %d (%s), want 202", code, body)
 	}
@@ -571,7 +572,9 @@ func TestPlaygroundPanelTokenScope(t *testing.T) {
 // server-to-server — a panel token is refused outright, whatever its
 // scope; the fixtures export scopes by public id like every run-id
 // route in api.go; steer mirrors the approval route's db-row fallback
-// so a run with no public id is outside every panel token. The server
+// so a run with no public id is outside every panel token, and — a
+// write verb — it takes a playground-scoped token (the second pass's
+// correction: the first pin let a read-scoped token steer). The server
 // token keeps every route working.
 func TestStep8RoutesRefusePanelTokens(t *testing.T) {
 	pt := newPlaygroundServer(t, "srv-token")
@@ -701,14 +704,21 @@ func TestStep8RoutesRefusePanelTokens(t *testing.T) {
 	startRun("cmd_anon", "", "run_rt_anon")
 	startRun("cmd_mine", "pub_mine", "run_rt_mine")
 
-	if code, body := pt.authed(t, http.MethodPost, "/api/runs/run_rt_other/steer", readTok, `{"message":"hi"}`); code != http.StatusForbidden {
+	// The public-id rule is a playground-scoped token's: a read-scoped
+	// one does not steer at all (S4.6 — read-only unless "playground":
+	// true), whatever the run.
+	pgTok := pt.panelTok(t, "pub_mine", true)
+	if code, body := pt.authed(t, http.MethodPost, "/api/runs/run_rt_other/steer", pgTok, `{"message":"hi"}`); code != http.StatusForbidden {
 		t.Errorf("steer, another public id's run = %d (%s), want 403", code, body)
 	}
-	if code, body := pt.authed(t, http.MethodPost, "/api/runs/run_rt_anon/steer", readTok, `{"message":"hi"}`); code != http.StatusForbidden {
+	if code, body := pt.authed(t, http.MethodPost, "/api/runs/run_rt_anon/steer", pgTok, `{"message":"hi"}`); code != http.StatusForbidden {
 		t.Errorf("steer, a run with no public id = %d (%s), want 403", code, body)
 	}
-	if code, body := pt.authed(t, http.MethodPost, "/api/runs/run_rt_mine/steer", readTok, `{"message":"hi"}`); code != http.StatusAccepted {
+	if code, body := pt.authed(t, http.MethodPost, "/api/runs/run_rt_mine/steer", pgTok, `{"message":"hi"}`); code != http.StatusAccepted {
 		t.Errorf("steer, own run = %d (%s), want 202", code, body)
+	}
+	if code, body := pt.authed(t, http.MethodPost, "/api/runs/run_rt_mine/steer", readTok, `{"message":"hi"}`); code != http.StatusForbidden {
+		t.Errorf("steer, own run, read-scoped token = %d (%s), want 403", code, body)
 	}
 	if code, body := pt.authed(t, http.MethodPost, "/api/runs/run_rt_other/steer", pt.token, `{"message":"hi"}`); code != http.StatusAccepted {
 		t.Errorf("steer, server token = %d (%s), want 202", code, body)

@@ -35,12 +35,14 @@
 //   - step 8 (lane C2) adds studio/playground.go the same way
 //     (playgroundGroupHook), enabled by the Playground(true) option.
 //
-// A hook is nil until its file exists, so this build reports no panel
-// or playground capability: the group is simply not registered.
-// api/meta's capabilities list is computed from the registered groups
-// — never hard-coded — plus anything a hosting wrapper declares with
-// Capabilities(...). The UI gates every deployment-specific screen on
-// those names (ADR 0018 §8).
+// Both files exist now: the panel group registers always and names no
+// capability (the panel is a client of the API), and Playground(true)
+// registers the playground's groups — capabilities playground,
+// runtimes, breakpoints and steer. api/meta's capabilities list is
+// computed from the registered groups (live, ingest, auth with a
+// Token, and the playground's) — never hard-coded — plus anything a
+// hosting wrapper declares with Capabilities(...). The UI gates every
+// deployment-specific screen on those names (ADR 0018 §8).
 //
 // # The API is the contract
 //

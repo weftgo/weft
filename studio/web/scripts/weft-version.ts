@@ -11,8 +11,14 @@ export function weftVersion(): string {
   // A path, not a URL: under vitest's jsdom, URL is jsdom's and
   // readFileSync refuses it.
   const here = path.dirname(fileURLToPath(import.meta.url))
-  const go = readFileSync(path.resolve(here, "../../../version/version.go"), "utf8")
+  const go = readFileSync(
+    path.resolve(here, "../../../version/version.go"),
+    "utf8"
+  )
   const m = /^const Version = "([^"]+)"$/m.exec(go)
-  if (!m) throw new Error("weft-version: const Version not found in version/version.go")
+  if (!m)
+    throw new Error(
+      "weft-version: const Version not found in version/version.go"
+    )
   return m[1]
 }

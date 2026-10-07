@@ -17,7 +17,21 @@ import (
 	"time"
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
+
+	"github.com/weftgo/weft/version"
 )
+
+// TestVersionFlag pins --version: the one version (version.Runtime)
+// and a newline on stdout, and no server.
+func TestVersionFlag(t *testing.T) {
+	var out strings.Builder
+	if err := run([]string{"--version"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if want := version.Runtime() + "\n"; out.String() != want {
+		t.Errorf("studio --version printed %q, want %q", out.String(), want)
+	}
+}
 
 // TestNewServer pins the flag surface: the default database, sqlite://
 // paths, clickhouse:// reaching the driver, and the token wall.

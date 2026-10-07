@@ -6,6 +6,28 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Changed — breaking
+
+- **One version, the module's.** The new `github.com/weftgo/weft/version`
+  package (standard library only) holds it: `version.Version` is the
+  release tag, `version.Runtime()` reads the framework module's version
+  from the build info (the main module or the `github.com/weftgo/weft`
+  dependency, honouring `replace`) and falls back to `Version` under
+  `(devel)`. `studio.Version` is now `version.Version` — `v0.4.1` →
+  `v0.9.0` — so `/api/meta`'s `studio_version` and the devtools panel's
+  embedded version (stamped from `version/version.go` at build) move
+  with the module. A panel built for `v0.4.1` refuses a Studio that
+  reports `v0.9.0` as newer.
+- **`/api/meta`'s `weft_version` is the framework module's build-info
+  version** (`version.Runtime()`), no longer the `core` dependency's;
+  inside the workspace it reads the tag instead of `(devel)`.
+
+### Added
+
+- `studio --version` prints `version.Runtime()` and exits.
+
 ## 0.9.0 — 2026-10-07
 
 One module is the framework; `core` is the loop alone (ADR 0027).

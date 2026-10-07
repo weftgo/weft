@@ -1,5 +1,5 @@
 {
-  "weft_version": "(test)",
+  "weft_version": "v0.9.0",
   "studio_version": "v0.9.0",
   "db": "sqlite",
   "title": "weft studio",

@@ -599,7 +599,7 @@ func TestWeftVersionMatchesRoot(t *testing.T) {
 		t.Fatal("no run_start record with weft.version (test bug)")
 	}
 	if weftVersion() != root {
-		t.Errorf("weftVersion() = %q but the root module reports %q: bump otel/pipeline.go", weftVersion(), root)
+		t.Errorf("weftVersion() = %q but the root module reports %q: bump version/version.go and core/observe.go's version together", weftVersion(), root)
 	}
 }
 

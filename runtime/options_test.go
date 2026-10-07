@@ -74,6 +74,6 @@ func TestWeftVersionMatchesRoot(t *testing.T) {
 		t.Fatal("the run reported no span (test bug)")
 	}
 	if root := spans[0].InstrumentationScope().Version; weftVersion() != root {
-		t.Errorf("weftVersion() = %q, the root module reports %q: bump runtime/options.go with the tag", weftVersion(), root)
+		t.Errorf("weftVersion() = %q, the root module reports %q: bump version/version.go and core/observe.go's version together", weftVersion(), root)
 	}
 }

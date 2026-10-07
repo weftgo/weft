@@ -15,13 +15,15 @@
 // the weft version (version.Runtime: the module tag this binary was
 // built from) and exits.
 //
-// This is its own module so the studio library never carries what
-// only the binary needs — it is the one place that imports the
-// clickhouse driver.
+// It is a package of the framework module (ADR 0027) kept apart from
+// the studio library so the library never carries what only the
+// binary needs — it is the one place that imports the clickhouse
+// driver.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -41,21 +43,33 @@ import (
 const defaultAddr = "127.0.0.1:7331"
 
 func main() {
-	db := flag.String("db", "",
-		"`sqlite://path` or `clickhouse://user:pass@host:9000/db` (default: $WEFT_DB or ./.weft/weft.db)")
-	addr := flag.String("addr", defaultAddr, "listen address (loopback by default)")
-	token := flag.String("token", "",
-		"API token (default: $WEFT_STUDIO_TOKEN, else a generated dev token printed at start)")
-	showVersion := flag.Bool("version", false, "print the weft version and exit")
-	flag.Parse()
-	if *showVersion {
-		fmt.Println(version.Runtime())
-		return
-	}
-	if err := serve(*db, *addr, *token, os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "studio:", err)
+	if err := run(os.Args[1:], os.Stdout); err != nil {
+		if !errors.Is(err, flag.ErrHelp) {
+			fmt.Fprintln(os.Stderr, "studio:", err)
+		}
 		os.Exit(1)
 	}
+}
+
+// run parses the command line and serves, or prints the version
+// (version.Runtime) and returns when --version is set. Split from main
+// so the flag surface is testable.
+func run(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("studio", flag.ContinueOnError)
+	db := fs.String("db", "",
+		"`sqlite://path` or `clickhouse://user:pass@host:9000/db` (default: $WEFT_DB or ./.weft/weft.db)")
+	addr := fs.String("addr", defaultAddr, "listen address (loopback by default)")
+	token := fs.String("token", "",
+		"API token (default: $WEFT_STUDIO_TOKEN, else a generated dev token printed at start)")
+	showVersion := fs.Bool("version", false, "print the weft version and exit")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *showVersion {
+		_, err := fmt.Fprintln(stdout, version.Runtime())
+		return err
+	}
+	return serve(*db, *addr, *token, stdout)
 }
 
 // serve builds the server, prints where it lives, and listens until

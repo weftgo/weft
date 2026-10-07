@@ -207,7 +207,8 @@ func cleartext(rawURL string) bool {
 	return true
 }
 
-// weftVersion is the framework module's version, from the one source
-// ([version.Runtime]: the build info's tag, else [version.Version]);
-// TestWeftVersionMatchesRoot pins it to what the core reports.
-func weftVersion() string { return version.Runtime() }
+// weftVersion is the framework module's tag, [version.Version] — the
+// constant, not version.Runtime, because the core stamps weft.version
+// on the same run's spans and records from its own literal, and one run
+// must carry one value. TestWeftVersionMatchesRoot pins the two.
+func weftVersion() string { return version.Version }

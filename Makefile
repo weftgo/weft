@@ -119,9 +119,13 @@ live:
 #
 # The panel is stamped with the one version (B6): vite.panel.config.ts
 # reads `const Version` from version/version.go (studio/web/scripts/
-# weft-version.ts), so bumping that line at release and rerunning this
-# target is the whole bump; studio's TestVersionIsTheModules fails on a
-# stale or hand-edited stamp.
+# weft-version.ts). A release's version bump is three steps: (1) the
+# tag in version/version.go, (2) the same tag in core/observe.go's
+# `version` literal (the core imports nothing above it), (3) regenerate
+# studio's meta golden (`go test ./studio -run TestMetaGolden -update`)
+# and rerun this target, committing studio/dist. studio's
+# TestVersionIsTheModules fails on a stale or hand-edited stamp, and
+# TestWeftVersionMatchesRoot (otel, runtime) on a missed step 2.
 
 studio-build:
 	cd studio/web && bun install --frozen-lockfile && bun run build

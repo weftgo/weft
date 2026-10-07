@@ -28,8 +28,9 @@ import (
 // last-seen reads interrupted. Each run is one obsdb Batch — the
 // events, messages and invoke span a real pipeline would write — with
 // every time pinned, so the goldens are byte-stable. The only
-// normalization left is weft_version, which depends on where the test
-// runs.
+// normalization left is the run views' weft_version, the record's
+// stamp; api/meta's own weft_version is version.Runtime, which reads
+// the tag under go test, so meta.golden.json pins it unnormalized.
 
 var fixtureTags = map[string]string{"cwd": "/tmp/demo"}
 
@@ -370,12 +371,17 @@ func post(t *testing.T, h http.Handler, path, ctype, body string) (int, http.Hea
 // pretty re-indents a compact JSON body so goldens read like the API.
 func pretty(t *testing.T, body string) string {
 	t.Helper()
+	return weftVersionRe.ReplaceAllString(indent(t, body), `"weft_version": "(test)"`)
+}
+
+// indent re-indents a compact JSON body, normalizing nothing.
+func indent(t *testing.T, body string) string {
+	t.Helper()
 	var buf bytes.Buffer
 	if err := json.Indent(&buf, []byte(body), "", "  "); err != nil {
 		t.Fatalf("indent: %v", err)
 	}
-	out := weftVersionRe.ReplaceAllString(buf.String(), `"weft_version": "(test)"`)
-	return out + "\n"
+	return buf.String() + "\n"
 }
 
 func golden(t *testing.T, name, body string) {
@@ -392,7 +398,9 @@ func TestMetaGolden(t *testing.T) {
 	if !strings.Contains(body, `"db":"sqlite"`) || !strings.Contains(body, `"interrupted_after_ms":30000`) {
 		t.Errorf("meta db kind / clock: %s", body)
 	}
-	golden(t, "meta.golden.json", body)
+	// Not golden(): weft_version is pinned too (version.Runtime is the
+	// tag under go test; the release bump regenerates this file).
+	wefttest.Golden(t, "testdata/api/meta.golden.json", []byte(indent(t, body)))
 
 	// Capabilities are computed from the registered route groups
 	// (S4.2): the read API names none; live and ingest are registered,

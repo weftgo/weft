@@ -6,7 +6,7 @@
 // meta.capabilities reports the playground (§8.5 item 3).
 import type { RunRow, ToolCallPart, Usage } from "../lib/api"
 import { isHoleRef } from "../lib/api"
-import { holeWords, mergeHoles } from "../lib/honesty"
+import { holeWords, mergeHoles, rowHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
 import type { HoleMark } from "../lib/honesty"
 import { paramsLine, REQUEST_NOT_RECORDED_LABEL, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
 import { MAX_REQUEST_PAGES, REQUEST_PAGE } from "./client"
@@ -1629,16 +1629,20 @@ function childBlock(childId: string, t: TurnView, open?: OpenState, endpoint?: s
   details.setAttribute("data-weft-child", childId)
   if (t.expanded.has(childId)) details.setAttribute("open", "")
   // The nested row (A10): agent, status, usage — the parent's row of
-  // the child, before it is opened.
-  details.appendChild(
-    el(
-      "summary",
-      undefined,
-      row
-        ? `subagent ${row.agent || shortId(childId)} · ${row.status} · ${usageLine(row.usage)}`
-        : `subagent ${shortId(childId)}`
-    )
+  // the child, before it is opened; its usage only once the record
+  // has it, its holes (interrupted, stripped…) as badges.
+  const summary = el(
+    "summary",
+    undefined,
+    row
+      ? `subagent ${row.agent || shortId(childId)} · ${row.status} · ${
+          usageKnown(row.status) ? usageLine(row.usage) : row.status === "running" ? USAGE_AT_FINISH : "—"
+        }`
+      : `subagent ${shortId(childId)}`
   )
+  const holes = row && holeBadges(child?.doc?.holes ?? rowHoles(row))
+  if (holes) summary.appendChild(holes)
+  details.appendChild(summary)
   if (endpoint) details.appendChild(handOff(endpoint, childId))
   if (!child) {
     details.appendChild(el("div", undefined, "loading the subagent's turn…"))

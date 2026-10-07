@@ -91,13 +91,19 @@ module, ADR 0005).
   with the child's own request record, read by the child's id
   (`/api/runs/<child id>/requests`, under the `requests` capability:
   the child's prompt, never the parent's; a read-scoped token sees
-  `hidden`). The trace view's call detail joins a call to its child the
-  same way. The runs table is "top-level only" by default with a toggle
+  `hidden`). A call joins its child by the child's id, which names the
+  step (`<parent>/<step>/<call id>` — call ids may repeat across steps),
+  in the story and the trace view's call detail alike; a child id of
+  another form falls back to the first unlinked call with its
+  `parent_call_id`. The run document's `children[]` rows carry each
+  child's own `holes`; a child's usage shows once it ended ("usage at
+  finish" while it runs, "—" beside the interrupted badge). The runs table is "top-level only" by default with a toggle
   (`?subagents=all`) and a `?parent=` filter chip; a child row links its
   parent. The devtools panel's subagent badge opens the child inline,
   one level: its row (agent, status, usage), its steps with its request
   line, and an "open in Studio" hand-off carrying the child's id; a
-  grandchild is its badge and the hand-off only.
+  grandchild is its badge and the hand-off only. A child opened while
+  it ran is read again when the parent's reload finds its status moved.
 
 - **Studio's run export (plan A7, A9's byte-faithful fixtures).**
   `GET /api/runs/{id}/export?format=json|jsonl|otlp|wefttest`, under a

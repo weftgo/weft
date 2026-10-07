@@ -4,9 +4,11 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { screen } from "@testing-library/react"
+import { QueryClient } from "@tanstack/react-query"
 import { describe, expect, it } from "vitest"
 
-import type { EventsPage, RunDoc, WireEvent } from "@/lib/api"
+import { stepQuery } from "@/lib/api"
+import type { EventsPage, RunDoc, StepDoc, WireEvent } from "@/lib/api"
 import { fold } from "@/lib/events"
 import { StepList } from "@/components/studio/step-list"
 import { renderWithRouter } from "@/test/render"
@@ -205,4 +207,71 @@ describe("StepList", () => {
     expect(
       order[1]!.compareDocumentPosition(order[2]!) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+  
+})
+
+describe("StepList's subagent child rows (A10)", () => {
+  // A child's usage is the record's only once the run ended — a
+  // running child's zeros read "usage at finish", an interrupted one's
+  // "—" beside its interrupted badge; never "0 in / 0 out".
+  it("a running child's row says its usage comes at the finish; an interrupted one's is a dash and a badge", async () => {
+    const zero = { input_tokens: 0, output_tokens: 0 }
+    for (const [status, want] of [
+      ["running", "usage at finish"],
+      ["interrupted", "—"],
+    ] as const) {
+      const doc: RunDoc = {
+        ...subDoc,
+        children: subDoc.children.map((c) => ({ ...c, status, usage: zero, finished: null })),
+      }
+      const { unmount } = await renderWithRouter(
+        <StepList events={subEvents} folded={fold(subEvents)} doc={doc} />
+      )
+      const row = document.querySelector(`[data-child-row="${subDoc.children[0].id}"]`)!
+      expect(row.querySelector("[data-child-usage]")?.textContent).toBe(want)
+      expect(row.textContent).not.toContain("0 in / 0 out")
+      expect(Boolean(row.querySelector('[data-hole="interrupted"]'))).toBe(status === "interrupted")
+      unmount()
+    }
   })
+
+  // A10: a live child the run document does not list yet still gets
+  // its row from the step route's children[] when that is cached.
+  it("falls back to the cached step route's children[] for a child the run document does not list", async () => {
+    const kid = subDoc.children[0]
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    client.setQueryData(stepQuery(subDoc.id, 0).queryKey, {
+      children: [{ id: kid.id, call_id: kid.parent_call_id, agent: "researcher", status: "succeeded", usage: kid.usage }],
+    } as unknown as StepDoc)
+    const doc: RunDoc = { ...subDoc, children: [] }
+    await renderWithRouter(<StepList events={subEvents} folded={fold(subEvents)} doc={doc} />, client)
+    const row = document.querySelector(`[data-step="0"] [data-child-row="${kid.id}"]`)
+    expect(row?.querySelector("[data-child-agent]")?.textContent).toBe("researcher")
+    expect(row?.querySelector("[data-child-usage]")?.textContent).toBe("9 in / 5 out")
+  })
+
+  // A10: call ids may repeat across steps (core/loop.go); the child's
+  // id names its step (<parent>/<step>/<call id>), and that is the
+  // call it joins — never the first call with the same id.
+  it("joins a child to the call of the step its id names when a call id repeats across steps", async () => {
+    const R = "r_rep"
+    const U = { input_tokens: 1, output_tokens: 1 }
+    const call = (index: number, name: string): WireEvent[] => [
+      { type: "step_start", run_id: R, index },
+      { type: "tool_start", run_id: R, seq: index + 1, call_id: "c1", name, args: {} },
+      { type: "tool_finish", run_id: R, seq: index + 1, call_id: "c1", name, content: "ok", is_error: false },
+      { type: "step_finish", run_id: R, index, reason: "tool_calls", usage: U },
+    ]
+    const events: WireEvent[] = [
+      { type: "run_start", id: R, model: { provider: "p", name: "m" } },
+      ...call(0, "lookup_order"),
+      ...call(1, "research"),
+      { type: "run_finish", run_id: R, usage: U, steps: 2 },
+    ]
+    const kid = { ...subDoc.children[0], id: `${R}/1/c1`, parent_run_id: R, parent_call_id: "c1" }
+    const doc: RunDoc = { ...subDoc, id: R, children: [kid] }
+    await renderWithRouter(<StepList events={events} folded={fold(events)} doc={doc} />)
+    expect(document.querySelector(`[data-step="1"] [data-child-row="${kid.id}"]`)).toBeTruthy()
+    expect(document.querySelector(`[data-step="0"] [data-child-row]`)).toBeNull()
+  })
+})

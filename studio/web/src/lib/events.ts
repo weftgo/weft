@@ -331,11 +331,19 @@ export function newFold(): FoldFeed {
  */
 export function linkView(
   view: FoldedRun,
-  children: { id: string; parent_call_id: string }[]
+  children: { id: string; parent_call_id: string; parent_run_id?: string }[]
 ): FoldedRun {
   for (const child of children) {
     if (!child.parent_call_id) continue
-    for (const step of view.steps) {
+    // Call ids may repeat across steps (core/loop.go), which is why a
+    // child's id carries the step: <parent>/<step>/<call id>. The step
+    // the id names wins; an id of another form (a resumed run's) falls
+    // back to the first call with that id not linked yet.
+    const named = view.steps.find(
+      (s) =>
+        child.id === `${child.parent_run_id || view.runId}/${s.index}/${child.parent_call_id}`
+    )
+    for (const step of named ? [named] : view.steps) {
       const call = step.toolCalls.find((c) => c.callId === child.parent_call_id)
       if (call && !call.childRunId) {
         call.childRunId = child.id

@@ -170,7 +170,7 @@ status, session, public id, playground, parent and `tag.<k>=<v>`
 filters, cursor-paged; top-level only by default — `parent=<run id>`
 lists one run's subagent children, `all=1` (or `parent=*`) every run,
 children included),
-`runs/{id}` (the row and the subagent children — never events; with
+`runs/{id}` (the row and the subagent children, each child row with its own `holes` — never events; with
 `instructions_hash`, `catalog_hash`, `request_count` and, for a run
 written before ADR 0028, `requests_badge: "not_recorded"`),
 `runs/{id}/events?after=&limit=` (the paged durable stream),

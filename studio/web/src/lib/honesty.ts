@@ -195,17 +195,30 @@ export function holeWords(m: HoleMark): {
   }
 }
 
-/** rowHoles is what a run row alone can tell (a subagent child's row,
- * before its own document is read; api.go's runHoles holds the rest):
- * a run older than the request record (requests_badge not_recorded),
- * and a crash-orphaned one (status interrupted). The child's document,
- * once read, carries the full list — the surfaces prefer it. */
+/** rowHoles is a run row's holes: a run document's children[] row
+ * carries the child's own (api.go's runHoles, A10 — stripped, gap,
+ * derived…); beside them, what the row alone tells — a run older than
+ * the request record (requests_badge not_recorded), a crash-orphaned
+ * one (status interrupted), which a Studio older than the field still
+ * shows. */
 export function rowHoles(row: {
   status?: string
   requests_badge?: string
+  holes?: HoleMark[]
 }): HoleMark[] {
-  const out: HoleMark[] = []
+  const out: HoleMark[] = Array.isArray(row.holes) ? [...row.holes] : []
   if (row.requests_badge === "not_recorded") out.push({ hole: "not_recorded" })
   if (row.status === "interrupted") out.push({ hole: "interrupted" })
   return mergeHoles(out)
 }
+
+/** usageKnown says whether a run row's usage is a number to show: the
+ * record sets it only when the run ends (run_finish, the run span's
+ * end), so a running row's zeros are "not yet" and an interrupted
+ * one's are "never" (its badge says why) — neither is 0 tokens. */
+export function usageKnown(status: string): boolean {
+  return status === "succeeded" || status === "failed"
+}
+
+/** USAGE_AT_FINISH is what a running child's usage reads. */
+export const USAGE_AT_FINISH = "usage at finish"

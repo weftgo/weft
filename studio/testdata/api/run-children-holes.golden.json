@@ -1,0 +1,93 @@
+{
+  "id": "r_off",
+  "parent_run_id": "",
+  "parent_call_id": "",
+  "trace_id": "(norm)",
+  "agent": "orders",
+  "model": {
+    "provider": "wefttest",
+    "name": "glm-a"
+  },
+  "manifest_hash": "890fdbb9c1789b77afb62887150cab9260674ae424b34d86a78d6cf8a02f0ce1",
+  "weft_version": "(test)",
+  "service": "studio.test",
+  "session_id": "",
+  "public_id": "",
+  "turn": 0,
+  "playground": false,
+  "experiment_id": "",
+  "forked_from": "",
+  "meta": {},
+  "started": "(time)",
+  "finished": "(time)",
+  "last_seen": "(norm)",
+  "status": "succeeded",
+  "err": "",
+  "steps": 3,
+  "pending": 1,
+  "stop_reason": "tool_calls",
+  "usage": {
+    "input_tokens": 40,
+    "output_tokens": 20
+  },
+  "event_count": 13,
+  "message_count": 0,
+  "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+  "catalog_hash": "974dbbd40b479735e3931872bc773dc4351bddc76c1e52c12457ea04c42f2b14",
+  "request_count": 6,
+  "children": [
+    {
+      "id": "r_off/1/c_sub",
+      "parent_run_id": "r_off",
+      "parent_call_id": "c_sub",
+      "trace_id": "(norm)",
+      "agent": "researcher",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "manifest_hash": "6926e54a73e45a204c42ebf4655098d6cf83224f4c3c6f809b982eb57e6d0d18",
+      "weft_version": "(test)",
+      "service": "studio.test",
+      "session_id": "",
+      "public_id": "",
+      "turn": 0,
+      "playground": false,
+      "experiment_id": "",
+      "forked_from": "",
+      "meta": {},
+      "started": "(time)",
+      "finished": "(time)",
+      "last_seen": "(norm)",
+      "status": "succeeded",
+      "err": "",
+      "steps": 1,
+      "pending": 0,
+      "stop_reason": "stop",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 0,
+      "instructions_hash": "85f7fc2d7601d943c660c7969a4cc4a4c5838d7cdff1f2f56350587c70f58d13",
+      "catalog_hash": "",
+      "request_count": 1,
+      "holes": [
+        {
+          "hole": "stripped",
+          "reason": "content not captured by this app: the destination's chain stripped it (weft.content = stripped), or the agent captured none (weft.Content(false), weft.content = none), so prompts, catalogs, messages, tool arguments and results were dropped before they were stored",
+          "fix": "turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent"
+        }
+      ]
+    }
+  ],
+  "holes": [
+    {
+      "hole": "stripped",
+      "reason": "content not captured by this app: the destination's chain stripped it (weft.content = stripped), or the agent captured none (weft.Content(false), weft.content = none), so prompts, catalogs, messages, tool arguments and results were dropped before they were stored",
+      "fix": "turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent"
+    }
+  ]
+}
+

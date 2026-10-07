@@ -12,6 +12,7 @@ import {
   all,
   ATTRS,
   baseRoutes,
+  FakeEventSource,
   fakeStudio,
   META,
   mount,
@@ -116,5 +117,46 @@ describe("the panel's subagent badge (A10)", () => {
     expect(el.shadowRoot!.innerHTML).not.toContain(CHILD_PROMPT)
     // The child's steps are still folded under the parent's.
     expect(all(el, `[data-weft-child="${CHILD}"] [data-weft-step]`).length).toBe(1)
+  })
+
+  it("a running child reads 'usage at finish', and refreshes — status, request line — once the parent's reload finds it finished", async () => {
+    let finished = false
+    const r = routes()
+    const parentRow = () => runRow({ status: finished ? "succeeded" : "running", finished: finished ? T0 : null })
+    const childRow = () =>
+      runRow({
+        id: CHILD,
+        parent_run_id: RUN,
+        parent_call_id: "c_sub",
+        agent: "researcher",
+        session_id: "",
+        status: finished ? "succeeded" : "running",
+        finished: finished ? T0 : null,
+        usage: finished ? U : { input_tokens: 0, output_tokens: 0 },
+      })
+    r["runs?public_id=pub_orders&limit=50"] = () => ({ total: 1, runs: [parentRow()], next_before: null })
+    r[`runs/${RUN}`] = () => ({ ...parentRow(), children: [childRow()] })
+    r[`runs/${CHILD}`] = () => ({ ...childRow(), children: [] })
+    r[`runs/${CHILD}/requests?limit=1000`] = () => (finished ? golden("requests-child") : { requests: [] })
+    const studio = fakeStudio(r, metaWithRequests)
+    const el = await mount({ ...ATTRS, "data-token": claims("playground") })
+    expect($(el, `[data-weft-child="${CHILD}"] summary`)?.textContent).toBe(
+      "subagent researcher · running · usage at finish"
+    )
+    let block = await openChild(el)
+    expect(block.querySelector('[data-weft-request="0"]')?.textContent).toContain("not stored yet")
+    expect(block.textContent).not.toContain(CHILD_PROMPT)
+    const reads = studio.gets(`runs/${CHILD}/requests`).length
+
+    // The parent ends: its tail's run frame reloads the turn, whose
+    // document now reads the child finished — the child is read again.
+    finished = true
+    FakeEventSource.last("run=")!.emit("run", { run: parentRow() })
+    await settle()
+    block = $(el, `[data-weft-child="${CHILD}"]`)!
+    expect(block.getAttribute("open")).toBe("")
+    expect(block.querySelector("summary")?.textContent).toBe("subagent researcher · succeeded · 10→5 tok")
+    expect(block.querySelector('[data-weft-request="0"]')?.textContent).toContain(CHILD_PROMPT)
+    expect(studio.gets(`runs/${CHILD}/requests`).length).toBe(reads + 1)
   })
 })

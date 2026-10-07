@@ -13,9 +13,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import type { RunRow, RunStatus, StepChild, Usage } from "@/lib/api"
 import { runQuery, transcriptQuery } from "@/lib/api"
-import { applyTranscript } from "@/lib/events"
+import { applyTranscript, linkView } from "@/lib/events"
 import { usageSummary } from "@/lib/format"
-import { mergeHoles, rowHoles } from "@/lib/honesty"
+import { mergeHoles, rowHoles, USAGE_AT_FINISH, usageKnown } from "@/lib/honesty"
 import { useRunEvents } from "@/hooks/use-run-events"
 
 import { HoleBadges } from "@/components/studio/hole-badge"
@@ -91,12 +91,15 @@ export function SubagentBlock({
     stream.events.length > 0
       ? stream.folded
       : null
-  const view =
+  const overlaid =
     folded && transcript.data
       ? applyTranscript(folded, transcript.data.batches, {
           replace: childStatus !== "running",
         })
       : folded
+  // The grandchildren, stamped on the child's calls by child id.
+  const view =
+    overlaid && doc.data ? linkView(overlaid, doc.data.children) : overlaid
 
   return (
     <div
@@ -147,7 +150,11 @@ export function SubagentBlock({
           data-child-usage
           title="the child's own tokens: delegated usage, rolled into the parent's"
         >
-          {usageSummary(child.usage)}
+          {usageKnown(childStatus)
+            ? usageSummary(child.usage)
+            : childStatus === "running"
+              ? USAGE_AT_FINISH
+              : "—"}
         </span>
         <HoleBadges holes={holes} />
         <span className="font-mono text-[11px] text-faint">{child.id}</span>
@@ -199,14 +206,14 @@ export function SubagentBlock({
   )
 }
 
-/** childLinksOf maps a call id to its child run, for the block's own
- * nested blocks. */
+/** childLinksOf maps a child run id to its row, for the block's own
+ * nested blocks (looked up by the call's childRunId). */
 export function childLinksOf(
   children: ChildRow[] | undefined
 ): Map<string, ChildRow> {
   const m = new Map<string, ChildRow>()
   for (const c of children ?? []) {
-    if (c.parent_call_id) m.set(c.parent_call_id, c)
+    if (c.parent_call_id) m.set(c.id, c)
   }
   return m
 }

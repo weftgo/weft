@@ -2,8 +2,11 @@ package studio
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/weftgo/weft/otel"
 )
 
 // TestSubagentsOnThePage pins plan A10's share of the record over the
@@ -76,5 +79,44 @@ func TestSubagentsOnThePage(t *testing.T) {
 	decode(t, fetchJSON(t, ts, "/api/runs/"+kid+"/requests?step=0", nil), &page)
 	if len(page.Requests) != 1 || page.Requests[0].Step != 0 {
 		t.Errorf("child requests?step=0 = %+v, want the one row", page.Requests)
+	}
+}
+
+// TestChildRowHoles: the run document's children[] rows carry each
+// child's own holes (runHoles, plan A10), so the parent's page badges a
+// content-off child before the child's document is read; a child with
+// none carries no holes field (list rows never do). The content-off
+// parent's document is the golden run-children-holes.golden.json.
+func TestChildRowHoles(t *testing.T) {
+	ts, _ := requestsServer(t)
+	recordStepsRun(t, ts.URL, "r_off", nil, otel.NoContent())
+	recordStepsRun(t, ts.URL, "r_on", nil)
+	type kid struct {
+		ID    string `json:"id"`
+		Holes []struct {
+			Hole, Reason, Fix string
+		} `json:"holes"`
+	}
+	read := func(id string) (string, []kid) {
+		body := fetchJSON(t, ts, "/api/runs/"+id, func(b string) bool {
+			return strings.Contains(b, `"request_count":6`) && strings.Contains(b, `"id":"`+id+`/1/c_sub"`)
+		})
+		var doc struct {
+			Children []kid `json:"children"`
+		}
+		decode(t, body, &doc)
+		return body, doc.Children
+	}
+	body, off := read("r_off")
+	if len(off) != 1 || len(off[0].Holes) == 0 || off[0].Holes[0].Hole != "stripped" || off[0].Holes[0].Reason == "" {
+		t.Errorf("content-off child row = %+v, want its stripped hole with a reason", off)
+	}
+	stepGolden(t, "run-children-holes.golden.json", regexp.MustCompile(`"(last_seen|trace_id)": ?"[^"]*"`).ReplaceAllString(body, `"$1":"(norm)"`))
+	_, on := read("r_on")
+	if len(on) != 1 || on[0].Holes != nil {
+		t.Errorf("content-on child row = %+v, want no holes field", on)
+	}
+	if list := fetchJSON(t, ts, "/api/runs?all=1", nil); strings.Contains(list, `"holes"`) {
+		t.Errorf("list rows carry holes: %s", list)
 	}
 }

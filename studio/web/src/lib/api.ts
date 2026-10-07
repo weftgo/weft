@@ -61,6 +61,9 @@ export interface RunRow {
   catalog_hash?: string
   request_count?: number
   requests_badge?: string
+  /** On a run document's children[] rows only (A10): the child's own
+   * holes (api.go's runHoles), absent when it has none. */
+  holes?: StepHole[]
 }
 
 /** GET /api/runs → RunsPage. */

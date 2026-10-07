@@ -93,6 +93,9 @@ export interface ChildView {
    * the same scope rules as the turn's — a read-scoped token never
    * asks and holds the hidden badge. */
   requests: PanelRequests | null
+  /** The child's status (the parent's row of it) when it was read: a
+   * reload of the parent that finds it moved reads the child again. */
+  status: string
 }
 
 /** The selected turn's data: the run doc (children by
@@ -804,6 +807,19 @@ export class PanelModel {
         this.upsertRun(row)
       }
     }
+    // An expanded child read while it ran is a snapshot: one whose
+    // status has moved since (it finished, or went stale) is read again
+    // — its words, its request line, its holes (A10, parity with the
+    // Studio block). The old copy stays drawn until the new one lands.
+    if (doc && Array.isArray(doc.children)) {
+      for (const [cid, cv] of view.children) {
+        const now = doc.children.find((c) => c.id === cid)?.status
+        if (!now || now === cv.status) continue
+        view.tried.delete(cid)
+        if (view.expanded.has(cid)) void this.expandChild(cid, true).catch(quiet)
+        else view.children.delete(cid)
+      }
+    }
     if (walk) {
       restart(view, walk.events)
       view.gaps = walk.gaps
@@ -1001,9 +1017,9 @@ export class PanelModel {
 
   /** expandChild loads a subagent child's own turn view (lazy, §2:
    * a delegating tool call expands into the child run). */
-  async expandChild(childId: string) {
+  async expandChild(childId: string, refresh = false) {
     const view = this.state.turn
-    if (!view || view.children.has(childId) || view.tried.has(childId)) return
+    if (!view || (!refresh && view.children.has(childId)) || view.tried.has(childId)) return
     view.tried.add(childId)
     const seq = this.loadSeq
     let walk: EventWalk
@@ -1020,11 +1036,8 @@ export class PanelModel {
       this.readRequests(childId),
     ])
     if (seq !== this.loadSeq || this.disposed || this.state.turn !== view) return
-    const folded = overlay(
-      viewOf(feed),
-      transcript,
-      (view.doc?.children.find((c) => c.id === childId)?.status ?? "running") !== "running"
-    )
+    const status = view.doc?.children.find((c) => c.id === childId)?.status ?? "running"
+    const folded = overlay(viewOf(feed), transcript, status !== "running")
     // The grandchildren are linked (one level inline: the panel badges
     // them and hands off to Studio).
     if (doc && Array.isArray(doc.children)) {
@@ -1042,6 +1055,7 @@ export class PanelModel {
       capped: walk.capped,
       doc,
       requests,
+      status,
     })
     this.emit()
   }

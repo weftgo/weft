@@ -272,11 +272,14 @@ export function StepBody({
 }: {
   step: FoldedStep
   runStatus: string
-  /** A subagent's child run per owning call id (parent_call_id,
-   * S4.3) — the block fetches its events on expand. */
+  /** The run's subagent children by child run id, looked up by the
+   * call's childRunId (linkView stamped it: call ids may repeat across
+   * steps, child ids carry the step) — the block fetches its events on
+   * expand. */
   childLinks: Map<string, ChildRow>
-  /** The step route's children[] (A7), when cached: a child the run
-   * document does not list yet (a live run's) still gets its row. */
+  /** The step route's children[] (A7) by call id — one step's, so its
+   * call ids are unique — when cached: a child the run document does
+   * not list yet (a live run's) still gets its row. */
   stepChildren?: Map<string, ChildRow>
   onJump?: (t: number) => void
   compact?: boolean
@@ -308,9 +311,9 @@ export function StepBody({
               call={call}
               runStatus={runStatus}
               child={
-                call.childRunId
-                  ? childLinks.get(call.callId)
-                  : stepChildren?.get(call.callId)
+                (call.childRunId
+                  ? childLinks.get(call.childRunId)
+                  : undefined) ?? stepChildren?.get(call.callId)
               }
               onJump={onJump}
               compact={compact}
@@ -535,10 +538,10 @@ export function StepList({
     upTo == null ? folded : (atPlayhead ?? fold(events, upTo)),
     doc.children
   )
-  // A child row per owning call id, joined by parent_call_id (S4.3);
-  // the block expands lazily.
+  // A child row per child id; linkView stamped each call with its
+  // child's id (S4.3). The block expands lazily.
   const childLinks = new Map<string, ChildRow>(
-    doc.children.map((c) => [c.parent_call_id, c])
+    doc.children.map((c) => [c.id, c])
   )
   // While scrubbing, the run reads as running: calls past the
   // playhead are "running", not "never completed".

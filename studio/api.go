@@ -143,6 +143,11 @@ type runRow struct {
 	CatalogHash      string `json:"catalog_hash"`
 	RequestCount     int64  `json:"request_count"`
 	RequestsBadge    string `json:"requests_badge,omitempty"`
+	// Holes is set on a run document's children[] rows only (plan
+	// A10): each child's own runHoles, so the parent's page badges a
+	// content-off or interrupted child before its document is read.
+	// Absent on list rows; a runDoc's own Holes shadows it.
+	Holes []stepHole `json:"holes,omitempty"`
 }
 
 // row maps an obsdb run row onto the DTO. The status is the
@@ -674,7 +679,14 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	doc := runDoc{runRow: row(det.RunRow), Children: make([]runRow, 0, len(det.Children))}
 	for _, kid := range det.Children {
-		doc.Children = append(doc.Children, row(kid))
+		kr := row(kid)
+		kh, err := s.runHoles(r.Context(), kid)
+		if err != nil {
+			dbError(w, r, "run", id, err)
+			return
+		}
+		kr.Holes = kh
+		doc.Children = append(doc.Children, kr)
 	}
 	holes, err := s.runHoles(r.Context(), det.RunRow)
 	if err != nil {

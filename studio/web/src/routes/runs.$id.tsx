@@ -25,7 +25,7 @@ import {
   spansQuery,
 } from "@/lib/api"
 import type { RunRow, Span as TimedSpan } from "@/lib/api"
-import { applyTranscript, fold } from "@/lib/events"
+import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
 import {
   defaultSelection,
@@ -278,9 +278,18 @@ function RunPage() {
   // are "running", not "never completed".
   const viewStatus = replaying ? "running" : runStatus
 
+  // The trace's calls carry their child's id (linkView, as the story's
+  // do): the call detail's subagent block joins on it — never on the
+  // bare call id, which may repeat across steps (A10).
+  const children = run.data?.children
   const posSpans = useMemo(
-    () => spansFromFold(atPlayhead, stream.events.length, viewStatus),
-    [atPlayhead, stream.events.length, viewStatus]
+    () =>
+      spansFromFold(
+        children ? linkView(atPlayhead, children) : atPlayhead,
+        stream.events.length,
+        viewStatus
+      ),
+    [atPlayhead, children, stream.events.length, viewStatus]
   )
   const timeSpans = useMemo(() => spansFromTimed(timed), [timed])
   const traceSpans = axis === "time" && haveTime ? timeSpans : posSpans

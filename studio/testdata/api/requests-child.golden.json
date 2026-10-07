@@ -1,0 +1,41 @@
+{
+  "requests": [
+    {
+      "index": 0,
+      "step": 0,
+      "attempt": 1,
+      "time": "(time)",
+      "system_hash": "85f7fc2d7601d943c660c7969a4cc4a4c5838d7cdff1f2f56350587c70f58d13",
+      "catalog_hash": "",
+      "content": "",
+      "truncated_bytes": 0,
+      "body": {
+        "step": 0,
+        "attempt": 1,
+        "system_hash": "85f7fc2d7601d943c660c7969a4cc4a4c5838d7cdff1f2f56350587c70f58d13",
+        "messages_ref": {
+          "index": 0,
+          "count": 1
+        },
+        "tools": {
+          "catalog_hash": "",
+          "names": []
+        },
+        "sequential_tools": false,
+        "params": {},
+        "model": {
+          "provider": "wefttest",
+          "name": "script"
+        },
+        "stream": true
+      },
+      "prompt": {
+        "hash": "85f7fc2d7601d943c660c7969a4cc4a4c5838d7cdff1f2f56350587c70f58d13",
+        "text": "You research orders.",
+        "content": "",
+        "truncated_bytes": 0
+      }
+    }
+  ]
+}
+

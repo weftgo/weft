@@ -504,7 +504,9 @@ func (s *Server) debugScope() string {
 
 // serveRuns answers api/runs (S4.2): agent, status, session,
 // public_id, playground, parent ("" top-level only, "*" all, or a run
-// id for its children), tag.<k>=<v> metadata matches, before (the
+// id for its children), all (a boolean: true is parent=*, every run,
+// subagent children included — a parent id given beside it wins),
+// tag.<k>=<v> metadata matches, before (the
 // RFC 3339 paging cursor on started) with before_id (the cursor's run
 // id: exact inside a tie) and limit. next_before / next_before_id are
 // the next page's before / before_id, null on the last page.
@@ -525,6 +527,16 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		query.Playground = &b
+	}
+	if v := q.Get("all"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			badRequest(w, r, "all must be true or false (1 or 0)")
+			return
+		}
+		if b && query.ParentRunID == "" {
+			query.ParentRunID = "*"
+		}
 	}
 	if v := q.Get("before"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)

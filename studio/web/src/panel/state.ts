@@ -85,6 +85,14 @@ export interface ChildView {
   transcript: Transcript | null
   /** The events walk stopped at the page cap. */
   capped: boolean
+  /** The child's own document (its holes; its children, the
+   * grandchildren the panel only hands off to Studio); null when it
+   * could not be read. */
+  doc: RunDoc | null
+  /** The child's request record, read by the child's id (plan A10):
+   * the same scope rules as the turn's — a read-scoped token never
+   * asks and holds the hidden badge. */
+  requests: PanelRequests | null
 }
 
 /** The selected turn's data: the run doc (children by
@@ -1006,18 +1014,34 @@ export class PanelModel {
     }
     const feed = newFold()
     foldInto(feed, new Set(), walk.events)
-    const transcript = await fetchTranscript(this.ep, childId).catch(() => null)
+    const [transcript, doc, requests] = await Promise.all([
+      fetchTranscript(this.ep, childId).catch(() => null),
+      fetchRun(this.ep, childId).catch(() => null),
+      this.readRequests(childId),
+    ])
     if (seq !== this.loadSeq || this.disposed || this.state.turn !== view) return
+    const folded = overlay(
+      viewOf(feed),
+      transcript,
+      (view.doc?.children.find((c) => c.id === childId)?.status ?? "running") !== "running"
+    )
+    // The grandchildren are linked (one level inline: the panel badges
+    // them and hands off to Studio).
+    if (doc && Array.isArray(doc.children)) {
+      try {
+        linkView(folded, doc.children)
+      } catch {
+        // children that do not read as rows: no badges
+      }
+    }
     view.children.set(childId, {
       events: walk.events,
       feed,
-      folded: overlay(
-        viewOf(feed),
-        transcript,
-        (view.doc?.children.find((c) => c.id === childId)?.status ?? "running") !== "running"
-      ),
+      folded,
       transcript,
       capped: walk.capped,
+      doc,
+      requests,
     })
     this.emit()
   }

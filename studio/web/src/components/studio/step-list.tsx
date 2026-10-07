@@ -10,7 +10,7 @@ import { ChevronRight, Play } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 import { stepQuery } from "@/lib/api"
-import type { RunDoc, RunRow, WireEvent } from "@/lib/api"
+import type { RunDoc, WireEvent } from "@/lib/api"
 import {
   callState,
   fold,
@@ -31,7 +31,8 @@ import { CodeWin } from "@/components/studio/codewin"
 import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
 import { RequestSection } from "@/components/studio/step-request"
 import type { RunRequests } from "@/components/studio/step-request"
-import { SubagentBlock } from "@/components/studio/subagent-block"
+import { childOfStep, SubagentBlock } from "@/components/studio/subagent-block"
+import type { ChildRow } from "@/components/studio/subagent-block"
 import { TruncationBadge } from "@/components/studio/truncation-badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -166,7 +167,7 @@ export function ToolCallRow({
 }: {
   call: FoldedToolCall
   runStatus: string
-  child?: RunRow
+  child?: ChildRow
   onJump?: (t: number) => void
   compact?: boolean
 }) {
@@ -265,6 +266,7 @@ export function StepBody({
   step,
   runStatus,
   childLinks,
+  stepChildren,
   onJump,
   compact,
 }: {
@@ -272,7 +274,10 @@ export function StepBody({
   runStatus: string
   /** A subagent's child run per owning call id (parent_call_id,
    * S4.3) — the block fetches its events on expand. */
-  childLinks: Map<string, RunRow>
+  childLinks: Map<string, ChildRow>
+  /** The step route's children[] (A7), when cached: a child the run
+   * document does not list yet (a live run's) still gets its row. */
+  stepChildren?: Map<string, ChildRow>
   onJump?: (t: number) => void
   compact?: boolean
 }) {
@@ -302,7 +307,11 @@ export function StepBody({
               key={call.callId}
               call={call}
               runStatus={runStatus}
-              child={call.childRunId ? childLinks.get(call.callId) : undefined}
+              child={
+                call.childRunId
+                  ? childLinks.get(call.callId)
+                  : stepChildren?.get(call.callId)
+              }
               onJump={onJump}
               compact={compact}
             />
@@ -400,7 +409,7 @@ function StepCard({
    * each card (stepHoles). */
   runHoles?: HoleMark[]
   runStatus: string
-  childLinks: Map<string, RunRow>
+  childLinks: Map<string, ChildRow>
   highlighted?: boolean
   onJump?: (t: number) => void
   requests?: RunRequests
@@ -410,6 +419,11 @@ function StepCard({
   // from the cache only — the card never fetches it.
   const stepDoc = useQuery({ ...stepQuery(runId, step.index), enabled: false })
   const holes = stepHoles(step, runHoles, stepDoc.data)
+  // The children the step route names (A10), joined by call id: the
+  // run document's rows win where both have one (they carry more).
+  const stepChildren = new Map(
+    (stepDoc.data?.children ?? []).map((c) => [c.call_id, childOfStep(c)])
+  )
   // A ?step= link (A3) lands on the card it names.
   useEffect(() => {
     if (highlighted) ref.current?.scrollIntoView({ block: "center" })
@@ -446,6 +460,7 @@ function StepCard({
         step={step}
         runStatus={runStatus}
         childLinks={childLinks}
+        stepChildren={stepChildren}
         onJump={onJump}
       />
     </div>
@@ -522,7 +537,7 @@ export function StepList({
   )
   // A child row per owning call id, joined by parent_call_id (S4.3);
   // the block expands lazily.
-  const childLinks = new Map(
+  const childLinks = new Map<string, ChildRow>(
     doc.children.map((c) => [c.parent_call_id, c])
   )
   // While scrubbing, the run reads as running: calls past the

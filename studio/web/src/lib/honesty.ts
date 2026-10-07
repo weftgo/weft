@@ -194,3 +194,18 @@ export function holeWords(m: HoleMark): {
     tone: note?.tone ?? "loss",
   }
 }
+
+/** rowHoles is what a run row alone can tell (a subagent child's row,
+ * before its own document is read; api.go's runHoles holds the rest):
+ * a run older than the request record (requests_badge not_recorded),
+ * and a crash-orphaned one (status interrupted). The child's document,
+ * once read, carries the full list — the surfaces prefer it. */
+export function rowHoles(row: {
+  status?: string
+  requests_badge?: string
+}): HoleMark[] {
+  const out: HoleMark[] = []
+  if (row.requests_badge === "not_recorded") out.push({ hole: "not_recorded" })
+  if (row.status === "interrupted") out.push({ hole: "interrupted" })
+  return mergeHoles(out)
+}

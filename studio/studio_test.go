@@ -551,6 +551,62 @@ func TestRunsGolden(t *testing.T) {
 	golden(t, "runs.golden.json", body)
 }
 
+// TestRunsParentFilter pins the runs list's subagent filters (plan
+// A10): the default is top-level only; parent=<run id> lists that
+// run's children (golden); parent=* and all=1 list every run, children
+// included; a parent id beside all=1 wins; a malformed all is a 400.
+func TestRunsParentFilter(t *testing.T) {
+	h := Handler(DB(fixtureDB(t)), Manifest([]byte(fixtureManifest)))
+	ids := func(path string) []string {
+		t.Helper()
+		code, _, body := get(t, h, path)
+		if code != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, code, body)
+		}
+		var raw struct {
+			Runs []map[string]any `json:"runs"`
+		}
+		if err := json.Unmarshal([]byte(body), &raw); err != nil {
+			t.Fatal(err)
+		}
+		out := []string{}
+		for _, r := range raw.Runs {
+			out = append(out, r["id"].(string))
+		}
+		return out
+	}
+	has := func(list []string, id string) bool {
+		for _, x := range list {
+			if x == id {
+				return true
+			}
+		}
+		return false
+	}
+	if got := ids("/studio/api/runs"); has(got, "r_sub/0/call_3") || !has(got, "r_sub") {
+		t.Errorf("default = %v, want top-level only", got)
+	}
+	if got := ids("/studio/api/runs?parent=r_sub"); len(got) != 1 || got[0] != "r_sub/0/call_3" {
+		t.Errorf("parent=r_sub = %v, want its one child", got)
+	}
+	for _, q := range []string{"parent=*", "all=1", "all=true"} {
+		if got := ids("/studio/api/runs?" + q); !has(got, "r_sub/0/call_3") || !has(got, "r_sub") {
+			t.Errorf("%s = %v, want every run, the child included", q, got)
+		}
+	}
+	if got := ids("/studio/api/runs?all=0"); has(got, "r_sub/0/call_3") {
+		t.Errorf("all=0 = %v, want top-level only", got)
+	}
+	if got := ids("/studio/api/runs?all=1&parent=r_sub"); len(got) != 1 || got[0] != "r_sub/0/call_3" {
+		t.Errorf("all=1&parent=r_sub = %v, want the parent filter to win", got)
+	}
+	if code, _, body := get(t, h, "/studio/api/runs?all=maybe"); code != http.StatusBadRequest || !strings.Contains(body, `"bad_request"`) {
+		t.Errorf("all=maybe = %d %s, want 400", code, body)
+	}
+	_, _, body := get(t, h, "/studio/api/runs?parent=r_sub")
+	golden(t, "runs-children.golden.json", body)
+}
+
 func TestRunGolden(t *testing.T) {
 	h := Handler(DB(fixtureDB(t)), Manifest([]byte(fixtureManifest)))
 	code, _, body := get(t, h, "/studio/api/runs/r_sub")

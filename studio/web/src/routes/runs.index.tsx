@@ -40,6 +40,11 @@ interface RunsSearch {
    * runs, "on" only those (S4.7). */
   experiments?: "on" | "off"
   tag?: string // "k=v" — a single pair; more is T2
+  /** One run's subagent children (the API's parent=<run id>). */
+  parent?: string
+  /** Subagent children listed too (the API's all=1); absent = the
+   * top-level-only default. */
+  subagents?: "all"
   before?: string
 }
 
@@ -80,6 +85,11 @@ export const Route = createFileRoute("/runs/")({
         ? search.experiments
         : undefined,
     tag: typeof search.tag === "string" && search.tag ? search.tag : undefined,
+    parent:
+      typeof search.parent === "string" && search.parent
+        ? search.parent
+        : undefined,
+    subagents: search.subagents === "all" ? "all" : undefined,
     before:
       typeof search.before === "string" && search.before
         ? search.before
@@ -97,6 +107,8 @@ export function filtersFromSearch(s: RunsSearch): RunsFilters {
   if (s.public_id) filters.public_id = s.public_id
   if (s.experiments) filters.playground = s.experiments === "on"
   if (s.before) filters.before = s.before
+  if (s.parent) filters.parent = s.parent
+  else if (s.subagents === "all") filters.all = true
   if (s.tag) {
     const i = s.tag.indexOf("=")
     if (i > 0) filters.tag = { [s.tag.slice(0, i)]: s.tag.slice(i + 1) }
@@ -175,7 +187,7 @@ function RunsPage() {
   const runs = page.data?.pages.flatMap((p) => p.runs) ?? []
   const total = page.data?.pages[0]?.total ?? 0
   const filtered = Boolean(
-    search.agent || search.status || search.tag || search.session || search.public_id || search.experiments
+    search.agent || search.status || search.tag || search.session || search.public_id || search.experiments || search.parent
   )
   // Live rows (S4.7): with an agent filter — the live stream's one
   // selector shape — a follow toggle subscribes to that agent's run
@@ -218,8 +230,9 @@ function RunsPage() {
           )
           return
         }
-        // Subagent runs are not rows of this list (top-level only).
-        if (!f.run.parent_run_id) refetch()
+        // Subagent runs are not rows of this list unless asked
+        // (top-level only by default).
+        if (!f.run.parent_run_id || filters.all || filters.parent) refetch()
       },
       onOverflow: refetch,
     })
@@ -227,7 +240,7 @@ function RunsPage() {
       refetch.cancel()
       live.close()
     }
-  }, [follow, agentKey, liveCapable, queryClient])
+  }, [follow, agentKey, liveCapable, queryClient, filters.all, filters.parent])
 
   // j/k selection, enter opens, "/" focuses the filter box (A4). The
   // selection starts unset — nothing is highlighted until a key moves
@@ -304,6 +317,8 @@ function RunsPage() {
       label: experimentsLabel(search.experiments),
     })
   if (search.tag) chips.push({ key: "tag", label: `tag ${search.tag}` })
+  if (search.parent)
+    chips.push({ key: "parent", label: `children of ${search.parent}` })
 
   return (
     <div className="space-y-3">
@@ -314,7 +329,9 @@ function RunsPage() {
             ? "…"
             : filtered
               ? `${total.toLocaleString()} matching`
-              : `${total.toLocaleString()} top-level`}
+              : search.subagents === "all"
+                ? `${total.toLocaleString()} runs`
+                : `${total.toLocaleString()} top-level`}
         </span>
         <FilterBox
           inputRef={agentInput}
@@ -358,6 +375,26 @@ function RunsPage() {
             <SelectItem value="on">experiments only</SelectItem>
           </SelectContent>
         </Select>
+        {search.parent ? null : (
+          <Button
+            variant={search.subagents === "all" ? "default" : "outline"}
+            size="sm"
+            className="h-8 text-xs"
+            aria-pressed={search.subagents !== "all"}
+            title={
+              search.subagents === "all"
+                ? "subagent children are listed too (all=1) — show top-level runs only"
+                : "top-level runs only: subagent children are on their parent's page — list them too"
+            }
+            onClick={() =>
+              setSearch({
+                subagents: search.subagents === "all" ? undefined : "all",
+              })
+            }
+          >
+            {search.subagents === "all" ? "with subagents" : "top-level only"}
+          </Button>
+        )}
         {search.agent && liveCapable ? (
           <Button
             variant={follow ? "default" : "outline"}
@@ -445,6 +482,7 @@ function RunsPage() {
                 session: undefined,
                 public_id: undefined,
                 experiments: undefined,
+                parent: undefined,
               })
             }
           >
@@ -483,6 +521,7 @@ function RunsPage() {
                   session: undefined,
                   public_id: undefined,
                   experiments: undefined,
+                  parent: undefined,
                 })
               }
             >

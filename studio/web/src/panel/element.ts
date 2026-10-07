@@ -25,7 +25,7 @@ import {
   strippedContent,
   TURNS_LIMIT,
 } from "./state"
-import type { PanelRequests, PanelState, TurnView } from "./state"
+import type { ChildView, PanelRequests, PanelState, TurnView } from "./state"
 import { foldedWords, turnPromptOf } from "./playground"
 import type { ExperimentDraft, TurnWords } from "./playground"
 import { panelStudioVersion } from "./version"
@@ -1214,10 +1214,14 @@ export class WeftDevtools extends HTMLElement {
     if (prompt) wrap.appendChild(el("div", "weft-note", prompt))
     const row = this.rowOf(t.id)
     wrap.appendChild(
-      renderFolded(t.folded, row?.status ?? t.doc?.status ?? "running", t, s.selectedStep, {
-        keys: this.openKeys,
-        scope: t.id,
-      })
+      renderFolded(
+        t.folded,
+        row?.status ?? t.doc?.status ?? "running",
+        t,
+        s.selectedStep,
+        { keys: this.openKeys, scope: t.id },
+        { endpoint: this.cfg.endpoint }
+      )
     )
     if (t.folded.pending.length) wrap.appendChild(this.approvals(t.folded.pending, !!row?.playground))
     if (this.canAct(s)) wrap.appendChild(this.actions(s))
@@ -1377,20 +1381,30 @@ export function renderWaterfall(bars: { name: string; left: number; width: numbe
   return box
 }
 
+/** Where a fold is drawn: the Studio endpoint (the hand-off links),
+ * and — inside a subagent expander — the child's own view, whose
+ * request record and holes its steps show, and below which nothing
+ * nests inline (one level, plan A10). */
+export interface FoldCtx {
+  endpoint?: string
+  child?: ChildView
+}
+
 /** renderFolded draws the turn view (§2). */
 export function renderFolded(
   view: FoldedRun,
   runStatus: string,
   t?: TurnView,
   selectedStep?: number | null,
-  open?: OpenState
+  open?: OpenState,
+  ctx?: FoldCtx
 ): HTMLElement {
   const wrap = el("div")
   if (view.model?.name) {
     wrap.appendChild(el("div", "weft-reason", `${view.model.provider}/${view.model.name}`))
   }
   for (const step of view.steps)
-    wrap.appendChild(renderStep(step, runStatus, t, selectedStep, open))
+    wrap.appendChild(renderStep(step, runStatus, t, selectedStep, open, ctx))
   return wrap
 }
 
@@ -1399,7 +1413,8 @@ function renderStep(
   runStatus: string,
   t?: TurnView,
   selectedStep?: number | null,
-  open?: OpenState
+  open?: OpenState,
+  ctx?: FoldCtx
 ): HTMLElement {
   const card = el("div", "weft-step")
   card.setAttribute("data-weft-step", String(step.index))
@@ -1412,11 +1427,13 @@ function renderStep(
     head.appendChild(el("span", undefined, step.finish.reason))
     head.appendChild(el("span", undefined, usageLine(step.finish.usage)))
   }
-  const holes = holeBadges(stepHoles(step, t?.doc?.holes))
+  const holes = holeBadges(stepHoles(step, ctx?.child ? ctx.child.doc?.holes : t?.doc?.holes))
   if (holes) head.appendChild(holes)
   card.appendChild(head)
   const body = el("div", "weft-step-b")
-  if (t?.requests) body.appendChild(requestLine(step.index, t.requests, runStatus, open))
+  // A child's step reads the child's record (by the child's id).
+  const req = ctx?.child ? ctx.child.requests : t?.requests
+  if (req) body.appendChild(requestLine(step.index, req, runStatus, open))
   if (step.reasoning) {
     const d = el("details", "weft-collapsible")
     if (open) {
@@ -1432,7 +1449,7 @@ function renderStep(
   }
   if (step.text) body.appendChild(el("div", undefined, step.text))
   if (step.steer) body.appendChild(el("div", "weft-note", `steered: ${step.steer.text}`))
-  for (const call of step.toolCalls) body.appendChild(renderCall(call, runStatus, t, open))
+  for (const call of step.toolCalls) body.appendChild(renderCall(call, runStatus, t, open, ctx))
   card.appendChild(body)
   return card
 }
@@ -1538,7 +1555,8 @@ function renderCall(
   call: FoldedToolCall,
   runStatus: string,
   t?: TurnView,
-  open?: OpenState
+  open?: OpenState,
+  ctx?: FoldCtx
 ): HTMLElement {
   const box = el("div", "weft-call")
   const state = callState(call, runStatus)
@@ -1547,9 +1565,12 @@ function renderCall(
     el("span", "weft-args", argsText(call)),
   ])
   box.appendChild(head)
-  if (call.childRunId && t) {
+  if (call.childRunId && (t || ctx?.child)) {
     head.appendChild(el("span", "weft-badge weft-info", "subagent", { title: call.childRunId }))
-    box.appendChild(childBlock(call.childRunId, t, open))
+    // One level inline: a grandchild is its badge and the hand-off.
+    if (ctx?.child) {
+      if (ctx.endpoint) head.appendChild(handOff(ctx.endpoint, call.childRunId))
+    } else if (t) box.appendChild(childBlock(call.childRunId, t, open, ctx?.endpoint))
   }
   if (call.result) {
     const ms = spanMs(t, call)
@@ -1601,25 +1622,52 @@ function spanMs(t: TurnView | undefined, call: FoldedToolCall): string {
 /** childBlock is the lazy subagent expander (§2, Dv3): the call's
  * child run folds on demand and nests under the call. The element
  * delegates the toggle through [data-weft-child]. */
-function childBlock(childId: string, t: TurnView, open?: OpenState): HTMLElement {
+function childBlock(childId: string, t: TurnView, open?: OpenState, endpoint?: string): HTMLElement {
   const child = t.children.get(childId)
+  const row = t.doc?.children.find((c) => c.id === childId)
   const details = el("details", "weft-collapsible")
   details.setAttribute("data-weft-child", childId)
   if (t.expanded.has(childId)) details.setAttribute("open", "")
-  details.appendChild(el("summary", undefined, `subagent ${shortId(childId)}`))
+  // The nested row (A10): agent, status, usage — the parent's row of
+  // the child, before it is opened.
+  details.appendChild(
+    el(
+      "summary",
+      undefined,
+      row
+        ? `subagent ${row.agent || shortId(childId)} · ${row.status} · ${usageLine(row.usage)}`
+        : `subagent ${shortId(childId)}`
+    )
+  )
+  if (endpoint) details.appendChild(handOff(endpoint, childId))
   if (!child) {
     details.appendChild(el("div", undefined, "loading the subagent's turn…"))
   } else {
     // The child's own status (the doc lists it): a child still running
     // shows its open calls as running, not as never completed.
-    const status = t.doc?.children.find((c) => c.id === childId)?.status ?? "succeeded"
+    const status = row?.status ?? "succeeded"
     details.appendChild(
-      renderFolded(child.folded, status, undefined, undefined, open && { keys: open.keys, scope: childId })
+      renderFolded(child.folded, status, undefined, undefined, open && { keys: open.keys, scope: childId }, {
+        endpoint,
+        child,
+      })
     )
     if (child.capped)
       details.appendChild(el("div", "weft-note weft-warn", "a long run: its first events are shown"))
   }
   return details
+}
+
+/** handOff is "open in Studio" for a child run: today's runs/<id>
+ * page (studioLink). G1: the deep-link scheme replaces this URL. */
+function handOff(endpoint: string, runId: string): HTMLElement {
+  return el("a", "weft-btn", "open in Studio ⤢", {
+    href: studioLink(endpoint, runId),
+    target: "_blank",
+    rel: "noopener",
+    title: `open the child run ${runId} in Studio`,
+    "data-weft-handoff": runId,
+  })
 }
 
 function shortId(id: string): string {

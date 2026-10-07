@@ -216,6 +216,22 @@ export function RunsTable({ runs, selectedId, now }: RunsTableProps) {
                   </span>
                   <CopyId id={run.id} />
                 </Link>
+                {run.parent_run_id ? (
+                  <div
+                    className="flex items-center gap-1 truncate font-mono text-[11px] text-faint"
+                    data-parent-link
+                  >
+                    ↳ subagent of
+                    <Link
+                      to="/runs/$id"
+                      params={{ id: run.parent_run_id }}
+                      className="truncate text-muted-foreground hover:text-thread-ink hover:underline"
+                      title={`the parent run (call ${run.parent_call_id})`}
+                    >
+                      {run.parent_run_id}
+                    </Link>
+                  </div>
+                ) : null}
                 {run.err ? (
                   <div
                     className="truncate font-mono text-[11px] text-status-bad/80"

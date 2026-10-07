@@ -72,7 +72,9 @@ One script tag puts the run loop in the corner of your own page —
 Rung 1 is a viewer scoped to that conversation: the turns (parked
 shown), the step story with tool calls, usage splits, approvals
 read-only, truncation/gap/stripped honesty, the raw JSON, a live tail,
-⤢ deep links into Studio, lazy subagents and a spans waterfall.
+⤢ deep links into Studio, lazy subagents (one level inline, with the
+child's request line and an "open in Studio" hand-off; a grandchild is
+the hand-off only) and a spans waterfall.
 `Alt+W` toggles (Q4), `?` lists keys, `r` flips raw. Setups B/C add
 `data-endpoint` and `data-token` (a dev token, or a panel token your
 backend mints per page via `POST /api/panel-tokens`). No Studio
@@ -140,8 +142,10 @@ The run page (light) — the prompt and the answer first (the answer now
 comes from the transcript: deltas are live-only), then the facts; the
 **trace** draws on the **time axis** when the run has spans (real
 durations, `?axis=` picks; the position axis keeps the replay
-playhead), and subagent children expand lazily — their events are
-their own runs', fetched on demand:
+playhead), and subagent children sit as nested rows under the step
+that called them (agent, status, usage, holes, a link) and expand
+lazily — their events and their request record (the child's prompt,
+read by the child's id) are their own runs', fetched on demand:
 
 ![run page with the trace, light theme](screenshots/run-light.png)
 
@@ -163,7 +167,9 @@ everything. Keys fire only on a bare press outside a text box.
 JSON under `{base}api/`: `meta` (versions, the DB kind,
 `ingest_open`, `interrupted_after_ms`, capabilities), `runs` (agent,
 status, session, public id, playground, parent and `tag.<k>=<v>`
-filters, cursor-paged),
+filters, cursor-paged; top-level only by default — `parent=<run id>`
+lists one run's subagent children, `all=1` (or `parent=*`) every run,
+children included),
 `runs/{id}` (the row and the subagent children — never events; with
 `instructions_hash`, `catalog_hash`, `request_count` and, for a run
 written before ADR 0028, `requests_badge: "not_recorded"`),

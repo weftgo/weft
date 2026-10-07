@@ -7,10 +7,11 @@
 // the diff itself is E1's. Every hole is a badge with its reason and
 // fix: a run older than the record, a content-off destination, a
 // token that may not read prompts — never an empty section.
+import { useQuery } from "@tanstack/react-query"
 import { ChevronRight } from "lucide-react"
 import { useState } from "react"
 
-import { isHoleRef } from "@/lib/api"
+import { isHoleRef, requestsQuery } from "@/lib/api"
 import type {
   Holed,
   HoleRef,
@@ -29,6 +30,7 @@ import type { StepRequests } from "@/lib/requests"
 import { bytes } from "@/lib/summarize"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { JsonTree } from "@/components/studio/json-tree"
+import { useCapabilities } from "@/hooks/use-capabilities"
 
 /** What the run page hands every step: the run's request record, or
  * where reading it stands. */
@@ -47,6 +49,32 @@ export function runRequests(
   opts: { loading: boolean; error?: string; running: boolean }
 ): RunRequests {
   return { ...opts, doc, steps: byStep(doc?.requests ?? []) }
+}
+
+/**
+ * useRunRequests reads one run's request record by its own id — a
+ * subagent child's on the parent's page (plan A10: the child's
+ * prompt, never the parent's) — when the server has the requests
+ * capability and the caller has a reason to (enabled: the block is
+ * open). Undefined without the capability: the section is not drawn.
+ */
+export function useRunRequests(
+  runId: string,
+  opts: { enabled: boolean; running: boolean }
+): RunRequests | undefined {
+  const { has } = useCapabilities()
+  const capable = has("requests")
+  const q = useQuery({
+    ...requestsQuery(runId),
+    enabled: capable && opts.enabled && runId !== "",
+    refetchInterval: opts.running ? 2000 : false,
+  })
+  if (!capable) return undefined
+  return runRequests(q.data, {
+    loading: q.isPending,
+    error: q.isError ? q.error.message : undefined,
+    running: opts.running,
+  })
 }
 
 /** The not_recorded badge's words on this surface (ADR 0028: the

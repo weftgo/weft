@@ -54,6 +54,13 @@ export interface RunRow {
   usage: Usage
   event_count: number
   message_count: number
+  /** The request record's run columns (ADR 0028 §10, api.go's runRow):
+   * absent from a Studio older than A1. requests_badge "not_recorded"
+   * is a run written before the record existed. */
+  instructions_hash?: string
+  catalog_hash?: string
+  request_count?: number
+  requests_badge?: string
 }
 
 /** GET /api/runs → RunsPage. */
@@ -540,6 +547,9 @@ export interface RunsFilters {
   public_id?: string
   playground?: boolean
   parent?: string // "" top-level (default), "*" all, or a run id
+  /** Every run, subagent children included (the API's all=1; a parent
+   * id beside it wins). */
+  all?: boolean
   tag?: Record<string, string>
   before?: string
   /** The cursor's tie-breaker: a page's next_before_id, sent beside
@@ -557,6 +567,7 @@ export function runsSearch(filters: RunsFilters): string {
   if (filters.public_id) params.set("public_id", filters.public_id)
   if (filters.playground !== undefined) params.set("playground", String(filters.playground))
   if (filters.parent) params.set("parent", filters.parent)
+  else if (filters.all) params.set("all", "1")
   if (filters.before) params.set("before", filters.before)
   if (filters.before && filters.before_id) params.set("before_id", filters.before_id)
   for (const [k, v] of Object.entries(filters.tag ?? {}))
@@ -859,6 +870,9 @@ export interface StepAttempt {
   span_id?: string
   /** The attempt's request record index (the requests route's row). */
   request_index?: number
+  /** "derived": the attempt was told from the step's events alone (no
+   * span named it) — its number may then be 0. */
+  badge?: "derived"
 }
 
 /** The request's messages_ref resolved to a count; the bytes stay on
@@ -870,6 +884,8 @@ export interface StepMessagesIn extends Holed {
 }
 
 export interface StepToolCall {
+  /** "" for a call the model asked for but the loop never executed (a
+   * max_tokens step's, read from the transcript without an id). */
   call_id: string
   name: string
   seq?: number
@@ -880,7 +896,9 @@ export interface StepToolCall {
   span?: { id: string; started: string; finished: string; status: string }
   child_run_id?: string
   pending?: boolean
-  badge?: string
+  /** max_tokens: not executed, the step hit the output limit (rule 11);
+   * stripped: a content-off chain removed the args or the result. */
+  badge?: "max_tokens" | "stripped"
 }
 
 /** A child run a step's call started (A10). Cost arrives with A5. */

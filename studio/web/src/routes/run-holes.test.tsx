@@ -198,7 +198,7 @@ describe("transcript words whose step has no events (view.unplaced)", () => {
       instructions_hash: "h",
       requests_badge: undefined,
       holes: [],
-    } as RunDoc
+    }
     new FakeStudio()
       .on("GET meta", meta(["ingest"]))
       .on(`GET runs/${RUN}`, doc)

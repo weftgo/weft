@@ -7,13 +7,13 @@
 import { ArrowUpRight } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
-import type { RunDoc, RunRow, WireEvent } from "@/lib/api"
+import type { RunDoc, WireEvent } from "@/lib/api"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "@/lib/events"
 import { spanMs, usageSummary } from "@/lib/format"
 import type { Span } from "@/lib/trace"
 import { JsonTree } from "@/components/studio/json-tree"
 import { EventsExplorer } from "@/components/studio/raw-view"
-import { RequestSection } from "@/components/studio/step-request"
+import { RequestSection, useRunRequests } from "@/components/studio/step-request"
 import type { RunRequests } from "@/components/studio/step-request"
 import {
   StepBody,
@@ -21,6 +21,7 @@ import {
   Usage,
   stepOutcome,
 } from "@/components/studio/step-list"
+import type { ChildRow } from "@/components/studio/subagent-block"
 import { Button } from "@/components/ui/button"
 
 export type DetailMode = "detail" | "events" | "json"
@@ -51,7 +52,7 @@ function RunDetail({
   doc: RunDoc
   runStatus: string
   onJump: (t: number) => void
-  childLinks: Map<string, RunRow>
+  childLinks: Map<string, ChildRow>
 }) {
   const isChild = span.kind === "subagent"
   const link = isChild
@@ -127,6 +128,7 @@ function RunDetail({
               step={step}
               runStatus={runStatus}
               childLinks={childLinks}
+              stepChildren={childLinks}
               onJump={onJump}
               compact
             />
@@ -140,18 +142,29 @@ function RunDetail({
   )
 }
 
+/** A subagent's step in the trace (an `s:<run>:<n>` key): the CHILD's
+ * request for that step, read by the child's run id (plan A10) — never
+ * the parent's record. */
+function ChildStepRequest({ runId, step }: { runId: string; step: number }) {
+  const req = useRunRequests(runId, { enabled: true, running: false })
+  return req ? <RequestSection req={req} step={step} /> : null
+}
+
 function StepDetail({
   step,
   runStatus,
   onJump,
   childLinks,
   requests,
+  childRunId,
 }: {
   step: FoldedStep
   runStatus: string
   onJump: (t: number) => void
-  childLinks: Map<string, RunRow>
+  childLinks: Map<string, ChildRow>
   requests?: RunRequests
+  /** The step is a subagent child's: its request is the child's. */
+  childRunId?: string
 }) {
   return (
     <div className="space-y-3">
@@ -161,11 +174,16 @@ function StepDetail({
           events {step.from}–{step.to}
         </span>
       </div>
-      {requests ? <RequestSection req={requests} step={step.index} /> : null}
+      {childRunId ? (
+        <ChildStepRequest runId={childRunId} step={step.index} />
+      ) : requests ? (
+        <RequestSection req={requests} step={step.index} />
+      ) : null}
       <StepBody
         step={step}
         runStatus={runStatus}
         childLinks={childLinks}
+        stepChildren={childLinks}
         onJump={onJump}
       />
       {!step.text && !step.reasoning && step.toolCalls.length === 0 ? (
@@ -186,7 +204,7 @@ function CallDetail({
   call: FoldedToolCall
   runStatus: string
   onJump: (t: number) => void
-  childLinks: Map<string, RunRow>
+  childLinks: Map<string, ChildRow>
 }) {
   return (
     <div className="space-y-3">
@@ -208,7 +226,7 @@ function CallDetail({
       <ToolCallRow
         call={call}
         runStatus={runStatus}
-        child={call.childRunId ? childLinks.get(call.callId) : undefined}
+        child={childLinks.get(call.callId)}
         onJump={onJump}
       />
     </div>
@@ -235,11 +253,15 @@ export function SpanDetail({
   mode: DetailMode
   onMode: (m: DetailMode) => void
   onJump: (t: number) => void
-  /** The run's request record: a step of the run's own (not a
-   * subagent's) shows what it called the model with. */
+  /** The run's request record: a step of the run's own shows what it
+   * called the model with; a subagent's step shows the child's (read
+   * by the child's id, A10). */
   requests?: RunRequests
 }) {
-  const childLinks = new Map(
+  // The run document's children by owning call id (S4.3). The trace's
+  // fold is not linked (linkView is the story's), so the detail joins
+  // a call to its child here, by call id (A10).
+  const childLinks = new Map<string, ChildRow>(
     doc.children.map((c) => [c.parent_call_id, c])
   )
   const modes: DetailMode[] = span?.timed ? ["detail"] : ["detail", "events", "json"]
@@ -328,6 +350,13 @@ export function SpanDetail({
             requests={
               span.key === `s${(span.node as FoldedStep).index}`
                 ? requests
+                : undefined
+            }
+            childRunId={
+              span.key !== `s${(span.node as FoldedStep).index}` &&
+              span.runId &&
+              span.runId !== doc.id
+                ? span.runId
                 : undefined
             }
           />

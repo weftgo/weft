@@ -115,6 +115,7 @@ func TestGoldensMatchARealRun(t *testing.T) {
 	}{
 		{"run-sub.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".meta.cwd"}},
 		{"runs.golden.json", "/api/runs", []string{".runs[].finished=<nil>", ".runs[].meta.cwd"}},
+		{"runs-children.golden.json", "/api/runs?all=1", []string{".runs[].meta.cwd"}},
 		{"events-ok.golden.json", "/api/runs/" + res.ID + "/events", nil},
 		{"events-ok-paged.golden.json", "/api/runs/" + res.ID + "/events?after=2&limit=3", nil},
 		{"transcript-ok.golden.json", "/api/runs/" + res.ID + "/transcript", nil},

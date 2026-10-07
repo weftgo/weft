@@ -1,27 +1,52 @@
-// The subagent block (B7, S4.3): a child run renders inline, indented
-// under its parent tool call — but its events are NOT in the parent's
-// stream anymore (Nested is gone), so the block fetches the child's
-// own events on expand and folds them here, lazily. The child's usage
-// and a link to its own run page (a full run page) stay; collapsed,
+// The subagent block (B7, S4.3; plan A10): a child run renders as a
+// nested row under the step whose tool call started it — agent,
+// status, usage, its holes and a link to its own run page — and opens
+// inline. Its events are NOT in the parent's stream (Nested is gone),
+// so the block fetches the child's own events on expand and folds
+// them here, lazily, each child step with the CHILD's request record
+// (read by the child's id: its prompt, never the parent's). Collapsed,
 // the block costs one row.
 import { ArrowUpRight, ChevronRight } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
-import type { RunRow } from "@/lib/api"
+import type { RunRow, RunStatus, StepChild, Usage } from "@/lib/api"
 import { runQuery, transcriptQuery } from "@/lib/api"
 import { applyTranscript } from "@/lib/events"
 import { usageSummary } from "@/lib/format"
+import { mergeHoles, rowHoles } from "@/lib/honesty"
 import { useRunEvents } from "@/hooks/use-run-events"
 
+import { HoleBadges } from "@/components/studio/hole-badge"
 import { StepBody } from "@/components/studio/step-list"
+import { RequestSection, useRunRequests } from "@/components/studio/step-request"
+
+/** A child run as the parent's page knows it: the run document's
+ * children row (RunDetail.Children), or — when only the step route's
+ * cached children[] names it — its id, call id, agent, status and
+ * usage. */
+export type ChildRow = Pick<RunRow, "id" | "agent" | "parent_call_id"> & {
+  status: RunStatus
+  usage: Usage
+} & Partial<Omit<RunRow, "id" | "agent" | "parent_call_id" | "status" | "usage">>
+
+/** childOfStep reads a step route child (A7's children[]) as a row. */
+export function childOfStep(c: StepChild): ChildRow {
+  return {
+    id: c.id,
+    agent: c.agent,
+    parent_call_id: c.call_id,
+    status: c.status,
+    usage: c.usage,
+  }
+}
 
 export function SubagentBlock({
   child,
   defaultOpen = false,
 }: {
-  child: RunRow
+  child: ChildRow
   /** Accepted for the call row's signature and not passed down: a
    * child's steps carry positions in the CHILD's stream, and the
    * replay playhead scrubs the parent's — a "replay to here" from
@@ -53,6 +78,14 @@ export function SubagentBlock({
     void queryClient.invalidateQueries({ queryKey: transcriptQuery(child.id).queryKey })
   }, [open, childStatus, child.id, queryClient])
   const stream = useRunEvents(open ? child.id : "", childStatus)
+  // The child's own request record, by the child's id (A10): each of
+  // its steps says what IT called the model with.
+  const requests = useRunRequests(child.id, {
+    enabled: open,
+    running: childStatus === "running",
+  })
+  // The child's holes: its document's once read, its row's before.
+  const holes = mergeHoles(doc.data?.holes ?? rowHoles(child))
 
   const folded =
     stream.events.length > 0
@@ -66,47 +99,67 @@ export function SubagentBlock({
       : folded
 
   return (
-    <div className="my-1 rounded-md border border-ev-tool/25 bg-secondary/40">
-      <button
-        type="button"
-        className="flex w-full flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-left"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-      >
-        <ChevronRight
-          data-slot="icon"
-          className={`size-3.5 text-faint transition-transform ${open ? "rotate-90" : ""}`}
-        />
-        <span className="eyebrow">subagent</span>
-        <span className="font-mono text-xs">{child.agent || "unnamed"}</span>
-        <span className="font-mono text-[11px] text-faint">
-          {child.model.provider}/{child.model.name}
-        </span>
-        <span className="font-mono text-[11px] text-muted-foreground">
-          {child.steps} {child.steps === 1 ? "step" : "steps"}
-        </span>
-        {child.status === "succeeded" ? (
+    <div
+      className="my-1 rounded-md border border-ev-tool/25 bg-secondary/40"
+      data-child-row={child.id}
+    >
+      <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2">
+        <button
+          type="button"
+          className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-left"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-label={`subagent ${child.agent || "unnamed"}: ${open ? "close" : "open"} the child run`}
+        >
+          <ChevronRight
+            data-slot="icon"
+            className={`size-3.5 text-faint transition-transform ${open ? "rotate-90" : ""}`}
+          />
+          <span className="eyebrow">subagent</span>
+          <span className="font-mono text-xs" data-child-agent>
+            {child.agent || "unnamed"}
+          </span>
+        </button>
+        {child.model ? (
+          <span className="font-mono text-[11px] text-faint">
+            {child.model.provider}/{child.model.name}
+          </span>
+        ) : null}
+        {child.steps !== undefined ? (
           <span className="font-mono text-[11px] text-muted-foreground">
-            {usageSummary(child.usage)}
+            {child.steps} {child.steps === 1 ? "step" : "steps"}
           </span>
-        ) : (
-          <span
-            className={`font-mono text-[11px] ${child.status === "running" ? "text-status-run" : "text-ev-error"}`}
-          >
-            {child.status === "running" ? "running…" : "did not finish"}
-          </span>
-        )}
+        ) : null}
+        <span
+          data-child-status={childStatus}
+          className={`font-mono text-[11px] ${
+            childStatus === "running"
+              ? "text-status-run"
+              : childStatus === "succeeded"
+                ? "text-status-ok"
+                : "text-ev-error"
+          }`}
+        >
+          {childStatus === "running" ? "running…" : childStatus}
+        </span>
+        <span
+          className="font-mono text-[11px] text-muted-foreground"
+          data-child-usage
+          title="the child's own tokens: delegated usage, rolled into the parent's"
+        >
+          {usageSummary(child.usage)}
+        </span>
+        <HoleBadges holes={holes} />
         <span className="font-mono text-[11px] text-faint">{child.id}</span>
         <Link
           to="/runs/$id"
           params={{ id: child.id }}
           className="ml-auto flex items-center gap-0.5 font-mono text-[11px] text-thread-ink hover:underline"
-          onClick={(e) => e.stopPropagation()}
         >
           open run
           <ArrowUpRight className="size-3" data-slot="icon" />
         </Link>
-      </button>
+      </div>
       {open ? (
         <div className="space-y-2 border-l border-ev-tool/25 pl-3">
           {view ? (
@@ -120,6 +173,11 @@ export function SubagentBlock({
                     </span>
                   ) : null}
                 </div>
+                {requests ? (
+                  <div data-child-request={step.index}>
+                    <RequestSection req={requests} step={step.index} />
+                  </div>
+                ) : null}
                 <StepBody
                   step={step}
                   runStatus={childStatus}
@@ -144,9 +202,9 @@ export function SubagentBlock({
 /** childLinksOf maps a call id to its child run, for the block's own
  * nested blocks. */
 export function childLinksOf(
-  children: RunRow[] | undefined
-): Map<string, RunRow> {
-  const m = new Map<string, RunRow>()
+  children: ChildRow[] | undefined
+): Map<string, ChildRow> {
+  const m = new Map<string, ChildRow>()
   for (const c of children ?? []) {
     if (c.parent_call_id) m.set(c.parent_call_id, c)
   }

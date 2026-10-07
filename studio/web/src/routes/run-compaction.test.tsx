@@ -154,7 +154,7 @@ describe("the compaction marker on the run page (A9.2)", () => {
     showOriginal(m)
     expect(m.textContent).toContain("session compaction · after this run")
     expect(m.querySelector("[data-compaction-original]")?.textContent).toBe(
-      "thread compacted the session context this run belongs to: 3 of its messages were replaced by 1; the next run starts on the compacted context (its input record). The marker carries counts and a hash, never messages."
+      "thread compacted the session context this run belongs to: 3 of its messages were replaced by 1; the next run starts on the compacted context (its input record). The marker carries counts and a hash, never messages. (For entries appended by hand that no run produced, thread files the marker under the run that follows, which starts on the compacted context.)"
     )
   })
 
@@ -233,12 +233,17 @@ describe("the compaction marker on the run page (A9.2)", () => {
     // RootDocument under vitest — a <script> inside a component, the
     // empty href of a `?url` import, <html> inside the test's <div>.
     // Every other console.error is this page's and fails the test.
-    const harness = [
-      /^Encountered a script tag while rendering React component/,
-      /^An empty string \(""\) was passed to the %s attribute/,
-      /^In HTML, %s cannot be a child of <%s>/,
+    const harness: ((c: unknown[]) => boolean)[] = [
+      (c) => String(c[0]).startsWith("Encountered a script tag while rendering React component"),
+      (c) => String(c[0]).startsWith('An empty string ("") was passed to the %s attribute') && c[1] === "href",
+      (c) => String(c[0]).startsWith("In HTML, %s cannot be a child of <%s>") && c[1] === "<html>",
     ]
-    expect(errors.mock.calls.filter((c) => !harness.some((re) => re.test(String(c[0]))))).toEqual([])
+    const calls = errors.mock.calls as unknown[][]
+    // Each harness warning at most once — React logs each of these once
+    // per module, so whichever test mounts first sees them — and
+    // nothing else at all.
+    for (const h of harness) expect(calls.filter(h).length).toBeLessThanOrEqual(1)
+    expect(calls.filter((c) => !harness.some((h) => h(c)))).toEqual([])
     expect(document.body.textContent).not.toContain("compacted")
   })
 })

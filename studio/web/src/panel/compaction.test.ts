@@ -71,7 +71,7 @@ describe("the panel's compaction marker (A9.2)", () => {
     // Filed under the run that produced the context: it reads as after it.
     expect(m.textContent).toContain("session compaction · after this run")
     expect(m.querySelector("details")?.textContent).toContain(
-      "thread compacted the session context this run belongs to: 3 of its messages were replaced by 1; the next run starts on the compacted context (its input record). The marker carries counts and a hash, never messages."
+      "thread compacted the session context this run belongs to: 3 of its messages were replaced by 1; the next run starts on the compacted context (its input record). The marker carries counts and a hash, never messages. (For entries appended by hand that no run produced, thread files the marker under the run that follows, which starts on the compacted context.)"
     )
   })
 

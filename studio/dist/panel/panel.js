@@ -783,7 +783,7 @@ function Re(e) {
 }
 var ze = "session compaction · after this run";
 function Be(e) {
-	return `thread compacted the session context this run belongs to: ${e.replaced} of its messages were replaced by ${e.entries}; the next run starts on the compacted context (its input record). The marker carries counts and a hash, never messages.`;
+	return `thread compacted the session context this run belongs to: ${e.replaced} of its messages were replaced by ${e.entries}; the next run starts on the compacted context (its input record). The marker carries counts and a hash, never messages. (For entries appended by hand that no run produced, thread files the marker under the run that follows, which starts on the compacted context.)`;
 }
 function Ve(e, t, n) {
 	if (!t) return { loading: !0 };

@@ -385,7 +385,10 @@ parent's records never describe a child's request.
   `SystemHash` and `CatalogHash` (`weft.system.hash`,
   `weft.catalog.hash`), the hashes a reader falls back to when a
   malformed producer's body does not parse — that row reads `derived`
-  (A1.2).
+  unless it is marked `stripped`, which outranks it (A1.2). Where a
+  record's hash attribute is set and disagrees with its body, the
+  attribute wins, as the run row and the record's position already
+  read attributes.
 - The run row gains `instructions_hash` (`run_start`'s
   `weft.instructions.hash`, or the `invoke_agent` span's; the larger
   when the two differ, on both backends), `catalog_hash` (the

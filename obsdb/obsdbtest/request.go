@@ -474,5 +474,53 @@ func requestRunRows(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if _, err := db.Prompt(ctx(), "rq_bad", fxSystem1); !errors.As(err, &hole) || hole.Hole != obsdb.HoleGap {
 			t.Errorf("Prompt named only by a malformed request = %v; want the gap hole, not a silent not-found", err)
 		}
+		requestHashes(t, db)
+	}
+}
+
+// requestHashes: the attribute hashes win. A stripped request whose
+// body is {} (what a content-off chain writes for a body it cannot
+// shape) or does not parse at all reads its hashes from the
+// attributes and stays stripped — stripped outranks derived — so its
+// prompt answers the stripped hole; a body and attributes that
+// disagree read the attributes', in Requests and on the run row alike.
+func requestHashes(t *testing.T, db obsdb.DB) {
+	t.Helper()
+	const s3, bodySys, bodyCat, attrSys, attrCat = "3333", "b0d1", "b0dc", "a771", "a77c"
+	empty := &fxRun{id: "rq_strip_empty"}
+	empty.start(true)
+	empty.request(0, 0, 1, s3, fxCatalog1, "stripped", `{}`)
+	broken := &fxRun{id: "rq_strip_bad"}
+	broken.start(true)
+	broken.request(0, 0, 1, s3, fxCatalog1, "stripped", `{"step":`)
+	differ := &fxRun{id: "rq_differ"}
+	differ.start(true)
+	differ.request(0, 0, 1, attrSys, attrCat, "full", fxRequest(0, 1, bodySys, bodyCat, "lookup", "script", 0, 1))
+	if err := db.Write(ctx(), obsdb.Batch{Records: append(append(empty.recs, broken.recs...), differ.recs...)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"rq_strip_empty", "rq_strip_bad"} {
+		reqs, err := db.Requests(ctx(), id, obsdb.RequestQuery{})
+		if err != nil || len(reqs) != 1 {
+			t.Fatalf("%s requests = %+v, %v", id, reqs, err)
+		}
+		if r := reqs[0]; r.Content != obsdb.HoleStripped || r.SystemHash != s3 || r.CatalogHash != fxCatalog1 {
+			t.Errorf("%s request = %+v; want stripped with the attributes' hashes", id, r)
+		}
+		var hole *obsdb.HoleError
+		if _, err := db.Prompt(ctx(), id, s3); !errors.As(err, &hole) || hole.Hole != obsdb.HoleStripped {
+			t.Errorf("%s Prompt = %v; want the stripped hole", id, err)
+		}
+		if _, err := db.Tools(ctx(), id, fxCatalog1); !errors.As(err, &hole) || hole.Hole != obsdb.HoleStripped {
+			t.Errorf("%s Tools = %v; want the stripped hole", id, err)
+		}
+	}
+	reqs, err := db.Requests(ctx(), "rq_differ", obsdb.RequestQuery{})
+	if err != nil || len(reqs) != 1 || reqs[0].SystemHash != attrSys || reqs[0].CatalogHash != attrCat || reqs[0].Content != "" {
+		t.Errorf("disagreeing request = %+v, %v; want the attributes' hashes %s/%s", reqs, err, attrSys, attrCat)
+	}
+	run, err := db.Run(ctx(), "rq_differ")
+	if err != nil || run.CatalogHash != attrCat {
+		t.Errorf("disagreeing run row catalog = %q, %v; want %s", run.CatalogHash, err, attrCat)
 	}
 }

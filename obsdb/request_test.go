@@ -46,6 +46,12 @@ func TestRecordOfConstructors(t *testing.T) {
 	if r.Attempt != 2 || r.SystemHash != "s" || r.CatalogHash != "c" || r.Content != obsdb.HoleStripped {
 		t.Errorf("RequestRecordOf = %+v", r)
 	}
+	if st := obsdb.RequestRecordOf(obsdb.StoredRecord{Body: []byte(`not json`), Content: "stripped", SystemHash: "as"}); st.Content != obsdb.HoleStripped || st.SystemHash != "as" {
+		t.Errorf("RequestRecordOf(stripped, undecodable) = %+v; want stripped over derived", st)
+	}
+	if w := obsdb.RequestRecordOf(obsdb.StoredRecord{Body: []byte(`{"system_hash":"body"}`), SystemHash: "attr"}); w.SystemHash != "attr" {
+		t.Errorf("RequestRecordOf(disagreeing) system hash = %q, want the attribute's", w.SystemHash)
+	}
 	bad := obsdb.RequestRecordOf(obsdb.StoredRecord{Body: []byte(`not json`), Content: "full", SystemHash: "as", CatalogHash: "ac"})
 	if bad.Content != obsdb.HoleDerived || string(bad.Raw) != "not json" || bad.SystemHash != "as" || bad.CatalogHash != "ac" {
 		t.Errorf("RequestRecordOf(undecodable) = %+v; want derived, raw kept, the attributes' hashes", bad)

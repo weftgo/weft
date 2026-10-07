@@ -62,19 +62,22 @@ func (q RequestQuery) PageLimit() int {
 
 // RequestRecord is one stored request record (ADR 0028 §3): one model
 // call attempt. Index is weft.request.index, Step the stored
-// weft.step.index (-1 when absent). Attempt, SystemHash and CatalogHash
-// are read from the body (which also holds them as Body.Attempt,
-// Body.SystemHash, Body.Tools.CatalogHash). Raw is the body verbatim.
+// weft.step.index (-1 when absent), Attempt the body's attempt. The
+// record's weft.system.hash and weft.catalog.hash attributes win over
+// the body's system_hash and tools.catalog_hash when set and they
+// disagree; SystemHash and CatalogHash fall back to the body's where
+// the attribute is absent. Raw is the body verbatim.
 //
 // Content is the record's hole, from ADR 0028 §11's table:
 //
 //   - "": stored as emitted;
 //   - HoleStripped: it came through a content-off chain (weft.content =
 //     stripped: its params.stop and messages_ref.index were removed,
-//     and that chain dropped the prompt and tools records it names);
-//   - HoleDerived: a malformed producer — the body did not parse, so
-//     Body is zero, Attempt is 0, and the two hashes come from the
-//     record's weft.system.hash and weft.catalog.hash attributes.
+//     and that chain dropped the prompt and tools records it names) —
+//     whether or not its body parses;
+//   - HoleDerived: a malformed producer — an unstripped record whose
+//     body did not parse, so Body is zero, Attempt is 0, and the two
+//     hashes come from the record's attributes.
 //
 // A request record is never capped (only prompt and tools records
 // are), and a destination's Redact over params.stop is not marked on
@@ -88,7 +91,7 @@ type RequestRecord struct {
 	SystemHash     string
 	CatalogHash    string
 	Content        Hole
-	TruncatedBytes int64
+	TruncatedBytes int64 // informational only; a request record is never capped by weft
 	Body           RequestBody
 	Raw            json.RawMessage
 }
@@ -262,9 +265,10 @@ func contentHole(mark string, truncated int64) Hole {
 	return ""
 }
 
-// RequestRecordOf builds a RequestRecord from a stored request record.
-// A body that does not parse gives a HoleDerived row whose hashes are
-// the stored attributes' (RequestRecord).
+// RequestRecordOf builds a RequestRecord from a stored request record:
+// the hashes are the attributes' where set, the body's otherwise; a
+// stripped mark is HoleStripped, and only an unstripped record whose
+// body does not parse is HoleDerived (RequestRecord).
 func RequestRecordOf(r StoredRecord) RequestRecord {
 	out := RequestRecord{
 		Index: r.Index, Step: r.Step, Time: r.Time,
@@ -273,11 +277,24 @@ func RequestRecordOf(r StoredRecord) RequestRecord {
 	}
 	if json.Unmarshal(r.Body, &out.Body) != nil {
 		out.Body = RequestBody{}
-		out.SystemHash, out.CatalogHash, out.Content = r.SystemHash, r.CatalogHash, HoleDerived
-		return out
+		if out.Content != HoleStripped {
+			out.Content = HoleDerived
+		}
 	}
-	out.Attempt, out.SystemHash, out.CatalogHash = out.Body.Attempt, out.Body.SystemHash, out.Body.Tools.CatalogHash
+	out.Attempt = out.Body.Attempt
+	out.SystemHash = firstSet(r.SystemHash, out.Body.SystemHash)
+	out.CatalogHash = firstSet(r.CatalogHash, out.Body.Tools.CatalogHash)
 	return out
+}
+
+// firstSet is the stored attribute's value when set, else the body's:
+// the attribute wins, as the run row and the record's position are
+// attribute-based.
+func firstSet(attr, body string) string {
+	if attr != "" {
+		return attr
+	}
+	return body
 }
 
 // PromptRecordOf builds a PromptRecord from a stored prompt record.
@@ -294,7 +311,7 @@ func PromptRecordOf(r StoredRecord) PromptRecord {
 		out.Hash, out.Content = r.SystemHash, HoleDerived
 		return out
 	}
-	out.Hash, out.Text = b.Hash, b.Text
+	out.Hash, out.Text = firstSet(r.SystemHash, b.Hash), b.Text
 	return out
 }
 
@@ -312,7 +329,7 @@ func ToolsRecordOf(r StoredRecord) ToolsRecord {
 		out.Hash, out.Content = r.CatalogHash, HoleDerived
 		return out
 	}
-	out.Hash, out.Tools = b.Hash, b.Tools
+	out.Hash, out.Tools = firstSet(r.CatalogHash, b.Hash), b.Tools
 	return out
 }
 

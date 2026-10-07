@@ -15,3 +15,6 @@
 # Replay, ReplaySafe, ReplayNever, ToolDef.ReplayPolicy; no entries;
 # the gate diffs against v0.7.0.
 
+#
+# Reset at v0.8.0 (2026-10-07): the cycle is additive — ParkAllExcept;
+# no entries; the gate diffs against v0.8.0.

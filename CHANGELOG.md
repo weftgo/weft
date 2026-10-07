@@ -4,9 +4,20 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
-## Unreleased
+## 0.8.0 (unreleased)
 
-### weft (root)
+The 2026-10-02 production-readiness pass and its follow-ups, tagged in
+dependency order: root `v0.8.0` (additive: `ParkAllExcept`), then
+`thread/v0.9.1` and `obsdb/v0.2.0`, then `obsdb/clickhouse/v0.2.0` and
+`otel/v0.2.0`, then `studio/v0.4.0`, then `studio/cmd/v0.2.0` and
+`runtime/v0.2.0`. Every module requires its siblings' new tags, no
+replaces. `thread/sqlite` (v0.3.0) and the adapters (`openai`,
+`anthropic`, `google` v0.3.8, `mcp` v0.1.9) are unchanged and not
+retagged. The pre-freeze modules (obsdb/clickhouse, otel, studio,
+runtime) carry breaking changes, listed first in their sections; their
+tags are minor bumps.
+
+### weft 0.8.0
 
 - Added `ParkAllExcept(names...)` — the default-deny park rule: every tool
   call whose tool is not named parks at the approval boundary (ADR 0007),
@@ -33,7 +44,29 @@ is pre-1.0 and tags per module (ADR 0005).
   so a large caller tag set no longer drops `weft.session.id` /
   `weft.turn` / `weft.public_id`.
 
-### obsdb
+### thread 0.9.1
+
+- A steer that cannot join the running turn (it meets the approval
+  boundary or a StopWhen end, or arrives after the last drain point)
+  now becomes a follow-up turn under the run options of the turn it was
+  aimed at — the in-flight turn, or the parked turn when only a
+  boundary holds the session — with the steer's own options after
+  them, and the aimed turn's context values beneath the steer's
+  context. A turn sent with `weft.ParkAllExcept` keeps its steer
+  follow-ups parked (they ran unparked before). A steer to an idle
+  session still runs under its own options. ADR 0019 amendment.
+- A resume (after `Decide`, `Resume`, `Send` or `Continue`) runs on the
+  arming call's context for cancellation and on the parked turn's
+  context values for every key the arming context lacks, so a park
+  rule or metadata that rode the parked turn's context binds the
+  resumed steps whoever decides. ADR 0021 amendment.
+- thread/pool: an async child's context takes the pool's cancellation
+  and the delegating call's context values, so the delegating run's
+  `ParkAllExcept` list and metadata bind it as they bind a sync child;
+  a resumed child (sync or async) keeps the rule on every step. ADR
+  0022 §M.
+
+### obsdb 0.2.0
 
 - Production-readiness pass (2026-10-02):
   - `weft.playground` is read in its string spelling (`"true"`) — real
@@ -71,82 +104,50 @@ is pre-1.0 and tags per module (ADR 0005).
   - Calls racing `Close` return `ErrClosed`; `Experiment` reports a failed
     read as that error, not `ErrNotFound`.
 
-### studio
+### obsdb/clickhouse 0.2.0 (breaking)
 
-- Production-readiness pass (2026-10-02) — security:
-  - A caller's `command_id` is validated (`[A-Za-z0-9._:-]{1,128}`) — a line
-    break in it forged frames on the runtime's command stream.
-  - Read-scoped panel tokens can no longer decide approvals, steer, or read
-    `/api/manifest`; `/api/runtimes` omits agent instructions for them.
-  - A playground-scoped token's source run must be inside its public id;
-    it may not set `experiment_id`; experiments routes refuse panel tokens;
-    `/api/live` checks every frame against a panel token's public id; scope
-    checks fail closed on database errors; panel tokens' 500s no longer
-    carry database error text; tokens compare in constant time.
-  - Loopback-open ingest refuses forwarded requests and foreign browser
-    Origins (a proxied Studio must set `IngestToken`).
-- API and behaviour:
-  - Request bodies capped at 4 MiB (413); option values validated
-    (temperature 0..2); approvals validate `call_id` against the run's
-    pending set; a fork-mode run is steered like an ephemeral one (an
-    accepted ack naming the fork's turn maps it; no 409).
-  - Transcript batches carry `input` and the real `step`; transcript edits,
-    `from_step` and fixtures count the run's own steps (the input record is
-    context).
-  - `/api/runs` and `/api/sessions` take `before_id` and answer
-    `next_before_id` (an exact cursor inside a tie); the live backfill and
-    experiment detail page with it; experiment detail returns every
-    top-level run, oldest first.
-  - Command rows expose `status` (succeeded|failed) and the finished run's
-    `error`; a panel token can poll its own approval decision and steer the
-    resumed run.
-  - `/api/live`: per-frame write deadline, HEAD answers headers only,
-    backfill honours cancellation, bounded dedup set, `X-Accel-Buffering:
-    no`; `Vary: Origin` on every CORS answer; error bodies always JSON.
-- studio/runtime: `ValidCommandID`, `ErrInvalidCommandID`, `Retention`
-  (24 h), `WriteTimeout`, `RuntimeView.Breakpoints`, `ForkRun`; terminal
-  commands, run routes and dead runtimes are pruned; replaced or stalled
-  streams end at once and their accepted commands get a finish watch;
-  duplicate acks no longer cancel timers; HEAD on the stream is 405;
-  breakpoints are stored only when delivered, adopted from the register
-  payload and sent before the backlog on every stream open.
-- Web UI: a token prompt on a walled API and `#token=`/`?token=` hand-over;
-  a thread turn shows its own prompt and reply; live streams reconnect with
-  backoff and lose nothing at the walk/stream seam; live renders coalesce
-  on large runs; finished runs show stored transcript words; event gaps are
-  surfaced; sessions list pages and nests experiments under their source
-  turn; the playground targets the source run's agent, tracks every
-  variant, shows held approval decisions and the run's outcome, waits for
-  the run to settle, caps live cards, reads the hand-off from the URL
-  fragment and handles fork mode; malformed stored data and cyclic or huge
-  traces no longer crash or hang a page.
-- Devtools panel: attribute changes and remounts no longer remove or
-  mis-scope it, and `window.__WEFT__` scopes every connected panel; the
-  keyboard never takes the host page's keys; redraws keep focus and caret
-  and are throttled while streaming; nothing is thrown into the host page;
-  streams and polls are bounded; verbs and typed text never carry across a
-  conversation switch; the tail subscribes before reading pages; stale
-  "running" rows are re-read; approval controls act on the run's pending
-  set with per-call decisions; read-scoped tokens are offered no write
-  verb; the hand-off rides the URL fragment; the build fails on any
-  package code or over the 80 KiB gzip budget.
-- Playground: `side_effects: "allow"` accepts a ReplaySafe tool that is
-  not opted in (it was refused 403); the panel drawer and `/playground`
-  side-effect selects say what each mode does — only `allow` runs the
-  app's `AllowSideEffects` tools for real.
-- Security (behaviour change): without a `Token`, the API — the whole
-  `/api` tree, `/api/live` and the runtime link included — answers only a
-  loopback `Host` (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`, any
-  port) or the `host:port` of an `AllowOrigins` origin. A DNS-rebinding page
-  (`http://evil.example:7331` resolving to 127.0.0.1) could start playground
-  runs, approve parked calls, steer and read transcripts; it now gets a 403
-  naming what to configure. An embedded Studio served on a real hostname
-  lists its origin (`studio.AllowOrigins("http://myapp.internal:8080")`) or
-  sets `studio.Token`. `X-Forwarded-Host`/`Forwarded` are never trusted;
-  in-process callers (`runtime.Local`) pass; `/panel.js` and the UI shell
-  are unchecked; nothing changes with a `Token`.
+#### Breaking
 
-### otel
+- Migration 0003 changes the stored `otel_traces.SpanKind`/`StatusCode`
+  strings to the pinned collector's spelling (`Internal`, `Error`, …);
+  anyone querying those columns directly reads the new spelling (both
+  are read back by this module). Rows stored before 0003 are not
+  backfilled.
+
+#### Changes
+
+- Production-readiness pass (2026-10-02):
+  - Runs/Sessions filters read each run's merged row: subagent runs no
+    longer surface as top-level runs or session turns before a merge.
+  - Migration 0003: the traces view reads the pinned collector's real
+    status spelling (`Error`); spans are written as `Internal`/`Error`/…
+    and both spellings read (breaking for anyone querying
+    `otel_traces.SpanKind/StatusCode` strings directly). Collector-written
+    failures stored before 0003 are not backfilled.
+  - Paging carries tied rows (bounded by `obsdb.MaxTies`) and honours the
+    exact `BeforeID` cursor; Sessions `Total` is the whole match;
+    `Transcript` reads through `obsdb.DedupTranscript`.
+  - Events reads the terminal flags before the events; `Gaps` capped;
+    `Session` returns every turn and no longer exceeds `max_query_size`
+    on huge sessions.
+  - Non-finite attributes no longer cost a span its typed attributes; a
+    zero record time falls back to Observed and the epoch reads back as
+    the zero time; a batch may span any number of day-partitions.
+  - Experiments keep nanosecond Created/Updated; a failed read is no
+    longer `ErrNotFound`; rows closed on every path.
+  - `ResolvePublicID` orders by (turn, started) like sqlite and reads by
+    primary key; TTL windows round up to whole seconds; detail reads
+    narrow `FINAL` by primary key; calls racing `Close` return `ErrClosed`.
+
+### otel 0.2.0 (breaking)
+
+#### Breaking
+
+- `Pipeline` is no longer comparable (apidiff: "Pipeline: old is
+  comparable, new is not"): code that compared `Pipeline` values with
+  `==` or used them as map keys compares the `*Pipeline` instead.
+
+#### Changes
 
 - Production-readiness pass (2026-10-02):
   - Security: an https destination stays https when
@@ -196,7 +197,127 @@ is pre-1.0 and tags per module (ADR 0005).
   one WARN, when every environment destination fails to build (it
   recorded nothing); `Start` still returns the error.
 
-### runtime
+### studio 0.4.0 (breaking)
+
+#### Breaking
+
+- Without a `Token`, the API answers only a loopback `Host` or an
+  `AllowOrigins` origin's `host:port` (the DNS-rebinding guard, below):
+  an embedded Studio served on a real hostname must set
+  `studio.AllowOrigins(...)` or `studio.Token`.
+- studio/runtime: `RuntimeServer.Enqueue` (and the approval/steer
+  paths) refuse what they used to accept — a caller's command id outside
+  `ValidCommandID` (`ErrInvalidCommandID`), decisions for calls not in
+  the run's pending set, out-of-range option values.
+
+#### Changes
+
+- Production-readiness pass (2026-10-02) — security:
+  - A caller's `command_id` is validated (`[A-Za-z0-9._:-]{1,128}`) — a line
+    break in it forged frames on the runtime's command stream.
+  - Read-scoped panel tokens can no longer decide approvals, steer, or read
+    `/api/manifest`; `/api/runtimes` omits agent instructions for them.
+  - A playground-scoped token's source run must be inside its public id;
+    it may not set `experiment_id`; experiments routes refuse panel tokens;
+    `/api/live` checks every frame against a panel token's public id; scope
+    checks fail closed on database errors; panel tokens' 500s no longer
+    carry database error text; tokens compare in constant time.
+  - Loopback-open ingest refuses forwarded requests and foreign browser
+    Origins (a proxied Studio must set `IngestToken`).
+- API and behaviour:
+  - Request bodies capped at 4 MiB (413); option values validated
+    (temperature 0..2); approvals validate `call_id` against the run's
+    pending set; a fork-mode run is steered like an ephemeral one (an
+    accepted ack naming the fork's turn maps it; no 409).
+  - Transcript batches carry `input` and the real `step`; transcript edits,
+    `from_step` and fixtures count the run's own steps (the input record is
+    context).
+  - `/api/runs` and `/api/sessions` take `before_id` and answer
+    `next_before_id` (an exact cursor inside a tie); the live backfill and
+    experiment detail page with it; experiment detail returns every
+    top-level run, oldest first.
+  - Command rows expose `status` (succeeded|failed) and the finished run's
+    `error`; a panel token can poll its own approval decision and steer the
+    resumed run.
+  - `/api/live`: per-frame write deadline, HEAD answers headers only,
+    backfill honours cancellation, bounded dedup set, `X-Accel-Buffering:
+    no`; `Vary: Origin` on every CORS answer; error bodies always JSON.
+- studio/runtime: `ValidCommandID`, `ErrInvalidCommandID`, `Retention`
+  (24 h), `WriteTimeout`, `RuntimeView.Breakpoints`; terminal
+  commands, run routes and dead runtimes are pruned; replaced or stalled
+  streams end at once and their accepted commands get a finish watch;
+  duplicate acks no longer cancel timers; HEAD on the stream is 405;
+  breakpoints are stored only when delivered, adopted from the register
+  payload and sent before the backlog on every stream open.
+- Web UI: a token prompt on a walled API and `#token=`/`?token=` hand-over;
+  a thread turn shows its own prompt and reply; live streams reconnect with
+  backoff and lose nothing at the walk/stream seam; live renders coalesce
+  on large runs; finished runs show stored transcript words; event gaps are
+  surfaced; sessions list pages and nests experiments under their source
+  turn; the playground targets the source run's agent, tracks every
+  variant, shows held approval decisions and the run's outcome, waits for
+  the run to settle, caps live cards, reads the hand-off from the URL
+  fragment and handles fork mode; malformed stored data and cyclic or huge
+  traces no longer crash or hang a page.
+- Devtools panel: attribute changes and remounts no longer remove or
+  mis-scope it, and `window.__WEFT__` scopes every connected panel; the
+  keyboard never takes the host page's keys; redraws keep focus and caret
+  and are throttled while streaming; nothing is thrown into the host page;
+  streams and polls are bounded; verbs and typed text never carry across a
+  conversation switch; the tail subscribes before reading pages; stale
+  "running" rows are re-read; approval controls act on the run's pending
+  set with per-call decisions; read-scoped tokens are offered no write
+  verb; the hand-off rides the URL fragment; the build fails on any
+  package code or over the 80 KiB gzip budget.
+- Playground: `side_effects: "allow"` accepts a ReplaySafe tool that is
+  not opted in (it was refused 403); the panel drawer and `/playground`
+  side-effect selects say what each mode does — only `allow` runs the
+  app's `AllowSideEffects` tools for real.
+- Security (behaviour change): without a `Token`, the API — the whole
+  `/api` tree, `/api/live` and the runtime link included — answers only a
+  loopback `Host` (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`, any
+  port) or the `host:port` of an `AllowOrigins` origin. A DNS-rebinding page
+  (`http://evil.example:7331` resolving to 127.0.0.1) could start playground
+  runs, approve parked calls, steer and read transcripts; it now gets a 403
+  naming what to configure. An embedded Studio served on a real hostname
+  lists its origin (`studio.AllowOrigins("http://myapp.internal:8080")`) or
+  sets `studio.Token`. `X-Forwarded-Host`/`Forwarded` are never trusted;
+  in-process callers (`runtime.Local`) pass; `/panel.js` and the UI shell
+  are unchecked; nothing changes with a `Token`.
+
+#### Release asset
+
+- `panel-v0.4.0.js` (PANEL_ASSET_BYTES bytes, sha256
+  `PANEL_ASSET_SHA256`
+  beside it) — the devtools panel for non-Go backends; serve it from
+  your app and add `<script type="module"
+  src="/static/panel-v0.4.0.js" data-endpoint=… data-token=…
+  data-public-id=…></script>`. Staged by `make studio-panel-asset`
+  (RELEASE_DIR, default `studio/web/dist-release` relative to the repo
+  root); byte-identical to the committed `studio/dist/panel/panel.js`.
+
+### studio/cmd 0.2.0
+
+- Production-readiness pass (2026-10-02): ReadHeaderTimeout/IdleTimeout
+  set; shutdown ends open streams at once; the ClickHouse handle closes on
+  shutdown; a generated dev token is printed as an openable
+  `http://addr/#token=…` link, a fixed `--token`/`WEFT_STUDIO_TOKEN` is
+  never printed; an unopenable `--db` is an error, not a panic; `sqlite://`
+  without a path is a usage error; the DSN mask handles passwords
+  containing `@`.
+
+### runtime 0.2.0 (breaking)
+
+#### Breaking
+
+- `AllowSideEffects` is honoured only in `side_effects: "allow"`: an
+  opted-in tool no longer runs for real in `substitute` (the default) or
+  `park` mode (details below).
+- Side-effect parking is default-deny (`weft.ParkAllExcept`): tools a
+  `ToolSource` supplies and Subagent children's tools park unless
+  vouched safe or opted in.
+
+#### Changes
 
 - Production-readiness pass (2026-10-02) — safety:
   - Side-effect parking is default-deny (`weft.ParkAllExcept`): tools a
@@ -260,28 +381,6 @@ is pre-1.0 and tags per module (ADR 0005).
   `http://localhost` (was `weft.studio.local`), a Host Studio's
   DNS-rebinding guard accepts like any loopback request.
 
-### thread
-
-- A steer that cannot join the running turn (it meets the approval
-  boundary or a StopWhen end, or arrives after the last drain point)
-  now becomes a follow-up turn under the run options of the turn it was
-  aimed at — the in-flight turn, or the parked turn when only a
-  boundary holds the session — with the steer's own options after
-  them, and the aimed turn's context values beneath the steer's
-  context. A turn sent with `weft.ParkAllExcept` keeps its steer
-  follow-ups parked (they ran unparked before). A steer to an idle
-  session still runs under its own options. ADR 0019 amendment.
-- A resume (after `Decide`, `Resume`, `Send` or `Continue`) runs on the
-  arming call's context for cancellation and on the parked turn's
-  context values for every key the arming context lacks, so a park
-  rule or metadata that rode the parked turn's context binds the
-  resumed steps whoever decides. ADR 0021 amendment.
-- thread/pool: an async child's context takes the pool's cancellation
-  and the delegating call's context values, so the delegating run's
-  `ParkAllExcept` list and metadata bind it as they bind a sync child;
-  a resumed child (sync or async) keeps the rule on every step. ADR
-  0022 §M.
-
 ### CI / repo
 
 - The ClickHouse job (its service's invalid `ulimits:` key already
@@ -306,41 +405,6 @@ is pre-1.0 and tags per module (ADR 0005).
 - examples/studio-local registers its thread store with the runtime (fork
   mode works in the demo; the panel gate covers it); `/run` takes the
   question from the body.
-
-### studio/cmd
-
-- Production-readiness pass (2026-10-02): ReadHeaderTimeout/IdleTimeout
-  set; shutdown ends open streams at once; the ClickHouse handle closes on
-  shutdown; a generated dev token is printed as an openable
-  `http://addr/#token=…` link, a fixed `--token`/`WEFT_STUDIO_TOKEN` is
-  never printed; an unopenable `--db` is an error, not a panic; `sqlite://`
-  without a path is a usage error; the DSN mask handles passwords
-  containing `@`.
-
-### obsdb/clickhouse
-
-- Production-readiness pass (2026-10-02):
-  - Runs/Sessions filters read each run's merged row: subagent runs no
-    longer surface as top-level runs or session turns before a merge.
-  - Migration 0003: the traces view reads the pinned collector's real
-    status spelling (`Error`); spans are written as `Internal`/`Error`/…
-    and both spellings read (breaking for anyone querying
-    `otel_traces.SpanKind/StatusCode` strings directly). Collector-written
-    failures stored before 0003 are not backfilled.
-  - Paging carries tied rows (bounded by `obsdb.MaxTies`) and honours the
-    exact `BeforeID` cursor; Sessions `Total` is the whole match;
-    `Transcript` reads through `obsdb.DedupTranscript`.
-  - Events reads the terminal flags before the events; `Gaps` capped;
-    `Session` returns every turn and no longer exceeds `max_query_size`
-    on huge sessions.
-  - Non-finite attributes no longer cost a span its typed attributes; a
-    zero record time falls back to Observed and the epoch reads back as
-    the zero time; a batch may span any number of day-partitions.
-  - Experiments keep nanosecond Created/Updated; a failed read is no
-    longer `ErrNotFound`; rows closed on every path.
-  - `ResolvePublicID` orders by (turn, started) like sqlite and reads by
-    primary key; TTL windows round up to whole seconds; detail reads
-    narrow `FINAL` by primary key; calls racing `Close` return `ErrClosed`.
 
 ## thread 0.9.0 / thread/sqlite 0.3.0 — 2026-10-02 (the 2026-10-01 review fix train)
 

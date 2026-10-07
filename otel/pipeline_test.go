@@ -274,8 +274,8 @@ func TestBuildResourcePrecedence(t *testing.T) {
 	for name, r := range map[string]*sdkresource.Resource{
 		"base": base, "service": svc, "resource": top,
 	} {
-		if got := resAttr(r, "weft.version"); got != "v0.7.0" {
-			t.Errorf("(d) %s: weft.version = %q, want v0.7.0", name, got)
+		if got := resAttr(r, "weft.version"); got != "v0.8.0" {
+			t.Errorf("(d) %s: weft.version = %q, want v0.8.0", name, got)
 		}
 	}
 }

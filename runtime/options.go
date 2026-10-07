@@ -210,4 +210,4 @@ func cleartext(rawURL string) bool {
 // registration. Hard-coded like otel's own weftVersion (the root
 // exports no Version); the release step bumps it with the tag, and
 // TestWeftVersionMatchesRoot fails until it does.
-func weftVersion() string { return "v0.7.0" }
+func weftVersion() string { return "v0.8.0" }

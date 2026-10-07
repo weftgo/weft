@@ -175,7 +175,11 @@ children included),
 `runs/{id}` (the row and the subagent children, each child row with its own `holes` — never events; with
 `delta_count` (the streamed deltas, counted and never stored),
 `instructions_hash`, `catalog_hash`, `request_count` and, for a run
-written before ADR 0028, `requests_badge: "not_recorded"`),
+written before ADR 0028, `requests_badge: "not_recorded"`; and
+`compactions` — ADR 0028 §8's run-scope views `{scope: "run", index,
+step, from_seq, to_seq, hash, replaced, entries}` and thread's session
+markers `{scope: "session", hash, replaced, entries, tokens_before?,
+tokens_after?, reason}`, counts and hashes only, `[]` when none),
 `runs/{id}/events?after=&limit=` (the paged durable stream),
 `runs/{id}/transcript` (the messages bodies), `runs/{id}/spans`,
 `runs/{id}/requests?step=&from=&limit=&refs=1` (one row per model-call
@@ -192,12 +196,18 @@ non-weft records an `slog` bridge or the OTel Logs API emitted under one
 of the run's spans, or an app span below one — in time order, `{index,
 time, severity, severity_number, body, attrs, span_id?}`, `next_from`
 while pages are full; `severity` keeps a level and above without
-renumbering; under the `logs` capability; a running run's page is
-`partial: true` with a reason — lines under in-flight spans appear once
-those spans end, and indexes may shift; lines naming a span never
-stored are `badge: "gap"` with their count, more than 10 000 lines in
-the run's traces `badge: "truncated"`; a run recorded without a
-tracer reads `badge: "not_recorded"`; app logs may carry prompts, so a
+renumbering; under the `logs` capability; `holes: [{hole, reason,
+fix?}]` lists every hole of the page (`[]` when none) and
+`badge`/`reason`/`fix` repeat the first: `not_recorded` (a run recorded
+without a tracer), `truncated` (the run's traces hold more than 10 000
+log lines in its window — the cap applies before attribution, so a
+flooding subagent or sibling counts, and later lines of this run may be
+missing), `gap` (lines in the run's trace and window name a span that
+is not stored — dropped, or still open — and may be this run's or
+another's); a running run's page is `partial: true` with a
+`partial_reason` — lines under in-flight spans appear once those spans
+end, and indexes may shift — a live condition, not a hole, so
+`partial` can appear with no badge (then `reason` carries it too); app logs may carry prompts, so a
 read-scoped panel token is refused them, 403 with `badge: "hidden"`),
 `runs/{id}/steps/{n}` (one step assembled server-side, `n` its ordinal,
 under the `steps` capability: the step's status, timing, the model

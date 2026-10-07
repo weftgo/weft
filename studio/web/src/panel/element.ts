@@ -4,7 +4,7 @@
 // state.ts owns the data. Rung 1 is a viewer (§8.1); rung 2's
 // experiment drawer and approval controls render only when
 // meta.capabilities reports the playground (§8.5 item 3).
-import type { RunRow, ToolCallPart, Usage } from "../lib/api"
+import type { RunCompaction, RunRow, ToolCallPart, Transcript, Usage } from "../lib/api"
 import { isHoleRef } from "../lib/api"
 import { holeWords, mergeHoles, rowHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
 import type { HoleMark } from "../lib/honesty"
@@ -12,6 +12,7 @@ import { paramsLine, REQUEST_NOT_RECORDED_LABEL, REQUEST_NOT_STORED, shortHash }
 import { MAX_REQUEST_PAGES, REQUEST_PAGE } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
 import { callState, runHoles, stepHoles, truncation } from "../lib/events"
+import { compactionLine, compactionsOf, isSessionMarker, messageLine, originalOf, replacementNote } from "../lib/compaction"
 import { attemptLine, attemptsHole, factsFromRows, timingLine } from "../lib/attempts"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
 import { duration, relativeTime, tokens } from "../lib/format"
@@ -1213,6 +1214,11 @@ export class WeftDevtools extends HTMLElement {
     if (wf.length) wrap.appendChild(renderWaterfall(wf))
     const prompt = turnPromptOf(t.transcript)
     if (prompt) wrap.appendChild(el("div", "weft-note", prompt))
+    // thread's session markers (A9.2) at the top of the turn they are
+    // filed under; a run from before A9 names none and draws nothing.
+    const comps = compactionsOf(t.doc)
+    for (const c of comps.filter(isSessionMarker))
+      wrap.appendChild(compactionBox(c, comps, t.transcript, { keys: this.openKeys, scope: t.id }))
     const row = this.rowOf(t.id)
     wrap.appendChild(
       renderFolded(
@@ -1444,6 +1450,12 @@ function renderStep(
   if (holes) head.appendChild(holes)
   card.appendChild(head)
   const body = el("div", "weft-step-b")
+  // The step's run-scope compaction views (A9.2), on its step line.
+  const doc = ctx?.child ? ctx.child.doc : t?.doc
+  const comps = compactionsOf(doc)
+  for (const c of comps)
+    if (!isSessionMarker(c) && c.step === step.index)
+      body.appendChild(compactionBox(c, comps, ctx?.child ? ctx.child.transcript : t?.transcript, open))
   if (req) body.appendChild(requestLine(step.index, req, runStatus, open))
   if (step.reasoning) {
     const d = el("details", "weft-collapsible")
@@ -1463,6 +1475,55 @@ function renderStep(
   for (const call of step.toolCalls) body.appendChild(renderCall(call, runStatus, t, open, ctx))
   card.appendChild(body)
   return card
+}
+
+/** compactionBox is one compaction marker (plan A9.2, the run page's
+ * words from lib/compaction): the line, the `compacted` badge, and
+ * "show original" collapsed — for a view, the replaced transcript
+ * messages read from the growth records the turn already holds (a gap
+ * badge when they cannot be placed); for a session marker, where the
+ * replaced context lives. Never a fetch. */
+function compactionBox(
+  c: RunCompaction,
+  all: RunCompaction[],
+  transcript: Transcript | null | undefined,
+  open?: OpenState
+): HTMLElement {
+  const session = isSessionMarker(c)
+  const box = el("div", "weft-note")
+  box.setAttribute("data-weft-compaction", session ? "session" : String(c.step ?? ""))
+  const head = el("div", "weft-call-h", [
+    el("span", "weft-name", session ? "session compaction" : "compaction"),
+    el("span", "weft-args", compactionLine(c)),
+  ])
+  const badges = holeBadges([{ hole: "compacted" }])
+  if (badges) head.appendChild(badges)
+  box.appendChild(head)
+  const d = el("details", "weft-collapsible")
+  if (open) {
+    const key = `${open.scope}\u0000compaction\u0000${c.hash || c.index}`
+    d.setAttribute("data-weft-open", key)
+    if (open.keys.has(key)) d.setAttribute("open", "")
+  }
+  d.appendChild(el("summary", undefined, "show original"))
+  if (session) {
+    d.appendChild(el("div", "weft-res", "the replaced context is this turn's transcript; the next turn starts on the compacted context. The marker carries counts, never messages."))
+  } else {
+    const o = originalOf(c, transcript, all)
+    if ("loading" in o) d.appendChild(el("div", "weft-res", "loading the transcript…"))
+    else if ("gap" in o) {
+      const gap = holeBadges([{ hole: "gap", reason: o.gap }])
+      if (gap) d.appendChild(gap)
+      d.appendChild(el("div", "weft-reason", o.gap))
+    }
+    else if (!o.messages.length) d.appendChild(el("div", "weft-res", `nothing replaced: inserted at message ${o.from}`))
+    else
+      for (const [i, m] of o.messages.entries())
+        d.appendChild(el("div", "weft-res", messageLine(m), { "data-weft-original": String(o.from + i) }))
+    d.appendChild(el("div", "weft-reason", replacementNote(c)))
+  }
+  box.appendChild(d)
+  return box
 }
 
 /** A request hole's badge as the panel words it: the shared honesty

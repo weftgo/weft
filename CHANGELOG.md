@@ -77,10 +77,10 @@ module, ADR 0005).
   is running: lines under in-flight spans appear when those spans end,
   and indexes may shift), `Gap` (lines naming a span never stored) and
   `Truncated` (more than `obsdb.MaxLogCandidates` lines in the run's
-  traces). A third-party `DB` implements it as
+  traces, counted before attribution). A third-party `DB` implements it as
   `obsdb.ReadOtherLogs(ctx, db, runID, q, candidates)`, where
-  `candidates` reads the first `limit` non-weft records, by time, of the
-  run's traces within a time window. `obsdb.HoleError.Kind` gains `"logs"`: a finished run
+  `candidates` returns the first `limit` non-weft records of the run's
+  traces within a time window, in time order. `obsdb.HoleError.Kind` gains `"logs"`: a finished run
   with no span has nothing to attribute through and answers
   `HoleNotRecorded`.
 
@@ -96,6 +96,28 @@ module, ADR 0005).
 
 ### Added
 
+- **The compaction marker on the run page and in the panel (plan
+  A9.2, ADR 0028 §8).** `GET /api/runs/{id}` gains `compactions`: each
+  compaction the run's records name, counts and hash only, never a
+  message body — a run-scope view `{scope: "run", index, step,
+  from_seq, to_seq, hash, replaced, entries}` and thread's session
+  marker `{scope: "session", hash, replaced, entries, tokens_before?,
+  tokens_after?, reason}`; `[]` for a run that never compacted or was
+  written before A9 (the record is optional: no badge). A read-scoped
+  panel token reads it. The run page's step card whose request saw a
+  view draws "2 messages rewritten into 1 by PrepareStep" ("1 message
+  inserted by PrepareStep" when nothing was replaced) with the
+  `compacted` badge; a session marker sits at the top of the run it is
+  filed under — "12 messages compacted into 2 · 8.1k → 1.2k tokens".
+  "show original" (collapsed, no fetch) expands a view's replaced range
+  `[from_seq, to_seq)` from the transcript route's growth records the
+  page already holds (seq = position in their concatenation); a range
+  that cannot be placed is the `gap` badge. The replacement shows its
+  count — and, once the step route is loaded, the request's message
+  count — and says where its body is (the export's
+  `compactions[].messages`). The devtools panel draws the same marker:
+  session markers at the top of the turn, views on their step line.
+
 - **A run's app logs and its delta count in Studio (plan A7).**
   `GET /api/runs/{id}/logs?from=&limit=&severity=`, under a new `logs`
   capability in `/api/meta`, pages the app's own log lines (an `slog`
@@ -103,13 +125,15 @@ module, ADR 0005).
   were emitted under the run's spans — a tool handler's lines are the
   run's — in time order: `{logs: [{index, time, severity,
   severity_number, body, attrs, span_id?}], next_from?}`; `severity`
-  keeps a level and above (`trace`…`fatal`, or 1–24). A running run's
-  page carries `partial: true` and a reason (lines under in-flight spans
-  appear once those spans end; indexes may shift); lines naming a span
-  that was never stored are counted as `badge: "gap"`; past 10 000 lines
-  in the run's traces the page reads `badge: "truncated"`. A run
-  recorded without a tracer reads `badge: "not_recorded"` with the
-  tracer fix.
+  keeps a level and above (`trace`…`fatal`, or 1–24). `holes` lists
+  every hole of the page (`badge`/`reason`/`fix` repeat the first):
+  `not_recorded` for a run recorded without a tracer, `truncated` when
+  the run's traces hold more than 10 000 log lines in its window (the
+  cap applies before attribution: later lines of this run may be
+  missing), `gap` for lines in the run's trace naming a span that is
+  not stored (they may be another run's). A running run's page carries
+  `partial: true` and a `partial_reason` (lines under in-flight spans
+  appear once those spans end; indexes may shift) — not a hole.
   App logs may carry anything the app logged, prompts included, so a
   read-scoped panel token is refused them (403, `badge: "hidden"`); a
   playground-scoped token, the server token and loopback read them. The

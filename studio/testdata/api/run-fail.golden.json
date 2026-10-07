@@ -39,6 +39,7 @@
   "catalog_hash": "",
   "request_count": 0,
   "children": [],
-  "holes": []
+  "holes": [],
+  "compactions": []
 }
 

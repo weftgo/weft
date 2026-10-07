@@ -1,5 +1,5 @@
 {
-  "id": "r_off",
+  "id": "r_steps",
   "parent_run_id": "",
   "parent_call_id": "",
   "trace_id": "(norm)",
@@ -31,15 +31,15 @@
     "output_tokens": 20
   },
   "event_count": 13,
-  "message_count": 0,
+  "message_count": 6,
   "delta_count": 0,
   "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
   "catalog_hash": "974dbbd40b479735e3931872bc773dc4351bddc76c1e52c12457ea04c42f2b14",
   "request_count": 6,
   "children": [
     {
-      "id": "r_off/1/c_sub",
-      "parent_run_id": "r_off",
+      "id": "r_steps/1/c_sub",
+      "parent_run_id": "r_steps",
       "parent_call_id": "c_sub",
       "trace_id": "(norm)",
       "agent": "researcher",
@@ -70,27 +70,25 @@
         "output_tokens": 5
       },
       "event_count": 4,
-      "message_count": 0,
+      "message_count": 2,
       "delta_count": 1,
       "instructions_hash": "85f7fc2d7601d943c660c7969a4cc4a4c5838d7cdff1f2f56350587c70f58d13",
       "catalog_hash": "",
-      "request_count": 1,
-      "holes": [
-        {
-          "hole": "stripped",
-          "reason": "content not captured by this app: the destination's chain stripped it (weft.content = stripped), or the agent captured none (weft.Content(false), weft.content = none), so prompts, catalogs, messages, tool arguments and results were dropped before they were stored",
-          "fix": "turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent"
-        }
-      ]
+      "request_count": 1
     }
   ],
-  "holes": [
+  "holes": [],
+  "compactions": [
     {
-      "hole": "stripped",
-      "reason": "content not captured by this app: the destination's chain stripped it (weft.content = stripped), or the agent captured none (weft.Content(false), weft.content = none), so prompts, catalogs, messages, tool arguments and results were dropped before they were stored",
-      "fix": "turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent"
+      "scope": "run",
+      "index": 5,
+      "step": 2,
+      "from_seq": 1,
+      "to_seq": 3,
+      "hash": "f7f974691e358826798016f537798494fdc08c45bce009893a273b3cf26bd1c3",
+      "replaced": 2,
+      "entries": 1
     }
-  ],
-  "compactions": []
+  ]
 }
 

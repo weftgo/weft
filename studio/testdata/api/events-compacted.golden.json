@@ -1,0 +1,185 @@
+{
+  "events": [
+    {
+      "pos": 0,
+      "time": "(time)",
+      "event": {
+        "type": "run_start",
+        "id": "r_steps",
+        "model": {
+          "provider": "wefttest",
+          "name": "glm-a"
+        },
+        "agent": "orders",
+        "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+      }
+    },
+    {
+      "pos": 1,
+      "time": "(time)",
+      "event": {
+        "type": "step_start",
+        "run_id": "r_steps",
+        "index": 0
+      }
+    },
+    {
+      "pos": 2,
+      "time": "(time)",
+      "event": {
+        "type": "tool_start",
+        "run_id": "r_steps",
+        "seq": 1,
+        "call_id": "c_lookup",
+        "name": "lookup_order",
+        "args": {
+          "order_id": "42"
+        }
+      }
+    },
+    {
+      "pos": 3,
+      "time": "(time)",
+      "event": {
+        "type": "tool_finish",
+        "run_id": "r_steps",
+        "seq": 2,
+        "call_id": "c_lookup",
+        "name": "lookup_order",
+        "content": "order 42 shipped",
+        "is_error": false
+      }
+    },
+    {
+      "pos": 4,
+      "time": "(time)",
+      "event": {
+        "type": "step_finish",
+        "run_id": "r_steps",
+        "index": 0,
+        "reason": "tool_calls",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "latency_ms": 1
+      }
+    },
+    {
+      "pos": 5,
+      "time": "(time)",
+      "event": {
+        "type": "step_start",
+        "run_id": "r_steps",
+        "index": 1
+      }
+    },
+    {
+      "pos": 6,
+      "time": "(time)",
+      "event": {
+        "type": "tool_start",
+        "run_id": "r_steps",
+        "seq": 3,
+        "call_id": "c_sub",
+        "name": "research",
+        "args": {
+          "prompt": "why is order 42 late?"
+        }
+      }
+    },
+    {
+      "pos": 7,
+      "time": "(time)",
+      "event": {
+        "type": "tool_finish",
+        "run_id": "r_steps",
+        "seq": 9,
+        "call_id": "c_sub",
+        "name": "research",
+        "content": "the carrier lost it",
+        "is_error": false
+      }
+    },
+    {
+      "pos": 8,
+      "time": "(time)",
+      "event": {
+        "type": "step_finish",
+        "run_id": "r_steps",
+        "index": 1,
+        "reason": "tool_calls",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "latency_ms": 1
+      }
+    },
+    {
+      "pos": 9,
+      "time": "(time)",
+      "event": {
+        "type": "step_start",
+        "run_id": "r_steps",
+        "index": 2
+      }
+    },
+    {
+      "pos": 10,
+      "time": "(time)",
+      "event": {
+        "type": "tool_start",
+        "run_id": "r_steps",
+        "seq": 10,
+        "call_id": "c_refund",
+        "name": "refund",
+        "args": {
+          "order_id": "42"
+        }
+      }
+    },
+    {
+      "pos": 11,
+      "time": "(time)",
+      "event": {
+        "type": "step_finish",
+        "run_id": "r_steps",
+        "index": 2,
+        "reason": "tool_calls",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "latency_ms": 1
+      }
+    },
+    {
+      "pos": 12,
+      "time": "(time)",
+      "event": {
+        "type": "run_finish",
+        "run_id": "r_steps",
+        "usage": {
+          "input_tokens": 40,
+          "output_tokens": 20
+        },
+        "steps": 3,
+        "pending": [
+          {
+            "type": "tool_call",
+            "id": "c_refund",
+            "name": "refund",
+            "args": {
+              "order_id": "42"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "next_after": null,
+  "done": true,
+  "gaps": []
+}
+

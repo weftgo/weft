@@ -116,6 +116,33 @@ export interface RunDoc extends RunRow {
    * not_recorded, interrupted, derived, stripped, gap — each with its
    * reason and fix. Absent from a Studio older than A3. */
   holes?: StepHole[]
+  /** The compactions the run's records name (ADR 0028 §8, api.go's
+   * runCompaction; plan A9.2): counts and hashes, never a message
+   * body. [] for a run that never compacted; absent from a Studio
+   * older than A9.2 — either way the page draws no marker. */
+  compactions?: RunCompaction[]
+}
+
+/** One compaction of a run (api.go's runCompaction). scope "run": a
+ * PrepareStep's view of one step's request — index, step and the
+ * replaced range [from_seq, to_seq), seq being the position in the
+ * concatenated growth records (the transcript route's batches); scope
+ * "session": thread's marker — reason and counts, token estimates when
+ * reported, no range. */
+export interface RunCompaction {
+  scope: "run" | "session" | (string & {})
+  index?: number
+  step?: number
+  from_seq?: number
+  to_seq?: number
+  hash: string
+  replaced: number
+  entries: number
+  tokens_before?: number
+  tokens_after?: number
+  /** thread's reason (session markers): manual, threshold, overflow,
+   * from_hook, trim. */
+  reason?: string
 }
 
 /** One positioned event in a paged stream (S4.3's EventsPage entry). */

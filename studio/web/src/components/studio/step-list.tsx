@@ -10,7 +10,8 @@ import { ChevronRight, Play } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 import { stepQuery } from "@/lib/api"
-import type { RunDoc, WireEvent } from "@/lib/api"
+import type { RunCompaction, RunDoc, Transcript, WireEvent } from "@/lib/api"
+import { compactionsOf, isSessionMarker } from "@/lib/compaction"
 import {
   callState,
   fold,
@@ -28,6 +29,7 @@ import type { HoleMark } from "@/lib/honesty"
 import { tokens } from "@/lib/format"
 import { bytes } from "@/lib/summarize"
 import { CodeWin } from "@/components/studio/codewin"
+import { CompactionMarker } from "@/components/studio/compaction-marker"
 import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
 import {
   AttemptsSection,
@@ -409,12 +411,18 @@ function StepCard({
   highlighted,
   onJump,
   requests,
+  compactions,
+  transcript,
 }: {
   step: FoldedStep
   runId: string
   /** The run document's holes: those that hold for every step badge
    * each card (stepHoles). */
   runHoles?: HoleMark[]
+  /** The run's compactions (plan A9.2): this step's run-scope views
+   * draw their marker inside the card. */
+  compactions: RunCompaction[]
+  transcript?: Transcript | null
   runStatus: string
   childLinks: Map<string, ChildRow>
   highlighted?: boolean
@@ -463,6 +471,17 @@ function StepCard({
           />
         </span>
       </div>
+      {compactions
+        .filter((c) => !isSessionMarker(c) && c.step === step.index)
+        .map((c) => (
+          <CompactionMarker
+            key={c.hash || c.index}
+            c={c}
+            all={compactions}
+            runId={runId}
+            transcript={transcript}
+          />
+        ))}
       {requests ? <RequestSection req={requests} step={step.index} /> : null}
       <AttemptsSection
         step={step}
@@ -524,6 +543,7 @@ export function StepList({
   highlight,
   onJump,
   requests,
+  transcript,
 }: {
   events: WireEvent[]
   folded: FoldedRun
@@ -543,7 +563,16 @@ export function StepList({
    * called the model with. Absent — the server lacks the requests
    * capability — the section is not drawn. */
   requests?: RunRequests
+  /** The transcript route's growth records, when loaded: "show
+   * original" reads a view's replaced range from them (plan A9.2). */
+  transcript?: Transcript | null
 }) {
+  // The compactions the run document names (A9.2). A run from before
+  // A9 has none in its document and draws no marker: the record is
+  // optional, so its absence is not a hole ("not recorded" would be a
+  // false claim about a run that may simply never have compacted).
+  const compactions = compactionsOf(doc)
+  const sessionMarkers = compactions.filter(isSessionMarker)
   const replaying = upTo != null && upTo < events.length
   const view = linkView(
     upTo == null ? folded : (atPlayhead ?? fold(events, upTo)),
@@ -559,6 +588,15 @@ export function StepList({
   const runStatus = replaying ? "running" : doc.status
   return (
     <div className="space-y-3">
+      {sessionMarkers.map((c, i) => (
+        <CompactionMarker
+          key={c.hash || `session-${i}`}
+          c={c}
+          all={compactions}
+          runId={doc.id}
+          transcript={transcript}
+        />
+      ))}
       {view.steps.map((step) => (
         <div key={step.index} className="space-y-3">
           <StepCard
@@ -570,6 +608,8 @@ export function StepList({
             highlighted={step.index === highlight}
             onJump={onJump}
             requests={requests}
+            compactions={compactions}
+            transcript={transcript}
           />
           {step.steer ? <SteerBlock steer={step.steer} onJump={onJump} /> : null}
         </div>

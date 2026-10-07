@@ -566,6 +566,7 @@ function RunPage() {
             highlight={search.step}
             onJump={jump}
             requests={requests}
+            transcript={transcript.data}
           />
         </TabsContent>
         <TabsContent value="raw" className="mt-3">

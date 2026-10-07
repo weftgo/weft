@@ -1,0 +1,53 @@
+{
+  "id": "s_compact_001-t2",
+  "parent_run_id": "",
+  "parent_call_id": "",
+  "trace_id": "(norm)",
+  "agent": "support",
+  "model": {
+    "provider": "wefttest",
+    "name": "script"
+  },
+  "manifest_hash": "33a8f1f552861709caf85582dcf411044b89989f12e2f6cb74d3e3b5fc511859",
+  "weft_version": "(test)",
+  "service": "studio.test",
+  "session_id": "s_compact_001",
+  "public_id": "",
+  "turn": 2,
+  "playground": false,
+  "experiment_id": "",
+  "forked_from": "",
+  "meta": {},
+  "started": "(time)",
+  "finished": "(time)",
+  "last_seen": "(norm)",
+  "status": "succeeded",
+  "err": "",
+  "steps": 1,
+  "pending": 0,
+  "stop_reason": "stop",
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  },
+  "event_count": 4,
+  "message_count": 2,
+  "delta_count": 1,
+  "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "catalog_hash": "",
+  "request_count": 1,
+  "children": [],
+  "holes": [],
+  "compactions": [
+    {
+      "scope": "session",
+      "hash": "(hash)",
+      "replaced": 3,
+      "entries": 1,
+      "tokens_before": 2058,
+      "tokens_after": 1045,
+      "reason": "manual"
+    }
+  ]
+}
+

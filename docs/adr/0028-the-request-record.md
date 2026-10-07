@@ -344,6 +344,11 @@ in it. Step 3's request, if `PrepareStep` leaves the messages alone,
 has `messages_ref = {index: 4, count: 4}` and no `compacted` record
 applies to it.
 
+A reader resolves `from_seq`/`to_seq` against the growth records below
+the view's index, concatenated in index order: a seq is the message's
+position there (Studio's "show original", plan A9.2, draws exactly that
+range; a growth record missing below the index is a `gap`).
+
 **Session scope (thread reports it).** The core has no knowledge of a
 `thread` compaction (ADR 0020): when `thread` compacted before the run
 — a threshold or manual compaction, or the overflow re-run, which runs

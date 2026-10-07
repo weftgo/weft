@@ -225,6 +225,55 @@ type runDoc struct {
 	Holes    []stepHole `json:"holes"`
 }
 
+// runPage is what GET /api/runs/{id} serves: the run document and the
+// compactions its records name (ADR 0028 §8, obsdb.DB.Compactions) —
+// [] for a run that never compacted, and for every run written before
+// A9: the record is optional, so its absence is no hole. The export's
+// run block is the bare runDoc; it carries the compactions (with
+// their messages) in a block of its own.
+type runPage struct {
+	runDoc
+	Compactions []runCompaction `json:"compactions"`
+}
+
+// runCompaction is one compaction a run's records name, counts and
+// hash only: a run-scope view (scope "run": the PrepareStep rewrite of
+// one step's request — index, step and the replaced transcript range
+// [from_seq, to_seq), seq being the message's position in the
+// concatenated growth records) or thread's session marker (scope
+// "session": reason, the counts and the token estimates; no index,
+// step or range). A view's messages are not here: the page reads the
+// replaced range from the transcript route it already holds, and the
+// export carries the view's body (the compactions block).
+type runCompaction struct {
+	Scope        string `json:"scope"`
+	Index        *int64 `json:"index,omitempty"`
+	Step         *int   `json:"step,omitempty"`
+	FromSeq      *int64 `json:"from_seq,omitempty"`
+	ToSeq        *int64 `json:"to_seq,omitempty"`
+	Hash         string `json:"hash"`
+	Replaced     int    `json:"replaced"`
+	Entries      int    `json:"entries"`
+	TokensBefore int64  `json:"tokens_before,omitempty"`
+	TokensAfter  int64  `json:"tokens_after,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+// runCompactions maps DB.Compactions onto the run page's DTO.
+func runCompactions(cs []obsdb.Compaction) []runCompaction {
+	out := make([]runCompaction, 0, len(cs))
+	for _, c := range cs {
+		rc := runCompaction{Scope: c.Scope, Hash: c.Hash, Replaced: c.Replaced, Entries: c.Entries,
+			TokensBefore: c.TokensBefore, TokensAfter: c.TokensAfter, Reason: c.Reason}
+		if c.Scope != obsdb.CompactionSession {
+			idx, step, from, to := c.Index, c.Step, c.FromSeq, c.ToSeq
+			rc.Index, rc.Step, rc.FromSeq, rc.ToSeq = &idx, &step, &from, &to
+		}
+		out = append(out, rc)
+	}
+	return out
+}
+
 // posEvent is one event in a paged stream: its 0-based position and
 // time beside the event itself (S4.3's EventsPage entry). Attrs is the
 // stored record's weft.content.* attributes and nothing else — what
@@ -669,8 +718,8 @@ func (s *Server) serveRunRoutes(w http.ResponseWriter, r *http.Request) {
 	s.serveRun(w, r, rest)
 }
 
-// serveRun answers api/runs/{id}: the row and the child runs (obsdb's
-// Run detail carries both). Events are deliberately not here — they
+// serveRun answers api/runs/{id}: the row, the child runs (obsdb's
+// Run detail carries both) and the run's compactions (runPage). Events are deliberately not here — they
 // are paged (ADR 0018 §8).
 func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	if !s.scopeRunID(w, r, id) {
@@ -698,7 +747,12 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	doc.Holes = holes
-	writeJSON(w, r, http.StatusOK, doc)
+	comps, err := s.db.Compactions(r.Context(), id)
+	if err != nil {
+		dbError(w, r, "compactions of run", id, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, runPage{runDoc: doc, Compactions: runCompactions(comps)})
 }
 
 // runHoles is the run's own holes, from what obsdb can tell about the

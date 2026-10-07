@@ -157,6 +157,11 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		absent []string
 	}{
 		{"run-sub.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".meta.cwd"}},
+		// The run documents A9.2 pins from runs that compacted (a
+		// PrepareStep trim, thread's session marker): every field but the
+		// compactions themselves is the plain run's.
+		{"run-compacted.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".compactions[]", ".holes[]"}},
+		{"run-session-compacted.golden.json", "/api/runs/" + res.ID, []string{".compactions[]"}},
 		{"runs.golden.json", "/api/runs", []string{".runs[].finished=<nil>", ".runs[].meta.cwd"}},
 		{"runs-children.golden.json", "/api/runs?all=1", []string{".runs[].meta.cwd"}},
 		{"events-ok.golden.json", "/api/runs/" + res.ID + "/events", nil},

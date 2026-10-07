@@ -305,7 +305,7 @@ func TestLiveHEADDoesNotHoldAStream(t *testing.T) {
 	done := make(chan int, 1)
 	go func() {
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest(http.MethodHead, "/api/live?run=r_ok", nil))
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodHead, "http://127.0.0.1/api/live?run=r_ok", nil))
 		done <- w.Code
 	}()
 	select {
@@ -374,7 +374,9 @@ func TestLiveBackfillStopsWhenTheClientLeaves(t *testing.T) {
 	h := New(DB(db), Live(obsdb.NewHub())).Handler()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/api/live?session=s_big", nil).WithContext(ctx)
+	// A loopback Host: setup A's API answers nothing else (the
+	// DNS-rebinding guard), and httptest's default is example.com.
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/live?session=s_big", nil).WithContext(ctx)
 	req.Header.Set("Last-Event-ID", "1")
 	done := make(chan struct{})
 	go func() {
@@ -700,7 +702,7 @@ func TestPlaygroundOptionValues(t *testing.T) {
 func TestFixtureRouteNamesDBFailures(t *testing.T) {
 	stub := stubDB{err: errors.New("disk on fire")}
 	h := New(DB(stub), Playground(true)).Handler()
-	req := httptest.NewRequest(http.MethodPost, "/api/playground/fixtures", strings.NewReader(`{"run_id":"r_x"}`))
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/playground/fixtures", strings.NewReader(`{"run_id":"r_x"}`))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	if w.Code != http.StatusInternalServerError {

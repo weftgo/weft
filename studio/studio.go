@@ -1,7 +1,6 @@
 package studio
 
 import (
-	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -79,7 +78,9 @@ func IngestToken(tok string) Option {
 
 // Token protects the JSON API and the panel-token mint with a bearer
 // token, and keys the panel tokens' HMAC signatures (setup C's signing
-// key). Without it the API is open (setup A: embedded, same origin).
+// key). Without it the API is open to a loopback Host or one
+// AllowOrigins names (setup A: embedded, same origin; any other Host
+// is refused, the DNS-rebinding guard).
 func Token(tok string) Option {
 	return func(c *config) { c.token = tok }
 }
@@ -87,7 +88,11 @@ func Token(tok string) Option {
 // AllowOrigins permits these origins on the API and ingest routes
 // (CORS for a panel served from another origin). The default, when a
 // Token is configured, is localhost and 127.0.0.1 on any port; setup
-// A (same origin, no token) sends no CORS headers at all.
+// A (same origin, no token) sends no CORS headers unless origins are
+// listed. Without a Token each origin's host:port is also a Host the
+// API answers besides the loopback names (an app served at
+// http://myapp.internal:8080 lists exactly that); "*" admits every
+// Host.
 func AllowOrigins(origins ...string) Option {
 	return func(c *config) { c.origins = append(c.origins, origins...) }
 }
@@ -283,16 +288,7 @@ func (s *Server) ingestAuthorized(r *http.Request) bool {
 // ::1 and the IPv4-mapped form (a dual-stack listener reports
 // ::ffff:127.0.0.1) are loopback.
 func remoteIsLoopback(r *http.Request) bool {
-	host := r.RemoteAddr
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	host = strings.Trim(host, "[]")
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return isLoopbackName(hostOnly(r.RemoteAddr))
 }
 
 // ServeHTTP routes one request: the registered route groups (the API,

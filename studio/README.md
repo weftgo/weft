@@ -26,6 +26,20 @@ the handle's hub and `/api/live` follows, sub-100 ms, no network.
 opens `$WEFT_DB` or `./.weft/weft.db` (history only — a second handle
 on the file, no live lane).
 
+Without a `Token`, setup A's API (the whole `/api` tree: reads, the
+live stream, the playground and debugger verbs, the runtime link)
+answers only a **loopback `Host`** — `localhost`, `*.localhost`,
+`127.0.0.0/8`, `[::1]`, any port — so a DNS-rebinding page
+(`http://evil.example:7331` resolving to 127.0.0.1, same-origin to the
+browser) gets a 403 instead of your transcripts and your playground.
+An app served on a real hostname (`http://myapp.internal:8080/studio/`)
+either lists that origin — `studio.AllowOrigins("http://myapp.internal:8080")`,
+whose `host:port` must equal the request's `Host` — or sets
+`studio.Token`. `X-Forwarded-Host`/`Forwarded` are never trusted; behind
+a proxy, the `Host` the proxy forwards is the one checked. The UI shell
+and `/panel.js` carry no data and are not checked; with a `Token` the
+bearer is the defence and the `Host` does not matter.
+
 **B · local binary** — any language's app, several services:
 
 ```sh

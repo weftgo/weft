@@ -14,6 +14,11 @@
 // Passing the pipeline's handle is what makes it live: writes publish
 // to the handle's hub and the /api/live stream follows, no network
 // (examples/studio-local is the whole thing, with a thread session).
+// Without a Token the API answers only a loopback Host (localhost,
+// *.localhost, 127.0.0.0/8, [::1]) or one an AllowOrigins origin
+// names — DNS rebinding makes any site same-origin to a loopback
+// Studio — so an app served on a real hostname lists its origin in
+// AllowOrigins or sets a Token.
 //
 // Setup B runs the binary (studio/cmd): the UI, OTLP ingest, SQLite
 // and a dev token on 127.0.0.1:7331 — any language's app points

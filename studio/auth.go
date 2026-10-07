@@ -9,8 +9,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,8 +21,13 @@ import (
 
 // Auth and CORS (S4.6). Three setups, one handler:
 //
-//   - A embedded: no Token configured — the API is open (same
-//     origin, in-process), ingest answers loopback.
+//   - A embedded: no Token configured — the API is open to the
+//     page's own origin (same origin, in-process), ingest answers
+//     loopback. "Same origin" is the browser's word, and DNS
+//     rebinding makes any site same-origin to a loopback Studio
+//     (http://evil.example:7331 resolving to 127.0.0.1), so the open
+//     API answers only a loopback Host or one AllowOrigins names
+//     (hostAllowed below).
 //   - B local binary: a dev token (printed at start;
 //     WEFT_STUDIO_TOKEN fixes it) protects the API; AllowOrigins
 //     defaults to localhost and 127.0.0.1 on any port.
@@ -129,15 +136,28 @@ func bearerToken(r *http.Request) string {
 }
 
 // auth wraps the API tree with S4.6's token check. Without a
-// configured Token everything passes (setup A); with one, the bearer
-// must be the server token or a valid panel token. Ingest carries its
-// own token (S4.4) and is not wrapped.
+// configured Token (setup A) every request whose Host passes
+// hostAllowed goes through — reads and writes alike, the live stream
+// and the runtime link included: transcripts are as sensitive as the
+// playground's verbs are dangerous — and any other Host is a 403 that
+// names what to configure. With a Token the bearer must be the server
+// token or a valid panel token, and the Host does not matter. Ingest
+// carries its own rule (S4.4) and is not wrapped; neither are the UI
+// shell and panel.js, which carry no data.
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		identify := func(id identity) {
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), identityCtxKey{}, id)))
 		}
 		if s.token == "" {
+			if !hostAllowed(s.origins, r) {
+				writeError(w, r, http.StatusForbidden, "forbidden",
+					"no studio.Token is configured, so the API answers only a loopback Host "+
+						"(localhost, *.localhost, 127.0.0.1, [::1]); this request's Host is "+
+						strconv.Quote(r.Host)+": list its origin in studio.AllowOrigins "+
+						"(e.g. \"http://"+r.Host+"\") or configure studio.Token")
+				return
+			}
 			identify(identity{})
 			return
 		}
@@ -422,6 +442,55 @@ func originAllowed(origins []string, defaults bool, origin string) bool {
 	}
 	host := u.Hostname()
 	return host == "localhost" || host == "127.0.0.1"
+}
+
+// hostAllowed is setup A's DNS-rebinding guard: the request's Host
+// (the browser's idea of the origin's host, which a rebound page
+// cannot fake) must be a loopback name — localhost, *.localhost
+// (browsers resolve those to loopback themselves), 127.0.0.0/8 or
+// [::1], any port — or the host[:port] of an AllowOrigins entry
+// ("*" lets every Host through, as it lets every origin). Proxy
+// headers (X-Forwarded-Host, Forwarded) are never read: anyone can
+// send them. A request with no RemoteAddr never crossed a socket —
+// net/http's server always sets it — and is the in-process caller
+// (weft/runtime's runtime.Local transport), which passes.
+func hostAllowed(origins []string, r *http.Request) bool {
+	if r.RemoteAddr == "" {
+		return true
+	}
+	if isLoopbackName(hostOnly(r.Host)) {
+		return true
+	}
+	for _, o := range origins {
+		if o == "*" {
+			return true
+		}
+		if u, err := url.Parse(o); err == nil && u.Host != "" && strings.EqualFold(u.Host, r.Host) {
+			return true
+		}
+	}
+	return false
+}
+
+// hostOnly strips the port (and an IPv6 literal's brackets) from a
+// host[:port].
+func hostOnly(hostport string) string {
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		return h
+	}
+	return strings.Trim(hostport, "[]")
+}
+
+// isLoopbackName reports whether host names this machine: localhost,
+// a *.localhost name, or a loopback IP (127.0.0.0/8, ::1, the
+// IPv4-mapped form).
+func isLoopbackName(host string) bool {
+	host = strings.ToLower(host)
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // DevToken generates a random dev token for setup B's binary: printed

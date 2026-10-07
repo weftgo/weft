@@ -510,7 +510,18 @@ func TestRequestRecordSchema(t *testing.T) {
 			"weft.messages.reason": "compacted", "weft.messages.from_seq": int64(1), "weft.messages.to_seq": int64(3),
 			"weft.compaction.hash": "kh", "weft.compaction.scope": "run"}),
 		rec("tools", nil), // a malformed producer: no index
-	}}); err != nil {
+	}, Spans: []obsdb.Span{{
+		// Run q2 is known only from its invoke_agent span: the traces
+		// view's InstructionsHash path.
+		TraceID: "0102030405060708090a0b0c0d0e0f10", SpanID: "0a0b0c0d0e0f1011",
+		Name: "invoke_agent support", Kind: 1, Service: "conf-svc",
+		Start: time.Unix(0, 1790845923120000000).UTC(), End: time.Unix(0, 1790845924120000000).UTC(),
+		Attrs: map[string]any{
+			"weft.run.id": "q2", "gen_ai.operation.name": "invoke_agent",
+			"weft.instructions.hash": "sih", "tenant": "acme",
+		},
+		Resource: map[string]any{"service.name": "conf-svc"},
+	}}}); err != nil {
 		t.Fatal(err)
 	}
 	conn := openRaw(t, dsn)
@@ -526,6 +537,13 @@ func TestRequestRecordSchema(t *testing.T) {
 	}
 	if meta != `{"tenant":"acme"}` {
 		t.Errorf("run meta = %s; ADR 0028's keys must stay out of it", meta)
+	}
+	if err := conn.QueryRow(ctx(), `SELECT max(InstructionsHash), max(Meta)
+		FROM weft_runs WHERE RunId = 'q2'`).Scan(&instructions, &meta); err != nil {
+		t.Fatal(err)
+	}
+	if instructions != "sih" || meta != `{"tenant":"acme"}` {
+		t.Errorf("span-only run = %q, meta %s; want sih from the invoke_agent span and only the tenant", instructions, meta)
 	}
 	rows, err := conn.Query(ctx(), `SELECT Kind, Pos, Step, Reason FROM weft_records FINAL
 		WHERE RunId = 'q1' ORDER BY Kind, Pos`)

@@ -5,7 +5,7 @@
   plan decision 1, "record the request", the same day)
 - Amends: ADR 0024 (observability data) — its record contract gains
   three record kinds, their attributes, the compaction view record and
-  four `obsdb` columns. ADR 0024's "changing either is an ADR" rule is
+  five `obsdb` columns. ADR 0024's "changing either is an ADR" rule is
   why this ADR exists.
 - Reverses: the stance in `core/run.go`'s `overrideAttrs` comment (at
   line 672 when this was written) that "no record carries the [instructions]
@@ -181,15 +181,24 @@ terms; an emitter in another language follows the same steps:
 
 1. For each tool, decode its JSON schema with a `json.Decoder` that has
    `UseNumber()` set, into an `any`.
-2. Build one object per tool, `{"name": …, "description": …, "schema":
-   <the decoded value>}`, and sort the objects by `name`.
+2. Build one map per tool with the keys `description`, `name` and
+   `schema` (the decoded value), and sort the maps by `name`. They are
+   maps, not structs: every object, at every level, is written with its
+   keys sorted (`description`, `name`, `schema` here), so an emitter
+   that writes the fields in a struct's declaration order produces a
+   different hash and is wrong.
 3. Encode the array with a `json.Encoder` that has
    `SetEscapeHTML(false)`; Go's encoder writes map keys sorted and no
    insignificant whitespace. Drop the encoder's trailing newline.
 4. The hash is sha256 of those bytes, lowercase hex.
 
-The result is JCS-equivalent (RFC 8785) except that numbers keep their
-source lexeme (`1.0` stays `1.0`), which `UseNumber` preserves. A change
+Go's encoder output, produced by these steps, is the definition. An
+emitter in another language that starts from RFC 8785 (JCS) must
+account for the three known differences: numbers keep their source
+lexeme (`1.0` stays `1.0`, which `UseNumber` preserves); U+2028 and
+U+2029 are escaped as `\u2028` and `\u2029` even with
+`SetEscapeHTML(false)`; and invalid UTF-8 in a string is replaced by
+U+FFFD. A change
 of policy alone (a `ToolSource` swapping in the same schema with another
 timeout) is therefore not a new catalog and is not re-recorded; the
 chips describe the catalog as first recorded in the run.
@@ -227,8 +236,11 @@ start. Only the layer adjacent to the real model reports (`mw.Retry`,
 retries), and an adapter that does report SDK-internal retries adds
 records the same way; a count of `request` records per step is
 therefore "attempts the chain reported, at least one", not a fixed one.
-A report that arrives after its model call ended is dropped by the
-reporter and adds no record.
+A report made after its model call ended is dropped by the reporter
+best-effort, as `core/report.go` documents: a goroutine the chain left
+behind that reports while the call is ending may still land. So A1
+additionally checks the reporter's ended state before it emits the
+extra `request` record, and a late report adds no record.
 
 The `attempt` child span under `chat` is A8's, unchanged:
 `weft.attempt.index`, `gen_ai.provider.name`, `gen_ai.request.model`,
@@ -267,13 +279,14 @@ reader fails loudly on one it does not know.
 
 **Run scope (the core emits it).** When the messages a request carries
 are not the run's transcript so far — a `PrepareStep` that trims,
-summarizes or rewrites messages, an overflow re-run — the core emits
+summarizes or rewrites messages — the core emits
 one `compacted` record immediately before that request's `request`
 record:
 
 - the range is computed by the longest common prefix and the longest
   common suffix (not overlapping the prefix) of the current transcript
-  and the request's messages; the messages between them in the
+  and the request's messages, where two messages are equal when their
+  wire JSON (ADR 0001) is byte-equal; the messages between them in the
   transcript are the replaced half-open range `[from_seq, to_seq)` of
   message ordinals, and the request's messages between them are the
   record's body (the ordinary messages wire, so per-part `Redact`
@@ -304,9 +317,11 @@ has `messages_ref = {index: 4, count: 4}` and no `compacted` record
 applies to it.
 
 **Session scope (thread reports it).** The core has no knowledge of a
-`thread` compaction (ADR 0020): when `thread` compacted before the run,
-the run's input record 0 already holds the compacted context, which is
-literal and needs nothing applied. A marker with
+`thread` compaction (ADR 0020): when `thread` compacted before the run
+— a threshold or manual compaction, or the overflow re-run, which runs
+again on the compacted context — the run's input record 0 already
+holds the compacted context, which is literal and needs nothing
+applied; the core emits no run-scope record for it. A marker with
 `weft.compaction.scope = session` is informational only: `thread` emits
 it through its own OTel records, it carries no messages, and readers
 never apply it. A9 designs that carrier.
@@ -431,7 +446,7 @@ columns and the badges are one contract and are read together.
   every model call, diff two runs' requests by hash, and say precisely
   when it cannot (`stripped`, `truncated`, `not_recorded`, `hidden`).
 - A run records at least one `prompt` and one `tools` record more than
-  before, and one `request` per model call. The `request` record is
+  before, and one `request` per reported attempt (§7). The `request` record is
   small; the two content payloads are stored once per distinct hash, so
   the cost grows with how often a run changes its prompt or catalog,
   not with its step count.

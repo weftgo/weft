@@ -12,7 +12,46 @@
 // (§5.1 Versioning). studio/panel_test.go pins that this string
 // matches studio.Version.
 import { readFileSync } from "node:fs"
+import { gzipSync } from "node:zlib"
 import { defineConfig } from "vite"
+import type { Plugin } from "vite"
+
+/** §5.1's budget: panel.js is ≤ 80 KiB gzip. */
+const PANEL_GZIP_BUDGET = 80 * 1024
+
+/** panelBudget fails the build — loudly, before anything is copied
+ * into the committed dist — when the artifact is not the one file
+ * §5.1 names or is over its budget (a shared lib module that starts
+ * dragging the app's dependencies in shows up here as size). */
+function panelBudget(): Plugin {
+  return {
+    name: "weft-panel-budget",
+    generateBundle(_options, bundle) {
+      const files = Object.keys(bundle)
+      if (files.length !== 1 || files[0] !== "panel.js")
+        this.error(`the panel build must emit panel.js alone, got: ${files.join(", ")}`)
+      const out = bundle["panel.js"]
+      // The panel has no runtime dependency (V1: vanilla TS, the Dv0
+      // decision): it reaches the app's lib/ modules for their pure
+      // halves, and lib/api.ts imports @tanstack/react-query at its top.
+      // Tree-shaking drops that today; a side-effectful import, or a
+      // helper that starts touching it, would pull React into every
+      // host page — far under the size budget, so size cannot be the
+      // guard. Any package code in the bundle fails the build.
+      if (out.type === "chunk") {
+        const deps = Object.entries(out.modules)
+          .filter(([id, m]) => m.renderedLength > 0 && /[\\/]node_modules[\\/]/.test(id))
+          .map(([id]) => id.replace(/^.*[\\/]node_modules[\\/]/, ""))
+        if (deps.length)
+          this.error(`panel.js must carry no package code (V1), got: ${deps.slice(0, 5).join(", ")}`)
+      }
+      const code = out.type === "chunk" ? out.code : String(out.source)
+      const gz = gzipSync(code).length
+      if (gz > PANEL_GZIP_BUDGET)
+        this.error(`panel.js is ${gz} bytes gzipped, over the ${PANEL_GZIP_BUDGET} budget (WEFT-DEVTOOLS §5.1)`)
+    },
+  }
+}
 
 // The version the Go module reports (studio/studio.go's Version) —
 // read from the source so the panel can never drift from it silently.
@@ -29,6 +68,7 @@ const studioVersion = (() => {
 // (f80f7e5) and is gone.
 
 export default defineConfig({
+  plugins: [panelBudget()],
   define: {
     __PANEL_STUDIO_VERSION__: JSON.stringify(studioVersion),
   },

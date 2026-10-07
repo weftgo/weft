@@ -10,8 +10,8 @@
 //
 // The replay playhead (?t=) drives every view on the position axis.
 // A running run's tail is the /api/live stream when the server has
-// the lane (S4.5): deltas stream, run frames refresh the document,
-// overflow falls back to the paged poll. The document and transcript
+// the lane (S4.5) — one stream per page: deltas stream, run frames
+// refresh the document, a lost stream falls back to the paged poll. The document and transcript
 // refresh every 2 s while running as the poll-shaped fallback.
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Columns2, Rows3 } from "lucide-react"
 
 import { runQuery, transcriptQuery, spansQuery } from "@/lib/api"
-import type { Span as TimedSpan } from "@/lib/api"
+import type { RunRow, Span as TimedSpan } from "@/lib/api"
 import { applyTranscript, fold } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
 import {
@@ -29,7 +29,6 @@ import {
   spansFromTimed,
   timeDomain,
 } from "@/lib/trace"
-import { openLive } from "@/lib/live"
 import { FlowStrip } from "@/components/studio/flow-strip"
 import { RunHeader } from "@/components/studio/run-header"
 import { RawView } from "@/components/studio/raw-view"
@@ -98,7 +97,7 @@ function RunPage() {
   const navigate = useNavigate({ from: "/runs/$id" })
   const view: View = search.view ?? "trace"
   const [layout, setLayout] = useState<Layout>(readLayout)
-  const { has } = useCapabilities()
+  const { has, loading: capsLoading } = useCapabilities()
   const liveCapable = has("live")
   const cycleLayout = () =>
     setLayout((l) => {
@@ -137,7 +136,33 @@ function RunPage() {
     refetchInterval: () => (run.data?.status === "running" ? 2000 : false),
   })
   const runStatus = run.data?.status ?? "running"
-  const stream = useRunEvents(id, runStatus, { live: liveCapable })
+  // Run frames refresh the document (usage, status, counts) without
+  // waiting for the poll. The frame carries the row itself, so it is
+  // written into the cache — a refetch per frame is a request per
+  // written batch on a busy run. The children (and the finished
+  // words, the spans) are refetched once, when the status changes.
+  const onRunFrame = useCallback(
+    (row: RunRow) => {
+      const prev = queryClient.getQueryData(runQuery(id).queryKey)
+      queryClient.setQueryData(runQuery(id).queryKey, (old) =>
+        old ? { ...old, ...row } : old
+      )
+      if (!prev || prev.status !== row.status) {
+        void queryClient.invalidateQueries({ queryKey: ["run", id] })
+        void queryClient.invalidateQueries({ queryKey: ["transcript", id] })
+        void queryClient.invalidateQueries({ queryKey: ["spans", id] })
+      }
+    },
+    [id, queryClient]
+  )
+  // The walk waits for api/meta (the shell asks for it at the same
+  // time): started without the live capability known, it would start
+  // over from position 0 when the capability arrived — the whole
+  // stream read twice.
+  const stream = useRunEvents(capsLoading ? "" : id, runStatus, {
+    live: liveCapable,
+    onRun: onRunFrame,
+  })
 
   // The run's timed spans (the time axis's rows, S4.7), fetched when
   // the trace view is on and the run has a trace.
@@ -149,20 +174,6 @@ function RunPage() {
   const timed: TimedSpan[] = spans.data?.spans ?? []
   const haveTime = timed.length > 0
   const axis: "events" | "time" = search.axis ?? (haveTime ? "time" : "events")
-
-  // Run frames refresh the document (usage, status, counts) without
-  // waiting for the poll.
-  useEffect(() => {
-    if (!liveCapable || runStatus !== "running") return
-    const live = openLive({
-      selector: { run: id },
-      kinds: ["run"],
-      onRun: () => {
-        void queryClient.invalidateQueries({ queryKey: ["run", id] })
-      },
-    })
-    return () => live.close()
-  }, [id, liveCapable, runStatus, queryClient])
 
   // The replay playhead: null = live. Seeks and pauses write t to the
   // URL (a paste reproduces the exact view, A3); playback ticks do
@@ -193,7 +204,7 @@ function RunPage() {
     axis === "events" && playhead !== null && playhead < stream.events.length
   const foldedNow =
     transcript.data && runStatus !== "running"
-      ? applyTranscript(stream.folded, transcript.data.batches)
+      ? applyTranscript(stream.folded, transcript.data.batches, { replace: true })
       : stream.folded
   const atPlayhead = useMemo(
     () => (replaying ? fold(stream.events, playhead) : foldedNow),
@@ -316,6 +327,18 @@ function RunPage() {
           onSeek={seek}
         />
       ) : null}
+      {stream.gaps.length > 0 && (
+        <div className="rounded-md border border-status-bad/30 px-3 py-2 font-mono text-xs text-status-bad">
+          {stream.gaps.length >= 1000 ? "1,000+" : stream.gaps.length} recorded{" "}
+          {stream.gaps.length === 1 ? "event is" : "events are"} missing from the
+          database (position{stream.gaps.length === 1 ? "" : "s"}{" "}
+          {stream.gaps.slice(0, 8).join(", ")}
+          {stream.gaps.length > 8 ? ", …" : ""}) —{" "}
+          {runStatus === "running"
+            ? "still in flight, or lost on the way"
+            : "lost on the way: the story has holes there"}
+        </div>
+      )}
       {stream.error && (
         <div className="rounded-md border border-status-bad/30 px-3 py-2 font-mono text-xs text-status-bad">
           event stream: {stream.error}

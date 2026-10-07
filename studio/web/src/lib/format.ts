@@ -21,12 +21,24 @@ export function relativeTime(iso: string, now: number = Date.now()): string {
   })
 }
 
-/** "2026-09-28 09:00:12" — the absolute stamp shown on hover. */
+/** "UTC", "UTC+2", "UTC-5:30" — the offset a local stamp was rendered
+ * in. offsetMinutes is Date#getTimezoneOffset's value (UTC − local). */
+export function zoneLabel(offsetMinutes: number): string {
+  if (!offsetMinutes) return "UTC"
+  const abs = Math.abs(offsetMinutes)
+  const h = Math.floor(abs / 60)
+  const m = abs % 60
+  return `UTC${offsetMinutes < 0 ? "+" : "-"}${h}${m ? `:${String(m).padStart(2, "0")}` : ""}`
+}
+
+/** "2026-09-28 09:00:12 UTC+2" — the absolute stamp shown on hover:
+ * the viewer's wall clock, with its offset named so the stamp can be
+ * lined up with a server log. */
 export function absoluteTime(iso: string): string {
   const t = new Date(Date.parse(iso))
   if (Number.isNaN(t.getTime())) return "—"
   const p = (n: number) => String(n).padStart(2, "0")
-  return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}`
+  return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())} ${zoneLabel(t.getTimezoneOffset())}`
 }
 
 /** Run-level duration (finished - started), "12ms" / "1.2s" / "4m03s" / "2h05m". */
@@ -39,11 +51,14 @@ export function duration(started: string, finished: string | null): string {
 
 /** A span of milliseconds in the tightest unit that still reads. */
 export function spanMs(ms: number): string {
+  if (!Number.isFinite(ms)) return "—"
   if (ms < 1000) return `${Math.round(ms)}ms`
-  const s = ms / 1000
-  if (s < 60) return `${s.toFixed(1)}s`
+  // Under a minute keeps a decimal — unless rounding would print
+  // "60.0s"; from there on whole seconds, so a remainder never reads 60.
+  if (ms < 59_950) return `${(ms / 1000).toFixed(1)}s`
+  const s = Math.round(ms / 1000)
   const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m${String(Math.round(s % 60)).padStart(2, "0")}s`
+  if (m < 60) return `${m}m${String(s % 60).padStart(2, "0")}s`
   const h = Math.floor(m / 60)
   return `${h}h${String(m % 60).padStart(2, "0")}m`
 }
@@ -57,10 +72,15 @@ export function elapsed(started: string, now: number = Date.now()): string {
 
 /** "12.4k / 3.1k" — token counts stay compact; exact values on hover. */
 export function tokens(n: number): string {
-  if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(1)}k`
+  if (!Number.isFinite(n)) return "—"
+  const abs = Math.abs(n)
+  if (abs >= 999_950) return `${(n / 1_000_000).toFixed(1)}M`
+  if (abs >= 1000) return `${(n / 1000).toFixed(1)}k`
   return String(n)
 }
 
 export function usageSummary(u: Usage): string {
-  return `${u.input_tokens.toLocaleString()} in / ${u.output_tokens.toLocaleString()} out`
+  const n = (v: number | undefined) =>
+    (Number.isFinite(v) ? (v as number) : 0).toLocaleString()
+  return `${n(u.input_tokens)} in / ${n(u.output_tokens)} out`
 }

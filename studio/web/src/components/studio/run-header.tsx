@@ -1,14 +1,13 @@
 // The run page header: what was asked, what came back, and the facts
-// — identity, status, model, usage, timing, provenance — and the
-// local-recording note (D8): this content is on disk because
-// store.Record was installed, and the page says so. A debugger's
+// — identity, status, model, usage, timing, provenance. A debugger's
 // first three questions are answered above the fold: what was the
 // prompt, did it succeed, and what did it say.
 import { Link } from "@tanstack/react-router"
 import { ArrowUpRight, ChevronRight } from "lucide-react"
 import { useEffect, useState } from "react"
 
-import type { Part, RunDoc, Transcript } from "@/lib/api"
+import type { RunDoc, Transcript } from "@/lib/api"
+import { producedTexts, turnPrompt } from "@/lib/events"
 import type { FoldedRun } from "@/lib/events"
 import {
   absoluteTime,
@@ -32,38 +31,15 @@ function shortHash(hash: string | undefined): string {
   return hash ? hash.slice(0, 8) : "—"
 }
 
-/** The first user text in the transcript: the prompt. */
-function promptOf(batches: Transcript["batches"] | undefined): string | null {
-  for (const b of batches ?? []) {
-    for (const m of b.messages) {
-      if (m.role !== "user") continue
-      const text = m.content
-        .filter((p): p is Extract<Part, { type: "text" }> => p.type === "text")
-        .map((p) => p.text)
-        .join("\n")
-      if (text) return text
-    }
-  }
-  return null
-}
-
 /** The run's last assistant text: the answer — from the transcript
- * (the messages records are the finished words, S4.3) or the fold. */
+ * (the messages records are the finished words, S4.3) or the fold.
+ * Only the run's own messages count: the input record of a later turn
+ * carries the earlier turns' replies (splitTranscript). */
 function answerOf(
   batches: Transcript["batches"] | undefined,
   folded: FoldedRun
 ): string | null {
-  const texts: string[] = []
-  for (const b of batches ?? []) {
-    for (const m of b.messages) {
-      if (m.role !== "assistant") continue
-      const text = m.content
-        .filter((p): p is Extract<Part, { type: "text" }> => p.type === "text")
-        .map((p) => p.text)
-        .join("")
-      if (text) texts.push(text)
-    }
-  }
+  const texts = producedTexts(batches ?? [])
   if (texts.length) return texts[texts.length - 1]
   for (let i = folded.steps.length - 1; i >= 0; i--) {
     if (folded.steps[i].text) return folded.steps[i].text
@@ -138,7 +114,9 @@ export function RunHeader({
   transcript?: Transcript
 }) {
   const now = useNow(doc.status === "running")
-  const prompt = promptOf(transcript?.batches)
+  // The words this run was asked: the last user message it was fed
+  // (in a thread the first one is an earlier turn's).
+  const prompt = turnPrompt(transcript?.batches ?? [])
   const answer = answerOf(transcript?.batches, folded)
   const timing =
     doc.status === "running"
@@ -249,7 +227,7 @@ export function RunHeader({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-faint">
-        <span className="font-mono" title={doc.manifest_hash ?? undefined}>
+        <span className="font-mono" title={doc.manifest_hash || undefined}>
           manifest {shortHash(doc.manifest_hash)}
         </span>
         {doc.weft_version ? (

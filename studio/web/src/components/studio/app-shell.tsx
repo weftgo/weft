@@ -34,6 +34,7 @@ import {
 import { metaQuery, runsQuery } from "@/lib/api"
 import { isPlainShortcut } from "@/lib/keys"
 import { KbdHelpBody } from "@/components/studio/kbd-help"
+import { TokenWall } from "@/components/studio/token-wall"
 import {
   Dialog,
   DialogContent,
@@ -102,12 +103,22 @@ function Nav() {
           {/* The playground (step 8): offered exactly when the runtime
               link's routes are registered (the capability is computed
               from them, never hard-coded). */}
-          {meta.data?.capabilities?.includes("playground") &&
+          {meta.data?.capabilities.includes("playground") &&
             item("/playground", "Playground", <FlaskConical data-slot="icon" />)}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>
   )
+}
+
+/** decodeURIComponent that never throws: a run id holding a bare "%"
+ * is a malformed escape, and the header must not take the app down. */
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s)
+  } catch {
+    return s
+  }
 }
 
 /** Where the reader is, for the header: runs › id. */
@@ -122,14 +133,15 @@ function Place() {
         </Link>
         <span className="text-faint">›</span>
         <span className="truncate font-mono text-foreground">
-          {decodeURIComponent(parts.slice(1).join("/"))}
+          {safeDecode(parts.slice(1).join("/"))}
         </span>
       </span>
     )
   }
+  const places = ["runs", "sessions", "traces", "live", "agents", "playground"]
   return (
     <span className="text-xs text-muted-foreground">
-      {parts[0] === "agents" ? "agents" : "runs"}
+      {places.includes(parts[0]) ? parts[0] : "runs"}
     </span>
   )
 }
@@ -233,7 +245,9 @@ export function AppShell() {
               </div>
             }
           >
-            <Outlet />
+            <TokenWall>
+              <Outlet />
+            </TokenWall>
           </ClientOnly>
         </div>
       </SidebarInset>

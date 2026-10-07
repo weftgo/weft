@@ -4,9 +4,8 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
-import type { EventsPage, WireEvent } from "./api"
+import type { EventsPage, WireEvent, Span as TimedSpan  } from "./api"
 import { fold } from "./events"
-import type { Span as TimedSpan } from "./api"
 import {
   defaultSelection,
   flowFromFold,
@@ -48,7 +47,7 @@ describe("spansFromFold", () => {
         key: "s0",
         index: 0,
         gist: 'research({"prompt":"status of order 42"})',
-        finish: "end_turn",
+        finish: "stop",
         bad: false,
         open: false,
       },
@@ -130,6 +129,82 @@ describe("spansFromTimed (the time axis, S4.7)", () => {
     expect(timeDomain(timed)).toEqual([0, 100])
     expect(isGenAISpan(timed[1])).toBe(true)
     expect(isGenAISpan(timed[0])).toBe(false)
+  })
+
+  // The API returns spans in start order, not tree order: two parallel
+  // tools start before either one's children. Rows indent by depth, so
+  // they must come out parent-then-subtree or a child reads as nested
+  // under the wrong sibling.
+  it("orders rows as a tree: each parent, then its whole subtree", () => {
+    const timed = [
+      span("root", "", "invoke_agent orders", 0, 100),
+      span("toolA", "root", "execute_tool a", 10, 60),
+      span("toolB", "root", "execute_tool b", 11, 70),
+      span("a1", "toolA", "invoke_agent child-a", 12, 50),
+      span("b1", "toolB", "invoke_agent child-b", 13, 55),
+    ]
+    expect(spansFromTimed(timed).map((s) => `${s.depth}:${s.label}`)).toEqual([
+      "0:invoke_agent orders",
+      "1:execute_tool a",
+      "2:invoke_agent child-a",
+      "1:execute_tool b",
+      "2:invoke_agent child-b",
+    ])
+  })
+
+  // The core names its spans "<operation> <name>" ("invoke_agent
+  // planner", observe.go's spanName), never the bare operation the
+  // golden fixtures carry: the run row is told by the operation.
+  it("tells an agent span by its operation, not an exact name", () => {
+    const [run, chat] = spansFromTimed([
+      span("a", "", "invoke_agent planner", 0, 10, {
+        "gen_ai.operation.name": "invoke_agent",
+      }),
+      span("b", "a", "chat glm", 1, 5, { "gen_ai.operation.name": "chat" }),
+    ])
+    expect(run.kind).toBe("run")
+    expect(chat.kind).toBe("tool")
+  })
+
+  // Ingest stores what it is sent: a trace can name a parent that is
+  // missing, itself, or a cycle. Every span still gets one row, cycles
+  // are cut, and nothing loops.
+  it("survives missing parents, self-parents and cycles", () => {
+    const timed = [
+      span("orphan", "gone", "orphan", 0, 5),
+      span("self", "self", "self", 1, 6),
+      span("x", "y", "x", 2, 7),
+      span("y", "x", "y", 3, 8),
+    ]
+    const rows = spansFromTimed(timed)
+    expect(rows.map((r) => r.label).sort()).toEqual(["orphan", "self", "x", "y"])
+    const byId = new Map(rows.map((r) => [r.id, r]))
+    for (const r of rows) {
+      // Walking up from any row terminates.
+      let p = r.parent
+      let hops = 0
+      while (p && hops < 10) {
+        p = byId.get(p)?.parent
+        hops++
+      }
+      expect(hops).toBeLessThan(10)
+    }
+  })
+
+  it("handles a trace too large to spread into Math.min", () => {
+    const timed = Array.from({ length: 200_000 }, (_, i) =>
+      span(`s${i}`, "", "work", i, i + 1)
+    )
+    expect(timeDomain(timed)).toEqual([0, 200_000])
+    expect(spansFromTimed(timed)).toHaveLength(200_000)
+  })
+
+  it("keeps unparseable times off the axis instead of NaN", () => {
+    const bad = { ...span("a", "", "a", 0, 10), start: "nope", end: "nope" }
+    const [row] = spansFromTimed([bad])
+    expect(row.from).toBe(0)
+    expect(row.to).toBeNull()
+    expect(timeDomain([bad])).toEqual([0, 1])
   })
 
   it("is empty without spans", () => {

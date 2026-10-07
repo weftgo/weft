@@ -59,3 +59,45 @@ describe("summarize", () => {
     expect(bytes(2048)).toBe("2.0 KB")
   })
 })
+
+// The raw explorer and the replay bar summarize whatever the stream
+// holds — bodies are stored as ingested, so a malformed or unknown
+// event must read as a quiet row, never throw (one bad record would
+// otherwise take the whole run page down).
+describe("summaries of malformed and unknown events", () => {
+  const bad = (v: unknown) => v as WireEvent
+
+  it("never throws on a non-object body", () => {
+    for (const v of [null, "text", 7, [], {}]) {
+      expect(() => eventKind(bad(v))).not.toThrow()
+      expect(() => eventSummary(bad(v))).not.toThrow()
+      expect(() => isBoundary(bad(v))).not.toThrow()
+      expect(typeof eventType(bad(v))).toBe("string")
+      expect(typeof eventSummary(bad(v))).toBe("string")
+    }
+  })
+
+  it("names an unknown type and shows its JSON", () => {
+    const ev = bad({ type: "from_the_future", run_id: "r", n: 1 })
+    expect(eventType(ev)).toBe("from_the_future")
+    expect(eventKind(ev)).toBe("step")
+    expect(eventSummary(ev)).toContain('"n":1')
+  })
+
+  it("summarizes known types with missing fields", () => {
+    expect(() =>
+      eventSummary(bad({ type: "run_start", id: "r" }))
+    ).not.toThrow()
+    expect(() =>
+      eventSummary(bad({ type: "step_finish", run_id: "r", index: 0 }))
+    ).not.toThrow()
+    expect(() =>
+      eventSummary(bad({ type: "tool_finish", run_id: "r", name: "t" }))
+    ).not.toThrow()
+    expect(() =>
+      eventSummary(
+        bad({ type: "steered", step: 0, messages: [{ role: "user", content: null }] })
+      )
+    ).not.toThrow()
+  })
+})

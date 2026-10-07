@@ -10,7 +10,8 @@ export function EmptyState({ command }: { command: string }) {
       <div className="max-w-md space-y-1">
         <p className="font-medium">No runs recorded yet</p>
         <p className="text-sm text-muted-foreground">
-          Studio reads the run store; the first run is one command away.
+          Studio reads the observability database; the first run is one
+          command away.
         </p>
       </div>
       <div className="codewin mt-2 max-w-lg text-left">
@@ -25,8 +26,8 @@ export function EmptyState({ command }: { command: string }) {
         </pre>
       </div>
       <p className="text-xs text-faint">
-        recorded locally by <span className="font-mono">store.Record</span> —
-        content included
+        recorded locally by <span className="font-mono">otel.Install()</span>{" "}
+        — content included
       </p>
       <p className="text-xs text-faint">
         press <Kbd>?</Kbd> for keyboard help

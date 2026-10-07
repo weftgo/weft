@@ -1,5 +1,6 @@
 import { createRouter as createTanStackRouter } from "@tanstack/react-router"
 import { routeTree } from "./routeTree.gen"
+import { adoptTokenFromLocation } from "./lib/api"
 
 // The router's basepath comes from the shell's <base href>, which the
 // Go handler rewrites to the mount per request (ADR 0018 §6) — the
@@ -11,6 +12,11 @@ function runtimeBasepath(): string {
 }
 
 export function getRouter() {
+  // A token handed over in the link (?token= / #token=, S4.6) is
+  // stored and stripped before the router reads the location — and
+  // before the first API call needs it. Not in the shell prerender.
+  if (typeof document !== "undefined") adoptTokenFromLocation()
+
   const router = createTanStackRouter({
     routeTree,
     basepath: runtimeBasepath(),

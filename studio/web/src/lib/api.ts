@@ -59,6 +59,38 @@ export interface RunsPage {
   total: number
   runs: RunRow[]
   next_before: string | null
+  /** The exact cursor's tie-breaker: the next page starts strictly
+   * after (next_before, next_before_id). Absent on a Studio older than
+   * the field — `before` alone then pages by time. */
+  next_before_id?: string | null
+}
+
+/** A list page's cursor, as the next request sends it: `before`, and
+ * `before_id` when the server gave one (a group of rows sharing one
+ * timestamp is then paged exactly, never skipped). */
+export interface PageCursor {
+  before: string
+  before_id?: string
+}
+
+/**
+ * nextCursor is the cursor after `page`, or undefined when the list is
+ * over: no next_before, or a cursor that did not move from `prev` (a
+ * page loop must end the walk). The pair is compared, not the time
+ * alone — inside a group sharing one timestamp the time stays and
+ * the id moves.
+ */
+export function nextCursor(
+  page: { next_before: string | null; next_before_id?: string | null },
+  prev?: PageCursor
+): PageCursor | undefined {
+  if (!page.next_before) return undefined
+  const next: PageCursor = page.next_before_id
+    ? { before: page.next_before, before_id: page.next_before_id }
+    : { before: page.next_before }
+  if (prev && prev.before === next.before && prev.before_id === next.before_id)
+    return undefined
+  return next
 }
 
 /** GET /api/runs/{id} → RunDetail: the row and the subagent children,
@@ -88,11 +120,25 @@ export interface EventsPage {
  * messages record — the fold's source of finished text, because
  * deltas are not stored. */
 export interface Transcript {
-  batches: { index: number; step: number; messages: Message[] }[]
+  batches: {
+    index: number
+    /** The step the batch belongs to (step N = the run's (N+1)th model
+     * call, step_start.index); the input record and a resumed run's
+     * rebuilt tool message read 0 (api.go's transcriptBatch). */
+    step: number
+    /** True on the run's input record — batch 0, everything the run
+     * was fed; never a step. Absent only on a Studio older than the
+     * field (lib/events' splitTranscript then tells it by shape). */
+    input?: boolean
+    messages: Message[]
+  }[]
 }
 
-interface RawTranscript {
-  batches: { index: number; step: number; messages: unknown }[]
+/** The transcript as the wire carries it: each batch's messages are a
+ * record body embedded verbatim — any JSON value (api.go's rawOrNull
+ * turns a non-JSON body into a JSON string). */
+export interface RawTranscript {
+  batches: { index: number; step: number; input?: boolean; messages: unknown }[]
 }
 
 export interface SpanEvent {
@@ -137,6 +183,8 @@ export interface SessionsPage {
   total: number
   sessions: SessionRow[]
   next_before: string | null
+  /** The exact cursor's tie-breaker (RunsPage.next_before_id). */
+  next_before_id?: string | null
 }
 
 /** GET /api/sessions/{id}: the thread and its turns in order;
@@ -313,18 +361,64 @@ export function apiBase(): string {
 const TOKEN_KEY = "studio.token"
 export function studioToken(): string {
   try {
-    return localStorage.getItem(TOKEN_KEY) ?? ""
+    return localStorage.getItem(TOKEN_KEY) ?? memoryToken
   } catch {
-    return ""
+    return memoryToken
   }
 }
+// The in-memory copy serves a browser whose storage is unwritable
+// (the token then lasts this page only) and makes a paste effective
+// before the next read.
+let memoryToken = ""
 export function setStudioToken(tok: string) {
+  memoryToken = tok
   try {
     if (tok) localStorage.setItem(TOKEN_KEY, tok)
     else localStorage.removeItem(TOKEN_KEY)
   } catch {
     // unwritable storage: this page only
   }
+}
+
+/**
+ * adoptTokenFromLocation takes a token handed over in the page URL —
+ * `?token=…` or `#token=…` (the fragment never reaches a server or a
+ * log) — stores it, and strips it from the address bar so it is not
+ * bookmarked or shared. This is how the reader of a token-walled
+ * Studio (setup B's `studio` binary prints a dev token) gets in with
+ * one link; the shell's token prompt is the other way. Reports whether
+ * a token was adopted.
+ */
+export function adoptTokenFromLocation(): boolean {
+  let tok = ""
+  try {
+    const url = new URL(window.location.href)
+    const fromQuery = url.searchParams.get("token")
+    if (fromQuery) {
+      tok = fromQuery
+      url.searchParams.delete("token")
+    }
+    if (url.hash.length > 1) {
+      const frag = new URLSearchParams(url.hash.slice(1))
+      const fromHash = frag.get("token")
+      if (fromHash) {
+        tok = tok || fromHash
+        frag.delete("token")
+        const rest = frag.toString()
+        url.hash = rest ? `#${rest}` : ""
+      }
+    }
+    if (!tok) return false
+    window.history.replaceState(
+      window.history.state,
+      "",
+      url.pathname + url.search + url.hash
+    )
+  } catch {
+    return false
+  }
+  setStudioToken(tok)
+  return true
 }
 
 export class ApiError extends Error {
@@ -337,21 +431,33 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(path: string): Promise<T> {
+/** One JSON request under the API base, with the bearer when the
+ * Studio is token-walled. A non-2xx answer is an ApiError carrying the
+ * server's code and message (S4.2's error shape). */
+async function request<T>(
+  method: "GET" | "POST" | "PUT",
+  path: string,
+  body?: unknown
+): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" }
+  if (body !== undefined) headers["Content-Type"] = "application/json"
   const tok = studioToken()
   if (tok) headers.Authorization = `Bearer ${tok}`
-  const res = await fetch(new URL(path, apiBase()).toString(), { headers })
+  const res = await fetch(new URL(path, apiBase()).toString(), {
+    method,
+    headers,
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  })
   if (!res.ok) {
     let code = "network"
     let message = `${res.status} ${res.statusText}`
     try {
-      const body = (await res.json()) as {
+      const doc = (await res.json()) as {
         error?: { code?: string; message?: string }
-      }
-      if (body.error) {
-        code = body.error.code ?? code
-        message = body.error.message ?? message
+      } | null
+      if (doc?.error) {
+        code = doc.error.code ?? code
+        message = doc.error.message ?? message
       }
     } catch {
       // not JSON — keep the status line
@@ -361,15 +467,37 @@ async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T
 }
 
-/** A transcript's messages arrive as raw JSON: coerce one page. */
+function get<T>(path: string): Promise<T> {
+  return request<T>("GET", path)
+}
+
+/** A transcript's messages arrive as raw JSON — a stored record body,
+ * whatever it held: coerce the document so every batch is a list of
+ * messages and every message's content a list of parts. A body that
+ * is not a message array (a bare string, null, an object) reads as an
+ * empty batch instead of crashing whoever renders it. */
 export function asTranscript(doc: RawTranscript): Transcript {
+  const batches: unknown = (doc as RawTranscript | null)?.batches
+  if (!Array.isArray(batches)) return { batches: [] }
   return {
-    batches: doc.batches.map((b) => ({
+    batches: (batches as RawTranscript["batches"]).map((b) => ({
       index: b.index,
       step: b.step,
-      messages: b.messages as Message[],
+      ...(typeof b.input === "boolean" ? { input: b.input } : {}),
+      messages: asMessages(b.messages),
     })),
   }
+}
+
+function asMessages(raw: unknown): Message[] {
+  if (!Array.isArray(raw)) return []
+  const out: Message[] = []
+  for (const m of raw as unknown[]) {
+    if (typeof m !== "object" || m === null) continue
+    const msg = m as Message
+    out.push(Array.isArray(msg.content) ? msg : { ...msg, content: [] })
+  }
+  return out
 }
 
 // ── Query options ──────────────────────────────────────────────────
@@ -383,6 +511,11 @@ export interface RunsFilters {
   parent?: string // "" top-level (default), "*" all, or a run id
   tag?: Record<string, string>
   before?: string
+  /** The cursor's tie-breaker: a page's next_before_id, sent beside
+   * its next_before. */
+  before_id?: string
+  /** Page size: 0/absent is the server's 50, above 500 clamps. */
+  limit?: number
 }
 
 export function runsSearch(filters: RunsFilters): string {
@@ -394,8 +527,10 @@ export function runsSearch(filters: RunsFilters): string {
   if (filters.playground !== undefined) params.set("playground", String(filters.playground))
   if (filters.parent) params.set("parent", filters.parent)
   if (filters.before) params.set("before", filters.before)
+  if (filters.before && filters.before_id) params.set("before_id", filters.before_id)
   for (const [k, v] of Object.entries(filters.tag ?? {}))
     params.set(`tag.${k}`, v)
+  if (filters.limit) params.set("limit", String(filters.limit))
   const qs = params.toString()
   return qs ? `?${qs}` : ""
 }
@@ -417,17 +552,14 @@ export function runsQuery(filters: RunsFilters = {}) {
 export function runQuery(id: string) {
   return queryOptions({
     queryKey: ["run", id],
-    queryFn: () => get<RunDoc>(`runs/${encodeURIComponent(id)}`),
+    queryFn: () => fetchRun(id),
   })
 }
 
 export function eventsQuery(id: string, after: number, limit = 500) {
   return queryOptions({
     queryKey: ["events", id, after, limit],
-    queryFn: () =>
-      get<EventsPage>(
-        `runs/${encodeURIComponent(id)}/events?after=${after}&limit=${limit}`
-      ),
+    queryFn: () => fetchEventsPage(id, after, limit),
   })
 }
 
@@ -435,8 +567,32 @@ export function transcriptQuery(id: string) {
   return queryOptions({
     queryKey: ["transcript", id],
     staleTime: 30_000,
-    queryFn: () => get<Transcript>(`runs/${encodeURIComponent(id)}/transcript`),
+    queryFn: () => fetchTranscript(id),
   })
+}
+
+/** GET /api/runs/{id}/transcript, coerced (asTranscript). */
+export async function fetchTranscript(id: string): Promise<Transcript> {
+  return asTranscript(
+    await get<RawTranscript>(`runs/${encodeURIComponent(id)}/transcript`)
+  )
+}
+
+/** GET /api/runs/{id}: the row and its children. */
+export function fetchRun(id: string): Promise<RunDoc> {
+  return get<RunDoc>(`runs/${encodeURIComponent(id)}`)
+}
+
+/** GET /api/runs/{id}/events?after=&limit=: one page of the stream.
+ * `after` is the first position returned. */
+export function fetchEventsPage(
+  id: string,
+  after: number,
+  limit = 500
+): Promise<EventsPage> {
+  return get<EventsPage>(
+    `runs/${encodeURIComponent(id)}/events?after=${after}&limit=${limit}`
+  )
 }
 
 export function spansQuery(id: string) {
@@ -458,18 +614,27 @@ export interface SessionFilters {
   agent?: string
   public_id?: string
   before?: string
+  /** The cursor's tie-breaker (RunsFilters.before_id). */
+  before_id?: string
 }
 
-export function sessionsQuery(filters: SessionFilters = {}) {
+/** GET /api/sessions: one page; next_before (with next_before_id) is
+ * the next page's cursor (null when this was the last) — nextCursor. */
+export function fetchSessions(filters: SessionFilters = {}): Promise<SessionsPage> {
   const params = new URLSearchParams()
   if (filters.agent) params.set("agent", filters.agent)
   if (filters.public_id) params.set("public_id", filters.public_id)
   if (filters.before) params.set("before", filters.before)
+  if (filters.before && filters.before_id) params.set("before_id", filters.before_id)
   const qs = params.toString()
+  return get<SessionsPage>(`sessions${qs ? `?${qs}` : ""}`)
+}
+
+export function sessionsQuery(filters: SessionFilters = {}) {
   return queryOptions({
     queryKey: ["sessions", filters],
     staleTime: 5_000,
-    queryFn: () => get<SessionsPage>(`sessions${qs ? `?${qs}` : ""}`),
+    queryFn: () => fetchSessions(filters),
   })
 }
 
@@ -532,6 +697,10 @@ export interface RuntimeView {
   connected_since: string
   last_seen: string
   agents: AgentView[]
+  /** The debugger's stored tool set for this runtime (PUT
+   * /api/runtimes/{id}/breakpoints): what it parks on every run it
+   * starts. Absent on a Studio older than the field. */
+  breakpoints?: string[]
 }
 
 export function runtimesQuery() {
@@ -564,33 +733,8 @@ export interface PlaygroundRunBody {
 }
 
 /** post one JSON document (the playground's write verbs). */
-async function post<T>(path: string, body: unknown): Promise<T> {
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  }
-  const tok = studioToken()
-  if (tok) headers.Authorization = `Bearer ${tok}`
-  const res = await fetch(new URL(path, apiBase()).toString(), {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) {
-    let code = "network"
-    let message = `${res.status} ${res.statusText}`
-    try {
-      const doc = (await res.json()) as { error?: { code?: string; message?: string } }
-      if (doc.error) {
-        code = doc.error.code ?? code
-        message = doc.error.message ?? message
-      }
-    } catch {
-      // not JSON — the status line says enough
-    }
-    throw new ApiError(res.status, code, message)
-  }
-  return (await res.json()) as T
+function post<T>(path: string, body: unknown): Promise<T> {
+  return request<T>("POST", path, body)
 }
 
 /** POST /api/playground/runs → 202 { command_id, state }. */
@@ -603,6 +747,13 @@ export interface CommandStatus {
   command_id: string
   state: "queued" | "accepted" | "rejected" | "finished" | "lost"
   run_id: string
+  /** The finished run's own outcome (the runtime's finished ack);
+   * absent until state is finished. A held approval decision (other
+   * calls of the park still undecided) finishes succeeded under the
+   * still-parked run's id. */
+  status?: "succeeded" | "failed"
+  /** Why, when there is a why: a failed run's error, a rejection's
+   * reason, what made the command lost. */
   error: string | null
   created: string
   updated: string
@@ -627,6 +778,18 @@ export function postFixtures(runID: string, tools: string[]) {
  * one user message delivered into a runtime-started run mid-flight. */
 export function postSteer(runID: string, message: string) {
   return post<{ steered: boolean }>(`runs/${encodeURIComponent(runID)}/steer`, { message })
+}
+
+/** PUT /api/runtimes/{id}/breakpoints — the rung-3 verb (WEFT-DEVTOOLS
+ * §8.3): the tools the runtime parks on every run it starts from now
+ * on (an empty set clears). Answers the set the runtime now holds; a
+ * runtime that is not connected is a 503 and nothing is stored. */
+export function putBreakpoints(runtimeID: string, tools: string[]) {
+  return request<{ tools: string[] | null }>(
+    "PUT",
+    `runtimes/${encodeURIComponent(runtimeID)}/breakpoints`,
+    { tools }
+  )
 }
 
 /** One saved experiment (§10.4): the definition; the detail adds the

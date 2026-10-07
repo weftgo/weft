@@ -4,17 +4,12 @@ import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 
 import { sessionQuery } from "@/lib/api"
+import { fetchSessionForks, nestExperiments } from "@/lib/experiments"
 import { absoluteTime, relativeTime, tokens } from "@/lib/format"
 import { StatusChip } from "@/components/studio/runs-table"
+import { SessionTurns } from "@/components/studio/session-turns"
+import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 
 export const Route = createFileRoute("/sessions/$id")({
   component: SessionPage,
@@ -23,6 +18,19 @@ export const Route = createFileRoute("/sessions/$id")({
 function SessionPage() {
   const { id } = Route.useParams()
   const q = useQuery(sessionQuery(id))
+  // The experiments that forked this thread's turns: playground runs
+  // are not turns of the session (an ephemeral one has no session id),
+  // so they are read beside it and joined on forked_from.
+  const forks = useQuery({
+    queryKey: ["session-forks", id, q.data?.public_id, q.data?.agent],
+    enabled: q.isSuccess,
+    staleTime: 5_000,
+    queryFn: () =>
+      fetchSessionForks({
+        public_id: q.data?.public_id ?? "",
+        agent: q.data?.agent ?? "",
+      }),
+  })
   if (q.isPending) {
     return (
       <div className="flex justify-center py-24">
@@ -35,15 +43,21 @@ function SessionPage() {
       <div className="mx-auto max-w-md space-y-3 py-24 text-center">
         <p className="font-mono text-xs text-faint">{id}</p>
         <p className="text-sm text-status-bad">{q.error.message}</p>
+        <div className="flex justify-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => void q.refetch()}>
+            retry
+          </Button>
+          <Button variant="ghost" size="sm" render={<Link to="/sessions" />}>
+            back to sessions
+          </Button>
+        </div>
       </div>
     )
   }
   const s = q.data
-  // Turns in order; experiments (playground runs that forked a turn)
-  // nest under their source.
   const turns = s.runs
-  const experimentsByFork = new Map<string, typeof turns>()
-  void experimentsByFork
+  const experiments = nestExperiments(turns, forks.data?.runs ?? [])
+  const forked = [...experiments.values()].reduce((n, l) => n + l.length, 0)
 
   return (
     <div className="space-y-3">
@@ -74,67 +88,31 @@ function SessionPage() {
       </div>
 
       <div className="overflow-x-auto rounded-lg border bg-background">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="w-28">status</TableHead>
-              <TableHead>turn</TableHead>
-              <TableHead>agent</TableHead>
-              <TableHead className="text-right">steps</TableHead>
-              <TableHead className="text-right" title="input / output tokens">
-                tokens in / out
-              </TableHead>
-              <TableHead className="text-right">started</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {turns.map((r) => (
-              <TableRow key={r.id} className="h-9">
-                <TableCell>
-                  <StatusChip status={r.status} />
-                </TableCell>
-                <TableCell className="max-w-72">
-                  <Link
-                    to="/runs/$id"
-                    params={{ id: r.id }}
-                    className="font-mono text-[13px] hover:text-thread-ink"
-                  >
-                    <span className="truncate">{r.id}</span>
-                  </Link>
-                  {r.err ? (
-                    <div
-                      className="truncate font-mono text-[11px] text-status-bad/80"
-                      title={r.err}
-                    >
-                      {r.err}
-                    </div>
-                  ) : null}
-                </TableCell>
-                <TableCell className="whitespace-nowrap">
-                  {r.agent || <span className="text-faint">—</span>}
-                </TableCell>
-                <TableCell className="text-right font-mono tabular-nums">
-                  {r.steps}
-                </TableCell>
-                <TableCell className="text-right font-mono tabular-nums">
-                  {tokens(r.usage.input_tokens)} / {tokens(r.usage.output_tokens)}
-                </TableCell>
-                <TableCell
-                  className="text-right font-mono whitespace-nowrap tabular-nums"
-                  title={absoluteTime(r.started)}
-                >
-                  {relativeTime(r.started)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <SessionTurns turns={turns} experiments={experiments} />
       </div>
       {turns.length === 0 ? (
         <p className="py-8 text-center font-mono text-xs text-faint">
           no top-level turns recorded
         </p>
       ) : null}
+      {s.turns > turns.length ? (
+        <p className="text-center font-mono text-[11px] text-faint">
+          showing {turns.length.toLocaleString()} of{" "}
+          {s.turns.toLocaleString()} turns — the session document is capped;
+          the runs list filtered by this session pages through all of them
+        </p>
+      ) : null}
+      <p className="text-center font-mono text-[11px] text-faint">
+        {forks.isError
+          ? `experiments could not be read: ${forks.error.message}`
+          : forks.isPending
+            ? "looking for experiments…"
+            : `${forked} ${forked === 1 ? "experiment" : "experiments"} forked from these turns${
+                forks.data.truncated
+                  ? " — only the newest 2,000 playground runs were searched"
+                  : ""
+              }`}
+      </p>
     </div>
   )
 }

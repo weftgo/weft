@@ -2,10 +2,12 @@
 // §8.2): the experiment drawer's draft, the command body it becomes,
 // and the result slot the live lane fills. One API, two clients — the
 // Studio UI posts the same body to the same endpoint (V6).
-import type { RunRow } from "../lib/api"
+import type { Message, Part, PosEvent, RunRow, Transcript } from "../lib/api"
+import { splitTranscript, turnPrompt } from "../lib/events"
 import type { FoldFeed, FoldedRun } from "../lib/events"
-import type { PosEvent } from "../lib/api"
+import type { LiveRecord } from "../lib/live"
 import type { CommandStatus, RuntimeView } from "./client"
+import { stringify } from "./render"
 
 /** One transcript edit (D2/D3): patch a kept step's tool result (the
  * "what if the API returned 429?" counterfactual) or rewrite its
@@ -56,15 +58,120 @@ export interface ExperimentResult {
   error: string | null
   /** §3's label: `t3·x1` — experiment 1 of turn 3. */
   label: string
-  /** The source turn's final text (the diff base). */
-  sourceText: string
+  /** The turn the experiment hangs off: the pane draws under it. */
+  sourceRunID: string
+  /** The source turn's words (the diff base), taken when the command
+   * was posted. */
+  source: TurnWords
   /** The other side of the 2-way compare (P3, PQ3): a sibling run id
    * whose text the diff is taken against; "" is the source turn. */
   compareWith: string
   row: RunRow | null
   events: PosEvent[]
+  /** Event positions already folded: a reconnect's backfill and the
+   * durable reload both re-deliver, and a call folds once. */
+  seen: Set<number>
   feed: FoldFeed
   folded: FoldedRun
+  /** The durable load of runID landed after the run ended: the fold
+   * is that run's own stored events (not a stream that may have begun
+   * late, or an earlier leg of a substitute chain), so its pending set
+   * is the one a decision may act on and the diff has final words. */
+  ready: boolean
+  /** The finished run's words (whole turn), once ready. */
+  words: TurnWords | null
+  /** The decision this result's command carries (decide): when the
+   * runtime holds it — other calls of the parked run are still
+   * undecided — it lands in decided and the pane stays on the park. */
+  deciding: { callID: string; decision: string } | null
+  /** Decisions the runtime is holding for the parked run, by call id:
+   * it resumes once, when every pending call has one. */
+  decided: Record<string, string>
+  /** The command's thread mode: a fork runs as its session's next turn
+   * — its accepted row names no run (the finished one names the turn),
+   * and steer (ephemeral runs only, 409 otherwise) is not offered. */
+  thread: ExperimentDraft["thread"]
+  /** The live lane's bookkeeping (state.ts's Lane): the highest
+   * durable position folded, the frames held while pages are read, a
+   * catch-up read in flight or asked for again, a full reload in
+   * flight, and a fold changed since folded was taken. */
+  pos: number
+  held: LiveRecord[]
+  reading: boolean
+  recheck: boolean
+  loading: boolean
+  stale: boolean
+}
+
+/** A turn's words as the inline diff compares them: the assistant
+ * text and the tool calls as name(args) lines. */
+export interface TurnWords {
+  text: string
+  calls: string[]
+}
+
+// ── A turn's words ────────────────────────────────────────────────
+// A run's first messages record is its INPUT (ADR 0024 D1) —
+// everything it was fed: for turn 2+ of a session the whole
+// conversation so far, for a continued or resumed experiment the kept
+// prefix. lib/events' splitTranscript draws that line (one rule, two
+// clients — V6); the panel reads the turn's prompt and its words
+// through it.
+
+function textOf(m: Message): string {
+  return m.content
+    .filter((p: Part | null): p is Extract<Part, { type: "text" }> => p?.type === "text")
+    .map((p) => p.text)
+    .join("")
+}
+
+/** callLine is the tool-call diff's line: name(args). */
+export function callLine(name: string, args: unknown): string {
+  let a = ""
+  if (args !== undefined) {
+    try {
+      a = stringify(args) ?? ""
+    } catch {
+      a = "?"
+    }
+  }
+  return `${name}(${a})`
+}
+
+/** turnPromptOf is the turn's own prompt — the last user message the
+ * run was fed, not the earlier turns' prompts it was fed along with. */
+export function turnPromptOf(t: Transcript | null): string {
+  return t ? (turnPrompt(t.batches) ?? "") : ""
+}
+
+/** turnWordsOf is the whole turn as the model spoke it: the assistant
+ * messages after the input's last user message (the steps a continued
+ * run kept, the legs a substitute chain already ran) and every one the
+ * run produced. Both sides of the diff are read this way, so a kept
+ * step never shows as deleted. null without a transcript (content
+ * stripped): the caller falls back to the fold. */
+export function turnWordsOf(t: Transcript | null): TurnWords | null {
+  if (!t || !t.batches.length) return null
+  const { input, produced } = splitTranscript(t.batches)
+  let from = input.length
+  for (let i = input.length - 1; i >= 0; i--) {
+    if (input[i].role === "user") break
+    from = i
+  }
+  const said = [...input.slice(from), ...produced].filter((m) => m.role === "assistant")
+  const calls: string[] = []
+  for (const m of said)
+    for (const p of m.content as (Part | null)[])
+      if (p?.type === "tool_call") calls.push(callLine(p.name, p.args))
+  return { text: said.map(textOf).filter(Boolean).join("\n"), calls }
+}
+
+/** foldedWords reads the same words off a fold (no transcript). */
+export function foldedWords(f: FoldedRun): TurnWords {
+  return {
+    text: f.steps.map((s) => s.text).filter(Boolean).join("\n"),
+    calls: f.steps.flatMap((s) => s.toolCalls).map((c) => callLine(c.name, c.args)),
+  }
 }
 
 /** experimentLabel builds `t3·x1`: the source turn's t-number from its
@@ -74,6 +181,17 @@ export function experimentLabel(sourceRunID: string, forkedCount: number): strin
   const m = /-t(\d+)$/.exec(sourceRunID)
   const turn = m ? `t${m[1]}` : sourceRunID.slice(-8)
   return `${turn}·x${forkedCount + 1}`
+}
+
+/** draftProblem names what the wire cannot carry, before anything is
+ * posted. tools_enabled: [] reads as "no override" on the server, so
+ * a draft with every tool off would run with every tool on — the
+ * opposite of what the drawer shows. */
+export function draftProblem(draft: ExperimentDraft): string | null {
+  const names = Object.keys(draft.tools)
+  if (names.length && !names.some((n) => draft.tools[n]))
+    return "at least one tool must stay on — the command cannot express an empty tool set (it would run with every tool)"
+  return null
 }
 
 /** buildRunBody is §5.1's command, assembled from the draft. The
@@ -116,9 +234,12 @@ export function buildRunBody(draft: ExperimentDraft, publicId: string): Record<s
 }
 
 /** pickRuntime names the runtime a drawer opens against: the one
- * exposing the source run's agent, else the newest seen. */
+ * exposing the source run's agent — the one seen last when several do
+ * (a restarted app registers again under a new id, and the old
+ * registration lingers) — else the first listed. */
 export function pickRuntime(runtimes: RuntimeView[], agent: string): RuntimeView | null {
   const live = runtimes.filter((r) => r.agents.some((a) => a.name === agent))
-  if (live.length) return live[0]
-  return runtimes[0] ?? null
+  if (!live.length) return runtimes[0] ?? null
+  const seen = (r: RuntimeView) => Date.parse(r.last_seen) || 0
+  return live.reduce((best, r) => (seen(r) > seen(best) ? r : best))
 }

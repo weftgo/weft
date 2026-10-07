@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { EventsPage } from "@/lib/api"
 import { fold } from "@/lib/events"
 import { spansFromFold } from "@/lib/trace"
+import type { Span } from "@/lib/trace"
 import { Waterfall } from "@/components/studio/waterfall"
 
 const events = (
@@ -36,7 +37,7 @@ describe("Waterfall", () => {
     expect(screen.getByText("research")).toBeTruthy()
     expect(screen.getByText("2–3")).toBeTruthy() // the call's positions
     expect(screen.getByText("ok")).toBeTruthy()
-    expect(screen.getByText("end_turn")).toBeTruthy()
+    expect(screen.getByText("stop")).toBeTruthy()
   })
 
   it("selects on click and on arrow keys", () => {
@@ -69,5 +70,34 @@ describe("Waterfall", () => {
     // Fold the step: its call disappears.
     fireEvent.click(screen.getAllByLabelText("collapse")[1])
     expect(screen.getAllByRole("treeitem")).toHaveLength(spans.length - 1)
+  })
+})
+
+// A row is hidden when an ancestor is folded — found by walking the
+// parent chain. A trace whose spans name each other as parents (ingest
+// stores what it is sent) made that walk spin forever and hung the
+// tab; the walk must terminate on any parent graph.
+describe("Waterfall on a cyclic parent chain", () => {
+  it("renders and terminates", () => {
+    const row = (id: string, parent: string): Span => ({
+      id,
+      key: id,
+      parent,
+      depth: 1,
+      kind: "tool",
+      label: id,
+      tone: "tool",
+      from: 0,
+      to: 1,
+      runId: "",
+    })
+    render(
+      <Waterfall
+        spans={[row("t:x", "t:y"), row("t:y", "t:x"), row("t:self", "t:self")]}
+        domain={[0, 1]}
+        playhead={null}
+      />
+    )
+    expect(screen.getAllByRole("treeitem")).toHaveLength(3)
   })
 })

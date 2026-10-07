@@ -9,6 +9,7 @@ import { diffLines, diffSummary } from "../lib/diff"
 import { studioPlaygroundLink, WeftDevtools } from "./element"
 import { buildRunBody, experimentLabel, pickRuntime } from "./playground"
 import type { ExperimentDraft } from "./playground"
+import { idle } from "./testkit"
 
 const T0 = "2026-10-01T09:00:00Z"
 
@@ -37,7 +38,7 @@ function runRow(over: Partial<RunRow>): RunRow {
     err: "",
     steps: 1,
     pending: 0,
-    stop_reason: "end_turn",
+    stop_reason: "stop",
     usage: { input_tokens: 10, output_tokens: 4 },
     event_count: 6,
     message_count: 2,
@@ -62,7 +63,7 @@ const EVENTS = {
   events: [
     { pos: 0, time: T0, event: { type: "run_start", id: "s_01-t1", model: { provider: "wefttest", name: "script" }, agent: "acme-support" } },
     { pos: 1, time: T0, event: { type: "step_start", run_id: "s_01-t1", index: 0 } },
-    { pos: 2, time: T0, event: { type: "step_finish", run_id: "s_01-t1", index: 0, reason: "end_turn", usage: { input_tokens: 10, output_tokens: 4 } } },
+    { pos: 2, time: T0, event: { type: "step_finish", run_id: "s_01-t1", index: 0, reason: "stop", usage: { input_tokens: 10, output_tokens: 4 } } },
     { pos: 3, time: T0, event: { type: "run_finish", run_id: "s_01-t1", usage: { input_tokens: 10, output_tokens: 4 }, steps: 1 } },
   ],
   next_after: null,
@@ -183,7 +184,12 @@ class FakeEventSource {
   }
 }
 
-const settle = (ms = 30) => new Promise((r) => setTimeout(r, ms))
+/** Let ms pass (a poll tick), then wait for the panel to come to
+ * rest — a fixed sleep is a bet on the machine's load. */
+const settle = async (ms = 0) => {
+  if (ms) await new Promise((r) => setTimeout(r, ms))
+  await idle()
+}
 
 async function mount(attrs: Record<string, string>): Promise<WeftDevtools> {
   if (!customElements.get("weft-devtools")) customElements.define("weft-devtools", WeftDevtools)
@@ -313,21 +319,24 @@ describe("the pure halves", () => {
       studioPlaygroundLink("http://studio.test/studio/", draft, 2)
     )
     expect(link.pathname).toBe("/studio/playground")
-    expect(link.searchParams.get("run")).toBe("s_01-t2")
-    expect(link.searchParams.get("step")).toBe("2")
-    expect(link.searchParams.get("instructions")).toBe("new prompt")
-    expect(link.searchParams.get("tools")).toBe("lookup_order")
-    expect(link.searchParams.get("model")).toBe("glm-5.3-flash")
-    expect(link.searchParams.get("input")).toBe("another question")
+    expect(link.search).toBe("") // the hand-off rides the fragment
+    const h = new URLSearchParams(link.hash.slice(1))
+    expect(h.get("run")).toBe("s_01-t2")
+    expect(h.get("step")).toBe("2")
+    expect(h.get("instructions")).toBe("new prompt")
+    expect(h.get("tools")).toBe("lookup_order")
+    expect(h.get("model")).toBe("glm-5.3-flash")
+    expect(h.get("input")).toBe("another question")
     // Nothing changed, nothing carried: the run and the step alone.
     const bare = new URL(
       studioPlaygroundLink("http://studio.test/studio/", null, null)
     )
     expect(bare.search).toBe("")
+    expect(bare.hash).toBe("")
   })
 
   it("pickRuntime prefers the runtime exposing the agent", () => {
-    const rt = pickRuntime(RUNTIMES.runtimes as never, "acme-support")
+    const rt = pickRuntime(RUNTIMES.runtimes, "acme-support")
     expect(rt?.id).toBe("rt_01")
     expect(pickRuntime(RUNTIMES.runtimes as never, "other")).toBeDefined() // falls back to newest seen
     expect(pickRuntime([], "acme-support")).toBeNull()
@@ -347,6 +356,15 @@ describe("the pure halves", () => {
   })
 })
 
+/** The parked run's last event: run_finish with one pending call. */
+const PARKED_FINISH = {
+  type: "run_finish",
+  run_id: "pg_p1",
+  usage: { input_tokens: 10, output_tokens: 4 },
+  steps: 1,
+  pending: [{ type: "tool_call", id: "call_1", name: "refund", args: { order_id: "4411" } }],
+}
+
 describe("the drawer against a fake Studio", () => {
   it("pre-fills from the registered config and warns on side-effect tools", async () => {
     const { fetchMock } = fakeStudio(baseRoutes())
@@ -364,12 +382,12 @@ describe("the drawer against a fake Studio", () => {
     expect(text(el, ".weft-drawer")).toContain("Experiment · acme-support")
     const ta = $(el, ".weft-drawer textarea") as HTMLTextAreaElement
     expect(ta.value).toBe("You are Acme's support agent.") // the registered words
-    const tools = all(el, ".weft-tool").map((n) => n.textContent ?? "")
+    const tools = all(el, ".weft-tool").map((n) => n.textContent)
     expect(tools.some((t) => t.includes("refund"))).toBe(true)
     // ⚠ is on refund (never) and not on lookup_order (safe).
-    const warn = all(el, ".weft-tool").find((n) => n.textContent?.includes("refund"))
+    const warn = all(el, ".weft-tool").find((n) => n.textContent.includes("refund"))
     expect(warn?.querySelector(".weft-warn-badge")?.textContent).toBe("⚠")
-    const safe = all(el, ".weft-tool").find((n) => n.textContent?.includes("lookup_order"))
+    const safe = all(el, ".weft-tool").find((n) => n.textContent.includes("lookup_order"))
     expect(safe?.querySelector(".weft-warn-badge")).toBeNull()
   })
 
@@ -386,6 +404,19 @@ describe("the drawer against a fake Studio", () => {
         updated: T0,
       },
       "runs/pg_x1": { ...runRow({ id: "pg_x1", playground: true, session_id: "", forked_from: "s_01-t1#0" }), children: [] },
+      // A succeeded run's stored events end in run_finish (the pane
+      // settles on the row out of running AND that event read).
+      "runs/pg_x1/events?after=0&limit=500": {
+        events: [
+          { type: "run_start", id: "pg_x1", model: { provider: "wefttest", name: "script" } },
+          { type: "step_start", run_id: "pg_x1", index: 0 },
+          { type: "step_finish", run_id: "pg_x1", index: 0, reason: "stop", usage: { input_tokens: 11, output_tokens: 6 } },
+          { type: "run_finish", run_id: "pg_x1", usage: { input_tokens: 11, output_tokens: 6 }, steps: 1 },
+        ].map((event, pos) => ({ pos, time: T0, event })),
+        next_after: null,
+        done: true,
+        gaps: [],
+      },
       "runs/pg_x1/transcript": {
         batches: [
           {
@@ -423,7 +454,7 @@ describe("the drawer against a fake Studio", () => {
     es!.emit("record", { run_id: "pg_x1", kind: "delta", pos: 1, time: T0,
       event: { type: "text_delta", run_id: "pg_x1", text: "Your order shipped yesterday — track it here." } })
     es!.emit("record", { run_id: "pg_x1", kind: "event", pos: 2, time: T0,
-      event: { type: "step_finish", run_id: "pg_x1", index: 0, reason: "end_turn", usage: { input_tokens: 11, output_tokens: 6 } } })
+      event: { type: "step_finish", run_id: "pg_x1", index: 0, reason: "stop", usage: { input_tokens: 11, output_tokens: 6 } } })
     await settle()
     // The result pane: the label names the turn and the experiment.
     expect(text(el, ".weft-xres .weft-step-h")).toContain("t1·x1")
@@ -447,6 +478,18 @@ describe("the drawer against a fake Studio", () => {
       },
       "runs/pg_p1": { ...runRow({ id: "pg_p1", playground: true, pending: 1, session_id: "" }), children: [] },
       "runs/pg_p1/transcript": { batches: [] },
+      // A finished run's events are stored (its row reads finished
+      // because its run_finish landed): the parked calls are read from
+      // them — the pane's controls act on the run's own pending set.
+      "runs/pg_p1/events?after=0&limit=500": {
+        events: [
+          { pos: 0, time: T0, event: { type: "run_start", id: "pg_p1", model: { provider: "wefttest", name: "script" }, agent: "acme-support" } },
+          { pos: 4, time: T0, event: PARKED_FINISH },
+        ],
+        next_after: null,
+        done: true,
+        gaps: [],
+      },
     }
     const { fetchMock, posts } = fakeStudio(routes)
     vi.stubGlobal("fetch", fetchMock)
@@ -464,9 +507,7 @@ describe("the drawer against a fake Studio", () => {
     // The parked call shows the three verbs: the run's own finish
     // carried the pending calls.
     const es = FakeEventSource.instances.find((i) => i.url.includes("run=pg_p1"))
-    es!.emit("record", { run_id: "pg_p1", kind: "event", pos: 4, time: T0,
-      event: { type: "run_finish", run_id: "pg_p1", usage: { input_tokens: 10, output_tokens: 4 }, steps: 1,
-        pending: [{ type: "tool_call", id: "call_1", name: "refund", args: { order_id: "4411" } }] } })
+    es!.emit("record", { run_id: "pg_p1", kind: "event", pos: 4, time: T0, event: PARKED_FINISH })
     await settle()
     const res = $(el, ".weft-xres")
     expect(res?.textContent).toContain("awaiting decision")
@@ -516,7 +557,7 @@ describe("the drawer against a fake Studio", () => {
     // The thread select sits beside the engine select: ephemeral by
     // default, fork selectable.
     const thread = all(el, ".weft-drawer select").find((s) =>
-      s.textContent?.includes("fork (new session)")
+      s.textContent.includes("fork (new session)")
     ) as HTMLSelectElement
     expect(thread).toBeTruthy()
     expect(thread.value).toBe("ephemeral")
@@ -550,7 +591,7 @@ describe("the drawer against a fake Studio", () => {
     await settle()
     // The breakpoint checkboxes render (gated on the capability).
     const field = all(el, ".weft-drawer .weft-field").find((n) =>
-      n.textContent?.includes("Break on (parks every run)")
+      n.textContent.includes("Break on (parks every run)")
     )
     expect(field).toBeTruthy()
     const refund = field!.querySelectorAll("label.weft-tool")[1] as HTMLLabelElement

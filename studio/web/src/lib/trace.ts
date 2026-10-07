@@ -266,6 +266,18 @@ export function flowFromFold(folded: FoldedRun, runStatus: string): FlowPill[] {
   })
 }
 
+/** The earliest parseable start, in epoch ms; NaN when none parses.
+ * A loop, not Math.min(...spread): a large trace overflows the
+ * argument stack. */
+function earliestStart(timed: TimedSpan[]): number {
+  let t0 = NaN
+  for (const s of timed) {
+    const t = Date.parse(s.start)
+    if (Number.isFinite(t) && !(t >= t0)) t0 = t
+  }
+  return t0
+}
+
 /**
  * spansFromTimed builds the time-axis trace from /spans (S4.7): rows
  * are the timed spans themselves — the invoke_agent span, the chat
@@ -273,65 +285,101 @@ export function flowFromFold(folded: FoldedRun, runStatus: string): FlowPill[] {
  * in milliseconds since the earliest start. The domain is
  * timeDomain(spans); replay does not apply here (nothing to scrub:
  * these are durations), so the playhead is null.
+ *
+ * Rows come out in tree order — a span, then its whole subtree,
+ * siblings by start — whatever order the API returned (it sorts by
+ * start, which interleaves parallel siblings' children). A span whose
+ * parent is not in the set is a root; a parent chain that loops (a
+ * span naming itself, two naming each other — ingest stores what it
+ * is sent) is cut where the walk would revisit, so every span gets
+ * exactly one row and no consumer can loop on `parent`.
  */
 export function spansFromTimed(timed: TimedSpan[]): Span[] {
   if (timed.length === 0) return []
-  const t0 = Math.min(
-    ...timed.map((s) => Date.parse(s.start)).filter((t) => Number.isFinite(t))
-  )
-  const byID = new Map(timed.map((s) => [s.span_id, s]))
-  const depthOf = (s: TimedSpan): number => {
-    let depth = 0
-    let cur = s
-    const seen = new Set<string>()
-    while (cur.parent_span_id && byID.has(cur.parent_span_id) && !seen.has(cur.span_id)) {
-      seen.add(cur.span_id)
-      cur = byID.get(cur.parent_span_id)!
-      depth++
-    }
-    return depth
+  const t0 = earliestStart(timed)
+  const startOf = (s: TimedSpan): number => {
+    const t = Date.parse(s.start)
+    return Number.isFinite(t) && Number.isFinite(t0) ? Math.max(0, t - t0) : 0
   }
+  const byID = new Map<string, TimedSpan>()
+  for (const s of timed) if (!byID.has(s.span_id)) byID.set(s.span_id, s)
+  const kids = new Map<string, TimedSpan[]>()
+  const roots: TimedSpan[] = []
+  for (const s of timed) {
+    const p = s.parent_span_id
+    if (p && p !== s.span_id && byID.has(p)) {
+      const list = kids.get(p)
+      if (list) list.push(s)
+      else kids.set(p, [s])
+    } else roots.push(s)
+  }
+  const byStart = (a: TimedSpan, b: TimedSpan) => startOf(a) - startOf(b)
+
   const out: Span[] = []
-  for (const sp of timed) {
-    const fromMs = Date.parse(sp.start) - t0
+  const placed = new Set<TimedSpan>()
+  const row = (sp: TimedSpan, parent: string | undefined, depth: number) => {
+    const fromMs = startOf(sp)
     const endMs = Date.parse(sp.end)
-    const toMs = Number.isFinite(endMs) ? endMs - t0 : null
+    const toMs =
+      Number.isFinite(endMs) && Number.isFinite(t0) ? endMs - t0 : null
     const runID = typeof sp.attrs["weft.run.id"] === "string"
-      ? (sp.attrs["weft.run.id"] as string)
+      ? (sp.attrs["weft.run.id"])
       : ""
-    const name = typeof sp.attrs["gen_ai.operation.name"] === "string"
-      ? `${sp.name}`
-      : sp.name
+    // The core names a span "<operation> <name>" ("invoke_agent
+    // planner"): the operation attribute says what it is, the name's
+    // first word is the fallback for spans that carry none.
+    const op =
+      typeof sp.attrs["gen_ai.operation.name"] === "string"
+        ? (sp.attrs["gen_ai.operation.name"])
+        : sp.name.split(" ")[0]
     out.push({
       id: `t:${sp.span_id}`,
       key: `t:${sp.span_id}`,
-      parent: sp.parent_span_id ? `t:${sp.parent_span_id}` : undefined,
-      depth: depthOf(sp),
-      kind: name === "invoke_agent" ? "run" : "tool",
-      label: name,
+      parent,
+      depth,
+      kind: op === "invoke_agent" ? "run" : "tool",
+      label: sp.name,
       sub: sp.service || undefined,
       badge: sp.status === "error" ? "error" : sp.status === "ok" ? "ok" : undefined,
       tone: sp.status === "error" ? "bad" : sp.status === "ok" ? "tool" : "step",
-      from: Math.max(0, fromMs),
+      from: fromMs,
       to: toMs,
-      timed: { span: sp, fromMs: Math.max(0, fromMs), toMs },
+      timed: { span: sp, fromMs, toMs },
       runId: runID,
     })
   }
+  // Depth-first without recursion (a deep trace must not overflow the
+  // stack): the work list holds a span with the row it hangs under.
+  const walk = (start: TimedSpan[]) => {
+    const stack: { sp: TimedSpan; parent: string | undefined; depth: number }[] =
+      [...start].sort(byStart).reverse().map((sp) => ({ sp, parent: undefined, depth: 0 }))
+    for (let item = stack.pop(); item; item = stack.pop()) {
+      const { sp, parent, depth } = item
+      if (placed.has(sp)) continue
+      placed.add(sp)
+      row(sp, parent, depth)
+      const children = (kids.get(sp.span_id) ?? []).slice().sort(byStart)
+      for (let i = children.length - 1; i >= 0; i--)
+        stack.push({ sp: children[i], parent: `t:${sp.span_id}`, depth: depth + 1 })
+    }
+  }
+  walk(roots)
+  // Whatever no root reaches sits on a parent cycle: each remaining
+  // span opens its own tree (the cycle is cut at the revisit).
+  for (const sp of timed) if (!placed.has(sp)) walk([sp])
   return out
 }
 
 /** The time axis's domain: [0, the latest end] in milliseconds. */
 export function timeDomain(timed: TimedSpan[]): [number, number] {
-  if (timed.length === 0) return [0, 1]
-  const t0 = Math.min(
-    ...timed.map((s) => Date.parse(s.start)).filter((t) => Number.isFinite(t))
-  )
-  const ends = timed
-    .map((s) => Date.parse(s.end))
-    .filter((t) => Number.isFinite(t))
-  const hi = ends.length ? Math.max(...ends) - t0 : 1
-  return [0, Math.max(1, hi)]
+  const t0 = earliestStart(timed)
+  if (!Number.isFinite(t0)) return [0, 1]
+  let hi = 1
+  for (const s of timed) {
+    const end = Date.parse(s.end)
+    if (Number.isFinite(end) && end - t0 > hi) hi = end - t0
+  }
+  return [0, hi]
 }
 
 /** Whether a span is a GenAI semconv span (the chat view's rows). */

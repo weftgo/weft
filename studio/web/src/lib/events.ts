@@ -117,6 +117,26 @@ export function foldMore(feed: FoldFeed, page: WireEvent[]): FoldFeed {
   return feed
 }
 
+/** A wire string, or "" when the field is missing or not a string. */
+function text(v: unknown): string {
+  return typeof v === "string" ? v : ""
+}
+
+/** A step index off the wire, or the fallback when it is not one. */
+function stepIndex(v: unknown, fallback: number): number {
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : fallback
+}
+
+/** The event's usage, zeros when it carries none. */
+function usageOf(u: Usage | undefined): Usage {
+  const o = (typeof u === "object" ? u : null)
+  return {
+    ...o,
+    input_tokens: o?.input_tokens ?? 0,
+    output_tokens: o?.output_tokens ?? 0,
+  }
+}
+
 export function newFold(): FoldFeed {
   const run: FoldedRun = { runId: "", steps: [], pending: [], finished: false }
   // tool_args_delta carries no call id — keyed by best-known name.
@@ -147,29 +167,39 @@ export function newFold(): FoldFeed {
     push(ev: WireEvent, pos?: number) {
       at = pos ?? count
       count++
+      // The stream is stored as ingested (obsdb does not validate a
+      // body): a null, a bare string or an untyped object is not an
+      // event. It keeps its position — replay indexes the stream —
+      // and folds to nothing. Fields are read defensively for the
+      // same reason: a missing one must never throw or print
+      // "undefined" into the story.
+      if (typeof ev !== "object" || (ev as unknown) === null) return
       switch (ev.type) {
         case "run_start":
-          run.runId = ev.id
-          run.agent = ev.agent
+          run.runId = text(ev.id)
+          run.agent = typeof ev.agent === "string" ? ev.agent : undefined
           run.model = ev.model
           run.startPos = at
           break
         case "step_start":
-          step(ev.index) // a resumed index keeps its accumulated state
+          step(stepIndex(ev.index, last())) // a resumed index keeps its accumulated state
           break
         case "text_delta":
-          step(last()).text += ev.text
+          step(last()).text += text(ev.text)
           break
         case "reasoning_delta":
-          step(last()).reasoning += ev.text
+          step(last()).reasoning += text(ev.text)
           break
         case "tool_args_delta":
-          streamedArgs.set(ev.name, (streamedArgs.get(ev.name) ?? "") + ev.args)
+          streamedArgs.set(
+            ev.name,
+            (streamedArgs.get(ev.name) ?? "") + text(ev.args)
+          )
           break
         case "tool_start":
           step(last()).toolCalls.push({
-            callId: ev.call_id,
-            name: ev.name,
+            callId: text(ev.call_id),
+            name: text(ev.name),
             args: ev.args,
             streamedArgs: streamedArgs.get(ev.name) ?? "",
             state: "running",
@@ -180,7 +210,7 @@ export function newFold(): FoldFeed {
         case "tool_finish": {
           const c = findCall(ev.call_id)
           if (c) {
-            c.result = { content: ev.content, isError: ev.is_error }
+            c.result = { content: text(ev.content), isError: Boolean(ev.is_error) }
             c.state = "done"
             c.finishPos = at
             // the call's step spans through its finish
@@ -190,26 +220,31 @@ export function newFold(): FoldFeed {
           break
         }
         case "step_finish":
-          step(ev.index).finish = {
-            reason: ev.reason,
+          step(stepIndex(ev.index, last())).finish = {
+            reason: text(ev.reason),
             raw: ev.raw,
-            usage: ev.usage,
+            usage: usageOf(ev.usage),
           }
           break
         case "steered": {
           // A user turn delivered inside the run: attached to the step
           // it followed, rendered after that step's card (ADR 0019 §4).
-          const s = step(ev.step)
-          const text = (ev.messages ?? []).map(messageText).join("\n")
-          s.steer = { text: (s.steer?.text ? s.steer.text + "\n" : "") + text, pos: at }
+          const s = step(stepIndex(ev.step, last()))
+          const words = (Array.isArray(ev.messages) ? ev.messages : [])
+            .map((m) => messageText(m))
+            .filter(Boolean)
+            .join("\n")
+          s.steer = { text: (s.steer?.text ? s.steer.text + "\n" : "") + words, pos: at }
           break
         }
         case "run_finish":
           run.finished = true
-          run.usage = ev.usage
-          run.pending = ev.pending ?? []
+          run.usage = usageOf(ev.usage)
+          run.pending = Array.isArray(ev.pending) ? ev.pending : []
           run.finishPos = at
           break
+        // Anything else — a type from a newer core, a store-era
+        // "nested" envelope — is not part of the story: skipped.
       }
     },
     result(): FoldedRun {
@@ -255,57 +290,154 @@ export function linkView(
   return view
 }
 
+/** A transcript batch as the fold reads it: its messages, and the
+ * server's input flag when the API carries one. */
+export interface TranscriptBatch {
+  messages: Message[]
+  /** True on the run's input record (weft.messages.input). */
+  input?: boolean
+}
+
+/** A batch's messages, whatever the body held: only objects count,
+ * and a message's content is always an array of parts. */
+function messagesOf(b: TranscriptBatch | null | undefined): Message[] {
+  const raw: unknown = b?.messages
+  if (!Array.isArray(raw)) return []
+  const out: Message[] = []
+  for (const m of raw as unknown[]) {
+    if (typeof m !== "object" || m === null) continue
+    const msg = m as Message
+    out.push(
+      Array.isArray(msg.content)
+        ? msg
+        : { ...msg, content: [] }
+    )
+  }
+  return out
+}
+
+/** The text parts of a message, joined. Files and other parts are not
+ * rendered — the words are the turn. */
+function messageText(m: { content: Part[] } | null | undefined, sep = ""): string {
+  const parts: unknown = m?.content
+  if (!Array.isArray(parts)) return ""
+  return (parts as (Part | null)[])
+    .filter(
+      (p): p is Extract<Part, { type: "text" }> =>
+        p?.type === "text" && typeof p.text === "string"
+    )
+    .map((p) => p.text)
+    .join(sep)
+}
+
+/**
+ * splitTranscript separates what a run was FED from what it PRODUCED.
+ * The run's first messages record is its input (ADR 0024 D1) — and for
+ * turn 2+ of a thread that is the whole conversation so far, earlier
+ * assistant replies and tool results included. Everything after it is
+ * the run's own: one assistant message per step, the tool messages,
+ * steered user turns. Reading the flattened transcript as "this run's
+ * messages" shows a previous turn's reply as this run's first step.
+ *
+ * The server marks the input record (`input: true` on batch 0,
+ * api.go's transcriptBatch) and that flag is believed. Only a batch
+ * without the flag (a Studio older than it) is told by its shape: a
+ * record the loop wrote for a step is exactly one assistant message;
+ * anything else in first place is the input.
+ */
+export function splitTranscript(batches: TranscriptBatch[]): {
+  input: Message[]
+  produced: Message[]
+} {
+  const list = Array.isArray(batches) ? batches : []
+  const input: Message[] = []
+  const produced: Message[] = []
+  list.forEach((b, i) => {
+    const msgs = messagesOf(b)
+    const flag = (b as TranscriptBatch | null)?.input
+    const isInput =
+      typeof flag === "boolean"
+        ? flag
+        : i === 0 && !(msgs.length === 1 && msgs[0].role === "assistant")
+    ;(isInput ? input : produced).push(...msgs)
+  })
+  return { input, produced }
+}
+
+/** The words the run was asked: the last user text it was fed (the
+ * turn's own prompt — earlier user messages are history). */
+export function turnPrompt(batches: TranscriptBatch[]): string | null {
+  const { input } = splitTranscript(batches)
+  for (let i = input.length - 1; i >= 0; i--) {
+    if (input[i].role !== "user") continue
+    const words = messageText(input[i], "\n")
+    if (words) return words
+  }
+  return null
+}
+
+/** The run's own assistant texts, in order — its reply, never the
+ * history it was fed. */
+export function producedTexts(batches: TranscriptBatch[]): string[] {
+  return splitTranscript(batches)
+    .produced.filter((m) => m.role === "assistant")
+    .map((m) => messageText(m))
+    .filter(Boolean)
+}
+
+/** producedTexts joined by newlines: the diff base and the result
+ * text of the playground. */
+export function producedText(batches: TranscriptBatch[]): string {
+  return producedTexts(batches).join("\n")
+}
+
 /**
  * applyTranscript overlays the finished words onto a fold: the sinks
  * do not store deltas (S4.3/S4.7), so a run loaded from history has
  * no text_delta events — its text and tool arguments come from the
- * messages records instead. Assistant messages map onto steps in
- * order (each step produces one), and a message's tool-call parts
- * carry the arguments the model finally sent. Live runs keep what the
- * deltas streamed; this only fills steps whose text is still empty,
- * so a live tail and a reload agree.
+ * messages records instead. The run's own assistant messages map onto
+ * steps in order (each step produces one; the input record's history
+ * is not the run's — splitTranscript), and a message's tool-call parts
+ * carry the arguments the model finally sent. By default it only
+ * fills steps whose text is still empty (a running run keeps what the
+ * deltas streamed). With `replace` — a run that is over — the
+ * transcript's words win over streamed ones: deltas are live-only, so
+ * text streamed across a dropped connection has a hole the transcript
+ * does not, and a live tail must end where a reload starts.
  */
 export function applyTranscript(
   view: FoldedRun,
-  batches: { messages: Message[] }[]
+  batches: TranscriptBatch[],
+  opts?: { replace?: boolean }
 ): FoldedRun {
-  const assistants = batches
-    .flatMap((b) => b.messages)
-    .filter((m) => m.role === "assistant")
+  const replace = opts?.replace === true
+  const assistants = splitTranscript(batches).produced.filter(
+    (m) => m.role === "assistant"
+  )
   assistants.forEach((msg, i) => {
-    const step = view.steps[i]
+    const step = view.steps.at(i)
     if (!step) return
-    const text = msg.content
-      .filter((p): p is Extract<Part, { type: "text" }> => p.type === "text")
-      .map((p) => p.text)
-      .join("")
-    if (text && !step.text) step.text = text
+    const words = messageText(msg)
+    if (words && (replace || !step.text)) step.text = words
     const reasoning = msg.content
       .filter(
-        (p): p is Extract<Part, { type: "reasoning" }> => p.type === "reasoning"
+        (p): p is Extract<Part, { type: "reasoning" }> =>
+          (p as Part | null)?.type === "reasoning" &&
+          typeof (p as { text?: unknown }).text === "string"
       )
       .map((p) => p.text)
       .join("")
-    if (reasoning && !step.reasoning) step.reasoning = reasoning
+    if (reasoning && (replace || !step.reasoning)) step.reasoning = reasoning
     for (const part of msg.content) {
-      if (part.type !== "tool_call") continue
-      for (const s of [step]) {
-        const call = s.toolCalls.find((c) => c.callId === part.id)
-        if (call && call.args === undefined && part.args !== undefined)
-          call.args = part.args
-      }
+      if ((part as Part | null)?.type !== "tool_call") continue
+      const tc = part as ToolCallPart
+      const call = step.toolCalls.find((c) => c.callId === tc.id)
+      // A content-stripped tool_start carries null args: the
+      // transcript's are the ones the model sent.
+      if (call && call.args == null && tc.args != null) call.args = tc.args
     }
   })
   return view
-}
-
-/** The text of a steered message: its text parts joined. Files and
- * other parts are not rendered — the delivered words are the turn. */
-function messageText(m: { content: Part[] }): string {
-  return m.content
-    .filter((p): p is Extract<Part, { type: "text" }> => p.type === "text")
-    .map((p) => p.text)
-    .join("")
 }
 
 /** callState is what the UI shows for a call that never finished:

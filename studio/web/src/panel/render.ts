@@ -40,11 +40,17 @@ export function fmtArgs(args: unknown, streamed: string): string {
   return streamed || "…"
 }
 
+/** stringify is JSON.stringify with its honest type: undefined for a
+ * value JSON cannot carry (undefined, a function, a symbol). */
+export function stringify(v: unknown, indent?: number): string | undefined {
+  return JSON.stringify(v, null, indent)
+}
+
 /** fmtJSON pretty-prints for the raw toggle; a cycle or a BigInt
  * falls back to String so the toggle never throws into the page. */
 export function fmtJSON(v: unknown): string {
   try {
-    return JSON.stringify(v, null, 2) ?? String(v)
+    return stringify(v, 2) ?? String(v)
   } catch {
     return String(v)
   }

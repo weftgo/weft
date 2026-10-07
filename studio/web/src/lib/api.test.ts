@@ -1,0 +1,151 @@
+// The client's contract edges (S4.3/S4.6): the token reaches the API
+// however the reader supplied it, every URL resolves under the mount,
+// and a transcript body is read as data — never trusted to be shaped.
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+import {
+  adoptTokenFromLocation,
+  ApiError,
+  asTranscript,
+  fetchRuns,
+  nextCursor,
+  putBreakpoints,
+  runsSearch,
+  setStudioToken,
+  studioToken,
+} from "./api"
+
+const ok = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  })
+
+describe("the token (S4.6, setup B)", () => {
+  beforeEach(() => setStudioToken(""))
+  afterEach(() => {
+    setStudioToken("")
+    window.history.replaceState(null, "", "/")
+  })
+
+  // The studio binary prints a dev token and serves the UI open: the
+  // only way in used to be typing localStorage.setItem in the console.
+  it("adopts ?token= from the page URL and strips it", () => {
+    window.history.replaceState(null, "", "/runs?token=dev-secret&agent=orders")
+    expect(adoptTokenFromLocation()).toBe(true)
+    expect(studioToken()).toBe("dev-secret")
+    expect(window.location.search).toBe("?agent=orders")
+  })
+
+  it("adopts #token= (never sent to the server) and strips it", () => {
+    window.history.replaceState(null, "", "/runs#token=frag-secret")
+    expect(adoptTokenFromLocation()).toBe(true)
+    expect(studioToken()).toBe("frag-secret")
+    expect(window.location.hash).toBe("")
+  })
+
+  it("leaves a URL without a token alone", () => {
+    window.history.replaceState(null, "", "/playground?run=r1#t=3")
+    expect(adoptTokenFromLocation()).toBe(false)
+    expect(studioToken()).toBe("")
+    expect(window.location.search + window.location.hash).toBe("?run=r1#t=3")
+  })
+})
+
+describe("requests under the mount and the wall", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setStudioToken("")
+    document.querySelector("base")?.remove()
+  })
+
+  it("resolves every route under <base href> (setup A's /studio/)", async () => {
+    const base = document.createElement("base")
+    base.href = "/studio/"
+    document.head.appendChild(base)
+    setStudioToken("tok")
+    const fetchMock = vi.fn(async (_u: RequestInfo | URL, _i?: RequestInit) =>
+      ok({ total: 0, runs: [], next_before: null })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    await fetchRuns({ agent: "orders" })
+    expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe(
+      "/studio/api/runs"
+    )
+
+    fetchMock.mockImplementation(async () => ok({ tools: ["refund"] }))
+    await putBreakpoints("rt_1", ["refund"])
+    const [url, init] = fetchMock.mock.calls[1]
+    // The control used to PUT api/api/runtimes/…: a 404 nobody read.
+    expect(new URL(String(url)).pathname).toBe(
+      "/studio/api/runtimes/rt_1/breakpoints"
+    )
+    expect(init?.method).toBe("PUT")
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer tok")
+    expect(init?.body).toBe(JSON.stringify({ tools: ["refund"] }))
+  })
+
+  it("surfaces a refused write as an ApiError with the server's words", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        ok({ error: { code: "unavailable", message: "runtime rt_1 is not connected" } }, 503)
+      )
+    )
+    const err = await putBreakpoints("rt_1", []).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).status).toBe(503)
+    expect((err as ApiError).message).toBe("runtime rt_1 is not connected")
+  })
+
+  it("carries limit and tags in the runs query", () => {
+    expect(runsSearch({ playground: true, public_id: "pub_1", limit: 500 })).toBe(
+      "?public_id=pub_1&playground=true&limit=500"
+    )
+  })
+})
+
+describe("asTranscript", () => {
+  it("reads any stored body as a list of messages", () => {
+    const doc = asTranscript({
+      batches: [
+        { index: 0, step: 0, messages: "a bare JSON string" },
+        { index: 1, step: 0, messages: null },
+        { index: 2, step: 0, messages: [null, 3, { role: "assistant", content: null }] },
+        {
+          index: 3,
+          step: 0,
+          input: true,
+          messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        },
+      ],
+    })
+    expect(doc.batches.map((b) => b.messages.length)).toEqual([0, 0, 1, 1])
+    expect(doc.batches[2].messages[0].content).toEqual([])
+    expect(doc.batches[3].input).toBe(true)
+    expect(doc.batches[0].input).toBeUndefined()
+  })
+
+  it("survives a document with no batches", () => {
+    expect(asTranscript({} as never).batches).toEqual([])
+  })
+
+  // The exact cursor (the server's next_before_id): a group of rows
+  // sharing one timestamp is paged by id, so inside it the time stays
+  // and only the id moves — that must not read as a stuck cursor.
+  it("pages on the exact cursor and ends only when the pair stops moving", () => {
+    const t = "2026-10-01T09:00:00.5Z"
+    expect(nextCursor({ next_before: null, next_before_id: "x" })).toBeUndefined()
+    expect(nextCursor({ next_before: t })).toEqual({ before: t })
+    expect(nextCursor({ next_before: t, next_before_id: null })).toEqual({ before: t })
+    const a = nextCursor({ next_before: t, next_before_id: "r_a" })
+    expect(a).toEqual({ before: t, before_id: "r_a" })
+    expect(nextCursor({ next_before: t, next_before_id: "r_b" }, a)).toEqual({ before: t, before_id: "r_b" })
+    expect(nextCursor({ next_before: t, next_before_id: "r_a" }, a)).toBeUndefined()
+    expect(runsSearch({ before: t, before_id: "r_a" })).toBe(
+      `?before=${encodeURIComponent(t)}&before_id=r_a`
+    )
+    // An id without its time is not a cursor.
+    expect(runsSearch({ before_id: "r_a" })).toBe("")
+  })
+})

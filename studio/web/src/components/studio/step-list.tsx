@@ -494,7 +494,7 @@ export function StepList({
           <ul className="mt-1 space-y-0.5">
             {view.pending.map((p) => (
               <li key={p.id} className="font-mono">
-                {p.name}({JSON.stringify(p.args)}) — awaiting a decision
+                {p.name}({p.args == null ? "" : JSON.stringify(p.args)}) — awaiting a decision
               </li>
             ))}
           </ul>

@@ -1,5 +1,5 @@
 // Guaranteed replay (B2): the playhead moves over the event INDEX,
-// never time — events carry no timestamps, so replay is correct by
+// never time — the fold reads no timestamps, so replay is correct by
 // construction (the Seq order is the record's order, D6). Playback
 // reveals events in stream order at a fixed cadence: 60 ms per delta,
 // 400 ms per tool/step boundary, a quarter of that at 4×. The step
@@ -36,7 +36,7 @@ import { Button } from "@/components/ui/button"
 
 /** Milliseconds a reveal takes at 1×: deltas stream, boundaries land. */
 export function cadenceMs(ev: WireEvent): number {
-  switch (ev.type) {
+  switch ((ev as WireEvent | null)?.type) {
     case "text_delta":
     case "reasoning_delta":
     case "tool_args_delta":
@@ -257,7 +257,7 @@ export function ReplayBar({
               : `0 of ${total}`
           }
           tabIndex={0}
-          title="click to seek — events carry no timestamps; position, not time"
+          title="click to seek — replay moves by position, not time"
         >
           {cells.map((c, i) => (
             <span

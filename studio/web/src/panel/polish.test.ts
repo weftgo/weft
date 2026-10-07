@@ -4,6 +4,7 @@
 // Ctrl+Shift+W as close-window before any page can see it).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { renderWaterfall, studioLink, WeftDevtools } from "./element"
+import { idle } from "./testkit"
 import { waterfall } from "./render"
 
 class FakeEventSource {
@@ -100,7 +101,7 @@ describe("the keyboard (§5.2, Q4 decided: Alt+W primary)", () => {
     el.setAttribute("data-endpoint", "http://studio.test/studio/")
     el.setAttribute("data-public-id", "pub_orders")
     document.body.appendChild(el) // data-open unset: starts collapsed
-    await new Promise((r) => setTimeout(r, 30))
+    await idle()
     return el as WeftDevtools
   }
 
@@ -111,29 +112,29 @@ describe("the keyboard (§5.2, Q4 decided: Alt+W primary)", () => {
     const el = await mountClosed()
     expect(el.shadowRoot?.querySelector(".weft-fab")).toBeTruthy()
     press(el, { code: "KeyW", altKey: true })
-    await new Promise((r) => setTimeout(r, 10))
+    await idle()
     expect(el.shadowRoot?.querySelector(".weft-dock")).toBeTruthy()
   })
 
   it("Ctrl+Shift+W toggles too (where the browser delivers it)", async () => {
     const el = await mountClosed()
     press(el, { code: "KeyW", ctrlKey: true, shiftKey: true })
-    await new Promise((r) => setTimeout(r, 10))
+    await idle()
     expect(el.shadowRoot?.querySelector(".weft-dock")).toBeTruthy()
   })
 
   it("? shows the shortcuts and Esc closes them, then the dock", async () => {
     const el = await mountClosed()
     press(el, { code: "KeyW", altKey: true })
-    await new Promise((r) => setTimeout(r, 10))
+    await idle()
     press(el, { key: "?" })
-    await new Promise((r) => setTimeout(r, 10))
+    await idle()
     expect(el.shadowRoot?.querySelector(".weft-keys")?.textContent).toContain("Alt+W")
     press(el, { key: "Escape" })
-    await new Promise((r) => setTimeout(r, 10))
+    await idle()
     expect(el.shadowRoot?.querySelector(".weft-keys")).toBeNull()
     press(el, { key: "Escape" })
-    await new Promise((r) => setTimeout(r, 10))
+    await idle()
     expect(el.shadowRoot?.querySelector(".weft-fab")).toBeTruthy()
   })
 
@@ -145,7 +146,7 @@ describe("the keyboard (§5.2, Q4 decided: Alt+W primary)", () => {
     input.dispatchEvent(
       new KeyboardEvent("keydown", { code: "KeyW", altKey: true, bubbles: true })
     )
-    await new Promise((r) => setTimeout(r, 10))
+    await idle()
     expect(el.shadowRoot?.querySelector(".weft-fab")).toBeTruthy() // still collapsed
   })
 })

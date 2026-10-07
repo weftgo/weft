@@ -5,9 +5,9 @@
 // and a link to its own run page (a full run page) stay; collapsed,
 // the block costs one row.
 import { ArrowUpRight, ChevronRight } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import type { RunRow } from "@/lib/api"
 import { runQuery, transcriptQuery } from "@/lib/api"
@@ -19,10 +19,14 @@ import { StepBody } from "@/components/studio/step-list"
 
 export function SubagentBlock({
   child,
-  onJump,
   defaultOpen = false,
 }: {
   child: RunRow
+  /** Accepted for the call row's signature and not passed down: a
+   * child's steps carry positions in the CHILD's stream, and the
+   * replay playhead scrubs the parent's — a "replay to here" from
+   * inside the block would land on an unrelated parent event. The
+   * child's own page (the link above) replays it. */
   onJump?: (t: number) => void
   defaultOpen?: boolean
 }) {
@@ -31,7 +35,23 @@ export function SubagentBlock({
   // parent's pages never carried them (S4.3's lazy rule).
   const doc = useQuery({ ...runQuery(child.id), enabled: open })
   const transcript = useQuery({ ...transcriptQuery(child.id), enabled: open })
-  const childStatus = doc.data?.status ?? child.status
+  // The parent's row of the child is the fresher one once it reads
+  // terminal (the run page refreshes it); the block's own document was
+  // read on expand and is not polled.
+  const childStatus =
+    child.status !== "running" ? child.status : (doc.data?.status ?? child.status)
+  // A child that ends while open: its words are in the transcript
+  // (deltas are not stored), read again now — the copy read on expand
+  // holds only what the child had said by then.
+  const queryClient = useQueryClient()
+  const wasStatus = useRef(childStatus)
+  useEffect(() => {
+    const was = wasStatus.current
+    wasStatus.current = childStatus
+    if (!open || was !== "running" || childStatus === "running") return
+    void queryClient.invalidateQueries({ queryKey: runQuery(child.id).queryKey })
+    void queryClient.invalidateQueries({ queryKey: transcriptQuery(child.id).queryKey })
+  }, [open, childStatus, child.id, queryClient])
   const stream = useRunEvents(open ? child.id : "", childStatus)
 
   const folded =
@@ -40,7 +60,9 @@ export function SubagentBlock({
       : null
   const view =
     folded && transcript.data
-      ? applyTranscript(folded, transcript.data.batches)
+      ? applyTranscript(folded, transcript.data.batches, {
+          replace: childStatus !== "running",
+        })
       : folded
 
   return (
@@ -57,11 +79,9 @@ export function SubagentBlock({
         />
         <span className="eyebrow">subagent</span>
         <span className="font-mono text-xs">{child.agent || "unnamed"}</span>
-        {child.model ? (
-          <span className="font-mono text-[11px] text-faint">
-            {child.model.provider}/{child.model.name}
-          </span>
-        ) : null}
+        <span className="font-mono text-[11px] text-faint">
+          {child.model.provider}/{child.model.name}
+        </span>
         <span className="font-mono text-[11px] text-muted-foreground">
           {child.steps} {child.steps === 1 ? "step" : "steps"}
         </span>
@@ -104,7 +124,6 @@ export function SubagentBlock({
                   step={step}
                   runStatus={childStatus}
                   childLinks={childLinksOf(doc.data?.children)}
-                  onJump={onJump}
                   compact
                 />
               </div>

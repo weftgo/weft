@@ -46,6 +46,7 @@ export const PANEL_CSS = `
   font: 13px ${MONO_STACK};
   display: flex; align-items: center; justify-content: center;
 }
+.weft-fab-bottom-left { right: auto; left: 16px; }
 .weft-fab:hover { background: var(--w-bg2); }
 .weft-fab::before { content: "\\25C8"; color: var(--w-accent); margin-right: 4px; }
 
@@ -59,6 +60,7 @@ export const PANEL_CSS = `
 .weft-dot.weft-on { background: var(--w-accent); }
 .weft-dot.weft-run { background: var(--w-warn); animation: weft-pulse 1.2s infinite; }
 @keyframes weft-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .weft-dot.weft-run { animation: none; } }
 .weft-head .weft-title { overflow: hidden; text-overflow: ellipsis; }
 .weft-head .weft-grow { flex: 1; }
 .weft-btn {
@@ -178,4 +180,5 @@ select.weft-input { width: auto; min-width: 120px; }
 .weft-diff-row { white-space: pre-wrap; word-break: break-word; }
 .weft-diff-add { color: var(--w-info); }
 .weft-diff-del { color: var(--w-warn); text-decoration: line-through; }
+.weft-resolve { width: auto; min-width: 150px; margin: 0 4px; }
 `

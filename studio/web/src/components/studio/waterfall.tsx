@@ -95,9 +95,11 @@ export function Waterfall({
   }, [spans])
   // A row is hidden when any ancestor is folded.
   const byId = useMemo(() => new Map(spans.map((s) => [s.id, s])), [spans])
+  // The walk is bounded by the span count: a parent chain that loops
+  // (rows built from spans that name each other) must not hang the tab.
   const visible = spans.filter((sp) => {
     let p = sp.parent
-    while (p) {
+    for (let hops = 0; p && hops <= spans.length; hops++) {
       if (folded.has(p)) return false
       p = byId.get(p)?.parent
     }

@@ -8,12 +8,13 @@
 // refreshes the list as runs start and finish (S4.7's live rows).
 import { useEffect, useRef, useState } from "react"
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query"
+import type { InfiniteData } from "@tanstack/react-query"
 import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
 import { RefreshCw, Radio, X } from "lucide-react"
 
-import { fetchRuns } from "@/lib/api"
-import type { RunsFilters, RunStatus } from "@/lib/api"
-import { openLive } from "@/lib/live"
+import { fetchRuns, nextCursor } from "@/lib/api"
+import type { PageCursor, RunsFilters, RunsPage, RunStatus } from "@/lib/api"
+import { openLive, throttle } from "@/lib/live"
 import { isPlainShortcut } from "@/lib/keys"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { EmptyState } from "@/components/studio/empty-state"
@@ -143,6 +144,11 @@ function FilterBox({
   )
 }
 
+/** The first page's cursor: a ?before= from the URL, else none. */
+function undefinedOr(before: string | undefined): PageCursor | undefined {
+  return before ? { before } : undefined
+}
+
 function RunsPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: "/runs/" })
@@ -159,9 +165,12 @@ function RunsPage() {
     // non-infinite entry.
     queryKey: ["runs", "infinite", filters],
     staleTime: 5_000,
-    initialPageParam: filters.before,
-    queryFn: ({ pageParam }) => fetchRuns({ ...filters, before: pageParam }),
-    getNextPageParam: (last) => last.next_before ?? undefined,
+    initialPageParam: undefinedOr(filters.before),
+    queryFn: ({ pageParam }) =>
+      fetchRuns({ ...filters, before: pageParam?.before, before_id: pageParam?.before_id }),
+    // The exact cursor (next_before + next_before_id); one that does
+    // not move ends the list (never a page loop).
+    getNextPageParam: (last, _all, lastParam) => nextCursor(last, lastParam),
   })
   const runs = page.data?.pages.flatMap((p) => p.runs) ?? []
   const total = page.data?.pages[0]?.total ?? 0
@@ -174,18 +183,51 @@ function RunsPage() {
   const { has } = useCapabilities()
   const [follow, setFollow] = useState(false)
   const agentKey = search.agent ?? ""
+  const liveCapable = has("live")
   useEffect(() => {
-    if (!follow || !agentKey || !has("live")) return
+    if (!follow || !agentKey || !liveCapable) return
+    // A run frame carries the row: one already listed is rewritten in
+    // place, and only a run the list has not seen (or a lost stream)
+    // refetches it — at most once a second. A refetch per frame is a
+    // request per written batch for every loaded page.
+    const refetch = throttle(
+      () => void queryClient.invalidateQueries({ queryKey: ["runs", "infinite"] }),
+      1000
+    )
     const live = openLive({
       selector: { agent: agentKey },
       kinds: ["run"],
-      onRun: () =>
-        void queryClient.invalidateQueries({ queryKey: ["runs", "infinite"] }),
-      onOverflow: () =>
-        void queryClient.invalidateQueries({ queryKey: ["runs", "infinite"] }),
+      onRun: (f) => {
+        const lists = queryClient.getQueriesData<InfiniteData<RunsPage>>({
+          queryKey: ["runs", "infinite"],
+        })
+        const listed = lists.some(([, data]) =>
+          data?.pages.some((p) => p.runs.some((r) => r.id === f.run.id))
+        )
+        if (listed) {
+          queryClient.setQueriesData<InfiniteData<RunsPage>>(
+            { queryKey: ["runs", "infinite"] },
+            (old) =>
+              old && {
+                ...old,
+                pages: old.pages.map((p) => ({
+                  ...p,
+                  runs: p.runs.map((r) => (r.id === f.run.id ? f.run : r)),
+                })),
+              }
+          )
+          return
+        }
+        // Subagent runs are not rows of this list (top-level only).
+        if (!f.run.parent_run_id) refetch()
+      },
+      onOverflow: refetch,
     })
-    return () => live.close()
-  }, [follow, agentKey, has("live"), queryClient])
+    return () => {
+      refetch.cancel()
+      live.close()
+    }
+  }, [follow, agentKey, liveCapable, queryClient])
 
   // j/k selection, enter opens, "/" focuses the filter box (A4). The
   // selection starts unset — nothing is highlighted until a key moves
@@ -316,7 +358,7 @@ function RunsPage() {
             <SelectItem value="on">experiments only</SelectItem>
           </SelectContent>
         </Select>
-        {search.agent && has("live") ? (
+        {search.agent && liveCapable ? (
           <Button
             variant={follow ? "default" : "outline"}
             size="sm"

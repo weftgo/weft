@@ -1,20 +1,14 @@
-// The live page (S4.7): everything streaming right now. The runs
-// list of running runs feeds one live subscription per run (the
-// agent-scoped stream covers whole fleets; per-run streams keep each
-// row's lane honest and let one row be followed without the others'
-// noise). Rows update in place through the (run) frames; the newest
-// running runs arrive by refetch when a run frame says something
-// started.
+// The live page (S4.7): everything streaming right now. The list of
+// running runs is one query (refreshed every 5 s); the live lane keeps
+// its rows current through one agent-scoped stream per agent — see
+// components/studio/live-runs for why not one per run.
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, Link } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { createFileRoute } from "@tanstack/react-router"
 
 import { fetchRuns, metaQuery } from "@/lib/api"
-import type { RunRow } from "@/lib/api"
-import { openLive } from "@/lib/live"
-import { elapsed, relativeTime } from "@/lib/format"
-import { StatusChip } from "@/components/studio/runs-table"
+import { LiveRuns } from "@/components/studio/live-runs"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 
 export const Route = createFileRoute("/live")({
@@ -44,93 +38,31 @@ function LivePage() {
   return <RunningNow />
 }
 
-/** One running run's live row: the row, refreshed by run frames. */
-function RunLane({ run }: { run: RunRow }) {
-  const [row, setRow] = useState(run)
-  const [pulsed, setPulsed] = useState(0)
-  useEffect(() => {
-    const live = openLive({
-      selector: { run: run.id },
-      kinds: ["event", "run"],
-      onRun: (f) => setRow(f.run),
-      onRecord: () => setPulsed((n) => n + 1),
-    })
-    return () => live.close()
-  }, [run.id])
-  return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border bg-background px-3 py-2">
-      <StatusChip status={row.status} />
-      <Link
-        to="/runs/$id"
-        params={{ id: row.id }}
-        className="font-mono text-[13px] hover:text-thread-ink"
-      >
-        {row.id}
-      </Link>
-      <span className="text-xs">{row.agent || "—"}</span>
-      <span className="font-mono text-[11px] text-muted-foreground">
-        {row.model.provider}/{row.model.name}
-      </span>
-      <span
-        className="font-mono text-[11px] text-status-run tabular-nums"
-        title={`${pulsed} record frame${pulsed === 1 ? "" : "s"} this connection`}
-      >
-        {row.status === "running" ? `${elapsed(row.started)} · ${pulsed} evt` : "ended"}
-      </span>
-      <span
-        className="ml-auto font-mono text-[11px] text-faint"
-        title={row.last_seen}
-      >
-        {relativeTime(row.last_seen)}
-      </span>
-    </div>
-  )
-}
-
 function RunningNow() {
   const queryClient = useQueryClient()
   const meta = useQuery(metaQuery())
   const q = useQuery({
     queryKey: ["runs", "live-page"],
-    queryFn: () => fetchRuns({ status: "running", parent: "*" }),
+    queryFn: () => fetchRuns({ status: "running", parent: "*", limit: 200 }),
     refetchInterval: 5_000,
   })
-  // An agent-wide subscription refreshes the list when runs start or
-  // finish without waiting for the poll.
-  const agents = Array.from(
-    new Set((q.data?.runs ?? []).map((r) => r.agent).filter(Boolean))
-  )
-  const agentsKey = agents.join(",")
-  useEffect(() => {
-    if (!agentsKey) return
-    const handles = agents.map((agent) =>
-      openLive({
-        selector: { agent },
-        kinds: ["run"],
-        onRun: () => {
-          void queryClient.invalidateQueries({ queryKey: ["runs", "live-page"] })
-        },
-        onOverflow: () => {
-          void queryClient.invalidateQueries({ queryKey: ["runs", "live-page"] })
-        },
-      })
-    )
-    return () => handles.forEach((h) => h.close())
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentsKey, queryClient])
-  const firstRender = useRef(true)
-  useEffect(() => {
-    firstRender.current = false
-  }, [])
-  void firstRender
   const runs = q.data?.runs ?? []
+  const total = q.data?.total ?? runs.length
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-sm font-medium tracking-tight">Live</h1>
         <span className="font-mono text-xs text-faint tabular-nums">
-          {q.isPending ? "…" : `${runs.length.toLocaleString()} running`}
+          {q.isPending
+            ? "…"
+            : q.isError
+              ? ""
+              : `${total.toLocaleString()} running${
+                  total > runs.length
+                    ? ` · showing the newest ${runs.length.toLocaleString()}`
+                    : ""
+                }`}
         </span>
         {meta.data?.ingest_open ? (
           <span
@@ -145,17 +77,25 @@ function RunningNow() {
         <p className="py-16 text-center font-mono text-xs text-faint">
           loading…
         </p>
+      ) : q.isError && runs.length === 0 ? (
+        <div className="mx-auto max-w-md space-y-2 py-16 text-center">
+          <p className="text-sm text-status-bad">{q.error.message}</p>
+          <Button variant="outline" size="sm" onClick={() => void q.refetch()}>
+            retry
+          </Button>
+        </div>
       ) : runs.length === 0 ? (
         <p className="py-16 text-center font-mono text-xs text-faint">
           nothing is streaming right now — run something and it lands
           here the moment its run_start arrives
         </p>
       ) : (
-        <div className="space-y-2">
-          {runs.map((r) => (
-            <RunLane key={r.id} run={r} />
-          ))}
-        </div>
+        <LiveRuns
+          runs={runs}
+          onStale={() =>
+            void queryClient.invalidateQueries({ queryKey: ["runs", "live-page"] })
+          }
+        />
       )}
     </div>
   )

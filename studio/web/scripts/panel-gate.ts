@@ -21,6 +21,11 @@
 //   bun run scripts/panel-gate.ts --endpoint http://127.0.0.1:7331/studio \
 //       --page http://127.0.0.1:8000/ --token dev_… --otlp scripts/panel-otlp-fixture.json
 //
+// --bundle <path> drives another build of the panel (a scratch build
+// of the sources under review) instead of the committed artifact; the
+// /panel.js check still compares what Studio serves with the committed
+// artifact it embeds.
+//
 // Prints PASS lines and exits non-zero on the first failed
 // expectation.
 
@@ -40,11 +45,13 @@ interface Args {
    * byte-compares it across a playground re-run — the original
    * session's files must not change. Empty skips that half. */
   threads: string
+  /** The bundle to drive; "" is the committed dist/panel/panel.js. */
+  bundle: string
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: Record<string, string> = {}
-  for (let i = 0; i < argv.length; i += 2) a[argv[i]?.replace(/^--/, "")] = argv[i + 1]
+  const a: Record<string, string | undefined> = {}
+  for (let i = 0; i < argv.length; i += 2) a[argv[i].replace(/^--/, "")] = argv.at(i + 1)
   let endpoint = a.endpoint ?? "http://127.0.0.1:7331/studio"
   if (!endpoint.endsWith("/")) endpoint += "/" // a base URL, not a file
   return {
@@ -59,6 +66,7 @@ function parseArgs(argv: string[]): Args {
      * /v1/traces (the Python app's stand-in) instead of triggering. */
     otlp: a.otlp ?? "",
     threads: a.threads ?? "",
+    bundle: a.bundle ?? "",
   }
 }
 
@@ -141,10 +149,8 @@ async function main() {
   const args = parseArgs(process.argv.slice(2))
   // The committed artifact — the exact bytes studio.Handler embeds —
   // so the gate drives what ships, not what lies beside the build.
-  const panelJs = readFileSync(
-    new URL("../../dist/panel/panel.js", import.meta.url),
-    "utf8"
-  )
+  const shipped = readFileSync(new URL("../../dist/panel/panel.js", import.meta.url), "utf8")
+  const panelJs = args.bundle ? readFileSync(args.bundle, "utf8") : shipped
 
   const scriptAttrs = [`src="${args.endpoint}panel.js"`, `data-public-id="${args.publicId}"`]
   if (args.token) scriptAttrs.push(`data-token="${args.token}"`)
@@ -233,7 +239,7 @@ async function main() {
       throw new Error(`FAIL OTLP ingest: ${ingest.status} ${await ingest.text()}`)
     console.log("PASS OTLP JSON export accepted by /v1/traces")
     await waitFor(
-      () => ($(".weft-turn")?.textContent?.includes(args.publicId === "pub_pyapp" ? "py_run_1" : args.publicId) ? "row" : null),
+      () => ($(".weft-turn")?.textContent.includes(args.publicId === "pub_pyapp" ? "py_run_1" : args.publicId) ? "row" : null),
       "the exported run appears in the panel's turn list"
     )
     const rowText = $(".weft-turn")?.textContent ?? ""
@@ -244,24 +250,43 @@ async function main() {
 
   // 2b. setup A: a scripted turn streams into the docked panel.
   if (!args.otlp) {
+    const rowIds = (): string[] =>
+      Array.from(
+        dom.window.document.querySelector("weft-devtools")?.shadowRoot?.querySelectorAll(".weft-turn") ?? []
+      ).map((n) => n.querySelector(".weft-id")?.textContent ?? "")
     for (let t = 0; t < args.turns; t++) {
+      // The rows before this turn (the database may hold earlier
+      // conversations' turns too): the turn's own row is one that was
+      // not there — "some row exists" would pass on turn 1's.
+      const before = new Set(rowIds())
       const res = await fetch(args.trigger, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: `text=${encodeURIComponent(`${args.text} (#${t + 1})`)}`,
       })
       if (!res.ok) throw new Error(`trigger failed: ${res.status} ${await res.text()}`)
-      await waitFor(
-        () => ($(".weft-turn") ? "row" : null),
-        `turn ${t + 1}: run row appears in the turn list`
+      const fresh = await waitFor(
+        () => rowIds().find((id) => !before.has(id)) ?? null,
+        `turn ${t + 1}: its run row appears in the turn list`
       )
+      // The panel opens the first turn by itself and then stays on what
+      // the user is reading: a later turn is opened the way a user
+      // opens it.
+      const row = Array.from(
+        dom.window.document.querySelector("weft-devtools")?.shadowRoot?.querySelectorAll(".weft-turn") ?? []
+      ).find((n) => n.querySelector(".weft-id")?.textContent === fresh)
+      if (!row?.classList.contains("weft-sel"))
+        row?.dispatchEvent(
+          new (dom.window as unknown as { Event: typeof Event }).Event("click", { bubbles: true })
+        )
       await waitFor(() => {
+        const sel = text(".weft-sel .weft-id")
         const body = text(".weft-step-b")
         // The second Say chunk streams while the tail subscription is
         // live; the first can beat the subscription's round trip and is
         // transcript-era (Dv1's applyTranscript covers it).
-        return body.includes("shipped this morning") ? body : null
-      }, `turn ${t + 1}: model text streams into the turn view`)
+        return sel === fresh && body.includes("shipped this morning") ? body : null
+      }, `turn ${t + 1}: model text streams into its own turn view`)
     }
   }
 
@@ -278,9 +303,9 @@ async function main() {
   )
   const ids = rows.map((n) => n.querySelector(".weft-id")?.textContent ?? "")
   const panelIds = new Set(ids)
-  console.log(`PASS turns listed: ${rows.length} (${panelIds.size} distinct)`)
   if (rows.length < (args.otlp ? 1 : args.turns))
-    throw new Error("FAIL not all turns listed")
+    throw new Error(`FAIL not all turns listed: ${rows.length} rows`)
+  console.log(`PASS turns listed: ${rows.length} (${panelIds.size} distinct)`)
   if (rows.length !== panelIds.size)
     throw new Error(
       `FAIL duplicate turn rows: ${rows.length} rows for ${panelIds.size} run ids (${ids.join(", ")})`
@@ -303,7 +328,7 @@ async function main() {
   const row2 = Array.from(
     dom.window.document.querySelector("weft-devtools")?.shadowRoot?.querySelectorAll(".weft-row2") ?? []
   ).map((n) => n.textContent)
-  if (!row2.some((t) => /(\d+m?s|\d+ms)/.test(t ?? "")))
+  if (!row2.some((t) => /(\d+m?s|\d+ms)/.test(t)))
     throw new Error(`FAIL timing: no duration on the turn rows (${row2.join(" | ")})`)
   console.log("PASS timing: the turn rows carry durations")
 
@@ -313,7 +338,7 @@ async function main() {
     const sess = await fetch(new URL("api/sessions?public_id=" + args.publicId, args.endpoint))
     if (!sess.ok) throw new Error(`FAIL sessions: ${sess.status}`)
     const sessDoc = (await sess.json()) as { total: number; sessions: { turns: number }[] }
-    const thread = sessDoc.sessions[0]
+    const thread = sessDoc.sessions.at(0)
     if (!thread || thread.turns < args.turns)
       throw new Error(`FAIL grouping: ${JSON.stringify(thread)}`)
     console.log(`PASS grouped: one session, ${thread.turns} turns`)
@@ -321,9 +346,9 @@ async function main() {
     // Content and timing, in the open turn: the tool call with its
     // arguments and result, the streamed text.
     await waitFor(() => {
-      const main = text(".weft-main")
-      return main.includes("lookup_order") && main.includes("shipped this morning")
-        ? main
+      const story = text(".weft-main")
+      return story.includes("lookup_order") && story.includes("shipped this morning")
+        ? story
         : null
     }, "content: the tool call (name + args + result) and the reply render")
   }
@@ -333,7 +358,7 @@ async function main() {
   const served = await fetch(new URL("panel.js", args.endpoint))
   if (!served.ok) throw new Error(`FAIL /panel.js: ${served.status}`)
   const servedJs = await served.text()
-  if (servedJs !== panelJs) throw new Error("FAIL /panel.js is not the built bundle")
+  if (servedJs !== shipped) throw new Error("FAIL /panel.js is not the committed bundle")
   console.log("PASS studio.Handler serves /panel.js (the committed bundle)")
 
   // 5. the ⤢ deep link carries run and step (Dv3): clicking a step
@@ -393,11 +418,11 @@ async function main() {
     // re-run: the demo model quotes the question, so the answer — and
     // the diff — carry the edit.
     const textareas = Array.from(
-      dom.window.document.querySelector("weft-devtools")?.shadowRoot?.querySelectorAll(
-        ".weft-drawer textarea"
-      ) ?? []
-    ) as HTMLTextAreaElement[]
-    const input = textareas[textareas.length - 1]
+      dom.window.document
+        .querySelector("weft-devtools")
+        ?.shadowRoot?.querySelectorAll<HTMLTextAreaElement>(".weft-drawer textarea") ?? []
+    )
+    const input = textareas.at(-1)
     if (!input) throw new Error("FAIL the drawer has no input field")
     const edited = "where is order 4242?"
     input.value = edited
@@ -409,7 +434,7 @@ async function main() {
       dom.window.document
         .querySelector("weft-devtools")
         ?.shadowRoot?.querySelectorAll(".weft-drawer button") ?? []
-    ).find((b) => b.textContent?.includes("Run experiment"))
+    ).find((b) => b.textContent.includes("Run experiment"))
     if (!runBtn) throw new Error("FAIL no Run experiment button")
     ;(runBtn as HTMLElement).dispatchEvent(
       new (dom.window as unknown as { Event: typeof Event }).Event("click", { bubbles: true })
@@ -421,9 +446,23 @@ async function main() {
     console.log("PASS the experiment result streams in place (labelled ·x1)")
     await waitFor(() => {
       const diff = text(".weft-diff-h")
-      return diff.includes("diff vs") && diff !== "identical" ? diff : null
+      // The header reads "diff vs t1:  +1 −1"; an edited input that
+      // changed nothing would read "… identical" — not a pass.
+      return diff.includes("diff vs") && !diff.includes("identical") ? diff : null
     }, "the inline diff against the source turn renders")
     console.log(`PASS inline diff against the source turn: ${text(".weft-diff-h")}`)
+    // The Studio hand-off: every parameter rides the fragment (never a
+    // server's request line or logs), and the page it names is served.
+    const compare = Array.from(
+      dom.window.document.querySelector("weft-devtools")?.shadowRoot?.querySelectorAll(".weft-xres a") ?? []
+    ).find((a) => a.textContent === "compare in Studio")
+    const handoff = new URL(compare?.getAttribute("href") ?? "about:blank")
+    const carried = new URLSearchParams(handoff.hash.slice(1))
+    if (handoff.search !== "" || !carried.get("run") || carried.get("input") !== edited)
+      throw new Error(`FAIL the hand-off does not ride the fragment: ${handoff.toString()}`)
+    const shell = await fetch(handoff.origin + handoff.pathname)
+    if (shell.status !== 200) throw new Error(`FAIL the hand-off page does not resolve: ${shell.status}`)
+    console.log(`PASS the Studio hand-off rides the fragment: ${handoff.pathname}#${handoff.hash.slice(1, 40)}…`)
     // The original session's thread files are byte-identical.
     if (before !== null) {
       await sleep(500) // any writer that was going to touch them has
@@ -434,6 +473,40 @@ async function main() {
         if (after.get(p) !== body) throw new Error(`FAIL thread file changed: ${p}`)
       console.log(`PASS the original session's thread files are byte-identical (${after.size} files)`)
     }
+
+    // 7. fork mode (§5.4): the same drawer, thread=fork — the command's
+    // accepted row names no run, the finished one names the new
+    // session's turn, and the pane moves to it. After the byte check:
+    // a fork writes a session of its own.
+    const shadow = () => dom.window.document.querySelector("weft-devtools")?.shadowRoot
+    const threadSel = Array.from(shadow()?.querySelectorAll<HTMLSelectElement>(".weft-drawer select") ?? []).find(
+      (s) => Array.from(s.options).some((o) => o.value === "fork")
+    )
+    if (!threadSel) throw new Error("FAIL the drawer offers no thread mode")
+    threadSel.value = "fork"
+    threadSel.dispatchEvent(new (dom.window as unknown as { Event: typeof Event }).Event("change", { bubbles: true }))
+    await sleep(100)
+    const forkInput = Array.from(shadow()?.querySelectorAll<HTMLTextAreaElement>(".weft-drawer textarea") ?? []).at(-1)
+    if (!forkInput) throw new Error("FAIL the drawer has no input field for the fork")
+    const forked = "and order 7777?"
+    forkInput.value = forked
+    forkInput.dispatchEvent(new (dom.window as unknown as { Event: typeof Event }).Event("input", { bubbles: true }))
+    await sleep(100)
+    const forkRun = Array.from(shadow()?.querySelectorAll(".weft-drawer button") ?? []).find((b) =>
+      b.textContent.includes("Run experiment")
+    )
+    ;(forkRun as HTMLElement | undefined)?.dispatchEvent(
+      new (dom.window as unknown as { Event: typeof Event }).Event("click", { bubbles: true })
+    )
+    const forkText = await waitFor(() => {
+      const res = text(".weft-xres")
+      return res.includes(forked) && res.includes("finished") ? res : null
+    }, "fork mode: the result moves to the new session's turn and answers the fork's input", 30000)
+    if (/error|failed|rejected/i.test(text(".weft-xres .weft-warn"))) throw new Error(`FAIL fork: ${forkText}`)
+    const href = shadow()?.querySelector(".weft-xres a")?.getAttribute("href") ?? ""
+    const forkRunId = new URLSearchParams(new URL(href).hash.slice(1)).get("run") ?? ""
+    if (!/-t\d+$/.test(forkRunId)) throw new Error(`FAIL fork: the pane is not on a thread turn: ${forkRunId}`)
+    console.log(`PASS fork mode: the pane follows the forked session's turn ${forkRunId}`)
   }
 
   console.log("PANEL GATE PASS")

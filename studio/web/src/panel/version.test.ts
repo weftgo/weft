@@ -18,6 +18,34 @@ describe("compareVersions", () => {
   })
 })
 
+describe("compareVersions on pre-releases and non-versions", () => {
+  it("a pre-release is older than its release (semver)", () => {
+    expect(compareVersions("v0.3.0-rc1", "v0.3.0")).toBeLessThan(0)
+    expect(compareVersions("v0.3.0", "v0.3.0-rc1")).toBeGreaterThan(0)
+    expect(compareVersions("v0.3.0-rc.2", "v0.3.0-rc.10")).toBeLessThan(0)
+    expect(compareVersions("v0.3.0-rc.1", "v0.3.0-rc.1")).toBe(0)
+    expect(compareVersions("v0.3.1-0.20261001120000-abcdef", "v0.3.1")).toBeLessThan(0)
+    expect(compareVersions("v0.3.0+build.7", "v0.3.0")).toBe(0)
+  })
+
+  it("orders numbers as numbers, not as whatever Number() reads", () => {
+    expect(compareVersions("v0.1e3.0", "v0.2.0")).toBeNaN() // not a version: no order
+    expect(compareVersions("v0.0x10.0", "v0.2.0")).toBeNaN()
+  })
+
+  it("a studio_version that is not a version is not 'newer': the panel renders", () => {
+    ;(globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ = "v0.3.0"
+    try {
+      for (const odd of ["(devel)", "", "garbage", "v", "0.3.x"]) expect(studioIsTooNew(odd)).toBe(false)
+      expect(studioIsTooNew(undefined as unknown as string)).toBe(false)
+      expect(studioIsTooNew("v0.3.0-rc1")).toBe(false)
+      expect(studioIsTooNew("v0.3.1")).toBe(true)
+    } finally {
+      delete (globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__
+    }
+  })
+})
+
 describe("studioIsTooNew (§5.1)", () => {
   it("an equal or older Studio renders", () => {
     expect(studioIsTooNew(panelStudioVersion())).toBe(false)

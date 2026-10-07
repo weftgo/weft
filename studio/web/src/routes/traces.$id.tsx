@@ -176,7 +176,7 @@ function GenAIChat({ spans }: { spans: TimedSpan[] }) {
         const completion = attrText(sp.attrs, COMPLETION_KEYS)
         const runID =
           typeof sp.attrs["weft.run.id"] === "string"
-            ? (sp.attrs["weft.run.id"] as string)
+            ? (sp.attrs["weft.run.id"])
             : null
         return (
           <div key={sp.span_id} className="space-y-1">

@@ -107,7 +107,7 @@ function RunDetail({
           <ul className="mt-1 space-y-0.5 font-mono">
             {run.pending.map((p) => (
               <li key={p.id}>
-                {p.name}({JSON.stringify(p.args)})
+                {p.name}({p.args == null ? "" : JSON.stringify(p.args)})
               </li>
             ))}
           </ul>
@@ -236,6 +236,9 @@ export function SpanDetail({
     doc.children.map((c) => [c.parent_call_id, c])
   )
   const modes: DetailMode[] = span?.timed ? ["detail"] : ["detail", "events", "json"]
+  // A time-axis row has only its detail: a ?d=events carried over from
+  // the event axis would read the span's milliseconds as positions.
+  if (span?.timed) mode = "detail"
   const rangeEnd =
     span?.to ??
     (playhead !== null ? Math.max(playhead - 1, 0) : events.length - 1)

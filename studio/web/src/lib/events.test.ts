@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
-import type { EventsPage, WireEvent } from "./api"
+import type { EventsPage, Message, WireEvent } from "./api"
 import {
   applyTranscript,
   callState,
@@ -14,7 +14,10 @@ import {
   foldMore,
   linkView,
   newFold,
+  producedText,
+  splitTranscript,
   truncation,
+  turnPrompt,
 } from "./events"
 
 function golden(name: string): WireEvent[] {
@@ -47,7 +50,7 @@ describe("fold on the goldens", () => {
       isError: false,
     })
     expect((call.args as { order_id: string }).order_id).toBe("42")
-    expect(first.finish?.reason).toBe("end_turn")
+    expect(first.finish?.reason).toBe("stop")
     expect(first.text).toBe("")
     expect(run.usage?.input_tokens).toBe(10)
   })
@@ -208,7 +211,7 @@ describe("hand-written edge cases", () => {
         type: "step_finish",
         run_id: "r_t",
         index: 1,
-        reason: "end_turn",
+        reason: "stop",
         usage: { input_tokens: 1, output_tokens: 2 },
       },
       {
@@ -432,5 +435,159 @@ describe("steered events fold as user turns (ADR 0019)", () => {
       { type: "steered", run_id: "r_s", seq: 1, step: 0, messages: null },
     ])
     expect(run.steps[0].steer).toEqual({ text: "", pos: 4 })
+  })
+})
+
+// The input record (ADR 0024 D1): a run's first messages record is
+// everything it was FED — for turn 2+ of a thread that is the whole
+// conversation so far, earlier assistant replies included (the real
+// shape: batch 0 = [user, assistant, user], then one message per
+// record). The overlay must map only the run's OWN assistant messages
+// onto its steps; before this, step 0 of every later turn showed the
+// previous turn's reply.
+describe("applyTranscript and the input record", () => {
+  const user = (text: string): Message => ({
+    role: "user",
+    content: [{ type: "text", text }],
+  })
+  const assistant = (text: string): Message => ({
+    role: "assistant",
+    content: [{ type: "text", text }],
+  })
+  const oneStep: WireEvent[] = [
+    { type: "run_start", id: "s_1-t2", model: { provider: "p", name: "m" } },
+    { type: "step_start", run_id: "s_1-t2", index: 0 },
+    {
+      type: "step_finish",
+      run_id: "s_1-t2",
+      index: 0,
+      reason: "stop",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    },
+    {
+      type: "run_finish",
+      run_id: "s_1-t2",
+      usage: { input_tokens: 1, output_tokens: 1 },
+      steps: 1,
+    },
+  ]
+  // Turn 2 of a session, as the local sink stores it.
+  const turn2 = [
+    { messages: [user("hi"), assistant("turn one's reply"), user("and now?")] },
+    { messages: [assistant("turn two's reply")] },
+  ]
+
+  it("overlays the run's own reply, never the history it was fed", () => {
+    const view = applyTranscript(fold(oneStep), turn2)
+    expect(view.steps[0].text).toBe("turn two's reply")
+  })
+
+  it("splits the transcript into what was fed and what was produced", () => {
+    const { input, produced } = splitTranscript(turn2)
+    expect(input.map((m) => m.role)).toEqual(["user", "assistant", "user"])
+    expect(produced.map((m) => m.role)).toEqual(["assistant"])
+    expect(turnPrompt(turn2)).toBe("and now?")
+    expect(producedText(turn2)).toBe("turn two's reply")
+  })
+
+  it("treats a lone assistant first batch as produced (a run with no input)", () => {
+    const batches = [{ messages: [assistant("unprompted")] }]
+    expect(splitTranscript(batches).input).toEqual([])
+    expect(applyTranscript(fold(oneStep), batches).steps[0].text).toBe(
+      "unprompted"
+    )
+  })
+
+  it("trusts the server's input flag over the shape when it is present", () => {
+    const batches = [
+      { input: false, messages: [user("steered in"), user("twice")] },
+      { messages: [assistant("ok")] },
+    ]
+    expect(splitTranscript(batches).input).toEqual([])
+    const flagged = [
+      { input: true, messages: [assistant("a fed-back reply")] },
+      { messages: [assistant("the new one")] },
+    ]
+    expect(splitTranscript(flagged).produced).toEqual([assistant("the new one")])
+  })
+
+  it("survives malformed bodies (anything OTLP ingest stored)", () => {
+    const junk = [
+      { messages: "a bare string" },
+      { messages: null },
+      { messages: [null, 7, { role: "assistant" }, { role: "assistant", content: null }] },
+      { messages: [assistant("still here")] },
+    ] as unknown as { messages: Message[] }[]
+    expect(() => applyTranscript(fold(oneStep), junk)).not.toThrow()
+    expect(() => turnPrompt(junk)).not.toThrow()
+    expect(producedText(junk)).toBe("still here")
+  })
+})
+
+// Event bodies are stored as ingested (obsdb does not validate them),
+// so the fold meets whatever reached POST /v1/logs: a null body, a
+// bare string, an object with no type, a type from a newer core, a
+// content-stripped delta. None of them may throw or corrupt the view.
+describe("fold on malformed and unknown events", () => {
+  const base: WireEvent[] = [
+    { type: "run_start", id: "r_m", model: { provider: "p", name: "m" } },
+    { type: "step_start", run_id: "r_m", index: 0 },
+  ]
+  const bad = (v: unknown) => v as WireEvent
+
+  it("skips non-object and untyped events without losing position", () => {
+    const run = fold([
+      ...base,
+      bad(null),
+      bad("a string body"),
+      bad(42),
+      bad({}),
+      bad({ type: "from_the_future", run_id: "r_m" }),
+      bad({ type: "nested", run_id: "r_m", seq: 1, call_id: "c", event: {} }),
+      {
+        type: "tool_start",
+        run_id: "r_m",
+        seq: 1,
+        call_id: "c1",
+        name: "lookup",
+        args: {},
+      },
+    ])
+    expect(run.steps).toHaveLength(1)
+    // Positions stay the stream's own: the call opened at index 8.
+    expect(run.steps[0].toolCalls[0].startPos).toBe(8)
+  })
+
+  it("never renders 'undefined' for a delta without text", () => {
+    const run = fold([
+      ...base,
+      bad({ type: "text_delta", run_id: "r_m" }),
+      bad({ type: "reasoning_delta", run_id: "r_m" }),
+      { type: "text_delta", run_id: "r_m", text: "ok" },
+    ])
+    expect(run.steps[0].text).toBe("ok")
+    expect(run.steps[0].reasoning).toBe("")
+  })
+
+  it("defaults a step_finish without usage and a steer without content", () => {
+    const run = fold([
+      ...base,
+      bad({ type: "step_finish", run_id: "r_m", index: 0, reason: "stop" }),
+      bad({
+        type: "steered",
+        run_id: "r_m",
+        seq: 1,
+        step: 0,
+        messages: [{ role: "user", content: null }, null],
+      }),
+      bad({ type: "run_finish", run_id: "r_m", steps: 1, pending: "nope" }),
+    ])
+    expect(run.steps[0].finish?.usage).toEqual({
+      input_tokens: 0,
+      output_tokens: 0,
+    })
+    expect(run.steps[0].steer?.text).toBe("")
+    expect(run.pending).toEqual([])
+    expect(run.finished).toBe(true)
   })
 })

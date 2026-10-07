@@ -10,12 +10,23 @@ export type EventKind =
   | "reasoning"
   | "delta" // text/args deltas
 
+/** The stream is stored as ingested: a body can be anything JSON
+ * holds. typeOf is the event's discriminator, or "" when there is none
+ * (a null, a bare string, an object without a type). */
+function typeOf(ev: WireEvent): string {
+  const t = (ev as { type?: unknown } | null)?.type
+  return typeof t === "string" ? t : ""
+}
+
 export function eventKind(ev: WireEvent): EventKind {
-  switch (ev.type) {
+  switch (typeOf(ev)) {
+    case "":
+      return "delta" // not an event at all: the quietest row
+
     case "tool_start":
       return "tool"
     case "tool_finish":
-      return ev.is_error ? "error" : "result"
+      return (ev as { is_error?: unknown }).is_error ? "error" : "result"
     case "reasoning_delta":
       return "reasoning"
     case "text_delta":
@@ -85,7 +96,8 @@ export function dominantKind(kinds: EventKind[]): EventKind {
   return best
 }
 
-function clip(s: string, n: number): string {
+function clip(s: unknown, n: number): string {
+  if (typeof s !== "string") return ""
   const one = s.replace(/\s+/g, " ").trim()
   return one.length > n ? `${one.slice(0, n - 1)}…` : one
 }
@@ -107,16 +119,19 @@ export function bytes(n: number): string {
 
 /** The event's type name as the wire spells it. */
 export function eventType(ev: WireEvent): string {
-  return ev.type
+  return typeOf(ev) || "(not an event)"
 }
 
 /** A steered delivery's words: its messages' text parts, one line
  * each, whitespace folded — the summary of a user turn (ADR 0019). */
 function steerText(messages: Message[] | null | undefined): string {
-  return (messages ?? [])
+  return (Array.isArray(messages) ? messages : [])
     .map((m) =>
-      m.content
-        .filter((p): p is Extract<(typeof m.content)[number], { type: "text" }> => p.type === "text")
+      // A message (or its content) can be null on a malformed body.
+      (Array.isArray((m as Message | null)?.content) ? m.content : [])
+        .filter((p): p is Extract<(typeof m.content)[number], { type: "text" }> =>
+          (p as { type?: unknown } | null)?.type === "text"
+        )
         .map((p) => p.text)
         .join("")
     )
@@ -125,11 +140,22 @@ function steerText(messages: Message[] | null | undefined): string {
     .trim()
 }
 
-/** A one-line, human summary: what happened, in the machine's voice. */
+/** "12 in / 3 out", zeros when the usage is missing. */
+function inOut(u: { input_tokens?: number; output_tokens?: number } | undefined): string {
+  return `${u?.input_tokens ?? 0} in / ${u?.output_tokens ?? 0} out`
+}
+
+/** A one-line, human summary: what happened, in the machine's voice.
+ * Total over anything the stream can hold: a known type with fields
+ * missing reads short, an unknown type (a newer core's event) shows
+ * its JSON, a body that is no event at all shows what it is. */
 export function eventSummary(ev: WireEvent, width = 96): string {
+  if (!typeOf(ev)) return short(ev, width)
   switch (ev.type) {
-    case "run_start":
-      return `${ev.agent ?? "agent"} · ${ev.model.provider}/${ev.model.name} · ${ev.id}`
+    case "run_start": {
+      const m = ev.model as typeof ev.model | undefined
+      return `${ev.agent ?? "agent"} · ${m?.provider ?? "?"}/${m?.name ?? "?"} · ${ev.id}`
+    }
     case "step_start":
       return `step ${ev.index}`
     case "text_delta":
@@ -140,20 +166,26 @@ export function eventSummary(ev: WireEvent, width = 96): string {
       return `${ev.name} ${clip(ev.args, width)}`
     case "tool_start":
       return `${ev.name}(${short(ev.args, width)})`
-    case "tool_finish":
+    case "tool_finish": {
+      const content = typeof ev.content === "string" ? ev.content : ""
       return `${ev.name} → ${ev.is_error ? "error" : "ok"} · ${bytes(
-        new TextEncoder().encode(ev.content).length
-      )} · ${clip(ev.content, width)}`
+        new TextEncoder().encode(content).length
+      )} · ${clip(content, width)}`
+    }
     case "step_finish":
-      return `step ${ev.index} · ${ev.reason} · ${ev.usage.input_tokens} in / ${ev.usage.output_tokens} out`
+      return `step ${ev.index} · ${ev.reason} · ${inOut(ev.usage)}`
     case "steered":
       return `steered · after step ${ev.step} · ${clip(
         steerText(ev.messages),
         width
       )}`
     case "run_finish":
-      return `${ev.steps} steps · ${ev.usage.input_tokens} in / ${ev.usage.output_tokens} out${
-        ev.pending?.length ? ` · ${ev.pending.length} pending` : ""
+      return `${ev.steps} steps · ${inOut(ev.usage)}${
+        Array.isArray(ev.pending) && ev.pending.length
+          ? ` · ${ev.pending.length} pending`
+          : ""
       }`
+    default:
+      return short(ev, width)
   }
 }

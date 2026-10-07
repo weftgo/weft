@@ -26,6 +26,8 @@ export default [
     },
   },
   {
-    ignores: ["eslint.config.js", ".prettierrc", "src/routeTree.gen.ts"],
+    // dist-release holds the staged panel asset (a built bundle, not
+    // source — make studio-panel-asset).
+    ignores: ["eslint.config.js", ".prettierrc", "src/routeTree.gen.ts", "dist-release/**"],
   },
 ]

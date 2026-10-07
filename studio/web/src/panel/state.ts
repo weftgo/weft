@@ -6,38 +6,70 @@
 // deltas, spans for the honesty badges (and, at Dv3, the waterfall).
 // V6 (one API, two clients): these are the Studio UI's own endpoints,
 // reached through lib/api.ts's mirrors and lib/events.ts's fold.
-import type {
-  Meta,
-  PosEvent,
-  RunDoc,
-  RunRow,
-  SessionRow,
-  Span,
-  Transcript,
-} from "../lib/api"
-import { applyTranscript, linkView, newFold, type FoldFeed, type FoldedRun } from "../lib/events"
+//
+// The panel runs inside someone else's page, over records that were
+// stored as ingested: every async path here ends in a catch, every
+// timer is the model's own (dispose clears them), every retry is
+// bounded, and a response that arrives for a view the user has left
+// is dropped.
+import type { Meta, PosEvent, RunDoc, RunRow, SessionRow, Span, Transcript } from "../lib/api"
+import { applyTranscript, linkView, newFold } from "../lib/events"
+import type { FoldFeed, FoldedRun } from "../lib/events"
 import type { LiveRecord, LiveRun } from "../lib/live"
-import { fetchMeta, fetchRuns, fetchSessions } from "./client"
 import {
+  fetchCommand,
   fetchEvents,
+  fetchMeta,
   fetchRun,
+  fetchRuns,
+  fetchRuntimes,
+  fetchSessions,
   fetchSpans,
   fetchTranscript,
   openPanelLive,
-  type PanelEndpoint,
-  type PanelLiveHandle,
-} from "./client"
-import type { CommandStatus, RuntimeView } from "./client"
-import {
-  fetchCommand,
-  fetchRuntimes,
+  PanelApiError,
   postApproval,
   postPlaygroundRun,
   postSteer,
   putBreakpoints,
 } from "./client"
-import { buildRunBody, experimentLabel, pickRuntime, type ExperimentDraft, type ExperimentResult } from "./playground"
+import type { CommandStatus, PanelEndpoint, PanelLiveHandle, RuntimeView } from "./client"
+import {
+  buildRunBody,
+  draftProblem,
+  experimentLabel,
+  foldedWords,
+  pickRuntime,
+  turnPromptOf,
+  turnWordsOf,
+} from "./playground"
+import type { ExperimentDraft, ExperimentResult, TurnWords } from "./playground"
 import { studioIsTooNew } from "./version"
+
+/** The events walk's page cap: 20 pages of 500. A longer run says so
+ * (capped) instead of reading as complete. */
+export const MAX_EVENT_PAGES = 20
+/** The turn list's page: the newest runs of the conversation. */
+export const TURNS_LIMIT = 50
+/** How often a stream that closed for good is reopened before the
+ * panel stops knocking (5 s, doubling, capped at a minute). */
+export const LIVE_RETRIES = 5
+/** The lifecycle poll: its cadence, and how many failed reads in a
+ * row end it. */
+const POLL_MS = 700
+const POLL_FAILS = 8
+/** The dev list (no public id) has no stream that covers it (S4.5
+ * wants exactly one selector): it is read again this often while the
+ * dock is open and the page visible. */
+export const DEV_POLL_MS = 10_000
+/** While a tail streams, the dock is redrawn at most this often: a
+ * redraw rebuilds the whole dock inside the host page, and a burst of
+ * deltas must not cost it a rebuild per animation frame. Everything
+ * else (a click's answer, a turn loading) draws on the next frame. */
+export const LIVE_DRAW_MS = 100
+/** How many times an experiment's run is read after its command
+ * finished, 1 s apart, before the pane settles on what it has. */
+const SETTLE_READS = 15
 
 /** One loaded subagent child (Dv3 expands them lazily; the fetch is
  * the same turn-view pipeline over the child's own run id). */
@@ -46,6 +78,8 @@ export interface ChildView {
   feed: FoldFeed
   folded: FoldedRun
   transcript: Transcript | null
+  /** The events walk stopped at the page cap. */
+  capped: boolean
 }
 
 /** The selected turn's data: the run doc (children by
@@ -56,6 +90,13 @@ export interface TurnView {
   doc: RunDoc | null
   events: PosEvent[]
   gaps: number[]
+  /** The events walk stopped at the page cap: the story is the run's
+   * first MAX_EVENT_PAGES pages, and the view says so. */
+  capped: boolean
+  /** Durable event positions already folded: the pages and the live
+   * lane both deliver them (a reconnect backfills from position 0),
+   * and a tool call must fold once. */
+  seen: Set<number>
   feed: FoldFeed
   folded: FoldedRun
   transcript: Transcript | null
@@ -63,6 +104,47 @@ export interface TurnView {
   children: Map<string, ChildView>
   /** Subagent expanders the user opened (survives re-renders). */
   expanded: Set<string>
+  /** Children whose load was started: an open expander is redrawn on
+   * every state change, and each redraw must not fetch again (a child
+   * that cannot be read is asked for once, until the user reopens it). */
+  tried: Set<string>
+  /** The run ended and its stored records were reloaded: late deltas
+   * are dropped (the transcript carries the final words). */
+  done: boolean
+  /** A reload of this view is in flight. */
+  loading: boolean
+  /** The run ended while that reload was in flight: what it read may
+   * predate the end, so it reads once more. */
+  again: boolean
+  /** The highest durable position folded (-1: none yet). */
+  pos: number
+  /** Live frames that arrived while the stored pages were being read:
+   * folded after them, in arrival order. */
+  held: LiveRecord[]
+  /** A catch-up read of the pages past pos is in flight. */
+  reading: boolean
+  /** The stream (re)opened while a read was in flight: what was
+   * published before the server subscribed may be in neither, so the
+   * pages past pos are read once more when the read ends. */
+  recheck: boolean
+  /** The fold changed since folded was taken: the next frame takes it
+   * again (once per frame, not once per delta). */
+  stale: boolean
+}
+
+/** A run the panel follows live — the open turn, or the result pane's
+ * run: its fold, and where its durable events stand. */
+export interface Lane {
+  events: PosEvent[]
+  seen: Set<number>
+  feed: FoldFeed
+  pos: number
+  held: LiveRecord[]
+  reading: boolean
+  recheck: boolean
+  stale: boolean
+  /** A full reload (a rebuild from position 0) is in flight. */
+  loading: boolean
 }
 
 export interface PanelState {
@@ -76,6 +158,8 @@ export interface PanelState {
   session: SessionRow | null
   /** The conversation's top-level turns, newest first. */
   turns: RunRow[]
+  /** The runs page was full: older turns exist beyond TURNS_LIMIT. */
+  turnsCapped: boolean
   /** Experiments (playground runs) by the source turn id they hang
    * off (forked_from's run part). Empty until step 8 turns the
    * playground on; the slot exists (§2). */
@@ -92,7 +176,8 @@ export interface PanelState {
   runtimes: RuntimeView[]
   /** The drawer's running or finished experiment (the result pane). */
   result: ExperimentResult | null
-  /** The runtime's breakpoint set (§8.3), as last set from here. */
+  /** The drawer's runtime's breakpoint set (§8.3): the stored set
+   * GET /api/runtimes reports, then what PUT …/breakpoints answered. */
   breakpoints: string[]
   /** The scope subscription is open (the live dot). */
   live: boolean
@@ -109,6 +194,7 @@ export function emptyPanelState(): PanelState {
     gone: false,
     session: null,
     turns: [],
+    turnsCapped: false,
     experiments: new Map(),
     selected: "",
     selectedStep: null,
@@ -130,12 +216,23 @@ function newTurnView(id: string): TurnView {
     doc: null,
     events: [],
     gaps: [],
+    capped: false,
+    seen: new Set(),
     feed,
     folded: feed.result(),
     transcript: null,
     spans: null,
     children: new Map(),
     expanded: new Set(),
+    tried: new Set(),
+    done: false,
+    loading: false,
+    again: false,
+    pos: -1,
+    held: [],
+    reading: false,
+    recheck: false,
+    stale: false,
   }
 }
 
@@ -165,8 +262,95 @@ export function partitionRuns(runs: RunRow[]): { turns: RunRow[]; experiments: M
  * so instead of showing empty boxes). */
 export function strippedContent(spans: Span[] | null): boolean {
   if (!spans) return false
-  return spans.some((sp) => sp.attrs?.["weft.content"] === "stripped")
+  return spans.some((sp) => sp.attrs["weft.content"] === "stripped")
 }
+
+/** One events walk: the pages followed, and whether the cap ended it. */
+interface EventWalk {
+  events: PosEvent[]
+  gaps: number[]
+  capped: boolean
+}
+
+/** feedEvent pushes one stored event into a fold. Event bodies are
+ * stored as ingested, so a body may be null, a string or an object
+ * with no type: skipped, and a fold that throws on a shape it does not
+ * know is contained — nothing here may throw into the host page. */
+function feedEvent(feed: FoldFeed, ev: unknown, pos: number): void {
+  if (!ev || typeof ev !== "object" || typeof (ev as { type?: unknown }).type !== "string") return
+  try {
+    feed.push(ev as PosEvent["event"], pos)
+  } catch {
+    // an event the fold cannot read: skipped
+  }
+}
+
+/** foldInto folds durable events once each, by position. */
+function foldInto(feed: FoldFeed, seen: Set<number>, events: (PosEvent | null)[]): void {
+  for (const p of events) {
+    if (!p || typeof p.pos !== "number" || seen.has(p.pos)) continue
+    seen.add(p.pos)
+    feedEvent(feed, p.event, p.pos)
+  }
+}
+
+/** restart rebuilds a lane's fold from stored pages (position 0 on). */
+function restart(lane: Lane, events: PosEvent[]): void {
+  const feed = newFold()
+  const seen = new Set<number>()
+  foldInto(feed, seen, events)
+  lane.feed = feed
+  lane.seen = seen
+  lane.events = events
+  lane.pos = seen.size ? Math.max(...seen) : -1
+  lane.stale = true
+}
+
+/** foldLive folds one live frame into a lane. Events fold once each,
+ * by position, and in order: a position past the next one means the
+ * stream never carried what lies between (published before the server
+ * subscribed, or lost on the way) — a "gap" the stored pages fill.
+ * force folds past one: the pages were read and the hole is a lost
+ * batch, not something to wait on. Deltas are live-only and carry
+ * their own counter (the hook's rule, hooks/use-run-events.ts). */
+function foldLive(lane: Lane, rec: LiveRecord, force = false): "folded" | "skip" | "gap" {
+  const pos = Number(rec.pos)
+  if (rec.kind === "event") {
+    if (!Number.isFinite(pos) || lane.seen.has(pos)) return "skip"
+    if (!force && pos > lane.pos + 1) return "gap"
+    lane.seen.add(pos)
+    lane.events.push({ pos, time: rec.time, event: rec.event })
+    if (pos > lane.pos) lane.pos = pos
+  } else if (rec.kind !== "delta") return "skip"
+  feedEvent(lane.feed, rec.event, pos)
+  lane.stale = true
+  return "folded"
+}
+
+/** viewOf takes a fold's view; pending is read by the approval
+ * controls, so it is always a list. */
+function viewOf(feed: FoldFeed): FoldedRun {
+  const out = feed.result()
+  if (!Array.isArray(out.pending)) out.pending = []
+  return out
+}
+
+/** overlay puts the run's finished words on a fold (applyTranscript
+ * maps only what the run produced onto its steps — its input record,
+ * the conversation it was fed, is not its reply). */
+function overlay(folded: FoldedRun, transcript: Transcript | null, terminal = false): FoldedRun {
+  if (!transcript) return folded
+  try {
+    // A terminal run's stored words are the story: they replace what
+    // the tail streamed (deltas are never backfilled — text streamed
+    // across a dropped connection keeps its hole otherwise).
+    return applyTranscript(folded, transcript.batches, { replace: terminal })
+  } catch {
+    return folded
+  }
+}
+
+const quiet = () => {}
 
 /**
  * PanelModel connects the panel to one Studio and one conversation.
@@ -174,23 +358,7 @@ export function strippedContent(spans: Span[] | null): boolean {
  * subscription per scope; one per watched turn.
  */
 export class PanelModel {
-  state: PanelState = {
-    meta: null,
-    tooNew: false,
-    gone: false,
-    session: null,
-    turns: [],
-    experiments: new Map(),
-    selected: "",
-    selectedStep: null,
-    turn: null,
-    drawer: null,
-    runtimes: [],
-    result: null,
-    breakpoints: [],
-    live: false,
-    raw: false,
-  }
+  state: PanelState = emptyPanelState()
 
   private notify: PanelNotify
   private ep: PanelEndpoint
@@ -199,7 +367,15 @@ export class PanelModel {
   private expSub?: PanelLiveHandle
   private disposed = false
   private loadSeq = 0 // selects the freshest async load after a rescope
-  private pollTimer: ReturnType<typeof setTimeout> | null = null
+  private timers = new Set<ReturnType<typeof setTimeout>>()
+  /** Reopen attempts since each stream last opened (LIVE_RETRIES). */
+  private retries = { scope: 0, run: 0, exp: 0 }
+  /** Run frames that arrived while a turn-list fetch was in flight:
+   * the fetch's snapshot is older than they are, so they are applied
+   * over it. */
+  private collectors = new Set<RunRow[]>()
+  private posting = false
+  private deciding = false
 
   constructor(ep: PanelEndpoint, public publicId: string, notify: PanelNotify) {
     this.ep = ep
@@ -210,7 +386,13 @@ export class PanelModel {
   async start(): Promise<boolean> {
     let meta: Meta
     try {
-      meta = await fetchMeta(this.ep)
+      // Whatever answered: a 200 with JSON that is not Studio's meta
+      // (an app's own catch-all route) is not a Studio, same as no
+      // answer.
+      const doc = (await fetchMeta(this.ep)) as Partial<Meta> | null
+      if (!doc || typeof doc !== "object" || typeof doc.studio_version !== "string")
+        throw new Error("not a Studio")
+      meta = { ...(doc as Meta), capabilities: Array.isArray(doc.capabilities) ? doc.capabilities : [] }
     } catch {
       this.state.gone = true
       return false
@@ -228,73 +410,210 @@ export class PanelModel {
   async rescope(publicId: string) {
     if (publicId === this.publicId) return
     this.publicId = publicId
-    if (this.state.meta) await this.scope()
+    if (this.state.meta && !this.state.tooNew) await this.scope()
   }
 
-  /** scope loads the header and the turn list, then follows the live
-   * lane for the conversation (S4.5: exactly one selector). */
+  /** scope starts over on the conversation: the header and the turn
+   * list, and the live lane for it (S4.5: exactly one selector).
+   * Nothing of the previous conversation stays — its open turn, its
+   * drawer and its result belong to another public id. */
   private async scope() {
     const seq = ++this.loadSeq
     this.scopeSub?.close()
     this.runSub?.close()
-    this.scopeSub = this.runSub = undefined
-    this.state.live = false
-    this.state.selected = ""
-    this.state.turn = null
+    this.expSub?.close()
+    this.scopeSub = this.runSub = this.expSub = undefined
+    this.clearTimers()
+    this.retries = { scope: 0, run: 0, exp: 0 }
+    const s = this.state
+    s.live = false
+    s.session = null
+    s.turns = []
+    s.turnsCapped = false
+    s.experiments = new Map()
+    s.selected = ""
+    s.selectedStep = null
+    s.turn = null
+    s.drawer = null
+    s.result = null
+    this.compareWords.clear()
     this.emit()
+    // Subscribe before the list is fetched: a run frame that lands
+    // during the fetch is newer than the page and is applied over it
+    // (refresh's collector), so no change falls between the two.
+    this.subscribe(seq)
+    this.armDev()
     await this.refresh()
-    if (seq !== this.loadSeq || this.disposed) return
-    if (!this.publicId) {
-      // No public id: the dev list (latest turns, unscoped — §5.2's
-      // default, dev only). Run frames keep it current below.
-      this.state.live = true
-      this.emit()
-      return
+  }
+
+  /** subscribe opens the conversation's live lane: run frames only —
+   * the turn list is all this stream feeds (each open turn has its own
+   * tail). Without a public id there is the dev list (latest turns,
+   * unscoped — §5.2's default) and no selector that covers it (S4.5
+   * wants exactly one): history only, and the dot says so. */
+  private subscribe(seq: number) {
+    this.scopeSub?.close()
+    this.scopeSub = undefined
+    if (!this.publicId) return
+    const again = async () => {
+      if (seq !== this.loadSeq || this.disposed) return
+      this.subscribe(seq)
+      await this.refresh()
     }
     this.scopeSub = openPanelLive(this.ep, {
       selector: { public_id: this.publicId },
-      kinds: ["event", "run"],
+      kinds: ["run"],
+      onOpen: (reopened) => {
+        this.retries.scope = 0
+        if (!this.state.live) {
+          this.state.live = true
+          this.emit()
+        }
+        // The browser reconnected by itself: run frames sent while the
+        // stream was down are gone — the list is refetched.
+        if (reopened) void this.refresh().catch(quiet)
+      },
       onRun: (f) => this.onRunFrame(f),
-      onOverflow: () => {
-        // Refetch and reconnect (S4.5): the durable lane is the
-        // database's job.
+      onOverflow: (why) => {
+        this.scopeSub = undefined
         this.state.live = false
         this.emit()
-        void this.scope()
+        // Refetch and reconnect (S4.5): the durable lane is the
+        // database's job. A stream that closed for good is retried a
+        // bounded number of times, further apart each time — a Studio
+        // that went away (or a token that expired) is not hammered.
+        if (why === "overflow") void again().catch(quiet)
+        else this.retry("scope", again)
       },
     })
     this.state.live = true
     this.emit()
   }
 
+  /** retry runs fn after the kind's next backoff step, LIVE_RETRIES
+   * times at most between two successful opens. */
+  private retry(kind: "scope" | "run" | "exp", fn: () => Promise<void>) {
+    const n = this.retries[kind]
+    if (n >= LIVE_RETRIES) return
+    this.retries[kind] = n + 1
+    this.after(Math.min(5_000 * 2 ** n, 60_000), () => void fn().catch(quiet))
+  }
+
+  private after(ms: number, fn: () => void): ReturnType<typeof setTimeout> {
+    const t = setTimeout(() => {
+      this.timers.delete(t)
+      if (!this.disposed) fn()
+    }, ms)
+    this.timers.add(t)
+    return t
+  }
+
+  private cancel(t: ReturnType<typeof setTimeout> | null) {
+    if (!t) return
+    clearTimeout(t)
+    this.timers.delete(t)
+  }
+
+  /** The dock is open (the element says so on every draw). */
+  private watching = false
+  private devTimer: ReturnType<typeof setTimeout> | null = null
+  private staleTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** watch tells the model whether anyone is looking: the dev list is
+   * read again only while the dock is open (and the page visible). */
+  watch(open: boolean) {
+    if (open === this.watching) return
+    this.watching = open
+    this.armDev()
+  }
+
+  /** armDev schedules the dev list's next read (DEV_POLL_MS): no
+   * public id, so no stream covers it. A hidden page reads nothing; it
+   * looks again a period later. */
+  private armDev() {
+    this.cancel(this.devTimer)
+    this.devTimer = null
+    if (!this.watching || this.publicId || this.disposed || !this.state.meta || this.state.tooNew) return
+    this.devTimer = this.after(DEV_POLL_MS, () => {
+      this.devTimer = null
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        this.armDev()
+        return
+      }
+      void this.refresh()
+        .catch(quiet)
+        .then(() => this.armDev())
+    })
+  }
+
+  /** armStale watches the rows that read running: a run whose app died
+   * never sends another frame — its row reads interrupted only when it
+   * is read again (derivation, S4.3; meta.interrupted_after_ms). One
+   * timer, pushed back by every change heard: the list is read again
+   * once nothing has been heard for that long while something reads
+   * running. */
+  private armStale() {
+    this.cancel(this.staleTimer)
+    this.staleTimer = null
+    if (this.disposed) return
+    const rows = [...this.state.turns, ...[...this.state.experiments.values()].flat()]
+    if (!rows.some((r) => r.status === "running")) return
+    const ia = this.state.meta?.interrupted_after_ms
+    const ms = (typeof ia === "number" && ia > 0 ? Math.min(ia, 10 * 60_000) : 30_000) + 1_000
+    this.staleTimer = this.after(ms, () => {
+      this.staleTimer = null
+      void this.refresh().catch(quiet)
+    })
+  }
+
+  private clearTimers() {
+    for (const t of this.timers) clearTimeout(t)
+    this.timers.clear()
+    this.devTimer = this.staleTimer = this.liveTimer = null
+  }
+
   /** refresh reloads the header and the turn list. */
   async refresh() {
     const seq = this.loadSeq
+    const during: RunRow[] = []
+    this.collectors.add(during)
     try {
       if (this.publicId) {
-        const sessions = await fetchSessions(this.ep, { public_id: this.publicId })
-        if (seq !== this.loadSeq) return
-        this.state.session = sessions.sessions[0] ?? null
-        const page = await fetchRuns(this.ep, { public_id: this.publicId, limit: "50" })
-        if (seq !== this.loadSeq) return
-        const { turns, experiments } = partitionRuns(page.runs)
-        this.state.turns = turns
-        this.state.experiments = experiments
-      } else {
-        const page = await fetchRuns(this.ep, { limit: "10" })
-        if (seq !== this.loadSeq) return
-        const { turns, experiments } = partitionRuns(page.runs)
-        this.state.turns = turns
-        this.state.experiments = experiments
+        // The header's row; without it the list still loads.
+        const sessions = await fetchSessions(this.ep, { public_id: this.publicId }).catch(() => null)
+        if (seq !== this.loadSeq || this.disposed) return
+        if (sessions && Array.isArray(sessions.sessions)) this.state.session = sessions.sessions[0] ?? null
       }
+      const page = await fetchRuns(
+        this.ep,
+        this.publicId ? { public_id: this.publicId, limit: String(TURNS_LIMIT) } : { limit: "10" }
+      )
+      if (seq !== this.loadSeq || this.disposed) return
+      const listed: (RunRow | null)[] = Array.isArray(page.runs) ? page.runs : []
+      const runs = listed.filter((r): r is RunRow => !!r && typeof r.id === "string")
+      const { turns, experiments } = partitionRuns(runs)
+      this.state.turns = turns
+      this.state.experiments = experiments
+      this.state.turnsCapped = page.next_before != null
+      for (const r of during) this.upsertRun(r)
     } catch {
       // A refresh that fails leaves what was there; run frames will
       // retry the shape naturally.
       return
+    } finally {
+      this.collectors.delete(during)
+    }
+    this.armStale()
+    // The open turn's row may have ended without a frame saying so (a
+    // run that read interrupted only now): its tail is done.
+    const open = this.state.turn
+    if (open && !open.done && !open.loading) {
+      const status = this.rowOf(open.id)?.status
+      if (status && status !== "running") void this.settleTurn(open).catch(quiet)
     }
     if (!this.state.selected) {
       const running = this.state.turns.find((r) => r.status === "running")
-      const target = running ?? this.state.turns[0]
+      const target = running ?? this.state.turns.at(0)
       if (target) await this.select(target.id)
       else this.emit()
     } else {
@@ -303,19 +622,33 @@ export class PanelModel {
   }
 
   /** onRunFrame upserts a turn row from the live lane and keeps the
-   * open turn's final state honest: when a run finishes, the
-   * transcript and spans reload (the finished words are the
-   * transcript's, not the deltas'). */
+   * open turn's final state honest: when a run finishes, its stored
+   * records reload (the finished words are the transcript's, not the
+   * deltas'). */
   private onRunFrame(f: LiveRun) {
-    if (f.run.public_id && f.run.public_id !== this.publicId) return
-    this.upsertRun(f.run)
+    const run = f.run
+    if (run.public_id && run.public_id !== this.publicId) return
+    // A subagent's run inherits the public id, but it is not a turn:
+    // the list is top-level runs (runs?public_id= reads the same way)
+    // and the child hangs off its parent's call.
+    if (run.parent_run_id) return
+    for (const c of this.collectors) c.push(run)
+    this.upsertRun(run)
+    this.armStale()
     if (!this.state.selected && this.state.turns.length) {
       const running = this.state.turns.find((r) => r.status === "running")
-      void this.select((running ?? this.state.turns[0]).id)
+      void this.select((running ?? this.state.turns[0]).id).catch(quiet)
       return
     }
-    if (this.state.selected === f.run.id && f.run.status !== "running") {
-      void this.refreshTurn(f.run.id)
+    const view = this.state.turn
+    if (view && view.id === run.id) {
+      if (run.status !== "running") void this.settleTurn(view).catch(quiet)
+      else if (view.done && !this.runSub && !view.loading) {
+        // A row that read ended and runs again (a stale read, a
+        // heartbeat after an interruption): its tail is followed.
+        view.done = false
+        void this.resumeTurn(view).catch(quiet)
+      }
     }
     this.emit()
   }
@@ -343,137 +676,315 @@ export class PanelModel {
     this.state.experiments = experiments
   }
 
+  /** walkEvents follows next_after until it reads null: done only
+   * means the run is terminal — a terminal run's page can still be
+   * full (events-ok-paged.golden.json pins done:true with next_after
+   * set), and breaking on done lost every later event of a long
+   * finished turn. The page cap bounds the walk and is reported; a
+   * cursor that does not advance ends it. */
+  private async walkEvents(id: string): Promise<EventWalk> {
+    const events: PosEvent[] = []
+    const gaps: number[] = []
+    let after = 0
+    for (let page = 0; page < MAX_EVENT_PAGES; page++) {
+      const p = await fetchEvents(this.ep, id, after)
+      if (Array.isArray(p.events)) for (const e of p.events) events.push(e)
+      if (Array.isArray(p.gaps)) for (const g of p.gaps) gaps.push(g)
+      if (typeof p.next_after !== "number" || p.next_after <= after)
+        return { events, gaps, capped: false }
+      after = p.next_after
+    }
+    return { events, gaps, capped: true }
+  }
+
   /** select loads one turn: the doc (subagent children), every events
    * page, the transcript and the spans, then follows its live tail
    * while it runs. */
   async select(id: string) {
-    const seq = this.loadSeq
     this.runSub?.close()
     this.runSub = undefined
+    this.retries.run = 0
+    // The step being read is the previous turn's.
+    if (this.state.selected !== id) this.state.selectedStep = null
     this.state.selected = id
     const view = newTurnView(id)
     this.state.turn = view
     this.emit()
+    await this.resumeTurn(view)
+  }
+
+  /** resumeTurn (re)loads the view's stored records and, while the run
+   * is running, follows its tail. The tail subscribes BEFORE the pages
+   * are read (the hook's order, hooks/use-run-events.ts): frames that
+   * land during the walk are held and folded after it by position, so
+   * nothing published between the last page and the subscription is
+   * lost until the run ends. */
+  private async resumeTurn(view: TurnView) {
+    const followed = !view.done && this.rowOf(view.id)?.status === "running"
+    if (followed) this.follow(view)
+    await this.loadTurn(view)
+    if (this.state.turn !== view || this.disposed || view.done) return
+    const status = this.rowOf(view.id)?.status ?? view.doc?.status
+    if (status === "running") {
+      // A run the list did not know as running (no row yet): its tail
+      // opens now, and its open reads the pages past what was folded.
+      if (!followed) this.follow(view)
+      return
+    }
+    // It ended. Followed, its end may have landed after the pages were
+    // read: settling reads them once more. Not followed, they were read
+    // after it ended.
+    if (followed) await this.settleTurn(view)
+    else view.done = true
+  }
+
+  /** loadTurn reads the run's stored records into the view, in place:
+   * the fold is rebuilt from the durable events (a live tail that
+   * began late, or dropped, is made whole), the subagent expanders
+   * and whatever the user opened stay. A response for a view the user
+   * has left is dropped. */
+  private async loadTurn(view: TurnView): Promise<void> {
+    const seq = this.loadSeq
     const ep = this.ep
-    const [doc, events, transcript, spans] = await Promise.all([
+    const id = view.id
+    view.loading = true
+    const [doc, walk, transcript, spans] = await Promise.all([
       fetchRun(ep, id).catch(() => null),
-      (async () => {
-        const out: PosEvent[] = []
-        const gaps: number[] = []
-        let after = 0
-        // The cursor to follow is next_after until it reads null:
-        // done only means the run is terminal — a terminal run's page
-        // can still be full (events-ok-paged.golden.json pins
-        // done:true with next_after set), and breaking on done lost
-        // every later event of a long finished turn. The page cap
-        // bounds the walk; a run still generating continues through
-        // the live tail below.
-        for (let page = 0; page < 20; page++) {
-          const p = await fetchEvents(ep, id, after)
-          out.push(...p.events)
-          gaps.push(...p.gaps)
-          if (p.next_after === null) break
-          after = p.next_after
-        }
-        return { out, gaps }
-      })().catch(() => ({ out: [] as PosEvent[], gaps: [] as number[] })),
+      this.walkEvents(id).catch(() => null),
       fetchTranscript(ep, id).catch(() => null),
       fetchSpans(ep, id)
-        .then((d) => d.spans)
+        .then((d) => (Array.isArray(d.spans) ? d.spans : null))
         .catch(() => null),
     ])
-    if (seq !== this.loadSeq || this.disposed || this.state.selected !== id) return
-    view.doc = doc
-    view.events = events.out
-    view.gaps = events.gaps
-    for (const p of events.out) view.feed.push(p.event, p.pos)
-    view.folded = view.feed.result()
-    view.transcript = transcript
-    if (transcript) view.folded = applyTranscript(view.folded, transcript.batches)
-    if (doc) view.folded = linkView(view.folded, doc.children)
-    view.spans = spans
+    view.loading = false
+    if (seq !== this.loadSeq || this.disposed || this.state.turn !== view) return
+    if (view.again) {
+      view.again = false
+      return this.loadTurn(view)
+    }
+    if (doc) {
+      view.doc = doc
+      // The doc is the row as of now: a list loaded a moment ago may
+      // still read running for a run that has since ended. The row moves
+      // only ever forward: a doc read before a run frame can land after
+      // it, and must not take a finished row back to running.
+      if (this.rowOf(id)?.status === "running" && doc.status !== "running") {
+        const { children: _children, ...row } = doc
+        this.upsertRun(row)
+      }
+    }
+    if (walk) {
+      restart(view, walk.events)
+      view.gaps = walk.gaps
+      view.capped = walk.capped
+    }
+    if (transcript) view.transcript = transcript
+    if (spans) view.spans = spans
+    // The frames the tail delivered while the pages were read: folded
+    // after them, once each. A settled view's are late — the reload is
+    // the story.
+    if (view.done || view.capped) view.held.length = 0
+    else this.drain(view, id, () => this.state.turn === view && !view.done)
+    if (view.recheck && !view.done) {
+      view.recheck = false
+      void this.catchUp(view, id, () => this.state.turn === view && !view.done).catch(quiet)
+    }
+    this.dress(view)
     this.emit()
-    const row = this.rowOf(id)
-    if (row?.status === "running") this.follow(id)
+  }
+
+  /** drain folds a lane's held frames in arrival order; one past a
+   * position nobody carried sends the lane back to the pages (it and
+   * the frames behind it wait for that read). */
+  private drain(lane: Lane, id: string, current: () => boolean) {
+    const held = lane.held.splice(0)
+    for (let i = 0; i < held.length; i++) {
+      if (foldLive(lane, held[i]) !== "gap") continue
+      lane.held.push(...held.slice(i))
+      void this.catchUp(lane, id, current).catch(quiet)
+      return
+    }
+  }
+
+  /** liveInto takes one live frame for a lane: held while its pages are
+   * being read, folded in order otherwise, and a frame past a position
+   * the stream never carried sends the lane back to the pages. */
+  private liveInto(lane: Lane, id: string, rec: LiveRecord, current: () => boolean) {
+    if (lane.loading || lane.reading) {
+      lane.held.push(rec)
+      return
+    }
+    const r = foldLive(lane, rec)
+    if (r === "gap") {
+      lane.held.push(rec)
+      void this.catchUp(lane, id, current).catch(quiet)
+    } else if (r === "folded") this.emit(true)
+  }
+
+  /** catchUp reads the stored pages past the lane's last position into
+   * its fold (in place: the deltas streamed so far stay), then folds
+   * what was held meanwhile — past any hole that is still there: the
+   * pages are read, so it is a lost batch (the page's gaps). One read
+   * at a time; asked again meanwhile, it reads once more. Bounded by
+   * the walk's page cap. */
+  private async catchUp(lane: Lane, id: string, current: () => boolean): Promise<void> {
+    if (lane.loading || lane.reading) {
+      lane.recheck = true
+      return
+    }
+    lane.reading = true
+    // Read through a function: another call sets these flags while this
+    // one awaits (control-flow narrowing would read the stale literal).
+    const asked = (): boolean => lane.recheck
+    const reloading = (): boolean => lane.loading
+    try {
+      do {
+        lane.recheck = false
+        let after = lane.pos + 1
+        for (let n = 0; n < MAX_EVENT_PAGES; n++) {
+          const p = await fetchEvents(this.ep, id, after)
+          if (!current()) return
+          if (Array.isArray(p.events)) {
+            for (const e of p.events as (PosEvent | null)[]) {
+              if (!e || typeof e.pos !== "number" || lane.seen.has(e.pos)) continue
+              lane.seen.add(e.pos)
+              lane.events.push(e)
+              feedEvent(lane.feed, e.event, e.pos)
+              if (e.pos > lane.pos) lane.pos = e.pos
+              lane.stale = true
+            }
+          }
+          if (typeof p.next_after !== "number" || p.next_after <= after) break
+          after = p.next_after
+        }
+      } while (asked())
+    } catch {
+      // unreadable now: what was held folds anyway, below
+    } finally {
+      lane.reading = false
+    }
+    if (!current() || reloading()) return // a reload drains them itself
+    for (const rec of lane.held.splice(0)) foldLive(lane, rec, true)
+    this.emit(true)
+  }
+
+  /** dress takes the view's fold and puts the transcript's words and
+   * the subagent links on it. */
+  private dress(view: TurnView) {
+    view.stale = false
+    const status = this.rowOf(view.id)?.status ?? view.doc?.status
+    view.folded = overlay(viewOf(view.feed), view.transcript, view.done || (!!status && status !== "running"))
+    if (view.doc && Array.isArray(view.doc.children)) {
+      try {
+        linkView(view.folded, view.doc.children)
+      } catch {
+        // children that do not read as rows: no expanders
+      }
+    }
   }
 
   /** follow opens the live tail: deltas stream the text as it is
    * generated, tool calls show running… until they finish (§2). */
-  private follow(id: string) {
+  private follow(view: TurnView) {
+    const id = view.id
+    this.runSub?.close()
     this.runSub = openPanelLive(this.ep, {
       selector: { run: id },
       kinds: ["event", "delta", "run"],
+      onOpen: () => {
+        this.retries.run = 0
+        // Subscribed now: what was published before the server
+        // subscribed and after the pages were read is in neither — the
+        // pages past the last position are read (after a load in
+        // flight, which then reads them).
+        if (this.state.turn === view && !view.done && !view.capped)
+          void this.catchUp(view, id, () => this.state.turn === view && !view.done).catch(quiet)
+      },
       onRecord: (rec: LiveRecord) => {
-        const view = this.state.turn
-        if (!view || view.id !== rec.run_id) return
-        view.feed.push(rec.event, Number(rec.pos))
-        view.folded = view.feed.result()
-        this.emit()
+        if (this.state.turn !== view || view.id !== rec.run_id || view.done) return
+        // A story cut at the page cap is not extended: it says so, and
+        // Studio has the rest.
+        if (view.capped) return
+        // The pages and the tail overlap (a reconnect backfills the
+        // stored events from position 0): one fold per position.
+        this.liveInto(view, id, rec, () => this.state.turn === view && !view.done)
       },
       onRun: (f) => {
-        if (f.run.id !== id) return
-        if (f.run.status !== "running") void this.refreshTurn(id)
+        if (f.run.id !== id || this.state.turn !== view) return
+        if (this.rowOf(id)) this.upsertRun(f.run)
+        if (f.run.status !== "running") void this.settleTurn(view).catch(quiet)
+        this.emit()
       },
-      onOverflow: () => {
-        void this.select(id)
+      onOverflow: (why) => {
+        this.runSub = undefined
+        if (this.state.turn !== view || view.done) return
+        // The tail is gone, the run is not: reload what is stored and
+        // follow again — at once on the server's own overflow frame,
+        // on the bounded backoff when the stream closed for good.
+        if (why === "overflow") void this.resumeTurn(view).catch(quiet)
+        else this.retry("run", () => this.resumeTurn(view))
       },
     })
   }
 
-  /** refreshTurn reloads the finished bits of the open turn: the
-   * transcript (final words), the spans (timing) and the row. */
-  private async refreshTurn(id: string) {
-    const seq = this.loadSeq
-    const view = this.state.turn
-    if (!view || view.id !== id) return
-    const [transcript, spans, doc] = await Promise.all([
-      fetchTranscript(this.ep, id).catch(() => null),
-      fetchSpans(this.ep, id)
-        .then((d) => d.spans)
-        .catch(() => null),
-      fetchRun(this.ep, id).catch(() => null),
-    ])
-    if (seq !== this.loadSeq || this.disposed || this.state.turn !== view) return
-    view.transcript = transcript
-    if (transcript) view.folded = applyTranscript(view.folded, transcript.batches)
-    view.spans = spans
-    view.doc = doc ?? view.doc
-    if (doc) view.folded = linkView(view.folded, doc.children)
-    this.emit()
+  /** settleTurn is the open turn's end: the tail closes, late deltas
+   * are dropped, and the stored records reload — every event the tail
+   * may have missed between the page fetch and the subscription, the
+   * final words (the transcript's, not the deltas'), the spans and
+   * the row. A live tail and a reload agree. */
+  private async settleTurn(view: TurnView) {
+    if (this.state.turn !== view) return
+    view.done = true
+    this.runSub?.close()
+    this.runSub = undefined
+    if (view.loading) {
+      view.again = true
+      return
+    }
+    await this.loadTurn(view)
   }
 
   /** expandChild loads a subagent child's own turn view (lazy, §2:
    * a delegating tool call expands into the child run). */
   async expandChild(childId: string) {
     const view = this.state.turn
-    if (!view || view.children.has(childId)) return
+    if (!view || view.children.has(childId) || view.tried.has(childId)) return
+    view.tried.add(childId)
     const seq = this.loadSeq
-    const feed = newFold()
-    const events: PosEvent[] = []
+    let walk: EventWalk
     try {
-      let after = 0
-      // next_after is the cursor (done:true on a full page is not the
-      // end — see select); the cap bounds the walk.
-      for (let page = 0; page < 20; page++) {
-        const p = await fetchEvents(this.ep, childId, after)
-        events.push(...p.events)
-        if (p.next_after === null) break
-        after = p.next_after
-      }
+      walk = await this.walkEvents(childId)
     } catch {
       return // the child's history is unreachable: leave the expander
     }
-    for (const p of events) feed.push(p.event, p.pos)
-    let folded = feed.result()
+    const feed = newFold()
+    foldInto(feed, new Set(), walk.events)
     const transcript = await fetchTranscript(this.ep, childId).catch(() => null)
-    if (seq !== this.loadSeq || this.state.turn !== view) return
-    if (transcript) folded = applyTranscript(folded, transcript.batches)
-    view.children.set(childId, { events, feed, folded, transcript })
+    if (seq !== this.loadSeq || this.disposed || this.state.turn !== view) return
+    view.children.set(childId, {
+      events: walk.events,
+      feed,
+      folded: overlay(
+        viewOf(feed),
+        transcript,
+        (view.doc?.children.find((c) => c.id === childId)?.status ?? "running") !== "running"
+      ),
+      transcript,
+      capped: walk.capped,
+    })
     this.emit()
   }
 
+  /** rowOf finds a run's row: a turn, or an experiment nested under
+   * one (both are selectable). */
   rowOf(id: string): RunRow | undefined {
-    return this.state.turns.find((r) => r.id === id)
+    const turn = this.state.turns.find((r) => r.id === id)
+    if (turn) return turn
+    for (const list of this.state.experiments.values()) {
+      const x = list.find((r) => r.id === id)
+      if (x) return x
+    }
+    return undefined
   }
 
   // ── The playground (WEFT-PLAYGROUND §3, WEFT-DEVTOOLS §8.2) ──────
@@ -481,25 +992,43 @@ export class PanelModel {
   /** openExperiment opens the drawer pre-filled from the run's
    * registered config — instructions, tools and models come from the
    * runtime's manifest, never guessed from the trace. step 0 re-runs
-   * the whole turn; the Continue-from button passes the read step. */
+   * the whole turn; the Continue-from button passes the read step.
+   * The runtimes are read each time: a restarted app registers under
+   * a new runtime id, and a remembered list would post to the dead
+   * one. */
   async openExperiment(runId: string, step = 0) {
-    const row = this.rowOf(runId) ?? this.state.turns.find((r) => r.id === runId)
+    const row = this.rowOf(runId)
     if (!row) return
-    let runtimes = this.state.runtimes
-    if (!runtimes.length) {
-      try {
-        runtimes = (await fetchRuntimes(this.ep)).runtimes
-      } catch {
-        return // no runtime connected: the verb is not offered
-      }
-      if (this.disposed) return
-      this.state.runtimes = runtimes
+    // Every await below re-asks whether the conversation is still the
+    // one the verb was for: an SPA that switched users meanwhile must
+    // not get the previous one's drawer, result or stream.
+    const seq = this.loadSeq
+    let runtimes: RuntimeView[]
+    try {
+      const doc = await fetchRuntimes(this.ep)
+      runtimes = Array.isArray(doc.runtimes) ? doc.runtimes : []
+    } catch (err) {
+      if (!this.disposed && seq === this.loadSeq) this.setExperimentError(messageOf(err), runId)
+      return
     }
+    if (this.disposed || seq !== this.loadSeq) return
+    this.state.runtimes = runtimes
     const rt = pickRuntime(runtimes, row.agent)
     const agent = rt?.agents.find((a) => a.name === row.agent)
-    if (!rt || !agent) return
+    if (!rt || !agent) {
+      // The verb cannot run; say why instead of a button that does
+      // nothing.
+      this.setExperimentError(
+        `no connected runtime registers the agent "${row.agent}" — experiments run in your app (weft/runtime)`,
+        runId
+      )
+      return
+    }
     const tools: Record<string, boolean> = {}
     for (const t of agent.tools) tools[t.name] = true
+    // The rule that is parking this runtime's runs, whoever set it.
+    this.state.breakpoints = Array.isArray(rt.breakpoints) ? [...rt.breakpoints] : []
+    const turn = this.state.turn
     this.state.drawer = {
       runId,
       agent: row.agent,
@@ -510,7 +1039,7 @@ export class PanelModel {
       tools,
       model: "",
       thinking: "",
-      input: step === 0 ? promptOf(this.state.turn) : "",
+      input: step === 0 && turn && turn.id === runId ? turnPromptOf(turn.transcript) : "",
       engine: "live",
       sideEffects: "",
       thread: "ephemeral",
@@ -519,11 +1048,13 @@ export class PanelModel {
     this.emit()
   }
 
-  /** setDraft patches the drawer's editable fields. */
-  setDraft(patch: Partial<ExperimentDraft>) {
+  /** setDraft patches the drawer's editable fields. still leaves the
+   * dock as it is — a text field being typed in already shows its own
+   * value, and redrawing it would take the caret. */
+  setDraft(patch: Partial<ExperimentDraft>, still = false) {
     if (!this.state.drawer) return
     this.state.drawer = { ...this.state.drawer, ...patch }
-    this.emit()
+    if (!still) this.emit()
   }
 
   /** closeExperiment drops the drawer (the result stays until the next
@@ -533,64 +1064,142 @@ export class PanelModel {
     this.emit()
   }
 
+  /** rerun is §3's ↻: the whole turn again with the drawer's current
+   * edits — or, with no drawer open on this turn, as registered. */
+  async rerun(runId: string) {
+    const d = this.state.drawer
+    if (!d || d.runId !== runId) {
+      await this.openExperiment(runId, 0)
+      if (this.state.drawer?.runId !== runId) return
+    } else if (d.step !== 0) {
+      const turn = this.state.turn
+      this.state.drawer = {
+        ...d,
+        step: 0,
+        input: d.input || (turn && turn.id === runId ? turnPromptOf(turn.transcript) : ""),
+      }
+    }
+    await this.runExperiment()
+  }
+
   /** runExperiment posts §5.1's command and follows it: the lifecycle
-   * row until the run id arrives, then the live lane for the run. */
+   * row until the run id arrives, then the live lane for the run. One
+   * post at a time — a second click while the first is in flight would
+   * start (and bill) a second run. */
   async runExperiment() {
     const draft = this.state.drawer
-    if (!draft) return
+    if (!draft || this.posting) return
+    const problem = draftProblem(draft)
+    if (problem) {
+      this.setExperimentError(problem, draft.runId)
+      return
+    }
+    this.posting = true
+    const seq = this.loadSeq
     let out: { command_id: string; state: string }
     try {
       out = await postPlaygroundRun(this.ep, buildRunBody(draft, this.publicId))
     } catch (err) {
-      this.setExperimentError(err instanceof Error ? err.message : String(err))
+      if (!this.disposed && seq === this.loadSeq) this.setExperimentError(messageOf(err), draft.runId)
       return
+    } finally {
+      this.posting = false
     }
+    // Posted for a conversation the page has left: the run is the
+    // runtime's now, but not this view's to follow.
+    if (this.disposed || seq !== this.loadSeq) return
     const forked = this.state.experiments.get(draft.runId)?.length ?? 0
-    const feed = newFold()
+    const turn = this.state.turn
+    const source =
+      turn && turn.id === draft.runId
+        ? (turnWordsOf(turn.transcript) ?? foldedWords(turn.folded))
+        : { text: "", calls: [] }
     this.expSub?.close()
     this.expSub = undefined
-    this.state.result = {
-      commandID: out.command_id,
-      state: "queued",
-      runID: "",
-      error: null,
-      label: experimentLabel(draft.runId, forked),
-      sourceText: sourceTextOf(this.state.turn),
-      compareWith: "",
-      row: null,
-      events: [],
-      feed,
-      folded: feed.result(),
-    }
+    const res = newResult(draft.runId, experimentLabel(draft.runId, forked), source)
+    res.commandID = out.command_id
+    res.thread = draft.thread
+    res.state = "queued"
+    this.state.result = res
     this.emit()
-    this.trackCommand(out.command_id)
+    this.trackCommand(res)
   }
 
   /** decide answers one parked call of the experiment's run with the
    * approval verbs (continue / skip / resolve, ADR 0007) and follows
-   * the resumed run in the same result pane. */
+   * the resumed run in the same result pane. The run's pending set is
+   * read again from its stored events first: a call that is not in it
+   * is not sent. With several calls parked the runtime holds each
+   * decision until all are in, then resumes once (trackCommand records
+   * the held ones). */
   async decide(callID: string, decision: "approve" | "deny" | "resolve", content?: string) {
     const res = this.state.result
-    if (!res || !res.runID) return
-    let out: { command_id: string; state: string }
+    if (!res || !res.runID || !res.ready || this.deciding) return
+    this.deciding = true
     try {
-      out = await postApproval(this.ep, res.runID, {
-        call_id: callID,
-        decision,
-        content,
-      })
-    } catch (err) {
-      this.setExperimentError(err instanceof Error ? err.message : String(err))
-      return
+      let walk: EventWalk
+      try {
+        walk = await this.walkEvents(res.runID)
+      } catch (err) {
+        res.error = `the parked run could not be read again — nothing was sent (${messageOf(err)})`
+        this.emit()
+        return
+      }
+      if (this.left(res)) return
+      const feed = newFold()
+      foldInto(feed, new Set(), walk.events)
+      const pending = viewOf(feed).pending
+      if (!pending.some((c) => c.id === callID)) {
+        res.folded.pending = pending
+        res.error = `call ${callID} is not pending on ${res.runID} — nothing was sent`
+        this.emit()
+        return
+      }
+      let out: { command_id: string; state: string }
+      try {
+        out = await postApproval(this.ep, res.runID, { call_id: callID, decision, content })
+      } catch (err) {
+        // Refused (a read-only token is a 403, a call that is not
+        // pending a 400 naming the ones that are, a runtime that left
+        // a 503): say what Studio said, and show the pending set as it
+        // stands now.
+        res.error = messageOf(err)
+        this.emit()
+        const again = await this.walkEvents(res.runID).catch(() => null)
+        if (again && !this.left(res)) {
+          const now = newFold()
+          foldInto(now, new Set(), again.events)
+          res.folded.pending = viewOf(now).pending
+          this.emit()
+        }
+        return
+      }
+      if (this.left(res)) return
+      // The decision is a command of its own. The pane keeps the
+      // parked run until the runtime names the resumed one (a rejected
+      // decision leaves it as it was); the label and the diff base
+      // stay — it is the same experiment continuing.
+      const next: ExperimentResult = {
+        ...res,
+        commandID: out.command_id,
+        state: "queued",
+        error: null,
+        ready: false,
+        words: null,
+        deciding: { callID, decision },
+        // Its own lane bookkeeping: nothing held or in flight is the
+        // new command's.
+        held: [],
+        reading: false,
+        recheck: false,
+        loading: false,
+      }
+      this.state.result = next
+      this.emit()
+      this.trackCommand(next)
+    } finally {
+      this.deciding = false
     }
-    // The resumed run replaces the pane's stream; the label and the
-    // diff base stay (it is the same experiment continuing).
-    const feed = newFold()
-    this.expSub?.close()
-    this.expSub = undefined
-    this.state.result = { ...res, commandID: out.command_id, state: "queued", runID: "", error: null, events: [], feed, folded: feed.result() }
-    this.emit()
-    this.trackCommand(out.command_id)
   }
 
   /** setCompare points the 2-way diff at another run of the same
@@ -600,49 +1209,28 @@ export class PanelModel {
     if (!res) return
     res.compareWith = runID
     this.emit()
-    if (!runID) return
-    // The other side's final words, from its transcript.
-    const doc = await fetchTranscript(this.ep, runID).catch(() => null)
-    if (this.state.result !== res) return
-    if (doc) {
-      const parts: string[] = []
-      for (const b of doc.batches)
-        for (const m of b.messages)
-          if (m.role === "assistant")
-            for (const p of m.content)
-              if (p.type === "text" && p.text) parts.push(p.text)
-      this.compareText.set(runID, parts.join("\n"))
-    }
-    // The sibling's tool calls, folded from its events.
-    const feed = newFold()
-    try {
-      let after = 0
-      // next_after is the cursor (done:true on a full page is not the
-      // end — see select); the cap bounds the walk.
-      for (let page = 0; page < 20; page++) {
-        const p = await fetchEvents(this.ep, runID, after)
-        for (const pe of p.events) feed.push(pe.event, pe.pos)
-        if (p.next_after === null) break
-        after = p.next_after
+    if (!runID || this.compareWords.has(runID)) return
+    // The other side's words: its transcript, read the way every side
+    // of the diff is (turnWordsOf); its fold when content is stripped.
+    const transcript = await fetchTranscript(this.ep, runID).catch(() => null)
+    let words = turnWordsOf(transcript)
+    if (!words) {
+      const feed = newFold()
+      try {
+        foldInto(feed, new Set(), (await this.walkEvents(runID)).events)
+      } catch {
+        // unreachable: an empty side
       }
-    } catch {
-      // the text side still compares
+      words = foldedWords(viewOf(feed))
     }
-    if (this.state.result !== res || this.disposed) return
-    this.compareCalls.set(
-      runID,
-      feed
-        .result()
-        .steps.flatMap((st) => st.toolCalls)
-        .map((c) => `${c.name}(${c.args === undefined ? "" : JSON.stringify(c.args)})`)
-    )
+    if (this.left(res)) return
+    this.compareWords.set(runID, words)
     this.emit()
   }
 
-  /** compareText and compareCalls hold the loaded text and tool-call
-   * lines of each compare target (P3's 2-way diff needs both sides). */
-  compareText = new Map<string, string>()
-  compareCalls = new Map<string, string[]>()
+  /** compareWords holds the loaded words of each compare target (P3's
+   * 2-way diff needs both sides). */
+  compareWords = new Map<string, TurnWords>()
 
   /** setBreakpoints is the rung-3 verb (§8.3): the tools every run
    * this runtime starts parks on from then on. Rendered only when
@@ -650,13 +1238,18 @@ export class PanelModel {
   async setBreakpoints(tools: string[]) {
     const drawer = this.state.drawer
     if (!drawer) return
+    const seq = this.loadSeq
+    let stored: { tools?: string[] } | null
     try {
-      await putBreakpoints(this.ep, drawer.runtimeId, tools)
+      stored = await putBreakpoints(this.ep, drawer.runtimeId, tools)
     } catch (err) {
-      this.setExperimentError(err instanceof Error ? err.message : String(err))
+      // Nothing was stored (a disconnected runtime is a 503): the
+      // redraw puts the checkbox back on the set that stands.
+      if (!this.disposed && seq === this.loadSeq) this.setExperimentError(messageOf(err), drawer.runId)
       return
     }
-    this.state.breakpoints = tools
+    if (this.disposed || seq !== this.loadSeq) return
+    this.state.breakpoints = Array.isArray(stored?.tools) ? stored.tools : tools
     this.emit()
   }
 
@@ -668,10 +1261,9 @@ export class PanelModel {
     try {
       await postSteer(this.ep, res.runID, message)
     } catch (err) {
-      this.setExperimentError(err instanceof Error ? err.message : String(err))
-      return
+      res.error = messageOf(err)
     }
-    this.emit()
+    if (!this.left(res)) this.emit()
   }
 
   /** discardResult clears the result pane (the run itself stays in the
@@ -683,101 +1275,223 @@ export class PanelModel {
     this.emit()
   }
 
-  private setExperimentError(message: string) {
-    if (this.state.result) {
-      this.state.result = { ...this.state.result, error: message }
+  /** setExperimentError shows a refused verb where its result would
+   * have been: on the open result, or on an empty one under the turn
+   * the verb was for. */
+  private setExperimentError(message: string, sourceRunID?: string) {
+    const res = this.state.result
+    if (res && (!sourceRunID || res.sourceRunID === sourceRunID)) {
+      res.error = message
     } else {
-      this.state.result = {
-        commandID: "",
-        state: "rejected",
-        runID: "",
-        error: message,
-        label: "—",
-        sourceText: "",
-        compareWith: "",
-        row: null,
-        events: [],
-        feed: newFold(),
-        folded: newFold().result(),
-      }
+      this.expSub?.close()
+      this.expSub = undefined
+      const blank = newResult(sourceRunID ?? this.state.selected, "—", { text: "", calls: [] })
+      blank.error = message
+      this.state.result = blank
     }
     this.emit()
   }
 
   /** trackCommand polls the lifecycle row (§10.5) until the run id
    * arrives — then the live lane takes over — and until the terminal
-   * state, when the final text (the transcript, not the deltas) and
-   * the row load for the diff. */
-  private trackCommand(commandID: string) {
+   * state, when the run's stored records load for the final words and
+   * the diff. The id the row names can change: the accepted ack names
+   * the first run, the finished ack the last of a substitute chain
+   * (each leg resumes under a fresh id) — the pane follows it. A row
+   * that cannot be read (the command is unknown to a restarted Studio,
+   * the token expired, Studio is gone) ends the poll instead of asking
+   * forever. */
+  private trackCommand(res: ExperimentResult) {
+    let fails = 0
     const tick = async () => {
-      if (this.disposed) return
+      if (this.left(res)) return // replaced or discarded
       let st: CommandStatus
       try {
-        st = await fetchCommand(this.ep, commandID)
-      } catch {
-        this.schedulePoll(commandID)
+        st = await fetchCommand(this.ep, res.commandID)
+      } catch (err) {
+        if (this.left(res)) return
+        const refused = err instanceof PanelApiError && [401, 403, 404, 410].includes(err.status)
+        if (refused || ++fails >= POLL_FAILS) {
+          res.state = "lost"
+          res.error = refused
+            ? messageOf(err)
+            : "Studio stopped answering — the command's state is unknown"
+          this.emit()
+          return
+        }
+        this.after(POLL_MS, () => void tick().catch(quiet))
         return
       }
-      const res = this.state.result
-      if (!res || res.commandID !== commandID) return // replaced or discarded
-      this.state.result = { ...res, state: st.state, runID: st.run_id || res.runID, error: st.error }
+      if (this.left(res)) return
+      fails = 0
+      res.state = st.state
+      res.error = st.error ?? null
+      if (st.run_id && st.run_id !== res.runID) this.followExperiment(res, st.run_id)
       this.emit()
-      if (st.run_id && !this.expSub) this.followExperiment(st.run_id)
       if (st.state === "finished" || st.state === "rejected" || st.state === "lost") {
-        if (st.run_id) await this.finishExperiment(st.run_id)
+        // A decision that finished under the parked run's own id is
+        // one the runtime holds: the run resumes once, when every
+        // pending call has a decision — this one is recorded, the park
+        // stands, and the remaining calls are still to decide.
+        if (st.state === "finished" && res.deciding && !st.error) {
+          res.decided = { ...res.decided, [res.deciding.callID]: res.deciding.decision }
+        }
+        res.deciding = null
+        if (res.runID) await this.settleExperiment(res, 0)
         return
       }
-      this.schedulePoll(commandID)
+      this.after(POLL_MS, () => void tick().catch(quiet))
     }
-    void tick()
+    void tick().catch(quiet)
   }
 
-  private schedulePoll(commandID: string) {
-    this.pollTimer = setTimeout(() => this.trackCommand(commandID), 700)
+  /** followExperiment points the pane at one run and streams it in
+   * place (§3: "the result streams in place from the live lane"). */
+  private followExperiment(res: ExperimentResult, runID: string) {
+    const feed = newFold()
+    res.runID = runID
+    res.row = null
+    res.events = []
+    res.seen = new Set()
+    res.feed = feed
+    res.folded = viewOf(feed)
+    // A fresh lane: a read still in flight for the previous run of the
+    // chain is no longer this lane's (its own checks drop it).
+    res.pos = -1
+    res.held = []
+    res.reading = false
+    res.recheck = false
+    res.loading = false
+    res.stale = false
+    res.ready = false
+    res.words = null
+    res.deciding = null // the run it was held for has been resumed
+    res.decided = {}
+    this.retries.exp = 0
+    this.openExperimentStream(res)
   }
 
-  /** followExperiment streams the experiment's run in place (§3: "the
-   * result streams in place from the live lane"). */
-  private followExperiment(runID: string) {
+  private openExperimentStream(res: ExperimentResult) {
+    const runID = res.runID
+    const current = () => !this.left(res) && res.runID === runID && !res.ready
+    this.expSub?.close()
     this.expSub = openPanelLive(this.ep, {
       selector: { run: runID },
       kinds: ["event", "delta", "run"],
+      onOpen: () => {
+        this.retries.exp = 0
+        // The run began before its stream opened (the run id arrives
+        // with the lifecycle poll): what it stored before the server
+        // subscribed is read from the pages, by position.
+        if (!this.left(res) && res.runID === runID && !res.ready) void this.catchUp(res, runID, current).catch(quiet)
+      },
       onRecord: (rec) => {
-        const res = this.state.result
-        if (!res || res.runID !== rec.run_id) return
-        res.events.push({ pos: Number(rec.pos), time: rec.time, event: rec.event })
-        res.feed.push(rec.event, Number(rec.pos))
-        res.folded = res.feed.result()
-        this.emit()
+        if (this.state.result !== res || res.runID !== rec.run_id || res.ready) return
+        this.liveInto(res, runID, rec, current)
       },
       onRun: (f) => {
-        const res = this.state.result
-        if (!res || f.run.id !== res.runID) return
+        if (this.state.result !== res || f.run.id !== res.runID) return
         res.row = f.run
         this.emit()
+        if (f.run.status !== "running") void this.settleExperiment(res, 0).catch(quiet)
       },
-      onOverflow: () => {
-        const res = this.state.result
-        if (res) res.events = []
-        this.expSub?.close()
+      onOverflow: (why) => {
         this.expSub = undefined
+        if (this.state.result !== res || res.runID !== runID || res.ready) return
+        // The stream is gone, the run is not: what is stored reloads
+        // and the tail reopens (at once on the server's overflow
+        // frame, on the bounded backoff when it closed for good).
+        const again = async () => {
+          if (this.state.result !== res || res.runID !== runID || res.ready) return
+          await this.loadExperiment(res)
+          if (this.left(res) || res.runID !== runID || isReady(res)) return
+          if (res.state === "queued" || res.state === "accepted") this.openExperimentStream(res)
+        }
+        if (why === "overflow") void again().catch(quiet)
+        else this.retry("exp", again)
       },
     })
   }
 
-  /** finishExperiment loads the finished run's final words and row:
-   * the diff is taken against the transcript, never the deltas. */
-  private async finishExperiment(runID: string) {
-    const res = this.state.result
-    if (!res || res.runID !== runID) return
-    const [transcript, row] = await Promise.all([
-      fetchTranscript(this.ep, runID).catch(() => null),
-      fetchRun(this.ep, runID).catch(() => null),
-    ])
-    if (this.disposed || this.state.result !== res) return
+  /** loadExperiment rebuilds the pane's fold from the run's stored
+   * events — a run can end before the stream to it opens (the
+   * scripted engine answers in milliseconds), and the last run of a
+   * chain is first named by the finished ack. It reports whether the
+   * load still belongs to the pane, and the transcript it read. */
+  private async loadExperiment(
+    res: ExperimentResult
+  ): Promise<{ transcript: Transcript | null } | null> {
+    const runID = res.runID
+    res.loading = true
+    let walk: EventWalk | null, transcript: Transcript | null, row: RunRow | null
+    try {
+      ;[walk, transcript, row] = await Promise.all([
+        this.walkEvents(runID).catch(() => null),
+        fetchTranscript(this.ep, runID).catch(() => null),
+        fetchRun(this.ep, runID).catch(() => null),
+      ])
+    } finally {
+      res.loading = false
+    }
+    if (this.disposed || this.state.result !== res || res.runID !== runID) return null
+    if (walk && walk.events.length) restart(res, walk.events)
+    // Frames the stream delivered meanwhile fold after the pages.
+    const current = () => !this.left(res) && res.runID === runID && !res.ready
+    this.drain(res, runID, current)
+    if (res.recheck) {
+      res.recheck = false
+      void this.catchUp(res, runID, current).catch(quiet)
+    }
     if (row) res.row = row
-    if (transcript) res.folded = applyTranscript(res.folded, transcript.batches)
+    res.folded = overlay(viewOf(res.feed), transcript, !!res.row && res.row.status !== "running")
+    res.stale = false
     this.emit()
+    return { transcript }
+  }
+
+  /** settleExperiment loads the ended run's stored records: the diff
+   * is taken against the transcript, never the deltas, and the
+   * approval controls act on this run's own pending set. The finished
+   * ack travels the runtime link while the run's last records travel
+   * the OTel pipeline — when they have not landed yet, the load is
+   * tried again a few times before the pane settles on what it has. */
+  private async settleExperiment(res: ExperimentResult, attempt: number) {
+    if (res.ready || this.state.result !== res || this.settling.has(res)) return
+    this.settling.add(res)
+    let loaded: { transcript: Transcript | null } | null
+    try {
+      loaded = await this.loadExperiment(res)
+    } finally {
+      this.settling.delete(res)
+    }
+    if (!loaded || isReady(res)) return
+    // Ack before export: the runtime's finished ack travels the link,
+    // the run's last records the OTel pipeline — its row (spans) and
+    // its run_finish (logs, the event naming the pending calls) can
+    // land after it. Settled is the row out of running and, for a run
+    // that succeeded, its run_finish read; until then the stream stays
+    // open and the run is read again (SETTLE_READS, 1 s apart, the
+    // Studio UI's bound) — the final words, the diff and the approval
+    // controls are taken from the settled run only.
+    const row = res.row
+    const settled = !!row && row.status !== "running" && (row.status !== "succeeded" || res.folded.finished)
+    if (!settled && attempt < SETTLE_READS - 1) {
+      this.after(1_000, () => void this.settleExperiment(res, attempt + 1).catch(quiet))
+      return
+    }
+    res.ready = true
+    res.words = turnWordsOf(loaded.transcript) ?? foldedWords(res.folded)
+    this.expSub?.close()
+    this.expSub = undefined
+    this.emit()
+  }
+
+  private settling = new WeakSet<ExperimentResult>()
+
+  /** left: the pane no longer shows this result (replaced, discarded,
+   * or the panel is gone) — asked again after every await. */
+  private left(res: ExperimentResult): boolean {
+    return this.disposed || this.state.result !== res
   }
 
   /** toggleRaw flips the raw JSON view (§2: one keypress away). */
@@ -789,15 +1503,53 @@ export class PanelModel {
   /** selectStep marks the step the user is reading: the ⤢ deep link
    * carries it into Studio (Dv3, §2 "with the context carried over"). */
   selectStep(index: number) {
+    if (this.state.selectedStep === index) return
     this.state.selectedStep = index
     this.emit()
   }
 
+  /** drawPending: a draw is scheduled (the next frame, or a live draw
+   * waiting out LIVE_DRAW_MS). */
+  drawPending(): boolean {
+    return this.raf !== 0 || this.liveTimer !== null
+  }
+
   private raf = 0
-  private emit() {
+  private lastDraw = 0
+  private liveTimer: ReturnType<typeof setTimeout> | null = null
+  /** emit draws the state once per frame. The live lanes' views are
+   * taken here, not per frame of the stream: a burst of deltas folds
+   * at the stream's pace and is dressed (transcript, subagent links)
+   * once per draw. A live emit (a streamed frame) draws at most every
+   * LIVE_DRAW_MS; any other emit draws on the next frame and takes a
+   * waiting live draw with it. */
+  private emit(live = false) {
+    if (this.disposed) return
+    if (live) {
+      if (this.raf || this.liveTimer) return
+      const wait = this.lastDraw + LIVE_DRAW_MS - Date.now()
+      if (wait > 0) {
+        this.liveTimer = this.after(wait, () => {
+          this.liveTimer = null
+          this.emit()
+        })
+        return
+      }
+    } else if (this.liveTimer) {
+      this.cancel(this.liveTimer)
+      this.liveTimer = null
+    }
     if (this.raf) return
     this.raf = requestAnimationFrame(() => {
       this.raf = 0
+      this.lastDraw = Date.now()
+      const t = this.state.turn
+      if (t?.stale) this.dress(t)
+      const r = this.state.result
+      if (r?.stale) {
+        r.stale = false
+        r.folded = viewOf(r.feed)
+      }
       this.notify(this.state)
     })
   }
@@ -805,29 +1557,51 @@ export class PanelModel {
   dispose() {
     this.disposed = true
     if (this.raf) cancelAnimationFrame(this.raf)
-    if (this.pollTimer) clearTimeout(this.pollTimer)
+    this.raf = 0
+    this.clearTimers()
     this.scopeSub?.close()
     this.runSub?.close()
     this.expSub?.close()
+    this.scopeSub = this.runSub = this.expSub = undefined
   }
 }
 
-/** sourceText is the run's final reply text — the inline diff's base
- * (the source turn's own words). */
-function sourceTextOf(t: TurnView | null): string {
-  if (!t) return ""
-  return t.folded.steps.map((s) => s.text).filter(Boolean).join("\n")
+/** newResult is an empty result pane under one source turn. */
+function newResult(sourceRunID: string, label: string, source: TurnWords): ExperimentResult {
+  const feed = newFold()
+  return {
+    commandID: "",
+    state: "rejected",
+    runID: "",
+    error: null,
+    label,
+    sourceRunID,
+    source,
+    compareWith: "",
+    row: null,
+    events: [],
+    seen: new Set(),
+    feed,
+    folded: viewOf(feed),
+    ready: false,
+    words: null,
+    deciding: null,
+    decided: {},
+    thread: "ephemeral",
+    pos: -1,
+    held: [],
+    reading: false,
+    recheck: false,
+    stale: false,
+    loading: false,
+  }
 }
 
-/** promptOf lifts the turn's input, so a whole-turn re-run starts from
- * the words the user actually sent. */
-function promptOf(t: TurnView | null): string {
-  if (!t?.transcript) return ""
-  return t.transcript.batches
-    .flatMap((b) => b.messages)
-    .filter((m) => m.role === "user")
-    .flatMap((m) => m.content)
-    .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
-    .map((p) => p.text)
-    .join("\n")
+/** isReady reads the flag as it is now (an await ago it was false). */
+function isReady(res: ExperimentResult): boolean {
+  return res.ready
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }

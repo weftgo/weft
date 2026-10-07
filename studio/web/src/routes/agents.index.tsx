@@ -4,7 +4,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 
-import { manifestQuery } from "@/lib/api"
+import { ApiError, manifestQuery } from "@/lib/api"
 import { AgentCard } from "@/components/studio/agent-cards"
 import { EmptyState } from "@/components/studio/empty-state"
 import { Spinner } from "@/components/ui/spinner"
@@ -23,7 +23,15 @@ function AgentsPage() {
     )
   }
   if (manifest.isError) {
-    return <EmptyState command="weft manifest" />
+    // 404 is "no manifest configured" (api.go's serveManifest); any
+    // other failure is said as it is, not dressed as an empty state.
+    if (manifest.error instanceof ApiError && manifest.error.status === 404)
+      return <EmptyState command="weft manifest" />
+    return (
+      <p className="py-24 text-center text-sm text-status-bad">
+        {manifest.error.message}
+      </p>
+    )
   }
   return (
     <div className="space-y-3">

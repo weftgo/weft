@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { RunRow, SessionRow } from "../lib/api"
 import { statusChip, studioLink, WeftDevtools } from "./element"
 import { partitionRuns, strippedContent } from "./state"
+import { idle } from "./testkit"
 
 // ── The fake Studio ───────────────────────────────────────────────
 // The shapes mirror studio/testdata/api/*.golden.json (S4.3), which
@@ -40,7 +41,7 @@ function runRow(over: Partial<RunRow>): RunRow {
     err: "",
     steps: 1,
     pending: 0,
-    stop_reason: "end_turn",
+    stop_reason: "stop",
     usage: { input_tokens: 10, output_tokens: 4 },
     event_count: 6,
     message_count: 2,
@@ -187,7 +188,7 @@ async function mount(attrs: Record<string, string>): Promise<WeftDevtools> {
   document.body.appendChild(el)
   // connectedCallback → start → meta + first loads, each a microtask
   // round trip through rAF; waitFor settles the renders.
-  await new Promise((r) => setTimeout(r, 30))
+  await idle()
   return el as WeftDevtools
 }
 
@@ -236,7 +237,7 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     expect(chips).toContain("running")
     expect(chips).toContain("parked")
     expect(chips).toContain("failed")
-    const row = all(el, ".weft-turn").find((n) => n.textContent?.includes("r_park"))
+    const row = all(el, ".weft-turn").find((n) => n.textContent.includes("r_park"))
     expect(row?.textContent).toContain("script")
     expect(row?.textContent).toContain("1 steps")
   })
@@ -376,7 +377,7 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     })
     const rawBtn = all(el, ".weft-head .weft-btn").find((b) => b.textContent === "raw") as HTMLElement
     rawBtn.click()
-    await new Promise((r) => setTimeout(r, 20))
+    await idle()
     const raw = $(el, ".weft-raw")?.textContent ?? ""
     expect(raw).toContain('"run_start"')
     expect(raw).toContain('"batches"')
@@ -408,11 +409,11 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       kind: "delta", pos: 0, time: T0,
       event: { type: "text_delta", run_id: "r_live", text: "streaming in…" },
     })
-    await new Promise((r) => setTimeout(r, 20))
+    await idle()
     expect(text(el, ".weft-step-b")).toContain("streaming in…")
     const scope = FakeEventSource.instances.find((i) => i.url.includes("public_id="))
     scope?.emit("run", { run: runRow({ id: "r_live", steps: 1 }) })
-    await new Promise((r) => setTimeout(r, 20))
+    await idle()
     expect(text(el, ".weft-turns")).toContain("1 steps")
   })
 
@@ -440,14 +441,14 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     const chipOf = (id: string) =>
       rowsFor(id)[0]?.querySelector(".weft-row1 > .weft-chip")?.textContent ?? ""
     scope?.emit("run", { run: runRow({ id: "r_live", status: "running", finished: null }) })
-    await new Promise((r) => setTimeout(r, 20))
+    await idle()
     expect(all(el, ".weft-turn")).toHaveLength(2)
     expect(rowsFor("r_live")).toHaveLength(1)
     expect(chipOf("r_live")).toBe("running")
     // The second frame for the same id (the run finished): the row is
     // replaced, never appended.
     scope?.emit("run", { run: runRow({ id: "r_live", status: "succeeded" }) })
-    await new Promise((r) => setTimeout(r, 20))
+    await idle()
     expect(all(el, ".weft-turn")).toHaveLength(2)
     expect(rowsFor("r_live")).toHaveLength(1)
     expect(chipOf("r_live")).toBe("succeeded")
@@ -473,7 +474,7 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     expect(expander?.textContent).toContain("loading the subagent's turn")
     expander?.setAttribute("open", "")
     expander?.dispatchEvent(new Event("toggle", { bubbles: true }))
-    await new Promise((r) => setTimeout(r, 30))
+    await idle()
     const childCalls = fetchMock.mock.calls.map((c) => String(c[0])).filter((u) =>
       u.includes(encodeURIComponent("r_ok/0/call_1"))
     )
@@ -492,12 +493,16 @@ describe("§5.3: fail silent, one request, no retries", () => {
       new Response("no studio", { status: 404 })
     )
     vi.stubGlobal("fetch", fetchMock)
-    const el = await mount({
-      "data-endpoint": "http://studio.test/studio/",
-      "data-public-id": "pub_orders",
-      "data-auto": "true",
-    })
-    await new Promise((r) => setTimeout(r, 50))
+    // The dock main.ts mounts (mountDock marks it autoMounted): the
+    // panel's own node, so the panel's to remove.
+    if (!customElements.get("weft-devtools")) customElements.define("weft-devtools", WeftDevtools)
+    const el = document.createElement("weft-devtools") as WeftDevtools
+    el.autoMounted = true
+    el.setAttribute("data-endpoint", "http://studio.test/studio/")
+    el.setAttribute("data-public-id", "pub_orders")
+    el.setAttribute("data-auto", "true")
+    document.body.appendChild(el)
+    await idle()
     expect(el.isConnected).toBe(false)
     const metaCalls = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/meta"))
     expect(metaCalls).toHaveLength(1)

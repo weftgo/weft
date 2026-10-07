@@ -8,6 +8,7 @@ import type {
   EventsPage,
   Meta,
   PublicResolution,
+  RawTranscript,
   RunDoc,
   RunsPage,
   SessionDoc,
@@ -107,7 +108,10 @@ export function fetchTranscript(
   id: string,
   signal?: AbortSignal
 ): Promise<Transcript> {
-  return panelGet<Transcript>(ep, `runs/${encodeURIComponent(id)}/transcript`, signal).then(
+  // asTranscript also normalises: a messages body is stored verbatim
+  // (studio/api.go's rawOrNull embeds any JSON, or a JSON string for a
+  // non-JSON body), and the panel renders inside someone else's page.
+  return panelGet<RawTranscript>(ep, `runs/${encodeURIComponent(id)}/transcript`, signal).then(
     asTranscript
   )
 }
@@ -172,6 +176,9 @@ export interface RuntimeView {
   connected_since: string
   last_seen: string
   agents: AgentView[]
+  /** The runtime's stored breakpoint set (§8.3): what PUT
+   * …/breakpoints last delivered. Empty, never null. */
+  breakpoints?: string[]
 }
 
 export function fetchRuntimes(ep: PanelEndpoint, signal?: AbortSignal): Promise<{ runtimes: RuntimeView[] }> {
@@ -191,6 +198,10 @@ export interface CommandStatus {
   command_id: string
   state: "queued" | "accepted" | "rejected" | "finished" | "lost"
   run_id: string
+  /** The finished run's own outcome (the runtime's finished ack);
+   * absent until the command is finished. A held approval decision
+   * finishes succeeded under the still-parked run's id. */
+  status?: "succeeded" | "failed"
   error: string | null
   created: string
   updated: string
@@ -216,7 +227,7 @@ export function putBreakpoints(
   ep: PanelEndpoint,
   runtimeID: string,
   tools: string[]
-): Promise<{ tools: string[] }> {
+): Promise<{ tools?: string[] } | null> {
   return panelPut(ep, `runtimes/${encodeURIComponent(runtimeID)}/breakpoints`, { tools })
 }
 
@@ -289,77 +300,151 @@ export interface PanelLiveOptions {
   kinds?: string[]
   onRecord?: (rec: LiveRecord) => void
   onRun?: (run: LiveRun) => void
-  onOverflow?: () => void
+  /** The stream is open. again is true when it had dropped first (the
+   * browser reconnected on its own): run frames sent meanwhile are
+   * gone, so the caller refetches what it lists. */
+  onOpen?: (again: boolean) => void
+  /** The stream ended and will not come back by itself: "overflow" is
+   * the server's own frame (S4.5: refetch and reconnect), "closed" a
+   * stream that failed for good or stayed down a whole round — the
+   * caller decides whether to knock again, and how often. */
+  onOverflow?: (why: "overflow" | "closed") => void
 }
 
 export interface PanelLiveHandle {
   close: () => void
 }
 
+/** How long a dropped stream may stay down before the panel stops
+ * letting the browser retry it (one round of silence). */
+export const LIVE_SILENCE_MS = 10_000
+
+/** A stream's dedup window: the newest keys it forwarded — the same
+ * bound studio/live.go's liveDedupSize puts on the server side. The
+ * duplicates it exists for (a transport retry, the backfill beside the
+ * live frames) arrive close to the original, and a tail left open on a
+ * long generation must not grow by one key per delta: an evicted key
+ * costs a repeated frame at worst, which the model's own fold by
+ * position absorbs (S4.5). */
+export const LIVE_DEDUP_SIZE = 1 << 16
+
 /**
  * openPanelLive is live.ts's openLive over the panel's endpoint and
  * token: same frames, same dedup on (run, kind, pos) — a transport
  * retry and the database's own publish both re-deliver a record, and
  * one delivery is enough. The token rides the URL because
- * EventSource cannot send headers.
+ * EventSource cannot send headers. Nothing in here may throw into the
+ * host page: a frame that does not parse is skipped, and a handler
+ * that fails is contained.
  */
 export function openPanelLive(ep: PanelEndpoint, opts: PanelLiveOptions): PanelLiveHandle {
-  const params = new URLSearchParams(selectorSearch(opts.selector))
-  params.set("kinds", (opts.kinds ?? ["event", "run"]).join(","))
-  if (ep.token) params.set("token", ep.token)
-  const url = apiUrl(ep, `live?${params.toString()}`)
-
   let closed = false
+  let dropped = false
+  let timer: ReturnType<typeof setTimeout> | null = null
   const seen = new Set<string>()
+  const stop = () => {
+    closed = true
+    if (timer) clearTimeout(timer)
+    timer = null
+  }
 
-  const es = new EventSource(url)
-  es.addEventListener("record", (e) => {
-    const raw = JSON.parse((e as MessageEvent).data as string) as {
-      run_id: string
-      session_id: string
-      public_id: string
-      kind: string
-      pos: number
-      time: string
-      event: unknown
+  let es: EventSource
+  try {
+    const params = new URLSearchParams(selectorSearch(opts.selector))
+    params.set("kinds", (opts.kinds ?? ["event", "run"]).join(","))
+    if (ep.token) params.set("token", ep.token)
+    es = new EventSource(apiUrl(ep, `live?${params.toString()}`))
+  } catch {
+    // No EventSource here, or a URL it refuses: history only.
+    return { close: stop }
+  }
+  const guarded = (fn: (e: MessageEvent) => void) => (e: Event) => {
+    if (closed) return
+    try {
+      fn(e as MessageEvent)
+    } catch {
+      // a malformed frame or a failed handler: skip the frame
     }
-    const key = `${raw.run_id}\u0000${raw.kind}\u0000${raw.pos}`
-    if (seen.has(key)) return
-    seen.add(key)
-    const id = (e as MessageEvent).lastEventId
-    opts.onRecord?.({
-      seq: Number(id) > 0 ? Number(id) : 0,
-      run_id: raw.run_id,
-      session_id: raw.session_id,
-      public_id: raw.public_id,
-      kind: raw.kind as LiveRecord["kind"],
-      pos: raw.pos,
-      time: raw.time,
-      event: raw.event as LiveRecord["event"],
+  }
+  es.addEventListener(
+    "record",
+    guarded((e) => {
+      const raw = JSON.parse(e.data as string) as {
+        run_id: string
+        session_id: string
+        public_id: string
+        kind: string
+        pos: number
+        time: string
+        event: unknown
+      }
+      const key = `${raw.run_id}\u0000${raw.kind}\u0000${raw.pos}`
+      if (seen.has(key)) return
+      seen.add(key)
+      // A Set iterates in insertion order: the first key is the oldest.
+      if (seen.size > LIVE_DEDUP_SIZE) seen.delete(seen.values().next().value as string)
+      const id = e.lastEventId
+      opts.onRecord?.({
+        seq: Number(id) > 0 ? Number(id) : 0,
+        run_id: raw.run_id,
+        session_id: raw.session_id,
+        public_id: raw.public_id,
+        kind: raw.kind as LiveRecord["kind"],
+        pos: raw.pos,
+        time: raw.time,
+        event: raw.event as LiveRecord["event"],
+      })
     })
-  })
-  es.addEventListener("run", (e) => {
-    const raw = JSON.parse((e as MessageEvent).data as string) as { run: LiveRun["run"] }
-    const id = (e as MessageEvent).lastEventId
-    opts.onRun?.({ seq: Number(id) > 0 ? Number(id) : 0, run: raw.run })
-  })
+  )
+  es.addEventListener(
+    "run",
+    guarded((e) => {
+      const raw = JSON.parse(e.data as string) as { run?: LiveRun["run"] } | null
+      if (!raw?.run || typeof raw.run.id !== "string") return
+      const id = e.lastEventId
+      opts.onRun?.({ seq: Number(id) > 0 ? Number(id) : 0, run: raw.run })
+    })
+  )
   es.addEventListener("ping", () => {})
-  es.addEventListener("overflow", () => {
-    es.close()
-    opts.onOverflow?.()
+  es.addEventListener(
+    "overflow",
+    guarded(() => {
+      stop()
+      es.close()
+      opts.onOverflow?.("overflow")
+    })
+  )
+  es.onopen = guarded(() => {
+    if (timer) clearTimeout(timer)
+    timer = null
+    const again = dropped
+    dropped = false
+    opts.onOpen?.(again)
   })
   es.onerror = () => {
-    // EventSource retries on its own; a loop of failures (Studio
-    // gone) is closed after one round of silence so the panel stops
-    // knocking on a door that is no longer there.
+    // EventSource retries on its own. A stream that failed for good
+    // (a refused token closes it), or that is still down after one
+    // round of silence (Studio gone), is closed here so the browser
+    // stops knocking — the caller hears "closed" once. A handle the
+    // panel closed itself never reports.
     if (closed) return
-    window.setTimeout(() => {
-      if (es.readyState === EventSource.CLOSED) opts.onOverflow?.()
-    }, 10_000)
+    dropped = true
+    if (timer) return
+    timer = setTimeout(() => {
+      timer = null
+      if (closed || es.readyState === EventSource.OPEN) return
+      stop()
+      es.close()
+      try {
+        opts.onOverflow?.("closed")
+      } catch {
+        // contained: a timer must not throw into the host page
+      }
+    }, LIVE_SILENCE_MS)
   }
   return {
     close() {
-      closed = true
+      stop()
       es.close()
     },
   }

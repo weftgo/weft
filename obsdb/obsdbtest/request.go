@@ -203,7 +203,7 @@ func requestRecords(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 
 		// Requests: every attempt, in index order, parsed.
-		all, err := db.Requests(ctx(), "rq", obsdb.RequestQuery{Step: obsdb.AllSteps, After: -1})
+		all, err := db.Requests(ctx(), "rq", obsdb.RequestQuery{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -241,16 +241,16 @@ func requestRecords(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Errorf("request 0 body = %+v", b)
 		}
 		// Paging and the step filter.
-		first, err := db.Requests(ctx(), "rq", obsdb.RequestQuery{Step: obsdb.AllSteps, After: -1, Limit: 3})
+		first, err := db.Requests(ctx(), "rq", obsdb.RequestQuery{Limit: 3})
 		if err != nil || len(first) != 3 || first[2].Index != 2 {
 			t.Fatalf("first page = %d rows, %v; want indexes 0..2", len(first), err)
 		}
-		rest, err := db.Requests(ctx(), "rq", obsdb.RequestQuery{Step: obsdb.AllSteps, After: first[2].Index, Limit: 3})
+		rest, err := db.Requests(ctx(), "rq", obsdb.RequestQuery{From: first[2].Index + 1, Limit: 3})
 		if err != nil || len(rest) != 1 || rest[0].Index != 3 {
 			t.Fatalf("second page = %+v, %v; want index 3 alone", rest, err)
 		}
 		for step, wantIdx := range map[int][]int64{0: {0}, 1: {1, 2}, 2: {3}, 9: nil} {
-			got, err := db.Requests(ctx(), "rq", obsdb.RequestQuery{Step: step, After: -1})
+			got, err := db.Requests(ctx(), "rq", obsdb.RequestQuery{Step: &step})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -292,7 +292,7 @@ func requestRecords(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 
 		// The holes.
-		offReqs, err := db.Requests(ctx(), "rq_off", obsdb.RequestQuery{Step: obsdb.AllSteps, After: -1})
+		offReqs, err := db.Requests(ctx(), "rq_off", obsdb.RequestQuery{})
 		if err != nil || len(offReqs) != 2 {
 			t.Fatalf("content-off Requests = %d, %v; want 2", len(offReqs), err)
 		}
@@ -325,12 +325,12 @@ func requestRecords(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 				t.Errorf("%s %s of %s = %v; want ErrNotFound with hole %s", c.kind, c.hash[:8], c.run, err, c.hole)
 			}
 		}
-		if reqs, err := db.Requests(ctx(), "rq_old", obsdb.RequestQuery{Step: obsdb.AllSteps, After: -1}); err != nil || len(reqs) != 0 {
+		if reqs, err := db.Requests(ctx(), "rq_old", obsdb.RequestQuery{}); err != nil || len(reqs) != 0 {
 			t.Errorf("pre-0028 run's Requests = %+v, %v; want none", reqs, err)
 		}
 		for name, read := range map[string]func() error{
 			"Requests": func() error {
-				_, err := db.Requests(ctx(), "nope", obsdb.RequestQuery{Step: obsdb.AllSteps, After: -1})
+				_, err := db.Requests(ctx(), "nope", obsdb.RequestQuery{})
 				return err
 			},
 			"Prompt":   func() error { _, err := db.Prompt(ctx(), "nope", fxSystem1); return err },
@@ -367,7 +367,7 @@ func requestsManySteps(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if err != nil || run.RequestCount != steps || run.CatalogHash != fxCatalog1 || run.InstructionsHash != fxInstructions {
 			t.Fatalf("run = %+v, %v; want %d requests", run, err, steps)
 		}
-		reqs, err := db.Requests(ctx(), "rq50", obsdb.RequestQuery{Step: obsdb.AllSteps, After: -1})
+		reqs, err := db.Requests(ctx(), "rq50", obsdb.RequestQuery{})
 		if err != nil || len(reqs) != steps {
 			t.Fatalf("Requests = %d, %v; want %d", len(reqs), err, steps)
 		}
@@ -381,6 +381,98 @@ func requestsManySteps(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		if cats, err := db.Catalogs(ctx(), "rq50"); err != nil || len(cats) != 1 {
 			t.Errorf("Catalogs = %d, %v; want exactly one", len(cats), err)
+		}
+	}
+}
+
+// requestRunRows: the run row's three columns agree across backends
+// whatever order and source the records arrive in — a run written in
+// two batches out of index order (catalog_hash from index 0, the
+// count the high-water mark), a run known only from its invoke_agent
+// span, request 0 offering no tools (catalog_hash ” even though
+// request 1 offered some), run_start and the invoke_agent span naming
+// different instructions hashes (the larger kept; a chat span's
+// ignored) — and a malformed producer's request reads derived, its
+// hashes from the attributes.
+func requestRunRows(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		const lowHash, highHash, chatHash = "1111", "9999", "ffff"
+		split := &fxRun{id: "rq_split"}
+		split.start(true)
+		split.request(1, 1, 1, fxSystem1, fxCatalog2, "full", fxRequest(1, 1, fxSystem1, fxCatalog2, "refund", "script", 1, 2))
+		split.request(3, 3, 1, fxSystem1, fxCatalog2, "full", fxRequest(3, 1, fxSystem1, fxCatalog2, "refund", "script", 3, 4))
+		first := split.recs
+		split.recs = nil
+		split.request(2, 2, 1, fxSystem1, fxCatalog2, "full", fxRequest(2, 1, fxSystem1, fxCatalog2, "refund", "script", 2, 3))
+		split.request(0, 0, 1, fxSystem1, fxCatalog1, "full", fxRequest0)
+		second := split.recs
+
+		noTools := &fxRun{id: "rq_notools"}
+		noTools.start(true)
+		noTools.request(0, 0, 1, fxSystem1, "", "full", fxRequest(0, 1, fxSystem1, "", "", "script", 0, 1))
+		noTools.request(1, 1, 1, fxSystem1, fxCatalog1, "full", fxRequest(1, 1, fxSystem1, fxCatalog1, "lookup", "script", 1, 2))
+
+		disagree := &fxRun{id: "rq_disagree"}
+		disagree.event(0, "run_start", `{"type":"run_start","id":"rq_disagree"}`, map[string]any{"weft.instructions.hash": lowHash})
+
+		bad := &fxRun{id: "rq_bad"}
+		bad.start(true)
+		bad.request(0, 0, 1, fxSystem1, fxCatalog1, "full", `{"step":0,`)
+
+		span := func(runID, spanID, op, hash string) obsdb.Span {
+			s := invokeSpan(runID, 1, map[string]any{"weft.instructions.hash": hash, "gen_ai.operation.name": op})
+			s.SpanID = spanID
+			return s
+		}
+		if err := db.Write(ctx(), obsdb.Batch{
+			Records: append(append(append(first, noTools.recs...), disagree.recs...), bad.recs...),
+			Spans: []obsdb.Span{
+				span("rq_span", "1000000000000001", "invoke_agent", fxInstructions),
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		// The span lands after run_start's lower hash was stored.
+		if err := db.Write(ctx(), obsdb.Batch{Records: second, Spans: []obsdb.Span{
+			span("rq_disagree", "1000000000000002", "invoke_agent", highHash),
+			span("rq_disagree", "1000000000000003", "chat", chatHash),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []struct {
+			id, instructions, catalog string
+			count                     int64
+		}{
+			{"rq_split", fxInstructions, fxCatalog1, 4},
+			{"rq_span", fxInstructions, "", 0},
+			{"rq_notools", fxInstructions, "", 2},
+			{"rq_disagree", highHash, "", 0},
+			{"rq_bad", fxInstructions, fxCatalog1, 1},
+		} {
+			run, err := db.Run(ctx(), c.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if run.InstructionsHash != c.instructions || run.CatalogHash != c.catalog || run.RequestCount != c.count {
+				t.Errorf("run %s = instructions %q catalog %q requests %d; want %q %q %d", c.id,
+					run.InstructionsHash, run.CatalogHash, run.RequestCount, c.instructions, c.catalog, c.count)
+			}
+		}
+		reqs, err := db.Requests(ctx(), "rq_split", obsdb.RequestQuery{})
+		if err != nil || len(reqs) != 4 || reqs[0].CatalogHash != fxCatalog1 || reqs[3].Index != 3 {
+			t.Errorf("split run's requests = %+v, %v; want 0..3 in index order", reqs, err)
+		}
+		bads, err := db.Requests(ctx(), "rq_bad", obsdb.RequestQuery{})
+		if err != nil || len(bads) != 1 {
+			t.Fatalf("malformed run's requests = %+v, %v", bads, err)
+		}
+		if b := bads[0]; b.Content != obsdb.HoleDerived || b.SystemHash != fxSystem1 || b.CatalogHash != fxCatalog1 || string(b.Raw) != `{"step":0,` {
+			t.Errorf("malformed request = %+v; want derived, the attributes' hashes, the body verbatim", b)
+		}
+		var hole *obsdb.HoleError
+		if _, err := db.Prompt(ctx(), "rq_bad", fxSystem1); !errors.As(err, &hole) || hole.Hole != obsdb.HoleGap {
+			t.Errorf("Prompt named only by a malformed request = %v; want the gap hole, not a silent not-found", err)
 		}
 	}
 }

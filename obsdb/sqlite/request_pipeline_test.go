@@ -104,7 +104,7 @@ func TestRequestRecordsThroughThePipeline(t *testing.T) {
 	if run.InstructionsHash == "" || run.CatalogHash == "" || run.RequestCount != 50 || run.RequestsHole() != "" {
 		t.Fatalf("run row = instructions %q catalog %q requests %d; want both hashes and 50", run.InstructionsHash, run.CatalogHash, run.RequestCount)
 	}
-	reqs, err := local.Requests(ctx, runID, obsdb.RequestQuery{Step: obsdb.AllSteps, After: -1})
+	reqs, err := local.Requests(ctx, runID, obsdb.RequestQuery{})
 	if err != nil || len(reqs) != 50 {
 		t.Fatalf("Requests = %d, %v; want 50", len(reqs), err)
 	}
@@ -154,7 +154,7 @@ func TestRequestRecordsThroughThePipeline(t *testing.T) {
 	if offRun.InstructionsHash != run.InstructionsHash || offRun.CatalogHash != run.CatalogHash || offRun.RequestCount != 50 {
 		t.Errorf("content-off run row = %q %q %d; want the content-on row's", offRun.InstructionsHash, offRun.CatalogHash, offRun.RequestCount)
 	}
-	offReqs, err := stripped.Requests(ctx, runID, obsdb.RequestQuery{Step: obsdb.AllSteps, After: -1})
+	offReqs, err := stripped.Requests(ctx, runID, obsdb.RequestQuery{})
 	if err != nil || len(offReqs) != 50 {
 		t.Fatalf("content-off Requests = %d, %v", len(offReqs), err)
 	}

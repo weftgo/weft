@@ -348,6 +348,15 @@ type runUpdate struct {
 	requestCount     int64
 }
 
+// seeInstructions keeps the larger weft.instructions.hash seen — run_start's
+// or the invoke_agent span's — which is ClickHouse's max() over the two
+// run views, so both backends store the same value when they disagree.
+func (u *runUpdate) seeInstructions(attrs map[string]any) {
+	if v, ok := attrs["weft.instructions.hash"].(string); ok && v > u.instructionsHash {
+		u.instructionsHash = v
+	}
+}
+
 // applyRequest folds a request record into the run row: the
 // high-water mark max(weft.request.index) + 1 — retry-proof, like the
 // delta count, and what ClickHouse's run view computes — and request
@@ -441,9 +450,7 @@ func (u *runUpdate) applySpan(s obsdb.Span, w obsdb.Weft) {
 			u.errText = s.StatusMessage
 		}
 	}
-	if v, ok := s.Attrs["weft.instructions.hash"].(string); ok && v != "" {
-		u.instructionsHash = v
-	}
+	u.seeInstructions(s.Attrs)
 	if p, ok := s.Attrs["gen_ai.provider.name"].(string); ok && p != "" {
 		u.provider = p
 	}
@@ -552,9 +559,7 @@ func (u *runUpdate) setFinishedAt(t time.Time) {
 func (u *runUpdate) applyDurable(ctx context.Context, tx *sql.Tx, r obsdb.Record, w obsdb.Weft) error {
 	switch w.EventType {
 	case "run_start":
-		if v, ok := r.Attrs["weft.instructions.hash"].(string); ok && v != "" {
-			u.instructionsHash = v
-		}
+		u.seeInstructions(r.Attrs)
 		var body struct {
 			Model struct {
 				Provider string `json:"provider"`
@@ -721,7 +726,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		steps = ?, pending = ?, stop_reason = ?,
 		input_tokens = ?, output_tokens = ?, cached_input_tokens = ?, cache_write_tokens = ?, reasoning_tokens = ?,
 		event_count = event_count + ?, delta_count = MAX(delta_count, ?), message_count = message_count + ?,
-		instructions_hash = CASE WHEN instructions_hash = '' THEN ? ELSE instructions_hash END,
+		instructions_hash = MAX(instructions_hash, ?),
 		catalog_hash = CASE WHEN catalog_hash = '' THEN ? ELSE catalog_hash END,
 		request_count = MAX(request_count, ?)
 		WHERE run_id = ?`,

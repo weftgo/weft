@@ -4,7 +4,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/weftgo/weft/obsdb"
 )
@@ -39,34 +38,37 @@ func TestRequestsHoleReadingTable(t *testing.T) {
 	}
 }
 
-// One parse for every backend: the content mark, the cut in any of
-// its stored spellings, a body that does not decode.
+// One parse for every backend: the content mark, a capped record, and
+// a malformed producer's body — derived, its hashes from the attributes.
 func TestRecordOfConstructors(t *testing.T) {
-	for _, attrs := range []map[string]any{
-		{"weft.content.truncated_bytes": int64(7)},
-		{"weft.content.truncated_bytes": float64(7)},
-		{"weft.content.truncated_bytes": "7"},
-	} {
-		if _, cut := obsdb.RecordContent(attrs); cut != 7 {
-			t.Errorf("RecordContent(%v) cut = %d, want 7", attrs, cut)
-		}
-	}
-	if mark, cut := obsdb.RecordContent(map[string]any{"weft.content": "stripped"}); mark != "stripped" || cut != 0 {
-		t.Errorf("RecordContent(stripped) = %q, %d", mark, cut)
-	}
-	r := obsdb.RequestRecordOf(2, 1, time.Time{}, []byte(`{"step":1,"attempt":2,"system_hash":"s","tools":{"catalog_hash":"c","names":["a"]}}`), "stripped", 0)
+	r := obsdb.RequestRecordOf(obsdb.StoredRecord{Index: 2, Step: 1, Content: "stripped",
+		Body: []byte(`{"step":1,"attempt":2,"system_hash":"s","tools":{"catalog_hash":"c","names":["a"]}}`)})
 	if r.Attempt != 2 || r.SystemHash != "s" || r.CatalogHash != "c" || r.Content != obsdb.HoleStripped {
 		t.Errorf("RequestRecordOf = %+v", r)
 	}
-	if bad := obsdb.RequestRecordOf(0, 0, time.Time{}, []byte(`not json`), "full", 0); bad.Content != "" || string(bad.Raw) != "not json" || bad.SystemHash != "" {
-		t.Errorf("RequestRecordOf(undecodable) = %+v; want the raw body kept, fields zero", bad)
+	bad := obsdb.RequestRecordOf(obsdb.StoredRecord{Body: []byte(`not json`), Content: "full", SystemHash: "as", CatalogHash: "ac"})
+	if bad.Content != obsdb.HoleDerived || string(bad.Raw) != "not json" || bad.SystemHash != "as" || bad.CatalogHash != "ac" {
+		t.Errorf("RequestRecordOf(undecodable) = %+v; want derived, raw kept, the attributes' hashes", bad)
 	}
-	if p := obsdb.PromptRecordOf(0, time.Time{}, []byte(`{"hash":"h","text":"x"}`), 3); p.Content != obsdb.HoleTruncated || p.Hash != "h" {
+	if p := obsdb.PromptRecordOf(obsdb.StoredRecord{Body: []byte(`{"hash":"h","text":"x"}`), TruncatedBytes: 3}); p.Content != obsdb.HoleTruncated || p.Hash != "h" {
 		t.Errorf("PromptRecordOf(cut) = %+v", p)
 	}
-	cats := obsdb.UniqueCatalogs([]obsdb.ToolsRecord{{Index: 0, Hash: "a"}, {Index: 1, Hash: "b"}, {Index: 2, Hash: "a"}})
-	if len(cats) != 2 || cats[0].Index != 0 || cats[1].Index != 1 {
-		t.Errorf("UniqueCatalogs = %+v", cats)
+	if p := obsdb.PromptRecordOf(obsdb.StoredRecord{Body: []byte(`{`), SystemHash: "as"}); p.Content != obsdb.HoleDerived || p.Hash != "as" {
+		t.Errorf("PromptRecordOf(undecodable) = %+v", p)
+	}
+	if tr := obsdb.ToolsRecordOf(obsdb.StoredRecord{Body: []byte(`{`), CatalogHash: "ac"}); tr.Content != obsdb.HoleDerived || tr.Hash != "ac" {
+		t.Errorf("ToolsRecordOf(undecodable) = %+v", tr)
+	}
+}
+
+// The zero query reads everything: every step, from index 0, 100 a page.
+func TestRequestQueryZeroValue(t *testing.T) {
+	var q obsdb.RequestQuery
+	if q.Step != nil || q.From != 0 || q.PageLimit() != 100 {
+		t.Errorf("zero RequestQuery = %+v, limit %d", q, q.PageLimit())
+	}
+	if (obsdb.RequestQuery{Limit: 5000}).PageLimit() != 1000 {
+		t.Error("PageLimit does not cap at 1000")
 	}
 }
 

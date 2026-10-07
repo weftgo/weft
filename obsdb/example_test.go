@@ -98,7 +98,7 @@ func ExampleDB_Requests() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	reqs, err := db.Requests(ctx, "run_1", obsdb.RequestQuery{Step: obsdb.AllSteps, After: -1})
+	reqs, err := db.Requests(ctx, "run_1", obsdb.RequestQuery{})
 	if err != nil {
 		log.Fatal(err)
 	}

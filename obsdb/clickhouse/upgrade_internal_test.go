@@ -114,7 +114,7 @@ func TestUpgradeFromPreRequestRecord(t *testing.T) {
 	if _, err := db.Prompt(ctx, "old1", "any"); !errors.Is(err, obsdb.ErrNotFound) || !errors.As(err, &hole) || hole.Hole != obsdb.HoleNotRecorded {
 		t.Errorf("Prompt of a pre-0004 run = %v; want ErrNotFound, not_recorded", err)
 	}
-	if reqs, err := db.Requests(ctx, "old1", obsdb.RequestQuery{Step: obsdb.AllSteps, After: -1}); err != nil || len(reqs) != 0 {
+	if reqs, err := db.Requests(ctx, "old1", obsdb.RequestQuery{}); err != nil || len(reqs) != 0 {
 		t.Errorf("Requests of a pre-0004 run = %+v, %v; want none", reqs, err)
 	}
 	for runID, want := range map[string][]bool{"old1": {true, false}, "old2": {false}} {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"time"
 )
 
@@ -37,30 +36,50 @@ func Holes() []Hole {
 	}
 }
 
-// AllSteps is RequestQuery.Step's "every step".
-const AllSteps = -1
-
 // RequestQuery selects a run's request records for DB.Requests, in
-// request-index order. Step is AllSteps (-1) for every step, n ≥ 0 for
-// step n's attempts only. After is exclusive, as Events' after is: pass
-// -1 to read from index 0 and the last returned Index to continue; a
-// page shorter than its limit is the last. Limit: 0 = 100, max 1000.
+// request-index order. The zero value reads every step from index 0,
+// 100 at a time. Step, when set, keeps step *Step's attempts only. From
+// is the first index read (inclusive): pass the last returned Index + 1
+// to continue; a page shorter than PageLimit is the last. Limit: 0 =
+// 100, max 1000.
 type RequestQuery struct {
-	Step  int
-	After int64
+	Step  *int
+	From  int64
 	Limit int
+}
+
+// PageLimit is the query's normalized limit: 100 for 0 (or negative),
+// 1000 at most.
+func (q RequestQuery) PageLimit() int {
+	switch {
+	case q.Limit <= 0:
+		return 100
+	case q.Limit > 1000:
+		return 1000
+	}
+	return q.Limit
 }
 
 // RequestRecord is one stored request record (ADR 0028 §3): one model
 // call attempt. Index is weft.request.index, Step the stored
 // weft.step.index (-1 when absent). Attempt, SystemHash and CatalogHash
 // are read from the body (which also holds them as Body.Attempt,
-// Body.SystemHash, Body.Tools.CatalogHash). Content is the record's
-// hole: HoleStripped when it came through a content-off chain
-// (weft.content = stripped: its params.stop and messages_ref.index were
-// removed, and that chain dropped the prompt and tools records it
-// names), HoleTruncated when TruncatedBytes > 0, "" as emitted. Raw is
-// the body verbatim; a body that does not decode leaves Body zero.
+// Body.SystemHash, Body.Tools.CatalogHash). Raw is the body verbatim.
+//
+// Content is the record's hole, from ADR 0028 §11's table:
+//
+//   - "": stored as emitted;
+//   - HoleStripped: it came through a content-off chain (weft.content =
+//     stripped: its params.stop and messages_ref.index were removed,
+//     and that chain dropped the prompt and tools records it names);
+//   - HoleDerived: a malformed producer — the body did not parse, so
+//     Body is zero, Attempt is 0, and the two hashes come from the
+//     record's weft.system.hash and weft.catalog.hash attributes.
+//
+// A request record is never capped (only prompt and tools records
+// are), and a destination's Redact over params.stop is not marked on
+// the record: HoleRedacted is reserved for the readers that can tell
+// (ADR 0028 §11, A3).
 type RequestRecord struct {
 	Index          int64
 	Step           int
@@ -136,7 +155,9 @@ type RequestModel struct {
 // PromptRecord is one stored prompt record (ADR 0028 §4): the composed
 // system text of one distinct system hash. Index is weft.prompt.index.
 // Content is HoleTruncated when a destination's cap cut Text
-// (TruncatedBytes > 0); Hash is over the text before the cut.
+// (TruncatedBytes > 0), HoleDerived when the body did not parse (a
+// malformed producer; Hash is then the weft.system.hash attribute). Hash
+// is over the text before the cut.
 type PromptRecord struct {
 	Index          int64
 	Time           time.Time
@@ -149,7 +170,9 @@ type PromptRecord struct {
 // ToolsRecord is one stored tools record (ADR 0028 §5): the catalog of
 // one distinct catalog hash, tools in name order. Content is
 // HoleTruncated when a destination's cap dropped entries from the end
-// (TruncatedBytes > 0); Hash is over the whole catalog.
+// (TruncatedBytes > 0), HoleDerived when the body did not parse (a
+// malformed producer; Hash is then the weft.catalog.hash attribute).
+// Hash is over the whole catalog.
 type ToolsRecord struct {
 	Index          int64
 	Time           time.Time
@@ -210,39 +233,28 @@ func (r RunRow) RequestsHole() Hole {
 	return ""
 }
 
-// The record attributes the three kinds' readers need.
-const (
-	attrContent   = "weft.content"
-	attrTruncated = "weft.content.truncated_bytes"
-	markStripped  = "stripped"
-)
-
-// RecordContent reads a stored record's content mark and cut from its
-// attributes: weft.content and weft.content.truncated_bytes, the
-// latter as a number or a numeric string. A backend with an attribute
-// column passes it here; one that stores the two as columns passes
-// them to the RecordOf constructors directly.
-func RecordContent(attrs map[string]any) (mark string, truncated int64) {
-	mark = attr(attrs, attrContent)
-	switch v := attrs[attrTruncated].(type) {
-	case int64:
-		truncated = v
-	case int:
-		truncated = int64(v)
-	case float64:
-		truncated = int64(v)
-	case json.Number:
-		truncated, _ = v.Int64()
-	case string:
-		truncated, _ = strconv.ParseInt(v, 10, 64)
-	}
-	return mark, truncated
+// StoredRecord is one request, prompt or tools record as a backend
+// stored it: its index, stored step (-1 when absent), time and body,
+// and the four attributes the readers need — weft.content (the mark),
+// weft.content.truncated_bytes, weft.system.hash and weft.catalog.hash.
+// A backend fills it from its columns (or its attribute column) and
+// builds the read type through RequestRecordOf, PromptRecordOf or
+// ToolsRecordOf, so every backend parses alike.
+type StoredRecord struct {
+	Index          int64
+	Step           int
+	Time           time.Time
+	Body           []byte
+	Content        string
+	TruncatedBytes int64
+	SystemHash     string
+	CatalogHash    string
 }
 
 // contentHole is the badge a record's content mark and cut make.
 func contentHole(mark string, truncated int64) Hole {
 	switch {
-	case mark == markStripped:
+	case mark == "stripped":
 		return HoleStripped
 	case truncated > 0:
 		return HoleTruncated
@@ -250,77 +262,57 @@ func contentHole(mark string, truncated int64) Hole {
 	return ""
 }
 
-// RequestRecordOf builds a RequestRecord from what a backend stored:
-// the record's index, its stored step, time, body, content mark
-// (weft.content) and cut (weft.content.truncated_bytes). Every backend
-// reads through it, so the parse is one.
-func RequestRecordOf(index int64, step int, t time.Time, body []byte, mark string, truncated int64) RequestRecord {
-	r := RequestRecord{
-		Index: index, Step: step, Time: t,
-		Content: contentHole(mark, truncated), TruncatedBytes: truncated,
-		Raw: json.RawMessage(body),
+// RequestRecordOf builds a RequestRecord from a stored request record.
+// A body that does not parse gives a HoleDerived row whose hashes are
+// the stored attributes' (RequestRecord).
+func RequestRecordOf(r StoredRecord) RequestRecord {
+	out := RequestRecord{
+		Index: r.Index, Step: r.Step, Time: r.Time,
+		Content: contentHole(r.Content, 0), TruncatedBytes: r.TruncatedBytes,
+		Raw: json.RawMessage(r.Body),
 	}
-	if json.Unmarshal(body, &r.Body) != nil {
-		r.Body = RequestBody{}
+	if json.Unmarshal(r.Body, &out.Body) != nil {
+		out.Body = RequestBody{}
+		out.SystemHash, out.CatalogHash, out.Content = r.SystemHash, r.CatalogHash, HoleDerived
+		return out
 	}
-	r.Attempt, r.SystemHash, r.CatalogHash = r.Body.Attempt, r.Body.SystemHash, r.Body.Tools.CatalogHash
-	return r
+	out.Attempt, out.SystemHash, out.CatalogHash = out.Body.Attempt, out.Body.SystemHash, out.Body.Tools.CatalogHash
+	return out
 }
 
-// PromptRecordOf builds a PromptRecord from what a backend stored. A
-// body that does not decode reads with an empty Hash and Text.
-func PromptRecordOf(index int64, t time.Time, body []byte, truncated int64) PromptRecord {
+// PromptRecordOf builds a PromptRecord from a stored prompt record.
+// Content is HoleTruncated when a cap cut the text; a body that does
+// not parse (a malformed producer) reads HoleDerived, with no text and
+// the hash of the record's weft.system.hash attribute.
+func PromptRecordOf(r StoredRecord) PromptRecord {
 	var b struct {
 		Hash string `json:"hash"`
 		Text string `json:"text"`
 	}
-	_ = json.Unmarshal(body, &b)
-	return PromptRecord{
-		Index: index, Time: t, Hash: b.Hash, Text: b.Text,
-		Content: contentHole("", truncated), TruncatedBytes: truncated,
+	out := PromptRecord{Index: r.Index, Time: r.Time, Content: contentHole("", r.TruncatedBytes), TruncatedBytes: r.TruncatedBytes}
+	if json.Unmarshal(r.Body, &b) != nil {
+		out.Hash, out.Content = r.SystemHash, HoleDerived
+		return out
 	}
+	out.Hash, out.Text = b.Hash, b.Text
+	return out
 }
 
-// ToolsRecordOf builds a ToolsRecord from what a backend stored. A body
-// that does not decode reads with an empty Hash and no tools.
-func ToolsRecordOf(index int64, t time.Time, body []byte, truncated int64) ToolsRecord {
+// ToolsRecordOf builds a ToolsRecord from a stored tools record.
+// Content is HoleTruncated when a cap dropped entries; a body that does
+// not parse (a malformed producer) reads HoleDerived, with no tools and
+// the hash of the record's weft.catalog.hash attribute.
+func ToolsRecordOf(r StoredRecord) ToolsRecord {
 	var b struct {
 		Hash  string      `json:"hash"`
 		Tools []ToolEntry `json:"tools"`
 	}
-	if json.Unmarshal(body, &b) != nil {
-		b.Hash, b.Tools = "", nil
+	out := ToolsRecord{Index: r.Index, Time: r.Time, Content: contentHole("", r.TruncatedBytes), TruncatedBytes: r.TruncatedBytes}
+	if json.Unmarshal(r.Body, &b) != nil {
+		out.Hash, out.Content = r.CatalogHash, HoleDerived
+		return out
 	}
-	return ToolsRecord{
-		Index: index, Time: t, Hash: b.Hash, Tools: b.Tools,
-		Content: contentHole("", truncated), TruncatedBytes: truncated,
-	}
-}
-
-// FindPrompt returns the lowest-index prompt record with hash; ok is
-// false when none has it.
-func FindPrompt(prompts []PromptRecord, hash string) (PromptRecord, bool) {
-	for _, p := range prompts {
-		if hash != "" && p.Hash == hash {
-			return p, true
-		}
-	}
-	return PromptRecord{}, false
-}
-
-// UniqueCatalogs keeps the first (lowest-index) tools record of each
-// hash, in index order: a run's catalogs by hash, as DB.Catalogs
-// returns them.
-func UniqueCatalogs(tools []ToolsRecord) []ToolsRecord {
-	seen := map[string]bool{}
-	out := make([]ToolsRecord, 0, len(tools))
-	for _, t := range tools {
-		if seen[t.Hash] {
-			continue
-		}
-		seen[t.Hash] = true
-		out = append(out, t)
-	}
+	out.Hash, out.Tools = b.Hash, b.Tools
 	return out
 }
 
@@ -340,7 +332,7 @@ func ExplainMissing(ctx context.Context, db DB, runID, kind, hash string) error 
 	}
 	if hash != "" {
 		named, stripped := false, false
-		q := RequestQuery{Step: AllSteps, After: -1, Limit: 1000}
+		q := RequestQuery{Limit: 1000}
 		for {
 			page, err := db.Requests(ctx, runID, q)
 			if err != nil {
@@ -352,10 +344,10 @@ func ExplainMissing(ctx context.Context, db DB, runID, kind, hash string) error 
 					stripped = stripped || r.Content == HoleStripped
 				}
 			}
-			if len(page) < q.Limit {
+			if len(page) < q.PageLimit() {
 				break
 			}
-			q.After = page[len(page)-1].Index
+			q.From = page[len(page)-1].Index + 1
 		}
 		switch {
 		case stripped:
@@ -365,16 +357,4 @@ func ExplainMissing(ctx context.Context, db DB, runID, kind, hash string) error 
 		}
 	}
 	return fmt.Errorf("%w: run %s: %s %s", ErrNotFound, runID, kind, hash)
-}
-
-// RequestLimit normalizes RequestQuery.Limit: 0 (or negative) is 100,
-// above 1000 is 1000.
-func RequestLimit(n int) int {
-	switch {
-	case n <= 0:
-		return 100
-	case n > 1000:
-		return 1000
-	}
-	return n
 }

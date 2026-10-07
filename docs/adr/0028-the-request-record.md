@@ -380,10 +380,15 @@ parent's records never describe a child's request.
   before the column, for which the transcript reader infers the flag
   and shows the `derived` badge), `Content` (`weft.content`) and
   `TruncatedBytes` (`weft.content.truncated_bytes`), which the request
-  readers turn into the `stripped` and `truncated` badges (A1.2).
+  readers turn into the `stripped` and `truncated` badges, and
+  `SystemHash` and `CatalogHash` (`weft.system.hash`,
+  `weft.catalog.hash`), the hashes a reader falls back to when a
+  malformed producer's body does not parse — that row reads `derived`
+  (A1.2).
 - The run row gains `instructions_hash` (`run_start`'s
-  `weft.instructions.hash`), `catalog_hash` (the `weft.catalog.hash` of
-  `request` index 0 — the request record survives content-off chains,
+  `weft.instructions.hash`, or the `invoke_agent` span's; the larger
+  when the two differ, on both backends), `catalog_hash` (the
+  `weft.catalog.hash` of `request` index 0 — the request record survives content-off chains,
   the `tools` record does not; `''` when that request offered no tools,
   §5) and `request_count` (the number of
   `request` records). ClickHouse fills them in its run views as

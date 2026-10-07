@@ -1,9 +1,12 @@
 package clickhouse_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -93,15 +96,13 @@ func TestRequestRecordsBackendsAgree(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = lite.Close() }()
-			hosted, _ := openFresh(t)
+			hosted, dsn := openFresh(t)
 			type view struct {
-				instructions, catalog string
-				count                 int64
-				requests              int
-				systems, catalogs     map[string]int
-				stripped              int
-				catalogRecords        int
-				promptHole            obsdb.Hole
+				Run        [3]any
+				Requests   []obsdb.RequestRecord
+				Prompt     obsdb.PromptRecord
+				Catalogs   []obsdb.ToolsRecord
+				PromptHole obsdb.Hole
 			}
 			read := func(db obsdb.DB) view {
 				if err := db.Write(ctx, c.batch()); err != nil {
@@ -111,59 +112,70 @@ func TestRequestRecordsBackendsAgree(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				v := view{instructions: run.InstructionsHash, catalog: run.CatalogHash, count: run.RequestCount,
-					systems: map[string]int{}, catalogs: map[string]int{}}
-				reqs, err := db.Requests(ctx, res.ID, obsdb.RequestQuery{Step: obsdb.AllSteps, After: -1})
-				if err != nil {
-					t.Fatal(err)
+				v := view{Run: [3]any{run.InstructionsHash, run.CatalogHash, run.RequestCount}}
+				if v.Requests, err = db.Requests(ctx, res.ID, obsdb.RequestQuery{}); err != nil || len(v.Requests) == 0 {
+					t.Fatalf("Requests = %d, %v", len(v.Requests), err)
 				}
-				v.requests = len(reqs)
-				for _, r := range reqs {
-					v.systems[r.SystemHash]++
-					v.catalogs[r.CatalogHash]++
-					if r.Content == obsdb.HoleStripped {
-						v.stripped++
+				for i := range v.Requests {
+					r := &v.Requests[i]
+					r.Time = r.Time.UTC()
+					var buf bytes.Buffer
+					if err := json.Compact(&buf, r.Raw); err != nil {
+						t.Fatal(err)
 					}
+					r.Raw = buf.Bytes()
 				}
-				cats, err := db.Catalogs(ctx, res.ID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				v.catalogRecords = len(cats)
 				var hole *obsdb.HoleError
-				if _, err := db.Prompt(ctx, res.ID, reqs[0].SystemHash); errors.As(err, &hole) {
-					v.promptHole = hole.Hole
+				v.Prompt, err = db.Prompt(ctx, res.ID, v.Requests[0].SystemHash)
+				v.Prompt.Time = v.Prompt.Time.UTC()
+				if errors.As(err, &hole) {
+					v.PromptHole = hole.Hole
 				} else if err != nil {
 					t.Fatal(err)
+				}
+				if v.Catalogs, err = db.Catalogs(ctx, res.ID); err != nil {
+					t.Fatal(err)
+				}
+				for i := range v.Catalogs {
+					v.Catalogs[i].Time = v.Catalogs[i].Time.UTC()
 				}
 				return v
 			}
 			l, h := read(lite), read(hosted)
-			if l.instructions != h.instructions || l.catalog != h.catalog || l.count != h.count ||
-				l.requests != h.requests || l.stripped != h.stripped || l.catalogRecords != h.catalogRecords ||
-				l.promptHole != h.promptHole || len(l.systems) != len(h.systems) || len(l.catalogs) != len(h.catalogs) {
+			if !reflect.DeepEqual(l, h) {
 				t.Errorf("backends disagree:\nsqlite     %+v\nclickhouse %+v", l, h)
 			}
-			if h.instructions == "" || h.catalog == "" || h.count != 50 || h.requests != 50 ||
-				!onlyKey(h.systems, 50) || !onlyKey(h.catalogs, 50) || h.catalogs[h.catalog] != 50 {
-				t.Errorf("clickhouse = %+v; want both hashes, 50 requests naming one prompt and one catalog", h)
+			if h.Run[0] == "" || h.Run[1] == "" || h.Run[2] != int64(50) || len(h.Requests) != 50 {
+				t.Errorf("clickhouse run row %v, %d requests; want both hashes and 50", h.Run, len(h.Requests))
 			}
-			wantCats, wantStripped, wantHole := 1, 0, obsdb.Hole("")
-			if name == "content-off" {
-				wantCats, wantStripped, wantHole = 0, 50, obsdb.HoleStripped
+			for _, r := range h.Requests {
+				if r.SystemHash != h.Requests[0].SystemHash || r.CatalogHash != h.Run[1] {
+					t.Errorf("request %d names %s/%s; want the run's one prompt and catalog", r.Index, r.SystemHash, r.CatalogHash)
+				}
 			}
-			if h.catalogRecords != wantCats || h.stripped != wantStripped || h.promptHole != wantHole {
-				t.Errorf("%s on clickhouse: catalogs %d stripped %d prompt hole %q; want %d, %d, %q",
-					name, h.catalogRecords, h.stripped, h.promptHole, wantCats, wantStripped, wantHole)
+			conn := openRaw(t, dsn)
+			defer func() { _ = conn.Close() }()
+			var prompts, tools uint64
+			if err := conn.QueryRow(ctx, `SELECT countIf(Kind = 'prompt'), countIf(Kind = 'tools')
+				FROM weft_records FINAL WHERE RunId = ?`, res.ID).Scan(&prompts, &tools); err != nil {
+				t.Fatal(err)
+			}
+			if name == "content-on" {
+				if prompts != 1 || tools != 1 || h.Prompt.Text != "You are a support agent." || h.PromptHole != "" ||
+					len(h.Catalogs) != 1 || len(h.Catalogs[0].Tools) != 1 || h.Catalogs[0].Tools[0].Description != "Echo lookup." {
+					t.Errorf("content-on on clickhouse: %d prompt and %d tools rows, prompt %+v, catalogs %+v; want one each with the texts",
+						prompts, tools, h.Prompt, h.Catalogs)
+				}
+				return
+			}
+			if prompts != 0 || tools != 0 || h.PromptHole != obsdb.HoleStripped || len(h.Catalogs) != 0 {
+				t.Errorf("content-off on clickhouse: %d prompt, %d tools rows, prompt hole %q; want none, stripped", prompts, tools, h.PromptHole)
+			}
+			for _, r := range h.Requests {
+				if r.Content != obsdb.HoleStripped {
+					t.Errorf("content-off request %d content %q, want stripped", r.Index, r.Content)
+				}
 			}
 		})
 	}
-}
-
-// onlyKey reports whether m has exactly one key, counted n times.
-func onlyKey(m map[string]int, n int) bool {
-	for _, got := range m {
-		return len(m) == 1 && got == n
-	}
-	return false
 }

@@ -14,13 +14,16 @@
 -- before this migration read -1, "not stored", and the transcript
 -- reader infers the flag for them, badged derived), Content
 -- (weft.content: 'full', 'stripped', '' when absent) and
--- TruncatedBytes (weft.content.truncated_bytes, 0 when absent).
+-- TruncatedBytes (weft.content.truncated_bytes, 0 when absent), and
+-- SystemHash and CatalogHash (weft.system.hash, weft.catalog.hash: the
+-- hashes a reader falls back to when a malformed producer's body does
+-- not parse).
 -- weft_records_mv widens to the three new durable kinds, request,
 -- prompt and tools, each positioned by its own per-run index
 -- (weft.request.index, weft.prompt.index, weft.tools.index) under the
 -- same (RunId, Kind, Pos) key; a new-kind record without its index
 -- reads Pos -1, like obsdb.DeriveRecord. Everything else in the view
--- is 0001's select verbatim. (Input, Content and TruncatedBytes were
+-- is 0001's select verbatim. (Input, Content, TruncatedBytes, SystemHash and CatalogHash were
 -- added to this file before it was released, with A1.2; a database
 -- that applied the earlier text of 0004 lacks them and must be
 -- recreated — no released binary wrote one.)
@@ -48,6 +51,10 @@ ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS Content LowCardinality(String)
 
 ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS TruncatedBytes Int64 DEFAULT 0 AFTER Content;
 
+ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS SystemHash LowCardinality(String) DEFAULT '' AFTER TruncatedBytes;
+
+ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS CatalogHash LowCardinality(String) DEFAULT '' AFTER SystemHash;
+
 ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS InstructionsHash SimpleAggregateFunction(max, String);
 
 ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS CatalogHash SimpleAggregateFunction(max, String);
@@ -72,6 +79,8 @@ SELECT
     toInt8(LogAttributes['weft.messages.input'] = 'true') AS Input,
     LogAttributes['weft.content'] AS Content,
     toInt64OrZero(LogAttributes['weft.content.truncated_bytes']) AS TruncatedBytes,
+    LogAttributes['weft.system.hash'] AS SystemHash,
+    LogAttributes['weft.catalog.hash'] AS CatalogHash,
     LogAttributes['weft.session.id'] AS SessionId,
     LogAttributes['weft.public_id'] AS PublicId,
     LogAttributes['gen_ai.agent.name'] AS Agent,

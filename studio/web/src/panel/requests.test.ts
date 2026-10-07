@@ -192,13 +192,26 @@ describe("the panel's request line (A1.4)", () => {
         },
         403
       )
-    fakeStudio(routes(other), metaWithRequests)
-    const el = await mount({ ...ATTRS, "data-token": claims("playground") })
-    const l0 = $(el, '[data-weft-request="0"]')!
-    expect(l0.textContent).toBe(
-      "request could not be read: token is scoped to public id pub_other"
-    )
-    expect(el.shadowRoot!.innerHTML).not.toContain("hidden by your token scope")
+    const errors = vi.spyOn(console, "error")
+    const warns = vi.spyOn(console, "warn")
+    const caught = trap()
+    try {
+      fakeStudio(routes(other), metaWithRequests)
+      const el = await mount({ ...ATTRS, "data-token": claims("playground") })
+      const l0 = $(el, '[data-weft-request="0"]')!
+      expect(l0.textContent).toBe(
+        "request could not be read: token is scoped to public id pub_other"
+      )
+      expect(el.shadowRoot!.innerHTML).not.toContain(
+        "hidden by your token scope"
+      )
+      // Words in the view, nothing into the host page.
+      expect(caught.escaped).toEqual([])
+      expect(errors).not.toHaveBeenCalled()
+      expect(warns).not.toHaveBeenCalled()
+    } finally {
+      caught.release()
+    }
   })
 
   it("a running turn's step without a row reads 'not stored yet', not a gap", async () => {

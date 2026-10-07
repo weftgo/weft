@@ -157,7 +157,6 @@ function RunPage() {
         void queryClient.invalidateQueries({ queryKey: ["run", id] })
         void queryClient.invalidateQueries({ queryKey: ["transcript", id] })
         void queryClient.invalidateQueries({ queryKey: ["spans", id] })
-        void queryClient.invalidateQueries({ queryKey: ["requests", id] })
       }
     },
     [id, queryClient]

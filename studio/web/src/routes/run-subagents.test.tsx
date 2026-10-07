@@ -201,6 +201,62 @@ describe("subagents on the run page (A10)", () => {
   })
 })
 
+describe("the trace view on a call id repeated across steps (A10)", () => {
+  // Step 0 calls lookup_order as c1; step 1 calls the research
+  // subagent, also as c1 (ids may repeat across steps, core/loop.go):
+  // the child, <run>/1/c1, belongs to step 1's call alone. The trace
+  // fold is linked by child id (linkView), so the call detail joins on
+  // it. ?sel=c:c1 itself stays ambiguous — it selects the first span
+  // with that key, step 0's — until G1 keys spans by step (G1/G2 debt);
+  // step 1's call is reached through its step's detail (?sel=s1).
+  const R = "r_rep"
+  const KID = `${R}/1/c1`
+  const U = { input_tokens: 1, output_tokens: 1 }
+  function serveRepeated() {
+    const call = (index: number, name: string) => [
+      { type: "step_start", run_id: R, index },
+      { type: "tool_start", run_id: R, seq: index + 1, call_id: "c1", name, args: {} },
+      { type: "tool_finish", run_id: R, seq: index + 1, call_id: "c1", name, content: "ok", is_error: false },
+      { type: "step_finish", run_id: R, index, reason: "tool_calls", usage: U },
+    ]
+    const evs = [
+      { type: "run_start", id: R, model: { provider: "wefttest", name: "glm-a" }, agent: "orders" },
+      ...call(0, "lookup_order"),
+      ...call(1, "research"),
+      { type: "run_finish", run_id: R, usage: U, steps: 2 },
+    ].map((event, pos) => ({ pos, time: rOK.started, event }))
+    const kidRow: RunRow = { ...childRow, id: KID, parent_run_id: R, parent_call_id: "c1" }
+    studio = new FakeStudio()
+      .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: ["ingest"] })
+      .on(`GET runs/${R}`, { ...doc, id: R, steps: 2, children: [kidRow] })
+      .on(`GET runs/${R}/events`, pagedEvents(evs, { done: true }))
+      .on(`GET runs/${R}/transcript`, transcriptOf([]))
+      .install()
+  }
+
+  it("step 0's c1 lookup shows no child; step 1's c1 subagent shows it", async () => {
+    serveRepeated()
+    renderApp(`/runs/${R}?sel=${encodeURIComponent("c:c1")}`)
+    // The ambiguous key lands on step 0's lookup: no child there.
+    await waitFor(() =>
+      expect(document.querySelector('[data-span="c:c1"][aria-selected="true"]')).toBeTruthy()
+    )
+    expect(document.querySelector("[data-call=\"c1\"]")?.textContent).toContain("lookup_order")
+    expect(document.querySelector("[data-child-row]")).toBeNull()
+    cleanup()
+
+    serveRepeated()
+    renderApp(`/runs/${R}?sel=s1`)
+    let row: HTMLElement | null = null
+    await waitFor(() => {
+      row = document.querySelector<HTMLElement>(`[data-child-row="${KID}"]`)
+      expect(row).toBeTruthy()
+    })
+    expect(row!.closest("[data-call]")?.textContent).toContain("research")
+    expect(document.querySelectorAll("[data-child-row]").length).toBe(1)
+  })
+})
+
 describe("the runs list keeps subagent children out by default (A10)", () => {
   it("lists top-level runs, and the toggle lists the children with their parent link", async () => {
     const parentRow: RunRow = { ...rOK, id: RUN, agent: "orders" }

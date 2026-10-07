@@ -965,3 +965,41 @@ describe("content attrs → badges", () => {
     ])
   })
 })
+
+// A10: a resumed run's step 0 may hold two calls with one id — the
+// approved call resumed before the loop's first model call (its child
+// <run>/resume/<id>) and the model's own call (<run>/0/<id>). Each
+// child links to its own call, whichever order the run document lists
+// them in, and no call is linked twice; each finish closes its own call.
+describe("linkView on a repeated call id inside a resumed step", () => {
+  const R = "r_res"
+  const U = { input_tokens: 1, output_tokens: 1 }
+  const events = [
+    { type: "run_start", id: R, model: { provider: "p", name: "m" } },
+    { type: "tool_start", run_id: R, seq: 1, call_id: "c1", name: "research", args: {} },
+    { type: "tool_finish", run_id: R, seq: 1, call_id: "c1", name: "research", content: "resumed", is_error: false },
+    { type: "step_start", run_id: R, index: 0 },
+    { type: "tool_start", run_id: R, seq: 2, call_id: "c1", name: "research", args: {} },
+    { type: "tool_finish", run_id: R, seq: 2, call_id: "c1", name: "research", content: "own", is_error: false },
+    { type: "step_finish", run_id: R, index: 0, reason: "tool_calls", usage: U },
+  ] as WireEvent[]
+  const resumed = { id: `${R}/resume/c1`, parent_run_id: R, parent_call_id: "c1" }
+  const own = { id: `${R}/0/c1`, parent_run_id: R, parent_call_id: "c1" }
+  for (const [label, kids] of [
+    ["resumed child listed first", [resumed, own]],
+    ["named child listed first", [own, resumed]],
+  ] as const) {
+    it(`each child links to its own call (${label})`, () => {
+      const view = linkView(fold(events), [...kids])
+      const calls = view.steps[0].toolCalls
+      expect(calls.map((c) => [c.result?.content, c.resumed ?? false, c.childRunId])).toEqual([
+        ["resumed", true, resumed.id],
+        ["own", false, own.id],
+      ])
+    })
+  }
+  it("links each child once: a second pass changes nothing", () => {
+    const view = linkView(linkView(fold(events), [own, resumed]), [resumed, own])
+    expect(view.steps[0].toolCalls.map((c) => c.childRunId)).toEqual([resumed.id, own.id])
+  })
+})

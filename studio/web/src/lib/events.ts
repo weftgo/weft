@@ -41,6 +41,10 @@ export interface FoldedToolCall {
   /** The subagent run this call owns, linked by parent_call_id
    * (linkChildren); its events are fetched on expand, never inline. */
   childRunId?: string
+  /** The call started before any step_start of this stream: a resumed
+   * run's approved call, executed before the loop's first model call
+   * (its child id reads <run>/resume/<call id>). */
+  resumed?: boolean
   /** Stream position of tool_start — replay "to here" lands after it. */
   startPos: number
   /** Stream position of tool_finish, once seen. */
@@ -174,6 +178,7 @@ export function newFold(): FoldFeed {
   const streamedArgs = new Map<string, string>()
   let count = 0
   let at = 0 // the position of the event being pushed
+  let stepped = false // a step_start was seen
 
   const step = (index: number): FoldedStep => {
     let s = run.steps.find((x) => x.index === index)
@@ -184,7 +189,13 @@ export function newFold(): FoldFeed {
     if (at > s.to) s.to = at
     return s
   }
+  // A finish closes the call with its id still open (a resumed run's
+  // step 0 may hold two calls with one id), else the latest with it.
   const findCall = (callId: string): FoldedToolCall | undefined => {
+    for (let i = run.steps.length - 1; i >= 0; i--) {
+      const c = run.steps[i].toolCalls.find((x) => x.callId === callId && x.state === "running")
+      if (c) return c
+    }
     for (let i = run.steps.length - 1; i >= 0; i--) {
       const c = run.steps[i].toolCalls.find((x) => x.callId === callId)
       if (c) return c
@@ -222,6 +233,7 @@ export function newFold(): FoldFeed {
           run.startPos = at
           break
         case "step_start":
+          stepped = true
           into = step(stepIndex(ev.index, last())) // a resumed index keeps its accumulated state
           break
         case "text_delta":
@@ -248,6 +260,7 @@ export function newFold(): FoldFeed {
             state: "running",
             startPos: at,
           }
+          if (!stepped) call.resumed = true
           into.toolCalls.push(call)
           streamedArgs.delete(ev.name)
           break
@@ -333,24 +346,37 @@ export function linkView(
   view: FoldedRun,
   children: { id: string; parent_call_id: string; parent_run_id?: string }[]
 ): FoldedRun {
+  // Call ids may repeat across steps (core/loop.go) — and within a
+  // resumed run's step 0, the resumed call beside the model's own —
+  // which is why a child's id carries the step: <parent>/<step>/<call
+  // id>, or <parent>/resume/<call id> for a resumed call. Children
+  // whose id names a step link first, inside that step, to a call the
+  // loop started there (not a resumed one) where there is one; the
+  // rest then take a resumed call with their id where there is one,
+  // else the first unlinked. No call is linked twice.
+  const named = new Map<(typeof children)[number], FoldedStep>()
   for (const child of children) {
     if (!child.parent_call_id) continue
-    // Call ids may repeat across steps (core/loop.go), which is why a
-    // child's id carries the step: <parent>/<step>/<call id>. The step
-    // the id names wins; an id of another form (a resumed run's) falls
-    // back to the first call with that id not linked yet.
-    const named = view.steps.find(
+    const step = view.steps.find(
       (s) =>
         child.id === `${child.parent_run_id || view.runId}/${s.index}/${child.parent_call_id}`
     )
-    for (const step of named ? [named] : view.steps) {
-      const call = step.toolCalls.find((c) => c.callId === child.parent_call_id)
-      if (call && !call.childRunId) {
-        call.childRunId = child.id
-        break
-      }
-    }
+    if (step) named.set(child, step)
   }
+  const link = (
+    child: (typeof children)[number],
+    steps: FoldedStep[],
+    resumed: boolean
+  ) => {
+    const free = steps.flatMap((st) =>
+      st.toolCalls.filter((c) => c.callId === child.parent_call_id && !c.childRunId)
+    )
+    const call = free.find((c) => Boolean(c.resumed) === resumed) ?? free.at(0)
+    if (call) call.childRunId = child.id
+  }
+  for (const [child, step] of named) link(child, [step], false)
+  for (const child of children)
+    if (child.parent_call_id && !named.has(child)) link(child, view.steps, true)
   return view
 }
 

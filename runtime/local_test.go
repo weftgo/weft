@@ -44,7 +44,7 @@ func TestLocalPlaygroundInProcess(t *testing.T) {
 		if body != "" {
 			rd = strings.NewReader(body)
 		}
-		req, _ := http.NewRequest(method, "http://weft.studio.local"+path, rd)
+		req, _ := http.NewRequest(method, "http://localhost"+path, rd)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req)
 		if err != nil {
@@ -135,7 +135,7 @@ func TestLocalWithStudioToken(t *testing.T) {
 		client := inProcessClient(srv)
 		deadline := time.Now().Add(2 * time.Second)
 		for time.Now().Before(deadline) {
-			req, _ := http.NewRequest(http.MethodGet, "http://weft.studio.local/api/runtimes", nil)
+			req, _ := http.NewRequest(http.MethodGet, "http://localhost/api/runtimes", nil)
 			req.Header.Set("Authorization", "Bearer srv-token")
 			resp, err := client.Do(req)
 			if err != nil {

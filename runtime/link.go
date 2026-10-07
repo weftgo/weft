@@ -706,12 +706,14 @@ func (l *link) postAck(a ack) {
 
 // url resolves a server-relative Studio path against the link's base.
 // In-process there is no base: the transport ignores the host, so a
-// dummy origin keeps the URL valid.
+// placeholder origin keeps the URL valid — localhost, the loopback Host
+// Studio's DNS-rebinding guard answers without a token, so the
+// in-process link needs no exemption of its own.
 func (l *link) url(path string) string {
 	if l.base != "" {
 		return l.base + path
 	}
-	return "http://weft.studio.local" + path
+	return "http://localhost" + path
 }
 
 // sseEvent is one parsed SSE frame.

@@ -74,3 +74,31 @@ export function paramsLine(row: RequestRow): string {
     .map(([k, v]) => `${k} ${v}`)
     .join(" · ")
 }
+
+/** The request record's holes in words, defined once for both clients
+ * (the run page's hole-badge.tsx and the panel read these; reasons and
+ * fixes as studio/requests.go words them). A3 moves this and
+ * hole-badge.tsx's table into one shared honesty module. */
+export const REQUEST_HOLES = {
+  not_recorded: {
+    label: "request not recorded by weft v0.9.0 or earlier",
+    reason:
+      "this run was recorded before the request record existed (weft v0.9.0 or earlier, ADR 0028): it has no request, prompt or tools records",
+    fix: "upgrade weft and re-run",
+  },
+  hidden: {
+    label: "hidden by your token scope",
+    reason:
+      "a read-scoped panel token does not read system prompts or tool catalogs",
+    fix: "use a playground-scoped token",
+  },
+  stripped: {
+    label: "content not recorded for this destination",
+    reason:
+      "this run's records were content-off: its system prompts and tool catalogs were dropped before they were stored",
+    fix: "turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent",
+  },
+} as const
+
+/** A step with no row while the run is still running. */
+export const REQUEST_NOT_STORED = "not stored yet — the run is still running"

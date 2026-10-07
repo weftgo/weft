@@ -22,6 +22,7 @@ import {
   FakeStudio,
   golden,
   pagedEvents,
+  pagedRequests,
   transcriptOf,
 } from "@/test/fake-studio"
 import type { FakePosEvent, RequestsVariant } from "@/test/fake-studio"
@@ -172,11 +173,6 @@ describe("the run page's request section (A1.4)", () => {
     expect(
       within(section(1)).getAllByText('"order_id"').length
     ).toBeGreaterThan(0)
-    // Attempts switch.
-    fireEvent.click(
-      within(section(1)).getByRole("button", { name: "attempt 1" })
-    )
-    expect(section(1).querySelector("[data-prompt]")?.textContent).toBe(PROMPT1)
   })
 
   it("a content-off run shows the hashes and the stripped badge with its fix", async () => {
@@ -272,7 +268,156 @@ describe("the run page's request section (A1.4)", () => {
   })
 })
 
+/** The ok golden with attempt 1 of step 1 told apart from attempt 2:
+ * a temperature only that attempt carried (a copy; the committed
+ * golden is A1.3's). */
+function okWithDistinctAttempt(): RequestsPage {
+  const page = structuredClone(golden<RequestsPage>("requests-ok"))
+  page.requests[1].body.params = { temperature: 0.7 }
+  return page
+}
+
+describe("the run page's request record, paged and live (A1.4 review)", () => {
+  it("pages a small-page server through next_from, and the attempts switch to what each sent", async () => {
+    serve(null)
+    studio.on(
+      `GET runs/${RUN}/requests`,
+      pagedRequests(okWithDistinctAttempt(), { pageSize: 2 })
+    )
+    await story()
+    await waitFor(() =>
+      expect(
+        within(section(2)).getByText("prompt changed at this step")
+      ).toBeTruthy()
+    )
+    expect(
+      studio.calls(`GET runs/${RUN}/requests`).map((c) => c.query.get("from"))
+    ).toEqual([null, "2", "4"])
+    open(1)
+    const temp = () =>
+      within(section(1)).getByText("temperature").parentElement?.lastChild
+        ?.textContent
+    // The answering attempt (2) is shown first: no temperature sent.
+    expect(temp()).toBe("adapter default")
+    fireEvent.click(
+      within(section(1)).getByRole("button", { name: "attempt 1" })
+    )
+    expect(temp()).toBe("0.7")
+    fireEvent.click(
+      within(section(1)).getByRole("button", { name: "attempt 2" })
+    )
+    expect(temp()).toBe("adapter default")
+  })
+
+  it("a run that ends after the last poll reads its last request, not a gap (poll path)", async () => {
+    const all = golden<RequestsPage>("requests-ok").requests
+    let ended = false
+    let endServed = false
+    const running: RunDoc = { ...doc, status: "running", finished: null }
+    studio = new FakeStudio()
+      .on("GET meta", meta(["requests", "ingest"]))
+      .on(`GET runs/${RUN}`, () => {
+        if (!ended) return running
+        endServed = true
+        return doc
+      })
+      .on(
+        `GET runs/${RUN}/events`,
+        pagedEvents(events(), { done: () => ended })
+      )
+      .on(`GET runs/${RUN}/transcript`, transcriptOf([]))
+      .on(`GET runs/${RUN}/spans`, { spans: [] })
+      // Step 2's request is stored only once the run reads finished.
+      .on(`GET runs/${RUN}/requests`, (req) =>
+        pagedRequests({ requests: endServed ? all : all.slice(0, 3) })(req)
+      )
+      .install()
+    await story()
+    await waitFor(() =>
+      expect(section(2).textContent).toContain(
+        "not stored yet — the run is still running"
+      )
+    )
+    ended = true
+    await waitFor(() =>
+      expect(
+        within(section(2)).getByText("prompt changed at this step")
+      ).toBeTruthy()
+    )
+    expect(section(2).textContent).not.toContain("no request record names it")
+  })
+
+  it("a live run frame that ends the run reads the record again", async () => {
+    const all = golden<RequestsPage>("requests-ok").requests
+    let ended = false
+    const running: RunDoc = { ...doc, status: "running", finished: null }
+    studio = new FakeStudio()
+      .on("GET meta", meta(["requests", "live", "ingest"]))
+      .on(`GET runs/${RUN}`, () => (ended ? doc : running))
+      .on(
+        `GET runs/${RUN}/events`,
+        pagedEvents(events(), { done: () => ended })
+      )
+      .on(`GET runs/${RUN}/transcript`, transcriptOf([]))
+      .on(`GET runs/${RUN}/spans`, { spans: [] })
+      .on(`GET runs/${RUN}/requests`, (req) =>
+        pagedRequests({ requests: ended ? all : all.slice(0, 3) })(req)
+      )
+      .install()
+    await story()
+    await waitFor(() => expect(FakeEventSource.open()).toHaveLength(1))
+    FakeEventSource.open()[0].connect()
+    await waitFor(() =>
+      expect(section(2).textContent).toContain("not stored yet")
+    )
+    ended = true
+    const { children: _c, ...row } = doc
+    FakeEventSource.open()[0].emit("run", { run: row }, "9")
+    await waitFor(() =>
+      expect(
+        within(section(2)).getByText("prompt changed at this step")
+      ).toBeTruthy()
+    )
+  })
+})
+
 describe("fetchAllRequests", () => {
+  it("polls incrementally: only the rows past the last index, the stripped note read once", async () => {
+    const all = golden<RequestsPage>("requests-stripped").requests
+    let stored = 2
+    studio = new FakeStudio()
+      .on(`GET runs/${RUN}/requests`, (req) =>
+        pagedRequests({ requests: all.slice(0, stored) })(req)
+      )
+      .on(`GET runs/${RUN}/tools`, golden<object>("tools-stripped"))
+      .install()
+    const first = await fetchAllRequests(RUN)
+    expect(first.requests.map((r) => r.index)).toEqual([0, 1])
+    expect(first.stripped?.fix).toContain("turn content on")
+    stored = 4
+    const second = await fetchAllRequests(RUN, first)
+    expect(second.requests.map((r) => r.index)).toEqual([0, 1, 2, 3])
+    expect(second.stripped).toEqual(first.stripped)
+    const froms = studio
+      .calls(`GET runs/${RUN}/requests`)
+      .map((c) => c.query.get("from"))
+    expect(froms).toEqual([null, "2"])
+    expect(studio.calls(`GET runs/${RUN}/tools`)).toHaveLength(1)
+  })
+
+  it("a cursor that does not move forward ends the walk", async () => {
+    const all = golden<RequestsPage>("requests-ok").requests
+    // A broken server: every page is the first, next_from stuck at 2.
+    studio = new FakeStudio()
+      .on(`GET runs/${RUN}/requests`, {
+        requests: all.slice(0, 2),
+        next_from: 2,
+      })
+      .install()
+    await fetchAllRequests(RUN)
+    expect(studio.calls(`GET runs/${RUN}/requests`)).toHaveLength(2)
+  })
+
   it("pages through next_from until the record is done", async () => {
     const all = golden<RequestsPage>("requests-ok").requests
     // A server whose pages are two rows long, whatever the client asks.

@@ -13,7 +13,7 @@
 // bounded, and a response that arrives for a view the user has left
 // is dropped.
 import type { Holed, Meta, PosEvent, RunDoc, RunRow, SessionRow, Span, Transcript } from "../lib/api"
-import { byStep } from "../lib/requests"
+import { byStep, REQUEST_HOLES } from "../lib/requests"
 import type { StepRequests } from "../lib/requests"
 import { tokenScope } from "./config"
 import { applyTranscript, linkView, newFold } from "../lib/events"
@@ -221,6 +221,10 @@ export function emptyPanelState(): PanelState {
  * (badge) or its rows by step. */
 export interface PanelRequests extends Holed {
   steps: Map<number, StepRequests>
+  /** The walk stopped at its page cap: a step past it is not a gap. */
+  truncated?: boolean
+  /** The record could not be read (not a hole: an error). */
+  error?: string
 }
 
 /** newTurnView starts an empty fold for one run. */
@@ -817,12 +821,20 @@ export class PanelModel {
    * so the hole is known without a request. */
   private async readRequests(id: string): Promise<PanelRequests | null> {
     if (!this.state.meta?.capabilities.includes("requests")) return null
-    if (tokenScope(this.ep.token) === "read") return { badge: "hidden", steps: new Map() }
+    if (tokenScope(this.ep.token) === "read") return { badge: "hidden", reason: REQUEST_HOLES.hidden.reason, fix: REQUEST_HOLES.hidden.fix, steps: new Map() }
     try {
       const doc = await fetchRequests(this.ep, id)
-      return { badge: doc.badge, reason: doc.reason, fix: doc.fix, steps: byStep(doc.requests) }
-    } catch {
-      return null
+      return {
+        badge: doc.badge,
+        reason: doc.reason,
+        fix: doc.fix,
+        truncated: doc.truncated,
+        steps: byStep(doc.requests),
+      }
+    } catch (err) {
+      // The panel's error path: words in the view, nothing thrown into
+      // the page.
+      return { steps: new Map(), error: err instanceof Error ? err.message : String(err) }
     }
   }
 

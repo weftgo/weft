@@ -18,7 +18,13 @@ import type {
   RunRequestsDoc,
   ToolEntry,
 } from "@/lib/api"
-import { byStep, paramFields, shortHash } from "@/lib/requests"
+import {
+  byStep,
+  paramFields,
+  REQUEST_HOLES,
+  REQUEST_NOT_STORED,
+  shortHash,
+} from "@/lib/requests"
 import type { StepRequests } from "@/lib/requests"
 import { bytes } from "@/lib/summarize"
 import { HoleBadge } from "@/components/studio/hole-badge"
@@ -45,8 +51,7 @@ export function runRequests(
 
 /** The not_recorded badge's words on this surface (ADR 0028: the
  * record exists from the release after v0.9.0). */
-export const NOT_RECORDED_LABEL =
-  "request not recorded by weft v0.9.0 or earlier"
+const NOT_RECORDED_LABEL = REQUEST_HOLES.not_recorded.label
 
 /** Lines of system prompt shown before "show all". */
 const PROMPT_LINES = 12
@@ -435,7 +440,7 @@ export function RequestSection({
   } else if (req.running) {
     head = (
       <span className="font-mono text-[11px] text-faint">
-        not stored yet — the run is still running
+        {REQUEST_NOT_STORED}
       </span>
     )
   } else {

@@ -779,21 +779,33 @@ export interface RunRequestsDoc extends Holed {
   stripped?: Holed
 }
 
-export async function fetchAllRequests(runId: string): Promise<RunRequestsDoc> {
-  const rows: RequestRow[] = []
-  let from: number | undefined
+/**
+ * fetchAllRequests reads the run's request record from where `prev`
+ * left off: a poll of a running run asks only for the rows past the
+ * last index it holds (an explicit from — next_from appears only on a
+ * full page) and appends them, prompts and catalogs inline for the new
+ * rows alone. The stripped note is read once. A cursor that does not
+ * move forward ends the walk.
+ */
+export async function fetchAllRequests(
+  runId: string,
+  prev?: RunRequestsDoc
+): Promise<RunRequestsDoc> {
+  const base = prev && !prev.badge ? prev : undefined
+  const rows: RequestRow[] = base ? [...base.requests] : []
+  let from: number | undefined = rows.length ? rows[rows.length - 1].index + 1 : undefined
   for (;;) {
     const page = await fetchRequests(runId, { from, limit: 1000 })
     rows.push(...page.requests)
     if (page.badge) {
       return { requests: rows, badge: page.badge, reason: page.reason, fix: page.fix }
     }
-    // A cursor that does not move ends the walk.
-    if (page.next_from === undefined || page.next_from === from) break
+    if (page.next_from === undefined || page.next_from <= (from ?? -1)) break
     from = page.next_from
   }
   const out: RunRequestsDoc = { requests: rows }
-  if (rows.some((r) => r.content === "stripped")) {
+  if (base?.stripped) out.stripped = base.stripped
+  else if (rows.some((r) => r.content === "stripped")) {
     const tools = await fetchTools(runId).catch(() => null)
     if (tools?.badge === "stripped")
       out.stripped = { badge: tools.badge, reason: tools.reason, fix: tools.fix }
@@ -805,7 +817,8 @@ export function requestsQuery(runId: string) {
   return queryOptions({
     queryKey: ["requests", runId],
     staleTime: 30_000,
-    queryFn: () => fetchAllRequests(runId),
+    queryFn: ({ client, queryKey }) =>
+      fetchAllRequests(runId, client.getQueryData<RunRequestsDoc>(queryKey)),
   })
 }
 

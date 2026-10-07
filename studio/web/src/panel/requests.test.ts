@@ -16,6 +16,7 @@ import {
   META,
   mount,
   page,
+  runRow,
   setup,
   T0,
   teardown,
@@ -91,8 +92,15 @@ describe("the panel's request line (A1.4)", () => {
     const el = await mount({ ...ATTRS, "data-token": claims("read") })
     const lines = all(el, "[data-weft-request]")
     expect(lines.length).toBe(3)
-    for (const l of lines)
-      expect(l.textContent).toBe("request: hidden by your token scope")
+    for (const l of lines) {
+      expect(l.querySelector(".weft-badge")?.textContent).toBe(
+        "request: hidden by your token scope"
+      )
+      // The hole says why and what to do, with nothing asked.
+      expect(l.querySelector(".weft-reason")?.textContent).toBe(
+        "a read-scoped panel token does not read system prompts or tool catalogs — fix: use a playground-scoped token"
+      )
+    }
     expect(studio.gets(`runs/${RUN}/requests`)).toEqual([])
     expect(el.shadowRoot!.innerHTML).not.toContain(PROMPT0)
   })
@@ -107,8 +115,14 @@ describe("the panel's request line (A1.4)", () => {
       expect(studio.gets(`runs/${RUN}/requests`).length).toBe(1)
       const lines = all(el, "[data-weft-request]")
       expect(lines.length).toBe(3)
-      for (const l of lines)
-        expect(l.textContent).toBe("request: hidden by your token scope")
+      for (const l of lines) {
+        expect(l.querySelector(".weft-badge")?.textContent).toBe(
+          "request: hidden by your token scope"
+        )
+        expect(l.querySelector(".weft-reason")?.textContent).toContain(
+          "fix: use a playground-scoped token"
+        )
+      }
       expect(el.shadowRoot!.innerHTML).not.toContain(PROMPT0)
       expect(caught.escaped).toEqual([])
       expect(errors).not.toHaveBeenCalled()
@@ -145,10 +159,14 @@ describe("the panel's request line (A1.4)", () => {
   it("a pre-A1 run says so on every step; a content-off one shows the hash and the badge", async () => {
     fakeStudio(routes(golden("requests-not-recorded")), metaWithRequests)
     let el = await mount()
-    for (const l of all(el, "[data-weft-request]"))
-      expect(l.textContent).toBe(
+    for (const l of all(el, "[data-weft-request]")) {
+      expect(l.querySelector(".weft-badge")?.textContent).toBe(
         "request not recorded by weft v0.9.0 or earlier"
       )
+      expect(l.querySelector(".weft-reason")?.textContent).toContain(
+        "fix: upgrade weft and re-run"
+      )
+    }
     el.remove()
     fakeStudio(routes(golden("requests-stripped")), metaWithRequests)
     el = await mount()
@@ -157,7 +175,79 @@ describe("the panel's request line (A1.4)", () => {
       "content not recorded for this destination"
     )
     expect(l0.textContent).toContain("system prompt 57e8f485cbb5")
+    expect(l0.querySelector(".weft-reason")?.textContent).toContain(
+      "fix: turn content on"
+    )
     expect(l0.querySelector("details")).toBeNull()
+  })
+
+  it("a 403 without the hidden badge is an error, not the hidden hole", async () => {
+    const other = () =>
+      json(
+        {
+          error: {
+            code: "forbidden",
+            message: "token is scoped to public id pub_other",
+          },
+        },
+        403
+      )
+    fakeStudio(routes(other), metaWithRequests)
+    const el = await mount({ ...ATTRS, "data-token": claims("playground") })
+    const l0 = $(el, '[data-weft-request="0"]')!
+    expect(l0.textContent).toBe(
+      "request could not be read: token is scoped to public id pub_other"
+    )
+    expect(el.shadowRoot!.innerHTML).not.toContain("hidden by your token scope")
+  })
+
+  it("a running turn's step without a row reads 'not stored yet', not a gap", async () => {
+    const r = routes({
+      requests: golden<{ requests: unknown[] }>("requests-ok").requests.slice(
+        0,
+        1
+      ),
+    })
+    const running = runRow({ status: "running", finished: null })
+    r["runs?public_id=pub_orders&limit=50"] = {
+      total: 1,
+      runs: [running],
+      next_before: null,
+    }
+    r[`runs/${RUN}`] = { ...running, children: [] }
+    fakeStudio(r, metaWithRequests)
+    const el = await mount()
+    expect($(el, '[data-weft-request="0"]')!.textContent).toContain("attempt 1")
+    expect($(el, '[data-weft-request="2"]')!.textContent).toBe(
+      "request: not stored yet — the run is still running"
+    )
+  })
+
+  it("the page cap reads truncated, never a gap; a cursor that does not move ends the walk", async () => {
+    const one = golden<{ requests: Record<string, unknown>[] }>("requests-ok")
+      .requests[0]
+    const r = routes(undefined)
+    delete r[REQS]
+    for (let i = 0; i < 12; i++)
+      r[`runs/${RUN}/requests?limit=1000${i ? `&from=${i}` : ""}`] = {
+        requests: [{ ...one, index: i, attempt: i + 1 }],
+        next_from: i + 1,
+      }
+    let studio = fakeStudio(r, metaWithRequests)
+    let el = await mount()
+    expect(studio.gets(`runs/${RUN}/requests`).length).toBe(10)
+    expect($(el, '[data-weft-request="2"]')!.textContent).toBe(
+      "request: truncated — first 10 000 requests"
+    )
+    el.remove()
+
+    const stuck = routes({ requests: [one], next_from: 0 })
+    studio = fakeStudio(stuck, metaWithRequests)
+    el = await mount()
+    expect(studio.gets(`runs/${RUN}/requests`).length).toBe(1)
+    expect($(el, '[data-weft-request="2"]')!.textContent).toBe(
+      "request: no record for this step"
+    )
   })
 
   it("without the requests capability, no line and no request", async () => {

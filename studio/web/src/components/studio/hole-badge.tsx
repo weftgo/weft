@@ -3,6 +3,9 @@
 // named badges, each with a reason and — where one exists — a fix.
 // A pane with a hole shows the badge and says why; it is never just
 // empty. A response's own reason and fix win over the table's words.
+// A3 moves this table and lib/requests.ts's REQUEST_HOLES into one
+// shared non-React honesty module.
+import { REQUEST_HOLES } from "@/lib/requests"
 import { Badge } from "@/components/ui/badge"
 
 export type Hole =
@@ -32,13 +35,7 @@ export const HOLES: Record<Hole, HoleNote> = {
     fix: "raise the destination's content MaxBytes",
     loss: true,
   },
-  stripped: {
-    label: "content not recorded for this destination",
-    reason:
-      "this run's records were content-off: the text was dropped before it was stored",
-    fix: "turn content on for this destination",
-    loss: false,
-  },
+  stripped: { ...REQUEST_HOLES.stripped, loss: false },
   redacted: {
     label: "redacted",
     reason: "a destination's Redact rewrote this value before it was stored",
@@ -72,12 +69,7 @@ export const HOLES: Record<Hole, HoleNote> = {
     reason: "inferred by the reader, not stored as emitted",
     loss: false,
   },
-  hidden: {
-    label: "hidden by your token scope",
-    reason: "this token's scope does not read this record",
-    fix: "use a playground-scoped token",
-    loss: false,
-  },
+  hidden: { ...REQUEST_HOLES.hidden, loss: false },
   compacted: {
     label: "compacted",
     reason: "compaction replaced these messages with a summary",

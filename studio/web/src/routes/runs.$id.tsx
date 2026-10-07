@@ -15,7 +15,7 @@
 // refresh every 2 s while running as the poll-shaped fallback.
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Columns2, Rows3 } from "lucide-react"
 
 import {
@@ -157,6 +157,7 @@ function RunPage() {
         void queryClient.invalidateQueries({ queryKey: ["run", id] })
         void queryClient.invalidateQueries({ queryKey: ["transcript", id] })
         void queryClient.invalidateQueries({ queryKey: ["spans", id] })
+        void queryClient.invalidateQueries({ queryKey: ["requests", id] })
       }
     },
     [id, queryClient]
@@ -179,6 +180,19 @@ function RunPage() {
     enabled: requestsCapable && Boolean(run.data),
     refetchInterval: runStatus === "running" ? 2000 : false,
   })
+  // The run ended (a live frame, or the 2 s poll of the row): read the
+  // record once more — a request stored after the last poll must not
+  // read as a gap on the last step.
+  // Only a seen transition counts: a page opened on a finished run
+  // reads the record once.
+  const seenStatus = useRef<{ id: string; status?: string }>({ id })
+  const loadedStatus = run.data?.status
+  useEffect(() => {
+    const was = seenStatus.current.id === id ? seenStatus.current.status : undefined
+    seenStatus.current = { id, status: loadedStatus }
+    if (was === "running" && loadedStatus && loadedStatus !== "running")
+      void queryClient.invalidateQueries({ queryKey: ["requests", id] })
+  }, [loadedStatus, id, queryClient])
   const requests = useMemo(
     () =>
       requestsCapable

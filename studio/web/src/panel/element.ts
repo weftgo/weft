@@ -6,7 +6,8 @@
 // meta.capabilities reports the playground (§8.5 item 3).
 import type { RunRow, ToolCallPart, Usage } from "../lib/api"
 import { isHoleRef } from "../lib/api"
-import { paramsLine, shortHash } from "../lib/requests"
+import { paramsLine, REQUEST_HOLES, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
+import { MAX_REQUEST_PAGES, REQUEST_PAGE } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
 import { callState, truncation } from "../lib/events"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
@@ -1401,7 +1402,7 @@ function renderStep(
   }
   card.appendChild(head)
   const body = el("div", "weft-step-b")
-  if (t?.requests) body.appendChild(requestLine(step.index, t.requests, open))
+  if (t?.requests) body.appendChild(requestLine(step.index, t.requests, runStatus, open))
   if (step.reasoning) {
     const d = el("details", "weft-collapsible")
     if (open) {
@@ -1422,33 +1423,57 @@ function renderStep(
   return card
 }
 
-/** The request's holes in the panel's words (Studio's hole-badge.tsx
- * holds the full table; A3 makes it one). */
-const REQ_HOLES: Record<string, string> = {
-  hidden: "request: hidden by your token scope",
-  not_recorded: "request not recorded by weft v0.9.0 or earlier",
-  stripped: "content not recorded for this destination",
+/** A request hole's badge as the panel words it: the shared label
+ * (lib/requests.ts's REQUEST_HOLES — A3 moves it into the one honesty
+ * module), prefixed where the label does not name the request. */
+function holeLabel(badge: string): string {
+  const h = (REQUEST_HOLES as Record<string, { label: string } | undefined>)[badge]
+  const label = h?.label ?? badge
+  return label.startsWith("request") ? label : `request: ${label}`
+}
+
+/** holeNote draws one hole: the badge, then its reason and fix as
+ * words (the response's when it gave them, the shared table's else). */
+function holeNote(box: HTMLElement, badge: string, reason?: string, fix?: string): void {
+  const h = (REQUEST_HOLES as Record<string, { reason: string; fix: string } | undefined>)[badge]
+  const why = reason || h?.reason
+  const remedy = fix || h?.fix
+  box.appendChild(el("span", "weft-badge weft-info", holeLabel(badge)))
+  if (why || remedy)
+    box.appendChild(el("div", "weft-reason", [why, remedy && `fix: ${remedy}`].filter(Boolean).join(" — ")))
 }
 
 /** requestLine is the step's request (ADR 0028 §10, the Studio run
  * page's section in one line): the attempts and the changed marks,
  * the system prompt collapsed, the catalog's names, the params. A hole
- * is its badge and nothing else — a hidden one never holds a byte of
- * prompt, because a read-scoped token never asked for it. */
-function requestLine(step: number, req: PanelRequests, open?: OpenState): HTMLElement {
+ * is its badge with its reason and fix, nothing else — a hidden one
+ * never holds a byte of prompt, because a read-scoped token never
+ * asked for it. */
+function requestLine(step: number, req: PanelRequests, runStatus: string, open?: OpenState): HTMLElement {
   const box = el("div", "weft-req")
   box.setAttribute("data-weft-request", String(step))
   if (req.badge) {
-    const why = [req.reason, req.fix && `fix: ${req.fix}`].filter(Boolean).join(" — ")
-    box.appendChild(
-      el("span", "weft-badge weft-info", REQ_HOLES[req.badge] ?? `request: ${req.badge}`, why ? { title: why } : undefined)
-    )
+    holeNote(box, req.badge, req.reason, req.fix)
+    return box
+  }
+  if (req.error) {
+    box.appendChild(el("span", "weft-badge weft-err", `request could not be read: ${req.error}`))
     return box
   }
   const mine = req.steps.get(step)
   const row = mine?.rows[mine.rows.length - 1]
   if (!mine || !row) {
-    box.appendChild(el("span", "weft-badge", "request: no record for this step"))
+    box.appendChild(
+      el(
+        "span",
+        "weft-badge",
+        runStatus === "running"
+          ? `request: ${REQUEST_NOT_STORED}`
+          : req.truncated
+            ? `request: truncated — first ${(MAX_REQUEST_PAGES * REQUEST_PAGE).toLocaleString("en-US").replace(",", " ")} requests`
+            : "request: no record for this step"
+      )
+    )
     return box
   }
   const head = el("div", "weft-call-h", [
@@ -1457,9 +1482,9 @@ function requestLine(step: number, req: PanelRequests, open?: OpenState): HTMLEl
   ])
   if (mine.promptChanged) head.appendChild(el("span", "weft-badge weft-info", "prompt changed at this step"))
   if (mine.catalogChanged) head.appendChild(el("span", "weft-badge weft-info", "catalog changed at this step"))
-  if (row.content === "stripped") head.appendChild(el("span", "weft-badge", REQ_HOLES.stripped))
-  else if (row.content) head.appendChild(el("span", "weft-badge", row.content))
+  if (row.content && row.content !== "stripped") head.appendChild(el("span", "weft-badge", row.content))
   box.appendChild(head)
+  if (row.content === "stripped") holeNote(box, "stripped")
   const p = row.prompt
   if (p && !isHoleRef(p)) {
     const d = el("details", "weft-collapsible")
@@ -1474,7 +1499,7 @@ function requestLine(step: number, req: PanelRequests, open?: OpenState): HTMLEl
     box.appendChild(d)
   } else if (row.system_hash) {
     box.appendChild(
-      el("div", "weft-res", `system prompt ${shortHash(row.system_hash)}${p ? ` · ${REQ_HOLES[p.badge] ?? p.badge}` : ""}`)
+      el("div", "weft-res", `system prompt ${shortHash(row.system_hash)}${p ? ` · ${p.badge === "stripped" ? "stripped" : holeLabel(p.badge)}` : ""}`)
     )
   }
   const names = row.body.tools.names

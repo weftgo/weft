@@ -121,12 +121,17 @@ export function transcriptOf(bodies: unknown[]) {
  * step's attempts, from is the first index, limit 0 = 100 (max 1000),
  * next_from is one past the page's last index when the page is full;
  * refs=1 drops the inline prompt and tools. A page carrying a badge
- * (not_recorded) is answered as is.
+ * (not_recorded) is answered as is. pageSize caps every page below
+ * what the client asked (a server's clamp), so a test can make a small
+ * record page.
  */
-export function pagedRequests(doc: {
-  requests: { index: number; step: number; prompt?: unknown; tools?: unknown }[]
-  badge?: string
-}): Handler {
+export function pagedRequests(
+  doc: {
+    requests: { index: number; step: number; prompt?: unknown; tools?: unknown }[]
+    badge?: string
+  },
+  opts: { pageSize?: number } = {}
+): Handler {
   return (req) => {
     if (doc.badge) return doc
     const num = (k: string, dflt: number) => {
@@ -135,7 +140,7 @@ export function pagedRequests(doc: {
     }
     const step = req.query.get("step")
     const from = num("from", 0)
-    const limit = Math.min(num("limit", 0) || 100, 1000)
+    const limit = Math.min(num("limit", 0) || 100, 1000, opts.pageSize ?? 1000)
     const refs = req.query.get("refs") === "1"
     const rows = doc.requests
       .filter((r) => r.index >= from && (step === null || r.step === Number(step)))

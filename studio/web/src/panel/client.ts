@@ -40,7 +40,10 @@ export class PanelApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
-    message: string
+    message: string,
+    /** The error body as sent (parsed JSON), when it was JSON: a
+     * refusal can carry a hole badge beside the error. */
+    readonly body?: unknown
   ) {
     super(message)
   }
@@ -60,8 +63,10 @@ export async function panelGet<T>(
   if (!res.ok) {
     let code = "network"
     let message = `${res.status} ${res.statusText}`
+    let parsed: unknown
     try {
       const body = (await res.json()) as { error?: { code?: string; message?: string } }
+      parsed = body
       if (body.error) {
         code = body.error.code ?? code
         message = body.error.message ?? message
@@ -69,7 +74,7 @@ export async function panelGet<T>(
     } catch {
       // not JSON: the status line says enough
     }
-    throw new PanelApiError(res.status, code, message)
+    throw new PanelApiError(res.status, code, message, parsed)
   }
   return (await res.json()) as T
 }
@@ -120,8 +125,10 @@ export function fetchTranscript(
 }
 
 /** The request record pages the panel reads for one run: the turn is
- * bounded by MaxSteps, and so is this walk. */
-const MAX_REQUEST_PAGES = 10
+ * bounded by MaxSteps, and so is this walk — past it the view says
+ * truncated, never a gap. */
+export const MAX_REQUEST_PAGES = 10
+export const REQUEST_PAGE = 1000
 
 /** fetchRequests reads a run's request record (GET runs/{id}/requests,
  * the Studio UI's route): every page, prompts and catalogs inline. A
@@ -131,7 +138,7 @@ export async function fetchRequests(
   ep: PanelEndpoint,
   id: string,
   signal?: AbortSignal
-): Promise<Holed & { requests: RequestRow[] }> {
+): Promise<Holed & { requests: RequestRow[]; truncated?: boolean }> {
   const rows: RequestRow[] = []
   let from = 0
   for (let i = 0; i < MAX_REQUEST_PAGES; i++) {
@@ -139,19 +146,22 @@ export async function fetchRequests(
     try {
       page = await panelGet<RequestsPage>(
         ep,
-        `runs/${encodeURIComponent(id)}/requests?limit=1000${from ? `&from=${from}` : ""}`,
+        `runs/${encodeURIComponent(id)}/requests?limit=${REQUEST_PAGE}${from ? `&from=${from}` : ""}`,
         signal
       )
     } catch (err) {
-      if (err instanceof PanelApiError && err.status === 403) return { requests: [], badge: "hidden" }
+      // Only the route's own hidden refusal is a hole; any other 403
+      // (a token scoped to another conversation) is an error.
+      const body = err instanceof PanelApiError && err.status === 403 ? (err.body as Holed | null | undefined) : null
+      if (body?.badge === "hidden") return { requests: [], badge: "hidden", reason: body.reason, fix: body.fix }
       throw err
     }
     rows.push(...page.requests)
     if (page.badge) return { requests: rows, badge: page.badge, reason: page.reason, fix: page.fix }
-    if (page.next_from === undefined || page.next_from <= from) break
+    if (page.next_from === undefined || page.next_from <= from) return { requests: rows }
     from = page.next_from
   }
-  return { requests: rows }
+  return { requests: rows, truncated: true }
 }
 
 export function fetchSpans(

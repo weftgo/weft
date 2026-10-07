@@ -507,9 +507,19 @@ func ExampleLoggerProvider() {
 	lp.mu.Lock()
 	defer lp.mu.Unlock()
 	for _, r := range lp.records {
-		if r.attr("weft.record") == "messages" {
+		switch r.attr("weft.record") {
+		case "messages":
 			idx, _ := r.intAttr("weft.messages.index")
 			fmt.Printf("messages index=%d\n", idx)
+			continue
+		case "request":
+			idx, _ := r.intAttr("weft.request.index")
+			step, _ := r.intAttr("weft.step.index")
+			fmt.Printf("request index=%d step=%d\n", idx, step)
+			continue
+		case "tools":
+			idx, _ := r.intAttr("weft.tools.index")
+			fmt.Printf("tools index=%d\n", idx)
 			continue
 		}
 		pos, ok := r.intAttr("weft.event.pos")
@@ -522,12 +532,15 @@ func ExampleLoggerProvider() {
 	// event run_start pos=0
 	// messages index=0
 	// event step_start pos=1
+	// tools index=0
+	// request index=0 step=0
 	// messages index=1
 	// event tool_start pos=2
 	// event tool_finish pos=3
 	// messages index=2
 	// event step_finish pos=4
 	// event step_start pos=5
+	// request index=1 step=1
 	// delta text_delta pos=0
 	// messages index=3
 	// event step_finish pos=6

@@ -246,10 +246,16 @@ func TestSpansRunTree(t *testing.T) {
 	if v := got["weft.version"]; len(v) < 2 || v[0] != 'v' {
 		t.Errorf("weft.version = %q, want a v-prefixed version", v)
 	}
+	// ADR 0028 §4: the raw instructions' hash, always present — this
+	// agent has none, so it is the empty string's.
+	if h := got["weft.instructions.hash"]; h != emptySHA256 {
+		t.Errorf("weft.instructions.hash = %q, want sha256(\"\")", h)
+	}
 	delete(got, "weft.manifest.hash")
 	delete(got, "weft.version")
+	delete(got, "weft.instructions.hash")
 	if len(got) != len(want) {
-		t.Errorf("run span attrs = %v, want exactly %v (+ hash, version)", got, want)
+		t.Errorf("run span attrs = %v, want exactly %v (+ hashes, version)", got, want)
 	}
 }
 

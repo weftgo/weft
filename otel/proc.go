@@ -24,16 +24,31 @@ const (
 	contentStripped = "stripped"
 
 	eventNameMessages = "weft.messages"
+	eventNamePrompt   = "weft.prompt"
+	eventNameTools    = "weft.tools"
 )
+
+// contentEvent reports whether a record kind is pure content, asked of
+// Enabled by its EventName: the transcript batches and ADR 0028's
+// prompt and tools records. A content-off destination answers false for
+// them and drops them when they arrive anyway.
+func contentEvent(eventName string) bool {
+	switch eventName {
+	case eventNameMessages, eventNamePrompt, eventNameTools:
+		return true
+	}
+	return false
+}
 
 // destProc is the head of one destination's log chain — the only
 // processor registered on the provider for that destination. It owns
 // the Enabled rule and the clone rule:
 //
-//   - Enabled answers weft.messages with the destination's content
-//     setting and everything else true. The core's one Enabled question
-//     is therefore true exactly when some destination wants content,
-//     and a content-off-only pipeline captures nothing (S2.4).
+//   - Enabled answers weft.messages, weft.prompt and weft.tools (the
+//     pure-content kinds) with the destination's content setting and
+//     everything else true. The core's Enabled questions are therefore
+//     true exactly when some destination wants content, and a
+//     content-off-only pipeline captures nothing (S2.4).
 //   - OnEmit clones the record first: the SDK hands every processor
 //     the same *Record, so in-place edits would leak between
 //     destinations. The clone is what this chain's inner processor
@@ -45,6 +60,13 @@ const (
 // and MaxBytes to event and delta bodies, set
 // weft.content.truncated_bytes when a cap cut, and apply Redact — never
 // MaxBytes — to messages records, part by part.
+//
+// ADR 0028's three kinds (§6): a request record is kept everywhere —
+// content-off empties its params.stop and marks it stripped, content-on
+// redacts each stop sequence (core.ContentStop); prompt and tools
+// records are dropped by content-off chains like messages records, and
+// content-on chains redact the prompt text (core.ContentPrompt) and cap
+// it, and cap the tools body, with weft.content.truncated_bytes.
 type destProc struct {
 	name     string
 	inner    sdklog.Processor
@@ -57,7 +79,7 @@ type destProc struct {
 var _ sdklog.Processor = (*destProc)(nil)
 
 func (p *destProc) Enabled(_ context.Context, param sdklog.EnabledParameters) bool {
-	if param.EventName == eventNameMessages {
+	if contentEvent(param.EventName) {
 		return p.content
 	}
 	return true
@@ -90,6 +112,20 @@ func (p *destProc) OnEmit(ctx context.Context, r *sdklog.Record) error {
 			p.shapeEvent(&clone)
 		} else if kind == "event" {
 			p.stripEvent(&clone)
+		}
+	case "prompt", "tools":
+		if !p.content {
+			p.drops.filtered(1)
+			return nil // pure content, like a messages record
+		}
+		if !p.shapeContentRecord(&clone, kind) {
+			return nil // never sent unredacted
+		}
+	case "request":
+		if p.content {
+			p.redactRequest(&clone)
+		} else {
+			p.stripRequest(&clone)
 		}
 	case "heartbeat":
 		// No body, no content: through unchanged.

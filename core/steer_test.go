@@ -197,7 +197,7 @@ func TestSteeringEventOrderAndSeq(t *testing.T) {
 		got = append(got, ev)
 	}
 	want := []core.Event{
-		core.RunStart{ID: "r1", Model: core.ModelInfo{Provider: "wefttest", Name: "script"}},
+		core.RunStart{ID: "r1", Model: core.ModelInfo{Provider: "wefttest", Name: "script"}, InstructionsHash: emptySHA256},
 		core.StepStart{RunID: "r1", Index: 0},
 		core.ToolStart{RunID: "r1", Seq: 1, CallID: "call_1", Name: "echo", Args: json.RawMessage(`{}`)},
 		core.ToolFinish{RunID: "r1", Seq: 2, CallID: "call_1", Name: "echo", Content: "ok"},

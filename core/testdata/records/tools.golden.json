@@ -1,0 +1,38 @@
+{
+  "attributes": {
+    "gen_ai.agent.name": "STRING:support",
+    "weft.catalog.hash": "STRING:3adb2763c108ccb41856390296a2a74e41f44f9ccd7df7ea21e24e3281ee6d59",
+    "weft.content": "STRING:full",
+    "weft.record": "STRING:tools",
+    "weft.run.id": "STRING:run-golden",
+    "weft.tools.index": "INT64:0"
+  },
+  "body": {
+    "hash": "3adb2763c108ccb41856390296a2a74e41f44f9ccd7df7ea21e24e3281ee6d59",
+    "tools": [
+      {
+        "approval": false,
+        "description": "Echo lookup.",
+        "max_result_bytes": 65536,
+        "name": "lookup",
+        "replay": "never",
+        "schema": {
+          "properties": {
+            "msg": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "msg"
+          ],
+          "type": "object"
+        },
+        "sequential": false,
+        "source": "local",
+        "timeout_ms": 1000
+      }
+    ]
+  },
+  "event_name": "weft.tools",
+  "severity": "INFO"
+}

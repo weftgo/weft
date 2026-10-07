@@ -67,8 +67,15 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// hit the limits the drop count (ADR 0024 S1.2). A run that changed
 	// its configuration carries the experiment's fingerprint
 	// (weft.override.*).
+	// The raw configured instructions' hash (ADR 0028 §4): the agent's
+	// Instructions or the run's override, before PrepareStep and before
+	// composition — fixed for the run, always present (sha256 of "" when
+	// there are none). One hash per run, on RunStart, its record and the
+	// invoke_agent span; it is not content.
+	instructionsHash := hashText(cfg.effectiveSystem(a.system))
 	var runExtra []attribute.KeyValue
 	runExtra = append(runExtra, cfg.overrideAttrs()...)
+	runExtra = append(runExtra, attrInstructionsHash.String(instructionsHash))
 	if c, ok := CallFromContext(ctx); ok {
 		runExtra = append(runExtra, attrParentRunID.String(c.RunID), attrParentCallID.String(c.CallID))
 	}
@@ -125,6 +132,8 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		runID:        cfg.id,
 		agent:        a.name,
 		manifestHash: a.manifestHash,
+		obs:          &a.obs,
+		panics:       &a.tapPanics,
 	}
 	deliver := func(ev Event) bool {
 		if ctx.Err() != nil {
@@ -195,7 +204,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	}
 	// A model that can name itself does so on the first event; the
 	// interface stays optional so Model remains one method.
-	emit(RunStart{ID: cfg.id, Model: InfoOf(model), Agent: a.name})
+	emit(RunStart{ID: cfg.id, Model: InfoOf(model), Agent: a.name, InstructionsHash: instructionsHash})
 	// The input joins the record stream before anything else grows the
 	// transcript: the repaired input, index 0, step 0 (ADR 0024 D1 —
 	// today it is never reported at all, so a stored transcript could
@@ -398,9 +407,17 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// consumed on the span's context, so an adapter's own HTTP spans
 		// parent under chat.
 		mctx, endModel := a.obs.model(ctx, cfg.id, step, InfoOf(model))
+		// What this call is given, recorded beside it (ADR 0028): the
+		// prompt and tools records when their hash is new to the run,
+		// then the request record (attempt 1), on the chat span's
+		// context, after PrepareStep, validation and composition, right
+		// before the chain runs. Reporting only: req is not touched.
+		reqRec := records.recordRequest(mctx, a, step, req, InfoOf(model), parkSet)
 		// The chain's reporting path (ReportFromContext): attempts and
-		// wire bodies the chain reports land on this step's record.
+		// wire bodies the chain reports land on this step's record; each
+		// attempt after the first adds its own request record.
 		rep := a.obs.withReport(mctx, cfg.id, step, &a.tapPanics)
+		rep.request = reqRec
 		mctx = rep
 		// The Model stream contract (see Model) is enforced here, not just
 		// documented: exactly one ModelFinish, nothing after it, and a

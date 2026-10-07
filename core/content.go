@@ -10,13 +10,15 @@ import (
 // say which field of which event is content (ADR 0024 S1.1, [D2]).
 type ContentKind string
 
-// The five kinds of content the core ever puts in a record.
+// The seven kinds of content the core ever puts in a record.
 const (
 	ContentText      ContentKind = "text"      // assistant text, text deltas
 	ContentReasoning ContentKind = "reasoning" // reasoning text and deltas
 	ContentArgs      ContentKind = "args"      // tool call arguments and arg deltas
 	ContentResult    ContentKind = "result"    // tool results
 	ContentMessages  ContentKind = "messages"  // whole transcript batches (weft/otel redacts them per part with the four kinds above)
+	ContentPrompt    ContentKind = "prompt"    // the composed system text of a prompt record (ADR 0028)
+	ContentStop      ContentKind = "stop"      // one stop sequence of a request record's params (ADR 0028)
 )
 
 type contentOption struct{ capture bool }
@@ -47,6 +49,12 @@ func Content(capture bool) Option { return contentOption{capture} }
 // a stripped record still attributes and orders; it is no longer
 // replay-grade, by design.
 //
+// The request, prompt and tools records (ADR 0028) are not events and
+// have their own rule, which weft/otel applies: a content-off
+// destination keeps the request record with its params.stop emptied
+// (hashes, names and numbers survive) and drops the prompt and tools
+// records, as it drops transcript batches.
+//
 //	Event             Emptied                       Kept
 //	text_delta        text                          run_id
 //	reasoning_delta   text                          run_id
@@ -55,7 +63,7 @@ func Content(capture bool) Option { return contentOption{capture} }
 //	tool_finish       content                       seq, call_id, name, is_error
 //	steered           messages (becomes [])         seq, step
 //	run_finish        each pending call's args      usage, steps, pending ids and names
-//	run_start         nothing (no content)          all
+//	run_start         nothing (no content)          all, instructions_hash included
 //	step_start        nothing (no content)          all
 //	step_finish       nothing (no content)          all
 //	nested            recurses into event           the envelope

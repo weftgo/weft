@@ -19,9 +19,10 @@ import (
 // stops heartbeating, so obsdb's InterruptedAfter rule stays honest.
 //
 // The tracker is itself a processor on the provider, so it must answer
-// Enabled like every other one: false for weft.messages (a tracker that
-// said yes would make every pipeline capture content), true for the
-// rest. Heartbeats pass through it and are ignored — no recursion.
+// Enabled like every other one: false for the pure-content kinds
+// (weft.messages, weft.prompt, weft.tools — a tracker that said yes
+// would make every pipeline capture content), true for the rest.
+// Heartbeats pass through it and are ignored — no recursion.
 type runTracker struct {
 	mu   sync.Mutex
 	open map[string]map[string]string // runID → metadata attributes
@@ -34,11 +35,12 @@ func newRunTracker() *runTracker {
 var _ sdklog.Processor = (*runTracker)(nil)
 var _ sdktrace.SpanProcessor = (*trackerSpanProc)(nil)
 
-// Enabled answers false for weft.messages (the tracker wants no
-// content; a single content-off pipeline must not capture) and true for
-// everything else.
+// Enabled answers false for the pure-content kinds — weft.messages,
+// weft.prompt, weft.tools (the tracker wants no content; a single
+// content-off pipeline must not capture) — and true for everything
+// else.
 func (t *runTracker) Enabled(_ context.Context, param sdklog.EnabledParameters) bool {
-	return param.EventName != eventNameMessages
+	return !contentEvent(param.EventName)
 }
 
 func (t *runTracker) OnEmit(_ context.Context, r *sdklog.Record) error {

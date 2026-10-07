@@ -20,9 +20,11 @@ func (f optionFunc) apply(c *config) { f(c) }
 // destination, not in the core ([D2]: the core cannot discover them —
 // the OTel global never hands out the SDK provider).
 type ContentConfig struct {
-	// MaxBytes caps one event field or delta body; 0 = 32 KiB; negative
-	// = unlimited. Never applied to messages records — a capped
-	// transcript is not replay-grade.
+	// MaxBytes caps one event field or delta body, a prompt record's
+	// text and a tools record's body (whole tool entries dropped from
+	// the end, so the body stays JSON); 0 = 32 KiB; negative =
+	// unlimited. A cut sets weft.content.truncated_bytes. Never applied
+	// to messages records — a capped transcript is not replay-grade.
 	MaxBytes int
 	// Redact is applied to a content field before the cap; nil = identity.
 	// It sees event and delta bodies and weft.messages transcript
@@ -30,7 +32,10 @@ type ContentConfig struct {
 	// has on the event path: text parts (every role) core.ContentText,
 	// reasoning core.ContentReasoning, tool-call args core.ContentArgs (an
 	// output that is not JSON is carried as a JSON string), tool results
-	// core.ContentResult. Ids, names, roles, signatures and file parts are
+	// core.ContentResult. It also sees a prompt record's text
+	// (core.ContentPrompt) and each stop sequence of a request record
+	// (core.ContentStop); a tools record is capped, never redacted (ADR
+	// 0028 §6). Ids, names, roles, signatures, file parts and hashes are
 	// not passed to it; a transcript record is redacted, never capped. It
 	// runs on the run's goroutine: a panic in it is contained — the event
 	// goes out stripped, the transcript record not at all — and counted

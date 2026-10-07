@@ -1,0 +1,16 @@
+{
+  "attributes": {
+    "gen_ai.agent.name": "STRING:support",
+    "weft.content": "STRING:full",
+    "weft.prompt.index": "INT64:0",
+    "weft.record": "STRING:prompt",
+    "weft.run.id": "STRING:run-golden",
+    "weft.system.hash": "STRING:068dac11e8f131c8f87e8c902dda33d8bcd5ce2bdba165e5ef58fce6a8137623"
+  },
+  "body": {
+    "hash": "068dac11e8f131c8f87e8c902dda33d8bcd5ce2bdba165e5ef58fce6a8137623",
+    "text": "You are a support agent.\n\nUse lookup for orders."
+  },
+  "event_name": "weft.prompt",
+  "severity": "INFO"
+}

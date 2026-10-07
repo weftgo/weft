@@ -28,10 +28,19 @@ type Event interface {
 
 // RunStart is always the first event of a run and carries its id and,
 // when reported, the model's identity and the agent's name.
+//
+// InstructionsHash is the lowercase hex sha256 of the run's raw
+// configured instructions — the agent's Instructions, or the run's
+// override, before PrepareStep and before PromptSnippets are composed
+// in (ADR 0028 §4). The loop always sets it: a run with no instructions
+// carries the hash of the empty string. It is a hash, not content, so
+// it survives StripContent; an event built elsewhere may leave it
+// empty, and it is then absent on the wire.
 type RunStart struct {
-	ID    string    `json:"id"`
-	Model ModelInfo `json:"model"`
-	Agent string    `json:"agent,omitempty"`
+	ID               string    `json:"id"`
+	Model            ModelInfo `json:"model"`
+	Agent            string    `json:"agent,omitempty"`
+	InstructionsHash string    `json:"instructions_hash,omitempty"`
 }
 
 // StepStart reports that the model is being called for step Index.

@@ -394,13 +394,15 @@ func ToolSource(fn func() []*ToolDef) Option { return core.ToolSource(fn) }
 // say which field of which event is content (ADR 0024 S1.1, [D2]).
 type ContentKind = core.ContentKind
 
-// The five kinds of content the core ever puts in a record.
+// The seven kinds of content the core ever puts in a record.
 const (
 	ContentText      = core.ContentText      // assistant text, text deltas
 	ContentReasoning = core.ContentReasoning // reasoning text and deltas
 	ContentArgs      = core.ContentArgs      // tool call arguments and arg deltas
 	ContentResult    = core.ContentResult    // tool results
 	ContentMessages  = core.ContentMessages  // whole transcript batches (weft/otel redacts them per part with the four kinds above)
+	ContentPrompt    = core.ContentPrompt    // the composed system text of a prompt record (ADR 0028)
+	ContentStop      = core.ContentStop      // one stop sequence of a request record's params (ADR 0028)
 )
 
 // Content sets whether this agent's runs put content into their records,
@@ -424,6 +426,12 @@ func Content(capture bool) Option { return core.Content(capture) }
 // a stripped record still attributes and orders; it is no longer
 // replay-grade, by design.
 //
+// The request, prompt and tools records (ADR 0028) are not events and
+// have their own rule, which weft/otel applies: a content-off
+// destination keeps the request record with its params.stop emptied
+// (hashes, names and numbers survive) and drops the prompt and tools
+// records, as it drops transcript batches.
+//
 //	Event             Emptied                       Kept
 //	text_delta        text                          run_id
 //	reasoning_delta   text                          run_id
@@ -432,7 +440,7 @@ func Content(capture bool) Option { return core.Content(capture) }
 //	tool_finish       content                       seq, call_id, name, is_error
 //	steered           messages (becomes [])         seq, step
 //	run_finish        each pending call's args      usage, steps, pending ids and names
-//	run_start         nothing (no content)          all
+//	run_start         nothing (no content)          all, instructions_hash included
 //	step_start        nothing (no content)          all
 //	step_finish       nothing (no content)          all
 //	nested            recurses into event           the envelope
@@ -641,6 +649,14 @@ type Event = core.Event
 
 // RunStart is always the first event of a run and carries its id and,
 // when reported, the model's identity and the agent's name.
+//
+// InstructionsHash is the lowercase hex sha256 of the run's raw
+// configured instructions — the agent's Instructions, or the run's
+// override, before PrepareStep and before PromptSnippets are composed
+// in (ADR 0028 §4). The loop always sets it: a run with no instructions
+// carries the hash of the empty string. It is a hash, not content, so
+// it survives StripContent; an event built elsewhere may leave it
+// empty, and it is then absent on the wire.
 type RunStart = core.RunStart
 
 // StepStart reports that the model is being called for step Index.

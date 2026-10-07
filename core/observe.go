@@ -570,6 +570,31 @@ type recorder struct {
 	eventPos    atomic.Int64
 	deltaPos    atomic.Int64
 	messagesIdx atomic.Int64
+
+	// The request record's state (ADR 0028, request.go): one counter
+	// per kind, the per-run dedupe sets of the prompt and catalog
+	// hashes already recorded, and the last hashes computed, so an
+	// unchanged prompt or tool set is not hashed again. The counters
+	// are atomic (a reporter may emit a further attempt's record from
+	// a chain goroutine); the rest is touched on the loop goroutine
+	// only.
+	requestIdx     atomic.Int64
+	promptIdx      atomic.Int64
+	toolsIdx       atomic.Int64
+	seenPrompts    map[string]bool
+	seenCatalogs   map[string]bool
+	lastSystem     string
+	lastSystemHash string
+	systemHashed   bool
+	lastTools      []*ToolDef
+	lastCatalog    string
+	catalogHashed  bool
+
+	// obs is the run's observer, for the Debug line a dropped record
+	// leaves; panics the agent's TapPanics counter, for a contained
+	// panic. Either may be nil in observer-only tests.
+	obs    *observer
+	panics *atomic.Int64
 }
 
 // captureOn resolves the content question for one emission: the agent's
@@ -657,6 +682,9 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 		}
 		if r.manifestHash != "" {
 			attrs = append(attrs, attrManifestHash.String(r.manifestHash))
+		}
+		if e.InstructionsHash != "" {
+			attrs = append(attrs, attrInstructionsHash.String(e.InstructionsHash))
 		}
 		attrs = append(attrs, attrVersion.String(version))
 	}

@@ -111,6 +111,7 @@ func FuzzUnmarshalEvent(f *testing.F) {
 	for _, seed := range []string{
 		`{"type":"run_start","id":"r1","model":{"provider":"openai","name":"gpt-5-mini"},"agent":"a"}`,
 		`{"type":"run_start","id":"r2","model":{"provider":"","name":""}}`,
+		`{"type":"run_start","id":"r3","model":{"provider":"wefttest","name":"script"},"agent":"a","instructions_hash":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}`,
 		`{"type":"step_start","index":1}`,
 		`{"type":"text_delta","text":"hi"}`,
 		`{"type":"reasoning_delta","text":"hm"}`,

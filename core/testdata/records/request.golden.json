@@ -1,0 +1,51 @@
+{
+  "attributes": {
+    "gen_ai.agent.name": "STRING:support",
+    "weft.attempt.index": "INT64:1",
+    "weft.catalog.hash": "STRING:3adb2763c108ccb41856390296a2a74e41f44f9ccd7df7ea21e24e3281ee6d59",
+    "weft.content": "STRING:full",
+    "weft.record": "STRING:request",
+    "weft.request.index": "INT64:0",
+    "weft.run.id": "STRING:run-golden",
+    "weft.step.index": "INT64:0",
+    "weft.system.hash": "STRING:068dac11e8f131c8f87e8c902dda33d8bcd5ce2bdba165e5ef58fce6a8137623"
+  },
+  "body": {
+    "attempt": 1,
+    "messages_ref": {
+      "count": 1,
+      "index": 0
+    },
+    "model": {
+      "name": "script",
+      "provider": "wefttest"
+    },
+    "params": {
+      "max_tokens": 256,
+      "stop": [
+        "STOP"
+      ],
+      "temperature": 0.5
+    },
+    "sequential_tools": true,
+    "step": 0,
+    "stream": true,
+    "system_hash": "068dac11e8f131c8f87e8c902dda33d8bcd5ce2bdba165e5ef58fce6a8137623",
+    "thinking": {
+      "budget": 1024,
+      "level": "high"
+    },
+    "tool_choice": {
+      "mode": "tool",
+      "name": "lookup"
+    },
+    "tools": {
+      "catalog_hash": "3adb2763c108ccb41856390296a2a74e41f44f9ccd7df7ea21e24e3281ee6d59",
+      "names": [
+        "lookup"
+      ]
+    }
+  },
+  "event_name": "weft.request",
+  "severity": "INFO"
+}

@@ -672,9 +672,10 @@ const (
 // plain run. "Changed" means a run-level option was applied — the value
 // may coincide with the agent's own; the fingerprint records what the
 // run carried, not a diff. The instructions text itself is content: the
-// attribute says only that it was replaced (true), and no record carries
-// the text — a transcript has no system role, so the input messages
-// record cannot — only the hash does. The hash covers every
+// attribute says only that it was replaced (true), and spans carry no
+// text (ADR 0016 O7). The text is recorded under the content policy by
+// the prompt record (ADR 0028, which reversed the earlier stance that
+// no record carries it). The hash covers every
 // changed value, text included, as sha256 over the canonical JSON of a
 // map (encoding/json sorts map keys, so equal changes hash equal); the
 // tool subset and the parked tools enter it as sets (nameSet).
@@ -759,21 +760,7 @@ func nameSet(names []string) []string {
 // thinkingOverride renders a ThinkingConfig for weft.override.thinking:
 // the level by name, the budget beside it when set.
 func thinkingOverride(cfg ThinkingConfig) string {
-	var level string
-	switch cfg.Level {
-	case ThinkUnset:
-		level = "unset"
-	case ThinkOff:
-		level = "off"
-	case ThinkLow:
-		level = "low"
-	case ThinkMedium:
-		level = "medium"
-	case ThinkHigh:
-		level = "high"
-	default:
-		level = strconv.Itoa(int(cfg.Level))
-	}
+	level := thinkingLevelName(cfg.Level)
 	if cfg.Budget > 0 {
 		return level + "/" + strconv.FormatInt(cfg.Budget, 10)
 	}

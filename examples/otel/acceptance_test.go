@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -95,7 +96,13 @@ func TestRecordsThroughRealSDK(t *testing.T) {
 	if len(logExp.records) == 0 {
 		t.Fatal("no records reached the log exporter")
 	}
-	var events, deltas, messages int
+	var events, deltas, messages, requests, tools int
+	chatSpans := map[string]bool{}
+	for _, s := range spans {
+		if strings.HasPrefix(s.Name, "chat") {
+			chatSpans[s.SpanContext.SpanID().String()] = true
+		}
+	}
 	var lastEventPos = -1
 	var transcript []weft.Message
 	for _, r := range logExp.records {
@@ -120,6 +127,17 @@ func TestRecordsThroughRealSDK(t *testing.T) {
 				t.Fatalf("messages record body does not decode: %v", err)
 			}
 			transcript = append(transcript, batch...)
+		case "request", "tools":
+			// ADR 0028: emitted on the chat span's context, so they join
+			// the model call by span id.
+			if kind.AsString() == "request" {
+				requests++
+			} else {
+				tools++
+			}
+			if !chatSpans[r.SpanID().String()] {
+				t.Errorf("%s record span %s is not a chat span", kind.AsString(), r.SpanID())
+			}
 		default:
 			t.Errorf("record kind = %q", kind.AsString())
 		}
@@ -135,6 +153,9 @@ func TestRecordsThroughRealSDK(t *testing.T) {
 	}
 	if deltas != 1 {
 		t.Errorf("%d delta records, want 1 (Say's text)", deltas)
+	}
+	if requests != 2 || tools != 1 {
+		t.Errorf("%d request and %d tools records, want 2 and 1 (no instructions: no prompt record)", requests, tools)
 	}
 	// The messages records rebuild the transcript byte-for-byte.
 	if len(transcript) != len(res.Messages) {

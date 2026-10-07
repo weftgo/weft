@@ -233,5 +233,6 @@ func Subagent(name, description string, child *Agent, opts ...ToolOption) *ToolD
 		t.sourceFile, t.sourceLine = file, line
 	}
 	t.subagent = child.name
+	t.delegates = true
 	return t
 }

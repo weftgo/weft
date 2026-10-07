@@ -4608,7 +4608,9 @@ func (m reportingModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 // The reporting hook (ReportFromContext) is reporting, not a seam. The
 // same two-step run is made five ways — no hook; a reporting middleware
 // with every report written (tracer recording, logger at Debug) and
-// with none written (no tracer, logger at Info); real mw.Retry over a
+// with none written (no tracer, logger at Info, no records); loud also
+// records every log record kind, the request records included (ADR
+// 0028); real mw.Retry over a
 // script that fails before each step, loud and quiet — and the
 // transcript, the event stream, the stop reason and the usage are
 // identical across all five.
@@ -4637,7 +4639,10 @@ func TestReportingHookChangesNothingModelVisible(t *testing.T) {
 		if loud {
 			opts = append(opts,
 				core.Logger(slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}))),
-				core.TracerProvider(newRecProvider()))
+				core.TracerProvider(newRecProvider()),
+				// Every record kind on, the request records (ADR 0028)
+				// included: one per reported attempt under retry.
+				core.LoggerProvider(newRecLogProvider()), core.Content(true))
 		} else {
 			opts = append(opts, core.Logger(slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo}))))
 		}

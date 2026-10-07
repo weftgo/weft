@@ -16,10 +16,12 @@
 //
 //   - Content is captured once and shaped per destination [D2]. Every
 //     processor registered here answers the Logs API's Enabled by event
-//     name: the core asks one question ("weft.messages") and emits
-//     content when any destination wants it. Content-off chains clone
+//     name: the core asks of each pure-content kind ("weft.messages",
+//     and ADR 0028's "weft.prompt" and "weft.tools") and emits content
+//     when any destination wants it. Content-off chains clone
 //     the record first (the SDK hands every processor the same pointer),
-//     strip the body with core.StripContent and drop messages records;
+//     strip the body with core.StripContent, empty a request record's
+//     params.stop and drop messages, prompt and tools records;
 //     content-on chains redact and cap event and delta bodies and
 //     redact (never cap) the transcript records part by part. The core reads no environment variable — this
 //     module does, here only.

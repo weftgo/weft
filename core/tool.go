@@ -38,6 +38,10 @@ type ToolDef struct {
 	// subagent names the child agent when this tool came from Subagent,
 	// for the manifest's delegation edge. Empty for ordinary tools.
 	subagent string
+	// delegates marks a Subagent tool whatever its child's name (an
+	// unnamed child leaves subagent empty): the request record's
+	// source chip (ADR 0028 §5).
+	delegates bool
 
 	// Per-tool policy, set by ToolOptions. Zero values defer to the
 	// agent; capSet distinguishes "no per-tool cap" from

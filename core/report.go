@@ -124,6 +124,11 @@ type stepReport struct {
 	panics *atomic.Int64 // the agent's TapPanics counter; nil in observer-only tests
 	n      atomic.Int64  // attempts reported so far: the next number is n+1
 	ended  atomic.Bool   // the model call returned: later reports are dropped
+	// request is the call's prepared request record (ADR 0028 §7): every
+	// attempt reported after the first re-emits it with that attempt's
+	// number. Nil when no destination wants request records. Set before
+	// the chain runs, never after.
+	request *requestRecord
 }
 
 func (s *stepReport) Value(key any) any {
@@ -250,6 +255,13 @@ func (s *stepReport) attempt(a AttemptInfo) {
 			attrs = append(attrs, slog.String(logErr, a.Err.Error()))
 		}
 		l.LogAttrs(ctx, slog.LevelDebug, "model attempt", attrs...)
+	}
+	// Attempt 1's request record was emitted by the loop before the
+	// chain ran; each further reported attempt adds its own. The ended
+	// check is repeated here, just before the record: a report racing
+	// the call's end must add no record (ADR 0028 §7).
+	if index > 1 && s.request != nil && !s.ended.Load() {
+		s.request.attempt(ctx, index, a)
 	}
 }
 

@@ -204,6 +204,10 @@ func TestMetaOfExcludesRequestRecordKeys(t *testing.T) {
 		"weft.system.hash": "aa", "weft.catalog.hash": "bb", "weft.instructions.hash": "cc",
 		"weft.messages.reason": "compacted", "weft.messages.from_seq": "1", "weft.messages.to_seq": "3",
 		"weft.compaction.hash": "dd", "weft.compaction.scope": "run",
+		// Plan A4: the string-valued answering model, and the timing
+		// keys (ints on the wire, strings here to prove the exclusion).
+		"gen_ai.response.model": "glm-b", "weft.stream": "true",
+		"weft.ttft_ms": "140", "weft.latency_ms": "812",
 		"tenant": "acme",
 	}
 	meta := MetaOf(attrs)

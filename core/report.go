@@ -173,7 +173,15 @@ func (s *stepReport) Value(key any) any {
 // end closes the reporter: the model call is over, and a report that
 // arrives later (a goroutine the chain left behind) is dropped rather
 // than recorded against a step that has moved on.
-func (s *stepReport) end() { s.ended.Store(true) }
+//
+// The flag is stored under mu so that it orders with answered: an
+// attempt that names the answering model checks ended inside the same
+// lock, so once end returns no late report can change answeredModel.
+func (s *stepReport) end() {
+	s.mu.Lock()
+	s.ended.Store(true)
+	s.mu.Unlock()
+}
 
 // contain recovers a panic out of the tracer or the logger and counts
 // it, as safeTap does for a tap: a broken observer must not break the
@@ -231,7 +239,9 @@ func (s *stepReport) attempt(a AttemptInfo) {
 	index := s.n.Add(1)
 	if a.Err == nil && a.Model != "" {
 		s.mu.Lock()
-		s.answered = a.Model
+		if !s.ended.Load() { // re-checked under the lock end takes
+			s.answered = a.Model
+		}
 		s.mu.Unlock()
 	}
 	timed := !a.Start.IsZero() && !a.End.Before(a.Start)

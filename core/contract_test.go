@@ -4937,6 +4937,24 @@ func TestStepTimingWithoutADelta(t *testing.T) {
 	}
 }
 
+// A model call that fails names no answering model — nothing answered —
+// while a delta that arrived before the failure still gives the chat
+// span its weft.ttft_ms.
+func TestFailedModelCallNamesNoModel(t *testing.T) {
+	tp := newRecProvider()
+	model := wefttest.Script(wefttest.SayThenFail("partial", core.ErrStreamIdle))
+	if _, err := core.New(model, core.TracerProvider(tp)).Generate(context.Background(), core.Prompt("x")); err == nil {
+		t.Fatal("run succeeded, want the stream's error")
+	}
+	got := tp.find(t, "chat script").attrsMap()
+	if _, ok := got["gen_ai.response.model"]; ok {
+		t.Errorf("failed chat span names an answering model: %v", got)
+	}
+	if ms, err := strconv.ParseInt(got["weft.ttft_ms"], 10, 64); err != nil || ms < 1 || got["weft.stream"] != "true" {
+		t.Errorf("failed chat span attrs = %v, want weft.ttft_ms >= 1 and weft.stream true", got)
+	}
+}
+
 // Outside a run's model call the reporter is a no-op, never nil: a bare
 // context, a nil one, and a tool handler's context (the run's, not the
 // chain's) all discard reports without panicking.

@@ -490,10 +490,18 @@ loop decides on):
   defined no first token; the plan's definition is taken, and ADR 0028
   §7's "first model event" means this). A call that yields neither — a
   non-streaming adapter, a bare tool call — has no TTFT: the value is
-  absent, never 0.
+  absent, never 0. It is measured from the call's start, not the
+  answering attempt's: failed attempts, a retry's backoff and a
+  fallback's earlier tries that came before the first delta are inside
+  it (the attempt spans carry each attempt's own times).
 - **Latency** is the call's whole wall time, the chain's `Stream` to
   the stream's end (the `ModelFinish`): a retry's backoff and a
-  fallback's failed tries are inside it.
+  fallback's failed tries are inside it. It is measured inside the
+  loop's consumption of the stream, so it also includes the loop's own
+  delivery of each delta (taps, records, a `Stream` consumer's
+  back-pressure). It is not the `chat` span's duration, which starts
+  earlier (the span also covers the request record's emission) and ends
+  later (after the reporter closes).
 - Both are reported in whole milliseconds **rounded up**, so a measured
   interval is never 0 and 0 keeps meaning "not measured".
 - **The model that answered** is the `Model` of the last attempt

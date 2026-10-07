@@ -259,8 +259,9 @@ is content of another size and a separate amendment.
 
 The `chat` span gains `weft.ttft_ms` (time to the first model event:
 the first `TextDelta` or `ToolArgsDelta`, as ADR 0016's A4 note
-defines it) and `weft.stream = true` when the call streamed. The `step_finish`
-event gains `latency_ms` and `ttft_ms` (additive wire fields, ADR 0004).
+defines it) and `weft.stream`, always `true` (the loop always
+consumes a stream; ADR 0016's A4 note). The `step_finish` event gains
+`latency_ms` and `ttft_ms` (additive wire fields, ADR 0004).
 
 ### 8. The step index on transcript batches (A2) and the compaction view (A9)
 

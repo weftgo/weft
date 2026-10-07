@@ -10,6 +10,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -159,5 +160,43 @@ func BenchmarkReportAttempt(b *testing.B) {
 				ReportFromContext(c.ctx).Attempt(a)
 			}
 		})
+	}
+}
+
+// A report that lands after the model call ended cannot name the
+// answering model: end orders with the answered write under one lock,
+// so the value the loop reads once end has returned is final, however
+// many goroutines the chain left behind keep reporting (run under
+// -race).
+func TestLateReportCannotNameTheModel(t *testing.T) {
+	o := newNoopObserver()
+	mctx, endModel := o.model(context.Background(), "r", 0, ModelInfo{})
+	defer endModel(ModelFinish{}, true, 0, nil, callTiming{})
+	rep := o.withReport(mctx, "r", 0, nil)
+	ReportFromContext(rep).Attempt(AttemptInfo{Model: "glm-b"})
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for range 100 {
+				ReportFromContext(rep).Attempt(AttemptInfo{Model: "late"})
+			}
+		}()
+	}
+	close(start)
+	rep.end()
+	final := rep.answeredModel()
+	wg.Wait()
+	if got := rep.answeredModel(); got != final {
+		t.Errorf("answered model changed after end: %q, then %q", final, got)
+	}
+	// After end, nothing reports at all.
+	ReportFromContext(rep).Attempt(AttemptInfo{Model: "later"})
+	if got := rep.answeredModel(); got != final {
+		t.Errorf("a report after end named %q (was %q)", got, final)
 	}
 }

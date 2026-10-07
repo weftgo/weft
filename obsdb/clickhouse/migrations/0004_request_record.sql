@@ -31,8 +31,10 @@
 -- weft_runs gains InstructionsHash, CatalogHash and RequestCount as
 -- max-aggregates, and both run views are restated (0001's logs view,
 -- 0003's traces view) with two changes each: the contract tuple gains
--- ADR 0028's twelve keys (obsdb.MetaOf's set; TestMigrationContractTuple
--- pins it), and the three columns are filled. InstructionsHash comes
+-- ADR 0028's twelve keys and plan A4's four (gen_ai.response.model,
+-- weft.stream, weft.ttft_ms, weft.latency_ms; added before release)
+-- (obsdb.MetaOf's set; TestMigrationContractTuple pins it), and the
+-- three columns are filled. InstructionsHash comes
 -- from run_start's (and the invoke_agent span's) weft.instructions.hash;
 -- CatalogHash from request index 0's weft.catalog.hash (the request
 -- record survives content-off chains, the tools record does not);
@@ -112,7 +114,8 @@ WITH mapFilter((k, v) -> NOT has([
         'weft.request.index', 'weft.prompt.index', 'weft.tools.index',
         'weft.system.hash', 'weft.catalog.hash', 'weft.attempt.index',
         'weft.instructions.hash', 'weft.messages.reason', 'weft.messages.from_seq',
-        'weft.messages.to_seq', 'weft.compaction.hash', 'weft.compaction.scope'], k), LogAttributes) AS metaMap
+        'weft.messages.to_seq', 'weft.compaction.hash', 'weft.compaction.scope',
+        'gen_ai.response.model', 'weft.stream', 'weft.ttft_ms', 'weft.latency_ms'], k), LogAttributes) AS metaMap
 SELECT
     LogAttributes['weft.run.id'] AS RunId,
     LogAttributes['weft.parent.run.id'] AS ParentRunID,
@@ -178,7 +181,8 @@ WITH if(mapContains(SpanAttributes, 'gen_ai.operation.name'),
         'weft.request.index', 'weft.prompt.index', 'weft.tools.index',
         'weft.system.hash', 'weft.catalog.hash', 'weft.attempt.index',
         'weft.instructions.hash', 'weft.messages.reason', 'weft.messages.from_seq',
-        'weft.messages.to_seq', 'weft.compaction.hash', 'weft.compaction.scope'], k), SpanAttributes) AS metaMap
+        'weft.messages.to_seq', 'weft.compaction.hash', 'weft.compaction.scope',
+        'gen_ai.response.model', 'weft.stream', 'weft.ttft_ms', 'weft.latency_ms'], k), SpanAttributes) AS metaMap
 SELECT
     SpanAttributes['weft.run.id'] AS RunId,
     SpanAttributes['weft.parent.run.id'] AS ParentRunID,

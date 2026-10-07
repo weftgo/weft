@@ -934,6 +934,8 @@ var contractKeys = []string{
 	"weft.system.hash", "weft.catalog.hash", "weft.attempt.index",
 	"weft.instructions.hash", "weft.messages.reason", "weft.messages.from_seq",
 	"weft.messages.to_seq", "weft.compaction.hash", "weft.compaction.scope",
+	// Plan A4 (ADR 0016's A4 note), the same restatement of 0004.
+	"gen_ai.response.model", "weft.stream", "weft.ttft_ms", "weft.latency_ms",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

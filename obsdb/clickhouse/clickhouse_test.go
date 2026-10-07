@@ -406,8 +406,9 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 // exclusion set — the SQL copy of contractKeys. The latest restatement
 // of both run views (0004) carries the whole set; 0001's two views and
 // 0003's restated traces view carry the set as it was before ADR 0028,
-// contractKeys without its last adr0028Keys entries.
-const adr0028Keys = 12
+// contractKeys without its last adr0028Keys entries (ADR 0028's twelve
+// and plan A4's four, all added by 0004).
+const adr0028Keys = 12 + 4
 
 func TestMigrationContractTuple(t *testing.T) {
 	before := contractKeys[:len(contractKeys)-adr0028Keys]
@@ -566,7 +567,8 @@ func TestMigration0004RestatesViews(t *testing.T) {
         'weft.request.index', 'weft.prompt.index', 'weft.tools.index',
         'weft.system.hash', 'weft.catalog.hash', 'weft.attempt.index',
         'weft.instructions.hash', 'weft.messages.reason', 'weft.messages.from_seq',
-        'weft.messages.to_seq', 'weft.compaction.hash', 'weft.compaction.scope'], k)`
+        'weft.messages.to_seq', 'weft.compaction.hash', 'weft.compaction.scope',
+        'gen_ai.response.model', 'weft.stream', 'weft.ttft_ms', 'weft.latency_ms'], k)`
 	logsDelta := "toInt64OrZero(LogAttributes['weft.delta.pos']) + 1, 0) AS DeltaCount"
 	logs := strings.NewReplacer(
 		"'error.type'], k)", tuple,

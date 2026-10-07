@@ -151,13 +151,13 @@ func TestReopenIsANoop(t *testing.T) {
 	if err := conn.QueryRow(ctx(), "SELECT count() FROM obsdb_migrations").Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	// One row per migration: 0001 (init) and 0002 (experiments) — the
-	// same count TestMigrationPinsExporterVersion pins as the highest
-	// version. (Step 8b review fix 1: this read still wanted 1 after
-	// 0002 landed, failing only on a real server, where the gated suite
-	// first ran.)
-	if versions != 2 {
-		t.Errorf("obsdb_migrations rows after reopen = %d, want 2 (0001, 0002)", versions)
+	// One row per migration: 0001 (init), 0002 (experiments) and 0003
+	// (status spelling) — the same count TestMigrationPinsExporterVersion
+	// pins as the highest version. (Step 8b review fix 1: this read still
+	// wanted 1 after 0002 landed, failing only on a real server, where
+	// the gated suite first ran.)
+	if versions != 3 {
+		t.Errorf("obsdb_migrations rows after reopen = %d, want 3 (0001, 0002, 0003)", versions)
 	}
 }
 

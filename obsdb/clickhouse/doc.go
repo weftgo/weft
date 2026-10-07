@@ -53,8 +53,4 @@
 // debugging (rows into weft_deltas, nothing else feeds it); TTL(...)
 // overrides the retention windows (content 30 days, spans and runs 90
 // by default) with ALTER TABLE ... MODIFY TTL.
-//
-// This module is lane B2's deliverable (TODO T16); until the merge
-// step adds it to the workspace root files, a lane-local go.work sits
-// beside it.
 package clickhouse

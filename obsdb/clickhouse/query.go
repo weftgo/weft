@@ -54,10 +54,11 @@ const statusCase = `CASE WHEN Failed = 1 THEN 'failed'
 	WHEN toUnixTimestamp64Nano(LastSeen) >= ? THEN 'running'
 	ELSE 'interrupted' END`
 
-func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (obsdb.RunPage, error) {
+func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.RunPage{}, err
 	}
+	defer d.closedErr(&err)
 	now := time.Now()
 	inner, args := runsInner(q)
 	var conds []string
@@ -80,12 +81,25 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (obsdb.RunPage, error) 
 		// [S.000, S.<nanos>) sorted right after the boundary row — no
 		// later page ever returned it (rows silently skipped at
 		// essentially every page boundary).
-		frag += " AND toUnixTimestamp64Nano(Started) < ?"
-		pageArgs = append(pageArgs, q.Before.UnixNano())
+		ns := q.Before.UnixNano()
+		if q.BeforeID != "" {
+			frag += " AND (toUnixTimestamp64Nano(Started) < ? OR (toUnixTimestamp64Nano(Started) = ? AND RunId < ?))"
+			pageArgs = append(pageArgs, ns, ns, q.BeforeID)
+		} else {
+			frag += " AND toUnixTimestamp64Nano(Started) < ?"
+			pageArgs = append(pageArgs, ns)
+		}
 	}
-	frag += " ORDER BY Started DESC, RunId DESC LIMIT ?"
-	pageArgs = append(pageArgs, obsdb.LimitOf(q.Limit))
-	rows, err := d.queryRunRows(ctx, frag, pageArgs...)
+	// WITH TIES: a page does not end inside a group of runs sharing one
+	// Started — the tied rows ride along, or a next page read on Before
+	// alone (`Started < cursor`) would skip them for good. The outer
+	// sort gives the page its total order and caps the ride-along at
+	// MaxTies, so one page stays bounded however large the tie; past
+	// the cap the (Before, BeforeID) cursor resumes inside the group.
+	limit := obsdb.LimitOf(q.Limit)
+	frag = "SELECT * FROM (" + frag + " ORDER BY Started DESC LIMIT ? WITH TIES) ORDER BY Started DESC, RunId DESC LIMIT ?"
+	pageArgs = append(pageArgs, limit, limit+obsdb.MaxTies)
+	rows, err := d.queryRunRows(ctx, now, frag, pageArgs...)
 	if err != nil {
 		return obsdb.RunPage{}, err
 	}
@@ -93,47 +107,61 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (obsdb.RunPage, error) 
 		return obsdb.RunPage{}, err
 	}
 	page := obsdb.RunPage{Runs: rows, Total: total}
-	if len(rows) == obsdb.LimitOf(q.Limit) {
-		last := rows[len(rows)-1].Started
-		page.NextBefore = &last
+	if len(rows) >= limit {
+		end := rows[len(rows)-1]
+		page.NextBefore, page.NextBeforeID = &end.Started, end.ID
 	}
 	return page, nil
 }
 
-// runsInner builds weft_runs' grouped subquery with its bind arguments.
-// The row filters run inside their own SELECT: ClickHouse aliases are
-// query-global, so a WHERE beside `max(ParentRunID) AS ParentRunID`
-// would resolve the name to the aggregate and fail.
+// runsInner builds the filtered run list — one row per run, the whole
+// run's aggregates — with its bind arguments. The filters apply to the
+// grouped rows, never to weft_runs' stored ones: until a background
+// merge collapses them a run is several rows (one per insert), each
+// holding only what its own records carried, so a row-level filter both
+// leaks and truncates — a subagent's later records carry no parent id
+// and passed the top-level filter, while a parent filter kept
+// only the run_start row and aggregated a run that never finished.
+//
+// An equality on an identity column additionally narrows the scan to
+// the runs that have a row with that value (a superset of the answer:
+// max returns a value some row holds), so a session's or an
+// experiment's list reads those runs by primary key instead of
+// aggregating the table. The narrowing subquery names its columns
+// through a table alias: ClickHouse aliases are query-global, and a
+// bare `Agent` beside `max(Agent) AS Agent` would resolve to the
+// aggregate.
 func runsInner(q obsdb.RunQuery) (string, []any) {
-	var conds []string
-	var args []any
+	var narrow, conds []string
+	var narrowArgs, args []any
+	eq := func(col, v string) {
+		narrow = append(narrow, "RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r."+col+" = ?)")
+		narrowArgs = append(narrowArgs, v)
+		conds = append(conds, col+" = ?")
+		args = append(args, v)
+	}
 	if q.Agent != "" {
-		conds = append(conds, "Agent = ?")
-		args = append(args, q.Agent)
+		eq("Agent", q.Agent)
 	}
 	if q.SessionID != "" {
-		conds = append(conds, "SessionID = ?")
-		args = append(args, q.SessionID)
+		eq("SessionID", q.SessionID)
 	}
 	if q.PublicID != "" {
-		conds = append(conds, "PublicID = ?")
-		args = append(args, q.PublicID)
+		eq("PublicID", q.PublicID)
 	}
 	switch q.ParentRunID {
 	case "":
 		conds = append(conds, "ParentRunID = ''")
 	case "*":
 	default:
-		conds = append(conds, "ParentRunID = ?")
-		args = append(args, q.ParentRunID)
+		eq("ParentRunID", q.ParentRunID)
 	}
 	if q.Playground != nil {
 		conds = append(conds, "Playground = ?")
 		args = append(args, *q.Playground)
 	}
 	if q.ExperimentID != "" {
-		conds = append(conds, "ExperimentID = ?")
-		args = append(args, q.ExperimentID)
+		eq("ExperimentID", q.ExperimentID)
 	}
 	for k, v := range q.Meta {
 		// Meta holds the caller metadata (contract keys filtered at the
@@ -141,8 +169,9 @@ func runsInner(q obsdb.RunQuery) (string, []any) {
 		conds = append(conds, "JSONHas(Meta, ?) AND JSONExtractString(Meta, ?) = ?")
 		args = append(args, k, k, v)
 	}
-	return "SELECT " + runAggregates + " FROM (SELECT * FROM weft_runs WHERE " +
-		strings.Join(or1(conds), " AND ") + ") GROUP BY RunId", args
+	return "SELECT * FROM (SELECT " + runAggregates + " FROM weft_runs WHERE " +
+		strings.Join(or1(narrow), " AND ") + " GROUP BY RunId) WHERE " +
+		strings.Join(or1(conds), " AND "), append(narrowArgs, args...)
 }
 
 // or1 returns conds or ["1=1"], so WHERE clauses never dangle.
@@ -164,11 +193,13 @@ func (d *DB) countRows(ctx context.Context, sql string, args, outerArgs []any) (
 	return int(n), nil
 }
 
-func (d *DB) Run(ctx context.Context, id string) (obsdb.RunDetail, error) {
+func (d *DB) Run(ctx context.Context, id string) (_ obsdb.RunDetail, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.RunDetail{}, err
 	}
-	rows, err := d.queryRunRows(ctx,
+	defer d.closedErr(&err)
+	now := time.Now()
+	rows, err := d.queryRunRows(ctx, now,
 		"SELECT "+runColumns+" FROM weft_runs FINAL WHERE RunId = ?", id)
 	if err != nil {
 		return obsdb.RunDetail{}, err
@@ -176,8 +207,14 @@ func (d *DB) Run(ctx context.Context, id string) (obsdb.RunDetail, error) {
 	if len(rows) == 0 {
 		return obsdb.RunDetail{}, fmt.Errorf("%w: run %s", obsdb.ErrNotFound, id)
 	}
-	children, err := d.queryRunRows(ctx,
-		"SELECT "+runColumns+" FROM weft_runs FINAL WHERE ParentRunID = ? ORDER BY Started, RunId", id)
+	// The RunId IN (...) narrows FINAL to the candidate runs by primary
+	// key (a superset: some row of each child names the parent); the
+	// equality then reads their merged rows. Without it FINAL merges
+	// the whole table for every run page.
+	children, err := d.queryRunRows(ctx, now,
+		"SELECT "+runColumns+" FROM weft_runs FINAL WHERE "+
+			"RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.ParentRunID = ?) AND ParentRunID = ? "+
+			"ORDER BY Started, RunId", id, id)
 	if err != nil {
 		return obsdb.RunDetail{}, err
 	}
@@ -190,14 +227,16 @@ func (d *DB) Run(ctx context.Context, id string) (obsdb.RunDetail, error) {
 }
 
 // queryRunRows selects run rows (FINAL or already-aggregated SQL) and
-// derives status with one clock for the whole result.
-func (d *DB) queryRunRows(ctx context.Context, sql string, args ...any) ([]obsdb.RunRow, error) {
+// derives status with one clock for the whole result — the caller's
+// now, the same instant its status filter's cutoff was cut from, so a
+// row the filter passed as running cannot derive interrupted a moment
+// later.
+func (d *DB) queryRunRows(ctx context.Context, now time.Time, sql string, args ...any) ([]obsdb.RunRow, error) {
 	rs, err := d.conn.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rs.Close() }()
-	now := time.Now()
 	var out []obsdb.RunRow
 	for rs.Next() {
 		var s runScan
@@ -289,9 +328,24 @@ func (d *DB) fillCounts(ctx context.Context, rows []*obsdb.RunRow) error {
 			ids = append(ids, row.ID)
 		}
 	}
-	if len(ids) == 0 {
-		return nil
+	// The ids bind as literals into the query text, which the server
+	// caps (max_query_size, 256 KiB by default): an uncapped Session's
+	// thousands of runs read in chunks, each well under the cap.
+	for len(ids) > 0 {
+		n, size := 0, 0
+		for n < len(ids) && n < 1000 && (n == 0 || size+len(ids[n]) < 64<<10) {
+			size += len(ids[n])
+			n++
+		}
+		if err := d.fillCountsOf(ctx, ids[:n], byID); err != nil {
+			return err
+		}
+		ids = ids[n:]
 	}
+	return nil
+}
+
+func (d *DB) fillCountsOf(ctx context.Context, ids []string, byID map[string]*obsdb.RunRow) error {
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
 	args := make([]any, len(ids))
 	for i, id := range ids {
@@ -317,12 +371,26 @@ func (d *DB) fillCounts(ctx context.Context, rows []*obsdb.RunRow) error {
 	return rs.Err()
 }
 
-func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (obsdb.EventPage, error) {
+func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (_ obsdb.EventPage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.EventPage{}, err
 	}
-	if err := d.runExists(ctx, runID); err != nil {
+	defer d.closedErr(&err)
+	// The terminal flags are read before the events: a run that
+	// finishes between the two reads then answers Done false with its
+	// tail still to come, never Done true short of its tail. Read in
+	// this order, Done only ever says "the run was already terminal
+	// when these events were read". The same row count is the
+	// existence check.
+	var finishedOK, failed bool
+	var stored uint64
+	if err := d.conn.QueryRow(ctx,
+		`SELECT max(FinishedOK), max(Failed), count() FROM weft_runs WHERE RunId = ?`, runID).
+		Scan(&finishedOK, &failed, &stored); err != nil {
 		return obsdb.EventPage{}, err
+	}
+	if stored == 0 {
+		return obsdb.EventPage{}, fmt.Errorf("%w: run %s", obsdb.ErrNotFound, runID)
 	}
 	if limit <= 0 {
 		limit = 100
@@ -330,47 +398,34 @@ func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (
 	if limit > 1000 {
 		limit = 1000
 	}
-	page := obsdb.EventPage{Done: true}
+	// One row past the limit answers "is there more" in the same read.
 	rs, err := d.conn.Query(ctx,
 		`SELECT Pos, Time, Body FROM weft_records FINAL
 		WHERE RunId = ? AND Kind = 'event' AND Pos > ? ORDER BY Pos LIMIT ?`,
-		runID, after, limit)
+		runID, after, limit+1)
 	if err != nil {
 		return obsdb.EventPage{}, err
 	}
 	defer func() { _ = rs.Close() }()
+	var page obsdb.EventPage
 	for rs.Next() {
 		var ev obsdb.PosEvent
 		if err := rs.Scan(&ev.Pos, &ev.Time, &ev.Event); err != nil {
 			return obsdb.EventPage{}, err
 		}
-		ev.Time = ev.Time.UTC()
+		ev.Time = timeOf(ev.Time)
 		page.Events = append(page.Events, ev)
 	}
 	if err := rs.Err(); err != nil {
 		return obsdb.EventPage{}, err
 	}
-	var remaining uint64
-	if err := d.conn.QueryRow(ctx,
-		`SELECT uniqExactIf(Pos, Kind = 'event') FROM weft_records WHERE RunId = ? AND Pos > ?`,
-		runID, after).Scan(&remaining); err != nil {
-		return obsdb.EventPage{}, err
-	}
-	if remaining > uint64(len(page.Events)) {
-		page.Done = false
-		if n := len(page.Events); n > 0 {
-			last := page.Events[n-1].Pos
-			page.NextAfter = &last
-		}
+	if len(page.Events) > limit {
+		page.Events = page.Events[:limit]
+		last := page.Events[limit-1].Pos
+		page.NextAfter = &last
 	} else {
 		// Every stored event returned: done only when the run is
 		// terminal — a running run may still emit more.
-		var finishedOK, failed bool
-		if err := d.conn.QueryRow(ctx,
-			`SELECT max(FinishedOK), max(Failed) FROM weft_runs WHERE RunId = ?`, runID).
-			Scan(&finishedOK, &failed); err != nil {
-			return obsdb.EventPage{}, err
-		}
 		page.Done = finishedOK || failed
 	}
 	gaps, err := d.eventGaps(ctx, runID)
@@ -383,43 +438,52 @@ func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (
 
 // eventGaps returns the durable positions missing below the high-water
 // mark: a lost batch, never a delta (deltas are on their own counter,
-// so their absence cannot open a hole here).
+// so their absence cannot open a hole here). At most obsdb.MaxGaps are
+// listed.
+//
+// The common, gapless run is answered from one aggregate: positions
+// are unique per run, so n distinct positions inside 0..max with
+// n = max+1 leave no room for a hole, and no position is read back.
 func (d *DB) eventGaps(ctx context.Context, runID string) ([]int64, error) {
+	var n uint64
+	var hi int64
+	if err := d.conn.QueryRow(ctx,
+		`SELECT uniqExact(Pos), max(Pos) FROM weft_records WHERE RunId = ? AND Kind = 'event' AND Pos >= 0`,
+		runID).Scan(&n, &hi); err != nil {
+		return nil, err
+	}
+	if n == 0 || int64(n) == hi+1 {
+		return nil, nil
+	}
 	rs, err := d.conn.Query(ctx,
-		`SELECT DISTINCT Pos FROM weft_records WHERE RunId = ? AND Kind = 'event' ORDER BY Pos`, runID)
+		`SELECT DISTINCT Pos FROM weft_records WHERE RunId = ? AND Kind = 'event' AND Pos >= 0 ORDER BY Pos`, runID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rs.Close() }()
-	var present []int64
-	for rs.Next() {
+	var gaps []int64
+	next := int64(0)
+	for rs.Next() && len(gaps) < obsdb.MaxGaps {
 		var p int64
 		if err := rs.Scan(&p); err != nil {
 			return nil, err
 		}
-		present = append(present, p)
-	}
-	if err := rs.Err(); err != nil {
-		return nil, err
-	}
-	var gaps []int64
-	next := int64(0)
-	for _, p := range present {
-		for p > next {
+		// The hole below p, bounded: a stray position (a foreign
+		// sender's weft.event.pos of 10^12) must not turn one page
+		// read into a trillion-element list.
+		for ; next < p && len(gaps) < obsdb.MaxGaps; next++ {
 			gaps = append(gaps, next)
-			next++
 		}
-		if p == next {
-			next++
-		}
+		next = p + 1
 	}
-	return gaps, nil
+	return gaps, rs.Err()
 }
 
-func (d *DB) Transcript(ctx context.Context, runID string) ([]json.RawMessage, error) {
+func (d *DB) Transcript(ctx context.Context, runID string) (_ []json.RawMessage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
+	defer d.closedErr(&err)
 	if err := d.runExists(ctx, runID); err != nil {
 		return nil, err
 	}
@@ -438,7 +502,12 @@ func (d *DB) Transcript(ctx context.Context, runID string) ([]json.RawMessage, e
 		}
 		out = append(out, json.RawMessage(body))
 	}
-	return out, rs.Err()
+	if err := rs.Err(); err != nil {
+		return nil, err
+	}
+	// The later record of a rebuilt tool message is the authoritative
+	// one (the rule every backend reads through).
+	return obsdb.DedupTranscript(out), nil
 }
 
 const spanColumns = `Timestamp, TraceId, SpanId, ParentSpanId, SpanName, SpanKind, ServiceName,
@@ -446,10 +515,11 @@ const spanColumns = `Timestamp, TraceId, SpanId, ParentSpanId, SpanName, SpanKin
 	Events.Timestamp, Events.Name, Events.Attributes,
 	WeftAttrs, WeftEvents, WeftResource`
 
-func (d *DB) RunSpans(ctx context.Context, runID string) ([]obsdb.Span, error) {
+func (d *DB) RunSpans(ctx context.Context, runID string) (_ []obsdb.Span, err error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
+	defer d.closedErr(&err)
 	if err := d.runExists(ctx, runID); err != nil {
 		return nil, err
 	}
@@ -460,10 +530,11 @@ func (d *DB) RunSpans(ctx context.Context, runID string) ([]obsdb.Span, error) {
 // Trace returns any trace's spans — weft and non-weft alike (the
 // polyglot promise). An unknown trace id returns no rows and no error,
 // like the SQLite backend.
-func (d *DB) Trace(ctx context.Context, traceID string) ([]obsdb.Span, error) {
+func (d *DB) Trace(ctx context.Context, traceID string) (_ []obsdb.Span, err error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
+	defer d.closedErr(&err)
 	return d.querySpans(ctx, "SELECT "+spanColumns+" FROM otel_traces WHERE TraceId = ?"+
 		spanDedup, traceID)
 }
@@ -499,11 +570,10 @@ func (d *DB) querySpans(ctx context.Context, sql string, arg any) ([]obsdb.Span,
 		}
 		s.Kind = spanKindInt(kind)
 		s.StatusCode = statusCodeInt(code)
-		s.End = s.Start.Add(time.Duration(dur))
+		s.Start, s.End = timeOf(s.Start), timeOf(s.Start.Add(time.Duration(dur)))
 		s.Attrs = attrsFromJSONOrMap(weftAttrs, attrs)
 		s.Resource = attrsFromJSONOrMap(weftRes, res)
 		s.Events = eventsFromJSONOrNested(weftEvents, evT, evN, evA)
-		s.Start, s.End = s.Start.UTC(), s.End.UTC()
 		out = append(out, s)
 	}
 	return out, rs.Err()
@@ -558,9 +628,20 @@ func eventsFromJSONOrNested(js string, times []time.Time, names []string, attrs 
 				a[k] = v
 			}
 		}
-		out[i] = obsdb.SpanEvent{Time: times[i].UTC(), Name: names[i], Attrs: a}
+		out[i] = obsdb.SpanEvent{Time: timeOf(times[i]), Name: names[i], Attrs: a}
 	}
 	return out
+}
+
+// timeOf reads a span or record time column: the Unix epoch is what a
+// zero time.Time — OTLP's "unknown" — was stored as (DateTime64 cannot
+// hold year 1), and reads back as the zero time, as the SQLite backend
+// returns it.
+func timeOf(t time.Time) time.Time {
+	if t.UnixNano() == 0 {
+		return time.Time{}
+	}
+	return t.UTC()
 }
 
 func (d *DB) runExists(ctx context.Context, runID string) error {
@@ -586,11 +667,12 @@ func (d *DB) runExists(ctx context.Context, runID string) error {
 // double-count usage in the outer sum; the session level's aliases are
 // prefixed s* so no ClickHouse alias substitution can shadow the argMax
 // arguments (aliases are query-global).
-func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (obsdb.SessionPage, error) {
+func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.SessionPage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.SessionPage{}, err
 	}
-	runs := sessionRuns("")
+	defer d.closedErr(&err)
+	runs := sessionRuns("", "")
 	var having []string
 	var hargs []any
 	if q.Agent != "" {
@@ -601,31 +683,44 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (obsdb.SessionP
 		having = append(having, "max(PublicID) = ?")
 		hargs = append(hargs, q.PublicID)
 	}
+	havingSQL := func(conds []string) string {
+		if len(conds) == 0 {
+			return ""
+		}
+		return " HAVING " + strings.Join(conds, " AND ")
+	}
+	// Total is the whole match: the cursor pages it, never narrows it.
+	var total uint64
+	if err := d.conn.QueryRow(ctx,
+		"SELECT count() FROM (SELECT SessionID FROM "+runs+" GROUP BY SessionID"+havingSQL(having)+")", hargs...).Scan(&total); err != nil {
+		return obsdb.SessionPage{}, err
+	}
+	pageArgs := append([]any{}, hargs...)
 	if !q.Before.IsZero() {
 		// Integer nanoseconds (the Runs cursor's rule): a time.Time
 		// bind floors to whole seconds and drops the sub-second band.
-		having = append(having, "toUnixTimestamp64Nano(max(LastSeen)) < ?")
-		hargs = append(hargs, q.Before.UnixNano())
-	}
-	havingSQL := ""
-	if len(having) > 0 {
-		havingSQL = " HAVING " + strings.Join(having, " AND ")
-	}
-	var total uint64
-	if err := d.conn.QueryRow(ctx,
-		"SELECT count() FROM (SELECT SessionID FROM "+runs+" GROUP BY SessionID"+havingSQL+")", hargs...).Scan(&total); err != nil {
-		return obsdb.SessionPage{}, err
+		ns := q.Before.UnixNano()
+		if q.BeforeID != "" {
+			having = append(having, "(toUnixTimestamp64Nano(max(LastSeen)) < ? OR (toUnixTimestamp64Nano(max(LastSeen)) = ? AND SessionID < ?))")
+			pageArgs = append(pageArgs, ns, ns, q.BeforeID)
+		} else {
+			having = append(having, "toUnixTimestamp64Nano(max(LastSeen)) < ?")
+			pageArgs = append(pageArgs, ns)
+		}
 	}
 	limit := obsdb.LimitOf(q.Limit)
-	rs, err := d.conn.Query(ctx, `SELECT SessionID, max(PublicID) AS sPublicID, max(Agent) AS sAgent,
+	// WITH TIES, then the total order capped at MaxTies past the limit —
+	// the Runs page's rule: sessions sharing one LastSeen ride along
+	// instead of being skipped by a next page read on Before alone.
+	rs, err := d.conn.Query(ctx, `SELECT * FROM (SELECT SessionID, max(PublicID) AS sPublicID, max(Agent) AS sAgent,
 		uniqExact(RunId) AS sTurns, min(Started) AS sFirstSeen, max(LastSeen) AS sLastSeen,
 		sum(InputTokens) AS sInputTokens, sum(OutputTokens) AS sOutputTokens,
 		sum(CachedInputTokens) AS sCachedInputTokens, sum(CacheWriteTokens) AS sCacheWriteTokens,
 		sum(ReasoningTokens) AS sReasoningTokens,
 		argMax(FinishedOK, (Turn, Started)) AS sNewestOK, argMax(Failed, (Turn, Started)) AS sNewestFailed,
 		argMax(LastSeen, (Turn, Started)) AS sNewestLastSeen
-		FROM `+runs+` GROUP BY SessionID`+havingSQL+
-		` ORDER BY sLastSeen DESC LIMIT ?`, append(append([]any{}, hargs...), limit)...)
+		FROM `+runs+` GROUP BY SessionID`+havingSQL(having)+
+		` ORDER BY sLastSeen DESC LIMIT ? WITH TIES) ORDER BY sLastSeen DESC, SessionID DESC LIMIT ?`, append(pageArgs, limit, limit+obsdb.MaxTies)...)
 	if err != nil {
 		return obsdb.SessionPage{}, err
 	}
@@ -656,33 +751,40 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (obsdb.SessionP
 	if err := rs.Err(); err != nil {
 		return obsdb.SessionPage{}, err
 	}
-	if len(page.Sessions) == limit {
-		last := page.Sessions[len(page.Sessions)-1].LastSeen
-		page.NextBefore = &last
+	if len(page.Sessions) >= limit {
+		end := page.Sessions[len(page.Sessions)-1]
+		page.NextBefore, page.NextBeforeID = &end.LastSeen, end.ID
 	}
 	return page, nil
 }
 
 // sessionRuns builds the per-run subquery both Sessions and Session
-// group over. cond appends to the WHERE (Session appends the
-// session-id equality so the detail reads the one session's row
-// directly instead of scanning the newest page).
-func sessionRuns(cond string) string {
-	return `(SELECT RunId, SessionID, max(PublicID) AS PublicID, max(Agent) AS Agent,
-			max(Turn) AS Turn, min(Started) AS Started, max(LastSeen) AS LastSeen,
-			max(FinishedOK) AS FinishedOK, max(Failed) AS Failed,
-			max(InputTokens) AS InputTokens, max(OutputTokens) AS OutputTokens,
-			max(CachedInputTokens) AS CachedInputTokens, max(CacheWriteTokens) AS CacheWriteTokens,
-			max(ReasoningTokens) AS ReasoningTokens
-		FROM weft_runs
-		WHERE ParentRunID = '' AND Playground = 0 AND SessionID != ''` + cond + `
-		GROUP BY RunId, SessionID)`
+// group over: each run collapsed to its aggregates first, then scoped
+// to top-level, non-playground runs that carry a session. The scope
+// reads the collapsed row for the reason runsInner's filters do — a
+// subagent run inherits its parent's session metadata and names its
+// parent on run_start only, so a row-level top-level filter counted
+// its later records as a turn of the session and summed its usage in a
+// second time. narrow goes inside the collapse (Session narrows the
+// scan to the one session's runs), cond onto the collapsed rows.
+func sessionRuns(narrow, cond string) string {
+	return `(SELECT * FROM (SELECT RunId, max(SessionID) AS SessionID, max(PublicID) AS PublicID,
+				max(Agent) AS Agent, max(ParentRunID) AS ParentRunID, max(Playground) AS Playground,
+				max(Turn) AS Turn, min(Started) AS Started, max(LastSeen) AS LastSeen,
+				max(FinishedOK) AS FinishedOK, max(Failed) AS Failed,
+				max(InputTokens) AS InputTokens, max(OutputTokens) AS OutputTokens,
+				max(CachedInputTokens) AS CachedInputTokens, max(CacheWriteTokens) AS CacheWriteTokens,
+				max(ReasoningTokens) AS ReasoningTokens
+			FROM weft_runs` + narrow + `
+			GROUP BY RunId)
+		WHERE ParentRunID = '' AND Playground = 0 AND SessionID != ''` + cond + `)`
 }
 
-func (d *DB) Session(ctx context.Context, id string) (obsdb.SessionDetail, error) {
+func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.SessionDetail{}, err
 	}
+	defer d.closedErr(&err)
 	// The session's own grouped row, queried directly (the sqlite
 	// backend's P2-1 fix): the old read scanned the newest 500
 	// sessions, so an older session 404'd here while the list still
@@ -694,7 +796,9 @@ func (d *DB) Session(ctx context.Context, id string) (obsdb.SessionDetail, error
 		sum(ReasoningTokens) AS sReasoningTokens,
 		argMax(FinishedOK, (Turn, Started)) AS sNewestOK, argMax(Failed, (Turn, Started)) AS sNewestFailed,
 		argMax(LastSeen, (Turn, Started)) AS sNewestLastSeen
-		FROM `+sessionRuns(" AND SessionID = ?")+` GROUP BY SessionID`, id)
+		FROM `+sessionRuns(
+		" WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID = ?)",
+		" AND SessionID = ?")+` GROUP BY SessionID`, id, id)
 	if err != nil {
 		return obsdb.SessionDetail{}, err
 	}
@@ -725,11 +829,16 @@ func (d *DB) Session(ctx context.Context, id string) (obsdb.SessionDetail, error
 		CachedInputTokens: cached, CacheWriteTokens: cacheW,
 		ReasoningTokens: reason,
 	}
-	row.Status = obsdb.DeriveStatus(failed, ok, newestSeen, time.Now())
-	runs, err := d.queryRunRows(ctx,
+	now := time.Now()
+	row.Status = obsdb.DeriveStatus(failed, ok, newestSeen, now)
+	// Every turn (the SQLite backend's rule): a cap here kept the oldest
+	// 500 and silently dropped the newest. A caller that wants pages
+	// reads Runs with RunQuery.SessionID.
+	runs, err := d.queryRunRows(ctx, now,
 		`SELECT `+runColumns+` FROM weft_runs FINAL
-		WHERE SessionID = ? AND ParentRunID = '' AND Playground = 0
-		ORDER BY Turn, Started, RunId LIMIT ?`, id, 500)
+		WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID = ?)
+			AND SessionID = ? AND ParentRunID = '' AND Playground = 0
+		ORDER BY Turn, Started, RunId`, id, id)
 	if err != nil {
 		return obsdb.SessionDetail{}, err
 	}
@@ -739,15 +848,20 @@ func (d *DB) Session(ctx context.Context, id string) (obsdb.SessionDetail, error
 	return obsdb.SessionDetail{SessionRow: row, Runs: runs}, nil
 }
 
-func (d *DB) ResolvePublicID(ctx context.Context, publicID string) (string, error) {
+func (d *DB) ResolvePublicID(ctx context.Context, publicID string) (_ string, err error) {
 	if err := d.checkOpen(); err != nil {
 		return "", err
 	}
+	defer d.closedErr(&err)
 	var sessionID string
-	err := d.conn.QueryRow(ctx,
+	// The RunId IN (...) narrows FINAL to the runs that carry the id, by
+	// primary key (Session's and Run's rule) — without it every
+	// resolution merged the whole table.
+	err = d.conn.QueryRow(ctx,
 		`SELECT SessionID FROM weft_runs FINAL
-		WHERE PublicID = ? AND SessionID != '' ORDER BY Turn DESC, LastSeen DESC LIMIT 1`,
-		publicID).Scan(&sessionID)
+		WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.PublicID = ?)
+			AND PublicID = ? AND SessionID != '' ORDER BY Turn DESC, Started DESC, RunId DESC LIMIT 1`,
+		publicID, publicID).Scan(&sessionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", fmt.Errorf("%w: public id %s", obsdb.ErrNotFound, publicID)

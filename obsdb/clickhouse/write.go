@@ -3,9 +3,13 @@ package clickhouse
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
+
+	ch "github.com/ClickHouse/clickhouse-go/v2"
 
 	"github.com/weftgo/weft/obsdb"
 )
@@ -25,13 +29,21 @@ import (
 // min/max aggregates are unchanged by identical values, so a retried
 // transport's duplicate is a no-op once merged and never inflates a
 // count at read time (uniqExact over the key dedups pre-merge).
-func (d *DB) Write(ctx context.Context, b obsdb.Batch) error {
+func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
+	defer d.closedErr(&err)
 	if len(b.Spans) == 0 && len(b.Records) == 0 {
 		return nil
 	}
+	// The tables partition by day, and the server refuses an insert
+	// block that spans more than 100 partitions by default: one batch
+	// carrying a backfill or a sender's broken clock failed whole, its
+	// sound rows lost with it and a retry failing the same way. The
+	// limit guards against a mis-chosen partition key; this one is
+	// fixed, so the batch is taken as it is.
+	ctx = ch.Context(ctx, ch.WithSettings(ch.Settings{"max_partitions_per_insert_block": 0}))
 	if len(b.Spans) > 0 {
 		if err := d.insertSpans(ctx, b.Spans); err != nil {
 			return err
@@ -106,7 +118,7 @@ func (d *DB) insertRecords(ctx context.Context, records []obsdb.Record) error {
 	}
 	for _, r := range records {
 		if err := batch.Append(
-			r.Time, r.TraceID, r.SpanID, uint8(0), "", severityNumber(r.Severity),
+			recordTime(r), r.TraceID, r.SpanID, uint8(0), "", severityNumber(r.Severity),
 			r.Service, r.Body, "",
 			stringAttrs(r.Resource),
 			"", "", "", map[string]string{},
@@ -138,11 +150,21 @@ func (d *DB) insertDeltas(ctx context.Context, records []obsdb.Record) error {
 	}
 	for _, r := range deltas {
 		w := obsdb.DeriveRecord(r)
-		if err := batch.Append(w.RunID, w.Pos, r.Time, r.TraceID, r.SpanID, w.EventType, r.Body); err != nil {
+		if err := batch.Append(w.RunID, w.Pos, recordTime(r), r.TraceID, r.SpanID, w.EventType, r.Body); err != nil {
 			return err
 		}
 	}
 	return batch.Send()
+}
+
+// recordTime is the time a record is stored at: its own, or — OTLP's
+// rule for a zero ("unknown") Time — the observed one (the SQLite
+// backend reads it the same way).
+func recordTime(r obsdb.Record) time.Time {
+	if r.Time.IsZero() {
+		return r.Observed
+	}
+	return r.Time
 }
 
 // spanDuration returns end-start in nanoseconds, floored at zero for a
@@ -212,11 +234,58 @@ func jsonOrNull(m map[string]any) string {
 	if len(m) == 0 {
 		return ""
 	}
-	b, err := json.Marshal(m)
+	b, err := marshalColumn(m)
 	if err != nil {
 		return ""
 	}
 	return string(b)
+}
+
+// marshalColumn encodes a weft JSON column. JSON has no spelling for NaN
+// or an infinite double, yet both are legal OTLP attribute values: one
+// of them must not cost the row its typed column (the read would fall
+// back to the stringified map, every int64 attribute a string). They are
+// stored under the names the protobuf JSON mapping gives them — the
+// SQLite backend's rule, so both backends read the same values back.
+func marshalColumn(v any) ([]byte, error) {
+	b, err := json.Marshal(v)
+	var unsupported *json.UnsupportedValueError
+	if errors.As(err, &unsupported) {
+		return json.Marshal(finite(v))
+	}
+	return b, err
+}
+
+// finite returns v with every non-finite double replaced by its name,
+// copied, never modified in place — the batch is the caller's.
+func finite(v any) any {
+	switch x := v.(type) {
+	case float64:
+		switch {
+		case math.IsNaN(x):
+			return "NaN"
+		case math.IsInf(x, 1):
+			return "Infinity"
+		case math.IsInf(x, -1):
+			return "-Infinity"
+		}
+	case map[string]any:
+		if x == nil {
+			return x
+		}
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			out[k] = finite(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = finite(e)
+		}
+		return out
+	}
+	return v
 }
 
 // eventsJSON marshals span events with typed attributes.
@@ -234,45 +303,56 @@ func eventsJSON(events []obsdb.SpanEvent) string {
 		wire[i] = wireEvent{Time: e.Time, Name: e.Name, Attrs: e.Attrs}
 	}
 	b, err := json.Marshal(wire)
+	var unsupported *json.UnsupportedValueError
+	if errors.As(err, &unsupported) {
+		for i := range wire {
+			wire[i].Attrs, _ = finite(wire[i].Attrs).(map[string]any)
+		}
+		b, err = json.Marshal(wire)
+	}
 	if err != nil {
 		return ""
 	}
 	return string(b)
 }
 
-// The OTLP enum names the pinned exporter writes (v0.162.0
-// exporter_traces.go appends span.Kind().String() and
-// spanStatus.Code().String(), the OTLP proto's own value names), and
-// their inverses. A test pins the round trip.
+// The span kind and status spellings the pinned exporter writes:
+// v0.162.0's exporter_traces.go appends span.Kind().String() and
+// spanStatus.Code().String(), which are pdata's names — "Internal",
+// "Error" — not the OTLP proto value names (SPAN_KIND_INTERNAL,
+// STATUS_CODE_ERROR). Writes use the exporter's spelling, so a row is
+// the same shape whoever wrote it; reads accept both, because rows
+// written before migration 0003 (and by older exporters) carry the
+// proto names. Tests pin the round trip and both read spellings.
 
 func spanKindName(kind int) string {
 	switch kind {
 	case 1:
-		return "SPAN_KIND_INTERNAL"
+		return "Internal"
 	case 2:
-		return "SPAN_KIND_SERVER"
+		return "Server"
 	case 3:
-		return "SPAN_KIND_CLIENT"
+		return "Client"
 	case 4:
-		return "SPAN_KIND_PRODUCER"
+		return "Producer"
 	case 5:
-		return "SPAN_KIND_CONSUMER"
+		return "Consumer"
 	default:
-		return "SPAN_KIND_UNSPECIFIED"
+		return "Unspecified"
 	}
 }
 
 func spanKindInt(name string) int {
 	switch name {
-	case "SPAN_KIND_INTERNAL":
+	case "Internal", "SPAN_KIND_INTERNAL":
 		return 1
-	case "SPAN_KIND_SERVER":
+	case "Server", "SPAN_KIND_SERVER":
 		return 2
-	case "SPAN_KIND_CLIENT":
+	case "Client", "SPAN_KIND_CLIENT":
 		return 3
-	case "SPAN_KIND_PRODUCER":
+	case "Producer", "SPAN_KIND_PRODUCER":
 		return 4
-	case "SPAN_KIND_CONSUMER":
+	case "Consumer", "SPAN_KIND_CONSUMER":
 		return 5
 	default:
 		return 0
@@ -282,19 +362,19 @@ func spanKindInt(name string) int {
 func statusCodeName(code int) string {
 	switch code {
 	case 1:
-		return "STATUS_CODE_OK"
+		return "Ok"
 	case 2:
-		return "STATUS_CODE_ERROR"
+		return "Error"
 	default:
-		return "STATUS_CODE_UNSET"
+		return "Unset"
 	}
 }
 
 func statusCodeInt(name string) int {
 	switch name {
-	case "STATUS_CODE_OK":
+	case "Ok", "STATUS_CODE_OK":
 		return 1
-	case "STATUS_CODE_ERROR":
+	case "Error", "STATUS_CODE_ERROR":
 		return 2
 	default:
 		return 0

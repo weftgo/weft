@@ -1,10 +1,15 @@
 package clickhouse
 
 import (
+	"context"
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	ch "github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 
 	"github.com/weftgo/weft/obsdb"
 )
@@ -22,8 +27,8 @@ func TestMigrationPinsExporterVersion(t *testing.T) {
 	if !strings.Contains(string(body), pinnedExporterVersion) {
 		t.Errorf("migration 0001 does not name the pinned exporter version %s", pinnedExporterVersion)
 	}
-	if highestMigration() != 2 {
-		t.Errorf("highest migration = %d, want 2 (0001 init, 0002 experiments)", highestMigration())
+	if highestMigration() != 3 {
+		t.Errorf("highest migration = %d, want 3 (0001 init, 0002 experiments, 0003 status spelling)", highestMigration())
 	}
 }
 
@@ -177,6 +182,23 @@ func TestTTLOptionDefaults(t *testing.T) {
 	}
 }
 
+// A window renders as whole seconds, rounded up — never the zero
+// interval a truncated sub-second window produced, which expires every
+// row on arrival.
+func TestTTLSecondsRoundUp(t *testing.T) {
+	for _, c := range []struct {
+		in   time.Duration
+		want int64
+	}{
+		{500 * time.Millisecond, 1}, {time.Nanosecond, 1}, {time.Second, 1},
+		{1500 * time.Millisecond, 2}, {time.Hour, 3600}, {DefaultContentTTL, 2592000}, {DefaultMetaTTL, 7776000},
+	} {
+		if got := ttlSeconds(c.in); got != c.want {
+			t.Errorf("ttlSeconds(%v) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
 func TestKeepDeltasOption(t *testing.T) {
 	var cfg openConfig
 	KeepDeltas().apply(&cfg)
@@ -185,16 +207,18 @@ func TestKeepDeltasOption(t *testing.T) {
 	}
 }
 
-// The OTLP enum names the pinned exporter writes, round-tripped.
+// The span kind and status names the pinned exporter writes (pdata's
+// String() spellings — exporter_traces.go at v0.162.0), round-tripped,
+// and the OTLP proto value names older rows carry still read.
 func TestOTLPEnumNames(t *testing.T) {
 	for kind := 0; kind <= 6; kind++ {
 		if got := spanKindInt(spanKindName(kind)); got != kind && kind <= 5 {
 			t.Errorf("span kind %d round trip = %d", kind, got)
 		}
 	}
-	if spanKindName(0) != "SPAN_KIND_UNSPECIFIED" || spanKindName(1) != "SPAN_KIND_INTERNAL" ||
-		spanKindName(3) != "SPAN_KIND_CLIENT" {
-		t.Error("span kind names must be the OTLP proto value names the exporter writes")
+	if spanKindName(0) != "Unspecified" || spanKindName(1) != "Internal" ||
+		spanKindName(3) != "Client" {
+		t.Error("span kind names must be pdata's SpanKind.String() spellings the exporter writes")
 	}
 	if spanKindInt("weird") != 0 {
 		t.Error("unknown kind reads unspecified")
@@ -204,8 +228,13 @@ func TestOTLPEnumNames(t *testing.T) {
 			t.Errorf("status code %d round trip = %d", code, got)
 		}
 	}
-	if statusCodeName(2) != "STATUS_CODE_ERROR" {
-		t.Error("error status code name must be the OTLP proto value name")
+	if statusCodeName(2) != "Error" || statusCodeName(1) != "Ok" || statusCodeName(0) != "Unset" {
+		t.Error("status code names must be pdata's StatusCode.String() spellings the exporter writes")
+	}
+	// Rows from before migration 0003 (and older exporters).
+	if spanKindInt("SPAN_KIND_SERVER") != 2 || statusCodeInt("STATUS_CODE_ERROR") != 2 ||
+		statusCodeInt("STATUS_CODE_OK") != 1 {
+		t.Error("the OTLP proto value names must still read")
 	}
 }
 
@@ -317,14 +346,14 @@ func TestContractKeysMatchMetaOf(t *testing.T) {
 }
 
 // The Runs meta filter compiles to a JSON condition over the metadata
-// column — the SQL shape of a MetaOf subset match.
+// column — the SQL shape of a MetaOf subset match — applied to the
+// grouped rows, never to weft_runs' stored ones.
 func TestRunsInnerMetaFilter(t *testing.T) {
 	sql, _ := runsInner(obsdb.RunQuery{Meta: map[string]string{"tenant": "acme"}})
 	for _, want := range []string{
 		"JSONHas(Meta, ?)",
 		"JSONExtractString(Meta, ?) = ?",
-		"GROUP BY RunId",
-		"FROM (SELECT * FROM weft_runs WHERE",
+		"FROM weft_runs WHERE 1=1 GROUP BY RunId) WHERE ParentRunID = '' AND JSONHas(Meta, ?)",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("runsInner missing %q:\n%s", want, sql)
@@ -332,39 +361,119 @@ func TestRunsInnerMetaFilter(t *testing.T) {
 	}
 }
 
-// The migration's mapFilter tuples must be exactly obsdb.MetaOf's
-// exclusion set — the SQL copy of contractKeys, in both run views.
+// Every Runs filter reads the grouped row: nothing but the narrowing
+// RunId IN (...) may sit between weft_runs and its GROUP BY, or an
+// unmerged run is filtered row by row (the child-run leak). An identity
+// equality binds twice — once to narrow the scan, once on the grouped
+// row — in text order.
+func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
+	yes := true
+	sql, args := runsInner(obsdb.RunQuery{
+		Agent: "a", SessionID: "s", PublicID: "p", ParentRunID: "par",
+		ExperimentID: "e", Playground: &yes,
+	})
+	inner, outer, ok := strings.Cut(sql, " GROUP BY RunId) WHERE ")
+	if !ok {
+		t.Fatalf("runsInner has no grouped subquery:\n%s", sql)
+	}
+	_, where, _ := strings.Cut(inner, " FROM weft_runs WHERE ")
+	for _, cond := range strings.Split(where, " AND ") {
+		if !strings.HasPrefix(cond, "RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.") {
+			t.Errorf("row-level filter before GROUP BY: %q", cond)
+		}
+	}
+	if outer != "Agent = ? AND SessionID = ? AND PublicID = ? AND ParentRunID = ? AND Playground = ? AND ExperimentID = ?" {
+		t.Errorf("grouped-row filter = %q", outer)
+	}
+	want := []any{"a", "s", "p", "par", "e", "a", "s", "p", "par", &yes, "e"}
+	if len(args) != len(want) {
+		t.Fatalf("args = %v, want %d binds", args, len(want))
+	}
+	for i, w := range want {
+		if p, isPtr := w.(*bool); isPtr {
+			if args[i] != *p {
+				t.Errorf("arg %d = %v, want %v", i, args[i], *p)
+			}
+			continue
+		}
+		if args[i] != w {
+			t.Errorf("arg %d = %v, want %v", i, args[i], w)
+		}
+	}
+}
+
+// The migrations' mapFilter tuples must be exactly obsdb.MetaOf's
+// exclusion set — the SQL copy of contractKeys: in both run views of
+// 0001, and in 0003's restated traces view.
 func TestMigrationContractTuple(t *testing.T) {
-	body, err := migrationsFS.ReadFile("migrations/" + migrations[1])
+	for v, want := range map[int]int{1: 2, 3: 1} {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		marker := "NOT has(["
+		count := strings.Count(string(body), marker)
+		if count != want {
+			t.Fatalf("migration %d: expected the tuple %d time(s), found %d", v, want, count)
+		}
+		rest := string(body)
+		for i := 0; i < count; i++ {
+			start := strings.Index(rest, marker) + len(marker)
+			end := strings.Index(rest[start:], "], k)")
+			if end < 0 {
+				t.Fatal("tuple not terminated")
+			}
+			tuple := rest[start : start+end]
+			var sqlKeys []string
+			for _, part := range strings.Split(tuple, ",") {
+				sqlKeys = append(sqlKeys, strings.Trim(strings.TrimSpace(part), "'"))
+			}
+			if len(sqlKeys) != len(contractKeys) {
+				t.Fatalf("migration %d: tuple has %d keys, contractKeys has %d", v, len(sqlKeys), len(contractKeys))
+			}
+			for i, k := range contractKeys {
+				if sqlKeys[i] != k {
+					t.Errorf("migration %d: tuple key %d = %q, want %q", v, i, sqlKeys[i], k)
+				}
+			}
+			rest = rest[start+end:]
+		}
+	}
+}
+
+// Migration 0003 is 0001's traces view with one change — the error
+// status read in both spellings. Pinned offline against 0001's text so
+// the restated select cannot drift from the view it replaces.
+func TestMigration0003RestatesTracesView(t *testing.T) {
+	init, err := migrationsFS.ReadFile("migrations/" + migrations[1])
 	if err != nil {
 		t.Fatal(err)
 	}
-	marker := "NOT has(["
-	count := strings.Count(string(body), marker)
-	if count != 2 {
-		t.Fatalf("expected the tuple in both run views, found %d", count)
+	fix, err := migrationsFS.ReadFile("migrations/" + migrations[3])
+	if err != nil {
+		t.Fatal(err)
 	}
-	rest := string(body)
-	for i := 0; i < count; i++ {
-		start := strings.Index(rest, marker) + len(marker)
-		end := strings.Index(rest[start:], "], k)")
-		if end < 0 {
-			t.Fatal("tuple not terminated")
-		}
-		tuple := rest[start : start+end]
-		var sqlKeys []string
-		for _, part := range strings.Split(tuple, ",") {
-			sqlKeys = append(sqlKeys, strings.Trim(strings.TrimSpace(part), "'"))
-		}
-		if len(sqlKeys) != len(contractKeys) {
-			t.Fatalf("tuple has %d keys, contractKeys has %d", len(sqlKeys), len(contractKeys))
-		}
-		for i, k := range contractKeys {
-			if sqlKeys[i] != k {
-				t.Errorf("tuple key %d = %q, want %q", i, sqlKeys[i], k)
-			}
-		}
-		rest = rest[start+end:]
+	const create = "CREATE MATERIALIZED VIEW IF NOT EXISTS weft_runs_traces_mv TO weft_runs AS"
+	const alter = "ALTER TABLE weft_runs_traces_mv MODIFY QUERY"
+	_, was, ok := strings.Cut(string(init), create)
+	if !ok {
+		t.Fatal("0001 has no weft_runs_traces_mv")
+	}
+	_, now, ok := strings.Cut(string(fix), alter)
+	if !ok {
+		t.Fatal("0003 does not MODIFY QUERY weft_runs_traces_mv")
+	}
+	want := strings.NewReplacer(
+		"startsWith(SpanName, 'invoke_agent')) AS isInvoke,\n",
+		"startsWith(SpanName, 'invoke_agent')) AS isInvoke,\n     StatusCode IN ('Error', 'STATUS_CODE_ERROR') AS isError,\n",
+		"StatusCode = 'STATUS_CODE_ERROR'", "isError",
+	).Replace(was)
+	if now != want {
+		t.Errorf("0003's select is not 0001's with the status spelling widened:\n%s", now)
+	}
+	stmts := splitStatements(string(fix))
+	if len(stmts) != 1 || !strings.HasPrefix(stmts[0], alter) {
+		t.Errorf("0003 must be the one ALTER statement, got %d", len(stmts))
 	}
 }
 
@@ -404,5 +513,66 @@ func TestSpecExperimentsEnginePresent(t *testing.T) {
 		if !strings.Contains(ddl, want) {
 			t.Errorf("migration 0002 missing %q:\n%s", want, ddl)
 		}
+	}
+}
+
+// stubConn is a ch.Conn whose Query returns canned rows: the offline
+// seat for the failure paths a live server will not produce on demand.
+type stubConn struct {
+	ch.Conn
+	rows *stubRows
+}
+
+func (c stubConn) Query(context.Context, string, ...any) (driver.Rows, error) { return c.rows, nil }
+
+// stubRows yields n rows whose Scan fails with scanErr (when set), then
+// ends with err; it records Close.
+type stubRows struct {
+	driver.Rows
+	n       int
+	scanErr error
+	err     error
+	closed  bool
+}
+
+func (r *stubRows) Next() bool {
+	if r.n == 0 {
+		return false
+	}
+	r.n--
+	return true
+}
+func (r *stubRows) Scan(...any) error { return r.scanErr }
+func (r *stubRows) Err() error        { return r.err }
+func (r *stubRows) Close() error      { r.closed = true; return nil }
+
+// A read that failed mid-stream is not a missing experiment: Next
+// reports false and Err carries the failure. Experiment answered
+// ErrNotFound for it, which SaveExperiment takes as "first save" — the
+// update then reset Created (P2-4's bug through the stream's door).
+func TestExperimentSurfacesStreamError(t *testing.T) {
+	boom := errors.New("code: 241, memory limit exceeded")
+	rows := &stubRows{err: boom}
+	d := &DB{conn: stubConn{rows: rows}}
+	if _, err := d.Experiment(context.Background(), "exp_1"); !errors.Is(err, boom) {
+		t.Errorf("Experiment on a failed read = %v, want the read's error (never ErrNotFound)", err)
+	}
+	if !rows.closed {
+		t.Error("Experiment left its rows open")
+	}
+}
+
+// Experiments closes its rows on every path: an early return from a
+// row that fails to scan left the stream — and the pooled connection
+// its reader holds — open.
+func TestExperimentsClosesRowsOnError(t *testing.T) {
+	boom := errors.New("scan failed")
+	rows := &stubRows{n: 1, scanErr: boom}
+	d := &DB{conn: stubConn{rows: rows}}
+	if _, err := d.Experiments(context.Background()); !errors.Is(err, boom) {
+		t.Fatalf("Experiments = %v, want the scan error", err)
+	}
+	if !rows.closed {
+		t.Error("Experiments returned on a scan error without closing its rows")
 	}
 }

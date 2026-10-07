@@ -29,7 +29,8 @@ import (
 // default INSERT — they exist only in the exporter's json-mode
 // tables — so their absence here is safe. The values follow the
 // append order of exporter_traces.go and exporter_logs.go at the same
-// tag.
+// tag — SpanKind and StatusCode in pdata's String() spellings
+// ("Internal", "Ok"), which is what that file appends.
 
 const collectorTracesInsert = `INSERT INTO %q.%q (
     Timestamp,
@@ -139,14 +140,14 @@ func TestCollectorShapeInserts(t *testing.T) {
 	}
 	if err := spanBatch.Append(
 		at, "0102030405060708090a0b0c0d0e0f10", "0a0b0c0d0e0f0102", "", "",
-		"invoke_agent conf", "SPAN_KIND_INTERNAL", "conf-svc",
+		"invoke_agent conf", "Internal", "conf-svc",
 		map[string]string{"service.name": "conf-svc"}, "", "",
 		map[string]string{
 			"gen_ai.operation.name": "invoke_agent", "weft.run.id": "collector",
 			"gen_ai.agent.name": "conf", "weft.session.id": "s_col",
 			"weft.turn": "1", "gen_ai.usage.input_tokens": "42",
 		},
-		uint64(9000000000), "STATUS_CODE_OK", "",
+		uint64(9000000000), "Ok", "",
 		[]time.Time{at, at.Add(time.Second)},
 		[]string{"gen_ai.content.prompt", "exception"},
 		[]map[string]string{{"gen_ai.system.prompt": "short"}, {"exception.type": "RuntimeError"}},

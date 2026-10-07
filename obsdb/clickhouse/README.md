@@ -12,7 +12,8 @@ import (
 db, err := clickhouse.Open("clickhouse://default:pass@localhost:9000/weft",
     clickhouse.TTL(30*24*time.Hour, 90*24*time.Hour)) // content, spans+runs
 // db implements obsdb.DB: Write, Runs, Run, Events, Transcript,
-// RunSpans, Trace, Sessions, Session, ResolvePublicID, Close.
+// RunSpans, Trace, Sessions, Session, ResolvePublicID, SaveExperiment,
+// Experiments, Experiment, Close.
 ```
 
 `Open` creates and versions the schema in `obsdb_migrations` (the
@@ -79,8 +80,15 @@ services:
 
 ### CI job (service container)
 
-The job below is what CI runs for this module — `clickhouse/clickhouse-server`
-as a service container, the DSN pointing at the service name:
+The job below is what `.github/workflows/ci.yml` runs for this module —
+`clickhouse/clickhouse-server` as a service container, the DSN pointing
+at the port the service maps onto the runner. A service container takes
+`docker create` flags through `options:` (GitHub Actions has no
+`ulimits:` key — one makes the whole workflow file invalid), and the
+health check holds the steps until the server answers a query on the
+native port. A gated test that skips fails the job, so a DSN the tests
+cannot read never reads green; the same DSN un-gates `studio/cmd`'s
+`--db clickhouse://` test.
 
 ```yaml
 clickhouse:
@@ -92,26 +100,32 @@ clickhouse:
         CLICKHOUSE_PASSWORD: weft
       ports:
         - 9000:9000
-      ulimits:
-        nofile: 262144:262144
-  env:
-    WEFT_CLICKHOUSE_DSN: clickhouse://default:weft@127.0.0.1:9000/default
-  steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-go@v5
-      with:
-        go-version: stable
-    - run: go test -race ./obsdb/clickhouse/...
-```
-
-(Health check: the image's entrypoint serves once the port is open; if
-your runner needs an explicit one, add an `options:` block to the
-service:
-
-```yaml
       options: >-
+        --ulimit nofile=262144:262144
         --health-cmd "clickhouse-client --password weft --query 'SELECT 1'"
         --health-interval 5s
         --health-timeout 5s
-        --health-retries 10
+        --health-retries 20
+  env:
+    WEFT_CLICKHOUSE_DSN: clickhouse://default:weft@127.0.0.1:9000/default
+  steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version: stable
+    - name: test (obsdb/clickhouse, gated suite)
+      working-directory: obsdb/clickhouse
+      run: |
+        set -o pipefail
+        go test -race -count=1 -v ./... | tee "$RUNNER_TEMP/clickhouse.log"
+        if grep -E '^\s*--- SKIP' "$RUNNER_TEMP/clickhouse.log"; then
+          echo "gated tests skipped: WEFT_CLICKHOUSE_DSN did not reach them" >&2
+          exit 1
+        fi
+    - name: test (studio/cmd, gated --db clickhouse:// test)
+      working-directory: studio/cmd
+      run: |
+        set -o pipefail
+        go test -race -count=1 -v -run '^TestNewServerClickhouse$' ./... | tee "$RUNNER_TEMP/studio-cmd.log"
+        grep -q -- '--- PASS: TestNewServerClickhouse' "$RUNNER_TEMP/studio-cmd.log"
 ```

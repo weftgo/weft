@@ -61,8 +61,13 @@ func KeepDeltas() Option {
 // and weft_runs. Values ≤ 0 keep the default for that class
 // (DefaultContentTTL / DefaultMetaTTL), so TTL(0, 7*24*time.Hour)
 // changes only the spans-and-runs window. Open applies non-default
-// windows with ALTER TABLE ... MODIFY TTL after the migrations, so the
-// tables converge to the caller's windows on every Open.
+// windows with ALTER TABLE ... MODIFY TTL after the migrations (a no-op
+// on the server when the clause is unchanged). An Open with both
+// classes at their defaults alters nothing: the tables keep whatever
+// windows they already have — the migration's defaults on a fresh
+// database, or an earlier Open's override — so a process that opens
+// the database without TTL (the studio binary) never undoes the
+// windows the writer set. Windows are whole seconds, rounded up.
 func TTL(content, meta time.Duration) Option {
 	return openOption(func(c *openConfig) {
 		if content > 0 {
@@ -122,15 +127,16 @@ func Open(dsn string, opts ...Option) (obsdb.DB, error) {
 	return db, nil
 }
 
-// applyTTLs converges the tables' TTL clauses to the configured
-// windows. The migration creates them with the defaults; a TTL(...)
-// override rewrites them on every Open, which is idempotent and keeps
-// the schema inspectable (SHOW CREATE TABLE tells the truth).
+// applyTTLs sets the tables' TTL clauses to the configured windows.
+// The migration creates them with the defaults; a TTL(...) override
+// rewrites them on every Open, which is idempotent and keeps the
+// schema inspectable (SHOW CREATE TABLE tells the truth). With both
+// classes at their defaults nothing is altered (see TTL).
 func (d *DB) applyTTLs(ctx context.Context) error {
 	if d.contentTTL == DefaultContentTTL && d.metaTTL == DefaultMetaTTL {
 		return nil
 	}
-	contentSec, metaSec := int(d.contentTTL.Seconds()), int(d.metaTTL.Seconds())
+	contentSec, metaSec := ttlSeconds(d.contentTTL), ttlSeconds(d.metaTTL)
 	for _, stmt := range []string{
 		fmt.Sprintf("ALTER TABLE otel_logs MODIFY TTL Timestamp + toIntervalSecond(%d)", contentSec),
 		fmt.Sprintf("ALTER TABLE weft_records MODIFY TTL Time + toIntervalSecond(%d)", contentSec),
@@ -143,6 +149,13 @@ func (d *DB) applyTTLs(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// ttlSeconds renders a window as whole seconds, rounded up: a
+// sub-second window truncated to toIntervalSecond(0) would expire every
+// row the moment it is written.
+func ttlSeconds(d time.Duration) int64 {
+	return int64((d + time.Second - 1) / time.Second)
 }
 
 // Close closes the connection. Further calls return obsdb.ErrClosed.
@@ -164,4 +177,14 @@ func (d *DB) checkOpen() error {
 		return obsdb.ErrClosed
 	}
 	return nil
+}
+
+// closedErr turns the error of a call that raced Close into ErrClosed:
+// checkOpen passed, then Close shut the handle under the call, and the
+// driver's own "closed" error is not the documented sentinel. Every
+// method defers it on its error result.
+func (d *DB) closedErr(err *error) {
+	if *err != nil && d.checkOpen() != nil {
+		*err = obsdb.ErrClosed
+	}
 }

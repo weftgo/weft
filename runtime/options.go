@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"log/slog"
+	"net"
+	"net/url"
 	"os"
 
 	"github.com/weftgo/weft"
@@ -38,7 +40,9 @@ func Studio(url, token string) Option {
 
 // Local takes the embedded Studio server (setup A): the link talks to
 // srv's handler in-process, no socket. srv is the studio.New(...)
-// server the app mounts; nil is ignored.
+// server the app mounts; nil is ignored. In-process is not exempt from
+// srv's own token gate: a server built with studio.Token needs the
+// token here as well — add Studio("", token).
 func Local(srv *studio.Server) Option {
 	return func(c *config) { c.local = srv }
 }
@@ -83,12 +87,21 @@ func Limits(b Budget) Option {
 	return func(c *config) { c.budget = b }
 }
 
-// AllowSideEffects names the tools whose handlers may really run for a
-// playground command that asks for side_effects "allow". Every
-// side-effect tool (ReplayPolicy never, the unannotated default) parks
-// at the approval boundary in the other modes; a tool marked
-// weft.Replay(weft.ReplaySafe) is not a side effect and may run in any
-// mode.
+// AllowSideEffects opts tools in to really running in playground runs:
+// a tool named here is never parked and never substituted, in any
+// side_effects mode — its handler executes whenever an experiment's
+// model calls it. Every other side-effect tool (ReplayPolicy never,
+// the unannotated default) is substituted with its recorded result or
+// parked at the approval boundary; a tool marked
+// weft.Replay(weft.ReplaySafe) is not a side effect and runs in any
+// mode. A command that asks for side_effects "allow" is refused unless
+// every tool it leaves on is named here — "allow" asserts that nothing
+// will park, it does not widen this list.
+//
+// Name a tool here only when re-running it is harmless. Names match
+// wherever the run reaches: a tool a weft.ToolSource supplies under
+// that name, and a tool of that name in a weft.Subagent child (the
+// child is under the same rule — its other tools park).
 func AllowSideEffects(tools ...string) Option {
 	return func(c *config) {
 		if c.allow == nil {
@@ -120,8 +133,10 @@ func Enabled(on bool) Option {
 // link: it dials out (never listens), so it works behind NAT. It never
 // panics and never fails the program — a runtime that cannot be built
 // (nothing enabled, no endpoint, no named agents) logs a WARN and
-// opens nothing. The returned function stops the link; call it on
-// exit, like otel.Install's.
+// opens nothing. The returned function stops the link — the command
+// stream ends, the runs the link started are canceled, and it waits
+// (bounded) for both; call it on exit, like otel.Install's. Calling it
+// again is harmless.
 //
 // The link registers on connect and after every reconnect, receives
 // commands over an SSE stream (resuming with Last-Event-ID), acks every
@@ -159,6 +174,10 @@ func Install(opts ...Option) (shutdown func()) {
 			"hint", "runtime.Studio(url, token), runtime.Local(srv), or a Studio destination in weft/otel")
 		return func() {}
 	}
+	if c.local == nil && token != "" && cleartext(url) {
+		slog.Warn("weft/runtime: the Studio token travels unencrypted over http to a non-loopback host",
+			"hint", "use an https Studio URL")
+	}
 	reg := newRegistry(c)
 	l := newLink(c, reg, url, token)
 	if err := l.start(); err != nil {
@@ -168,7 +187,25 @@ func Install(opts ...Option) (shutdown func()) {
 	return l.stop
 }
 
+// cleartext reports whether rawURL is plain http to a host that is not
+// this machine — where a bearer token would cross a network readable.
+func cleartext(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return false
+	}
+	return true
+}
+
 // weftVersion is the root module's version this runtime reports at
 // registration. Hard-coded like otel's own weftVersion (the root
-// exports no Version); the release step bumps it with the tag.
+// exports no Version); the release step bumps it with the tag, and
+// TestWeftVersionMatchesRoot fails until it does.
 func weftVersion() string { return "v0.7.0" }

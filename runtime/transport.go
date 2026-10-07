@@ -3,7 +3,9 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -52,14 +54,34 @@ func (t *handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	ctx, cancel := context.WithCancel(req.Context())
 	go func() {
 		defer close(rec.done)
+		defer func() {
+			// net/http's server contains a handler panic per connection;
+			// in-process this goroutine is the connection. Without the
+			// same containment a panic in Studio's handler would take the
+			// app down — over a socket it would cost one response.
+			if r := recover(); r != nil {
+				slog.Error("weft/runtime: in-process Studio handler panicked", "path", req.URL.Path, "panic", fmt.Sprint(r))
+				rec.WriteHeader(http.StatusInternalServerError)
+				_ = pw.CloseWithError(io.ErrUnexpectedEOF)
+				return
+			}
+			_ = pw.Close()
+		}()
 		t.h.ServeHTTP(rec, req.Clone(ctx))
-		_ = pw.Close()
 	}()
 	// The client needs StatusCode and Header the moment RoundTrip
 	// returns; wait for the handler's first write (or its end).
 	select {
 	case <-rec.ready:
 	case <-rec.done:
+	case <-req.Context().Done():
+		// The caller's deadline (the register timeout, the link's
+		// shutdown) holds here as it does on a socket: a handler that
+		// has not answered does not hold the caller. Closing the read
+		// side fails the handler's late writes instead of blocking them.
+		cancel()
+		_ = pr.CloseWithError(req.Context().Err())
+		return nil, req.Context().Err()
 	}
 	resp := &http.Response{
 		StatusCode: rec.status(),
@@ -103,6 +125,7 @@ type pipeResponseWriter struct {
 	mu     sync.Mutex
 	pw     *io.PipeWriter
 	header http.Header
+	sent   http.Header // header as of the first write: what the client sees
 	code   int
 	wrote  bool
 
@@ -125,18 +148,19 @@ func (w *pipeResponseWriter) WriteHeader(code int) {
 	defer w.mu.Unlock()
 	if !w.wrote {
 		w.wrote, w.code = true, code
+		w.sent = w.header.Clone()
 		close(w.ready)
 	}
 }
 
 func (w *pipeResponseWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
-	first := !w.wrote
-	w.wrote = true
-	w.mu.Unlock()
-	if first {
+	if !w.wrote {
+		w.wrote = true
+		w.sent = w.header.Clone()
 		close(w.ready)
 	}
+	w.mu.Unlock()
 	return w.pw.Write(p)
 }
 
@@ -153,16 +177,17 @@ func (w *pipeResponseWriter) status() int {
 	return w.code
 }
 
-// headerSnapshot copies the headers as of the first write — the
-// client must not see later mutations.
+// headerSnapshot returns the headers as of the first write — taken on
+// the handler's own goroutine when it wrote, so the client never reads
+// the map the handler may still be setting — or as the handler left
+// them when it returned without writing.
 func (w *pipeResponseWriter) headerSnapshot() http.Header {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	clone := make(http.Header, len(w.header))
-	for k, v := range w.header {
-		clone[k] = append([]string(nil), v...)
+	if w.sent != nil {
+		return w.sent
 	}
-	return clone
+	return w.header.Clone()
 }
 
 // bearerAuth sets the Studio token on a request (the Studio

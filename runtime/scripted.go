@@ -24,9 +24,10 @@ import (
 // prompt, wefttest/replay.go:77-96; the tool list comes from the
 // manifest, so a PrepareStep that changed tools per step will miss).
 //
-// ReasoningPart.Signature never streams (ADR 0004), so a scripted run's
-// rebuilt transcript lacks signatures — harmless without a provider,
-// and recorded here so nobody expects otherwise.
+// Signatures (a reasoning block's, a tool call's) are replayed with the
+// events that carry them, so the rebuilt assistant message equals the
+// recorded one byte for byte — the next step's request is then the key
+// the record holds.
 //
 // The prompt trap (§5.5): the key ignores the system prompt by design,
 // so a prompt experiment would silently replay the old answer. Studio
@@ -44,23 +45,26 @@ type scriptedModel struct {
 	byKey map[string][][]weft.ModelEvent // keyed turns, recorded order
 }
 
-// newScriptedModel indexes the transcript: the request whose messages
-// are msgs[:i] is answered by the assistant message at i. tools is the
-// advertised set the requests carried (the agent's registered tools —
-// the manifest's list).
-func newScriptedModel(msgs []weft.Message, tools []string) *scriptedModel {
+// newScriptedModel indexes the source run's own steps: the request
+// whose messages are the run's input plus its steps before assistant
+// message i is answered by that message. The input's assistant
+// messages are earlier turns' answers — context, never a turn this
+// engine replays. tools is the advertised set the requests carried
+// (the agent's registered tools — the manifest's list).
+func newScriptedModel(src *sourceRun, tools []string) *scriptedModel {
 	m := &scriptedModel{
 		info:  weft.ModelInfo{Provider: "weft/runtime", Name: "scripted"},
 		byKey: map[string][][]weft.ModelEvent{},
 	}
 	names := append([]string(nil), tools...)
 	slices.Sort(names)
-	for i, msg := range msgs {
-		if msg.Role != weft.RoleAssistant {
+	msgs := src.all()
+	for i := len(src.input); i < len(msgs); i++ {
+		if msgs[i].Role != weft.RoleAssistant {
 			continue
 		}
 		key := scriptedKey(msgs[:i], names)
-		m.byKey[key] = append(m.byKey[key], eventsOf(msg))
+		m.byKey[key] = append(m.byKey[key], eventsOf(msgs[i]))
 	}
 	return m
 }
@@ -72,9 +76,10 @@ func eventsOf(msg weft.Message) []weft.ModelEvent {
 	for _, p := range msg.Content {
 		switch p := p.(type) {
 		case weft.ReasoningPart:
-			// The signature never streams back (ADR 0004): a scripted
-			// run's rebuilt transcript carries no signatures.
-			out = append(out, weft.ModelReasoningDelta{Text: p.Text})
+			// The block's signature rides its delta (a signed delta closes
+			// the block): the rebuilt message must equal the recorded one,
+			// or the next step's request keys differently and misses.
+			out = append(out, weft.ModelReasoningDelta(p))
 		case weft.TextPart:
 			out = append(out, weft.ModelTextDelta(p))
 		case weft.ToolCallPart:
@@ -83,7 +88,7 @@ func eventsOf(msg weft.Message) []weft.ModelEvent {
 			if len(args) == 0 {
 				args = json.RawMessage("{}")
 			}
-			out = append(out, weft.ModelToolCall{ID: p.ID, Name: p.Name, Args: args})
+			out = append(out, weft.ModelToolCall{ID: p.ID, Name: p.Name, Args: args, Signature: p.Signature})
 		}
 	}
 	reason := weft.StopEndTurn

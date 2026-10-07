@@ -3,6 +3,7 @@ package runtime_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -10,6 +11,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -206,18 +209,30 @@ func (e *e2e) appTurn(t *testing.T, prompt string) string {
 	return ""
 }
 
-// waitRuntime blocks until a runtime is connected.
+// waitRuntime blocks until a runtime is connected: registered AND
+// holding its command stream. The register lands before the stream
+// opens, and a command enqueued between the two is a 503 (not
+// connected) — the listing alone raced it under load.
 func (e *e2e) waitRuntime(t *testing.T) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		_, body := e.api(t, http.MethodGet, "/api/runtimes", "")
-		if strings.Contains(body, "rt_") {
-			return
+		var rts struct {
+			Runtimes []struct {
+				ID string `json:"id"`
+			} `json:"runtimes"`
+		}
+		if json.Unmarshal([]byte(body), &rts) == nil {
+			for _, rt := range rts.Runtimes {
+				if e.srv.Runtime().Connected(rt.ID) {
+					return
+				}
+			}
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatal("no runtime ever registered")
+	t.Fatal("no runtime ever connected")
 }
 
 // waitCommand polls the lifecycle row until state arrives.
@@ -319,6 +334,11 @@ func TestPlaygroundEndToEnd(t *testing.T) {
 
 	// §10.6's P0 gate: the run's span carries the experiment labels
 	// and the override fingerprint.
+	// Flushed, not waited on: the batcher's 5 s export interval sat on
+	// the poll's own 5 s deadline, a flake under load.
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	attrs := e.rec.playgroundSpan(t)
 	want := map[string]string{
 		"weft.playground":            "true",
@@ -341,10 +361,13 @@ func TestPlaygroundEndToEnd(t *testing.T) {
 	if h := attrs["weft.override.hash"]; len(h) != 64 {
 		t.Errorf("weft.override.hash = %q, want 64 hex chars", h)
 	}
-	// The command's only enabled tool is opted in: nothing parks (the
-	// on-set minus the opted-in is empty — §6 rule 3, TestParkedTools).
+	// §6 rule 3's fingerprint: the run parks everything but the tool
+	// the runtime opted in; no breakpoint is set, so no park_on.
+	if p := attrs["weft.override.park_all_except"]; p != "lookup_order" {
+		t.Errorf("weft.override.park_all_except = %q, want %q (the opted-in tool)", p, "lookup_order")
+	}
 	if p := attrs["weft.override.park_on"]; p != "" {
-		t.Errorf("weft.override.park_on = %q, want none for an opted-in tool set", p)
+		t.Errorf("weft.override.park_on = %q, want none without a breakpoint", p)
 	}
 	if sid := attrs["weft.session.id"]; sid != "" {
 		t.Errorf("an ephemeral run carries weft.session.id = %q (§5.2: never)", sid)
@@ -391,12 +414,12 @@ func TestPlaygroundEndToEnd(t *testing.T) {
 }
 
 // TestPlaygroundParkOnSpan pins §6 rule 3's observable fingerprint
-// (§10.1): a command that enables a tool the runtime did not opt in
-// runs with weft.override.park_on naming exactly the enabled
-// non-opted-in set — the model's call to it parks (the run finishes
-// successfully with the call pending) instead of firing the side
-// effect. The opted-in-only command's absence is pinned in
-// TestPlaygroundEndToEnd.
+// (§10.1): every playground run carries weft.override.park_all_except
+// naming the tools that may really run — here the opted-in one — and a
+// command that enables a tool outside it has the model's call park (the
+// run finishes successfully with the call pending) instead of firing
+// the side effect. (The name is historical: the rule was a ParkOn list
+// before it became default-deny.)
 func TestPlaygroundParkOnSpan(t *testing.T) {
 	e := newE2E(t,
 		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"4411"}`}),
@@ -451,9 +474,15 @@ func TestPlaygroundParkOnSpan(t *testing.T) {
 	if row := e.waitCommand(t, "cmd_park", "finished"); !strings.Contains(row, `"run_id":"pg_`) {
 		t.Errorf("park command row = %s, want the run's pg_ id", row)
 	}
-	if attrs := e.rec.playgroundSpan(t); attrs["weft.override.park_on"] != "refund" {
-		t.Errorf("weft.override.park_on = %q, want %q (the enabled tool the runtime did not opt in)",
-			attrs["weft.override.park_on"], "refund")
+	// Flushed, not waited on: the batcher's 5 s export interval sat on
+	// the poll's own 5 s deadline, a flake under load.
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	attrs := e.rec.playgroundSpan(t)
+	if got, ok := attrs["weft.override.park_all_except"]; !ok || got != "lookup_order" {
+		t.Errorf("weft.override.park_all_except = %q (present %v), want %q — refund is not on it, so it parks",
+			got, ok, "lookup_order")
 	}
 }
 
@@ -507,8 +536,10 @@ func TestPlaygroundApprovalVerbs(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"4411"}`, ID: "call_refund"}),
 		wefttest.Say("approved then."),
 	)
-	e.agent = weft.New(script, weft.Name("acme-support"), weft.TracerProvider(e.p.TracerProvider()), refund)
+	e.agent = weft.New(script, weft.Name("acme-support"), weft.TracerProvider(e.p.TracerProvider()),
+		weft.LoggerProvider(e.p.LoggerProvider()), refund) // the messages records: from_step 1 keeps step 0 of them
 	runID := e.appTurn(t, "please refund order #4411")
+	e.waitTranscript(t, runID, "anything else")
 	refundRan.Store(false) // the app's own turn really ran it; the experiment must not
 
 	shutdown := runtime.Install(
@@ -935,6 +966,11 @@ func TestPlaygroundForkMode(t *testing.T) {
 	// The fork's run carries weft.session.forked_from (thread's stamp)
 	// and weft.session.id of the NEW session, beside the playground
 	// labels. The original is untouched: byte-compare the store.
+	// Flushed, not waited on: the batcher's 5 s export interval sat on
+	// the poll's own 5 s deadline, a flake under load.
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	attrs := e.rec.playgroundSpan(t)
 	if attrs["weft.session.forked_from"] == "" {
 		t.Errorf("weft.session.forked_from missing on the fork's run span: %v", attrs)
@@ -1159,7 +1195,9 @@ func TestPlaygroundMatrixBudget(t *testing.T) {
 // countingEchoModel answers every call with a deterministic line — a
 // matrix's cheap cell.
 type countingEchoModel struct {
-	n int
+	// n is atomic: the matrix's runs call Stream concurrently (sixteen
+	// run slots), and a plain int raced under -race.
+	n atomic.Int64
 }
 
 func (m *countingEchoModel) Info() weft.ModelInfo {
@@ -1167,13 +1205,13 @@ func (m *countingEchoModel) Info() weft.ModelInfo {
 }
 
 func (m *countingEchoModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	m.n++
+	n := m.n.Add(1)
 	return func(yield func(weft.ModelEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(nil, err)
 			return
 		}
-		yield(weft.ModelTextDelta{Text: fmt.Sprintf("About cell %d.", m.n)}, nil)
+		yield(weft.ModelTextDelta{Text: fmt.Sprintf("About cell %d.", n)}, nil)
 		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
 	}
 }
@@ -1294,6 +1332,25 @@ func TestDebuggerBreakpointsAndSteer(t *testing.T) {
 		`{"message": "also check the tracking link"}`); code != http.StatusAccepted {
 		t.Fatalf("steer = %d %s", code, resp)
 	}
+	// The 202 means Studio queued the frame, not that the runtime read
+	// it: opening the gate now raced the frame under load (the run
+	// ended first and the steer found nothing in flight). A decision on
+	// the same run, a call it never parked, rides the same ordered
+	// stream behind the steer; its rejection proves the steer is in the
+	// run's queue.
+	code, resp := e.api(t, http.MethodPost, "/api/runs/"+steeredAt+"/approvals", `{"call_id":"c_none","decision":"deny"}`)
+	if code != http.StatusAccepted {
+		t.Fatalf("sentinel decision = %d %s", code, resp)
+	}
+	var sentinel struct {
+		CommandID string `json:"command_id"`
+	}
+	if err := json.Unmarshal([]byte(resp), &sentinel); err != nil {
+		t.Fatal(err)
+	}
+	if row := e.waitCommand(t, sentinel.CommandID, "rejected"); !strings.Contains(row, `"state":"rejected"`) {
+		t.Fatalf("sentinel decision row = %s", row)
+	}
 	close(gate) // the model finishes; the loop drains the steer at its point
 	e.waitCommand(t, "cmd_steer", "finished")
 	// The steered event is in the run's records.
@@ -1357,5 +1414,631 @@ func (m *gatedModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq
 		}
 		yield(weft.ModelTextDelta{Text: "done"}, nil)
 		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+	}
+}
+
+// runtimeID waits for the runtime to register and returns its id.
+func (e *e2e) runtimeID(t *testing.T) string {
+	t.Helper()
+	e.waitRuntime(t)
+	_, rtJSON := e.api(t, http.MethodGet, "/api/runtimes", "")
+	var runtimes struct {
+		Runtimes []struct {
+			ID string `json:"id"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal([]byte(rtJSON), &runtimes); err != nil || len(runtimes.Runtimes) == 0 {
+		t.Fatalf("runtimes: %v %s", err, rtJSON)
+	}
+	return runtimes.Runtimes[0].ID
+}
+
+// run posts one playground command and waits its lifecycle row to
+// state, returning the row and the run id it names.
+func (e *e2e) run(t *testing.T, id, body, state string) (row, runID string) {
+	t.Helper()
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", body); code != http.StatusAccepted {
+		t.Fatalf("command %s = %d %s", id, code, resp)
+	}
+	row = e.waitCommand(t, id, state)
+	var st struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(row), &st); err != nil {
+		t.Fatalf("command %s row %s: %v", id, row, err)
+	}
+	return row, st.RunID
+}
+
+// decide posts one approval decision on a parked run and waits its
+// command out, returning the row and the run id it names.
+func (e *e2e) decide(t *testing.T, runID, body string) (row, resumed string) {
+	t.Helper()
+	code, resp := e.api(t, http.MethodPost, "/api/runs/"+runID+"/approvals", body)
+	if code != http.StatusAccepted {
+		t.Fatalf("decision on %s = %d %s", runID, code, resp)
+	}
+	var cmd struct {
+		CommandID string `json:"command_id"`
+	}
+	if err := json.Unmarshal([]byte(resp), &cmd); err != nil {
+		t.Fatal(err)
+	}
+	row = e.waitCommand(t, cmd.CommandID, "finished")
+	var st struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(row), &st); err != nil {
+		t.Fatalf("decision row %s: %v", row, err)
+	}
+	return row, st.RunID
+}
+
+// texts flattens a request's messages to "role:text" lines — what the
+// model was fed, for the assertions below.
+func texts(msgs []weft.Message) []string {
+	out := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		text := m.Text()
+		for _, p := range m.Content {
+			switch p := p.(type) {
+			case weft.ToolCallPart:
+				text += "call " + p.Name
+			case weft.ToolResultPart:
+				text += "result " + p.Content
+			}
+		}
+		out = append(out, string(m.Role)+":"+text)
+	}
+	return out
+}
+
+// TestPlaygroundMultiTurnSource pins §5.4's "the run gets the thread's
+// context up to that turn" and §5.1's from_step on a source that is
+// not a session's first turn — through both resolution paths (thread
+// storage, and Studio's transcript). The run's steps are its own: an
+// earlier turn's reply is context, not step 0. Before the fix a
+// whole-turn re-run of turn 2 fed the model turn 1's prompt alone (the
+// Studio path) or turn 2's prompt with the conversation gone (the
+// thread path), and from_step 1 cut inside turn 1.
+func TestPlaygroundMultiTurnSource(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		threads bool
+	}{{"studio transcript", false}, {"thread storage", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newE2E(t)
+			script := wefttest.Script(
+				wefttest.Say("answer one"), // turn 1
+				wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"7"}`, ID: "c1"}), // turn 2, step 0
+				wefttest.Say("answer two"),                  // turn 2, step 1
+				wefttest.Say("whole-turn re-run"),           // experiment A
+				wefttest.Say("continued from step one"),     // experiment B
+				wefttest.Say("a new question, same thread"), // experiment C
+			)
+			lookup := weft.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
+				OrderID string `json:"order_id"`
+			}) (string, error) {
+				return "shipped", nil
+			}, weft.Replay(weft.ReplaySafe))
+			e.agent = weft.New(script, weft.Name("acme-support"),
+				weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), lookup)
+			ctx := context.Background()
+			sess, err := thread.Create(ctx, e.store, e.agent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var runID string
+			for _, prompt := range []string{"question one", "question two"} {
+				turn, err := sess.Send(ctx, weft.User(prompt))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := turn.Wait(); err != nil {
+					t.Fatal(err)
+				}
+				runID = turn.RunID()
+			}
+			if err := e.p.ForceFlush(ctx); err != nil {
+				t.Fatal(err)
+			}
+			e.waitTranscript(t, runID, "answer two")
+
+			opts := []runtime.Option{runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent), runtime.Enabled(true)}
+			if tc.threads {
+				opts = append(opts, runtime.Threads(e.store))
+			}
+			shutdown := runtime.Install(opts...)
+			defer shutdown()
+			rt := e.runtimeID(t)
+
+			// A: the whole turn again, no input — the conversation
+			// before it and its own prompt.
+			e.run(t, "cmd_mt_a", fmt.Sprintf(`{"command_id":"cmd_mt_a","runtime":%q,"agent":"acme-support",
+			  "source":{"run_id":%q,"from_step":0},"engine":"live","thread":"ephemeral"}`, rt, runID), "finished")
+			want := []string{"user:question one", "assistant:answer one", "user:question two"}
+			if got := texts(script.LastRequest().Messages); !reflect.DeepEqual(got, want) {
+				t.Errorf("whole-turn re-run of turn 2 fed the model\n  %q\nwant\n  %q", got, want)
+			}
+
+			// B: from_step 1 keeps turn 2's step 0 (the call and its
+			// result) on top of the same context.
+			e.run(t, "cmd_mt_b", fmt.Sprintf(`{"command_id":"cmd_mt_b","runtime":%q,"agent":"acme-support",
+			  "source":{"run_id":%q,"from_step":1},"engine":"live","thread":"ephemeral"}`, rt, runID), "finished")
+			want = []string{"user:question one", "assistant:answer one", "user:question two",
+				"assistant:call lookup_order", "tool:result shipped"}
+			if got := texts(script.LastRequest().Messages); !reflect.DeepEqual(got, want) {
+				t.Errorf("from_step 1 of turn 2 fed the model\n  %q\nwant\n  %q", got, want)
+			}
+
+			// C: an input replaces the turn's own user message — the
+			// conversation before it stays.
+			e.run(t, "cmd_mt_c", fmt.Sprintf(`{"command_id":"cmd_mt_c","runtime":%q,"agent":"acme-support",
+			  "source":{"run_id":%q,"from_step":0},"input":"a different question","engine":"live","thread":"ephemeral"}`, rt, runID), "finished")
+			want = []string{"user:question one", "assistant:answer one", "user:a different question"}
+			if got := texts(script.LastRequest().Messages); !reflect.DeepEqual(got, want) {
+				t.Errorf("turn 2 with a replaced input fed the model\n  %q\nwant\n  %q", got, want)
+			}
+
+			// from_step past the run's last step has nothing fresh to
+			// answer: rejected, never a run on a finished transcript.
+			row, _ := e.run(t, "cmd_mt_d", fmt.Sprintf(`{"command_id":"cmd_mt_d","runtime":%q,"agent":"acme-support",
+			  "source":{"run_id":%q,"from_step":2},"engine":"live","thread":"ephemeral"}`, rt, runID), "rejected")
+			if !strings.Contains(row, "beyond the source run's last step") {
+				t.Errorf("from_step 2 of a two-step run: row = %s, want rejected as beyond the last step", row)
+			}
+		})
+	}
+}
+
+// TestPlaygroundDecisionNeedsAParkedCall pins the audit's P2-16: a
+// decision naming a call that is not parked on the run is rejected and
+// the park stays — before the fix the core read it as "no decision",
+// silently denied the real call and consumed the park. And a parked
+// run with two calls resumes once both are decided, under both
+// decisions: resuming on the first denied the one nobody decided.
+func TestPlaygroundDecisionNeedsAParkedCall(t *testing.T) {
+	var refunds atomic.Int64
+	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct {
+		OrderID string `json:"order_id"`
+	}) (string, error) {
+		refunds.Add(1)
+		return "refunded " + in.OrderID, nil
+	})
+	script := wefttest.Script(
+		wefttest.ToolCalls(
+			wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`, ID: "c_a"},
+			wefttest.Call{Name: "refund", Args: `{"order_id":"2"}`, ID: "c_b"}),
+		wefttest.Say("both refunded"),
+	)
+	e := newE2E(t)
+	e.agent = weft.New(script, weft.Name("acme-support"),
+		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), refund)
+	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent), runtime.Enabled(true))
+	defer shutdown()
+	rt := e.runtimeID(t)
+
+	_, parked := e.run(t, "cmd_dec_1", fmt.Sprintf(`{"command_id":"cmd_dec_1","runtime":%q,"agent":"acme-support",
+	  "input":"refund orders 1 and 2","engine":"live","side_effects":"park","thread":"ephemeral"}`, rt), "finished")
+
+	// A stale call id: rejected, nothing resumed, nothing denied.
+	code, resp := e.api(t, http.MethodPost, "/api/runs/"+parked+"/approvals", `{"call_id":"c_stale","decision":"approve"}`)
+	if code != http.StatusAccepted {
+		t.Fatalf("stale decision = %d %s", code, resp)
+	}
+	var stale struct {
+		CommandID string `json:"command_id"`
+	}
+	if err := json.Unmarshal([]byte(resp), &stale); err != nil {
+		t.Fatal(err)
+	}
+	if row := e.waitCommand(t, stale.CommandID, "rejected"); !strings.Contains(row, `"state":"rejected"`) || !strings.Contains(row, "c_stale") {
+		t.Fatalf("a decision on a call that is not parked: row = %s, want rejected naming the call", row)
+	}
+	if n := len(script.Requests()); n != 1 {
+		t.Fatalf("the model was called %d times after a stale decision, want 1 (the park must stay)", n)
+	}
+
+	// The first of two decisions is held: no resume, no handler, and
+	// the command names the run that is still parked.
+	if _, held := e.decide(t, parked, `{"call_id":"c_a","decision":"approve"}`); held != parked {
+		t.Errorf("the first of two decisions finished under run %q, want the still-parked %q", held, parked)
+	}
+	if n := refunds.Load(); n != 0 {
+		t.Fatalf("the refund handler ran %d times with one of two calls undecided, want 0", n)
+	}
+
+	// The second completes the set: one resume under both — the
+	// approved call runs for real, the resolved one never does.
+	_, resumed := e.decide(t, parked, `{"call_id":"c_b","decision":"resolve","content":"REFUNDED BY HAND"}`)
+	if resumed == parked || !strings.HasPrefix(resumed, "pg_") {
+		t.Errorf("the completing decision finished under run %q, want a fresh pg_ run", resumed)
+	}
+	if n := refunds.Load(); n != 1 {
+		t.Errorf("refund handler runs = %d, want 1 (the approved call; the resolved one never runs)", n)
+	}
+	want := []string{"user:refund orders 1 and 2", "assistant:call refundcall refund",
+		"tool:result refunded 1result REFUNDED BY HAND"}
+	if got := texts(script.LastRequest().Messages); !reflect.DeepEqual(got, want) {
+		t.Errorf("the resumed run fed the model\n  %q\nwant\n  %q", got, want)
+	}
+
+	// The run is resumed: a further decision finds no park.
+	code, resp = e.api(t, http.MethodPost, "/api/runs/"+parked+"/approvals", `{"call_id":"c_a","decision":"approve"}`)
+	if code != http.StatusAccepted {
+		t.Fatalf("late decision = %d %s", code, resp)
+	}
+	if err := json.Unmarshal([]byte(resp), &stale); err != nil {
+		t.Fatal(err)
+	}
+	if row := e.waitCommand(t, stale.CommandID, "rejected"); !strings.Contains(row, "no parked run") {
+		t.Errorf("a decision on a resumed run: row = %s, want rejected (no parked run)", row)
+	}
+	if n := refunds.Load(); n != 1 {
+		t.Errorf("refund handler runs after the late decision = %d, want still 1", n)
+	}
+}
+
+// TestPlaygroundConcurrentDecisionsResumeOnce pins the park's one
+// resume: several approvals of the same parked call racing down the
+// link run its handler once. Before the fix every decision that read
+// the park before the first resume deleted it resumed the run again —
+// the approved side effect fired once per click.
+func TestPlaygroundConcurrentDecisionsResumeOnce(t *testing.T) {
+	var refunds atomic.Int64
+	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+		refunds.Add(1)
+		time.Sleep(20 * time.Millisecond) // a real handler takes a moment
+		return "refunded", nil
+	})
+	e := newE2E(t)
+	e.agent = weft.New(&refundOnceModel{}, weft.Name("acme-support"),
+		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), refund)
+	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent), runtime.Enabled(true))
+	defer shutdown()
+	rt := e.runtimeID(t)
+
+	_, parked := e.run(t, "cmd_race_1", fmt.Sprintf(`{"command_id":"cmd_race_1","runtime":%q,"agent":"acme-support",
+	  "input":"refund it","engine":"live","side_effects":"park","thread":"ephemeral"}`, rt), "finished")
+
+	const clicks = 8
+	ids := make([]string, clicks)
+	var wg sync.WaitGroup
+	for i := range clicks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, resp := e.api(t, http.MethodPost, "/api/runs/"+parked+"/approvals", `{"call_id":"c_r","decision":"approve"}`)
+			var cmd struct {
+				CommandID string `json:"command_id"`
+			}
+			_ = json.Unmarshal([]byte(resp), &cmd)
+			ids[i] = cmd.CommandID
+		}()
+	}
+	wg.Wait()
+	resumed := 0
+	for _, id := range ids {
+		if id == "" {
+			t.Fatal("a decision was not enqueued")
+		}
+		if row := e.waitCommand(t, id, "finished"); strings.Contains(row, `"state":"finished"`) {
+			resumed++
+		}
+	}
+	if resumed != 1 {
+		t.Errorf("%d of %d racing decisions resumed the run, want exactly 1", resumed, clicks)
+	}
+	if n := refunds.Load(); n != 1 {
+		t.Errorf("the approved refund ran %d times, want 1", n)
+	}
+}
+
+// refundOnceModel calls refund when the conversation ends in a user
+// message and answers in words once it ends in the tool's result —
+// stateless, so any number of resumes read the same script.
+type refundOnceModel struct{}
+
+func (*refundOnceModel) Info() weft.ModelInfo {
+	return weft.ModelInfo{Provider: "wefttest", Name: "refund-once"}
+}
+
+func (*refundOnceModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	return func(yield func(weft.ModelEvent, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(nil, err)
+			return
+		}
+		if req.Messages[len(req.Messages)-1].Role == weft.RoleUser {
+			yield(weft.ModelToolCall{ID: "c_r", Name: "refund", Args: []byte(`{}`)}, nil)
+			yield(weft.ModelFinish{Reason: weft.StopToolCalls}, nil)
+			return
+		}
+		yield(weft.ModelTextDelta{Text: "refund done"}, nil)
+		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+	}
+}
+
+// TestPlaygroundForkParkedDecision pins fork mode's approval boundary
+// (§5.4 + WEFT-DEVTOOLS §8.2): a never tool parks the fork's turn, and
+// the decision resumes it as the fork session's own next turn — the
+// decision and the tool's result are entries of the fork, and the
+// panel keeps chatting in it. Before the fix the decision resumed an
+// ephemeral pg_ run beside the session: the handler ran, the fork never
+// saw the result, and its boundary stayed open so the next message
+// queued behind it for good.
+func TestPlaygroundForkParkedDecision(t *testing.T) {
+	var refunds atomic.Int64
+	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+		refunds.Add(1)
+		return "refunded for real", nil
+	})
+	e := newE2E(t)
+	script := wefttest.Script(
+		wefttest.Say("hello from the app"),
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{}`, ID: "c_r"}),
+		wefttest.Say("the refund went through"),
+		wefttest.Say("still here"),
+	)
+	e.agent = weft.New(script, weft.Name("acme-support"),
+		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), refund)
+	runID := e.appTurn(t, "hello app")
+	e.waitTranscript(t, runID, "hello from the app")
+
+	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent),
+		runtime.Threads(e.store), runtime.Enabled(true))
+	defer shutdown()
+	rt := e.runtimeID(t)
+
+	_, parked := e.run(t, "cmd_fp_1", fmt.Sprintf(`{"command_id":"cmd_fp_1","runtime":%q,"agent":"acme-support",
+	  "source":{"run_id":%q,"from_step":0},"input":"refund please","engine":"live","thread":"fork"}`, rt, runID), "finished")
+	i := strings.LastIndex(parked, "-t")
+	if i <= 0 || strings.HasPrefix(parked, "pg_") {
+		t.Fatalf("fork run id = %q, want a thread turn id", parked)
+	}
+	fork := parked[:i]
+	if n := refunds.Load(); n != 0 {
+		t.Fatalf("the never tool ran %d times in the fork's turn, want it parked", n)
+	}
+
+	_, resumed := e.decide(t, parked, `{"call_id":"c_r","decision":"approve"}`)
+	if !strings.HasPrefix(resumed, fork+"-t") {
+		t.Errorf("the decision resumed run %q, want a turn of the fork session %s", resumed, fork)
+	}
+	if n := refunds.Load(); n != 1 {
+		t.Errorf("refund handler runs = %d, want 1 (approved)", n)
+	}
+	// The fork holds the whole exchange: the result is its entry.
+	s, err := thread.Open(context.Background(), e.store, fork, e.agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := texts(s.Context()); !slices.Contains(got, "tool:result refunded for real") ||
+		got[len(got)-1] != "assistant:the refund went through" {
+		t.Errorf("the fork's conversation = %q, want the approved result and the reply it led to", got)
+	}
+	if n := len(s.Pending()); n != 0 {
+		t.Errorf("the fork still has %d pending call(s) after the decision", n)
+	}
+
+	// The panel keeps chatting in the fork.
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e.waitTranscript(t, resumed, "the refund went through")
+	_, next := e.run(t, "cmd_fp_2", fmt.Sprintf(`{"command_id":"cmd_fp_2","runtime":%q,"agent":"acme-support",
+	  "source":{"run_id":%q,"from_step":0},"input":"thanks","engine":"live","thread":"fork"}`, rt, resumed), "finished")
+	if !strings.HasPrefix(next, fork+"-t") {
+		t.Errorf("the next message ran as %q, want a turn of the same fork %s", next, fork)
+	}
+}
+
+// TestPlaygroundSubstituteRepeatedCalls pins the substitute lookup's
+// order (§6 rule 3): a never tool the source called twice with the
+// same arguments answered twice, and the re-run gets those answers in
+// that order — and the handler never runs. Before the fix the index
+// kept one result per (tool, args), the last: both calls were answered
+// "ticket 2".
+func TestPlaygroundSubstituteRepeatedCalls(t *testing.T) {
+	var tickets atomic.Int64
+	next := weft.Tool("next_ticket", "Take the next ticket.", func(ctx context.Context, in struct{}) (string, error) {
+		return fmt.Sprintf("ticket %d", tickets.Add(1)), nil
+	})
+	script := wefttest.Script(
+		// The app's own turn: two identical calls, two different answers.
+		wefttest.ToolCalls(wefttest.Call{Name: "next_ticket", Args: `{}`, ID: "c1"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "next_ticket", Args: `{}`, ID: "c1"}),
+		wefttest.Say("you hold tickets 1 and 2"),
+		// The re-run makes them again (the second with other spacing —
+		// the same arguments).
+		wefttest.ToolCalls(wefttest.Call{Name: "next_ticket", Args: `{}`, ID: "c1"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "next_ticket", Args: `{ }`, ID: "c1"}),
+		wefttest.Say("again: tickets 1 and 2"),
+	)
+	e := newE2E(t)
+	e.agent = weft.New(script, weft.Name("acme-support"),
+		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), next)
+	runID := e.appTurn(t, "two tickets please")
+	e.waitTranscript(t, runID, "you hold tickets")
+
+	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent), runtime.Enabled(true))
+	defer shutdown()
+	rt := e.runtimeID(t)
+
+	row, _ := e.run(t, "cmd_sub_1", fmt.Sprintf(`{"command_id":"cmd_sub_1","runtime":%q,"agent":"acme-support",
+	  "source":{"run_id":%q,"from_step":0},"engine":"live","side_effects":"substitute","thread":"ephemeral"}`, rt, runID), "finished")
+	if n := tickets.Load(); n != 2 {
+		t.Errorf("the never tool's handler ran %d times in all, want 2 (the app's own turn only): %s", n, row)
+	}
+	want := []string{"user:two tickets please",
+		"assistant:call next_ticket", "tool:result ticket 1",
+		"assistant:call next_ticket", "tool:result ticket 2"}
+	if got := texts(script.LastRequest().Messages); !reflect.DeepEqual(got, want) {
+		t.Errorf("the substituted re-run fed the model\n  %q\nwant the recorded answers in the recorded order\n  %q", got, want)
+	}
+}
+
+// loopingModel calls ping at every step, forever — the model a step
+// budget exists for.
+type loopingModel struct{ calls atomic.Int64 }
+
+func (*loopingModel) Info() weft.ModelInfo {
+	return weft.ModelInfo{Provider: "wefttest", Name: "looping"}
+}
+
+func (m *loopingModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	n := m.calls.Add(1)
+	return func(yield func(weft.ModelEvent, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(nil, err)
+			return
+		}
+		if n > 200 { // the test's own backstop: a broken bound must not spin forever
+			yield(weft.ModelTextDelta{Text: "gave up"}, nil)
+			yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+			return
+		}
+		yield(weft.ModelToolCall{ID: "c_p", Name: "ping", Args: []byte(`{}`)}, nil)
+		yield(weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}}, nil)
+	}
+}
+
+// TestPlaygroundSubstituteChainIsBounded pins the substitute chain's
+// step budget: every leg is a fresh run with a fresh MaxSteps, so a
+// model that calls a substituted tool at every step chained forever —
+// tokens with no cap. The chain as a whole gets the agent's MaxSteps,
+// fails past it, and the experiment's budget counts every leg.
+func TestPlaygroundSubstituteChainIsBounded(t *testing.T) {
+	model := &loopingModel{}
+	ping := weft.Tool("ping", "Ping.", func(ctx context.Context, in struct{}) (string, error) { return "pong", nil })
+	e := newE2E(t)
+	e.agent = weft.New(model, weft.Name("acme-support"), weft.MaxSteps(3),
+		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), ping)
+	// The app's own turn loops into its MaxSteps and fails; its record
+	// (three pings, three pongs) is the source.
+	sess, err := thread.Create(context.Background(), e.store, e.agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := sess.Send(context.Background(), weft.User("ping forever"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := turn.Wait(); !errors.Is(err, weft.ErrMaxSteps) {
+		t.Fatalf("the app's own turn = %v, want ErrMaxSteps", err)
+	}
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e.waitTranscript(t, turn.RunID(), "pong")
+	before := model.calls.Load()
+
+	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent),
+		runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 40}), runtime.Enabled(true))
+	defer shutdown()
+	rt := e.runtimeID(t)
+
+	cmd := func(id string) string {
+		return fmt.Sprintf(`{"command_id":%q,"runtime":%q,"agent":"acme-support",
+		  "source":{"run_id":%q,"from_step":0},"engine":"live","side_effects":"substitute",
+		  "thread":"ephemeral","experiment_id":"exp_chain"}`, id, rt, turn.RunID())
+	}
+	e.run(t, "cmd_chain_1", cmd("cmd_chain_1"), "finished")
+	if n := model.calls.Load() - before; n < 3 || n > 4 {
+		t.Errorf("the substitute chain made %d model calls, want the agent's 3-step budget (one leg of slack)", n)
+	}
+	_, body := e.api(t, http.MethodGet, "/api/playground/commands/cmd_chain_1", "")
+	t.Logf("chain row: %s", body)
+
+	// Every leg's tokens counted (15 each, 45+ against a cap of 40):
+	// the experiment's next command is over budget.
+	row, _ := e.run(t, "cmd_chain_2", cmd("cmd_chain_2"), "rejected")
+	if !strings.Contains(row, "budget_exceeded") {
+		t.Errorf("the command after a chain that spent past the cap: row = %s, want budget_exceeded", row)
+	}
+}
+
+// TestPlaygroundBudgetCountsFailedAndConcurrentRuns pins §6 rule 6's
+// two holes. A failed run returns no result — its usage rides the
+// *weft.RunError — and before the fix it counted zero tokens, so a
+// command that burned its budget and failed left the experiment open.
+// And the run cap counted a run when it ended: commands dispatched
+// together all passed a cap only some of them fit.
+func TestPlaygroundBudgetCountsFailedAndConcurrentRuns(t *testing.T) {
+	gate := make(chan struct{})
+	model := &budgetModel{gate: gate}
+	e := newE2E(t)
+	noop := weft.Tool("noop", "Do nothing.", func(ctx context.Context, in struct{}) (string, error) { return "ok", nil },
+		weft.Replay(weft.ReplaySafe))
+	e.agent = weft.New(model, weft.Name("acme-support"),
+		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), noop)
+	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent),
+		runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 50, MaxRunsPerExperiment: 2}), runtime.Enabled(true))
+	defer shutdown()
+	rt := e.runtimeID(t)
+	cmd := func(id, exp, input string) string {
+		return fmt.Sprintf(`{"command_id":%q,"runtime":%q,"agent":"acme-support","input":%q,
+		  "engine":"live","thread":"ephemeral","experiment_id":%q}`, id, rt, input, exp)
+	}
+
+	// The failed run spent 100 tokens against a cap of 50.
+	e.run(t, "cmd_bf_1", cmd("cmd_bf_1", "exp_fail", "fail"), "finished")
+	if row, _ := e.run(t, "cmd_bf_2", cmd("cmd_bf_2", "exp_fail", "fail"), "rejected"); !strings.Contains(row, "budget_exceeded") {
+		t.Errorf("the command after a failed run that spent past the cap: row = %s, want budget_exceeded", row)
+	}
+
+	// Six commands of one experiment at once, a cap of two runs, every
+	// model call held open: two are admitted, four rejected — while the
+	// two are still in flight.
+	for i := range 6 {
+		id := fmt.Sprintf("cmd_bc_%d", i)
+		if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", cmd(id, "exp_burst", "hold")); code != http.StatusAccepted {
+			t.Fatalf("burst %d = %d %s", i, code, resp)
+		}
+	}
+	accepted, rejected := 0, 0
+	for i := range 6 {
+		row := e.waitCommand(t, fmt.Sprintf("cmd_bc_%d", i), "accepted")
+		switch {
+		case strings.Contains(row, "budget_exceeded"):
+			rejected++
+		case strings.Contains(row, `"state":"accepted"`):
+			accepted++
+		}
+	}
+	close(gate)
+	if accepted != 2 || rejected != 4 {
+		t.Errorf("a burst of 6 under a 2-run cap: %d accepted, %d rejected — want 2 and 4", accepted, rejected)
+	}
+}
+
+// budgetModel spends 100 tokens on "fail" (one step, a noop call) and
+// then fails the run on the next step; it holds "hold" open until the
+// gate closes.
+type budgetModel struct{ gate chan struct{} }
+
+func (*budgetModel) Info() weft.ModelInfo {
+	return weft.ModelInfo{Provider: "wefttest", Name: "budget"}
+}
+
+func (m *budgetModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+	last := req.Messages[len(req.Messages)-1]
+	return func(yield func(weft.ModelEvent, error) bool) {
+		switch {
+		case last.Role == weft.RoleTool:
+			yield(nil, errors.New("the provider went away"))
+		case last.Text() == "hold":
+			select {
+			case <-m.gate:
+			case <-ctx.Done():
+				yield(nil, ctx.Err())
+				return
+			}
+			yield(weft.ModelTextDelta{Text: "held"}, nil)
+			yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+		default:
+			yield(weft.ModelToolCall{ID: "c_n", Name: "noop", Args: []byte(`{}`)}, nil)
+			yield(weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 60, OutputTokens: 40}}, nil)
+		}
 	}
 }

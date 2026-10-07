@@ -67,7 +67,9 @@ func TestLocalPlaygroundInProcess(t *testing.T) {
 				} `json:"runtimes"`
 			}
 			_ = json.Unmarshal([]byte(body), &out)
-			if len(out.Runtimes) > 0 {
+			// Registered AND streaming: the register lands before the
+			// command stream opens, and a command in between is a 503.
+			if len(out.Runtimes) > 0 && (srv.Runtime() == nil || srv.Runtime().Connected(out.Runtimes[0].ID)) {
 				rtID = out.Runtimes[0].ID
 				break
 			}
@@ -116,4 +118,54 @@ func TestLocalPlaygroundInProcess(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("command never finished in-process")
+}
+
+// TestLocalWithStudioToken pins Local's doc: the in-process link goes
+// through the embedded server's own token gate, so a server built with
+// studio.Token registers the runtime only when Install carries the
+// token too — Studio("", token) beside Local(srv).
+func TestLocalWithStudioToken(t *testing.T) {
+	registered := func(opts ...Option) bool {
+		srv := studio.New(studio.Open(filepath.Join(t.TempDir(), "studio.db")),
+			studio.Playground(true), studio.Token("srv-token"))
+		defer func() { _ = srv.Close() }()
+		agent := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("acme-support"))
+		shutdown := Install(append([]Option{Local(srv), Agents(agent), Enabled(true)}, opts...)...)
+		defer shutdown()
+		client := inProcessClient(srv)
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			req, _ := http.NewRequest(http.MethodGet, "http://weft.studio.local/api/runtimes", nil)
+			req.Header.Set("Authorization", "Bearer srv-token")
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK && strings.Contains(string(b), "rt_") {
+				return true
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		return false
+	}
+	if !registered(Studio("", "srv-token")) {
+		t.Error("Local(srv) + Studio(\"\", token) did not register with a token-gated server")
+	}
+	if registered() {
+		t.Error("Local(srv) without the token registered with a token-gated server")
+	}
+	for raw, want := range map[string]bool{
+		"http://studio.example.com":  true,
+		"http://10.0.0.5:7331":       true,
+		"https://studio.example.com": false,
+		"http://127.0.0.1:7331":      false,
+		"http://localhost:7331":      false,
+		"http://[::1]:7331":          false,
+	} {
+		if got := cleartext(raw); got != want {
+			t.Errorf("cleartext(%q) = %v, want %v", raw, got, want)
+		}
+	}
 }

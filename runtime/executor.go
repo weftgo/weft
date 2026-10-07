@@ -2,29 +2,37 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
+	"strings"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/thread"
 )
 
 // The executor (WEFT-PLAYGROUND.md §5.2): a command becomes one run
-// of one registered agent. P0 executes engine "live" and thread
-// "ephemeral" only — fork and scripted are 8b; Studio refuses them
-// earlier ("not yet available"), and the runtime re-refuses anything
-// that reaches it anyway (its copy is authoritative).
+// of one registered agent — live or scripted, ephemeral or in a fork.
+// Studio validates the command first; the runtime re-validates all of
+// it (its copy is authoritative, §10.4, and Studio's may be stale,
+// buggy or not Studio at all): anything it does not recognise is
+// rejected, never defaulted.
 
 // validate re-checks the command against the runtime's own registry
 // before the accepted ack (§10.4: Studio's copy can be stale after a
-// reconnect; this one is authoritative). A false return rejects the
-// command with the given reason — never a run.
-func (l *link) validate(cmd command) (string, bool) {
+// reconnect; this one is authoritative), resolves the source run's
+// transcript once and composes the kept prefix the run will be fed —
+// both land on cmd, so everything after reads the same copy. A false
+// return rejects the command with the given reason — never a run.
+func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 	agent, ok := l.reg.agent(cmd.Agent)
 	if !ok || agent == nil {
 		return fmt.Sprintf("unknown agent %q", cmd.Agent), false
 	}
+	hasSource := cmd.Source != nil && cmd.Source.RunID != ""
+	hasInput := cmd.Input != nil && *cmd.Input != ""
 	switch cmd.Engine {
 	case "", "live":
 	case "scripted":
@@ -39,7 +47,7 @@ func (l *link) validate(cmd command) (string, bool) {
 		if cmd.Overrides.Model != "" {
 			return "scripted engine with a model override would silently replay the old answer", false
 		}
-		if cmd.Source == nil || cmd.Source.RunID == "" {
+		if !hasSource {
 			return "the scripted engine replays a source run's recorded turns: a source run is required", false
 		}
 	default:
@@ -55,10 +63,10 @@ func (l *link) validate(cmd command) (string, bool) {
 		if l.cfg.threads == nil {
 			return "fork mode needs runtime.Threads(store)", false
 		}
-		if cmd.Source == nil || cmd.Source.RunID == "" {
+		if !hasSource {
 			return "fork mode forks a source turn's session: a source run is required", false
 		}
-		if cmd.Input == nil || *cmd.Input == "" {
+		if !hasInput {
 			return "fork mode continues the conversation: an input is required", false
 		}
 		if cmd.Source.FromStep > 0 {
@@ -67,20 +75,34 @@ func (l *link) validate(cmd command) (string, bool) {
 	default:
 		return fmt.Sprintf("unknown thread mode %q", cmd.Thread), false
 	}
-	if len(cmd.TranscriptEdits) > 0 {
-		// The runtime's copy is authoritative (§10.4): the edits must
-		// apply to the transcript it will feed the run.
-		if cmd.Source == nil || cmd.Source.RunID == "" {
-			return "transcript_edits need a source run", false
+	switch cmd.SideEffects {
+	case "", "substitute", "park", "allow":
+	default:
+		return fmt.Sprintf("unknown side_effects mode %q", cmd.SideEffects), false
+	}
+	if _, ok := thinkingLevel(cmd.Overrides.Thinking); !ok && cmd.Overrides.Thinking != "" {
+		return fmt.Sprintf("unknown thinking level %q", cmd.Overrides.Thinking), false
+	}
+	if len(cmd.TranscriptEdits) > 0 && !hasSource {
+		return "transcript_edits need a source run", false
+	}
+	if hasSource {
+		if !validRunID(cmd.Source.RunID) {
+			return "source.run_id is not a run id", false
 		}
-		msgs, err := l.sourceTranscript(context.Background(), cmd.Source.RunID)
-		if err != nil {
-			return fmt.Sprintf("source transcript unresolved: %v", err), false
+		if cmd.Source.FromStep < 0 {
+			return "source.from_step must be 0 or more", false
 		}
-		if _, err := applyTranscriptEdits(msgs, cmd.Source.FromStep, cmd.TranscriptEdits); err != nil {
-			return err.Error(), false
+		if hasInput && cmd.Source.FromStep > 0 {
+			return "input replaces the turn's user message only when from_step is 0", false
+		}
+		if cmd.Thread == "fork" {
+			if _, _, err := parseThreadRunID(cmd.Source.RunID); err != nil {
+				return "fork mode forks a thread turn: " + err.Error(), false
+			}
 		}
 	}
+
 	entry, _ := l.reg.entry(cmd.Agent)
 	tools := map[string]bool{}
 	for _, t := range agent.Tools() {
@@ -92,33 +114,60 @@ func (l *link) validate(cmd command) (string, bool) {
 		}
 	}
 	if m := cmd.Overrides.Model; m != "" {
-		if _, ok := l.reg.model(m); !ok && m != l.reg.ownModel(cmd.Agent) {
+		if alt, ok := l.reg.model(m); (!ok || alt == nil) && m != l.reg.ownModel(cmd.Agent) {
 			return fmt.Sprintf("model %q is not on this runtime's allow-list", m), false
 		}
 	}
-	if n := int(cmd.Overrides.Options["max_steps"]); n > 0 && entry.Limits.MaxSteps > 0 && n > entry.Limits.MaxSteps {
-		return fmt.Sprintf("max_steps %d raises the agent's cap %d", n, entry.Limits.MaxSteps), false
-	}
-	if n := int(cmd.Overrides.Options["parallelism"]); n > 0 && entry.Limits.Parallelism > 0 && n > entry.Limits.Parallelism {
-		return fmt.Sprintf("parallelism %d raises the agent's cap %d", n, entry.Limits.Parallelism), false
+	if reason, ok := validOptions(cmd.Overrides.Options, entry.Limits); !ok {
+		return reason, false
 	}
 	if cmd.SideEffects == "allow" {
-		for _, name := range enabledTools(cmd, tools) {
+		for _, name := range enabledTools(*cmd, tools) {
 			if !entry.isAllowed(name) {
 				return fmt.Sprintf("tool %q is not opted in for real side effects", name), false
 			}
 		}
 	}
+
+	// The source turn's context, read once. A fork reads nothing from
+	// it (the session's own tree is the conversation) unless the
+	// scripted engine needs the record.
+	if hasSource && (cmd.Thread != "fork" || cmd.Engine == "scripted") {
+		src, err := l.sourceTranscript(ctx, agent, cmd.Source.RunID)
+		switch {
+		case err == nil:
+			cmd.src = src
+		case cmd.Source.FromStep > 0 || len(cmd.TranscriptEdits) > 0 || cmd.Engine == "scripted" || !hasInput:
+			// The command is a re-run of that transcript: without it
+			// there is nothing to run — and a scripted command must
+			// never fall through to the live model.
+			return fmt.Sprintf("source transcript unresolved: %v", err), false
+		default:
+			// A fresh input on an unresolvable source still runs, on
+			// the input alone: a playground run from the words given
+			// beats a dev tool that wedges. Logged.
+			slog.Warn("weft/runtime: source transcript unresolved; running on the input alone",
+				"run_id", cmd.Source.RunID, "err", err)
+		}
+	}
+	if cmd.src != nil && cmd.Thread != "fork" {
+		if n := cmd.src.stepCount(); cmd.Source.FromStep > 0 && cmd.Source.FromStep >= n {
+			return fmt.Sprintf("from_step %d is beyond the source run's last step (it recorded %d; a run past the end has nothing fresh to answer)",
+				cmd.Source.FromStep, n), false
+		}
+		var err error
+		if cmd.prefix, err = runPrefix(cmd.src, *cmd, hasInput); err != nil {
+			return err.Error(), false
+		}
+	}
+
 	// The budget cap (§6 rule 6): a breach rejects the next command of
 	// that experiment, never a run in flight and never the app's own
-	// runs (only commands dispatched here are counted).
+	// runs (only commands dispatched here are counted). The admission
+	// itself — the run counted against the cap — is reserve's.
 	if cmd.ExperimentID != "" {
 		l.mu.Lock()
-		st := l.tally[cmd.ExperimentID]
-		if st == nil {
-			st = &budgetState{}
-			l.tally[cmd.ExperimentID] = st
-		}
+		st := l.tallyLocked(cmd.ExperimentID)
 		over := st.over(l.cfg.budget, 0)
 		l.mu.Unlock()
 		if over {
@@ -126,6 +175,76 @@ func (l *link) validate(cmd command) (string, bool) {
 		}
 	}
 	return "", true
+}
+
+// runPrefix composes the transcript a re-run of src is fed before its
+// input.
+func runPrefix(src *sourceRun, cmd command, hasInput bool) ([]weft.Message, error) {
+	switch {
+	case len(cmd.TranscriptEdits) > 0 || cmd.Source.FromStep > 0:
+		// The kept prefix, the edits applied (D2/D3) — the runtime's
+		// copy is authoritative (§10.4).
+		return applyTranscriptEdits(src, cmd.Source.FromStep, cmd.TranscriptEdits)
+	case hasInput:
+		// §5.1: input "replaces the turn's user message" — the
+		// conversation before the turn stays, the prompt goes. The kept
+		// prefix of step 0 is the input plus what a resumed run
+		// recorded before its first model call (the parked calls'
+		// results): a resumed turn has no prompt to drop, and its input
+		// alone ends at a call the new input must not orphan.
+		kept, err := keptPrefix(src, 0)
+		if err != nil {
+			return nil, err
+		}
+		return withoutPrompt(kept), nil
+	default:
+		// A whole-turn re-run that sends no input runs the turn on what
+		// the run was actually fed — the conversation and the user's
+		// own message, parts and all (both engines).
+		return keptPrefix(src, 0)
+	}
+}
+
+// validOptions checks the option lab's knobs (§5.1's options): only
+// the three the runtime applies, whole positive counts no higher than
+// the agent's own caps (§6 rule 2 — narrowing only), and a temperature
+// inside the range every provider accepts. A value outside is
+// rejected, not ignored: a command asking for max_steps −1 and running
+// with the agent's 20 is not the experiment that was asked for.
+func validOptions(options map[string]float64, limits agentLimits) (string, bool) {
+	for key, v := range options {
+		switch key {
+		case "max_steps", "parallelism":
+			if v != math.Trunc(v) || v < 1 || v > 1<<20 {
+				return fmt.Sprintf("%s %v is not a positive whole number", key, v), false
+			}
+			limit := limits.MaxSteps
+			if key == "parallelism" {
+				limit = limits.Parallelism
+			}
+			if limit > 0 && int(v) > limit {
+				return fmt.Sprintf("%s %d raises the agent's cap %d", key, int(v), limit), false
+			}
+		case "temperature":
+			if math.IsNaN(v) || v < 0 || v > 2 {
+				return fmt.Sprintf("temperature %v is outside 0..2", v), false
+			}
+		default:
+			return fmt.Sprintf("unknown option %q", key), false
+		}
+	}
+	return "", true
+}
+
+// withoutPrompt drops the turn's own user message from a run's input:
+// the trailing user message is the prompt the command's input replaces.
+// An input that ends otherwise (a resumed run's) is kept whole and the
+// new input follows it.
+func withoutPrompt(input []weft.Message) []weft.Message {
+	if n := len(input); n > 0 && input[n-1].Role == weft.RoleUser {
+		return input[:n-1]
+	}
+	return input
 }
 
 // enabledTools lists the tools this command leaves on: the override
@@ -141,41 +260,108 @@ func enabledTools(cmd command, tools map[string]bool) []string {
 	return all
 }
 
+// tallyLocked returns the experiment's budget state, creating it.
+// Caller holds l.mu.
+func (l *link) tallyLocked(experiment string) *budgetState {
+	st := l.tally[experiment]
+	if st == nil {
+		st = &budgetState{}
+		l.tally[experiment] = st
+	}
+	return st
+}
+
+// reserve admits one command against its experiment's caps: the check
+// and the run's count are one step under the lock, so commands
+// dispatched together cannot all pass a cap only one of them fits
+// (§6 rule 6). False is budget_exceeded.
+func (l *link) reserve(cmd command) bool {
+	if cmd.ExperimentID == "" {
+		return true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	st := l.tallyLocked(cmd.ExperimentID)
+	if st.over(l.cfg.budget, 0) {
+		return false
+	}
+	st.reserve()
+	return true
+}
+
+// unreserve gives back the run reserve counted, for a command that
+// never ran.
+func (l *link) unreserve(cmd command) {
+	if cmd.ExperimentID == "" {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if st := l.tally[cmd.ExperimentID]; st != nil && st.runs > 0 {
+		st.runs--
+	}
+}
+
+// steering wires one run's steer queue (§8.4): the run carries a
+// weft.Steering source draining it, so a steer frame finds the run
+// mid-flight. The returned func drops the queue when the run ends.
+func (l *link) steering(runID string) (weft.RunOption, func()) {
+	steerQ := make(chan weft.Message, 8)
+	l.mu.Lock()
+	l.steerQ[runID] = steerQ
+	l.mu.Unlock()
+	opt := weft.Steering(func(_ context.Context, _ weft.SteerPoint) []weft.Message {
+		select {
+		case m := <-steerQ:
+			return []weft.Message{m}
+		default:
+			return nil
+		}
+	})
+	return opt, func() {
+		l.mu.Lock()
+		delete(l.steerQ, runID)
+		l.mu.Unlock()
+	}
+}
+
+// chainStepBound is the substitute chain's step budget when the agent's
+// manifest names none.
+const chainStepBound = 64
+
+// stepLimit is the step budget a command's whole substitute chain may
+// spend: the command's own max_steps, else the agent's cap.
+func (l *link) stepLimit(cmd command) int {
+	if n := int(cmd.Overrides.Options["max_steps"]); n > 0 {
+		return n
+	}
+	if e, ok := l.reg.entry(cmd.Agent); ok && e.Limits.MaxSteps > 0 {
+		return e.Limits.MaxSteps
+	}
+	return chainStepBound
+}
+
 // execute runs the command as one ephemeral run of its agent and
-// returns the run's status and the run id the result lives under (a
+// returns the run's status, the run id the result lives under (a
 // substitute-mode chain resumes under fresh ids; the finished ack
-// names the last). The run's content reaches Studio through the normal
-// OTel pipeline; the link carries only the acks. A run that parks (a
-// call awaiting a decision) ends successfully with Pending set — the
-// state is kept so a later approval decision can resume it.
-func (l *link) execute(ctx context.Context, cmd command, runID string) (string, string) {
+// names the last) and the failure's text, if any. The run's content
+// reaches Studio through the normal OTel pipeline; the link carries
+// only the acks. A run that parks (a call awaiting a decision) ends
+// successfully with Pending set — the state is kept so a later
+// approval decision can resume it.
+func (l *link) execute(ctx context.Context, cmd command, runID string) (status, finalRun, errText string) {
 	if cmd.Thread == "fork" {
 		return l.executeFork(ctx, cmd)
 	}
 	agent, _ := l.reg.agent(cmd.Agent)
 
-	// The steer queue (§8.4): every ephemeral run this link starts
-	// carries a weft.Steering source draining it, so a steer frame
-	// finds the run mid-flight. Dropped when the run ends.
-	steerQ := make(chan weft.Message, 8)
-	l.mu.Lock()
-	l.steerQ[runID] = steerQ
-	l.mu.Unlock()
-	defer func() {
-		l.mu.Lock()
-		delete(l.steerQ, runID)
-		l.mu.Unlock()
-	}()
+	// The steer queue (§8.4), registered under the id Studio learned
+	// from the accepted ack and drained by every leg of the chain.
+	steer, release := l.steering(runID)
+	defer release()
 
-	res, err := agent.Generate(ctx, append(l.runOptions(cmd, runID),
-		weft.Steering(func(_ context.Context, _ weft.SteerPoint) []weft.Message {
-			select {
-			case m := <-steerQ:
-				return []weft.Message{m}
-			default:
-				return nil
-			}
-		}))...)
+	res, err := agent.Generate(ctx, append(l.runOptions(cmd, runID), steer)...)
+	spent := usageOf(res, err)
 
 	// Substitute (§6 rule 3, the default mode): a parked side-effect
 	// call that matches a recorded call of the source (same tool, same
@@ -184,139 +370,278 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) (string, 
 	// fresh run ids. A miss stays parked for the human, and every
 	// pending call must match: a partial match left pending would be
 	// denied "no decision" by the resume.
-	if source := l.sourceMsgs(cmd); len(source) > 0 {
-		records := recordedCalls(source)
-		for err == nil && res != nil && len(res.Pending) > 0 &&
-			(cmd.SideEffects == "" || cmd.SideEffects == "substitute") {
+	if cmd.src != nil && (cmd.SideEffects == "" || cmd.SideEffects == "substitute") {
+		cut := cutAtStep(cmd.src.steps, cmd.Source.FromStep)
+		records := recordedCalls(cmd.src.steps[cut:], cmd.src.steps[:cut])
+		steps, limit := numSteps(res), l.stepLimit(cmd)
+		breaks := map[string]bool{}
+		for _, t := range l.breakpointTools(cmd.Agent) {
+			breaks[t] = true
+		}
+		for err == nil && res != nil && len(res.Pending) > 0 {
 			resolves := make([]weft.RunOption, 0, len(res.Pending))
 			all := true
 			for _, call := range res.Pending {
-				recorded, ok := records[call.Name+"\x00"+string(call.Args)]
+				if breaks[call.Name] {
+					// The debugger's breakpoint (§8.3) stops here whatever
+					// the mode: answering it from the record would run
+					// straight past it.
+					all = false
+					break
+				}
+				rec, ok := records.take(call.Name, call.Args)
 				if !ok {
 					all = false
 					break
 				}
-				resolves = append(resolves, weft.Resolve(call.ID, recorded))
+				if rec.isError {
+					resolves = append(resolves, weft.ResolveError(call.ID, rec.content))
+				} else {
+					resolves = append(resolves, weft.Resolve(call.ID, rec.content))
+				}
 			}
 			if !all {
 				break // a real miss: parked for a human decision
+			}
+			if steps >= limit {
+				// Every leg is a fresh run with a fresh MaxSteps: a model
+				// that calls a substituted tool at every step would chain
+				// forever. The chain as a whole gets the agent's budget.
+				err = fmt.Errorf("the substitute chain spent %d steps, the agent's budget is %d", steps, limit)
+				break
 			}
 			runID = newID("pg_")
 			opts := l.overrideOptions(cmd)
 			opts = append(opts, weft.Messages(res.Messages...))
 			opts = append(opts, resolves...)
-			opts = append(opts, weft.RunID(runID))
-			var next *weft.RunResult
-			next, err = agent.Generate(ctx, opts...)
-			if next != nil && res != nil {
-				next.Usage = addUsage(res.Usage, next.Usage)
-			}
-			res = next
+			opts = append(opts, steer, weft.RunID(runID))
+			res, err = agent.Generate(ctx, opts...)
+			spent = spent.Add(usageOf(res, err))
+			steps += numSteps(res)
 		}
 	}
-	return l.outcome(cmd, runID, res, err), runID
+	status, errText = l.outcome(cmd, runID, res, err, spent, nil)
+	return status, runID, errText
 }
+
+// numSteps is how many model calls a result records (0 for none).
+func numSteps(res *weft.RunResult) int {
+	if res == nil {
+		return 0
+	}
+	return len(res.Steps)
+}
+
+// usageOf is what one run spent: the result's usage, or — a failed run
+// returns no result — the partial usage its *weft.RunError carries.
+// The budget counts both (§6 rule 6): a run that fails after burning
+// tokens burned them.
+func usageOf(res *weft.RunResult, err error) weft.Usage {
+	if res != nil {
+		return res.Usage
+	}
+	var re *weft.RunError
+	if errors.As(err, &re) && re.Result != nil {
+		return re.Result.Usage
+	}
+	return weft.Usage{}
+}
+
+// maxForks bounds the forked sessions the runtime keeps open for
+// "keep chatting" (§5.4). Past it the oldest is forgotten: a later
+// fork command naming one of its turns forks it afresh instead of
+// continuing in place.
+const maxForks = 64
 
 // executeFork runs §5.4's fork mode: the source session opens
 // read-side, Fork copies it (a new session with lineage — the original
 // is only read), and the command's input becomes the fork's next turn
-// under the same shaping options. The runtime holds the forked
-// session's writer for the command and releases it when the turn lands
-// (the reference drops; a later fork command targeting the fork reopens
-// it, so the panel can keep chatting in it).
-func (l *link) executeFork(ctx context.Context, cmd command) (string, string) {
+// under the same shaping options. The runtime keeps the forked session
+// it wrote: a later fork command naming one of the fork's turns
+// continues the conversation in that same session value, so two
+// commands on one fork queue behind each other instead of writing the
+// tree from two copies.
+func (l *link) executeFork(ctx context.Context, cmd command) (status, finalRun, errText string) {
 	agent, _ := l.reg.agent(cmd.Agent)
+	fail := func(err error) (string, string, string) {
+		slog.Warn("weft/runtime: fork command failed",
+			"command_id", cmd.CommandID, "source", cmd.Source.RunID, "err", err)
+		return "failed", "", err.Error()
+	}
 	session, _, err := parseThreadRunID(cmd.Source.RunID)
 	if err != nil {
-		return "failed: " + err.Error(), ""
+		return fail(err)
 	}
 	opts := l.overrideOptions(cmd)
 
 	l.mu.Lock()
-	known := l.forked[session]
+	s := l.forks[session]
 	l.mu.Unlock()
 
-	var turn *thread.Turn
-	if known {
-		// A session this runtime forked: continue the conversation in
-		// it (§5.4's "keep chatting").
-		s, err := thread.Open(ctx, l.cfg.threads, session, agent)
-		if err == nil {
-			turn, err = s.Send(ctx, weft.User(*cmd.Input), thread.RunOptions(opts...))
-		}
+	if s != nil && !isLatestTurn(s, cmd.Source.RunID) {
+		// A turn of a fork this runtime holds, but not its latest: the
+		// command forks from that turn — continuing in place would feed
+		// the run everything the fork said since.
+		entryID, err := turnEntryOf(s, cmd.Source.RunID)
 		if err != nil {
-			return "failed: " + err.Error(), ""
+			return fail(err)
 		}
-		l.mu.Lock()
-		l.steerSess[turn.RunID()] = s
-		l.mu.Unlock()
-		defer func() {
-			l.mu.Lock()
-			delete(l.steerSess, turn.RunID())
-			l.mu.Unlock()
-		}()
-		res, werr := turn.Wait()
-		return l.outcome(cmd, turn.RunID(), res, werr), turn.RunID()
+		if s, err = forkSession(ctx, s, entryID); err != nil {
+			return fail(err)
+		}
+		l.rememberFork(s)
+	} else if s == nil {
+		// The app's session: open read-side (readers never lock), find
+		// the source turn's closing entry, fork at it.
+		src, err := thread.Open(ctx, l.cfg.threads, session, agent)
+		if err != nil {
+			return fail(err)
+		}
+		entryID, err := turnEntryOf(src, cmd.Source.RunID)
+		if err != nil {
+			return fail(err)
+		}
+		if s, err = forkSession(ctx, src, entryID); err != nil {
+			return fail(err)
+		}
+		l.rememberFork(s)
 	}
-
-	// The app's session: open read-side (readers never lock), find the
-	// source turn's closing entry, fork at it.
-	src, err := thread.Open(ctx, l.cfg.threads, session, agent)
-	if err != nil {
-		return "failed: " + err.Error(), ""
-	}
-	entryID, err := turnEntryOf(ctx, l.cfg.threads, session, cmd.Source.RunID)
-	if err != nil {
-		return "failed: " + err.Error(), ""
-	}
-	forked, err := src.Fork(ctx, entryID)
-	if err != nil {
-		return "failed: " + err.Error(), ""
-	}
-	turn, err = forked.Send(ctx, weft.User(*cmd.Input), thread.RunOptions(opts...))
-	if err != nil {
-		return "failed: " + err.Error(), ""
+	if pending := s.Pending(); len(pending) > 0 {
+		// A Send on a parked boundary queues behind it and would hold
+		// this command — and its run slot — until someone decides; say
+		// so instead, naming what to decide. A boundary of the fork's
+		// own turn is made decidable here (its park record may have been
+		// evicted); a fresh fork's inherited boundary is the source
+		// turn's, decided in the app — the runtime never resumes it.
+		l.adoptForkParks(s)
+		return fail(fmt.Errorf("the conversation has %d parked call(s) awaiting a decision at this point: decide them first (a new message would wait behind them): %s",
+			len(pending), describePending(pending)))
 	}
 	l.mu.Lock()
-	l.forked[forked.ID()] = true       // its turns continue in-place later
-	l.steerSess[turn.RunID()] = forked // steered through the session while in flight
+	l.forkCmd[s.ID()] = cmd // the shaping a rebuilt park record carries
+	l.mu.Unlock()
+	turn, err := s.Send(ctx, weft.User(*cmd.Input), thread.RunOptions(opts...))
+	if err != nil {
+		return fail(err)
+	}
+	return l.awaitTurn(cmd, s, turn)
+}
+
+// awaitTurn waits a fork's turn out and records its end. The turn is
+// registered while in flight only so a steer for it is recognised and
+// refused (link.steer).
+func (l *link) awaitTurn(cmd command, s *thread.Session, turn *thread.Turn) (status, finalRun, errText string) {
+	runID := turn.RunID()
+	l.mu.Lock()
+	l.steerSess[runID] = s
 	l.mu.Unlock()
 	defer func() {
 		l.mu.Lock()
-		delete(l.steerSess, turn.RunID())
+		delete(l.steerSess, runID)
 		l.mu.Unlock()
 	}()
-	res, werr := turn.Wait()
-	return l.outcome(cmd, turn.RunID(), res, werr), turn.RunID()
+	res, err := turn.Wait()
+	runID = turn.RunID() // a turn re-run after an overflow reports the re-run's id
+	status, errText = l.outcome(cmd, runID, res, err, usageOf(res, err), s)
+	return status, runID, errText
+}
+
+// rememberFork keeps a session this runtime forked, bounded.
+func (l *link) rememberFork(s *thread.Session) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.forkOrder) >= maxForks {
+		delete(l.forks, l.forkOrder[0])
+		delete(l.forkCmd, l.forkOrder[0])
+		l.forkOrder = l.forkOrder[1:]
+	}
+	l.forks[s.ID()] = s
+	l.forkOrder = append(l.forkOrder, s.ID())
+}
+
+// adoptForkParks makes every parked call of a fork's own turns
+// decidable again: a park record evicted from the bounded set
+// (maxParked) is rebuilt from the session's pending requests. Only the
+// fork's own turns qualify — this process ran them, so the session
+// value still holds the run options their resume carries (the park
+// rule above all); a boundary the fork inherited from its source has
+// none, and a session reopened from storage has none either, so
+// neither is ever resumed from here.
+func (l *link) adoptForkParks(s *thread.Session) {
+	byRun := map[string][]weft.ToolCallPart{}
+	for _, r := range s.Pending() {
+		if sess, _, err := parseThreadRunID(r.RunID); err != nil || sess != s.ID() {
+			continue
+		}
+		byRun[r.RunID] = append(byRun[r.RunID], weft.ToolCallPart{ID: r.CallID, Name: r.Tool, Args: r.Args})
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for runID, calls := range byRun {
+		if _, held := l.parked[runID]; held {
+			continue
+		}
+		cmd := l.forkCmd[s.ID()]
+		l.rememberParkLocked(runID, &parkedRun{cmd: cmd, pending: calls,
+			decisions: map[string]approvalDecision{}, sess: s})
+	}
+}
+
+// describePending names parked calls for a human: run, call, tool.
+func describePending(pending []thread.Request) string {
+	parts := make([]string, 0, len(pending))
+	for _, r := range pending {
+		parts = append(parts, fmt.Sprintf("run %s call %s (%s)", r.RunID, r.CallID, r.Tool))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// forkSession forks src at entryID and revokes, in the fork, every
+// approval grant the conversation carried. A session-scoped grant is an
+// entry (ADR 0021 §4) and Fork copies it: the fork's boundary chain
+// would approve a parked call on the app user's standing consent and
+// the never tool's handler would run for real in an experiment — §6
+// rule 3's park would be decided by nobody. Deny-grants stay: a
+// standing refusal is safe to keep.
+func forkSession(ctx context.Context, src *thread.Session, entryID string) (*thread.Session, error) {
+	s, err := src.Fork(ctx, entryID)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range s.Entries() {
+		if g, ok := e.(thread.GrantEntry); ok && !g.Deny {
+			if err := s.Revoke(ctx, g.ID); err != nil {
+				return nil, fmt.Errorf("revoking the source's grant %s in the fork: %w", g.ID, err)
+			}
+		}
+	}
+	return s, nil
+}
+
+// isLatestTurn reports whether runID's turn is the last turn on the
+// session's current path — the one a Send continues from.
+func isLatestTurn(s *thread.Session, runID string) bool {
+	path, err := s.Path(s.Leaf())
+	if err != nil {
+		return false
+	}
+	for i := len(path) - 1; i >= 0; i-- {
+		if te, ok := path[i].(thread.TurnEntry); ok {
+			return te.RunID == runID
+		}
+	}
+	return false
 }
 
 // turnEntryOf finds the TurnEntry that closed the source run's turn —
 // the fork point (the fork keeps the whole conversation through it).
-func turnEntryOf(ctx context.Context, st thread.Storage, session, runID string) (string, error) {
-	_, entries, _, err := st.Load(ctx, session)
-	if err != nil {
-		return "", err
-	}
-	for _, e := range entries {
+func turnEntryOf(s *thread.Session, runID string) (string, error) {
+	for _, e := range s.Entries() {
 		if te, ok := e.(thread.TurnEntry); ok && te.RunID == runID {
 			return te.ID, nil
 		}
 	}
-	return "", fmt.Errorf("no turn %q in session %q", runID, session)
-}
-
-// sourceMsgs resolves the command's source transcript once per run
-// (nil when the command has no source or it cannot be resolved — the
-// same honest degradation runOptions logs).
-func (l *link) sourceMsgs(cmd command) []weft.Message {
-	if cmd.Source == nil || cmd.Source.RunID == "" {
-		return nil
-	}
-	msgs, err := l.sourceTranscript(context.Background(), cmd.Source.RunID)
-	if err != nil {
-		return nil
-	}
-	return msgs
+	return "", fmt.Errorf("no turn %q in session %q", runID, s.ID())
 }
 
 // breakpointTools names the stored breakpoint set this run parks on,
@@ -343,64 +668,60 @@ func (l *link) breakpointTools(agent string) []string {
 	return out
 }
 
-// scriptedFor builds the scripted engine over the command's source
-// transcript (nil when it cannot be resolved — the run then proceeds
-// on the agent's own model, the same honest degradation as an
-// unresolvable prefix, logged).
+// scriptedFor builds the scripted engine over the command's resolved
+// source. A command without one (validate refuses it; a hand-built
+// command can still reach here) gets an engine that holds no record:
+// every request misses, loudly — a scripted command never falls
+// through to the live model and its tokens.
 func (l *link) scriptedFor(cmd command) weft.Model {
-	agent, ok := l.reg.agent(cmd.Agent)
-	if !ok || agent == nil {
-		return nil
-	}
-	msgs := l.sourceMsgs(cmd)
-	if len(msgs) == 0 {
-		return nil
-	}
 	var tools []string
-	for _, t := range agent.Tools() {
-		tools = append(tools, t.Name)
+	if agent, ok := l.reg.agent(cmd.Agent); ok && agent != nil {
+		for _, t := range agent.Tools() {
+			tools = append(tools, t.Name)
+		}
 	}
-	return newScriptedModel(msgs, tools)
+	src := cmd.src
+	if src == nil {
+		src = &sourceRun{}
+	}
+	return newScriptedModel(src, tools)
 }
 
-// addUsage sums two usage rows (the substitute chain's budget counts
-// every run it spent).
-func addUsage(a, b weft.Usage) weft.Usage {
-	a.InputTokens += b.InputTokens
-	a.OutputTokens += b.OutputTokens
-	a.CachedInputTokens += b.CachedInputTokens
-	a.CacheWriteTokens += b.CacheWriteTokens
-	a.ReasoningTokens += b.ReasoningTokens
-	return a
-}
-
-// outcome records the run's end: the finished-ack status, the budget
-// tally, and — when the run parked — the parkedRun a decision resumes.
-func (l *link) outcome(cmd command, runID string, res *weft.RunResult, err error) string {
-	status := "succeeded"
+// outcome records the run's end: the finished-ack status and failure
+// text, the budget tally, and — when the run parked — the parkedRun a
+// decision resumes. spent is everything the command's runs used (every
+// leg of a chain, a failed run's partial usage); sess is the fork's
+// session when the run was a turn of one.
+func (l *link) outcome(cmd command, runID string, res *weft.RunResult, err error, spent weft.Usage, sess *thread.Session) (status, errText string) {
+	status = "succeeded"
 	if err != nil {
-		status = "failed"
+		status, errText = "failed", err.Error()
 		slog.Warn("weft/runtime: playground run failed",
 			"command_id", cmd.CommandID, "run_id", runID, "err", err)
 	}
 	// The budget tally counts what this command spent (§6 rule 6:
 	// "counted from each command's OnRunEnd usage" — this link is the
-	// run's caller, so the result's usage is that count).
-	if cmd.ExperimentID != "" && res != nil {
+	// run's caller, so the runs' usage is that count).
+	if cmd.ExperimentID != "" {
 		l.mu.Lock()
-		st := l.tally[cmd.ExperimentID]
-		if st == nil {
-			st = &budgetState{}
-			l.tally[cmd.ExperimentID] = st
-		}
-		st.spend(res.Usage.InputTokens + res.Usage.OutputTokens)
+		l.tallyLocked(cmd.ExperimentID).spend(spent.InputTokens + spent.OutputTokens)
 		l.mu.Unlock()
 	}
 	if res != nil && len(res.Pending) > 0 && err == nil {
-		l.rememberPark(runID, &parkedRun{cmd: cmd, msgs: res.Messages})
+		l.rememberPark(runID, &parkedRun{
+			cmd:       cmd,
+			msgs:      res.Messages,
+			pending:   res.Pending,
+			decisions: map[string]approvalDecision{},
+			sess:      sess,
+		})
 	}
-	return status
+	return status, errText
 }
+
+// maxParked bounds the parked runs kept for a later decision (a var
+// so a test can force eviction).
+var maxParked = 128
 
 // rememberPark keeps one parked run for a later decision, bounded:
 // a dev process that parks a thousand experiments keeps the newest
@@ -408,125 +729,172 @@ func (l *link) outcome(cmd command, runID string, res *weft.RunResult, err error
 func (l *link) rememberPark(runID string, pr *parkedRun) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if len(l.parked) >= 128 {
-		var oldest string
-		for id := range l.parked {
-			if oldest == "" || id < oldest {
-				oldest = id
-			}
+	l.rememberParkLocked(runID, pr)
+}
+
+// rememberParkLocked is rememberPark under l.mu.
+func (l *link) rememberParkLocked(runID string, pr *parkedRun) {
+	if _, again := l.parked[runID]; !again {
+		for len(l.parkOrder) >= maxParked {
+			delete(l.parked, l.parkOrder[0])
+			l.parkOrder = l.parkOrder[1:]
 		}
-		if oldest != "" && oldest != runID {
-			delete(l.parked, oldest)
-		}
+		l.parkOrder = append(l.parkOrder, runID)
 	}
 	l.parked[runID] = pr
 }
 
-// parkedRun is one parked run this runtime started: the transcript
-// through the park and the command that shaped it — what a decision
-// (panel continue/skip/resolve, or substitute's recorded result) needs
-// to resume it.
-type parkedRun struct {
-	cmd  command
-	msgs []weft.Message
+// restorePark puts back a park a decision took but whose resume never
+// started, without that decision (the next one completes the set
+// again). A fork's park goes back only while its session still holds
+// every parked call open: once Decide recorded anything, the session's
+// boundary is the truth and a re-decision would be refused there.
+func (l *link) restorePark(runID string, pr *parkedRun, callID string) {
+	if pr.sess != nil && len(pr.sess.Pending()) != len(pr.pending) {
+		return
+	}
+	l.mu.Lock()
+	delete(pr.decisions, callID)
+	l.mu.Unlock()
+	l.rememberPark(runID, pr)
 }
 
-// parkState is the parked map's value (an indirection so a later
-// substitute path can hold more without churning every site).
-type parkState = parkedRun
+// forgetParkLocked drops a parked run (its decisions are complete, or
+// it was evicted). Caller holds l.mu.
+func (l *link) forgetParkLocked(runID string) {
+	delete(l.parked, runID)
+	for i, id := range l.parkOrder {
+		if id == runID {
+			l.parkOrder = append(l.parkOrder[:i], l.parkOrder[i+1:]...)
+			break
+		}
+	}
+}
 
-// resume continues a parked run under one decision on one call:
-// Approve runs the handler for real, Deny skips it, Resolve pastes a
-// content computed outside the process (ADR 0007's verbs, called by
-// their plain names from the panel). The run keeps its shaping — the
-// same overrides, the same parked set for the calls still to come, the
-// same experiment labels — under a fresh run id; a resume that parks
-// again updates the state so the next decision finds it.
-func (l *link) resume(ctx context.Context, pr *parkedRun, d approvalDecision, runID string) (string, string) {
+// parkedRun is one parked run this runtime started: the transcript
+// through the park, the calls it left pending, the command that shaped
+// it, and the decisions that have arrived so far — what the panel's
+// continue/skip/resolve need to resume it. A fork's turn also keeps
+// its session: the boundary is the session's, and only the session
+// value that parked it still holds the run options the resume must
+// carry (the parked set above all).
+type parkedRun struct {
+	cmd       command
+	msgs      []weft.Message
+	pending   []weft.ToolCallPart
+	decisions map[string]approvalDecision // call id → the decision, until every pending call has one
+	sess      *thread.Session
+}
+
+// isPending reports whether callID is one of the run's parked calls.
+func (pr *parkedRun) isPending(callID string) bool {
+	for _, c := range pr.pending {
+		if c.ID == callID {
+			return true
+		}
+	}
+	return false
+}
+
+// pendingIDs lists the parked call ids, for an error a human reads.
+func (pr *parkedRun) pendingIDs() string {
+	ids := make([]string, 0, len(pr.pending))
+	for _, c := range pr.pending {
+		ids = append(ids, c.ID)
+	}
+	return strings.Join(ids, ", ")
+}
+
+// ordered returns the decisions in the pending calls' order.
+func (pr *parkedRun) ordered() []approvalDecision {
+	out := make([]approvalDecision, 0, len(pr.pending))
+	for _, c := range pr.pending {
+		if d, ok := pr.decisions[c.ID]; ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// resume continues a parked run once every one of its pending calls
+// has a decision: Approve runs the handler for real, Deny skips it,
+// Resolve pastes a content computed outside the process (ADR 0007's
+// verbs, called by their plain names from the panel). The run keeps
+// its shaping — the same overrides, the same parked set for the calls
+// still to come, the same experiment labels — under a fresh run id; a
+// resume that parks again is remembered under its own id so the next
+// decision finds it. A fork's boundary resumes through its session
+// (thread's Decide — the decisions are durable entries of the fork and
+// the resume is its next turn), never as a run beside it.
+func (l *link) resume(ctx context.Context, pr *parkedRun, runID string) (status, finalRun, errText string) {
+	decisions := pr.ordered()
+	if pr.sess != nil {
+		ds := make([]thread.Decision, 0, len(decisions))
+		for _, d := range decisions {
+			var td thread.Decision
+			switch d.Decision {
+			case "approve":
+				td = thread.Approve(d.CallID)
+			case "deny":
+				td = thread.Deny(d.CallID, orDefault(d.Reason, "skipped from the devtools panel"))
+			default: // resolve
+				td = thread.Resolve(d.CallID, d.Content)
+			}
+			td.Who, td.Via = d.Actor, "playground"
+			ds = append(ds, td)
+		}
+		turn, err := pr.sess.Decide(ctx, ds...)
+		if err == nil && turn == nil {
+			turn, err = pr.sess.Resume(ctx) // a session opened with AutoResume(false)
+		}
+		if err != nil {
+			slog.Warn("weft/runtime: fork resume failed", "session", pr.sess.ID(), "err", err)
+			return "failed", "", err.Error()
+		}
+		return l.awaitTurn(pr.cmd, pr.sess, turn)
+	}
+
 	agent, _ := l.reg.agent(pr.cmd.Agent)
 	opts := l.overrideOptions(pr.cmd)
 	opts = append(opts, weft.Messages(pr.msgs...))
-	switch d.Decision {
-	case "approve":
-		opts = append(opts, weft.Approve(d.CallID))
-	case "deny":
-		opts = append(opts, weft.Deny(d.CallID, orDefault(d.Reason, "skipped from the devtools panel")))
-	default: // resolve
-		opts = append(opts, weft.Resolve(d.CallID, d.Content))
+	for _, d := range decisions {
+		switch d.Decision {
+		case "approve":
+			opts = append(opts, weft.Approve(d.CallID))
+		case "deny":
+			opts = append(opts, weft.Deny(d.CallID, orDefault(d.Reason, "skipped from the devtools panel")))
+		default: // resolve
+			opts = append(opts, weft.Resolve(d.CallID, d.Content))
+		}
 	}
-	opts = append(opts, weft.RunID(runID))
-	l.mu.Lock()
-	delete(l.parked, d.RunID) // a resume that parks again re-members under its own id
-	l.mu.Unlock()
+	steer, release := l.steering(runID)
+	defer release()
+	opts = append(opts, steer, weft.RunID(runID))
 	res, err := agent.Generate(ctx, opts...)
-	return l.outcome(pr.cmd, runID, res, err), runID
+	status, errText = l.outcome(pr.cmd, runID, res, err, usageOf(res, err), nil)
+	return status, runID, errText
 }
 
 // runOptions composes the run exactly as §5.2's snippet does: the
 // overrides as plain weft RunOptions (dual Option/RunOption knobs, no
-// OverrideSpec), the source transcript as Messages (the loop repairs
-// a fed-back transcript), ParkOn for every tool not opted in, and the
-// experiment's metadata — weft.playground, weft.experiment.id,
-// weft.playground.command, weft.forked_from, weft.public_id — and
-// never weft.session.id (an ephemeral experiment is not a turn of the
-// session; §5.2).
+// OverrideSpec), the kept prefix validate composed as Messages (the
+// source run's input, its steps through from_step − 1, the transcript
+// edits applied — validated, so Repair has nothing to synthesize),
+// ParkAllExcept the tools vouched safe or opted in, and the experiment's metadata —
+// weft.playground, weft.experiment.id, weft.playground.command,
+// weft.forked_from, weft.public_id — and never weft.session.id (an
+// ephemeral experiment is not a turn of the session; §5.2). A fresh
+// command (no source) starts from the input alone.
 func (l *link) runOptions(cmd command, runID string) []weft.RunOption {
 	opts := l.overrideOptions(cmd)
-	// The source turn's context: the transcript through step from_step
-	// − 1, the transcript edits applied to the kept prefix (D2/D3),
-	// repaired by the loop — the edits were validated so Repair has
-	// nothing to synthesize. A fresh command (no source) starts from
-	// the input alone.
-	var msgs []weft.Message
-	if cmd.Source != nil && cmd.Source.RunID != "" {
-		var err error
-		if msgs, err = l.sourceTranscript(context.Background(), cmd.Source.RunID); err != nil {
-			slog.Warn("weft/runtime: source transcript unresolved; running without it",
-				"run_id", cmd.Source.RunID, "err", err)
-			msgs = nil
-		} else if len(cmd.TranscriptEdits) > 0 {
-			patched, perr := applyTranscriptEdits(msgs, cmd.Source.FromStep, cmd.TranscriptEdits)
-			if perr != nil {
-				// Studio validated the same edits against its own copy
-				// (§10.4); this copy disagrees — refuse rather than run
-				// on a transcript nobody wrote.
-				slog.Warn("weft/runtime: transcript edits rejected against the runtime's copy",
-					"run_id", cmd.Source.RunID, "err", perr)
-				msgs = nil
-			} else if cut := len(patched); cut > 0 {
-				opts = append(opts, weft.Messages(patched...))
-			}
-		} else if cut := cutAtStep(msgs, cmd.Source.FromStep); cut > 0 {
-			opts = append(opts, weft.Messages(msgs[:cut]...))
-		}
+	if len(cmd.prefix) > 0 {
+		opts = append(opts, weft.Messages(cmd.prefix...))
 	}
 	if cmd.Input != nil && *cmd.Input != "" {
 		opts = append(opts, weft.Prompt(*cmd.Input))
-	} else if cmd.Source != nil && cmd.Source.RunID != "" && cmd.Source.FromStep == 0 {
-		// §5.1 (step 8b review fix 5): input "replaces the turn's user
-		// message" — the original exists by default. A whole-turn
-		// re-run that sends no input runs the turn on the words the
-		// user actually sent (both engines); before this it fed the
-		// model an empty conversation.
-		if prompt := firstUserMessage(msgs); prompt != "" {
-			opts = append(opts, weft.Prompt(prompt))
-		}
 	}
 	opts = append(opts, weft.RunID(runID))
 	return opts
-}
-
-// firstUserMessage lifts the transcript's opening user message — the
-// turn's own input, the default a whole-turn re-run replays (§5.1).
-// Steered messages later in the turn are not turn openers; the first
-// user message is.
-func firstUserMessage(msgs []weft.Message) string {
-	for _, m := range msgs {
-		if m.Role == weft.RoleUser {
-			return m.Text()
-		}
-	}
-	return ""
 }
 
 // overrideOptions is the command's shaping alone — every knob §5.2
@@ -542,16 +910,16 @@ func (l *link) overrideOptions(cmd command) []weft.RunOption {
 	if len(o.ToolsEnabled) > 0 {
 		opts = append(opts, weft.OnlyTools(o.ToolsEnabled...))
 	}
-	if m := o.Model; m != "" {
-		if alt, ok := l.reg.model(m); ok && alt != nil {
-			opts = append(opts, weft.UseModel(alt))
-		}
-	} else if cmd.Engine == "scripted" {
+	if cmd.Engine == "scripted" {
 		// The scripted engine (§5.5): the source run's recorded turns
 		// answer each model call, zero tokens. Keyed on the agent's
-		// registered tool list — a narrowed set misses, loudly.
-		if scripted := l.scriptedFor(cmd); scripted != nil {
-			opts = append(opts, weft.UseModel(scripted))
+		// registered tool list — a narrowed set misses, loudly. It wins
+		// over a model override (validate refuses the pair): nothing a
+		// scripted command carries may reach a live model.
+		opts = append(opts, weft.UseModel(l.scriptedFor(cmd)))
+	} else if m := o.Model; m != "" {
+		if alt, ok := l.reg.model(m); ok && alt != nil {
+			opts = append(opts, weft.UseModel(alt))
 		}
 	}
 	if lvl, ok := thinkingLevel(o.Thinking); ok {
@@ -568,12 +936,14 @@ func (l *link) overrideOptions(cmd command) []weft.RunOption {
 		opts = append(opts, weft.Params(weft.RequestParams{Temperature: &temp}))
 	}
 
-	// Side-effect safety (§6 rule 3): every side-effect tool the
-	// runtime has not opted in parks at the approval boundary instead
-	// of running. A tool marked ReplaySafe is not a side effect.
-	if parked := l.reg.parkedTools(cmd.Agent, o.ToolsEnabled); len(parked) > 0 {
-		opts = append(opts, weft.ParkOn(parked...))
-	}
+	// Side-effect safety (§6 rule 3), default-deny: every tool call of
+	// the run parks at the approval boundary unless its tool is one the
+	// code vouched safe or the runtime opted in — by name, against each
+	// step's own dispatch set, so a tool only a ToolSource supplies
+	// parks too, and inherited by the Subagent child runs the run
+	// starts. On every run, the empty list included: nothing vouched
+	// means everything parks.
+	opts = append(opts, weft.ParkAllExcept(l.reg.allowedTools(cmd.Agent)...))
 	// The debugger's breakpoints (§8.3): parked on every run this
 	// runtime starts, whatever the command asked for — D7's rule,
 	// applied per run because the agent is immutable.
@@ -602,7 +972,8 @@ func (l *link) overrideOptions(cmd command) []weft.RunOption {
 }
 
 // thinkingLevel maps the wire vocabulary (the arena playground's)
-// onto the core's neutral scale.
+// onto the core's neutral scale. ok is false for "" (no override) and
+// for a word outside the vocabulary — validate rejects the latter.
 func thinkingLevel(s string) (weft.ThinkingLevel, bool) {
 	switch s {
 	case "off":
@@ -613,30 +984,27 @@ func thinkingLevel(s string) (weft.ThinkingLevel, bool) {
 		return weft.ThinkMedium, true
 	case "high":
 		return weft.ThinkHigh, true
-	case "":
-		return 0, false
 	default:
 		return 0, false
 	}
 }
 
-// cutAtStep implements §5.1's from_step semantics: keep the transcript
-// through step N−1 (its tool results included) and run step N fresh.
-// The cut is the message index where step N begins: the Nth assistant
-// message (steps count from 0, an assistant message opens each step),
-// so everything before it is steps 0..N−1 complete. That is the same
-// boundary the messages records' weft.step.index draws (each record
-// carries its step; keeping the ones below N), expressed over the
-// concatenated bodies because no P0 read path exposes the attribute
-// yet (obsdb's Transcript returns bodies only; studio/api.go's
-// transcript step reads 0 for the same reason). Repair on the fed-back
-// transcript guarantees no call is left without a result.
-func cutAtStep(msgs []weft.Message, fromStep int) int {
-	if fromStep <= 0 {
-		return 0 // re-run the whole turn: no prefix kept
+// cutAtStep implements §5.1's from_step semantics over a run's own
+// steps (sourceRun.steps — what the run added to the transcript it was
+// fed): keep them through step N−1 (its tool results included) and run
+// step N fresh. The cut is the index where step N begins: the Nth
+// assistant message (steps count from 0, an assistant message opens
+// each), so everything before it is steps 0..N−1 complete — the same
+// boundary the messages records' weft.step.index draws. Step 0's cut
+// is the first assistant message: what a resumed run recorded before
+// its first model call is not a step's to re-run. keptPrefix refuses
+// a cut that leaves a call without its result.
+func cutAtStep(steps []weft.Message, fromStep int) int {
+	if fromStep < 0 {
+		fromStep = 0
 	}
 	assistants := 0
-	for i, m := range msgs {
+	for i, m := range steps {
 		if m.Role == weft.RoleAssistant {
 			if assistants == fromStep {
 				return i
@@ -644,7 +1012,7 @@ func cutAtStep(msgs []weft.Message, fromStep int) int {
 			assistants++
 		}
 	}
-	return len(msgs) // fewer steps than asked: keep it all
+	return len(steps) // fewer steps than asked: keep it all
 }
 
 // orDefault returns s when set, def otherwise.

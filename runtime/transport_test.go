@@ -97,3 +97,45 @@ func TestBearerAuth(t *testing.T) {
 		t.Errorf("Authorization = %q", got)
 	}
 }
+
+// TestInProcessClientContainsAHandlerPanic pins the in-process
+// transport's parity with a socket: net/http contains a handler panic
+// per connection, and here the handler's goroutine is the connection.
+// Before the fix a panic in the embedded Studio's handler was an
+// unrecovered panic on a goroutine of the app — it took the process
+// down. Now it costs one response: a 500 before the handler wrote, a
+// broken body after.
+func TestInProcessClientContainsAHandlerPanic(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /early", func(http.ResponseWriter, *http.Request) { panic("before any write") })
+	mux.HandleFunc("GET /late", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Sent", "yes")
+		_, _ = w.Write([]byte("partial"))
+		w.Header().Set("X-Late", "after the first write") // must not reach, or race, the client's copy
+		panic("mid-body")
+	})
+	client := &http.Client{Transport: &handlerTransport{h: mux}}
+
+	resp, err := client.Get("http://weft.studio.local/early")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("a handler that panicked before writing answered %d, want 500", resp.StatusCode)
+	}
+
+	resp, err = client.Get("http://weft.studio.local/late")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if string(body) != "partial" || err == nil {
+		t.Errorf("a handler that panicked mid-body: body %q err %v, want the partial body and a read error", body, err)
+	}
+	if resp.Header.Get("X-Sent") != "yes" || resp.Header.Get("X-Late") != "" {
+		t.Errorf("headers = %v, want the ones set before the first write only", resp.Header)
+	}
+}

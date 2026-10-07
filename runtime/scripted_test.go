@@ -21,6 +21,13 @@ func scriptedTranscript() []weft.Message {
 	}
 }
 
+// scriptedSource is scriptedTranscript as a resolved source: the prompt
+// is the run's input, the rest its steps.
+func scriptedSource() *sourceRun {
+	msgs := scriptedTranscript()
+	return &sourceRun{input: msgs[:1], steps: msgs[1:]}
+}
+
 // TestScriptedEngine pins §5.5: the recorded assistant messages answer
 // matching requests byte-for-byte (zero tokens), a request that
 // changed the model's input misses with "no recorded turn" — never a
@@ -34,7 +41,7 @@ func TestScriptedEngine(t *testing.T) {
 	tools := []string{"lookup_order"}
 
 	// The same input replays the same answer, tool calls included.
-	model := newScriptedModel(scriptedTranscript(), tools)
+	model := newScriptedModel(scriptedSource(), tools)
 	agt := weft.New(model, weft.Name("a"), lookup)
 	res, err := agt.Generate(context.Background(), weft.Prompt("where is my order #4411?"))
 	if err != nil {
@@ -51,7 +58,7 @@ func TestScriptedEngine(t *testing.T) {
 	}
 
 	// A narrowed tool set changes the key: the miss is loud.
-	narrow := weft.New(newScriptedModel(scriptedTranscript(), []string{"lookup_order", "refund"}), weft.Name("a"), lookup)
+	narrow := weft.New(newScriptedModel(scriptedSource(), []string{"lookup_order", "refund"}), weft.Name("a"), lookup)
 	_, err = narrow.Generate(context.Background(), weft.Prompt("where is my order #4411?"),
 		weft.OnlyTools("lookup_order"))
 	if err == nil || !strings.Contains(err.Error(), "no recorded turn") {
@@ -59,7 +66,7 @@ func TestScriptedEngine(t *testing.T) {
 	}
 
 	// An edited input changes the messages: the miss is loud.
-	_, err = weft.New(newScriptedModel(scriptedTranscript(), tools), weft.Name("a"), lookup).
+	_, err = weft.New(newScriptedModel(scriptedSource(), tools), weft.Name("a"), lookup).
 		Generate(context.Background(), weft.Prompt("a different question entirely"))
 	if err == nil || !strings.Contains(err.Error(), "no recorded turn") {
 		t.Errorf("changed input err = %v, want the no-recorded-turn miss", err)
@@ -68,7 +75,7 @@ func TestScriptedEngine(t *testing.T) {
 	// Continued from step 1 (the tool message is the new input's
 	// prefix): the recorded reply answers.
 	prefix := scriptedTranscript()[:3]
-	cont := weft.New(newScriptedModel(scriptedTranscript(), tools), weft.Name("a"), lookup)
+	cont := weft.New(newScriptedModel(scriptedSource(), tools), weft.Name("a"), lookup)
 	res, err = cont.Generate(context.Background(), weft.Messages(prefix...))
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +94,7 @@ func TestScriptedEngineNoSilentPromptReplay(t *testing.T) {
 	lookup := weft.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) {
 		return "shipped", nil
 	})
-	model := newScriptedModel(scriptedTranscript(), []string{"lookup_order"})
+	model := newScriptedModel(scriptedSource(), []string{"lookup_order"})
 	agt := weft.New(model, weft.Name("a"), lookup)
 	res, err := agt.Generate(context.Background(), weft.Prompt("where is my order #4411?"),
 		weft.Instructions("a completely different system prompt"))
@@ -116,7 +123,7 @@ func TestScriptedEngineKeyAlteringRequestMisses(t *testing.T) {
 	// The full agent path — the trap the review proved live. Even
 	// thinking "off" misses: ThinkUnset is the zero level, so "off" is
 	// a non-zero key input the record never answers.
-	agt := weft.New(newScriptedModel(msgs, tools), weft.Name("a"), lookup)
+	agt := weft.New(newScriptedModel(&sourceRun{input: msgs[:1], steps: msgs[1:]}, tools), weft.Name("a"), lookup)
 	for _, lvl := range []weft.ThinkingLevel{weft.ThinkLow, weft.ThinkOff} {
 		_, err := agt.Generate(context.Background(), weft.Prompt("where is my order #4411?"),
 			weft.Thinking(weft.ThinkingConfig{Level: lvl}))
@@ -130,7 +137,7 @@ func TestScriptedEngineKeyAlteringRequestMisses(t *testing.T) {
 	// sequential-tools request each miss the plain-record key.
 	miss := func(req weft.ModelRequest) error {
 		var err error
-		newScriptedModel(msgs, tools).Stream(context.Background(), req)(
+		newScriptedModel(&sourceRun{input: msgs[:1], steps: msgs[1:]}, tools).Stream(context.Background(), req)(
 			func(_ weft.ModelEvent, e error) bool {
 				if e != nil {
 					err = e
@@ -154,9 +161,9 @@ func TestScriptedEngineKeyAlteringRequestMisses(t *testing.T) {
 	}
 }
 
-// TestScriptedModelReasoningParts documents ADR 0004's consequence:
-// signatures never stream back, so a scripted run's rebuilt transcript
-// lacks them.
+// TestScriptedModelReasoningParts pins reasoning replay:
+// signatures ride their deltas back, so a scripted run's rebuilt
+// transcript equals the record (the next step's key depends on it).
 func TestScriptedModelReasoningParts(t *testing.T) {
 	msgs := []weft.Message{
 		weft.User("think and answer"),
@@ -166,7 +173,7 @@ func TestScriptedModelReasoningParts(t *testing.T) {
 		}},
 	}
 	var got []weft.ModelEvent
-	for ev, err := range newScriptedModel(msgs, nil).Stream(context.Background(), weft.ModelRequest{
+	for ev, err := range newScriptedModel(&sourceRun{input: msgs[:1], steps: msgs[1:]}, nil).Stream(context.Background(), weft.ModelRequest{
 		Messages: msgs[:1],
 	}) {
 		if err != nil {
@@ -178,12 +185,12 @@ func TestScriptedModelReasoningParts(t *testing.T) {
 		t.Fatalf("events = %d, want reasoning, text, finish", len(got))
 	}
 	rd, ok := got[0].(weft.ModelReasoningDelta)
-	if !ok || rd.Text != "hmm" || rd.Signature != "" {
-		t.Errorf("reasoning event = %+v, want the text with no signature", got[0])
+	if !ok || rd.Text != "hmm" || rd.Signature != "sig-should-not-return" {
+		t.Errorf("reasoning event = %+v, want the text with its recorded signature", got[0])
 	}
 	// A repeated identical request drains the queue in recorded order;
 	// once drained, the next one misses loudly.
-	model := newScriptedModel(msgs, nil)
+	model := newScriptedModel(&sourceRun{input: msgs[:1], steps: msgs[1:]}, nil)
 	model.Stream(context.Background(), weft.ModelRequest{Messages: msgs[:1]})(
 		func(weft.ModelEvent, error) bool { return true })
 	var drainErr error

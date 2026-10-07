@@ -31,9 +31,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"iter"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -86,10 +88,17 @@ func serve(addr string) error {
 	// Setup A, with the playground: the same five lines, one more
 	// option and one deferred call. The Studio server is built, its
 	// Handler mounted, and the runtime link dials it in-process.
+	// The demo's sessions live in one jsonl store; the runtime gets it
+	// too, so the playground's fork mode (thread=fork) can branch them.
+	store, err := jsonl.Open("./.weft/threads")
+	if err != nil {
+		return err
+	}
 	srv := studio.New(studio.DB(otel.LocalDB()), studio.Playground(true))
 	defer runtime.Install(
 		runtime.Local(srv),
 		runtime.Agents(agent),
+		runtime.Threads(store),
 		runtime.Enabled(true),
 	)()
 
@@ -98,10 +107,6 @@ func serve(addr string) error {
 
 	// The demo's own surface: one thread turn per call, and the plain
 	// page the panel docks on (the gate harness drives both).
-	store, err := jsonl.Open("./.weft/threads")
-	if err != nil {
-		return err
-	}
 	demo := newDemo(store, agent)
 	mux.HandleFunc("POST /run", demo.run)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
@@ -221,7 +226,14 @@ func newDemo(st thread.Storage, agent *weft.Agent) *demo {
 // run answers one question: one turn of the session whose public id
 // the panel carries.
 func (d *demo) run(w http.ResponseWriter, r *http.Request) {
-	question := strings.TrimSpace(r.FormValue("text"))
+	// The body is the question — curl -d 'where is order 42?' sends the
+	// bare words under a form content type, so FormValue would read
+	// them as a field name with no value. A text=… field works too.
+	raw, _ := io.ReadAll(io.LimitReader(r.Body, 64<<10))
+	question := strings.TrimSpace(string(raw))
+	if form, err := url.ParseQuery(question); err == nil && form.Get("text") != "" {
+		question = strings.TrimSpace(form.Get("text"))
+	}
 	if question == "" {
 		question = "hello"
 	}

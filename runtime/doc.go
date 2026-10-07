@@ -26,17 +26,46 @@
 // registered can be turned off, never added (OnlyTools); models come
 // from the Models allow-list; MaxSteps and Parallelism only lower.
 // Side effects never re-fire silently (§6 rule 3): a tool counts as
-// "never" unless its code vouched weft.Replay(weft.ReplaySafe). In
-// side_effects "substitute" (the default), a parked call that matches
-// a recorded call of the source (same tool, same args) is answered
-// with the recorded result — the runtime acts as ADR 0007's resolver,
-// the handler never runs; a miss stays parked for a human (the panel's
-// continue / skip / resolve). "park" keeps every side-effect call at
-// the boundary; "allow" runs for real, but only tools the runtime
-// opted in with AllowSideEffects. The debugger's breakpoints (§8.3)
-// park their tools on every run this package starts, and steer (§8.4)
-// delivers into a run it holds — the app's own turns are never
-// breakable or steerable from here (D7, PQ7).
+// "never" unless its code vouched weft.Replay(weft.ReplaySafe) or the
+// runtime opted it in with AllowSideEffects — an opted-in tool runs
+// for real in every mode. In side_effects "substitute" (the default),
+// a parked call that matches a recorded call of the source (same tool,
+// same arguments as JSON; repeated calls in the order the source made
+// them) is answered with the recorded result — the runtime acts as
+// ADR 0007's resolver, the handler never runs; a miss stays parked for
+// a human (the panel's continue / skip / resolve). "park" answers
+// nothing from the record: every such call waits at the boundary.
+// "allow" is refused unless every tool the command leaves on is opted
+// in. A parked run resumes once each of its parked calls has a
+// decision, under all of them; a decision naming a call that is not
+// parked is rejected. The debugger's breakpoints (§8.3) park their
+// tools on every run this package starts, and steer (§8.4) delivers
+// into an ephemeral run it holds — not into a fork's turn, whose
+// undelivered steer thread would re-run as a follow-up turn without
+// the park rule; the app's own turns are never breakable or steerable
+// from here (D7, PQ7).
+//
+// The rule is default-deny (weft.ParkAllExcept): a run lists the tools
+// that may execute — the vouched-safe ones, the opted-in names, an
+// Output agent's submit_output — and every other call parks, matched
+// by name against each step's own tool set. So a tool that reaches the
+// run only through weft.ToolSource parks like any unannotated tool, and
+// the rule follows a weft.Subagent delegation into the child run: the
+// child's own unvouched tools park there. One limit: a child's parked
+// call is not the panel's to decide — the delegating call reads
+// SUBAGENT_PENDING (ADR 0014) and the parent run carries on, the side
+// effect never having fired. Names are matched in parent and child
+// alike, so opt a name in only if every tool of that name down the
+// delegation may run.
+//
+// Everything a command carries is re-validated here, whatever Studio
+// checked: unknown agents, tools, models, modes and options are
+// rejected, never defaulted; the source run id, from_step and the
+// transcript edits are checked against the transcript this runtime
+// resolved itself. The link holds bounded state — at most 256 commands
+// admitted and 16 runs executing at once, the newest 4096 command ids
+// for at-most-once, 128 parked runs, 64 forks — and stopping it
+// cancels the runs it started.
 //
 // The engines: "live" runs the agent's own model (or a Models
 // alternate); "scripted" (§5.5) answers each model call with the
@@ -48,7 +77,13 @@
 // opens read-side, Fork copies it to a new session with lineage
 // (thread mints the run ids, stamps weft.session.forked_from), and the
 // command's input becomes the fork's next turn under the same shaping;
-// a later fork command on the fork continues it in place.
+// the source's approval grants are revoked in the fork (the app user's
+// standing consent does not decide an experiment's parked call); a
+// later fork command naming the fork's latest turn continues it in
+// place, one naming an earlier turn forks from that turn. A fork's
+// parked call is the fork session's own approval boundary: a decision
+// is recorded in the fork and resumes it as the fork's next turn (the
+// record is never consulted in a fork — every such call parks).
 //
 // Runs this package starts are ordinary weft runs: they flow through
 // the weft/otel pipeline to every destination, carrying

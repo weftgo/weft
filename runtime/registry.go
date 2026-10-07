@@ -192,35 +192,42 @@ func (r *registry) entry(name string) (agentRegistration, bool) {
 	return e, ok
 }
 
-// parkedTools names the tools a command's run must park on: every
-// side-effect tool the command leaves on (the override subset when set,
-// else the agent's full set) that the runtime has not opted in with
-// AllowSideEffects — the on-set minus the opted-in, minus the tools
-// whose ReplayPolicy is safe (they are not side effects; a re-run may
-// execute them for real, WEFT-PLAYGROUND §6 rule 3). A tool the command
-// turned off is not offered and cannot fire, so it needs no park.
-func (r *registry) parkedTools(agent string, enabled []string) []string {
+// allowedTools names the tools a playground run may really execute —
+// the except-list of the run's default-deny park rule
+// (weft.ParkAllExcept, WEFT-PLAYGROUND §6 rule 3): the agent's tools
+// whose code vouched weft.Replay(weft.ReplaySafe), every name the
+// runtime opted in with AllowSideEffects (registered on the agent or
+// supplied later by a ToolSource — the rule matches by name), and the
+// structured-output submission of an agent built with weft.Output (a
+// submission is the run's answer, not a side effect). Everything else
+// a run can reach parks: an unannotated tool, a tool only a ToolSource
+// supplies, a Subagent child's own tools. Sorted; empty when nothing
+// may run.
+func (r *registry) allowedTools(agent string) []string {
 	e, ok := r.entries[agent]
 	if !ok {
 		return nil
 	}
-	on := map[string]bool{}
-	for _, t := range enabled {
-		on[t] = true
-	}
-	var parked []string
+	set := map[string]bool{}
 	for tool, class := range e.SideEffects {
-		if class == "safe" || e.isAllowed(tool) {
-			continue
+		if class == string(weft.ReplaySafe) || tool == outputTool {
+			set[tool] = true
 		}
-		if len(enabled) > 0 && !on[tool] {
-			continue // turned off: not offered, cannot fire
-		}
-		parked = append(parked, tool)
 	}
-	sort.Strings(parked) // the override hash and park_on are order-sensitive
-	return parked
+	for tool := range r.cfg.allow {
+		set[tool] = true
+	}
+	allowed := make([]string, 0, len(set))
+	for tool := range set {
+		allowed = append(allowed, tool)
+	}
+	sort.Strings(allowed) // a map's iteration order must not reach the run's options
+	return allowed
 }
+
+// outputTool is the tool weft.Output registers on an agent (the core's
+// submit_output; its name is model-visible contract).
+const outputTool = "submit_output"
 
 // isAllowed reports whether tool is on this agent's AllowSideEffects
 // list.
@@ -259,11 +266,16 @@ type budgetState struct {
 	runs   int64
 }
 
-// spend records one command's cost against its experiment.
-func (b *budgetState) spend(tokens int64) {
-	b.tokens += tokens
-	b.runs++
-}
+// reserve counts one admitted command against its experiment's run
+// cap. The count lands at admission, not at the run's end: a matrix
+// dispatched all at once would otherwise pass the check sixty times
+// before the first run finished and counted.
+func (b *budgetState) reserve() { b.runs++ }
+
+// spend records what one command's runs cost against its experiment —
+// every run it made: a failed run's partial usage and every leg of a
+// substitute chain included.
+func (b *budgetState) spend(tokens int64) { b.tokens += tokens }
 
 // over reports whether spending one more run of tokens would breach
 // the caps. Zero caps never breach.

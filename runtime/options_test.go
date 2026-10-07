@@ -1,10 +1,13 @@
 package runtime
 
 import (
+	"context"
 	"testing"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/wefttest"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // testAgent builds one named scripted agent for the registry tests.
@@ -51,4 +54,26 @@ func TestInstallEnabledByEnv(t *testing.T) {
 	}
 	shutdown()
 	shutdown() // idempotent
+}
+
+// TestWeftVersionMatchesRoot pins weftVersion() to the root module's
+// own version without reaching into it: weft stamps its version on the
+// tracer it reports through (the instrumentation scope), so a run's
+// span says what the constant must say. The release step that moves
+// root's version and forgets this one (0.7.0 did) fails here.
+func TestWeftVersionMatchesRoot(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
+	defer func() { _ = tp.Shutdown(context.Background()) }()
+	agent := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("a"), weft.TracerProvider(tp))
+	if _, err := agent.Generate(context.Background(), weft.Prompt("hi")); err != nil {
+		t.Fatal(err)
+	}
+	spans := rec.Ended()
+	if len(spans) == 0 {
+		t.Fatal("the run reported no span (test bug)")
+	}
+	if root := spans[0].InstrumentationScope().Version; weftVersion() != root {
+		t.Errorf("weftVersion() = %q, the root module reports %q: bump runtime/options.go with the tag", weftVersion(), root)
+	}
 }

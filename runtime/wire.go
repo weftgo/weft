@@ -1,5 +1,7 @@
 package runtime
 
+import "github.com/weftgo/weft"
+
 // The runtime link's wire protocol (WEFT-PLAYGROUND.md §10.3): all
 // JSON over HTTP. Commands come down an SSE stream; everything else
 // goes up as POSTs. These are the client's copy of the shapes — the
@@ -15,14 +17,20 @@ package runtime
 // command is validated against. Sent on connect and again after every
 // reconnect — the copy Studio holds must always be the runtime's own.
 type registration struct {
-	RuntimeID   string              `json:"runtime_id"`
-	Host        string              `json:"host"`
-	Pid         int                 `json:"pid"`
-	Service     string              `json:"service"`
-	Env         string              `json:"env"`
-	WeftVersion string              `json:"weft_version"`
-	Budget      budgetWire          `json:"budget"`
-	Threads     bool                `json:"threads"`
+	RuntimeID   string     `json:"runtime_id"`
+	Host        string     `json:"host"`
+	Pid         int        `json:"pid"`
+	Service     string     `json:"service"`
+	Env         string     `json:"env"`
+	WeftVersion string     `json:"weft_version"`
+	Budget      budgetWire `json:"budget"`
+	Threads     bool       `json:"threads"`
+	// Breakpoints is the debugger's tool set this runtime holds right
+	// now (§8.3) — sorted, empty rather than null. The set lives in
+	// this process, so it outlives a Studio restart; reporting it at
+	// every registration lets Studio show the rule that is parking the
+	// runtime's runs instead of an empty set that is not true.
+	Breakpoints []string            `json:"breakpoints"`
 	Agents      []agentRegistration `json:"agents"`
 }
 
@@ -76,6 +84,17 @@ type command struct {
 	ExperimentID    string           `json:"experiment_id"`
 	Actor           string           `json:"actor"`
 	PublicID        string           `json:"public_id"`
+
+	// src is the source run's transcript, resolved once when the command
+	// is dispatched and read by everything after (validation, the kept
+	// prefix, the scripted engine, the substitute lookup) — one read, so
+	// they cannot disagree about a source that is still growing. Off the
+	// wire; nil without a source or when it could not be resolved.
+	src *sourceRun
+	// prefix is the transcript the run is fed before its input: the
+	// source's kept part with the edits applied, composed (and so
+	// validated) once at dispatch.
+	prefix []weft.Message
 }
 
 // sourceSpec names the run to re-run: its id and the step to continue
@@ -98,9 +117,9 @@ type overrides struct {
 	Options      map[string]float64 `json:"options,omitempty"`  // max_steps, parallelism, temperature
 }
 
-// transcriptEdit is a D2/D3 edit — rewrite a model reply, patch a tool
-// result. Accepted by the schema (the wire shape is final), answered
-// "not yet available" by Studio until 8b implements them.
+// transcriptEdit is a D2/D3 edit — rewrite a kept step's model reply
+// (content), or patch one of its tool results (tool_result + call_id).
+// Step is the source run's own step index.
 type transcriptEdit struct {
 	Step       int    `json:"step"`
 	ToolResult string `json:"tool_result,omitempty"`
@@ -153,5 +172,5 @@ type ack struct {
 	State     string `json:"state"` // accepted | rejected | finished
 	RunID     string `json:"run_id,omitempty"`
 	Status    string `json:"status,omitempty"` // succeeded | failed (finished only)
-	Error     string `json:"error,omitempty"`  // rejected only
+	Error     string `json:"error,omitempty"`  // why: a rejection's reason, a failed run's error
 }

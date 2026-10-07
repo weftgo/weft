@@ -20,6 +20,7 @@ import (
 	"github.com/weftgo/weft/core/mw"
 	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/obsdb/sqlite"
 	"github.com/weftgo/weft/otel"
 )
 
@@ -339,7 +340,7 @@ func TestRequestsContentOff(t *testing.T) {
 	var td toolsDocT
 	decode(t, tools, &td)
 	if len(td.Catalogs) != 0 || td.Badge != "stripped" || td.Reason == "" ||
-		!strings.Contains(td.Fix, "enable content for this destination: otel.Local(...)") {
+		!strings.Contains(td.Fix, "otel.NoContent()") || !strings.Contains(td.Fix, "weft.Content(false)") {
 		t.Errorf("content-off tools = %+v, want [] with the stripped badge, reason and fix", td)
 	}
 }
@@ -437,5 +438,206 @@ func TestRequestsNotRecorded(t *testing.T) {
 	}
 	if !strings.Contains(reqs, `"requests":[]`) || !strings.Contains(tools, `"catalogs":[]`) {
 		t.Errorf("empty lists must be [], never null: %s %s", reqs, tools)
+	}
+}
+
+// countingDB counts the prompt and tools reads a response makes and
+// keeps the last requests query it was asked.
+type countingDB struct {
+	obsdb.DB
+	prompts, tools atomic.Int64
+	lastLimit      atomic.Int64
+}
+
+func (c *countingDB) Prompt(ctx context.Context, run, hash string) (obsdb.PromptRecord, error) {
+	c.prompts.Add(1)
+	return c.DB.Prompt(ctx, run, hash)
+}
+
+func (c *countingDB) Tools(ctx context.Context, run, hash string) (obsdb.ToolsRecord, error) {
+	c.tools.Add(1)
+	return c.DB.Tools(ctx, run, hash)
+}
+
+func (c *countingDB) Requests(ctx context.Context, run string, q obsdb.RequestQuery) ([]obsdb.RequestRecord, error) {
+	c.lastLimit.Store(int64(q.Limit))
+	return c.DB.Requests(ctx, run, q)
+}
+
+// countingServer is requestsServer over a countingDB, with the sqlite
+// file's path (for tests that damage it).
+func countingServer(t *testing.T) (*httptest.Server, *countingDB, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "weft.db")
+	db, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &countingDB{DB: db}
+	srv := New(DB(c))
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(func() { ts.Close(); _ = srv.Close(); _ = db.Close() })
+	return ts, c, path
+}
+
+// TestRequestsResolveEachHashOnce: the 4-row run names 2 prompts and 2
+// catalogs, and one response reads each exactly once (2 + 2), not once
+// per row; a content-off run's stripped rows read none — their badge is
+// known from the mark, with no obsdb.ExplainMissing scan per hash.
+func TestRequestsResolveEachHashOnce(t *testing.T) {
+	ts, c, _ := countingServer(t)
+	recordRequestsRun(t, ts.URL, "r_req")
+	recordRequestsRun(t, ts.URL, "r_off", otel.NoContent())
+	fetchJSON(t, ts, "/api/runs/r_req", func(b string) bool { return strings.Contains(b, `"request_count":4`) })
+	fetchJSON(t, ts, "/api/runs/r_off", func(b string) bool { return strings.Contains(b, `"request_count":4`) })
+
+	c.prompts.Store(0)
+	c.tools.Store(0)
+	fetchJSON(t, ts, "/api/runs/r_req/requests", nil)
+	if p, tl := c.prompts.Load(), c.tools.Load(); p != 2 || tl != 2 {
+		t.Errorf("one response read %d prompts and %d catalogs, want 2 and 2", p, tl)
+	}
+	c.prompts.Store(0)
+	c.tools.Store(0)
+	fetchJSON(t, ts, "/api/runs/r_off/requests", nil)
+	fetchJSON(t, ts, "/api/runs/r_off/tools", nil)
+	if p, tl := c.prompts.Load(), c.tools.Load(); p != 0 || tl != 0 {
+		t.Errorf("a content-off run read %d prompts and %d catalogs, want none", p, tl)
+	}
+}
+
+// TestRequestsGap: a stored-as-emitted request whose tools record a
+// destination dropped (here: deleted from the file) reads {hash,
+// badge: gap} inline; when that was the run's only catalog, the tools
+// route's empty list carries the gap badge.
+func TestRequestsGap(t *testing.T) {
+	ts, _, path := countingServer(t)
+	recordRequestsRun(t, ts.URL, "r_req")
+	// r_one: one tool, two steps — one catalog.
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(ts.URL, ""), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	echo := core.Tool("echo", "Echo.", func(_ context.Context, in struct {
+		Msg string `json:"msg"`
+	}) (string, error) {
+		return in.Msg, nil
+	})
+	one := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"msg":"hi"}`, ID: "c1"}),
+		wefttest.Say("done"),
+	), core.Instructions("x"), echo, core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	if _, err := one.Generate(ctx, core.RunID("r_one"), core.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	fetchJSON(t, ts, "/api/runs/r_req", func(b string) bool { return strings.Contains(b, `"request_count":4`) })
+	fetchJSON(t, ts, "/api/runs/r_one", func(b string) bool { return strings.Contains(b, `"request_count":2`) })
+
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range []struct {
+		id  string
+		pos int
+	}{{"r_req", 1}, {"r_one", 0}} {
+		res, err := raw.Exec(`DELETE FROM records WHERE run_id = ? AND kind = 'tools' AND pos = ?`, run.id, run.pos)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			t.Fatalf("deleted %d tools records of %s, want 1", n, run.id)
+		}
+	}
+	_ = raw.Close()
+
+	var page requestsDoc
+	decode(t, fetchJSON(t, ts, "/api/runs/r_req/requests", nil), &page)
+	if len(page.Requests) != 4 {
+		t.Fatalf("requests = %d rows, want 4", len(page.Requests))
+	}
+	for i, r := range page.Requests {
+		var ref map[string]any
+		decode(t, string(r.ToolsRaw), &ref)
+		if i == 0 {
+			if ref["badge"] != nil || ref["tools"] == nil {
+				t.Errorf("request 0 tools = %s, want the stored catalog", r.ToolsRaw)
+			}
+			continue
+		}
+		if len(ref) != 2 || ref["badge"] != "gap" || ref["hash"] != r.CatalogHash {
+			t.Errorf("request %d tools = %s, want {hash, badge: gap}", i, r.ToolsRaw)
+		}
+	}
+	// One catalog of two left: listed, the lost one shows on its rows.
+	var td toolsDocT
+	decode(t, fetchJSON(t, ts, "/api/runs/r_req/tools", nil), &td)
+	if len(td.Catalogs) != 1 || td.Badge != "" {
+		t.Errorf("r_req tools = %+v, want the surviving catalog, no envelope badge", td)
+	}
+	// The only catalog lost: the empty list says gap.
+	var only toolsDocT
+	decode(t, fetchJSON(t, ts, "/api/runs/r_one/tools", nil), &only)
+	if len(only.Catalogs) != 0 || only.Badge != "gap" || only.Fix == "" {
+		t.Errorf("r_one tools = %+v, want [] with the gap badge and its fix", only)
+	}
+}
+
+// TestRequestsParams pins the parameters: limit above 1000 is clamped
+// to 1000 (the same cap obsdb applies, so next_from is judged against
+// it), malformed from and limit are 400s, and step= filters a child
+// run (an id with slashes) like any other.
+func TestRequestsParams(t *testing.T) {
+	ts, c, _ := countingServer(t)
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(ts.URL, ""), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov := []core.Option{core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider())}
+	child := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "noop", Args: `{}`, ID: "k1"}),
+		wefttest.Say("researched"),
+	), append([]core.Option{core.Name("researcher"), core.Instructions("research"),
+		core.Tool("noop", "Do nothing.", func(context.Context, struct{}) (string, error) { return "ok", nil })}, prov...)...)
+	parent := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"go"}`, ID: "c_sub"}),
+		wefttest.Say("done"),
+	), append([]core.Option{core.Name("lead"), core.Instructions("lead"),
+		core.Subagent("research", "Research.", child)}, prov...)...)
+	if _, err := parent.Generate(ctx, core.RunID("r_par"), core.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	const kid = "r_par/0/c_sub"
+	fetchJSON(t, ts, "/api/runs/"+kid, func(b string) bool { return strings.Contains(b, `"request_count":2`) })
+
+	var page requestsDoc
+	decode(t, fetchJSON(t, ts, "/api/runs/"+kid+"/requests?step=1", nil), &page)
+	if len(page.Requests) != 1 || page.Requests[0].Step != 1 || page.Requests[0].Index != 1 {
+		t.Errorf("child step=1 = %+v, want its one step-1 request", page.Requests)
+	}
+
+	decode(t, fetchJSON(t, ts, "/api/runs/"+kid+"/requests?limit=5000", nil), &page)
+	if got := c.lastLimit.Load(); got != 1000 || len(page.Requests) != 2 || page.NextFrom != nil {
+		t.Errorf("limit=5000 asked obsdb for %d (rows %d, next_from %v), want the 1000 clamp", got, len(page.Requests), page.NextFrom)
+	}
+
+	for _, q := range []string{"from=abc", "limit=abc"} {
+		resp, err := http.Get(ts.URL + "/api/runs/" + kid + "/requests?" + q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(b), `"bad_request"`) {
+			t.Errorf("?%s = %d %s, want 400", q, resp.StatusCode, b)
+		}
 	}
 }

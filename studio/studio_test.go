@@ -45,6 +45,13 @@ const (
 	// fxHash mirrors what core.New stamps at construction (the
 	// manifest hash rides every record and span).
 	fxHash = "sha256:demo-fleet"
+	// The request record's hashes (ADR 0028): every fixture run's
+	// run_start carries the instructions hash a current run does, and
+	// r_ok's one model call has its request, prompt and tools records,
+	// so the fixture goldens read like current runs (not not_recorded —
+	// TestRequestsNotRecorded's hand-built file is the pre-A1 one).
+	fxInstructionsHash = "9d1f0a5c3b7e2a4d6f8091b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6"
+	fxCatalogHash      = "4e3d2c1b0a99887766554433221100ffeeddccbbaa0099887766554433221100"
 )
 
 // fxRecord builds one weft log record for run at time at: kind is
@@ -63,6 +70,24 @@ func fxRecord(run, kind, eventType string, pos int64, at time.Time, body string)
 	case "event":
 		attrs["weft.event.type"] = eventType
 		attrs["weft.event.pos"] = pos
+		if eventType == "run_start" {
+			attrs["weft.instructions.hash"] = fxInstructionsHash
+		}
+	case "request":
+		attrs["weft.request.index"] = pos
+		attrs["weft.step.index"] = int64(0)
+		attrs["weft.attempt.index"] = int64(1)
+		attrs["weft.content"] = "full"
+		attrs["weft.system.hash"] = fxInstructionsHash
+		attrs["weft.catalog.hash"] = fxCatalogHash
+	case "prompt":
+		attrs["weft.prompt.index"] = pos
+		attrs["weft.step.index"] = int64(0)
+		attrs["weft.system.hash"] = fxInstructionsHash
+	case "tools":
+		attrs["weft.tools.index"] = pos
+		attrs["weft.step.index"] = int64(0)
+		attrs["weft.catalog.hash"] = fxCatalogHash
 	case "messages":
 		// Every fixture run makes one model call: its input record and
 		// its one assistant batch both joined at step 0.
@@ -190,6 +215,17 @@ func fixtureDB(t *testing.T) obsdb.DB {
 			`[{"role":"user","content":[{"type":"text","text":"Where is order 42?"}]}]`),
 		fxRecord("r_ok", "messages", "", 1, okAt(2*time.Second),
 			`[{"role":"assistant","content":[{"type":"text","text":"Order 42 shipped this morning."}]}]`),
+		// Step 0's model call: its prompt and catalog, then the request.
+		fxRecord("r_ok", "prompt", "", 0, okAt(200*time.Millisecond),
+			`{"hash":"`+fxInstructionsHash+`","text":"You handle orders."}`),
+		fxRecord("r_ok", "tools", "", 0, okAt(200*time.Millisecond),
+			`{"hash":"`+fxCatalogHash+`","tools":[{"name":"lookup_order","description":"Look up an order by ID.",`+
+				`"schema":{"type":"object","properties":{"order_id":{"type":"string","description":"the order to look up"}},"required":["order_id"]},`+
+				`"timeout_ms":0,"approval":false,"replay":"never","max_result_bytes":65536,"sequential":false,"source":"local"}]}`),
+		fxRecord("r_ok", "request", "", 0, okAt(200*time.Millisecond),
+			`{"step":0,"attempt":1,"system_hash":"`+fxInstructionsHash+`","messages_ref":{"index":0,"count":1},`+
+				`"tools":{"catalog_hash":"`+fxCatalogHash+`","names":["lookup_order"]},"sequential_tools":false,"params":{},`+
+				`"model":{"provider":"wefttest","name":"script"},"stream":true}`),
 	}
 	okEvents, okSpans := stampSession(okEvents, []obsdb.Span{
 		fxSpanRec("r_ok", okAt(0), okAt(2*time.Second), 1, "", 10, 4)}, "r_ok")

@@ -59,7 +59,11 @@ type runRoute struct {
 }
 
 // addRunRoute registers a GET /api/runs/{id}/<ext> sub-route, which
-// serveRunRoutes dispatches.
+// serveRunRoutes dispatches by suffix. So a child run id whose last
+// segment equals a sub-route name (events, transcript, spans, requests,
+// tools) is shadowed by that route: its run document is unreachable
+// at /api/runs/{id}. A child id's last segment is the provider's tool
+// call id, and providers' ids never take those shapes.
 func (s *Server) addRunRoute(ext string, serve func(http.ResponseWriter, *http.Request, string)) {
 	s.runRoutes = append(s.runRoutes, runRoute{ext: ext, serve: serve})
 }

@@ -1,7 +1,7 @@
 {
   "catalogs": [],
   "badge": "stripped",
-  "reason": "this run was recorded through a content-off destination, which drops system prompts and tool catalogs",
-  "fix": "enable content for this destination: otel.Local(...) and otel.Studio(...) record content unless otel.NoContent() turns it off"
+  "reason": "this run's records were content-off: its system prompts and tool catalogs were dropped before they were stored",
+  "fix": "turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent"
 }
 

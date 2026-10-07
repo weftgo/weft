@@ -175,7 +175,9 @@ attempt, the prompt and catalog its hashes name inline unless `refs=1`,
 catalogs by hash) — both under the `requests` capability, refused to a
 read-scoped panel token (403, `badge: "hidden"`), and badged
 `not_recorded` / `stripped` rather than empty when there is nothing to
-show for a reason,
+show for a reason (a child run id whose last segment is itself one of
+these sub-route names — `events`, `transcript`, `spans`, `requests`,
+`tools` — is shadowed by the route; provider call ids never collide),
 `traces/{trace_id}` (any trace), `sessions`, `sessions/{id}` (turns in
 order), `public/{public_id}`, `manifest`, `POST /api/panel-tokens`
 (mint; the panel's scoped tokens — see the devtools panel above), and

@@ -23,6 +23,10 @@ import (
 // a run written before the record reads not_recorded, a content-off
 // run's catalogs read stripped — never an empty pane without a word.
 
+// maxRequestsLimit is the largest requests page (obsdb's
+// RequestQuery.PageLimit cap): a larger limit is clamped, not refused.
+const maxRequestsLimit = 1000
+
 // holeNote is a badge's one-line reason and fix (ADR 0028 §11's table)
 // as these routes word them.
 type holeNote struct{ reason, fix string }
@@ -33,8 +37,8 @@ var holeNotes = map[obsdb.Hole]holeNote{
 		"upgrade weft and re-run",
 	},
 	obsdb.HoleStripped: {
-		"this run was recorded through a content-off destination, which drops system prompts and tool catalogs",
-		"enable content for this destination: otel.Local(...) and otel.Studio(...) record content unless otel.NoContent() turns it off",
+		"this run's records were content-off: its system prompts and tool catalogs were dropped before they were stored",
+		"turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent",
 	},
 	obsdb.HoleGap: {
 		"a request names this record, but the destination dropped it",
@@ -145,13 +149,21 @@ func missingHole(err error) obsdb.Hole {
 	return obsdb.HoleGap
 }
 
-// mayReadPrompts refuses a read-scoped panel token on a route that
-// carries system prompts or tool catalogs (the manifest's rule): 403
-// in the error shape, with the hidden badge so the panel renders the
-// hole rather than an error.
-func mayReadPrompts(w http.ResponseWriter, r *http.Request) bool {
+// readsPrompts says whether the request's identity may read system
+// prompts and tool catalogs (the manifest, a run's requests and tools):
+// everyone but a read-scoped panel token — the server token, setup A's
+// loopback API and a playground-scoped panel token.
+func readsPrompts(r *http.Request) bool {
 	p := idFrom(r).panel
-	if p == nil || p.Scope == scopePlayground {
+	return p == nil || p.Scope == scopePlayground
+}
+
+// mayReadPrompts refuses a read-scoped panel token on a route that
+// carries system prompts or tool catalogs (readsPrompts): 403 in the
+// error shape, with the hidden badge so the panel renders the hole
+// rather than an error.
+func mayReadPrompts(w http.ResponseWriter, r *http.Request) bool {
+	if readsPrompts(r) {
 		return true
 	}
 	type errBody struct {
@@ -200,7 +212,9 @@ func (s *Server) serveRunRequests(w http.ResponseWriter, r *http.Request, id str
 	if !ok {
 		return
 	}
-	query.Limit = limit
+	// obsdb clamps the same way (RequestQuery.PageLimit); clamping here
+	// keeps the page size next_from is judged against explicit.
+	query.Limit = min(limit, maxRequestsLimit)
 	refs := false
 	if v := q.Get("refs"); v != "" {
 		b, err := strconv.ParseBool(v)
@@ -239,8 +253,9 @@ func (s *Server) serveRunRequests(w http.ResponseWriter, r *http.Request, id str
 			row.Body.Tools.Names = []string{}
 		}
 		if !refs {
-			if row.Prompt, err = res.prompt(rec.SystemHash); err == nil {
-				row.Tools, err = res.catalog(rec.CatalogHash)
+			stripped := rec.Content == obsdb.HoleStripped
+			if row.Prompt, err = res.prompt(rec.SystemHash, stripped); err == nil {
+				row.Tools, err = res.catalog(rec.CatalogHash, stripped)
 			}
 			if err != nil {
 				dbError(w, r, "requests of run", id, err)
@@ -257,7 +272,10 @@ func (s *Server) serveRunRequests(w http.ResponseWriter, r *http.Request, id str
 }
 
 // resolver reads each distinct prompt and catalog hash of one response
-// once.
+// once. A stripped request's hashes are not read at all: a content-off
+// chain drops the records they name, so the answer is known — and
+// asking would cost obsdb.ExplainMissing's scan of every request per
+// hash. Only an unstripped row's missing record is explained (gap).
 type resolver struct {
 	ctx      context.Context
 	db       obsdb.DB
@@ -266,9 +284,12 @@ type resolver struct {
 	catalogs map[string]any
 }
 
-func (rs *resolver) prompt(hash string) (any, error) {
-	if hash == "" {
+func (rs *resolver) prompt(hash string, stripped bool) (any, error) {
+	switch {
+	case hash == "":
 		return nil, nil
+	case stripped:
+		return holeRef{Hash: hash, Badge: string(obsdb.HoleStripped)}, nil
 	}
 	if v, ok := rs.prompts[hash]; ok {
 		return v, nil
@@ -287,9 +308,12 @@ func (rs *resolver) prompt(hash string) (any, error) {
 	return v, nil
 }
 
-func (rs *resolver) catalog(hash string) (any, error) {
-	if hash == "" {
+func (rs *resolver) catalog(hash string, stripped bool) (any, error) {
+	switch {
+	case hash == "":
 		return nil, nil
+	case stripped:
+		return holeRef{Hash: hash, Badge: string(obsdb.HoleStripped)}, nil
 	}
 	if v, ok := rs.catalogs[hash]; ok {
 		return v, nil
@@ -338,14 +362,20 @@ func (s *Server) serveRunTools(w http.ResponseWriter, r *http.Request, id string
 		out.Catalogs = append(out.Catalogs, catalogOf(c))
 	}
 	if len(cats) == 0 && det.RequestCount > 0 {
-		// No catalog stored: say why when a request named one.
-		hash, err := s.namedCatalog(ctx, id, det.CatalogHash)
+		// No catalog stored: say why when a request named one — stripped
+		// straight from that request's mark, else the reader's answer
+		// (gap).
+		named, err := s.namedCatalog(ctx, id)
 		if err != nil {
 			dbError(w, r, "tools of run", id, err)
 			return
 		}
-		if hash != "" {
-			if _, err := s.db.Tools(ctx, id, hash); errors.Is(err, obsdb.ErrNotFound) {
+		switch {
+		case named.CatalogHash == "":
+		case named.Content == obsdb.HoleStripped:
+			out.badgeFields = badgeOf(obsdb.HoleStripped)
+		default:
+			if _, err := s.db.Tools(ctx, id, named.CatalogHash); errors.Is(err, obsdb.ErrNotFound) {
 				out.badgeFields = badgeOf(missingHole(err))
 			} else if err != nil {
 				dbError(w, r, "tools of run", id, err)
@@ -356,26 +386,23 @@ func (s *Server) serveRunTools(w http.ResponseWriter, r *http.Request, id string
 	writeJSON(w, r, http.StatusOK, out)
 }
 
-// namedCatalog is a catalog hash some request of the run names: the
-// run row's (request 0's) when set, else the first a later request
-// names; "" when no request offered tools.
-func (s *Server) namedCatalog(ctx context.Context, id, first string) (string, error) {
-	if first != "" {
-		return first, nil
-	}
-	q := obsdb.RequestQuery{Limit: 1000}
+// namedCatalog is the first request of the run that names a catalog
+// (request 0 unless it offered no tools); the zero record when none
+// did. The scan stops at that request.
+func (s *Server) namedCatalog(ctx context.Context, id string) (obsdb.RequestRecord, error) {
+	q := obsdb.RequestQuery{Limit: maxRequestsLimit}
 	for {
 		page, err := s.db.Requests(ctx, id, q)
 		if err != nil {
-			return "", err
+			return obsdb.RequestRecord{}, err
 		}
 		for _, rec := range page {
 			if rec.CatalogHash != "" {
-				return rec.CatalogHash, nil
+				return rec, nil
 			}
 		}
 		if len(page) < q.PageLimit() {
-			return "", nil
+			return obsdb.RequestRecord{}, nil
 		}
 		q.From = page[len(page)-1].Index + 1
 	}

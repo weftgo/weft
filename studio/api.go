@@ -818,7 +818,7 @@ func (s *Server) serveManifest(w http.ResponseWriter, r *http.Request) {
 	// read-scoped panel token's page does not get (serveRuntimes strips
 	// the same field for it): only an identity that may start
 	// experiments reads it. The panel itself never asks for it.
-	if p := idFrom(r).panel; p != nil && p.Scope != scopePlayground {
+	if !readsPrompts(r) {
 		writeError(w, r, http.StatusForbidden, "forbidden",
 			"the manifest carries the agents' system prompts: a read-scoped panel token does not read it")
 		return

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/obsdb"
 	linkruntime "github.com/weftgo/weft/studio/runtime"
 )
 
@@ -16,23 +17,75 @@ import (
 // (its transcript is the one the run feeds on); this file keeps the
 // HTTP side honest against Studio's own database.
 //
-// The rules mirror weft/runtime's edits.go and transcript.go line for
-// line (each module owns its copy of the contract, like the wire
-// shapes — nothing above the link is shared), and the counting is the
-// part that must not drift:
+// The counting is the part that must not drift:
 //
-//   - a run's first messages record is its INPUT record — the
-//     conversation it was fed plus the turn's own prompt (D1). It is
-//     context, never a step: an assistant message of an earlier turn
-//     is not a step of this run;
-//   - every later record is what the run's steps added. Step N is the
-//     run's (N+1)th model call: the Nth assistant message after the
-//     input record (from 0), with the tool results that follow it —
-//     the index step_start / step_finish carry (weft.step.index);
+//   - the run's INPUT record — the conversation it was fed plus the
+//     turn's own prompt (D1) — is context, never a step: an assistant
+//     message of an earlier turn is not a step of this run;
+//   - every other record is what the run's steps added, and it says
+//     which: the step it joined, as the core stamped it on the record
+//     (weft.step.index, ADR 0028 §8). Step N is the run's (N+1)th model
+//     call. A resumed run's rebuilt tool message is step 0's; a steered
+//     message the step that just finished;
 //   - from_step N keeps the input and steps 0..N−1 and runs step N
 //     fresh; an edit names one of the kept steps, and a tool-result
 //     patch is scoped to the step it names (call ids are a step's own
 //     — a deterministic model reuses them).
+//
+// Only a transcript whose records carry no step (a ClickHouse row from
+// before 0004, a producer that never stamped one) or whose input flag
+// the backend inferred is counted the pre-ADR-0028 way, by assistant
+// order — weft/runtime's edits.go and transcript.go rule, which the
+// runtime still applies (A2 debt: stored step (F2/H6)).
+
+// stepMessage is one of the run's own messages and the step it joined
+// (-1: recorded before the run's first model call on a transcript
+// counted by order).
+type stepMessage struct {
+	step int
+	msg  core.Message
+}
+
+// runSteps returns the run's own messages, each with its step: the
+// stored step when every batch carries one and a read input flag, else
+// the order walk over sourceSteps.
+func runSteps(batches []obsdb.TranscriptBatch) ([]stepMessage, error) {
+	stored := len(batches) > 0
+	for _, b := range batches {
+		if b.Step < 0 || b.InputDerived {
+			stored = false
+		}
+	}
+	if !stored {
+		_, msgs, err := sourceSteps(obsdb.TranscriptBodies(batches))
+		if err != nil {
+			return nil, err
+		}
+		out := make([]stepMessage, len(msgs))
+		at := -1
+		for i, m := range msgs {
+			if m.Role == core.RoleAssistant {
+				at++
+			}
+			out[i] = stepMessage{step: at, msg: m}
+		}
+		return out, nil
+	}
+	var out []stepMessage
+	for _, b := range batches {
+		if b.Input || len(b.Messages) == 0 || string(b.Messages) == "null" {
+			continue
+		}
+		var batch []core.Message
+		if err := json.Unmarshal(b.Messages, &batch); err != nil {
+			return nil, fmt.Errorf("messages body: %w", err)
+		}
+		for _, m := range batch {
+			out = append(out, stepMessage{step: b.Step, msg: m})
+		}
+	}
+	return out, nil
+}
 
 // sourceSteps splits a run's messages bodies where the run itself
 // began: the first record is the input, the rest are the steps
@@ -57,13 +110,14 @@ func sourceSteps(bodies []json.RawMessage) (input, steps []core.Message, err err
 	return input, steps, nil
 }
 
-// stepCount is how many steps the run recorded — one assistant message
-// opens each.
-func stepCount(steps []core.Message) int {
+// stepCount is how many steps the run recorded: one past the last
+// step holding an assistant message (each step's model call writes
+// one).
+func stepCount(steps []stepMessage) int {
 	n := 0
 	for _, m := range steps {
-		if m.Role == core.RoleAssistant {
-			n++
+		if m.msg.Role == core.RoleAssistant && m.step+1 > n {
+			n = m.step + 1
 		}
 	}
 	return n
@@ -71,10 +125,10 @@ func stepCount(steps []core.Message) int {
 
 // validateTranscriptEdits applies the edits to the source run's kept
 // steps in memory and reports the first rule they break, in the
-// runtime's own words. steps are the run's own (sourceSteps), never
-// its input. A nil error means the patched prefix is complete: every
-// kept call answered, the cut at a step boundary.
-func validateTranscriptEdits(steps []core.Message, fromStep int, edits []linkruntime.TranscriptEdit) error {
+// runtime's own words. steps are the run's own (runSteps), never its
+// input. A nil error means the patched prefix is complete: every kept
+// call answered, the cut at a step boundary.
+func validateTranscriptEdits(steps []stepMessage, fromStep int, edits []linkruntime.TranscriptEdit) error {
 	if len(edits) == 0 {
 		return nil
 	}
@@ -88,9 +142,9 @@ func validateTranscriptEdits(steps []core.Message, fromStep int, edits []linkrun
 	cut := cutTranscriptAtStep(steps, fromStep)
 	// Copied deep enough to patch: the parts slices are the decoded
 	// transcript's.
-	kept := make([]core.Message, cut)
+	kept := make([]stepMessage, cut)
 	for i, m := range steps[:cut] {
-		kept[i] = core.Message{Role: m.Role, Content: append([]core.Part(nil), m.Content...)}
+		kept[i] = stepMessage{step: m.step, msg: core.Message{Role: m.msg.Role, Content: append([]core.Part(nil), m.msg.Content...)}}
 	}
 	for _, e := range edits {
 		if e.Step < 0 {
@@ -122,20 +176,20 @@ func validateTranscriptEdits(steps []core.Message, fromStep int, edits []linkrun
 	// §1's boundary rule over the kept steps: every call answered.
 	answered := map[string]bool{}
 	for _, m := range kept {
-		if m.Role != core.RoleTool {
+		if m.msg.Role != core.RoleTool {
 			continue
 		}
-		for _, p := range m.Content {
+		for _, p := range m.msg.Content {
 			if tr, ok := p.(core.ToolResultPart); ok {
 				answered[tr.CallID] = true
 			}
 		}
 	}
 	for _, m := range kept {
-		if m.Role != core.RoleAssistant {
+		if m.msg.Role != core.RoleAssistant {
 			continue
 		}
-		for _, p := range m.Content {
+		for _, p := range m.msg.Content {
 			if c, ok := p.(core.ToolCallPart); ok && !answered[c.ID] {
 				return fmt.Errorf("the kept prefix leaves call %q (%s) without a result: from_step must end at a step boundary", c.ID, c.Name)
 			}
@@ -145,49 +199,37 @@ func validateTranscriptEdits(steps []core.Message, fromStep int, edits []linkrun
 }
 
 // cutTranscriptAtStep is §5.1's from_step cut over a run's own steps:
-// the index of step N's assistant message (the Nth, from 0), so what
-// lies before it is steps 0..N−1 complete. Step 0's cut is the first
-// assistant message: what a resumed run recorded before its first
-// model call is not a step's to re-run.
-func cutTranscriptAtStep(steps []core.Message, fromStep int) int {
+// the index of the first message of step fromStep or later, so what
+// lies before it is steps 0..fromStep−1 complete.
+func cutTranscriptAtStep(steps []stepMessage, fromStep int) int {
 	if fromStep < 0 {
 		fromStep = 0
 	}
-	assistants := 0
 	for i, m := range steps {
-		if m.Role != core.RoleAssistant {
-			continue
-		}
-		if assistants == fromStep {
+		if m.step >= fromStep {
 			return i
 		}
-		assistants++
 	}
 	return len(steps)
 }
 
 // patchTranscriptResult patches the result of call callID inside step
-// (a tool message belongs to the step its assistant message opened) —
-// scoped to the step, like the runtime's patchResult.
-func patchTranscriptResult(steps []core.Message, step int, callID, content string) bool {
+// — scoped to the step, like the runtime's patchResult.
+func patchTranscriptResult(steps []stepMessage, step int, callID, content string) bool {
 	patched := false
-	at := -1 // the step the walk is in; -1 before the first assistant message
 	for mi := range steps {
-		if steps[mi].Role == core.RoleAssistant {
-			at++
+		if steps[mi].msg.Role != core.RoleTool || steps[mi].step != step {
 			continue
 		}
-		if steps[mi].Role != core.RoleTool || at != step {
-			continue
-		}
-		for pi := range steps[mi].Content {
-			tr, ok := steps[mi].Content[pi].(core.ToolResultPart)
+		parts := steps[mi].msg.Content
+		for pi := range parts {
+			tr, ok := parts[pi].(core.ToolResultPart)
 			if !ok || tr.CallID != callID {
 				continue
 			}
 			tr.Content = content
 			tr.IsError = false
-			steps[mi].Content[pi] = tr
+			parts[pi] = tr
 			patched = true
 		}
 	}
@@ -196,21 +238,17 @@ func patchTranscriptResult(steps []core.Message, step int, callID, content strin
 
 // checkRewrite reports whether step's assistant message exists and
 // carries no tool calls (dropping them would orphan their results).
-func checkRewrite(steps []core.Message, step int) bool {
-	assistants := 0
+func checkRewrite(steps []stepMessage, step int) bool {
 	for _, m := range steps {
-		if m.Role != core.RoleAssistant {
+		if m.msg.Role != core.RoleAssistant || m.step != step {
 			continue
 		}
-		if assistants == step {
-			for _, p := range m.Content {
-				if _, ok := p.(core.ToolCallPart); ok {
-					return false
-				}
+		for _, p := range m.msg.Content {
+			if _, ok := p.(core.ToolCallPart); ok {
+				return false
 			}
-			return true
 		}
-		assistants++
+		return true
 	}
 	return false
 }

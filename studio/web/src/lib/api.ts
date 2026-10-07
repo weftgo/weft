@@ -134,8 +134,11 @@ export interface Transcript {
      * everything the run was fed; never a step. Absent only on a
      * Studio older than the field. */
     input?: boolean
-    /** "not_recorded" when the record carried no step (step -1). */
-    badge?: "not_recorded"
+    /** "not_recorded" when the record carried no step (step -1);
+     * "derived" when the backend inferred the input flag (ClickHouse
+     * before its weft_records keeps one) — either way the client
+     * places the batch by inference, marked derived. */
+    badge?: "not_recorded" | "derived"
     messages: Message[]
   }[]
 }
@@ -148,7 +151,7 @@ export interface RawTranscript {
     index: number
     step: number
     input?: boolean
-    badge?: "not_recorded"
+    badge?: "not_recorded" | "derived"
     messages: unknown
   }[]
 }
@@ -496,6 +499,7 @@ export function asTranscript(doc: RawTranscript): Transcript {
       index: b.index,
       step: b.step,
       ...(typeof b.input === "boolean" ? { input: b.input } : {}),
+      ...(typeof b.badge === "string" ? { badge: b.badge } : {}),
       messages: asMessages(b.messages),
     })),
   }

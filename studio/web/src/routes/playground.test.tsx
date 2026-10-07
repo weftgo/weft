@@ -35,11 +35,12 @@ const toolResult = (callID: string, name: string, content: string): Message => (
 })
 
 describe("editFieldsOf", () => {
-  // The transcript as the API serves it: the input record first, then
-  // one message per record, every batch's `step` reading 0 (api.go:
-  // "step reads 0 until a later obsdb widens it"). The fields used to
-  // be keyed on that step — so every result landed on "step 0", steps
-  // past from_step were offered (and 400'd), and a reply never was.
+  // The transcript as an older Studio served it: the input record
+  // first, then one message per record, every batch's `step` reading 0
+  // and no input flag — no stored step, so the fields are counted by
+  // order (placeBatches' derived fallback). The fields used to be keyed
+  // on that step — so every result landed on "step 0", steps past
+  // from_step were offered (and 400'd), and a reply never was.
   const batches = [
     batch(user("refund order #4411 please")),
     batch(assistantCall("c1", "lookup_order")),
@@ -85,6 +86,23 @@ describe("editFieldsOf", () => {
     ]
     expect(editFieldsOf(turn2, 2)).toEqual([
       { step: 0, callID: "c9", name: "refund", placeholder: "refunded" },
+      { step: 1, name: "reply", placeholder: "done" },
+    ])
+  })
+
+  it("reads the stored step: a run fed no messages has no input batch", () => {
+    // ADR 0028 §8: rows carry the step the core stamped. Counting by
+    // order would take step 0's call for the input and see one step.
+    const stored = [
+      { index: 0, step: 0, input: false, messages: [assistantCall("c1", "lookup_order")] },
+      { index: 1, step: 0, input: false, messages: [toolResult("c1", "lookup_order", "shipped")] },
+      { index: 2, step: 1, input: false, messages: [assistantText("done")] },
+    ]
+    expect(editFieldsOf(stored, 1)).toEqual([
+      { step: 0, callID: "c1", name: "lookup_order", placeholder: "shipped" },
+    ])
+    expect(editFieldsOf(stored, 2)).toEqual([
+      { step: 0, callID: "c1", name: "lookup_order", placeholder: "shipped" },
       { step: 1, name: "reply", placeholder: "done" },
     ])
   })

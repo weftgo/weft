@@ -1355,3 +1355,53 @@ func TestRequestRecordSchema(t *testing.T) {
 		t.Errorf("records = %v, want %s", got, want)
 	}
 }
+
+// SQLite reads the input flag from the record's attributes: exact, and
+// never marked inferred — a run fed no messages has no input batch.
+func TestTranscriptInputStored(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := db.Write(context.Background(), obsdb.Batch{Records: inputRecs()}); err != nil {
+		t.Fatal(err)
+	}
+	for run, want := range map[string][]bool{"c_in": {true, false}, "c_none": {false}} {
+		got, err := db.TranscriptBatches(context.Background(), run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("%s: %d batches, want %d", run, len(got), len(want))
+		}
+		for i, b := range got {
+			if b.Input != want[i] || b.InputDerived {
+				t.Errorf("%s batch %d = input %v derived %v, want input %v, not derived", run, i, b.Input, b.InputDerived, want[i])
+			}
+		}
+	}
+}
+
+// inputRecs is a run fed one message (c_in) and a run fed none
+// (c_none): the transcript input flag's two shapes.
+func inputRecs() []obsdb.Record {
+	rec := func(run string, pos int64, body string, attrs map[string]any) obsdb.Record {
+		a := map[string]any{"weft.record": "messages", "weft.run.id": run, "weft.messages.index": pos, "weft.step.index": int64(0)}
+		for k, v := range attrs {
+			a[k] = v
+		}
+		return obsdb.Record{
+			Time: time.Unix(0, 1790845923120000000+pos).UTC(), EventName: "weft.messages",
+			Severity: 9, Body: body, Service: "conf-svc", Attrs: a,
+			Resource: map[string]any{"service.name": "conf-svc"},
+		}
+	}
+	user := `[{"role":"user","content":[{"type":"text","text":"q"}]}]`
+	reply := `[{"role":"assistant","content":[{"type":"text","text":"a"}]}]`
+	return []obsdb.Record{
+		rec("c_in", 0, user, map[string]any{"weft.messages.input": true}),
+		rec("c_in", 1, reply, nil),
+		rec("c_none", 0, reply, nil),
+	}
+}

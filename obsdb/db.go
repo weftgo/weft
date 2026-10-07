@@ -60,15 +60,21 @@ type DB interface {
 // written before migration 0004, or a producer that never stamped it;
 // a reader that places such a batch anyway infers the step and says
 // so (the derived badge, ADR 0028 §11). Input is the record's
-// weft.messages.input; a backend that keeps no attribute column
-// (ClickHouse) reads it as Index 0, which is the input record whenever
-// the run was fed any messages (the core writes the input first, and
-// writes none for an empty input).
+// weft.messages.input: the input record — on a partial resume a prefix
+// of what the run was fed, ending at the last assistant message with
+// tool calls; the tail (the rebuilt tool message and what follows it)
+// is the next batch, at step 0, not flagged. A backend that keeps no attribute column
+// (ClickHouse, until its weft_records gains one) cannot read it: it
+// infers Input on index 0 — true unless the body is a lone assistant
+// message, which is step 0 of a run fed no messages (the core writes
+// the input record first, and none for an empty input) — and sets
+// InputDerived on that batch so readers badge it derived.
 type TranscriptBatch struct {
-	Index    int64
-	Step     int
-	Input    bool
-	Messages json.RawMessage
+	Index        int64
+	Step         int
+	Input        bool
+	InputDerived bool // Input was inferred by the backend, not read from the record
+	Messages     json.RawMessage
 }
 
 // TranscriptBodies returns the batches' bodies in order — Transcript's

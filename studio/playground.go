@@ -199,14 +199,14 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 				badRequest(w, r, "transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)")
 				return
 			}
-			bodies, terr := s.db.Transcript(r.Context(), req.Source.RunID)
+			batches, terr := s.db.TranscriptBatches(r.Context(), req.Source.RunID)
 			if terr != nil {
 				badRequest(w, r, "the source run has no readable transcript to edit")
 				return
 			}
-			// The run's own steps: its first messages record is the
-			// input (context, never a step) — the runtime's split.
-			_, steps, serr := sourceSteps(bodies)
+			// The run's own steps, each where its record says it joined
+			// (the input record is context, never a step).
+			steps, serr := runSteps(batches)
 			if serr != nil {
 				badRequest(w, r, "the source run has no readable transcript to edit")
 				return

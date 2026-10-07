@@ -145,6 +145,7 @@ func (l *link) transcriptFromStudio(ctx context.Context, runID string) (*sourceR
 // every later one is what a step added; that position is the split.
 // A run with no messages at all (content capture off) is an error:
 // there is nothing to re-run from.
+// TODO(A2 debt: stored step (F2/H6)): split by the stored step and input (obsdb.DB.TranscriptBatches), not by record order.
 func decodeBodies(bodies []json.RawMessage) (*sourceRun, error) {
 	src := &sourceRun{}
 	first := true

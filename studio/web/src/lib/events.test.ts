@@ -825,4 +825,32 @@ describe("transcript placement by the stored step", () => {
       ["a1", true],
     ])
   })
+
+  it("keeps a batch whose step the fold does not hold on view.unplaced", () => {
+    const view = applyTranscript(fold(twoSteps("r5", [["", ""]])), [
+      { step: 0, input: true, messages: [msg("user", "hi")] },
+      { step: 0, input: false, messages: [msg("assistant", "a0")] },
+      { step: 3, input: false, messages: [msg("assistant", "from a lost step")] },
+    ])
+    expect(view.steps[0].text).toBe("a0")
+    expect(view.unplaced).toEqual([
+      {
+        step: 3,
+        input: false,
+        derived: false,
+        messages: [msg("assistant", "from a lost step")],
+      },
+    ])
+  })
+
+  it("places a row whose input the backend inferred as derived", () => {
+    const placed = placeBatches([
+      { step: 0, input: true, badge: "derived", messages: [msg("user", "q")] },
+      { step: 0, input: false, messages: [msg("assistant", "a")] },
+    ])
+    expect(placed.map((b) => [b.step, b.input, b.derived])).toEqual([
+      [0, true, true],
+      [0, false, false],
+    ])
+  })
 })

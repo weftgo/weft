@@ -51,8 +51,8 @@ import {
   
   
 } from "@/lib/api"
-import type {AgentView, CommandStatus, PlaygroundRunBody, RunRow, RuntimeView} from "@/lib/api";
-import { producedText, splitTranscript } from "@/lib/events"
+import type {AgentView, CommandStatus, Message, PlaygroundRunBody, RunRow, RuntimeView} from "@/lib/api";
+import { placeBatches, producedText, splitTranscript } from "@/lib/events"
 import type { TranscriptBatch } from "@/lib/events"
 import { diffLines, diffSummary } from "@/lib/diff"
 import type { DiffRow } from "@/lib/diff"
@@ -402,23 +402,35 @@ export interface EditField {
  * calls (a reply rewrite may not drop a step's calls — D2/D3). The
  * panel's per-step fields are the shape (element.ts's drawer).
  *
- * Steps are counted the way the loop writes them — each assistant
- * message the run PRODUCED opens one (edits.go's cutTranscriptAtStep),
- * the count the API's batch `step` is derived by too — and the input
- * record (the conversation the run was fed) is not the run's own
- * steps. A tool message recorded before the first assistant message
- * (a resumed run's rebuilt results) is no kept step's: the server
- * patches results inside a step only, so it offers no field. */
+ * Each message counts toward the step its batch joined — the stored
+ * step the API carries (ADR 0028 §8; edits.go's runSteps reads the
+ * same) — and the input record (the conversation the run was fed) is
+ * not the run's own steps. Only a transcript with a batch placed by
+ * inference (placeBatches' `derived`: no stored step) is counted the
+ * pre-ADR-0028 way, as the server then counts it: each assistant
+ * message the run PRODUCED opens a step, and a tool message recorded
+ * before the first one (a resumed run's rebuilt results) is no kept
+ * step's — the server patches results inside a step only. */
 export function editFieldsOf(
   batches: TranscriptBatch[],
   fromStep: number
 ): EditField[] {
+  const placed = placeBatches(batches)
+  const tagged: { step: number; m: Message }[] = []
+  if (placed.length > 0 && placed.every((b) => !b.derived)) {
+    for (const b of placed)
+      if (!b.input) for (const m of b.messages) tagged.push({ step: b.step, m })
+  } else {
+    let at = -1
+    for (const m of splitTranscript(batches).produced) {
+      if (m.role === "assistant") at++
+      tagged.push({ step: at, m })
+    }
+  }
   const fields: EditField[] = []
-  let step = -1
-  for (const m of splitTranscript(batches).produced) {
+  for (const { step, m } of tagged) {
+    if (step < 0 || step >= fromStep) continue
     if (m.role === "assistant") {
-      step++
-      if (step >= fromStep) break
       let text = ""
       let hadCalls = false
       for (const p of m.content) {
@@ -426,7 +438,7 @@ export function editFieldsOf(
         if (p.type === "text" && p.text) text += p.text
       }
       if (text && !hadCalls) fields.push({ step, name: "reply", placeholder: text })
-    } else if (m.role === "tool" && step >= 0) {
+    } else if (m.role === "tool") {
       for (const p of m.content) {
         if (p.type === "tool_result")
           fields.push({

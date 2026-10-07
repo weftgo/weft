@@ -33,6 +33,7 @@ import (
 // refuses a prefix that leaves one of the kept steps' calls without a
 // result: Repair would synthesize one, and the experiment would run on
 // a transcript nobody wrote.
+// TODO(A2 debt: stored step (F2/H6)): count steps by the stored step (obsdb.TranscriptBatch.Step), not by assistant order.
 func keptPrefix(src *sourceRun, fromStep int) ([]core.Message, error) {
 	cut := cutAtStep(src.steps, fromStep)
 	if err := prefixComplete(src.steps[:cut]); err != nil {

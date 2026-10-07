@@ -10,18 +10,22 @@ import (
 // bodies in index order, as a backend's Transcript reads them; every
 // backend's Transcript returns its result through this.
 //
-// One shape needs it. A resume whose input already holds a partial tool
-// message (some calls of the step answered, the rest parked) records
-// that input as fed — index 0 — and then the tool message it rebuilt
-// over the partial one, at index 1 (the core's attachResults; both
-// records are the contract, ADR 0024 D1). Concatenated naively the two
-// versions of the one message sit side by side; the later record is the
-// authoritative one. So when the second body is a lone tool message and
-// the first holds, directly after its last assistant message with tool
-// calls, a tool message whose results the lone one repeats, the partial
-// message is dropped from the first body. Every other message stays
-// byte-for-byte, the number of bodies never changes (a body's place is
-// still its record's index), and any other shape is returned untouched.
+// One stored shape needs it: a run recorded before ADR 0028 §8's
+// partial-resume shape. A resume whose input already holds a partial
+// tool message (some calls of the step answered, the rest parked) was
+// recorded with that input as fed — index 0 — and then the tool message
+// it rebuilt over the partial one, at index 1. Concatenated naively the
+// two versions of the one message sit side by side; the later record is
+// the authoritative one. The current core never writes that shape (its
+// input record stops at the last assistant message with tool calls and
+// the rebuilt message is the next growth record, step 0); this stays
+// for runs stored in the old one. So when the second body is a lone
+// tool message and the first holds, directly after its last assistant
+// message with tool calls, a tool message whose results the lone one
+// repeats, the partial message is dropped from the first body. Every
+// other message stays byte-for-byte, the number of bodies never changes
+// (a body's place is still its record's index), and any other shape is
+// returned untouched.
 func DedupTranscript(bodies []json.RawMessage) []json.RawMessage {
 	if len(bodies) < 2 {
 		return bodies

@@ -204,6 +204,41 @@ func TestTranscriptStepsFromARealRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// run 3: fed no messages at all — the core writes no input record,
+	// so the first batch is step 0's assistant message. An order walk
+	// takes it for the input and folds step 1 into step 0; the stored
+	// step and input flag cannot.
+	bare := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"7"}`, ID: "c_bare"}),
+		wefttest.Say("Order 7 shipped."),
+	), core.Name("orders"), core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()), lookup)
+	third, err := bare.Generate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// runs 4 and 5: a partial park — one step calls echo (it executes)
+	// and refund (it parks); the resume approves the refund.
+	echo := core.Tool("echo", "Echo.", func(context.Context, orderIn) (string, error) {
+		return "echoed", nil
+	})
+	partial := core.New(wefttest.Script(
+		wefttest.ToolCalls(
+			wefttest.Call{Name: "echo", Args: `{"order_id":"9"}`, ID: "c_echo"},
+			wefttest.Call{Name: "refund", Args: `{"order_id":"9"}`, ID: "c_ref9"},
+		),
+		wefttest.Say("Refunded order 9."),
+	), core.Name("orders"), core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()), echo, refund)
+	parked, err := partial.Generate(ctx, core.Prompt("refund order 9"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parked.Pending) != 1 || parked.Pending[0].ID != "c_ref9" {
+		t.Fatalf("partial run pending = %+v, want the refund parked", parked.Pending)
+	}
+	resumed, err := partial.Generate(ctx, core.Messages(parked.Messages...), core.Approve("c_ref9"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := p.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -282,6 +317,46 @@ func TestTranscriptStepsFromARealRun(t *testing.T) {
 		{0, false, "tool"},
 		{1, false, "assistant"}, // step 1: the answer
 	})
+
+	check(third.ID, []want{
+		{0, false, "assistant"}, // step 0: the lookup call — not an input
+		{0, false, "tool"},
+		{1, false, "assistant"}, // step 1: the answer
+	})
+
+	check(parked.ID, []want{
+		{0, true, "user"},
+		{0, false, "assistant"}, // step 0: echo and refund
+		{0, false, "tool"},      // echo's result; the refund parked
+	})
+	// The partial resume (ADR 0028 §8): the input record stops at the
+	// assistant message with calls; the rebuilt tool message — echo's
+	// result and the approved refund's — is the next batch, step 0, not
+	// the input.
+	rows := check(resumed.ID, []want{
+		{0, true, "user,assistant"},
+		{0, false, "tool"},
+		{0, false, "assistant"}, // step 0: the answer
+	})
+	var lastIn struct {
+		Role    string `json:"role"`
+		Content []struct {
+			Type string `json:"type"`
+		} `json:"content"`
+	}
+	_ = json.Unmarshal(rows[0].Messages[len(rows[0].Messages)-1], &lastIn)
+	if lastIn.Role != "assistant" || len(lastIn.Content) != 2 || lastIn.Content[0].Type != "tool_call" {
+		t.Errorf("the resume's input record ends with %+v, want the assistant message with both calls", lastIn)
+	}
+	var rebuilt struct {
+		Content []struct {
+			CallID string `json:"call_id"`
+		} `json:"content"`
+	}
+	_ = json.Unmarshal(rows[1].Messages[0], &rebuilt)
+	if len(rebuilt.Content) != 2 || rebuilt.Content[0].CallID != "c_echo" || rebuilt.Content[1].CallID != "c_ref9" {
+		t.Errorf("the resume's step-0 tool message = %+v, want echo's and the refund's results", rebuilt)
+	}
 
 	// The steered batch's step is the one the Steered event names.
 	var events struct {

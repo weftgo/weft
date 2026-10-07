@@ -234,8 +234,8 @@ function _(e, t = "") {
 function v(e) {
 	let t = Array.isArray(e) ? e : [], n = y(t);
 	return t.map((e, t) => {
-		let r = g(e), i = e?.step, a = e?.input;
-		return typeof i == "number" && i >= 0 && typeof a == "boolean" ? {
+		let r = g(e), i = e?.step, a = e?.input, o = e?.badge;
+		return typeof i == "number" && i >= 0 && typeof a == "boolean" && o !== "derived" ? {
 			step: i,
 			input: a,
 			derived: !1,
@@ -276,10 +276,15 @@ function x(e) {
 }
 function S(e, t, n) {
 	let r = n?.replace === !0;
+	e.unplaced = [];
 	for (let n of v(t)) {
 		if (n.input) continue;
 		let t = e.steps.find((e) => e.index === n.step);
-		if (t) for (let e of n.messages) {
+		if (!t) {
+			e.unplaced.push(n);
+			continue;
+		}
+		for (let e of n.messages) {
 			if (e.role !== "assistant") continue;
 			n.derived && (t.derived = !0);
 			let i = _(e);
@@ -561,6 +566,7 @@ function ie(e) {
 		index: e.index,
 		step: e.step,
 		...typeof e.input == "boolean" ? { input: e.input } : {},
+		...typeof e.badge == "string" ? { badge: e.badge } : {},
 		messages: ae(e.messages)
 	})) } : { batches: [] };
 }

@@ -566,3 +566,51 @@ func TestRequestRecordSchema(t *testing.T) {
 		t.Errorf("weft_records = %v, want %s", got, want)
 	}
 }
+
+// The input flag on ClickHouse (no attribute column until A1.2): index
+// 0 is inferred — the input unless it is a lone assistant message,
+// step 0 of a run fed none — and every inferred flag says so, so the
+// transcript route badges it derived instead of passing it as stored.
+func TestTranscriptInputInferred(t *testing.T) {
+	db, _ := openFresh(t)
+	if err := db.Write(ctx(), obsdb.Batch{Records: inputRecs()}); err != nil {
+		t.Fatal(err)
+	}
+	for run, want := range map[string][]bool{"c_in": {true, false}, "c_none": {false}} {
+		got, err := db.TranscriptBatches(ctx(), run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("%s: %d batches, want %d", run, len(got), len(want))
+		}
+		for i, b := range got {
+			if b.Input != want[i] || b.InputDerived != (i == 0) {
+				t.Errorf("%s batch %d = input %v derived %v, want input %v derived %v", run, i, b.Input, b.InputDerived, want[i], i == 0)
+			}
+		}
+	}
+}
+
+// inputRecs is a run fed one message (c_in) and a run fed none
+// (c_none): the transcript input flag's two shapes.
+func inputRecs() []obsdb.Record {
+	rec := func(run string, pos int64, body string, attrs map[string]any) obsdb.Record {
+		a := map[string]any{"weft.record": "messages", "weft.run.id": run, "weft.messages.index": pos, "weft.step.index": int64(0)}
+		for k, v := range attrs {
+			a[k] = v
+		}
+		return obsdb.Record{
+			Time: time.Unix(0, 1790845923120000000+pos).UTC(), EventName: "weft.messages",
+			Severity: 9, Body: body, Service: "conf-svc", Attrs: a,
+			Resource: map[string]any{"service.name": "conf-svc"},
+		}
+	}
+	user := `[{"role":"user","content":[{"type":"text","text":"q"}]}]`
+	reply := `[{"role":"assistant","content":[{"type":"text","text":"a"}]}]`
+	return []obsdb.Record{
+		rec("c_in", 0, user, map[string]any{"weft.messages.input": true}),
+		rec("c_in", 1, reply, nil),
+		rec("c_none", 0, reply, nil),
+	}
+}

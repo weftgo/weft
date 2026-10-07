@@ -67,6 +67,10 @@ export interface FoldedStep {
 
 export interface FoldedRun {
   runId: string
+  /** Transcript batches of the run's own whose step the fold holds no
+   * step for (applyTranscript) — data for a not_recorded hole, kept
+   * rather than dropped. */
+  unplaced?: PlacedBatch[]
   agent?: string
   model?: ModelInfo
   steps: FoldedStep[]
@@ -356,7 +360,8 @@ export interface PlacedBatch {
  * stored values (ADR 0028 §8); nothing is inferred from the order of
  * the batches. Only a batch without a stored step falls back to
  * inference, and that placement is marked `derived`: step -1 (the
- * record carried none, badge not_recorded), or no input flag beside
+ * record carried none, badge not_recorded), a batch whose input flag
+ * the backend inferred (badge derived), or no input flag beside
  * the step — a Studio older than the flag served a step it did not
  * store (0 for every batch).
  */
@@ -367,7 +372,13 @@ export function placeBatches(batches: TranscriptBatch[]): PlacedBatch[] {
     const messages = messagesOf(b)
     const step = (b as TranscriptBatch | null)?.step
     const input = (b as TranscriptBatch | null)?.input
-    if (typeof step === "number" && step >= 0 && typeof input === "boolean") {
+    const badge = (b as TranscriptBatch | null)?.badge
+    if (
+      typeof step === "number" &&
+      step >= 0 &&
+      typeof input === "boolean" &&
+      badge !== "derived"
+    ) {
       return { step, input, derived: false, messages }
     }
     return { ...derived[i], derived: true, messages }
@@ -451,7 +462,9 @@ export function producedText(batches: TranscriptBatch[]): string {
  * lands on the step its batch joined (placeBatches: the stored step;
  * the input record's history is never the run's), and a message's
  * tool-call parts carry the arguments the model finally sent. A step
- * filled from a batch placed by inference is marked `derived`. By
+ * filled from a batch placed by inference is marked `derived`; a batch
+ * whose step the fold does not hold (its events not loaded, or lost)
+ * is kept on `view.unplaced`, never dropped. By
  * default it only fills steps whose text is still empty (a running run
  * keeps what the deltas streamed). With `replace` — a run that is over
  * — the transcript's words win over streamed ones: deltas are
@@ -465,10 +478,14 @@ export function applyTranscript(
   opts?: { replace?: boolean }
 ): FoldedRun {
   const replace = opts?.replace === true
+  view.unplaced = []
   for (const b of placeBatches(batches)) {
     if (b.input) continue
     const step = view.steps.find((s) => s.index === b.step)
-    if (!step) continue
+    if (!step) {
+      view.unplaced.push(b)
+      continue
+    }
     for (const msg of b.messages) {
       if (msg.role !== "assistant") continue
       if (b.derived) step.derived = true

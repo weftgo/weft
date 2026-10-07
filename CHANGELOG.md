@@ -23,6 +23,21 @@ module, ADR 0005).
 - **`/api/meta`'s `weft_version` is the framework module's build-info
   version** (`version.Runtime()`), no longer the `core` dependency's;
   inside the workspace it reads the tag instead of `(devel)`.
+- **`obsdb.DB` gains `TranscriptBatches`** (ADR 0028 §8): a run's
+  messages records with what each stored — index, step
+  (`weft.step.index`, -1 when absent), input flag. A third-party `DB`
+  reads pos, step, body and the `weft.messages.input` attribute per
+  `messages` record, returns them through `obsdb.DedupBatches`, and
+  implements `Transcript` as `obsdb.TranscriptBodies(batches)`. A
+  backend with no attribute column infers the input flag on index 0 and
+  sets `TranscriptBatch.InputDerived`.
+- **`/api/runs/{id}/transcript` rows carry what the record stored**: the
+  stored `index`, the stored `step` (or `-1` with `"badge":
+  "not_recorded"`) and the stored `input` (`"badge": "derived"` where
+  the backend inferred it) — no longer derived from assistant-message
+  order. Playground `transcript_edits` / `from_step` validation and the
+  web client read the same stored step; only a batch without one is
+  placed by inference, marked derived.
 
 ### Changed
 
@@ -37,6 +52,8 @@ module, ADR 0005).
 ### Added
 
 - `studio --version` prints `version.Runtime()` and exits.
+- `obsdb.TranscriptBatch`, `obsdb.TranscriptBodies`, `obsdb.DedupBatches`
+  (ADR 0028 §8).
 - **The request record (ADR 0028).** Three OTel log record kinds beside
   `event`, `delta` and `messages`: `request` (one per model-call attempt:
   step, attempt, system and catalog hashes, messages reference, tool

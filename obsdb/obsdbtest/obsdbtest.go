@@ -972,19 +972,13 @@ func sessionPaging(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	}
 }
 
-// transcriptRebuilt: a resume that rebuilds a partial tool message
-// records the input as fed and then the rebuilt message (the core's
-// two record sites, both contract). Transcript reads the later record
-// as the authoritative one (obsdb.DedupTranscript): its bodies
-// concatenate to the transcript the run held — one tool message, not
-// the partial and the rebuilt side by side — one body per record still.
 // transcriptSteps: a messages record's weft.step.index is stored and
 // read back by TranscriptBatches (ADR 0028 §8) — the step it joined,
 // whatever its neighbours hold — with the input flag and the index; a
-// record without the attribute reads -1, never a guess. The steered
-// batch below joins step 0 though step 1's call precedes it in no
-// order a reader could walk; the resumed run's rebuilt tool message
-// joins step 0 before any assistant message.
+// record without the attribute reads -1, never a guess. The resumed
+// run's rebuilt tool message joins step 0 before any assistant message
+// of the run's own (the partial-resume shape), and the steered batch
+// joins the step that just finished.
 func transcriptSteps(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
@@ -994,9 +988,15 @@ func transcriptSteps(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		step := func(n int) map[string]any { return map[string]any{"weft.step.index": int64(n)} }
 		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
 			record("c1", "event", "run_start", 0, `{"type":"run_start","id":"c1"}`, nil),
-			record("c1", "messages", "", 0, msg("user", "q"),
+			// A partial resume (ADR 0028 §8): the input record stops at
+			// the last assistant message with tool calls; the rebuilt
+			// tool message is the next growth record, step 0, not input.
+			record("c1", "messages", "", 0, `[{"role":"user","content":[{"type":"text","text":"q"}]},`+
+				`{"role":"assistant","content":[{"type":"tool_call","id":"c_e","name":"echo","args":{}},{"type":"tool_call","id":"c_r","name":"refund","args":{}}]}]`,
 				map[string]any{"weft.messages.input": true, "weft.step.index": int64(0)}),
-			record("c1", "messages", "", 1, msg("tool", "rebuilt"), step(0)),
+			record("c1", "messages", "", 1, `[{"role":"tool","content":[`+
+				`{"type":"tool_result","call_id":"c_e","name":"echo","content":"x","is_error":false},`+
+				`{"type":"tool_result","call_id":"c_r","name":"refund","content":"refunded","is_error":false}]}]`, step(0)),
 			record("c1", "messages", "", 2, msg("assistant", "a0"), step(0)),
 			record("c1", "messages", "", 3, msg("user", "steer"), step(0)),
 			record("c1", "messages", "", 4, msg("assistant", "a1"), step(1)),
@@ -1030,12 +1030,45 @@ func transcriptSteps(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 				t.Errorf("Transcript body %d = %s, batch body %s", i, tr[i], got[i].Messages)
 			}
 		}
+		for _, b := range got {
+			if b.InputDerived && b.Index != 0 {
+				t.Errorf("batch %d: an inferred input flag off index 0", b.Index)
+			}
+		}
+
+		// A run fed no messages: the core writes no input record, so
+		// index 0 is step 0's assistant batch — never the input, whether
+		// the backend reads the flag or infers it.
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+			record("c2", "event", "run_start", 0, `{"type":"run_start","id":"c2"}`, nil),
+			record("c2", "messages", "", 0, msg("assistant", "unprompted"), step(0)),
+			record("c2", "messages", "", 1, msg("assistant", "again"), step(1)),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		empty, err := db.TranscriptBatches(ctx(), "c2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(empty) != 2 || empty[0].Input || empty[1].Input || empty[0].Step != 0 || empty[1].Step != 1 {
+			t.Errorf("empty-input run batches = %+v, want steps 0 and 1, neither the input", empty)
+		}
 		if _, err := db.TranscriptBatches(ctx(), "nope"); !errors.Is(err, obsdb.ErrNotFound) {
 			t.Errorf("TranscriptBatches of an unknown run = %v, want ErrNotFound", err)
 		}
 	}
 }
 
+// transcriptRebuilt: a resume that rebuilds a partial tool message,
+// stored in the shape a core before ADR 0028 §8 wrote — the input as
+// fed (partial tool message included) and then the rebuilt message.
+// The current core ends the input record at the last assistant message
+// with tool calls and records the rebuilt message as step 0's growth,
+// so no copy repeats; runs stored in the old shape still read through
+// obsdb.DedupTranscript, which takes the later record as the
+// authoritative one: the bodies concatenate to the transcript the run
+// held — one tool message, not the partial and the rebuilt side by
+// side — one body per record still.
 func transcriptRebuilt(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	const (
 		user      = `{"role":"user","content":[{"type":"text","text":"refund please"}]}`

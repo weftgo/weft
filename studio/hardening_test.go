@@ -800,19 +800,45 @@ var multiTurnBodies = []string{
 // accepted ones the runtime rejects. The verdicts below are the
 // runtime's own for the same transcript and bodies (its
 // applyTranscriptEdits behind the beyond-the-last-step check).
+//
+// The same verdicts hold over the stored steps (ADR 0028 §8): run
+// run_multi_stamped carries weft.step.index and weft.messages.input on
+// each record, and Studio reads them instead of counting. A source fed
+// no messages (run_bare: no input record) shows the difference — the
+// order walk took its step 0 for the input and saw one step.
 func TestTranscriptEditsCountTheRunsOwnSteps(t *testing.T) {
 	pt := newPlaygroundTestServer(t)
 	now := time.Now().UTC()
 	var recs []obsdb.Record
-	for i, body := range multiTurnBodies {
-		recs = append(recs, obsdb.Record{
+	msgRec := func(run string, i int, body string) obsdb.Record {
+		return obsdb.Record{
 			Time: now.Add(time.Duration(i) * time.Millisecond), EventName: "weft.messages", Severity: 9, Body: body, Service: "svc",
 			Attrs: map[string]any{
-				"weft.record": "messages", "weft.run.id": "run_multi", "gen_ai.agent.name": "acme-support",
+				"weft.record": "messages", "weft.run.id": run, "gen_ai.agent.name": "acme-support",
 				"weft.messages.index": int64(i), "weft.messages.count": int64(1),
 			},
 			Resource: map[string]any{"service.name": "svc"},
-		})
+		}
+	}
+	stamped := []int{0, 0, 0, 1, 1, 2, 2, 3}
+	for i, body := range multiTurnBodies {
+		recs = append(recs, msgRec("run_multi", i, body))
+		r := msgRec("run_multi_stamped", i, body)
+		r.Attrs["weft.step.index"] = int64(stamped[i])
+		r.Attrs["weft.messages.input"] = i == 0
+		recs = append(recs, r)
+	}
+	for i, c := range []struct {
+		step int
+		body string
+	}{
+		{0, `[{"role":"assistant","content":[{"type":"tool_call","id":"c1","name":"lookup_order","args":{}}]}]`},
+		{0, `[{"role":"tool","content":[{"type":"tool_result","call_id":"c1","name":"lookup_order","content":"r0","is_error":false}]}]`},
+		{1, `[{"role":"assistant","content":[{"type":"text","text":"done"}]}]`},
+	} {
+		r := msgRec("run_bare", i, c.body)
+		r.Attrs["weft.step.index"] = int64(c.step)
+		recs = append(recs, r)
 	}
 	if err := pt.db.Write(context.Background(), obsdb.Batch{Records: recs}); err != nil {
 		t.Fatal(err)
@@ -844,12 +870,21 @@ func TestTranscriptEditsCountTheRunsOwnSteps(t *testing.T) {
 		{"a patch without a call id", 2, `{"step":0,"tool_result":"X"}`, http.StatusBadRequest, "needs call_id"},
 		{"edits with from_step 0", 0, `{"step":0,"content":"X"}`, http.StatusBadRequest, "transcript_edits need from_step"},
 	} {
-		body := fmt.Sprintf(`{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"run_multi","from_step":%d},`+
-			`"engine":"live","side_effects":"substitute","thread":"ephemeral","transcript_edits":[%s]}`, tc.fromStep, tc.edits)
-		code, out := pt.post(t, body)
-		if code != tc.status || !strings.Contains(out, tc.in) {
-			t.Errorf("%s (from_step %d, %s) = %d %s, want %d %q", tc.name, tc.fromStep, tc.edits, code, strings.TrimSpace(out), tc.status, tc.in)
+		for _, run := range []string{"run_multi", "run_multi_stamped"} {
+			body := fmt.Sprintf(`{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"%s","from_step":%d},`+
+				`"engine":"live","side_effects":"substitute","thread":"ephemeral","transcript_edits":[%s]}`, run, tc.fromStep, tc.edits)
+			code, out := pt.post(t, body)
+			if code != tc.status || !strings.Contains(out, tc.in) {
+				t.Errorf("%s: %s (from_step %d, %s) = %d %s, want %d %q", run, tc.name, tc.fromStep, tc.edits, code, strings.TrimSpace(out), tc.status, tc.in)
+			}
 		}
+	}
+	// run_bare: step 0's call and result are the run's own, step 1 its
+	// answer — patchable at from_step 1, by the stored steps.
+	body := `{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"run_bare","from_step":1},` +
+		`"engine":"live","side_effects":"substitute","thread":"ephemeral","transcript_edits":[{"step":0,"call_id":"c1","tool_result":"X"}]}`
+	if code, out := pt.post(t, body); code != http.StatusAccepted {
+		t.Errorf("run_bare: patch step 0's c1 at from_step 1 = %d %s, want 202 (the stored steps: no input record, two steps)", code, strings.TrimSpace(out))
 	}
 }
 

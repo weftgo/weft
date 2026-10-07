@@ -473,6 +473,7 @@ func (s *Server) backfillRun(
 		}
 	}
 	if kinds["messages"] {
+		// TODO(A2 debt: stored step (F2/H6)): carry the stored step and input on messages frames (TranscriptBatches).
 		bodies, err := s.db.Transcript(ctx, rec.ID)
 		if err == nil {
 			for i, body := range bodies {

@@ -493,8 +493,8 @@ func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.Tra
 		return nil, err
 	}
 	// Step is weft_records.Step (0004; -1 on rows written before it).
-	// weft_records keeps no attribute column, so the input flag is
-	// read as index 0 (obsdb.TranscriptBatch).
+	// weft_records keeps no attribute column, so the input flag of
+	// index 0 is inferred and marked so (obsdb.TranscriptBatch).
 	rs, err := d.conn.Query(ctx,
 		`SELECT Pos, Step, Body FROM weft_records FINAL
 		WHERE RunId = ? AND Kind = 'messages' ORDER BY Pos`, runID)
@@ -512,9 +512,11 @@ func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.Tra
 		if err := rs.Scan(&pos, &step, &body); err != nil {
 			return nil, err
 		}
-		out = append(out, obsdb.TranscriptBatch{
-			Index: pos, Step: int(step), Input: pos == 0, Messages: json.RawMessage(body),
-		})
+		b := obsdb.TranscriptBatch{Index: pos, Step: int(step), Messages: json.RawMessage(body)}
+		if pos == 0 {
+			b.Input, b.InputDerived = !loneAssistant(b.Messages), true
+		}
+		out = append(out, b)
 	}
 	if err := rs.Err(); err != nil {
 		return nil, err
@@ -522,6 +524,16 @@ func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.Tra
 	// The later record of a rebuilt tool message is the authoritative
 	// one (the rule every backend reads through).
 	return obsdb.DedupBatches(out), nil
+}
+
+// loneAssistant reports whether a messages body is exactly one
+// assistant message: the core's step-0 batch of a run fed no messages,
+// never an input record it writes for a run fed some.
+func loneAssistant(body json.RawMessage) bool {
+	var msgs []struct {
+		Role string `json:"role"`
+	}
+	return json.Unmarshal(body, &msgs) == nil && len(msgs) == 1 && msgs[0].Role == "assistant"
 }
 
 const spanColumns = `Timestamp, TraceId, SpanId, ParentSpanId, SpanName, SpanKind, ServiceName,

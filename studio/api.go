@@ -230,7 +230,8 @@ type eventsPage struct {
 // ClickHouse row written before migration 0004, a producer that never
 // stamped it); such a batch says so with Badge "not_recorded", and a
 // client that places it anyway infers the step and marks the result
-// derived (ADR 0028 §11's closed table).
+// derived (ADR 0028 §11's closed table). A batch whose input flag the
+// backend inferred carries Badge "derived".
 type transcriptBatch struct {
 	Index    int64           `json:"index"`
 	Step     int             `json:"step"`
@@ -239,9 +240,13 @@ type transcriptBatch struct {
 	Messages json.RawMessage `json:"messages"`
 }
 
-// badgeNotRecorded is ADR 0028 §11's badge for a value the record does
-// not carry.
-const badgeNotRecorded = "not_recorded"
+// ADR 0028 §11's badges a batch can carry: the record does not carry
+// its step (not_recorded), or the backend inferred its input flag
+// (derived — ClickHouse, which keeps no attribute column).
+const (
+	badgeNotRecorded = "not_recorded"
+	badgeDerived     = "derived"
+)
 
 type transcript struct {
 	Batches []transcriptBatch `json:"batches"`
@@ -661,8 +666,11 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 		tb := transcriptBatch{
 			Index: b.Index, Step: b.Step, Input: b.Input, Messages: rawOrNull(string(b.Messages)),
 		}
-		if b.Step < 0 {
+		switch {
+		case b.Step < 0:
 			tb.Step, tb.Badge = -1, badgeNotRecorded
+		case b.InputDerived:
+			tb.Badge = badgeDerived
 		}
 		out.Batches = append(out.Batches, tb)
 	}

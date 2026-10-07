@@ -233,6 +233,28 @@ is pre-1.0 and tags per module (ADR 0005).
     re-run after an overflow no longer leaves its first run id in the
     steer registry.
 
+### thread
+
+- A steer that cannot join the running turn (it meets the approval
+  boundary or a StopWhen end, or arrives after the last drain point)
+  now becomes a follow-up turn under the run options of the turn it was
+  aimed at — the in-flight turn, or the parked turn when only a
+  boundary holds the session — with the steer's own options after
+  them, and the aimed turn's context values beneath the steer's
+  context. A turn sent with `weft.ParkAllExcept` keeps its steer
+  follow-ups parked (they ran unparked before). A steer to an idle
+  session still runs under its own options. ADR 0019 amendment.
+- A resume (after `Decide`, `Resume`, `Send` or `Continue`) runs on the
+  arming call's context for cancellation and on the parked turn's
+  context values for every key the arming context lacks, so a park
+  rule or metadata that rode the parked turn's context binds the
+  resumed steps whoever decides. ADR 0021 amendment.
+- thread/pool: an async child's context takes the pool's cancellation
+  and the delegating call's context values, so the delegating run's
+  `ParkAllExcept` list and metadata bind it as they bind a sync child;
+  a resumed child (sync or async) keeps the rule on every step. ADR
+  0022 §M.
+
 ### CI / repo
 
 - The ClickHouse job (its service's invalid `ulimits:` key already

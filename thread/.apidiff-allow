@@ -11,5 +11,5 @@
 # then a deliberate break is listed here, never smuggled past the gate.
 #
 # The 2026-10-01 review fix train's breaks shipped as thread/v0.9.0;
-# their entries left with that tag. Nothing is acknowledged against
-# thread/v0.9.0 yet.
+# their entries left with that tag. thread/v0.9.1 (2026-10-07) is
+# additive. Nothing is acknowledged against thread/v0.9.1 yet.

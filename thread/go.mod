@@ -3,7 +3,7 @@ module github.com/weftgo/weft/thread
 go 1.26
 
 require (
-	github.com/weftgo/weft v0.7.0
+	github.com/weftgo/weft v0.8.0
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/log v0.22.0
 	go.opentelemetry.io/otel/trace v1.46.0

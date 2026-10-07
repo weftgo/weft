@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // SessionOption configures a session at Create, Open or Fork — one
@@ -62,7 +62,7 @@ type sessionConfig struct {
 	keyring         *Keyring
 	requireSigned   bool
 	// reRunOnOverflow arms the overflow re-run (ADR 0020 §5): a turn
-	// failing with weft.ErrContextOverflow compacts — reason overflow —
+	// failing with core.ErrContextOverflow compacts — reason overflow —
 	// and runs once more over the shrunken path. Default on.
 	reRunOnOverflow bool
 	// lineage is the pool origin recorded in a created session's
@@ -293,7 +293,7 @@ type Session struct {
 	// st is the write path: the application's storage, behind the
 	// lease (leased) when the backend offers one, and sealed by Close.
 	st     Storage
-	agent  *weft.Agent
+	agent  *core.Agent
 	cfg    sessionConfig
 	header Header         // immutable after construction: read without mu
 	order  []Entry        // the whole tree, append order
@@ -413,7 +413,7 @@ const (
 // the Turn that parked — the anchor a resume links back to through
 // Turn.Next.
 type awaitState struct {
-	opts  []weft.RunOption
+	opts  []core.RunOption
 	ctx   context.Context
 	runID string
 	turn  *Turn
@@ -463,7 +463,7 @@ type OpenReport struct {
 // already holds fails with ErrExists. Create is the new Session's
 // first write: it holds the session's writer lease from here (see
 // Session, One writer).
-func Create(ctx context.Context, st Storage, agent *weft.Agent, opts ...SessionOption) (*Session, error) {
+func Create(ctx context.Context, st Storage, agent *core.Agent, opts ...SessionOption) (*Session, error) {
 	if st == nil {
 		return nil, fmt.Errorf("thread: Create with nil storage")
 	}
@@ -568,7 +568,7 @@ func newHeader(cfg *sessionConfig) (Header, error) {
 // first write, which fails with ErrLocked while another holds the
 // session and with ErrStale once the session has moved past what
 // this Open loaded (see Session, One writer).
-func Open(ctx context.Context, st Storage, id string, agent *weft.Agent, opts ...SessionOption) (*Session, error) {
+func Open(ctx context.Context, st Storage, id string, agent *core.Agent, opts ...SessionOption) (*Session, error) {
 	if st == nil {
 		return nil, fmt.Errorf("thread: Open with nil storage")
 	}
@@ -608,7 +608,7 @@ func Open(ctx context.Context, st Storage, id string, agent *weft.Agent, opts ..
 // from, and the compaction trigger's last measurement. report is the
 // storage's load report, nil for a session whose entries this process
 // just wrote.
-func newSession(st Storage, agent *weft.Agent, cfg sessionConfig, h Header, entries []Entry, report *LoadReport) (*Session, error) {
+func newSession(st Storage, agent *core.Agent, cfg sessionConfig, h Header, entries []Entry, report *LoadReport) (*Session, error) {
 	// Per-model overrides need the agent; a compaction configuration
 	// that cannot work is an error, not a session that never compacts.
 	if err := cfg.compaction.resolve(agent.Model()); err != nil {
@@ -952,7 +952,7 @@ func (s *Session) walkLocked(entryID string) ([]Entry, error) {
 }
 
 // Context returns the messages the model sees at the session's leaf,
-// in conversation order, with weft.Repair applied last — every call
+// in conversation order, with core.Repair applied last — every call
 // the transcript shows has a result (ADR 0011 §2, ADR 0001). Entries
 // of the bookkeeping kinds never reach it; a custom entry's whole
 // point is to survive outside it. A call left pending by its turn is
@@ -969,18 +969,18 @@ func (s *Session) walkLocked(entryID string) ([]Entry, error) {
 // compaction replayed (the stubs the record names, nothing else), and
 // signed reasoning stripped from entries recorded before the latest
 // compaction or trim.
-func (s *Session) Context() []weft.Message {
-	return weft.Repair(s.rawContext())
+func (s *Session) Context() []core.Message {
+	return core.Repair(s.rawContext())
 }
 
-// rawContext is Context before weft.Repair: the leaf's path messages
+// rawContext is Context before core.Repair: the leaf's path messages
 // exactly as stored. The run Send starts carries these — the loop
 // repairs its input itself, and with a decision option in force it
 // leaves that decision's pending calls unresolved so it can resolve
 // them (loop.go: repair-with-skip). Repairing here would close the
 // approval boundary: an Approve arriving at a transcript whose call
 // already reads "interrupted" has nothing left to resolve.
-func (s *Session) rawContext() []weft.Message {
+func (s *Session) rawContext() []core.Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.rawContextLocked()
@@ -988,12 +988,12 @@ func (s *Session) rawContext() []weft.Message {
 
 // rawContextLocked is the context walk's messages (callers hold
 // s.mu); contextViewLocked is the walk itself.
-func (s *Session) rawContextLocked() []weft.Message {
+func (s *Session) rawContextLocked() []core.Message {
 	view, err := s.contextViewLocked()
 	if err != nil || len(view.msgs) == 0 {
 		return nil // the leaf is always an entry the session holds
 	}
-	msgs := make([]weft.Message, len(view.msgs))
+	msgs := make([]core.Message, len(view.msgs))
 	for i, vm := range view.msgs {
 		msgs[i] = vm.msg
 	}
@@ -1005,7 +1005,7 @@ func (s *Session) rawContextLocked() []weft.Message {
 // The governing compaction's summary has no source entry (entry is
 // empty; idx is the compaction entry's index).
 type viewMsg struct {
-	msg   weft.Message
+	msg   core.Message
 	entry string
 	idx   int
 }
@@ -1152,7 +1152,7 @@ func (s *Session) trimStubsLocked(path []Entry, b pathBoundary) map[string][]Tri
 		for i := b.start; i < legacyAt; i++ {
 			if m, ok := path[i].(MessageEntry); ok {
 				for _, p := range m.Message.Content {
-					if r, isResult := p.(weft.ToolResultPart); isResult {
+					if r, isResult := p.(core.ToolResultPart); isResult {
 						results = append(results, TrimStub{Entry: m.ID, CallID: r.CallID, Content: clearedResultStub(r.CallID, r.Name)})
 					}
 				}
@@ -1175,13 +1175,13 @@ func (s *Session) trimStubsLocked(path []Entry, b pathBoundary) map[string][]Tri
 // applyStubs replaces the tool results the stubs name with their
 // recorded content — the trim's view of the message, never a change to
 // what the file holds.
-func applyStubs(m weft.Message, stubs []TrimStub) weft.Message {
+func applyStubs(m core.Message, stubs []TrimStub) core.Message {
 	if len(stubs) == 0 {
 		return m
 	}
-	var content []weft.Part
+	var content []core.Part
 	for j, p := range m.Content {
-		r, ok := p.(weft.ToolResultPart)
+		r, ok := p.(core.ToolResultPart)
 		if !ok {
 			continue
 		}
@@ -1190,10 +1190,10 @@ func applyStubs(m weft.Message, stubs []TrimStub) weft.Message {
 				continue
 			}
 			if content == nil {
-				content = make([]weft.Part, len(m.Content))
+				content = make([]core.Part, len(m.Content))
 				copy(content, m.Content)
 			}
-			content[j] = weft.ToolResultPart{CallID: r.CallID, Name: r.Name, Content: st.Content, IsError: st.IsError}
+			content[j] = core.ToolResultPart{CallID: r.CallID, Name: r.Name, Content: st.Content, IsError: st.IsError}
 			break
 		}
 	}
@@ -1206,10 +1206,10 @@ func applyStubs(m weft.Message, stubs []TrimStub) weft.Message {
 // stripSignedReasoning drops the message's signed reasoning parts —
 // the kept-side half of the compaction's reasoning rule, applied to
 // the context the model sees and never to what the file holds.
-func stripSignedReasoning(m weft.Message) weft.Message {
+func stripSignedReasoning(m core.Message) core.Message {
 	has := false
 	for _, p := range m.Content {
-		if r, ok := p.(weft.ReasoningPart); ok && r.Signature != "" {
+		if r, ok := p.(core.ReasoningPart); ok && r.Signature != "" {
 			has = true
 			break
 		}
@@ -1220,7 +1220,7 @@ func stripSignedReasoning(m weft.Message) weft.Message {
 	out := m
 	out.Content = nil
 	for _, p := range m.Content {
-		if r, ok := p.(weft.ReasoningPart); ok && r.Signature != "" {
+		if r, ok := p.(core.ReasoningPart); ok && r.Signature != "" {
 			continue
 		}
 		out.Content = append(out.Content, p)
@@ -1371,7 +1371,7 @@ func (s *Session) Custom(ctx context.Context, kind string, data json.RawMessage)
 }
 
 // CustomMessage appends an application message: a caller-chosen Kind
-// and a weft.Message that is always in the model's context — how an
+// and a core.Message that is always in the model's context — how an
 // application puts a note the model must see without attributing it to
 // the user (ADR 0011 §2). An empty kind is rejected. The message is
 // copied: the caller's value is not retained.
@@ -1386,7 +1386,7 @@ func (s *Session) Custom(ctx context.Context, kind string, data json.RawMessage)
 // Steer policy. A parked approval boundary is not a running turn: a
 // note written there is accepted and reads after the boundary's
 // results. Custom, which never enters the context, is not restricted.
-func (s *Session) CustomMessage(ctx context.Context, kind string, msg weft.Message) error {
+func (s *Session) CustomMessage(ctx context.Context, kind string, msg core.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if kind == "" {
@@ -1417,15 +1417,15 @@ func isPoolSettled(status string) bool {
 type Usage struct {
 	// Turns sums every turn entry's usage — every run the session ever
 	// made, abandoned branches included: the tokens were spent.
-	Turns weft.Usage
+	Turns core.Usage
 	// Summaries sums the summarizer usage of every compaction entry —
 	// the cost of keeping the context small, in its own bucket.
-	Summaries weft.Usage
+	Summaries core.Usage
 	// Delegated sums the usage every settled pool receipt carries —
 	// the cost of work handed to thread/pool children (ADR 0022 D3),
 	// in its own bucket: a delegated child's tokens are not this
 	// session's turns, and the ledger never mixes kinds.
-	Delegated weft.Usage
+	Delegated core.Usage
 }
 
 // Usage returns the session's cost ledger over every entry in the
@@ -1999,14 +1999,14 @@ func cloneEntry(e Entry) Entry {
 // and inside each part the fields a retained value could be written
 // through — a tool call's raw arguments, a file's data. The other
 // part kinds hold only strings.
-func deepCloneMessage(m weft.Message) weft.Message {
+func deepCloneMessage(m core.Message) core.Message {
 	m.Content = slices.Clone(m.Content)
 	for i, p := range m.Content {
 		switch p := p.(type) {
-		case weft.ToolCallPart:
+		case core.ToolCallPart:
 			p.Args = slices.Clone(p.Args)
 			m.Content[i] = p
-		case weft.FilePart:
+		case core.FilePart:
 			p.Data = slices.Clone(p.Data)
 			m.Content[i] = p
 		}

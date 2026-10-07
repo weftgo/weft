@@ -243,7 +243,7 @@ var nonMetaAttr = map[string]struct{}{
 
 // MetaOf returns the caller metadata a set of attributes carries: every
 // string value under a key outside the record/span contract (what
-// weft.Metadata put there, enduser.id included). Keys under "weft."
+// core.Metadata put there, enduser.id included). Keys under "weft."
 // that are not part of the contract — thread's weft.session.parent, a
 // future module's own — are metadata and are kept.
 func MetaOf(attrs map[string]any) map[string]string {

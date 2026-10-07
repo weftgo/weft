@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/studio"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // shapePaths flattens a JSON document into the set of its field paths
@@ -66,18 +66,18 @@ func TestGoldensMatchARealRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lookup := weft.Tool("lookup_order", "Look up an order.", func(_ context.Context, in struct {
+	lookup := core.Tool("lookup_order", "Look up an order.", func(_ context.Context, in struct {
 		OrderID string `json:"order_id"`
 	}) (string, error) {
 		return "order shipped", nil
 	})
-	agent := weft.New(wefttest.Script(
+	agent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"42"}`}),
 		wefttest.Say("Order 42 shipped this morning."),
-	), weft.Name("orders"), weft.TracerProvider(p.TracerProvider()), weft.LoggerProvider(p.LoggerProvider()), lookup)
+	), core.Name("orders"), core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()), lookup)
 	// The keys thread stamps on a session's turns (block 8).
-	res, err := agent.Generate(ctx, weft.Prompt("where is order 42?"),
-		weft.Metadata(map[string]string{"weft.public_id": "pub_x", "weft.session.id": "s_x", "weft.turn": "1"}))
+	res, err := agent.Generate(ctx, core.Prompt("where is order 42?"),
+		core.Metadata(map[string]string{"weft.public_id": "pub_x", "weft.session.id": "s_x", "weft.turn": "1"}))
 	if err != nil {
 		t.Fatal(err)
 	}

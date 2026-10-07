@@ -4,16 +4,16 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // SchemaMap renders through json.Marshal, so a foreign schema parsed
-// with weft.ParseSchema reaches the provider as its verbatim bytes —
+// with core.ParseSchema reaches the provider as its verbatim bytes —
 // enum, minimum, oneOf and all — where the hand-built map this
 // replaced degraded them to the struct's own vocabulary.
 func TestSchemaMapKeepsForeignSchema(t *testing.T) {
 	in := json.RawMessage(`{"type":"object","properties":{"units":{"type":"string","enum":["c","f"]},"n":{"type":"integer","minimum":0}},"required":["units"]}`)
-	s, err := weft.ParseSchema(in)
+	s, err := core.ParseSchema(in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,9 +35,9 @@ func TestSchemaMapKeepsForeignSchema(t *testing.T) {
 // and now renders as {} (ADR 0003's 2026-09-19 amendment). This pins
 // both halves.
 func TestSchemaMapReflected(t *testing.T) {
-	got, err := json.Marshal(SchemaMap(&weft.Schema{
+	got, err := json.Marshal(SchemaMap(&core.Schema{
 		Type: "object",
-		Properties: map[string]*weft.Schema{
+		Properties: map[string]*core.Schema{
 			"n":   {Type: "integer", Description: "count"},
 			"any": {},
 		},

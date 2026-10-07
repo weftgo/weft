@@ -11,9 +11,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 func thresholdCompactions(s *thread.Session) int {
@@ -29,8 +29,8 @@ func thresholdCompactions(s *thread.Session) int {
 // usageAgent is a scripted agent whose every turn reports input
 // tokens of in, with a separate recorder to summarize — so the script
 // is never consumed by a summary.
-func usageAgent(in int64, turns int) (*weft.Agent, *summaryRecorder) {
-	agent, _ := scriptedAgent(weft.Usage{InputTokens: in, OutputTokens: 5}, turns)
+func usageAgent(in int64, turns int) (*core.Agent, *summaryRecorder) {
+	agent, _ := scriptedAgent(core.Usage{InputTokens: in, OutputTokens: 5}, turns)
 	return agent, &summaryRecorder{reply: "the summary"}
 }
 
@@ -61,18 +61,18 @@ func TestReserveMovesTheTriggerLine(t *testing.T) {
 // only for it.
 func TestModelReservesOverride(t *testing.T) {
 	agent, rec := usageAgent(60_000, 2)
-	info := weft.InfoOf(agent.Model())
+	info := core.InfoOf(agent.Model())
 	s := compactable(t, thread.Memory(), agent, thread.ContextWindow(100_000),
-		thread.ModelReserves(map[weft.ModelInfo]int64{info: 50_000}), thread.SummaryModel(rec))
+		thread.ModelReserves(map[core.ModelInfo]int64{info: 50_000}), thread.SummaryModel(rec))
 	sendAndWait(t, s, "go")
 	if n := thresholdCompactions(s); n != 1 {
 		t.Errorf("this model's reserve: threshold compactions = %d, want 1", n)
 	}
 
 	agent, rec = usageAgent(60_000, 2)
-	other := weft.ModelInfo{Provider: "other", Name: "nope"}
+	other := core.ModelInfo{Provider: "other", Name: "nope"}
 	s = compactable(t, thread.Memory(), agent, thread.ContextWindow(100_000),
-		thread.ModelReserves(map[weft.ModelInfo]int64{other: 50_000}), thread.SummaryModel(rec))
+		thread.ModelReserves(map[core.ModelInfo]int64{other: 50_000}), thread.SummaryModel(rec))
 	sendAndWait(t, s, "go")
 	if n := thresholdCompactions(s); n != 0 {
 		t.Errorf("another model's reserve: threshold compactions = %d, want 0", n)
@@ -190,23 +190,23 @@ func TestRateLimitsCountAlongThePath(t *testing.T) {
 
 // failingNative offers the provider-native seam and fails it.
 type failingNative struct {
-	weft.Model
+	core.Model
 	calls int
 }
 
-func (m *failingNative) CompactNative(ctx context.Context, req weft.ModelRequest, instructions string) (weft.Message, weft.Usage, error) {
+func (m *failingNative) CompactNative(ctx context.Context, req core.ModelRequest, instructions string) (core.Message, core.Usage, error) {
 	m.calls++
-	return weft.Message{}, weft.Usage{}, errors.New("compact endpoint down")
+	return core.Message{}, core.Usage{}, errors.New("compact endpoint down")
 }
 
 // wrapping is a middleware-shaped model: the native lookup follows its
 // Unwrap.
-type wrapping struct{ inner weft.Model }
+type wrapping struct{ inner core.Model }
 
-func (w wrapping) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (w wrapping) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	return w.inner.Stream(ctx, req)
 }
-func (w wrapping) Unwrap() weft.Model { return w.inner }
+func (w wrapping) Unwrap() core.Model { return w.inner }
 
 // PreferNative: the seam is found through middleware, only the text is
 // kept, and a native failure is logged — never swallowed — before the
@@ -217,7 +217,7 @@ func TestPreferNativeFallbackIsLogged(t *testing.T) {
 
 	t.Run("found through Unwrap, text only", func(t *testing.T) {
 		native := &nativeFake{Model: rec}
-		s := compactable(t, thread.Memory(), weft.New(wrapping{native}), thread.PreferNative())
+		s := compactable(t, thread.Memory(), core.New(wrapping{native}), thread.PreferNative())
 		if err := s.Compact(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -232,7 +232,7 @@ func TestPreferNativeFallbackIsLogged(t *testing.T) {
 	t.Run("an error falls back, out loud", func(t *testing.T) {
 		var buf syncBuffer
 		native := &failingNative{Model: rec}
-		agent := weft.New(native, weft.Logger(slog.New(slog.NewTextHandler(&buf, nil))))
+		agent := core.New(native, core.Logger(slog.New(slog.NewTextHandler(&buf, nil))))
 		s := compactable(t, thread.Memory(), agent, thread.PreferNative())
 		if err := s.Compact(ctx); err != nil {
 			t.Fatalf("Compact through the native fallback: %v", err)
@@ -256,7 +256,7 @@ func TestPreferNativeFallbackIsLogged(t *testing.T) {
 func TestTokensBeforeCountsTheCompactedView(t *testing.T) {
 	ctx := context.Background()
 	rec := &summaryRecorder{reply: "the summary"}
-	agent := weft.New(rec)
+	agent := core.New(rec)
 	st := thread.Memory()
 	var prep thread.Preparation
 	hook := thread.BeforeCompact(func(ctx context.Context, p *thread.Preparation) (thread.Verdict, error) {
@@ -315,7 +315,7 @@ func TestTokensBeforeCountsTheCompactedView(t *testing.T) {
 // one was rejected, so a replayed plan landed twice.
 func TestApplyCompactionRejectsTheSameBoundary(t *testing.T) {
 	ctx := context.Background()
-	s := compactable(t, thread.Memory(), weft.New(&summaryRecorder{reply: "the summary"}))
+	s := compactable(t, thread.Memory(), core.New(&summaryRecorder{reply: "the summary"}))
 	plan, err := s.PreviewCompaction(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -338,15 +338,15 @@ func TestApplyCompactionRejectsTheSameBoundary(t *testing.T) {
 func TestCompactionErrorsAreSentinels(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
-	agent := weft.New(&summaryRecorder{reply: "the summary"})
+	agent := core.New(&summaryRecorder{reply: "the summary"})
 	s, _ := thread.Create(ctx, st, agent)
 	now := timeUTC()
 	if err := st.Append(ctx, s.ID(),
-		thread.MessageEntry{ID: "e_1", Created: now, Message: weft.User("one")},
-		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: now, Message: weft.Message{Role: weft.RoleTool,
-			Content: []weft.Part{weft.ToolResultPart{CallID: "c1", Name: "read", Content: "result"}}}},
-		thread.MessageEntry{ID: "e_3", ParentID: "e_2", Created: now, Message: weft.User("three")},
-		thread.MessageEntry{ID: "e_side", ParentID: "e_1", Created: now, Message: weft.User("another branch")},
+		thread.MessageEntry{ID: "e_1", Created: now, Message: core.User("one")},
+		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: now, Message: core.Message{Role: core.RoleTool,
+			Content: []core.Part{core.ToolResultPart{CallID: "c1", Name: "read", Content: "result"}}}},
+		thread.MessageEntry{ID: "e_3", ParentID: "e_2", Created: now, Message: core.User("three")},
+		thread.MessageEntry{ID: "e_side", ParentID: "e_1", Created: now, Message: core.User("another branch")},
 		thread.LeafEntry{ID: "e_nav", ParentID: "e_side", Created: now, Entry: "e_3"},
 	); err != nil {
 		t.Fatal(err)
@@ -401,13 +401,13 @@ func TestCompactionErrorsAreSentinels(t *testing.T) {
 // have dropped it silently), an unknown id with ErrNoEntry.
 func TestPinRejectsBookkeepingEntries(t *testing.T) {
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script(wefttest.Say("reply")))
+	agent := core.New(wefttest.Script(wefttest.Say("reply")))
 	s, _ := thread.Create(ctx, thread.Memory(), agent)
 	sendAndWait(t, s, "hello")
 	if err := s.Custom(ctx, "app/state", json.RawMessage(`{"k":1}`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CustomMessage(ctx, "app/note", weft.User("a note")); err != nil {
+	if err := s.CustomMessage(ctx, "app/note", core.User("a note")); err != nil {
 		t.Fatal(err)
 	}
 	before := len(s.Entries())
@@ -448,14 +448,14 @@ func TestPinRejectsBookkeepingEntries(t *testing.T) {
 func TestPinBelowTheBoundaryTakesEffectAtTheNextCompaction(t *testing.T) {
 	ctx := context.Background()
 	rec := &summaryRecorder{reply: "the summary"}
-	agent := weft.New(rec)
+	agent := core.New(rec)
 	st := thread.Memory()
 	s, _ := thread.Create(ctx, st, agent)
 	now := timeUTC()
 	if err := st.Append(ctx, s.ID(),
-		thread.MessageEntry{ID: "e_req", Created: now, Message: weft.User("THE REQUIREMENT " + strings.Repeat("a", 30_000))},
-		thread.MessageEntry{ID: "e_b", ParentID: "e_req", Created: now, Message: weft.User(strings.Repeat("b", 30_000))},
-		thread.MessageEntry{ID: "e_c", ParentID: "e_b", Created: now, Message: weft.User(strings.Repeat("c", 30_000))},
+		thread.MessageEntry{ID: "e_req", Created: now, Message: core.User("THE REQUIREMENT " + strings.Repeat("a", 30_000))},
+		thread.MessageEntry{ID: "e_b", ParentID: "e_req", Created: now, Message: core.User(strings.Repeat("b", 30_000))},
+		thread.MessageEntry{ID: "e_c", ParentID: "e_b", Created: now, Message: core.User(strings.Repeat("c", 30_000))},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -496,9 +496,9 @@ func TestPinBelowTheBoundaryTakesEffectAtTheNextCompaction(t *testing.T) {
 // running a session that silently never compacts.
 func TestCompactConfigIsValidated(t *testing.T) {
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script())
-	info := weft.InfoOf(agent.Model())
-	other := weft.ModelInfo{Provider: "other", Name: "nope"}
+	agent := core.New(wefttest.Script())
+	info := core.InfoOf(agent.Model())
+	other := core.ModelInfo{Provider: "other", Name: "nope"}
 	for name, tc := range map[string]struct {
 		opts []thread.SessionOption
 		ok   bool
@@ -506,10 +506,10 @@ func TestCompactConfigIsValidated(t *testing.T) {
 		"window under the default reserve": {[]thread.SessionOption{thread.ContextWindow(8_000)}, false},
 		"reserve at the window":            {[]thread.SessionOption{thread.ContextWindow(100_000), thread.Reserve(100_000)}, false},
 		"keep-recent at the trigger line":  {[]thread.SessionOption{thread.ContextWindow(100_000), thread.KeepRecent(83_616)}, false},
-		"per-model window too small":       {[]thread.SessionOption{thread.ContextWindow(100_000), thread.ModelWindows(map[weft.ModelInfo]int64{info: 16_000})}, false},
-		"per-model reserve too large":      {[]thread.SessionOption{thread.ContextWindow(100_000), thread.ModelReserves(map[weft.ModelInfo]int64{info: 90_000})}, false},
+		"per-model window too small":       {[]thread.SessionOption{thread.ContextWindow(100_000), thread.ModelWindows(map[core.ModelInfo]int64{info: 16_000})}, false},
+		"per-model reserve too large":      {[]thread.SessionOption{thread.ContextWindow(100_000), thread.ModelReserves(map[core.ModelInfo]int64{info: 90_000})}, false},
 		"a small window, sized knobs":      {[]thread.SessionOption{thread.ContextWindow(8_000), thread.Reserve(1_000), thread.KeepRecent(2_000)}, true},
-		"another model's small window":     {[]thread.SessionOption{thread.ModelWindows(map[weft.ModelInfo]int64{other: 10})}, true},
+		"another model's small window":     {[]thread.SessionOption{thread.ModelWindows(map[core.ModelInfo]int64{other: 10})}, true},
 		"no window: nothing to validate":   {[]thread.SessionOption{thread.Reserve(1 << 40), thread.KeepRecent(1 << 40)}, true},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -549,9 +549,9 @@ func TestTriggerFiringOverNothingWarnsOnce(t *testing.T) {
 	var buf syncBuffer
 	turns := make([]wefttest.Turn, 3)
 	for i := range turns {
-		turns[i] = wefttest.Say("reply").WithUsage(weft.Usage{InputTokens: 95_000, OutputTokens: 5})
+		turns[i] = wefttest.Say("reply").WithUsage(core.Usage{InputTokens: 95_000, OutputTokens: 5})
 	}
-	agent := weft.New(wefttest.Script(turns...), weft.Logger(slog.New(slog.NewTextHandler(&buf, nil))))
+	agent := core.New(wefttest.Script(turns...), core.Logger(slog.New(slog.NewTextHandler(&buf, nil))))
 	s, err := thread.Create(ctx, thread.Memory(), agent, thread.ContextWindow(100_000))
 	if err != nil {
 		t.Fatal(err)

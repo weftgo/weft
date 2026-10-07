@@ -3,7 +3,7 @@ package mcp
 import (
 	"encoding/json"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // toSDK renders a weft schema for the SDK's Tool.InputSchema /
@@ -12,8 +12,8 @@ import (
 // the SDK panics on a nil input schema, and a schema-less tool takes
 // every object, which the empty schema says exactly (RawTool's own
 // rule). Marshal honours Schema.MarshalJSON, so a schema parsed with
-// weft.ParseSchema crosses as its verbatim bytes.
-func toSDK(s *weft.Schema) any {
+// core.ParseSchema crosses as its verbatim bytes.
+func toSDK(s *core.Schema) any {
 	if s == nil {
 		return json.RawMessage(`{"type":"object"}`)
 	}
@@ -28,7 +28,7 @@ func toSDK(s *weft.Schema) any {
 
 // fromSDK turns the SDK's schema value — whatever Go type the pinned
 // version's client fills in, a map on v1.8.0 — into the bytes
-// weft.ParseSchema reads.
+// core.ParseSchema reads.
 func fromSDK(v any) (json.RawMessage, error) {
 	if v == nil {
 		return nil, nil

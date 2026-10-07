@@ -10,17 +10,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/pool"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // delegating builds a parent agent whose model delegates once to
 // child through the wrap "research" — under an explicit call id —
 // then concludes.
-func delegating(p *pool.Pool, child *weft.Agent, opts ...pool.WrapOption) *weft.Agent {
-	return weft.New(wefttest.Script(
+func delegating(p *pool.Pool, child *core.Agent, opts ...pool.WrapOption) *core.Agent {
+	return core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research", ID: "c-wrapper", Args: `{"prompt":"refund the orders"}`}),
 		wefttest.Say("all done"),
 	), p.MustWrap("research", "delegates the refund flow", child, opts...))
@@ -58,7 +58,7 @@ func waitFor(t *testing.T, p *pool.Pool, s *thread.Session, receiptID string, wa
 // receipt of the child it parked on.
 func park(t *testing.T, s *thread.Session) (*thread.Turn, pool.Receipt) {
 	t.Helper()
-	t1, err := s.Send(context.Background(), weft.User("refund them"))
+	t1, err := s.Send(context.Background(), core.User("refund them"))
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestWrapperNotDecidable(t *testing.T) {
 func TestResumeHoldsSlot(t *testing.T) {
 	ctx := context.Background()
 	p := pool.New(1)
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	child, ran := gatedChild(
 		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c-a", Args: `{"order_id":"1"}`}),
 		wefttest.Say("refunded"),
@@ -205,7 +205,7 @@ func TestResumeHoldsSlot(t *testing.T) {
 
 	// Another child takes the only slot and keeps it.
 	started, release := make(chan struct{}), make(chan struct{})
-	busy, err := p.Submit(ctx, s, weft.New(blocking{release: release, text: "busy",
+	busy, err := p.Submit(ctx, s, core.New(blocking{release: release, text: "busy",
 		onStart: func() { close(started) }}), "hold the slot")
 	if err != nil {
 		t.Fatal(err)
@@ -266,7 +266,7 @@ func TestDecideJoinsErrors(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
 	p := pool.New(3)
-	s, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 	var rs []*pool.Receipt
 	for i := 0; i < 3; i++ {
 		child, _ := gatedChild(wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: fmt.Sprintf("c-%d", i), Args: `{"order_id":"1"}`}))
@@ -287,12 +287,12 @@ func TestDecideJoinsErrors(t *testing.T) {
 	if err := s.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
-	open, err := thread.Open(ctx, st, s.ID(), weft.New(wefttest.Script()))
+	open, err := thread.Open(ctx, st, s.ID(), core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	p2 := pool.New(3)
-	resumed := func() *weft.Agent {
+	resumed := func() *core.Agent {
 		a, _ := gatedChild(wefttest.Say("resumed"))
 		return a
 	}
@@ -374,7 +374,7 @@ func TestMirrorFailureFailsDelegation(t *testing.T) {
 		p := pool.New(1)
 		child, ran := gatedChild(wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c-a", Args: `{"order_id":"1"}`}))
 		s, _ := thread.Create(ctx, st, delegating(p, child))
-		t1, err := s.Send(ctx, weft.User("refund them"))
+		t1, err := s.Send(ctx, core.User("refund them"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -408,7 +408,7 @@ func TestMirrorFailureFailsDelegation(t *testing.T) {
 		st.failMirrors.Store(true)
 		p := pool.New(1)
 		child, _ := gatedChild(wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c-a", Args: `{"order_id":"1"}`}))
-		s, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+		s, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 		r, err := p.Submit(ctx, s, child, "refund")
 		if err != nil {
 			t.Fatal(err)
@@ -645,7 +645,7 @@ func TestCancelParked(t *testing.T) {
 	})
 	t.Run("async", func(t *testing.T) {
 		p := pool.New(1)
-		s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+		s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 		child, ran := gatedChild(wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c-a", Args: `{"order_id":"1"}`}))
 		r, err := p.Submit(ctx, s, child, "refund")
 		if err != nil {
@@ -678,9 +678,9 @@ func TestCancelRunningSyncChild(t *testing.T) {
 	p := pool.New(1)
 	started, release := make(chan struct{}), make(chan struct{})
 	defer close(release)
-	child := weft.New(blocking{release: release, text: "late", onStart: func() { close(started) }})
+	child := core.New(blocking{release: release, text: "late", onStart: func() { close(started) }})
 	s, _ := thread.Create(ctx, thread.Memory(), delegating(p, child))
-	t1, err := s.Send(ctx, weft.User("go"))
+	t1, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,9 +716,9 @@ func TestParentCancellationIsNotSubagentCanceled(t *testing.T) {
 	p := pool.New(1)
 	started, release := make(chan struct{}), make(chan struct{})
 	defer close(release)
-	child := weft.New(blocking{release: release, text: "late", onStart: func() { close(started) }})
+	child := core.New(blocking{release: release, text: "late", onStart: func() { close(started) }})
 	s, _ := thread.Create(ctx, thread.Memory(), delegating(p, child))
-	t1, err := s.Send(ctx, weft.User("go"))
+	t1, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -738,8 +738,8 @@ func TestParentCancellationIsNotSubagentCanceled(t *testing.T) {
 func TestStateErrors(t *testing.T) {
 	ctx := context.Background()
 	p := pool.New(1)
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
-	other, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
+	other, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 
 	parkedChild, _ := gatedChild(wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c-a", Args: `{"order_id":"1"}`}))
 	parked, err := p.Submit(ctx, s, parkedChild, "refund")
@@ -749,20 +749,20 @@ func TestStateErrors(t *testing.T) {
 	waitFor(t, p, s, parked.ID, pool.Parked)
 
 	started, release := make(chan struct{}), make(chan struct{})
-	running, err := p.Submit(ctx, s, weft.New(blocking{release: release, text: "ran",
+	running, err := p.Submit(ctx, s, core.New(blocking{release: release, text: "ran",
 		onStart: func() { close(started) }}), "run")
 	if err != nil {
 		t.Fatal(err)
 	}
 	<-started
-	queued, err := p.Submit(ctx, s, weft.New(wefttest.Script(wefttest.Say("queued ran"))), "queue")
+	queued, err := p.Submit(ctx, s, core.New(wefttest.Script(wefttest.Say("queued ran"))), "queue")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	check := func(id string, want pool.State) {
 		t.Helper()
-		_, err := p.Forward(ctx, s, id, weft.User("steer"))
+		_, err := p.Forward(ctx, s, id, core.User("steer"))
 		var se *pool.StateError
 		if !errors.As(err, &se) || !errors.Is(err, pool.ErrNotRunning) || se.State != want || se.Receipt != id || se.Orphan {
 			t.Errorf("Forward to a %s receipt = %v, want a StateError naming it", want, err)
@@ -774,7 +774,7 @@ func TestStateErrors(t *testing.T) {
 	check(parked.ID, pool.Parked)
 	check(queued.ID, pool.Accepted)
 	for name, call := range map[string]func(id string) error{
-		"Forward": func(id string) error { _, err := p.Forward(ctx, s, id, weft.User("x")); return err },
+		"Forward": func(id string) error { _, err := p.Forward(ctx, s, id, core.User("x")); return err },
 		"Cancel":  func(id string) error { return p.Cancel(ctx, s, id) },
 		"Wait":    func(id string) error { _, err := p.Wait(ctx, s, id); return err },
 	} {
@@ -783,7 +783,7 @@ func TestStateErrors(t *testing.T) {
 		}
 	}
 	// Another session's receipt is unknown to this one.
-	if _, err := p.Forward(ctx, other, running.ID, weft.User("x")); !errors.Is(err, pool.ErrUnknownReceipt) {
+	if _, err := p.Forward(ctx, other, running.ID, core.User("x")); !errors.Is(err, pool.ErrUnknownReceipt) {
 		t.Errorf("Forward through the wrong parent = %v, want ErrUnknownReceipt", err)
 	}
 	close(release)
@@ -805,18 +805,18 @@ func TestCloseCoversEverything(t *testing.T) {
 	t.Run("bare call after Close", func(t *testing.T) {
 		p := pool.New(1)
 		var ran atomic.Bool
-		child := weft.New(stateless{answer: func(weft.ModelRequest) []weft.ModelEvent {
+		child := core.New(stateless{answer: func(core.ModelRequest) []core.ModelEvent {
 			ran.Store(true)
-			return say(nil, "ran").answer(weft.ModelRequest{})
+			return say(nil, "ran").answer(core.ModelRequest{})
 		}})
-		parent := weft.New(wefttest.Script(
+		parent := core.New(wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: "ask", ID: "c-ask", Args: `{"prompt":"go"}`}),
 			wefttest.Say("noted"),
 		), p.MustWrap("ask", "", child))
 		if err := p.Close(ctx); err != nil {
 			t.Fatal(err)
 		}
-		res, err := parent.Generate(ctx, weft.Prompt("go"))
+		res, err := parent.Generate(ctx, core.Prompt("go"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -831,14 +831,14 @@ func TestCloseCoversEverything(t *testing.T) {
 		p := pool.New(1)
 		started, release := make(chan struct{}), make(chan struct{})
 		defer close(release)
-		child := weft.New(blocking{release: release, text: "late", onStart: func() { close(started) }})
-		parent := weft.New(wefttest.Script(
+		child := core.New(blocking{release: release, text: "late", onStart: func() { close(started) }})
+		parent := core.New(wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: "ask", ID: "c-ask", Args: `{"prompt":"go"}`}),
 			wefttest.Say("noted"),
 		), p.MustWrap("ask", "", child))
-		done := make(chan *weft.RunResult, 1)
+		done := make(chan *core.RunResult, 1)
 		go func() {
-			res, _ := parent.Generate(ctx, weft.Prompt("go"))
+			res, _ := parent.Generate(ctx, core.Prompt("go"))
 			done <- res
 		}()
 		<-started
@@ -855,7 +855,7 @@ func TestCloseCoversEverything(t *testing.T) {
 	t.Run("parked child", func(t *testing.T) {
 		st := thread.Memory()
 		p := pool.New(1)
-		s, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+		s, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 		child, _ := gatedChild(wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c-a", Args: `{"order_id":"1"}`}))
 		r, err := p.Submit(ctx, s, child, "refund")
 		if err != nil {
@@ -880,7 +880,7 @@ func TestCloseCoversEverything(t *testing.T) {
 // under the wrong agent. MustWrap panics on the same.
 func TestWrapErrors(t *testing.T) {
 	p := pool.New(1)
-	a, b := weft.New(wefttest.Script()), weft.New(wefttest.Script())
+	a, b := core.New(wefttest.Script()), core.New(wefttest.Script())
 	if _, err := p.Wrap("x", "", nil); err == nil {
 		t.Error("Wrap with a nil agent: no error")
 	}
@@ -920,7 +920,7 @@ func TestDecisionDuringTheDelegatingTurn(t *testing.T) {
 		wefttest.Say("refunded"),
 	)
 	entered, release := make(chan struct{}), make(chan struct{})
-	slow := weft.Tool("slow", "", func(ctx context.Context, _ struct{}) (string, error) {
+	slow := core.Tool("slow", "", func(ctx context.Context, _ struct{}) (string, error) {
 		close(entered)
 		select {
 		case <-release:
@@ -931,7 +931,7 @@ func TestDecisionDuringTheDelegatingTurn(t *testing.T) {
 	})
 	// One step, two calls: the delegation and a slow sibling that
 	// keeps the turn running after the child has parked.
-	parent := weft.New(wefttest.Script(
+	parent := core.New(wefttest.Script(
 		wefttest.ToolCalls(
 			wefttest.Call{Name: "research", ID: "c-wrapper", Args: `{"prompt":"refund"}`},
 			wefttest.Call{Name: "slow", ID: "c-slow"},
@@ -939,7 +939,7 @@ func TestDecisionDuringTheDelegatingTurn(t *testing.T) {
 		wefttest.Say("all done"),
 	), p.MustWrap("research", "", child), slow)
 	s, _ := thread.Create(ctx, thread.Memory(), parent)
-	t1, err := s.Send(ctx, weft.User("go"))
+	t1, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1112,7 +1112,7 @@ func TestInterruptReachesParkedChild(t *testing.T) {
 				wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c-a", Args: `{"order_id":"1"}`}),
 				wefttest.Say("stood down"),
 			)
-			parent := weft.New(wefttest.Script(
+			parent := core.New(wefttest.Script(
 				wefttest.ToolCalls(wefttest.Call{Name: "research", ID: "c-wrapper", Args: `{"prompt":"refund the orders"}`}),
 				wefttest.Say("resumed tail"),
 				wefttest.Say("the new plan"),
@@ -1123,7 +1123,7 @@ func TestInterruptReachesParkedChild(t *testing.T) {
 			}
 			_, rc := park(t, s)
 
-			follow, err := s.Send(ctx, weft.User("forget the refund"), thread.As(policy))
+			follow, err := s.Send(ctx, core.User("forget the refund"), thread.As(policy))
 			if err != nil {
 				t.Fatalf("the interrupting Send: %v", err)
 			}

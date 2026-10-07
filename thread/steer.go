@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread/internal/carry"
 )
 
@@ -24,10 +24,10 @@ import (
 // is the step whose drain took it, set when it is handed to a run.
 type queuedSteer struct {
 	receipt string
-	msg     weft.Message
+	msg     core.Message
 	ctx     context.Context
-	opts    []weft.RunOption
-	aimOpts []weft.RunOption
+	opts    []core.RunOption
+	aimOpts []core.RunOption
 	aimCtx  context.Context
 	turn    *Turn
 	step    int
@@ -43,7 +43,7 @@ type queuedSteer struct {
 func (q queuedSteer) followUp(ft *Turn, receipt string) pendingSend {
 	opts := q.opts
 	if len(q.aimOpts) > 0 {
-		opts = append(append([]weft.RunOption(nil), q.aimOpts...), q.opts...)
+		opts = append(append([]core.RunOption(nil), q.aimOpts...), q.opts...)
 	}
 	return pendingSend{ctx: carry.Values(q.ctx, q.aimCtx), msg: q.msg, opts: opts, turn: ft, receipt: receipt}
 }
@@ -53,7 +53,7 @@ func (q queuedSteer) followUp(ft *Turn, receipt string) pendingSend {
 // in flight — the open boundary's parked turn's. None on a session
 // with neither (a restored steer settled by Continue). Callers hold
 // s.mu.
-func (s *Session) aimLocked() ([]weft.RunOption, context.Context) {
+func (s *Session) aimLocked() ([]core.RunOption, context.Context) {
 	if s.busyLocked() {
 		return s.inFlight.aimOpts, s.inFlight.aimCtx
 	}
@@ -72,7 +72,7 @@ type QueuedSteer struct {
 	// receipt entry names it in ReceiptEntry.Turn.
 	Receipt string
 	// Msg is the message held.
-	Msg weft.Message
+	Msg core.Message
 	// Policy says how it waits: Steer — held for the running turn's
 	// next drain point — or Queue — an accepted send (or a deferred
 	// steer's follow-up) waiting for a turn of its own.
@@ -85,13 +85,13 @@ type QueuedSteer struct {
 // over to the handed list, whose delivered receipts join the turn's
 // end batch. The core calls it on the run goroutine between steps,
 // never while the session's mutex is held.
-func (s *Session) steerSource(_ context.Context, at weft.SteerPoint) []weft.Message {
+func (s *Session) steerSource(_ context.Context, at core.SteerPoint) []core.Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.steerQueue) == 0 {
 		return nil
 	}
-	msgs := make([]weft.Message, 0, len(s.steerQueue))
+	msgs := make([]core.Message, 0, len(s.steerQueue))
 	for _, q := range s.steerQueue {
 		msgs = append(msgs, q.msg)
 		q.step = at.Step
@@ -113,10 +113,10 @@ func (s *Session) steerSource(_ context.Context, at weft.SteerPoint) []weft.Mess
 // turn's end or ClearQueue takes it. An application that must cap what
 // a user can pile onto a running turn checks len(Queue()) before it
 // sends.
-func (s *Session) steerSendLocked(ctx context.Context, msg weft.Message, opts []weft.RunOption) (*Turn, error) {
-	if msg.Role != weft.RoleUser {
+func (s *Session) steerSendLocked(ctx context.Context, msg core.Message, opts []core.RunOption) (*Turn, error) {
+	if msg.Role != core.RoleUser {
 		return nil, fmt.Errorf("thread: %w: a steered message must be RoleUser, got %q — the model's own turns come from the model",
-			weft.ErrInvalidSteer, msg.Role)
+			core.ErrInvalidSteer, msg.Role)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err

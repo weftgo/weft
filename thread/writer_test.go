@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
@@ -21,7 +21,7 @@ import (
 func ExampleSession_Close_handOver() {
 	ctx := context.Background()
 	st := thread.Memory()
-	agent := weft.New(wefttest.Script())
+	agent := core.New(wefttest.Script())
 
 	writer, _ := thread.Create(ctx, st, agent)
 	_ = writer.SetInfo(ctx, "Order 1234", nil)

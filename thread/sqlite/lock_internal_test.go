@@ -13,9 +13,9 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 func openBackend(t *testing.T, path string, opts ...thread.OpenOption) *backend {
@@ -28,7 +28,7 @@ func openBackend(t *testing.T, path string, opts ...thread.OpenOption) *backend 
 }
 
 func entry(id string) thread.Entry {
-	return thread.MessageEntry{ID: id, Created: time.Now().UTC(), Message: weft.User(id)}
+	return thread.MessageEntry{ID: id, Created: time.Now().UTC(), Message: core.User(id)}
 }
 
 // otherProcess makes b look like a Storage opened by a different
@@ -380,7 +380,7 @@ func TestBrokenLockStopsTheOldHolder(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "zombie.db")
 	holder := openBackend(t, path)
-	s, err := thread.Create(ctx, holder, weft.New(wefttest.Script()))
+	s, err := thread.Create(ctx, holder, core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatal(err)
 	}

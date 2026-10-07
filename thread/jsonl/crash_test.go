@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
 	"github.com/weftgo/weft/thread/threadtest"
@@ -45,7 +45,7 @@ func TestCrashMidAppend(t *testing.T) {
 	if err := st.Append(ctx, h.ID, thread.MessageEntry{
 		ID:      "e_crash1",
 		Created: h.Created.Add(time.Second),
-		Message: weft.User("the prompt, durable before the run"),
+		Message: core.User("the prompt, durable before the run"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestCrashMidAppendThenNextWriterAppends(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.Append(ctx, h.ID, thread.MessageEntry{
-		ID: "e_crash1", Created: h.Created.Add(time.Second), Message: weft.User("before the crash"),
+		ID: "e_crash1", Created: h.Created.Add(time.Second), Message: core.User("before the crash"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -129,8 +129,8 @@ func TestCrashMidAppendThenNextWriterAppends(t *testing.T) {
 		t.Fatalf("the reopen before any write: report %+v, err %v; want Torn=3", report, err)
 	}
 	if err := next.Append(ctx, h.ID,
-		thread.MessageEntry{ID: "e_after1", Created: time.Now().UTC(), Message: weft.User("after the crash")},
-		thread.MessageEntry{ID: "e_after2", Created: time.Now().UTC(), Message: weft.Assistant("still here")},
+		thread.MessageEntry{ID: "e_after1", Created: time.Now().UTC(), Message: core.User("after the crash")},
+		thread.MessageEntry{ID: "e_after2", Created: time.Now().UTC(), Message: core.Assistant("still here")},
 	); err != nil {
 		t.Fatalf("Append after the crash: %v", err)
 	}

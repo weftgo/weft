@@ -4,6 +4,19 @@ This file is the shortest accurate description of the package for anyone
 (human or model) writing code with or inside weft. The godoc is the
 authority; this is the map.
 
+Two Go modules (ADR 0027). `github.com/weftgo/weft` is the framework:
+the root package is the loop, and every layer below — `openai`,
+`anthropic`, `google`, `mcp`, `mw`, `wefttest`, `thread`, `otel`,
+`obsdb`, `studio`, `runtime` — is a package of it, one version, one
+`go get`. `github.com/weftgo/weft/core` is the loop alone (plus
+`core/wefttest` and `core/mw`), the module to import when nothing else
+is wanted; its only dependency is the OTel API. The root package, `mw`,
+`wefttest` and `wefttest/conformance` are generated facades over
+`core` — every name an alias of or a wrapper around the same name there
+(`weft.Agent` is `core.Agent`) — so inside this repo the layers import
+`core`, examples and user code import `weft`, and `make generate`
+follows any change to core's exported API.
+
 ## Using weft (the whole API on one screen)
 
 ```go
@@ -40,7 +53,7 @@ lookup := weft.Tool("lookup_order", "Look up an order by ID.",
 //     weft.Subagent("research", "Research a topic in depth.", researcher, weft.Timeout(2*time.Minute))
 //     Child events arrive as weft.Nested{CallID, Event}; usage rolls into res.Usage.
 
-// 1d. MCP, both ways (module weft/mcp; alias the SDK as sdk):
+// 1d. MCP, both ways (package weft/mcp; alias the SDK as sdk):
 //     tools, _ := mcp.Tools(ctx, sess, mcp.Prefix("gh_"))   // a server's tools as weft tools (RawTool; schema verbatim)
 //     mcp.Serve(srv, agt, "Support agent.")                 // an agent (and its tools) as an MCP server
 
@@ -144,7 +157,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 // 5. Describe the fleet: weft.Manifest(agents...) → weft.json (generated,
 //    committed, golden-gated; never read back).
 
-// 6. Record runs (module weft/otel — the store is gone, ADR 0024 step 5; the
+// 6. Record runs (package weft/otel — the store is gone, ADR 0024 step 5; the
 //    pipeline is the recorder now, block 9 has the full destination menu):
 //    defer otel.Install()()  // local sink ./.weft/weft.db, content on, no network —
 //    // every event, delta, transcript record and span leaves as it happens
@@ -155,7 +168,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    // (inherited by subagents; thread sessions stamp weft.session.id,
 //    // weft.public_id, weft.turn — block 8).
 
-// 7. Serve the Inspector (module weft/studio; S4 on obsdb — UI, JSON API,
+// 7. Serve the Inspector (package weft/studio; S4 on obsdb — UI, JSON API,
 //    OTLP ingest, live, the devtools panel, the playground): setup A,
 //    embedded beside the app (§10.1's five lines):
 //    mux.Handle("/studio/", http.StripPrefix("/studio",
@@ -171,11 +184,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5); Token(tok) walls the
 //    //    /api tree (bearer or ?token=) — the UI shell and /panel.js are static,
 //    //    OTLP ingest (/v1/traces, /v1/logs) carries its own IngestToken.
-//    // Setup B, any language (module studio/cmd — the one place the clickhouse
+//    // Setup B, any language (package studio/cmd — the one place the clickhouse
 //    // driver lives): studio --db sqlite://path | clickhouse://user:pass@host:9000/db
 //    //    [--addr --token] serves UI + OTLP ingest on 127.0.0.1:7331.
 
-// 7a. The playground (module weft/runtime): your app dials Studio out and
+// 7a. The playground (package weft/runtime): your app dials Studio out and
 //     executes experiment commands as runs of the agents you register:
 //     defer runtime.Install(runtime.Studio(url, tok) /* or runtime.Local(srv) */,
 //         runtime.Agents(support), runtime.Models(map[string]weft.Model{"glm": m}),
@@ -200,9 +213,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // {id}/breakpoints, /api/runs/{id}/steer; the panel drawer and /playground
 //     // (the Studio UI) render them, gated on capabilities.
 
-// 8. Sessions (module weft/thread) — the map; godoc is the reference, docs/thread-operations.md the
+// 8. Sessions (package weft/thread) — the map; godoc is the reference, docs/thread-operations.md the
 //    operator's page; pre-1.0, API and format not frozen. st: jsonl.Open(dir) | sqlite.Open(path) (own
-//    module) | thread.Memory(); options thread.Salvage(), FsyncOnFlush(), NoLock(), OpenLogger(l); the live
+//    package) | thread.Memory(); options thread.Salvage(), FsyncOnFlush(), NoLock(), OpenLogger(l); the live
 //    tail is st.(thread.Watcher).Watch(ctx, id, afterEntryID). s, _ := thread.Create(ctx, st, agent, opts...)
 //    | thread.Open(ctx, st, id, agent); defer s.Close(ctx); thread.List(ctx, st, thread.Query{…}); thread.Delete.
 //    Turns: turn, _ := s.Send(ctx, weft.User("…")[, thread.As(p), thread.RunOptions(…)]) — prompt durable
@@ -226,7 +239,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    p.Forward, p.Recover(ctx, parent) after a restart, p.Close(ctx); pool.Receipts, Children, Descendants.
 //    Errors: retry ErrBusy, ErrLocked · reopen ErrStale, ErrClosed · terminal ErrCorrupt, ErrNewerFormat.
 
-// 9. Observability pipeline (module weft/otel; several destinations at once,
+// 9. Observability pipeline (package weft/otel; several destinations at once,
 //    each with its own content policy; defer on exit):
 //    defer otel.Install(
 //        otel.Local("weft.db"),                       // local sink: replay-grade, content on
@@ -248,8 +261,8 @@ once with `wefttest.Record`; ADR 0017) — the adapters' own parsing is proven
 by `wefttest/conformance` fixtures, not by replay; `make fuzz` runs the five
 fuzz targets (a new message part or event type adds a seed; a crasher becomes
 a committed seed).
-Provider adapters (`weft/openai`, `weft/anthropic`, `weft/google` — own
-modules, official vendor SDKs) pass the shared executable contract
+Provider adapters (`weft/openai`, `weft/anthropic`, `weft/google` —
+packages of the framework module over the official vendor SDKs) pass the shared executable contract
 `wefttest/conformance` (ADR 0013); run it live behind `-tags live`.
 Set `WEFT_MODEL_REQUESTS=deny` to make every first-party adapter refuse
 to call its provider (`weft.ModelRequestsAllowed()` reads it on every
@@ -324,7 +337,7 @@ ignore it.
     `StepRecord.SubagentUsage`, so a budget that must cover delegated
     work reads `Delegated`.
 
-### Thread rules (module `weft/thread`; its tests pin them)
+### Thread rules (package `weft/thread`; its tests pin them)
 
 - **T1. One writer per Session.** A `Session` takes its session's
   writer lease with its first write (`Create` and `Fork` are one) and
@@ -360,19 +373,19 @@ ignore it.
   (`Option`, `Event`, `Part`, `ModelEvent`), no config structs, no
   globals, `context.Context` first in every signature.
 - Prefer additive change. CI runs the apidiff gate (`make apidiff-all`,
-  `scripts/apidiff.sh`) over every workspace module, each against its
-  own last tag. The root, `thread`, `thread/sqlite` and the adapters
-  fail on incompatible changes; pre-1.0 a deliberate source-compatible
-  widening is acknowledged line-by-line in the module's
-  `.apidiff-allow`, and renames always fail. `weft/thread` is not
-  frozen yet: a deliberate breaking change there is acknowledged the
-  same way, its exact apidiff line in `thread/.apidiff-allow`, and gets
-  a line in the CHANGELOG's migration checklist saying what to write
-  instead. `obsdb`, `obsdb/clickhouse`, `otel`, `runtime` and `studio`
-  are pre-freeze: the gate reports their incompatible changes without
-  failing — such a change makes the module's next tag a minor bump with
-  a breaking CHANGELOG entry. A module added to `go.work` needs a
-  policy in `scripts/apidiff.sh` or the gate fails.
+  `scripts/apidiff.sh`) over both modules, each against its own last
+  tag. `core` fails on incompatible changes; pre-1.0 a deliberate
+  source-compatible widening is acknowledged line-by-line in
+  `core/.apidiff-allow`, and renames always fail. The framework module
+  holds the pre-freeze layers (`thread` is not frozen yet; `obsdb`,
+  `otel`, `runtime` and `studio` follow ADR 0024's programme), so the
+  gate reports its incompatible changes without failing — such a
+  change makes the next tag a minor bump with a breaking CHANGELOG
+  entry and, for `thread`, a line in the CHANGELOG's migration
+  checklist saying what to write instead. A module added to `go.work`
+  needs a policy in `scripts/apidiff.sh` or the gate fails.
+- After changing core's exported API, `make generate` regenerates the
+  facades; `TestFacadesAreComplete` (root) fails otherwise.
 - Docs: `README.md` (usage), `docs/adr/` (why), this file (map),
   `docs/thread-operations.md` (running `weft/thread` in production).
   Update the one that applies in the same change.

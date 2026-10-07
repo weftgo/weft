@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/pool"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // Every exported sentinel of the pool is reachable with errors.Is from
@@ -30,7 +30,7 @@ func TestSentinelsAreMatchable(t *testing.T) {
 	}{
 		{"ErrClosed/Submit after Close", pool.ErrClosed, func(t *testing.T) error {
 			p, s := sentinelClosedPool(t)
-			_, err := p.Submit(sentinelCtx(t), s, weft.New(wefttest.Script()), "go")
+			_, err := p.Submit(sentinelCtx(t), s, core.New(wefttest.Script()), "go")
 			return err
 		}},
 		{"ErrClosed/Decide after Close", pool.ErrClosed, func(t *testing.T) error {
@@ -58,18 +58,18 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		}},
 		{"ErrUnknownReceipt/Forward to an id the ledger does not hold", pool.ErrUnknownReceipt, func(t *testing.T) error {
 			p, s := sentinelPool(t)
-			_, err := p.Forward(sentinelCtx(t), s, "e_unknown", weft.User("hello"))
+			_, err := p.Forward(sentinelCtx(t), s, "e_unknown", core.User("hello"))
 			return err
 		}},
 		{"ErrUnknownReceipt/Forward through another session's receipt", pool.ErrUnknownReceipt, func(t *testing.T) error {
 			ctx := sentinelCtx(t)
 			p, s := sentinelPool(t)
 			r := sentinelSettled(t, p, s)
-			other, err := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+			other, err := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 			if err != nil {
 				t.Fatalf("Create: %v", err)
 			}
-			_, err = p.Forward(ctx, other, r.ID, weft.User("hello"))
+			_, err = p.Forward(ctx, other, r.ID, core.User("hello"))
 			return err
 		}},
 
@@ -86,7 +86,7 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		{"ErrNotRunning/Forward to a settled receipt", pool.ErrNotRunning, func(t *testing.T) error {
 			p, s := sentinelPool(t)
 			r := sentinelSettled(t, p, s)
-			_, err := p.Forward(sentinelCtx(t), s, r.ID, weft.User("late"))
+			_, err := p.Forward(sentinelCtx(t), s, r.ID, core.User("late"))
 			return err
 		}},
 
@@ -117,10 +117,10 @@ func TestSentinelsAreMatchable(t *testing.T) {
 
 		{"ErrDuplicateWrap/Wrap of another agent under a held name", pool.ErrDuplicateWrap, func(t *testing.T) error {
 			p := pool.New(1)
-			if _, err := p.Wrap("research", "", weft.New(wefttest.Script())); err != nil {
+			if _, err := p.Wrap("research", "", core.New(wefttest.Script())); err != nil {
 				t.Fatalf("the first Wrap: %v", err)
 			}
-			_, err := p.Wrap("research", "", weft.New(wefttest.Script()))
+			_, err := p.Wrap("research", "", core.New(wefttest.Script()))
 			return err
 		}},
 	}
@@ -167,7 +167,7 @@ func sentinelCtx(t *testing.T) context.Context {
 // row's cleanup closes the pool.
 func sentinelPool(t *testing.T) (*pool.Pool, *thread.Session) {
 	t.Helper()
-	s, err := thread.Create(sentinelCtx(t), thread.Memory(), weft.New(wefttest.Script()))
+	s, err := thread.Create(sentinelCtx(t), thread.Memory(), core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -198,7 +198,7 @@ func sentinelClosedPool(t *testing.T) (*pool.Pool, *thread.Session) {
 func sentinelSettled(t *testing.T, p *pool.Pool, s *thread.Session) pool.Receipt {
 	t.Helper()
 	ctx := sentinelCtx(t)
-	r, err := p.Submit(ctx, s, weft.New(wefttest.Script(wefttest.Say("done"))), "go")
+	r, err := p.Submit(ctx, s, core.New(wefttest.Script(wefttest.Say("done"))), "go")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -217,24 +217,24 @@ func sentinelParkedDelegation(t *testing.T) *thread.Session {
 	t.Helper()
 	ctx := sentinelCtx(t)
 	st := thread.Memory()
-	gated := weft.Tool("refund", "", func(_ context.Context, in struct {
+	gated := core.Tool("refund", "", func(_ context.Context, in struct {
 		OrderID string `json:"order_id"`
 	}) (string, error) {
 		return "refunded " + in.OrderID, nil
-	}, weft.RequireApproval())
+	}, core.RequireApproval())
 
 	p := pool.New(1)
-	child := weft.New(wefttest.Script(
+	child := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "call-refund", Args: `{"order_id":"42"}`}),
 	), gated)
-	parent := weft.New(wefttest.Script(
+	parent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "refunds", ID: "call-delegate", Args: `{"prompt":"refund order 42"}`}),
 	), p.MustWrap("refunds", "delegates the refund flow", child))
 	s, err := thread.Create(ctx, st, parent)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	turn, err := s.Send(ctx, weft.User("refund order 42"))
+	turn, err := s.Send(ctx, core.User("refund order 42"))
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -250,7 +250,7 @@ func sentinelParkedDelegation(t *testing.T) *thread.Session {
 	if err := s.Close(ctx); err != nil {
 		t.Fatalf("the session's Close: %v", err)
 	}
-	reopened, err := thread.Open(ctx, st, s.ID(), weft.New(wefttest.Script()))
+	reopened, err := thread.Open(ctx, st, s.ID(), core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -272,19 +272,19 @@ func sentinelSubmitInside(t *testing.T) (cycleErr, depthErr error) {
 			t.Errorf("the pool's Close: %v", err)
 		}
 	})
-	var agent *weft.Agent
-	other := weft.New(wefttest.Script(wefttest.Say("other")))
-	probe := weft.Tool("probe", "", func(ctx context.Context, _ struct{}) (string, error) {
+	var agent *core.Agent
+	other := core.New(wefttest.Script(wefttest.Say("other")))
+	probe := core.Tool("probe", "", func(ctx context.Context, _ struct{}) (string, error) {
 		s := thread.SessionFromContext(ctx)
 		_, cycleErr = p.Submit(ctx, s, agent, "again")
 		_, depthErr = p.Submit(ctx, s, other, "deeper")
 		return "probed", nil
 	})
-	agent = weft.New(wefttest.Script(
+	agent = core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "probe", ID: "c-probe"}),
 		wefttest.Say("done"),
 	), probe)
-	s, err := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	s, err := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}

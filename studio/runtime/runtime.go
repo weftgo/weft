@@ -243,7 +243,7 @@ type TranscriptEdit struct {
 }
 
 // Breakpoints is an `event: breakpoints` frame's data (§8.3): the
-// runtime passes the named tools as weft.ParkOn on every run it starts
+// runtime passes the named tools as core.ParkOn on every run it starts
 // from then on [D7] — it cannot alter agents it did not build. An
 // empty set clears.
 type Breakpoints struct {
@@ -251,7 +251,7 @@ type Breakpoints struct {
 }
 
 // SteerMessage is an `event: steer` frame's data (§8.4): a user
-// message delivered into a runtime-started run — weft.Steering on an
+// message delivered into a runtime-started run — core.Steering on an
 // ephemeral run, thread's Steer policy on a fork the runtime owns.
 // The app's own turns are never steerable from here (PQ7).
 type SteerMessage struct {
@@ -1196,7 +1196,7 @@ func orDefault(s, def string) string {
 
 // SetBreakpoints stores the runtime's breakpoint set and forwards it
 // (an `event: breakpoints` frame): the runtime passes the named tools
-// as weft.ParkOn on every run it starts from then on. It cannot alter
+// as core.ParkOn on every run it starts from then on. It cannot alter
 // agents it did not build — the app's own turns are not breakable
 // from here (PQ7), and meta says so.
 func (rs *RuntimeServer) SetBreakpoints(runtimeID string, tools []string) error {
@@ -1232,7 +1232,7 @@ func (rs *RuntimeServer) BreakpointsOf(runtimeID string) []string {
 }
 
 // Steer forwards one user message into a runtime-started run (an
-// `event: steer` frame): weft.Steering on an ephemeral run the runtime
+// `event: steer` frame): core.Steering on an ephemeral run the runtime
 // holds, thread's Steer policy on a fork it owns. Best effort — the
 // run may have ended between the read and the delivery.
 func (rs *RuntimeServer) Steer(runtimeID, runID, message string) error {

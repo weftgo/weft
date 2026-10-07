@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // MaxRetries(0) switches the SDK's transport retries off — the pairing
@@ -43,7 +43,7 @@ func TestMaxRetriesZeroDisablesSDKRetries(t *testing.T) {
 			}))
 			defer srv.Close()
 			opts := append([]Option{BaseURL(srv.URL), APIKey("test")}, tc.opts...)
-			_, err := weft.New(Model("m", opts...)).Generate(context.Background(), weft.Prompt("hi"))
+			_, err := core.New(Model("m", opts...)).Generate(context.Background(), core.Prompt("hi"))
 			if err == nil {
 				t.Fatal("a 500 produced no error")
 			}

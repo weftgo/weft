@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // eachBackend runs test against the two in-module storages, Memory and
@@ -44,7 +44,7 @@ func eachBackend(t *testing.T, test func(t *testing.T, st thread.Storage)) {
 func TestSessionCreateOpen(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		s, err := thread.Create(ctx, st, agent)
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -71,7 +71,7 @@ func TestSessionCreateOpen(t *testing.T) {
 
 func TestSessionCreateOpenNilArgs(t *testing.T) {
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script())
+	agent := core.New(wefttest.Script())
 	if _, err := thread.Create(ctx, nil, agent); err == nil {
 		t.Error("Create with nil storage: no error")
 	}
@@ -88,7 +88,7 @@ func TestSessionCreateOpenNilArgs(t *testing.T) {
 
 func TestSessionOpenUnknown(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
-		_, err := thread.Open(context.Background(), st, "s_missing", weft.New(wefttest.Script()))
+		_, err := thread.Open(context.Background(), st, "s_missing", core.New(wefttest.Script()))
 		if !errors.Is(err, thread.ErrNotFound) {
 			t.Errorf("Open unknown: err = %v, want ErrNotFound", err)
 		}
@@ -98,7 +98,7 @@ func TestSessionOpenUnknown(t *testing.T) {
 func TestSessionListDelete(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		a, _ := thread.Create(ctx, st, agent, thread.IDs(func() string { return "s_aaa" }))
 		b, _ := thread.Create(ctx, st, agent, thread.IDs(func() string { return "s_bbb" }))
 		page, err := thread.List(ctx, st, thread.Query{})
@@ -176,17 +176,17 @@ func appendChain(t *testing.T, ctx context.Context, st thread.Storage, s *thread
 func TestSessionContextIsPathMessages(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		s, err := thread.Create(ctx, st, agent)
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		note := weft.User("customer quote covers two items")
+		note := core.User("customer quote covers two items")
 		ids := appendChain(t, ctx, st, s,
-			thread.MessageEntry{Message: weft.User("hi")},
-			thread.MessageEntry{Message: weft.Message{
-				Role:    weft.RoleAssistant,
-				Content: []weft.Part{weft.ToolCallPart{ID: "c1", Name: "lookup", Args: json.RawMessage(`{}`)}},
+			thread.MessageEntry{Message: core.User("hi")},
+			thread.MessageEntry{Message: core.Message{
+				Role:    core.RoleAssistant,
+				Content: []core.Part{core.ToolCallPart{ID: "c1", Name: "lookup", Args: json.RawMessage(`{}`)}},
 			}},
 			thread.CustomEntry{Kind: "cart", Data: []byte(`{"items":2}`)},
 			thread.CustomMessageEntry{Kind: "note", Message: note},
@@ -199,10 +199,10 @@ func TestSessionContextIsPathMessages(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Open: %v", err)
 		}
-		want := []weft.Message{
-			weft.User("hi"),
-			{Role: weft.RoleAssistant, Content: []weft.Part{weft.ToolCallPart{ID: "c1", Name: "lookup", Args: json.RawMessage(`{}`)}}},
-			{Role: weft.RoleTool, Content: []weft.Part{weft.ToolResultPart{
+		want := []core.Message{
+			core.User("hi"),
+			{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c1", Name: "lookup", Args: json.RawMessage(`{}`)}}},
+			{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{
 				CallID:  "c1",
 				Name:    "lookup",
 				Content: "no result recorded: the call was interrupted",
@@ -219,11 +219,11 @@ func TestSessionContextIsPathMessages(t *testing.T) {
 func TestSessionContextHonorsLeafMove(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		s, _ := thread.Create(ctx, st, agent)
 		ids := appendChain(t, ctx, st, s,
-			thread.MessageEntry{Message: weft.User("first")},
-			thread.MessageEntry{Message: weft.Assistant("wrong turn")},
+			thread.MessageEntry{Message: core.User("first")},
+			thread.MessageEntry{Message: core.Assistant("wrong turn")},
 		)
 		// Navigate back to the first entry, then continue there: the
 		// abandoned assistant message must drop out of the context.
@@ -232,7 +232,7 @@ func TestSessionContextHonorsLeafMove(t *testing.T) {
 		}
 		if err := st.Append(ctx, s.ID(), thread.MessageEntry{
 			ID: thread.NewEntryID(), ParentID: ids[0], Created: time.Now().UTC(),
-			Message: weft.User("second"),
+			Message: core.User("second"),
 		}); err != nil {
 			t.Fatalf("Append second: %v", err)
 		}
@@ -253,11 +253,11 @@ func TestSessionContextHonorsLeafMove(t *testing.T) {
 func TestSessionEntriesLeafPath(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		s, _ := thread.Create(ctx, st, agent)
 		ids := appendChain(t, ctx, st, s,
-			thread.MessageEntry{Message: weft.User("one")},
-			thread.MessageEntry{Message: weft.Assistant("two")},
+			thread.MessageEntry{Message: core.User("one")},
+			thread.MessageEntry{Message: core.Assistant("two")},
 		)
 
 		open, err := thread.Open(ctx, st, s.ID(), agent)
@@ -312,9 +312,9 @@ func idOf(t *testing.T, e thread.Entry) string {
 func TestSessionLabelSetInfoCustom(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		s, _ := thread.Create(ctx, st, agent)
-		ids := appendChain(t, ctx, st, s, thread.MessageEntry{Message: weft.User("one")})
+		ids := appendChain(t, ctx, st, s, thread.MessageEntry{Message: core.User("one")})
 		abandon(t, st, s.ID())
 		open, err := thread.Open(ctx, st, s.ID(), agent)
 		if err != nil {
@@ -344,10 +344,10 @@ func TestSessionLabelSetInfoCustom(t *testing.T) {
 		if err := open.Custom(ctx, "bad", []byte(`{oops`)); err == nil {
 			t.Error("Custom non-JSON data: no error")
 		}
-		if err := open.CustomMessage(ctx, "note", weft.User("n")); err != nil {
+		if err := open.CustomMessage(ctx, "note", core.User("n")); err != nil {
 			t.Fatalf("CustomMessage: %v", err)
 		}
-		if err := open.CustomMessage(ctx, "", weft.User("n")); err == nil {
+		if err := open.CustomMessage(ctx, "", core.User("n")); err == nil {
 			t.Error("CustomMessage empty kind: no error")
 		}
 
@@ -380,7 +380,7 @@ func TestSessionLabelSetInfoCustom(t *testing.T) {
 func TestSessionMetaMergesHeader(t *testing.T) {
 	st := thread.Memory()
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script())
+	agent := core.New(wefttest.Script())
 	if err := st.Create(ctx, thread.Header{
 		ID: "s_meta", Created: time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC),
 		Meta: map[string]string{"app": "orders"},
@@ -403,15 +403,15 @@ func TestSessionMetaMergesHeader(t *testing.T) {
 func TestSessionUsage(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		s, _ := thread.Create(ctx, st, agent)
-		t1 := weft.Usage{InputTokens: 100, OutputTokens: 20}
-		t2 := weft.Usage{InputTokens: 50, CachedInputTokens: 30}
-		sum := weft.Usage{InputTokens: 9, OutputTokens: 90}
+		t1 := core.Usage{InputTokens: 100, OutputTokens: 20}
+		t2 := core.Usage{InputTokens: 50, CachedInputTokens: 30}
+		sum := core.Usage{InputTokens: 9, OutputTokens: 90}
 		appendChain(t, ctx, st, s,
-			thread.MessageEntry{Message: weft.User("one")},
+			thread.MessageEntry{Message: core.User("one")},
 			thread.TurnEntry{RunID: s.ID() + "-t1", Usage: t1},
-			thread.MessageEntry{Message: weft.User("two")},
+			thread.MessageEntry{Message: core.User("two")},
 			thread.TurnEntry{RunID: s.ID() + "-t2", Usage: t2},
 			thread.CompactionEntry{FirstKept: "e_x", TokensBefore: 150, SummarizerUsage: sum},
 		)
@@ -429,7 +429,7 @@ func TestSessionUsage(t *testing.T) {
 func TestSessionIDsOption(t *testing.T) {
 	st := thread.Memory()
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script())
+	agent := core.New(wefttest.Script())
 	next := 0
 	ids := []string{"s_fixed", "e_alpha", "e_beta"}
 	opt := thread.IDs(func() string { id := ids[next]; next++; return id })
@@ -475,7 +475,7 @@ func TestSessionFailedAppendNoDivergence(t *testing.T) {
 	ctx := context.Background()
 	inner := thread.Memory()
 	st := &failOnceStorage{Storage: inner, fail: true}
-	agent := weft.New(wefttest.Script())
+	agent := core.New(wefttest.Script())
 	s, err := thread.Create(ctx, inner, agent) // create through the inner storage: only Append fails
 	if err != nil {
 		t.Fatal(err)
@@ -494,7 +494,7 @@ func TestSessionFailedAppendNoDivergence(t *testing.T) {
 		t.Errorf("after successful Append, Entries = %d, want 1", n)
 	}
 	// The storage holds exactly the same tree the session does.
-	onDisk, _ := thread.Open(ctx, inner, s.ID(), weft.New(wefttest.Script()))
+	onDisk, _ := thread.Open(ctx, inner, s.ID(), core.New(wefttest.Script()))
 	if n := len(onDisk.Entries()); n != 1 {
 		t.Errorf("storage holds %d entries, want 1 (no divergence)", n)
 	}
@@ -502,7 +502,7 @@ func TestSessionFailedAppendNoDivergence(t *testing.T) {
 
 func openOn(t *testing.T, st thread.Storage, id string) *thread.Session {
 	t.Helper()
-	s, err := thread.Open(context.Background(), st, id, weft.New(wefttest.Script()))
+	s, err := thread.Open(context.Background(), st, id, core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -512,7 +512,7 @@ func openOn(t *testing.T, st thread.Storage, id string) *thread.Session {
 func TestSessionConcurrent(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		s, _ := thread.Create(ctx, st, agent)
 		const writers, each = 8, 25
 		var wg sync.WaitGroup
@@ -559,7 +559,7 @@ func TestSessionOpenReportsRepair(t *testing.T) {
 	ctx := context.Background()
 	var log bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&log, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	agent := weft.New(wefttest.Script(), weft.Logger(logger))
+	agent := core.New(wefttest.Script(), core.Logger(logger))
 	s, err := thread.Create(ctx, st, agent, thread.IDs(func() string { return "s_torn" }))
 	if err != nil {
 		t.Fatal(err)
@@ -581,10 +581,10 @@ func TestSessionOpenReportsRepair(t *testing.T) {
 func TestSessionOpenDanglingLeaf(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		s, _ := thread.Create(ctx, st, agent)
 		if err := st.Append(ctx, s.ID(),
-			thread.MessageEntry{ID: "e_m", Created: time.Now().UTC(), Message: weft.User("one")},
+			thread.MessageEntry{ID: "e_m", Created: time.Now().UTC(), Message: core.User("one")},
 			// A leaf entry pointing at an entry the file does not hold:
 			// the session's active position is undefined, and Open must
 			// say so instead of answering every read with nothing.

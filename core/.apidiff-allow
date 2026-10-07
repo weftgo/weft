@@ -1,0 +1,25 @@
+# Acknowledged incompatible API changes in the core module since its
+# last core/v* tag (before 0.9.0: the root's v* tag, ADR 0027), one
+# exact apidiff line per entry (scripts/apidiff.sh). Pre-1.0 only: each
+# entry is a deliberate, reviewed evolution. Reset this file when tagging.
+#
+# Reset at v0.3.5 (2026-09-27): the 0.3.4 → 0.3.5 cycle is additive —
+# OnRunEnd, nothing else; no entries; the gate diffs against v0.3.5.
+# (Re-reset at v0.5.0, 2026-09-29: the 0.5.0 cycle was additive.)
+#
+# Reset at v0.6.0 (2026-10-01): the cycle's three D9 widenings — the
+# dual options' return types, Option → superset interface, source-
+# compatible — shipped in this tag; no entries remain; the gate diffs
+# against v0.6.0.
+#
+# Reset at v0.7.0 (2026-10-01): the cycle is additive — ReplayPolicy,
+# Replay, ReplaySafe, ReplayNever, ToolDef.ReplayPolicy; no entries;
+# the gate diffs against v0.7.0.
+
+#
+# Reset at v0.8.0 (2026-10-07): the cycle is additive — ParkAllExcept;
+# no entries; the gate diffs against v0.8.0.
+#
+# Reset at v0.9.0 (2026-10-07): the loop moved from the root package
+# to this module (ADR 0027), same API; the gate diffs against
+# core/v0.9.0 once it exists.

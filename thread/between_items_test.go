@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // heldBetweenItems builds a session whose runner, after its first
@@ -46,8 +46,8 @@ func heldBetweenItems(t *testing.T) (s *thread.Session, ids func() []string, ent
 		}
 		return thread.Cancel(), nil
 	})
-	agent := weft.New(wefttest.Script(
-		wefttest.Say(strings.Repeat("first ", 1000)).WithUsage(weft.Usage{InputTokens: 95_000, OutputTokens: 5}),
+	agent := core.New(wefttest.Script(
+		wefttest.Say(strings.Repeat("first ", 1000)).WithUsage(core.Usage{InputTokens: 95_000, OutputTokens: 5}),
 		wefttest.Say("second"),
 	))
 	s, err := thread.Create(ctx, thread.Memory(), agent, mint, hook,
@@ -85,7 +85,7 @@ func TestSendBetweenItems(t *testing.T) {
 	ctx := context.Background()
 	t.Run("accepted with a receipt", func(t *testing.T) {
 		s, ids, entered, release := heldBetweenItems(t)
-		t1, _ := s.Send(ctx, weft.User("one"))
+		t1, _ := s.Send(ctx, core.User("one"))
 		if _, err := t1.Wait(); err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +95,7 @@ func TestSendBetweenItems(t *testing.T) {
 			t.Fatal("the post-turn trigger never ran: the runner is not held between items")
 		}
 		before := len(ids())
-		t2, err := s.Send(ctx, weft.User("two"))
+		t2, err := s.Send(ctx, core.User("two"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -112,7 +112,7 @@ func TestSendBetweenItems(t *testing.T) {
 	})
 	t.Run("WaitIdle closes the window", func(t *testing.T) {
 		s, ids, entered, release := heldBetweenItems(t)
-		t1, _ := s.Send(ctx, weft.User("one"))
+		t1, _ := s.Send(ctx, core.User("one"))
 		if _, err := t1.Wait(); err != nil {
 			t.Fatal(err)
 		}
@@ -125,7 +125,7 @@ func TestSendBetweenItems(t *testing.T) {
 			t.Fatal(err)
 		}
 		before := len(ids())
-		t2, err := s.Send(ctx, weft.User("two"))
+		t2, err := s.Send(ctx, core.User("two"))
 		if err != nil {
 			t.Fatal(err)
 		}

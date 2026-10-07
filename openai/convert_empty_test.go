@@ -3,7 +3,7 @@ package openai
 import (
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // The empty-content rules of ADR 0013's 2026-09-14 amendment, ported
@@ -16,12 +16,12 @@ import (
 // emitted as `{"role":"assistant"}`.
 func TestEmptyAssistantMessageSkipped(t *testing.T) {
 	m := Model("m").(*model)
-	p, err := m.params(weft.ModelRequest{Messages: []weft.Message{
-		weft.User("hi"),
-		{Role: weft.RoleAssistant, Content: []weft.Part{
-			weft.ReasoningPart{Text: "hmm", Signature: "sig"}, // dropped: no reasoning input
+	p, err := m.params(core.ModelRequest{Messages: []core.Message{
+		core.User("hi"),
+		{Role: core.RoleAssistant, Content: []core.Part{
+			core.ReasoningPart{Text: "hmm", Signature: "sig"}, // dropped: no reasoning input
 		}},
-		weft.User("again"),
+		core.User("again"),
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -46,10 +46,10 @@ func TestEmptyAssistantMessageSkipped(t *testing.T) {
 // null.
 func TestAssistantEmptyTextAndNilArgsNeverReachTheWire(t *testing.T) {
 	m := Model("m").(*model)
-	p, err := m.params(weft.ModelRequest{Messages: []weft.Message{
-		{Role: weft.RoleAssistant, Content: []weft.Part{
-			weft.TextPart{Text: ""},
-			weft.ToolCallPart{ID: "c1", Name: "ping"},
+	p, err := m.params(core.ModelRequest{Messages: []core.Message{
+		{Role: core.RoleAssistant, Content: []core.Part{
+			core.TextPart{Text: ""},
+			core.ToolCallPart{ID: "c1", Name: "ping"},
 		}},
 	}})
 	if err != nil {
@@ -74,8 +74,8 @@ func TestAssistantEmptyTextAndNilArgsNeverReachTheWire(t *testing.T) {
 // — an empty content array is API-rejected.
 func TestEmptyUserMessageKeepsPlaceholder(t *testing.T) {
 	m := Model("m").(*model)
-	p, err := m.params(weft.ModelRequest{Messages: []weft.Message{
-		{Role: weft.RoleUser, Content: []weft.Part{weft.TextPart{Text: ""}}},
+	p, err := m.params(core.ModelRequest{Messages: []core.Message{
+		{Role: core.RoleUser, Content: []core.Part{core.TextPart{Text: ""}}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -91,8 +91,8 @@ func TestEmptyUserMessageKeepsPlaceholder(t *testing.T) {
 // adapter's guard, ported).
 func TestSequentialHintWithoutToolsIsNotSent(t *testing.T) {
 	m := Model("m").(*model)
-	p, err := m.params(weft.ModelRequest{
-		Messages:        []weft.Message{weft.User("hi")},
+	p, err := m.params(core.ModelRequest{
+		Messages:        []core.Message{core.User("hi")},
 		SequentialTools: true,
 	})
 	if err != nil {
@@ -101,9 +101,9 @@ func TestSequentialHintWithoutToolsIsNotSent(t *testing.T) {
 	if p.ParallelToolCalls.Valid() {
 		t.Errorf("parallel_tool_calls = %v, want unset with an empty tool catalog", p.ParallelToolCalls.Value)
 	}
-	p, err = m.params(weft.ModelRequest{
-		Messages:        []weft.Message{weft.User("hi")},
-		Tools:           []*weft.ToolDef{testTool()},
+	p, err = m.params(core.ModelRequest{
+		Messages:        []core.Message{core.User("hi")},
+		Tools:           []*core.ToolDef{testTool()},
 		SequentialTools: true,
 	})
 	if err != nil {

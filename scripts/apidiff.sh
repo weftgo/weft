@@ -6,27 +6,24 @@
 #
 #   enforce  an incompatible change fails the build unless its exact
 #            apidiff line is listed in the module's .apidiff-allow:
-#            the root module (newest v* tag), thread and thread/sqlite
-#            (plan §10; root and thread stay additive and
-#            source-compatible), and the adapters (anthropic, google,
-#            openai, mcp).
-#   report   incompatible changes are printed, never fatal: obsdb,
-#            obsdb/clickhouse, otel, runtime and studio are pre-freeze
-#            (ADR 0024's programme allows breaking them). The report
-#            is what the release reads: an incompatible line means the
-#            module's next tag is a minor bump with a "breaking"
-#            CHANGELOG entry, not a patch. Move a module to enforce
-#            when its API freezes.
-#   skip     nothing to gate: studio/cmd is a command (package main,
-#            no importable API) and examples/* are never tagged.
+#            the core module (newest core/v* tag; the loop stays
+#            additive and source-compatible).
+#   report   incompatible changes are printed, never fatal: the root
+#            module (newest v* tag) holds the pre-freeze layers —
+#            thread, obsdb, otel, runtime, studio (ADR 0024's programme
+#            allows breaking them) — beside the adapters and the
+#            generated facades. The report is what the release reads:
+#            an incompatible line means the next tag is a minor bump
+#            with a "breaking" CHANGELOG entry, not a patch. Move the
+#            root to enforce when its layers freeze.
+#   skip     nothing to gate: examples/* are never tagged.
 #
 # (The store module's gate died with the module, step 5 of ADR 0024.)
 #
 # Usage: scripts/apidiff.sh [base-ref] [module-dir|all]
-#   module-dir "." (the default) is the root module; "thread", "otel",
-#   "obsdb/clickhouse", … name a sub-module by its directory; "all"
-#   runs every module go.work lists, prints a summary, and fails if
-#   any gate failed. base-ref defaults to the module's newest matching
+#   module-dir "." (the default) is the root (framework) module; "core"
+#   is the loop module; "all" runs every module go.work lists, prints
+#   a summary, and fails if any gate failed. base-ref defaults to the module's newest matching
 #   tag reachable from HEAD; an explicit empty string means the same.
 #   A module with no matching tag yet skips with a note — nothing to
 #   diff against, nothing vouched for; the gate starts at the release
@@ -35,8 +32,8 @@
 # Pre-1.0 evolutions that are source-compatible but flagged by apidiff
 # (widening a return type to a superset interface, adding a trailing
 # variadic) can be acknowledged by listing the exact apidiff line in
-# the module's .apidiff-allow (root: ./.apidiff-allow; a sub-module:
-# <dir>/.apidiff-allow). Anything not listed fails an enforced module.
+# the module's .apidiff-allow (core/.apidiff-allow; the root would be
+# ./.apidiff-allow). Anything not listed fails an enforced module.
 # Post-1.0 the allowlist is emptied and stays empty.
 #
 # The gate fails closed: a tree that does not compile, or an apidiff
@@ -48,9 +45,9 @@
 # How a module is loaded. Each side (the tag's tree, the working tree)
 # is built with GOWORK=off first: its requirements then resolve from
 # the module graph (the repo is public; the proxy serves the tags), so
-# the gate does not lean on go.work. A sub-module on main may
-# legitimately not build that way between releases — it uses a sibling
-# change that is not tagged yet (the two-phase release, ADR 0005), or
+# the gate does not lean on go.work. The root on main may
+# legitimately not build that way between releases — it uses a core
+# change that is not tagged yet (the two-phase release, ADR 0027), or
 # `go work sync` moved a requirement its go.sum has not followed. The
 # gate then says so and loads that side through the workspace instead;
 # a side that compiles in neither mode fails the gate. The note is the
@@ -59,14 +56,8 @@
 # APIDIFF_STRICT=1 turns the note into a failure — the release-time
 # check that every module builds from published tags alone.
 #
-# thread/sqlite is the exception that loads through the workspace
-# first, on both sides (the base through the tag commit's own go.work,
-# the head through the working tree's), with no note: it is developed
-# against the in-tree thread module and released second (thread is
-# tagged first, then sqlite's go.mod moves to that tag), so between two
-# thread tags it only compiles against the thread beside it — which is
-# how CI builds and tests it too. APIDIFF_STRICT=1 still holds it to
-# its published requirements.
+# (Before 0.9.0 thread/sqlite loaded through the workspace first, on
+# both sides; it is a package of the root now.)
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -80,11 +71,9 @@ mod="${2:-.}"
 policy_of() {
   load=graph
   case "$1" in
-    thread/sqlite) tagpat="$1/v*"; policy=enforce; load=workspace ;;
-    .) tagpat='v*'; policy=enforce ;;
-    thread|thread/sqlite|anthropic|google|openai|mcp) tagpat="$1/v*"; policy=enforce ;;
-    obsdb|obsdb/clickhouse|otel|runtime|studio) tagpat="$1/v*"; policy=report ;;
-    studio/cmd|examples/*) tagpat=''; policy=skip ;;
+    core) tagpat='core/v*'; policy=enforce ;;
+    .) tagpat='v*'; policy=report ;;
+    examples/*) tagpat=''; policy=skip ;;
     *) return 1 ;;
   esac
 }
@@ -141,7 +130,8 @@ fi
 # answer in $gowork: "off" (the module graph alone) or "" (the
 # workspace found from <dir>). Returns 1 when the side compiles in
 # neither mode — or, under APIDIFF_STRICT=1, when it needs the
-# workspace.
+# workspace. core never needs the workspace: its requirements are
+# published; the root may, between a core change and its tag.
 load_mode() {
   : > "$tmp/build-ws.err"
   if [ "$load" = workspace ] && [ "${APIDIFF_STRICT:-}" != 1 ]; then
@@ -156,7 +146,7 @@ load_mode() {
     gowork=off
     return 0
   fi
-  if [ "${APIDIFF_STRICT:-}" != 1 ] && [ "$mod" != . ] && (cd "$1" && GOWORK='' go build ./...) 2>"$tmp/build-ws.err"; then
+  if [ "${APIDIFF_STRICT:-}" != 1 ] && [ "$mod" != core ] && (cd "$1" && GOWORK='' go build ./...) 2>"$tmp/build-ws.err"; then
     echo "apidiff: note: $2 does not build from its published requirements (GOWORK=off):"
     sed 's/^/    /' "$tmp/build.err" | head -5
     echo "apidiff: note: loading it through the workspace instead — tag its dependencies (and tidy its go.mod/go.sum against them) before tagging $mod"

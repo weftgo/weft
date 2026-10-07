@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 func TestResolveDialect(t *testing.T) {
@@ -45,17 +45,17 @@ func TestThinkingParamsEffort(t *testing.T) {
 	t.Setenv("OPENAI_BASE_URL", "")
 	m := Model("m").(*model)
 	cases := []struct {
-		run  weft.ThinkingConfig
+		run  core.ThinkingConfig
 		want string
 	}{
-		{weft.ThinkingConfig{Level: weft.ThinkHigh}, "high"},
-		{weft.ThinkingConfig{Level: weft.ThinkMedium}, "medium"},
-		{weft.ThinkingConfig{Level: weft.ThinkLow}, "low"},
-		{weft.ThinkingConfig{Level: weft.ThinkOff}, ""}, // no off switch; documented gap
-		{weft.ThinkingConfig{}, ""},
+		{core.ThinkingConfig{Level: core.ThinkHigh}, "high"},
+		{core.ThinkingConfig{Level: core.ThinkMedium}, "medium"},
+		{core.ThinkingConfig{Level: core.ThinkLow}, "low"},
+		{core.ThinkingConfig{Level: core.ThinkOff}, ""}, // no off switch; documented gap
+		{core.ThinkingConfig{}, ""},
 	}
 	for _, tc := range cases {
-		p, err := m.params(weft.ModelRequest{Thinking: tc.run})
+		p, err := m.params(core.ModelRequest{Thinking: tc.run})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -69,14 +69,14 @@ func TestThinkingParamsEffort(t *testing.T) {
 // enables, unset sends nothing.
 func TestThinkingObj(t *testing.T) {
 	cases := []struct {
-		run  weft.ThinkingConfig
+		run  core.ThinkingConfig
 		want map[string]any
 	}{
-		{weft.ThinkingConfig{Level: weft.ThinkOff}, map[string]any{"type": "disabled"}},
-		{weft.ThinkingConfig{Level: weft.ThinkLow}, map[string]any{"type": "enabled"}},
-		{weft.ThinkingConfig{Level: weft.ThinkMedium}, map[string]any{"type": "enabled"}},
-		{weft.ThinkingConfig{Level: weft.ThinkHigh}, map[string]any{"type": "enabled"}},
-		{weft.ThinkingConfig{}, nil},
+		{core.ThinkingConfig{Level: core.ThinkOff}, map[string]any{"type": "disabled"}},
+		{core.ThinkingConfig{Level: core.ThinkLow}, map[string]any{"type": "enabled"}},
+		{core.ThinkingConfig{Level: core.ThinkMedium}, map[string]any{"type": "enabled"}},
+		{core.ThinkingConfig{Level: core.ThinkHigh}, map[string]any{"type": "enabled"}},
+		{core.ThinkingConfig{}, nil},
 	}
 	for _, tc := range cases {
 		if got := thinkingObj(tc.run); !reflect.DeepEqual(got, tc.want) {
@@ -137,9 +137,9 @@ func TestThinkingObjectInjection(t *testing.T) {
 	srv, got := recordingServer(t, oneWordSSE)
 	c := testClient(srv)
 	m := Model("m", Client(&c), Dialect(DialectObject))
-	res, err := weft.New(m).Generate(context.Background(),
-		weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkOff}),
-		weft.Prompt("Reply with one word: lime"),
+	res, err := core.New(m).Generate(context.Background(),
+		core.Thinking(core.ThinkingConfig{Level: core.ThinkOff}),
+		core.Prompt("Reply with one word: lime"),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -163,9 +163,9 @@ func TestThinkingNoObjectForEffortDialect(t *testing.T) {
 	srv, got := recordingServer(t, oneWordSSE)
 	c := testClient(srv)
 	m := Model("m", Client(&c)) // no base URL → the effort dialect (the api.openai.com default)
-	if _, err := weft.New(m).Generate(context.Background(),
-		weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkOff}),
-		weft.Prompt("Reply with one word: lime"),
+	if _, err := core.New(m).Generate(context.Background(),
+		core.Thinking(core.ThinkingConfig{Level: core.ThinkOff}),
+		core.Prompt("Reply with one word: lime"),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestThinkingUnsetSendsNothing(t *testing.T) {
 	srv, got := recordingServer(t, oneWordSSE)
 	c := testClient(srv)
 	m := Model("m", Client(&c), Dialect(DialectObject))
-	if _, err := weft.New(m).Generate(context.Background(), weft.Prompt("hi")); err != nil {
+	if _, err := core.New(m).Generate(context.Background(), core.Prompt("hi")); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := got.last()["thinking"]; ok {

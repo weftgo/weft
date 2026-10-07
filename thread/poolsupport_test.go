@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // The Delegated bucket sums settled pool receipts only (ADR 0022 D3):
@@ -16,7 +16,7 @@ import (
 func TestUsageDelegatedBucket(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		s, err := thread.Create(ctx, st, weft.New(wefttest.Script()))
+		s, err := thread.Create(ctx, st, core.New(wefttest.Script()))
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
@@ -37,7 +37,7 @@ func TestUsageDelegatedBucket(t *testing.T) {
 		if _, err := s.AppendPoolReceipt(ctx, thread.PoolReceiptEntry{
 			Receipt: accept.ID, Status: thread.PoolDone, Child: "s_child",
 			Stop:  "the answer",
-			Usage: weft.Usage{InputTokens: 10, OutputTokens: 5},
+			Usage: core.Usage{InputTokens: 10, OutputTokens: 5},
 		}); err != nil {
 			t.Fatalf("settlement: %v", err)
 		}
@@ -71,11 +71,11 @@ func TestSessionFromContext(t *testing.T) {
 			t.Errorf("a bare context has a session")
 		}
 		var inside, outside *thread.Session
-		tool := weft.Tool("probe", "", func(ctx context.Context, _ struct{}) (string, error) {
+		tool := core.Tool("probe", "", func(ctx context.Context, _ struct{}) (string, error) {
 			inside = thread.SessionFromContext(ctx)
 			return "probed", nil
 		})
-		agent := weft.New(wefttest.Script(
+		agent := core.New(wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: "probe", Args: `{}`}),
 			wefttest.Say("done"),
 		), tool)
@@ -90,7 +90,7 @@ func TestSessionFromContext(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		turn, err := s.Send(ctx, weft.User("probe"))
+		turn, err := s.Send(ctx, core.User("probe"))
 		if err != nil {
 			t.Fatalf("Send: %v", err)
 		}
@@ -112,7 +112,7 @@ func TestSessionFromContext(t *testing.T) {
 func TestWithLineage(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		s, err := thread.Create(ctx, st, agent, thread.WithLineage("s_parent", "call_1"))
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -146,7 +146,7 @@ func TestWithLineage(t *testing.T) {
 func TestAppendApprovalRequests(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		s, err := thread.Create(ctx, st, weft.New(wefttest.Script()))
+		s, err := thread.Create(ctx, st, core.New(wefttest.Script()))
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
@@ -179,7 +179,7 @@ func TestAppendApprovalRequests(t *testing.T) {
 func TestWithMeta(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		s, err := thread.Create(ctx, st, agent, thread.WithMeta(map[string]string{"app": "billing"}))
 		if err != nil {
 			t.Fatalf("Create: %v", err)

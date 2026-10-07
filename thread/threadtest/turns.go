@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -27,20 +27,20 @@ func RunTurns(t *testing.T, open func(t *testing.T) thread.Storage) {
 // scripted plays fixed model turns: each a list of events. It records
 // how many calls it served.
 type scripted struct {
-	turns [][]weft.ModelEvent
+	turns [][]core.ModelEvent
 	calls atomic.Int32
 }
 
-func (m *scripted) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "threadtest", Name: "scripted"}
+func (m *scripted) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "threadtest", Name: "scripted"}
 }
 
-func (m *scripted) Stream(_ context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *scripted) Stream(_ context.Context, _ core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	n := int(m.calls.Add(1)) - 1
-	return func(yield func(weft.ModelEvent, error) bool) {
+	return func(yield func(core.ModelEvent, error) bool) {
 		if n >= len(m.turns) {
-			yield(weft.ModelTextDelta{Text: "(script exhausted)"}, nil)
-			yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+			yield(core.ModelTextDelta{Text: "(script exhausted)"}, nil)
+			yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
 			return
 		}
 		for _, ev := range m.turns[n] {
@@ -51,10 +51,10 @@ func (m *scripted) Stream(_ context.Context, _ weft.ModelRequest) iter.Seq2[weft
 	}
 }
 
-func say(text string) []weft.ModelEvent {
-	return []weft.ModelEvent{
-		weft.ModelTextDelta{Text: text},
-		weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+func say(text string) []core.ModelEvent {
+	return []core.ModelEvent{
+		core.ModelTextDelta{Text: text},
+		core.ModelFinish{Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 	}
 }
 
@@ -68,25 +68,25 @@ func mixedBatchResume(open func(t *testing.T) thread.Storage) func(*testing.T) {
 	return func(t *testing.T) {
 		ctx := context.Background()
 		st := open(t)
-		model := &scripted{turns: [][]weft.ModelEvent{
+		model := &scripted{turns: [][]core.ModelEvent{
 			{
-				weft.ModelToolCall{ID: "call_s", Name: "safe", Args: []byte(`{}`)},
-				weft.ModelToolCall{ID: "call_d", Name: "dangerous", Args: []byte(`{}`)},
-				weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+				core.ModelToolCall{ID: "call_s", Name: "safe", Args: []byte(`{}`)},
+				core.ModelToolCall{ID: "call_d", Name: "dangerous", Args: []byte(`{}`)},
+				core.ModelFinish{Reason: core.StopToolCalls, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 			},
 			say("both done"),
 			say("next reply"),
 		}}
-		agent := weft.New(model,
-			weft.Tool("safe", "runs at once", func(context.Context, struct{}) (string, error) { return "safe result", nil }),
-			weft.Tool("dangerous", "needs a human", func(context.Context, struct{}) (string, error) { return "dangerous result", nil },
-				weft.RequireApproval()),
+		agent := core.New(model,
+			core.Tool("safe", "runs at once", func(context.Context, struct{}) (string, error) { return "safe result", nil }),
+			core.Tool("dangerous", "needs a human", func(context.Context, struct{}) (string, error) { return "dangerous result", nil },
+				core.RequireApproval()),
 		)
 		s, err := thread.Create(ctx, st, agent)
 		if err != nil {
 			t.Fatal(err)
 		}
-		t1, err := s.Send(ctx, weft.User("do both"))
+		t1, err := s.Send(ctx, core.User("do both"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -109,7 +109,7 @@ func mixedBatchResume(open func(t *testing.T) thread.Storage) func(*testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		next, err := s2.Send(ctx, weft.User("and then"))
+		next, err := s2.Send(ctx, core.User("and then"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -136,7 +136,7 @@ func mixedBatchResume(open func(t *testing.T) thread.Storage) func(*testing.T) {
 		}
 		tools := 0
 		for _, m := range got {
-			if m.Role == weft.RoleTool {
+			if m.Role == core.RoleTool {
 				tools++
 				if len(m.Content) != 2 {
 					t.Errorf("the tool message carries %d results, want both", len(m.Content))
@@ -157,8 +157,8 @@ func queuedSendRestored(open func(t *testing.T) thread.Storage) func(*testing.T)
 	return func(t *testing.T) {
 		ctx := context.Background()
 		st := open(t)
-		model := &scripted{turns: [][]weft.ModelEvent{say("picked up")}}
-		agent := weft.New(model)
+		model := &scripted{turns: [][]core.ModelEvent{say("picked up")}}
+		agent := core.New(model)
 		s, err := thread.Create(ctx, st, agent)
 		if err != nil {
 			t.Fatal(err)
@@ -166,7 +166,7 @@ func queuedSendRestored(open func(t *testing.T) thread.Storage) func(*testing.T)
 		if err := s.Close(ctx); err != nil {
 			t.Fatal(err)
 		}
-		msg := weft.User("the send a stopped writer left queued")
+		msg := core.User("the send a stopped writer left queued")
 		prompt := thread.NewEntryID()
 		if err := st.Append(ctx, s.ID(), thread.ReceiptEntry{
 			ID: thread.NewEntryID(), Created: time.Now().UTC(),
@@ -207,7 +207,7 @@ func queuedSendRestored(open func(t *testing.T) thread.Storage) func(*testing.T)
 		}
 		// The next run id continues past the restored one.
 		model.turns = append(model.turns, say("and again"))
-		after, err := s3.Send(ctx, weft.User("again"))
+		after, err := s3.Send(ctx, core.User("again"))
 		if err != nil {
 			t.Fatal(err)
 		}

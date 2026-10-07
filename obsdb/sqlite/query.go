@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
 )
 
@@ -229,7 +229,7 @@ func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
 		Started:  time.Unix(0, r.Started).UTC(),
 		LastSeen: time.Unix(0, r.LastSeen).UTC(),
 		Err:      r.Err, Steps: r.Steps, Pending: r.Pending, StopReason: r.StopReason,
-		Usage: weft.Usage{
+		Usage: core.Usage{
 			InputTokens: r.InTok, OutputTokens: r.OutTok,
 			CachedInputTokens: r.CachedTok, CacheWriteTokens: r.CacheWrite,
 			ReasoningTokens: r.ReasonTok,
@@ -622,7 +622,7 @@ func (d *DB) sessionRows(ctx context.Context, cutoff int64, where string, wargs 
 		row.FirstSeen = time.Unix(0, first).UTC()
 		row.LastSeen = time.Unix(0, last).UTC()
 		row.Status = obsdb.Status(status)
-		row.Usage = weft.Usage{
+		row.Usage = core.Usage{
 			InputTokens: inTok.Int64, OutputTokens: outTok.Int64,
 			CachedInputTokens: cached.Int64, CacheWriteTokens: cacheW.Int64,
 			ReasoningTokens: reason.Int64,

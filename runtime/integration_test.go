@@ -19,13 +19,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/runtime"
 	"github.com/weftgo/weft/studio"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
-	"github.com/weftgo/weft/wefttest"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
@@ -105,7 +105,7 @@ type e2e struct {
 	srv   *studio.Server
 	p     *otel.Pipeline
 	rec   *spanRecorder
-	agent *weft.Agent
+	agent *core.Agent
 	alt   *wefttest.Model
 	store thread.Storage
 	dir   string
@@ -129,26 +129,26 @@ func newE2E(t *testing.T, appTurns ...wefttest.Turn) *e2e {
 	}
 	t.Cleanup(func() { _ = p.Shutdown(ctx) })
 
-	lookup := weft.Tool("lookup_order", "Look up an order by ID.",
+	lookup := core.Tool("lookup_order", "Look up an order by ID.",
 		func(ctx context.Context, in struct {
 			OrderID string `json:"order_id"`
 		}) (string, error) {
 			return `{"status":"shipped"}`, nil
 		})
-	refund := weft.Tool("refund", "Refund an order.",
+	refund := core.Tool("refund", "Refund an order.",
 		func(ctx context.Context, in struct {
 			OrderID string `json:"order_id"`
 		}) (string, error) {
 			return "refunded", nil
 		})
-	agent := weft.New(
+	agent := core.New(
 		wefttest.Script(appTurns...),
-		weft.Name("acme-support"),
-		weft.Instructions("You are Acme's support agent."),
-		weft.MaxSteps(10),
-		weft.Parallelism(4),
-		weft.TracerProvider(p.TracerProvider()),
-		weft.LoggerProvider(p.LoggerProvider()), // the messages records — replay-grade, D1
+		core.Name("acme-support"),
+		core.Instructions("You are Acme's support agent."),
+		core.MaxSteps(10),
+		core.Parallelism(4),
+		core.TracerProvider(p.TracerProvider()),
+		core.LoggerProvider(p.LoggerProvider()), // the messages records — replay-grade, D1
 		lookup, refund,
 	)
 	store, err := jsonl.Open(filepath.Join(dir, "threads"))
@@ -186,7 +186,7 @@ func (e *e2e) appTurn(t *testing.T, prompt string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := sess.Send(context.Background(), weft.User(prompt))
+	turn, err := sess.Send(context.Background(), core.User(prompt))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestPlaygroundEndToEnd(t *testing.T) {
 	shutdown := runtime.Install(
 		runtime.Studio(e.ts.URL, ""),
 		runtime.Agents(e.agent),
-		runtime.Models(map[string]weft.Model{"glm-5.3-flash": e.alt}),
+		runtime.Models(map[string]core.Model{"glm-5.3-flash": e.alt}),
 		runtime.Limits(runtime.Budget{MaxRunsPerExperiment: 1}),
 		runtime.AllowSideEffects("lookup_order"),
 		runtime.Threads(e.store),
@@ -402,7 +402,7 @@ func TestPlaygroundEndToEnd(t *testing.T) {
 	}
 
 	// The app's own runs are untouched by the breach (§6 rule 6).
-	res, err := e.agent.Generate(ctx, weft.Prompt("and the tracking link?"))
+	res, err := e.agent.Generate(ctx, core.Prompt("and the tracking link?"))
 	if err != nil {
 		t.Fatalf("the app's own run failed after a breach: %v", err)
 	}
@@ -434,14 +434,14 @@ func TestPlaygroundParkOnSpan(t *testing.T) {
 	// Consume the app's own turn (no session: this run is not the
 	// experiment's source), so the experiment's run starts at the
 	// refund call.
-	if _, err := e.agent.Generate(ctx, weft.Prompt("where is my order #4411?")); err != nil {
+	if _, err := e.agent.Generate(ctx, core.Prompt("where is my order #4411?")); err != nil {
 		t.Fatal(err)
 	}
 
 	shutdown := runtime.Install(
 		runtime.Studio(e.ts.URL, ""),
 		runtime.Agents(e.agent),
-		runtime.Models(map[string]weft.Model{"glm-5.3-flash": e.alt}),
+		runtime.Models(map[string]core.Model{"glm-5.3-flash": e.alt}),
 		runtime.AllowSideEffects("lookup_order"),
 		runtime.Enabled(true),
 	)
@@ -520,7 +520,7 @@ func TestPlaygroundApprovalVerbs(t *testing.T) {
 	)
 	// A second, uninstrumented refund tool so the handler's "ran for
 	// real" is observable without side effects.
-	refund := weft.Tool("refund", "Refund an order.",
+	refund := core.Tool("refund", "Refund an order.",
 		func(ctx context.Context, in struct {
 			OrderID string `json:"order_id"`
 		}) (string, error) {
@@ -539,8 +539,8 @@ func TestPlaygroundApprovalVerbs(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"4411"}`, ID: "call_refund"}),
 		wefttest.Say("approved then."),
 	)
-	e.agent = weft.New(script, weft.Name("acme-support"), weft.TracerProvider(e.p.TracerProvider()),
-		weft.LoggerProvider(e.p.LoggerProvider()), refund) // the messages records: from_step 1 keeps step 0 of them
+	e.agent = core.New(script, core.Name("acme-support"), core.TracerProvider(e.p.TracerProvider()),
+		core.LoggerProvider(e.p.LoggerProvider()), refund) // the messages records: from_step 1 keeps step 0 of them
 	runID := e.appTurn(t, "please refund order #4411")
 	e.waitTranscript(t, runID, "anything else")
 	refundRan.Store(false) // the app's own turn really ran it; the experiment must not
@@ -651,18 +651,18 @@ func TestPlaygroundApprovalVerbs(t *testing.T) {
 // zero while the model still receives the recorded result.
 func TestPlaygroundContinueFromStepWithEdits(t *testing.T) {
 	var refunds atomic.Int64
-	refund := weft.Tool("refund", "Refund an order.",
+	refund := core.Tool("refund", "Refund an order.",
 		func(ctx context.Context, in struct {
 			OrderID string `json:"order_id"`
 		}) (string, error) {
 			refunds.Add(1)
 			return "refunded-for-real", nil
 		})
-	lookup := weft.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
+	lookup := core.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
 		OrderID string `json:"order_id"`
 	}) (string, error) {
 		return "shipped", nil
-	}, weft.Replay(weft.ReplaySafe))
+	}, core.Replay(core.ReplaySafe))
 	// The app's own turn: lookup (step 0), refund (step 1), reply
 	// (step 2). The experiment continues from step 2 with the refund
 	// result patched, and — the counting case — re-runs step 1 fresh
@@ -676,9 +676,9 @@ func TestPlaygroundContinueFromStepWithEdits(t *testing.T) {
 		wefttest.Say("Refunded, on the record."),                                                 // the substitute chain's continuation
 	)
 	e := newE2E(t)
-	e.agent = weft.New(script, weft.Name("acme-support"),
-		weft.Instructions("You are Acme's support agent."),
-		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), lookup, refund)
+	e.agent = core.New(script, core.Name("acme-support"),
+		core.Instructions("You are Acme's support agent."),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()), lookup, refund)
 	runID := e.appTurn(t, "refund order #4411 please")
 	// The Studio destination batches logs; the transcript route can
 	// answer before the turn's last records land. Wait for the final
@@ -817,15 +817,15 @@ func TestScriptedEngineEndToEnd(t *testing.T) {
 		// The scripted replay consumes from the RECORD, not this
 		// script — a third turn here would prove nothing.
 	)
-	e.agent = weft.New(script, weft.Name("acme-support"),
-		weft.Instructions("You are Acme's support agent."),
-		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()),
-		func() *weft.ToolDef {
-			return weft.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
+	e.agent = core.New(script, core.Name("acme-support"),
+		core.Instructions("You are Acme's support agent."),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()),
+		func() *core.ToolDef {
+			return core.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
 				OrderID string `json:"order_id"`
 			}) (string, error) {
 				return "shipped", nil
-			}, weft.Replay(weft.ReplaySafe))
+			}, core.Replay(core.ReplaySafe))
 		}())
 	runID := e.appTurn(t, "where is my order #4411?")
 
@@ -915,9 +915,9 @@ func TestPlaygroundForkMode(t *testing.T) {
 		wefttest.Say("hello from the fork"),
 		wefttest.Say("hello again from the fork"),
 	)
-	e.agent = weft.New(script, weft.Name("acme-support"),
-		weft.Instructions("You are Acme's support agent."),
-		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()))
+	e.agent = core.New(script, core.Name("acme-support"),
+		core.Instructions("You are Acme's support agent."),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()))
 	runID := e.appTurn(t, "hello app")
 	e.waitTranscript(t, runID, "hello from the app")
 
@@ -1033,24 +1033,24 @@ func TestPlaygroundForkMode(t *testing.T) {
 // conversation.
 type echoPromptModel struct{}
 
-func (echoPromptModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "wefttest", Name: "echo-prompt"}
+func (echoPromptModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "wefttest", Name: "echo-prompt"}
 }
 
-func (echoPromptModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (echoPromptModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	last := ""
 	for _, m := range req.Messages {
-		if m.Role == weft.RoleUser {
+		if m.Role == core.RoleUser {
 			last = m.Text()
 		}
 	}
-	return func(yield func(weft.ModelEvent, error) bool) {
+	return func(yield func(core.ModelEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(nil, err)
 			return
 		}
-		yield(weft.ModelTextDelta{Text: "you asked: " + last}, nil)
-		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+		yield(core.ModelTextDelta{Text: "you asked: " + last}, nil)
+		yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
 	}
 }
 
@@ -1063,9 +1063,9 @@ func (echoPromptModel) Stream(ctx context.Context, req weft.ModelRequest) iter.S
 // answer replays; before the fix the run failed "no recorded turn").
 func TestPlaygroundWholeTurnRerunDefaultsInput(t *testing.T) {
 	e := newE2E(t)
-	e.agent = weft.New(echoPromptModel{}, weft.Name("acme-support"),
-		weft.Instructions("You are Acme's support agent."),
-		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()))
+	e.agent = core.New(echoPromptModel{}, core.Name("acme-support"),
+		core.Instructions("You are Acme's support agent."),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()))
 	runID := e.appTurn(t, "what is your refund policy?")
 	e.waitTranscript(t, runID, "you asked: what is your refund policy?")
 
@@ -1135,9 +1135,9 @@ func TestPlaygroundMatrixBudget(t *testing.T) {
 	// A model that never exhausts: every call answers with a short
 	// text (the matrix's cells are cheap).
 	model := countingEchoModel{}
-	e.agent = weft.New(&model, weft.Name("acme-support"),
-		weft.Instructions("You are Acme's support agent."),
-		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()))
+	e.agent = core.New(&model, core.Name("acme-support"),
+		core.Instructions("You are Acme's support agent."),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()))
 	runID := e.appTurn(t, "hello")
 	e.waitTranscript(t, runID, "About")
 
@@ -1203,19 +1203,19 @@ type countingEchoModel struct {
 	n atomic.Int64
 }
 
-func (m *countingEchoModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "wefttest", Name: "echo"}
+func (m *countingEchoModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "wefttest", Name: "echo"}
 }
 
-func (m *countingEchoModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *countingEchoModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	n := m.n.Add(1)
-	return func(yield func(weft.ModelEvent, error) bool) {
+	return func(yield func(core.ModelEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(nil, err)
 			return
 		}
-		yield(weft.ModelTextDelta{Text: fmt.Sprintf("About cell %d.", n)}, nil)
-		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+		yield(core.ModelTextDelta{Text: fmt.Sprintf("About cell %d.", n)}, nil)
+		yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
 	}
 }
 
@@ -1229,14 +1229,14 @@ func TestDebuggerBreakpointsAndSteer(t *testing.T) {
 	e := newE2E(t)
 	gate := make(chan struct{})
 	model := &gatedModel{gate: gate}
-	safeLookup := weft.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
+	safeLookup := core.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
 		OrderID string `json:"order_id"`
 	}) (string, error) {
 		return "shipped", nil
-	}, weft.Replay(weft.ReplaySafe))
-	e.agent = weft.New(model, weft.Name("acme-support"),
-		weft.Instructions("You are Acme's support agent."),
-		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), safeLookup)
+	}, core.Replay(core.ReplaySafe))
+	e.agent = core.New(model, core.Name("acme-support"),
+		core.Instructions("You are Acme's support agent."),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()), safeLookup)
 	runID := e.appTurn(t, "hello")
 
 	shutdown := runtime.Install(
@@ -1384,39 +1384,39 @@ type gatedModel struct {
 	calls int
 }
 
-func (m *gatedModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "wefttest", Name: "gated"}
+func (m *gatedModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "wefttest", Name: "gated"}
 }
 
-func (m *gatedModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *gatedModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	m.mu.Lock()
 	m.calls++
 	n := m.calls
 	m.mu.Unlock()
 	switch n {
 	case 1: // the app's own turn: a plain reply
-		return func(yield func(weft.ModelEvent, error) bool) {
-			yield(weft.ModelTextDelta{Text: "done"}, nil)
-			yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+		return func(yield func(core.ModelEvent, error) bool) {
+			yield(core.ModelTextDelta{Text: "done"}, nil)
+			yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
 		}
 	case 2: // the breakpoint command: call the tool (the run parks)
-		return func(yield func(weft.ModelEvent, error) bool) {
-			yield(weft.ModelToolCall{ID: "c_brk", Name: "lookup_order",
+		return func(yield func(core.ModelEvent, error) bool) {
+			yield(core.ModelToolCall{ID: "c_brk", Name: "lookup_order",
 				Args: []byte(`{"order_id":"4411"}`)}, nil)
-			yield(weft.ModelFinish{Reason: weft.StopToolCalls}, nil)
+			yield(core.ModelFinish{Reason: core.StopToolCalls}, nil)
 		}
 	}
 	// Later calls hold until the gate closes — the steered run sits
 	// mid-flight, and the steer lands when it drains.
-	return func(yield func(weft.ModelEvent, error) bool) {
+	return func(yield func(core.ModelEvent, error) bool) {
 		select {
 		case <-m.gate:
 		case <-ctx.Done():
 			yield(nil, ctx.Err())
 			return
 		}
-		yield(weft.ModelTextDelta{Text: "done"}, nil)
-		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+		yield(core.ModelTextDelta{Text: "done"}, nil)
+		yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
 	}
 }
 
@@ -1479,15 +1479,15 @@ func (e *e2e) decide(t *testing.T, runID, body string) (row, resumed string) {
 
 // texts flattens a request's messages to "role:text" lines — what the
 // model was fed, for the assertions below.
-func texts(msgs []weft.Message) []string {
+func texts(msgs []core.Message) []string {
 	out := make([]string, 0, len(msgs))
 	for _, m := range msgs {
 		text := m.Text()
 		for _, p := range m.Content {
 			switch p := p.(type) {
-			case weft.ToolCallPart:
+			case core.ToolCallPart:
 				text += "call " + p.Name
-			case weft.ToolResultPart:
+			case core.ToolResultPart:
 				text += "result " + p.Content
 			}
 		}
@@ -1519,13 +1519,13 @@ func TestPlaygroundMultiTurnSource(t *testing.T) {
 				wefttest.Say("continued from step one"),     // experiment B
 				wefttest.Say("a new question, same thread"), // experiment C
 			)
-			lookup := weft.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
+			lookup := core.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
 				OrderID string `json:"order_id"`
 			}) (string, error) {
 				return "shipped", nil
-			}, weft.Replay(weft.ReplaySafe))
-			e.agent = weft.New(script, weft.Name("acme-support"),
-				weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), lookup)
+			}, core.Replay(core.ReplaySafe))
+			e.agent = core.New(script, core.Name("acme-support"),
+				core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()), lookup)
 			ctx := context.Background()
 			sess, err := thread.Create(ctx, e.store, e.agent)
 			if err != nil {
@@ -1533,7 +1533,7 @@ func TestPlaygroundMultiTurnSource(t *testing.T) {
 			}
 			var runID string
 			for _, prompt := range []string{"question one", "question two"} {
-				turn, err := sess.Send(ctx, weft.User(prompt))
+				turn, err := sess.Send(ctx, core.User(prompt))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1602,7 +1602,7 @@ func TestPlaygroundMultiTurnSource(t *testing.T) {
 // decisions: resuming on the first denied the one nobody decided.
 func TestPlaygroundDecisionNeedsAParkedCall(t *testing.T) {
 	var refunds atomic.Int64
-	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct {
+	refund := core.Tool("refund", "Refund an order.", func(ctx context.Context, in struct {
 		OrderID string `json:"order_id"`
 	}) (string, error) {
 		refunds.Add(1)
@@ -1615,8 +1615,8 @@ func TestPlaygroundDecisionNeedsAParkedCall(t *testing.T) {
 		wefttest.Say("both refunded"),
 	)
 	e := newE2E(t)
-	e.agent = weft.New(script, weft.Name("acme-support"),
-		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), refund)
+	e.agent = core.New(script, core.Name("acme-support"),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()), refund)
 	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent), runtime.Enabled(true))
 	defer shutdown()
 	rt := e.runtimeID(t)
@@ -1689,14 +1689,14 @@ func TestPlaygroundDecisionNeedsAParkedCall(t *testing.T) {
 // the approved side effect fired once per click.
 func TestPlaygroundConcurrentDecisionsResumeOnce(t *testing.T) {
 	var refunds atomic.Int64
-	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+	refund := core.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
 		refunds.Add(1)
 		time.Sleep(20 * time.Millisecond) // a real handler takes a moment
 		return "refunded", nil
 	})
 	e := newE2E(t)
-	e.agent = weft.New(&refundOnceModel{}, weft.Name("acme-support"),
-		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), refund)
+	e.agent = core.New(&refundOnceModel{}, core.Name("acme-support"),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()), refund)
 	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent), runtime.Enabled(true))
 	defer shutdown()
 	rt := e.runtimeID(t)
@@ -1742,23 +1742,23 @@ func TestPlaygroundConcurrentDecisionsResumeOnce(t *testing.T) {
 // stateless, so any number of resumes read the same script.
 type refundOnceModel struct{}
 
-func (*refundOnceModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "wefttest", Name: "refund-once"}
+func (*refundOnceModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "wefttest", Name: "refund-once"}
 }
 
-func (*refundOnceModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
+func (*refundOnceModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(nil, err)
 			return
 		}
-		if req.Messages[len(req.Messages)-1].Role == weft.RoleUser {
-			yield(weft.ModelToolCall{ID: "c_r", Name: "refund", Args: []byte(`{}`)}, nil)
-			yield(weft.ModelFinish{Reason: weft.StopToolCalls}, nil)
+		if req.Messages[len(req.Messages)-1].Role == core.RoleUser {
+			yield(core.ModelToolCall{ID: "c_r", Name: "refund", Args: []byte(`{}`)}, nil)
+			yield(core.ModelFinish{Reason: core.StopToolCalls}, nil)
 			return
 		}
-		yield(weft.ModelTextDelta{Text: "refund done"}, nil)
-		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+		yield(core.ModelTextDelta{Text: "refund done"}, nil)
+		yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
 	}
 }
 
@@ -1772,7 +1772,7 @@ func (*refundOnceModel) Stream(ctx context.Context, req weft.ModelRequest) iter.
 // queued behind it for good.
 func TestPlaygroundForkParkedDecision(t *testing.T) {
 	var refunds atomic.Int64
-	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+	refund := core.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
 		refunds.Add(1)
 		return "refunded for real", nil
 	})
@@ -1783,8 +1783,8 @@ func TestPlaygroundForkParkedDecision(t *testing.T) {
 		wefttest.Say("the refund went through"),
 		wefttest.Say("still here"),
 	)
-	e.agent = weft.New(script, weft.Name("acme-support"),
-		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), refund)
+	e.agent = core.New(script, core.Name("acme-support"),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()), refund)
 	runID := e.appTurn(t, "hello app")
 	e.waitTranscript(t, runID, "hello from the app")
 
@@ -1844,7 +1844,7 @@ func TestPlaygroundForkParkedDecision(t *testing.T) {
 // "ticket 2".
 func TestPlaygroundSubstituteRepeatedCalls(t *testing.T) {
 	var tickets atomic.Int64
-	next := weft.Tool("next_ticket", "Take the next ticket.", func(ctx context.Context, in struct{}) (string, error) {
+	next := core.Tool("next_ticket", "Take the next ticket.", func(ctx context.Context, in struct{}) (string, error) {
 		return fmt.Sprintf("ticket %d", tickets.Add(1)), nil
 	})
 	script := wefttest.Script(
@@ -1859,8 +1859,8 @@ func TestPlaygroundSubstituteRepeatedCalls(t *testing.T) {
 		wefttest.Say("again: tickets 1 and 2"),
 	)
 	e := newE2E(t)
-	e.agent = weft.New(script, weft.Name("acme-support"),
-		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), next)
+	e.agent = core.New(script, core.Name("acme-support"),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()), next)
 	runID := e.appTurn(t, "two tickets please")
 	e.waitTranscript(t, runID, "you hold tickets")
 
@@ -1885,24 +1885,24 @@ func TestPlaygroundSubstituteRepeatedCalls(t *testing.T) {
 // budget exists for.
 type loopingModel struct{ calls atomic.Int64 }
 
-func (*loopingModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "wefttest", Name: "looping"}
+func (*loopingModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "wefttest", Name: "looping"}
 }
 
-func (m *loopingModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *loopingModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	n := m.calls.Add(1)
-	return func(yield func(weft.ModelEvent, error) bool) {
+	return func(yield func(core.ModelEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(nil, err)
 			return
 		}
 		if n > 200 { // the test's own backstop: a broken bound must not spin forever
-			yield(weft.ModelTextDelta{Text: "gave up"}, nil)
-			yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+			yield(core.ModelTextDelta{Text: "gave up"}, nil)
+			yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
 			return
 		}
-		yield(weft.ModelToolCall{ID: "c_p", Name: "ping", Args: []byte(`{}`)}, nil)
-		yield(weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}}, nil)
+		yield(core.ModelToolCall{ID: "c_p", Name: "ping", Args: []byte(`{}`)}, nil)
+		yield(core.ModelFinish{Reason: core.StopToolCalls, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}}, nil)
 	}
 }
 
@@ -1913,21 +1913,21 @@ func (m *loopingModel) Stream(ctx context.Context, req weft.ModelRequest) iter.S
 // fails past it, and the experiment's budget counts every leg.
 func TestPlaygroundSubstituteChainIsBounded(t *testing.T) {
 	model := &loopingModel{}
-	ping := weft.Tool("ping", "Ping.", func(ctx context.Context, in struct{}) (string, error) { return "pong", nil })
+	ping := core.Tool("ping", "Ping.", func(ctx context.Context, in struct{}) (string, error) { return "pong", nil })
 	e := newE2E(t)
-	e.agent = weft.New(model, weft.Name("acme-support"), weft.MaxSteps(3),
-		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), ping)
+	e.agent = core.New(model, core.Name("acme-support"), core.MaxSteps(3),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()), ping)
 	// The app's own turn loops into its MaxSteps and fails; its record
 	// (three pings, three pongs) is the source.
 	sess, err := thread.Create(context.Background(), e.store, e.agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := sess.Send(context.Background(), weft.User("ping forever"))
+	turn, err := sess.Send(context.Background(), core.User("ping forever"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := turn.Wait(); !errors.Is(err, weft.ErrMaxSteps) {
+	if _, err := turn.Wait(); !errors.Is(err, core.ErrMaxSteps) {
 		t.Fatalf("the app's own turn = %v, want ErrMaxSteps", err)
 	}
 	if err := e.p.ForceFlush(context.Background()); err != nil {
@@ -1963,7 +1963,7 @@ func TestPlaygroundSubstituteChainIsBounded(t *testing.T) {
 
 // TestPlaygroundBudgetCountsFailedAndConcurrentRuns pins §6 rule 6's
 // two holes. A failed run returns no result — its usage rides the
-// *weft.RunError — and before the fix it counted zero tokens, so a
+// *core.RunError — and before the fix it counted zero tokens, so a
 // command that burned its budget and failed left the experiment open.
 // And the run cap counted a run when it ended: commands dispatched
 // together all passed a cap only some of them fit.
@@ -1971,10 +1971,10 @@ func TestPlaygroundBudgetCountsFailedAndConcurrentRuns(t *testing.T) {
 	gate := make(chan struct{})
 	model := &budgetModel{gate: gate}
 	e := newE2E(t)
-	noop := weft.Tool("noop", "Do nothing.", func(ctx context.Context, in struct{}) (string, error) { return "ok", nil },
-		weft.Replay(weft.ReplaySafe))
-	e.agent = weft.New(model, weft.Name("acme-support"),
-		weft.TracerProvider(e.p.TracerProvider()), weft.LoggerProvider(e.p.LoggerProvider()), noop)
+	noop := core.Tool("noop", "Do nothing.", func(ctx context.Context, in struct{}) (string, error) { return "ok", nil },
+		core.Replay(core.ReplaySafe))
+	e.agent = core.New(model, core.Name("acme-support"),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()), noop)
 	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent),
 		runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 50, MaxRunsPerExperiment: 2}), runtime.Enabled(true))
 	defer shutdown()
@@ -2020,15 +2020,15 @@ func TestPlaygroundBudgetCountsFailedAndConcurrentRuns(t *testing.T) {
 // gate closes.
 type budgetModel struct{ gate chan struct{} }
 
-func (*budgetModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "wefttest", Name: "budget"}
+func (*budgetModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "wefttest", Name: "budget"}
 }
 
-func (m *budgetModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *budgetModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	last := req.Messages[len(req.Messages)-1]
-	return func(yield func(weft.ModelEvent, error) bool) {
+	return func(yield func(core.ModelEvent, error) bool) {
 		switch {
-		case last.Role == weft.RoleTool:
+		case last.Role == core.RoleTool:
 			yield(nil, errors.New("the provider went away"))
 		case last.Text() == "hold":
 			select {
@@ -2037,11 +2037,11 @@ func (m *budgetModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Se
 				yield(nil, ctx.Err())
 				return
 			}
-			yield(weft.ModelTextDelta{Text: "held"}, nil)
-			yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+			yield(core.ModelTextDelta{Text: "held"}, nil)
+			yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
 		default:
-			yield(weft.ModelToolCall{ID: "c_n", Name: "noop", Args: []byte(`{}`)}, nil)
-			yield(weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 60, OutputTokens: 40}}, nil)
+			yield(core.ModelToolCall{ID: "c_n", Name: "noop", Args: []byte(`{}`)}, nil)
+			yield(core.ModelFinish{Reason: core.StopToolCalls, Usage: core.Usage{InputTokens: 60, OutputTokens: 40}}, nil)
 		}
 	}
 }

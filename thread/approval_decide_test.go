@@ -8,16 +8,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // parkTurn drives one Send that parks, and returns the parked turn
 // beside its pending call — for the tests that follow Turn.Next.
-func parkTurn(t *testing.T, s *thread.Session, ctx context.Context) (*thread.Turn, weft.ToolCallPart) {
+func parkTurn(t *testing.T, s *thread.Session, ctx context.Context) (*thread.Turn, core.ToolCallPart) {
 	t.Helper()
-	turn, err := s.Send(ctx, weft.User("refund it"))
+	turn, err := s.Send(ctx, core.User("refund it"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestSendOverExpiredBoundaryResumes(t *testing.T) {
 	_, call := parkTurn(t, s, ctx)
 	time.Sleep(time.Until(s.Pending()[0].Expiry) + 5*time.Millisecond)
 
-	follow, err := s.Send(ctx, weft.User("anything else?"))
+	follow, err := s.Send(ctx, core.User("anything else?"))
 	if err != nil {
 		t.Fatal(err)
 	}

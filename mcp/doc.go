@@ -14,7 +14,7 @@
 //
 // Consuming (§7.3): the tools of a connected client session become
 // ordinary weft tools — a RawTool per server tool, the server's schema
-// bytes verbatim (weft.ParseSchema keeps every keyword the core's
+// bytes verbatim (core.ParseSchema keeps every keyword the core's
 // Schema type cannot express). Exposing (§7.2): weft tools and whole
 // agents register on an SDK server; every failure — undecodable
 // arguments, a handler error, a panic — is a tool result with isError,

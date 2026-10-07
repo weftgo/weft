@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // refundInput is the approval-gated test tool's input.
@@ -51,23 +51,23 @@ func (r *ranLog) snapshot() []bool {
 // playing turns, and reporting whether each executed call ran with
 // Call.Approved set (ADR 0007: an approved resume runs the ordinary
 // chain, Approved true).
-func refundAgent(turns ...wefttest.Turn) (*weft.Agent, *ranLog) {
+func refundAgent(turns ...wefttest.Turn) (*core.Agent, *ranLog) {
 	ran := &ranLog{}
-	tool := weft.Tool("refund", "Refund an order.",
+	tool := core.Tool("refund", "Refund an order.",
 		func(ctx context.Context, in refundInput) (string, error) {
-			c, _ := weft.CallFromContext(ctx)
+			c, _ := core.CallFromContext(ctx)
 			ran.add(c.Approved)
 			return "refunded " + in.OrderID, nil
 		},
-		weft.RequireApproval())
-	return weft.New(wefttest.Script(turns...), weft.Name("approvals-test"), tool), ran
+		core.RequireApproval())
+	return core.New(wefttest.Script(turns...), core.Name("approvals-test"), tool), ran
 }
 
 // parkSend drives one Send that parks exactly one refund call, waits
 // for the turn, and returns the pending call.
-func parkSend(t *testing.T, s *thread.Session, ctx context.Context) weft.ToolCallPart {
+func parkSend(t *testing.T, s *thread.Session, ctx context.Context) core.ToolCallPart {
 	t.Helper()
-	turn, err := s.Send(ctx, weft.User("refund it"))
+	turn, err := s.Send(ctx, core.User("refund it"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,11 +82,11 @@ func parkSend(t *testing.T, s *thread.Session, ctx context.Context) weft.ToolCal
 }
 
 // toolResults collects the tool results of a context, in order.
-func toolResults(msgs []weft.Message) []weft.ToolResultPart {
-	var out []weft.ToolResultPart
+func toolResults(msgs []core.Message) []core.ToolResultPart {
+	var out []core.ToolResultPart
 	for _, m := range msgs {
 		for _, p := range m.Content {
-			if r, ok := p.(weft.ToolResultPart); ok {
+			if r, ok := p.(core.ToolResultPart); ok {
 				out = append(out, r)
 			}
 		}
@@ -229,7 +229,7 @@ func TestApprovalsRestartDecideResume(t *testing.T) {
 
 // parkSession creates a session whose one Send parks a refund call,
 // and returns the session id.
-func parkSession(t *testing.T, ctx context.Context, st thread.Storage, agent *weft.Agent) string {
+func parkSession(t *testing.T, ctx context.Context, st thread.Storage, agent *core.Agent) string {
 	t.Helper()
 	s, err := thread.Create(ctx, st, agent)
 	if err != nil {
@@ -449,7 +449,7 @@ func TestApproverDecides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("refund 9"))
+	turn, err := s.Send(ctx, core.User("refund 9"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +618,7 @@ func TestSendQueuedBehindBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	call := parkSend(t, s, ctx)
-	t2, err := s.Send(ctx, weft.User("and then?"))
+	t2, err := s.Send(ctx, core.User("and then?"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -674,7 +674,7 @@ func TestAutoResumeOff(t *testing.T) {
 	if rt != nil {
 		t.Fatal("AutoResume(false) resumed on its own")
 	}
-	t2, err := s.Send(ctx, weft.User("next"))
+	t2, err := s.Send(ctx, core.User("next"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -930,7 +930,7 @@ func TestSendOverDecidedBoundaryResumes(t *testing.T) {
 	if got := len(s2.Pending()); got != 0 {
 		t.Fatalf("Pending after reopen: %d, want 0 (all decided)", got)
 	}
-	t2, err := s2.Send(ctx, weft.User("carry on"))
+	t2, err := s2.Send(ctx, core.User("carry on"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1059,7 +1059,7 @@ func TestResumeRetryAfterCanceledArm(t *testing.T) {
 // released and counting every call — the handle a test holds on a run
 // in flight.
 type gateModel struct {
-	inner   weft.Model
+	inner   core.Model
 	mu      sync.Mutex
 	calls   int
 	blockAt int
@@ -1067,7 +1067,7 @@ type gateModel struct {
 	release chan struct{}
 }
 
-func (g *gateModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (g *gateModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	g.mu.Lock()
 	g.calls++
 	n := g.calls
@@ -1100,14 +1100,14 @@ func TestResumeDuringInFlightResumeArmsOnce(t *testing.T) {
 		release: make(chan struct{}),
 	}
 	ran := &ranLog{}
-	agent := weft.New(gm, weft.Name("double-resume-test"),
-		weft.Tool("refund", "Refund an order.",
+	agent := core.New(gm, core.Name("double-resume-test"),
+		core.Tool("refund", "Refund an order.",
 			func(ctx context.Context, in refundInput) (string, error) {
-				c, _ := weft.CallFromContext(ctx)
+				c, _ := core.CallFromContext(ctx)
 				ran.add(c.Approved)
 				return "refunded " + in.OrderID, nil
 			},
-			weft.RequireApproval()))
+			core.RequireApproval()))
 	s, err := thread.Create(ctx, thread.Memory(), agent)
 	if err != nil {
 		t.Fatal(err)
@@ -1115,7 +1115,7 @@ func TestResumeDuringInFlightResumeArmsOnce(t *testing.T) {
 	if err := s.Grant(ctx, thread.Grant{Tool: "refund"}); err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("refund it"))
+	t1, err := s.Send(ctx, core.User("refund it"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1167,7 +1167,7 @@ func TestApproverAlwaysGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("build"))
+	t1, err := s.Send(ctx, core.User("build"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1188,7 +1188,7 @@ func TestApproverAlwaysGrants(t *testing.T) {
 	if !found {
 		t.Fatal("an Approver's ApproveAlways recorded no grant")
 	}
-	t2, err := s.Send(ctx, weft.User("build again"))
+	t2, err := s.Send(ctx, core.User("build again"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1400,7 +1400,7 @@ func TestDenyAlwaysMintsNoGrant(t *testing.T) {
 		t.Fatalf("denied call ran: %v", got)
 	}
 	// The next such call parks again: no grant stands.
-	turn, err := s.Send(ctx, weft.User("refund it again"))
+	turn, err := s.Send(ctx, core.User("refund it again"))
 	if err != nil {
 		t.Fatal(err)
 	}

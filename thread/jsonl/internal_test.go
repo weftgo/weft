@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 func openBackend(t *testing.T, dir string, opts ...thread.OpenOption) *backend {
@@ -28,7 +28,7 @@ func openBackend(t *testing.T, dir string, opts ...thread.OpenOption) *backend {
 }
 
 func entry(id string) thread.Entry {
-	return thread.MessageEntry{ID: id, Created: time.Now().UTC(), Message: weft.User(id)}
+	return thread.MessageEntry{ID: id, Created: time.Now().UTC(), Message: core.User(id)}
 }
 
 // A platform with no file lock opens only by explicit choice: without
@@ -224,7 +224,7 @@ func TestWatchPollReadsOnlyNewBytes(t *testing.T) {
 	if err := b.Create(ctx, thread.Header{ID: "s_big", Created: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	big := thread.MessageEntry{ID: "e_big", Created: time.Now().UTC(), Message: weft.User(strings.Repeat("x", 4<<20))}
+	big := thread.MessageEntry{ID: "e_big", Created: time.Now().UTC(), Message: core.User(strings.Repeat("x", 4<<20))}
 	if err := b.Append(ctx, "s_big", big); err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +463,7 @@ func TestFailedAppendLeavesNoPrefix(t *testing.T) {
 func TestSessionSurvivesAFailedBatch(t *testing.T) {
 	ctx := context.Background()
 	b := openBackend(t, t.TempDir())
-	s, err := thread.Create(ctx, b, weft.New(wefttest.Script()))
+	s, err := thread.Create(ctx, b, core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatal(err)
 	}

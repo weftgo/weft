@@ -1,0 +1,462 @@
+package core
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"reflect"
+	"strings"
+	"time"
+)
+
+// Schema is the subset of JSON Schema (draft 2020-12) that weft derives
+// from tool input structs. Its shape tracks what the official Go MCP SDK
+// derives via google/jsonschema-go, so tools cross over to MCP without
+// conversion.
+type Schema struct {
+	Type        string             `json:"type,omitempty"`
+	Format      string             `json:"format,omitempty"`
+	Description string             `json:"description,omitempty"`
+	Properties  map[string]*Schema `json:"properties,omitempty"`
+	// AdditionalProperties types a map's values (JSON Schema draft
+	// 2020-12), so map[string]int stops being "some object". The
+	// boolean false form is not expressible: reflection always has a
+	// value type, and hand-written RawTool schemas that need to lock
+	// properties down must say so in Description.
+	AdditionalProperties *Schema  `json:"additionalProperties,omitempty"`
+	Required             []string `json:"required,omitempty"`
+	Items                *Schema  `json:"items,omitempty"`
+
+	// raw holds the verbatim bytes a schema parsed with ParseSchema came
+	// from — an MCP server's inputSchema, a plugin manifest — including
+	// every keyword the fields above cannot express (enum, oneOf,
+	// minimum, $ref, …). Unexported and never set by the reflector: only
+	// ParseSchema writes it, and MarshalJSON emits it, so a foreign
+	// schema reaches the model whole instead of degraded to this
+	// struct's vocabulary (ADR 0003's amendment, TODO §7.1).
+	raw json.RawMessage
+}
+
+// ParseSchema reads a JSON Schema document from outside Go into a
+// *Schema: the structured fields it knows are populated (Type,
+// Properties, Required, … — the manifest and any reader that walks the
+// tree see them), and the document's own bytes are kept and re-emitted
+// by Schema.MarshalJSON, so an enum or a oneOf the Schema type cannot
+// express still reaches the model exactly as written. The top-level
+// type must be an object — providers and MCP both require it, and
+// failing here, at import, beats failing at the first model call.
+//
+// The structured view is lenient: a keyword whose shape the Schema
+// type cannot hold — a boolean additionalProperties, a type array
+// such as ["string","null"], tuple or boolean items, a non-string
+// description — leaves that field zero (an unconstrained node) and
+// is not an error, because the bytes carry it whole and the view is
+// for readers, not the model. Only the document itself is checked:
+// invalid JSON, trailing data, or a non-object top level return an
+// error naming the problem.
+func ParseSchema(b json.RawMessage) (*Schema, error) {
+	if len(bytes.TrimSpace(b)) == 0 {
+		return nil, fmt.Errorf("weft: ParseSchema: empty schema")
+	}
+	var doc json.RawMessage
+	dec := json.NewDecoder(bytes.NewReader(b))
+	if err := dec.Decode(&doc); err != nil {
+		return nil, fmt.Errorf("weft: ParseSchema: %w", err)
+	}
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("weft: ParseSchema: trailing data after the schema")
+	}
+	s, ok := parseSchemaNode(doc)
+	if !ok {
+		return nil, fmt.Errorf("weft: ParseSchema: the document is not a JSON object")
+	}
+	if s.Type != "object" {
+		return nil, fmt.Errorf("weft: ParseSchema: top-level type must be %q, got %q", "object", s.Type)
+	}
+	s.raw = bytes.Clone(b)
+	return s, nil
+}
+
+// looseSchema is one schema node with every keyword still raw, so
+// parseSchemaNode can take each field only when it has the shape the
+// Schema type can hold and leave it zero otherwise — a legal JSON
+// Schema shape the struct cannot express must not reject the document.
+type looseSchema struct {
+	Type                 json.RawMessage `json:"type"`
+	Format               json.RawMessage `json:"format"`
+	Description          json.RawMessage `json:"description"`
+	Properties           json.RawMessage `json:"properties"`
+	AdditionalProperties json.RawMessage `json:"additionalProperties"`
+	Required             json.RawMessage `json:"required"`
+	Items                json.RawMessage `json:"items"`
+}
+
+// parseSchemaNode builds the structured view of one node. ok is false
+// when the bytes are not a JSON object (a boolean schema, an array, a
+// scalar): the caller treats such a node as unconstrained or, at the
+// top level, as an error.
+func parseSchemaNode(b json.RawMessage) (*Schema, bool) {
+	var ls looseSchema
+	if err := json.Unmarshal(b, &ls); err != nil {
+		return nil, false
+	}
+	s := &Schema{}
+	looseString(ls.Type, &s.Type)
+	looseString(ls.Format, &s.Format)
+	looseString(ls.Description, &s.Description)
+	if len(ls.Required) > 0 {
+		var req []string
+		if err := json.Unmarshal(ls.Required, &req); err == nil {
+			s.Required = req
+		}
+	}
+	if len(ls.Properties) > 0 {
+		var props map[string]json.RawMessage
+		if err := json.Unmarshal(ls.Properties, &props); err == nil && props != nil {
+			s.Properties = make(map[string]*Schema, len(props))
+			for name, pb := range props {
+				p, ok := parseSchemaNode(pb)
+				if !ok {
+					p = &Schema{} // a boolean or otherwise untyped property schema: unconstrained
+				}
+				s.Properties[name] = p
+			}
+		}
+	}
+	s.Items = parseChildNode(ls.Items)
+	s.AdditionalProperties = parseChildNode(ls.AdditionalProperties)
+	return s, true
+}
+
+// parseChildNode is parseSchemaNode for an optional subschema field:
+// absent, null, or a shape that is not an object schema (a boolean, a
+// tuple) leaves the field nil.
+func parseChildNode(b json.RawMessage) *Schema {
+	if len(b) == 0 || bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+		return nil
+	}
+	p, ok := parseSchemaNode(b)
+	if !ok {
+		return nil
+	}
+	return p
+}
+
+// looseString sets dst when raw is a JSON string and leaves it alone
+// otherwise (absent, null, or a shape the field cannot hold).
+func looseString(raw json.RawMessage, dst *string) {
+	if len(raw) == 0 {
+		return
+	}
+	var v string
+	if err := json.Unmarshal(raw, &v); err == nil {
+		*dst = v
+	}
+}
+
+// MarshalJSON emits the schema's parsed bytes verbatim when it came
+// from ParseSchema — the manifest's input_schema, the adapters' tool
+// parameters, and any other reader see exactly what the foreign server
+// sent — and the plain struct encoding otherwise (a reflected schema
+// has no bytes to honour, so existing goldens are unchanged).
+func (s *Schema) MarshalJSON() ([]byte, error) {
+	if len(s.raw) > 0 {
+		return s.raw, nil
+	}
+	type plainSchema Schema
+	return json.Marshal((*plainSchema)(s))
+}
+
+// schemaFor derives the input schema for a Go type.
+//
+// Mapping rules:
+//
+//	string, []byte          → string
+//	bool                    → boolean
+//	integers                → integer
+//	floats                  → number
+//	slice, array            → array with Items
+//	map                     → object with AdditionalProperties typing the
+//	                         values (map[string]int → object of integers;
+//	                         map[string]any → bare object, free-form)
+//	struct, time.Time       → object (time.Time → string with format date-time)
+//	pointer                 → the pointed-to schema; the field becomes optional
+//
+// Struct fields use their json tag for the property name (skipping "-");
+// the jsonschema tag provides the description. A field is required unless
+// it is a pointer or tagged omitempty. Embedded structs contribute their
+// fields directly to the enclosing object, with exactly encoding/json's
+// dominance rules: a claim at a shallower embedding depth wins over a
+// deeper one; at equal depth, exactly one json-tagged claim wins over
+// untagged ones and any other tie cancels the name (encoding/json drops
+// it from the wire, so the schema must not advertise it). One exception
+// is fail-loud, not mirroring: two fields of the same struct claiming
+// one JSON name (always both tagged — untagged Go names cannot collide)
+// panic at construction, at any *named* nesting depth — each named
+// struct derives its own depth-0 space, so its unreachable handler
+// field is a bug, not a pattern. The same collision inside an embedded
+// struct does not panic: its claims flatten into the parent's dominance
+// rules and the name is silently dropped, exactly the drop encoding/json
+// makes — schema and wire stay in agreement either way. The json
+// ",string" option is
+// reflected for the scalar kinds that support it: the property is typed
+// string, the quoted wire form.
+//
+// Known gaps, deliberate for now: union types (oneOf/anyOf) do not exist in
+// Go's type system, and interface fields degrade to an unconstrained value.
+// A time.Duration field is an integer counting nanoseconds — consistent
+// with encoding/json round trips, but a foot-gun for models; prefer a
+// string with a provider-appropriate format for model-facing durations.
+// A recursive struct (a tree) is cut at the point of recursion: the nested
+// occurrence becomes an unconstrained value instead of an infinite schema.
+// An optional go:generate step may recover stricter schemas later.
+func schemaFor(t reflect.Type) *Schema {
+	return schemaOf(t, map[reflect.Type]bool{})
+}
+
+// schemaOf derives a schema; visiting holds the struct types on the
+// current derivation path, so cycles terminate.
+func schemaOf(t reflect.Type, visiting map[reflect.Type]bool) *Schema {
+	for t != nil && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t == nil {
+		return &Schema{}
+	}
+	switch t {
+	case reflect.TypeOf(time.Time{}):
+		return &Schema{Type: "string", Format: "date-time"}
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return &Schema{Type: "string"}
+	case reflect.Bool:
+		return &Schema{Type: "boolean"}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return &Schema{Type: "integer"}
+	case reflect.Float32, reflect.Float64:
+		return &Schema{Type: "number"}
+	case reflect.Slice:
+		if t.Elem().Kind() == reflect.Uint8 {
+			return &Schema{Type: "string"} // []byte marshals as a base64 string
+		}
+		return &Schema{Type: "array", Items: schemaOf(t.Elem(), visiting)}
+	case reflect.Array:
+		return &Schema{Type: "array", Items: schemaOf(t.Elem(), visiting)}
+	case reflect.Map:
+		// An any value type has nothing to say — every value is
+		// allowed, which a bare object already means — so
+		// map[string]any stays wire-identical to a free-form object
+		// instead of carrying an empty additionalProperties:{}.
+		if t.Elem().Kind() == reflect.Interface {
+			return &Schema{Type: "object"}
+		}
+		return &Schema{Type: "object", AdditionalProperties: schemaOf(t.Elem(), visiting)}
+	case reflect.Struct:
+		if visiting[t] {
+			return &Schema{} // recursion: unconstrained at this depth
+		}
+		visiting[t] = true
+		defer delete(visiting, t)
+		return schemaForStruct(t, visiting)
+	default:
+		// Interface, func, chan, ...: unconstrained; JSON decides.
+		return &Schema{}
+	}
+}
+
+// fieldClaim is one struct field's claim on a JSON name: the derived
+// property schema, whether the field is required, the field's embedding
+// depth (0 for a struct's own fields), and whether a json tag named the
+// field explicitly.
+type fieldClaim struct {
+	schema   *Schema
+	required bool
+	depth    int
+	tagged   bool
+}
+
+// claimIndex collects claims per JSON name, remembering the order in
+// which names are first claimed — declaration order, with an embedded
+// struct's contributions at the embedded field's position — so the
+// marshalled schema (its Required list) is byte-stable.
+type claimIndex struct {
+	order  []string
+	claims map[string][]fieldClaim
+}
+
+func newClaimIndex() *claimIndex {
+	return &claimIndex{claims: map[string][]fieldClaim{}}
+}
+
+func (x *claimIndex) add(name string, c fieldClaim) {
+	if _, seen := x.claims[name]; !seen {
+		x.order = append(x.order, name)
+	}
+	x.claims[name] = append(x.claims[name], c)
+}
+
+// collectClaims walks t's fields, flattening embedded structs one depth
+// down — including embedded structs whose type name is unexported — and
+// records each field's claim. A struct type already on the derivation
+// path is skipped, the recursion cut schemaOf performs.
+func collectClaims(t reflect.Type, visiting map[reflect.Type]bool, depth int, x *claimIndex) {
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		name, rest, _ := strings.Cut(f.Tag.Get("json"), ",")
+		tagged := name != "" // an explicit json name tag, the dominance tiebreak's currency
+		if name == "-" {
+			continue
+		}
+		if f.Anonymous && name == "" {
+			ft := derefType(f.Type)
+			if ft.Kind() != reflect.Struct || visiting[ft] {
+				continue
+			}
+			// encoding/json can never decode into an embedded pointer
+			// to an unexported struct type (it cannot allocate the
+			// pointer: "cannot set embedded pointer to unexported
+			// struct type"), and every weft schema is decoded into a
+			// zero value — so the flattened fields would be advertised
+			// yet unreachable, and the model would see "field "id":
+			// expected string, got string" for every argument it sent
+			// (found by the 2026-09-24 review's corpus row). Loud at
+			// construction, like an empty name or a nil handler.
+			if f.Type.Kind() == reflect.Pointer && !f.IsExported() {
+				panic(fmt.Sprintf("weft: %s embeds *%s, a pointer to an unexported struct type: encoding/json cannot decode into it, so its fields would be unreachable; embed the value (%s) or export the type", t, ft, ft.Name()))
+			}
+			visiting[ft] = true
+			collectClaims(ft, visiting, depth+1, x)
+			delete(visiting, ft)
+			continue
+		}
+		// An anonymous struct field with a name tag is an ordinary named
+		// field on the wire — encoding/json marshals it even when the
+		// embedded type's name is unexported (found by the §7.1 corpus:
+		// the wire carried "cfg":{...} the schema never advertised). An
+		// anonymous field of an unexported non-struct type is ignored
+		// by encoding/json whatever its tag, so the skip keeps it out
+		// of the schema too: advertising it would name a field the
+		// decoder never reads.
+		if !f.IsExported() && (!f.Anonymous || derefType(f.Type).Kind() != reflect.Struct) {
+			continue
+		}
+		if name == "" {
+			name = f.Name // no json name: encoding/json uses the field name
+		}
+		optional := f.Type.Kind() == reflect.Pointer || hasTagOption(rest, "omitempty")
+		p := schemaOf(f.Type, visiting)
+		// The ",string" option carries the value inside a JSON string —
+		// encoding/json demands quotes — so for the kinds that support
+		// it the wire type is string; advertising the bare type would
+		// invite exactly the unquoted value decoding rejects.
+		if hasTagOption(rest, "string") {
+			switch derefType(f.Type).Kind() {
+			case reflect.String, reflect.Bool,
+				reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+				reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+				reflect.Float32, reflect.Float64:
+				p = &Schema{Type: "string"}
+			}
+		}
+		if desc := f.Tag.Get("jsonschema"); desc != "" {
+			p.Description = desc
+		}
+		x.add(name, fieldClaim{schema: p, required: !optional, depth: depth, tagged: tagged})
+	}
+}
+
+func schemaForStruct(t reflect.Type, visiting map[reflect.Type]bool) *Schema {
+	x := newClaimIndex()
+	collectClaims(t, visiting, 0, x)
+	s := &Schema{Type: "object", Properties: map[string]*Schema{}}
+	for _, name := range x.order {
+		claim, state := resolveClaim(name, x.claims[name])
+		switch state {
+		case claimDropped:
+			continue // cancelled: encoding/json drops the name, the schema must not advertise it
+		case claimBug:
+			// Two of the top-level struct's own fields claim one name —
+			// one handler field can never receive a value. The
+			// duplicate-name and non-struct-input panics set the
+			// precedent: fail loud, fail early (ADR 0003).
+			panic(fmt.Sprintf("weft: struct %s declares two fields with the JSON name %q; one of them can never receive a value", t, name))
+		}
+		s.Properties[name] = claim.schema
+		if claim.required {
+			s.Required = append(s.Required, name)
+		}
+	}
+	if len(s.Properties) == 0 {
+		s.Properties = nil
+	}
+	return s
+}
+
+type claimState int
+
+const (
+	claimWon claimState = iota
+	claimDropped
+	claimBug
+)
+
+// resolveClaim applies encoding/json's field dominance rules to one
+// name's claims: the shallowest embedding depth wins; at equal depth
+// exactly one json-tagged claim wins over untagged ones, and any other
+// tie cancels the name — encoding/json drops it from the wire. A
+// cancelling tie at depth 0 is the struct's own two fields (untagged
+// Go field names cannot collide), reported as claimBug rather than
+// mirrored.
+func resolveClaim(name string, claims []fieldClaim) (fieldClaim, claimState) {
+	min := claims[0].depth
+	for _, c := range claims[1:] {
+		if c.depth < min {
+			min = c.depth
+		}
+	}
+	var atMin []fieldClaim
+	for _, c := range claims {
+		if c.depth == min {
+			atMin = append(atMin, c)
+		}
+	}
+	if len(atMin) == 1 {
+		return atMin[0], claimWon
+	}
+	var tagged []fieldClaim
+	for _, c := range atMin {
+		if c.tagged {
+			tagged = append(tagged, c)
+		}
+	}
+	if len(tagged) == 1 {
+		return tagged[0], claimWon
+	}
+	if min == 0 {
+		return fieldClaim{}, claimBug
+	}
+	return fieldClaim{}, claimDropped
+}
+
+// hasTagOption reports whether opt is among a tag's comma-separated
+// options.
+func hasTagOption(rest, opt string) bool {
+	for _, o := range strings.Split(rest, ",") {
+		if o == opt {
+			return true
+		}
+	}
+	return false
+}
+
+func derefType(t reflect.Type) reflect.Type {
+	for t != nil && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	return t
+}

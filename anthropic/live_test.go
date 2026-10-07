@@ -6,9 +6,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/anthropic"
-	"github.com/weftgo/weft/wefttest/conformance"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest/conformance"
 )
 
 // TestConformanceLive runs the suite against the real API. Never in CI
@@ -30,7 +30,7 @@ func TestConformanceLive(t *testing.T) {
 		Sequential: true,
 		Usage:      true,
 		Live:       true,
-	}, func(t *testing.T, caseName string) weft.Model {
+	}, func(t *testing.T, caseName string) core.Model {
 		opts := []anthropic.Option{anthropic.APIKey(key), anthropic.Thinking(true)}
 		if caseName == "max_tokens" {
 			opts = append(opts, anthropic.MaxTokens(16))

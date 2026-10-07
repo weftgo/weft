@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // turnAdditiveSamples are the entries carrying the optional fields the
@@ -23,22 +23,22 @@ import (
 // key — no format version moved.
 func turnAdditiveSamples() map[string]thread.Entry {
 	run := sessionID + "-t2"
-	queued := weft.User("and after that, the invoices")
+	queued := core.User("and after that, the invoices")
 	return map[string]thread.Entry{
 		"format1/message_prompt.json": thread.MessageEntry{
 			ID: entryID0, Created: at(1),
-			Message: weft.User("Where is order 1234?"),
+			Message: core.User("Where is order 1234?"),
 			RunID:   sessionID + "-t1",
 		},
 		"format1/turn_policy.json": thread.TurnEntry{
 			ID: entryID1, ParentID: entryID0, Created: at(2),
-			RunID: sessionID + "-t1", StopReason: weft.StopEndTurn,
-			Usage: weft.Usage{InputTokens: 410, OutputTokens: 62}, Steps: 2,
+			RunID: sessionID + "-t1", StopReason: core.StopEndTurn,
+			Usage: core.Usage{InputTokens: 410, OutputTokens: 62}, Steps: 2,
 			Policy: thread.Interrupt.String(), LateSteps: 1,
 		},
 		"format1/turn_overflow_attempt.json": thread.TurnEntry{
 			ID: entryID1, ParentID: entryID0, Created: at(2),
-			RunID: run, Usage: weft.Usage{InputTokens: 180_000, OutputTokens: 40}, Steps: 1,
+			RunID: run, Usage: core.Usage{InputTokens: 180_000, OutputTokens: 40}, Steps: 1,
 			Err:    "weft: run failed at step 1: model stream: weft: request exceeds the model's context window",
 			Policy: thread.Queue.String(), ReRun: sessionID + "-t3",
 		},
@@ -100,12 +100,12 @@ func TestTurnAdditiveFieldGoldens(t *testing.T) {
 // The added fields are absent from the wire when empty: an entry that
 // does not use them is the bytes it was before they existed.
 func TestTurnAdditiveFieldsOmittedWhenEmpty(t *testing.T) {
-	steer := weft.User("x")
+	steer := core.User("x")
 	for name, tc := range map[string]struct {
 		e    thread.Entry
 		keys []string
 	}{
-		"message": {thread.MessageEntry{ID: entryID0, Created: at(1), Message: weft.User("x")}, []string{"run_id"}},
+		"message": {thread.MessageEntry{ID: entryID0, Created: at(1), Message: core.User("x")}, []string{"run_id"}},
 		"turn": {thread.TurnEntry{ID: entryID1, Created: at(2), RunID: sessionID + "-t1"},
 			[]string{"policy", "late_steps", "rerun", "canceled"}},
 		"receipt": {thread.ReceiptEntry{ID: entryID10, Created: at(11), Status: thread.ReceiptQueued, Msg: &steer},

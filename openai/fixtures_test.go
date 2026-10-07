@@ -13,8 +13,8 @@ import (
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest/conformance"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest/conformance"
 )
 
 // testClient builds an SDK client aimed at srv. Injecting it — instead
@@ -28,7 +28,7 @@ func testClient(srv *httptest.Server) openai.Client {
 
 // fixtureModel builds the adapter against a fixture server for one
 // recorded case.
-func fixtureModel(t *testing.T, name string, opts ...Option) weft.Model {
+func fixtureModel(t *testing.T, name string, opts ...Option) core.Model {
 	t.Helper()
 	srv := conformance.FixtureServer(t, filepath.Join("testdata", name+".sse"))
 	c := testClient(srv)
@@ -36,8 +36,8 @@ func fixtureModel(t *testing.T, name string, opts ...Option) weft.Model {
 	return Model("m", opts...)
 }
 
-func collect(m weft.Model, req weft.ModelRequest) ([]weft.ModelEvent, error) {
-	var evs []weft.ModelEvent
+func collect(m core.Model, req core.ModelRequest) ([]core.ModelEvent, error) {
+	var evs []core.ModelEvent
 	for ev, err := range m.Stream(context.Background(), req) {
 		if err != nil {
 			return evs, err
@@ -47,11 +47,11 @@ func collect(m weft.Model, req weft.ModelRequest) ([]weft.ModelEvent, error) {
 	return evs, nil
 }
 
-var basicReq = weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}}
+var basicReq = core.ModelRequest{Messages: []core.Message{core.User("hi")}}
 
-func lastFinish(t *testing.T, evs []weft.ModelEvent) weft.ModelFinish {
+func lastFinish(t *testing.T, evs []core.ModelEvent) core.ModelFinish {
 	t.Helper()
-	fin, ok := evs[len(evs)-1].(weft.ModelFinish)
+	fin, ok := evs[len(evs)-1].(core.ModelFinish)
 	if !ok {
 		t.Fatalf("last event = %T, want ModelFinish", evs[len(evs)-1])
 	}
@@ -64,16 +64,16 @@ func TestStreamToolCallSplitAcrossChunks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var calls []weft.ModelToolCall
-	var deltas []weft.ModelToolCallDelta
-	var finish weft.ModelFinish
+	var calls []core.ModelToolCall
+	var deltas []core.ModelToolCallDelta
+	var finish core.ModelFinish
 	for _, ev := range evs {
 		switch e := ev.(type) {
-		case weft.ModelToolCall:
+		case core.ModelToolCall:
 			calls = append(calls, e)
-		case weft.ModelToolCallDelta:
+		case core.ModelToolCallDelta:
 			deltas = append(deltas, e)
-		case weft.ModelFinish:
+		case core.ModelFinish:
 			finish = e
 		}
 	}
@@ -95,7 +95,7 @@ func TestStreamToolCallSplitAcrossChunks(t *testing.T) {
 	if joined.String() != `{"n":3}` {
 		t.Errorf("joined delta args = %s, want the call's arguments", joined.String())
 	}
-	if finish.Reason != weft.StopToolCalls {
+	if finish.Reason != core.StopToolCalls {
 		t.Errorf("reason = %q, want tool_calls", finish.Reason)
 	}
 	if finish.Usage.InputTokens != 9 || finish.Usage.OutputTokens != 5 {
@@ -112,9 +112,9 @@ func TestStreamTwoCallsInterleavedByIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var calls []weft.ModelToolCall
+	var calls []core.ModelToolCall
 	for _, ev := range evs {
-		if c, ok := ev.(weft.ModelToolCall); ok {
+		if c, ok := ev.(core.ModelToolCall); ok {
 			calls = append(calls, c)
 		}
 	}
@@ -137,15 +137,15 @@ func TestStreamSynthesisesIDsAndEmptyFinish(t *testing.T) {
 		t.Fatal(err)
 	}
 	var (
-		calls  []weft.ModelToolCall
-		finish weft.ModelFinish
+		calls  []core.ModelToolCall
+		finish core.ModelFinish
 		sawFin bool
 	)
 	for _, ev := range evs {
 		switch e := ev.(type) {
-		case weft.ModelToolCall:
+		case core.ModelToolCall:
 			calls = append(calls, e)
-		case weft.ModelFinish:
+		case core.ModelFinish:
 			finish, sawFin = e, true
 		}
 	}
@@ -155,7 +155,7 @@ func TestStreamSynthesisesIDsAndEmptyFinish(t *testing.T) {
 	if len(calls) != 2 || calls[0].ID != "call_1" || calls[1].ID != "call_2" {
 		t.Fatalf("calls = %+v, want synthesised call_1/call_2 in order", calls)
 	}
-	if finish.Reason != weft.StopToolCalls {
+	if finish.Reason != core.StopToolCalls {
 		t.Errorf("reason = %q, want tool_calls from buffered calls", finish.Reason)
 	}
 }
@@ -165,7 +165,7 @@ func TestStreamLengthStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fin := lastFinish(t, evs); fin.Reason != weft.StopMaxTokens {
+	if fin := lastFinish(t, evs); fin.Reason != core.StopMaxTokens {
 		t.Errorf("reason = %q, want max_tokens", fin.Reason)
 	}
 }
@@ -177,13 +177,13 @@ func TestStreamRawFinishReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fin := lastFinish(t, evs); fin.Reason != weft.StopEndTurn || fin.Raw != "content_filter" {
+	if fin := lastFinish(t, evs); fin.Reason != core.StopEndTurn || fin.Raw != "content_filter" {
 		t.Errorf("finish = %+v, want stop + raw content_filter", fin)
 	}
 	var refusal string
 	for _, ev := range evs {
 		switch e := ev.(type) {
-		case weft.ModelTextDelta:
+		case core.ModelTextDelta:
 			refusal += e.Text
 		}
 	}
@@ -201,9 +201,9 @@ func TestStreamReasoningContent(t *testing.T) {
 	var order []string
 	for _, ev := range evs {
 		switch e := ev.(type) {
-		case weft.ModelReasoningDelta:
+		case core.ModelReasoningDelta:
 			order = append(order, "r:"+e.Text)
-		case weft.ModelTextDelta:
+		case core.ModelTextDelta:
 			order = append(order, "t:"+e.Text)
 		}
 	}
@@ -222,7 +222,7 @@ func TestStreamIdleTimeout(t *testing.T) {
 	c := testClient(srv)
 	m := Model("m", Client(&c), IdleTimeout(150*time.Millisecond))
 	_, err := collect(m, basicReq)
-	if err == nil || !errors.Is(err, weft.ErrStreamIdle) {
+	if err == nil || !errors.Is(err, core.ErrStreamIdle) {
 		t.Fatalf("err = %v, want ErrStreamIdle", err)
 	}
 	if !strings.Contains(err.Error(), "150ms") {
@@ -244,7 +244,7 @@ func TestStreamCancelMidStream(t *testing.T) {
 			runErr = err
 			break
 		}
-		if _, ok := ev.(weft.ModelTextDelta); ok && !sawDelta {
+		if _, ok := ev.(core.ModelTextDelta); ok && !sawDelta {
 			sawDelta = true
 			cancel()
 		}
@@ -281,7 +281,7 @@ func TestStreamKillSwitch(t *testing.T) {
 	t.Setenv("WEFT_MODEL_REQUESTS", "deny")
 	m := Model("m", BaseURL("http://127.0.0.1:1"), APIKey("test"))
 	_, err := collect(m, basicReq)
-	if !errors.Is(err, weft.ErrModelRequestsDenied) {
+	if !errors.Is(err, core.ErrModelRequestsDenied) {
 		t.Fatalf("err = %v, want ErrModelRequestsDenied with no request made", err)
 	}
 }
@@ -302,11 +302,11 @@ func TestKillSwitchExemptsInjectedClient(t *testing.T) {
 func TestStreamUnsupportedFilePart(t *testing.T) {
 	c := openai.NewClient(option.WithBaseURL("http://127.0.0.1:1"), option.WithAPIKey("test"))
 	m := Model("m", Client(&c))
-	req := weft.ModelRequest{Messages: []weft.Message{weft.UserParts(
-		weft.FilePart{MediaType: "application/pdf", Data: []byte{1}},
+	req := core.ModelRequest{Messages: []core.Message{core.UserParts(
+		core.FilePart{MediaType: "application/pdf", Data: []byte{1}},
 	)}}
 	_, err := collect(m, req)
-	if err == nil || !errors.Is(err, weft.ErrUnsupported) {
+	if err == nil || !errors.Is(err, core.ErrUnsupported) {
 		t.Fatalf("err = %v, want ErrUnsupported", err)
 	}
 }
@@ -332,7 +332,7 @@ data: [DONE]
 		t.Fatal(err)
 	}
 	for _, ev := range evs {
-		if call, ok := ev.(weft.ModelToolCall); ok {
+		if call, ok := ev.(core.ModelToolCall); ok {
 			if call.Name != "ping" {
 				t.Errorf("call name = %q, want ping (repeated fragments overwrite)", call.Name)
 			}
@@ -363,7 +363,7 @@ data: [DONE]
 	}
 	var ids []string
 	for _, ev := range evs {
-		if call, ok := ev.(weft.ModelToolCall); ok {
+		if call, ok := ev.(core.ModelToolCall); ok {
 			ids = append(ids, call.ID)
 		}
 	}
@@ -392,9 +392,9 @@ data: [DONE]
 	if err != nil {
 		t.Fatal(err)
 	}
-	var call weft.ModelToolCall
+	var call core.ModelToolCall
 	for _, ev := range evs {
-		if c, ok := ev.(weft.ModelToolCall); ok {
+		if c, ok := ev.(core.ModelToolCall); ok {
 			call = c
 		}
 	}

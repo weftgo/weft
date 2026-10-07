@@ -7,24 +7,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
 	"github.com/weftgo/weft/thread/pool"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // gatedChild builds the child agent of the nested-approval tests: one
 // refund tool behind RequireApproval, whose handler records the
 // Approved flag it ran under.
-func gatedChild(turns ...wefttest.Turn) (*weft.Agent, *flags) {
+func gatedChild(turns ...wefttest.Turn) (*core.Agent, *flags) {
 	ran := &flags{}
-	tool := weft.Tool("refund", "", func(ctx context.Context, in struct{ OrderID string }) (string, error) {
-		call, _ := weft.CallFromContext(ctx)
+	tool := core.Tool("refund", "", func(ctx context.Context, in struct{ OrderID string }) (string, error) {
+		call, _ := core.CallFromContext(ctx)
 		ran.add(call.Approved)
 		return "refunded " + in.OrderID, nil
-	}, weft.RequireApproval())
-	return weft.New(wefttest.Script(turns...), tool), ran
+	}, core.RequireApproval())
+	return core.New(wefttest.Script(turns...), tool), ran
 }
 
 type flags struct {
@@ -69,8 +69,8 @@ func restart(t *testing.T, st thread.Storage) {
 }
 
 // the wrapped child, then concludes.
-func nestedParent(p *pool.Pool, child *weft.Agent, opts ...pool.WrapOption) *weft.Agent {
-	return weft.New(wefttest.Script(
+func nestedParent(p *pool.Pool, child *core.Agent, opts ...pool.WrapOption) *core.Agent {
+	return core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research",
 			Args: wefttest.Args(struct{ Prompt string }{"refund order 1234"})}),
 		wefttest.Say("all done"),
@@ -95,7 +95,7 @@ func TestNestedSyncFullFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	t1, err := s.Send(ctx, weft.User("refund it"))
+	t1, err := s.Send(ctx, core.User("refund it"))
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestNestedAsyncParkAndDecide(t *testing.T) {
 		wefttest.Say("child finished the refund"),
 	)
 	s, _ := thread.Create(ctx, thread.Memory(), nestedParent(p, child, pool.Async()))
-	t1, err := s.Send(ctx, weft.User("refund it"))
+	t1, err := s.Send(ctx, core.User("refund it"))
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestNestedAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	t1, err := s.Send(ctx, weft.User("refund it"))
+	t1, err := s.Send(ctx, core.User("refund it"))
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestNestedAcrossRestart(t *testing.T) {
 	// The restarted parent's agent resumes positioned too: its first
 	// model call is the continuation the boundary's resume is about to
 	// make, not the delegation it already made.
-	resumeParent := weft.New(wefttest.Script(wefttest.Say("all done")),
+	resumeParent := core.New(wefttest.Script(wefttest.Say("all done")),
 		p2.MustWrap("research", "delegates the refund flow", child2))
 	restart(t, st)
 	open, err := thread.Open(ctx, st, s.ID(), resumeParent)
@@ -324,7 +324,7 @@ func TestNestedSignedDecision(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"5"}`}),
 		wefttest.Say("signed refund done"),
 	)
-	parent := weft.New(wefttest.Script(
+	parent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"go"}`}),
 		wefttest.Say("all done"),
 	), p.MustWrap("research", "", child))
@@ -332,7 +332,7 @@ func TestNestedSignedDecision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	t1, _ := s.Send(ctx, weft.User("refund it"))
+	t1, _ := s.Send(ctx, core.User("refund it"))
 	if _, err := t1.Wait(); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestNestedDeny(t *testing.T) {
 		wefttest.Say("refund refused by the approver"),
 	)
 	s, _ := thread.Create(ctx, st, nestedParent(p, child))
-	t1, _ := s.Send(ctx, weft.User("refund it"))
+	t1, _ := s.Send(ctx, core.User("refund it"))
 	if _, err := t1.Wait(); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
@@ -417,7 +417,7 @@ func TestNestedDeny(t *testing.T) {
 	saw := false
 	for _, m := range childOpen.Context() {
 		for _, part := range m.Content {
-			if tp, ok := part.(weft.ToolResultPart); ok && tp.IsError && tp.Content == "DENIED: out of policy" {
+			if tp, ok := part.(core.ToolResultPart); ok && tp.IsError && tp.Content == "DENIED: out of policy" {
 				saw = true
 			}
 		}
@@ -431,14 +431,14 @@ func TestNestedDeny(t *testing.T) {
 // child's turn; an unknown or settled receipt refuses.
 func TestForward(t *testing.T) {
 	ctx := context.Background()
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	p := pool.New(1)
 	inTool := make(chan struct{})
 	proceed := make(chan struct{})
-	child := weft.New(wefttest.Script(
+	child := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "work", Args: `{}`}),
 		wefttest.Say("steer noted"),
-	), weft.Tool("work", "", func(_ context.Context, _ struct{}) (string, error) {
+	), core.Tool("work", "", func(_ context.Context, _ struct{}) (string, error) {
 		close(inTool)
 		<-proceed
 		return "worked", nil
@@ -449,7 +449,7 @@ func TestForward(t *testing.T) {
 	}
 	<-inTool // the child is mid-run inside its tool
 
-	st, err := p.Forward(ctx, s, r.ID, weft.User("switch to euros"))
+	st, err := p.Forward(ctx, s, r.ID, core.User("switch to euros"))
 	if err != nil {
 		t.Fatalf("Forward: %v", err)
 	}
@@ -465,9 +465,9 @@ func TestForward(t *testing.T) {
 	}
 	saw := false
 	for _, m := range childOpen.Context() {
-		if m.Role == weft.RoleUser {
+		if m.Role == core.RoleUser {
 			for _, part := range m.Content {
-				if tp, ok := part.(weft.TextPart); ok && tp.Text == "switch to euros" {
+				if tp, ok := part.(core.TextPart); ok && tp.Text == "switch to euros" {
 					saw = true
 				}
 			}
@@ -477,7 +477,7 @@ func TestForward(t *testing.T) {
 		t.Errorf("the forwarded message never reached the child's transcript")
 	}
 	// A settled receipt refuses.
-	if _, err := p.Forward(ctx, s, r.ID, weft.User("late")); !errors.Is(err, pool.ErrNotRunning) {
+	if _, err := p.Forward(ctx, s, r.ID, core.User("late")); !errors.Is(err, pool.ErrNotRunning) {
 		t.Errorf("Forward after settle err = %v", err)
 	}
 	if err := p.Close(ctx); err != nil {
@@ -491,19 +491,19 @@ func TestForward(t *testing.T) {
 // between Send returning and the mark was a false ErrNotRunning.
 func TestForwardSeesStart(t *testing.T) {
 	ctx := context.Background()
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	p := pool.New(1)
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
-	child := weft.New(blocking{release: release, text: "ran",
+	child := core.New(blocking{release: release, text: "ran",
 		onStart: func() { once.Do(func() { close(started) }) }})
 	r, err := p.Submit(ctx, s, child, "go")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	<-started // the model is running: Forward must serve it, not refuse
-	if _, err := p.Forward(ctx, s, r.ID, weft.User("steer")); err != nil {
+	if _, err := p.Forward(ctx, s, r.ID, core.User("steer")); err != nil {
 		t.Fatalf("Forward at the run's start: %v", err)
 	}
 	close(release)
@@ -520,7 +520,7 @@ func TestForwardSeesStart(t *testing.T) {
 func TestConcurrentDecide(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 8; i++ {
-		s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+		s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 		p := pool.New(1)
 		child, _ := gatedChild(
 			wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}),
@@ -569,17 +569,17 @@ func TestConcurrentDecide(t *testing.T) {
 func TestBareSubagentPendingUnchanged(t *testing.T) {
 	ctx := context.Background()
 	p := pool.New(1)
-	tool := weft.Tool("spend", "", func(_ context.Context, _ struct{}) (string, error) {
+	tool := core.Tool("spend", "", func(_ context.Context, _ struct{}) (string, error) {
 		return "spent", nil
-	}, weft.RequireApproval())
-	child := weft.New(wefttest.Script(
+	}, core.RequireApproval())
+	child := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "spend", Args: `{}`}),
 	), tool)
-	parent := weft.New(wefttest.Script(
+	parent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "ask", Args: `{"prompt":"go"}`}),
 		wefttest.Say("noted the failure"),
 	), p.MustWrap("ask", "", child))
-	res, err := parent.Generate(ctx, weft.Prompt("go"))
+	res, err := parent.Generate(ctx, core.Prompt("go"))
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -589,7 +589,7 @@ func TestBareSubagentPendingUnchanged(t *testing.T) {
 	saw := ""
 	for _, m := range res.Messages {
 		for _, part := range m.Content {
-			if tp, ok := part.(weft.ToolResultPart); ok {
+			if tp, ok := part.(core.ToolResultPart); ok {
 				saw = tp.Content
 			}
 		}
@@ -610,7 +610,7 @@ func TestRegisterResumesParkedSubmitChild(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"2"}`}),
 		wefttest.Say("registered resume done"),
 	)
-	s, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 	r, err := p.Submit(ctx, s, child, "refund order 2")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -642,7 +642,7 @@ func TestRegisterResumesParkedSubmitChild(t *testing.T) {
 	if err := s.Close(ctx); err != nil {
 		t.Fatalf("Close the old parent: %v", err)
 	}
-	open, err := thread.Open(ctx, st, s.ID(), weft.New(wefttest.Script()))
+	open, err := thread.Open(ctx, st, s.ID(), core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -666,11 +666,11 @@ func TestRegisterResumesParkedSubmitChild(t *testing.T) {
 }
 
 // toolResultsOf renders a context's tool results in order.
-func toolResultsOf(msgs []weft.Message) []string {
+func toolResultsOf(msgs []core.Message) []string {
 	var out []string
 	for _, m := range msgs {
 		for _, part := range m.Content {
-			if tp, ok := part.(weft.ToolResultPart); ok {
+			if tp, ok := part.(core.ToolResultPart); ok {
 				out = append(out, tp.Content)
 			}
 		}
@@ -684,11 +684,11 @@ func toolResultsOf(msgs []weft.Message) []string {
 // child").
 func TestForwardRequiresRunning(t *testing.T) {
 	ctx := context.Background()
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	p := pool.New(1)
 	warmStarted := make(chan struct{})
 	warmRelease := make(chan struct{})
-	warm, err := p.Submit(ctx, s, weft.New(blocking{release: warmRelease, text: "warm",
+	warm, err := p.Submit(ctx, s, core.New(blocking{release: warmRelease, text: "warm",
 		onStart: func() { close(warmStarted) }}), "warm")
 	if err != nil {
 		t.Fatalf("Submit warm: %v", err)
@@ -697,23 +697,23 @@ func TestForwardRequiresRunning(t *testing.T) {
 	waitStarted := make(chan struct{})
 	release := make(chan struct{})
 	// Queued behind the warm-up: accepted, not running.
-	r, err := p.Submit(ctx, s, weft.New(blocking{release: release, text: "task",
+	r, err := p.Submit(ctx, s, core.New(blocking{release: release, text: "task",
 		onStart: func() { close(waitStarted) }}), "the task")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	if _, err := p.Forward(ctx, s, r.ID, weft.User("early")); !errors.Is(err, pool.ErrNotRunning) {
+	if _, err := p.Forward(ctx, s, r.ID, core.User("early")); !errors.Is(err, pool.ErrNotRunning) {
 		t.Fatalf("Forward to a queued child err = %v, want ErrNotRunning", err)
 	}
 	close(warmRelease)
 	waitState(t, s, thread.PoolDone)
 	<-waitStarted
-	if _, err := p.Forward(ctx, s, r.ID, weft.User("on time")); err != nil {
+	if _, err := p.Forward(ctx, s, r.ID, core.User("on time")); err != nil {
 		t.Fatalf("Forward to the now-running child: %v", err)
 	}
 	close(release)
 	waitState(t, s, thread.PoolDone)
-	if _, err := p.Forward(ctx, s, warm.ID, weft.User("late")); !errors.Is(err, pool.ErrNotRunning) {
+	if _, err := p.Forward(ctx, s, warm.ID, core.User("late")); !errors.Is(err, pool.ErrNotRunning) {
 		t.Errorf("Forward after settle err = %v, want ErrNotRunning", err)
 	}
 	if err := p.Close(ctx); err != nil {

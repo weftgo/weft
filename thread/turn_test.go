@@ -9,16 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // blockingTool returns a tool that blocks until release is closed (or
 // ctx dies), for the busy-policy and cancellation rows.
-func blockingTool() (*weft.ToolDef, *release) {
+func blockingTool() (*core.ToolDef, *release) {
 	r := &release{ch: make(chan struct{})}
-	return weft.Tool("wait", "blocks until released", func(ctx context.Context, in struct{}) (string, error) {
+	return core.Tool("wait", "blocks until released", func(ctx context.Context, in struct{}) (string, error) {
 		select {
 		case <-r.ch:
 			return "released", nil
@@ -38,10 +38,10 @@ func (r *release) open() { r.once.Do(func() { close(r.ch) }) }
 func TestSendMultiTurn(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script(wefttest.Say("first reply"), wefttest.Say("second reply")))
+		agent := core.New(wefttest.Script(wefttest.Say("first reply"), wefttest.Say("second reply")))
 		s, _ := thread.Create(ctx, st, agent)
 
-		t1, err := s.Send(ctx, weft.User("question one"))
+		t1, err := s.Send(ctx, core.User("question one"))
 		if err != nil {
 			t.Fatalf("Send 1: %v", err)
 		}
@@ -52,7 +52,7 @@ func TestSendMultiTurn(t *testing.T) {
 		if res1.Text() != "first reply" {
 			t.Errorf("reply 1 = %q", res1.Text())
 		}
-		t2, err := s.Send(ctx, weft.User("question two"))
+		t2, err := s.Send(ctx, core.User("question two"))
 		if err != nil {
 			t.Fatalf("Send 2: %v", err)
 		}
@@ -89,7 +89,7 @@ func TestSendMultiTurn(t *testing.T) {
 				if te.RunID != s.ID()+"-t"+string(rune('0'+turns)) {
 					t.Errorf("turn entry run id = %q", te.RunID)
 				}
-				if te.StopReason != weft.StopEndTurn {
+				if te.StopReason != core.StopEndTurn {
 					t.Errorf("turn entry stop = %q", te.StopReason)
 				}
 				if te.Usage.InputTokens != 10 {
@@ -110,17 +110,17 @@ func TestSendFailureKeepsPartial(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		boom := errors.New("boom")
-		agent := weft.New(
+		agent := core.New(
 			wefttest.Script(
 				wefttest.ToolCalls(wefttest.Call{Name: "lookup"}),
 				wefttest.Fail(boom),
 			),
-			weft.Tool("lookup", "finds an order", func(ctx context.Context, in struct{}) (string, error) {
+			core.Tool("lookup", "finds an order", func(ctx context.Context, in struct{}) (string, error) {
 				return "order 1234 shipped", nil
 			}),
 		)
 		s, _ := thread.Create(ctx, st, agent)
-		t1, err := s.Send(ctx, weft.User("where is order 1234?"))
+		t1, err := s.Send(ctx, core.User("where is order 1234?"))
 		if err != nil {
 			t.Fatalf("Send: %v", err)
 		}
@@ -128,9 +128,9 @@ func TestSendFailureKeepsPartial(t *testing.T) {
 		if err == nil {
 			t.Fatal("failed script: no error from Wait")
 		}
-		var runErr *weft.RunError
+		var runErr *core.RunError
 		if !errors.As(err, &runErr) {
-			t.Fatalf("Wait err = %T (%v), want *weft.RunError", err, err)
+			t.Fatalf("Wait err = %T (%v), want *core.RunError", err, err)
 		}
 		if res != nil {
 			t.Error("Wait returned a result with the error")
@@ -143,7 +143,7 @@ func TestSendFailureKeepsPartial(t *testing.T) {
 		if len(msgs) != 3 {
 			t.Fatalf("Context = %d messages, want 3 (prompt, call, result)", len(msgs))
 		}
-		if msgs[1].Role != weft.RoleAssistant || msgs[2].Role != weft.RoleTool {
+		if msgs[1].Role != core.RoleAssistant || msgs[2].Role != core.RoleTool {
 			t.Errorf("partial roles = %q, %q", msgs[1].Role, msgs[2].Role)
 		}
 		found := false
@@ -182,7 +182,7 @@ func TestSendCancel(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		tool, _ := blockingTool()
-		agent := weft.New(
+		agent := core.New(
 			wefttest.Script(
 				wefttest.ToolCalls(wefttest.Call{Name: "wait"}),
 				wefttest.Say("never reached"),
@@ -193,7 +193,7 @@ func TestSendCancel(t *testing.T) {
 
 		runCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		t1, err := s.Send(runCtx, weft.User("go wait"))
+		t1, err := s.Send(runCtx, core.User("go wait"))
 		if err != nil {
 			t.Fatalf("Send: %v", err)
 		}
@@ -202,7 +202,7 @@ func TestSendCancel(t *testing.T) {
 			if err != nil {
 				break
 			}
-			if _, ok := ev.(weft.ToolStart); ok {
+			if _, ok := ev.(core.ToolStart); ok {
 				cancel()
 			}
 		}
@@ -234,7 +234,7 @@ func TestSendCancel(t *testing.T) {
 func TestSendQueueOrdering(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script(
+		agent := core.New(wefttest.Script(
 			wefttest.Say("r"), wefttest.Say("r"), wefttest.Say("r"),
 			wefttest.Say("r"), wefttest.Say("r"),
 		))
@@ -248,7 +248,7 @@ func TestSendQueueOrdering(t *testing.T) {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				turn, err := s.Send(ctx, weft.User("follow-up"))
+				turn, err := s.Send(ctx, core.User("follow-up"))
 				if err != nil {
 					t.Errorf("Send %d: %v", i, err)
 					return
@@ -272,9 +272,9 @@ func TestSendQueueOrdering(t *testing.T) {
 			t.Fatalf("Context = %d messages, want %d", len(msgs), 2*n)
 		}
 		for i, m := range msgs {
-			wantRole := weft.RoleUser
+			wantRole := core.RoleUser
 			if i%2 == 1 {
-				wantRole = weft.RoleAssistant
+				wantRole = core.RoleAssistant
 			}
 			if m.Role != wantRole {
 				t.Errorf("message %d role = %q, want %q (prompts and replies must not interleave)", i, m.Role, wantRole)
@@ -306,7 +306,7 @@ func TestSendReject(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		tool, rel := blockingTool()
-		agent := weft.New(
+		agent := core.New(
 			wefttest.Script(
 				wefttest.ToolCalls(wefttest.Call{Name: "wait"}),
 				wefttest.Say("done waiting"),
@@ -316,11 +316,11 @@ func TestSendReject(t *testing.T) {
 		)
 		s, _ := thread.Create(ctx, st, agent, thread.BusyPolicy(thread.Reject))
 
-		t1, err := s.Send(ctx, weft.User("first"))
+		t1, err := s.Send(ctx, core.User("first"))
 		if err != nil {
 			t.Fatalf("Send 1: %v", err)
 		}
-		if _, err := s.Send(ctx, weft.User("second")); !errors.Is(err, thread.ErrBusy) {
+		if _, err := s.Send(ctx, core.User("second")); !errors.Is(err, thread.ErrBusy) {
 			t.Fatalf("Send while busy: err = %v, want ErrBusy", err)
 		}
 		rel.open()
@@ -328,7 +328,7 @@ func TestSendReject(t *testing.T) {
 			t.Fatalf("Wait 1: %v", err)
 		}
 		// The runner slot is free again.
-		t2, err := s.Send(ctx, weft.User("third"))
+		t2, err := s.Send(ctx, core.User("third"))
 		if err != nil {
 			t.Fatalf("Send after idle: %v", err)
 		}
@@ -345,11 +345,11 @@ func TestSendReject(t *testing.T) {
 func TestSendEventsInOrder(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script(wefttest.Say("hello")))
+		agent := core.New(wefttest.Script(wefttest.Say("hello")))
 		s, _ := thread.Create(ctx, st, agent)
-		t1, _ := s.Send(ctx, weft.User("hi"))
+		t1, _ := s.Send(ctx, core.User("hi"))
 
-		var events []weft.Event
+		var events []core.Event
 		for ev, err := range t1.Events() {
 			if err != nil {
 				t.Fatalf("Events err: %v", err)
@@ -359,10 +359,10 @@ func TestSendEventsInOrder(t *testing.T) {
 		if len(events) < 3 {
 			t.Fatalf("events = %d, want at least RunStart, StepStart, …", len(events))
 		}
-		if _, ok := events[0].(weft.RunStart); !ok {
+		if _, ok := events[0].(core.RunStart); !ok {
 			t.Errorf("first event = %T, want RunStart", events[0])
 		}
-		if _, ok := events[len(events)-1].(weft.RunFinish); !ok {
+		if _, ok := events[len(events)-1].(core.RunFinish); !ok {
 			t.Errorf("last event = %T, want RunFinish", events[len(events)-1])
 		}
 		// The step events of one run arrive in their loop order:
@@ -399,9 +399,9 @@ func TestSendEventsInOrder(t *testing.T) {
 func TestSendPromptDurableWhenRunNeverStarts(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script()) // empty: the first model call fails
+		agent := core.New(wefttest.Script()) // empty: the first model call fails
 		s, _ := thread.Create(ctx, st, agent)
-		t1, err := s.Send(ctx, weft.User("answer me"))
+		t1, err := s.Send(ctx, core.User("answer me"))
 		if err != nil {
 			t.Fatalf("Send: %v", err)
 		}
@@ -422,30 +422,30 @@ func TestSendPromptDurableWhenRunNeverStarts(t *testing.T) {
 
 func TestSendRunOptionsRejected(t *testing.T) {
 	ctx := context.Background()
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	// What the session owns: the transcript, the run id, the steering
 	// source, and the approval decisions — a Send never reaches a parked
 	// call, so a decision passed here would apply to nothing.
-	for name, opt := range map[string]weft.RunOption{
-		"Messages":     weft.Messages(weft.User("x")),
-		"Prompt":       weft.Prompt("x"),
-		"RunID":        weft.RunID("mine"),
-		"Steering":     weft.Steering(func(context.Context, weft.SteerPoint) []weft.Message { return nil }),
-		"Approve":      weft.Approve("call_1"),
-		"Deny":         weft.Deny("call_1", "not mine"),
-		"Resolve":      weft.Resolve("call_1", "done by hand"),
-		"ResolveError": weft.ResolveError("call_1", "failed by hand"),
+	for name, opt := range map[string]core.RunOption{
+		"Messages":     core.Messages(core.User("x")),
+		"Prompt":       core.Prompt("x"),
+		"RunID":        core.RunID("mine"),
+		"Steering":     core.Steering(func(context.Context, core.SteerPoint) []core.Message { return nil }),
+		"Approve":      core.Approve("call_1"),
+		"Deny":         core.Deny("call_1", "not mine"),
+		"Resolve":      core.Resolve("call_1", "done by hand"),
+		"ResolveError": core.ResolveError("call_1", "failed by hand"),
 	} {
-		_, err := s.Send(ctx, weft.User("q"), thread.RunOptions(weft.MaxSteps(2), opt))
-		if !errors.Is(err, weft.ErrInvalidRunOption) {
-			t.Errorf("RunOptions(%s): %v, want weft.ErrInvalidRunOption", name, err)
+		_, err := s.Send(ctx, core.User("q"), thread.RunOptions(core.MaxSteps(2), opt))
+		if !errors.Is(err, core.ErrInvalidRunOption) {
+			t.Errorf("RunOptions(%s): %v, want core.ErrInvalidRunOption", name, err)
 		}
 	}
 	if n := len(s.Entries()); n != 0 {
 		t.Errorf("a rejected Send wrote %d entries", n)
 	}
 	// Without the rejected options the run carries the caller's extras.
-	turn, err := s.Send(ctx, weft.User("q"), thread.RunOptions(weft.Metadata(map[string]string{"tenant": "acme"})))
+	turn, err := s.Send(ctx, core.User("q"), thread.RunOptions(core.Metadata(map[string]string{"tenant": "acme"})))
 	if err != nil {
 		t.Fatalf("RunOptions(Metadata): %v", err)
 	}
@@ -456,7 +456,7 @@ func TestSendQueuedPromptSurvivesCancel(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		tool, rel := blockingTool()
-		agent := weft.New(
+		agent := core.New(
 			wefttest.Script(
 				wefttest.ToolCalls(wefttest.Call{Name: "wait"}),
 				wefttest.Say("done"),
@@ -466,11 +466,11 @@ func TestSendQueuedPromptSurvivesCancel(t *testing.T) {
 		)
 		s, _ := thread.Create(ctx, st, agent)
 
-		t1, _ := s.Send(ctx, weft.User("first"))
+		t1, _ := s.Send(ctx, core.User("first"))
 		// Accepted while live, then its context dies while it waits
 		// in the queue: the prompt is still kept.
 		queuedCtx, cancel := context.WithCancel(ctx)
-		t2, err := s.Send(queuedCtx, weft.User("second"))
+		t2, err := s.Send(queuedCtx, core.User("second"))
 		if err != nil {
 			t.Fatalf("queued Send: %v", err)
 		}
@@ -504,14 +504,14 @@ func TestSendQueuedPromptSurvivesCancel(t *testing.T) {
 func TestSendConcurrentSessionsAndReads(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script(wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok")))
+		agent := core.New(wefttest.Script(wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok")))
 		s, _ := thread.Create(ctx, st, agent)
 		var wg sync.WaitGroup
 		for i := 0; i < 4; i++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				turn, err := s.Send(ctx, weft.User("q"))
+				turn, err := s.Send(ctx, core.User("q"))
 				if err != nil {
 					t.Errorf("Send: %v", err)
 					return
@@ -556,20 +556,20 @@ func TestSendPendingApprovalResume(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		ran := make(chan string, 1)
-		agent := weft.New(
+		agent := core.New(
 			wefttest.Script(
 				wefttest.ToolCalls(wefttest.Call{Name: "dangerous", ID: "call_9"}),
 				wefttest.Say("the call ran"),
 				wefttest.Say("queued reply"),
 			),
-			weft.Tool("dangerous", "needs a human", func(ctx context.Context, in struct{}) (string, error) {
+			core.Tool("dangerous", "needs a human", func(ctx context.Context, in struct{}) (string, error) {
 				ran <- "ran"
 				return "approved result", nil
-			}, weft.RequireApproval()),
+			}, core.RequireApproval()),
 		)
 		s, _ := thread.Create(ctx, st, agent)
 
-		t1, err := s.Send(ctx, weft.User("do the dangerous thing"))
+		t1, err := s.Send(ctx, core.User("do the dangerous thing"))
 		if err != nil {
 			t.Fatalf("Send 1: %v", err)
 		}
@@ -587,7 +587,7 @@ func TestSendPendingApprovalResume(t *testing.T) {
 		// §1): the manual Send-with-a-decision path is superseded, and
 		// a Send now queues behind the open boundary instead.
 		open := reopen(t, ctx, st, s)
-		var pending []weft.ToolCallPart
+		var pending []core.ToolCallPart
 		for _, e := range open.Entries() {
 			if te, ok := e.(thread.TurnEntry); ok && len(te.Pending) > 0 {
 				pending = te.Pending
@@ -600,7 +600,7 @@ func TestSendPendingApprovalResume(t *testing.T) {
 			t.Fatalf("reopened Pending = %+v, want call_9", pend)
 		}
 
-		t2, err := s.Send(ctx, weft.User("approve it"))
+		t2, err := s.Send(ctx, core.User("approve it"))
 		if err != nil {
 			t.Fatalf("Send 2: %v", err)
 		}
@@ -638,9 +638,9 @@ func TestSendPendingApprovalResume(t *testing.T) {
 func TestSendRunIDUniqueAcrossReopen(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script(wefttest.Say("a"), wefttest.Say("b")))
+		agent := core.New(wefttest.Script(wefttest.Say("a"), wefttest.Say("b")))
 		s, _ := thread.Create(ctx, st, agent)
-		t1, _ := s.Send(ctx, weft.User("one"))
+		t1, _ := s.Send(ctx, core.User("one"))
 		if _, err := t1.Wait(); err != nil {
 			t.Fatal(err)
 		}
@@ -651,7 +651,7 @@ func TestSendRunIDUniqueAcrossReopen(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t2, err := s2.Send(ctx, weft.User("two"))
+		t2, err := s2.Send(ctx, core.User("two"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -668,24 +668,24 @@ func TestSendAfterFailedTurn(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		boom := errors.New("boom")
-		agent := weft.New(
+		agent := core.New(
 			wefttest.Script(
 				wefttest.ToolCalls(wefttest.Call{Name: "lookup"}),
 				wefttest.Fail(boom),
 				wefttest.Say("recovered"),
 			),
-			weft.Tool("lookup", "", func(ctx context.Context, in struct{}) (string, error) {
+			core.Tool("lookup", "", func(ctx context.Context, in struct{}) (string, error) {
 				return "found", nil
 			}),
 		)
 		s, _ := thread.Create(ctx, st, agent)
-		t1, _ := s.Send(ctx, weft.User("first"))
+		t1, _ := s.Send(ctx, core.User("first"))
 		if _, err := t1.Wait(); err == nil {
 			t.Fatal("want the scripted failure")
 		}
 		// Nothing from the failed turn corrupts the next turn: the
 		// context is a valid transcript and the run continues.
-		t2, err := s.Send(ctx, weft.User("try again"))
+		t2, err := s.Send(ctx, core.User("try again"))
 		if err != nil {
 			t.Fatalf("Send after failure: %v", err)
 		}
@@ -705,17 +705,17 @@ func TestSendAfterFailedTurn(t *testing.T) {
 func TestSendToolPanicRecordsTurn(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(
+		agent := core.New(
 			wefttest.Script(
 				wefttest.ToolCalls(wefttest.Call{Name: "bang"}),
 				wefttest.Say("carried on"),
 			),
-			weft.Tool("bang", "", func(ctx context.Context, in struct{}) (string, error) {
+			core.Tool("bang", "", func(ctx context.Context, in struct{}) (string, error) {
 				panic("tool blew up")
 			}),
 		)
 		s, _ := thread.Create(ctx, st, agent)
-		t1, _ := s.Send(ctx, weft.User("use the tool"))
+		t1, _ := s.Send(ctx, core.User("use the tool"))
 		res, err := t1.Wait()
 		if err != nil {
 			t.Fatalf("a contained tool panic must not fail the run: %v", err)

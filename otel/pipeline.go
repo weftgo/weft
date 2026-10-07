@@ -31,7 +31,7 @@ var envGetenv = os.Getenv
 
 // Instrumentation names, shared with the core's.
 const (
-	instrumentationName = "github.com/weftgo/weft"
+	instrumentationName = "github.com/weftgo/weft/core"
 	eventHeartbeat      = "weft.heartbeat"
 )
 

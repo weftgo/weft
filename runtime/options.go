@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/studio"
 	"github.com/weftgo/weft/thread"
@@ -21,8 +21,8 @@ type config struct {
 	studioURL   string
 	studioToken string
 	local       *studio.Server // setup A: the embedded Studio, in-process
-	agents      []*weft.Agent
-	models      map[string]weft.Model
+	agents      []*core.Agent
+	models      map[string]core.Model
 	budget      Budget
 	allow       map[string]bool
 	threads     thread.Storage
@@ -49,21 +49,21 @@ func Local(srv *studio.Server) Option {
 
 // Agents registers the agents this runtime exposes. Only registered
 // agents are playable (WEFT-PLAYGROUND.md §5.2). An agent without a
-// name (weft.Name) cannot register — its manifest would be nameless —
+// name (core.Name) cannot register — its manifest would be nameless —
 // and is skipped with a WARN.
-func Agents(agents ...*weft.Agent) Option {
+func Agents(agents ...*core.Agent) Option {
 	return func(c *config) { c.agents = append(c.agents, agents...) }
 }
 
 // Models declares the model alternates a command may switch to, by
 // display name — the allow-list the playground's model picker reads
 // and the resolver that turns a command's model string back into a
-// weft.Model (§5.2). A name missing here is refused: the playground
+// core.Model (§5.2). A name missing here is refused: the playground
 // cannot add a model, only choose among the ones the code registered.
-func Models(models map[string]weft.Model) Option {
+func Models(models map[string]core.Model) Option {
 	return func(c *config) {
 		if c.models == nil {
-			c.models = make(map[string]weft.Model, len(models))
+			c.models = make(map[string]core.Model, len(models))
 		}
 		for name, m := range models {
 			c.models[name] = m
@@ -95,14 +95,14 @@ func Limits(b Budget) Option {
 // is a side effect like any other: a call matching one the source run
 // recorded is answered with the recorded result, any other call parks
 // at the approval boundary ("park" answers nothing from the record).
-// A tool marked weft.Replay(weft.ReplaySafe) is not a side effect and
+// A tool marked core.Replay(core.ReplaySafe) is not a side effect and
 // runs in every mode, opted in or not. A command that asks for "allow"
 // is refused unless every tool it leaves on is named here or vouched
 // ReplaySafe — "allow" runs this list for real, it does not widen it.
 //
 // Name a tool here only when re-running it is harmless. Names match
-// wherever the run reaches: a tool a weft.ToolSource supplies under
-// that name, and a tool of that name in a weft.Subagent child (the
+// wherever the run reaches: a tool a core.ToolSource supplies under
+// that name, and a tool of that name in a core.Subagent child (the
 // child is under the same rule — its other tools park).
 func AllowSideEffects(tools ...string) Option {
 	return func(c *config) {

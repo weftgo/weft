@@ -3,7 +3,7 @@ package otel
 import (
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkresource "go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -27,16 +27,16 @@ type ContentConfig struct {
 	// Redact is applied to a content field before the cap; nil = identity.
 	// It sees event and delta bodies and weft.messages transcript
 	// records, the latter part by part with the kind the same content
-	// has on the event path: text parts (every role) weft.ContentText,
-	// reasoning weft.ContentReasoning, tool-call args weft.ContentArgs (an
+	// has on the event path: text parts (every role) core.ContentText,
+	// reasoning core.ContentReasoning, tool-call args core.ContentArgs (an
 	// output that is not JSON is carried as a JSON string), tool results
-	// weft.ContentResult. Ids, names, roles, signatures and file parts are
+	// core.ContentResult. Ids, names, roles, signatures and file parts are
 	// not passed to it; a transcript record is redacted, never capped. It
 	// runs on the run's goroutine: a panic in it is contained — the event
 	// goes out stripped, the transcript record not at all — and counted
 	// as the destination's drop; so is a transcript record that cannot be
 	// decoded for redaction. Nothing it was given is ever sent unredacted.
-	Redact func(kind weft.ContentKind, s string) string
+	Redact func(kind core.ContentKind, s string) string
 }
 
 // Content sets the pipeline-wide default for destinations with content
@@ -196,7 +196,7 @@ func WithContent(cfg ...ContentConfig) DestOption {
 }
 
 // NoContent turns content off: the chain strips event and delta bodies
-// (weft.StripContent) and drops messages records before its exporter.
+// (core.StripContent) and drops messages records before its exporter.
 func NoContent() DestOption {
 	return destOptionFunc(func(d *dest) {
 		on := false

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // Transcript edits (WEFT-PLAYGROUND §1's Transcript knob, D2/D3): a
@@ -33,12 +33,12 @@ import (
 // refuses a prefix that leaves one of the kept steps' calls without a
 // result: Repair would synthesize one, and the experiment would run on
 // a transcript nobody wrote.
-func keptPrefix(src *sourceRun, fromStep int) ([]weft.Message, error) {
+func keptPrefix(src *sourceRun, fromStep int) ([]core.Message, error) {
 	cut := cutAtStep(src.steps, fromStep)
 	if err := prefixComplete(src.steps[:cut]); err != nil {
 		return nil, err
 	}
-	out := make([]weft.Message, 0, len(src.input)+cut)
+	out := make([]core.Message, 0, len(src.input)+cut)
 	out = append(out, src.input...)
 	return append(out, src.steps[:cut]...), nil
 }
@@ -55,7 +55,7 @@ func keptPrefix(src *sourceRun, fromStep int) ([]weft.Message, error) {
 //     meaning);
 //   - a kept prefix that leaves a call without a result (from_step
 //     must land on a step boundary).
-func applyTranscriptEdits(src *sourceRun, fromStep int, edits []transcriptEdit) ([]weft.Message, error) {
+func applyTranscriptEdits(src *sourceRun, fromStep int, edits []transcriptEdit) ([]core.Message, error) {
 	if len(edits) == 0 {
 		return keptPrefix(src, fromStep)
 	}
@@ -65,9 +65,9 @@ func applyTranscriptEdits(src *sourceRun, fromStep int, edits []transcriptEdit) 
 	cut := cutAtStep(src.steps, fromStep)
 	// The kept steps are copied deep enough to patch: the source is
 	// shared by every reader of this command.
-	steps := make([]weft.Message, cut)
+	steps := make([]core.Message, cut)
 	for i, m := range src.steps[:cut] {
-		steps[i] = weft.Message{Role: m.Role, Content: append([]weft.Part(nil), m.Content...)}
+		steps[i] = core.Message{Role: m.Role, Content: append([]core.Part(nil), m.Content...)}
 	}
 
 	for _, e := range edits {
@@ -100,7 +100,7 @@ func applyTranscriptEdits(src *sourceRun, fromStep int, edits []transcriptEdit) 
 	if err := prefixComplete(steps); err != nil {
 		return nil, err
 	}
-	out := make([]weft.Message, 0, len(src.input)+cut)
+	out := make([]core.Message, 0, len(src.input)+cut)
 	out = append(out, src.input...)
 	return append(out, steps...), nil
 }
@@ -109,19 +109,19 @@ func applyTranscriptEdits(src *sourceRun, fromStep int, edits []transcriptEdit) 
 // of call callID inside step (a tool message belongs to the step its
 // assistant message opened). Scoped to the step: call ids are only
 // unique within a run's step, and a deterministic model reuses them.
-func patchResult(steps []weft.Message, step int, callID, content string) bool {
+func patchResult(steps []core.Message, step int, callID, content string) bool {
 	patched := false
 	at := -1 // the step the walk is in; -1 before the first assistant message
 	for mi := range steps {
-		if steps[mi].Role == weft.RoleAssistant {
+		if steps[mi].Role == core.RoleAssistant {
 			at++
 			continue
 		}
-		if steps[mi].Role != weft.RoleTool || at != step {
+		if steps[mi].Role != core.RoleTool || at != step {
 			continue
 		}
 		for pi := range steps[mi].Content {
-			tr, ok := steps[mi].Content[pi].(weft.ToolResultPart)
+			tr, ok := steps[mi].Content[pi].(core.ToolResultPart)
 			if !ok || tr.CallID != callID {
 				continue
 			}
@@ -137,19 +137,19 @@ func patchResult(steps []weft.Message, step int, callID, content string) bool {
 // rewriteReply replaces one step's assistant message with a plain-text
 // reply. It refuses a message that carried tool calls: their results
 // would become orphans Repair drops silently.
-func rewriteReply(steps []weft.Message, step int, content string) bool {
+func rewriteReply(steps []core.Message, step int, content string) bool {
 	assistants := 0
 	for mi := range steps {
-		if steps[mi].Role != weft.RoleAssistant {
+		if steps[mi].Role != core.RoleAssistant {
 			continue
 		}
 		if assistants == step {
 			for _, p := range steps[mi].Content {
-				if _, ok := p.(weft.ToolCallPart); ok {
+				if _, ok := p.(core.ToolCallPart); ok {
 					return false
 				}
 			}
-			steps[mi].Content = []weft.Part{weft.TextPart{Text: content}}
+			steps[mi].Content = []core.Part{core.TextPart{Text: content}}
 			return true
 		}
 		assistants++
@@ -161,24 +161,24 @@ func rewriteReply(steps []weft.Message, step int, content string) bool {
 // call they made has a result among them. A from_step that lands
 // mid-step (or a source that never finished one — a parked or failed
 // run) fails here instead of letting Repair synthesize results.
-func prefixComplete(steps []weft.Message) error {
+func prefixComplete(steps []core.Message) error {
 	answered := map[string]bool{}
 	for _, m := range steps {
-		if m.Role != weft.RoleTool {
+		if m.Role != core.RoleTool {
 			continue
 		}
 		for _, p := range m.Content {
-			if tr, ok := p.(weft.ToolResultPart); ok {
+			if tr, ok := p.(core.ToolResultPart); ok {
 				answered[tr.CallID] = true
 			}
 		}
 	}
 	for _, m := range steps {
-		if m.Role != weft.RoleAssistant {
+		if m.Role != core.RoleAssistant {
 			continue
 		}
 		for _, p := range m.Content {
-			c, ok := p.(weft.ToolCallPart)
+			c, ok := p.(core.ToolCallPart)
 			if !ok || answered[c.ID] {
 				continue
 			}
@@ -226,27 +226,27 @@ func (s *substitutes) take(name string, args json.RawMessage) (recorded, bool) {
 // is making again; kept are the steps before it, whose results answer
 // only a key the fresh steps never recorded (the model re-issuing a
 // call the kept prefix already made). Only calls with a result count.
-func recordedCalls(fresh, kept []weft.Message) *substitutes {
+func recordedCalls(fresh, kept []core.Message) *substitutes {
 	s := &substitutes{byKey: map[string][]recorded{}}
-	index := func(msgs []weft.Message, skip map[string]bool) map[string]bool {
+	index := func(msgs []core.Message, skip map[string]bool) map[string]bool {
 		seen := map[string]bool{}
 		// A result pairs with the call of the assistant message before
 		// it, never by id across the whole run: call ids are a step's
 		// own, and a deterministic model reuses them step after step.
-		var calls []weft.ToolCallPart
+		var calls []core.ToolCallPart
 		for _, m := range msgs {
 			switch m.Role {
-			case weft.RoleAssistant:
+			case core.RoleAssistant:
 				calls = calls[:0]
 				for _, p := range m.Content {
-					if c, ok := p.(weft.ToolCallPart); ok {
+					if c, ok := p.(core.ToolCallPart); ok {
 						calls = append(calls, c)
 					}
 				}
-			case weft.RoleTool:
+			case core.RoleTool:
 				for _, c := range calls {
 					for _, p := range m.Content {
-						tr, ok := p.(weft.ToolResultPart)
+						tr, ok := p.(core.ToolResultPart)
 						if !ok || tr.CallID != c.ID {
 							continue
 						}

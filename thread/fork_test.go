@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // Fork honours the header options exactly as Create does — metadata,
@@ -18,7 +18,7 @@ import (
 func TestForkHonoursHeaderOptions(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		s, err := thread.Create(ctx, st, agent, thread.PublicID("pub-origin"),
 			thread.WithMeta(map[string]string{"tenant": "acme"}))
 		if err != nil {
@@ -67,12 +67,12 @@ func TestForkHonoursHeaderOptions(t *testing.T) {
 func TestForkInheritsThePath(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script(wefttest.Say("first answer"), wefttest.Say("second answer"), wefttest.Say("in the fork")))
+		agent := core.New(wefttest.Script(wefttest.Say("first answer"), wefttest.Say("second answer"), wefttest.Say("in the fork")))
 		s, err := thread.Create(ctx, st, agent)
 		if err != nil {
 			t.Fatal(err)
 		}
-		turn, _ := s.Send(ctx, weft.User("hello"))
+		turn, _ := s.Send(ctx, core.User("hello"))
 		if _, err := turn.Wait(); err != nil {
 			t.Fatal(err)
 		}
@@ -80,7 +80,7 @@ func TestForkInheritsThePath(t *testing.T) {
 			t.Fatal(err)
 		}
 		at := s.Leaf()
-		turn2, _ := s.Send(ctx, weft.User("after the fork point"))
+		turn2, _ := s.Send(ctx, core.User("after the fork point"))
 		if _, err := turn2.Wait(); err != nil {
 			t.Fatal(err)
 		}
@@ -101,11 +101,11 @@ func TestForkInheritsThePath(t *testing.T) {
 		if got := f.Meta()["team"]; got != "support" {
 			t.Errorf("fork Meta[team] = %q, want support", got)
 		}
-		if got, want := f.Usage().Turns, s.Usage().Turns; got == (weft.Usage{}) || got == want {
+		if got, want := f.Usage().Turns, s.Usage().Turns; got == (core.Usage{}) || got == want {
 			t.Errorf("fork Usage.Turns = %+v, want the one copied turn's (origin has %+v)", got, want)
 		}
 		// The run ids continue after the copied turn, live and reopened.
-		ft, err := f.Send(ctx, weft.User("go on"))
+		ft, err := f.Send(ctx, core.User("go on"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -124,7 +124,7 @@ func TestForkInheritsThePath(t *testing.T) {
 func TestForkRejectsLeafEntry(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
-	s, _ := thread.Create(ctx, st, weft.New(wefttest.Script()), thread.IDs(counter("e_")))
+	s, _ := thread.Create(ctx, st, core.New(wefttest.Script()), thread.IDs(counter("e_")))
 	if err := s.Custom(ctx, "a", nil); err != nil { // e_2
 		t.Fatal(err)
 	}
@@ -150,9 +150,9 @@ func TestForkDoesNotInheritQueuedSteers(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		model := wefttest.Script(wefttest.Say("ran the steer"))
-		agent := weft.New(model)
+		agent := core.New(model)
 		s, _ := thread.Create(ctx, st, agent)
-		msg := weft.User("steer me")
+		msg := core.User("steer me")
 		if err := st.Append(ctx, s.ID(),
 			userEntry("e_m1", "", "one"),
 			thread.ReceiptEntry{ID: "e_steer", ParentID: "e_m1", Created: time.Unix(1, 0).UTC(),
@@ -207,9 +207,9 @@ func TestForkDoesNotInheritQueuedSteers(t *testing.T) {
 func TestForkNeutralisesPoolState(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		s, _ := thread.Create(ctx, st, agent, thread.IDs(counter("o_")))
-		if err := s.CustomMessage(ctx, "note", weft.User("before")); err != nil { // o_2
+		if err := s.CustomMessage(ctx, "note", core.User("before")); err != nil { // o_2
 			t.Fatal(err)
 		}
 		settled, err := s.AppendPoolReceipt(ctx, thread.PoolReceiptEntry{Status: thread.PoolAccepted, Child: "s_done"}) // o_3
@@ -218,7 +218,7 @@ func TestForkNeutralisesPoolState(t *testing.T) {
 		}
 		if _, err := s.AppendPoolReceipt(ctx, thread.PoolReceiptEntry{ // o_4
 			Receipt: settled.ID, Status: thread.PoolDone, Child: "s_done", Stop: "answer",
-			Usage: weft.Usage{InputTokens: 5},
+			Usage: core.Usage{InputTokens: 5},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -232,7 +232,7 @@ func TestForkNeutralisesPoolState(t *testing.T) {
 		); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.CustomMessage(ctx, "note", weft.User("after")); err != nil { // o_8
+		if err := s.CustomMessage(ctx, "note", core.User("after")); err != nil { // o_8
 			t.Fatal(err)
 		}
 		if n := len(s.Pending()); n != 2 {
@@ -298,7 +298,7 @@ func (f *failAppendTo) Append(ctx context.Context, session string, entries ...th
 func TestForkFailureLeavesNoSession(t *testing.T) {
 	ctx := context.Background()
 	st := &failAppendTo{Storage: thread.Memory(), prefix: "s_fork"}
-	s, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 	if err := s.Custom(ctx, "a", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -316,13 +316,13 @@ func TestForkDuringRunningTurn(t *testing.T) {
 	ctx := context.Background()
 	started := make(chan struct{})
 	release := make(chan struct{})
-	tool := weft.Tool("block", "Block until released.",
+	tool := core.Tool("block", "Block until released.",
 		func(ctx context.Context, _ struct{}) (string, error) {
 			close(started)
 			<-release
 			return "ok", nil
 		})
-	agent := weft.New(wefttest.Script(
+	agent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "block"}),
 		wefttest.Say("done"),
 	), tool)
@@ -331,7 +331,7 @@ func TestForkDuringRunningTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("go"))
+	turn, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/pool"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // crashed stands in for a process that died without closing
@@ -28,7 +28,7 @@ func crashed(ctx context.Context, st thread.Storage, ids ...string) {
 // wrap name — driven as far as drive takes it, and an acceptance and
 // a running receipt in the parent that nothing in this process
 // answers for.
-func orphan(t *testing.T, st thread.Storage, parent *thread.Session, agent *weft.Agent, wrap, call string, drive func(*thread.Session)) pool.Receipt {
+func orphan(t *testing.T, st thread.Storage, parent *thread.Session, agent *core.Agent, wrap, call string, drive func(*thread.Session)) pool.Receipt {
 	t.Helper()
 	ctx := context.Background()
 	opts := []thread.SessionOption{thread.WithLineage(parent.ID(), call), thread.InheritApprovals(parent)}
@@ -60,7 +60,7 @@ func orphan(t *testing.T, st thread.Storage, parent *thread.Session, agent *weft
 // runTurn sends one prompt and waits the turn out.
 func runTurn(t *testing.T, s *thread.Session) {
 	t.Helper()
-	turn, err := s.Send(context.Background(), weft.User("the task"))
+	turn, err := s.Send(context.Background(), core.User("the task"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func runTurn(t *testing.T, s *thread.Session) {
 func TestRecoverParkedUnmirrored(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
-	parent, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+	parent, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 	dead, _ := gatedChild(wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c-a", Args: `{"order_id":"7"}`}))
 	rc := orphan(t, st, parent, dead, "research", "", func(c *thread.Session) { runTurn(t, c) })
 	if pend := parent.Pending(); len(pend) != 0 {
@@ -128,17 +128,17 @@ func TestRecoverParkedUnmirrored(t *testing.T) {
 func TestRecoverSettles(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
-	parent, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+	parent, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 	run := func(c *thread.Session) { runTurn(t, c) }
 
-	done := orphan(t, st, parent, weft.New(wefttest.Script(wefttest.Say("finished before the crash"))), "", "", run)
-	failed := orphan(t, st, parent, weft.New(wefttest.Script(wefttest.Fail(errors.New("connection reset")))), "", "", run)
-	capped := orphan(t, st, parent, weft.New(wefttest.Script(
+	done := orphan(t, st, parent, core.New(wefttest.Script(wefttest.Say("finished before the crash"))), "", "", run)
+	failed := orphan(t, st, parent, core.New(wefttest.Script(wefttest.Fail(errors.New("connection reset")))), "", "", run)
+	capped := orphan(t, st, parent, core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "loop", ID: "c-loop"}),
 		wefttest.ToolCalls(wefttest.Call{Name: "loop", ID: "c-loop-2"}),
-	), weft.MaxSteps(1), weft.Tool("loop", "", func(context.Context, struct{}) (string, error) { return "again", nil })), "", "", run)
-	never := orphan(t, st, parent, weft.New(wefttest.Script()), "", "", nil)
-	gone := orphan(t, st, parent, weft.New(wefttest.Script()), "", "", nil)
+	), core.MaxSteps(1), core.Tool("loop", "", func(context.Context, struct{}) (string, error) { return "again", nil })), "", "", run)
+	never := orphan(t, st, parent, core.New(wefttest.Script()), "", "", nil)
+	gone := orphan(t, st, parent, core.New(wefttest.Script()), "", "", nil)
 	if err := thread.Delete(ctx, st, gone.Child); err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestRecoverResolvesParkedWrapper(t *testing.T) {
 		wefttest.Say("all done"),
 	)
 	parent, _ := thread.Create(ctx, st, agent)
-	t1, err := parent.Send(ctx, weft.User("go"))
+	t1, err := parent.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,19 +257,19 @@ func TestRecoverResolvesParkedWrapper(t *testing.T) {
 func TestRecoverPartialAndLive(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
-	parent, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
-	gated := func() *weft.Agent {
+	parent, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
+	gated := func() *core.Agent {
 		a, _ := gatedChild(wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c-a", Args: `{"order_id":"7"}`}))
 		return a
 	}
 	run := func(c *thread.Session) { runTurn(t, c) }
 	unknown := orphan(t, st, parent, gated(), "", "", run)         // a Submit child nobody registered
 	renamed := orphan(t, st, parent, gated(), "old-name", "", run) // a wrap this process does not have
-	finished := orphan(t, st, parent, weft.New(wefttest.Script(wefttest.Say("done"))), "", "", run)
+	finished := orphan(t, st, parent, core.New(wefttest.Script(wefttest.Say("done"))), "", "", run)
 
 	p := pool.New(2)
 	started, release := make(chan struct{}), make(chan struct{})
-	live, err := p.Submit(ctx, parent, weft.New(blocking{release: release, text: "live",
+	live, err := p.Submit(ctx, parent, core.New(blocking{release: release, text: "live",
 		onStart: func() { close(started) }}), "run")
 	if err != nil {
 		t.Fatal(err)
@@ -306,7 +306,7 @@ func TestRecoverPartialAndLive(t *testing.T) {
 		t.Errorf("unrecoverable receipts = %s, %s; want them left as they were", state(unknown.ID), state(renamed.ID))
 	}
 	// Forward says what such a receipt is.
-	_, ferr := p.Forward(ctx, parent, unknown.ID, weft.User("x"))
+	_, ferr := p.Forward(ctx, parent, unknown.ID, core.User("x"))
 	var se *pool.StateError
 	if !errors.As(ferr, &se) || !se.Orphan {
 		t.Errorf("Forward to an orphaned receipt = %v, want a StateError marked Orphan", ferr)
@@ -343,7 +343,7 @@ func TestRecoverPartialAndLive(t *testing.T) {
 func TestPumpSettlesAChildThatAlreadyResumed(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
-	parent, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+	parent, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 	dead, ran := gatedChild(
 		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c-a", Args: `{"order_id":"7"}`}),
 		wefttest.Say("refunded before the crash"),

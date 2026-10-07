@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // DB is the observability database every backend implements (sqlite by
@@ -123,7 +123,7 @@ type RunRow struct {
 	Err                                                        string
 	Steps, Pending                                             int
 	StopReason                                                 string
-	Usage                                                      weft.Usage
+	Usage                                                      core.Usage
 	EventCount, MessageCount                                   int64
 	DeltaCount                                                 int64 // deltas are counted, never stored (Q4)
 }
@@ -196,7 +196,7 @@ type SessionRow struct {
 	Turns               int
 	FirstSeen, LastSeen time.Time
 	Status              Status // the newest turn's
-	Usage               weft.Usage
+	Usage               core.Usage
 }
 
 // SessionPage is one Sessions result, paged as RunPage is: newest

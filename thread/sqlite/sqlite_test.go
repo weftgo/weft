@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/sqlite"
 	"github.com/weftgo/weft/thread/threadtest"
@@ -105,12 +105,12 @@ func TestSecondWriterInOneProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := a.Append(ctx, "s_lock", thread.MessageEntry{
-		ID: "e_1", Created: time.Now().UTC(), Message: weft.User("held"),
+		ID: "e_1", Created: time.Now().UTC(), Message: core.User("held"),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.Append(ctx, "s_lock", thread.MessageEntry{
-		ID: "e_2", Created: time.Now().UTC(), Message: weft.User("second writer"),
+		ID: "e_2", Created: time.Now().UTC(), Message: core.User("second writer"),
 	}); !errors.Is(err, thread.ErrLocked) {
 		t.Errorf("second writer Append: err = %v, want ErrLocked", err)
 	}
@@ -148,7 +148,7 @@ func TestReopenReadsWhatWasWritten(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := first.Append(ctx, "s_reopen", thread.MessageEntry{
-		ID: "e_1", Created: created.Add(time.Second), Message: weft.User("durable"),
+		ID: "e_1", Created: created.Add(time.Second), Message: core.User("durable"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestFsyncOptionsAccepted(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.Append(ctx, "s_cadence", thread.MessageEntry{
-		ID: "e_1", Created: time.Now().UTC(), Message: weft.User("committed"),
+		ID: "e_1", Created: time.Now().UTC(), Message: core.User("committed"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestAppendAfterTornRepairs(t *testing.T) {
 		t.Fatalf("before the repair: report %+v, err %v; want Torn=2", report, err)
 	}
 	if err := st.Append(ctx, "s_aftertorn", thread.MessageEntry{
-		ID: "e_2", Created: time.Now().UTC(), Message: weft.User("after the crash"),
+		ID: "e_2", Created: time.Now().UTC(), Message: core.User("after the crash"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -454,7 +454,7 @@ func TestMigration0003OnExistingData(t *testing.T) {
 		t.Fatalf("second keyset page through the tie: %+v, err %v", next, err)
 	}
 	// The old lock row's dead holder is taken over.
-	if err := st.Append(ctx, "s_b", thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: weft.User("x")}); err != nil {
+	if err := st.Append(ctx, "s_b", thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: core.User("x")}); err != nil {
 		t.Errorf("Append over a pre-migration lock row whose holder is dead: %v", err)
 	}
 }
@@ -566,8 +566,8 @@ func TestLoadReadsOneSnapshot(t *testing.T) {
 			return err
 		}
 		return st.Append(ctx, id,
-			thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: weft.User(fmt.Sprintf("gen %d", gen))},
-			thread.MessageEntry{ID: "e_2", Created: time.Now().UTC(), Message: weft.User(fmt.Sprintf("gen %d", gen))})
+			thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: core.User(fmt.Sprintf("gen %d", gen))},
+			thread.MessageEntry{ID: "e_2", Created: time.Now().UTC(), Message: core.User(fmt.Sprintf("gen %d", gen))})
 	}
 	if err := seed(0); err != nil {
 		t.Fatal(err)
@@ -649,7 +649,7 @@ func TestWatch(t *testing.T) {
 		}
 	}()
 	if err := writer.Append(ctx, "s_tail", thread.MessageEntry{
-		ID: "e_w1", Created: time.Now().UTC(), Message: weft.User("committed while watched"),
+		ID: "e_w1", Created: time.Now().UTC(), Message: core.User("committed while watched"),
 	}); err != nil {
 		t.Fatal(err)
 	}

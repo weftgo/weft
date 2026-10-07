@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -15,12 +15,12 @@ import (
 func buildLong(tb testing.TB, n int) *thread.Session {
 	tb.Helper()
 	ctx := context.Background()
-	s, err := thread.Create(ctx, thread.Memory(), weft.New(&benchContextModel{}))
+	s, err := thread.Create(ctx, thread.Memory(), core.New(&benchContextModel{}))
 	if err != nil {
 		tb.Fatal(err)
 	}
 	for i := 0; i < n; i++ {
-		turn, err := s.Send(ctx, weft.User("tick"))
+		turn, err := s.Send(ctx, core.User("tick"))
 		if err != nil {
 			tb.Fatal(err)
 		}
@@ -46,7 +46,7 @@ func TestBudgetLongSessionTurn(t *testing.T) {
 	const turns = 20
 	start := time.Now()
 	for i := 0; i < turns; i++ {
-		turn, err := s.Send(ctx, weft.User("tick"))
+		turn, err := s.Send(ctx, core.User("tick"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -72,7 +72,7 @@ func BenchmarkSendLongSession(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		turn, err := s.Send(ctx, weft.User("tick"))
+		turn, err := s.Send(ctx, core.User("tick"))
 		if err != nil {
 			b.Fatal(err)
 		}

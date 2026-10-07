@@ -10,7 +10,7 @@ import (
 
 	openaisdk "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // captureServer serves a recorded SSE fixture and captures the request
@@ -49,7 +49,7 @@ func TestExtraBodyAndHeaders(t *testing.T) {
 		}),
 		ExtraHeaders(h),
 	)
-	if _, err := weft.New(m).Generate(t.Context(), weft.Prompt("hi")); err != nil {
+	if _, err := core.New(m).Generate(t.Context(), core.Prompt("hi")); err != nil {
 		t.Fatal(err)
 	}
 	var payload map[string]any
@@ -77,7 +77,7 @@ func TestExtraBodyDefaultBytes(t *testing.T) {
 	srv, body, header := captureServer(t, "testdata/text_only.sse")
 	c := openaisdk.NewClient(option.WithBaseURL(srv.URL), option.WithAPIKey("test"))
 	m := Model("m", Client(&c))
-	if _, err := weft.New(m).Generate(t.Context(), weft.Prompt("hi")); err != nil {
+	if _, err := core.New(m).Generate(t.Context(), core.Prompt("hi")); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(body(), "x_vendor_knob") || strings.Contains(body(), "custom") {
@@ -98,7 +98,7 @@ func TestExtraHeadersMultiValued(t *testing.T) {
 	srv, _, header := captureServer(t, "testdata/text_only.sse")
 	c := openaisdk.NewClient(option.WithBaseURL(srv.URL), option.WithAPIKey("test"))
 	m := Model("m", Client(&c), ExtraHeaders(h))
-	if _, err := weft.New(m).Generate(t.Context(), weft.Prompt("hi")); err != nil {
+	if _, err := core.New(m).Generate(t.Context(), core.Prompt("hi")); err != nil {
 		t.Fatal(err)
 	}
 	if got := header()["X-Multi"]; len(got) != 2 || got[0] != "a" || got[1] != "b" {
@@ -121,7 +121,7 @@ func TestExtraBodySnapshot(t *testing.T) {
 	nested["custom"] = 2            // caller mutates after construction
 	fields["x_vendor_knob"] = false // top level too
 	h["X-Weft-Test"][0] = "no"      // and the header slice
-	if _, err := weft.New(m).Generate(t.Context(), weft.Prompt("hi")); err != nil {
+	if _, err := core.New(m).Generate(t.Context(), core.Prompt("hi")); err != nil {
 		t.Fatal(err)
 	}
 	var payload map[string]any

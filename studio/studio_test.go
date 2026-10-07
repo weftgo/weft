@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/sqlite"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // The fixtures (plan §3, rebuilt on obsdb for the step-5 interim read
@@ -41,7 +41,7 @@ var fixtureT0 = time.Date(2020, 1, 1, 9, 0, 0, 123000000, time.UTC)
 const (
 	fxTrace = "0102030405060708090a0b0c0d0e0f10"
 	fxSpan  = "0102030405060708"
-	// fxHash mirrors what weft.New stamps at construction (the
+	// fxHash mirrors what core.New stamps at construction (the
 	// manifest hash rides every record and span).
 	fxHash = "sha256:demo-fleet"
 )

@@ -11,7 +11,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/internal/adapterkit"
 )
 
@@ -68,21 +68,21 @@ func Client(c *anthropic.Client) Option {
 func MaxTokens(n int) Option { return optionFunc(func(c *config) { c.maxTokens = n }) }
 
 // Temperature sets the sampling temperature; it is not sent unless the
-// option is given. A per-request weft.RequestParams.Temperature
+// option is given. A per-request core.RequestParams.Temperature
 // overrides it for one call.
 func Temperature(t float64) Option {
 	return optionFunc(func(c *config) { c.temperature = t; c.tempSet = true })
 }
 
 // TopP sets nucleus sampling; it is not sent unless the option is
-// given. A per-request weft.RequestParams.TopP overrides it for one
+// given. A per-request core.RequestParams.TopP overrides it for one
 // call.
 func TopP(p float64) Option {
 	return optionFunc(func(c *config) { c.topP = p; c.topPSet = true })
 }
 
 // Stop sets stop sequences (stop_sequences); not sent unless the
-// option is given. A per-request weft.RequestParams.Stop overrides it
+// option is given. A per-request core.RequestParams.Stop overrides it
 // for one call. The Messages API has no seed — a RequestParams.Seed is
 // dropped (see doc.go), because seed is a determinism hint everywhere,
 // not a contract.
@@ -91,7 +91,7 @@ func Stop(seqs ...string) Option {
 }
 
 // IdleTimeout is the maximum gap between two stream events before the
-// call fails wrapping weft.ErrStreamIdle (default 60s; zero disables
+// call fails wrapping core.ErrStreamIdle (default 60s; zero disables
 // it). The wait for response headers is the first gap: it covers the
 // SDK's transport retries and their sleeps too (a 429 whose retry-after
 // the SDK honours sleeps inside it), so a retry sequence longer than
@@ -137,7 +137,7 @@ func Thinking(on bool) Option { return optionFunc(func(c *config) { c.thinking =
 // discipline is the caller's: a PrepareStep function that trims
 // messages invalidates the trailing breakpoint on purpose (the option
 // composes with deliberate trimming, it does not forbid it), and
-// weft.ToolChoiceNone is the way to stop tool calls without dropping
+// core.ToolChoiceNone is the way to stop tool calls without dropping
 // the tool definitions — and the cache prefix they anchor — from the
 // request. No TTL or position options in v0.3.0: one good default,
 // revisit when a consumer asks.
@@ -186,10 +186,10 @@ const (
 	provider           = "anthropic"
 )
 
-// Model returns a weft.Model backed by the Anthropic Messages API. A
+// Model returns a core.Model backed by the Anthropic Messages API. A
 // Model is immutable and safe for concurrent runs; tool definitions
 // are converted per request (ADR 0013).
-func Model(name string, opts ...Option) weft.Model {
+func Model(name string, opts ...Option) core.Model {
 	var cfg config
 	for _, o := range opts {
 		if o != nil {
@@ -290,6 +290,6 @@ func (m *model) requestOptions() []option.RequestOption {
 }
 
 // Info identifies the model for RunStart and the manifest.
-func (m *model) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: provider, Name: m.name}
+func (m *model) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: provider, Name: m.name}
 }

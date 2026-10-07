@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 )
 
 // kindSamples holds one fully populated value of every entry kind in
@@ -23,20 +23,20 @@ import (
 // fails when a kind is added to entry.go and not here.
 func kindSamples() []Entry {
 	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
-	msg := func() weft.Message {
-		return weft.Message{Role: weft.RoleAssistant, Content: []weft.Part{
-			weft.TextPart{Text: "text"},
-			weft.ReasoningPart{Text: "why", Signature: "sig"},
-			weft.ToolCallPart{ID: "call_1", Name: "lookup", Args: json.RawMessage(`{"order":1}`)},
-			weft.ToolResultPart{CallID: "call_1", Name: "lookup", Content: "ok"},
-			weft.FilePart{MediaType: "image/png", Data: []byte{1, 2, 3, 4}},
+	msg := func() core.Message {
+		return core.Message{Role: core.RoleAssistant, Content: []core.Part{
+			core.TextPart{Text: "text"},
+			core.ReasoningPart{Text: "why", Signature: "sig"},
+			core.ToolCallPart{ID: "call_1", Name: "lookup", Args: json.RawMessage(`{"order":1}`)},
+			core.ToolResultPart{CallID: "call_1", Name: "lookup", Content: "ok"},
+			core.FilePart{MediaType: "image/png", Data: []byte{1, 2, 3, 4}},
 		}}
 	}
 	steer := msg()
 	return []Entry{
 		MessageEntry{ID: "e_message", ParentID: "e_p", Created: at, Message: msg()},
 		TurnEntry{ID: "e_turn", ParentID: "e_p", Created: at, RunID: "s-t1",
-			Pending: []weft.ToolCallPart{{ID: "call_9", Name: "refund", Args: json.RawMessage(`{"a":1}`)}}},
+			Pending: []core.ToolCallPart{{ID: "call_9", Name: "refund", Args: json.RawMessage(`{"a":1}`)}}},
 		CompactionEntry{ID: "e_compaction", ParentID: "e_p", Created: at, Summary: "s", FirstKept: "e_k",
 			Trim:      &TrimRecord{Stubs: []TrimStub{{Entry: "e_k", CallID: "c1", Content: "stub"}}},
 			FilesRead: []string{"a.go"}, FilesModified: []string{"b.go"}, Pinned: []string{"e_pin"}},
@@ -55,7 +55,7 @@ func kindSamples() []Entry {
 		GrantRevokedEntry{ID: "e_revoked", ParentID: "e_p", Created: at, GrantID: "e_grant"},
 		ReceiptEntry{ID: "e_receipt", ParentID: "e_p", Created: at, Status: ReceiptQueued, Msg: &steer},
 		PoolReceiptEntry{ID: "e_pool", ParentID: "e_p", Created: at, Status: PoolAccepted, Child: "s_child",
-			Usage: weft.Usage{InputTokens: 3}},
+			Usage: core.Usage{InputTokens: 3}},
 	}
 }
 
@@ -188,7 +188,7 @@ func TestSnapshotsShareNothingWithTheSession(t *testing.T) {
 
 	ctx := context.Background()
 	st := Memory()
-	agent := weft.New(wefttest.Script())
+	agent := core.New(wefttest.Script())
 	s, err := Create(ctx, st, agent)
 	if err != nil {
 		t.Fatal(err)
@@ -287,7 +287,7 @@ func TestPathFailsOnABrokenLink(t *testing.T) {
 	build := func(entries ...Entry) *Session {
 		t.Helper()
 		st := Memory()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		s, err := Create(ctx, st, agent)
 		if err != nil {
 			t.Fatal(err)
@@ -303,9 +303,9 @@ func TestPathFailsOnABrokenLink(t *testing.T) {
 	}
 	chain := func() []Entry {
 		return []Entry{
-			MessageEntry{ID: "e_1", Created: at, Message: weft.User("one")},
-			MessageEntry{ID: "e_2", ParentID: "e_1", Created: at, Message: weft.User("two")},
-			MessageEntry{ID: "e_3", ParentID: "e_2", Created: at, Message: weft.User("three")},
+			MessageEntry{ID: "e_1", Created: at, Message: core.User("one")},
+			MessageEntry{ID: "e_2", ParentID: "e_1", Created: at, Message: core.User("two")},
+			MessageEntry{ID: "e_3", ParentID: "e_2", Created: at, Message: core.User("three")},
 		}
 	}
 
@@ -345,14 +345,14 @@ func TestPathFailsOnABrokenLink(t *testing.T) {
 func TestForkDerivesStateLikeOpen(t *testing.T) {
 	ctx := context.Background()
 	st := Memory()
-	model := wefttest.Script(wefttest.Say("one").WithUsage(weft.Usage{InputTokens: 1200, OutputTokens: 10}))
-	agent := weft.New(model)
-	windows := ModelWindows(map[weft.ModelInfo]int64{weft.InfoOf(model): 64_000})
+	model := wefttest.Script(wefttest.Say("one").WithUsage(core.Usage{InputTokens: 1200, OutputTokens: 10}))
+	agent := core.New(model)
+	windows := ModelWindows(map[core.ModelInfo]int64{core.InfoOf(model): 64_000})
 	s, err := Create(ctx, st, agent, windows)
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("hello"))
+	turn, err := s.Send(ctx, core.User("hello"))
 	if err != nil {
 		t.Fatal(err)
 	}

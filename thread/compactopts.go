@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // The compaction options (ADR 0020 §3). The naming rule of this file:
@@ -42,11 +42,11 @@ func (o contextWindowOption) applySession(c *sessionConfig) {
 // too small for its reserve would otherwise never compact, silently.
 func ContextWindow(n int64) SessionOption { return contextWindowOption(n) }
 
-type modelWindowsOption map[weft.ModelInfo]int64
+type modelWindowsOption map[core.ModelInfo]int64
 
 func (o modelWindowsOption) applySession(c *sessionConfig) {
 	if c.compaction.modelWindows == nil {
-		c.compaction.modelWindows = map[weft.ModelInfo]int64{}
+		c.compaction.modelWindows = map[core.ModelInfo]int64{}
 	}
 	for k, v := range o {
 		if v > 0 {
@@ -60,18 +60,18 @@ func (o modelWindowsOption) applySession(c *sessionConfig) {
 // model is looked up once, at Create or Open, and its entry overrides
 // ContextWindow for the life of that Session value — one options list
 // shared by sessions that run different agents. The lookup is not
-// repeated per turn: a run that swaps its model (weft.UseModel) keeps
+// repeated per turn: a run that swaps its model (core.UseModel) keeps
 // the window resolved for the agent's own model, and a session
 // reopened with another agent resolves again for that agent.
-func ModelWindows(windows map[weft.ModelInfo]int64) SessionOption {
+func ModelWindows(windows map[core.ModelInfo]int64) SessionOption {
 	return modelWindowsOption(windows)
 }
 
-type modelReservesOption map[weft.ModelInfo]int64
+type modelReservesOption map[core.ModelInfo]int64
 
 func (o modelReservesOption) applySession(c *sessionConfig) {
 	if c.compaction.modelReserves == nil {
-		c.compaction.modelReserves = map[weft.ModelInfo]int64{}
+		c.compaction.modelReserves = map[core.ModelInfo]int64{}
 	}
 	for k, v := range o {
 		if v > 0 {
@@ -84,7 +84,7 @@ func (o modelReservesOption) applySession(c *sessionConfig) {
 // keyed by ModelInfo, overriding Reserve for the session agent's model
 // — the small-window model that needs a different headroom than the
 // default. Resolved once at Create or Open, like ModelWindows.
-func ModelReserves(reserves map[weft.ModelInfo]int64) SessionOption {
+func ModelReserves(reserves map[core.ModelInfo]int64) SessionOption {
 	return modelReservesOption(reserves)
 }
 
@@ -186,7 +186,7 @@ func MaxPerSession(n int) SessionOption { return maxPerSessionOption(n) }
 // walk weighs entries one by one and with a batch otherwise. It runs
 // without the session lock and may call the session.
 type Estimator interface {
-	Estimate(msgs []weft.Message) int64
+	Estimate(msgs []core.Message) int64
 }
 
 type estimatorOption struct{ est Estimator }
@@ -215,7 +215,7 @@ func NoAutoCompact() SessionOption { return noAutoCompactOption{} }
 
 // ── Layer 2 — the summary ───────────────────────────────────────────
 
-type summaryModelOption struct{ m weft.Model }
+type summaryModelOption struct{ m core.Model }
 
 func (o summaryModelOption) applySession(c *sessionConfig) {
 	if o.m != nil {
@@ -229,7 +229,7 @@ func (o summaryModelOption) applySession(c *sessionConfig) {
 // the session's own model takes over (the chain: SummaryModel →
 // session model → no compaction, the error returned and reported
 // through CompactFailed).
-func SummaryModel(m weft.Model) SessionOption { return summaryModelOption{m} }
+func SummaryModel(m core.Model) SessionOption { return summaryModelOption{m} }
 
 type summaryPromptOption string
 
@@ -303,7 +303,7 @@ func (o summaryInstructionsOption) applyCompact(c *compactCall) {
 // instructions to this compaction's summary prompt: s.Compact(ctx,
 // thread.SummaryInstructions("focus on the API design")). They guide
 // the summarizer for this one call; the agent's own instructions
-// (weft.Instructions) are untouched.
+// (core.Instructions) are untouched.
 func SummaryInstructions(text string) CompactOption { return summaryInstructionsOption(text) }
 
 // ── Layer 3 — swap the parts ────────────────────────────────────────
@@ -319,7 +319,7 @@ func SummaryInstructions(text string) CompactOption { return summaryInstructions
 // skeleton or SummaryPrompt, then SummaryFocus and Instructions —
 // handed over so a custom Summarizer can reuse it; it may ignore it.
 type SummaryInput struct {
-	Messages     []weft.Message
+	Messages     []core.Message
 	PrevSummary  string
 	Instructions string
 	MaxTokens    int64
@@ -334,8 +334,8 @@ type Summary struct {
 	// Usage and Model are what the summary cost and which model made
 	// it — the cost ledger's inputs; a custom Summarizer that runs no
 	// model leaves them zero.
-	Usage weft.Usage
-	Model weft.ModelInfo
+	Usage core.Usage
+	Model core.ModelInfo
 }
 
 // Summarizer produces the summary text and nothing else: the cut, the
@@ -366,12 +366,12 @@ type Preparation struct {
 	// Context is the context the model is shown now — the compacted
 	// view at the leaf: the previous summary, pinned entries, the kept
 	// tail with recorded trims applied.
-	Context []weft.Message
+	Context []core.Message
 	// Messages is the range this compaction summarizes: the entries
 	// from the previous boundary up to FirstKept, as stored. A split
 	// turn's prefix is part of it (one pass, ADR 0020's 2026-09-29
 	// amendment).
-	Messages []weft.Message
+	Messages []core.Message
 	// PrevSummary is the iterative chain's last link: the latest
 	// summary compaction's text on the path, trims skipped.
 	PrevSummary string
@@ -448,7 +448,7 @@ func WithCompactor(c Compactor) SessionOption { return withCompactorOption{c} }
 // Trim runs without the session lock and may call the session; an
 // error or a panic is logged and the summary compaction runs.
 type Trimmer interface {
-	Trim(ctx context.Context, msgs []weft.Message) ([]weft.Message, error)
+	Trim(ctx context.Context, msgs []core.Message) ([]core.Message, error)
 }
 
 type withTrimmerOption struct{ t Trimmer }
@@ -475,7 +475,7 @@ func clearedResultStub(callID, name string) string {
 // replaced with the stub, newest kept first.
 type clearResultsTrimmer struct{ keepLast int }
 
-func (t clearResultsTrimmer) Trim(ctx context.Context, msgs []weft.Message) ([]weft.Message, error) {
+func (t clearResultsTrimmer) Trim(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
 	// A step's results batch on one tool message (ADR 0001), so the
 	// unit is the result part: the newest keepLast parts in the whole
 	// context survive, every older one reads as the stub.
@@ -483,7 +483,7 @@ func (t clearResultsTrimmer) Trim(ctx context.Context, msgs []weft.Message) ([]w
 	var parts []at // newest first
 	for i := len(msgs) - 1; i >= 0; i-- {
 		for j := len(msgs[i].Content) - 1; j >= 0; j-- {
-			if _, ok := msgs[i].Content[j].(weft.ToolResultPart); ok {
+			if _, ok := msgs[i].Content[j].(core.ToolResultPart); ok {
 				parts = append(parts, at{i, j})
 			}
 		}
@@ -492,16 +492,16 @@ func (t clearResultsTrimmer) Trim(ctx context.Context, msgs []weft.Message) ([]w
 	for n := 0; n < min(t.keepLast, len(parts)); n++ {
 		keep[parts[n]] = true
 	}
-	out := make([]weft.Message, len(msgs))
+	out := make([]core.Message, len(msgs))
 	copy(out, msgs)
 	for _, p := range parts {
 		if keep[p] {
 			continue
 		}
 		m := out[p.msg]
-		if r, ok := m.Content[p.part].(weft.ToolResultPart); ok {
-			stubbed := weft.ToolResultPart{CallID: r.CallID, Name: r.Name, Content: clearedResultStub(r.CallID, r.Name)}
-			content := make([]weft.Part, len(m.Content))
+		if r, ok := m.Content[p.part].(core.ToolResultPart); ok {
+			stubbed := core.ToolResultPart{CallID: r.CallID, Name: r.Name, Content: clearedResultStub(r.CallID, r.Name)}
+			content := make([]core.Part, len(m.Content))
 			copy(content, m.Content)
 			content[p.part] = stubbed
 			m.Content = content
@@ -649,7 +649,7 @@ func CheckSummary(fn func(Summary) error) SessionOption {
 // server-side. Root types only, so an adapter implements it without
 // importing thread (ADR 0020 §7).
 type NativeCompactor interface {
-	CompactNative(ctx context.Context, req weft.ModelRequest, instructions string) (weft.Message, weft.Usage, error)
+	CompactNative(ctx context.Context, req core.ModelRequest, instructions string) (core.Message, core.Usage, error)
 }
 
 type preferNativeOption struct{}
@@ -683,8 +683,8 @@ const maxModelChain = 64
 // depth cap when it is not. The seen list is a slice, not a map — a
 // Model value need not be hashable (anything but a pointer or another
 // comparable kind would panic the map), and chains are short.
-func nativeOf(m weft.Model) NativeCompactor {
-	var seen []weft.Model
+func nativeOf(m core.Model) NativeCompactor {
+	var seen []core.Model
 	for m != nil {
 		if len(seen) >= maxModelChain {
 			return nil
@@ -706,7 +706,7 @@ func nativeOf(m weft.Model) NativeCompactor {
 		if nc, ok := m.(NativeCompactor); ok {
 			return nc
 		}
-		m = weft.Unwrap(m)
+		m = core.Unwrap(m)
 	}
 	return nil
 }
@@ -715,7 +715,7 @@ func nativeOf(m weft.Model) NativeCompactor {
 // true when they hold identical dynamic types and those types are
 // comparable (a struct wrapper with a slice field is not, and reads
 // as never-equal rather than panicking).
-func equalModel(a, b weft.Model) bool {
+func equalModel(a, b core.Model) bool {
 	if reflect.TypeOf(a) != reflect.TypeOf(b) {
 		return false
 	}

@@ -5,9 +5,9 @@ import (
 	"iter"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // settle is idempotent per receipt: a second settlement — the panic
@@ -18,9 +18,9 @@ func TestSettleOnce(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
 	p := New(1)
-	parent, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+	parent, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 	gate := make(chan struct{})
-	r, err := p.Submit(ctx, parent, weft.New(stubModel{gate: gate}), "go")
+	r, err := p.Submit(ctx, parent, core.New(stubModel{gate: gate}), "go")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,8 +68,8 @@ func TestSettleOnce(t *testing.T) {
 func TestRegistersPruned(t *testing.T) {
 	ctx := context.Background()
 	p := New(2)
-	child := weft.New(stubModel{})
-	parent, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	child := core.New(stubModel{})
+	parent, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	var ids []string
 	for i := 0; i < 20; i++ {
 		r, err := p.Submit(ctx, parent, child, "go")
@@ -104,8 +104,8 @@ func TestRegistersPruned(t *testing.T) {
 // of sessions can share — once its gate, when it has one, is open.
 type stubModel struct{ gate chan struct{} }
 
-func (m stubModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
+func (m stubModel) Stream(ctx context.Context, _ core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
 		if m.gate != nil {
 			select {
 			case <-m.gate:
@@ -116,9 +116,9 @@ func (m stubModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2[we
 			yield(nil, err)
 			return
 		}
-		if !yield(weft.ModelTextDelta{Text: "ok"}, nil) {
+		if !yield(core.ModelTextDelta{Text: "ok"}, nil) {
 			return
 		}
-		yield(weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}}, nil)
+		yield(core.ModelFinish{Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}}, nil)
 	}
 }

@@ -4,15 +4,15 @@ import (
 	"context"
 	"testing"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // testAgent builds one named scripted agent for the registry tests.
-func testAgent(name string) *weft.Agent {
-	return weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name(name))
+func testAgent(name string) *core.Agent {
+	return core.New(wefttest.Script(wefttest.Say("ok")), core.Name(name))
 }
 
 // TestInstallOpensNothing pins §6 rule 1 and §10.2's "without
@@ -65,8 +65,8 @@ func TestWeftVersionMatchesRoot(t *testing.T) {
 	rec := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
 	defer func() { _ = tp.Shutdown(context.Background()) }()
-	agent := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("a"), weft.TracerProvider(tp))
-	if _, err := agent.Generate(context.Background(), weft.Prompt("hi")); err != nil {
+	agent := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("a"), core.TracerProvider(tp))
+	if _, err := agent.Generate(context.Background(), core.Prompt("hi")); err != nil {
 		t.Fatal(err)
 	}
 	spans := rec.Ended()

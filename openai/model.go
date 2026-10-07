@@ -11,7 +11,7 @@ import (
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/internal/adapterkit"
 )
 
@@ -70,21 +70,21 @@ func Client(c *openai.Client) Option {
 func MaxTokens(n int) Option { return optionFunc(func(c *config) { c.maxTokens = n }) }
 
 // Temperature sets the sampling temperature; it is not sent unless the
-// option is given. A per-request weft.RequestParams.Temperature
+// option is given. A per-request core.RequestParams.Temperature
 // overrides it for one call.
 func Temperature(t float64) Option {
 	return optionFunc(func(c *config) { c.temperature = t; c.tempSet = true })
 }
 
 // TopP sets nucleus sampling; it is not sent unless the option is
-// given. A per-request weft.RequestParams.TopP overrides it for one
+// given. A per-request core.RequestParams.TopP overrides it for one
 // call.
 func TopP(p float64) Option {
 	return optionFunc(func(c *config) { c.topP = p; c.topPSet = true })
 }
 
 // Stop sets stop sequences the API stops on; not sent unless the
-// option is given. A per-request weft.RequestParams.Stop overrides it
+// option is given. A per-request core.RequestParams.Stop overrides it
 // for one call.
 func Stop(seqs ...string) Option {
 	return optionFunc(func(c *config) { c.stop = seqs })
@@ -92,14 +92,14 @@ func Stop(seqs ...string) Option {
 
 // Seed sets the sampling seed for deterministic-ish runs — a hint the
 // provider treats best-effort, not a contract. Not sent unless the
-// option is given; a per-request weft.RequestParams.Seed overrides it
+// option is given; a per-request core.RequestParams.Seed overrides it
 // for one call.
 func Seed(s int64) Option {
 	return optionFunc(func(c *config) { c.seed = s; c.seedSet = true })
 }
 
 // IdleTimeout is the maximum gap between two stream chunks before the
-// call fails wrapping weft.ErrStreamIdle (default 60s; zero disables
+// call fails wrapping core.ErrStreamIdle (default 60s; zero disables
 // it). The wait for response headers is the first gap: it covers the
 // SDK's transport retries and their sleeps too (a 429 whose retry-after
 // the SDK honours sleeps inside it), so a retry sequence longer than
@@ -167,10 +167,10 @@ const (
 	provider = "openai"
 )
 
-// Model returns a weft.Model backed by the OpenAI Chat Completions API
+// Model returns a core.Model backed by the OpenAI Chat Completions API
 // (or any compatible server, via BaseURL). A Model is immutable and
 // safe for concurrent runs.
-func Model(name string, opts ...Option) weft.Model {
+func Model(name string, opts ...Option) core.Model {
 	var cfg config
 	for _, o := range opts {
 		if o != nil {
@@ -276,6 +276,6 @@ func (m *model) requestOptions() []option.RequestOption {
 
 // Info identifies the model for RunStart and the manifest. The provider
 // is "openai" even when BaseURL points elsewhere.
-func (m *model) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: provider, Name: m.name}
+func (m *model) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: provider, Name: m.name}
 }

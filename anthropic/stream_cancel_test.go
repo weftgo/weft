@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // A consumer that cancels mid-stream but keeps consuming must get the
@@ -29,7 +29,7 @@ func TestCancelMidStreamYieldsContextError(t *testing.T) {
 			finalErr = err
 			break
 		}
-		if _, ok := ev.(weft.ModelFinish); ok {
+		if _, ok := ev.(core.ModelFinish); ok {
 			fabricated = true
 		}
 		if !canceled {

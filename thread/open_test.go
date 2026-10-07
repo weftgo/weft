@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // counter returns an IDs function minting prefix1, prefix2, … — the
@@ -26,7 +26,7 @@ func counter(prefix string) func() string {
 }
 
 func userEntry(id, parent, text string) thread.MessageEntry {
-	return thread.MessageEntry{ID: id, ParentID: parent, Created: time.Unix(1, 0).UTC(), Message: weft.User(text)}
+	return thread.MessageEntry{ID: id, ParentID: parent, Created: time.Unix(1, 0).UTC(), Message: core.User(text)}
 }
 
 // Open validates the tree as it indexes it: every malformed shape a
@@ -97,7 +97,7 @@ func TestOpenRejectsMalformedTree(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			st := thread.Memory()
-			agent := weft.New(wefttest.Script())
+			agent := core.New(wefttest.Script())
 			s, err := thread.Create(ctx, st, agent, thread.IDs(func() string { return "s_bad" }))
 			if err != nil {
 				t.Fatal(err)
@@ -129,7 +129,7 @@ func TestOpenRejectsMalformedTree(t *testing.T) {
 func TestOpenAcceptsSeveralRoots(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		s, _ := thread.Create(ctx, st, agent)
 		if err := st.Append(ctx, s.ID(),
 			userEntry("e_a1", "", "a one"), userEntry("e_a2", "e_a1", "a two"),
@@ -165,7 +165,7 @@ func salvagedSession(t *testing.T, tail ...thread.Entry) (dir, id string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := thread.Create(ctx, st, weft.New(wefttest.Script()), thread.IDs(func() string { return "s_salvage" }))
+	s, err := thread.Create(ctx, st, core.New(wefttest.Script()), thread.IDs(func() string { return "s_salvage" }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func salvagedSession(t *testing.T, tail ...thread.Entry) (dir, id string) {
 func TestOpenSalvageReportsOrphans(t *testing.T) {
 	ctx := context.Background()
 	dir, id := salvagedSession(t)
-	agent := weft.New(wefttest.Script())
+	agent := core.New(wefttest.Script())
 
 	strict, err := jsonl.Open(dir)
 	if err != nil {
@@ -279,7 +279,7 @@ func TestOpenSalvageLostLeafTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := thread.Open(ctx, st, id, weft.New(wefttest.Script()))
+	s, err := thread.Open(ctx, st, id, core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatalf("Open with Salvage: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestOpenSalvageLostLeafTarget(t *testing.T) {
 func TestLoadReportTornTail(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
-	agent := weft.New(wefttest.Script())
+	agent := core.New(wefttest.Script())
 	s, _ := thread.Create(ctx, st, agent)
 	if err := st.Append(ctx, s.ID(), userEntry("e_1", "", "one")); err != nil {
 		t.Fatal(err)
@@ -322,7 +322,7 @@ func TestLoadReportTornTail(t *testing.T) {
 func TestOpenRejectsCreateOnlyOptions(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
-	agent := weft.New(wefttest.Script())
+	agent := core.New(wefttest.Script())
 	s, _ := thread.Create(ctx, st, agent)
 	for name, opt := range map[string]thread.SessionOption{
 		"WithMeta":    thread.WithMeta(map[string]string{"team": "support"}),
@@ -373,7 +373,7 @@ func TestClockPinsTimestamps(t *testing.T) {
 		tick = tick.Add(time.Second)
 		return tick
 	})
-	agent := weft.New(wefttest.Script(wefttest.Say("hello")))
+	agent := core.New(wefttest.Script(wefttest.Say("hello")))
 	s, err := thread.Create(ctx, st, agent, clock, thread.IDs(counter("c_")))
 	if err != nil {
 		t.Fatal(err)
@@ -421,7 +421,7 @@ func TestClockPinsTimestamps(t *testing.T) {
 func TestSetInfoRules(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		s, err := thread.Create(ctx, st, weft.New(wefttest.Script()),
+		s, err := thread.Create(ctx, st, core.New(wefttest.Script()),
 			thread.WithMeta(map[string]string{"weft.public_id": "pub-1", "team": "support"}))
 		if err != nil {
 			t.Fatal(err)
@@ -469,7 +469,7 @@ func TestSetInfoRules(t *testing.T) {
 func TestMetaReservedKeyFirstWriteWins(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
-	agent := weft.New(wefttest.Script())
+	agent := core.New(wefttest.Script())
 	s, _ := thread.Create(ctx, st, agent)
 	at := time.Unix(1, 0).UTC()
 	if err := st.Append(ctx, s.ID(),
@@ -505,7 +505,7 @@ func TestAppendApprovalRequestsGuardsIDs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			st := thread.Memory()
 			next := 0
-			s, err := thread.Create(ctx, st, weft.New(wefttest.Script()),
+			s, err := thread.Create(ctx, st, core.New(wefttest.Script()),
 				thread.IDs(func() string { id := ids[next]; next++; return id }))
 			if err != nil {
 				t.Fatal(err)
@@ -528,7 +528,7 @@ func TestAppendApprovalRequestsGuardsIDs(t *testing.T) {
 	// The good path: ids in order, entries chained, the caller's
 	// copies detached from the tree.
 	st := thread.Memory()
-	s, _ := thread.Create(ctx, st, weft.New(wefttest.Script()), thread.IDs(counter("m_")))
+	s, _ := thread.Create(ctx, st, core.New(wefttest.Script()), thread.IDs(counter("m_")))
 	reqs[0].Args = []byte(`{"order":1}`)
 	out, err := s.AppendApprovalRequests(ctx, reqs...)
 	if err != nil {

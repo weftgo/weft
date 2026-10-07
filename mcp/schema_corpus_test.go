@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // The 7.1 corpus: real tool input struct shapes — one per row of the
@@ -66,7 +66,7 @@ type rowTest struct {
 // a slice literal, so each row is one call in corpus().
 func runRow[In any](name string) rowTest {
 	rt := rowTest{name: name}
-	tool := weft.Tool(name, "corpus probe",
+	tool := core.Tool(name, "corpus probe",
 		func(context.Context, In) (string, error) { return "", nil })
 	b, err := json.Marshal(tool.InputSchema)
 	if err != nil {
@@ -485,7 +485,7 @@ func props(doc any) (map[string]any, bool) {
 
 // TestToSDKRoundTrips pins the bridge for every corpus shape: the
 // marshalled weft schema (what toSDK hands the SDK) comes back through
-// an SDK-decoded value (the client's map form) and weft.ParseSchema,
+// an SDK-decoded value (the client's map form) and core.ParseSchema,
 // and must re-marshal to the same document. Both sides are compared
 // as decoded JSON — struct encoding orders keys by field, map encoding
 // sorts them, so only the semantic compare is fair. If this needed a
@@ -508,7 +508,7 @@ func TestToSDKRoundTrips(t *testing.T) {
 			t.Errorf("%s: fromSDK: %v", r.name, err)
 			continue
 		}
-		s, err := weft.ParseSchema(back)
+		s, err := core.ParseSchema(back)
 		if err != nil {
 			t.Errorf("%s: ParseSchema rejected the round-tripped schema: %v (%s)", r.name, err, back)
 			continue

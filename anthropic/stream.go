@@ -10,7 +10,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/internal/adapterkit"
 )
 
@@ -24,17 +24,17 @@ type block struct {
 	args   strings.Builder
 }
 
-// Stream implements weft.Model over the SDK's streaming Messages API.
+// Stream implements core.Model over the SDK's streaming Messages API.
 // Text and thinking deltas are yielded live; tool calls are assembled
 // from input_json_delta fragments (surfaced live as ModelToolCallDelta
 // progress) and yielded whole before ModelFinish.
-func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
+func (m *model) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
 		// The kill switch guards self-built client egress; a client the
 		// caller injected is a test double by construction (ADR 0013's
 		// kill-switch clause).
-		if !m.injected && !weft.ModelRequestsAllowed() {
-			yield(nil, weft.ErrModelRequestsDenied)
+		if !m.injected && !core.ModelRequestsAllowed() {
+			yield(nil, core.ErrModelRequestsDenied)
 			return
 		}
 		params, err := m.params(req)
@@ -56,7 +56,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 
 		var (
 			blocks   = map[int64]*block{}
-			input    weft.Usage
+			input    core.Usage
 			output   int64
 			thinking int64
 			stop     string
@@ -65,7 +65,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 		for {
 			ok, idleHit := reader.next()
 			if idleHit {
-				yield(nil, fmt.Errorf("%w after %s", weft.ErrStreamIdle, m.idle))
+				yield(nil, fmt.Errorf("%w after %s", core.ErrStreamIdle, m.idle))
 				return
 			}
 			if !ok {
@@ -78,7 +78,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 				// Cache reads and writes are billed input; the totals
 				// fold them in, and the splits report them (TODO
 				// §2a.4) — the totals stay inclusive either way.
-				input = weft.Usage{
+				input = core.Usage{
 					InputTokens: e.Message.Usage.InputTokens +
 						e.Message.Usage.CacheReadInputTokens +
 						e.Message.Usage.CacheCreationInputTokens,
@@ -105,17 +105,17 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			case anthropic.ContentBlockDeltaEvent:
 				switch d := e.Delta.AsAny().(type) {
 				case anthropic.TextDelta:
-					if !yield(weft.ModelTextDelta{Text: d.Text}, nil) {
+					if !yield(core.ModelTextDelta{Text: d.Text}, nil) {
 						return
 					}
 				case anthropic.ThinkingDelta:
-					if !yield(weft.ModelReasoningDelta{Text: d.Thinking}, nil) {
+					if !yield(core.ModelReasoningDelta{Text: d.Thinking}, nil) {
 						return
 					}
 				case anthropic.SignatureDelta:
 					// The signature completes a thinking block; the core
 					// keeps the last non-empty signature of the step.
-					if !yield(weft.ModelReasoningDelta{Signature: d.Signature}, nil) {
+					if !yield(core.ModelReasoningDelta{Signature: d.Signature}, nil) {
 						return
 					}
 				case anthropic.InputJSONDelta:
@@ -129,7 +129,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 						if d.PartialJSON != "" {
 							// Argument fragments stream as progress —
 							// see the openai adapter's note.
-							if !yield(weft.ModelToolCallDelta{Index: int(e.Index), Name: b.name, Args: d.PartialJSON}, nil) {
+							if !yield(core.ModelToolCallDelta{Index: int(e.Index), Name: b.name, Args: d.PartialJSON}, nil) {
 								return
 							}
 						}
@@ -184,10 +184,10 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			if b.callID == "" || b.name == "" {
 				// The loop rejects empty ids/names as a contract
 				// violation; surface it exactly as loudly from here.
-				yield(nil, fmt.Errorf("%w: tool_use block %d has an empty id or name", weft.ErrModelContract, i))
+				yield(nil, fmt.Errorf("%w: tool_use block %d has an empty id or name", core.ErrModelContract, i))
 				return
 			}
-			if !yield(weft.ModelToolCall{ID: b.callID, Name: b.name, Args: json.RawMessage(args)}, nil) {
+			if !yield(core.ModelToolCall{ID: b.callID, Name: b.name, Args: json.RawMessage(args)}, nil) {
 				return
 			}
 		}
@@ -195,7 +195,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 		outputUsage := input
 		outputUsage.OutputTokens = output
 		outputUsage.ReasoningTokens = thinking
-		yield(weft.ModelFinish{
+		yield(core.ModelFinish{
 			Reason: reason,
 			Usage:  outputUsage,
 			Raw:    raw,

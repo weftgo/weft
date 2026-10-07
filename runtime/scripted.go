@@ -9,7 +9,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // The scripted engine (WEFT-PLAYGROUND §5.5, D1/C6): engine "scripted"
@@ -36,13 +36,13 @@ import (
 // edited messages) simply miss, and the step fails with "no recorded
 // turn" — either way it never silently answers.
 
-// scriptedModel is a weft.Model over the source run's recorded
+// scriptedModel is a core.Model over the source run's recorded
 // assistant messages, keyed per request prefix like wefttest's
 // fixtures.
 type scriptedModel struct {
-	info  weft.ModelInfo
+	info  core.ModelInfo
 	mu    sync.Mutex
-	byKey map[string][][]weft.ModelEvent // keyed turns, recorded order
+	byKey map[string][][]core.ModelEvent // keyed turns, recorded order
 }
 
 // newScriptedModel indexes the source run's own steps: the request
@@ -53,14 +53,14 @@ type scriptedModel struct {
 // (the agent's registered tools — the manifest's list).
 func newScriptedModel(src *sourceRun, tools []string) *scriptedModel {
 	m := &scriptedModel{
-		info:  weft.ModelInfo{Provider: "weft/runtime", Name: "scripted"},
-		byKey: map[string][][]weft.ModelEvent{},
+		info:  core.ModelInfo{Provider: "weft/runtime", Name: "scripted"},
+		byKey: map[string][][]core.ModelEvent{},
 	}
 	names := append([]string(nil), tools...)
 	slices.Sort(names)
 	msgs := src.all()
 	for i := len(src.input); i < len(msgs); i++ {
-		if msgs[i].Role != weft.RoleAssistant {
+		if msgs[i].Role != core.RoleAssistant {
 			continue
 		}
 		key := scriptedKey(msgs[:i], names)
@@ -70,33 +70,33 @@ func newScriptedModel(src *sourceRun, tools []string) *scriptedModel {
 }
 
 // eventsOf synthesises one recorded assistant message's model events.
-func eventsOf(msg weft.Message) []weft.ModelEvent {
-	var out []weft.ModelEvent
+func eventsOf(msg core.Message) []core.ModelEvent {
+	var out []core.ModelEvent
 	var calls int
 	for _, p := range msg.Content {
 		switch p := p.(type) {
-		case weft.ReasoningPart:
+		case core.ReasoningPart:
 			// The block's signature rides its delta (a signed delta closes
 			// the block): the rebuilt message must equal the recorded one,
 			// or the next step's request keys differently and misses.
-			out = append(out, weft.ModelReasoningDelta(p))
-		case weft.TextPart:
-			out = append(out, weft.ModelTextDelta(p))
-		case weft.ToolCallPart:
+			out = append(out, core.ModelReasoningDelta(p))
+		case core.TextPart:
+			out = append(out, core.ModelTextDelta(p))
+		case core.ToolCallPart:
 			calls++
 			args := p.Args
 			if len(args) == 0 {
 				args = json.RawMessage("{}")
 			}
-			out = append(out, weft.ModelToolCall{ID: p.ID, Name: p.Name, Args: args, Signature: p.Signature})
+			out = append(out, core.ModelToolCall{ID: p.ID, Name: p.Name, Args: args, Signature: p.Signature})
 		}
 	}
-	reason := weft.StopEndTurn
+	reason := core.StopEndTurn
 	if calls > 0 {
-		reason = weft.StopToolCalls
+		reason = core.StopToolCalls
 	}
 	// Usage stays zero: the point is zero tokens (D1/C6, J5).
-	out = append(out, weft.ModelFinish{Reason: reason})
+	out = append(out, core.ModelFinish{Reason: reason})
 	return out
 }
 
@@ -105,10 +105,10 @@ func eventsOf(msg weft.Message) []weft.ModelEvent {
 // tool catalogue by name only, the thinking and tool-choice requests,
 // the sequential flag. The system prompt is deliberately absent.
 type scriptedKeyDoc struct {
-	Messages   []weft.Message         `json:"messages"`
+	Messages   []core.Message         `json:"messages"`
 	Tools      []string               `json:"tools,omitempty"`
-	Thinking   *weft.ThinkingConfig   `json:"thinking,omitempty"`
-	ToolChoice *weft.ToolChoiceConfig `json:"tool_choice,omitempty"`
+	Thinking   *core.ThinkingConfig   `json:"thinking,omitempty"`
+	ToolChoice *core.ToolChoiceConfig `json:"tool_choice,omitempty"`
 	Sequential bool                   `json:"sequential,omitempty"`
 }
 
@@ -122,19 +122,19 @@ type scriptedKeyDoc struct {
 // changes. (An agent configured with non-zero defaults for them
 // therefore records a transcript its own scripted re-runs cannot
 // answer: the miss is loud, never a silent wrong answer.)
-func scriptedKey(prefix []weft.Message, tools []string) string {
+func scriptedKey(prefix []core.Message, tools []string) string {
 	return hashScriptedKey(scriptedKeyDoc{Messages: prefix, Tools: tools})
 }
 
 // scriptedRequestKey is the request side of the same key: wefttest's
 // canonical rules verbatim (replay.go:89-104).
-func scriptedRequestKey(req weft.ModelRequest) string {
+func scriptedRequestKey(req core.ModelRequest) string {
 	doc := scriptedKeyDoc{Messages: req.Messages, Tools: toolNames(req.Tools), Sequential: req.SequentialTools}
-	if req.Thinking != (weft.ThinkingConfig{}) {
+	if req.Thinking != (core.ThinkingConfig{}) {
 		tc := req.Thinking
 		doc.Thinking = &tc
 	}
-	if req.ToolChoice != (weft.ToolChoiceConfig{}) {
+	if req.ToolChoice != (core.ToolChoiceConfig{}) {
 		cc := req.ToolChoice
 		doc.ToolChoice = &cc
 	}
@@ -152,20 +152,20 @@ func hashScriptedKey(doc scriptedKeyDoc) string {
 	return fmt.Sprintf("%016x", h.Sum64())
 }
 
-func (m *scriptedModel) Info() weft.ModelInfo { return m.info }
+func (m *scriptedModel) Info() core.ModelInfo { return m.info }
 
-func (m *scriptedModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *scriptedModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	key := scriptedRequestKey(req)
 	m.mu.Lock()
 	queue := m.byKey[key]
-	var events []weft.ModelEvent
+	var events []core.ModelEvent
 	if len(queue) > 0 {
 		events = queue[0]
 		m.byKey[key] = queue[1:]
 	}
 	m.mu.Unlock()
 
-	return func(yield func(weft.ModelEvent, error) bool) {
+	return func(yield func(core.ModelEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(nil, err)
 			return
@@ -192,7 +192,7 @@ func (m *scriptedModel) Stream(ctx context.Context, req weft.ModelRequest) iter.
 
 // toolNames lists the request's advertised tool names, sorted — the
 // wefttest key's tool catalogue.
-func toolNames(tools []*weft.ToolDef) []string {
+func toolNames(tools []*core.ToolDef) []string {
 	out := make([]string, 0, len(tools))
 	for _, t := range tools {
 		out = append(out, t.Name)

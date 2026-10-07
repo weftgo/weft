@@ -4,14 +4,7 @@ go 1.26.0
 
 // Every weft module resolves from its released tag (the module
 // proxy, no replace — the two-phase rule, ADR 0005).
-require (
-	github.com/weftgo/weft v0.8.0
-	github.com/weftgo/weft/obsdb v0.2.0
-	github.com/weftgo/weft/otel v0.2.1
-	github.com/weftgo/weft/runtime v0.2.0
-	github.com/weftgo/weft/studio v0.4.1
-	github.com/weftgo/weft/thread v0.9.1
-)
+require github.com/weftgo/weft v0.8.0
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"google.golang.org/genai"
 )
 
@@ -36,7 +36,7 @@ func captureServer(t *testing.T, fixture string) (srv *httptest.Server, body fun
 	return srv, func() string { return gotBody }, func() http.Header { return gotHeader }
 }
 
-func atModel(t *testing.T, srv *httptest.Server, opts ...Option) weft.Model {
+func atModel(t *testing.T, srv *httptest.Server, opts ...Option) core.Model {
 	t.Helper()
 	c, err := genaiClient(t.Context(), srv.URL)
 	if err != nil {
@@ -66,7 +66,7 @@ func TestExtraBodyAndHeaders(t *testing.T) {
 		}),
 		ExtraHeaders(h),
 	)
-	if _, err := weft.New(m).Generate(t.Context(), weft.Prompt("hi")); err != nil {
+	if _, err := core.New(m).Generate(t.Context(), core.Prompt("hi")); err != nil {
 		t.Fatal(err)
 	}
 	var payload map[string]any
@@ -93,7 +93,7 @@ func TestExtraBodyAndHeaders(t *testing.T) {
 func TestExtraBodyDefaultBytes(t *testing.T) {
 	srv, body, header := captureServer(t, "testdata/text_only.sse")
 	m := atModel(t, srv)
-	if _, err := weft.New(m).Generate(t.Context(), weft.Prompt("hi")); err != nil {
+	if _, err := core.New(m).Generate(t.Context(), core.Prompt("hi")); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(body(), "x_vendor_knob") || strings.Contains(body(), "x_nested") {
@@ -117,7 +117,7 @@ func TestExtraBodySnapshot(t *testing.T) {
 	m := atModel(t, srv, ExtraBody(fields), ExtraHeaders(h))
 	nested["custom"] = 2       // caller mutates after construction
 	h["X-Weft-Test"][0] = "no" // and the header slice
-	if _, err := weft.New(m).Generate(t.Context(), weft.Prompt("hi")); err != nil {
+	if _, err := core.New(m).Generate(t.Context(), core.Prompt("hi")); err != nil {
 		t.Fatal(err)
 	}
 	var payload map[string]any

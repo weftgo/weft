@@ -12,9 +12,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // toolHistory appends a turn with two bulky tool results (c1, c2 —
@@ -24,22 +24,22 @@ func toolHistory(t *testing.T, st thread.Storage, s *thread.Session) {
 	t.Helper()
 	now := timeUTC()
 	if err := st.Append(context.Background(), s.ID(),
-		thread.MessageEntry{ID: "e_t1", Created: now, Message: weft.User("run the tools")},
-		thread.MessageEntry{ID: "e_t2", ParentID: "e_t1", Created: now, Message: weft.Message{
-			Role: weft.RoleAssistant,
-			Content: []weft.Part{
-				weft.ToolCallPart{ID: "c1", Name: "read", Args: []byte("{}")},
-				weft.ToolCallPart{ID: "c2", Name: "read", Args: []byte("{}")},
+		thread.MessageEntry{ID: "e_t1", Created: now, Message: core.User("run the tools")},
+		thread.MessageEntry{ID: "e_t2", ParentID: "e_t1", Created: now, Message: core.Message{
+			Role: core.RoleAssistant,
+			Content: []core.Part{
+				core.ToolCallPart{ID: "c1", Name: "read", Args: []byte("{}")},
+				core.ToolCallPart{ID: "c2", Name: "read", Args: []byte("{}")},
 			},
 		}},
-		thread.MessageEntry{ID: "e_t3", ParentID: "e_t2", Created: now, Message: weft.Message{
-			Role: weft.RoleTool,
-			Content: []weft.Part{
-				weft.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 40_000)},
-				weft.ToolResultPart{CallID: "c2", Name: "read", Content: strings.Repeat("r", 40_000)},
+		thread.MessageEntry{ID: "e_t3", ParentID: "e_t2", Created: now, Message: core.Message{
+			Role: core.RoleTool,
+			Content: []core.Part{
+				core.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 40_000)},
+				core.ToolResultPart{CallID: "c2", Name: "read", Content: strings.Repeat("r", 40_000)},
 			},
 		}},
-		thread.MessageEntry{ID: "e_t4", ParentID: "e_t3", Created: now, Message: weft.Assistant("done")},
+		thread.MessageEntry{ID: "e_t4", ParentID: "e_t3", Created: now, Message: core.Assistant("done")},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func resultContents(s *thread.Session) []string {
 	var out []string
 	for _, m := range s.Context() {
 		for _, p := range m.Content {
-			if r, ok := p.(weft.ToolResultPart); ok {
+			if r, ok := p.(core.ToolResultPart); ok {
 				if len(r.Content) > 200 {
 					out = append(out, "raw")
 				} else {
@@ -75,7 +75,7 @@ func trims(s *thread.Session) []thread.CompactionEntry {
 
 func sendAndWait(t *testing.T, s *thread.Session, text string) {
 	t.Helper()
-	turn, err := s.Send(context.Background(), weft.User(text))
+	turn, err := s.Send(context.Background(), core.User(text))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,10 +100,10 @@ func TestCustomTrimmerChangesTheContext(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		agent, _ := scriptedAgent(bigUsage(), 4)
-		gone := trimmerFunc(func(ctx context.Context, msgs []weft.Message) ([]weft.Message, error) {
+		gone := trimmerFunc(func(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
 			for i, m := range msgs {
 				for j, p := range m.Content {
-					if r, ok := p.(weft.ToolResultPart); ok && r.CallID == "c1" {
+					if r, ok := p.(core.ToolResultPart); ok && r.CallID == "c1" {
 						r.Content = "[gone: " + r.Name + "]"
 						msgs[i].Content[j] = r // in place, on the trimmer's own copy
 					}
@@ -150,7 +150,7 @@ func TestCustomTrimmerChangesTheContext(t *testing.T) {
 		// The stored result is untouched: the trim is a view.
 		for _, e := range s.Entries() {
 			if m, ok := e.(thread.MessageEntry); ok && m.ID == "e_t3" {
-				if r := m.Message.Content[0].(weft.ToolResultPart); len(r.Content) != 40_000 {
+				if r := m.Message.Content[0].(core.ToolResultPart); len(r.Content) != 40_000 {
 					t.Error("the trimmer's in-place edit rewrote the stored result")
 				}
 			}
@@ -219,7 +219,7 @@ func TestTrimReplayIgnoresTheCurrentOptions(t *testing.T) {
 // under any other configuration it stubs nothing.
 func TestLegacyTrimEntryReadsAsBefore(t *testing.T) {
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script())
+	agent := core.New(wefttest.Script())
 	st := thread.Memory()
 	s, _ := thread.Create(ctx, st, agent)
 	toolHistory(t, st, s)
@@ -255,17 +255,17 @@ func TestUnrepresentableTrimIsLoud(t *testing.T) {
 		wantFailed bool
 		wantLog    string
 	}{
-		"drops a message": {trimmerFunc(func(ctx context.Context, msgs []weft.Message) ([]weft.Message, error) {
+		"drops a message": {trimmerFunc(func(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
 			return msgs[1:], nil
 		}), true, "the trim cannot be recorded"},
-		"rewrites a text part": {trimmerFunc(func(ctx context.Context, msgs []weft.Message) ([]weft.Message, error) {
-			msgs[0] = weft.User("rewritten")
+		"rewrites a text part": {trimmerFunc(func(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
+			msgs[0] = core.User("rewritten")
 			return msgs, nil
 		}), true, "the trim cannot be recorded"},
-		"renames a result's call": {trimmerFunc(func(ctx context.Context, msgs []weft.Message) ([]weft.Message, error) {
+		"renames a result's call": {trimmerFunc(func(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
 			for i, m := range msgs {
 				for j, p := range m.Content {
-					if r, ok := p.(weft.ToolResultPart); ok {
+					if r, ok := p.(core.ToolResultPart); ok {
 						r.CallID, r.Content = "other", "x"
 						msgs[i].Content[j] = r
 					}
@@ -273,23 +273,23 @@ func TestUnrepresentableTrimIsLoud(t *testing.T) {
 			}
 			return msgs, nil
 		}), true, "the trim cannot be recorded"},
-		"returns nil": {trimmerFunc(func(ctx context.Context, msgs []weft.Message) ([]weft.Message, error) {
+		"returns nil": {trimmerFunc(func(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
 			return nil, nil
 		}), false, "the trimmer failed"},
-		"returns an error": {trimmerFunc(func(ctx context.Context, msgs []weft.Message) ([]weft.Message, error) {
+		"returns an error": {trimmerFunc(func(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
 			return nil, errors.New("trimmer down")
 		}), false, "the trimmer failed"},
-		"panics": {trimmerFunc(func(ctx context.Context, msgs []weft.Message) ([]weft.Message, error) {
+		"panics": {trimmerFunc(func(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
 			panic("trimmer blew up")
 		}), false, "the trimmer failed"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var buf syncBuffer
 			logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
-			agent := weft.New(wefttest.Script(
+			agent := core.New(wefttest.Script(
 				wefttest.Say("reply").WithUsage(bigUsage()),
 				wefttest.Say("the summary"),
-			), weft.Logger(logger))
+			), core.Logger(logger))
 			var mu sync.Mutex
 			var failedReason thread.Reason
 			var failedErr error
@@ -365,17 +365,17 @@ func TestCompactTrimCompactKeepsTheChain(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		rec := &summaryRecorder{reply: "FIRST-SUMMARY"}
-		agent := weft.New(rec)
+		agent := core.New(rec)
 		s, _ := thread.Create(ctx, st, agent)
 		now := timeUTC()
 		if err := st.Append(ctx, s.ID(),
-			thread.MessageEntry{ID: "e_a", Created: now, Message: weft.User(strings.Repeat("a", 60_000))},
-			thread.MessageEntry{ID: "e_b", ParentID: "e_a", Created: now, Message: weft.User(strings.Repeat("b", 30_000))},
-			thread.MessageEntry{ID: "e_call", ParentID: "e_b", Created: now, Message: weft.Message{Role: weft.RoleAssistant,
-				Content: []weft.Part{weft.ToolCallPart{ID: "c1", Name: "read", Args: []byte("{}")}}}},
-			thread.MessageEntry{ID: "e_res", ParentID: "e_call", Created: now, Message: weft.Message{Role: weft.RoleTool,
-				Content: []weft.Part{weft.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 2_000)}}}},
-			thread.MessageEntry{ID: "e_c", ParentID: "e_res", Created: now, Message: weft.User(strings.Repeat("c", 30_000))},
+			thread.MessageEntry{ID: "e_a", Created: now, Message: core.User(strings.Repeat("a", 60_000))},
+			thread.MessageEntry{ID: "e_b", ParentID: "e_a", Created: now, Message: core.User(strings.Repeat("b", 30_000))},
+			thread.MessageEntry{ID: "e_call", ParentID: "e_b", Created: now, Message: core.Message{Role: core.RoleAssistant,
+				Content: []core.Part{core.ToolCallPart{ID: "c1", Name: "read", Args: []byte("{}")}}}},
+			thread.MessageEntry{ID: "e_res", ParentID: "e_call", Created: now, Message: core.Message{Role: core.RoleTool,
+				Content: []core.Part{core.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 2_000)}}}},
+			thread.MessageEntry{ID: "e_c", ParentID: "e_res", Created: now, Message: core.User(strings.Repeat("c", 30_000))},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -458,10 +458,10 @@ func TestCompactTrimCompactKeepsTheChain(t *testing.T) {
 func TestTriggerStandsDownAfterACompaction(t *testing.T) {
 	ctx := context.Background()
 	rec := &summaryRecorder{reply: "the summary"}
-	agent := weft.New(wefttest.Script(
-		wefttest.Say("first").WithUsage(weft.Usage{InputTokens: 95_000, OutputTokens: 5}),
+	agent := core.New(wefttest.Script(
+		wefttest.Say("first").WithUsage(core.Usage{InputTokens: 95_000, OutputTokens: 5}),
 		wefttest.Fail(errors.New("model down")),
-		wefttest.Say("third").WithUsage(weft.Usage{InputTokens: 95_000, OutputTokens: 5}),
+		wefttest.Say("third").WithUsage(core.Usage{InputTokens: 95_000, OutputTokens: 5}),
 	))
 	opts := []thread.SessionOption{thread.ContextWindow(100_000), thread.KeepRecent(100), thread.SummaryModel(rec)}
 	s := compactable(t, thread.Memory(), agent, opts...)
@@ -481,7 +481,7 @@ func TestTriggerStandsDownAfterACompaction(t *testing.T) {
 	// The next turn's prompt alone outweighs KeepRecent, so a re-fire
 	// would have something to cut — and the run fails before any step
 	// reports: only the stale 95k could fire the pre-turn trigger.
-	turn, err := s.Send(ctx, weft.User(strings.Repeat("p", 8_000)))
+	turn, err := s.Send(ctx, core.User(strings.Repeat("p", 8_000)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -507,14 +507,14 @@ func TestTriggerStandsDownAfterACompaction(t *testing.T) {
 func TestUnusableCompactionIsSkipped(t *testing.T) {
 	ctx := context.Background()
 	history := []thread.Entry{
-		thread.MessageEntry{ID: "e_1", Created: timeUTC(), Message: weft.User("one")},
-		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: timeUTC(), Message: weft.Assistant("two")},
-		thread.MessageEntry{ID: "e_3", ParentID: "e_2", Created: timeUTC(), Message: weft.User("three")},
+		thread.MessageEntry{ID: "e_1", Created: timeUTC(), Message: core.User("one")},
+		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: timeUTC(), Message: core.Assistant("two")},
+		thread.MessageEntry{ID: "e_3", ParentID: "e_2", Created: timeUTC(), Message: core.User("three")},
 	}
 	open := func(t *testing.T, extra ...thread.Entry) (*thread.Session, *syncBuffer) {
 		t.Helper()
 		var buf syncBuffer
-		agent := weft.New(wefttest.Script(), weft.Logger(slog.New(slog.NewTextHandler(&buf, nil))))
+		agent := core.New(wefttest.Script(), core.Logger(slog.New(slog.NewTextHandler(&buf, nil))))
 		st := thread.Memory()
 		s, _ := thread.Create(ctx, st, agent)
 		if err := st.Append(ctx, s.ID(), append(append([]thread.Entry(nil), history...), extra...)...); err != nil {
@@ -608,24 +608,24 @@ func TestTrimRecordGolden(t *testing.T) {
 // marker, wherever it sits on the path.
 func TestCompactedContextShapeGolden(t *testing.T) {
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script())
+	agent := core.New(wefttest.Script())
 	st := thread.Memory()
 	s, _ := thread.Create(ctx, st, agent)
 	now := timeUTC()
 	if err := st.Append(ctx, s.ID(),
-		thread.MessageEntry{ID: "e_1", Created: now, Message: weft.User("THE REQUIREMENT: ship by Friday")},
-		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: now, Message: weft.Assistant("Understood.")},
-		thread.MessageEntry{ID: "e_3", ParentID: "e_2", Created: now, Message: weft.User("read both files")},
-		thread.MessageEntry{ID: "e_4", ParentID: "e_3", Created: now, Message: weft.Message{Role: weft.RoleAssistant,
-			Content: []weft.Part{
-				weft.ReasoningPart{Text: "which first?", Signature: "sig-1"},
-				weft.ToolCallPart{ID: "c1", Name: "read", Args: []byte(`{"path":"a.go"}`)},
-				weft.ToolCallPart{ID: "c2", Name: "read", Args: []byte(`{"path":"b.go"}`)},
+		thread.MessageEntry{ID: "e_1", Created: now, Message: core.User("THE REQUIREMENT: ship by Friday")},
+		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: now, Message: core.Assistant("Understood.")},
+		thread.MessageEntry{ID: "e_3", ParentID: "e_2", Created: now, Message: core.User("read both files")},
+		thread.MessageEntry{ID: "e_4", ParentID: "e_3", Created: now, Message: core.Message{Role: core.RoleAssistant,
+			Content: []core.Part{
+				core.ReasoningPart{Text: "which first?", Signature: "sig-1"},
+				core.ToolCallPart{ID: "c1", Name: "read", Args: []byte(`{"path":"a.go"}`)},
+				core.ToolCallPart{ID: "c2", Name: "read", Args: []byte(`{"path":"b.go"}`)},
 			}}},
-		thread.MessageEntry{ID: "e_5", ParentID: "e_4", Created: now, Message: weft.Message{Role: weft.RoleTool,
-			Content: []weft.Part{
-				weft.ToolResultPart{CallID: "c1", Name: "read", Content: "package a // a long file"},
-				weft.ToolResultPart{CallID: "c2", Name: "read", Content: "package b"},
+		thread.MessageEntry{ID: "e_5", ParentID: "e_4", Created: now, Message: core.Message{Role: core.RoleTool,
+			Content: []core.Part{
+				core.ToolResultPart{CallID: "c1", Name: "read", Content: "package a // a long file"},
+				core.ToolResultPart{CallID: "c2", Name: "read", Content: "package b"},
 			}}},
 		thread.CompactionEntry{ID: "e_6", ParentID: "e_5", Created: now,
 			Summary: "Goal: ship by Friday. Progress: plan agreed.", FirstKept: "e_3",
@@ -637,7 +637,7 @@ func TestCompactedContextShapeGolden(t *testing.T) {
 			}}},
 		thread.BranchSummaryEntry{ID: "e_8", ParentID: "e_7", Created: now,
 			Summary: "The abandoned branch tried a rewrite; it was dropped.", FromEntry: "e_7"},
-		thread.MessageEntry{ID: "e_9", ParentID: "e_8", Created: now, Message: weft.User("now fix a.go")},
+		thread.MessageEntry{ID: "e_9", ParentID: "e_8", Created: now, Message: core.User("now fix a.go")},
 	); err != nil {
 		t.Fatal(err)
 	}

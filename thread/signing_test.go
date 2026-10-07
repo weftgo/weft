@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // signerRing is the one-key ring most signing tests need.
@@ -83,7 +83,7 @@ func TestDecideSignedFailClosed(t *testing.T) {
 	ctx := context.Background()
 	ring, secret := signerRing(t)
 
-	park := func(t *testing.T) (*thread.Session, weft.ToolCallPart, thread.Request) {
+	park := func(t *testing.T) (*thread.Session, core.ToolCallPart, thread.Request) {
 		t.Helper()
 		agent, _ := refundAgent(wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}), wefttest.Say("done"))
 		s, err := thread.Create(ctx, thread.Memory(), agent, thread.WithKeyring(ring))
@@ -360,7 +360,7 @@ func TestSignedApproveAlways(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("build"))
+	t1, err := s.Send(ctx, core.User("build"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +388,7 @@ func TestSignedApproveAlways(t *testing.T) {
 	if !found {
 		t.Fatal("a signed ApproveAlways recorded no grant")
 	}
-	t2, err := s.Send(ctx, weft.User("build again"))
+	t2, err := s.Send(ctx, core.User("build again"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +422,7 @@ func TestSignedDenyAlwaysMintsNoGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("build"))
+	t1, err := s.Send(ctx, core.User("build"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +448,7 @@ func TestSignedDenyAlwaysMintsNoGrant(t *testing.T) {
 			t.Fatalf("a signed Deny with Always minted grant %+v", g.Grant)
 		}
 	}
-	t2, err := s.Send(ctx, weft.User("build again"))
+	t2, err := s.Send(ctx, core.User("build again"))
 	if err != nil {
 		t.Fatal(err)
 	}

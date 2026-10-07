@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -96,7 +96,7 @@ func (p *Pool) recoverOne(ctx context.Context, parent *thread.Session, rc Receip
 	h, entries, _, err := parent.Storage().Load(ctx, rc.Child)
 	if errors.Is(err, thread.ErrNotFound) {
 		return p.settleFromLedger(ctx, parent, rc, "", Failed,
-			fmt.Sprintf("child session %s is gone", rc.Child), weft.Usage{})
+			fmt.Sprintf("child session %s is gone", rc.Child), core.Usage{})
 	}
 	if err != nil {
 		return fmt.Errorf("thread/pool: child session %s: %w", rc.Child, err)
@@ -115,7 +115,7 @@ func (p *Pool) recoverOne(ctx context.Context, parent *thread.Session, rc Receip
 // failed with the recorded cause, or failed because no turn was ever
 // recorded (the process died with the run in flight or still queued).
 // usage is the session's whole cost, turns and summaries.
-func classify(entries []thread.Entry) (state State, stop string, usage weft.Usage, parked bool) {
+func classify(entries []thread.Entry) (state State, stop string, usage core.Usage, parked bool) {
 	var last *thread.TurnEntry
 	for _, e := range entries {
 		switch e := e.(type) {
@@ -134,7 +134,7 @@ func classify(entries []thread.Entry) (state State, stop string, usage weft.Usag
 	case last.Canceled:
 		return Canceled, last.Err, usage, false
 	case last.Err != "":
-		if strings.Contains(last.Err, weft.ErrMaxSteps.Error()) || strings.Contains(last.Err, weft.ErrUsageLimit.Error()) {
+		if strings.Contains(last.Err, core.ErrMaxSteps.Error()) || strings.Contains(last.Err, core.ErrUsageLimit.Error()) {
 			return Capped, last.Err, usage, false
 		}
 		return Failed, last.Err, usage, false
@@ -190,7 +190,7 @@ func callPending(parent *thread.Session, callID string) bool {
 // settleFromLedger settles a receipt whose child no delegate of this
 // pool holds, from what the child's file says, and resolves the
 // delegating call if it is still parked in the parent.
-func (p *Pool) settleFromLedger(ctx context.Context, parent *thread.Session, rc Receipt, name string, state State, stop string, usage weft.Usage) error {
+func (p *Pool) settleFromLedger(ctx context.Context, parent *thread.Session, rc Receipt, name string, state State, stop string, usage core.Usage) error {
 	if _, err := parent.AppendPoolReceipt(ctx, thread.PoolReceiptEntry{
 		Receipt: rc.ID, Status: string(state), Child: rc.Child, Stop: stop, Usage: usage,
 	}); err != nil {
@@ -273,12 +273,12 @@ func (p *Pool) resolveFromLedger(ctx context.Context, parent *thread.Session, rc
 func finalText(entries []thread.Entry) string {
 	for i := len(entries) - 1; i >= 0; i-- {
 		me, ok := entries[i].(thread.MessageEntry)
-		if !ok || me.Message.Role != weft.RoleAssistant {
+		if !ok || me.Message.Role != core.RoleAssistant {
 			continue
 		}
 		var b strings.Builder
 		for _, part := range me.Message.Content {
-			if tp, ok := part.(weft.TextPart); ok {
+			if tp, ok := part.(core.TextPart); ok {
 				b.WriteString(tp.Text)
 			}
 		}

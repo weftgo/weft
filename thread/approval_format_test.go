@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // approvalAdditiveSamples are the format-2 kinds carrying the optional

@@ -2,17 +2,22 @@
 
 [![CI](https://github.com/weftgo/weft/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/weftgo/weft/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/weftgo/weft.svg)](https://pkg.go.dev/github.com/weftgo/weft)
-[![Version](https://img.shields.io/badge/version-v0.8.0-orange)](https://github.com/weftgo/weft/releases/tag/v0.8.0)
+[![Version](https://img.shields.io/badge/version-v0.9.0-orange)](https://github.com/weftgo/weft/releases/tag/v0.9.0)
 
 A modular framework for building AI agents in Go — designed the way the
 standard library is: small interfaces, `context` everywhere, functional
-options, wrapped errors, and zero required configuration. Start with the
-core as a library; add the batteries when you need them. Every module is
-usable on its own, and nothing above the core is required.
+options, wrapped errors, and zero required configuration. One `go get`
+is the whole framework; one import path is the loop alone:
 
-| Module | What it gives you |
+```sh
+go get github.com/weftgo/weft@v0.9.0        # the framework: every package below, one version
+go get github.com/weftgo/weft/core@v0.9.0   # the loop alone: its only dependency is the OTel API
+```
+
+| Package | What it gives you |
 |---|---|
-| `weft` | The agent loop: tools from plain Go functions, parallel tool calls with defined failure semantics, typed streaming events, structured output, approvals, steering, subagents; OpenAI, Anthropic, Google adapters (`weft/openai`, …) and MCP both ways (`weft/mcp`) |
+| `weft` | The agent loop: tools from plain Go functions, parallel tool calls with defined failure semantics, typed streaming events, structured output, approvals, steering, subagents; OpenAI, Anthropic, Google adapters (`weft/openai`, …), MCP both ways (`weft/mcp`), reference middleware (`weft/mw`) and the offline test double (`weft/wefttest`) |
+| `weft/core` | The same loop as a module of its own, for a service that wants nothing else: `core.New`, `core.Tool`, `core/wefttest`, `core/mw`. `weft` re-exports it name for name, so `weft.Agent` *is* `core.Agent` |
 | `weft/thread` | Durable sessions: an append-only conversation tree with branching, compaction, approvals that survive restarts, steering and a bounded pool of child agents (jsonl, SQLite or memory storage) |
 | `weft/otel` | Recording in one line (`defer otel.Install()()`): every event, transcript and span exported over OpenTelemetry — to a local database, Studio, or any OTLP backend — with per-destination content policy and redaction |
 | `weft/obsdb` | The queryable store those records land in: SQLite locally, ClickHouse hosted (`weft/obsdb/clickhouse`) |
@@ -23,11 +28,11 @@ Concurrency is the point, not a feature: a step's tools fan out over
 goroutines, parallelism is a one-line dial, and tool failures never cancel
 their siblings.
 
-> **Status:** v0.8.0 — experimental, pre-1.0, released module by module
-> (see [Releases](https://github.com/weftgo/weft/releases) and
-> `CHANGELOG.md`). The core's three load-bearing contracts — message
+> **Status:** v0.9.0 — experimental, pre-1.0, released as one module
+> (plus `core`; see [Releases](https://github.com/weftgo/weft/releases),
+> `CHANGELOG.md` and, coming from 0.8, [`MIGRATION-0.9.md`](MIGRATION-0.9.md)). The core's three load-bearing contracts — message
 > model, error model, tool contract — are implemented and tested, and
-> every module has been through a production-readiness review. Serving,
+> every layer has been through a production-readiness review. Serving,
 > eval and the `weft` CLI come next — see the roadmap below.
 
 ## Quick start
@@ -311,7 +316,7 @@ content on, no network) and every event, delta, transcript record and
 span leaves as it happens — a crash loses nothing emitted. Caller
 pairs ride `weft.Metadata`; a quiet run heartbeats, so a live run
 reads `running` and a crashed one `interrupted`. The recorder's
-database is module `weft/obsdb`: the OTLP-shaped model with the
+database is package `weft/obsdb`: the OTLP-shaped model with the
 derived weft identity, read back through one `obsdb.DB` interface —
 runs, sessions, positioned event pages, transcripts, spans by run or
 trace, public ids — with `obsdb/sqlite` as the default backend and
@@ -336,7 +341,7 @@ live SSE stream — served as one `http.Handler` with the UI embedded,
 no build step, nothing leaves the process. Setup A embeds it beside
 the app and passes the pipeline's handle for the live lane; a token
 (`studio.Token`) walls the API when it leaves loopback. Setup B is the
-binary — module `weft/studio/cmd`, the one place that imports the
+binary — package `weft/studio/cmd`, the one place that imports the
 ClickHouse driver — for any language's OTel app: UI + ingest + a dev
 token on `127.0.0.1:7331`, `--db sqlite://path` or
 `clickhouse://user:pass@host:9000/db` ([studio/README.md](studio/README.md)).
@@ -398,7 +403,7 @@ as they join the run — through `weft.OnMessages`, the core's transcript
 observer — so a crash mid-turn loses nothing emitted; the prompt was
 already durable before the run started. Two backends carry it:
 `thread/jsonl` (one file per session) and `thread/sqlite` (one SQLite
-file, WAL, its own module so the driver never enters `thread`). A
+file, WAL; `thread` itself never imports the driver). A
 crash mid-append leaves at most a torn final line, which the next
 writer removes before it appends. Across processes and `Storage`
 values a second writer gets `thread.ErrLocked`, while readers never
@@ -591,7 +596,7 @@ is the review artifact. ([ADR 0012](docs/adr/0012-manifest-format.md))
 
 ## MCP: both ways
 
-`weft/mcp` (its own module over the official Go MCP SDK, aliased
+`weft/mcp` (a package over the official Go MCP SDK, aliased
 `sdk`) is the bridge in both directions, with no adapter layer — the
 tool contract is the same shape ([ADR 0015](docs/adr/0015-mcp-interop.md)):
 
@@ -641,7 +646,7 @@ import keeps the schema and the answers identical.
 ## Providers
 
 First-party adapters wrap the vendors' official Go SDKs — weft never
-owns an HTTP client — and are versioned as their own modules. One line
+owns an HTTP client — and ship in the framework module. One line
 per vendor, one adapter for the whole OpenAI-compatible long tail:
 
 ```go
@@ -730,26 +735,30 @@ that must stay offline get loud failures, not surprise bills.
   `ModelFinish`, continues after it, carries a tool call with an empty
   ID or name, or panics fails the run wrapping `ErrModelContract` — a
   broken adapter cannot corrupt a transcript.
-- **One dependency** in the core module: the OTel API (trace and
-  logs — ADR 0016, ADR 0024), a no-op until an SDK registers — the
-  zero-config instrumentation THE-END-GOAL sanctions as the core's
-  single exception. The vendor SDKs live in the adapter modules (their
-  own `go.mod`); the OTel SDK and its exporters live in the `weft/otel`
-  satellite (and `examples/otel`), never in the core.
+- **One dependency** in the core module (`weft/core`): the OTel API
+  (trace and logs — ADR 0016, ADR 0024), a no-op until an SDK
+  registers — the zero-config instrumentation THE-END-GOAL sanctions
+  as the core's single exception. The vendor SDKs, the OTel SDK and its
+  exporters, the SQLite and ClickHouse drivers are dependencies of the
+  framework module, never of `core` (ADR 0027).
 
 ## Layout
 
 ```
-doc.go, message.go    message model (roles, parts, versioned JSON)
-errors.go, env.go     error model (sentinels, RunError, kill switch)
-tool.go, schema.go    tool contract, per-tool policy, schema reflection
-output.go             structured output (Output, GenerateAs, OutputOf)
-model.go              provider seam (streaming-first Model interface)
-events.go             sealed run-event set
-agent.go, run.go      agent construction options, run/stream/result
-loop.go               the loop: model call → tool chain fan-out → repeat; approval resume
-mw/                   reference middleware: Retry, Fallback, Log, RepairJSON, Allow, Audit, MapErrors
-wefttest/             scripted mock model + the conformance suite
+facade.go             the framework's root package: generated aliases and wrappers over core
+core/                 the loop, a module of its own (go.mod; its one dependency is the OTel API):
+  message.go            message model (roles, parts, versioned JSON)
+  errors.go, env.go     error model (sentinels, RunError, kill switch)
+  tool.go, schema.go    tool contract, per-tool policy, schema reflection
+  output.go             structured output (Output, GenerateAs, OutputOf)
+  model.go              provider seam (streaming-first Model interface)
+  events.go             sealed run-event set
+  agent.go, run.go      agent construction options, run/stream/result
+  loop.go               the loop: model call → tool chain fan-out → repeat; approval resume
+  mw/                   reference middleware: Retry, Fallback, Log, RepairJSON, Allow, Audit, MapErrors
+  wefttest/             scripted mock model + the conformance suite
+mw/, wefttest/        the framework's facades over core/mw and core/wefttest (generated)
+internal/facadegen/   the facade generator (internal/cmd/genfacade runs it under go generate)
 openai/               OpenAI Chat Completions (+ compatible servers)
 anthropic/            Anthropic Messages (thinking, signatures)
 google/               Gemini via genai
@@ -765,12 +774,13 @@ examples/             runnable examples (getting-started, approval, otel, studio
 docs/adr/             decision records for the contracts
 ```
 
-Each module directory tags independently (ADR 0005's monorepo rule).
-The current set (2026-10-07) is root `v0.8.0`, `thread` `v0.9.1`
-(with `thread/sqlite` `v0.3.0`), `obsdb` `v0.2.0`, `obsdb/clickhouse`
-`v0.2.0`, `otel` `v0.2.0`, `studio` `v0.4.0`, `studio/cmd` `v0.2.0`,
-`runtime` `v0.2.0` — and every module resolves from its tag, no
-replaces. The whole
+Two Go modules (ADR 0027): the root is the framework — every directory
+above except `core/` is a package of it — and `core/` is the loop
+alone. A release is two tags, `core/vX.Y.Z` then `vX.Y.Z`, and the
+root requires `core` at that exact version with no replace; `go.work`
+joins them for development. The root package, `mw`, `wefttest` and
+`wefttest/conformance` are generated facades over `core`
+(`make generate` after changing core's exported API). The whole
 recorder-and-inspector story is two lines: `defer otel.Install()()`
 and `studio.Handler(studio.DB(otel.LocalDB()))` (Recording runs and
 Inspecting runs above); `weft/runtime` adds the playground with one
@@ -783,15 +793,17 @@ make test   # go test -race ./... in every workspace module
 make vet
 make lint   # golangci-lint (CI uses .golangci.yml)
 make live   # adapter conformance against real keys (-tags live)
-make apidiff  # public API of the root module vs the last tag
-make apidiff-all  # every workspace module vs its own last tag (CI runs it)
+make generate  # regenerate the facades after changing core's API
+make apidiff   # public API of the framework module vs the last tag (reported)
+make apidiff-core  # core vs its last core/v* tag (enforced)
+make apidiff-all   # every workspace module vs its own last tag (CI runs it)
 make fuzz    # 10 s per fuzz target; FUZZTIME=1m make fuzz for longer
 make fmt
 ```
 
 Requires Go 1.26 or newer; the current and previous Go releases are
 supported and both are tested in CI. A fuzz crasher fails CI, its
-input is uploaded, and the fix PR commits it under `testdata/fuzz/` as
+input is uploaded, and the fix PR commits it under `core/testdata/fuzz/` as
 a regression seed — the existing `FuzzRepair` seed got there that way.
 
 ### Testing
@@ -817,18 +829,17 @@ by `wefttest/conformance` against recorded `.sse` fixtures, not by
 replay (ADR 0013).
 
 **API stability is enforced, not aspired to.** CI runs
-`scripts/apidiff.sh` over every module in the workspace, each compared
-against its own last tag. For the root module (the last `v*` tag),
-`thread`, `thread/sqlite` and the adapters any incompatible change
+`scripts/apidiff.sh` over both modules, each compared against its own
+last tag. For `core` (the last `core/v*` tag) any incompatible change
 fails the build. Pre-1.0, a deliberate source-compatible evolution
 (widening a return type to a superset interface, adding a trailing
-variadic) can be acknowledged by adding apidiff's exact line to the
-module's `.apidiff-allow` with a justification; the root's file is
-emptied at each tag. Renaming or removing an exported symbol always
-fails. The observability modules — `obsdb`, `obsdb/clickhouse`,
-`otel`, `runtime`, `studio` — are pre-freeze: the gate reports their
-incompatible changes instead of failing, and such a change makes the
-module's next tag a minor bump with a breaking CHANGELOG entry.
+variadic) can be acknowledged by adding apidiff's exact line to
+`core/.apidiff-allow` with a justification; the file is emptied at
+each tag. Renaming or removing an exported symbol always fails. The
+framework module holds the pre-freeze layers — `thread`, `obsdb`,
+`otel`, `runtime`, `studio` — so the gate reports its incompatible
+changes instead of failing, and such a change makes the next tag a
+minor bump with a breaking CHANGELOG entry.
 
 ## Roadmap
 

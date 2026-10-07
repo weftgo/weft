@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // An empty tool result travels as a visible placeholder: the API
@@ -13,14 +13,14 @@ import (
 // returning "" must not fail the run's next model call.
 func TestEmptyToolResultPlaceholder(t *testing.T) {
 	m := Model("m").(*model)
-	p, err := m.params(weft.ModelRequest{
-		Messages: []weft.Message{
-			weft.User("q"),
-			{Role: weft.RoleAssistant, Content: []weft.Part{
-				weft.ToolCallPart{ID: "c1", Name: "t", Args: json.RawMessage(`{}`)},
+	p, err := m.params(core.ModelRequest{
+		Messages: []core.Message{
+			core.User("q"),
+			{Role: core.RoleAssistant, Content: []core.Part{
+				core.ToolCallPart{ID: "c1", Name: "t", Args: json.RawMessage(`{}`)},
 			}},
-			{Role: weft.RoleTool, Content: []weft.Part{
-				weft.ToolResultPart{CallID: "c1", Name: "t"},
+			{Role: core.RoleTool, Content: []core.Part{
+				core.ToolResultPart{CallID: "c1", Name: "t"},
 			}},
 		},
 	})
@@ -43,12 +43,12 @@ func TestEmptyToolResultPlaceholder(t *testing.T) {
 // input:null, which the API rejects.
 func TestAssistantEmptyTextAndNilArgsNeverReachTheWire(t *testing.T) {
 	m := Model("m").(*model)
-	p, err := m.params(weft.ModelRequest{
-		Messages: []weft.Message{
-			weft.User("q"),
-			{Role: weft.RoleAssistant, Content: []weft.Part{
-				weft.TextPart{Text: ""},
-				weft.ToolCallPart{ID: "c1", Name: "t"},
+	p, err := m.params(core.ModelRequest{
+		Messages: []core.Message{
+			core.User("q"),
+			{Role: core.RoleAssistant, Content: []core.Part{
+				core.TextPart{Text: ""},
+				core.ToolCallPart{ID: "c1", Name: "t"},
 			}},
 		},
 	})
@@ -74,14 +74,14 @@ func TestAssistantEmptyTextAndNilArgsNeverReachTheWire(t *testing.T) {
 // content array the API would reject.
 func TestEmptyAssistantMessageSkipped(t *testing.T) {
 	m := Model("m").(*model)
-	p, err := m.params(weft.ModelRequest{
-		Messages: []weft.Message{
-			weft.User("q"),
-			{Role: weft.RoleAssistant, Content: []weft.Part{
-				weft.ReasoningPart{Text: "unsigned, from another provider"},
+	p, err := m.params(core.ModelRequest{
+		Messages: []core.Message{
+			core.User("q"),
+			{Role: core.RoleAssistant, Content: []core.Part{
+				core.ReasoningPart{Text: "unsigned, from another provider"},
 			}},
-			{Role: weft.RoleTool, Content: []weft.Part{
-				weft.ToolResultPart{CallID: "c1", Name: "t", Content: "ok"},
+			{Role: core.RoleTool, Content: []core.Part{
+				core.ToolResultPart{CallID: "c1", Name: "t", Content: "ok"},
 			}},
 		},
 	})

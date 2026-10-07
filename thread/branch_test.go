@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // msgs appends one message entry per text through the storage (no
@@ -26,7 +26,7 @@ func msgs(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Sessio
 	for i, text := range texts {
 		id := thread.NewEntryID()
 		ids[i] = id
-		entries[i] = thread.MessageEntry{ID: id, ParentID: parent, Created: now, Message: weft.User(text)}
+		entries[i] = thread.MessageEntry{ID: id, ParentID: parent, Created: now, Message: core.User(text)}
 		parent = id
 	}
 	if err := st.Append(ctx, s.ID(), entries...); err != nil {
@@ -37,13 +37,13 @@ func msgs(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Sessio
 
 func reopen(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Session) *thread.Session {
 	t.Helper()
-	return reopenWith(t, ctx, st, s, weft.New(wefttest.Script()))
+	return reopenWith(t, ctx, st, s, core.New(wefttest.Script()))
 }
 
 // reopenWith reopens on the caller's agent — the tests whose model
 // records what it saw (the compaction suite) must not swap it for a
 // fresh scripted one on the way back in.
-func reopenWith(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Session, agent *weft.Agent, opts ...thread.SessionOption) *thread.Session {
+func reopenWith(t *testing.T, ctx context.Context, st thread.Storage, s *thread.Session, agent *core.Agent, opts ...thread.SessionOption) *thread.Session {
 	t.Helper()
 	// One Session writes a session: the lease of the one being
 	// replaced ends first, as its process ending would end it.
@@ -100,7 +100,7 @@ func headerOf(t *testing.T, ctx context.Context, st thread.Storage, id string) t
 func TestBranchTree(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		s, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+		s, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 
 		// A deep tree: a five-message main line, a branch off the
 		// third entry, back to the main line's end, then onto the
@@ -148,7 +148,7 @@ func TestBranchTree(t *testing.T) {
 func TestBranchLeafEntryIsLeafAfterReopen(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		s, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+		s, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 		s, ids := msgs(t, ctx, st, s, "one", "two")
 		// A branch with no write after it: the file's last entry is a
 		// leaf entry, and the leaf is its target.
@@ -168,7 +168,7 @@ func TestBranchLeafEntryIsLeafAfterReopen(t *testing.T) {
 func TestBranchValidation(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		s, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+		s, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 		s, _ = msgs(t, ctx, st, s, "one")
 		if err := s.Branch(ctx, "e_nope"); err == nil {
 			t.Error("Branch to unknown id: no error")
@@ -207,12 +207,12 @@ func TestBranchSummarizeLeft(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		rec := &summaryRecorder{reply: "what the abandoned branch did"}
-		agent := weft.New(rec)
+		agent := core.New(rec)
 		s, _ := thread.Create(ctx, st, agent)
 		now := time.Now().UTC()
 		if err := st.Append(ctx, s.ID(),
-			thread.MessageEntry{ID: "e_bs1", Created: now, Message: weft.User("the setup")},
-			thread.MessageEntry{ID: "e_bs2", ParentID: "e_bs1", Created: now, Message: weft.Assistant("the wrong turn")},
+			thread.MessageEntry{ID: "e_bs1", Created: now, Message: core.User("the setup")},
+			thread.MessageEntry{ID: "e_bs2", ParentID: "e_bs1", Created: now, Message: core.Assistant("the wrong turn")},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -253,7 +253,7 @@ func TestBranchSummarizeLeft(t *testing.T) {
 func TestFork(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		s, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+		s, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 		s, ids := msgs(t, ctx, st, s, "one", "two", "three")
 		s, _ = msgs(t, ctx, st, s, "four") // beyond the fork point
 
@@ -310,7 +310,7 @@ func TestFork(t *testing.T) {
 func TestForkValidation(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		s, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+		s, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 		if _, err := s.Fork(ctx, "e_nope"); err == nil {
 			t.Error("Fork to unknown id: no error")
 		}
@@ -340,7 +340,7 @@ func TestForkValidation(t *testing.T) {
 
 func TestSessionDuplicateEntryID(t *testing.T) {
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script())
+	agent := core.New(wefttest.Script())
 	st := thread.Memory()
 	next := 0
 	ids := []string{"s_dup", "e_dup", "e_dup"}
@@ -372,23 +372,23 @@ func TestBranchDuringRunningTurnFailsBusy(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	type blockInput struct{}
-	tool := weft.Tool("block", "Block until released.",
+	tool := core.Tool("block", "Block until released.",
 		func(ctx context.Context, in blockInput) (string, error) {
 			close(started)
 			<-release
 			return "ok", nil
 		})
-	agent := weft.New(
+	agent := core.New(
 		wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: "block"}),
 			wefttest.Say("done"),
 		),
-		weft.Name("branch-busy-test"), tool)
+		core.Name("branch-busy-test"), tool)
 	s, err := thread.Create(ctx, thread.Memory(), agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("go"))
+	t1, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,17 +416,17 @@ func TestBranchDuringRunningTurnFailsBusy(t *testing.T) {
 // still held the busy mark for a scheduling window).
 func TestBranchAfterWaitIsNeverBusy(t *testing.T) {
 	ctx := context.Background()
-	agent := weft.New(
+	agent := core.New(
 		wefttest.Script(
 			wefttest.Say("one"), wefttest.Say("two"), wefttest.Say("three"),
 			wefttest.Say("four"), wefttest.Say("five")),
-		weft.Name("branch-after-wait"))
+		core.Name("branch-after-wait"))
 	s, err := thread.Create(ctx, thread.Memory(), agent)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 5; i++ {
-		turn, err := s.Send(ctx, weft.User("go"))
+		turn, err := s.Send(ctx, core.User("go"))
 		if err != nil {
 			t.Fatal(err)
 		}

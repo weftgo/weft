@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // registry is what a runtime exposes: the agents (found by name), the
@@ -16,7 +16,7 @@ import (
 // Install's options; the tally mutates as commands run.
 type registry struct {
 	cfg     *config
-	agents  map[string]*weft.Agent
+	agents  map[string]*core.Agent
 	order   []string // agent names, registration order
 	entries map[string]agentRegistration
 }
@@ -25,14 +25,14 @@ type registry struct {
 // without a name cannot register (its manifest would be nameless) and
 // is skipped with a WARN; a duplicate name keeps the first.
 func newRegistry(c *config) *registry {
-	r := &registry{cfg: c, agents: map[string]*weft.Agent{}, entries: map[string]agentRegistration{}}
+	r := &registry{cfg: c, agents: map[string]*core.Agent{}, entries: map[string]agentRegistration{}}
 	for _, a := range c.agents {
 		if a == nil {
 			continue
 		}
 		name := a.Name()
 		if name == "" {
-			slog.Warn("weft/runtime: agent without weft.Name is not playable", "hint", "weft.Name names an agent in its manifest")
+			slog.Warn("weft/runtime: agent without core.Name is not playable", "hint", "core.Name names an agent in its manifest")
 			continue
 		}
 		if _, dup := r.agents[name]; dup {
@@ -45,14 +45,14 @@ func newRegistry(c *config) *registry {
 	return r
 }
 
-// entryFor builds one agent's registration: its weft.Manifest bytes
+// entryFor builds one agent's registration: its core.Manifest bytes
 // (the description of the code — names, instructions, policy, tools),
 // the alternate models the runtime allows, its own caps as the
 // lower-only bounds, each tool's real side-effect class (its
 // ReplayPolicy; unannotated is "never", WEFT-PLAYGROUND §6 rule 3),
 // and the AllowSideEffects set.
-func (r *registry) entryFor(a *weft.Agent, name string) agentRegistration {
-	manifest, err := weft.Manifest(a)
+func (r *registry) entryFor(a *core.Agent, name string) agentRegistration {
+	manifest, err := core.Manifest(a)
 	if err != nil {
 		// Manifest only errors on nil/unnamed/duplicate agents; the
 		// name is checked above, so this is unreachable in practice —
@@ -181,7 +181,7 @@ func serviceName() string {
 }
 
 // agent returns the registered agent by name.
-func (r *registry) agent(name string) (*weft.Agent, bool) {
+func (r *registry) agent(name string) (*core.Agent, bool) {
 	a, ok := r.agents[name]
 	return a, ok
 }
@@ -194,9 +194,9 @@ func (r *registry) entry(name string) (agentRegistration, bool) {
 
 // allowedTools names the tools a playground run may really execute —
 // the except-list of the run's default-deny park rule
-// (weft.ParkAllExcept, WEFT-PLAYGROUND §6 rule 3): the agent's tools
-// whose code vouched weft.Replay(weft.ReplaySafe) and the
-// structured-output submission of an agent built with weft.Output (a
+// (core.ParkAllExcept, WEFT-PLAYGROUND §6 rule 3): the agent's tools
+// whose code vouched core.Replay(core.ReplaySafe) and the
+// structured-output submission of an agent built with core.Output (a
 // submission is the run's answer, not a side effect), in every
 // side_effects mode; and, only when the command asked for
 // side_effects "allow" (allowMode), every name the runtime opted in
@@ -213,7 +213,7 @@ func (r *registry) allowedTools(agent string, allowMode bool) []string {
 	}
 	set := map[string]bool{}
 	for tool, class := range e.SideEffects {
-		if class == string(weft.ReplaySafe) || tool == outputTool {
+		if class == string(core.ReplaySafe) || tool == outputTool {
 			set[tool] = true
 		}
 	}
@@ -230,17 +230,17 @@ func (r *registry) allowedTools(agent string, allowMode bool) []string {
 	return allowed
 }
 
-// outputTool is the tool weft.Output registers on an agent (the core's
+// outputTool is the tool core.Output registers on an agent (the core's
 // submit_output; its name is model-visible contract).
 const outputTool = "submit_output"
 
 // mayRunForReal reports whether tool may execute under side_effects
 // "allow": it is on this agent's AllowSideEffects list, or it is not a
-// side effect at all (vouched weft.Replay(weft.ReplaySafe), or an
+// side effect at all (vouched core.Replay(core.ReplaySafe), or an
 // Output agent's submission) — those run in every mode, "allow"
 // included.
 func (e agentRegistration) mayRunForReal(tool string) bool {
-	if e.SideEffects[tool] == string(weft.ReplaySafe) || tool == outputTool {
+	if e.SideEffects[tool] == string(core.ReplaySafe) || tool == outputTool {
 		return true
 	}
 	for _, t := range e.Allow {
@@ -265,7 +265,7 @@ func (r *registry) ownModel(agent string) string {
 }
 
 // model resolves a display name from the allow-list.
-func (r *registry) model(name string) (weft.Model, bool) {
+func (r *registry) model(name string) (core.Model, bool) {
 	m, ok := r.cfg.models[name]
 	return m, ok
 }

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // The compaction defaults (ADR 0020 §2): zero configuration works once
@@ -47,8 +47,8 @@ const (
 // summaryMessage wraps a summary text in the fixed marker as a user
 // message — the one shape both a compaction's summary and a branch
 // summary take in the context.
-func summaryMessage(text string) weft.Message {
-	return weft.User(summaryMarkerOpen + "\n" + text + "\n" + summaryMarkerClose)
+func summaryMessage(text string) core.Message {
+	return core.User(summaryMarkerOpen + "\n" + text + "\n" + summaryMarkerClose)
 }
 
 // summarySkeleton is the summarizer's system prompt — model-visible
@@ -149,8 +149,8 @@ type Compaction struct {
 	Reason Reason
 	// SummarizerUsage and SummarizerModel record what the summary
 	// cost and which model made it — the cost ledger's inputs.
-	SummarizerUsage weft.Usage
-	SummarizerModel weft.ModelInfo
+	SummarizerUsage core.Usage
+	SummarizerModel core.ModelInfo
 	// FilesRead lists the file URLs the summarized range carried,
 	// sorted and deduplicated.
 	FilesRead []string
@@ -179,14 +179,14 @@ type compactConfig struct {
 	keepRecent int64
 	// The five layers (ADR 0020 §3), all optional; the zero values
 	// mean "not set" and the defaults above carry the algorithm.
-	modelWindows     map[weft.ModelInfo]int64
-	modelReserves    map[weft.ModelInfo]int64
+	modelWindows     map[core.ModelInfo]int64
+	modelReserves    map[core.ModelInfo]int64
 	trigger          func(TriggerInput) bool
 	minTurnsBetween  int
 	maxPerSession    int
 	estimator        Estimator
 	disabled         bool
-	summaryModel     weft.Model
+	summaryModel     core.Model
 	summaryPrompt    string
 	summaryFocus     string
 	summaryMaxTokens int64
@@ -214,11 +214,11 @@ func defaultCompactConfig() compactConfig {
 // under the line, so the configuration is an error (ErrCompactConfig)
 // instead of a session that silently never compacts. With no window
 // known nothing is validated: only manual compaction runs.
-func (c *compactConfig) resolve(m weft.Model) error {
-	if n, ok := c.modelWindows[weft.InfoOf(m)]; ok {
+func (c *compactConfig) resolve(m core.Model) error {
+	if n, ok := c.modelWindows[core.InfoOf(m)]; ok {
 		c.window = n
 	}
-	if n, ok := c.modelReserves[weft.InfoOf(m)]; ok {
+	if n, ok := c.modelReserves[core.InfoOf(m)]; ok {
 		c.reserve = n
 	}
 	if c.window <= 0 {
@@ -470,7 +470,7 @@ func validTrimRecord(path []Entry, t *TrimRecord) error {
 		found := false
 		if ok {
 			for _, p := range m.Content {
-				if r, isResult := p.(weft.ToolResultPart); isResult && r.CallID == st.CallID {
+				if r, isResult := p.(core.ToolResultPart); isResult && r.CallID == st.CallID {
 					found = true
 					break
 				}
@@ -692,7 +692,7 @@ func (s *Session) planCompaction(ctx context.Context, reason Reason, instruction
 	// after a first compaction the two differ by everything the summary
 	// replaced. Each message carries its own Content slice: the hook
 	// and the Compactor are handed copies, never the tree's.
-	contextMsgs := make([]weft.Message, len(view.msgs))
+	contextMsgs := make([]core.Message, len(view.msgs))
 	for i, vm := range view.msgs {
 		contextMsgs[i] = cloneMessage(vm.msg)
 	}
@@ -781,10 +781,10 @@ func (s *Session) planCompaction(ctx context.Context, reason Reason, instruction
 		Pinned:          prep.Pinned,
 		RangeHash:       hex.EncodeToString(hash[:]),
 	}
-	if cfg.preferNative && c.SummarizerModel == (weft.ModelInfo{}) {
+	if cfg.preferNative && c.SummarizerModel == (core.ModelInfo{}) {
 		// A native compaction that reported no model info still names
 		// the model that ran it.
-		c.SummarizerModel = weft.InfoOf(s.agent.Model())
+		c.SummarizerModel = core.InfoOf(s.agent.Model())
 	}
 	return c, nil
 }
@@ -793,8 +793,8 @@ func (s *Session) planCompaction(ctx context.Context, reason Reason, instruction
 // compaction summarizes — each with its own Content slice, so a
 // BeforeCompact hook that edits a message in place edits its copy and
 // never the tree.
-func rangeMessages(path []Entry, from, to int) []weft.Message {
-	var out []weft.Message
+func rangeMessages(path []Entry, from, to int) []core.Message {
+	var out []core.Message
 	for _, e := range path[from:to] {
 		if m, ok := contextMessage(e); ok {
 			out = append(out, cloneMessage(m))
@@ -869,7 +869,7 @@ func adoptEdits(path []Entry, rangeStart, cut int, pinned map[string]bool, prep 
 // contextMessage returns the message an entry contributes to the
 // context — message, custom_message, and branch summaries in their
 // marked shape.
-func contextMessage(e Entry) (weft.Message, bool) {
+func contextMessage(e Entry) (core.Message, bool) {
 	switch e := e.(type) {
 	case MessageEntry:
 		return e.Message, true
@@ -878,7 +878,7 @@ func contextMessage(e Entry) (weft.Message, bool) {
 	case BranchSummaryEntry:
 		return summaryMessage(e.Summary), true
 	}
-	return weft.Message{}, false
+	return core.Message{}, false
 }
 
 // indexOfID returns the position of the entry with the given id on the
@@ -975,19 +975,19 @@ func (s *Session) produceSummary(ctx context.Context, in SummaryInput) (Summary,
 // writes happen on the summary call. A max_tokens finish is
 // ErrSummaryTruncated — the text that fit under the cap is half a
 // summary, and storing it would silently lose the other half.
-func (s *Session) summarizeWith(ctx context.Context, m weft.Model, in SummaryInput) (Summary, error) {
+func (s *Session) summarizeWith(ctx context.Context, m core.Model, in SummaryInput) (Summary, error) {
 	input := in.Messages
 	if in.PrevSummary != "" {
-		input = append([]weft.Message{summaryMessage(in.PrevSummary)}, in.Messages...)
+		input = append([]core.Message{summaryMessage(in.PrevSummary)}, in.Messages...)
 	}
 	if s.cfg.compaction.preferNative {
 		if nc := nativeOf(m); nc != nil {
-			msg, usage, err := nc.CompactNative(ctx, weft.ModelRequest{
+			msg, usage, err := nc.CompactNative(ctx, core.ModelRequest{
 				System:   in.SystemPrompt,
 				Messages: input,
 			}, in.Instructions)
 			if err == nil && strings.TrimSpace(msg.Text()) != "" {
-				return Summary{Text: strings.TrimSpace(msg.Text()), Usage: usage, Model: weft.InfoOf(m)}, nil
+				return Summary{Text: strings.TrimSpace(msg.Text()), Usage: usage, Model: core.InfoOf(m)}, nil
 			}
 			// An error or a text-less answer: the text summary is the
 			// fallback (ADR 0020 §7) — said out loud, never swallowed.
@@ -999,44 +999,44 @@ func (s *Session) summarizeWith(ctx context.Context, m weft.Model, in SummaryInp
 		}
 	}
 	maxTokens := int(in.MaxTokens)
-	req := weft.ModelRequest{
+	req := core.ModelRequest{
 		System:   in.SystemPrompt,
 		Messages: input,
-		Params:   weft.RequestParams{MaxTokens: &maxTokens},
+		Params:   core.RequestParams{MaxTokens: &maxTokens},
 	}
 	// The stream contract, enforced the way the loop enforces it:
 	// exactly one ModelFinish, nothing after it (ErrModelContract) —
 	// a summarizer stream that ends without a finish is an error, not
 	// whatever text happened to arrive.
 	var sb strings.Builder
-	var usage weft.Usage
-	var stop weft.StopReason
+	var usage core.Usage
+	var stop core.StopReason
 	finished := false
 	for ev, err := range m.Stream(ctx, req) {
 		if err != nil {
 			return Summary{}, fmt.Errorf("thread: summarizer: %w", err)
 		}
 		if finished {
-			return Summary{}, fmt.Errorf("%w: the summarizer stream continued after ModelFinish", weft.ErrModelContract)
+			return Summary{}, fmt.Errorf("%w: the summarizer stream continued after ModelFinish", core.ErrModelContract)
 		}
 		switch ev := ev.(type) {
-		case weft.ModelTextDelta:
+		case core.ModelTextDelta:
 			sb.WriteString(ev.Text)
-		case weft.ModelFinish:
+		case core.ModelFinish:
 			usage, stop, finished = ev.Usage, ev.Reason, true
 		}
 	}
 	if !finished {
-		return Summary{}, fmt.Errorf("%w: the summarizer stream ended without ModelFinish", weft.ErrModelContract)
+		return Summary{}, fmt.Errorf("%w: the summarizer stream ended without ModelFinish", core.ErrModelContract)
 	}
-	if stop == weft.StopMaxTokens {
+	if stop == core.StopMaxTokens {
 		return Summary{}, fmt.Errorf("%w: the summarizer stopped at %d output tokens (raise SummaryMaxTokens or Reserve)", ErrSummaryTruncated, maxTokens)
 	}
 	summary := strings.TrimSpace(sb.String())
 	if summary == "" {
 		return Summary{}, errors.New("thread: summarizer returned no text")
 	}
-	return Summary{Text: summary, Usage: usage, Model: weft.InfoOf(m)}, nil
+	return Summary{Text: summary, Usage: usage, Model: core.InfoOf(m)}, nil
 }
 
 // cutIndex finds where the path cuts: the earliest boundary such that
@@ -1112,13 +1112,13 @@ func validCut(path []Entry, cut int) bool {
 	if !ok {
 		return false
 	}
-	if m.Message.Role != weft.RoleUser && m.Message.Role != weft.RoleAssistant {
+	if m.Message.Role != core.RoleUser && m.Message.Role != core.RoleAssistant {
 		return false
 	}
 	if cut > 0 {
-		if prev, ok := path[cut-1].(MessageEntry); ok && prev.Message.Role == weft.RoleAssistant {
+		if prev, ok := path[cut-1].(MessageEntry); ok && prev.Message.Role == core.RoleAssistant {
 			for _, p := range prev.Message.Content {
-				if _, isCall := p.(weft.ToolCallPart); isCall {
+				if _, isCall := p.(core.ToolCallPart); isCall {
 					return false
 				}
 			}
@@ -1134,37 +1134,37 @@ func validCut(path []Entry, cut int) bool {
 // the provider's internal scratch), and file parts reduced to their
 // names — the URL, or the media type and size for inline data. It
 // returns the view and the file URLs it saw, unsorted.
-func summarizerView(msgs []weft.Message) ([]weft.Message, []string) {
+func summarizerView(msgs []core.Message) ([]core.Message, []string) {
 	var files []string
-	out := make([]weft.Message, 0, len(msgs))
+	out := make([]core.Message, 0, len(msgs))
 	for _, m := range msgs {
-		vm := weft.Message{Role: m.Role}
+		vm := core.Message{Role: m.Role}
 		for _, p := range m.Content {
 			switch p := p.(type) {
-			case weft.ToolResultPart:
+			case core.ToolResultPart:
 				if len([]rune(p.Content)) > defaultToolResultCap {
 					r := []rune(p.Content)
 					p.Content = string(r[:defaultToolResultCap]) + "…[truncated]"
 				}
 				vm.Content = append(vm.Content, p)
-			case weft.ReasoningPart:
+			case core.ReasoningPart:
 				if p.Signature != "" {
 					continue // signed reasoning is dropped
 				}
 				vm.Content = append(vm.Content, p)
-			case weft.FilePart:
+			case core.FilePart:
 				name := p.URL
 				if name == "" {
 					name = fmt.Sprintf("(%s, %d bytes)", p.MediaType, len(p.Data))
 				} else {
 					files = append(files, name)
 				}
-				vm.Content = append(vm.Content, weft.TextPart{Text: "[file: " + name + "]"})
+				vm.Content = append(vm.Content, core.TextPart{Text: "[file: " + name + "]"})
 			default:
 				vm.Content = append(vm.Content, p)
 			}
 		}
-		if len(vm.Content) > 0 || m.Role == weft.RoleUser {
+		if len(vm.Content) > 0 || m.Role == core.RoleUser {
 			out = append(out, vm)
 		}
 	}
@@ -1175,9 +1175,9 @@ func summarizerView(msgs []weft.Message) ([]weft.Message, []string) {
 // configured Estimator when one is set, the default quarter-of-wire-
 // bytes otherwise. The Estimator is a caller's hook: callers must not
 // hold s.mu.
-func (s *Session) estimate(m weft.Message) int64 {
+func (s *Session) estimate(m core.Message) int64 {
 	if est := s.cfg.compaction.estimator; est != nil {
-		return est.Estimate([]weft.Message{m})
+		return est.Estimate([]core.Message{m})
 	}
 	return estimateMessage(m)
 }
@@ -1185,7 +1185,7 @@ func (s *Session) estimate(m weft.Message) int64 {
 // estimateAll is estimate over a batch — one Estimator call for the
 // lot, so a provider-aware estimator can count them together. Callers
 // must not hold s.mu.
-func (s *Session) estimateAll(msgs []weft.Message) int64 {
+func (s *Session) estimateAll(msgs []core.Message) int64 {
 	if len(msgs) == 0 {
 		return 0
 	}
@@ -1220,7 +1220,7 @@ func (s *Session) entryWeight(e Entry) int64 {
 // quarter of its wire bytes, rounded up. It estimates the DELTA the
 // trigger adds to provider-reported input — the signal itself is never
 // an estimate (ADR 0020 §2's rule); WithEstimator replaces it.
-func estimateMessage(m weft.Message) int64 {
+func estimateMessage(m core.Message) int64 {
 	return (int64(len(mustJSON(m))) + 3) / 4
 }
 
@@ -1314,7 +1314,7 @@ func (s *Session) maybeAutoCompact(ctx context.Context) {
 		s.mu.Unlock()
 		return
 	}
-	var since []weft.Message
+	var since []core.Message
 	counting, stale := false, false
 	for _, e := range path {
 		if !counting {
@@ -1417,7 +1417,7 @@ func (s *Session) safeTrigger(in TriggerInput) (fire bool) {
 // safeTrim runs the trimmer, containing a panic as an error. A nil
 // result is an error too: a trimmer that returns nothing has not
 // trimmed the context to nothing. Callers must not hold s.mu.
-func (s *Session) safeTrim(ctx context.Context, before []weft.Message) (trimmed []weft.Message, err error) {
+func (s *Session) safeTrim(ctx context.Context, before []core.Message) (trimmed []core.Message, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			trimmed, err = nil, fmt.Errorf("thread: the Trimmer panicked: %v", r)
@@ -1449,8 +1449,8 @@ func (s *Session) tryTrim(ctx context.Context) bool {
 	if err != nil || len(view.msgs) == 0 {
 		return false
 	}
-	before := make([]weft.Message, len(view.msgs))
-	input := make([]weft.Message, len(view.msgs))
+	before := make([]core.Message, len(view.msgs))
+	input := make([]core.Message, len(view.msgs))
 	for i, vm := range view.msgs {
 		before[i] = vm.msg
 		input[i] = cloneMessage(vm.msg) // the trimmer's own copy: an in-place edit must not reach the tree
@@ -1495,7 +1495,7 @@ func (s *Session) tryTrim(ctx context.Context) bool {
 // CallID or Name changed is an error wrapping ErrInvalidCompaction — a
 // change the walk could not replay must not be silently lost. An
 // unchanged context yields an empty record.
-func deriveTrim(view []viewMsg, trimmed []weft.Message) (*TrimRecord, error) {
+func deriveTrim(view []viewMsg, trimmed []core.Message) (*TrimRecord, error) {
 	if len(trimmed) != len(view) {
 		return nil, fmt.Errorf("%w: the Trimmer returned %d messages for %d; a trim may only replace tool-result content", ErrInvalidCompaction, len(trimmed), len(view))
 	}
@@ -1509,8 +1509,8 @@ func deriveTrim(view []viewMsg, trimmed []weft.Message) (*TrimRecord, error) {
 			if samePart(in.Content[j], out.Content[j]) {
 				continue
 			}
-			ir, inOK := in.Content[j].(weft.ToolResultPart)
-			or, outOK := out.Content[j].(weft.ToolResultPart)
+			ir, inOK := in.Content[j].(core.ToolResultPart)
+			or, outOK := out.Content[j].(core.ToolResultPart)
 			if !inOK || !outOK || ir.CallID != or.CallID || ir.Name != or.Name || vm.entry == "" {
 				return nil, fmt.Errorf("%w: the Trimmer changed part %d of message %d, which is not a tool result's content", ErrInvalidCompaction, j, i)
 			}
@@ -1523,7 +1523,7 @@ func deriveTrim(view []viewMsg, trimmed []weft.Message) (*TrimRecord, error) {
 // samePart reports whether two message parts are the same on the wire
 // — the comparison that matters, since the wire is what the model
 // sees.
-func samePart(a, b weft.Part) bool {
+func samePart(a, b core.Part) bool {
 	if reflect.DeepEqual(a, b) {
 		return true
 	}
@@ -1620,7 +1620,7 @@ func (s *Session) summarizeBranch(ctx context.Context, target string) (summary, 
 	if common > 0 {
 		fromEntry = idOf(leafPath[common-1])
 	}
-	var sumMsgs []weft.Message
+	var sumMsgs []core.Message
 	for _, vm := range view.msgs {
 		if vm.entry == "" {
 			// The governing compaction's summary: the branch's own when

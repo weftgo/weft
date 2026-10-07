@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	otelapi "go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
@@ -69,12 +69,12 @@ func TestEnvEndpointDoesNotDowngradeTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agt := weft.New(
+	agt := core.New(
 		wefttest.Script(wefttest.Say("tls")),
-		weft.TracerProvider(p.TracerProvider()),
-		weft.LoggerProvider(p.LoggerProvider()),
+		core.TracerProvider(p.TracerProvider()),
+		core.LoggerProvider(p.LoggerProvider()),
 	)
-	if _, err := agt.Generate(context.Background(), weft.Prompt("go")); err != nil {
+	if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -113,13 +113,13 @@ func TestTrackerForgetsUnsampledFailedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = p.Shutdown(testCtx(t)) }()
-	agt := weft.New(
+	agt := core.New(
 		wefttest.Script(wefttest.Fail(errors.New("boom"))),
-		weft.Name("unsampled"),
-		weft.TracerProvider(p.TracerProvider()),
-		weft.LoggerProvider(p.LoggerProvider()),
+		core.Name("unsampled"),
+		core.TracerProvider(p.TracerProvider()),
+		core.LoggerProvider(p.LoggerProvider()),
 	)
-	if _, err := agt.Generate(context.Background(), weft.Prompt("go")); err == nil {
+	if _, err := agt.Generate(context.Background(), core.Prompt("go")); err == nil {
 		t.Fatal("the scripted failure did not fail the run (test bug)")
 	}
 	if open := p.tracker.snapshot(); len(open) != 0 {
@@ -138,13 +138,13 @@ func TestUnsampledRunSpansAreNotExported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agt := weft.New(
+	agt := core.New(
 		wefttest.Script(wefttest.Say("quiet")),
-		weft.Name("unsampled"),
-		weft.TracerProvider(p.TracerProvider()),
-		weft.LoggerProvider(p.LoggerProvider()),
+		core.Name("unsampled"),
+		core.TracerProvider(p.TracerProvider()),
+		core.LoggerProvider(p.LoggerProvider()),
 	)
-	if _, err := agt.Generate(context.Background(), weft.Prompt("go")); err != nil {
+	if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.Shutdown(testCtx(t)); err != nil {
@@ -364,7 +364,7 @@ func TestRedactPanicStripsInsteadOfUnwinding(t *testing.T) {
 	mem := newMemExporter()
 	p := &destProc{
 		name: "test", inner: sdklog.NewSimpleProcessor(mem), content: true,
-		contentC: ContentConfig{Redact: func(weft.ContentKind, string) string { panic("redact bug") }},
+		contentC: ContentConfig{Redact: func(core.ContentKind, string) string { panic("redact bug") }},
 		drops:    newDropCounter("test"),
 	}
 	r := sdkRecordWith(t, "weft.event",
@@ -578,12 +578,12 @@ func TestWeftVersionMatchesRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agt := weft.New(
+	agt := core.New(
 		wefttest.Script(wefttest.Say("v")),
-		weft.TracerProvider(p.TracerProvider()),
-		weft.LoggerProvider(p.LoggerProvider()),
+		core.TracerProvider(p.TracerProvider()),
+		core.LoggerProvider(p.LoggerProvider()),
 	)
-	if _, err := agt.Generate(context.Background(), weft.Prompt("go")); err != nil {
+	if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.Shutdown(testCtx(t)); err != nil {
@@ -611,7 +611,7 @@ func TestConcurrentRunsAcrossShutdown(t *testing.T) {
 		Local(filepath.Join(t.TempDir(), "race.db")),
 		Exporters(&spanCapture{}, newMemExporter(), WithContent(ContentConfig{
 			MaxBytes: 8,
-			Redact:   func(_ weft.ContentKind, s string) string { return strings.ToUpper(s) },
+			Redact:   func(_ core.ContentKind, s string) string { return strings.ToUpper(s) },
 		})),
 		Exporters(nil, newMemExporter(), NoDeltas()),
 		Heartbeat(time.Millisecond),
@@ -619,7 +619,7 @@ func TestConcurrentRunsAcrossShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	echo := weft.Tool("echo", "Echoes.", func(_ context.Context, in struct {
+	echo := core.Tool("echo", "Echoes.", func(_ context.Context, in struct {
 		Note string `json:"note"`
 	}) (string, error) {
 		return "echo:" + in.Note, nil
@@ -630,18 +630,18 @@ func TestConcurrentRunsAcrossShutdown(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range 5 {
-				agt := weft.New(
+				agt := core.New(
 					wefttest.Script(
 						wefttest.Think("plan", wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: `{"note":"n"}`})),
 						wefttest.Say("done"),
 					),
-					weft.Name("race"),
-					weft.TracerProvider(p.TracerProvider()),
-					weft.LoggerProvider(p.LoggerProvider()),
+					core.Name("race"),
+					core.TracerProvider(p.TracerProvider()),
+					core.LoggerProvider(p.LoggerProvider()),
 					echo,
 				)
-				_, _ = agt.Generate(context.Background(), weft.Prompt("go"),
-					weft.Metadata(map[string]string{"weft.session.id": "race"}))
+				_, _ = agt.Generate(context.Background(), core.Prompt("go"),
+					core.Metadata(map[string]string{"weft.session.id": "race"}))
 			}
 		}()
 	}
@@ -669,8 +669,8 @@ func TestConcurrentRunsAcrossShutdown(t *testing.T) {
 // redactor): the re-encode failed on the invalid RawMessage and the
 // chain exported the ORIGINAL body, arguments in the clear.
 func TestRedactedArgsNeverFallBackToOriginal(t *testing.T) {
-	red := func(kind weft.ContentKind, s string) string {
-		if kind == weft.ContentArgs {
+	red := func(kind core.ContentKind, s string) string {
+		if kind == core.ContentArgs {
 			return "[REDACTED]"
 		}
 		return s
@@ -689,7 +689,7 @@ func TestRedactedArgsNeverFallBackToOriginal(t *testing.T) {
 		if !strings.Contains(out, "[REDACTED]") {
 			t.Errorf("the redactor's output is not in the body: %s", out)
 		}
-		if _, err := weft.UnmarshalEvent([]byte(out)); err != nil {
+		if _, err := core.UnmarshalEvent([]byte(out)); err != nil {
 			t.Errorf("shaped body no longer decodes: %v (%s)", err, out)
 		}
 	}
@@ -721,12 +721,12 @@ func TestLocalWriteFailureIsCountedNotFlooded(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = p.LocalDB().Close() // the sink fails from here on
-	agt := weft.New(
+	agt := core.New(
 		wefttest.Script(wefttest.Say("x")),
-		weft.TracerProvider(p.TracerProvider()),
-		weft.LoggerProvider(p.LoggerProvider()),
+		core.TracerProvider(p.TracerProvider()),
+		core.LoggerProvider(p.LoggerProvider()),
 	)
-	if _, err := agt.Generate(context.Background(), weft.Prompt("go")); err != nil {
+	if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
 		t.Fatalf("a failing sink failed the run: %v", err)
 	}
 	_ = p.Shutdown(testCtx(t))
@@ -751,7 +751,7 @@ func TestCloneRuleAcrossShapingChains(t *testing.T) {
 	p, err := Start(testCtx(t), NoGlobal(), NoEnv(), Heartbeat(0),
 		Exporters(nil, shaped, WithContent(ContentConfig{
 			MaxBytes: 6,
-			Redact:   func(_ weft.ContentKind, s string) string { return strings.ToUpper(s) },
+			Redact:   func(_ core.ContentKind, s string) string { return strings.ToUpper(s) },
 		})),
 		Exporters(nil, stripped, NoContent()),
 		Local(path),
@@ -766,11 +766,11 @@ func TestCloneRuleAcrossShapingChains(t *testing.T) {
 	toolFinish := func(recs []sdklog.Record) (string, sdklog.Record) {
 		for _, r := range recs {
 			if attrOf(r, "weft.event.type") == "tool_finish" {
-				ev, err := weft.UnmarshalEvent([]byte(r.Body().AsString()))
+				ev, err := core.UnmarshalEvent([]byte(r.Body().AsString()))
 				if err != nil {
 					t.Fatalf("tool_finish body: %v", err)
 				}
-				return ev.(weft.ToolFinish).Content, r
+				return ev.(core.ToolFinish).Content, r
 			}
 		}
 		t.Fatal("no tool_finish record")
@@ -804,8 +804,8 @@ func TestCloneRuleAcrossShapingChains(t *testing.T) {
 	}
 	var local string
 	for _, e := range page.Events {
-		if ev, err := weft.UnmarshalEvent(e.Event); err == nil {
-			if tf, ok := ev.(weft.ToolFinish); ok {
+		if ev, err := core.UnmarshalEvent(e.Event); err == nil {
+			if tf, ok := ev.(core.ToolFinish); ok {
 				local = tf.Content
 			}
 		}
@@ -830,7 +830,7 @@ func TestShapeStringRuneBoundary(t *testing.T) {
 		{"abc", 3, "abc", 0, "exactly the cap"},
 		{"abc", -1, "abc", 0, "unlimited"},
 	} {
-		got, cut := shapeString(c.in, weft.ContentText, nil, c.max)
+		got, cut := shapeString(c.in, core.ContentText, nil, c.max)
 		if got != c.want || cut != c.wantCut {
 			t.Errorf("%s: shapeString(%q, %d) = %q, %d; want %q, %d", c.wantDesc, c.in, c.max, got, cut, c.want, c.wantCut)
 		}
@@ -856,12 +856,12 @@ func TestEnvHeadersStayOffOtherDestinations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agt := weft.New(
+	agt := core.New(
 		wefttest.Script(wefttest.Say("x")),
-		weft.TracerProvider(p.TracerProvider()),
-		weft.LoggerProvider(p.LoggerProvider()),
+		core.TracerProvider(p.TracerProvider()),
+		core.LoggerProvider(p.LoggerProvider()),
 	)
-	if _, err := agt.Generate(context.Background(), weft.Prompt("go")); err != nil {
+	if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.Shutdown(testCtx(t)); err != nil {

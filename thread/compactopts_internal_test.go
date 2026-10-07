@@ -5,25 +5,25 @@ import (
 	"iter"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // unhashableModel is a Model whose dynamic type cannot sit in a map
 // or survive an ==: a struct value carrying a slice. Middleware in
-// the wild is usually a pointer, but nothing in weft.Model promises
+// the wild is usually a pointer, but nothing in core.Model promises
 // comparable — the native lookup must not panic on one.
 type unhashableModel struct {
 	tags []string
 }
 
-func (m unhashableModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
-		yield(weft.ModelTextDelta{Text: "x"}, nil)
-		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+func (m unhashableModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
+		yield(core.ModelTextDelta{Text: "x"}, nil)
+		yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
 	}
 }
 
-func (m unhashableModel) Unwrap() weft.Model { return nil }
+func (m unhashableModel) Unwrap() core.Model { return nil }
 
 // unhashableLoop wraps itself forever — the loop guard must terminate
 // the walk without ever hashing the wrapper.
@@ -31,7 +31,7 @@ type unhashableLoop struct {
 	unhashableModel
 }
 
-func (m unhashableLoop) Unwrap() weft.Model { return m }
+func (m unhashableLoop) Unwrap() core.Model { return m }
 
 // The native lookup terminates on unhashable Model values instead of
 // panicking: chains are compared structurally, never hashed (the

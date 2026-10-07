@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/pool"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // A parent session under RequireSigned completes a pool delegation
@@ -26,7 +26,7 @@ func TestPoolDelegationCompletesUnderRequireSigned(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"5"}`}),
 		wefttest.Say("signed refund done"),
 	)
-	parent := weft.New(wefttest.Script(
+	parent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"go"}`}),
 		wefttest.Say("all done"),
 	), p.MustWrap("research", "", child))
@@ -34,7 +34,7 @@ func TestPoolDelegationCompletesUnderRequireSigned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("refund it"))
+	t1, err := s.Send(ctx, core.User("refund it"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestPoolReplaysAQuorumIntoTheChild(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"5"}`}),
 		wefttest.Say("refund done"),
 	)
-	parent := weft.New(wefttest.Script(
+	parent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"go"}`}),
 		wefttest.Say("all done"),
 	), p.MustWrap("research", "", child))
@@ -120,7 +120,7 @@ func TestPoolReplaysAQuorumIntoTheChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("refund it"))
+	t1, err := s.Send(ctx, core.User("refund it"))
 	if err != nil {
 		t.Fatal(err)
 	}

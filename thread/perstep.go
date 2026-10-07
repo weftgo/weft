@@ -7,11 +7,11 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // Per-step durability (ADR 0011 §7): a turn's messages are appended to
-// the tree as they join the run's transcript — through weft.OnMessages,
+// the tree as they join the run's transcript — through core.OnMessages,
 // the core's transcript observer — so a crash mid-turn loses nothing
 // emitted. The step entries are the same message entries the turn-end
 // batch used to write alone; the turn's end then appends only what the
@@ -28,7 +28,7 @@ import (
 //
 // A turn that dies mid-step may leave a dangling call in the tree — an
 // assistant message whose tool message never arrived. The loop repairs
-// its input on every run (weft.Repair at the run's start), with the
+// its input on every run (core.Repair at the run's start), with the
 // same golden completion bytes the turn-end repair used to write, so
 // the model sees an identical transcript either way; only the tree's
 // stored form differs (raw tail, repaired at read).
@@ -57,8 +57,8 @@ type stepPersist struct {
 	// join is a resume join the tree does not hold yet, and backlog the
 	// step messages it does not hold yet, in order: both are retried
 	// ahead of the next batch.
-	join    *weft.Message
-	backlog []weft.Message
+	join    *core.Message
+	backlog []core.Message
 	// late counts the appends that failed during the attempt: each was
 	// a window in which a crash would have lost emitted messages.
 	late int
@@ -70,8 +70,8 @@ type stepPersist struct {
 // ctx is the turn's persistence context — the WithoutCancel window the
 // turn-end batch uses — because the observer's own ctx is the run's,
 // and a step's durability must not die with a canceled caller.
-func (s *Session) observer(ctx context.Context, sp *stepPersist) weft.RunOption {
-	return weft.OnMessages(func(_ context.Context, _ int, msgs []weft.Message) {
+func (s *Session) observer(ctx context.Context, sp *stepPersist) core.RunOption {
+	return core.OnMessages(func(_ context.Context, _ int, msgs []core.Message) {
 		s.persistStep(ctx, sp, msgs)
 	})
 }
@@ -87,7 +87,7 @@ func (s *Session) observer(ctx context.Context, sp *stepPersist) weft.RunOption 
 // and the turn's end writes whatever is still held — so a failed step
 // write is written late, never lost and never out of order. Callers
 // hold nothing; the session lock is taken here.
-func (s *Session) persistStep(ctx context.Context, sp *stepPersist, msgs []weft.Message) {
+func (s *Session) persistStep(ctx context.Context, sp *stepPersist, msgs []core.Message) {
 	if len(msgs) == 0 {
 		return
 	}
@@ -95,7 +95,7 @@ func (s *Session) persistStep(ctx context.Context, sp *stepPersist, msgs []weft.
 	defer s.mu.Unlock()
 	first := !sp.seen
 	sp.seen = true
-	if first && sp.resume && msgs[0].Role == weft.RoleTool {
+	if first && sp.resume && msgs[0].Role == core.RoleTool {
 		// The core reports the resume's completed tool message before
 		// any step runs (the transcript's one in-place growth point).
 		j := cloneMessage(msgs[0])
@@ -181,7 +181,7 @@ func (s *Session) flushStepsLocked(ctx context.Context, sp *stepPersist) error {
 //
 // The join completes the run's input; the run's own messages attach
 // after it, so the attempt's start moves here. Callers hold s.mu.
-func (s *Session) appendJoinLocked(ctx context.Context, sp *stepPersist, tool weft.Message) error {
+func (s *Session) appendJoinLocked(ctx context.Context, sp *stepPersist, tool core.Message) error {
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
 		return err
@@ -191,7 +191,7 @@ func (s *Session) appendJoinLocked(ctx context.Context, sp *stepPersist, tool we
 	// last assistant message with calls).
 	asst := -1
 	for i := len(path) - 1; i >= 0; i-- {
-		if m, ok := contextMessage(path[i]); ok && m.Role == weft.RoleAssistant {
+		if m, ok := contextMessage(path[i]); ok && m.Role == core.RoleAssistant {
 			asst = i
 			break
 		}
@@ -206,7 +206,7 @@ func (s *Session) appendJoinLocked(ctx context.Context, sp *stepPersist, tool we
 				continue
 			}
 			replace = true
-			if m.Role != weft.RoleTool { // the partial tool message is what the join replaces
+			if m.Role != core.RoleTool { // the partial tool message is what the join replaces
 				carry = append(carry, e)
 			}
 		}
@@ -296,14 +296,14 @@ func (s *Session) branchBackLocked(ctx context.Context, entry string) error {
 // alone: a tool message of the tail may pair with an assistant inside
 // the input and would read as an orphan in the slice. A transcript
 // that holds nothing beyond the input plans nothing.
-func turnEndMessages(full []weft.Message, inputLen int, treeTail []weft.Message, err error) (keep int, msgs []weft.Message) {
+func turnEndMessages(full []core.Message, inputLen int, treeTail []core.Message, err error) (keep int, msgs []core.Message) {
 	inputLen = max(inputLen, 0)
 	if len(full) <= inputLen {
 		return len(treeTail), nil
 	}
 	final := full
 	if err != nil {
-		final = weft.Repair(full)
+		final = core.Repair(full)
 	}
 	want := final[min(inputLen, len(final)):] // repair dropped inside the input: nothing beyond it to write
 	for keep < len(treeTail) && keep < len(want) && sameMessage(treeTail[keep], want[keep]) {
@@ -315,7 +315,7 @@ func turnEndMessages(full []weft.Message, inputLen int, treeTail []weft.Message,
 // sameMessage reports whether two messages are the same transcript
 // content: equal values, or — a nil slice against an empty one — equal
 // wire bytes.
-func sameMessage(a, b weft.Message) bool {
+func sameMessage(a, b core.Message) bool {
 	if reflect.DeepEqual(a, b) {
 		return true
 	}
@@ -330,7 +330,7 @@ func sameMessage(a, b weft.Message) bool {
 // tailEntry is one message entry of a turn's tail: its id and message.
 type tailEntry struct {
 	id  string
-	msg weft.Message
+	msg core.Message
 }
 
 // turnTailLocked returns the message entries the step observer

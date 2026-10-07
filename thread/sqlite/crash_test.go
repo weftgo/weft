@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/sqlite"
 	"github.com/weftgo/weft/thread/threadtest"
@@ -91,7 +91,7 @@ func TestCrashMidAppend(t *testing.T) {
 	if err := fresh.Append(ctx, "s_crash", thread.MessageEntry{
 		ID:      "e_after",
 		Created: time.Now().UTC(),
-		Message: weft.User("after the crash"),
+		Message: core.User("after the crash"),
 	}); err != nil {
 		t.Fatalf("append after takeover: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestCrashLockDiesWithProcess(t *testing.T) {
 	if err := st.Append(ctx, "s_hold", thread.MessageEntry{
 		ID:      "e_take",
 		Created: time.Now().UTC(),
-		Message: weft.User("the takeover"),
+		Message: core.User("the takeover"),
 	}); err != nil {
 		t.Fatalf("Append after the holder died: %v — a crashed writer must not strand its session", err)
 	}
@@ -189,7 +189,7 @@ func TestCrashHelper(t *testing.T) {
 			os.Exit(2)
 		}
 		if err := st.Append(ctx, "s_hold", thread.MessageEntry{
-			ID: "e_held", Created: time.Now().UTC(), Message: weft.User("held"),
+			ID: "e_held", Created: time.Now().UTC(), Message: core.User("held"),
 		}); err != nil {
 			fmt.Println("helper: append failed:", err)
 			os.Exit(2)
@@ -210,7 +210,7 @@ func TestCrashHelper(t *testing.T) {
 		if err := st.Append(ctx, "s_crash", thread.MessageEntry{
 			ID:      fmt.Sprintf("e_c%d", i),
 			Created: time.Now().UTC(),
-			Message: weft.User(fmt.Sprintf("entry %d", i)),
+			Message: core.User(fmt.Sprintf("entry %d", i)),
 		}); err != nil {
 			fmt.Println("helper: append failed:", err)
 			os.Exit(2)
@@ -237,7 +237,7 @@ func TestTwoProcessesDistinctSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.Append(ctx, "s_parent", thread.MessageEntry{
-		ID: "e_p", Created: time.Now().UTC(), Message: weft.User("parent"),
+		ID: "e_p", Created: time.Now().UTC(), Message: core.User("parent"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestFleetHelper(t *testing.T) {
 		os.Exit(2)
 	}
 	if err := st.Append(ctx, "s_child", thread.MessageEntry{
-		ID: "e_c", Created: time.Now().UTC(), Message: weft.User("child"),
+		ID: "e_c", Created: time.Now().UTC(), Message: core.User("child"),
 	}); err != nil {
 		fmt.Println("helper: append failed:", err)
 		os.Exit(2)

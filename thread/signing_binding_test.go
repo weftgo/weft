@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // signedRefusals returns the audit trail's refused-signature entries.
@@ -155,7 +155,7 @@ func TestSignedDecisionNeedsAnIssuedNonce(t *testing.T) {
 func TestSignedDecisionCannotChooseItsExpiry(t *testing.T) {
 	ctx := context.Background()
 	ring, secret := signerRing(t)
-	park := func(t *testing.T, d time.Duration) (*thread.Session, weft.ToolCallPart, thread.Request, *ranLog) {
+	park := func(t *testing.T, d time.Duration) (*thread.Session, core.ToolCallPart, thread.Request, *ranLog) {
 		t.Helper()
 		agent, ran := refundAgent(wefttest.ToolCalls(wefttest.Call{Name: "refund"}), wefttest.Say("done"))
 		s, err := thread.Create(ctx, thread.Memory(), agent, thread.WithKeyring(ring), thread.RequestExpiry(d))

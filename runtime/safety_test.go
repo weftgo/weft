@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // forkSteerModel answers by the transcript's tail: the app's own
@@ -30,18 +30,18 @@ type forkSteerModel struct {
 	once sync.Once
 }
 
-func (*forkSteerModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "wefttest", Name: "fork-steer"}
+func (*forkSteerModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "wefttest", Name: "fork-steer"}
 }
 
-func (m *forkSteerModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *forkSteerModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	last := req.Messages[len(req.Messages)-1]
-	return func(yield func(weft.ModelEvent, error) bool) {
+	return func(yield func(core.ModelEvent, error) bool) {
 		switch {
-		case last.Role == weft.RoleUser && last.Text() == "hello app":
-			yield(weft.ModelTextDelta{Text: "hi"}, nil)
-			yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
-		case last.Role == weft.RoleUser:
+		case last.Role == core.RoleUser && last.Text() == "hello app":
+			yield(core.ModelTextDelta{Text: "hi"}, nil)
+			yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
+		case last.Role == core.RoleUser:
 			held := false
 			m.once.Do(func() { held = true })
 			if held {
@@ -52,11 +52,11 @@ func (m *forkSteerModel) Stream(ctx context.Context, req weft.ModelRequest) iter
 					return
 				}
 			}
-			yield(weft.ModelToolCall{ID: "c_r", Name: "refund", Args: []byte(`{}`)}, nil)
-			yield(weft.ModelFinish{Reason: weft.StopToolCalls}, nil)
+			yield(core.ModelToolCall{ID: "c_r", Name: "refund", Args: []byte(`{}`)}, nil)
+			yield(core.ModelFinish{Reason: core.StopToolCalls}, nil)
 		default:
-			yield(weft.ModelTextDelta{Text: "ok"}, nil)
-			yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+			yield(core.ModelTextDelta{Text: "ok"}, nil)
+			yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
 		}
 	}
 }
@@ -71,19 +71,19 @@ func (m *forkSteerModel) Stream(ctx context.Context, req weft.ModelRequest) iter
 // fork steering until it landed.)
 func TestForkSteerNeverRunsUnparked(t *testing.T) {
 	var refunds atomic.Int64
-	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+	refund := core.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
 		refunds.Add(1)
 		return "refunded for real", nil
 	})
 	model := &forkSteerModel{gate: make(chan struct{})}
-	agent := weft.New(model, weft.Name("acme-support"), refund)
+	agent := core.New(model, core.Name("acme-support"), refund)
 	store := thread.Memory()
 	ctx := context.Background()
 	app, err := thread.Create(ctx, store, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := app.Send(ctx, weft.User("hello app"))
+	turn, err := app.Send(ctx, core.User("hello app"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestForkSteerNeverRunsUnparked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := &config{agents: []*weft.Agent{agent}, threads: store}
+	cfg := &config{agents: []*core.Agent{agent}, threads: store}
 	l := newLink(cfg, newRegistry(cfg), "http://127.0.0.1:1", "")
 	defer l.stop()
 	input := "refund please"
@@ -166,7 +166,7 @@ func TestForkSteerNeverRunsUnparked(t *testing.T) {
 	// The steer was delivered — as the fork's next user message.
 	var steered bool
 	for _, m := range fork.Context() {
-		if m.Role == weft.RoleUser && strings.Contains(m.Text(), "refund the other one") {
+		if m.Role == core.RoleUser && strings.Contains(m.Text(), "refund the other one") {
 			steered = true
 		}
 	}
@@ -182,27 +182,27 @@ func TestForkSteerNeverRunsUnparked(t *testing.T) {
 // fork turn's options on that Send, so the never tool still parks.
 func TestForkSteerIdleSessionKeepsTheParkRule(t *testing.T) {
 	var refunds atomic.Int64
-	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+	refund := core.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
 		refunds.Add(1)
 		return "refunded for real", nil
 	})
 	model := &forkSteerModel{gate: make(chan struct{})}
 	close(model.gate)
-	agent := weft.New(model, weft.Name("acme-support"), refund)
+	agent := core.New(model, core.Name("acme-support"), refund)
 	store := thread.Memory()
 	ctx := context.Background()
 	app, err := thread.Create(ctx, store, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := app.Send(ctx, weft.User("hello app"))
+	turn, err := app.Send(ctx, core.User("hello app"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := turn.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config{agents: []*weft.Agent{agent}, threads: store}
+	cfg := &config{agents: []*core.Agent{agent}, threads: store}
 	l := newLink(cfg, newRegistry(cfg), "http://127.0.0.1:1", "")
 	defer l.stop()
 	// A fork whose turn answers without a tool call: "hello app" again.
@@ -251,13 +251,13 @@ func TestForkSteerIdleSessionKeepsTheParkRule(t *testing.T) {
 // playground experiment nobody approved.
 func TestForkDoesNotInheritTheAppsGrants(t *testing.T) {
 	var refunds atomic.Int64
-	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+	refund := core.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
 		refunds.Add(1)
 		return "refunded for real", nil
 	})
 	model := &forkSteerModel{gate: make(chan struct{})}
 	close(model.gate)
-	agent := weft.New(model, weft.Name("acme-support"), refund)
+	agent := core.New(model, core.Name("acme-support"), refund)
 	store := thread.Memory()
 	ctx := context.Background()
 	app, err := thread.Create(ctx, store, agent)
@@ -267,7 +267,7 @@ func TestForkDoesNotInheritTheAppsGrants(t *testing.T) {
 	if err := app.Grant(ctx, thread.Grant{Tool: "refund"}); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := app.Send(ctx, weft.User("hello app"))
+	turn, err := app.Send(ctx, core.User("hello app"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func TestForkDoesNotInheritTheAppsGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := &config{agents: []*weft.Agent{agent}, threads: store}
+	cfg := &config{agents: []*core.Agent{agent}, threads: store}
 	l := newLink(cfg, newRegistry(cfg), "http://127.0.0.1:1", "")
 	defer l.stop()
 	input := "refund please"
@@ -309,13 +309,13 @@ func decisionLink(t *testing.T, calls ...string) (*link, *fakeStudio, *parkedRun
 	f := newFakeStudio(t)
 	ts := httptest.NewServer(f.handler())
 	t.Cleanup(ts.Close)
-	agent := weft.New(&forkSteerModel{gate: make(chan struct{})}, weft.Name("acme-support"))
-	cfg := &config{agents: []*weft.Agent{agent}}
+	agent := core.New(&forkSteerModel{gate: make(chan struct{})}, core.Name("acme-support"))
+	cfg := &config{agents: []*core.Agent{agent}}
 	l := newLink(cfg, newRegistry(cfg), ts.URL, "")
 	t.Cleanup(l.stop)
 	pr := &parkedRun{cmd: command{CommandID: "cmd_src", Agent: "acme-support"}, decisions: map[string]approvalDecision{}}
 	for _, c := range calls {
-		pr.pending = append(pr.pending, weft.ToolCallPart{ID: c, Name: "refund", Args: []byte(`{}`)})
+		pr.pending = append(pr.pending, core.ToolCallPart{ID: c, Name: "refund", Args: []byte(`{}`)})
 	}
 	l.rememberPark("pg_parked", pr)
 	return l, f, pr
@@ -393,23 +393,23 @@ type recordingModel struct {
 	seen [][]string
 }
 
-func (*recordingModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "wefttest", Name: "rec"}
+func (*recordingModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "wefttest", Name: "rec"}
 }
 
-func (m *recordingModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *recordingModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	var users []string
 	for _, msg := range req.Messages {
-		if msg.Role == weft.RoleUser {
+		if msg.Role == core.RoleUser {
 			users = append(users, msg.Text())
 		}
 	}
 	m.mu.Lock()
 	m.seen = append(m.seen, users)
 	m.mu.Unlock()
-	return func(yield func(weft.ModelEvent, error) bool) {
-		yield(weft.ModelTextDelta{Text: "ok"}, nil)
-		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+	return func(yield func(core.ModelEvent, error) bool) {
+		yield(core.ModelTextDelta{Text: "ok"}, nil)
+		yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
 	}
 }
 
@@ -426,21 +426,21 @@ func (m *recordingModel) last() []string {
 // everything the fork said since.
 func TestForkFromAnOlderTurnOfAFork(t *testing.T) {
 	model := &recordingModel{}
-	agent := weft.New(model, weft.Name("acme-support"))
+	agent := core.New(model, core.Name("acme-support"))
 	store := thread.Memory()
 	ctx := context.Background()
 	app, err := thread.Create(ctx, store, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := app.Send(ctx, weft.User("hello app"))
+	turn, err := app.Send(ctx, core.User("hello app"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := turn.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config{agents: []*weft.Agent{agent}, threads: store}
+	cfg := &config{agents: []*core.Agent{agent}, threads: store}
 	l := newLink(cfg, newRegistry(cfg), "http://127.0.0.1:1", "")
 	defer l.stop()
 	fork := func(id, source, input string) string {
@@ -477,8 +477,8 @@ func TestCanceledBeforeItsSlotReleasesTheBudget(t *testing.T) {
 	f := newFakeStudio(t)
 	ts := httptest.NewServer(f.handler())
 	defer ts.Close()
-	agent := weft.New(&recordingModel{}, weft.Name("acme-support"))
-	cfg := &config{agents: []*weft.Agent{agent}, budget: Budget{MaxRunsPerExperiment: 1}}
+	agent := core.New(&recordingModel{}, core.Name("acme-support"))
+	cfg := &config{agents: []*core.Agent{agent}, budget: Budget{MaxRunsPerExperiment: 1}}
 	l := newLink(cfg, newRegistry(cfg), ts.URL, "")
 	defer l.stop()
 	for range maxRunning {
@@ -514,8 +514,8 @@ func TestOversizedFrameIsRejectedNotRedelivered(t *testing.T) {
 	f := newFakeStudio(t)
 	ts := httptest.NewServer(f.handler())
 	defer ts.Close()
-	agent := weft.New(&recordingModel{}, weft.Name("acme-support"))
-	cfg := &config{agents: []*weft.Agent{agent}}
+	agent := core.New(&recordingModel{}, core.Name("acme-support"))
+	cfg := &config{agents: []*core.Agent{agent}}
 	l := newLink(cfg, newRegistry(cfg), ts.URL, "")
 	defer l.stop()
 	big := "id: cmd_big\nevent: run\ndata: {\"command_id\":\"cmd_big\",\"input\":\"" +
@@ -573,8 +573,8 @@ func TestLinkStopLeaksNoGoroutines(t *testing.T) {
 	close(gate)
 	base := goruntime.NumGoroutine()
 	model := &gatedModel{model: wefttest.Script(wefttest.Say("a"), wefttest.Say("b"), wefttest.Say("c")), gate: gate, calls: make(chan struct{}, 8)}
-	agent := weft.New(model, weft.Name("acme-support"))
-	cfg := &config{agents: []*weft.Agent{agent}}
+	agent := core.New(model, core.Name("acme-support"))
+	cfg := &config{agents: []*core.Agent{agent}}
 	l := newLink(cfg, newRegistry(cfg), ts.URL, "")
 	l.reconnect = func() time.Duration { return time.Millisecond }
 	if err := l.start(); err != nil {
@@ -607,24 +607,24 @@ func TestLinkStopLeaksNoGoroutines(t *testing.T) {
 // run straight past the breakpoint.
 func TestBreakpointIsNotSubstituted(t *testing.T) {
 	var lookups atomic.Int64
-	lookup := weft.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct {
+	lookup := core.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct {
 		OrderID string `json:"order_id"`
 	}) (string, error) {
 		lookups.Add(1)
 		return "shipped", nil
 	})
-	agent := weft.New(wefttest.Script(
+	agent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1"}`, ID: "c1"}),
-		wefttest.Say("done")), weft.Name("acme-support"), lookup)
+		wefttest.Say("done")), core.Name("acme-support"), lookup)
 	l := newExecLink(nil, agent)
 	defer l.stop()
 	l.setBreakpoints([]string{"lookup_order"})
 	src := &sourceRun{
-		input: []weft.Message{weft.User("where is 1?")},
-		steps: []weft.Message{
-			{Role: weft.RoleAssistant, Content: []weft.Part{weft.ToolCallPart{ID: "c1", Name: "lookup_order", Args: []byte(`{"order_id":"1"}`)}}},
-			{Role: weft.RoleTool, Content: []weft.Part{weft.ToolResultPart{CallID: "c1", Name: "lookup_order", Content: "recorded"}}},
-			weft.Assistant("done"),
+		input: []core.Message{core.User("where is 1?")},
+		steps: []core.Message{
+			{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c1", Name: "lookup_order", Args: []byte(`{"order_id":"1"}`)}}},
+			{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c1", Name: "lookup_order", Content: "recorded"}}},
+			core.Assistant("done"),
 		},
 	}
 	cmd := command{CommandID: "cmd_bp", Agent: "acme-support", Source: &sourceSpec{RunID: "run_src"}, src: src, prefix: src.input}
@@ -652,21 +652,21 @@ func TestForkAcceptedAckNamesNoInventedRun(t *testing.T) {
 	f := newFakeStudio(t)
 	ts := httptest.NewServer(f.handler())
 	defer ts.Close()
-	agent := weft.New(&recordingModel{}, weft.Name("acme-support"))
+	agent := core.New(&recordingModel{}, core.Name("acme-support"))
 	store := thread.Memory()
 	ctx := context.Background()
 	app, err := thread.Create(ctx, store, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := app.Send(ctx, weft.User("hello app"))
+	turn, err := app.Send(ctx, core.User("hello app"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := turn.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config{agents: []*weft.Agent{agent}, threads: store}
+	cfg := &config{agents: []*core.Agent{agent}, threads: store}
 	l := newLink(cfg, newRegistry(cfg), ts.URL, "")
 	defer l.stop()
 	in := "continue"
@@ -691,26 +691,26 @@ func TestForkAcceptedAckNamesNoInventedRun(t *testing.T) {
 // nobody can send (the runtime holds no park for the app's own turn),
 // holding a run slot for good. It must fail fast and say why.
 func TestForkOfAParkedTurnDoesNotHang(t *testing.T) {
-	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+	refund := core.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
 		return "refunded", nil
-	}, weft.RequireApproval())
+	}, core.RequireApproval())
 	model := &forkSteerModel{gate: make(chan struct{})}
 	close(model.gate)
-	agent := weft.New(model, weft.Name("acme-support"), refund)
+	agent := core.New(model, core.Name("acme-support"), refund)
 	store := thread.Memory()
 	ctx := context.Background()
 	app, err := thread.Create(ctx, store, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := app.Send(ctx, weft.User("refund please"))
+	turn, err := app.Send(ctx, core.User("refund please"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res, err := turn.Wait(); err != nil || len(res.Pending) != 1 {
 		t.Fatalf("the app's turn did not park: %v %v", res, err)
 	}
-	cfg := &config{agents: []*weft.Agent{agent}, threads: store}
+	cfg := &config{agents: []*core.Agent{agent}, threads: store}
 	l := newLink(cfg, newRegistry(cfg), "http://127.0.0.1:1", "")
 	defer l.stop()
 	in := "and then?"
@@ -746,20 +746,20 @@ func TestEvictedForkParkStaysDecidable(t *testing.T) {
 	defer func(n int) { maxParked = n }(maxParked)
 	maxParked = 1
 	var refunds atomic.Int64
-	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+	refund := core.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
 		refunds.Add(1)
 		return "refunded", nil
 	})
 	model := &forkSteerModel{gate: make(chan struct{})}
 	close(model.gate)
-	agent := weft.New(model, weft.Name("acme-support"), refund)
+	agent := core.New(model, core.Name("acme-support"), refund)
 	store := thread.Memory()
 	ctx := context.Background()
 	app, err := thread.Create(ctx, store, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := app.Send(ctx, weft.User("hello app"))
+	turn, err := app.Send(ctx, core.User("hello app"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -769,7 +769,7 @@ func TestEvictedForkParkStaysDecidable(t *testing.T) {
 	f := newFakeStudio(t)
 	ts := httptest.NewServer(f.handler())
 	defer ts.Close()
-	cfg := &config{agents: []*weft.Agent{agent}, threads: store}
+	cfg := &config{agents: []*core.Agent{agent}, threads: store}
 	l := newLink(cfg, newRegistry(cfg), ts.URL, "")
 	defer l.stop()
 	forkCmd := func(id, source string) (string, string, string) {
@@ -816,21 +816,21 @@ func TestEvictedForkParkStaysDecidable(t *testing.T) {
 func TestForgottenForksGiveUpTheirSessions(t *testing.T) {
 	defer func(n int) { maxForks = n }(maxForks)
 	maxForks = 1
-	agent := weft.New(&recordingModel{}, weft.Name("acme-support"))
+	agent := core.New(&recordingModel{}, core.Name("acme-support"))
 	store := thread.Memory()
 	ctx := context.Background()
 	app, err := thread.Create(ctx, store, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := app.Send(ctx, weft.User("hello app"))
+	turn, err := app.Send(ctx, core.User("hello app"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := turn.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config{agents: []*weft.Agent{agent}, threads: store}
+	cfg := &config{agents: []*core.Agent{agent}, threads: store}
 	l := newLink(cfg, newRegistry(cfg), "http://127.0.0.1:1", "")
 	stopped := false
 	defer func() {
@@ -905,21 +905,21 @@ func TestForkTurnAckedInFlight(t *testing.T) {
 
 	model := &forkSteerModel{gate: make(chan struct{})}
 	close(model.gate)
-	agent := weft.New(model, weft.Name("acme-support"))
+	agent := core.New(model, core.Name("acme-support"))
 	store := thread.Memory()
 	ctx := context.Background()
 	app, err := thread.Create(ctx, store, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := app.Send(ctx, weft.User("hello app"))
+	turn, err := app.Send(ctx, core.User("hello app"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := turn.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config{agents: []*weft.Agent{agent}, threads: store}
+	cfg := &config{agents: []*core.Agent{agent}, threads: store}
 	l := newLink(cfg, newRegistry(cfg), studio.URL, "")
 	defer l.stop()
 	input := "hello app"

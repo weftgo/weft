@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
 )
@@ -30,7 +30,7 @@ func seedSession(t *testing.T, dir, id string) string {
 	if err := st.Create(ctx, thread.Header{ID: id, Created: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Append(ctx, id, thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: weft.User("one")}); err != nil {
+	if err := st.Append(ctx, id, thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: core.User("one")}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.(thread.Releaser).Release(ctx, id); err != nil {
@@ -80,7 +80,7 @@ func TestTornTailRepairedBeforeAppend(t *testing.T) {
 		t.Fatalf("a read logged a repair: %s", logged.String())
 	}
 	for _, id := range []string{"e_2", "e_3"} {
-		if err := st.Append(ctx, "s_torn", thread.MessageEntry{ID: id, Created: time.Now().UTC(), Message: weft.User(id)}); err != nil {
+		if err := st.Append(ctx, "s_torn", thread.MessageEntry{ID: id, Created: time.Now().UTC(), Message: core.User(id)}); err != nil {
 			t.Fatalf("Append over a torn tail: %v", err)
 		}
 	}
@@ -122,7 +122,7 @@ func TestTornTailRepairedUnderSalvage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Append(ctx, "s_torn", thread.MessageEntry{ID: "e_2", Created: time.Now().UTC(), Message: weft.User("after the crash")}); err != nil {
+	if err := st.Append(ctx, "s_torn", thread.MessageEntry{ID: "e_2", Created: time.Now().UTC(), Message: core.User("after the crash")}); err != nil {
 		t.Fatal(err)
 	}
 	_, entries, report, err := st.Load(ctx, "s_torn")
@@ -150,7 +150,7 @@ func TestAppendToTornHeaderIsCorrupt(t *testing.T) {
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		err := st.Append(ctx, name, thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: weft.User("x")})
+		err := st.Append(ctx, name, thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: core.User("x")})
 		var ce *thread.CorruptError
 		if !errors.Is(err, thread.ErrCorrupt) || !errors.As(err, &ce) || ce.Line != 1 {
 			t.Errorf("%s: Append = %v, want a CorruptError on line 1", name, err)
@@ -206,7 +206,7 @@ func TestWatchSalvageSkipsMalformed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Append(ctx, "s_salvage", thread.MessageEntry{ID: "e_2", Created: time.Now().UTC(), Message: weft.User("two")}); err != nil {
+	if err := st.Append(ctx, "s_salvage", thread.MessageEntry{ID: "e_2", Created: time.Now().UTC(), Message: core.User("two")}); err != nil {
 		t.Fatal(err)
 	}
 	wctx, cancel := context.WithCancel(ctx)
@@ -249,7 +249,7 @@ func TestNoLockDoesNotRefuseASecondWriter(t *testing.T) {
 	}
 	for i, st := range []thread.Storage{first, second, first} {
 		if err := st.Append(ctx, "s_nolock", thread.MessageEntry{
-			ID: thread.NewEntryID(), Created: time.Now().UTC(), Message: weft.User("x"),
+			ID: thread.NewEntryID(), Created: time.Now().UTC(), Message: core.User("x"),
 		}); err != nil {
 			t.Fatalf("append %d under NoLock: %v", i, err)
 		}

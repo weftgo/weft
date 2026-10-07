@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -24,7 +24,7 @@ type delegate struct {
 	name    string // the wrap's name; empty for a Submit
 	child   *thread.Session
 	parent  *thread.Session
-	agent   *weft.Agent
+	agent   *core.Agent
 	info    runInfo // the child run's depth and ancestry
 
 	// The fields below are guarded by the pool's mutex.
@@ -70,26 +70,26 @@ func (d *delegate) label() string {
 // contract the wrapped tool's own errors keep (see wrap.go's table).
 
 func (d *delegate) canceledText() string {
-	return (&weft.ToolError{Code: CodeSubagentCanceled,
+	return (&core.ToolError{Code: CodeSubagentCanceled,
 		Message: fmt.Sprintf(canceledMessage, d.label())}).Error()
 }
 
 func (d *delegate) failureText(cause string) string {
-	return (&weft.ToolError{Code: weft.CodeSubagentFailed,
+	return (&core.ToolError{Code: core.CodeSubagentFailed,
 		Message: fmt.Sprintf(failedPlainMessage, d.label(), cause)}).Error()
 }
 
 func (d *delegate) runFailureText(err error) string {
-	var re *weft.RunError
+	var re *core.RunError
 	if errors.As(err, &re) {
-		return (&weft.ToolError{Code: weft.CodeSubagentFailed,
+		return (&core.ToolError{Code: core.CodeSubagentFailed,
 			Message: fmt.Sprintf(failedMessage, d.label(), re.Step, re.Err)}).Error()
 	}
 	return d.failureText(err.Error())
 }
 
 func (d *delegate) unmirroredText(err error) string {
-	return (&weft.ToolError{Code: weft.CodeSubagentFailed,
+	return (&core.ToolError{Code: core.CodeSubagentFailed,
 		Message: fmt.Sprintf(unmirroredMessage, d.label(), err)}).Error()
 }
 
@@ -205,7 +205,7 @@ func (p *Pool) mirror(ctx context.Context, d *delegate) error {
 // over the wrap name. The registration is dropped when the session's
 // delegation settles. An empty session id or a nil agent is an error.
 // Register alone recovers nothing: Recover does, and Decide resumes.
-func (p *Pool) Register(sessionID string, agent *weft.Agent) error {
+func (p *Pool) Register(sessionID string, agent *core.Agent) error {
 	if sessionID == "" {
 		return fmt.Errorf("thread/pool: Register with an empty session id")
 	}
@@ -603,7 +603,7 @@ func (p *Pool) lineageInfo(ctx context.Context, parent *thread.Session) runInfo 
 // agentForSession finds the agent a child session resumes under, and
 // the wrap name it was made under: Register's session register first,
 // then the wrap-name register by the child header's metadata.
-func (p *Pool) agentForSession(ctx context.Context, parent *thread.Session, childID string) (*weft.Agent, string, error) {
+func (p *Pool) agentForSession(ctx context.Context, parent *thread.Session, childID string) (*core.Agent, string, error) {
 	h, _, _, err := parent.Storage().Load(ctx, childID)
 	if err != nil {
 		return nil, "", fmt.Errorf("thread/pool: child session %s: %w", childID, err)
@@ -678,7 +678,7 @@ func (p *Pool) cancelParked(ctx context.Context, d *delegate) error {
 // run as the session's first turn, the task's prompt behind it),
 // parked (its fate is the decision), or settled; an id the ledger
 // does not hold fails with ErrUnknownReceipt.
-func (p *Pool) Forward(ctx context.Context, parent *thread.Session, receiptID string, msg weft.Message) (*thread.Turn, error) {
+func (p *Pool) Forward(ctx context.Context, parent *thread.Session, receiptID string, msg core.Message) (*thread.Turn, error) {
 	if parent == nil {
 		return nil, fmt.Errorf("thread/pool: Forward with no parent session")
 	}

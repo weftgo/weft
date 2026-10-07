@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 )
 
 // TestChallengeCanonical: two claim sets that a plain concatenation
@@ -138,17 +138,17 @@ func TestForkInheritsRequireSigned(t *testing.T) {
 // lapsed request is denied by the first one only.
 func TestSweepWritesOneDenialPerExpiredRequest(t *testing.T) {
 	ctx := context.Background()
-	tool := weft.Tool("refund", "Refund an order.",
+	tool := core.Tool("refund", "Refund an order.",
 		func(context.Context, struct{}) (string, error) { return "refunded", nil },
-		weft.RequireApproval())
-	agent := weft.New(
+		core.RequireApproval())
+	agent := core.New(
 		wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "refund"}), wefttest.Say("resumed")),
 		tool)
 	s, err := Create(ctx, Memory(), agent, AutoResume(false), RequestExpiry(time.Nanosecond))
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("refund it"))
+	turn, err := s.Send(ctx, core.User("refund it"))
 	if err != nil {
 		t.Fatal(err)
 	}

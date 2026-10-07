@@ -18,10 +18,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/studio"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // TestFixtureRoundTripThroughReplay runs one real agent turn through a
@@ -41,18 +41,18 @@ func TestFixtureRoundTripThroughReplay(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = p.Shutdown(ctx) })
 
-	lookup := weft.Tool("lookup_order", "Look up an order.", func(_ context.Context, in struct {
+	lookup := core.Tool("lookup_order", "Look up an order.", func(_ context.Context, in struct {
 		OrderID string `json:"order_id"`
 	}) (string, error) {
 		return "order shipped", nil
 	})
-	agent := weft.New(wefttest.Script(
+	agent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"42"}`}),
 		wefttest.Say("Order 42 shipped this morning."),
-	), weft.Name("support"), weft.Instructions("You are a support agent."),
-		weft.TracerProvider(p.TracerProvider()), weft.LoggerProvider(p.LoggerProvider()), lookup)
+	), core.Name("support"), core.Instructions("You are a support agent."),
+		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()), lookup)
 
-	res, err := agent.Generate(ctx, weft.Prompt("where is order 42?"))
+	res, err := agent.Generate(ctx, core.Prompt("where is order 42?"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,8 +101,8 @@ func TestFixtureRoundTripThroughReplay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	replayed := weft.New(wefttest.Replay(t, filepath.Join(dir, "testdata")), weft.Name("support"), lookup)
-	out, err := replayed.Generate(ctx, weft.Prompt("where is order 42?"))
+	replayed := core.New(wefttest.Replay(t, filepath.Join(dir, "testdata")), core.Name("support"), lookup)
+	out, err := replayed.Generate(ctx, core.Prompt("where is order 42?"))
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}

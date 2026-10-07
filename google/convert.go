@@ -7,7 +7,7 @@ import (
 	"math"
 	"slices"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/internal/adapterkit"
 	"google.golang.org/genai"
 )
@@ -15,11 +15,11 @@ import (
 // contents converts the transcript and system instruction for one
 // step. The ModelRequest is read-only: conversion builds fresh SDK
 // values and never mutates req.Messages or req.Tools.
-func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.GenerateContentConfig, error) {
+func (m *model) contents(req core.ModelRequest) ([]*genai.Content, *genai.GenerateContentConfig, error) {
 	contents := make([]*genai.Content, 0, len(req.Messages))
 	for _, msg := range req.Messages {
 		switch msg.Role {
-		case weft.RoleUser:
+		case core.RoleUser:
 			parts, err := userParts(msg)
 			if err != nil {
 				return nil, nil, err
@@ -31,20 +31,20 @@ func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.Genera
 			if len(parts) > 0 {
 				contents = append(contents, &genai.Content{Role: "user", Parts: parts})
 			}
-		case weft.RoleAssistant:
+		case core.RoleAssistant:
 			// Same rule for the model role: unsigned reasoning drops and
 			// can leave nothing sendable.
 			if parts := modelParts(msg); len(parts) > 0 {
 				contents = append(contents, &genai.Content{Role: "model", Parts: parts})
 			}
-		case weft.RoleTool:
+		case core.RoleTool:
 			// One step's results travel on one user content with N
 			// functionResponse parts, in part order — the shape Gemini
 			// documents for parallel calls; the API matches responses to
 			// calls by name and position.
 			parts := make([]*genai.Part, 0, len(msg.Content))
 			for _, part := range msg.Content {
-				tr, ok := part.(weft.ToolResultPart)
+				tr, ok := part.(core.ToolResultPart)
 				if !ok {
 					continue
 				}
@@ -85,17 +85,17 @@ func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.Genera
 	// thought summaries back, so reasoning streams; the default sends
 	// nothing and keeps the model's own behavior.
 	switch {
-	case req.Thinking.Level == weft.ThinkOff:
+	case req.Thinking.Level == core.ThinkOff:
 		zero := int32(0)
 		cfg.ThinkingConfig = &genai.ThinkingConfig{ThinkingBudget: &zero}
 	case req.Thinking.Budget > 0:
 		// The budget is an int32 on the wire; see MaxTokens above.
 		if req.Thinking.Budget > math.MaxInt32 {
-			return nil, nil, fmt.Errorf("%w: Thinking Budget %d exceeds Gemini's int32 limit", weft.ErrUnsupported, req.Thinking.Budget)
+			return nil, nil, fmt.Errorf("%w: Thinking Budget %d exceeds Gemini's int32 limit", core.ErrUnsupported, req.Thinking.Budget)
 		}
 		b := int32(req.Thinking.Budget)
 		cfg.ThinkingConfig = &genai.ThinkingConfig{ThinkingBudget: &b, IncludeThoughts: true}
-	case req.Thinking.Level != weft.ThinkUnset:
+	case req.Thinking.Level != core.ThinkUnset:
 		cfg.ThinkingConfig = &genai.ThinkingConfig{ThinkingLevel: geminiLevel(req.Thinking.Level), IncludeThoughts: true}
 	}
 	// Converted per request: conversion is microseconds against the
@@ -116,16 +116,16 @@ func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.Genera
 	// 2026-09-24 §3).
 	if len(req.Tools) > 0 {
 		switch req.ToolChoice.Mode {
-		case weft.ToolChoiceAny:
+		case core.ToolChoiceAny:
 			cfg.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{
 				Mode: genai.FunctionCallingConfigModeAny,
 			}}
-		case weft.ToolChoiceNamed:
+		case core.ToolChoiceNamed:
 			cfg.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{
 				Mode:                 genai.FunctionCallingConfigModeAny,
 				AllowedFunctionNames: []string{req.ToolChoice.Name},
 			}}
-		case weft.ToolChoiceNone:
+		case core.ToolChoiceNone:
 			cfg.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{
 				Mode: genai.FunctionCallingConfigModeNone,
 			}}
@@ -155,7 +155,7 @@ func (m *model) contents(req weft.ModelRequest) ([]*genai.Content, *genai.Genera
 // narrowing silently would wrap a large value into garbage, so
 // out-of-range values fail naming the ceiling ("adapters document
 // what they drop", ADR 0013).
-func (m *model) foldParams(cfg *genai.GenerateContentConfig, rp weft.RequestParams) error {
+func (m *model) foldParams(cfg *genai.GenerateContentConfig, rp core.RequestParams) error {
 	if rp.Temperature != nil {
 		t := float32(*rp.Temperature)
 		cfg.Temperature = &t
@@ -177,13 +177,13 @@ func (m *model) foldParams(cfg *genai.GenerateContentConfig, rp weft.RequestPara
 	// construction cap into the provider default, effectively
 	// unbounded (review 2026-09-24 §2.3). Only openai sends a 0 as a
 	// value; anthropic keeps the default the same way, documented on
-	// weft.RequestParams.
+	// core.RequestParams.
 	if rp.MaxTokens != nil && *rp.MaxTokens > 0 {
 		maxTokens = *rp.MaxTokens
 	}
 	if maxTokens > 0 {
 		if int64(maxTokens) > math.MaxInt32 {
-			return fmt.Errorf("%w: MaxTokens %d exceeds Gemini's int32 limit", weft.ErrUnsupported, maxTokens)
+			return fmt.Errorf("%w: MaxTokens %d exceeds Gemini's int32 limit", core.ErrUnsupported, maxTokens)
 		}
 		cfg.MaxOutputTokens = int32(maxTokens)
 	}
@@ -198,7 +198,7 @@ func (m *model) foldParams(cfg *genai.GenerateContentConfig, rp weft.RequestPara
 	}
 	if seedSet {
 		if seed > math.MaxInt32 || seed < math.MinInt32 {
-			return fmt.Errorf("%w: Seed %d exceeds Gemini's int32 limit", weft.ErrUnsupported, seed)
+			return fmt.Errorf("%w: Seed %d exceeds Gemini's int32 limit", core.ErrUnsupported, seed)
 		}
 		s := int32(seed)
 		cfg.Seed = &s
@@ -209,11 +209,11 @@ func (m *model) foldParams(cfg *genai.GenerateContentConfig, rp weft.RequestPara
 // geminiLevel maps the neutral scale onto Gemini's own; an unmapped
 // level (Unset never reaches here, Off is handled by the budget switch)
 // lands on medium.
-func geminiLevel(l weft.ThinkingLevel) genai.ThinkingLevel {
+func geminiLevel(l core.ThinkingLevel) genai.ThinkingLevel {
 	switch l {
-	case weft.ThinkLow:
+	case core.ThinkLow:
 		return genai.ThinkingLevelLow
-	case weft.ThinkHigh:
+	case core.ThinkHigh:
 		return genai.ThinkingLevelHigh
 	default:
 		return genai.ThinkingLevelMedium
@@ -229,16 +229,16 @@ func geminiLevel(l weft.ThinkingLevel) genai.ThinkingLevel {
 // where openai and anthropic keep a visible "(empty message)"
 // placeholder because their APIs reject an empty content array. The
 // divergence is deliberate and pinned on each side.
-func userParts(msg weft.Message) ([]*genai.Part, error) {
+func userParts(msg core.Message) ([]*genai.Part, error) {
 	parts := make([]*genai.Part, 0, len(msg.Content))
 	for _, part := range msg.Content {
 		switch p := part.(type) {
-		case weft.TextPart:
+		case core.TextPart:
 			if p.Text == "" {
 				continue
 			}
 			parts = append(parts, &genai.Part{Text: p.Text})
-		case weft.FilePart:
+		case core.FilePart:
 			if err := adapterkit.FilePartSource(p); err != nil {
 				return nil, err
 			}
@@ -268,7 +268,7 @@ func userParts(msg weft.Message) ([]*genai.Part, error) {
 // transcript from another provider — is dropped rather than failing the
 // call. Signatures are stored base64 (see Stream); decoding failures
 // send the value as-is.
-func modelParts(msg weft.Message) []*genai.Part {
+func modelParts(msg core.Message) []*genai.Part {
 	var (
 		parts     []*genai.Part
 		hasCalls  bool
@@ -278,11 +278,11 @@ func modelParts(msg weft.Message) []*genai.Part {
 	)
 	for _, part := range msg.Content {
 		switch p := part.(type) {
-		case weft.ReasoningPart:
+		case core.ReasoningPart:
 			if p.Signature != "" && !legacySet {
 				legacy, legacySet = decodeSignature(p.Signature), true
 			}
-		case weft.ToolCallPart:
+		case core.ToolCallPart:
 			hasCalls = true
 			if p.Signature != "" {
 				callSigs = true
@@ -291,12 +291,12 @@ func modelParts(msg weft.Message) []*genai.Part {
 	}
 	for _, part := range msg.Content {
 		switch p := part.(type) {
-		case weft.TextPart:
+		case core.TextPart:
 			if p.Text == "" {
 				continue // the SDK omits empty text; a bare {} part is rejected
 			}
 			parts = append(parts, &genai.Part{Text: p.Text})
-		case weft.ReasoningPart:
+		case core.ReasoningPart:
 			if p.Signature == "" || hasCalls {
 				continue
 			}
@@ -305,7 +305,7 @@ func modelParts(msg weft.Message) []*genai.Part {
 				Thought:          true,
 				ThoughtSignature: decodeSignature(p.Signature),
 			})
-		case weft.ToolCallPart:
+		case core.ToolCallPart:
 			args := map[string]any{}
 			if len(p.Args) > 0 {
 				_ = json.Unmarshal(p.Args, &args)
@@ -341,7 +341,7 @@ func decodeSignature(s string) []byte {
 }
 
 // convertTool converts a ToolDef to the SDK's tool declaration.
-func convertTool(t *weft.ToolDef) *genai.Tool {
+func convertTool(t *core.ToolDef) *genai.Tool {
 	return &genai.Tool{
 		FunctionDeclarations: []*genai.FunctionDeclaration{{
 			Name:        t.Name,
@@ -351,9 +351,9 @@ func convertTool(t *weft.ToolDef) *genai.Tool {
 	}
 }
 
-// genaiSchema converts a weft.Schema to the SDK's by JSON round trip:
+// genaiSchema converts a core.Schema to the SDK's by JSON round trip:
 // json.Marshal (which emits a foreign schema parsed with
-// weft.ParseSchema verbatim) then json.Unmarshal into genai.Schema, so
+// core.ParseSchema verbatim) then json.Unmarshal into genai.Schema, so
 // every field the vendor type has is carried and every field it lacks
 // — additionalProperties, oneOf, pattern, … — is dropped by the
 // decoder: the same rule the hand-built mapping this replaced applied
@@ -363,7 +363,7 @@ func convertTool(t *weft.ToolDef) *genai.Tool {
 // a value where a string belongs) falls back to a recursive mapping of
 // the structured fields. Unconstrained nodes (type "") are unchanged:
 // the API takes the empty type as "any", as before.
-func genaiSchema(s *weft.Schema) *genai.Schema {
+func genaiSchema(s *core.Schema) *genai.Schema {
 	if s == nil {
 		return nil
 	}
@@ -386,7 +386,7 @@ func genaiSchema(s *weft.Schema) *genai.Schema {
 // every field the two types share, recursively, so a document the
 // decoder rejects still contributes its whole shape, not just the top
 // level; keywords genai.Schema has no field for are dropped either way.
-func structuredGenaiSchema(s *weft.Schema) *genai.Schema {
+func structuredGenaiSchema(s *core.Schema) *genai.Schema {
 	if s == nil {
 		return nil
 	}
@@ -438,21 +438,21 @@ func upperType(t string) string {
 // mapFinish converts the candidate's finish reason; a candidate with
 // function calls is a tool step regardless (Gemini reports STOP), and
 // unmapped reasons keep their raw value on ModelFinish.Raw.
-func mapFinish(reason genai.FinishReason, hasCalls bool) (weft.StopReason, string) {
+func mapFinish(reason genai.FinishReason, hasCalls bool) (core.StopReason, string) {
 	switch reason {
 	case genai.FinishReasonStop:
 		if hasCalls {
-			return weft.StopToolCalls, ""
+			return core.StopToolCalls, ""
 		}
-		return weft.StopEndTurn, ""
+		return core.StopEndTurn, ""
 	case genai.FinishReasonMaxTokens:
-		return weft.StopMaxTokens, ""
+		return core.StopMaxTokens, ""
 	case "":
 		if hasCalls {
-			return weft.StopToolCalls, ""
+			return core.StopToolCalls, ""
 		}
-		return weft.StopEndTurn, ""
+		return core.StopEndTurn, ""
 	default:
-		return weft.StopEndTurn, string(reason)
+		return core.StopEndTurn, string(reason)
 	}
 }

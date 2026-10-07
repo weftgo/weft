@@ -11,10 +11,10 @@ import (
 
 	"strings"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // waitUntil polls cond until it holds or the deadline passes, failing
@@ -36,7 +36,7 @@ func waitUntil(t *testing.T, what string, cond func() bool) {
 // active context.
 func steerInContext(s *thread.Session, text string) bool {
 	for _, m := range s.Context() {
-		if m.Role == weft.RoleUser && m.Text() == text {
+		if m.Role == core.RoleUser && m.Text() == text {
 			return true
 		}
 	}
@@ -73,7 +73,7 @@ func receiptStatus(rs []thread.ReceiptEntry) map[string]string {
 // tell the story (ADR 0019 §2).
 func TestSteerDuringParallelBatch(t *testing.T) {
 	ctx := context.Background()
-	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+	echo := core.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
 		return "ok", nil
 	})
 	model := wefttest.Script(
@@ -82,10 +82,10 @@ func TestSteerDuringParallelBatch(t *testing.T) {
 	)
 	var steerRef *thread.Session
 	var steerOnce sync.Once
-	agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.ToolStart); ok {
+	agent := core.New(model, echo, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.ToolStart); ok {
 			steerOnce.Do(func() {
-				if _, err := steerRef.Send(ctx, weft.User("switch to metric units")); err != nil {
+				if _, err := steerRef.Send(ctx, core.User("switch to metric units")); err != nil {
 					t.Errorf("steer Send: %v", err)
 				}
 			})
@@ -96,7 +96,7 @@ func TestSteerDuringParallelBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	steerRef = s
-	t1, err := s.Send(ctx, weft.User("convert this"))
+	t1, err := s.Send(ctx, core.User("convert this"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,10 +110,10 @@ func TestSteerDuringParallelBatch(t *testing.T) {
 		t.Fatalf("model called %d times, want the drained steer to spend another step", len(reqs))
 	}
 	second := reqs[1].Messages
-	if n := second[len(second)-1]; n.Role != weft.RoleUser || n.Text() != "switch to metric units" {
+	if n := second[len(second)-1]; n.Role != core.RoleUser || n.Text() != "switch to metric units" {
 		t.Errorf("second request ends with %+v, want the steer", n)
 	}
-	if n := second[len(second)-2]; n.Role != weft.RoleTool || len(n.Content) != 2 {
+	if n := second[len(second)-2]; n.Role != core.RoleTool || len(n.Content) != 2 {
 		t.Errorf("message before the steer = %+v, want the batch's tool message with both results", n)
 	}
 	if res.Text() != "done" {
@@ -138,7 +138,7 @@ func TestSteerDuringParallelBatch(t *testing.T) {
 	// the message exactly once, as the delivered transcript message.
 	count := 0
 	for _, m := range s.Context() {
-		if m.Role == weft.RoleUser && m.Text() == "switch to metric units" {
+		if m.Role == core.RoleUser && m.Text() == "switch to metric units" {
 			count++
 		}
 	}
@@ -155,10 +155,10 @@ func TestSteerAtFinalStepRedirects(t *testing.T) {
 	model := wefttest.Script(wefttest.Say("done"), wefttest.Say("done, metric"))
 	var steerRef *thread.Session
 	var steerOnce sync.Once
-	agent := weft.New(model, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.TextDelta); ok {
+	agent := core.New(model, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.TextDelta); ok {
 			steerOnce.Do(func() {
-				if _, err := steerRef.Send(ctx, weft.User("actually, metric units")); err != nil {
+				if _, err := steerRef.Send(ctx, core.User("actually, metric units")); err != nil {
 					t.Errorf("steer Send: %v", err)
 				}
 			})
@@ -169,7 +169,7 @@ func TestSteerAtFinalStepRedirects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("convert this"))
+	t1, err := s.Send(ctx, core.User("convert this"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,20 +197,20 @@ func TestSteerAtFinalStepRedirects(t *testing.T) {
 // sent while only the boundary is open defers at once.
 func TestSteerVsApprovals(t *testing.T) {
 	ctx := context.Background()
-	gate := weft.Tool("gate", "", func(_ context.Context, _ struct{}) (string, error) {
+	gate := core.Tool("gate", "", func(_ context.Context, _ struct{}) (string, error) {
 		return "g", nil
-	}, weft.RequireApproval())
+	}, core.RequireApproval())
 	model := wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "gate"}),
 		wefttest.Say("resumed"),
 		wefttest.Say("followed up"),
 	)
-	agent := weft.New(model, gate)
+	agent := core.New(model, gate)
 	s, err := thread.Create(ctx, thread.Memory(), agent, thread.BusyPolicy(thread.Steer))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("run the gate"))
+	t1, err := s.Send(ctx, core.User("run the gate"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestSteerVsApprovals(t *testing.T) {
 	}
 	// The boundary holds the session with nothing running: a steer now
 	// defers at once — queued then deferred, a follow-up enqueued.
-	st, err := s.Send(ctx, weft.User("and then check the totals"))
+	st, err := s.Send(ctx, core.User("and then check the totals"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestSteerVsApprovals(t *testing.T) {
 	}
 	found := false
 	for _, m := range s.Context() {
-		if m.Role == weft.RoleUser && m.Text() == "and then check the totals" {
+		if m.Role == core.RoleUser && m.Text() == "and then check the totals" {
 			found = true
 		}
 	}
@@ -264,7 +264,7 @@ func TestSteerVsApprovals(t *testing.T) {
 // end, and the message runs as the follow-up turn.
 func TestSteerDeferredAtStopWhen(t *testing.T) {
 	ctx := context.Background()
-	submit := weft.Tool("submit", "", func(_ context.Context, _ struct{}) (string, error) {
+	submit := core.Tool("submit", "", func(_ context.Context, _ struct{}) (string, error) {
 		return "submitted", nil
 	})
 	model := wefttest.Script(
@@ -273,11 +273,11 @@ func TestSteerDeferredAtStopWhen(t *testing.T) {
 	)
 	var steerRef *thread.Session
 	var steerOnce sync.Once
-	agent := weft.New(model, submit, weft.StopWhen(weft.HasToolCall("submit")),
-		weft.Tap(func(_ context.Context, ev weft.Event) {
-			if _, ok := ev.(weft.ToolStart); ok {
+	agent := core.New(model, submit, core.StopWhen(core.HasToolCall("submit")),
+		core.Tap(func(_ context.Context, ev core.Event) {
+			if _, ok := ev.(core.ToolStart); ok {
 				steerOnce.Do(func() {
-					if _, err := steerRef.Send(ctx, weft.User("one more thing")); err != nil {
+					if _, err := steerRef.Send(ctx, core.User("one more thing")); err != nil {
 						t.Errorf("steer Send: %v", err)
 					}
 				})
@@ -288,7 +288,7 @@ func TestSteerDeferredAtStopWhen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("finish"))
+	t1, err := s.Send(ctx, core.User("finish"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestSteerDeferredAtStopWhen(t *testing.T) {
 		t.Fatal("the deferred steer's follow-up never started (its prompt entry is missing)")
 	}
 	for _, m := range s.Context() {
-		if m.Role == weft.RoleUser && m.Text() == "one more thing" {
+		if m.Role == core.RoleUser && m.Text() == "one more thing" {
 			return // delivered by the follow-up's turn
 		}
 	}
@@ -344,13 +344,13 @@ func TestAsOverridesPolicy(t *testing.T) {
 		wefttest.Say("done"),
 		wefttest.Say("held"),
 	)
-	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) { return "ok", nil })
+	echo := core.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) { return "ok", nil })
 	var steerRef *thread.Session
 	var steerOnce sync.Once
-	agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.ToolStart); ok {
+	agent := core.New(model, echo, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.ToolStart); ok {
 			steerOnce.Do(func() {
-				if _, err := steerRef.Send(ctx, weft.User("steer this one"), thread.As(thread.Steer)); err != nil {
+				if _, err := steerRef.Send(ctx, core.User("steer this one"), thread.As(thread.Steer)); err != nil {
 					t.Errorf("As(Steer) send: %v", err)
 				}
 			})
@@ -358,7 +358,7 @@ func TestAsOverridesPolicy(t *testing.T) {
 	}))
 	s, _ := thread.Create(ctx, thread.Memory(), agent) // Queue, the default
 	steerRef = s
-	t1, _ := s.Send(ctx, weft.User("go"))
+	t1, _ := s.Send(ctx, core.User("go"))
 	if _, err := t1.Wait(); err != nil {
 		t.Fatal(err)
 	}
@@ -378,10 +378,10 @@ func TestAsOverridesPolicy(t *testing.T) {
 	model2 := wefttest.Script(wefttest.Say("first"), wefttest.Say("held reply"))
 	var heldRef *thread.Session
 	var heldOnce sync.Once
-	agent2 := weft.New(model2, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.TextDelta); ok {
+	agent2 := core.New(model2, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.TextDelta); ok {
 			heldOnce.Do(func() {
-				if _, err := heldRef.Send(ctx, weft.User("hold this one"), thread.As(thread.Queue)); err != nil {
+				if _, err := heldRef.Send(ctx, core.User("hold this one"), thread.As(thread.Queue)); err != nil {
 					t.Errorf("As(Queue) send: %v", err)
 				}
 			})
@@ -389,7 +389,7 @@ func TestAsOverridesPolicy(t *testing.T) {
 	}))
 	s2, _ := thread.Create(ctx, thread.Memory(), agent2, thread.BusyPolicy(thread.Steer))
 	heldRef = s2
-	u1, _ := s2.Send(ctx, weft.User("go"))
+	u1, _ := s2.Send(ctx, core.User("go"))
 	if _, err := u1.Wait(); err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +435,7 @@ func TestAsOverridesPolicy(t *testing.T) {
 func TestClearQueue(t *testing.T) {
 	ctx := context.Background()
 	release := make(chan struct{})
-	block := weft.Tool("block", "", func(ctx context.Context, _ struct{}) (string, error) {
+	block := core.Tool("block", "", func(ctx context.Context, _ struct{}) (string, error) {
 		select {
 		case <-release:
 			return "ok", nil
@@ -451,9 +451,9 @@ func TestClearQueue(t *testing.T) {
 	queued.Add(1)
 	var steerRef *thread.Session
 	var steerTurn *thread.Turn
-	agent := weft.New(model, block, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.ToolStart); ok {
-			tt, err := steerRef.Send(ctx, weft.User("never mind"))
+	agent := core.New(model, block, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.ToolStart); ok {
+			tt, err := steerRef.Send(ctx, core.User("never mind"))
 			if err != nil {
 				t.Errorf("steer Send: %v", err)
 				return
@@ -467,7 +467,7 @@ func TestClearQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	steerRef = s
-	t1, _ := s.Send(ctx, weft.User("go"))
+	t1, _ := s.Send(ctx, core.User("go"))
 	queued.Wait()
 	if q := s.Queue(); len(q) != 1 || q[0].Msg.Text() != "never mind" {
 		t.Fatalf("Queue() = %+v, want the live steer", q)
@@ -508,22 +508,22 @@ func TestClearQueue(t *testing.T) {
 func TestSteerRejectsNonUserRole(t *testing.T) {
 	ctx := context.Background()
 	model := wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "echo"}), wefttest.Say("done"))
-	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) { return "ok", nil })
+	echo := core.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) { return "ok", nil })
 	var steerRef *thread.Session
 	var once sync.Once
-	agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.ToolStart); ok {
+	agent := core.New(model, echo, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.ToolStart); ok {
 			once.Do(func() {
-				_, err := steerRef.Send(ctx, weft.Message{Role: weft.RoleAssistant, Content: []weft.Part{weft.TextPart{Text: "I speak for the model"}}})
-				if !errors.Is(err, weft.ErrInvalidSteer) {
-					t.Errorf("an assistant-role steer: %v, want weft.ErrInvalidSteer", err)
+				_, err := steerRef.Send(ctx, core.Message{Role: core.RoleAssistant, Content: []core.Part{core.TextPart{Text: "I speak for the model"}}})
+				if !errors.Is(err, core.ErrInvalidSteer) {
+					t.Errorf("an assistant-role steer: %v, want core.ErrInvalidSteer", err)
 				}
 			})
 		}
 	}))
 	s, _ := thread.Create(ctx, thread.Memory(), agent, thread.BusyPolicy(thread.Steer))
 	steerRef = s
-	t1, _ := s.Send(ctx, weft.User("go"))
+	t1, _ := s.Send(ctx, core.User("go"))
 	if _, err := t1.Wait(); err != nil {
 		t.Fatal(err)
 	}
@@ -532,14 +532,14 @@ func TestSteerRejectsNonUserRole(t *testing.T) {
 	}
 }
 
-// weft.Steering in RunOptions is refused: the session owns the steer
+// core.Steering in RunOptions is refused: the session owns the steer
 // queue (ADR 0019 through thread).
 func TestSteeringRejectedInRunOptions(t *testing.T) {
 	ctx := context.Background()
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script(wefttest.Say("x"))))
-	_, err := s.Send(ctx, weft.User("go"), thread.RunOptions(weft.Steering(func(context.Context, weft.SteerPoint) []weft.Message { return nil })))
-	if !errors.Is(err, weft.ErrInvalidRunOption) || !strings.Contains(err.Error(), "weft.Steering") {
-		t.Fatalf("err = %v, want weft.ErrInvalidRunOption naming weft.Steering", err)
+	s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script(wefttest.Say("x"))))
+	_, err := s.Send(ctx, core.User("go"), thread.RunOptions(core.Steering(func(context.Context, core.SteerPoint) []core.Message { return nil })))
+	if !errors.Is(err, core.ErrInvalidRunOption) || !strings.Contains(err.Error(), "core.Steering") {
+		t.Fatalf("err = %v, want core.ErrInvalidRunOption naming core.Steering", err)
 	}
 	if rs := receipts(s); len(rs) != 0 {
 		t.Errorf("a refused Send wrote receipts: %+v", rs)
@@ -562,13 +562,13 @@ func TestReceiptsAcrossRestart(t *testing.T) {
 		wefttest.Say("done"),
 		wefttest.Say("resurrected"),
 	)
-	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) { return "ok", nil })
+	echo := core.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) { return "ok", nil })
 	var steerRef *thread.Session
 	var steerOnce sync.Once
-	agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.ToolStart); ok {
+	agent := core.New(model, echo, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.ToolStart); ok {
 			steerOnce.Do(func() {
-				if _, err := steerRef.Send(ctx, weft.User("switch to metric units")); err != nil {
+				if _, err := steerRef.Send(ctx, core.User("switch to metric units")); err != nil {
 					t.Errorf("steer Send: %v", err)
 				}
 			})
@@ -579,7 +579,7 @@ func TestReceiptsAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	steerRef = s
-	t1, _ := s.Send(ctx, weft.User("convert this"))
+	t1, _ := s.Send(ctx, core.User("convert this"))
 	if _, err := t1.Wait(); err != nil {
 		t.Fatal(err)
 	}
@@ -595,7 +595,7 @@ func TestReceiptsAcrossRestart(t *testing.T) {
 
 	// The crash window: hand-write a queued receipt no fate followed —
 	// exactly what a killed writer leaves behind.
-	clone := weft.User("lost in the crash")
+	clone := core.User("lost in the crash")
 	if err := st.Append(ctx, s.ID(), thread.ReceiptEntry{
 		ID: "e_crashwindow", ParentID: "", Created: time.Now().UTC(),
 		Status: thread.ReceiptQueued, Msg: &clone,
@@ -657,7 +657,7 @@ func TestReceiptsAcrossRestart(t *testing.T) {
 func TestSteersDeliverInAcceptanceOrder(t *testing.T) {
 	ctx := context.Background()
 	release := make(chan struct{})
-	block := weft.Tool("block", "", func(ctx context.Context, _ struct{}) (string, error) {
+	block := core.Tool("block", "", func(ctx context.Context, _ struct{}) (string, error) {
 		select {
 		case <-release:
 			return "ok", nil
@@ -670,12 +670,12 @@ func TestSteersDeliverInAcceptanceOrder(t *testing.T) {
 		wefttest.Say("done"),
 	)
 	var ref *thread.Session
-	agent := weft.New(model, block, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.ToolStart); ok {
+	agent := core.New(model, block, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.ToolStart); ok {
 			// All three steers accepted between two drain points — one
 			// tool call, one batch, one drain.
 			for n := 1; n <= 3; n++ {
-				if _, err := ref.Send(ctx, weft.User(fmt.Sprintf("steer number %d", n))); err != nil {
+				if _, err := ref.Send(ctx, core.User(fmt.Sprintf("steer number %d", n))); err != nil {
 					t.Errorf("steer %d: %v", n, err)
 				}
 			}
@@ -686,7 +686,7 @@ func TestSteersDeliverInAcceptanceOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref = s
-	t1, _ := s.Send(ctx, weft.User("go"))
+	t1, _ := s.Send(ctx, core.User("go"))
 	close(release)
 	if _, err := t1.Wait(); err != nil {
 		t.Fatal(err)
@@ -696,7 +696,7 @@ func TestSteersDeliverInAcceptanceOrder(t *testing.T) {
 	second := model.Requests()[1].Messages
 	var got []string
 	for _, m := range second {
-		if m.Role == weft.RoleUser && len(m.Text()) > len("steer number ") && m.Text()[:6] == "steer " {
+		if m.Role == core.RoleUser && len(m.Text()) > len("steer number ") && m.Text()[:6] == "steer " {
 			got = append(got, m.Text())
 		}
 	}
@@ -728,10 +728,10 @@ func TestSteerSettlesWhenTurnDiesEarly(t *testing.T) {
 	var ref *thread.Session
 	var once sync.Once
 	t1ctx, cancelTurn := context.WithCancel(ctx)
-	agent := weft.New(model, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.TextDelta); ok {
+	agent := core.New(model, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.TextDelta); ok {
 			once.Do(func() {
-				if _, err := ref.Send(ctx, weft.User("steer the dying turn")); err != nil {
+				if _, err := ref.Send(ctx, core.User("steer the dying turn")); err != nil {
 					t.Errorf("steer Send: %v", err)
 					return
 				}
@@ -746,7 +746,7 @@ func TestSteerSettlesWhenTurnDiesEarly(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref = s
-	t1, _ := s.Send(t1ctx, weft.User("go"))
+	t1, _ := s.Send(t1ctx, core.User("go"))
 	if _, err := t1.Wait(); err == nil {
 		t.Fatal("the canceled turn reported success")
 	}
@@ -788,23 +788,23 @@ func TestSteerSettlesWhenTurnDiesEarly(t *testing.T) {
 // receipt names the re-run.
 func TestOverflowReRunRedeliversHandedSteers(t *testing.T) {
 	ctx := context.Background()
-	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+	echo := core.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
 		return "ok", nil
 	})
 	model := wefttest.Script(
 		wefttest.Say("a first answer"),                  // a prior turn, so the compaction has a cut
 		wefttest.ToolCalls(wefttest.Call{Name: "echo"}), // attempt 1: a batch to drain the steer after
-		wefttest.Fail(weft.ErrContextOverflow),          // attempt 1: the overflow
+		wefttest.Fail(core.ErrContextOverflow),          // attempt 1: the overflow
 		wefttest.Say("the summary"),                     // the compaction's summarizer call
 		wefttest.ToolCalls(wefttest.Call{Name: "echo"}), // attempt 2: a batch to drain the re-queued steer after
 		wefttest.Say("done"),
 	)
 	var steerRef *thread.Session
 	var steerOnce sync.Once
-	agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.ToolStart); ok {
+	agent := core.New(model, echo, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.ToolStart); ok {
 			steerOnce.Do(func() {
-				if _, err := steerRef.Send(ctx, weft.User("switch to metric units")); err != nil {
+				if _, err := steerRef.Send(ctx, core.User("switch to metric units")); err != nil {
 					t.Errorf("steer Send: %v", err)
 				}
 			})
@@ -815,14 +815,14 @@ func TestOverflowReRunRedeliversHandedSteers(t *testing.T) {
 		t.Fatal(err)
 	}
 	steerRef = s
-	t0, err := s.Send(ctx, weft.User("a first question"))
+	t0, err := s.Send(ctx, core.User("a first question"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := t0.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("convert this"))
+	t1, err := s.Send(ctx, core.User("convert this"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -858,7 +858,7 @@ func TestOverflowReRunRedeliversHandedSteers(t *testing.T) {
 func countUser(s *thread.Session, text string) int {
 	n := 0
 	for _, m := range s.Context() {
-		if m.Role == weft.RoleUser && m.Text() == text {
+		if m.Role == core.RoleUser && m.Text() == text {
 			n++
 		}
 	}
@@ -898,15 +898,15 @@ func TestSteerSettlesWhenTurnEndPanics(t *testing.T) {
 		wefttest.Say("done"),
 		wefttest.Say("followed"),
 	)
-	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+	echo := core.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
 		return "ok", nil
 	})
 	var steerRef *thread.Session
 	var steerOnce sync.Once
-	agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.ToolStart); ok {
+	agent := core.New(model, echo, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.ToolStart); ok {
 			steerOnce.Do(func() {
-				if _, err := steerRef.Send(ctx, weft.User("steer the doomed turn")); err != nil {
+				if _, err := steerRef.Send(ctx, core.User("steer the doomed turn")); err != nil {
 					t.Errorf("steer Send: %v", err)
 				}
 			})
@@ -917,7 +917,7 @@ func TestSteerSettlesWhenTurnEndPanics(t *testing.T) {
 		t.Fatal(err)
 	}
 	steerRef = s
-	t1, err := s.Send(ctx, weft.User("go"))
+	t1, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -972,15 +972,15 @@ func TestSteerRedeliveredWhenTurnEndNotPersisted(t *testing.T) {
 		wefttest.Say("done"),
 		wefttest.Say("followed"),
 	)
-	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+	echo := core.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
 		return "ok", nil
 	})
 	var steerRef *thread.Session
 	var steerOnce sync.Once
-	agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.ToolStart); ok {
+	agent := core.New(model, echo, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.ToolStart); ok {
 			steerOnce.Do(func() {
-				if _, err := steerRef.Send(ctx, weft.User("steer the unpersisted turn")); err != nil {
+				if _, err := steerRef.Send(ctx, core.User("steer the unpersisted turn")); err != nil {
 					t.Errorf("steer Send: %v", err)
 				}
 			})
@@ -991,7 +991,7 @@ func TestSteerRedeliveredWhenTurnEndNotPersisted(t *testing.T) {
 		t.Fatal(err)
 	}
 	steerRef = s
-	t1, err := s.Send(ctx, weft.User("go"))
+	t1, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1041,16 +1041,16 @@ func TestSteerFlushFailureStillSettles(t *testing.T) {
 		wefttest.Say("done"),
 		wefttest.Say("followed"),
 	)
-	echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+	echo := core.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
 		return "ok", nil
 	})
 	var steerRef *thread.Session
 	var steerOnce sync.Once
-	agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.ToolStart); ok {
+	agent := core.New(model, echo, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.ToolStart); ok {
 			steerOnce.Do(func() {
 				st.failNext.Store(1) // the steer receipt's flush fails
-				if _, err := steerRef.Send(ctx, weft.User("steer past the flush failure")); err == nil {
+				if _, err := steerRef.Send(ctx, core.User("steer past the flush failure")); err == nil {
 					t.Error("a steer whose receipt flush failed was reported accepted")
 				}
 			})
@@ -1061,7 +1061,7 @@ func TestSteerFlushFailureStillSettles(t *testing.T) {
 		t.Fatal(err)
 	}
 	steerRef = s
-	t1, err := s.Send(ctx, weft.User("go"))
+	t1, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1111,13 +1111,13 @@ func TestResurrectSteerSurvivesFailedDeferral(t *testing.T) {
 	ctx := context.Background()
 	inner := thread.Memory()
 	st := &failDeferredStorage{Storage: inner, fail: true}
-	agent := weft.New(wefttest.Script(wefttest.Say("resurrected"), wefttest.Say("resurrected")))
+	agent := core.New(wefttest.Script(wefttest.Say("resurrected"), wefttest.Say("resurrected")))
 	s0, err := thread.Create(ctx, inner, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The crash window: a queued receipt no fate followed.
-	clone := weft.User("lost in the crash")
+	clone := core.User("lost in the crash")
 	if err := st.Append(ctx, s0.ID(), thread.ReceiptEntry{
 		ID: "e_orphan", ParentID: "", Created: time.Now().UTC(),
 		Status: thread.ReceiptQueued, Msg: &clone,
@@ -1143,29 +1143,29 @@ func TestDeferredSteerFollowUpKeepsItsRunOptions(t *testing.T) {
 	ctx := context.Background()
 	var mu sync.Mutex
 	tenants := map[string]string{} // run id → the tenant its metadata carried
-	tool := weft.Tool("refund", "Refund an order.", func(context.Context, struct{}) (string, error) {
+	tool := core.Tool("refund", "Refund an order.", func(context.Context, struct{}) (string, error) {
 		return "refunded", nil
-	}, weft.RequireApproval())
-	agent := weft.New(
+	}, core.RequireApproval())
+	agent := core.New(
 		wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "call_r"}),
 			wefttest.Say("not refunded"),
 			wefttest.Say("the follow-up's reply"),
 		), tool,
-		weft.Tap(func(ctx context.Context, ev weft.Event) {
-			if rs, ok := ev.(weft.RunStart); ok {
+		core.Tap(func(ctx context.Context, ev core.Event) {
+			if rs, ok := ev.(core.RunStart); ok {
 				mu.Lock()
-				tenants[rs.ID] = weft.MetadataFromContext(ctx)["tenant"]
+				tenants[rs.ID] = core.MetadataFromContext(ctx)["tenant"]
 				mu.Unlock()
 			}
 		}))
 	s, _ := thread.Create(ctx, thread.Memory(), agent)
-	parked, _ := s.Send(ctx, weft.User("refund it"))
+	parked, _ := s.Send(ctx, core.User("refund it"))
 	if _, err := parked.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	steer, err := s.Send(ctx, weft.User("and tell me when it is done"), thread.As(thread.Steer),
-		thread.RunOptions(weft.Metadata(map[string]string{"tenant": "acme"})))
+	steer, err := s.Send(ctx, core.User("and tell me when it is done"), thread.As(thread.Steer),
+		thread.RunOptions(core.Metadata(map[string]string{"tenant": "acme"})))
 	if err != nil {
 		t.Fatal(err)
 	}

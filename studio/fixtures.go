@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"sort"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
 )
 
@@ -46,20 +46,20 @@ type fixtureFile struct {
 // whose assistant messages are earlier turns' and not this run's
 // calls); steps is everything it recorded after (sourceSteps). Each
 // step's request is the input plus the steps before it.
-func buildFixtures(input, steps []weft.Message, tools []string) []fixtureFile {
+func buildFixtures(input, steps []core.Message, tools []string) []fixtureFile {
 	var files []fixtureFile
 	sorted := append([]string(nil), tools...)
 	sort.Strings(sorted)
-	msgs := append(append([]weft.Message(nil), input...), steps...)
+	msgs := append(append([]core.Message(nil), input...), steps...)
 	seq := 0
 	for i, msg := range msgs {
-		if i < len(input) || msg.Role != weft.RoleAssistant {
+		if i < len(input) || msg.Role != core.RoleAssistant {
 			continue
 		}
 		seq++
 		key := fixtureKey(msgs[:i], sorted)
 		doc := fixtureDoc{
-			Model: weft.ModelInfo{Provider: "weft", Name: "recorded"},
+			Model: core.ModelInfo{Provider: "weft", Name: "recorded"},
 			Request: fixtureRequest{
 				System:        "",
 				fixtureKeyDoc: fixtureKeyDoc{Messages: msgs[:i], Tools: sorted},
@@ -81,10 +81,10 @@ func buildFixtures(input, steps []weft.Message, tools []string) []fixtureFile {
 // fixtureKeyDoc mirrors wefttest's keyDoc field-for-field (replay.go:
 // the JSON bytes are the key's input, so the tags must match exactly).
 type fixtureKeyDoc struct {
-	Messages   []weft.Message         `json:"messages"`
+	Messages   []core.Message         `json:"messages"`
 	Tools      []string               `json:"tools,omitempty"`
-	Thinking   *weft.ThinkingConfig   `json:"thinking,omitempty"`
-	ToolChoice *weft.ToolChoiceConfig `json:"tool_choice,omitempty"`
+	Thinking   *core.ThinkingConfig   `json:"thinking,omitempty"`
+	ToolChoice *core.ToolChoiceConfig `json:"tool_choice,omitempty"`
 	Sequential bool                   `json:"sequential,omitempty"`
 }
 
@@ -101,19 +101,19 @@ type fixtureEvent struct {
 	ID        string          `json:"id,omitempty"`
 	Name      string          `json:"name,omitempty"`
 	Args      json.RawMessage `json:"args,omitempty"`
-	Reason    weft.StopReason `json:"reason,omitempty"`
+	Reason    core.StopReason `json:"reason,omitempty"`
 }
 
-func fixtureEvents(msg weft.Message) []fixtureEvent {
+func fixtureEvents(msg core.Message) []fixtureEvent {
 	var out []fixtureEvent
 	var calls int
 	for _, p := range msg.Content {
 		switch p := p.(type) {
-		case weft.ReasoningPart:
+		case core.ReasoningPart:
 			out = append(out, fixtureEvent{Type: "reasoning", Text: p.Text, Signature: p.Signature})
-		case weft.TextPart:
+		case core.TextPart:
 			out = append(out, fixtureEvent{Type: "text", Text: p.Text})
-		case weft.ToolCallPart:
+		case core.ToolCallPart:
 			calls++
 			args := p.Args
 			if len(args) == 0 {
@@ -122,23 +122,23 @@ func fixtureEvents(msg weft.Message) []fixtureEvent {
 			out = append(out, fixtureEvent{Type: "tool_call", ID: p.ID, Name: p.Name, Args: args})
 		}
 	}
-	reason := weft.StopEndTurn
+	reason := core.StopEndTurn
 	if calls > 0 {
-		reason = weft.StopToolCalls
+		reason = core.StopToolCalls
 	}
 	out = append(out, fixtureEvent{Type: "finish", Reason: reason})
 	return out
 }
 
 type fixtureDoc struct {
-	Model   weft.ModelInfo `json:"model"`
+	Model   core.ModelInfo `json:"model"`
 	Request fixtureRequest `json:"request"`
 	Events  []fixtureEvent `json:"events"`
 	Error   string         `json:"error"`
 }
 
 // fixtureKey is wefttest's hashKeyDoc over the canonical form.
-func fixtureKey(prefix []weft.Message, tools []string) string {
+func fixtureKey(prefix []core.Message, tools []string) string {
 	b, err := json.Marshal(fixtureKeyDoc{Messages: prefix, Tools: tools})
 	if err != nil {
 		panic(fmt.Sprintf("studio: fixture key: %v", err))

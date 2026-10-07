@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -39,7 +39,7 @@ func TestBudgetAppend(t *testing.T) {
 	parent := ""
 	appendOne := func(i int) {
 		t.Helper()
-		e := thread.MessageEntry{Message: weft.User("tick")}
+		e := thread.MessageEntry{Message: core.User("tick")}
 		e.ID, e.ParentID, e.Created = "e_"+strconv.Itoa(i), parent, time.Now().UTC()
 		if err := st.Append(ctx, "s_bench", e); err != nil {
 			t.Fatal(err)
@@ -66,17 +66,17 @@ func TestBudgetAppend(t *testing.T) {
 // answers with its index — the summarizer and the turns share it.
 type benchContextModel struct{ calls int }
 
-func (m *benchContextModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "threadtest", Name: "benchcontext"}
+func (m *benchContextModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "threadtest", Name: "benchcontext"}
 }
 
-func (m *benchContextModel) Stream(_ context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *benchContextModel) Stream(_ context.Context, _ core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	m.calls++
 	n := m.calls
-	return func(yield func(weft.ModelEvent, error) bool) {
-		for _, ev := range []weft.ModelEvent{
-			weft.ModelTextDelta{Text: fmt.Sprintf("turn %d", n)},
-			weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+	return func(yield func(core.ModelEvent, error) bool) {
+		for _, ev := range []core.ModelEvent{
+			core.ModelTextDelta{Text: fmt.Sprintf("turn %d", n)},
+			core.ModelFinish{Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 		} {
 			if !yield(ev, nil) {
 				return
@@ -90,12 +90,12 @@ func (m *benchContextModel) Stream(_ context.Context, _ weft.ModelRequest) iter.
 func buildCompacted(tb testing.TB, n int) *thread.Session {
 	tb.Helper()
 	ctx := context.Background()
-	s, err := thread.Create(ctx, thread.Memory(), weft.New(&benchContextModel{}), thread.KeepRecent(1))
+	s, err := thread.Create(ctx, thread.Memory(), core.New(&benchContextModel{}), thread.KeepRecent(1))
 	if err != nil {
 		tb.Fatal(err)
 	}
 	for i := 0; i < n; i++ {
-		turn, err := s.Send(ctx, weft.User("tick"))
+		turn, err := s.Send(ctx, core.User("tick"))
 		if err != nil {
 			tb.Fatal(err)
 		}

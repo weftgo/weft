@@ -25,8 +25,8 @@ jobs:
           cache-dependency-path: |
             **/go.sum
             go.work.sum
-      # One module per adapter (ADR 0005): loop over the workspace the
-      # same way `make test` does. The live suite is never in CI — no
+      # The framework module, the core module and the examples (ADR
+      # 0027): loop over the workspace the same way `make test` does. The live suite is never in CI — no
       # keys; it is a release-time manual step.
       - name: vet (every module)
         run: |
@@ -69,11 +69,10 @@ jobs:
 
   # The selvedge (TODO §1.7): every module go.work lists is compared
   # against its own last tag under the policy scripts/apidiff.sh
-  # records for it — root, thread, thread/sqlite and the adapters fail
-  # on an incompatible change unless it is acknowledged in the module's
-  # .apidiff-allow (pre-1.0 only); obsdb, obsdb/clickhouse, otel,
-  # runtime and studio report theirs without failing (pre-freeze);
-  # commands and examples skip. A module without a policy fails.
+  # records for it — core fails on an incompatible change unless it is
+  # acknowledged in core/.apidiff-allow (pre-1.0 only); the root, which
+  # holds the pre-freeze layers, reports without failing; examples
+  # skip. A module without a policy fails.
   apidiff:
     runs-on: ubuntu-latest
     steps:
@@ -167,7 +166,7 @@ jobs:
             (cd "$m" && WEFT_MODEL_REQUESTS=deny go test ./...)
           done
 
-  # The fuzz gate (TODO §9.4): every Fuzz* target of the root module
+  # The fuzz gate (TODO §9.4): every Fuzz* target of the core module
   # and of thread's decoders runs for FUZZTIME on
   # stable Go. Not under -race (the seeds already run under -race in
   # `test`). A crasher fails the job and its input is uploaded so the
@@ -183,9 +182,9 @@ jobs:
           cache-dependency-path: |
             **/go.sum
             go.work.sum
-      - name: fuzz (root module, 10s per target)
+      - name: fuzz (core module, 10s per target)
         run: make fuzz
-      - name: fuzz (thread module, 10s per target)
+      - name: fuzz (thread package, 10s per target)
         run: make fuzz-thread
       - name: upload crashers
         if: failure()
@@ -193,7 +192,7 @@ jobs:
         with:
           name: fuzz-crashers
           path: |
-            testdata/fuzz
+            core/testdata/fuzz
             thread/testdata/fuzz
           if-no-files-found: ignore
 

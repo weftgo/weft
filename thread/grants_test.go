@@ -8,16 +8,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // runAgent is an agent whose "run" tool requires approval — the
 // command-shaped tool grants exist for (ADR 0021 §4).
-func runAgent(turns ...wefttest.Turn) (*weft.Agent, *[]string) {
+func runAgent(turns ...wefttest.Turn) (*core.Agent, *[]string) {
 	ran := &[]string{}
-	tool := weft.Tool("run", "Run a command.",
+	tool := core.Tool("run", "Run a command.",
 		func(ctx context.Context, in struct {
 			Command string `json:"command"`
 			Dir     string `json:"dir"`
@@ -25,8 +25,8 @@ func runAgent(turns ...wefttest.Turn) (*weft.Agent, *[]string) {
 			*ran = append(*ran, in.Command)
 			return "ran " + in.Command, nil
 		},
-		weft.RequireApproval())
-	return weft.New(wefttest.Script(turns...), weft.Name("grants-test"), tool), ran
+		core.RequireApproval())
+	return core.New(wefttest.Script(turns...), core.Name("grants-test"), tool), ran
 }
 
 // TestGrantApprovesAtOnce: a matching live grant decides at the chain's
@@ -51,7 +51,7 @@ func TestGrantApprovesAtOnce(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("test it"))
+	turn, err := s.Send(ctx, core.User("test it"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestGrantPredicateTable(t *testing.T) {
 			if err := s.Grant(ctx, g); err != nil {
 				t.Fatal(err)
 			}
-			turn, err := s.Send(ctx, weft.User("run"))
+			turn, err := s.Send(ctx, core.User("run"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -156,7 +156,7 @@ func TestDenyGrant(t *testing.T) {
 	if err := s.Grant(ctx, thread.Grant{Tool: "run", Deny: true}); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("clean everything"))
+	turn, err := s.Send(ctx, core.User("clean everything"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestDenyGrant(t *testing.T) {
 	if err := s2.Grant(ctx, thread.Grant{Tool: "run", Deny: true, Reason: "no network from tests"}); err != nil {
 		t.Fatal(err)
 	}
-	turn2, _ := s2.Send(ctx, weft.User("curl"))
+	turn2, _ := s2.Send(ctx, core.User("curl"))
 	if _, err := turn2.Wait(); err != nil {
 		t.Fatal(err)
 	}
@@ -235,12 +235,12 @@ func TestGrantLifetime(t *testing.T) {
 			}
 		}
 	}
-	first, err := s.Send(ctx, weft.User("vet"))
+	first, err := s.Send(ctx, core.User("vet"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitTurn(first)
-	second, err := s.Send(ctx, weft.User("vet again"))
+	second, err := s.Send(ctx, core.User("vet again"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestGrantLifetime(t *testing.T) {
 	if err := s.Revoke(ctx, grantID); err != nil {
 		t.Fatal(err)
 	}
-	third, err := s.Send(ctx, weft.User("vet once more"))
+	third, err := s.Send(ctx, core.User("vet once more"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +301,7 @@ func TestGrantExpiry(t *testing.T) {
 	if err := s.Grant(ctx, thread.Grant{Tool: "run", Expiry: time.Now().UTC().Add(-time.Second)}); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("run"))
+	turn, err := s.Send(ctx, core.User("run"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestApproveAlways(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("build"))
+	t1, err := s.Send(ctx, core.User("build"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +355,7 @@ func TestApproveAlways(t *testing.T) {
 		t.Fatal("ApproveAlways recorded no grant")
 	}
 	// The second identical call runs without parking.
-	t2, err := s.Send(ctx, weft.User("build again"))
+	t2, err := s.Send(ctx, core.User("build again"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +395,7 @@ func TestSharedGrantStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("deploy"))
+	turn, err := s.Send(ctx, core.User("deploy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +422,7 @@ func TestSharedGrantStore(t *testing.T) {
 		wefttest.Say("done"),
 	)
 	s2, _ := thread.Create(ctx, thread.Memory(), agent2, thread.WithGrantStore(store2))
-	turn2, _ := s2.Send(ctx, weft.User("deploy"))
+	turn2, _ := s2.Send(ctx, core.User("deploy"))
 	if _, err := turn2.Wait(); err != nil {
 		t.Fatal(err)
 	}
@@ -570,7 +570,7 @@ func TestAuditTellsTheWholeStory(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	// The second call runs under the grant; then revoke it.
-	turn, err := s.Send(ctx, weft.User("again"))
+	turn, err := s.Send(ctx, core.User("again"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -652,7 +652,7 @@ func TestDenyGrantMaxUsesCountsDenials(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("build"))
+	t1, err := s.Send(ctx, core.User("build"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -663,7 +663,7 @@ func TestDenyGrantMaxUsesCountsDenials(t *testing.T) {
 		t.Fatalf("the deny-granted call ran: %v", *ran)
 	}
 	// The grant is spent: the same call parks instead of refusing.
-	t2, err := s.Send(ctx, weft.User("build again"))
+	t2, err := s.Send(ctx, core.User("build again"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -722,7 +722,7 @@ func TestSharedGrantIDCollisionDoesNotInflateSessionUses(t *testing.T) {
 		},
 	}}
 	// One shared match (go build)…
-	t1, err := s.Send(ctx, weft.User("build"))
+	t1, err := s.Send(ctx, core.User("build"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -740,7 +740,7 @@ func TestSharedGrantIDCollisionDoesNotInflateSessionUses(t *testing.T) {
 	}
 	// …must not spend the colliding session grant's single use: the
 	// call it covers still goes through the grant, not the park.
-	t2, err := s.Send(ctx, weft.User("test"))
+	t2, err := s.Send(ctx, core.User("test"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -772,7 +772,7 @@ func TestGrantMaxUsesWithinOneTurn(t *testing.T) {
 	if err := s.Grant(ctx, thread.Grant{Tool: "run", MaxUses: 1}); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("vet twice"))
+	turn, err := s.Send(ctx, core.User("vet twice"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -825,7 +825,7 @@ func TestGrantMatchAuditNamesTheGrant(t *testing.T) {
 			grantID = g.ID
 		}
 	}
-	turn, err := s.Send(ctx, weft.User("vet"))
+	turn, err := s.Send(ctx, core.User("vet"))
 	if err != nil {
 		t.Fatal(err)
 	}

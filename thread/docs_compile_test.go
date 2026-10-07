@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
 	"github.com/weftgo/weft/thread/pool"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // The README's Sessions section and AGENTS.md block 8, copied line for
@@ -27,13 +27,13 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent := weft.New(wefttest.Script(
+	agent := core.New(wefttest.Script(
 		wefttest.Say("r"), wefttest.Say("r"), wefttest.Say("r"), wefttest.Say("r")))
 	s, err := thread.Create(ctx, st, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("Where is order 1234?"))
+	turn, err := s.Send(ctx, core.User("Where is order 1234?"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 	if err := s.WaitIdle(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Send(ctx, weft.User("after close")); !errors.Is(err, thread.ErrClosed) {
+	if _, err := s.Send(ctx, core.User("after close")); !errors.Is(err, thread.ErrClosed) {
 		t.Fatalf("Send on a closed session: %v, want ErrClosed", err)
 	}
 
@@ -116,7 +116,7 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	queued, err := s3.Send(ctx, weft.User("x"), thread.RunOptions(weft.Metadata(map[string]string{"tenant": "acme"})))
+	queued, err := s3.Send(ctx, core.User("x"), thread.RunOptions(core.Metadata(map[string]string{"tenant": "acme"})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 	if err := again.Custom(ctx, "kind", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := again.CustomMessage(ctx, "kind", weft.User("note")); err != nil {
+	if err := again.CustomMessage(ctx, "kind", core.User("note")); err != nil {
 		t.Fatal(err)
 	}
 	if err := again.Pin(ctx, turn.ID()); err != nil {
@@ -170,16 +170,16 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 	// README: the approvals block. A gated tool parks; Pending,
 	// Decide, Turn.Next, the grant, and the signed exchange all exist
 	// exactly as written.
-	apAgent := weft.New(wefttest.Script(
+	apAgent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "deploy"}), wefttest.Say("done")),
-		weft.Tool("deploy", "Deploy.", func(context.Context, struct{}) (string, error) {
+		core.Tool("deploy", "Deploy.", func(context.Context, struct{}) (string, error) {
 			return "deployed", nil
-		}, weft.RequireApproval()))
+		}, core.RequireApproval()))
 	s4, err := thread.Create(ctx, thread.Memory(), apAgent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	apTurn, err := s4.Send(ctx, weft.User("Deploy to prod."))
+	apTurn, err := s4.Send(ctx, core.User("Deploy to prod."))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,11 +220,11 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 	ask := func(context.Context, thread.Request) (thread.Decision, bool) {
 		return thread.Decision{}, false // no terminal here: decline, and the call parks
 	}
-	apAgent2 := weft.New(wefttest.Script(
+	apAgent2 := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "deploy"}), wefttest.Say("done")),
-		weft.Tool("deploy", "Deploy.", func(context.Context, struct{}) (string, error) {
+		core.Tool("deploy", "Deploy.", func(context.Context, struct{}) (string, error) {
 			return "deployed", nil
-		}, weft.RequireApproval()))
+		}, core.RequireApproval()))
 	s5, err := thread.Create(ctx, thread.Memory(), apAgent2,
 		thread.WithKeyring(ring),
 		thread.RequireSigned(),
@@ -232,7 +232,7 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sdTurn, err := s5.Send(ctx, weft.User("Deploy again."))
+	sdTurn, err := s5.Send(ctx, core.User("Deploy again."))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,13 +266,13 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 
 	// README: the steering block. On an idle session every policy runs
 	// a plain turn; the calls and the names are what this pins.
-	stAgent := weft.New(wefttest.Script(
+	stAgent := core.New(wefttest.Script(
 		wefttest.Say("r"), wefttest.Say("r"), wefttest.Say("r")))
 	s6, err := thread.Create(ctx, thread.Memory(), stAgent, thread.BusyPolicy(thread.Steer))
 	if err != nil {
 		t.Fatal(err)
 	}
-	steer, err := s6.Send(ctx, weft.User("wait — metric units"))
+	steer, err := s6.Send(ctx, core.User("wait — metric units"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, p := range []thread.Policy{thread.Interrupt, thread.Rollback} {
-		tn, err := s6.Send(ctx, weft.User("stop, do this instead"), thread.As(p))
+		tn, err := s6.Send(ctx, core.User("stop, do this instead"), thread.As(p))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -301,11 +301,11 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 	_ = thread.ErrDropped
 
 	// README: the pool block.
-	researcher := weft.New(wefttest.Script(wefttest.Say("found")))
+	researcher := core.New(wefttest.Script(wefttest.Say("found")))
 	pl := pool.New(4)
 	research := pl.MustWrap("research", "Research a topic.", researcher)
 	_ = research
-	ps, err := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	ps, err := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestDocsSessionsBlocksCompile(t *testing.T) {
 	}
 	_ = pool.New(1, pool.MaxDepth(2))
 	_ = pl.Cancel(ctx, ps, rc.ID)                     // settled already: a *StateError
-	_, _ = pl.Forward(ctx, ps, rc.ID, weft.User("x")) // the same
+	_, _ = pl.Forward(ctx, ps, rc.ID, core.User("x")) // the same
 	_ = pool.Receipts(ps)
 	if _, err := pool.Children(ctx, ps); err != nil {
 		t.Fatal(err)

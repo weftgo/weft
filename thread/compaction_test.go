@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 func timeUTC() time.Time { return time.Now().UTC() }
@@ -27,32 +27,32 @@ func timeUTC() time.Time { return time.Now().UTC() }
 // tests watch.
 type summaryRecorder struct {
 	mu       sync.Mutex
-	requests []weft.ModelRequest
+	requests []core.ModelRequest
 	reply    string
 }
 
-func (m *summaryRecorder) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *summaryRecorder) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	m.mu.Lock()
 	m.requests = append(m.requests, req)
 	reply := m.reply
 	m.mu.Unlock()
-	return func(yield func(weft.ModelEvent, error) bool) {
-		yield(weft.ModelTextDelta{Text: reply}, nil)
-		yield(weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 7, OutputTokens: 3}}, nil)
+	return func(yield func(core.ModelEvent, error) bool) {
+		yield(core.ModelTextDelta{Text: reply}, nil)
+		yield(core.ModelFinish{Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 7, OutputTokens: 3}}, nil)
 	}
 }
 
-func (m *summaryRecorder) saw() []weft.ModelRequest {
+func (m *summaryRecorder) saw() []core.ModelRequest {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]weft.ModelRequest(nil), m.requests...)
+	return append([]core.ModelRequest(nil), m.requests...)
 }
 
 func TestCompactionEndToEnd(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		rec := &summaryRecorder{reply: "the summary text"}
-		s, _ := thread.Create(ctx, st, weft.New(rec))
+		s, _ := thread.Create(ctx, st, core.New(rec))
 
 		// Three turns of ~7.5k estimated tokens each: the tail (two
 		// of them) fits the keep window, all three do not — the cut
@@ -62,7 +62,7 @@ func TestCompactionEndToEnd(t *testing.T) {
 			strings.Repeat("b", 30_000),
 			strings.Repeat("c", 30_000),
 		)
-		s = reopenWith(t, ctx, st, s, weft.New(rec))
+		s = reopenWith(t, ctx, st, s, core.New(rec))
 		before := s.Entries()
 
 		if err := s.Compact(ctx); err != nil {
@@ -126,14 +126,14 @@ func TestCompactionIterative(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		rec := &summaryRecorder{reply: "summary"}
-		s, _ := thread.Create(ctx, st, weft.New(rec))
+		s, _ := thread.Create(ctx, st, core.New(rec))
 		msgs(t, ctx, st, s,
 			strings.Repeat("a", 30_000),
 			strings.Repeat("b", 30_000),
 			strings.Repeat("c", 30_000),
 			strings.Repeat("d", 30_000),
 		)
-		s = reopenWith(t, ctx, st, s, weft.New(rec))
+		s = reopenWith(t, ctx, st, s, core.New(rec))
 		if err := s.Compact(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -151,7 +151,7 @@ func TestCompactionIterative(t *testing.T) {
 			strings.Repeat("f", 30_000),
 			strings.Repeat("g", 30_000),
 		)
-		s = reopenWith(t, ctx, st, s, weft.New(rec))
+		s = reopenWith(t, ctx, st, s, core.New(rec))
 		if err := s.Compact(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -202,13 +202,13 @@ func TestCompactionUndo(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		rec := &summaryRecorder{reply: "summary"}
-		s, _ := thread.Create(ctx, st, weft.New(rec))
+		s, _ := thread.Create(ctx, st, core.New(rec))
 		msgs(t, ctx, st, s,
 			strings.Repeat("a", 30_000),
 			strings.Repeat("b", 30_000),
 			strings.Repeat("c", 30_000),
 		)
-		s = reopenWith(t, ctx, st, s, weft.New(rec))
+		s = reopenWith(t, ctx, st, s, core.New(rec))
 		prior := s.Context()
 
 		if err := s.Compact(ctx); err != nil {
@@ -228,7 +228,7 @@ func TestCompactionUndo(t *testing.T) {
 			t.Errorf("Entries = %d, want 5", n)
 		}
 		// Undo with no compaction on the path is loud.
-		fresh, _ := thread.Create(ctx, st, weft.New(rec))
+		fresh, _ := thread.Create(ctx, st, core.New(rec))
 		if err := fresh.Uncompact(ctx); err == nil {
 			t.Error("Uncompact with no compaction: no error")
 		}
@@ -240,11 +240,11 @@ func TestCompactionNoWindow(t *testing.T) {
 		ctx := context.Background()
 		var buf bytes.Buffer
 		logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
-		agent := weft.New(wefttest.Script(wefttest.Say("r1"), wefttest.Say("r2")),
-			weft.Logger(logger))
+		agent := core.New(wefttest.Script(wefttest.Say("r1"), wefttest.Say("r2")),
+			core.Logger(logger))
 		s, _ := thread.Create(ctx, st, agent)
 		for i := 0; i < 2; i++ {
-			turn, err := s.Send(ctx, weft.User("q"))
+			turn, err := s.Send(ctx, core.User("q"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -270,31 +270,31 @@ func TestCompactionStripsSignedReasoning(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		rec := &summaryRecorder{reply: "summary"}
-		s, _ := thread.Create(ctx, st, weft.New(rec))
+		s, _ := thread.Create(ctx, st, core.New(rec))
 
 		// One big old prompt (~19k tokens) so the cut lands after it,
 		// a signed-reasoning assistant and a small prompt in the kept
 		// tail, and — after the compaction — an unsigned-reasoning
 		// assistant, whose reasoning must survive: it was recorded
 		// over a prefix that already held the summary.
-		signed := weft.Message{Role: weft.RoleAssistant, Content: []weft.Part{
-			weft.ReasoningPart{Text: "chain of thought", Signature: "sig1"},
-			weft.TextPart{Text: "kept reply"},
+		signed := core.Message{Role: core.RoleAssistant, Content: []core.Part{
+			core.ReasoningPart{Text: "chain of thought", Signature: "sig1"},
+			core.TextPart{Text: "kept reply"},
 		}}
-		unsigned := weft.Message{Role: weft.RoleAssistant, Content: []weft.Part{
-			weft.ReasoningPart{Text: "later thinking"},
-			weft.TextPart{Text: "after the compaction"},
+		unsigned := core.Message{Role: core.RoleAssistant, Content: []core.Part{
+			core.ReasoningPart{Text: "later thinking"},
+			core.TextPart{Text: "after the compaction"},
 		}}
 		parent := s.Leaf()
 		entries := []thread.Entry{
-			thread.MessageEntry{ID: "e_old", ParentID: parent, Created: timeUTC(), Message: weft.User(strings.Repeat("a", 84_000))},
+			thread.MessageEntry{ID: "e_old", ParentID: parent, Created: timeUTC(), Message: core.User(strings.Repeat("a", 84_000))},
 			thread.MessageEntry{ID: "e_sig", ParentID: "e_old", Created: timeUTC(), Message: signed},
-			thread.MessageEntry{ID: "e_tail", ParentID: "e_sig", Created: timeUTC(), Message: weft.User("small tail")},
+			thread.MessageEntry{ID: "e_tail", ParentID: "e_sig", Created: timeUTC(), Message: core.User("small tail")},
 		}
 		if err := st.Append(ctx, s.ID(), entries...); err != nil {
 			t.Fatal(err)
 		}
-		s = reopenWith(t, ctx, st, s, weft.New(rec))
+		s = reopenWith(t, ctx, st, s, core.New(rec))
 		if err := s.Compact(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -303,7 +303,7 @@ func TestCompactionStripsSignedReasoning(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		s = reopenWith(t, ctx, st, s, weft.New(rec))
+		s = reopenWith(t, ctx, st, s, core.New(rec))
 		got := s.Context()
 		if len(got) != 4 { // summary, stripped assistant, tail prompt, unsigned assistant
 			t.Fatalf("Context = %d messages, want 4", len(got))
@@ -328,19 +328,19 @@ func TestCompactionStripsSignedReasoning(t *testing.T) {
 	})
 }
 
-func hasUnsigned(m weft.Message) bool {
+func hasUnsigned(m core.Message) bool {
 	for _, p := range m.Content {
-		if r, ok := p.(weft.ReasoningPart); ok && r.Signature == "" && r.Text != "" {
+		if r, ok := p.(core.ReasoningPart); ok && r.Signature == "" && r.Text != "" {
 			return true
 		}
 	}
 	return false
 }
 
-func hasSigned(m weft.Message) bool { return hasSignedMsg(m) }
-func hasSignedMsg(m weft.Message) bool {
+func hasSigned(m core.Message) bool { return hasSignedMsg(m) }
+func hasSignedMsg(m core.Message) bool {
 	for _, p := range m.Content {
-		if r, ok := p.(weft.ReasoningPart); ok && r.Signature != "" {
+		if r, ok := p.(core.ReasoningPart); ok && r.Signature != "" {
 			return true
 		}
 	}
@@ -354,18 +354,18 @@ func TestCompactionSummarizerView(t *testing.T) {
 	rec := &summaryRecorder{reply: "summary"}
 	ctx := context.Background()
 	mem := thread.Memory()
-	s, _ := thread.Create(ctx, mem, weft.New(rec))
-	ranged := []weft.Message{
-		weft.User(strings.Repeat("q", 300)),
-		{Role: weft.RoleAssistant, Content: []weft.Part{
-			weft.ReasoningPart{Text: "secret chain", Signature: "s"},
-			weft.ToolCallPart{ID: "c1", Name: "read", Args: json.RawMessage(`{}`)},
+	s, _ := thread.Create(ctx, mem, core.New(rec))
+	ranged := []core.Message{
+		core.User(strings.Repeat("q", 300)),
+		{Role: core.RoleAssistant, Content: []core.Part{
+			core.ReasoningPart{Text: "secret chain", Signature: "s"},
+			core.ToolCallPart{ID: "c1", Name: "read", Args: json.RawMessage(`{}`)},
 		}},
-		{Role: weft.RoleTool, Content: []weft.Part{
-			weft.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 9_000)},
+		{Role: core.RoleTool, Content: []core.Part{
+			core.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 9_000)},
 		}},
-		{Role: weft.RoleUser, Content: []weft.Part{
-			weft.FilePart{MediaType: "text/plain", URL: "file:///docs/spec.md", Data: []byte("xxxx")},
+		{Role: core.RoleUser, Content: []core.Part{
+			core.FilePart{MediaType: "text/plain", URL: "file:///docs/spec.md", Data: []byte("xxxx")},
 		}},
 	}
 	parent := s.Leaf()
@@ -378,13 +378,13 @@ func TestCompactionSummarizerView(t *testing.T) {
 	if err := mem.Append(ctx, s.ID(), entries...); err != nil {
 		t.Fatal(err)
 	}
-	open, err := thread.Open(ctx, mem, s.ID(), weft.New(rec))
+	open, err := thread.Open(ctx, mem, s.ID(), core.New(rec))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Make the tail overflow so there is something to summarize.
 	msgs(t, ctx, mem, open, strings.Repeat("z", 30_000), strings.Repeat("z", 30_000), strings.Repeat("z", 30_000))
-	open = reopenWith(t, ctx, mem, open, weft.New(rec))
+	open = reopenWith(t, ctx, mem, open, core.New(rec))
 	if err := open.Compact(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -400,22 +400,22 @@ func TestCompactionSummarizerView(t *testing.T) {
 	for _, m := range view {
 		for _, p := range m.Content {
 			switch p := p.(type) {
-			case weft.ToolResultPart:
+			case core.ToolResultPart:
 				if len([]rune(p.Content)) > 2100 {
 					t.Errorf("tool result not capped: %d runes", len([]rune(p.Content)))
 				}
 				if strings.Contains(p.Content, "[truncated]") {
 					foundCapped = true
 				}
-			case weft.ReasoningPart:
+			case core.ReasoningPart:
 				if p.Signature != "" {
 					foundSigned = true
 				}
-			case weft.TextPart:
+			case core.TextPart:
 				if strings.Contains(p.Text, "[file: file:///docs/spec.md]") {
 					foundFile = true
 				}
-			case weft.FilePart:
+			case core.FilePart:
 				t.Error("file part reached the summarizer whole")
 			}
 		}
@@ -434,7 +434,7 @@ func TestCompactionSummarizerView(t *testing.T) {
 
 func TestApplyCompactionValidates(t *testing.T) {
 	ctx := context.Background()
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	if err := s.ApplyCompaction(ctx, nil); err == nil {
 		t.Error("ApplyCompaction(nil): no error")
 	}
@@ -453,7 +453,7 @@ func TestApplyCompactionValidates(t *testing.T) {
 // change only with an ADR).
 func TestCompactionGoldens(t *testing.T) {
 	// The marker message, byte for byte.
-	marker, err := json.Marshal(weft.User("<weft-summary>\nSUMMARY TEXT\n</weft-summary>"))
+	marker, err := json.Marshal(core.User("<weft-summary>\nSUMMARY TEXT\n</weft-summary>"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,15 +463,15 @@ func TestCompactionGoldens(t *testing.T) {
 	// then the kept tail from the compaction's first kept entry.
 	st := thread.Memory()
 	ctx := context.Background()
-	s, _ := thread.Create(ctx, st, weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
 	if err := st.Append(ctx, s.ID(),
-		thread.MessageEntry{ID: "e_1", Created: timeUTC(), Message: weft.User("hello")},
-		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: timeUTC(), Message: weft.Assistant("hi there")},
+		thread.MessageEntry{ID: "e_1", Created: timeUTC(), Message: core.User("hello")},
+		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: timeUTC(), Message: core.Assistant("hi there")},
 	); err != nil {
 		t.Fatal(err)
 	}
 	abandon(t, st, s.ID())
-	open, err := thread.Open(ctx, st, s.ID(), weft.New(wefttest.Script()))
+	open, err := thread.Open(ctx, st, s.ID(), core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,10 +501,10 @@ func wantGolden(t *testing.T, name string, got []byte) {
 // recordingModel is the example's deterministic summarizer.
 type recordingModel struct{ reply string }
 
-func (m *recordingModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
-		yield(weft.ModelTextDelta{Text: m.reply}, nil)
-		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+func (m *recordingModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
+		yield(core.ModelTextDelta{Text: m.reply}, nil)
+		yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
 	}
 }
 
@@ -515,7 +515,7 @@ func TestCompactionSummarizerFailure(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		fail := &failingModel{}
-		agent := weft.New(fail)
+		agent := core.New(fail)
 		s, _ := thread.Create(ctx, st, agent)
 		msgs(t, ctx, st, s,
 			strings.Repeat("a", 30_000),
@@ -539,8 +539,8 @@ func TestCompactionSummarizerFailure(t *testing.T) {
 
 type failingModel struct{}
 
-func (m *failingModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
+func (m *failingModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
 		yield(nil, errors.New("summarizer down"))
 	}
 }
@@ -550,11 +550,11 @@ func (m *failingModel) Stream(ctx context.Context, req weft.ModelRequest) iter.S
 func TestBranchSummarizeLeftNoDivergence(t *testing.T) {
 	ctx := context.Background()
 	rec := &summaryRecorder{reply: "x"}
-	agent := weft.New(rec)
+	agent := core.New(rec)
 	st := thread.Memory()
 	s, _ := thread.Create(ctx, st, agent)
 	if err := st.Append(ctx, s.ID(), thread.MessageEntry{
-		ID: "e_only", Created: timeUTC(), Message: weft.User("only line"),
+		ID: "e_only", Created: timeUTC(), Message: core.User("only line"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -576,19 +576,19 @@ func TestTrimAfterCompactionKeepsTheBoundary(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		rec := &summaryRecorder{reply: "the summary"}
-		agent := weft.New(rec)
+		agent := core.New(rec)
 		s, _ := thread.Create(ctx, st, agent, thread.ClearOldToolResults(0))
-		callPair := []weft.Message{
-			{Role: weft.RoleAssistant, Content: []weft.Part{
-				weft.ToolCallPart{ID: "c1", Name: "read", Args: json.RawMessage(`{}`)},
+		callPair := []core.Message{
+			{Role: core.RoleAssistant, Content: []core.Part{
+				core.ToolCallPart{ID: "c1", Name: "read", Args: json.RawMessage(`{}`)},
 			}},
-			{Role: weft.RoleTool, Content: []weft.Part{
-				weft.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 500)},
+			{Role: core.RoleTool, Content: []core.Part{
+				core.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 500)},
 			}},
 		}
 		entries := []thread.Entry{
-			thread.MessageEntry{ID: "e_old", Created: timeUTC(), Message: weft.User(strings.Repeat("a", 120_000))},
-			thread.MessageEntry{ID: "e_mid", ParentID: "e_old", Created: timeUTC(), Message: weft.User(strings.Repeat("m", 5_000))},
+			thread.MessageEntry{ID: "e_old", Created: timeUTC(), Message: core.User(strings.Repeat("a", 120_000))},
+			thread.MessageEntry{ID: "e_mid", ParentID: "e_old", Created: timeUTC(), Message: core.User(strings.Repeat("m", 5_000))},
 		}
 		parent := "e_mid"
 		for i, m := range callPair {
@@ -596,7 +596,7 @@ func TestTrimAfterCompactionKeepsTheBoundary(t *testing.T) {
 			entries = append(entries, thread.MessageEntry{ID: id, ParentID: parent, Created: timeUTC(), Message: m})
 			parent = id
 		}
-		entries = append(entries, thread.MessageEntry{ID: "e_kept", ParentID: parent, Created: timeUTC(), Message: weft.User("kept tail")})
+		entries = append(entries, thread.MessageEntry{ID: "e_kept", ParentID: parent, Created: timeUTC(), Message: core.User("kept tail")})
 		if err := st.Append(ctx, s.ID(), entries...); err != nil {
 			t.Fatal(err)
 		}
@@ -637,10 +637,10 @@ func TestTrimAfterCompactionKeepsTheBoundary(t *testing.T) {
 		if !strings.HasPrefix(got[1].Text(), strings.Repeat("m", 10)) {
 			t.Errorf("kept mid message = %q", got[1].Text()[:min(30, len(got[1].Text()))])
 		}
-		if got[2].Role != weft.RoleAssistant || len(got[2].Content) == 0 {
+		if got[2].Role != core.RoleAssistant || len(got[2].Content) == 0 {
 			t.Errorf("call message = %+v, want the kept assistant call", got[2])
 		}
-		res, ok := got[3].Content[0].(weft.ToolResultPart)
+		res, ok := got[3].Content[0].(core.ToolResultPart)
 		if !ok || res.Content != "[cleared tool result read c1]" {
 			t.Errorf("result part = %+v, want the cleared stub", got[3].Content[0])
 		}
@@ -663,7 +663,7 @@ func TestIterativeRangeStartsAtKeptBoundary(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		rec := &summaryRecorder{reply: "summary"}
-		agent := weft.New(rec)
+		agent := core.New(rec)
 		s, _ := thread.Create(ctx, st, agent)
 		msgs(t, ctx, st, s,
 			strings.Repeat("a", 30_000),
@@ -726,12 +726,12 @@ func TestSummarizeLeftAcrossBranches(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		rec := &summaryRecorder{reply: "what B did"}
-		agent := weft.New(rec)
+		agent := core.New(rec)
 		s, _ := thread.Create(ctx, st, agent)
 		if err := st.Append(ctx, s.ID(),
-			thread.MessageEntry{ID: "e_r", Created: timeUTC(), Message: weft.User("root")},
-			thread.MessageEntry{ID: "e_a1", ParentID: "e_r", Created: timeUTC(), Message: weft.Assistant("line A")},
-			thread.MessageEntry{ID: "e_a2", ParentID: "e_a1", Created: timeUTC(), Message: weft.Assistant("line A end")},
+			thread.MessageEntry{ID: "e_r", Created: timeUTC(), Message: core.User("root")},
+			thread.MessageEntry{ID: "e_a1", ParentID: "e_r", Created: timeUTC(), Message: core.Assistant("line A")},
+			thread.MessageEntry{ID: "e_a2", ParentID: "e_a1", Created: timeUTC(), Message: core.Assistant("line A end")},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -740,7 +740,7 @@ func TestSummarizeLeftAcrossBranches(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := st.Append(ctx, s.ID(), thread.MessageEntry{
-			ID: "e_b1", ParentID: "e_r", Created: timeUTC(), Message: weft.Assistant("line B"),
+			ID: "e_b1", ParentID: "e_r", Created: timeUTC(), Message: core.Assistant("line B"),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -776,13 +776,13 @@ func TestSummarizeLeftAcrossBranches(t *testing.T) {
 func TestApplyCompactionValidatesTheBoundary(t *testing.T) {
 	ctx := context.Background()
 	rec := &summaryRecorder{reply: "s"}
-	agent := weft.New(rec)
+	agent := core.New(rec)
 	st := thread.Memory()
 	s, _ := thread.Create(ctx, st, agent)
 	if err := st.Append(ctx, s.ID(),
-		thread.MessageEntry{ID: "e_1", Created: timeUTC(), Message: weft.User(strings.Repeat("a", 60_000))},
-		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: timeUTC(), Message: weft.User(strings.Repeat("b", 30_000))},
-		thread.MessageEntry{ID: "e_3", ParentID: "e_2", Created: timeUTC(), Message: weft.User(strings.Repeat("c", 30_000))},
+		thread.MessageEntry{ID: "e_1", Created: timeUTC(), Message: core.User(strings.Repeat("a", 60_000))},
+		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: timeUTC(), Message: core.User(strings.Repeat("b", 30_000))},
+		thread.MessageEntry{ID: "e_3", ParentID: "e_2", Created: timeUTC(), Message: core.User(strings.Repeat("c", 30_000))},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -799,7 +799,7 @@ func TestApplyCompactionValidatesTheBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.Append(ctx, s.ID(), thread.MessageEntry{
-		ID: "e_side", ParentID: "e_1", Created: timeUTC(), Message: weft.User("side"),
+		ID: "e_side", ParentID: "e_1", Created: timeUTC(), Message: core.User("side"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -827,16 +827,16 @@ func TestLastInputCarriesTheUnreportedTail(t *testing.T) {
 		// A turn of two steps: the first answers with a tool call, the
 		// second (the final step) answers in text — its reported input
 		// covers everything but its own reply.
-		agent := weft.New(wefttest.Script(
-			wefttest.ToolCalls(wefttest.Call{Name: "echo"}).WithUsage(weft.Usage{InputTokens: 5_000, OutputTokens: 10}),
-			wefttest.Say(strings.Repeat("final answer ", 400)).WithUsage(weft.Usage{InputTokens: 6_000, OutputTokens: 20}),
+		agent := core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "echo"}).WithUsage(core.Usage{InputTokens: 5_000, OutputTokens: 10}),
+			wefttest.Say(strings.Repeat("final answer ", 400)).WithUsage(core.Usage{InputTokens: 6_000, OutputTokens: 20}),
 		),
-			weft.Tool("echo", "replies", func(ctx context.Context, in struct{}) (string, error) {
+			core.Tool("echo", "replies", func(ctx context.Context, in struct{}) (string, error) {
 				return "ok", nil
 			}),
 		)
 		s, _ := thread.Create(ctx, st, agent)
-		turn, err := s.Send(ctx, weft.User("go"))
+		turn, err := s.Send(ctx, core.User("go"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -878,8 +878,8 @@ func TestLastInputCarriesTheUnreportedTail(t *testing.T) {
 // measures again (the same rule as a never-measured session).
 func TestTriggerStandsDownOnAnOffPathMark(t *testing.T) {
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script(
-		wefttest.Say("first").WithUsage(weft.Usage{InputTokens: 95_000, OutputTokens: 5}),
+	agent := core.New(wefttest.Script(
+		wefttest.Say("first").WithUsage(core.Usage{InputTokens: 95_000, OutputTokens: 5}),
 		wefttest.Say("the summary"),
 		wefttest.Fail(errors.New("model down")),
 	))
@@ -887,8 +887,8 @@ func TestTriggerStandsDownOnAnOffPathMark(t *testing.T) {
 	s, _ := thread.Create(ctx, st, agent, thread.ContextWindow(100_000))
 	// Real bulk, so the post-turn trigger has something to compact.
 	if err := st.Append(ctx, s.ID(),
-		thread.MessageEntry{ID: "e_b1", Created: timeUTC(), Message: weft.User(strings.Repeat("a", 120_000))},
-		thread.MessageEntry{ID: "e_b2", ParentID: "e_b1", Created: timeUTC(), Message: weft.User(strings.Repeat("b", 120_000))},
+		thread.MessageEntry{ID: "e_b1", Created: timeUTC(), Message: core.User(strings.Repeat("a", 120_000))},
+		thread.MessageEntry{ID: "e_b2", ParentID: "e_b1", Created: timeUTC(), Message: core.User(strings.Repeat("b", 120_000))},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -897,7 +897,7 @@ func TestTriggerStandsDownOnAnOffPathMark(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("one"))
+	turn, err := s.Send(ctx, core.User("one"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -932,7 +932,7 @@ func TestTriggerStandsDownOnAnOffPathMark(t *testing.T) {
 	}
 	// The next turn fails before any step reports: the pre-turn
 	// trigger must stand down rather than compact on the stale 95k.
-	if turn, err := s.Send(ctx, weft.User("two")); err != nil {
+	if turn, err := s.Send(ctx, core.User("two")); err != nil {
 		t.Fatal(err)
 	} else if _, err := turn.Wait(); err == nil {
 		t.Fatal("the scripted failure did not fail")
@@ -946,33 +946,33 @@ func TestTriggerStandsDownOnAnOffPathMark(t *testing.T) {
 }
 
 // A summarizer stream that breaks the Model contract — no ModelFinish,
-// or events after it — is an error wrapping weft.ErrModelContract, the
+// or events after it — is an error wrapping core.ErrModelContract, the
 // same enforcement the loop applies; the text that happened to arrive
 // is never accepted as a summary.
 func TestSummarizerStreamContract(t *testing.T) {
 	ctx := context.Background()
-	for name, model := range map[string]weft.Model{
-		"no finish": &contractModel{events: []weft.ModelEvent{weft.ModelTextDelta{Text: "half a summary"}}},
-		"after finish": &contractModel{events: []weft.ModelEvent{
-			weft.ModelTextDelta{Text: "a summary"},
-			weft.ModelFinish{Reason: weft.StopEndTurn},
-			weft.ModelTextDelta{Text: "and more"},
+	for name, model := range map[string]core.Model{
+		"no finish": &contractModel{events: []core.ModelEvent{core.ModelTextDelta{Text: "half a summary"}}},
+		"after finish": &contractModel{events: []core.ModelEvent{
+			core.ModelTextDelta{Text: "a summary"},
+			core.ModelFinish{Reason: core.StopEndTurn},
+			core.ModelTextDelta{Text: "and more"},
 		}},
 	} {
 		st := thread.Memory()
-		s, _ := thread.Create(ctx, st, weft.New(model))
+		s, _ := thread.Create(ctx, st, core.New(model))
 		msgs(t, ctx, st, s,
 			strings.Repeat("a", 30_000),
 			strings.Repeat("b", 30_000),
 			strings.Repeat("c", 30_000),
 		)
-		s, err := thread.Open(ctx, st, s.ID(), weft.New(model))
+		s, err := thread.Open(ctx, st, s.ID(), core.New(model))
 		if err != nil {
 			t.Fatal(err)
 		}
 		err = s.Compact(ctx)
-		if !errors.Is(err, weft.ErrModelContract) {
-			t.Errorf("%s: Compact err = %v, want weft.ErrModelContract", name, err)
+		if !errors.Is(err, core.ErrModelContract) {
+			t.Errorf("%s: Compact err = %v, want core.ErrModelContract", name, err)
 		}
 		for _, e := range s.Entries() {
 			if _, ok := e.(thread.CompactionEntry); ok {
@@ -984,10 +984,10 @@ func TestSummarizerStreamContract(t *testing.T) {
 
 // contractModel plays a fixed event slice verbatim — the shape a
 // contract-violating adapter would produce.
-type contractModel struct{ events []weft.ModelEvent }
+type contractModel struct{ events []core.ModelEvent }
 
-func (m *contractModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
+func (m *contractModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
 		for _, ev := range m.events {
 			if !yield(ev, nil) {
 				return
@@ -1002,9 +1002,9 @@ func (m *contractModel) Stream(ctx context.Context, req weft.ModelRequest) iter.
 func TestForkMintsRunIDsPastTheCopiedTurns(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script(wefttest.Say("one"), wefttest.Say("in the fork")))
+		agent := core.New(wefttest.Script(wefttest.Say("one"), wefttest.Say("in the fork")))
 		s, _ := thread.Create(ctx, st, agent)
-		turn, err := s.Send(ctx, weft.User("first"))
+		turn, err := s.Send(ctx, core.User("first"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1016,7 +1016,7 @@ func TestForkMintsRunIDsPastTheCopiedTurns(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ft, err := f.Send(ctx, weft.User("second"))
+		ft, err := f.Send(ctx, core.User("second"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1037,12 +1037,12 @@ func TestPinKeepsACustomMessageThroughCompaction(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		rec := &summaryRecorder{reply: "s"}
-		agent := weft.New(rec)
+		agent := core.New(rec)
 		s, _ := thread.Create(ctx, st, agent, thread.KeepRecent(100))
 		if err := st.Append(ctx, s.ID(),
-			thread.MessageEntry{ID: "e_big", Created: timeUTC(), Message: weft.User(strings.Repeat("a", 60_000))},
-			thread.CustomMessageEntry{ID: "e_note", ParentID: "e_big", Created: timeUTC(), Kind: "app/note", Message: weft.User("SERVICE NOTE: the API key rotates Friday")},
-			thread.MessageEntry{ID: "e_tail", ParentID: "e_note", Created: timeUTC(), Message: weft.User("tail")},
+			thread.MessageEntry{ID: "e_big", Created: timeUTC(), Message: core.User(strings.Repeat("a", 60_000))},
+			thread.CustomMessageEntry{ID: "e_note", ParentID: "e_big", Created: timeUTC(), Kind: "app/note", Message: core.User("SERVICE NOTE: the API key rotates Friday")},
+			thread.MessageEntry{ID: "e_tail", ParentID: "e_note", Created: timeUTC(), Message: core.User("tail")},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -1085,7 +1085,7 @@ func TestSummarizeLeftKeepsTheBranchCompaction(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		rec := &summaryRecorder{reply: "MAIN-SUMMARY"}
-		agent := weft.New(rec)
+		agent := core.New(rec)
 		s, _ := thread.Create(ctx, st, agent)
 		msgs(t, ctx, st, s,
 			strings.Repeat("a", 60_000),
@@ -1113,9 +1113,9 @@ func TestSummarizeLeftKeepsTheBranchCompaction(t *testing.T) {
 		}
 		if err := st.Append(ctx, s.ID(),
 			thread.MessageEntry{ID: "e_side1", ParentID: firstID, Created: timeUTC(),
-				Message: weft.User("SIDE-ONE " + strings.Repeat("s", 60_000))},
+				Message: core.User("SIDE-ONE " + strings.Repeat("s", 60_000))},
 			thread.MessageEntry{ID: "e_side2", ParentID: "e_side1", Created: timeUTC(),
-				Message: weft.User("SIDE-TWO " + strings.Repeat("t", 60_000))},
+				Message: core.User("SIDE-TWO " + strings.Repeat("t", 60_000))},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -1166,7 +1166,7 @@ func TestForkOfACompactedSession(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		rec := &summaryRecorder{reply: "summary"}
-		agent := weft.New(rec)
+		agent := core.New(rec)
 		s, _ := thread.Create(ctx, st, agent)
 		msgs(t, ctx, st, s,
 			strings.Repeat("a", 60_000),
@@ -1204,16 +1204,16 @@ func TestForkOfACompactedSession(t *testing.T) {
 func TestUncompactOfATrim(t *testing.T) {
 	ctx := context.Background()
 	rec := &summaryRecorder{reply: "s"}
-	agent := weft.New(rec)
+	agent := core.New(rec)
 	st := thread.Memory()
 	s, _ := thread.Create(ctx, st, agent, thread.ClearOldToolResults(0))
 	callPair := []thread.Entry{
-		thread.MessageEntry{ID: "e_c0", Created: timeUTC(), Message: weft.Message{Role: weft.RoleAssistant,
-			Content: []weft.Part{weft.ToolCallPart{ID: "c1", Name: "read", Args: json.RawMessage(`{}`)}}}},
-		thread.MessageEntry{ID: "e_c1", ParentID: "e_c0", Created: timeUTC(), Message: weft.Message{Role: weft.RoleTool,
-			Content: []weft.Part{weft.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 900)}}}},
+		thread.MessageEntry{ID: "e_c0", Created: timeUTC(), Message: core.Message{Role: core.RoleAssistant,
+			Content: []core.Part{core.ToolCallPart{ID: "c1", Name: "read", Args: json.RawMessage(`{}`)}}}},
+		thread.MessageEntry{ID: "e_c1", ParentID: "e_c0", Created: timeUTC(), Message: core.Message{Role: core.RoleTool,
+			Content: []core.Part{core.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 900)}}}},
 	}
-	entries := []thread.Entry{thread.MessageEntry{ID: "e_old", Created: timeUTC(), Message: weft.User(strings.Repeat("a", 120_000))}}
+	entries := []thread.Entry{thread.MessageEntry{ID: "e_old", Created: timeUTC(), Message: core.User(strings.Repeat("a", 120_000))}}
 	entries = append(entries, callPair...)
 	if err := st.Append(ctx, s.ID(), entries...); err != nil {
 		t.Fatal(err)
@@ -1234,7 +1234,7 @@ func TestUncompactOfATrim(t *testing.T) {
 	stubbed := false
 	for _, m := range s.Context() {
 		for _, p := range m.Content {
-			if r, ok := p.(weft.ToolResultPart); ok && r.Content == "[cleared tool result read c1]" {
+			if r, ok := p.(core.ToolResultPart); ok && r.Content == "[cleared tool result read c1]" {
 				stubbed = true
 			}
 		}
@@ -1249,7 +1249,7 @@ func TestUncompactOfATrim(t *testing.T) {
 	s, _ = thread.Open(ctx, st, s.ID(), agent, thread.ClearOldToolResults(0))
 	for _, m := range s.Context() {
 		for _, p := range m.Content {
-			if r, ok := p.(weft.ToolResultPart); ok && r.Content == "[cleared tool result read c1]" {
+			if r, ok := p.(core.ToolResultPart); ok && r.Content == "[cleared tool result read c1]" {
 				t.Error("the stub outlived the undo — the file was rewritten, not viewed")
 			}
 		}
@@ -1263,14 +1263,14 @@ func TestUncompactOfATrim(t *testing.T) {
 // on its own mutex (the 2026-09-29 review's finding).
 type leafReadingEstimator struct{ s *thread.Session }
 
-func (e leafReadingEstimator) Estimate(msgs []weft.Message) int64 {
+func (e leafReadingEstimator) Estimate(msgs []core.Message) int64 {
 	_ = e.s.Leaf()
 	return int64(len(msgs))
 }
 
 func TestEstimatorMayCallTheSession(t *testing.T) {
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script(wefttest.Say("hello")), weft.Name("estimator-reentry"))
+	agent := core.New(wefttest.Script(wefttest.Say("hello")), core.Name("estimator-reentry"))
 	est := &leafReadingEstimator{}
 	s, err := thread.Create(ctx, thread.Memory(), agent, thread.WithEstimator(est))
 	if err != nil {
@@ -1279,7 +1279,7 @@ func TestEstimatorMayCallTheSession(t *testing.T) {
 	est.s = s
 	done := make(chan error, 1)
 	go func() {
-		turn, err := s.Send(ctx, weft.User("hi"))
+		turn, err := s.Send(ctx, core.User("hi"))
 		if err != nil {
 			done <- err
 			return
@@ -1305,16 +1305,16 @@ func TestEstimatorMayCallTheSession(t *testing.T) {
 func TestTriggerReArmsAfterTheBoundaryResolves(t *testing.T) {
 	ctx := context.Background()
 	agent, _ := refundAgent(
-		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}).WithUsage(weft.Usage{InputTokens: 95_000, OutputTokens: 5}),
-		wefttest.Say("done").WithUsage(weft.Usage{InputTokens: 95_000, OutputTokens: 5}),
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}).WithUsage(core.Usage{InputTokens: 95_000, OutputTokens: 5}),
+		wefttest.Say("done").WithUsage(core.Usage{InputTokens: 95_000, OutputTokens: 5}),
 		wefttest.Say("the summary"),
 	)
 	st := thread.Memory()
 	s, _ := thread.Create(ctx, st, agent, thread.ContextWindow(100_000))
 	// Real bulk, so the held trigger has something to compact.
 	if err := st.Append(ctx, s.ID(),
-		thread.MessageEntry{ID: "e_b1", Created: timeUTC(), Message: weft.User(strings.Repeat("a", 120_000))},
-		thread.MessageEntry{ID: "e_b2", ParentID: "e_b1", Created: timeUTC(), Message: weft.User(strings.Repeat("b", 120_000))},
+		thread.MessageEntry{ID: "e_b1", Created: timeUTC(), Message: core.User(strings.Repeat("a", 120_000))},
+		thread.MessageEntry{ID: "e_b2", ParentID: "e_b1", Created: timeUTC(), Message: core.User(strings.Repeat("b", 120_000))},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -1323,7 +1323,7 @@ func TestTriggerReArmsAfterTheBoundaryResolves(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("refund it"))
+	turn, err := s.Send(ctx, core.User("refund it"))
 	if err != nil {
 		t.Fatal(err)
 	}

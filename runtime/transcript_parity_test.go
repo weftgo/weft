@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/studio"
 	"github.com/weftgo/weft/thread"
@@ -21,19 +21,19 @@ import (
 // mid-turn), a tool result gets words, anything else gets words.
 type parityModel struct{ gate chan struct{} }
 
-func (*parityModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "wefttest", Name: "parity"}
+func (*parityModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "wefttest", Name: "parity"}
 }
 
-func (m *parityModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *parityModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	last := req.Messages[len(req.Messages)-1]
-	return func(yield func(weft.ModelEvent, error) bool) {
+	return func(yield func(core.ModelEvent, error) bool) {
 		switch {
-		case last.Role == weft.RoleUser && last.Text() == "refund":
-			yield(weft.ModelToolCall{ID: "c_r", Name: "refund", Args: []byte(`{"order_id":"1"}`)}, nil)
-			yield(weft.ModelFinish{Reason: weft.StopToolCalls}, nil)
+		case last.Role == core.RoleUser && last.Text() == "refund":
+			yield(core.ModelToolCall{ID: "c_r", Name: "refund", Args: []byte(`{"order_id":"1"}`)}, nil)
+			yield(core.ModelFinish{Reason: core.StopToolCalls}, nil)
 			return
-		case last.Role == weft.RoleUser && last.Text() == "steer me":
+		case last.Role == core.RoleUser && last.Text() == "steer me":
 			select {
 			case <-m.gate:
 			case <-ctx.Done():
@@ -41,8 +41,8 @@ func (m *parityModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Se
 				return
 			}
 		}
-		yield(weft.ModelTextDelta{Text: "reply to " + string(last.Role)}, nil)
-		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+		yield(core.ModelTextDelta{Text: "reply to " + string(last.Role)}, nil)
+		yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
 	}
 }
 
@@ -65,14 +65,14 @@ func transcriptParity(t *testing.T, backend string) {
 		t.Fatal(err)
 	}
 	defer func() { _ = p.Shutdown(ctx) }()
-	refund := weft.Tool("refund", "Refund.", func(ctx context.Context, in struct {
+	refund := core.Tool("refund", "Refund.", func(ctx context.Context, in struct {
 		OrderID string `json:"order_id"`
 	}) (string, error) {
 		return "refunded", nil
-	}, weft.RequireApproval())
+	}, core.RequireApproval())
 	model := &parityModel{gate: make(chan struct{})}
-	agent := weft.New(model, weft.Name("acme-support"),
-		weft.TracerProvider(p.TracerProvider()), weft.LoggerProvider(p.LoggerProvider()), refund)
+	agent := core.New(model, core.Name("acme-support"),
+		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()), refund)
 	store := thread.Memory()
 	if backend == "jsonl" {
 		if store, err = jsonl.Open(filepath.Join(dir, "threads")); err != nil {
@@ -83,7 +83,7 @@ func transcriptParity(t *testing.T, backend string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	send := func(msg weft.Message) *thread.Turn {
+	send := func(msg core.Message) *thread.Turn {
 		t.Helper()
 		turn, err := s.Send(ctx, msg)
 		if err != nil {
@@ -95,9 +95,9 @@ func transcriptParity(t *testing.T, backend string) {
 		return turn
 	}
 	runs := map[string]string{}
-	runs["turn 1"] = send(weft.User("hello")).RunID()
-	runs["turn 2"] = send(weft.User("again")).RunID()
-	runs["parked"] = send(weft.User("refund")).RunID()
+	runs["turn 1"] = send(core.User("hello")).RunID()
+	runs["turn 2"] = send(core.User("again")).RunID()
+	runs["parked"] = send(core.User("refund")).RunID()
 	resumed, err := s.Decide(ctx, thread.Approve("c_r"))
 	if err != nil || resumed == nil {
 		t.Fatalf("decide: %v %v", resumed, err)
@@ -106,14 +106,14 @@ func transcriptParity(t *testing.T, backend string) {
 		t.Fatal(err)
 	}
 	runs["resumed"] = resumed.RunID()
-	runs["multimodal"] = send(weft.UserParts(weft.TextPart{Text: "look"},
-		weft.FilePart{MediaType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}})).RunID()
-	steered, err := s.Send(ctx, weft.User("steer me"))
+	runs["multimodal"] = send(core.UserParts(core.TextPart{Text: "look"},
+		core.FilePart{MediaType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}})).RunID()
+	steered, err := s.Send(ctx, core.User("steer me"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(20 * time.Millisecond)
-	if _, err := s.Send(ctx, weft.User("and also this"), thread.As(thread.Steer)); err != nil {
+	if _, err := s.Send(ctx, core.User("and also this"), thread.As(thread.Steer)); err != nil {
 		t.Fatal(err)
 	}
 	close(model.gate)
@@ -128,7 +128,7 @@ func transcriptParity(t *testing.T, backend string) {
 	if err := s.Compact(ctx); err != nil {
 		t.Fatal(err)
 	}
-	compacted := send(weft.User("after compaction")).RunID()
+	compacted := send(core.User("after compaction")).RunID()
 	if err := p.ForceFlush(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func transcriptParity(t *testing.T, backend string) {
 	srv := studio.New(studio.DB(p.LocalDB()))
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
-	cfg := &config{agents: []*weft.Agent{agent}, threads: store}
+	cfg := &config{agents: []*core.Agent{agent}, threads: store}
 	l := newLink(cfg, newRegistry(cfg), ts.URL, "")
 	defer l.stop()
 
@@ -185,11 +185,11 @@ func transcriptParity(t *testing.T, backend string) {
 // orphaned, and Repair would invent a result the run never had.
 func TestNewInputOnAResumedSourceKeepsTheResolution(t *testing.T) {
 	src := &sourceRun{
-		input: []weft.Message{weft.User("refund"),
-			{Role: weft.RoleAssistant, Content: []weft.Part{weft.ToolCallPart{ID: "c_r", Name: "refund", Args: []byte(`{}`)}}}},
-		steps: []weft.Message{
-			{Role: weft.RoleTool, Content: []weft.Part{weft.ToolResultPart{CallID: "c_r", Name: "refund", Content: "refunded"}}},
-			{Role: weft.RoleAssistant, Content: []weft.Part{weft.TextPart{Text: "done"}}}},
+		input: []core.Message{core.User("refund"),
+			{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c_r", Name: "refund", Args: []byte(`{}`)}}}},
+		steps: []core.Message{
+			{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c_r", Name: "refund", Content: "refunded"}}},
+			{Role: core.RoleAssistant, Content: []core.Part{core.TextPart{Text: "done"}}}},
 	}
 	in := "something else"
 	got, err := runPrefix(src, command{Input: &in, Source: &sourceSpec{RunID: "s_x-t4"}}, true)
@@ -199,11 +199,11 @@ func TestNewInputOnAResumedSourceKeepsTheResolution(t *testing.T) {
 	if err := prefixComplete(got); err != nil {
 		t.Fatalf("the prefix a new input follows: %v", err)
 	}
-	if n := len(got); n != 3 || got[n-1].Role != weft.RoleTool {
+	if n := len(got); n != 3 || got[n-1].Role != core.RoleTool {
 		t.Errorf("prefix = %+v, want the conversation through the parked call's result", got)
 	}
 	// A plain turn still drops its prompt.
-	plain := &sourceRun{input: []weft.Message{weft.User("hi")}, steps: []weft.Message{{Role: weft.RoleAssistant, Content: []weft.Part{weft.TextPart{Text: "yo"}}}}}
+	plain := &sourceRun{input: []core.Message{core.User("hi")}, steps: []core.Message{{Role: core.RoleAssistant, Content: []core.Part{core.TextPart{Text: "yo"}}}}}
 	if got, _ := runPrefix(plain, command{Input: &in, Source: &sourceSpec{RunID: "s_x-t1"}}, true); len(got) != 0 {
 		t.Errorf("plain turn prefix = %+v, want the prompt dropped", got)
 	}
@@ -230,23 +230,23 @@ func TestParseThreadRunIDWholeSuffix(t *testing.T) {
 // rebuilt it — a rebuilt message without the signatures keys
 // differently, and every multi-step signed run missed at step 1.
 func TestScriptedReplaysSignedTurns(t *testing.T) {
-	lookup := weft.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) {
+	lookup := core.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) {
 		return "shipped", nil
 	})
 	src := &sourceRun{
-		input: []weft.Message{weft.User("where is #4411?")},
-		steps: []weft.Message{
-			{Role: weft.RoleAssistant, Content: []weft.Part{
-				weft.ReasoningPart{Text: "first think", Signature: "sig-a"},
-				weft.ReasoningPart{Text: "then think", Signature: "sig-b"},
-				weft.ToolCallPart{ID: "c1", Name: "lookup_order", Args: []byte(`{}`), Signature: "sig-call"},
+		input: []core.Message{core.User("where is #4411?")},
+		steps: []core.Message{
+			{Role: core.RoleAssistant, Content: []core.Part{
+				core.ReasoningPart{Text: "first think", Signature: "sig-a"},
+				core.ReasoningPart{Text: "then think", Signature: "sig-b"},
+				core.ToolCallPart{ID: "c1", Name: "lookup_order", Args: []byte(`{}`), Signature: "sig-call"},
 			}},
-			{Role: weft.RoleTool, Content: []weft.Part{weft.ToolResultPart{CallID: "c1", Name: "lookup_order", Content: "shipped"}}},
-			weft.Assistant("It shipped."),
+			{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c1", Name: "lookup_order", Content: "shipped"}}},
+			core.Assistant("It shipped."),
 		},
 	}
-	agt := weft.New(newScriptedModel(src, []string{"lookup_order"}), weft.Name("a"), lookup)
-	res, err := agt.Generate(context.Background(), weft.Messages(src.input...))
+	agt := core.New(newScriptedModel(src, []string{"lookup_order"}), core.Name("a"), lookup)
+	res, err := agt.Generate(context.Background(), core.Messages(src.input...))
 	if err != nil {
 		t.Fatalf("the scripted re-run of a signed run: %v", err)
 	}

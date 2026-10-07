@@ -19,23 +19,23 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
-	"strings"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/mw"
 )
 
-// SchemaMap renders a weft.Schema as the plain JSON map the vendors'
+// SchemaMap renders a core.Schema as the plain JSON map the vendors'
 // tool-parameter fields expect (openai-go's FunctionParameters,
 // anthropic-sdk-go's InputSchema). Nil stays nil: a schema-less tool
 // takes the provider's default shape. The rendering goes through
 // json.Marshal, which honours Schema.MarshalJSON — so a schema parsed
-// with weft.ParseSchema reaches the provider as its verbatim foreign
+// with core.ParseSchema reaches the provider as its verbatim foreign
 // bytes (enum, oneOf and all), where the hand-built map this replaced
 // degraded them to the struct's own vocabulary. One rendering change
 // rode along: an unconstrained node (a recursion cut, an interface
 // field) marshalled as {"type": ""} before and is {} now (ADR 0003's
 // 2026-09-19 amendment).
-func SchemaMap(s *weft.Schema) map[string]any {
+func SchemaMap(s *core.Schema) map[string]any {
 	if s == nil {
 		return nil
 	}
@@ -56,7 +56,7 @@ func SchemaMap(s *weft.Schema) map[string]any {
 // contract expects: ctx.Err() when the caller's context ended (the
 // vendor SDKs wrap cancellation in their own error types, and the
 // reader goroutine can exit its handshake with a nil SDK error); a
-// context-window overflow wrapped in weft.ErrContextOverflow when the
+// context-window overflow wrapped in core.ErrContextOverflow when the
 // provider's error names one (ADR 0020 §5 — the caller routes it to
 // compaction, and mw.Retry never retries it); the error unchanged
 // otherwise — so callers can errors.As the SDK's type.
@@ -67,41 +67,16 @@ func TerminalErr(ctx context.Context, err error) error {
 	if IsContextOverflow(err) {
 		// Both links wrapped, so errors.Is finds the sentinel and
 		// errors.As still reaches the provider's own error type.
-		return fmt.Errorf("%w: %w", weft.ErrContextOverflow, err)
+		return fmt.Errorf("%w: %w", core.ErrContextOverflow, err)
 	}
 	return err
 }
 
-// overflowMarkers are substrings the providers use for a request that
-// exceeds the model's context window. Overflow is a request-shape
-// problem: retrying the same bytes cannot succeed. One table, shared
-// by the adapters' mapping (TerminalErr) and mw.Retry's classifier —
-// the 2026-09-18 review's drift rule applied to the second copy.
-var overflowMarkers = []string{
-	"context_length_exceeded",
-	"context length",
-	"context limit", // anthropic's second shape: "input length and `max_tokens` exceed context limit"
-	"context window",
-	"prompt is too long",
-	"too many tokens",
-	"maximum context",
-	"input token count",
-}
-
 // IsContextOverflow reports whether the error chain's text names a
-// context-window overflow. The vendor SDKs carry the provider's
-// message on the error's own Error() — typed enough for the mapping,
-// string-matched because mw imports no vendor SDK (ADR 0013's
-// structural-lookup rule).
-func IsContextOverflow(err error) bool {
-	msg := strings.ToLower(err.Error())
-	for _, m := range overflowMarkers {
-		if strings.Contains(msg, m) {
-			return true
-		}
-	}
-	return false
-}
+// context-window overflow. The marker table lives in mw (the core
+// module), where Retry's classifier reads it; the adapters delegate so
+// the table exists once.
+func IsContextOverflow(err error) bool { return mw.IsContextOverflow(err) }
 
 // NextCallID synthesises the id for a streamed tool call whose server
 // omitted one: "call_<n>" with n starting at ordinal+1, skipping ids
@@ -123,9 +98,9 @@ func NextCallID(used map[string]bool, ordinal int) string {
 // FilePartSource validates that a FilePart sets exactly one of Data and
 // URL — the shape every provider's file input takes. Both or neither is
 // a caller bug, refused wrapping ErrUnsupported before any request.
-func FilePartSource(p weft.FilePart) error {
+func FilePartSource(p core.FilePart) error {
 	if (len(p.Data) == 0) == (p.URL == "") {
-		return fmt.Errorf("%w: a file part must set exactly one of Data or URL", weft.ErrUnsupported)
+		return fmt.Errorf("%w: a file part must set exactly one of Data or URL", core.ErrUnsupported)
 	}
 	return nil
 }

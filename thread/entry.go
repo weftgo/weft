@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // Entry is the sealed set of session entry kinds (ADR 0011 §2): a
@@ -26,14 +26,14 @@ type Entry interface {
 	isEntry()
 }
 
-// MessageEntry is one weft.Message in the transcript, embedded with
+// MessageEntry is one core.Message in the transcript, embedded with
 // the core's message wire (ADR 0001) verbatim. It is how conversation
 // content is stored, and it is always in the model's context.
 type MessageEntry struct {
 	ID       string       `json:"id"`
 	ParentID string       `json:"parent,omitempty"`
 	Created  time.Time    `json:"created"`
-	Message  weft.Message `json:"message"`
+	Message  core.Message `json:"message"`
 	// RunID is set on a turn's prompt entry: the run id minted for the
 	// turn the message starts (<session>-t<n>), written before the run
 	// does anything — so the id is on the record even when the turn's
@@ -60,11 +60,11 @@ type TurnEntry struct {
 	ParentID   string              `json:"parent,omitempty"`
 	Created    time.Time           `json:"created"`
 	RunID      string              `json:"run_id"`
-	StopReason weft.StopReason     `json:"stop_reason,omitempty"`
-	Usage      weft.Usage          `json:"usage"`
+	StopReason core.StopReason     `json:"stop_reason,omitempty"`
+	Usage      core.Usage          `json:"usage"`
 	Steps      int                 `json:"steps,omitempty"`
 	Err        string              `json:"err,omitempty"`
-	Pending    []weft.ToolCallPart `json:"pending,omitempty"`
+	Pending    []core.ToolCallPart `json:"pending,omitempty"`
 	// Canceled marks a turn whose context ended — canceled (the caller
 	// walked away, an Interrupt or Rollback send, Close) or past its
 	// deadline. Err says which.
@@ -117,7 +117,7 @@ const (
 	// hook replaced.
 	ReasonFromHook Reason = "from_hook"
 	// ReasonOverflow marks the compaction that follows a turn failing
-	// with weft.ErrContextOverflow, before the turn's one re-run
+	// with core.ErrContextOverflow, before the turn's one re-run
 	// (ADR 0020 §5).
 	ReasonOverflow Reason = "overflow"
 )
@@ -152,8 +152,8 @@ type CompactionEntry struct {
 	// SummarizerUsage and SummarizerModel name what the summary cost
 	// and which model made it (the cost ledger, ADR 0020 §4) — absent
 	// on a trim, which summarizes nothing.
-	SummarizerUsage weft.Usage     `json:"summarizer_usage,omitzero"`
-	SummarizerModel weft.ModelInfo `json:"summarizer_model,omitzero"`
+	SummarizerUsage core.Usage     `json:"summarizer_usage,omitzero"`
+	SummarizerModel core.ModelInfo `json:"summarizer_model,omitzero"`
 	FilesRead       []string       `json:"files_read,omitempty"`
 	// FilesModified is a format-1 wire field kept readable: no build
 	// writes it (the sandbox write log it was reserved for was
@@ -254,7 +254,7 @@ type CustomEntry struct {
 }
 
 // CustomMessageEntry carries an application message: a caller-chosen
-// Kind and a weft.Message that is always in the model's context — how
+// Kind and a core.Message that is always in the model's context — how
 // an application injects a note the model must see without attributing
 // it to the user.
 type CustomMessageEntry struct {
@@ -262,7 +262,7 @@ type CustomMessageEntry struct {
 	ParentID string       `json:"parent,omitempty"`
 	Created  time.Time    `json:"created"`
 	Kind     string       `json:"kind"`
-	Message  weft.Message `json:"message"`
+	Message  core.Message `json:"message"`
 }
 
 // ApprovalRequestEntry is a parked call made durable (ADR 0021 §1): a
@@ -440,7 +440,7 @@ type ReceiptEntry struct {
 	Created  time.Time     `json:"created"`
 	Receipt  string        `json:"receipt,omitempty"`
 	Status   string        `json:"status"`
-	Msg      *weft.Message `json:"msg,omitempty"`
+	Msg      *core.Message `json:"msg,omitempty"`
 	RunID    string        `json:"run_id,omitempty"`
 	Turn     string        `json:"turn,omitempty"`
 	// Unanswered, on a delivered receipt, marks a steer the run took
@@ -503,7 +503,7 @@ type PoolReceiptEntry struct {
 	Call     string     `json:"call,omitempty"`
 	Prompt   string     `json:"prompt,omitempty"`
 	Stop     string     `json:"stop,omitempty"`
-	Usage    weft.Usage `json:"usage,omitzero"`
+	Usage    core.Usage `json:"usage,omitzero"`
 }
 
 // Pool receipt statuses — the wire values, pinned by the format-4

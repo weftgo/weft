@@ -1,6 +1,6 @@
 package runtime
 
-import "github.com/weftgo/weft"
+import "github.com/weftgo/weft/core"
 
 // The runtime link's wire protocol (WEFT-PLAYGROUND.md §10.3): all
 // JSON over HTTP. Commands come down an SSE stream; everything else
@@ -34,7 +34,7 @@ type registration struct {
 	Agents      []agentRegistration `json:"agents"`
 }
 
-// agentRegistration is one exposed agent: its weft.Manifest (names,
+// agentRegistration is one exposed agent: its core.Manifest (names,
 // instructions, policy, tools), the alternate models a command may
 // switch to, the lower-only bounds on its knobs, every tool's side
 // effect class (its ReplayPolicy; unannotated is "never",
@@ -42,7 +42,7 @@ type registration struct {
 // AllowSideEffects.
 type agentRegistration struct {
 	Name        string            `json:"name"`
-	Manifest    string            `json:"manifest"` // weft.Manifest JSON for this one agent
+	Manifest    string            `json:"manifest"` // core.Manifest JSON for this one agent
 	Models      []string          `json:"models"`
 	Limits      agentLimits       `json:"limits"`
 	SideEffects map[string]string `json:"side_effects"`
@@ -94,7 +94,7 @@ type command struct {
 	// prefix is the transcript the run is fed before its input: the
 	// source's kept part with the edits applied, composed (and so
 	// validated) once at dispatch.
-	prefix []weft.Message
+	prefix []core.Message
 }
 
 // sourceSpec names the run to re-run: its id and the step to continue

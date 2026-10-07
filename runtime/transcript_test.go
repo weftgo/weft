@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // TestParseThreadRunID pins the source-run id grammar: thread mints
@@ -48,13 +48,13 @@ func TestParseThreadRunID(t *testing.T) {
 func TestThreadTurnMessages(t *testing.T) {
 	now := time.Now().Round(0)
 	path := []thread.Entry{
-		thread.MessageEntry{ID: "e1", Created: now, Message: weft.User("where is my order?")},
-		thread.MessageEntry{ID: "e2", Created: now, Message: weft.Assistant("checking")},
-		thread.MessageEntry{ID: "e3", Created: now, Message: weft.User("and the tracking link?")}, // steered, turn 1
-		thread.MessageEntry{ID: "e4", Created: now, Message: weft.Assistant("it shipped")},
+		thread.MessageEntry{ID: "e1", Created: now, Message: core.User("where is my order?")},
+		thread.MessageEntry{ID: "e2", Created: now, Message: core.Assistant("checking")},
+		thread.MessageEntry{ID: "e3", Created: now, Message: core.User("and the tracking link?")}, // steered, turn 1
+		thread.MessageEntry{ID: "e4", Created: now, Message: core.Assistant("it shipped")},
 		thread.TurnEntry{ID: "e5", Created: now, RunID: "s_01M3-t1"},
-		thread.MessageEntry{ID: "e6", Created: now, Message: weft.User("thanks")},
-		thread.MessageEntry{ID: "e7", Created: now, Message: weft.Assistant("anytime")},
+		thread.MessageEntry{ID: "e6", Created: now, Message: core.User("thanks")},
+		thread.MessageEntry{ID: "e7", Created: now, Message: core.Assistant("anytime")},
 		thread.TurnEntry{ID: "e8", Created: now, RunID: "s_01M3-t2"},
 	}
 	src, err := threadTurnMessages(path, "s_01M3-t1")
@@ -86,18 +86,18 @@ func TestThreadTurnMessages(t *testing.T) {
 }
 
 // TestDecodeBodies pins the obsdb and Studio paths' shared decoder:
-// one JSON array of weft.Message per body, nulls skipped; the first
+// one JSON array of core.Message per body, nulls skipped; the first
 // record is the run's input, the rest its steps.
 func TestDecodeBodies(t *testing.T) {
-	b1, _ := json.Marshal([]weft.Message{weft.User("a"), weft.Assistant("b"), weft.User("c")})
-	b2, _ := json.Marshal([]weft.Message{weft.Assistant("d")})
-	b3, _ := json.Marshal([]weft.Message{{Role: weft.RoleTool,
-		Content: []weft.Part{weft.ToolResultPart{CallID: "c1", Content: "ok"}}}})
+	b1, _ := json.Marshal([]core.Message{core.User("a"), core.Assistant("b"), core.User("c")})
+	b2, _ := json.Marshal([]core.Message{core.Assistant("d")})
+	b3, _ := json.Marshal([]core.Message{{Role: core.RoleTool,
+		Content: []core.Part{core.ToolResultPart{CallID: "c1", Content: "ok"}}}})
 	src, err := decodeBodies([]json.RawMessage{json.RawMessage("null"), b1, b2, json.RawMessage("null"), b3})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(src.input) != 3 || len(src.steps) != 2 || src.steps[1].Role != weft.RoleTool {
+	if len(src.input) != 3 || len(src.steps) != 2 || src.steps[1].Role != core.RoleTool {
 		t.Errorf("decoded input %d / steps %d, want 3 / 2 with a tool message last", len(src.input), len(src.steps))
 	}
 	// The input's assistant message is an earlier turn's answer: the
@@ -118,13 +118,13 @@ func TestDecodeBodies(t *testing.T) {
 // the second turn's input carries the first.
 func TestTranscriptFromThreadMemory(t *testing.T) {
 	st := thread.Memory()
-	agent := weft.New(wefttest.Script(wefttest.Say("answer one"), wefttest.Say("answer two")), weft.Name("a"))
+	agent := core.New(wefttest.Script(wefttest.Say("answer one"), wefttest.Say("answer two")), core.Name("a"))
 	sess, err := thread.Create(context.Background(), st, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, prompt := range []string{"first", "second"} {
-		turn, err := sess.Send(context.Background(), weft.User(prompt))
+		turn, err := sess.Send(context.Background(), core.User(prompt))
 		if err != nil {
 			t.Fatalf("send: %v", err)
 		}

@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
 	"github.com/weftgo/weft/thread/threadtest"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // Memory runs the shared conformance table — the durable backends run
@@ -40,7 +40,7 @@ func TestMemoryHoldsRawBytes(t *testing.T) {
 	if err := st.Create(ctx, thread.Header{ID: id, Created: created}); err != nil {
 		t.Fatal(err)
 	}
-	entry := thread.MessageEntry{ID: "e_raw1", Created: created.Add(time.Second), Message: weft.User("one")}
+	entry := thread.MessageEntry{ID: "e_raw1", Created: created.Add(time.Second), Message: core.User("one")}
 	if err := st.Append(ctx, id, entry); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestMemoryHoldsRawBytes(t *testing.T) {
 	if len(loaded) != 1 || report == nil || report.Torn != 3 {
 		t.Errorf("torn tail: %d entries, report %+v; want 1 entry, Torn=3", len(loaded), report)
 	}
-	if err := st.Append(ctx, id, thread.MessageEntry{ID: "e_raw2", Created: created.Add(2 * time.Second), Message: weft.User("two")}); err != nil {
+	if err := st.Append(ctx, id, thread.MessageEntry{ID: "e_raw2", Created: created.Add(2 * time.Second), Message: core.User("two")}); err != nil {
 		t.Fatal(err)
 	}
 	_, loaded, report, err = st.Load(ctx, id)
@@ -126,7 +126,7 @@ func TestMemoryOpenLogger(t *testing.T) {
 	if err := st.(threadtest.RawInjector).Inject(ctx, h.ID, []byte(`{"type":"message","id":"e_t`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Append(ctx, h.ID, thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: weft.User("one")}); err != nil {
+	if err := st.Append(ctx, h.ID, thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: core.User("one")}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(own.String(), "removed a torn tail") || !strings.Contains(own.String(), h.ID) {
@@ -157,13 +157,13 @@ func TestMemorySalvage(t *testing.T) {
 			if err := st.Create(ctx, h); err != nil {
 				t.Fatal(err)
 			}
-			if err := st.Append(ctx, h.ID, thread.MessageEntry{ID: "e_1", Created: at, Message: weft.User("one")}); err != nil {
+			if err := st.Append(ctx, h.ID, thread.MessageEntry{ID: "e_1", Created: at, Message: core.User("one")}); err != nil {
 				t.Fatal(err)
 			}
 			if err := st.(threadtest.RawInjector).Inject(ctx, h.ID, []byte("{not json}\n")); err != nil {
 				t.Fatal(err)
 			}
-			if err := st.Append(ctx, h.ID, thread.MessageEntry{ID: "e_3", ParentID: "e_1", Created: at, Message: weft.User("three")}); err != nil {
+			if err := st.Append(ctx, h.ID, thread.MessageEntry{ID: "e_3", ParentID: "e_1", Created: at, Message: core.User("three")}); err != nil {
 				t.Fatal(err)
 			}
 			_, entries, report, err := st.Load(ctx, h.ID)
@@ -175,7 +175,7 @@ func TestMemorySalvage(t *testing.T) {
 			if err := st.(thread.Releaser).Release(ctx, h.ID); err != nil {
 				t.Fatal(err)
 			}
-			s, err := thread.Open(ctx, st, h.ID, weft.New(wefttest.Script()))
+			s, err := thread.Open(ctx, st, h.ID, core.New(wefttest.Script()))
 			if err != nil {
 				t.Fatal(err)
 			}

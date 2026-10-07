@@ -19,7 +19,7 @@
 //     name: the core asks one question ("weft.messages") and emits
 //     content when any destination wants it. Content-off chains clone
 //     the record first (the SDK hands every processor the same pointer),
-//     strip the body with weft.StripContent and drop messages records;
+//     strip the body with core.StripContent and drop messages records;
 //     content-on chains redact and cap event and delta bodies and
 //     redact (never cap) the transcript records part by part. The core reads no environment variable — this
 //     module does, here only.

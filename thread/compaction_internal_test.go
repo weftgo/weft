@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // bigText returns text whose wire bytes cost about tokens estimated
@@ -20,7 +20,7 @@ func bigText(tokens int64) string {
 }
 
 // pathOf builds a root→leaf path of chained entries from shapes: a
-// weft.Message becomes a MessageEntry; a string becomes a bookkeeping
+// core.Message becomes a MessageEntry; a string becomes a bookkeeping
 // CustomEntry (context-invisible state).
 func pathOf(shapes ...any) []Entry {
 	path := make([]Entry, len(shapes))
@@ -28,7 +28,7 @@ func pathOf(shapes ...any) []Entry {
 	for i, sh := range shapes {
 		id := fmt.Sprintf("e_%02d", i)
 		switch sh := sh.(type) {
-		case weft.Message:
+		case core.Message:
 			path[i] = MessageEntry{ID: id, ParentID: parent, Message: sh}
 		case string:
 			path[i] = CustomEntry{ID: id, ParentID: parent, Kind: sh}
@@ -38,18 +38,18 @@ func pathOf(shapes ...any) []Entry {
 	return path
 }
 
-func user(text string) weft.Message { return weft.User(text) }
-func assist(text string) weft.Message {
-	return weft.Message{Role: weft.RoleAssistant, Content: []weft.Part{weft.TextPart{Text: text}}}
+func user(text string) core.Message { return core.User(text) }
+func assist(text string) core.Message {
+	return core.Message{Role: core.RoleAssistant, Content: []core.Part{core.TextPart{Text: text}}}
 }
-func assistCall(id, name string) weft.Message {
-	return weft.Message{Role: weft.RoleAssistant, Content: []weft.Part{
-		weft.ToolCallPart{ID: id, Name: name, Args: []byte("{}")},
+func assistCall(id, name string) core.Message {
+	return core.Message{Role: core.RoleAssistant, Content: []core.Part{
+		core.ToolCallPart{ID: id, Name: name, Args: []byte("{}")},
 	}}
 }
-func toolResult(id string) weft.Message {
-	return weft.Message{Role: weft.RoleTool, Content: []weft.Part{
-		weft.ToolResultPart{CallID: id, Name: "n", Content: "ok"},
+func toolResult(id string) core.Message {
+	return core.Message{Role: core.RoleTool, Content: []core.Part{
+		core.ToolResultPart{CallID: id, Name: "n", Content: "ok"},
 	}}
 }
 
@@ -233,13 +233,13 @@ func TestCutProperty(t *testing.T) {
 				continue
 			}
 			first, ok := path[cut].(MessageEntry)
-			if !ok || (first.Message.Role != weft.RoleUser && first.Message.Role != weft.RoleAssistant) {
+			if !ok || (first.Message.Role != core.RoleUser && first.Message.Role != core.RoleAssistant) {
 				t.Fatalf("seed %d keep %d: kept side starts at %T", seed, keep, path[cut])
 			}
 			if cut > 0 {
-				if prev, ok := path[cut-1].(MessageEntry); ok && prev.Message.Role == weft.RoleAssistant {
+				if prev, ok := path[cut-1].(MessageEntry); ok && prev.Message.Role == core.RoleAssistant {
 					for _, p := range prev.Message.Content {
-						if _, isCall := p.(weft.ToolCallPart); isCall {
+						if _, isCall := p.(core.ToolCallPart); isCall {
 							t.Fatalf("seed %d keep %d: cut separates a call from its results", seed, keep)
 						}
 					}

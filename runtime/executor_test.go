@@ -7,9 +7,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // TestRegistryRegistration pins the §10.3 register payload the
@@ -19,24 +19,24 @@ import (
 // (its ReplayPolicy; unannotated is "never") and the AllowSideEffects
 // set.
 func TestRegistryRegistration(t *testing.T) {
-	lookup := weft.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct{ ID string }) (string, error) {
+	lookup := core.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct{ ID string }) (string, error) {
 		return "shipped", nil
-	}, weft.Replay(weft.ReplaySafe))
-	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{ ID string }) (string, error) {
+	}, core.Replay(core.ReplaySafe))
+	refund := core.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{ ID string }) (string, error) {
 		return "refunded", nil
 	})
-	agent := weft.New(
+	agent := core.New(
 		wefttest.Script(wefttest.Say("ok")),
-		weft.Name("acme-support"),
-		weft.Instructions("You are Acme's support agent."),
-		weft.MaxSteps(7),
-		weft.Parallelism(3),
+		core.Name("acme-support"),
+		core.Instructions("You are Acme's support agent."),
+		core.MaxSteps(7),
+		core.Parallelism(3),
 		lookup, refund,
 	)
 	alt := wefttest.Script(wefttest.Say("alt"))
 	reg := newRegistry(&config{
-		agents: []*weft.Agent{agent},
-		models: map[string]weft.Model{"glm-5.3-flash": alt, "claude-sonnet-5": alt},
+		agents: []*core.Agent{agent},
+		models: map[string]core.Model{"glm-5.3-flash": alt, "claude-sonnet-5": alt},
 		allow:  map[string]bool{"lookup_order": true},
 		budget: Budget{MaxTokensPerExperiment: 200_000, MaxRunsPerExperiment: 60},
 	})
@@ -79,7 +79,7 @@ func TestRegistryRegistration(t *testing.T) {
 		t.Errorf("allow = %v, want %v", a.Allow, want)
 	}
 	if !strings.Contains(a.Manifest, `"acme-support"`) || !strings.Contains(a.Manifest, `"lookup_order"`) {
-		t.Errorf("manifest = %s, want the agent's weft.Manifest", a.Manifest)
+		t.Errorf("manifest = %s, want the agent's core.Manifest", a.Manifest)
 	}
 	if !strings.Contains(a.Manifest, `"replay_policy": "safe"`) {
 		t.Errorf("manifest = %s, want the safe class recorded", a.Manifest)
@@ -92,20 +92,20 @@ func TestRegistryRegistration(t *testing.T) {
 // side_effects "allow" also the names the runtime opted in
 // (AllowSideEffects, whether or not the agent registers them — a
 // ToolSource may supply one later). Everything else parks by default
-// (weft.ParkAllExcept), so the list is empty, not absent, when nothing
+// (core.ParkAllExcept), so the list is empty, not absent, when nothing
 // is vouched.
 func TestAllowedTools(t *testing.T) {
-	lookup := weft.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) { return "", nil },
-		weft.Replay(weft.ReplaySafe))
-	refund := weft.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
-	escalate := weft.Tool("escalate", "Escalate.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
-	agent := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("a"), lookup, refund, escalate)
-	bare := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("bare"), refund)
-	typed := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("typed"), weft.Output[struct {
+	lookup := core.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) { return "", nil },
+		core.Replay(core.ReplaySafe))
+	refund := core.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
+	escalate := core.Tool("escalate", "Escalate.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
+	agent := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("a"), lookup, refund, escalate)
+	bare := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("bare"), refund)
+	typed := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("typed"), core.Output[struct {
 		OK bool `json:"ok"`
 	}](), refund)
 
-	reg := newRegistry(&config{agents: []*weft.Agent{agent, bare, typed}})
+	reg := newRegistry(&config{agents: []*core.Agent{agent, bare, typed}})
 	for _, allow := range []bool{false, true} {
 		if got := reg.allowedTools("a", allow); !reflect.DeepEqual(got, []string{"lookup_order"}) {
 			t.Errorf("allowed (allow mode %v) = %v, want [lookup_order] — the safe tool alone", allow, got)
@@ -117,7 +117,7 @@ func TestAllowedTools(t *testing.T) {
 			t.Errorf("allowed (Output agent, allow mode %v) = %v, want [submit_output] — the run's answer is not a side effect", allow, got)
 		}
 	}
-	opted := newRegistry(&config{agents: []*weft.Agent{agent},
+	opted := newRegistry(&config{agents: []*core.Agent{agent},
 		allow: map[string]bool{"escalate": true, "dynamic_tool": true}})
 	if got := opted.allowedTools("a", false); !reflect.DeepEqual(got, []string{"lookup_order"}) {
 		t.Errorf("allowed (opted in, substitute/park) = %v, want [lookup_order] — an opt-in runs only under allow", got)
@@ -136,33 +136,33 @@ func TestAllowedTools(t *testing.T) {
 // three. Before the fix the opted-in tool ran for real in every mode.
 func TestSideEffectModes(t *testing.T) {
 	var escalated, looked atomic.Int64
-	escalate := weft.Tool("escalate", "Escalate.", func(ctx context.Context, in struct {
+	escalate := core.Tool("escalate", "Escalate.", func(ctx context.Context, in struct {
 		ID string `json:"id"`
 	}) (string, error) {
 		escalated.Add(1)
 		return "escalated for real", nil
 	})
-	lookup := weft.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct {
+	lookup := core.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct {
 		ID string `json:"id"`
 	}) (string, error) {
 		looked.Add(1)
 		return "shipped", nil
-	}, weft.Replay(weft.ReplaySafe))
+	}, core.Replay(core.ReplaySafe))
 	record := &sourceRun{
-		input: []weft.Message{weft.User("escalate 1")},
-		steps: []weft.Message{
-			{Role: weft.RoleAssistant, Content: []weft.Part{weft.ToolCallPart{ID: "c0", Name: "escalate", Args: []byte(`{"id":"1"}`)}}},
-			{Role: weft.RoleTool, Content: []weft.Part{weft.ToolResultPart{CallID: "c0", Name: "escalate", Content: "escalated (recorded)"}}},
-			weft.Assistant("done"),
+		input: []core.Message{core.User("escalate 1")},
+		steps: []core.Message{
+			{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c0", Name: "escalate", Args: []byte(`{"id":"1"}`)}}},
+			{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c0", Name: "escalate", Content: "escalated (recorded)"}}},
+			core.Assistant("done"),
 		},
 	}
 	in := "escalate 1"
 	run := func(tool, mode string) (*link, string) {
 		t.Helper()
-		agent := weft.New(wefttest.Script(
+		agent := core.New(wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: tool, Args: `{"id":"1"}`}),
 			wefttest.Say("done"),
-		), weft.Name("a"), escalate, lookup)
+		), core.Name("a"), escalate, lookup)
 		l := newExecLink(map[string]bool{"escalate": true}, agent)
 		cmd := command{CommandID: "cmd_" + mode, Agent: "a", Engine: "live", Thread: "ephemeral",
 			Input: &in, SideEffects: mode, Source: &sourceSpec{RunID: "s_x-t1"}, src: record,
@@ -200,13 +200,13 @@ func TestSideEffectModes(t *testing.T) {
 
 // newExecLink builds a link over agents for the executor tests below,
 // with allow as the AllowSideEffects set.
-func newExecLink(allow map[string]bool, agents ...*weft.Agent) *link {
+func newExecLink(allow map[string]bool, agents ...*core.Agent) *link {
 	cfg := &config{agents: agents, allow: allow}
 	return newLink(cfg, newRegistry(cfg), "", "")
 }
 
 // TestToolSourceToolsPark pins §6 rule 3 for a tool the registry cannot
-// see: one that reaches the run only through weft.ToolSource. It parks
+// see: one that reaches the run only through core.ToolSource. It parks
 // like any unannotated tool — before the default-deny rule the parked
 // set was built from Agent.Tools, the source's tool was not in it, and
 // its handler ran for real in a playground command. In substitute mode
@@ -214,7 +214,7 @@ func newExecLink(allow map[string]bool, agents ...*weft.Agent) *link {
 // parked. The opted-in name runs under side_effects "allow".
 func TestToolSourceToolsPark(t *testing.T) {
 	var wired atomic.Int64
-	wire := weft.Tool("wire_money", "Wire money.", func(ctx context.Context, in struct {
+	wire := core.Tool("wire_money", "Wire money.", func(ctx context.Context, in struct {
 		To string `json:"to"`
 	}) (string, error) {
 		wired.Add(1)
@@ -228,8 +228,8 @@ func TestToolSourceToolsPark(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "wire_money", Args: `{"to":"acme"}`}), // 4: opted in, runs
 		wefttest.Say("wired"),
 	)
-	agent := weft.New(script, weft.Name("a"),
-		weft.ToolSource(func() []*weft.ToolDef { return []*weft.ToolDef{wire} }))
+	agent := core.New(script, core.Name("a"),
+		core.ToolSource(func() []*core.ToolDef { return []*core.ToolDef{wire} }))
 	if len(agent.Tools()) != 0 {
 		t.Fatal("the registry would see the source's tool (test bug)")
 	}
@@ -254,18 +254,18 @@ func TestToolSourceToolsPark(t *testing.T) {
 
 	// Substitute: the source run recorded this very call.
 	record := &sourceRun{
-		input: []weft.Message{weft.User("wire it")},
-		steps: []weft.Message{
-			{Role: weft.RoleAssistant, Content: []weft.Part{weft.ToolCallPart{ID: "c0", Name: "wire_money", Args: []byte(`{"to":"acme"}`)}}},
-			{Role: weft.RoleTool, Content: []weft.Part{weft.ToolResultPart{CallID: "c0", Name: "wire_money", Content: "sent (recorded)"}}},
-			weft.Assistant("wired"),
+		input: []core.Message{core.User("wire it")},
+		steps: []core.Message{
+			{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c0", Name: "wire_money", Args: []byte(`{"to":"acme"}`)}}},
+			{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c0", Name: "wire_money", Content: "sent (recorded)"}}},
+			core.Assistant("wired"),
 		},
 	}
 	sub := func(c *command) { c.Source = &sourceSpec{RunID: "s_x-t1"}; c.src = record }
 	if id := run("sub", sub); l.parked[id] != nil || wired.Load() != 0 {
 		t.Errorf("a recorded ToolSource call: parked %v, handler runs %d — want substituted, 0", l.parked[id] != nil, wired.Load())
 	}
-	if got := script.LastRequest().Messages; len(got) != 3 || got[2].Content[0].(weft.ToolResultPart).Content != "sent (recorded)" {
+	if got := script.LastRequest().Messages; len(got) != 3 || got[2].Content[0].(core.ToolResultPart).Content != "sent (recorded)" {
 		t.Errorf("the substituted run fed the model %+v, want the recorded result", got)
 	}
 	if id := run("miss", sub); l.parked[id] == nil || wired.Load() != 0 {
@@ -289,20 +289,20 @@ func TestToolSourceToolsPark(t *testing.T) {
 // no park set at all.
 func TestSubagentChildToolsPark(t *testing.T) {
 	var refunds atomic.Int64
-	refund := weft.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) {
+	refund := core.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) {
 		refunds.Add(1)
 		return "refunded for real", nil
 	})
-	child := weft.New(wefttest.Script(
+	child := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{}`}),
 		wefttest.Say("refunded"),
-	), weft.Name("billing"), refund)
+	), core.Name("billing"), refund)
 	script := wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "billing", Args: `{"prompt":"refund order 1"}`}),
 		wefttest.Say("billing could not finish"),
 	)
-	parent := weft.New(script, weft.Name("a"),
-		weft.Subagent("billing", "Billing.", child, weft.Replay(weft.ReplaySafe)))
+	parent := core.New(script, core.Name("a"),
+		core.Subagent("billing", "Billing.", child, core.Replay(core.ReplaySafe)))
 	l := newExecLink(nil, parent)
 
 	in := "refund order 1"
@@ -315,9 +315,9 @@ func TestSubagentChildToolsPark(t *testing.T) {
 		t.Errorf("the child agent's never tool ran %d times in a playground run, want 0", n)
 	}
 	last := script.LastRequest().Messages
-	tr, ok := last[len(last)-1].Content[0].(weft.ToolResultPart)
-	if !ok || !tr.IsError || !strings.Contains(tr.Content, weft.CodeSubagentPending) {
-		t.Errorf("the delegating call's result = %+v, want %s", last[len(last)-1], weft.CodeSubagentPending)
+	tr, ok := last[len(last)-1].Content[0].(core.ToolResultPart)
+	if !ok || !tr.IsError || !strings.Contains(tr.Content, core.CodeSubagentPending) {
+		t.Errorf("the delegating call's result = %+v, want %s", last[len(last)-1], core.CodeSubagentPending)
 	}
 	// The parent run itself did not park: the child's boundary is not
 	// the panel's to decide.
@@ -327,16 +327,16 @@ func TestSubagentChildToolsPark(t *testing.T) {
 }
 
 // TestOutputSubmissionDoesNotPark pins the except-list's third member:
-// an agent built with weft.Output ends its run by calling
+// an agent built with core.Output ends its run by calling
 // submit_output, which is the answer, not a side effect — a re-run of
 // such an agent must reach its output instead of parking on it.
 func TestOutputSubmissionDoesNotPark(t *testing.T) {
 	type verdict struct {
 		OK bool `json:"ok"`
 	}
-	agent := weft.New(wefttest.Script(
+	agent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "submit_output", Args: `{"ok":true}`}),
-	), weft.Name("a"), weft.Output[verdict]())
+	), core.Name("a"), core.Output[verdict]())
 	l := newExecLink(nil, agent)
 	in := "judge"
 	res, err := agent.Generate(context.Background(), l.runOptions(command{CommandID: "cmd_out", Agent: "a", Input: &in}, "pg_out")...)
@@ -346,7 +346,7 @@ func TestOutputSubmissionDoesNotPark(t *testing.T) {
 	if len(res.Pending) != 0 {
 		t.Fatalf("the structured-output submission parked: %+v", res.Pending)
 	}
-	if v, err := weft.OutputOf[verdict](res); err != nil || !v.OK {
+	if v, err := core.OutputOf[verdict](res); err != nil || !v.OK {
 		t.Errorf("output = %+v, %v — want the submitted verdict", v, err)
 	}
 }
@@ -360,26 +360,26 @@ func TestOutputSubmissionDoesNotPark(t *testing.T) {
 // it is not offered at all).
 func TestExecuteParksEnabledNonOptInTool(t *testing.T) {
 	var refundRan, lookupRan atomic.Bool
-	lookup := weft.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) {
+	lookup := core.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) {
 		lookupRan.Store(true)
 		return "shipped", nil
 	})
-	refund := weft.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) {
+	refund := core.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) {
 		refundRan.Store(true)
 		return "refunded", nil
 	})
-	agent := weft.New(
+	agent := core.New(
 		wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{}`}),
 			wefttest.Say("refunded"), // never reached: the run parks at the call
 			wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{}`}),
 			wefttest.Say("shipped"),
 		),
-		weft.Name("a"), lookup, refund)
-	l := newLink(&config{agents: []*weft.Agent{agent}},
-		newRegistry(&config{agents: []*weft.Agent{agent}, allow: map[string]bool{"lookup_order": true}}), "", "")
+		core.Name("a"), lookup, refund)
+	l := newLink(&config{agents: []*core.Agent{agent}},
+		newRegistry(&config{agents: []*core.Agent{agent}, allow: map[string]bool{"lookup_order": true}}), "", "")
 
-	run := func(id, input, tool, mode string) *weft.RunResult {
+	run := func(id, input, tool, mode string) *core.RunResult {
 		t.Helper()
 		in := input
 		cmd := command{CommandID: id, Agent: "a", Engine: "live", Thread: "ephemeral", SideEffects: mode,
@@ -416,17 +416,17 @@ func TestExecuteParksEnabledNonOptInTool(t *testing.T) {
 // limit, the 8b-deferred modes, and a budget breach each reject with a
 // named reason — never a run.
 func TestValidate(t *testing.T) {
-	lookup := weft.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
-	refund := weft.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
-	agent := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("a"), weft.MaxSteps(6), weft.Parallelism(4), lookup, refund)
+	lookup := core.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
+	refund := core.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
+	agent := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("a"), core.MaxSteps(6), core.Parallelism(4), lookup, refund)
 	alt := wefttest.Script(wefttest.Say("alt"))
 	l := newLink(&config{
-		agents: []*weft.Agent{agent},
-		models: map[string]weft.Model{"glm-5.3-flash": alt},
+		agents: []*core.Agent{agent},
+		models: map[string]core.Model{"glm-5.3-flash": alt},
 		budget: Budget{MaxRunsPerExperiment: 1},
 	}, newRegistry(&config{
-		agents: []*weft.Agent{agent},
-		models: map[string]weft.Model{"glm-5.3-flash": alt},
+		agents: []*core.Agent{agent},
+		models: map[string]core.Model{"glm-5.3-flash": alt},
 		allow:  map[string]bool{"lookup_order": true},
 	}), "", "")
 	l.cfg.threads = thread.Memory() // fork mode's storage requirement
@@ -500,7 +500,7 @@ func TestValidate(t *testing.T) {
 
 	// Fork mode without thread storage is rejected before anything
 	// else (this link carries none).
-	bare := newLink(&config{agents: []*weft.Agent{agent}}, newRegistry(&config{agents: []*weft.Agent{agent}}), "", "")
+	bare := newLink(&config{agents: []*core.Agent{agent}}, newRegistry(&config{agents: []*core.Agent{agent}}), "", "")
 	if reason, ok := bare.validate(context.Background(), agentCmd(func(c *command) { c.Thread = "fork" })); ok || !strings.Contains(reason, "runtime.Threads") {
 		t.Errorf("fork without threads: reason = %q ok = %v, want the Threads requirement", reason, ok)
 	}
@@ -556,11 +556,11 @@ func TestBudgetState(t *testing.T) {
 // step N fresh; the cut is the index where the Nth assistant message
 // begins.
 func TestCutAtStep(t *testing.T) {
-	steps := []weft.Message{
-		weft.Assistant("checking"), // step 0's assistant
-		{Role: weft.RoleTool, Content: []weft.Part{weft.ToolResultPart{CallID: "c1", Content: "shipped"}}},
-		weft.Assistant("it shipped"),     // step 1's assistant
-		weft.Assistant("anything else?"), // step 2's assistant
+	steps := []core.Message{
+		core.Assistant("checking"), // step 0's assistant
+		{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c1", Content: "shipped"}}},
+		core.Assistant("it shipped"),     // step 1's assistant
+		core.Assistant("anything else?"), // step 2's assistant
 	}
 	if got := cutAtStep(steps, 0); got != 0 {
 		t.Errorf("from_step 0 cut = %d, want 0 (re-run the whole turn)", got)
@@ -576,8 +576,8 @@ func TestCutAtStep(t *testing.T) {
 	}
 	// What a resumed run recorded before its first model call (the
 	// completed tool message) is not a step's: step 0 starts after it.
-	resumed := append([]weft.Message{{Role: weft.RoleTool,
-		Content: []weft.Part{weft.ToolResultPart{CallID: "c0", Content: "approved"}}}}, steps...)
+	resumed := append([]core.Message{{Role: core.RoleTool,
+		Content: []core.Part{core.ToolResultPart{CallID: "c0", Content: "approved"}}}}, steps...)
 	if got := cutAtStep(resumed, 0); got != 1 {
 		t.Errorf("from_step 0 cut on a resumed run = %d, want 1 (the joined tool message stays)", got)
 	}
@@ -589,14 +589,14 @@ func TestCutAtStep(t *testing.T) {
 // and the child — which inherits the experiment's metadata by design —
 // is never a second command of the experiment.
 func TestBudgetCountsSubagentUsageOnce(t *testing.T) {
-	child := weft.New(wefttest.Script(
-		wefttest.Say("found it").WithUsage(weft.Usage{InputTokens: 20, OutputTokens: 10}),
-	), weft.Name("researcher"))
-	parent := weft.New(wefttest.Script(
-		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"look"}`}).WithUsage(weft.Usage{InputTokens: 4, OutputTokens: 1}),
-		wefttest.Say("done").WithUsage(weft.Usage{InputTokens: 3, OutputTokens: 2}),
-	), weft.Name("a"), weft.Subagent("research", "Research.", child))
-	cfg := &config{agents: []*weft.Agent{parent}, allow: map[string]bool{"research": true}}
+	child := core.New(wefttest.Script(
+		wefttest.Say("found it").WithUsage(core.Usage{InputTokens: 20, OutputTokens: 10}),
+	), core.Name("researcher"))
+	parent := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"look"}`}).WithUsage(core.Usage{InputTokens: 4, OutputTokens: 1}),
+		wefttest.Say("done").WithUsage(core.Usage{InputTokens: 3, OutputTokens: 2}),
+	), core.Name("a"), core.Subagent("research", "Research.", child))
+	cfg := &config{agents: []*core.Agent{parent}, allow: map[string]bool{"research": true}}
 	l := newLink(cfg, newRegistry(cfg), "", "")
 
 	in := "go"

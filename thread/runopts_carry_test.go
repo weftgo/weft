@@ -6,9 +6,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // carryAgent is the fixture of the steer-inheritance tests: a "submit"
@@ -17,30 +17,30 @@ import (
 // submit call meets the intended end and defers), and a Tap recording
 // each run's metadata by run id.
 type carryAgent struct {
-	agent *weft.Agent
+	agent *core.Agent
 	fired atomic.Int32
 	mu    sync.Mutex
 	md    map[string]map[string]string // run id → the metadata its RunStart saw
 }
 
-func newCarryAgent(onToolStart func(weft.ToolStart), turns ...wefttest.Turn) *carryAgent {
+func newCarryAgent(onToolStart func(core.ToolStart), turns ...wefttest.Turn) *carryAgent {
 	c := &carryAgent{md: map[string]map[string]string{}}
-	submit := weft.Tool("submit", "", func(context.Context, struct{}) (string, error) {
+	submit := core.Tool("submit", "", func(context.Context, struct{}) (string, error) {
 		return "submitted", nil
 	})
-	fire := weft.Tool("fire", "a side effect", func(context.Context, struct{}) (string, error) {
+	fire := core.Tool("fire", "a side effect", func(context.Context, struct{}) (string, error) {
 		c.fired.Add(1)
 		return "fired", nil
 	})
-	c.agent = weft.New(wefttest.Script(turns...), submit, fire,
-		weft.StopWhen(weft.HasToolCall("submit")),
-		weft.Tap(func(ctx context.Context, ev weft.Event) {
+	c.agent = core.New(wefttest.Script(turns...), submit, fire,
+		core.StopWhen(core.HasToolCall("submit")),
+		core.Tap(func(ctx context.Context, ev core.Event) {
 			switch e := ev.(type) {
-			case weft.RunStart:
+			case core.RunStart:
 				c.mu.Lock()
-				c.md[e.ID] = weft.MetadataFromContext(ctx)
+				c.md[e.ID] = core.MetadataFromContext(ctx)
 				c.mu.Unlock()
-			case weft.ToolStart:
+			case core.ToolStart:
 				if onToolStart != nil {
 					onToolStart(e)
 				}
@@ -66,13 +66,13 @@ func TestSteerFollowUpInheritsTurnRunOptions(t *testing.T) {
 	var s *thread.Session
 	var once sync.Once
 	steerc := make(chan *thread.Turn, 1)
-	c := newCarryAgent(func(e weft.ToolStart) {
+	c := newCarryAgent(func(e core.ToolStart) {
 		if e.Name != "submit" {
 			return
 		}
 		once.Do(func() {
-			st, err := s.Send(ctx, weft.User("also fire it"), thread.As(thread.Steer),
-				thread.RunOptions(weft.Metadata(map[string]string{"via": "steer"})))
+			st, err := s.Send(ctx, core.User("also fire it"), thread.As(thread.Steer),
+				thread.RunOptions(core.Metadata(map[string]string{"via": "steer"})))
 			if err != nil {
 				t.Errorf("steer Send: %v", err)
 			}
@@ -88,9 +88,9 @@ func TestSteerFollowUpInheritsTurnRunOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("submit, nothing else"), thread.RunOptions(
-		weft.ParkAllExcept("submit"),
-		weft.Metadata(map[string]string{"tenant": "acme", "via": "turn"}),
+	t1, err := s.Send(ctx, core.User("submit, nothing else"), thread.RunOptions(
+		core.ParkAllExcept("submit"),
+		core.Metadata(map[string]string{"tenant": "acme", "via": "turn"}),
 	))
 	if err != nil {
 		t.Fatal(err)
@@ -140,15 +140,15 @@ func TestBoundarySteerFollowUpInheritsParkedTurnOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parked, err := s.Send(ctx, weft.User("fire"), thread.RunOptions(
-		weft.ParkAllExcept(), weft.Metadata(map[string]string{"tenant": "acme"})))
+	parked, err := s.Send(ctx, core.User("fire"), thread.RunOptions(
+		core.ParkAllExcept(), core.Metadata(map[string]string{"tenant": "acme"})))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res, err := parked.Wait(); err != nil || len(res.Pending) != 1 {
 		t.Fatalf("parked turn: %v, %v", res, err)
 	}
-	steer, err := s.Send(ctx, weft.User("fire again"), thread.As(thread.Steer))
+	steer, err := s.Send(ctx, core.User("fire again"), thread.As(thread.Steer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,8 +189,8 @@ func TestIdleSteerRunsUnderItsOwnOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tn, err := s.Send(ctx, weft.User("fire"), thread.As(thread.Steer), thread.RunOptions(
-		weft.ParkAllExcept(), weft.Metadata(map[string]string{"tenant": "acme"})))
+	tn, err := s.Send(ctx, core.User("fire"), thread.As(thread.Steer), thread.RunOptions(
+		core.ParkAllExcept(), core.Metadata(map[string]string{"tenant": "acme"})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,8 +231,8 @@ func TestRunsOnBehalfOfATurnKeepItsOptions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			parked, err := s.Send(ctx, weft.User("fire"), thread.RunOptions(
-				weft.ParkAllExcept(), weft.Metadata(map[string]string{"tenant": "acme"})))
+			parked, err := s.Send(ctx, core.User("fire"), thread.RunOptions(
+				core.ParkAllExcept(), core.Metadata(map[string]string{"tenant": "acme"})))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -265,17 +265,17 @@ func TestRunsOnBehalfOfATurnKeepItsOptions(t *testing.T) {
 		release := make(chan struct{})
 		started := make(chan struct{})
 		var once sync.Once
-		block := weft.Tool("block", "", func(context.Context, struct{}) (string, error) {
+		block := core.Tool("block", "", func(context.Context, struct{}) (string, error) {
 			once.Do(func() { close(started) })
 			<-release
 			return "ok", nil
 		})
 		var fired atomic.Int32
-		fire := weft.Tool("fire", "", func(context.Context, struct{}) (string, error) {
+		fire := core.Tool("fire", "", func(context.Context, struct{}) (string, error) {
 			fired.Add(1)
 			return "fired", nil
 		})
-		agent := weft.New(wefttest.Script(
+		agent := core.New(wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: "block", ID: "call_b"}),
 			wefttest.Say("unblocked"),
 			wefttest.ToolCalls(wefttest.Call{Name: "fire", ID: "call_f"}),
@@ -284,12 +284,12 @@ func TestRunsOnBehalfOfATurnKeepItsOptions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t1, err := s.Send(ctx, weft.User("block"))
+		t1, err := s.Send(ctx, core.User("block"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		<-started
-		t2, err := s.Send(ctx, weft.User("fire"), thread.RunOptions(weft.ParkAllExcept()))
+		t2, err := s.Send(ctx, core.User("fire"), thread.RunOptions(core.ParkAllExcept()))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -308,9 +308,9 @@ func TestRunsOnBehalfOfATurnKeepItsOptions(t *testing.T) {
 
 	t.Run("overflow-rerun", func(t *testing.T) {
 		col := &mdCollector{}
-		agent := weft.New(wefttest.Script(
+		agent := core.New(wefttest.Script(
 			wefttest.Say("the first answer"),
-			wefttest.Fail(weft.ErrContextOverflow),
+			wefttest.Fail(core.ErrContextOverflow),
 			wefttest.Say("the summary of what came before"),
 			wefttest.Say("recovered after compaction"),
 		), col.tap())
@@ -318,12 +318,12 @@ func TestRunsOnBehalfOfATurnKeepItsOptions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t0, _ := s.Send(ctx, weft.User("a first question"))
+		t0, _ := s.Send(ctx, core.User("a first question"))
 		if _, err := t0.Wait(); err != nil {
 			t.Fatal(err)
 		}
-		t1, err := s.Send(ctx, weft.User("a prompt that overflows"),
-			thread.RunOptions(weft.Metadata(map[string]string{"tenant": "acme"})))
+		t1, err := s.Send(ctx, core.User("a prompt that overflows"),
+			thread.RunOptions(core.Metadata(map[string]string{"tenant": "acme"})))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -345,15 +345,15 @@ func TestRunsOnBehalfOfATurnKeepItsOptions(t *testing.T) {
 func ruleContext(t *testing.T, names ...string) context.Context {
 	t.Helper()
 	var got context.Context
-	host := weft.Tool("host", "", func(ctx context.Context, _ struct{}) (string, error) {
+	host := core.Tool("host", "", func(ctx context.Context, _ struct{}) (string, error) {
 		got = context.WithoutCancel(ctx)
 		return "ok", nil
 	})
-	outer := weft.New(wefttest.Script(
+	outer := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "host", ID: "call_h"}),
 		wefttest.Say("done"),
 	), host)
-	if _, err := outer.Generate(context.Background(), weft.Prompt("host"), weft.ParkAllExcept(append(names, "host")...)); err != nil {
+	if _, err := outer.Generate(context.Background(), core.Prompt("host"), core.ParkAllExcept(append(names, "host")...)); err != nil {
 		t.Fatal(err)
 	}
 	if got == nil {
@@ -378,7 +378,7 @@ func TestContextRuleSurvivesResumeAndSteer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		parked, err := s.Send(ruleContext(t), weft.User("fire"))
+		parked, err := s.Send(ruleContext(t), core.User("fire"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -401,12 +401,12 @@ func TestContextRuleSurvivesResumeAndSteer(t *testing.T) {
 		var s *thread.Session
 		var once sync.Once
 		steerc := make(chan *thread.Turn, 1)
-		c := newCarryAgent(func(e weft.ToolStart) {
+		c := newCarryAgent(func(e core.ToolStart) {
 			if e.Name != "submit" {
 				return
 			}
 			once.Do(func() {
-				st, err := s.Send(ctx, weft.User("also fire it"), thread.As(thread.Steer))
+				st, err := s.Send(ctx, core.User("also fire it"), thread.As(thread.Steer))
 				if err != nil {
 					t.Errorf("steer Send: %v", err)
 				}
@@ -422,7 +422,7 @@ func TestContextRuleSurvivesResumeAndSteer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t1, err := s.Send(ruleContext(t, "submit"), weft.User("submit"))
+		t1, err := s.Send(ruleContext(t, "submit"), core.User("submit"))
 		if err != nil {
 			t.Fatal(err)
 		}

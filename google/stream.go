@@ -7,23 +7,23 @@ import (
 	"iter"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/internal/adapterkit"
 	"google.golang.org/genai"
 )
 
-// Stream implements weft.Model over the SDK's streamGenerateContent.
+// Stream implements core.Model over the SDK's streamGenerateContent.
 // Gemini yields function calls whole; text and thought parts stream as
 // they arrive. Calls are emitted before ModelFinish in arrival order;
 // ids come from the API when populated and are synthesised (call_<i>)
 // per step otherwise.
-func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
+func (m *model) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
 		// The kill switch guards self-built client egress; a client the
 		// caller injected is a test double by construction (ADR 0013's
 		// kill-switch clause).
-		if !m.injected && !weft.ModelRequestsAllowed() {
-			yield(nil, weft.ErrModelRequestsDenied)
+		if !m.injected && !core.ModelRequestsAllowed() {
+			yield(nil, core.ErrModelRequestsDenied)
 			return
 		}
 		if err := m.initClient(ctx); err != nil {
@@ -44,14 +44,14 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 		defer reader.wait()
 
 		var (
-			calls  []weft.ModelToolCall
-			usage  weft.Usage
+			calls  []core.ModelToolCall
+			usage  core.Usage
 			finish genai.FinishReason
 		)
 		for {
 			resp, idleHit, ok := reader.next()
 			if idleHit {
-				yield(nil, fmt.Errorf("%w after %s", weft.ErrStreamIdle, m.idle))
+				yield(nil, fmt.Errorf("%w after %s", core.ErrStreamIdle, m.idle))
 				return
 			}
 			if !ok {
@@ -70,7 +70,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 				// and the thought tokens separately (TODO §2a.4).
 				// Gemini's implicit caching reports
 				// cachedContentTokenCount with no request marker.
-				usage = weft.Usage{
+				usage = core.Usage{
 					InputTokens:       int64(um.PromptTokenCount + um.ToolUsePromptTokenCount),
 					OutputTokens:      int64(um.CandidatesTokenCount + um.ThoughtsTokenCount),
 					CachedInputTokens: int64(um.CachedContentTokenCount),
@@ -104,26 +104,26 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 						if string(args) == "null" {
 							args = []byte("{}")
 						}
-						calls = append(calls, weft.ModelToolCall{
+						calls = append(calls, core.ModelToolCall{
 							ID:        part.FunctionCall.ID,
 							Name:      part.FunctionCall.Name,
 							Args:      args,
 							Signature: encodeSignature(part.ThoughtSignature),
 						})
 					case part.Thought:
-						if part.Text != "" && !yield(weft.ModelReasoningDelta{Text: part.Text}, nil) {
+						if part.Text != "" && !yield(core.ModelReasoningDelta{Text: part.Text}, nil) {
 							return
 						}
 						if len(part.ThoughtSignature) > 0 &&
-							!yield(weft.ModelReasoningDelta{Signature: encodeSignature(part.ThoughtSignature)}, nil) {
+							!yield(core.ModelReasoningDelta{Signature: encodeSignature(part.ThoughtSignature)}, nil) {
 							return
 						}
 					case part.Text != "":
-						if !yield(weft.ModelTextDelta{Text: part.Text}, nil) {
+						if !yield(core.ModelTextDelta{Text: part.Text}, nil) {
 							return
 						}
 						if len(part.ThoughtSignature) > 0 &&
-							!yield(weft.ModelReasoningDelta{Signature: encodeSignature(part.ThoughtSignature)}, nil) {
+							!yield(core.ModelReasoningDelta{Signature: encodeSignature(part.ThoughtSignature)}, nil) {
 							return
 						}
 					case len(part.ThoughtSignature) > 0:
@@ -131,7 +131,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 						// text: the text is nothing but the signature must
 						// still stream back — Gemini validates its return
 						// on the next request, so losing it fails the call.
-						if !yield(weft.ModelReasoningDelta{Signature: encodeSignature(part.ThoughtSignature)}, nil) {
+						if !yield(core.ModelReasoningDelta{Signature: encodeSignature(part.ThoughtSignature)}, nil) {
 							return
 						}
 					}
@@ -171,7 +171,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			}
 		}
 		reason, raw := mapFinish(finish, len(calls) > 0)
-		yield(weft.ModelFinish{Reason: reason, Usage: usage, Raw: raw}, nil)
+		yield(core.ModelFinish{Reason: reason, Usage: usage, Raw: raw}, nil)
 	}
 }
 

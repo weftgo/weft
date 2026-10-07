@@ -8,14 +8,14 @@ import (
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/shared"
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/internal/adapterkit"
 )
 
 // params builds the Chat Completions request for one step. The
 // ModelRequest is read-only: conversion builds fresh SDK values and
 // never mutates req.Messages or req.Tools.
-func (m *model) params(req weft.ModelRequest) (openai.ChatCompletionNewParams, error) {
+func (m *model) params(req core.ModelRequest) (openai.ChatCompletionNewParams, error) {
 	p := openai.ChatCompletionNewParams{
 		Model:    m.name,
 		Messages: make([]openai.ChatCompletionMessageParamUnion, 0, len(req.Messages)+1),
@@ -33,7 +33,7 @@ func (m *model) params(req weft.ModelRequest) (openai.ChatCompletionNewParams, e
 	}
 	for _, msg := range req.Messages {
 		switch msg.Role {
-		case weft.RoleUser:
+		case core.RoleUser:
 			parts, err := userParts(msg)
 			if err != nil {
 				return p, err
@@ -45,7 +45,7 @@ func (m *model) params(req weft.ModelRequest) (openai.ChatCompletionNewParams, e
 					},
 				},
 			})
-		case weft.RoleAssistant:
+		case core.RoleAssistant:
 			// An assistant message with nothing sendable (only dropped
 			// reasoning, say) is skipped: Chat Completions rejects a
 			// message with neither content nor tool_calls — the
@@ -53,11 +53,11 @@ func (m *model) params(req weft.ModelRequest) (openai.ChatCompletionNewParams, e
 			if am, ok := assistantMessage(msg); ok {
 				p.Messages = append(p.Messages, am)
 			}
-		case weft.RoleTool:
+		case core.RoleTool:
 			// weft batches one step's results on a single tool message;
 			// OpenAI wants one tool message per result, in part order.
 			for _, part := range msg.Content {
-				tr, ok := part.(weft.ToolResultPart)
+				tr, ok := part.(core.ToolResultPart)
 				if !ok {
 					continue
 				}
@@ -100,12 +100,12 @@ func (m *model) params(req weft.ModelRequest) (openai.ChatCompletionNewParams, e
 	// 2026-09-24 §3).
 	if len(req.Tools) > 0 {
 		switch req.ToolChoice.Mode {
-		case weft.ToolChoiceAny:
+		case core.ToolChoiceAny:
 			p.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: openai.String("required")}
-		case weft.ToolChoiceNamed:
+		case core.ToolChoiceNamed:
 			p.ToolChoice = openai.ChatCompletionToolChoiceOptionParamOfChatCompletionNamedToolChoice(
 				openai.ChatCompletionNamedToolChoiceFunctionParam{Name: req.ToolChoice.Name})
-		case weft.ToolChoiceNone:
+		case core.ToolChoiceNone:
 			p.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: openai.String("none")}
 		}
 	}
@@ -126,7 +126,7 @@ func (m *model) params(req weft.ModelRequest) (openai.ChatCompletionNewParams, e
 // nothing, construction set sends the construction value, request set
 // sends the request value (a set pointer to 0 is a value). The fold
 // never replaces a construction value with a zero.
-func (m *model) foldParams(p *openai.ChatCompletionNewParams, rp weft.RequestParams) {
+func (m *model) foldParams(p *openai.ChatCompletionNewParams, rp core.RequestParams) {
 	if rp.Temperature != nil {
 		p.Temperature = openai.Float(*rp.Temperature)
 	} else if m.tempSet {
@@ -163,20 +163,20 @@ func (m *model) foldParams(p *openai.ChatCompletionNewParams, rp weft.RequestPar
 // content array is API-rejected. Anthropic keeps the same placeholder;
 // google drops the message instead (its API accepts a turn with no
 // parts as nothing at all) — each adapter's userParts states its rule.
-func userParts(msg weft.Message) ([]openai.ChatCompletionContentPartUnionParam, error) {
+func userParts(msg core.Message) ([]openai.ChatCompletionContentPartUnionParam, error) {
 	parts := make([]openai.ChatCompletionContentPartUnionParam, 0, len(msg.Content))
 	for _, part := range msg.Content {
 		switch p := part.(type) {
-		case weft.TextPart:
+		case core.TextPart:
 			if p.Text == "" {
 				continue
 			}
 			parts = append(parts, openai.ChatCompletionContentPartUnionParam{
 				OfText: &openai.ChatCompletionContentPartTextParam{Text: p.Text},
 			})
-		case weft.FilePart:
+		case core.FilePart:
 			if !strings.HasPrefix(p.MediaType, "image/") {
-				return nil, fmt.Errorf("%w: chat completions accept image files, got %q", weft.ErrUnsupported, p.MediaType)
+				return nil, fmt.Errorf("%w: chat completions accept image files, got %q", core.ErrUnsupported, p.MediaType)
 			}
 			if err := adapterkit.FilePartSource(p); err != nil {
 				return nil, err
@@ -206,14 +206,14 @@ func userParts(msg weft.Message) ([]openai.ChatCompletionContentPartUnionParam, 
 // input to send back. ok is false when nothing sendable remains (no
 // text, no calls): the caller skips the message rather than emitting
 // `{"role":"assistant"}`, which the API rejects.
-func assistantMessage(msg weft.Message) (openai.ChatCompletionMessageParamUnion, bool) {
+func assistantMessage(msg core.Message) (openai.ChatCompletionMessageParamUnion, bool) {
 	am := &openai.ChatCompletionAssistantMessageParam{}
 	var sb strings.Builder
 	for _, part := range msg.Content {
 		switch p := part.(type) {
-		case weft.TextPart:
+		case core.TextPart:
 			sb.WriteString(p.Text)
-		case weft.ToolCallPart:
+		case core.ToolCallPart:
 			// The API requires valid JSON arguments; a hand-built call
 			// with nil args would travel as arguments:"" and be
 			// rejected. The stream side and the other adapters
@@ -242,7 +242,7 @@ func assistantMessage(msg weft.Message) (openai.ChatCompletionMessageParamUnion,
 
 // convertTool converts a ToolDef to the SDK's tool type. Conversion
 // runs per request (ADR 0013: the pointer-keyed cache never evicted).
-func convertTool(t *weft.ToolDef) openai.ChatCompletionToolParam {
+func convertTool(t *core.ToolDef) openai.ChatCompletionToolParam {
 	fn := shared.FunctionDefinitionParam{Name: t.Name}
 	if t.Description != "" {
 		fn.Description = openai.String(t.Description)
@@ -257,22 +257,22 @@ func convertTool(t *weft.ToolDef) openai.ChatCompletionToolParam {
 // raw value rides on ModelFinish.Raw whenever the mapping is
 // approximate, so callers can see "content_filter" and friends without
 // a tap.
-func mapFinish(reason string, hasCalls bool) (weft.StopReason, string) {
+func mapFinish(reason string, hasCalls bool) (core.StopReason, string) {
 	switch reason {
 	case "stop":
-		return weft.StopEndTurn, ""
+		return core.StopEndTurn, ""
 	case "tool_calls":
-		return weft.StopToolCalls, ""
+		return core.StopToolCalls, ""
 	case "length":
-		return weft.StopMaxTokens, ""
+		return core.StopMaxTokens, ""
 	case "":
 		// Compatible servers may omit it; buffered calls are the truth.
 		if hasCalls {
-			return weft.StopToolCalls, ""
+			return core.StopToolCalls, ""
 		}
-		return weft.StopEndTurn, ""
+		return core.StopEndTurn, ""
 	default:
-		return weft.StopEndTurn, reason
+		return core.StopEndTurn, reason
 	}
 }
 
@@ -281,8 +281,8 @@ func mapFinish(reason string, hasCalls bool) (weft.StopReason, string) {
 // completion tokens are reporting subsets of the totals, never added
 // to them (TODO §2a.4). The detail objects are plain values — absent
 // on compat-gateway chunks, their fields decode as zero.
-func toUsage(u openai.CompletionUsage) weft.Usage {
-	return weft.Usage{
+func toUsage(u openai.CompletionUsage) core.Usage {
+	return core.Usage{
 		InputTokens:       u.PromptTokens,
 		OutputTokens:      u.CompletionTokens,
 		CachedInputTokens: u.PromptTokensDetails.CachedTokens,

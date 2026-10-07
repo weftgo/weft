@@ -10,23 +10,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // soloModel wraps a model and counts overlapping Stream calls: a
 // session runs one model call at a time, whatever races around it.
 type soloModel struct {
-	inner   weft.Model
+	inner   core.Model
 	inside  atomic.Int32
 	overlap atomic.Bool
 }
 
-func (m *soloModel) Info() weft.ModelInfo { return weft.InfoOf(m.inner) }
+func (m *soloModel) Info() core.ModelInfo { return core.InfoOf(m.inner) }
 
-func (m *soloModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
+func (m *soloModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
 		if m.inside.Add(1) > 1 {
 			m.overlap.Store(true)
 		}
@@ -48,8 +48,8 @@ func TestSettledBoundaryPickupIsInFlight(t *testing.T) {
 	ctx := context.Background()
 	script := wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "dangerous", ID: "call_d"}))
 	model := &blockingModel{script: script, block: make(chan struct{})}
-	agent := weft.New(model,
-		weft.Tool("dangerous", "", func(context.Context, struct{}) (string, error) { return "ran", nil }, weft.RequireApproval()))
+	agent := core.New(model,
+		core.Tool("dangerous", "", func(context.Context, struct{}) (string, error) { return "ran", nil }, core.RequireApproval()))
 	// Every reading of the clock is two minutes after the last: the
 	// request's one-minute lifetime is over by the time the runner
 	// looks at the boundary again.
@@ -65,7 +65,7 @@ func TestSettledBoundaryPickupIsInFlight(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("do it"))
+	t1, err := s.Send(ctx, core.User("do it"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestSettledBoundaryPickupIsInFlight(t *testing.T) {
 	if err := s.Branch(ctx, t1.ID()); !errors.Is(err, thread.ErrBusy) {
 		t.Errorf("Branch during the pickup's resume = %v, want ErrBusy", err)
 	}
-	if turn, err := s.Send(ctx, weft.User("me too"), thread.As(thread.Reject)); !errors.Is(err, thread.ErrBusy) {
+	if turn, err := s.Send(ctx, core.User("me too"), thread.As(thread.Reject)); !errors.Is(err, thread.ErrBusy) {
 		t.Errorf("a Reject Send during the pickup's resume = %v, %v; want ErrBusy", turn, err)
 	}
 	close(model.block)
@@ -114,7 +114,7 @@ func TestBusyInvariantUnderRaces(t *testing.T) {
 		steps[i] = wefttest.Say("ok")
 	}
 	model := &soloModel{inner: wefttest.Script(steps...)}
-	s, err := thread.Create(ctx, thread.Memory(), weft.New(model))
+	s, err := thread.Create(ctx, thread.Memory(), core.New(model))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestBusyInvariantUnderRaces(t *testing.T) {
 			defer senders.Done()
 			policies := []thread.Policy{thread.Queue, thread.Reject, thread.Steer, thread.Queue}
 			for i := 0; i < 20; i++ {
-				turn, err := s.Send(ctx, weft.User(fmt.Sprintf("m%d-%d", g, i)), thread.As(policies[(g+i)%len(policies)]))
+				turn, err := s.Send(ctx, core.User(fmt.Sprintf("m%d-%d", g, i)), thread.As(policies[(g+i)%len(policies)]))
 				if errors.Is(err, thread.ErrBusy) {
 					continue
 				}
@@ -224,12 +224,12 @@ func TestClockPanicUnderTheLockIsContained(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("one"))
+	t1, err := s.Send(ctx, core.User("one"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	<-started
-	queued, err := s.Send(ctx, weft.User("two"))
+	queued, err := s.Send(ctx, core.User("two"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestClockPanicUnderTheLockIsContained(t *testing.T) {
 	}
 	// The session works again once the clock does.
 	clockTrip.armed.Store(false)
-	t3, err := s.Send(ctx, weft.User("three"))
+	t3, err := s.Send(ctx, core.User("three"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,16 +290,16 @@ func TestCallbackPanicNeverWedgesTheSession(t *testing.T) {
 				// A tool step, a steer sent while the tool runs, a second
 				// step, then a queued send: the paths that mint under
 				// the lock.
-				echo := weft.Tool("echo", "", func(context.Context, struct{}) (string, error) { return "ok", nil })
+				echo := core.Tool("echo", "", func(context.Context, struct{}) (string, error) { return "ok", nil })
 				model := wefttest.Script(
 					wefttest.ToolCalls(wefttest.Call{Name: "echo"}),
 					wefttest.Say("one"), wefttest.Say("two"), wefttest.Say("three"), wefttest.Say("four"),
 				)
 				var ref *thread.Session
 				var once sync.Once
-				agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
-					if _, ok := ev.(weft.ToolStart); ok {
-						once.Do(func() { _, _ = ref.Send(ctx, weft.User("a steer"), thread.As(thread.Steer)) })
+				agent := core.New(model, echo, core.Tap(func(_ context.Context, ev core.Event) {
+					if _, ok := ev.(core.ToolStart); ok {
+						once.Do(func() { _, _ = ref.Send(ctx, core.User("a steer"), thread.As(thread.Steer)) })
 					}
 				}))
 				s, err := thread.Create(ctx, thread.Memory(), agent, ids, clock)
@@ -311,7 +311,7 @@ func TestCallbackPanicNeverWedgesTheSession(t *testing.T) {
 				tr.armed.Store(true)
 				send := func(text string) (turn *thread.Turn) {
 					defer func() { _ = recover() }() // a panic on the caller's own goroutine is the caller's
-					turn, _ = s.Send(ctx, weft.User(text))
+					turn, _ = s.Send(ctx, core.User(text))
 					return turn
 				}
 				var held []*thread.Turn
@@ -332,7 +332,7 @@ func TestCallbackPanicNeverWedgesTheSession(t *testing.T) {
 					t.Error(err)
 				}
 				tr.armed.Store(false)
-				last, err := s.Send(ctx, weft.User("after"))
+				last, err := s.Send(ctx, core.User("after"))
 				if err != nil {
 					t.Fatalf("Send after the panic: %v", err)
 				}
@@ -355,11 +355,11 @@ func TestCloseReturnsWhenTheRunnerExits(t *testing.T) {
 	agent, _, started, rel := heldAgent("first", "second", "third")
 	s, _ := thread.Create(ctx, thread.Memory(), agent)
 	var turns []*thread.Turn
-	t1, _ := s.Send(ctx, weft.User("one"))
+	t1, _ := s.Send(ctx, core.User("one"))
 	<-started
 	turns = append(turns, t1)
 	for _, text := range []string{"two", "three"} {
-		turn, err := s.Send(ctx, weft.User(text))
+		turn, err := s.Send(ctx, core.User(text))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -409,9 +409,9 @@ func TestEpiloguePanicFreesTheRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, _ := s.Send(ctx, weft.User("one"))
+	t1, _ := s.Send(ctx, core.User("one"))
 	<-started
-	followUp, err := s.Send(ctx, weft.User("instead, this"), thread.As(thread.Rollback))
+	followUp, err := s.Send(ctx, core.User("instead, this"), thread.As(thread.Rollback))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,7 +431,7 @@ func TestEpiloguePanicFreesTheRunner(t *testing.T) {
 		t.Fatalf("Queue after the runner's exit = %+v, want the follow-up still queued", q)
 	}
 	tr.armed.Store(false)
-	last, err := s.Send(ctx, weft.User("and then"))
+	last, err := s.Send(ctx, core.User("and then"))
 	if err != nil {
 		t.Fatal(err)
 	}

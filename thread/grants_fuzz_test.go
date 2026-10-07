@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // FuzzGrantMatches: the grant predicate engine over
@@ -50,7 +50,7 @@ func FuzzGrantMatches(f *testing.F) {
 		if err := json.Unmarshal(grantJSON, &g); err != nil {
 			return // malformed JSON is loud; the wire shapes are pinned elsewhere
 		}
-		call := weft.ToolCallPart{ID: "c_fuzz", Name: g.Tool, Args: argsJSON}
+		call := core.ToolCallPart{ID: "c_fuzz", Name: g.Tool, Args: argsJSON}
 		m1, m2 := grantMatches(g, call), grantMatches(g, call)
 		if m1 != m2 {
 			t.Fatalf("nondeterministic match over grant %q, args %q", grantJSON, argsJSON)

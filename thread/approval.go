@@ -10,7 +10,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // Outcome is a decision's kind (ADR 0021 §1): approve (run the call
@@ -834,8 +834,8 @@ func hashArgs(args []byte) string {
 // the resume run inherits.
 type chainResult struct {
 	entries     []Entry
-	parkedCalls []weft.ToolCallPart
-	opts        []weft.RunOption // the parked send's captured run options
+	parkedCalls []core.ToolCallPart
+	opts        []core.RunOption // the parked send's captured run options
 	awaitCtx    context.Context  // the persistence window the resume inherits
 	runID       string           // the run that parked
 }
@@ -857,7 +857,7 @@ type chainResult struct {
 // carries the expiry, the notification and the challenge the
 // remaining decisions answer, so the first approval is recorded
 // beside it, not instead of it.
-func (s *Session) runChain(ctx context.Context, t *Turn, opts []weft.RunOption, calls []weft.ToolCallPart) *chainResult {
+func (s *Session) runChain(ctx context.Context, t *Turn, opts []core.RunOption, calls []core.ToolCallPart) *chainResult {
 	cr := &chainResult{opts: opts, awaitCtx: ctx, runID: t.runID}
 	var expiry time.Time
 	if s.cfg.requestExpiry > 0 {
@@ -1187,13 +1187,13 @@ func fillApprovalEntry(e Entry, id, parent string, created time.Time) Entry {
 // tool message directly following the assistant is read here, so such
 // a boundary reads closed — as it was resolved — instead of holding
 // the session forever. Callers hold s.mu.
-func (s *Session) danglingCallsLocked() []weft.ToolCallPart {
+func (s *Session) danglingCallsLocked() []core.ToolCallPart {
 	unanswered := s.unansweredCallsLocked()
 	if len(unanswered) == 0 {
 		return nil
 	}
 	walk := s.approvalWalkLocked()
-	var out []weft.ToolCallPart
+	var out []core.ToolCallPart
 	for _, c := range unanswered {
 		_, requested := walk.requests[c.ID]
 		_, recorded := walk.runs[c.ID]
@@ -1207,7 +1207,7 @@ func (s *Session) danglingCallsLocked() []weft.ToolCallPart {
 // unansweredCallsLocked returns the calls of the path's last assistant
 // message with calls that no tool message directly after it answers —
 // parked or not (danglingCallsLocked tells which). Callers hold s.mu.
-func (s *Session) unansweredCallsLocked() []weft.ToolCallPart {
+func (s *Session) unansweredCallsLocked() []core.ToolCallPart {
 	path, err := s.walkLocked(s.leaf) // read-only: the calls returned are copied below
 	if err != nil {
 		return nil
@@ -1218,11 +1218,11 @@ func (s *Session) unansweredCallsLocked() []weft.ToolCallPart {
 	last := -1
 	for j := len(path) - 1; j >= 0 && last < 0; j-- {
 		me, ok := path[j].(MessageEntry)
-		if !ok || me.Message.Role != weft.RoleAssistant {
+		if !ok || me.Message.Role != core.RoleAssistant {
 			continue
 		}
 		for _, p := range me.Message.Content {
-			if _, ok := p.(weft.ToolCallPart); ok {
+			if _, ok := p.(core.ToolCallPart); ok {
 				last = j
 				break
 			}
@@ -1237,18 +1237,18 @@ func (s *Session) unansweredCallsLocked() []weft.ToolCallPart {
 		if !ok {
 			continue
 		}
-		if me.Message.Role != weft.RoleTool {
+		if me.Message.Role != core.RoleTool {
 			break
 		}
 		for _, p := range me.Message.Content {
-			if r, ok := p.(weft.ToolResultPart); ok {
+			if r, ok := p.(core.ToolResultPart); ok {
 				served[r.CallID] = true
 			}
 		}
 	}
-	var out []weft.ToolCallPart
+	var out []core.ToolCallPart
 	for _, p := range path[last].(MessageEntry).Message.Content {
-		if c, ok := p.(weft.ToolCallPart); ok && !served[c.ID] {
+		if c, ok := p.(core.ToolCallPart); ok && !served[c.ID] {
 			c.Args = slices.Clone(c.Args) // the caller's bytes, not the tree's
 			out = append(out, c)
 		}
@@ -1357,7 +1357,7 @@ func (s *Session) approvalWalkLocked() approvalWalk {
 		switch e := e.(type) {
 		case MessageEntry:
 			for _, p := range e.Message.Content {
-				if c, ok := p.(weft.ToolCallPart); ok {
+				if c, ok := p.(core.ToolCallPart); ok {
 					delete(w.requests, c.ID)
 					delete(w.runs, c.ID)
 					delete(w.decisions, c.ID)
@@ -1608,36 +1608,36 @@ func (s *Session) expiredPendingLocked(now time.Time) []Request {
 // approved calls run with Call.Approved set, denied ones show their
 // reason, resolved ones their content. Undecided calls get nothing
 // when denyUndecided is false; with it true (the resume run's own
-// mode) each becomes weft.Deny(id, "no decision") — the same text the
+// mode) each becomes core.Deny(id, "no decision") — the same text the
 // core's resolvePending writes, synthesized because the core only
 // writes it when some decision exists: a resume carrying none would
 // otherwise repair the dangling calls as interrupted, losing the
 // boundary instead of denying it. Callers hold s.mu.
-func (s *Session) danglingDecisionsLocked(denyUndecided bool) []weft.RunOption {
+func (s *Session) danglingDecisionsLocked(denyUndecided bool) []core.RunOption {
 	dangling := s.danglingCallsLocked()
 	if len(dangling) == 0 {
 		return nil
 	}
 	walk := s.approvalWalkLocked()
-	var opts []weft.RunOption
+	var opts []core.RunOption
 	for _, c := range dangling {
 		_, ds := walk.occurrence(c.ID)
 		d, ok := effectiveDecision(ds, s.cfg.quorum)
 		if !ok {
 			if denyUndecided {
-				opts = append(opts, weft.Deny(c.ID, "no decision"))
+				opts = append(opts, core.Deny(c.ID, "no decision"))
 			}
 			continue
 		}
 		switch d.Outcome {
 		case OutcomeApprove:
-			opts = append(opts, weft.Approve(c.ID))
+			opts = append(opts, core.Approve(c.ID))
 		case OutcomeDeny:
-			opts = append(opts, weft.Deny(c.ID, d.Reason))
+			opts = append(opts, core.Deny(c.ID, d.Reason))
 		case OutcomeResolve:
-			opts = append(opts, weft.Resolve(c.ID, d.Content))
+			opts = append(opts, core.Resolve(c.ID, d.Content))
 		case OutcomeResolveError:
-			opts = append(opts, weft.ResolveError(c.ID, d.Content))
+			opts = append(opts, core.ResolveError(c.ID, d.Content))
 		}
 	}
 	return opts

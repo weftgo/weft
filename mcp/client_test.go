@@ -10,8 +10,8 @@ import (
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 )
 
 // served builds an SDK server plus a connected client session over
@@ -97,8 +97,8 @@ func TestToolsKeepsForeignSchemaWhole(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "search", Args: `{"q":"a"}`}),
 		wefttest.Say("done"),
 	)
-	agt := weft.New(model, weft.Name("parent"), got)
-	if _, err := agt.Generate(context.Background(), weft.Prompt("search")); err != nil {
+	agt := core.New(model, core.Name("parent"), got)
+	if _, err := agt.Generate(context.Background(), core.Prompt("search")); err != nil {
 		t.Fatal(err)
 	}
 	reqSchema, err := json.Marshal(model.Requests()[0].Tools[0].InputSchema)
@@ -341,7 +341,7 @@ func TestToolsAppliesPolicy(t *testing.T) {
 		})
 	})
 	defer stop()
-	tools, err := Tools(context.Background(), sess, Policy(weft.Timeout(100*time.Millisecond)))
+	tools, err := Tools(context.Background(), sess, Policy(core.Timeout(100*time.Millisecond)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,23 +352,23 @@ func TestToolsAppliesPolicy(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "slow"}),
 		wefttest.Say("gave up"),
 	)
-	agt := weft.New(model, weft.Name("parent"), tools[0])
-	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	agt := core.New(model, core.Name("parent"), tools[0])
+	res, err := agt.Generate(context.Background(), core.Prompt("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.Messages[len(res.Messages)-2].Content[0].(weft.ToolResultPart).Content, `tool "slow" timed out after`) {
+	if !strings.Contains(res.Messages[len(res.Messages)-2].Content[0].(core.ToolResultPart).Content, `tool "slow" timed out after`) {
 		t.Errorf("timeout result = %+v", res.Messages[len(res.Messages)-2].Content[0])
 	}
 
 	// RequireApproval parks the imported call exactly like a local one.
-	tools, err = Tools(context.Background(), sess, Policy(weft.RequireApproval()))
+	tools, err = Tools(context.Background(), sess, Policy(core.RequireApproval()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	model2 := wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "slow"}))
-	agt2 := weft.New(model2, weft.Name("parent2"), tools[0])
-	res2, err := agt2.Generate(context.Background(), weft.Prompt("go"))
+	agt2 := core.New(model2, core.Name("parent2"), tools[0])
+	res2, err := agt2.Generate(context.Background(), core.Prompt("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,11 +388,11 @@ func TestToolsAppliesPolicyRunRules(t *testing.T) {
 		})
 	})
 	defer stop()
-	sawCall := make(chan weft.ToolCallPart, 1)
+	sawCall := make(chan core.ToolCallPart, 1)
 	tools, err := Tools(context.Background(), sess, Policy(
-		weft.MaxResultBytes(8),
-		weft.WrapTools(func(next weft.ToolCaller) weft.ToolCaller {
-			return func(ctx context.Context, call weft.ToolCallPart) (string, error) {
+		core.MaxResultBytes(8),
+		core.WrapTools(func(next core.ToolCaller) core.ToolCaller {
+			return func(ctx context.Context, call core.ToolCallPart) (string, error) {
 				sawCall <- call
 				return next(ctx, call)
 			}
@@ -405,8 +405,8 @@ func TestToolsAppliesPolicyRunRules(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "babbler"}),
 		wefttest.Say("enough"),
 	)
-	agt := weft.New(model, weft.Name("parent"), tools[0])
-	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	agt := core.New(model, core.Name("parent"), tools[0])
+	res, err := agt.Generate(context.Background(), core.Prompt("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +418,7 @@ func TestToolsAppliesPolicyRunRules(t *testing.T) {
 	default:
 		t.Error("WrapTools middleware never saw the imported call")
 	}
-	part := res.Messages[len(res.Messages)-2].Content[0].(weft.ToolResultPart)
+	part := res.Messages[len(res.Messages)-2].Content[0].(core.ToolResultPart)
 	if want := "xxxxxxxx\n…[truncated 492 bytes]"; part.Content != want {
 		t.Errorf("capped result = %q, want %q", part.Content, want)
 	}
@@ -452,8 +452,8 @@ func TestToolsAnnotationsSetSequential(t *testing.T) {
 			} `json:"tools"`
 		} `json:"agents"`
 	}
-	agt := weft.New(wefttest.Script(), weft.Name("p"), tools[0], tools[1])
-	if b, err := weft.Manifest(agt); err != nil {
+	agt := core.New(wefttest.Script(), core.Name("p"), tools[0], tools[1])
+	if b, err := core.Manifest(agt); err != nil {
 		t.Fatal(err)
 	} else if err := json.Unmarshal(b, &doc); err != nil {
 		t.Fatal(err)
@@ -530,8 +530,8 @@ func TestImportedToolInManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agt := weft.New(wefttest.Script(), weft.Name("p"), tools[0])
-	b, err := weft.Manifest(agt)
+	agt := core.New(wefttest.Script(), core.Name("p"), tools[0])
+	b, err := core.Manifest(agt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,9 +564,9 @@ func TestImportedToolsAreOrdinary(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "search", Args: `{"q":"a"}`}),
 		wefttest.Say("alright"),
 	)
-	agt := weft.New(model, weft.Name("p"), weft.Parallelism(4),
-		weft.WrapTools(func(next weft.ToolCaller) weft.ToolCaller {
-			return func(ctx context.Context, call weft.ToolCallPart) (string, error) {
+	agt := core.New(model, core.Name("p"), core.Parallelism(4),
+		core.WrapTools(func(next core.ToolCaller) core.ToolCaller {
+			return func(ctx context.Context, call core.ToolCallPart) (string, error) {
 				if call.Name == "search" {
 					return "", errors.New("searching is disabled today")
 				}
@@ -574,24 +574,24 @@ func TestImportedToolsAreOrdinary(t *testing.T) {
 			}
 		}),
 		tools[0])
-	res, err := agt.Generate(context.Background(), weft.Prompt("search"))
+	res, err := agt.Generate(context.Background(), core.Prompt("search"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	toolMsg := res.Messages[len(res.Messages)-2]
-	part := toolMsg.Content[0].(weft.ToolResultPart)
+	part := toolMsg.Content[0].(core.ToolResultPart)
 	if !part.IsError || part.Content != "searching is disabled today" {
 		t.Errorf("denial = %+v, want an error result the model sees", part)
 	}
 
 	// Through a ToolSource: the refreshed slice is the step's snapshot.
 	fetched := 0
-	src := weft.New(wefttest.Script(wefttest.Say("idle")), weft.Name("src"),
-		weft.ToolSource(func() []*weft.ToolDef {
+	src := core.New(wefttest.Script(wefttest.Say("idle")), core.Name("src"),
+		core.ToolSource(func() []*core.ToolDef {
 			fetched++
 			return tools
 		}))
-	if _, err := src.Generate(context.Background(), weft.Prompt("hi")); err != nil {
+	if _, err := src.Generate(context.Background(), core.Prompt("hi")); err != nil {
 		t.Fatal(err)
 	}
 	if fetched == 0 {
@@ -786,7 +786,7 @@ func TestToolsEmptyNameIsSkippedUnderPrefix(t *testing.T) {
 }
 
 // A name repeated in one listing is untrusted input of the same kind:
-// both used to import and weft.New panicked on the duplicate later.
+// both used to import and core.New panicked on the duplicate later.
 // The first occurrence stands, the repeat is reported, and the result
 // registers with New without incident.
 func TestToolsDuplicateNameIsSkippedAndReported(t *testing.T) {
@@ -816,7 +816,7 @@ func TestToolsDuplicateNameIsSkippedAndReported(t *testing.T) {
 			t.Fatalf("New panicked on the imported tools: %v", r)
 		}
 	}()
-	_ = weft.New(wefttest.Script(wefttest.Say("ok")), tools[0])
+	_ = core.New(wefttest.Script(wefttest.Say("ok")), tools[0])
 }
 
 // "The first occurrence stands" means the first *importable* one: an

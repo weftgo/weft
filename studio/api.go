@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
 )
 
@@ -111,7 +111,7 @@ type runRow struct {
 	ParentCallID string            `json:"parent_call_id"`
 	TraceID      string            `json:"trace_id"`
 	Agent        string            `json:"agent"`
-	Model        weft.ModelInfo    `json:"model"`
+	Model        core.ModelInfo    `json:"model"`
 	ManifestHash string            `json:"manifest_hash"`
 	WeftVersion  string            `json:"weft_version"`
 	Service      string            `json:"service"`
@@ -130,7 +130,7 @@ type runRow struct {
 	Steps        int               `json:"steps"`
 	Pending      int               `json:"pending"`
 	StopReason   string            `json:"stop_reason"`
-	Usage        weft.Usage        `json:"usage"`
+	Usage        core.Usage        `json:"usage"`
 	EventCount   int64             `json:"event_count"`
 	MessageCount int64             `json:"message_count"`
 }
@@ -145,7 +145,7 @@ func row(rec obsdb.RunRow) runRow {
 		ParentCallID: rec.ParentCallID,
 		TraceID:      rec.TraceID,
 		Agent:        rec.Agent,
-		Model:        weft.ModelInfo{Provider: rec.Provider, Name: rec.Model},
+		Model:        core.ModelInfo{Provider: rec.Provider, Name: rec.Model},
 		ManifestHash: rec.ManifestHash,
 		WeftVersion:  rec.WeftVersion,
 		Service:      rec.Service,
@@ -261,7 +261,7 @@ func batchOpensStep(body json.RawMessage) bool {
 		return false
 	}
 	for _, m := range msgs {
-		if m.Role == string(weft.RoleAssistant) {
+		if m.Role == string(core.RoleAssistant) {
 			return true
 		}
 	}
@@ -359,7 +359,7 @@ type sessionRow struct {
 	FirstSeen time.Time  `json:"first_seen"`
 	LastSeen  time.Time  `json:"last_seen"`
 	Status    string     `json:"status"`
-	Usage     weft.Usage `json:"usage"`
+	Usage     core.Usage `json:"usage"`
 }
 
 func sessRow(r obsdb.SessionRow) sessionRow {
@@ -520,7 +520,7 @@ func parentParam(q map[string][]string) string {
 }
 
 // tagParams collects the tag.<k>=<v> metadata matches (the row's
-// metadata — what the store era called tags; weft.Metadata and
+// metadata — what the store era called tags; core.Metadata and
 // thread's session keys land here).
 func tagParams(q map[string][]string) map[string]string {
 	var meta map[string]string
@@ -886,7 +886,7 @@ func weftVersion() string {
 		return ""
 	}
 	for _, dep := range bi.Deps {
-		if dep.Path != "github.com/weftgo/weft" {
+		if dep.Path != "github.com/weftgo/weft/core" {
 			continue
 		}
 		if dep.Replace != nil && dep.Replace.Version != "" {

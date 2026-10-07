@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 )
 
 // TestRollbackBeforeReceiptLands: a Rollback that lands while the
@@ -16,7 +16,7 @@ import (
 // on the interrupted turn's own line, the opposite of the policy.
 func TestRollbackBeforeReceiptLands(t *testing.T) {
 	ctx := context.Background()
-	s, err := Create(ctx, Memory(), weft.New(wefttest.Script(wefttest.Say("x"))))
+	s, err := Create(ctx, Memory(), core.New(wefttest.Script(wefttest.Say("x"))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestRollbackBeforeReceiptLands(t *testing.T) {
 	inflight := s.newTurnLocked()
 	s.inFlight = inflight
 	s.mu.Lock()
-	if _, err := s.interruptSendLocked(ctx, weft.User("rollback this"), nil, Rollback); err != nil {
+	if _, err := s.interruptSendLocked(ctx, core.User("rollback this"), nil, Rollback); err != nil {
 		s.mu.Unlock()
 		t.Fatal(err)
 	}

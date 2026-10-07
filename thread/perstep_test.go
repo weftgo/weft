@@ -11,31 +11,31 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // stepAgent builds an agent whose run answers with one tool step (signed
 // reasoning included) and one closing step — the two-step shape the
 // per-step tests assert over.
-func stepAgent(t *testing.T) (*weft.Agent, *wefttest.Model) {
+func stepAgent(t *testing.T) (*core.Agent, *wefttest.Model) {
 	t.Helper()
 	m := wefttest.Script(
 		wefttest.Raw(
-			weft.ModelReasoningDelta{Text: "planning", Signature: "sig-step"},
-			weft.ModelToolCall{ID: "call_1", Name: "note", Args: []byte(`{"text":"hi"}`)},
-			weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+			core.ModelReasoningDelta{Text: "planning", Signature: "sig-step"},
+			core.ModelToolCall{ID: "call_1", Name: "note", Args: []byte(`{"text":"hi"}`)},
+			core.ModelFinish{Reason: core.StopToolCalls, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 		),
 		wefttest.Say("done"),
 	)
-	note := weft.Tool("note", "Record a note.", func(_ context.Context, in struct {
+	note := core.Tool("note", "Record a note.", func(_ context.Context, in struct {
 		Text string `json:"text"`
 	}) (string, error) {
 		return "noted: " + in.Text, nil
 	})
-	return weft.New(m, note), m
+	return core.New(m, note), m
 }
 
 // The per-step contract (ADR 0011 §7): the message entries a turn
@@ -51,7 +51,7 @@ func TestPerStepEntriesEqualRunResult(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		turn, err := s.Send(ctx, weft.User("go"))
+		turn, err := s.Send(ctx, core.User("go"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -62,7 +62,7 @@ func TestPerStepEntriesEqualRunResult(t *testing.T) {
 		// The turn's input is the prompt alone: everything the result
 		// holds beyond it must be in the tree, in order, exactly.
 		want := res.Messages[1:]
-		var got []weft.Message
+		var got []core.Message
 		var sawTurn int
 		for _, e := range s.Entries() {
 			switch e := e.(type) {
@@ -84,7 +84,7 @@ func TestPerStepEntriesEqualRunResult(t *testing.T) {
 		for _, e := range s.Entries() {
 			if me, ok := e.(thread.MessageEntry); ok {
 				for _, p := range me.Message.Content {
-					if r, ok := p.(weft.ReasoningPart); ok && r.Signature != "" {
+					if r, ok := p.(core.ReasoningPart); ok && r.Signature != "" {
 						sig = r.Signature
 					}
 				}
@@ -114,16 +114,16 @@ func TestPerStepDurableWhileRunning(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "note", Args: `{"text":"hi"}`}),
 	)
 	blocking := &blockingModel{script: m, block: release}
-	note := weft.Tool("note", "Record a note.", func(_ context.Context, in struct {
+	note := core.Tool("note", "Record a note.", func(_ context.Context, in struct {
 		Text string `json:"text"`
 	}) (string, error) {
 		return "noted: " + in.Text, nil
 	})
-	s, err := thread.Create(ctx, st, weft.New(blocking, note))
+	s, err := thread.Create(ctx, st, core.New(blocking, note))
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("go"))
+	turn, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestPerStepDurableWhileRunning(t *testing.T) {
 		t.Fatalf("%d entries mid-run, want 3 (prompt, assistant, tool)", len(entries))
 	}
 	tool := entries[2].(thread.MessageEntry)
-	if r, ok := tool.Message.Content[0].(weft.ToolResultPart); !ok || r.Content != "noted: hi" {
+	if r, ok := tool.Message.Content[0].(core.ToolResultPart); !ok || r.Content != "noted: hi" {
 		t.Errorf("the tool message mid-run: %+v", tool.Message.Content)
 	}
 	for _, e := range entries {
@@ -183,22 +183,22 @@ type blockingModel struct {
 	calls  atomic.Int32
 }
 
-func (m *blockingModel) Info() weft.ModelInfo { return m.script.Info() }
+func (m *blockingModel) Info() core.ModelInfo { return m.script.Info() }
 
-func (m *blockingModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *blockingModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	if m.calls.Add(1) <= 1 {
 		return m.script.Stream(ctx, req) // the scripted tool step
 	}
-	return func(yield func(weft.ModelEvent, error) bool) {
+	return func(yield func(core.ModelEvent, error) bool) {
 		select {
 		case <-m.block:
 		case <-ctx.Done():
 			yield(nil, ctx.Err())
 			return
 		}
-		for _, ev := range []weft.ModelEvent{
-			weft.ModelTextDelta{Text: "done"},
-			weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+		for _, ev := range []core.ModelEvent{
+			core.ModelTextDelta{Text: "done"},
+			core.ModelFinish{Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 		} {
 			if !yield(ev, nil) {
 				return
@@ -218,7 +218,7 @@ func waitForStep(t *testing.T, turn *thread.Turn, index int) {
 			if err != nil {
 				return
 			}
-			if f, ok := ev.(weft.StepFinish); ok && f.Index == index {
+			if f, ok := ev.(core.StepFinish); ok && f.Index == index {
 				return
 			}
 		}
@@ -241,14 +241,14 @@ func TestPerStepFailedTailRewritten(t *testing.T) {
 			wefttest.ToolCalls(wefttest.Call{Name: "hang", Args: `{}`}),
 			wefttest.Say("after the interrupt"),
 		)
-		hang := weft.Tool("hang", "Block until canceled.", func(ctx context.Context, _ struct{}) (string, error) {
+		hang := core.Tool("hang", "Block until canceled.", func(ctx context.Context, _ struct{}) (string, error) {
 			<-ctx.Done()
 			return "", ctx.Err() // the bare cancellation noise
 		})
 		started := make(chan struct{})
 		var once sync.Once
-		agent := weft.New(m, hang, weft.Tap(func(_ context.Context, ev weft.Event) {
-			if _, ok := ev.(weft.ToolStart); ok {
+		agent := core.New(m, hang, core.Tap(func(_ context.Context, ev core.Event) {
+			if _, ok := ev.(core.ToolStart); ok {
 				once.Do(func() { close(started) })
 			}
 		}))
@@ -256,12 +256,12 @@ func TestPerStepFailedTailRewritten(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t1, err := s.Send(ctx, weft.User("start the work"))
+		t1, err := s.Send(ctx, core.User("start the work"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		<-started
-		t2, err := s.Send(ctx, weft.User("stop, do this instead"))
+		t2, err := s.Send(ctx, core.User("stop, do this instead"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -276,7 +276,7 @@ func TestPerStepFailedTailRewritten(t *testing.T) {
 		sawGolden := false
 		for _, msg := range s.Context() {
 			for _, p := range msg.Content {
-				if r, ok := p.(weft.ToolResultPart); ok && r.Content == golden {
+				if r, ok := p.(core.ToolResultPart); ok && r.Content == golden {
 					sawGolden = true
 				}
 			}
@@ -289,11 +289,11 @@ func TestPerStepFailedTailRewritten(t *testing.T) {
 		sawRaw := false
 		for _, e := range s.Entries() {
 			me, ok := e.(thread.MessageEntry)
-			if !ok || me.Message.Role != weft.RoleTool {
+			if !ok || me.Message.Role != core.RoleTool {
 				continue
 			}
 			for _, p := range me.Message.Content {
-				if r, ok := p.(weft.ToolResultPart); ok && r.Content == "context canceled" {
+				if r, ok := p.(core.ToolResultPart); ok && r.Content == "context canceled" {
 					sawRaw = true
 				}
 			}
@@ -316,27 +316,27 @@ func TestPerStepOverflowAttemptsKeepTheirOwnLines(t *testing.T) {
 		model := wefttest.Script(
 			wefttest.Say("the first answer"),                                                // turn 1: history for the cut
 			wefttest.ToolCalls(wefttest.Call{Name: "note", Args: `{"text":"attempt one"}`}), // attempt 1, step 0 — emitted
-			wefttest.Fail(weft.ErrContextOverflow),                                          // attempt 1, step 1 — overflows
+			wefttest.Fail(core.ErrContextOverflow),                                          // attempt 1, step 1 — overflows
 			wefttest.Say("the summary of what came before"),                                 // the compaction's summarizer
 			wefttest.Say("recovered after compaction"),                                      // attempt 2
 		)
-		note := weft.Tool("note", "Record a note.", func(_ context.Context, in struct {
+		note := core.Tool("note", "Record a note.", func(_ context.Context, in struct {
 			Text string `json:"text"`
 		}) (string, error) {
 			return "noted: " + in.Text, nil
 		})
-		s, err := thread.Create(ctx, st, weft.New(model, note), thread.KeepRecent(1))
+		s, err := thread.Create(ctx, st, core.New(model, note), thread.KeepRecent(1))
 		if err != nil {
 			t.Fatal(err)
 		}
-		t0, err := s.Send(ctx, weft.User("a first question"))
+		t0, err := s.Send(ctx, core.User("a first question"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if _, err := t0.Wait(); err != nil {
 			t.Fatal(err)
 		}
-		t1, err := s.Send(ctx, weft.User("a prompt that overflows"))
+		t1, err := s.Send(ctx, core.User("a prompt that overflows"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -380,7 +380,7 @@ func TestPerStepOverflowAttemptsKeepTheirOwnLines(t *testing.T) {
 				continue
 			}
 			for _, p := range me.Message.Content {
-				if r, ok := p.(weft.ToolResultPart); ok && r.Content == "noted: attempt one" {
+				if r, ok := p.(core.ToolResultPart); ok && r.Content == "noted: attempt one" {
 					sawAttempt++
 				}
 			}
@@ -390,7 +390,7 @@ func TestPerStepOverflowAttemptsKeepTheirOwnLines(t *testing.T) {
 		}
 		for _, m := range s.Context() {
 			for _, p := range m.Content {
-				if r, ok := p.(weft.ToolResultPart); ok && r.Content == "noted: attempt one" {
+				if r, ok := p.(core.ToolResultPart); ok && r.Content == "noted: attempt one" {
 					t.Error("the failed attempt's work rides the active path — the re-run must not see it")
 				}
 			}
@@ -440,7 +440,7 @@ func assertOnceEach(t *testing.T, s *thread.Session, promptID string) {
 func TestPerStepSteerReceiptBetweenSteps(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		echo := weft.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+		echo := core.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
 			return "ok", nil
 		})
 		model := wefttest.Script(
@@ -449,10 +449,10 @@ func TestPerStepSteerReceiptBetweenSteps(t *testing.T) {
 		)
 		var steerRef *thread.Session
 		var steerOnce sync.Once
-		agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
-			if _, ok := ev.(weft.ToolStart); ok {
+		agent := core.New(model, echo, core.Tap(func(_ context.Context, ev core.Event) {
+			if _, ok := ev.(core.ToolStart); ok {
 				steerOnce.Do(func() {
-					if _, err := steerRef.Send(ctx, weft.User("switch to metric units")); err != nil {
+					if _, err := steerRef.Send(ctx, core.User("switch to metric units")); err != nil {
 						t.Errorf("steer Send: %v", err)
 					}
 				})
@@ -463,7 +463,7 @@ func TestPerStepSteerReceiptBetweenSteps(t *testing.T) {
 			t.Fatal(err)
 		}
 		steerRef = s
-		t1, err := s.Send(ctx, weft.User("convert this"))
+		t1, err := s.Send(ctx, core.User("convert this"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -480,7 +480,7 @@ func TestPerStepSteerReceiptBetweenSteps(t *testing.T) {
 func TestPerStepLabelBetweenSteps(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		note := weft.Tool("note", "Record a note.", func(_ context.Context, in struct {
+		note := core.Tool("note", "Record a note.", func(_ context.Context, in struct {
 			Text string `json:"text"`
 		}) (string, error) {
 			return "noted: " + in.Text, nil
@@ -491,8 +491,8 @@ func TestPerStepLabelBetweenSteps(t *testing.T) {
 		)
 		var s *thread.Session
 		var once sync.Once
-		agent := weft.New(model, note, weft.Tap(func(_ context.Context, ev weft.Event) {
-			if _, ok := ev.(weft.ToolStart); ok {
+		agent := core.New(model, note, core.Tap(func(_ context.Context, ev core.Event) {
+			if _, ok := ev.(core.ToolStart); ok {
 				once.Do(func() {
 					if err := s.Label(ctx, s.Leaf(), "mid-turn"); err != nil {
 						t.Errorf("mid-run Label: %v", err)
@@ -504,7 +504,7 @@ func TestPerStepLabelBetweenSteps(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t1, err := s.Send(ctx, weft.User("go"))
+		t1, err := s.Send(ctx, core.User("go"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -573,7 +573,7 @@ func TestPerStepOneFailedAppendLosesAndDuplicatesNothing(t *testing.T) {
 				t.Fatal(err)
 			}
 			st.arm(nth)
-			turn, err := s.Send(ctx, weft.User("go"))
+			turn, err := s.Send(ctx, core.User("go"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -594,7 +594,7 @@ func TestPerStepOneFailedAppendLosesAndDuplicatesNothing(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var raw []weft.Message
+			var raw []core.Message
 			for _, e := range path {
 				if me, ok := e.(thread.MessageEntry); ok {
 					raw = append(raw, me.Message)
@@ -629,7 +629,7 @@ func TestPerStepCleanTurnRecordsNoLateSteps(t *testing.T) {
 	ctx := context.Background()
 	agent, _ := stepAgent(t)
 	s, _ := thread.Create(ctx, thread.Memory(), agent)
-	turn, _ := s.Send(ctx, weft.User("go"))
+	turn, _ := s.Send(ctx, core.User("go"))
 	if _, err := turn.Wait(); err != nil {
 		t.Fatal(err)
 	}

@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // The format-1 samples: fixed ids and times so the golden bytes are
@@ -55,15 +55,15 @@ func sampleEntries() []thread.Entry {
 	return []thread.Entry{
 		thread.MessageEntry{
 			ID: entryID0, Created: at(1),
-			Message: weft.User("Where is order 1234?"),
+			Message: core.User("Where is order 1234?"),
 		},
 		thread.TurnEntry{
 			ID: entryID1, ParentID: entryID0, Created: at(2),
 			RunID:      sessionID + "-t1",
-			StopReason: weft.StopToolCalls,
-			Usage:      weft.Usage{InputTokens: 410, OutputTokens: 62, CachedInputTokens: 128},
+			StopReason: core.StopToolCalls,
+			Usage:      core.Usage{InputTokens: 410, OutputTokens: 62, CachedInputTokens: 128},
 			Steps:      1,
-			Pending:    []weft.ToolCallPart{{ID: "call_1", Name: "refund_order", Args: json.RawMessage(`{"order_id":"1234"}`)}},
+			Pending:    []core.ToolCallPart{{ID: "call_1", Name: "refund_order", Args: json.RawMessage(`{"order_id":"1234"}`)}},
 		},
 		thread.CompactionEntry{
 			ID: entryID2, ParentID: entryID1, Created: at(3),
@@ -71,8 +71,8 @@ func sampleEntries() []thread.Entry {
 			FirstKept:       entryID0,
 			TokensBefore:    2817,
 			Reason:          thread.ReasonThreshold,
-			SummarizerUsage: weft.Usage{InputTokens: 480, OutputTokens: 96},
-			SummarizerModel: weft.ModelInfo{Provider: "anthropic", Name: "claude-sonnet-5"},
+			SummarizerUsage: core.Usage{InputTokens: 480, OutputTokens: 96},
+			SummarizerModel: core.ModelInfo{Provider: "anthropic", Name: "claude-sonnet-5"},
 			FilesRead:       []string{"orders/1234.json"},
 			FilesModified:   []string{"refunds/2026-09-28.json"},
 			RangeHash:       "9f2c51e4a7d3b806",
@@ -104,7 +104,7 @@ func sampleEntries() []thread.Entry {
 		thread.CustomMessageEntry{
 			ID: entryID8, ParentID: entryID7, Created: at(9),
 			Kind:    "system_note",
-			Message: weft.User("Order 1234 shipped on 2026-09-28."),
+			Message: core.User("Order 1234 shipped on 2026-09-28."),
 		},
 	}
 }
@@ -160,13 +160,13 @@ func TestEntryRoundTrip(t *testing.T) {
 	// through the entry wire.
 	all = append(all, thread.MessageEntry{
 		ID: entryID0, Created: at(1),
-		Message: weft.Message{
-			Role: weft.RoleAssistant,
-			Content: []weft.Part{
-				weft.ReasoningPart{Text: "checking", Signature: "sig1"},
-				weft.TextPart{Text: "looking"},
-				weft.ToolCallPart{ID: "call_2", Name: "lookup", Args: json.RawMessage(`{"order_id":"99"}`)},
-				weft.FilePart{MediaType: "image/png", URL: "https://example.com/p.png"},
+		Message: core.Message{
+			Role: core.RoleAssistant,
+			Content: []core.Part{
+				core.ReasoningPart{Text: "checking", Signature: "sig1"},
+				core.TextPart{Text: "looking"},
+				core.ToolCallPart{ID: "call_2", Name: "lookup", Args: json.RawMessage(`{"order_id":"99"}`)},
+				core.FilePart{MediaType: "image/png", URL: "https://example.com/p.png"},
 			},
 		},
 	})
@@ -174,11 +174,11 @@ func TestEntryRoundTrip(t *testing.T) {
 	// round-trips byte-for-byte too.
 	all = append(all, thread.MessageEntry{
 		ID: entryID0, Created: at(1),
-		Message: weft.Message{
-			Role: weft.RoleUser,
-			Content: []weft.Part{
-				weft.TextPart{Text: "what is this?"},
-				weft.FilePart{MediaType: "image/png", Data: []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff}},
+		Message: core.Message{
+			Role: core.RoleUser,
+			Content: []core.Part{
+				core.TextPart{Text: "what is this?"},
+				core.FilePart{MediaType: "image/png", Data: []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff}},
 			},
 		},
 	})
@@ -203,10 +203,10 @@ func TestEntryRoundTrip(t *testing.T) {
 		}
 	}
 	// The message kind carries the ADR 0001 wire verbatim.
-	msg := weft.Message{
-		Role: weft.RoleTool,
-		Content: []weft.Part{
-			weft.ToolResultPart{CallID: "call_1", Name: "lookup", Content: `{"status":"shipped"}`},
+	msg := core.Message{
+		Role: core.RoleTool,
+		Content: []core.Part{
+			core.ToolResultPart{CallID: "call_1", Name: "lookup", Content: `{"status":"shipped"}`},
 		},
 	}
 	b, err := json.Marshal(thread.MessageEntry{ID: entryID0, Created: at(1), Message: msg})

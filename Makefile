@@ -7,13 +7,14 @@ GO ?= go
 # The default is ignored by studio/web/.gitignore.
 RELEASE_DIR ?= studio/web/dist-release
 
-# The workspace is the monorepo layout: every adapter is its own module
-# (ADR 0005), so build/test/vet/lint loop over the modules `go list -m`
-# reports from go.work. The root module stays dependency-free; vendor
-# SDKs are required only by the adapter modules.
+# The workspace joins the framework module (the root: facade, adapters,
+# thread, otel, obsdb, studio, runtime), the core module (the loop
+# alone; its only dependency is the OTel API) and the example modules
+# (ADR 0027), so build/test/vet/lint loop over the modules `go list -m`
+# reports from go.work.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-thread apidiff-sqlite apidiff-all apidiff-selftest offline fuzz fuzz-thread soak-thread studio-build studio-check studio-panel-asset
+.PHONY: build test vet fmt lint tidy generate live tools apidiff apidiff-core apidiff-all apidiff-selftest offline fuzz fuzz-thread soak-thread studio-build studio-check studio-panel-asset
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -35,6 +36,13 @@ lint:
 tidy:
 	for m in $(MODULES); do (cd $$m && $(GO) mod tidy) || exit 1; done
 
+# The facades (the root package, mw, wefttest, wefttest/conformance)
+# are generated from core (internal/cmd/genfacade, ADR 0027); run this
+# after changing core's exported API. TestFacadesAreComplete fails
+# when a committed facade is stale.
+generate:
+	$(GO) generate ./...
+
 # Pinned tooling — the exact versions CI installs, so a local gate and
 # the remote gate can never disagree (TODO §1.2a, the §1 pre-flight of
 # docs/phase2b-store-plan.md). go install is idempotent; a warm module
@@ -42,29 +50,22 @@ tidy:
 tools:
 	$(GO) install golang.org/x/exp/cmd/apidiff@v0.0.0-20260908205506-85c1c2202aba
 
-# The apidiff gate (TODO §1.7): root module vs the last v* tag.
-# The tools target installs the pinned apidiff so the gate runs on a
-# machine without a pre-existing binary; PATH gains GOPATH/bin for it.
+# The apidiff gate (TODO §1.7): the framework module vs the last v*
+# tag (reported: the pre-freeze layers live in it). The tools target
+# installs the pinned apidiff so the gate runs on a machine without a
+# pre-existing binary; PATH gains GOPATH/bin for it.
 apidiff: tools
 	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh
 
-# The thread module's half — vs the last thread/v* tag. Deliberate
-# pre-1.0 breaks are listed in thread/.apidiff-allow.
-apidiff-thread: tools
-	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh "" thread
-
-# The SQLite backend's half — vs the last thread/sqlite/v* tag. Both
-# sides load through their tree's go.work (scripts/apidiff.sh says
-# why): between two thread tags the backend only compiles against the
-# thread module beside it.
-apidiff-sqlite: tools
-	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh "" thread/sqlite
+# The core module vs the last core/v* tag (enforced). Deliberate
+# pre-1.0 widenings are listed in core/.apidiff-allow.
+apidiff-core: tools
+	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh "" core
 
 # Every module go.work lists, each vs its own last tag and under its
-# own policy (scripts/apidiff.sh's header: root, thread, thread/sqlite
-# and the adapters are enforced; obsdb, obsdb/clickhouse, otel, runtime
-# and studio are reported; commands and examples skip). A module added
-# to go.work without a policy fails here. CI runs this.
+# own policy (scripts/apidiff.sh's header: core is enforced, the root
+# is reported, examples skip). A module added to go.work without a
+# policy fails here. CI runs this.
 #   APIDIFF_STRICT=1 make apidiff-all   # release check: every module
 #                                       # builds from published tags
 apidiff-all: tools
@@ -82,16 +83,16 @@ apidiff-selftest: tools
 offline:
 	for m in $(MODULES); do (cd $$m && WEFT_MODEL_REQUESTS=deny $(GO) test ./...) || exit 1; done
 
-# Fuzz every Fuzz* target of the root module, one invocation each (Go
+# Fuzz every Fuzz* target of the core module, one invocation each (Go
 # fuzzes one target at a time), FUZZTIME apiece. A crasher is written
-# to testdata/fuzz/<Target>/ — commit it as a regression seed.
+# to core/testdata/fuzz/<Target>/ — commit it as a regression seed.
 FUZZTIME ?= 10s
 fuzz:
-	for f in $$($(GO) test -list 'Fuzz.*' . | grep '^Fuzz'); do \
-	  $(GO) test -run '^$$' -fuzz "^$$f\$$" -fuzztime $(FUZZTIME) . || exit 1; \
+	for f in $$(cd core && $(GO) test -list 'Fuzz.*' . | grep '^Fuzz'); do \
+	  (cd core && $(GO) test -run '^$$' -fuzz "^$$f\$$" -fuzztime $(FUZZTIME) .) || exit 1; \
 	done
 
-# The thread module's decoders join the fuzz gate:
+# The thread package's decoders join the fuzz gate:
 # entries, headers, signed decisions and grant predicates — one
 # invocation each, crashers committed as seeds the same way.
 fuzz-thread:
@@ -102,7 +103,7 @@ fuzz-thread:
 	done
 
 # The race soak CI runs nightly (.github/workflows/soak.yml): the
-# thread module's suite ten times under the race detector, and
+# thread package's suite ten times under the race detector, and
 # thread/sqlite's three times.
 soak-thread:
 	cd thread && $(GO) test -race -count=10 -timeout 45m ./...

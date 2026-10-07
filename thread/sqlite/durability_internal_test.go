@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -80,7 +80,7 @@ func TestFlushCheckpointsUnderFsyncOnFlush(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.Append(ctx, "s_ckpt", thread.MessageEntry{
-		ID: "e_1", Created: time.Now().UTC(), Message: weft.User("in the log"),
+		ID: "e_1", Created: time.Now().UTC(), Message: core.User("in the log"),
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -11,7 +11,7 @@ import (
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/ssestream"
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/internal/adapterkit"
 )
 
@@ -24,20 +24,20 @@ type partialCall struct {
 	args strings.Builder
 }
 
-// Stream implements weft.Model over the SDK's streaming Chat
+// Stream implements core.Model over the SDK's streaming Chat
 // Completions. Text deltas pass through live; tool-call argument
 // fragments surface live as ModelToolCallDelta progress while the
 // assembled call is buffered and yielded whole before ModelFinish, in
 // first-seen index order; call ids are synthesised (call_<i>) when a
 // compatible server omits them, in first-seen order so the next step's
 // tool_call_id matches deterministically.
-func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
+func (m *model) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
 		// The kill switch guards self-built client egress; a client the
 		// caller injected is a test double by construction (ADR 0013's
 		// kill-switch clause).
-		if !m.injected && !weft.ModelRequestsAllowed() {
-			yield(nil, weft.ErrModelRequestsDenied)
+		if !m.injected && !core.ModelRequestsAllowed() {
+			yield(nil, core.ErrModelRequestsDenied)
 			return
 		}
 		params, err := m.params(req)
@@ -72,12 +72,12 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 			calls  = map[int64]*partialCall{}
 			order  []int64
 			finish string
-			usage  weft.Usage
+			usage  core.Usage
 		)
 		for {
 			ok, idleHit := reader.next()
 			if idleHit {
-				yield(nil, fmt.Errorf("%w after %s", weft.ErrStreamIdle, m.idle))
+				yield(nil, fmt.Errorf("%w after %s", core.ErrStreamIdle, m.idle))
 				return
 			}
 			if !ok {
@@ -89,16 +89,16 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 				usage = toUsage(chunk.Usage)
 			}
 			for _, ch := range chunk.Choices {
-				if ch.Delta.Content != "" && !yield(weft.ModelTextDelta{Text: ch.Delta.Content}, nil) {
+				if ch.Delta.Content != "" && !yield(core.ModelTextDelta{Text: ch.Delta.Content}, nil) {
 					return
 				}
 				// A safety refusal streams its message in delta.refusal
 				// (with finish_reason "content_filter"); it is the
 				// model's answer text and must not vanish.
-				if ch.Delta.Refusal != "" && !yield(weft.ModelTextDelta{Text: ch.Delta.Refusal}, nil) {
+				if ch.Delta.Refusal != "" && !yield(core.ModelTextDelta{Text: ch.Delta.Refusal}, nil) {
 					return
 				}
-				if r := reasoningContent(ch.Delta); r != "" && !yield(weft.ModelReasoningDelta{Text: r}, nil) {
+				if r := reasoningContent(ch.Delta); r != "" && !yield(core.ModelReasoningDelta{Text: r}, nil) {
 					return
 				}
 				for _, tc := range ch.Delta.ToolCalls {
@@ -124,7 +124,7 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 						// generated-code argument can take seconds to
 						// arrive, and without these the consumer sees
 						// dead air until the call is whole.
-						if !yield(weft.ModelToolCallDelta{Index: int(tc.Index), Name: pc.name, Args: tc.Function.Arguments}, nil) {
+						if !yield(core.ModelToolCallDelta{Index: int(tc.Index), Name: pc.name, Args: tc.Function.Arguments}, nil) {
 							return
 						}
 					}
@@ -171,12 +171,12 @@ func (m *model) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[wef
 				// adapter never emits an undecodable empty string.
 				args = "{}"
 			}
-			if !yield(weft.ModelToolCall{ID: id, Name: pc.name, Args: json.RawMessage(args)}, nil) {
+			if !yield(core.ModelToolCall{ID: id, Name: pc.name, Args: json.RawMessage(args)}, nil) {
 				return
 			}
 		}
 		reason, raw := mapFinish(finish, len(order) > 0)
-		yield(weft.ModelFinish{Reason: reason, Usage: usage, Raw: raw}, nil)
+		yield(core.ModelFinish{Reason: reason, Usage: usage, Raw: raw}, nil)
 	}
 }
 
@@ -200,7 +200,7 @@ func reasoningContent(d openai.ChatCompletionChunkChoiceDelta) string {
 // streamReader drives the SDK's SSE stream on a goroutine with an idle
 // timeout: a chunk gap longer than idle cancels the stream's context
 // (unblocking the SDK's reader) and the call fails wrapping
-// weft.ErrStreamIdle. A slow but actively streaming response is never
+// core.ErrStreamIdle. A slow but actively streaming response is never
 // killed — the timer resets after every chunk — and the caller's ctx
 // deadline remains the hard limit on the whole call.
 type streamReader struct {

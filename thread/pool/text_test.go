@@ -6,20 +6,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/pool"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // The pool's SUBAGENT_FAILED is the core's, byte for byte: the same
 // failing child reads the same to a parent model whether it ran as a
-// bare weft.Subagent or as a pool child session. The core's string is
+// bare core.Subagent or as a pool child session. The core's string is
 // not exported, so this test is what holds the two copies together.
 func TestFailureTextMatchesCore(t *testing.T) {
 	ctx := context.Background()
-	failing := func() *weft.Agent {
-		return weft.New(wefttest.Script(wefttest.SayThenFail("partial", errors.New("connection reset"))))
+	failing := func() *core.Agent {
+		return core.New(wefttest.Script(wefttest.SayThenFail("partial", errors.New("connection reset"))))
 	}
 	script := func() *wefttest.Model {
 		return wefttest.Script(
@@ -27,13 +27,13 @@ func TestFailureTextMatchesCore(t *testing.T) {
 			wefttest.Say("noted"),
 		)
 	}
-	bare, err := weft.New(script(), weft.Subagent("research", "", failing())).Generate(ctx, weft.Prompt("go"))
+	bare, err := core.New(script(), core.Subagent("research", "", failing())).Generate(ctx, core.Prompt("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	p := pool.New(1)
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(script(), p.MustWrap("research", "", failing())))
-	turn, err := s.Send(ctx, weft.User("go"))
+	s, _ := thread.Create(ctx, thread.Memory(), core.New(script(), p.MustWrap("research", "", failing())))
+	turn, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,12 +62,12 @@ func TestModelVisibleTexts(t *testing.T) {
 
 	t.Run("arguments that do not decode", func(t *testing.T) {
 		p := pool.New(1)
-		parent := weft.New(wefttest.Script(
+		parent := core.New(wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: "research", ID: "c-research", Args: `{"prompt":42}`}),
 			wefttest.Say("noted"),
-		), p.MustWrap("research", "", weft.New(wefttest.Script())))
+		), p.MustWrap("research", "", core.New(wefttest.Script())))
 		s, _ := thread.Create(ctx, thread.Memory(), parent)
-		turn, _ := s.Send(ctx, weft.User("go"))
+		turn, _ := s.Send(ctx, core.User("go"))
 		res, err := turn.Wait()
 		if err != nil {
 			t.Fatal(err)
@@ -124,14 +124,14 @@ func TestModelVisibleTexts(t *testing.T) {
 				wefttest.Say("all done"),
 			)
 			parent, _ := thread.Create(ctx, st, agent)
-			t1, err := parent.Send(ctx, weft.User("go"))
+			t1, err := parent.Send(ctx, core.User("go"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if _, err := t1.Wait(); err != nil {
 				t.Fatal(err)
 			}
-			child, err := thread.Create(ctx, st, weft.New(wefttest.Script()),
+			child, err := thread.Create(ctx, st, core.New(wefttest.Script()),
 				thread.WithLineage(parent.ID(), "c-wrapper"), thread.WithMeta(map[string]string{"pool_agent": "research"}))
 			if err != nil {
 				t.Fatal(err)

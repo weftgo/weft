@@ -27,7 +27,7 @@
 // # Costs
 //
 // A pool child is a session, not a tool-call child of the core's
-// (weft.Subagent), so the core's rule "a child's usage is yours" does
+// (core.Subagent), so the core's rule "a child's usage is yours" does
 // not reach it: its usage is on neither the parent's RunResult.Usage
 // nor StepRecord.SubagentUsage. It is on the receipt, and
 // thread.Session.Usage sums the settled receipts into its Delegated
@@ -61,7 +61,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/internal/carry"
 )
@@ -164,8 +164,8 @@ type Pool struct {
 	// session's delegation settles; nameAgents holds the agents the
 	// pool's wraps stand for, keyed by wrap name, which Wrap-made
 	// children record in their header metadata.
-	sessionAgents map[string]*weft.Agent
-	nameAgents    map[string]*weft.Agent
+	sessionAgents map[string]*core.Agent
+	nameAgents    map[string]*core.Agent
 	// calls holds the cancels of wrapped calls running outside any
 	// session (the bare path), so Close reaches them too.
 	calls    map[uint64]context.CancelFunc
@@ -220,8 +220,8 @@ func New(max int, opts ...Option) *Pool {
 		sem:           newFIFO(max),
 		delegates:     map[string]*delegate{},
 		byChild:       map[string]*delegate{},
-		sessionAgents: map[string]*weft.Agent{},
-		nameAgents:    map[string]*weft.Agent{},
+		sessionAgents: map[string]*core.Agent{},
+		nameAgents:    map[string]*core.Agent{},
 		calls:         map[uint64]context.CancelFunc{},
 	}
 	p.ctx, p.cancel = context.WithCancel(context.Background())
@@ -315,7 +315,7 @@ func (r Receipt) Settled() bool { return r.State.Settled() }
 // delegation's depth and ancestry from there, and fails with ErrDepth
 // or ErrCycle as a wrapped tool would refuse. A closed pool fails
 // with ErrClosed.
-func (p *Pool) Submit(ctx context.Context, parent *thread.Session, agent *weft.Agent, prompt string) (*Receipt, error) {
+func (p *Pool) Submit(ctx context.Context, parent *thread.Session, agent *core.Agent, prompt string) (*Receipt, error) {
 	if agent == nil {
 		return nil, fmt.Errorf("thread/pool: Submit with a nil agent")
 	}
@@ -664,11 +664,11 @@ type outcome struct {
 // check (ADR 0014): the agents whose runs delegated down to ctx plus
 // the agent running on it; the core's own guard lives in the Subagent
 // handler, which a session-run delegation never reaches.
-func (p *Pool) admit(ctx context.Context, agent *weft.Agent) (runInfo, error) {
+func (p *Pool) admit(ctx context.Context, agent *core.Agent) (runInfo, error) {
 	above := runFromContext(ctx)
 	chain := above.chain
-	if cur := weft.AgentFromContext(ctx); cur != nil && (len(chain) == 0 || chain[len(chain)-1] != cur) {
-		chain = append(append([]*weft.Agent(nil), chain...), cur)
+	if cur := core.AgentFromContext(ctx); cur != nil && (len(chain) == 0 || chain[len(chain)-1] != cur) {
+		chain = append(append([]*core.Agent(nil), chain...), cur)
 	}
 	for _, a := range chain {
 		if a == agent {
@@ -689,7 +689,7 @@ func (p *Pool) admit(ctx context.Context, agent *weft.Agent) (runInfo, error) {
 // child's lineage when there was one; name is the wrap's, the resume
 // key and the name the model-visible texts use. The mutex-checked
 // closed state refuses new work before anything is created.
-func (p *Pool) submit(ctx context.Context, parent *thread.Session, agent *weft.Agent, prompt, callID, name string, info runInfo, async bool) (*Receipt, outcome, error) {
+func (p *Pool) submit(ctx context.Context, parent *thread.Session, agent *core.Agent, prompt, callID, name string, info runInfo, async bool) (*Receipt, outcome, error) {
 	if parent == nil {
 		return nil, outcome{}, fmt.Errorf("thread/pool: delegation with no parent session")
 	}
@@ -788,7 +788,7 @@ func (p *Pool) submit(ctx context.Context, parent *thread.Session, agent *weft.A
 
 	rec := &Receipt{ID: accept.ID, State: Accepted, Child: child.ID(), Call: callID}
 	first := func(ctx context.Context) (*thread.Turn, error) {
-		return child.Send(ctx, weft.User(prompt))
+		return child.Send(ctx, core.User(prompt))
 	}
 	if async {
 		go func() {
@@ -857,7 +857,7 @@ func (p *Pool) run(ctx context.Context, d *delegate, r runHandle, start func(con
 	p.setPhase(d, phaseRunning)
 
 	turn, err := start(runCtx)
-	var res *weft.RunResult
+	var res *core.RunResult
 	if err == nil && turn != nil {
 		res, err = turn.Wait()
 		// A boundary the child's own decision chain settled — a grant,
@@ -1071,7 +1071,7 @@ func (p *Pool) closeChild(ctx context.Context, d *delegate) {
 // fails.
 func stateOf(err error) State {
 	switch {
-	case errors.Is(err, weft.ErrMaxSteps), errors.Is(err, weft.ErrUsageLimit):
+	case errors.Is(err, core.ErrMaxSteps), errors.Is(err, core.ErrUsageLimit):
 		return Capped
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return Canceled
@@ -1082,7 +1082,7 @@ func stateOf(err error) State {
 
 // stopOf renders the settlement's cause text.
 func stopOf(err error) string {
-	var re *weft.RunError
+	var re *core.RunError
 	if errors.As(err, &re) {
 		return re.Err.Error()
 	}
@@ -1093,11 +1093,11 @@ func stopOf(err error) string {
 // does (ADR 0014 G4): an Output child's submitted bytes verbatim —
 // empty bytes are a submission — and a child that never submitted its
 // final text.
-func answerOf(res *weft.RunResult) string {
+func answerOf(res *core.RunResult) string {
 	if res == nil {
 		return ""
 	}
-	if b, err := weft.OutputOf[json.RawMessage](res); err == nil {
+	if b, err := core.OutputOf[json.RawMessage](res); err == nil {
 		return string(b)
 	}
 	return res.Text()

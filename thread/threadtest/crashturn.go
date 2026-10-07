@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -84,17 +84,17 @@ func CrashTurn(t *testing.T, helperTest, storagePath string, reopen func() (thre
 	}
 	// Prompt, the signed assistant with its call, the tool's answer —
 	// and no turn entry: the turn never ended.
-	want := []weft.Message{
-		weft.User("crash the turn"),
-		{Role: weft.RoleAssistant, Content: []weft.Part{
-			weft.ReasoningPart{Text: "one step", Signature: "sig-crash"},
-			weft.ToolCallPart{ID: "call_crash", Name: "note", Args: []byte(`{"text":"crash"}`)},
+	want := []core.Message{
+		core.User("crash the turn"),
+		{Role: core.RoleAssistant, Content: []core.Part{
+			core.ReasoningPart{Text: "one step", Signature: "sig-crash"},
+			core.ToolCallPart{ID: "call_crash", Name: "note", Args: []byte(`{"text":"crash"}`)},
 		}},
-		{Role: weft.RoleTool, Content: []weft.Part{
-			weft.ToolResultPart{CallID: "call_crash", Name: "note", Content: "noted: crash"},
+		{Role: core.RoleTool, Content: []core.Part{
+			core.ToolResultPart{CallID: "call_crash", Name: "note", Content: "noted: crash"},
 		}},
 	}
-	var got []weft.Message
+	var got []core.Message
 	for _, e := range entries {
 		if _, ok := e.(thread.TurnEntry); ok {
 			t.Fatal("a turn entry landed for a turn that never ended")
@@ -110,11 +110,11 @@ func CrashTurn(t *testing.T, helperTest, storagePath string, reopen func() (thre
 	// Recovery: a reopened session continues from the crash point — the
 	// model's request carries everything that survived.
 	m := &replayModel{}
-	s, err := thread.Open(ctx, st, CrashSession, weft.New(m))
+	s, err := thread.Open(ctx, st, CrashSession, core.New(m))
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("continue"))
+	turn, err := s.Send(ctx, core.User("continue"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func RunCrashTurnChild(t *testing.T, open func() (thread.Storage, error)) {
 		os.Exit(2)
 	}
 	block := make(chan struct{}) // never closed in the child
-	agent := weft.New(&crashTurnModel{block: block}, crashNoteTool())
+	agent := core.New(&crashTurnModel{block: block}, crashNoteTool())
 	ctx := context.Background()
 	// The fixed session id the parent asserts over; every entry id
 	// after it stays unique.
@@ -164,7 +164,7 @@ func RunCrashTurnChild(t *testing.T, open func() (thread.Storage, error)) {
 		fmt.Println("helper: create failed:", err)
 		os.Exit(2)
 	}
-	turn, err := s.Send(ctx, weft.User("crash the turn"))
+	turn, err := s.Send(ctx, core.User("crash the turn"))
 	if err != nil {
 		fmt.Println("helper: send failed:", err)
 		os.Exit(2)
@@ -175,7 +175,7 @@ func RunCrashTurnChild(t *testing.T, open func() (thread.Storage, error)) {
 			fmt.Println("helper: stream error:", err)
 			os.Exit(2)
 		}
-		if f, ok := ev.(weft.StepFinish); ok && f.Index == 0 && !sawStep {
+		if f, ok := ev.(core.StepFinish); ok && f.Index == 0 && !sawStep {
 			sawStep = true
 			// The step's messages were persisted before this event was
 			// emitted (the fire sites precede it); say so plainly.
@@ -194,14 +194,14 @@ type crashTurnModel struct {
 	calls int
 }
 
-func (m *crashTurnModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "threadtest", Name: "crashturn"}
+func (m *crashTurnModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "threadtest", Name: "crashturn"}
 }
 
-func (m *crashTurnModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *crashTurnModel) Stream(ctx context.Context, _ core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	m.calls++
 	first := m.calls == 1
-	return func(yield func(weft.ModelEvent, error) bool) {
+	return func(yield func(core.ModelEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(nil, err)
 			return
@@ -214,15 +214,15 @@ func (m *crashTurnModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.S
 				return
 			}
 		}
-		events := []weft.ModelEvent{
-			weft.ModelTextDelta{Text: "never reached"},
-			weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+		events := []core.ModelEvent{
+			core.ModelTextDelta{Text: "never reached"},
+			core.ModelFinish{Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 		}
 		if first {
-			events = []weft.ModelEvent{
-				weft.ModelReasoningDelta{Text: "one step", Signature: "sig-crash"},
-				weft.ModelToolCall{ID: "call_crash", Name: "note", Args: []byte(`{"text":"crash"}`)},
-				weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+			events = []core.ModelEvent{
+				core.ModelReasoningDelta{Text: "one step", Signature: "sig-crash"},
+				core.ModelToolCall{ID: "call_crash", Name: "note", Args: []byte(`{"text":"crash"}`)},
+				core.ModelFinish{Reason: core.StopToolCalls, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 			}
 		}
 		for _, ev := range events {
@@ -236,23 +236,23 @@ func (m *crashTurnModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.S
 // replaySay is the parent's follow-up model: one plain answer per
 // call, recording its requests for the context assertion.
 type replayModel struct {
-	requests []weft.ModelRequest
+	requests []core.ModelRequest
 }
 
-func (m *replayModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "threadtest", Name: "say"}
+func (m *replayModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "threadtest", Name: "say"}
 }
 
-func (m *replayModel) Requests() []weft.ModelRequest {
-	return append([]weft.ModelRequest(nil), m.requests...)
+func (m *replayModel) Requests() []core.ModelRequest {
+	return append([]core.ModelRequest(nil), m.requests...)
 }
 
-func (m *replayModel) Stream(_ context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *replayModel) Stream(_ context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	m.requests = append(m.requests, req)
-	return func(yield func(weft.ModelEvent, error) bool) {
-		for _, ev := range []weft.ModelEvent{
-			weft.ModelTextDelta{Text: "recovered"},
-			weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+	return func(yield func(core.ModelEvent, error) bool) {
+		for _, ev := range []core.ModelEvent{
+			core.ModelTextDelta{Text: "recovered"},
+			core.ModelFinish{Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 		} {
 			if !yield(ev, nil) {
 				return
@@ -262,8 +262,8 @@ func (m *replayModel) Stream(_ context.Context, req weft.ModelRequest) iter.Seq2
 }
 
 // crashNoteTool is the child's tool: one plain answer.
-func crashNoteTool() *weft.ToolDef {
-	return weft.Tool("note", "Record a note.", func(_ context.Context, in struct {
+func crashNoteTool() *core.ToolDef {
+	return core.Tool("note", "Record a note.", func(_ context.Context, in struct {
 		Text string `json:"text"`
 	}) (string, error) {
 		return "noted: " + in.Text, nil

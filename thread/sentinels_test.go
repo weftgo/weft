@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/threadtest"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // The package's contract for failures is "sentinel errors, wrapped
@@ -36,12 +36,12 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		// --- Retry: ErrBusy, ErrLocked -------------------------------
 		{"ErrBusy/Send under the Reject policy while a turn runs", thread.ErrBusy, func(t *testing.T) error {
 			h := sentinelHeld(t, thread.BusyPolicy(thread.Reject))
-			_, err := h.s.Send(sentinelCtx(t), weft.User("one more thing"))
+			_, err := h.s.Send(sentinelCtx(t), core.User("one more thing"))
 			return err
 		}},
 		{"ErrBusy/Send As(Reject) while a turn runs", thread.ErrBusy, func(t *testing.T) error {
 			h := sentinelHeld(t)
-			_, err := h.s.Send(sentinelCtx(t), weft.User("one more thing"), thread.As(thread.Reject))
+			_, err := h.s.Send(sentinelCtx(t), core.User("one more thing"), thread.As(thread.Reject))
 			return err
 		}},
 		{"ErrBusy/Branch while a turn runs", thread.ErrBusy, func(t *testing.T) error {
@@ -62,11 +62,11 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		}},
 		{"ErrBusy/CustomMessage while a turn runs", thread.ErrBusy, func(t *testing.T) error {
 			h := sentinelHeld(t)
-			return h.s.CustomMessage(sentinelCtx(t), "app/note", weft.User("slipped in"))
+			return h.s.CustomMessage(sentinelCtx(t), "app/note", core.User("slipped in"))
 		}},
 		{"ErrLocked/a second Session writes while the first is open", thread.ErrLocked, func(t *testing.T) error {
 			ctx := sentinelCtx(t)
-			st, agent := thread.Memory(), weft.New(wefttest.Script())
+			st, agent := thread.Memory(), core.New(wefttest.Script())
 			writer := sentinelCreate(t, st, agent)
 			reader, err := thread.Open(ctx, st, writer.ID(), agent)
 			if err != nil {
@@ -78,7 +78,7 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		// --- Reopen: ErrStale, ErrClosed ------------------------------
 		{"ErrStale/a write after another writer appended and closed", thread.ErrStale, func(t *testing.T) error {
 			ctx := sentinelCtx(t)
-			st, agent := thread.Memory(), weft.New(wefttest.Script())
+			st, agent := thread.Memory(), core.New(wefttest.Script())
 			writer := sentinelCreate(t, st, agent)
 			reader, err := thread.Open(ctx, st, writer.ID(), agent)
 			if err != nil {
@@ -94,7 +94,7 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		}},
 		{"ErrClosed/Send after Close", thread.ErrClosed, func(t *testing.T) error {
 			s := sentinelClosed(t)
-			_, err := s.Send(sentinelCtx(t), weft.User("late"))
+			_, err := s.Send(sentinelCtx(t), core.User("late"))
 			return err
 		}},
 		{"ErrClosed/Continue after Close", thread.ErrClosed, func(t *testing.T) error {
@@ -110,7 +110,7 @@ func TestSentinelsAreMatchable(t *testing.T) {
 			// the write's, so a closed session with nothing to compact
 			// is refused earlier, with ErrNothingToCompact.
 			ctx := sentinelCtx(t)
-			s, _ := sentinelLong(t, weft.New(wefttest.Script(wefttest.Say("a summary"))))
+			s, _ := sentinelLong(t, core.New(wefttest.Script(wefttest.Say("a summary"))))
 			if err := s.Close(ctx); err != nil {
 				t.Fatalf("Close: %v", err)
 			}
@@ -132,7 +132,7 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		// --- Terminal for the stored data: ErrCorrupt, ErrNewerFormat --
 		{"ErrCorrupt/Open over a malformed line", thread.ErrCorrupt, func(t *testing.T) error {
 			st, id := sentinelInjected(t, "{not json}\n")
-			_, err := thread.Open(sentinelCtx(t), st, id, weft.New(wefttest.Script()))
+			_, err := thread.Open(sentinelCtx(t), st, id, core.New(wefttest.Script()))
 			return err
 		}},
 		{"ErrCorrupt/Load over a malformed line", thread.ErrCorrupt, func(t *testing.T) error {
@@ -148,11 +148,11 @@ func TestSentinelsAreMatchable(t *testing.T) {
 				t.Fatalf("Create: %v", err)
 			}
 			if err := st.Append(ctx, h.ID, thread.MessageEntry{
-				ID: "e_1", ParentID: "e_ghost", Created: h.Created, Message: weft.User("hello"),
+				ID: "e_1", ParentID: "e_ghost", Created: h.Created, Message: core.User("hello"),
 			}); err != nil {
 				t.Fatalf("Append: %v", err)
 			}
-			_, err := thread.Open(ctx, st, h.ID, weft.New(wefttest.Script()))
+			_, err := thread.Open(ctx, st, h.ID, core.New(wefttest.Script()))
 			return err
 		}},
 		{"ErrNewerFormat/UnmarshalEntry of an unknown kind", thread.ErrNewerFormat, func(t *testing.T) error {
@@ -169,13 +169,13 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		}},
 		{"ErrNewerFormat/Open over an entry of an unknown kind", thread.ErrNewerFormat, func(t *testing.T) error {
 			st, id := sentinelInjected(t, `{"type":"from_the_future","id":"e_1"}`+"\n")
-			_, err := thread.Open(sentinelCtx(t), st, id, weft.New(wefttest.Script()))
+			_, err := thread.Open(sentinelCtx(t), st, id, core.New(wefttest.Script()))
 			return err
 		}},
 
 		// --- A refused call: the storage's ---------------------------
 		{"ErrNotFound/Open of an id the storage does not hold", thread.ErrNotFound, func(t *testing.T) error {
-			_, err := thread.Open(sentinelCtx(t), thread.Memory(), "s_missing", weft.New(wefttest.Script()))
+			_, err := thread.Open(sentinelCtx(t), thread.Memory(), "s_missing", core.New(wefttest.Script()))
 			return err
 		}},
 		{"ErrNotFound/Delete of an id the storage does not hold", thread.ErrNotFound, func(t *testing.T) error {
@@ -187,11 +187,11 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		}},
 		{"ErrNotFound/Append to an id the storage does not hold", thread.ErrNotFound, func(t *testing.T) error {
 			return thread.Memory().Append(sentinelCtx(t), "s_missing",
-				thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: weft.User("hello")})
+				thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: core.User("hello")})
 		}},
 		{"ErrExists/Create under an id the storage already holds", thread.ErrExists, func(t *testing.T) error {
 			ctx := sentinelCtx(t)
-			st, agent := thread.Memory(), weft.New(wefttest.Script())
+			st, agent := thread.Memory(), core.New(wefttest.Script())
 			same := thread.IDs(func() string { return "s_same" })
 			if _, err := thread.Create(ctx, st, agent, same); err != nil {
 				t.Fatalf("the first Create: %v", err)
@@ -218,18 +218,18 @@ func TestSentinelsAreMatchable(t *testing.T) {
 			return sentinelOpenWith(t, thread.WithLineage("s_parent", "call_1"))
 		}},
 		{"ErrReservedKey/SetInfo under the weft. prefix", thread.ErrReservedKey, func(t *testing.T) error {
-			s := sentinelCreate(t, thread.Memory(), weft.New(wefttest.Script()))
+			s := sentinelCreate(t, thread.Memory(), core.New(wefttest.Script()))
 			return s.SetInfo(sentinelCtx(t), "", map[string]string{"weft.public_id": "other"})
 		}},
 
 		// --- A refused call: compaction ------------------------------
 		{"ErrNothingToCompact/Compact on an empty session", thread.ErrNothingToCompact, func(t *testing.T) error {
-			s := sentinelCreate(t, thread.Memory(), weft.New(wefttest.Script()))
+			s := sentinelCreate(t, thread.Memory(), core.New(wefttest.Script()))
 			return s.Compact(sentinelCtx(t))
 		}},
 		{"ErrNothingToCompact/ApplyCompaction of the boundary already left", thread.ErrNothingToCompact, func(t *testing.T) error {
 			ctx := sentinelCtx(t)
-			s, ids := sentinelLong(t, weft.New(wefttest.Script()))
+			s, ids := sentinelLong(t, core.New(wefttest.Script()))
 			plan := &thread.Compaction{Summary: "Orders were reviewed.", FirstKept: ids[2]}
 			if err := s.ApplyCompaction(ctx, plan); err != nil {
 				t.Fatalf("the first ApplyCompaction: %v", err)
@@ -240,11 +240,11 @@ func TestSentinelsAreMatchable(t *testing.T) {
 			// Two cut summaries: the attempt and its one retry, with no
 			// fallback left.
 			cut := wefttest.Script(wefttest.MaxTokens("Goal: ship the"), wefttest.MaxTokens("Goal: ship the"))
-			s, _ := sentinelLong(t, weft.New(cut))
+			s, _ := sentinelLong(t, core.New(cut))
 			return s.Compact(sentinelCtx(t))
 		}},
 		{"ErrCompactConfig/Create with a window under the reserve", thread.ErrCompactConfig, func(t *testing.T) error {
-			_, err := thread.Create(sentinelCtx(t), thread.Memory(), weft.New(wefttest.Script()),
+			_, err := thread.Create(sentinelCtx(t), thread.Memory(), core.New(wefttest.Script()),
 				thread.ContextWindow(100_000), thread.Reserve(100_000))
 			return err
 		}},
@@ -252,18 +252,18 @@ func TestSentinelsAreMatchable(t *testing.T) {
 			return sentinelOpenWith(t, thread.ContextWindow(100_000), thread.Reserve(100_000))
 		}},
 		{"ErrCompactCanceled/Compact with a BeforeCompact hook answering Cancel", thread.ErrCompactCanceled, func(t *testing.T) error {
-			s, _ := sentinelLong(t, weft.New(wefttest.Script(wefttest.Say("a summary"))),
+			s, _ := sentinelLong(t, core.New(wefttest.Script(wefttest.Say("a summary"))),
 				thread.BeforeCompact(func(context.Context, *thread.Preparation) (thread.Verdict, error) {
 					return thread.Cancel(), nil
 				}))
 			return s.Compact(sentinelCtx(t))
 		}},
 		{"ErrInvalidCompaction/ApplyCompaction with no Compaction", thread.ErrInvalidCompaction, func(t *testing.T) error {
-			s, _ := sentinelLong(t, weft.New(wefttest.Script()))
+			s, _ := sentinelLong(t, core.New(wefttest.Script()))
 			return s.ApplyCompaction(sentinelCtx(t), nil)
 		}},
 		{"ErrInvalidCompaction/ApplyCompaction with no summary and no trim", thread.ErrInvalidCompaction, func(t *testing.T) error {
-			s, ids := sentinelLong(t, weft.New(wefttest.Script()))
+			s, ids := sentinelLong(t, core.New(wefttest.Script()))
 			return s.ApplyCompaction(sentinelCtx(t), &thread.Compaction{FirstKept: ids[2]})
 		}},
 		{"ErrAwaitingApproval/Compact while a request is pending", thread.ErrAwaitingApproval, func(t *testing.T) error {
@@ -276,7 +276,7 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		}},
 		{"ErrNotPinnable/Pin of a custom entry", thread.ErrNotPinnable, func(t *testing.T) error {
 			ctx := sentinelCtx(t)
-			s := sentinelCreate(t, thread.Memory(), weft.New(wefttest.Script()))
+			s := sentinelCreate(t, thread.Memory(), core.New(wefttest.Script()))
 			if err := s.Custom(ctx, "app/state", json.RawMessage(`{"k":1}`)); err != nil {
 				t.Fatalf("Custom: %v", err)
 			}
@@ -289,15 +289,15 @@ func TestSentinelsAreMatchable(t *testing.T) {
 			return nil
 		}},
 		{"ErrNoEntry/Pin of an entry the session does not hold", thread.ErrNoEntry, func(t *testing.T) error {
-			s := sentinelCreate(t, thread.Memory(), weft.New(wefttest.Script()))
+			s := sentinelCreate(t, thread.Memory(), core.New(wefttest.Script()))
 			return s.Pin(sentinelCtx(t), "e_missing")
 		}},
 		{"ErrNoEntry/ApplyCompaction keeping from an entry the session does not hold", thread.ErrNoEntry, func(t *testing.T) error {
-			s, _ := sentinelLong(t, weft.New(wefttest.Script()))
+			s, _ := sentinelLong(t, core.New(wefttest.Script()))
 			return s.ApplyCompaction(sentinelCtx(t), &thread.Compaction{Summary: "x", FirstKept: "e_missing"})
 		}},
 		{"ErrNoEntry/Uncompact with no compaction to undo", thread.ErrNoEntry, func(t *testing.T) error {
-			s := sentinelCreate(t, thread.Memory(), weft.New(wefttest.Script()))
+			s := sentinelCreate(t, thread.Memory(), core.New(wefttest.Script()))
 			return s.Uncompact(sentinelCtx(t))
 		}},
 
@@ -415,7 +415,7 @@ func TestSentinelsAreMatchable(t *testing.T) {
 			return err
 		}},
 		{"ErrNotPending/Resume with no open boundary", thread.ErrNotPending, func(t *testing.T) error {
-			s := sentinelCreate(t, thread.Memory(), weft.New(wefttest.Script()))
+			s := sentinelCreate(t, thread.Memory(), core.New(wefttest.Script()))
 			_, err := s.Resume(sentinelCtx(t))
 			return err
 		}},
@@ -461,7 +461,7 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		{"ErrDropped/a queued send ClearQueue removed", thread.ErrDropped, func(t *testing.T) error {
 			ctx := sentinelCtx(t)
 			h := sentinelHeld(t)
-			queued, err := h.s.Send(ctx, weft.User("then email me the result"))
+			queued, err := h.s.Send(ctx, core.User("then email me the result"))
 			if err != nil {
 				t.Fatalf("the queued Send: %v", err)
 			}
@@ -475,7 +475,7 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		{"ErrDropped/a queued steer ClearQueue removed", thread.ErrDropped, func(t *testing.T) error {
 			ctx := sentinelCtx(t)
 			h := sentinelHeld(t)
-			steer, err := h.s.Send(ctx, weft.User("skip the appendix"), thread.As(thread.Steer))
+			steer, err := h.s.Send(ctx, core.User("skip the appendix"), thread.As(thread.Steer))
 			if err != nil {
 				t.Fatalf("the steer: %v", err)
 			}
@@ -490,7 +490,7 @@ func TestSentinelsAreMatchable(t *testing.T) {
 			ctx := sentinelCtx(t)
 			h := sentinelHeld(t)
 			qctx, cancel := context.WithCancel(ctx)
-			queued, err := h.s.Send(qctx, weft.User("never mind"))
+			queued, err := h.s.Send(qctx, core.User("never mind"))
 			if err != nil {
 				t.Fatalf("the queued Send: %v", err)
 			}
@@ -505,8 +505,8 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		{"ErrNotPersisted/a turn whose end the storage refused", thread.ErrNotPersisted, func(t *testing.T) error {
 			ctx := sentinelCtx(t)
 			st := &sentinelNoTurnEnd{Storage: thread.Memory()}
-			s := sentinelCreate(t, st, weft.New(wefttest.Script(wefttest.Say("answered"))))
-			turn, err := s.Send(ctx, weft.User("hello"))
+			s := sentinelCreate(t, st, core.New(wefttest.Script(wefttest.Say("answered"))))
+			turn, err := s.Send(ctx, core.User("hello"))
 			if err != nil {
 				t.Fatalf("Send: %v", err)
 			}
@@ -532,31 +532,31 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		}},
 
 		// --- weft's sentinels a Send documents ------------------------
-		{"weft.ErrInvalidRunOption/RunOptions carrying weft.Approve", weft.ErrInvalidRunOption, func(t *testing.T) error {
-			s := sentinelCreate(t, thread.Memory(), weft.New(wefttest.Script(wefttest.Say("x"))))
-			_, err := s.Send(sentinelCtx(t), weft.User("go"), thread.RunOptions(weft.Approve("call_1")))
+		{"core.ErrInvalidRunOption/RunOptions carrying core.Approve", core.ErrInvalidRunOption, func(t *testing.T) error {
+			s := sentinelCreate(t, thread.Memory(), core.New(wefttest.Script(wefttest.Say("x"))))
+			_, err := s.Send(sentinelCtx(t), core.User("go"), thread.RunOptions(core.Approve("call_1")))
 			return err
 		}},
-		{"weft.ErrInvalidRunOption/RunOptions carrying weft.Deny", weft.ErrInvalidRunOption, func(t *testing.T) error {
-			s := sentinelCreate(t, thread.Memory(), weft.New(wefttest.Script(wefttest.Say("x"))))
-			_, err := s.Send(sentinelCtx(t), weft.User("go"), thread.RunOptions(weft.Deny("call_1", "no")))
+		{"core.ErrInvalidRunOption/RunOptions carrying core.Deny", core.ErrInvalidRunOption, func(t *testing.T) error {
+			s := sentinelCreate(t, thread.Memory(), core.New(wefttest.Script(wefttest.Say("x"))))
+			_, err := s.Send(sentinelCtx(t), core.User("go"), thread.RunOptions(core.Deny("call_1", "no")))
 			return err
 		}},
-		{"weft.ErrInvalidRunOption/RunOptions carrying weft.Prompt", weft.ErrInvalidRunOption, func(t *testing.T) error {
-			s := sentinelCreate(t, thread.Memory(), weft.New(wefttest.Script(wefttest.Say("x"))))
-			_, err := s.Send(sentinelCtx(t), weft.User("go"), thread.RunOptions(weft.Prompt("something else")))
+		{"core.ErrInvalidRunOption/RunOptions carrying core.Prompt", core.ErrInvalidRunOption, func(t *testing.T) error {
+			s := sentinelCreate(t, thread.Memory(), core.New(wefttest.Script(wefttest.Say("x"))))
+			_, err := s.Send(sentinelCtx(t), core.User("go"), thread.RunOptions(core.Prompt("something else")))
 			return err
 		}},
-		{"weft.ErrInvalidRunOption/RunOptions carrying weft.Steering", weft.ErrInvalidRunOption, func(t *testing.T) error {
-			s := sentinelCreate(t, thread.Memory(), weft.New(wefttest.Script(wefttest.Say("x"))))
-			_, err := s.Send(sentinelCtx(t), weft.User("go"), thread.RunOptions(
-				weft.Steering(func(context.Context, weft.SteerPoint) []weft.Message { return nil })))
+		{"core.ErrInvalidRunOption/RunOptions carrying core.Steering", core.ErrInvalidRunOption, func(t *testing.T) error {
+			s := sentinelCreate(t, thread.Memory(), core.New(wefttest.Script(wefttest.Say("x"))))
+			_, err := s.Send(sentinelCtx(t), core.User("go"), thread.RunOptions(
+				core.Steering(func(context.Context, core.SteerPoint) []core.Message { return nil })))
 			return err
 		}},
-		{"weft.ErrInvalidSteer/a steer that is not a user message", weft.ErrInvalidSteer, func(t *testing.T) error {
+		{"core.ErrInvalidSteer/a steer that is not a user message", core.ErrInvalidSteer, func(t *testing.T) error {
 			h := sentinelHeld(t)
 			_, err := h.s.Send(sentinelCtx(t),
-				weft.Message{Role: weft.RoleAssistant, Content: []weft.Part{weft.TextPart{Text: "I speak for the model"}}},
+				core.Message{Role: core.RoleAssistant, Content: []core.Part{core.TextPart{Text: "I speak for the model"}}},
 				thread.As(thread.Steer))
 			return err
 		}},
@@ -613,7 +613,7 @@ func sentinelCtx(t *testing.T) context.Context {
 }
 
 // sentinelCreate creates a session on st, failing the row on error.
-func sentinelCreate(t *testing.T, st thread.Storage, agent *weft.Agent, opts ...thread.SessionOption) *thread.Session {
+func sentinelCreate(t *testing.T, st thread.Storage, agent *core.Agent, opts ...thread.SessionOption) *thread.Session {
 	t.Helper()
 	s, err := thread.Create(sentinelCtx(t), st, agent, opts...)
 	if err != nil {
@@ -625,7 +625,7 @@ func sentinelCreate(t *testing.T, st thread.Storage, agent *weft.Agent, opts ...
 // sentinelClosed returns a Session whose Close has run.
 func sentinelClosed(t *testing.T) *thread.Session {
 	t.Helper()
-	s := sentinelCreate(t, thread.Memory(), weft.New(wefttest.Script(wefttest.Say("x"))))
+	s := sentinelCreate(t, thread.Memory(), core.New(wefttest.Script(wefttest.Say("x"))))
 	if err := s.Close(sentinelCtx(t)); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -637,7 +637,7 @@ func sentinelClosed(t *testing.T) *thread.Session {
 func sentinelOpenWith(t *testing.T, opts ...thread.SessionOption) error {
 	t.Helper()
 	ctx := sentinelCtx(t)
-	st, agent := thread.Memory(), weft.New(wefttest.Script())
+	st, agent := thread.Memory(), core.New(wefttest.Script())
 	s := sentinelCreate(t, st, agent)
 	if err := s.Close(ctx); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -671,7 +671,7 @@ func sentinelInjected(t *testing.T, raw string) (thread.Storage, string) {
 // messages — more than the default KeepRecent keeps raw, so one
 // compaction has something to summarize — opened on agent with opts,
 // and the three entry ids.
-func sentinelLong(t *testing.T, agent *weft.Agent, opts ...thread.SessionOption) (*thread.Session, []string) {
+func sentinelLong(t *testing.T, agent *core.Agent, opts ...thread.SessionOption) (*thread.Session, []string) {
 	t.Helper()
 	ctx := sentinelCtx(t)
 	st := thread.Memory()
@@ -682,7 +682,7 @@ func sentinelLong(t *testing.T, agent *weft.Agent, opts ...thread.SessionOption)
 	for i, topic := range []string{"order ", "invoice ", "refund "} {
 		batch = append(batch, thread.MessageEntry{
 			ID: ids[i], ParentID: parent, Created: time.Now().UTC(),
-			Message: weft.User(strings.Repeat(topic, 30_000/len(topic))),
+			Message: core.User(strings.Repeat(topic, 30_000/len(topic))),
 		})
 		parent = ids[i]
 	}
@@ -747,20 +747,20 @@ type sentinelPark struct {
 func sentinelParked(t *testing.T, opts ...thread.SessionOption) sentinelPark {
 	t.Helper()
 	ctx := sentinelCtx(t)
-	agent := weft.New(
+	agent := core.New(
 		wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: "deploy", Args: `{"env":"prod"}`}),
 			wefttest.Say("Deployed."),
 		),
-		weft.Tool("deploy", "Deploy the service.",
+		core.Tool("deploy", "Deploy the service.",
 			func(_ context.Context, in struct {
 				Env string `json:"env"`
 			}) (string, error) {
 				return "deployed to " + in.Env, nil
 			},
-			weft.RequireApproval()))
+			core.RequireApproval()))
 	s := sentinelCreate(t, thread.Memory(), agent, opts...)
-	turn, err := s.Send(ctx, weft.User("Deploy to prod."))
+	turn, err := s.Send(ctx, core.User("Deploy to prod."))
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -815,13 +815,13 @@ func sentinelHeld(t *testing.T, opts ...thread.SessionOption) sentinelHold {
 	var startOnce, releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(released) }) }
 	t.Cleanup(release)
-	agent := weft.New(
+	agent := core.New(
 		wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: "work"}),
 			wefttest.Say("Done."),
 			wefttest.Say("And the follow-up."),
 		),
-		weft.Tool("work", "Takes a while.", func(ctx context.Context, _ struct{}) (string, error) {
+		core.Tool("work", "Takes a while.", func(ctx context.Context, _ struct{}) (string, error) {
 			startOnce.Do(func() { close(started) })
 			select {
 			case <-released:
@@ -831,7 +831,7 @@ func sentinelHeld(t *testing.T, opts ...thread.SessionOption) sentinelHold {
 			}
 		}))
 	s := sentinelCreate(t, thread.Memory(), agent, opts...)
-	turn, err := s.Send(ctx, weft.User("Do the long job."))
+	turn, err := s.Send(ctx, core.User("Do the long job."))
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}

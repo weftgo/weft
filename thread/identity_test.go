@@ -26,9 +26,9 @@ import (
 	"go.opentelemetry.io/otel/log/embedded"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // idTracerProvider records every span started through it, with the
@@ -189,11 +189,11 @@ type mdCollector struct {
 	mds []map[string]string
 }
 
-func (c *mdCollector) tap() weft.Option {
-	return weft.Tap(func(ctx context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.RunStart); ok {
+func (c *mdCollector) tap() core.Option {
+	return core.Tap(func(ctx context.Context, ev core.Event) {
+		if _, ok := ev.(core.RunStart); ok {
 			c.mu.Lock()
-			c.mds = append(c.mds, weft.MetadataFromContext(ctx))
+			c.mds = append(c.mds, core.MetadataFromContext(ctx))
 			c.mu.Unlock()
 		}
 	})
@@ -211,21 +211,21 @@ func (c *mdCollector) snapshot() []map[string]string {
 func TestRunIdentityOnSpansAndRecords(t *testing.T) {
 	tp, lp := &idTracerProvider{}, &idLogProvider{}
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script(wefttest.Say("first"), wefttest.Say("second")),
-		weft.Name("identity"),
-		weft.TracerProvider(tp), weft.LoggerProvider(lp))
+	agent := core.New(wefttest.Script(wefttest.Say("first"), wefttest.Say("second")),
+		core.Name("identity"),
+		core.TracerProvider(tp), core.LoggerProvider(lp))
 	s, err := thread.Create(ctx, thread.Memory(), agent, thread.PublicID("support-42"))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	t1, err := s.Send(ctx, weft.User("question one"))
+	t1, err := s.Send(ctx, core.User("question one"))
 	if err != nil {
 		t.Fatalf("Send 1: %v", err)
 	}
 	if _, err := t1.Wait(); err != nil {
 		t.Fatalf("Wait 1: %v", err)
 	}
-	t2, err := s.Send(ctx, weft.User("question two"))
+	t2, err := s.Send(ctx, core.User("question two"))
 	if err != nil {
 		t.Fatalf("Send 2: %v", err)
 	}
@@ -294,21 +294,21 @@ func TestRunIdentityResumedTurn(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		col := &mdCollector{}
-		agent := weft.New(
+		agent := core.New(
 			wefttest.Script(
 				wefttest.ToolCalls(wefttest.Call{Name: "dangerous", ID: "call_9"}),
 				wefttest.Say("the call ran"),
 			),
-			weft.Tool("dangerous", "needs a human", func(ctx context.Context, in struct{}) (string, error) {
+			core.Tool("dangerous", "needs a human", func(ctx context.Context, in struct{}) (string, error) {
 				return "approved result", nil
-			}, weft.RequireApproval()),
+			}, core.RequireApproval()),
 			col.tap(),
 		)
 		s, err := thread.Create(ctx, st, agent, thread.PublicID("share-9"))
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		t1, err := s.Send(ctx, weft.User("do the dangerous thing"))
+		t1, err := s.Send(ctx, core.User("do the dangerous thing"))
 		if err != nil {
 			t.Fatalf("Send: %v", err)
 		}
@@ -355,23 +355,23 @@ func TestRunIdentityOverflowReRunCarriesNewTurn(t *testing.T) {
 	col := &mdCollector{}
 	model := wefttest.Script(
 		wefttest.Say("the first answer"),
-		wefttest.Fail(weft.ErrContextOverflow),
+		wefttest.Fail(core.ErrContextOverflow),
 		wefttest.Say("the summary of what came before"),
 		wefttest.Say("recovered after compaction"),
 	)
-	agent := weft.New(model, col.tap())
+	agent := core.New(model, col.tap())
 	s, err := thread.Create(ctx, thread.Memory(), agent, thread.KeepRecent(1))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	t0, err := s.Send(ctx, weft.User("a first question"))
+	t0, err := s.Send(ctx, core.User("a first question"))
 	if err != nil {
 		t.Fatalf("Send 0: %v", err)
 	}
 	if _, err := t0.Wait(); err != nil {
 		t.Fatalf("Wait 0: %v", err)
 	}
-	t1, err := s.Send(ctx, weft.User("a prompt that overflows"))
+	t1, err := s.Send(ctx, core.User("a prompt that overflows"))
 	if err != nil {
 		t.Fatalf("Send 1: %v", err)
 	}
@@ -403,12 +403,12 @@ func TestRunIdentityFork(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		col := &mdCollector{}
-		agent := weft.New(wefttest.Script(wefttest.Say("parent reply"), wefttest.Say("fork reply")), col.tap())
+		agent := core.New(wefttest.Script(wefttest.Say("parent reply"), wefttest.Say("fork reply")), col.tap())
 		s, err := thread.Create(ctx, st, agent)
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		t0, err := s.Send(ctx, weft.User("the original question"))
+		t0, err := s.Send(ctx, core.User("the original question"))
 		if err != nil {
 			t.Fatalf("Send: %v", err)
 		}
@@ -419,7 +419,7 @@ func TestRunIdentityFork(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Fork: %v", err)
 		}
-		ft, err := f.Send(ctx, weft.User("the fork's question"))
+		ft, err := f.Send(ctx, core.User("the fork's question"))
 		if err != nil {
 			t.Fatalf("fork Send: %v", err)
 		}
@@ -456,18 +456,18 @@ func TestRunIdentityFork(t *testing.T) {
 
 // A caller's Metadata key that collides with a session key loses: the
 // session's identity is appended after the caller's options, and a
-// later weft.Metadata wins (S5, S1.1). Keys the session does not claim
+// later core.Metadata wins (S5, S1.1). Keys the session does not claim
 // pass through untouched.
 func TestRunIdentityCallerCollisionLoses(t *testing.T) {
 	ctx := context.Background()
 	col := &mdCollector{}
-	agent := weft.New(wefttest.Script(wefttest.Say("a reply")), col.tap())
+	agent := core.New(wefttest.Script(wefttest.Say("a reply")), col.tap())
 	s, err := thread.Create(ctx, thread.Memory(), agent, thread.PublicID("share-1"))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	turn, err := s.Send(ctx, weft.User("hello"),
-		thread.RunOptions(weft.Metadata(map[string]string{
+	turn, err := s.Send(ctx, core.User("hello"),
+		thread.RunOptions(core.Metadata(map[string]string{
 			"weft.session.id": "forged-session",
 			"weft.turn":       "99",
 			"tenant":          "acme",
@@ -503,7 +503,7 @@ func TestRunIdentityCallerCollisionLoses(t *testing.T) {
 func TestListByPublicID(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script(wefttest.Say("r"), wefttest.Say("r"), wefttest.Say("r")))
+		agent := core.New(wefttest.Script(wefttest.Say("r"), wefttest.Say("r"), wefttest.Say("r")))
 		a, err := thread.Create(ctx, st, agent, thread.IDs(func() string { return "s_pub_a" }), thread.PublicID("share-a"))
 		if err != nil {
 			t.Fatalf("Create a: %v", err)
@@ -553,7 +553,7 @@ func TestListByPublicID(t *testing.T) {
 			t.Fatalf("Append the old-shape info entry: %v", err)
 		}
 		col := &mdCollector{}
-		rotated := weft.New(wefttest.Script(wefttest.Say("r")), col.tap())
+		rotated := core.New(wefttest.Script(wefttest.Say("r")), col.tap())
 		abandon(t, st, c.ID())
 		cAgent, err := thread.Open(ctx, st, c.ID(), rotated)
 		if err != nil {
@@ -562,7 +562,7 @@ func TestListByPublicID(t *testing.T) {
 		if got := cAgent.Meta(); got["weft.public_id"] != "share-c" || got["team"] != "support" {
 			t.Errorf("Meta = %v, want the header's share-c beside the ordinary key", got)
 		}
-		turn, err := cAgent.Send(ctx, weft.User("after the rotation attempt"))
+		turn, err := cAgent.Send(ctx, core.User("after the rotation attempt"))
 		if err != nil {
 			t.Fatalf("Send: %v", err)
 		}

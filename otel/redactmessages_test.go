@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"go.opentelemetry.io/otel/attribute"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 )
@@ -18,8 +18,8 @@ const testCard = "4111111111111111"
 
 // maskCard is the masking redactor the tests use: every kind it is
 // handed, the card number becomes [CARD]; it records the kinds it saw.
-func maskCard(seen map[weft.ContentKind]bool) func(weft.ContentKind, string) string {
-	return func(kind weft.ContentKind, s string) string {
+func maskCard(seen map[core.ContentKind]bool) func(core.ContentKind, string) string {
+	return func(kind core.ContentKind, s string) string {
 		if strings.Contains(s, testCard) && seen != nil {
 			seen[kind] = true
 		}
@@ -30,7 +30,7 @@ func maskCard(seen map[weft.ContentKind]bool) func(weft.ContentKind, string) str
 // Redact applies to weft.messages records, part by part: the user's
 // prompt, the assistant's text and reasoning, tool-call args (a JSON
 // document and the model's non-JSON bytes) and tool results come out
-// masked; the batch still decodes as []weft.Message with the same
+// masked; the batch still decodes as []core.Message with the same
 // messages, roles and part types; the record attributes (index, count)
 // are untouched; the Local sink stores the redacted batch and
 // obsdb.Transcript — Studio's transcript route — reads it back. Pre-fix
@@ -40,7 +40,7 @@ func TestRedactAppliesToMessagesRecords(t *testing.T) {
 	dir := t.TempDir()
 	redacted, raw := filepath.Join(dir, "redacted.db"), filepath.Join(dir, "raw.db")
 	mem, off := newMemExporter(), newMemExporter()
-	seen := map[weft.ContentKind]bool{}
+	seen := map[core.ContentKind]bool{}
 	p, err := Start(testCtx(t), NoGlobal(), NoEnv(), Heartbeat(0),
 		Content(ContentConfig{Redact: maskCard(seen)}),
 		Local(redacted),
@@ -54,17 +54,17 @@ func TestRedactAppliesToMessagesRecords(t *testing.T) {
 	type payIn struct {
 		Card string `json:"card"`
 	}
-	pay := weft.Tool("pay", "Charge a card.", func(_ context.Context, in payIn) (string, error) {
+	pay := core.Tool("pay", "Charge a card.", func(_ context.Context, in payIn) (string, error) {
 		return "charged card " + testCard, nil
 	})
-	agt := weft.New(wefttest.Script(
+	agt := core.New(wefttest.Script(
 		wefttest.Think("the card is "+testCard, wefttest.ToolCalls(
 			wefttest.Call{Name: "pay", Args: `{"card":"` + testCard + `"}`},
 			wefttest.Call{Name: "pay", Args: `card ` + testCard + ` oops`}, // not JSON
 		)),
 		wefttest.Say("charged "+testCard),
-	), pay, weft.TracerProvider(p.TracerProvider()), weft.LoggerProvider(p.LoggerProvider()))
-	res, err := agt.Generate(context.Background(), weft.Prompt("pay with "+testCard))
+	), pay, core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	res, err := agt.Generate(context.Background(), core.Prompt("pay with "+testCard))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,9 +101,9 @@ func TestRedactAppliesToMessagesRecords(t *testing.T) {
 		if strings.Contains(string(got[i]), testCard) {
 			t.Errorf("batch %d leaks the card number through Redact: %s", i, got[i])
 		}
-		var gm, rm []weft.Message
+		var gm, rm []core.Message
 		if err := json.Unmarshal(got[i], &gm); err != nil {
-			t.Fatalf("batch %d no longer decodes as []weft.Message: %v (%s)", i, err, got[i])
+			t.Fatalf("batch %d no longer decodes as []core.Message: %v (%s)", i, err, got[i])
 		}
 		if err := json.Unmarshal(ref[i], &rm); err != nil {
 			t.Fatal(err)
@@ -117,16 +117,16 @@ func TestRedactAppliesToMessagesRecords(t *testing.T) {
 			}
 			for k, part := range gm[j].Content {
 				switch pt := part.(type) {
-				case weft.TextPart:
+				case core.TextPart:
 					if strings.Contains(pt.Text, "[CARD]") {
 						masked[string(gm[j].Role)+" text"] = true
 					}
-				case weft.ReasoningPart:
+				case core.ReasoningPart:
 					if strings.Contains(pt.Text, "[CARD]") {
 						masked["reasoning"] = true
 					}
-				case weft.ToolCallPart:
-					rc := rm[j].Content[k].(weft.ToolCallPart)
+				case core.ToolCallPart:
+					rc := rm[j].Content[k].(core.ToolCallPart)
 					if pt.ID != rc.ID || pt.Name != rc.Name {
 						t.Errorf("tool call ids/names changed: %+v vs %+v", pt, rc)
 					}
@@ -140,8 +140,8 @@ func TestRedactAppliesToMessagesRecords(t *testing.T) {
 							masked["non-json args"] = true
 						}
 					}
-				case weft.ToolResultPart:
-					rr := rm[j].Content[k].(weft.ToolResultPart)
+				case core.ToolResultPart:
+					rr := rm[j].Content[k].(core.ToolResultPart)
 					if pt.CallID != rr.CallID || pt.IsError != rr.IsError {
 						t.Errorf("tool result ids changed: %+v vs %+v", pt, rr)
 					}
@@ -157,7 +157,7 @@ func TestRedactAppliesToMessagesRecords(t *testing.T) {
 			t.Errorf("no masked %s in the stored transcript (masked: %v)", want, masked)
 		}
 	}
-	for _, k := range []weft.ContentKind{weft.ContentText, weft.ContentReasoning, weft.ContentArgs, weft.ContentResult} {
+	for _, k := range []core.ContentKind{core.ContentText, core.ContentReasoning, core.ContentArgs, core.ContentResult} {
 		if !seen[k] {
 			t.Errorf("Redact never saw the card under kind %q", k)
 		}
@@ -182,7 +182,7 @@ func TestRedactAppliesToMessagesRecords(t *testing.T) {
 			}
 			return true
 		})
-		var msgs []weft.Message
+		var msgs []core.Message
 		if err := json.Unmarshal([]byte(r.Body().AsString()), &msgs); err != nil || int64(len(msgs)) != n {
 			t.Errorf("record %d: count %d, body %d messages (%v)", idx, n, len(msgs), err)
 		}
@@ -215,8 +215,8 @@ func TestRedactMessagesArgsFallbackAndIdentity(t *testing.T) {
 	body := `[{"role":"assistant","content":[{"type":"tool_call","id":"c1","name":"pay","args":{"card":"` + testCard + `"}}]}]`
 	mem := newMemExporter()
 	p := &destProc{name: "t", inner: sdklog.NewSimpleProcessor(mem), content: true, drops: newDropCounter("t"),
-		contentC: ContentConfig{MaxBytes: 4, Redact: func(kind weft.ContentKind, s string) string {
-			if kind == weft.ContentArgs {
+		contentC: ContentConfig{MaxBytes: 4, Redact: func(kind core.ContentKind, s string) string {
+			if kind == core.ContentArgs {
 				return "[REDACTED]"
 			}
 			return s
@@ -236,11 +236,11 @@ func TestRedactMessagesArgsFallbackAndIdentity(t *testing.T) {
 	if len(recs) != 3 {
 		t.Fatalf("exported %d records, want 3", len(recs))
 	}
-	var msgs []weft.Message
+	var msgs []core.Message
 	if err := json.Unmarshal([]byte(recs[0].Body().AsString()), &msgs); err != nil {
 		t.Fatalf("redacted batch does not decode: %v (%s)", err, recs[0].Body().AsString())
 	}
-	if args := string(msgs[0].Content[0].(weft.ToolCallPart).Args); args != `"[REDACTED]"` {
+	if args := string(msgs[0].Content[0].(core.ToolCallPart).Args); args != `"[REDACTED]"` {
 		t.Errorf("non-JSON redactor output = %s, want the JSON string", args)
 	}
 	if got := recs[1].Body().AsString(); got != unchanged {
@@ -267,7 +267,7 @@ func TestRedactMessagesFailureNeverLeaks(t *testing.T) {
 	drops.log = slog.New(slog.NewTextHandler(buf, nil))
 	mem := newMemExporter()
 	p := &destProc{name: "t", inner: sdklog.NewSimpleProcessor(mem), content: true, drops: drops,
-		contentC: ContentConfig{Redact: func(_ weft.ContentKind, s string) string { panic("cannot redact " + s) }}}
+		contentC: ContentConfig{Redact: func(_ core.ContentKind, s string) string { panic("cannot redact " + s) }}}
 	body := `[{"role":"user","content":[{"type":"text","text":"card ` + testCard + `"}]}]`
 	if err := p.OnEmit(context.Background(), messagesRecord(t, body)); err != nil {
 		t.Fatal(err)

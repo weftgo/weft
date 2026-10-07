@@ -117,7 +117,7 @@ func Base(path string) Option {
 	}
 }
 
-// Manifest supplies weft.Manifest bytes for the agent and tool cards.
+// Manifest supplies core.Manifest bytes for the agent and tool cards.
 // Without it api/manifest answers 404 and the UI hides the Agents nav.
 func Manifest(json []byte) Option {
 	return func(c *config) { c.manifest = json }

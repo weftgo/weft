@@ -9,9 +9,9 @@ import (
 
 	openaisdk "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest/conformance"
 	"github.com/weftgo/weft/openai"
-	"github.com/weftgo/weft/wefttest/conformance"
 )
 
 // fixtureFile maps each conformance case to its recorded SSE file;
@@ -36,9 +36,9 @@ const stallChunk = `data: {"id":"c1","object":"chat.completion.chunk","created":
 // the suite runs under WEFT_MODEL_REQUESTS=deny — while kill_switch
 // keeps a self-built client: it is the one case that must prove the
 // switch fires before I/O.
-func newModel(t *testing.T, name string) weft.Model {
+func newModel(t *testing.T, name string) core.Model {
 	t.Helper()
-	at := func(srv *httptest.Server, opts ...openai.Option) weft.Model {
+	at := func(srv *httptest.Server, opts ...openai.Option) core.Model {
 		c := openaisdk.NewClient(option.WithBaseURL(srv.URL), option.WithAPIKey("test"))
 		return openai.Model("m", append([]openai.Option{openai.Client(&c)}, opts...)...)
 	}

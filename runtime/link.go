@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -93,7 +93,7 @@ type link struct {
 	forkCmd     map[string]command           // fork session id → the command its latest turn ran (a rebuilt park's shaping)
 	forkOrder   []string                     // forked session ids, oldest first
 	breakpoints map[string]bool              // the debugger's tool set (§8.3): parked on every run
-	steerQ      map[string]chan weft.Message // run id → the in-flight run's steering queue
+	steerQ      map[string]chan core.Message // run id → the in-flight run's steering queue
 	steerSess   map[string]forkSteer         // fork turns in flight: steered through the session
 
 	reconnect    func() time.Duration // backoff; indirected by tests
@@ -118,7 +118,7 @@ func newLink(c *config, reg *registry, url, token string) *link {
 		forks:       map[string]*thread.Session{},
 		forkCmd:     map[string]command{},
 		breakpoints: map[string]bool{},
-		steerQ:      map[string]chan weft.Message{},
+		steerQ:      map[string]chan core.Message{},
 		steerSess:   map[string]forkSteer{},
 	}
 	l.ctx, l.cancel = context.WithCancel(context.Background())
@@ -861,11 +861,11 @@ func (l *link) setBreakpoints(tools []string) {
 // command's shaping, the park rule above all).
 type forkSteer struct {
 	sess *thread.Session
-	opts []weft.RunOption
+	opts []core.RunOption
 }
 
 // steer delivers one user message into a runtime-started run (§8.4):
-// the ephemeral run's steering queue (weft.Steering's source drains it
+// the ephemeral run's steering queue (core.Steering's source drains it
 // at the loop's two fixed points), or a fork turn's session as a
 // thread steer. The app's own turns are never steerable from here
 // (PQ7): this link holds no handle to them.
@@ -877,7 +877,7 @@ func (l *link) steer(st steerFrame) {
 	switch {
 	case q != nil:
 		select {
-		case q <- weft.User(st.Message):
+		case q <- core.User(st.Message):
 		default:
 			slog.Debug("weft/runtime: steer dropped (queue full or run ending)", "run_id", st.RunID)
 		}
@@ -891,7 +891,7 @@ func (l *link) steer(st steerFrame) {
 		// ends, with nothing in flight and no boundary open, runs as a
 		// plain turn under its own options alone — it must not run
 		// unparked (§6 rule 3).
-		if _, err := fs.sess.Send(context.Background(), weft.User(st.Message),
+		if _, err := fs.sess.Send(context.Background(), core.User(st.Message),
 			thread.As(thread.Steer), thread.RunOptions(fs.opts...)); err != nil {
 			slog.Debug("weft/runtime: steer into the fork refused", "run_id", st.RunID, "err", err)
 		}

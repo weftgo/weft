@@ -7,9 +7,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // An Interrupt over a parked boundary is the session's own path: it
@@ -29,7 +29,7 @@ func TestInterruptDeniesUnderRequireSigned(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, call := parkTurn(t, s, ctx)
-	follow, err := s.Send(ctx, weft.User("forget the refund, do this"))
+	follow, err := s.Send(ctx, core.User("forget the refund, do this"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestInterruptDenialFailureFailsTheSend(t *testing.T) {
 	_, call := parkTurn(t, s, ctx)
 
 	st.down.Store(true)
-	turn, err := s.Send(ctx, weft.User("forget the refund"))
+	turn, err := s.Send(ctx, core.User("forget the refund"))
 	if !errors.Is(err, errStorageDown) || turn != nil {
 		t.Fatalf("the interrupting Send: turn %v, err %v; want the storage's error", turn, err)
 	}
@@ -107,7 +107,7 @@ func TestInterruptDenialFailureFailsTheSend(t *testing.T) {
 			turns++
 		case thread.MessageEntry:
 			for _, p := range e.Message.Content {
-				if tp, ok := p.(weft.TextPart); ok && strings.Contains(tp.Text, "forget the refund") {
+				if tp, ok := p.(core.TextPart); ok && strings.Contains(tp.Text, "forget the refund") {
 					t.Fatal("the refused message reached the tree")
 				}
 			}

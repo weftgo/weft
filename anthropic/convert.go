@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/internal/adapterkit"
 )
 
@@ -16,8 +16,8 @@ import (
 // sends the request value. MaxTokens is special only in its floor: the
 // API requires a positive value, so a request MaxTokens of 0 keeps the
 // default rather than sending a value the API would reject (documented
-// on weft.RequestParams).
-func (m *model) foldParams(p *anthropic.MessageNewParams, rp weft.RequestParams) {
+// on core.RequestParams).
+func (m *model) foldParams(p *anthropic.MessageNewParams, rp core.RequestParams) {
 	if rp.Temperature != nil {
 		p.Temperature = anthropic.Float(*rp.Temperature)
 	} else if m.tempSet {
@@ -46,7 +46,7 @@ func (m *model) foldParams(p *anthropic.MessageNewParams, rp weft.RequestParams)
 // params builds the Messages request for one step. The ModelRequest is
 // read-only: conversion builds fresh SDK values and never mutates
 // req.Messages or req.Tools.
-func (m *model) params(req weft.ModelRequest) (anthropic.MessageNewParams, error) {
+func (m *model) params(req core.ModelRequest) (anthropic.MessageNewParams, error) {
 	p := anthropic.MessageNewParams{
 		Model:    anthropic.Model(m.name),
 		Messages: make([]anthropic.MessageParam, 0, len(req.Messages)),
@@ -72,13 +72,13 @@ func (m *model) params(req weft.ModelRequest) (anthropic.MessageNewParams, error
 	// depth to the model — adaptive, the same shape Thinking(true)
 	// sends. Off wins over a contradictory Budget.
 	switch {
-	case req.Thinking.Level == weft.ThinkOff:
+	case req.Thinking.Level == core.ThinkOff:
 		p.Thinking = anthropic.ThinkingConfigParamUnion{
 			OfDisabled: &anthropic.ThinkingConfigDisabledParam{},
 		}
 	case req.Thinking.Budget > 0:
 		p.Thinking = anthropic.ThinkingConfigParamOfEnabled(req.Thinking.Budget)
-	case req.Thinking.Level != weft.ThinkUnset:
+	case req.Thinking.Level != core.ThinkUnset:
 		p.Thinking = anthropic.ThinkingConfigParamUnion{
 			OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{},
 		}
@@ -91,19 +91,19 @@ func (m *model) params(req weft.ModelRequest) (anthropic.MessageNewParams, error
 	// loop's validation already fails a forced choice without one.
 	if len(req.Tools) > 0 {
 		switch req.ToolChoice.Mode {
-		case weft.ToolChoiceAny:
+		case core.ToolChoiceAny:
 			any := &anthropic.ToolChoiceAnyParam{}
 			if req.SequentialTools {
 				any.DisableParallelToolUse = anthropic.Bool(true)
 			}
 			p.ToolChoice = anthropic.ToolChoiceUnionParam{OfAny: any}
-		case weft.ToolChoiceNamed:
+		case core.ToolChoiceNamed:
 			tool := &anthropic.ToolChoiceToolParam{Name: req.ToolChoice.Name}
 			if req.SequentialTools {
 				tool.DisableParallelToolUse = anthropic.Bool(true)
 			}
 			p.ToolChoice = anthropic.ToolChoiceUnionParam{OfTool: tool}
-		case weft.ToolChoiceNone:
+		case core.ToolChoiceNone:
 			p.ToolChoice = anthropic.ToolChoiceUnionParam{OfNone: &anthropic.ToolChoiceNoneParam{}}
 		default:
 			if req.SequentialTools {
@@ -117,7 +117,7 @@ func (m *model) params(req weft.ModelRequest) (anthropic.MessageNewParams, error
 	}
 	for _, msg := range req.Messages {
 		switch msg.Role {
-		case weft.RoleUser:
+		case core.RoleUser:
 			blocks, err := userBlocks(msg)
 			if err != nil {
 				return p, err
@@ -125,19 +125,19 @@ func (m *model) params(req weft.ModelRequest) (anthropic.MessageNewParams, error
 			if len(blocks) > 0 {
 				p.Messages = append(p.Messages, anthropic.NewUserMessage(blocks...))
 			}
-		case weft.RoleAssistant:
+		case core.RoleAssistant:
 			// An assistant message with no sendable blocks (only
 			// unsigned reasoning, say) is skipped: the API rejects
 			// empty content arrays.
 			if blocks := assistantBlocks(msg); len(blocks) > 0 {
 				p.Messages = append(p.Messages, anthropic.NewAssistantMessage(blocks...))
 			}
-		case weft.RoleTool:
+		case core.RoleTool:
 			// weft's batched tool message is already Anthropic's shape:
 			// one user message, N tool_result blocks, in part order.
 			blocks := make([]anthropic.ContentBlockParamUnion, 0, len(msg.Content))
 			for _, part := range msg.Content {
-				tr, ok := part.(weft.ToolResultPart)
+				tr, ok := part.(core.ToolResultPart)
 				if !ok {
 					continue
 				}
@@ -222,16 +222,16 @@ func markBlock(u *anthropic.ContentBlockParamUnion, mark anthropic.CacheControlE
 // and PDF file parts to image/document blocks (inline bytes base64, or
 // a URL). Anything else, or a FilePart with both or neither of Data and
 // URL, is refused wrapping ErrUnsupported.
-func userBlocks(msg weft.Message) ([]anthropic.ContentBlockParamUnion, error) {
+func userBlocks(msg core.Message) ([]anthropic.ContentBlockParamUnion, error) {
 	blocks := make([]anthropic.ContentBlockParamUnion, 0, len(msg.Content))
 	for _, part := range msg.Content {
 		switch p := part.(type) {
-		case weft.TextPart:
+		case core.TextPart:
 			if p.Text == "" {
 				continue // an empty text block is API-rejected; it carries nothing
 			}
 			blocks = append(blocks, anthropic.NewTextBlock(p.Text))
-		case weft.FilePart:
+		case core.FilePart:
 			if err := adapterkit.FilePartSource(p); err != nil {
 				return nil, err
 			}
@@ -252,13 +252,13 @@ func userBlocks(msg weft.Message) ([]anthropic.ContentBlockParamUnion, error) {
 					MediaType: "application/pdf",
 				}))
 			default:
-				return nil, fmt.Errorf("%w: anthropic accepts image and PDF files, got %q", weft.ErrUnsupported, p.MediaType)
+				return nil, fmt.Errorf("%w: anthropic accepts image and PDF files, got %q", core.ErrUnsupported, p.MediaType)
 			}
 		}
 	}
 	// A user message must carry at least one non-empty block; the API
 	// rejects empty content arrays. A message whose every part was
-	// empty text (weft.User("")) keeps a visible placeholder rather
+	// empty text (core.User("")) keeps a visible placeholder rather
 	// than silently vanishing from the transcript — openai's rule too;
 	// google drops the message instead (see each adapter's userParts).
 	if len(blocks) == 0 {
@@ -272,10 +272,10 @@ func userBlocks(msg weft.Message) ([]anthropic.ContentBlockParamUnion, error) {
 // without a signature — a transcript that came from another provider —
 // is dropped rather than failing the call; Anthropic rejects unsigned
 // thinking blocks.
-func assistantBlocks(msg weft.Message) []anthropic.ContentBlockParamUnion {
+func assistantBlocks(msg core.Message) []anthropic.ContentBlockParamUnion {
 	blocks := make([]anthropic.ContentBlockParamUnion, 0, len(msg.Content))
 	for _, part := range msg.Content {
-		if r, ok := part.(weft.ReasoningPart); ok {
+		if r, ok := part.(core.ReasoningPart); ok {
 			if r.Signature != "" {
 				blocks = append(blocks, anthropic.NewThinkingBlock(r.Signature, r.Text))
 			}
@@ -284,12 +284,12 @@ func assistantBlocks(msg weft.Message) []anthropic.ContentBlockParamUnion {
 	}
 	for _, part := range msg.Content {
 		switch p := part.(type) {
-		case weft.TextPart:
+		case core.TextPart:
 			if p.Text == "" {
 				continue // an empty text block is API-rejected; it carries nothing
 			}
 			blocks = append(blocks, anthropic.NewTextBlock(p.Text))
-		case weft.ToolCallPart:
+		case core.ToolCallPart:
 			// The API requires an object; nil args (a hand-built call)
 			// would travel as input:null and be rejected. Inbound, the
 			// stream already normalises empty arguments to {}.
@@ -305,7 +305,7 @@ func assistantBlocks(msg weft.Message) []anthropic.ContentBlockParamUnion {
 
 // convertTool converts a ToolDef to the SDK's tool type. Conversion
 // runs per request (ADR 0013: the pointer-keyed cache never evicted).
-func convertTool(t *weft.ToolDef) anthropic.ToolUnionParam {
+func convertTool(t *core.ToolDef) anthropic.ToolUnionParam {
 	tool := anthropic.ToolParam{Name: t.Name}
 	if t.Description != "" {
 		tool.Description = anthropic.String(t.Description)
@@ -322,7 +322,7 @@ func convertTool(t *weft.ToolDef) anthropic.ToolUnionParam {
 		// The SDK param has fields for properties, required and type
 		// only; every other top-level keyword — additionalProperties
 		// (typed map values), and a foreign schema's $defs, $schema,
-		// oneOf, … (weft.ParseSchema) — rides ExtraFields onto the
+		// oneOf, … (core.ParseSchema) — rides ExtraFields onto the
 		// wire, so the model sees the schema whole and a $ref inside
 		// properties never dangles.
 		for k, v := range m {
@@ -343,22 +343,22 @@ func convertTool(t *weft.ToolDef) anthropic.ToolUnionParam {
 // mapStopReason converts the wire stop_reason; the raw value rides on
 // ModelFinish.Raw whenever the mapping is approximate, with the refusal
 // category appended when the API names one.
-func mapStopReason(reason string, category string) (weft.StopReason, string) {
+func mapStopReason(reason string, category string) (core.StopReason, string) {
 	switch reason {
 	case "end_turn":
-		return weft.StopEndTurn, ""
+		return core.StopEndTurn, ""
 	case "tool_use":
-		return weft.StopToolCalls, ""
+		return core.StopToolCalls, ""
 	case "max_tokens":
-		return weft.StopMaxTokens, ""
+		return core.StopMaxTokens, ""
 	case "refusal":
 		if category != "" {
-			return weft.StopEndTurn, "refusal:" + category
+			return core.StopEndTurn, "refusal:" + category
 		}
-		return weft.StopEndTurn, reason
+		return core.StopEndTurn, reason
 	default:
 		// stop_sequence, pause_turn, anything newer: end the turn and
 		// keep the vendor's word on Raw (empty stays empty).
-		return weft.StopEndTurn, reason
+		return core.StopEndTurn, reason
 	}
 }

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/sqlite"
 )
@@ -31,7 +31,7 @@ func buildBigSession(tb testing.TB, st thread.Storage, id string, n int) {
 		}
 		entries := make([]thread.Entry, 0, end-i)
 		for j := i; j < end; j++ {
-			e := thread.MessageEntry{Message: weft.User("tick " + strconv.Itoa(j))}
+			e := thread.MessageEntry{Message: core.User("tick " + strconv.Itoa(j))}
 			e.ID = fmt.Sprintf("e_%06d", j)
 			e.ParentID = parent
 			e.Created = time.Now().UTC()

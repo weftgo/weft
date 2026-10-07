@@ -28,7 +28,7 @@
 //
 // # The entry tree and the format
 //
-// The entry kinds are a sealed set, like weft.Event, one wire
+// The entry kinds are a sealed set, like core.Event, one wire
 // discriminator each, restored by UnmarshalEntry: message, turn,
 // compaction, branch_summary, leaf, label, info, custom,
 // custom_message; the approval kinds approval_request,
@@ -112,7 +112,7 @@
 // reads the summary in place of what came before. ContextWindow arms
 // the automatic trigger; Session.Compact, Session.PreviewCompaction
 // and Session.ApplyCompaction are the manual path; a turn that fails
-// with weft.ErrContextOverflow compacts and runs once more.
+// with core.ErrContextOverflow compacts and runs once more.
 //
 // Approvals (ADR 0021) make the core's approval boundary durable: a
 // parked call is an approval_request entry, Session.Pending lists
@@ -187,5 +187,5 @@
 // ErrInvalidDecision, the signed-decision and compaction sentinels —
 // or how a turn ended: the error Turn.Wait returns wraps ErrNotRun,
 // ErrDropped, ErrNotPersisted or ErrTurnPanicked, or is the run's own
-// *weft.RunError.
+// *core.RunError.
 package thread

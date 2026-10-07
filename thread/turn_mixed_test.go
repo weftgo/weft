@@ -9,18 +9,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
 	"github.com/weftgo/weft/thread/threadtest"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // mixedAgent builds the agent of the mixed-batch rows: one step calls a
 // plain tool and an approval-gated one, so the step executes the first
 // and parks the second — the tool message the parking run records is
 // partial, and the resume completes it.
-func mixedAgent(extra ...wefttest.Turn) (*weft.Agent, *wefttest.Model, *atomic.Int32) {
+func mixedAgent(extra ...wefttest.Turn) (*core.Agent, *wefttest.Model, *atomic.Int32) {
 	steps := append([]wefttest.Turn{
 		wefttest.ToolCalls(
 			wefttest.Call{Name: "safe", ID: "call_s"},
@@ -30,23 +30,23 @@ func mixedAgent(extra ...wefttest.Turn) (*weft.Agent, *wefttest.Model, *atomic.I
 	}, extra...)
 	m := wefttest.Script(steps...)
 	ran := new(atomic.Int32)
-	agent := weft.New(m,
-		weft.Tool("safe", "runs at once", func(context.Context, struct{}) (string, error) {
+	agent := core.New(m,
+		core.Tool("safe", "runs at once", func(context.Context, struct{}) (string, error) {
 			return "safe result", nil
 		}),
-		weft.Tool("dangerous", "needs a human", func(context.Context, struct{}) (string, error) {
+		core.Tool("dangerous", "needs a human", func(context.Context, struct{}) (string, error) {
 			ran.Add(1)
 			return "dangerous result", nil
-		}, weft.RequireApproval()),
+		}, core.RequireApproval()),
 	)
 	return agent, m, ran
 }
 
 // toolMessages lists the tool-role messages of the session's context.
-func toolMessages(s *thread.Session) []weft.Message {
-	var out []weft.Message
+func toolMessages(s *thread.Session) []core.Message {
+	var out []core.Message
 	for _, m := range s.Context() {
-		if m.Role == weft.RoleTool {
+		if m.Role == core.RoleTool {
 			out = append(out, m)
 		}
 	}
@@ -54,10 +54,10 @@ func toolMessages(s *thread.Session) []weft.Message {
 }
 
 // resultIDs lists a tool message's result call ids, in order.
-func resultIDs(m weft.Message) []string {
+func resultIDs(m core.Message) []string {
 	var out []string
 	for _, p := range m.Content {
-		if r, ok := p.(weft.ToolResultPart); ok {
+		if r, ok := p.(core.ToolResultPart); ok {
 			out = append(out, r.CallID)
 		}
 	}
@@ -88,7 +88,7 @@ func assertMixedClosed(t *testing.T, s *thread.Session) {
 	}
 	n := 0
 	for _, e := range path {
-		if me, ok := e.(thread.MessageEntry); ok && me.Message.Role == weft.RoleTool {
+		if me, ok := e.(thread.MessageEntry); ok && me.Message.Role == core.RoleTool {
 			n++
 		}
 	}
@@ -109,7 +109,7 @@ func TestMixedBatchAutoResume(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t1, err := s.Send(ctx, weft.User("do both"))
+		t1, err := s.Send(ctx, core.User("do both"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -151,7 +151,7 @@ func TestMixedBatchAutoResume(t *testing.T) {
 		}
 		// The next Send runs — it is not queued behind a boundary that
 		// never closes.
-		t3, err := s.Send(ctx, weft.User("and then"))
+		t3, err := s.Send(ctx, core.User("and then"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -182,11 +182,11 @@ func TestMixedBatchManualResume(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t1, _ := s.Send(ctx, weft.User("do both"))
+		t1, _ := s.Send(ctx, core.User("do both"))
 		if _, err := t1.Wait(); err != nil {
 			t.Fatal(err)
 		}
-		queued, err := s.Send(ctx, weft.User("and then"))
+		queued, err := s.Send(ctx, core.User("and then"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -232,7 +232,7 @@ func TestMixedBatchAcrossReopen(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t1, _ := s.Send(ctx, weft.User("do both"))
+		t1, _ := s.Send(ctx, core.User("do both"))
 		if _, err := t1.Wait(); err != nil {
 			t.Fatal(err)
 		}
@@ -258,7 +258,7 @@ func TestMixedBatchAcrossReopen(t *testing.T) {
 		if got := s2.Context(); !reflect.DeepEqual(got, res.Messages) {
 			t.Errorf("Context differs from the resume's transcript:\n got %+v\nwant %+v", got, res.Messages)
 		}
-		t3, _ := s2.Send(ctx, weft.User("and then"))
+		t3, _ := s2.Send(ctx, core.User("and then"))
 		if res3, err := t3.Wait(); err != nil || res3.Text() != "next reply" {
 			t.Fatalf("follow-up = %v, %v", res3, err)
 		}
@@ -288,7 +288,7 @@ func TestMixedBatchResumeSurvivesAFailedAppend(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t1, _ := s.Send(ctx, weft.User("do both"))
+			t1, _ := s.Send(ctx, core.User("do both"))
 			if _, err := t1.Wait(); err != nil {
 				t.Fatal(err)
 			}
@@ -332,17 +332,17 @@ func TestResumeJoinKeepsMessagesWrittenWhileParked(t *testing.T) {
 			if mixed {
 				calls = []wefttest.Call{{Name: "safe", ID: "call_s"}, {Name: "dangerous", ID: "call_d"}}
 			}
-			agent := weft.New(wefttest.Script(wefttest.ToolCalls(calls...), wefttest.Say("done")),
-				weft.Tool("safe", "", func(context.Context, struct{}) (string, error) { return "safe result", nil }),
-				weft.Tool("dangerous", "", func(context.Context, struct{}) (string, error) { return "dangerous result", nil },
-					weft.RequireApproval()),
+			agent := core.New(wefttest.Script(wefttest.ToolCalls(calls...), wefttest.Say("done")),
+				core.Tool("safe", "", func(context.Context, struct{}) (string, error) { return "safe result", nil }),
+				core.Tool("dangerous", "", func(context.Context, struct{}) (string, error) { return "dangerous result", nil },
+					core.RequireApproval()),
 			)
 			s, _ := thread.Create(ctx, thread.Memory(), agent)
-			t1, _ := s.Send(ctx, weft.User("go"))
+			t1, _ := s.Send(ctx, core.User("go"))
 			if _, err := t1.Wait(); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.CustomMessage(ctx, "note", weft.User("a note written while parked")); err != nil {
+			if err := s.CustomMessage(ctx, "note", core.User("a note written while parked")); err != nil {
 				t.Fatal(err)
 			}
 			rt, err := s.Decide(ctx, thread.Approve("call_d"))
@@ -361,7 +361,7 @@ func TestResumeJoinKeepsMessagesWrittenWhileParked(t *testing.T) {
 			}
 			for _, m := range s.Context() {
 				for _, p := range m.Content {
-					if r, ok := p.(weft.ToolResultPart); ok && r.CallID == "call_d" && r.Content != "dangerous result" {
+					if r, ok := p.(core.ToolResultPart); ok && r.CallID == "call_d" && r.Content != "dangerous result" {
 						t.Errorf("call_d reads %q in the context, want the approved call's result", r.Content)
 					}
 				}
@@ -377,23 +377,23 @@ func TestResumeJoinKeepsMessagesWrittenWhileParked(t *testing.T) {
 func TestBoundaryReadsLegacyDoubleToolMessageAsClosed(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
-	agent := weft.New(wefttest.Script(wefttest.Say("still alive")))
+	agent := core.New(wefttest.Script(wefttest.Say("still alive")))
 	s, _ := thread.Create(ctx, st, agent)
 	at := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
-	call := func(id, name string) weft.ToolCallPart {
-		return weft.ToolCallPart{ID: id, Name: name, Args: []byte(`{}`)}
+	call := func(id, name string) core.ToolCallPart {
+		return core.ToolCallPart{ID: id, Name: name, Args: []byte(`{}`)}
 	}
-	result := func(id, name string) weft.ToolResultPart {
-		return weft.ToolResultPart{CallID: id, Name: name, Content: name + " result"}
+	result := func(id, name string) core.ToolResultPart {
+		return core.ToolResultPart{CallID: id, Name: name, Content: name + " result"}
 	}
 	entries := []thread.Entry{
-		thread.MessageEntry{ID: "e_1", Created: at, Message: weft.User("do both")},
-		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: at, Message: weft.Message{Role: weft.RoleAssistant,
-			Content: []weft.Part{call("call_s", "safe"), call("call_d", "dangerous")}}},
-		thread.MessageEntry{ID: "e_3", ParentID: "e_2", Created: at, Message: weft.Message{Role: weft.RoleTool,
-			Content: []weft.Part{result("call_s", "safe")}}},
-		thread.MessageEntry{ID: "e_4", ParentID: "e_3", Created: at, Message: weft.Message{Role: weft.RoleTool,
-			Content: []weft.Part{result("call_s", "safe"), result("call_d", "dangerous")}}},
+		thread.MessageEntry{ID: "e_1", Created: at, Message: core.User("do both")},
+		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: at, Message: core.Message{Role: core.RoleAssistant,
+			Content: []core.Part{call("call_s", "safe"), call("call_d", "dangerous")}}},
+		thread.MessageEntry{ID: "e_3", ParentID: "e_2", Created: at, Message: core.Message{Role: core.RoleTool,
+			Content: []core.Part{result("call_s", "safe")}}},
+		thread.MessageEntry{ID: "e_4", ParentID: "e_3", Created: at, Message: core.Message{Role: core.RoleTool,
+			Content: []core.Part{result("call_s", "safe"), result("call_d", "dangerous")}}},
 	}
 	if err := s.Close(ctx); err != nil { // the old writer is gone
 		t.Fatal(err)
@@ -405,7 +405,7 @@ func TestBoundaryReadsLegacyDoubleToolMessageAsClosed(t *testing.T) {
 	if p := s2.Pending(); len(p) != 0 {
 		t.Fatalf("Pending = %+v, want none: the second tool message serves call_d", p)
 	}
-	turn, err := s2.Send(ctx, weft.User("hello?"))
+	turn, err := s2.Send(ctx, core.User("hello?"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,13 +430,13 @@ func TestBoundaryReadsLegacyDoubleToolMessageAsClosed(t *testing.T) {
 func TestCrashDanglingCallIsNoBoundary(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script(wefttest.Say("recovered"), wefttest.Say("and again")))
+		agent := core.New(wefttest.Script(wefttest.Say("recovered"), wefttest.Say("and again")))
 		s, _ := thread.Create(ctx, st, agent)
 		at := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 		crashed := []thread.Entry{
-			thread.MessageEntry{ID: "e_1", Created: at, Message: weft.User("start")},
-			thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: at, Message: weft.Message{Role: weft.RoleAssistant,
-				Content: []weft.Part{weft.ToolCallPart{ID: "call_x", Name: "work", Args: []byte(`{}`)}}}},
+			thread.MessageEntry{ID: "e_1", Created: at, Message: core.User("start")},
+			thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: at, Message: core.Message{Role: core.RoleAssistant,
+				Content: []core.Part{core.ToolCallPart{ID: "call_x", Name: "work", Args: []byte(`{}`)}}}},
 		}
 		// The crashed writer is gone; what it left is in the file.
 		if err := s.Close(ctx); err != nil {
@@ -449,7 +449,7 @@ func TestCrashDanglingCallIsNoBoundary(t *testing.T) {
 		if p := s2.Pending(); len(p) != 0 {
 			t.Errorf("Pending = %+v, want none: a crashed call is not an approval request", p)
 		}
-		turn, err := s2.Send(ctx, weft.User("continue"))
+		turn, err := s2.Send(ctx, core.User("continue"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -469,7 +469,7 @@ func TestCrashDanglingCallIsNoBoundary(t *testing.T) {
 			t.Errorf("the reply sits %d times on the path, want 1", n)
 		}
 		// And the turn after it, whose input the repair also lengthens.
-		t3, _ := s2.Send(ctx, weft.User("again"))
+		t3, _ := s2.Send(ctx, core.User("again"))
 		res3, err := t3.Wait()
 		if err != nil {
 			t.Fatal(err)
@@ -493,7 +493,7 @@ func countAssistantText(s *thread.Session, text string) int {
 	path, _ := s.Path(s.Leaf())
 	n := 0
 	for _, e := range path {
-		if me, ok := e.(thread.MessageEntry); ok && me.Message.Role == weft.RoleAssistant && me.Message.Text() == text {
+		if me, ok := e.(thread.MessageEntry); ok && me.Message.Role == core.RoleAssistant && me.Message.Text() == text {
 			n++
 		}
 	}
@@ -531,7 +531,7 @@ func TestMixedBatchKeepsMirroredRequestsDecided(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, _ := s.Send(ctx, weft.User("do both"))
+	t1, _ := s.Send(ctx, core.User("do both"))
 	if _, err := t1.Wait(); err != nil {
 		t.Fatal(err)
 	}
@@ -591,13 +591,13 @@ func TestCustomMessageRefusedWhileATurnRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("long work"))
+	turn, err := s.Send(ctx, core.User("long work"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	<-started
 	before := len(s.Entries())
-	if err := s.CustomMessage(ctx, "note", weft.User("slipped in mid-run")); !errors.Is(err, thread.ErrBusy) {
+	if err := s.CustomMessage(ctx, "note", core.User("slipped in mid-run")); !errors.Is(err, thread.ErrBusy) {
 		t.Fatalf("CustomMessage while a turn runs: %v, want ErrBusy", err)
 	}
 	if got := len(s.Entries()); got != before {
@@ -626,7 +626,7 @@ func TestCustomMessageRefusedWhileATurnRuns(t *testing.T) {
 	if err := s.WaitIdle(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CustomMessage(ctx, "note", weft.User("between turns")); err != nil {
+	if err := s.CustomMessage(ctx, "note", core.User("between turns")); err != nil {
 		t.Fatalf("CustomMessage between turns: %v", err)
 	}
 	c := s.Context()

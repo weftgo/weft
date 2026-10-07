@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 )
 
 // clearEnvDestinations blanks every variable envDestinations reads, so a
@@ -124,7 +124,7 @@ func TestInstallFallsBackToLocalWhenEnvDestinationsFail(t *testing.T) {
 	if db == nil {
 		t.Fatalf("Install recorded nothing: no local fallback after every env destination failed; log: %s", buf.String())
 	}
-	res, err := weft.New(wefttest.Script(wefttest.Say("kept"))).Generate(context.Background(), weft.Prompt("go"))
+	res, err := core.New(wefttest.Script(wefttest.Say("kept"))).Generate(context.Background(), core.Prompt("go"))
 	if err != nil {
 		t.Fatal(err)
 	}

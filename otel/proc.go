@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"go.opentelemetry.io/otel/attribute"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -39,8 +39,8 @@ const (
 //     destinations. The clone is what this chain's inner processor
 //     (simple or batch) exports.
 //
-// Content-off chains decode the body with weft.UnmarshalEvent, apply
-// weft.StripContent, re-encode and set weft.content=stripped, and drop
+// Content-off chains decode the body with core.UnmarshalEvent, apply
+// core.StripContent, re-encode and set weft.content=stripped, and drop
 // messages records. Content-on chains apply the destination's Redact
 // and MaxBytes to event and delta bodies, set
 // weft.content.truncated_bytes when a cap cut, and apply Redact — never
@@ -120,11 +120,11 @@ func (p *destProc) stripEvent(clone *sdklog.Record) {
 	if body.Type() != attribute.STRING {
 		return
 	}
-	ev, err := weft.UnmarshalEvent([]byte(body.AsString()))
+	ev, err := core.UnmarshalEvent([]byte(body.AsString()))
 	if err != nil {
 		return // not a weft event body (a foreign record): through as is
 	}
-	b, err := json.Marshal(weft.StripContent(ev))
+	b, err := json.Marshal(core.StripContent(ev))
 	if err != nil {
 		return
 	}
@@ -154,7 +154,7 @@ func (p *destProc) shapeEvent(clone *sdklog.Record) {
 	if body.Type() != attribute.STRING {
 		return
 	}
-	ev, err := weft.UnmarshalEvent([]byte(body.AsString()))
+	ev, err := core.UnmarshalEvent([]byte(body.AsString()))
 	if err != nil {
 		return
 	}
@@ -186,46 +186,46 @@ func (p *destProc) shapeEvent(clone *sdklog.Record) {
 // pending args follow the adjudicated ToolStart.Args rule —
 // redact-not-cap, because a byte cap mid-JSON would make the args
 // undecodable; Nested recurses into the child event.
-func shapeEventValue(ev weft.Event, redact func(weft.ContentKind, string) string, maxBytes int) (out weft.Event, cut int, changed bool) {
+func shapeEventValue(ev core.Event, redact func(core.ContentKind, string) string, maxBytes int) (out core.Event, cut int, changed bool) {
 	switch e := ev.(type) {
-	case weft.TextDelta:
-		s, c := shapeString(e.Text, weft.ContentText, redact, maxBytes)
-		e.Text, cut, changed = s, c, s != ev.(weft.TextDelta).Text
+	case core.TextDelta:
+		s, c := shapeString(e.Text, core.ContentText, redact, maxBytes)
+		e.Text, cut, changed = s, c, s != ev.(core.TextDelta).Text
 		return e, cut, changed
-	case weft.ReasoningDelta:
-		s, c := shapeString(e.Text, weft.ContentReasoning, redact, maxBytes)
-		e.Text, cut, changed = s, c, s != ev.(weft.ReasoningDelta).Text
+	case core.ReasoningDelta:
+		s, c := shapeString(e.Text, core.ContentReasoning, redact, maxBytes)
+		e.Text, cut, changed = s, c, s != ev.(core.ReasoningDelta).Text
 		return e, cut, changed
-	case weft.ToolArgsDelta:
-		s, c := shapeString(e.Args, weft.ContentArgs, redact, maxBytes)
-		e.Args, cut, changed = s, c, s != ev.(weft.ToolArgsDelta).Args
+	case core.ToolArgsDelta:
+		s, c := shapeString(e.Args, core.ContentArgs, redact, maxBytes)
+		e.Args, cut, changed = s, c, s != ev.(core.ToolArgsDelta).Args
 		return e, cut, changed
-	case weft.ToolStart:
+	case core.ToolStart:
 		// Args is a JSON document: a byte cap mid-document would make it
 		// undecodable, so redaction may rewrite it but the cap does not
 		// touch it.
 		if redact != nil {
-			s := redact(weft.ContentArgs, string(e.Args))
+			s := redact(core.ContentArgs, string(e.Args))
 			if s != string(e.Args) {
 				e.Args, changed = redactedArgs(s), true
 			}
 		}
 		return e, 0, changed
-	case weft.ToolFinish:
-		s, c := shapeString(e.Content, weft.ContentResult, redact, maxBytes)
-		e.Content, cut, changed = s, c, s != ev.(weft.ToolFinish).Content
+	case core.ToolFinish:
+		s, c := shapeString(e.Content, core.ContentResult, redact, maxBytes)
+		e.Content, cut, changed = s, c, s != ev.(core.ToolFinish).Content
 		return e, cut, changed
-	case weft.Steered:
+	case core.Steered:
 		// The delivered messages are ordinary transcript; their text
 		// parts are user content (the core's StripContent empties them
 		// on content-off chains).
 		for i := range e.Messages {
 			for j, part := range e.Messages[i].Content {
-				tp, ok := part.(weft.TextPart)
+				tp, ok := part.(core.TextPart)
 				if !ok {
 					continue
 				}
-				s, c := shapeString(tp.Text, weft.ContentText, redact, maxBytes)
+				s, c := shapeString(tp.Text, core.ContentText, redact, maxBytes)
 				if s != tp.Text || c > 0 {
 					changed = true
 					cut += c
@@ -235,12 +235,12 @@ func shapeEventValue(ev weft.Event, redact func(weft.ContentKind, string) string
 			}
 		}
 		return e, cut, changed
-	case weft.RunFinish:
+	case core.RunFinish:
 		// Pending[].Args is the same class as the adjudicated
 		// ToolStart.Args: redact, never cap.
 		if redact != nil {
 			for i, c := range e.Pending {
-				s := redact(weft.ContentArgs, string(c.Args))
+				s := redact(core.ContentArgs, string(c.Args))
 				if s != string(c.Args) {
 					changed = true
 					c.Args = redactedArgs(s)
@@ -249,7 +249,7 @@ func shapeEventValue(ev weft.Event, redact func(weft.ContentKind, string) string
 			}
 		}
 		return e, 0, changed
-	case weft.Nested:
+	case core.Nested:
 		inner, c, ch := shapeEventValue(e.Event, redact, maxBytes)
 		if ch || c > 0 {
 			e.Event, changed, cut = inner, true, c
@@ -261,7 +261,7 @@ func shapeEventValue(ev weft.Event, redact func(weft.ContentKind, string) string
 }
 
 // redactMessages applies the destination's Redact to a messages record
-// (a transcript batch, a JSON array of weft.Message) part by part, with
+// (a transcript batch, a JSON array of core.Message) part by part, with
 // the kind the same content carries on the event path: text parts
 // ContentText (every role — as Steered user text already is), reasoning
 // ContentReasoning, tool-call args ContentArgs (a non-JSON redactor
@@ -294,7 +294,7 @@ func (p *destProc) redactMessages(clone *sdklog.Record) (keep bool) {
 		p.drops.dropped(1, errors.New("a messages record without a string body cannot be redacted: dropped"))
 		return false
 	}
-	var msgs []weft.Message
+	var msgs []core.Message
 	if err := json.Unmarshal([]byte(body.AsString()), &msgs); err != nil {
 		// The decode error only: its text can quote the body.
 		p.drops.dropped(1, errors.New("a messages record that does not decode cannot be redacted: dropped"))
@@ -314,27 +314,27 @@ func (p *destProc) redactMessages(clone *sdklog.Record) (keep bool) {
 
 // redactMessageParts redacts msgs in place and reports whether any part
 // changed.
-func redactMessageParts(msgs []weft.Message, redact func(weft.ContentKind, string) string) (changed bool) {
+func redactMessageParts(msgs []core.Message, redact func(core.ContentKind, string) string) (changed bool) {
 	for i := range msgs {
 		for j, part := range msgs[i].Content {
 			switch pt := part.(type) {
-			case weft.TextPart:
-				if s := redact(weft.ContentText, pt.Text); s != pt.Text {
+			case core.TextPart:
+				if s := redact(core.ContentText, pt.Text); s != pt.Text {
 					pt.Text, changed = s, true
 					msgs[i].Content[j] = pt
 				}
-			case weft.ReasoningPart:
-				if s := redact(weft.ContentReasoning, pt.Text); s != pt.Text {
+			case core.ReasoningPart:
+				if s := redact(core.ContentReasoning, pt.Text); s != pt.Text {
 					pt.Text, changed = s, true
 					msgs[i].Content[j] = pt
 				}
-			case weft.ToolCallPart:
-				if s := redact(weft.ContentArgs, string(pt.Args)); s != string(pt.Args) {
+			case core.ToolCallPart:
+				if s := redact(core.ContentArgs, string(pt.Args)); s != string(pt.Args) {
 					pt.Args, changed = redactedArgs(s), true
 					msgs[i].Content[j] = pt
 				}
-			case weft.ToolResultPart:
-				if s := redact(weft.ContentResult, pt.Content); s != pt.Content {
+			case core.ToolResultPart:
+				if s := redact(core.ContentResult, pt.Content); s != pt.Content {
 					pt.Content, changed = s, true
 					msgs[i].Content[j] = pt
 				}
@@ -358,7 +358,7 @@ func redactedArgs(s string) json.RawMessage {
 
 // shapeString applies redaction then the byte cap (on a rune boundary),
 // returning the shaped string and how many bytes the cap removed.
-func shapeString(s string, kind weft.ContentKind, redact func(weft.ContentKind, string) string, maxBytes int) (string, int) {
+func shapeString(s string, kind core.ContentKind, redact func(core.ContentKind, string) string, maxBytes int) (string, int) {
 	if redact != nil {
 		s = redact(kind, s)
 	}

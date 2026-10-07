@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -73,7 +73,7 @@ type WrapOption interface{ applyWrap(*wrapConfig) }
 
 type wrapConfig struct {
 	async    bool
-	toolOpts []weft.ToolOption
+	toolOpts []core.ToolOption
 }
 
 type asyncOption bool
@@ -89,7 +89,7 @@ func (o asyncOption) applyWrap(c *wrapConfig) { c.async = bool(o) }
 // the result is the child's answer, as an ordinary subagent's is.
 func Async() WrapOption { return asyncOption(true) }
 
-type toolOptionsOption struct{ opts []weft.ToolOption }
+type toolOptionsOption struct{ opts []core.ToolOption }
 
 func (o toolOptionsOption) applyWrap(c *wrapConfig) { c.toolOpts = append(c.toolOpts, o.opts...) }
 
@@ -97,7 +97,7 @@ func (o toolOptionsOption) applyWrap(c *wrapConfig) { c.toolOpts = append(c.tool
 // tool — Timeout, MaxResultBytes, a snippet — which otherwise the
 // wrap would hide. RequireApproval composes as on any tool: it gates
 // the act of delegating (ADR 0014).
-func ToolOptions(opts ...weft.ToolOption) WrapOption { return toolOptionsOption{opts} }
+func ToolOptions(opts ...core.ToolOption) WrapOption { return toolOptionsOption{opts} }
 
 // Wrap returns a subagent tool whose children the pool runs (ADR 0022
 // §1–§2): a delegation tool over agent, built on the core's Subagent,
@@ -132,7 +132,7 @@ func ToolOptions(opts ...weft.ToolOption) WrapOption { return toolOptionsOption{
 // ErrDuplicateWrap; wrapping the same agent again returns another
 // tool for it. A nil agent or an empty name is an error. MustWrap is
 // Wrap for wiring that cannot fail.
-func (p *Pool) Wrap(name, description string, agent *weft.Agent, opts ...WrapOption) (*weft.ToolDef, error) {
+func (p *Pool) Wrap(name, description string, agent *core.Agent, opts ...WrapOption) (*core.ToolDef, error) {
 	if agent == nil {
 		return nil, fmt.Errorf("thread/pool: Wrap %q with a nil agent", name)
 	}
@@ -152,8 +152,8 @@ func (p *Pool) Wrap(name, description string, agent *weft.Agent, opts ...WrapOpt
 	}
 	p.nameAgents[name] = agent
 	p.mu.Unlock()
-	mw := func(next weft.ToolCaller) weft.ToolCaller {
-		return func(ctx context.Context, call weft.ToolCallPart) (string, error) {
+	mw := func(next core.ToolCaller) core.ToolCaller {
+		return func(ctx context.Context, call core.ToolCallPart) (string, error) {
 			parent := thread.SessionFromContext(ctx)
 			if parent == nil {
 				return p.bare(ctx, call, next)
@@ -167,10 +167,10 @@ func (p *Pool) Wrap(name, description string, agent *weft.Agent, opts ...WrapOpt
 			info, err := p.admit(ctx, agent)
 			switch {
 			case errors.Is(err, ErrCycle):
-				return "", &weft.ToolError{Code: weft.CodeSubagentCycle,
+				return "", &core.ToolError{Code: core.CodeSubagentCycle,
 					Message: fmt.Sprintf(cycleMessage, name), Err: err}
 			case errors.Is(err, ErrDepth):
-				return "", &weft.ToolError{Code: CodeSubagentDepth,
+				return "", &core.ToolError{Code: CodeSubagentDepth,
 					Message: fmt.Sprintf(depthMessage, runFromContext(ctx).depth+1, p.maxDepth), Err: err}
 			case err != nil:
 				return "", err
@@ -199,7 +199,7 @@ func (p *Pool) Wrap(name, description string, agent *weft.Agent, opts ...WrapOpt
 				// answer — when they are decided. The park is the one
 				// rule tool middleware already had (ADR 0007).
 				return "", fmt.Errorf("thread/pool: agent %q awaits approval in child session %s: %w",
-					name, r.Child, weft.ErrApprovalRequired)
+					name, r.Child, core.ErrApprovalRequired)
 			case out.err != nil:
 				return "", delegationError(name, out)
 			case regained != nil:
@@ -213,15 +213,15 @@ func (p *Pool) Wrap(name, description string, agent *weft.Agent, opts ...WrapOpt
 	// The middleware wraps the subagent tool's own chain from the
 	// outside (a tool-level WrapTools, ADR 0006): agent middleware →
 	// this wrap → the tool's own options → handler.
-	all := append([]weft.ToolOption{weft.WrapTools(mw)}, cfg.toolOpts...)
-	return weft.Subagent(name, description, agent, all...), nil
+	all := append([]core.ToolOption{core.WrapTools(mw)}, cfg.toolOpts...)
+	return core.Subagent(name, description, agent, all...), nil
 }
 
 // MustWrap is Wrap for package-level and constructor wiring, where
 // the arguments are the program's own: it panics on the errors Wrap
 // returns — a nil agent, an empty name, a name already wrapping a
 // different agent.
-func (p *Pool) MustWrap(name, description string, agent *weft.Agent, opts ...WrapOption) *weft.ToolDef {
+func (p *Pool) MustWrap(name, description string, agent *core.Agent, opts ...WrapOption) *core.ToolDef {
 	t, err := p.Wrap(name, description, agent, opts...)
 	if err != nil {
 		panic(err)
@@ -235,21 +235,21 @@ func (p *Pool) MustWrap(name, description string, agent *weft.Agent, opts ...Wra
 // error raw, which the ordinary machinery renders (ADR 0014's rule).
 func delegationError(name string, out outcome) error {
 	var um *unmirroredError
-	var re *weft.RunError
+	var re *core.RunError
 	switch {
 	case errors.As(out.err, &um):
-		return &weft.ToolError{Code: weft.CodeSubagentFailed,
+		return &core.ToolError{Code: core.CodeSubagentFailed,
 			Message: fmt.Sprintf(unmirroredMessage, name, um.err), Err: out.err}
 	case out.canceled:
-		return &weft.ToolError{Code: CodeSubagentCanceled,
+		return &core.ToolError{Code: CodeSubagentCanceled,
 			Message: fmt.Sprintf(canceledMessage, name), Err: out.err}
 	case errors.Is(out.err, context.Canceled), errors.Is(out.err, context.DeadlineExceeded):
 		return out.err
 	case errors.As(out.err, &re):
-		return &weft.ToolError{Code: weft.CodeSubagentFailed,
+		return &core.ToolError{Code: core.CodeSubagentFailed,
 			Message: fmt.Sprintf(failedMessage, name, re.Step, re.Err), Err: out.err}
 	}
-	return &weft.ToolError{Code: weft.CodeSubagentFailed,
+	return &core.ToolError{Code: core.CodeSubagentFailed,
 		Message: fmt.Sprintf(failedPlainMessage, name, out.err.Error()), Err: out.err}
 }
 
@@ -259,7 +259,7 @@ func delegationError(name string, out outcome) error {
 // a closed pool refuses it with ErrClosed, Close cancels it and waits
 // for it, and when such calls nest the outer one hands its slot back
 // for the wait, exactly as a session-run delegation does.
-func (p *Pool) bare(ctx context.Context, call weft.ToolCallPart, next weft.ToolCaller) (string, error) {
+func (p *Pool) bare(ctx context.Context, call core.ToolCallPart, next core.ToolCaller) (string, error) {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
@@ -304,7 +304,7 @@ type runInfo struct {
 	// chain holds the agents whose runs delegated down to this one,
 	// root first — the cycle guard's ancestry. The run's own agent is
 	// read off the context when it delegates.
-	chain []*weft.Agent
+	chain []*core.Agent
 	slot  *slot
 }
 

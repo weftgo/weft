@@ -13,8 +13,8 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest/conformance"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest/conformance"
 )
 
 // testClient builds an SDK client aimed at srv. Injecting it — instead
@@ -26,7 +26,7 @@ func testClient(srv *httptest.Server) anthropic.Client {
 	return anthropic.NewClient(option.WithBaseURL(srv.URL), option.WithAPIKey("test"))
 }
 
-func fixtureModel(t *testing.T, name string, opts ...Option) weft.Model {
+func fixtureModel(t *testing.T, name string, opts ...Option) core.Model {
 	t.Helper()
 	srv := conformance.FixtureServer(t, filepath.Join("testdata", name+".sse"))
 	c := testClient(srv)
@@ -34,8 +34,8 @@ func fixtureModel(t *testing.T, name string, opts ...Option) weft.Model {
 	return Model("m", opts...)
 }
 
-func collect(m weft.Model, req weft.ModelRequest) ([]weft.ModelEvent, error) {
-	var evs []weft.ModelEvent
+func collect(m core.Model, req core.ModelRequest) ([]core.ModelEvent, error) {
+	var evs []core.ModelEvent
 	for ev, err := range m.Stream(context.Background(), req) {
 		if err != nil {
 			return evs, err
@@ -45,11 +45,11 @@ func collect(m weft.Model, req weft.ModelRequest) ([]weft.ModelEvent, error) {
 	return evs, nil
 }
 
-var basicReq = weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}}
+var basicReq = core.ModelRequest{Messages: []core.Message{core.User("hi")}}
 
-func lastFinish(t *testing.T, evs []weft.ModelEvent) weft.ModelFinish {
+func lastFinish(t *testing.T, evs []core.ModelEvent) core.ModelFinish {
 	t.Helper()
-	fin, ok := evs[len(evs)-1].(weft.ModelFinish)
+	fin, ok := evs[len(evs)-1].(core.ModelFinish)
 	if !ok {
 		t.Fatalf("last event = %T, want ModelFinish", evs[len(evs)-1])
 	}
@@ -62,13 +62,13 @@ func TestStreamToolCallFromFragments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var call weft.ModelToolCall
-	var deltas []weft.ModelToolCallDelta
+	var call core.ModelToolCall
+	var deltas []core.ModelToolCallDelta
 	for _, ev := range evs {
 		switch e := ev.(type) {
-		case weft.ModelToolCall:
+		case core.ModelToolCall:
 			call = e
-		case weft.ModelToolCallDelta:
+		case core.ModelToolCallDelta:
 			deltas = append(deltas, e)
 		}
 	}
@@ -88,7 +88,7 @@ func TestStreamToolCallFromFragments(t *testing.T) {
 		t.Errorf("joined delta args = %s, want the call's arguments", joined.String())
 	}
 	fin := lastFinish(t, evs)
-	if fin.Reason != weft.StopToolCalls || fin.Usage.InputTokens != 15 || fin.Usage.OutputTokens != 5 {
+	if fin.Reason != core.StopToolCalls || fin.Usage.InputTokens != 15 || fin.Usage.OutputTokens != 5 {
 		t.Errorf("finish = %+v, want tool_use with start+delta usage (cache folded into input)", fin)
 	}
 	if fin.Usage.CachedInputTokens != 4 || fin.Usage.CacheWriteTokens != 2 {
@@ -107,9 +107,9 @@ func TestStreamThinkingThenToolUse(t *testing.T) {
 	var order []string
 	for _, ev := range evs {
 		switch e := ev.(type) {
-		case weft.ModelReasoningDelta:
+		case core.ModelReasoningDelta:
 			order = append(order, "r:"+e.Text+e.Signature)
-		case weft.ModelToolCall:
+		case core.ModelToolCall:
 			order = append(order, "c:"+e.Name)
 		}
 	}
@@ -132,9 +132,9 @@ func TestStreamParallelCallsInBlockOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var calls []weft.ModelToolCall
+	var calls []core.ModelToolCall
 	for _, ev := range evs {
-		if c, ok := ev.(weft.ModelToolCall); ok {
+		if c, ok := ev.(core.ModelToolCall); ok {
 			calls = append(calls, c)
 		}
 	}
@@ -158,14 +158,14 @@ func TestStreamServerToolUseDeltasIgnored(t *testing.T) {
 	}
 	for _, ev := range evs {
 		switch e := ev.(type) {
-		case weft.ModelToolCallDelta:
+		case core.ModelToolCallDelta:
 			t.Errorf("server tool fragment surfaced as call progress: %+v", e)
-		case weft.ModelToolCall:
+		case core.ModelToolCall:
 			t.Errorf("server tool became a weft call: %+v", e)
 		}
 	}
 	fin := lastFinish(t, evs)
-	if fin.Reason != weft.StopEndTurn {
+	if fin.Reason != core.StopEndTurn {
 		t.Errorf("reason = %q, want end_turn (no weft calls)", fin.Reason)
 	}
 }
@@ -174,7 +174,7 @@ func TestStreamServerToolUseDeltasIgnored(t *testing.T) {
 // wrapping ErrModelContract — exactly what the core's loop would report.
 func TestStreamEmptyToolUseIDFailsLoudly(t *testing.T) {
 	_, err := collect(fixtureModel(t, "empty_tool_use_id"), basicReq)
-	if !errors.Is(err, weft.ErrModelContract) {
+	if !errors.Is(err, core.ErrModelContract) {
 		t.Fatalf("err = %v, want ErrModelContract", err)
 	}
 	if !strings.Contains(err.Error(), "empty id or name") {
@@ -193,7 +193,7 @@ func TestStreamTwoThinkingBlocks(t *testing.T) {
 	}
 	var order []string
 	for _, ev := range evs {
-		if r, ok := ev.(weft.ModelReasoningDelta); ok {
+		if r, ok := ev.(core.ModelReasoningDelta); ok {
 			order = append(order, "r:"+r.Text+"|"+r.Signature)
 		}
 	}
@@ -213,7 +213,7 @@ func TestStreamMaxTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fin := lastFinish(t, evs); fin.Reason != weft.StopMaxTokens {
+	if fin := lastFinish(t, evs); fin.Reason != core.StopMaxTokens {
 		t.Errorf("reason = %q, want max_tokens", fin.Reason)
 	}
 }
@@ -225,7 +225,7 @@ func TestStreamRefusalRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 	fin := lastFinish(t, evs)
-	if fin.Reason != weft.StopEndTurn || fin.Raw != "refusal:harmful" {
+	if fin.Reason != core.StopEndTurn || fin.Raw != "refusal:harmful" {
 		t.Errorf("finish = %+v, want end_turn + refusal:harmful", fin)
 	}
 }
@@ -235,7 +235,7 @@ func TestStreamIdleTimeout(t *testing.T) {
 	c := testClient(srv)
 	m := Model("m", Client(&c), IdleTimeout(150*time.Millisecond))
 	_, err := collect(m, basicReq)
-	if !errors.Is(err, weft.ErrStreamIdle) {
+	if !errors.Is(err, core.ErrStreamIdle) {
 		t.Fatalf("err = %v, want ErrStreamIdle", err)
 	}
 	if !strings.Contains(err.Error(), "150ms") {
@@ -267,7 +267,7 @@ func TestStreamKillSwitch(t *testing.T) {
 	t.Setenv("WEFT_MODEL_REQUESTS", "deny")
 	m := Model("m", BaseURL("http://127.0.0.1:1"), APIKey("test"))
 	_, err := collect(m, basicReq)
-	if !errors.Is(err, weft.ErrModelRequestsDenied) {
+	if !errors.Is(err, core.ErrModelRequestsDenied) {
 		t.Fatalf("err = %v, want ErrModelRequestsDenied with no request made", err)
 	}
 }
@@ -287,11 +287,11 @@ func TestKillSwitchExemptsInjectedClient(t *testing.T) {
 func TestStreamUnsupportedFilePart(t *testing.T) {
 	c := anthropic.NewClient(option.WithBaseURL("http://127.0.0.1:1"), option.WithAPIKey("test"))
 	m := Model("m", Client(&c))
-	req := weft.ModelRequest{Messages: []weft.Message{weft.UserParts(
-		weft.FilePart{MediaType: "audio/wav", Data: []byte{1}},
+	req := core.ModelRequest{Messages: []core.Message{core.UserParts(
+		core.FilePart{MediaType: "audio/wav", Data: []byte{1}},
 	)}}
 	_, err := collect(m, req)
-	if !errors.Is(err, weft.ErrUnsupported) {
+	if !errors.Is(err, core.ErrUnsupported) {
 		t.Fatalf("err = %v, want ErrUnsupported", err)
 	}
 }

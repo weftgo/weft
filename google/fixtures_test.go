@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest/conformance"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest/conformance"
 	"google.golang.org/genai"
 )
 
@@ -36,15 +36,15 @@ func testClient(t *testing.T, url string) *genai.Client {
 	return c
 }
 
-func fixtureModel(t *testing.T, name string, opts ...Option) weft.Model {
+func fixtureModel(t *testing.T, name string, opts ...Option) core.Model {
 	t.Helper()
 	srv := conformance.FixtureServer(t, filepath.Join("testdata", name+".sse"))
 	opts = append([]Option{Client(testClient(t, srv.URL))}, opts...)
 	return Model("m", opts...)
 }
 
-func collect(m weft.Model, req weft.ModelRequest) ([]weft.ModelEvent, error) {
-	var evs []weft.ModelEvent
+func collect(m core.Model, req core.ModelRequest) ([]core.ModelEvent, error) {
+	var evs []core.ModelEvent
 	for ev, err := range m.Stream(context.Background(), req) {
 		if err != nil {
 			return evs, err
@@ -54,11 +54,11 @@ func collect(m weft.Model, req weft.ModelRequest) ([]weft.ModelEvent, error) {
 	return evs, nil
 }
 
-var basicReq = weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}}
+var basicReq = core.ModelRequest{Messages: []core.Message{core.User("hi")}}
 
-func lastFinish(t *testing.T, evs []weft.ModelEvent) weft.ModelFinish {
+func lastFinish(t *testing.T, evs []core.ModelEvent) core.ModelFinish {
 	t.Helper()
-	fin, ok := evs[len(evs)-1].(weft.ModelFinish)
+	fin, ok := evs[len(evs)-1].(core.ModelFinish)
 	if !ok {
 		t.Fatalf("last event = %T, want ModelFinish", evs[len(evs)-1])
 	}
@@ -71,9 +71,9 @@ func TestStreamFunctionCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var call weft.ModelToolCall
+	var call core.ModelToolCall
 	for _, ev := range evs {
-		if c, ok := ev.(weft.ModelToolCall); ok {
+		if c, ok := ev.(core.ModelToolCall); ok {
 			call = c
 		}
 	}
@@ -81,7 +81,7 @@ func TestStreamFunctionCalls(t *testing.T) {
 		t.Fatalf("call = %+v, want the whole probe call", call)
 	}
 	fin := lastFinish(t, evs)
-	if fin.Reason != weft.StopToolCalls {
+	if fin.Reason != core.StopToolCalls {
 		t.Errorf("reason = %q, want tool_calls (calls present despite STOP)", fin.Reason)
 	}
 	// Input folds toolUsePromptTokenCount (9+3): genai bills those
@@ -103,9 +103,9 @@ func TestStreamSynthesisesIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var calls []weft.ModelToolCall
+	var calls []core.ModelToolCall
 	for _, ev := range evs {
-		if c, ok := ev.(weft.ModelToolCall); ok {
+		if c, ok := ev.(core.ModelToolCall); ok {
 			calls = append(calls, c)
 		}
 	}
@@ -158,10 +158,10 @@ func TestSynthesisedIDsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var calls []weft.ToolCallPart
+	var calls []core.ToolCallPart
 	for _, ev := range evs {
-		if c, ok := ev.(weft.ModelToolCall); ok {
-			calls = append(calls, weft.ToolCallPart(c))
+		if c, ok := ev.(core.ModelToolCall); ok {
+			calls = append(calls, core.ToolCallPart(c))
 		}
 	}
 	if len(calls) != 2 || calls[0].ID != "call_1" || calls[1].ID != "call_2" {
@@ -169,22 +169,22 @@ func TestSynthesisedIDsRoundTrip(t *testing.T) {
 	}
 
 	// Turn 2: the transcript with results goes back.
-	assistant := make([]weft.Part, len(calls))
+	assistant := make([]core.Part, len(calls))
 	for i, c := range calls {
 		assistant[i] = c
 	}
-	evs, err = collect(m, weft.ModelRequest{Messages: []weft.Message{
-		weft.User("hi"),
-		{Role: weft.RoleAssistant, Content: assistant},
-		{Role: weft.RoleTool, Content: []weft.Part{
-			weft.ToolResultPart{CallID: calls[0].ID, Name: calls[0].Name, Content: "ok"},
-			weft.ToolResultPart{CallID: calls[1].ID, Name: calls[1].Name, Content: "ok"},
+	evs, err = collect(m, core.ModelRequest{Messages: []core.Message{
+		core.User("hi"),
+		{Role: core.RoleAssistant, Content: assistant},
+		{Role: core.RoleTool, Content: []core.Part{
+			core.ToolResultPart{CallID: calls[0].ID, Name: calls[0].Name, Content: "ok"},
+			core.ToolResultPart{CallID: calls[1].ID, Name: calls[1].Name, Content: "ok"},
 		}},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fin := lastFinish(t, evs); fin.Reason != weft.StopEndTurn {
+	if fin := lastFinish(t, evs); fin.Reason != core.StopEndTurn {
 		t.Errorf("second turn reason = %q", fin.Reason)
 	}
 	mu.Lock()
@@ -211,9 +211,9 @@ func TestStreamThoughtParts(t *testing.T) {
 	var order []string
 	for _, ev := range evs {
 		switch e := ev.(type) {
-		case weft.ModelReasoningDelta:
+		case core.ModelReasoningDelta:
 			order = append(order, "r:"+e.Text+e.Signature)
-		case weft.ModelTextDelta:
+		case core.ModelTextDelta:
 			order = append(order, "t:"+e.Text)
 		}
 	}
@@ -231,17 +231,17 @@ func TestStreamSignatureOnFunctionCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	var (
-		call     weft.ModelToolCall
+		call     core.ModelToolCall
 		sawCall  bool
 		reasonSG int // signature-bearing reasoning deltas
 	)
 	for _, ev := range evs {
 		switch e := ev.(type) {
-		case weft.ModelReasoningDelta:
+		case core.ModelReasoningDelta:
 			if e.Signature != "" {
 				reasonSG++
 			}
-		case weft.ModelToolCall:
+		case core.ModelToolCall:
 			call, sawCall = e, true
 		}
 	}
@@ -265,9 +265,9 @@ func TestStreamSignaturePerParallelCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var calls []weft.ModelToolCall
+	var calls []core.ModelToolCall
 	for _, ev := range evs {
-		if c, ok := ev.(weft.ModelToolCall); ok {
+		if c, ok := ev.(core.ModelToolCall); ok {
 			calls = append(calls, c)
 		}
 	}
@@ -284,7 +284,7 @@ func TestStreamMaxTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fin := lastFinish(t, evs); fin.Reason != weft.StopMaxTokens {
+	if fin := lastFinish(t, evs); fin.Reason != core.StopMaxTokens {
 		t.Errorf("reason = %q, want max_tokens", fin.Reason)
 	}
 }
@@ -295,7 +295,7 @@ func TestStreamSafetyRaw(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fin := lastFinish(t, evs); fin.Reason != weft.StopEndTurn || fin.Raw != "SAFETY" {
+	if fin := lastFinish(t, evs); fin.Reason != core.StopEndTurn || fin.Raw != "SAFETY" {
 		t.Errorf("finish = %+v, want stop + raw SAFETY", fin)
 	}
 }
@@ -304,7 +304,7 @@ func TestStreamIdleTimeout(t *testing.T) {
 	srv := conformance.StallServer(t, stallChunk)
 	m := Model("m", Client(testClient(t, srv.URL)), IdleTimeout(150*time.Millisecond))
 	_, err := collect(m, basicReq)
-	if !errors.Is(err, weft.ErrStreamIdle) {
+	if !errors.Is(err, core.ErrStreamIdle) {
 		t.Fatalf("err = %v, want ErrStreamIdle", err)
 	}
 	if !strings.Contains(err.Error(), "150ms") {
@@ -336,7 +336,7 @@ func TestStreamKillSwitch(t *testing.T) {
 	t.Setenv("WEFT_MODEL_REQUESTS", "deny")
 	m := Model("m", BaseURL("http://127.0.0.1:1"), APIKey("test"))
 	_, err := collect(m, basicReq)
-	if !errors.Is(err, weft.ErrModelRequestsDenied) {
+	if !errors.Is(err, core.ErrModelRequestsDenied) {
 		t.Fatalf("err = %v, want ErrModelRequestsDenied with no request made", err)
 	}
 }
@@ -357,14 +357,14 @@ func TestKillSwitchExemptsInjectedClient(t *testing.T) {
 // is sent. (Any media type is otherwise fine: Gemini carries audio and
 // video inline natively.)
 func TestStreamUnsupportedFilePart(t *testing.T) {
-	for name, bad := range map[string]weft.FilePart{
+	for name, bad := range map[string]core.FilePart{
 		"both":    {MediaType: "image/png", Data: []byte{1}, URL: "https://x"},
 		"neither": {MediaType: "image/png"},
 	} {
 		m := Model("m", Client(testClient(t, "http://127.0.0.1:1")))
-		req := weft.ModelRequest{Messages: []weft.Message{weft.UserParts(bad)}}
+		req := core.ModelRequest{Messages: []core.Message{core.UserParts(bad)}}
 		_, err := collect(m, req)
-		if !errors.Is(err, weft.ErrUnsupported) {
+		if !errors.Is(err, core.ErrUnsupported) {
 			t.Errorf("%s: err = %v, want ErrUnsupported", name, err)
 		}
 	}
@@ -401,11 +401,11 @@ func TestStreamSignatureOnEmptyTextPart(t *testing.T) {
 	)
 	for _, ev := range evs {
 		switch e := ev.(type) {
-		case weft.ModelReasoningDelta:
+		case core.ModelReasoningDelta:
 			if e.Signature != "" {
 				sawSig = e.Signature == "c2ln"
 			}
-		case weft.ModelTextDelta:
+		case core.ModelTextDelta:
 			sawText = e.Text == "Hi."
 			if e.Text == "" {
 				emptyTx = true
@@ -432,7 +432,7 @@ func TestStreamSynthesisedIDSkipsPopulated(t *testing.T) {
 	}
 	var ids []string
 	for _, ev := range evs {
-		if c, ok := ev.(weft.ModelToolCall); ok {
+		if c, ok := ev.(core.ModelToolCall); ok {
 			ids = append(ids, c.ID)
 		}
 	}

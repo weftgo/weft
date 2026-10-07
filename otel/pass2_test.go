@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"go.opentelemetry.io/otel/attribute"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 )
@@ -47,9 +47,9 @@ func runThrough(t *testing.T, opts ...Option) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agt := weft.New(wefttest.Script(wefttest.Say("wire")),
-		weft.TracerProvider(p.TracerProvider()), weft.LoggerProvider(p.LoggerProvider()))
-	if _, err := agt.Generate(context.Background(), weft.Prompt("go")); err != nil {
+	agt := core.New(wefttest.Script(wefttest.Say("wire")),
+		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.Shutdown(context.Background()); err != nil {
@@ -125,8 +125,8 @@ func TestInstallSkipsOnlyTheBrokenDestinations(t *testing.T) {
 		shutdown()
 		t.Fatal("a broken destination disabled the Local sink")
 	}
-	agt := weft.New(wefttest.Script(wefttest.Say("kept")))
-	res, err := agt.Generate(context.Background(), weft.Prompt("go"))
+	agt := core.New(wefttest.Script(wefttest.Say("kept")))
+	res, err := agt.Generate(context.Background(), core.Prompt("go"))
 	if err != nil {
 		shutdown()
 		t.Fatal(err)
@@ -158,7 +158,7 @@ func TestRedactPanicWarnCarriesNoContent(t *testing.T) {
 	drops.log = slog.New(slog.NewTextHandler(buf, nil))
 	p := &destProc{
 		name: "test", inner: sdklog.NewSimpleProcessor(newMemExporter()), content: true,
-		contentC: ContentConfig{Redact: func(_ weft.ContentKind, s string) string {
+		contentC: ContentConfig{Redact: func(_ core.ContentKind, s string) string {
 			panic("cannot redact " + s)
 		}},
 		drops: drops,

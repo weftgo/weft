@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/internal/adapterkit"
 	"google.golang.org/genai"
 )
@@ -63,37 +63,37 @@ func Client(c *genai.Client) Option {
 
 // MaxTokens caps a step's output tokens (maxOutputTokens). Zero keeps
 // the provider default. The API's limit is an int32: a value above
-// math.MaxInt32 fails the call wrapping weft.ErrUnsupported rather
+// math.MaxInt32 fails the call wrapping core.ErrUnsupported rather
 // than wrapping around on the wire. Options carry no error channel, so
 // the check lands at convert time — the first place that can refuse —
 // not at construction.
 func MaxTokens(n int) Option { return optionFunc(func(c *config) { c.maxTokens = n }) }
 
 // Temperature sets the sampling temperature; it is not sent unless the
-// option is given. A per-request weft.RequestParams.Temperature
+// option is given. A per-request core.RequestParams.Temperature
 // overrides it for one call.
 func Temperature(t float64) Option {
 	return optionFunc(func(c *config) { c.temperature = t; c.tempSet = true })
 }
 
 // TopP sets nucleus sampling; it is not sent unless the option is
-// given. A per-request weft.RequestParams.TopP overrides it for one
+// given. A per-request core.RequestParams.TopP overrides it for one
 // call.
 func TopP(p float64) Option {
 	return optionFunc(func(c *config) { c.topP = p; c.topPSet = true })
 }
 
 // Stop sets stop sequences; not sent unless the option is given. A
-// per-request weft.RequestParams.Stop overrides it for one call.
+// per-request core.RequestParams.Stop overrides it for one call.
 func Stop(seqs ...string) Option {
 	return optionFunc(func(c *config) { c.stop = seqs })
 }
 
 // Seed sets the sampling seed — a best-effort determinism hint, not a
 // contract. Not sent unless the option is given; a per-request
-// weft.RequestParams.Seed overrides it for one call. The wire field is
+// core.RequestParams.Seed overrides it for one call. The wire field is
 // an int32: a value outside that range fails the call wrapping
-// weft.ErrUnsupported at convert time (options carry no error channel
+// core.ErrUnsupported at convert time (options carry no error channel
 // — the MaxTokens rule).
 func Seed(s int64) Option {
 	return optionFunc(func(c *config) { c.seed = s; c.seedSet = true })
@@ -138,7 +138,7 @@ func ExtraHeaders(h http.Header) Option {
 }
 
 // IdleTimeout is the maximum gap between two stream chunks before the
-// call fails wrapping weft.ErrStreamIdle (default 60s; zero disables
+// call fails wrapping core.ErrStreamIdle (default 60s; zero disables
 // it). The wait for response headers is the first gap — it covers the
 // SDK's transport retries when MaxRetries asked for any. The ctx
 // deadline stays the hard limit on the whole call — a slow but
@@ -158,11 +158,11 @@ const (
 	provider           = "google"
 )
 
-// Model returns a weft.Model backed by the Gemini API. The SDK client
+// Model returns a core.Model backed by the Gemini API. The SDK client
 // is created lazily on the first run (its constructor wants a context
 // for credential discovery), so constructing a Model performs no I/O.
 // A Model is immutable and safe for concurrent runs.
-func Model(name string, opts ...Option) weft.Model {
+func Model(name string, opts ...Option) core.Model {
 	var cfg config
 	for _, o := range opts {
 		if o != nil {
@@ -254,6 +254,6 @@ func (m *model) initClient(ctx context.Context) error {
 }
 
 // Info identifies the model for RunStart and the manifest.
-func (m *model) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: provider, Name: m.name}
+func (m *model) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: provider, Name: m.name}
 }

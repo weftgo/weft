@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // benchTool has a mid-sized schema (ten properties, one nested object,
@@ -35,7 +35,7 @@ type benchIn struct {
 // rebuilds its snapshot per step, the exact scenario ToolSource exists
 // for (ADR 0013's amendment).
 func BenchmarkConvertTool(b *testing.B) {
-	def := weft.Tool("bench", "", func(_ context.Context, _ benchIn) (string, error) {
+	def := core.Tool("bench", "", func(_ context.Context, _ benchIn) (string, error) {
 		return "", nil
 	})
 	b.ResetTimer()

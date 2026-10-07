@@ -2,7 +2,63 @@
 
 Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); the project
-is pre-1.0 and tags per module (ADR 0005).
+is pre-1.0; since 0.9.0 a release is one tag for the framework plus
+`core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
+module, ADR 0005).
+
+## 0.9.0 (unreleased)
+
+One module is the framework; `core` is the loop alone (ADR 0027).
+`MIGRATION-0.9.md` is the migration guide, written to be applied by a
+person or a coding agent.
+
+### Changed — breaking
+
+- **`github.com/weftgo/weft` is now the whole framework, one module at
+  one version.** The adapters (`openai`, `anthropic`, `google`, `mcp`),
+  `thread` (and `thread/sqlite`), `otel`, `obsdb` (and
+  `obsdb/clickhouse`), `studio` (and `studio/cmd`) and `runtime` are
+  packages of this module, no longer modules of their own. Their import
+  paths are unchanged; their per-module tags stop at the last ones cut
+  (thread/v0.9.1, thread/sqlite/v0.3.1, otel/v0.2.1, obsdb/v0.2.0,
+  studio/v0.4.1, studio/cmd/v0.2.0, runtime/v0.2.0, the adapters'),
+  which keep requiring weft v0.8.0. A go.mod that requires one of the
+  retired module paths beside `github.com/weftgo/weft v0.9.0` fails
+  with an ambiguous import: drop the line (`go mod edit -droprequire`)
+  and `go mod tidy`.
+- **The loop alone is `github.com/weftgo/weft/core`**, a separate
+  module whose only dependency is the OpenTelemetry API, tagged
+  `core/v0.9.0`. It holds what the root package held: `core.New`,
+  `core.Tool`, the contracts, plus `core/wefttest` (with
+  `conformance`) and `core/mw`.
+- **The root package, `mw`, `wefttest` and `wefttest/conformance` are
+  generated facades over their `core` counterparts**: every exported
+  name is a type alias, a bound constant or variable, or a one-line
+  wrapper with the original signature and doc. Code that used
+  `weft.New`, `wefttest.Script`, `mw.Retry` compiles unchanged;
+  `weft.Agent` and `core.Agent` are one type. `go generate ./...`
+  regenerates them (`internal/cmd/genfacade`) and
+  `TestFacadesAreComplete` fails when a facade and its source
+  disagree.
+- The layers' signatures name `core.X` where they named `weft.X`; same
+  types, no call-site change.
+- `mw.IsContextOverflow(err)` is exported: the overflow marker table
+  the adapters' error mapping and `mw.Retry` share now lives in `mw`
+  (the adapters' internal helper delegates to it).
+
+### Fixed
+
+- A tool defined through the facade records the caller's file and line
+  as its definition site, not the facade's: `Tool`, `Output` and
+  `Subagent` skip the framework's wrapper frame. Committed manifest
+  golden files do not change.
+
+### Release process
+
+- Two tags per release, in order: `core/vX.Y.Z`, then the root tidied
+  against it and tagged `vX.Y.Z`. `go.work` joins the two modules and
+  the examples. The apidiff gate enforces `core` against its last
+  `core/v*` tag and reports the root.
 
 ## thread/sqlite 0.3.1 — 2026-10-07
 

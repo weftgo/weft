@@ -1,0 +1,647 @@
+// Package conformance is the provider adapter contract as an executable
+// table. Every first-party adapter (weft/openai, weft/anthropic,
+// weft/google) runs Run in its own tests: offline against recorded
+// fixtures and live behind the `live` build tag. When Run is green for
+// an adapter, the adapter honours the contract — the suite *is* the
+// documented adapter contract (ADR 0013).
+//
+// The package lives in the root module and imports no vendor SDK: it
+// drives the model through weft's public API only, so it can also run
+// against wefttest models (proving the harness itself).
+package conformance
+
+import (
+	"context"
+	"errors"
+	"iter"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/weftgo/weft/core/mw"
+
+	"github.com/weftgo/weft/core"
+)
+
+// Caps declares what the adapter under test supports, so the suite
+// asserts the right behaviour instead of skipping silently.
+type Caps struct {
+	// Reasoning: the adapter emits ModelReasoningDelta and accepts a
+	// ReasoningPart (with signature) back.
+	Reasoning bool
+	// Files: the adapter accepts a FilePart image input.
+	Files bool
+	// Sequential: the adapter forwards SequentialTools and the provider
+	// honours the hint (emits at most one call per step).
+	Sequential bool
+	// ToolArgDeltas: the adapter surfaces ModelToolCallDelta progress
+	// while a provider streams a tool call's argument fragments.
+	// Google's calls arrive whole, so it legitimately emits none — the
+	// case is declared, not assumed.
+	ToolArgDeltas bool
+	// ToolChoice: the adapter forwards ModelRequest.ToolChoice and the
+	// provider honours the constraint. The offline case asserts on the
+	// request bytes too (tool_choice / toolConfig must be in what the
+	// adapter sent), which needs a RecordingFixtureServer wiring.
+	ToolChoice bool
+	// Usage: the provider reports non-zero token usage. False for
+	// compatible servers that never send usage — the adapter must not
+	// fake numbers, so the caller declares the gap instead.
+	Usage bool
+	// ErrorHeaders: the SDK's error type carries the HTTP response,
+	// so mw.RetryAfter can read a provider's retry-after header off a
+	// failed call. False where the SDK keeps only the status code
+	// (genai's APIError) — mw.Retry then falls back to backoff on that
+	// provider's 429s, a declared gap, not a silent one. HTTPStatus is
+	// asserted for every adapter regardless.
+	ErrorHeaders bool
+	// Live: the model is reached over the network. The suite relaxes
+	// determinism (a live model may make a different but valid choice;
+	// those cases t.Skip rather than fail) and skips fixture-only cases
+	// (idle_timeout, provider_error).
+	Live bool
+}
+
+// probeIn and probeOut are the suite's tool contract: a struct input
+// reflected into a schema, and a struct output the model must read back.
+type probeIn struct {
+	N int `json:"n" jsonschema:"the number to report and double"`
+}
+
+type probeOut struct {
+	N       int `json:"n"`
+	Doubled int `json:"doubled"`
+}
+
+// probeTool is the suite's own tool: call it with n, get n and 2n back.
+func probeTool() *core.ToolDef {
+	return core.Tool("probe", "Reports n and its double.", func(ctx context.Context, in probeIn) (probeOut, error) {
+		return probeOut{N: in.N, Doubled: in.N * 2}, nil
+	})
+}
+
+// parallelPrompt is owned by the suite so every adapter is asked the
+// same thing: three independent probe calls in one turn.
+const parallelPrompt = "Call `probe` three times, once each with n=1, n=2, n=3, in one turn."
+
+// RecordingModel wraps a model with the request bodies a
+// RecordingFixtureServer captured, so the tool_choice_forcing case can
+// assert on the bytes the adapter sent. It exists for that wiring — a
+// pass-through for Stream and Info, nothing else; it is not a general
+// proxy.
+type RecordingModel struct {
+	Model  core.Model
+	Bodies func() []string
+}
+
+// Stream implements core.Model by forwarding.
+func (m RecordingModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return m.Model.Stream(ctx, req)
+}
+
+// Info forwards the wrapped model's identity.
+func (m RecordingModel) Info() core.ModelInfo { return core.InfoOf(m.Model) }
+
+// RecordedBodies exposes the captured request bodies, in request order.
+func (m RecordingModel) RecordedBodies() []string { return m.Bodies() }
+
+// contractDetector collects ErrModelContract sightings across a whole
+// Run and fails the suite at Cleanup — the never_contract_violation
+// guarantee has to hold for every case, not one.
+type contractDetector struct {
+	violated bool
+}
+
+func (d *contractDetector) check(err error) {
+	if err != nil && errors.Is(err, core.ErrModelContract) {
+		d.violated = true
+	}
+}
+
+func (d *contractDetector) failIfViolated(t *testing.T) {
+	t.Helper()
+	if d.violated {
+		t.Error("adapter violated the model stream contract (ErrModelContract)")
+	}
+}
+
+// Run executes every conformance case as a subtest named after its
+// fixture key. newModel is called once per case (cases share no state)
+// and receives the case name so it can pick its fixture recording or
+// apply case-specific construction — max_tokens, notably, must build
+// the adapter with its token-limit option.
+func Run(t *testing.T, caps Caps, newModel func(t *testing.T, name string) core.Model) {
+	t.Helper()
+
+	detector := new(contractDetector)
+	t.Cleanup(func() { detector.failIfViolated(t) })
+
+	// generate runs one case's exchange through the public API, with the
+	// suite's tool registered and a generous per-case deadline (the live
+	// mode needs it; offline cases finish instantly).
+	generate := func(t *testing.T, m core.Model, agentOpts []core.Option, runOpts ...core.RunOption) (*core.RunResult, error) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		opts := append([]core.Option{probeTool()}, agentOpts...)
+		res, err := core.New(m, opts...).Generate(ctx, runOpts...)
+		detector.check(err)
+		return res, err
+	}
+
+	t.Run("text_only", func(t *testing.T) {
+		res, err := generate(t, newModel(t, "text_only"), nil, core.Prompt("Reply with one short sentence."))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.NumSteps() != 1 {
+			t.Errorf("steps = %d, want 1", res.NumSteps())
+		}
+		if res.StopReason != core.StopEndTurn {
+			t.Errorf("StopReason = %q, want %q", res.StopReason, core.StopEndTurn)
+		}
+		if res.Text() == "" {
+			t.Error("Text() is empty")
+		}
+		if caps.Usage && res.Usage.Total() == 0 {
+			t.Errorf("usage = %+v, want non-zero", res.Usage)
+		}
+	})
+
+	// The run-level thinking option must thread through the public API
+	// without failing the exchange — wire-shape assertions (the exact
+	// param each provider receives) live in the adapters' own unit
+	// tests, where the request body is recordable.
+	t.Run("thinking_option", func(t *testing.T) {
+		res, err := generate(t, newModel(t, "text_only"), nil,
+			core.Thinking(core.ThinkingConfig{Level: core.ThinkOff}),
+			core.Prompt("Reply with one short sentence."))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.NumSteps() != 1 || res.Text() == "" {
+			t.Errorf("steps = %d, text = %q; the thinking option broke the exchange", res.NumSteps(), res.Text())
+		}
+	})
+
+	t.Run("tool_roundtrip_struct", func(t *testing.T) {
+		res, err := generate(t, newModel(t, "tool_roundtrip_struct"), nil,
+			core.Prompt("Call `probe` with n=3, then tell me the doubled value it returned."))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sawCall, sawResult bool
+		for _, c := range res.Steps[0].ToolCalls {
+			if c.Name == "probe" && len(c.Args) > 0 {
+				sawCall = true
+			}
+		}
+		for _, msg := range res.Messages {
+			if msg.Role != core.RoleTool {
+				continue
+			}
+			for _, p := range msg.Content {
+				if tr, ok := p.(core.ToolResultPart); ok && tr.Name == "probe" && strings.Contains(tr.Content, "6") {
+					sawResult = true
+				}
+			}
+		}
+		if !sawCall {
+			if caps.Live {
+				t.Skip("model answered without calling the tool (valid choice)")
+			}
+			t.Fatal("the first step did not call probe with arguments")
+		}
+		if !sawResult {
+			t.Error("no probe result carries the doubled value; the struct output did not round-trip")
+		}
+		if !strings.Contains(res.Text(), "6") {
+			t.Errorf("final text %q does not mention the tool's doubled value", res.Text())
+		}
+	})
+
+	t.Run("parallel_three_calls", func(t *testing.T) {
+		res, err := generate(t, newModel(t, "parallel_three_calls"), nil, core.Prompt(parallelPrompt))
+		if err != nil {
+			t.Fatal(err)
+		}
+		calls := res.Steps[0].ToolCalls
+		if len(calls) == 0 {
+			if caps.Live {
+				t.Skip("model made no tool calls (valid choice)")
+			}
+			t.Fatal("the first step made no tool calls")
+		}
+		if len(calls) != 3 {
+			if caps.Live && len(calls) < 3 {
+				t.Skipf("model made %d calls, not 3 (valid choice; the fixture pins 3)", len(calls))
+			}
+			t.Errorf("the first step made %d calls, want 3", len(calls))
+		}
+		ids := map[string]bool{}
+		for _, c := range calls {
+			if c.ID == "" || c.Name == "" {
+				t.Errorf("call %+v has an empty ID or name", c)
+			}
+			ids[c.ID] = true
+		}
+		if len(calls) == 3 && len(ids) != 3 {
+			t.Errorf("%d distinct call IDs for 3 calls", len(ids))
+		}
+		// The step's results are batched on one RoleTool message (a core
+		// rule, but the adapter must not have upset it).
+		for _, msg := range res.Messages {
+			if msg.Role != core.RoleTool {
+				continue
+			}
+			if got := len(msg.Content); got != len(calls) {
+				t.Errorf("a tool message carries %d results, want %d on one batched message", got, len(calls))
+			}
+			break
+		}
+	})
+
+	if caps.Usage {
+		t.Run("usage_nonzero", func(t *testing.T) {
+			res, err := generate(t, newModel(t, "usage_nonzero"), nil,
+				core.Prompt("Call `probe` with n=1, then tell me the doubled value."))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Steps) == 0 {
+				t.Fatal("no steps ran")
+			}
+			for i, s := range res.Steps {
+				if s.Usage.InputTokens <= 0 || s.Usage.OutputTokens <= 0 {
+					t.Errorf("step %d usage = %+v, want input and output > 0", i, s.Usage)
+				}
+				// The splits are reporting subsets of the totals
+				// (TODO §2a.4): a fixture that reports more cached
+				// tokens than it billed input is a wire mistake.
+				if s.Usage.CachedInputTokens > s.Usage.InputTokens {
+					t.Errorf("step %d cached %d > input %d", i, s.Usage.CachedInputTokens, s.Usage.InputTokens)
+				}
+				if s.Usage.CacheWriteTokens > s.Usage.InputTokens {
+					t.Errorf("step %d cache write %d > input %d", i, s.Usage.CacheWriteTokens, s.Usage.InputTokens)
+				}
+				if s.Usage.ReasoningTokens > s.Usage.OutputTokens {
+					t.Errorf("step %d reasoning %d > output %d", i, s.Usage.ReasoningTokens, s.Usage.OutputTokens)
+				}
+			}
+		})
+	}
+
+	t.Run("cancel_mid_stream", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var (
+			runErr     error
+			errs       int
+			afterError int
+			sawDelta   bool
+		)
+		// Keep draining after the error: the contract is exactly one
+		// terminal error and nothing after it, so the loop must not
+		// stop at the first one.
+		for ev, err := range core.New(newModel(t, "cancel_mid_stream"), probeTool()).
+			Stream(ctx, core.Prompt("Count slowly from 1 to 50.")).Events() {
+			if err != nil {
+				errs++
+				if runErr == nil {
+					runErr = err
+				}
+				continue
+			}
+			if runErr != nil {
+				afterError++
+				continue
+			}
+			if _, ok := ev.(core.TextDelta); ok && !sawDelta {
+				sawDelta = true
+				cancel()
+			}
+		}
+		detector.check(runErr)
+		if runErr == nil {
+			if caps.Live {
+				t.Skip("the run completed before cancellation took effect")
+			}
+			t.Fatal("cancelling mid-stream produced no run error")
+		}
+		if !sawDelta {
+			t.Fatal("no TextDelta was observed before cancellation")
+		}
+		if !errors.Is(runErr, context.Canceled) {
+			t.Errorf("err = %v, want context.Canceled", runErr)
+		}
+		if errs != 1 {
+			t.Errorf("%d errors after cancellation, want exactly one terminal error", errs)
+		}
+		if afterError != 0 {
+			t.Errorf("%d events after the terminal error, want none", afterError)
+		}
+	})
+
+	t.Run("max_tokens", func(t *testing.T) {
+		// newModel must construct the adapter with its token-limit option
+		// (e.g. openai.MaxTokens(16)); the suite checks the mapping only.
+		res, err := generate(t, newModel(t, "max_tokens"), nil,
+			core.Prompt("Describe a tree in as many words as you like."))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.StopReason != core.StopMaxTokens {
+			if caps.Live && res.StopReason == core.StopEndTurn {
+				t.Skip("model finished naturally under the cap (valid choice)")
+			}
+			t.Errorf("StopReason = %q, want %q", res.StopReason, core.StopMaxTokens)
+		}
+	})
+
+	if caps.Sequential {
+		t.Run("sequential_hint", func(t *testing.T) {
+			res, err := generate(t, newModel(t, "sequential_hint"), []core.Option{core.Sequential()}, core.Prompt(parallelPrompt))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, s := range res.Steps {
+				if len(s.ToolCalls) > 1 {
+					if caps.Live {
+						t.Skipf("step %d emitted %d calls despite the sequential hint (best-effort)", s.Index, len(s.ToolCalls))
+					}
+					t.Errorf("step %d emitted %d calls under SequentialTools, want at most 1", s.Index, len(s.ToolCalls))
+				}
+			}
+		})
+	}
+
+	// Tool-choice forcing (TODO §2a.1): any must yield a call, a named
+	// choice must call exactly that tool, none must yield no call while
+	// the catalogue stays advertised. The request bytes are asserted
+	// too — the case must see the provider's tool-choice field in what
+	// the adapter sent, so the offline wiring is a RecordingFixtureServer
+	// (its bodies via RecordingModel; a live model cannot capture them).
+	if caps.ToolChoice {
+		t.Run("tool_choice_forcing", func(t *testing.T) {
+			m := newModel(t, "tool_choice_forcing")
+			recorder, records := interface{ RecordedBodies() []string }(nil), false
+			if r, ok := m.(interface{ RecordedBodies() []string }); ok {
+				recorder, records = r, true
+			} else if !caps.Live {
+				t.Fatal("offline tool_choice_forcing must wire a RecordingFixtureServer (wrap the model in conformance.RecordingModel)")
+			}
+
+			// any: some tool must be called.
+			res, err := generate(t, m, nil,
+				core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceAny}),
+				core.Prompt("Call `probe` with n=2, then tell me the doubled value."))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Steps) == 0 || len(res.Steps[0].ToolCalls) == 0 {
+				if caps.Live {
+					t.Skip("model made no tool call under any (valid choice)")
+				}
+				t.Fatal("the first step made no tool calls under ToolChoiceAny")
+			}
+
+			// named: exactly the named tool.
+			res, err = generate(t, m, nil,
+				core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceNamed, Name: "probe"}),
+				core.Prompt("Call `probe` with n=4, then tell me the doubled value."))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Steps) == 0 {
+				t.Fatal("no steps ran")
+			}
+			for _, c := range res.Steps[0].ToolCalls {
+				if c.Name != "probe" {
+					t.Errorf("step 0 called %q under ToolChoiceNamed(probe) — contract breach", c.Name)
+				}
+			}
+			if len(res.Steps[0].ToolCalls) == 0 && !caps.Live {
+				t.Fatal("the first step made no tool calls under ToolChoiceNamed")
+			}
+
+			// none: no call may be made, catalogue still advertised.
+			res, err = generate(t, m, nil,
+				core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceNone}),
+				core.Prompt("Describe the number 4 in one sentence. Do not call any tool."))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, s := range res.Steps {
+				for _, c := range s.ToolCalls {
+					t.Errorf("step %d called %q under ToolChoiceNone — contract breach", s.Index, c.Name)
+				}
+			}
+
+			if records {
+				bodies := recorder.RecordedBodies()
+				if len(bodies) == 0 {
+					t.Fatal("no request bodies were recorded")
+				}
+				for i, b := range bodies {
+					// The provider field name is the one thing the three
+					// wire formats disagree on; exact shapes are pinned in
+					// the adapters' own unit tests, where bodies are cheap.
+					if !strings.Contains(b, `"tool_choice"`) && !strings.Contains(b, "toolConfig") {
+						t.Errorf("request %d body carries no tool_choice/toolConfig:\n%s", i+1, b)
+					}
+				}
+			}
+		})
+	}
+
+	if caps.Reasoning {
+		t.Run("reasoning_passthrough", func(t *testing.T) {
+			m := newModel(t, "reasoning_passthrough")
+			res, err := generate(t, m, nil, core.Prompt("Think briefly, then reply in one sentence."))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var found bool
+			for _, msg := range res.Messages {
+				if msg.Role != core.RoleAssistant {
+					continue
+				}
+				for i, p := range msg.Content {
+					if _, ok := p.(core.ReasoningPart); ok {
+						found = true
+						if i > 0 {
+							t.Errorf("reasoning part at index %d, want first in the message", i)
+						}
+					}
+				}
+			}
+			if !found {
+				if caps.Live {
+					t.Skip("model returned no reasoning this time")
+				}
+				t.Fatal("no ReasoningPart in the transcript")
+			}
+			// The signature round-trips: feeding the transcript back must
+			// not fail the next model call.
+			if _, err := generate(t, m, nil, core.Messages(res.Messages...), core.Prompt("Continue in one sentence.")); err != nil {
+				t.Fatalf("second run with the reasoning transcript failed: %v", err)
+			}
+		})
+	}
+
+	t.Run("file_input", func(t *testing.T) {
+		// A minimal valid 1×1 PNG.
+		png := []byte{
+			0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+			0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+			0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+			0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+			0x42, 0x60, 0x82,
+		}
+		msg := core.UserParts(
+			core.TextPart{Text: "What is in this image?"},
+			core.FilePart{MediaType: "image/png", Data: png},
+		)
+		res, err := generate(t, newModel(t, "file_input"), nil, core.Messages(msg))
+		if caps.Files {
+			if err != nil {
+				t.Fatalf("file input rejected: %v", err)
+			}
+			if res.Text() == "" {
+				t.Error("empty reply for an image prompt")
+			}
+			return
+		}
+		if !errors.Is(err, core.ErrUnsupported) {
+			t.Errorf("err = %v, want ErrUnsupported", err)
+		}
+	})
+
+	if !caps.Live {
+		t.Run("idle_timeout", func(t *testing.T) {
+			_, err := generate(t, newModel(t, "idle_timeout"), nil, core.Prompt("Say something."))
+			if !errors.Is(err, core.ErrStreamIdle) {
+				t.Errorf("err = %v, want ErrStreamIdle", err)
+			}
+		})
+
+		// The idle timer covers the wait for response headers too: a
+		// server that accepts the connection and never answers is the
+		// same stall as one that stops mid-stream, and must fail
+		// ErrStreamIdle rather than hang until the caller's deadline
+		// (review 2026-09-24 §3). newModel wires this case to
+		// SilentServer with a short IdleTimeout.
+		t.Run("idle_timeout_before_headers", func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_, err := core.New(newModel(t, "idle_timeout_before_headers"), probeTool()).Generate(ctx, core.Prompt("Say something."))
+			detector.check(err)
+			if !errors.Is(err, core.ErrStreamIdle) {
+				t.Errorf("err = %v, want ErrStreamIdle (a pre-headers stall escaped the idle timer)", err)
+			}
+		})
+
+		// A provider error reaches the caller as the SDK's own error
+		// type, wrapped, never flattened to text: mw.Retry's classifier
+		// reads the status off it and — where the SDK keeps the
+		// response — the retry-after header. newModel wires this case
+		// to ErrorServer(429, Retry-After: 7) with the SDK's own
+		// transport retries off, so the one request is the one answer.
+		t.Run("provider_error", func(t *testing.T) {
+			_, err := generate(t, newModel(t, "provider_error"), nil, core.Prompt("Say something."))
+			if err == nil {
+				t.Fatal("a 429 from the provider produced no error")
+			}
+			var re *core.RunError
+			if !errors.As(err, &re) {
+				t.Errorf("err = %T, want *core.RunError", err)
+			}
+			if code, ok := mw.HTTPStatus(err); !ok || code != 429 {
+				t.Errorf("mw.HTTPStatus(err) = %d, %v; want 429 — the SDK error type must stay on the chain (err = %v)", code, ok, err)
+			}
+			if caps.ErrorHeaders {
+				if d, ok := mw.RetryAfter(err, time.Now()); !ok || d != 7*time.Second {
+					t.Errorf("mw.RetryAfter(err) = %s, %v; want 7s from the response header (err = %v)", d, ok, err)
+				}
+			}
+		})
+
+		// The idle timer resets per chunk: a stream that keeps dripping
+		// under the timeout — while its total exceeds it — must succeed,
+		// never ErrStreamIdle. newModel wires this case to SlowServer
+		// with an IdleTimeout tighter than the stream's total.
+		t.Run("slow_stream", func(t *testing.T) {
+			res, err := generate(t, newModel(t, "slow_stream"), nil, core.Prompt("Count slowly."))
+			if err != nil {
+				t.Fatalf("a slow but streaming response was killed: %v", err)
+			}
+			if res.Text() == "" {
+				t.Error("no text arrived from the slow stream")
+			}
+		})
+	}
+
+	// Argument fragments surface live as ToolArgsDelta before the call's
+	// ToolStart, and the assembled call still arrives whole (ADR 0004's
+	// amendment). Declared, not assumed: adapters whose calls arrive
+	// whole (Google) set Caps.ToolArgDeltas=false. Adapters map the case's
+	// fixture onto the tool round-trip recording, which already streams
+	// the arguments in pieces.
+	if caps.ToolArgDeltas && !caps.Live {
+		t.Run("tool_args_delta", func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			var (
+				deltas       int
+				afterStart   int
+				sawToolStart bool
+			)
+			for ev, err := range core.New(newModel(t, "tool_args_delta"), probeTool()).
+				Stream(ctx, core.Prompt("Call `probe` with n=3, then tell me the doubled value.")).Events() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				switch ev.(type) {
+				case core.ToolArgsDelta:
+					deltas++
+					if sawToolStart {
+						afterStart++
+					}
+				case core.ToolStart:
+					sawToolStart = true
+				}
+			}
+			if deltas == 0 {
+				t.Error("no ToolArgsDelta surfaced while the model wrote the call")
+			}
+			if afterStart > 0 {
+				t.Errorf("%d ToolArgsDelta events arrived after ToolStart; progress precedes the call", afterStart)
+			}
+		})
+	}
+
+	t.Run("kill_switch", func(t *testing.T) {
+		// newModel should point this case at NoRequestServer (offline)
+		// so a request slipping past the switch fails the test rather
+		// than reaching a fixture; the sentinel alone is not the proof.
+		t.Setenv("WEFT_MODEL_REQUESTS", "deny")
+		_, err := generate(t, newModel(t, "kill_switch"), nil, core.Prompt("Say something."))
+		if !errors.Is(err, core.ErrModelRequestsDenied) {
+			t.Errorf("err = %v, want ErrModelRequestsDenied (and no request made)", err)
+		}
+	})
+
+	t.Run("never_contract_violation", func(t *testing.T) {
+		// Every case's run errors flow through the detector; the Cleanup
+		// fails the suite on any ErrModelContract. This case runs one
+		// plain exchange through the same path to keep the guarantee
+		// exercised even in reduced runs.
+		res, err := generate(t, newModel(t, "never_contract_violation"), nil, core.Prompt("Reply with one short sentence."))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.NumSteps() != 1 {
+			t.Errorf("steps = %d, want 1", res.NumSteps())
+		}
+	})
+}

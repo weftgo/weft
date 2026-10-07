@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/studio"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // TestLocalPlaygroundInProcess pins setup A end to end with no socket
@@ -25,9 +25,9 @@ func TestLocalPlaygroundInProcess(t *testing.T) {
 	srv := studio.New(studio.Open(filepath.Join(dir, "studio.db")), studio.Playground(true))
 	defer func() { _ = srv.Close() }()
 
-	agent := weft.New(
+	agent := core.New(
 		wefttest.Script(wefttest.Say("It shipped.")),
-		weft.Name("acme-support"),
+		core.Name("acme-support"),
 	)
 	shutdown := Install(
 		Local(srv),
@@ -129,7 +129,7 @@ func TestLocalWithStudioToken(t *testing.T) {
 		srv := studio.New(studio.Open(filepath.Join(t.TempDir(), "studio.db")),
 			studio.Playground(true), studio.Token("srv-token"))
 		defer func() { _ = srv.Close() }()
-		agent := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("acme-support"))
+		agent := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("acme-support"))
 		shutdown := Install(append([]Option{Local(srv), Agents(agent), Enabled(true)}, opts...)...)
 		defer shutdown()
 		client := inProcessClient(srv)

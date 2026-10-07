@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -309,7 +309,7 @@ func RunWatch(t *testing.T, open func(t *testing.T) thread.Storage) {
 			t.Fatal(err)
 		}
 		mk := func(text string) thread.Entry {
-			return thread.MessageEntry{ID: thread.NewEntryID(), Created: time.Now().UTC(), Message: weft.User(text)}
+			return thread.MessageEntry{ID: thread.NewEntryID(), Created: time.Now().UTC(), Message: core.User(text)}
 		}
 		first := mk("one")
 		second := mk("two")
@@ -447,7 +447,7 @@ func watcher(t *testing.T, open func(t *testing.T) thread.Storage) (thread.Stora
 
 // msg builds a message entry with a fresh id.
 func msg(text string) thread.MessageEntry {
-	return thread.MessageEntry{ID: thread.NewEntryID(), Created: time.Now().UTC(), Message: weft.User(text)}
+	return thread.MessageEntry{ID: thread.NewEntryID(), Created: time.Now().UTC(), Message: core.User(text)}
 }
 
 // watchConsumerWrites pins that a watcher holds nothing of the storage
@@ -747,14 +747,14 @@ func batch(session string) []thread.Entry {
 		thread.MessageEntry{
 			ID:      thread.NewEntryID(),
 			Created: now,
-			Message: weft.User("Where is order 1234?"),
+			Message: core.User("Where is order 1234?"),
 		},
 		thread.TurnEntry{
 			ID:         thread.NewEntryID(),
 			Created:    now,
 			RunID:      session + "-t1",
-			StopReason: weft.StopEndTurn,
-			Usage:      weft.Usage{InputTokens: 410, OutputTokens: 62},
+			StopReason: core.StopEndTurn,
+			Usage:      core.Usage{InputTokens: 410, OutputTokens: 62},
 			Steps:      1,
 		},
 		thread.CustomEntry{
@@ -805,7 +805,7 @@ func roundTrip(open func(t *testing.T) thread.Storage) func(*testing.T) {
 		// No aliasing, in either direction: the loaded values are the
 		// caller's, and the passed-in values are already the storage's.
 		got.Meta["table"] = "edited"
-		loaded[0].(thread.MessageEntry).Message.Content[0] = weft.TextPart{Text: "edited"}
+		loaded[0].(thread.MessageEntry).Message.Content[0] = core.TextPart{Text: "edited"}
 		loaded[2].(thread.CustomEntry).Data[0] = 'X'
 		entries[2].(thread.CustomEntry).Data[0] = 'Y'
 		again, reloaded, _, err := st.Load(ctx(), h.ID)
@@ -884,12 +884,12 @@ func appendOrder(open func(t *testing.T) thread.Storage) func(*testing.T) {
 			first := thread.MessageEntry{
 				ID:      thread.NewEntryID(),
 				Created: time.Now().UTC(),
-				Message: weft.User(fmt.Sprintf("round %d a", round)),
+				Message: core.User(fmt.Sprintf("round %d a", round)),
 			}
 			second := thread.MessageEntry{
 				ID:      thread.NewEntryID(),
 				Created: time.Now().UTC(),
-				Message: weft.User(fmt.Sprintf("round %d b", round)),
+				Message: core.User(fmt.Sprintf("round %d b", round)),
 			}
 			want = append(want, first.ID, second.ID)
 			if err := st.Append(ctx(), h.ID, first, second); err != nil {
@@ -1079,7 +1079,7 @@ func concurrent(open func(t *testing.T) thread.Storage) func(*testing.T) {
 					if err := st.Append(ctx(), h.ID, thread.MessageEntry{
 						ID:      thread.NewEntryID(),
 						Created: time.Now().UTC(),
-						Message: weft.User(fmt.Sprintf("w%d e%d", w, i)),
+						Message: core.User(fmt.Sprintf("w%d e%d", w, i)),
 					}); err != nil {
 						errs <- err
 						return
@@ -1156,7 +1156,7 @@ func corrupt(open func(t *testing.T) thread.Storage) func(*testing.T) {
 			if err := st.Append(ctx(), id, thread.MessageEntry{
 				ID:      thread.NewEntryID(),
 				Created: time.Now().UTC(),
-				Message: weft.User("one"),
+				Message: core.User("one"),
 			}); err != nil {
 				t.Fatal(err)
 			}

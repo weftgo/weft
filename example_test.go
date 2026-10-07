@@ -163,8 +163,8 @@ func ExampleReasoningPart() {
 		fmt.Printf("%T\n", p)
 	}
 	// Output:
-	// weft.ReasoningPart
-	// weft.TextPart
+	// core.ReasoningPart
+	// core.TextPart
 }
 
 // Tap observes every event of every run — including Generate, which has

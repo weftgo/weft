@@ -10,7 +10,7 @@
 //	defer runtime.Install(
 //	    runtime.Studio(url, token),            // or runtime.Local(srv) in setup A
 //	    runtime.Agents(support, billing),      // the agents a runtime exposes
-//	    runtime.Models(map[string]weft.Model{  // allowed alternates, by display name
+//	    runtime.Models(map[string]core.Model{  // allowed alternates, by display name
 //	        "glm-5.3-flash": glmFlash,
 //	    }),
 //	    runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000, MaxRunsPerExperiment: 60}),
@@ -26,7 +26,7 @@
 // registered can be turned off, never added (OnlyTools); models come
 // from the Models allow-list; MaxSteps and Parallelism only lower.
 // Side effects never re-fire silently (§6 rule 3): a tool counts as
-// "never" unless its code vouched weft.Replay(weft.ReplaySafe) — a
+// "never" unless its code vouched core.Replay(core.ReplaySafe) — a
 // vouched tool runs in every mode. A tool the runtime opted in with
 // AllowSideEffects runs for real only when the command asks for
 // side_effects "allow"; in the other modes it is a side effect like any
@@ -49,13 +49,13 @@
 // app's own turns are never breakable or steerable
 // from here (D7, PQ7).
 //
-// The rule is default-deny (weft.ParkAllExcept): a run lists the tools
+// The rule is default-deny (core.ParkAllExcept): a run lists the tools
 // that may execute — the vouched-safe ones, an Output agent's
 // submit_output, and under "allow" the opted-in names — and every other
 // call parks, matched
 // by name against each step's own tool set. So a tool that reaches the
-// run only through weft.ToolSource parks like any unannotated tool, and
-// the rule follows a weft.Subagent delegation into the child run: the
+// run only through core.ToolSource parks like any unannotated tool, and
+// the rule follows a core.Subagent delegation into the child run: the
 // child's own unvouched tools park there. One limit: a child's parked
 // call is not the panel's to decide — the delegating call reads
 // SUBAGENT_PENDING (ADR 0014) and the parent run carries on, the side
@@ -74,7 +74,7 @@
 //
 // The engines: "live" runs the agent's own model (or a Models
 // alternate); "scripted" (§5.5) answers each model call with the
-// source run's recorded turn at zero tokens — its own weft.Model over
+// source run's recorded turn at zero tokens — its own core.Model over
 // the messages records, keyed like wefttest's fixtures and missing
 // loudly ("no recorded turn") when the input changed, never silently
 // answering a prompt experiment. Thread modes: "ephemeral" (nothing

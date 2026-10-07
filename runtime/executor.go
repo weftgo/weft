@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -179,7 +179,7 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 
 // runPrefix composes the transcript a re-run of src is fed before its
 // input.
-func runPrefix(src *sourceRun, cmd command, hasInput bool) ([]weft.Message, error) {
+func runPrefix(src *sourceRun, cmd command, hasInput bool) ([]core.Message, error) {
 	switch {
 	case len(cmd.TranscriptEdits) > 0 || cmd.Source.FromStep > 0:
 		// The kept prefix, the edits applied (D2/D3) — the runtime's
@@ -240,8 +240,8 @@ func validOptions(options map[string]float64, limits agentLimits) (string, bool)
 // the trailing user message is the prompt the command's input replaces.
 // An input that ends otherwise (a resumed run's) is kept whole and the
 // new input follows it.
-func withoutPrompt(input []weft.Message) []weft.Message {
-	if n := len(input); n > 0 && input[n-1].Role == weft.RoleUser {
+func withoutPrompt(input []core.Message) []core.Message {
+	if n := len(input); n > 0 && input[n-1].Role == core.RoleUser {
 		return input[:n-1]
 	}
 	return input
@@ -303,17 +303,17 @@ func (l *link) unreserve(cmd command) {
 }
 
 // steering wires one run's steer queue (§8.4): the run carries a
-// weft.Steering source draining it, so a steer frame finds the run
+// core.Steering source draining it, so a steer frame finds the run
 // mid-flight. The returned func drops the queue when the run ends.
-func (l *link) steering(runID string) (weft.RunOption, func()) {
-	steerQ := make(chan weft.Message, 8)
+func (l *link) steering(runID string) (core.RunOption, func()) {
+	steerQ := make(chan core.Message, 8)
 	l.mu.Lock()
 	l.steerQ[runID] = steerQ
 	l.mu.Unlock()
-	opt := weft.Steering(func(_ context.Context, _ weft.SteerPoint) []weft.Message {
+	opt := core.Steering(func(_ context.Context, _ core.SteerPoint) []core.Message {
 		select {
 		case m := <-steerQ:
-			return []weft.Message{m}
+			return []core.Message{m}
 		default:
 			return nil
 		}
@@ -379,7 +379,7 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) (status, 
 			breaks[t] = true
 		}
 		for err == nil && res != nil && len(res.Pending) > 0 {
-			resolves := make([]weft.RunOption, 0, len(res.Pending))
+			resolves := make([]core.RunOption, 0, len(res.Pending))
 			all := true
 			for _, call := range res.Pending {
 				if breaks[call.Name] {
@@ -395,9 +395,9 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) (status, 
 					break
 				}
 				if rec.isError {
-					resolves = append(resolves, weft.ResolveError(call.ID, rec.content))
+					resolves = append(resolves, core.ResolveError(call.ID, rec.content))
 				} else {
-					resolves = append(resolves, weft.Resolve(call.ID, rec.content))
+					resolves = append(resolves, core.Resolve(call.ID, rec.content))
 				}
 			}
 			if !all {
@@ -412,9 +412,9 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) (status, 
 			}
 			runID = newID("pg_")
 			opts := l.overrideOptions(cmd)
-			opts = append(opts, weft.Messages(res.Messages...))
+			opts = append(opts, core.Messages(res.Messages...))
 			opts = append(opts, resolves...)
-			opts = append(opts, steer, weft.RunID(runID))
+			opts = append(opts, steer, core.RunID(runID))
 			res, err = agent.Generate(ctx, opts...)
 			spent = spent.Add(usageOf(res, err))
 			steps += numSteps(res)
@@ -425,7 +425,7 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) (status, 
 }
 
 // numSteps is how many model calls a result records (0 for none).
-func numSteps(res *weft.RunResult) int {
+func numSteps(res *core.RunResult) int {
 	if res == nil {
 		return 0
 	}
@@ -433,18 +433,18 @@ func numSteps(res *weft.RunResult) int {
 }
 
 // usageOf is what one run spent: the result's usage, or — a failed run
-// returns no result — the partial usage its *weft.RunError carries.
+// returns no result — the partial usage its *core.RunError carries.
 // The budget counts both (§6 rule 6): a run that fails after burning
 // tokens burned them.
-func usageOf(res *weft.RunResult, err error) weft.Usage {
+func usageOf(res *core.RunResult, err error) core.Usage {
 	if res != nil {
 		return res.Usage
 	}
-	var re *weft.RunError
+	var re *core.RunError
 	if errors.As(err, &re) && re.Result != nil {
 		return re.Result.Usage
 	}
-	return weft.Usage{}
+	return core.Usage{}
 }
 
 // maxForks bounds the forked sessions the runtime keeps open for
@@ -525,7 +525,7 @@ func (l *link) executeFork(ctx context.Context, cmd command) (status, finalRun, 
 	l.mu.Lock()
 	l.forkCmd[s.ID()] = cmd // the shaping a rebuilt park record carries
 	l.mu.Unlock()
-	turn, err := s.Send(ctx, weft.User(*cmd.Input), thread.RunOptions(opts...))
+	turn, err := s.Send(ctx, core.User(*cmd.Input), thread.RunOptions(opts...))
 	if err != nil {
 		return fail(err)
 	}
@@ -538,7 +538,7 @@ func (l *link) executeFork(ctx context.Context, cmd command) (status, finalRun, 
 // and the command ackID (when set) is acked accepted again naming the
 // turn's run id — the dispatch's accepted ack could not (the session
 // mints it at Send), and Studio steers only a run an ack named.
-func (l *link) awaitTurn(ackID string, cmd command, s *thread.Session, turn *thread.Turn, opts []weft.RunOption) (status, finalRun, errText string) {
+func (l *link) awaitTurn(ackID string, cmd command, s *thread.Session, turn *thread.Turn, opts []core.RunOption) (status, finalRun, errText string) {
 	runID := turn.RunID()
 	inFlight := runID // the key the steer registry holds, whatever runID becomes below
 	l.mu.Lock()
@@ -627,12 +627,12 @@ func (l *link) releaseHeld(ctx context.Context) {
 // none, and a session reopened from storage has none either, so
 // neither is ever resumed from here.
 func (l *link) adoptForkParks(s *thread.Session) {
-	byRun := map[string][]weft.ToolCallPart{}
+	byRun := map[string][]core.ToolCallPart{}
 	for _, r := range s.Pending() {
 		if sess, _, err := parseThreadRunID(r.RunID); err != nil || sess != s.ID() {
 			continue
 		}
-		byRun[r.RunID] = append(byRun[r.RunID], weft.ToolCallPart{ID: r.CallID, Name: r.Tool, Args: r.Args})
+		byRun[r.RunID] = append(byRun[r.RunID], core.ToolCallPart{ID: r.CallID, Name: r.Tool, Args: r.Args})
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -744,7 +744,7 @@ func (l *link) breakpointTools(agent string) []string {
 // command can still reach here) gets an engine that holds no record:
 // every request misses, loudly — a scripted command never falls
 // through to the live model and its tokens.
-func (l *link) scriptedFor(cmd command) weft.Model {
+func (l *link) scriptedFor(cmd command) core.Model {
 	var tools []string
 	if agent, ok := l.reg.agent(cmd.Agent); ok && agent != nil {
 		for _, t := range agent.Tools() {
@@ -763,7 +763,7 @@ func (l *link) scriptedFor(cmd command) weft.Model {
 // decision resumes. spent is everything the command's runs used (every
 // leg of a chain, a failed run's partial usage); sess is the fork's
 // session when the run was a turn of one.
-func (l *link) outcome(cmd command, runID string, res *weft.RunResult, err error, spent weft.Usage, sess *thread.Session) (status, errText string) {
+func (l *link) outcome(cmd command, runID string, res *core.RunResult, err error, spent core.Usage, sess *thread.Session) (status, errText string) {
 	status = "succeeded"
 	if err != nil {
 		status, errText = "failed", err.Error()
@@ -855,8 +855,8 @@ func (l *link) forgetParkLocked(runID string) {
 // carry (the parked set above all).
 type parkedRun struct {
 	cmd       command
-	msgs      []weft.Message
-	pending   []weft.ToolCallPart
+	msgs      []core.Message
+	pending   []core.ToolCallPart
 	decisions map[string]approvalDecision // call id → the decision, until every pending call has one
 	sess      *thread.Session
 }
@@ -934,20 +934,20 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, runID, commandID strin
 
 	agent, _ := l.reg.agent(pr.cmd.Agent)
 	opts := l.overrideOptions(pr.cmd)
-	opts = append(opts, weft.Messages(pr.msgs...))
+	opts = append(opts, core.Messages(pr.msgs...))
 	for _, d := range decisions {
 		switch d.Decision {
 		case "approve":
-			opts = append(opts, weft.Approve(d.CallID))
+			opts = append(opts, core.Approve(d.CallID))
 		case "deny":
-			opts = append(opts, weft.Deny(d.CallID, orDefault(d.Reason, "skipped from the devtools panel")))
+			opts = append(opts, core.Deny(d.CallID, orDefault(d.Reason, "skipped from the devtools panel")))
 		default: // resolve
-			opts = append(opts, weft.Resolve(d.CallID, d.Content))
+			opts = append(opts, core.Resolve(d.CallID, d.Content))
 		}
 	}
 	steer, release := l.steering(runID)
 	defer release()
-	opts = append(opts, steer, weft.RunID(runID))
+	opts = append(opts, steer, core.RunID(runID))
 	res, err := agent.Generate(ctx, opts...)
 	status, errText = l.outcome(pr.cmd, runID, res, err, usageOf(res, err), nil)
 	return status, runID, errText
@@ -963,30 +963,30 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, runID, commandID strin
 // weft.forked_from, weft.public_id — and never weft.session.id (an
 // ephemeral experiment is not a turn of the session; §5.2). A fresh
 // command (no source) starts from the input alone.
-func (l *link) runOptions(cmd command, runID string) []weft.RunOption {
+func (l *link) runOptions(cmd command, runID string) []core.RunOption {
 	opts := l.overrideOptions(cmd)
 	if len(cmd.prefix) > 0 {
-		opts = append(opts, weft.Messages(cmd.prefix...))
+		opts = append(opts, core.Messages(cmd.prefix...))
 	}
 	if cmd.Input != nil && *cmd.Input != "" {
-		opts = append(opts, weft.Prompt(*cmd.Input))
+		opts = append(opts, core.Prompt(*cmd.Input))
 	}
-	opts = append(opts, weft.RunID(runID))
+	opts = append(opts, core.RunID(runID))
 	return opts
 }
 
 // overrideOptions is the command's shaping alone — every knob §5.2
 // names except the transcript, the input and the run id, which belong
 // to the run that carries them (a resume replaces all three).
-func (l *link) overrideOptions(cmd command) []weft.RunOption {
-	var opts []weft.RunOption
+func (l *link) overrideOptions(cmd command) []core.RunOption {
+	var opts []core.RunOption
 	o := cmd.Overrides
 
 	if o.Instructions != "" {
-		opts = append(opts, weft.Instructions(o.Instructions))
+		opts = append(opts, core.Instructions(o.Instructions))
 	}
 	if len(o.ToolsEnabled) > 0 {
-		opts = append(opts, weft.OnlyTools(o.ToolsEnabled...))
+		opts = append(opts, core.OnlyTools(o.ToolsEnabled...))
 	}
 	if cmd.Engine == "scripted" {
 		// The scripted engine (§5.5): the source run's recorded turns
@@ -994,24 +994,24 @@ func (l *link) overrideOptions(cmd command) []weft.RunOption {
 		// registered tool list — a narrowed set misses, loudly. It wins
 		// over a model override (validate refuses the pair): nothing a
 		// scripted command carries may reach a live model.
-		opts = append(opts, weft.UseModel(l.scriptedFor(cmd)))
+		opts = append(opts, core.UseModel(l.scriptedFor(cmd)))
 	} else if m := o.Model; m != "" {
 		if alt, ok := l.reg.model(m); ok && alt != nil {
-			opts = append(opts, weft.UseModel(alt))
+			opts = append(opts, core.UseModel(alt))
 		}
 	}
 	if lvl, ok := thinkingLevel(o.Thinking); ok {
-		opts = append(opts, weft.Thinking(weft.ThinkingConfig{Level: lvl}))
+		opts = append(opts, core.Thinking(core.ThinkingConfig{Level: lvl}))
 	}
 	if n := int(o.Options["max_steps"]); n > 0 {
-		opts = append(opts, weft.MaxSteps(n)) // lower only; a raise was rejected above
+		opts = append(opts, core.MaxSteps(n)) // lower only; a raise was rejected above
 	}
 	if n := int(o.Options["parallelism"]); n > 0 {
-		opts = append(opts, weft.Parallelism(n))
+		opts = append(opts, core.Parallelism(n))
 	}
 	if t, ok := o.Options["temperature"]; ok {
 		temp := t
-		opts = append(opts, weft.Params(weft.RequestParams{Temperature: &temp}))
+		opts = append(opts, core.Params(core.RequestParams{Temperature: &temp}))
 	}
 
 	// Side-effect safety (§6 rule 3), default-deny: every tool call of
@@ -1022,12 +1022,12 @@ func (l *link) overrideOptions(cmd command) []weft.RunOption {
 	// parks too, and inherited by the Subagent child runs the run
 	// starts. On every run, the empty list included: nothing vouched
 	// means everything parks.
-	opts = append(opts, weft.ParkAllExcept(l.reg.allowedTools(cmd.Agent, cmd.SideEffects == "allow")...))
+	opts = append(opts, core.ParkAllExcept(l.reg.allowedTools(cmd.Agent, cmd.SideEffects == "allow")...))
 	// The debugger's breakpoints (§8.3): parked on every run this
 	// runtime starts, whatever the command asked for — D7's rule,
 	// applied per run because the agent is immutable.
 	if breaks := l.breakpointTools(cmd.Agent); len(breaks) > 0 {
-		opts = append(opts, weft.ParkOn(breaks...))
+		opts = append(opts, core.ParkOn(breaks...))
 	}
 
 	meta := map[string]string{
@@ -1046,23 +1046,23 @@ func (l *link) overrideOptions(cmd command) []weft.RunOption {
 	if cmd.Actor != "" {
 		meta["weft.playground.actor"] = cmd.Actor
 	}
-	opts = append(opts, weft.Metadata(meta))
+	opts = append(opts, core.Metadata(meta))
 	return opts
 }
 
 // thinkingLevel maps the wire vocabulary (the arena playground's)
 // onto the core's neutral scale. ok is false for "" (no override) and
 // for a word outside the vocabulary — validate rejects the latter.
-func thinkingLevel(s string) (weft.ThinkingLevel, bool) {
+func thinkingLevel(s string) (core.ThinkingLevel, bool) {
 	switch s {
 	case "off":
-		return weft.ThinkOff, true
+		return core.ThinkOff, true
 	case "low":
-		return weft.ThinkLow, true
+		return core.ThinkLow, true
 	case "medium":
-		return weft.ThinkMedium, true
+		return core.ThinkMedium, true
 	case "high":
-		return weft.ThinkHigh, true
+		return core.ThinkHigh, true
 	default:
 		return 0, false
 	}
@@ -1078,13 +1078,13 @@ func thinkingLevel(s string) (weft.ThinkingLevel, bool) {
 // is the first assistant message: what a resumed run recorded before
 // its first model call is not a step's to re-run. keptPrefix refuses
 // a cut that leaves a call without its result.
-func cutAtStep(steps []weft.Message, fromStep int) int {
+func cutAtStep(steps []core.Message, fromStep int) int {
 	if fromStep < 0 {
 		fromStep = 0
 	}
 	assistants := 0
 	for i, m := range steps {
-		if m.Role == weft.RoleAssistant {
+		if m.Role == core.RoleAssistant {
 			if assistants == fromStep {
 				return i
 			}

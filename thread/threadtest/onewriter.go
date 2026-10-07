@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // RunOneWriter is the Session-level half of the Leaser table: what the
@@ -106,7 +106,7 @@ func secondSessionLocked(open func(t *testing.T) thread.Storage) func(*testing.T
 	return func(t *testing.T) {
 		ctx := context.Background()
 		st := open(t)
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		a, err := thread.Create(ctx, st, agent, thread.IDs(sequence("a_")))
 		if err != nil {
 			t.Fatal(err)
@@ -194,7 +194,7 @@ func staleSession(open func(t *testing.T) thread.Storage) func(*testing.T) {
 	return func(t *testing.T) {
 		ctx := context.Background()
 		st := open(t)
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		seed, err := thread.Create(ctx, st, agent, thread.IDs(sequence("s_")))
 		if err != nil {
 			t.Fatal(err)
@@ -263,7 +263,7 @@ func createTakesLease(open func(t *testing.T) thread.Storage) func(*testing.T) {
 	return func(t *testing.T) {
 		ctx := context.Background()
 		st := open(t)
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		a, err := thread.Create(ctx, st, agent)
 		if err != nil {
 			t.Fatal(err)
@@ -288,7 +288,7 @@ func forkTakesLease(open func(t *testing.T) thread.Storage) func(*testing.T) {
 	return func(t *testing.T) {
 		ctx := context.Background()
 		st := open(t)
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		a, err := thread.Create(ctx, st, agent, thread.IDs(sequence("a_")))
 		if err != nil {
 			t.Fatal(err)
@@ -335,7 +335,7 @@ func deleteUnderSession(open func(t *testing.T) thread.Storage) func(*testing.T)
 	return func(t *testing.T) {
 		ctx := context.Background()
 		st := open(t)
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		a, err := thread.Create(ctx, st, agent)
 		if err != nil {
 			t.Fatal(err)
@@ -367,7 +367,7 @@ func recreatedSession(open func(t *testing.T) thread.Storage) func(*testing.T) {
 	return func(t *testing.T) {
 		ctx := context.Background()
 		st := open(t)
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 		same := func() func() string { // every incarnation mints the same ids
 			return sequence("r_")
@@ -418,7 +418,7 @@ func sessionsRace(open func(t *testing.T) thread.Storage) func(*testing.T) {
 	return func(t *testing.T) {
 		ctx := context.Background()
 		st := open(t)
-		agent := weft.New(wefttest.Script())
+		agent := core.New(wefttest.Script())
 		seed, err := thread.Create(ctx, st, agent, thread.IDs(sequence("s_")))
 		if err != nil {
 			t.Fatal(err)

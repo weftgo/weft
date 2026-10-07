@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // reasonInterrupted is the denial reason an Interrupt or Rollback send
@@ -40,7 +40,7 @@ func interruptedCallResult(name string) string {
 // the error and the message leaves the queue again — its receipt
 // marked dropped — because a follow-up accepted behind a boundary
 // nothing will clear would never run.
-func (s *Session) interruptSendLocked(ctx context.Context, msg weft.Message, opts []weft.RunOption, policy Policy) (*Turn, error) {
+func (s *Session) interruptSendLocked(ctx context.Context, msg core.Message, opts []core.RunOption, policy Policy) (*Turn, error) {
 	t, err := s.enqueueLocked(ctx, msg, opts, policy)
 	if err != nil {
 		return nil, err
@@ -156,14 +156,14 @@ func (s *Session) rollbackLocked(t *Turn) {
 // transcript stays sound model input (the pairing invariant; the
 // repair that follows has nothing left to synthesise). The tool
 // message is rebuilt in the assistant's call order.
-func withInterruptedResults(msgs []weft.Message) []weft.Message {
+func withInterruptedResults(msgs []core.Message) []core.Message {
 	i := -1
 	for j := len(msgs) - 1; j >= 0; j-- {
-		if msgs[j].Role != weft.RoleAssistant {
+		if msgs[j].Role != core.RoleAssistant {
 			continue
 		}
 		for _, p := range msgs[j].Content {
-			if _, ok := p.(weft.ToolCallPart); ok {
+			if _, ok := p.(core.ToolCallPart); ok {
 				i = j
 			}
 		}
@@ -172,17 +172,17 @@ func withInterruptedResults(msgs []weft.Message) []weft.Message {
 	if i < 0 {
 		return msgs
 	}
-	served := map[string]weft.ToolResultPart{}
-	if i+1 < len(msgs) && msgs[i+1].Role == weft.RoleTool {
+	served := map[string]core.ToolResultPart{}
+	if i+1 < len(msgs) && msgs[i+1].Role == core.RoleTool {
 		for _, p := range msgs[i+1].Content {
-			if r, ok := p.(weft.ToolResultPart); ok {
+			if r, ok := p.(core.ToolResultPart); ok {
 				served[r.CallID] = r
 			}
 		}
 	}
-	var parts []weft.Part
+	var parts []core.Part
 	for _, p := range msgs[i].Content {
-		c, ok := p.(weft.ToolCallPart)
+		c, ok := p.(core.ToolCallPart)
 		if !ok {
 			continue
 		}
@@ -193,7 +193,7 @@ func withInterruptedResults(msgs []weft.Message) []weft.Message {
 		// No result at all, or the bare cancellation noise a handler
 		// returned as the run died under it — the model sees the golden
 		// interruption text either way.
-		parts = append(parts, weft.ToolResultPart{
+		parts = append(parts, core.ToolResultPart{
 			CallID:  c.ID,
 			Name:    c.Name,
 			IsError: true,
@@ -204,7 +204,7 @@ func withInterruptedResults(msgs []weft.Message) []weft.Message {
 		return msgs
 	}
 	out := slices.Clone(msgs)
-	if i+1 < len(out) && out[i+1].Role == weft.RoleTool {
+	if i+1 < len(out) && out[i+1].Role == core.RoleTool {
 		// The step's results message is rebuilt whole, in call order —
 		// every call of the batch takes its kept result or the golden
 		// text. Keeping the originals beside the rebuild would
@@ -213,7 +213,7 @@ func withInterruptedResults(msgs []weft.Message) []weft.Message {
 		out[i+1].Content = parts
 		return out
 	}
-	tool := weft.Message{Role: weft.RoleTool, Content: parts}
+	tool := core.Message{Role: core.RoleTool, Content: parts}
 	return slices.Insert(out, i+1, tool)
 }
 
@@ -249,7 +249,7 @@ type reRunOption bool
 func (o reRunOption) applySession(c *sessionConfig) { c.reRunOnOverflow = bool(o) }
 
 // ReRunOnOverflow sets whether a turn that fails with
-// weft.ErrContextOverflow compacts (reason overflow) and re-runs once
+// core.ErrContextOverflow compacts (reason overflow) and re-runs once
 // over the shrunken path (ADR 0020 §5) — on by default. A second
 // overflow fails the turn with both errors joined; with the re-run
 // off, the first overflow fails it directly.

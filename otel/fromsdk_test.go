@@ -94,7 +94,7 @@ func TestFromSDKRecordsMatchesOTLPFixture(t *testing.T) {
 		sdklog.WithProcessor(sdklog.NewSimpleProcessor(capture)),
 	)
 	defer func() { _ = provider.Shutdown(context.Background()) }()
-	lg := provider.Logger("github.com/weftgo/weft")
+	lg := provider.Logger("github.com/weftgo/weft/core")
 
 	emit := func(ts, observed time.Time, severity int, eventName, body string, attrs []attribute.KeyValue, withSpan bool) {
 		var r log.Record

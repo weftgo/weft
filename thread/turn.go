@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread/internal/carry"
 )
 
@@ -103,7 +103,7 @@ type SendOption interface {
 
 // sendConfig is one Send's resolved configuration.
 type sendConfig struct {
-	runOpts []weft.RunOption
+	runOpts []core.RunOption
 	// policy overrides the session's busy policy for this one Send
 	// when policySet (As).
 	policy    Policy
@@ -134,23 +134,23 @@ func (o asOption) applySend(c *sendConfig) { c.policy, c.policySet = Policy(o), 
 // turn: there is nothing to steer into, interrupt or queue behind.
 func As(p Policy) SendOption { return asOption(p) }
 
-type runOptionsOption struct{ opts []weft.RunOption }
+type runOptionsOption struct{ opts []core.RunOption }
 
 func (o runOptionsOption) applySend(c *sendConfig) { c.runOpts = append(c.runOpts, o.opts...) }
 
-// RunOptions returns the SendOption carrying extra weft.RunOptions
+// RunOptions returns the SendOption carrying extra core.RunOptions
 // into this turn's run — budgets, taps, thinking, metadata. Three
 // things are the session's own, and an option that would set one is
-// rejected by Send with an error wrapping weft.ErrInvalidRunOption:
+// rejected by Send with an error wrapping core.ErrInvalidRunOption:
 //
-//   - the transcript and the run id — weft.Messages, weft.Prompt,
-//     weft.RunID: Send builds the transcript from the session's tree
+//   - the transcript and the run id — core.Messages, core.Prompt,
+//     core.RunID: Send builds the transcript from the session's tree
 //     and mints <session>-t<n>; either option would quietly detach the
 //     run from the tree (ADR 0011 §4);
-//   - the steering source — weft.Steering: the session owns the steer
+//   - the steering source — core.Steering: the session owns the steer
 //     queue (Send under the Steer policy);
-//   - approval decisions — weft.Approve, weft.Deny, weft.Resolve,
-//     weft.ResolveError: a Send never runs while an approval boundary
+//   - approval decisions — core.Approve, core.Deny, core.Resolve,
+//     core.ResolveError: a Send never runs while an approval boundary
 //     is open (it queues behind it), so a decision passed here would
 //     reach no parked call. Decisions are recorded with Session.Decide
 //     and applied by the boundary's resume run (ADR 0021 §1).
@@ -167,7 +167,7 @@ func (o runOptionsOption) applySend(c *sendConfig) { c.runOpts = append(c.runOpt
 // delegating run handed down): those runs see every value their own
 // context lacks. Options and context are process state — a reopened
 // session's restored sends and boundaries run without them.
-func RunOptions(opts ...weft.RunOption) SendOption { return runOptionsOption{opts} }
+func RunOptions(opts ...core.RunOption) SendOption { return runOptionsOption{opts} }
 
 // sessionOwned names the run option Send must refuse, or "" for one it
 // carries. RunOption is sealed (ADR 0004) — only the core constructs
@@ -177,36 +177,36 @@ func RunOptions(opts ...weft.RunOption) SendOption { return runOptionsOption{opt
 // the tests pin the rejection with the constructors themselves. The
 // probes are built per call: no package state, and Send is not a hot
 // path.
-func sessionOwned(o weft.RunOption) string {
+func sessionOwned(o core.RunOption) string {
 	switch reflect.TypeOf(o) {
-	case reflect.TypeOf(weft.Messages()):
-		return "weft.Messages in RunOptions: the transcript is Send's to build from the session's tree (ADR 0011 §4)"
-	case reflect.TypeOf(weft.Prompt("")):
-		return "weft.Prompt in RunOptions: Send's msg is the prompt (ADR 0011 §4)"
-	case reflect.TypeOf(weft.RunID("")):
-		return "weft.RunID in RunOptions: the session mints <session>-t<n> run ids (ADR 0011 §4)"
-	case reflect.TypeOf(weft.Steering(nil)):
-		return "weft.Steering in RunOptions: the session owns the steer queue (ADR 0019; Send under the Steer policy)"
-	case reflect.TypeOf(weft.Approve("")):
-		return "weft.Approve in RunOptions: a Send never reaches a parked call; record the decision with Session.Decide (ADR 0021 §1)"
-	case reflect.TypeOf(weft.Deny("", "")):
-		return "weft.Deny in RunOptions: a Send never reaches a parked call; record the decision with Session.Decide (ADR 0021 §1)"
-	case reflect.TypeOf(weft.Resolve("", "")): // ResolveError is the same option type
-		return "weft.Resolve in RunOptions: a Send never reaches a parked call; record the decision with Session.Decide (ADR 0021 §1)"
+	case reflect.TypeOf(core.Messages()):
+		return "core.Messages in RunOptions: the transcript is Send's to build from the session's tree (ADR 0011 §4)"
+	case reflect.TypeOf(core.Prompt("")):
+		return "core.Prompt in RunOptions: Send's msg is the prompt (ADR 0011 §4)"
+	case reflect.TypeOf(core.RunID("")):
+		return "core.RunID in RunOptions: the session mints <session>-t<n> run ids (ADR 0011 §4)"
+	case reflect.TypeOf(core.Steering(nil)):
+		return "core.Steering in RunOptions: the session owns the steer queue (ADR 0019; Send under the Steer policy)"
+	case reflect.TypeOf(core.Approve("")):
+		return "core.Approve in RunOptions: a Send never reaches a parked call; record the decision with Session.Decide (ADR 0021 §1)"
+	case reflect.TypeOf(core.Deny("", "")):
+		return "core.Deny in RunOptions: a Send never reaches a parked call; record the decision with Session.Decide (ADR 0021 §1)"
+	case reflect.TypeOf(core.Resolve("", "")): // ResolveError is the same option type
+		return "core.Resolve in RunOptions: a Send never reaches a parked call; record the decision with Session.Decide (ADR 0021 §1)"
 	}
 	return ""
 }
 
 // rejectSessionOwned fails a Send whose run options would set what the
 // session owns — the transcript, the run id, the steering source, the
-// approval decisions — wrapping weft.ErrInvalidRunOption.
-func rejectSessionOwned(opts []weft.RunOption) error {
+// approval decisions — wrapping core.ErrInvalidRunOption.
+func rejectSessionOwned(opts []core.RunOption) error {
 	for _, o := range opts {
 		if o == nil {
 			continue
 		}
 		if why := sessionOwned(o); why != "" {
-			return fmt.Errorf("thread: %w: %s", weft.ErrInvalidRunOption, why)
+			return fmt.Errorf("thread: %w: %s", core.ErrInvalidRunOption, why)
 		}
 	}
 	return nil
@@ -219,8 +219,8 @@ func rejectSessionOwned(opts []weft.RunOption) error {
 // deferral whose receipt could not be written).
 type pendingSend struct {
 	ctx     context.Context
-	msg     weft.Message
-	opts    []weft.RunOption
+	msg     core.Message
+	opts    []core.RunOption
 	turn    *Turn
 	receipt string
 	// restored marks a send Open put back in the queue from its
@@ -256,7 +256,7 @@ type pendingSend struct {
 // between-turn compaction, when one is due — nothing is running to
 // steer into, interrupt or reject for: a Send in that window is
 // accepted under every policy and runs next.
-func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption) (*Turn, error) {
+func (s *Session) Send(ctx context.Context, msg core.Message, opts ...SendOption) (*Turn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -264,7 +264,7 @@ func (s *Session) Send(ctx context.Context, msg weft.Message, opts ...SendOption
 	if err := rejectSessionOwned(cfg.runOpts); err != nil {
 		return nil, err
 	}
-	extra := append([]weft.RunOption(nil), cfg.runOpts...) // captured with the Send
+	extra := append([]core.RunOption(nil), cfg.runOpts...) // captured with the Send
 	policy := s.cfg.policy
 	if cfg.policySet {
 		policy = cfg.policy // captured at Send, like the run options
@@ -361,7 +361,7 @@ func (s *Session) busyLocked() bool {
 // queued, in acceptance order. A reopened session restores an accepted
 // receipt whose prompt entry never landed (restoreAccepted). Callers
 // hold s.mu.
-func (s *Session) enqueueLocked(ctx context.Context, msg weft.Message, opts []weft.RunOption, policy Policy) (*Turn, error) {
+func (s *Session) enqueueLocked(ctx context.Context, msg core.Message, opts []core.RunOption, policy Policy) (*Turn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -381,7 +381,7 @@ func (s *Session) enqueueLocked(ctx context.Context, msg weft.Message, opts []we
 // that was written but could not be flushed is dropped again, best
 // effort, so a reopen does not run a send its caller was told failed.
 // Callers hold s.mu.
-func (s *Session) acceptLocked(ctx context.Context, t *Turn, msg weft.Message, lead func(id, parent string, created time.Time) Entry) (string, error) {
+func (s *Session) acceptLocked(ctx context.Context, t *Turn, msg core.Message, lead func(id, parent string, created time.Time) Entry) (string, error) {
 	if !ValidID(t.id) {
 		return "", fmt.Errorf("thread: invalid entry id %q", t.id)
 	}
@@ -518,7 +518,7 @@ func recoverTurnSeq(session string, entries []Entry) int {
 // recorded leaf entry, the prompt being in the file — so the failed
 // prompt sits on a line of its own and a retried Send leaves one
 // prompt in the context, not two. Callers hold s.mu.
-func (s *Session) appendPromptLocked(ctx context.Context, t *Turn, msg weft.Message) error {
+func (s *Session) appendPromptLocked(ctx context.Context, t *Turn, msg core.Message) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -820,7 +820,7 @@ func (s *Session) locked(fn func()) {
 // an item nor between two. A resume's arming is settled first, so its
 // caller faces a settled boundary: a retry after a failure arms fresh,
 // a resolution reads ErrNotPending.
-func (s *Session) land(item workItem, res *weft.RunResult, err error) {
+func (s *Session) land(item workItem, res *core.RunResult, err error) {
 	t := item.ps.turn
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -948,7 +948,7 @@ func (s *Session) runResume(item workItem) {
 	}
 	var (
 		startErr error
-		opts     []weft.RunOption
+		opts     []core.RunOption
 	)
 	s.locked(func() {
 		if !s.boundaryLocked() {
@@ -962,7 +962,7 @@ func (s *Session) runResume(item workItem) {
 			startErr = fmt.Errorf("%w: resume audit: %w", ErrNotRun, err)
 			return
 		}
-		opts = append([]weft.RunOption(nil), s.await.opts...)
+		opts = append([]core.RunOption(nil), s.await.opts...)
 		ctx = s.resumeCtxLocked(ctx)
 	})
 	if startErr != nil {
@@ -989,13 +989,13 @@ func (s *Session) runResume(item workItem) {
 // (ADR 0021 §2). callerOpts are the run options captured for this
 // turn — the resume inherits the parked send's — and after them come
 // the recorded decisions, which win.
-func (s *Session) runTurn(persist, ctx context.Context, item workItem, callerOpts []weft.RunOption) {
+func (s *Session) runTurn(persist, ctx context.Context, item workItem, callerOpts []core.RunOption) {
 	t := item.ps.turn
-	var res *weft.RunResult
+	var res *core.RunResult
 	var err error
 	inputLen := 0
 	// One re-run is allowed (ADR 0020 §5): a turn failing with
-	// weft.ErrContextOverflow compacts — reason overflow — and tries
+	// core.ErrContextOverflow compacts — reason overflow — and tries
 	// again over the shrunken path under a fresh run id. The failed
 	// attempt's partial is never recorded on the active path (an
 	// overflowed request produced no transcript worth keeping; the run
@@ -1016,24 +1016,24 @@ func (s *Session) runTurn(persist, ctx context.Context, item workItem, callerOpt
 		// input itself, leaving a decision's pending calls unresolved so it
 		// can resolve them (the approval resume).
 		input := s.rawContext()
-		var decisions []weft.RunOption
+		var decisions []core.RunOption
 		s.locked(func() { decisions = s.danglingDecisionsLocked(t.resume) })
-		runOpts := append([]weft.RunOption(nil), callerOpts...)
+		runOpts := append([]core.RunOption(nil), callerOpts...)
 		runOpts = append(runOpts, decisions...)
 		// The session's steering source rides every run (ADR 0019): an
 		// empty queue drains nothing, and a Send under the Steer policy
 		// can queue at any moment — including after this run started.
-		runOpts = append(runOpts, weft.Steering(s.steerSource))
+		runOpts = append(runOpts, core.Steering(s.steerSource))
 		// The transcript observer (ADR 0011 §7): each batch of messages
 		// the run emits is appended as it joins, so a crash mid-turn
 		// loses nothing emitted.
 		runOpts = append(runOpts, s.observer(persist, sp))
 		// The session's identity rides every run (ADR 0024 S5), appended
 		// after the caller's options and before the transcript — a later
-		// weft.Metadata wins (S1.1), so the session's keys win over a
-		// caller's colliding thread.RunOptions(weft.Metadata(...)).
-		runOpts = append(runOpts, weft.Metadata(s.runMetadata(t)))
-		runOpts = append(runOpts, weft.Messages(input...), weft.RunID(t.RunID()))
+		// core.Metadata wins (S1.1), so the session's keys win over a
+		// caller's colliding thread.RunOptions(core.Metadata(...)).
+		runOpts = append(runOpts, core.Metadata(s.runMetadata(t)))
+		runOpts = append(runOpts, core.Messages(input...), core.RunID(t.RunID()))
 		run := s.agent.Stream(withSession(ctx, s), runOpts...)
 		for ev, serr := range run.Events() {
 			if serr != nil {
@@ -1049,7 +1049,7 @@ func (s *Session) runTurn(persist, ctx context.Context, item workItem, callerOpt
 		// says nothing about where the run's own messages start. What
 		// the run added is exactly what the observer was handed.
 		s.locked(func() { inputLen = max(len(runMessages(res, err))-sp.observed, 0) })
-		if attempt == 0 && errors.Is(err, weft.ErrContextOverflow) && s.cfg.reRunOnOverflow && !t.overflowRetried {
+		if attempt == 0 && errors.Is(err, core.ErrContextOverflow) && s.cfg.reRunOnOverflow && !t.overflowRetried {
 			firstOverflow = err
 			t.overflowRetried = true
 			// Branch back before compacting: the compaction must walk the
@@ -1212,7 +1212,7 @@ func (s *Session) recordAttemptLocked(ctx context.Context, t *Turn, overflow err
 	if t.hasPolicy {
 		te.Policy = t.policy.String()
 	}
-	var runErr *weft.RunError
+	var runErr *core.RunError
 	if errors.As(overflow, &runErr) && runErr.Result != nil {
 		te.StopReason = runErr.Result.StopReason
 		te.Usage = runErr.Result.Usage
@@ -1230,16 +1230,16 @@ func (s *Session) recordAttemptLocked(ctx context.Context, t *Turn, overflow err
 
 // withInterruptedPartial returns the run's error with its partial
 // transcript completed for an interrupted turn — every dangling call
-// answered with the interruption text — on a copy: the *weft.RunError
+// answered with the interruption text — on a copy: the *core.RunError
 // the core returned and its Result are left as the run made them.
 func withInterruptedPartial(err error) error {
-	var runErr *weft.RunError
+	var runErr *core.RunError
 	if !errors.As(err, &runErr) || error(runErr) != err || runErr.Result == nil {
 		return err
 	}
 	res := *runErr.Result
 	res.Messages = withInterruptedResults(runErr.Result.Messages)
-	return &weft.RunError{Step: runErr.Step, Err: runErr.Err, Result: &res}
+	return &core.RunError{Step: runErr.Step, Err: runErr.Err, Result: &res}
 }
 
 // joinErrs joins a turn's own error with its persistence failure; nil
@@ -1285,11 +1285,11 @@ func (s *Session) runMetadata(t *Turn) map[string]string {
 }
 
 // runMessages returns the transcript a run left behind: the result's
-// on success, the partial riding on the *weft.RunError on failure, nil
+// on success, the partial riding on the *core.RunError on failure, nil
 // when the run produced neither.
-func runMessages(res *weft.RunResult, err error) []weft.Message {
+func runMessages(res *core.RunResult, err error) []core.Message {
 	if err != nil {
-		var runErr *weft.RunError
+		var runErr *core.RunError
 		if errors.As(err, &runErr) && runErr.Result != nil {
 			return runErr.Result.Messages
 		}
@@ -1308,7 +1308,7 @@ func runMessages(res *weft.RunResult, err error) []weft.Message {
 // transcript, the decision chain's entries when the turn parked calls,
 // and the attempt's per-step state.
 type turnEnd struct {
-	res      *weft.RunResult
+	res      *core.RunResult
 	err      error
 	report   error
 	inputLen int
@@ -1322,7 +1322,7 @@ type turnEnd struct {
 // turn entry, in one atomic batch under a WithoutCancel window — the
 // run is over, and its ledger must land whatever happened to the
 // caller's context (ADR 0011 §4). On failure the partial transcript
-// from RunError.Result is kept after weft.Repair; a turn whose context
+// from RunError.Result is kept after core.Repair; a turn whose context
 // ended — canceled, or past its deadline — is recorded as canceled;
 // the calls a pending approval left unrun are recorded on the entry.
 // The messages beyond the run's input are compared with what the tree
@@ -1346,9 +1346,9 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, end turnEnd) error
 	if report == nil {
 		report = err
 	}
-	var full []weft.Message
+	var full []core.Message
 	if err != nil {
-		var runErr *weft.RunError
+		var runErr *core.RunError
 		if errors.As(err, &runErr) && runErr.Result != nil {
 			full = runErr.Result.Messages
 			res = runErr.Result // the ledger fields (usage, steps, pending) live on the partial
@@ -1366,7 +1366,7 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, end turnEnd) error
 	if res != nil && len(res.Steps) > 0 {
 		tailStart := inputLen
 		for i := len(full) - 1; i >= inputLen; i-- {
-			if full[i].Role == weft.RoleAssistant {
+			if full[i].Role == core.RoleAssistant {
 				tailStart = i
 				break
 			}
@@ -1408,7 +1408,7 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, end turnEnd) error
 	// stay on their own line, evidence like every abandoned line (ADR
 	// 0011 §7).
 	tail := s.turnTailLocked(startLeaf)
-	have := make([]weft.Message, len(tail))
+	have := make([]core.Message, len(tail))
 	for i, te := range tail {
 		have[i] = te.msg
 	}
@@ -1693,15 +1693,15 @@ type Turn struct {
 	// parked send's — and the context whose values it runs on. Set
 	// under s.mu when the turn goes in flight (bindLocked); read under
 	// s.mu.
-	aimOpts []weft.RunOption
+	aimOpts []core.RunOption
 	aimCtx  context.Context
 
 	mu         sync.Mutex
 	cond       *sync.Cond
 	done       chan struct{} // closed by finish
-	events     []weft.Event
+	events     []core.Event
 	streamErr  error
-	result     *weft.RunResult
+	result     *core.RunResult
 	waitErr    error
 	outcome    TurnOutcome
 	ended      bool
@@ -1830,8 +1830,8 @@ func (t *Turn) setNext(n *Turn) {
 // and ends it. A failed run delivers its error exactly once as the
 // final element, the core's rule. A turn with no run of its own — a
 // steer, a turn that never started — yields nothing.
-func (t *Turn) Events() iter.Seq2[weft.Event, error] {
-	return func(yield func(weft.Event, error) bool) {
+func (t *Turn) Events() iter.Seq2[core.Event, error] {
+	return func(yield func(core.Event, error) bool) {
 		i := 0
 		for {
 			t.mu.Lock()
@@ -1887,7 +1887,7 @@ func (t *Turn) Done() <-chan struct{} { return t.done }
 // The error says what kind of end it was; match with errors.Is and
 // errors.As:
 //
-//   - *weft.RunError — the run started and failed, exactly as the
+//   - *core.RunError — the run started and failed, exactly as the
 //     core's Wait reports it: Result carries the partial transcript,
 //     Unwrap the cause (a canceled run's is context.Canceled). After a
 //     failed overflow re-run the error joins both attempts'.
@@ -1903,7 +1903,7 @@ func (t *Turn) Done() <-chan struct{} { return t.done }
 //   - ErrNotPersisted — the run ended but its end could not be
 //     written. It is joined to the run's own error when there is one;
 //     when the run succeeded the result is returned beside it.
-func (t *Turn) Wait() (*weft.RunResult, error) {
+func (t *Turn) Wait() (*core.RunResult, error) {
 	<-t.done
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -1917,7 +1917,7 @@ func (t *Turn) Wait() (*weft.RunResult, error) {
 // changes nothing for the turn — it keeps running, and a later Wait or
 // WaitContext still returns its end. To stop the turn itself, cancel
 // the context its Send was given.
-func (t *Turn) WaitContext(ctx context.Context) (*weft.RunResult, error) {
+func (t *Turn) WaitContext(ctx context.Context) (*core.RunResult, error) {
 	select {
 	case <-t.done:
 		return t.Wait()
@@ -1973,7 +1973,7 @@ func (t *Turn) Outcome() TurnOutcome {
 	return t.outcome
 }
 
-func (t *Turn) push(ev weft.Event) {
+func (t *Turn) push(ev core.Event) {
 	t.mu.Lock()
 	t.events = append(t.events, ev)
 	t.mu.Unlock()
@@ -2005,14 +2005,14 @@ func (t *Turn) promptWritten() bool {
 // (ErrDropped), canceled (the context ended, the turn was interrupted,
 // the session closed) or failed. Idempotent: the first call wins, so a
 // late containment path cannot repaint a decided turn.
-func (t *Turn) finish(res *weft.RunResult, err error) {
+func (t *Turn) finish(res *core.RunResult, err error) {
 	t.finishAs(TurnRunning, res, err)
 }
 
 // finishAs is finish with the outcome given — the steer's ends, which
 // no result or error tells apart. TurnRunning asks for the
 // classification finish describes.
-func (t *Turn) finishAs(outcome TurnOutcome, res *weft.RunResult, err error) {
+func (t *Turn) finishAs(outcome TurnOutcome, res *core.RunResult, err error) {
 	t.mu.Lock()
 	if t.ended {
 		t.mu.Unlock()
@@ -2058,7 +2058,7 @@ func (t *Turn) failed() bool {
 
 // cloneMessage copies a message's part slice, the one mutable field,
 // so an entry's message never aliases a value the caller held.
-func cloneMessage(m weft.Message) weft.Message {
-	m.Content = append([]weft.Part(nil), m.Content...)
+func cloneMessage(m core.Message) core.Message {
+	m.Content = append([]core.Part(nil), m.Content...)
 	return m
 }

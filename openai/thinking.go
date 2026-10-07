@@ -12,7 +12,7 @@ import (
 
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/shared"
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // ThinkingDialect selects how weft's ThinkingConfig reaches an
@@ -77,13 +77,13 @@ func resolveDialect(d ThinkingDialect, baseURL string) ThinkingDialect {
 // ThinkOff maps to nothing — the API has no off switch, so the provider
 // default stands (a documented gap, not a silent guess); a Budget has
 // no effort equivalent and is likewise dropped.
-func reasoningEffort(t weft.ThinkingConfig) shared.ReasoningEffort {
+func reasoningEffort(t core.ThinkingConfig) shared.ReasoningEffort {
 	switch t.Level {
-	case weft.ThinkLow:
+	case core.ThinkLow:
 		return shared.ReasoningEffortLow
-	case weft.ThinkMedium:
+	case core.ThinkMedium:
 		return shared.ReasoningEffortMedium
-	case weft.ThinkHigh:
+	case core.ThinkHigh:
 		return shared.ReasoningEffortHigh
 	default:
 		return ""
@@ -93,11 +93,11 @@ func reasoningEffort(t weft.ThinkingConfig) shared.ReasoningEffort {
 // thinkingObj is the gateway wire shape: nil when nothing should be
 // sent. A Budget has no representation here yet — Kimi k3's advertised
 // think_efforts low/high/max is the future knob (TODO §5.14).
-func thinkingObj(t weft.ThinkingConfig) map[string]any {
+func thinkingObj(t core.ThinkingConfig) map[string]any {
 	switch t.Level {
-	case weft.ThinkOff:
+	case core.ThinkOff:
 		return map[string]any{"type": "disabled"}
-	case weft.ThinkLow, weft.ThinkMedium, weft.ThinkHigh:
+	case core.ThinkLow, core.ThinkMedium, core.ThinkHigh:
 		return map[string]any{"type": "enabled"}
 	default:
 		return nil

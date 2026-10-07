@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // Done is the select-shaped wait, and WaitContext the bounded one:
@@ -19,7 +19,7 @@ func TestTurnDoneAndWaitContext(t *testing.T) {
 	ctx := context.Background()
 	agent, _, started, rel := heldAgent("done")
 	s, _ := thread.Create(ctx, thread.Memory(), agent)
-	turn, err := s.Send(ctx, weft.User("go"))
+	turn, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,13 +81,13 @@ func (h *heldSummarizer) Summarize(ctx context.Context, _ thread.SummaryInput) (
 func TestWaitReturnsBeforeTheBetweenTurnCompaction(t *testing.T) {
 	ctx := context.Background()
 	model := wefttest.Script(
-		wefttest.Say("first").WithUsage(weft.Usage{InputTokens: 95_000, OutputTokens: 5}),
-		wefttest.Say("second").WithUsage(weft.Usage{InputTokens: 1_000, OutputTokens: 5}),
+		wefttest.Say("first").WithUsage(core.Usage{InputTokens: 95_000, OutputTokens: 5}),
+		wefttest.Say("second").WithUsage(core.Usage{InputTokens: 1_000, OutputTokens: 5}),
 	)
 	sum := &heldSummarizer{started: make(chan struct{}), release: make(chan struct{})}
-	s := compactable(t, thread.Memory(), weft.New(model),
+	s := compactable(t, thread.Memory(), core.New(model),
 		thread.ContextWindow(100_000), thread.WithSummarizer(sum), thread.BusyPolicy(thread.Reject))
-	t1, err := s.Send(ctx, weft.User("one"))
+	t1, err := s.Send(ctx, core.User("one"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestWaitReturnsBeforeTheBetweenTurnCompaction(t *testing.T) {
 	}
 	// No turn is running: a Reject session accepts the Send, and it
 	// waits for the compaction.
-	t2, err := s.Send(ctx, weft.User("two"))
+	t2, err := s.Send(ctx, core.User("two"))
 	if err != nil {
 		t.Fatalf("Send between turns: %v, want it accepted", err)
 	}
@@ -156,8 +156,8 @@ func TestWaitReturnsBeforeTheBetweenTurnCompaction(t *testing.T) {
 func TestTurnOutcomes(t *testing.T) {
 	ctx := context.Background()
 	t.Run("answered", func(t *testing.T) {
-		s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script(wefttest.Say("ok"))))
-		turn, _ := s.Send(ctx, weft.User("q"))
+		s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script(wefttest.Say("ok"))))
+		turn, _ := s.Send(ctx, core.User("q"))
 		if _, err := turn.Wait(); err != nil || turn.Outcome() != thread.TurnAnswered || turn.Next() != nil {
 			t.Errorf("err %v, outcome %v, next %v", err, turn.Outcome(), turn.Next())
 		}
@@ -171,12 +171,12 @@ func TestTurnOutcomes(t *testing.T) {
 		}
 	})
 	t.Run("failed", func(t *testing.T) {
-		s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script(wefttest.Fail(errors.New("model down")))))
-		turn, _ := s.Send(ctx, weft.User("q"))
+		s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script(wefttest.Fail(errors.New("model down")))))
+		turn, _ := s.Send(ctx, core.User("q"))
 		_, err := turn.Wait()
-		var runErr *weft.RunError
+		var runErr *core.RunError
 		if !errors.As(err, &runErr) || turn.Outcome() != thread.TurnFailed {
-			t.Errorf("err %v, outcome %v; want a *weft.RunError and failed", err, turn.Outcome())
+			t.Errorf("err %v, outcome %v; want a *core.RunError and failed", err, turn.Outcome())
 		}
 	})
 	t.Run("canceled", func(t *testing.T) {
@@ -184,7 +184,7 @@ func TestTurnOutcomes(t *testing.T) {
 		defer rel.open()
 		s, _ := thread.Create(ctx, thread.Memory(), agent)
 		cctx, cancel := context.WithCancel(ctx)
-		turn, _ := s.Send(cctx, weft.User("q"))
+		turn, _ := s.Send(cctx, core.User("q"))
 		<-started
 		cancel()
 		if _, err := turn.Wait(); !errors.Is(err, context.Canceled) || turn.Outcome() != thread.TurnCanceled {
@@ -195,9 +195,9 @@ func TestTurnOutcomes(t *testing.T) {
 		agent, _, started, rel := heldAgent("after")
 		defer rel.open()
 		s, _ := thread.Create(ctx, thread.Memory(), agent)
-		turn, _ := s.Send(ctx, weft.User("q"))
+		turn, _ := s.Send(ctx, core.User("q"))
 		<-started
-		next, err := s.Send(ctx, weft.User("stop"), thread.As(thread.Interrupt))
+		next, err := s.Send(ctx, core.User("stop"), thread.As(thread.Interrupt))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -253,7 +253,7 @@ func TestTurnOutcomes(t *testing.T) {
 		agent, _ := refundAgent(wefttest.ToolCalls(wefttest.Call{Name: "refund"}))
 		s, _ := thread.Create(ctx, thread.Memory(), agent)
 		parkTurn(t, s, ctx)
-		steer, err := s.Send(ctx, weft.User("also this"), thread.As(thread.Steer))
+		steer, err := s.Send(ctx, core.User("also this"), thread.As(thread.Steer))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -285,15 +285,15 @@ func TestTurnOutcomes(t *testing.T) {
 func steerInto(t *testing.T, after wefttest.Turn) (*thread.Session, **thread.Turn, *thread.Turn) {
 	t.Helper()
 	ctx := context.Background()
-	echo := weft.Tool("echo", "", func(context.Context, struct{}) (string, error) { return "ok", nil })
+	echo := core.Tool("echo", "", func(context.Context, struct{}) (string, error) { return "ok", nil })
 	model := wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "echo"}), after)
 	var ref *thread.Session
 	var once sync.Once
 	steer := new(*thread.Turn)
-	agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.ToolStart); ok {
+	agent := core.New(model, echo, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.ToolStart); ok {
 			once.Do(func() {
-				st, err := ref.Send(ctx, weft.User("switch to metric units"))
+				st, err := ref.Send(ctx, core.User("switch to metric units"))
 				if err != nil {
 					t.Errorf("steer Send: %v", err)
 				}
@@ -308,7 +308,7 @@ func steerInto(t *testing.T, after wefttest.Turn) (*thread.Session, **thread.Tur
 	ref = s
 	// The first Send finds an idle session: under the Steer policy it
 	// runs as a plain turn.
-	t1, err := s.Send(ctx, weft.User("convert this"))
+	t1, err := s.Send(ctx, core.User("convert this"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,15 +334,15 @@ func TestTurnEntryRecordsThePolicy(t *testing.T) {
 		wefttest.Say("after the interrupt"),
 	)
 	s, _ := thread.Create(ctx, thread.Memory(), agent, thread.BusyPolicy(thread.Reject))
-	t1, _ := s.Send(ctx, weft.User("one")) // the session's policy
+	t1, _ := s.Send(ctx, core.User("one")) // the session's policy
 	if _, err := t1.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	t2, _ := s.Send(ctx, weft.User("refund it"), thread.As(thread.Queue)) // the Send's own
+	t2, _ := s.Send(ctx, core.User("refund it"), thread.As(thread.Queue)) // the Send's own
 	if _, err := t2.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	t3, err := s.Send(ctx, weft.User("never mind"), thread.As(thread.Interrupt)) // denies the boundary
+	t3, err := s.Send(ctx, core.User("never mind"), thread.As(thread.Interrupt)) // denies the boundary
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestTurnEntryCanceledOnDeadline(t *testing.T) {
 	s, _ := thread.Create(ctx, thread.Memory(), agent)
 	dctx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer cancel()
-	turn, err := s.Send(dctx, weft.User("too slow"))
+	turn, err := s.Send(dctx, core.User("too slow"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,10 +392,10 @@ func TestTurnEntryCanceledOnDeadline(t *testing.T) {
 func TestInterruptCompletesACopyOfThePartial(t *testing.T) {
 	ctx := context.Background()
 	golden := "tool call wait was interrupted: the run was canceled for a newer message"
-	hasGolden := func(msgs []weft.Message) bool {
+	hasGolden := func(msgs []core.Message) bool {
 		for _, m := range msgs {
 			for _, p := range m.Content {
-				if r, ok := p.(weft.ToolResultPart); ok && r.Content == golden {
+				if r, ok := p.(core.ToolResultPart); ok && r.Content == golden {
 					return true
 				}
 			}
@@ -408,15 +408,15 @@ func TestInterruptCompletesACopyOfThePartial(t *testing.T) {
 	started := make(chan struct{})
 	var once sync.Once
 	var mu sync.Mutex
-	var observed []*weft.RunResult
-	agent := weft.New(model, tool,
-		weft.Tap(func(_ context.Context, ev weft.Event) {
-			if _, ok := ev.(weft.ToolStart); ok {
+	var observed []*core.RunResult
+	agent := core.New(model, tool,
+		core.Tap(func(_ context.Context, ev core.Event) {
+			if _, ok := ev.(core.ToolStart); ok {
 				once.Do(func() { close(started) })
 			}
 		}),
-		weft.OnRunEnd(func(_ context.Context, _ *weft.RunResult, err error) {
-			var runErr *weft.RunError
+		core.OnRunEnd(func(_ context.Context, _ *core.RunResult, err error) {
+			var runErr *core.RunError
 			if errors.As(err, &runErr) {
 				mu.Lock()
 				observed = append(observed, runErr.Result)
@@ -425,16 +425,16 @@ func TestInterruptCompletesACopyOfThePartial(t *testing.T) {
 		}),
 	)
 	s, _ := thread.Create(ctx, thread.Memory(), agent)
-	turn, _ := s.Send(ctx, weft.User("go"))
+	turn, _ := s.Send(ctx, core.User("go"))
 	<-started
-	next, err := s.Send(ctx, weft.User("stop"), thread.As(thread.Interrupt))
+	next, err := s.Send(ctx, core.User("stop"), thread.As(thread.Interrupt))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, werr := turn.Wait()
-	var runErr *weft.RunError
+	var runErr *core.RunError
 	if !errors.As(werr, &runErr) || !hasGolden(runErr.Result.Messages) {
-		t.Fatalf("the turn's error = %v; want a *weft.RunError whose partial carries the interruption text", werr)
+		t.Fatalf("the turn's error = %v; want a *core.RunError whose partial carries the interruption text", werr)
 	}
 	if _, err := next.Wait(); err != nil {
 		t.Fatal(err)

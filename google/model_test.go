@@ -7,39 +7,39 @@ import (
 	"math"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"google.golang.org/genai"
 )
 
-func testTool() *weft.ToolDef {
+func testTool() *core.ToolDef {
 	type in struct {
 		N int `json:"n"`
 	}
-	return weft.Tool("probe", "Reports n.", func(_ context.Context, _ in) (string, error) { return "ok", nil })
+	return core.Tool("probe", "Reports n.", func(_ context.Context, _ in) (string, error) { return "ok", nil })
 }
 
 func TestConvertMessages(t *testing.T) {
 	m := Model("m").(*model)
-	contents, cfg, err := m.contents(weft.ModelRequest{
+	contents, cfg, err := m.contents(core.ModelRequest{
 		System: "be brief",
-		Messages: []weft.Message{
-			weft.UserParts(
-				weft.TextPart{Text: "look"},
-				weft.FilePart{MediaType: "image/png", Data: []byte{1, 2}},
-				weft.FilePart{MediaType: "image/png", URL: "https://x/y.png"},
+		Messages: []core.Message{
+			core.UserParts(
+				core.TextPart{Text: "look"},
+				core.FilePart{MediaType: "image/png", Data: []byte{1, 2}},
+				core.FilePart{MediaType: "image/png", URL: "https://x/y.png"},
 			),
-			{Role: weft.RoleAssistant, Content: []weft.Part{
-				weft.ReasoningPart{Text: "unsigned"},
-				weft.ReasoningPart{Text: "plan", Signature: "sig-1"},
-				weft.TextPart{Text: "checking"},
-				weft.ToolCallPart{ID: "c1", Name: "probe", Args: json.RawMessage(`{"n":1}`)},
+			{Role: core.RoleAssistant, Content: []core.Part{
+				core.ReasoningPart{Text: "unsigned"},
+				core.ReasoningPart{Text: "plan", Signature: "sig-1"},
+				core.TextPart{Text: "checking"},
+				core.ToolCallPart{ID: "c1", Name: "probe", Args: json.RawMessage(`{"n":1}`)},
 			}},
-			{Role: weft.RoleTool, Content: []weft.Part{
-				weft.ToolResultPart{CallID: "c1", Name: "probe", Content: `{"n":1,"doubled":2}`},
-				weft.ToolResultPart{CallID: "c2", Name: "probe", Content: "failed", IsError: true},
+			{Role: core.RoleTool, Content: []core.Part{
+				core.ToolResultPart{CallID: "c1", Name: "probe", Content: `{"n":1,"doubled":2}`},
+				core.ToolResultPart{CallID: "c2", Name: "probe", Content: "failed", IsError: true},
 			}},
 		},
-		Tools: []*weft.ToolDef{testTool()},
+		Tools: []*core.ToolDef{testTool()},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -90,10 +90,10 @@ func TestConvertMessages(t *testing.T) {
 // first; the signature is stored base64 and decoded on send.
 func TestConvertSignedThoughtWithoutCalls(t *testing.T) {
 	m := Model("m").(*model)
-	contents, _, err := m.contents(weft.ModelRequest{Messages: []weft.Message{
-		{Role: weft.RoleAssistant, Content: []weft.Part{
-			weft.ReasoningPart{Text: "plan", Signature: encodeSignature([]byte{0xff, 0x00, 0x01})},
-			weft.TextPart{Text: "Hello."},
+	contents, _, err := m.contents(core.ModelRequest{Messages: []core.Message{
+		{Role: core.RoleAssistant, Content: []core.Part{
+			core.ReasoningPart{Text: "plan", Signature: encodeSignature([]byte{0xff, 0x00, 0x01})},
+			core.TextPart{Text: "Hello."},
 		}},
 	}})
 	if err != nil {
@@ -113,10 +113,10 @@ func TestConvertSignedThoughtWithoutCalls(t *testing.T) {
 // original Part") — with no cross-contamination between calls.
 func TestConvertPerCallSignatures(t *testing.T) {
 	m := Model("m").(*model)
-	contents, _, err := m.contents(weft.ModelRequest{Messages: []weft.Message{
-		{Role: weft.RoleAssistant, Content: []weft.Part{
-			weft.ToolCallPart{ID: "a", Name: "probe", Args: json.RawMessage(`{"n":1}`), Signature: encodeSignature([]byte("sig-1"))},
-			weft.ToolCallPart{ID: "b", Name: "probe", Args: json.RawMessage(`{"n":2}`), Signature: encodeSignature([]byte("sig-2"))},
+	contents, _, err := m.contents(core.ModelRequest{Messages: []core.Message{
+		{Role: core.RoleAssistant, Content: []core.Part{
+			core.ToolCallPart{ID: "a", Name: "probe", Args: json.RawMessage(`{"n":1}`), Signature: encodeSignature([]byte("sig-1"))},
+			core.ToolCallPart{ID: "b", Name: "probe", Args: json.RawMessage(`{"n":2}`), Signature: encodeSignature([]byte("sig-2"))},
 		}},
 	}})
 	if err != nil {
@@ -133,23 +133,23 @@ func TestConvertPerCallSignatures(t *testing.T) {
 
 func TestConvertRejectsBadFiles(t *testing.T) {
 	m := Model("m").(*model)
-	for name, bad := range map[string]weft.FilePart{
+	for name, bad := range map[string]core.FilePart{
 		"both":    {MediaType: "image/png", Data: []byte{1}, URL: "https://x"},
 		"neither": {MediaType: "image/png"},
 	} {
-		_, _, err := m.contents(weft.ModelRequest{Messages: []weft.Message{weft.UserParts(bad)}})
-		if !errors.Is(err, weft.ErrUnsupported) {
+		_, _, err := m.contents(core.ModelRequest{Messages: []core.Message{core.UserParts(bad)}})
+		if !errors.Is(err, core.ErrUnsupported) {
 			t.Errorf("%s: err = %v, want ErrUnsupported", name, err)
 		}
 	}
 }
 
 func TestSchemaConversion(t *testing.T) {
-	got := genaiSchema(&weft.Schema{
+	got := genaiSchema(&core.Schema{
 		Type: "object",
-		Properties: map[string]*weft.Schema{
+		Properties: map[string]*core.Schema{
 			"n":  {Type: "integer", Description: "count"},
-			"xs": {Type: "array", Items: &weft.Schema{Type: "string"}},
+			"xs": {Type: "array", Items: &core.Schema{Type: "string"}},
 		},
 		Required: []string{"n"},
 	})
@@ -172,9 +172,9 @@ func TestSchemaConversion(t *testing.T) {
 // genaiSchema). This pins the deliberate drop: if the SDK ever grows
 // the field, wire it up and delete this test.
 func TestSchemaConversionDropsAdditionalProperties(t *testing.T) {
-	got := genaiSchema(&weft.Schema{
+	got := genaiSchema(&core.Schema{
 		Type:                 "object",
-		AdditionalProperties: &weft.Schema{Type: "integer"},
+		AdditionalProperties: &core.Schema{Type: "integer"},
 	})
 	if got.Type != genai.TypeObject {
 		t.Errorf("type = %v, want OBJECT", got.Type)
@@ -185,16 +185,16 @@ func TestMapFinish(t *testing.T) {
 	cases := []struct {
 		reason   genai.FinishReason
 		hasCalls bool
-		want     weft.StopReason
+		want     core.StopReason
 		raw      string
 	}{
-		{genai.FinishReasonStop, false, weft.StopEndTurn, ""},
-		{genai.FinishReasonStop, true, weft.StopToolCalls, ""},
-		{"", true, weft.StopToolCalls, ""},
-		{"", false, weft.StopEndTurn, ""},
-		{genai.FinishReasonMaxTokens, false, weft.StopMaxTokens, ""},
-		{genai.FinishReasonSafety, false, weft.StopEndTurn, "SAFETY"},
-		{genai.FinishReasonRecitation, false, weft.StopEndTurn, "RECITATION"},
+		{genai.FinishReasonStop, false, core.StopEndTurn, ""},
+		{genai.FinishReasonStop, true, core.StopToolCalls, ""},
+		{"", true, core.StopToolCalls, ""},
+		{"", false, core.StopEndTurn, ""},
+		{genai.FinishReasonMaxTokens, false, core.StopMaxTokens, ""},
+		{genai.FinishReasonSafety, false, core.StopEndTurn, "SAFETY"},
+		{genai.FinishReasonRecitation, false, core.StopEndTurn, "RECITATION"},
 	}
 	for _, tc := range cases {
 		got, raw := mapFinish(tc.reason, tc.hasCalls)
@@ -209,7 +209,7 @@ func TestConfigOptions(t *testing.T) {
 	if m.maxRetries != 2 {
 		t.Errorf("maxRetries = %d, want 2 (forwarded as 3 attempts)", m.maxRetries)
 	}
-	_, cfg, err := m.contents(weft.ModelRequest{})
+	_, cfg, err := m.contents(core.ModelRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,40 +224,40 @@ func TestConfigOptions(t *testing.T) {
 func TestThinkingConfig(t *testing.T) {
 	cases := []struct {
 		name  string
-		run   weft.ThinkingConfig
+		run   core.ThinkingConfig
 		check func(t *testing.T, tc *genai.ThinkingConfig)
 	}{
-		{"unset sends nothing", weft.ThinkingConfig{},
+		{"unset sends nothing", core.ThinkingConfig{},
 			func(t *testing.T, tc *genai.ThinkingConfig) {
 				if tc != nil {
 					t.Errorf("want nil ThinkingConfig, got %+v", tc)
 				}
 			}},
-		{"off zeroes the budget", weft.ThinkingConfig{Level: weft.ThinkOff},
+		{"off zeroes the budget", core.ThinkingConfig{Level: core.ThinkOff},
 			func(t *testing.T, tc *genai.ThinkingConfig) {
 				if tc == nil || tc.ThinkingBudget == nil || *tc.ThinkingBudget != 0 {
 					t.Errorf("ThinkOff: got %+v, want budget 0", tc)
 				}
 			}},
-		{"budget pins depth and asks for thoughts", weft.ThinkingConfig{Budget: 4096},
+		{"budget pins depth and asks for thoughts", core.ThinkingConfig{Budget: 4096},
 			func(t *testing.T, tc *genai.ThinkingConfig) {
 				if tc == nil || tc.ThinkingBudget == nil || *tc.ThinkingBudget != 4096 || !tc.IncludeThoughts {
 					t.Errorf("Budget 4096: got %+v, want budget 4096 + thoughts", tc)
 				}
 			}},
-		{"medium maps to the level", weft.ThinkingConfig{Level: weft.ThinkMedium},
+		{"medium maps to the level", core.ThinkingConfig{Level: core.ThinkMedium},
 			func(t *testing.T, tc *genai.ThinkingConfig) {
 				if tc == nil || tc.ThinkingLevel != genai.ThinkingLevelMedium || !tc.IncludeThoughts {
 					t.Errorf("ThinkMedium: got %+v, want level MEDIUM + thoughts", tc)
 				}
 			}},
-		{"low maps to the level", weft.ThinkingConfig{Level: weft.ThinkLow},
+		{"low maps to the level", core.ThinkingConfig{Level: core.ThinkLow},
 			func(t *testing.T, tc *genai.ThinkingConfig) {
 				if tc == nil || tc.ThinkingLevel != genai.ThinkingLevelLow || !tc.IncludeThoughts {
 					t.Errorf("ThinkLow: got %+v, want level LOW + thoughts", tc)
 				}
 			}},
-		{"high maps to the level", weft.ThinkingConfig{Level: weft.ThinkHigh},
+		{"high maps to the level", core.ThinkingConfig{Level: core.ThinkHigh},
 			func(t *testing.T, tc *genai.ThinkingConfig) {
 				if tc == nil || tc.ThinkingLevel != genai.ThinkingLevelHigh || !tc.IncludeThoughts {
 					t.Errorf("ThinkHigh: got %+v, want level HIGH + thoughts", tc)
@@ -267,7 +267,7 @@ func TestThinkingConfig(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := Model("m").(*model)
-			_, cfg, err := m.contents(weft.ModelRequest{Thinking: tc.run})
+			_, cfg, err := m.contents(core.ModelRequest{Thinking: tc.run})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -276,13 +276,13 @@ func TestThinkingConfig(t *testing.T) {
 	}
 }
 
-// A foreign schema parsed with weft.ParseSchema rides genaiSchema's
+// A foreign schema parsed with core.ParseSchema rides genaiSchema's
 // JSON round trip: what genai.Schema has a field for is carried (enum,
 // pattern, minimum, description), what it lacks is dropped by the
 // decoder (oneOf — Gemini's subset), and type names normalise to the
 // API's uppercase. A Gemini limit, not a weft one (TODO §7.1).
 func TestSchemaConversionForeignRaw(t *testing.T) {
-	s, err := weft.ParseSchema(json.RawMessage(`{"type":"object","properties":{"units":{"type":"string","enum":["c","f"],"pattern":"^[cf]$"},"n":{"type":"integer","minimum":0},"either":{"oneOf":[{"type":"string"}]}},"required":["units"]}`))
+	s, err := core.ParseSchema(json.RawMessage(`{"type":"object","properties":{"units":{"type":"string","enum":["c","f"],"pattern":"^[cf]$"},"n":{"type":"integer","minimum":0},"either":{"oneOf":[{"type":"string"}]}},"required":["units"]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestSchemaConversionForeignRaw(t *testing.T) {
 // properties and items survive the rejected document, not just the top
 // level (TODO §7.1: "falls back to the structured field mapping").
 func TestSchemaConversionFallbackKeepsNesting(t *testing.T) {
-	s, err := weft.ParseSchema(json.RawMessage(`{"type":"object","required":["q"],"properties":{"q":{"type":"string","minimum":"not-a-number"},"nums":{"type":"array","items":{"type":"integer"}}}}`))
+	s, err := core.ParseSchema(json.RawMessage(`{"type":"object","required":["q"],"properties":{"q":{"type":"string","minimum":"not-a-number"},"nums":{"type":"array","items":{"type":"integer"}}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,11 +329,11 @@ func TestSchemaConversionFallbackKeepsNesting(t *testing.T) {
 
 func TestConvertToolChoice(t *testing.T) {
 	tool := testTool()
-	convert := func(cfg weft.ToolChoiceConfig) *genai.GenerateContentConfig {
+	convert := func(cfg core.ToolChoiceConfig) *genai.GenerateContentConfig {
 		m := Model("m").(*model)
-		_, cfgOut, err := m.contents(weft.ModelRequest{
-			Messages:   []weft.Message{weft.User("hi")},
-			Tools:      []*weft.ToolDef{tool},
+		_, cfgOut, err := m.contents(core.ModelRequest{
+			Messages:   []core.Message{core.User("hi")},
+			Tools:      []*core.ToolDef{tool},
 			ToolChoice: cfg,
 		})
 		if err != nil {
@@ -342,7 +342,7 @@ func TestConvertToolChoice(t *testing.T) {
 		return cfgOut
 	}
 	// Zero value: nothing sent — v0.2.0's bytes (P3).
-	if cfg := convert(weft.ToolChoiceConfig{}); cfg.ToolConfig != nil {
+	if cfg := convert(core.ToolChoiceConfig{}); cfg.ToolConfig != nil {
 		t.Errorf("zero ToolChoice set ToolConfig: %+v", cfg.ToolConfig)
 	}
 	// No catalog: nothing sent either, whatever the mode — a toolConfig
@@ -350,9 +350,9 @@ func TestConvertToolChoice(t *testing.T) {
 	// anthropic guard, ported).
 	{
 		m := Model("m").(*model)
-		_, cfg, err := m.contents(weft.ModelRequest{
-			Messages:   []weft.Message{weft.User("hi")},
-			ToolChoice: weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny},
+		_, cfg, err := m.contents(core.ModelRequest{
+			Messages:   []core.Message{core.User("hi")},
+			ToolChoice: core.ToolChoiceConfig{Mode: core.ToolChoiceAny},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -361,15 +361,15 @@ func TestConvertToolChoice(t *testing.T) {
 			t.Errorf("ToolChoiceAny with no tools set ToolConfig: %+v", cfg.ToolConfig)
 		}
 	}
-	fc := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}).ToolConfig.FunctionCallingConfig
+	fc := convert(core.ToolChoiceConfig{Mode: core.ToolChoiceAny}).ToolConfig.FunctionCallingConfig
 	if fc == nil || fc.Mode != genai.FunctionCallingConfigModeAny || len(fc.AllowedFunctionNames) != 0 {
 		t.Errorf("any: %+v", fc)
 	}
-	fc = convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNamed, Name: "probe"}).ToolConfig.FunctionCallingConfig
+	fc = convert(core.ToolChoiceConfig{Mode: core.ToolChoiceNamed, Name: "probe"}).ToolConfig.FunctionCallingConfig
 	if fc == nil || fc.Mode != genai.FunctionCallingConfigModeAny || len(fc.AllowedFunctionNames) != 1 || fc.AllowedFunctionNames[0] != "probe" {
 		t.Errorf("named: %+v", fc)
 	}
-	fc = convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNone}).ToolConfig.FunctionCallingConfig
+	fc = convert(core.ToolChoiceConfig{Mode: core.ToolChoiceNone}).ToolConfig.FunctionCallingConfig
 	if fc == nil || fc.Mode != genai.FunctionCallingConfigModeNone {
 		t.Errorf("none: %+v", fc)
 	}
@@ -382,14 +382,14 @@ func TestFoldParams(t *testing.T) {
 	cases := []struct {
 		name string
 		opts []Option
-		rp   weft.RequestParams
+		rp   core.RequestParams
 		want func(*genai.GenerateContentConfig) bool
 		desc string
 	}{
 		{
 			name: "nothing set sends nothing",
 			opts: nil,
-			rp:   weft.RequestParams{},
+			rp:   core.RequestParams{},
 			want: func(c *genai.GenerateContentConfig) bool {
 				return c.Temperature == nil && c.TopP == nil && c.MaxOutputTokens == 0 && c.StopSequences == nil && c.Seed == nil
 			},
@@ -398,7 +398,7 @@ func TestFoldParams(t *testing.T) {
 		{
 			name: "construction only",
 			opts: []Option{Temperature(0.5), TopP(0.9), MaxTokens(128), Stop("END"), Seed(7)},
-			rp:   weft.RequestParams{},
+			rp:   core.RequestParams{},
 			want: func(c *genai.GenerateContentConfig) bool {
 				return c.Temperature != nil && *c.Temperature == 0.5 && c.TopP != nil && *c.TopP == 0.9 &&
 					c.MaxOutputTokens == 128 && len(c.StopSequences) == 1 && c.Seed != nil && *c.Seed == 7
@@ -408,7 +408,7 @@ func TestFoldParams(t *testing.T) {
 		{
 			name: "request only",
 			opts: nil,
-			rp:   weft.RequestParams{Temperature: p64(0.1), TopP: p64(0.8), MaxTokens: i(64), Stop: []string{"STOP"}, Seed: i64(3)},
+			rp:   core.RequestParams{Temperature: p64(0.1), TopP: p64(0.8), MaxTokens: i(64), Stop: []string{"STOP"}, Seed: i64(3)},
 			want: func(c *genai.GenerateContentConfig) bool {
 				return c.Temperature != nil && *c.Temperature == 0.1 && c.TopP != nil && *c.TopP == 0.8 &&
 					c.MaxOutputTokens == 64 && len(c.StopSequences) == 1 && c.StopSequences[0] == "STOP" && *c.Seed == 3
@@ -418,7 +418,7 @@ func TestFoldParams(t *testing.T) {
 		{
 			name: "request wins on collision",
 			opts: []Option{Temperature(0.5), TopP(0.9), MaxTokens(128), Seed(7)},
-			rp:   weft.RequestParams{Temperature: p64(0), TopP: p64(0.5), MaxTokens: i(32), Seed: i64(1)},
+			rp:   core.RequestParams{Temperature: p64(0), TopP: p64(0.5), MaxTokens: i(32), Seed: i64(1)},
 			want: func(c *genai.GenerateContentConfig) bool {
 				return *c.Temperature == 0 && *c.TopP == 0.5 && c.MaxOutputTokens == 32 && *c.Seed == 1
 			},
@@ -429,7 +429,7 @@ func TestFoldParams(t *testing.T) {
 			// lift a construction cap into the provider default.
 			name: "request zero keeps the construction cap",
 			opts: []Option{MaxTokens(128)},
-			rp:   weft.RequestParams{MaxTokens: i(0)},
+			rp:   core.RequestParams{MaxTokens: i(0)},
 			want: func(c *genai.GenerateContentConfig) bool {
 				return c.MaxOutputTokens == 128
 			},
@@ -438,7 +438,7 @@ func TestFoldParams(t *testing.T) {
 		{
 			name: "request zero without construction sends nothing",
 			opts: nil,
-			rp:   weft.RequestParams{MaxTokens: i(0)},
+			rp:   core.RequestParams{MaxTokens: i(0)},
 			want: func(c *genai.GenerateContentConfig) bool {
 				return c.MaxOutputTokens == 0
 			},
@@ -448,7 +448,7 @@ func TestFoldParams(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := Model("m", tc.opts...).(*model)
-			_, cfg, err := m.contents(weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}, Params: tc.rp})
+			_, cfg, err := m.contents(core.ModelRequest{Messages: []core.Message{core.User("hi")}, Params: tc.rp})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -462,19 +462,19 @@ func TestFoldParams(t *testing.T) {
 	// ErrUnsupported, on request and construction alike.
 	m := Model("m").(*model)
 	over := int64(math.MaxInt32) + 1
-	_, _, err := m.contents(weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}, Params: weft.RequestParams{Seed: &over}})
-	if !errors.Is(err, weft.ErrUnsupported) {
+	_, _, err := m.contents(core.ModelRequest{Messages: []core.Message{core.User("hi")}, Params: core.RequestParams{Seed: &over}})
+	if !errors.Is(err, core.ErrUnsupported) {
 		t.Errorf("request Seed overflow: err = %v, want ErrUnsupported", err)
 	}
 	m2 := Model("m", Seed(over)).(*model)
-	_, _, err = m2.contents(weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}})
-	if !errors.Is(err, weft.ErrUnsupported) {
+	_, _, err = m2.contents(core.ModelRequest{Messages: []core.Message{core.User("hi")}})
+	if !errors.Is(err, core.ErrUnsupported) {
 		t.Errorf("construction Seed overflow: err = %v, want ErrUnsupported", err)
 	}
 	big := math.MaxInt32 + 1
 	m3 := Model("m").(*model)
-	_, _, err = m3.contents(weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}, Params: weft.RequestParams{MaxTokens: &big}})
-	if !errors.Is(err, weft.ErrUnsupported) {
+	_, _, err = m3.contents(core.ModelRequest{Messages: []core.Message{core.User("hi")}, Params: core.RequestParams{MaxTokens: &big}})
+	if !errors.Is(err, core.ErrUnsupported) {
 		t.Errorf("request MaxTokens overflow: err = %v, want ErrUnsupported", err)
 	}
 }

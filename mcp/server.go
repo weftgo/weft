@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // AddTools registers weft tools on an MCP server. Each tool is listed
@@ -28,7 +28,7 @@ import (
 // name already registered by an earlier call is replaced, not
 // refused), or a tool built with RequireApproval — MCP has no approval channel, and
 // running a gated tool unapproved would be a silent policy bypass.
-func AddTools(s *sdk.Server, tools ...*weft.ToolDef) {
+func AddTools(s *sdk.Server, tools ...*core.ToolDef) {
 	seen := map[string]bool{}
 	for _, t := range tools {
 		if t == nil {
@@ -49,7 +49,7 @@ func AddTools(s *sdk.Server, tools ...*weft.ToolDef) {
 // schema (never nil — the SDK panics on nil, and a schema-less tool
 // takes every object, which the empty object schema says exactly), and
 // the output schema only when the tool has one.
-func sdkTool(t *weft.ToolDef) *sdk.Tool {
+func sdkTool(t *core.ToolDef) *sdk.Tool {
 	out := &sdk.Tool{
 		Name:        t.Name,
 		Description: t.Description,
@@ -81,7 +81,7 @@ func containedInvoke(name string, fn func() (string, error)) (out string, err er
 // already defines. Panic containment matches the loop's
 // invokeContained, so a panicking tool is the same isError result over
 // MCP it would be inside a run, not a dead server.
-func invokeHandler(t *weft.ToolDef) sdk.ToolHandler {
+func invokeHandler(t *core.ToolDef) sdk.ToolHandler {
 	return func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 		args := argumentBytes(req)
 		out, err := containedInvoke(t.Name, func() (string, error) { return t.Invoke(ctx, args) })
@@ -109,7 +109,7 @@ func argumentBytes(req *sdk.CallToolRequest) json.RawMessage {
 }
 
 // Serve exposes an agent over MCP: one tool named after the agent
-// (weft.Name is required) that runs it on a prompt and returns its
+// (core.Name is required) that runs it on a prompt and returns its
 // final text or submitted output, plus the agent's tools, each
 // dispatched through the agent's tool chain (Agent.CallTool) so
 // middleware and approval policy apply — an approval-gated tool
@@ -118,7 +118,7 @@ func argumentBytes(req *sdk.CallToolRequest) json.RawMessage {
 // MaxResultBytes) is not applied, per CallTool's rule; the SDK's own
 // request handling bounds the call.
 //
-// The agent tool is weft.Subagent under the name: the same
+// The agent tool is core.Subagent under the name: the same
 // {"prompt": string} input schema, the same Output handling, the same
 // final-text rule — Serve is Subagent over the wire. description is
 // what MCP clients (and their models) read to decide when to call the
@@ -131,14 +131,14 @@ func argumentBytes(req *sdk.CallToolRequest) json.RawMessage {
 //
 // Serve panics on a nil agent, an unnamed agent (the manifest's rule),
 // or a name collision between the agent and one of its tools.
-func Serve(s *sdk.Server, a *weft.Agent, description string) {
+func Serve(s *sdk.Server, a *core.Agent, description string) {
 	if a == nil {
 		panic("weft/mcp: Serve called with a nil agent")
 	}
 	if a.Name() == "" {
-		panic("weft/mcp: Serve: the agent has no name; set one with weft.Name — the exposed tool is named after the agent")
+		panic("weft/mcp: Serve: the agent has no name; set one with core.Name — the exposed tool is named after the agent")
 	}
-	AddTools(s, weft.Subagent(a.Name(), description, a))
+	AddTools(s, core.Subagent(a.Name(), description, a))
 	state := &serveState{}
 	seen := map[string]bool{a.Name(): true}
 	for _, t := range a.Tools() {
@@ -165,10 +165,10 @@ type serveState struct{ seq atomic.Int64 }
 // tool returns the ErrApprovalRequired error, which becomes an isError
 // result reading `weft: tool call requires approval: tool "x"` — loud,
 // never a bypass.
-func chainHandler(a *weft.Agent, t *weft.ToolDef, state *serveState) sdk.ToolHandler {
+func chainHandler(a *core.Agent, t *core.ToolDef, state *serveState) sdk.ToolHandler {
 	return func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 		args := argumentBytes(req)
-		call := weft.ToolCallPart{
+		call := core.ToolCallPart{
 			ID:   fmt.Sprintf("mcp_call_%d", state.seq.Add(1)),
 			Name: t.Name,
 			Args: args,
@@ -188,7 +188,7 @@ func chainHandler(a *weft.Agent, t *weft.ToolDef, state *serveState) sdk.ToolHan
 // result naming the breach (data the client model reads), because a
 // CallToolResult carrying unserializable structuredContent is a reply
 // that never goes out — the client blocks in the call forever.
-func toolResult(t *weft.ToolDef, out string) *sdk.CallToolResult {
+func toolResult(t *core.ToolDef, out string) *sdk.CallToolResult {
 	res := &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: out}}}
 	if t.OutputSchema == nil {
 		return res

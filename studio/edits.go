@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	linkruntime "github.com/weftgo/weft/studio/runtime"
 )
 
@@ -38,13 +38,13 @@ import (
 // began: the first record is the input, the rest are the steps
 // (runtime/transcript.go's decodeBodies). A null or empty body is
 // skipped; one that is not messages is an error.
-func sourceSteps(bodies []json.RawMessage) (input, steps []weft.Message, err error) {
+func sourceSteps(bodies []json.RawMessage) (input, steps []core.Message, err error) {
 	first := true
 	for _, body := range bodies {
 		if len(body) == 0 || string(body) == "null" {
 			continue
 		}
-		var batch []weft.Message
+		var batch []core.Message
 		if err := json.Unmarshal(body, &batch); err != nil {
 			return nil, nil, fmt.Errorf("messages body: %w", err)
 		}
@@ -59,10 +59,10 @@ func sourceSteps(bodies []json.RawMessage) (input, steps []weft.Message, err err
 
 // stepCount is how many steps the run recorded — one assistant message
 // opens each.
-func stepCount(steps []weft.Message) int {
+func stepCount(steps []core.Message) int {
 	n := 0
 	for _, m := range steps {
-		if m.Role == weft.RoleAssistant {
+		if m.Role == core.RoleAssistant {
 			n++
 		}
 	}
@@ -74,7 +74,7 @@ func stepCount(steps []weft.Message) int {
 // runtime's own words. steps are the run's own (sourceSteps), never
 // its input. A nil error means the patched prefix is complete: every
 // kept call answered, the cut at a step boundary.
-func validateTranscriptEdits(steps []weft.Message, fromStep int, edits []linkruntime.TranscriptEdit) error {
+func validateTranscriptEdits(steps []core.Message, fromStep int, edits []linkruntime.TranscriptEdit) error {
 	if len(edits) == 0 {
 		return nil
 	}
@@ -88,9 +88,9 @@ func validateTranscriptEdits(steps []weft.Message, fromStep int, edits []linkrun
 	cut := cutTranscriptAtStep(steps, fromStep)
 	// Copied deep enough to patch: the parts slices are the decoded
 	// transcript's.
-	kept := make([]weft.Message, cut)
+	kept := make([]core.Message, cut)
 	for i, m := range steps[:cut] {
-		kept[i] = weft.Message{Role: m.Role, Content: append([]weft.Part(nil), m.Content...)}
+		kept[i] = core.Message{Role: m.Role, Content: append([]core.Part(nil), m.Content...)}
 	}
 	for _, e := range edits {
 		if e.Step < 0 {
@@ -122,21 +122,21 @@ func validateTranscriptEdits(steps []weft.Message, fromStep int, edits []linkrun
 	// §1's boundary rule over the kept steps: every call answered.
 	answered := map[string]bool{}
 	for _, m := range kept {
-		if m.Role != weft.RoleTool {
+		if m.Role != core.RoleTool {
 			continue
 		}
 		for _, p := range m.Content {
-			if tr, ok := p.(weft.ToolResultPart); ok {
+			if tr, ok := p.(core.ToolResultPart); ok {
 				answered[tr.CallID] = true
 			}
 		}
 	}
 	for _, m := range kept {
-		if m.Role != weft.RoleAssistant {
+		if m.Role != core.RoleAssistant {
 			continue
 		}
 		for _, p := range m.Content {
-			if c, ok := p.(weft.ToolCallPart); ok && !answered[c.ID] {
+			if c, ok := p.(core.ToolCallPart); ok && !answered[c.ID] {
 				return fmt.Errorf("the kept prefix leaves call %q (%s) without a result: from_step must end at a step boundary", c.ID, c.Name)
 			}
 		}
@@ -149,13 +149,13 @@ func validateTranscriptEdits(steps []weft.Message, fromStep int, edits []linkrun
 // lies before it is steps 0..N−1 complete. Step 0's cut is the first
 // assistant message: what a resumed run recorded before its first
 // model call is not a step's to re-run.
-func cutTranscriptAtStep(steps []weft.Message, fromStep int) int {
+func cutTranscriptAtStep(steps []core.Message, fromStep int) int {
 	if fromStep < 0 {
 		fromStep = 0
 	}
 	assistants := 0
 	for i, m := range steps {
-		if m.Role != weft.RoleAssistant {
+		if m.Role != core.RoleAssistant {
 			continue
 		}
 		if assistants == fromStep {
@@ -169,19 +169,19 @@ func cutTranscriptAtStep(steps []weft.Message, fromStep int) int {
 // patchTranscriptResult patches the result of call callID inside step
 // (a tool message belongs to the step its assistant message opened) —
 // scoped to the step, like the runtime's patchResult.
-func patchTranscriptResult(steps []weft.Message, step int, callID, content string) bool {
+func patchTranscriptResult(steps []core.Message, step int, callID, content string) bool {
 	patched := false
 	at := -1 // the step the walk is in; -1 before the first assistant message
 	for mi := range steps {
-		if steps[mi].Role == weft.RoleAssistant {
+		if steps[mi].Role == core.RoleAssistant {
 			at++
 			continue
 		}
-		if steps[mi].Role != weft.RoleTool || at != step {
+		if steps[mi].Role != core.RoleTool || at != step {
 			continue
 		}
 		for pi := range steps[mi].Content {
-			tr, ok := steps[mi].Content[pi].(weft.ToolResultPart)
+			tr, ok := steps[mi].Content[pi].(core.ToolResultPart)
 			if !ok || tr.CallID != callID {
 				continue
 			}
@@ -196,15 +196,15 @@ func patchTranscriptResult(steps []weft.Message, step int, callID, content strin
 
 // checkRewrite reports whether step's assistant message exists and
 // carries no tool calls (dropping them would orphan their results).
-func checkRewrite(steps []weft.Message, step int) bool {
+func checkRewrite(steps []core.Message, step int) bool {
 	assistants := 0
 	for _, m := range steps {
-		if m.Role != weft.RoleAssistant {
+		if m.Role != core.RoleAssistant {
 			continue
 		}
 		if assistants == step {
 			for _, p := range m.Content {
-				if _, ok := p.(weft.ToolCallPart); ok {
+				if _, ok := p.(core.ToolCallPart); ok {
 					return false
 				}
 			}

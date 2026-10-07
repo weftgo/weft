@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // FuzzDecideSigned: the signed-decision verifier over arbitrary input
@@ -36,7 +36,7 @@ func FuzzDecideSigned(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("refund it"))
+	turn, err := s.Send(ctx, core.User("refund it"))
 	if err != nil {
 		f.Fatal(err)
 	}

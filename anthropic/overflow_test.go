@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
-// The provider's context-window overflow maps to weft.ErrContextOverflow
+// The provider's context-window overflow maps to core.ErrContextOverflow
 // (ADR 0020 §5): the caller routes it to compaction, and the SDK's own
 // error stays reachable underneath for errors.As. The body is the
 // provider's documented shape, status 400, "prompt is too long".
@@ -25,8 +25,8 @@ func TestContextOverflowMapsToSentinel(t *testing.T) {
 	c := testClient(srv)
 	m := Model("m", Client(&c))
 	_, err := collect(m, basicReq)
-	if !errors.Is(err, weft.ErrContextOverflow) {
-		t.Fatalf("err = %v (%T), want weft.ErrContextOverflow", err, err)
+	if !errors.Is(err, core.ErrContextOverflow) {
+		t.Fatalf("err = %v (%T), want core.ErrContextOverflow", err, err)
 	}
 	var apiErr *anthropic.Error
 	if !errors.As(err, &apiErr) {
@@ -49,7 +49,7 @@ func TestOtherBadRequestDoesNotMap(t *testing.T) {
 	c := testClient(srv)
 	m := Model("m", Client(&c))
 	_, err := collect(m, basicReq)
-	if errors.Is(err, weft.ErrContextOverflow) {
+	if errors.Is(err, core.ErrContextOverflow) {
 		t.Fatalf("err = %v; an unrelated 400 must not read as overflow", err)
 	}
 }
@@ -66,7 +66,7 @@ func TestContextOverflowMaxTokensShapeMapsToo(t *testing.T) {
 	c := testClient(srv)
 	m := Model("m", Client(&c))
 	_, err := collect(m, basicReq)
-	if !errors.Is(err, weft.ErrContextOverflow) {
-		t.Fatalf("err = %v (%T), want weft.ErrContextOverflow for the max_tokens shape too", err, err)
+	if !errors.Is(err, core.ErrContextOverflow) {
+		t.Fatalf("err = %v (%T), want core.ErrContextOverflow for the max_tokens shape too", err, err)
 	}
 }

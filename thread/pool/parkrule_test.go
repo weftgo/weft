@@ -5,21 +5,21 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/pool"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // firingChild is a child agent with one side-effect tool, "fire", that
 // counts its runs and carries no approval rule of its own: only a park
 // rule the child inherits can park it.
-func firingChild(fired *atomic.Int32, turns ...wefttest.Turn) *weft.Agent {
-	fire := weft.Tool("fire", "a side effect", func(context.Context, struct{}) (string, error) {
+func firingChild(fired *atomic.Int32, turns ...wefttest.Turn) *core.Agent {
+	fire := core.Tool("fire", "a side effect", func(context.Context, struct{}) (string, error) {
 		fired.Add(1)
 		return "fired", nil
 	})
-	return weft.New(wefttest.Script(turns...), fire)
+	return core.New(wefttest.Script(turns...), fire)
 }
 
 // An async child runs on the pool's context — it outlives the
@@ -34,7 +34,7 @@ func TestAsyncChildInheritsParkRule(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "fire", ID: "c-fire"}),
 		wefttest.Say("fired"),
 	)
-	parent := weft.New(wefttest.Script(
+	parent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research", ID: "c-wrapper", Args: `{"prompt":"fire"}`}),
 		wefttest.Say("submitted"),
 	), p.MustWrap("research", "", child, pool.Async()))
@@ -42,7 +42,7 @@ func TestAsyncChildInheritsParkRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("go"), thread.RunOptions(weft.ParkAllExcept("research")))
+	t1, err := s.Send(ctx, core.User("go"), thread.RunOptions(core.ParkAllExcept("research")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestResumedSyncChildKeepsParkRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, err := s.Send(ctx, weft.User("go"), thread.RunOptions(weft.ParkAllExcept("research")))
+	t1, err := s.Send(ctx, core.User("go"), thread.RunOptions(core.ParkAllExcept("research")))
 	if err != nil {
 		t.Fatal(err)
 	}

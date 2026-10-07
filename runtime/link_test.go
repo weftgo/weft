@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 )
 
 // fakeStudio is the Studio side of the wire protocol, just enough to
@@ -122,22 +122,22 @@ func (f *fakeStudio) waitAck(t *testing.T, n int) {
 	t.Fatalf("timed out waiting for %d acks; have %d: %+v", n, len(f.acks), f.acks)
 }
 
-// gatedModel is a weft.Model whose calls block until the test opens
+// gatedModel is a core.Model whose calls block until the test opens
 // the gate — proving the accepted ack is sent before execution — and
 // that counts its calls, proving at-most-once.
 type gatedModel struct {
-	model weft.Model
+	model core.Model
 	gate  chan struct{}
 	calls chan struct{}
 }
 
-func (m *gatedModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *gatedModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	// The gate is the model's first instruction: until the test opens
 	// it, no run can pass through this model at all.
 	select {
 	case <-m.gate:
 	case <-ctx.Done():
-		return func(yield func(weft.ModelEvent, error) bool) {
+		return func(yield func(core.ModelEvent, error) bool) {
 			yield(nil, ctx.Err())
 		}
 	}
@@ -150,12 +150,12 @@ func (m *gatedModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq
 
 // newTestLink wires a link against the fake Studio with instant
 // reconnects.
-func newTestLink(t *testing.T, tsURL string, model weft.Model, budget Budget) *link {
+func newTestLink(t *testing.T, tsURL string, model core.Model, budget Budget) *link {
 	t.Helper()
-	agent := weft.New(model, weft.Name("acme-support"), weft.Instructions("You are Acme's support agent."))
+	agent := core.New(model, core.Name("acme-support"), core.Instructions("You are Acme's support agent."))
 	cfg := &config{
-		agents: []*weft.Agent{agent},
-		models: map[string]weft.Model{},
+		agents: []*core.Agent{agent},
+		models: map[string]core.Model{},
 		budget: budget,
 	}
 	reg := newRegistry(cfg)
@@ -492,7 +492,7 @@ func TestLinkResumeCursorIsArrivalOrder(t *testing.T) {
 // keeps the newest maxSeen command ids, not every id since the process
 // started — and inside that window a repeated id is still refused.
 func TestLinkSeenIsBounded(t *testing.T) {
-	cfg := &config{agents: []*weft.Agent{testAgent("a")}}
+	cfg := &config{agents: []*core.Agent{testAgent("a")}}
 	l := newLink(cfg, newRegistry(cfg), "http://127.0.0.1:1", "")
 	for i := range maxSeen + 100 {
 		id := fmt.Sprintf("cmd_%06d", i)
@@ -605,14 +605,14 @@ type slotModel struct {
 	peak     int
 }
 
-func (m *slotModel) Info() weft.ModelInfo { return weft.ModelInfo{Provider: "wefttest", Name: "slot"} }
+func (m *slotModel) Info() core.ModelInfo { return core.ModelInfo{Provider: "wefttest", Name: "slot"} }
 
-func (m *slotModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *slotModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	m.mu.Lock()
 	m.inFlight++
 	m.peak = max(m.peak, m.inFlight)
 	m.mu.Unlock()
-	return func(yield func(weft.ModelEvent, error) bool) {
+	return func(yield func(core.ModelEvent, error) bool) {
 		defer func() {
 			m.mu.Lock()
 			m.inFlight--
@@ -624,8 +624,8 @@ func (m *slotModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2
 			yield(nil, ctx.Err())
 			return
 		}
-		yield(weft.ModelTextDelta{Text: "ok"}, nil)
-		yield(weft.ModelFinish{Reason: weft.StopEndTurn}, nil)
+		yield(core.ModelTextDelta{Text: "ok"}, nil)
+		yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
 	}
 }
 
@@ -686,7 +686,7 @@ func TestLinkContainsACommandPanic(t *testing.T) {
 	fs := newFakeStudio(t)
 	ts := httptest.NewServer(fs.handler())
 	t.Cleanup(ts.Close)
-	cfg := &config{agents: []*weft.Agent{testAgent("a")}}
+	cfg := &config{agents: []*core.Agent{testAgent("a")}}
 	l := newLink(cfg, newRegistry(cfg), ts.URL, "")
 
 	func() {

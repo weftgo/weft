@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/pool"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // stateless is a Model that answers from the request alone, so one
@@ -23,12 +23,12 @@ import (
 // distinct call ids: wefttest.Script's call_1-per-step hides every
 // bug that needs two ids to tell apart.
 type stateless struct {
-	answer func(req weft.ModelRequest) []weft.ModelEvent
+	answer func(req core.ModelRequest) []core.ModelEvent
 	gauge  *gauge
 }
 
-func (m stateless) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
+func (m stateless) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(nil, err)
 			return
@@ -74,14 +74,14 @@ func (g *gauge) Peak() int {
 
 var callSeq atomic.Int64
 
-func usage() weft.Usage { return weft.Usage{InputTokens: 10, OutputTokens: 5} }
+func usage() core.Usage { return core.Usage{InputTokens: 10, OutputTokens: 5} }
 
 // say is a stateless model that answers text.
 func say(g *gauge, text string) stateless {
-	return stateless{gauge: g, answer: func(weft.ModelRequest) []weft.ModelEvent {
-		return []weft.ModelEvent{
-			weft.ModelTextDelta{Text: text},
-			weft.ModelFinish{Reason: weft.StopEndTurn, Usage: usage()},
+	return stateless{gauge: g, answer: func(core.ModelRequest) []core.ModelEvent {
+		return []core.ModelEvent{
+			core.ModelTextDelta{Text: text},
+			core.ModelFinish{Reason: core.StopEndTurn, Usage: usage()},
 		}
 	}}
 }
@@ -92,28 +92,28 @@ func say(g *gauge, text string) stateless {
 // what the model says, so a test reads the whole tree's results off
 // the root.
 func fanOut(g *gauge, tool string, n int) stateless {
-	return stateless{gauge: g, answer: func(req weft.ModelRequest) []weft.ModelEvent {
+	return stateless{gauge: g, answer: func(req core.ModelRequest) []core.ModelEvent {
 		last := req.Messages[len(req.Messages)-1]
-		if last.Role == weft.RoleTool {
+		if last.Role == core.RoleTool {
 			var parts []string
 			for _, part := range last.Content {
-				if tr, ok := part.(weft.ToolResultPart); ok {
+				if tr, ok := part.(core.ToolResultPart); ok {
 					parts = append(parts, tr.Content)
 				}
 			}
-			return []weft.ModelEvent{
-				weft.ModelTextDelta{Text: "(" + strings.Join(parts, " ") + ")"},
-				weft.ModelFinish{Reason: weft.StopEndTurn, Usage: usage()},
+			return []core.ModelEvent{
+				core.ModelTextDelta{Text: "(" + strings.Join(parts, " ") + ")"},
+				core.ModelFinish{Reason: core.StopEndTurn, Usage: usage()},
 			}
 		}
-		var evs []weft.ModelEvent
+		var evs []core.ModelEvent
 		for i := 0; i < n; i++ {
-			evs = append(evs, weft.ModelToolCall{
+			evs = append(evs, core.ModelToolCall{
 				ID:   fmt.Sprintf("%s-%d", tool, callSeq.Add(1)),
 				Name: tool, Args: []byte(`{"prompt":"go"}`),
 			})
 		}
-		return append(evs, weft.ModelFinish{Reason: weft.StopToolCalls, Usage: usage()})
+		return append(evs, core.ModelFinish{Reason: core.StopToolCalls, Usage: usage()})
 	}}
 }
 
@@ -137,8 +137,8 @@ func within(t *testing.T, d time.Duration, what string, fn func()) {
 // tree builds a delegation chain depth levels deep under one pool,
 // every level calling the next fan times in one step: the root tool
 // to hand a parent, and the answer the root reads when all of it ran.
-func tree(p *pool.Pool, g *gauge, depth, fan int) (root *weft.ToolDef, rootAgent *weft.Agent, answer string) {
-	agent := weft.New(say(g, "leaf"))
+func tree(p *pool.Pool, g *gauge, depth, fan int) (root *core.ToolDef, rootAgent *core.Agent, answer string) {
+	agent := core.New(say(g, "leaf"))
 	answer = "leaf"
 	for level := depth; level >= 1; level-- {
 		name := fmt.Sprintf("level%d", level)
@@ -146,7 +146,7 @@ func tree(p *pool.Pool, g *gauge, depth, fan int) (root *weft.ToolDef, rootAgent
 		if level == 1 {
 			return tool, agent, answer
 		}
-		agent = weft.New(fanOut(g, name, fan), tool)
+		agent = core.New(fanOut(g, name, fan), tool)
 		answer = "(" + strings.TrimSuffix(strings.Repeat(answer+" ", fan), " ") + ")"
 	}
 	panic("unreachable")
@@ -169,16 +169,16 @@ func TestHandoffNoDeadlock(t *testing.T) {
 				tool, _, answer := tree(p, g, depth, fan)
 				// The parent is no pool child: its own model calls are
 				// not the pool's to count.
-				parent := weft.New(fanOut(nil, "level1", fan), tool)
+				parent := core.New(fanOut(nil, "level1", fan), tool)
 				s, err := thread.Create(ctx, thread.Memory(), parent)
 				if err != nil {
 					t.Fatal(err)
 				}
-				turn, err := s.Send(ctx, weft.User("go"))
+				turn, err := s.Send(ctx, core.User("go"))
 				if err != nil {
 					t.Fatal(err)
 				}
-				var res *weft.RunResult
+				var res *core.RunResult
 				within(t, 30*time.Second, "the delegating turn", func() { res, err = turn.Wait() })
 				if err != nil {
 					t.Fatalf("Wait: %v", err)
@@ -211,7 +211,7 @@ func TestHandoffNoDeadlock(t *testing.T) {
 				// The submitted children are the tree's first level:
 				// each delegates on, sync, below it.
 				_, top, answer := tree(p, g, depth, fan)
-				s, err := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+				s, err := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -254,10 +254,10 @@ func TestHandoffBarePath(t *testing.T) {
 	g := &gauge{}
 	p := pool.New(1)
 	tool, _, answer := tree(p, g, 3, 2)
-	parent := weft.New(fanOut(nil, "level1", 2), tool)
-	var res *weft.RunResult
+	parent := core.New(fanOut(nil, "level1", 2), tool)
+	var res *core.RunResult
 	var err error
-	within(t, 30*time.Second, "the bare Generate", func() { res, err = parent.Generate(ctx, weft.Prompt("go")) })
+	within(t, 30*time.Second, "the bare Generate", func() { res, err = parent.Generate(ctx, core.Prompt("go")) })
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestHandoffBarePath(t *testing.T) {
 // start in the order they were submitted, every time.
 func TestFIFO(t *testing.T) {
 	ctx := context.Background()
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	p := pool.New(1)
 	const queued = 6
 	var mu sync.Mutex
@@ -291,7 +291,7 @@ func TestFIFO(t *testing.T) {
 				started = append(started, i)
 				mu.Unlock()
 			}}
-		r, err := p.Submit(ctx, s, weft.New(mdl), "go")
+		r, err := p.Submit(ctx, s, core.New(mdl), "go")
 		if err != nil {
 			t.Fatalf("Submit %d: %v", i, err)
 		}
@@ -327,11 +327,11 @@ func TestFIFO(t *testing.T) {
 }
 
 // lastToolResult returns the last tool result in msgs.
-func lastToolResult(msgs []weft.Message) string {
+func lastToolResult(msgs []core.Message) string {
 	out := ""
 	for _, m := range msgs {
 		for _, part := range m.Content {
-			if tp, ok := part.(weft.ToolResultPart); ok {
+			if tp, ok := part.(core.ToolResultPart); ok {
 				out = tp.Content
 			}
 		}
@@ -349,15 +349,15 @@ func TestDepthLimit(t *testing.T) {
 	run := func(t *testing.T, opts ...pool.Option) string {
 		p := pool.New(1, opts...)
 		tool, _, _ := tree(p, nil, 3, 1)
-		s, err := thread.Create(ctx, thread.Memory(), weft.New(fanOut(nil, "level1", 1), tool))
+		s, err := thread.Create(ctx, thread.Memory(), core.New(fanOut(nil, "level1", 1), tool))
 		if err != nil {
 			t.Fatal(err)
 		}
-		turn, err := s.Send(ctx, weft.User("go"))
+		turn, err := s.Send(ctx, core.User("go"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		var res *weft.RunResult
+		var res *core.RunResult
 		within(t, 30*time.Second, "the chain", func() { res, err = turn.Wait() })
 		if err != nil {
 			t.Fatal(err)
@@ -398,19 +398,19 @@ func TestCycle(t *testing.T) {
 	ctx := context.Background()
 	t.Run("self", func(t *testing.T) {
 		p := pool.New(2)
-		var self *weft.ToolDef
+		var self *core.ToolDef
 		var runs atomic.Int64
 		model := fanOut(nil, "again", 1)
-		counted := stateless{answer: func(req weft.ModelRequest) []weft.ModelEvent {
+		counted := stateless{answer: func(req core.ModelRequest) []core.ModelEvent {
 			if len(req.Messages) == 1 {
 				runs.Add(1)
 			}
 			return model.answer(req)
 		}}
-		a := weft.New(counted, weft.ToolSource(func() []*weft.ToolDef { return []*weft.ToolDef{self} }))
+		a := core.New(counted, core.ToolSource(func() []*core.ToolDef { return []*core.ToolDef{self} }))
 		self = p.MustWrap("again", "", a)
 		s, _ := thread.Create(ctx, thread.Memory(), a)
-		turn, err := s.Send(ctx, weft.User("go"))
+		turn, err := s.Send(ctx, core.User("go"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -431,12 +431,12 @@ func TestCycle(t *testing.T) {
 	})
 	t.Run("A-B-A", func(t *testing.T) {
 		p := pool.New(2)
-		var toA *weft.ToolDef
-		b := weft.New(fanOut(nil, "to_a", 1), weft.ToolSource(func() []*weft.ToolDef { return []*weft.ToolDef{toA} }))
-		a := weft.New(fanOut(nil, "to_b", 1), p.MustWrap("to_b", "", b))
+		var toA *core.ToolDef
+		b := core.New(fanOut(nil, "to_a", 1), core.ToolSource(func() []*core.ToolDef { return []*core.ToolDef{toA} }))
+		a := core.New(fanOut(nil, "to_b", 1), p.MustWrap("to_b", "", b))
 		toA = p.MustWrap("to_a", "", a)
 		s, _ := thread.Create(ctx, thread.Memory(), a)
-		turn, _ := s.Send(ctx, weft.User("go"))
+		turn, _ := s.Send(ctx, core.User("go"))
 		res, err := turn.Wait()
 		if err != nil {
 			t.Fatal(err)
@@ -450,20 +450,20 @@ func TestCycle(t *testing.T) {
 		// Submit from inside a run counts from that run: the same two
 		// refusals, as Go errors.
 		p := pool.New(2, pool.MaxDepth(1))
-		var agent *weft.Agent
-		other := weft.New(say(nil, "other"))
+		var agent *core.Agent
+		other := core.New(say(nil, "other"))
 		var cycleErr, depthErr error
-		probe := weft.Tool("probe", "", func(ctx context.Context, _ struct{}) (string, error) {
+		probe := core.Tool("probe", "", func(ctx context.Context, _ struct{}) (string, error) {
 			s := thread.SessionFromContext(ctx)
 			_, cycleErr = p.Submit(ctx, s, agent, "again")
 			_, depthErr = p.Submit(ctx, s, other, "deeper")
 			return "probed", nil
 		})
-		agent = weft.New(wefttest.Script(
+		agent = core.New(wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: "probe", ID: "c-probe"}),
 			wefttest.Say("done"),
 		), probe)
-		s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+		s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 		r, err := p.Submit(ctx, s, agent, "go")
 		if err != nil {
 			t.Fatal(err)

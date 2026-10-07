@@ -9,7 +9,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
 )
 
@@ -321,7 +321,7 @@ type runUpdate struct {
 	experimentID string
 	forkedFrom   string
 	meta         map[string]string
-	usage        weft.Usage
+	usage        core.Usage
 	setUsage     bool
 	steps        int
 	setSteps     bool
@@ -533,7 +533,7 @@ func (u *runUpdate) applyDurable(ctx context.Context, tx *sql.Tx, r obsdb.Record
 		u.finishedOK = true
 		u.setFinishedAt(r.Time)
 		var body struct {
-			Usage   weft.Usage `json:"usage"`
+			Usage   core.Usage `json:"usage"`
 			Steps   int        `json:"steps"`
 			Pending []struct{} `json:"pending"`
 		}
@@ -653,7 +653,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 	}
 	finishedOK := ex.finishedOK || u.finishedOK
 	failed := ex.failed || u.failed
-	usage := weft.Usage{
+	usage := core.Usage{
 		InputTokens: ex.inTok, OutputTokens: ex.outTok,
 		CachedInputTokens: ex.cachedTok, CacheWriteTokens: ex.cacheWrite,
 		ReasoningTokens: ex.reasoningTok,

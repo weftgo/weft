@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
 	"github.com/weftgo/weft/thread/threadtest"
@@ -78,7 +78,7 @@ func TestFileShape(t *testing.T) {
 	if err := st.Append(ctx, h.ID, thread.MessageEntry{
 		ID:      "e_shape1",
 		Created: h.Created.Add(time.Second),
-		Message: weft.User("hello"),
+		Message: core.User("hello"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -164,10 +164,10 @@ func TestOneWriterPerSession(t *testing.T) {
 	if err := first.Create(ctx, h); err != nil {
 		t.Fatal(err)
 	}
-	if err := first.Append(ctx, h.ID, thread.MessageEntry{ID: "e_lock", Message: weft.User("one")}); err != nil {
+	if err := first.Append(ctx, h.ID, thread.MessageEntry{ID: "e_lock", Message: core.User("one")}); err != nil {
 		t.Fatal(err)
 	}
-	err = second.Append(ctx, h.ID, thread.MessageEntry{ID: "e_lock2", Message: weft.User("two")})
+	err = second.Append(ctx, h.ID, thread.MessageEntry{ID: "e_lock2", Message: core.User("two")})
 	if !errors.Is(err, thread.ErrLocked) {
 		t.Fatalf("second writer: err = %v, want ErrLocked", err)
 	}
@@ -215,8 +215,8 @@ func TestSalvage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := strict.Append(ctx, h.ID,
-		thread.MessageEntry{ID: "e_k1", Message: weft.User("keep me")},
-		thread.MessageEntry{ID: "e_k2", Message: weft.User("me too")},
+		thread.MessageEntry{ID: "e_k1", Message: core.User("keep me")},
+		thread.MessageEntry{ID: "e_k2", Message: core.User("me too")},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestConcurrentFirstTouchOneSession(t *testing.T) {
 				defer wg.Done()
 				errs <- st.Append(ctx, id, thread.MessageEntry{
 					ID:      fmt.Sprintf("e_touch%02d_%02d", r, w),
-					Message: weft.User("first touch"),
+					Message: core.User("first touch"),
 				})
 			}(w)
 		}
@@ -376,7 +376,7 @@ func TestCreateRacingAppends(t *testing.T) {
 				defer wg.Done()
 				appendErrs <- st.Append(ctx, id, thread.MessageEntry{
 					ID:      fmt.Sprintf("e_race%02d_%02d", r, a),
-					Message: weft.User("racing"),
+					Message: core.User("racing"),
 				})
 			}(a)
 		}
@@ -485,7 +485,7 @@ func TestSyncPolicies(t *testing.T) {
 		if err := st.Create(ctx, h); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.Append(ctx, h.ID, thread.MessageEntry{ID: "e_s1", Created: created.Add(time.Second), Message: weft.User("durable")}); err != nil {
+		if err := st.Append(ctx, h.ID, thread.MessageEntry{ID: "e_s1", Created: created.Add(time.Second), Message: core.User("durable")}); err != nil {
 			t.Fatal(err)
 		}
 		raw, err := os.ReadFile(filepath.Join(dir, "s_sync.jsonl"))
@@ -575,7 +575,7 @@ func TestWatch(t *testing.T) {
 	}()
 	// The writer is another handle entirely — the two-process shape.
 	if err := first.Append(ctx, "s_tail", thread.MessageEntry{
-		ID: "e_w1", Created: time.Now().UTC(), Message: weft.User("from the other handle"),
+		ID: "e_w1", Created: time.Now().UTC(), Message: core.User("from the other handle"),
 	}); err != nil {
 		t.Fatal(err)
 	}

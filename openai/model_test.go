@@ -7,32 +7,32 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
-func testTool() *weft.ToolDef {
+func testTool() *core.ToolDef {
 	type in struct {
 		N int `json:"n"`
 	}
-	return weft.Tool("probe", "Reports n.", func(_ context.Context, _ in) (string, error) { return "ok", nil })
+	return core.Tool("probe", "Reports n.", func(_ context.Context, _ in) (string, error) { return "ok", nil })
 }
 
-func req(msgs ...weft.Message) weft.ModelRequest {
-	return weft.ModelRequest{System: "be brief", Messages: msgs}
+func req(msgs ...core.Message) core.ModelRequest {
+	return core.ModelRequest{System: "be brief", Messages: msgs}
 }
 
 func TestConvertMessages(t *testing.T) {
 	m := Model("m").(*model)
 	p, err := m.params(req(
-		weft.User("hi"),
-		weft.Message{Role: weft.RoleAssistant, Content: []weft.Part{
-			weft.ReasoningPart{Text: "plan", Signature: "sig-1"},
-			weft.TextPart{Text: "let me check"},
-			weft.ToolCallPart{ID: "c1", Name: "probe", Args: json.RawMessage(`{"n":1}`)},
+		core.User("hi"),
+		core.Message{Role: core.RoleAssistant, Content: []core.Part{
+			core.ReasoningPart{Text: "plan", Signature: "sig-1"},
+			core.TextPart{Text: "let me check"},
+			core.ToolCallPart{ID: "c1", Name: "probe", Args: json.RawMessage(`{"n":1}`)},
 		}},
-		weft.Message{Role: weft.RoleTool, Content: []weft.Part{
-			weft.ToolResultPart{CallID: "c1", Name: "probe", Content: `{"n":1,"doubled":2}`},
-			weft.ToolResultPart{CallID: "c2", Name: "probe", Content: "failed", IsError: true},
+		core.Message{Role: core.RoleTool, Content: []core.Part{
+			core.ToolResultPart{CallID: "c1", Name: "probe", Content: `{"n":1,"doubled":2}`},
+			core.ToolResultPart{CallID: "c2", Name: "probe", Content: "failed", IsError: true},
 		}},
 	))
 	if err != nil {
@@ -71,10 +71,10 @@ func TestConvertMessages(t *testing.T) {
 
 func TestConvertMessagesPinsRequestJSON(t *testing.T) {
 	m := Model("m", MaxTokens(16), Temperature(0.5)).(*model)
-	p, err := m.params(weft.ModelRequest{
+	p, err := m.params(core.ModelRequest{
 		System:          "s",
-		Messages:        []weft.Message{weft.User("hi")},
-		Tools:           []*weft.ToolDef{testTool()},
+		Messages:        []core.Message{core.User("hi")},
+		Tools:           []*core.ToolDef{testTool()},
 		SequentialTools: true,
 	})
 	if err != nil {
@@ -99,13 +99,13 @@ func TestConvertMessagesPinsRequestJSON(t *testing.T) {
 
 func TestConvertFiles(t *testing.T) {
 	m := Model("m").(*model)
-	png := weft.FilePart{MediaType: "image/png", Data: []byte{1, 2, 3}}
-	url := weft.FilePart{MediaType: "image/png", URL: "https://x/y.png"}
-	pdf := weft.FilePart{MediaType: "application/pdf", Data: []byte{1}}
-	both := weft.FilePart{MediaType: "image/png", Data: []byte{1}, URL: "https://x"}
-	neither := weft.FilePart{MediaType: "image/png"}
+	png := core.FilePart{MediaType: "image/png", Data: []byte{1, 2, 3}}
+	url := core.FilePart{MediaType: "image/png", URL: "https://x/y.png"}
+	pdf := core.FilePart{MediaType: "application/pdf", Data: []byte{1}}
+	both := core.FilePart{MediaType: "image/png", Data: []byte{1}, URL: "https://x"}
+	neither := core.FilePart{MediaType: "image/png"}
 
-	p, err := m.params(req(weft.UserParts(weft.TextPart{Text: "look"}, png)))
+	p, err := m.params(req(core.UserParts(core.TextPart{Text: "look"}, png)))
 	if err != nil {
 		t.Fatalf("inline image rejected: %v", err)
 	}
@@ -113,12 +113,12 @@ func TestConvertFiles(t *testing.T) {
 	if !strings.Contains(string(b), "data:image/png;base64,AQID") {
 		t.Errorf("inline image not a data URL: %s", b)
 	}
-	if _, err := m.params(req(weft.UserParts(url))); err != nil {
+	if _, err := m.params(req(core.UserParts(url))); err != nil {
 		t.Errorf("image URL rejected: %v", err)
 	}
-	for name, bad := range map[string]weft.FilePart{"pdf": pdf, "both": both, "neither": neither} {
-		_, err := m.params(req(weft.UserParts(bad)))
-		if !errors.Is(err, weft.ErrUnsupported) {
+	for name, bad := range map[string]core.FilePart{"pdf": pdf, "both": both, "neither": neither} {
+		_, err := m.params(req(core.UserParts(bad)))
+		if !errors.Is(err, core.ErrUnsupported) {
 			t.Errorf("%s: err = %v, want ErrUnsupported", name, err)
 		}
 	}
@@ -128,16 +128,16 @@ func TestMapFinish(t *testing.T) {
 	cases := []struct {
 		reason   string
 		hasCalls bool
-		want     weft.StopReason
+		want     core.StopReason
 		raw      string
 	}{
-		{"stop", false, weft.StopEndTurn, ""},
-		{"tool_calls", true, weft.StopToolCalls, ""},
-		{"length", false, weft.StopMaxTokens, ""},
-		{"", true, weft.StopToolCalls, ""},
-		{"", false, weft.StopEndTurn, ""},
-		{"content_filter", false, weft.StopEndTurn, "content_filter"},
-		{"function_call", true, weft.StopEndTurn, "function_call"},
+		{"stop", false, core.StopEndTurn, ""},
+		{"tool_calls", true, core.StopToolCalls, ""},
+		{"length", false, core.StopMaxTokens, ""},
+		{"", true, core.StopToolCalls, ""},
+		{"", false, core.StopEndTurn, ""},
+		{"content_filter", false, core.StopEndTurn, "content_filter"},
+		{"function_call", true, core.StopEndTurn, "function_call"},
 	}
 	for _, tc := range cases {
 		got, raw := mapFinish(tc.reason, tc.hasCalls)
@@ -160,7 +160,7 @@ func TestSchemaMapCarriesAdditionalProperties(t *testing.T) {
 	type in struct {
 		Scores map[string]int `json:"scores"`
 	}
-	tool := weft.Tool("maps", "", func(_ context.Context, _ in) (string, error) {
+	tool := core.Tool("maps", "", func(_ context.Context, _ in) (string, error) {
 		return "ok", nil
 	})
 	got, err := json.Marshal(convertTool(tool).Function.Parameters)
@@ -175,11 +175,11 @@ func TestSchemaMapCarriesAdditionalProperties(t *testing.T) {
 
 func TestConvertToolChoice(t *testing.T) {
 	tool := testTool()
-	convert := func(cfg weft.ToolChoiceConfig, seq bool) string {
+	convert := func(cfg core.ToolChoiceConfig, seq bool) string {
 		m := Model("m").(*model)
-		p, err := m.params(weft.ModelRequest{
-			Messages:        []weft.Message{weft.User("hi")},
-			Tools:           []*weft.ToolDef{tool},
+		p, err := m.params(core.ModelRequest{
+			Messages:        []core.Message{core.User("hi")},
+			Tools:           []*core.ToolDef{tool},
 			SequentialTools: seq,
 			ToolChoice:      cfg,
 		})
@@ -190,7 +190,7 @@ func TestConvertToolChoice(t *testing.T) {
 		return string(b)
 	}
 	// Zero value: nothing sent — v0.2.0's bytes (P3).
-	if got := convert(weft.ToolChoiceConfig{}, false); strings.Contains(got, "tool_choice") {
+	if got := convert(core.ToolChoiceConfig{}, false); strings.Contains(got, "tool_choice") {
 		t.Errorf("zero ToolChoice sent tool_choice: %s", got)
 	}
 	// No catalog: nothing sent either, whatever the mode — tool_choice
@@ -198,9 +198,9 @@ func TestConvertToolChoice(t *testing.T) {
 	// anthropic guard, ported).
 	{
 		m := Model("m").(*model)
-		p, err := m.params(weft.ModelRequest{
-			Messages:   []weft.Message{weft.User("hi")},
-			ToolChoice: weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny},
+		p, err := m.params(core.ModelRequest{
+			Messages:   []core.Message{core.User("hi")},
+			ToolChoice: core.ToolChoiceConfig{Mode: core.ToolChoiceAny},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -209,17 +209,17 @@ func TestConvertToolChoice(t *testing.T) {
 			t.Errorf("ToolChoiceAny with no tools sent tool_choice: %s", b)
 		}
 	}
-	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}, false); !strings.Contains(got, `"tool_choice":"required"`) {
+	if got := convert(core.ToolChoiceConfig{Mode: core.ToolChoiceAny}, false); !strings.Contains(got, `"tool_choice":"required"`) {
 		t.Errorf("any: %s", got)
 	}
-	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNamed, Name: "probe"}, false); !strings.Contains(got, `"tool_choice":{"function":{"name":"probe"},"type":"function"}`) {
+	if got := convert(core.ToolChoiceConfig{Mode: core.ToolChoiceNamed, Name: "probe"}, false); !strings.Contains(got, `"tool_choice":{"function":{"name":"probe"},"type":"function"}`) {
 		t.Errorf("named: %s", got)
 	}
-	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceNone}, false); !strings.Contains(got, `"tool_choice":"none"`) {
+	if got := convert(core.ToolChoiceConfig{Mode: core.ToolChoiceNone}, false); !strings.Contains(got, `"tool_choice":"none"`) {
 		t.Errorf("none: %s", got)
 	}
 	// Forcing and the sequential hint are independent fields.
-	if got := convert(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}, true); !strings.Contains(got, `"tool_choice":"required"`) || !strings.Contains(got, `"parallel_tool_calls":false`) {
+	if got := convert(core.ToolChoiceConfig{Mode: core.ToolChoiceAny}, true); !strings.Contains(got, `"tool_choice":"required"`) || !strings.Contains(got, `"parallel_tool_calls":false`) {
 		t.Errorf("any + sequential: %s", got)
 	}
 }
@@ -232,45 +232,45 @@ func TestFoldParams(t *testing.T) {
 	cases := []struct {
 		name  string
 		opts  []Option
-		rp    weft.RequestParams
+		rp    core.RequestParams
 		want  []string
 		absnt []string
 	}{
 		{
 			name:  "nothing set sends nothing",
 			opts:  nil,
-			rp:    weft.RequestParams{},
+			rp:    core.RequestParams{},
 			absnt: []string{`"temperature"`, `"top_p"`, `"max_completion_tokens"`, `"stop"`, `"seed"`},
 		},
 		{
 			name: "construction only",
 			opts: []Option{Temperature(0.5), TopP(0.9), MaxTokens(128), Stop("END"), Seed(7)},
-			rp:   weft.RequestParams{},
+			rp:   core.RequestParams{},
 			want: []string{`"temperature":0.5`, `"top_p":0.9`, `"max_completion_tokens":128`, `"stop":["END"]`, `"seed":7`},
 		},
 		{
 			name: "request only",
 			opts: nil,
-			rp:   weft.RequestParams{Temperature: p64(0.1), TopP: p64(0.8), MaxTokens: i(64), Stop: []string{"STOP"}, Seed: i64(3)},
+			rp:   core.RequestParams{Temperature: p64(0.1), TopP: p64(0.8), MaxTokens: i(64), Stop: []string{"STOP"}, Seed: i64(3)},
 			want: []string{`"temperature":0.1`, `"top_p":0.8`, `"max_completion_tokens":64`, `"stop":["STOP"]`, `"seed":3`},
 		},
 		{
 			name: "request wins on collision",
 			opts: []Option{Temperature(0.5), TopP(0.9), MaxTokens(128), Stop("END"), Seed(7)},
-			rp:   weft.RequestParams{Temperature: p64(0), TopP: p64(0.5), MaxTokens: i(32), Stop: []string{"X"}, Seed: i64(1)},
+			rp:   core.RequestParams{Temperature: p64(0), TopP: p64(0.5), MaxTokens: i(32), Stop: []string{"X"}, Seed: i64(1)},
 			want: []string{`"temperature":0`, `"top_p":0.5`, `"max_completion_tokens":32`, `"stop":["X"]`, `"seed":1`},
 		},
 		{
 			name: "zero request MaxTokens is a value",
 			opts: []Option{MaxTokens(128)},
-			rp:   weft.RequestParams{MaxTokens: i(0)},
+			rp:   core.RequestParams{MaxTokens: i(0)},
 			want: []string{`"max_completion_tokens":0`},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := Model("m", tc.opts...).(*model)
-			p, err := m.params(weft.ModelRequest{Messages: []weft.Message{weft.User("hi")}, Params: tc.rp})
+			p, err := m.params(core.ModelRequest{Messages: []core.Message{core.User("hi")}, Params: tc.rp})
 			if err != nil {
 				t.Fatal(err)
 			}

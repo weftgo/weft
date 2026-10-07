@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
 )
 
@@ -282,7 +282,7 @@ func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
 		Playground: s.Playground, ExperimentID: s.ExperimentID, ForkedFrom: s.ForkedFrom,
 		Started: s.Started.UTC(), LastSeen: s.LastSeen.UTC(),
 		Err: s.Err, Steps: int(s.Steps), Pending: int(s.Pending), StopReason: s.StopReason,
-		Usage: weft.Usage{
+		Usage: core.Usage{
 			InputTokens: s.InTok, OutputTokens: s.OutTok,
 			CachedInputTokens: s.CachedTok, CacheWriteTokens: s.CacheWriteTok,
 			ReasoningTokens: s.ReasonTok,
@@ -740,7 +740,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		}
 		row.Turns = int(turns)
 		row.FirstSeen, row.LastSeen = row.FirstSeen.UTC(), row.LastSeen.UTC()
-		row.Usage = weft.Usage{
+		row.Usage = core.Usage{
 			InputTokens: inTok, OutputTokens: outTok,
 			CachedInputTokens: cached, CacheWriteTokens: cacheW,
 			ReasoningTokens: reason,
@@ -824,7 +824,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	}
 	row.Turns = int(turns)
 	row.FirstSeen, row.LastSeen = row.FirstSeen.UTC(), row.LastSeen.UTC()
-	row.Usage = weft.Usage{
+	row.Usage = core.Usage{
 		InputTokens: inTok, OutputTokens: outTok,
 		CachedInputTokens: cached, CacheWriteTokens: cacheW,
 		ReasoningTokens: reason,

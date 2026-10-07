@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/thread"
@@ -35,13 +35,13 @@ import (
 // steered messages). from_step counts over steps alone: an assistant
 // message of an earlier turn is context, never a step of this run.
 type sourceRun struct {
-	input []weft.Message
-	steps []weft.Message
+	input []core.Message
+	steps []core.Message
 }
 
 // all is the whole transcript: input, then steps.
-func (s *sourceRun) all() []weft.Message {
-	out := make([]weft.Message, 0, len(s.input)+len(s.steps))
+func (s *sourceRun) all() []core.Message {
+	out := make([]core.Message, 0, len(s.input)+len(s.steps))
 	out = append(out, s.input...)
 	return append(out, s.steps...)
 }
@@ -51,7 +51,7 @@ func (s *sourceRun) all() []weft.Message {
 func (s *sourceRun) stepCount() int {
 	n := 0
 	for _, m := range s.steps {
-		if m.Role == weft.RoleAssistant {
+		if m.Role == core.RoleAssistant {
 			n++
 		}
 	}
@@ -69,7 +69,7 @@ const (
 // sourceTranscript resolves a source run's messages through the three
 // paths in order. agent is the command's agent (thread.Open needs one
 // to read a session's tree).
-func (l *link) sourceTranscript(ctx context.Context, agent *weft.Agent, runID string) (*sourceRun, error) {
+func (l *link) sourceTranscript(ctx context.Context, agent *core.Agent, runID string) (*sourceRun, error) {
 	ctx, cancel := context.WithTimeout(ctx, sourceTimeout)
 	defer cancel()
 	if l.cfg.threads != nil && agent != nil {
@@ -86,7 +86,7 @@ func (l *link) sourceTranscript(ctx context.Context, agent *weft.Agent, runID st
 }
 
 // transcriptFromObsdb reads the run's messages bodies from the local
-// sink: one JSON array of weft.Message per messages record, in order.
+// sink: one JSON array of core.Message per messages record, in order.
 func transcriptFromObsdb(ctx context.Context, db obsdb.DB, runID string) (*sourceRun, error) {
 	bodies, err := db.Transcript(ctx, runID)
 	if err != nil {
@@ -139,7 +139,7 @@ func (l *link) transcriptFromStudio(ctx context.Context, runID string) (*sourceR
 	return decodeBodies(bodies)
 }
 
-// decodeBodies turns messages bodies ([]weft.Message each, or null)
+// decodeBodies turns messages bodies ([]core.Message each, or null)
 // into a sourceRun. The first record of a run is its input record —
 // the loop writes the fed-in transcript before any step (D1) — and
 // every later one is what a step added; that position is the split.
@@ -152,7 +152,7 @@ func decodeBodies(bodies []json.RawMessage) (*sourceRun, error) {
 		if len(body) == 0 || string(body) == "null" {
 			continue
 		}
-		var batch []weft.Message
+		var batch []core.Message
 		if err := json.Unmarshal(body, &batch); err != nil {
 			return nil, fmt.Errorf("messages body: %w", err)
 		}
@@ -183,7 +183,7 @@ func decodeBodies(bodies []json.RawMessage) (*sourceRun, error) {
 // The path is read raw, so a turn whose path holds a compaction or a
 // branch summary — the model saw a summary there — is refused, and the
 // obsdb and Studio paths (the run's own input record) answer.
-func transcriptFromThread(ctx context.Context, st thread.Storage, agent *weft.Agent, runID string) (*sourceRun, error) {
+func transcriptFromThread(ctx context.Context, st thread.Storage, agent *core.Agent, runID string) (*sourceRun, error) {
 	session, _, err := parseThreadRunID(runID)
 	if err != nil {
 		return nil, err
@@ -271,7 +271,7 @@ func threadTurnMessages(path []thread.Entry, runID string) (*sourceRun, error) {
 		if !ok {
 			continue
 		}
-		if m.Role == weft.RoleAssistant || m.Role == weft.RoleTool {
+		if m.Role == core.RoleAssistant || m.Role == core.RoleTool {
 			// A tool message before the turn's first assistant message is
 			// a resumed turn's resolution of the parked calls: the run
 			// produced it, the run was not fed it — its input record (the
@@ -292,14 +292,14 @@ func threadTurnMessages(path []thread.Entry, runID string) (*sourceRun, error) {
 
 // entryMessage returns the message of the two entry kinds that enter
 // the model's context.
-func entryMessage(e thread.Entry) (weft.Message, bool) {
+func entryMessage(e thread.Entry) (core.Message, bool) {
 	switch e := e.(type) {
 	case thread.MessageEntry:
 		return e.Message, true
 	case thread.CustomMessageEntry:
 		return e.Message, true
 	}
-	return weft.Message{}, false
+	return core.Message{}, false
 }
 
 // validRunID is the shape a source run id may have before it is put in

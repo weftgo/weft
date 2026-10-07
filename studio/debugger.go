@@ -3,7 +3,7 @@ package studio
 // The debugger's rungs 3–4 on runtime-started runs (WEFT-DEVTOOLS
 // §8.3/§8.4, ADR 0024 D7): breakpoints park calls to named tools on
 // every run the runtime starts from then on, and steer delivers one
-// user message into a run it holds — weft.Steering on an ephemeral
+// user message into a run it holds — core.Steering on an ephemeral
 // run, thread's Steer policy on a fork it owns. The app's own turns
 // are viewer-only: an agent is immutable after New and a session's
 // writer is the app's, so a run no runtime started is refused here,

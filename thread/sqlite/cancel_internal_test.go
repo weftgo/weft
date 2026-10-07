@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -49,7 +49,7 @@ func TestCanceledWriteReportsCancellation(t *testing.T) {
 		}
 	}
 	defer func() { beforeCommit = nil }()
-	err = st.Append(ctx, "s_cancel", thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: weft.User("hi")})
+	err = st.Append(ctx, "s_cancel", thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: core.User("hi")})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Append on a context canceled mid-transaction = %v, want an error matching context.Canceled", err)
 	}

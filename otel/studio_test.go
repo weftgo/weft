@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"google.golang.org/protobuf/proto"
@@ -52,14 +52,14 @@ func TestStudioTransportEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agt := weft.New(
+	agt := core.New(
 		wefttest.Script(wefttest.Say("studio")),
-		weft.Name("studio-demo"),
-		weft.TracerProvider(p.TracerProvider()),
-		weft.LoggerProvider(p.LoggerProvider()),
+		core.Name("studio-demo"),
+		core.TracerProvider(p.TracerProvider()),
+		core.LoggerProvider(p.LoggerProvider()),
 	)
-	if _, err := agt.Generate(context.Background(), weft.Prompt("go"),
-		weft.Metadata(map[string]string{"weft.session.id": "studio-s"})); err != nil {
+	if _, err := agt.Generate(context.Background(), core.Prompt("go"),
+		core.Metadata(map[string]string{"weft.session.id": "studio-s"})); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

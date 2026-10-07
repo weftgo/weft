@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
 )
 
@@ -168,7 +168,7 @@ func roundTrip(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if r.Status != obsdb.StatusSucceeded {
 			t.Errorf("status = %q, want succeeded", r.Status)
 		}
-		if r.Usage != (weft.Usage{InputTokens: 100, OutputTokens: 20}) {
+		if r.Usage != (core.Usage{InputTokens: 100, OutputTokens: 20}) {
 			t.Errorf("usage = %+v", r.Usage)
 		}
 		if r.Steps != 1 || r.EventCount != 2 || r.MessageCount != 1 || r.DeltaCount != 1 {

@@ -6,9 +6,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest/conformance"
 	"github.com/weftgo/weft/google"
-	"github.com/weftgo/weft/wefttest/conformance"
 )
 
 // TestConformanceLive runs the suite against the real API. Never in CI
@@ -32,7 +32,7 @@ func TestConformanceLive(t *testing.T) {
 		Files:     true,
 		Usage:     true,
 		Live:      true,
-	}, func(t *testing.T, caseName string) weft.Model {
+	}, func(t *testing.T, caseName string) core.Model {
 		opts := []google.Option{google.APIKey(key)}
 		if caseName == "max_tokens" {
 			opts = append(opts, google.MaxTokens(16))

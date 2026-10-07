@@ -7,11 +7,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"google.golang.org/genai"
 )
 
-// The provider's context-window overflow maps to weft.ErrContextOverflow
+// The provider's context-window overflow maps to core.ErrContextOverflow
 // (ADR 0020 §5): the caller routes it to compaction, and the SDK's own
 // error stays reachable underneath for errors.As. The body is the
 // provider's documented shape, status 400 INVALID_ARGUMENT with the
@@ -25,8 +25,8 @@ func TestContextOverflowMapsToSentinel(t *testing.T) {
 	t.Cleanup(srv.Close)
 	m := Model("m", Client(testClient(t, srv.URL)))
 	_, err := collect(m, basicReq)
-	if !errors.Is(err, weft.ErrContextOverflow) {
-		t.Fatalf("err = %v (%T), want weft.ErrContextOverflow", err, err)
+	if !errors.Is(err, core.ErrContextOverflow) {
+		t.Fatalf("err = %v (%T), want core.ErrContextOverflow", err, err)
 	}
 	var apiErr genai.APIError
 	if !errors.As(err, &apiErr) {
@@ -48,7 +48,7 @@ func TestOtherBadRequestDoesNotMap(t *testing.T) {
 	t.Cleanup(srv.Close)
 	m := Model("m", Client(testClient(t, srv.URL)))
 	_, err := collect(m, basicReq)
-	if errors.Is(err, weft.ErrContextOverflow) {
+	if errors.Is(err, core.ErrContextOverflow) {
 		t.Fatalf("err = %v; an unrelated 400 must not read as overflow", err)
 	}
 }

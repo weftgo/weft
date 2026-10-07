@@ -53,7 +53,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/pool"
 )
@@ -389,7 +389,7 @@ func assertCrashPoint(t *testing.T, point string, st thread.Storage) {
 		stubbed := false
 		for _, m := range s.Context() {
 			for _, part := range m.Content {
-				if r, ok := part.(weft.ToolResultPart); ok {
+				if r, ok := part.(core.ToolResultPart); ok {
 					stubbed = r.Content == trim.Trim.Stubs[0].Content
 					if !stubbed {
 						t.Fatalf("the trimmed result reads %q after the reopen, want the recorded stub %q", r.Content, trim.Trim.Stubs[0].Content)
@@ -418,7 +418,7 @@ func assertCrashPoint(t *testing.T, point string, st thread.Storage) {
 			t.Fatalf("the accepted receipt = %+v", accepted)
 		}
 		m := &countingModel{}
-		s, err := thread.Open(ctx, st, CrashMatrixTurnID, weft.New(m, plainSpend(), matrixNote()))
+		s, err := thread.Open(ctx, st, CrashMatrixTurnID, core.New(m, plainSpend(), matrixNote()))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -475,7 +475,7 @@ func assertCrashPoint(t *testing.T, point string, st thread.Storage) {
 		results := map[string][]string{}
 		for _, m := range s.Context() {
 			for _, part := range m.Content {
-				if r, ok := part.(weft.ToolResultPart); ok {
+				if r, ok := part.(core.ToolResultPart); ok {
 					results[r.CallID] = append(results[r.CallID], r.Content)
 				}
 			}
@@ -540,7 +540,7 @@ func assertCrashPoint(t *testing.T, point string, st thread.Storage) {
 			t.Fatalf("the ledger after the crash = %+v", rs)
 		}
 		p := pool.New(1)
-		if err := p.Register(CrashMatrixKidID, weft.New(&countingModel{}, plainSpend())); err != nil {
+		if err := p.Register(CrashMatrixKidID, core.New(&countingModel{}, plainSpend())); err != nil {
 			t.Fatal(err)
 		}
 		if err := p.Recover(ctx, s); err != nil {
@@ -665,24 +665,24 @@ func kindsOf(entries []thread.Entry) string {
 }
 
 // matrixSpend is the park family's gated tool.
-func matrixSpend() *weft.ToolDef {
-	return weft.Tool("spend", "Spend money.", func(_ context.Context, _ struct{}) (string, error) {
+func matrixSpend() *core.ToolDef {
+	return core.Tool("spend", "Spend money.", func(_ context.Context, _ struct{}) (string, error) {
 		return "spent", nil
-	}, weft.RequireApproval())
+	}, core.RequireApproval())
 }
 
 // plainSpend is the follow-up's spend — plain, no gate: what a crash
 // point parked is decided by then, and the resumed run must execute
 // it, not re-ask.
-func plainSpend() *weft.ToolDef {
-	return weft.Tool("spend", "Spend money.", func(_ context.Context, _ struct{}) (string, error) {
+func plainSpend() *core.ToolDef {
+	return core.Tool("spend", "Spend money.", func(_ context.Context, _ struct{}) (string, error) {
 		return "spent", nil
 	})
 }
 
 // matrixNote is the steer family's step tool, plain for the follow-up.
-func matrixNote() *weft.ToolDef {
-	return weft.Tool("note", "Record a note.", func(_ context.Context, in struct {
+func matrixNote() *core.ToolDef {
+	return core.Tool("note", "Record a note.", func(_ context.Context, in struct {
 		Text string `json:"text"`
 	}) (string, error) {
 		return "noted: " + in.Text, nil
@@ -693,7 +693,7 @@ func matrixNote() *weft.ToolDef {
 // returns the session ready to continue.
 func openMatrixSession(t *testing.T, st thread.Storage, id string) *thread.Session {
 	t.Helper()
-	s, err := thread.Open(context.Background(), st, id, weft.New(&countingModel{}, plainSpend(), matrixNote()))
+	s, err := thread.Open(context.Background(), st, id, core.New(&countingModel{}, plainSpend(), matrixNote()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,11 +710,11 @@ func continueTurn(t *testing.T, st thread.Storage, id string, minFed int) {
 	t.Helper()
 	ctx := context.Background()
 	m := &countingModel{}
-	s, err := thread.Open(ctx, st, id, weft.New(m, plainSpend(), matrixNote()))
+	s, err := thread.Open(ctx, st, id, core.New(m, plainSpend(), matrixNote()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.Send(ctx, weft.User("continue"))
+	turn, err := s.Send(ctx, core.User("continue"))
 	if err != nil {
 		t.Fatalf("the follow-up Send: %v", err)
 	}
@@ -810,12 +810,12 @@ func fixedIDs(id string) thread.SessionOption {
 func crashMatrixTurnChild(point string, st thread.Storage) {
 	ctx := context.Background()
 	block := make(chan struct{}) // never closed in the child
-	s, err := thread.Create(ctx, st, weft.New(&mxTurnModel{block: block, point: point}), fixedIDs(CrashMatrixTurnID))
+	s, err := thread.Create(ctx, st, core.New(&mxTurnModel{block: block, point: point}), fixedIDs(CrashMatrixTurnID))
 	if err != nil {
 		fmt.Println("helper: create failed:", err)
 		os.Exit(2)
 	}
-	turn, err := s.Send(ctx, weft.User("mx one"))
+	turn, err := s.Send(ctx, core.User("mx one"))
 	if err != nil {
 		fmt.Println("helper: send failed:", err)
 		os.Exit(2)
@@ -844,13 +844,13 @@ func crashMatrixParkChild(point string, st thread.Storage) {
 	// cut to make: the walk's one turn would otherwise fit inside the
 	// default 20k-token tail and Compact refuse ("nothing to
 	// compact") — the point is the write, not the policy.
-	s, err := thread.Create(ctx, st, weft.New(&mxParkModel{}, spend), fixedIDs(CrashMatrixParkID),
+	s, err := thread.Create(ctx, st, core.New(&mxParkModel{}, spend), fixedIDs(CrashMatrixParkID),
 		thread.AutoResume(false), thread.KeepRecent(1))
 	if err != nil {
 		fmt.Println("helper: create failed:", err)
 		os.Exit(2)
 	}
-	turn, err := s.Send(ctx, weft.User("mx spend"))
+	turn, err := s.Send(ctx, core.User("mx spend"))
 	if err != nil {
 		fmt.Println("helper: send failed:", err)
 		os.Exit(2)
@@ -899,12 +899,12 @@ func crashMatrixParkChild(point string, st thread.Storage) {
 func crashMatrixSteerSession(st thread.Storage) *thread.Session {
 	ctx := context.Background()
 	block := make(chan struct{}) // never closed in the child
-	s, err := thread.Create(ctx, st, weft.New(&mxSteerModel{block: block}, matrixNote()), fixedIDs(CrashMatrixSteerID))
+	s, err := thread.Create(ctx, st, core.New(&mxSteerModel{block: block}, matrixNote()), fixedIDs(CrashMatrixSteerID))
 	if err != nil {
 		fmt.Println("helper: create failed:", err)
 		os.Exit(2)
 	}
-	turn, err := s.Send(ctx, weft.User("mx steer"))
+	turn, err := s.Send(ctx, core.User("mx steer"))
 	if err != nil {
 		fmt.Println("helper: send failed:", err)
 		os.Exit(2)
@@ -915,7 +915,7 @@ func crashMatrixSteerSession(st thread.Storage) *thread.Session {
 			fmt.Println("helper: stream error:", serr)
 			os.Exit(2)
 		}
-		if f, ok := ev.(weft.StepFinish); ok && f.Index == 0 && !sawStep {
+		if f, ok := ev.(core.StepFinish); ok && f.Index == 0 && !sawStep {
 			sawStep = true
 			break // the run stays flying, blocked in its second model call
 		}
@@ -926,7 +926,7 @@ func crashMatrixSteerSession(st thread.Storage) *thread.Session {
 	}
 	// The receipt lands before the caller announces itself; the steer
 	// never resolves the run, which stays blocked in its model.
-	if _, err := s.Send(ctx, weft.User("steer it"), thread.As(thread.Steer)); err != nil {
+	if _, err := s.Send(ctx, core.User("steer it"), thread.As(thread.Steer)); err != nil {
 		fmt.Println("helper: steer failed:", err)
 		os.Exit(2)
 	}
@@ -946,7 +946,7 @@ func crashMatrixSteerChild(st thread.Storage) {
 // batch, the settlement — each durable, then death.
 func crashMatrixPoolChild(st thread.Storage) {
 	ctx := context.Background()
-	s, err := thread.Create(ctx, st, weft.New(&replayModel{}), fixedIDs(CrashMatrixPoolID))
+	s, err := thread.Create(ctx, st, core.New(&replayModel{}), fixedIDs(CrashMatrixPoolID))
 	if err != nil {
 		fmt.Println("helper: create failed:", err)
 		os.Exit(2)
@@ -985,12 +985,12 @@ func crashMatrixBranchChild(point string, st thread.Storage) {
 	if point == "fork" {
 		src = "s_mx_forksrc"
 	}
-	s, err := thread.Create(ctx, st, weft.New(&mxTurnModel{block: make(chan struct{}), point: "turn_end"}), fixedIDs(src))
+	s, err := thread.Create(ctx, st, core.New(&mxTurnModel{block: make(chan struct{}), point: "turn_end"}), fixedIDs(src))
 	if err != nil {
 		fmt.Println("helper: create failed:", err)
 		os.Exit(2)
 	}
-	turn, err := s.Send(ctx, weft.User("mx one"))
+	turn, err := s.Send(ctx, core.User("mx one"))
 	if err != nil {
 		fmt.Println("helper: send failed:", err)
 		os.Exit(2)
@@ -1044,13 +1044,13 @@ func crashMatrixSignedChild(point string, st thread.Storage) {
 		os.Exit(2)
 	}
 	spend := matrixSpend()
-	s, err := thread.Create(ctx, st, weft.New(&mxParkModel{}, spend), fixedIDs(CrashMatrixParkID),
+	s, err := thread.Create(ctx, st, core.New(&mxParkModel{}, spend), fixedIDs(CrashMatrixParkID),
 		thread.AutoResume(false), thread.WithKeyring(ring))
 	if err != nil {
 		fmt.Println("helper: create failed:", err)
 		os.Exit(2)
 	}
-	turn, err := s.Send(ctx, weft.User("mx spend"))
+	turn, err := s.Send(ctx, core.User("mx spend"))
 	if err != nil {
 		fmt.Println("helper: send failed:", err)
 		os.Exit(2)
@@ -1108,12 +1108,12 @@ func crashMatrixExpiryChild(st thread.Storage) {
 		defer mu.Unlock()
 		return now
 	}
-	s, err := thread.Create(ctx, st, weft.New(&mxParkModel{}, matrixSpend()), fixedIDs(CrashMatrixParkID),
+	s, err := thread.Create(ctx, st, core.New(&mxParkModel{}, matrixSpend()), fixedIDs(CrashMatrixParkID),
 		thread.AutoResume(false), thread.RequestExpiry(time.Hour), thread.Clock(clock))
 	if err != nil {
 		helperFail("create failed", err)
 	}
-	turn, err := s.Send(ctx, weft.User("mx spend"))
+	turn, err := s.Send(ctx, core.User("mx spend"))
 	if err != nil {
 		helperFail("send failed", err)
 	}
@@ -1139,14 +1139,14 @@ func crashMatrixExpiryChild(st thread.Storage) {
 // of a summary, and the child dies once the session is idle.
 func crashMatrixTrimChild(st thread.Storage) {
 	ctx := context.Background()
-	s, err := thread.Create(ctx, st, weft.New(&mxStepModel{}, matrixNote()), fixedIDs(CrashMatrixTurnID),
+	s, err := thread.Create(ctx, st, core.New(&mxStepModel{}, matrixNote()), fixedIDs(CrashMatrixTurnID),
 		thread.ContextWindow(100_000),
 		thread.TriggerFunc(func(thread.TriggerInput) bool { return true }),
 		thread.ClearOldToolResults(0))
 	if err != nil {
 		helperFail("create failed", err)
 	}
-	turn, err := s.Send(ctx, weft.User("mx trim"))
+	turn, err := s.Send(ctx, core.User("mx trim"))
 	if err != nil {
 		helperFail("send failed", err)
 	}
@@ -1176,7 +1176,7 @@ func crashMatrixQueuedChild(point string, st thread.Storage) {
 		id = "s_mx_forksrc"
 	}
 	block := make(chan struct{}) // never closed in the child
-	s, err := thread.Create(ctx, st, weft.New(&mxTurnModel{block: block, point: "prompt"}), fixedIDs(id))
+	s, err := thread.Create(ctx, st, core.New(&mxTurnModel{block: block, point: "prompt"}), fixedIDs(id))
 	if err != nil {
 		helperFail("create failed", err)
 	}
@@ -1187,10 +1187,10 @@ func crashMatrixQueuedChild(point string, st thread.Storage) {
 			helperFail("acceptance failed", err)
 		}
 	}
-	if _, err := s.Send(ctx, weft.User("mx one")); err != nil {
+	if _, err := s.Send(ctx, core.User("mx one")); err != nil {
 		helperFail("send failed", err)
 	}
-	if _, err := s.Send(ctx, weft.User("mx queued")); err != nil {
+	if _, err := s.Send(ctx, core.User("mx queued")); err != nil {
 		helperFail("queued send failed", err)
 	}
 	if q := s.Queue(); len(q) != 1 {
@@ -1213,11 +1213,11 @@ func crashMatrixJoinChild(st thread.Storage) {
 	ctx := context.Background()
 	inResume := make(chan struct{})
 	m := &mxJoinModel{block: make(chan struct{}), resumed: inResume}
-	s, err := thread.Create(ctx, st, weft.New(m, matrixNote(), matrixSpend()), fixedIDs(CrashMatrixParkID))
+	s, err := thread.Create(ctx, st, core.New(m, matrixNote(), matrixSpend()), fixedIDs(CrashMatrixParkID))
 	if err != nil {
 		helperFail("create failed", err)
 	}
-	turn, err := s.Send(ctx, weft.User("mx mixed"))
+	turn, err := s.Send(ctx, core.User("mx mixed"))
 	if err != nil {
 		helperFail("send failed", err)
 	}
@@ -1244,7 +1244,7 @@ func crashMatrixJoinChild(st thread.Storage) {
 // and dies with the pool still open.
 func crashMatrixLivePoolChild(point string, st thread.Storage) {
 	ctx := context.Background()
-	s, err := thread.Create(ctx, st, weft.New(&replayModel{}), fixedIDs(CrashMatrixPoolID))
+	s, err := thread.Create(ctx, st, core.New(&replayModel{}), fixedIDs(CrashMatrixPoolID))
 	if err != nil {
 		helperFail("create failed", err)
 	}
@@ -1255,15 +1255,15 @@ func crashMatrixLivePoolChild(point string, st thread.Storage) {
 		}
 		return thread.NewEntryID()
 	}))
-	var child *weft.Agent
+	var child *core.Agent
 	want := pool.Parked
 	switch point {
 	case "pool_parked":
-		child = weft.New(&mxParkModel{}, matrixSpend())
+		child = core.New(&mxParkModel{}, matrixSpend())
 	case "pool_canceled":
-		child, want = weft.New(&mxTurnModel{block: make(chan struct{}), point: "prompt"}), pool.Canceled
+		child, want = core.New(&mxTurnModel{block: make(chan struct{}), point: "prompt"}), pool.Canceled
 	case "pool_capped":
-		child, want = weft.New(&mxLoopModel{}, matrixNote(), weft.MaxSteps(1)), pool.Capped
+		child, want = core.New(&mxLoopModel{}, matrixNote(), core.MaxSteps(1)), pool.Capped
 	}
 	r, err := p.Submit(ctx, s, child, "mx delegated")
 	if err != nil {
@@ -1301,12 +1301,12 @@ type mxTurnModel struct {
 	point string
 }
 
-func (m *mxTurnModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "threadtest", Name: "mxturn"}
+func (m *mxTurnModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "threadtest", Name: "mxturn"}
 }
 
-func (m *mxTurnModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
+func (m *mxTurnModel) Stream(ctx context.Context, _ core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
 		if m.point == "prompt" {
 			select {
 			case <-m.block:
@@ -1315,9 +1315,9 @@ func (m *mxTurnModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2
 			}
 			return
 		}
-		for _, ev := range []weft.ModelEvent{
-			weft.ModelTextDelta{Text: "turn one done"},
-			weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+		for _, ev := range []core.ModelEvent{
+			core.ModelTextDelta{Text: "turn one done"},
+			core.ModelFinish{Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 		} {
 			if !yield(ev, nil) {
 				return
@@ -1333,27 +1333,27 @@ type mxParkModel struct {
 	calls int
 }
 
-func (m *mxParkModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "threadtest", Name: "mxpark"}
+func (m *mxParkModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "threadtest", Name: "mxpark"}
 }
 
-func (m *mxParkModel) Stream(_ context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *mxParkModel) Stream(_ context.Context, _ core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	m.calls++
 	first := m.calls == 1
-	return func(yield func(weft.ModelEvent, error) bool) {
-		events := []weft.ModelEvent{
-			weft.ModelTextDelta{Text: "mx summary"},
-			weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+	return func(yield func(core.ModelEvent, error) bool) {
+		events := []core.ModelEvent{
+			core.ModelTextDelta{Text: "mx summary"},
+			core.ModelFinish{Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 		}
 		if first {
-			events = []weft.ModelEvent{
-				weft.ModelToolCall{ID: "call_mx", Name: "spend", Args: []byte(`{}`)},
-				weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+			events = []core.ModelEvent{
+				core.ModelToolCall{ID: "call_mx", Name: "spend", Args: []byte(`{}`)},
+				core.ModelFinish{Reason: core.StopToolCalls, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 			}
 		} else if m.calls == 2 {
-			events = []weft.ModelEvent{
-				weft.ModelTextDelta{Text: "mx spent"},
-				weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+			events = []core.ModelEvent{
+				core.ModelTextDelta{Text: "mx spent"},
+				core.ModelFinish{Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 			}
 		}
 		for _, ev := range events {
@@ -1372,14 +1372,14 @@ type mxSteerModel struct {
 	calls int
 }
 
-func (m *mxSteerModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "threadtest", Name: "mxsteer"}
+func (m *mxSteerModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "threadtest", Name: "mxsteer"}
 }
 
-func (m *mxSteerModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *mxSteerModel) Stream(ctx context.Context, _ core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	m.calls++
 	first := m.calls == 1
-	return func(yield func(weft.ModelEvent, error) bool) {
+	return func(yield func(core.ModelEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(nil, err)
 			return
@@ -1392,10 +1392,10 @@ func (m *mxSteerModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq
 			}
 			return
 		}
-		events := []weft.ModelEvent{
-			weft.ModelReasoningDelta{Text: "one step", Signature: "sig-mx"},
-			weft.ModelToolCall{ID: "call_mx", Name: "note", Args: []byte(`{"text":"mx"}`)},
-			weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+		events := []core.ModelEvent{
+			core.ModelReasoningDelta{Text: "one step", Signature: "sig-mx"},
+			core.ModelToolCall{ID: "call_mx", Name: "note", Args: []byte(`{"text":"mx"}`)},
+			core.ModelFinish{Reason: core.StopToolCalls, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 		}
 		for _, ev := range events {
 			if !yield(ev, nil) {
@@ -1409,22 +1409,22 @@ func (m *mxSteerModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq
 // answer — a turn that leaves a tool result for the trimmer.
 type mxStepModel struct{ calls int }
 
-func (m *mxStepModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "threadtest", Name: "mxstep"}
+func (m *mxStepModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "threadtest", Name: "mxstep"}
 }
 
-func (m *mxStepModel) Stream(_ context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *mxStepModel) Stream(_ context.Context, _ core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	m.calls++
 	first := m.calls == 1
-	return func(yield func(weft.ModelEvent, error) bool) {
-		events := []weft.ModelEvent{
-			weft.ModelTextDelta{Text: "mx noted"},
-			weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+	return func(yield func(core.ModelEvent, error) bool) {
+		events := []core.ModelEvent{
+			core.ModelTextDelta{Text: "mx noted"},
+			core.ModelFinish{Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 		}
 		if first {
-			events = []weft.ModelEvent{
-				weft.ModelToolCall{ID: "call_mx", Name: "note", Args: []byte(`{"text":"mx"}`)},
-				weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+			events = []core.ModelEvent{
+				core.ModelToolCall{ID: "call_mx", Name: "note", Args: []byte(`{"text":"mx"}`)},
+				core.ModelFinish{Reason: core.StopToolCalls, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 			}
 		}
 		for _, ev := range events {
@@ -1439,15 +1439,15 @@ func (m *mxStepModel) Stream(_ context.Context, _ weft.ModelRequest) iter.Seq2[w
 // every step, so the run dies on its step budget.
 type mxLoopModel struct{}
 
-func (m *mxLoopModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "threadtest", Name: "mxloop"}
+func (m *mxLoopModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "threadtest", Name: "mxloop"}
 }
 
-func (m *mxLoopModel) Stream(_ context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
-		for _, ev := range []weft.ModelEvent{
-			weft.ModelToolCall{ID: "call_mx", Name: "note", Args: []byte(`{"text":"mx"}`)},
-			weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+func (m *mxLoopModel) Stream(_ context.Context, _ core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
+		for _, ev := range []core.ModelEvent{
+			core.ModelToolCall{ID: "call_mx", Name: "note", Args: []byte(`{"text":"mx"}`)},
+			core.ModelFinish{Reason: core.StopToolCalls, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 		} {
 			if !yield(ev, nil) {
 				return
@@ -1465,14 +1465,14 @@ type mxJoinModel struct {
 	calls   int
 }
 
-func (m *mxJoinModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "threadtest", Name: "mxjoin"}
+func (m *mxJoinModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "threadtest", Name: "mxjoin"}
 }
 
-func (m *mxJoinModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
+func (m *mxJoinModel) Stream(ctx context.Context, _ core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	m.calls++
 	call := m.calls
-	return func(yield func(weft.ModelEvent, error) bool) {
+	return func(yield func(core.ModelEvent, error) bool) {
 		if call > 1 {
 			if call == 2 {
 				close(m.resumed)
@@ -1484,10 +1484,10 @@ func (m *mxJoinModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2
 			}
 			return
 		}
-		for _, ev := range []weft.ModelEvent{
-			weft.ModelToolCall{ID: "call_note", Name: "note", Args: []byte(`{"text":"mx"}`)},
-			weft.ModelToolCall{ID: "call_mx", Name: "spend", Args: []byte(`{}`)},
-			weft.ModelFinish{Reason: weft.StopToolCalls, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}},
+		for _, ev := range []core.ModelEvent{
+			core.ModelToolCall{ID: "call_note", Name: "note", Args: []byte(`{"text":"mx"}`)},
+			core.ModelToolCall{ID: "call_mx", Name: "spend", Args: []byte(`{}`)},
+			core.ModelFinish{Reason: core.StopToolCalls, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
 		} {
 			if !yield(ev, nil) {
 				return
@@ -1501,6 +1501,6 @@ func (m *mxJoinModel) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2
 // replayModel with a public name — the matrix's asserts read it.
 type countingModel struct{ replayModel }
 
-func (m *countingModel) Info() weft.ModelInfo {
-	return weft.ModelInfo{Provider: "threadtest", Name: "mxcount"}
+func (m *countingModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "threadtest", Name: "mxcount"}
 }

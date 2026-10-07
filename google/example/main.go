@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/google"
 )
 
@@ -20,16 +20,16 @@ func main() {
 		prompt = os.Args[1]
 	}
 	model := google.Model("gemini-2.5-flash")
-	agt := weft.New(model,
-		weft.Name("google-example"),
-		weft.Instructions("You are a terse assistant. Use the tool when asked."),
-		weft.Tool("weather", "Report the weather for a city.", func(ctx context.Context, in struct {
+	agt := core.New(model,
+		core.Name("google-example"),
+		core.Instructions("You are a terse assistant. Use the tool when asked."),
+		core.Tool("weather", "Report the weather for a city.", func(ctx context.Context, in struct {
 			City string `json:"city" jsonschema:"the city to report on"`
 		}) (string, error) {
 			return fmt.Sprintf("sunny, 22°C, in %s", in.City), nil
 		}),
 	)
-	res, err := agt.Generate(context.Background(), weft.Prompt(prompt))
+	res, err := agt.Generate(context.Background(), core.Prompt(prompt))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run failed:", err)
 		os.Exit(1)

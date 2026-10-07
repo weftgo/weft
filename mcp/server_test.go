@@ -9,8 +9,8 @@ import (
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/weftgo/weft"
-	"github.com/weftgo/weft/wefttest"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 )
 
 // newSession runs s over one side of an in-memory transport and
@@ -35,8 +35,8 @@ type order struct {
 	Status string `json:"status"`
 }
 
-func lookupTool() *weft.ToolDef {
-	return weft.Tool("lookup_order", "Look up an order by ID.",
+func lookupTool() *core.ToolDef {
+	return core.Tool("lookup_order", "Look up an order by ID.",
 		func(_ context.Context, in struct {
 			OrderID string `json:"order_id" jsonschema:"the order to look up"`
 		}) (order, error) {
@@ -47,8 +47,8 @@ func lookupTool() *weft.ToolDef {
 		})
 }
 
-func echoTool() *weft.ToolDef {
-	return weft.Tool("echo", "Echo the text.",
+func echoTool() *core.ToolDef {
+	return core.Tool("echo", "Echo the text.",
 		func(_ context.Context, in struct {
 			Text string `json:"text"`
 		}) (string, error) {
@@ -156,12 +156,12 @@ func TestAddToolsStructuredContent(t *testing.T) {
 // nonJSONOutputTool is the §2.6 shape: a RawTool with an output schema
 // whose handler returns plain text — a breach of the tool's own
 // contract that, unanswered, wedges the session.
-func nonJSONOutputTool() *weft.ToolDef {
-	t := weft.RawTool("badge", "Issue a badge.", nil,
+func nonJSONOutputTool() *core.ToolDef {
+	t := core.RawTool("badge", "Issue a badge.", nil,
 		func(_ context.Context, _ json.RawMessage) (string, error) {
 			return "badge granted", nil
 		})
-	t.OutputSchema = &weft.Schema{Type: "object"}
+	t.OutputSchema = &core.Schema{Type: "object"}
 	return t
 }
 
@@ -193,7 +193,7 @@ func TestAddToolsNonJSONOutputIsErrorNotWedge(t *testing.T) {
 // through the same gate, so the agent's exposition cannot wedge either.
 func TestServeNonJSONOutputIsErrorNotWedge(t *testing.T) {
 	s := sdk.NewServer(&sdk.Implementation{Name: "srv", Version: "0"}, nil)
-	agt := weft.New(wefttest.Script(wefttest.Say("hi")), weft.Name("badger"), nonJSONOutputTool())
+	agt := core.New(wefttest.Script(wefttest.Say("hi")), core.Name("badger"), nonJSONOutputTool())
 	Serve(s, agt, "Issues badges.")
 	sess := newSession(t, s)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -216,7 +216,7 @@ func TestServeNonJSONOutputIsErrorNotWedge(t *testing.T) {
 func TestAddToolsErrorsAreResults(t *testing.T) {
 	s := sdk.NewServer(&sdk.Implementation{Name: "srv", Version: "0"}, nil)
 	AddTools(s, lookupTool(),
-		weft.Tool("panic", "Panics.", func(context.Context, struct{}) (string, error) {
+		core.Tool("panic", "Panics.", func(context.Context, struct{}) (string, error) {
 			panic("bang")
 		}))
 	sess := newSession(t, s)
@@ -266,7 +266,7 @@ func TestAddToolsErrorsAreResults(t *testing.T) {
 func TestAddToolsHonoursContext(t *testing.T) {
 	started := make(chan struct{})
 	ended := make(chan error, 1)
-	blocked := weft.Tool("blocked", "Blocks until cancelled.",
+	blocked := core.Tool("blocked", "Blocks until cancelled.",
 		func(ctx context.Context, _ struct{}) (string, error) {
 			close(started)
 			<-ctx.Done()
@@ -315,8 +315,8 @@ func mustPanic(t *testing.T, name string, fn func()) {
 // approval-gated tool all panic, fail-early like New. Every case runs.
 func TestAddToolsRefusesApprovalGated(t *testing.T) {
 	s := sdk.NewServer(&sdk.Implementation{Name: "srv", Version: "0"}, nil)
-	gated := weft.Tool("refund", "Refund.", func(context.Context, struct{}) (string, error) { return "", nil },
-		weft.RequireApproval())
+	gated := core.Tool("refund", "Refund.", func(context.Context, struct{}) (string, error) { return "", nil },
+		core.RequireApproval())
 	ran := 0
 	for name, fn := range map[string]func(){
 		"approval-gated": func() { AddTools(s, gated) },
@@ -337,7 +337,7 @@ func TestAddToolsRefusesApprovalGated(t *testing.T) {
 // wire form is driven here.
 func TestAddToolsNullArgumentsBecomeObject(t *testing.T) {
 	seen := make(chan string, 1)
-	raw := weft.RawTool("raw", "Echoes its argument bytes.", nil,
+	raw := core.RawTool("raw", "Echoes its argument bytes.", nil,
 		func(_ context.Context, args json.RawMessage) (string, error) {
 			seen <- string(args)
 			return "ok", nil
@@ -375,7 +375,7 @@ func TestAddToolsNullArgumentsBecomeObject(t *testing.T) {
 // Out answers with structuredContent as well as text, the way
 // AddTools does — the spec's MUST for a tool with an output schema.
 func TestServeStructuredContent(t *testing.T) {
-	agt := weft.New(wefttest.Script(), weft.Name("orders"), lookupTool())
+	agt := core.New(wefttest.Script(), core.Name("orders"), lookupTool())
 	s := sdk.NewServer(&sdk.Implementation{Name: "srv", Version: "0"}, nil)
 	Serve(s, agt, "Orders agent.")
 	sess := newSession(t, s)
@@ -398,18 +398,18 @@ func TestServeStructuredContent(t *testing.T) {
 	}
 }
 
-func servedAgent(t *testing.T) (*sdk.Server, *weft.Agent) {
+func servedAgent(t *testing.T) (*sdk.Server, *core.Agent) {
 	t.Helper()
 	touched := make(chan string, 4)
-	agt := weft.New(wefttest.Script(wefttest.Say("research done")),
-		weft.Name("research"),
-		weft.Instructions("You research."),
-		weft.Tool("note", "Record a note.", func(_ context.Context, _ struct{}) (string, error) {
+	agt := core.New(wefttest.Script(wefttest.Say("research done")),
+		core.Name("research"),
+		core.Instructions("You research."),
+		core.Tool("note", "Record a note.", func(_ context.Context, _ struct{}) (string, error) {
 			touched <- "note"
 			return "noted", nil
 		}),
-		weft.WrapTools(func(next weft.ToolCaller) weft.ToolCaller {
-			return func(ctx context.Context, call weft.ToolCallPart) (string, error) {
+		core.WrapTools(func(next core.ToolCaller) core.ToolCaller {
+			return func(ctx context.Context, call core.ToolCallPart) (string, error) {
 				touched <- "mw:" + call.Name
 				return next(ctx, call)
 			}
@@ -456,10 +456,10 @@ func TestServeToolsGoThroughTheChain(t *testing.T) {
 
 	// A gated tool answers loudly under Serve (where AddTools refuses
 	// outright): the approval error text is the result, never a bypass.
-	gated := weft.New(wefttest.Script(),
-		weft.Name("gated"),
-		weft.Tool("refund", "Refund.", func(context.Context, struct{}) (string, error) { return "refunded", nil },
-			weft.RequireApproval()),
+	gated := core.New(wefttest.Script(),
+		core.Name("gated"),
+		core.Tool("refund", "Refund.", func(context.Context, struct{}) (string, error) { return "refunded", nil },
+			core.RequireApproval()),
 	)
 	s2 := sdk.NewServer(&sdk.Implementation{Name: "srv2", Version: "0"}, nil)
 	Serve(s2, gated, "Gated agent.")
@@ -483,10 +483,10 @@ func TestServeOutputAgentReturnsJSON(t *testing.T) {
 	type verdict struct {
 		Answer string `json:"answer"`
 	}
-	agt := weft.New(wefttest.Script(
+	agt := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "submit_output", Args: `{"answer":"yes"}`}),
 		wefttest.Say("submitted"),
-	), weft.Name("oracle"), weft.Output[verdict]())
+	), core.Name("oracle"), core.Output[verdict]())
 	s := sdk.NewServer(&sdk.Implementation{Name: "srv", Version: "0"}, nil)
 	Serve(s, agt, "Answer yes or no.")
 	sess := newSession(t, s)
@@ -513,7 +513,7 @@ func TestServeRequiresName(t *testing.T) {
 		}
 	}()
 	s := sdk.NewServer(&sdk.Implementation{Name: "srv", Version: "0"}, nil)
-	Serve(s, weft.New(wefttest.Script()), "unnamed")
+	Serve(s, core.New(wefttest.Script()), "unnamed")
 }
 
 // X8: no ToolAnnotations are emitted in v1 — the spec's defaults treat

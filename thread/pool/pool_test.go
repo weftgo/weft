@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
 	"github.com/weftgo/weft/thread/pool"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // blocking is a Model whose single turn waits for its release channel
@@ -27,15 +27,15 @@ type blocking struct {
 	onStart func()
 }
 
-func (b blocking) Stream(ctx context.Context, _ weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
+func (b blocking) Stream(ctx context.Context, _ core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
 		if b.onStart != nil {
 			b.onStart()
 		}
 		select {
 		case <-b.release:
-			yield(weft.ModelTextDelta{Text: b.text}, nil)
-			yield(weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}}, nil)
+			yield(core.ModelTextDelta{Text: b.text}, nil)
+			yield(core.ModelFinish{Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}}, nil)
 		case <-ctx.Done():
 			// The house convention for a stream that dies mid-flight
 			// (wefttest's own shape): a terminal error yield.
@@ -67,8 +67,8 @@ func waitState(t *testing.T, parent *thread.Session, state pool.State) pool.Rece
 func TestSubmitValidates(t *testing.T) {
 	ctx := context.Background()
 	p := pool.New(1)
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
-	if _, err := p.Submit(ctx, nil, weft.New(wefttest.Script()), "go"); err == nil {
+	s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
+	if _, err := p.Submit(ctx, nil, core.New(wefttest.Script()), "go"); err == nil {
 		t.Errorf("nil parent accepted")
 	}
 	if _, err := p.Submit(ctx, s, nil, "go"); err == nil {
@@ -95,9 +95,9 @@ func TestNewMaxPanics(t *testing.T) {
 func TestWrapSync(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
-	child := weft.New(wefttest.Script(wefttest.Say("the bug is in compaction")))
+	child := core.New(wefttest.Script(wefttest.Say("the bug is in compaction")))
 	p := pool.New(2)
-	parent := weft.New(wefttest.Script(
+	parent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research",
 			Args: wefttest.Args(struct{ Prompt string }{"find the bug"})}),
 		wefttest.Say("done"),
@@ -106,7 +106,7 @@ func TestWrapSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	turn, err := s.Send(ctx, weft.User("where is the bug?"))
+	turn, err := s.Send(ctx, core.User("where is the bug?"))
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -120,11 +120,11 @@ func TestWrapSync(t *testing.T) {
 	// The child's answer was the tool result the parent model saw.
 	found := false
 	for _, m := range res.Messages {
-		if m.Role != weft.RoleTool {
+		if m.Role != core.RoleTool {
 			continue
 		}
 		for _, part := range m.Content {
-			if tp, ok := part.(weft.ToolResultPart); ok && tp.Content == "the bug is in compaction" {
+			if tp, ok := part.(core.ToolResultPart); ok && tp.Content == "the bug is in compaction" {
 				found = true
 			}
 		}
@@ -183,16 +183,16 @@ func TestWrapChildRunIdentity(t *testing.T) {
 	st := thread.Memory()
 	var mu sync.Mutex
 	var md map[string]string
-	child := weft.New(wefttest.Script(wefttest.Say("the bug is in compaction")),
-		weft.Tap(func(ctx context.Context, ev weft.Event) {
-			if _, ok := ev.(weft.RunStart); ok {
+	child := core.New(wefttest.Script(wefttest.Say("the bug is in compaction")),
+		core.Tap(func(ctx context.Context, ev core.Event) {
+			if _, ok := ev.(core.RunStart); ok {
 				mu.Lock()
-				md = weft.MetadataFromContext(ctx)
+				md = core.MetadataFromContext(ctx)
 				mu.Unlock()
 			}
 		}))
 	p := pool.New(2)
-	parent := weft.New(wefttest.Script(
+	parent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research",
 			Args: wefttest.Args(struct{ Prompt string }{"find the bug"})}),
 		wefttest.Say("done"),
@@ -201,7 +201,7 @@ func TestWrapChildRunIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	turn, err := s.Send(ctx, weft.User("where is the bug?"))
+	turn, err := s.Send(ctx, core.User("where is the bug?"))
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -243,15 +243,15 @@ func TestWrapChildRunIdentity(t *testing.T) {
 func TestWrapSyncFails(t *testing.T) {
 	ctx := context.Background()
 	cause := errors.New("connection reset")
-	child := weft.New(wefttest.Script(wefttest.SayThenFail("partial", cause)))
+	child := core.New(wefttest.Script(wefttest.SayThenFail("partial", cause)))
 	p := pool.New(1)
-	parent := weft.New(wefttest.Script(
+	parent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research",
 			Args: wefttest.Args(struct{ Prompt string }{"go"})}),
 		wefttest.Say("noted"),
 	), p.MustWrap("research", "", child))
 	s, _ := thread.Create(ctx, thread.Memory(), parent)
-	turn, err := s.Send(ctx, weft.User("go"))
+	turn, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -274,11 +274,11 @@ func TestWrapSyncFails(t *testing.T) {
 
 // transcriptText renders a transcript's tool results, for substring
 // assertions over what the model saw.
-func transcriptText(msgs []weft.Message) string {
+func transcriptText(msgs []core.Message) string {
 	var b strings.Builder
 	for _, m := range msgs {
 		for _, part := range m.Content {
-			if tp, ok := part.(weft.ToolResultPart); ok {
+			if tp, ok := part.(core.ToolResultPart); ok {
 				b.WriteString(tp.Content)
 				b.WriteByte('\n')
 			}
@@ -290,19 +290,19 @@ func transcriptText(msgs []weft.Message) string {
 // The capped settlement: a child that dies on a budget (ADR 0022 §4).
 func TestWrapSyncCapped(t *testing.T) {
 	ctx := context.Background()
-	child := weft.New(wefttest.Script(
+	child := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "loop", Args: `{}`}),
 		wefttest.ToolCalls(wefttest.Call{Name: "loop", Args: `{}`}),
-	), weft.MaxSteps(1), weft.Tool("loop", "", func(_ context.Context, _ struct{}) (string, error) {
+	), core.MaxSteps(1), core.Tool("loop", "", func(_ context.Context, _ struct{}) (string, error) {
 		return "again", nil
 	}))
 	p := pool.New(1)
-	parent := weft.New(wefttest.Script(
+	parent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"go"}`}),
 		wefttest.Say("noted"),
 	), p.MustWrap("research", "", child))
 	s, _ := thread.Create(ctx, thread.Memory(), parent)
-	turn, _ := s.Send(ctx, weft.User("go"))
+	turn, _ := s.Send(ctx, core.User("go"))
 	if _, err := turn.Wait(); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
@@ -318,14 +318,14 @@ func TestWrapSyncCapped(t *testing.T) {
 // turn to read.
 func TestWrapAsyncGolden(t *testing.T) {
 	ctx := context.Background()
-	child := weft.New(wefttest.Script(wefttest.Say("the answer")))
+	child := core.New(wefttest.Script(wefttest.Say("the answer")))
 	p := pool.New(2)
-	parent := weft.New(wefttest.Script(
+	parent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"go"}`}),
 		wefttest.Say("ok"),
 	), p.MustWrap("research", "", child, pool.Async()))
 	s, _ := thread.Create(ctx, thread.Memory(), parent)
-	turn, err := s.Send(ctx, weft.User("go"))
+	turn, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -335,11 +335,11 @@ func TestWrapAsyncGolden(t *testing.T) {
 	}
 	var line string
 	for _, m := range res.Messages {
-		if m.Role != weft.RoleTool {
+		if m.Role != core.RoleTool {
 			continue
 		}
 		for _, part := range m.Content {
-			if tp, ok := part.(weft.ToolResultPart); ok {
+			if tp, ok := part.(core.ToolResultPart); ok {
 				line = tp.Content
 			}
 		}
@@ -388,10 +388,10 @@ func waitStarted(t *testing.T, mu *sync.Mutex, started *[]int, n int) {
 // Cancel: an explicit cancel settles the receipt canceled (D4).
 func TestSubmitCancel(t *testing.T) {
 	ctx := context.Background()
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	p := pool.New(1)
 	release := make(chan struct{})
-	r, err := p.Submit(ctx, s, weft.New(blocking{release: release, text: "late"}), "go")
+	r, err := p.Submit(ctx, s, core.New(blocking{release: release, text: "late"}), "go")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -424,11 +424,11 @@ func TestSubmitCancel(t *testing.T) {
 // Close drains: no new work, every child canceled and settled.
 func TestCloseDrains(t *testing.T) {
 	ctx := context.Background()
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	p := pool.New(2)
 	release := make(chan struct{})
 	for i := 0; i < 2; i++ {
-		if _, err := p.Submit(ctx, s, weft.New(blocking{release: release, text: "x"}), "go"); err != nil {
+		if _, err := p.Submit(ctx, s, core.New(blocking{release: release, text: "x"}), "go"); err != nil {
 			t.Fatalf("Submit: %v", err)
 		}
 	}
@@ -441,7 +441,7 @@ func TestCloseDrains(t *testing.T) {
 			t.Errorf("receipt %s settled %q after Close", r.ID, r.State)
 		}
 	}
-	if _, err := p.Submit(ctx, s, weft.New(wefttest.Script()), "go"); !errors.Is(err, pool.ErrClosed) {
+	if _, err := p.Submit(ctx, s, core.New(wefttest.Script()), "go"); !errors.Is(err, pool.ErrClosed) {
 		t.Errorf("Submit after Close err = %v", err)
 	}
 	if err := p.Close(ctx); err != nil {
@@ -453,9 +453,9 @@ func TestCloseDrains(t *testing.T) {
 // cancellation — it runs on the pool's context, not the caller's.
 func TestSubmitDetachedFromCallerCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	s, _ := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	s, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	p := pool.New(1)
-	r, err := p.Submit(ctx, s, weft.New(wefttest.Script(wefttest.Say("done anyway"))), "go")
+	r, err := p.Submit(ctx, s, core.New(wefttest.Script(wefttest.Say("done anyway"))), "go")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -474,13 +474,13 @@ func TestSubmitDetachedFromCallerCancel(t *testing.T) {
 // is the result.
 func TestWrapOutsideSession(t *testing.T) {
 	ctx := context.Background()
-	child := weft.New(wefttest.Script(wefttest.Say("bare answer")))
+	child := core.New(wefttest.Script(wefttest.Say("bare answer")))
 	p := pool.New(1)
-	parent := weft.New(wefttest.Script(
+	parent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "ask", Args: `{"prompt":"go"}`}),
 		wefttest.Say("done"),
 	), p.MustWrap("ask", "", child))
-	res, err := parent.Generate(ctx, weft.Prompt("go"))
+	res, err := parent.Generate(ctx, core.Prompt("go"))
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -500,7 +500,7 @@ func mustList(ctx context.Context, t *testing.T, st thread.Storage) []thread.Hea
 
 func mustOpen(ctx context.Context, t *testing.T, st thread.Storage, id string) *thread.Session {
 	t.Helper()
-	s, err := thread.Open(ctx, st, id, weft.New(wefttest.Script()))
+	s, err := thread.Open(ctx, st, id, core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatalf("Open %s: %v", id, err)
 	}
@@ -516,14 +516,14 @@ func TestReceiptsAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("jsonl.Open: %v", err)
 	}
-	child := weft.New(wefttest.Script(wefttest.Say("persisted answer")))
+	child := core.New(wefttest.Script(wefttest.Say("persisted answer")))
 	p := pool.New(1)
-	parent := weft.New(wefttest.Script(
+	parent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"go"}`}),
 		wefttest.Say("done"),
 	), p.MustWrap("research", "", child))
 	s, _ := thread.Create(ctx, st, parent)
-	turn, _ := s.Send(ctx, weft.User("go"))
+	turn, _ := s.Send(ctx, core.User("go"))
 	if _, err := turn.Wait(); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
@@ -568,11 +568,11 @@ func TestManySessionsRace(t *testing.T) {
 		for j := range turns {
 			turns[j] = wefttest.Say("child answer")
 		}
-		child := weft.New(wefttest.Script(turns...))
+		child := core.New(wefttest.Script(turns...))
 		// One wrap name names one agent: each session's own child gets
 		// its own.
 		name := fmt.Sprintf("research%d", i)
-		parent := weft.New(wefttest.Script(
+		parent := core.New(wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: name, Args: `{"prompt":"go"}`}),
 			wefttest.Say("done"),
 		), p.MustWrap(name, "", child, pool.Async()))
@@ -580,7 +580,7 @@ func TestManySessionsRace(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		if _, err := s.Send(ctx, weft.User("go")); err != nil {
+		if _, err := s.Send(ctx, core.User("go")); err != nil {
 			t.Fatalf("Send: %v", err)
 		}
 		for d := 0; d < delegates; d++ {

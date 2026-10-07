@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // TestPointerArrayIndexStrict: an array reference token is RFC 6901's
@@ -104,16 +104,16 @@ func TestExactArgsGrantMatchesEmptyArgs(t *testing.T) {
 	for _, args := range []json.RawMessage{nil, {}, json.RawMessage(` `), json.RawMessage(`{}`)} {
 		g := exactArgsGrant("ping", args)
 		for _, again := range []json.RawMessage{nil, json.RawMessage(`{}`), json.RawMessage(` {} `)} {
-			if !grantMatches(g, weft.ToolCallPart{Name: "ping", Args: again}) {
+			if !grantMatches(g, core.ToolCallPart{Name: "ping", Args: again}) {
 				t.Errorf("grant minted over %q does not match args %q", args, again)
 			}
 		}
-		if grantMatches(g, weft.ToolCallPart{Name: "ping", Args: json.RawMessage(`{"force":true}`)}) {
+		if grantMatches(g, core.ToolCallPart{Name: "ping", Args: json.RawMessage(`{"force":true}`)}) {
 			t.Errorf("grant minted over %q matches a call with arguments", args)
 		}
 	}
 	g := exactArgsGrant("run", json.RawMessage(`{"command":"ls"}`))
-	if grantMatches(g, weft.ToolCallPart{Name: "run"}) {
+	if grantMatches(g, core.ToolCallPart{Name: "run"}) {
 		t.Error("an exact-arguments grant matches a call with none")
 	}
 }

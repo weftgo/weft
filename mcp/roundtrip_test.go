@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // TestRoundTripIsLossless is checkable property 3, tested the only way
@@ -15,14 +15,14 @@ import (
 // and answer identically — export and import are one shape, and the
 // bridge between them loses nothing (ADR 0003's bet, measured).
 func TestRoundTripIsLossless(t *testing.T) {
-	tool := weft.Tool("lookup_order", "Look up an order by ID.",
+	tool := core.Tool("lookup_order", "Look up an order by ID.",
 		func(_ context.Context, in struct {
 			OrderID string `json:"order_id" jsonschema:"the order to look up"`
 			Verbose bool   `json:"verbose,omitempty"`
 		}) (map[string]string, error) {
 			return map[string]string{"id": in.OrderID, "status": "shipped"}, nil
 		})
-	raw := weft.RawTool("parse_invoice", "Parse an invoice.",
+	raw := core.RawTool("parse_invoice", "Parse an invoice.",
 		mustParseSchema(t, `{"type":"object","properties":{"uri":{"type":"string","pattern":"^https://"}},"required":["uri"]}`),
 		func(_ context.Context, args json.RawMessage) (string, error) {
 			return "parsed " + string(args), nil
@@ -41,12 +41,12 @@ func TestRoundTripIsLossless(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byName := map[string]*weft.ToolDef{}
+	byName := map[string]*core.ToolDef{}
 	for _, t := range imported {
 		byName[t.Name] = t
 	}
 
-	for _, pair := range [][]*weft.ToolDef{{tool, byName["lookup_order"]}, {raw, byName["parse_invoice"]}} {
+	for _, pair := range [][]*core.ToolDef{{tool, byName["lookup_order"]}, {raw, byName["parse_invoice"]}} {
 		orig, back := pair[0], pair[1]
 		if back == nil {
 			t.Fatalf("%s was not imported", orig.Name)
@@ -90,9 +90,9 @@ func TestRoundTripIsLossless(t *testing.T) {
 	}
 }
 
-func mustParseSchema(t *testing.T, doc string) *weft.Schema {
+func mustParseSchema(t *testing.T, doc string) *core.Schema {
 	t.Helper()
-	s, err := weft.ParseSchema(json.RawMessage(doc))
+	s, err := core.ParseSchema(json.RawMessage(doc))
 	if err != nil {
 		t.Fatal(err)
 	}

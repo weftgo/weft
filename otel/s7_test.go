@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/sqlite"
 	"github.com/weftgo/weft/wefttest"
@@ -73,26 +73,26 @@ func (m *memExporter) snapshot() []sdklog.Record {
 // is two steps (a tool step and a final say), so its durable events
 // are run_start, step_start, tool_start, tool_finish, step_finish,
 // step_start, step_finish, run_finish — eight.
-func agentThrough(t *testing.T, p *Pipeline) (*weft.RunResult, string) {
+func agentThrough(t *testing.T, p *Pipeline) (*core.RunResult, string) {
 	t.Helper()
-	slow := weft.Tool("slow", "Sleeps briefly.", func(ctx context.Context, in struct {
+	slow := core.Tool("slow", "Sleeps briefly.", func(ctx context.Context, in struct {
 		Note string `json:"note"`
 	}) (string, error) {
 		time.Sleep(30 * time.Millisecond)
 		return "done:" + in.Note, nil
 	})
-	agt := weft.New(
+	agt := core.New(
 		wefttest.Script(
 			wefttest.Think("plan", wefttest.ToolCalls(wefttest.Call{Name: "slow", Args: `{"note":"one"}`})),
 			wefttest.Say("all done"),
 		),
-		weft.Name("s7"),
-		weft.TracerProvider(p.TracerProvider()),
-		weft.LoggerProvider(p.LoggerProvider()),
+		core.Name("s7"),
+		core.TracerProvider(p.TracerProvider()),
+		core.LoggerProvider(p.LoggerProvider()),
 		slow,
 	)
-	res, err := agt.Generate(context.Background(), weft.Prompt("go"),
-		weft.Metadata(map[string]string{"weft.session.id": "s7-session", "tenant": "acme"}))
+	res, err := agt.Generate(context.Background(), core.Prompt("go"),
+		core.Metadata(map[string]string{"weft.session.id": "s7-session", "tenant": "acme"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,25 +232,25 @@ func TestS7HeartbeatKeepsLongToolRunning(t *testing.T) {
 	}
 	started := make(chan struct{})
 	release := make(chan struct{})
-	slow := weft.Tool("slow", "Blocks until released.", func(ctx context.Context, _ struct{}) (string, error) {
+	slow := core.Tool("slow", "Blocks until released.", func(ctx context.Context, _ struct{}) (string, error) {
 		close(started)
 		<-release
 		return "done", nil
 	})
-	agt := weft.New(
+	agt := core.New(
 		wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: "slow"}),
 			wefttest.Say("done"),
 		),
-		weft.Name("hb"),
-		weft.TracerProvider(p.TracerProvider()),
-		weft.LoggerProvider(p.LoggerProvider()),
+		core.Name("hb"),
+		core.TracerProvider(p.TracerProvider()),
+		core.LoggerProvider(p.LoggerProvider()),
 		slow,
 	)
 	done := make(chan struct{})
 	go func() {
-		_, _ = agt.Generate(context.Background(), weft.Prompt("go"),
-			weft.Metadata(map[string]string{"weft.session.id": "s7-hb"}))
+		_, _ = agt.Generate(context.Background(), core.Prompt("go"),
+			core.Metadata(map[string]string{"weft.session.id": "s7-hb"}))
 		close(done)
 	}()
 	<-started
@@ -527,7 +527,7 @@ func sdkRecordWith(t *testing.T, eventName, body string, attrs ...attribute.KeyV
 		r.SetBody(attribute.StringValue(body))
 	}
 	r.AddAttributes(attrs...)
-	provider.Logger("github.com/weftgo/weft").Emit(context.Background(), r)
+	provider.Logger("github.com/weftgo/weft/core").Emit(context.Background(), r)
 	if len(capture.records) == 0 {
 		t.Fatal("no record captured")
 	}
@@ -603,7 +603,7 @@ func TestShapeEventCapsAndRedacts(t *testing.T) {
 	long := strings.Repeat("x", 100)
 	p := &destProc{content: true, contentC: ContentConfig{
 		MaxBytes: 10,
-		Redact:   func(kind weft.ContentKind, s string) string { return strings.ReplaceAll(s, "secret", "[redacted]") },
+		Redact:   func(kind core.ContentKind, s string) string { return strings.ReplaceAll(s, "secret", "[redacted]") },
 	}, drops: newDropCounter("test")}
 	r := sdkRecordWith(t, "weft.delta",
 		`{"type":"text_delta","run_id":"r","text":"secret `+long+`"}`,
@@ -669,12 +669,12 @@ func TestInstallZeroConfigLocalOnly(t *testing.T) {
 		t.Fatal("zero-config Install did not open the local sink")
 	}
 	// One scripted run through the installed globals.
-	agt := weft.New(
+	agt := core.New(
 		wefttest.Script(wefttest.Say("zero")),
-		weft.Name("zero"),
+		core.Name("zero"),
 	)
-	if _, err := agt.Generate(context.Background(), weft.Prompt("go"),
-		weft.Metadata(map[string]string{"weft.session.id": "zero"})); err != nil {
+	if _, err := agt.Generate(context.Background(), core.Prompt("go"),
+		core.Metadata(map[string]string{"weft.session.id": "zero"})); err != nil {
 		t.Fatal(err)
 	}
 	shutdown()
@@ -719,16 +719,16 @@ func TestShutdownIdempotent(t *testing.T) {
 // redact-not-cap, a cut mid-JSON would make the args undecodable).
 // Nested recurses into the child event.
 func TestShapeEventRedactsSteeredPendingNested(t *testing.T) {
-	red := func(kind weft.ContentKind, s string) string {
+	red := func(kind core.ContentKind, s string) string {
 		return strings.ReplaceAll(s, "secret", "[redacted]")
 	}
 	p := &destProc{content: true, contentC: ContentConfig{MaxBytes: 40, Redact: red}, drops: newDropCounter("test")}
 
-	shape := func(t *testing.T, body string) weft.Event {
+	shape := func(t *testing.T, body string) core.Event {
 		t.Helper()
 		r := sdkRecordWith(t, "weft.event", body, attribute.String("weft.record", "event"))
 		p.shapeEvent(r)
-		ev, err := weft.UnmarshalEvent([]byte(r.Body().AsString()))
+		ev, err := core.UnmarshalEvent([]byte(r.Body().AsString()))
 		if err != nil {
 			t.Fatalf("shaped body is not a valid event: %v (%s)", err, r.Body().AsString())
 		}
@@ -739,11 +739,11 @@ func TestShapeEventRedactsSteeredPendingNested(t *testing.T) {
 	// capped like other user text).
 	st := shape(t, `{"type":"steered","run_id":"r","seq":1,"step":0,`+
 		`"messages":[{"role":"user","content":[{"type":"text","text":"the secret word"}]}]}`)
-	s, ok := st.(weft.Steered)
+	s, ok := st.(core.Steered)
 	if !ok || len(s.Messages) != 1 {
 		t.Fatalf("steered shape lost: %#v", st)
 	}
-	tp, ok := s.Messages[0].Content[0].(weft.TextPart)
+	tp, ok := s.Messages[0].Content[0].(core.TextPart)
 	if !ok || !strings.Contains(tp.Text, "[redacted]") || strings.Contains(tp.Text, "secret") {
 		t.Errorf("steered text not redacted: %q", tp.Text)
 	}
@@ -752,15 +752,15 @@ func TestShapeEventRedactsSteeredPendingNested(t *testing.T) {
 	// ToolStart.Args class) and never capped — a 100-byte args
 	// document survives the 40-byte cap intact.
 	long := `{"note":"` + strings.Repeat("y", 100) + `","secret":"k"}`
-	finishBody, err := json.Marshal(weft.RunFinish{
+	finishBody, err := json.Marshal(core.RunFinish{
 		RunID: "r", Steps: 1,
-		Pending: []weft.ToolCallPart{{ID: "c1", Name: "refund", Args: json.RawMessage(long)}},
+		Pending: []core.ToolCallPart{{ID: "c1", Name: "refund", Args: json.RawMessage(long)}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	rf := shape(t, string(finishBody))
-	f, ok := rf.(weft.RunFinish)
+	f, ok := rf.(core.RunFinish)
 	if !ok || len(f.Pending) != 1 {
 		t.Fatalf("run_finish shape lost: %#v", rf)
 	}
@@ -776,15 +776,15 @@ func TestShapeEventRedactsSteeredPendingNested(t *testing.T) {
 		`"event":{"type":"text_delta","run_id":"r","text":"a secret and a good deal more text well past the cap"}}`
 	nestedRec := sdkRecordWith(t, "weft.event", nestedBody, attribute.String("weft.record", "event"))
 	p.shapeEvent(nestedRec)
-	nestedEv, err := weft.UnmarshalEvent([]byte(nestedRec.Body().AsString()))
+	nestedEv, err := core.UnmarshalEvent([]byte(nestedRec.Body().AsString()))
 	if err != nil {
 		t.Fatalf("shaped nested body invalid: %v", err)
 	}
-	n, ok := nestedEv.(weft.Nested)
+	n, ok := nestedEv.(core.Nested)
 	if !ok {
 		t.Fatalf("nested shape lost: %#v", nestedEv)
 	}
-	td, ok := n.Event.(weft.TextDelta)
+	td, ok := n.Event.(core.TextDelta)
 	if !ok || !strings.Contains(td.Text, "[redacted]") || strings.Contains(td.Text, "secret") {
 		t.Errorf("nested child not redacted: %q", td.Text)
 	}

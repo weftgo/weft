@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // testClock is a settable session clock.
@@ -162,7 +162,7 @@ func TestReusedWrapperIDIsOffered(t *testing.T) {
 // parent's Pending with a recorded reason.
 func TestMirrorsSupersededAndDenied(t *testing.T) {
 	ctx := context.Background()
-	s, err := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	s, err := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +387,7 @@ func TestCancelDelegated(t *testing.T) {
 	if len(ran.snapshot()) != 0 {
 		t.Fatal("the denied call ran")
 	}
-	plain, err := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	plain, err := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -404,7 +404,7 @@ func TestInheritApprovals(t *testing.T) {
 	ring, _ := signerRing(t)
 	clock := newTestClock()
 	st := thread.Memory()
-	parent, err := thread.Create(ctx, st, weft.New(wefttest.Script()),
+	parent, err := thread.Create(ctx, st, core.New(wefttest.Script()),
 		thread.Clock(clock.Now), thread.RequestExpiry(time.Hour), thread.Quorum(2),
 		thread.WithKeyring(ring), thread.RequireSigned())
 	if err != nil {
@@ -452,7 +452,7 @@ func TestInheritApprovals(t *testing.T) {
 // ordinary request with no parked call behind it.
 func TestAppendApprovalRequestsNeedsChild(t *testing.T) {
 	ctx := context.Background()
-	s, err := thread.Create(ctx, thread.Memory(), weft.New(wefttest.Script()))
+	s, err := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatal(err)
 	}

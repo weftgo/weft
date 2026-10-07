@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // A Grant approves — or, with Deny, refuses — future calls without
@@ -223,7 +223,7 @@ type grantRef struct {
 // are the matches the running chain has already made and not yet
 // appended — the audit entries land with the turn — so MaxUses holds
 // inside one turn too.
-func (s *Session) matchGrant(ctx context.Context, c weft.ToolCallPart, chainUses map[string]int) (Decision, grantRef, bool) {
+func (s *Session) matchGrant(ctx context.Context, c core.ToolCallPart, chainUses map[string]int) (Decision, grantRef, bool) {
 	now := s.approvalNow()
 	s.mu.Lock()
 	live := s.liveGrantsLocked(now, chainUses)
@@ -312,7 +312,7 @@ func (s *Session) liveGrantsLocked(now time.Time, pending map[string]int) []Gran
 
 // grantMatches reports whether the call satisfies the grant: the tool
 // name exactly, then every argument predicate.
-func grantMatches(g Grant, c weft.ToolCallPart) bool {
+func grantMatches(g Grant, c core.ToolCallPart) bool {
 	if g.Tool != c.Name {
 		return false
 	}

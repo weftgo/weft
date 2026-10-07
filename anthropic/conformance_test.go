@@ -9,9 +9,9 @@ import (
 
 	antsdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/anthropic"
-	"github.com/weftgo/weft/wefttest/conformance"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest/conformance"
 )
 
 // fixtureFile maps each conformance case to its recorded SSE file;
@@ -37,9 +37,9 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 // the suite runs under WEFT_MODEL_REQUESTS=deny — while kill_switch
 // keeps a self-built client: it is the one case that must prove the
 // switch fires before I/O.
-func newModel(t *testing.T, name string) weft.Model {
+func newModel(t *testing.T, name string) core.Model {
 	t.Helper()
-	at := func(srv *httptest.Server, opts ...anthropic.Option) weft.Model {
+	at := func(srv *httptest.Server, opts ...anthropic.Option) core.Model {
 		c := antsdk.NewClient(option.WithBaseURL(srv.URL), option.WithAPIKey("test"))
 		return anthropic.Model("m", append([]anthropic.Option{anthropic.Client(&c)}, opts...)...)
 	}

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // runIDsOf lists every run id the turn entries record, in order.
@@ -46,7 +46,7 @@ func closeNow(t *testing.T, s *thread.Session) {
 func TestRunIDRecoversPastIDsThatLeftNoTurnEntry(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		echo := weft.Tool("echo", "", func(context.Context, struct{}) (string, error) { return "ok", nil })
+		echo := core.Tool("echo", "", func(context.Context, struct{}) (string, error) { return "ok", nil })
 		model := wefttest.Script(
 			wefttest.ToolCalls(wefttest.Call{Name: "echo"}),
 			wefttest.Say("steered"),
@@ -55,10 +55,10 @@ func TestRunIDRecoversPastIDsThatLeftNoTurnEntry(t *testing.T) {
 		)
 		var ref *thread.Session
 		var once sync.Once
-		agent := weft.New(model, echo, weft.Tap(func(_ context.Context, ev weft.Event) {
-			if _, ok := ev.(weft.ToolStart); ok {
+		agent := core.New(model, echo, core.Tap(func(_ context.Context, ev core.Event) {
+			if _, ok := ev.(core.ToolStart); ok {
 				once.Do(func() {
-					if _, err := ref.Send(ctx, weft.User("a steer"), thread.As(thread.Steer)); err != nil {
+					if _, err := ref.Send(ctx, core.User("a steer"), thread.As(thread.Steer)); err != nil {
 						t.Errorf("steer: %v", err)
 					}
 				})
@@ -69,11 +69,11 @@ func TestRunIDRecoversPastIDsThatLeftNoTurnEntry(t *testing.T) {
 			t.Fatal(err)
 		}
 		ref = s
-		t1, _ := s.Send(ctx, weft.User("one")) // -t1; the steer spends -t2
+		t1, _ := s.Send(ctx, core.User("one")) // -t1; the steer spends -t2
 		if _, err := t1.Wait(); err != nil {
 			t.Fatal(err)
 		}
-		t2, _ := s.Send(ctx, weft.User("two"))
+		t2, _ := s.Send(ctx, core.User("two"))
 		if _, err := t2.Wait(); err != nil {
 			t.Fatal(err)
 		}
@@ -84,7 +84,7 @@ func TestRunIDRecoversPastIDsThatLeftNoTurnEntry(t *testing.T) {
 			t.Fatal(err)
 		}
 		s2 := reopenWith(t, ctx, st, s, agent)
-		t3, err := s2.Send(ctx, weft.User("three"))
+		t3, err := s2.Send(ctx, core.User("three"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -110,12 +110,12 @@ func TestRunIDRecoversPastIDsThatLeftNoTurnEntry(t *testing.T) {
 func TestRunIDRecoversAfterALostTurnEnd(t *testing.T) {
 	ctx := context.Background()
 	st := &failTurnEndStorage{Storage: thread.Memory(), fail: true}
-	agent := weft.New(wefttest.Script(wefttest.Say("lost"), wefttest.Say("kept")))
+	agent := core.New(wefttest.Script(wefttest.Say("lost"), wefttest.Say("kept")))
 	s, err := thread.Create(ctx, st, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1, _ := s.Send(ctx, weft.User("one"))
+	t1, _ := s.Send(ctx, core.User("one"))
 	if _, err := t1.Wait(); !errors.Is(err, thread.ErrNotPersisted) {
 		t.Fatalf("Wait = %v, want ErrNotPersisted", err)
 	}
@@ -135,7 +135,7 @@ func TestRunIDRecoversAfterALostTurnEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	s2 := reopenWith(t, ctx, st.Storage, s, agent)
-	t2, err := s2.Send(ctx, weft.User("two"))
+	t2, err := s2.Send(ctx, core.User("two"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,9 +152,9 @@ func TestRunIDRecoversAfterALostTurnEnd(t *testing.T) {
 func TestRunIDRecoversAfterAnOverflowReRun(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		agent := weft.New(wefttest.Script(
+		agent := core.New(wefttest.Script(
 			wefttest.Say("the first answer"),
-			wefttest.Fail(weft.ErrContextOverflow),
+			wefttest.Fail(core.ErrContextOverflow),
 			wefttest.Say("the summary of what came before"),
 			wefttest.Say("recovered after compaction"),
 			wefttest.Say("after the reopen"),
@@ -164,7 +164,7 @@ func TestRunIDRecoversAfterAnOverflowReRun(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, text := range []string{"a first question", "a prompt that overflows"} {
-			turn, _ := s.Send(ctx, weft.User(text))
+			turn, _ := s.Send(ctx, core.User(text))
 			if _, err := turn.Wait(); err != nil {
 				t.Fatal(err)
 			}
@@ -173,7 +173,7 @@ func TestRunIDRecoversAfterAnOverflowReRun(t *testing.T) {
 			t.Fatal(err)
 		}
 		s2 := reopenWith(t, ctx, st, s, agent, thread.KeepRecent(1))
-		turn, err := s2.Send(ctx, weft.User("and now"))
+		turn, err := s2.Send(ctx, core.User("and now"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -200,33 +200,33 @@ func TestPromptFlushFailureLeavesNoOrphanPrompt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			st := &flushFailStorage{Storage: thread.Memory()}
-			agent := weft.New(wefttest.Script(wefttest.Say("earlier"), wefttest.Say("answered")))
+			agent := core.New(wefttest.Script(wefttest.Say("earlier"), wefttest.Say("answered")))
 			s, err := thread.Create(ctx, st, agent)
 			if err != nil {
 				t.Fatal(err)
 			}
 			want := []string{"hello", "answered"}
 			if withHistory {
-				t0, _ := s.Send(ctx, weft.User("before"))
+				t0, _ := s.Send(ctx, core.User("before"))
 				if _, err := t0.Wait(); err != nil {
 					t.Fatal(err)
 				}
 				want = []string{"before", "earlier", "hello", "answered"}
 			} else {
-				agent = weft.New(wefttest.Script(wefttest.Say("answered")))
+				agent = core.New(wefttest.Script(wefttest.Say("answered")))
 				if s, err = thread.Create(ctx, st, agent); err != nil {
 					t.Fatal(err)
 				}
 			}
 			leaf := s.Leaf()
 			st.failNext.Store(1)
-			if turn, err := s.Send(ctx, weft.User("hello")); err == nil || turn != nil {
+			if turn, err := s.Send(ctx, core.User("hello")); err == nil || turn != nil {
 				t.Fatalf("Send over a failing flush = %v, %v; want an error", turn, err)
 			}
 			if got := s.Leaf(); got != leaf {
 				t.Errorf("the leaf after the failed Send = %q, want it back at %q", got, leaf)
 			}
-			turn, err := s.Send(ctx, weft.User("hello"))
+			turn, err := s.Send(ctx, core.User("hello"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -251,14 +251,14 @@ func TestPromptFlushFailureLeavesNoOrphanPrompt(t *testing.T) {
 func TestPromptFlushFailureIsRecordedForAReopen(t *testing.T) {
 	ctx := context.Background()
 	st := &flushFailStorage{Storage: thread.Memory()}
-	agent := weft.New(wefttest.Script(wefttest.Say("first")))
+	agent := core.New(wefttest.Script(wefttest.Say("first")))
 	s, _ := thread.Create(ctx, st, agent)
-	t0, _ := s.Send(ctx, weft.User("before"))
+	t0, _ := s.Send(ctx, core.User("before"))
 	if _, err := t0.Wait(); err != nil {
 		t.Fatal(err)
 	}
 	st.failNext.Store(1)
-	if _, err := s.Send(ctx, weft.User("lost")); err == nil {
+	if _, err := s.Send(ctx, core.User("lost")); err == nil {
 		t.Fatal("Send over a failing flush succeeded")
 	}
 	if err := s.Close(ctx); err != nil {
@@ -272,7 +272,7 @@ func TestPromptFlushFailureIsRecordedForAReopen(t *testing.T) {
 
 // heldAgent returns an agent whose first turn blocks in a tool until
 // released, then answers; every later turn answers at once.
-func heldAgent(replies ...string) (*weft.Agent, *wefttest.Model, chan struct{}, *release) {
+func heldAgent(replies ...string) (*core.Agent, *wefttest.Model, chan struct{}, *release) {
 	steps := []wefttest.Turn{wefttest.ToolCalls(wefttest.Call{Name: "wait"})}
 	for _, r := range replies {
 		steps = append(steps, wefttest.Say(r))
@@ -281,8 +281,8 @@ func heldAgent(replies ...string) (*weft.Agent, *wefttest.Model, chan struct{}, 
 	tool, rel := blockingTool()
 	started := make(chan struct{})
 	var once sync.Once
-	agent := weft.New(model, tool, weft.Tap(func(_ context.Context, ev weft.Event) {
-		if _, ok := ev.(weft.ToolStart); ok {
+	agent := core.New(model, tool, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.ToolStart); ok {
 			once.Do(func() { close(started) })
 		}
 	}))
@@ -304,11 +304,11 @@ func TestQueuedSendSurvivesARestart(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.Send(ctx, weft.User("long work")); err != nil {
+		if _, err := s.Send(ctx, core.User("long work")); err != nil {
 			t.Fatal(err)
 		}
 		<-started
-		queued, err := s.Send(ctx, weft.User("and after that, this"))
+		queued, err := s.Send(ctx, core.User("and after that, this"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -334,7 +334,7 @@ func TestQueuedSendSurvivesARestart(t *testing.T) {
 		}
 
 		model2 := wefttest.Script(wefttest.Say("picked up after the restart"))
-		s2 := reopenWith(t, ctx, st, s, weft.New(model2))
+		s2 := reopenWith(t, ctx, st, s, core.New(model2))
 		q := s2.Queue()
 		if len(q) != 1 || q[0].Receipt != queued.ID() || q[0].Policy != thread.Queue || q[0].Msg.Text() != "and after that, this" {
 			t.Fatalf("the reopened Queue = %+v, want the send restored under its id", q)
@@ -388,18 +388,18 @@ func TestRestoredQueuedSendRunsBeforeTheNextSend(t *testing.T) {
 	agent, _, started, rel := heldAgent()
 	defer rel.open()
 	s, _ := thread.Create(ctx, st, agent)
-	if _, err := s.Send(ctx, weft.User("long work")); err != nil {
+	if _, err := s.Send(ctx, core.User("long work")); err != nil {
 		t.Fatal(err)
 	}
 	<-started
-	if _, err := s.Send(ctx, weft.User("queued before the restart")); err != nil {
+	if _, err := s.Send(ctx, core.User("queued before the restart")); err != nil {
 		t.Fatal(err)
 	}
 	closeNow(t, s)
 
 	model2 := wefttest.Script(wefttest.Say("first"), wefttest.Say("second"))
-	s2 := reopenWith(t, ctx, st, s, weft.New(model2))
-	turn, err := s2.Send(ctx, weft.User("sent after the restart"))
+	s2 := reopenWith(t, ctx, st, s, core.New(model2))
+	turn, err := s2.Send(ctx, core.User("sent after the restart"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,7 @@ func TestRestoredQueuedSendRunsBeforeTheNextSend(t *testing.T) {
 	}
 	var users []string
 	for _, m := range s2.Context() {
-		if m.Role == weft.RoleUser && m.Text() != "" {
+		if m.Role == core.RoleUser && m.Text() != "" {
 			users = append(users, m.Text())
 		}
 	}
@@ -432,13 +432,13 @@ func TestClearQueueDropsQueuedSends(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t1, _ := s.Send(ctx, weft.User("long work"))
+		t1, _ := s.Send(ctx, core.User("long work"))
 		<-started
-		queued, err := s.Send(ctx, weft.User("on second thought"))
+		queued, err := s.Send(ctx, core.User("on second thought"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		steer, err := s.Send(ctx, weft.User("a steer too"), thread.As(thread.Steer))
+		steer, err := s.Send(ctx, core.User("a steer too"), thread.As(thread.Steer))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -497,17 +497,17 @@ func TestClearQueueDropsQueuedSends(t *testing.T) {
 func TestDeferredSteerFollowUpSurvivesARestart(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
-	agent := weft.New(
+	agent := core.New(
 		wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "dangerous", ID: "call_d"})),
-		weft.Tool("dangerous", "", func(context.Context, struct{}) (string, error) { return "ran", nil }, weft.RequireApproval()),
+		core.Tool("dangerous", "", func(context.Context, struct{}) (string, error) { return "ran", nil }, core.RequireApproval()),
 	)
 	s, _ := thread.Create(ctx, st, agent)
-	t1, _ := s.Send(ctx, weft.User("do it"))
+	t1, _ := s.Send(ctx, core.User("do it"))
 	if _, err := t1.Wait(); err != nil {
 		t.Fatal(err)
 	}
 	// A steer meeting the open boundary defers at once.
-	steer, err := s.Send(ctx, weft.User("also: be careful"), thread.As(thread.Steer))
+	steer, err := s.Send(ctx, core.User("also: be careful"), thread.As(thread.Steer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,8 +518,8 @@ func TestDeferredSteerFollowUpSurvivesARestart(t *testing.T) {
 	closeNow(t, s)
 
 	model2 := wefttest.Script(wefttest.Say("denied, moving on"), wefttest.Say("careful it is"))
-	agent2 := weft.New(model2,
-		weft.Tool("dangerous", "", func(context.Context, struct{}) (string, error) { return "ran", nil }, weft.RequireApproval()))
+	agent2 := core.New(model2,
+		core.Tool("dangerous", "", func(context.Context, struct{}) (string, error) { return "ran", nil }, core.RequireApproval()))
 	s2 := reopenWith(t, ctx, st, s, agent2)
 	q := s2.Queue()
 	if len(q) != 1 || q[0].Receipt != followUp.ID() || q[0].Msg.Text() != "also: be careful" {
@@ -548,10 +548,10 @@ func TestQueuedSendCanceledBeforeItStarts(t *testing.T) {
 	ctx := context.Background()
 	agent, _, started, rel := heldAgent("done")
 	s, _ := thread.Create(ctx, thread.Memory(), agent)
-	t1, _ := s.Send(ctx, weft.User("long work"))
+	t1, _ := s.Send(ctx, core.User("long work"))
 	<-started
 	qctx, cancel := context.WithCancel(ctx)
-	queued, err := s.Send(qctx, weft.User("never mind"))
+	queued, err := s.Send(qctx, core.User("never mind"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,9 +567,9 @@ func TestQueuedSendCanceledBeforeItStarts(t *testing.T) {
 	if got := queued.Outcome(); got != thread.TurnCanceled {
 		t.Errorf("Outcome = %v, want canceled", got)
 	}
-	var runErr *weft.RunError
+	var runErr *core.RunError
 	if errors.As(err, &runErr) {
-		t.Error("a turn that never ran reports a *weft.RunError")
+		t.Error("a turn that never ran reports a *core.RunError")
 	}
 	tes := turnEntries(s)
 	if last := tes[len(tes)-1]; !last.Canceled || last.RunID != queued.RunID() {
@@ -594,9 +594,9 @@ func TestForkDoesNotInheritQueuedSends(t *testing.T) {
 	st := thread.Memory()
 	agent, _, started, rel := heldAgent("done", "the queued send's reply")
 	s, _ := thread.Create(ctx, st, agent)
-	t1, _ := s.Send(ctx, weft.User("long work"))
+	t1, _ := s.Send(ctx, core.User("long work"))
 	<-started
-	queued, err := s.Send(ctx, weft.User("queued on the origin"))
+	queued, err := s.Send(ctx, core.User("queued on the origin"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -628,7 +628,7 @@ func TestForkDoesNotInheritQueuedSends(t *testing.T) {
 	if err := f.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
-	forked, err := thread.Open(ctx, st, f.ID(), weft.New(wefttest.Script()))
+	forked, err := thread.Open(ctx, st, f.ID(), core.New(wefttest.Script()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -658,11 +658,11 @@ func TestContinueBindsRestoredSendsToItsContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Send(ctx, weft.User("long work")); err != nil {
+	if _, err := s.Send(ctx, core.User("long work")); err != nil {
 		t.Fatal(err)
 	}
 	<-started
-	if _, err := s.Send(ctx, weft.User("queued, then restored")); err != nil {
+	if _, err := s.Send(ctx, core.User("queued, then restored")); err != nil {
 		t.Fatal(err)
 	}
 	closeNow(t, s)

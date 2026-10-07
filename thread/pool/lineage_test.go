@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/pool"
 )
@@ -19,11 +19,11 @@ func TestChildrenAndDescendants(t *testing.T) {
 	st := thread.Memory()
 	p := pool.New(2)
 	tool, _, _ := tree(p, nil, 3, 2) // parent → 2 × level1 → 2 × level2 → 2 × level3
-	s, err := thread.Create(ctx, st, weft.New(fanOut(nil, "level1", 2), tool))
+	s, err := thread.Create(ctx, st, core.New(fanOut(nil, "level1", 2), tool))
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, _ := s.Send(ctx, weft.User("go"))
+	turn, _ := s.Send(ctx, core.User("go"))
 	if _, err := turn.Wait(); err != nil {
 		t.Fatal(err)
 	}
@@ -118,10 +118,10 @@ func TestDeleteParentOrphansChildren(t *testing.T) {
 	ctx := context.Background()
 	st := thread.Memory()
 	p := pool.New(1)
-	s, _ := thread.Create(ctx, st, weft.New(say(nil, "parent")))
+	s, _ := thread.Create(ctx, st, core.New(say(nil, "parent")))
 	var kids []string
 	for i := 0; i < 2; i++ {
-		r, err := p.Submit(ctx, s, weft.New(say(nil, fmt.Sprintf("child %d", i))), "go")
+		r, err := p.Submit(ctx, s, core.New(say(nil, fmt.Sprintf("child %d", i))), "go")
 		if err != nil {
 			t.Fatal(err)
 		}

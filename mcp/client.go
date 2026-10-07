@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // ErrToolError is the cause on a remote isError result — data for the
@@ -51,7 +51,7 @@ var ErrToolError = errors.New("mcp: tool returned an error")
 // ctx error unchanged when the deadline hits mid-list. Connect
 // several servers concurrently with an errgroup and one deadline; for
 // a list that changes, set the SDK's ToolListChangedHandler to
-// re-run Tools into a slice you serve through weft.ToolSource, under
+// re-run Tools into a slice you serve through core.ToolSource, under
 // a mutex (the SDK runs the handler on its own goroutine, the loop
 // reads the source on the run's; ExampleTools_toolSource shows the
 // shape) — Tools
@@ -89,14 +89,14 @@ var ErrToolError = errors.New("mcp: tool returned an error")
 // longer takes its ninety-nine good ones down, and the one is still
 // named. A listing failure (transport, the ctx ending) is the ordinary
 // error with no tools.
-func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*weft.ToolDef, error) {
+func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*core.ToolDef, error) {
 	cfg := importConfig{}
 	for _, o := range opts {
 		if o != nil {
 			o.apply(&cfg)
 		}
 	}
-	out := []*weft.ToolDef{} // non-nil: zero tools is a fact, not an error
+	out := []*core.ToolDef{} // non-nil: zero tools is a fact, not an error
 	var skipped []SkippedTool
 	seen := map[string]bool{}
 	index := -1
@@ -122,7 +122,7 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*wef
 		name := cfg.prefix + t.Name
 		if seen[name] {
 			// A repeated name in one listing is the same untrusted
-			// input: both would import and weft.New would panic on
+			// input: both would import and core.New would panic on
 			// the duplicate later. The first importable occurrence
 			// stands, the repeat is reported — seen is set only when a
 			// tool is appended, so a skipped first entry does not block
@@ -135,7 +135,7 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*wef
 			skipped = append(skipped, SkippedTool{Name: t.Name, Index: index, Err: err})
 			continue
 		}
-		schema, err := weft.ParseSchema(raw)
+		schema, err := core.ParseSchema(raw)
 		if err != nil {
 			skipped = append(skipped, SkippedTool{Name: t.Name, Index: index, Err: err})
 			continue
@@ -143,16 +143,16 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*wef
 		// Annotation default first, the caller's policy after: a
 		// missing readOnlyHint cannot be un-Sequentialised, and
 		// RequireApproval is added, never removed.
-		toolOpts := []weft.ToolOption{}
+		toolOpts := []core.ToolOption{}
 		if t.Annotations == nil || !t.Annotations.ReadOnlyHint {
-			toolOpts = append(toolOpts, weft.Sequential())
+			toolOpts = append(toolOpts, core.Sequential())
 		}
 		toolOpts = append(toolOpts, cfg.policy...)
-		tool := weft.RawTool(name, t.Description, schema,
+		tool := core.RawTool(name, t.Description, schema,
 			callHandler(sess, t.Name), toolOpts...)
 		if t.OutputSchema != nil {
 			if raw, err := fromSDK(t.OutputSchema); err == nil {
-				if outSchema, err := weft.ParseSchema(raw); err == nil {
+				if outSchema, err := core.ParseSchema(raw); err == nil {
 					tool.OutputSchema = outSchema
 				}
 			}
@@ -168,7 +168,7 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*wef
 
 // ImportError is Tools' report of the tools it could not import. It
 // travels beside the importable tools, not instead of them — the
-// partial-result shape *weft.RunError uses (ADR 0002): the caller
+// partial-result shape *core.RunError uses (ADR 0002): the caller
 // reads it with errors.As and decides whether a skipped tool is a
 // warning or a stop. Unwrap exposes each tool's cause, so errors.Is
 // against a ParseSchema failure still works through the report.
@@ -212,7 +212,7 @@ type Option interface{ apply(*importConfig) }
 
 type importConfig struct {
 	prefix string
-	policy []weft.ToolOption
+	policy []core.ToolOption
 }
 
 type prefixOption string
@@ -224,7 +224,7 @@ func (p prefixOption) apply(c *importConfig) { c.prefix = string(p) }
 // agent; the remote call still uses the server's name.
 func Prefix(p string) Option { return prefixOption(p) }
 
-type policyOption []weft.ToolOption
+type policyOption []core.ToolOption
 
 func (p policyOption) apply(c *importConfig) { c.policy = append(c.policy, p...) }
 
@@ -234,7 +234,7 @@ func (p policyOption) apply(c *importConfig) { c.policy = append(c.policy, p...)
 // Timeout, MaxResultBytes, RequireApproval and WrapTools apply as on
 // any tool; StrictInput has no effect (a RawTool receives the model's
 // raw arguments — validation belongs to the server).
-func Policy(opts ...weft.ToolOption) Option { return policyOption(opts) }
+func Policy(opts ...core.ToolOption) Option { return policyOption(opts) }
 
 // callHandler is the imported tool's handler: one tools/call round
 // trip, the model's argument bytes forwarded verbatim (a

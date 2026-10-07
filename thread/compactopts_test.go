@@ -11,24 +11,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // scriptedAgent is an agent whose scripted model reports usage u per
 // step, so the trigger's lastInput lands where the test wants.
-func scriptedAgent(u weft.Usage, turns int) (*weft.Agent, weft.Model) {
+func scriptedAgent(u core.Usage, turns int) (*core.Agent, core.Model) {
 	turnsList := make([]wefttest.Turn, turns)
 	for i := range turnsList {
 		turnsList[i] = wefttest.Say("reply").WithUsage(u)
 	}
 	m := wefttest.Script(turnsList...)
-	return weft.New(m), m
+	return core.New(m), m
 }
 
-func bigUsage() weft.Usage {
-	return weft.Usage{InputTokens: 90_000, OutputTokens: 5}
+func bigUsage() core.Usage {
+	return core.Usage{InputTokens: 90_000, OutputTokens: 5}
 }
 
 // waitFor polls until cond or the deadline, failing the test on a
@@ -67,7 +67,7 @@ func TestContextWindowFiresTrigger(t *testing.T) {
 			strings.Repeat("c", 30_000))
 		s = reopenWith(t, ctx, st, s, agent, thread.ContextWindow(100_000))
 		for i := 0; i < 2; i++ {
-			turn, err := s.Send(ctx, weft.User("go"))
+			turn, err := s.Send(ctx, core.User("go"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -88,18 +88,18 @@ func TestContextWindowFiresTrigger(t *testing.T) {
 func TestModelWindowsOverride(t *testing.T) {
 	ctx := context.Background()
 	agent, _ := scriptedAgent(bigUsage(), 2)
-	info := weft.InfoOf(agent.Model())
+	info := core.InfoOf(agent.Model())
 	st := thread.Memory()
 	s, _ := thread.Create(ctx, st, agent,
-		thread.ModelWindows(map[weft.ModelInfo]int64{info: 100_000}))
+		thread.ModelWindows(map[core.ModelInfo]int64{info: 100_000}))
 	// The override is in force: the same shape as the window test,
 	// checked through the trigger firing.
 	msgs(t, ctx, st, s,
 		strings.Repeat("a", 30_000),
 		strings.Repeat("b", 30_000),
 		strings.Repeat("c", 30_000))
-	s = reopenWith(t, ctx, st, s, agent, thread.ModelWindows(map[weft.ModelInfo]int64{info: 100_000}))
-	turn, err := s.Send(ctx, weft.User("go"))
+	s = reopenWith(t, ctx, st, s, agent, thread.ModelWindows(map[core.ModelInfo]int64{info: 100_000}))
+	turn, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,9 +110,9 @@ func TestModelWindowsOverride(t *testing.T) {
 	waitFor(t, "the per-model window to fire", func() bool { return hasCompaction(s) > 0 })
 
 	// A window for a different model leaves the session window-less.
-	other := weft.ModelInfo{Provider: "other", Name: "nope"}
+	other := core.ModelInfo{Provider: "other", Name: "nope"}
 	s2, _ := thread.Create(ctx, st, agent,
-		thread.ModelWindows(map[weft.ModelInfo]int64{other: 100_000}))
+		thread.ModelWindows(map[core.ModelInfo]int64{other: 100_000}))
 	if hasCompaction(s2) != 0 {
 		t.Error("another model's window fired")
 	}
@@ -129,7 +129,7 @@ func TestDisabledAndNoWindow(t *testing.T) {
 		strings.Repeat("c", 30_000))
 	s = reopenWith(t, ctx, st, s, agent, thread.ContextWindow(100_000), thread.NoAutoCompact())
 	for i := 0; i < 2; i++ {
-		turn, err := s.Send(ctx, weft.User("go"))
+		turn, err := s.Send(ctx, core.User("go"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -179,7 +179,7 @@ func TestTriggerFuncAndRateLimits(t *testing.T) {
 		thread.MaxPerSession(1),
 	)
 	for i := 0; i < 4; i++ {
-		turn, err := s.Send(ctx, weft.User("go"))
+		turn, err := s.Send(ctx, core.User("go"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -207,7 +207,7 @@ func TestTriggerFuncAndRateLimits(t *testing.T) {
 func TestKeepRecentAndEstimator(t *testing.T) {
 	ctx := context.Background()
 	rec := &summaryRecorder{reply: "s"}
-	agent := weft.New(rec)
+	agent := core.New(rec)
 	st := thread.Memory()
 	s, _ := thread.Create(ctx, st, agent, thread.KeepRecent(100))
 	msgs(t, ctx, st, s,
@@ -241,13 +241,13 @@ func TestKeepRecentAndEstimator(t *testing.T) {
 
 type unitEstimator struct{}
 
-func (unitEstimator) Estimate(msgs []weft.Message) int64 { return int64(len(msgs)) }
+func (unitEstimator) Estimate(msgs []core.Message) int64 { return int64(len(msgs)) }
 
 func TestSummaryModelFallbackChain(t *testing.T) {
 	ctx := context.Background()
 	fail := &failingModel{}
 	rec := &summaryRecorder{reply: "from the session model"}
-	session := weft.New(rec)
+	session := core.New(rec)
 	st := thread.Memory()
 	s, _ := thread.Create(ctx, st, session, thread.SummaryModel(fail))
 	msgs(t, ctx, st, s,
@@ -265,7 +265,7 @@ func TestSummaryModelFallbackChain(t *testing.T) {
 	// The failing chain end reports through CompactFailed.
 	var failedReason thread.Reason
 	var failedErr error
-	failing := weft.New(&failingModel{})
+	failing := core.New(&failingModel{})
 	s2, _ := thread.Create(ctx, st, failing, thread.CompactFailed(
 		func(ctx context.Context, r thread.Reason, err error) {
 			failedReason, failedErr = r, err
@@ -290,7 +290,7 @@ func TestSummaryModelFallbackChain(t *testing.T) {
 func TestSummaryPromptFocusInstructions(t *testing.T) {
 	ctx := context.Background()
 	rec := &summaryRecorder{reply: "s"}
-	agent := weft.New(rec)
+	agent := core.New(rec)
 	st := thread.Memory()
 	promptOpts := []thread.SessionOption{
 		thread.SummaryPrompt("REPLACEMENT PROMPT"),
@@ -327,7 +327,7 @@ func TestCheckSummaryRetriesThenFallsBack(t *testing.T) {
 	// The cheap model returns summaries the checker rejects — twice.
 	bad := &summaryRecorder{reply: "no headings"}
 	good := &summaryRecorder{reply: "summary with Goal:"}
-	session := weft.New(good)
+	session := core.New(good)
 	st := thread.Memory()
 	checkOpts := []thread.SessionOption{
 		thread.SummaryModel(bad),
@@ -362,7 +362,7 @@ func TestCheckSummaryRetriesThenFallsBack(t *testing.T) {
 func TestBeforeCompactVerdicts(t *testing.T) {
 	ctx := context.Background()
 	rec := &summaryRecorder{reply: "computed"}
-	agent := weft.New(rec)
+	agent := core.New(rec)
 	st := thread.Memory()
 	// Proceed.
 	var sawReason thread.Reason
@@ -425,7 +425,7 @@ func TestBeforeCompactVerdicts(t *testing.T) {
 
 func TestWithSummarizerAndCompactor(t *testing.T) {
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script())
+	agent := core.New(wefttest.Script())
 	st := thread.Memory()
 	custom := &stubSummarizer{text: "custom text"}
 	s, _ := thread.Create(ctx, st, agent, thread.WithSummarizer(custom))
@@ -488,30 +488,30 @@ func (c *stubCompactor) Compact(ctx context.Context, p thread.Preparation) (*thr
 // nativeFake implements thread.NativeCompactor — root types only
 // (ADR 0020 §7).
 type nativeFake struct {
-	weft.Model
+	core.Model
 	called bool
 }
 
-func (m *nativeFake) CompactNative(ctx context.Context, req weft.ModelRequest, instructions string) (weft.Message, weft.Usage, error) {
+func (m *nativeFake) CompactNative(ctx context.Context, req core.ModelRequest, instructions string) (core.Message, core.Usage, error) {
 	m.called = true
-	return weft.Assistant("the provider compacted this"), weft.Usage{InputTokens: 1, OutputTokens: 1}, nil
+	return core.Assistant("the provider compacted this"), core.Usage{InputTokens: 1, OutputTokens: 1}, nil
 }
 
 func TestPreferNative(t *testing.T) {
 	ctx := context.Background()
 	rec := &summaryRecorder{reply: "the text summary"}
-	plain := weft.New(rec)
+	plain := core.New(rec)
 	native := &nativeFake{Model: rec}
 
 	// The session's model is native: the provider's compaction is used.
 	mem := thread.Memory()
-	s, _ := thread.Create(ctx, mem, weft.New(native), thread.PreferNative())
+	s, _ := thread.Create(ctx, mem, core.New(native), thread.PreferNative())
 	msgs(t, ctx, mem, s,
 		strings.Repeat("a", 30_000),
 		strings.Repeat("b", 30_000),
 		strings.Repeat("c", 30_000),
 	)
-	s = reopenWith(t, ctx, mem, s, weft.New(native), thread.PreferNative())
+	s = reopenWith(t, ctx, mem, s, core.New(native), thread.PreferNative())
 	if err := s.Compact(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -543,14 +543,14 @@ func TestPinSurvivesCompactions(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
 		rec := &summaryRecorder{reply: "s"}
-		agent := weft.New(rec)
+		agent := core.New(rec)
 		s, _ := thread.Create(ctx, st, agent, thread.KeepRecent(100))
 		now := time.Now().UTC()
 		if err := st.Append(ctx, s.ID(),
-			thread.MessageEntry{ID: "e_m0", Created: now, Message: weft.Assistant(strings.Repeat("a", 30_000))},
-			thread.MessageEntry{ID: "e_pin", ParentID: "e_m0", Created: now, Message: weft.User("THE REQUIREMENT: ship by Friday")},
-			thread.MessageEntry{ID: "e_m2", ParentID: "e_pin", Created: now, Message: weft.Assistant(strings.Repeat("b", 30_000))},
-			thread.MessageEntry{ID: "e_m3", ParentID: "e_m2", Created: now, Message: weft.Assistant(strings.Repeat("c", 30_000))},
+			thread.MessageEntry{ID: "e_m0", Created: now, Message: core.Assistant(strings.Repeat("a", 30_000))},
+			thread.MessageEntry{ID: "e_pin", ParentID: "e_m0", Created: now, Message: core.User("THE REQUIREMENT: ship by Friday")},
+			thread.MessageEntry{ID: "e_m2", ParentID: "e_pin", Created: now, Message: core.Assistant(strings.Repeat("b", 30_000))},
+			thread.MessageEntry{ID: "e_m3", ParentID: "e_m2", Created: now, Message: core.Assistant(strings.Repeat("c", 30_000))},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -572,7 +572,7 @@ func TestPinSurvivesCompactions(t *testing.T) {
 			grow := fmt.Sprintf("%s%d", strings.Repeat("g", 30_000), i)
 			if err := st.Append(ctx, s.ID(), thread.MessageEntry{
 				ID: fmt.Sprintf("e_g%d", i), ParentID: s.Leaf(), Created: time.Now().UTC(),
-				Message: weft.Assistant(grow),
+				Message: core.Assistant(grow),
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -602,7 +602,7 @@ func TestPinSurvivesCompactions(t *testing.T) {
 func TestTrimmerOnlyPath(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
-		usage := weft.Usage{InputTokens: 90_000, OutputTokens: 5}
+		usage := core.Usage{InputTokens: 90_000, OutputTokens: 5}
 		agent, _ := scriptedAgent(usage, 2)
 		s, _ := thread.Create(ctx, st, agent,
 			thread.ContextWindow(100_000),
@@ -613,22 +613,22 @@ func TestTrimmerOnlyPath(t *testing.T) {
 		// the results counted.
 		now := time.Now().UTC()
 		if err := st.Append(ctx, s.ID(),
-			thread.MessageEntry{ID: "e_t1", Created: now, Message: weft.User("run the tools")},
-			thread.MessageEntry{ID: "e_t2", ParentID: "e_t1", Created: now, Message: weft.Message{
-				Role: weft.RoleAssistant,
-				Content: []weft.Part{
-					weft.ToolCallPart{ID: "c1", Name: "read", Args: []byte("{}")},
-					weft.ToolCallPart{ID: "c2", Name: "read", Args: []byte("{}")},
+			thread.MessageEntry{ID: "e_t1", Created: now, Message: core.User("run the tools")},
+			thread.MessageEntry{ID: "e_t2", ParentID: "e_t1", Created: now, Message: core.Message{
+				Role: core.RoleAssistant,
+				Content: []core.Part{
+					core.ToolCallPart{ID: "c1", Name: "read", Args: []byte("{}")},
+					core.ToolCallPart{ID: "c2", Name: "read", Args: []byte("{}")},
 				},
 			}},
-			thread.MessageEntry{ID: "e_t3", ParentID: "e_t2", Created: now, Message: weft.Message{
-				Role: weft.RoleTool,
-				Content: []weft.Part{
-					weft.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 40_000)},
-					weft.ToolResultPart{CallID: "c2", Name: "read", Content: strings.Repeat("r", 40_000)},
+			thread.MessageEntry{ID: "e_t3", ParentID: "e_t2", Created: now, Message: core.Message{
+				Role: core.RoleTool,
+				Content: []core.Part{
+					core.ToolResultPart{CallID: "c1", Name: "read", Content: strings.Repeat("r", 40_000)},
+					core.ToolResultPart{CallID: "c2", Name: "read", Content: strings.Repeat("r", 40_000)},
 				},
 			}},
-			thread.MessageEntry{ID: "e_t4", ParentID: "e_t3", Created: now, Message: weft.Assistant("done")},
+			thread.MessageEntry{ID: "e_t4", ParentID: "e_t3", Created: now, Message: core.Assistant("done")},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -636,7 +636,7 @@ func TestTrimmerOnlyPath(t *testing.T) {
 			thread.ContextWindow(100_000),
 			thread.ClearOldToolResults(1),
 		)
-		turn, err := s.Send(ctx, weft.User("again"))
+		turn, err := s.Send(ctx, core.User("again"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -662,7 +662,7 @@ func TestTrimmerOnlyPath(t *testing.T) {
 		for _, m := range open.Context() {
 			for _, p := range m.Content {
 				switch p := p.(type) {
-				case weft.ToolResultPart:
+				case core.ToolResultPart:
 					if strings.Contains(p.Content, "[cleared tool result") {
 						stubbed++
 					} else if strings.Contains(p.Content, "rrrr") {
@@ -699,7 +699,7 @@ func TestClearedStubGolden(t *testing.T) {
 func TestHookPanicsContained(t *testing.T) {
 	ctx := context.Background()
 	rec := &summaryRecorder{reply: "s"}
-	agent := weft.New(rec)
+	agent := core.New(rec)
 	st := thread.Memory()
 	history := func(s *thread.Session, opts ...thread.SessionOption) *thread.Session {
 		msgs(t, ctx, st, s,
@@ -745,9 +745,9 @@ func TestHookPanicsContained(t *testing.T) {
 
 // A middleware whose Unwrap returns itself must not hang the native
 // lookup.
-type loopingModel struct{ weft.Model }
+type loopingModel struct{ core.Model }
 
-func (m *loopingModel) Unwrap() weft.Model { return m }
+func (m *loopingModel) Unwrap() core.Model { return m }
 
 func TestNativeLookupTerminates(t *testing.T) {
 	loop := &loopingModel{Model: &summaryRecorder{reply: "x"}}
@@ -763,14 +763,14 @@ func TestNativeLookupTerminates(t *testing.T) {
 	}
 }
 
-func nativeOfPublic(m weft.Model) { _ = m }
+func nativeOfPublic(m core.Model) { _ = m }
 
 // WithCompactor replaces the whole algorithm: a SummaryModel set
 // beside it never runs — the Compactor's output is the compaction.
 func TestWithCompactorPlusSummaryModel(t *testing.T) {
 	ctx := context.Background()
 	rec := &summaryRecorder{reply: "should not run"}
-	agent := weft.New(rec)
+	agent := core.New(rec)
 	comp := &stubCompactor{}
 	st := thread.Memory()
 	s, _ := thread.Create(ctx, st, agent,
@@ -797,7 +797,7 @@ func TestWithCompactorPlusSummaryModel(t *testing.T) {
 // Replace with a nil compaction is loud.
 func TestReplaceNilCompaction(t *testing.T) {
 	ctx := context.Background()
-	agent := weft.New(&summaryRecorder{reply: "s"})
+	agent := core.New(&summaryRecorder{reply: "s"})
 	st := thread.Memory()
 	replace := thread.BeforeCompact(func(ctx context.Context, p *thread.Preparation) (thread.Verdict, error) {
 		return thread.Replace(nil), nil

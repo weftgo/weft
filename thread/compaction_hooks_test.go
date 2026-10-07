@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
-	"github.com/weftgo/weft/wefttest"
 )
 
 // compactable creates a session holding three ~7.5k-token user
 // messages — enough for one compaction under the default KeepRecent —
 // opened on agent with opts.
-func compactable(t *testing.T, st thread.Storage, agent *weft.Agent, opts ...thread.SessionOption) *thread.Session {
+func compactable(t *testing.T, st thread.Storage, agent *core.Agent, opts ...thread.SessionOption) *thread.Session {
 	t.Helper()
 	ctx := context.Background()
 	s, err := thread.Create(ctx, st, agent, opts...)
@@ -67,7 +67,7 @@ func TestAfterCompactMayCallTheSession(t *testing.T) {
 		_ = s.Usage()
 		sawLeaf = s.Leaf()
 	})
-	s = compactable(t, thread.Memory(), weft.New(rec), after)
+	s = compactable(t, thread.Memory(), core.New(rec), after)
 	within(t, "Compact with an AfterCompact hook that reads the session", func() {
 		if err := s.Compact(ctx); err != nil {
 			t.Errorf("Compact: %v", err)
@@ -104,7 +104,7 @@ func (l leafCompactor) Compact(ctx context.Context, p thread.Preparation) (*thre
 // session while it does.
 type sessionEstimator struct{ s **thread.Session }
 
-func (e sessionEstimator) Estimate(msgs []weft.Message) int64 {
+func (e sessionEstimator) Estimate(msgs []core.Message) int64 {
 	_ = (*e.s).Leaf()
 	return int64(len(msgs)) * 10_000
 }
@@ -144,7 +144,7 @@ func TestEveryCompactionHookMayCallTheSession(t *testing.T) {
 		} {
 			t.Run(name, func(t *testing.T) {
 				var s *thread.Session
-				s = compactable(t, thread.Memory(), weft.New(&summaryRecorder{reply: "the summary"}), mk(&s)...)
+				s = compactable(t, thread.Memory(), core.New(&summaryRecorder{reply: "the summary"}), mk(&s)...)
 				within(t, "Compact under "+name, func() {
 					if err := s.Compact(ctx); err != nil {
 						t.Errorf("Compact: %v", err)
@@ -160,7 +160,7 @@ func TestEveryCompactionHookMayCallTheSession(t *testing.T) {
 	t.Run("CompactFailed", func(t *testing.T) {
 		var s *thread.Session
 		called := false
-		s = compactable(t, thread.Memory(), weft.New(&failingModel{}),
+		s = compactable(t, thread.Memory(), core.New(&failingModel{}),
 			thread.CompactFailed(func(ctx context.Context, r thread.Reason, err error) {
 				called = true
 				_ = s.Context()
@@ -186,7 +186,7 @@ func TestEveryCompactionHookMayCallTheSession(t *testing.T) {
 				_ = s.Leaf()
 				return true
 			}),
-			thread.WithTrimmer(trimmerFunc(func(ctx context.Context, m []weft.Message) ([]weft.Message, error) {
+			thread.WithTrimmer(trimmerFunc(func(ctx context.Context, m []core.Message) ([]core.Message, error) {
 				trimmed.Store(true)
 				_ = s.Context()
 				return m, nil
@@ -194,7 +194,7 @@ func TestEveryCompactionHookMayCallTheSession(t *testing.T) {
 		}
 		s = compactable(t, thread.Memory(), agent, opts...)
 		within(t, "a turn whose trigger and trimmer read the session", func() {
-			turn, err := s.Send(ctx, weft.User("go"))
+			turn, err := s.Send(ctx, core.User("go"))
 			if err != nil {
 				t.Errorf("Send: %v", err)
 				return
@@ -211,9 +211,9 @@ func TestEveryCompactionHookMayCallTheSession(t *testing.T) {
 }
 
 // trimmerFunc adapts a function to thread.Trimmer.
-type trimmerFunc func(ctx context.Context, msgs []weft.Message) ([]weft.Message, error)
+type trimmerFunc func(ctx context.Context, msgs []core.Message) ([]core.Message, error)
 
-func (f trimmerFunc) Trim(ctx context.Context, msgs []weft.Message) ([]weft.Message, error) {
+func (f trimmerFunc) Trim(ctx context.Context, msgs []core.Message) ([]core.Message, error) {
 	return f(ctx, msgs)
 }
 
@@ -258,7 +258,7 @@ func TestCompactFailedFiresForWritesNotDryRuns(t *testing.T) {
 
 	t.Run("ApplyCompaction storage failure fires", func(t *testing.T) {
 		st := &failingAppends{Storage: thread.Memory()}
-		s := compactable(t, st, weft.New(&summaryRecorder{reply: "s"}), failed)
+		s := compactable(t, st, core.New(&summaryRecorder{reply: "s"}), failed)
 		plan, err := s.PreviewCompaction(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -278,7 +278,7 @@ func TestCompactFailedFiresForWritesNotDryRuns(t *testing.T) {
 	})
 
 	t.Run("PreviewCompaction failure does not fire, Compact does", func(t *testing.T) {
-		s := compactable(t, thread.Memory(), weft.New(&failingModel{}), failed)
+		s := compactable(t, thread.Memory(), core.New(&failingModel{}), failed)
 		if _, err := s.PreviewCompaction(ctx); err == nil {
 			t.Fatal("PreviewCompaction with a failing summarizer: no error")
 		}
@@ -294,7 +294,7 @@ func TestCompactFailedFiresForWritesNotDryRuns(t *testing.T) {
 	})
 
 	t.Run("refusals do not fire", func(t *testing.T) {
-		s, err := thread.Create(ctx, thread.Memory(), weft.New(&summaryRecorder{reply: "s"}), failed,
+		s, err := thread.Create(ctx, thread.Memory(), core.New(&summaryRecorder{reply: "s"}), failed,
 			thread.BeforeCompact(func(ctx context.Context, p *thread.Preparation) (thread.Verdict, error) {
 				return thread.Cancel(), nil
 			}))
@@ -304,7 +304,7 @@ func TestCompactFailedFiresForWritesNotDryRuns(t *testing.T) {
 		if err := s.Compact(ctx); !errors.Is(err, thread.ErrNothingToCompact) {
 			t.Errorf("Compact on an empty session: err = %v, want ErrNothingToCompact", err)
 		}
-		s2 := compactable(t, thread.Memory(), weft.New(&summaryRecorder{reply: "s"}), failed,
+		s2 := compactable(t, thread.Memory(), core.New(&summaryRecorder{reply: "s"}), failed,
 			thread.BeforeCompact(func(ctx context.Context, p *thread.Preparation) (thread.Verdict, error) {
 				return thread.Cancel(), nil
 			}))
@@ -317,7 +317,7 @@ func TestCompactFailedFiresForWritesNotDryRuns(t *testing.T) {
 	})
 
 	t.Run("an invalid plan fires", func(t *testing.T) {
-		s := compactable(t, thread.Memory(), weft.New(&summaryRecorder{reply: "s"}), failed)
+		s := compactable(t, thread.Memory(), core.New(&summaryRecorder{reply: "s"}), failed)
 		err := s.ApplyCompaction(ctx, &thread.Compaction{Summary: "x", FirstKept: "e_missing"})
 		if !errors.Is(err, thread.ErrNoEntry) {
 			t.Fatalf("ApplyCompaction with an unheld FirstKept: err = %v, want ErrNoEntry", err)
@@ -336,8 +336,8 @@ type heldModel struct {
 	once    sync.Once
 }
 
-func (m *heldModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft.ModelEvent, error] {
-	return func(yield func(weft.ModelEvent, error) bool) {
+func (m *heldModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
 		m.once.Do(func() { close(m.started) })
 		select {
 		case <-m.release:
@@ -345,10 +345,10 @@ func (m *heldModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2
 			yield(nil, ctx.Err())
 			return
 		}
-		if !yield(weft.ModelTextDelta{Text: "done"}, nil) {
+		if !yield(core.ModelTextDelta{Text: "done"}, nil) {
 			return
 		}
-		yield(weft.ModelFinish{Reason: weft.StopEndTurn, Usage: weft.Usage{InputTokens: 10, OutputTokens: 1}}, nil)
+		yield(core.ModelFinish{Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 10, OutputTokens: 1}}, nil)
 	}
 }
 
@@ -360,10 +360,10 @@ func TestCompactWhileATurnRunsIsBusy(t *testing.T) {
 	ctx := context.Background()
 	gate := &heldModel{started: make(chan struct{}), release: make(chan struct{})}
 	rec := &summaryRecorder{reply: "the summary"}
-	s := compactable(t, thread.Memory(), weft.New(gate), thread.SummaryModel(rec))
+	s := compactable(t, thread.Memory(), core.New(gate), thread.SummaryModel(rec))
 	firstKept := s.Leaf()
 
-	turn, err := s.Send(ctx, weft.User("go"))
+	turn, err := s.Send(ctx, core.User("go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +405,7 @@ func TestTruncatedSummaryIsNeverStored(t *testing.T) {
 	t.Run("no fallback left", func(t *testing.T) {
 		cut := wefttest.Script(wefttest.MaxTokens("Goal: ship the"), wefttest.MaxTokens("Goal: ship the"))
 		var failedErr error
-		s := compactable(t, thread.Memory(), weft.New(cut),
+		s := compactable(t, thread.Memory(), core.New(cut),
 			thread.CompactFailed(func(ctx context.Context, r thread.Reason, err error) { failedErr = err }))
 		before := fmt.Sprint(s.Context())
 		err := s.Compact(ctx)
@@ -426,7 +426,7 @@ func TestTruncatedSummaryIsNeverStored(t *testing.T) {
 	t.Run("falls back to the session model", func(t *testing.T) {
 		cut := wefttest.Script(wefttest.MaxTokens("half"), wefttest.MaxTokens("half"))
 		whole := &summaryRecorder{reply: "the whole summary"}
-		s := compactable(t, thread.Memory(), weft.New(whole), thread.SummaryModel(cut))
+		s := compactable(t, thread.Memory(), core.New(whole), thread.SummaryModel(cut))
 		if err := s.Compact(ctx); err != nil {
 			t.Fatalf("Compact through the truncation fallback: %v", err)
 		}
@@ -440,7 +440,7 @@ func TestTruncatedSummaryIsNeverStored(t *testing.T) {
 
 	t.Run("a custom Summarizer reports it the same way", func(t *testing.T) {
 		calls := 0
-		s := compactable(t, thread.Memory(), weft.New(wefttest.Script()),
+		s := compactable(t, thread.Memory(), core.New(wefttest.Script()),
 			thread.WithSummarizer(summarizerFunc(func(ctx context.Context, in thread.SummaryInput) (thread.Summary, error) {
 				calls++
 				return thread.Summary{}, fmt.Errorf("%w: my model stopped early", thread.ErrSummaryTruncated)
@@ -454,7 +454,7 @@ func TestTruncatedSummaryIsNeverStored(t *testing.T) {
 	})
 
 	t.Run("an empty custom summary is a failure", func(t *testing.T) {
-		s := compactable(t, thread.Memory(), weft.New(wefttest.Script()),
+		s := compactable(t, thread.Memory(), core.New(wefttest.Script()),
 			thread.WithSummarizer(summarizerFunc(func(ctx context.Context, in thread.SummaryInput) (thread.Summary, error) {
 				return thread.Summary{Text: "  "}, nil
 			})))
@@ -482,15 +482,15 @@ func TestBeforeCompactEditsAreHonoured(t *testing.T) {
 	t.Run("replaced Messages and Instructions reach the summarizer", func(t *testing.T) {
 		rec := &summaryRecorder{reply: "the summary"}
 		redact := thread.BeforeCompact(func(ctx context.Context, p *thread.Preparation) (thread.Verdict, error) {
-			out := make([]weft.Message, len(p.Messages))
+			out := make([]core.Message, len(p.Messages))
 			for i := range p.Messages {
-				out[i] = weft.User("[redacted]")
+				out[i] = core.User("[redacted]")
 			}
 			p.Messages = out
 			p.Instructions = "mention nothing personal"
 			return thread.Proceed(), nil
 		})
-		s := compactable(t, thread.Memory(), weft.New(rec), redact)
+		s := compactable(t, thread.Memory(), core.New(rec), redact)
 		if err := s.Compact(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -512,11 +512,11 @@ func TestBeforeCompactEditsAreHonoured(t *testing.T) {
 		rec := &summaryRecorder{reply: "the summary"}
 		scrub := thread.BeforeCompact(func(ctx context.Context, p *thread.Preparation) (thread.Verdict, error) {
 			for i := range p.Messages {
-				p.Messages[i].Content[0] = weft.TextPart{Text: "[scrubbed]"}
+				p.Messages[i].Content[0] = core.TextPart{Text: "[scrubbed]"}
 			}
 			return thread.Proceed(), nil
 		})
-		s := compactable(t, thread.Memory(), weft.New(rec), scrub)
+		s := compactable(t, thread.Memory(), core.New(rec), scrub)
 		if err := s.Compact(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -538,7 +538,7 @@ func TestBeforeCompactEditsAreHonoured(t *testing.T) {
 			p.FirstKept = third // keep only the last message
 			return thread.Proceed(), nil
 		})
-		s = compactable(t, thread.Memory(), weft.New(rec), move)
+		s = compactable(t, thread.Memory(), core.New(rec), move)
 		third = s.Leaf()
 		if err := s.Compact(ctx); err != nil {
 			t.Fatal(err)
@@ -560,7 +560,7 @@ func TestBeforeCompactEditsAreHonoured(t *testing.T) {
 			"Pinned id off the path":              {func(p *thread.Preparation) { p.Pinned = []string{"e_nowhere"} }, thread.ErrNoEntry},
 		} {
 			rec := &summaryRecorder{reply: "the summary"}
-			s := compactable(t, thread.Memory(), weft.New(rec),
+			s := compactable(t, thread.Memory(), core.New(rec),
 				thread.BeforeCompact(func(ctx context.Context, p *thread.Preparation) (thread.Verdict, error) {
 					tc.edit(p)
 					return thread.Proceed(), nil
@@ -585,7 +585,7 @@ func TestBeforeCompactEditsAreHonoured(t *testing.T) {
 			}
 			return thread.Proceed(), nil
 		})
-		s := compactable(t, st, weft.New(rec), hook)
+		s := compactable(t, st, core.New(rec), hook)
 		for _, e := range s.Entries() {
 			if m, ok := e.(thread.MessageEntry); ok {
 				first = m.ID
@@ -596,7 +596,7 @@ func TestBeforeCompactEditsAreHonoured(t *testing.T) {
 			t.Fatal(err)
 		}
 		msgs(t, ctx, st, s, strings.Repeat("d", 30_000), strings.Repeat("e", 30_000), strings.Repeat("f", 30_000))
-		s = reopenWith(t, ctx, st, s, weft.New(rec), hook)
+		s = reopenWith(t, ctx, st, s, core.New(rec), hook)
 		armed = true
 		if err := s.Compact(ctx); !errors.Is(err, thread.ErrInvalidCompaction) {
 			t.Errorf("err = %v, want ErrInvalidCompaction", err)

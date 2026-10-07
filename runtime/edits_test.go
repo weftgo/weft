@@ -4,19 +4,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/core"
 )
 
 // editMsgs is a two-step transcript: step 0 looks an order up, step 1
 // refunds it, step 2 answers.
-func editMsgs() []weft.Message {
-	return []weft.Message{
-		weft.User("refund order #4411 please"),
-		{Role: weft.RoleAssistant, Content: []weft.Part{weft.ToolCallPart{ID: "c1", Name: "lookup_order", Args: []byte(`{"order_id":"4411"}`)}}},
-		{Role: weft.RoleTool, Content: []weft.Part{weft.ToolResultPart{CallID: "c1", Name: "lookup_order", Content: "shipped"}}},
-		{Role: weft.RoleAssistant, Content: []weft.Part{weft.ToolCallPart{ID: "c2", Name: "refund", Args: []byte(`{"order_id":"4411"}`)}}},
-		{Role: weft.RoleTool, Content: []weft.Part{weft.ToolResultPart{CallID: "c2", Name: "refund", Content: "refunded"}}},
-		weft.Assistant("Refunded — anything else?"),
+func editMsgs() []core.Message {
+	return []core.Message{
+		core.User("refund order #4411 please"),
+		{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c1", Name: "lookup_order", Args: []byte(`{"order_id":"4411"}`)}}},
+		{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c1", Name: "lookup_order", Content: "shipped"}}},
+		{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c2", Name: "refund", Args: []byte(`{"order_id":"4411"}`)}}},
+		{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c2", Name: "refund", Content: "refunded"}}},
+		core.Assistant("Refunded — anything else?"),
 	}
 }
 
@@ -42,7 +42,7 @@ func TestApplyTranscriptEdits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("patch = %v", err)
 	}
-	if got := patched[4].Content[0].(weft.ToolResultPart).Content; got != "429" {
+	if got := patched[4].Content[0].(core.ToolResultPart).Content; got != "429" {
 		t.Errorf("patched result = %q, want 429", got)
 	}
 	if len(patched) != 5 {
@@ -109,16 +109,16 @@ func TestRecordedCalls(t *testing.T) {
 // recorded error stays an error, the steps the run re-executes answer
 // before the kept ones, and the arguments match as JSON, not as bytes.
 func TestSubstitutesOrderAndKey(t *testing.T) {
-	call := func(id, args string) weft.Message {
-		return weft.Message{Role: weft.RoleAssistant, Content: []weft.Part{
-			weft.ToolCallPart{ID: id, Name: "next_ticket", Args: []byte(args)}}}
+	call := func(id, args string) core.Message {
+		return core.Message{Role: core.RoleAssistant, Content: []core.Part{
+			core.ToolCallPart{ID: id, Name: "next_ticket", Args: []byte(args)}}}
 	}
-	result := func(id, content string, isErr bool) weft.Message {
-		return weft.Message{Role: weft.RoleTool, Content: []weft.Part{
-			weft.ToolResultPart{CallID: id, Name: "next_ticket", Content: content, IsError: isErr}}}
+	result := func(id, content string, isErr bool) core.Message {
+		return core.Message{Role: core.RoleTool, Content: []core.Part{
+			core.ToolResultPart{CallID: id, Name: "next_ticket", Content: content, IsError: isErr}}}
 	}
-	kept := []weft.Message{call("c1", `{"queue":"a","n":1}`), result("c1", "kept", false)}
-	fresh := []weft.Message{
+	kept := []core.Message{call("c1", `{"queue":"a","n":1}`), result("c1", "kept", false)}
+	fresh := []core.Message{
 		call("c1", `{"queue":"a","n":1}`), result("c1", "ticket 1", false),
 		call("c1", `{"queue":"a","n":1}`), result("c1", "sold out", true),
 		call("c2", `{"queue":"b"}`), // parked in the source: no result, no record
@@ -157,11 +157,11 @@ func TestSubstitutesOrderAndKey(t *testing.T) {
 func TestTranscriptEditsAreTheRunsOwnSteps(t *testing.T) {
 	msgs := editMsgs()
 	src := &sourceRun{
-		input: []weft.Message{
-			weft.User("an earlier question"),
-			{Role: weft.RoleAssistant, Content: []weft.Part{weft.ToolCallPart{ID: "c1", Name: "lookup_order", Args: []byte(`{"order_id":"1"}`)}}},
-			{Role: weft.RoleTool, Content: []weft.Part{weft.ToolResultPart{CallID: "c1", Name: "lookup_order", Content: "delivered"}}},
-			weft.Assistant("an earlier answer"),
+		input: []core.Message{
+			core.User("an earlier question"),
+			{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c1", Name: "lookup_order", Args: []byte(`{"order_id":"1"}`)}}},
+			{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c1", Name: "lookup_order", Content: "delivered"}}},
+			core.Assistant("an earlier answer"),
 			msgs[0],
 		},
 		steps: msgs[1:],
@@ -173,13 +173,13 @@ func TestTranscriptEditsAreTheRunsOwnSteps(t *testing.T) {
 	if len(patched) != 7 {
 		t.Fatalf("kept prefix = %d messages, want the input's 5 and step 0's 2", len(patched))
 	}
-	if got := patched[2].Content[0].(weft.ToolResultPart).Content; got != "delivered" {
+	if got := patched[2].Content[0].(core.ToolResultPart).Content; got != "delivered" {
 		t.Errorf("the earlier turn's result = %q, want it untouched", got)
 	}
-	if got := patched[6].Content[0].(weft.ToolResultPart).Content; got != "lost in transit" {
+	if got := patched[6].Content[0].(core.ToolResultPart).Content; got != "lost in transit" {
 		t.Errorf("step 0's result = %q, want the patch", got)
 	}
-	if got := src.steps[1].Content[0].(weft.ToolResultPart).Content; got != "shipped" {
+	if got := src.steps[1].Content[0].(core.ToolResultPart).Content; got != "shipped" {
 		t.Errorf("the source itself was patched (%q): the edit must work on a copy", got)
 	}
 	// The call exists in step 0, not step 1: naming the wrong step misses.

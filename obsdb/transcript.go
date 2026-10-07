@@ -66,7 +66,7 @@ func DedupTranscript(bodies []json.RawMessage) []json.RawMessage {
 	return out
 }
 
-// wireMessage is the part of weft.Message's wire shape the dedup reads:
+// wireMessage is the part of core.Message's wire shape the dedup reads:
 // the role, and each part's type and — on a tool result — its call id.
 type wireMessage struct {
 	Role    string `json:"role"`

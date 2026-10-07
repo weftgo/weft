@@ -1945,7 +1945,7 @@ var Z = () => {}, Ue = class extends HTMLElement {
 					[r.name]: n.checked
 				} }));
 				let i = k("label", "weft-tool", [n, k("span", void 0, r.name)]);
-				(r.side_effects === "never" || !r.side_effects) && i.appendChild(k("span", "weft-badge weft-warn-badge", "⚠", { title: "side-effect tool (ReplayPolicy never): its calls substitute or park, never re-fire silently" })), e.appendChild(i);
+				(r.side_effects === "never" || !r.side_effects) && i.appendChild(k("span", "weft-badge weft-warn-badge", "⚠", { title: "side-effect tool (ReplayPolicy never): its calls substitute or park — never re-fire silently; only side effects: allow runs it for real, and only if the app opted it in" })), e.appendChild(i);
 			}
 			o.appendChild(e);
 		}
@@ -1972,11 +1972,13 @@ var Z = () => {}, Ue = class extends HTMLElement {
 			let e = k("label", "weft-field", [k("span", void 0, "Input (replaces the user message)")]), n = this.field(k("textarea", "weft-input"), "input");
 			n.rows = 2, n.value = t.input, n.addEventListener("input", () => this.model?.setDraft({ input: n.value }, !0)), e.appendChild(n), o.appendChild(e);
 		}
-		let _ = k("div", "weft-fields"), v = k("select", "weft-input"), y = k("option", void 0, "side effects: substitute");
+		let _ = k("div", "weft-fields"), v = k("select", "weft-input");
+		v.title = "How side-effect tools behave in the re-run. ReplaySafe tools always run; the others substitute, park, or — under allow, if the app opted them in — run for real.";
+		let y = k("option", void 0, "side effects: substitute", { title: "a side-effect call the source recorded is answered from the record; any other call parks for you" });
 		y.value = "", v.appendChild(y);
-		let b = k("option", void 0, "park");
+		let b = k("option", void 0, "park", { title: "every side-effect call parks for you; nothing is answered from the record" });
 		b.value = "park", v.appendChild(b);
-		let x = k("option", void 0, "allow (opted-in tools only)");
+		let x = k("option", void 0, "allow — runs the tools this app opted in (AllowSideEffects) for real", { title: "refused unless every tool left on is opted in or ReplaySafe" });
 		x.value = "allow", v.appendChild(x), v.value = t.sideEffects === "substitute" ? "" : t.sideEffects, v.addEventListener("change", () => this.model?.setDraft({ sideEffects: v.value })), _.appendChild(v);
 		let S = k("select", "weft-input"), C = k("option", void 0, "engine: live");
 		C.value = "live", S.appendChild(C);
@@ -2117,8 +2119,7 @@ var Z = () => {}, Ue = class extends HTMLElement {
 			let e = k("div", "weft-diff");
 			this.diffInto(e, `diff vs ${_}:`, g.text, h.text), g.calls.join("\n") !== h.calls.join("\n") && this.diffInto(e, "tool calls:", g.calls.join("\n"), h.calls.join("\n")), f.appendChild(e);
 		}
-		if (t.ready && t.folded.pending.length && t.runID && this.canAct(e) && f.appendChild(this.decisions(t.folded.pending, t.decided)), Y(e, "steer") && this.canAct(e) && t.state === "accepted" && t.thread === "fork") f.appendChild(k("div", "weft-note", "steering reaches ephemeral runs only — send the message as the fork's next input instead"));
-		else if (Y(e, "steer") && this.canAct(e) && t.state === "accepted" && t.runID) {
+		if (t.ready && t.folded.pending.length && t.runID && this.canAct(e) && f.appendChild(this.decisions(t.folded.pending, t.decided)), Y(e, "steer") && this.canAct(e) && t.state === "accepted" && t.runID) {
 			let e = k("div", "weft-step");
 			e.appendChild(k("div", "weft-step-h", [k("span", void 0, "steer this run")]));
 			let t = k("div", "weft-step-b"), n = this.field(k("input", "weft-input"), "steer");

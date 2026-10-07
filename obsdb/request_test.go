@@ -30,10 +30,18 @@ func TestHolesClosedTable(t *testing.T) {
 // (studio/web/src/lib/honesty.ts) is checked against it key by key —
 // one file, so the two trees cannot drift.
 func TestHoleNotesGolden(t *testing.T) {
+	type note struct {
+		Reason string `json:"reason"`
+		Fix    string `json:"fix,omitempty"`
+	}
+	// Causes (HoleNoteFor) ride under their hole in a sub-object: the
+	// ten top-level rows stay HoleNote's, which Studio's TypeScript
+	// table is checked against (it ignores causes).
 	type row struct {
-		Hole   obsdb.Hole `json:"hole"`
-		Reason string     `json:"reason"`
-		Fix    string     `json:"fix,omitempty"`
+		Hole   obsdb.Hole               `json:"hole"`
+		Reason string                   `json:"reason"`
+		Fix    string                   `json:"fix,omitempty"`
+		Causes map[obsdb.HoleCause]note `json:"causes,omitempty"`
 	}
 	var rows []row
 	noFix := map[obsdb.Hole]bool{obsdb.HoleRedacted: true, obsdb.HoleInterrupted: true, obsdb.HoleDerived: true}
@@ -45,7 +53,24 @@ func TestHoleNotesGolden(t *testing.T) {
 		if (fix == "") != noFix[h] {
 			t.Errorf("%s: fix %q, want one exactly where the table has one", h, fix)
 		}
-		rows = append(rows, row{h, reason, fix})
+		var causes map[obsdb.HoleCause]note
+		for _, c := range obsdb.HoleCauses() {
+			cr, cf := obsdb.HoleNoteFor(h, c)
+			if cr == reason && cf == fix {
+				continue
+			}
+			if cr == "" || cf == "" || strings.Contains(cr, "\n") {
+				t.Errorf("%s/%s: reason %q fix %q, want one line each", h, c, cr, cf)
+			}
+			if causes == nil {
+				causes = map[obsdb.HoleCause]note{}
+			}
+			causes[c] = note{cr, cf}
+		}
+		if r, f := obsdb.HoleNoteFor(h, obsdb.CauseDefault); r != reason || f != fix {
+			t.Errorf("%s: the default cause = %q %q, want HoleNote's", h, r, f)
+		}
+		rows = append(rows, row{h, reason, fix, causes})
 	}
 	if r, f := obsdb.HoleNote("nope"); r != "" || f != "" {
 		t.Errorf("unknown hole = %q %q, want neither", r, f)

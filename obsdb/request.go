@@ -51,6 +51,40 @@ func HoleNote(h Hole) (reason, fix string) {
 
 type holeNote struct{ reason, fix string }
 
+// HoleCause narrows a hole to the cause a reader established, when the
+// table words that cause apart: CauseDefault is the hole's own note.
+type HoleCause string
+
+const (
+	CauseDefault HoleCause = ""
+	// CauseNoSpans: the run's records arrived but no span did — it ran
+	// without a tracer (not_recorded: attempts, the answering model).
+	CauseNoSpans HoleCause = "no_spans"
+)
+
+// HoleCauses lists the causes the table words, in order.
+func HoleCauses() []HoleCause { return []HoleCause{CauseNoSpans} }
+
+var causeNotes = map[Hole]map[HoleCause]holeNote{
+	HoleNotRecorded: {
+		CauseNoSpans: {
+			"the run was recorded without a tracer, so attempt spans and the answering model were not stored",
+			"install a tracer (otel.Install records spans)",
+		},
+	},
+}
+
+// HoleNoteFor is HoleNote for a hole whose cause the reader knows: the
+// cause's own reason and fix where the table words it, HoleNote(h)
+// otherwise (CauseDefault included). The one table for every surface
+// (run page, panel, export).
+func HoleNoteFor(h Hole, cause HoleCause) (reason, fix string) {
+	if n, ok := causeNotes[h][cause]; ok {
+		return n.reason, n.fix
+	}
+	return HoleNote(h)
+}
+
 var holeNotes = map[Hole]holeNote{
 	HoleTruncated: {
 		"a destination's size cap cut this content before it was stored (weft.content.truncated_bytes)",

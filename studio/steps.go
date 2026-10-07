@@ -132,7 +132,9 @@ type stepMessagesIn struct {
 // the "not executed" text, no span), "stripped" when content-off
 // dropped the args and result — on such a max_tokens step the calls
 // are unknown beyond their count (the chat span's
-// weft.model.tool_calls), listed with call_id "".
+// weft.model.tool_calls), listed with call_id "". With neither content
+// nor a tracer, the calls are not listed; the max_tokens hole says the
+// step made some.
 type stepToolCall struct {
 	CallID     string          `json:"call_id"`
 	Name       string          `json:"name"`
@@ -228,12 +230,6 @@ func (hs holeSet) also(h obsdb.Hole, reason, fix string) {
 	}
 	hs[h] = cur
 }
-
-// noTracerFix is the fix for a run recorded without spans — the one
-// note obsdb.HoleNote's table does not word (its not_recorded fix is
-// "upgrade weft", wrong for an app that ran without a tracer). Local
-// until obsdb.HoleNote gains it.
-const noTracerFix = "install a tracer (otel.Install records spans)"
 
 func (hs holeSet) note(h obsdb.Hole) {
 	reason, fix := obsdb.HoleNote(h)
@@ -505,9 +501,16 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 	if stripped {
 		holes.add(obsdb.HoleStripped, "this run's records were content-off: the step's system prompt, catalog, messages, tool arguments and results were dropped before they were stored", holeFix(obsdb.HoleStripped))
 	}
+	// A call's own events say whether its content was dropped
+	// (weft.content stripped or none) — a run written before the request
+	// record has no request records to say it for the step.
+	callStripped := map[string]bool{}
 	for _, pe := range evs.events {
 		var h eventHead
 		_ = json.Unmarshal(pe.Event, &h)
+		if (h.Type == "tool_start" || h.Type == "tool_finish") && (pe.Content == "stripped" || pe.Content == "none") {
+			callStripped[h.CallID] = true
+		}
 		switch h.Type {
 		case "tool_start":
 			c := callOf(h.CallID, h.Name)
@@ -586,7 +589,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 			if p, _ := sp.Attrs["weft.tool.pending"].(bool); p {
 				c.Pending = true
 			}
-			if c.Result != nil && stripped {
+			if c.Result != nil && (stripped || callStripped[cid]) {
 				if b, ok := attrInt64(sp.Attrs["weft.tool.result_bytes"]); ok {
 					c.Result.Bytes = b
 				}
@@ -596,8 +599,9 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 			c.Pending = true
 		}
 		switch {
-		case stripped:
+		case stripped || callStripped[cid]:
 			c.Badge = string(obsdb.HoleStripped)
+			holes.note(obsdb.HoleStripped)
 		case maxTokens && c.Span == nil:
 			c.Badge = string(obsdb.HoleMaxTokens)
 		}
@@ -821,7 +825,8 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 	var attReason, attFix string
 	switch {
 	case chat == nil && len(allSpans) == 0 && evs.finish != nil:
-		attBadge, attReason, attFix = obsdb.HoleNotRecorded, "the run recorded its events but no spans: it ran without a tracer, so no attempt's outcome, timing or answering model was recorded", noTracerFix
+		attBadge = obsdb.HoleNotRecorded
+		attReason, attFix = obsdb.HoleNoteFor(obsdb.HoleNotRecorded, obsdb.CauseNoSpans)
 	case chat == nil && len(allSpans) == 0 && (modelCalled || !evs.found):
 		attBadge, attReason = obsdb.HoleNotRecorded, "the run has no spans: it was recorded without a tracer, or by a weft without attempt reporting (A4), so no attempt's outcome or timing exists"
 	case chat == nil && modelCalled:

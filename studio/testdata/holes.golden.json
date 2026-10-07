@@ -30,7 +30,13 @@
   {
     "hole": "not_recorded",
     "reason": "the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
-    "fix": "upgrade weft and re-run"
+    "fix": "upgrade weft and re-run",
+    "causes": {
+      "no_spans": {
+        "reason": "the run was recorded without a tracer, so attempt spans and the answering model were not stored",
+        "fix": "install a tracer (otel.Install records spans)"
+      }
+    }
   },
   {
     "hole": "derived",

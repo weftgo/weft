@@ -80,6 +80,25 @@ module, ADR 0005).
 
 ### Added
 
+- **Subagents on the page (plan A10).** `GET /api/runs` takes `all=1`
+  (every run, subagent children included — the same as `parent=*`; a
+  `parent=<run id>` beside it wins; a malformed value is a 400) beside
+  the existing `parent=` filter, whose absence keeps the list top-level
+  only. On the run page a step whose tool call started a child run
+  shows it as a nested row — agent, status, usage, its holes, a link to
+  its own page (from the run document's children, or the step route's
+  `children[]` when cached) — and opening it folds the child's steps
+  with the child's own request record, read by the child's id
+  (`/api/runs/<child id>/requests`, under the `requests` capability:
+  the child's prompt, never the parent's; a read-scoped token sees
+  `hidden`). The trace view's call detail joins a call to its child the
+  same way. The runs table is "top-level only" by default with a toggle
+  (`?subagents=all`) and a `?parent=` filter chip; a child row links its
+  parent. The devtools panel's subagent badge opens the child inline,
+  one level: its row (agent, status, usage), its steps with its request
+  line, and an "open in Studio" hand-off carrying the child's id; a
+  grandchild is its badge and the hand-off only.
+
 - **Studio's run export (plan A7, A9's byte-faithful fixtures).**
   `GET /api/runs/{id}/export?format=json|jsonl|otlp|wefttest`, under a
   new `export` capability in `/api/meta`, downloads the whole run
@@ -192,7 +211,12 @@ module, ADR 0005).
   until A5 adds costs (absent, not zero); the answering model and the
   attempts' outcomes are read from spans, so a run recorded without a
   tracer badges its attempts `not_recorded` with the fix to install
-  one.
+  one — `obsdb.HoleNoteFor(h, cause)` words it (`CauseNoSpans`), the
+  holes golden lists such causes under their hole. Each call is badged
+  `stripped` from its own events' `weft.content` too, so a content-off
+  run written before the request record says so per call. With neither
+  content nor a tracer, a max_tokens step's calls are not listed; the
+  max_tokens hole says the step made some.
 - **Compaction in the record (ADR 0028 §8, plan A9.1).** When a
   `PrepareStep` sends a request whose messages are not the run's
   transcript, the core emits one `messages` record with

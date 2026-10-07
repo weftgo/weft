@@ -881,3 +881,30 @@ func TestStepRealEdges(t *testing.T) {
 		t.Errorf("resume step 0 = events %+v calls %+v, want the approved refund ahead of step_start", r0.Events, r0.ToolCalls)
 	}
 }
+
+// TestStepOldContentOffCalls: a content-off run written before the
+// request record (no request records; its tool events carry
+// weft.content = stripped) badges each call stripped from its own
+// events, with the result's bytes from the execute_tool span.
+func TestStepOldContentOffCalls(t *testing.T) {
+	ts, srv := requestsServer(t)
+	off := map[string]any{"weft.content": "stripped"}
+	tool := obsdb.Span{SpanID: "e000000000000001", Name: "execute_tool t", Kind: 1, StatusCode: 1,
+		Attrs: map[string]any{"gen_ai.operation.name": "execute_tool", "weft.step.index": int64(0),
+			"gen_ai.tool.call.id": "c_old", "weft.tool.result_bytes": int64(42)}}
+	writeHand(t, srv.db, "r_oldoff", time.Now().UTC(), map[string]any{}, []handRec{
+		ev(0, `{"type":"run_start","id":"r_oldoff","model":{"provider":"p","name":"m"},"agent":"hand"}`),
+		ev(1, `{"type":"step_start","run_id":"r_oldoff","index":0}`),
+		{kind: "event", pos: 2, body: `{"type":"tool_start","run_id":"r_oldoff","seq":1,"call_id":"c_old","name":"t","args":null}`, extra: off},
+		{kind: "event", pos: 3, body: `{"type":"tool_finish","run_id":"r_oldoff","seq":2,"call_id":"c_old","name":"t","content":"","is_error":false}`, extra: off},
+		ev(4, `{"type":"step_finish","run_id":"r_oldoff","index":0,"reason":"tool_calls","usage":{"input_tokens":1,"output_tokens":1}}`),
+		ev(5, `{"type":"run_finish","run_id":"r_oldoff","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
+	}, tool)
+	d := getStep(t, ts, "/api/runs/r_oldoff/steps/0", nil)
+	if len(d.ToolCalls) != 1 || d.ToolCalls[0].Badge != "stripped" || d.ToolCalls[0].Result == nil || d.ToolCalls[0].Result.Bytes != 42 {
+		t.Errorf("old content-off call = %+v, want badge stripped, 42 bytes from the span", d.ToolCalls)
+	}
+	if got := d.holes(); !slices.Contains(got, "stripped") || !slices.Contains(got, "not_recorded") {
+		t.Errorf("holes = %v, want stripped and not_recorded", got)
+	}
+}

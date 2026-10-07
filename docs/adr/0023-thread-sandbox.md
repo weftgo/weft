@@ -1,9 +1,24 @@
 # ADR 0023 — `thread/sandbox`: a file firewall every file tool goes through
 
-- Status: **proposed** (2026-09-28; to be decided at the start of
-  `weft/thread` v0.6, plan §9)
+- Status: **abandoned (2026-09-29), never decided.** Proposed
+  2026-09-28 for `weft/thread` v0.6 (plan §9); nothing below was built
 - Depends on: ADR 0003 (the tool contract), ADR 0006 (the tool seam),
   ADR 0007 (approval is not a security boundary), ADR 0011
+
+## Abandoned
+
+The maintainer dropped `thread/sandbox` on 2026-09-29, before its open
+questions were answered and before any code was written: the release
+train went from thread v0.5.0 straight to v0.7.0 (the CHANGELOG's
+thread 0.7.0 entry records it). The proposal stays here as it was
+written, for the record of what was considered — it is not a decision
+and describes nothing that exists. Two things it would have touched
+stand as they are without it: approvals remain a policy seam, not a
+security boundary (ADR 0007), so isolating what a tool can reach is
+the deployment's job; and the compaction entry's `files_modified`
+field, reserved for this sandbox's write log, is read but never
+written (ADR 0020, amendment 2026-10-01 §D). A file firewall, if it
+is wanted again, starts from a new ADR.
 
 ## Context
 
@@ -15,7 +30,7 @@ cannot bypass it because it never gets the host filesystem — "enforced
 by interface, not review". Process isolation (containers, seccomp,
 microVMs) is deployment, not a library.
 
-## Proposed decision
+## Proposed decision (not taken)
 
 1. `sandbox.FS` — an interface with the operations file tools need
    (`Read`, `Write`, `Stat`, `List`, `Remove`, `Mkdir`, `Glob`) over
@@ -37,7 +52,7 @@ microVMs) is deployment, not a library.
 7. A remote `FS` (ACP's client `fs/*`, a container over RPC) is a second
    implementation of the same interface, outside this module.
 
-## Open questions (answer at v0.6)
+## Open questions (never answered)
 
 - Process execution (`run_command`) — out of scope, or an `Exec`
   interface with the same mount table and a deployment-provided runner?

@@ -98,12 +98,25 @@ func TestDecideSignedFailClosed(t *testing.T) {
 		return s, call, r
 	}
 
-	t.Run("unknown key", func(t *testing.T) {
+	t.Run("unknown key reads as a bad signature", func(t *testing.T) {
 		s, call, r := park(t)
-		sd := thread.SignDecision(secret, r, thread.Approve(call.ID))
-		sd.KeyID = "k9" // the ring never held it; the MAC no longer covers the claim either
-		if _, err := s.DecideSigned(ctx, sd); !errors.Is(err, thread.ErrUnknownKey) {
-			t.Fatalf("got %v, want ErrUnknownKey", err)
+		// A key id the ring never held, signed properly under some
+		// other secret: the answer is the one a wrong MAC gets, word
+		// for word — DecideSigned never says which key ids exist.
+		other := r
+		other.KeyID = "k9"
+		unknown := thread.SignDecision([]byte("some other secret"), other, thread.Approve(call.ID))
+		_, errUnknown := s.DecideSigned(ctx, unknown)
+		if !errors.Is(errUnknown, thread.ErrBadSignature) || errors.Is(errUnknown, thread.ErrUnknownKey) {
+			t.Fatalf("unknown key: got %v, want ErrBadSignature and not ErrUnknownKey", errUnknown)
+		}
+		wrong := thread.SignDecision([]byte("some other secret"), r, thread.Approve(call.ID))
+		_, errWrong := s.DecideSigned(ctx, wrong)
+		if !errors.Is(errWrong, thread.ErrBadSignature) {
+			t.Fatalf("wrong MAC: got %v, want ErrBadSignature", errWrong)
+		}
+		if errUnknown.Error() != errWrong.Error() {
+			t.Fatalf("an unknown key id is distinguishable from a wrong MAC:\n %v\n %v", errUnknown, errWrong)
 		}
 	})
 
@@ -137,7 +150,7 @@ func TestDecideSignedFailClosed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(time.Until(r.Expiry) + 5*time.Millisecond)
 		sd := thread.SignDecision(secret, r, thread.Approve(call.ID))
 		if _, err := s.DecideSigned(ctx, sd); !errors.Is(err, thread.ErrExpired) {
 			t.Fatalf("got %v, want ErrExpired", err)
@@ -166,7 +179,7 @@ func TestDecideSignedFailClosed(t *testing.T) {
 		}
 	})
 
-	t.Run("nothing recorded", func(t *testing.T) {
+	t.Run("no decision recorded, the refusal audited", func(t *testing.T) {
 		s, call, r := park(t)
 		before := len(s.Entries())
 		sd := thread.SignDecision(secret, r, thread.Approve(call.ID))
@@ -174,8 +187,17 @@ func TestDecideSignedFailClosed(t *testing.T) {
 		if _, err := s.DecideSigned(ctx, sd); !errors.Is(err, thread.ErrBadSignature) {
 			t.Fatal(err)
 		}
-		if got := len(s.Entries()); got != before {
-			t.Fatalf("a failed verification recorded %d entries", got-before)
+		added := s.Entries()[before:]
+		if len(added) != 1 {
+			t.Fatalf("a failed verification recorded %d entries, want the one audit step", len(added))
+		}
+		a, ok := added[0].(thread.ApprovalAuditEntry)
+		if !ok || a.Step != thread.StepSigned || a.Outcome != "refused" || a.Detail != "bad signature" ||
+			a.CallID != call.ID || a.KeyID != "k1" {
+			t.Fatalf("the refusal's audit entry: %+v", added[0])
+		}
+		if got := len(s.Pending()); got != 1 {
+			t.Fatalf("a refused signature decided the call: Pending=%d", got)
 		}
 	})
 }
@@ -203,6 +225,7 @@ func TestSignedReplayAcrossRestart(t *testing.T) {
 	sd := thread.SignDecision(secret, r, thread.Deny(call.ID, "first answer stands"))
 
 	resumed, _ := refundAgent(wefttest.Say("denied"))
+	abandon(t, st, s.ID())
 	s2, err := thread.Open(ctx, st, s.ID(), resumed, thread.WithKeyring(ring))
 	if err != nil {
 		t.Fatal(err)

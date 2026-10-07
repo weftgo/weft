@@ -450,8 +450,10 @@ func usageOf(res *weft.RunResult, err error) weft.Usage {
 // maxForks bounds the forked sessions the runtime keeps open for
 // "keep chatting" (§5.4). Past it the oldest is forgotten: a later
 // fork command naming one of its turns forks it afresh instead of
-// continuing in place.
-const maxForks = 64
+// continuing in place, and its Session is closed (its writer lease
+// given up) once no park or in-flight turn still uses it. A var so
+// tests can shrink it.
+var maxForks = 64
 
 // executeFork runs §5.4's fork mode: the source session opens
 // read-side, Fork copies it (a new session with lineage — the original
@@ -498,10 +500,13 @@ func (l *link) executeFork(ctx context.Context, cmd command) (status, finalRun, 
 			return fail(err)
 		}
 		entryID, err := turnEntryOf(src, cmd.Source.RunID)
-		if err != nil {
-			return fail(err)
+		if err == nil {
+			s, err = forkSession(ctx, src, entryID)
 		}
-		if s, err = forkSession(ctx, src, entryID); err != nil {
+		// The read-side Session never wrote, so its Close yields no
+		// lease (the app's writer keeps its own); it only ends the value.
+		releaseSession(ctx, src)
+		if err != nil {
 			return fail(err)
 		}
 		l.rememberFork(s)
@@ -532,12 +537,14 @@ func (l *link) executeFork(ctx context.Context, cmd command) (status, finalRun, 
 // refused (link.steer).
 func (l *link) awaitTurn(cmd command, s *thread.Session, turn *thread.Turn) (status, finalRun, errText string) {
 	runID := turn.RunID()
+	inFlight := runID // the key the steer registry holds, whatever runID becomes below
 	l.mu.Lock()
-	l.steerSess[runID] = s
+	l.steerSess[inFlight] = s
 	l.mu.Unlock()
 	defer func() {
 		l.mu.Lock()
-		delete(l.steerSess, runID)
+		delete(l.steerSess, inFlight)
+		l.releaseIfUnusedLocked(s) // a fork evicted while this turn ran
 		l.mu.Unlock()
 	}()
 	res, err := turn.Wait()
@@ -551,12 +558,58 @@ func (l *link) rememberFork(s *thread.Session) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if len(l.forkOrder) >= maxForks {
+		old := l.forks[l.forkOrder[0]]
 		delete(l.forks, l.forkOrder[0])
 		delete(l.forkCmd, l.forkOrder[0])
 		l.forkOrder = l.forkOrder[1:]
+		l.releaseIfUnusedLocked(old)
 	}
 	l.forks[s.ID()] = s
 	l.forkOrder = append(l.forkOrder, s.ID())
+}
+
+// releaseIfUnusedLocked closes a fork's Session once nothing this link
+// holds needs it any more — it is no longer a remembered fork, no park
+// record resumes through it and no turn of it is in flight. A Session
+// is its session's one writer from its first write until its Close
+// (thread's writer lease), so a forgotten fork left open would hold
+// its session — and, on jsonl, its file lock — for the life of the
+// process. Caller holds l.mu.
+func (l *link) releaseIfUnusedLocked(s *thread.Session) {
+	if s == nil || l.forks[s.ID()] == s {
+		return
+	}
+	for _, pr := range l.parked {
+		if pr.sess == s {
+			return
+		}
+	}
+	for _, in := range l.steerSess {
+		if in == s {
+			return
+		}
+	}
+	go releaseSession(context.Background(), s)
+}
+
+// releaseHeld closes every fork Session the link still holds — the
+// remembered forks and those only a park record keeps. stop calls it
+// once the link's runs have ended.
+func (l *link) releaseHeld(ctx context.Context) {
+	l.mu.Lock()
+	held := map[*thread.Session]bool{}
+	for _, s := range l.forks {
+		held[s] = true
+	}
+	for _, pr := range l.parked {
+		if pr.sess != nil {
+			held[pr.sess] = true
+		}
+	}
+	l.mu.Unlock()
+	for s := range held {
+		releaseSession(ctx, s)
+	}
 }
 
 // adoptForkParks makes every parked call of a fork's own turns
@@ -611,6 +664,7 @@ func forkSession(ctx context.Context, src *thread.Session, entryID string) (*thr
 	for _, e := range s.Entries() {
 		if g, ok := e.(thread.GrantEntry); ok && !g.Deny {
 			if err := s.Revoke(ctx, g.ID); err != nil {
+				releaseSession(ctx, s) // the fork took its writer lease
 				return nil, fmt.Errorf("revoking the source's grant %s in the fork: %w", g.ID, err)
 			}
 		}
@@ -631,6 +685,17 @@ func isLatestTurn(s *thread.Session, runID string) bool {
 		}
 	}
 	return false
+}
+
+// releaseSession closes a Session the runtime opened or forked: Close
+// drains its turn, seals it and gives up its writer lease, so another
+// writer (the app, a later Open) can take the session. Close outlives
+// the caller's context: a hold left behind would lock the next writer
+// out.
+func releaseSession(ctx context.Context, s *thread.Session) {
+	if err := s.Close(context.WithoutCancel(ctx)); err != nil {
+		slog.Warn("weft/runtime: forked session not released", "session", s.ID(), "err", err)
+	}
 }
 
 // turnEntryOf finds the TurnEntry that closed the source run's turn —
@@ -736,8 +801,12 @@ func (l *link) rememberPark(runID string, pr *parkedRun) {
 func (l *link) rememberParkLocked(runID string, pr *parkedRun) {
 	if _, again := l.parked[runID]; !again {
 		for len(l.parkOrder) >= maxParked {
+			evicted := l.parked[l.parkOrder[0]]
 			delete(l.parked, l.parkOrder[0])
 			l.parkOrder = l.parkOrder[1:]
+			if evicted != nil {
+				l.releaseIfUnusedLocked(evicted.sess)
+			}
 		}
 		l.parkOrder = append(l.parkOrder, runID)
 	}

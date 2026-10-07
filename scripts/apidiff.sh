@@ -58,16 +58,29 @@
 # (and its go.mod/go.sum tidied against that tag) before its own tag.
 # APIDIFF_STRICT=1 turns the note into a failure — the release-time
 # check that every module builds from published tags alone.
+#
+# thread/sqlite is the exception that loads through the workspace
+# first, on both sides (the base through the tag commit's own go.work,
+# the head through the working tree's), with no note: it is developed
+# against the in-tree thread module and released second (thread is
+# tagged first, then sqlite's go.mod moves to that tag), so between two
+# thread tags it only compiles against the thread beside it — which is
+# how CI builds and tests it too. APIDIFF_STRICT=1 still holds it to
+# its published requirements.
 set -eu
 
 cd "$(dirname "$0")/.."
 self="$(pwd)/scripts/apidiff.sh"
 mod="${2:-.}"
 
-# policy_of <module-dir> sets tagpat and policy, or returns 1 for a
-# directory the gate does not know.
+# policy_of <module-dir> sets tagpat, policy and load ("graph": the
+# module graph first, the workspace as a noted fallback; "workspace":
+# the workspace first, see the header), or returns 1 for a directory
+# the gate does not know.
 policy_of() {
+  load=graph
   case "$1" in
+    thread/sqlite) tagpat="$1/v*"; policy=enforce; load=workspace ;;
     .) tagpat='v*'; policy=enforce ;;
     thread|thread/sqlite|anthropic|google|openai|mcp) tagpat="$1/v*"; policy=enforce ;;
     obsdb|obsdb/clickhouse|otel|runtime|studio) tagpat="$1/v*"; policy=report ;;
@@ -130,6 +143,15 @@ fi
 # neither mode — or, under APIDIFF_STRICT=1, when it needs the
 # workspace.
 load_mode() {
+  : > "$tmp/build-ws.err"
+  if [ "$load" = workspace ] && [ "${APIDIFF_STRICT:-}" != 1 ]; then
+    if (cd "$1" && GOWORK='' go build ./...) 2>"$tmp/build-ws.err"; then
+      gowork=''
+      return 0
+    fi
+    cat "$tmp/build-ws.err" >&2
+    return 1
+  fi
   if (cd "$1" && GOWORK=off go build ./...) 2>"$tmp/build.err"; then
     gowork=off
     return 0
@@ -142,6 +164,10 @@ load_mode() {
     return 0
   fi
   cat "$tmp/build.err" >&2
+  if [ -s "$tmp/build-ws.err" ]; then
+    echo "apidiff: through the workspace:" >&2
+    cat "$tmp/build-ws.err" >&2
+  fi
   return 1
 }
 

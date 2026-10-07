@@ -1,0 +1,87 @@
+[
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "\u003cweft-summary\u003e\nGoal: ship by Friday. Progress: plan agreed.\n\u003c/weft-summary\u003e"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "THE REQUIREMENT: ship by Friday"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "read both files"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "tool_call",
+        "id": "c1",
+        "name": "read",
+        "args": {
+          "path": "a.go"
+        }
+      },
+      {
+        "type": "tool_call",
+        "id": "c2",
+        "name": "read",
+        "args": {
+          "path": "b.go"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "content": [
+      {
+        "type": "tool_result",
+        "call_id": "c1",
+        "name": "read",
+        "content": "[cleared tool result read c1]",
+        "is_error": false
+      },
+      {
+        "type": "tool_result",
+        "call_id": "c2",
+        "name": "read",
+        "content": "package b",
+        "is_error": false
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "\u003cweft-summary\u003e\nThe abandoned branch tried a rewrite; it was dropped.\n\u003c/weft-summary\u003e"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "now fix a.go"
+      }
+    ]
+  }
+]

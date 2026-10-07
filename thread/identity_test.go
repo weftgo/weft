@@ -14,9 +14,11 @@ package thread_test
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -493,11 +495,11 @@ func TestRunIdentityCallerCollisionLoses(t *testing.T) {
 	}
 }
 
-// List finds a session by its create-time public id: the header's Meta
-// is what every backend matches, so a public id a later SetInfo wrote
-// into an info entry never matches — while the runs, reading
-// Session.Meta (the merged view), pick the info entry's value up
-// (S5; review 2026-09-30 §8.1 item 4).
+// List finds a session by its create-time public id — the header's
+// Meta is what every backend matches — and the id is fixed for the
+// session's life: SetInfo refuses the reserved key (ErrReservedKey),
+// and an info entry that names it anyway never overrides the header
+// in Session.Meta or on the runs (ADR 0024 S5).
 func TestListByPublicID(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
@@ -523,27 +525,44 @@ func TestListByPublicID(t *testing.T) {
 			t.Fatalf("List by share-a = %d sessions, want exactly %s", p.Total, a.ID())
 		}
 
-		// A SetInfo-added public id never matches: the header is what
-		// the filter reads, and the header is never rewritten.
-		if err := c.SetInfo(ctx, "rotated", map[string]string{"weft.public_id": "share-rot"}); err != nil {
-			t.Fatalf("SetInfo: %v", err)
+		// The public id cannot be rotated: SetInfo refuses the reserved
+		// key, writes nothing, and the header keeps matching.
+		before := len(c.Entries())
+		err = c.SetInfo(ctx, "rotated", map[string]string{"weft.public_id": "share-rot"})
+		if !errors.Is(err, thread.ErrReservedKey) {
+			t.Fatalf("SetInfo with a weft. key: err = %v, want ErrReservedKey", err)
+		}
+		if got := len(c.Entries()); got != before {
+			t.Errorf("the refused SetInfo wrote %d entries", got-before)
 		}
 		if p, err = thread.List(ctx, st, thread.Query{Meta: map[string]string{"weft.public_id": "share-rot"}}); err != nil || p.Total != 0 {
-			t.Errorf("List by the rotated id: total %d, err %v, want 0 — info-entry meta never matches", p.Total, err)
+			t.Errorf("List by the rotated id: total %d, err %v, want 0", p.Total, err)
 		}
 		if p, err = thread.List(ctx, st, thread.Query{Meta: map[string]string{"weft.public_id": "share-c"}}); err != nil || p.Total != 1 {
-			t.Errorf("List by the create-time id after SetInfo: total %d, err %v, want 1 — the header keeps it", p.Total, err)
+			t.Errorf("List by the create-time id: total %d, err %v, want 1 — the header keeps it", p.Total, err)
 		}
 
-		// The runs read the merged view: a turn started after the
-		// SetInfo carries the info entry's public id.
+		// Defence in depth: a file that already holds an info entry
+		// naming the reserved key — written before the rule, or by
+		// other hands — still cannot rotate the id. The header's value
+		// stands in the merged view, and the runs carry it.
+		if err := st.Append(ctx, c.ID(), thread.InfoEntry{
+			ID: "e_rot", Created: time.Now().UTC(),
+			Meta: map[string]string{"weft.public_id": "share-rot", "team": "support"},
+		}); err != nil {
+			t.Fatalf("Append the old-shape info entry: %v", err)
+		}
 		col := &mdCollector{}
 		rotated := weft.New(wefttest.Script(wefttest.Say("r")), col.tap())
+		abandon(t, st, c.ID())
 		cAgent, err := thread.Open(ctx, st, c.ID(), rotated)
 		if err != nil {
 			t.Fatalf("Open c: %v", err)
 		}
-		turn, err := cAgent.Send(ctx, weft.User("after the rotation"))
+		if got := cAgent.Meta(); got["weft.public_id"] != "share-c" || got["team"] != "support" {
+			t.Errorf("Meta = %v, want the header's share-c beside the ordinary key", got)
+		}
+		turn, err := cAgent.Send(ctx, weft.User("after the rotation attempt"))
 		if err != nil {
 			t.Fatalf("Send: %v", err)
 		}
@@ -551,8 +570,8 @@ func TestListByPublicID(t *testing.T) {
 			t.Fatalf("Wait: %v", err)
 		}
 		mds := col.snapshot()
-		if len(mds) != 1 || mds[0]["weft.public_id"] != "share-rot" {
-			t.Errorf("run after SetInfo carries %v, want the merged view's share-rot", mds)
+		if len(mds) != 1 || mds[0]["weft.public_id"] != "share-c" {
+			t.Errorf("run carries %v, want the header's share-c — the public id never rotates", mds)
 		}
 	})
 }

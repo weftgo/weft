@@ -6,7 +6,7 @@ go 1.26.0
 // module proxy, no replace — the two-phase rule, ADR 0005).
 require (
 	github.com/weftgo/weft v0.7.0
-	github.com/weftgo/weft/obsdb v0.1.0
+	github.com/weftgo/weft/obsdb v0.1.1
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.22.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.46.0

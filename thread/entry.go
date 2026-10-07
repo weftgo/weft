@@ -34,6 +34,12 @@ type MessageEntry struct {
 	ParentID string       `json:"parent,omitempty"`
 	Created  time.Time    `json:"created"`
 	Message  weft.Message `json:"message"`
+	// RunID is set on a turn's prompt entry: the run id minted for the
+	// turn the message starts (<session>-t<n>), written before the run
+	// does anything — so the id is on the record even when the turn's
+	// end never lands, and a reopened session never mints it again.
+	// Empty on every other message entry.
+	RunID string `json:"run_id,omitempty"`
 }
 
 // TurnEntry is the per-turn ledger: the run's id (<session>-t<n>), its
@@ -42,6 +48,13 @@ type MessageEntry struct {
 // was canceled. It records the turn's outcome, never its content — the
 // messages are MessageEntries — and it does not enter the model's
 // context.
+//
+// One run, one turn entry. A Send is one entry — except a turn that
+// overflowed and re-ran (ADR 0020 §5), which leaves two: the failed
+// attempt's, under the attempt's run id, with the overflow in Err, the
+// usage of the steps it completed, and ReRun naming the run that
+// followed; then the re-run's own. Session.Usage sums both: the
+// attempt's tokens were spent.
 type TurnEntry struct {
 	ID         string              `json:"id"`
 	ParentID   string              `json:"parent,omitempty"`
@@ -52,7 +65,20 @@ type TurnEntry struct {
 	Steps      int                 `json:"steps,omitempty"`
 	Err        string              `json:"err,omitempty"`
 	Pending    []weft.ToolCallPart `json:"pending,omitempty"`
-	Canceled   bool                `json:"canceled,omitempty"`
+	// Canceled marks a turn whose context ended — canceled (the caller
+	// walked away, an Interrupt or Rollback send, Close) or past its
+	// deadline. Err says which.
+	Canceled bool `json:"canceled,omitempty"`
+	// Policy is the busy policy the turn's Send was called under —
+	// "queue", "reject", "steer", "interrupt" or "rollback"
+	// (Policy.String) — captured at Send, the session's or the Send's
+	// own (As). A steer's follow-up turn records "steer". Empty on a
+	// resume turn, which no Send started, and on entries written
+	// before the field existed.
+	Policy string `json:"policy,omitempty"`
+	// ReRun, on the entry of an overflow attempt that was re-run, is
+	// the run id of the re-run — written before the re-run starts.
+	ReRun string `json:"rerun,omitempty"`
 	// LastInput is the compaction trigger's baseline for the turn:
 	// the provider-reported input of the run's final model step, plus
 	// the estimated tokens of the tail that report cannot cover (the
@@ -61,50 +87,113 @@ type TurnEntry struct {
 	// are the signal; only what the report cannot cover is estimated).
 	// Absent on turns that ran no step.
 	LastInput int64 `json:"last_input,omitempty"`
+	// LateSteps counts the per-step appends that failed while the turn
+	// ran (ADR 0011 §7): each batch was held and written late — by the
+	// next step's append or by this entry's own batch — so nothing was
+	// lost, but for that long a crash would have lost messages the run
+	// had already emitted. Zero, and absent on the wire, for a turn
+	// whose every step landed as it joined.
+	LateSteps int `json:"late_steps,omitempty"`
 }
 
-// Reason is why a compaction ran (ADR 0020 §1): manual (the caller
-// asked), threshold (the configured trigger), trim (a trimmer pre-pass
-// brought the context under the line, so no summary was made),
-// from_hook (BeforeCompact replaced the plan), and overflow — an
-// ErrContextOverflow turn compacted and re-run, which arrives with
-// thread v0.3.
+// Reason is why a compaction ran (ADR 0020 §1) — the value a
+// CompactionEntry records on the wire.
 type Reason string
 
+// The reasons a compaction entry records.
 const (
-	ReasonManual    Reason = "manual"
+	// ReasonManual marks a compaction the caller asked for: Compact,
+	// or ApplyCompaction over a previewed plan.
+	ReasonManual Reason = "manual"
+	// ReasonThreshold marks a compaction the configured trigger
+	// started: the measured context crossed the window minus the
+	// reserve (ADR 0020 §2).
 	ReasonThreshold Reason = "threshold"
-	ReasonTrim      Reason = "trim"
-	ReasonFromHook  Reason = "from_hook"
-	ReasonOverflow  Reason = "overflow" // v0.3: overflow compaction and re-run (ADR 0020 §5)
+	// ReasonTrim marks a trim: a trimmer pre-pass brought the context
+	// under the line, so no summary was made — the entry's Summary is
+	// empty.
+	ReasonTrim Reason = "trim"
+	// ReasonFromHook marks a compaction whose plan a BeforeCompact
+	// hook replaced.
+	ReasonFromHook Reason = "from_hook"
+	// ReasonOverflow marks the compaction that follows a turn failing
+	// with weft.ErrContextOverflow, before the turn's one re-run
+	// (ADR 0020 §5).
+	ReasonOverflow Reason = "overflow"
 )
 
 // CompactionEntry records one compaction (ADR 0020 §1): the summary
-// text, the id of the first entry kept raw after it, the token count
-// before, the reason it ran, the summarizer's cost and identity, the
-// details (files read, files modified, pinned entries kept through),
-// and a hash of the summarized range. Nothing is deleted — the
-// summarized entries stay in the file, and the context at a leaf is
-// the latest compaction's summary on the path plus the entries from
-// its first kept id onward. A trim that needed no summary is the same
-// entry with an empty Summary and Reason "trim".
+// text, the id of the first entry kept raw after it, the estimated
+// size of the model's context before it, the reason it ran, the
+// summarizer's cost and identity, the details (files read, pinned
+// entries kept through), and a hash of the summarized range. Nothing
+// is deleted — the summarized entries stay in the file, and the
+// context at a leaf is the latest summary compaction's summary on the
+// path, the entries it pinned, then the entries from its first kept
+// id onward.
+//
+// A trim that needed no summary is the same entry with an empty
+// Summary, Reason "trim" and a Trim record naming exactly what was
+// stubbed. A trim never moves the boundary: the latest summary
+// compaction below it keeps governing the context, the trim's stubs
+// layer over the kept range, and its FirstKept only repeats the
+// boundary in force when it landed.
 type CompactionEntry struct {
-	ID           string    `json:"id"`
-	ParentID     string    `json:"parent,omitempty"`
-	Created      time.Time `json:"created"`
-	Summary      string    `json:"summary,omitempty"`
-	FirstKept    string    `json:"first_kept"`
-	TokensBefore int64     `json:"tokens_before"`
-	Reason       Reason    `json:"reason,omitempty"`
+	ID        string    `json:"id"`
+	ParentID  string    `json:"parent,omitempty"`
+	Created   time.Time `json:"created"`
+	Summary   string    `json:"summary,omitempty"`
+	FirstKept string    `json:"first_kept"`
+	// TokensBefore is the estimated size of the context the model was
+	// shown when the compaction ran — the compacted view, not the raw
+	// path.
+	TokensBefore int64  `json:"tokens_before"`
+	Reason       Reason `json:"reason,omitempty"`
 	// SummarizerUsage and SummarizerModel name what the summary cost
 	// and which model made it (the cost ledger, ADR 0020 §4) — absent
 	// on a trim, which summarizes nothing.
 	SummarizerUsage weft.Usage     `json:"summarizer_usage,omitzero"`
 	SummarizerModel weft.ModelInfo `json:"summarizer_model,omitzero"`
 	FilesRead       []string       `json:"files_read,omitempty"`
-	FilesModified   []string       `json:"files_modified,omitempty"`
-	Pinned          []string       `json:"pinned,omitempty"`
-	RangeHash       string         `json:"range_hash,omitempty"`
+	// FilesModified is a format-1 wire field kept readable: no build
+	// writes it (the sandbox write log it was reserved for was
+	// abandoned), and a file that carries it round-trips unchanged.
+	FilesModified []string `json:"files_modified,omitempty"`
+	Pinned        []string `json:"pinned,omitempty"`
+	RangeHash     string   `json:"range_hash,omitempty"`
+	// Trim is the trim record: present exactly on a trim, absent on a
+	// summary compaction. An entry carrying one is written with "v":5
+	// — a reader that does not know the record would replay the trim
+	// wrongly, so it must fail loudly instead (ADR 0011 §6).
+	Trim *TrimRecord `json:"trim,omitempty"`
+}
+
+// isTrim reports whether the entry is a trim record rather than a
+// summary compaction: no summary, reason trim. A trim never governs
+// the context's boundary and never feeds the iterative summary chain.
+func (e CompactionEntry) isTrim() bool {
+	return e.Summary == "" && e.Reason == ReasonTrim
+}
+
+// TrimRecord is what a trim did, persisted so the context replays it
+// from the file alone (ADR 0020, amendment 2026-10-01): every tool
+// result the trimmer replaced, with the replacement text. The walk
+// applies exactly these stubs — it never consults the session's
+// configured Trimmer — so a recorded trim reads the same under any
+// options, in any process.
+type TrimRecord struct {
+	Stubs []TrimStub `json:"stubs"`
+}
+
+// TrimStub is one stubbed tool result: the entry that holds it, the
+// call it answers, and the content the model sees in its place. The
+// stored result is untouched; IsError is what the stubbed part
+// reports (false for the built-in trimmer's stub).
+type TrimStub struct {
+	Entry   string `json:"entry"`
+	CallID  string `json:"call_id"`
+	Content string `json:"content"`
+	IsError bool   `json:"is_error,omitempty"`
 }
 
 // BranchSummaryEntry summarizes the branch a Session.Branch leaves
@@ -180,10 +269,13 @@ type CustomMessageEntry struct {
 // call the core's approval boundary left unexecuted, recorded with the
 // arguments and their SHA-256 so a decision can name exactly what it
 // decided, the run that parked it, why it parked, and an optional
-// expiry — a request past its expiry is denied with the stated reason
-// on the next resume (ADR 0021 §5). It is written in the same Append
-// as the turn that parked it, so no window exists where the turn is
-// durable and the request is not. It never enters the model's context;
+// expiry — a request past its expiry takes no decision and is denied
+// with the stated reason the next time the session looks at the
+// boundary (ADR 0021 §5). It is written in the same Append as the
+// turn that parked it, so no window exists where the turn is durable
+// and the request is not. Its ID names this one occurrence of the
+// call: call ids repeat across turns, the entry id never does, and a
+// signed decision is bound to it. It never enters the model's context;
 // the pending call itself stays unresolved in the transcript until a
 // decision resolves it.
 type ApprovalRequestEntry struct {
@@ -210,10 +302,15 @@ type ApprovalRequestEntry struct {
 // §1): approve, deny with a reason, or resolve with content computed
 // outside the process (resolve_error marks it an error). It records
 // Who decided, When (the entry's Created), Via which channel — "user"
-// for a plain Decide, "approver" for the live chain step, "expiry" for
-// an expired request's automatic denial — and the run the decided
-// request belonged to. It never enters the model's context; the model
-// sees the decision only through the result the resumed run produces.
+// for Decide, "signed" for DecideSigned, "approver" for the live chain
+// step, "grant" for a grant's approval, "expiry" for an expired
+// request's automatic denial, "interrupt" for the denial an
+// interrupting Send records, "child" for a pool delegation's
+// resolution, "parent" for a decision a pool child's parent session
+// took and the pool replayed into the child — and the run the decided
+// request belonged to. It never
+// enters the model's context; the model sees the decision only
+// through the result the resumed run produces.
 type ApprovalDecisionEntry struct {
 	ID       string    `json:"id"`
 	ParentID string    `json:"parent,omitempty"`
@@ -229,18 +326,36 @@ type ApprovalDecisionEntry struct {
 	// (ADR 0021 §3): a decision that arrived signed carries the nonce
 	// it answered and the key that vouched for it, so a replayed
 	// signature is detectable from the file alone — across restarts.
-	// Empty on the in-process paths, which mint no challenge.
+	// KeyID is also the signed decision's identity under Quorum: one
+	// key is one approver, whatever Who says. Empty on the in-process
+	// paths, which mint no challenge.
 	Nonce string `json:"nonce,omitempty"`
 	KeyID string `json:"key_id,omitempty"`
+	// RequestID is the id of the request entry the decision answers —
+	// the occurrence of the call, which a call id alone does not name.
+	// Set on every decision recorded over a parked request — Decide,
+	// DecideSigned (whose challenge is bound to it), an expiry or
+	// interrupt denial; empty on a chain step's decision (a grant, the
+	// Approver), written in the same append as the request or without
+	// one, and RunID names the occurrence either way.
+	RequestID string `json:"request_id,omitempty"`
+	// Always records that the decision was an "approve and always
+	// allow" (ApproveAlways): the grant is minted when the call's
+	// effective verdict becomes approve — at once without a quorum,
+	// with the completing approval under one — and never when the
+	// verdict is anything else.
+	Always bool `json:"always,omitempty"`
 }
 
 // ApprovalAuditEntry is the chain's own trail (ADR 0021 §2): every step
-// the decision chain takes over a call — the Approver consulted
-// (decided, declined, timed out), the park, an expiry denial, a resume
-// — leaves one of these, including automatic approvals, so s.Audit()
+// the decision chain takes over a call — a grant matched, the Approver
+// consulted (decided, declined, timed out), the park, an expiry
+// denial, a signed decision refused, a resume started —
+// leaves one of these, including automatic approvals, so s.Audit()
 // can tell the whole story from the file alone. Step and Outcome name
-// the step and how it ended; Detail carries anything beyond that. It
-// never enters the model's context.
+// the step and how it ended; Detail is prose for a human reader and
+// never parsed — what the session reads back lives in the typed
+// fields. It never enters the model's context.
 type ApprovalAuditEntry struct {
 	ID       string    `json:"id"`
 	ParentID string    `json:"parent,omitempty"`
@@ -250,6 +365,22 @@ type ApprovalAuditEntry struct {
 	Outcome  string    `json:"outcome,omitempty"`
 	Detail   string    `json:"detail,omitempty"`
 	RunID    string    `json:"run_id,omitempty"`
+	// GrantID names the grant a StepGrant entry matched — a session
+	// grant's entry id, or with GrantShared the GrantStore's own id
+	// for it. A session grant's MaxUses is counted from these fields:
+	// one entry is one use.
+	GrantID     string `json:"grant_id,omitempty"`
+	GrantShared bool   `json:"grant_shared,omitempty"`
+	// KeyID names the keyring key a refused signed decision claimed
+	// (StepSigned), when the ring holds it.
+	KeyID string `json:"key_id,omitempty"`
+	// Decisions lists the decision entries a resume applied
+	// (StepResume, outcome "started"). A decision is spent by the
+	// resume that applied it: it resolves its call on that resume's
+	// own line of the tree and nowhere else, so a Branch back to the
+	// decided boundary asks for a new decision instead of running the
+	// call again on the old one.
+	Decisions []string `json:"decisions,omitempty"`
 }
 
 // GrantEntry is a session-scoped grant made durable (ADR 0021 §4): a
@@ -259,7 +390,7 @@ type ApprovalAuditEntry struct {
 // audited, including the automatic approval. Liveness is derived, never
 // stored: a GrantRevokedEntry naming the grant ends it, an Expiry
 // passes, or its MaxUses is reached — uses counted from the audit
-// entries the chain writes when it matches. It never enters the
+// entries the chain writes when it matches (their GrantID). It never enters the
 // model's context; the model sees a grant only through the result of
 // the call it allowed or refused.
 type GrantEntry struct {
@@ -279,18 +410,30 @@ type GrantRevokedEntry struct {
 	GrantID  string    `json:"grant_id"`
 }
 
-// ReceiptEntry is the steering receipt (ADR 0019, plan §6): the
-// journey of one message accepted while the session was busy under
-// the Steer policy. One entry records acceptance — Status "queued",
-// the message on Msg — and a second, linked by Receipt, records the
-// fate: "delivered" (the running run's steering drain took it; RunID
-// names the run, and the message landed in that run's transcript),
-// "deferred" (it runs as the next turn instead — a StopWhen end, an
-// open approval boundary, or the run ended before the drain; Turn
-// names the follow-up turn's receipt), or "dropped" (ClearQueue).
-// Receipt entries never enter the model's context: the message
-// reaches the model through the run that delivered it or the
-// follow-up turn that ran it, exactly once.
+// ReceiptEntry is the receipt of a message accepted while the session
+// was busy (ADR 0019, ADR 0011 §4): the durable record that the
+// session took it, and of what became of it. Receipt entries never
+// enter the model's context: the message reaches the model through the
+// run that delivered it or the turn that ran it, exactly once.
+//
+// A steer — a Send under the Steer policy — is two entries. One
+// records acceptance: Status "queued", the message on Msg. A second,
+// linked by Receipt, records the fate: "delivered" (the running run's
+// steering drain took it; RunID names the run, the message landed in
+// that run's transcript, and Unanswered says the run ended before the
+// model answered it), "deferred" (it runs as the next turn instead — a
+// StopWhen end, an open approval boundary, or the run ended before the
+// drain; Turn names the follow-up turn's prompt entry), or "dropped"
+// (ClearQueue).
+//
+// A queued send — a Send that waits for a turn of its own: the Queue
+// policy on a busy session, an interrupting send, a deferred steer's
+// follow-up — is one entry: Status "accepted", the message on Msg,
+// Turn the id its prompt entry will take, RunID the run id minted for
+// it. It is settled by that prompt entry landing (the turn started),
+// or by a "dropped" entry linked by Receipt (ClearQueue, a refused
+// interrupt). An accepted receipt with neither is a send the writer
+// never got to: Open restores it to the queue.
 type ReceiptEntry struct {
 	ID       string        `json:"id"`
 	ParentID string        `json:"parent,omitempty"`
@@ -300,35 +443,53 @@ type ReceiptEntry struct {
 	Msg      *weft.Message `json:"msg,omitempty"`
 	RunID    string        `json:"run_id,omitempty"`
 	Turn     string        `json:"turn,omitempty"`
+	// Unanswered, on a delivered receipt, marks a steer the run took
+	// and never answered (ADR 0019 §5): the run failed — a budget, a
+	// model error, a cancellation — before another model step
+	// completed. The message is in that run's recorded transcript, so
+	// the next turn's model sees it; no reply to it exists.
+	Unanswered bool `json:"unanswered,omitempty"`
 }
 
 // Receipt statuses — the wire values, pinned by the format-3 goldens.
+// "accepted" joined them without a format bump: a reader from before
+// it restores only "queued" receipts and reads an accepted one as a
+// receipt it has nothing to do for — the queued send is not run by
+// that reader, exactly as before the status existed, and nothing is
+// misread.
 const (
-	// ReceiptQueued marks acceptance: the message is held for the
-	// running turn's steering drain.
+	// ReceiptQueued marks a steer's acceptance: the message is held
+	// for the running turn's steering drain.
 	ReceiptQueued = "queued"
+	// ReceiptAccepted marks a queued send's acceptance: the message is
+	// held for a turn of its own, whose prompt entry will take the id
+	// in Turn.
+	ReceiptAccepted = "accepted"
 	// ReceiptDelivered marks a message the running run drained: it is
 	// an ordinary transcript message of that run, named by RunID.
 	ReceiptDelivered = "delivered"
-	// ReceiptDeferred marks a message that became a follow-up turn
-	// (Turn names its receipt): a StopWhen end, an open approval
+	// ReceiptDeferred marks a steer that became a follow-up turn
+	// (Turn names its prompt entry): a StopWhen end, an open approval
 	// boundary, or the run ended before the drain.
 	ReceiptDeferred = "deferred"
-	// ReceiptDropped marks a message removed by ClearQueue before
-	// delivery: it never reaches the model.
+	// ReceiptDropped marks a message removed before it reached a
+	// model: ClearQueue, or an interrupting send that was refused.
 	ReceiptDropped = "dropped"
 )
 
 // PoolReceiptEntry is the pool receipt (ADR 0022 §4): the journey of
-// one child run a thread/pool started for this session. One entry
+// one delegation a thread/pool started for this session. One entry
 // records acceptance — Status "accepted", the child session on Child,
-// the task on Prompt — a second records the slot acquisition and
-// start ("running"), and a third, linked by Receipt, records the
-// settlement: "done" (Stop carries the child's answer, Usage its
-// total), "failed" (Stop the cause), "canceled" (an explicit Cancel),
-// or "capped" (the child died on a budget — MaxSteps or a usage
-// limit). Call names the delegating tool call for wrapped
-// delegations. Pool receipt entries never enter the model's context:
+// the task on Prompt — and every later one links back to it by
+// Receipt: "running" when a slot is acquired and the child's run
+// starts, "parked" when that run ends at an approval boundary (the
+// two alternate, once per park and resume), and exactly one
+// settlement — "done" (Stop carries the child's answer), "failed"
+// (Stop the cause), "canceled" (Cancel, or the pool's Close), or
+// "capped" (the child died on a budget — MaxSteps or a usage limit).
+// A settlement's Usage is the child session's whole cost — every run
+// it made for the delegation, the ones before a park included. Call
+// names the delegating tool call for wrapped delegations. Pool receipt entries never enter the model's context:
 // the answer reaches the model as the delegating call's result (a
 // sync delegation) or however the application delivers it (an async
 // one); the entry is the ledger, not the channel.
@@ -346,8 +507,9 @@ type PoolReceiptEntry struct {
 }
 
 // Pool receipt statuses — the wire values, pinned by the format-4
-// goldens. The machine is accepted → running → exactly one of done,
-// failed, canceled, capped.
+// goldens. The machine is accepted → running ⇄ parked → exactly one
+// of done, failed, canceled, capped; a delegation canceled or failed
+// before its child ever ran settles straight from accepted.
 const (
 	// PoolAccepted marks the delegation recorded and queued for a slot.
 	PoolAccepted = "accepted"
@@ -355,13 +517,20 @@ const (
 	// started — the wait between acceptance and running is the pool's
 	// queue, visible.
 	PoolRunning = "running"
+	// PoolParked marks a child whose run ended at an approval boundary
+	// (ADR 0022 §7): it holds no slot and waits for decisions on the
+	// requests mirrored onto this session. The next "running" entry is
+	// its resume. A status, not a new kind: a reader from before it
+	// sees one more unsettled state, which is what it is.
+	PoolParked = "parked"
 	// PoolDone marks a child that ran to its intended end; Stop is its
 	// answer, Usage its total cost.
 	PoolDone = "done"
 	// PoolFailed marks a child whose run failed; Stop is the cause.
 	PoolFailed = "failed"
-	// PoolCanceled marks a child canceled by an explicit Cancel (or the
-	// pool's Close) — never by the submitting turn's own end, which an
+	// PoolCanceled marks a child canceled — by an explicit Cancel, by
+	// the pool's Close, or, for a sync child, with the delegating call
+	// it ran under — never by the submitting turn's own end, which an
 	// async child survives by design (ADR 0022 D4).
 	PoolCanceled = "canceled"
 	// PoolCapped marks a child that died on a budget — ErrMaxSteps or
@@ -471,6 +640,65 @@ func parentOf(e Entry) string {
 	return ""
 }
 
+// withParent returns the entry with its ParentID replaced — the one
+// rewrite a copy of a path may need (Fork): an entry whose stored
+// parent the copy does not carry attaches to the nearest entry the
+// copy does. The entry's id and everything else are untouched, and
+// the stored original is never rewritten — only the copy differs.
+func withParent(e Entry, parent string) Entry {
+	switch e := e.(type) {
+	case MessageEntry:
+		e.ParentID = parent
+		return e
+	case TurnEntry:
+		e.ParentID = parent
+		return e
+	case CompactionEntry:
+		e.ParentID = parent
+		return e
+	case BranchSummaryEntry:
+		e.ParentID = parent
+		return e
+	case LeafEntry:
+		e.ParentID = parent
+		return e
+	case LabelEntry:
+		e.ParentID = parent
+		return e
+	case InfoEntry:
+		e.ParentID = parent
+		return e
+	case CustomEntry:
+		e.ParentID = parent
+		return e
+	case CustomMessageEntry:
+		e.ParentID = parent
+		return e
+	case ApprovalRequestEntry:
+		e.ParentID = parent
+		return e
+	case ApprovalDecisionEntry:
+		e.ParentID = parent
+		return e
+	case ApprovalAuditEntry:
+		e.ParentID = parent
+		return e
+	case GrantEntry:
+		e.ParentID = parent
+		return e
+	case GrantRevokedEntry:
+		e.ParentID = parent
+		return e
+	case ReceiptEntry:
+		e.ParentID = parent
+		return e
+	case PoolReceiptEntry:
+		e.ParentID = parent
+		return e
+	}
+	return e
+}
+
 // Wire discriminators for entry kinds.
 const (
 	kindMessage          = "message"
@@ -518,21 +746,29 @@ type (
 )
 
 // approvalEntryV is the entry version the approval kinds carry on the
-// wire (ADR 0011 §6, ADR 0021): the approvals format is 2, so a v0.1
-// reader fails loudly on a session that used approvals instead of
-// guessing at kinds it does not know.
+// wire (ADR 0011 §6, ADR 0021): the approvals format is 2, so a
+// format-1 reader fails loudly on a session that used approvals
+// instead of guessing at kinds it does not know.
 const approvalEntryV = 2
 
 // receiptEntryV is the entry version the steering receipt carries on
 // the wire (ADR 0011 §6, ADR 0019): the steering format is 3, so a
-// v0.2 reader fails loudly on a session that steered.
+// format-2 reader fails loudly on a session that steered.
 const receiptEntryV = 3
 
 // poolReceiptV is the entry version the pool receipt carries on the
-// wire (ADR 0011 §6, ADR 0022): the pool's format is 4, so a reader
-// from before v0.5 fails loudly on a session that used the pool
+// wire (ADR 0011 §6, ADR 0022): the pool's format is 4, so a
+// format-3 reader fails loudly on a session that used the pool
 // instead of guessing at a kind it does not know.
 const poolReceiptV = 4
+
+// trimRecordV is the entry version a compaction entry carries on the
+// wire when it holds a trim record (ADR 0011 §6, ADR 0020's 2026-10-01
+// amendment): the record is what the context replays, so a reader
+// from before it fails loudly on such an entry instead of replaying
+// the trim from its own options. A compaction entry without a trim
+// record stays a format-1 line with no "v".
+const trimRecordV = 5
 
 // MarshalJSON encodes the entry with its "type" discriminator.
 func (e MessageEntry) MarshalJSON() ([]byte, error) {
@@ -550,12 +786,19 @@ func (e TurnEntry) MarshalJSON() ([]byte, error) {
 	}{kindTurn, turnEntryWire(e)})
 }
 
-// MarshalJSON encodes the entry with its "type" discriminator.
+// MarshalJSON encodes the entry with its "type" discriminator. A
+// summary compaction is a format-1 line and carries no "v"; an entry
+// holding a trim record carries "v":5, its minimum reader version.
 func (e CompactionEntry) MarshalJSON() ([]byte, error) {
+	v := 0
+	if e.Trim != nil {
+		v = trimRecordV
+	}
 	return json.Marshal(struct {
 		Type string `json:"type"`
+		V    int    `json:"v,omitempty"`
 		compactionEntryWire
-	}{kindCompaction, compactionEntryWire(e)})
+	}{kindCompaction, v, compactionEntryWire(e)})
 }
 
 // MarshalJSON encodes the entry with its "type" discriminator.
@@ -682,16 +925,22 @@ func (e PoolReceiptEntry) MarshalJSON() ([]byte, error) {
 
 // kindVersion returns the highest entry version this build reads for a
 // wire kind (ADR 0011 §6). Kinds born in format 1 are version 1 and
-// carry no "v" on the wire; a kind added after format 1 — approvals in
-// v0.2, steering receipts in v0.3 — is written with "v":N, its minimum
-// reader version, and registers here at that version. A reader that
+// carry no "v" on the wire; a kind added after format 1 — approvals,
+// steering receipts, pool receipts — is written with "v":N, its
+// minimum reader version, and registers here at that version. A
+// format-1 kind that later gains a field an older reader would misread
+// writes "v":N on the entries that carry it, and registers at N the
+// same way (the compaction entry's trim record). A reader that
 // does not know a kind at all, or knows it only at a lower version,
 // fails loudly (UnmarshalEntry) instead of guessing.
 func kindVersion(kind string) (int, bool) {
 	switch kind {
-	case kindMessage, kindTurn, kindCompaction, kindBranchSummary,
+	case kindMessage, kindTurn, kindBranchSummary,
 		kindLeaf, kindLabel, kindInfo, kindCustom, kindCustomMessage:
 		return 1, true
+	case kindCompaction:
+		// Born in format 1; read up to the trim record's version.
+		return trimRecordV, true
 	case kindApprovalRequest, kindApprovalDecision, kindApprovalAudit,
 		kindGrant, kindGrantRevoked:
 		return approvalEntryV, true

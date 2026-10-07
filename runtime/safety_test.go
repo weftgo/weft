@@ -719,3 +719,81 @@ func TestEvictedForkParkStaysDecidable(t *testing.T) {
 		t.Errorf("approved refund ran %d times, want 1", n)
 	}
 }
+
+// TestForgottenForksGiveUpTheirSessions pins the fork mode under
+// thread's writer lease: a Session holds its session from its first
+// write until Close, so a fork the runtime forgets (evicted past
+// maxForks) or still holds at stop must be closed — or no other writer
+// could ever continue that session (ErrLocked), and on jsonl its file
+// lock would live as long as the process.
+func TestForgottenForksGiveUpTheirSessions(t *testing.T) {
+	defer func(n int) { maxForks = n }(maxForks)
+	maxForks = 1
+	agent := weft.New(&recordingModel{}, weft.Name("acme-support"))
+	store := thread.Memory()
+	ctx := context.Background()
+	app, err := thread.Create(ctx, store, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := app.Send(ctx, weft.User("hello app"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := turn.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config{agents: []*weft.Agent{agent}, threads: store}
+	l := newLink(cfg, newRegistry(cfg), "http://127.0.0.1:1", "")
+	stopped := false
+	defer func() {
+		if !stopped {
+			l.stop()
+		}
+	}()
+	fork := func(id, input string) string {
+		t.Helper()
+		cmd := command{CommandID: id, Agent: "acme-support", Thread: "fork", Engine: "live",
+			Source: &sourceSpec{RunID: turn.RunID()}, Input: &input}
+		if reason, ok := l.validate(ctx, &cmd); !ok {
+			t.Fatal(reason)
+		}
+		status, runID, errText := l.execute(ctx, cmd, "pg_unused")
+		if status != "succeeded" {
+			t.Fatalf("%s: %s %s", id, status, errText)
+		}
+		session, _, err := parseThreadRunID(runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return session
+	}
+	// writable reports whether another Session can write the session —
+	// retried briefly, since an evicted fork is closed in the background.
+	writable := func(session string) error {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			s, err := thread.Open(ctx, store, session, agent)
+			if err != nil {
+				return err
+			}
+			err = s.Label(ctx, s.Leaf(), "continued elsewhere")
+			_ = s.Close(ctx)
+			if err == nil || !errors.Is(err, thread.ErrLocked) || time.Now().After(deadline) {
+				return err
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	first := fork("cmd_g1", "first")
+	second := fork("cmd_g2", "second") // evicts the first fork
+	if err := writable(first); err != nil {
+		t.Errorf("the evicted fork %s is still held: %v", first, err)
+	}
+	l.stop()
+	stopped = true
+	if err := writable(second); err != nil {
+		t.Errorf("the fork %s the stopped link held is still held: %v", second, err)
+	}
+}

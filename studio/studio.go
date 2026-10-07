@@ -13,7 +13,7 @@ import (
 
 // Version is the studio module's tag, reported by api/meta. It moves
 // when the module is released, nothing else.
-const Version = "v0.3.0"
+const Version = "v0.3.1"
 
 const defaultTitle = "weft studio"
 

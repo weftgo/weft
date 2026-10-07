@@ -1,0 +1,33 @@
+name: Soak
+
+# The race soak (the thread plan's §11 bar): the thread module's whole
+# suite ten times over under the race detector, and thread/sqlite's
+# three times — the crash matrix, the one-writer tables and the pool's
+# scheduling tests are the ones a single pass can miss a flake in. Too
+# slow for every push, so it runs nightly and on demand; `make
+# soak-thread` is the same run locally.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  soak-thread:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+          cache-dependency-path: |
+            **/go.sum
+            go.work.sum
+      - name: soak (thread, -race -count=10)
+        run: cd thread && go test -race -count=10 -timeout 45m ./...
+      - name: soak (thread/sqlite, -race -count=3)
+        run: cd thread/sqlite && go test -race -count=3 -timeout 30m ./...

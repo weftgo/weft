@@ -1,6 +1,6 @@
 //go:build unix
 
-// The crash matrix (plan §10, step 7.1) over sqlite: every
+// The crash matrix over sqlite: every
 // session-layer write point, each process killed dead at its write and
 // reopened — the shared harness in threadtest carries the assertions;
 // this file wires it to this backend's storage and re-executed helper.

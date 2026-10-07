@@ -12,7 +12,7 @@ import (
 	"github.com/weftgo/weft/thread"
 )
 
-// The budget suite (plan §10, step 7.2): the costs an operator feels —
+// The budget suite: the costs an operator feels —
 // append latency, opening a long session (jsonl and sqlite carry their
 // own files), building the context of a much-compacted one, listing a
 // fleet — each with a Benchmark for the number and a TestBudget that

@@ -797,7 +797,7 @@ function Te(e, t) {
 //#endregion
 //#region src/panel/version.ts
 function Ee() {
-	return "v0.3.0";
+	return "v0.3.1";
 }
 function De(e) {
 	if (typeof e != "string") return null;

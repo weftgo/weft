@@ -74,6 +74,7 @@ func TestContextWindowFiresTrigger(t *testing.T) {
 			if _, err := turn.Wait(); err != nil {
 				t.Fatal(err)
 			}
+			_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 		}
 		waitFor(t, "an automatic compaction", func() bool { return hasCompaction(s) > 0 })
 		for _, e := range s.Entries() {
@@ -105,6 +106,7 @@ func TestModelWindowsOverride(t *testing.T) {
 	if _, err := turn.Wait(); err != nil {
 		t.Fatal(err)
 	}
+	_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 	waitFor(t, "the per-model window to fire", func() bool { return hasCompaction(s) > 0 })
 
 	// A window for a different model leaves the session window-less.
@@ -120,12 +122,12 @@ func TestDisabledAndNoWindow(t *testing.T) {
 	ctx := context.Background()
 	agent, _ := scriptedAgent(bigUsage(), 4)
 	st := thread.Memory()
-	s, _ := thread.Create(ctx, st, agent, thread.ContextWindow(100_000), thread.Disabled())
+	s, _ := thread.Create(ctx, st, agent, thread.ContextWindow(100_000), thread.NoAutoCompact())
 	msgs(t, ctx, st, s,
 		strings.Repeat("a", 30_000),
 		strings.Repeat("b", 30_000),
 		strings.Repeat("c", 30_000))
-	s = reopenWith(t, ctx, st, s, agent, thread.ContextWindow(100_000), thread.Disabled())
+	s = reopenWith(t, ctx, st, s, agent, thread.ContextWindow(100_000), thread.NoAutoCompact())
 	for i := 0; i < 2; i++ {
 		turn, err := s.Send(ctx, weft.User("go"))
 		if err != nil {
@@ -134,6 +136,7 @@ func TestDisabledAndNoWindow(t *testing.T) {
 		if _, err := turn.Wait(); err != nil {
 			t.Fatal(err)
 		}
+		_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 	}
 	if hasCompaction(s) != 0 {
 		t.Error("Disabled session auto-compacted")
@@ -183,10 +186,11 @@ func TestTriggerFuncAndRateLimits(t *testing.T) {
 		if _, err := turn.Wait(); err != nil {
 			t.Fatal(err)
 		}
+		_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 	}
-	// The trigger runs in the session's runner goroutine; the waits
-	// above cover it (a Wait returns with the between-turn
-	// housekeeping done), and the counts read under the mutex.
+	// The trigger runs in the session's runner goroutine, between
+	// turns; the WaitIdle calls above cover it, and the counts read
+	// under the mutex.
 	waitFor(t, "the custom trigger to be consulted", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
@@ -237,7 +241,7 @@ func TestKeepRecentAndEstimator(t *testing.T) {
 
 type unitEstimator struct{}
 
-func (unitEstimator) Estimate(msgs []weft.Message) int { return len(msgs) }
+func (unitEstimator) Estimate(msgs []weft.Message) int64 { return int64(len(msgs)) }
 
 func TestSummaryModelFallbackChain(t *testing.T) {
 	ctx := context.Background()
@@ -300,7 +304,7 @@ func TestSummaryPromptFocusInstructions(t *testing.T) {
 		strings.Repeat("c", 30_000),
 	)
 	s = reopenWith(t, ctx, st, s, agent, promptOpts...)
-	if err := s.Compact(ctx, thread.Instructions("focus on the API design")); err != nil {
+	if err := s.Compact(ctx, thread.SummaryInstructions("focus on the API design")); err != nil {
 		t.Fatal(err)
 	}
 	reqs := rec.saw()
@@ -364,7 +368,7 @@ func TestBeforeCompactVerdicts(t *testing.T) {
 	var sawReason thread.Reason
 	proceed := thread.BeforeCompact(func(ctx context.Context, p *thread.Preparation) (thread.Verdict, error) {
 		sawReason = p.Reason
-		return thread.Proceed, nil
+		return thread.Proceed(), nil
 	})
 	history := func(s *thread.Session, opts ...thread.SessionOption) *thread.Session {
 		msgs(t, ctx, st, s,
@@ -385,7 +389,7 @@ func TestBeforeCompactVerdicts(t *testing.T) {
 
 	// Cancel.
 	cancel := thread.BeforeCompact(func(ctx context.Context, p *thread.Preparation) (thread.Verdict, error) {
-		return thread.Cancel, nil
+		return thread.Cancel(), nil
 	})
 	s2, _ := thread.Create(ctx, st, agent, cancel)
 	s2 = history(s2, cancel)
@@ -639,6 +643,7 @@ func TestTrimmerOnlyPath(t *testing.T) {
 		if _, err := turn.Wait(); err != nil {
 			t.Fatal(err)
 		}
+		_ = s.WaitIdle(ctx) // the post-turn trigger runs once the turn is decided
 		waitFor(t, "the trim record", func() bool {
 			for _, e := range s.Entries() {
 				if c, ok := e.(thread.CompactionEntry); ok && c.Reason == thread.ReasonTrim {

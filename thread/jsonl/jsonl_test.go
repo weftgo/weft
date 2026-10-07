@@ -28,9 +28,35 @@ func open(t *testing.T) thread.Storage {
 }
 
 // Conformance runs the shared table — including the loud rows, which
-// the RawInjector hook unlocks for a backend that holds real files.
+// the RawInjector hooks unlock for a backend that holds real files,
+// and the Watch table, which Run adds for a thread.Watcher.
 func TestConformance(t *testing.T) {
 	threadtest.Run(t, open)
+}
+
+// The session-level table: the turn machinery's promises that depend
+// on what the backend stores — the mixed batch's resume join, a
+// queued send restored after a restart.
+func TestConformanceTurns(t *testing.T) {
+	threadtest.RunTurns(t, open)
+}
+
+// The one-writer sub-table: two Storages over one directory are the
+// in-process shape of two processes — the second writer is ErrLocked,
+// and Release hands the session over.
+func TestConformanceTwoWriters(t *testing.T) {
+	threadtest.RunTwoWriters(t, func(t *testing.T) (thread.Storage, thread.Storage) {
+		dir := t.TempDir()
+		first, err := jsonl.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := jsonl.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return first, second
+	})
 }
 
 // The file shape is the format (ADR 0011 §2, §5): the directory 0700,
@@ -513,18 +539,12 @@ func TestNewerEnvelopeHeaderIsNewerFormat(t *testing.T) {
 	}
 }
 
-// The Watch capability (plan §7): the shared conformance table covers
-// order, exactly-once, the resume point and the loud failures; this
-// test adds the backend's own shape — the tail sees appends from
-// another handle over the same directory, the cross-process shape.
+// The Watch capability: the shared conformance table (TestConformance
+// runs RunWatch, the backend being a thread.Watcher) covers order,
+// exactly-once, the resume point and the loud failures; this test adds
+// the backend's own shape — the tail sees appends from another handle
+// over the same directory, the cross-process shape.
 func TestWatch(t *testing.T) {
-	threadtest.RunWatch(t, func(t *testing.T) thread.Storage {
-		st, err := jsonl.Open(t.TempDir())
-		if err != nil {
-			t.Fatal(err)
-		}
-		return st
-	})
 	dir := t.TempDir()
 	first, err := jsonl.Open(dir)
 	if err != nil {

@@ -1,16 +1,15 @@
 # The thread module's pre-1.0 apidiff allowances: one exact apidiff
-# line per acknowledged incompatibility, with the justification that
-# reviewed it. Anything not listed fails the build. Post-1.0 this file
-# is emptied and stays empty (plan §10: v0.8 → v0.9 is the first pair
-# gated with no allowances).
+# line per acknowledged incompatibility, under the justification that
+# reviewed it. Anything not listed fails the build (scripts/apidiff.sh
+# "" thread, `make apidiff-thread`). The gate diffs against the newest
+# thread/v* tag, so the entries of a cycle are dropped when its tag is
+# cut; an entry apidiff no longer reports is dead and is removed with
+# the change that made it so.
 #
-# v0.2 added to the v0.1 surface without breaking it — no entries yet.
+# The API is not frozen: the freeze — the first pair of tags gated
+# with this file empty — is deferred until the API is stable. Until
+# then a deliberate break is listed here, never smuggled past the gate.
 #
-# v0.4 (2026-09-29): one entry — Query grew its filter fields and so
-# stopped being comparable. Reviewed in the v0.4 release pass: Query is
-# a request value handed to List, never a map key or a compared pair;
-# the filters are maps by nature (exact pairs, any count), and the
-# alternative — sorted key/value slices to keep comparability — would
-# tax every caller to preserve a property nothing promises. The v0.8
-# freeze empties this file (plan §10).
-Query: old is comparable, new is not
+# The 2026-10-01 review fix train's breaks shipped as thread/v0.9.0;
+# their entries left with that tag. Nothing is acknowledged against
+# thread/v0.9.0 yet.

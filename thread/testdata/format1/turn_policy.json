@@ -1,0 +1,1 @@
+{"type":"turn","id":"e_01J8X9M2K7QW4R5N8T6V2B3C4F","parent":"e_01J8X9M2K7QW4R5N8T6V2B3C4E","created":"2026-09-28T12:00:02.123456789Z","run_id":"s_01J8X9M2K7QW4R5N8T6V2B3C4D-t1","stop_reason":"stop","usage":{"input_tokens":410,"output_tokens":62},"steps":2,"policy":"interrupt","late_steps":1}

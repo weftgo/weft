@@ -185,6 +185,18 @@ func (l *link) stop() {
 	case <-idle:
 	case <-time.After(stopWait):
 	}
+	// The forks' Sessions hold their writer leases until closed: give
+	// them up, so the app (or the next process) can write those
+	// sessions. Bounded like the waits above.
+	released := make(chan struct{})
+	go func() {
+		l.releaseHeld(context.Background())
+		close(released)
+	}()
+	select {
+	case <-released:
+	case <-time.After(stopWait):
+	}
 	if tr, ok := l.client.Transport.(*http.Transport); ok {
 		tr.CloseIdleConnections()
 	}

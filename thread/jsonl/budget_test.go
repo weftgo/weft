@@ -3,6 +3,9 @@ package jsonl_test
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -12,7 +15,7 @@ import (
 	"github.com/weftgo/weft/thread/jsonl"
 )
 
-// The jsonl half of the budget suite (plan §10, step 7.2): opening a
+// The jsonl half of the budget suite: opening a
 // 100k-entry session — the decode-and-adopt cost a restart pays — and
 // the per-append cost with the backend's own durability in the loop.
 
@@ -124,5 +127,86 @@ func BenchmarkAppendJSONL(b *testing.B) {
 			b.Fatal(err)
 		}
 		parent = e.ID
+	}
+}
+
+// buildFleet writes n session files — a header line each, the shape
+// Create leaves — straight to the directory: the list budget measures
+// reading a fleet, and creating one through the backend would spend
+// the test on 2n fsyncs.
+func buildFleet(tb testing.TB, dir string, n int) {
+	tb.Helper()
+	base := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < n; i++ {
+		id := "s_l" + strconv.Itoa(i)
+		line := fmt.Sprintf(`{"type":"session","weft":1,"id":%q,"created":%q}`+"\n",
+			id, base.Add(time.Duration(i)*time.Millisecond).Format(time.RFC3339Nano))
+		if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(line), 0o600); err != nil {
+			tb.Fatal(err)
+		}
+	}
+}
+
+// budgetList10k is one page plus the count over a 10k-session
+// directory, a title search and a meta filter beside it — the sqlite
+// budget's shape (sqlite/budget_test.go). A directory is this
+// backend's index, so every call reads every header; the budget is
+// what keeps that read proportional to the headers. Measured
+// 2026-10-01 at ~70ms a call.
+const budgetList10k = 15 * time.Second
+
+// budgetListBytesPerSession bounds what one List allocates per session
+// file it reads: a header's worth. The read buffer is shared across
+// the directory — it used to be a megabyte per file per call, 10 GiB
+// of garbage for this fleet.
+const budgetListBytesPerSession = 8 << 10
+
+func TestBudgetList10k(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	buildFleet(t, dir, 10_000)
+	st, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	start := time.Now()
+	page, err := thread.List(ctx, st, thread.Query{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.ReadMemStats(&after)
+	if len(page.Sessions) != 100 || page.Total != 10_000 {
+		t.Fatalf("page = %d sessions, total %d; want 100 of 10000", len(page.Sessions), page.Total)
+	}
+	if per := (after.TotalAlloc - before.TotalAlloc) / 10_000; per > budgetListBytesPerSession {
+		t.Errorf("List allocated %d bytes per session file, budget %d", per, budgetListBytesPerSession)
+	}
+	if _, err := thread.List(ctx, st, thread.Query{Limit: 100, TitleSearch: "s_l1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := thread.List(ctx, st, thread.Query{Limit: 100, Meta: map[string]string{"tier": "gold"}}); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > budgetList10k {
+		t.Errorf("list over 10k (page + count + title + meta) = %s, budget %s", d, budgetList10k)
+	}
+}
+
+func BenchmarkList10k(b *testing.B) {
+	ctx := context.Background()
+	dir := b.TempDir()
+	buildFleet(b, dir, 10_000)
+	st, err := jsonl.Open(dir)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := thread.List(ctx, st, thread.Query{Limit: 100}); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

@@ -210,7 +210,8 @@ func (p paced) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[weft
 
 // demo owns one thread session over durable jsonl storage: every /run
 // is a turn of it, so Studio groups the turns under one session — the
-// acceptance test's shape, and a file the byte-compare gate reads.
+// acceptance test's shape, and a file the byte-compare gate reads. It
+// holds the one Session value for as long as it serves.
 type demo struct {
 	mu    sync.Mutex
 	st    thread.Storage
@@ -250,19 +251,23 @@ func (d *demo) run(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), time.Minute)
 	defer cancel()
 
+	// One Session for the demo's life: a Session is its session's one
+	// writer from its first write until its Close (thread's writer
+	// lease), so the process keeps the value it created instead of
+	// opening the session again per request — a second Session would
+	// be refused with thread.ErrLocked while the first is open.
 	d.mu.Lock()
-	var err error
 	if d.s == nil {
-		d.s, err = thread.Create(ctx, d.st, d.agent, thread.PublicID("pub_demo"))
-	} else {
-		d.s, err = thread.Open(ctx, d.st, d.s.ID(), d.agent)
+		s, err := thread.Create(ctx, d.st, d.agent, thread.PublicID("pub_demo"))
+		if err != nil {
+			d.mu.Unlock()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		d.s = s
 	}
 	session := d.s
 	d.mu.Unlock()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	turn, err := session.Send(ctx, weft.User(question))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

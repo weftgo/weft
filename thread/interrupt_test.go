@@ -20,7 +20,7 @@ func holdingTool() (*weft.ToolDef, *release) { return blockingTool() }
 
 // Interrupt cancels the running turn, completes its dangling call with
 // the golden text, and runs the message as the next turn — the
-// interrupted entries stay on the tree (plan §6).
+// interrupted entries stay on the tree.
 func TestInterruptCancelsAndRuns(t *testing.T) {
 	ctx := context.Background()
 	model := wefttest.Script(
@@ -269,30 +269,40 @@ func TestOverflowCompactsAndReRuns(t *testing.T) {
 	if len(reasons) != 1 || reasons[0] != "overflow" {
 		t.Errorf("compaction reasons = %v, want exactly one overflow", reasons)
 	}
-	// One turn entry, one prompt: the failed attempt left no
-	// transcript of its own.
-	turns := 0
-	for _, e := range s.Entries() {
-		if _, ok := e.(thread.TurnEntry); ok {
-			turns++
-		}
+	// One prompt, and the failed attempt left no transcript of its own
+	// — but its ledger: a turn entry under the attempt's run id naming
+	// the re-run, beside the first turn's and the re-run's.
+	tes := turnEntries(s)
+	if len(tes) != 3 {
+		t.Fatalf("turn entries = %d, want 3 (the first turn, the failed attempt, the re-run)", len(tes))
 	}
-	if turns != 2 {
-		t.Errorf("turn entries = %d, want 2 (the first turn and the re-run's; the failed attempt records none)", turns)
+	if tes[1].RunID != s.ID()+"-t2" || tes[1].ReRun != t1.RunID() || !strings.Contains(tes[1].Err, "context window") {
+		t.Errorf("the attempt's entry = %+v, want run -t2, the overflow, and the re-run's id %s", tes[1], t1.RunID())
+	}
+	if tes[2].RunID != t1.RunID() || t1.RunID() != s.ID()+"-t3" {
+		t.Errorf("the re-run's entry runs under %q; the turn reports %q", tes[2].RunID, t1.RunID())
 	}
 }
 
-// A second overflow fails the turn with both errors joined.
+// A second overflow fails the turn with both errors joined. A turn
+// whose re-run never happened — the compaction had nothing to cut —
+// fails with the one overflow, said once.
 func TestOverflowSecondFailureJoins(t *testing.T) {
 	ctx := context.Background()
 	model := wefttest.Script(
-		wefttest.Fail(weft.ErrContextOverflow),
-		wefttest.Say("the summary"),
-		wefttest.Fail(weft.ErrContextOverflow),
+		wefttest.Say("the first answer"),                              // history, so the overflow compaction has a cut to make
+		wefttest.ToolCalls(wefttest.Call{Name: "note", ID: "call_a"}), // attempt one: a step lands…
+		wefttest.Fail(weft.ErrContextOverflow),                        // …then it overflows
+		wefttest.Say("the summary"),                                   // the compaction's summarizer
+		wefttest.Fail(weft.ErrContextOverflow),                        // the re-run overflows at once
 	)
-	agent := weft.New(model)
-	s, err := thread.Create(ctx, thread.Memory(), agent, thread.KeepRecent(1))
+	note := weft.Tool("note", "", func(context.Context, struct{}) (string, error) { return "noted", nil })
+	s, err := thread.Create(ctx, thread.Memory(), weft.New(model, note), thread.KeepRecent(1))
 	if err != nil {
+		t.Fatal(err)
+	}
+	t0, _ := s.Send(ctx, weft.User("a first question"))
+	if _, err := t0.Wait(); err != nil {
 		t.Fatal(err)
 	}
 	t1, err := s.Send(ctx, weft.User("a prompt that keeps overflowing"))
@@ -306,8 +316,27 @@ func TestOverflowSecondFailureJoins(t *testing.T) {
 	if !errors.Is(err, weft.ErrContextOverflow) {
 		t.Fatalf("err = %v, want the overflow sentinel", err)
 	}
-	if got := strings.Count(err.Error(), weft.ErrContextOverflow.Error()); got < 2 {
-		t.Errorf("err = %v, want both attempts' overflows joined", err)
+	if got := strings.Count(err.Error(), weft.ErrContextOverflow.Error()); got != 2 {
+		t.Errorf("err = %v, want both attempts' overflows joined (%d found)", err, got)
+	}
+	var runErr *weft.RunError
+	if !errors.As(err, &runErr) {
+		t.Errorf("err = %v, want a *weft.RunError in the chain", err)
+	}
+	// Two attempts ran, so two ledgers: the attempt's, then the turn's.
+	tes := turnEntries(s)
+	if len(tes) != 3 || tes[1].ReRun != tes[2].RunID || tes[2].Err == "" {
+		t.Fatalf("turn entries = %+v, want the first turn, the attempt (naming the re-run) and the failed re-run", tes)
+	}
+	// What the turn recorded is the re-run's transcript, not the failed
+	// attempt's: the attempt's step — its call and result — stays on
+	// its own line, off the path the next turn continues from.
+	for _, m := range s.Context() {
+		for _, p := range m.Content {
+			if c, ok := p.(weft.ToolCallPart); ok && c.ID == "call_a" {
+				t.Errorf("the failed attempt's step rides the active path:\n%s", renderContext(s))
+			}
+		}
 	}
 	// The re-run can be switched off: the first overflow fails directly.
 	model2 := wefttest.Script(
@@ -322,8 +351,12 @@ func TestOverflowSecondFailureJoins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := t2.Wait(); !errors.Is(err, weft.ErrContextOverflow) {
+	_, err = t2.Wait()
+	if !errors.Is(err, weft.ErrContextOverflow) {
 		t.Fatalf("err = %v, want the first overflow to fail directly", err)
+	}
+	if got := strings.Count(err.Error(), weft.ErrContextOverflow.Error()); got != 1 {
+		t.Errorf("err = %v, want the one overflow said once", err)
 	}
 	var compacted bool
 	for _, e := range s2.Entries() {
@@ -535,9 +568,8 @@ func (p *parkResumes) Stream(ctx context.Context, req weft.ModelRequest) iter.Se
 // An Interrupt that fells a resume mid-model still runs its message:
 // the canceled resume's persistence records the repaired input's tail
 // — the approval resolution — so the boundary it was resolving closes
-// and the interrupting follow-up is not held behind it (plan §6 steps
-// 3–4; the resume was the boundary's resolver, and its corpse
-// completes it).
+// and the interrupting follow-up is not held behind it (the resume was
+// the boundary's resolver, and its corpse completes it).
 func TestInterruptDuringResumeRunsTheMessage(t *testing.T) {
 	ctx := context.Background()
 	gate := weft.Tool("gate", "", func(_ context.Context, _ struct{}) (string, error) {
@@ -605,5 +637,165 @@ func TestInterruptDuringResumeRunsTheMessage(t *testing.T) {
 	}
 	if p := s.Pending(); len(p) != 0 {
 		t.Errorf("pending after the interrupt = %d, want the boundary resolved", len(p))
+	}
+}
+
+// A Rollback over the session's first turn returns the leaf to the
+// root: the follow-up runs as though nothing had been said.
+func TestRollbackOfTheFirstTurnReturnsToTheRoot(t *testing.T) {
+	ctx := context.Background()
+	agent, model, started, rel := heldAgent("a fresh start")
+	defer rel.open()
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, _ := s.Send(ctx, weft.User("start the work"))
+	<-started
+	t2, err := s.Send(ctx, weft.User("no — this instead"), thread.As(thread.Rollback))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t1.Wait(); err == nil {
+		t.Fatal("the rolled-back turn reported success")
+	}
+	if res, err := t2.Wait(); err != nil || res.Text() != "a fresh start" {
+		t.Fatalf("the follow-up: %v, %v", res, err)
+	}
+	if got, want := contextTexts(s), []string{"no — this instead", "a fresh start"}; !equalStrings(got, want) {
+		t.Errorf("Context = %v, want %v: the first turn rolled back to the root", got, want)
+	}
+	reqs := model.Requests()
+	if last := reqs[len(reqs)-1]; len(last.Messages) != 1 {
+		t.Errorf("the follow-up's model call carried %d messages, want its prompt alone", len(last.Messages))
+	}
+}
+
+// An Interrupt or Rollback over a parked boundary whose denial cannot
+// be recorded is refused whole: the Send fails, and the message it had
+// already accepted leaves the queue again — its receipt dropped, so
+// neither this session nor a reopened one runs it behind a boundary
+// that still stands. Under RequireSigned too: the denial is the
+// session's own, not the unsigned door's.
+func TestInterruptRefusedLeavesNothingQueued(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		policy thread.Policy
+		signed bool
+	}{
+		{"interrupt", thread.Interrupt, false},
+		{"rollback", thread.Rollback, false},
+		{"interrupt_require_signed", thread.Interrupt, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := &failNthAppend{Storage: thread.Memory()}
+			agent, ran := refundAgent(
+				wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "call_r"}),
+				wefttest.Say("resumed tail"),
+				wefttest.Say("after the denial"),
+			)
+			opts := []thread.SessionOption{thread.BusyPolicy(tc.policy)}
+			var reopenOpts []thread.SessionOption
+			if tc.signed {
+				ring, _ := signerRing(t)
+				opts = append(opts, thread.WithKeyring(ring), thread.RequireSigned())
+				reopenOpts = append(reopenOpts, thread.WithKeyring(ring))
+			}
+			s, err := thread.Create(ctx, st, agent, opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parkTurn(t, s, ctx)
+
+			// The Send's appends: 1 the accepted receipt, 2 the denial.
+			st.arm(2)
+			turn, err := s.Send(ctx, weft.User("forget the refund"))
+			if err == nil || turn != nil {
+				t.Fatalf("the interrupting Send = %v, %v; want the storage's refusal", turn, err)
+			}
+			if q := s.Queue(); len(q) != 0 {
+				t.Errorf("Queue after the refused interrupt = %+v, want empty", q)
+			}
+			if got := len(s.Pending()); got != 1 {
+				t.Fatalf("Pending = %d, want the call still parked", got)
+			}
+			status := map[string]int{}
+			for _, r := range receipts(s) {
+				status[r.Status]++
+			}
+			if status[thread.ReceiptAccepted] != 1 || status[thread.ReceiptDropped] != 1 {
+				t.Errorf("receipts = %v, want the acceptance and its drop", status)
+			}
+
+			// The same Send again, the storage well: the boundary is
+			// denied by the session itself and the message runs.
+			follow, err := s.Send(ctx, weft.User("forget the refund"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, err := follow.Wait()
+			if err != nil || res.Text() != "after the denial" {
+				t.Fatalf("the follow-up: %v, %v", res, err)
+			}
+			got := decisionsFor(s, "call_r")
+			if len(got) != 1 || got[0].Via != "interrupt" || got[0].Outcome != thread.OutcomeDeny {
+				t.Errorf("the interrupt's denial = %+v, want one deny via interrupt", got)
+			}
+			if len(ran.snapshot()) != 0 {
+				t.Error("the denied call ran")
+			}
+			if n := countUser(s, "forget the refund"); n != 1 {
+				t.Errorf("the message sits %d times in the context, want 1", n)
+			}
+			// Nothing of the refused attempt comes back with the file.
+			if err := s.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if q := reopenWith(t, ctx, st.Storage, s, agent, reopenOpts...).Queue(); len(q) != 0 {
+				t.Errorf("the reopened Queue = %+v, want empty", q)
+			}
+		})
+	}
+}
+
+// An interrupting Send carries its run options into its own turn, like
+// any Send.
+func TestInterruptingSendKeepsItsRunOptions(t *testing.T) {
+	ctx := context.Background()
+	model := wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "wait"}), wefttest.Say("after"))
+	tool, rel := blockingTool()
+	defer rel.open()
+	started := make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	tenants := map[string]string{} // run id → the tenant its metadata carried
+	agent := weft.New(model, tool, weft.Tap(func(ctx context.Context, ev weft.Event) {
+		switch ev := ev.(type) {
+		case weft.RunStart:
+			mu.Lock()
+			tenants[ev.ID] = weft.MetadataFromContext(ctx)["tenant"]
+			mu.Unlock()
+		case weft.ToolStart:
+			once.Do(func() { close(started) })
+		}
+	}))
+	s, _ := thread.Create(ctx, thread.Memory(), agent)
+	if _, err := s.Send(ctx, weft.User("go")); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	next, err := s.Send(ctx, weft.User("stop"), thread.As(thread.Interrupt),
+		thread.RunOptions(weft.Metadata(map[string]string{"tenant": "acme"})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := next.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got := tenants[next.RunID()]; got != "acme" {
+		t.Errorf("the interrupting send's run carried tenant %q, want its own run options (acme)", got)
 	}
 }

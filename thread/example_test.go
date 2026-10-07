@@ -3,6 +3,7 @@ package thread_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -113,7 +114,7 @@ func ExampleMemory() {
 // deterministic ids so the output is stable.
 func ExampleCreate() {
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script()) // no run happens here; Send arrives in step 1.7
+	agent := weft.New(wefttest.Script()) // no run happens here: the example only appends
 	st := thread.Memory()
 
 	next := 0
@@ -166,7 +167,7 @@ func ExampleSession_Usage() {
 		fmt.Println(err)
 		return
 	}
-	// A finished turn, recorded the way Send will from step 1.7.
+	// A finished turn, recorded the way Send records one.
 	if err := st.Append(ctx, s.ID(),
 		thread.MessageEntry{ID: "e_q", Created: time.Now().UTC(), Message: weft.User("Summarize the plan.")},
 		thread.TurnEntry{
@@ -215,7 +216,7 @@ func ExampleSession_Branch() {
 		fmt.Println(err)
 		return
 	}
-	// Two messages of history, appended the way Send will from step 1.7.
+	// Two messages of history, appended the way Send appends them.
 	if err := st.Append(ctx, s.ID(),
 		thread.MessageEntry{ID: "e_1", Created: time.Now().UTC(), Message: weft.User("draft the intro")},
 		thread.MessageEntry{ID: "e_2", ParentID: "e_1", Created: time.Now().UTC(), Message: weft.Assistant("done")},
@@ -223,6 +224,10 @@ func ExampleSession_Branch() {
 		fmt.Println(err)
 		return
 	}
+	// The entries went in behind the Session's back, and it is the
+	// session's writer since Create: close it, and open one that
+	// sees them.
+	_ = s.Close(ctx)
 	s, err = thread.Open(ctx, st, s.ID(), agent, thread.IDs(func() string { id := ids[next]; next++; return id }))
 	if err != nil {
 		fmt.Println(err)
@@ -329,6 +334,10 @@ func ExampleSession_Compact() {
 		fmt.Println(err)
 		return
 	}
+	// The entries went in behind the Session's back, and it is the
+	// session's writer since Create: close it, and open one that
+	// sees them.
+	_ = s.Close(ctx)
 	s, err := thread.Open(ctx, st, s.ID(), agent)
 	if err != nil {
 		fmt.Println(err)
@@ -354,17 +363,45 @@ func ExampleSession_Compact() {
 }
 
 // A session under the Reject busy policy says ErrBusy instead of
-// holding a follow-up while a turn runs.
+// holding a follow-up while a turn runs; once the turn has ended the
+// same Send is accepted.
 func ExampleBusyPolicy() {
 	ctx := context.Background()
-	agent := weft.New(wefttest.Script())
+	started, release := make(chan struct{}), make(chan struct{})
+	agent := weft.New(
+		wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "work", ID: "call_1"}),
+			wefttest.Say("Done."),
+			wefttest.Say("Here it is."),
+		),
+		weft.Tool("work", "Takes a while.", func(ctx context.Context, _ struct{}) (string, error) {
+			close(started)
+			<-release
+			return "ok", nil
+		}),
+	)
 	s, _ := thread.Create(ctx, thread.Memory(), agent, thread.BusyPolicy(thread.Reject))
-	_ = s
-	// With a turn in flight (a blocking tool, say):
-	//   if _, err := s.Send(ctx, weft.User("one more thing")); errors.Is(err, thread.ErrBusy) { … }
-	fmt.Println("Queue is the default; Reject is one option away")
+
+	turn, _ := s.Send(ctx, weft.User("Do the long job."))
+	<-started
+	_, err := s.Send(ctx, weft.User("One more thing."))
+	fmt.Println("while the turn runs:", errors.Is(err, thread.ErrBusy))
+
+	close(release)
+	if _, err := turn.Wait(); err != nil {
+		fmt.Println(err)
+		return
+	}
+	next, err := s.Send(ctx, weft.User("One more thing."))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	res, _ := next.Wait()
+	fmt.Println("after it:", res.Text())
 	// Output:
-	// Queue is the default; Reject is one option away
+	// while the turn runs: true
+	// after it: Here it is.
 }
 
 // Pin keeps an entry in the context through every compaction — the
@@ -382,6 +419,10 @@ func ExampleSession_Pin() {
 		fmt.Println(err)
 		return
 	}
+	// The entries went in behind the Session's back, and it is the
+	// session's writer since Create: close it, and open one that
+	// sees them.
+	_ = s.Close(ctx)
 	open, _ := thread.Open(ctx, st, s.ID(), agent)
 	if err := open.Pin(ctx, "e_req"); err != nil {
 		fmt.Println(err)
@@ -411,7 +452,7 @@ func ExampleSession_Decide() {
 			weft.RequireApproval()),
 	)
 	next := 0
-	ids := []string{"s_appr", "e_1", "e_2", "e_3", "e_4", "e_5", "e_6", "e_7", "e_8", "e_9", "e_10", "e_11"}
+	ids := []string{"s_appr", "e_1", "e_2", "e_3", "e_4", "e_5", "e_6", "e_7", "e_8", "e_9", "e_10", "e_11", "e_12"}
 	s, _ := thread.Create(ctx, thread.Memory(), agent,
 		thread.IDs(func() string { id := ids[next]; next++; return id }))
 

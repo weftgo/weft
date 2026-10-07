@@ -65,24 +65,10 @@ function bareStep(run: string, timing: Record<string, number>): unknown[] {
   ]
 }
 
-/** The request record a run with step-0's attempts holds: one row per
- * attempt, each naming its own model (what A1.4's section already
- * reads; the collapsed header's attempt count comes from here). */
-function rowsOf(step: StepDoc): { requests: RequestRow[] } {
-  const first = step.request as RequestRow
-  return {
-    requests: step.attempts.map((a) => ({
-      ...first,
-      index: a.request_index ?? 0,
-      attempt: a.attempt,
-      body: {
-        ...first.body,
-        attempt: a.attempt,
-        model: { provider: a.provider ?? "", name: a.model },
-      },
-    })),
-  }
-}
+/** The recorded run's request record (TestRequestsStepsGolden: A7's
+ * scenario through the real pipeline): step 0's four attempts glm-a,
+ * glm-b, glm-a, glm-b, one row each, then steps 1 and 2. */
+const recorded = () => golden<{ requests: RequestRow[] }>("requests-steps")
 
 let studio: FakeStudio
 function serve(opts: {
@@ -92,8 +78,15 @@ function serve(opts: {
   requests?: { requests: RequestRow[]; badge?: string } | object
   spans?: Span[]
   capabilities?: string[]
+  status?: RunDoc["status"]
 }) {
-  const doc: RunDoc = { ...rOK, id: opts.run, steps: 1, children: [] }
+  const doc: RunDoc = {
+    ...rOK,
+    id: opts.run,
+    steps: 1,
+    children: [],
+    status: opts.status ?? rOK.status,
+  }
   studio = new FakeStudio()
     .on("GET meta", meta(opts.capabilities ?? ["requests", "steps", "ingest"]))
     .on(`GET runs/${opts.run}`, doc)
@@ -132,6 +125,13 @@ function attemptsSection(step = 0): HTMLElement {
   return s
 }
 
+/** The card header's not_recorded badge (its HoleBadges). */
+function headBadge(): HTMLElement | null {
+  return card().querySelector<HTMLElement>(
+    ':scope > div:first-child [data-holes] [data-hole="not_recorded"]'
+  )
+}
+
 function openAttempts(step = 0) {
   fireEvent.click(
     within(attemptsSection(step)).getByRole("button", { name: /attempts/ })
@@ -140,6 +140,58 @@ function openAttempts(step = 0) {
 
 const step0 = golden<StepDoc>("step-0")
 
+/** The run's timed spans as the pipeline records A7's step 0: the
+ * invoke_agent span, the chat span (glm-a asked, glm-b answered, TTFT
+ * 180 ms), and its four attempt spans — three stream_idle errors, the
+ * fourth ok. */
+function chatSpans(run: string): Span[] {
+  const t0 = Date.parse(rOK.started)
+  const at = (ms: number) => new Date(t0 + ms).toISOString()
+  const span = (
+    id: string,
+    parent: string,
+    name: string,
+    from: number,
+    to: number,
+    status: Span["status"],
+    attrs: Record<string, unknown>
+  ): Span => ({
+    trace_id: rOK.trace_id,
+    span_id: id,
+    parent_span_id: parent,
+    name,
+    kind: "internal",
+    start: at(from),
+    end: at(to),
+    status,
+    status_message: "",
+    service: "svc",
+    attrs: { "weft.run.id": run, ...attrs },
+    events: [],
+  })
+  const models = ["glm-a", "glm-b", "glm-a", "glm-b"]
+  const spans: Span[] = [
+    span("a", "", "invoke_agent orders", 0, 100, "ok", {
+      "gen_ai.operation.name": "invoke_agent",
+    }),
+    span("b", "a", "chat glm-a", 1, 90, "ok", {
+      "gen_ai.operation.name": "chat",
+      "weft.step.index": 0,
+      "gen_ai.request.model": "glm-a",
+      "gen_ai.response.model": "glm-b",
+      "weft.ttft_ms": 180,
+    }),
+    ...models.map((m, i) =>
+      span(`c${i + 1}`, "b", "attempt", 2 + i * 20, 20 + i * 20, i < 3 ? "error" : "ok", {
+        "weft.attempt.index": i + 1,
+        "gen_ai.request.model": m,
+        ...(i < 3 ? { "error.type": "stream_idle" } : {}),
+      })
+    ),
+  ]
+  return spans
+}
+
 describe("the step story's attempts and timing (A4.2)", () => {
   it("names the answering model on the retry-over-fallback step and lists every attempt with its model and error", async () => {
     const run = step0.run_id
@@ -147,7 +199,7 @@ describe("the step story's attempts and timing (A4.2)", () => {
       run,
       events: streamOf(run, step0.events.map((e) => e.event)),
       steps: ["0"],
-      requests: rowsOf(step0),
+      requests: recorded(),
     })
     renderApp(`/runs/${run}?view=story`)
     // Collapsed: the line comes from the request rows, the timing from
@@ -174,10 +226,12 @@ describe("the step story's attempts and timing (A4.2)", () => {
     expect(
       rows.map((r) => r.querySelector("[data-attempt-outcome]")?.textContent)
     ).toEqual(["stream_idle", "stream_idle", "stream_idle", "ok"])
-    // The header now reads the step route: the same words.
+    // The header now reads the step route: the same words, the same
+    // timing.
     expect(card().querySelector("[data-attempt-line]")?.textContent).toBe(
       "attempt 4 of 4 · fallback to glm-b"
     )
+    expect(card().querySelector("[data-timing]")?.textContent).toBe("1 ms")
     expect(attemptsSection().querySelector("[data-hole]")).toBeNull()
   })
 
@@ -190,11 +244,12 @@ describe("the step story's attempts and timing (A4.2)", () => {
       requests: golden("requests-not-recorded"),
     })
     renderApp(`/runs/${run}?view=story`)
-    // Collapsed: no timing, no rows — the client tells it itself.
+    // Collapsed: no timing, no rows — the card tells it itself, with
+    // what it checked.
     await waitFor(() =>
-      expect(
-        attemptsSection().querySelector('[data-hole="not_recorded"]')
-      ).toBeTruthy()
+      expect(headBadge()?.getAttribute("title")).toContain(
+        "its request record no attempt rows"
+      )
     )
     expect(card().querySelector("[data-timing]")).toBeNull()
     expect(card().querySelector("[data-attempt-line]")).toBeNull()
@@ -261,55 +316,12 @@ describe("the step story's attempts and timing (A4.2)", () => {
 
   it("the trace view's chat span names the answering model and the attempt, with the attempt list under it", async () => {
     const run = step0.run_id
-    const t0 = Date.parse(rOK.started)
-    const at = (ms: number) => new Date(t0 + ms).toISOString()
-    const span = (
-      id: string,
-      parent: string,
-      name: string,
-      from: number,
-      to: number,
-      status: Span["status"],
-      attrs: Record<string, unknown>
-    ): Span => ({
-      trace_id: rOK.trace_id,
-      span_id: id,
-      parent_span_id: parent,
-      name,
-      kind: "internal",
-      start: at(from),
-      end: at(to),
-      status,
-      status_message: "",
-      service: "svc",
-      attrs: { "weft.run.id": run, ...attrs },
-      events: [],
-    })
-    const models = ["glm-a", "glm-b", "glm-a", "glm-b"]
-    const spans: Span[] = [
-      span("a", "", "invoke_agent orders", 0, 100, "ok", {
-        "gen_ai.operation.name": "invoke_agent",
-      }),
-      span("b", "a", "chat glm-a", 1, 90, "ok", {
-        "gen_ai.operation.name": "chat",
-        "weft.step.index": 0,
-        "gen_ai.request.model": "glm-a",
-        "gen_ai.response.model": "glm-b",
-        "weft.ttft_ms": 180,
-      }),
-      ...models.map((m, i) =>
-        span(`c${i + 1}`, "b", "attempt", 2 + i * 20, 20 + i * 20, i < 3 ? "error" : "ok", {
-          "weft.attempt.index": i + 1,
-          "gen_ai.request.model": m,
-          ...(i < 3 ? { "error.type": "stream_idle" } : {}),
-        })
-      ),
-    ]
+    const spans = chatSpans(run)
     serve({
       run,
       events: streamOf(run, step0.events.map((e) => e.event)),
       steps: ["0"],
-      requests: rowsOf(step0),
+      requests: recorded(),
       spans,
     })
     renderApp(`/runs/${run}?axis=time&sel=t:b`)
@@ -331,5 +343,64 @@ describe("the step story's attempts and timing (A4.2)", () => {
       document.querySelectorAll("[data-attempts-pane] [data-attempt-outcome]")
     ).map((o) => o.textContent)
     expect(outcomes).toEqual(["stream_idle", "stream_idle", "stream_idle", "ok"])
+  })
+
+  it("a step the run failed in says its attempts and that none answered", async () => {
+    const run = step0.run_id
+    serve({
+      run,
+      events: streamOf(run, [{ type: "step_start", run_id: run, index: 0 }]).slice(0, 2),
+      steps: ["0"],
+      requests: recorded(),
+      status: "failed",
+    })
+    renderApp(`/runs/${run}?view=story`)
+    await waitFor(() =>
+      expect(card().querySelector("[data-attempt-line]")?.textContent).toBe(
+        "4 attempts · none answered"
+      )
+    )
+    expect(studio.calls(`GET runs/${run}/steps/0`)).toEqual([])
+  })
+
+  it("a pre-A4 run badges not_recorded on a Studio without the steps and requests capabilities", async () => {
+    const run = "old2"
+    serve({
+      run,
+      events: streamOf(run, bareStep(run, {})),
+      steps: ["not-recorded"],
+      capabilities: ["ingest"],
+    })
+    renderApp(`/runs/${run}?view=story`)
+    await waitFor(() =>
+      expect(headBadge()?.getAttribute("title")).toContain(
+        "recorded by a weft before attempt reporting (A4)"
+      )
+    )
+    expect(headBadge()?.getAttribute("title")).toContain("upgrade weft and re-run")
+    expect(card().querySelector("[data-attempts]")).toBeNull()
+    expect(studio.calls(`GET runs/${run}/steps/0`)).toEqual([])
+    expect(studio.calls(`GET runs/${run}/requests`)).toEqual([])
+  })
+
+  it("the trace view's chat span without the steps capability still names the attempt, and fetches nothing", async () => {
+    const run = step0.run_id
+    serve({
+      run,
+      events: streamOf(run, step0.events.map((e) => e.event)),
+      steps: ["0"],
+      requests: recorded(),
+      spans: chatSpans(run),
+      capabilities: ["requests", "ingest"],
+    })
+    renderApp(`/runs/${run}?axis=time&sel=t:b`)
+    const line = await waitFor(() => {
+      const l = document.querySelector<HTMLElement>("dd [data-attempt-line]")
+      expect(l).toBeTruthy()
+      return l!
+    })
+    expect(line.textContent).toBe("attempt 4 of 4 · fallback to glm-b")
+    expect(document.querySelector("[data-attempts]")).toBeNull()
+    expect(studio.calls(`GET runs/${run}/steps/0`)).toEqual([])
   })
 })

@@ -25,6 +25,7 @@ import type {
   FoldedToolCall,
   PlacedBatch,
 } from "@/lib/events"
+import { mergeHoles } from "@/lib/honesty"
 import type { HoleMark } from "@/lib/honesty"
 import { tokens } from "@/lib/format"
 import { bytes } from "@/lib/summarize"
@@ -34,6 +35,7 @@ import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
 import {
   AttemptsSection,
   StepHeadline,
+  stepAttemptsHole,
 } from "@/components/studio/step-attempts"
 import { RequestSection } from "@/components/studio/step-request"
 import type { RunRequests } from "@/components/studio/step-request"
@@ -433,7 +435,10 @@ function StepCard({
   // The step route's assembled holes when the page has it (A7): read
   // from the cache only — the card never fetches it.
   const stepDoc = useQuery({ ...stepQuery(runId, step.index), enabled: false })
-  const holes = stepHoles(step, runHoles, stepDoc.data)
+  const holes = mergeHoles(
+    stepHoles(step, runHoles, stepDoc.data),
+    stepAttemptsHole(step, requests)
+  )
   // The children the step route names (A10), joined by call id: the
   // run document's rows win where both have one (they carry more).
   const stepChildren = new Map(
@@ -455,7 +460,12 @@ function StepCard({
       <div className="flex flex-wrap items-center gap-2">
         <span className="eyebrow">step {step.index}</span>
         {stepOutcome(step, runStatus)}
-        <StepHeadline step={step} runId={runId} requests={requests} />
+        <StepHeadline
+          step={step}
+          runId={runId}
+          runStatus={runStatus}
+          requests={requests}
+        />
         <HoleBadges holes={holes} />
         <span className="ml-auto flex items-center gap-1">
           <span

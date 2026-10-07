@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -310,6 +311,37 @@ func TestRequestsRoutes(t *testing.T) {
 // destination keeps its request records (stripped) but no prompt or
 // tools record — each inline object is {hash, badge: stripped}, and
 // the tools route is an empty list with the stripped badge and its fix.
+// TestRequestsStepsGolden records the A7 step scenario (recordStepsRun:
+// step 0's mw.Retry over mw.Fallback, four attempts glm-a, glm-b, glm-a,
+// glm-b) and goldens its request record: the rows the web client's
+// attempt line reads (plan A4.2) — one per attempt, each naming the
+// model that attempt asked.
+func TestRequestsStepsGolden(t *testing.T) {
+	ts, _ := requestsServer(t)
+	recordStepsRun(t, ts.URL, "r_steps", nil)
+	body := fetchJSON(t, ts, "/api/runs/r_steps/requests", func(b string) bool { return strings.Contains(b, `"index":5`) })
+	requestsGolden(t, "requests-steps.golden.json", body)
+	var page struct {
+		Requests []struct {
+			Step    int   `json:"step"`
+			Attempt int64 `json:"attempt"`
+			Body    struct {
+				Model struct{ Name string } `json:"model"`
+			} `json:"body"`
+		} `json:"requests"`
+	}
+	decode(t, body, &page)
+	var got []string
+	for _, r := range page.Requests {
+		if r.Step == 0 {
+			got = append(got, strconv.FormatInt(r.Attempt, 10)+":"+r.Body.Model.Name)
+		}
+	}
+	if want := "1:glm-a 2:glm-b 3:glm-a 4:glm-b"; strings.Join(got, " ") != want {
+		t.Errorf("step 0's request rows = %v, want %s", got, want)
+	}
+}
+
 func TestRequestsContentOff(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordRequestsRun(t, ts.URL, "r_off", otel.NoContent())

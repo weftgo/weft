@@ -25,6 +25,7 @@ import {
   timingLine,
 } from "@/lib/attempts"
 import type { FoldedStep } from "@/lib/events"
+import type { HoleMark } from "@/lib/honesty"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import type { RunRequests } from "@/components/studio/step-request"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -38,17 +39,23 @@ import { useCapabilities } from "@/hooks/use-capabilities"
 export function StepHeadline({
   step,
   runId,
+  runStatus,
   requests,
 }: {
   step: FoldedStep
   runId: string
+  runStatus: string
   requests?: RunRequests
 }) {
   const doc = useQuery({ ...stepQuery(runId, step.index), enabled: false })
   const d = doc.data
   const line = attemptLine(
     (d ? factsFromStep(d) : null) ??
-      factsFromRows(requests?.steps.get(step.index)?.rows, !!step.finish)
+      factsFromRows(
+        requests?.steps.get(step.index)?.rows,
+        !!step.finish,
+        runStatus === "running"
+      )
   )
   const timing = timingLine(
     d?.latency_ms ?? step.finish?.latencyMs,
@@ -77,6 +84,24 @@ export function StepHeadline({
       ) : null}
     </>
   )
+}
+
+/**
+ * stepAttemptsHole is the card's not_recorded hole for a step written
+ * before attempt reporting (attemptsHole) — the panel's rule, computed
+ * on the card whatever the capabilities: no requests capability reads
+ * as zero rows; a record still loading or unreadable says nothing.
+ */
+export function stepAttemptsHole(
+  step: Pick<FoldedStep, "index" | "finish">,
+  requests?: RunRequests
+): HoleMark[] {
+  if (requests && (requests.loading || requests.error)) return []
+  const h = attemptsHole(
+    step.finish,
+    requests?.steps.get(step.index)?.rows.length ?? 0
+  )
+  return h ? [h] : []
 }
 
 function outcomeOf(a: StepAttempt) {
@@ -166,9 +191,7 @@ export function AttemptsSection({
   requests,
   defaultOpen = false,
 }: {
-  /** The step's index, and its folded step_finish when the caller has
-   * it (the timing that tells a pre-A4 step while collapsed). */
-  step: Pick<FoldedStep, "index" | "finish">
+  step: { index: number }
   runId: string
   runStatus: string
   requests?: RunRequests
@@ -183,11 +206,9 @@ export function AttemptsSection({
   })
   if (!capable) return null
   const running = runStatus === "running"
-  // Collapsed, the request rows say how many attempts, and a finished
-  // step with no timing and no rows predates attempt reporting.
-  const rowsKnown = requests && !requests.loading && !requests.error
+  // Collapsed, the request rows say how many attempts (a step older
+  // than attempt reporting is badged on the card: stepAttemptsHole).
   const rows = requests?.steps.get(step.index)?.rows ?? []
-  const old = rowsKnown ? attemptsHole(step.finish, rows.length) : null
   let body: React.ReactNode = null
   if (open) {
     body = q.data ? (
@@ -224,9 +245,6 @@ export function AttemptsSection({
           <span className="font-mono text-[11px] text-faint">
             {rows.length} {rows.length === 1 ? "attempt" : "attempts"}
           </span>
-        ) : null}
-        {!open && old ? (
-          <HoleBadge hole={old.hole} reason={old.reason} />
         ) : null}
       </div>
       {body}

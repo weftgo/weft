@@ -1052,9 +1052,13 @@ export interface LogRow {
 export interface LogsPage extends Holed {
   logs: LogRow[]
   next_from?: number
-  /** The run is still running: more lines may arrive (reason says so;
-   * no badge). */
+  /** The run is still running: more lines may arrive (partial_reason
+   * says so; no badge). */
   partial?: boolean
+  /** Why the lines are partial (beside partial). */
+  partial_reason?: string
+  /** Every hole of the envelope, in ADR 0028 §11's order. */
+  holes?: StepHole[]
 }
 
 /** The logs route's query: from (inclusive index), limit (0/absent is

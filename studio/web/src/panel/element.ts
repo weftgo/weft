@@ -1436,16 +1436,22 @@ function renderStep(
   // read for the Request line, the folded step_finish's timing — no
   // fetch of its own; the same words as the run page (lib/attempts).
   const rows = req?.steps.get(step.index)?.rows ?? []
+  // A record cut at the page cap holds every row of the steps before
+  // its last row's step; that step's rows and later ones may be short
+  // — no total and no pre-A4 reading from them.
+  const complete = !req?.error && (!req?.truncated || step.index < lastStep(req))
   if (step.finish) {
     head.appendChild(el("span", undefined, step.finish.reason))
     head.appendChild(el("span", undefined, usageLine(step.finish.usage)))
-    const line = attemptLine(factsFromRows(rows, true))
-    if (line) head.appendChild(el("span", "weft-badge weft-info", line, { "data-weft-attempts": "" }))
+  }
+  const line = complete ? attemptLine(factsFromRows(rows, !!step.finish, runStatus === "running")) : null
+  if (line) head.appendChild(el("span", "weft-badge weft-info", line, { "data-weft-attempts": "" }))
+  if (step.finish) {
     const timing = timingLine(step.finish.latencyMs, step.finish.ttftMs, "ttft")
     if (timing) head.appendChild(el("span", undefined, timing, { "data-weft-timing": "" }))
   }
   const own = stepHoles(step, ctx?.child ? ctx.child.doc?.holes : t?.doc?.holes)
-  const old = req?.error ? null : attemptsHole(step.finish, rows.length)
+  const old = complete ? attemptsHole(step.finish, rows.length) : null
   const holes = holeBadges(old ? mergeHoles(own, [old]) : own)
   if (holes) head.appendChild(holes)
   card.appendChild(head)
@@ -1524,6 +1530,13 @@ function compactionBox(
   }
   box.appendChild(d)
   return box
+}
+
+/** lastStep is the highest step the request record holds a row of. */
+function lastStep(req: PanelRequests): number {
+  let n = -1
+  for (const k of req.steps.keys()) if (k > n) n = k
+  return n
 }
 
 /** A request hole's badge as the panel words it: the shared honesty

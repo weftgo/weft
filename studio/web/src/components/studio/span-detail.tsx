@@ -168,7 +168,12 @@ function StepDetail({
       <div className="flex flex-wrap items-center gap-2">
         {stepOutcome(step, runStatus)}
         {runId ? (
-          <StepHeadline step={step} runId={runId} requests={requests} />
+          <StepHeadline
+            step={step}
+            runId={runId}
+            runStatus={runStatus}
+            requests={requests}
+          />
         ) : null}
         <span className="ml-auto font-mono text-[10px] text-faint tabular-nums">
           events {step.from}–{step.to}
@@ -496,16 +501,22 @@ function chatFacts(sp: TimedSpan, timed: TimedSpan[]): [string, React.ReactNode]
     ["requested", requested || "—"],
     ["answered", answered || "not reported"],
   ]
-  const line = ok
-    ? attemptLine({
-        n: num(ok.attrs["weft.attempt.index"]) ?? kids.indexOf(ok) + 1,
-        total: kids.length,
-        requested,
-        answered,
-      })
-    : null
+  // No attempt ok on an ended call: every attempt failed (n 0, "none
+  // answered"); a call still open says nothing yet.
+  const line = attemptLine(
+    ok
+      ? {
+          n: num(ok.attrs["weft.attempt.index"]) ?? kids.indexOf(ok) + 1,
+          total: kids.length,
+          requested,
+          answered,
+        }
+      : kids.length && sp.status !== "unset"
+        ? { n: 0, total: kids.length }
+        : null
+  )
   if (line) rows.push(["attempts", <span data-attempt-line>{line}</span>])
-  else if (kids.length) rows.push(["attempts", String(kids.length)])
+  else if (kids.length > 1) rows.push(["attempts", String(kids.length)])
   const ttft = num(sp.attrs["weft.ttft_ms"])
   if (ttft) rows.push(["first token", msText(ttft)])
   return rows

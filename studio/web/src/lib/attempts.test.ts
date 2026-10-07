@@ -27,10 +27,13 @@ describe("attempts", () => {
     expect(attemptLine(null)).toBeNull()
   })
 
-  it("reads the request rows only for a finished step", () => {
+  it("reads the request rows: the last attempt of a finished step answered, none of an ended unfinished one", () => {
     const rows = [row(1, "glm-a"), row(2, "glm-a")]
-    expect(factsFromRows(rows, false)).toBeNull()
     expect(attemptLine(factsFromRows(rows, true))).toBe("attempt 2 of 2 · retry")
+    expect(factsFromRows(rows, false, true)).toBeNull()
+    expect(attemptLine(factsFromRows(rows, false))).toBe("2 attempts · none answered")
+    expect(attemptLine(factsFromRows([row(1, "a")], false))).toBe("1 attempt · none answered")
+    expect(factsFromRows([], false)).toBeNull()
   })
 
   it("reads the step route: the last ok attempt answered", () => {
@@ -39,6 +42,16 @@ describe("attempts", () => {
     )
     expect(factsFromStep(golden<StepDoc>("step-not-recorded"))).toBeNull()
     expect(factsFromStep({})).toBeNull()
+    const failed = {
+      status: "error",
+      model: { requested: "glm-a" },
+      attempts: [
+        { attempt: 1, model: "glm-a", outcome: "error" },
+        { attempt: 2, model: "glm-b", outcome: "error" },
+      ],
+    }
+    expect(attemptLine(factsFromStep(failed))).toBe("2 attempts · none answered")
+    expect(factsFromStep({ ...failed, status: "running" })).toBeNull()
   })
 
   it("says timing without inventing a zero", () => {
@@ -51,6 +64,9 @@ describe("attempts", () => {
 
   it("tells a pre-A4 step and relative times", () => {
     expect(attemptsHole({}, 0)?.hole).toBe("not_recorded")
+    expect(attemptsHole({}, 0)?.reason).toBe(
+      "this step's step_finish has no timing and its request record no attempt rows: it was recorded by a weft before attempt reporting (A4)"
+    )
     expect(attemptsHole({ latencyMs: 3 }, 0)).toBeNull()
     expect(attemptsHole({}, 2)).toBeNull()
     expect(attemptsHole(undefined, 0)).toBeNull()

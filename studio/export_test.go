@@ -724,8 +724,9 @@ func TestExportReadTokenContentOff(t *testing.T) {
 }
 
 // TestExportOTLPKeepsTruncatedAndDerived: a hand-written record set
-// whose prompt was cut by a cap (truncated) and whose tools record did
-// not parse (derived) re-ingests from its OTLP export with both holes
+// whose prompt was cut by a cap (truncated), whose tools record and
+// second prompt did not parse (derived) — both badged in the export's
+// top-level holes — re-ingests from its OTLP export with both holes
 // intact — never read back as a gap.
 func TestExportOTLPKeepsTruncatedAndDerived(t *testing.T) {
 	ts, srv := requestsServer(t)
@@ -748,7 +749,12 @@ func TestExportOTLPKeepsTruncatedAndDerived(t *testing.T) {
 		rec(3, "prompt", `{"hash":"sh","text":"You are cu"}`,
 			map[string]any{"weft.prompt.index": int64(0), "weft.system.hash": "sh", "weft.content.truncated_bytes": int64(40)}),
 		rec(4, "tools", `not json`, map[string]any{"weft.tools.index": int64(0), "weft.catalog.hash": "ch"}),
-		rec(5, "event", `{"type":"run_finish","run_id":"r_hand","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`,
+		// A second attempt under another system text, whose prompt
+		// record did not parse: a derived prompt.
+		rec(5, "request", `{"step":0,"attempt":2,"system_hash":"sh2","messages_ref":{"index":0,"count":1},"tools":{"catalog_hash":"ch","names":["x"]}}`,
+			map[string]any{"weft.request.index": int64(1), "weft.step.index": int64(0), "weft.system.hash": "sh2", "weft.catalog.hash": "ch", "weft.content": "full"}),
+		rec(6, "prompt", `not json`, map[string]any{"weft.prompt.index": int64(1), "weft.system.hash": "sh2"}),
+		rec(7, "event", `{"type":"run_finish","run_id":"r_hand","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`,
 			map[string]any{"weft.event.type": "run_finish", "weft.event.pos": int64(1)}),
 	}}); err != nil {
 		t.Fatal(err)
@@ -771,6 +777,14 @@ func TestExportOTLPKeepsTruncatedAndDerived(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 	_, got := exportGet(t, fresh, "/api/runs/r_hand/export?format=json", nil)
+	for name, doc := range map[string][]byte{"source": want, "copy": got} {
+		var d exportDocT
+		decode(t, string(doc), &d)
+		if !strings.Contains(string(d.Requests.Prompts["sh2"]), `"content":"derived"`) || !strings.Contains(","+d.holes()+",", ",derived,") ||
+			!strings.Contains(","+d.holes()+",", ",truncated,") {
+			t.Errorf("%s: prompt sh2 %s, holes %s; want the derived prompt and both truncated and derived among the holes", name, d.Requests.Prompts["sh2"], d.holes())
+		}
+	}
 	if a, b := withoutChildren(t, want), withoutChildren(t, got); a != b {
 		t.Errorf("re-ingested export differs:\n got %s\nwant %s", b, a)
 	}

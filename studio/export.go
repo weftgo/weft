@@ -559,6 +559,9 @@ func (x *runExport) holes(blocks []exportBlock) []stepHole {
 			case ref.prompt != nil && ref.prompt.Content == obsdb.HoleTruncated,
 				ref.catalog != nil && ref.catalog.Content == obsdb.HoleTruncated:
 				hs.note(obsdb.HoleTruncated)
+			case ref.prompt != nil && ref.prompt.Content == obsdb.HoleDerived,
+				ref.catalog != nil && ref.catalog.Content == obsdb.HoleDerived:
+				hs.note(obsdb.HoleDerived)
 			case ref.prompt == nil && ref.catalog == nil && ref.hole == obsdb.HoleGap:
 				hs.note(obsdb.HoleGap)
 			}

@@ -451,13 +451,9 @@ func originAllowed(origins []string, defaults bool, origin string) bool {
 // [::1], any port — or the host[:port] of an AllowOrigins entry
 // ("*" lets every Host through, as it lets every origin). Proxy
 // headers (X-Forwarded-Host, Forwarded) are never read: anyone can
-// send them. A request with no RemoteAddr never crossed a socket —
-// net/http's server always sets it — and is the in-process caller
-// (weft/runtime's runtime.Local transport), which passes.
+// send them. No request is exempt: weft/runtime's in-process
+// runtime.Local transport addresses the handler as localhost.
 func hostAllowed(origins []string, r *http.Request) bool {
-	if r.RemoteAddr == "" {
-		return true
-	}
 	if isLoopbackName(hostOnly(r.Host)) {
 		return true
 	}

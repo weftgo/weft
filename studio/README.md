@@ -92,7 +92,7 @@ demo behind the P0 curl gate):
 ```go
 defer runtime.Install(runtime.Local(srv), // or runtime.Studio(url, tok)
     runtime.Agents(support), runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000}),
-    runtime.AllowSideEffects("lookup_order"))()
+    runtime.AllowSideEffects("send_email"))() // a write tool; a read is weft.Replay(weft.ReplaySafe)
 ```
 
 Studio's side is `studio.New(..., studio.Playground(true))`, which

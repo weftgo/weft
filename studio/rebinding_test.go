@@ -159,21 +159,24 @@ func TestDNSRebindingForwardedHost(t *testing.T) {
 }
 
 // TestDNSRebindingInProcess: a request that never crossed a socket (no
-// RemoteAddr — net/http's server always sets one) is weft/runtime's
-// runtime.Local transport, whose Host is the placeholder
-// weft.studio.local; it passes. The same Host over a socket does not.
+// RemoteAddr, as an adapter may hand one over) gets no exemption — only
+// its Host decides. weft/runtime's runtime.Local transport says
+// localhost and passes; any other Host is refused.
 func TestDNSRebindingInProcess(t *testing.T) {
 	h := New(Open(t.TempDir() + "/inproc.db")).Handler()
 	for _, tc := range []struct {
-		remote string
-		want   int
-	}{{"", http.StatusOK}, {"127.0.0.1:5555", http.StatusForbidden}} {
-		req := httptest.NewRequest(http.MethodGet, "http://weft.studio.local/api/runs", nil)
-		req.RemoteAddr = tc.remote
+		url  string
+		want int
+	}{
+		{"http://localhost/api/runs", http.StatusOK},
+		{"http://weft.studio.local/api/runs", http.StatusForbidden},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.url, nil)
+		req.RemoteAddr = ""
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
 		if w.Code != tc.want {
-			t.Errorf("RemoteAddr %q: %d, want %d (%s)", tc.remote, w.Code, tc.want, w.Body)
+			t.Errorf("%s with no RemoteAddr: %d, want %d (%s)", tc.url, w.Code, tc.want, w.Body)
 		}
 	}
 }

@@ -360,7 +360,8 @@ and empty when everything parks) inside `weft.override.hash`. Not a
 seam: ADR 0006 and ADR 0007 are unchanged. Why: a `ParkOn` list computed
 from `Agent.Tools()` cannot name a `ToolSource` tool or a child run's
 tools, so WEFT-PLAYGROUND §6 rule 3 did not hold for them; `weft/runtime`
-now passes `ParkAllExcept(safe ∪ opted-in)` on every playground run.
+now passes `ParkAllExcept(...)` on every playground run: the ReplaySafe tools, plus the
+`AllowSideEffects` tools only under `side_effects: "allow"`.
 
 ### `Tap` narrows
 

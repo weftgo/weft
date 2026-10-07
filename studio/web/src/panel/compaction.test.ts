@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { golden } from "../test/fake-studio"
 import type { RunDoc } from "../lib/api"
-import { $, all, baseRoutes, fakeStudio, mount, page, runRow, setup, teardown } from "./testkit"
+import { $, all, baseRoutes, click, fakeStudio, mount, page, runRow, settle, setup, teardown } from "./testkit"
 
 beforeEach(setup)
 afterEach(teardown)
@@ -68,6 +68,11 @@ describe("the panel's compaction marker (A9.2)", () => {
     expect(m.querySelector('[data-weft-hole="compacted"]')).not.toBeNull()
     expect(m.querySelector("details")?.hasAttribute("open")).toBe(false)
     expect(all(el, "[data-weft-step] [data-weft-compaction]")).toEqual([])
+    // Filed under the run that produced the context: it reads as after it.
+    expect(m.textContent).toContain("session compaction · after this run")
+    expect(m.querySelector("details")?.textContent).toContain(
+      "thread compacted the session context this run belongs to: 3 of its messages were replaced by 1; the next run starts on the compacted context (its input record). The marker carries counts and a hash, never messages."
+    )
   })
 
   it("a run from before A9 shows no marker and no error", async () => {
@@ -89,5 +94,51 @@ describe("the panel's compaction marker (A9.2)", () => {
     expect(d.querySelector('[data-weft-hole="gap"]')).not.toBeNull()
     expect(d.querySelectorAll("[data-weft-original]").length).toBe(0)
     expect(d.textContent).toContain("messages record 1 before the view is missing")
+  })
+
+  it("an insertion is labelled inserted and its original says nothing was replaced", async () => {
+    const view = golden<RunDoc>("run-compacted").compactions![0]
+    fakeStudio(trimRoutes({ compactions: [{ ...view, from_seq: 3, to_seq: 3, replaced: 0, entries: 1 }] }))
+    const el = await mount()
+    const m = $(el, '[data-weft-compaction="2"]')!
+    expect(m.textContent).toContain("1 message inserted by PrepareStep")
+    expect(m.querySelector("details")?.textContent).toContain("nothing replaced: inserted at message 3")
+    expect(m.querySelectorAll("[data-weft-original]").length).toBe(0)
+  })
+
+  it("a body that is not a message array below the view is a gap, never a shifted range", async () => {
+    const r = trimRoutes()
+    const t = golden<{ batches: { index: number; messages: unknown }[] }>("transcript-compacted")
+    r[`runs/${RUN}/transcript`] = {
+      batches: t.batches.map((b) => (b.index === 0 ? { ...b, messages: "not json" } : b)),
+    }
+    fakeStudio(r)
+    const el = await mount()
+    const d = $(el, '[data-weft-compaction="2"] details')!
+    expect(d.querySelector('[data-weft-hole="gap"]')).not.toBeNull()
+    expect(d.querySelectorAll("[data-weft-original]").length).toBe(0)
+    expect(d.textContent).toContain("messages record 0 before the view does not read as messages")
+  })
+
+  it("two views with one hash keep their own open state across a redraw (keyed by index)", async () => {
+    // The same insertion at the same place on steps 1 and 2: one hash.
+    const ins = { scope: "run", hash: "same", replaced: 0, entries: 1, from_seq: 3, to_seq: 3 }
+    fakeStudio(
+      trimRoutes({
+        compactions: [
+          { ...ins, index: 5, step: 1 },
+          { ...ins, index: 7, step: 2 },
+        ],
+      })
+    )
+    const el = await mount()
+    const det = (step: number) => $(el, `[data-weft-compaction="${step}"] details`) as HTMLDetailsElement
+    expect(det(1).hasAttribute("open")).toBe(false)
+    det(2).setAttribute("open", "")
+    det(2).dispatchEvent(new Event("toggle")) // as the browser fires it
+    click($(el, "[data-weft-step]")) // marks a step: a redraw
+    await settle()
+    expect(det(2).hasAttribute("open")).toBe(true)
+    expect(det(1).hasAttribute("open")).toBe(false)
   })
 })

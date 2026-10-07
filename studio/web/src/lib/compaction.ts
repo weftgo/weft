@@ -48,6 +48,16 @@ export function compactionLine(c: RunCompaction): string {
   return `${plural(c.replaced, "message")} rewritten into ${c.entries} by PrepareStep`
 }
 
+/** The session marker's label: ADR 0028 §8 files it under the run that
+ * produced the compacted context, so it reads as after this run. */
+export const SESSION_LABEL = "session compaction · after this run"
+
+/** What "show original" says for a session marker: it carries counts,
+ * not a range — the context it replaced is not a seq range of this run. */
+export function sessionNote(c: RunCompaction): string {
+  return `thread compacted the session context this run belongs to: ${c.replaced} of its messages were replaced by ${c.entries}; the next run starts on the compacted context (its input record). The marker carries counts and a hash, never messages.`
+}
+
 /** The original messages of a view, or why they cannot be shown. */
 export type Original =
   | { messages: Message[]; from: number; to: number }
@@ -61,8 +71,10 @@ export type Original =
  * transcript route serves exactly those, views skipped), and the view
  * applies to the growth records below its own index. Every index below
  * it must be a growth record the page holds or another view the run
- * document names; a missing one, or a range past the messages held, is
- * a gap — never a guess. transcript null is still loading.
+ * document names; a missing one, one asTranscript marked unreadable
+ * (its body was not a message array, so its count — and every later
+ * seq — is unknown), or a range past the messages held, is a gap —
+ * never a guess. transcript null is still loading.
  */
 export function originalOf(
   c: RunCompaction,
@@ -88,8 +100,13 @@ export function originalOf(
     return {
       gap: `messages record${missing.length === 1 ? "" : "s"} ${missing.slice(0, 6).join(", ")}${missing.length > 6 ? ", …" : ""} before the view ${missing.length === 1 ? "is" : "are"} missing: the replaced range cannot be placed`,
     }
+  const unreadable = growth.filter((b) => b.unreadable).map((b) => b.index)
+  if (unreadable.length)
+    return {
+      gap: `messages record${unreadable.length === 1 ? "" : "s"} ${unreadable.slice(0, 6).join(", ")}${unreadable.length > 6 ? ", …" : ""} before the view ${unreadable.length === 1 ? "does" : "do"} not read as messages: the positions after ${unreadable.length === 1 ? "it" : "them"} are unknown, so the replaced range cannot be placed`,
+    }
   const seq: Message[] = []
-  for (const b of growth) if (Array.isArray(b.messages)) seq.push(...b.messages)
+  for (const b of growth) seq.push(...b.messages)
   if (to > seq.length)
     return { gap: `the view replaces messages ${from}–${to - 1}, but the transcript holds ${seq.length} before it` }
   return { messages: seq.slice(from, to), from, to }
@@ -98,7 +115,7 @@ export function originalOf(
 /** One message as a line: its role and its words — text, a tool
  * call's name(args), a tool result's content, clipped. */
 export function messageLine(m: Message, max = 160): string {
-  // A stored body may hold anything: a non-object still takes its seq.
+  // Defensive: a caller may hand a message straight from a stored body.
   const msg = m as Message | null
   const raw: unknown = msg?.content
   const parts = (Array.isArray(raw) ? raw : []) as (Part | null)[]

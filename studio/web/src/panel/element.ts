@@ -12,7 +12,16 @@ import { paramsLine, REQUEST_NOT_RECORDED_LABEL, REQUEST_NOT_STORED, shortHash }
 import { MAX_REQUEST_PAGES, REQUEST_PAGE } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
 import { callState, runHoles, stepHoles, truncation } from "../lib/events"
-import { compactionLine, compactionsOf, isSessionMarker, messageLine, originalOf, replacementNote } from "../lib/compaction"
+import {
+  compactionLine,
+  compactionsOf,
+  isSessionMarker,
+  messageLine,
+  originalOf,
+  replacementNote,
+  SESSION_LABEL,
+  sessionNote,
+} from "../lib/compaction"
 import { attemptLine, attemptsHole, factsFromRows, timingLine } from "../lib/attempts"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
 import { duration, relativeTime, tokens } from "../lib/format"
@@ -1488,7 +1497,9 @@ function renderStep(
  * "show original" collapsed — for a view, the replaced transcript
  * messages read from the growth records the turn already holds (a gap
  * badge when they cannot be placed); for a session marker, where the
- * replaced context lives. Never a fetch. */
+ * replaced context lives. Never a fetch. The open state is keyed by
+ * a view's index (two views can share a hash: the same insertion at
+ * the same place every step) and by a session marker's hash. */
 function compactionBox(
   c: RunCompaction,
   all: RunCompaction[],
@@ -1499,7 +1510,7 @@ function compactionBox(
   const box = el("div", "weft-note")
   box.setAttribute("data-weft-compaction", session ? "session" : String(c.step ?? ""))
   const head = el("div", "weft-call-h", [
-    el("span", "weft-name", session ? "session compaction" : "compaction"),
+    el("span", "weft-name", session ? SESSION_LABEL : "compaction"),
     el("span", "weft-args", compactionLine(c)),
   ])
   const badges = holeBadges([{ hole: "compacted" }])
@@ -1507,13 +1518,13 @@ function compactionBox(
   box.appendChild(head)
   const d = el("details", "weft-collapsible")
   if (open) {
-    const key = `${open.scope}\u0000compaction\u0000${c.hash || c.index}`
+    const key = `${open.scope}\u0000compaction\u0000${session ? `session\u0000${c.hash}` : `view\u0000${c.index ?? ""}`}`
     d.setAttribute("data-weft-open", key)
     if (open.keys.has(key)) d.setAttribute("open", "")
   }
   d.appendChild(el("summary", undefined, "show original"))
   if (session) {
-    d.appendChild(el("div", "weft-res", "the replaced context is this turn's transcript; the next turn starts on the compacted context. The marker carries counts, never messages."))
+    d.appendChild(el("div", "weft-res", sessionNote(c)))
   } else {
     const o = originalOf(c, transcript, all)
     if ("loading" in o) d.appendChild(el("div", "weft-res", "loading the transcript…"))

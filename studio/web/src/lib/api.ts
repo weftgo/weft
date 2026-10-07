@@ -190,6 +190,11 @@ export interface Transcript {
      * places the batch by inference, marked derived. */
     badge?: "not_recorded" | "derived"
     messages: Message[]
+    /** Set by asTranscript when the stored body was not a message
+     * array, or held entries that are not messages: the batch's
+     * message count is unknown, so every later position is too (a
+     * reader placing by seq says gap). */
+    unreadable?: true
   }[]
 }
 
@@ -550,18 +555,25 @@ function get<T>(path: string): Promise<T> {
  * whatever it held: coerce the document so every batch is a list of
  * messages and every message's content a list of parts. A body that
  * is not a message array (a bare string, null, an object) reads as an
- * empty batch instead of crashing whoever renders it. */
+ * empty batch instead of crashing whoever renders it, marked
+ * `unreadable` — as is a batch that lost a non-message entry — so a
+ * reader counting positions knows the count is not the record's. */
 export function asTranscript(doc: RawTranscript): Transcript {
   const batches: unknown = (doc as RawTranscript | null)?.batches
   if (!Array.isArray(batches)) return { batches: [] }
   return {
-    batches: (batches as RawTranscript["batches"]).map((b) => ({
-      index: b.index,
-      step: b.step,
-      ...(typeof b.input === "boolean" ? { input: b.input } : {}),
-      ...(typeof b.badge === "string" ? { badge: b.badge } : {}),
-      messages: asMessages(b.messages),
-    })),
+    batches: (batches as RawTranscript["batches"]).map((b) => {
+      const messages = asMessages(b.messages)
+      const unreadable = !Array.isArray(b.messages) || messages.length !== (b.messages as unknown[]).length
+      return {
+        index: b.index,
+        step: b.step,
+        ...(typeof b.input === "boolean" ? { input: b.input } : {}),
+        ...(typeof b.badge === "string" ? { badge: b.badge } : {}),
+        messages,
+        ...(unreadable ? { unreadable: true as const } : {}),
+      }
+    }),
   }
 }
 

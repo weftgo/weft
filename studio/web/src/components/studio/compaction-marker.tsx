@@ -21,6 +21,8 @@ import {
   messageLine,
   originalOf,
   replacementNote,
+  SESSION_LABEL,
+  sessionNote,
 } from "@/lib/compaction"
 import { HoleBadge } from "@/components/studio/hole-badge"
 
@@ -45,7 +47,7 @@ export function CompactionMarker({
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="eyebrow text-thread/80">
-          {session ? "session compaction" : "compaction"}
+          {session ? SESSION_LABEL : "compaction"}
         </span>
         <span data-compaction-line className="font-mono">
           {compactionLine(c)}
@@ -71,7 +73,7 @@ export function CompactionMarker({
       </div>
       {open ? (
         session ? (
-          <SessionOriginal />
+          <SessionOriginal c={c} />
         ) : (
           <ViewOriginal c={c} all={all} runId={runId} transcript={transcript} />
         )
@@ -80,16 +82,11 @@ export function CompactionMarker({
   )
 }
 
-/** A session marker carries counts, not messages: the context it
- * replaced is this run's transcript as the story shows it, and the
- * next turn's input record holds the compacted context literally. */
-function SessionOriginal() {
+/** A session marker carries counts, not a range (sessionNote). */
+function SessionOriginal({ c }: { c: RunCompaction }) {
   return (
     <p className="mt-1 text-muted-foreground" data-compaction-original>
-      thread compacted the context this run left: the messages it replaced
-      are this run's transcript above and below, and the next turn's run
-      starts on the compacted context (its input record). The marker
-      carries counts and a hash, never messages.
+      {sessionNote(c)}
     </p>
   )
 }

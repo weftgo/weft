@@ -152,8 +152,9 @@ describe("the compaction marker on the run page (A9.2)", () => {
     expect(m.compareDocumentPosition(card(0)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(document.querySelector("[data-step] [data-compaction]")).toBeNull()
     showOriginal(m)
-    expect(m.querySelector("[data-compaction-original]")?.textContent).toContain(
-      "The marker carries counts and a hash, never messages."
+    expect(m.textContent).toContain("session compaction · after this run")
+    expect(m.querySelector("[data-compaction-original]")?.textContent).toBe(
+      "thread compacted the session context this run belongs to: 3 of its messages were replaced by 1; the next run starts on the compacted context (its input record). The marker carries counts and a hash, never messages."
     )
   })
 
@@ -195,6 +196,24 @@ describe("the compaction marker on the run page (A9.2)", () => {
     expect(m.querySelectorAll("[data-original-seq]").length).toBe(0)
   })
 
+  it("a transcript body that is not a message array below the view is a gap, never a shifted range", async () => {
+    const raw = golden<{ batches: { index: number; messages: unknown }[] }>("transcript-compacted")
+    serve({
+      transcript: { batches: raw.batches.map((b) => (b.index === 0 ? { ...b, messages: "not json" } : b)) },
+    })
+    renderApp(`/runs/${RUN}?view=story`)
+    const m = await marker('[data-compaction="2"]')
+    await waitFor(() => expect(studio.calls(`GET runs/${RUN}/transcript`).length).toBeGreaterThan(0))
+    showOriginal(m)
+    const gap = await waitFor(() => {
+      const g = m.querySelector('[data-compaction-original] [data-hole="gap"]')
+      expect(g).toBeTruthy()
+      return g!
+    })
+    expect(gap.parentElement?.textContent).toContain("messages record 0 before the view does not read as messages")
+    expect(m.querySelectorAll("[data-original-seq]").length).toBe(0)
+  })
+
   it("a run from before A9 shows no marker and no error", async () => {
     const errors = vi.spyOn(console, "error")
     const { compactions: _drop, ...pre } = { ...recorded, children: [] }
@@ -210,10 +229,16 @@ describe("the compaction marker on the run page (A9.2)", () => {
     renderApp(`/runs/${RUN}?view=story`)
     await waitFor(() => expect(card(2)).toBeTruthy())
     expect(document.querySelector("[data-compaction]")).toBeNull()
-    // No error of the marker's: the page's other console lines (an
-    // empty-href warning the run header raises on any fake run) are
-    // not this item's.
-    expect(errors.mock.calls.filter((c) => /compact/i.test(String(c[0])))).toEqual([])
+    // Nothing logged but the jsdom harness's own noise from mounting
+    // RootDocument under vitest — a <script> inside a component, the
+    // empty href of a `?url` import, <html> inside the test's <div>.
+    // Every other console.error is this page's and fails the test.
+    const harness = [
+      /^Encountered a script tag while rendering React component/,
+      /^An empty string \(""\) was passed to the %s attribute/,
+      /^In HTML, %s cannot be a child of <%s>/,
+    ]
+    expect(errors.mock.calls.filter((c) => !harness.some((re) => re.test(String(c[0]))))).toEqual([])
     expect(document.body.textContent).not.toContain("compacted")
   })
 })

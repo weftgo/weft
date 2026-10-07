@@ -4,6 +4,17 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## studio 0.4.1 — 2026-10-07
+
+### Fixed
+
+- Panel tokens decode strictly: `base64.RawURLEncoding` ignored the
+  unused low bits of a signature's last character, so several spellings
+  of one token were accepted (not a forgery — each needed the real
+  signature). Now exactly one spelling is valid.
+- The OTLP test fixtures live in the module's own `testdata/otlp`, so
+  `go test` runs from the module cache (otel's copies too, test-only).
+
 ## 0.8.0 — 2026-10-07
 
 The 2026-10-02 production-readiness pass and its follow-ups, tagged in

@@ -4,7 +4,7 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
-## 0.8.0 (unreleased)
+## 0.8.0 — 2026-10-07
 
 The 2026-10-02 production-readiness pass and its follow-ups, tagged in
 dependency order: root `v0.8.0` (additive: `ParkAllExcept`), then

@@ -8,13 +8,22 @@
 -- records.step convention since its 0001; rows from before 0004 read
 -- -1 and readers infer, badged derived) and Reason
 -- (weft.messages.reason, '' = transcript growth; ClickHouse keeps no
--- attribute column, so a compaction view record is told apart here).
+-- attribute column, so a compaction view record is told apart here),
+-- and three more attribute reads the request record's readers need for
+-- the same reason: Input (weft.messages.input as 0/1; rows written
+-- before this migration read -1, "not stored", and the transcript
+-- reader infers the flag for them, badged derived), Content
+-- (weft.content: 'full', 'stripped', '' when absent) and
+-- TruncatedBytes (weft.content.truncated_bytes, 0 when absent).
 -- weft_records_mv widens to the three new durable kinds, request,
 -- prompt and tools, each positioned by its own per-run index
 -- (weft.request.index, weft.prompt.index, weft.tools.index) under the
 -- same (RunId, Kind, Pos) key; a new-kind record without its index
 -- reads Pos -1, like obsdb.DeriveRecord. Everything else in the view
--- is 0001's select verbatim.
+-- is 0001's select verbatim. (Input, Content and TruncatedBytes were
+-- added to this file before it was released, with A1.2; a database
+-- that applied the earlier text of 0004 lacks them and must be
+-- recreated — no released binary wrote one.)
 --
 -- weft_runs gains InstructionsHash, CatalogHash and RequestCount as
 -- max-aggregates, and both run views are restated (0001's logs view,
@@ -32,6 +41,12 @@
 ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS Step Int32 DEFAULT -1 AFTER EventType;
 
 ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS Reason LowCardinality(String) DEFAULT '' AFTER Step;
+
+ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS Input Int8 DEFAULT -1 AFTER Reason;
+
+ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS Content LowCardinality(String) DEFAULT '' AFTER Input;
+
+ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS TruncatedBytes Int64 DEFAULT 0 AFTER Content;
 
 ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS InstructionsHash SimpleAggregateFunction(max, String);
 
@@ -54,6 +69,9 @@ SELECT
     LogAttributes['weft.event.type'] AS EventType,
     if(LogAttributes['weft.step.index'] != '', toInt32OrZero(LogAttributes['weft.step.index']), -1) AS Step,
     LogAttributes['weft.messages.reason'] AS Reason,
+    toInt8(LogAttributes['weft.messages.input'] = 'true') AS Input,
+    LogAttributes['weft.content'] AS Content,
+    toInt64OrZero(LogAttributes['weft.content.truncated_bytes']) AS TruncatedBytes,
     LogAttributes['weft.session.id'] AS SessionId,
     LogAttributes['weft.public_id'] AS PublicId,
     LogAttributes['gen_ai.agent.name'] AS Agent,

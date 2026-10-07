@@ -38,6 +38,22 @@ module, ADR 0005).
   order. Playground `transcript_edits` / `from_step` validation and the
   web client read the same stored step; only a batch without one is
   placed by inference, marked derived.
+- **`obsdb.DB` gains `Requests`, `Prompt`, `Tools` and `Catalogs`**
+  (ADR 0028 §10, the request record's read side). A third-party `DB`
+  reads its `request`, `prompt` and `tools` records (stored under
+  `(run, kind, index)`) through `obsdb.RequestRecordOf`,
+  `obsdb.PromptRecordOf` and `obsdb.ToolsRecordOf`, returns
+  `obsdb.UniqueCatalogs` from `Catalogs`, and answers a missing hash
+  with `obsdb.ExplainMissing`. `obsdb.RunRow` gains `InstructionsHash`,
+  `CatalogHash` and `RequestCount`, which a backend fills from
+  `run_start`'s `weft.instructions.hash` (or the `invoke_agent` span's),
+  request index 0's `weft.catalog.hash` and max `weft.request.index` + 1.
+- **`obsdb/clickhouse`'s unreleased migration 0004 gained
+  `weft_records.Input`, `Content` and `TruncatedBytes`**: a database
+  that applied 0004's earlier text (only a development build wrote one)
+  lacks them and must be recreated. ClickHouse now reads the transcript
+  input flag as stored; only rows written before the column read
+  `TranscriptBatch.InputDerived`.
 
 ### Changed
 
@@ -54,6 +70,12 @@ module, ADR 0005).
 - `studio --version` prints `version.Runtime()` and exits.
 - `obsdb.TranscriptBatch`, `obsdb.TranscriptBodies`, `obsdb.DedupBatches`
   (ADR 0028 §8).
+- `obsdb.Hole` and its ten constants (`obsdb.Holes()`, ADR 0028 §11's
+  closed badge table); `obsdb.RequestQuery`, `RequestRecord`,
+  `RequestBody` (and its parts), `PromptRecord`, `ToolsRecord`,
+  `ToolEntry`, `HoleError`, `RunRow.RequestsHole` (ADR 0028 §10's
+  reading table), `AllSteps`, `RecordContent`, `FindPrompt`,
+  `RequestLimit`.
 - **The request record (ADR 0028).** Three OTel log record kinds beside
   `event`, `delta` and `messages`: `request` (one per model-call attempt:
   step, attempt, system and catalog hashes, messages reference, tool

@@ -26,7 +26,8 @@ const runColumns = `RunId, ParentRunID, ParentCallID, TraceID, Agent, Provider, 
 	ManifestHash, WeftVersion, Service, SessionID, PublicID, Turn, Playground,
 	ExperimentID, ForkedFrom, Meta, Started, Finished, LastSeen, FinishedOK,
 	Failed, Err, Steps, Pending, StopReason, InputTokens, OutputTokens,
-	CachedInputTokens, CacheWriteTokens, ReasoningTokens, DeltaCount`
+	CachedInputTokens, CacheWriteTokens, ReasoningTokens, DeltaCount,
+	InstructionsHash, CatalogHash, RequestCount`
 
 // runAggregates is the same list as a GROUP BY RunId select: max for
 // identity strings, flags, usage and last-seen; min for started — the
@@ -41,7 +42,9 @@ const runAggregates = `RunId, max(ParentRunID) AS ParentRunID, max(ParentCallID)
 	max(Steps) AS Steps, max(Pending) AS Pending, max(StopReason) AS StopReason,
 	max(InputTokens) AS InputTokens, max(OutputTokens) AS OutputTokens,
 	max(CachedInputTokens) AS CachedInputTokens, max(CacheWriteTokens) AS CacheWriteTokens,
-	max(ReasoningTokens) AS ReasoningTokens, max(DeltaCount) AS DeltaCount`
+	max(ReasoningTokens) AS ReasoningTokens, max(DeltaCount) AS DeltaCount,
+	max(InstructionsHash) AS InstructionsHash, max(CatalogHash) AS CatalogHash,
+	max(RequestCount) AS RequestCount`
 
 // statusCase is the four-row table in SQL over weft_runs' columns: it
 // must agree with obsdb.DeriveStatus, whose test pins the boundaries.
@@ -245,7 +248,8 @@ func (d *DB) queryRunRows(ctx context.Context, now time.Time, sql string, args .
 			&s.SessionID, &s.PublicID, &s.Turn, &s.Playground, &s.ExperimentID, &s.ForkedFrom,
 			&s.Meta, &s.Started, &s.Finished, &s.LastSeen, &s.FinishedOK, &s.Failed, &s.Err,
 			&s.Steps, &s.Pending, &s.StopReason,
-			&s.InTok, &s.OutTok, &s.CachedTok, &s.CacheWriteTok, &s.ReasonTok, &s.DeltaCount); err != nil {
+			&s.InTok, &s.OutTok, &s.CachedTok, &s.CacheWriteTok, &s.ReasonTok, &s.DeltaCount,
+			&s.InstructionsHash, &s.CatalogHash, &s.RequestCount); err != nil {
 			return nil, err
 		}
 		row, err := s.row(now)
@@ -271,6 +275,8 @@ type runScan struct {
 	Steps, Pending                                     int32
 	InTok, OutTok, CachedTok, CacheWriteTok, ReasonTok int64
 	DeltaCount                                         int64
+	InstructionsHash, CatalogHash                      string
+	RequestCount                                       int64
 }
 
 func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
@@ -287,7 +293,8 @@ func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
 			CachedInputTokens: s.CachedTok, CacheWriteTokens: s.CacheWriteTok,
 			ReasoningTokens: s.ReasonTok,
 		},
-		DeltaCount: s.DeltaCount,
+		DeltaCount:       s.DeltaCount,
+		InstructionsHash: s.InstructionsHash, CatalogHash: s.CatalogHash, RequestCount: s.RequestCount,
 	}
 	if s.Finished != nil {
 		f := s.Finished.UTC()
@@ -492,11 +499,11 @@ func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.Tra
 	if err := d.runExists(ctx, runID); err != nil {
 		return nil, err
 	}
-	// Step is weft_records.Step (0004; -1 on rows written before it).
-	// weft_records keeps no attribute column, so the input flag of
-	// index 0 is inferred and marked so (obsdb.TranscriptBatch).
+	// Step is weft_records.Step and Input weft_records.Input (0004;
+	// -1 on rows written before it). A row without a stored input flag
+	// has its index 0 inferred and marked so (obsdb.TranscriptBatch).
 	rs, err := d.conn.Query(ctx,
-		`SELECT Pos, Step, Body FROM weft_records FINAL
+		`SELECT Pos, Step, Input, Body FROM weft_records FINAL
 		WHERE RunId = ? AND Kind = 'messages' ORDER BY Pos`, runID)
 	if err != nil {
 		return nil, err
@@ -505,15 +512,17 @@ func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.Tra
 	var out []obsdb.TranscriptBatch
 	for rs.Next() {
 		var (
-			pos  int64
-			step int32
-			body string
+			pos   int64
+			step  int32
+			input int8
+			body  string
 		)
-		if err := rs.Scan(&pos, &step, &body); err != nil {
+		if err := rs.Scan(&pos, &step, &input, &body); err != nil {
 			return nil, err
 		}
-		b := obsdb.TranscriptBatch{Index: pos, Step: int(step), Messages: json.RawMessage(body)}
-		if pos == 0 {
+		b := obsdb.TranscriptBatch{Index: pos, Step: int(step), Input: input == 1, Messages: json.RawMessage(body)}
+		if input < 0 && pos == 0 {
+			// Written before 0004 stored the flag: inferred, and said so.
 			b.Input, b.InputDerived = !loneAssistant(b.Messages), true
 		}
 		out = append(out, b)

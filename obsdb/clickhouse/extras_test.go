@@ -567,11 +567,11 @@ func TestRequestRecordSchema(t *testing.T) {
 	}
 }
 
-// The input flag on ClickHouse (no attribute column until A1.2): index
-// 0 is inferred — the input unless it is a lone assistant message,
-// step 0 of a run fed none — and every inferred flag says so, so the
-// transcript route badges it derived instead of passing it as stored.
-func TestTranscriptInputInferred(t *testing.T) {
+// The input flag on ClickHouse: weft_records.Input (0004) stores
+// weft.messages.input, so the flag reads exact and is never marked
+// inferred — a run fed no messages has no input batch. Rows written
+// before the column existed are TestUpgradeFromPreRequestRecord's.
+func TestTranscriptInputStored(t *testing.T) {
 	db, _ := openFresh(t)
 	if err := db.Write(ctx(), obsdb.Batch{Records: inputRecs()}); err != nil {
 		t.Fatal(err)
@@ -585,8 +585,8 @@ func TestTranscriptInputInferred(t *testing.T) {
 			t.Fatalf("%s: %d batches, want %d", run, len(got), len(want))
 		}
 		for i, b := range got {
-			if b.Input != want[i] || b.InputDerived != (i == 0) {
-				t.Errorf("%s batch %d = input %v derived %v, want input %v derived %v", run, i, b.Input, b.InputDerived, want[i], i == 0)
+			if b.Input != want[i] || b.InputDerived {
+				t.Errorf("%s batch %d = input %v derived %v, want input %v, not derived", run, i, b.Input, b.InputDerived, want[i])
 			}
 		}
 	}

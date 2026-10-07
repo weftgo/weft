@@ -41,6 +41,8 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("SessionPaging", sessionPaging(open))
 	t.Run("TranscriptRebuilt", transcriptRebuilt(open))
 	t.Run("TranscriptSteps", transcriptSteps(open))
+	t.Run("RequestRecords", requestRecords(open))
+	t.Run("RequestsManySteps", requestsManySteps(open))
 	t.Run("NonFiniteAttrs", nonFiniteAttrs(open))
 	t.Run("ZeroTimes", zeroTimes(open))
 	t.Run("OutOfOrder", outOfOrder(open))

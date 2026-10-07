@@ -375,7 +375,12 @@ parent's records never describe a child's request.
 - `records.step` holds `weft.step.index` (-1 = absent). SQLite has had
   the column since `0001`; ClickHouse's `weft_records` gains `Step` and
   `Reason` (`weft.messages.reason`, `''` for growth), because ClickHouse
-  keeps no attribute column to read the reason from.
+  keeps no attribute column to read the reason from — and, for the same
+  reason, `Input` (`weft.messages.input` as 0/1; `-1` on rows written
+  before the column, for which the transcript reader infers the flag
+  and shows the `derived` badge), `Content` (`weft.content`) and
+  `TruncatedBytes` (`weft.content.truncated_bytes`), which the request
+  readers turn into the `stripped` and `truncated` badges (A1.2).
 - The run row gains `instructions_hash` (`run_start`'s
   `weft.instructions.hash`), `catalog_hash` (the `weft.catalog.hash` of
   `request` index 0 — the request record survives content-off chains,
@@ -387,6 +392,15 @@ parent's records never describe a child's request.
   contiguous from 0, and which a retried batch cannot inflate (a sum
   over rows could). SQLite's write path fills them with the emission
   (A1).
+- The read side (A1.2): `obsdb.DB` gains `Requests` (paged by request
+  index, a step filter), `Prompt` and `Tools` (one record by hash) and
+  `Catalogs` (every tools record of a run, one per hash). A prompt or
+  tools record the run does not hold is `ErrNotFound`, as an
+  `obsdb.HoleError` naming the badge when the reason is known:
+  `not_recorded` (the run's `instructions_hash` is `''`), `stripped` (a
+  request naming the hash came through a content-off chain) or `gap` (a
+  request naming it was stored as emitted, the record was dropped).
+  `obsdb.Hole` is §11's table as a Go type.
 - Every new attribute key (`weft.request.index`, `weft.prompt.index`,
   `weft.tools.index`, `weft.system.hash`, `weft.catalog.hash`,
   `weft.attempt.index`, `weft.instructions.hash`,

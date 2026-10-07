@@ -24,7 +24,8 @@ const runColumns = `run_id, parent_run_id, parent_call_id, trace_id, agent, prov
 	started_ns, finished_ns, last_seen_ns, finished_ok, failed, err,
 	steps, pending, stop_reason,
 	input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
-	event_count, delta_count, message_count`
+	event_count, delta_count, message_count,
+	instructions_hash, catalog_hash, request_count`
 
 // statusExpr is the four-row table in SQL: it must agree with
 // obsdb.DeriveStatus, whose test pins the boundaries. One bind
@@ -195,7 +196,8 @@ func (d *DB) runRowsQuery(ctx context.Context, where string, args []any) ([]runR
 			&r.Started, &r.Finished, &r.LastSeen, &r.FinishedOK, &r.Failed, &r.Err,
 			&r.Steps, &r.Pending, &r.StopReason,
 			&r.InTok, &r.OutTok, &r.CachedTok, &r.CacheWrite, &r.ReasonTok,
-			&r.EventCount, &r.DeltaCount, &r.MessageCount); err != nil {
+			&r.EventCount, &r.DeltaCount, &r.MessageCount,
+			&r.InstructionsHash, &r.CatalogHash, &r.RequestCount); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -217,6 +219,8 @@ type runRowScan struct {
 	Steps, Pending                                    int
 	InTok, OutTok, CachedTok, CacheWrite, ReasonTok   int64
 	EventCount, DeltaCount, MessageCount              int64
+	InstructionsHash, CatalogHash                     string
+	RequestCount                                      int64
 }
 
 func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
@@ -235,6 +239,7 @@ func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
 			ReasoningTokens: r.ReasonTok,
 		},
 		EventCount: r.EventCount, DeltaCount: r.DeltaCount, MessageCount: r.MessageCount,
+		InstructionsHash: r.InstructionsHash, CatalogHash: r.CatalogHash, RequestCount: r.RequestCount,
 	}
 	if r.Finished.Valid {
 		f := time.Unix(0, r.Finished.Int64).UTC()

@@ -95,6 +95,15 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 			// retried batch cannot inflate it, the same protection the
 			// row counts get from INSERT OR IGNORE.
 			u.markDelta(w.Pos)
+		case "request", "prompt", "tools":
+			// ADR 0028's kinds: stored under their own per-run index;
+			// a request also feeds the run row (applyRequest).
+			if _, err := insertRecord(ctx, tx, r, w); err != nil {
+				return err
+			}
+			if w.Record == "request" {
+				u.applyRequest(r, w)
+			}
 		case "heartbeat":
 			// Never a row: no position, so the (run, kind, pos) key
 			// could not hold it anyway. It moves last_seen only, which
@@ -331,6 +340,31 @@ type runUpdate struct {
 	eventCount   int64
 	deltaCount   int64
 	messageCount int64
+	// ADR 0028 §10: instructions_hash (run_start or the invoke_agent
+	// span), catalog_hash (request index 0) and request_count (the
+	// request high-water mark).
+	instructionsHash string
+	catalogHash      string
+	requestCount     int64
+}
+
+// applyRequest folds a request record into the run row: the
+// high-water mark max(weft.request.index) + 1 — retry-proof, like the
+// delta count, and what ClickHouse's run view computes — and request
+// index 0's weft.catalog.hash. Applied whether or not the row was new:
+// a duplicate changes neither.
+func (u *runUpdate) applyRequest(r obsdb.Record, w obsdb.Weft) {
+	if _, ok := r.Attrs["weft.request.index"]; !ok {
+		return // Pos -1: a malformed producer's record counts nothing
+	}
+	if hw := w.Pos + 1; hw > u.requestCount {
+		u.requestCount = hw
+	}
+	if w.Pos == 0 {
+		if v, ok := r.Attrs["weft.catalog.hash"].(string); ok && v != "" {
+			u.catalogHash = v
+		}
+	}
 }
 
 func (u *runUpdate) count(kind string, n int64) {
@@ -406,6 +440,9 @@ func (u *runUpdate) applySpan(s obsdb.Span, w obsdb.Weft) {
 		if s.StatusMessage != "" {
 			u.errText = s.StatusMessage
 		}
+	}
+	if v, ok := s.Attrs["weft.instructions.hash"].(string); ok && v != "" {
+		u.instructionsHash = v
 	}
 	if p, ok := s.Attrs["gen_ai.provider.name"].(string); ok && p != "" {
 		u.provider = p
@@ -515,6 +552,9 @@ func (u *runUpdate) setFinishedAt(t time.Time) {
 func (u *runUpdate) applyDurable(ctx context.Context, tx *sql.Tx, r obsdb.Record, w obsdb.Weft) error {
 	switch w.EventType {
 	case "run_start":
+		if v, ok := r.Attrs["weft.instructions.hash"].(string); ok && v != "" {
+			u.instructionsHash = v
+		}
 		var body struct {
 			Model struct {
 				Provider string `json:"provider"`
@@ -626,8 +666,9 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 			 started_ns, finished_ns, last_seen_ns, finished_ok, failed, err,
 			 steps, pending, stop_reason,
 			 input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
-			 event_count, delta_count, message_count)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			 event_count, delta_count, message_count,
+			 instructions_hash, catalog_hash, request_count)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			runID, u.parentRunID, u.parentCallID, u.traceID, u.agent, u.provider, u.model,
 			u.manifestHash, u.weftVersion, u.service, u.sessionID, u.publicID, u.turn,
 			boolInt(u.playground), u.experimentID, u.forkedFrom, meta,
@@ -635,7 +676,8 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 			u.steps, u.pending, u.stopReason,
 			u.usage.InputTokens, u.usage.OutputTokens, u.usage.CachedInputTokens,
 			u.usage.CacheWriteTokens, u.usage.ReasoningTokens,
-			u.eventCount, u.deltaCount, u.messageCount)
+			u.eventCount, u.deltaCount, u.messageCount,
+			u.instructionsHash, u.catalogHash, u.requestCount)
 		return err
 	case err != nil:
 		return err
@@ -678,7 +720,10 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		started_ns = ?, finished_ns = ?, last_seen_ns = ?, finished_ok = ?, failed = ?, err = ?,
 		steps = ?, pending = ?, stop_reason = ?,
 		input_tokens = ?, output_tokens = ?, cached_input_tokens = ?, cache_write_tokens = ?, reasoning_tokens = ?,
-		event_count = event_count + ?, delta_count = MAX(delta_count, ?), message_count = message_count + ?
+		event_count = event_count + ?, delta_count = MAX(delta_count, ?), message_count = message_count + ?,
+		instructions_hash = CASE WHEN instructions_hash = '' THEN ? ELSE instructions_hash END,
+		catalog_hash = CASE WHEN catalog_hash = '' THEN ? ELSE catalog_hash END,
+		request_count = MAX(request_count, ?)
 		WHERE run_id = ?`,
 		coalesce(ex.parentRun, u.parentRunID), coalesce(ex.parentC, u.parentCallID),
 		coalesce(ex.traceID, u.traceID), coalesce(ex.agent, u.agent),
@@ -694,6 +739,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
 		usage.CacheWriteTokens, usage.ReasoningTokens,
 		u.eventCount, u.deltaCount, u.messageCount,
+		u.instructionsHash, u.catalogHash, u.requestCount,
 		runID)
 	return err
 }

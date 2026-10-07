@@ -517,6 +517,9 @@ func TestMigration0004RestatesViews(t *testing.T) {
 	wantPrefixes := []string{
 		"ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS Step Int32 DEFAULT -1 AFTER EventType",
 		"ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS Reason LowCardinality(String) DEFAULT '' AFTER Step",
+		"ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS Input Int8 DEFAULT -1 AFTER Reason",
+		"ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS Content LowCardinality(String) DEFAULT '' AFTER Input",
+		"ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS TruncatedBytes Int64 DEFAULT 0 AFTER Content",
 		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS InstructionsHash SimpleAggregateFunction(max, String)",
 		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS CatalogHash SimpleAggregateFunction(max, String)",
 		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS RequestCount SimpleAggregateFunction(max, Int64)",
@@ -545,11 +548,14 @@ func TestMigration0004RestatesViews(t *testing.T) {
 		`    LogAttributes['weft.event.type'] AS EventType,
     if(LogAttributes['weft.step.index'] != '', toInt32OrZero(LogAttributes['weft.step.index']), -1) AS Step,
     LogAttributes['weft.messages.reason'] AS Reason,
+    toInt8(LogAttributes['weft.messages.input'] = 'true') AS Input,
+    LogAttributes['weft.content'] AS Content,
+    toInt64OrZero(LogAttributes['weft.content.truncated_bytes']) AS TruncatedBytes,
 `,
 		`IN ('event', 'messages')`, `IN ('event', 'messages', 'request', 'prompt', 'tools')`,
 	).Replace(selectAfter(init, "CREATE MATERIALIZED VIEW IF NOT EXISTS weft_records_mv TO weft_records AS"))
-	if now := got(5, recordsAlter); now != records {
-		t.Errorf("0004's records select is not 0001's with the request kinds, Step and Reason:\n%s\nwant:\n%s", now, records)
+	if now := got(8, recordsAlter); now != records {
+		t.Errorf("0004's records select is not 0001's with the request kinds, Step, Reason, Input, Content and TruncatedBytes:\n%s\nwant:\n%s", now, records)
 	}
 
 	tuple := `'error.type',
@@ -565,7 +571,7 @@ func TestMigration0004RestatesViews(t *testing.T) {
     if(LogAttributes['weft.record'] = 'request' AND LogAttributes['weft.request.index'] = '0', LogAttributes['weft.catalog.hash'], '') AS CatalogHash,
     if(LogAttributes['weft.record'] = 'request' AND LogAttributes['weft.request.index'] != '', toInt64OrZero(LogAttributes['weft.request.index']) + 1, 0) AS RequestCount`,
 	).Replace(selectAfter(init, "CREATE MATERIALIZED VIEW IF NOT EXISTS weft_runs_logs_mv TO weft_runs AS"))
-	if now := got(6, logsAlter); now != logs {
+	if now := got(9, logsAlter); now != logs {
 		t.Errorf("0004's logs run view is not 0001's with the tuple and the three columns:\n%s\nwant:\n%s", now, logs)
 	}
 
@@ -576,7 +582,7 @@ func TestMigration0004RestatesViews(t *testing.T) {
     '' AS CatalogHash,
     toInt64(0) AS RequestCount`,
 	).Replace(selectAfter(fix, tracesAlter))
-	if now := got(7, tracesAlter); now != traces {
+	if now := got(10, tracesAlter); now != traces {
 		t.Errorf("0004's traces run view is not 0003's with the tuple and the three columns:\n%s\nwant:\n%s", now, traces)
 	}
 }

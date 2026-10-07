@@ -1332,9 +1332,12 @@ func TestRequestRecordSchema(t *testing.T) {
 		Scan(&instructions, &catalog, &requests); err != nil {
 		t.Fatal(err)
 	}
-	// SQLite's write path fills these with the emission (ADR 0028, A1).
-	if instructions != "" || catalog != "" || requests != 0 {
-		t.Errorf("run columns = %q, %q, %d; want the defaults until the emission ships", instructions, catalog, requests)
+	// The write path fills them (ADR 0028 §10): scriptedRun's run_start
+	// carries no instructions hash (a pre-0028 shape) and request 0 no
+	// catalog hash, so only the high-water mark moves — 2 requests, the
+	// index-less tools record counting nothing.
+	if instructions != "" || catalog != "" || requests != 2 {
+		t.Errorf("run columns = %q, %q, %d; want \"\", \"\", 2", instructions, catalog, requests)
 	}
 	rows, err := raw.Query(`SELECT kind, pos, step FROM records
 		WHERE run_id = 'r1' AND kind IN ('request', 'prompt', 'tools') ORDER BY kind, pos`)

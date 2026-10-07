@@ -3,15 +3,18 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
+
+	"github.com/weftgo/weft/obsdb"
 )
 
 // A file written before ADR 0028 — migrations 0001 and 0002 applied by
 // hand from the embedded bodies, one run row and one record in it —
 // opens through 0003: the rows survive, the new run columns read their
-// defaults (instructions_hash ” is the not_recorded reading), and the
-// recorded version is 3.
+// defaults (instructions_hash ” is the not_recorded reading, which the
+// read API reports), and the recorded version is 3.
 func TestUpgradeFrom0002(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
 	raw, err := sql.Open("sqlite", "file:"+path)
@@ -48,6 +51,21 @@ func TestUpgradeFrom0002(t *testing.T) {
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("open a 0002 file: %v", err)
+	}
+	// Through the read API: ADR 0028 §10's reading table says
+	// not_recorded, and so do the prompt and tools readers.
+	run, err := db.Run(context.Background(), "old1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.InstructionsHash != "" || run.CatalogHash != "" || run.RequestCount != 0 || run.RequestsHole() != obsdb.HoleNotRecorded {
+		t.Errorf("upgraded run = %q %q %d hole %q; want the defaults, not_recorded",
+			run.InstructionsHash, run.CatalogHash, run.RequestCount, run.RequestsHole())
+	}
+	var hole *obsdb.HoleError
+	if _, err := db.Tools(context.Background(), "old1", "any"); !errors.Is(err, obsdb.ErrNotFound) ||
+		!errors.As(err, &hole) || hole.Hole != obsdb.HoleNotRecorded {
+		t.Errorf("Tools of a pre-0028 run = %v; want ErrNotFound, not_recorded", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)

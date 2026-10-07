@@ -37,6 +37,19 @@ type DB interface {
 	// it is the run's input (weft.messages.input). The bodies are
 	// Transcript's, through DedupTranscript, one per record.
 	TranscriptBatches(ctx context.Context, runID string) ([]TranscriptBatch, error)
+
+	// The request record (ADR 0028). Requests pages a run's request
+	// records in index order, one per model-call attempt
+	// (RequestQuery). Prompt and Tools return the run's prompt or tools
+	// record of one hash: ErrNotFound when the run holds none, as a
+	// *HoleError when the reason is known (not_recorded, stripped,
+	// gap — ExplainMissing). Catalogs returns every tools record of the
+	// run, one per hash, in index order; a content-off run has none.
+	// All four answer ErrNotFound for an unknown run.
+	Requests(ctx context.Context, runID string, q RequestQuery) ([]RequestRecord, error)
+	Prompt(ctx context.Context, runID, hash string) (PromptRecord, error)
+	Tools(ctx context.Context, runID, hash string) (ToolsRecord, error)
+	Catalogs(ctx context.Context, runID string) ([]ToolsRecord, error)
 	RunSpans(ctx context.Context, runID string) ([]Span, error)
 	Trace(ctx context.Context, traceID string) ([]Span, error) // empty, not an error, for an unknown trace
 
@@ -63,12 +76,13 @@ type DB interface {
 // weft.messages.input: the input record — on a partial resume a prefix
 // of what the run was fed, ending at the last assistant message with
 // tool calls; the tail (the rebuilt tool message and what follows it)
-// is the next batch, at step 0, not flagged. A backend that keeps no attribute column
-// (ClickHouse, until its weft_records gains one) cannot read it: it
-// infers Input on index 0 — true unless the body is a lone assistant
-// message, which is step 0 of a run fed no messages (the core writes
-// the input record first, and none for an empty input) — and sets
-// InputDerived on that batch so readers badge it derived.
+// is the next batch, at step 0, not flagged. A backend that did not
+// store the flag for a row (ClickHouse rows written before
+// weft_records.Input existed) infers Input on index 0 — true unless
+// the body is a lone assistant message, which is step 0 of a run fed
+// no messages (the core writes the input record first, and none for an
+// empty input) — and sets InputDerived on that batch so readers badge
+// it HoleDerived.
 type TranscriptBatch struct {
 	Index        int64
 	Step         int
@@ -178,6 +192,14 @@ type RunRow struct {
 	Usage                                                      core.Usage
 	EventCount, MessageCount                                   int64
 	DeltaCount                                                 int64 // deltas are counted, never stored (Q4)
+	// ADR 0028 §10: run_start's weft.instructions.hash ("" on a run
+	// written before the request record — RequestsHole reads the
+	// table), request index 0's weft.catalog.hash ("" when it offered
+	// no tools) and the request records' high-water mark (max
+	// weft.request.index + 1). The API names them instructions_hash,
+	// catalog_hash and request_count.
+	InstructionsHash, CatalogHash string
+	RequestCount                  int64
 }
 
 // RunPage is one Runs result, newest Started first (ties by ID,
@@ -272,9 +294,11 @@ type SessionDetail struct {
 }
 
 // ErrNotFound is returned by Run, Session, Events, Transcript,
-// RunSpans, Experiment and ResolvePublicID for an id the database does
-// not hold. Trace answers an unknown trace with no spans instead: a
-// trace is only ever the spans that arrived.
+// RunSpans, Requests, Prompt, Tools, Catalogs, Experiment and
+// ResolvePublicID for an id the database does not hold (Prompt and
+// Tools also for a hash, possibly as a *HoleError). Trace answers an
+// unknown trace with no spans instead: a trace is only ever the spans
+// that arrived.
 var ErrNotFound = errors.New("obsdb: not found")
 
 // ErrClosed is returned by a backend used after Close.

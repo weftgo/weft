@@ -133,6 +133,17 @@ is pre-1.0 and tags per module (ADR 0005).
   not opted in (it was refused 403); the panel drawer and `/playground`
   side-effect selects say what each mode does — only `allow` runs the
   app's `AllowSideEffects` tools for real.
+- Security (behaviour change): without a `Token`, the API — the whole
+  `/api` tree, `/api/live` and the runtime link included — answers only a
+  loopback `Host` (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`, any
+  port) or the `host:port` of an `AllowOrigins` origin. A DNS-rebinding page
+  (`http://evil.example:7331` resolving to 127.0.0.1) could start playground
+  runs, approve parked calls, steer and read transcripts; it now gets a 403
+  naming what to configure. An embedded Studio served on a real hostname
+  lists its origin (`studio.AllowOrigins("http://myapp.internal:8080")`) or
+  sets `studio.Token`. `X-Forwarded-Host`/`Forwarded` are never trusted;
+  in-process callers (`runtime.Local`) pass; `/panel.js` and the UI shell
+  are unchecked; nothing changes with a `Token`.
 
 ### otel
 

@@ -8,6 +8,7 @@ import {
   adoptTokenFromLocation,
   ApiError,
   asTranscript,
+  exportUrl,
   fetchRuns,
   fetchStep,
   isRequestRow,
@@ -105,6 +106,29 @@ describe("requests under the mount and the wall", () => {
     expect(runsSearch({ playground: true, public_id: "pub_1", limit: 500 })).toBe(
       "?public_id=pub_1&playground=true&limit=500"
     )
+  })
+})
+
+describe("exportUrl", () => {
+  afterEach(() => {
+    setStudioToken("")
+    document.querySelector("base")?.remove()
+  })
+
+  it("links a run's export under the mount, the id encoded, the token as ?token=", () => {
+    const base = document.createElement("base")
+    base.href = "/studio/"
+    document.head.appendChild(base)
+    const plain = new URL(exportUrl("r_1/1/c_sub", "wefttest"))
+    expect(plain.pathname).toBe("/studio/api/runs/r_1%2F1%2Fc_sub/export")
+    expect(plain.searchParams.get("format")).toBe("wefttest")
+    expect(plain.searchParams.has("token")).toBe(false)
+
+    // A download link cannot carry a bearer header.
+    setStudioToken("tok")
+    const walled = new URL(exportUrl("r_1", "jsonl"))
+    expect(walled.searchParams.get("format")).toBe("jsonl")
+    expect(walled.searchParams.get("token")).toBe("tok")
   })
 })
 

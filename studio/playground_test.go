@@ -647,13 +647,13 @@ func TestStep8RoutesRefusePanelTokens(t *testing.T) {
 	}
 	readTok := minted.Token
 
-	// Fixtures: another public id's run is refused; the token's own
-	// run exports (a readable transcript was seeded).
+	// Fixtures are request-derived: a read-scoped token is refused them
+	// whatever the run, its own included (403, badge hidden).
 	if code, body := pt.authed(t, http.MethodPost, "/api/playground/fixtures", readTok, `{"run_id":"run_other"}`); code != http.StatusForbidden {
 		t.Errorf("fixtures, another public id's run = %d (%s), want 403", code, body)
 	}
-	if code, body := pt.authed(t, http.MethodPost, "/api/playground/fixtures", readTok, `{"run_id":"run_mine"}`); code != http.StatusOK {
-		t.Errorf("fixtures, own run = %d (%s), want 200", code, body)
+	if code, body := pt.authed(t, http.MethodPost, "/api/playground/fixtures", readTok, `{"run_id":"run_mine"}`); code != http.StatusForbidden || !strings.Contains(body, `"badge":"hidden"`) {
+		t.Errorf("fixtures, own run with a read token = %d (%s), want 403 with the hidden badge", code, body)
 	}
 	if code, body := pt.authed(t, http.MethodPost, "/api/playground/fixtures", pt.token, `{"run_id":"run_other"}`); code != http.StatusOK {
 		t.Errorf("fixtures, server token = %d (%s), want 200", code, body)

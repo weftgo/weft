@@ -118,7 +118,7 @@ instructions/model override is refused — the §5.5 prompt trap), thread
 `fork` (a new session with lineage the panel can keep chatting in),
 `POST /api/runs/{id}/approvals` (a parked run's continue/skip/resolve
 — ADR 0007's own verbs), `POST /api/playground/fixtures` (the run's
-records as wefttest replay fixtures), and `GET/POST /api/experiments`
+records as wefttest replay fixtures; refused to a read-scoped panel token, 403 with badge `hidden`; 409 with its badge when there is nothing to fixture), and `GET/POST /api/experiments`
 with `GET /api/experiments/{id}` (the saved groups, PQ4). The
 debugger's rungs 3–4 act on runtime-started runs only (D7, PQ7):
 `PUT /api/runtimes/{id}/breakpoints` (capability `breakpoints`) and

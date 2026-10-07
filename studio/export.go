@@ -127,22 +127,48 @@ func (s *Server) serveRunExport(w http.ResponseWriter, r *http.Request, id strin
 }
 
 // writeDownload sends an export as an attachment named <run id>.<ext>.
-// A child run's id carries slashes: the file name spells them "_".
+// The quoted filename is plain ASCII: a child run's slashes, a quote, a
+// backslash, control and non-ASCII characters are spelled "_". An id
+// with non-ASCII characters also gets RFC 6266's filename* — the UTF-8
+// name, percent-encoded — which browsers prefer.
 func writeDownload(w http.ResponseWriter, r *http.Request, id string, f exportFormat, body []byte) {
-	file := strings.Map(func(c rune) rune {
-		if c == '/' || c == '\\' || c == '"' || c < 0x20 || c == 0x7f {
+	name := id + "." + f.ext
+	ascii := strings.Map(func(c rune) rune {
+		if c == '/' || c == '\\' || c == '"' || c < 0x20 || c >= 0x7f {
 			return '_'
 		}
 		return c
-	}, id)
+	}, name)
+	cd := `attachment; filename="` + ascii + `"`
+	for _, c := range name {
+		if c >= 0x80 {
+			cd += "; filename*=UTF-8''" + rfc5987(strings.ReplaceAll(name, "/", "_"))
+			break
+		}
+	}
 	w.Header().Set("Content-Type", f.contentType)
-	w.Header().Set("Content-Disposition", `attachment; filename="`+file+"."+f.ext+`"`)
+	w.Header().Set("Content-Disposition", cd)
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(http.StatusOK)
 	if r.Method == http.MethodHead {
 		return
 	}
 	_, _ = w.Write(body)
+}
+
+// rfc5987 percent-encodes s as an RFC 5987 ext-value's value: every
+// byte outside attr-char.
+func rfc5987(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("!#$&+-.^_`|~", c) >= 0 {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "%%%02X", c)
+	}
+	return b.String()
 }
 
 // refuseHidden is mayReadPrompts' refusal with the route's own words:
@@ -169,26 +195,13 @@ func (s *Server) exportFixtures(w http.ResponseWriter, r *http.Request, id strin
 		dbError(w, r, "run", id, err)
 		return
 	}
-	src, err := s.loadFixtureSource(ctx, id, nil, true)
+	src, err := s.loadFixtureSource(ctx, id, nil)
 	if err != nil {
 		dbError(w, r, "run", id, err)
 		return
 	}
-	files, err := runFixtures(src)
-	if errors.Is(err, errNoTranscript) {
-		b := badgeOf(obsdb.HoleGap)
-		if requestsStripped(src.requests) {
-			b = badgeOf(obsdb.HoleStripped)
-		}
-		conflict(w, r, "the run has no transcript to fixture", b)
-		return
-	}
-	if err != nil {
-		conflict(w, r, "the run's transcript cannot be fixtured: "+err.Error(), badgeFields{})
-		return
-	}
-	if len(files) == 0 {
-		conflict(w, r, "the run recorded no assistant turns to fixture", badgeFields{})
+	files, ok := fixturesOrConflict(w, r, src)
+	if !ok {
 		return
 	}
 	var buf bytes.Buffer
@@ -246,6 +259,10 @@ type runExport struct {
 	catalogs    []exportRef
 	spans       []obsdb.Span
 	runHoles    []stepHole // the run's own (runHoles), as /api/runs/{id} serves them
+	// stripped is whether any request record came through a content-off
+	// chain — read even when the request block is hidden, so a read
+	// token's transcript badge says stripped, not gap.
+	stripped bool
 }
 
 // exportRef is one prompt or catalog hash the requests name: the record
@@ -292,14 +309,19 @@ func (s *Server) collectExport(ctx context.Context, id string, hidden bool) (*ru
 		return nil, err
 	}
 	x.reqHole = det.RequestsHole()
+	if x.reqHole == "" {
+		if x.requests, err = allRequests(ctx, s.db, id); err != nil {
+			return nil, err
+		}
+		x.stripped = requestsStripped(x.requests)
+	}
 	if hidden {
-		x.reqHole = obsdb.HoleHidden
+		// The marks are read; the rows, prompts and catalogs are not
+		// the read-scoped token's — whatever else the block lacks.
+		x.reqHole, x.requests = obsdb.HoleHidden, nil
 	}
 	if x.reqHole != "" {
 		return x, nil
-	}
-	if x.requests, err = allRequests(ctx, s.db, id); err != nil {
-		return nil, err
 	}
 	cats, err := s.db.Catalogs(ctx, id)
 	if err != nil {
@@ -463,7 +485,7 @@ func (x *runExport) transcriptBlock() exportTranscript {
 	}
 	if len(x.batches) == 0 {
 		switch {
-		case requestsStripped(x.requests):
+		case x.stripped:
 			out.badgeFields = badgeOf(obsdb.HoleStripped)
 		case x.run.Steps > 0 || x.run.RequestCount > 0:
 			out.badgeFields = badgeOf(obsdb.HoleGap)
@@ -528,7 +550,7 @@ func (x *runExport) holes(blocks []exportBlock) []stepHole {
 			hs.add(obsdb.Hole(b.Badge), b.Reason, b.Fix)
 		}
 	}
-	if requestsStripped(x.requests) {
+	if x.stripped {
 		hs.note(obsdb.HoleStripped)
 	}
 	for _, refs := range [][]exportRef{x.prompts, x.catalogs} {
@@ -827,7 +849,10 @@ func (x *runExport) otlpLogs() *collogspb.ExportLogsServiceRequest {
 		if b.Step >= 0 {
 			a["weft.step.index"] = int64(b.Step)
 		}
-		if b.Input {
+		// An input flag the backend inferred (InputDerived) is not
+		// stamped: the copy infers it again and reads derived, as the
+		// source does.
+		if b.Input && !b.InputDerived {
 			a["weft.messages.input"] = true
 		}
 		recs = append(recs, x.record(start, "weft.messages", string(b.Messages), a))
@@ -878,11 +903,14 @@ func (x *runExport) otlpLogs() *collogspb.ExportLogsServiceRequest {
 		recs = append(recs, x.record(rq.Time, "weft.request", string(rq.Raw), a))
 	}
 	for _, ref := range x.prompts {
-		if p := ref.prompt; p != nil && p.Content != obsdb.HoleDerived {
+		if p := ref.prompt; p != nil {
 			body, _ := json.Marshal(struct {
 				Hash string `json:"hash"`
 				Text string `json:"text"`
 			}{p.Hash, p.Text})
+			if p.Content == obsdb.HoleDerived {
+				body = nil // see derivedBody
+			}
 			a := map[string]any{"weft.record": "prompt", "weft.prompt.index": p.Index, "weft.system.hash": p.Hash, "weft.content": "full"}
 			if p.TruncatedBytes > 0 {
 				a["weft.content.truncated_bytes"] = p.TruncatedBytes
@@ -891,11 +919,14 @@ func (x *runExport) otlpLogs() *collogspb.ExportLogsServiceRequest {
 		}
 	}
 	for _, ref := range x.catalogs {
-		if c := ref.catalog; c != nil && c.Content != obsdb.HoleDerived {
+		if c := ref.catalog; c != nil {
 			body, _ := json.Marshal(struct {
 				Hash  string            `json:"hash"`
 				Tools []obsdb.ToolEntry `json:"tools"`
 			}{c.Hash, catalogOf(*c).Tools})
+			if c.Content == obsdb.HoleDerived {
+				body = nil // see derivedBody
+			}
 			a := map[string]any{"weft.record": "tools", "weft.tools.index": c.Index, "weft.catalog.hash": c.Hash, "weft.content": "full"}
 			if c.TruncatedBytes > 0 {
 				a["weft.content.truncated_bytes"] = c.TruncatedBytes
@@ -903,6 +934,12 @@ func (x *runExport) otlpLogs() *collogspb.ExportLogsServiceRequest {
 			recs = append(recs, x.record(c.Time, "weft.tools", string(body), a))
 		}
 	}
+	// derivedBody: a prompt or tools record stored derived (a malformed
+	// producer: its body did not parse) is exported with its hash
+	// attribute and an empty body, which reads back derived again. The
+	// malformed body itself is lost: obsdb's reader keeps only the hash
+	// it fell back to (PromptRecordOf, ToolsRecordOf).
+
 	// The run's last-seen: heartbeats are never stored, so the newest
 	// one is what the row's last_seen remembers of them.
 	if !x.run.LastSeen.IsZero() {

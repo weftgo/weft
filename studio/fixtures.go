@@ -44,9 +44,10 @@ import (
 //     R3); the finish carries the step_finish event's reason, raw
 //     reason and usage when the run recorded it, else an inferred
 //     reason (tool calls → tool_calls, else stop) and no usage;
-//   - the system prompt is filled only for an identity that reads
-//     prompts (readsPrompts) — it is recorded for the reviewer, never
-//     keyed (wefttest/replay.go's keyDoc).
+//   - the system prompt is filled — it is recorded for the reviewer,
+//     never keyed (wefttest/replay.go's keyDoc); both routes refuse a
+//     read-scoped panel token (403, badge hidden): fixtures are
+//     request-derived.
 //
 // A step whose attempts all failed recorded no answer and gets no
 // fixture: a failed attempt answered by a retry is invisible to the
@@ -66,13 +67,31 @@ type fixtureSource struct {
 	system      func(hash string) string
 }
 
+// fixtureError is the builder's refusal, with the hole that explains
+// it: gap (a record the fixtures need was not stored — no transcript,
+// a step without its request record) or derived (the stored records do
+// not read back as what the model saw — a body that is not messages, a
+// view that does not fit). Both routes answer it 409 with the badge;
+// a content-off run's missing transcript is badged stripped there.
+type fixtureError struct {
+	hole obsdb.Hole
+	msg  string
+}
+
+func (e *fixtureError) Error() string { return e.msg }
+
 // errNoTranscript is the fixture builder's refusal for a run whose
 // transcript was not stored (content capture off, a pre-record run).
-var errNoTranscript = errors.New("the run has no readable transcript to fixture (content capture off?)")
+var errNoTranscript = &fixtureError{obsdb.HoleGap, "the run has no readable transcript to fixture (content capture off?)"}
+
+func derivedError(format string, args ...any) error {
+	return &fixtureError{obsdb.HoleDerived, fmt.Sprintf(format, args...)}
+}
 
 // loadFixtureSource reads everything runFixtures needs for run id.
-// prompts says whether the caller may read system prompts.
-func (s *Server) loadFixtureSource(ctx context.Context, id string, tools []string, prompts bool) (fixtureSource, error) {
+// Both callers have refused a read-scoped token (readsPrompts), so the
+// system prompt is filled for the reviewer.
+func (s *Server) loadFixtureSource(ctx context.Context, id string, tools []string) (fixtureSource, error) {
 	src := fixtureSource{tools: tools, finishes: map[int]core.StepFinish{}}
 	det, err := s.db.Run(ctx, id)
 	if err != nil {
@@ -105,15 +124,13 @@ func (s *Server) loadFixtureSource(ctx context.Context, id string, tools []strin
 			src.finishes[sf.Index] = sf
 		}
 	}
-	if prompts {
-		res := resolver{ctx: ctx, db: s.db, run: id, prompts: map[string]any{}, catalogs: map[string]any{}}
-		src.system = func(hash string) string {
-			v, err := res.prompt(hash, false)
-			if p, ok := v.(promptDoc); err == nil && ok {
-				return p.Text
-			}
-			return ""
+	res := resolver{ctx: ctx, db: s.db, run: id, prompts: map[string]any{}, catalogs: map[string]any{}}
+	src.system = func(hash string) string {
+		v, err := res.prompt(hash, false)
+		if p, ok := v.(promptDoc); err == nil && ok {
+			return p.Text
 		}
+		return ""
 	}
 	return src, nil
 }
@@ -199,7 +216,7 @@ func runFixtures(src fixtureSource) ([]fixtureFile, error) {
 		}
 		var batch []core.Message
 		if err := json.Unmarshal(b.Messages, &batch); err != nil {
-			return nil, fmt.Errorf("the run's transcript is not readable as messages: %w", err)
+			return nil, derivedError("the run's transcript is not readable as messages: %v", err)
 		}
 		if first && !flagged {
 			// No record carries weft.messages.input (a producer or row
@@ -260,7 +277,15 @@ func runFixtures(src fixtureSource) ([]fixtureFile, error) {
 		done[step] = true
 		doc := fixtureDoc{Model: core.ModelInfo{Provider: "weft", Name: "recorded"}}
 		key := fixtureKeyDoc{Messages: msgs[:i:i], Tools: sortedNames(src.tools)}
-		if rec, ok := answering[step]; ok {
+		rec, ok := answering[step]
+		if !ok && len(src.requests) > 0 {
+			// The run recorded request records, but not this step's: its
+			// key (tools, thinking, tool choice) is unknown, and keying it
+			// on nothing would write a fixture that silently never
+			// matches.
+			return nil, &fixtureError{obsdb.HoleGap, fmt.Sprintf("step %d has no request record: a destination dropped it, so the step's request key cannot be rebuilt", step)}
+		}
+		if ok {
 			body := rec.Body
 			key.Tools = sortedNames(body.Tools.Names)
 			key.Sequential = body.SequentialTools
@@ -283,7 +308,7 @@ func runFixtures(src fixtureSource) ([]fixtureFile, error) {
 				if v, ok := views[*ref]; ok {
 					seen, err := applyView(msgs[:i], v)
 					if err != nil {
-						return nil, fmt.Errorf("step %d: %w", step, err)
+						return nil, derivedError("step %d: %v", step, err)
 					}
 					key.Messages = seen
 					doc.CompactedAt = &compactedNote{
@@ -301,7 +326,7 @@ func runFixtures(src fixtureSource) ([]fixtureFile, error) {
 		doc.Events = fixtureEvents(msg, finish, hasFinish)
 		b, err := json.MarshalIndent(doc, "", "  ")
 		if err != nil {
-			return nil, fmt.Errorf("step %d: %w", step, err)
+			return nil, derivedError("step %d: %v", step, err)
 		}
 		files = append(files, fixtureFile{
 			Name: fmt.Sprintf("%05d-%s.json", len(files)+1, fixtureKey(key)),
@@ -452,9 +477,15 @@ func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) 
 		badRequest(w, r, "fixture body: run_id is required")
 		return
 	}
+	// Fixtures are request-derived (the step's tool names, thinking,
+	// the system prompt): a read-scoped panel token is refused them, as
+	// it is the request record and the export's wefttest format.
+	if !readsPrompts(r) {
+		refuseHidden(w, r, "fixtures are rebuilt from the run's request records and carry its system prompt and tool names: a read-scoped panel token does not read them")
+		return
+	}
 	// A panel token fixtures inside its public id only (S4.6) — like
-	// every run-id route in api.go. The export is a full transcript:
-	// a read-scoped token must not read another public id's turns.
+	// every run-id route in api.go.
 	if !s.scopeRunID(w, r, req.RunID) {
 		return
 	}
@@ -472,18 +503,13 @@ func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) 
 	// recorded before the request record. A batch dropped would shift
 	// every later request key — fixtures that silently never match —
 	// so an unreadable transcript is refused, never skipped.
-	src, err := s.loadFixtureSource(r.Context(), req.RunID, req.Tools, readsPrompts(r))
-	if err != nil && !errors.Is(err, obsdb.ErrNotFound) {
+	src, err := s.loadFixtureSource(r.Context(), req.RunID, req.Tools)
+	if err != nil {
 		dbError(w, r, "transcript of run", req.RunID, err)
 		return
 	}
-	files, err := runFixtures(src)
-	if err != nil {
-		badRequest(w, r, err.Error())
-		return
-	}
-	if len(files) == 0 {
-		badRequest(w, r, "the run recorded no assistant turns to fixture")
+	files, ok := fixturesOrConflict(w, r, src)
+	if !ok {
 		return
 	}
 	writeJSON(w, r, http.StatusOK, struct {
@@ -491,4 +517,31 @@ func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) 
 		Agent string        `json:"agent"`
 		Files []fixtureFile `json:"files"`
 	}{RunID: req.RunID, Agent: row.Agent, Files: files})
+}
+
+// fixturesOrConflict builds the run's fixtures, or answers the refusal
+// itself: 409 in the error shape with the hole that explains it —
+// stripped for a content-off run's missing transcript, the builder's
+// gap or derived otherwise. A run with a transcript but no recorded
+// answer (it failed before any step answered) is 409 without a badge:
+// nothing is missing, there is nothing to replay.
+func fixturesOrConflict(w http.ResponseWriter, r *http.Request, src fixtureSource) ([]fixtureFile, bool) {
+	files, err := runFixtures(src)
+	var fe *fixtureError
+	switch {
+	case errors.As(err, &fe):
+		b := badgeOf(fe.hole)
+		if fe == errNoTranscript && requestsStripped(src.requests) {
+			b = badgeOf(obsdb.HoleStripped)
+		}
+		conflict(w, r, fe.msg, b)
+		return nil, false
+	case err != nil:
+		conflict(w, r, "the run's transcript cannot be fixtured: "+err.Error(), badgeOf(obsdb.HoleDerived))
+		return nil, false
+	case len(files) == 0:
+		conflict(w, r, "the run recorded no assistant turns to fixture", badgeFields{})
+		return nil, false
+	}
+	return files, true
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +22,7 @@ import (
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/mw"
 	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/otel"
 )
 
@@ -497,7 +500,7 @@ func TestExportWefttestReplay(t *testing.T) {
 // — and its wefttest export is 409 with the stripped badge (no
 // transcript to fixture).
 func TestExportContentOff(t *testing.T) {
-	ts, _ := requestsServer(t)
+	ts, srv := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_xoff", nil, otel.NoContent())
 	_, body := exportGet(t, ts, "/api/runs/r_xoff/export?format=json", settled("r_xoff"))
 	shapeGolden(t, "export-json-stripped.shape.golden", body)
@@ -530,6 +533,13 @@ func TestExportContentOff(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict || !strings.Contains(string(b), `"badge":"stripped"`) || !strings.Contains(string(b), `"code":"conflict"`) {
 		t.Errorf("content-off wefttest = %d %s, want 409 with the stripped badge", resp.StatusCode, b)
+	}
+	// The playground's fixtures route answers alike: 409, stripped.
+	pg := Handler(DB(srv.db), Playground(true))
+	w := httptest.NewRecorder()
+	pg.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/playground/fixtures", strings.NewReader(`{"run_id":"r_xoff"}`)))
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"badge":"stripped"`) {
+		t.Errorf("content-off playground fixtures = %d %s, want 409 with the stripped badge", w.Code, w.Body)
 	}
 }
 
@@ -670,5 +680,177 @@ func TestExportPanelTokens(t *testing.T) {
 		if code, _ := get("wefttest", bearer); code != http.StatusOK {
 			t.Errorf("a prompt-reading identity's wefttest = %d, want 200", code)
 		}
+	}
+}
+
+// TestExportReadTokenContentOff: a read-scoped token's json export of a
+// content-off run badges the transcript stripped — the request records'
+// content marks are read even though their rows are hidden — and lists
+// stripped and hidden, never a gap.
+func TestExportReadTokenContentOff(t *testing.T) {
+	const tok = "srv-token"
+	srv := New(Open(filepath.Join(t.TempDir(), "weft.db")), Token(tok))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	recordStepsRun(t, ts.URL, "r_roff", map[string]string{"weft.public_id": "pub_a"}, otel.NoContent())
+	read, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(bearer string) string {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/r_roff/export?format=json", nil)
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("export = %d %s", resp.StatusCode, b)
+		}
+		return string(b)
+	}
+	for deadline := time.Now().Add(5 * time.Second); !settled("r_roff")(get(tok)) && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+	}
+	var d exportDocT
+	decode(t, get(read), &d)
+	if d.Transcript.Badge != "stripped" || d.Requests.Badge != "hidden" || len(d.Requests.Requests) != 0 || d.holes() != "stripped,hidden" {
+		t.Errorf("read token × content-off = transcript %q requests %q (%d rows) holes %s, want stripped, hidden, none, stripped,hidden",
+			d.Transcript.Badge, d.Requests.Badge, len(d.Requests.Requests), d.holes())
+	}
+}
+
+// TestExportOTLPKeepsTruncatedAndDerived: a hand-written record set
+// whose prompt was cut by a cap (truncated) and whose tools record did
+// not parse (derived) re-ingests from its OTLP export with both holes
+// intact — never read back as a gap.
+func TestExportOTLPKeepsTruncatedAndDerived(t *testing.T) {
+	ts, srv := requestsServer(t)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	rec := func(i int, kind, body string, attrs map[string]any) obsdb.Record {
+		a := map[string]any{"weft.record": kind, "weft.run.id": "r_hand", "gen_ai.agent.name": "a"}
+		for k, v := range attrs {
+			a[k] = v
+		}
+		return obsdb.Record{Time: now.Add(time.Duration(i) * time.Millisecond), EventName: "weft." + kind, Severity: 9,
+			Body: body, Service: "svc", Attrs: a, Resource: map[string]any{"service.name": "svc"}}
+	}
+	if err := srv.db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{
+		rec(0, "event", `{"type":"run_start","id":"r_hand","model":{"provider":"p","name":"m"},"agent":"a"}`,
+			map[string]any{"weft.event.type": "run_start", "weft.event.pos": int64(0), "weft.instructions.hash": "ih"}),
+		rec(1, "messages", `[{"role":"user","content":[{"type":"text","text":"hi"}]}]`,
+			map[string]any{"weft.messages.index": int64(0), "weft.step.index": int64(0), "weft.messages.input": true}),
+		rec(2, "request", `{"step":0,"attempt":1,"system_hash":"sh","messages_ref":{"index":0,"count":1},"tools":{"catalog_hash":"ch","names":["x"]}}`,
+			map[string]any{"weft.request.index": int64(0), "weft.step.index": int64(0), "weft.system.hash": "sh", "weft.catalog.hash": "ch", "weft.content": "full"}),
+		rec(3, "prompt", `{"hash":"sh","text":"You are cu"}`,
+			map[string]any{"weft.prompt.index": int64(0), "weft.system.hash": "sh", "weft.content.truncated_bytes": int64(40)}),
+		rec(4, "tools", `not json`, map[string]any{"weft.tools.index": int64(0), "weft.catalog.hash": "ch"}),
+		rec(5, "event", `{"type":"run_finish","run_id":"r_hand","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`,
+			map[string]any{"weft.event.type": "run_finish", "weft.event.pos": int64(1)}),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	_, want := exportGet(t, ts, "/api/runs/r_hand/export?format=json", nil)
+	for _, w := range []string{`"content":"truncated"`, `"content":"derived"`, `"hole":"truncated"`} {
+		if !strings.Contains(string(want), w) {
+			t.Fatalf("source export lacks %s: %s", w, want)
+		}
+	}
+	_, body := exportGet(t, ts, "/api/runs/r_hand/export?format=otlp", nil)
+	var parts struct {
+		Logs json.RawMessage `json:"logs"`
+	}
+	decode(t, string(body), &parts)
+	fresh, _ := requestsServer(t)
+	resp, err := http.Post(fresh.URL+"/v1/logs", "application/json", bytes.NewReader(parts.Logs))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	_, got := exportGet(t, fresh, "/api/runs/r_hand/export?format=json", nil)
+	if a, b := withoutChildren(t, want), withoutChildren(t, got); a != b {
+		t.Errorf("re-ingested export differs:\n got %s\nwant %s", b, a)
+	}
+}
+
+// TestExportOTLPInputDerived: a messages batch whose input flag the
+// backend inferred is exported without weft.messages.input, so the
+// copy infers it again (derived) instead of reading it as recorded.
+func TestExportOTLPInputDerived(t *testing.T) {
+	x := &runExport{batches: []obsdb.TranscriptBatch{
+		{Index: 0, Step: 0, Input: true, InputDerived: true, Messages: json.RawMessage(`[]`)},
+		{Index: 1, Step: 0, Input: true, Messages: json.RawMessage(`[]`)},
+	}}
+	recs := x.otlpLogs().ResourceLogs[0].ScopeLogs[0].LogRecords
+	has := func(i int) bool {
+		for _, kv := range recs[i].Attributes {
+			if kv.Key == "weft.messages.input" {
+				return true
+			}
+		}
+		return false
+	}
+	if has(0) || !has(1) {
+		t.Errorf("weft.messages.input on (derived, recorded) = (%v, %v), want (false, true)", has(0), has(1))
+	}
+}
+
+// TestFixturesRefuseAStepWithoutItsRequest: a run that recorded
+// request records but not one step's cannot key that step — the
+// builder refuses with the gap hole instead of keying it on nothing.
+func TestFixturesRefuseAStepWithoutItsRequest(t *testing.T) {
+	src := fixtureSource{
+		batches: []obsdb.TranscriptBatch{
+			{Index: 0, Step: 0, Input: true, Messages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"hi"}]}]`)},
+			{Index: 1, Step: 0, Messages: json.RawMessage(`[{"role":"assistant","content":[{"type":"text","text":"a"}]}]`)},
+			{Index: 2, Step: 1, Messages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"more"}]},{"role":"assistant","content":[{"type":"text","text":"b"}]}]`)},
+		},
+		requests: []obsdb.RequestRecord{{Index: 0, Step: 0}},
+	}
+	_, err := runFixtures(src)
+	var fe *fixtureError
+	if !errors.As(err, &fe) || fe.hole != obsdb.HoleGap || !strings.Contains(fe.msg, "step 1") {
+		t.Errorf("err = %v, want the gap refusal naming step 1", err)
+	}
+	src.requests = append(src.requests, obsdb.RequestRecord{Index: 1, Step: 1})
+	if files, err := runFixtures(src); err != nil || len(files) != 2 {
+		t.Errorf("with both requests = %d files, %v; want 2", len(files), err)
+	}
+}
+
+// TestExportDownloadHeaders: the attachment name is plain ASCII in
+// filename (slash, quote, backslash, control and non-ASCII characters
+// spelled "_") with filename* carrying a non-ASCII id; HEAD answers the
+// headers without the body.
+func TestExportDownloadHeaders(t *testing.T) {
+	f := exportFormats["json"]
+	for id, want := range map[string]string{
+		"r/1/c":   `attachment; filename="r_1_c.json"`,
+		"a\"b\\c": `attachment; filename="a_b_c.json"`,
+		"line\nx": `attachment; filename="line_x.json"`,
+		"run-é/漢": `attachment; filename="run-___.json"; filename*=UTF-8''run-%C3%A9_%E6%BC%A2.json`,
+	} {
+		w := httptest.NewRecorder()
+		writeDownload(w, httptest.NewRequest(http.MethodGet, "/", nil), id, f, []byte("{}"))
+		if got := w.Header().Get("Content-Disposition"); got != want {
+			t.Errorf("%q: Content-Disposition = %s, want %s", id, got, want)
+		}
+	}
+	ts, _ := requestsServer(t)
+	recordStepsRun(t, ts.URL, "r_head", nil)
+	_, body := exportGet(t, ts, "/api/runs/r_head/export?format=json", settled("r_head"))
+	req, _ := http.NewRequest(http.MethodHead, ts.URL+"/api/runs/r_head/export?format=json", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || len(b) != 0 || resp.Header.Get("Content-Length") != strconv.Itoa(len(body)) ||
+		resp.Header.Get("Content-Disposition") != `attachment; filename="r_head.json"` {
+		t.Errorf("HEAD = %d, %d body bytes, length %q, disposition %q", resp.StatusCode, len(b), resp.Header.Get("Content-Length"), resp.Header.Get("Content-Disposition"))
 	}
 }

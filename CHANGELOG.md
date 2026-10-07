@@ -83,8 +83,10 @@ module, ADR 0005).
 - **Studio's run export (plan A7, A9's byte-faithful fixtures).**
   `GET /api/runs/{id}/export?format=json|jsonl|otlp|wefttest`, under a
   new `export` capability in `/api/meta`, downloads the whole run
-  (`Content-Disposition: attachment; filename="<run id>.<ext>"`, a
-  child's slashes spelled `_`). `json` is one `weft.run.export/1`
+  (`Content-Disposition: attachment; filename="<run id>.<ext>"`, the
+  quoted name plain ASCII — a child's slashes, quotes, backslashes,
+  control and non-ASCII characters spelled `_` — plus RFC 6266's
+  `filename*` for a non-ASCII id; HEAD answers the headers alone). `json` is one `weft.run.export/1`
   document — `run` (as `/api/runs/{id}`), `events` (with `gaps`),
   `transcript` (the batches as `/transcript` serves them),
   `compactions`, `requests` (the rows with `refs=1`, plus `prompts` and
@@ -97,13 +99,22 @@ module, ADR 0005).
   requests by index, prompts, catalogs, spans). `otlp` is
   `{"logs": ExportLogsServiceRequest, "traces": ExportTraceServiceRequest}`
   in OTLP/JSON (ids as hex): the records are rebuilt from what obsdb
-  reads, with the run's identity and metadata on each and one heartbeat
-  at its last-seen, so `POST /v1/logs` and `/v1/traces` re-ingest the
-  same run. `wefttest` is a zip of replay fixtures for
+  reads, with the run's identity and metadata on each, the events'
+  `weft.content` marks, and one heartbeat at its last-seen, so
+  `POST /v1/logs` and `/v1/traces` re-ingest the same run, its
+  `stripped`, `truncated` and `derived` holes included (an inferred
+  input flag is left unstamped, a derived prompt or tools record goes
+  out with its hash and an empty body — the malformed original is not
+  kept by obsdb). The log records' resource carries only
+  `service.name`: obsdb keeps no record's own resource, and the spans
+  keep theirs verbatim. `wefttest` is a zip of replay fixtures for
   `wefttest.Replay`. A read-scoped panel token gets `json`/`jsonl` with
-  the request block `{badge: "hidden"}`; `otlp` and `wefttest` are 403
+  the request block `{badge: "hidden"}` (the transcript still badged
+  `stripped` for a content-off run); `otlp` and `wefttest` are 403
   with the hidden badge. An unknown format is 400, an unknown run 404,
-  a run with no transcript to fixture 409 (badged `stripped` or `gap`).
+  a run with nothing to fixture 409 with its badge (`stripped`, `gap`
+  — no transcript, or a step whose request record was dropped — or
+  `derived`).
   `web/src/lib/api.ts` gains `exportUrl(runId, format)`.
 - **Studio's replay fixtures key on the stored step and the request
   record.** `POST /api/playground/fixtures` and the wefttest export
@@ -116,7 +127,12 @@ module, ADR 0005).
   carries a `compacted_at` header (index, step, range, hash); the
   finish event carries the step's recorded reason, raw reason and
   usage; tool-call signatures are kept; and the system prompt is
-  filled for an identity that reads prompts.
+  filled for the reviewer. One fixture per step, from its answering
+  attempt: failed retry attempts get no fixture, so a replay answers
+  the step's first call under any middleware. `POST
+  /api/playground/fixtures` now refuses a read-scoped panel token (403,
+  badge `hidden`: fixtures are request-derived) and answers "nothing to
+  fixture" with 409 and the badge, like the export (it was 400).
 - **Every hole is a badge from one closed table, on both surfaces
   (plan A3, ADR 0028 §11).** `obsdb.HoleNote(h)` holds each of the ten
   holes' one-line reason and, where one exists, its fix — Studio's

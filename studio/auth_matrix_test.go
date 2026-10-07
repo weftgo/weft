@@ -377,8 +377,10 @@ func TestAuthMatrix(t *testing.T) {
 			body: fixed(`{"message":"hi"}`), resources: []string{"A", "B"}, want: anyValid(forbidden403)},
 		{name: "POST /api/runs/{app's own run}/approvals", method: "POST", path: func(res string) string { return "/api/runs/" + run[res] + "/approvals" },
 			body: fixed(`{"call_id":"call_1","decision":"deny"}`), resources: []string{"A", "B"}, want: anyValid(forbidden403)},
+		// Fixtures are request-derived (tool names, the system prompt):
+		// refused to a read-scoped token like the export's wefttest.
 		{name: "POST /api/playground/fixtures", method: "POST", path: fixed("/api/playground/fixtures"),
-			body: func(res string) string { return `{"run_id":"` + run[res] + `"}` }, resources: all, want: scoped(ok)},
+			body: func(res string) string { return `{"run_id":"` + run[res] + `"}` }, resources: all, want: acting(ok)},
 
 		// Not public-id-shaped: the server token's alone.
 		{name: "GET /api/experiments", method: "GET", path: fixed("/api/experiments"), resources: one, want: serverOnly(ok)},

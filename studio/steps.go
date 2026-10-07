@@ -209,6 +209,26 @@ func (hs holeSet) add(h obsdb.Hole, reason, fix string) {
 	}
 }
 
+// also adds a second cause to a badge already named: its reason and
+// fix are appended ("; ") after the first one's, never in its place.
+func (hs holeSet) also(h obsdb.Hole, reason, fix string) {
+	cur, ok := hs[h]
+	if !ok {
+		hs.add(h, reason, fix)
+		return
+	}
+	if !strings.Contains(cur.Reason, reason) {
+		cur.Reason += "; " + reason
+	}
+	if fix != "" && !strings.Contains(cur.Fix, fix) {
+		if cur.Fix != "" {
+			cur.Fix += "; "
+		}
+		cur.Fix += fix
+	}
+	hs[h] = cur
+}
+
 // noTracerFix is the fix for a run recorded without spans — the one
 // note obsdb.HoleNote's table does not word (its not_recorded fix is
 // "upgrade weft", wrong for an app that ran without a tracer). Local
@@ -410,22 +430,9 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		Children: []stepChild{},
 	}
 
-	// Events, status, timing, usage — and what the recorder did to
-	// the events' content (their weft.content.* attributes): a
-	// content-off chain's or the core's capture-off mark is stripped,
-	// a destination's cap is truncated, its bytes summed.
-	var cut int64
+	// Events, status, timing, usage.
 	for _, pe := range evs.events {
 		doc.Events = append(doc.Events, posEventOf(pe))
-		if pe.Content == "stripped" || pe.Content == "none" {
-			holes.note(obsdb.HoleStripped)
-		}
-		if pe.TruncatedBytes > 0 {
-			cut += pe.TruncatedBytes
-		}
-	}
-	if cut > 0 {
-		holes.add(obsdb.HoleTruncated, "a destination's cap cut "+strconv.FormatInt(cut, 10)+" bytes from this step's events before they were stored", holeFix(obsdb.HoleTruncated))
 	}
 	if evs.start != nil {
 		t := evs.start.Time
@@ -875,6 +882,24 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 	}
 	if first != nil && first.Content == obsdb.HoleDerived {
 		holes.add(obsdb.HoleDerived, "the step's request record did not parse: its body is empty and its hashes come from the record's attributes", "")
+	}
+	// Last, what the recorder did to the events' content (their
+	// weft.content.* attributes) — after every specific reason, so it
+	// only fills what nothing else named: a content-off chain's or the
+	// core's capture-off mark is stripped; a destination's cap on the
+	// events is truncated, its bytes summed, beside any other cut of
+	// the step (the core's result cap, a capped prompt or catalog).
+	var cut int64
+	for _, pe := range evs.events {
+		if pe.Content == "stripped" || pe.Content == "none" {
+			holes.note(obsdb.HoleStripped)
+		}
+		if pe.TruncatedBytes > 0 {
+			cut += pe.TruncatedBytes
+		}
+	}
+	if cut > 0 {
+		holes.also(obsdb.HoleTruncated, "a destination's cap cut "+strconv.FormatInt(cut, 10)+" bytes from this step's events before they were stored", holeFix(obsdb.HoleTruncated))
 	}
 	doc.Holes = holes.list()
 	writeJSON(w, r, http.StatusOK, doc)

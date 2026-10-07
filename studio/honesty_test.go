@@ -390,8 +390,13 @@ func TestStepHolesFromAttrs(t *testing.T) {
 	}
 	decode(t, fetchJSON(t, ts, "/api/runs/r_cap/steps/0", nil), &sd)
 	_, fix := obsdb.HoleNote(obsdb.HoleTruncated)
-	if len(sd.Holes) == 0 || sd.Holes[0].Hole != "truncated" || !strings.Contains(sd.Holes[0].Reason, "92 bytes") || sd.Holes[0].Fix != fix {
-		t.Errorf("capped step holes = %+v, want truncated (92 bytes) first, with the table's fix", sd.Holes)
+	// The 16-byte cap cut the tool catalog (its specific reason comes
+	// first) and the tool result (the events' cut, beside it); both
+	// carry the table's truncated fix, once.
+	if len(sd.Holes) == 0 || sd.Holes[0].Hole != "truncated" ||
+		!strings.Contains(sd.Holes[0].Reason, "the step's tool catalog was cut by a destination's cap") ||
+		!strings.Contains(sd.Holes[0].Reason, "92 bytes") || sd.Holes[0].Fix != fix {
+		t.Errorf("capped step holes = %+v, want truncated: the catalog's reason and the events' 92 bytes, with the table's fix %q", sd.Holes, fix)
 	}
 
 	db, err := sqlite.Open(":memory:")
@@ -460,5 +465,57 @@ func TestLiveBackfillAttrs(t *testing.T) {
 		} else if !strings.Contains(frames[i].data, want) {
 			t.Errorf("backfill frame %d misses %s: %s", i, want, frames[i].data)
 		}
+	}
+}
+
+// TestStepHolesBothCuts: a step with one tool result the core's
+// MaxResultBytes cut and another a destination's cap cut names both
+// causes on its one truncated badge — the core's first,
+// with its weft.MaxResultBytes fix, then the destination's.
+func TestStepHolesBothCuts(t *testing.T) {
+	ts, _ := requestsServer(t)
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(ts.URL, "", otel.WithContent(otel.ContentConfig{MaxBytes: 48})), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	type in struct {
+		Q string `json:"q" jsonschema:"the query"`
+	}
+	big := core.Tool("big", "Big.", func(context.Context, in) (string, error) { return strings.Repeat("x", 100), nil },
+		core.MaxResultBytes(10)) // the core cuts it: 10 bytes and the marker, under the destination's 48
+	long := core.Tool("long", "Long.", func(context.Context, in) (string, error) { return strings.Repeat("y", 100), nil })
+	agent := core.New(wefttest.Script(
+		wefttest.ToolCalls(
+			wefttest.Call{Name: "big", Args: `{"q":"1"}`, ID: "c1"},
+			wefttest.Call{Name: "long", Args: `{"q":"2"}`, ID: "c2"}),
+		wefttest.Say("ok"),
+	), core.Name("both"), big, long, core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	if _, err := agent.Generate(ctx, core.RunID("r_both"), core.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	fetchJSON(t, ts, "/api/runs/r_both", func(b string) bool { return strings.Contains(b, `"status":"succeeded"`) })
+	var sd struct {
+		Holes []struct{ Hole, Reason, Fix string } `json:"holes"`
+	}
+	decode(t, fetchJSON(t, ts, "/api/runs/r_both/steps/0", nil), &sd)
+	var tr *struct{ Hole, Reason, Fix string }
+	for i := range sd.Holes {
+		if sd.Holes[i].Hole == "truncated" {
+			tr = &sd.Holes[i]
+		}
+	}
+	if tr == nil {
+		t.Fatalf("holes = %+v, want truncated", sd.Holes)
+	}
+	byCore, byDest := strings.Index(tr.Reason, "a tool result was cut by its result cap"), strings.Index(tr.Reason, "a destination's cap cut")
+	if byCore < 0 || byDest < 0 || byCore > byDest {
+		t.Errorf("truncated reason = %q, want the core's result cap, then the destination's cut", tr.Reason)
+	}
+	if !strings.HasPrefix(tr.Fix, "raise the tool's weft.MaxResultBytes") {
+		t.Errorf("truncated fix = %q, want the core cut's weft.MaxResultBytes first", tr.Fix)
 	}
 }

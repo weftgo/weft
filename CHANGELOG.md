@@ -4,6 +4,19 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
+## Unreleased
+
+### thread/sqlite
+
+- A write whose context ends while its transaction is open now fails
+  with an error matching the context's (`context.Canceled`,
+  `context.DeadlineExceeded`), wrapping `sql.ErrTxDone` beside it.
+  database/sql rolls such a transaction back on its own, and the bare
+  `sql.ErrTxDone` read as a storage failure: a `thread/pool` child
+  canceled while its first prompt was being written settled `failed`
+  instead of `canceled` (the crash matrix's `pool_canceled` point, seen
+  once in CI). The write still does not land; only the error changed.
+
 ## otel 0.2.1 — 2026-10-07
 
 ### Fixed

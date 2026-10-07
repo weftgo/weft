@@ -255,17 +255,24 @@ function RunPage() {
       : stream.folded
   // The replay fold goes through the same overlay: the transcript's
   // words and `derived` placements, and the recorder's badges (the
-  // events' attrs), survive scrubbing. Its unplaced batches are the
-  // whole run's — a batch whose step the playhead has not reached yet
-  // is not a hole.
+  // events' attrs), survive scrubbing. Only steps whose step_finish
+  // is at or before the playhead take their final words — replay stays
+  // a prefix. Its unplaced batches are the whole run's: a batch whose
+  // step the playhead has not reached yet is not a hole.
   const batches = transcript.data?.batches
   const atPlayhead = useMemo(() => {
     if (!replaying) return foldedNow
     const prefix = fold(stream.events, playhead, stream.attrs)
     if (!batches || runStatus === "running") return prefix
-    const overlaid = applyTranscript(prefix, batches, { replace: true })
-    overlaid.unplaced = foldedNow.unplaced
-    return overlaid
+    // The finished steps are the prefix's own objects: the overlay
+    // lands on them in place.
+    applyTranscript(
+      { ...prefix, steps: prefix.steps.filter((st) => st.finish) },
+      batches,
+      { replace: true }
+    )
+    prefix.unplaced = foldedNow.unplaced
+    return prefix
   }, [replaying, stream.events, stream.attrs, foldedNow, playhead, batches, runStatus])
   // While scrubbing the run reads as running: calls past the playhead
   // are "running", not "never completed".
@@ -384,16 +391,16 @@ function RunPage() {
           onSeek={seek}
         />
       ) : null}
-      {stream.gaps.length > 0 && (
+      {/* While running: positions may still be in flight. Once over,
+          the header's gap badge (the run's holes) says it. */}
+      {runStatus === "running" && stream.gaps.length > 0 && (
         <div className="rounded-md border border-status-bad/30 px-3 py-2 font-mono text-xs text-status-bad">
           {stream.gaps.length >= 1000 ? "1,000+" : stream.gaps.length} recorded{" "}
           {stream.gaps.length === 1 ? "event is" : "events are"} missing from the
           database (position{stream.gaps.length === 1 ? "" : "s"}{" "}
           {stream.gaps.slice(0, 8).join(", ")}
-          {stream.gaps.length > 8 ? ", …" : ""}) —{" "}
-          {runStatus === "running"
-            ? "still in flight, or lost on the way"
-            : "lost on the way: the story has holes there"}
+          {stream.gaps.length > 8 ? ", …" : ""}) — still in flight, or lost
+          on the way
         </div>
       )}
       {stream.error && (

@@ -454,7 +454,8 @@ function StepCard({
 
 /** The words of transcript batches whose step the record holds no
  * events for (applyTranscript's view.unplaced): kept, under the last
- * step, with the hole that says why — never dropped. */
+ * step, with the hole that says why — a gap: the step's events were
+ * lost — never dropped. */
 function Unplaced({ batches }: { batches: PlacedBatch[] }) {
   const steps = [...new Set(batches.map((b) => b.step))].sort((a, b) => a - b)
   const words = batches
@@ -472,9 +473,8 @@ function Unplaced({ batches }: { batches: PlacedBatch[] }) {
       data-unplaced
     >
       <HoleBadge
-        hole="not_recorded"
-        reason={`the transcript has words for step ${steps.join(", ")}, but no event of ${steps.length === 1 ? "that step" : "those steps"} is in the record`}
-        fix="check the exporter's drops"
+        hole="gap"
+        reason={`the transcript has words for step ${steps.join(", ")}, but no event of ${steps.length === 1 ? "that step" : "those steps"} is in the record: a destination dropped them`}
         detail
       />
       {words.map((w, i) => (

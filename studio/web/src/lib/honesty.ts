@@ -2,7 +2,7 @@
 // record is missing, cut or derived is one of ten named badges, each
 // with a one-line reason and — where one exists — the one-line fix. The
 // vocabulary is closed. Reasons and fixes are obsdb.HoleNote's words
-// (Go is the source: holes.test.ts checks this table against
+// (Go is the source: honesty.test.ts checks this table against
 // studio/testdata/holes.golden.json key by key); the label and tone are
 // how a surface draws them. Plain TypeScript, no React: the run page
 // (hole-badge.tsx) and the devtools panel both read this one module.
@@ -41,7 +41,7 @@ export const HOLES: Record<Hole, HoleNote> = {
   stripped: {
     label: "content not captured by this app",
     reason:
-      "content not captured by this app: the destination's chain is content-off (weft.content = stripped), so prompts, catalogs, messages, tool arguments and results were dropped before they were stored",
+      "content not captured by this app: the destination's chain stripped it (weft.content = stripped), or the agent captured none (weft.Content(false), weft.content = none), so prompts, catalogs, messages, tool arguments and results were dropped before they were stored",
     fix: "turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent",
     tone: "note",
   },

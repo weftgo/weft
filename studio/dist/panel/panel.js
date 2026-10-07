@@ -102,7 +102,7 @@ var f = {
 	},
 	stripped: {
 		label: "content not captured by this app",
-		reason: "content not captured by this app: the destination's chain is content-off (weft.content = stripped), so prompts, catalogs, messages, tool arguments and results were dropped before they were stored",
+		reason: "content not captured by this app: the destination's chain stripped it (weft.content = stripped), or the agent captured none (weft.Content(false), weft.content = none), so prompts, catalogs, messages, tool arguments and results were dropped before they were stored",
 		fix: "turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent",
 		tone: "note"
 	},
@@ -683,12 +683,11 @@ function we(e, t, n) {
 	return e;
 }
 function Te(e, t, n) {
-	if (n && Array.isArray(n.holes)) return _(n.holes, e.holes);
 	let r = [...e.holes ?? []];
 	return e.derived && r.push({
 		hole: "derived",
 		reason: "this step's words come from a transcript batch whose step was inferred, not stored"
-	}), e.finish?.reason === "max_tokens" && r.push({ hole: "max_tokens" }), _(r, (t ?? []).filter((e) => e.hole === "not_recorded" || e.hole === "stripped"));
+	}), e.finish?.reason === "max_tokens" && r.push({ hole: "max_tokens" }), _(Array.isArray(n?.holes) ? n.holes : [], r, (t ?? []).filter((e) => e.hole === "not_recorded" || e.hole === "stripped"));
 }
 function Ee(e, t) {
 	return _(Array.isArray(e?.holes) ? e.holes : [], t.holes);
@@ -1125,7 +1124,7 @@ function Qe(e) {
 	};
 }
 function $e(e) {
-	return e ? e.some((e) => e.attrs["weft.content"] === "stripped") : !1;
+	return !!e?.holes?.some((e) => e.hole === "stripped");
 }
 function W(e, t, n, r) {
 	if (t && typeof t == "object" && typeof t.type == "string") try {
@@ -2480,7 +2479,7 @@ var $ = () => {}, st = class extends HTMLElement {
 	}
 	footer(e) {
 		let t = "prompts, args and results from your app, via your Studio";
-		return $e(e.turn?.spans ?? null) ? R("div", "weft-footer", [R("span", void 0, t), R("span", void 0, " · content is stripped for this destination")]) : R("div", "weft-footer", t);
+		return $e(e.turn?.folded) ? R("div", "weft-footer", [R("span", void 0, t), R("span", void 0, " · content is stripped for this destination")]) : R("div", "weft-footer", t);
 	}
 	rawView(e) {
 		return R("pre", "weft-raw", z({
@@ -2498,7 +2497,7 @@ function ct(e, t) {
 	return t?.status === "interrupted" && n.push({ hole: "interrupted" }), e.gaps.length && n.push({
 		hole: "gap",
 		reason: `${e.gaps.length} events missing (positions ${e.gaps.slice(0, 8).join(", ")}${e.gaps.length > 8 ? ", …" : ""}): a destination dropped a batch`
-	}), t?.stop_reason === "max_tokens" && n.push({ hole: "max_tokens" }), $e(e.spans) && n.push({ hole: "stripped" }), _(Ee(e.doc, e.folded), n);
+	}), t?.stop_reason === "max_tokens" && n.push({ hole: "max_tokens" }), _(Ee(e.doc, e.folded), n);
 }
 function lt(e, t) {
 	return t == null ? -1 : e.steps.findIndex((e) => e.index === t);

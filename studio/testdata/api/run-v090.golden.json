@@ -1,0 +1,48 @@
+{
+  "id": "r_v090",
+  "parent_run_id": "",
+  "parent_call_id": "",
+  "trace_id": "e9a5a815b0da4b09533a89707b886327",
+  "agent": "orders",
+  "model": {
+    "provider": "wefttest",
+    "name": "script"
+  },
+  "manifest_hash": "3fbd067b181e14da9a40ba4cea78bc3e8281f530aa79383cd275d60626e3c272",
+  "weft_version": "(test)",
+  "service": "mkv090db",
+  "session_id": "",
+  "public_id": "",
+  "turn": 0,
+  "playground": false,
+  "experiment_id": "",
+  "forked_from": "",
+  "meta": {},
+  "started": "2026-10-07T19:52:36.988770779Z",
+  "finished": "2026-10-07T19:52:36.992463394Z",
+  "last_seen": "2026-10-07T19:52:36.992463394Z",
+  "status": "succeeded",
+  "err": "",
+  "steps": 2,
+  "pending": 0,
+  "stop_reason": "stop",
+  "usage": {
+    "input_tokens": 20,
+    "output_tokens": 10
+  },
+  "event_count": 8,
+  "message_count": 4,
+  "instructions_hash": "",
+  "catalog_hash": "",
+  "request_count": 0,
+  "requests_badge": "not_recorded",
+  "children": [],
+  "holes": [
+    {
+      "hole": "not_recorded",
+      "reason": "the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
+      "fix": "upgrade weft and re-run"
+    }
+  ]
+}
+

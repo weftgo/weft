@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { RunRow, SessionRow } from "../lib/api"
 import { HOLES } from "../lib/honesty"
 import { statusChip, studioLink, WeftDevtools } from "./element"
+import { fold } from "../lib/events"
 import { partitionRuns, strippedContent } from "./state"
 import { idle } from "./testkit"
 
@@ -307,19 +308,14 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       runRow({ id: "r_int", status: "interrupted" }),
     ])
     routes["runs/r_int"] = { ...runRow({ id: "r_int", status: "interrupted" }), children: [] }
+    // A content-off chain marks the events (weft.content = stripped),
+    // never the spans.
     routes["runs/r_int/events?after=0&limit=500"] = {
       ...EVENTS,
-      events: EVENTS.events.slice(0, 2),
+      events: EVENTS.events
+        .slice(0, 2)
+        .map((pe) => ({ ...(pe as object), attrs: { "weft.content": "stripped" } })),
       gaps: [2, 3],
-    }
-    routes["runs/r_int/spans"] = {
-      spans: [
-        {
-          trace_id: "0102", span_id: "01", parent_span_id: "", name: "invoke_agent",
-          kind: "internal", start: T0, end: T0, status: "ok", status_message: "",
-          service: "app", attrs: { "weft.content": "stripped" }, events: [],
-        },
-      ],
     }
     const { fetchMock } = fakeStudio(routes)
     vi.stubGlobal("fetch", fetchMock)
@@ -590,16 +586,12 @@ describe("pure helpers", () => {
     expect(experiments.get("r_ok")?.map((r) => r.id)).toEqual(["r_x1"])
   })
 
-  it("strippedContent reads weft.content off the spans (§5.4)", () => {
-    const span = (v: unknown) => [
-      {
-        trace_id: "", span_id: "", parent_span_id: "", name: "invoke_agent",
-        kind: "internal" as const, start: T0, end: T0, status: "ok" as const,
-        status_message: "", service: "", attrs: { "weft.content": v }, events: [],
-      },
-    ]
-    expect(strippedContent(span("stripped"))).toBe(true)
-    expect(strippedContent(span("full"))).toBe(false)
+  it("strippedContent reads the events' weft.content through the fold (§5.4)", () => {
+    const view = (attrs?: Record<string, string>) =>
+      fold([{ type: "run_start", id: "r", model: { provider: "p", name: "m" } }], undefined, [attrs])
+    expect(strippedContent(view({ "weft.content": "stripped" }))).toBe(true)
+    expect(strippedContent(view({ "weft.content": "none" }))).toBe(true)
+    expect(strippedContent(view())).toBe(false)
     expect(strippedContent(null)).toBe(false)
   })
 

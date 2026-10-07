@@ -1,0 +1,107 @@
+{
+  "events": [
+    {
+      "pos": 0,
+      "time": "2026-10-07T19:52:36.988778705Z",
+      "event": {
+        "type": "run_start",
+        "id": "r_v090",
+        "model": {
+          "provider": "wefttest",
+          "name": "script"
+        },
+        "agent": "orders"
+      }
+    },
+    {
+      "pos": 1,
+      "time": "2026-10-07T19:52:36.989595684Z",
+      "event": {
+        "type": "step_start",
+        "run_id": "r_v090",
+        "index": 0
+      }
+    },
+    {
+      "pos": 2,
+      "time": "2026-10-07T19:52:36.990217655Z",
+      "event": {
+        "type": "tool_start",
+        "run_id": "r_v090",
+        "seq": 1,
+        "call_id": "c1",
+        "name": "lookup_order",
+        "args": {
+          "order_id": "42"
+        }
+      }
+    },
+    {
+      "pos": 3,
+      "time": "2026-10-07T19:52:36.990645767Z",
+      "event": {
+        "type": "tool_finish",
+        "run_id": "r_v090",
+        "seq": 2,
+        "call_id": "c1",
+        "name": "lookup_order",
+        "content": "order 42 shipped",
+        "is_error": false
+      }
+    },
+    {
+      "pos": 4,
+      "time": "2026-10-07T19:52:36.991133242Z",
+      "event": {
+        "type": "step_finish",
+        "run_id": "r_v090",
+        "index": 0,
+        "reason": "tool_calls",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        }
+      }
+    },
+    {
+      "pos": 5,
+      "time": "2026-10-07T19:52:36.991360202Z",
+      "event": {
+        "type": "step_start",
+        "run_id": "r_v090",
+        "index": 1
+      }
+    },
+    {
+      "pos": 6,
+      "time": "2026-10-07T19:52:36.992064599Z",
+      "event": {
+        "type": "step_finish",
+        "run_id": "r_v090",
+        "index": 1,
+        "reason": "stop",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        }
+      }
+    },
+    {
+      "pos": 7,
+      "time": "2026-10-07T19:52:36.992252605Z",
+      "event": {
+        "type": "run_finish",
+        "run_id": "r_v090",
+        "usage": {
+          "input_tokens": 20,
+          "output_tokens": 10
+        },
+        "steps": 2
+      }
+    }
+  ],
+  "next_after": null,
+  "done": true,
+  "gaps": []
+}
+

@@ -2,8 +2,12 @@ package studio
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -238,6 +242,223 @@ func TestRunHolesInterrupted(t *testing.T) {
 		}
 		if strings.Join(got, " ") != strings.Join(wantS, " ") || doc.Status != "interrupted" {
 			t.Errorf("%s (%s) holes = %v, want %v", run, doc.Status, got, wantS)
+		}
+	}
+}
+
+// v090File copies studio/testdata/v0.9.0.db — a database weft v0.9.0
+// wrote (its README says how) — into a temp dir: Studio migrates the
+// file it opens, and the committed one must stay as v0.9.0 left it.
+func v090File(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", "v0.9.0.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "v0.9.0.db")
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// migrationMax is the highest obsdb migration a sqlite file records.
+func migrationMax(t *testing.T, path string) int {
+	t.Helper()
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = raw.Close() }()
+	var v int
+	if err := raw.QueryRow(`SELECT max(version) FROM obsdb_migrations`).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+// TestRunHolesV090: the database weft v0.9.0 really wrote opens in this
+// Studio — migrated to the current schema — and every pane that cannot
+// be filled says why: the run reads not_recorded, every step's
+// assembled holes carry it, and the requests and tools routes answer
+// it with the table's reason and fix. Its run, events and transcript
+// are goldened for the web's page test.
+func TestRunHolesV090(t *testing.T) {
+	path := v090File(t)
+	if got := migrationMax(t, path); got != 2 {
+		t.Fatalf("v0.9.0.db records migration %d, want 2 (v0.9.0's last)", got)
+	}
+	srv := New(Open(path))
+	t.Cleanup(func() { _ = srv.Close() })
+	h := srv.Handler()
+	code, _, body := get(t, h, "/studio/api/runs/r_v090")
+	if code != http.StatusOK {
+		t.Fatalf("run: %d %s", code, body)
+	}
+	migs, err := filepath.Glob(filepath.Join("..", "obsdb", "sqlite", "migrations", "*.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := migrationMax(t, path); got != len(migs) {
+		t.Errorf("after open: migration %d, want the current %d", got, len(migs))
+	}
+	golden(t, "run-v090.golden.json", body)
+	var doc struct {
+		holesDoc
+		Steps int `json:"steps"`
+	}
+	decode(t, body, &doc)
+	reason, fix := obsdb.HoleNote(obsdb.HoleNotRecorded)
+	if doc.Status != "succeeded" || doc.Steps != 2 || len(doc.Holes) != 1 || doc.Holes[0].Hole != "not_recorded" ||
+		doc.Holes[0].Reason != reason || doc.Holes[0].Fix != fix {
+		t.Fatalf("v0.9.0 run = %s, want a succeeded 2-step run with holes [not_recorded]", body)
+	}
+	_, _, events := get(t, h, "/studio/api/runs/r_v090/events?limit=1000")
+	golden(t, "run-v090-events.golden.json", events)
+	_, _, transcript := get(t, h, "/studio/api/runs/r_v090/transcript")
+	golden(t, "run-v090-transcript.golden.json", transcript)
+	for n := range doc.Steps {
+		code, _, step := get(t, h, fmt.Sprintf("/studio/api/runs/r_v090/steps/%d", n))
+		if code != http.StatusOK {
+			t.Fatalf("step %d: %d %s", n, code, step)
+		}
+		var sd struct {
+			Holes []struct{ Hole string } `json:"holes"`
+		}
+		decode(t, step, &sd)
+		found := false
+		for _, hl := range sd.Holes {
+			found = found || hl.Hole == "not_recorded"
+		}
+		if !found {
+			t.Errorf("step %d holes = %+v, want not_recorded among them", n, sd.Holes)
+		}
+	}
+	for _, route := range []string{"requests", "tools"} {
+		_, _, b := get(t, h, "/studio/api/runs/r_v090/"+route)
+		var env struct{ Badge, Reason, Fix string }
+		decode(t, b, &env)
+		if env.Badge != "not_recorded" || env.Reason != reason || env.Fix != fix {
+			t.Errorf("%s = %s, want the not_recorded badge with the table's words", route, b)
+		}
+	}
+}
+
+// TestContentOffAgent: an agent with core.Content(false) captures no
+// content itself — its events carry weft.content = none through a
+// content-on destination — and the run reads stripped from its
+// run_start.
+func TestContentOffAgent(t *testing.T) {
+	ts, _ := requestsServer(t)
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(ts.URL, ""), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("quiet"), core.Content(false),
+		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	if _, err := agent.Generate(ctx, core.RunID("r_none"), core.Prompt("hi")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	body := fetchJSON(t, ts, "/api/runs/r_none/events?limit=1000", func(b string) bool { return strings.Contains(b, `"type":"run_finish"`) })
+	var page attrsPage
+	decode(t, body, &page)
+	for _, e := range page.Events {
+		if len(e.Attrs) != 1 || e.Attrs["weft.content"] != "none" {
+			t.Errorf("event %d attrs = %v, want {weft.content: none}", e.Pos, e.Attrs)
+		}
+	}
+	var doc holesDoc
+	decode(t, fetchJSON(t, ts, "/api/runs/r_none", nil), &doc)
+	if len(doc.Holes) != 1 || doc.Holes[0].Hole != "stripped" {
+		t.Errorf("content-off agent run holes = %+v, want [stripped]", doc.Holes)
+	}
+}
+
+// TestStepHolesFromAttrs: the assembled step reads its events' attrs —
+// a capped tool result is truncated with the bytes cut; a content-off
+// run written before the request record is stripped and not_recorded.
+func TestStepHolesFromAttrs(t *testing.T) {
+	ts, _ := requestsServer(t)
+	recordAttrsRun(t, ts.URL, "r_cap", otel.WithContent(otel.ContentConfig{MaxBytes: 16}))
+	fetchJSON(t, ts, "/api/runs/r_cap", func(b string) bool { return strings.Contains(b, `"status":"succeeded"`) })
+	var sd struct {
+		Holes []struct{ Hole, Reason, Fix string } `json:"holes"`
+	}
+	decode(t, fetchJSON(t, ts, "/api/runs/r_cap/steps/0", nil), &sd)
+	_, fix := obsdb.HoleNote(obsdb.HoleTruncated)
+	if len(sd.Holes) == 0 || sd.Holes[0].Hole != "truncated" || !strings.Contains(sd.Holes[0].Reason, "92 bytes") || sd.Holes[0].Fix != fix {
+		t.Errorf("capped step holes = %+v, want truncated (92 bytes) first, with the table's fix", sd.Holes)
+	}
+
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	at := time.Now().UTC()
+	var recs []obsdb.Record
+	for i, ev := range []struct{ typ, body string }{
+		{"run_start", `{"type":"run_start","id":"r_off"}`},
+		{"step_start", `{"type":"step_start","run_id":"r_off","index":0}`},
+		{"step_finish", `{"type":"step_finish","run_id":"r_off","index":0,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`},
+		{"run_finish", `{"type":"run_finish","run_id":"r_off","steps":1}`},
+	} {
+		r := fxRecord("r_off", "event", ev.typ, int64(i), at, ev.body)
+		delete(r.Attrs, "weft.instructions.hash") // written before the request record
+		r.Attrs["weft.content"] = "stripped"
+		recs = append(recs, r)
+	}
+	if err := db.Write(context.Background(), obsdb.Batch{Records: recs}); err != nil {
+		t.Fatal(err)
+	}
+	code, _, body := get(t, Handler(DB(db)), "/studio/api/runs/r_off/steps/0")
+	if code != http.StatusOK {
+		t.Fatalf("step: %d %s", code, body)
+	}
+	decode(t, body, &sd)
+	var got []string
+	for _, hl := range sd.Holes {
+		got = append(got, hl.Hole)
+	}
+	if !strings.Contains(" "+strings.Join(got, " ")+" ", " stripped ") || !strings.Contains(" "+strings.Join(got, " ")+" ", " not_recorded ") {
+		t.Errorf("content-off pre-A1 step holes = %v, want stripped and not_recorded", got)
+	}
+}
+
+// TestLiveBackfillAttrs: a resume's backfill frames (Last-Event-ID set,
+// read from the database) carry the stored events' attrs as the live
+// ones do.
+func TestLiveBackfillAttrs(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	start := fxRecord("r_bf", "event", "run_start", 0, at, `{"type":"run_start","id":"r_bf"}`)
+	start.Attrs["weft.content"] = "stripped"
+	fin := fxRecord("r_bf", "event", "tool_finish", 1, at, `{"type":"tool_finish","run_id":"r_bf"}`)
+	fin.Attrs["weft.content.truncated_bytes"] = int64(12595)
+	plain := fxRecord("r_bf", "event", "step_finish", 2, at, `{"type":"step_finish","run_id":"r_bf"}`)
+	if err := db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{start, fin, plain}}); err != nil {
+		t.Fatal(err)
+	}
+	h := Handler(DB(db), Live(obsdb.NewHub()))
+	frames := readSSE(t, subscribeLive(t, h, "?run=r_bf", "1"), 3, 5*time.Second)
+	if len(frames) != 3 {
+		t.Fatalf("got %d backfill frames, want 3", len(frames))
+	}
+	for i, want := range []string{`"attrs":{"weft.content":"stripped"}`, `"attrs":{"weft.content.truncated_bytes":12595}`, ``} {
+		if want == "" {
+			if strings.Contains(frames[i].data, `"attrs"`) {
+				t.Errorf("backfill frame %d carries attrs: %s", i, frames[i].data)
+			}
+		} else if !strings.Contains(frames[i].data, want) {
+			t.Errorf("backfill frame %d misses %s: %s", i, want, frames[i].data)
 		}
 	}
 }

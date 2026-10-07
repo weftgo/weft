@@ -139,10 +139,15 @@ module, ADR 0005).
   captured by this app" with its fix); the run header, every step card,
   the raw view's event rows and the panel's turn header and step lines
   draw them; transcript words whose step has no events render as a
-  "not recorded" row under the last step, and the replay playhead goes
-  through the transcript overlay, so holes survive scrubbing. The
-  request routes' reasons are now the table's words. `redacted` stays
-  reserved: weft's pipeline does not mark a redaction.
+  `gap` row under the last step, and the replay playhead goes through
+  the transcript overlay (only steps finished at the playhead take
+  their final words), so holes survive scrubbing. The step route's
+  holes read its events' attrs too (stripped, truncated with the bytes
+  cut). The request routes' reasons are now the table's words.
+  `redacted` stays reserved: weft's pipeline does not mark a redaction.
+  `studio/testdata/v0.9.0.db` is a database weft v0.9.0 wrote; Studio's
+  tests open it (migrated to the current schema) and every pane of its
+  run says why it is empty.
 - **Studio's step route (plan A7, with A4's attempts and A10's
   children).** `GET /api/runs/{id}/steps/{n}` (`n` the step ordinal)
   answers one step assembled server-side from `obsdb`: `status` (`ok`,

@@ -1,9 +1,10 @@
 // The run page's honesty (plan A3, ADR 0028 §11) against a fake Studio
 // serving the Go goldens: a run written by the previous release says
 // why on every pane that cannot be filled — the run header, every step
-// card, every request section — and transcript words whose step the
-// record holds no events for render as a "not recorded" row that
-// survives scrubbing.
+// card, every request section — over the database weft v0.9.0 really
+// wrote (studio/testdata/v0.9.0.db, served as Go reads it) and the
+// hand-built stand-in; transcript words whose step the record holds no
+// events for render as a gap row that survives scrubbing.
 import { cleanup, configure, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -88,6 +89,45 @@ afterEach(() => {
 })
 
 describe("a run written by the previous release (A3's done line)", () => {
+  it("v0.9.0's own database: not_recorded on the run header, every step and every request section, no pane empty", async () => {
+    // The run, its events and transcript exactly as this Studio serves
+    // them from the file v0.9.0 wrote (TestRunHolesV090's goldens).
+    const doc = golden<RunDoc>("run-v090")
+    expect(doc.holes?.map((h) => h.hole)).toEqual(["not_recorded"])
+    const RUN = doc.id
+    const events = golden<{ events: FakePosEvent[] }>("run-v090-events").events
+    new FakeStudio()
+      .on("GET meta", meta(["requests", "ingest"]))
+      .on(`GET runs/${RUN}`, doc)
+      .on(`GET runs/${RUN}/events`, pagedEvents(events))
+      .on(`GET runs/${RUN}/transcript`, golden("run-v090-transcript"))
+      .on(`GET runs/${RUN}/spans`, { spans: [] })
+      .withRequests(RUN, "not-recorded")
+      .install()
+
+    renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll("[data-request] [data-hole='not_recorded']").length
+      ).toBe(doc.steps)
+    )
+    const header = document.querySelector<HTMLElement>("[data-run-holes]")!
+    expect(header.querySelector("[data-hole='not_recorded']")).toBeTruthy()
+    expect(header.textContent).toContain(HOLES.not_recorded.reason)
+    expect(header.textContent).toContain(HOLES.not_recorded.fix!)
+    const cards = document.querySelectorAll<HTMLElement>("[data-step]")
+    expect(cards.length).toBe(doc.steps)
+    for (const card of cards) {
+      expect(card.querySelector("[data-holes] [data-hole='not_recorded']")).toBeTruthy()
+      const req = card.querySelector<HTMLElement>("[data-request]")!
+      expect(req.textContent).toContain("request not recorded by weft v0.9.0 or earlier")
+      expect(req.textContent).toContain(HOLES.not_recorded.reason)
+    }
+    // No empty pane: step 0 shows its call, step 1 its words.
+    expect(cards[0].textContent).toContain("lookup_order")
+    expect(cards[1].textContent).toContain("Order 42 shipped this morning.")
+  })
+
   it("says not_recorded on the run header, every step and every request section — no pane is silently empty", async () => {
     // The run document as Go serves it for the hand-built v0.9.0 file
     // (TestRunHolesPreA1), its events and transcript as v0.9.0 kept
@@ -175,14 +215,15 @@ describe("transcript words whose step has no events (view.unplaced)", () => {
       .install()
   }
 
-  it("renders as a not recorded row under the last step", async () => {
+  it("renders as a gap row under the last step", async () => {
     serve()
     renderApp(`/runs/${RUN}?view=story`)
     await waitFor(() =>
       expect(document.querySelector("[data-unplaced]")).toBeTruthy()
     )
     const row = document.querySelector<HTMLElement>("[data-unplaced]")!
-    expect(row.querySelector("[data-hole='not_recorded']")).toBeTruthy()
+    expect(row.querySelector("[data-hole='gap']")).toBeTruthy()
+    expect(row.textContent).toContain(HOLES.gap.fix!)
     expect(row.textContent).toContain("It shipped.")
     expect(row.textContent).toContain("step 1")
     // It sits after the last step card.
@@ -192,9 +233,11 @@ describe("transcript words whose step has no events (view.unplaced)", () => {
     ).toBeTruthy()
   })
 
-  it("survives scrubbing: the replay fold goes through the transcript too", async () => {
+  it("survives scrubbing; the replay stays a prefix", async () => {
     serve()
-    renderApp(`/runs/${RUN}?view=story&t=3`)
+    // t=3: step 0 has started but not finished — the gap row is there,
+    // and the step does not show its final words yet.
+    const first = renderApp(`/runs/${RUN}?view=story&t=3`)
     await waitFor(() =>
       expect(document.querySelector("[data-step='0']")).toBeTruthy()
     )
@@ -204,7 +247,19 @@ describe("transcript words whose step has no events (view.unplaced)", () => {
     expect(document.querySelector("[data-unplaced]")!.textContent).toContain(
       "It shipped."
     )
-    // The prefix's step carries the transcript's words as well.
-    expect(screen.getByText("Looking.")).toBeTruthy()
+    expect(
+      document.querySelector("[data-step='0']")!.textContent
+    ).not.toContain("Looking.")
+    first.unmount()
+    // t=5: step 0's step_finish (position 4) is revealed — its words
+    // come from the transcript.
+    serve()
+    renderApp(`/runs/${RUN}?view=story&t=5`)
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-step='0']")?.textContent
+      ).toContain("Looking.")
+    )
+    expect(document.querySelector("[data-unplaced]")).toBeTruthy()
   })
 })

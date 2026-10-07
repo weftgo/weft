@@ -57,7 +57,7 @@ var holeNotes = map[Hole]holeNote{
 		"raise the destination's cap: otel.Content(otel.ContentConfig{MaxBytes: …}), -1 for unlimited",
 	},
 	HoleStripped: {
-		"content not captured by this app: the destination's chain is content-off (weft.content = stripped), so prompts, catalogs, messages, tool arguments and results were dropped before they were stored",
+		"content not captured by this app: the destination's chain stripped it (weft.content = stripped), or the agent captured none (weft.Content(false), weft.content = none), so prompts, catalogs, messages, tool arguments and results were dropped before they were stored",
 		"turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent",
 	},
 	HoleRedacted: {

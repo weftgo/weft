@@ -1,0 +1,76 @@
+{
+  "batches": [
+    {
+      "index": 0,
+      "step": 0,
+      "input": true,
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Where is order 42?"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "step": 0,
+      "input": false,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_call",
+              "id": "c1",
+              "name": "lookup_order",
+              "args": {
+                "order_id": "42"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "step": 0,
+      "input": false,
+      "messages": [
+        {
+          "role": "tool",
+          "content": [
+            {
+              "type": "tool_result",
+              "call_id": "c1",
+              "name": "lookup_order",
+              "content": "order 42 shipped",
+              "is_error": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "step": 1,
+      "input": false,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Order 42 shipped this morning."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+

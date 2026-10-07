@@ -1316,7 +1316,7 @@ export class WeftDevtools extends HTMLElement {
 
   private footer(s: PanelState): HTMLElement {
     const line = "prompts, args and results from your app, via your Studio"
-    if (strippedContent(s.turn?.spans ?? null)) {
+    if (strippedContent(s.turn?.folded)) {
       return el("div", "weft-footer", [
         el("span", undefined, line),
         el("span", undefined, " · content is stripped for this destination"),
@@ -1337,8 +1337,7 @@ export class WeftDevtools extends HTMLElement {
 
 /** turnHoles is a turn's holes, from the shared table: the run
  * document's and the fold's (runHoles, the run page's header), the
- * row's interrupted status and max_tokens stop, the walk's gaps and
- * content-off spans. */
+ * row's interrupted status and max_tokens stop, the walk's gaps. */
 export function turnHoles(t: TurnView, row?: RunRow): HoleMark[] {
   const extra: HoleMark[] = []
   if (row?.status === "interrupted") extra.push({ hole: "interrupted" })
@@ -1348,7 +1347,6 @@ export function turnHoles(t: TurnView, row?: RunRow): HoleMark[] {
       reason: `${t.gaps.length} events missing (positions ${t.gaps.slice(0, 8).join(", ")}${t.gaps.length > 8 ? ", …" : ""}): a destination dropped a batch`,
     })
   if (row?.stop_reason === "max_tokens") extra.push({ hole: "max_tokens" })
-  if (strippedContent(t.spans)) extra.push({ hole: "stripped" })
   return mergeHoles(runHoles(t.doc, t.folded), extra)
 }
 

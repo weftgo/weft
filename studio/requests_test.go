@@ -450,6 +450,26 @@ func TestRequestsNotRecorded(t *testing.T) {
 	}
 }
 
+// TestRequestsNotRecordedV090: the same reading over the database weft
+// v0.9.0 really wrote (testdata/v0.9.0.db): both routes answer 200
+// with not_recorded, its reason and fix, beside an empty list.
+func TestRequestsNotRecordedV090(t *testing.T) {
+	srv := New(Open(v090File(t)))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	var rd requestsDoc
+	decode(t, fetchJSON(t, ts, "/api/runs/r_v090/requests", nil), &rd)
+	var td toolsDocT
+	decode(t, fetchJSON(t, ts, "/api/runs/r_v090/tools", nil), &td)
+	if len(rd.Requests) != 0 || rd.Badge != "not_recorded" || rd.Reason == "" || rd.Fix == "" {
+		t.Errorf("v0.9.0 requests = %+v, want [] with not_recorded, a reason and a fix", rd)
+	}
+	if len(td.Catalogs) != 0 || td.Badge != "not_recorded" || td.Reason == "" || td.Fix == "" {
+		t.Errorf("v0.9.0 tools = %+v, want [] with not_recorded, a reason and a fix", td)
+	}
+}
+
 // countingDB counts the prompt and tools reads a response makes and
 // keeps the last requests query it was asked.
 type countingDB struct {

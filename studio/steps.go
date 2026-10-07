@@ -410,9 +410,22 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		Children: []stepChild{},
 	}
 
-	// Events, status, timing, usage.
+	// Events, status, timing, usage — and what the recorder did to
+	// the events' content (their weft.content.* attributes): a
+	// content-off chain's or the core's capture-off mark is stripped,
+	// a destination's cap is truncated, its bytes summed.
+	var cut int64
 	for _, pe := range evs.events {
 		doc.Events = append(doc.Events, posEventOf(pe))
+		if pe.Content == "stripped" || pe.Content == "none" {
+			holes.note(obsdb.HoleStripped)
+		}
+		if pe.TruncatedBytes > 0 {
+			cut += pe.TruncatedBytes
+		}
+	}
+	if cut > 0 {
+		holes.add(obsdb.HoleTruncated, "a destination's cap cut "+strconv.FormatInt(cut, 10)+" bytes from this step's events before they were stored", holeFix(obsdb.HoleTruncated))
 	}
 	if evs.start != nil {
 		t := evs.start.Time
@@ -695,11 +708,11 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 				}
 			case promptDoc:
 				if d.Content == string(obsdb.HoleTruncated) {
-					holes.add(obsdb.HoleTruncated, "the step's system prompt was cut by a destination's cap", "raise the destination's MaxBytes")
+					holes.add(obsdb.HoleTruncated, "the step's system prompt was cut by a destination's cap", holeFix(obsdb.HoleTruncated))
 				}
 			case catalogDoc:
 				if d.Content == string(obsdb.HoleTruncated) {
-					holes.add(obsdb.HoleTruncated, "the step's tool catalog was cut by a destination's cap", "raise the destination's MaxBytes")
+					holes.add(obsdb.HoleTruncated, "the step's tool catalog was cut by a destination's cap", holeFix(obsdb.HoleTruncated))
 				}
 			}
 		}

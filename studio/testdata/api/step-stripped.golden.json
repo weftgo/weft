@@ -194,7 +194,7 @@
   "holes": [
     {
       "hole": "stripped",
-      "reason": "this run's records were content-off: the step's system prompt, catalog, messages, tool arguments and results were dropped before they were stored",
+      "reason": "content not captured by this app: the destination's chain stripped it (weft.content = stripped), or the agent captured none (weft.Content(false), weft.content = none), so prompts, catalogs, messages, tool arguments and results were dropped before they were stored",
       "fix": "turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent"
     }
   ]

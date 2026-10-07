@@ -278,12 +278,13 @@ export function partitionRuns(runs: RunRow[]): { turns: RunRow[]; experiments: M
   return { turns, experiments }
 }
 
-/** strippedContent reports the content state the spans carry: the
- * pipeline's strip processor sets weft.content = stripped (§5.4: say
- * so instead of showing empty boxes). */
-export function strippedContent(spans: Span[] | null): boolean {
-  if (!spans) return false
-  return spans.some((sp) => sp.attrs["weft.content"] === "stripped")
+/** strippedContent reports whether the turn's content was not
+ * captured (§5.4: say so instead of showing empty boxes): its events'
+ * attrs — weft.content = stripped from a content-off chain, or none
+ * from the core — folded into the run's stripped hole. Spans never
+ * carry weft.content; the events do. */
+export function strippedContent(view: FoldedRun | null | undefined): boolean {
+  return Boolean(view?.holes?.some((h) => h.hole === "stripped"))
 }
 
 /** One events walk: the pages followed, and whether the cap ended it. */

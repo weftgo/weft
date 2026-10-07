@@ -944,9 +944,24 @@ describe("content attrs → badges", () => {
       "not_recorded",
       "derived",
     ])
-    // The step route's assembled holes win when loaded.
+    // With the step route's holes cached: the union — its holes (its
+    // words first), the fold's and the run's.
     expect(
-      stepHoles(step, run, { holes: [{ hole: "compacted", reason: "r" }] })
-    ).toEqual([{ hole: "compacted", reason: "r" }])
+      stepHoles(step, run, {
+        holes: [
+          { hole: "compacted", reason: "r" },
+          { hole: "not_recorded", reason: "step's" },
+        ],
+      })
+    ).toEqual([
+      { hole: "max_tokens" },
+      { hole: "not_recorded", reason: "step's" },
+      {
+        hole: "derived",
+        reason:
+          "this step's words come from a transcript batch whose step was inferred, not stored",
+      },
+      { hole: "compacted", reason: "r" },
+    ])
   })
 })

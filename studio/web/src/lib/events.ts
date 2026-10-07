@@ -562,21 +562,20 @@ export function applyTranscript(
 }
 
 /**
- * stepHoles is what a step card badges (ADR 0028 §11): the step
- * route's holes when the page loaded them (A7's assembled step), the
- * fold's otherwise — the recorder's cuts on the step's events, a
- * `derived` placement of its words, a `max_tokens` finish — plus the
- * run's holes that hold for every step of it (not_recorded: a run
- * written before the request record; stripped: a content-off chain).
- * In the table's order, one badge per hole.
+ * stepHoles is what a step card badges (ADR 0028 §11): the union of
+ * the step route's holes when the page has them cached (A7's
+ * assembled step), the fold's — the recorder's cuts on the step's
+ * events, a `derived` placement of its words, a `max_tokens` finish —
+ * and the run's holes that hold for every step of it (not_recorded: a
+ * run written before the request record; stripped: a content-off
+ * chain). In the table's order, one badge per hole (the step route's
+ * words first).
  */
 export function stepHoles(
   step: FoldedStep,
   inherited?: HoleMark[],
   stepDoc?: { holes?: HoleMark[] }
 ): HoleMark[] {
-  if (stepDoc && Array.isArray(stepDoc.holes))
-    return mergeHoles(stepDoc.holes, step.holes)
   const own: HoleMark[] = [...(step.holes ?? [])]
   if (step.derived)
     own.push({
@@ -586,6 +585,7 @@ export function stepHoles(
     })
   if (step.finish?.reason === "max_tokens") own.push({ hole: "max_tokens" })
   return mergeHoles(
+    Array.isArray(stepDoc?.holes) ? stepDoc.holes : [],
     own,
     (inherited ?? []).filter(
       (h) => h.hole === "not_recorded" || h.hole === "stripped"

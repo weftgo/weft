@@ -51,7 +51,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 python app.py
 The dev token is printed at start (`WEFT_STUDIO_TOKEN` or `--token`
 fixes it); ingest is open on loopback; `--db sqlite://path` picks the
 file, `--db clickhouse://user:pass@host:9000/db` the hosted backend
-(its own module, the one place the driver is imported).
+(`obsdb/clickhouse`, the one place the driver is imported).
 
 **C · hosted** — the same handler behind `studio.Token`: the panel's
 scoped tokens are HMAC-signed `{public_id, scope, exp}` minted by your
@@ -226,7 +226,8 @@ The dev loop is two terminals: `go run ./studio/examples/basic
 -serve` (API + embedded UI on :7331) and `cd studio/web && bun run
 dev -- --base /studio/` (Vite on :3000 proxying `/studio/api`).
 
-Go module: `github.com/weftgo/weft/studio`, requiring the tagged
-`weft` and `weft/obsdb` (and `weft/otel`, for its tests) — no
-`replace`, standalone-importable. The binary is its own module
-([cmd/](./cmd)), the one place that imports the clickhouse driver.
+Import path: `github.com/weftgo/weft/studio`, a package of the
+framework module (`go get github.com/weftgo/weft`); it imports `core`,
+`obsdb` and, for its tests, `otel`. The binary is [cmd/](./cmd)
+(`go install github.com/weftgo/weft/studio/cmd@latest`), the one
+place that imports the clickhouse driver.

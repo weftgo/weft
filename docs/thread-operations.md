@@ -14,7 +14,7 @@ it fails loudly (§7), it never guesses.
 
 ## 1. What is on disk
 
-| | `thread/jsonl` | `thread/sqlite` (its own module) |
+| | `thread/jsonl` | `thread/sqlite` (the one package that imports the SQLite driver) |
 |---|---|---|
 | Layout | one directory; one `<id>.jsonl` file per session | one SQLite database file holding every session |
 | A session | the header line, then one JSON line per entry, append-only | the same line bytes, one per row (`sessions.header`, `entries.line`) |

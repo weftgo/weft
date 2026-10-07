@@ -449,7 +449,7 @@ func (d *DB) Compactions(ctx context.Context, runID string) (_ []obsdb.Compactio
 	rs, err := d.reads.QueryContext(ctx,
 		`SELECT kind, pos, step, body, attrs FROM records WHERE run_id = ?
 		AND (kind = 'compaction' OR (kind = 'messages' AND instr(attrs, '"weft.messages.reason"') > 0))
-		ORDER BY pos`, runID)
+		ORDER BY time_ns, pos`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -470,6 +470,9 @@ func (d *DB) Compactions(ctx context.Context, runID string) (_ []obsdb.Compactio
 			if err := unmarshalAttrs(attrs, &m); err != nil {
 				return nil, fmt.Errorf("sqlite: run %s record %d attrs: %w", runID, pos, err)
 			}
+		}
+		if kind == obsdb.RecordCompaction {
+			pos = -1 // a marker's stored position is derived from its hash, not an index
 		}
 		c, ok, err := obsdb.CompactionOf(kind, pos, step, m, body)
 		if err != nil {

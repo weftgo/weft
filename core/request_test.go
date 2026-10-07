@@ -913,27 +913,40 @@ func BenchmarkRequestRecord(b *testing.B) {
 		return append(ts, wefttest.Say("done"))
 	}
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// prepare-noop: a PrepareStep that leaves the messages alone, with
+	// everything recorded — the compaction view's comparison (ADR 0028
+	// §8) runs every step and must find nothing to record cheaply.
+	noop := core.PrepareStep(func(_ context.Context, _ int, req core.ModelRequest) (core.ModelRequest, error) {
+		return req, nil
+	})
 	for _, c := range []struct {
 		name string
 		lp   func() log.LoggerProvider
+		opts []core.Option
 	}{
 		{"off", func() log.LoggerProvider {
 			lp := newRecLogProvider()
 			lp.enabled = func(string) bool { return false }
 			return lp
-		}},
+		}, nil},
 		{"requests-only", func() log.LoggerProvider {
 			lp := newRecLogProvider()
 			lp.enabled = func(n string) bool { return n == "weft.request" }
 			return lp
-		}},
-		{"all", func() log.LoggerProvider { return newRecLogProvider() }},
+		}, nil},
+		{"all", func() log.LoggerProvider { return newRecLogProvider() }, nil},
+		{"off-prepare-noop", func() log.LoggerProvider {
+			lp := newRecLogProvider()
+			lp.enabled = func(string) bool { return false }
+			return lp
+		}, []core.Option{noop}},
+		{"all-prepare-noop", func() log.LoggerProvider { return newRecLogProvider() }, []core.Option{noop}},
 	} {
 		b.Run(c.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				agt := core.New(wefttest.Script(turns()...), reqEcho("echo"), core.Instructions("You are terse."),
-					core.LoggerProvider(c.lp()), core.Logger(quiet))
+				agt := core.New(wefttest.Script(turns()...), append([]core.Option{reqEcho("echo"), core.Instructions("You are terse."),
+					core.LoggerProvider(c.lp()), core.Logger(quiet)}, c.opts...)...)
 				if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
 					b.Fatal(err)
 				}

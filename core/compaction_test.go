@@ -57,3 +57,22 @@ func TestCompactionRangeInvalidArgs(t *testing.T) {
 		t.Error("equal transcripts with invalid args produced a range")
 	}
 }
+
+// The equality is decided structurally first: a message and its deep
+// copy (what a PrepareStep that changed nothing hands back) compare
+// equal without being encoded.
+func TestSameMessageSkipsEncodingForCopies(t *testing.T) {
+	m := Message{Role: RoleAssistant, Content: []Part{
+		TextPart{Text: "hi"},
+		ToolCallPart{ID: "c", Name: "t", Args: json.RawMessage(`{"a":1}`)},
+	}}
+	cp := cloneMessages([]Message{m})[0]
+	allocs := testing.AllocsPerRun(100, func() {
+		if !sameMessage(m, cp) {
+			t.Fatal("a deep copy compared unequal")
+		}
+	})
+	if allocs > 2 {
+		t.Errorf("sameMessage on a copy allocated %.0f times; it encoded", allocs)
+	}
+}

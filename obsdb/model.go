@@ -157,6 +157,11 @@ func DeriveRecord(r Record) Weft {
 		w.Pos = int64(attrInt(r.Attrs, attrPromptIdx))
 	case has(r.Attrs, attrToolsIdx):
 		w.Pos = int64(attrInt(r.Attrs, attrToolsIdx))
+	case w.Record == RecordCompaction:
+		// thread's session marker has no counter (ADR 0028 §8): its
+		// position is derived from its hash, so a retried batch lands on
+		// the same key and two compactions filed under one run do not.
+		w.Pos = markerPos(attr(r.Attrs, attrCompactionHash))
 	case w.Record == "request" || w.Record == "prompt" || w.Record == "tools":
 		// One of ADR 0028's kinds without its index: only a malformed
 		// producer gets here. -1 on both backends; duplicates collapse.
@@ -306,4 +311,18 @@ func MetaOf(attrs map[string]any) map[string]string {
 		}
 	}
 	return meta
+}
+
+// markerPos is a session compaction marker's position: the first 60
+// bits of its hash (lowercase hex), 0 for a hash that is absent or not
+// hex.
+func markerPos(hash string) int64 {
+	if len(hash) < 15 {
+		return 0
+	}
+	n, err := strconv.ParseInt(hash[:15], 16, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }

@@ -326,6 +326,13 @@ func liveInScope(scope string, f obsdb.Frame) bool {
 func liveWanted(kinds map[string]bool, f obsdb.Frame) bool {
 	switch f.Kind {
 	case obsdb.FrameRecord:
+		// A compaction view (a messages record whose weft.messages.reason
+		// is set, ADR 0028 §8) is not transcript: forwarded as a messages
+		// frame it would fold into the live transcript, and the catch-up
+		// (which reads growth records only) never replays it.
+		if f.Weft.Record == "messages" && f.Weft.Reason != "" {
+			return false
+		}
 		return f.Weft.Record != "heartbeat" && kinds[f.Weft.Record]
 	case obsdb.FrameRun:
 		return kinds["run"]
@@ -473,17 +480,22 @@ func (s *Server) backfillRun(
 		}
 	}
 	if kinds["messages"] {
-		// TODO(A2 debt: stored step (F2/H6)): carry the stored step and input on messages frames (TranscriptBatches).
-		bodies, err := s.db.Transcript(ctx, rec.ID)
+		// TODO(A2 debt: stored step (F2/H6)): carry the stored step and input on messages frames.
+		// The growth records with their stored index as the position — the
+		// live lane's (run, messages, weft.messages.index) key. A slot
+		// number would shift after a compaction view (ADR 0028 §8), which
+		// takes an index but is not transcript, and collide with the live
+		// frames of the records after it.
+		batches, err := s.db.TranscriptBatches(ctx, rec.ID)
 		if err == nil {
-			for i, body := range bodies {
-				if sent.seen(liveKey{run: rec.ID, kind: "messages", pos: int64(i)}) {
+			for _, b := range batches {
+				if sent.seen(liveKey{run: rec.ID, kind: "messages", pos: b.Index}) {
 					continue
 				}
 				dto := recordFrameDTO{
 					RunID: rec.ID, SessionID: rec.SessionID, PublicID: rec.PublicID,
-					Kind: "messages", Pos: int64(i),
-					Event: rawOrNull(string(body)),
+					Kind: "messages", Pos: b.Index,
+					Event: rawOrNull(string(b.Messages)),
 				}
 				if data, err := json.Marshal(dto); err == nil {
 					sw.frame("event: record\ndata: %s\n\n", data)

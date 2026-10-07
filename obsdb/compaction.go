@@ -17,11 +17,12 @@ import (
 //     the plain transcript (Transcript and TranscriptBatches hold growth
 //     records only) and never applies to another request.
 //   - CompactionSession: the informational marker weft/thread emits
-//     (a record of kind compaction) when the run is the first to start
-//     after the session compacted. The run's input record already holds
-//     the compacted context; the marker carries no messages and a
-//     reader never applies it. Index and Step are -1, FromSeq and ToSeq
-//     0.
+//     (a record of kind compaction) when the session compacts, filed
+//     under the last run that produced the compacted context (or, for
+//     a context no run produced, under the next run). The next run's
+//     input record holds the compacted context literally; the marker
+//     carries no messages and a reader never applies it. Index and
+//     Step are -1, FromSeq and ToSeq 0.
 //
 // Replaced and Entries are the change in messages: for a view,
 // ToSeq-FromSeq and the length of Messages; for a session marker, the
@@ -123,8 +124,16 @@ func CompactionOf(kind string, index int64, step int, attrs map[string]any, body
 	return Compaction{}, false, nil
 }
 
-// SortCompactions orders DB.Compactions' answer: session markers first
-// (they precede the run's first step), then the views by index.
+// SortCompactions orders DB.Compactions' answer: the views by index,
+// then the session markers in the order given (a backend reads them in
+// emission order). A marker is filed under the run that produced the
+// compacted context, so it follows that run's own views.
 func SortCompactions(cs []Compaction) {
-	sort.SliceStable(cs, func(i, j int) bool { return cs[i].Index < cs[j].Index })
+	sort.SliceStable(cs, func(i, j int) bool {
+		a, b := cs[i].Scope == CompactionSession, cs[j].Scope == CompactionSession
+		if a != b {
+			return b
+		}
+		return !a && cs[i].Index < cs[j].Index
+	})
 }

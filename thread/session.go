@@ -364,13 +364,15 @@ type Session struct {
 	// itself (steerSource) never blocks.
 	steerQueue []queuedSteer
 
-	// compactMarker is the session compaction marker (ADR 0028 §8)
-	// waiting for the next run's RunStart: set by ApplyCompaction,
-	// consumed by reportCompaction. Guarded by mu; not persisted (it is
-	// informational, and a restart's first run starts on a context the
-	// file already holds compacted).
-	compactMarker *compactionMarker
-	handed        []queuedSteer
+	// The session compaction marker's state (ADR 0028 §8,
+	// compactmarker.go), guarded by mu: lastRun is the latest run this
+	// Session saw report (its id, span and merged metadata), and
+	// pendingMarkers the markers of compactions no run had produced the
+	// context of yet — emitted under the next run when it reports,
+	// dropped at Close. Neither is persisted.
+	lastRun        runSight
+	pendingMarkers []*compactionMarker
+	handed         []queuedSteer
 
 	// The compaction trigger's state (ADR 0020 §2): lastInput is the
 	// provider-reported input of the last model step the session ran,
@@ -1653,6 +1655,8 @@ func (s *Session) Close(ctx context.Context) error {
 // Close waits for that release through closeDone.
 func (s *Session) sealLocked(ctx context.Context) error {
 	closed := fmt.Errorf("%w: session %s", ErrClosed, s.header.ID)
+	unreported := len(s.pendingMarkers)
+	s.pendingMarkers = nil
 	queued := s.queue
 	s.queue = nil
 	w, _ := s.st.(*leased)
@@ -1663,6 +1667,12 @@ func (s *Session) sealLocked(ctx context.Context) error {
 	s.closeDone = done
 	s.mu.Unlock()
 
+	if unreported > 0 {
+		// Compactions of a context no run produced, and no run started
+		// on before the close: there is no run id to file them under.
+		s.agent.Logger().Debug("thread: compaction markers dropped at close: no run to report them under",
+			"session", s.header.ID, "markers", unreported)
+	}
 	for _, ps := range queued {
 		ps.turn.finish(nil, closed)
 	}

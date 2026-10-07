@@ -466,3 +466,60 @@ func (d *slowWriteDB) Write(ctx context.Context, b obsdb.Batch) error {
 	<-d.release
 	return d.DB.Write(ctx, b)
 }
+
+// A run holding a compaction view (ADR 0028 §8): the catch-up sends
+// the growth records under their stored index (never a slot number,
+// which would shift past the view and collide with the live frames of
+// the records after it), and the view itself is never forwarded — not
+// by the catch-up, not by the live lane. Every growth record arrives
+// exactly once even when the live lane re-publishes the record after
+// the view.
+func TestLiveSkipsCompactionViews(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	start := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	view := fxRecord("run_v", "messages", "", 1, start.Add(20*time.Millisecond),
+		`[{"role":"user","content":[{"type":"text","text":"summary"}]}]`)
+	view.Attrs["weft.messages.reason"] = "compacted"
+	view.Attrs["weft.messages.from_seq"] = int64(0)
+	view.Attrs["weft.messages.to_seq"] = int64(1)
+	view.Attrs["weft.compaction.scope"] = "run"
+	after := fxRecord("run_v", "messages", "", 2, start.Add(30*time.Millisecond),
+		`[{"role":"assistant","content":[{"type":"text","text":"after"}]}]`)
+	if err := db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{
+		fxRecord("run_v", "event", "run_start", 0, start, `{"type":"run_start","run_id":"run_v"}`),
+		fxRecord("run_v", "messages", "", 0, start.Add(10*time.Millisecond),
+			`[{"role":"user","content":[{"type":"text","text":"hi"}]}]`),
+		view, after,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	hub := obsdb.NewHub()
+	h := Handler(DB(db), Live(hub))
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		hub.Publish(context.Background(), obsdb.RecordFrame(view))
+		hub.Publish(context.Background(), obsdb.RecordFrame(after)) // a transport retry
+	}()
+	resp := subscribeLive(t, h, "?run=run_v&kinds=messages", "1")
+	frames := readSSE(t, resp, 99, 500*time.Millisecond)
+	seen := map[int64]int{}
+	for _, f := range frames {
+		var dto struct {
+			Kind string `json:"kind"`
+			Pos  int64  `json:"pos"`
+		}
+		if err := json.Unmarshal([]byte(f.data), &dto); err != nil {
+			t.Fatalf("frame data: %v", err)
+		}
+		if dto.Kind == "messages" {
+			seen[dto.Pos]++
+		}
+	}
+	if seen[0] != 1 || seen[2] != 1 || seen[1] != 0 || len(seen) != 2 {
+		t.Errorf("messages frames by position = %v, want 0 and 2 once each, never the view (1)", seen)
+	}
+}

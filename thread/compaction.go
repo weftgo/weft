@@ -345,8 +345,10 @@ func (s *Session) ApplyCompaction(ctx context.Context, c *Compaction) error {
 	before := s.rawContextLocked()
 	e, flushErr, err := s.applyCompactionLocked(ctx, &plan)
 	var after []core.Message
+	var lastRun string
 	if err == nil {
 		after = s.rawContextLocked()
+		lastRun = s.lastRunIDLocked()
 	}
 	s.mu.Unlock()
 	// Everything below runs without the lock: the logger and both
@@ -371,10 +373,9 @@ func (s *Session) ApplyCompaction(ctx context.Context, c *Compaction) error {
 			"session", s.header.ID, "reason", string(e.Reason),
 			"tokens_before", e.TokensBefore, "first_kept", e.FirstKept)
 	}
-	// The marker the next run to start reports (reportCompaction); a
-	// later compaction before that run replaces it.
-	marker := s.newCompactionMarker(e, before, after)
-	s.locked(func() { s.compactMarker = marker })
+	// The session marker (ADR 0028 §8), now, under the run that
+	// produced the compacted context.
+	s.reportCompaction(ctx, e, before, after, lastRun)
 	s.safeAfter(ctx, e) // the durable record, not the plan
 	return nil
 }

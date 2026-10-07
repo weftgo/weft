@@ -70,8 +70,12 @@ type stepPersist struct {
 // ctx is the turn's persistence context — the WithoutCancel window the
 // turn-end batch uses — because the observer's own ctx is the run's,
 // and a step's durability must not die with a canceled caller.
-func (s *Session) observer(ctx context.Context, sp *stepPersist) core.RunOption {
-	return core.OnMessages(func(_ context.Context, _ int, msgs []core.Message) {
+func (s *Session) observer(ctx context.Context, sp *stepPersist, runID string) core.RunOption {
+	return core.OnMessages(func(rctx context.Context, _ int, msgs []core.Message) {
+		// The run's own context (its invoke_agent span, its merged
+		// metadata) is what a compaction marker under this run is
+		// emitted on (compactmarker.go).
+		s.seeRun(rctx, runID)
 		s.persistStep(ctx, sp, msgs)
 	})
 }

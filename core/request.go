@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -331,9 +332,9 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 	// The run-scope compaction view, between the tools and the request
 	// records: -1 when the request carries the transcript unchanged (or
 	// the view could not be recorded).
-	view := int64(-1)
+	view, rewrote := int64(-1), false
 	if viewOn {
-		view = r.recordView(mctx, step, transcript, req.Messages)
+		view, rewrote = r.recordView(mctx, step, transcript, req.Messages)
 	}
 	if !reqOn {
 		return nil
@@ -366,10 +367,17 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 	// request alone, ADR 0028 §8); with capture off no messages record
 	// exists and the index is omitted.
 	if capture {
-		if view >= 0 {
+		switch {
+		case view >= 0:
 			body.MessagesRef.Index = &view
-		} else if last := r.growthTop.Load() - 1; last >= 0 {
-			body.MessagesRef.Index = &last
+		case rewrote:
+			// The request was rewritten but its view could not be
+			// built: no index at all, never the growth records, which
+			// are not what the model saw.
+		default:
+			if last := r.growthTop.Load() - 1; last >= 0 {
+				body.MessagesRef.Index = &last
+			}
 		}
 	}
 	if req.ToolChoice.Mode != ToolChoiceAuto || req.ToolChoice.Name != "" {
@@ -536,31 +544,32 @@ func (r *recorder) debug(ctx context.Context, step int, what string, err error) 
 }
 
 // recordView emits the run-scope compaction view (ADR 0028 §8) when a
-// request's messages are not the run's transcript, and returns the
-// record's weft.messages.index — -1 when the two are equal (no record)
-// or the record could not be built. The replaced range is the
+// request's messages are not the run's transcript. It returns the
+// record's weft.messages.index and whether the request was rewritten:
+// (-1, false) when the two are equal (no record), (-1, true) when they
+// differ but the record could not be built. The replaced range is the
 // transcript's messages between the longest common prefix and the
 // longest common suffix (not overlapping the prefix), two messages
 // being equal when their wire JSON is byte-equal; the body is the
 // request's messages between the same two bounds. Reporting only: the
 // request is read, never touched. Runs on the loop goroutine, inside
 // recordRequest's containment.
-func (r *recorder) recordView(ctx context.Context, step int, transcript, sent []Message) int64 {
+func (r *recorder) recordView(ctx context.Context, step int, transcript, sent []Message) (index int64, rewritten bool) {
 	from, to, body, ok := compactionRange(transcript, sent)
 	if !ok {
-		return -1
+		return -1, false
 	}
 	b, err := json.Marshal(body)
 	if err != nil {
 		if b, err = json.Marshal(quoteInvalidMessageArgs(body)); err != nil {
 			r.debug(ctx, step, "messages", err)
-			return -1
+			return -1, true
 		}
 	}
 	hash, err := compactionHash(from, to, b)
 	if err != nil {
 		r.debug(ctx, step, "messages", err)
-		return -1
+		return -1, true
 	}
 	idx := r.messagesIdx.Add(1) - 1
 	r.emitRecord(ctx, step, eventNameMessages, b, []attribute.KeyValue{
@@ -579,45 +588,54 @@ func (r *recorder) recordView(ctx context.Context, step int, transcript, sent []
 	// The index is taken whether or not the emit got through (a
 	// contained panic): the request names the view it was given, and a
 	// reader that misses the record sees a gap, never a wrong ref.
-	return idx
+	return idx, true
 }
 
 // compactionRange computes ADR 0028 §8's range between the transcript
 // and the messages a request carried: the half-open range [from, to)
 // of transcript ordinals the request replaced, and the request's
-// messages in its place. ok is false when the two are equal. A message
-// that does not encode (only invalid tool-call arguments do, and those
-// are quoted the way the records quote them) compares by its quoted
-// encoding.
+// messages in its place. ok is false when the two are equal. Equality
+// is the wire bytes', decided cheaply: two messages that are
+// reflect.DeepEqual encode identically (the encoding is deterministic),
+// so only a pair that differs structurally is encoded — at most the
+// two pairs where the prefix and the suffix walks stop, plus any pair
+// that differs only in a way the wire erases (a nil versus an empty
+// slice). A PrepareStep that changed nothing costs one structural walk
+// and no encoding. A message that does not encode (only invalid
+// tool-call arguments do) compares by the quoted encoding the records
+// use.
 func compactionRange(transcript, sent []Message) (from, to int, body []Message, ok bool) {
-	enc := func(m Message) []byte {
-		b, err := json.Marshal(m)
-		if err != nil {
-			b, _ = json.Marshal(quoteInvalidMessageArgs([]Message{m})[0])
-		}
-		return b
-	}
 	n, m := len(transcript), len(sent)
-	tEnc := make([][]byte, n)
-	for i, msg := range transcript {
-		tEnc[i] = enc(msg)
-	}
-	sEnc := make([][]byte, m)
-	for i, msg := range sent {
-		sEnc[i] = enc(msg)
-	}
 	p := 0
-	for p < n && p < m && bytes.Equal(tEnc[p], sEnc[p]) {
+	for p < n && p < m && sameMessage(transcript[p], sent[p]) {
 		p++
 	}
 	if p == n && p == m {
 		return 0, 0, nil, false
 	}
 	s := 0
-	for s < n-p && s < m-p && bytes.Equal(tEnc[n-1-s], sEnc[m-1-s]) {
+	for s < n-p && s < m-p && sameMessage(transcript[n-1-s], sent[m-1-s]) {
 		s++
 	}
 	return p, n - s, sent[p : m-s], true
+}
+
+// sameMessage is §8's message equality: byte-equal wire JSON.
+func sameMessage(a, b Message) bool {
+	if reflect.DeepEqual(a, b) {
+		return true
+	}
+	return bytes.Equal(wireMessage(a), wireMessage(b))
+}
+
+// wireMessage is a message's wire JSON, or its quoted encoding when a
+// tool call's arguments are not JSON.
+func wireMessage(m Message) []byte {
+	b, err := json.Marshal(m)
+	if err != nil {
+		b, _ = json.Marshal(quoteInvalidMessageArgs([]Message{m})[0])
+	}
+	return b
 }
 
 // compactionHash is weft.compaction.hash (ADR 0028 §8): sha256, lowercase

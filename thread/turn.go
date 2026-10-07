@@ -1027,24 +1027,18 @@ func (s *Session) runTurn(persist, ctx context.Context, item workItem, callerOpt
 		// The transcript observer (ADR 0011 §7): each batch of messages
 		// the run emits is appended as it joins, so a crash mid-turn
 		// loses nothing emitted.
-		runOpts = append(runOpts, s.observer(persist, sp))
+		runOpts = append(runOpts, s.observer(persist, sp, t.RunID()))
 		// The session's identity rides every run (ADR 0024 S5), appended
 		// after the caller's options and before the transcript — a later
 		// core.Metadata wins (S1.1), so the session's keys win over a
 		// caller's colliding thread.RunOptions(core.Metadata(...)).
-		md := s.runMetadata(t)
-		runOpts = append(runOpts, core.Metadata(md))
+		runOpts = append(runOpts, core.Metadata(s.runMetadata(t)))
 		runOpts = append(runOpts, core.Messages(input...), core.RunID(t.RunID()))
 		run := s.agent.Stream(withSession(ctx, s), runOpts...)
 		for ev, serr := range run.Events() {
 			if serr != nil {
 				t.setStreamErr(serr)
 				break
-			}
-			if rs, ok := ev.(core.RunStart); ok {
-				// The first run to start after a compaction reports the
-				// session marker under its own id (ADR 0028 §8).
-				s.reportCompaction(ctx, rs.ID, md)
 			}
 			t.push(ev)
 		}

@@ -20,11 +20,12 @@ import (
 )
 
 // ADR 0028 §8 through the real pipeline, on both backends: a run whose
-// PrepareStep trimmed the middle at step 3, and a thread session's
-// first run after a manual compaction. Each backend returns the plain
+// PrepareStep trimmed the middle at step 3, and a thread session that
+// compacted manually. Each backend returns the plain
 // transcript unchanged (the growth records concatenate to the run's
 // messages), exposes the view with its range and the session marker
-// through Compactions, and resolves the step-3 request's messages_ref
+// through Compactions (the marker under the session's last run before
+// the compaction), and resolves the step-3 request's messages_ref
 // to exactly what the model was sent; the two backends agree. The
 // SQLite half always runs; the ClickHouse half needs
 // WEFT_CLICKHOUSE_DSN.
@@ -69,8 +70,10 @@ func TestCompactionBackendsAgree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var last *thread.Turn // the run that produced the compacted context: the marker's run
 	for _, q := range []string{strings.Repeat("a", 4000), strings.Repeat("b", 4000), strings.Repeat("c", 4000)} {
 		turn, err := sess.Send(ctx, core.User(q))
+		last = turn
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -164,7 +167,7 @@ func TestCompactionBackendsAgree(t *testing.T) {
 			cs[i].Messages = mustCompactRaw(t, cs[i].Messages)
 		}
 
-		ss, err := db.Compactions(ctx, after.RunID())
+		ss, err := db.Compactions(ctx, last.RunID())
 		if err != nil || len(ss) != 1 {
 			t.Fatalf("session Compactions = %+v, %v; want the marker", ss, err)
 		}

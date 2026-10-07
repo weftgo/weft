@@ -294,8 +294,12 @@ index order, and that concatenation equals `RunResult.Messages` (ADR
 0024's byte-for-byte rule, now stated over growth records only). A
 record with `weft.messages.reason = compacted` is a view: it says what
 one request saw instead of the transcript, and it is never part of the
-plain transcript. `compacted` is the only reason this ADR defines; a
-reader fails loudly on one it does not know.
+plain transcript. One rule for every transcript reader: a `messages`
+record with any non-empty `weft.messages.reason` is not growth and is
+skipped — safe whatever the reason, since a view never belongs to the
+plain transcript. `compacted` is the only reason this ADR defines; only
+a reader that applies views (`obsdb.DB.Compactions`, and what replays
+from it) fails loudly on one it does not know.
 
 **Run scope (the core emits it).** When the messages a request carries
 are not the run's transcript so far — a `PrepareStep` that trims,
@@ -310,7 +314,11 @@ record:
   transcript are the replaced half-open range `[from_seq, to_seq)` of
   message ordinals, and the request's messages between them are the
   record's body (the ordinary messages wire, so per-part `Redact`
-  applies unchanged). If the two are equal, no record is emitted;
+  applies unchanged). If the two are equal, no record is emitted. A
+  request that only adds messages is a view too, with `from_seq ==
+  to_seq` (the insertion point) and the added messages as its body —
+  a reader labels it "inserted" rather than "compacted" when nothing
+  was replaced (`obsdb.Compaction.Replaced == 0`);
 - attributes `weft.messages.from_seq`, `weft.messages.to_seq`,
   `weft.compaction.scope = run`, and `weft.compaction.hash`, sha256
   over the canonical JSON (§5's encoder) of `{"from_seq", "to_seq",
@@ -353,29 +361,43 @@ attribute keys outside the contract). So the marker is one log record of
 a fourth kind beside `request`, `prompt` and `tools`: `weft.record =
 compaction`, EventName `weft.compaction`, emitted by the session through
 the agent's own `LoggerProvider` (`(*core.Agent).LoggerProvider`, so it
-lands wherever the run's records land) under the id of the first run to
-start after the compaction, when that run's `RunStart` arrives — never
-before, so it never names a run that did not start. Attributes
-`weft.run.id`, `weft.compaction.scope = session`, `weft.compaction.hash`
-(sha256, lowercase hex, of the compaction entry's JSON as `thread` wrote
-it — its id included, so no two compactions share one), `weft.content =
-none`, `gen_ai.agent.name` and the session identity the run carries
-(`weft.session.id`, `weft.turn`, …); no position attribute (one per run,
-position 0). Body `{"scope", "hash", "entry", "reason", "replaced",
-"entries", "messages_before", "messages_after", "tokens_before",
-"tokens_after"}`: `reason` is ADR 0020's; `replaced` → `entries` is the
-context's change by this section's prefix/suffix rule applied to the
-session's context before and after; the token counts are the session's
-estimates (the entry's `TokensBefore`, the estimator over the context
-after). Every compaction path — threshold, `Compact`, `ApplyCompaction`,
-a trim, the overflow re-run (whose re-run carries it) — goes through
-`ApplyCompaction`, which arms the marker; a later compaction before the
-next run replaces it; it is not persisted (a restart's first run starts
-on a context the file already holds compacted). Pipelines pass the kind
-through unchanged (it carries no content); SQLite stores it under its
-kind, ClickHouse keeps it in `otel_logs` only (`weft_records_mv`'s kinds
-are unchanged: no migration), and `obsdb.DB.Compactions` reads it from
-there.
+lands wherever the run's records land) **when the compaction lands**,
+under the id of the last run that produced the compacted context — the
+newest message or turn entry on the session's path that names a run.
+It is in the sink at once (a compaction followed by `Close` is
+reported), and every compaction emits its own; nothing supersedes. It
+is emitted on that run's `invoke_agent` span context and stamped with
+that run's merged metadata (the session identity and the caller's
+`thread.RunOptions` metadata) when this Session drove the run; after a
+reopen, with the session id alone and no span. The overflow re-run's
+compaction is filed under the attempt that overflowed (its prompt is
+the newest entry on the path); the re-run starts on the compacted
+context. A compaction of a context no run produced (entries appended by
+hand) is held and emitted under the next run this Session drives, on
+that run's context, when it reports its first batch; a `Close` before
+that drops it with a Debug line. Attributes `weft.run.id`,
+`weft.compaction.scope = session`, `weft.compaction.hash` (sha256,
+lowercase hex, of the compaction entry's JSON as `thread` wrote it — its
+id included, so no two compactions share one), `weft.content = none`,
+`gen_ai.agent.name`, and the metadata above; no position attribute
+(`obsdb` derives a marker's stored position from its hash, so a retry
+lands on the same key and two compactions filed under one run are both
+kept). Body `{"scope", "hash",
+"entry", "reason", "replaced", "entries", "messages_before",
+"messages_after", "tokens_before", "tokens_after"}`: `reason` is ADR
+0020's; `replaced` → `entries` is the context's change by this section's
+prefix/suffix rule applied to the session's context before and after;
+the token counts are the session's estimates (the entry's
+`TokensBefore`, the estimator over the context after — computed only
+when a destination wants the record, a panicking estimator contained
+and reported as 0). Every compaction path — threshold, `Compact`,
+`ApplyCompaction`, a trim, the overflow re-run — goes through
+`ApplyCompaction`, which emits. Pipelines pass the kind through
+unchanged (it carries no content); SQLite stores it under its kind,
+ClickHouse keeps it in `otel_logs` only (`weft_records_mv`'s kinds are
+unchanged: no migration), and `obsdb.DB.Compactions` reads it from
+there, bounded by the run's time window (the marker moves the run's
+last-seen like any record).
 
 **Readers (A9).** Both transcript readers — `obsdb/sqlite`'s
 `Transcript`/`TranscriptBatches` and `obsdb/clickhouse`'s — filter to
@@ -385,15 +407,20 @@ transcript stays the growth concatenation byte for byte, and a run's
 messages count excludes `compacted` records (SQLite's write path does
 not count them; ClickHouse counts `Kind = 'messages' AND Reason = ''`).
 `obsdb.DB.Compactions(ctx, runID)` returns the run's compactions as
-`obsdb.Compaction`: the session marker first (index and step -1), then
-each view in index order with its step, range, hash, body and counts —
-what a reader needs to draw the marker and to rebuild a request's
+`obsdb.Compaction`: each view in index order, then the session markers
+filed under the run in emission order (index and step -1; SQLite keys a
+marker by a position derived from its hash, ClickHouse dedupes it by
+hash) — each view with its step, range, hash, body and counts: what a
+reader needs to draw the marker and to rebuild a request's
 messages (growth up to the view's index, its range replaced by its
 body). ClickHouse reads them from `otel_logs` (the views' range and hash
 and the marker's kind are not `weft_records` columns), narrowed by the
-attribute-key bloom index on `weft.compaction.scope`, deduplicated by
-(kind, index). A view with a reason the reader does not know fails
-`Compactions`; the transcript readers skip every non-growth record.
+run's time window from `weft_runs`, selected as SQLite selects (a
+`messages` record naming a reason, or a `compaction` record),
+deduplicated by (kind, index); a view whose index does not parse is an
+error on both backends. A view with a reason the reader does not know
+fails `Compactions`; the transcript readers skip every non-growth
+record.
 
 *Clarifications (A9).* A request whose messages are the transcript
 points at the latest growth record, never at an earlier step's view

@@ -452,15 +452,19 @@ span and every log record of the run (ADR 0024):
 The session's keys win over a caller's colliding
 `thread.RunOptions(weft.Metadata(...))`; other keys pass through.
 
-One record of its own: after a compaction lands (threshold, `Compact`,
-`ApplyCompaction`, a trim, the overflow re-run), the first run to start
-on the compacted context carries a record of kind `compaction` (event
-name `weft.compaction`, ADR 0028 §8), emitted through the agent's
-`LoggerProvider` under that run's id when its `RunStart` arrives:
-`weft.compaction.scope = session`, the compaction entry's hash, and a
-body with the reason, the messages replaced → summary entries and the
-estimated tokens before → after. It carries no messages and is not
-persisted; `obsdb`'s `DB.Compactions` reads it back for Studio.
+One record of its own: every compaction that lands (threshold,
+`Compact`, `ApplyCompaction`, a trim, the overflow re-run) emits a
+record of kind `compaction` (event name `weft.compaction`, ADR 0028 §8)
+through the agent's `LoggerProvider`, at once, under the id of the last
+run that produced the compacted context — on that run's span, with its
+metadata, when this Session drove it — so a compaction followed by
+`Close` is reported. It carries `weft.compaction.scope = session`, the
+compaction entry's hash, and a body with the reason, the messages
+replaced → summary entries and the estimated tokens before → after; no
+messages. A compaction of a context no run produced (entries appended
+directly to the store) is emitted under the next run the Session
+drives, or dropped at `Close` with a Debug line. `obsdb`'s
+`DB.Compactions` reads it back for Studio.
 
 What the module logs on its own. Through the agent's logger
 (`weft.Logger`): `Warn` for a repaired load at `Open`, a step write

@@ -1184,6 +1184,21 @@ func compactions(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if len(cs) != 1 {
 			t.Fatalf("k2 Compactions = %+v, want the one marker", cs)
 		}
+		// A second compaction filed under the same run (a trim, then a
+		// summary, with no run between): both kept, in emission order,
+		// after the run's views.
+		second := record("k2", "compaction", "", 0,
+			`{"scope":"session","hash":"f00d","reason":"manual","replaced":2,"entries":1}`,
+			map[string]any{"weft.compaction.scope": "session", "weft.compaction.hash": "f00d000000000000000000000000000000000000000000000000000000000000"})
+		second.EventName = "weft.compaction"
+		second.Time = at(900 * time.Millisecond)
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{second}}); err != nil {
+			t.Fatal(err)
+		}
+		both, err := db.Compactions(ctx(), "k2")
+		if err != nil || len(both) != 2 || both[0].Hash != "h_sess" || both[1].Reason != "manual" {
+			t.Errorf("k2 Compactions after a second marker = %+v, %v; want both, in emission order", both, err)
+		}
 		if m := cs[0]; m.Scope != obsdb.CompactionSession || m.Hash != "h_sess" || m.Index != -1 || m.Step != -1 ||
 			m.Reason != "threshold" || m.Replaced != 12 || m.Entries != 1 || m.TokensBefore != 8100 || m.TokensAfter != 1200 ||
 			m.Messages != nil {
@@ -1208,6 +1223,22 @@ func compactions(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		if cs, err := db.Compactions(ctx(), "k3"); err != nil || len(cs) != 0 {
 			t.Errorf("Compactions of a plain run = %+v, %v; want none", cs, err)
+		}
+
+		// A view selected by its reason alone — no weft.compaction.scope
+		// (a producer that stamped only §8's required pair): both
+		// backends find it, and its scope reads run.
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+			record("k5", "event", "run_start", 0, `{"type":"run_start","id":"k5"}`, nil),
+			record("k5", "messages", "", 0, msg("user", "u"), step(0)),
+			record("k5", "messages", "", 1, msg("user", "s"), map[string]any{
+				"weft.step.index": int64(1), "weft.messages.reason": "compacted",
+				"weft.messages.from_seq": int64(0), "weft.messages.to_seq": int64(1)}),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		if cs, err := db.Compactions(ctx(), "k5"); err != nil || len(cs) != 1 || cs[0].Scope != obsdb.CompactionRun || cs[0].Index != 1 || cs[0].ToSeq != 1 {
+			t.Errorf("Compactions of a scope-less view = %+v, %v; want the view, scope run", cs, err)
 		}
 
 		// A reason this build does not know: readers fail loudly.

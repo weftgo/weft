@@ -542,22 +542,40 @@ func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.Tra
 // otel_logs, the one table that keeps their attributes: weft_records
 // holds a view's Reason but not its range or hash, and thread's
 // session marker (kind compaction) is outside weft_records_mv's kinds.
-// Both carry weft.compaction.scope, so the attribute-key bloom index
-// narrows the scan to the granules that hold one. otel_logs is a plain
-// MergeTree: a retried batch's duplicate is dropped here, by (kind,
-// index).
+// The scan is bounded by the run's time window from weft_runs.
+// otel_logs is a plain MergeTree: a retried batch's duplicate is
+// dropped here, by (kind, index) — by hash for a marker.
 func (d *DB) Compactions(ctx context.Context, runID string) (_ []obsdb.Compaction, err error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
 	defer d.closedErr(&err)
-	if err := d.runExists(ctx, runID); err != nil {
+	// The run's time window bounds the otel_logs scan (its order key
+	// leads with time): every record of the run — the marker included,
+	// which moves LastSeen like any record — sits inside it. ε absorbs
+	// clock skew between the emitters of one run.
+	var (
+		n             uint64
+		started, last time.Time
+	)
+	if err := d.conn.QueryRow(ctx,
+		`SELECT count(), min(Started), max(LastSeen) FROM weft_runs WHERE RunId = ?`, runID).Scan(&n, &started, &last); err != nil {
 		return nil, err
 	}
+	if n == 0 {
+		return nil, fmt.Errorf("%w: run %s", obsdb.ErrNotFound, runID)
+	}
+	const skew = time.Minute
+	// The views are messages records naming a reason, the marker a
+	// record of thread's compaction kind — the selection SQLite makes
+	// (CompactionOf decides; an unknown reason is its error).
 	rs, err := d.conn.Query(ctx,
 		`SELECT LogAttributes, Body FROM otel_logs
-		WHERE mapContains(LogAttributes, 'weft.compaction.scope') AND LogAttributes['weft.run.id'] = ?
-		ORDER BY Timestamp`, runID)
+		WHERE Timestamp BETWEEN ? AND ?
+		  AND LogAttributes['weft.run.id'] = ?
+		  AND ((LogAttributes['weft.record'] = 'messages' AND mapContains(LogAttributes, 'weft.messages.reason'))
+		       OR LogAttributes['weft.record'] = 'compaction')
+		ORDER BY Timestamp`, started.Add(-skew), last.Add(skew), runID)
 	if err != nil {
 		return nil, err
 	}
@@ -565,6 +583,7 @@ func (d *DB) Compactions(ctx context.Context, runID string) (_ []obsdb.Compactio
 	type key struct {
 		kind  string
 		index int64
+		hash  string // a marker's identity: markers carry no index
 	}
 	seen := map[key]bool{}
 	out := []obsdb.Compaction{}
@@ -583,11 +602,15 @@ func (d *DB) Compactions(ctx context.Context, runID string) (_ []obsdb.Compactio
 		kind := la["weft.record"]
 		index := int64(-1)
 		if kind == "messages" {
-			n, perr := strconv.ParseInt(la["weft.messages.index"], 10, 64)
+			idx, perr := strconv.ParseInt(la["weft.messages.index"], 10, 64)
 			if perr != nil {
-				continue // a view without its index cannot be placed
+				// SQLite stores such a record at its derived position; a
+				// view this backend cannot place is an error, never a
+				// silent drop.
+				return nil, fmt.Errorf("clickhouse: run %s: messages record with weft.messages.reason %q has no usable weft.messages.index (%q)",
+					runID, la["weft.messages.reason"], la["weft.messages.index"])
 			}
-			index = n
+			index = idx
 		}
 		step := -1
 		if n, perr := strconv.Atoi(la["weft.step.index"]); perr == nil {
@@ -597,10 +620,14 @@ func (d *DB) Compactions(ctx context.Context, runID string) (_ []obsdb.Compactio
 		if cerr != nil {
 			return nil, fmt.Errorf("clickhouse: run %s: %w", runID, cerr)
 		}
-		if !ok || seen[key{kind, index}] {
+		k := key{kind: kind, index: index}
+		if kind == obsdb.RecordCompaction {
+			k.hash = c.Hash
+		}
+		if !ok || seen[k] {
 			continue
 		}
-		seen[key{kind, index}] = true
+		seen[k] = true
 		out = append(out, c)
 	}
 	if err := rs.Err(); err != nil {

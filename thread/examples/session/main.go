@@ -56,13 +56,15 @@ func p(w io.Writer, a ...any) error {
 	return err
 }
 
-func run(w io.Writer, dir string) error {
+// run is the example; opts are extra agent options (its test passes a
+// LoggerProvider to watch the compaction marker the session emits).
+func run(w io.Writer, dir string, opts ...weft.Option) error {
 	ctx := context.Background()
 	agent := weft.New(wefttest.Script(
 		wefttest.Say("Order 1234 shipped Tuesday, tracking 1Z89."),
 		wefttest.Say("Draft two: same facts, tighter opening."),
 		wefttest.Say("Goal: answer order-status questions.\nProgress: order 1234 shipped Tuesday."),
-	))
+	), opts...)
 
 	st, err := jsonl.Open(dir)
 	if err != nil {

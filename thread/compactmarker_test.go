@@ -6,10 +6,12 @@ package thread_test
 // no messages; runs before it and after it carry none.
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +19,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/embedded"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
@@ -31,6 +35,7 @@ type markerLogs struct {
 }
 
 type markerRec struct {
+	span      trace.SpanContext
 	scope     string
 	eventName string
 	body      string
@@ -47,8 +52,8 @@ type markerLogger struct {
 	scope string
 }
 
-func (l *markerLogger) Emit(_ context.Context, r log.Record) {
-	rec := markerRec{scope: l.scope, eventName: r.EventName(), body: r.Body().AsString(), attrs: map[string]string{}}
+func (l *markerLogger) Emit(ctx context.Context, r log.Record) {
+	rec := markerRec{span: trace.SpanContextFromContext(ctx), scope: l.scope, eventName: r.EventName(), body: r.Body().AsString(), attrs: map[string]string{}}
 	r.WalkAttributes(func(kv attribute.KeyValue) bool {
 		rec.attrs[string(kv.Key)] = kv.Value.String()
 		return true
@@ -97,9 +102,10 @@ func sendWait(t *testing.T, ctx context.Context, s *thread.Session, text string)
 	return turn
 }
 
-// A manual compaction between turns: the next turn's run carries the
-// marker under its own id, after its run_start; the turn after it
-// carries none.
+// A compaction of a context no run produced (entries appended by
+// hand): the marker waits for the next run this Session drives and is
+// emitted under it, after its run_start; the turn after it carries
+// none.
 func TestCompactionMarkerManual(t *testing.T) {
 	eachBackend(t, func(t *testing.T, st thread.Storage) {
 		ctx := context.Background()
@@ -119,7 +125,7 @@ func TestCompactionMarkerManual(t *testing.T) {
 		}
 		after := s.Context()
 		if n := len(lp.kind("compaction")); n != 0 {
-			t.Fatalf("markers before any run = %d, want 0 (the next run reports it)", n)
+			t.Fatalf("markers before any run = %d, want 0 (no run produced the context; the next run reports it)", n)
 		}
 		var entry thread.CompactionEntry
 		for _, e := range s.Entries() {
@@ -194,8 +200,7 @@ func TestCompactionMarkerManual(t *testing.T) {
 }
 
 // The overflow re-run (ADR 0020 §5) compacts and runs again under a
-// fresh id: the re-run carries the marker, reason overflow; the failed
-// attempt does not.
+// fresh id: one marker, reason overflow.
 func TestCompactionMarkerOverflowReRun(t *testing.T) {
 	ctx := context.Background()
 	lp := &markerLogs{}
@@ -215,11 +220,105 @@ func TestCompactionMarkerOverflowReRun(t *testing.T) {
 	if len(ms) != 1 {
 		t.Fatalf("markers = %d, want 1", len(ms))
 	}
-	if ms[0].attrs["weft.run.id"] != t1.RunID() || ms[0].attrs["weft.run.id"] != s.ID()+"-t3" {
-		t.Errorf("marker run = %q, want the re-run %q", ms[0].attrs["weft.run.id"], t1.RunID())
+	// Emitted when the compaction landed, under the run that produced
+	// the compacted context: the failed attempt (-t2), whose prompt is
+	// the newest entry on the path; the re-run is -t3.
+	if ms[0].attrs["weft.run.id"] != s.ID()+"-t2" || t1.RunID() != s.ID()+"-t3" {
+		t.Errorf("marker run = %q, want the overflowed attempt %s-t2 (re-run %q)", ms[0].attrs["weft.run.id"], s.ID(), t1.RunID())
 	}
 	var body markerBody
 	if err := json.Unmarshal([]byte(ms[0].body), &body); err != nil || body.Reason != "overflow" || body.Scope != "session" {
 		t.Errorf("marker body = %s (%v), want reason overflow", ms[0].body, err)
+	}
+}
+
+// Compactions after real turns: each emits its marker when it lands —
+// before any further run, and before Close — under the last run that
+// produced the compacted context, on that run's invoke_agent span and
+// with its merged metadata (the caller's thread.RunOptions metadata
+// included). Two compactions, two markers.
+func TestCompactionMarkerAtCompactionTime(t *testing.T) {
+	ctx := context.Background()
+	lp := &markerLogs{}
+	model := wefttest.Script(
+		wefttest.Say(strings.Repeat("a", 4000)), wefttest.Say(strings.Repeat("b", 4000)),
+		wefttest.Say("summary one"), wefttest.Say(strings.Repeat("c", 4000)), wefttest.Say("summary two"))
+	agent := core.New(model, core.LoggerProvider(lp), core.TracerProvider(sdktrace.NewTracerProvider()))
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.KeepRecent(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := thread.RunOptions(core.Metadata(map[string]string{"tenant": "acme"}))
+	send := func(text string) *thread.Turn {
+		turn, err := s.Send(ctx, core.User(text), caller)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := turn.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		return turn
+	}
+	send("q1")
+	t2 := send("q2")
+	if err := s.Compact(ctx); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	ms := lp.kind("compaction")
+	if len(ms) != 1 {
+		t.Fatalf("markers right after the compaction = %d, want 1", len(ms))
+	}
+	m := ms[0]
+	if m.attrs["weft.run.id"] != t2.RunID() || m.attrs["tenant"] != "acme" || m.attrs["weft.session.id"] != s.ID() || m.attrs["weft.turn"] != "2" {
+		t.Errorf("marker attrs = %v, want under %s with the run's metadata", m.attrs, t2.RunID())
+	}
+	var runSpan trace.SpanContext
+	for _, r := range lp.kind("event") {
+		if r.attrs["weft.run.id"] == t2.RunID() && r.attrs["weft.event.type"] == "run_start" {
+			runSpan = r.span
+		}
+	}
+	if !runSpan.IsValid() || m.span.SpanID() != runSpan.SpanID() || m.span.TraceID() != runSpan.TraceID() {
+		t.Errorf("marker span = %v, want the run's invoke_agent span %v", m.span, runSpan)
+	}
+	send("q3")
+	if err := s.Compact(ctx); err != nil {
+		t.Fatalf("second Compact: %v", err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ms = lp.kind("compaction")
+	if len(ms) != 2 || ms[0].attrs["weft.compaction.hash"] == ms[1].attrs["weft.compaction.hash"] {
+		t.Fatalf("markers = %d, want 2 with distinct hashes", len(ms))
+	}
+	if ms[1].attrs["weft.run.id"] != s.ID()+"-t3" {
+		t.Errorf("second marker run = %q, want %s-t3", ms[1].attrs["weft.run.id"], s.ID())
+	}
+}
+
+// A compaction of a context no run produced, then Close with no run:
+// no run id to file the marker under — dropped, with a Debug line.
+func TestCompactionMarkerDroppedAtCloseWithoutARun(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	lp := &markerLogs{}
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	rec := &summaryRecorder{reply: "the summary text"}
+	s, _ := thread.Create(ctx, st, core.New(rec))
+	msgs(t, ctx, st, s, strings.Repeat("a", 30_000), strings.Repeat("b", 30_000), strings.Repeat("c", 30_000))
+	s = reopenWith(t, ctx, st, s, core.New(rec, core.LoggerProvider(lp), core.Logger(logger)))
+	if err := s.Compact(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(lp.kind("compaction")); n != 0 {
+		t.Errorf("markers = %d, want 0", n)
+	}
+	if !strings.Contains(logs.String(), "compaction markers dropped at close") {
+		t.Errorf("no Debug line for the dropped marker:\n%s", logs.String())
 	}
 }

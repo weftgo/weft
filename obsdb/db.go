@@ -39,9 +39,8 @@ type DB interface {
 	// Transcript's, through DedupTranscript, one per record.
 	TranscriptBatches(ctx context.Context, runID string) ([]TranscriptBatch, error)
 	// Compactions returns the compactions a run's records name (ADR
-	// 0028 §8): the session marker thread emitted when the run was the
-	// first after a session compaction, then every run-scope view in
-	// index order — what a reader needs to draw the compaction and
+	// 0028 §8): every run-scope view in index order, then the session
+	// markers thread filed under the run, in emission order — what a reader needs to draw the compaction and
 	// rebuild a request's messages. Transcript and TranscriptBatches
 	// never include a view: the plain transcript is growth records
 	// only. A messages record with an unknown weft.messages.reason is

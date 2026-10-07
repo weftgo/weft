@@ -570,7 +570,7 @@ func buildResource(cfg config) (*sdkresource.Resource, error) {
 }
 
 // weftVersion is the root module's version attribute value.
-func weftVersion() string { return "v0.8.0" }
+func weftVersion() string { return "v0.9.0" }
 
 // The installed pipeline, for the package-level accessors.
 var (

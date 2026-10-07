@@ -29,8 +29,8 @@ github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
-github.com/weftgo/weft v0.6.0 h1:aSldInzChNIdIk4iVnUzaqNqEP+0062/pOnZM6fkkMA=
-github.com/weftgo/weft v0.6.0/go.mod h1:137JkU7mIxN6mCLnzQDq4vXOTwN45fdkM/QEztfv520=
+github.com/weftgo/weft v0.7.0 h1:yaLY6G71NENRrRqW2RHoxaFojxqXyS0RQURueOn1BVo=
+github.com/weftgo/weft v0.7.0/go.mod h1:137JkU7mIxN6mCLnzQDq4vXOTwN45fdkM/QEztfv520=
 github.com/weftgo/weft/obsdb v0.1.0 h1:AARfoAK88GD809T4wEod1sH+cRuCjFU9nazITaeoPA4=
 github.com/weftgo/weft/obsdb v0.1.0/go.mod h1:UZoHGyJ0LNBeD4rPtuhxVGXcDA+fxOo3gn94Aod3wCs=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=

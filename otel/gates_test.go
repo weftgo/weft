@@ -16,7 +16,7 @@ func TestDropCounterThrottlesWarn(t *testing.T) {
 	d := newDropCounter("test")
 	d.log = slog.New(slog.NewTextHandler(buf, nil))
 	for i := 0; i < 100; i++ {
-		d.dropped(1)
+		d.dropped(1, nil)
 	}
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 	var warns int
@@ -33,7 +33,7 @@ func TestDropCounterThrottlesWarn(t *testing.T) {
 	}
 	// The window's edge: a drop after the window warns again.
 	d.last.Store(time.Now().Add(-2 * time.Minute).UnixNano())
-	d.dropped(1)
+	d.dropped(1, nil)
 	if warns = strings.Count(buf.String(), "level=WARN"); warns != 2 {
 		t.Errorf("%d WARN lines after the window, want 2", warns)
 	}

@@ -3,6 +3,7 @@ package otel
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/weftgo/weft"
 	"go.opentelemetry.io/otel/attribute"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // The attribute names the chain heads read and set. They mirror the
@@ -65,12 +67,12 @@ func (p *destProc) OnEmit(ctx context.Context, r *sdklog.Record) error {
 	switch kind {
 	case "messages":
 		if !p.content {
-			p.drops.dropped(1)
+			p.drops.filtered(1)
 			return nil // pure content; a content-off destination gets none
 		}
 	case "delta":
 		if p.noDeltas {
-			p.drops.dropped(1)
+			p.drops.filtered(1)
 			return nil
 		}
 		if p.content {
@@ -128,7 +130,21 @@ func (p *destProc) stripEvent(clone *sdklog.Record) {
 // shapeEvent applies the destination's Redact then MaxBytes to the
 // body's content fields (event and delta bodies only — a capped
 // transcript is not replay-grade), and records the cut.
+//
+// Redact is the caller's function running on the run's goroutine
+// (Emit): a panic in it must neither unwind the run nor let the record
+// through unredacted, so the chain falls back to the content-off shape
+// for that record — the durable sequence keeps its position, the
+// content does not leave — and counts it as the destination's drop.
 func (p *destProc) shapeEvent(clone *sdklog.Record) {
+	defer func() {
+		if v := recover(); v != nil {
+			p.stripEvent(clone)
+			// The panic's type only: its value is commonly built from
+			// the very content Redact was given.
+			p.drops.dropped(1, fmt.Errorf("content redaction panicked (%T): the record was exported stripped", v))
+		}
+	}()
 	body := clone.Body()
 	if body.Type() != attribute.STRING {
 		return
@@ -147,6 +163,8 @@ func (p *destProc) shapeEvent(clone *sdklog.Record) {
 	}
 	b, err := json.Marshal(shaped)
 	if err != nil {
+		// Never the original body: it is the unredacted one.
+		p.stripEvent(clone)
 		return
 	}
 	clone.SetBody(attribute.StringValue(string(b)))
@@ -184,7 +202,7 @@ func shapeEventValue(ev weft.Event, redact func(weft.ContentKind, string) string
 		if redact != nil {
 			s := redact(weft.ContentArgs, string(e.Args))
 			if s != string(e.Args) {
-				e.Args, changed = json.RawMessage(s), true
+				e.Args, changed = redactedArgs(s), true
 			}
 		}
 		return e, 0, changed
@@ -220,7 +238,7 @@ func shapeEventValue(ev weft.Event, redact func(weft.ContentKind, string) string
 				s := redact(weft.ContentArgs, string(c.Args))
 				if s != string(c.Args) {
 					changed = true
-					c.Args = json.RawMessage(s)
+					c.Args = redactedArgs(s)
 					e.Pending[i] = c
 				}
 			}
@@ -235,6 +253,18 @@ func shapeEventValue(ev weft.Event, redact func(weft.ContentKind, string) string
 	default:
 		return ev, 0, false
 	}
+}
+
+// redactedArgs renders a redactor's output as the JSON value Args must
+// be: the document itself when it still is one, a JSON string otherwise
+// ("[REDACTED]" for the whole value is the natural redactor). An
+// invalid RawMessage would fail the body's re-encode.
+func redactedArgs(s string) json.RawMessage {
+	if json.Valid([]byte(s)) {
+		return json.RawMessage(s)
+	}
+	b, _ := json.Marshal(s)
+	return b
 }
 
 // shapeString applies redaction then the byte cap (on a rune boundary),
@@ -274,27 +304,79 @@ func addAttr(r *sdklog.Record, key string, value attribute.Value) {
 }
 
 // dropCounter counts one destination's dropped records and logs a WARN
-// at most once a minute while drops happen — a slow or failing
-// destination starves only itself. newDropCounter fixes the logger at
-// construction, before any goroutine can emit; the field is immutable
-// from then on (the old lazy assignment raced concurrent runs).
+// at most once a minute while it loses them — a slow or failing
+// destination starves only itself. Two ways a record does not arrive:
+// lost (a failed export or write — dropped, which warns) and filtered
+// by the destination's own policy (messages records on a content-off
+// chain, deltas under NoDeltas — filtered, which counts and stays
+// quiet: a healthy pipeline must not log drops). newDropCounter fixes
+// the logger at construction, before any goroutine can emit; the field
+// is immutable from then on (the old lazy assignment raced concurrent
+// runs).
 type dropCounter struct {
-	name  string
-	count atomic.Int64
-	last  atomic.Int64 // unix nano of the last WARN
-	log   *slog.Logger
+	name   string
+	count  atomic.Int64 // every record that did not arrive, lost or filtered
+	policy atomic.Int64 // the filtered share of count
+	last   atomic.Int64 // unix nano of the last WARN
+	log    *slog.Logger
 }
 
 func newDropCounter(name string) *dropCounter {
 	return &dropCounter{name: name, log: slog.Default()}
 }
 
-func (d *dropCounter) dropped(n int64) {
+// dropped counts n lost records; cause is the export or write error
+// the throttled WARN names.
+func (d *dropCounter) dropped(n int64, cause error) {
 	total := d.count.Add(n)
-	now := time.Now().UnixNano()
-	last := d.last.Load()
-	if now-last > int64(time.Minute) && d.last.CompareAndSwap(last, now) {
-		d.log.Warn("weft/otel: destination dropped records",
-			"dest", d.name, "dropped", total)
+	if throttle(&d.last) {
+		attrs := []any{"dest", d.name, "dropped", total - d.policy.Load()}
+		if cause != nil {
+			attrs = append(attrs, "err", cause.Error())
+		}
+		d.log.Warn("weft/otel: destination dropped records", attrs...)
 	}
+}
+
+func (d *dropCounter) filtered(n int64) {
+	d.policy.Add(n)
+	d.count.Add(n)
+}
+
+// throttle reports whether a minute has passed since it last said yes.
+func throttle(last *atomic.Int64) bool {
+	now := time.Now().UnixNano()
+	prev := last.Load()
+	return now-prev > int64(time.Minute) && last.CompareAndSwap(prev, now)
+}
+
+// countingLogExporter and countingSpanExporter wrap a batch
+// destination's exporters: what a failed export loses is the
+// destination's own drops, counted and warned like the Local sink's
+// failed writes. (The OTLP exporters retry inside Export; an error here
+// is after they gave up.)
+type countingLogExporter struct {
+	sdklog.Exporter
+	drops *dropCounter
+}
+
+func (e countingLogExporter) Export(ctx context.Context, recs []sdklog.Record) error {
+	err := e.Exporter.Export(ctx, recs)
+	if err != nil {
+		e.drops.dropped(int64(len(recs)), err)
+	}
+	return err
+}
+
+type countingSpanExporter struct {
+	sdktrace.SpanExporter
+	drops *dropCounter
+}
+
+func (e countingSpanExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
+	err := e.SpanExporter.ExportSpans(ctx, spans)
+	if err != nil {
+		e.drops.dropped(int64(len(spans)), err)
+	}
+	return err
 }

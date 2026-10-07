@@ -52,8 +52,15 @@ func (t *runTracker) OnEmit(_ context.Context, r *sdklog.Record) error {
 	}
 	switch {
 	case kind == "event" && eventType == "run_start":
+		// The run's metadata is run_start's string attributes minus
+		// the record contract's own keys: a heartbeat is not a
+		// run_start (weft.event.type) and has no body (weft.content).
 		meta := map[string]string{}
 		r.WalkAttributes(func(kv attribute.KeyValue) bool {
+			switch kv.Key {
+			case "weft.record", "weft.run.id", "weft.event.type", "weft.content":
+				return true
+			}
 			if v, ok := attrString(kv); ok {
 				meta[string(kv.Key)] = v
 			}
@@ -142,6 +149,24 @@ func (p *trackerSpanProc) OnEnd(s sdktrace.ReadOnlySpan) {
 func (p *trackerSpanProc) Shutdown(context.Context) error   { return nil }
 func (p *trackerSpanProc) ForceFlush(context.Context) error { return nil }
 
+// runEndSampler makes the tracker see every run end. The SDK never
+// shows a dropped span to a processor, so a sampled-out run that failed
+// or was cancelled (no run_finish record) would stay in the open set
+// for the life of the process — heartbeating, reading running in every
+// sink. A Drop decision on an invoke_agent span becomes RecordOnly: the
+// span reaches trackerSpanProc.OnEnd, and is still never exported (the
+// simple and batch processors skip unsampled spans) nor sampled
+// downstream (its flags are unchanged).
+type runEndSampler struct{ sdktrace.Sampler }
+
+func (s runEndSampler) ShouldSample(p sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	res := s.Sampler.ShouldSample(p)
+	if res.Decision == sdktrace.Drop && isInvokeAgentName(p.Name) {
+		res.Decision = sdktrace.RecordOnly
+	}
+	return res
+}
+
 // isInvokeAgentName matches the span-name form ("invoke_agent <agent>")
 // when the operation attribute was dropped.
 func isInvokeAgentName(name string) bool {
@@ -161,9 +186,6 @@ func heartbeats(ctx context.Context, emit log.Logger, t *runTracker) {
 			attribute.String("weft.run.id", runID),
 		}
 		for k, v := range meta {
-			if k == "weft.record" || k == "weft.run.id" {
-				continue
-			}
 			attrs = append(attrs, attribute.String(k, v))
 		}
 		r.AddAttributes(attrs...)

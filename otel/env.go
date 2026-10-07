@@ -20,7 +20,7 @@ func envDestinations(getenv func(string) string) []dest {
 	var out []dest
 	if u := getenv("WEFT_STUDIO_URL"); u != "" {
 		d := newDest(destStudio, "studio(env)")
-		d.url = u
+		d.url = normalizeEnvEndpoint(u)
 		d.token = getenv("WEFT_STUDIO_TOKEN")
 		on := true
 		d.content = &on
@@ -52,7 +52,10 @@ func normalizeEnvEndpoint(u string) string {
 }
 
 // parseHeaderList reads the OTEL_EXPORTER_OTLP_HEADERS form:
-// comma-separated key=value pairs.
+// comma-separated key=value pairs, percent-encoded (the OTel spec's
+// W3C-baggage form — "Authorization=Basic%20…"), as the SDK's own
+// exporters decode it. A name or value that does not decode rides as
+// written.
 func parseHeaderList(s string) map[string]string {
 	out := map[string]string{}
 	for _, pair := range strings.Split(s, ",") {
@@ -60,9 +63,16 @@ func parseHeaderList(s string) map[string]string {
 		if !ok {
 			continue
 		}
-		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		out[unescapeHeader(strings.TrimSpace(k))] = unescapeHeader(strings.TrimSpace(v))
 	}
 	return out
+}
+
+func unescapeHeader(s string) string {
+	if u, err := url.PathUnescape(s); err == nil {
+		return u
+	}
+	return s
 }
 
 // dedupURL is the URL two destinations are compared by: scheme, host
@@ -75,7 +85,24 @@ func dedupURL(raw string) string {
 	if err != nil || u.Host == "" {
 		return raw
 	}
-	return u.Scheme + "://" + u.Host + u.Path
+	return u.Scheme + "://" + u.Host + strings.TrimSuffix(u.Path, "/")
+}
+
+// exportURL is the URL a destination exports to — what de-duplication
+// compares; "" for the kinds with none (Local, Exporters).
+func exportURL(d dest) string {
+	switch d.kind {
+	case destStudio, destOTLP:
+		return d.url
+	case destDatadog:
+		if d.url == "" {
+			return datadogDefaultURL
+		}
+		return d.url
+	case destLangfuse:
+		return strings.TrimSuffix(d.host, "/") + "/api/public/otel"
+	}
+	return ""
 }
 
 // dedupe removes environment destinations whose URL an explicit
@@ -83,9 +110,8 @@ func dedupURL(raw string) string {
 func dedupe(explicit, env []dest) []dest {
 	used := map[string]bool{}
 	for _, d := range explicit {
-		switch d.kind {
-		case destStudio, destOTLP:
-			used[dedupURL(d.url)] = true
+		if u := exportURL(d); u != "" {
+			used[dedupURL(u)] = true
 		}
 	}
 	var out []dest

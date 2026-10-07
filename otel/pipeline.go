@@ -42,7 +42,9 @@ type Pipeline struct {
 	tp *sdktrace.TracerProvider
 	lp *sdklog.LoggerProvider
 
-	local       obsdb.DB
+	local       obsdb.DB   // the Local destination's DB (the last one configured): what LocalDB returns
+	locals      []obsdb.DB // every Local destination's DB; all close at Shutdown
+	dests       []*destRuntime
 	studioURL   string
 	studioToken string
 
@@ -76,17 +78,34 @@ func (p *Pipeline) LocalDB() obsdb.DB { return p.local }
 // token), which weft/runtime dials by default. "" without one.
 func (p *Pipeline) StudioEndpoint() (string, string) { return p.studioURL, p.studioToken }
 
-// ForceFlush flushes every destination.
+// ForceFlush flushes every destination, all at once: each
+// destination's span and log chains flush on their own goroutines
+// under ctx, so a slow or hung destination costs only its own data,
+// never the budget of the one behind it (flushed through the providers
+// they go one after another).
 func (p *Pipeline) ForceFlush(ctx context.Context) error {
-	// A pipeline whose build failed has no providers yet (Start shuts
-	// the half-built value down on its error path); flush is then a
-	// no-op, not a panic.
-	var err error
-	if p.tp != nil {
-		err = errors.Join(err, p.tp.ForceFlush(ctx))
+	var flushes []func(context.Context) error
+	for _, rt := range p.dests {
+		if rt.spanProc != nil {
+			flushes = append(flushes, rt.spanProc.ForceFlush)
+		}
+		if rt.logProc != nil {
+			flushes = append(flushes, rt.logProc.ForceFlush)
+		}
 	}
-	if p.lp != nil {
-		err = errors.Join(err, p.lp.ForceFlush(ctx))
+	errs := make(chan error, len(flushes))
+	for _, flush := range flushes {
+		go func() { errs <- flush(ctx) }()
+	}
+	var err error
+	for range flushes {
+		select {
+		case e := <-errs:
+			err = errors.Join(err, e)
+		case <-ctx.Done():
+			// A flush that ignores its context is not waited for.
+			return errors.Join(err, ctx.Err())
+		}
 	}
 	return err
 }
@@ -96,6 +115,13 @@ func (p *Pipeline) ForceFlush(ctx context.Context) error {
 // DB last.
 func (p *Pipeline) Shutdown(ctx context.Context) error {
 	p.closeOnce.Do(func() {
+		// The package accessors stop handing this pipeline out first: a
+		// LocalDB() after shutdown is nil, not a closed database.
+		installedMu.Lock()
+		if installedPipeline == p {
+			installedPipeline = nil
+		}
+		installedMu.Unlock()
 		p.stopHeartbeat()
 		flushCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		_ = p.ForceFlush(flushCtx)
@@ -106,8 +132,8 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 		if p.tp != nil {
 			_ = p.tp.Shutdown(ctx)
 		}
-		if p.local != nil {
-			p.closeErr = p.local.Close()
+		for _, db := range p.locals {
+			p.closeErr = errors.Join(p.closeErr, db.Close())
 		}
 	})
 	return p.closeErr
@@ -126,8 +152,9 @@ func (p *Pipeline) stopHeartbeat() {
 // Start builds and starts the pipeline: one provider pair, the run
 // tracker, one processor chain per destination (explicit options and
 // environment combined, de-duplicated with the explicit destination
-// winning). It fails if any destination fails to build; NoGlobal leaves
-// the OTel globals alone (tests).
+// winning). It fails if any destination fails to build — what was
+// already built is shut down again, exporters handed to Exporters
+// included; NoGlobal leaves the OTel globals alone (tests).
 func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 	cfg := config{heartbeat: defaultHeartbeat}
 	for _, o := range opts {
@@ -142,7 +169,6 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 	}
 	p, failed := build(ctx, cfg, dests)
 	if failed != nil {
-		_ = p.Shutdown(ctx)
 		return nil, failed
 	}
 	if !cfg.noGlobal {
@@ -155,6 +181,11 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 // Install's cue to fall back to the zero-config local sink.
 var errNoDestinations = errors.New("otel: no destinations configured")
 
+// errAllFailed is Install's WARN-and-skip mode ending with nothing
+// built. Not errNoDestinations: a program that named its destinations
+// does not get the local sink behind its back.
+var errAllFailed = errors.New("otel: every destination failed to build")
+
 // Install starts the pipeline and registers it globally. It never
 // panics and never fails the program: with no options at all (and no
 // environment destinations) it writes the local sink only (the
@@ -163,17 +194,17 @@ var errNoDestinations = errors.New("otel: no destinations configured")
 // everything down; call it on exit.
 func Install(opts ...Option) func() {
 	// NoGlobal is Start's test escape hatch; Install always registers.
-	p, err := Start(context.Background(), append(opts, forceGlobal{})...)
+	// dropFailed from the first attempt: each destination is built
+	// once (a failed Start shuts down what it built, which a retry over
+	// the same Exporters would then be handed dead).
+	opts = append(append([]Option{}, opts...), forceGlobal{}, dropFailed{})
+	p, err := Start(context.Background(), opts...)
 	if errors.Is(err, errNoDestinations) {
-		p, err = Start(context.Background(), append(opts, Local(""), forceGlobal{})...)
+		p, err = Start(context.Background(), append(opts, Local(""))...)
 	}
 	if err != nil {
-		slog.Warn("weft/otel: install: skipping destinations that cannot be built", "err", err.Error())
-		p, err = Start(context.Background(), append(opts, forceGlobal{}, dropFailed{})...)
-		if err != nil {
-			slog.Warn("weft/otel: install failed", "err", err.Error())
-			return func() {}
-		}
+		slog.Warn("weft/otel: install failed", "err", err.Error())
+		return func() {}
 	}
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -195,20 +226,23 @@ func (dropFailed) apply(c *config) { c.dropFailed = true }
 
 const defaultHeartbeat = 10 * time.Second
 
-// build assembles the pipeline from the config and destinations.
+// build assembles the pipeline from the config and destinations. On
+// failure nothing stays behind: every destination already built is
+// released (its processors' goroutines, its exporters, its database).
 func build(ctx context.Context, cfg config, dests []dest) (p *Pipeline, failed error) {
 	p = &Pipeline{tracker: newRunTracker()}
 	p.beatCfg = cfg.heartbeat
 
 	res, err := buildResource(cfg)
 	if err != nil {
-		return p, err
+		return nil, err
 	}
 	var spanProcs []sdktrace.SpanProcessor
 	var logProcs []sdklog.Processor
 	spanProcs = append(spanProcs, &trackerSpanProc{t: p.tracker})
 	logProcs = append(logProcs, p.tracker)
 
+	var built []*destRuntime
 	for _, d := range dests {
 		rt, err := buildDest(ctx, d, cfg)
 		if err != nil {
@@ -216,8 +250,13 @@ func build(ctx context.Context, cfg config, dests []dest) (p *Pipeline, failed e
 				slog.Warn("weft/otel: destination skipped", "dest", d.name, "err", err.Error())
 				continue
 			}
-			return p, fmt.Errorf("otel: destination %s: %w", d.name, err)
+			for _, b := range built {
+				b.release(ctx)
+			}
+			return nil, fmt.Errorf("otel: destination %s: %w", d.name, err)
 		}
+		built = append(built, rt)
+		p.dests = built
 		if rt.spanProc != nil {
 			spanProcs = append(spanProcs, rt.spanProc)
 		}
@@ -226,17 +265,18 @@ func build(ctx context.Context, cfg config, dests []dest) (p *Pipeline, failed e
 		}
 		if rt.localDB != nil {
 			p.local = rt.localDB
+			p.locals = append(p.locals, rt.localDB)
 		}
 		if d.kind == destStudio {
-			p.studioURL, p.studioToken = d.url, d.token
+			p.studioURL, p.studioToken = normalizeEnvEndpoint(d.url), d.token
 		}
 	}
-	if len(spanProcs) == 1 && len(logProcs) == 1 {
-		return p, errNoDestinations
+	if len(built) == 0 {
+		return nil, errAllFailed
 	}
 	tpOpts := []sdktrace.TracerProviderOption{
 		sdktrace.WithResource(res),
-		sdktrace.WithSampler(samplerOf(cfg)),
+		sdktrace.WithSampler(runEndSampler{samplerOf(cfg)}),
 	}
 	for _, sp := range spanProcs {
 		tpOpts = append(tpOpts, sdktrace.WithSpanProcessor(sp))
@@ -256,12 +296,32 @@ type destRuntime struct {
 	spanProc sdktrace.SpanProcessor
 	logProc  sdklog.Processor
 	localDB  obsdb.DB
-	close    func()
+}
+
+// release shuts a built destination down outside a provider — the
+// build-failure path, where no provider exists yet to do it: the batch
+// processors' goroutines end, the exporters close, the database closes.
+func (rt *destRuntime) release(ctx context.Context) {
+	if rt.spanProc != nil {
+		_ = rt.spanProc.Shutdown(ctx)
+	}
+	if rt.logProc != nil {
+		_ = rt.logProc.Shutdown(ctx)
+	}
+	if rt.localDB != nil {
+		_ = rt.localDB.Close()
+	}
 }
 
 // buildDest builds one destination's exporters and processor chains.
-func buildDest(ctx context.Context, d dest, cfg config) (*destRuntime, error) {
+// A destination that fails partway releases what it had built.
+func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err error) {
 	rt := &destRuntime{}
+	defer func() {
+		if err != nil {
+			rt.release(ctx)
+		}
+	}()
 	content := d.contentOn()
 	contentCfg := cfg.content
 	if d.contentCfg != nil {
@@ -274,6 +334,8 @@ func buildDest(ctx context.Context, d dest, cfg config) (*destRuntime, error) {
 	drops := newDropCounter(d.name)
 
 	logDelay, spanDelay := d.batchDelays()
+	var spanExp sdktrace.SpanExporter
+	var logExp sdklog.Exporter
 	switch d.kind {
 	case destLocal:
 		db, err := openLocal(d.path)
@@ -281,7 +343,6 @@ func buildDest(ctx context.Context, d dest, cfg config) (*destRuntime, error) {
 			return nil, err
 		}
 		rt.localDB = db
-		rt.close = func() { _ = db.Close() }
 		if d.traces {
 			rt.spanProc = sdktrace.NewSimpleSpanProcessor(&localSpanExporter{db: db, drops: drops})
 		}
@@ -297,40 +358,51 @@ func buildDest(ctx context.Context, d dest, cfg config) (*destRuntime, error) {
 			return nil, err
 		}
 		if d.traces {
-			spanExp, err := traceExporter(ctx, endpoint, pathPrefix+"/v1/traces", headers, insecure, d.timeout)
+			spanExp, err = traceExporter(ctx, endpoint, pathPrefix+"/v1/traces", headers, insecure, d.timeout)
 			if err != nil {
 				return nil, err
-			}
-			if spanDelay > 0 {
-				rt.spanProc = sdktrace.NewBatchSpanProcessor(spanExp, sdktrace.WithBatchTimeout(spanDelay))
-			} else {
-				rt.spanProc = sdktrace.NewBatchSpanProcessor(spanExp)
 			}
 		}
 		if d.logs {
-			logExp, err := logExporter(ctx, endpoint, pathPrefix+"/v1/logs", headers, insecure, d.timeout)
+			logExp, err = logExporter(ctx, endpoint, pathPrefix+"/v1/logs", headers, insecure, d.timeout)
 			if err != nil {
+				if spanExp != nil {
+					_ = spanExp.Shutdown(ctx)
+				}
 				return nil, err
 			}
-			var inner sdklog.Processor
-			if logDelay > 0 {
-				inner = sdklog.NewBatchProcessor(logExp, sdklog.WithExportInterval(logDelay))
-			} else {
-				inner = sdklog.NewBatchProcessor(logExp)
-			}
-			rt.logProc = &destProc{name: d.name, inner: inner,
-				content: content, contentC: contentCfg, noDeltas: d.noDeltas, drops: drops}
 		}
 	case destExporters:
-		if d.traces && d.spanExp != nil {
-			rt.spanProc = sdktrace.NewBatchSpanProcessor(d.spanExp)
+		if d.traces {
+			spanExp = d.spanExp
 		}
-		if d.logs && d.logExp != nil {
-			rt.logProc = &destProc{name: d.name, inner: sdklog.NewBatchProcessor(d.logExp),
-				content: content, contentC: contentCfg, noDeltas: d.noDeltas, drops: drops}
+		if d.logs {
+			logExp = d.logExp
 		}
 	default:
 		return nil, fmt.Errorf("unknown destination kind %d", d.kind)
+	}
+	// The batch chains (every kind but Local). The exporters are
+	// wrapped to count what a failed export lost — the destination's
+	// own drops (S2.4).
+	if spanExp != nil {
+		counted := countingSpanExporter{SpanExporter: spanExp, drops: drops}
+		if spanDelay > 0 {
+			rt.spanProc = sdktrace.NewBatchSpanProcessor(counted, sdktrace.WithBatchTimeout(spanDelay))
+		} else {
+			rt.spanProc = sdktrace.NewBatchSpanProcessor(counted)
+		}
+	}
+	if logExp != nil {
+		counted := countingLogExporter{Exporter: logExp, drops: drops}
+		var inner sdklog.Processor
+		if logDelay > 0 {
+			inner = sdklog.NewBatchProcessor(counted, sdklog.WithExportInterval(logDelay))
+		} else {
+			inner = sdklog.NewBatchProcessor(counted)
+		}
+		rt.logProc = &destProc{name: d.name, inner: inner,
+			content: content, contentC: contentCfg, noDeltas: d.noDeltas, drops: drops}
 	}
 	if rt.spanProc == nil && rt.logProc == nil {
 		return nil, errors.New("neither signal enabled")
@@ -355,13 +427,10 @@ func transportOf(d dest) (endpoint, pathPrefix string, headers map[string]string
 	case destDatadog:
 		raw = d.url
 		if raw == "" {
-			raw = "http://localhost:4318"
+			raw = datadogDefaultURL
 		}
 	case destLangfuse:
 		raw = d.host
-		if !strings.Contains(raw, "://") {
-			raw = "https://" + raw
-		}
 		headers["Authorization"] = "Basic " + base64.StdEncoding.EncodeToString(
 			[]byte(d.publicKey+":"+d.secretKey))
 		pathPrefix = "/api/public/otel"
@@ -370,9 +439,21 @@ func transportOf(d dest) (endpoint, pathPrefix string, headers map[string]string
 	default:
 		return "", "", nil, false, fmt.Errorf("not an OTLP destination: %d", d.kind)
 	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return "", "", nil, false, fmt.Errorf("bad endpoint %q: %w", raw, err)
+	if raw == "" {
+		return "", "", nil, false, errors.New("no endpoint URL")
+	}
+	// A scheme-less URL is https, for every kind (the OTLP convention
+	// the env endpoint already follows). The errors below never echo
+	// the raw value: a URL may carry credentials.
+	u, err := url.Parse(normalizeEnvEndpoint(raw))
+	if err != nil {
+		return "", "", nil, false, errors.New("bad endpoint URL: it does not parse")
+	}
+	if u.Host == "" {
+		return "", "", nil, false, fmt.Errorf("bad endpoint URL %q: no host", u.Redacted())
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", "", nil, false, fmt.Errorf("endpoint scheme %q: OTLP/HTTP takes http:// or https://", u.Scheme)
 	}
 	if u.Scheme == "http" {
 		host := u.Hostname()
@@ -387,14 +468,24 @@ func transportOf(d dest) (endpoint, pathPrefix string, headers map[string]string
 	return u.Host, pathPrefix, headers, insecure, nil
 }
 
+// endpointURL renders the full URL the exporters are given. Always the
+// whole URL, scheme included: the OTLP exporters read
+// OTEL_EXPORTER_OTLP_ENDPOINT themselves and take their TLS posture
+// from its scheme, and a bare host (WithEndpoint) leaves that posture
+// in force — a sidecar collector's http:// variable would send an
+// https destination's token and content in cleartext. The URL form
+// sets the posture explicitly.
+func endpointURL(endpoint, path string, insecure bool) string {
+	if insecure {
+		return "http://" + endpoint + path
+	}
+	return "https://" + endpoint + path
+}
+
 func traceExporter(ctx context.Context, endpoint, path string, headers map[string]string, insecure bool, timeout time.Duration) (sdktrace.SpanExporter, error) {
 	opts := []otlptracehttp.Option{
-		otlptracehttp.WithEndpoint(endpoint),
-		otlptracehttp.WithURLPath(path),
+		otlptracehttp.WithEndpointURL(endpointURL(endpoint, path, insecure)),
 		otlptracehttp.WithHeaders(headers),
-	}
-	if insecure {
-		opts = append(opts, otlptracehttp.WithInsecure())
 	}
 	if timeout > 0 {
 		opts = append(opts, otlptracehttp.WithTimeout(timeout))
@@ -404,12 +495,8 @@ func traceExporter(ctx context.Context, endpoint, path string, headers map[strin
 
 func logExporter(ctx context.Context, endpoint, path string, headers map[string]string, insecure bool, timeout time.Duration) (sdklog.Exporter, error) {
 	opts := []otlploghttp.Option{
-		otlploghttp.WithEndpoint(endpoint),
-		otlploghttp.WithURLPath(path),
+		otlploghttp.WithEndpointURL(endpointURL(endpoint, path, insecure)),
 		otlploghttp.WithHeaders(headers),
-	}
-	if insecure {
-		opts = append(opts, otlploghttp.WithInsecure())
 	}
 	if timeout > 0 {
 		opts = append(opts, otlploghttp.WithTimeout(timeout))
@@ -477,8 +564,8 @@ func registerGlobals(p *Pipeline) {
 }
 
 // LocalDB returns the installed pipeline's local obsdb.DB — for
-// studio.DB(otel.LocalDB()) (setup A, [D4]). nil before Install or
-// without a Local destination.
+// studio.DB(otel.LocalDB()) (setup A, [D4]). nil before Install, after
+// its shutdown, or without a Local destination.
 //
 // S2.1 names this otel.Local(), which cannot coexist with the
 // Local(path) destination option in Go; LocalDB is the recorded
@@ -493,7 +580,8 @@ func LocalDB() obsdb.DB {
 }
 
 // StudioEndpoint returns the installed pipeline's Studio destination,
-// which weft/runtime dials by default. "" without one.
+// which weft/runtime dials by default. "" without one (or after the
+// pipeline's shutdown).
 func StudioEndpoint() (string, string) {
 	installedMu.RLock()
 	defer installedMu.RUnlock()
@@ -505,9 +593,10 @@ func StudioEndpoint() (string, string) {
 
 // startHeartbeat runs the tracker's ticker: every interval, one
 // weft.heartbeat record per open run through the provider's logger.
-// Heartbeat(0) at Start disables it.
+// Heartbeat(0) at Start disables it; so does a negative interval
+// (time.NewTicker panics on one, on a goroutine nothing can recover).
 func (p *Pipeline) startHeartbeat() {
-	if p.beatCfg == 0 {
+	if p.beatCfg <= 0 {
 		return
 	}
 	p.beatMu.Lock()

@@ -25,6 +25,9 @@ type ContentConfig struct {
 	// transcript is not replay-grade.
 	MaxBytes int
 	// Redact is applied to a content field before the cap; nil = identity.
+	// It sees event bodies and deltas only: weft.messages transcript
+	// records are NOT passed through it and reach a content-on
+	// destination unredacted.
 	Redact func(kind weft.ContentKind, s string) string
 }
 
@@ -50,7 +53,7 @@ func Resource(r *sdkresource.Resource) Option {
 }
 
 // Heartbeat sets how often the run tracker emits one weft.heartbeat
-// record per open run (the default 10s; 0 disables). Three missed
+// record per open run (the default 10s; 0 or less disables). Three missed
 // intervals are what obsdb's InterruptedAfter reads as interrupted.
 func Heartbeat(every time.Duration) Option {
 	return optionFunc(func(c *config) { c.heartbeat = every })

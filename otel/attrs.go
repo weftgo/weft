@@ -1,6 +1,10 @@
 package otel
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -45,6 +49,26 @@ func attrValue(v attribute.Value) any {
 		return anySlice(v.AsInt64Slice())
 	case attribute.FLOAT64SLICE:
 		return anySlice(v.AsFloat64Slice())
+	case attribute.BYTESLICE:
+		return base64.StdEncoding.EncodeToString(v.AsByteSlice())
+	case attribute.SLICE:
+		vals := v.AsSlice()
+		out := make([]any, 0, len(vals))
+		for _, e := range vals {
+			if x := attrValue(e); x != nil {
+				out = append(out, x)
+			}
+		}
+		return out
+	case attribute.MAP:
+		kvs := v.AsMap()
+		out := make(map[string]any, len(kvs))
+		for _, kv := range kvs {
+			if x := attrValue(kv.Value); x != nil {
+				out[string(kv.Key)] = x
+			}
+		}
+		return out
 	}
 	return nil
 }
@@ -60,10 +84,22 @@ func anySlice[S any](s []S) []any {
 	return out
 }
 
-// bodyString renders a record body: weft bodies are JSON strings.
+// bodyString renders a record body: weft bodies are JSON strings; any
+// other value type (a stock bridge may emit structured bodies) renders
+// through the attribute mapping above, as JSON — exactly what
+// obsdb.FromOTLPLogs makes of the same body, so both paths store
+// identical rows (S3.3).
 func bodyString(v attribute.Value) string {
-	if v.Type() == attribute.STRING {
-		return v.AsString()
+	switch x := attrValue(v).(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	default:
+		b, err := json.Marshal(x)
+		if err != nil {
+			return fmt.Sprint(x) // a NaN or infinite double: JSON has no spelling
+		}
+		return string(b)
 	}
-	return ""
 }

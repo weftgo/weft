@@ -14,6 +14,11 @@ import (
 // returns — a crash loses nothing emitted (R5); the write cost rides
 // the run's goroutine, like store.Record today. Delta records reach
 // the exporter and are counted by Write, not stored (Q4).
+//
+// A failed write is counted and named by the destination's throttled
+// WARN, and the exporters return nil: handed back to the simple
+// processors, the error would go to OTel's global error handler once
+// per record — a stderr line per delta for as long as the disk is full.
 
 // localSpanExporter writes SDK spans into the shared obsdb.DB.
 type localSpanExporter struct {
@@ -26,8 +31,7 @@ func (e *localSpanExporter) ExportSpans(ctx context.Context, spans []sdktrace.Re
 		return nil
 	}
 	if err := e.db.Write(ctx, obsdb.Batch{Spans: FromSDKSpans(spans)}); err != nil {
-		e.drops.dropped(int64(len(spans)))
-		return err
+		e.drops.dropped(int64(len(spans)), err)
 	}
 	return nil
 }
@@ -46,8 +50,7 @@ func (e *localLogExporter) Export(ctx context.Context, recs []sdklog.Record) err
 		return nil
 	}
 	if err := e.db.Write(ctx, obsdb.Batch{Records: FromSDKRecords(recs)}); err != nil {
-		e.drops.dropped(int64(len(recs)))
-		return err
+		e.drops.dropped(int64(len(recs)), err)
 	}
 	return nil
 }

@@ -16,7 +16,7 @@ type config struct {
 	content    ContentConfig
 	service    string
 	resource   *sdkresource.Resource
-	heartbeat  time.Duration // 0 = the 10s default; <0 = disabled
+	heartbeat  time.Duration // Start seeds the 10s default; <= 0 = disabled
 	sampler    sdktrace.Sampler
 	noEnv      bool
 	noGlobal   bool
@@ -94,6 +94,9 @@ func (d dest) batchDelays() (logs, spans time.Duration) {
 	}
 	return 0, 0
 }
+
+// datadogDefaultURL is the Datadog Agent's OTLP/HTTP intake.
+const datadogDefaultURL = "http://localhost:4318"
 
 // defaultLocalPath is where the Local sink writes when no path is
 // given: $WEFT_DB or ./.weft/weft.db.

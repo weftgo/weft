@@ -4,32 +4,31 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/weftgo/weft.svg)](https://pkg.go.dev/github.com/weftgo/weft)
 [![Version](https://img.shields.io/badge/version-v0.8.0-orange)](https://github.com/weftgo/weft/releases/tag/v0.8.0)
 
-A thin, opinionated core for building AI agents in Go — designed the way
-the standard library is: small interfaces, `context` everywhere, functional
-options, wrapped errors, and zero required configuration.
+A modular framework for building AI agents in Go — designed the way the
+standard library is: small interfaces, `context` everywhere, functional
+options, wrapped errors, and zero required configuration. Start with the
+core as a library; add the batteries when you need them. Every module is
+usable on its own, and nothing above the core is required.
 
-Weft runs the agent loop — call a model, execute its tool calls in parallel
-with defined failure semantics, stream typed events while work is in
-flight — and nothing else. Concurrency is the point, not a feature: a
-step's tools fan out over goroutines, parallelism is a one-line dial, and
-tool failures never cancel their siblings.
+| Module | What it gives you |
+|---|---|
+| `weft` | The agent loop: tools from plain Go functions, parallel tool calls with defined failure semantics, typed streaming events, structured output, approvals, steering, subagents; OpenAI, Anthropic, Google adapters (`weft/openai`, …) and MCP both ways (`weft/mcp`) |
+| `weft/thread` | Durable sessions: an append-only conversation tree with branching, compaction, approvals that survive restarts, steering and a bounded pool of child agents (jsonl, SQLite or memory storage) |
+| `weft/otel` | Recording in one line (`defer otel.Install()()`): every event, transcript and span exported over OpenTelemetry — to a local database, Studio, or any OTLP backend — with per-destination content policy and redaction |
+| `weft/obsdb` | The queryable store those records land in: SQLite locally, ClickHouse hosted (`weft/obsdb/clickhouse`) |
+| `weft/studio` | The Inspector: runs, sessions, traces and live streams in a web UI, an in-app devtools panel for your own pages, and a playground that re-runs a turn with an edited prompt, model or tools; the `studio` binary (`weft/studio/cmd`) serves it for apps in any language |
+| `weft/runtime` | The playground's in-app side: your app executes experiment commands safely — side-effect tools are substituted or parked unless you opt them in |
 
-> **Status:** v0.8.0 — experimental, pre-1.0. The three load-bearing
-> contracts — message model, error model, tool contract — are implemented
-> and tested; the provider adapters (OpenAI + compatible servers,
-> Anthropic, Google) wrap the vendors' official Go SDKs; the two
-> middleware seams (`WrapModel`/`WrapTools`, package `mw`), the approval
-> boundary (now with externally-computed results: `Resolve`), subagents
-> as tools, MCP interop both ways (`weft/mcp`), observability (OTel
-> spans, slog lines), wefttest record/replay, and the parity-round
-> controls — tool-choice forcing, per-step sampling params, richer
-> `Usage` splits, anthropic prompt caching, and the streaming
-> `OutputDecoder` — are in; see `docs/adr/` and the roadmap below.
-> Above the core, each its own tagged module: sessions (`weft/thread`),
-> the observability pipeline and database (`weft/otel`, `weft/obsdb`),
-> the Inspector with its devtools panel (`weft/studio`) and the
-> playground's in-app side (`weft/runtime`) — see Layout. Serving, eval
-> and the cli come next, in that order of demand.
+Concurrency is the point, not a feature: a step's tools fan out over
+goroutines, parallelism is a one-line dial, and tool failures never cancel
+their siblings.
+
+> **Status:** v0.8.0 — experimental, pre-1.0, released module by module
+> (see [Releases](https://github.com/weftgo/weft/releases) and
+> `CHANGELOG.md`). The core's three load-bearing contracts — message
+> model, error model, tool contract — are implemented and tested, and
+> every module has been through a production-readiness review. Serving,
+> eval and the `weft` CLI come next — see the roadmap below.
 
 ## Quick start
 

@@ -272,15 +272,36 @@ describe("a run page", () => {
   // gaps are durable positions lost in transit (api.go's eventsPage):
   // the fold skips them silently unless the page says so.
   it("says which events were lost instead of folding over the hole", async () => {
+    // A finished run: the run's own gap hole (api.go's runHoles) says
+    // it in the header; the in-flight banner is for running runs only.
+    const gap = {
+      hole: "gap",
+      reason: "1 of the run's event positions are missing: a destination dropped a batch",
+      fix: "check the exporter's drops",
+    }
     studio
-      .on("GET runs/s_1-t2", doc)
+      .on("GET runs/s_1-t2", { ...doc, holes: [gap] })
       .on("GET runs/s_1-t2/events", pagedEvents(stored.filter((e) => e.pos !== 2), { gaps: [2] }))
       .on("GET runs/s_1-t2/spans", { spans: [] })
       .on("GET runs/s_1-t2/transcript", transcriptOf([]))
     renderApp("/runs/s_1-t2")
     expect(
+      await screen.findByText(gap.reason, { exact: false }, { timeout: 10_000 })
+    ).toBeTruthy()
+    expect(document.querySelector("[data-run-holes] [data-hole='gap']")).toBeTruthy()
+    expect(screen.queryByText(/missing from the database/)).toBeNull()
+  })
+
+  it("says which events are missing while the run is still running", async () => {
+    studio
+      .on("GET runs/s_1-t2", { ...doc, status: "running", finished: null })
+      .on("GET runs/s_1-t2/events", pagedEvents(stored.filter((e) => e.pos !== 2), { gaps: [2], done: false }))
+      .on("GET runs/s_1-t2/spans", { spans: [] })
+      .on("GET runs/s_1-t2/transcript", transcriptOf([]))
+    renderApp("/runs/s_1-t2")
+    expect(
       await screen.findByText(
-        /event is missing from the database \(position 2\) — lost on the way/,
+        /event is missing from the database \(position 2\) — still in flight, or lost/,
         {},
         { timeout: 10_000 }
       )

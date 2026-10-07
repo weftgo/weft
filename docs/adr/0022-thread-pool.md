@@ -443,6 +443,20 @@ its receipt and in the parent session's `Usage.Delegated` — not on
 the parent run's `RunResult.Usage` or `StepRecord.SubagentUsage`. A
 budget that must cover delegated work reads `Delegated`.
 
+### M. Async children keep what the delegating run hands down (2026-10-07)
+
+An async child ran on the pool's bare context (§6, D4), so a
+`weft.ParkAllExcept` list in force on the delegating run — the rule
+that reaches every run started inside it — and the run's metadata did
+not reach the child: an async delegation from a default-deny run fired
+its side effects unparked. The async child's context now takes the
+pool's cancellation and the delegating call's context values — the
+same values a sync child sees — so the rule binds it, and the turn's
+end still does not cancel it. A child's resumes (its own `Decide`,
+the pool's arming through `Pool.Decide`) run on the parked turn's
+context values (ADR 0021, amendment 2026-10-07), so a resumed child,
+sync or async, keeps the rule on every step.
+
 ### L. API changes (breaking, pre-1.0)
 
 - `Wrap` returns `(*weft.ToolDef, error)`; `MustWrap` panics. One

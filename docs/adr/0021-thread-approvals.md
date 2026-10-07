@@ -220,6 +220,18 @@ collides with a session grant's entry id can never inflate the
 session grant's use count — audit prose is not a data channel between
 the two scopes (§4).
 
+## Amendment (2026-10-07 — a resume runs on the parked turn's context values)
+
+A resume armed by `Decide`, `Resume`, a `Send` or `Continue` ran on
+the arming call's context alone, so a rule that rode the parked turn's
+*context* — a `weft.ParkAllExcept` list a delegating run handed down
+to a `thread/pool` child — was gone for the resumed steps, whoever
+decided. The resume now runs on the arming call's context for
+cancellation and deadline and takes the parked turn's context values
+for every key the arming context lacks (the parked turn's run options
+already rode along, §1). After a restart the parked turn's context is
+gone, like its options.
+
 ## Amendment (2026-10-01 — the approvals hardening)
 
 A review of the shipped subsystem found the decision above under-kept

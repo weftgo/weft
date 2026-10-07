@@ -226,6 +226,24 @@ behaviour is a plain turn's.
 drains it — the message joins another turn's run, under that run's
 options. They apply to the follow-up turn when the steer defers.
 
+*Amended 2026-10-07 — a follow-up inherits the turn it was aimed at.*
+The follow-up ran under the steer Send's options alone, so a turn sent
+with `weft.ParkAllExcept` (a playground fork's side-effect guard) had
+its steer's follow-up fire tools unparked. Now a deferred steer's
+follow-up runs under the run options of the turn the steer was aimed
+at — the turn in flight when it was accepted, or, when only an
+approval boundary held the session, the parked turn — with the steer's
+own options after them: a later option wins where options override
+(metadata keys, model), and park rules only add up, so a steer can
+narrow the turn's `ParkAllExcept`, never widen it. The follow-up runs
+on the steer's context for cancellation, and takes the aimed turn's
+context values for every key the steer's lacks — a park rule or
+metadata that rode the turn's context, as a pool child's does. A steer
+that finds no turn in flight and no boundary open (an idle session, or
+the window between a turn's end and the next) runs as the plain turn
+above, under its own options. A steer restored by `Open` has neither:
+options and contexts are not entries.
+
 **The live steer queue is unbounded.** Each accepted steer costs one
 durable receipt entry and stays queued until a drain point, the turn's
 end, or `ClearQueue` takes it; the session does not cap how many may

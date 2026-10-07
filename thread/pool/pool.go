@@ -63,6 +63,7 @@ import (
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/thread"
+	"github.com/weftgo/weft/thread/internal/carry"
 )
 
 // ErrClosed is returned for work handed to a pool whose Close has
@@ -741,10 +742,18 @@ func (p *Pool) submit(ctx context.Context, parent *thread.Session, agent *weft.A
 	// build its context: a pool-owned WithCancel dropped on the sync
 	// path would stay registered on the pool's context until Close,
 	// one leaked child per sync delegation.
+	//
+	// The async child's context takes the pool's cancellation and the
+	// delegating call's values (internal/carry): what a run hands down
+	// to the runs started inside it — the ParkAllExcept list in force,
+	// the metadata, the delegating call — binds an async child exactly
+	// as it binds a sync one, and the turn's end does not cancel it.
+	// The child session's turns capture the context, so its resumes
+	// keep the values too, whoever decides.
 	var runCtx context.Context
 	var cancel context.CancelFunc
 	if async {
-		runCtx, cancel = context.WithCancel(p.ctx)
+		runCtx, cancel = context.WithCancel(carry.Values(p.ctx, ctx))
 	} else {
 		runCtx, cancel = context.WithCancel(ctx)
 	}

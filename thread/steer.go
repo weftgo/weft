@@ -8,22 +8,59 @@ import (
 	"time"
 
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/thread/internal/carry"
 )
 
 // queuedSteer is one accepted steer waiting for the running turn's
 // drain: the receipt entry's id, the message, the context its Send
-// carried (the follow-up's persistence window if it defers), the run
-// options its Send carried (the follow-up's, if it defers — a
-// delivered steer joins another turn's run, under that run's options),
-// and the Turn the caller holds. step is the step whose drain took it,
-// set when it is handed to a run.
+// carried (the follow-up's persistence window and cancellation if it
+// defers), the run options its Send carried, and the Turn the caller
+// holds. aimOpts and aimCtx are what it inherits from the turn it was
+// aimed at — the turn in flight when it was accepted, or the parked
+// turn holding the boundary — if it defers: a follow-up runs under
+// that turn's run options with the steer's own after them, on the
+// steer's context with the aimed turn's values beneath (followUp). A
+// delivered steer joins the aimed run itself, under its options. step
+// is the step whose drain took it, set when it is handed to a run.
 type queuedSteer struct {
 	receipt string
 	msg     weft.Message
 	ctx     context.Context
 	opts    []weft.RunOption
+	aimOpts []weft.RunOption
+	aimCtx  context.Context
 	turn    *Turn
 	step    int
+}
+
+// followUp is the pending send a deferred steer becomes: the aimed
+// turn's run options, then the steer's own — a later option wins
+// where options override, and park rules only add up, so a steer can
+// narrow the aimed turn's ParkAllExcept, never widen it — on the
+// steer's context, with the aimed turn's context values for every key
+// the steer's lacks (a park rule or metadata that rode the turn's
+// context, as a pool child's does).
+func (q queuedSteer) followUp(ft *Turn, receipt string) pendingSend {
+	opts := q.opts
+	if len(q.aimOpts) > 0 {
+		opts = append(append([]weft.RunOption(nil), q.aimOpts...), q.opts...)
+	}
+	return pendingSend{ctx: carry.Values(q.ctx, q.aimCtx), msg: q.msg, opts: opts, turn: ft, receipt: receipt}
+}
+
+// aimLocked returns what a steer accepted now inherits if it defers:
+// the in-flight turn's run options and context, or — when no turn is
+// in flight — the open boundary's parked turn's. None on a session
+// with neither (a restored steer settled by Continue). Callers hold
+// s.mu.
+func (s *Session) aimLocked() ([]weft.RunOption, context.Context) {
+	if s.busyLocked() {
+		return s.inFlight.aimOpts, s.inFlight.aimCtx
+	}
+	if s.boundaryLocked() {
+		return s.await.opts, s.await.ctx
+	}
+	return nil, nil
 }
 
 // QueuedSteer is one message the session has accepted and not yet
@@ -100,6 +137,7 @@ func (s *Session) steerSendLocked(ctx context.Context, msg weft.Message, opts []
 	}
 	s.adoptLocked(e)
 	q := queuedSteer{receipt: t.id, msg: msg, ctx: ctx, opts: opts, turn: t}
+	q.aimOpts, q.aimCtx = s.aimLocked()
 	if err := s.flushLocked(ctx); err != nil {
 		// The receipt is written but not synced, and Send reports the
 		// failure — yet the entry is on disk, and a reopen would
@@ -139,7 +177,7 @@ func (s *Session) deferSteerLocked(q queuedSteer) error {
 	if err != nil {
 		return err
 	}
-	s.queue = append(s.queue, pendingSend{ctx: q.ctx, msg: q.msg, opts: q.opts, turn: ft, receipt: receipt})
+	s.queue = append(s.queue, q.followUp(ft, receipt))
 	if q.turn != nil {
 		q.turn.setNext(ft)
 		q.turn.finishAs(TurnDeferred, nil, nil)
@@ -161,7 +199,7 @@ func (s *Session) settleSteerLocked(q queuedSteer) {
 			"session", s.header.ID, "receipt", q.receipt, "err", err)
 		ft := s.newTurnLocked()
 		ft.policy, ft.hasPolicy = Steer, true
-		s.queue = append(s.queue, pendingSend{ctx: q.ctx, msg: q.msg, opts: q.opts, turn: ft})
+		s.queue = append(s.queue, q.followUp(ft, ""))
 		if q.turn != nil {
 			q.turn.setNext(ft)
 			q.turn.finishAs(TurnDeferred, nil, nil)

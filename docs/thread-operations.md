@@ -280,6 +280,13 @@ a crash or a `Close` that gave up, `thread.Open` restores both to
 - `s.Continue(ctx)` runs them now, with no new message;
 - `s.ClearQueue(ctx)` drops them, on the record.
 
+**Steer follow-ups inherit.** A steer that cannot join the running
+turn becomes a follow-up turn under that turn's run options (and the
+values on its context), the steer's own options after them — a turn
+sent with `weft.ParkAllExcept` keeps its follow-ups parked. A steer to
+an idle session runs under its own options. Restored messages run with
+neither: run options are not entries.
+
 **The queue is unbounded.** The session does not cap how many steers
 or sends may wait; each costs one entry. If users can pile messages
 onto a running turn, check `len(s.Queue())` before sending.
@@ -368,6 +375,11 @@ not the numbers themselves.
   `Delegated`.
 - **Depth.** `pool.MaxDepth(n)` (default 8) bounds a delegation chain;
   the model reads `SUBAGENT_DEPTH` past it.
+- **Default-deny reaches every child.** A parent turn sent with
+  `thread.RunOptions(weft.ParkAllExcept(...))` binds its children,
+  sync and async, on every turn they run — the first and each resume —
+  so a child's side-effect tools park unless named. Name a wrap's tool
+  in the list for the delegation itself to run.
 
 ## 11. Approvals operations
 

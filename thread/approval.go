@@ -755,9 +755,11 @@ func (s *Session) armResumeLocked(ctx context.Context) (*Turn, error) {
 		s.resumeWork = &pendingResume{ctx: ctx, turn: t}
 		return t, nil
 	}
+	item := workItem{ps: pendingSend{ctx: ctx, turn: t}, resume: true}
 	s.running = true
 	s.inFlight = t
-	go s.execute(workItem{ps: pendingSend{ctx: ctx, turn: t}, resume: true})
+	s.bindLocked(item)
+	go s.execute(item)
 	return t, nil
 }
 

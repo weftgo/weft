@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/thread/internal/carry"
 )
 
 // Policy is what a Send does when the session is already running a
@@ -154,7 +155,18 @@ func (o runOptionsOption) applySend(c *sendConfig) { c.runOpts = append(c.runOpt
 //     reach no parked call. Decisions are recorded with Session.Decide
 //     and applied by the boundary's resume run (ADR 0021 §1).
 //
-// A resume run inherits the run options of the Send that parked.
+// The options bind every run the session starts on the turn's behalf:
+// the resume run of a boundary the turn parked (after Decide or
+// Resume), its overflow re-run, and the follow-up turn a steer aimed at
+// it becomes when the steer cannot join the run (it meets the
+// approval boundary or a StopWhen end, or arrives after the last drain
+// point) — the follow-up runs under these options, the steer's own
+// after them. A steer that finds no turn in flight and no boundary
+// open runs as a plain turn under its own options. The same holds for
+// the values on the turn's context (a ParkAllExcept list or metadata a
+// delegating run handed down): those runs see every value their own
+// context lacks. Options and context are process state — a reopened
+// session's restored sends and boundaries run without them.
 func RunOptions(opts ...weft.RunOption) SendOption { return runOptionsOption{opts} }
 
 // sessionOwned names the run option Send must refuse, or "" for one it
@@ -577,6 +589,7 @@ func (s *Session) kickRunnerLocked() {
 func (s *Session) startRunnerLocked(item workItem) {
 	s.running = true
 	s.inFlight = item.ps.turn
+	s.bindLocked(item)
 	s.between = false
 	go s.execute(item)
 }
@@ -713,9 +726,36 @@ func (s *Session) epilogue(cur workItem) (next workItem, more bool) {
 // lock is released. Callers hold s.mu.
 func (s *Session) handLocked(item workItem) (workItem, bool) {
 	s.inFlight = item.ps.turn
+	s.bindLocked(item)
 	s.between = false
 	s.signalRunnerLocked()
 	return item, true
+}
+
+// bindLocked records on the item's turn, as it goes in flight, what a
+// steer aimed at it inherits if the steer becomes a follow-up: a
+// send's own run options and context, or — for a resume — the parked
+// send's options and the context the resume runs on (resumeCtx).
+// Callers hold s.mu.
+func (s *Session) bindLocked(item workItem) {
+	t := item.ps.turn
+	if item.resume {
+		t.aimOpts, t.aimCtx = s.await.opts, s.resumeCtxLocked(item.ps.ctx)
+		return
+	}
+	t.aimOpts, t.aimCtx = item.ps.opts, item.ps.ctx
+}
+
+// resumeCtxLocked is the context a resume runs on: armed's
+// cancellation and deadline — the call that armed it, or the
+// boundary's own window — and, for every value armed does not carry,
+// the parked turn's (internal/carry). The resume continues the parked
+// turn, so what rode that turn's context — a ParkAllExcept list
+// inherited from a delegating run, its metadata — still binds the
+// resumed steps, whoever decided. After a restart the parked turn's
+// context is gone, like its run options. Callers hold s.mu.
+func (s *Session) resumeCtxLocked(armed context.Context) context.Context {
+	return carry.Values(armed, s.await.ctx)
 }
 
 // exitRunnerLocked frees the runner slot. Callers hold s.mu.
@@ -884,7 +924,10 @@ func (s *Session) runOne(item workItem) {
 // decisions can resolve their calls. The run options the parked send
 // captured ride along (across a restart they are gone: run options are
 // not entries), with the recorded decisions applied after them, so a
-// durable decision always beats a captured option. No compaction runs
+// durable decision always beats a captured option. The run's context
+// is the arming call's for cancellation and the parked turn's for the
+// values the arming call's lacks (resumeCtxLocked): a decider never
+// strips the park rule or metadata the parked turn ran under. No compaction runs
 // before a resume: there is no new prompt to cover, and the boundary
 // must stay raw.
 //
@@ -920,11 +963,15 @@ func (s *Session) runResume(item workItem) {
 			return
 		}
 		opts = append([]weft.RunOption(nil), s.await.opts...)
+		ctx = s.resumeCtxLocked(ctx)
 	})
 	if startErr != nil {
 		s.land(item, nil, startErr)
 		return
 	}
+	// The window carries the parked turn's values too: a resume that
+	// parks again hands them on to the next one.
+	persist = context.WithoutCancel(ctx)
 	// A resume is as interruptible as a send's turn.
 	rctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -1639,6 +1686,15 @@ type Turn struct {
 	// actually started. Runner-goroutine only.
 	overflowRetried bool
 	reRan           bool
+
+	// aimOpts and aimCtx are what a steer aimed at this turn inherits
+	// when it cannot join the run and becomes a follow-up turn (ADR
+	// 0019, amendment 2026-10-07): the run options the turn runs under — a resume's, the
+	// parked send's — and the context whose values it runs on. Set
+	// under s.mu when the turn goes in flight (bindLocked); read under
+	// s.mu.
+	aimOpts []weft.RunOption
+	aimCtx  context.Context
 
 	mu         sync.Mutex
 	cond       *sync.Cond

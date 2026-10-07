@@ -5,8 +5,9 @@ import (
 )
 
 // ContentKind names what a content field holds. weft/otel's Redact
-// receives it; the core only uses it in StripContent's table, to say
-// which field of which event is content (ADR 0024 S1.1, [D2]).
+// receives it — for event fields, deltas, and each part of a
+// transcript batch; the core only uses it in StripContent's table, to
+// say which field of which event is content (ADR 0024 S1.1, [D2]).
 type ContentKind string
 
 // The five kinds of content the core ever puts in a record.
@@ -15,7 +16,7 @@ const (
 	ContentReasoning ContentKind = "reasoning" // reasoning text and deltas
 	ContentArgs      ContentKind = "args"      // tool call arguments and arg deltas
 	ContentResult    ContentKind = "result"    // tool results
-	ContentMessages  ContentKind = "messages"  // whole transcript batches
+	ContentMessages  ContentKind = "messages"  // whole transcript batches (weft/otel redacts them per part with the four kinds above)
 )
 
 type contentOption struct{ capture bool }

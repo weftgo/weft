@@ -5,12 +5,12 @@ go 1.26.0
 // Every weft module resolves from its released tag (the module
 // proxy, no replace — the two-phase rule, ADR 0005).
 require (
-	github.com/weftgo/weft v0.7.0
-	github.com/weftgo/weft/obsdb v0.1.1
-	github.com/weftgo/weft/otel v0.1.1
-	github.com/weftgo/weft/runtime v0.1.1
-	github.com/weftgo/weft/studio v0.3.1
-	github.com/weftgo/weft/thread v0.9.0
+	github.com/weftgo/weft v0.8.0
+	github.com/weftgo/weft/obsdb v0.2.0
+	github.com/weftgo/weft/otel v0.2.0
+	github.com/weftgo/weft/runtime v0.2.0
+	github.com/weftgo/weft/studio v0.4.0
+	github.com/weftgo/weft/thread v0.9.1
 )
 
 require (

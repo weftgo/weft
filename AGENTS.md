@@ -62,7 +62,8 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
     weft.Params(weft.RequestParams{Temperature: ptr(0.2)}), // per-run/step sampling (TopP, MaxTokens, Stop, Seed; nil = construction default; a negative MaxTokens fails the step)
     weft.Tap(func(ctx context.Context, ev weft.Event) {...}), // observer: sees every event, changes nothing
     weft.OnRunEnd(func(ctx context.Context, res *weft.RunResult, err error) {...}), // outcome observer: once per run, even on failure — the otel pipeline pairs it with Tap
-    weft.OnMessages(func(ctx context.Context, step int, msgs []weft.Message) {...}), // run option: transcript observer — exact messages as they join, for incremental persistence
+    // weft.OnMessages(func(ctx context.Context, step int, msgs []weft.Message) {...}) is a RunOption — pass it to Generate/Stream, not New:
+    //   the transcript observer — exact messages as they join, for incremental persistence
     // In any observer: weft.AgentFromContext(ctx) → the running *Agent (nil outside a run); agt.Logger() → the run lines' sink.
     weft.TracerProvider(tp),                   // OTel spans: invoke_agent › chat / execute_tool (default: the global provider; no-op until an SDK registers)
     weft.LoggerProvider(lp),                   // OTel records through the Logs API (ADR 0024): events, deltas, transcript batches; same default
@@ -88,6 +89,7 @@ res, err := agt.Generate(ctx, weft.Prompt("Where is order 1234?"))
 //       weft.OnlyTools("lookup", "refund"),   // narrow to registered tools; unknown name → ErrInvalidRunOption
 //       weft.UseModel(alt),                    // the WrapModel chain rebuilt over alt, this run alone
 //       weft.ParkOn("refund"),                 // park at the approval boundary (ADR 0007 per run); Approve resumes
+//       weft.ParkAllExcept("lookup"),          // default-deny: every other call parks — ToolSource tools and Subagent child runs included
 //       weft.Metadata(map[string]string{"tenant": "acme"})) // on every span and record; subagent runs inherit
 //   weft.MetadataFromContext(ctx)   // read the merged pairs back (Tap, tool handler, child run)
 //   weft.StripContent(ev)           // the one content-shaping table: what a content-off destination receives
@@ -146,9 +148,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    pipeline is the recorder now, block 9 has the full destination menu):
 //    defer otel.Install()()  // local sink ./.weft/weft.db, content on, no network —
 //    // every event, delta, transcript record and span leaves as it happens
-//    // (weft.Heartbeat keeps a quiet run reading running); the durable run
-//    // reads back through obsdb — otel.LocalDB() — never through the process.
-//    weft.Metadata({"cwd": wd})  // caller pairs on every record/span of the run
+//    // (weft.heartbeat records — otel.Heartbeat(d), default 10 s — keep a quiet
+//    // run reading running); the durable run reads back through obsdb —
+//    // otel.LocalDB() — never through the process.
+//    weft.Metadata(map[string]string{"cwd": wd})  // run option: caller pairs on every record/span of the run
 //    // (inherited by subagents; thread sessions stamp weft.session.id,
 //    // weft.public_id, weft.turn — block 8).
 
@@ -162,10 +165,12 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    options DB/Open/Base/Manifest/Title/Capabilities/Token/Live/NoIngest/
 //    //    IngestToken/AllowOrigins/Playground; routes register through
 //    //    routes.go's groups (panel.go/playground.go add theirs in their own files).
-//    // API: meta, runs (+session/public/playground filters), runs/{id}/transcript,
-//    //    spans, traces/{id}, sessions, public/{public_id}, /api/live (SSE),
-//    //    /api/panel-tokens, /panel.js (the devtools panel, WEFT-DEVTOOLS §5);
-//    //    Token(tok) walls everything but /panel.js (bearer or ?token=).
+//    // API: meta, manifest, runs (+session/public/playground filters), runs/{id},
+//    //    runs/{id}/events|transcript|spans, traces/{id}, sessions, sessions/{id},
+//    //    public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
+//    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5); Token(tok) walls the
+//    //    /api tree (bearer or ?token=) — the UI shell and /panel.js are static,
+//    //    OTLP ingest (/v1/traces, /v1/logs) carries its own IngestToken.
 //    // Setup B, any language (module studio/cmd — the one place the clickhouse
 //    // driver lives): studio --db sqlite://path | clickhouse://user:pass@host:9000/db
 //    //    [--addr --token] serves UI + OTLP ingest on 127.0.0.1:7331.
@@ -230,7 +235,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    session (ErrLocked), readers never lock. Live tail: st.(thread.Watcher).
 //    Pool (ADR 0022): pool.New(max) — the one FIFO bound (also the depth guard);
 //    p.Wrap(name, desc, agent[, pool.Async()]): sync waits for the child session's
-//    answer, async returns the receipt line; p.Submit/Cancel/Close/Receipts/Forward.
+//    answer, async returns the receipt line; p.Submit/Cancel/Close/Forward,
+//    pool.Receipts(parent).
 //    Children are sessions (Header.Lineage), their cost in Usage.Delegated; a parked
 //    child mirrors onto Pending — p.Decide resumes it and resolves the parked call.
 //    Watch(ctx, id, afterEntryID). List filters: thread.Query{Meta, TitleSearch}
@@ -242,7 +248,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //        otel.Local("weft.db"),                       // local sink: replay-grade, content on
 //        otel.Studio("https://studio.example", token), // OTLP/HTTP, content on
 //        otel.Datadog(),                               // the Agent's OTLP intake, content off
-//        otel.Exporters(myLogExporter),                // your own exporters
+//        otel.Exporters(spanExporter, logExporter),    // your own exporters (either may be nil)
 //        otel.Content(otel.ContentConfig{MaxBytes: 32 << 10, Redact: redact}),
 //    )()
 //    p, err := otel.Start(ctx, opts...)               // Install with errors; otel.NoGlobal() for tests
@@ -255,7 +261,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 Test offline with `wefttest.Script(wefttest.ToolCalls(...), wefttest.Say(...))`;
 replay a recorded real transcript with `wefttest.Replay(t, dir)` (record it
 once with `wefttest.Record`; ADR 0017) — the adapters' own parsing is proven
-by `wefttest/conformance` fixtures, not by replay; `make fuzz` runs the four
+by `wefttest/conformance` fixtures, not by replay; `make fuzz` runs the five
 fuzz targets (a new message part or event type adds a seed; a crasher becomes
 a committed seed).
 Provider adapters (`weft/openai`, `weft/anthropic`, `weft/google` — own
@@ -337,9 +343,16 @@ ignore it.
 - Keep the public surface small: functional options, sealed interfaces
   (`Option`, `Event`, `Part`, `ModelEvent`), no config structs, no
   globals, `context.Context` first in every signature.
-- Prefer additive change. CI runs the apidiff gate (`make apidiff`,
-  `scripts/apidiff.sh`) against the last tag and fails on incompatible
-  changes; pre-1.0 a deliberate source-compatible widening is
-  acknowledged line-by-line in `.apidiff-allow`. Renames always fail.
+- Prefer additive change. CI runs the apidiff gate (`make apidiff-all`,
+  `scripts/apidiff.sh`) over every workspace module, each against its
+  own last tag. The root, `thread`, `thread/sqlite` and the adapters
+  fail on incompatible changes; pre-1.0 a deliberate source-compatible
+  widening is acknowledged line-by-line in the module's
+  `.apidiff-allow`, and renames always fail. `obsdb`,
+  `obsdb/clickhouse`, `otel`, `runtime` and `studio` are pre-freeze:
+  the gate reports their incompatible changes without failing — such a
+  change makes the module's next tag a minor bump with a breaking
+  CHANGELOG entry. A module added to `go.work` needs a policy in
+  `scripts/apidiff.sh` or the gate fails.
 - Docs: `README.md` (usage), `docs/adr/` (why), this file (map). Update
   the one that applies in the same change.

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/weftgo/weft/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/weftgo/weft/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/weftgo/weft.svg)](https://pkg.go.dev/github.com/weftgo/weft)
-[![Version](https://img.shields.io/badge/version-v0.3.7-orange)](https://github.com/weftgo/weft/releases/tag/v0.3.7)
+[![Version](https://img.shields.io/badge/version-v0.7.0-orange)](https://github.com/weftgo/weft/releases/tag/v0.7.0)
 
 A thin, opinionated core for building AI agents in Go — designed the way
 the standard library is: small interfaces, `context` everywhere, functional
@@ -14,7 +14,7 @@ flight — and nothing else. Concurrency is the point, not a feature: a
 step's tools fan out over goroutines, parallelism is a one-line dial, and
 tool failures never cancel their siblings.
 
-> **Status:** v0.3.7 — experimental, pre-1.0. The three load-bearing
+> **Status:** v0.7.0 — experimental, pre-1.0. The three load-bearing
 > contracts — message model, error model, tool contract — are implemented
 > and tested; the provider adapters (OpenAI + compatible servers,
 > Anthropic, Google) wrap the vendors' official Go SDKs; the two
@@ -25,8 +25,11 @@ tool failures never cancel their siblings.
 > controls — tool-choice forcing, per-step sampling params, richer
 > `Usage` splits, anthropic prompt caching, and the streaming
 > `OutputDecoder` — are in; see `docs/adr/` and the roadmap below.
-> The surrounding modules (serving, ops, devtools, cli) come next, in
-> that order of demand.
+> Above the core, each its own tagged module: sessions (`weft/thread`),
+> the observability pipeline and database (`weft/otel`, `weft/obsdb`),
+> the Inspector with its devtools panel (`weft/studio`) and the
+> playground's in-app side (`weft/runtime`) — see Layout. Serving, eval
+> and the cli come next, in that order of demand.
 
 ## Quick start
 
@@ -322,7 +325,7 @@ defer otel.Install()()                          // the recorder: local sink, con
 db := otel.LocalDB()                            // the same handle Studio reads [D4]
 page, _ := db.Runs(ctx, obsdb.RunQuery{})       // identity chain, status derived
 rec, _ := db.Run(ctx, page.Runs[0].ID)          // the row + its subagent children
-evs, _ := db.Events(ctx, rec.ID, 0, 50)         // positioned events, inclusive cursor
+evs, _ := db.Events(ctx, rec.ID, -1, 50)        // positioned events after the cursor; -1 = from the start
 ```
 
 ### Inspecting runs
@@ -400,7 +403,8 @@ answer.
 
 ```go
 w := st.(thread.Watcher)
-for e, err := range w.Watch(ctx, s.ID(), lastEntryID) { … } // another process's tail
+tail, _ := w.Watch(ctx, s.ID(), lastEntryID)       // entries after lastEntryID
+for e, err := range tail { … }                     // another process's tail
 
 p, _ := st.List(ctx, thread.Query{
     Meta:        map[string]string{"env": "prod"}, // every pair, exactly
@@ -657,12 +661,12 @@ that must stay offline get loud failures, not surprise bills.
   `ModelFinish`, continues after it, carries a tool call with an empty
   ID or name, or panics fails the run wrapping `ErrModelContract` — a
   broken adapter cannot corrupt a transcript.
-- **One dependency** in the core module: the OTel API package (ADR
-  0016), a no-op until an SDK registers — the zero-config
-  instrumentation THE-END-GOAL sanctions as the core's single
-  exception. The vendor SDKs live in the adapter modules (their own
-  `go.mod`); the OTel SDK itself lives only in `examples/otel`; exporters
-  stay in a satellite.
+- **One dependency** in the core module: the OTel API (trace and
+  logs — ADR 0016, ADR 0024), a no-op until an SDK registers — the
+  zero-config instrumentation THE-END-GOAL sanctions as the core's
+  single exception. The vendor SDKs live in the adapter modules (their
+  own `go.mod`); the OTel SDK and its exporters live in the `weft/otel`
+  satellite (and `examples/otel`), never in the core.
 
 ## Layout
 
@@ -687,7 +691,8 @@ obsdb/clickhouse/     the hosted backend (collector-compatible schema, materiali
 studio/               the Inspector on obsdb: UI + JSON API + OTLP ingest + live (web/ is its
                       Bun source, cmd/ the setup-B binary)
 runtime/              the playground's in-app side: the Studio link, the experiment executor
-examples/             runnable examples (otel, studio-local; per-adapter: <adapter>/example)
+examples/             runnable examples (getting-started, approval, otel, studio-local;
+                      per-adapter: <adapter>/example)
 docs/adr/             decision records for the contracts
 ```
 
@@ -709,7 +714,8 @@ make test   # go test -race ./... in every workspace module
 make vet
 make lint   # golangci-lint (CI uses .golangci.yml)
 make live   # adapter conformance against real keys (-tags live)
-make apidiff  # public API of the root module vs the last tag (CI runs it)
+make apidiff  # public API of the root module vs the last tag
+make apidiff-all  # every workspace module vs its own last tag (CI runs it)
 make fuzz    # 10 s per fuzz target; FUZZTIME=1m make fuzz for longer
 make fmt
 ```
@@ -730,7 +736,7 @@ and when the question is "what does my agent do with what the model
 ```go
 func model(t *testing.T) weft.Model {
     if os.Getenv("WEFT_RECORD") != "" { // the suite's own switch; wefttest never reads it
-        return wefttest.Record(t, "testdata/replay", openai.New(key, "gpt-5"))
+        return wefttest.Record(t, "testdata/replay", openai.Model("gpt-5", openai.APIKey(key)))
     }
     return wefttest.Replay(t, "testdata/replay")
 }
@@ -742,13 +748,18 @@ by `wefttest/conformance` against recorded `.sse` fixtures, not by
 replay (ADR 0013).
 
 **API stability is enforced, not aspired to.** CI runs
-`scripts/apidiff.sh`: the root module's exported API is compared
-against the last `v*` tag and any incompatible change fails the build.
-Pre-1.0, a deliberate source-compatible evolution (widening a return
-type to a superset interface, adding a trailing variadic) can be
-acknowledged by adding apidiff's exact line to `.apidiff-allow` with a
-justification; the file is emptied at each tag. Renaming or removing
-an exported symbol always fails.
+`scripts/apidiff.sh` over every module in the workspace, each compared
+against its own last tag. For the root module (the last `v*` tag),
+`thread`, `thread/sqlite` and the adapters any incompatible change
+fails the build. Pre-1.0, a deliberate source-compatible evolution
+(widening a return type to a superset interface, adding a trailing
+variadic) can be acknowledged by adding apidiff's exact line to the
+module's `.apidiff-allow` with a justification; the root's file is
+emptied at each tag. Renaming or removing an exported symbol always
+fails. The observability modules — `obsdb`, `obsdb/clickhouse`,
+`otel`, `runtime`, `studio` — are pre-freeze: the gate reports their
+incompatible changes instead of failing, and such a change makes the
+module's next tag a minor bump with a breaking CHANGELOG entry.
 
 ## Roadmap
 
@@ -763,10 +774,13 @@ an exported symbol always fails.
 5. The satellites: ~~`store`~~ — **removed** (step 5 of ADR 0024;
    v0.1.3 remains on the module proxy). ~~`studio`~~ — **done** (the
    Inspector, v0.1.0, ADR 0018; rewritten on obsdb, ADR 0024 S4).
-   Next: `thread` — sessions, branching, compaction, approvals,
-   steering, pool, sandbox, v0.1 → v1.0 (designed in
-   [ADR 0011](docs/adr/0011-thread-sessions.md) and ADRs 0019–0023),
-   then `serve` and the eval/prompt/mem/trace modules.
+   ~~`thread`~~ — **shipped** through v0.8 (sessions, branching,
+   compaction, approvals, steering, pool;
+   [ADR 0011](docs/adr/0011-thread-sessions.md) and ADRs 0019–0022;
+   the sandbox proposed in ADR 0023 was not built).
+   ~~`obsdb`, `otel`, `runtime`~~ — **done** (ADR 0024: the recorder,
+   its database, the playground). Next: `serve` and the
+   eval/prompt/mem/trace modules.
 
 ## License
 

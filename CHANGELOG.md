@@ -1,5 +1,32 @@
 ## Unreleased
 
+### weft (root)
+
+- Added `ParkAllExcept(names...)` — the default-deny park rule: every tool
+  call whose tool is not named parks at the approval boundary (ADR 0007),
+  evaluated against each step's dispatch snapshot (so `ToolSource` tools
+  are covered) and inherited by Subagent child runs; park rules only add
+  up; an agent's own `Output` submission never parks under it;
+  `weft.override.park_all_except` joins the fingerprint (ADR 0024
+  amendment under "Per-run configuration is not a seam").
+- Fixed: run records are no longer dropped when a model emits tool-call
+  arguments that are not JSON — the `tool_start` event, the assistant's
+  `weft.messages` batch, a parked call's `run_finish` and later runs'
+  input records carry the raw bytes as a JSON string.
+- Fixed: no `weft.messages` record is emitted after the run's context
+  ends (S1.3's cancellation rule now covers transcript batches).
+- Fixed: `Replay` — the last option wins; `Replay(ReplayNever)` after
+  `Replay(ReplaySafe)` is never's.
+- Fixed: `weft.override.hash` / `.tools` / `.park_on` treat tool names as
+  a sorted, de-duplicated set — equal experiments hash equal.
+- Fixed: `Agent.CallTool` called from a tool handler dispatches a call of
+  its own — never approved, so a `RequireApproval` tool still returns
+  `ErrApprovalRequired` under an approved outer call; its handler's
+  `CallFromContext` reports its own id and name.
+- Changed: under `Metadata`'s 64-key cap, `weft.*` keys are kept first,
+  so a large caller tag set no longer drops `weft.session.id` /
+  `weft.turn` / `weft.public_id`.
+
 ### obsdb
 
 - `DeriveSpan`/`DeriveRecord` read a numeric string attribute as the
@@ -19,6 +46,41 @@
   a session older than the newest page 404'd in the detail while the
   list still showed it. Pinned on both backends
   (`TestSessionBeyondNewestPage`: 502 sessions, the oldest resolves).
+- Production-readiness pass (2026-10-02):
+  - `weft.playground` is read in its string spelling (`"true"`) — real
+    playground runs stopped being listed as session turns.
+  - `FromOTLP*`: hex ids of real OTLP/JSON senders survive a protojson
+    decode; nil elements at any layer are skipped; structured log bodies
+    render as JSON.
+  - Hub: a resume cursor from a previous process no longer mutes the
+    subscription; an overflow drop releases its watcher goroutine.
+  - New `DedupTranscript`: a resume's rebuilt tool message supersedes the
+    partial one; every backend's `Transcript` reads through it.
+  - New `MaxGaps` (1000) bounds `EventPage.Gaps`; new `MaxTies` (500)
+    bounds how far a page runs past `Limit` to finish a tie; new exact
+    cursor `RunQuery.BeforeID`/`RunPage.NextBeforeID` and
+    `SessionQuery.BeforeID`/`SessionPage.NextBeforeID`;
+    `SessionPage.Total` no longer shrinks with the cursor.
+  - obsdbtest: Idempotence reads spans back; new subtests PipelineSpellings,
+    PagingTies, SessionPaging, TranscriptRebuilt, NonFiniteAttrs, ZeroTimes,
+    OutOfOrder, HeartbeatOnly, Strings, MetaFilter, SessionUncapped,
+    ReadErrorIsNotNotFound, FilterCombinations, PagingBigTie,
+    ManyDaysOneBatch, CloseRace; status fixtures run on the wall clock
+    (no expiry under slow or repeated runs).
+- obsdb/sqlite:
+  - `Events` never reports `Done` with stored events missing; gap
+    detection no longer scans the run on every page.
+  - `Write`: a NaN/Inf attribute no longer fails the batch; zero
+    timestamps are stored as unknown and records fall back to Observed;
+    a run's `Started` is the earliest time seen of any record or span.
+  - `Session` returns every turn (the 500 cap dropped the newest); paging
+    never skips rows tied on the cursor time; one clock for the status
+    filter and row status.
+  - `Open`: paths containing `%`, `?`, `#` or starting with `//` open the
+    file they name (a database previously created at the misparsed
+    location is no longer the one opened for such a path).
+  - Calls racing `Close` return `ErrClosed`; `Experiment` reports a failed
+    read as that error, not `ErrNotFound`.
 
 ### studio
 
@@ -60,6 +122,62 @@
   and a late accepted-ack that resurrects a row the lost sweep took
   arms the finish watch, so a runtime that never finishes cannot leave
   it accepted forever — `TestLateAcceptedAckArmsFinishWatch`.
+- Production-readiness pass (2026-10-02) — security:
+  - A caller's `command_id` is validated (`[A-Za-z0-9._:-]{1,128}`) — a line
+    break in it forged frames on the runtime's command stream.
+  - Read-scoped panel tokens can no longer decide approvals, steer, or read
+    `/api/manifest`; `/api/runtimes` omits agent instructions for them.
+  - A playground-scoped token's source run must be inside its public id;
+    it may not set `experiment_id`; experiments routes refuse panel tokens;
+    `/api/live` checks every frame against a panel token's public id; scope
+    checks fail closed on database errors; panel tokens' 500s no longer
+    carry database error text; tokens compare in constant time.
+  - Loopback-open ingest refuses forwarded requests and foreign browser
+    Origins (a proxied Studio must set `IngestToken`).
+- API and behaviour:
+  - Request bodies capped at 4 MiB (413); option values validated
+    (temperature 0..2); approvals validate `call_id` against the run's
+    pending set; steering a fork-mode run answers 409 `conflict`.
+  - Transcript batches carry `input` and the real `step`; transcript edits,
+    `from_step` and fixtures count the run's own steps (the input record is
+    context).
+  - `/api/runs` and `/api/sessions` take `before_id` and answer
+    `next_before_id` (an exact cursor inside a tie); the live backfill and
+    experiment detail page with it; experiment detail returns every
+    top-level run, oldest first.
+  - Command rows expose `status` (succeeded|failed) and the finished run's
+    `error`; a panel token can poll its own approval decision and steer the
+    resumed run.
+  - `/api/live`: per-frame write deadline, HEAD answers headers only,
+    backfill honours cancellation, bounded dedup set, `X-Accel-Buffering:
+    no`; `Vary: Origin` on every CORS answer; error bodies always JSON.
+- studio/runtime: `ValidCommandID`, `ErrInvalidCommandID`, `Retention`
+  (24 h), `WriteTimeout`, `RuntimeView.Breakpoints`, `ForkRun`; terminal
+  commands, run routes and dead runtimes are pruned; replaced or stalled
+  streams end at once and their accepted commands get a finish watch;
+  duplicate acks no longer cancel timers; HEAD on the stream is 405;
+  breakpoints are stored only when delivered, adopted from the register
+  payload and sent before the backlog on every stream open.
+- Web UI: a token prompt on a walled API and `#token=`/`?token=` hand-over;
+  a thread turn shows its own prompt and reply; live streams reconnect with
+  backoff and lose nothing at the walk/stream seam; live renders coalesce
+  on large runs; finished runs show stored transcript words; event gaps are
+  surfaced; sessions list pages and nests experiments under their source
+  turn; the playground targets the source run's agent, tracks every
+  variant, shows held approval decisions and the run's outcome, waits for
+  the run to settle, caps live cards, reads the hand-off from the URL
+  fragment and handles fork mode; malformed stored data and cyclic or huge
+  traces no longer crash or hang a page.
+- Devtools panel: attribute changes and remounts no longer remove or
+  mis-scope it, and `window.__WEFT__` scopes every connected panel; the
+  keyboard never takes the host page's keys; redraws keep focus and caret
+  and are throttled while streaming; nothing is thrown into the host page;
+  streams and polls are bounded; verbs and typed text never carry across a
+  conversation switch; the tail subscribes before reading pages; stale
+  "running" rows are re-read; approval controls act on the run's pending
+  set with per-call decisions; read-scoped tokens are offered no write
+  verb; the hand-off rides the URL fragment; the build fails on any
+  package code or over the 80 KiB gzip budget.
 
 ### otel
 
@@ -81,12 +199,83 @@
   configured, steered user text and pending-approval tool args no
   longer ride unredacted to Studio/Local. Pinned by
   `TestShapeEventRedactsSteeredPendingNested`.
+- Production-readiness pass (2026-10-02):
+  - Security: an https destination stays https when
+    `OTEL_EXPORTER_OTLP_ENDPOINT` is an http:// URL (bearer tokens and
+    content were sent in cleartext).
+  - Security: redacted tool arguments that are not JSON are exported as a
+    JSON string; a failed re-encode strips the record instead of exporting
+    the unredacted body. A panicking `Redact` no longer unwinds the run
+    (the record is exported stripped and counted) and is named in the
+    WARN by type only.
+  - Shutdown and `ForceFlush` flush every destination in parallel under
+    the shared budget — a hung destination no longer costs a healthy one
+    its last records.
+  - Sampled-out runs that fail or are cancelled leave the run tracker (no
+    endless heartbeats); heartbeats no longer carry `weft.event.type` /
+    `weft.content`; `Heartbeat` ≤ 0 disables instead of panicking.
+  - A failed `Start` releases everything it built (including exporters
+    passed to `Exporters`); every `Local` DB closes at Shutdown; `Install`
+    builds each destination once; `LocalDB()`/`StudioEndpoint()` return
+    nil/"" after the installed pipeline shuts down.
+  - Failed exports are counted per destination with the cause in the
+    throttled WARN; policy filtering counts without warning; Local write
+    failures no longer flood OTel's error handler.
+  - `OTEL_EXPORTER_OTLP_HEADERS` values are percent-decoded; de-dup
+    compares resolved export URLs; scheme-less endpoints read as https,
+    non-http(s) schemes are refused, endpoint errors do not echo the URL.
+  - `BatchDelay` applies to `Exporters` destinations; the Local path keeps
+    bytes/slice/map attributes and renders structured bodies as JSON.
+  - `ContentConfig.Redact` godoc states it sees event bodies and deltas
+    only — `weft.messages` transcript records are not passed through it.
+  - Requires root v0.7.0 (was v0.6.0), matching the `weft.version` it
+    reports.
 
 ### runtime
 
 - Registration reports `weft_version: v0.7.0` — the same missed bump
   as otel's. The pushed `runtime/v0.1.0` tag carries the stale string
   (owner: consider a patch tag).
+- Production-readiness pass (2026-10-02) — safety:
+  - Side-effect parking is default-deny (`weft.ParkAllExcept`): tools a
+    `ToolSource` supplies and a Subagent child's tools park unless vouched
+    safe or opted in; an Output agent's `submit_output` no longer parks;
+    runs carry `weft.override.park_all_except`. Requires the root release
+    that adds `ParkAllExcept`.
+  - Approval decisions are checked against the parked run's pending calls;
+    a parked run resumes once, when every pending call has a decision;
+    concurrent decisions can no longer run an approved handler twice; a
+    second decision on a call is rejected; a parked run whose resume never
+    started is restored.
+  - Fork mode: forks revoke the source session's approval grants; steering
+    into a fork is refused (thread's steer follow-up turns do not carry the
+    park rule — departs from WEFT-DEVTOOLS §8.4 until they do); forking a
+    source waiting on approval fails fast; a parked fork call is decided
+    through the fork session, stays decidable after its park record is
+    evicted, and "decide first" names the calls; naming an older fork turn
+    forks from that turn; the accepted ack carries no invented run id.
+  - A scripted command never runs on the live model; breakpoints are never
+    substituted; the substitute chain answers repeated calls in recorded
+    order, keeps recorded errors as errors, matches canonical JSON args and
+    is bounded by MaxSteps.
+- Correctness and robustness:
+  - Source transcripts are split once into input + the run's own steps on
+    every path (thread, obsdb, Studio): from_step, edits, the default
+    prompt, scripted indexing and substitution count the run's own steps;
+    resumed turns split the same way everywhere; the thread path refuses
+    turns that ran over a summarized context; the scripted engine replays
+    reasoning/tool-call signatures.
+  - Budgets count failed runs and every chain leg, reserve at admission and
+    release a reservation whose command never ran.
+  - The runtime rejects unknown engines, modes, thinking levels, options,
+    out-of-range values, bad run/command ids and from_step out of range.
+  - The link: stop cancels and waits for in-flight runs; bounded
+    seen/parked/forks/frames; 16 concurrent runs, 256 admitted commands;
+    jittered backoff that resets; register/header timeouts; panics
+    contained; the resume cursor is arrival order; oversized frames are
+    acked rejected; the in-process transport honours the caller's
+    context; the register payload reports `breakpoints`; finished acks
+    carry `error`.
 
 ### CI / repo
 
@@ -99,6 +288,21 @@
 - `studio/web/dist-release/` — where `make studio-panel-asset` stages
   the release asset — is gitignored, so a staged release no longer
   shows as an untracked stray.
+- ci.yml was invalid as shipped (the ClickHouse job's `ulimits:` key is
+  not a GitHub Actions key, so no job ran): the service uses `options:`
+  with `--ulimit` and a health check, and the job fails when a gated test
+  skips. Actions bumped to node24 majors; Go cache keyed on every go.sum.
+- The apidiff gate covers every workspace module against its own tag
+  (`make apidiff-all`; root/thread/thread/sqlite/adapters enforced,
+  obsdb/clickhouse/otel/runtime/studio reported; `APIDIFF_STRICT=1`
+  requires building from published tags); `make apidiff-selftest` works
+  again.
+- `make studio-check` also fails on dist files the commit does not contain;
+  `RELEASE_DIR` resolves from the repo root.
+- anthropic/google/mcp go.sum tidied so they build `GOWORK=off`.
+- examples/studio-local registers its thread store with the runtime (fork
+  mode works in the demo; the panel gate covers it); `/run` takes the
+  question from the body.
 
 ### studio/cmd
 
@@ -117,6 +321,13 @@
   and the banner no longer echoes a DSN's password
   (`clickhouse://user:***@host`). Pinned by
   `TestListenShutsDownGracefully` and `TestDBLabelMasksPassword`.
+- Production-readiness pass (2026-10-02): ReadHeaderTimeout/IdleTimeout
+  set; shutdown ends open streams at once; the ClickHouse handle closes on
+  shutdown; a generated dev token is printed as an openable
+  `http://addr/#token=…` link, a fixed `--token`/`WEFT_STUDIO_TOKEN` is
+  never printed; an unopenable `--db` is an error, not a panic; `sqlite://`
+  without a path is a usage error; the DSN mask handles passwords
+  containing `@`.
 
 ### obsdb/clickhouse
 
@@ -140,6 +351,28 @@
   (`TestSpecExperimentsEnginePresent`): `ReplacingMergeTree(InsertTime)`
   and `InsertTime DEFAULT now64(9)` — the two properties the step 8b
   review fixes rest on, previously guarded by nothing offline.
+- Production-readiness pass (2026-10-02):
+  - Runs/Sessions filters read each run's merged row: subagent runs no
+    longer surface as top-level runs or session turns before a merge.
+  - Migration 0003: the traces view reads the pinned collector's real
+    status spelling (`Error`); spans are written as `Internal`/`Error`/…
+    and both spellings read (breaking for anyone querying
+    `otel_traces.SpanKind/StatusCode` strings directly). Collector-written
+    failures stored before 0003 are not backfilled.
+  - Paging carries tied rows (bounded by `obsdb.MaxTies`) and honours the
+    exact `BeforeID` cursor; Sessions `Total` is the whole match;
+    `Transcript` reads through `obsdb.DedupTranscript`.
+  - Events reads the terminal flags before the events; `Gaps` capped;
+    `Session` returns every turn and no longer exceeds `max_query_size`
+    on huge sessions.
+  - Non-finite attributes no longer cost a span its typed attributes; a
+    zero record time falls back to Observed and the epoch reads back as
+    the zero time; a batch may span any number of day-partitions.
+  - Experiments keep nanosecond Created/Updated; a failed read is no
+    longer `ErrNotFound`; rows closed on every path.
+  - `ResolvePublicID` orders by (turn, started) like sqlite and reads by
+    primary key; TTL windows round up to whole seconds; detail reads
+    narrow `FINAL` by primary key; calls racing `Close` return `ErrClosed`.
 
 ## 0.7.0 — 2026-10-01
 

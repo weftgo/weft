@@ -114,8 +114,10 @@ sits under the parent's `execute_tool` with the parent ids from
 follow emission order. A hole in the durable sequence means a lost batch,
 never a delta.
 
-**D4 — setup A shares the handle: `studio.Handler(studio.DB(otel.Local()))`;
-the live hub interface lives in `obsdb`.** Nothing else connects the
+**D4 — setup A shares the handle: `studio.Handler(studio.DB(otel.LocalDB()))`;
+the live hub interface lives in `obsdb`.** (The accessor was decided as
+`otel.Local()` and ships as `otel.LocalDB()`: `Local(path)` is the
+destination option, and Go allows one function of a name per package.) Nothing else connects the
 pipeline to Studio's live lane: two processes that only share the SQLite
 file get history, not live, and the acceptance test (a running run
 streams into the panel) fails. A package-level default would be a new
@@ -343,6 +345,22 @@ when `UseModel` is set. Nothing wraps a call and nothing observes; ADR
 0006 is unchanged, and ADR 0007 is unchanged — `ParkOn` applies its
 boundary per run through the existing `ErrApprovalRequired` parking
 path.
+
+Amendment, 2026-10-02 — `ParkAllExcept(names...)` joins `ParkOn` as
+run configuration: the same ADR 0007 boundary applied default-deny.
+Every call whose tool is not named parks, evaluated by name against the
+step's dispatch snapshot (so `ToolSource` tools are covered), and the
+except-list rides the run's context, so runs started inside it (a
+Subagent's child) apply it to their own tools; a parked child is
+`SUBAGENT_PENDING` as before. Park rules only add up (`ParkOn`,
+`RequireApproval`, several except-lists intersect); an agent's own
+`Output` submission is the run's answer and never parks under it. The
+fingerprint gains `weft.override.park_all_except` (a sorted set, present
+and empty when everything parks) inside `weft.override.hash`. Not a
+seam: ADR 0006 and ADR 0007 are unchanged. Why: a `ParkOn` list computed
+from `Agent.Tools()` cannot name a `ToolSource` tool or a child run's
+tools, so WEFT-PLAYGROUND §6 rule 3 did not hold for them; `weft/runtime`
+now passes `ParkAllExcept(safe ∪ opted-in)` on every playground run.
 
 ### `Tap` narrows
 

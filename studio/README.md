@@ -42,7 +42,11 @@ file, `--db clickhouse://user:pass@host:9000/db` the hosted backend
 **C · hosted** — the same handler behind `studio.Token`: the panel's
 scoped tokens are HMAC-signed `{public_id, scope, exp}` minted by your
 backend through `POST /api/panel-tokens`; every data route refuses
-anything outside the token's public id.
+anything outside the token's public id. A token is read-only unless
+minted with `"playground": true` — a read-scoped one neither acts nor
+reads the agents' system prompts (`/api/manifest`, the runtimes'
+instructions) — and experiments (`experiment_id` included) are the
+server token's alone.
 
 ## The devtools panel (WEFT-DEVTOOLS.md)
 
@@ -60,7 +64,7 @@ read-only, truncation/gap/stripped honesty, the raw JSON, a live tail,
 backend mints per page via `POST /api/panel-tokens`). No Studio
 answering: the panel removes itself silently. The artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 63,475 B raw / 17.0 KiB gzip;
+committed `studio/dist/panel/panel.js`, 63,541 B raw / 17.0 KiB gzip;
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 
@@ -144,7 +148,8 @@ everything. Keys fire only on a bare press outside a text box.
 
 JSON under `{base}api/`: `meta` (versions, the DB kind,
 `ingest_open`, `interrupted_after_ms`, capabilities), `runs` (agent,
-status, session, public id, playground and tag filters, cursor-paged),
+status, session, public id, playground, parent and `tag.<k>=<v>`
+filters, cursor-paged),
 `runs/{id}` (the row and the subagent children — never events),
 `runs/{id}/events?after=&limit=` (the paged durable stream),
 `runs/{id}/transcript` (the messages bodies), `runs/{id}/spans`,
@@ -162,22 +167,27 @@ ingest is `POST /v1/traces` and `/v1/logs` (protobuf and JSON, gzip,
 16 MiB after decompression, publish-then-write, 503 on a write failure
 so the exporter retries). Under `Playground(true)` the playground's
 routes join (`GET /api/runtimes`, `POST /api/playground/runs`, `GET
-/api/playground/commands/{id}`) beside the runtime link's own
-(`POST /api/runtime/register`, `GET /api/runtime/commands` SSE, `POST
-/api/runtime/acks`); `/panel.js` serves the devtools panel bundle —
-static and unauthenticated.
+/api/playground/commands/{id}`, `POST /api/runs/{id}/approvals`,
+`POST /api/playground/fixtures`, `GET/POST /api/experiments`, `GET
+/api/experiments/{id}`, `PUT /api/runtimes/{id}/breakpoints`, `POST
+/api/runs/{id}/steer` — see the playground above) beside the runtime
+link's own (`POST /api/runtime/register`, `GET /api/runtime/commands`
+SSE, `POST /api/runtime/acks` — server token only, never a panel
+token); `/panel.js` serves the devtools panel bundle — static and
+unauthenticated.
 
 Capabilities are computed from the registered route groups
 (`routes.go`) — never hard-coded: `live`, `ingest`, `auth` (with a
-token), and `playground` + `runtimes` under `Playground(true)`, plus
-anything a hosting wrapper declares with `studio.Capabilities(…)`.
+token), and `runtimes`, `breakpoints`, `steer` + `playground` under
+`Playground(true)`, plus anything a hosting wrapper declares with
+`studio.Capabilities(…)`.
 The panel group registers always on and names no capability;
 `panel.go` and `playground.go` add their groups through the package's
 hooks — nothing edits `routes.go`.
 
 Errors are `{"error": {"code", "message"}}` with the codes `not_found`,
-`bad_request`, `unauthorized`, `forbidden`, `conflict`, `unsupported`,
-`unavailable`, `internal`.
+`bad_request`, `unauthorized`, `forbidden`, `method_not_allowed`,
+`conflict`, `unsupported`, `unavailable`, `internal`.
 
 ## Contributing to the UI
 
@@ -193,7 +203,7 @@ make studio-check   # rebuild, prove dist is fresh, check the 600 KiB gzip budge
 
 `make studio-check` is the freshness gate (ADR 0018 §4): it fails if
 `dist/` does not match `web/` or if the gzipped total exceeds 600 KiB
-(currently ~341 KiB: the app's ~329 plus the panel bundle's 11.5).
+(currently ~356 KiB: the app's ~339 plus the panel bundle's ~17).
 The build is deterministic — two builds from
 one tree are byte-identical (`scripts/clean-dist.ts` pins the router's
 prerender timestamp and keeps `<base href>` first in `<head>`).
@@ -203,7 +213,6 @@ The dev loop is two terminals: `go run ./studio/examples/basic
 dev -- --base /studio/` (Vite on :3000 proxying `/studio/api`).
 
 Go module: `github.com/weftgo/weft/studio`, requiring the tagged
-`weft` and (until they tag, step 8's release) `weft/obsdb` through a
-directory `replace` that the release step drops — standalone-importable
-after that, no `replace`. The binary is its own module
+`weft` and `weft/obsdb` (and `weft/otel`, for its tests) — no
+`replace`, standalone-importable. The binary is its own module
 ([cmd/](./cmd)), the one place that imports the clickhouse driver.

@@ -2,6 +2,7 @@ package obsdb
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -184,5 +185,49 @@ func TestFrameBuilders(t *testing.T) {
 	}
 	if uf.Weft.RunID != "r1" || uf.Weft.SessionID != "s1" || uf.Weft.Agent != "a" || uf.Weft.Turn != 2 {
 		t.Errorf("run frame identity = %+v", uf.Weft)
+	}
+}
+
+// A cursor ahead of the hub's own counter cannot have come from this
+// hub: it is a Last-Event-ID a client kept across a restart (Seq is not
+// persisted, so it starts over). Such a subscription must still receive
+// what is published — filtering on the stale cursor would leave an
+// auto-reconnected live tail silent until the new hub's Seq caught up
+// with the old one's.
+func TestHubStaleCursorStillDelivers(t *testing.T) {
+	h := NewHub()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, err := h.Subscribe(ctx, Selector{SessionID: "s1"}, 5000) // from the previous process
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Publish(ctx, recFrame("r1", "s1", "event"))
+	if n := drain(ch); n != 1 {
+		t.Fatalf("subscription with a stale cursor saw %d frames, want 1", n)
+	}
+}
+
+// An overflow drop releases the subscription's watcher goroutine: it
+// must not sit on the context until that ends (never, for a
+// context.Background subscriber).
+func TestHubOverflowReleasesWatcher(t *testing.T) {
+	h := NewHub(QueueSize(1))
+	before := runtime.NumGoroutine()
+	const subs = 50
+	for i := 0; i < subs; i++ {
+		if _, err := h.Subscribe(context.Background(), Selector{RunID: "r1"}, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.Publish(context.Background(), recFrame("r1", "s1", "event")) // fills every queue
+	h.Publish(context.Background(), recFrame("r1", "s1", "event")) // overflows every subscriber
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before+subs/2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutines = %d (was %d before %d subscriptions): overflow-dropped watchers still parked",
+				runtime.NumGoroutine(), before, subs)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

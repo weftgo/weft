@@ -8,6 +8,9 @@ import (
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
+	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -246,5 +249,93 @@ func TestOTLPRoundTripStable(t *testing.T) {
 	}
 	if !proto.Equal(req, &back) {
 		t.Error("logs fixture not stable under marshal/unmarshal")
+	}
+}
+
+// OTLP/JSON is not protojson: the specification encodes traceId, spanId
+// and parentSpanId as hex strings (and enums as integers), where the
+// standard protobuf JSON mapping reads a bytes field as base64. A hex id
+// is valid base64 too, so protojson decodes it without complaint — into
+// 24 (or 12) bytes of garbage. Every non-Go OTLP/JSON exporter sends
+// this shape; the model's ids must be the ids the sender wrote.
+func TestFromOTLPJSONHexIDs(t *testing.T) {
+	const traces = `{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"py-svc"}}]},
+	 "scopeSpans":[{"spans":[{"traceId":"5B8EFFF798038103D269B633813FC60C","spanId":"eee19b7ec3c1b174",
+	   "parentSpanId":"eee19b7ec3c1b173","name":"chat","kind":3,
+	   "startTimeUnixNano":"1790845923120000000","endTimeUnixNano":"1790845923130000000"}]}]}]}`
+	var treq coltracepb.ExportTraceServiceRequest
+	if err := protojson.Unmarshal([]byte(traces), &treq); err != nil {
+		t.Fatal(err)
+	}
+	spans := FromOTLPTraces(&treq)
+	if len(spans) != 1 {
+		t.Fatalf("spans = %d, want 1", len(spans))
+	}
+	if s := spans[0]; s.TraceID != "5b8efff798038103d269b633813fc60c" ||
+		s.SpanID != "eee19b7ec3c1b174" || s.ParentSpanID != "eee19b7ec3c1b173" {
+		t.Errorf("hex-encoded OTLP/JSON ids = %q / %q / %q, want the sender's own ids, lowercase",
+			s.TraceID, s.SpanID, s.ParentSpanID)
+	}
+	const logs = `{"resourceLogs":[{"scopeLogs":[{"logRecords":[{"timeUnixNano":"1790845923120000000",
+	   "traceId":"5b8efff798038103d269b633813fc60c","spanId":"eee19b7ec3c1b174","body":{"stringValue":"hi"}}]}]}]}`
+	var lreq collogspb.ExportLogsServiceRequest
+	if err := protojson.Unmarshal([]byte(logs), &lreq); err != nil {
+		t.Fatal(err)
+	}
+	recs := FromOTLPLogs(&lreq)
+	if len(recs) != 1 || recs[0].TraceID != "5b8efff798038103d269b633813fc60c" || recs[0].SpanID != "eee19b7ec3c1b174" {
+		t.Errorf("hex-encoded OTLP/JSON log ids = %+v", recs)
+	}
+}
+
+// The requests arrive from the network: a nil element at any layer
+// (hand-built requests; decoders that tolerate null) must be skipped,
+// never dereferenced.
+func TestFromOTLPNilLayers(t *testing.T) {
+	spans := FromOTLPTraces(&coltracepb.ExportTraceServiceRequest{ResourceSpans: []*tracepb.ResourceSpans{
+		nil,
+		{ScopeSpans: []*tracepb.ScopeSpans{nil, {Spans: []*tracepb.Span{nil, {Name: "kept", Events: []*tracepb.Span_Event{nil}}}}}},
+	}})
+	if len(spans) != 1 || spans[0].Name != "kept" {
+		t.Errorf("spans = %+v, want the one non-nil span", spans)
+	}
+	recs := FromOTLPLogs(&collogspb.ExportLogsServiceRequest{ResourceLogs: []*logspb.ResourceLogs{
+		nil,
+		{ScopeLogs: []*logspb.ScopeLogs{nil, {LogRecords: []*logspb.LogRecord{nil, {EventName: "kept"}}}}},
+	}})
+	if len(recs) != 1 || recs[0].EventName != "kept" {
+		t.Errorf("records = %+v, want the one non-nil record", recs)
+	}
+}
+
+// A non-string body (a stock bridge's structured log) renders through
+// the AnyValue mapping as JSON — never silently as "".
+func TestFromOTLPStructuredBody(t *testing.T) {
+	body := func(v *commonpb.AnyValue) string {
+		recs := FromOTLPLogs(&collogspb.ExportLogsServiceRequest{ResourceLogs: []*logspb.ResourceLogs{
+			{ScopeLogs: []*logspb.ScopeLogs{{LogRecords: []*logspb.LogRecord{{Body: v}}}}},
+		}})
+		if len(recs) != 1 {
+			t.Fatalf("records = %d", len(recs))
+		}
+		return recs[0].Body
+	}
+	kv := &commonpb.AnyValue{Value: &commonpb.AnyValue_KvlistValue{KvlistValue: &commonpb.KeyValueList{
+		Values: []*commonpb.KeyValue{
+			{Key: "msg", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "paid"}}},
+			{Key: "amount", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: 42}}},
+		},
+	}}}
+	if got := body(kv); got != `{"amount":42,"msg":"paid"}` {
+		t.Errorf("kvlist body = %q, want its JSON", got)
+	}
+	if got := body(&commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: 7}}); got != "7" {
+		t.Errorf("int body = %q, want 7", got)
+	}
+	if got := body(&commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "plain"}}); got != "plain" {
+		t.Errorf("string body = %q, want it verbatim", got)
+	}
+	if got := body(nil); got != "" {
+		t.Errorf("absent body = %q, want empty", got)
 	}
 }

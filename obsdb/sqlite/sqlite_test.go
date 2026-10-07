@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -334,12 +337,12 @@ func TestHeartbeatRule(t *testing.T) {
 	}
 	before, _ := db.Run(ctx, "r1")
 	hb := rec("r1", "heartbeat", "", 0, "", nil)
-	hb.Time = base(20 * time.Second)
+	hb.Time = time.Now().UTC() // the wall clock: "running" must not depend on how long the binary has run
 	if err := db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{hb}}); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := db.Run(ctx, "r1")
-	if !after.LastSeen.Equal(base(20 * time.Second)) {
+	if !after.LastSeen.Equal(hb.Time) {
 		t.Errorf("last seen = %v, want moved by the heartbeat", after.LastSeen)
 	}
 	if after.EventCount != before.EventCount {
@@ -459,6 +462,8 @@ func TestSessions(t *testing.T) {
 		if finish {
 			recs = append(recs, rec(runID, "event", "run_finish", 1,
 				`{"type":"run_finish","run_id":"`+runID+`","usage":{"input_tokens":10,"output_tokens":2},"steps":1}`, extra))
+		} else {
+			recs[0].Time = time.Now().UTC() // running on the wall clock, however long the binary has run
 		}
 		if err := db.Write(ctx, obsdb.Batch{Records: recs}); err != nil {
 			t.Fatal(err)
@@ -720,6 +725,13 @@ func TestRunsStatusFilter(t *testing.T) {
 	write("ok", true, false)
 	write("bad", false, true)
 	write("live", false, false)
+	// "live" reads running on the wall clock, not the process-start
+	// fixture clock (which expires 30 s into the binary's run).
+	live := rec("live", "heartbeat", "", 0, "", nil)
+	live.Time = time.Now().UTC()
+	if err := db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{live}}); err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []obsdb.Status{obsdb.StatusSucceeded, obsdb.StatusFailed, obsdb.StatusRunning} {
 		page, err := db.Runs(ctx, obsdb.RunQuery{Status: want})
 		if err != nil {
@@ -883,5 +895,356 @@ func TestSessionBeyondNewestPage(t *testing.T) {
 	}
 	if _, err := db.Session(ctx, "nope"); !errors.Is(err, obsdb.ErrNotFound) {
 		t.Errorf("unknown session: %v, want ErrNotFound", err)
+	}
+}
+
+// A NaN or infinite double attribute is legal OTLP (and a legal
+// attribute.Float64), but JSON has no spelling for it: the attrs column
+// could not encode, and that one value failed the whole batch — every
+// other span and record in it lost, and an OTLP exporter retrying a
+// 500 forever. The value is stored under its protojson name instead.
+func TestNonFiniteAttrDoesNotFailTheBatch(t *testing.T) {
+	db := openMem(t)
+	ctx := context.Background()
+	sp := invokeAgentSpan(map[string]any{
+		"score": math.NaN(), "ceiling": math.Inf(1),
+		"nested": []any{math.Inf(-1), int64(1)},
+	})
+	sp.Events = []obsdb.SpanEvent{{Time: base(time.Second), Name: "sample", Attrs: map[string]any{"p": math.NaN()}}}
+	recs := scriptedRun()
+	recs[1].Attrs["temperature"] = math.NaN()
+	other := obsdb.Record{Time: base(0), Body: "line", Attrs: map[string]any{"ratio": math.NaN()}}
+	if err := db.Write(ctx, obsdb.Batch{Spans: []obsdb.Span{sp}, Records: append(recs, other)}); err != nil {
+		t.Fatalf("Write with non-finite attrs: %v", err)
+	}
+	det, err := db.Run(ctx, "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if det.EventCount != 4 || det.Status != obsdb.StatusSucceeded {
+		t.Errorf("run = %d events, %q; want the whole batch stored", det.EventCount, det.Status)
+	}
+	spans, err := db.RunSpans(ctx, "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spans) != 1 {
+		t.Fatalf("spans = %d, want 1", len(spans))
+	}
+	a := spans[0].Attrs
+	if a["score"] != "NaN" || a["ceiling"] != "Infinity" {
+		t.Errorf("non-finite attrs = %v / %v, want NaN / Infinity", a["score"], a["ceiling"])
+	}
+	if n, _ := a["nested"].([]any); len(n) != 2 || n[0] != "-Infinity" || n[1] != int64(1) {
+		t.Errorf("nested = %v, want [-Infinity 1]", a["nested"])
+	}
+	if a["weft.run.id"] != "r1" || spans[0].Events[0].Attrs["p"] != "NaN" {
+		t.Errorf("the rest of the span did not survive: %v, events %v", a, spans[0].Events)
+	}
+}
+
+// OTLP spells "unknown" as a zero timestamp, and time.Time's zero is
+// outside UnixNano's range: stored raw it read back as a date in 1754.
+// A zero time is stored as 0 and reads back zero; a record with only an
+// observed time (a log bridge that never set Time) takes that.
+func TestZeroTimestamps(t *testing.T) {
+	db := openMem(t)
+	ctx := context.Background()
+	sp := obsdb.Span{TraceID: "aa", SpanID: "bb", Name: "untimed"}
+	observed := rec("z1", "event", "run_start", 0, `{"type":"run_start","id":"z1"}`, nil)
+	observedAt := time.Now().UTC() // the wall clock: the status below must read running whenever this runs
+	observed.Time, observed.Observed = time.Time{}, observedAt
+	untimed := rec("z1", "event", "step_start", 1, `{"type":"step_start","run_id":"z1","index":0}`, nil)
+	untimed.Time = time.Time{}
+	if err := db.Write(ctx, obsdb.Batch{Spans: []obsdb.Span{sp}, Records: []obsdb.Record{observed, untimed}}); err != nil {
+		t.Fatal(err)
+	}
+	spans, err := db.Trace(ctx, "aa")
+	if err != nil || len(spans) != 1 {
+		t.Fatalf("trace = %v, %v", spans, err)
+	}
+	if !spans[0].Start.IsZero() || !spans[0].End.IsZero() {
+		t.Errorf("untimed span = %v → %v, want zero times", spans[0].Start, spans[0].End)
+	}
+	det, err := db.Run(ctx, "z1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !det.Started.Equal(observedAt) || !det.LastSeen.Equal(observedAt) {
+		t.Errorf("run started/last-seen = %v / %v, want the observed time %v", det.Started, det.LastSeen, observedAt)
+	}
+	if det.Status != obsdb.StatusRunning {
+		t.Errorf("status = %q, want running (last seen just now, by the observed time)", det.Status)
+	}
+	page, err := db.Events(ctx, "z1", -1, 10)
+	if err != nil || len(page.Events) != 2 {
+		t.Fatalf("events = %+v, %v", page, err)
+	}
+	if !page.Events[0].Time.Equal(observedAt) {
+		t.Errorf("event 0 time = %v, want the observed time", page.Events[0].Time)
+	}
+	if !page.Events[1].Time.IsZero() {
+		t.Errorf("event 1 time = %v, want zero (no time at all)", page.Events[1].Time)
+	}
+}
+
+// Done means the run is terminal AND every stored event was returned.
+// The page's events and the run's terminal flags are separate reads: a
+// batch committing between them (the last events plus run_finish) used
+// to produce Done with those events missing, so a reader following the
+// run to Done stopped short of its tail.
+func TestEventsDoneNeverHidesStoredEvents(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	for iter := 0; iter < 60; iter++ {
+		db, err := sqlite.Open(filepath.Join(dir, fmt.Sprintf("race-%d.db", iter)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{
+			rec("r1", "event", "run_start", 0, `{"type":"run_start","id":"r1"}`, nil),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		wrote := make(chan error, 1)
+		go func() {
+			wrote <- db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{
+				rec("r1", "event", "step_start", 1, `{"type":"step_start","run_id":"r1","index":0}`, nil),
+				rec("r1", "event", "run_finish", 2, `{"type":"run_finish","run_id":"r1","steps":1}`, nil),
+			}})
+		}()
+		for {
+			page, err := db.Events(ctx, "r1", -1, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if page.Done {
+				if len(page.Events) != 3 {
+					t.Fatalf("iteration %d: Done with %d of 3 events returned", iter, len(page.Events))
+				}
+				break
+			}
+		}
+		if err := <-wrote; err != nil {
+			t.Fatal(err)
+		}
+		_ = db.Close()
+	}
+}
+
+// A session's detail carries all of its turns: the read used to stop at
+// 500 ordered by turn, silently dropping the newest ones.
+func TestSessionDetailCarriesEveryTurn(t *testing.T) {
+	db := openMem(t)
+	ctx := context.Background()
+	const turns = 503
+	var recs []obsdb.Record
+	for i := 1; i <= turns; i++ {
+		id := fmt.Sprintf("s_long-t%d", i)
+		r := rec(id, "event", "run_start", 0, `{"type":"run_start","id":"`+id+`"}`,
+			map[string]any{"weft.session.id": "s_long", "weft.turn": int64(i)})
+		r.Time = base(time.Duration(i) * time.Second)
+		recs = append(recs, r)
+	}
+	if err := db.Write(ctx, obsdb.Batch{Records: recs}); err != nil {
+		t.Fatal(err)
+	}
+	det, err := db.Session(ctx, "s_long")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if det.Turns != turns || len(det.Runs) != turns {
+		t.Fatalf("session = %d turns, %d runs listed; want %d of each", det.Turns, len(det.Runs), turns)
+	}
+	if last := det.Runs[len(det.Runs)-1]; last.Turn != turns {
+		t.Errorf("last listed turn = %d, want the newest (%d)", last.Turn, turns)
+	}
+}
+
+// The gap detector's fast path (the run's event count against the
+// highest position) must never hide a hole — a negative position from a
+// foreign sender makes the count match while a real position is
+// missing.
+func TestEventGapsWithStrayPositions(t *testing.T) {
+	db := openMem(t)
+	ctx := context.Background()
+	var recs []obsdb.Record
+	for _, p := range []int64{-1, 0, 2} { // 1 lost; three rows, highest position 2
+		recs = append(recs, rec("r1", "event", "step_start", p, `{"type":"step_start","run_id":"r1","index":0}`, nil))
+	}
+	if err := db.Write(ctx, obsdb.Batch{Records: recs}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := db.Events(ctx, "r1", -1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Gaps) != 1 || page.Gaps[0] != 1 {
+		t.Errorf("gaps = %v, want [1]", page.Gaps)
+	}
+}
+
+// Positions are the sender's numbers: one stray high weft.event.pos
+// must not make every page read of the run build a list of each
+// position below it. Gaps lists the first obsdb.MaxGaps.
+func TestEventGapsAreBounded(t *testing.T) {
+	db := openMem(t)
+	ctx := context.Background()
+	if err := db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{
+		rec("r1", "event", "run_start", 0, `{"type":"run_start","id":"r1"}`, nil),
+		rec("r1", "event", "step_start", 5_000_000, `{"type":"step_start","run_id":"r1","index":0}`, nil),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := db.Events(ctx, "r1", -1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Gaps) != obsdb.MaxGaps || page.Gaps[0] != 1 || page.Gaps[len(page.Gaps)-1] != obsdb.MaxGaps {
+		t.Errorf("gaps = %d listed, want the first %d (1..%d)", len(page.Gaps), obsdb.MaxGaps, obsdb.MaxGaps)
+	}
+}
+
+// Writers and readers share the handle (the local sink writes on the
+// runs' goroutines while Studio reads): on both handle shapes
+// concurrent use neither errors nor loses a row, and Close afterwards
+// turns every further call into ErrClosed.
+func TestConcurrentWritersAndReaders(t *testing.T) {
+	for name, path := range map[string]string{
+		"memory": ":memory:",
+		"file":   filepath.Join(t.TempDir(), "conc.db"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			db, err := sqlite.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			const writers, events = 6, 40
+			errs := make(chan error, writers*2)
+			stop := make(chan struct{})
+			var readers sync.WaitGroup
+			for r := 0; r < 3; r++ {
+				readers.Add(1)
+				go func() {
+					defer readers.Done()
+					for {
+						select {
+						case <-stop:
+							return
+						default:
+						}
+						if _, err := db.Runs(ctx, obsdb.RunQuery{}); err != nil {
+							errs <- err
+							return
+						}
+						if _, err := db.Sessions(ctx, obsdb.SessionQuery{}); err != nil {
+							errs <- err
+							return
+						}
+						if _, err := db.Events(ctx, "w0", -1, 10); err != nil && !errors.Is(err, obsdb.ErrNotFound) {
+							errs <- err
+							return
+						}
+					}
+				}()
+			}
+			var wg sync.WaitGroup
+			for w := 0; w < writers; w++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					id := fmt.Sprintf("w%d", w)
+					for p := int64(0); p < events; p++ {
+						et := "step_start"
+						if p == 0 {
+							et = "run_start"
+						}
+						if err := db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{
+							rec(id, "event", et, p, `{"type":"`+et+`"}`, map[string]any{"weft.session.id": "s_" + id}),
+							rec(id, "delta", "text_delta", p, `{"type":"text_delta"}`, nil),
+						}}); err != nil {
+							errs <- err
+							return
+						}
+					}
+				}()
+			}
+			wg.Wait()
+			close(stop)
+			readers.Wait()
+			close(errs)
+			for err := range errs {
+				t.Fatalf("concurrent use: %v", err)
+			}
+			page, err := db.Runs(ctx, obsdb.RunQuery{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if page.Total != writers {
+				t.Fatalf("runs = %d, want %d", page.Total, writers)
+			}
+			for _, r := range page.Runs {
+				if r.EventCount != events || r.DeltaCount != events {
+					t.Errorf("run %s = %d events, %d deltas; want %d of each", r.ID, r.EventCount, r.DeltaCount, events)
+				}
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Write(ctx, obsdb.Batch{Records: scriptedRun()}); !errors.Is(err, obsdb.ErrClosed) {
+				t.Errorf("Write after Close = %v, want ErrClosed", err)
+			}
+			if _, err := db.Runs(ctx, obsdb.RunQuery{}); !errors.Is(err, obsdb.ErrClosed) {
+				t.Errorf("Runs after Close = %v, want ErrClosed", err)
+			}
+		})
+	}
+}
+
+// The path is a file path, not a URI: the characters SQLite's URI form
+// gives meaning to ('%', '?', '#') must reach it escaped, or the
+// database lands in a different file than the one asked for ("C#/app.db"
+// opened a file named "C").
+func TestOpenPathWithURICharacters(t *testing.T) {
+	for _, name := range []string{"q?x.db", "h#x.db", "p%41.db", "a b.db"} {
+		path := filepath.Join(t.TempDir(), name)
+		db, err := sqlite.Open(path)
+		if err != nil {
+			t.Fatalf("%q: %v", name, err)
+		}
+		if err := db.Write(context.Background(), obsdb.Batch{Records: scriptedRun()}); err != nil {
+			t.Fatalf("%q: %v", name, err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%q: the database is not at the path it was opened with: %v", name, err)
+		}
+	}
+}
+
+// A path that begins with two slashes is a valid POSIX path (it names
+// the same file as one slash), but "file://x/..." is a URI authority to
+// SQLite: the open failed with "invalid uri authority".
+func TestOpenPathWithLeadingDoubleSlash(t *testing.T) {
+	dir := t.TempDir()
+	if !filepath.IsAbs(dir) || filepath.Separator != '/' {
+		t.Skip("POSIX paths only")
+	}
+	path := "/" + filepath.Join(dir, "dbl.db")
+	db, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatalf("%q: %v", path, err)
+	}
+	if err := db.Write(context.Background(), obsdb.Batch{Records: scriptedRun()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dbl.db")); err != nil {
+		t.Errorf("the database is not at %s: %v", path, err)
 	}
 }

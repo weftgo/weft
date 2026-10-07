@@ -179,10 +179,20 @@ func attrIntOr(m map[string]any, k string, def int) int {
 }
 
 // attrBool reads a boolean attribute; anything but a present true is
-// false.
+// false. The string "true" counts as true for attrIntOr's reason: the
+// flags weft's own modules set travel as run metadata (weft/runtime
+// stamps "weft.playground": "true"), and the core renders every
+// metadata value as a string attribute — so the string spelling is the
+// one the pipeline produces and the bool the one fixtures hand-build.
+// ClickHouse's views read the same pair (the stringified attr = 'true').
 func attrBool(m map[string]any, k string) bool {
-	b, _ := m[k].(bool)
-	return b
+	switch v := m[k].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true"
+	}
+	return false
 }
 
 // nonMetaAttr names every attribute key that is part of the record and

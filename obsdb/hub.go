@@ -67,6 +67,10 @@ type hubSub struct {
 	ch    chan Frame
 	after uint64
 	ctx   context.Context
+	// dropped closes when the hub drops the subscription on overflow,
+	// so its context watcher ends with it instead of waiting on a
+	// context that may never end.
+	dropped chan struct{}
 }
 
 type inProcessHub struct {
@@ -124,19 +128,33 @@ func (h *inProcessHub) Publish(ctx context.Context, f Frame) {
 		default:
 			delete(h.subs, sub)
 			close(sub.ch)
+			close(sub.dropped)
 		}
 	}
 }
 
 func (h *inProcessHub) Subscribe(ctx context.Context, sel Selector, after uint64) (<-chan Frame, error) {
-	sub := &hubSub{sel: sel, ch: make(chan Frame, h.queue), after: after, ctx: ctx}
+	sub := &hubSub{sel: sel, ch: make(chan Frame, h.queue), after: after, ctx: ctx, dropped: make(chan struct{})}
 	h.mu.Lock()
+	// Seq is this hub's own counter and is not persisted: a cursor ahead
+	// of it was minted by another hub — a Last-Event-ID a client kept
+	// across a restart. Nothing this hub publishes is a repeat for that
+	// client, so the cursor reads as none; honouring it would mute the
+	// subscription until Seq caught up with the old process's.
+	if sub.after > h.seq {
+		sub.after = 0
+	}
 	h.subs[sub] = struct{}{}
 	h.mu.Unlock()
 	go func() {
 		// Context end also drops the subscription; the channel close is
-		// the same signal either way.
-		<-ctx.Done()
+		// the same signal either way. An overflow drop got there first
+		// and leaves nothing to do.
+		select {
+		case <-ctx.Done():
+		case <-sub.dropped:
+			return
+		}
 		h.mu.Lock()
 		if _, ok := h.subs[sub]; ok {
 			delete(h.subs, sub)

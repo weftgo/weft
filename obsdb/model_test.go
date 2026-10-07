@@ -157,3 +157,30 @@ func TestDeriveAbsentStepAndToolSeq(t *testing.T) {
 		t.Fatalf("absent step/toolseq = %d/%d, want -1/-1", w.Step, w.ToolSeq)
 	}
 }
+
+// The string spelling of weft.playground is the one the real chain
+// produces: weft/runtime stamps it as run metadata
+// ("weft.playground": "true" in executor.go) and the core renders every
+// metadata value as attribute.String — the turn-as-string bug's
+// sibling. Derive* must read "true" as true, or every playground run
+// lands in the session lists and RunQuery.Playground filters nothing.
+// Anything but true/"true" stays false.
+func TestDerivePlaygroundAsStringAttr(t *testing.T) {
+	if w := DeriveRecord(Record{Attrs: map[string]any{
+		"weft.run.id": "r_pg", "weft.record": "event", "weft.playground": "true",
+	}}); !w.Playground {
+		t.Fatal("DeriveRecord playground = false, want true (string attr)")
+	}
+	if w := DeriveSpan(Span{Attrs: map[string]any{
+		"weft.run.id": "r_pg", "weft.playground": "true",
+	}}); !w.Playground {
+		t.Fatal("DeriveSpan playground = false, want true (string attr)")
+	}
+	for _, v := range []any{"false", "", "yes", int64(1), false} {
+		if w := DeriveSpan(Span{Attrs: map[string]any{
+			"weft.run.id": "r", "weft.playground": v,
+		}}); w.Playground {
+			t.Fatalf("playground %#v derived true, want false", v)
+		}
+	}
+}

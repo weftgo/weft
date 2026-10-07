@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -35,10 +34,11 @@ const statusExpr = `CASE WHEN failed = 1 THEN 'failed'
 	WHEN last_seen_ns >= ? THEN 'running'
 	ELSE 'interrupted' END`
 
-func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (obsdb.RunPage, error) {
+func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.RunPage{}, err
 	}
+	defer d.closedErr(&err)
 	now := time.Now()
 	where, args := runWhere(q, now)
 	var total int
@@ -47,21 +47,41 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (obsdb.RunPage, error) 
 		return obsdb.RunPage{}, err
 	}
 	limit := obsdb.LimitOf(q.Limit)
-	frag, qargs := where, args
+	frag, qargs := where, append([]any{}, args...)
 	if !q.Before.IsZero() {
-		frag += " AND started_ns < ?"
-		qargs = append(append([]any{}, args...), q.Before.UnixNano())
+		ns := q.Before.UnixNano()
+		if q.BeforeID != "" {
+			frag += " AND (started_ns < ? OR (started_ns = ? AND run_id < ?))"
+			qargs = append(qargs, ns, ns, q.BeforeID)
+		} else {
+			frag += " AND started_ns < ?"
+			qargs = append(qargs, ns)
+		}
 	}
 	frag += ` ORDER BY started_ns DESC, run_id DESC LIMIT ?`
-	qargs = append(append([]any{}, qargs...), limit)
-	rows, err := d.queryRunRows(ctx, frag, qargs)
+	qargs = append(qargs, limit)
+	rows, err := d.queryRunRows(ctx, frag, qargs, now)
 	if err != nil {
 		return obsdb.RunPage{}, err
 	}
 	page := obsdb.RunPage{Runs: rows, Total: total}
 	if len(rows) == limit {
-		last := rows[len(rows)-1].Started
-		page.NextBefore = &last
+		// A page does not end inside a group of runs sharing one
+		// Started: a caller paging on Before alone reads strictly older
+		// next, and the rest of the group would never be listed. The
+		// tied rows ride along — at most MaxTies of them, so one page
+		// stays bounded however many runs share a timestamp; past that
+		// the (Before, BeforeID) cursor resumes inside the group.
+		last := rows[len(rows)-1]
+		ties, err := d.queryRunRows(ctx,
+			where+` AND started_ns = ? AND run_id < ? ORDER BY run_id DESC LIMIT ?`,
+			append(append([]any{}, args...), last.Started.UnixNano(), last.ID, obsdb.MaxTies), now)
+		if err != nil {
+			return obsdb.RunPage{}, err
+		}
+		page.Runs = append(page.Runs, ties...)
+		end := page.Runs[len(page.Runs)-1]
+		page.NextBefore, page.NextBeforeID = &end.Started, end.ID
 	}
 	return page, nil
 }
@@ -69,8 +89,8 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (obsdb.RunPage, error) 
 // runWhere builds the Runs WHERE fragment with its bind arguments, in
 // text order. The status filter's condition carries statusExpr, whose
 // own cutoff parameter binds first, so it is added before everything
-// else. now is the read's clock — the same one scanRunRow derives
-// statuses with, so filtering and rows cannot disagree.
+// else. now is the read's clock — the same one queryRunRows derives
+// the rows' statuses with, so filtering and rows cannot disagree.
 func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 	var conds []string
 	var args []any
@@ -117,11 +137,13 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 	return strings.Join(conds, " AND "), args
 }
 
-func (d *DB) Run(ctx context.Context, id string) (obsdb.RunDetail, error) {
+func (d *DB) Run(ctx context.Context, id string) (_ obsdb.RunDetail, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.RunDetail{}, err
 	}
-	rows, err := d.queryRunRows(ctx, "run_id = ?", []any{id})
+	defer d.closedErr(&err)
+	now := time.Now()
+	rows, err := d.queryRunRows(ctx, "run_id = ?", []any{id}, now)
 	if err != nil {
 		return obsdb.RunDetail{}, err
 	}
@@ -129,7 +151,7 @@ func (d *DB) Run(ctx context.Context, id string) (obsdb.RunDetail, error) {
 		return obsdb.RunDetail{}, fmt.Errorf("%w: run %s", obsdb.ErrNotFound, id)
 	}
 	children, err := d.queryRunRows(ctx,
-		"parent_run_id = ? ORDER BY started_ns, run_id", []any{id})
+		"parent_run_id = ? ORDER BY started_ns, run_id", []any{id}, now)
 	if err != nil {
 		return obsdb.RunDetail{}, err
 	}
@@ -139,13 +161,14 @@ func (d *DB) Run(ctx context.Context, id string) (obsdb.RunDetail, error) {
 // queryRunRows selects run rows for a WHERE fragment. The fragment's
 // args come first; when the fragment references statusExpr the cutoff
 // is already among the caller's args (runWhere puts status filtering in
-// its own prelude — see Runs). limit is always last.
-func (d *DB) queryRunRows(ctx context.Context, where string, args []any) ([]obsdb.RunRow, error) {
+// its own prelude — see Runs). limit is always last. now is the clock
+// the rows' statuses derive from — the caller's, so a read that also
+// filters or groups by status uses one clock for both.
+func (d *DB) queryRunRows(ctx context.Context, where string, args []any, now time.Time) ([]obsdb.RunRow, error) {
 	rows, err := d.runRowsQuery(ctx, where, args)
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now()
 	var out []obsdb.RunRow
 	for _, r := range rows {
 		row, err := scanRunRow(r, now)
@@ -226,11 +249,26 @@ func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
 	return row, nil
 }
 
-func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (obsdb.EventPage, error) {
+func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (_ obsdb.EventPage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.EventPage{}, err
 	}
-	if err := d.runExists(ctx, runID); err != nil {
+	defer d.closedErr(&err)
+	// The run's terminal flags are read before its events, never after:
+	// a batch committing between the two reads (the last events plus
+	// run_finish) would otherwise make a page that is Done yet misses
+	// those events, and a reader following the run to Done would stop
+	// short of its tail. Read in this order, Done only ever says "the
+	// run was already terminal when these events were read".
+	var finishedOK, failed bool
+	var eventCount int64
+	err = d.reads.QueryRowContext(ctx,
+		`SELECT finished_ok, failed, event_count FROM runs WHERE run_id = ?`, runID).
+		Scan(&finishedOK, &failed, &eventCount)
+	if err == sql.ErrNoRows {
+		return obsdb.EventPage{}, fmt.Errorf("%w: run %s", obsdb.ErrNotFound, runID)
+	}
+	if err != nil {
 		return obsdb.EventPage{}, err
 	}
 	if limit <= 0 {
@@ -239,14 +277,15 @@ func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (
 	if limit > 1000 {
 		limit = 1000
 	}
-	page := obsdb.EventPage{Done: true}
+	// One row past the limit answers "is there more" in the same read.
 	rs, err := d.reads.QueryContext(ctx,
 		`SELECT pos, time_ns, body FROM records WHERE run_id = ? AND kind = 'event' AND pos > ? ORDER BY pos LIMIT ?`,
-		runID, after, limit)
+		runID, after, limit+1)
 	if err != nil {
 		return obsdb.EventPage{}, err
 	}
 	defer func() { _ = rs.Close() }()
+	var page obsdb.EventPage
 	for rs.Next() {
 		var ev obsdb.PosEvent
 		var ns int64
@@ -254,36 +293,23 @@ func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (
 		if err := rs.Scan(&ev.Pos, &ns, &body); err != nil {
 			return obsdb.EventPage{}, err
 		}
-		ev.Time = time.Unix(0, ns).UTC()
+		ev.Time = timeOf(ns)
 		ev.Event = json.RawMessage(body)
 		page.Events = append(page.Events, ev)
 	}
 	if err := rs.Err(); err != nil {
 		return obsdb.EventPage{}, err
 	}
-	var remaining int
-	if err := d.reads.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM records WHERE run_id = ? AND kind = 'event' AND pos > ?`, runID, after).
-		Scan(&remaining); err != nil {
-		return obsdb.EventPage{}, err
-	}
-	if remaining > len(page.Events) {
-		page.Done = false
-		if n := len(page.Events); n > 0 {
-			last := page.Events[n-1].Pos
-			page.NextAfter = &last
-		}
+	if len(page.Events) > limit {
+		page.Events = page.Events[:limit]
+		last := page.Events[limit-1].Pos
+		page.NextAfter = &last
 	} else {
 		// Every stored event returned: done only when the run is
 		// terminal — a running run may still emit more.
-		var finishedOK, failed bool
-		if err := d.reads.QueryRowContext(ctx,
-			`SELECT finished_ok, failed FROM runs WHERE run_id = ?`, runID).Scan(&finishedOK, &failed); err != nil {
-			return obsdb.EventPage{}, err
-		}
 		page.Done = finishedOK || failed
 	}
-	gaps, err := d.eventGaps(ctx, runID)
+	gaps, err := d.eventGaps(ctx, runID, eventCount)
 	if err != nil {
 		return obsdb.EventPage{}, err
 	}
@@ -293,43 +319,55 @@ func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (
 
 // eventGaps returns the durable positions missing below the high-water
 // mark: a lost batch, never a delta (deltas are on their own counter,
-// so their absence cannot open a hole here).
-func (d *DB) eventGaps(ctx context.Context, runID string) ([]int64, error) {
+// so their absence cannot open a hole here). At most obsdb.MaxGaps are
+// listed.
+//
+// count is the run's event_count, read before this call. Positions are
+// unique per run, so count rows inside 0..max with count = max+1 leave
+// no room for a hole: the common, gapless run is answered from the two
+// ends of the key without reading every position on every page. A
+// count read earlier than the positions can only be too small, which
+// falls through to the scan.
+func (d *DB) eventGaps(ctx context.Context, runID string, count int64) ([]int64, error) {
+	var lo, hi sql.NullInt64
+	if err := d.reads.QueryRowContext(ctx,
+		`SELECT (SELECT MIN(pos) FROM records WHERE run_id = ? AND kind = 'event'),
+		        (SELECT MAX(pos) FROM records WHERE run_id = ? AND kind = 'event')`,
+		runID, runID).Scan(&lo, &hi); err != nil {
+		return nil, err
+	}
+	if !hi.Valid || (lo.Int64 >= 0 && count == hi.Int64+1) {
+		return nil, nil
+	}
 	rs, err := d.reads.QueryContext(ctx,
-		`SELECT pos FROM records WHERE run_id = ? AND kind = 'event' ORDER BY pos`, runID)
+		`SELECT pos FROM records WHERE run_id = ? AND kind = 'event' AND pos >= 0 ORDER BY pos`, runID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rs.Close() }()
-	var present []int64
-	for rs.Next() {
+	var gaps []int64
+	next := int64(0)
+	for rs.Next() && len(gaps) < obsdb.MaxGaps {
 		var p int64
 		if err := rs.Scan(&p); err != nil {
 			return nil, err
 		}
-		present = append(present, p)
-	}
-	if err := rs.Err(); err != nil {
-		return nil, err
-	}
-	var gaps []int64
-	next := int64(0)
-	for _, p := range present {
-		for p > next {
+		// The hole below p, bounded: a stray position (a foreign
+		// sender's weft.event.pos of 10^12) must not turn one page
+		// read into a trillion-element list.
+		for ; next < p && len(gaps) < obsdb.MaxGaps; next++ {
 			gaps = append(gaps, next)
-			next++
 		}
-		if p == next {
-			next++
-		}
+		next = p + 1
 	}
-	return gaps, nil
+	return gaps, rs.Err()
 }
 
-func (d *DB) Transcript(ctx context.Context, runID string) ([]json.RawMessage, error) {
+func (d *DB) Transcript(ctx context.Context, runID string) (_ []json.RawMessage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
+	defer d.closedErr(&err)
 	if err := d.runExists(ctx, runID); err != nil {
 		return nil, err
 	}
@@ -347,23 +385,30 @@ func (d *DB) Transcript(ctx context.Context, runID string) ([]json.RawMessage, e
 		}
 		out = append(out, json.RawMessage(body))
 	}
-	return out, rs.Err()
+	if err := rs.Err(); err != nil {
+		return nil, err
+	}
+	// A resume's rebuilt tool message supersedes the partial one its
+	// input record carried (the later record is the authoritative one).
+	return obsdb.DedupTranscript(out), nil
 }
 
-func (d *DB) RunSpans(ctx context.Context, runID string) ([]obsdb.Span, error) {
+func (d *DB) RunSpans(ctx context.Context, runID string) (_ []obsdb.Span, err error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
+	defer d.closedErr(&err)
 	if err := d.runExists(ctx, runID); err != nil {
 		return nil, err
 	}
 	return d.querySpans(ctx, `run_id = ? ORDER BY start_ns, span_id`, runID)
 }
 
-func (d *DB) Trace(ctx context.Context, traceID string) ([]obsdb.Span, error) {
+func (d *DB) Trace(ctx context.Context, traceID string) (_ []obsdb.Span, err error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
+	defer d.closedErr(&err)
 	return d.querySpans(ctx, `trace_id = ? ORDER BY start_ns, span_id`, traceID)
 }
 
@@ -384,7 +429,7 @@ func (d *DB) querySpans(ctx context.Context, where string, arg any) ([]obsdb.Spa
 			&start, &end, &s.StatusCode, &s.StatusMessage, &s.Service, &attrs, &resource, &events); err != nil {
 			return nil, err
 		}
-		s.Start, s.End = time.Unix(0, start).UTC(), time.Unix(0, end).UTC()
+		s.Start, s.End = timeOf(start), timeOf(end)
 		if attrs != "" && attrs != "null" {
 			if err := unmarshalAttrs([]byte(attrs), &s.Attrs); err != nil {
 				return nil, fmt.Errorf("sqlite: span %s attrs: %w", s.SpanID, err)
@@ -403,6 +448,15 @@ func (d *DB) querySpans(ctx context.Context, where string, arg any) ([]obsdb.Spa
 		out = append(out, s)
 	}
 	return out, rs.Err()
+}
+
+// timeOf reads a span or record *_ns column: 0 is the zero time Write
+// stored for it (unixNS), anything else the instant.
+func timeOf(ns int64) time.Time {
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns).UTC()
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as
@@ -462,15 +516,19 @@ func (d *DB) runExists(ctx context.Context, runID string) error {
 	return err
 }
 
+// sessionScope is what a session is grouped over (S3.4): its
+// top-level, non-playground runs.
+const sessionScope = `parent_run_id = '' AND playground = 0 AND session_id <> ''`
+
 // Sessions is a GROUP BY session_id over top-level, non-playground
 // runs (S3.4): turns, first/last seen, summed usage, and the newest
 // turn's derived status.
-func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (obsdb.SessionPage, error) {
+func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.SessionPage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.SessionPage{}, err
 	}
+	defer d.closedErr(&err)
 	cutoff := time.Now().Add(-obsdb.InterruptedAfter).UnixNano()
-	conds := []string{"parent_run_id = ''", "playground = 0", "session_id <> ''"}
 	var having []string
 	var hargs []any
 	if q.Agent != "" {
@@ -481,35 +539,77 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (obsdb.SessionP
 		having = append(having, "MAX(public_id) = ?")
 		hargs = append(hargs, q.PublicID)
 	}
-	if !q.Before.IsZero() {
-		having = append(having, "MAX(last_seen_ns) < ?")
-		hargs = append(hargs, q.Before.UnixNano())
-	}
-	havingSQL := ""
-	if len(having) > 0 {
-		havingSQL = " HAVING " + strings.Join(having, " AND ")
-	}
-	where := strings.Join(conds, " AND ")
+	// Total is the whole match, as Runs' is: the cursor pages through
+	// it and never narrows it.
 	var total int
 	if err := d.reads.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM (SELECT session_id FROM runs WHERE `+where+
-			` GROUP BY session_id`+havingSQL+`)`, hargs...).Scan(&total); err != nil {
+		`SELECT COUNT(*) FROM (SELECT session_id FROM runs WHERE `+sessionScope+
+			` GROUP BY session_id`+havingSQL(having)+`)`, hargs...).Scan(&total); err != nil {
 		return obsdb.SessionPage{}, err
 	}
 	limit := obsdb.LimitOf(q.Limit)
+	paged, pargs := having, hargs
+	if !q.Before.IsZero() {
+		ns := q.Before.UnixNano()
+		if q.BeforeID != "" {
+			paged = append(append([]string{}, having...), "(MAX(last_seen_ns) < ? OR (MAX(last_seen_ns) = ? AND session_id < ?))")
+			pargs = append(append([]any{}, hargs...), ns, ns, q.BeforeID)
+		} else {
+			paged = append(append([]string{}, having...), "MAX(last_seen_ns) < ?")
+			pargs = append(append([]any{}, hargs...), ns)
+		}
+	}
+	rows, err := d.sessionRows(ctx, cutoff, sessionScope, nil, paged,
+		append(append([]any{}, pargs...), limit), ` ORDER BY MAX(last_seen_ns) DESC, session_id DESC LIMIT ?`)
+	if err != nil {
+		return obsdb.SessionPage{}, err
+	}
+	page := obsdb.SessionPage{Sessions: rows, Total: total}
+	if len(rows) == limit {
+		// Runs' rule: the sessions sharing the last row's LastSeen ride
+		// along (at most MaxTies) instead of being skipped by a next
+		// page that reads strictly older.
+		last := rows[len(rows)-1]
+		ties, err := d.sessionRows(ctx, cutoff, sessionScope, nil,
+			append(append([]string{}, having...), "MAX(last_seen_ns) = ?", "session_id < ?"),
+			append(append([]any{}, hargs...), last.LastSeen.UnixNano(), last.ID, obsdb.MaxTies),
+			` ORDER BY session_id DESC LIMIT ?`)
+		if err != nil {
+			return obsdb.SessionPage{}, err
+		}
+		page.Sessions = append(page.Sessions, ties...)
+		end := page.Sessions[len(page.Sessions)-1]
+		page.NextBefore, page.NextBeforeID = &end.LastSeen, end.ID
+	}
+	return page, nil
+}
+
+func havingSQL(having []string) string {
+	if len(having) == 0 {
+		return ""
+	}
+	return " HAVING " + strings.Join(having, " AND ")
+}
+
+// sessionRows selects grouped session rows: where (with wargs) scopes
+// the runs, having (with hargs, which also carry tail's parameters)
+// filters the groups, tail orders and limits. cutoff is statusExpr's
+// parameter, the first in text order.
+func (d *DB) sessionRows(ctx context.Context, cutoff int64, where string, wargs []any,
+	having []string, hargs []any, tail string) ([]obsdb.SessionRow, error) {
+	args := append(append([]any{cutoff}, wargs...), hargs...)
 	rs, err := d.reads.QueryContext(ctx, `SELECT session_id, MAX(public_id), MAX(agent), COUNT(*),
 		MIN(started_ns), MAX(last_seen_ns),
 		SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens), SUM(cache_write_tokens), SUM(reasoning_tokens),
 		(SELECT `+statusExpr+` FROM runs r2 WHERE r2.session_id = runs.session_id
 		 AND r2.parent_run_id = '' AND r2.playground = 0
 		 ORDER BY r2.turn DESC, r2.started_ns DESC LIMIT 1)
-		FROM runs WHERE `+where+` GROUP BY session_id`+havingSQL+
-		` ORDER BY MAX(last_seen_ns) DESC LIMIT ?`, append([]any{cutoff}, append(hargs, limit)...)...)
+		FROM runs WHERE `+where+` GROUP BY session_id`+havingSQL(having)+tail, args...)
 	if err != nil {
-		return obsdb.SessionPage{}, err
+		return nil, err
 	}
 	defer func() { _ = rs.Close() }()
-	page := obsdb.SessionPage{Total: total}
+	var out []obsdb.SessionRow
 	for rs.Next() {
 		var row obsdb.SessionRow
 		var first, last int64
@@ -517,7 +617,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (obsdb.SessionP
 		var status string
 		if err := rs.Scan(&row.ID, &row.PublicID, &row.Agent, &row.Turns,
 			&first, &last, &inTok, &outTok, &cached, &cacheW, &reason, &status); err != nil {
-			return obsdb.SessionPage{}, err
+			return nil, err
 		}
 		row.FirstSeen = time.Unix(0, first).UTC()
 		row.LastSeen = time.Unix(0, last).UTC()
@@ -527,72 +627,49 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (obsdb.SessionP
 			CachedInputTokens: cached.Int64, CacheWriteTokens: cacheW.Int64,
 			ReasoningTokens: reason.Int64,
 		}
-		page.Sessions = append(page.Sessions, row)
+		out = append(out, row)
 	}
-	if err := rs.Err(); err != nil {
-		return obsdb.SessionPage{}, err
-	}
-	if len(page.Sessions) == limit {
-		last := page.Sessions[len(page.Sessions)-1].LastSeen
-		page.NextBefore = &last
-	}
-	return page, nil
+	return out, rs.Err()
 }
 
-func (d *DB) Session(ctx context.Context, id string) (obsdb.SessionDetail, error) {
+func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.SessionDetail{}, err
 	}
+	defer d.closedErr(&err)
 	// The session's own grouped row, queried directly: the old read
 	// scanned the newest 500 sessions, so an older session 404'd here
 	// while the list still showed it (the audit's P2-1). Same shape as
 	// Sessions' select, scoped to the one session_id.
-	cutoff := time.Now().Add(-obsdb.InterruptedAfter).UnixNano()
-	var row obsdb.SessionRow
-	var first, last int64
-	var inTok, outTok, cached, cacheW, reason sql.NullInt64
-	var status string
-	err := d.reads.QueryRowContext(ctx, `SELECT session_id, MAX(public_id), MAX(agent), COUNT(*),
-		MIN(started_ns), MAX(last_seen_ns),
-		SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens), SUM(cache_write_tokens), SUM(reasoning_tokens),
-		(SELECT `+statusExpr+` FROM runs r2 WHERE r2.session_id = runs.session_id
-		 AND r2.parent_run_id = '' AND r2.playground = 0
-		 ORDER BY r2.turn DESC, r2.started_ns DESC LIMIT 1)
-		FROM runs
-		WHERE parent_run_id = '' AND playground = 0 AND session_id <> '' AND session_id = ?
-		GROUP BY session_id`, cutoff, id).
-		Scan(&row.ID, &row.PublicID, &row.Agent, &row.Turns,
-			&first, &last, &inTok, &outTok, &cached, &cacheW, &reason, &status)
-	if errors.Is(err, sql.ErrNoRows) {
+	now := time.Now()
+	rows, err := d.sessionRows(ctx, now.Add(-obsdb.InterruptedAfter).UnixNano(),
+		sessionScope+` AND session_id = ?`, []any{id}, nil, nil, ``)
+	if err != nil {
+		return obsdb.SessionDetail{}, err
+	}
+	if len(rows) == 0 {
 		return obsdb.SessionDetail{}, fmt.Errorf("%w: session %s", obsdb.ErrNotFound, id)
 	}
-	if err != nil {
-		return obsdb.SessionDetail{}, err
-	}
-	row.FirstSeen = time.Unix(0, first).UTC()
-	row.LastSeen = time.Unix(0, last).UTC()
-	row.Status = obsdb.Status(status)
-	row.Usage = weft.Usage{
-		InputTokens: inTok.Int64, OutputTokens: outTok.Int64,
-		CachedInputTokens: cached.Int64, CacheWriteTokens: cacheW.Int64,
-		ReasoningTokens: reason.Int64,
-	}
+	// Every turn: a cap here kept the oldest 500 and silently dropped
+	// the newest — the ones a session view is opened for. A caller that
+	// wants pages reads Runs with RunQuery.SessionID.
 	runs, err := d.queryRunRows(ctx,
-		`session_id = ? AND parent_run_id = '' AND playground = 0 ORDER BY turn, started_ns, run_id LIMIT ?`,
-		[]any{id, 500})
+		`session_id = ? AND parent_run_id = '' AND playground = 0 ORDER BY turn, started_ns, run_id`,
+		[]any{id}, now)
 	if err != nil {
 		return obsdb.SessionDetail{}, err
 	}
-	return obsdb.SessionDetail{SessionRow: row, Runs: runs}, nil
+	return obsdb.SessionDetail{SessionRow: rows[0], Runs: runs}, nil
 }
 
-func (d *DB) ResolvePublicID(ctx context.Context, publicID string) (string, error) {
+func (d *DB) ResolvePublicID(ctx context.Context, publicID string) (_ string, err error) {
 	if err := d.checkOpen(); err != nil {
 		return "", err
 	}
+	defer d.closedErr(&err)
 	var sessionID string
-	err := d.reads.QueryRowContext(ctx,
-		`SELECT session_id FROM runs WHERE public_id = ? AND session_id <> '' ORDER BY turn DESC, started_ns DESC LIMIT 1`,
+	err = d.reads.QueryRowContext(ctx,
+		`SELECT session_id FROM runs WHERE public_id = ? AND session_id <> '' ORDER BY turn DESC, started_ns DESC, run_id DESC LIMIT 1`,
 		publicID).Scan(&sessionID)
 	if err == sql.ErrNoRows {
 		return "", fmt.Errorf("%w: public id %s", obsdb.ErrNotFound, publicID)

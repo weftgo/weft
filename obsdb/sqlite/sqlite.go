@@ -137,8 +137,25 @@ func isBusy(err error) bool {
 	return false
 }
 
+// uriPath escapes the characters SQLite's URI filename form gives
+// meaning to, so a path holding one names the file it says: '%' starts
+// an escape, '?' the parameters, '#' a fragment.
+var uriPath = strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23")
+
+// fileURI is path as the SQLite URI filename that names it. A path
+// opening with "//" would read as "file://authority/...", so it gets
+// the empty authority spelled out.
+func fileURI(path string) string {
+	esc := uriPath.Replace(path)
+	if strings.HasPrefix(esc, "//") {
+		return "file://" + esc
+	}
+	return "file:" + esc
+}
+
 func openHandles(path string) (*DB, *sql.DB, error) {
-	dsn := "file:" + path +
+	file := fileURI(path)
+	dsn := file +
 		"?_txlock=immediate" +
 		"&_pragma=synchronous(NORMAL)" +
 		"&_pragma=busy_timeout(30000)" +
@@ -171,7 +188,7 @@ func openHandles(path string) (*DB, *sql.DB, error) {
 	}
 	writer.SetMaxOpenConns(1) // one writer: every Write serialized
 	writer.SetMaxIdleConns(1)
-	reads, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)")
+	reads, err := sql.Open("sqlite", file+"?_pragma=busy_timeout(30000)&_pragma=foreign_keys(ON)")
 	if err != nil {
 		_ = writer.Close()
 		return nil, nil, err
@@ -183,7 +200,7 @@ func openHandles(path string) (*DB, *sql.DB, error) {
 
 // Hub returns the DB's in-process live hub: every Write publishes its
 // frames to it before returning (D4 — this handle is what setup A's
-// studio.DB(otel.Local()) shares).
+// studio.DB(otel.LocalDB()) shares).
 func (d *DB) Hub() obsdb.Hub { return d.hub }
 
 // Close closes the handles.
@@ -211,4 +228,14 @@ func (d *DB) checkOpen() error {
 		return obsdb.ErrClosed
 	}
 	return nil
+}
+
+// closedErr turns the error of a call that raced Close into ErrClosed:
+// checkOpen passed, then Close shut the handle under the call, and the
+// driver's own "closed" error is not the documented sentinel. Every
+// method defers it on its error result.
+func (d *DB) closedErr(err *error) {
+	if *err != nil && d.checkOpen() != nil {
+		*err = obsdb.ErrClosed
+	}
 }

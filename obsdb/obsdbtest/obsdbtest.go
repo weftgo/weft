@@ -5,11 +5,14 @@
 package obsdbtest
 
 import (
-	"encoding/json"
-
 	"context"
-
+	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
+	"sort"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +36,22 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("NonWeft", nonWeft(open))
 	t.Run("NotFound", notFound(open))
 	t.Run("Experiments", experiments(open))
+	t.Run("PipelineSpellings", pipelineSpellings(open))
+	t.Run("PagingTies", pagingTies(open))
+	t.Run("SessionPaging", sessionPaging(open))
+	t.Run("TranscriptRebuilt", transcriptRebuilt(open))
+	t.Run("NonFiniteAttrs", nonFiniteAttrs(open))
+	t.Run("ZeroTimes", zeroTimes(open))
+	t.Run("OutOfOrder", outOfOrder(open))
+	t.Run("HeartbeatOnly", heartbeatOnly(open))
+	t.Run("Strings", stringsRoundTrip(open))
+	t.Run("MetaFilter", metaFilter(open))
+	t.Run("SessionUncapped", sessionUncapped(open))
+	t.Run("ReadErrorIsNotNotFound", readErrorIsNotNotFound(open))
+	t.Run("FilterCombinations", filterCombinations(open))
+	t.Run("PagingBigTie", pagingBigTie(open))
+	t.Run("ManyDaysOneBatch", manyDaysOneBatch(open))
+	t.Run("CloseRace", closeRace(open))
 }
 
 func ctx() context.Context { return context.Background() }
@@ -218,6 +237,22 @@ func idempotence(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if len(tr) != 1 {
 			t.Errorf("transcript after a rewrite = %d batches, want 1", len(tr))
 		}
+		// The (trace, span) half of the promise, read back: a backend
+		// that stored the retried span twice must not return it twice.
+		spans, err := db.RunSpans(ctx(), "c1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(spans) != 1 {
+			t.Errorf("RunSpans after a rewrite = %d spans, want 1 per span id", len(spans))
+		}
+		byTrace, err := db.Trace(ctx(), "0102030405060708090a0b0c0d0e0f10")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(byTrace) != 1 {
+			t.Errorf("Trace after a rewrite = %d spans, want 1 per span id", len(byTrace))
+		}
 	}
 }
 
@@ -297,14 +332,34 @@ func gaps(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 // a crashed run (no terminal anywhere, stale last-seen) reads running
 // while fresh and interrupted once older than InterruptedAfter —
 // DeriveStatus is the exported rule every backend reads through, so
-// the boundary is pinned here in time.
+// the boundary is pinned here in time, and the stored rows on either
+// side of it read through each backend. The non-terminal fixtures sit
+// on the wall clock, not the fixture clock: anchored at process start,
+// "fresh" expired once the test binary had run for 30 s (a slow CI
+// machine, -count=N).
 func status(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
-		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
-			record("live", "event", "run_start", 0, `{"type":"run_start","id":"live"}`, nil),
-		}}); err != nil {
+		now := time.Now().UTC()
+		liveStart := record("live", "event", "run_start", 0, `{"type":"run_start","id":"live"}`, nil)
+		liveStart.Time = now
+		// Either side of the boundary, by a margin only a stalled
+		// machine could eat (the read follows the write within ms).
+		fresh := record("fresh", "event", "run_start", 0, `{"type":"run_start","id":"fresh"}`, nil)
+		fresh.Time = now.Add(-obsdb.InterruptedAfter + 10*time.Second)
+		stale := record("stale", "event", "run_start", 0, `{"type":"run_start","id":"stale"}`, nil)
+		stale.Time = now.Add(-obsdb.InterruptedAfter - time.Second)
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{liveStart, fresh, stale}}); err != nil {
 			t.Fatal(err)
+		}
+		for id, want := range map[string]obsdb.Status{"fresh": obsdb.StatusRunning, "stale": obsdb.StatusInterrupted} {
+			r, err := db.Run(ctx(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Status != want {
+				t.Errorf("%s (last seen %v ago) = %q, want %q", id, time.Since(r.LastSeen).Round(time.Second), r.Status, want)
+			}
 		}
 		live, err := db.Run(ctx(), "live")
 		if err != nil {
@@ -341,13 +396,26 @@ func status(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Errorf("DeriveStatus(fresh crash window) = %q, want running", got)
 		}
 		// Status filters agree with the derived rows.
-		for _, st := range []obsdb.Status{obsdb.StatusRunning, obsdb.StatusSucceeded, obsdb.StatusFailed} {
+		for st, want := range map[obsdb.Status]string{
+			obsdb.StatusRunning: "live,fresh", obsdb.StatusSucceeded: "done",
+			obsdb.StatusFailed: "bad", obsdb.StatusInterrupted: "stale",
+		} {
 			page, err := db.Runs(ctx(), obsdb.RunQuery{Status: st})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if page.Total != 1 || page.Runs[0].Status != st {
-				t.Errorf("status filter %q = %d rows (first %q)", st, page.Total, page.Runs[0].Status)
+			got := idsOf(page.Runs)
+			sort.Strings(got)
+			w := strings.Split(want, ",")
+			sort.Strings(w)
+			if strings.Join(got, ",") != strings.Join(w, ",") || page.Total != len(w) {
+				t.Errorf("status filter %q = %v (total %d), want %v", st, got, page.Total, w)
+				continue
+			}
+			for _, r := range page.Runs {
+				if r.Status != st {
+					t.Errorf("status filter %q returned a %q row", st, r.Status)
+				}
 			}
 		}
 	}
@@ -553,17 +621,23 @@ func deltaRule(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 func heartbeatRule(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
-		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
-			record("c1", "event", "run_start", 0, `{"type":"run_start","id":"c1"}`, nil),
-		}}); err != nil {
+		// On the wall clock: a run_start older than InterruptedAfter reads
+		// interrupted until the heartbeat — now — refreshes it.
+		now := time.Now().UTC()
+		start := record("c1", "event", "run_start", 0, `{"type":"run_start","id":"c1"}`, nil)
+		start.Time = now.Add(-obsdb.InterruptedAfter - 10*time.Second)
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{start}}); err != nil {
 			t.Fatal(err)
 		}
 		before, err := db.Run(ctx(), "c1")
 		if err != nil {
 			t.Fatal(err)
 		}
+		if before.Status != obsdb.StatusInterrupted {
+			t.Errorf("a run last seen %v ago = %q, want interrupted", obsdb.InterruptedAfter+10*time.Second, before.Status)
+		}
 		hb := record("c1", "heartbeat", "", 0, "", nil)
-		hb.Time = at(45 * time.Second)
+		hb.Time = now
 		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{hb}}); err != nil {
 			t.Fatal(err)
 		}
@@ -741,5 +815,826 @@ func writeRun(ctx context.Context, t *testing.T, db obsdb.DB, runID, experiment 
 	finish.Time = at(2 * time.Second)
 	if err := db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{start, finish}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// pipelineSpellings pins the attribute spellings the real pipeline
+// produces, not the ones a fixture would hand-build: weft.turn and
+// weft.playground travel as run metadata, and the core renders every
+// metadata value as a string attribute — "2" and "true". A backend
+// reading only the typed spellings reports turn 0 on every row and
+// lists every playground run as a session turn.
+func pipelineSpellings(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		write := func(id string, extra map[string]any) {
+			if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+				record(id, "event", "run_start", 0, `{"type":"run_start","id":"`+id+`"}`, extra),
+				record(id, "event", "run_finish", 1, `{"type":"run_finish","run_id":"`+id+`","steps":1}`, extra),
+			}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		write("s_conf-t2", map[string]any{"weft.turn": "2"})
+		write("pg_1", map[string]any{"weft.turn": "3", "weft.playground": "true", "weft.experiment.id": "exp_1"})
+		turn, err := db.Run(ctx(), "s_conf-t2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if turn.Turn != 2 || turn.Playground {
+			t.Errorf("turn row = turn %d, playground %v; want 2, false", turn.Turn, turn.Playground)
+		}
+		pg, err := db.Run(ctx(), "pg_1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !pg.Playground || pg.Turn != 3 || pg.ExperimentID != "exp_1" {
+			t.Errorf("playground row = playground %v, turn %d, experiment %q; want true, 3, exp_1",
+				pg.Playground, pg.Turn, pg.ExperimentID)
+		}
+		yes := true
+		page, err := db.Runs(ctx(), obsdb.RunQuery{Playground: &yes})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Runs) != 1 || page.Runs[0].ID != "pg_1" {
+			t.Errorf("Playground filter = %d runs, want exactly pg_1", len(page.Runs))
+		}
+		det, err := db.Session(ctx(), "s_conf")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if det.Turns != 1 || len(det.Runs) != 1 || det.Runs[0].ID != "s_conf-t2" {
+			t.Errorf("session = %d turns, runs %+v; want the one real turn (the playground run excluded)", det.Turns, det.Runs)
+		}
+	}
+}
+
+// pagingTies: runs sharing one Started (a foreign SDK's ms-truncated
+// clock, a batch import) must survive a page boundary. The cursor is a
+// time, so a page never ends inside a tie — the tied rows ride along —
+// and the walk sees every run exactly once.
+func pagingTies(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		const n = 5
+		var recs []obsdb.Record
+		for i := 0; i < n; i++ {
+			id := "tie-" + string(rune('a'+i))
+			recs = append(recs, record(id, "event", "run_start", 0, `{"type":"run_start","id":"`+id+`"}`, nil)) // all at(0)
+		}
+		older := record("older", "event", "run_start", 0, `{"type":"run_start","id":"older"}`, nil)
+		older.Time = at(-time.Minute)
+		if err := db.Write(ctx(), obsdb.Batch{Records: append(recs, older)}); err != nil {
+			t.Fatal(err)
+		}
+		seen := map[string]int{}
+		q := obsdb.RunQuery{Limit: 2}
+		for pages := 0; ; pages++ {
+			if pages > n+2 {
+				t.Fatal("cursor walk does not terminate")
+			}
+			page, err := db.Runs(ctx(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if page.Total != n+1 {
+				t.Errorf("total = %d on page %d, want %d", page.Total, pages, n+1)
+			}
+			for _, r := range page.Runs {
+				seen[r.ID]++
+			}
+			if page.NextBefore == nil {
+				break
+			}
+			q.Before = *page.NextBefore
+		}
+		if len(seen) != n+1 {
+			t.Errorf("cursor walk saw %d of %d runs (%v): tied Started values lost at a page boundary", len(seen), n+1, seen)
+		}
+		for id, times := range seen {
+			if times != 1 {
+				t.Errorf("run %s on %d pages", id, times)
+			}
+		}
+	}
+}
+
+// sessionPaging: the Sessions cursor walks newest activity first, sees
+// every session exactly once even when several share one LastSeen, and
+// Total is the whole match on every page — the cursor never shrinks it.
+func sessionPaging(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		const n = 5
+		var recs []obsdb.Record
+		for i := 0; i < n; i++ {
+			id := "sess-" + string(rune('a'+i))
+			recs = append(recs, record(id+"-t1", "event", "run_start", 0, `{"type":"run_start","id":"`+id+`-t1"}`,
+				map[string]any{"weft.session.id": id, "weft.public_id": "pub_" + id})) // all at(0)
+		}
+		old := record("sess-old-t1", "event", "run_start", 0, `{"type":"run_start","id":"sess-old-t1"}`,
+			map[string]any{"weft.session.id": "sess-old", "weft.public_id": "pub_old"})
+		old.Time = at(-time.Minute)
+		if err := db.Write(ctx(), obsdb.Batch{Records: append(recs, old)}); err != nil {
+			t.Fatal(err)
+		}
+		seen := map[string]int{}
+		q := obsdb.SessionQuery{Limit: 2}
+		for pages := 0; ; pages++ {
+			if pages > n+2 {
+				t.Fatal("cursor walk does not terminate")
+			}
+			page, err := db.Sessions(ctx(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if page.Total != n+1 {
+				t.Errorf("total = %d on page %d, want %d (the cursor does not narrow Total)", page.Total, pages, n+1)
+			}
+			for _, s := range page.Sessions {
+				seen[s.ID]++
+			}
+			if page.NextBefore == nil {
+				break
+			}
+			q.Before = *page.NextBefore
+		}
+		if len(seen) != n+1 {
+			t.Errorf("cursor walk saw %d of %d sessions (%v): tied LastSeen values lost at a page boundary", len(seen), n+1, seen)
+		}
+		for id, times := range seen {
+			if times != 1 {
+				t.Errorf("session %s on %d pages", id, times)
+			}
+		}
+	}
+}
+
+// transcriptRebuilt: a resume that rebuilds a partial tool message
+// records the input as fed and then the rebuilt message (the core's
+// two record sites, both contract). Transcript reads the later record
+// as the authoritative one (obsdb.DedupTranscript): its bodies
+// concatenate to the transcript the run held — one tool message, not
+// the partial and the rebuilt side by side — one body per record still.
+func transcriptRebuilt(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	const (
+		user      = `{"role":"user","content":[{"type":"text","text":"refund please"}]}`
+		assistant = `{"role":"assistant","content":[{"type":"tool_call","id":"c_e","name":"echo","args":{"msg":"x"}},{"type":"tool_call","id":"c_r","name":"refund","args":{}}]}`
+		partial   = `{"role":"tool","content":[{"type":"tool_result","call_id":"c_e","name":"echo","content":"x","is_error":false}]}`
+		rebuilt   = `{"role":"tool","content":[{"type":"tool_result","call_id":"c_e","name":"echo","content":"x","is_error":false},{"type":"tool_result","call_id":"c_r","name":"refund","content":"refunded","is_error":false}]}`
+		final     = `{"role":"assistant","content":[{"type":"text","text":"all set"}]}`
+	)
+	return func(t *testing.T) {
+		db := open(t)
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+			record("c1", "event", "run_start", 0, `{"type":"run_start","id":"c1"}`, nil),
+			record("c1", "messages", "", 0, "["+user+","+assistant+","+partial+"]",
+				map[string]any{"weft.messages.input": true, "weft.step.index": int64(0)}),
+			record("c1", "messages", "", 1, "["+rebuilt+"]", map[string]any{"weft.step.index": int64(0)}),
+			record("c1", "messages", "", 2, "["+final+"]", map[string]any{"weft.step.index": int64(0)}),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		tr, err := db.Transcript(ctx(), "c1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tr) != 3 {
+			t.Fatalf("transcript = %d bodies, want 3 (one per record)", len(tr))
+		}
+		var got []string
+		for _, body := range tr {
+			var batch []json.RawMessage
+			if err := json.Unmarshal(body, &batch); err != nil {
+				t.Fatalf("body %s: %v", body, err)
+			}
+			for _, m := range batch {
+				got = append(got, string(m))
+			}
+		}
+		want := []string{user, assistant, rebuilt, final}
+		if len(got) != len(want) {
+			t.Fatalf("transcript = %d messages, want %d (the rebuilt tool message supersedes the partial one): %v",
+				len(got), len(want), got)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("message %d = %s, want %s", i, got[i], want[i])
+			}
+		}
+	}
+}
+
+// nonFiniteAttrs: NaN and ±Inf are legal OTLP doubles with no JSON
+// spelling. One of them must neither fail the batch it rides in nor
+// cost the span's other attributes their types: every backend stores
+// them under the protobuf JSON mapping's names and keeps the rest exact.
+func nonFiniteAttrs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		span := invokeSpan("c1", 1, map[string]any{
+			"score": math.NaN(), "hi": math.Inf(1), "lo": math.Inf(-1),
+			"nested": []any{1.5, math.NaN()},
+		})
+		span.Events = []obsdb.SpanEvent{{Time: at(time.Second), Name: "probe", Attrs: map[string]any{"x": math.NaN(), "n": int64(7)}}}
+		span.Resource = map[string]any{"service.name": "conf-svc", "r": math.Inf(1)}
+		recs := finishedRun("c1")
+		recs[0].Attrs["weird"] = math.NaN()
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{span}, Records: recs}); err != nil {
+			t.Fatalf("a non-finite attribute failed the batch: %v", err)
+		}
+		det, err := db.Run(ctx(), "c1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if det.Status != obsdb.StatusSucceeded || det.EventCount != 2 {
+			t.Errorf("run = %q, %d events; want the batch's other rows stored", det.Status, det.EventCount)
+		}
+		spans, err := db.RunSpans(ctx(), "c1")
+		if err != nil || len(spans) != 1 {
+			t.Fatalf("spans = %v, %v", spans, err)
+		}
+		a := spans[0].Attrs
+		if a["gen_ai.usage.input_tokens"] != int64(100) {
+			t.Errorf("input tokens = %#v, want int64(100): a non-finite sibling cost the span its types", a["gen_ai.usage.input_tokens"])
+		}
+		if a["score"] != "NaN" || a["hi"] != "Infinity" || a["lo"] != "-Infinity" {
+			t.Errorf("non-finite values = %#v/%#v/%#v, want NaN/Infinity/-Infinity", a["score"], a["hi"], a["lo"])
+		}
+		if n, _ := a["nested"].([]any); len(n) != 2 || n[0] != 1.5 || n[1] != "NaN" {
+			t.Errorf("nested = %#v", a["nested"])
+		}
+		if spans[0].Resource["r"] != "Infinity" || spans[0].Resource["service.name"] != "conf-svc" {
+			t.Errorf("resource = %#v", spans[0].Resource)
+		}
+		if ev := spans[0].Events; len(ev) != 1 || ev[0].Attrs["x"] != "NaN" || ev[0].Attrs["n"] != int64(7) {
+			t.Errorf("events = %#v", ev)
+		}
+	}
+}
+
+// zeroTimes: OTLP spells "unknown" as a zero timestamp. A record's zero
+// Time reads its Observed time (the OTLP rule); a record with no time at
+// all reads back as the zero time — never as a 1970 or 1754 instant.
+// (Not pinned, because the backends differ: an untimed record or span
+// lends a run no start in SQLite, while ClickHouse's views take the
+// epoch as its min(Started); and an untimed span sits in ClickHouse's
+// 1970 partition, which the TTL drops on insert. Neither shape is one a
+// conforming OTel SDK or collector emits.)
+func zeroTimes(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		start := record("z1", "event", "run_start", 0, `{"type":"run_start","id":"z1"}`, nil)
+		start.Time, start.Observed = time.Time{}, at(3*time.Second)
+		finish := record("z1", "event", "run_finish", 1, `{"type":"run_finish","run_id":"z1","steps":1}`, nil)
+		finish.Time = at(4 * time.Second)
+		// z2: a step with no time at all inside a timed run.
+		start2 := record("z2", "event", "run_start", 0, `{"type":"run_start","id":"z2"}`, nil)
+		step2 := record("z2", "event", "step_start", 1, `{"type":"step_start","run_id":"z2"}`, nil)
+		step2.Time = time.Time{}
+		finish2 := record("z2", "event", "run_finish", 2, `{"type":"run_finish","run_id":"z2","steps":1}`, nil)
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{start, finish, start2, step2, finish2}}); err != nil {
+			t.Fatal(err)
+		}
+		page, err := db.Events(ctx(), "z1", -1, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Events) != 2 || !page.Events[0].Time.Equal(at(3*time.Second)) {
+			t.Errorf("z1 events = %+v, want run_start at its observed time", page.Events)
+		}
+		z1, err := db.Run(ctx(), "z1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !z1.Started.Equal(at(3*time.Second)) || z1.Status != obsdb.StatusSucceeded {
+			t.Errorf("z1 = started %v, %q; want the observed time, succeeded", z1.Started, z1.Status)
+		}
+		page2, err := db.Events(ctx(), "z2", -1, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page2.Events) != 3 || !page2.Events[1].Time.IsZero() || !page2.Events[2].Time.Equal(at(2*time.Second)) {
+			t.Errorf("z2 events = %+v, want the untimed step read back as the zero time", page2.Events)
+		}
+		z2, err := db.Run(ctx(), "z2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !z2.LastSeen.Equal(at(2*time.Second)) || z2.Finished == nil || !z2.Finished.Equal(at(2*time.Second)) {
+			t.Errorf("z2 = last seen %v, finished %v; want run_finish's time", z2.LastSeen, z2.Finished)
+		}
+	}
+}
+
+// outOfOrder: batches arrive in any order — a span before the records,
+// a child before its parent, a batch retried after later ones landed.
+// The run rows converge to the same answer whatever the order.
+func outOfOrder(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		recs := finishedRun("c1")
+		span := invokeSpan("c1", 1, nil)
+		kidStart := record("kid", "event", "run_start", 0, `{"type":"run_start","id":"kid"}`,
+			map[string]any{"weft.parent.run.id": "c1", "weft.parent.call.id": "call_1", "weft.session.id": ""})
+		kidFinish := record("kid", "event", "run_finish", 1, `{"type":"run_finish","run_id":"kid","steps":1}`,
+			map[string]any{"weft.session.id": ""})
+		for i, b := range []obsdb.Batch{
+			{Spans: []obsdb.Span{span}},          // the span first
+			{Records: []obsdb.Record{kidFinish}}, // the child's tail, before anything of its parent
+			{Records: recs[2:]},                  // parent's tail
+			{Records: []obsdb.Record{kidStart}},  // the child's head
+			{Records: recs[:2]},                  // parent's head
+			{Records: recs[2:]},                  // a retried batch, after later ones landed
+			{Spans: []obsdb.Span{span}},          // and the span again
+		} {
+			if err := db.Write(ctx(), b); err != nil {
+				t.Fatalf("batch %d: %v", i, err)
+			}
+		}
+		det, err := db.Run(ctx(), "c1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if det.Status != obsdb.StatusSucceeded || !det.Started.Equal(at(0)) || det.Finished == nil {
+			t.Errorf("c1 = %q, started %v, finished %v", det.Status, det.Started, det.Finished)
+		}
+		if det.EventCount != 2 || det.MessageCount != 1 || det.DeltaCount != 1 || det.Usage.InputTokens != 100 {
+			t.Errorf("c1 counts/usage = %d/%d/%d, %+v", det.EventCount, det.MessageCount, det.DeltaCount, det.Usage)
+		}
+		if len(det.Children) != 1 || det.Children[0].ID != "kid" || det.Children[0].Status != obsdb.StatusSucceeded {
+			t.Errorf("children = %+v", det.Children)
+		}
+		top, err := db.Runs(ctx(), obsdb.RunQuery{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if top.Total != 1 || len(top.Runs) != 1 || top.Runs[0].ID != "c1" {
+			t.Errorf("top-level = %d %v, want c1 alone (the child's parentless tail is still the child's)", top.Total, idsOf(top.Runs))
+		}
+		kids, err := db.Runs(ctx(), obsdb.RunQuery{ParentRunID: "c1"})
+		if err != nil || kids.Total != 1 || len(kids.Runs) != 1 || kids.Runs[0].Status != obsdb.StatusSucceeded {
+			t.Errorf("children list = %+v, %v", kids, err)
+		}
+		spans, err := db.RunSpans(ctx(), "c1")
+		if err != nil || len(spans) != 1 {
+			t.Errorf("spans = %d, %v", len(spans), err)
+		}
+	}
+}
+
+// heartbeatOnly: a run seen through nothing but heartbeats (its durable
+// records lost or still in flight) exists, reads running while fresh,
+// started at the first beat, and has an empty — not missing — event
+// page.
+func heartbeatOnly(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		// The wall clock, not the fixture's: "running" must hold however
+		// long the process has been up before this subtest.
+		now := time.Now().UTC()
+		h1 := record("hb", "heartbeat", "", 0, "", nil)
+		h1.Time = now.Add(-2 * time.Second)
+		h2 := record("hb", "heartbeat", "", 0, "", nil)
+		h2.Time = now.Add(-time.Second)
+		// One batch, the later beat first: the start is the earliest
+		// time seen, whatever the arrival order.
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{h2, h1}}); err != nil {
+			t.Fatal(err)
+		}
+		det, err := db.Run(ctx(), "hb")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if det.Status != obsdb.StatusRunning || det.EventCount != 0 || det.MessageCount != 0 {
+			t.Errorf("hb = %q, %d/%d", det.Status, det.EventCount, det.MessageCount)
+		}
+		if !det.Started.Equal(h1.Time) || !det.LastSeen.Equal(h2.Time) {
+			t.Errorf("hb = started %v, last seen %v; want the first and the last beat", det.Started, det.LastSeen)
+		}
+		page, err := db.Events(ctx(), "hb", -1, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Events) != 0 || page.Done || len(page.Gaps) != 0 {
+			t.Errorf("hb events = %+v", page)
+		}
+		tr, err := db.Transcript(ctx(), "hb")
+		if err != nil || len(tr) != 0 {
+			t.Errorf("hb transcript = %v, %v", tr, err)
+		}
+		// A run seen only through its invoke_agent span (its records lost
+		// or still in flight) started when the span did.
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{invokeSpan("sp", 1, nil)}}); err != nil {
+			t.Fatal(err)
+		}
+		sp, err := db.Run(ctx(), "sp")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !sp.Started.Equal(at(0)) || !sp.LastSeen.Equal(at(9*time.Second)) || sp.Finished == nil {
+			t.Errorf("span-only run = started %v, last seen %v, finished %v; want the span's start and end", sp.Started, sp.LastSeen, sp.Finished)
+		}
+	}
+}
+
+// stringsRoundTrip: bodies are stored verbatim — unicode, bytes that are
+// not UTF-8, a megabyte — and identity and metadata strings survive.
+func stringsRoundTrip(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		id := "run-ünï-世界-🎉"
+		uni := `{"type":"run_start","id":"` + id + `","note":"héllo 世界 🎉 \u0000"}`
+		invalid := "{\"type\":\"step_start\",\"x\":\"\xff\xfe\"}"
+		big := `[{"role":"user","content":[{"type":"text","text":"` + strings.Repeat("abcdefgh", 1<<17) + `"}]}]`
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+			record(id, "event", "run_start", 0, uni, map[string]any{"note": "naïve — ✓", "bad": "a\xffb", "gen_ai.agent.name": "agënt"}),
+			record(id, "event", "step_start", 1, invalid, nil),
+			record(id, "messages", "", 0, big, nil),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		det, err := db.Run(ctx(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Metadata is JSON on both backends: a byte that is not UTF-8
+		// reads back as U+FFFD, the same on each.
+		if det.Agent != "agënt" || det.Meta["note"] != "naïve — ✓" || det.Meta["bad"] != "a\uFFFDb" {
+			t.Errorf("identity/meta = %q / %v", det.Agent, det.Meta)
+		}
+		page, err := db.Events(ctx(), id, -1, 10)
+		if err != nil || len(page.Events) != 2 {
+			t.Fatalf("events = %v, %v", page.Events, err)
+		}
+		if string(page.Events[0].Event) != uni || string(page.Events[1].Event) != invalid {
+			t.Errorf("bodies not verbatim: %q / %q", page.Events[0].Event, page.Events[1].Event)
+		}
+		tr, err := db.Transcript(ctx(), id)
+		if err != nil || len(tr) != 1 || string(tr[0]) != big {
+			t.Errorf("1 MiB transcript body: %d bodies, %v", len(tr), err)
+		}
+		list, err := db.Runs(ctx(), obsdb.RunQuery{Agent: "agënt"})
+		if err != nil || len(list.Runs) != 1 || list.Runs[0].ID != id {
+			t.Errorf("agent filter = %v, %v", list.Runs, err)
+		}
+	}
+}
+
+// metaFilter: RunQuery.Meta is an exact subset match on key and value,
+// whatever characters either holds — dots, quotes, backslashes,
+// wildcards, unicode.
+func metaFilter(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		meta := map[string]any{
+			"a.b": "x.y", `q"k`: `v"al`, `back\slash`: `c:\dir`, "pct%_": "50%_", "ünï": "✓", "app.tenant": "acme",
+		}
+		write := func(id string, extra map[string]any) {
+			if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+				record(id, "event", "run_start", 0, `{"type":"run_start","id":"`+id+`"}`, extra),
+			}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		write("m1", meta)
+		write("m2", map[string]any{"a": map[string]any{"b": "x.y"}, "pct%_": "50%x", "app.tenant": "other"})
+		for k, v := range meta {
+			page, err := db.Runs(ctx(), obsdb.RunQuery{Meta: map[string]string{k: v.(string)}})
+			if err != nil {
+				t.Fatalf("meta %q: %v", k, err)
+			}
+			if len(page.Runs) != 1 || page.Runs[0].ID != "m1" {
+				t.Errorf("meta %q=%q matched %v, want m1 alone", k, v, idsOf(page.Runs))
+			}
+		}
+		page, err := db.Runs(ctx(), obsdb.RunQuery{Meta: map[string]string{"a.b": "x.y", "app.tenant": "acme"}})
+		if err != nil || len(page.Runs) != 1 {
+			t.Errorf("two-key subset = %v, %v", idsOf(page.Runs), err)
+		}
+		none, err := db.Runs(ctx(), obsdb.RunQuery{Meta: map[string]string{"app.tenant": "acme", "pct%_": "50%x"}})
+		if err != nil || len(none.Runs) != 0 {
+			t.Errorf("a pair from each run = %v, %v; want none", idsOf(none.Runs), err)
+		}
+		missing, err := db.Runs(ctx(), obsdb.RunQuery{Meta: map[string]string{"absent": ""}})
+		if err != nil || len(missing.Runs) != 0 {
+			t.Errorf("an absent key matched %v, %v", idsOf(missing.Runs), err)
+		}
+	}
+}
+
+// sessionUncapped: Session returns every turn, the newest included, past
+// any list page size.
+func sessionUncapped(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		const n = 520
+		recs := make([]obsdb.Record, 0, n)
+		for i := 1; i <= n; i++ {
+			id := fmt.Sprintf("big-t%03d", i)
+			r := record(id, "event", "run_start", 0, `{"type":"run_start","id":"`+id+`"}`,
+				map[string]any{"weft.session.id": "big", "weft.turn": int64(i)})
+			r.Time = at(time.Duration(i) * time.Millisecond)
+			recs = append(recs, r)
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Records: recs}); err != nil {
+			t.Fatal(err)
+		}
+		det, err := db.Session(ctx(), "big")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if det.Turns != n || len(det.Runs) != n || det.Runs[n-1].ID != fmt.Sprintf("big-t%03d", n) {
+			t.Errorf("session = %d turns, %d runs; want all %d, newest last", det.Turns, len(det.Runs), n)
+		}
+	}
+}
+
+// readErrorIsNotNotFound: a read that failed is not "no such id" —
+// callers branch on ErrNotFound (SaveExperiment's first save, Studio's
+// 404), so a cancelled or broken read must surface as itself.
+func readErrorIsNotNotFound(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		if err := db.Write(ctx(), obsdb.Batch{Records: finishedRun("c1")}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SaveExperiment(ctx(), obsdb.Experiment{ID: "exp"}); err != nil {
+			t.Fatal(err)
+		}
+		dead, cancel := context.WithCancel(ctx())
+		cancel()
+		check := func(name string, err error) {
+			t.Helper()
+			if err == nil || errors.Is(err, obsdb.ErrNotFound) {
+				t.Errorf("%s on a cancelled context = %v, want the read's own error", name, err)
+			}
+		}
+		_, err := db.Run(dead, "c1")
+		check("Run", err)
+		_, err = db.Events(dead, "c1", -1, 10)
+		check("Events", err)
+		_, err = db.Transcript(dead, "c1")
+		check("Transcript", err)
+		_, err = db.RunSpans(dead, "c1")
+		check("RunSpans", err)
+		_, err = db.Session(dead, "s_conf")
+		check("Session", err)
+		_, err = db.ResolvePublicID(dead, "pub_conf")
+		check("ResolvePublicID", err)
+		_, err = db.Experiment(dead, "exp")
+		check("Experiment", err)
+	}
+}
+
+// filterCombinations: every RunQuery filter, alone and combined, agrees
+// with the rows it returns — the list and Total both.
+func filterCombinations(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		write := func(id string, finish bool, extra map[string]any) {
+			recs := []obsdb.Record{record(id, "event", "run_start", 0, `{"type":"run_start","id":"`+id+`"}`, extra)}
+			if !finish {
+				recs[0].Time = time.Now().UTC() // running, on the wall clock
+			}
+			if finish {
+				recs = append(recs, record(id, "event", "run_finish", 1, `{"type":"run_finish","run_id":"`+id+`","steps":1}`, nil))
+			}
+			if err := db.Write(ctx(), obsdb.Batch{Records: recs}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		write("f-top-done", true, nil)
+		write("f-top-live", false, map[string]any{"gen_ai.agent.name": "other"})
+		write("f-pg", true, map[string]any{"weft.playground": "true", "weft.experiment.id": "e1"})
+		write("f-kid", true, map[string]any{"weft.parent.run.id": "f-top-done", "weft.session.id": ""})
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{invokeSpan("f-bad", 2, map[string]any{"weft.session.id": "s_other"})}}); err != nil {
+			t.Fatal(err)
+		}
+		yes, no := true, false
+		for _, c := range []struct {
+			name string
+			q    obsdb.RunQuery
+			want []string
+		}{
+			{"default", obsdb.RunQuery{}, []string{"f-bad", "f-pg", "f-top-done", "f-top-live"}},
+			{"all", obsdb.RunQuery{ParentRunID: "*"}, []string{"f-bad", "f-kid", "f-pg", "f-top-done", "f-top-live"}},
+			{"parent", obsdb.RunQuery{ParentRunID: "f-top-done"}, []string{"f-kid"}},
+			{"succeeded", obsdb.RunQuery{Status: obsdb.StatusSucceeded}, []string{"f-pg", "f-top-done"}},
+			{"succeeded all", obsdb.RunQuery{Status: obsdb.StatusSucceeded, ParentRunID: "*"}, []string{"f-kid", "f-pg", "f-top-done"}},
+			{"running", obsdb.RunQuery{Status: obsdb.StatusRunning}, []string{"f-top-live"}},
+			{"failed", obsdb.RunQuery{Status: obsdb.StatusFailed}, []string{"f-bad"}},
+			{"interrupted", obsdb.RunQuery{Status: obsdb.StatusInterrupted}, nil},
+			{"playground", obsdb.RunQuery{Playground: &yes}, []string{"f-pg"}},
+			{"not playground", obsdb.RunQuery{Playground: &no, Status: obsdb.StatusSucceeded}, []string{"f-top-done"}},
+			{"agent", obsdb.RunQuery{Agent: "conf", ParentRunID: "*"}, []string{"f-bad", "f-kid", "f-pg", "f-top-done"}},
+			{"agent other", obsdb.RunQuery{Agent: "other"}, []string{"f-top-live"}},
+			{"session", obsdb.RunQuery{SessionID: "s_conf"}, []string{"f-pg", "f-top-done", "f-top-live"}},
+			{"session other", obsdb.RunQuery{SessionID: "s_other", Status: obsdb.StatusFailed}, []string{"f-bad"}},
+			{"public", obsdb.RunQuery{PublicID: "pub_conf", Playground: &no}, []string{"f-bad", "f-top-done", "f-top-live"}},
+			{"experiment", obsdb.RunQuery{ExperimentID: "e1", Status: obsdb.StatusSucceeded}, []string{"f-pg"}},
+			{"meta", obsdb.RunQuery{Meta: map[string]string{"tenant": "conftest"}, Agent: "conf"}, []string{"f-pg", "f-top-done"}},
+			{"everything", obsdb.RunQuery{Agent: "conf", SessionID: "s_conf", PublicID: "pub_conf", ParentRunID: "*",
+				Status: obsdb.StatusSucceeded, Playground: &no, Meta: map[string]string{"tenant": "conftest"}}, []string{"f-top-done"}},
+		} {
+			page, err := db.Runs(ctx(), c.q)
+			if err != nil {
+				t.Fatalf("%s: %v", c.name, err)
+			}
+			got := idsOf(page.Runs)
+			sort.Strings(got)
+			if strings.Join(got, ",") != strings.Join(c.want, ",") || page.Total != len(c.want) {
+				t.Errorf("%s = %v (total %d), want %v", c.name, got, page.Total, c.want)
+			}
+		}
+	}
+}
+
+func idsOf(rows []obsdb.RunRow) []string {
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.ID)
+	}
+	return out
+}
+
+// pagingBigTie: thousands of rows sharing one timestamp (a bulk import
+// at a truncated clock) must neither blow a page up nor be skipped. A
+// page runs at most MaxTies past its Limit; the (Before, BeforeID)
+// cursor resumes inside the tie and the walk sees every run and every
+// session exactly once.
+func pagingBigTie(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		const n = obsdb.MaxTies + 100
+		recs := make([]obsdb.Record, 0, n+1)
+		for i := 0; i < n; i++ {
+			id := fmt.Sprintf("bulk-%04d", i)
+			recs = append(recs, record(id, "event", "run_start", 0, `{"type":"run_start","id":"`+id+`"}`,
+				map[string]any{"weft.session.id": "sess-" + id})) // all at(0)
+		}
+		older := record("older", "event", "run_start", 0, `{"type":"run_start","id":"older"}`,
+			map[string]any{"weft.session.id": "sess-older"})
+		older.Time = at(-time.Minute)
+		if err := db.Write(ctx(), obsdb.Batch{Records: append(recs, older)}); err != nil {
+			t.Fatal(err)
+		}
+		const limit = 40
+		seen := map[string]int{}
+		var prev string
+		q := obsdb.RunQuery{Limit: limit}
+		for pages := 0; ; pages++ {
+			if pages > n {
+				t.Fatal("run walk does not terminate")
+			}
+			page, err := db.Runs(ctx(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(page.Runs) > limit+obsdb.MaxTies {
+				t.Fatalf("page %d = %d runs, want at most Limit+MaxTies = %d", pages, len(page.Runs), limit+obsdb.MaxTies)
+			}
+			for _, r := range page.Runs {
+				seen[r.ID]++
+				if prev != "" && r.ID >= prev && r.ID != "older" {
+					t.Fatalf("page %d: %s after %s breaks the (Started, ID) descending order", pages, r.ID, prev)
+				}
+				prev = r.ID
+			}
+			if page.NextBefore == nil {
+				break
+			}
+			if page.NextBeforeID == "" {
+				t.Fatal("NextBefore without NextBeforeID")
+			}
+			q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
+		}
+		if len(seen) != n+1 {
+			t.Errorf("run walk saw %d of %d runs", len(seen), n+1)
+		}
+		for id, times := range seen {
+			if times != 1 {
+				t.Errorf("run %s on %d pages", id, times)
+			}
+		}
+		sessions := map[string]int{}
+		sq := obsdb.SessionQuery{Limit: limit}
+		for pages := 0; ; pages++ {
+			if pages > n {
+				t.Fatal("session walk does not terminate")
+			}
+			page, err := db.Sessions(ctx(), sq)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(page.Sessions) > limit+obsdb.MaxTies {
+				t.Fatalf("session page %d = %d rows, want at most %d", pages, len(page.Sessions), limit+obsdb.MaxTies)
+			}
+			for _, s := range page.Sessions {
+				sessions[s.ID]++
+			}
+			if page.NextBefore == nil {
+				break
+			}
+			sq.Before, sq.BeforeID = *page.NextBefore, page.NextBeforeID
+		}
+		if len(sessions) != n+1 {
+			t.Errorf("session walk saw %d of %d sessions", len(sessions), n+1)
+		}
+		for id, times := range sessions {
+			if times != 1 {
+				t.Errorf("session %s on %d pages", id, times)
+			}
+		}
+	}
+}
+
+// manyDaysOneBatch: one batch whose rows span hundreds of days (a
+// backfill, a sender with a broken clock) is stored whole — a storage
+// engine's per-insert partition limit must not fail the batch and take
+// its sound rows with it.
+func manyDaysOneBatch(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		const days = 150
+		var recs []obsdb.Record
+		var spans []obsdb.Span
+		for i := 0; i < days; i++ {
+			r := record("days", "event", "step_start", int64(i), `{"type":"step_start","run_id":"days"}`, nil)
+			r.Time = at(time.Duration(i) * 24 * time.Hour)
+			recs = append(recs, r)
+			sp := invokeSpan("days", 1, map[string]any{"gen_ai.operation.name": "chat"})
+			sp.SpanID = fmt.Sprintf("%016x", i+1)
+			sp.Start, sp.End = r.Time, r.Time.Add(time.Second)
+			spans = append(spans, sp)
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Spans: spans, Records: recs}); err != nil {
+			t.Fatalf("a batch spanning %d days: %v", days, err)
+		}
+		page, err := db.Events(ctx(), "days", -1, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Events) != days {
+			t.Errorf("events = %d, want %d", len(page.Events), days)
+		}
+		got, err := db.RunSpans(ctx(), "days")
+		if err != nil || len(got) != days {
+			t.Errorf("spans = %d, %v; want %d", len(got), err, days)
+		}
+	}
+}
+
+// closeRace: a call that races Close fails with ErrClosed — the
+// documented sentinel — never with whatever the driver says about a
+// handle closed under it.
+func closeRace(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		if err := db.Write(ctx(), obsdb.Batch{Records: finishedRun("c1")}); err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		errs := make(chan error, 64)
+		started := make(chan struct{}, 8)
+		for g := 0; g < 8; g++ {
+			wg.Add(1)
+			go func(g int) {
+				defer wg.Done()
+				for i := 0; ; i++ {
+					var err error
+					switch (g + i) % 4 {
+					case 0:
+						_, err = db.Runs(ctx(), obsdb.RunQuery{})
+					case 1:
+						_, err = db.Run(ctx(), "c1")
+					case 2:
+						_, err = db.Events(ctx(), "c1", -1, 10)
+					default:
+						err = db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+							record(fmt.Sprintf("w%d-%d", g, i), "event", "run_start", 0, `{"type":"run_start"}`, nil)}})
+					}
+					if i == 0 {
+						started <- struct{}{}
+					}
+					if err != nil {
+						errs <- err
+						return
+					}
+				}
+			}(g)
+		}
+		for g := 0; g < 8; g++ {
+			<-started
+		}
+		_ = db.Close()
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if !errors.Is(err, obsdb.ErrClosed) {
+				t.Errorf("a call racing Close = %v, want obsdb.ErrClosed", err)
+			}
+		}
 	}
 }

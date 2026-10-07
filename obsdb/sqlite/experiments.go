@@ -16,10 +16,11 @@ import (
 
 // SaveExperiment upserts one experiment by id. A new id stamps
 // Created; an existing one keeps it and moves Updated.
-func (d *DB) SaveExperiment(ctx context.Context, e obsdb.Experiment) error {
+func (d *DB) SaveExperiment(ctx context.Context, e obsdb.Experiment) (err error) {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
+	defer d.closedErr(&err)
 	if e.ID == "" {
 		return obsdb.ErrNotFound
 	}
@@ -46,10 +47,11 @@ func (d *DB) SaveExperiment(ctx context.Context, e obsdb.Experiment) error {
 }
 
 // Experiments lists the saved experiments, newest update first.
-func (d *DB) Experiments(ctx context.Context) ([]obsdb.Experiment, error) {
+func (d *DB) Experiments(ctx context.Context) (_ []obsdb.Experiment, err error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
 	}
+	defer d.closedErr(&err)
 	rows, err := d.reads.QueryContext(ctx,
 		`SELECT id, name, agent, created_ns, updated_ns, variants, inputs
 		 FROM experiments ORDER BY updated_ns DESC, id`)
@@ -69,10 +71,11 @@ func (d *DB) Experiments(ctx context.Context) ([]obsdb.Experiment, error) {
 }
 
 // Experiment returns one experiment; ErrNotFound otherwise.
-func (d *DB) Experiment(ctx context.Context, id string) (obsdb.Experiment, error) {
+func (d *DB) Experiment(ctx context.Context, id string) (_ obsdb.Experiment, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.Experiment{}, err
 	}
+	defer d.closedErr(&err)
 	rows, err := d.reads.QueryContext(ctx,
 		`SELECT id, name, agent, created_ns, updated_ns, variants, inputs
 		 FROM experiments WHERE id = ?`, id)
@@ -81,6 +84,10 @@ func (d *DB) Experiment(ctx context.Context, id string) (obsdb.Experiment, error
 	}
 	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
+		// A read that failed is not "no such experiment".
+		if err := rows.Err(); err != nil {
+			return obsdb.Experiment{}, err
+		}
 		return obsdb.Experiment{}, obsdb.ErrNotFound
 	}
 	return scanExperiment(rows)

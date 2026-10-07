@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/weftgo/weft"
@@ -19,20 +21,22 @@ import (
 // KeepDeltas; heartbeats are never inserted, they only move last_seen;
 // counts increment only for rows actually inserted, so retries don't
 // inflate them; any record or span — heartbeats and deltas included —
-// sets last_seen to its max and fills empty identity columns; run_start
-// sets started_ns with the earliest winning; run_finish sets the
+// sets last_seen to its max, started_ns to its min (a span's start, the
+// earliest winning: run_start's time, or the invoke_agent span's just
+// before it) and fills empty identity columns; run_finish sets the
 // terminal fields; the invoke_agent span sets trace, finish, usage,
-// steps and, on error, failed and err. A run first seen through a
-// non-run_start record (a reordered batch) gets a provisional
-// started_ns, corrected when the run_start row lands.
+// steps and, on error, failed and err. A run first seen through a later
+// record (a reordered batch) gets a provisional started_ns, corrected
+// when the earlier rows land.
 //
 // After the commit, every frame the batch produced is published to the
 // DB's hub before Write returns — an in-process subscriber sees a
 // record within this call (setup A's live lane).
-func (d *DB) Write(ctx context.Context, b obsdb.Batch) error {
+func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 	if err := d.checkOpen(); err != nil {
 		return err
 	}
+	defer d.closedErr(&err)
 	if len(b.Spans) == 0 && len(b.Records) == 0 {
 		return nil
 	}
@@ -54,6 +58,12 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) error {
 	}
 	for _, r := range b.Records {
 		w := obsdb.DeriveRecord(r)
+		// OTLP spells "unknown" as a zero time and has the receiver use
+		// the observed one (a log bridge that never set Time). The hub
+		// frames below still carry the record as ingested.
+		if r.Time.IsZero() {
+			r.Time = r.Observed
+		}
 		if w.RunID == "" {
 			if err := insertOtherLog(ctx, tx, r); err != nil {
 				return err
@@ -128,17 +138,17 @@ func (d *DB) publish(b obsdb.Batch, ru *runUpdates) {
 }
 
 func insertSpan(ctx context.Context, tx *sql.Tx, s obsdb.Span, w obsdb.Weft) (bool, error) {
-	attrs, err := json.Marshal(s.Attrs)
+	attrs, err := marshalColumn(s.Attrs)
 	if err != nil {
 		return false, err
 	}
-	resource, err := json.Marshal(s.Resource)
+	resource, err := marshalColumn(s.Resource)
 	if err != nil {
 		return false, err
 	}
 	events := "[]"
 	if len(s.Events) > 0 {
-		b, err := json.Marshal(s.Events)
+		b, err := marshalColumn(s.Events)
 		if err != nil {
 			return false, err
 		}
@@ -150,7 +160,7 @@ func insertSpan(ctx context.Context, tx *sql.Tx, s obsdb.Span, w obsdb.Weft) (bo
 		 attrs, resource, events)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		s.TraceID, s.SpanID, s.ParentSpanID, s.Name, s.Kind,
-		s.Start.UnixNano(), s.End.UnixNano(),
+		unixNS(s.Start), unixNS(s.End),
 		s.StatusCode, s.StatusMessage, s.Service,
 		w.RunID, w.Step, w.ToolSeq, w.SessionID,
 		string(attrs), string(resource), events)
@@ -162,14 +172,14 @@ func insertSpan(ctx context.Context, tx *sql.Tx, s obsdb.Span, w obsdb.Weft) (bo
 }
 
 func insertRecord(ctx context.Context, tx *sql.Tx, r obsdb.Record, w obsdb.Weft) (bool, error) {
-	attrs, err := json.Marshal(r.Attrs)
+	attrs, err := marshalColumn(r.Attrs)
 	if err != nil {
 		return false, err
 	}
 	res, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO records
 		(run_id, kind, pos, time_ns, trace_id, span_id, event_type, step, body, attrs)
 		VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		w.RunID, w.Record, w.Pos, r.Time.UnixNano(), r.TraceID, r.SpanID,
+		w.RunID, w.Record, w.Pos, unixNS(r.Time), r.TraceID, r.SpanID,
 		w.EventType, w.Step, r.Body, string(attrs))
 	if err != nil {
 		return false, err
@@ -179,20 +189,87 @@ func insertRecord(ctx context.Context, tx *sql.Tx, r obsdb.Record, w obsdb.Weft)
 }
 
 func insertOtherLog(ctx context.Context, tx *sql.Tx, r obsdb.Record) error {
-	attrs, err := json.Marshal(r.Attrs)
+	attrs, err := marshalColumn(r.Attrs)
 	if err != nil {
 		return err
 	}
-	resource, err := json.Marshal(r.Resource)
+	resource, err := marshalColumn(r.Resource)
 	if err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO other_logs
 		(time_ns, trace_id, span_id, severity, event_name, body, service, attrs, resource)
 		VALUES (?,?,?,?,?,?,?,?,?)`,
-		r.Time.UnixNano(), r.TraceID, r.SpanID, r.Severity, r.EventName,
+		unixNS(r.Time), r.TraceID, r.SpanID, r.Severity, r.EventName,
 		r.Body, r.Service, string(attrs), string(resource))
 	return err
+}
+
+// unixNS is a time as the *_ns columns hold it. The zero time — OTLP's
+// "unknown" — is stored as 0: it is outside UnixNano's range, and the
+// undefined result read back as a date in 1754.
+func unixNS(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UnixNano()
+}
+
+// marshalColumn encodes an attrs, resource or events column. JSON has
+// no spelling for NaN or an infinite double, yet both are legal OTLP
+// attribute values — and one of them must not fail the batch it rides
+// in (every other span and record lost, the exporter retrying a batch
+// that can never succeed). They are stored under the names the
+// protobuf JSON mapping gives them.
+func marshalColumn(v any) ([]byte, error) {
+	b, err := json.Marshal(v)
+	var unsupported *json.UnsupportedValueError
+	if errors.As(err, &unsupported) {
+		return json.Marshal(finite(v))
+	}
+	return b, err
+}
+
+// finite returns v with every non-finite double replaced by its name;
+// the attribute value shapes of the model (S3.3), copied, never
+// modified in place — the batch is the caller's.
+func finite(v any) any {
+	switch x := v.(type) {
+	case float64:
+		switch {
+		case math.IsNaN(x):
+			return "NaN"
+		case math.IsInf(x, 1):
+			return "Infinity"
+		case math.IsInf(x, -1):
+			return "-Infinity"
+		}
+	case map[string]any:
+		if x == nil {
+			return x
+		}
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			out[k] = finite(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = finite(e)
+		}
+		return out
+	case []obsdb.SpanEvent:
+		out := make([]obsdb.SpanEvent, len(x))
+		for i, e := range x {
+			out[i] = e
+			if e.Attrs != nil {
+				out[i].Attrs, _ = finite(e.Attrs).(map[string]any)
+			}
+		}
+		return out
+	}
+	return v
 }
 
 // runUpdates accumulates the runs a batch touched, in touch order.
@@ -221,8 +298,7 @@ func (ru *runUpdates) touch(runID string) *runUpdate {
 // and finished.
 type runUpdate struct {
 	lastSeen     int64
-	started      int64
-	setStarted   bool
+	earliest     int64 // the earliest time seen, 0 for none
 	finished     int64
 	setFinished  bool
 	finishedOK   bool
@@ -282,6 +358,7 @@ func (u *runUpdate) markDelta(pos int64) {
 // failed and err.
 func (u *runUpdate) applySpan(s obsdb.Span, w obsdb.Weft) {
 	u.applyIdentity(w, obsdb.Record{})
+	u.seeStart(s.Start)
 	u.seeTime(s.End)
 	if s.Attrs != nil {
 		for k, v := range obsdb.MetaOf(s.Attrs) {
@@ -397,13 +474,34 @@ func (u *runUpdate) mergeMeta(k, v string) {
 	u.meta[k] = v
 }
 
+// seeTime folds one record or span time into the update: last-seen is
+// the latest time seen, the start the earliest — of anything, heartbeats,
+// deltas and spans included, which is the ClickHouse views' min/max
+// rule, so both backends date a run alike whatever reached them first.
+// The zero time is "unknown" and moves neither.
 func (u *runUpdate) seeTime(t time.Time) {
-	if ns := t.UnixNano(); ns > u.lastSeen {
+	ns := unixNS(t)
+	if ns == 0 {
+		return
+	}
+	if ns > u.lastSeen {
 		u.lastSeen = ns
+	}
+	u.seeStart(t)
+}
+
+// seeStart lowers the start alone: a span's start time, whose end is
+// its last-seen.
+func (u *runUpdate) seeStart(t time.Time) {
+	if ns := unixNS(t); ns != 0 && (u.earliest == 0 || ns < u.earliest) {
+		u.earliest = ns
 	}
 }
 
 func (u *runUpdate) setFinishedAt(t time.Time) {
+	if t.IsZero() {
+		return // an unknown time finishes nothing
+	}
 	ns := t.UnixNano()
 	if !u.setFinished || ns > u.finished {
 		u.finished, u.setFinished = ns, true
@@ -415,13 +513,6 @@ func (u *runUpdate) setFinishedAt(t time.Time) {
 // time, the earliest winning, plus provider/model from the body) and
 // run_finish (the terminal fields from the body).
 func (u *runUpdate) applyDurable(ctx context.Context, tx *sql.Tx, r obsdb.Record, w obsdb.Weft) error {
-	if !r.Time.IsZero() {
-		if !u.setStarted {
-			u.started, u.setStarted = r.Time.UnixNano(), true
-		} else if r.Time.UnixNano() < u.started {
-			u.started = r.Time.UnixNano()
-		}
-	}
 	switch w.EventType {
 	case "run_start":
 		var body struct {
@@ -514,10 +605,9 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 			&ex.inTok, &ex.outTok, &ex.cachedTok, &ex.cacheWrite, &ex.reasoningTok)
 	switch {
 	case err == sql.ErrNoRows:
-		started := u.started
-		if !u.setStarted {
-			started = u.lastSeen // a run first seen through a non-run_start record
-		}
+		// The earliest time seen; a reordered batch's provisional start
+		// is corrected by the min below when earlier records land.
+		started := u.earliest
 		lastSeen := maxNS(u.lastSeen, started)
 		meta := "{}"
 		if len(u.meta) > 0 {
@@ -553,8 +643,8 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 
 	// UPDATE: merge the update into what the row holds.
 	started := ex.started.Int64
-	if u.setStarted && (!ex.started.Valid || u.started < started) {
-		started = u.started
+	if u.earliest != 0 && (started == 0 || u.earliest < started) {
+		started = u.earliest // 0 was "no time seen yet", never an instant
 	}
 	lastSeen := maxNS(u.lastSeen, ex.lastSeen.Int64)
 	finished := ex.finished
@@ -656,7 +746,7 @@ func mergeMetaJSON(existing string, add map[string]string) string {
 
 // runRowByID reads one run row for hub frames (after the commit).
 func (d *DB) runRowByID(ctx context.Context, runID string) (obsdb.RunRow, error) {
-	rows, err := d.queryRunRows(ctx, `run_id = ?`, []any{runID})
+	rows, err := d.queryRunRows(ctx, `run_id = ?`, []any{runID}, time.Now())
 	if err != nil {
 		return obsdb.RunRow{}, err
 	}

@@ -22,10 +22,17 @@ type DB interface {
 
 	Runs(ctx context.Context, q RunQuery) (RunPage, error)
 	Run(ctx context.Context, id string) (RunDetail, error) // ErrNotFound
+	// Events pages a run's durable events in position order. after is
+	// exclusive — pass -1 to read from the start (0 would skip position
+	// 0, the run_start) and EventPage.NextAfter to continue. limit: 0 =
+	// 100, max 1000.
 	Events(ctx context.Context, runID string, after int64, limit int) (EventPage, error)
-	Transcript(ctx context.Context, runID string) ([]json.RawMessage, error) // messages bodies, in order
+	// Transcript returns the messages bodies in index order, one per
+	// messages record, read through DedupTranscript — so they
+	// concatenate to the transcript the run held.
+	Transcript(ctx context.Context, runID string) ([]json.RawMessage, error)
 	RunSpans(ctx context.Context, runID string) ([]Span, error)
-	Trace(ctx context.Context, traceID string) ([]Span, error)
+	Trace(ctx context.Context, traceID string) ([]Span, error) // empty, not an error, for an unknown trace
 
 	Sessions(ctx context.Context, q SessionQuery) (SessionPage, error)
 	Session(ctx context.Context, id string) (SessionDetail, error)
@@ -50,7 +57,11 @@ type RunQuery struct {
 	ExperimentID                            string            // the runs of one experiment
 	Meta                                    map[string]string // subset match on metadata
 	Before                                  time.Time         // cursor on Started; zero = newest
-	Limit                                   int               // 0 = 50, max 500
+	// BeforeID, with Before, makes the cursor the pair (Started, ID):
+	// the runs after that one in the list order — exact inside a group
+	// sharing one Started. Pass RunPage.NextBeforeID.
+	BeforeID string
+	Limit    int // 0 = 50, max 500
 }
 
 // Experiment is one saved playground group: a name, the variants and
@@ -117,12 +128,26 @@ type RunRow struct {
 	DeltaCount                                                 int64 // deltas are counted, never stored (Q4)
 }
 
-// RunPage is one Runs result.
+// RunPage is one Runs result, newest Started first (ties by ID,
+// descending). NextBefore and NextBeforeID are the next page's
+// RunQuery.Before and BeforeID, nil and "" on the last page. A page
+// does not end inside a group of runs sharing one Started: the rest of
+// the group rides along, so a caller paging on Before alone skips
+// nothing — up to MaxTies rows past Limit. A longer tie (a bulk import
+// at one truncated timestamp) is cut there, and only the (Before,
+// BeforeID) pair resumes inside it. Total counts the whole match,
+// cursor aside.
 type RunPage struct {
-	Runs       []RunRow
-	Total      int
-	NextBefore *time.Time
+	Runs         []RunRow
+	Total        int
+	NextBefore   *time.Time
+	NextBeforeID string
 }
+
+// MaxTies bounds how far a page may run past its Limit to finish a group
+// of rows sharing the cursor's time (RunPage, SessionPage): one page
+// never grows unbounded however many rows share one timestamp.
+const MaxTies = 500
 
 // RunDetail is one run with its subagent children (runs whose
 // ParentRunID is this run, by Started).
@@ -142,7 +167,7 @@ type PosEvent struct {
 // EventPage is one page of a run's durable events. Gaps are durable
 // positions missing below the high-water mark: a lost batch, never a
 // delta — deltas are on their own counter, so their absence cannot open
-// a hole here (D3).
+// a hole here (D3). At most MaxGaps are listed, lowest first.
 type EventPage struct {
 	Events    []PosEvent
 	NextAfter *int64
@@ -150,11 +175,17 @@ type EventPage struct {
 	Gaps      []int64
 }
 
+// MaxGaps bounds EventPage.Gaps: positions are the sender's numbers, and
+// one stray high position must not turn a page read into a list of
+// every position below it.
+const MaxGaps = 1000
+
 // SessionQuery selects sessions. The zero value lists them newest
 // activity first, 50 at a time.
 type SessionQuery struct {
 	Agent, PublicID string
 	Before          time.Time // cursor on LastSeen; zero = newest
+	BeforeID        string    // with Before: the (LastSeen, ID) pair, as RunQuery.BeforeID
 	Limit           int       // 0 = 50, max 500
 }
 
@@ -168,24 +199,30 @@ type SessionRow struct {
 	Usage               weft.Usage
 }
 
-// SessionPage is one Sessions result.
+// SessionPage is one Sessions result, paged as RunPage is: newest
+// LastSeen first (ties by ID, descending), NextBefore/NextBeforeID are
+// the next SessionQuery.Before/BeforeID, sessions sharing the last
+// row's LastSeen ride along up to MaxTies, and Total counts the whole
+// match.
 type SessionPage struct {
-	Sessions   []SessionRow
-	Total      int
-	NextBefore *time.Time
+	Sessions     []SessionRow
+	Total        int
+	NextBefore   *time.Time
+	NextBeforeID string
 }
 
-// SessionDetail is one session with its turns: top-level runs by Turn,
-// then Started; experiments excluded (they hang off runs via
-// ForkedFrom).
+// SessionDetail is one session with its turns — all of them: top-level
+// runs by Turn, then Started; experiments excluded (they hang off runs
+// via ForkedFrom).
 type SessionDetail struct {
 	SessionRow
 	Runs []RunRow
 }
 
 // ErrNotFound is returned by Run, Session, Events, Transcript,
-// RunSpans, Trace and ResolvePublicID for an id the database does not
-// hold.
+// RunSpans, Experiment and ResolvePublicID for an id the database does
+// not hold. Trace answers an unknown trace with no spans instead: a
+// trace is only ever the spans that arrived.
 var ErrNotFound = errors.New("obsdb: not found")
 
 // ErrClosed is returned by a backend used after Close.

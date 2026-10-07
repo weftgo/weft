@@ -3,6 +3,9 @@ package obsdb
 import (
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
@@ -22,18 +25,20 @@ func FromOTLPTraces(req *coltracepb.ExportTraceServiceRequest) []Span {
 		return nil
 	}
 	var out []Span
-	for _, rs := range req.ResourceSpans {
+	// The getters throughout: a nil element at any layer reads as empty
+	// instead of being dereferenced (the request is network input).
+	for _, rs := range req.GetResourceSpans() {
 		res := attrsOf(rs.GetResource())
 		service, _ := res["service.name"].(string)
-		for _, ss := range rs.ScopeSpans {
-			for _, sp := range ss.Spans {
+		for _, ss := range rs.GetScopeSpans() {
+			for _, sp := range ss.GetSpans() {
 				if sp == nil {
 					continue
 				}
 				out = append(out, Span{
-					TraceID:       hex.EncodeToString(sp.GetTraceId()),
-					SpanID:        hex.EncodeToString(sp.GetSpanId()),
-					ParentSpanID:  hex.EncodeToString(sp.GetParentSpanId()),
+					TraceID:       idHex(sp.GetTraceId(), traceIDBytes),
+					SpanID:        idHex(sp.GetSpanId(), spanIDBytes),
+					ParentSpanID:  idHex(sp.GetParentSpanId(), spanIDBytes),
 					Name:          sp.GetName(),
 					Kind:          int(sp.GetKind()),
 					Start:         unixNano(sp.GetStartTimeUnixNano()),
@@ -45,6 +50,9 @@ func FromOTLPTraces(req *coltracepb.ExportTraceServiceRequest) []Span {
 					Resource:      res,
 				})
 				for _, ev := range sp.GetEvents() {
+					if ev == nil {
+						continue
+					}
 					out[len(out)-1].Events = append(out[len(out)-1].Events, SpanEvent{
 						Time:  unixNano(ev.GetTimeUnixNano()),
 						Name:  ev.GetName(),
@@ -66,19 +74,19 @@ func FromOTLPLogs(req *collogspb.ExportLogsServiceRequest) []Record {
 		return nil
 	}
 	var out []Record
-	for _, rl := range req.ResourceLogs {
+	for _, rl := range req.GetResourceLogs() {
 		res := attrsOf(rl.GetResource())
 		service, _ := res["service.name"].(string)
-		for _, sl := range rl.ScopeLogs {
-			for _, lr := range sl.LogRecords {
+		for _, sl := range rl.GetScopeLogs() {
+			for _, lr := range sl.GetLogRecords() {
 				if lr == nil {
 					continue
 				}
 				out = append(out, Record{
 					Time:      unixNano(lr.GetTimeUnixNano()),
 					Observed:  unixNano(lr.GetObservedTimeUnixNano()),
-					TraceID:   hex.EncodeToString(lr.GetTraceId()),
-					SpanID:    hex.EncodeToString(lr.GetSpanId()),
+					TraceID:   idHex(lr.GetTraceId(), traceIDBytes),
+					SpanID:    idHex(lr.GetSpanId(), spanIDBytes),
 					Severity:  int(lr.GetSeverityNumber()),
 					EventName: lr.GetEventName(),
 					Body:      valueString(lr.GetBody()),
@@ -97,6 +105,41 @@ func attrsOf(r *resourcepb.Resource) map[string]any {
 		return nil
 	}
 	return keyValueMap(r.GetAttributes())
+}
+
+// The id widths OTLP fixes: 16-byte trace ids, 8-byte span ids.
+const (
+	traceIDBytes = 16
+	spanIDBytes  = 8
+)
+
+// idHex renders a trace or span id as lowercase hex. size is the id's
+// width in bytes.
+//
+// OTLP/JSON spells ids as hex strings, not the base64 the standard
+// protobuf JSON mapping gives a bytes field — and a hex id is valid
+// base64, so a protojson decode of a real OTLP/JSON request (what
+// studio/ingest runs) succeeds and yields size*3/2 bytes of the hex
+// text read as base64. No real id has that width, and encoding the
+// bytes back returns the sender's string exactly: when that string is
+// hex of the right length, it is the id.
+func idHex(b []byte, size int) string {
+	if len(b) == size*3/2 {
+		if s := base64.StdEncoding.EncodeToString(b); isHex(s) {
+			return strings.ToLower(s)
+		}
+	}
+	return hex.EncodeToString(b)
+}
+
+func isHex(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // unixNano renders a protobuf fixed64 timestamp; zero stays zero.
@@ -169,15 +212,20 @@ func anyValue(v *commonpb.AnyValue) any {
 
 // valueString renders a record body: weft bodies are JSON strings; any
 // other value type (a stock bridge may emit structured bodies) renders
-// through its AnyValue mapping.
+// through its AnyValue mapping, as JSON.
 func valueString(v *commonpb.AnyValue) string {
-	if v == nil {
+	switch x := anyValue(v).(type) {
+	case nil:
 		return ""
+	case string:
+		return x
+	default:
+		b, err := json.Marshal(x)
+		if err != nil {
+			return fmt.Sprint(x) // a NaN or infinite double: JSON has no spelling
+		}
+		return string(b)
 	}
-	if s, ok := anyValue(v).(string); ok {
-		return s
-	}
-	return ""
 }
 
 // Compile-time pins on the OTLP enums the model's int fields carry, so

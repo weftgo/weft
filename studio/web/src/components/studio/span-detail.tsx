@@ -7,12 +7,17 @@
 import { ArrowUpRight } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
-import type { RunDoc, WireEvent } from "@/lib/api"
+import type { RunDoc, Span as TimedSpan, WireEvent } from "@/lib/api"
+import { attemptLine, msText } from "@/lib/attempts"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "@/lib/events"
 import { spanMs, usageSummary } from "@/lib/format"
 import type { Span } from "@/lib/trace"
 import { JsonTree } from "@/components/studio/json-tree"
 import { EventsExplorer } from "@/components/studio/raw-view"
+import {
+  AttemptsSection,
+  StepHeadline,
+} from "@/components/studio/step-attempts"
 import { RequestSection } from "@/components/studio/step-request"
 import type { RunRequests } from "@/components/studio/step-request"
 import {
@@ -143,12 +148,16 @@ function RunDetail({
 
 function StepDetail({
   step,
+  runId,
   runStatus,
   onJump,
   childLinks,
   requests,
 }: {
   step: FoldedStep
+  /** The run the step is the run's own step of; absent for a
+   * subagent's step (its attempts are on the child's page). */
+  runId?: string
   runStatus: string
   onJump: (t: number) => void
   childLinks: Map<string, ChildRow>
@@ -158,11 +167,23 @@ function StepDetail({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         {stepOutcome(step, runStatus)}
+        {runId ? (
+          <StepHeadline step={step} runId={runId} requests={requests} />
+        ) : null}
         <span className="ml-auto font-mono text-[10px] text-faint tabular-nums">
           events {step.from}–{step.to}
         </span>
       </div>
       {requests ? <RequestSection req={requests} step={step.index} /> : null}
+      {runId ? (
+        <AttemptsSection
+          step={step}
+          runId={runId}
+          runStatus={runStatus}
+          requests={requests}
+          defaultOpen
+        />
+      ) : null}
       <StepBody
         step={step}
         runStatus={runStatus}
@@ -226,6 +247,7 @@ export function SpanDetail({
   onMode,
   onJump,
   requests,
+  timed,
 }: {
   /** The selected span, resolved against the fold at the playhead. */
   span: Span | undefined
@@ -239,6 +261,9 @@ export function SpanDetail({
   /** The run's request record: a step of the run's own (not a
    * subagent's) shows what it called the model with. */
   requests?: RunRequests
+  /** The run's timed spans (the time axis): a chat span's detail
+   * reads its attempt children from them. */
+  timed?: TimedSpan[]
 }) {
   // The run document's children by child id; the page stamped each
   // call with its child's id (linkView — call ids may repeat across
@@ -313,7 +338,12 @@ export function SpanDetail({
             </div>
           </div>
         ) : span.timed ? (
-          <TimedDetail span={span} />
+          <TimedDetail
+            span={span}
+            runId={doc.id}
+            runStatus={runStatus}
+            timed={timed}
+          />
         ) : span.kind === "run" || span.kind === "subagent" ? (
           <RunDetail
             run={span.node as FoldedRun}
@@ -326,6 +356,11 @@ export function SpanDetail({
         ) : span.kind === "step" ? (
           <StepDetail
             step={span.node as FoldedStep}
+            runId={
+              span.key === `s${(span.node as FoldedStep).index}`
+                ? doc.id
+                : undefined
+            }
             runStatus={runStatus}
             onJump={onJump}
             childLinks={childLinks}
@@ -360,9 +395,22 @@ export function SpanDetail({
 
 /** A time-axis row's facts: the timed span itself — name, service,
  * times, status, and its attributes as a tree (S4.7's time axis). */
-function TimedDetail({ span }: { span: Span }) {
+function TimedDetail({
+  span,
+  runId,
+  runStatus,
+  timed,
+}: {
+  span: Span
+  runId: string
+  runStatus: string
+  timed?: TimedSpan[]
+}) {
   const t = span.timed!
   const sp = t.span
+  const chat = isChatSpan(sp) ? chatFacts(sp, timed ?? []) : null
+  const step = chat ? num(sp.attrs["weft.step.index"]) : undefined
+  const chatRun = str(sp.attrs["weft.run.id"]) || runId
   return (
     <div className="space-y-3">
       <Facts
@@ -377,8 +425,17 @@ function TimedDetail({ span }: { span: Span }) {
               ? `${spanMs(t.fromMs)}– (open)`
               : `${spanMs(t.fromMs)}–${spanMs(t.toMs)} (${spanMs(t.toMs - t.fromMs)})`,
           ],
+          ...(chat ?? []),
         ]}
       />
+      {chat && step !== undefined ? (
+        <AttemptsSection
+          step={{ index: step }}
+          runId={chatRun}
+          runStatus={runStatus}
+          defaultOpen
+        />
+      ) : null}
       <div className="codewin">
         <div className="codewin-bar">
           <span className="font-mono text-[11px] text-code-mut">attrs</span>
@@ -401,4 +458,55 @@ function TimedDetail({ span }: { span: Span }) {
       ) : null}
     </div>
   )
+}
+
+function str(v: unknown): string {
+  return typeof v === "string" ? v : ""
+}
+
+function num(v: unknown): number | undefined {
+  const n = typeof v === "string" ? Number(v) : v
+  return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : undefined
+}
+
+/** A model call's span: gen_ai.operation.name chat, or named so. */
+function isChatSpan(sp: TimedSpan): boolean {
+  const op = sp.attrs["gen_ai.operation.name"]
+  return op === "chat" || (op === undefined && sp.name.split(" ")[0] === "chat")
+}
+
+/** chatFacts is a chat span's A4 facts (ADR 0016's A4 note): the model
+ * asked for, the one that answered, "attempt n of m" from its attempt
+ * children (the answering one is the last with status ok), and the
+ * call's TTFT. */
+function chatFacts(sp: TimedSpan, timed: TimedSpan[]): [string, React.ReactNode][] {
+  const requested = str(sp.attrs["gen_ai.request.model"])
+  const kids = timed
+    .filter((k) => k.parent_span_id === sp.span_id && k.name === "attempt")
+    .sort(
+      (a, b) =>
+        (num(a.attrs["weft.attempt.index"]) ?? 0) -
+        (num(b.attrs["weft.attempt.index"]) ?? 0)
+    )
+  const ok = kids.filter((k) => k.status === "ok").at(-1)
+  const answered =
+    str(sp.attrs["gen_ai.response.model"]) ||
+    (ok ? str(ok.attrs["gen_ai.request.model"]) : "")
+  const rows: [string, React.ReactNode][] = [
+    ["requested", requested || "—"],
+    ["answered", answered || "not reported"],
+  ]
+  const line = ok
+    ? attemptLine({
+        n: num(ok.attrs["weft.attempt.index"]) ?? kids.indexOf(ok) + 1,
+        total: kids.length,
+        requested,
+        answered,
+      })
+    : null
+  if (line) rows.push(["attempts", <span data-attempt-line>{line}</span>])
+  else if (kids.length) rows.push(["attempts", String(kids.length)])
+  const ttft = num(sp.attrs["weft.ttft_ms"])
+  if (ttft) rows.push(["first token", msText(ttft)])
+  return rows
 }

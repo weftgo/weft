@@ -532,6 +532,7 @@ function RunPage() {
                 events={stream.events}
                 doc={doc}
                 runStatus={viewStatus}
+                timed={timed}
                 playhead={axis === "events" ? playhead : null}
                 mode={search.d ?? "detail"}
                 onMode={(m) =>

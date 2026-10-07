@@ -341,6 +341,12 @@ module, ADR 0005).
   `gen_ai.response.model`. The answering model is the last attempt the
   chain reported as a success (`mw.Retry`, `mw.Fallback`, a reporting
   adapter), else the model the call asked for.
+  Studio's step card and the panel's step line show it (A4.2): "attempt
+  4 of 4 · fallback to glm-b" and "1.2 s · first token 180 ms" from the
+  folded `step_finish` and the request rows (no fetch while collapsed),
+  the attempt list (model, outcome, `retry_after`, times) from the step
+  route on expand under the `steps` capability, the same on the trace
+  view's `chat` span, and `not_recorded` on a run from before A4.
 
 ## 0.9.0 — 2026-10-07
 

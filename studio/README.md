@@ -70,7 +70,9 @@ One script tag puts the run loop in the corner of your own page —
     <script type="module" src="/studio/panel.js" data-public-id="pub_…"></script>
 
 Rung 1 is a viewer scoped to that conversation: the turns (parked
-shown), the step story with tool calls, usage splits, approvals
+shown), the step story with tool calls, usage splits, each step's
+attempts and timing ("attempt 4 of 4 · fallback to glm-b", "1.2 s ·
+ttft 180 ms"), approvals
 read-only, truncation/gap/stripped honesty, the raw JSON, a live tail,
 ⤢ deep links into Studio, lazy subagents (one level inline, with the
 child's request line and an "open in Studio" hand-off; a grandchild is
@@ -80,7 +82,7 @@ the hand-off only) and a spans waterfall.
 backend mints per page via `POST /api/panel-tokens`). No Studio
 answering: the panel removes itself silently. The artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 88,514 B raw / 23.9 KiB gzip;
+committed `studio/dist/panel/panel.js`, 102,424 B raw / 28.1 KiB gzip;
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 

@@ -29,6 +29,10 @@ import { tokens } from "@/lib/format"
 import { bytes } from "@/lib/summarize"
 import { CodeWin } from "@/components/studio/codewin"
 import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
+import {
+  AttemptsSection,
+  StepHeadline,
+} from "@/components/studio/step-attempts"
 import { RequestSection } from "@/components/studio/step-request"
 import type { RunRequests } from "@/components/studio/step-request"
 import { childOfStep, SubagentBlock } from "@/components/studio/subagent-block"
@@ -443,6 +447,7 @@ function StepCard({
       <div className="flex flex-wrap items-center gap-2">
         <span className="eyebrow">step {step.index}</span>
         {stepOutcome(step, runStatus)}
+        <StepHeadline step={step} runId={runId} requests={requests} />
         <HoleBadges holes={holes} />
         <span className="ml-auto flex items-center gap-1">
           <span
@@ -459,6 +464,12 @@ function StepCard({
         </span>
       </div>
       {requests ? <RequestSection req={requests} step={step.index} /> : null}
+      <AttemptsSection
+        step={step}
+        runId={runId}
+        runStatus={runStatus}
+        requests={requests}
+      />
       <StepBody
         step={step}
         runStatus={runStatus}

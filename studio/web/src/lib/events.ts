@@ -59,7 +59,16 @@ export interface FoldedStep {
   text: string
   reasoning: string
   toolCalls: FoldedToolCall[]
-  finish?: { reason: string; raw?: string; usage: Usage }
+  finish?: {
+    reason: string
+    raw?: string
+    usage: Usage
+    /** step_finish's latency_ms and ttft_ms (ADR 0016's A4 note):
+     * absent when not measured — a run from before A4, a call that
+     * streamed no delta (TTFT). */
+    latencyMs?: number
+    ttftMs?: number
+  }
   /** The user turn steering delivered after this step finished (the
    * Steered event, ADR 0019): rendered between this step and the next.
    * At most one per step — the loop drains once per drain point. */
@@ -162,6 +171,12 @@ function stepIndex(v: unknown, fallback: number): number {
 }
 
 /** The event's usage, zeros when it carries none. */
+/** posInt: a measured millisecond count (whole, above 0 — 0 means
+ * "not measured", ADR 0016's A4 note). */
+function posInt(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v) && v > 0
+}
+
 function usageOf(u: Usage | undefined): Usage {
   const o = (typeof u === "object" ? u : null)
   return {
@@ -287,6 +302,8 @@ export function newFold(): FoldFeed {
             raw: ev.raw,
             usage: usageOf(ev.usage),
           }
+          if (posInt(ev.latency_ms)) into.finish.latencyMs = ev.latency_ms
+          if (posInt(ev.ttft_ms)) into.finish.ttftMs = ev.ttft_ms
           break
         case "steered": {
           // A user turn delivered inside the run: attached to the step

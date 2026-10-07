@@ -294,6 +294,11 @@ export type WireEvent =
       reason: string
       usage: Usage
       raw?: string
+      /** The step's model call timed by the loop (ADR 0016's A4 note):
+       * whole ms rounded up; absent on a run from before A4. ttft_ms is
+       * absent when no text or tool-args delta arrived. */
+      latency_ms?: number
+      ttft_ms?: number
     }
   | {
       type: "steered"
@@ -1020,6 +1025,9 @@ export interface LogRow {
 export interface LogsPage extends Holed {
   logs: LogRow[]
   next_from?: number
+  /** The run is still running: more lines may arrive (reason says so;
+   * no badge). */
+  partial?: boolean
 }
 
 /** The logs route's query: from (inclusive index), limit (0/absent is

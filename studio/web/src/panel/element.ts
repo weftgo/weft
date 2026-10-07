@@ -12,6 +12,7 @@ import { paramsLine, REQUEST_NOT_RECORDED_LABEL, REQUEST_NOT_STORED, shortHash }
 import { MAX_REQUEST_PAGES, REQUEST_PAGE } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
 import { callState, runHoles, stepHoles, truncation } from "../lib/events"
+import { attemptLine, attemptsHole, factsFromRows, timingLine } from "../lib/attempts"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
 import { duration, relativeTime, tokens } from "../lib/format"
 import { readConfig, tokenScope } from "./config"
@@ -1423,16 +1424,26 @@ function renderStep(
     el("span", undefined, `step ${step.index}`),
     el("span", "weft-grow"),
   ])
+  // A child's step reads the child's record (by the child's id).
+  const req = ctx?.child ? ctx.child.requests : t?.requests
+  // The attempt and timing line (plan A4): the request rows already
+  // read for the Request line, the folded step_finish's timing — no
+  // fetch of its own; the same words as the run page (lib/attempts).
+  const rows = req?.steps.get(step.index)?.rows ?? []
   if (step.finish) {
     head.appendChild(el("span", undefined, step.finish.reason))
     head.appendChild(el("span", undefined, usageLine(step.finish.usage)))
+    const line = attemptLine(factsFromRows(rows, true))
+    if (line) head.appendChild(el("span", "weft-badge weft-info", line, { "data-weft-attempts": "" }))
+    const timing = timingLine(step.finish.latencyMs, step.finish.ttftMs, "ttft")
+    if (timing) head.appendChild(el("span", undefined, timing, { "data-weft-timing": "" }))
   }
-  const holes = holeBadges(stepHoles(step, ctx?.child ? ctx.child.doc?.holes : t?.doc?.holes))
+  const own = stepHoles(step, ctx?.child ? ctx.child.doc?.holes : t?.doc?.holes)
+  const old = req?.error ? null : attemptsHole(step.finish, rows.length)
+  const holes = holeBadges(old ? mergeHoles(own, [old]) : own)
   if (holes) head.appendChild(holes)
   card.appendChild(head)
   const body = el("div", "weft-step-b")
-  // A child's step reads the child's record (by the child's id).
-  const req = ctx?.child ? ctx.child.requests : t?.requests
   if (req) body.appendChild(requestLine(step.index, req, runStatus, open))
   if (step.reasoning) {
     const d = el("details", "weft-collapsible")

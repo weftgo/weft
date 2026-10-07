@@ -14,6 +14,8 @@ import type { FoldedRun, FoldedStep, FoldedToolCall } from "@/lib/events"
 import { tokens } from "@/lib/format"
 import { bytes } from "@/lib/summarize"
 import { CodeWin } from "@/components/studio/codewin"
+import { RequestSection } from "@/components/studio/step-request"
+import type { RunRequests } from "@/components/studio/step-request"
 import { SubagentBlock } from "@/components/studio/subagent-block"
 import { TruncationBadge } from "@/components/studio/truncation-badge"
 import { Button } from "@/components/ui/button"
@@ -372,12 +374,14 @@ function StepCard({
   childLinks,
   highlighted,
   onJump,
+  requests,
 }: {
   step: FoldedStep
   runStatus: string
   childLinks: Map<string, RunRow>
   highlighted?: boolean
   onJump?: (t: number) => void
+  requests?: RunRequests
 }) {
   const ref = useRef<HTMLDivElement>(null)
   // A ?step= link (A3) lands on the card it names.
@@ -410,6 +414,7 @@ function StepCard({
           />
         </span>
       </div>
+      {requests ? <RequestSection req={requests} step={step.index} /> : null}
       <StepBody
         step={step}
         runStatus={runStatus}
@@ -427,6 +432,7 @@ export function StepList({
   upTo,
   highlight,
   onJump,
+  requests,
 }: {
   events: WireEvent[]
   folded: FoldedRun
@@ -438,6 +444,10 @@ export function StepList({
   highlight?: number
   /** Send the replay playhead to a position (a step or call's start). */
   onJump?: (t: number) => void
+  /** The run's request record (ADR 0028 §10): each step shows what it
+   * called the model with. Absent — the server lacks the requests
+   * capability — the section is not drawn. */
+  requests?: RunRequests
 }) {
   const replaying = upTo != null && upTo < events.length
   const view = linkView(
@@ -462,6 +472,7 @@ export function StepList({
             childLinks={childLinks}
             highlighted={step.index === highlight}
             onJump={onJump}
+            requests={requests}
           />
           {step.steer ? <SteerBlock steer={step.steer} onJump={onJump} /> : null}
         </div>

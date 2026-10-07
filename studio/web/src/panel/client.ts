@@ -6,7 +6,10 @@
 // (§3) — while the app's own api.ts resolves against its document.
 import type {
   EventsPage,
+  Holed,
   Meta,
+  RequestRow,
+  RequestsPage,
   PublicResolution,
   RawTranscript,
   RunDoc,
@@ -114,6 +117,41 @@ export function fetchTranscript(
   return panelGet<RawTranscript>(ep, `runs/${encodeURIComponent(id)}/transcript`, signal).then(
     asTranscript
   )
+}
+
+/** The request record pages the panel reads for one run: the turn is
+ * bounded by MaxSteps, and so is this walk. */
+const MAX_REQUEST_PAGES = 10
+
+/** fetchRequests reads a run's request record (GET runs/{id}/requests,
+ * the Studio UI's route): every page, prompts and catalogs inline. A
+ * 403 is the hidden hole (a read-scoped token), answered as the badge
+ * — the caller renders it, nothing is thrown or logged. */
+export async function fetchRequests(
+  ep: PanelEndpoint,
+  id: string,
+  signal?: AbortSignal
+): Promise<Holed & { requests: RequestRow[] }> {
+  const rows: RequestRow[] = []
+  let from = 0
+  for (let i = 0; i < MAX_REQUEST_PAGES; i++) {
+    let page: RequestsPage
+    try {
+      page = await panelGet<RequestsPage>(
+        ep,
+        `runs/${encodeURIComponent(id)}/requests?limit=1000${from ? `&from=${from}` : ""}`,
+        signal
+      )
+    } catch (err) {
+      if (err instanceof PanelApiError && err.status === 403) return { requests: [], badge: "hidden" }
+      throw err
+    }
+    rows.push(...page.requests)
+    if (page.badge) return { requests: rows, badge: page.badge, reason: page.reason, fix: page.fix }
+    if (page.next_from === undefined || page.next_from <= from) break
+    from = page.next_from
+  }
+  return { requests: rows }
 }
 
 export function fetchSpans(

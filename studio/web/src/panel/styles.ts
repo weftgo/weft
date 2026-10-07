@@ -108,6 +108,7 @@ details.weft-collapsible > summary {
 details.weft-collapsible > summary::before { content: "\\25B8 "; }
 details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 
+.weft-req { margin-bottom: 6px; }
 .weft-call { border-top: 1px dashed var(--w-line); margin-top: 6px; padding-top: 6px; }
 .weft-call-h { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
 .weft-call .weft-name { color: var(--w-info); }

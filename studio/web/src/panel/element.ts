@@ -5,6 +5,8 @@
 // experiment drawer and approval controls render only when
 // meta.capabilities reports the playground (§8.5 item 3).
 import type { RunRow, ToolCallPart, Usage } from "../lib/api"
+import { isHoleRef } from "../lib/api"
+import { paramsLine, shortHash } from "../lib/requests"
 import { diffLines, diffSummary } from "../lib/diff"
 import { callState, truncation } from "../lib/events"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
@@ -20,7 +22,7 @@ import {
   strippedContent,
   TURNS_LIMIT,
 } from "./state"
-import type { PanelState, TurnView } from "./state"
+import type { PanelRequests, PanelState, TurnView } from "./state"
 import { foldedWords, turnPromptOf } from "./playground"
 import type { ExperimentDraft, TurnWords } from "./playground"
 import { panelStudioVersion } from "./version"
@@ -1399,6 +1401,7 @@ function renderStep(
   }
   card.appendChild(head)
   const body = el("div", "weft-step-b")
+  if (t?.requests) body.appendChild(requestLine(step.index, t.requests, open))
   if (step.reasoning) {
     const d = el("details", "weft-collapsible")
     if (open) {
@@ -1417,6 +1420,67 @@ function renderStep(
   for (const call of step.toolCalls) body.appendChild(renderCall(call, runStatus, t, open))
   card.appendChild(body)
   return card
+}
+
+/** The request's holes in the panel's words (Studio's hole-badge.tsx
+ * holds the full table; A3 makes it one). */
+const REQ_HOLES: Record<string, string> = {
+  hidden: "request: hidden by your token scope",
+  not_recorded: "request not recorded by weft v0.9.0 or earlier",
+  stripped: "content not recorded for this destination",
+}
+
+/** requestLine is the step's request (ADR 0028 §10, the Studio run
+ * page's section in one line): the attempts and the changed marks,
+ * the system prompt collapsed, the catalog's names, the params. A hole
+ * is its badge and nothing else — a hidden one never holds a byte of
+ * prompt, because a read-scoped token never asked for it. */
+function requestLine(step: number, req: PanelRequests, open?: OpenState): HTMLElement {
+  const box = el("div", "weft-req")
+  box.setAttribute("data-weft-request", String(step))
+  if (req.badge) {
+    const why = [req.reason, req.fix && `fix: ${req.fix}`].filter(Boolean).join(" — ")
+    box.appendChild(
+      el("span", "weft-badge weft-info", REQ_HOLES[req.badge] ?? `request: ${req.badge}`, why ? { title: why } : undefined)
+    )
+    return box
+  }
+  const mine = req.steps.get(step)
+  const row = mine?.rows[mine.rows.length - 1]
+  if (!mine || !row) {
+    box.appendChild(el("span", "weft-badge", "request: no record for this step"))
+    return box
+  }
+  const head = el("div", "weft-call-h", [
+    el("span", "weft-name", "request"),
+    el("span", "weft-args", mine.rows.map((r) => `attempt ${r.attempt}`).join(" · ")),
+  ])
+  if (mine.promptChanged) head.appendChild(el("span", "weft-badge weft-info", "prompt changed at this step"))
+  if (mine.catalogChanged) head.appendChild(el("span", "weft-badge weft-info", "catalog changed at this step"))
+  if (row.content === "stripped") head.appendChild(el("span", "weft-badge", REQ_HOLES.stripped))
+  else if (row.content) head.appendChild(el("span", "weft-badge", row.content))
+  box.appendChild(head)
+  const p = row.prompt
+  if (p && !isHoleRef(p)) {
+    const d = el("details", "weft-collapsible")
+    if (open) {
+      const key = `${open.scope}\u0000request\u0000${step}`
+      d.setAttribute("data-weft-open", key)
+      if (open.keys.has(key)) d.setAttribute("open", "")
+    }
+    const text = p.text
+    d.appendChild(el("summary", undefined, `system prompt · ${text.length} chars`))
+    d.appendChild(el("div", "weft-res", text))
+    box.appendChild(d)
+  } else if (row.system_hash) {
+    box.appendChild(
+      el("div", "weft-res", `system prompt ${shortHash(row.system_hash)}${p ? ` · ${REQ_HOLES[p.badge] ?? p.badge}` : ""}`)
+    )
+  }
+  const names = row.body.tools.names
+  box.appendChild(el("div", "weft-res", `tools: ${names.length ? names.join(", ") : "none"}`))
+  box.appendChild(el("div", "weft-res", `params: ${paramsLine(row)}`))
+  return box
 }
 
 function renderCall(

@@ -18,7 +18,12 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Columns2, Rows3 } from "lucide-react"
 
-import { runQuery, transcriptQuery, spansQuery } from "@/lib/api"
+import {
+  requestsQuery,
+  runQuery,
+  transcriptQuery,
+  spansQuery,
+} from "@/lib/api"
 import type { RunRow, Span as TimedSpan } from "@/lib/api"
 import { applyTranscript, fold } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
@@ -36,6 +41,7 @@ import { ReplayBar } from "@/components/studio/replay-bar"
 import { SpanDetail } from "@/components/studio/span-detail"
 import type { DetailMode } from "@/components/studio/span-detail"
 import { StepList } from "@/components/studio/step-list"
+import { runRequests } from "@/components/studio/step-request"
 import { Waterfall } from "@/components/studio/waterfall"
 import { Button } from "@/components/ui/button"
 import { Kbd } from "@/components/ui/kbd"
@@ -163,6 +169,34 @@ function RunPage() {
     live: liveCapable,
     onRun: onRunFrame,
   })
+
+  // The run's request record (ADR 0028 §10), every page: each step
+  // shows what it called the model with. Only where the server reports
+  // the requests capability — the section is not drawn otherwise.
+  const requestsCapable = has("requests")
+  const requestsQ = useQuery({
+    ...requestsQuery(id),
+    enabled: requestsCapable && Boolean(run.data),
+    refetchInterval: runStatus === "running" ? 2000 : false,
+  })
+  const requests = useMemo(
+    () =>
+      requestsCapable
+        ? runRequests(requestsQ.data, {
+            loading: requestsQ.isPending,
+            error: requestsQ.isError ? requestsQ.error.message : undefined,
+            running: runStatus === "running",
+          })
+        : undefined,
+    [
+      requestsCapable,
+      requestsQ.data,
+      requestsQ.isPending,
+      requestsQ.isError,
+      requestsQ.error,
+      runStatus,
+    ]
+  )
 
   // The run's timed spans (the time axis's rows, S4.7), fetched when
   // the trace view is on and the run has a trace.
@@ -471,6 +505,7 @@ function RunPage() {
                   })
                 }
                 onJump={jump}
+                requests={requests}
               />
             </div>
           </div>
@@ -489,6 +524,7 @@ function RunPage() {
             upTo={axis === "events" ? (playhead ?? undefined) : undefined}
             highlight={search.step}
             onJump={jump}
+            requests={requests}
           />
         </TabsContent>
         <TabsContent value="raw" className="mt-3">

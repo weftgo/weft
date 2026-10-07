@@ -115,6 +115,68 @@ export function transcriptOf(bodies: unknown[]) {
   }
 }
 
+/**
+ * pagedRequests answers GET runs/{id}/requests the way requests.go's
+ * serveRunRequests does over a whole page's rows: step keeps one
+ * step's attempts, from is the first index, limit 0 = 100 (max 1000),
+ * next_from is one past the page's last index when the page is full;
+ * refs=1 drops the inline prompt and tools. A page carrying a badge
+ * (not_recorded) is answered as is.
+ */
+export function pagedRequests(doc: {
+  requests: { index: number; step: number; prompt?: unknown; tools?: unknown }[]
+  badge?: string
+}): Handler {
+  return (req) => {
+    if (doc.badge) return doc
+    const num = (k: string, dflt: number) => {
+      const v = req.query.get(k)
+      return v === null || v === "" ? dflt : Number(v)
+    }
+    const step = req.query.get("step")
+    const from = num("from", 0)
+    const limit = Math.min(num("limit", 0) || 100, 1000)
+    const refs = req.query.get("refs") === "1"
+    const rows = doc.requests
+      .filter((r) => r.index >= from && (step === null || r.step === Number(step)))
+      .slice(0, limit)
+      .map((r) => {
+        if (!refs) return r
+        const { prompt: _p, tools: _t, ...rest } = r
+        return rest
+      })
+    return {
+      requests: rows,
+      ...(rows.length >= limit ? { next_from: rows[rows.length - 1].index + 1 } : {}),
+    }
+  }
+}
+
+/** The 403 requests.go's mayReadPrompts answers a read-scoped panel
+ * token on the request and tools routes: the error shape with the
+ * hidden badge beside it. */
+export function hiddenRefusal(): Response {
+  return json(
+    {
+      error: {
+        code: "forbidden",
+        message:
+          "the request record carries the system prompt and the tool catalog: a read-scoped panel token does not read it",
+      },
+      badge: "hidden",
+      reason: "a read-scoped panel token does not read system prompts or tool catalogs",
+      fix: "use a playground-scoped token",
+    },
+    403
+  )
+}
+
+/** The request record's goldens (A1.3's TestRequestsRoutes and
+ * friends) by variant: "ok" (a PrepareStep rewrite at step 1, a retry
+ * there, the catalog grown), "stripped" (content-off), "not-recorded"
+ * (a pre-A1 run), "hidden" (a read-scoped token's 403). */
+export type RequestsVariant = "ok" | "stripped" | "not-recorded" | "hidden"
+
 export class FakeStudio {
   readonly requests: FakeRequest[] = []
   private routes = new Map<string, Handler>()
@@ -141,6 +203,21 @@ export class FakeStudio {
           () => (handler instanceof Response ? handler.clone() : handler)
     )
     return this
+  }
+
+  /** Serve runs/{id}/requests and runs/{id}/tools from the goldens. */
+  withRequests(runId: string, variant: RequestsVariant): this {
+    if (variant === "hidden") {
+      return this.on(`GET runs/${runId}/requests`, () => hiddenRefusal()).on(
+        `GET runs/${runId}/tools`,
+        () => hiddenRefusal()
+      )
+    }
+    const reqs = golden<Parameters<typeof pagedRequests>[0]>(`requests-${variant}`)
+    return this.on(`GET runs/${runId}/requests`, pagedRequests(reqs)).on(
+      `GET runs/${runId}/tools`,
+      golden<object>(`tools-${variant}`)
+    )
   }
 
   /** The requests made to one route, oldest first. */

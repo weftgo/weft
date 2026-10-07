@@ -440,7 +440,11 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
-    message: string
+    message: string,
+    /** The error body as the server sent it (parsed JSON), when it was
+     * JSON: a refusal can carry a hole badge beside the error (the
+     * request record's 403 reads badge "hidden"). */
+    readonly doc?: unknown
   ) {
     super(message)
   }
@@ -466,18 +470,19 @@ async function request<T>(
   if (!res.ok) {
     let code = "network"
     let message = `${res.status} ${res.statusText}`
+    type ErrorDoc = { error?: { code?: string; message?: string } } | null
+    let doc: ErrorDoc = null
     try {
-      const doc = (await res.json()) as {
-        error?: { code?: string; message?: string }
-      } | null
-      if (doc?.error) {
-        code = doc.error.code ?? code
-        message = doc.error.message ?? message
+      const parsed = (await res.json()) as ErrorDoc
+      doc = parsed
+      if (parsed?.error) {
+        code = parsed.error.code ?? code
+        message = parsed.error.message ?? message
       }
     } catch {
       // not JSON — keep the status line
     }
-    throw new ApiError(res.status, code, message)
+    throw new ApiError(res.status, code, message, doc ?? undefined)
   }
   return (await res.json()) as T
 }
@@ -609,6 +614,199 @@ export function fetchEventsPage(
   return get<EventsPage>(
     `runs/${encodeURIComponent(id)}/events?after=${after}&limit=${limit}`
   )
+}
+
+// ── The request record (ADR 0028 §10, plan A1) ─────────────────────
+// GET runs/{id}/requests and runs/{id}/tools, mirrored from
+// studio/requests.go. Every hole is a badge from ADR 0028 §11's closed
+// table with a reason and, where one exists, a fix.
+
+/** An envelope's hole: the badge, its reason and its fix — all absent
+ * when the answer has none. */
+export interface Holed {
+  badge?: string
+  reason?: string
+  fix?: string
+}
+
+/** One tool of a catalog: the model-visible triple and the policy
+ * chips (obsdb.ToolEntry). */
+export interface ToolEntry {
+  name: string
+  description: string
+  schema: unknown
+  timeout_ms: number
+  approval: boolean
+  replay: string
+  max_result_bytes: number
+  sequential: boolean
+  source: string
+}
+
+/** A resolved prompt record. content is "" or "truncated"
+ * (truncated_bytes > 0) or "derived". */
+export interface PromptDoc {
+  hash: string
+  text: string
+  content: string
+  truncated_bytes: number
+}
+
+/** A resolved tools record: one catalog, tools in name order. */
+export interface CatalogDoc {
+  hash: string
+  tools: ToolEntry[]
+  content: string
+  truncated_bytes: number
+}
+
+/** A hash whose record the run does not hold, and why
+ * (not_recorded, stripped, gap). */
+export interface HoleRef {
+  hash: string
+  badge: string
+}
+
+/** The request record's body (obsdb.RequestBody); an absent field is
+ * unset — a params field absent is the adapter's default. */
+export interface RequestBody {
+  step: number
+  attempt: number
+  system_hash: string
+  messages_ref: { index?: number; count: number }
+  tools: { catalog_hash: string; names: string[] }
+  tool_choice?: { mode: string; name?: string }
+  thinking?: { level: string; budget?: number }
+  sequential_tools: boolean
+  params: {
+    temperature?: number
+    top_p?: number
+    max_tokens?: number
+    stop?: string[]
+    seed?: number
+  }
+  model: { provider?: string; name?: string }
+  stream: boolean
+}
+
+/** One request record: one model-call attempt. content is ""
+ * (as emitted), "stripped" or "derived". prompt and tools are the
+ * records the hashes name, inline unless refs=1 — absent when the hash
+ * is "" (no system text, no tools offered). */
+export interface RequestRow {
+  index: number
+  step: number
+  attempt: number
+  time: string
+  system_hash: string
+  catalog_hash: string
+  content: "" | "stripped" | "derived" | string
+  truncated_bytes: number
+  body: RequestBody
+  prompt?: PromptDoc | HoleRef
+  tools?: CatalogDoc | HoleRef
+}
+
+/** GET /api/runs/{id}/requests: one page. next_from is the next
+ * page's from, absent on the last page. */
+export interface RequestsPage extends Holed {
+  requests: RequestRow[]
+  next_from?: number
+}
+
+/** GET /api/runs/{id}/tools: every catalog of the run, one per hash. */
+export interface ToolsDoc extends Holed {
+  catalogs: CatalogDoc[]
+}
+
+/** isHoleRef tells a missing record's {hash, badge} from the record. */
+export function isHoleRef(v: PromptDoc | CatalogDoc | HoleRef): v is HoleRef {
+  return typeof (v as HoleRef).badge === "string"
+}
+
+/** A refusal that is a hole, not an error: the routes answer a
+ * read-scoped token 403 with badge "hidden" beside the error. */
+function hiddenOf(err: unknown): Holed | null {
+  if (!(err instanceof ApiError) || err.status !== 403) return null
+  const doc = err.doc as Holed | null | undefined
+  if (doc?.badge !== "hidden") return null
+  return { badge: doc.badge, reason: doc.reason, fix: doc.fix }
+}
+
+/** GET /api/runs/{id}/requests?step=&from=&limit=&refs=1. A hidden
+ * refusal (a read-scoped token) answers as an empty page carrying the
+ * hidden badge — a hole to render, not an error. */
+export async function fetchRequests(
+  runId: string,
+  opts: { step?: number; from?: number; limit?: number; refs?: boolean } = {}
+): Promise<RequestsPage> {
+  const q = new URLSearchParams()
+  if (opts.step !== undefined) q.set("step", String(opts.step))
+  if (opts.from !== undefined) q.set("from", String(opts.from))
+  if (opts.limit !== undefined) q.set("limit", String(opts.limit))
+  if (opts.refs) q.set("refs", "1")
+  const qs = q.toString()
+  try {
+    return await get<RequestsPage>(
+      `runs/${encodeURIComponent(runId)}/requests${qs ? `?${qs}` : ""}`
+    )
+  } catch (err) {
+    const hidden = hiddenOf(err)
+    if (hidden) return { requests: [], ...hidden }
+    throw err
+  }
+}
+
+/** GET /api/runs/{id}/tools; a hidden refusal answers as an empty
+ * list carrying the hidden badge. */
+export async function fetchTools(runId: string): Promise<ToolsDoc> {
+  try {
+    return await get<ToolsDoc>(`runs/${encodeURIComponent(runId)}/tools`)
+  } catch (err) {
+    const hidden = hiddenOf(err)
+    if (hidden) return { catalogs: [], ...hidden }
+    throw err
+  }
+}
+
+/** A run's whole request record as the run page reads it: every page
+ * (runs are bounded by MaxSteps), and — when a row is stripped — the
+ * tools route's reason and fix for it (the requests route badges the
+ * row, the tools route words it). */
+export interface RunRequestsDoc extends Holed {
+  requests: RequestRow[]
+  /** The stripped note's reason and fix, when a row is stripped. */
+  stripped?: Holed
+}
+
+export async function fetchAllRequests(runId: string): Promise<RunRequestsDoc> {
+  const rows: RequestRow[] = []
+  let from: number | undefined
+  for (;;) {
+    const page = await fetchRequests(runId, { from, limit: 1000 })
+    rows.push(...page.requests)
+    if (page.badge) {
+      return { requests: rows, badge: page.badge, reason: page.reason, fix: page.fix }
+    }
+    // A cursor that does not move ends the walk.
+    if (page.next_from === undefined || page.next_from === from) break
+    from = page.next_from
+  }
+  const out: RunRequestsDoc = { requests: rows }
+  if (rows.some((r) => r.content === "stripped")) {
+    const tools = await fetchTools(runId).catch(() => null)
+    if (tools?.badge === "stripped")
+      out.stripped = { badge: tools.badge, reason: tools.reason, fix: tools.fix }
+  }
+  return out
+}
+
+export function requestsQuery(runId: string) {
+  return queryOptions({
+    queryKey: ["requests", runId],
+    staleTime: 30_000,
+    queryFn: () => fetchAllRequests(runId),
+  })
 }
 
 export function spansQuery(id: string) {

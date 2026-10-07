@@ -13,6 +13,8 @@ import { spanMs, usageSummary } from "@/lib/format"
 import type { Span } from "@/lib/trace"
 import { JsonTree } from "@/components/studio/json-tree"
 import { EventsExplorer } from "@/components/studio/raw-view"
+import { RequestSection } from "@/components/studio/step-request"
+import type { RunRequests } from "@/components/studio/step-request"
 import {
   StepBody,
   ToolCallRow,
@@ -143,11 +145,13 @@ function StepDetail({
   runStatus,
   onJump,
   childLinks,
+  requests,
 }: {
   step: FoldedStep
   runStatus: string
   onJump: (t: number) => void
   childLinks: Map<string, RunRow>
+  requests?: RunRequests
 }) {
   return (
     <div className="space-y-3">
@@ -157,6 +161,7 @@ function StepDetail({
           events {step.from}–{step.to}
         </span>
       </div>
+      {requests ? <RequestSection req={requests} step={step.index} /> : null}
       <StepBody
         step={step}
         runStatus={runStatus}
@@ -219,6 +224,7 @@ export function SpanDetail({
   mode,
   onMode,
   onJump,
+  requests,
 }: {
   /** The selected span, resolved against the fold at the playhead. */
   span: Span | undefined
@@ -229,6 +235,9 @@ export function SpanDetail({
   mode: DetailMode
   onMode: (m: DetailMode) => void
   onJump: (t: number) => void
+  /** The run's request record: a step of the run's own (not a
+   * subagent's) shows what it called the model with. */
+  requests?: RunRequests
 }) {
   const childLinks = new Map(
     doc.children.map((c) => [c.parent_call_id, c])
@@ -316,6 +325,11 @@ export function SpanDetail({
             runStatus={runStatus}
             onJump={onJump}
             childLinks={childLinks}
+            requests={
+              span.key === `s${(span.node as FoldedStep).index}`
+                ? requests
+                : undefined
+            }
           />
         ) : (
           <CallDetail

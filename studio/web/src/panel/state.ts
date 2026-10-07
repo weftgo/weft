@@ -12,7 +12,10 @@
 // timer is the model's own (dispose clears them), every retry is
 // bounded, and a response that arrives for a view the user has left
 // is dropped.
-import type { Meta, PosEvent, RunDoc, RunRow, SessionRow, Span, Transcript } from "../lib/api"
+import type { Holed, Meta, PosEvent, RunDoc, RunRow, SessionRow, Span, Transcript } from "../lib/api"
+import { byStep } from "../lib/requests"
+import type { StepRequests } from "../lib/requests"
+import { tokenScope } from "./config"
 import { applyTranscript, linkView, newFold } from "../lib/events"
 import type { FoldFeed, FoldedRun } from "../lib/events"
 import type { LiveRecord, LiveRun } from "../lib/live"
@@ -20,6 +23,7 @@ import {
   fetchCommand,
   fetchEvents,
   fetchMeta,
+  fetchRequests,
   fetchRun,
   fetchRuns,
   fetchRuntimes,
@@ -101,6 +105,11 @@ export interface TurnView {
   folded: FoldedRun
   transcript: Transcript | null
   spans: Span[] | null
+  /** The run's request record per step (ADR 0028 §10), or the hole
+   * that stands for it (not_recorded; hidden for a read-scoped token,
+   * which never asks); null without the requests capability or before
+   * it was read. */
+  requests: PanelRequests | null
   children: Map<string, ChildView>
   /** Subagent expanders the user opened (survives re-renders). */
   expanded: Set<string>
@@ -208,6 +217,12 @@ export function emptyPanelState(): PanelState {
   }
 }
 
+/** A turn's request record as the panel draws it: the run's hole
+ * (badge) or its rows by step. */
+export interface PanelRequests extends Holed {
+  steps: Map<number, StepRequests>
+}
+
 /** newTurnView starts an empty fold for one run. */
 function newTurnView(id: string): TurnView {
   const feed = newFold()
@@ -222,6 +237,7 @@ function newTurnView(id: string): TurnView {
     folded: feed.result(),
     transcript: null,
     spans: null,
+    requests: null,
     children: new Map(),
     expanded: new Set(),
     tried: new Set(),
@@ -748,13 +764,14 @@ export class PanelModel {
     const ep = this.ep
     const id = view.id
     view.loading = true
-    const [doc, walk, transcript, spans] = await Promise.all([
+    const [doc, walk, transcript, spans, requests] = await Promise.all([
       fetchRun(ep, id).catch(() => null),
       this.walkEvents(id).catch(() => null),
       fetchTranscript(ep, id).catch(() => null),
       fetchSpans(ep, id)
         .then((d) => (Array.isArray(d.spans) ? d.spans : null))
         .catch(() => null),
+      this.readRequests(id),
     ])
     view.loading = false
     if (seq !== this.loadSeq || this.disposed || this.state.turn !== view) return
@@ -780,6 +797,7 @@ export class PanelModel {
     }
     if (transcript) view.transcript = transcript
     if (spans) view.spans = spans
+    if (requests) view.requests = requests
     // The frames the tail delivered while the pages were read: folded
     // after them, once each. A settled view's are late — the reload is
     // the story.
@@ -791,6 +809,21 @@ export class PanelModel {
     }
     this.dress(view)
     this.emit()
+  }
+
+  /** readRequests reads the turn's request record when the server has
+   * the route (the requests capability). A read-scoped token never
+   * asks: it may not read system prompts (the route would refuse it),
+   * so the hole is known without a request. */
+  private async readRequests(id: string): Promise<PanelRequests | null> {
+    if (!this.state.meta?.capabilities.includes("requests")) return null
+    if (tokenScope(this.ep.token) === "read") return { badge: "hidden", steps: new Map() }
+    try {
+      const doc = await fetchRequests(this.ep, id)
+      return { badge: doc.badge, reason: doc.reason, fix: doc.fix, steps: byStep(doc.requests) }
+    } catch {
+      return null
+    }
   }
 
   /** drain folds a lane's held frames in arrival order; one past a

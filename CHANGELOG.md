@@ -287,8 +287,8 @@ tags are minor bumps.
 
 #### Release asset
 
-- `panel-v0.4.0.js` (PANEL_ASSET_BYTES bytes, sha256
-  `PANEL_ASSET_SHA256`
+- `panel-v0.4.0.js` (87779 bytes, sha256
+  `c1265cf322d1bed2779ef9e1c2bef969ae604af1be6af831f424387865d15221`
   beside it) — the devtools panel for non-Go backends; serve it from
   your app and add `<script type="module"
   src="/static/panel-v0.4.0.js" data-endpoint=… data-token=…

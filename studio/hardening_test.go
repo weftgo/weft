@@ -577,7 +577,7 @@ func TestExperimentDetailReturnsEveryRun(t *testing.T) {
 // not a local exporter. And 127.0.0.0/8 and the IPv4-mapped form are
 // loopback like 127.0.0.1.
 func TestLoopbackOpenIngestRefusesBrowsersAndProxies(t *testing.T) {
-	pb, err := os.ReadFile(filepath.Join("..", "obsdb", "testdata", "logs.pb"))
+	pb, err := os.ReadFile(filepath.Join("testdata", "otlp", "logs.pb"))
 	if err != nil {
 		t.Fatal(err)
 	}

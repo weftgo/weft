@@ -27,7 +27,7 @@ import (
 
 func fixture(t *testing.T, name string) []byte {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "..", "obsdb", "testdata", name))
+	b, err := os.ReadFile(filepath.Join("testdata", "otlp", name))
 	if err != nil {
 		t.Fatal(err)
 	}

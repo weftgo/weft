@@ -433,7 +433,7 @@ func TestLiveIngestToEndToEnd(t *testing.T) {
 	srv := New(DB(&slowWriteDB{DB: inner, release: release}))
 
 	resp := subscribeLive(t, srv.Handler(), "?agent=demo", "")
-	pb, err := os.ReadFile("../obsdb/testdata/logs.pb")
+	pb, err := os.ReadFile("testdata/otlp/logs.pb")
 	if err != nil {
 		t.Fatal(err)
 	}

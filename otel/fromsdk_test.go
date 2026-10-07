@@ -30,7 +30,7 @@ import (
 
 func loadLogsFixture(t *testing.T) []obsdb.Record {
 	t.Helper()
-	b, err := os.ReadFile("../obsdb/testdata/logs.pb")
+	b, err := os.ReadFile("testdata/otlp/logs.pb")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func loadLogsFixture(t *testing.T) []obsdb.Record {
 
 func loadTracesFixture(t *testing.T) []obsdb.Span {
 	t.Helper()
-	b, err := os.ReadFile("../obsdb/testdata/traces.pb")
+	b, err := os.ReadFile("testdata/otlp/traces.pb")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func mustSpanID(t *testing.T, s string) trace.SpanID {
 // form stays pinned from this module too.
 func TestFixturesJSONMatchesPB(t *testing.T) {
 	var lj collogspb.ExportLogsServiceRequest
-	lb, err := os.ReadFile("../obsdb/testdata/logs.json")
+	lb, err := os.ReadFile("testdata/otlp/logs.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestFixturesJSONMatchesPB(t *testing.T) {
 		t.Errorf("logs JSON != pb:\n got %+v\nwant %+v", got, want)
 	}
 	var tj coltracepb.ExportTraceServiceRequest
-	tb, err := os.ReadFile("../obsdb/testdata/traces.json")
+	tb, err := os.ReadFile("testdata/otlp/traces.json")
 	if err != nil {
 		t.Fatal(err)
 	}

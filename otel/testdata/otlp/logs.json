@@ -1,0 +1,121 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "acme-api" } },
+          { "key": "service.version", "value": { "stringValue": "1.4.2" } }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "scope": { "name": "github.com/weftgo/weft", "version": "v0.6.0" },
+          "logRecords": [
+            {
+              "timeUnixNano": "1790845923120000000",
+              "observedTimeUnixNano": "1790845923120000001",
+              "severityNumber": 9,
+              "eventName": "weft.event",
+              "body": {
+                "stringValue": "{\"type\":\"run_start\",\"id\":\"r_20261001_1\",\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"agent\":\"demo\"}"
+              },
+              "attributes": [
+                { "key": "weft.record", "value": { "stringValue": "event" } },
+                { "key": "weft.run.id", "value": { "stringValue": "r_20261001_1" } },
+                { "key": "weft.event.type", "value": { "stringValue": "run_start" } },
+                { "key": "weft.event.pos", "value": { "intValue": "0" } },
+                { "key": "weft.content", "value": { "stringValue": "full" } },
+                { "key": "gen_ai.agent.name", "value": { "stringValue": "demo" } },
+                { "key": "weft.manifest.hash", "value": { "stringValue": "sha256:0f2c9a" } },
+                { "key": "weft.version", "value": { "stringValue": "v0.6.0" } },
+                { "key": "weft.session.id", "value": { "stringValue": "s_01M3" } },
+                { "key": "gen_ai.conversation.id", "value": { "stringValue": "s_01M3" } },
+                { "key": "session.id", "value": { "stringValue": "s_01M3" } },
+                { "key": "weft.turn", "value": { "intValue": "3" } },
+                { "key": "weft.public_id", "value": { "stringValue": "pub_7Hk2" } },
+                { "key": "tenant", "value": { "stringValue": "acme" } },
+                { "key": "weft.roles", "value": { "arrayValue": { "values": [ { "stringValue": "support" }, { "stringValue": "billing" } ] } } },
+                { "key": "weft.limit", "value": { "kvlistValue": { "values": [ { "key": "rpm", "value": { "intValue": "60" } } ] } } },
+                { "key": "weft.token", "value": { "bytesValue": "c2VjcmV0MQ==" } }
+              ],
+              "traceId": "S/kvNXezTaajzpKdDg5HNg==",
+              "spanId": "APBnqgupArc="
+            },
+            {
+              "timeUnixNano": "1790845924370000000",
+              "observedTimeUnixNano": "1790845924370000001",
+              "severityNumber": 9,
+              "eventName": "weft.delta",
+              "body": { "stringValue": "{\"type\":\"text_delta\",\"run_id\":\"r_20261001_1\",\"text\":\"Your order\"}" },
+              "attributes": [
+                { "key": "weft.record", "value": { "stringValue": "delta" } },
+                { "key": "weft.run.id", "value": { "stringValue": "r_20261001_1" } },
+                { "key": "weft.event.type", "value": { "stringValue": "text_delta" } },
+                { "key": "weft.delta.pos", "value": { "intValue": "0" } },
+                { "key": "weft.content", "value": { "stringValue": "full" } }
+              ],
+              "traceId": "S/kvNXezTaajzpKdDg5HNg==",
+              "spanId": "APBnqgupArc="
+            },
+            {
+              "timeUnixNano": "1790845927120000000",
+              "observedTimeUnixNano": "1790845927120000001",
+              "severityNumber": 9,
+              "eventName": "weft.messages",
+              "body": { "stringValue": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"find order 42\"}]}]" },
+              "attributes": [
+                { "key": "weft.record", "value": { "stringValue": "messages" } },
+                { "key": "weft.run.id", "value": { "stringValue": "r_20261001_1" } },
+                { "key": "weft.step.index", "value": { "intValue": "0" } },
+                { "key": "weft.messages.index", "value": { "intValue": "0" } },
+                { "key": "weft.messages.count", "value": { "intValue": "1" } },
+                { "key": "weft.messages.input", "value": { "boolValue": true } },
+                { "key": "weft.content", "value": { "stringValue": "full" } }
+              ],
+              "traceId": "S/kvNXezTaajzpKdDg5HNg==",
+              "spanId": "APBnqgupArc="
+            },
+            {
+              "timeUnixNano": "1790845932530000000",
+              "observedTimeUnixNano": "1790845932530000001",
+              "severityNumber": 9,
+              "eventName": "weft.event",
+              "body": { "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"r_20261001_1\",\"usage\":{\"input_tokens\":1012,\"output_tokens\":209},\"steps\":2}" },
+              "attributes": [
+                { "key": "weft.record", "value": { "stringValue": "event" } },
+                { "key": "weft.run.id", "value": { "stringValue": "r_20261001_1" } },
+                { "key": "weft.event.type", "value": { "stringValue": "run_finish" } },
+                { "key": "weft.event.pos", "value": { "intValue": "3" } },
+                { "key": "weft.content", "value": { "stringValue": "full" } }
+              ],
+              "traceId": "S/kvNXezTaajzpKdDg5HNg==",
+              "spanId": "APBnqgupArc="
+            },
+            {
+              "timeUnixNano": "1790845933120000000",
+              "observedTimeUnixNano": "1790845933120000001",
+              "severityNumber": 9,
+              "eventName": "weft.heartbeat",
+              "attributes": [
+                { "key": "weft.record", "value": { "stringValue": "heartbeat" } },
+                { "key": "weft.run.id", "value": { "stringValue": "r_20261001_1" } },
+                { "key": "tenant", "value": { "stringValue": "acme" } }
+              ]
+            },
+            {
+              "timeUnixNano": "1790845935260000000",
+              "observedTimeUnixNano": "1790845935260000001",
+              "severityNumber": 17,
+              "severityText": "ERROR",
+              "eventName": "",
+              "body": { "stringValue": "payment worker retrying after 502" },
+              "attributes": [
+                { "key": "worker", "value": { "stringValue": "payments" } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

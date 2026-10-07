@@ -50,6 +50,20 @@ func (s *Server) addGroup(g routeGroup) {
 	s.groups = append(s.groups, g)
 }
 
+// runRoute is one /api/runs/{id}/<ext> sub-route: run ids contain
+// slashes, so these cannot be mux patterns of their own, and a group
+// registers them through addRunRoute instead.
+type runRoute struct {
+	ext   string
+	serve func(http.ResponseWriter, *http.Request, string)
+}
+
+// addRunRoute registers a GET /api/runs/{id}/<ext> sub-route, which
+// serveRunRoutes dispatches.
+func (s *Server) addRunRoute(ext string, serve func(http.ResponseWriter, *http.Request, string)) {
+	s.runRoutes = append(s.runRoutes, runRoute{ext: ext, serve: serve})
+}
+
 // capabilityList names what the registered groups provide plus
 // anything the hosting wrapper declared with Capabilities(...): the
 // UI gates every deployment-specific screen on these names
@@ -77,6 +91,18 @@ func (s *Server) registerGroups() {
 	s.addGroup(routeGroup{
 		name:     "api",
 		register: registerReadAPI,
+	})
+	// The request record's read routes (ADR 0028 §10, A1): every
+	// model-call attempt with the prompt and catalog it named, and the
+	// run's catalogs. Always present now that obsdb.DB reads them; the
+	// capability is what the UIs gate the Request pane on.
+	s.addGroup(routeGroup{
+		name:       "requests",
+		capability: "requests",
+		register: func(_ *http.ServeMux, s *Server) {
+			s.addRunRoute("requests", s.serveRunRequests)
+			s.addRunRoute("tools", s.serveRunTools)
+		},
 	})
 	// The live stream (S4.5).
 	s.addGroup(routeGroup{
@@ -127,8 +153,9 @@ func (s *Server) serveAPINotFound(w http.ResponseWriter, r *http.Request) {
 // registerReadAPI mounts the S4.2 read routes. Run ids contain slashes
 // (a subagent's child id is <parent>/<step>/<callID>), so the run
 // subtree is one handler that takes everything after /api/runs/ as
-// the id, with at most a trailing /events, /transcript or /spans
-// segment; session, trace and public ids never carry one.
+// the id, with at most one trailing segment a group registered through
+// addRunRoute (/events, /transcript, /spans; /requests and /tools from
+// the requests group); session, trace and public ids never carry one.
 func registerReadAPI(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/meta", s.serveMeta)
 	mux.HandleFunc("GET /api/manifest", s.serveManifest)
@@ -138,6 +165,9 @@ func registerReadAPI(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/sessions/", s.serveSessionRoutes)
 	mux.HandleFunc("GET /api/traces/", s.serveTrace)
 	mux.HandleFunc("GET /api/public/", s.servePublic)
+	s.addRunRoute("events", s.serveRunEvents)
+	s.addRunRoute("transcript", s.serveRunTranscript)
+	s.addRunRoute("spans", s.serveRunSpans)
 }
 
 // registerIngest mounts the OTLP/HTTP receiver (studio/ingest, S4.4).

@@ -182,7 +182,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    IngestToken/AllowOrigins/Playground; routes register through
 //    //    routes.go's groups (panel.go/playground.go add theirs in their own files).
 //    // API: meta, manifest, runs (+session/public/playground filters), runs/{id},
-//    //    runs/{id}/events|transcript|spans, traces/{id}, sessions, sessions/{id},
+//    //    runs/{id}/events|transcript|spans|requests|tools, traces/{id}, sessions, sessions/{id},
 //    //    public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5); Token(tok) walls the
 //    //    /api tree (bearer or ?token=) — the UI shell and /panel.js are static,

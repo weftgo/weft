@@ -156,6 +156,10 @@ type Server struct {
 	config
 	groups []routeGroup
 	mux    *http.ServeMux
+	// runRoutes are the /api/runs/{id}/<ext> sub-routes the groups
+	// registered (addRunRoute): run ids carry slashes, so the run
+	// subtree is one mux handler that dispatches on the last segment.
+	runRoutes []runRoute
 
 	// live (config.live, set by New from the Live default) is the hub
 	// /api/live streams from (S4.1).

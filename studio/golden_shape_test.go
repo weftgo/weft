@@ -110,18 +110,20 @@ func TestGoldensMatchARealRun(t *testing.T) {
 	for _, c := range []struct {
 		golden, path string
 		// what the fixture holds that this run does not: a subagent
-		// child, a crash orphan's open finish, a metadata key of its own.
+		// child, a crash orphan's open finish, a metadata key of its own,
+		// the not_recorded badge of a run written before ADR 0028 (the
+		// fixture's records carry no instructions hash).
 		absent []string
 	}{
-		{"run-sub.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".meta.cwd"}},
-		{"runs.golden.json", "/api/runs", []string{".runs[].finished=<nil>", ".runs[].meta.cwd"}},
+		{"run-sub.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".meta.cwd", ".requests_badge"}},
+		{"runs.golden.json", "/api/runs", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".runs[].requests_badge"}},
 		{"events-ok.golden.json", "/api/runs/" + res.ID + "/events", nil},
 		{"events-ok-paged.golden.json", "/api/runs/" + res.ID + "/events?after=2&limit=3", nil},
 		{"transcript-ok.golden.json", "/api/runs/" + res.ID + "/transcript", nil},
 		{"spans-sub.golden.json", "/api/runs/" + res.ID + "/spans", nil},
 		{"trace.golden.json", "/api/traces/" + trace, nil},
 		{"sessions.golden.json", "/api/sessions", nil},
-		{"session-orders.golden.json", "/api/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd"}},
+		{"session-orders.golden.json", "/api/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".runs[].requests_badge"}},
 		{"public.golden.json", "/api/public/pub_x", nil},
 	} {
 		b, err := os.ReadFile(filepath.Join("testdata", "api", c.golden))

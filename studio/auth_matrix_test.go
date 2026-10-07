@@ -27,6 +27,9 @@ import (
 //     elsewhere);
 //   - a read-scoped panel token never acts (runs, approvals, steer are
 //     403); a playground-scoped one acts inside its public id;
+//   - a read-scoped panel token never reads system prompts (the
+//     manifest, a run's requests and tools: 403, badge "hidden"); a
+//     playground-scoped one reads them inside its public id;
 //   - what is not public-id-shaped is the server token's alone: the
 //     runtime link, breakpoints, experiments, the token mint;
 //   - ingest takes the ingest token and nothing else.
@@ -256,6 +259,13 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "GET /api/runs/{id}/events", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/events" }, resources: all, want: scoped(ok)},
 		{name: "GET /api/runs/{id}/transcript", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/transcript" }, resources: all, want: scoped(ok)},
 		{name: "GET /api/runs/{id}/spans", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/spans" }, resources: all, want: scoped(ok)},
+		// The request record carries the system prompt and the catalog:
+		// refused to a read-scoped token whatever the run (the manifest's
+		// rule, badge "hidden" — pinned below), scoped for the rest.
+		{name: "GET /api/runs/{id}/requests", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/requests" }, resources: all, want: acting(ok)},
+		{name: "GET /api/runs/{id}/tools", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/tools" }, resources: all, want: acting(ok)},
+		{name: "GET /api/runs/{B's child}/requests", method: "GET", path: fixed("/api/runs/run_b/0/call_1/requests"), resources: []string{"B"}, want: acting(ok)},
+		{name: "GET /api/runs/{B's child}/tools", method: "GET", path: fixed("/api/runs/run_b/0/call_1/tools"), resources: []string{"B"}, want: acting(ok)},
 		{name: "GET /api/runs/{B's child}", method: "GET", path: fixed("/api/runs/run_b/0/call_1"), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/runs/{B's child}/transcript", method: "GET", path: fixed("/api/runs/run_b/0/call_1/transcript"), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/runs/{B's child}/events", method: "GET", path: fixed("/api/runs/run_b/0/call_1/events"), resources: []string{"B"}, want: scoped(ok)},
@@ -409,6 +419,29 @@ func TestAuthMatrix(t *testing.T) {
 		}
 		if got, want := strings.Contains(string(b), "THE SYSTEM PROMPT"), id.kind != "read"; got != want {
 			t.Errorf("GET /api/runtimes as %s: instructions present = %v, want %v", id.name, got, want)
+		}
+	}
+
+	// The request routes' refusal of a read-scoped token is the hidden
+	// hole: the 403 carries the badge, its reason and its fix, so the
+	// panel renders the badge instead of an error.
+	for _, id := range identities {
+		if id.kind != "read" {
+			continue
+		}
+		for _, path := range []string{"/api/runs/run_a/requests", "/api/runs/run_a/tools"} {
+			req, _ := http.NewRequest(http.MethodGet, ts.URL+path+"?token="+id.token, nil)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			for _, want := range []string{`"code":"forbidden"`, `"badge":"hidden"`, `"fix":"use a playground-scoped token"`} {
+				if resp.StatusCode != forbidden403 || !strings.Contains(string(b), want) {
+					t.Errorf("%s as %s = %d %s, want 403 with %s", path, id.name, resp.StatusCode, b, want)
+				}
+			}
 		}
 	}
 

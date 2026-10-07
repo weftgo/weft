@@ -1,0 +1,7 @@
+{
+  "requests": [],
+  "badge": "not_recorded",
+  "reason": "this run was recorded before the request record existed (weft v0.9.0 or earlier, ADR 0028): it has no request, prompt or tools records",
+  "fix": "upgrade weft and re-run"
+}
+

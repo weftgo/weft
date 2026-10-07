@@ -34,6 +34,10 @@
   },
   "event_count": 6,
   "message_count": 2,
+  "instructions_hash": "",
+  "catalog_hash": "",
+  "request_count": 0,
+  "requests_badge": "not_recorded",
   "children": [
     {
       "id": "r_sub/0/call_3",
@@ -70,7 +74,11 @@
         "output_tokens": 5
       },
       "event_count": 4,
-      "message_count": 2
+      "message_count": 2,
+      "instructions_hash": "",
+      "catalog_hash": "",
+      "request_count": 0,
+      "requests_badge": "not_recorded"
     }
   ]
 }

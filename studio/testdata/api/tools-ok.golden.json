@@ -1,0 +1,85 @@
+{
+  "catalogs": [
+    {
+      "hash": "eb2241595b06a331d17acf3b446ed383b91e48ab5e2ef19967f9c0fecdd5e394",
+      "tools": [
+        {
+          "name": "lookup_order",
+          "description": "Look up an order.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string",
+                "description": "the order"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          },
+          "timeout_ms": 0,
+          "approval": false,
+          "replay": "never",
+          "max_result_bytes": 65536,
+          "sequential": false,
+          "source": "local"
+        }
+      ],
+      "content": "",
+      "truncated_bytes": 0
+    },
+    {
+      "hash": "58a2f735b942ba5f583d0fb01ec3a4112b4a0d632576193ea8af7676cba166f1",
+      "tools": [
+        {
+          "name": "lookup_order",
+          "description": "Look up an order.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string",
+                "description": "the order"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          },
+          "timeout_ms": 0,
+          "approval": false,
+          "replay": "never",
+          "max_result_bytes": 65536,
+          "sequential": false,
+          "source": "local"
+        },
+        {
+          "name": "refund",
+          "description": "Refund an order.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string",
+                "description": "the order"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          },
+          "timeout_ms": 0,
+          "approval": false,
+          "replay": "never",
+          "max_result_bytes": 65536,
+          "sequential": false,
+          "source": "local"
+        }
+      ],
+      "content": "",
+      "truncated_bytes": 0
+    }
+  ]
+}
+

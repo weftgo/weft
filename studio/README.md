@@ -164,9 +164,18 @@ JSON under `{base}api/`: `meta` (versions, the DB kind,
 `ingest_open`, `interrupted_after_ms`, capabilities), `runs` (agent,
 status, session, public id, playground, parent and `tag.<k>=<v>`
 filters, cursor-paged),
-`runs/{id}` (the row and the subagent children — never events),
+`runs/{id}` (the row and the subagent children — never events; with
+`instructions_hash`, `catalog_hash`, `request_count` and, for a run
+written before ADR 0028, `requests_badge: "not_recorded"`),
 `runs/{id}/events?after=&limit=` (the paged durable stream),
 `runs/{id}/transcript` (the messages bodies), `runs/{id}/spans`,
+`runs/{id}/requests?step=&from=&limit=&refs=1` (one row per model-call
+attempt, the prompt and catalog its hashes name inline unless `refs=1`,
+`next_from` while pages are full) and `runs/{id}/tools` (the run's
+catalogs by hash) — both under the `requests` capability, refused to a
+read-scoped panel token (403, `badge: "hidden"`), and badged
+`not_recorded` / `stripped` rather than empty when there is nothing to
+show for a reason,
 `traces/{trace_id}` (any trace), `sessions`, `sessions/{id}` (turns in
 order), `public/{public_id}`, `manifest`, `POST /api/panel-tokens`
 (mint; the panel's scoped tokens — see the devtools panel above), and

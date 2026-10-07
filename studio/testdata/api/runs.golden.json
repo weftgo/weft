@@ -36,7 +36,11 @@
         "output_tokens": 0
       },
       "event_count": 2,
-      "message_count": 0
+      "message_count": 0,
+      "instructions_hash": "",
+      "catalog_hash": "",
+      "request_count": 0,
+      "requests_badge": "not_recorded"
     },
     {
       "id": "r_sub",
@@ -73,7 +77,11 @@
         "output_tokens": 6
       },
       "event_count": 6,
-      "message_count": 2
+      "message_count": 2,
+      "instructions_hash": "",
+      "catalog_hash": "",
+      "request_count": 0,
+      "requests_badge": "not_recorded"
     },
     {
       "id": "r_fail",
@@ -110,7 +118,11 @@
         "output_tokens": 2
       },
       "event_count": 4,
-      "message_count": 1
+      "message_count": 1,
+      "instructions_hash": "",
+      "catalog_hash": "",
+      "request_count": 0,
+      "requests_badge": "not_recorded"
     },
     {
       "id": "r_ok",
@@ -147,7 +159,11 @@
         "output_tokens": 4
       },
       "event_count": 6,
-      "message_count": 2
+      "message_count": 2,
+      "instructions_hash": "",
+      "catalog_hash": "",
+      "request_count": 0,
+      "requests_badge": "not_recorded"
     }
   ],
   "next_before": null,

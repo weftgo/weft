@@ -133,6 +133,15 @@ type runRow struct {
 	Usage        core.Usage        `json:"usage"`
 	EventCount   int64             `json:"event_count"`
 	MessageCount int64             `json:"message_count"`
+	// The request record's run columns (ADR 0028 §10):
+	// instructions_hash "" means the run was written before the record
+	// existed, and requests_badge then reads "not_recorded" (absent
+	// otherwise); request_count 0 with an instructions_hash means the
+	// run made no model call — no badge.
+	InstructionsHash string `json:"instructions_hash"`
+	CatalogHash      string `json:"catalog_hash"`
+	RequestCount     int64  `json:"request_count"`
+	RequestsBadge    string `json:"requests_badge,omitempty"`
 }
 
 // row maps an obsdb run row onto the DTO. The status is the
@@ -166,6 +175,11 @@ func row(rec obsdb.RunRow) runRow {
 		Usage:        rec.Usage,
 		EventCount:   rec.EventCount,
 		MessageCount: rec.MessageCount,
+
+		InstructionsHash: rec.InstructionsHash,
+		CatalogHash:      rec.CatalogHash,
+		RequestCount:     rec.RequestCount,
+		RequestsBadge:    string(rec.RequestsHole()),
 	}
 	if out.Meta == nil {
 		out.Meta = map[string]string{}
@@ -239,14 +253,6 @@ type transcriptBatch struct {
 	Badge    string          `json:"badge,omitempty"`
 	Messages json.RawMessage `json:"messages"`
 }
-
-// ADR 0028 §11's badges a batch can carry: the record does not carry
-// its step (not_recorded), or the backend inferred its input flag
-// (derived — ClickHouse, which keeps no attribute column).
-const (
-	badgeNotRecorded = "not_recorded"
-	badgeDerived     = "derived"
-)
 
 type transcript struct {
 	Batches []transcriptBatch `json:"batches"`
@@ -531,7 +537,8 @@ func limitParam(w http.ResponseWriter, r *http.Request, q map[string][]string) (
 }
 
 // serveRunRoutes dispatches the /api/runs/ subtree: run documents and
-// their paged events, transcript and spans. Everything after
+// the sub-routes the groups registered (addRunRoute) — paged events,
+// transcript, spans, requests and tools. Everything after
 // /api/runs/ is the run id, slashes included — a subagent's child id
 // is <parent>/<step>/<callID> (the core's childRunID), and its page
 // is a full run page (B7). An unknown id still answers 404 — from
@@ -542,14 +549,7 @@ func (s *Server) serveRunRoutes(w http.ResponseWriter, r *http.Request) {
 		notFound(w, r, "no such api route "+r.URL.Path)
 		return
 	}
-	for _, sub := range []struct {
-		ext   string
-		serve func(http.ResponseWriter, *http.Request, string)
-	}{
-		{"events", s.serveRunEvents},
-		{"transcript", s.serveRunTranscript},
-		{"spans", s.serveRunSpans},
-	} {
+	for _, sub := range s.runRoutes {
 		if id, ok := strings.CutSuffix(rest, "/"+sub.ext); ok && id != "" {
 			sub.serve(w, r, id)
 			return
@@ -668,9 +668,9 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 		}
 		switch {
 		case b.Step < 0:
-			tb.Step, tb.Badge = -1, badgeNotRecorded
+			tb.Step, tb.Badge = -1, string(obsdb.HoleNotRecorded)
 		case b.InputDerived:
-			tb.Badge = badgeDerived
+			tb.Badge = string(obsdb.HoleDerived)
 		}
 		out.Batches = append(out.Batches, tb)
 	}

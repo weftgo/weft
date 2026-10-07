@@ -1,0 +1,342 @@
+{
+  "requests": [
+    {
+      "index": 0,
+      "step": 0,
+      "attempt": 1,
+      "time": "(time)",
+      "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "eb2241595b06a331d17acf3b446ed383b91e48ab5e2ef19967f9c0fecdd5e394",
+      "content": "",
+      "truncated_bytes": 0,
+      "body": {
+        "step": 0,
+        "attempt": 1,
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "messages_ref": {
+          "index": 0,
+          "count": 1
+        },
+        "tools": {
+          "catalog_hash": "eb2241595b06a331d17acf3b446ed383b91e48ab5e2ef19967f9c0fecdd5e394",
+          "names": [
+            "lookup_order"
+          ]
+        },
+        "sequential_tools": false,
+        "params": {},
+        "model": {
+          "provider": "wefttest",
+          "name": "script"
+        },
+        "stream": true
+      },
+      "prompt": {
+        "hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "text": "You are a support agent.",
+        "content": "",
+        "truncated_bytes": 0
+      },
+      "tools": {
+        "hash": "eb2241595b06a331d17acf3b446ed383b91e48ab5e2ef19967f9c0fecdd5e394",
+        "tools": [
+          {
+            "name": "lookup_order",
+            "description": "Look up an order.",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "order_id": {
+                  "type": "string",
+                  "description": "the order"
+                }
+              },
+              "required": [
+                "order_id"
+              ]
+            },
+            "timeout_ms": 0,
+            "approval": false,
+            "replay": "never",
+            "max_result_bytes": 65536,
+            "sequential": false,
+            "source": "local"
+          }
+        ],
+        "content": "",
+        "truncated_bytes": 0
+      }
+    },
+    {
+      "index": 1,
+      "step": 1,
+      "attempt": 1,
+      "time": "(time)",
+      "system_hash": "7be02fcc1da7eb770a5ac56060dee4a1a6e8fa3734b0206f38f2e5a38c0a8921",
+      "catalog_hash": "58a2f735b942ba5f583d0fb01ec3a4112b4a0d632576193ea8af7676cba166f1",
+      "content": "",
+      "truncated_bytes": 0,
+      "body": {
+        "step": 1,
+        "attempt": 1,
+        "system_hash": "7be02fcc1da7eb770a5ac56060dee4a1a6e8fa3734b0206f38f2e5a38c0a8921",
+        "messages_ref": {
+          "index": 2,
+          "count": 3
+        },
+        "tools": {
+          "catalog_hash": "58a2f735b942ba5f583d0fb01ec3a4112b4a0d632576193ea8af7676cba166f1",
+          "names": [
+            "lookup_order",
+            "refund"
+          ]
+        },
+        "sequential_tools": false,
+        "params": {},
+        "model": {
+          "provider": "wefttest",
+          "name": "script"
+        },
+        "stream": true
+      },
+      "prompt": {
+        "hash": "7be02fcc1da7eb770a5ac56060dee4a1a6e8fa3734b0206f38f2e5a38c0a8921",
+        "text": "You are a support agent. Refunds need a reason.",
+        "content": "",
+        "truncated_bytes": 0
+      },
+      "tools": {
+        "hash": "58a2f735b942ba5f583d0fb01ec3a4112b4a0d632576193ea8af7676cba166f1",
+        "tools": [
+          {
+            "name": "lookup_order",
+            "description": "Look up an order.",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "order_id": {
+                  "type": "string",
+                  "description": "the order"
+                }
+              },
+              "required": [
+                "order_id"
+              ]
+            },
+            "timeout_ms": 0,
+            "approval": false,
+            "replay": "never",
+            "max_result_bytes": 65536,
+            "sequential": false,
+            "source": "local"
+          },
+          {
+            "name": "refund",
+            "description": "Refund an order.",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "order_id": {
+                  "type": "string",
+                  "description": "the order"
+                }
+              },
+              "required": [
+                "order_id"
+              ]
+            },
+            "timeout_ms": 0,
+            "approval": false,
+            "replay": "never",
+            "max_result_bytes": 65536,
+            "sequential": false,
+            "source": "local"
+          }
+        ],
+        "content": "",
+        "truncated_bytes": 0
+      }
+    },
+    {
+      "index": 2,
+      "step": 1,
+      "attempt": 2,
+      "time": "(time)",
+      "system_hash": "7be02fcc1da7eb770a5ac56060dee4a1a6e8fa3734b0206f38f2e5a38c0a8921",
+      "catalog_hash": "58a2f735b942ba5f583d0fb01ec3a4112b4a0d632576193ea8af7676cba166f1",
+      "content": "",
+      "truncated_bytes": 0,
+      "body": {
+        "step": 1,
+        "attempt": 2,
+        "system_hash": "7be02fcc1da7eb770a5ac56060dee4a1a6e8fa3734b0206f38f2e5a38c0a8921",
+        "messages_ref": {
+          "index": 2,
+          "count": 3
+        },
+        "tools": {
+          "catalog_hash": "58a2f735b942ba5f583d0fb01ec3a4112b4a0d632576193ea8af7676cba166f1",
+          "names": [
+            "lookup_order",
+            "refund"
+          ]
+        },
+        "sequential_tools": false,
+        "params": {},
+        "model": {
+          "provider": "wefttest",
+          "name": "script"
+        },
+        "stream": true
+      },
+      "prompt": {
+        "hash": "7be02fcc1da7eb770a5ac56060dee4a1a6e8fa3734b0206f38f2e5a38c0a8921",
+        "text": "You are a support agent. Refunds need a reason.",
+        "content": "",
+        "truncated_bytes": 0
+      },
+      "tools": {
+        "hash": "58a2f735b942ba5f583d0fb01ec3a4112b4a0d632576193ea8af7676cba166f1",
+        "tools": [
+          {
+            "name": "lookup_order",
+            "description": "Look up an order.",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "order_id": {
+                  "type": "string",
+                  "description": "the order"
+                }
+              },
+              "required": [
+                "order_id"
+              ]
+            },
+            "timeout_ms": 0,
+            "approval": false,
+            "replay": "never",
+            "max_result_bytes": 65536,
+            "sequential": false,
+            "source": "local"
+          },
+          {
+            "name": "refund",
+            "description": "Refund an order.",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "order_id": {
+                  "type": "string",
+                  "description": "the order"
+                }
+              },
+              "required": [
+                "order_id"
+              ]
+            },
+            "timeout_ms": 0,
+            "approval": false,
+            "replay": "never",
+            "max_result_bytes": 65536,
+            "sequential": false,
+            "source": "local"
+          }
+        ],
+        "content": "",
+        "truncated_bytes": 0
+      }
+    },
+    {
+      "index": 3,
+      "step": 2,
+      "attempt": 1,
+      "time": "(time)",
+      "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "58a2f735b942ba5f583d0fb01ec3a4112b4a0d632576193ea8af7676cba166f1",
+      "content": "",
+      "truncated_bytes": 0,
+      "body": {
+        "step": 2,
+        "attempt": 1,
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "messages_ref": {
+          "index": 4,
+          "count": 5
+        },
+        "tools": {
+          "catalog_hash": "58a2f735b942ba5f583d0fb01ec3a4112b4a0d632576193ea8af7676cba166f1",
+          "names": [
+            "lookup_order",
+            "refund"
+          ]
+        },
+        "sequential_tools": false,
+        "params": {},
+        "model": {
+          "provider": "wefttest",
+          "name": "script"
+        },
+        "stream": true
+      },
+      "prompt": {
+        "hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "text": "You are a support agent.",
+        "content": "",
+        "truncated_bytes": 0
+      },
+      "tools": {
+        "hash": "58a2f735b942ba5f583d0fb01ec3a4112b4a0d632576193ea8af7676cba166f1",
+        "tools": [
+          {
+            "name": "lookup_order",
+            "description": "Look up an order.",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "order_id": {
+                  "type": "string",
+                  "description": "the order"
+                }
+              },
+              "required": [
+                "order_id"
+              ]
+            },
+            "timeout_ms": 0,
+            "approval": false,
+            "replay": "never",
+            "max_result_bytes": 65536,
+            "sequential": false,
+            "source": "local"
+          },
+          {
+            "name": "refund",
+            "description": "Refund an order.",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "order_id": {
+                  "type": "string",
+                  "description": "the order"
+                }
+              },
+              "required": [
+                "order_id"
+              ]
+            },
+            "timeout_ms": 0,
+            "approval": false,
+            "replay": "never",
+            "max_result_bytes": 65536,
+            "sequential": false,
+            "source": "local"
+          }
+        ],
+        "content": "",
+        "truncated_bytes": 0
+      }
+    }
+  ]
+}
+

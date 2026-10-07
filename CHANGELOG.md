@@ -71,6 +71,24 @@ module, ADR 0005).
 ### Added
 
 - `studio --version` prints `version.Runtime()` and exits.
+- **Studio's request record routes (ADR 0028 §10, plan A1).** `GET
+  /api/runs/{id}/requests?step=&from=&limit=&refs=1`: one row per
+  model-call attempt (`index`, `step`, `attempt`, `time`, `system_hash`,
+  `catalog_hash`, `content` — `""`, `stripped` or `derived` —,
+  `truncated_bytes`, the parsed `body`), each row's `prompt` and `tools`
+  resolved inline by hash unless `refs=1` (`{hash, badge}` when the
+  record is missing), `next_from` while pages are full. `GET
+  /api/runs/{id}/tools`: `{catalogs: [{hash, tools, content,
+  truncated_bytes}]}` in index order. A run written before the record
+  answers both with `badge: "not_recorded"` (and a reason and fix)
+  beside the empty list; a content-off run's tools answer `badge:
+  "stripped"`. Both are refused to a read-scoped panel token (403 with
+  `badge: "hidden"`), as `/api/manifest` is.
+- `GET /api/runs/{id}` (and every run row) gains `instructions_hash`,
+  `catalog_hash`, `request_count` and, for a run written before ADR
+  0028, `requests_badge: "not_recorded"`.
+- `/api/meta` lists the `requests` capability: the UIs gate the Request
+  pane on it.
 - `obsdb.TranscriptBatch`, `obsdb.TranscriptBodies`, `obsdb.DedupBatches`
   (ADR 0028 §8).
 - `obsdb.Hole` and its ten constants (`obsdb.Holes()`, ADR 0028 §11's

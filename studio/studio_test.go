@@ -409,12 +409,13 @@ func TestMetaGolden(t *testing.T) {
 	wefttest.Golden(t, "testdata/api/meta.golden.json", []byte(indent(t, body)))
 
 	// Capabilities are computed from the registered route groups
-	// (S4.2): the read API names none; live and ingest are registered,
-	// so the open handler reports exactly [live ingest] — the panel and
-	// playground join with theirs (step 7/8).
+	// (S4.2): the read API names none; the request record's routes
+	// (requests, ADR 0028 §10), live and ingest are registered, so the
+	// open handler reports exactly [requests live ingest] — the panel
+	// and playground join with theirs (step 7/8).
 	_, _, plain := get(t, Handler(DB(fixtureDB(t))), "/studio/api/meta")
-	if !strings.Contains(plain, `"capabilities":["live","ingest"]`) {
-		t.Errorf("default capabilities = %s, want [live ingest]", plain)
+	if !strings.Contains(plain, `"capabilities":["requests","live","ingest"]`) {
+		t.Errorf("default capabilities = %s, want [requests live ingest]", plain)
 	}
 	// Ingest is open on loopback without a token, and meta says so
 	// (S4.4); a configured token closes it.
@@ -427,7 +428,7 @@ func TestMetaGolden(t *testing.T) {
 	}
 	// NoIngest drops the ingest group with its routes and capability.
 	_, _, ro := get(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/api/meta")
-	if !strings.Contains(ro, `"capabilities":["live"]`) || !strings.Contains(ro, `"ingest_open":false`) {
+	if !strings.Contains(ro, `"capabilities":["requests","live"]`) || !strings.Contains(ro, `"ingest_open":false`) {
 		t.Errorf("NoIngest meta: %s", ro)
 	}
 	if code, _, _ := post(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/v1/logs", "application/json", "{}"); code != http.StatusNotFound {
@@ -437,12 +438,12 @@ func TestMetaGolden(t *testing.T) {
 	// runtime link's (step 8's playground.go registers both; the
 	// step-6 pin asserted neither existed yet).
 	_, _, pg := get(t, Handler(DB(fixtureDB(t)), Playground(true)), "/studio/api/meta")
-	if !strings.Contains(pg, `"capabilities":["live","ingest","runtimes","breakpoints","steer","playground"]`) {
+	if !strings.Contains(pg, `"capabilities":["requests","live","ingest","runtimes","breakpoints","steer","playground"]`) {
 		t.Errorf("Playground capabilities = %s", pg)
 	}
 	// A hosting wrapper declares its own verbs beside the groups'.
 	_, _, caps := get(t, Handler(DB(fixtureDB(t)), Capabilities("fleet")), "/studio/api/meta")
-	if !strings.Contains(caps, `"capabilities":["live","ingest","fleet"]`) {
+	if !strings.Contains(caps, `"capabilities":["requests","live","ingest","fleet"]`) {
 		t.Errorf("declared capabilities = %s", caps)
 	}
 }

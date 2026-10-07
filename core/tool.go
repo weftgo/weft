@@ -38,10 +38,10 @@ type ToolDef struct {
 	// subagent names the child agent when this tool came from Subagent,
 	// for the manifest's delegation edge. Empty for ordinary tools.
 	subagent string
-	// delegates marks a Subagent tool whatever its child's name (an
-	// unnamed child leaves subagent empty): the request record's
-	// source chip (ADR 0028 §5).
-	delegates bool
+	// origin is the tools record's source chip (ADR 0028 §5): set by
+	// Origin, by Subagent ("subagent", whatever its child's name), "" =
+	// local.
+	origin string
 
 	// Per-tool policy, set by ToolOptions. Zero values defer to the
 	// agent; capSet distinguishes "no per-tool cap" from
@@ -567,6 +567,17 @@ func (approvalOption) applyTool(t *ToolDef) { t.approval = true }
 // the model sees. This is a policy and UX seam, not a security
 // boundary: the boundary is the sandbox a tool runs in.
 func RequireApproval() ToolOption { return approvalOption{} }
+
+type originOption struct{ name string }
+
+func (o originOption) applyTool(t *ToolDef) { t.origin = o.name }
+
+// Origin names where a tool came from, for the observability record
+// only: it is the tools record's source (ADR 0028 §5), and changes
+// nothing the model sees or the loop does. A tool is "local" by
+// default; Subagent sets "subagent" and weft/mcp's Tools sets "mcp".
+// Any other string is recorded verbatim; the last Origin wins.
+func Origin(name string) ToolOption { return originOption{name} }
 
 // ReplayPolicy is a tool's side-effect class: what a re-run of a
 // recorded conversation (a playground experiment, a replay fixture) may

@@ -438,7 +438,7 @@ func TestRequestRecordsNotForUnsentRequests(t *testing.T) {
 }
 
 // Content(false): the request record survives with its hashes and
-// numbers, params.stop emptied, weft.content=none and no messages
+// numbers, params.stop emptied, weft.content=stripped and no messages
 // index; prompt and tools records are not emitted at all.
 func TestRequestRecordsContentOff(t *testing.T) {
 	lp := newRecLogProvider()
@@ -457,8 +457,8 @@ func TestRequestRecordsContentOff(t *testing.T) {
 		t.Fatalf("request records = %d, want 1", len(reqs))
 	}
 	r := reqs[0]
-	if r.attr("weft.content") != "none" {
-		t.Errorf("weft.content = %q, want none", r.attr("weft.content"))
+	if r.attr("weft.content") != "stripped" {
+		t.Errorf("weft.content = %q, want stripped (ADR 0028 §6/§11)", r.attr("weft.content"))
 	}
 	if strings.Contains(r.body, "secret") {
 		t.Errorf("content-off request carries text: %s", r.body)
@@ -479,7 +479,7 @@ func TestRequestRecordsContentOff(t *testing.T) {
 	if n := len(lp2.ofKind(t, "prompt")) + len(lp2.ofKind(t, "tools")); n != 0 {
 		t.Errorf("%d prompt/tools records with content not wanted", n)
 	}
-	if reqs := lp2.ofKind(t, "request"); len(reqs) != 1 || reqs[0].attr("weft.content") != "none" {
+	if reqs := lp2.ofKind(t, "request"); len(reqs) != 1 || reqs[0].attr("weft.content") != "stripped" {
 		t.Errorf("request records = %+v", reqs)
 	}
 }
@@ -694,6 +694,7 @@ func TestToolsRecordChips(t *testing.T) {
 		reqEcho("a_tuned", core.Timeout(2*time.Second), core.MaxResultBytes(100), core.Replay(core.ReplaySafe), core.Sequential(), core.RequireApproval()),
 		reqEcho("c_parked"),
 		core.Subagent("d_sub", "Delegate.", child),
+		reqEcho("e_mcp", core.Origin("mcp")),
 		core.Timeout(5*time.Second), core.LoggerProvider(lp))
 	if _, err := agt.Generate(context.Background(), core.Prompt("x"), core.ParkOn("c_parked")); err != nil {
 		t.Fatal(err)
@@ -728,7 +729,7 @@ func TestToolsRecordChips(t *testing.T) {
 		names = append(names, e.Name)
 		got[e.Name] = fmt.Sprintf("%d/%v/%s/%d/%v/%s", e.TimeoutMS, e.Approval, e.Replay, e.MaxResultBytes, e.Sequential, e.Source)
 	}
-	if !slices.Equal(names, []string{"a_tuned", "b_plain", "c_parked", "d_sub"}) {
+	if !slices.Equal(names, []string{"a_tuned", "b_plain", "c_parked", "d_sub", "e_mcp"}) {
 		t.Errorf("entries not in name order: %v", names)
 	}
 	want := map[string]string{
@@ -736,6 +737,7 @@ func TestToolsRecordChips(t *testing.T) {
 		"b_plain":  "5000/false/never/65536/false/local",
 		"c_parked": "5000/true/never/65536/false/local",
 		"d_sub":    "5000/false/never/65536/false/subagent",
+		"e_mcp":    "5000/false/never/65536/false/mcp",
 	}
 	for k, v := range want {
 		if got[k] != v {
@@ -939,4 +941,306 @@ func BenchmarkRequestRecord(b *testing.B) {
 			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/10, "ns/step")
 		})
 	}
+}
+
+// resolveRef returns the messages a request's messages_ref names: the
+// growth records up to its index, concatenated (no compaction records
+// exist before A9).
+func resolveRef(t *testing.T, lp *recLogProvider, runID string, index int64) []core.Message {
+	t.Helper()
+	var out []core.Message
+	for _, m := range lp.ofKind(t, "messages") {
+		if m.attr("weft.run.id") != runID {
+			continue
+		}
+		if idx, _ := m.intAttr("weft.messages.index"); idx <= index {
+			var batch []core.Message
+			if err := json.Unmarshal([]byte(m.body), &batch); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, batch...)
+		}
+	}
+	return out
+}
+
+// After a resume that rebuilds a partial tool message (one call ran,
+// one parked), the step-0 request's messages_ref resolves to exactly
+// its count — the input record stops at the assistant message and the
+// rebuilt tool message is the next growth record — and the resolved
+// messages are the request's.
+func TestRequestRecordsRefResolvesAfterMixedResume(t *testing.T) {
+	park := reqEcho("park", core.RequireApproval())
+	model := wefttest.Script(
+		wefttest.ToolCalls(
+			wefttest.Call{ID: "a", Name: "echo", Args: `{"msg":"1"}`},
+			wefttest.Call{ID: "b", Name: "park", Args: `{"msg":"2"}`}),
+		wefttest.Say("done"))
+	agt := core.New(model, reqEcho("echo"), park)
+	res, err := agt.Generate(context.Background(), core.Prompt("go"))
+	if err != nil || len(res.Pending) != 1 || len(res.Messages) != 3 {
+		t.Fatalf("park: %v, pending %d, messages %d", err, len(res.Pending), len(res.Messages))
+	}
+	lp := newRecLogProvider()
+	agt2 := core.New(model, reqEcho("echo"), park, core.LoggerProvider(lp))
+	res2, err := agt2.Generate(context.Background(), core.RunID("resume"), core.Messages(res.Messages...), core.Approve("b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqs := lp.ofKind(t, "request")
+	if len(reqs) != 1 {
+		t.Fatalf("request records = %d", len(reqs))
+	}
+	b := decodeRequest(t, reqs[0])
+	if b.MessagesRef.Index == nil {
+		t.Fatal("no messages_ref.index with capture on")
+	}
+	got := resolveRef(t, lp, "resume", *b.MessagesRef.Index)
+	if len(got) != b.MessagesRef.Count {
+		t.Fatalf("records ≤ %d hold %d messages, messages_ref.count = %d", *b.MessagesRef.Index, len(got), b.MessagesRef.Count)
+	}
+	gb, _ := json.Marshal(got)
+	wb, _ := json.Marshal(model.LastRequest().Messages)
+	if !bytes.Equal(gb, wb) {
+		t.Errorf("ref resolves to\n%s\nthe request carried\n%s", gb, wb)
+	}
+	// And the whole stream still concatenates to the transcript.
+	all := resolveRef(t, lp, "resume", 1<<30)
+	ab, _ := json.Marshal(all)
+	tb, _ := json.Marshal(res2.Messages)
+	if !bytes.Equal(ab, tb) {
+		t.Errorf("records rebuild\n%s\ntranscript\n%s", ab, tb)
+	}
+}
+
+// A steered batch is growth: the next step's request points at it.
+func TestRequestRecordsRefPointsAtSteeredBatch(t *testing.T) {
+	lp := newRecLogProvider()
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{ID: "c1", Name: "echo", Args: `{"msg":"x"}`}),
+		wefttest.Say("done")), reqEcho("echo"), core.LoggerProvider(lp))
+	if _, err := agt.Generate(context.Background(), core.RunID("st"), core.Prompt("go"),
+		wefttest.NewSteers().At(0, core.User("metric")).Option()); err != nil {
+		t.Fatal(err)
+	}
+	reqs := lp.ofKind(t, "request")
+	if len(reqs) != 2 {
+		t.Fatalf("request records = %d", len(reqs))
+	}
+	b := decodeRequest(t, reqs[1])
+	if b.MessagesRef.Index == nil || *b.MessagesRef.Index != 3 || b.MessagesRef.Count != 4 {
+		t.Fatalf("step 1 messages_ref = %v/%d, want {3, 4}", b.MessagesRef.Index, b.MessagesRef.Count)
+	}
+	for _, m := range lp.ofKind(t, "messages") {
+		if idx, _ := m.intAttr("weft.messages.index"); idx == 3 && !strings.Contains(m.body, "metric") {
+			t.Errorf("messages record 3 is not the steered batch: %s", m.body)
+		}
+	}
+	if n := len(resolveRef(t, lp, "st", 3)); n != 4 {
+		t.Errorf("ref resolves to %d messages, want 4", n)
+	}
+}
+
+// Two schemas equal but for their key order hash identically: the
+// catalog hash is over decoded values, written with sorted keys.
+func TestCatalogHashIgnoresSchemaKeyOrder(t *testing.T) {
+	hashOf := func(schema string) string {
+		s, err := core.ParseSchema(json.RawMessage(schema))
+		if err != nil {
+			t.Fatal(err)
+		}
+		lp := newRecLogProvider()
+		tool := core.RawTool("t", "T.", s, func(context.Context, json.RawMessage) (string, error) { return "", nil })
+		if _, err := core.New(wefttest.Script(wefttest.Say("x")), tool, core.LoggerProvider(lp)).Generate(context.Background(), core.Prompt("x")); err != nil {
+			t.Fatal(err)
+		}
+		return lp.ofKind(t, "request")[0].attr("weft.catalog.hash")
+	}
+	a := hashOf(`{"type":"object","properties":{"q":{"type":"string","description":"d"}},"required":["q"]}`)
+	b := hashOf(`{"required":["q"],"properties":{"q":{"description":"d","type":"string"}},"type":"object"}`)
+	if a == "" || a != b {
+		t.Errorf("key order changed the catalog hash: %s vs %s", a, b)
+	}
+}
+
+// Retry over Fallback: only the layer next to the models reports (the
+// ReportsAttempts gate), so a primary failure and a backup success are
+// two request records — attempt 2 naming the backup — never doubled.
+func TestRequestRecordsRetryOverFallbackNotDoubled(t *testing.T) {
+	lp := newRecLogProvider()
+	backup := infoModel{Model: wefttest.Script(wefttest.Say("from backup")), info: core.ModelInfo{Provider: "backup-co", Name: "b-1"}}
+	agt := core.New(wefttest.Script(wefttest.Fail(core.ErrStreamIdle)),
+		core.WrapModel(mw.Retry(mw.BaseDelay(0)), mw.Fallback(backup)), core.LoggerProvider(lp))
+	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	reqs := lp.ofKind(t, "request")
+	if len(reqs) != 2 {
+		t.Fatalf("request records = %d, want 2 (one per reported provider request)", len(reqs))
+	}
+	b := decodeRequest(t, reqs[1])
+	if b.Attempt != 2 || b.Model.Provider != "backup-co" || b.Model.Name != "b-1" {
+		t.Errorf("attempt 2 record = %+v", b)
+	}
+}
+
+// An attempt that reports only its model keeps the call's provider, and
+// one that reports only its provider keeps the call's model name.
+func TestRequestRecordsAttemptKeepsUnreportedModelFields(t *testing.T) {
+	lp := newRecLogProvider()
+	agt := core.New(wefttest.Script(wefttest.Say("done")), core.LoggerProvider(lp),
+		core.WrapModel(func(next core.Model) core.Model {
+			// The reporting layer names the call's model, as Info would.
+			return infoModel{Model: reportVia(func(ctx context.Context) {
+				r := core.ReportFromContext(ctx)
+				r.Attempt(core.AttemptInfo{})
+				r.Attempt(core.AttemptInfo{Model: "other"})
+				r.Attempt(core.AttemptInfo{Provider: "elsewhere"})
+			})(next), info: core.InfoOf(next)}
+		}))
+	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	reqs := lp.ofKind(t, "request")
+	if len(reqs) != 3 {
+		t.Fatalf("request records = %d, want 3", len(reqs))
+	}
+	if m := decodeRequest(t, reqs[1]).Model; m.Provider != "wefttest" || m.Name != "other" {
+		t.Errorf("model-only attempt = %+v", m)
+	}
+	if m := decodeRequest(t, reqs[2]).Model; m.Provider != "elsewhere" || m.Name != "script" {
+		t.Errorf("provider-only attempt = %+v", m)
+	}
+}
+
+// A prompt or tools record whose emission panicked is not marked
+// recorded: it is emitted again at the next step.
+func TestRequestRecordsRetriedAfterEmitPanic(t *testing.T) {
+	lp := &flakyFirstProvider{}
+	agt := core.New(wefttest.Script(toolTurns(1)...), reqEcho("echo"), core.Instructions("p"), core.LoggerProvider(lp))
+	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	if lp.prompts.Load() != 1 || lp.tools.Load() != 1 {
+		t.Errorf("prompt/tools records delivered = %d/%d, want 1/1 (retried at step 1)", lp.prompts.Load(), lp.tools.Load())
+	}
+	if agt.TapPanics() != 2 {
+		t.Errorf("TapPanics = %d, want 2", agt.TapPanics())
+	}
+}
+
+// flakyFirstProvider panics on the first prompt and the first tools
+// record, and counts the ones delivered after.
+type flakyFirstProvider struct {
+	embedded.LoggerProvider
+	prompts, tools        atomic.Int64
+	promptSeen, toolsSeen atomic.Bool
+}
+
+func (p *flakyFirstProvider) Logger(string, ...log.LoggerOption) log.Logger { return flakyLogger{p: p} }
+
+type flakyLogger struct {
+	embedded.Logger
+	p *flakyFirstProvider
+}
+
+func (flakyLogger) Enabled(context.Context, log.EnabledParameters) bool { return true }
+func (l flakyLogger) Emit(_ context.Context, r log.Record) {
+	switch r.EventName() {
+	case "weft.prompt":
+		if !l.p.promptSeen.Swap(true) {
+			panic("first prompt")
+		}
+		l.p.prompts.Add(1)
+	case "weft.tools":
+		if !l.p.toolsSeen.Swap(true) {
+			panic("first tools")
+		}
+		l.p.tools.Add(1)
+	}
+}
+
+// Four subagents running in parallel each record under their own run
+// id, with their own counters and their own tools record.
+func TestRequestRecordsParallelSubagents(t *testing.T) {
+	lp := newRecLogProvider()
+	var opts []core.Option
+	var calls []wefttest.Call
+	for i := range 4 {
+		child := core.New(wefttest.Script(wefttest.Say("child")), core.Name(fmt.Sprintf("child%d", i)),
+			reqEcho(fmt.Sprintf("tool%d", i)), core.LoggerProvider(lp))
+		name := fmt.Sprintf("sub%d", i)
+		opts = append(opts, core.Subagent(name, "Delegate.", child))
+		calls = append(calls, wefttest.Call{ID: fmt.Sprintf("c%d", i), Name: name, Args: `{"prompt":"x"}`})
+	}
+	opts = append(opts, core.Parallelism(4), core.LoggerProvider(lp))
+	parent := core.New(wefttest.Script(wefttest.ToolCalls(calls...), wefttest.Say("final")), opts...)
+	res, err := parent.Generate(context.Background(), core.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	type counts struct{ req, tools int }
+	byRun := map[string]*counts{}
+	catalogs := map[string]bool{}
+	for _, k := range []string{"request", "tools"} {
+		for _, r := range lp.ofKind(t, k) {
+			id := r.attr("weft.run.id")
+			if byRun[id] == nil {
+				byRun[id] = &counts{}
+			}
+			idx, _ := r.intAttr("weft." + k + ".index")
+			if k == "request" {
+				if id != res.ID && idx != 0 {
+					t.Errorf("child %s request index %d, want its own counter from 0", id, idx)
+				}
+				byRun[id].req++
+			} else {
+				if idx != 0 {
+					t.Errorf("run %s tools index %d", id, idx)
+				}
+				byRun[id].tools++
+				catalogs[r.attr("weft.catalog.hash")] = true
+			}
+		}
+	}
+	if len(byRun) != 5 {
+		t.Fatalf("records under %d run ids, want 5", len(byRun))
+	}
+	for id, c := range byRun {
+		want := 1
+		if id == res.ID {
+			want = 2
+		}
+		if c.req != want || c.tools != 1 {
+			t.Errorf("run %s: %d request, %d tools records", id, c.req, c.tools)
+		}
+	}
+	if len(catalogs) != 5 {
+		t.Errorf("%d distinct catalogs, want 5 (each child its own)", len(catalogs))
+	}
+}
+
+// ExampleOrigin: a tool registered from somewhere other than Go source
+// names its origin, which the tools record carries as its source chip.
+func ExampleOrigin() {
+	lp := newRecLogProvider()
+	plugin := core.RawTool("lookup", "Look up an order.", nil,
+		func(context.Context, json.RawMessage) (string, error) { return "ok", nil },
+		core.Origin("plugin"))
+	agt := core.New(wefttest.Script(wefttest.Say("ok")), plugin, core.LoggerProvider(lp))
+	if _, err := agt.Generate(context.Background(), core.Prompt("hi")); err != nil {
+		return
+	}
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	for _, r := range lp.records {
+		if r.attr("weft.record") == "tools" {
+			var body struct {
+				Tools []struct{ Name, Source string } `json:"tools"`
+			}
+			_ = json.Unmarshal([]byte(r.body), &body)
+			fmt.Println(body.Tools[0].Name, body.Tools[0].Source)
+		}
+	}
+	// Output: lookup plugin
 }

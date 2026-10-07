@@ -150,7 +150,8 @@ func TestRequestRecordsContentPolicyPerDestination(t *testing.T) {
 			CatalogHash string   `json:"catalog_hash"`
 			Names       []string `json:"names"`
 		} `json:"tools"`
-		Params map[string]any `json:"params"`
+		Params      map[string]any `json:"params"`
+		MessagesRef map[string]any `json:"messages_ref"`
 	}
 	if err := json.Unmarshal([]byte(offReqs[0].Body().AsString()), &ob); err != nil {
 		t.Fatal(err)
@@ -160,6 +161,14 @@ func TestRequestRecordsContentPolicyPerDestination(t *testing.T) {
 	}
 	if _, has := ob.Params["stop"]; has {
 		t.Errorf("content-off request keeps params.stop: %v", ob.Params)
+	}
+	// It never received the messages records: the index is gone, the
+	// count stays; the content-on destination keeps both.
+	if _, has := ob.MessagesRef["index"]; has || ob.MessagesRef["count"] != float64(1) {
+		t.Errorf("content-off request messages_ref = %v, want the count alone", ob.MessagesRef)
+	}
+	if !strings.Contains(rb, `"messages_ref":{"index":0,"count":1}`) {
+		t.Errorf("content-on request lost its messages_ref: %s", rb)
 	}
 	if attrOf(offReqs[0], "weft.system.hash") != pr.Hash || attrOf(offReqs[0], "weft.catalog.hash") != tb.Hash {
 		t.Error("content-off request lost its hash attributes")

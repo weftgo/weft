@@ -23,8 +23,11 @@ type ContentConfig struct {
 	// MaxBytes caps one event field or delta body, a prompt record's
 	// text and a tools record's body (whole tool entries dropped from
 	// the end, so the body stays JSON); 0 = 32 KiB; negative =
-	// unlimited. A cut sets weft.content.truncated_bytes. Never applied
-	// to messages records — a capped transcript is not replay-grade.
+	// unlimited. A cut sets weft.content.truncated_bytes. The default
+	// applies to tools bodies too: a large catalog (an MCP server's, say)
+	// arrives truncated, with truncated_bytes set — raise MaxBytes for
+	// the local sink when the full catalog is wanted. Never applied to
+	// messages records — a capped transcript is not replay-grade.
 	MaxBytes int
 	// Redact is applied to a content field before the cap; nil = identity.
 	// It sees event and delta bodies and weft.messages transcript

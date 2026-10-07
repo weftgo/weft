@@ -24,9 +24,34 @@ module, ADR 0005).
   version** (`version.Runtime()`), no longer the `core` dependency's;
   inside the workspace it reads the tag instead of `(devel)`.
 
+### Changed
+
+- **The system prompt and the tool catalog now reach content-on
+  destinations** (`otel.Local`, `otel.Studio`) under the content policy:
+  `Redact`-able, capped with `weft.content.truncated_bytes`, dropped by
+  content-off destinations. ADR 0028 reverses the old stance that no
+  record carries the instructions text. An application whose prompt must
+  not leave the process redacts it (`core.ContentPrompt`) or turns
+  content off for that destination.
+
 ### Added
 
 - `studio --version` prints `version.Runtime()` and exits.
+- **The request record (ADR 0028).** Three OTel log record kinds beside
+  `event`, `delta` and `messages`: `request` (one per model-call attempt:
+  step, attempt, system and catalog hashes, messages reference, tool
+  names, tool choice, thinking, params, model), `prompt` (the composed
+  system text, once per distinct hash per run) and `tools` (the offered
+  catalog with its policy chips, once per distinct hash per run).
+- `RunStart.InstructionsHash` (`instructions_hash` on the wire, an
+  additive field): sha256 of the run's raw configured instructions,
+  always set by the loop; mirrored as `weft.instructions.hash` on the
+  `run_start` record and the `invoke_agent` span.
+- `ContentPrompt` and `ContentStop`, the `ContentKind`s `otel`'s
+  `Redact` receives for a prompt's text and a request's stop sequences.
+- `weft.Origin(name)`, a tool option naming the tools record's `source`
+  (`local` by default; `Subagent` sets `subagent`, `mcp.Tools` sets
+  `mcp`).
 
 ## 0.9.0 — 2026-10-07
 

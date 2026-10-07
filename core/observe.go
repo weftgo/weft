@@ -87,6 +87,9 @@ const (
 
 	contentFull = "full"
 	contentNone = "none"
+	// contentStripped marks a request record emitted with capture off
+	// (ADR 0028 §6): the same mark weft/otel's content-off chains set.
+	contentStripped = "stripped"
 )
 
 // Log-line keys (ADR 0016's log table). A log is the caller's, unlike a

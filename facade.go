@@ -1621,6 +1621,13 @@ func PromptSnippet(text string) ToolOption { return core.PromptSnippet(text) }
 // boundary: the boundary is the sandbox a tool runs in.
 func RequireApproval() ToolOption { return core.RequireApproval() }
 
+// Origin names where a tool came from, for the observability record
+// only: it is the tools record's source (ADR 0028 §5), and changes
+// nothing the model sees or the loop does. A tool is "local" by
+// default; Subagent sets "subagent" and weft/mcp's Tools sets "mcp".
+// Any other string is recorded verbatim; the last Origin wins.
+func Origin(name string) ToolOption { return core.Origin(name) }
+
 // ReplayPolicy is a tool's side-effect class: what a re-run of a
 // recorded conversation (a playground experiment, a replay fixture) may
 // do with a call to this tool. The zero value, ReplayNever, is what an

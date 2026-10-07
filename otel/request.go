@@ -14,11 +14,12 @@ import (
 // destination chain:
 //
 //	kind      content-on                                   content-off
-//	request   Redact over each params.stop                 kept: params.stop emptied, weft.content=stripped
+//	request   Redact over each params.stop                 kept: params.stop and messages_ref.index removed, stripped
 //	prompt    Redact over text, MaxBytes caps it           dropped (filtered)
 //	tools     MaxBytes caps the body                       dropped (filtered)
 //
-// The hashes are never touched: they were computed over the text before
+// A content-off request also loses messages_ref.index (the messages
+// records it points at were dropped there). The hashes are never touched: they were computed over the text before
 // any destination shaped it, so a capped or redacted prompt still names
 // itself. A cap that cut sets weft.content.truncated_bytes. A body that
 // cannot be shaped — it does not decode, or Redact panicked — is never
@@ -154,14 +155,54 @@ func (p *destProc) redactRequest(clone *sdklog.Record) {
 }
 
 // stripRequest is a content-off chain's request record: params.stop
-// emptied, weft.content=stripped; the hashes, names and numbers stay.
+// emptied and messages_ref.index removed — this destination never
+// received the messages records it points at, so only the count is
+// kept (ADR 0028 §3) — marked weft.content=stripped; the hashes, names
+// and numbers stay.
 func (p *destProc) stripRequest(clone *sdklog.Record) {
-	if _, ok := editStop(clone, func([]string) ([]string, bool) { return nil, true }); !ok {
-		// Not a weft request body: nothing known to strip but the stop
-		// field, which cannot be found — drop the body's text entirely.
+	if _, ok := editStop(clone, func([]string) ([]string, bool) { return nil, true }); !ok || !dropMessagesIndex(clone) {
+		// Not a weft request body: the fields to strip cannot be found
+		// — drop the body's text entirely.
 		clone.SetBody(attribute.StringValue("{}"))
 	}
 	setAttr(clone, attrContentKey, attribute.StringValue(contentStripped))
+}
+
+// dropMessagesIndex removes messages_ref.index from a request body,
+// re-encoding only when it was there. ok is false when the body is not
+// a request object.
+func dropMessagesIndex(clone *sdklog.Record) (ok bool) {
+	body := clone.Body()
+	if body.Type() != attribute.STRING {
+		return false
+	}
+	var req map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body.AsString()), &req); err != nil || req == nil {
+		return false
+	}
+	raw, has := req["messages_ref"]
+	if !has {
+		return true
+	}
+	var ref map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &ref); err != nil {
+		return false
+	}
+	if _, has := ref["index"]; !has {
+		return true
+	}
+	delete(ref, "index")
+	rb, err := json.Marshal(ref)
+	if err != nil {
+		return false
+	}
+	req["messages_ref"] = rb
+	b, err := json.Marshal(req)
+	if err != nil {
+		return false
+	}
+	clone.SetBody(attribute.StringValue(string(b)))
+	return true
 }
 
 // editStop rewrites a request body's params.stop through fn (nil

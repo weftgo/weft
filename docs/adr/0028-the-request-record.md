@@ -122,7 +122,7 @@ Body (JSON, keys as written; absent = not set):
 | `attempt` | 1 for the loop's call; 2, 3, … for each further attempt the model chain reports (§7) |
 | `system_hash` | sha256 of the system text this request carried (§4); `""` when it carried none |
 | `messages_ref` | `{"index": i, "count": n}`: the request's messages are the run's view as of `messages` record `i` (§8), `n` messages long — the bytes are never duplicated. On a run whose capture is off no `messages` record exists and `weft.messages.index` does not advance, so `index` is omitted and only `count` is kept |
-| `tools` | `{"catalog_hash": h, "names": [...]}`, names in the order offered |
+| `tools` | `{"catalog_hash": h, "names": [...]}`, names in the order offered; `catalog_hash` is `""` when no tools were offered (§5) |
 | `tool_choice` | the `ToolChoiceConfig` in force (mode, name) |
 | `thinking` | the `ThinkingConfig` in force |
 | `sequential_tools` | true when the step dispatches tools one at a time |
@@ -198,7 +198,10 @@ account for the three known differences: numbers keep their source
 lexeme (`1.0` stays `1.0`, which `UseNumber` preserves); U+2028 and
 U+2029 are escaped as `\u2028` and `\u2029` even with
 `SetEscapeHTML(false)`; and invalid UTF-8 in a string is replaced by
-U+FFFD. A change
+U+FFFD. An empty catalog — no tools offered — has `catalog_hash` `""`,
+like a request with no system text has `system_hash` `""`: no `tools`
+record is emitted and the `request` record carries no
+`weft.catalog.hash` attribute, so no emitter hashes `[]`. A change
 of policy alone (a `ToolSource` swapping in the same schema with another
 timeout) is therefore not a new catalog and is not re-recorded; the
 chips describe the catalog as first recorded in the run.
@@ -209,7 +212,7 @@ chips describe the catalog as first recorded in the run.
 |---|---|---|
 | `request` | as emitted; `Redact` runs over each `params.stop` string | kept, `params.stop` emptied, `weft.content = stripped`: the hashes, names and numbers survive, so a trace-only backend still sees which prompt and catalog a call used |
 | `prompt` | `Redact` runs over `text`; `MaxBytes` caps it, setting `weft.content.truncated_bytes` | dropped, like a `messages` record |
-| `tools` | `MaxBytes` caps the body, setting `weft.content.truncated_bytes` | dropped, like a `messages` record |
+| `tools` | `MaxBytes` caps the body by dropping whole entries from the end of the name-ordered list, never a byte cut (a cut schema is not JSON), setting `weft.content.truncated_bytes` to the bytes removed | dropped, like a `messages` record |
 
 The core decides capture the way ADR 0024 D2 does: it asks the Logs
 API's `Enabled` with the record's EventName before marshalling anything,
@@ -361,7 +364,8 @@ parent's records never describe a child's request.
 - The run row gains `instructions_hash` (`run_start`'s
   `weft.instructions.hash`), `catalog_hash` (the `weft.catalog.hash` of
   `request` index 0 — the request record survives content-off chains,
-  the `tools` record does not) and `request_count` (the number of
+  the `tools` record does not; `''` when that request offered no tools,
+  §5) and `request_count` (the number of
   `request` records). ClickHouse fills them in its run views as
   max-aggregates: `request_count` is the high-water mark, max
   `weft.request.index` + 1, which equals the count because the index is

@@ -177,7 +177,16 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			a.safeRunEnd(ctx, fn, res, err)
 		}
 	}
+	// held is the input's tail a resume will rebuild or extend (below):
+	// recorded after the resumed results attach, or here, if the run
+	// fails before they do — so the messages records still concatenate
+	// to the transcript (ADR 0024 D1).
+	var held []Message
 	fail := func(step int, err error) (*RunResult, error) {
+		if held != nil {
+			records.recordMessages(ctx, 0, held, false)
+			held = nil
+		}
 		spanEnded = true
 		re := &RunError{Step: step, Err: err, Result: res}
 		endSpan(res, re)
@@ -210,7 +219,21 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// today it is never reported at all, so a stored transcript could
 	// not rebuild what the run was fed). An empty input (a run with no
 	// messages) emits nothing.
-	records.recordMessages(ctx, 0, res.Messages, true)
+	//
+	// A resume attaches its results right after the last assistant
+	// message with calls — rebuilding the partial tool message there,
+	// or inserting a new one before anything that follows. The input
+	// record stops at that assistant message, and what follows it is
+	// recorded after the attach, as the next growth record: records
+	// concatenated in index order stay the transcript, and a request's
+	// messages_ref resolves to exactly its messages (ADR 0028 §3).
+	inputRec := res.Messages
+	if len(resume) > 0 {
+		if i := lastAssistantWithCalls(res.Messages); i >= 0 && i+1 < len(res.Messages) {
+			inputRec, held = res.Messages[:i+1], res.Messages[i+1:]
+		}
+	}
+	records.recordMessages(ctx, 0, inputRec, true)
 
 	// The approval boundary's second half: approved calls run now,
 	// before any model call, and every other pending call is denied.
@@ -298,7 +321,14 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			return fail(0, err)
 		}
 		var joined []Message
+		cut, tailHeld := len(res.Messages)-len(held), held != nil
 		res.Messages, joined = attachResults(res.Messages, resume, results)
+		if tailHeld {
+			// The held tail as it is now: the rebuilt (or inserted)
+			// tool message and whatever followed it.
+			held = nil
+			records.recordMessages(ctx, 0, res.Messages[cut:], false)
+		}
 		if len(joined) > 0 {
 			// The completed tool message — created, or rebuilt over one
 			// the earlier run left partial — joins the transcript at
@@ -308,7 +338,10 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			// beside the input record, so a resume's stored transcript
 			// rebuilds too.
 			a.observeMessages(ctx, cfg, 0, joined)
-			records.recordMessages(ctx, 0, joined, false)
+			if !tailHeld {
+				// Appended at the end: the next growth record.
+				records.recordMessages(ctx, 0, joined, false)
+			}
 		}
 		// Resumed delegations roll into the total only: there is no
 		// StepRecord for resumed calls (ADR 0007), so no per-call map.

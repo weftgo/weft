@@ -143,7 +143,9 @@ func Tools(ctx context.Context, sess *sdk.ClientSession, opts ...Option) ([]*cor
 		// Annotation default first, the caller's policy after: a
 		// missing readOnlyHint cannot be un-Sequentialised, and
 		// RequireApproval is added, never removed.
-		toolOpts := []core.ToolOption{}
+		// Origin("mcp") names the tool's source in the tools record (ADR
+		// 0028 §5); first, so a caller's own Origin can still rename it.
+		toolOpts := []core.ToolOption{core.Origin("mcp")}
 		if t.Annotations == nil || !t.Annotations.ReadOnlyHint {
 			toolOpts = append(toolOpts, core.Sequential())
 		}

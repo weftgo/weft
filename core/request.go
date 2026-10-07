@@ -172,10 +172,9 @@ type toolEntry struct {
 	Source         string          `json:"source"`
 }
 
-// The tool sources a tools record names. The core knows a Subagent
-// tool by its own construction; an MCP tool is a RawTool the core
-// cannot tell from a local one, so it reads local (ADR 0028 §5 lists
-// mcp; the marker that would let the core say it does not exist yet).
+// The tool sources a tools record names by default: local for an
+// ordinary tool, subagent for a Subagent; any other is the tool's
+// Origin (weft/mcp sets "mcp").
 const (
 	toolSourceLocal    = "local"
 	toolSourceSubagent = "subagent"
@@ -200,9 +199,9 @@ func (a *Agent) toolEntries(tools []*ToolDef, parkSet *parkRule) ([]toolEntry, e
 		if t.capSet {
 			resultCap = t.resultCap
 		}
-		source := toolSourceLocal
-		if t.delegates {
-			source = toolSourceSubagent
+		source := t.origin
+		if source == "" {
+			source = toolSourceLocal
 		}
 		out = append(out, toolEntry{
 			Name:           t.Name,
@@ -280,6 +279,10 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 		}
 	}
 	systemHash := r.lastSystemHash
+	// The memo compares tool pointers. Any PrepareStep deep-clones the
+	// tools every step (loop.go), so under one the catalog is re-hashed
+	// at every recorded step: the hash is unchanged, only the cost is
+	// paid again.
 	if !r.catalogHashed || !slices.Equal(req.Tools, r.lastTools) {
 		h, err := catalogHash(req.Tools)
 		if err != nil {
@@ -362,20 +365,27 @@ func (rr *requestRecord) attempt(ctx context.Context, index int64, a AttemptInfo
 	}
 	body := rr.body
 	body.Attempt = index
-	if a.Model != "" || a.Provider != "" {
-		body.Model = requestModelBody{Provider: a.Provider, Name: a.Model}
+	// Each field the attempt reported overrides the call's own; one it
+	// left zero keeps it.
+	if a.Model != "" {
+		body.Model.Name = a.Model
+	}
+	if a.Provider != "" {
+		body.Model.Provider = a.Provider
 	}
 	rr.emit(ctx, body)
 }
 
 // emit writes one request record. A content-off emission (capture off)
-// empties params.stop, the record's one text field, and says so with
-// weft.content=none; the hashes, names and numbers always go.
+// empties params.stop, the record's one text field, and marks the
+// record weft.content=stripped — the badge ADR 0028 §6/§11 ties to a
+// request whose prompt and tools records were not sent; the hashes,
+// names and numbers always go.
 func (rr *requestRecord) emit(ctx context.Context, body requestBody) {
 	r := rr.r
 	content := contentFull
 	if !r.captureOn(ctx) {
-		body.Params.Stop, content = nil, contentNone
+		body.Params.Stop, content = nil, contentStripped
 	}
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -405,14 +415,13 @@ func (r *recorder) emitPrompt(ctx context.Context, step int, hash, text string) 
 		r.debug(ctx, step, "prompt", err)
 		return false
 	}
-	r.emitRecord(ctx, step, eventNamePrompt, b, []attribute.KeyValue{
+	return r.emitRecord(ctx, step, eventNamePrompt, b, []attribute.KeyValue{
 		attrRecord.String("prompt"),
 		attrRunID.String(r.runID),
 		attrContent.String(contentFull),
 		attrPromptIndex.Int64(r.promptIdx.Add(1) - 1),
 		attrSystemHash.String(hash),
 	})
-	return true
 }
 
 func (r *recorder) emitTools(ctx context.Context, a *Agent, step int, hash string, tools []*ToolDef, parkSet *parkRule) bool {
@@ -426,22 +435,28 @@ func (r *recorder) emitTools(ctx context.Context, a *Agent, step int, hash strin
 		r.debug(ctx, step, "tools", err)
 		return false
 	}
-	r.emitRecord(ctx, step, eventNameTools, b, []attribute.KeyValue{
+	return r.emitRecord(ctx, step, eventNameTools, b, []attribute.KeyValue{
 		attrRecord.String("tools"),
 		attrRunID.String(r.runID),
 		attrContent.String(contentFull),
 		attrToolsIndex.Int64(r.toolsIdx.Add(1) - 1),
 		attrCatalogHash.String(hash),
 	})
-	return true
 }
 
 // emitRecord stamps the identity chain every record carries (the agent
 // name, the run's metadata) and emits. A panic out of the logger is
 // contained here, per record, so one broken kind does not take the
-// step's other records with it.
-func (r *recorder) emitRecord(ctx context.Context, step int, eventName string, body []byte, attrs []attribute.KeyValue) {
-	defer r.contain(ctx, step, eventName)
+// step's other records with it; ok is false then, so a prompt or
+// catalog whose record did not go is not marked recorded and is tried
+// again at the next step.
+func (r *recorder) emitRecord(ctx context.Context, step int, eventName string, body []byte, attrs []attribute.KeyValue) (ok bool) {
+	defer func() {
+		if p := recover(); p != nil {
+			ok = false
+			r.contained(ctx, step, eventName, p)
+		}
+	}()
 	var rec log.Record
 	rec.SetTimestamp(time.Now())
 	rec.SetEventName(eventName)
@@ -453,6 +468,7 @@ func (r *recorder) emitRecord(ctx context.Context, step int, eventName string, b
 	attrs = append(attrs, metadataAttrs(ctx)...)
 	rec.AddAttributes(attrs...)
 	r.elog.Emit(ctx, rec)
+	return true
 }
 
 // contain recovers a panic out of the logger (or a record's building)
@@ -460,11 +476,16 @@ func (r *recorder) emitRecord(ctx context.Context, step int, eventName string, b
 // the run, nor be invisible.
 func (r *recorder) contain(ctx context.Context, step int, what string) {
 	if p := recover(); p != nil {
-		if r.panics != nil {
-			r.panics.Add(1)
-		}
-		r.debug(ctx, step, what, fmt.Errorf("record panicked: %v", p))
+		r.contained(ctx, step, what, p)
 	}
+}
+
+// contained counts a recovered panic and leaves its Debug line.
+func (r *recorder) contained(ctx context.Context, step int, what string, p any) {
+	if r.panics != nil {
+		r.panics.Add(1)
+	}
+	r.debug(ctx, step, what, fmt.Errorf("record panicked: %v", p))
 }
 
 // debug reports a record that could not be built: one Debug line, never

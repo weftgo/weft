@@ -1,0 +1,79 @@
+{
+  "format": "weft.run.export/1",
+  "run": {
+    "id": "old1",
+    "parent_run_id": "",
+    "parent_call_id": "",
+    "trace_id": "",
+    "agent": "support",
+    "model": {
+      "provider": "",
+      "name": ""
+    },
+    "manifest_hash": "",
+    "weft_version": "(test)",
+    "service": "",
+    "session_id": "",
+    "public_id": "",
+    "turn": 0,
+    "playground": false,
+    "experiment_id": "",
+    "forked_from": "",
+    "meta": {},
+    "started": "1970-01-01T00:00:00.0000001Z",
+    "finished": null,
+    "last_seen": "1970-01-01T00:00:00.0000002Z",
+    "status": "succeeded",
+    "err": "",
+    "steps": 2,
+    "pending": 0,
+    "stop_reason": "",
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    "event_count": 0,
+    "message_count": 0,
+    "instructions_hash": "",
+    "catalog_hash": "",
+    "request_count": 0,
+    "requests_badge": "not_recorded",
+    "children": []
+  },
+  "events": {
+    "events": [],
+    "gaps": [],
+    "badge": "gap",
+    "reason": "the run counts steps, but no event of it was stored: a destination dropped its records",
+    "fix": "check the exporter's drops"
+  },
+  "transcript": {
+    "batches": [],
+    "badge": "gap",
+    "reason": "the run made model calls, but no messages record was stored: content capture was off, or a destination dropped them",
+    "fix": "check the exporter's drops"
+  },
+  "compactions": [],
+  "requests": {
+    "requests": [],
+    "prompts": {},
+    "catalogs": {},
+    "badge": "not_recorded",
+    "reason": "this run was recorded before the request record existed (weft v0.9.0 or earlier, ADR 0028): it has no request, prompt or tools records",
+    "fix": "upgrade weft and re-run"
+  },
+  "spans": [],
+  "holes": [
+    {
+      "hole": "gap",
+      "reason": "the run counts steps, but no event of it was stored: a destination dropped its records",
+      "fix": "check the exporter's drops"
+    },
+    {
+      "hole": "not_recorded",
+      "reason": "this run was recorded before the request record existed (weft v0.9.0 or earlier, ADR 0028): it has no request, prompt or tools records",
+      "fix": "upgrade weft and re-run"
+    }
+  ]
+}
+

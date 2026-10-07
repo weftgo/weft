@@ -80,6 +80,43 @@ module, ADR 0005).
 
 ### Added
 
+- **Studio's run export (plan A7, A9's byte-faithful fixtures).**
+  `GET /api/runs/{id}/export?format=json|jsonl|otlp|wefttest`, under a
+  new `export` capability in `/api/meta`, downloads the whole run
+  (`Content-Disposition: attachment; filename="<run id>.<ext>"`, a
+  child's slashes spelled `_`). `json` is one `weft.run.export/1`
+  document — `run` (as `/api/runs/{id}`), `events` (with `gaps`),
+  `transcript` (the batches as `/transcript` serves them),
+  `compactions`, `requests` (the rows with `refs=1`, plus `prompts` and
+  `catalogs` keyed by hash: the record, or `{hash, badge}`), `spans`
+  and `holes`; every absent block carries its badge, reason and fix
+  (`not_recorded` for a run written before ADR 0028, `stripped` for a
+  content-off run, `gap` for records a destination dropped). `jsonl` is
+  the same records one per line, `{"record": <kind>, …}`, in a stable
+  order (run, badges, events by pos, messages by index, compactions,
+  requests by index, prompts, catalogs, spans). `otlp` is
+  `{"logs": ExportLogsServiceRequest, "traces": ExportTraceServiceRequest}`
+  in OTLP/JSON (ids as hex): the records are rebuilt from what obsdb
+  reads, with the run's identity and metadata on each and one heartbeat
+  at its last-seen, so `POST /v1/logs` and `/v1/traces` re-ingest the
+  same run. `wefttest` is a zip of replay fixtures for
+  `wefttest.Replay`. A read-scoped panel token gets `json`/`jsonl` with
+  the request block `{badge: "hidden"}`; `otlp` and `wefttest` are 403
+  with the hidden badge. An unknown format is 400, an unknown run 404,
+  a run with no transcript to fixture 409 (badged `stripped` or `gap`).
+  `web/src/lib/api.ts` gains `exportUrl(runId, format)`.
+- **Studio's replay fixtures key on the stored step and the request
+  record.** `POST /api/playground/fixtures` and the wefttest export
+  share one builder: each fixture is the step its records were stamped
+  with (`weft.step.index`), not the Nth assistant message; its key takes
+  the tool names, thinking, tool choice and sequential flag from the
+  step's answering request record (the caller's `tools` only for a run
+  written before the record); a step whose request carried a run-scope
+  compaction view keys on the compacted messages the model saw and
+  carries a `compacted_at` header (index, step, range, hash); the
+  finish event carries the step's recorded reason, raw reason and
+  usage; tool-call signatures are kept; and the system prompt is
+  filled for an identity that reads prompts.
 - **Every hole is a badge from one closed table, on both surfaces
   (plan A3, ADR 0028 §11).** `obsdb.HoleNote(h)` holds each of the ten
   holes' one-line reason and, where one exists, its fix — Studio's
@@ -106,7 +143,6 @@ module, ADR 0005).
   through the transcript overlay, so holes survive scrubbing. The
   request routes' reasons are now the table's words. `redacted` stays
   reserved: weft's pipeline does not mark a redaction.
-
 - **Studio's step route (plan A7, with A4's attempts and A10's
   children).** `GET /api/runs/{id}/steps/{n}` (`n` the step ordinal)
   answers one step assembled server-side from `obsdb`: `status` (`ok`,

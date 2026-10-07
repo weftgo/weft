@@ -177,7 +177,7 @@ read-scoped panel token (403, `badge: "hidden"`), and badged
 `not_recorded` / `stripped` rather than empty when there is nothing to
 show for a reason (a child run id whose last segment is itself one of
 these sub-route names — `events`, `transcript`, `spans`, `requests`,
-`tools` — is shadowed by the route; provider call ids never collide),
+`tools`, `export` — is shadowed by the route; provider call ids never collide),
 `runs/{id}/steps/{n}` (one step assembled server-side, `n` its ordinal,
 under the `steps` capability: the step's status, timing, the model
 requested and the one that answered, attempt 1's request row, every
@@ -187,6 +187,22 @@ the compaction view it saw and `holes` — every absent block a badge
 with its reason and fix; scoped like `events`, except that a read-scoped
 panel token gets the request block as `{badge: "hidden", …}` inside a
 200; a step past the run's last, or not yet started, is 404),
+`runs/{id}/export?format=json|jsonl|otlp|wefttest` (the whole run as
+one download, `Content-Disposition: attachment; filename="<run
+id>.<ext>"`, under the `export` capability: `json` is one document —
+the run as `runs/{id}` serves it, every event, the transcript batches,
+the compactions, the request records with the prompts and catalogs
+they name keyed by hash, the spans and `holes`, every absent block
+badged; `jsonl` is the same records one per line, each with a
+`"record"` kind, in a stable order; `otlp` is
+`{"logs": ExportLogsServiceRequest, "traces": ExportTraceServiceRequest}`
+in OTLP/JSON, which `POST /v1/logs` and `/v1/traces` read back into the
+same run; `wefttest` is the run's model calls as replay fixtures,
+zipped flat — unzip into `testdata/<TestName>/` and `wefttest.Replay`
+answers, a step whose request carried a compaction view keyed on it
+and noted `compacted_at`. A read-scoped panel token gets `json` and
+`jsonl` with the request block `{badge: "hidden", …}`; `otlp` and
+`wefttest` are 403 with that badge),
 `traces/{trace_id}` (any trace), `sessions`, `sessions/{id}` (turns in
 order), `public/{public_id}`, `manifest`, `POST /api/panel-tokens`
 (mint; the panel's scoped tokens — see the devtools panel above), and

@@ -1,0 +1,203 @@
+=== 00001-a10676c6f4cb824e.json
+{
+  "model": {
+    "provider": "wefttest",
+    "name": "glm-b"
+  },
+  "request": {
+    "system": "You are a support agent.",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "refund order 42"
+          }
+        ]
+      }
+    ],
+    "tools": [
+      "lookup_order",
+      "refund",
+      "research"
+    ]
+  },
+  "events": [
+    {
+      "type": "tool_call",
+      "id": "c_lookup",
+      "name": "lookup_order",
+      "args": {
+        "order_id": "42"
+      }
+    },
+    {
+      "type": "finish",
+      "reason": "tool_calls",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      }
+    }
+  ],
+  "error": ""
+}
+=== 00002-b0319d8dacaf352f.json
+{
+  "model": {
+    "provider": "wefttest",
+    "name": "glm-a"
+  },
+  "request": {
+    "system": "You are a support agent.",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "refund order 42"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_call",
+            "id": "c_lookup",
+            "name": "lookup_order",
+            "args": {
+              "order_id": "42"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [
+          {
+            "type": "tool_result",
+            "call_id": "c_lookup",
+            "name": "lookup_order",
+            "content": "order 42 shipped",
+            "is_error": false
+          }
+        ]
+      }
+    ],
+    "tools": [
+      "lookup_order",
+      "refund",
+      "research"
+    ]
+  },
+  "events": [
+    {
+      "type": "tool_call",
+      "id": "c_sub",
+      "name": "research",
+      "args": {
+        "prompt": "why is order 42 late?"
+      }
+    },
+    {
+      "type": "finish",
+      "reason": "tool_calls",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      }
+    }
+  ],
+  "error": ""
+}
+=== 00003-c543200256d8d724.json
+{
+  "model": {
+    "provider": "wefttest",
+    "name": "glm-a"
+  },
+  "compacted_at": {
+    "index": 5,
+    "step": 2,
+    "from_seq": 1,
+    "to_seq": 3,
+    "hash": "f7f974691e358826798016f537798494fdc08c45bce009893a273b3cf26bd1c3",
+    "replaced": 2,
+    "entries": 1
+  },
+  "request": {
+    "system": "You are a support agent.",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "refund order 42"
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "summary: the order was looked up"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_call",
+            "id": "c_sub",
+            "name": "research",
+            "args": {
+              "prompt": "why is order 42 late?"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [
+          {
+            "type": "tool_result",
+            "call_id": "c_sub",
+            "name": "research",
+            "content": "the carrier lost it",
+            "is_error": false
+          }
+        ]
+      }
+    ],
+    "tools": [
+      "lookup_order",
+      "refund",
+      "research"
+    ]
+  },
+  "events": [
+    {
+      "type": "tool_call",
+      "id": "c_refund",
+      "name": "refund",
+      "args": {
+        "order_id": "42"
+      }
+    },
+    {
+      "type": "finish",
+      "reason": "tool_calls",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      }
+    }
+  ],
+  "error": ""
+}

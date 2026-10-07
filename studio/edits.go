@@ -78,29 +78,6 @@ func runSteps(batches []obsdb.TranscriptBatch) ([]stepMessage, error) {
 	return out, nil
 }
 
-// sourceSteps splits a run's messages bodies where the run itself
-// began: the first record is the input, the rest are the steps
-// (runtime/transcript.go's decodeBodies). A null or empty body is
-// skipped; one that is not messages is an error.
-func sourceSteps(bodies []json.RawMessage) (input, steps []core.Message, err error) {
-	first := true
-	for _, body := range bodies {
-		if len(body) == 0 || string(body) == "null" {
-			continue
-		}
-		var batch []core.Message
-		if err := json.Unmarshal(body, &batch); err != nil {
-			return nil, nil, fmt.Errorf("messages body: %w", err)
-		}
-		if first {
-			input, first = batch, false
-			continue
-		}
-		steps = append(steps, batch...)
-	}
-	return input, steps, nil
-}
-
 // stepCount is how many steps the run recorded: one past the last
 // step holding an assistant message (each step's model call writes
 // one).

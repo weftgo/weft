@@ -64,7 +64,7 @@ type runRoute struct {
 // addRunRoute registers a GET /api/runs/{id}/<ext> sub-route, which
 // serveRunRoutes dispatches by suffix. So a child run id whose last
 // segment equals a sub-route name (events, transcript, spans, requests,
-// tools) is shadowed by that route: its run document is unreachable
+// tools, export) is shadowed by that route: its run document is unreachable
 // at /api/runs/{id}. A child id's last segment is the provider's tool
 // call id, and providers' ids never take those shapes.
 func (s *Server) addRunRoute(ext string, serve func(http.ResponseWriter, *http.Request, string)) {
@@ -129,6 +129,16 @@ func (s *Server) registerGroups() {
 		capability: "steps",
 		register: func(_ *http.ServeMux, s *Server) {
 			s.addRunItemRoute("steps", s.serveRunStep)
+		},
+	})
+	// The run export (plan A7): the whole run as one download, in
+	// json, jsonl, otlp or wefttest. Always present; the capability is
+	// what the UIs gate their export buttons on.
+	s.addGroup(routeGroup{
+		name:       "export",
+		capability: "export",
+		register: func(_ *http.ServeMux, s *Server) {
+			s.addRunRoute("export", s.serveRunExport)
 		},
 	})
 	// The live stream (S4.5).

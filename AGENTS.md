@@ -184,7 +184,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    // API: meta, manifest, runs (+session/public/playground filters), runs/{id},
 //    //    runs/{id}/events|transcript|spans|requests|tools, runs/{id}/steps/{n} (one step
 //    //    assembled: request, attempts, events, tool calls, children, holes; capability
-//    //    "steps"), traces/{id},
+//    //    "steps"), runs/{id}/export?format=json|jsonl|otlp|wefttest (the whole run as one
+//    //    download, capability "export"; otlp re-ingests through /v1/*, wefttest is a zip
+//    //    wefttest.Replay reads — a compacted step keys on its view, noted compacted_at),
+//    //    traces/{id},
 //    //    sessions, sessions/{id}, public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5); Token(tok) walls the
 //    //    /api tree (bearer or ?token=) — the UI shell and /panel.js are static,

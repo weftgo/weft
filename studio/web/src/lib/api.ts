@@ -957,6 +957,25 @@ export function stepQuery(runId: string, n: number) {
   })
 }
 
+/** The formats GET /api/runs/{id}/export serves (capability "export"). */
+export type ExportFormat = "json" | "jsonl" | "otlp" | "wefttest"
+
+/**
+ * exportUrl is the download link of a run's export: json (one
+ * document), jsonl (one record per line), otlp (OTLP/JSON logs and
+ * traces, re-ingestable) or wefttest (replay fixtures, zipped). A link
+ * cannot carry a bearer header, so a token-walled Studio's token rides
+ * as ?token=. A read-scoped panel token's json and jsonl hide the
+ * request block; its otlp and wefttest are 403 with badge "hidden".
+ */
+export function exportUrl(runId: string, format: ExportFormat): string {
+  const url = new URL(`runs/${encodeURIComponent(runId)}/export`, apiBase())
+  url.searchParams.set("format", format)
+  const tok = studioToken()
+  if (tok) url.searchParams.set("token", tok)
+  return url.toString()
+}
+
 export function spansQuery(id: string) {
   return queryOptions({
     queryKey: ["spans", id],

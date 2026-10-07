@@ -9,6 +9,7 @@
   "capabilities": [
     "requests",
     "steps",
+    "export",
     "live",
     "ingest"
   ]

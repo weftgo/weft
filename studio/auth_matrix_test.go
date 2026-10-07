@@ -30,7 +30,9 @@ import (
 //   - a read-scoped panel token never reads system prompts (the
 //     manifest, a run's requests and tools: 403, badge "hidden"; a
 //     step's request block: the hidden badge inside a 200); a
-//     playground-scoped one reads them inside its public id;
+//     playground-scoped one reads them inside its public id; the run
+//     export's json and jsonl hide the request block for it, otlp and
+//     wefttest are 403 with the hidden badge;
 //   - what is not public-id-shaped is the server token's alone: the
 //     runtime link, breakpoints, experiments, the token mint;
 //   - ingest takes the ingest token and nothing else.
@@ -277,6 +279,19 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "GET /api/runs/{B's child}", method: "GET", path: fixed("/api/runs/run_b/0/call_1"), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/runs/{B's child}/transcript", method: "GET", path: fixed("/api/runs/run_b/0/call_1/transcript"), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/runs/{B's child}/events", method: "GET", path: fixed("/api/runs/run_b/0/call_1/events"), resources: []string{"B"}, want: scoped(ok)},
+		// The run export (plan A7): json and jsonl are scoped like the
+		// run's other reads — a read-scoped token gets them with the
+		// request block hidden (pinned below); otlp and wefttest carry
+		// the request records and prompts, so a read-scoped token is
+		// refused them whatever the run (403, badge hidden). An unknown
+		// format is 400 before anything is looked up.
+		{name: "GET /api/runs/{id}/export?format=json", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=json" }, resources: all, want: scoped(ok)},
+		{name: "GET /api/runs/{id}/export?format=jsonl", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=jsonl" }, resources: all, want: scoped(ok)},
+		{name: "GET /api/runs/{id}/export?format=otlp", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=otlp" }, resources: all, want: acting(ok)},
+		{name: "GET /api/runs/{id}/export?format=wefttest", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=wefttest" }, resources: all, want: acting(ok)},
+		{name: "GET /api/runs/{B's child}/export?format=json", method: "GET", path: fixed("/api/runs/run_b/0/call_1/export?format=json"), resources: []string{"B"}, want: scoped(ok)},
+		{name: "GET /api/runs/{B's child}/export?format=wefttest", method: "GET", path: fixed("/api/runs/run_b/0/call_1/export?format=wefttest"), resources: []string{"B"}, want: acting(ok)},
+		{name: "GET /api/runs/{id}/export?format=xml", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=xml" }, resources: one, want: anyValid(http.StatusBadRequest)},
 		{name: "GET /api/traces/{id}", method: "GET", path: func(res string) string { return "/api/traces/" + trace[res] }, resources: all, want: scoped(ok)},
 		{name: "GET /api/sessions", method: "GET", path: fixed("/api/sessions"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/sessions?public_id=", method: "GET", path: func(res string) string { return "/api/sessions?public_id=" + public[res] },
@@ -471,6 +486,33 @@ func TestAuthMatrix(t *testing.T) {
 		hidden := strings.Contains(string(b), `"request":{"badge":"hidden","reason":"`+reason+`","fix":"`+fix+`"}`)
 		if resp.StatusCode != ok || hidden != (id.kind == "read") {
 			t.Errorf("steps/0 as %s = %d %s, want 200 with the request hidden = %v", id.name, resp.StatusCode, b, id.kind == "read")
+		}
+	}
+
+	// The export hides the request block from a read-scoped token: json
+	// and jsonl answer 200 with {badge: hidden} in its place, otlp and
+	// wefttest are 403 with the hidden badge; every other identity that
+	// may read the run gets no hidden badge and the full formats.
+	for _, id := range identities {
+		if id.kind == "bad" {
+			continue
+		}
+		for _, format := range []string{"json", "jsonl", "otlp", "wefttest"} {
+			req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/run_a/export?format="+format+"&token="+id.token, nil)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			hidden := strings.Contains(string(b), `"badge":"hidden","reason":"a read-scoped panel token does not read system prompts or tool catalogs","fix":"use a playground-scoped token"`)
+			wantCode, wantHidden := ok, id.kind == "read"
+			if id.kind == "read" && (format == "otlp" || format == "wefttest") {
+				wantCode = forbidden403
+			}
+			if resp.StatusCode != wantCode || hidden != wantHidden {
+				t.Errorf("export %s as %s = %d hidden %v %s, want %d hidden %v", format, id.name, resp.StatusCode, hidden, b, wantCode, wantHidden)
+			}
 		}
 	}
 

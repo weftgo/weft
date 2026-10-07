@@ -23,10 +23,10 @@ github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
-github.com/weftgo/weft v0.7.0 h1:yaLY6G71NENRrRqW2RHoxaFojxqXyS0RQURueOn1BVo=
-github.com/weftgo/weft v0.7.0/go.mod h1:137JkU7mIxN6mCLnzQDq4vXOTwN45fdkM/QEztfv520=
-github.com/weftgo/weft/thread v0.9.0 h1:/a/BvDbgk43rMhS89btsz9wUTqcDhQvsKC3cCrh/fOU=
-github.com/weftgo/weft/thread v0.9.0/go.mod h1:W0F4G2aiesx411XX3GmWWu7NPOD4rKp8H/BZ5M+V6Go=
+github.com/weftgo/weft v0.8.0 h1:FmoUGhtPUzP9F6Qg3ePCi221X+RRDMcHY7FDvgmrKU0=
+github.com/weftgo/weft v0.8.0/go.mod h1:137JkU7mIxN6mCLnzQDq4vXOTwN45fdkM/QEztfv520=
+github.com/weftgo/weft/thread v0.9.1 h1:68ak2+fgDCKtX0qXA6eML7im69mAQYHzWK5NsXmBJko=
+github.com/weftgo/weft/thread v0.9.1/go.mod h1:PgD5F8ChdX0JsrXA19/ycD41vtbNR5ZoKRe9P9DK5FI=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
 go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
 go.opentelemetry.io/otel v1.46.0 h1:FHt5/CDyVxi/8IM1CH7VE/rRgq3kLHa2mSTVMO8AWyc=

@@ -4,9 +4,9 @@ Notable changes to weft, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); the project
 is pre-1.0 and tags per module (ADR 0005).
 
-## Unreleased
+## thread/sqlite 0.3.1 — 2026-10-07
 
-### thread/sqlite
+### Fixed
 
 - A write whose context ends while its transaction is open now fails
   with an error matching the context's (`context.Canceled`,
@@ -16,6 +16,7 @@ is pre-1.0 and tags per module (ADR 0005).
   canceled while its first prompt was being written settled `failed`
   instead of `canceled` (the crash matrix's `pool_canceled` point, seen
   once in CI). The write still does not land; only the error changed.
+- Requires weft v0.8.0 and thread v0.9.1.
 
 ## otel 0.2.1 — 2026-10-07
 

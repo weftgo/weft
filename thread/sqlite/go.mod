@@ -3,8 +3,8 @@ module github.com/weftgo/weft/thread/sqlite
 go 1.26.0
 
 require (
-	github.com/weftgo/weft v0.7.0
-	github.com/weftgo/weft/thread v0.9.0
+	github.com/weftgo/weft v0.8.0
+	github.com/weftgo/weft/thread v0.9.1
 	modernc.org/sqlite v1.60.1
 )
 

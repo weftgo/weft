@@ -183,15 +183,20 @@ var errNoDestinations = errors.New("otel: no destinations configured")
 
 // errAllFailed is Install's WARN-and-skip mode ending with nothing
 // built. Not errNoDestinations: a program that named its destinations
-// does not get the local sink behind its back.
+// does not get the local sink behind its back (Install falls back only
+// when every failed destination came from the environment).
 var errAllFailed = errors.New("otel: every destination failed to build")
 
 // Install starts the pipeline and registers it globally. It never
 // panics and never fails the program: with no options at all (and no
 // environment destinations) it writes the local sink only (the
 // zero-config rule), and a destination that cannot be built is logged
-// (slog, WARN) and skipped. The returned function flushes and shuts
-// everything down; call it on exit.
+// (slog, WARN) and skipped. When no destination option was passed and
+// every environment destination failed to build, it falls back to the
+// local sink with one WARN rather than recording nothing (Start returns
+// the error instead); a program that passed its own destinations gets
+// no destination it did not name. The returned function flushes and
+// shuts everything down; call it on exit.
 func Install(opts ...Option) func() {
 	// NoGlobal is Start's test escape hatch; Install always registers.
 	// dropFailed from the first attempt: each destination is built
@@ -199,8 +204,16 @@ func Install(opts ...Option) func() {
 	// the same Exporters would then be handed dead).
 	opts = append(append([]Option{}, opts...), forceGlobal{}, dropFailed{})
 	p, err := Start(context.Background(), opts...)
-	if errors.Is(err, errNoDestinations) {
+	switch {
+	case errors.Is(err, errNoDestinations):
 		p, err = Start(context.Background(), append(opts, Local(""))...)
+	case errors.Is(err, errAllFailed) && !explicitDestinations(opts):
+		// Only environment destinations were configured and none built:
+		// the zero-config local sink rather than recording nothing. A
+		// program that named its own destinations is never handed one.
+		slog.Warn("weft/otel: every environment destination failed to build; falling back to the local sink",
+			"path", defaultLocalPath(envGetenv))
+		p, err = Start(context.Background(), append(opts, NoEnv(), Local(""))...)
 	}
 	if err != nil {
 		slog.Warn("weft/otel: install failed", "err", err.Error())
@@ -211,6 +224,16 @@ func Install(opts ...Option) func() {
 		defer cancel()
 		_ = p.Shutdown(ctx)
 	}
+}
+
+// explicitDestinations reports whether opts name any destination
+// (Local, Studio, Datadog, Langfuse, OTLP, Exporters).
+func explicitDestinations(opts []Option) bool {
+	var c config
+	for _, o := range opts {
+		o.apply(&c)
+	}
+	return len(c.dests) > 0
 }
 
 // forceGlobal clears the NoGlobal flag (Install always registers).

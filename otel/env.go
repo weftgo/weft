@@ -16,6 +16,16 @@ import (
 //	OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT      → content for the env OTLP destination
 //	OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES            → resource (buildResource)
 //	WEFT_DB                                                  → the default Local path
+//
+// An http:// scheme the operator wrote in OTEL_EXPORTER_OTLP_ENDPOINT is
+// the opt-in for a plaintext export to that host — the variable's
+// OpenTelemetry-standard meaning, and the docker-compose/sidecar
+// collector's usual form (http://otel-collector:4318). It holds for that
+// environment destination only: a code-configured OTLP("http://…") to a
+// non-loopback host still needs Insecure(), an https:// destination is
+// never downgraded by it, and WEFT_STUDIO_URL gets no such reading — the
+// Studio destination carries a bearer token, so plaintext to a
+// non-loopback Studio takes Studio(url, token, Insecure()) in code.
 func envDestinations(getenv func(string) string) []dest {
 	var out []dest
 	if u := getenv("WEFT_STUDIO_URL"); u != "" {
@@ -29,6 +39,7 @@ func envDestinations(getenv func(string) string) []dest {
 	if u := getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); u != "" {
 		d := newDest(destOTLP, "otlp(env)")
 		d.url = normalizeEnvEndpoint(u)
+		d.insecure = hasHTTPScheme(u)
 		if h := getenv("OTEL_EXPORTER_OTLP_HEADERS"); h != "" {
 			d.headers = parseHeaderList(h)
 		}
@@ -49,6 +60,12 @@ func normalizeEnvEndpoint(u string) string {
 		return u
 	}
 	return "https://" + u
+}
+
+// hasHTTPScheme reports whether an endpoint was written with an explicit
+// http:// scheme (case-insensitive, as URL schemes are).
+func hasHTTPScheme(u string) bool {
+	return len(u) >= len("http://") && strings.EqualFold(u[:len("http://")], "http://")
 }
 
 // parseHeaderList reads the OTEL_EXPORTER_OTLP_HEADERS form:

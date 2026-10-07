@@ -237,7 +237,9 @@ func Timeout(d time.Duration) DestOption {
 }
 
 // Insecure allows http:// to a non-loopback host (OTLP-family
-// destinations). Loopback http is always allowed.
+// destinations). Loopback http is always allowed, and so is the
+// environment's OTEL_EXPORTER_OTLP_ENDPOINT written with http:// (the
+// operator's opt-in; see envDestinations) — never WEFT_STUDIO_URL.
 func Insecure() DestOption {
 	return destOptionFunc(func(d *dest) { d.insecure = true })
 }

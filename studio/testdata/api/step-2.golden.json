@@ -1,0 +1,228 @@
+{
+  "run_id": "r_steps",
+  "step": 2,
+  "status": "parked",
+  "reason": "tool_calls",
+  "started": "(time)",
+  "finished": "(time)",
+  "latency_ms": 1,
+  "model": {
+    "provider": "wefttest",
+    "requested": "glm-a",
+    "answered": "glm-a"
+  },
+  "request": {
+    "index": 5,
+    "step": 2,
+    "attempt": 1,
+    "time": "(time)",
+    "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+    "catalog_hash": "974dbbd40b479735e3931872bc773dc4351bddc76c1e52c12457ea04c42f2b14",
+    "content": "",
+    "truncated_bytes": 0,
+    "body": {
+      "step": 2,
+      "attempt": 1,
+      "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "messages_ref": {
+        "index": 5,
+        "count": 4
+      },
+      "tools": {
+        "catalog_hash": "974dbbd40b479735e3931872bc773dc4351bddc76c1e52c12457ea04c42f2b14",
+        "names": [
+          "lookup_order",
+          "refund",
+          "research"
+        ]
+      },
+      "sequential_tools": false,
+      "params": {},
+      "model": {
+        "provider": "wefttest",
+        "name": "glm-a"
+      },
+      "stream": true
+    },
+    "prompt": {
+      "hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "text": "You are a support agent.",
+      "content": "",
+      "truncated_bytes": 0
+    },
+    "tools": {
+      "hash": "974dbbd40b479735e3931872bc773dc4351bddc76c1e52c12457ea04c42f2b14",
+      "tools": [
+        {
+          "name": "lookup_order",
+          "description": "Look up an order.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string",
+                "description": "the order"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          },
+          "timeout_ms": 0,
+          "approval": false,
+          "replay": "never",
+          "max_result_bytes": 65536,
+          "sequential": false,
+          "source": "local"
+        },
+        {
+          "name": "refund",
+          "description": "Refund an order.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string",
+                "description": "the order"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          },
+          "timeout_ms": 0,
+          "approval": true,
+          "replay": "never",
+          "max_result_bytes": 65536,
+          "sequential": false,
+          "source": "local"
+        },
+        {
+          "name": "research",
+          "description": "Research an order.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "prompt": {
+                "type": "string",
+                "description": "The task, stated in full: the agent sees only this prompt, not the conversation."
+              }
+            },
+            "required": [
+              "prompt"
+            ]
+          },
+          "timeout_ms": 0,
+          "approval": false,
+          "replay": "never",
+          "max_result_bytes": 65536,
+          "sequential": false,
+          "source": "subagent"
+        }
+      ],
+      "content": "",
+      "truncated_bytes": 0
+    }
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "model": "glm-a",
+      "provider": "wefttest",
+      "outcome": "ok",
+      "started": "(time)",
+      "finished": "(time)",
+      "span_id": "(span)",
+      "request_index": 5
+    }
+  ],
+  "messages_in": {
+    "index": 5,
+    "count": 4,
+    "badge": "compacted",
+    "reason": "the model saw a compacted view: a PrepareStep replaced part of the transcript for this step's request",
+    "fix": "see the compaction block: the transcript range it replaced and the messages that stood in"
+  },
+  "events": [
+    {
+      "pos": 9,
+      "time": "(time)",
+      "event": {
+        "type": "step_start",
+        "run_id": "r_steps",
+        "index": 2
+      }
+    },
+    {
+      "pos": 10,
+      "time": "(time)",
+      "event": {
+        "type": "tool_start",
+        "run_id": "r_steps",
+        "seq": 10,
+        "call_id": "c_refund",
+        "name": "refund",
+        "args": {
+          "order_id": "42"
+        }
+      }
+    },
+    {
+      "pos": 11,
+      "time": "(time)",
+      "event": {
+        "type": "step_finish",
+        "run_id": "r_steps",
+        "index": 2,
+        "reason": "tool_calls",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "latency_ms": 1
+      }
+    }
+  ],
+  "tool_calls": [
+    {
+      "call_id": "c_refund",
+      "name": "refund",
+      "seq": 10,
+      "args": {
+        "order_id": "42"
+      },
+      "span": {
+        "id": "(span)",
+        "started": "(time)",
+        "finished": "(time)",
+        "status": "unset"
+      },
+      "pending": true
+    }
+  ],
+  "children": [],
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  },
+  "compaction": {
+    "scope": "run",
+    "index": 5,
+    "from_seq": 1,
+    "to_seq": 3,
+    "hash": "f7f974691e358826798016f537798494fdc08c45bce009893a273b3cf26bd1c3",
+    "replaced": 2,
+    "entries": 1,
+    "badge": "compacted",
+    "reason": "the model saw a compacted view: a PrepareStep replaced part of the transcript for this step's request",
+    "fix": "see the compaction block: the transcript range it replaced and the messages that stood in"
+  },
+  "holes": [
+    {
+      "hole": "compacted",
+      "reason": "the model saw a compacted view: a PrepareStep replaced part of the transcript for this step's request",
+      "fix": "see the compaction block: the transcript range it replaced and the messages that stood in"
+    }
+  ]
+}
+

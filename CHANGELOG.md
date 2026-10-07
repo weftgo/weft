@@ -80,6 +80,31 @@ module, ADR 0005).
 
 ### Added
 
+- **Studio's step route (plan A7, with A4's attempts and A10's
+  children).** `GET /api/runs/{id}/steps/{n}` (`n` the step ordinal)
+  answers one step assembled server-side from `obsdb`: `status` (`ok`,
+  `error`, `parked`, `running`), `started`/`finished`, `latency_ms`/
+  `ttft_ms`, `model` (`requested`, and `answered` — the model that
+  answered under `mw.Retry`/`mw.Fallback`), `request` (the requests
+  route's row for attempt 1, prompt and catalog inline), `attempts`
+  (each request record joined to its `attempt` span on the attempt
+  number: model, provider, `outcome`, `error_type`, `retry_after_ms`,
+  times, span id, request index; attempt 1 falls back to the `chat`
+  span), `messages_in` (the request's `messages_ref` as a count),
+  `events` (as the events route serves them), `tool_calls` (args,
+  result with bytes and truncation, the `execute_tool` span, the child
+  run, pending), `children` (the child runs the step's calls started:
+  id, call id, agent, status, usage), `usage`, `compaction` (the
+  run-scope view the step's request carried) and `holes` — every hole
+  that applies, deduplicated, from ADR 0028 §11's table with a reason
+  and fix. A block missing for a reason carries its badge
+  (`attempts_badge: not_recorded` for a run without attempt spans or
+  A4 timing, `request: {badge: "not_recorded" | "gap"}`). Scoped like
+  the events route; a read-scoped panel token reads the whole step with
+  `request: {badge: "hidden", reason, fix}`. A step past the run's
+  last, or a running run's next, is 404. `/api/meta` lists the new
+  `steps` capability; the web client gains `fetchStep` and the
+  `StepDoc` types (no UI change yet).
 - **Compaction in the record (ADR 0028 §8, plan A9.1).** When a
   `PrepareStep` sends a request whose messages are not the run's
   transcript, the core emits one `messages` record with

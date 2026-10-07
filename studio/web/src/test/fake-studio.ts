@@ -182,6 +182,14 @@ export function hiddenRefusal(): Response {
  * (a pre-A1 run), "hidden" (a read-scoped token's 403). */
 export type RequestsVariant = "ok" | "stripped" | "not-recorded" | "hidden"
 
+/** The step route's goldens (A7's TestStepRoute and friends): "0",
+ * "1", "2" are one real run's steps (four attempts with three errors on
+ * step 0, a Subagent child on step 1, a compaction view and a parked
+ * call on step 2); "stripped" a content-off run's step 0;
+ * "not-recorded" a pre-A1 run's step 0; "hidden" a step as a
+ * read-scoped panel token reads it (the request block hidden). */
+export type StepGolden = "0" | "1" | "2" | "stripped" | "not-recorded" | "hidden"
+
 export class FakeStudio {
   readonly requests: FakeRequest[] = []
   private routes = new Map<string, Handler>()
@@ -222,6 +230,16 @@ export class FakeStudio {
     return this.on(`GET runs/${runId}/requests`, pagedRequests(reqs)).on(
       `GET runs/${runId}/tools`,
       golden<object>(`tools-${variant}`)
+    )
+  }
+
+  /** Serve runs/{id}/steps/{n} from the goldens: steps[n] answers
+   * step n; the step after the last is a 404 in the error shape, as
+   * steps.go answers a step past the run's last. */
+  withSteps(runId: string, steps: StepGolden[]): this {
+    steps.forEach((g, n) => this.on(`GET runs/${runId}/steps/${n}`, golden<object>(`step-${g}`)))
+    return this.on(`GET runs/${runId}/steps/${steps.length}`, () =>
+      apiError(404, "not_found", `no step ${steps.length} of run ${runId}`)
     )
   }
 

@@ -822,6 +822,131 @@ export function requestsQuery(runId: string) {
   })
 }
 
+// ── One step, assembled server-side (plan A7) ──────────────────────
+// GET runs/{id}/steps/{n}, mirrored from studio/steps.go: the step's
+// request (attempt 1), attempts, messages in, events, tool calls with
+// their spans, the child runs they started, usage, timing, the
+// compaction view, and every hole as a badge (ADR 0028 §11) — a block
+// missing for a reason carries its badge, never just goes missing.
+
+/** ok (finished), error (the run failed or stopped reporting inside
+ * it), parked (finished with a call awaiting approval), running.
+ * not_started is reserved: the server does not produce it today. */
+export type StepStatus = "ok" | "error" | "parked" | "running" | "not_started"
+
+/** One attempt: the request record of that number joined to its
+ * attempt span (or, when nothing reported attempts, attempt 1 joined to
+ * the chat span). outcome is absent when no span says. */
+export interface StepAttempt {
+  attempt: number
+  model: string
+  provider?: string
+  outcome?: "ok" | "error"
+  error_type?: string
+  retry_after_ms?: number
+  started?: string
+  finished?: string
+  span_id?: string
+  /** The attempt's request record index (the requests route's row). */
+  request_index?: number
+}
+
+/** The request's messages_ref resolved to a count; the bytes stay on
+ * the transcript route. badge: stripped, compacted or not_recorded
+ * (gap when no request record was stored). */
+export interface StepMessagesIn extends Holed {
+  index?: number
+  count: number
+}
+
+export interface StepToolCall {
+  call_id: string
+  name: string
+  seq?: number
+  /** null when content-off stripped it (badge "stripped"). */
+  args: unknown
+  /** Absent while running or parked. */
+  result?: { content: string; is_error: boolean; bytes: number; truncated?: boolean }
+  span?: { id: string; started: string; finished: string; status: string }
+  child_run_id?: string
+  pending?: boolean
+  badge?: string
+}
+
+/** A child run a step's call started (A10). Cost arrives with A5. */
+export interface StepChild {
+  id: string
+  call_id: string
+  agent: string
+  status: RunStatus
+  usage: Usage
+}
+
+/** The run-scope compaction view the step's request carried (ADR 0028
+ * §8): the transcript range [from_seq, to_seq) replaced by `entries`
+ * messages; badge "compacted". */
+export interface StepCompaction extends Holed {
+  scope: string
+  index: number
+  from_seq: number
+  to_seq: number
+  hash: string
+  replaced: number
+  entries: number
+}
+
+/** One hole of the step, deduplicated, in ADR 0028 §11's order. */
+export interface StepHole {
+  hole: string
+  reason: string
+  fix?: string
+}
+
+/** GET /api/runs/{id}/steps/{n}. request is attempt 1's RequestRow
+ * (prompt and catalog inline) or, when it is not here, the badge that
+ * says why (hidden for a read-scoped token, not_recorded, gap); absent
+ * only for a step that made no model call. */
+export interface StepDoc {
+  run_id: string
+  step: number
+  status: StepStatus
+  /** step_finish's stop reason. */
+  reason?: string
+  started?: string
+  finished?: string
+  latency_ms?: number
+  ttft_ms?: number
+  model: { provider?: string; requested: string; answered?: string }
+  request?: RequestRow | Holed
+  attempts: StepAttempt[]
+  attempts_badge?: Holed
+  messages_in: StepMessagesIn
+  events: PosEvent[]
+  tool_calls: StepToolCall[]
+  children: StepChild[]
+  usage: Usage
+  compaction?: StepCompaction
+  holes: StepHole[]
+}
+
+/** isRequestRow tells the step's request row from its badge. */
+export function isRequestRow(v: RequestRow | Holed): v is RequestRow {
+  return typeof (v as RequestRow).index === "number"
+}
+
+/** GET /api/runs/{id}/steps/{n}: one step, n its ordinal. A step past
+ * the run's last (or not yet started) is a 404 ApiError. */
+export function fetchStep(runId: string, n: number): Promise<StepDoc> {
+  return get<StepDoc>(`runs/${encodeURIComponent(runId)}/steps/${n}`)
+}
+
+export function stepQuery(runId: string, n: number) {
+  return queryOptions({
+    queryKey: ["step", runId, n],
+    queryFn: () => fetchStep(runId, n),
+  })
+}
+
 export function spansQuery(id: string) {
   return queryOptions({
     queryKey: ["spans", id],

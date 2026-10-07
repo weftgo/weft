@@ -56,6 +56,9 @@ func (s *Server) addGroup(g routeGroup) {
 type runRoute struct {
 	ext   string
 	serve func(http.ResponseWriter, *http.Request, string)
+	// item, when set, serves /api/runs/{id}/<ext>/{item} instead: one
+	// item of a run's collection (a step by its ordinal).
+	item func(w http.ResponseWriter, r *http.Request, id, item string)
 }
 
 // addRunRoute registers a GET /api/runs/{id}/<ext> sub-route, which
@@ -66,6 +69,16 @@ type runRoute struct {
 // call id, and providers' ids never take those shapes.
 func (s *Server) addRunRoute(ext string, serve func(http.ResponseWriter, *http.Request, string)) {
 	s.runRoutes = append(s.runRoutes, runRoute{ext: ext, serve: serve})
+}
+
+// addRunItemRoute registers a GET /api/runs/{id}/<ext>/{item} sub-route
+// (one item of a run's collection: a step by its ordinal), which
+// serveRunRoutes dispatches when the path's next-to-last segment is
+// ext. The same shadowing caveat as addRunRoute's applies to a child
+// run id whose last two segments read <ext>/<item>; a child id's
+// segments are <step>/<callID>, so its next-to-last is a number.
+func (s *Server) addRunItemRoute(ext string, serve func(w http.ResponseWriter, r *http.Request, id, item string)) {
+	s.runRoutes = append(s.runRoutes, runRoute{ext: ext, item: serve})
 }
 
 // capabilityList names what the registered groups provide plus
@@ -106,6 +119,16 @@ func (s *Server) registerGroups() {
 		register: func(_ *http.ServeMux, s *Server) {
 			s.addRunRoute("requests", s.serveRunRequests)
 			s.addRunRoute("tools", s.serveRunTools)
+		},
+	})
+	// One step assembled server-side (plan A7, A4's attempts, A10's
+	// children): always present; the capability is what the UIs gate
+	// the step card's single read on.
+	s.addGroup(routeGroup{
+		name:       "steps",
+		capability: "steps",
+		register: func(_ *http.ServeMux, s *Server) {
+			s.addRunItemRoute("steps", s.serveRunStep)
 		},
 	})
 	// The live stream (S4.5).

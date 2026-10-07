@@ -3,11 +3,14 @@
 // and a transcript body is read as data — never trusted to be shaped.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { FakeStudio } from "../test/fake-studio"
 import {
   adoptTokenFromLocation,
   ApiError,
   asTranscript,
   fetchRuns,
+  fetchStep,
+  isRequestRow,
   nextCursor,
   putBreakpoints,
   runsSearch,
@@ -147,5 +150,51 @@ describe("asTranscript", () => {
     )
     // An id without its time is not a cursor.
     expect(runsSearch({ before_id: "r_a" })).toBe("")
+  })
+})
+
+// GET runs/{id}/steps/{n} (plan A7): the client reads the server's own
+// goldens — every block present or badged, the request a row or a hole.
+describe("fetchStep", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("reads a step whole: attempts, the answering model, children, compaction", async () => {
+    const fake = new FakeStudio().withSteps("r_steps", ["0", "1", "2"]).install()
+    const s0 = await fetchStep("r_steps", 0)
+    expect(fake.calls("GET runs/r_steps/steps/0")).toHaveLength(1)
+    expect(s0.model).toMatchObject({ requested: "glm-a", answered: "glm-b" })
+    expect(s0.attempts.map((a) => [a.model, a.outcome, a.error_type ?? ""])).toEqual([
+      ["glm-a", "error", "stream_idle"],
+      ["glm-b", "error", "stream_idle"],
+      ["glm-a", "error", "stream_idle"],
+      ["glm-b", "ok", ""],
+    ])
+    expect(s0.request && isRequestRow(s0.request)).toBe(true)
+    const s1 = await fetchStep("r_steps", 1)
+    expect(s1.children.map((c) => c.id)).toEqual(["r_steps/1/c_sub"])
+    expect(s1.tool_calls[0].child_run_id).toBe("r_steps/1/c_sub")
+    const s2 = await fetchStep("r_steps", 2)
+    expect(s2.status).toBe("parked")
+    expect(s2.compaction?.badge).toBe("compacted")
+    expect(s2.holes.map((h) => h.hole)).toEqual(["compacted"])
+    await expect(fetchStep("r_steps", 3)).rejects.toMatchObject({ status: 404, code: "not_found" })
+  })
+
+  it("carries every missing block as a badge", async () => {
+    new FakeStudio()
+      .withSteps("old1", ["not-recorded"])
+      .withSteps("r_off", ["stripped"])
+      .withSteps("r_tok", ["0", "hidden"])
+      .install()
+    const old = await fetchStep("old1", 0)
+    expect(old.request && !isRequestRow(old.request) && old.request.badge).toBe("not_recorded")
+    expect(old.attempts_badge?.badge).toBe("not_recorded")
+    expect(old.holes.map((h) => h.hole)).toEqual(["gap", "not_recorded", "derived"])
+    const off = await fetchStep("r_off", 0)
+    expect(off.messages_in.badge).toBe("stripped")
+    expect(off.request && isRequestRow(off.request) && off.request.content).toBe("stripped")
+    const hidden = await fetchStep("r_tok", 1)
+    expect(hidden.request && !isRequestRow(hidden.request) && hidden.request.badge).toBe("hidden")
+    expect(hidden.children).toHaveLength(1)
   })
 })

@@ -8,6 +8,7 @@
   "interrupted_after_ms": 30000,
   "capabilities": [
     "requests",
+    "steps",
     "live",
     "ingest"
   ]

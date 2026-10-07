@@ -178,6 +178,15 @@ read-scoped panel token (403, `badge: "hidden"`), and badged
 show for a reason (a child run id whose last segment is itself one of
 these sub-route names — `events`, `transcript`, `spans`, `requests`,
 `tools` — is shadowed by the route; provider call ids never collide),
+`runs/{id}/steps/{n}` (one step assembled server-side, `n` its ordinal,
+under the `steps` capability: the step's status, timing, the model
+requested and the one that answered, attempt 1's request row, every
+attempt with its model and outcome, `messages_in`, its events, its tool
+calls with their spans and results, the child runs they started, usage,
+the compaction view it saw and `holes` — every absent block a badge
+with its reason and fix; scoped like `events`, except that a read-scoped
+panel token gets the request block as `{badge: "hidden", …}` inside a
+200; a step past the run's last, or not yet started, is 404),
 `traces/{trace_id}` (any trace), `sessions`, `sessions/{id}` (turns in
 order), `public/{public_id}`, `manifest`, `POST /api/panel-tokens`
 (mint; the panel's scoped tokens — see the devtools panel above), and

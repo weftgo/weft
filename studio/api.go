@@ -537,11 +537,11 @@ func limitParam(w http.ResponseWriter, r *http.Request, q map[string][]string) (
 }
 
 // serveRunRoutes dispatches the /api/runs/ subtree: run documents and
-// the sub-routes the groups registered (addRunRoute) — paged events,
-// transcript, spans, requests and tools. Everything after
-// /api/runs/ is the run id, slashes included — a subagent's child id
-// is <parent>/<step>/<callID> (the core's childRunID), and its page
-// is a full run page (B7). An unknown id still answers 404 — from
+// the sub-routes the groups registered (addRunRoute, addRunItemRoute)
+// — paged events, transcript, spans, requests, tools and one step.
+// Everything after /api/runs/ is the run id, slashes included — a
+// subagent's child id is <parent>/<step>/<callID> (the core's
+// childRunID), and its page is a full run page (B7). An unknown id still answers 404 — from
 // the database, naming the run.
 func (s *Server) serveRunRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/runs/")
@@ -550,6 +550,17 @@ func (s *Server) serveRunRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, sub := range s.runRoutes {
+		if sub.item != nil {
+			i := strings.LastIndexByte(rest, '/')
+			if i < 0 {
+				continue
+			}
+			if id, ok := strings.CutSuffix(rest[:i], "/"+sub.ext); ok && id != "" && rest[i+1:] != "" {
+				sub.item(w, r, id, rest[i+1:])
+				return
+			}
+			continue
+		}
 		if id, ok := strings.CutSuffix(rest, "/"+sub.ext); ok && id != "" {
 			sub.serve(w, r, id)
 			return

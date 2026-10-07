@@ -1,0 +1,236 @@
+{
+  "run_id": "r_steps",
+  "step": 1,
+  "status": "ok",
+  "reason": "tool_calls",
+  "started": "(time)",
+  "finished": "(time)",
+  "latency_ms": 1,
+  "model": {
+    "provider": "wefttest",
+    "requested": "glm-a",
+    "answered": "glm-a"
+  },
+  "request": {
+    "index": 4,
+    "step": 1,
+    "attempt": 1,
+    "time": "(time)",
+    "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+    "catalog_hash": "974dbbd40b479735e3931872bc773dc4351bddc76c1e52c12457ea04c42f2b14",
+    "content": "",
+    "truncated_bytes": 0,
+    "body": {
+      "step": 1,
+      "attempt": 1,
+      "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "messages_ref": {
+        "index": 2,
+        "count": 3
+      },
+      "tools": {
+        "catalog_hash": "974dbbd40b479735e3931872bc773dc4351bddc76c1e52c12457ea04c42f2b14",
+        "names": [
+          "lookup_order",
+          "refund",
+          "research"
+        ]
+      },
+      "sequential_tools": false,
+      "params": {},
+      "model": {
+        "provider": "wefttest",
+        "name": "glm-a"
+      },
+      "stream": true
+    },
+    "prompt": {
+      "hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "text": "You are a support agent.",
+      "content": "",
+      "truncated_bytes": 0
+    },
+    "tools": {
+      "hash": "974dbbd40b479735e3931872bc773dc4351bddc76c1e52c12457ea04c42f2b14",
+      "tools": [
+        {
+          "name": "lookup_order",
+          "description": "Look up an order.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string",
+                "description": "the order"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          },
+          "timeout_ms": 0,
+          "approval": false,
+          "replay": "never",
+          "max_result_bytes": 65536,
+          "sequential": false,
+          "source": "local"
+        },
+        {
+          "name": "refund",
+          "description": "Refund an order.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string",
+                "description": "the order"
+              }
+            },
+            "required": [
+              "order_id"
+            ]
+          },
+          "timeout_ms": 0,
+          "approval": true,
+          "replay": "never",
+          "max_result_bytes": 65536,
+          "sequential": false,
+          "source": "local"
+        },
+        {
+          "name": "research",
+          "description": "Research an order.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "prompt": {
+                "type": "string",
+                "description": "The task, stated in full: the agent sees only this prompt, not the conversation."
+              }
+            },
+            "required": [
+              "prompt"
+            ]
+          },
+          "timeout_ms": 0,
+          "approval": false,
+          "replay": "never",
+          "max_result_bytes": 65536,
+          "sequential": false,
+          "source": "subagent"
+        }
+      ],
+      "content": "",
+      "truncated_bytes": 0
+    }
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "model": "glm-a",
+      "provider": "wefttest",
+      "outcome": "ok",
+      "started": "(time)",
+      "finished": "(time)",
+      "span_id": "(span)",
+      "request_index": 4
+    }
+  ],
+  "messages_in": {
+    "index": 2,
+    "count": 3
+  },
+  "events": [
+    {
+      "pos": 5,
+      "time": "(time)",
+      "event": {
+        "type": "step_start",
+        "run_id": "r_steps",
+        "index": 1
+      }
+    },
+    {
+      "pos": 6,
+      "time": "(time)",
+      "event": {
+        "type": "tool_start",
+        "run_id": "r_steps",
+        "seq": 3,
+        "call_id": "c_sub",
+        "name": "research",
+        "args": {
+          "prompt": "why is order 42 late?"
+        }
+      }
+    },
+    {
+      "pos": 7,
+      "time": "(time)",
+      "event": {
+        "type": "tool_finish",
+        "run_id": "r_steps",
+        "seq": 9,
+        "call_id": "c_sub",
+        "name": "research",
+        "content": "the carrier lost it",
+        "is_error": false
+      }
+    },
+    {
+      "pos": 8,
+      "time": "(time)",
+      "event": {
+        "type": "step_finish",
+        "run_id": "r_steps",
+        "index": 1,
+        "reason": "tool_calls",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "latency_ms": 1
+      }
+    }
+  ],
+  "tool_calls": [
+    {
+      "call_id": "c_sub",
+      "name": "research",
+      "seq": 3,
+      "args": {
+        "prompt": "why is order 42 late?"
+      },
+      "result": {
+        "content": "the carrier lost it",
+        "is_error": false,
+        "bytes": 19
+      },
+      "span": {
+        "id": "(span)",
+        "started": "(time)",
+        "finished": "(time)",
+        "status": "ok"
+      },
+      "child_run_id": "r_steps/1/c_sub"
+    }
+  ],
+  "children": [
+    {
+      "id": "r_steps/1/c_sub",
+      "call_id": "c_sub",
+      "agent": "researcher",
+      "status": "succeeded",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      }
+    }
+  ],
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  },
+  "holes": []
+}
+

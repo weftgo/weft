@@ -123,6 +123,9 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		{"sessions.golden.json", "/api/sessions", nil},
 		{"session-orders.golden.json", "/api/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd"}},
 		{"public.golden.json", "/api/public/pub_x", nil},
+		// The step goldens are recorded from TestStepRoute's real run;
+		// this one has no instructions, one tool and no failed attempt.
+		{"step-0.golden.json", "/api/runs/" + res.ID + "/steps/0", []string{".attempts[].error_type", ".request.prompt", ".request.tools.tools[].schema"}},
 	} {
 		b, err := os.ReadFile(filepath.Join("testdata", "api", c.golden))
 		if err != nil {

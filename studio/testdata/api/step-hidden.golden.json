@@ -1,0 +1,134 @@
+{
+  "run_id": "r_tok",
+  "step": 1,
+  "status": "ok",
+  "reason": "tool_calls",
+  "started": "(time)",
+  "finished": "(time)",
+  "latency_ms": 1,
+  "model": {
+    "provider": "wefttest",
+    "requested": "glm-a",
+    "answered": "glm-a"
+  },
+  "request": {
+    "badge": "hidden",
+    "reason": "a read-scoped panel token does not read system prompts or tool catalogs",
+    "fix": "use a playground-scoped token"
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "model": "glm-a",
+      "provider": "wefttest",
+      "outcome": "ok",
+      "started": "(time)",
+      "finished": "(time)",
+      "span_id": "(span)",
+      "request_index": 4
+    }
+  ],
+  "messages_in": {
+    "index": 2,
+    "count": 3
+  },
+  "events": [
+    {
+      "pos": 5,
+      "time": "(time)",
+      "event": {
+        "type": "step_start",
+        "run_id": "r_tok",
+        "index": 1
+      }
+    },
+    {
+      "pos": 6,
+      "time": "(time)",
+      "event": {
+        "type": "tool_start",
+        "run_id": "r_tok",
+        "seq": 3,
+        "call_id": "c_sub",
+        "name": "research",
+        "args": {
+          "prompt": "why is order 42 late?"
+        }
+      }
+    },
+    {
+      "pos": 7,
+      "time": "(time)",
+      "event": {
+        "type": "tool_finish",
+        "run_id": "r_tok",
+        "seq": 9,
+        "call_id": "c_sub",
+        "name": "research",
+        "content": "the carrier lost it",
+        "is_error": false
+      }
+    },
+    {
+      "pos": 8,
+      "time": "(time)",
+      "event": {
+        "type": "step_finish",
+        "run_id": "r_tok",
+        "index": 1,
+        "reason": "tool_calls",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "latency_ms": 1
+      }
+    }
+  ],
+  "tool_calls": [
+    {
+      "call_id": "c_sub",
+      "name": "research",
+      "seq": 3,
+      "args": {
+        "prompt": "why is order 42 late?"
+      },
+      "result": {
+        "content": "the carrier lost it",
+        "is_error": false,
+        "bytes": 19
+      },
+      "span": {
+        "id": "(span)",
+        "started": "(time)",
+        "finished": "(time)",
+        "status": "ok"
+      },
+      "child_run_id": "r_tok/1/c_sub"
+    }
+  ],
+  "children": [
+    {
+      "id": "r_tok/1/c_sub",
+      "call_id": "c_sub",
+      "agent": "researcher",
+      "status": "succeeded",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      }
+    }
+  ],
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  },
+  "holes": [
+    {
+      "hole": "hidden",
+      "reason": "a read-scoped panel token does not read system prompts or tool catalogs",
+      "fix": "use a playground-scoped token"
+    }
+  ]
+}
+

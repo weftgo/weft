@@ -1,0 +1,49 @@
+{
+  "run_id": "old1",
+  "step": 0,
+  "status": "ok",
+  "model": {
+    "requested": ""
+  },
+  "request": {
+    "badge": "not_recorded",
+    "reason": "this run was recorded before the request record existed (weft v0.9.0 or earlier, ADR 0028): it has no request, prompt or tools records",
+    "fix": "upgrade weft and re-run"
+  },
+  "attempts": [],
+  "attempts_badge": {
+    "badge": "not_recorded",
+    "reason": "the run has no spans: it was recorded without a tracer, or by a weft without attempt reporting (A4), so no attempt's outcome or timing exists",
+    "fix": "upgrade weft and re-run"
+  },
+  "messages_in": {
+    "count": 0,
+    "badge": "not_recorded",
+    "reason": "this run was recorded before the request record existed (weft v0.9.0 or earlier, ADR 0028): it has no request, prompt or tools records",
+    "fix": "upgrade weft and re-run"
+  },
+  "events": [],
+  "tool_calls": [],
+  "children": [],
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0
+  },
+  "holes": [
+    {
+      "hole": "gap",
+      "reason": "the run counts this step, but no event of it was stored: a destination dropped its records",
+      "fix": "check the exporter's drops"
+    },
+    {
+      "hole": "not_recorded",
+      "reason": "this run was recorded before the request record existed (weft v0.9.0 or earlier, ADR 0028): it has no request, prompt or tools records",
+      "fix": "upgrade weft and re-run"
+    },
+    {
+      "hole": "derived",
+      "reason": "the step's requested model is the run's: no request record or chat span of the step names it"
+    }
+  ]
+}
+

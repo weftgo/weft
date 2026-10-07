@@ -88,7 +88,8 @@ is pre-1.0 and tags per module (ADR 0005).
 - API and behaviour:
   - Request bodies capped at 4 MiB (413); option values validated
     (temperature 0..2); approvals validate `call_id` against the run's
-    pending set; steering a fork-mode run answers 409 `conflict`.
+    pending set; a fork-mode run is steered like an ephemeral one (an
+    accepted ack naming the fork's turn maps it; no 409).
   - Transcript batches carry `input` and the real `step`; transcript edits,
     `from_step` and fixtures count the run's own steps (the input record is
     context).
@@ -208,9 +209,11 @@ is pre-1.0 and tags per module (ADR 0005).
     concurrent decisions can no longer run an approved handler twice; a
     second decision on a call is rejected; a parked run whose resume never
     started is restored.
-  - Fork mode: forks revoke the source session's approval grants; steering
-    into a fork is refused (thread's steer follow-up turns do not carry the
-    park rule — departs from WEFT-DEVTOOLS §8.4 until they do); forking a
+  - Fork mode: forks revoke the source session's approval grants; a steer
+    into a fork's turn is a thread steer under the turn's run options (the
+    park rule binds its follow-up — requires thread's steer follow-up fix);
+    the fork's turn is acked accepted again naming its run id once in
+    flight, so Studio can steer it; forking a
     source waiting on approval fails fast; a parked fork call is decided
     through the fork session, stays decidable after its park record is
     evicted, and "decide first" names the calls; naming an older fork turn
@@ -253,6 +256,9 @@ is pre-1.0 and tags per module (ADR 0005).
   answered from the source's recorded result or parked, in `park` it
   parks; ReplaySafe tools still run in every mode. `allow` no longer
   refuses a ReplaySafe tool that is not opted in.
+- The in-process link (`runtime.Local`) addresses Studio as
+  `http://localhost` (was `weft.studio.local`), a Host Studio's
+  DNS-rebinding guard accepts like any loopback request.
 
 ### thread
 

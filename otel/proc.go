@@ -3,6 +3,7 @@ package otel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
@@ -41,8 +42,9 @@ const (
 // Content-off chains decode the body with weft.UnmarshalEvent, apply
 // weft.StripContent, re-encode and set weft.content=stripped, and drop
 // messages records. Content-on chains apply the destination's Redact
-// and MaxBytes to event and delta bodies — never messages records —
-// and set weft.content.truncated_bytes when a cap cut.
+// and MaxBytes to event and delta bodies, set
+// weft.content.truncated_bytes when a cap cut, and apply Redact — never
+// MaxBytes — to messages records, part by part.
 type destProc struct {
 	name     string
 	inner    sdklog.Processor
@@ -69,6 +71,9 @@ func (p *destProc) OnEmit(ctx context.Context, r *sdklog.Record) error {
 		if !p.content {
 			p.drops.filtered(1)
 			return nil // pure content; a content-off destination gets none
+		}
+		if !p.redactMessages(&clone) {
+			return nil // redaction failed: the batch is dropped, never sent unredacted
 		}
 	case "delta":
 		if p.noDeltas {
@@ -253,6 +258,90 @@ func shapeEventValue(ev weft.Event, redact func(weft.ContentKind, string) string
 	default:
 		return ev, 0, false
 	}
+}
+
+// redactMessages applies the destination's Redact to a messages record
+// (a transcript batch, a JSON array of weft.Message) part by part, with
+// the kind the same content carries on the event path: text parts
+// ContentText (every role — as Steered user text already is), reasoning
+// ContentReasoning, tool-call args ContentArgs (a non-JSON redactor
+// output becomes a JSON string, redactedArgs), tool results
+// ContentResult. Ids, names, roles, signatures and file parts are left
+// as they are; the record's attributes (index, count, step) are never
+// touched. Never capped — a capped transcript is not replay-grade (ADR
+// 0024 D1). An unchanged batch keeps its bytes.
+//
+// It reports whether the record may go on. A batch that does not decode
+// or re-encode, or whose Redact panicked, is dropped and counted as the
+// destination's loss — a messages record is pure content, so its
+// stripped form is no record at all (what a content-off chain does);
+// sending it unredacted is never the fallback.
+func (p *destProc) redactMessages(clone *sdklog.Record) (keep bool) {
+	redact := p.contentC.Redact
+	if redact == nil {
+		return true
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			keep = false
+			// The panic's type only: its value is commonly built from
+			// the very content Redact was given.
+			p.drops.dropped(1, fmt.Errorf("content redaction panicked (%T): the messages record was dropped", v))
+		}
+	}()
+	body := clone.Body()
+	if body.Type() != attribute.STRING {
+		p.drops.dropped(1, errors.New("a messages record without a string body cannot be redacted: dropped"))
+		return false
+	}
+	var msgs []weft.Message
+	if err := json.Unmarshal([]byte(body.AsString()), &msgs); err != nil {
+		// The decode error only: its text can quote the body.
+		p.drops.dropped(1, errors.New("a messages record that does not decode cannot be redacted: dropped"))
+		return false
+	}
+	if !redactMessageParts(msgs, redact) {
+		return true
+	}
+	b, err := json.Marshal(msgs)
+	if err != nil {
+		p.drops.dropped(1, errors.New("a redacted messages record did not re-encode: dropped"))
+		return false
+	}
+	clone.SetBody(attribute.StringValue(string(b)))
+	return true
+}
+
+// redactMessageParts redacts msgs in place and reports whether any part
+// changed.
+func redactMessageParts(msgs []weft.Message, redact func(weft.ContentKind, string) string) (changed bool) {
+	for i := range msgs {
+		for j, part := range msgs[i].Content {
+			switch pt := part.(type) {
+			case weft.TextPart:
+				if s := redact(weft.ContentText, pt.Text); s != pt.Text {
+					pt.Text, changed = s, true
+					msgs[i].Content[j] = pt
+				}
+			case weft.ReasoningPart:
+				if s := redact(weft.ContentReasoning, pt.Text); s != pt.Text {
+					pt.Text, changed = s, true
+					msgs[i].Content[j] = pt
+				}
+			case weft.ToolCallPart:
+				if s := redact(weft.ContentArgs, string(pt.Args)); s != string(pt.Args) {
+					pt.Args, changed = redactedArgs(s), true
+					msgs[i].Content[j] = pt
+				}
+			case weft.ToolResultPart:
+				if s := redact(weft.ContentResult, pt.Content); s != pt.Content {
+					pt.Content, changed = s, true
+					msgs[i].Content[j] = pt
+				}
+			}
+		}
+	}
+	return changed
 }
 
 // redactedArgs renders a redactor's output as the JSON value Args must

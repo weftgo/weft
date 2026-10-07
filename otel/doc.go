@@ -20,8 +20,8 @@
 //     content when any destination wants it. Content-off chains clone
 //     the record first (the SDK hands every processor the same pointer),
 //     strip the body with weft.StripContent and drop messages records;
-//     content-on chains redact and cap event and delta bodies, never
-//     the transcript. The core reads no environment variable — this
+//     content-on chains redact and cap event and delta bodies and
+//     redact (never cap) the transcript records part by part. The core reads no environment variable — this
 //     module does, here only.
 //   - The run tracker keeps the set of open runs and emits one
 //     weft.heartbeat record per open run per interval, so a 45 s tool

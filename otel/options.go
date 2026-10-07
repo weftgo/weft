@@ -25,9 +25,17 @@ type ContentConfig struct {
 	// transcript is not replay-grade.
 	MaxBytes int
 	// Redact is applied to a content field before the cap; nil = identity.
-	// It sees event bodies and deltas only: weft.messages transcript
-	// records are NOT passed through it and reach a content-on
-	// destination unredacted.
+	// It sees event and delta bodies and weft.messages transcript
+	// records, the latter part by part with the kind the same content
+	// has on the event path: text parts (every role) weft.ContentText,
+	// reasoning weft.ContentReasoning, tool-call args weft.ContentArgs (an
+	// output that is not JSON is carried as a JSON string), tool results
+	// weft.ContentResult. Ids, names, roles, signatures and file parts are
+	// not passed to it; a transcript record is redacted, never capped. It
+	// runs on the run's goroutine: a panic in it is contained — the event
+	// goes out stripped, the transcript record not at all — and counted
+	// as the destination's drop; so is a transcript record that cannot be
+	// decoded for redaction. Nothing it was given is ever sent unredacted.
 	Redact func(kind weft.ContentKind, s string) string
 }
 

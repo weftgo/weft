@@ -225,9 +225,24 @@ func TestPanelTokenValidity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tampered := tok[:len(tok)-2] + "aa"
+	// Any other spelling of the signature's last character is refused:
+	// it carries unused bits, which strict decoding requires to be zero
+	// (a lenient decoder read several spellings as one signature).
+	last := byte('a')
+	if tok[len(tok)-1] == 'a' {
+		last = 'b'
+	}
+	tampered := tok[:len(tok)-1] + string(last)
 	if code, _, _ := getWith(t, h, "/studio/api/runs", tampered, ""); code != http.StatusUnauthorized {
 		t.Errorf("tampered: %d", code)
+	}
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	for i := range len(alphabet) {
+		if c := alphabet[i]; c != tok[len(tok)-1] {
+			if _, err := parsePanelToken(key, tok[:len(tok)-1]+string(c)); err == nil {
+				t.Errorf("signature spelled with last char %q accepted", c)
+			}
+		}
 	}
 	// An expired token is a 401.
 	claims.Exp = time.Now().Add(-time.Minute)

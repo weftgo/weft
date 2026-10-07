@@ -97,11 +97,13 @@ func parsePanelToken(key []byte, tok string) (panelClaims, error) {
 	if dot <= 0 {
 		return claims, errBadToken
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(rest[:dot])
+	// Strict: unused trailing bits must be zero, so one token has exactly
+	// one spelling (the default decoder accepts several per signature).
+	payload, err := base64.RawURLEncoding.Strict().DecodeString(rest[:dot])
 	if err != nil {
 		return claims, errBadToken
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(rest[dot+1:])
+	sig, err := base64.RawURLEncoding.Strict().DecodeString(rest[dot+1:])
 	if err != nil {
 		return claims, errBadToken
 	}

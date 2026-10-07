@@ -110,10 +110,38 @@ func ParseSeverity(s string) (n int, ok bool) {
 	return 0, false
 }
 
+// MaxLogCandidates caps how many app log records one DB.OtherLogs read
+// loads: the first records of the run's traces in its time window, by
+// time. A run whose traces hold more reads LogPage.Truncated.
+const MaxLogCandidates = 10_000
+
+// LogPage is one DB.OtherLogs answer: the page and what the reader
+// knows about what it could not show.
+//
+//   - Partial: the run is running. Spans are exported when they end,
+//     so a line under an in-flight span (invoke_agent, an open
+//     execute_tool) is not attributable yet: it appears once its span
+//     arrives, and it may then take an index below lines already
+//     served — indexes are stable only once the run has ended.
+//   - Gap: lines in the run's traces (deduplicated, in its window) that
+//     name a span no stored span has — a dropped batch, a process that
+//     exited before exporting. They belong to no run and are not in
+//     Logs. Always 0 while Partial (the span may still be on its way).
+//   - Truncated: the run's traces hold more than MaxLogCandidates lines
+//     in its window; only the first MaxLogCandidates, by time, were
+//     read.
+type LogPage struct {
+	Logs      []OtherLog
+	Partial   bool
+	Gap       int
+	Truncated bool
+}
+
 // LogCandidates is a backend's half of DB.OtherLogs: the non-weft log
 // records (no weft.run.id) of the given traces whose time is within
-// [from, to], in any order. ReadOtherLogs does the rest.
-type LogCandidates func(ctx context.Context, traceIDs []string, from, to time.Time) ([]OtherLog, error)
+// [from, to], the first limit of them by time. ReadOtherLogs does the
+// rest.
+type LogCandidates func(ctx context.Context, traceIDs []string, from, to time.Time, limit int) ([]OtherLog, error)
 
 // ReadOtherLogs is DB.OtherLogs for every backend, so both attribute,
 // order, index and page alike. An app log names no run — it carries no
@@ -132,25 +160,34 @@ type LogCandidates func(ctx context.Context, traceIDs []string, from, to time.Ti
 // dropped (same time, trace, span, severity, event name, body and
 // attributes). The order is time, then span id, severity and body; the
 // filter applies after indexing (LogQuery). An unknown run is
-// ErrNotFound; a run with spans and no app logs is an empty slice,
+// ErrNotFound; a run with spans and no app logs has an empty Logs,
 // never nil. A run with no span at all has nothing to attribute logs
-// through: a running one reads empty (its spans may not have arrived
-// yet), any other is a *HoleError{Kind: "logs", Hole: HoleNotRecorded}
-// — it was recorded without a tracer.
-func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candidates LogCandidates) ([]OtherLog, error) {
+// through: a running one reads empty and Partial (its spans may not
+// have arrived yet), any other is a *HoleError{Kind: "logs", Hole:
+// HoleNotRecorded} — it was recorded without a tracer.
+//
+// While the run is running the page is Partial and its indexes may
+// shift (LogPage): a client paging with From may re-read lines and
+// miss as many. TODO(phase 2): a stable cursor — (time, span, seq)
+// rather than an index — so a live walk neither repeats nor skips.
+//
+// At most MaxLogCandidates records are read (Truncated past it); lines
+// naming a span never stored are counted, not shown (Gap).
+func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candidates LogCandidates) (LogPage, error) {
 	det, err := db.Run(ctx, runID)
 	if err != nil {
-		return nil, err
+		return LogPage{}, err
 	}
+	page := LogPage{Logs: []OtherLog{}, Partial: det.Status == StatusRunning}
 	own, err := db.RunSpans(ctx, runID)
 	if err != nil {
-		return nil, err
+		return LogPage{}, err
 	}
 	if len(own) == 0 {
-		if det.Status == StatusRunning {
-			return []OtherLog{}, nil
+		if page.Partial {
+			return page, nil
 		}
-		return nil, &HoleError{Kind: "logs", Hole: HoleNotRecorded}
+		return LogPage{}, &HoleError{Kind: "logs", Hole: HoleNotRecorded}
 	}
 	var traces []string
 	seenTrace := map[string]bool{}
@@ -164,16 +201,24 @@ func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candida
 	for _, id := range traces {
 		spans, err := db.Trace(ctx, id)
 		if err != nil {
-			return nil, err
+			return LogPage{}, err
 		}
 		all = append(all, spans...)
 	}
 	attributed := logSpans(own, all)
 
 	from, to := det.Started.Add(-LogSkew), det.LastSeen.Add(LogSkew)
-	cands, err := candidates(ctx, traces, from, to)
+	cands, err := candidates(ctx, traces, from, to, MaxLogCandidates+1)
 	if err != nil {
-		return nil, err
+		return LogPage{}, err
+	}
+	if len(cands) > MaxLogCandidates {
+		sort.SliceStable(cands, func(i, j int) bool { return cands[i].Time.Before(cands[j].Time) })
+		cands, page.Truncated = cands[:MaxLogCandidates], true
+	}
+	stored := map[spanKey]bool{}
+	for _, s := range all {
+		stored[spanKey{s.TraceID, s.SpanID}] = true
 	}
 	type dedupKey struct {
 		ns                       int64
@@ -184,7 +229,12 @@ func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candida
 	seen := map[dedupKey]bool{}
 	logs := make([]OtherLog, 0, len(cands))
 	for _, l := range cands {
-		if !attributed[spanKey{l.TraceID, l.SpanID}] || l.Time.Before(from) || l.Time.After(to) {
+		if l.Time.Before(from) || l.Time.After(to) {
+			continue
+		}
+		key := spanKey{l.TraceID, l.SpanID}
+		lost := l.SpanID != "" && !stored[key]
+		if !attributed[key] && !lost {
 			continue
 		}
 		attrs, _ := json.Marshal(l.Attrs) // sorted keys: one spelling per map
@@ -193,6 +243,13 @@ func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candida
 			continue
 		}
 		seen[k] = true
+		if lost {
+			// Its span was never stored (or, while running, not yet).
+			if !page.Partial {
+				page.Gap++
+			}
+			continue
+		}
 		logs = append(logs, l)
 	}
 	sort.SliceStable(logs, func(i, j int) bool {
@@ -207,7 +264,7 @@ func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candida
 		}
 		return a.Body < b.Body
 	})
-	out := []OtherLog{}
+	out := page.Logs
 	limit := q.PageLimit()
 	for i := range logs {
 		l := logs[i]
@@ -220,7 +277,8 @@ func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candida
 			break
 		}
 	}
-	return out, nil
+	page.Logs = out
+	return page, nil
 }
 
 type spanKey struct{ trace, span string }

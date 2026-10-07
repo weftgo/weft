@@ -190,7 +190,11 @@ non-weft records an `slog` bridge or the OTel Logs API emitted under one
 of the run's spans, or an app span below one — in time order, `{index,
 time, severity, severity_number, body, attrs, span_id?}`, `next_from`
 while pages are full; `severity` keeps a level and above without
-renumbering; under the `logs` capability; a run recorded without a
+renumbering; under the `logs` capability; a running run's page is
+`partial: true` with a reason — lines under in-flight spans appear once
+those spans end, and indexes may shift; lines naming a span never
+stored are `badge: "gap"` with their count, more than 10 000 lines in
+the run's traces `badge: "truncated"`; a run recorded without a
 tracer reads `badge: "not_recorded"`; app logs may carry prompts, so a
 read-scoped panel token is refused them, 403 with `badge: "hidden"`),
 `runs/{id}/steps/{n}` (one step assembled server-side, `n` its ordinal,

@@ -71,12 +71,16 @@ module, ADR 0005).
   the non-weft records (no `weft.run.id`) the writers keep beside
   weft's, attributed to the run through the span they were emitted
   under (its own spans and the non-weft spans below them, never another
-  run's) — as `obsdb.OtherLog`, paged by `obsdb.LogQuery` (`From`
-  inclusive, `Limit` 0 = 100 max 1000, `MinSeverity` filtering without
-  renumbering). A third-party `DB` implements it as
+  run's) — as an `obsdb.LogPage` of `obsdb.OtherLog`s, paged by
+  `obsdb.LogQuery` (`From` inclusive, `Limit` 0 = 100 max 1000,
+  `MinSeverity` filtering without renumbering), with `Partial` (the run
+  is running: lines under in-flight spans appear when those spans end,
+  and indexes may shift), `Gap` (lines naming a span never stored) and
+  `Truncated` (more than `obsdb.MaxLogCandidates` lines in the run's
+  traces). A third-party `DB` implements it as
   `obsdb.ReadOtherLogs(ctx, db, runID, q, candidates)`, where
-  `candidates` reads the non-weft records of the run's traces within a
-  time window. `obsdb.HoleError.Kind` gains `"logs"`: a finished run
+  `candidates` reads the first `limit` non-weft records, by time, of the
+  run's traces within a time window. `obsdb.HoleError.Kind` gains `"logs"`: a finished run
   with no span has nothing to attribute through and answers
   `HoleNotRecorded`.
 
@@ -99,8 +103,13 @@ module, ADR 0005).
   were emitted under the run's spans — a tool handler's lines are the
   run's — in time order: `{logs: [{index, time, severity,
   severity_number, body, attrs, span_id?}], next_from?}`; `severity`
-  keeps a level and above (`trace`…`fatal`, or 1–24). A run recorded
-  without a tracer reads `badge: "not_recorded"` with the tracer fix.
+  keeps a level and above (`trace`…`fatal`, or 1–24). A running run's
+  page carries `partial: true` and a reason (lines under in-flight spans
+  appear once those spans end; indexes may shift); lines naming a span
+  that was never stored are counted as `badge: "gap"`; past 10 000 lines
+  in the run's traces the page reads `badge: "truncated"`. A run
+  recorded without a tracer reads `badge: "not_recorded"` with the
+  tracer fix.
   App logs may carry anything the app logged, prompts included, so a
   read-scoped panel token is refused them (403, `badge: "hidden"`); a
   playground-scoped token, the server token and loopback read them. The

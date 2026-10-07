@@ -2,6 +2,7 @@ package obsdbtest
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -56,6 +57,8 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 				appLog(app, 3*time.Second, 17, "db timeout", nil),
 				appLog(child, 2500*time.Millisecond, 17, "the child's line", nil),
 				appLog("", 2*time.Second, 17, "no span context", nil),
+				// A line under a span that was never stored: a gap.
+				appLog("dead00000000beef", 2*time.Second, 9, "orphan line", nil),
 				obsdb.Record{Time: at(2 * time.Second), TraceID: "ff" + trace[2:], SpanID: tool, Severity: 17, Body: "another trace"},
 			),
 		}
@@ -67,9 +70,14 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Fatal(err)
 		}
 
-		got, err := db.OtherLogs(ctx(), "r_logs", obsdb.LogQuery{})
+		page, err := db.OtherLogs(ctx(), "r_logs", obsdb.LogQuery{})
 		if err != nil {
 			t.Fatal(err)
+		}
+		got := page.Logs
+		// Finished: not partial, nothing cut; the orphan line is the gap.
+		if page.Partial || page.Truncated || page.Gap != 1 {
+			t.Errorf("page = partial %v truncated %v gap %d, want false false 1", page.Partial, page.Truncated, page.Gap)
 		}
 		type row struct {
 			index int64
@@ -96,30 +104,31 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 
 		// Paged: a page shorter than the limit is the last.
-		p1, err := db.OtherLogs(ctx(), "r_logs", obsdb.LogQuery{Limit: 2})
+		p1p, err := db.OtherLogs(ctx(), "r_logs", obsdb.LogQuery{Limit: 2})
+		p1 := p1p.Logs
 		if err != nil || !equalRows(rows(p1), want[:2]) {
 			t.Fatalf("page 1 = %+v, %v", rows(p1), err)
 		}
 		p2, err := db.OtherLogs(ctx(), "r_logs", obsdb.LogQuery{From: p1[1].Index + 1, Limit: 2})
-		if err != nil || !equalRows(rows(p2), want[2:]) {
-			t.Fatalf("page 2 = %+v, %v", rows(p2), err)
+		if err != nil || !equalRows(rows(p2.Logs), want[2:]) {
+			t.Fatalf("page 2 = %+v, %v", rows(p2.Logs), err)
 		}
 
 		// The severity filter keeps the indexes: a filtered walk
 		// continues with From like an unfiltered one.
 		warnUp, err := db.OtherLogs(ctx(), "r_logs", obsdb.LogQuery{MinSeverity: 13})
-		if err != nil || !equalRows(rows(warnUp), want[1:]) {
-			t.Fatalf("severity >= 13 = %+v, %v", rows(warnUp), err)
+		if err != nil || !equalRows(rows(warnUp.Logs), want[1:]) {
+			t.Fatalf("severity >= 13 = %+v, %v", rows(warnUp.Logs), err)
 		}
 		errOnly, err := db.OtherLogs(ctx(), "r_logs", obsdb.LogQuery{MinSeverity: 17, From: 2, Limit: 1})
-		if err != nil || !equalRows(rows(errOnly), want[2:]) {
-			t.Fatalf("severity >= 17 from 2 = %+v, %v", rows(errOnly), err)
+		if err != nil || !equalRows(rows(errOnly.Logs), want[2:]) {
+			t.Fatalf("severity >= 17 from 2 = %+v, %v", rows(errOnly.Logs), err)
 		}
 
 		// The subagent's line is the child's.
 		kid, err := db.OtherLogs(ctx(), "r_logs/0/c1", obsdb.LogQuery{})
-		if err != nil || !equalRows(rows(kid), []row{{0, 17, "the child's line", child}}) {
-			t.Errorf("child's logs = %+v, %v", rows(kid), err)
+		if err != nil || !equalRows(rows(kid.Logs), []row{{0, 17, "the child's line", child}}) {
+			t.Errorf("child's logs = %+v, %v", rows(kid.Logs), err)
 		}
 
 		// An unknown run is ErrNotFound.
@@ -134,8 +143,8 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Fatal(err)
 		}
 		none, err := db.OtherLogs(ctx(), "r_quiet", obsdb.LogQuery{})
-		if err != nil || none == nil || len(none) != 0 {
-			t.Errorf("a run without app logs = %#v, %v; want an empty slice", none, err)
+		if err != nil || none.Logs == nil || len(none.Logs) != 0 || none.Gap != 0 || none.Partial {
+			t.Errorf("a run without app logs = %#v, %v; want an empty slice, nothing else", none, err)
 		}
 
 		// A finished run with no span has nothing to attribute through:
@@ -148,14 +157,47 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if !errors.As(err, &he) || he.Kind != "logs" || he.Hole != obsdb.HoleNotRecorded || !errors.Is(err, obsdb.ErrNotFound) {
 			t.Errorf("a run without spans = %v, want a logs HoleError not_recorded", err)
 		}
-		// A running one reads empty: its spans may still be on the way.
+		// A running one reads empty and partial: its spans may still be
+		// on the way.
 		young := record("r_young", "event", "run_start", 0, `{"type":"run_start","id":"r_young"}`, nil)
 		young.Time = time.Now().UTC()
 		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{young}}); err != nil {
 			t.Fatal(err)
 		}
-		if got, err := db.OtherLogs(ctx(), "r_young", obsdb.LogQuery{}); err != nil || got == nil || len(got) != 0 {
-			t.Errorf("a running run without spans = %#v, %v; want an empty slice", got, err)
+		if got, err := db.OtherLogs(ctx(), "r_young", obsdb.LogQuery{}); err != nil || got.Logs == nil || len(got.Logs) != 0 || !got.Partial {
+			t.Errorf("a running run without spans = %#v, %v; want an empty, partial page", got, err)
+		}
+		// A running run with spans: partial, and a line under a span not
+		// stored yet is no gap (the span may still arrive).
+		live := invokeSpan("r_live", 1, nil)
+		live.TraceID, live.SpanID = "c1"+trace[2:], "3000000000000001"
+		start := record("r_live", "event", "run_start", 0, `{"type":"run_start","id":"r_live"}`, nil)
+		start.Time = time.Now().UTC()
+		live.Start, live.End = start.Time, start.Time.Add(time.Second)
+		pending := obsdb.Record{Time: start.Time.Add(500 * time.Millisecond), TraceID: live.TraceID,
+			SpanID: "3000000000000002", Severity: 9, Body: "under an open tool span", Service: "conf-svc"}
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{live}, Records: []obsdb.Record{start, pending}}); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := db.OtherLogs(ctx(), "r_live", obsdb.LogQuery{}); err != nil || !got.Partial || got.Gap != 0 || len(got.Logs) != 0 {
+			t.Errorf("a running run = %#v, %v; want partial, no gap, no lines yet", got, err)
+		}
+
+		// Past MaxLogCandidates lines the read is cut and says so.
+		many := invokeSpan("r_many", 1, nil)
+		many.TraceID, many.SpanID = "d1"+trace[2:], "4000000000000001"
+		lines := make([]obsdb.Record, 0, obsdb.MaxLogCandidates+1)
+		for i := 0; i <= obsdb.MaxLogCandidates; i++ {
+			lines = append(lines, obsdb.Record{Time: at(time.Second + time.Duration(i)*time.Microsecond),
+				TraceID: many.TraceID, SpanID: many.SpanID, Severity: 9, Body: fmt.Sprintf("line %d", i), Service: "conf-svc"})
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{many}, Records: append(finishedRun("r_many"), lines...)}); err != nil {
+			t.Fatal(err)
+		}
+		last, err := db.OtherLogs(ctx(), "r_many", obsdb.LogQuery{From: obsdb.MaxLogCandidates - 1, Limit: 10})
+		if err != nil || !last.Truncated || len(last.Logs) != 1 || last.Logs[0].Index != obsdb.MaxLogCandidates-1 ||
+			last.Logs[0].Body != fmt.Sprintf("line %d", obsdb.MaxLogCandidates-1) {
+			t.Errorf("past the cap = truncated %v, %d rows %+v, %v; want the first %d lines and truncated", last.Truncated, len(last.Logs), last.Logs, err, obsdb.MaxLogCandidates)
 		}
 	}
 }

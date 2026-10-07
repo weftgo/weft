@@ -93,7 +93,13 @@ func TestGoldensMatchARealRun(t *testing.T) {
 	agent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"42"}`}),
 		wefttest.Say("Order 42 shipped this morning."),
-	), core.Name("orders"), core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()), lookup)
+	), core.Name("orders"), core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()), lookup,
+		// A Tap's line rides the invoke_agent span (the run's own ctx).
+		core.Tap(func(ctx context.Context, ev core.Event) {
+			if _, ok := ev.(core.RunStart); ok {
+				emit(ctx, otellog.SeverityInfo, "run started", attribute.String("event", "run_start"))
+			}
+		}))
 	// The keys thread stamps on a session's turns (block 8).
 	res, err := agent.Generate(ctx, core.Prompt("where is order 42?"),
 		core.Metadata(map[string]string{"weft.public_id": "pub_x", "weft.session.id": "s_x", "weft.turn": "1"}))
@@ -126,10 +132,23 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		}
 	}
 	trace, _ := fetch("/api/runs/" + res.ID).(map[string]any)["trace_id"].(string)
-	// The app's lines are the run's, in order, through the pipeline.
-	if logs, _ := fetch("/api/runs/" + res.ID + "/logs").(map[string]any)["logs"].([]any); len(logs) != 2 ||
-		logs[0].(map[string]any)["body"] != "looking up order 42" || logs[1].(map[string]any)["severity"] != "WARN" {
-		t.Errorf("the real run's app logs = %v, want the tool's two lines", logs)
+	// The app's lines are the run's, in order, through the pipeline: the
+	// Tap's under the invoke_agent span, the tool's two under its
+	// execute_tool span.
+	logsDoc := fetch("/api/runs/" + res.ID + "/logs").(map[string]any)
+	logs, _ := logsDoc["logs"].([]any)
+	spanOf := map[string]string{} // span id → name
+	for _, sp := range fetch("/api/runs/" + res.ID + "/spans").(map[string]any)["spans"].([]any) {
+		m := sp.(map[string]any)
+		id, _ := m["span_id"].(string)
+		name, _ := m["name"].(string)
+		spanOf[id] = name
+	}
+	line := func(i int) map[string]any { return logs[i].(map[string]any) }
+	if len(logs) != 3 || line(0)["body"] != "run started" || line(1)["body"] != "looking up order 42" || line(2)["severity"] != "WARN" ||
+		!strings.HasPrefix(spanOf[line(0)["span_id"].(string)], "invoke_agent") ||
+		!strings.HasPrefix(spanOf[line(1)["span_id"].(string)], "execute_tool") || logsDoc["partial"] != nil || logsDoc["badge"] != nil {
+		t.Errorf("the real run's app logs = %v (spans %v), want the Tap's line under invoke_agent, then the tool's two under execute_tool, nothing partial or badged", logsDoc, spanOf)
 	}
 	for _, c := range []struct {
 		golden, path string

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
@@ -43,11 +44,42 @@ type logRow struct {
 // from (the last index + 1) when the page is full; absent on the last
 // page. A run whose logs cannot be attributed (it has no span) carries
 // the not_recorded badge beside an empty list.
+//
+// Partial is a live condition, not a hole (the badge table is closed):
+// the run is running, so lines under its in-flight spans are not
+// attributable yet and indexes may shift when those spans arrive — a
+// client paging with from may re-read lines and miss as many until
+// the run ends (obsdb.ReadOtherLogs; a stable cursor is phase-2 work).
+// The reason says so, beside any badge's own.
+//
+// The badge, when the page is not the whole story: truncated when the
+// run's traces hold more than obsdb.MaxLogCandidates lines (only the
+// first are read), else gap when lines in the run's trace name a span
+// that was never stored (a dropped batch, a process that exited) —
+// with the count; truncated's reason then carries the gap's too.
 type logsPage struct {
 	Logs     []logRow `json:"logs"`
 	NextFrom *int64   `json:"next_from,omitempty"`
+	Partial  bool     `json:"partial,omitempty"`
 	badgeFields
 }
+
+// logsCap is obsdb.MaxLogCandidates as the reason spells it: digits in
+// groups of three ("10 000").
+var logsCap = func() string {
+	d := strconv.Itoa(obsdb.MaxLogCandidates)
+	var b strings.Builder
+	for i, c := range d {
+		if i > 0 && (len(d)-i)%3 == 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
+}()
+
+// logsPartialReason is the reason a running run's page carries.
+const logsPartialReason = "spans are exported when they end: lines under in-flight spans appear once they do, and indexes may shift"
 
 // logsNoSpansReason words the not_recorded hole of a run with no span:
 // HoleNote's own reason is the request record's.
@@ -110,7 +142,8 @@ func (s *Server) serveRunLogs(w http.ResponseWriter, r *http.Request, id string)
 		}
 		query.MinSeverity = n
 	}
-	logs, err := s.db.OtherLogs(r.Context(), id, query)
+	page, err := s.db.OtherLogs(r.Context(), id, query)
+	logs := page.Logs
 	out := logsPage{Logs: []logRow{}}
 	var he *obsdb.HoleError
 	switch {
@@ -142,5 +175,19 @@ func (s *Server) serveRunLogs(w http.ResponseWriter, r *http.Request, id string)
 		next := logs[n-1].Index + 1
 		out.NextFrom = &next
 	}
+	var reasons []string
+	if page.Gap > 0 {
+		out.Badge, out.Fix = string(obsdb.HoleGap), holeFix(obsdb.HoleGap)
+		reasons = append(reasons, strconv.Itoa(page.Gap)+" log lines in the run's trace name a span that was never stored")
+	}
+	if page.Truncated {
+		out.Badge, out.Fix = string(obsdb.HoleTruncated), ""
+		reasons = append([]string{"the first " + logsCap + " app log lines are shown"}, reasons...)
+	}
+	if page.Partial {
+		out.Partial = true
+		reasons = append(reasons, logsPartialReason)
+	}
+	out.Reason = strings.Join(reasons, "; ")
 	writeJSON(w, r, http.StatusOK, out)
 }

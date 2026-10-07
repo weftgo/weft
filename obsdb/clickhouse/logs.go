@@ -13,17 +13,17 @@ import (
 // (obsdb.ReadOtherLogs: the attribution through the run's spans, the
 // order, the paging). The scan is bounded by the run's time window
 // (otel_logs' order key leads with time) and the run's trace ids
-// (its bloom filter). otel_logs keeps the collector's string map only,
+// (its bloom filter), the first obsdb.MaxLogCandidates by time. otel_logs keeps the collector's string map only,
 // so attribute values read back as strings.
-func (d *DB) OtherLogs(ctx context.Context, runID string, q obsdb.LogQuery) (_ []obsdb.OtherLog, err error) {
+func (d *DB) OtherLogs(ctx context.Context, runID string, q obsdb.LogQuery) (_ obsdb.LogPage, err error) {
 	if err := d.checkOpen(); err != nil {
-		return nil, err
+		return obsdb.LogPage{}, err
 	}
 	defer d.closedErr(&err)
 	return obsdb.ReadOtherLogs(ctx, d, runID, q, d.logCandidates)
 }
 
-func (d *DB) logCandidates(ctx context.Context, traceIDs []string, from, to time.Time) ([]obsdb.OtherLog, error) {
+func (d *DB) logCandidates(ctx context.Context, traceIDs []string, from, to time.Time, limit int) ([]obsdb.OtherLog, error) {
 	if len(traceIDs) == 0 {
 		return nil, nil
 	}
@@ -31,7 +31,8 @@ func (d *DB) logCandidates(ctx context.Context, traceIDs []string, from, to time
 		FROM otel_logs
 		WHERE Timestamp BETWEEN ? AND ?
 		  AND TraceId IN (?)
-		  AND LogAttributes['weft.run.id'] = ''`, from, to, traceIDs)
+		  AND LogAttributes['weft.run.id'] = ''
+		ORDER BY Timestamp LIMIT ?`, from, to, traceIDs, limit)
 	if err != nil {
 		return nil, err
 	}

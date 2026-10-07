@@ -64,11 +64,13 @@ type DB interface {
 	// OtherLogs pages a run's app log records — the non-weft records
 	// the writers store beside weft's (other_logs on SQLite, otel_logs
 	// on ClickHouse), attributed to the run through the spans they were
-	// emitted under — in time order (LogQuery, ReadOtherLogs).
-	// ErrNotFound for an unknown run; empty, not nil, for a run with no
-	// app logs; a *HoleError (Kind "logs", HoleNotRecorded) for a
-	// finished run with no span to attribute them through.
-	OtherLogs(ctx context.Context, runID string, q LogQuery) ([]OtherLog, error)
+	// emitted under — in time order (LogQuery, ReadOtherLogs), with
+	// what the read could not show (LogPage: partial while running,
+	// lines under a never-stored span, the candidate cap).
+	// ErrNotFound for an unknown run; empty Logs, not nil, for a run
+	// with no app logs; a *HoleError (Kind "logs", HoleNotRecorded) for
+	// a finished run with no span to attribute them through.
+	OtherLogs(ctx context.Context, runID string, q LogQuery) (LogPage, error)
 	Trace(ctx context.Context, traceID string) ([]Span, error) // empty, not an error, for an unknown trace
 
 	Sessions(ctx context.Context, q SessionQuery) (SessionPage, error)

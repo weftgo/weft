@@ -13,16 +13,16 @@ import (
 // puts every record with no weft.run.id (obsdb.ReadOtherLogs: the
 // attribution through the run's spans, the order, the paging). The
 // candidates are read by trace id (other_logs_trace) inside the run's
-// time window.
-func (d *DB) OtherLogs(ctx context.Context, runID string, q obsdb.LogQuery) (_ []obsdb.OtherLog, err error) {
+// time window, the first obsdb.MaxLogCandidates by time.
+func (d *DB) OtherLogs(ctx context.Context, runID string, q obsdb.LogQuery) (_ obsdb.LogPage, err error) {
 	if err := d.checkOpen(); err != nil {
-		return nil, err
+		return obsdb.LogPage{}, err
 	}
 	defer d.closedErr(&err)
 	return obsdb.ReadOtherLogs(ctx, d, runID, q, d.logCandidates)
 }
 
-func (d *DB) logCandidates(ctx context.Context, traceIDs []string, from, to time.Time) ([]obsdb.OtherLog, error) {
+func (d *DB) logCandidates(ctx context.Context, traceIDs []string, from, to time.Time, limit int) ([]obsdb.OtherLog, error) {
 	if len(traceIDs) == 0 {
 		return nil, nil
 	}
@@ -30,11 +30,12 @@ func (d *DB) logCandidates(ctx context.Context, traceIDs []string, from, to time
 	for _, id := range traceIDs {
 		args = append(args, id)
 	}
-	args = append(args, unixNS(from), unixNS(to))
+	args = append(args, unixNS(from), unixNS(to), limit)
 	rs, err := d.reads.QueryContext(ctx, `SELECT time_ns, COALESCE(trace_id, ''), COALESCE(span_id, ''),
 		COALESCE(severity, 0), COALESCE(event_name, ''), COALESCE(body, ''), COALESCE(service, ''), COALESCE(attrs, '')
 		FROM other_logs
-		WHERE trace_id IN (?`+strings.Repeat(",?", len(traceIDs)-1)+`) AND time_ns BETWEEN ? AND ?`, args...)
+		WHERE trace_id IN (?`+strings.Repeat(",?", len(traceIDs)-1)+`) AND time_ns BETWEEN ? AND ?
+		ORDER BY time_ns, id LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}

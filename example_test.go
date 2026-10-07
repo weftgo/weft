@@ -1034,6 +1034,38 @@ func ExampleParkOn() {
 	// pending: 1
 }
 
+// ParkAllExcept is the default-deny park rule: the caller names what may
+// run, and every other tool call parks — including a tool only a
+// ToolSource supplies, which no list built from Agent.Tools could name.
+func ExampleParkAllExcept() {
+	lookup := weft.Tool("lookup", "Look up an order.", func(context.Context, struct{}) (string, error) {
+		return "shipped", nil
+	})
+	wire := weft.Tool("wire_money", "Send a payment.", func(context.Context, struct{}) (string, error) {
+		return "sent", nil
+	})
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(
+			wefttest.Call{Name: "lookup", ID: "c1"},
+			wefttest.Call{Name: "wire_money", ID: "c2"},
+		),
+		wefttest.Say("paid"),
+	), weft.ToolSource(func() []*weft.ToolDef { return []*weft.ToolDef{lookup, wire} }))
+	res, err := agt.Generate(context.Background(),
+		weft.Prompt("pay invoice 4411"), weft.ParkAllExcept("lookup"))
+	if err != nil {
+		return
+	}
+	fmt.Println("ran:", res.Steps[0].Results[0].Name)
+	fmt.Println("pending:", res.Pending[0].Name)
+	// A human decides; the next run resumes under the same rule:
+	_, _ = agt.Generate(context.Background(),
+		weft.Messages(res.Messages...), weft.Approve("c2"), weft.ParkAllExcept("lookup"))
+	// Output:
+	// ran: lookup
+	// pending: wire_money
+}
+
 // Replay declares a tool's side-effect class for re-runs: safe vouches
 // the call is idempotent (a re-run may execute it for real); every
 // unannotated tool counts as never — substituted or parked, never

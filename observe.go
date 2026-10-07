@@ -1,6 +1,7 @@
 package weft
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -547,7 +548,8 @@ func toolErrorType(err error) string {
 // never opens a hole in the durable sequence; Nested takes neither (a
 // child run numbers its own). Records go out on the run's context, so
 // the SDK derives their trace/span ids from the invoke_agent span, and
-// nothing is emitted after that context ends (deliver checks first).
+// nothing is emitted after that context ends: deliver checks before an
+// event record, recordMessages before a transcript batch.
 //
 // Cost rule: Enabled is asked before anything is marshalled, so a
 // program with no SDK pays no JSON encoding; the no-SDK logger answers
@@ -613,7 +615,11 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 	}
 	b, err := json.Marshal(body)
 	if err != nil {
-		return // an event that cannot encode is dropped, never fatal
+		// The one way an event fails to encode: a tool call whose
+		// arguments are not JSON (quoteInvalidArgs).
+		if b, err = json.Marshal(quoteInvalidEventArgs(body)); err != nil {
+			return // an event that still cannot encode is dropped, never fatal
+		}
 	}
 	rec.SetBody(attribute.StringValue(string(b)))
 
@@ -667,8 +673,12 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 // their stripped shape. step is the step the batch belongs to (0 for the
 // input); input marks index 0. The body is a JSON array of Message,
 // never capped — a capped transcript is not replay-grade (ADR 0024 D1).
+// Like the event records, nothing is reported once the run's context
+// has ended (S1.3's cancellation rule): the transcript may still grow —
+// a cancelled batch's results ride RunError.Result — but the record
+// stream stops where the event stream does.
 func (r *recorder) recordMessages(ctx context.Context, step int, msgs []Message, input bool) {
-	if len(msgs) == 0 || !r.captureOn(ctx) {
+	if len(msgs) == 0 || ctx.Err() != nil || !r.captureOn(ctx) {
 		return
 	}
 	if !r.elog.Enabled(ctx, log.EnabledParameters{EventName: eventNameMessages}) {
@@ -676,7 +686,13 @@ func (r *recorder) recordMessages(ctx context.Context, step int, msgs []Message,
 	}
 	b, err := json.Marshal(msgs)
 	if err != nil {
-		return
+		// A tool call whose arguments are not JSON (quoteInvalidArgs):
+		// dropping the batch would lose the message from the stored
+		// transcript — and the input record of every later run it is fed
+		// back into.
+		if b, err = json.Marshal(quoteInvalidMessageArgs(msgs)); err != nil {
+			return
+		}
 	}
 
 	var rec log.Record
@@ -701,6 +717,76 @@ func (r *recorder) recordMessages(ctx context.Context, step int, msgs []Message,
 	attrs = append(attrs, metadataAttrs(ctx)...)
 	rec.AddAttributes(attrs...)
 	r.elog.Emit(ctx, rec)
+}
+
+// quoteInvalidArgs returns a tool call's arguments in a form a record
+// body can carry. Args is the model's raw bytes, and a model can emit
+// bytes that are not JSON — a cut-off object, stray text; the loop keeps
+// them in the transcript and answers the call with INVALID_INPUT — but
+// encoding/json refuses to embed an invalid RawMessage, which would fail
+// the whole record: the tool_start event, the assistant's messages
+// batch, a parked call's run_finish. Such arguments are recorded as a
+// JSON string holding the raw bytes — still not an object, so a re-run
+// fed the recorded transcript still fails the call with INVALID_INPUT.
+// Empty arguments encode as null, which the tool decoder reads as {}
+// too.
+// Valid arguments pass through untouched; these helpers only run after
+// a marshal has already failed.
+func quoteInvalidArgs(args json.RawMessage) json.RawMessage {
+	if len(bytes.TrimSpace(args)) == 0 {
+		return nil
+	}
+	if json.Valid(args) {
+		return args
+	}
+	quoted, err := json.Marshal(string(args))
+	if err != nil {
+		return nil // unreachable: a string always encodes
+	}
+	return quoted
+}
+
+// quoteInvalidEventArgs applies quoteInvalidArgs to every tool-call
+// argument an event carries: ToolStart's own, RunFinish's pending
+// calls', a Steered batch's messages'.
+func quoteInvalidEventArgs(ev Event) Event {
+	switch e := ev.(type) {
+	case ToolStart:
+		e.Args = quoteInvalidArgs(e.Args)
+		return e
+	case RunFinish:
+		pending := make([]ToolCallPart, len(e.Pending))
+		for i, c := range e.Pending {
+			c.Args = quoteInvalidArgs(c.Args)
+			pending[i] = c
+		}
+		e.Pending = pending
+		return e
+	case Steered:
+		e.Messages = quoteInvalidMessageArgs(e.Messages)
+		return e
+	default:
+		return ev
+	}
+}
+
+// quoteInvalidMessageArgs applies quoteInvalidArgs to every tool call
+// in msgs, on a copy: the run's transcript keeps the model's own bytes.
+func quoteInvalidMessageArgs(msgs []Message) []Message {
+	out := make([]Message, len(msgs))
+	for i, m := range msgs {
+		content := make([]Part, len(m.Content))
+		for j, p := range m.Content {
+			if c, ok := p.(ToolCallPart); ok {
+				c.Args = quoteInvalidArgs(c.Args)
+				p = c
+			}
+			content[j] = p
+		}
+		m.Content = content
+		out[i] = m
+	}
+	return out
 }
 
 // metadataAttrs renders the metadata in force on ctx as span/record

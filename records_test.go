@@ -870,3 +870,146 @@ func TestMessagesRecordsSteered(t *testing.T) {
 		t.Errorf("steered record step = %d, want 0 (the drain step)", step)
 	}
 }
+
+// A model can emit tool-call arguments that are not JSON (a cut-off
+// object, stray text): the loop keeps the raw bytes in the transcript
+// and answers the call with INVALID_INPUT. encoding/json refuses to
+// embed an invalid RawMessage, so the records carrying those bytes — the
+// tool_start event, the assistant's messages batch, every later run's
+// input, a parked call's run_finish — used to be dropped whole, leaving
+// a tool_finish with no start and a transcript that could not rebuild.
+// They are recorded with the raw bytes as a JSON string instead:
+// positions and indexes stay contiguous and every body decodes.
+func TestRecordsSurviveToolArgsThatAreNotJSON(t *testing.T) {
+	const raw = `{"msg": "hi` // cut off mid-string
+	wantArgs, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lp := newRecLogProvider()
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "echo", Args: raw, ID: "c1"}),
+		wefttest.Say("done"),
+	), msgEcho(), weft.LoggerProvider(lp))
+	res, err := agt.Generate(context.Background(), weft.Prompt("hello"), weft.RunID("r"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := lp.ofKind(t, "event")
+	wantTypes := []string{"run_start", "step_start", "tool_start", "tool_finish",
+		"step_finish", "step_start", "step_finish", "run_finish"}
+	if len(events) != len(wantTypes) {
+		t.Fatalf("got %d event records (%v), want %d (%v)", len(events), typesOf(events), len(wantTypes), wantTypes)
+	}
+	for i, want := range wantTypes {
+		if got := events[i].attr("weft.event.type"); got != want {
+			t.Errorf("event record %d type = %q, want %q", i, got, want)
+		}
+		if pos, ok := events[i].intAttr("weft.event.pos"); !ok || pos != int64(i) {
+			t.Errorf("event record %d pos = %d (ok=%v), want %d", i, pos, ok, i)
+		}
+	}
+	ev, err := weft.UnmarshalEvent([]byte(events[2].body))
+	if err != nil {
+		t.Fatalf("tool_start body does not decode: %v", err)
+	}
+	if start, ok := ev.(weft.ToolStart); !ok || string(start.Args) != string(wantArgs) {
+		t.Errorf("tool_start body = %s, want args %s (the raw bytes as a JSON string)", events[2].body, wantArgs)
+	}
+
+	// The transcript rebuilds: every message is there, and the call
+	// carries the raw bytes as a JSON string.
+	got := collectMessages(t, lp, "r")
+	if len(got) != len(res.Messages) {
+		t.Fatalf("records rebuild %d messages, transcript has %d", len(got), len(res.Messages))
+	}
+	call, ok := got[1].Content[0].(weft.ToolCallPart)
+	if !ok || string(call.Args) != string(wantArgs) {
+		t.Errorf("recorded assistant message = %+v, want the call's args %s", got[1], wantArgs)
+	}
+
+	// A continuation feeds that transcript back: its input record — the
+	// whole fed transcript — is still index 0.
+	lp2 := newRecLogProvider()
+	agt2 := weft.New(wefttest.Script(wefttest.Say("again")), weft.LoggerProvider(lp2))
+	res2, err := agt2.Generate(context.Background(),
+		weft.Messages(res.Messages...), weft.Prompt("more"), weft.RunID("r2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := collectMessages(t, lp2, "r2"); len(got) != len(res2.Messages) {
+		t.Fatalf("continuation records rebuild %d messages, transcript has %d", len(got), len(res2.Messages))
+	}
+	msgs := lp2.ofKind(t, "messages")
+	if len(msgs) == 0 || !msgs[0].hasAttr("weft.messages.input") {
+		t.Fatalf("continuation has no input messages record first: %d messages records", len(msgs))
+	}
+
+	// A parked call's arguments ride run_finish's pending list: the
+	// terminal record must not be lost either.
+	lp3 := newRecLogProvider()
+	guarded := weft.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) {
+		return "refunded", nil
+	}, weft.RequireApproval())
+	agt3 := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: raw, ID: "c9"}),
+	), guarded, weft.LoggerProvider(lp3))
+	res3, err := agt3.Generate(context.Background(), weft.Prompt("refund it"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res3.Pending) != 1 {
+		t.Fatalf("pending = %d, want the parked call", len(res3.Pending))
+	}
+	parked := lp3.ofKind(t, "event")
+	if last := parked[len(parked)-1]; last.attr("weft.event.type") != "run_finish" {
+		t.Fatalf("last event record = %q, want run_finish (%v)", last.attr("weft.event.type"), typesOf(parked))
+	} else if _, err := weft.UnmarshalEvent([]byte(last.body)); err != nil {
+		t.Errorf("run_finish body does not decode: %v", err)
+	}
+}
+
+// S1.3's cancellation rule covers the messages records too: nothing is
+// recorded after the run's context ends. A run started on a dead context
+// used to leave one orphan input record — no run_start beside it — and
+// a run cancelled mid-step recorded the tool message of the cancelled
+// batch after the event stream had stopped.
+func TestNoRecordsAfterCancellation(t *testing.T) {
+	t.Run("dead context", func(t *testing.T) {
+		lp := newRecLogProvider()
+		agt := weft.New(wefttest.Script(wefttest.Say("never")), weft.LoggerProvider(lp))
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := agt.Generate(ctx, weft.Prompt("hello")); err == nil {
+			t.Fatal("a run on a dead context succeeded")
+		}
+		lp.mu.Lock()
+		defer lp.mu.Unlock()
+		if n := len(lp.records); n != 0 {
+			t.Errorf("%d records emitted on a dead context, want 0 (first: %s %s)",
+				n, lp.records[0].eventName, lp.records[0].body)
+		}
+	})
+	t.Run("cancelled mid-step", func(t *testing.T) {
+		lp := newRecLogProvider()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		stop := weft.Tool("stop", "Cancels the run.", func(context.Context, struct{}) (string, error) {
+			cancel()
+			return "stopped", nil
+		})
+		agt := weft.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "stop", ID: "c1"}),
+			wefttest.Say("never"),
+		), stop, weft.LoggerProvider(lp))
+		if _, err := agt.Generate(ctx, weft.Prompt("hello")); err == nil {
+			t.Fatal("a cancelled run succeeded")
+		}
+		// Before the cancellation: the input and the assistant's call.
+		// The tool message joined the transcript after it — not recorded.
+		if msgs := lp.ofKind(t, "messages"); len(msgs) != 2 {
+			t.Errorf("%d messages records, want 2 (input, assistant) — none after the cancellation", len(msgs))
+		}
+	})
+}

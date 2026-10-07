@@ -272,13 +272,13 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// carries, not a seam).
 	maxSteps := cfg.effectiveMaxSteps(a.maxSteps)
 	parallelism := cfg.effectiveParallelism(a.parallelism)
-	// The run's parked set (ParkOn): the approval boundary applied per
-	// run — a call to a named tool parks exactly as RequireApproval
-	// would (ADR 0007; ADR 0024 D7).
-	parkSet := make(map[string]bool, len(cfg.parkOn))
-	for _, name := range cfg.parkOn {
-		parkSet[name] = true
-	}
+	// The run's park rule (ParkOn, ParkAllExcept): the approval boundary
+	// applied per run — a call the rule names parks exactly as
+	// RequireApproval would (ADR 0007; ADR 0024 D7). An except-list in
+	// force goes onto the context here, before any tool call's context
+	// is derived from it, so the runs started inside this one inherit
+	// it; nothing else reads it.
+	ctx, parkSet := cfg.resolvePark(ctx)
 	if len(resume) > 0 {
 		results, pending, sub, err := a.resolvePending(ctx, cfg, resume, seq, emit, fetchTools, parkSet)
 		if err != nil {
@@ -864,7 +864,7 @@ func (a *Agent) modelInfo() ModelInfo { return InfoOf(a.model) }
 // its child run's events (wrapped in Nested, numbered from this run's
 // counter under emitMu) and usage (the returned per-call map, keyed by
 // call id). The dispatcher otherwise knows nothing about subagents.
-func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool, parallelism int, parkSet map[string]bool) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage, retried []string) {
+func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool, parallelism int, parkSet *parkRule) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage, retried []string) {
 	outcomes := make([]ToolResultPart, len(calls))
 	parked := make([]bool, len(calls))
 	sem := make(chan struct{}, parallelism)
@@ -1013,7 +1013,7 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 // resumed calls is reported as 0: the original index is not recoverable
 // from the transcript, and there is no StepRecord for them (ADR 0007).
 // Audit lines should key on the CallID, not the step.
-func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), fetchTools func() ([]*ToolDef, error), parkSet map[string]bool) ([]ToolResultPart, []ToolCallPart, map[string]Usage, error) {
+func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), fetchTools func() ([]*ToolDef, error), parkSet *parkRule) ([]ToolResultPart, []ToolCallPart, map[string]Usage, error) {
 	// Resumed calls run before any step exists, so they fetch their own
 	// snapshot — a separate consultation, like CallTool's, through the
 	// run's (possibly narrowed) fetch.
@@ -1126,9 +1126,11 @@ func lastAssistantWithCalls(msgs []Message) int {
 // call taking its resumed result when one exists and its earlier one
 // otherwise: Gemini matches functionResponses by name and position, so
 // a reordered tool message could attach a result to the wrong call.
-// joined returns the tool message when one was created (a message
-// joined the transcript); a rebuild of a message already held is not a
-// join and reports nothing.
+// joined returns the completed tool message either way — created, or
+// rebuilt over the partial one the earlier run left (ADR 0024 S1.3
+// widened the report to the rebuild): the caller hands it to the
+// transcript observers and the messages record. nil when no result was
+// attached.
 func attachResults(msgs []Message, calls []ToolCallPart, results []ToolResultPart) (out []Message, joined []Message) {
 	if len(results) == 0 {
 		return msgs, nil
@@ -1213,7 +1215,11 @@ func deniedResult(reason string) string {
 // ErrDuplicateTool. Timeouts and result caps are not applied;
 // StrictInput is, at both levels, as in the loop. No span or log line
 // is produced: manual dispatchers own their context and their own
-// reporting (ADR 0016).
+// reporting (ADR 0016). Called from a tool handler, the dispatched call
+// is its own: CallFromContext in its handler reports its id and name
+// (the run and step stay the dispatching call's), and an approval the
+// dispatching call ran under does not carry over — a RequireApproval
+// tool still returns ErrApprovalRequired.
 func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error) {
 	tools, err := a.dispatchTools()
 	if err != nil {
@@ -1224,6 +1230,15 @@ func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error)
 	if def != nil && def.strict {
 		strict = true
 	}
+	// Dispatched from inside a tool handler, ctx carries that handler's
+	// Call — possibly approved. The dispatched call is a call of its
+	// own: never approved (an approval names one call, not what its
+	// handler goes on to do), and its handler sees its own id and name,
+	// in the same run and step. Outside the loop there is no Call, and
+	// none is invented.
+	if outer, ok := CallFromContext(ctx); ok {
+		ctx = withCall(ctx, Call{RunID: outer.RunID, Step: outer.Step, CallID: call.ID, Name: call.Name})
+	}
 	return a.chain(def, strict, nil)(ctx, call)
 }
 
@@ -1233,15 +1248,16 @@ func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error)
 // RequireApproval, decodes, and runs the handler. def is nil for an
 // unknown tool — the chain still runs, so Allow/Audit see the attempt,
 // and the base returns the NO_SUCH_TOOL error.
-func (a *Agent) chain(def *ToolDef, strict bool, parkSet map[string]bool) ToolCaller {
+func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule) ToolCaller {
 	base := func(ctx context.Context, call ToolCallPart) (string, error) {
 		if def == nil {
 			return "", noSuchTool(call.Name)
 		}
 		// The approval boundary (ADR 0007): the tool's own RequireApproval,
-		// or the run's ParkOn set naming it. Same boundary, same resume
-		// path — ParkOn is the policy applied per run (ADR 0024 D7).
-		if def.approval || parkSet[def.Name] {
+		// or the run's park rule naming it (ParkOn, ParkAllExcept). Same
+		// boundary, same resume path — the rule is the policy applied per
+		// run (ADR 0024 D7).
+		if def.approval || parkSet.parks(def.Name, a.hasOutput && def.Name == outputToolName) {
 			if c, _ := CallFromContext(ctx); !c.Approved {
 				return "", fmt.Errorf("%w: tool %q", ErrApprovalRequired, call.Name)
 			}
@@ -1272,7 +1288,7 @@ func (a *Agent) chain(def *ToolDef, strict bool, parkSet map[string]bool) ToolCa
 // folded into the result's text for the model, but typed for the
 // observer's error.type (ADR 0016) — and is nil on success and on a
 // parked call's pending report.
-func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, parkSet map[string]bool) (res ToolResultPart, pending, retry bool, err error) {
+func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, parkSet *parkRule) (res ToolResultPart, pending, retry bool, err error) {
 	res = ToolResultPart{CallID: call.ID, Name: call.Name}
 	resultCap := a.resultCap
 	timeout := a.toolTimeout

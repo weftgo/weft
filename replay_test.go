@@ -50,3 +50,25 @@ func TestReplayPolicy(t *testing.T) {
 		t.Errorf("manifest carries %d replay_policy lines, want 1 (never is omitted):\n%s", n, doc)
 	}
 }
+
+// The last Replay option wins, like every other tool option: a tool
+// composed from shared defaults that vouch safe and then marked never —
+// or given a class nobody knows — is never's. The unsafe reading (the
+// first safe sticks) would re-fire a side effect the caller had just
+// said must not re-fire.
+func TestReplayLastOptionWins(t *testing.T) {
+	handler := func(_ context.Context, _ struct{}) (string, error) { return "", nil }
+	for _, tc := range []struct {
+		name string
+		opts []weft.ToolOption
+		want weft.ReplayPolicy
+	}{
+		{"safe then never", []weft.ToolOption{weft.Replay(weft.ReplaySafe), weft.Replay(weft.ReplayNever)}, weft.ReplayNever},
+		{"safe then unknown", []weft.ToolOption{weft.Replay(weft.ReplaySafe), weft.Replay(weft.ReplayPolicy("sometimes"))}, weft.ReplayNever},
+		{"never then safe", []weft.ToolOption{weft.Replay(weft.ReplayNever), weft.Replay(weft.ReplaySafe)}, weft.ReplaySafe},
+	} {
+		if got := weft.Tool("t", "", handler, tc.opts...).ReplayPolicy(); got != tc.want {
+			t.Errorf("%s: ReplayPolicy() = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

@@ -585,15 +585,21 @@ const (
 type replayOption struct{ p ReplayPolicy }
 
 func (o replayOption) applyTool(t *ToolDef) {
-	if ReplayPolicy(o.p) == ReplaySafe {
+	// The last option decides, both ways: only an explicit safe vouches,
+	// and anything after it that is not safe takes the vouching back.
+	t.replay = ReplayNever
+	if o.p == ReplaySafe {
 		t.replay = ReplaySafe
 	}
 }
 
 // Replay sets the tool's ReplayPolicy. Only ReplaySafe needs to be
 // said: ReplayNever is the zero value and the default, and any other
-// value is ignored rather than trusted (an unknown class is never's,
-// the safe default). The manifest records the class.
+// value counts as never rather than being trusted (an unknown class is
+// never's, the safe default). Like every tool option the last one
+// wins, so Replay(ReplayNever) after an earlier Replay(ReplaySafe) —
+// shared defaults, then this tool's own word — is never's. The manifest
+// records the class.
 func Replay(p ReplayPolicy) ToolOption { return replayOption{p} }
 
 // ReplayPolicy reports the tool's side-effect class. Unannotated tools

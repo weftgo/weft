@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"iter"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,6 +65,11 @@ type runConfig struct {
 	// parkOn parks calls to the named tools at the approval boundary,
 	// exactly as RequireApproval would (ADR 0007 applied per run).
 	parkOn []string
+	// parkAll is ParkAllExcept: every call parks unless its tool is in
+	// parkExcept — the names every ParkAllExcept option of the run lists
+	// (non-nil once set, possibly empty).
+	parkAll    bool
+	parkExcept map[string]bool
 }
 
 type decision struct {
@@ -167,7 +174,8 @@ func (o onlyToolsOption) applyRun(c *runConfig) {
 // calls to a tool a PrepareStep function dropped fail as unknown, as
 // today. Manifest and Agent.Tools keep reporting the static set: they
 // describe the code, not one run's experiment (WEFT-PLAYGROUND §10.1
-// [D5]). With no names, the run keeps the agent's full set.
+// [D5]). With no names, the run keeps the agent's full set. Several
+// OnlyTools options add up: the run keeps every tool any of them names.
 func OnlyTools(names ...string) RunOption { return onlyToolsOption{names} }
 
 type useModelOption struct{ m Model }
@@ -202,8 +210,125 @@ func (o parkOnOption) applyRun(c *runConfig) {
 // Approve/Deny/Resolve on a resuming run decide it. This is how a
 // breakpoint or side-effect parking reaches a runtime-started run
 // without touching the agent, which is immutable after New (ADR 0024
-// D7, WEFT-PLAYGROUND §10.1). With no names, nothing parks.
+// D7, WEFT-PLAYGROUND §10.1). With no names, nothing parks. Names are
+// not validated — a name no tool carries parks nothing — and the set
+// covers this run only: a Subagent's child run does not inherit it.
+// ParkAllExcept is the default-deny form, for when the tools to park
+// cannot all be named.
 func ParkOn(tools ...string) RunOption { return parkOnOption{tools} }
+
+type parkAllExceptOption struct{ names []string }
+
+func (o parkAllExceptOption) applyRun(c *runConfig) {
+	// Every option is its own "park all but these" rule and the rules
+	// add up toward parking, so a second option keeps only the names
+	// the first one also let through.
+	keep := make(map[string]bool, len(o.names))
+	for _, name := range o.names {
+		if !c.parkAll || c.parkExcept[name] {
+			keep[name] = true
+		}
+	}
+	c.parkAll, c.parkExcept = true, keep
+}
+
+// ParkAllExcept parks, at the approval boundary (ADR 0007), every tool
+// call of the run whose tool is not named — ParkOn turned around: the
+// caller lists what may run, and everything else waits for a decision.
+// It is the rule for a run that must not fire a side effect nobody
+// vouched for (a playground re-run, WEFT-PLAYGROUND §6 rule 3; ADR 0024
+// D7), where a list of tools to park cannot be complete:
+//
+//   - The rule is applied by name to the tool each call resolves to in
+//     its step's dispatch snapshot, so a tool only a ToolSource supplies
+//     — absent from Agent.Tools and the manifest — parks like any other.
+//   - It reaches the runs started inside this run: a Subagent's child
+//     run (any run on a tool call's context) applies the same rule to
+//     its own tools, where ParkOn stops at the run it was given to. A
+//     child that parks ends as a child approval boundary always has —
+//     the delegating call's result is SUBAGENT_PENDING (ADR 0014); the
+//     parent does not park. Names are matched in parent and child
+//     alike, so name a tool only if every tool of that name down the
+//     delegation may run. A child run's own ParkAllExcept can narrow
+//     the inherited list, never widen it.
+//
+// A parked call is ParkOn's parked call: its ToolStart and no
+// ToolFinish, the run ending successfully with it on RunResult.Pending,
+// Approve/Deny/Resolve on the resuming run deciding it — an approved
+// call runs once even when the resume carries the rule again, and the
+// next call to the tool parks again. The rules only add up toward
+// parking: a tool ParkOn names or built with RequireApproval parks
+// whether or not it is named here, and several ParkAllExcept options
+// let through only the names all of them list. OnlyTools is
+// independent — it decides what is offered, this decides what of it
+// runs unasked. A name no tool carries is not an error (a ToolSource's
+// names are not known up front) and with no names every call parks —
+// except an agent's own Output submission (submit_output on an agent
+// built with Output, in this run or a child's): it is the run's
+// answer, not a side effect, so it never needs naming; ParkOn can
+// still park it.
+func ParkAllExcept(names ...string) RunOption { return parkAllExceptOption{names} }
+
+// parkRule is a run's park rule, resolved once in execute: the ParkOn
+// names, and — when a ParkAllExcept is in force, the run's own or one
+// inherited from the run it was started inside — the names that may
+// still run. nil parks nothing.
+type parkRule struct {
+	on     map[string]bool
+	all    bool
+	except map[string]bool
+}
+
+// parks reports whether a call to the named tool parks under the rule.
+// answer marks the running agent's own Output submission, which the
+// default-deny half lets through: it is the run's answer, not a side
+// effect. ParkOn naming it still parks it.
+func (p *parkRule) parks(name string, answer bool) bool {
+	if p == nil {
+		return false
+	}
+	return p.on[name] || (p.all && !answer && !p.except[name])
+}
+
+// parkExceptKey is the context key for the ParkAllExcept list in force:
+// execute places it so the runs started inside this one inherit it. The
+// map is never mutated after it is placed; a present, empty map parks
+// everything.
+type parkExceptKey struct{}
+
+// resolvePark builds the run's park rule from its own options and the
+// except-list inherited on ctx, and returns the context the run's tool
+// calls — and so its child runs — carry the list on. A child's own
+// list intersects the inherited one: default-deny only tightens on the
+// way down.
+func (c *runConfig) resolvePark(ctx context.Context) (context.Context, *parkRule) {
+	inherited, inForce := ctx.Value(parkExceptKey{}).(map[string]bool)
+	except := inherited
+	if c.parkAll {
+		except = c.parkExcept
+		if inForce {
+			except = make(map[string]bool, len(c.parkExcept))
+			for name := range c.parkExcept {
+				if inherited[name] {
+					except[name] = true
+				}
+			}
+		}
+		ctx = context.WithValue(ctx, parkExceptKey{}, except)
+		inForce = true
+	}
+	if len(c.parkOn) == 0 && !inForce {
+		return ctx, nil
+	}
+	rule := &parkRule{all: inForce, except: except}
+	if len(c.parkOn) > 0 {
+		rule.on = make(map[string]bool, len(c.parkOn))
+		for _, name := range c.parkOn {
+			rule.on[name] = true
+		}
+	}
+	return ctx, rule
+}
 
 type onMessagesOption struct {
 	fn func(context.Context, int, []Message)
@@ -534,6 +659,7 @@ const (
 	attrOverrideTools        = "weft.override.tools"
 	attrOverrideModel        = "weft.override.model"
 	attrOverrideParkOn       = "weft.override.park_on"
+	attrOverrideParkExcept   = "weft.override.park_all_except"
 	attrOverrideThinking     = "weft.override.thinking"
 	attrOverrideToolChoice   = "weft.override.tool_choice"
 	attrOverrideParams       = "weft.override.params"
@@ -546,10 +672,12 @@ const (
 // plain run. "Changed" means a run-level option was applied — the value
 // may coincide with the agent's own; the fingerprint records what the
 // run carried, not a diff. The instructions text itself is content: the
-// attribute says only that it was replaced (true); the text rides the
-// input messages record when capture is on. The hash covers every
+// attribute says only that it was replaced (true), and no record carries
+// the text — a transcript has no system role, so the input messages
+// record cannot — only the hash does. The hash covers every
 // changed value, text included, as sha256 over the canonical JSON of a
-// map (encoding/json sorts map keys, so equal changes hash equal).
+// map (encoding/json sorts map keys, so equal changes hash equal); the
+// tool subset and the parked tools enter it as sets (nameSet).
 func (c *runConfig) overrideAttrs() []attribute.KeyValue {
 	values := map[string]any{}
 	var attrs []attribute.KeyValue
@@ -561,7 +689,8 @@ func (c *runConfig) overrideAttrs() []attribute.KeyValue {
 		add("instructions", c.system, attribute.Bool(attrOverrideInstructions, true))
 	}
 	if len(c.onlyTools) > 0 {
-		add("tools", c.onlyTools, attribute.String(attrOverrideTools, strings.Join(c.onlyTools, ",")))
+		names := nameSet(c.onlyTools)
+		add("tools", names, attribute.String(attrOverrideTools, strings.Join(names, ",")))
 	}
 	if c.model != nil {
 		info := InfoOf(c.model)
@@ -596,7 +725,15 @@ func (c *runConfig) overrideAttrs() []attribute.KeyValue {
 		add("parallelism", c.parallelism, attribute.Int(attrOverrideParallelism, c.parallelism))
 	}
 	if len(c.parkOn) > 0 {
-		add("park_on", c.parkOn, attribute.String(attrOverrideParkOn, strings.Join(c.parkOn, ",")))
+		names := nameSet(c.parkOn)
+		add("park_on", names, attribute.String(attrOverrideParkOn, strings.Join(names, ",")))
+	}
+	if c.parkAll {
+		// The run's own except-list — a set, on its own attribute, so
+		// park_on keeps meaning ParkOn. Present and empty when the run
+		// parks everything.
+		names := slices.Sorted(maps.Keys(c.parkExcept))
+		add("park_all_except", names, attribute.String(attrOverrideParkExcept, strings.Join(names, ",")))
 	}
 	if len(values) == 0 {
 		return nil
@@ -607,6 +744,16 @@ func (c *runConfig) overrideAttrs() []attribute.KeyValue {
 	}
 	sum := sha256.Sum256(b)
 	return append([]attribute.KeyValue{attribute.String(attrOverrideHash, hex.EncodeToString(sum[:]))}, attrs...)
+}
+
+// nameSet renders an option's accumulated tool names as the set they
+// are — sorted, each once — so the fingerprint and its attribute do not
+// depend on the order the names were given in, or on a name several
+// options repeated.
+func nameSet(names []string) []string {
+	out := slices.Clone(names)
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // thinkingOverride renders a ThinkingConfig for weft.override.thinking:

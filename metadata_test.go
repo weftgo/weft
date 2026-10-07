@@ -5,6 +5,7 @@ package weft_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -126,5 +127,49 @@ func TestMetadataLimits(t *testing.T) {
 	}
 	if got["keep"] != "kept" {
 		t.Errorf("a valid entry was dropped: %v", got)
+	}
+}
+
+// The 64-key cap never costs a run its identity: keys under "weft." —
+// the weft modules' namespace, where thread stamps weft.session.id,
+// weft.public_id and weft.turn — take their places first, and the cap
+// then drops the caller's overflow in sorted order. A caller carrying a
+// large tag set through a session used to push the session's own keys
+// out (they sort after most names), and the run's records then belonged
+// to no session.
+func TestMetadataCapKeepsWeftKeys(t *testing.T) {
+	caller := map[string]string{}
+	for i := 0; i < 64; i++ {
+		caller[fmt.Sprintf("tag%02d", i)] = "v"
+	}
+	tp := newRecProvider()
+	var got map[string]string
+	agt := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("capped"), weft.TracerProvider(tp),
+		weft.Tap(func(ctx context.Context, _ weft.Event) {
+			if got == nil {
+				got = weft.MetadataFromContext(ctx)
+			}
+		}))
+	if _, err := agt.Generate(context.Background(),
+		weft.Metadata(caller),
+		weft.Metadata(map[string]string{"weft.session.id": "s_1", "weft.turn": "3"}),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 64 {
+		t.Errorf("%d keys survived, want exactly 64", len(got))
+	}
+	if got["weft.session.id"] != "s_1" || got["weft.turn"] != "3" {
+		t.Errorf("the cap dropped the weft.* keys: weft.session.id=%q weft.turn=%q",
+			got["weft.session.id"], got["weft.turn"])
+	}
+	// The overflow is the caller's last two keys in sorted order, counted.
+	for _, k := range []string{"tag62", "tag63"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("%s survived the cap; the caller's sorted tail is what drops", k)
+		}
+	}
+	if dropped := tp.find(t, "invoke_agent capped").attrsMap()["weft.metadata.dropped"]; dropped != "2" {
+		t.Errorf("weft.metadata.dropped = %q, want 2", dropped)
 	}
 }

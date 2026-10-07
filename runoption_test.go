@@ -333,3 +333,46 @@ func spanAttrsByID(t *testing.T, tp *recProvider, runID string) map[string]strin
 	t.Fatalf("no invoke_agent span for run %q", runID)
 	return nil
 }
+
+// The fingerprint is over what changed, not how the options were
+// spelled: the tool subset and the parked tools are sets, so the same
+// names in another order — or named twice, as two ParkOn options for
+// one tool do — hash equal and render the same sorted list. Sibling
+// runs of one experiment built by different callers must not read as
+// different experiments.
+func TestOverrideHashIgnoresNameOrderAndDuplicates(t *testing.T) {
+	tp := newRecProvider()
+	agt := weft.New(wefttest.Script(
+		wefttest.Say("ok"), wefttest.Say("ok"), wefttest.Say("ok"),
+	), weft.Name("demo"), weft.TracerProvider(tp), lookupTool(), refundTool())
+	run := func(id string, opts ...weft.RunOption) map[string]string {
+		t.Helper()
+		all := append([]weft.RunOption{weft.RunID(id)}, opts...)
+		if _, err := agt.Generate(context.Background(), all...); err != nil {
+			t.Fatal(err)
+		}
+		return spanAttrsByID(t, tp, id)
+	}
+	a := run("o1", weft.OnlyTools("lookup", "refund"), weft.ParkOn("refund", "lookup"))
+	b := run("o2", weft.OnlyTools("refund"), weft.OnlyTools("lookup", "refund"),
+		weft.ParkOn("lookup"), weft.ParkOn("refund"), weft.ParkOn("refund"))
+	c := run("o3", weft.OnlyTools("lookup"), weft.ParkOn("refund", "lookup"))
+	if a["weft.override.hash"] == "" {
+		t.Fatal("no weft.override.hash on an experiment run")
+	}
+	if a["weft.override.hash"] != b["weft.override.hash"] {
+		t.Errorf("the same tool subset and parked set hashed differently: %q vs %q",
+			a["weft.override.hash"], b["weft.override.hash"])
+	}
+	if a["weft.override.hash"] == c["weft.override.hash"] {
+		t.Error("a different tool subset hashed equal")
+	}
+	for id, attrs := range map[string]map[string]string{"o1": a, "o2": b} {
+		if got := attrs["weft.override.tools"]; got != "lookup,refund" {
+			t.Errorf("%s: weft.override.tools = %q, want %q", id, got, "lookup,refund")
+		}
+		if got := attrs["weft.override.park_on"]; got != "lookup,refund" {
+			t.Errorf("%s: weft.override.park_on = %q, want %q", id, got, "lookup,refund")
+		}
+	}
+}

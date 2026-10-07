@@ -490,7 +490,8 @@ function RunsPage() {
             </Button>
           </div>
         ) : (
-          <EmptyState command="go run ./studio/examples/basic" />
+          // B1: becomes "weft dev"
+          <EmptyState command="go run ./studio/cmd" />
         )
       ) : (
         <>

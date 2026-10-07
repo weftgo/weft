@@ -143,9 +143,8 @@ func Capabilities(names ...string) Option {
 }
 
 // Playground turns the runtime link server and the playground routes
-// on (step 8: studio/playground.go registers its group, which this
-// option enables). Until that file exists the option is accepted and
-// does nothing, and meta.capabilities does not list the playground.
+// on (studio/playground.go registers its group, which this option
+// enables); without it meta.capabilities does not list the playground.
 func Playground(on bool) Option {
 	return func(c *config) { c.playground = on }
 }

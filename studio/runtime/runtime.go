@@ -233,8 +233,8 @@ type Overrides struct {
 	Options      map[string]float64 `json:"options,omitempty"`
 }
 
-// TranscriptEdit is a D2/D3 edit; accepted by the schema, answered
-// "not yet available" until 8b.
+// TranscriptEdit is a D2/D3 edit: a step's recorded tool result or
+// message replaced before the experiment re-runs from that step.
 type TranscriptEdit struct {
 	Step       int    `json:"step"`
 	ToolResult string `json:"tool_result,omitempty"`

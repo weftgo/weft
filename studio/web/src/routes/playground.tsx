@@ -1,8 +1,7 @@
 // The Studio playground (WEFT-PLAYGROUND §4, P1's Studio half): the
 // split view — the experiment's config on the left, the runs side by
-// side on the right, the diff on top. One variant for now (P3's N-way
-// compare and P5's variants × inputs matrix grow this page); the
-// panel hands off into it with the context carried over (run, step,
+// side on the right, the diff on top, variants side by side with
+// their metrics; the panel hands off into it with the context carried over (run, step,
 // current overrides), so nothing is retyped (§2's parity rule).
 //
 //   /playground?run=<id>&step=N&instructions=…&tools=a,b&model=…

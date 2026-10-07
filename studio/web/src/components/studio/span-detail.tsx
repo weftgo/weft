@@ -212,7 +212,6 @@ function CallDetail({
 
 export function SpanDetail({
   span,
-  view,
   events,
   doc,
   runStatus,
@@ -223,7 +222,6 @@ export function SpanDetail({
 }: {
   /** The selected span, resolved against the fold at the playhead. */
   span: Span | undefined
-  view: FoldedRun
   events: WireEvent[]
   doc: RunDoc
   runStatus: string
@@ -338,7 +336,6 @@ export function SpanDetail({
           </div>
         ) : null}
       </div>
-      {view.finished ? null : null}
     </div>
   )
 }

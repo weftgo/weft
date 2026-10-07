@@ -19,8 +19,8 @@ import (
 //     playgroundGroupHook the same way; the Playground(true) option
 //     is what enables it.
 //
-// A hook is nil until its file exists, which is why a step-6 build
-// reports no panel or playground capability: the group is simply not
+// A hook is nil in a build without its file, which then reports no
+// panel or playground capability: the group is simply not
 // registered. No init() anywhere — the var initializer is the whole
 // mechanism, and New does the enabling.
 var (

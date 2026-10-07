@@ -456,7 +456,6 @@ function RunPage() {
             <div className={stickyDetail}>
               <SpanDetail
                 span={selected}
-                view={atPlayhead}
                 events={stream.events}
                 doc={doc}
                 runStatus={viewStatus}

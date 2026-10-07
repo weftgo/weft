@@ -37,8 +37,8 @@ export const Route = createRootRoute({
       <p className="font-mono text-xs text-faint">404</p>
       <p className="text-sm">There is no page here.</p>
       <p className="text-xs text-muted-foreground">
-        Studio has two places: the runs list and the agents page. A run link
-        looks like <span className="font-mono">runs/&lt;id&gt;</span>.
+        Studio's pages are in the sidebar. A run link looks like{" "}
+        <span className="font-mono">runs/&lt;id&gt;</span>.
       </p>
       <Link
         to="/runs"

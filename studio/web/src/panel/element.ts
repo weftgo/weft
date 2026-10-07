@@ -541,7 +541,7 @@ export class WeftDevtools extends HTMLElement {
       shown.add(r.id)
       list.appendChild(this.turnRow(r, s.selected))
       // The experiment slot (§2): runs that forked from this turn nest
-      // under it. Empty until step 8's playground capability.
+      // under it; empty without the playground capability.
       const expts = s.experiments.get(r.id) ?? []
       if (expts.length) {
         const box = el("div", "weft-expts")

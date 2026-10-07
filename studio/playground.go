@@ -25,10 +25,9 @@ import (
 // mounted from this group because the hook returns one group — the
 // registration point is the same, only the bookkeeping differs).
 //
-// P0 is API only (§7's P0 row): no UI. Everything 8b implements later
-// (transcript edits, the scripted engine, fork mode) is already in
-// the wire schema and refused with "not yet available", so the shape
-// is final now and clients do not break when they land.
+// The command's wire schema carries transcript edits, the scripted
+// engine and fork mode; the handler validates each (§10.4) before the
+// command reaches a runtime.
 
 // playgroundGroupInstalled wires the playground's group into New's
 // registry through routes.go's hook — the one registration point step

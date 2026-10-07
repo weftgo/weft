@@ -78,7 +78,7 @@ read-only, truncation/gap/stripped honesty, the raw JSON, a live tail,
 backend mints per page via `POST /api/panel-tokens`). No Studio
 answering: the panel removes itself silently. The artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 63,541 B raw / 17.0 KiB gzip;
+committed `studio/dist/panel/panel.js`, 88,514 B raw / 23.9 KiB gzip;
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 
@@ -217,7 +217,7 @@ make studio-check   # rebuild, prove dist is fresh, check the 600 KiB gzip budge
 
 `make studio-check` is the freshness gate (ADR 0018 §4): it fails if
 `dist/` does not match `web/` or if the gzipped total exceeds 600 KiB
-(currently ~356 KiB: the app's ~339 plus the panel bundle's ~17).
+(currently ~371 KiB: the app's ~347 plus the panel bundle's ~24).
 The build is deterministic — two builds from
 one tree are byte-identical (`scripts/clean-dist.ts` pins the router's
 prerender timestamp and keeps `<base href>` first in `<head>`).

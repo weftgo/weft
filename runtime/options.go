@@ -87,16 +87,18 @@ func Limits(b Budget) Option {
 	return func(c *config) { c.budget = b }
 }
 
-// AllowSideEffects opts tools in to really running in playground runs:
-// a tool named here is never parked and never substituted, in any
-// side_effects mode — its handler executes whenever an experiment's
-// model calls it. Every other side-effect tool (ReplayPolicy never,
-// the unannotated default) is substituted with its recorded result or
-// parked at the approval boundary; a tool marked
-// weft.Replay(weft.ReplaySafe) is not a side effect and runs in any
-// mode. A command that asks for side_effects "allow" is refused unless
-// every tool it leaves on is named here — "allow" asserts that nothing
-// will park, it does not widen this list.
+// AllowSideEffects opts tools in to really running in playground runs
+// whose command asks for side_effects "allow" (WEFT-PLAYGROUND §5.1,
+// §6 rule 3): under "allow" a tool named here is never parked and never
+// substituted — its handler executes whenever the experiment's model
+// calls it. In "substitute" (the default) and "park" an opted-in tool
+// is a side effect like any other: a call matching one the source run
+// recorded is answered with the recorded result, any other call parks
+// at the approval boundary ("park" answers nothing from the record).
+// A tool marked weft.Replay(weft.ReplaySafe) is not a side effect and
+// runs in every mode, opted in or not. A command that asks for "allow"
+// is refused unless every tool it leaves on is named here or vouched
+// ReplaySafe — "allow" runs this list for real, it does not widen it.
 //
 // Name a tool here only when re-running it is harmless. Names match
 // wherever the run reaches: a tool a weft.ToolSource supplies under

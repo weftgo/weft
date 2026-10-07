@@ -195,15 +195,18 @@ func (r *registry) entry(name string) (agentRegistration, bool) {
 // allowedTools names the tools a playground run may really execute —
 // the except-list of the run's default-deny park rule
 // (weft.ParkAllExcept, WEFT-PLAYGROUND §6 rule 3): the agent's tools
-// whose code vouched weft.Replay(weft.ReplaySafe), every name the
-// runtime opted in with AllowSideEffects (registered on the agent or
-// supplied later by a ToolSource — the rule matches by name), and the
+// whose code vouched weft.Replay(weft.ReplaySafe) and the
 // structured-output submission of an agent built with weft.Output (a
-// submission is the run's answer, not a side effect). Everything else
-// a run can reach parks: an unannotated tool, a tool only a ToolSource
-// supplies, a Subagent child's own tools. Sorted; empty when nothing
-// may run.
-func (r *registry) allowedTools(agent string) []string {
+// submission is the run's answer, not a side effect), in every
+// side_effects mode; and, only when the command asked for
+// side_effects "allow" (allowMode), every name the runtime opted in
+// with AllowSideEffects (registered on the agent or supplied later by a
+// ToolSource — the rule matches by name). In "substitute" and "park" an
+// opted-in tool is a side effect like any other: substituted from the
+// record or parked. Everything else a run can reach parks: an
+// unannotated tool, a tool only a ToolSource supplies, a Subagent
+// child's own tools. Sorted; empty when nothing may run.
+func (r *registry) allowedTools(agent string, allowMode bool) []string {
 	e, ok := r.entries[agent]
 	if !ok {
 		return nil
@@ -214,8 +217,10 @@ func (r *registry) allowedTools(agent string) []string {
 			set[tool] = true
 		}
 	}
-	for tool := range r.cfg.allow {
-		set[tool] = true
+	if allowMode {
+		for tool := range r.cfg.allow {
+			set[tool] = true
+		}
 	}
 	allowed := make([]string, 0, len(set))
 	for tool := range set {
@@ -229,9 +234,15 @@ func (r *registry) allowedTools(agent string) []string {
 // submit_output; its name is model-visible contract).
 const outputTool = "submit_output"
 
-// isAllowed reports whether tool is on this agent's AllowSideEffects
-// list.
-func (e agentRegistration) isAllowed(tool string) bool {
+// mayRunForReal reports whether tool may execute under side_effects
+// "allow": it is on this agent's AllowSideEffects list, or it is not a
+// side effect at all (vouched weft.Replay(weft.ReplaySafe), or an
+// Output agent's submission) — those run in every mode, "allow"
+// included.
+func (e agentRegistration) mayRunForReal(tool string) bool {
+	if e.SideEffects[tool] == string(weft.ReplaySafe) || tool == outputTool {
+		return true
+	}
 	for _, t := range e.Allow {
 		if t == tool {
 			return true

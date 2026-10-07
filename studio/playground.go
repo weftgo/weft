@@ -380,8 +380,12 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 			if len(touched) == 0 {
 				touched = manifestTools
 			}
+			// "allow" runs the AllowSideEffects tools for real; a tool
+			// the code vouched ReplaySafe (or an Output agent's
+			// submission) is no side effect and runs in every mode, so it
+			// may stay on too — the runtime's own check is the same.
 			for _, name := range touched {
-				if !agent.IsAllowed(name) {
+				if !agent.IsAllowed(name) && agent.SideEffects[name] != "safe" && name != "submit_output" {
 					writeError(w, r, http.StatusForbidden, "forbidden",
 						"tool "+name+" is not opted in for real side effects")
 					return

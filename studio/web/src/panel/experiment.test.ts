@@ -208,6 +208,20 @@ describe("the result pane follows the command to its run", () => {
     expect(FakeEventSource.instances.filter((i) => /[?&]run=(&|$)/.test(i.url))).toHaveLength(0)
   })
 
+  it("the side-effect select explains the modes: substitute by default, allow runs the app's opted-in tools for real", async () => {
+    const { el } = await openDrawer(baseRoutes())
+    const se = all(el, ".weft-drawer select").find((n) =>
+      Array.from((n as HTMLSelectElement).options).some((o) => o.value === "allow")
+    ) as HTMLSelectElement
+    expect(se.value).toBe("") // substitute, the default
+    const labels = Array.from(se.options).map((o) => o.textContent)
+    expect(labels).toEqual([
+      "side effects: substitute",
+      "park",
+      "allow — runs the tools this app opted in (AllowSideEffects) for real",
+    ])
+  })
+
   it("a steer Studio refuses (a fork-mode run: 409) shows Studio's words", async () => {
     const routes = baseRoutes()
     routes["POST playground/runs"] = { command_id: "cmd_1", state: "queued" }

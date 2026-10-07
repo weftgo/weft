@@ -734,7 +734,8 @@ export class WeftDevtools extends HTMLElement {
         if (t.side_effects === "never" || !t.side_effects) {
           lab.appendChild(
             el("span", "weft-badge weft-warn-badge", "⚠", {
-              title: "side-effect tool (ReplayPolicy never): its calls substitute or park, never re-fire silently",
+              title:
+                "side-effect tool (ReplayPolicy never): its calls substitute or park — never re-fire silently; only side effects: allow runs it for real, and only if the app opted it in",
             })
           )
         }
@@ -785,17 +786,27 @@ export class WeftDevtools extends HTMLElement {
     }
 
     // The side-effect mode (§6 rule 3): substitute (the default — a
-    // recorded call answers from the record, a miss parks), park
-    // (always), allow (only tools the runtime opted in).
+    // recorded side-effect call answers from the record, a miss parks),
+    // park (every side-effect call waits), allow (the tools the app
+    // opted in with AllowSideEffects run for real — only here; a
+    // ReplaySafe tool runs in every mode).
     const seRow = el("div", "weft-fields")
     const seSel = el("select", "weft-input") as HTMLSelectElement
-    const seLabel = el("option", undefined, "side effects: substitute") as unknown as HTMLOptionElement
+    seSel.title =
+      "How side-effect tools behave in the re-run. ReplaySafe tools always run; the others substitute, park, or — under allow, if the app opted them in — run for real."
+    const seLabel = el("option", undefined, "side effects: substitute", {
+      title: "a side-effect call the source recorded is answered from the record; any other call parks for you",
+    }) as unknown as HTMLOptionElement
     seLabel.value = ""
     seSel.appendChild(seLabel)
-    const parkOpt = el("option", undefined, "park") as unknown as HTMLOptionElement
+    const parkOpt = el("option", undefined, "park", {
+      title: "every side-effect call parks for you; nothing is answered from the record",
+    }) as unknown as HTMLOptionElement
     parkOpt.value = "park"
     seSel.appendChild(parkOpt)
-    const allowOpt = el("option", undefined, "allow (opted-in tools only)") as unknown as HTMLOptionElement
+    const allowOpt = el("option", undefined, "allow — runs the tools this app opted in (AllowSideEffects) for real", {
+      title: "refused unless every tool left on is opted in or ReplaySafe",
+    }) as unknown as HTMLOptionElement
     allowOpt.value = "allow"
     seSel.appendChild(allowOpt)
     seSel.value = d.sideEffects === "substitute" ? "" : d.sideEffects

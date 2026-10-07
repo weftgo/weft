@@ -305,7 +305,7 @@ func TestPlaygroundEndToEnd(t *testing.T) {
 	    "options": {"max_steps": 6, "temperature": 0.2}
 	  },
 	  "engine": "live",
-	  "side_effects": "substitute",
+	  "side_effects": "allow",
 	  "thread": "ephemeral",
 	  "experiment_id": "exp_9",
 	  "public_id": "pub_7Hk2"
@@ -361,8 +361,9 @@ func TestPlaygroundEndToEnd(t *testing.T) {
 	if h := attrs["weft.override.hash"]; len(h) != 64 {
 		t.Errorf("weft.override.hash = %q, want 64 hex chars", h)
 	}
-	// §6 rule 3's fingerprint: the run parks everything but the tool
-	// the runtime opted in; no breakpoint is set, so no park_on.
+	// §6 rule 3's fingerprint: under side_effects "allow" the run parks
+	// everything but the tool the runtime opted in; no breakpoint is
+	// set, so no park_on.
 	if p := attrs["weft.override.park_all_except"]; p != "lookup_order" {
 		t.Errorf("weft.override.park_all_except = %q, want %q (the opted-in tool)", p, "lookup_order")
 	}
@@ -415,11 +416,13 @@ func TestPlaygroundEndToEnd(t *testing.T) {
 
 // TestPlaygroundParkOnSpan pins §6 rule 3's observable fingerprint
 // (§10.1): every playground run carries weft.override.park_all_except
-// naming the tools that may really run — here the opted-in one — and a
-// command that enables a tool outside it has the model's call park (the
-// run finishes successfully with the call pending) instead of firing
-// the side effect. (The name is historical: the rule was a ParkOn list
-// before it became default-deny.)
+// naming the tools that may really run — under side_effects
+// "substitute" none here: the opted-in lookup_order runs for real only
+// under "allow", and nothing is vouched ReplaySafe — and a command that
+// enables a tool outside it has the model's call park (the run finishes
+// successfully with the call pending) instead of firing the side
+// effect. (The name is historical: the rule was a ParkOn list before it
+// became default-deny.)
 func TestPlaygroundParkOnSpan(t *testing.T) {
 	e := newE2E(t,
 		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"4411"}`}),
@@ -480,9 +483,9 @@ func TestPlaygroundParkOnSpan(t *testing.T) {
 		t.Fatal(err)
 	}
 	attrs := e.rec.playgroundSpan(t)
-	if got, ok := attrs["weft.override.park_all_except"]; !ok || got != "lookup_order" {
-		t.Errorf("weft.override.park_all_except = %q (present %v), want %q — refund is not on it, so it parks",
-			got, ok, "lookup_order")
+	if got, ok := attrs["weft.override.park_all_except"]; !ok || got != "" {
+		t.Errorf("weft.override.park_all_except = %q (present %v), want present and empty — substitute runs no opt-in, refund parks",
+			got, ok)
 	}
 }
 

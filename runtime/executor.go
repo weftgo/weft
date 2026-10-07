@@ -123,7 +123,7 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 	}
 	if cmd.SideEffects == "allow" {
 		for _, name := range enabledTools(*cmd, tools) {
-			if !entry.isAllowed(name) {
+			if !entry.mayRunForReal(name) {
 				return fmt.Sprintf("tool %q is not opted in for real side effects", name), false
 			}
 		}
@@ -1007,12 +1007,13 @@ func (l *link) overrideOptions(cmd command) []weft.RunOption {
 
 	// Side-effect safety (§6 rule 3), default-deny: every tool call of
 	// the run parks at the approval boundary unless its tool is one the
-	// code vouched safe or the runtime opted in — by name, against each
+	// code vouched safe, or one the runtime opted in and the command
+	// asked for side_effects "allow" — by name, against each
 	// step's own dispatch set, so a tool only a ToolSource supplies
 	// parks too, and inherited by the Subagent child runs the run
 	// starts. On every run, the empty list included: nothing vouched
 	// means everything parks.
-	opts = append(opts, weft.ParkAllExcept(l.reg.allowedTools(cmd.Agent)...))
+	opts = append(opts, weft.ParkAllExcept(l.reg.allowedTools(cmd.Agent, cmd.SideEffects == "allow")...))
 	// The debugger's breakpoints (§8.3): parked on every run this
 	// runtime starts, whatever the command asked for — D7's rule,
 	// applied per run because the agent is immutable.

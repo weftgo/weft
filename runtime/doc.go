@@ -14,7 +14,7 @@
 //	        "glm-5.3-flash": glmFlash,
 //	    }),
 //	    runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000, MaxRunsPerExperiment: 60}),
-//	    runtime.AllowSideEffects("lookup_order"),
+//	    runtime.AllowSideEffects("send_email"), // real only under side_effects "allow"
 //	    runtime.Threads(store),                // thread.Storage; nil = ephemeral only
 //	)()
 //
@@ -26,17 +26,20 @@
 // registered can be turned off, never added (OnlyTools); models come
 // from the Models allow-list; MaxSteps and Parallelism only lower.
 // Side effects never re-fire silently (§6 rule 3): a tool counts as
-// "never" unless its code vouched weft.Replay(weft.ReplaySafe) or the
-// runtime opted it in with AllowSideEffects — an opted-in tool runs
-// for real in every mode. In side_effects "substitute" (the default),
+// "never" unless its code vouched weft.Replay(weft.ReplaySafe) — a
+// vouched tool runs in every mode. A tool the runtime opted in with
+// AllowSideEffects runs for real only when the command asks for
+// side_effects "allow"; in the other modes it is a side effect like any
+// other. In side_effects "substitute" (the default),
 // a parked call that matches a recorded call of the source (same tool,
 // same arguments as JSON; repeated calls in the order the source made
 // them) is answered with the recorded result — the runtime acts as
 // ADR 0007's resolver, the handler never runs; a miss stays parked for
 // a human (the panel's continue / skip / resolve). "park" answers
 // nothing from the record: every such call waits at the boundary.
-// "allow" is refused unless every tool the command leaves on is opted
-// in. A parked run resumes once each of its parked calls has a
+// "allow" runs the opted-in tools for real, and is refused unless
+// every tool the command leaves on is opted in or vouched ReplaySafe.
+// A parked run resumes once each of its parked calls has a
 // decision, under all of them; a decision naming a call that is not
 // parked is rejected. The debugger's breakpoints (§8.3) park their
 // tools on every run this package starts, and steer (§8.4) delivers
@@ -46,8 +49,9 @@
 // from here (D7, PQ7).
 //
 // The rule is default-deny (weft.ParkAllExcept): a run lists the tools
-// that may execute — the vouched-safe ones, the opted-in names, an
-// Output agent's submit_output — and every other call parks, matched
+// that may execute — the vouched-safe ones, an Output agent's
+// submit_output, and under "allow" the opted-in names — and every other
+// call parks, matched
 // by name against each step's own tool set. So a tool that reaches the
 // run only through weft.ToolSource parks like any unannotated tool, and
 // the rule follows a weft.Subagent delegation into the child run: the

@@ -180,12 +180,15 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     defer runtime.Install(runtime.Studio(url, tok) /* or runtime.Local(srv) */,
 //         runtime.Agents(support), runtime.Models(map[string]weft.Model{"glm": m}),
 //         runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000}),
-//         runtime.AllowSideEffects("lookup_order"), runtime.Threads(store))()
+//         runtime.AllowSideEffects("send_email"), runtime.Threads(store))()
 //     // WEFT_ENV=dev (or runtime.Enabled(true)) opens the link; commands ack
 //     // before they run (at-most-once), a never-class tool's call is substituted
 //     // with its recorded result or parked (weft.Replay(weft.ReplaySafe) vouches a
-//     // read), budgets cap each experiment; runs carry weft.playground and never
-//     // touch weft.session.id (ephemeral). Engines live | scripted (the source
+//     // read: it runs in every mode); side_effects substitute (default) | park |
+//     // allow — only allow runs the AllowSideEffects tools for real, and is refused
+//     // unless every tool left on is opted in or ReplaySafe; budgets cap each
+//     // experiment; runs carry weft.playground and never touch weft.session.id
+//     // (ephemeral). Engines live | scripted (the source
 //     // run's recorded turns, zero tokens); thread ephemeral | fork (a new session
 //     // with lineage, the panel keeps chatting in it). Breakpoints and steer act
 //     // on the runs this runtime starts only (D7). Studio side:

@@ -68,11 +68,13 @@ func main() {
 		weft.Instructions("You are Acme's support agent."),
 		weft.MaxSteps(10),
 		weft.TracerProvider(p.TracerProvider()),
+		// A read: vouched safe to re-run, so experiments run it for real
+		// in every side_effects mode — no AllowSideEffects needed.
 		weft.Tool("lookup_order", "Look up an order by ID.", func(ctx context.Context, in struct {
 			OrderID string `json:"order_id"`
 		}) (string, error) {
 			return `{"status":"shipped"}`, nil
-		}),
+		}, weft.Replay(weft.ReplaySafe)),
 		weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct {
 			OrderID string `json:"order_id"`
 		}) (string, error) {
@@ -100,7 +102,6 @@ func main() {
 		runtime.Agents(agent),
 		runtime.Models(map[string]weft.Model{"glm-5.3-flash": alt}),
 		runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000, MaxRunsPerExperiment: 60}),
-		runtime.AllowSideEffects("lookup_order"),
 		runtime.Enabled(true),
 	)
 	defer shutdown()

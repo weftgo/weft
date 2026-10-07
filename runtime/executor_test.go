@@ -87,10 +87,11 @@ func TestRegistryRegistration(t *testing.T) {
 }
 
 // TestAllowedTools pins §6 rule 3's except-list — the only tools a
-// playground run executes unasked: the ones whose code vouched
-// ReplaySafe, the names the runtime opted in (AllowSideEffects, whether
-// or not the agent registers them — a ToolSource may supply one later),
-// and an Output agent's submission. Everything else parks by default
+// playground run executes unasked: in every mode the ones whose code
+// vouched ReplaySafe and an Output agent's submission; under
+// side_effects "allow" also the names the runtime opted in
+// (AllowSideEffects, whether or not the agent registers them — a
+// ToolSource may supply one later). Everything else parks by default
 // (weft.ParkAllExcept), so the list is empty, not absent, when nothing
 // is vouched.
 func TestAllowedTools(t *testing.T) {
@@ -105,19 +106,95 @@ func TestAllowedTools(t *testing.T) {
 	}](), refund)
 
 	reg := newRegistry(&config{agents: []*weft.Agent{agent, bare, typed}})
-	if got := reg.allowedTools("a"); !reflect.DeepEqual(got, []string{"lookup_order"}) {
-		t.Errorf("allowed = %v, want [lookup_order] — the safe tool alone", got)
-	}
-	if got := reg.allowedTools("bare"); got == nil || len(got) != 0 {
-		t.Errorf("allowed (nothing vouched) = %#v, want empty: everything parks", got)
-	}
-	if got := reg.allowedTools("typed"); !reflect.DeepEqual(got, []string{"submit_output"}) {
-		t.Errorf("allowed (Output agent) = %v, want [submit_output] — the run's answer is not a side effect", got)
+	for _, allow := range []bool{false, true} {
+		if got := reg.allowedTools("a", allow); !reflect.DeepEqual(got, []string{"lookup_order"}) {
+			t.Errorf("allowed (allow mode %v) = %v, want [lookup_order] — the safe tool alone", allow, got)
+		}
+		if got := reg.allowedTools("bare", allow); got == nil || len(got) != 0 {
+			t.Errorf("allowed (nothing vouched, allow mode %v) = %#v, want empty: everything parks", allow, got)
+		}
+		if got := reg.allowedTools("typed", allow); !reflect.DeepEqual(got, []string{"submit_output"}) {
+			t.Errorf("allowed (Output agent, allow mode %v) = %v, want [submit_output] — the run's answer is not a side effect", allow, got)
+		}
 	}
 	opted := newRegistry(&config{agents: []*weft.Agent{agent},
 		allow: map[string]bool{"escalate": true, "dynamic_tool": true}})
-	if got := opted.allowedTools("a"); !reflect.DeepEqual(got, []string{"dynamic_tool", "escalate", "lookup_order"}) {
-		t.Errorf("allowed (opted in) = %v, want [dynamic_tool escalate lookup_order]", got)
+	if got := opted.allowedTools("a", false); !reflect.DeepEqual(got, []string{"lookup_order"}) {
+		t.Errorf("allowed (opted in, substitute/park) = %v, want [lookup_order] — an opt-in runs only under allow", got)
+	}
+	if got := opted.allowedTools("a", true); !reflect.DeepEqual(got, []string{"dynamic_tool", "escalate", "lookup_order"}) {
+		t.Errorf("allowed (opted in, allow) = %v, want [dynamic_tool escalate lookup_order]", got)
+	}
+}
+
+// TestSideEffectModes pins WEFT-PLAYGROUND §5.1/§6.3's three modes for
+// an opted-in tool and a ReplaySafe one, through execute: an
+// AllowSideEffects tool runs for real only when the command asks for
+// side_effects "allow" — under "substitute" (the default) a recorded
+// call is answered from the record, under "park" it waits at the
+// boundary, its handler never runs; a ReplaySafe tool runs in all
+// three. Before the fix the opted-in tool ran for real in every mode.
+func TestSideEffectModes(t *testing.T) {
+	var escalated, looked atomic.Int64
+	escalate := weft.Tool("escalate", "Escalate.", func(ctx context.Context, in struct {
+		ID string `json:"id"`
+	}) (string, error) {
+		escalated.Add(1)
+		return "escalated for real", nil
+	})
+	lookup := weft.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct {
+		ID string `json:"id"`
+	}) (string, error) {
+		looked.Add(1)
+		return "shipped", nil
+	}, weft.Replay(weft.ReplaySafe))
+	record := &sourceRun{
+		input: []weft.Message{weft.User("escalate 1")},
+		steps: []weft.Message{
+			{Role: weft.RoleAssistant, Content: []weft.Part{weft.ToolCallPart{ID: "c0", Name: "escalate", Args: []byte(`{"id":"1"}`)}}},
+			{Role: weft.RoleTool, Content: []weft.Part{weft.ToolResultPart{CallID: "c0", Name: "escalate", Content: "escalated (recorded)"}}},
+			weft.Assistant("done"),
+		},
+	}
+	in := "escalate 1"
+	run := func(tool, mode string) (*link, string) {
+		t.Helper()
+		agent := weft.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: tool, Args: `{"id":"1"}`}),
+			wefttest.Say("done"),
+		), weft.Name("a"), escalate, lookup)
+		l := newExecLink(map[string]bool{"escalate": true}, agent)
+		cmd := command{CommandID: "cmd_" + mode, Agent: "a", Engine: "live", Thread: "ephemeral",
+			Input: &in, SideEffects: mode, Source: &sourceSpec{RunID: "s_x-t1"}, src: record,
+			Overrides: overrides{ToolsEnabled: []string{tool}}}
+		if reason, ok := l.validate(context.Background(), &command{CommandID: cmd.CommandID, Agent: "a",
+			Engine: "live", Thread: "ephemeral", SideEffects: mode, Input: &in,
+			Overrides: overrides{ToolsEnabled: []string{tool}}}); !ok {
+			t.Fatalf("%s under %q rejected: %s", tool, mode, reason)
+		}
+		status, runID, errText := l.execute(context.Background(), cmd, "pg_"+mode)
+		if status != "succeeded" {
+			t.Fatalf("%s under %q = %s (%s)", tool, mode, status, errText)
+		}
+		return l, runID
+	}
+
+	if l, id := run("escalate", "substitute"); l.parked[id] != nil || escalated.Load() != 0 {
+		t.Errorf("opted-in tool under substitute: parked %v, handler runs %d — want substituted from the record, 0", l.parked[id] != nil, escalated.Load())
+	}
+	if l, id := run("escalate", ""); l.parked[id] != nil || escalated.Load() != 0 {
+		t.Errorf("opted-in tool under the default mode: parked %v, handler runs %d — want substituted, 0", l.parked[id] != nil, escalated.Load())
+	}
+	if l, id := run("escalate", "park"); l.parked[id] == nil || escalated.Load() != 0 {
+		t.Errorf("opted-in tool under park: parked %v, handler runs %d — want parked, 0", l.parked[id] != nil, escalated.Load())
+	}
+	if l, id := run("escalate", "allow"); l.parked[id] != nil || escalated.Load() != 1 {
+		t.Errorf("opted-in tool under allow: parked %v, handler runs %d — want it to run once", l.parked[id] != nil, escalated.Load())
+	}
+	for i, mode := range []string{"substitute", "park", "allow"} {
+		if l, id := run("lookup_order", mode); l.parked[id] != nil || looked.Load() != int64(i+1) {
+			t.Errorf("ReplaySafe tool under %q: parked %v, handler runs %d — want it to run (%d)", mode, l.parked[id] != nil, looked.Load(), i+1)
+		}
 	}
 }
 
@@ -134,7 +211,7 @@ func newExecLink(allow map[string]bool, agents ...*weft.Agent) *link {
 // set was built from Agent.Tools, the source's tool was not in it, and
 // its handler ran for real in a playground command. In substitute mode
 // a call the source recorded is answered from the record; a miss stays
-// parked. The opted-in name runs.
+// parked. The opted-in name runs under side_effects "allow".
 func TestToolSourceToolsPark(t *testing.T) {
 	var wired atomic.Int64
 	wire := weft.Tool("wire_money", "Wire money.", func(ctx context.Context, in struct {
@@ -195,9 +272,10 @@ func TestToolSourceToolsPark(t *testing.T) {
 		t.Errorf("an unrecorded ToolSource call: parked %v, handler runs %d — want parked, 0", l.parked[id] != nil, wired.Load())
 	}
 
-	// Opted in by name, the source's tool runs.
+	// Opted in by name, the source's tool runs under side_effects
+	// "allow" (in the other modes an opt-in is a side effect like any).
 	optedIn := newExecLink(map[string]bool{"wire_money": true}, agent)
-	cmd := command{CommandID: "opted", Agent: "a", Input: &in}
+	cmd := command{CommandID: "opted", Agent: "a", Input: &in, SideEffects: "allow"}
 	if status, _, errText := optedIn.execute(context.Background(), cmd, "pg_opted"); status != "succeeded" || wired.Load() != 1 {
 		t.Errorf("AllowSideEffects(wire_money): %s (%s), handler runs %d — want it to run once", status, errText, wired.Load())
 	}
@@ -277,8 +355,9 @@ func TestOutputSubmissionDoesNotPark(t *testing.T) {
 // executor's own option list: a command that enables a tool the runtime
 // has not opted in runs with that tool parked — the scripted model's
 // call lands on RunResult.Pending and the tool's handler never
-// executes — while the opted-in tool, enabled the same way, runs for
-// real (a turned-off tool parks nothing: it is not offered at all).
+// executes — while the opted-in tool, enabled the same way under
+// side_effects "allow", runs for real (a turned-off tool parks nothing:
+// it is not offered at all).
 func TestExecuteParksEnabledNonOptInTool(t *testing.T) {
 	var refundRan, lookupRan atomic.Bool
 	lookup := weft.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) {
@@ -300,10 +379,10 @@ func TestExecuteParksEnabledNonOptInTool(t *testing.T) {
 	l := newLink(&config{agents: []*weft.Agent{agent}},
 		newRegistry(&config{agents: []*weft.Agent{agent}, allow: map[string]bool{"lookup_order": true}}), "", "")
 
-	run := func(id, input, tool string) *weft.RunResult {
+	run := func(id, input, tool, mode string) *weft.RunResult {
 		t.Helper()
 		in := input
-		cmd := command{CommandID: id, Agent: "a", Engine: "live", Thread: "ephemeral",
+		cmd := command{CommandID: id, Agent: "a", Engine: "live", Thread: "ephemeral", SideEffects: mode,
 			Input: &in, Overrides: overrides{ToolsEnabled: []string{tool}}}
 		res, err := agent.Generate(context.Background(), l.runOptions(cmd, "pg_"+id)...)
 		if err != nil {
@@ -313,17 +392,18 @@ func TestExecuteParksEnabledNonOptInTool(t *testing.T) {
 	}
 
 	// The enabled non-opted-in tool parks: the call is Pending.
-	if res := run("park", "refund it", "refund"); len(res.Pending) != 1 || res.Pending[0].Name != "refund" {
+	if res := run("park", "refund it", "refund", ""); len(res.Pending) != 1 || res.Pending[0].Name != "refund" {
 		t.Errorf("pending = %+v, want the parked refund call", res.Pending)
 	}
 
-	// The opted-in tool enabled the same way parks nothing (run 2's
-	// model turn is the Say the parked run never reached) and runs for
-	// real on the next one (run 3 calls lookup_order).
-	if res := run("live", "where is it?", "lookup_order"); len(res.Pending) != 0 {
+	// The opted-in tool enabled the same way under "allow" parks
+	// nothing (run 2's model turn is the Say the parked run never
+	// reached) and runs for real on the next one (run 3 calls
+	// lookup_order).
+	if res := run("live", "where is it?", "lookup_order", "allow"); len(res.Pending) != 0 {
 		t.Errorf("pending = %+v, want none for the opted-in tool", res.Pending)
 	}
-	if res := run("live", "and again", "lookup_order"); res.Text() == "" || !lookupRan.Load() {
+	if res := run("live", "and again", "lookup_order", "allow"); res.Text() == "" || !lookupRan.Load() {
 		t.Errorf("the opted-in run: text = %q, lookup ran = %v — want the handler to have run", res.Text(), lookupRan.Load())
 	}
 	if refundRan.Load() {
@@ -520,7 +600,8 @@ func TestBudgetCountsSubagentUsageOnce(t *testing.T) {
 	l := newLink(cfg, newRegistry(cfg), "", "")
 
 	in := "go"
-	cmd := command{CommandID: "cmd_sub", Agent: "a", Input: &in, ExperimentID: "exp_sub"}
+	// "allow": the opted-in delegation runs for real only there.
+	cmd := command{CommandID: "cmd_sub", Agent: "a", Input: &in, ExperimentID: "exp_sub", SideEffects: "allow"}
 	if reason, ok := l.validate(context.Background(), &cmd); !ok {
 		t.Fatalf("validate: %s", reason)
 	}

@@ -68,10 +68,10 @@ func newPlaygroundServer(t *testing.T, token string) *playgroundTestServer {
 			Name: "acme-support",
 			Manifest: `{"weft":1,"agents":[{"name":"acme-support","model":{"provider":"wefttest","name":"script"},` +
 				`"policy":{"parallelism":4,"max_steps":10,"max_model_retries":3},` +
-				`"tools":[{"name":"lookup_order"},{"name":"refund"}]}]}`,
+				`"tools":[{"name":"lookup_order"},{"name":"refund"},{"name":"track_parcel"}]}]}`,
 			Models:      []string{"glm-5.3-flash"},
 			Limits:      linkruntime.AgentLimits{MaxSteps: 10, Parallelism: 4},
-			SideEffects: map[string]string{"lookup_order": "never", "refund": "never"},
+			SideEffects: map[string]string{"lookup_order": "never", "refund": "never", "track_parcel": "safe"},
 			Allow:       []string{"lookup_order"},
 		}},
 	}
@@ -334,6 +334,15 @@ func TestPlaygroundRunValidation(t *testing.T) {
 	allowOK = strings.Replace(allowOK, `"side_effects": "substitute"`, `"side_effects": "allow"`, 1)
 	if code, body := pt.post(t, allowOK); code != http.StatusAccepted {
 		t.Errorf("allow over the opted-in tool = %d (%s)", code, body)
+	}
+	// A ReplaySafe tool is no side effect: it runs in every mode, so it
+	// may stay on under allow although it is not opted in (the
+	// over-strict check refused it).
+	allowSafe := mutate(`"tools_enabled": ["lookup_order", "refund"]`, `"tools_enabled": ["lookup_order", "track_parcel"]`,
+		`"experiment_id": "exp_1"`, `"experiment_id": "exp_safe"`)
+	allowSafe = strings.Replace(allowSafe, `"side_effects": "substitute"`, `"side_effects": "allow"`, 1)
+	if code, body := pt.post(t, allowSafe); code != http.StatusAccepted {
+		t.Errorf("allow over an opted-in and a ReplaySafe tool = %d (%s), want 202", code, body)
 	}
 }
 

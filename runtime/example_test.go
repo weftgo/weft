@@ -22,8 +22,8 @@ func ExampleInstall() {
 		runtime.Agents(support),
 		runtime.Models(map[string]weft.Model{"glm-5.3-flash": glmFlash}),
 		runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000, MaxRunsPerExperiment: 60}),
-		runtime.AllowSideEffects("lookup_order"),
-		runtime.Enabled(false), // dev-only by default: WEFT_ENV=dev
+		runtime.AllowSideEffects("send_email"), // for real only under side_effects "allow"
+		runtime.Enabled(false),                 // dev-only by default: WEFT_ENV=dev
 	)
 	defer shutdown()
 	fmt.Println("link:", "closed")

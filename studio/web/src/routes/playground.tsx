@@ -868,7 +868,7 @@ function Playground({ caps }: { caps: string[] }) {
                   />
                   {t.name}
                   {(t.side_effects === "never" || !t.side_effects) && (
-                    <span title="side-effect tool (ReplayPolicy never): substitute or park, never re-fire silently">
+                    <span title="side-effect tool (ReplayPolicy never): substitute or park, never re-fire silently — only side effects: allow runs it for real, and only if the app opted it in">
                       ⚠
                     </span>
                   )}
@@ -927,9 +927,18 @@ function Playground({ caps }: { caps: string[] }) {
                 value={variant.sideEffects}
                 onChange={(e) => patch({ sideEffects: e.target.value as SideEffects })}
               >
-                <option value="substitute">substitute</option>
-                <option value="park">park</option>
-                <option value="allow">allow</option>
+                <option
+                  value="substitute"
+                  title="a side-effect call the source recorded is answered from the record; any other call parks"
+                >
+                  substitute — recorded results, else park
+                </option>
+                <option value="park" title="every side-effect call parks; nothing is answered from the record">
+                  park — every side-effect call waits
+                </option>
+                <option value="allow" title="refused unless every tool left on is opted in or ReplaySafe">
+                  allow — runs the tools this app opted in (AllowSideEffects) for real
+                </option>
               </select>
             </label>
             {/* §5.4's thread mode (review fix 4a): fork continues the

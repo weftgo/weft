@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -60,12 +61,14 @@ func (m *forkSteerModel) Stream(ctx context.Context, req weft.ModelRequest) iter
 	}
 }
 
-// TestForkSteerNeverRunsUnparked pins §6 rule 3 on a fork's steer: a
-// steer into a fork's turn that thread defers (it met the approval
-// boundary) runs later as a follow-up turn of the fork — and thread
-// gives that follow-up none of the turn's run options, so the
-// playground's park-everything rule is gone and the never tool's
-// handler runs for real. The runtime must not steer a fork.
+// TestForkSteerNeverRunsUnparked pins §6 rule 3 on a fork's steer
+// (§8.4): a steer into a fork's turn that thread defers (it met the
+// approval boundary) runs later as a follow-up turn of the fork — and
+// that follow-up runs under the fork turn's run options, so the
+// playground's park rule binds it: the never tool parks, its handler
+// never runs. (Before thread's steer follow-up fix the follow-up ran
+// without the turn's options and the handler fired; the runtime refused
+// fork steering until it landed.)
 func TestForkSteerNeverRunsUnparked(t *testing.T) {
 	var refunds atomic.Int64
 	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
@@ -132,28 +135,112 @@ func TestForkSteerNeverRunsUnparked(t *testing.T) {
 	if pr == nil {
 		t.Fatalf("the fork's turn %s did not park", parkedRun)
 	}
-	if status, _, errText := l.resume(ctx, pr, "pg_resume"); status != "succeeded" {
+	if status, _, errText := l.resume(ctx, pr, "pg_resume", ""); status != "succeeded" {
 		t.Fatalf("resume = %s %s", status, errText)
 	}
-	// Any follow-up the steer left behind runs now; give it room.
-	deadline = time.Now().Add(time.Second)
-	for time.Now().Before(deadline) && refunds.Load() == 0 {
+	// The steer's follow-up turn runs now: it calls refund, which must
+	// park in the fork like the turn's own call did.
+	sessID := parkedRun[:strings.LastIndex(parkedRun, "-t")]
+	l.mu.Lock()
+	fork := l.forks[sessID]
+	l.mu.Unlock()
+	if fork == nil {
+		t.Fatalf("the runtime does not hold fork %s", sessID)
+	}
+	var followUp []thread.Request
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && len(followUp) == 0 && refunds.Load() == 0 {
+		for _, r := range fork.Pending() {
+			if r.RunID != parkedRun && r.Tool == "refund" {
+				followUp = append(followUp, r)
+			}
+		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	if n := refunds.Load(); n != 0 {
 		t.Fatalf("refund's handler ran %d time(s) for real: the steer's follow-up turn ran without the playground's park rule", n)
 	}
-	// The steer was not silently half-delivered either: nothing of it
-	// is in the fork.
-	fork, err := thread.Open(ctx, store, strings.TrimSuffix(parkedRun, parkedRun[strings.LastIndex(parkedRun, "-t"):]), agent)
+	if len(followUp) == 0 {
+		t.Fatalf("the steer's follow-up never parked its refund call (pending %+v)", fork.Pending())
+	}
+	// The steer was delivered — as the fork's next user message.
+	var steered bool
+	for _, m := range fork.Context() {
+		if m.Role == weft.RoleUser && strings.Contains(m.Text(), "refund the other one") {
+			steered = true
+		}
+	}
+	if !steered {
+		t.Error("the steer never reached the fork's conversation")
+	}
+}
+
+// TestForkSteerIdleSessionKeepsTheParkRule pins the one path thread
+// does not cover by inheritance: a steer that reaches the fork's
+// session after its turn ended — nothing in flight, no boundary open —
+// is a plain turn under the Send's own options. The runtime passes the
+// fork turn's options on that Send, so the never tool still parks.
+func TestForkSteerIdleSessionKeepsTheParkRule(t *testing.T) {
+	var refunds atomic.Int64
+	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+		refunds.Add(1)
+		return "refunded for real", nil
+	})
+	model := &forkSteerModel{gate: make(chan struct{})}
+	close(model.gate)
+	agent := weft.New(model, weft.Name("acme-support"), refund)
+	store := thread.Memory()
+	ctx := context.Background()
+	app, err := thread.Create(ctx, store, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range fork.Context() {
-		if strings.Contains(m.Text(), "refund the other one") {
-			t.Errorf("the refused steer reached the fork: %q", m.Text())
-		}
+	turn, err := app.Send(ctx, weft.User("hello app"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	if _, err := turn.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config{agents: []*weft.Agent{agent}, threads: store}
+	l := newLink(cfg, newRegistry(cfg), "http://127.0.0.1:1", "")
+	defer l.stop()
+	// A fork whose turn answers without a tool call: "hello app" again.
+	input := "hello app"
+	cmd := command{CommandID: "cmd_fi", Agent: "acme-support", Thread: "fork", Engine: "live",
+		Source: &sourceSpec{RunID: turn.RunID()}, Input: &input}
+	if reason, ok := l.validate(ctx, &cmd); !ok {
+		t.Fatal(reason)
+	}
+	status, runID, errText := l.execute(ctx, cmd, "pg_unused")
+	if status != "succeeded" {
+		t.Fatalf("fork = %s %s", status, errText)
+	}
+	sessID := runID[:strings.LastIndex(runID, "-t")]
+	l.mu.Lock()
+	fork := l.forks[sessID]
+	forkCmd := l.forkCmd[sessID]
+	l.mu.Unlock()
+	opts := l.overrideOptions(forkCmd)
+	l.mu.Lock()
+	// The registry entry as awaitTurn holds it while a turn is in
+	// flight — re-armed here so the steer finds an idle session.
+	l.steerSess[runID] = forkSteer{sess: fork, opts: opts}
+	l.mu.Unlock()
+	l.steer(steerFrame{RunID: runID, Message: "refund it"})
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && len(fork.Pending()) == 0 && refunds.Load() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if n := refunds.Load(); n != 0 {
+		t.Fatalf("refund ran %d time(s) for real: the idle-session steer ran without the park rule", n)
+	}
+	if p := fork.Pending(); len(p) != 1 || p[0].Tool != "refund" {
+		t.Fatalf("pending = %+v, want the steer turn's refund parked", p)
+	}
+	l.mu.Lock()
+	delete(l.steerSess, runID)
+	l.mu.Unlock()
 }
 
 // TestForkDoesNotInheritTheAppsGrants pins §6 rule 3 against ADR
@@ -795,5 +882,59 @@ func TestForgottenForksGiveUpTheirSessions(t *testing.T) {
 	stopped = true
 	if err := writable(second); err != nil {
 		t.Errorf("the fork %s the stopped link held is still held: %v", second, err)
+	}
+}
+
+// TestForkTurnAckedInFlight pins how Studio learns a fork turn's run
+// id while it runs (so the panel can follow and steer it): the
+// dispatch's accepted ack names no run (the session mints the id at
+// Send), and awaitTurn acks accepted again naming the turn, before it
+// finishes.
+func TestForkTurnAckedInFlight(t *testing.T) {
+	var mu sync.Mutex
+	var acks []ack
+	studio := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var a ack
+		if r.URL.Path == "/api/runtime/acks" && json.NewDecoder(r.Body).Decode(&a) == nil {
+			mu.Lock()
+			acks = append(acks, a)
+			mu.Unlock()
+		}
+	}))
+	defer studio.Close()
+
+	model := &forkSteerModel{gate: make(chan struct{})}
+	close(model.gate)
+	agent := weft.New(model, weft.Name("acme-support"))
+	store := thread.Memory()
+	ctx := context.Background()
+	app, err := thread.Create(ctx, store, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := app.Send(ctx, weft.User("hello app"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := turn.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config{agents: []*weft.Agent{agent}, threads: store}
+	l := newLink(cfg, newRegistry(cfg), studio.URL, "")
+	defer l.stop()
+	input := "hello app"
+	cmd := command{CommandID: "cmd_fa", Agent: "acme-support", Thread: "fork", Engine: "live",
+		Source: &sourceSpec{RunID: turn.RunID()}, Input: &input}
+	if reason, ok := l.validate(ctx, &cmd); !ok {
+		t.Fatal(reason)
+	}
+	status, runID, errText := l.execute(ctx, cmd, "pg_unused")
+	if status != "succeeded" {
+		t.Fatalf("fork = %s %s", status, errText)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(acks) != 1 || acks[0] != (ack{CommandID: "cmd_fa", State: "accepted", RunID: runID}) {
+		t.Errorf("acks during the fork turn = %+v, want one accepted naming %s", acks, runID)
 	}
 }

@@ -88,8 +88,9 @@ export interface ExperimentResult {
    * it resumes once, when every pending call has one. */
   decided: Record<string, string>
   /** The command's thread mode: a fork runs as its session's next turn
-   * — its accepted row names no run (the finished one names the turn),
-   * and steer (ephemeral runs only, 409 otherwise) is not offered. */
+   * — its first accepted row names no run; the runtime acks again
+   * naming the turn once it is in flight (then it can be steered), and
+   * the finished row names it too. */
   thread: ExperimentDraft["thread"]
   /** The live lane's bookkeeping (state.ts's Lane): the highest
    * durable position folded, the frames held while pages are read, a

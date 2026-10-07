@@ -672,48 +672,57 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     })
   }, 20_000)
 
-  // A fork's accepted ack names no run (weft/runtime link.go): the
-  // thread turn's id arrives with the finished ack. The card must not
-  // read runs//… meanwhile, must not offer steer (debugger.go answers
-  // a fork-mode turn 409), and must pick the id up at the finish.
-  it("follows a fork command whose run id arrives only at the finish", async () => {
-    let finished = false
+  // A fork's first accepted ack names no run (weft/runtime link.go):
+  // the runtime acks again naming the thread turn once it is in flight.
+  // The card must not read runs//… meanwhile, offers no steer until a
+  // run is named, then steers the fork's turn like any run, and keeps
+  // the id through the finish.
+  it("follows a fork command whose run id arrives with a later ack, and steers it", async () => {
+    let phase = 0
     studio
       .on("POST playground/runs", command("cmd_f", "queued"))
       .on("GET playground/commands/cmd_f", () =>
-        finished
+        phase === 2
           ? { ...command("cmd_f", "finished", "s_9-t3"), status: "succeeded" }
-          : command("cmd_f", "accepted")
+          : phase === 1
+            ? command("cmd_f", "accepted", "s_9-t3")
+            : command("cmd_f", "accepted")
       )
       .on("GET runs/s_9-t3", { ...row({ id: "s_9-t3", session_id: "s_9", turn: 3 }), children: [] })
       .on("GET runs/s_9-t3/events", pagedEvents([]))
       .on("GET runs/s_9-t3/transcript", transcriptOf([]))
+      .on("POST runs/s_9-t3/steer", { steered: true })
     renderApp("/playground?run=r_ok&thread=fork&input=and%20then%3F")
     const runButton = await screen.findByRole("button", { name: "Run A" })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
     const card = () => document.querySelector<HTMLElement>('[data-variant="A"]')!
-    await waitFor(() => expect(within(card()).getByText(/turn id arrives when it finishes/)).toBeTruthy())
-    expect(within(card()).getByText(/no steer: a fork-mode turn/)).toBeTruthy()
+    await waitFor(() => expect(within(card()).getByText(/turn id arrives once the turn is in flight/)).toBeTruthy())
     expect(within(card()).queryByLabelText("steer message")).toBeNull()
-    finished = true
+    expect(within(card()).queryByText(/no steer/)).toBeNull()
+    phase = 1
+    const input = await within(card()).findByLabelText("steer message", undefined, { timeout: 5_000 })
+    fireEvent.change(input, { target: { value: "be brief" } })
+    fireEvent.click(within(card()).getByRole("button", { name: "steer" }))
+    await waitFor(() => expect(studio.calls("POST runs/s_9-t3/steer")).toHaveLength(1))
+    expect(studio.calls("POST runs/s_9-t3/steer")[0].body).toEqual({ message: "be brief" })
+    phase = 2
     await waitFor(() => expect(within(card()).getByRole("link", { name: "s_9-t3" })).toBeTruthy())
     // Never a read with an empty run id.
     expect(studio.requests.some((r) => /^runs\/(\/|$)/.test(r.path))).toBe(false)
   })
 
-  // An ephemeral run that the server refuses to steer (a 409 for a
-  // fork-mode turn, a 503 for a gone runtime) shows the server's words.
+  // A run the server refuses to steer (a 503 for a gone runtime, a
+  // 409 or 403 the route may answer) shows the server's words.
   it("shows the server's refusal of a steer", async () => {
-    const refusal =
-      "run pg_1 is a fork-mode turn: steering reaches ephemeral runs only — send the message as the fork's next input instead"
+    const refusal = "runtime rt_1 is not connected"
     studio
       .on("POST playground/runs", command("cmd_1", "queued"))
       .on("GET playground/commands/cmd_1", command("cmd_1", "accepted", "pg_1"))
       .on("GET runs/pg_1", { ...row({ id: "pg_1", playground: true, status: "running", finished: null }), children: [] })
       .on("GET runs/pg_1/events", pagedEvents([], { done: false }))
       .on("GET runs/pg_1/transcript", transcriptOf([]))
-      .on("POST runs/pg_1/steer", apiError(409, "conflict", refusal))
+      .on("POST runs/pg_1/steer", apiError(503, "unavailable", refusal))
     renderApp("/playground?run=r_ok")
     const runButton = await screen.findByRole("button", { name: "Run A" })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))

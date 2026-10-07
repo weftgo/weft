@@ -132,15 +132,6 @@ func (s *Server) serveSteer(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 				return
 			}
 		}
-		// A fork-mode run is the runtime's own thread turn, and the
-		// runtime refuses to steer it: thread would turn a steer it
-		// cannot deliver into a follow-up turn outside the playground's
-		// park rule. Answering steered would tell the user it landed.
-		if rs.ForkRun(runID) {
-			writeError(w, r, http.StatusConflict, "conflict",
-				"run "+runID+" is a fork-mode turn: steering reaches ephemeral runs only — send the message as the fork's next input instead")
-			return
-		}
 		if err := rs.Steer(runtimeID, runID, req.Message); err != nil {
 			switch {
 			case errors.Is(err, linkruntime.ErrUnknownRuntime):

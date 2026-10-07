@@ -423,11 +423,11 @@ type RuntimeServer struct {
 	runs   map[string]string
 	runPub map[string]string
 	// runFork marks the runs a fork-mode command (thread=fork) started —
-	// learned like runs, from the acks that name them (a fork's accepted
-	// ack names none; its finished ack names the thread turn). The
-	// runtime refuses to steer those (a steer it cannot deliver would
-	// become a follow-up turn outside the playground's park rule), so
-	// Studio refuses up front instead of answering steered.
+	// learned like runs, from the acks that name them (a fork's first
+	// accepted ack names none; a second one names the thread turn once
+	// it is in flight, the finished ack names it too). A decision on
+	// such a run is a fork command too (its resume is the session's next
+	// turn).
 	runFork map[string]bool
 	// runSeen is when an ack last named the run: the retention clock
 	// of its runs/runPub entries.
@@ -836,6 +836,13 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 				// forever.
 				rs.armLostLocked(row, rs.FinishDeadline, "accepted while the runtime was disconnected, no finish")
 			}
+		} else if row.state == StateAccepted && row.runID == "" && a.RunID != "" {
+			// A fork's turn: the first accepted ack names no run (its
+			// session mints the id at Send), the runtime acks again once
+			// the turn is in flight, naming it — so the panel can follow
+			// and steer the run before it finishes.
+			row.runID = a.RunID
+			row.updated = rs.now()
 		}
 	case "rejected":
 		if row.state == StateQueued || row.state == StateLost {
@@ -957,14 +964,6 @@ func (rs *RuntimeServer) PublicOf(runID string) (string, bool) {
 	defer rs.mu.Unlock()
 	id, ok := rs.runPub[runID]
 	return id, ok
-}
-
-// ForkRun reports whether runID was started by a fork-mode command
-// (thread=fork, or the resume of one): a run the runtime never steers.
-func (rs *RuntimeServer) ForkRun(runID string) bool {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-	return rs.runFork[runID]
 }
 
 // EnqueueApproval forwards a human decision on one parked call of a

@@ -529,18 +529,24 @@ func (l *link) executeFork(ctx context.Context, cmd command) (status, finalRun, 
 	if err != nil {
 		return fail(err)
 	}
-	return l.awaitTurn(cmd, s, turn)
+	return l.awaitTurn(cmd.CommandID, cmd, s, turn, opts)
 }
 
 // awaitTurn waits a fork's turn out and records its end. The turn is
-// registered while in flight only so a steer for it is recognised and
-// refused (link.steer).
-func (l *link) awaitTurn(cmd command, s *thread.Session, turn *thread.Turn) (status, finalRun, errText string) {
+// registered while in flight, with the run options it was sent with,
+// so a steer for it reaches the fork's session under them (link.steer);
+// and the command ackID (when set) is acked accepted again naming the
+// turn's run id — the dispatch's accepted ack could not (the session
+// mints it at Send), and Studio steers only a run an ack named.
+func (l *link) awaitTurn(ackID string, cmd command, s *thread.Session, turn *thread.Turn, opts []weft.RunOption) (status, finalRun, errText string) {
 	runID := turn.RunID()
 	inFlight := runID // the key the steer registry holds, whatever runID becomes below
 	l.mu.Lock()
-	l.steerSess[inFlight] = s
+	l.steerSess[inFlight] = forkSteer{sess: s, opts: opts}
 	l.mu.Unlock()
+	if ackID != "" {
+		l.postAck(ack{CommandID: ackID, State: "accepted", RunID: inFlight})
+	}
 	defer func() {
 		l.mu.Lock()
 		delete(l.steerSess, inFlight)
@@ -585,7 +591,7 @@ func (l *link) releaseIfUnusedLocked(s *thread.Session) {
 		}
 	}
 	for _, in := range l.steerSess {
-		if in == s {
+		if in.sess == s {
 			return
 		}
 	}
@@ -895,7 +901,10 @@ func (pr *parkedRun) ordered() []approvalDecision {
 // decision finds it. A fork's boundary resumes through its session
 // (thread's Decide — the decisions are durable entries of the fork and
 // the resume is its next turn), never as a run beside it.
-func (l *link) resume(ctx context.Context, pr *parkedRun, runID string) (status, finalRun, errText string) {
+//
+// commandID is the decision command's id: a fork's resumed turn is
+// acked accepted under it once its run id is known (awaitTurn).
+func (l *link) resume(ctx context.Context, pr *parkedRun, runID, commandID string) (status, finalRun, errText string) {
 	decisions := pr.ordered()
 	if pr.sess != nil {
 		ds := make([]thread.Decision, 0, len(decisions))
@@ -920,7 +929,7 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, runID string) (status,
 			slog.Warn("weft/runtime: fork resume failed", "session", pr.sess.ID(), "err", err)
 			return "failed", "", err.Error()
 		}
-		return l.awaitTurn(pr.cmd, pr.sess, turn)
+		return l.awaitTurn(commandID, pr.cmd, pr.sess, turn, l.overrideOptions(pr.cmd))
 	}
 
 	agent, _ := l.reg.agent(pr.cmd.Agent)

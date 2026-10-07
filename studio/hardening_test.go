@@ -1173,14 +1173,16 @@ func TestListCursorsWalkALongTie(t *testing.T) {
 	}
 }
 
-// TestSteerRefusesForkRuns: the runtime refuses to steer a fork-mode
-// run (thread would turn an undeliverable steer into a follow-up turn
-// that runs outside the playground's park rule), but Studio answered
-// 202 {"steered":true} — the user was told the steer landed. The fork's
-// accepted ack names no run id (nothing is mapped for it); its finished
-// ack names the thread turn, which is the run Studio refuses to steer —
-// and so is the turn a decision on it resumes into.
-func TestSteerRefusesForkRuns(t *testing.T) {
+// TestSteerReachesForkRuns: a fork-mode run steers like an ephemeral
+// one (§8.4) — the runtime delivers it as a thread steer under the fork
+// turn's run options, so a follow-up keeps the park rule. The fork's
+// first accepted ack names no run (its session mints the id at Send);
+// the runtime acks accepted again once the turn is in flight, naming
+// it: the command row then carries the run id (the panel follows and
+// steers it before it finishes) and the steer route answers 202. The
+// fork run is still remembered as one (a decision on it is a fork
+// command).
+func TestSteerReachesForkRuns(t *testing.T) {
 	pt := newPlaygroundTestServer(t)
 	// Fork mode needs a runtime registered with threads.
 	reg, _ := pt.rs.Registration("rt_test")
@@ -1195,16 +1197,28 @@ func TestSteerRefusesForkRuns(t *testing.T) {
 		t.Fatalf("fork command = %d %s", code, out)
 	}
 	pt.waitCommand(t, "cmd_fork")
-	pt.ack(t, `{"command_id":"cmd_fork","state":"accepted"}`) // a fork's accepted ack names no run
+	pt.ack(t, `{"command_id":"cmd_fork","state":"accepted"}`) // a fork's first accepted ack names no run
 	if _, ok := pt.rs.RuntimeOf(""); ok {
 		t.Error("an accepted ack without a run id was mapped to a run")
 	}
-	pt.ack(t, `{"command_id":"cmd_fork","state":"finished","run_id":"s_fork-t2","status":"succeeded"}`)
-
-	code, out := pt.authed(t, http.MethodPost, "/api/runs/s_fork-t2/steer", "", `{"message":"hi"}`)
-	if code != http.StatusConflict || !strings.Contains(out, `"code":"conflict"`) || !strings.Contains(out, "fork") {
-		t.Errorf("steer into a fork run = %d %s, want 409 conflict naming fork mode", code, out)
+	if code, out := pt.authed(t, http.MethodPost, "/api/runs/s_fork-t2/steer", "", `{"message":"hi"}`); code == http.StatusAccepted {
+		t.Errorf("steer before any ack named the run = %d %s, want a refusal", code, out)
 	}
+	// The turn is in flight: the runtime names it.
+	pt.ack(t, `{"command_id":"cmd_fork","state":"accepted","run_id":"s_fork-t2"}`)
+	if code, out := pt.get(t, "/api/playground/commands/cmd_fork"); code != http.StatusOK ||
+		!strings.Contains(out, `"state":"accepted"`) || !strings.Contains(out, `"run_id":"s_fork-t2"`) {
+		t.Errorf("command row = %d %s, want accepted naming s_fork-t2", code, out)
+	}
+	if code, out := pt.authed(t, http.MethodPost, "/api/runs/s_fork-t2/steer", "", `{"message":"hi"}`); code != http.StatusAccepted || !strings.Contains(out, `"steered":true`) {
+		t.Errorf("steer into a fork run = %d %s, want 202 steered", code, out)
+	}
+	// A later accepted ack (a retried POST) does not rename the run.
+	pt.ack(t, `{"command_id":"cmd_fork","state":"accepted","run_id":"s_other-t9"}`)
+	if _, out := pt.get(t, "/api/playground/commands/cmd_fork"); !strings.Contains(out, `"run_id":"s_fork-t2"`) {
+		t.Errorf("a repeated accepted ack renamed the run: %s", out)
+	}
+	pt.ack(t, `{"command_id":"cmd_fork","state":"finished","run_id":"s_fork-t2","status":"succeeded"}`)
 	// An ephemeral run still steers.
 	pt.startRun(t, "cmd_eph", "", "pg_eph")
 	if code, out := pt.authed(t, http.MethodPost, "/api/runs/pg_eph/steer", "", `{"message":"hi"}`); code != http.StatusAccepted {

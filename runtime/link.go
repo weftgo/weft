@@ -94,7 +94,7 @@ type link struct {
 	forkOrder   []string                     // forked session ids, oldest first
 	breakpoints map[string]bool              // the debugger's tool set (§8.3): parked on every run
 	steerQ      map[string]chan weft.Message // run id → the in-flight run's steering queue
-	steerSess   map[string]*thread.Session   // fork turns in flight: steered through the session
+	steerSess   map[string]forkSteer         // fork turns in flight: steered through the session
 
 	reconnect    func() time.Duration // backoff; indirected by tests
 	resetBackoff func()
@@ -119,7 +119,7 @@ func newLink(c *config, reg *registry, url, token string) *link {
 		forkCmd:     map[string]command{},
 		breakpoints: map[string]bool{},
 		steerQ:      map[string]chan weft.Message{},
-		steerSess:   map[string]*thread.Session{},
+		steerSess:   map[string]forkSteer{},
 	}
 	l.ctx, l.cancel = context.WithCancel(context.Background())
 	if c.local != nil {
@@ -653,7 +653,7 @@ func (l *link) dispatchDecision(ctx context.Context, d approvalDecision) {
 		return
 	}
 	defer func() { <-l.slots }()
-	status, finalRun, errText := l.resume(ctx, ps, runID)
+	status, finalRun, errText := l.resume(ctx, ps, runID, d.CommandID)
 	if status == "failed" && finalRun == "" {
 		// A fork's Decide refused before its session recorded anything
 		// (resume reports no run): the boundary is still open, so the
@@ -856,15 +856,23 @@ func (l *link) setBreakpoints(tools []string) {
 	slog.Debug("weft/runtime: breakpoints set", "tools", tools)
 }
 
+// forkSteer is a fork turn in flight, as the steer registry holds it:
+// the fork's session and the run options the turn was sent with (the
+// command's shaping, the park rule above all).
+type forkSteer struct {
+	sess *thread.Session
+	opts []weft.RunOption
+}
+
 // steer delivers one user message into a runtime-started run (§8.4):
 // the ephemeral run's steering queue (weft.Steering's source drains it
-// at the loop's two fixed points). A fork's turn is refused (see
-// below). The app's own turns are never steerable from here (PQ7):
-// this link holds no handle to them.
+// at the loop's two fixed points), or a fork turn's session as a
+// thread steer. The app's own turns are never steerable from here
+// (PQ7): this link holds no handle to them.
 func (l *link) steer(st steerFrame) {
 	l.mu.Lock()
 	q := l.steerQ[st.RunID]
-	sess := l.steerSess[st.RunID]
+	fs, isFork := l.steerSess[st.RunID]
 	l.mu.Unlock()
 	switch {
 	case q != nil:
@@ -873,15 +881,20 @@ func (l *link) steer(st steerFrame) {
 		default:
 			slog.Debug("weft/runtime: steer dropped (queue full or run ending)", "run_id", st.RunID)
 		}
-	case sess != nil:
-		// A fork's turn is not steered (§6 rule 3 wins over §8.4): a
-		// steer thread cannot deliver — it met the approval boundary or
-		// a StopWhen end, or the turn just ended — becomes a follow-up
-		// turn of the fork, and thread runs that follow-up without the
-		// turn's run options. The park-everything rule would be gone and
-		// a never tool's handler would run for real.
-		slog.Warn("weft/runtime: steer into a fork refused: a fork's follow-up turn would run without the playground's park rule",
-			"run_id", st.RunID)
+	case isFork:
+		// A thread steer joins the fork's running turn, or — when it
+		// cannot (the approval boundary, a StopWhen end, past the last
+		// drain point) — becomes a follow-up turn that thread runs
+		// under the aimed turn's run options (thread ≥ the steer
+		// follow-up fix), so the park rule still binds it. The turn's
+		// options ride this Send too: a steer that lands as the turn
+		// ends, with nothing in flight and no boundary open, runs as a
+		// plain turn under its own options alone — it must not run
+		// unparked (§6 rule 3).
+		if _, err := fs.sess.Send(context.Background(), weft.User(st.Message),
+			thread.As(thread.Steer), thread.RunOptions(fs.opts...)); err != nil {
+			slog.Debug("weft/runtime: steer into the fork refused", "run_id", st.RunID, "err", err)
+		}
 	default:
 		slog.Debug("weft/runtime: steer for a run not in flight here", "run_id", st.RunID)
 	}

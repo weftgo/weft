@@ -216,8 +216,8 @@ interface Experiment {
    * decision is held, and its command finishes under the still-parked
    * run's id — this is what the card shows as decided. */
   decided?: { runID: string; calls: Record<string, string> }
-  /** The thread mode the command was issued with (fork: no steer, and
-   * no run id until the turn finishes). */
+  /** The thread mode the command was issued with (fork: no run id
+   * until the turn is in flight — the runtime acks again naming it). */
   thread?: ThreadMode
 }
 
@@ -1380,11 +1380,12 @@ function ResultCard({
         {experiment.state === "queued" && !experiment.runID && (
           <p className="text-muted-foreground">waiting for the runtime to ack…</p>
         )}
-        {/* A fork's accepted ack names no run (weft/runtime link.go):
-            the thread turn's id arrives with the finished ack. */}
+        {/* A fork's first accepted ack names no run (weft/runtime
+            link.go): the session mints the thread turn's id at Send, and
+            the runtime acks again naming it once the turn is in flight. */}
         {experiment.state === "accepted" && !experiment.runID && (
           <p className="text-muted-foreground">
-            running — the fork's turn id arrives when it finishes
+            starting — the fork's turn id arrives once the turn is in flight
           </p>
         )}
         {/* The metrics row P3 names: tokens, latency, the tool calls. */}
@@ -1450,17 +1451,7 @@ function ResultCard({
         )}
         {/* Rung 4 (§8.4, review fix 4d): steer the in-flight run — one
             user message delivered mid-flight. */}
-        {/* A fork-mode turn is the runtime's own thread turn: steer
-            reaches ephemeral runs only (debugger.go answers 409). */}
-        {caps.includes("steer") && experiment.state === "accepted" && experiment.thread === "fork" && (
-          <p className="text-faint">
-            no steer: a fork-mode turn is steered by sending the fork's next input
-          </p>
-        )}
-        {caps.includes("steer") &&
-          experiment.state === "accepted" &&
-          experiment.runID &&
-          experiment.thread !== "fork" && (
+        {caps.includes("steer") && experiment.state === "accepted" && experiment.runID && (
           <form
             className="flex items-center gap-2"
             onSubmit={(e) => {

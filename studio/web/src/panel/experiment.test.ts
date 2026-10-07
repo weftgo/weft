@@ -198,9 +198,8 @@ describe("the result pane follows the command to its run", () => {
     await settle(200) // an accepted row with no run id
     expect(text(el, ".weft-xres")).toContain("accepted")
     expect($(el, ".weft-xres .weft-warn")).toBeNull() // no error for an empty run id
-    // Steer reaches ephemeral runs only: not offered, and the pane says why.
+    // No run to steer yet: steer waits for an ack naming the turn.
     expect($(el, "[data-weft-k=steer]")).toBeNull()
-    expect(text(el, ".weft-xres")).toContain("send the message as the fork's next input")
     await settle(1_600) // the poll reaches finished
     expect(text(el, ".weft-xres")).toContain("Forked: your order ships tomorrow.")
     const empty = (path: string) => /runs\/(\/|\?|$)/.test(path)
@@ -222,12 +221,46 @@ describe("the result pane follows the command to its run", () => {
     ])
   })
 
-  it("a steer Studio refuses (a fork-mode run: 409) shows Studio's words", async () => {
+  it("a fork's turn named by a second accepted ack is steered like any run", async () => {
+    const routes = baseRoutes()
+    routes["POST playground/runs"] = { command_id: "cmd_fs", state: "queued" }
+    // runtime/link.go: the first accepted ack names no run; once the
+    // turn is in flight the runtime acks again naming <session>-tN.
+    let polls = 0
+    routes["playground/commands/cmd_fs"] = () =>
+      ++polls < 2 ? command("cmd_fs", "accepted") : command("cmd_fs", "accepted", "s_02-t2")
+    routes["runs/s_02-t2"] = { ...pg("s_02-t2", { status: "running", finished: null }), children: [] }
+    routes["runs/s_02-t2/events?after=0&limit=500"] = page([])
+    routes["runs/s_02-t2/transcript"] = transcript([user("and then?")], [])
+    routes["POST runs/s_02-t2/steer"] = { steered: true }
+    const meta = { ...META, capabilities: [...META.capabilities, "steer"] }
+    const { el, studio } = await openDrawer(routes, meta)
+    const thread = all(el, ".weft-drawer select").find((n) =>
+      Array.from((n as HTMLSelectElement).options).some((o) => o.value === "fork")
+    ) as HTMLSelectElement
+    thread.value = "fork"
+    thread.dispatchEvent(new Event("change", { bubbles: true }))
+    await settle()
+    click(button(el, "Run experiment ▶"))
+    await settle(1_600) // the poll reaches the ack naming the turn
+    const steer = $(el, "[data-weft-k=steer]") as HTMLInputElement
+    expect(steer).not.toBeNull()
+    expect(text(el, ".weft-xres")).not.toContain("ephemeral runs only")
+    steer.value = "also check the refund"
+    steer.dispatchEvent(new Event("input", { bubbles: true }))
+    click(button(el, "steer", ".weft-xres"))
+    await settle()
+    const posted = studio.calls.filter((c) => c.method === "POST" && c.path.endsWith("runs/s_02-t2/steer"))
+    expect(posted).toHaveLength(1)
+    expect(posted[0].body).toEqual({ message: "also check the refund" })
+  })
+
+  it("a steer Studio refuses shows Studio's words", async () => {
     const routes = baseRoutes()
     routes["POST playground/runs"] = { command_id: "cmd_1", state: "queued" }
     routes["playground/commands/cmd_1"] = command("cmd_1", "accepted", "pg_x1")
-    const refusal = "run pg_x1 is a fork-mode turn: steering reaches ephemeral runs only — send the message as the fork's next input instead"
-    routes["POST runs/pg_x1/steer"] = apiError(409, "conflict", refusal)
+    const refusal = "runtime rt_1 is not connected"
+    routes["POST runs/pg_x1/steer"] = apiError(503, "unavailable", refusal)
     const meta = { ...META, capabilities: [...META.capabilities, "steer"] }
     const { el } = await openDrawer(routes, meta)
     await run(el)

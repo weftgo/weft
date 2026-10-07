@@ -1085,13 +1085,9 @@ export class WeftDevtools extends HTMLElement {
     if (r.ready && r.folded.pending.length && r.runID && this.canAct(s))
       body.appendChild(this.decisions(r.folded.pending, r.decided))
     // Rung 4 (§8.4): steer the running experiment — one user message
-    // delivered mid-flight into the run the runtime holds.
-    if (hasCapability(s, "steer") && this.canAct(s) && r.state === "accepted" && r.thread === "fork") {
-      // Studio refuses it (409): a fork is its session's next turn.
-      body.appendChild(
-        el("div", "weft-note", "steering reaches ephemeral runs only — send the message as the fork's next input instead")
-      )
-    } else if (hasCapability(s, "steer") && this.canAct(s) && r.state === "accepted" && r.runID) {
+    // delivered mid-flight into the run the runtime holds (an ephemeral
+    // run, or a fork's turn once the runtime's ack names it).
+    if (hasCapability(s, "steer") && this.canAct(s) && r.state === "accepted" && r.runID) {
       const box = el("div", "weft-step")
       box.appendChild(el("div", "weft-step-h", [el("span", undefined, "steer this run")]))
       const b = el("div", "weft-step-b")

@@ -1,9 +1,11 @@
 GO ?= go
 
 # Where the release steps stage their artifacts (step 8's release
-# uploads from here); overridable per invocation:
+# uploads from here); overridable per invocation, a relative path
+# resolving from this directory:
 #   make studio-panel-asset RELEASE_DIR=/tmp/rel
-RELEASE_DIR ?= dist-release
+# The default is ignored by studio/web/.gitignore.
+RELEASE_DIR ?= studio/web/dist-release
 
 # The workspace is the monorepo layout: every adapter is its own module
 # (ADR 0005), so build/test/vet/lint loop over the modules `go list -m`
@@ -11,7 +13,7 @@ RELEASE_DIR ?= dist-release
 # SDKs are required only by the adapter modules.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-thread apidiff-selftest offline fuzz fuzz-thread studio-build studio-check studio-panel-asset
+.PHONY: build test vet fmt lint tidy live tools apidiff apidiff-thread apidiff-all apidiff-selftest offline fuzz fuzz-thread studio-build studio-check studio-panel-asset
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -51,6 +53,16 @@ apidiff: tools
 # skips with a note.
 apidiff-thread: tools
 	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh "" thread
+
+# Every module go.work lists, each vs its own last tag and under its
+# own policy (scripts/apidiff.sh's header: root, thread, thread/sqlite
+# and the adapters are enforced; obsdb, obsdb/clickhouse, otel, runtime
+# and studio are reported; commands and examples skip). A module added
+# to go.work without a policy fails here. CI runs this.
+#   APIDIFF_STRICT=1 make apidiff-all   # release check: every module
+#                                       # builds from published tags
+apidiff-all: tools
+	PATH="$$(go env GOPATH)/bin:$$PATH" scripts/apidiff.sh "" all
 
 # Exercises the gates' own failure modes — a broken tree must fail
 # them, never read green.
@@ -97,13 +109,14 @@ studio-build:
 # The devtools panel as a release asset (WEFT-DEVTOOLS §5.1): non-Go
 # backends serve this file themselves (V2).
 studio-panel-asset: studio-build
-	cd studio/web && bun run scripts/panel-asset.ts $(RELEASE_DIR)
+	cd studio/web && bun run scripts/panel-asset.ts $(abspath $(RELEASE_DIR))
 
 # The freshness gate (ADR 0018 §4): rebuild the web app and prove the
 # committed dist matches, fits the 600 KiB gzip budget (§7), and that
 # its own checks pass. CI runs this on every push.
 studio-check: studio-build
 	git diff --exit-code -- studio/dist || { echo "studio/dist is stale: run 'make studio-build' and commit"; exit 1; }
+	test -z "$$(git status --porcelain -- studio/dist)" || { git status --short -- studio/dist; echo "studio/dist has files the commit does not: run 'make studio-build' and commit"; exit 1; }
 	total=0; for f in $$(find studio/dist -type f); do \
 	  sz=$$(gzip -c $$f | wc -c); total=$$((total+sz)); done; \
 	kib=$$((total / 1024)); echo "studio dist: $$kib KiB gzipped (budget 600)"; \

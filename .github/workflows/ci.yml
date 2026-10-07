@@ -17,11 +17,14 @@ jobs:
         # minimum). See README "Development".
         go-version: ["1.26.x", "stable"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go-version }}
           check-latest: true
+          cache-dependency-path: |
+            **/go.sum
+            go.work.sum
       # One module per adapter (ADR 0005): loop over the workspace the
       # same way `make test` does. The live suite is never in CI — no
       # keys; it is a release-time manual step.
@@ -44,38 +47,47 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
           check-latest: true
+          cache-dependency-path: |
+            **/go.sum
+            go.work.sum
       # golangci-lint per module, all sharing the root .golangci.yml.
       # Pinned so lint results do not drift with HEAD (staticcheck's
       # rule set changes between minor versions).
       - name: install golangci-lint
         run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b "$(go env GOPATH)/bin" v2.13.2
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.13.2/install.sh | sh -s -- -b "$(go env GOPATH)/bin" v2.13.2
       - name: lint (every module)
         run: |
           for m in $(go list -m -f '{{.Dir}}'); do
             (cd "$m" && golangci-lint run --config "$GITHUB_WORKSPACE/.golangci.yml")
           done
 
-  # The selvedge (TODO §1.7): the root module's public API is compared
-  # against the last root tag and any incompatible change fails the
-  # build unless it is acknowledged in .apidiff-allow (pre-1.0 only).
-  # Adapters are separate modules and get their own gate when they tag.
+  # The selvedge (TODO §1.7): every module go.work lists is compared
+  # against its own last tag under the policy scripts/apidiff.sh
+  # records for it — root, thread, thread/sqlite and the adapters fail
+  # on an incompatible change unless it is acknowledged in the module's
+  # .apidiff-allow (pre-1.0 only); obsdb, obsdb/clickhouse, otel,
+  # runtime and studio report theirs without failing (pre-freeze);
+  # commands and examples skip. A module without a policy fails.
   apidiff:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # tags are needed to find the base
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
           check-latest: true
-      # Pinned, like golangci-lint below, so gate results do not drift
+          cache-dependency-path: |
+            **/go.sum
+            go.work.sum
+      # Pinned, like golangci-lint in the lint job, so gate results do not drift
       # with HEAD.
       - name: install apidiff
         run: go install golang.org/x/exp/cmd/apidiff@v0.0.0-20260908205506-85c1c2202aba
@@ -83,16 +95,16 @@ jobs:
       # non-compiling tree, an incompatible rename) before trusting it.
       - name: apidiff self-test (the gate fails closed)
         run: scripts/apidiff-selftest.sh
-      - name: apidiff (root module vs last tag)
-        run: scripts/apidiff.sh
-      - name: apidiff (thread module vs last thread tag)
-        run: scripts/apidiff.sh "" thread
+      - name: apidiff (every workspace module vs its last tag)
+        run: scripts/apidiff.sh "" all
 
   # The gated ClickHouse suite (obsdb/clickhouse's README "CI job
   # (service container)" block): the conformance table and the
   # collector-shape insert test need a server; each test creates and
   # drops its own database. The same DSN also un-gates studio/cmd's
-  # hosted-backend test.
+  # hosted-backend test. The job waits for the server's health check
+  # (a real query on the native port), and a gated test that skips
+  # fails it — a DSN the tests cannot read must not turn the job green.
   clickhouse:
     runs-on: ubuntu-latest
     services:
@@ -102,22 +114,38 @@ jobs:
           CLICKHOUSE_PASSWORD: weft
         ports:
           - 9000:9000
-        ulimits:
-          nofile: 262144:262144
+        options: >-
+          --ulimit nofile=262144:262144
+          --health-cmd "clickhouse-client --password weft --query 'SELECT 1'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       WEFT_CLICKHOUSE_DSN: clickhouse://default:weft@127.0.0.1:9000/default
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
           check-latest: true
+          cache-dependency-path: |
+            **/go.sum
+            go.work.sum
       - name: test (obsdb/clickhouse, gated suite)
+        working-directory: obsdb/clickhouse
         run: |
-          cd obsdb/clickhouse && go test -race ./...
+          set -o pipefail
+          go test -race -count=1 -v ./... | tee "$RUNNER_TEMP/clickhouse.log"
+          if grep -E '^\s*--- SKIP' "$RUNNER_TEMP/clickhouse.log"; then
+            echo "gated tests skipped: WEFT_CLICKHOUSE_DSN did not reach them" >&2
+            exit 1
+          fi
       - name: test (studio/cmd, gated --db clickhouse:// test)
+        working-directory: studio/cmd
         run: |
-          cd studio/cmd && go test -race -run TestNewServerClickhouse ./...
+          set -o pipefail
+          go test -race -count=1 -v -run '^TestNewServerClickhouse$' ./... | tee "$RUNNER_TEMP/studio-cmd.log"
+          grep -q -- '--- PASS: TestNewServerClickhouse' "$RUNNER_TEMP/studio-cmd.log"
 
   # The offline gate (ADR 0013's kill-switch clause): the whole
   # workspace stays green under WEFT_MODEL_REQUESTS=deny — suites that
@@ -125,11 +153,14 @@ jobs:
   offline:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
           check-latest: true
+          cache-dependency-path: |
+            **/go.sum
+            go.work.sum
       - name: test (every module, WEFT_MODEL_REQUESTS=deny)
         run: |
           for m in $(go list -m -f '{{.Dir}}'); do
@@ -144,18 +175,21 @@ jobs:
   fuzz:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
           check-latest: true
+          cache-dependency-path: |
+            **/go.sum
+            go.work.sum
       - name: fuzz (root module, 10s per target)
         run: make fuzz
       - name: fuzz (thread module, 10s per target)
         run: make fuzz-thread
       - name: upload crashers
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-crashers
           path: |
@@ -170,7 +204,7 @@ jobs:
   studio:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14

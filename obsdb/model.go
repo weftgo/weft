@@ -157,6 +157,12 @@ func DeriveRecord(r Record) Weft {
 		w.Pos = int64(attrInt(r.Attrs, attrPromptIdx))
 	case has(r.Attrs, attrToolsIdx):
 		w.Pos = int64(attrInt(r.Attrs, attrToolsIdx))
+	case w.Record == "messages" && w.Reason != "":
+		// A compaction view without its index (ADR 0028 §8): only a
+		// malformed producer gets here. -1 on both backends, as for
+		// ADR 0028's kinds — never position 0, where it would collide
+		// with the input record; Compactions reports it as an error.
+		w.Pos = -1
 	case w.Record == RecordCompaction:
 		// thread's session marker has no counter (ADR 0028 §8): its
 		// position is derived from its hash, so a retried batch lands on

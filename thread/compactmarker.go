@@ -84,8 +84,13 @@ func (s *Session) seeRun(rctx context.Context, runID string) {
 }
 
 // lastRunIDLocked is the id of the last run that produced the leaf's
-// context: the newest message or turn entry on the path carrying one.
-// "" when none does. Callers hold s.mu.
+// context: the run of the newest turn entry on the path. A message
+// entry's run counts only once its turn entry follows it — which is
+// then the newer entry — so a message entry whose run has no turn
+// entry yet (the prompt of a turn about to run: the pre-run threshold
+// trigger fires after the prompt is appended; the prompt of the
+// attempt that overflowed) never names the run. "" when no run
+// produced any of the context. Callers hold s.mu.
 func (s *Session) lastRunIDLocked() string {
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
@@ -93,10 +98,6 @@ func (s *Session) lastRunIDLocked() string {
 	}
 	for i := len(path) - 1; i >= 0; i-- {
 		switch e := path[i].(type) {
-		case MessageEntry:
-			if e.RunID != "" {
-				return e.RunID
-			}
 		case TurnEntry:
 			if e.RunID != "" {
 				return e.RunID

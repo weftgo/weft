@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -595,13 +594,17 @@ func (r *recorder) recordView(ctx context.Context, step int, transcript, sent []
 // and the messages a request carried: the half-open range [from, to)
 // of transcript ordinals the request replaced, and the request's
 // messages in its place. ok is false when the two are equal. Equality
-// is the wire bytes', decided cheaply: two messages that are
-// reflect.DeepEqual encode identically (the encoding is deterministic),
-// so only a pair that differs structurally is encoded — at most the
+// is the wire bytes', decided cheaply: two messages that are equal
+// field for field (structEqual) encode identically (the encoding is
+// deterministic), so only a pair that differs structurally is encoded — at most the
 // two pairs where the prefix and the suffix walks stop, plus any pair
 // that differs only in a way the wire erases (a nil versus an empty
 // slice). A PrepareStep that changed nothing costs one structural walk
-// and no encoding. A message that does not encode (only invalid
+// and no encoding, and no allocation. Every step compares the whole
+// transcript: a prefix proven equal at an earlier step proves nothing
+// about this step's request, since each PrepareStep call may rewrite
+// any message (a no-op at steps 0–2, then a trim of message 1 at step
+// 3, TestRequestRecordsRefCompactedView). A message that does not encode (only invalid
 // tool-call arguments do) compares by the quoted encoding the records
 // use.
 func compactionRange(transcript, sent []Message) (from, to int, body []Message, ok bool) {
@@ -622,10 +625,54 @@ func compactionRange(transcript, sent []Message) (from, to int, body []Message, 
 
 // sameMessage is §8's message equality: byte-equal wire JSON.
 func sameMessage(a, b Message) bool {
-	if reflect.DeepEqual(a, b) {
+	if structEqual(a, b) {
 		return true
 	}
 	return bytes.Equal(wireMessage(a), wireMessage(b))
+}
+
+// structEqual reports whether two messages are field-for-field equal
+// over the sealed part set — which implies equal wire JSON, the
+// encoding being deterministic. It allocates nothing (reflect.DeepEqual
+// allocates its visited map on every call, and the comparison runs over
+// the whole transcript each recorded step under a PrepareStep). False
+// is not a verdict: sameMessage then compares the encodings.
+func structEqual(a, b Message) bool {
+	if a.Role != b.Role || len(a.Content) != len(b.Content) {
+		return false
+	}
+	for i, pa := range a.Content {
+		switch x := pa.(type) {
+		case TextPart:
+			if y, ok := b.Content[i].(TextPart); !ok || x != y {
+				return false
+			}
+		case ToolResultPart:
+			if y, ok := b.Content[i].(ToolResultPart); !ok || x != y {
+				return false
+			}
+		case ReasoningPart:
+			if y, ok := b.Content[i].(ReasoningPart); !ok || x != y {
+				return false
+			}
+		case ToolCallPart:
+			y, ok := b.Content[i].(ToolCallPart)
+			// nil and empty arguments encode differently ("null" versus
+			// an encoding error): equal only when both or neither are nil.
+			if !ok || x.ID != y.ID || x.Name != y.Name || x.Signature != y.Signature ||
+				(x.Args == nil) != (y.Args == nil) || !bytes.Equal(x.Args, y.Args) {
+				return false
+			}
+		case FilePart:
+			y, ok := b.Content[i].(FilePart)
+			if !ok || x.MediaType != y.MediaType || x.URL != y.URL || !bytes.Equal(x.Data, y.Data) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // wireMessage is a message's wire JSON, or its quoted encoding when a

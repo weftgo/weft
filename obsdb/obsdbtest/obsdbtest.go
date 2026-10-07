@@ -1241,6 +1241,31 @@ func compactions(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Errorf("Compactions of a scope-less view = %+v, %v; want the view, scope run", cs, err)
 		}
 
+		// A view without its index (a malformed producer): stored apart
+		// from the growth records (position -1, never the input's 0),
+		// out of the transcript and the count, and reported by
+		// Compactions as an error on both backends.
+		noIndex := record("k6", "messages", "", 0, msg("user", "s"), map[string]any{
+			"weft.step.index": int64(1), "weft.messages.reason": "compacted",
+			"weft.messages.from_seq": int64(0), "weft.messages.to_seq": int64(1)})
+		delete(noIndex.Attrs, "weft.messages.index")
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+			record("k6", "event", "run_start", 0, `{"type":"run_start","id":"k6"}`, nil),
+			record("k6", "messages", "", 0, msg("user", "u"), map[string]any{"weft.messages.input": true, "weft.step.index": int64(0)}),
+			noIndex,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		if tr, err := db.Transcript(ctx(), "k6"); err != nil || len(tr) != 1 || string(tr[0]) != msg("user", "u") {
+			t.Errorf("k6 Transcript = %s, %v; want the input record alone", tr, err)
+		}
+		if det, err := db.Run(ctx(), "k6"); err != nil || det.MessageCount != 1 {
+			t.Errorf("k6 MessageCount = %d, %v; want 1", det.MessageCount, err)
+		}
+		if _, err := db.Compactions(ctx(), "k6"); err == nil || !strings.Contains(err.Error(), "weft.messages.index") {
+			t.Errorf("Compactions over an index-less view = %v, want an error naming weft.messages.index", err)
+		}
+
 		// A reason this build does not know: readers fail loudly.
 		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
 			record("k4", "event", "run_start", 0, `{"type":"run_start","id":"k4"}`, nil),

@@ -75,6 +75,10 @@ func CompactionOf(kind string, index int64, step int, attrs map[string]any, body
 		default:
 			return Compaction{}, false, fmt.Errorf("obsdb: messages record %d: unknown weft.messages.reason %q", index, reason)
 		}
+		if index < 0 {
+			// Stored at -1 (DeriveRecord): a view no request can name.
+			return Compaction{}, false, fmt.Errorf("obsdb: a messages record with weft.messages.reason %q has no usable weft.messages.index", reason)
+		}
 		c = Compaction{
 			Scope:    attr(attrs, attrCompactionScope),
 			Hash:     attr(attrs, attrCompactionHash),

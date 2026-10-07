@@ -363,16 +363,18 @@ compaction`, EventName `weft.compaction`, emitted by the session through
 the agent's own `LoggerProvider` (`(*core.Agent).LoggerProvider`, so it
 lands wherever the run's records land) **when the compaction lands**,
 under the id of the last run that produced the compacted context — the
-newest message or turn entry on the session's path that names a run.
+run of the newest turn entry on the session's path; a prompt whose run
+has no turn entry yet (the pre-run threshold trigger fires after the
+turn's prompt is appended) produced nothing and never names the run.
 It is in the sink at once (a compaction followed by `Close` is
 reported), and every compaction emits its own; nothing supersedes. It
 is emitted on that run's `invoke_agent` span context and stamped with
 that run's merged metadata (the session identity and the caller's
 `thread.RunOptions` metadata) when this Session drove the run; after a
 reopen, with the session id alone and no span. The overflow re-run's
-compaction is filed under the attempt that overflowed (its prompt is
-the newest entry on the path); the re-run starts on the compacted
-context. A compaction of a context no run produced (entries appended by
+compaction is filed under the turn before it, by the same rule (the
+attempt that overflowed left only its prompt on the path); the re-run
+starts on the compacted context. A compaction of a context no run produced (entries appended by
 hand) is held and emitted under the next run this Session drives, on
 that run's context, when it reports its first batch; a `Close` before
 that drops it with a Debug line. Attributes `weft.run.id`,
@@ -417,8 +419,12 @@ body). ClickHouse reads them from `otel_logs` (the views' range and hash
 and the marker's kind are not `weft_records` columns), narrowed by the
 run's time window from `weft_runs`, selected as SQLite selects (a
 `messages` record naming a reason, or a `compaction` record),
-deduplicated by (kind, index); a view whose index does not parse is an
-error on both backends. A view with a reason the reader does not know
+deduplicated by (kind, index). A view without a usable
+`weft.messages.index` (only a malformed producer writes one) is stored
+at position -1 on both backends, as §10 places an index-less record of
+the request kinds — never at 0, where SQLite's key would collide with
+the input record — stays out of the transcript and the count, and makes
+`Compactions` fail on both backends. A view with a reason the reader does not know
 fails `Compactions`; the transcript readers skip every non-growth
 record.
 

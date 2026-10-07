@@ -72,7 +72,39 @@ func TestSameMessageSkipsEncodingForCopies(t *testing.T) {
 			t.Fatal("a deep copy compared unequal")
 		}
 	})
-	if allocs > 2 {
+	if allocs != 0 {
 		t.Errorf("sameMessage on a copy allocated %.0f times; it encoded", allocs)
+	}
+}
+
+// structEqual implies wire equality, and a nil versus an empty
+// argument (which encode differently) is not structurally equal.
+func TestStructEqualAgreesWithTheWire(t *testing.T) {
+	call := func(args json.RawMessage) Message {
+		return Message{Role: RoleAssistant, Content: []Part{ToolCallPart{ID: "c", Name: "t", Args: args}}}
+	}
+	file := func(data []byte) Message {
+		return Message{Role: RoleUser, Content: []Part{FilePart{MediaType: "image/png", Data: data}}}
+	}
+	for _, c := range []struct {
+		name string
+		a, b Message
+		want bool
+	}{
+		{"same text", User("x"), User("x"), true},
+		{"other text", User("x"), User("y"), false},
+		{"other role", User("x"), Message{Role: RoleAssistant, Content: []Part{TextPart{Text: "x"}}}, false},
+		{"same args", call(json.RawMessage(`{"a":1}`)), call(json.RawMessage(`{"a":1}`)), true},
+		{"other args", call(json.RawMessage(`{"a":1}`)), call(json.RawMessage(`{"a":2}`)), false},
+		{"nil vs empty args", call(nil), call(json.RawMessage{}), false},
+		{"same file", file([]byte{1, 2}), file([]byte{1, 2}), true},
+		{"other part type", User("x"), Message{Role: RoleUser, Content: []Part{ReasoningPart{Text: "x"}}}, false},
+	} {
+		if got := structEqual(c.a, c.b); got != c.want {
+			t.Errorf("%s: structEqual = %v, want %v", c.name, got, c.want)
+		}
+		if structEqual(c.a, c.b) && !sameMessage(c.a, c.b) {
+			t.Errorf("%s: structurally equal but not wire-equal", c.name)
+		}
 	}
 }

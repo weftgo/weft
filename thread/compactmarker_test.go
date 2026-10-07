@@ -221,10 +221,11 @@ func TestCompactionMarkerOverflowReRun(t *testing.T) {
 		t.Fatalf("markers = %d, want 1", len(ms))
 	}
 	// Emitted when the compaction landed, under the run that produced
-	// the compacted context: the failed attempt (-t2), whose prompt is
-	// the newest entry on the path; the re-run is -t3.
-	if ms[0].attrs["weft.run.id"] != s.ID()+"-t2" || t1.RunID() != s.ID()+"-t3" {
-		t.Errorf("marker run = %q, want the overflowed attempt %s-t2 (re-run %q)", ms[0].attrs["weft.run.id"], s.ID(), t1.RunID())
+	// the compacted context: the first turn's (-t1). The overflowed
+	// attempt (-t2) produced nothing of it — only its prompt is on the
+	// path, with no turn entry yet; the re-run is -t3.
+	if ms[0].attrs["weft.run.id"] != s.ID()+"-t1" || t1.RunID() != s.ID()+"-t3" {
+		t.Errorf("marker run = %q, want the first turn %s-t1 (re-run %q)", ms[0].attrs["weft.run.id"], s.ID(), t1.RunID())
 	}
 	var body markerBody
 	if err := json.Unmarshal([]byte(ms[0].body), &body); err != nil || body.Reason != "overflow" || body.Scope != "session" {
@@ -320,5 +321,86 @@ func TestCompactionMarkerDroppedAtCloseWithoutARun(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "compaction markers dropped at close") {
 		t.Errorf("no Debug line for the dropped marker:\n%s", logs.String())
+	}
+}
+
+// The pre-run threshold trigger (ADR 0020 §2) fires after turn 2's
+// prompt is appended: its marker is filed under turn 1, the run that
+// produced the compacted context — on turn 1's span, with its
+// metadata (weft.turn 1, the caller's pairs) — and emitted before turn
+// 2's run_start. Never under turn 2, which had produced nothing yet.
+func TestCompactionMarkerThresholdNamesTheProducingRun(t *testing.T) {
+	ctx := context.Background()
+	lp := &markerLogs{}
+	st := thread.Memory()
+	// Turn 1 reports 80k input: under the line (100k − 16,384 reserve)
+	// after it, over it once turn 2's ~7.5k-token prompt joins.
+	model := wefttest.Script(
+		wefttest.Say("turn one").WithUsage(core.Usage{InputTokens: 80_000, OutputTokens: 5}),
+		wefttest.Say("the summary"),
+		wefttest.Say("turn two"),
+	)
+	agent := core.New(model, core.LoggerProvider(lp), core.TracerProvider(sdktrace.NewTracerProvider()))
+	s, err := thread.Create(ctx, st, core.New(wefttest.Script()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs(t, ctx, st, s, strings.Repeat("a", 30_000), strings.Repeat("b", 30_000), strings.Repeat("c", 30_000))
+	s = reopenWith(t, ctx, st, s, agent, thread.ContextWindow(100_000))
+	caller := thread.RunOptions(core.Metadata(map[string]string{"tenant": "acme"}))
+	t1, err := s.Send(ctx, core.User("first"), caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.WaitIdle(ctx)
+	if n := hasCompaction(s); n != 0 {
+		t.Fatalf("compactions after turn 1 = %d, want 0 (under the line)", n)
+	}
+	t2, err := s.Send(ctx, core.User(strings.Repeat("d", 30_000)), caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := t2.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	var reason thread.Reason
+	for _, e := range s.Entries() {
+		if c, ok := e.(thread.CompactionEntry); ok {
+			reason = c.Reason
+		}
+	}
+	if reason != thread.ReasonThreshold {
+		t.Fatalf("compaction reason = %q, want threshold before turn 2", reason)
+	}
+	ms := lp.kind("compaction")
+	if len(ms) != 1 {
+		t.Fatalf("markers = %d, want 1", len(ms))
+	}
+	m := ms[0]
+	if m.attrs["weft.run.id"] != t1.RunID() || m.attrs["weft.turn"] != "1" || m.attrs["tenant"] != "acme" {
+		t.Errorf("marker attrs = %v, want under turn 1 (%s) with its metadata", m.attrs, t1.RunID())
+	}
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	var t1Span trace.SpanContext
+	markerAt, t2StartAt := -1, -1
+	for i, r := range lp.recs {
+		switch {
+		case r.attrs["weft.run.id"] == t1.RunID() && r.attrs["weft.event.type"] == "run_start":
+			t1Span = r.span
+		case r.attrs["weft.run.id"] == t2.RunID() && r.attrs["weft.event.type"] == "run_start":
+			t2StartAt = i
+		case r.attrs["weft.record"] == "compaction":
+			markerAt = i
+		}
+	}
+	if !t1Span.IsValid() || m.span.SpanID() != t1Span.SpanID() {
+		t.Errorf("marker span = %v, want turn 1's invoke_agent span %v", m.span, t1Span)
+	}
+	if markerAt < 0 || t2StartAt < 0 || markerAt > t2StartAt {
+		t.Errorf("marker at %d, turn 2's run_start at %d: want the marker first", markerAt, t2StartAt)
 	}
 }

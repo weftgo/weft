@@ -43,10 +43,10 @@ github.com/shopspring/decimal v1.4.0 h1:bxl37RwXBklmTi0C79JfXCEBD1cqqHt0bbgBAGFp
 github.com/shopspring/decimal v1.4.0/go.mod h1:gawqmDU56v4yIKSwfBSFip1HdCCXN8/+DMd9qYNcwME=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
-github.com/weftgo/weft v0.6.0 h1:aSldInzChNIdIk4iVnUzaqNqEP+0062/pOnZM6fkkMA=
-github.com/weftgo/weft v0.6.0/go.mod h1:137JkU7mIxN6mCLnzQDq4vXOTwN45fdkM/QEztfv520=
-github.com/weftgo/weft/obsdb v0.1.1 h1:heM+Sctt752wzQ33dtfwWl1RMil3MKLkBnsEzQrxVzM=
-github.com/weftgo/weft/obsdb v0.1.1/go.mod h1:UZoHGyJ0LNBeD4rPtuhxVGXcDA+fxOo3gn94Aod3wCs=
+github.com/weftgo/weft v0.8.0 h1:FmoUGhtPUzP9F6Qg3ePCi221X+RRDMcHY7FDvgmrKU0=
+github.com/weftgo/weft v0.8.0/go.mod h1:137JkU7mIxN6mCLnzQDq4vXOTwN45fdkM/QEztfv520=
+github.com/weftgo/weft/obsdb v0.2.0 h1:R7if6ozRMNJlPelA6NlIPTrY7BHdqhghDGqb//ehYPM=
+github.com/weftgo/weft/obsdb v0.2.0/go.mod h1:F1virA6QQKJVTv0VJk0FF2SDhUhs3m/BT1muva7ls5w=
 github.com/xyproto/randomstring v1.0.5 h1:YtlWPoRdgMu3NZtP45drfy1GKoojuR7hmRcnhZqKjWU=
 github.com/xyproto/randomstring v1.0.5/go.mod h1:rgmS5DeNXLivK7YprL0pY+lTuhNQW3iGxZ18UQApw/E=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=

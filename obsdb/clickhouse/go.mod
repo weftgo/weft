@@ -6,8 +6,8 @@ go 1.26.0
 // module proxy, no replace — the two-phase rule, ADR 0005).
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
-	github.com/weftgo/weft v0.6.0
-	github.com/weftgo/weft/obsdb v0.1.1
+	github.com/weftgo/weft v0.8.0
+	github.com/weftgo/weft/obsdb v0.2.0
 )
 
 require (

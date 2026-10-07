@@ -64,7 +64,7 @@ func (m *fallbackModel) Unwrap() core.Model { return m.chain[0] }
 func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	return func(yield func(core.ModelEvent, error) bool) {
 		for i, model := range m.chain {
-			yielded, failed := replay(ctx, model, req, yield, i+1)
+			yielded, failed := replay(ctx, model, req, yield)
 			if failed == nil {
 				return
 			}
@@ -77,19 +77,37 @@ func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 	}
 }
 
-// replay streams one model attempt — number index, 1-based — into
-// yield and reports it on the run's record (core.ReportFromContext; a
-// no-op outside a run). It returns whether any event reached the
-// consumer and the stream error, if one ended it. A consumer that stops
-// early is reported as yielded with no error.
-func replay(ctx context.Context, model core.Model, req core.ModelRequest, yield func(core.ModelEvent, error) bool, index int) (bool, error) {
+// replay streams one model attempt into yield and, when model is the
+// provider side of the chain, reports it on the run's record
+// (core.ReportFromContext; a no-op outside a run). A model that is
+// itself a Retry or Fallback layer (directly or under other wrappers)
+// reports its own attempts, so the layer above stays silent: one
+// report per provider request, however Retry and Fallback compose. It
+// returns whether any event reached the consumer and the stream error,
+// if one ended it. A consumer that stops early is reported as yielded
+// with no error.
+func replay(ctx context.Context, model core.Model, req core.ModelRequest, yield func(core.ModelEvent, error) bool) (bool, error) {
+	if reportsItself(model) {
+		return stream(ctx, model, req, yield)
+	}
 	info, start := core.InfoOf(model), time.Now()
 	yielded, failed := stream(ctx, model, req, yield)
 	end := time.Now()
 	ask, _ := RetryAfter(failed, end)
 	core.ReportFromContext(ctx).Attempt(core.AttemptInfo{Model: info.Name, Provider: info.Provider,
-		Index: index, Start: start, End: end, Err: failed, RetryAfter: ask})
+		Start: start, End: end, Err: failed, RetryAfter: ask})
 	return yielded, failed
+}
+
+// reportsItself walks the Unwrap chain for a Retry or Fallback layer.
+func reportsItself(m core.Model) bool {
+	for ; m != nil; m = core.Unwrap(m) {
+		switch m.(type) {
+		case *retryModel, *fallbackModel:
+			return true
+		}
+	}
+	return false
 }
 
 func stream(ctx context.Context, model core.Model, req core.ModelRequest, yield func(core.ModelEvent, error) bool) (yielded bool, failed error) {

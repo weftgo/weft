@@ -94,7 +94,7 @@ func (t *recTracer) Start(ctx context.Context, name string, opts ...trace.SpanSt
 		SpanID:     trace.SpanID(sid),
 		TraceFlags: trace.FlagsSampled,
 	})
-	s := &recSpan{name: name, kind: cfg.SpanKind(), sc: sc, parent: parent, recording: true}
+	s := &recSpan{name: name, kind: cfg.SpanKind(), sc: sc, parent: parent, recording: true, startTS: cfg.Timestamp()}
 	p.spans = append(p.spans, s)
 	p.mu.Unlock()
 	return trace.ContextWithSpan(ctx, s), s
@@ -114,12 +114,17 @@ type recSpan struct {
 	events    []string
 	ended     bool
 	recording bool
+	// startTS and endTS are the explicit timestamps passed with
+	// WithTimestamp, zero when none was.
+	startTS, endTS time.Time
 }
 
-func (s *recSpan) End(...trace.SpanEndOption) {
+func (s *recSpan) End(opts ...trace.SpanEndOption) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ended, s.recording = true, false
+	ec := trace.NewSpanEndConfig(opts...)
+	s.endTS = ec.Timestamp()
 }
 
 func (s *recSpan) SpanContext() trace.SpanContext { return s.sc }

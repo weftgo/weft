@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/mw"
 	"github.com/weftgo/weft/core/wefttest"
 )
 
@@ -4586,6 +4587,9 @@ func reportingMW(next core.Model) core.Model {
 
 type reportingModel struct{ next core.Model }
 
+func (m reportingModel) Info() core.ModelInfo { return core.InfoOf(m.next) }
+func (m reportingModel) Unwrap() core.Model   { return m.next }
+
 func (m reportingModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	return func(yield func(core.ModelEvent, error) bool) {
 		start := time.Now()
@@ -4596,42 +4600,90 @@ func (m reportingModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 			}
 		}
 		r.Raw(core.RawPair{Request: []byte(`{}`), Response: []byte(`{}`), MediaType: "application/json"})
-		r.Attempt(core.AttemptInfo{Model: "m", Provider: "p", Index: 1, Start: start, End: time.Now(),
+		r.Attempt(core.AttemptInfo{Model: "m", Provider: "p", Start: start, End: time.Now(),
 			Err: errors.New("reported, not returned"), RetryAfter: time.Second})
 	}
 }
 
-// The reporting hook (ReportFromContext) is reporting, not a seam: a run
-// whose chain reports attempts — with a tracer recording and the logger
-// at Debug, so every report is written — produces a transcript
-// byte-identical to the same run without the reporting middleware.
+// The reporting hook (ReportFromContext) is reporting, not a seam. The
+// same two-step run is made five ways — no hook; a reporting middleware
+// with every report written (tracer recording, logger at Debug) and
+// with none written (no tracer, logger at Info); real mw.Retry over a
+// script that fails before each step, loud and quiet — and the
+// transcript, the event stream, the stop reason and the usage are
+// identical across all five.
 func TestReportingHookChangesNothingModelVisible(t *testing.T) {
-	run := func(wrap ...core.ModelMiddleware) []byte {
+	type outcome struct {
+		messages, events, usage []byte
+		stop                    core.StopReason
+	}
+	run := func(failFirst, loud bool, wrap ...core.ModelMiddleware) outcome {
 		t.Helper()
-		model := wefttest.Script(
-			wefttest.ToolCalls(wefttest.Call{ID: "c1", Name: "echo", Args: `{"msg":"hi"}`}),
-			wefttest.Say("done"),
-		)
+		var turns []wefttest.Turn
+		if failFirst {
+			turns = append(turns, wefttest.Fail(core.ErrStreamIdle))
+		}
+		turns = append(turns, wefttest.ToolCalls(wefttest.Call{ID: "c1", Name: "echo", Args: `{"msg":"hi"}`}))
+		if failFirst {
+			turns = append(turns, wefttest.Fail(core.ErrStreamIdle))
+		}
+		turns = append(turns, wefttest.Say("done"))
 		echo := core.Tool("echo", "Echo.", func(_ context.Context, in struct {
 			Msg string `json:"msg"`
 		}) (string, error) {
 			return "echo: " + in.Msg, nil
 		})
-		logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}))
-		agt := core.New(model, echo, core.Logger(logger), core.TracerProvider(newRecProvider()), core.WrapModel(wrap...))
-		res, err := agt.Generate(context.Background(), core.RunID("r"), core.Prompt("hello"))
+		opts := []core.Option{echo, core.WrapModel(wrap...)}
+		if loud {
+			opts = append(opts,
+				core.Logger(slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}))),
+				core.TracerProvider(newRecProvider()))
+		} else {
+			opts = append(opts, core.Logger(slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo}))))
+		}
+		r := core.New(wefttest.Script(turns...), opts...).Stream(context.Background(), core.RunID("r"), core.Prompt("hello"))
+		var events []core.Event
+		for ev, err := range r.Events() {
+			if err != nil {
+				t.Fatal(err)
+			}
+			events = append(events, ev)
+		}
+		res, err := r.Wait()
 		if err != nil {
 			t.Fatal(err)
 		}
-		b, err := json.Marshal(res.Messages)
-		if err != nil {
-			t.Fatal(err)
+		var o outcome
+		var merr error
+		if o.messages, merr = json.Marshal(res.Messages); merr != nil {
+			t.Fatal(merr)
 		}
-		return b
+		if o.events, merr = json.Marshal(events); merr != nil {
+			t.Fatal(merr)
+		}
+		if o.usage, merr = json.Marshal(res.Usage); merr != nil {
+			t.Fatal(merr)
+		}
+		o.stop = res.StopReason
+		return o
 	}
-	plain, reported := run(), run(reportingMW)
-	if !bytes.Equal(plain, reported) {
-		t.Errorf("transcript differs with a reporting middleware:\nplain    %s\nreported %s", plain, reported)
+	retry := mw.Retry(mw.BaseDelay(0))
+	base := run(false, false)
+	for name, got := range map[string]outcome{
+		"hook, loud":  run(false, true, reportingMW),
+		"hook, quiet": run(false, false, reportingMW),
+		"retry, loud": run(true, true, retry),
+		"retry quiet": run(true, false, retry),
+	} {
+		if !bytes.Equal(got.messages, base.messages) {
+			t.Errorf("%s: transcript differs:\nbase %s\ngot  %s", name, base.messages, got.messages)
+		}
+		if !bytes.Equal(got.events, base.events) {
+			t.Errorf("%s: events differ:\nbase %s\ngot  %s", name, base.events, got.events)
+		}
+		if !bytes.Equal(got.usage, base.usage) || got.stop != base.stop {
+			t.Errorf("%s: usage/stop = %s/%q, want %s/%q", name, got.usage, got.stop, base.usage, base.stop)
+		}
 	}
 }
 
@@ -4639,7 +4691,7 @@ func TestReportingHookChangesNothingModelVisible(t *testing.T) {
 // context, a nil one, and a tool handler's context (the run's, not the
 // chain's) all discard reports without panicking.
 func TestReportFromContextOutsideAModelCall(t *testing.T) {
-	core.ReportFromContext(context.Background()).Attempt(core.AttemptInfo{Index: 1})
+	core.ReportFromContext(context.Background()).Attempt(core.AttemptInfo{Model: "m"})
 	core.ReportFromContext(nil).Raw(core.RawPair{}) //nolint:staticcheck // a nil ctx is the documented no-op
 	var zero core.Reporter
 	zero.Attempt(core.AttemptInfo{})

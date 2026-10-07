@@ -1107,9 +1107,12 @@ func NewOutputDecoder[Out any]() *OutputDecoder[Out] { return core.NewOutputDeco
 // non-nil input yields an empty non-nil transcript.
 func Repair(msgs []Message) []Message { return core.Repair(msgs) }
 
-// AttemptInfo is one provider attempt inside a model call, as the code
+// AttemptInfo is one provider request inside a model call, as the code
 // that made it saw it: a retry middleware's try, a fallback's model, an
-// adapter's request. Fields the reporter does not know stay zero.
+// adapter's request. Fields the reporter does not know stay zero. The
+// attempt's number is not the caller's to give: the reporter numbers
+// the model call's attempts 1, 2, … in the order they are reported, so
+// numbers stay unique however many layers report.
 type AttemptInfo = core.AttemptInfo
 
 // RawPair is one attempt's wire bodies: the request as sent and the
@@ -1123,18 +1126,21 @@ type RawPair = core.RawPair
 // the run's observer about attempts and wire bodies, which the loop
 // cannot see from outside the chain. It is reporting, not a seam (ADR
 // 0006): no report alters a step, a retry, a tool call or a model
-// choice, a report never returns an error and never blocks, and one
-// the observer cannot write is dropped (to the agent's logger at Debug
-// when it is enabled). The zero Reporter, and the one
-// ReportFromContext returns outside a run's model call, discards every
-// report; a Reporter is safe for concurrent use.
+// choice. A report never returns an error, never blocks and never
+// panics into the caller — a panicking tracer or log handler is
+// contained and counted in Agent.TapPanics, the report dropped. A
+// report made after its model call ended is dropped. The zero
+// Reporter, and the one ReportFromContext returns outside a run's
+// model call, discards every report; a Reporter is safe for concurrent
+// use.
 type Reporter = core.Reporter
 
 // ReportFromContext returns the reporter of the model call whose
 // context ctx is (or derives from): the loop puts one on the context it
 // hands to the model chain, so a ModelMiddleware or a Model adapter
 // reaches it from the ctx of its Stream. Outside a run's model call —
-// a tool handler, a bare Model.Stream, any context the loop did not
+// a tool handler, a bare Model.Stream, a run started on the chain's
+// context (it is masked at run start), any context the loop did not
 // hand the chain — it is a no-op Reporter, never nil, so callers do not
 // check. Using it is optional for adapters (ADR 0013).
 func ReportFromContext(ctx context.Context) Reporter { return core.ReportFromContext(ctx) }

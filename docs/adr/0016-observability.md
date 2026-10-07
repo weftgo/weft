@@ -431,26 +431,41 @@ through one context-carried hook, `weft.ReportFromContext(ctx)
 Reporter`, with `Attempt(AttemptInfo)` and `Raw(RawPair)`. The loop
 puts the reporter on the context it hands the chain (the `chat` span's
 context, one allocation per step); anywhere else — outside a run, a
-tool handler's context — it is the zero, no-op `Reporter`. The core
-still imports nothing above it: `mw` and the adapters call in, the
-core never calls out.
+tool handler's context — it is the zero, no-op `Reporter`. A run
+started on a chain's context (a middleware running a child agent)
+masks the enclosing reporter at run start, so the child's handlers see
+none and its own model calls install their own. The core still imports
+nothing above it: `mw` and the adapters call in, the core never calls
+out.
 
 It is reporting, not a seam (ADR 0006): `Reporter` is a sealed struct,
 not an interface the caller can replace; a report returns nothing,
 never blocks, and changes no step, retry, tool call or model choice
-(`TestReportingHookChangesNothingModelVisible` pins the transcript
-byte-for-byte). An `Attempt` becomes, with a tracer recording, an
-`attempt` span (Client) child of the step's `chat` span — `weft.run.id`,
+(`TestReportingHookChangesNothingModelVisible` pins the transcript,
+the event stream, the stop reason and the usage, through real
+`mw.Retry` too). A panic out of the tracer or the logger during a
+report is contained and counted in `Agent.TapPanics`, the report
+dropped; a report made after its model call returned is dropped. The
+reporter numbers the model call's attempts itself, 1..n in report
+order (atomic, so concurrent reports stay unique) — the caller gives
+no index. An `Attempt` becomes, with a tracer recording, an `attempt`
+span (Client) child of the step's `chat` span — `weft.run.id`,
 `weft.step.index`, `weft.attempt.index`, `gen_ai.provider.name`,
-`gen_ai.request.model`, `weft.attempt.retry_after_ms` (when asked), the
-run's metadata, status `Ok` or `Error` + `error.type` (the chat span's
-classification), start and end at the reported times — and, with the
-logger at Debug, a `model attempt` line (`run`, `step`, `attempt`,
-`provider`, `model`, `dur`, `retry_after`, `err`). `Raw` reaches the
-observer and is dropped there: what the wire bodies become, and under
-which content policy, is the request record's decision, not this
-amendment's. `mw.Retry` and `mw.Fallback` report every attempt through
-them; for the first-party adapters the hook is optional (ADR 0013).
-Cost under the default program (no SDK, Debug off), measured
-2026-10-07 on the machine above: `BenchmarkReportAttempt` 2.4 ns/op
-outside a run and 11.6 ns/op inside a model call, 0 allocs/op both.
+`gen_ai.request.model`, `weft.attempt.retry_after_ms` (when asked),
+the run's metadata, status `Ok` or `Error` + `error.type` (the chat
+span's classification), start and end at the reported times when both
+are given and ordered (otherwise neither) — and, with the logger at
+Debug, a `model attempt` line (`run`, `step`, `attempt`, `provider`,
+`model`, `dur`, `retry_after`, `err`). `Raw` is accepted and
+discarded: what the wire bodies become, and under which content
+policy, is the request record's decision (ADR 0028), not this
+amendment's; until then a Debug `model raw dropped` line carries the
+sizes and media type, never the bytes. `mw.Retry` and `mw.Fallback`
+report one attempt per provider request — the layer next to the real
+model reports, a layer whose inner model is itself a Retry or
+Fallback stays silent — so `Retry(Fallback)` and `Fallback(Retry)`
+both yield exactly one attempt per request. For the first-party
+adapters the hook is optional (ADR 0013). Cost under the default
+program (no SDK, Debug off), measured 2026-10-07 on the machine above:
+`BenchmarkReportAttempt` 2 ns/op outside a run and 16 ns/op inside a
+model call, 0 allocs/op both.

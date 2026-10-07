@@ -138,7 +138,7 @@ func (m *retryModel) Unwrap() core.Model { return m.next }
 func (m *retryModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	return func(yield func(core.ModelEvent, error) bool) {
 		for attempt := 0; ; attempt++ {
-			yielded, failed := replay(ctx, m.next, req, yield, attempt+1)
+			yielded, failed := replay(ctx, m.next, req, yield)
 			if failed == nil {
 				return
 			}

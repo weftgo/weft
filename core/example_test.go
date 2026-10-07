@@ -1104,7 +1104,7 @@ func (m timed) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core
 			}
 		}
 		core.ReportFromContext(ctx).Attempt(core.AttemptInfo{
-			Model: info.Name, Provider: info.Provider, Index: 1,
+			Model: info.Name, Provider: info.Provider,
 			Start: start, End: time.Now(), Err: failed,
 		})
 	}

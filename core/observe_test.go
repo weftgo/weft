@@ -130,8 +130,8 @@ func TestReportAttemptNoopAllocations(t *testing.T) {
 	o := newNoopObserver()
 	mctx, end := o.model(context.Background(), "r", 0, ModelInfo{})
 	defer end(ModelFinish{}, true, 0, nil)
-	ctx := o.withReport(mctx, "r", 0)
-	a := AttemptInfo{Model: "m", Provider: "p", Index: 1, Start: time.Now(), End: time.Now()}
+	ctx := o.withReport(mctx, "r", 0, nil)
+	a := AttemptInfo{Model: "m", Provider: "p", Start: time.Now(), End: time.Now()}
 	if n := testing.AllocsPerRun(100, func() { ReportFromContext(ctx).Attempt(a) }); n != 0 {
 		t.Errorf("Attempt under a stub observer allocs = %.0f, want 0", n)
 	}
@@ -147,8 +147,8 @@ func BenchmarkReportAttempt(b *testing.B) {
 	o := newNoopObserver()
 	mctx, end := o.model(context.Background(), "r", 0, ModelInfo{})
 	defer end(ModelFinish{}, true, 0, nil)
-	inRun := o.withReport(mctx, "r", 0)
-	a := AttemptInfo{Model: "m", Provider: "p", Index: 1, Start: time.Now(), End: time.Now()}
+	inRun := o.withReport(mctx, "r", 0, nil)
+	a := AttemptInfo{Model: "m", Provider: "p", Start: time.Now(), End: time.Now()}
 	for _, c := range []struct {
 		name string
 		ctx  context.Context

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -11,19 +12,21 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// AttemptInfo is one provider attempt inside a model call, as the code
+// AttemptInfo is one provider request inside a model call, as the code
 // that made it saw it: a retry middleware's try, a fallback's model, an
-// adapter's request. Fields the reporter does not know stay zero.
+// adapter's request. Fields the reporter does not know stay zero. The
+// attempt's number is not the caller's to give: the reporter numbers
+// the model call's attempts 1, 2, … in the order they are reported, so
+// numbers stay unique however many layers report.
 type AttemptInfo struct {
 	// Model is the model id the attempt requested (ModelInfo.Name of the
 	// model it called).
 	Model string
 	// Provider is the provider that served it (ModelInfo.Provider).
 	Provider string
-	// Index is the attempt's 1-based number within the model call, as
-	// counted by the reporter.
-	Index int
-	// Start and End bracket the attempt.
+	// Start and End bracket the attempt. Both or neither: with Start
+	// zero, or End before Start, the times are ignored and the record
+	// carries none.
 	Start, End time.Time
 	// Err is the attempt's failure, nil when it succeeded.
 	Err error
@@ -47,11 +50,13 @@ type RawPair struct {
 // the run's observer about attempts and wire bodies, which the loop
 // cannot see from outside the chain. It is reporting, not a seam (ADR
 // 0006): no report alters a step, a retry, a tool call or a model
-// choice, a report never returns an error and never blocks, and one
-// the observer cannot write is dropped (to the agent's logger at Debug
-// when it is enabled). The zero Reporter, and the one
-// ReportFromContext returns outside a run's model call, discards every
-// report; a Reporter is safe for concurrent use.
+// choice. A report never returns an error, never blocks and never
+// panics into the caller — a panicking tracer or log handler is
+// contained and counted in Agent.TapPanics, the report dropped. A
+// report made after its model call ended is dropped. The zero
+// Reporter, and the one ReportFromContext returns outside a run's
+// model call, discards every report; a Reporter is safe for concurrent
+// use.
 type Reporter struct {
 	s *stepReport
 }
@@ -60,7 +65,8 @@ type Reporter struct {
 // context ctx is (or derives from): the loop puts one on the context it
 // hands to the model chain, so a ModelMiddleware or a Model adapter
 // reaches it from the ctx of its Stream. Outside a run's model call —
-// a tool handler, a bare Model.Stream, any context the loop did not
+// a tool handler, a bare Model.Stream, a run started on the chain's
+// context (it is masked at run start), any context the loop did not
 // hand the chain — it is a no-op Reporter, never nil, so callers do not
 // check. Using it is optional for adapters (ADR 0013).
 func ReportFromContext(ctx context.Context) Reporter {
@@ -71,10 +77,11 @@ func ReportFromContext(ctx context.Context) Reporter {
 	return Reporter{s: s}
 }
 
-// Attempt reports one provider attempt of the current model call. With
+// Attempt reports one provider request of the current model call. With
 // a tracer recording, it becomes an "attempt" child span of the step's
-// chat span (provider, model, index, error.type or Ok, the retry-after
-// ask); with the logger at Debug, a "model attempt" line.
+// chat span (provider, model, the reporter's attempt number, error.type
+// or Ok, the retry-after ask); with the logger at Debug, a "model
+// attempt" line.
 func (r Reporter) Attempt(a AttemptInfo) {
 	if r.s == nil {
 		return
@@ -82,9 +89,11 @@ func (r Reporter) Attempt(a AttemptInfo) {
 	r.s.attempt(a)
 }
 
-// Raw reports one attempt's wire bodies. The observer receives them;
-// what is recorded, and under which content policy, is not decided yet
-// — today the bodies are dropped and nothing is written anywhere.
+// Raw reports one attempt's wire bodies. They are accepted and
+// discarded: what is recorded, and under which content policy, is a
+// later ADR's decision (the request record). Until then nothing is
+// written anywhere; with the logger at Debug a "model raw dropped" line
+// names the sizes, never the bytes.
 func (r Reporter) Raw(p RawPair) {
 	if r.s == nil {
 		return
@@ -99,9 +108,12 @@ type reportKey struct{}
 // reporter costs one allocation per step and no extra context layer.
 type stepReport struct {
 	context.Context
-	obs   *observer
-	runID string
-	step  int
+	obs    *observer
+	runID  string
+	step   int
+	panics *atomic.Int64 // the agent's TapPanics counter; nil in observer-only tests
+	n      atomic.Int64  // attempts reported so far: the next number is n+1
+	ended  atomic.Bool   // the model call returned: later reports are dropped
 }
 
 func (s *stepReport) Value(key any) any {
@@ -111,10 +123,46 @@ func (s *stepReport) Value(key any) any {
 	return s.Context.Value(key)
 }
 
+// end closes the reporter: the model call is over, and a report that
+// arrives later (a goroutine the chain left behind) is dropped rather
+// than recorded against a step that has moved on.
+func (s *stepReport) end() { s.ended.Store(true) }
+
+// contain recovers a panic out of the tracer or the logger and counts
+// it, as safeTap does for a tap: a broken observer must not break the
+// run, nor be invisible.
+func (s *stepReport) contain() {
+	if recover() != nil && s.panics != nil {
+		s.panics.Add(1)
+	}
+}
+
 // withReport wraps the model call's context (the chat span's) with its
-// reporter.
-func (o *observer) withReport(ctx context.Context, runID string, step int) context.Context {
-	return &stepReport{Context: ctx, obs: o, runID: runID, step: step}
+// reporter. panics is the agent's TapPanics counter.
+func (o *observer) withReport(ctx context.Context, runID string, step int, panics *atomic.Int64) *stepReport {
+	return &stepReport{Context: ctx, obs: o, runID: runID, step: step, panics: panics}
+}
+
+// reportMask hides an enclosing model call's reporter from a run started
+// on the chain's context (a middleware or handler running a child
+// agent): the child's tool handlers must not report into the parent's
+// step. Its own model calls install their own reporter beneath it.
+type reportMask struct{ context.Context }
+
+func (m reportMask) Value(key any) any {
+	if _, ok := key.(reportKey); ok {
+		return nil
+	}
+	return m.Context.Value(key)
+}
+
+// maskReport applies reportMask only when ctx carries a reporter — the
+// nested case — so an ordinary run pays nothing.
+func maskReport(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(reportKey{}).(*stepReport); ok {
+		return reportMask{ctx}
+	}
+	return ctx
 }
 
 // The attempt span's weft.* attributes (ADR 0016's span table).
@@ -123,20 +171,29 @@ const (
 	attrAttemptRetryAfterMS = attribute.Key("weft.attempt.retry_after_ms")
 	logAttempt              = "attempt"
 	logRetryAfter           = "retry_after"
+	logMediaType            = "media_type"
+	logRequestBytes         = "request_bytes"
+	logResponseBytes        = "response_bytes"
 )
 
 func (s *stepReport) attempt(a AttemptInfo) {
+	if s.ended.Load() {
+		return
+	}
+	defer s.contain()
+	index := s.n.Add(1)
+	timed := !a.Start.IsZero() && !a.End.Before(a.Start)
 	ctx := s.Context
 	if trace.SpanFromContext(ctx).IsRecording() {
 		start := []trace.SpanStartOption{trace.WithSpanKind(trace.SpanKindClient)}
-		if !a.Start.IsZero() {
+		if timed {
 			start = append(start, trace.WithTimestamp(a.Start))
 		}
 		_, span := s.obs.tracer.Start(ctx, "attempt", start...)
 		attrs := []attribute.KeyValue{
 			attrRunID.String(s.runID),
 			attrStepIndex.Int(s.step),
-			attrAttemptIndex.Int(a.Index),
+			attrAttemptIndex.Int64(index),
 		}
 		if a.Provider != "" {
 			attrs = append(attrs, semconv.GenAIProviderNameKey.String(providerName(a.Provider)))
@@ -155,17 +212,17 @@ func (s *stepReport) attempt(a AttemptInfo) {
 		} else {
 			span.SetStatus(codes.Ok, "")
 		}
-		var end []trace.SpanEndOption
-		if !a.End.IsZero() {
-			end = append(end, trace.WithTimestamp(a.End))
+		if timed {
+			span.End(trace.WithTimestamp(a.End))
+		} else {
+			span.End()
 		}
-		span.End(end...)
 	}
 	if l := s.obs.logger(); l.Enabled(ctx, slog.LevelDebug) {
 		attrs := []slog.Attr{
 			slog.String(logRun, s.runID),
 			slog.Int(logStep, s.step),
-			slog.Int(logAttempt, a.Index),
+			slog.Int64(logAttempt, index),
 		}
 		if a.Provider != "" {
 			attrs = append(attrs, slog.String(logProvider, a.Provider))
@@ -173,7 +230,7 @@ func (s *stepReport) attempt(a AttemptInfo) {
 		if a.Model != "" {
 			attrs = append(attrs, slog.String(logModel, a.Model))
 		}
-		if !a.Start.IsZero() && !a.End.IsZero() {
+		if timed {
 			attrs = append(attrs, slog.Duration(logDur, a.End.Sub(a.Start)))
 		}
 		if a.RetryAfter > 0 {
@@ -188,5 +245,18 @@ func (s *stepReport) attempt(a AttemptInfo) {
 
 // raw receives an attempt's wire bodies. Storage is not decided (the
 // request record's ADR will); until then the report is dropped here, on
-// purpose, and nothing is written.
-func (s *stepReport) raw(RawPair) {}
+// purpose, and only its sizes reach a Debug line.
+func (s *stepReport) raw(p RawPair) {
+	if s.ended.Load() {
+		return
+	}
+	defer s.contain()
+	if l := s.obs.logger(); l.Enabled(s.Context, slog.LevelDebug) {
+		l.LogAttrs(s.Context, slog.LevelDebug, "model raw dropped",
+			slog.String(logRun, s.runID),
+			slog.Int(logStep, s.step),
+			slog.String(logMediaType, p.MediaType),
+			slog.Int(logRequestBytes, len(p.Request)),
+			slog.Int(logResponseBytes, len(p.Response)))
+	}
+}

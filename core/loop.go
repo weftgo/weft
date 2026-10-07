@@ -35,6 +35,10 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// one per nesting level, and a Subagent handler refuses a delegation
 	// whose child is already on it (the cycle guard, ADR 0014).
 	ctx = withAncestry(ctx, append(slices.Clone(ancestryOf(ctx)), a))
+	// A run started on a model chain's context (a middleware running a
+	// child agent) does not report into that chain's step: its handlers
+	// see no reporter, its own model calls install theirs.
+	ctx = maskReport(ctx)
 	// The run's metadata is merged and placed before any span starts, so
 	// every span and record of this run carries it and a Subagent's child
 	// run inherits it through the tool call's context (ADR 0024 S1.1).
@@ -396,7 +400,8 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		mctx, endModel := a.obs.model(ctx, cfg.id, step, InfoOf(model))
 		// The chain's reporting path (ReportFromContext): attempts and
 		// wire bodies the chain reports land on this step's record.
-		mctx = a.obs.withReport(mctx, cfg.id, step)
+		rep := a.obs.withReport(mctx, cfg.id, step, &a.tapPanics)
+		mctx = rep
 		// The Model stream contract (see Model) is enforced here, not just
 		// documented: exactly one ModelFinish, nothing after it, and a
 		// panicking implementation becomes a run error instead of crashing
@@ -467,6 +472,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			return nil
 		}
 		streamErr := consume()
+		rep.end()
 		endModel(finish, finished, len(calls), streamErr)
 		if streamErr != nil {
 			return fail(step, streamErr)

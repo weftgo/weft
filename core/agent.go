@@ -881,7 +881,9 @@ func (a *Agent) Logger() *slog.Logger {
 }
 
 // TapPanics reports how many tap invocations have panicked and been
-// contained since construction. A rising counter means an observer is
+// contained since construction — taps, OnMessages and OnRunEnd
+// observers, and reports (ReportFromContext) whose tracer or logger
+// panicked. A rising counter means an observer is
 // broken; runs are unaffected by design.
 func (a *Agent) TapPanics() int64 { return a.tapPanics.Load() }
 

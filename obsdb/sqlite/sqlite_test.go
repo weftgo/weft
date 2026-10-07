@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1246,5 +1247,108 @@ func TestOpenPathWithLeadingDoubleSlash(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "dbl.db")); err != nil {
 		t.Errorf("the database is not at %s: %v", path, err)
+	}
+}
+
+// Migration 0003 (ADR 0028): a fresh file carries the request record's
+// run columns at their "not recorded" defaults, records.step stays, and
+// the three new record kinds land under their own per-run index with
+// their step.
+func TestRequestRecordSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "req.db")
+	db, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	kindRec := func(kind, posKey string, pos, step int64) obsdb.Record {
+		attrs := map[string]any{"weft.record": kind, "weft.run.id": "r1", posKey: pos}
+		if step >= 0 {
+			attrs["weft.step.index"] = step
+		}
+		return obsdb.Record{Time: time.Unix(1790845923, pos).UTC(), EventName: "weft." + kind, Body: `{}`, Attrs: attrs}
+	}
+	batch := obsdb.Batch{Records: append(scriptedRun(),
+		kindRec("prompt", "weft.prompt.index", 0, -1),
+		kindRec("tools", "weft.tools.index", 0, -1),
+		kindRec("request", "weft.request.index", 0, 1),
+		kindRec("request", "weft.request.index", 1, 2),
+	)}
+	if err := db.Write(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := sqlOpen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = raw.Close() }()
+	columns := func(table string) map[string]string {
+		rows, err := raw.Query(`SELECT name, type, "notnull", COALESCE(dflt_value, '') FROM pragma_table_info(?)`, table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		out := map[string]string{}
+		for rows.Next() {
+			var name, typ, dflt string
+			var notNull int
+			if err := rows.Scan(&name, &typ, &notNull, &dflt); err != nil {
+				t.Fatal(err)
+			}
+			out[name] = fmt.Sprintf("%s notnull=%d default=%s", typ, notNull, dflt)
+		}
+		return out
+	}
+	runs, records := columns("runs"), columns("records")
+	for col, want := range map[string]string{
+		"instructions_hash": "TEXT notnull=1 default=''",
+		"catalog_hash":      "TEXT notnull=1 default=''",
+		"request_count":     "INTEGER notnull=1 default=0",
+	} {
+		if runs[col] != want {
+			t.Errorf("runs.%s = %q, want %q", col, runs[col], want)
+		}
+	}
+	if want := "INTEGER notnull=1 default=-1"; records["step"] != want {
+		t.Errorf("records.step = %q, want %q", records["step"], want)
+	}
+
+	var version int
+	if err := raw.QueryRow(`SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 3 {
+		t.Errorf("obsdb_migrations max = %d, want 3 (0003 request record)", version)
+	}
+	var instructions, catalog string
+	var requests int
+	if err := raw.QueryRow(`SELECT instructions_hash, catalog_hash, request_count FROM runs WHERE run_id = 'r1'`).
+		Scan(&instructions, &catalog, &requests); err != nil {
+		t.Fatal(err)
+	}
+	if instructions != "" || catalog != "" || requests != 0 {
+		t.Errorf("run columns = %q, %q, %d; want the defaults until the emission ships", instructions, catalog, requests)
+	}
+	rows, err := raw.Query(`SELECT kind, pos, step FROM records
+		WHERE run_id = 'r1' AND kind IN ('request', 'prompt', 'tools') ORDER BY kind, pos`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var got []string
+	for rows.Next() {
+		var kind string
+		var pos, step int64
+		if err := rows.Scan(&kind, &pos, &step); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%s/%d/%d", kind, pos, step))
+	}
+	if want := "prompt/0/-1 request/0/1 request/1/2 tools/0/-1"; strings.Join(got, " ") != want {
+		t.Errorf("records = %v, want %s", got, want)
 	}
 }

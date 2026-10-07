@@ -27,8 +27,8 @@ func TestMigrationPinsExporterVersion(t *testing.T) {
 	if !strings.Contains(string(body), pinnedExporterVersion) {
 		t.Errorf("migration 0001 does not name the pinned exporter version %s", pinnedExporterVersion)
 	}
-	if highestMigration() != 3 {
-		t.Errorf("highest migration = %d, want 3 (0001 init, 0002 experiments, 0003 status spelling)", highestMigration())
+	if highestMigration() != 4 {
+		t.Errorf("highest migration = %d, want 4 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record)", highestMigration())
 	}
 }
 
@@ -474,6 +474,64 @@ func TestMigration0003RestatesTracesView(t *testing.T) {
 	stmts := splitStatements(string(fix))
 	if len(stmts) != 1 || !strings.HasPrefix(stmts[0], alter) {
 		t.Errorf("0003 must be the one ALTER statement, got %d", len(stmts))
+	}
+}
+
+// Migration 0004 (ADR 0028) is additive: the request record's columns
+// and weft_records_mv restated with the three new kinds, their
+// positions and Step. Pinned offline against 0001's records view, so
+// the restated select cannot drift from the view it replaces in
+// anything but the named changes.
+func TestMigration0004RestatesRecordsView(t *testing.T) {
+	init, err := migrationsFS.ReadFile("migrations/" + migrations[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := migrationsFS.ReadFile("migrations/" + migrations[4])
+	if err != nil {
+		t.Fatal(err)
+	}
+	const create = "CREATE MATERIALIZED VIEW IF NOT EXISTS weft_records_mv TO weft_records AS"
+	const alter = "ALTER TABLE weft_records_mv MODIFY QUERY"
+	_, was, ok := strings.Cut(string(init), create)
+	if !ok {
+		t.Fatal("0001 has no weft_records_mv")
+	}
+	was, _, _ = strings.Cut(was, ";")
+	stmts := splitStatements(string(body))
+	wantPrefixes := []string{
+		"ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS Step Int32 DEFAULT -1",
+		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS InstructionsHash SimpleAggregateFunction(max, String)",
+		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS CatalogHash SimpleAggregateFunction(max, String)",
+		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS RequestCount SimpleAggregateFunction(max, Int64)",
+		alter,
+	}
+	if len(stmts) != len(wantPrefixes) {
+		t.Fatalf("0004 has %d statements, want %d", len(stmts), len(wantPrefixes))
+	}
+	for i, p := range wantPrefixes {
+		if !strings.HasPrefix(stmts[i], p) {
+			t.Errorf("0004 statement %d = %q, want prefix %q", i, stmts[i], p)
+		}
+	}
+	now := strings.TrimPrefix(stmts[4], alter)
+	want := strings.NewReplacer(
+		`    if(LogAttributes['weft.event.pos'] != '', toInt64OrZero(LogAttributes['weft.event.pos']),
+      if(LogAttributes['weft.messages.index'] != '', toInt64OrZero(LogAttributes['weft.messages.index']), -1)) AS Pos,`,
+		`    multiIf(LogAttributes['weft.event.pos'] != '', toInt64OrZero(LogAttributes['weft.event.pos']),
+      LogAttributes['weft.messages.index'] != '', toInt64OrZero(LogAttributes['weft.messages.index']),
+      LogAttributes['weft.request.index'] != '', toInt64OrZero(LogAttributes['weft.request.index']),
+      LogAttributes['weft.prompt.index'] != '', toInt64OrZero(LogAttributes['weft.prompt.index']),
+      LogAttributes['weft.tools.index'] != '', toInt64OrZero(LogAttributes['weft.tools.index']), -1) AS Pos,`,
+		`    LogAttributes['weft.event.type'] AS EventType,
+`,
+		`    LogAttributes['weft.event.type'] AS EventType,
+    if(LogAttributes['weft.step.index'] != '', toInt32OrZero(LogAttributes['weft.step.index']), -1) AS Step,
+`,
+		`IN ('event', 'messages')`, `IN ('event', 'messages', 'request', 'prompt', 'tools')`,
+	).Replace(strings.TrimSpace(was))
+	if strings.TrimSpace(now) != want {
+		t.Errorf("0004's records select is not 0001's with the request kinds and Step added:\n%s\nwant:\n%s", now, want)
 	}
 }
 

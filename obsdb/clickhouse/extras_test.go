@@ -3,6 +3,7 @@ package clickhouse_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -151,13 +152,13 @@ func TestReopenIsANoop(t *testing.T) {
 	if err := conn.QueryRow(ctx(), "SELECT count() FROM obsdb_migrations").Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	// One row per migration: 0001 (init), 0002 (experiments) and 0003
-	// (status spelling) — the same count TestMigrationPinsExporterVersion
+	// One row per migration: 0001 (init), 0002 (experiments), 0003
+	// (status spelling) and 0004 (request record) — the same count TestMigrationPinsExporterVersion
 	// pins as the highest version. (Step 8b review fix 1: this read still
 	// wanted 1 after 0002 landed, failing only on a real server, where
 	// the gated suite first ran.)
-	if versions != 3 {
-		t.Errorf("obsdb_migrations rows after reopen = %d, want 3 (0001, 0002, 0003)", versions)
+	if versions != 4 {
+		t.Errorf("obsdb_migrations rows after reopen = %d, want 4 (0001, 0002, 0003, 0004)", versions)
 	}
 }
 
@@ -475,5 +476,64 @@ func TestExperimentCreatedSurvivesUpdate(t *testing.T) {
 	}
 	if time.Since(gotNew.Created) > time.Minute {
 		t.Errorf("a first save's created = %v, want now", gotNew.Created)
+	}
+}
+
+// Migration 0004 (ADR 0028) on a live server: weft_runs carries the
+// request record's three columns at their "not recorded" defaults, and
+// weft_records_mv keeps request, prompt and tools records under their
+// own per-run index, with weft.step.index in Step.
+func TestRequestRecordSchema(t *testing.T) {
+	db, dsn := openFresh(t)
+	rec := func(kind, posKey string, pos, step int64) obsdb.Record {
+		attrs := map[string]any{"weft.record": kind, "weft.run.id": "q1", posKey: pos}
+		if step >= 0 {
+			attrs["weft.step.index"] = step
+		}
+		return obsdb.Record{
+			Time: time.Unix(0, 1790845923120000000+pos).UTC(), EventName: "weft." + kind,
+			Severity: 9, Body: `{}`, Service: "conf-svc", Attrs: attrs,
+			Resource: map[string]any{"service.name": "conf-svc"},
+		}
+	}
+	if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+		rec("prompt", "weft.prompt.index", 0, -1),
+		rec("tools", "weft.tools.index", 0, -1),
+		rec("request", "weft.request.index", 0, 1),
+		rec("request", "weft.request.index", 1, 2),
+		rec("messages", "weft.messages.index", 2, 1),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	conn := openRaw(t, dsn)
+	defer func() { _ = conn.Close() }()
+	var instructions, catalog string
+	var requests int64
+	if err := conn.QueryRow(ctx(), `SELECT max(InstructionsHash), max(CatalogHash), max(RequestCount)
+		FROM weft_runs WHERE RunId = 'q1'`).Scan(&instructions, &catalog, &requests); err != nil {
+		t.Fatal(err)
+	}
+	if instructions != "" || catalog != "" || requests != 0 {
+		t.Errorf("run columns = %q, %q, %d; want the defaults until the emission ships", instructions, catalog, requests)
+	}
+	rows, err := conn.Query(ctx(), `SELECT Kind, Pos, Step FROM weft_records FINAL
+		WHERE RunId = 'q1' ORDER BY Kind, Pos`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var got []string
+	for rows.Next() {
+		var kind string
+		var pos int64
+		var step int32
+		if err := rows.Scan(&kind, &pos, &step); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%s/%d/%d", kind, pos, step))
+	}
+	want := "messages/2/1 prompt/0/-1 request/0/1 request/1/2 tools/0/-1"
+	if strings.Join(got, " ") != want {
+		t.Errorf("weft_records = %v, want %s", got, want)
 	}
 }

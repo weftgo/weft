@@ -55,7 +55,7 @@ type Weft struct {
 	Agent                            string
 	Record                           string // event | delta | messages | heartbeat | "" (non-weft)
 	EventType                        string
-	Pos                              int64 // event pos, messages index, or delta pos
+	Pos                              int64 // event pos, messages index, delta pos, or request/prompt/tools index
 	Step                             int   // -1 when absent
 	ToolSeq                          int64 // -1 when absent
 	Playground                       bool
@@ -78,6 +78,9 @@ const (
 	attrEventPos     = "weft.event.pos"
 	attrDeltaPos     = "weft.delta.pos"
 	attrMessagesIdx  = "weft.messages.index"
+	attrRequestIdx   = "weft.request.index" // ADR 0028: request, prompt and tools records
+	attrPromptIdx    = "weft.prompt.index"  // are positioned by their own per-run index
+	attrToolsIdx     = "weft.tools.index"
 	attrStepIndex    = "weft.step.index"
 	attrToolSeq      = "weft.tool.seq"
 	attrPlayground   = "weft.playground"
@@ -107,7 +110,8 @@ func DeriveSpan(s Span) Weft {
 
 // DeriveRecord returns the weft identity a log record carries. Pos is
 // the event position for event records, the messages index for
-// transcript records, and the delta position for delta records — the
+// transcript records, the delta position for delta records, and the
+// request, prompt or tools index for those kinds (ADR 0028) — the
 // value the (run, kind, pos) key and the live lane's dedup need. A
 // record with no weft.run.id is non-weft and lands in other_logs.
 func DeriveRecord(r Record) Weft {
@@ -134,6 +138,12 @@ func DeriveRecord(r Record) Weft {
 		w.Pos = int64(attrInt(r.Attrs, attrMessagesIdx))
 	case has(r.Attrs, attrDeltaPos):
 		w.Pos = int64(attrInt(r.Attrs, attrDeltaPos))
+	case has(r.Attrs, attrRequestIdx):
+		w.Pos = int64(attrInt(r.Attrs, attrRequestIdx))
+	case has(r.Attrs, attrPromptIdx):
+		w.Pos = int64(attrInt(r.Attrs, attrPromptIdx))
+	case has(r.Attrs, attrToolsIdx):
+		w.Pos = int64(attrInt(r.Attrs, attrToolsIdx))
 	}
 	return w
 }

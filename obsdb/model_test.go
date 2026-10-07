@@ -78,6 +78,10 @@ func TestDeriveRecordKindAndPosition(t *testing.T) {
 		{"messages", map[string]any{"weft.record": "messages", "weft.messages.index": int64(2), "weft.messages.count": int64(1)}, "messages", 2},
 		{"delta", map[string]any{"weft.record": "delta", "weft.event.type": "text_delta", "weft.delta.pos": int64(41)}, "delta", 41},
 		{"heartbeat", map[string]any{"weft.record": "heartbeat"}, "heartbeat", 0},
+		// ADR 0028's kinds, each on its own per-run index.
+		{"request", map[string]any{"weft.record": "request", "weft.request.index": int64(3), "weft.step.index": int64(2)}, "request", 3},
+		{"prompt", map[string]any{"weft.record": "prompt", "weft.prompt.index": int64(1)}, "prompt", 1},
+		{"tools", map[string]any{"weft.record": "tools", "weft.tools.index": int64(4)}, "tools", 4},
 	} {
 		attrs := map[string]any{}
 		for k, v := range base {

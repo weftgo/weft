@@ -161,6 +161,24 @@ is pre-1.0 and tags per module (ADR 0005).
     bytes/slice/map attributes and renders structured bodies as JSON.
   - `ContentConfig.Redact` godoc states it sees event bodies and deltas
     only — `weft.messages` transcript records are not passed through it.
+- Security: `ContentConfig.Redact` now applies to `weft.messages`
+  transcript records too, part by part with the event path's kinds (text
+  of every role `ContentText`, reasoning `ContentReasoning`, tool-call
+  args `ContentArgs`, tool results `ContentResult`); ids, names, roles,
+  signatures, file parts and record attributes are untouched, and the
+  transcript is still never capped. A batch that cannot be decoded for
+  redaction, or whose `Redact` panics, is dropped and counted — never
+  exported unredacted. A masking redactor previously leaked the whole
+  transcript (Local sink included).
+- An `OTEL_EXPORTER_OTLP_ENDPOINT` written with `http://` is the
+  operator's plaintext opt-in for that environment destination (the
+  docker-compose/sidecar `http://otel-collector:4318` was refused as
+  "needs Insecure()"). Code-configured `OTLP("http://…")` to a
+  non-loopback host still needs `Insecure()`; an http:// `WEFT_STUDIO_URL`
+  to a non-loopback host stays refused (bearer token).
+- `Install` with no destination option falls back to the local sink, with
+  one WARN, when every environment destination fails to build (it
+  recorded nothing); `Start` still returns the error.
 
 ### runtime
 

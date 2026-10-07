@@ -15,7 +15,7 @@
 import { gzipSync } from "node:zlib"
 import { defineConfig } from "vite"
 import type { Plugin } from "vite"
-import { weftVersion } from "./scripts/weft-version"
+import { weftVersion } from "./scripts/weft-version.ts"
 
 /** §5.1's budget: panel.js is ≤ 80 KiB gzip. */
 const PANEL_GZIP_BUDGET = 80 * 1024

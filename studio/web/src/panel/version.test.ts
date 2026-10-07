@@ -2,7 +2,7 @@
 // up to the one it was built against, and a newer Studio says so with
 // exactly the words the spec names.
 import { describe, expect, it } from "vitest"
-import { weftVersion } from "../../scripts/weft-version"
+import { weftVersion } from "../../scripts/weft-version.ts"
 import { compareVersions, panelStudioVersion, studioIsTooNew } from "./version"
 
 describe("compareVersions", () => {

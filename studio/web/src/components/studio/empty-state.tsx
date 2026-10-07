@@ -1,5 +1,6 @@
-// The empty state (plan §4.3): the weft loop mark and the one command
-// that produces a first run — nothing to sign up for (L3).
+// The empty state (plan §4.3): the weft loop mark, the command that
+// starts Studio, and where a first run comes from — nothing to sign up
+// for (L3).
 import { WeftMark } from "@/components/studio/weft-mark"
 import { Kbd } from "@/components/ui/kbd"
 
@@ -10,8 +11,9 @@ export function EmptyState({ command }: { command: string }) {
       <div className="max-w-md space-y-1">
         <p className="font-medium">No runs recorded yet</p>
         <p className="text-sm text-muted-foreground">
-          Studio reads the observability database; the first run is one
-          command away.
+          This command starts Studio; runs appear once an app calls{" "}
+          <span className="font-mono">otel.Install()</span> (setup A in
+          studio/README.md).
         </p>
       </div>
       <div className="codewin mt-2 max-w-lg text-left">

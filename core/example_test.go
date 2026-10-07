@@ -1083,3 +1083,39 @@ func ExampleReplay() {
 	// lookup: safe
 	// refund: never
 }
+
+// timedModel is a ModelMiddleware that reports each call through it as
+// one attempt on the run's record (an "attempt" span under the step's
+// chat span, a "model attempt" Debug line) — the reporting hook mw.Retry
+// and mw.Fallback use. Outside a run the reporter is a no-op; nothing a
+// report does reaches the model, the transcript or the run's outcome.
+func timedModel(next core.Model) core.Model { return timed{next} }
+
+type timed struct{ next core.Model }
+
+func (m timed) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
+		info, start := core.InfoOf(m.next), time.Now()
+		var failed error
+		for ev, err := range m.next.Stream(ctx, req) {
+			failed = err
+			if !yield(ev, err) || err != nil {
+				break
+			}
+		}
+		core.ReportFromContext(ctx).Attempt(core.AttemptInfo{
+			Model: info.Name, Provider: info.Provider, Index: 1,
+			Start: start, End: time.Now(), Err: failed,
+		})
+	}
+}
+
+func ExampleReportFromContext() {
+	agt := core.New(wefttest.Script(wefttest.Say("hello")), core.WrapModel(timedModel))
+	res, err := agt.Generate(context.Background(), core.Prompt("hi"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Text())
+	// Output: hello
+}

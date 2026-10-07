@@ -421,3 +421,36 @@ ADR 0024). The span table above gains the new attribute families (the
 linkage, provenance, metadata and override rows) unchanged in meaning;
 the full contract, including the record attribute families and the
 identity chain, is ADR 0024's.
+
+## Amendment (2026-10-07 — the reporting hook; devtools plan A8)
+
+The loop cannot see inside the model chain: a retry's three tries, a
+fallback's second model and an adapter's wire bodies are one `chat`
+span to it. Code inside the chain now reports into the loop's record
+through one context-carried hook, `weft.ReportFromContext(ctx)
+Reporter`, with `Attempt(AttemptInfo)` and `Raw(RawPair)`. The loop
+puts the reporter on the context it hands the chain (the `chat` span's
+context, one allocation per step); anywhere else — outside a run, a
+tool handler's context — it is the zero, no-op `Reporter`. The core
+still imports nothing above it: `mw` and the adapters call in, the
+core never calls out.
+
+It is reporting, not a seam (ADR 0006): `Reporter` is a sealed struct,
+not an interface the caller can replace; a report returns nothing,
+never blocks, and changes no step, retry, tool call or model choice
+(`TestReportingHookChangesNothingModelVisible` pins the transcript
+byte-for-byte). An `Attempt` becomes, with a tracer recording, an
+`attempt` span (Client) child of the step's `chat` span — `weft.run.id`,
+`weft.step.index`, `weft.attempt.index`, `gen_ai.provider.name`,
+`gen_ai.request.model`, `weft.attempt.retry_after_ms` (when asked), the
+run's metadata, status `Ok` or `Error` + `error.type` (the chat span's
+classification), start and end at the reported times — and, with the
+logger at Debug, a `model attempt` line (`run`, `step`, `attempt`,
+`provider`, `model`, `dur`, `retry_after`, `err`). `Raw` reaches the
+observer and is dropped there: what the wire bodies become, and under
+which content policy, is the request record's decision, not this
+amendment's. `mw.Retry` and `mw.Fallback` report every attempt through
+them; for the first-party adapters the hook is optional (ADR 0013).
+Cost under the default program (no SDK, Debug off), measured
+2026-10-07 on the machine above: `BenchmarkReportAttempt` 2.4 ns/op
+outside a run and 11.6 ns/op inside a model call, 0 allocs/op both.

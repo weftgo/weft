@@ -394,6 +394,9 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// consumed on the span's context, so an adapter's own HTTP spans
 		// parent under chat.
 		mctx, endModel := a.obs.model(ctx, cfg.id, step, InfoOf(model))
+		// The chain's reporting path (ReportFromContext): attempts and
+		// wire bodies the chain reports land on this step's record.
+		mctx = a.obs.withReport(mctx, cfg.id, step)
 		// The Model stream contract (see Model) is enforced here, not just
 		// documented: exactly one ModelFinish, nothing after it, and a
 		// panicking implementation becomes a run error instead of crashing

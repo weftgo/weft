@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -120,3 +121,43 @@ func (h *gateHandler) Handle(context.Context, slog.Record) error {
 }
 func (h *gateHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
 func (h *gateHandler) WithGroup(string) slog.Handler      { return h }
+
+// The reporting hook's cost under a stub observer (no SDK, Debug gate
+// closed) — the default program's configuration: an Attempt report on
+// the model call's context allocates nothing, and neither does one
+// outside a run.
+func TestReportAttemptNoopAllocations(t *testing.T) {
+	o := newNoopObserver()
+	mctx, end := o.model(context.Background(), "r", 0, ModelInfo{})
+	defer end(ModelFinish{}, true, 0, nil)
+	ctx := o.withReport(mctx, "r", 0)
+	a := AttemptInfo{Model: "m", Provider: "p", Index: 1, Start: time.Now(), End: time.Now()}
+	if n := testing.AllocsPerRun(100, func() { ReportFromContext(ctx).Attempt(a) }); n != 0 {
+		t.Errorf("Attempt under a stub observer allocs = %.0f, want 0", n)
+	}
+	if n := testing.AllocsPerRun(100, func() { ReportFromContext(context.Background()).Attempt(a) }); n != 0 {
+		t.Errorf("Attempt outside a run allocs = %.0f, want 0", n)
+	}
+}
+
+// BenchmarkReportAttempt reports what the hook costs a middleware per
+// attempt: outside a run (the no-op reporter), and inside a model call
+// under a stub observer (no SDK registered, logger at Info).
+func BenchmarkReportAttempt(b *testing.B) {
+	o := newNoopObserver()
+	mctx, end := o.model(context.Background(), "r", 0, ModelInfo{})
+	defer end(ModelFinish{}, true, 0, nil)
+	inRun := o.withReport(mctx, "r", 0)
+	a := AttemptInfo{Model: "m", Provider: "p", Index: 1, Start: time.Now(), End: time.Now()}
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+	}{{"outside_run", context.Background()}, {"stub_observer", inRun}} {
+		b.Run(c.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				ReportFromContext(c.ctx).Attempt(a)
+			}
+		})
+	}
+}

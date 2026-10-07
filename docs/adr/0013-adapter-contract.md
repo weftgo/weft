@@ -121,6 +121,11 @@ fixture-only idle case.
   deny and weft's own offline suites run in the very mode the switch
   exists for (`make offline` is that gate, workspace-wide).
   `wefttest` models ignore the switch.
+- **The reporting hook is optional** (since 2026-10-07, ADR 0016's
+  amendment of that date). An adapter may report its attempts and wire
+  bodies through `weft.ReportFromContext(ctx)` (`Attempt`, `Raw`) on
+  the context its `Stream` receives; one that ignores the hook is fully
+  conformant and `wefttest/conformance` does not test for it.
 
 ### Fixtures and live runs
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"log/slog"
 	"os"
@@ -4573,5 +4574,89 @@ func TestAgentLogger(t *testing.T) {
 	}
 	if got := core.New(wefttest.Script(wefttest.Say("ok"))).Logger(); got != slog.Default() {
 		t.Error("Logger() without the option != slog.Default()")
+	}
+}
+
+// reportingMW reports one attempt (and one wire pair) per model call
+// through the reporting hook, and nothing else: the A8 promise is that
+// a report never changes the run.
+func reportingMW(next core.Model) core.Model {
+	return reportingModel{next}
+}
+
+type reportingModel struct{ next core.Model }
+
+func (m reportingModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
+		start := time.Now()
+		r := core.ReportFromContext(ctx)
+		for ev, err := range m.next.Stream(ctx, req) {
+			if !yield(ev, err) {
+				break
+			}
+		}
+		r.Raw(core.RawPair{Request: []byte(`{}`), Response: []byte(`{}`), MediaType: "application/json"})
+		r.Attempt(core.AttemptInfo{Model: "m", Provider: "p", Index: 1, Start: start, End: time.Now(),
+			Err: errors.New("reported, not returned"), RetryAfter: time.Second})
+	}
+}
+
+// The reporting hook (ReportFromContext) is reporting, not a seam: a run
+// whose chain reports attempts — with a tracer recording and the logger
+// at Debug, so every report is written — produces a transcript
+// byte-identical to the same run without the reporting middleware.
+func TestReportingHookChangesNothingModelVisible(t *testing.T) {
+	run := func(wrap ...core.ModelMiddleware) []byte {
+		t.Helper()
+		model := wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{ID: "c1", Name: "echo", Args: `{"msg":"hi"}`}),
+			wefttest.Say("done"),
+		)
+		echo := core.Tool("echo", "Echo.", func(_ context.Context, in struct {
+			Msg string `json:"msg"`
+		}) (string, error) {
+			return "echo: " + in.Msg, nil
+		})
+		logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		agt := core.New(model, echo, core.Logger(logger), core.TracerProvider(newRecProvider()), core.WrapModel(wrap...))
+		res, err := agt.Generate(context.Background(), core.RunID("r"), core.Prompt("hello"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := json.Marshal(res.Messages)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	plain, reported := run(), run(reportingMW)
+	if !bytes.Equal(plain, reported) {
+		t.Errorf("transcript differs with a reporting middleware:\nplain    %s\nreported %s", plain, reported)
+	}
+}
+
+// Outside a run's model call the reporter is a no-op, never nil: a bare
+// context, a nil one, and a tool handler's context (the run's, not the
+// chain's) all discard reports without panicking.
+func TestReportFromContextOutsideAModelCall(t *testing.T) {
+	core.ReportFromContext(context.Background()).Attempt(core.AttemptInfo{Index: 1})
+	core.ReportFromContext(nil).Raw(core.RawPair{}) //nolint:staticcheck // a nil ctx is the documented no-op
+	var zero core.Reporter
+	zero.Attempt(core.AttemptInfo{})
+	zero.Raw(core.RawPair{})
+	if core.ReportFromContext(context.Background()) != zero {
+		t.Error("ReportFromContext outside a run is not the zero Reporter")
+	}
+	var inTool core.Reporter
+	tool := core.Tool("probe", "Probe.", func(ctx context.Context, _ struct{}) (string, error) {
+		inTool = core.ReportFromContext(ctx)
+		return "ok", nil
+	})
+	model := wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "probe", Args: `{}`}), wefttest.Say("done"))
+	if _, err := core.New(model, tool).Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	if inTool != zero {
+		t.Error("a tool handler's context carries the model call's reporter")
 	}
 }

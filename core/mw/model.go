@@ -17,7 +17,9 @@ import (
 // consumed part of the reply, so it surfaces as the run error. Context
 // cancellation and the WEFT_MODEL_REQUESTS kill switch never fall
 // through. A max_tokens finish is a successful stream, not a failure —
-// Fallback does not switch on it. Info reports the primary model.
+// Fallback does not switch on it. Info reports the primary model. Each
+// model tried is reported as one attempt on the run's record
+// (core.ReportFromContext) — reporting only, a no-op outside a run.
 func Fallback(models ...core.Model) core.ModelMiddleware {
 	return FallbackWhen(defaultFallback, models...)
 }
@@ -62,7 +64,7 @@ func (m *fallbackModel) Unwrap() core.Model { return m.chain[0] }
 func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	return func(yield func(core.ModelEvent, error) bool) {
 		for i, model := range m.chain {
-			yielded, failed := replay(ctx, model, req, yield)
+			yielded, failed := replay(ctx, model, req, yield, i+1)
 			if failed == nil {
 				return
 			}
@@ -75,10 +77,22 @@ func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 	}
 }
 
-// replay streams one model attempt into yield. It reports whether any
-// event reached the consumer and the stream error, if one ended it. A
-// consumer that stops early is reported as yielded with no error.
-func replay(ctx context.Context, model core.Model, req core.ModelRequest, yield func(core.ModelEvent, error) bool) (yielded bool, failed error) {
+// replay streams one model attempt — number index, 1-based — into
+// yield and reports it on the run's record (core.ReportFromContext; a
+// no-op outside a run). It returns whether any event reached the
+// consumer and the stream error, if one ended it. A consumer that stops
+// early is reported as yielded with no error.
+func replay(ctx context.Context, model core.Model, req core.ModelRequest, yield func(core.ModelEvent, error) bool, index int) (bool, error) {
+	info, start := core.InfoOf(model), time.Now()
+	yielded, failed := stream(ctx, model, req, yield)
+	end := time.Now()
+	ask, _ := RetryAfter(failed, end)
+	core.ReportFromContext(ctx).Attempt(core.AttemptInfo{Model: info.Name, Provider: info.Provider,
+		Index: index, Start: start, End: end, Err: failed, RetryAfter: ask})
+	return yielded, failed
+}
+
+func stream(ctx context.Context, model core.Model, req core.ModelRequest, yield func(core.ModelEvent, error) bool) (yielded bool, failed error) {
 	for ev, err := range model.Stream(ctx, req) {
 		if err != nil {
 			return yielded, err

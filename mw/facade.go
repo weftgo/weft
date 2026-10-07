@@ -20,7 +20,9 @@ import (
 // consumed part of the reply, so it surfaces as the run error. Context
 // cancellation and the WEFT_MODEL_REQUESTS kill switch never fall
 // through. A max_tokens finish is a successful stream, not a failure —
-// Fallback does not switch on it. Info reports the primary model.
+// Fallback does not switch on it. Info reports the primary model. Each
+// model tried is reported as one attempt on the run's record
+// (core.ReportFromContext) — reporting only, a no-op outside a run.
 func Fallback(models ...weft.Model) weft.ModelMiddleware { return coremw.Fallback(models...) }
 
 // FallbackWhen is Fallback with a predicate: the next model is tried
@@ -96,7 +98,8 @@ func Classifier(fn func(error) bool) RetryOption { return coremw.Classifier(fn) 
 // provider's retry-after inside the adapter's idle timer (the wait for
 // response headers is one gap), so a long ask fails ErrStreamIdle with
 // the 429 discarded — here the same ask is honoured, capped by MaxWait,
-// and visible in Log.
+// and visible in Log. Each try is reported as one attempt on the run's
+// record (core.ReportFromContext) — reporting only, a no-op outside a run.
 func Retry(opts ...RetryOption) weft.ModelMiddleware { return coremw.Retry(opts...) }
 
 // Retryable is Retry's default classifier: true for core.ErrStreamIdle,

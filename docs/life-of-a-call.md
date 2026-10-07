@@ -26,6 +26,9 @@ system = Instructions + PromptSnippets of the (prepared) tools
 ┌─ `chat` span begins (ADR 0016): it wraps the whole chain, so one
 │  span per step measures the chain's outcome; spans an adapter starts
 │  for its own HTTP calls parent under it
+│  — and the chain's context carries the reporter (weft.ReportFromContext):
+│  mw.Retry/mw.Fallback (and any adapter that opts in) report each attempt,
+│  an `attempt` span under `chat`; reporting, not a seam (ADR 0016)
 model middleware chain (WrapModel; first listed = outermost)
   mw.Log ─── observation: request summary, finish, duration
   mw.Retry ─ alternative dispatch: retry a call that failed before any event

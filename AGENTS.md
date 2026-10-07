@@ -91,6 +91,9 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
 // verifies something puts it on ctx before next; handlers read it via a
 // typed accessor (ExampleWrapTools_context). docs/life-of-a-call.md
 // shows where every phase sits — phases are docs, seams are code.
+// Inside the model chain, weft.ReportFromContext(ctx).Attempt(weft.AttemptInfo{…}) / .Raw(…)
+// reports an attempt (an `attempt` span under `chat`) — reporting, not a seam;
+// a no-op outside a run's model call; mw.Retry/mw.Fallback use it, adapters may.
 
 // 3. Run it.
 res, err := agt.Generate(ctx, weft.Prompt("Where is order 1234?"))

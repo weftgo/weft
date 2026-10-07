@@ -104,7 +104,8 @@ func Classifier(fn func(error) bool) RetryOption {
 // provider's retry-after inside the adapter's idle timer (the wait for
 // response headers is one gap), so a long ask fails ErrStreamIdle with
 // the 429 discarded — here the same ask is honoured, capped by MaxWait,
-// and visible in Log.
+// and visible in Log. Each try is reported as one attempt on the run's
+// record (core.ReportFromContext) — reporting only, a no-op outside a run.
 func Retry(opts ...RetryOption) core.ModelMiddleware {
 	cfg := retryConfig{
 		maxRetries: defaultMaxRetries,
@@ -137,7 +138,7 @@ func (m *retryModel) Unwrap() core.Model { return m.next }
 func (m *retryModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	return func(yield func(core.ModelEvent, error) bool) {
 		for attempt := 0; ; attempt++ {
-			yielded, failed := replay(ctx, m.next, req, yield)
+			yielded, failed := replay(ctx, m.next, req, yield, attempt+1)
 			if failed == nil {
 				return
 			}

@@ -445,7 +445,9 @@ never blocks, and changes no step, retry, tool call or model choice
 the event stream, the stop reason and the usage, through real
 `mw.Retry` too). A panic out of the tracer or the logger during a
 report is contained and counted in `Agent.TapPanics`, the report
-dropped; a report made after its model call returned is dropped. The
+dropped; a report made after its model call returned is dropped, best-effort
+(no lock: one racing report from a goroutine the chain left behind may
+still land under the ended chat span). The
 reporter numbers the model call's attempts itself, 1..n in report
 order (atomic, so concurrent reports stay unique) — the caller gives
 no index. An `Attempt` becomes, with a tracer recording, an `attempt`
@@ -461,9 +463,11 @@ discarded: what the wire bodies become, and under which content
 policy, is the request record's decision (ADR 0028), not this
 amendment's; until then a Debug `model raw dropped` line carries the
 sizes and media type, never the bytes. `mw.Retry` and `mw.Fallback`
-report one attempt per provider request — the layer next to the real
-model reports, a layer whose inner model is itself a Retry or
-Fallback stays silent — so `Retry(Fallback)` and `Fallback(Retry)`
+report one attempt per provider request — a layer whose inner model
+carries the duck-typed marker `ReportsAttempts() bool` (true on
+Retry and Fallback, and on any adapter or middleware that reports for
+itself, ADR 0013) stays silent, the Unwrap walk bounded at 64 hops —
+so `Retry(Fallback)` and `Fallback(Retry)`
 both yield exactly one attempt per request. For the first-party
 adapters the hook is optional (ADR 0013). Cost under the default
 program (no SDK, Debug off), measured 2026-10-07 on the machine above:

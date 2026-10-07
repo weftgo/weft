@@ -126,6 +126,13 @@ fixture-only idle case.
   bodies through `weft.ReportFromContext(ctx)` (`Attempt`, `Raw`) on
   the context its `Stream` receives; one that ignores the hook is fully
   conformant and `wefttest/conformance` does not test for it.
+  An adapter or middleware that reports its own attempts implements
+  the optional marker `ReportsAttempts() bool` (returning true) so an
+  outer reporting layer — `mw.Retry`, `mw.Fallback`, which walk the
+  `Unwrap` chain for it, at most 64 hops — stays silent and each
+  provider request is reported once; a layer that unwraps to a
+  reporting model it may bypass (a router) returns false to end the
+  walk. The marker is duck-typed: core exports no type for it.
 
 ### Fixtures and live runs
 

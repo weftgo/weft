@@ -2,9 +2,11 @@ package mw_test
 
 import (
 	"context"
+	"iter"
 	"log/slog"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/mw"
@@ -133,5 +135,81 @@ func TestRetryOutsideARunReportsNowhere(t *testing.T) {
 	}
 	if n == 0 {
 		t.Fatal("no events")
+	}
+}
+
+// selfUnwrap is a wrapper whose Unwrap returns itself — a bug in user
+// middleware the Unwrap walk must survive.
+type selfUnwrap struct{ next core.Model }
+
+func (w *selfUnwrap) Unwrap() core.Model { return w }
+func (w *selfUnwrap) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return w.next.Stream(ctx, req)
+}
+
+// The Unwrap walk is bounded: Retry over a self-unwrapping model
+// finishes (and reports, no marker being found) instead of spinning.
+func TestRetryOverSelfUnwrappingModelReturns(t *testing.T) {
+	h := &attemptLines{}
+	inner := wefttest.Script(wefttest.Say("ok"))
+	agt := core.New(inner, core.Logger(slog.New(h)), core.WrapModel(mw.Retry(),
+		func(next core.Model) core.Model { return &selfUnwrap{next} }))
+	done := make(chan error, 1)
+	go func() {
+		_, err := agt.Generate(context.Background(), core.Prompt("x"))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Generate did not return: the Unwrap walk is unbounded")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.lines) != 1 {
+		t.Errorf("attempt lines = %d, want 1", len(h.lines))
+	}
+}
+
+// selfReporting is a third-party model that reports its own attempts
+// and says so with the ReportsAttempts marker.
+type selfReporting struct{ next core.Model }
+
+func (m selfReporting) ReportsAttempts() bool { return true }
+func (m selfReporting) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return func(yield func(core.ModelEvent, error) bool) {
+		var failed error
+		for ev, err := range m.next.Stream(ctx, req) {
+			failed = err
+			if !yield(ev, err) || err != nil {
+				break
+			}
+		}
+		core.ReportFromContext(ctx).Attempt(core.AttemptInfo{Model: "own", Provider: "thirdparty", Err: failed})
+	}
+}
+
+// Retry over a model carrying the marker stays silent: the model's own
+// reports are the only ones, one per provider request.
+func TestRetryOverSelfReportingModelStaysSilent(t *testing.T) {
+	h := &attemptLines{}
+	inner := wefttest.Script(wefttest.Fail(status(503, nil)), wefttest.Say("ok"))
+	agt := core.New(inner, core.Logger(slog.New(h)), core.WrapModel(mw.Retry(mw.BaseDelay(0)),
+		func(next core.Model) core.Model { return selfReporting{next} }))
+	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.lines) != 2 {
+		t.Fatalf("attempt lines = %v, want 2 (one per provider request)", h.lines)
+	}
+	for i, l := range h.lines {
+		if l["provider"] != "thirdparty" || l["attempt"] != []string{"1", "2"}[i] {
+			t.Errorf("line %d = %v, want the model's own report, attempt %d", i, l, i+1)
+		}
 	}
 }

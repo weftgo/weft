@@ -131,6 +131,10 @@ type retryModel struct {
 
 func (m *retryModel) Info() core.ModelInfo { return core.InfoOf(m.next) }
 
+// ReportsAttempts marks Retry as reporting its own attempts (one per
+// try), so a Fallback around it stays silent.
+func (m *retryModel) ReportsAttempts() bool { return true }
+
 // Unwrap declares the model being retried (the Unwrap convention,
 // beside Info).
 func (m *retryModel) Unwrap() core.Model { return m.next }

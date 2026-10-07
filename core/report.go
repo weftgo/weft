@@ -53,10 +53,20 @@ type RawPair struct {
 // choice. A report never returns an error, never blocks and never
 // panics into the caller — a panicking tracer or log handler is
 // contained and counted in Agent.TapPanics, the report dropped. A
-// report made after its model call ended is dropped. The zero
-// Reporter, and the one ReportFromContext returns outside a run's
+// report made after its model call ended is dropped, best-effort: a
+// goroutine the chain left behind that reports while the call is
+// ending may still land one attempt under the ended chat span. The
+// zero Reporter, and the one ReportFromContext returns outside a run's
 // model call, discards every report; a Reporter is safe for concurrent
 // use.
+//
+// Layers that report must not double-report one provider request. A
+// model or middleware that reports its own attempts says so with an
+// optional method, ReportsAttempts() bool, returning true; a reporting
+// layer above it (mw.Retry, mw.Fallback) walks the Unwrap chain, finds
+// the marker and stays silent. A layer that unwraps to a self-reporting
+// model but may not stream through it (a router) returns false, which
+// ends the walk. The marker is a convention, not a core type (ADR 0013).
 type Reporter struct {
 	s *stepReport
 }

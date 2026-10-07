@@ -5,6 +5,7 @@ import (
 	"errors"
 	"iter"
 	"log/slog"
+	"reflect"
 	"time"
 
 	"github.com/weftgo/weft/core"
@@ -79,10 +80,10 @@ func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 
 // replay streams one model attempt into yield and, when model is the
 // provider side of the chain, reports it on the run's record
-// (core.ReportFromContext; a no-op outside a run). A model that is
-// itself a Retry or Fallback layer (directly or under other wrappers)
-// reports its own attempts, so the layer above stays silent: one
-// report per provider request, however Retry and Fallback compose. It
+// (core.ReportFromContext; a no-op outside a run). A model that
+// reports its own attempts (the ReportsAttempts marker, see
+// reportsItself) is not reported again: one report per provider
+// request, however Retry, Fallback and reporting adapters compose. It
 // returns whether any event reached the consumer and the stream error,
 // if one ended it. A consumer that stops early is reported as yielded
 // with no error.
@@ -99,16 +100,40 @@ func replay(ctx context.Context, model core.Model, req core.ModelRequest, yield 
 	return yielded, failed
 }
 
-// reportsItself walks the Unwrap chain for a Retry or Fallback layer.
+// maxUnwrap bounds reportsItself's walk: a chain deeper than this is
+// treated as not self-reporting rather than walked further.
+const maxUnwrap = 64
+
+// reportsItself walks the Unwrap chain (core.Unwrap) for the optional
+// marker interface{ ReportsAttempts() bool } — what an adapter or
+// middleware that reports its own attempts implements (ADR 0013). The
+// first layer carrying the marker decides: true, the layer reports and
+// replay stays silent; false, it does not (a router that may bypass
+// the layers it unwraps to stops the walk this way). No marker on any
+// layer: replay reports. The walk is bounded — at most maxUnwrap hops,
+// and it stops when Unwrap returns the same value — so a
+// self-unwrapping wrapper cannot hang the run.
 func reportsItself(m core.Model) bool {
-	for ; m != nil; m = core.Unwrap(m) {
-		switch m.(type) {
-		case *retryModel, *fallbackModel:
-			return true
+	for range maxUnwrap {
+		if m == nil {
+			return false
 		}
+		if r, ok := m.(interface{ ReportsAttempts() bool }); ok {
+			return r.ReportsAttempts()
+		}
+		next := core.Unwrap(m)
+		if next != nil && reflect.TypeOf(next) == reflect.TypeOf(m) && reflect.TypeOf(m).Comparable() && next == m {
+			return false
+		}
+		m = next
 	}
 	return false
 }
+
+// ReportsAttempts marks Fallback as reporting its own attempts (one
+// per model of the chain it streams), so a Retry around it stays
+// silent.
+func (m *fallbackModel) ReportsAttempts() bool { return true }
 
 func stream(ctx context.Context, model core.Model, req core.ModelRequest, yield func(core.ModelEvent, error) bool) (yielded bool, failed error) {
 	for ev, err := range model.Stream(ctx, req) {

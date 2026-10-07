@@ -368,7 +368,8 @@ func (b *backend) Create(ctx context.Context, h thread.Header) error {
 // it for List, and the creator's lock row — the creator is the
 // session's writer from birth, the same rule jsonl's create-and-lock
 // follows.
-func (b *backend) insertSession(ctx context.Context, id, created, header string, envelope int) error {
+func (b *backend) insertSession(ctx context.Context, id, created, header string, envelope int) (err error) {
+	defer func() { err = txCanceled(ctx, err) }()
 	gen, err := randomToken()
 	if err != nil {
 		return fmt.Errorf("sqlite: session generation: %w", err)
@@ -436,7 +437,8 @@ func (b *backend) Append(ctx context.Context, id string, entries ...thread.Entry
 // over and a torn row removed are logged only once the transaction
 // that did them has committed. added is how many complete entry rows
 // the batch adds, unknownEntries when the caller cannot say (Inject).
-func (b *backend) commit(ctx context.Context, id string, lines []string, tornRow int, title string, added int) error {
+func (b *backend) commit(ctx context.Context, id string, lines []string, tornRow int, title string, added int) (err error) {
+	defer func() { err = txCanceled(ctx, err) }()
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -450,6 +452,9 @@ func (b *backend) commit(ctx context.Context, id string, lines []string, tornRow
 		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET title = ? WHERE id = ?`, title, id); err != nil {
 			return err
 		}
+	}
+	if beforeCommit != nil {
+		beforeCommit(tx)
 	}
 	if err := tx.Commit(); err != nil {
 		return err
@@ -564,7 +569,8 @@ func (b *backend) write(ctx context.Context, tx *sql.Tx, id string, lines []stri
 // entries vanished, indistinguishable from data loss. The returned
 // values are fresh: decoded from the row bytes every call, never
 // aliasing the database or a previous load.
-func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.Entry, *thread.LoadReport, error) {
+func (b *backend) Load(ctx context.Context, id string) (_ thread.Header, _ []thread.Entry, _ *thread.LoadReport, err error) {
+	defer func() { err = txCanceled(ctx, err) }()
 	if err := ctx.Err(); err != nil {
 		return thread.Header{}, nil, nil, err
 	}
@@ -681,7 +687,8 @@ func (b *backend) Load(ctx context.Context, id string) (thread.Header, []thread.
 // never an error: one undecodable header never blocks listing the
 // others, and Load names what is wrong with it when asked. Page and
 // Total come from one read snapshot.
-func (b *backend) List(ctx context.Context, q thread.Query) (thread.Page, error) {
+func (b *backend) List(ctx context.Context, q thread.Query) (_ thread.Page, err error) {
+	defer func() { err = txCanceled(ctx, err) }()
 	if err := ctx.Err(); err != nil {
 		return thread.Page{}, err
 	}
@@ -784,7 +791,8 @@ func (b *backend) List(ctx context.Context, q thread.Query) (thread.Page, error)
 // writer's session can always be deleted. A lease on this instance
 // (Acquire) does not refuse it: Delete through the holder's own
 // Storage removes the session and the lease with it.
-func (b *backend) Delete(ctx context.Context, id string) error {
+func (b *backend) Delete(ctx context.Context, id string) (err error) {
+	defer func() { err = txCanceled(ctx, err) }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -883,7 +891,8 @@ func (b *backend) Yield(ctx context.Context, id string, holder any) error {
 // release is Release and Yield's shared body: by is nil for Release,
 // which lets go whoever holds the lease, and the yielding holder
 // otherwise.
-func (b *backend) release(ctx context.Context, id string, by any) error {
+func (b *backend) release(ctx context.Context, id string, by any) (err error) {
+	defer func() { err = txCanceled(ctx, err) }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -932,7 +941,8 @@ func (b *backend) release(ctx context.Context, id string, by any) error {
 // refusing a different holder with ErrLocked. The complete entry rows
 // are counted once per hold and kept current by this instance's own
 // appends: for the holder a repeated Acquire touches no database.
-func (b *backend) Acquire(ctx context.Context, id string, holder any) (int, time.Time, error) {
+func (b *backend) Acquire(ctx context.Context, id string, holder any) (_ int, _ time.Time, err error) {
+	defer func() { err = txCanceled(ctx, err) }()
 	if err := ctx.Err(); err != nil {
 		return 0, time.Time{}, err
 	}
@@ -1178,7 +1188,8 @@ func (b *backend) acquire(ctx context.Context, tx *sql.Tx, id string) (wrote, er
 // nil; one the database does not hold fails with thread.ErrNotFound.
 // To clear a whole database after a host change, List the sessions
 // and break each.
-func BreakLock(ctx context.Context, st thread.Storage, session string) error {
+func BreakLock(ctx context.Context, st thread.Storage, session string) (err error) {
+	defer func() { err = txCanceled(ctx, err) }()
 	b, ok := st.(*backend)
 	if !ok {
 		return fmt.Errorf("sqlite: BreakLock needs a Storage opened by this package, got %T", st)
@@ -1237,6 +1248,29 @@ func (b *backend) host() string {
 // rollback drops a transaction whose caller is returning an error —
 // best effort, because the error is what the caller needs.
 func rollback(tx *sql.Tx) { _ = tx.Rollback() }
+
+// txCanceled reports a transaction that its context's end rolled back
+// as the cancellation it is. database/sql rolls a transaction back on
+// its own when the context it began on ends, and a statement or the
+// commit after that fails with sql.ErrTxDone — an error that says
+// nothing of why, so a caller matching context.Canceled or
+// context.DeadlineExceeded read a canceled write as a storage failure.
+// The write did not land; the error now wraps the context's error and
+// the original both.
+func txCanceled(ctx context.Context, err error) error {
+	if err == nil || !errors.Is(err, sql.ErrTxDone) {
+		return err
+	}
+	cerr := ctx.Err()
+	if cerr == nil || errors.Is(err, cerr) {
+		return err
+	}
+	return fmt.Errorf("sqlite: transaction rolled back: %w: %w", cerr, err)
+}
+
+// beforeCommit is a test seam: when set, commit calls it with the open
+// transaction just before committing. nil outside the package's tests.
+var beforeCommit func(*sql.Tx)
 
 // formatTime renders the schema's timestamp form: RFC 3339, UTC,
 // always nine fractional digits, so lexicographic order is

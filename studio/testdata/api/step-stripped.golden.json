@@ -111,6 +111,9 @@
         "type": "step_start",
         "run_id": "r_off",
         "index": 0
+      },
+      "attrs": {
+        "weft.content": "stripped"
       }
     },
     {
@@ -123,6 +126,9 @@
         "call_id": "c_lookup",
         "name": "lookup_order",
         "args": null
+      },
+      "attrs": {
+        "weft.content": "stripped"
       }
     },
     {
@@ -136,6 +142,9 @@
         "name": "lookup_order",
         "content": "",
         "is_error": false
+      },
+      "attrs": {
+        "weft.content": "stripped"
       }
     },
     {
@@ -151,6 +160,9 @@
           "output_tokens": 5
         },
         "latency_ms": 1
+      },
+      "attrs": {
+        "weft.content": "stripped"
       }
     }
   ],

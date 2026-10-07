@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -146,6 +147,7 @@ type stepDocT struct {
 		ErrorType    string `json:"error_type"`
 		SpanID       string `json:"span_id"`
 		RequestIndex *int64 `json:"request_index"`
+		Badge        string `json:"badge"`
 	} `json:"attempts"`
 	AttemptsBadge *struct {
 		Badge, Reason, Fix string
@@ -226,6 +228,7 @@ func TestStepRoute(t *testing.T) {
 		body := fetchJSON(t, ts, path, nil)
 		stepGolden(t, "step-"+string(rune('0'+n))+".golden.json", body)
 		decode(t, body, &docs[n])
+		checkHoles(t, path, docs[n])
 	}
 
 	// Step 0: every attempt with its model and outcome, joined by
@@ -387,6 +390,7 @@ func TestStepContentOff(t *testing.T) {
 	stepGolden(t, "step-stripped.golden.json", body)
 	var d stepDocT
 	decode(t, body, &d)
+	checkHoles(t, "content-off", d)
 	if d.Request == nil || d.Request.Content != "stripped" || !strings.Contains(string(d.Request.Prompt), `"badge":"stripped"`) ||
 		!strings.Contains(string(d.Request.Tools), `"badge":"stripped"`) {
 		t.Errorf("content-off request = %+v, want the stripped row", d.Request)
@@ -464,11 +468,7 @@ func TestStepNotRecorded(t *testing.T) {
 	if got := strings.Join(d.holes(), ","); got != "gap,not_recorded,derived" {
 		t.Errorf("pre-A1 holes = %s, want gap,not_recorded,derived", got)
 	}
-	for _, h := range d.Holes {
-		if h.Reason == "" {
-			t.Errorf("hole %s has no reason", h.Hole)
-		}
-	}
+	checkHoles(t, "pre-A1", d)
 	if !strings.Contains(body, `"attempts":[]`) || !strings.Contains(body, `"events":[]`) || !strings.Contains(body, `"tool_calls":[]`) || !strings.Contains(body, `"children":[]`) {
 		t.Errorf("empty lists must be [], never null: %s", body)
 	}
@@ -524,6 +524,7 @@ func TestStepPanelTokens(t *testing.T) {
 	stepGolden(t, "step-hidden.golden.json", body)
 	var d stepDocT
 	decode(t, body, &d)
+	checkHoles(t, "read token", d)
 	if d.Request == nil || d.Request.Badge != "hidden" || d.Request.Fix != "use a playground-scoped token" || d.Request.Prompt != nil || strings.Contains(body, "You are a support agent.") {
 		t.Errorf("read token request = %+v, want the hidden badge and no system prompt", d.Request)
 	}
@@ -540,5 +541,343 @@ func TestStepPanelTokens(t *testing.T) {
 		if code != http.StatusOK || d.Request == nil || d.Request.Badge != "" || !strings.Contains(string(d.Request.Prompt), "You are a support agent.") {
 			t.Errorf("a prompt-reading identity = %d request %+v, want the row with the prompt", code, d.Request)
 		}
+	}
+}
+
+// withPipeline runs fn with an agent's observability options wired to
+// a fresh pipeline into url (traced: the tracer too), then flushes.
+func withPipeline(t *testing.T, url string, traced bool, fn func(prov []core.Option), dest ...otel.DestOption) {
+	t.Helper()
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(url, "", dest...), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov := []core.Option{core.LoggerProvider(p.LoggerProvider())}
+	if traced {
+		prov = append(prov, core.TracerProvider(p.TracerProvider()))
+	}
+	fn(prov)
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// checkHoles fails on a listed hole without a reason: no hole ever
+// goes out unexplained.
+func checkHoles(t *testing.T, where string, d stepDocT) {
+	t.Helper()
+	for _, h := range d.Holes {
+		if h.Reason == "" {
+			t.Errorf("%s: hole %s has no reason", where, h.Hole)
+		}
+	}
+}
+
+func getStep(t *testing.T, ts *httptest.Server, path string, cond func(string) bool) stepDocT {
+	t.Helper()
+	var d stepDocT
+	decode(t, fetchJSON(t, ts, path, cond), &d)
+	checkHoles(t, path, d)
+	return d
+}
+
+// TestStepMaxTokensCalls: a step that hit the output token limit with
+// tool calls runs none of them (rule 11) — no tool events, no spans —
+// yet the step lists each call from its transcript batch with the
+// "not executed" result and the max_tokens badge; content-off, the
+// stripped badge.
+func TestStepMaxTokensCalls(t *testing.T) {
+	ts, _ := requestsServer(t)
+	run := func(id string, dest ...otel.DestOption) {
+		withPipeline(t, ts.URL, true, func(prov []core.Option) {
+			touch := core.Tool("touch", "Touch.", func(context.Context, struct{}) (string, error) { return "ok", nil })
+			agent := core.New(wefttest.Script(
+				wefttest.Raw(
+					core.ModelToolCall{ID: "c1", Name: "touch", Args: json.RawMessage(`{}`)},
+					core.ModelToolCall{ID: "c2", Name: "touch", Args: json.RawMessage(`{}`)},
+					core.ModelFinish{Reason: core.StopMaxTokens, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
+				),
+				wefttest.Say("recovered"),
+			), append([]core.Option{touch}, prov...)...)
+			if _, err := agent.Generate(context.Background(), core.RunID(id), core.Prompt("go")); err != nil {
+				t.Fatal(err)
+			}
+		}, dest...)
+	}
+	run("r_max")
+	run("r_max_off", otel.NoContent())
+	for _, c := range []struct{ id, badge string }{{"r_max", "max_tokens"}, {"r_max_off", "stripped"}} {
+		d := getStep(t, ts, "/api/runs/"+c.id+"/steps/0", func(b string) bool { return strings.Contains(b, `"step_finish"`) })
+		if d.Reason != "max_tokens" || !slices.Contains(d.holes(), "max_tokens") {
+			t.Errorf("%s step 0 = reason %q holes %v, want max_tokens", c.id, d.Reason, d.holes())
+		}
+		if c.badge == "stripped" {
+			// A content-off chain stores no messages: the calls' ids and
+			// arguments are unknown, the chat span counts them — two
+			// entries, stripped.
+			if !slices.Contains(d.holes(), "stripped") || len(d.ToolCalls) != 2 {
+				t.Errorf("%s holes = %v calls %+v, want stripped and two calls", c.id, d.holes(), d.ToolCalls)
+			}
+			for _, tc := range d.ToolCalls {
+				if tc.Badge != "stripped" || tc.CallID != "" || tc.Result != nil {
+					t.Errorf("%s call %+v, want an anonymous stripped call", c.id, tc)
+				}
+			}
+			continue
+		}
+		if len(d.ToolCalls) != 2 {
+			t.Fatalf("%s tool calls = %+v, want c1 and c2", c.id, d.ToolCalls)
+		}
+		for i, tc := range d.ToolCalls {
+			if tc.CallID != []string{"c1", "c2"}[i] || tc.Badge != c.badge || tc.Span != nil || tc.Result == nil ||
+				tc.Result.Content != "tool call touch was not executed: the response hit the output token limit" {
+				t.Errorf("%s call %d = %+v, want the not-executed result badged %s", c.id, i, tc, c.badge)
+			}
+		}
+	}
+}
+
+// handRec is one hand-written record: an event (its type read from the
+// body) or a request record, at pos, with extra attributes.
+type handRec struct {
+	kind  string // "event" | "request"
+	pos   int64
+	body  string
+	extra map[string]any
+}
+
+// writeHand stores hand-written records (and spans) for one run, all
+// stamped at t0 + pos ms with attrs on every record — the shapes the
+// real producer writes, minus what a test means to drop.
+func writeHand(t *testing.T, db obsdb.DB, runID string, t0 time.Time, attrs map[string]any, recs []handRec, spans ...obsdb.Span) {
+	t.Helper()
+	var out []obsdb.Record
+	for _, r := range recs {
+		a := map[string]any{"weft.record": r.kind, "weft.run.id": runID, "gen_ai.agent.name": "hand"}
+		switch r.kind {
+		case "event":
+			var h struct {
+				Type string `json:"type"`
+			}
+			_ = json.Unmarshal([]byte(r.body), &h)
+			a["weft.event.type"], a["weft.event.pos"] = h.Type, r.pos
+		case "request":
+			a["weft.request.index"] = r.pos
+		}
+		for k, v := range attrs {
+			a[k] = v
+		}
+		for k, v := range r.extra {
+			a[k] = v
+		}
+		out = append(out, obsdb.Record{
+			Time: t0.Add(time.Duration(r.pos) * time.Millisecond), EventName: "weft." + r.kind, Severity: 9,
+			Body: r.body, Service: "svc", Attrs: a, Resource: map[string]any{"service.name": "svc"},
+		})
+	}
+	for i := range spans {
+		spans[i].Attrs["weft.run.id"] = runID
+		if spans[i].TraceID == "" {
+			spans[i].TraceID = "abababababababababababababababab"
+		}
+		if spans[i].Start.IsZero() {
+			spans[i].Start, spans[i].End = t0, t0.Add(time.Millisecond)
+		}
+		spans[i].Service, spans[i].Resource = "svc", map[string]any{"service.name": "svc"}
+	}
+	if err := db.Write(context.Background(), obsdb.Batch{Records: out, Spans: spans}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func ev(pos int64, body string) handRec { return handRec{kind: "event", pos: pos, body: body} }
+
+// TestStepReadTokenNotRecorded: under a read-scoped token the request
+// block is hidden, and the run predates the request record (run_start
+// without weft.instructions.hash) — messages_in's not_recorded badge
+// still reaches holes beside hidden.
+func TestStepReadTokenNotRecorded(t *testing.T) {
+	const tok = "srv-token"
+	srv := New(Open(filepath.Join(t.TempDir(), "weft.db")), Token(tok))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	writeHand(t, srv.db, "r_old", time.Now().UTC(), map[string]any{"weft.public_id": "pub_a"}, []handRec{
+		ev(0, `{"type":"run_start","id":"r_old","model":{"provider":"p","name":"m"},"agent":"hand"}`),
+		ev(1, `{"type":"step_start","run_id":"r_old","index":0}`),
+		ev(2, `{"type":"step_finish","run_id":"r_old","index":0,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
+		ev(3, `{"type":"run_finish","run_id":"r_old","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
+	})
+	read, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d stepDocT
+	decode(t, fetchJSON(t, ts, "/api/runs/r_old/steps/0?token="+read, nil), &d)
+	checkHoles(t, "read token", d)
+	if d.Request == nil || d.Request.Badge != "hidden" || d.MessagesIn.Badge != "not_recorded" {
+		t.Errorf("request %+v messages_in %+v, want hidden and not_recorded", d.Request, d.MessagesIn)
+	}
+	if got := d.holes(); !slices.Contains(got, "hidden") || !slices.Contains(got, "not_recorded") {
+		t.Errorf("holes = %v, want hidden and not_recorded", got)
+	}
+}
+
+// TestStepLogsOnly: a run recorded without a tracer has its events and
+// requests but no spans — the attempts block says not_recorded with the
+// fix to install a tracer (not to upgrade weft), and the answering
+// model, read from the chat span, is absent.
+func TestStepLogsOnly(t *testing.T) {
+	ts, _ := requestsServer(t)
+	withPipeline(t, ts.URL, false, func(prov []core.Option) {
+		agent := core.New(wefttest.Script(wefttest.Say("hi")), append([]core.Option{core.Instructions("x")}, prov...)...)
+		if _, err := agent.Generate(context.Background(), core.RunID("r_logs"), core.Prompt("go")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	d := getStep(t, ts, "/api/runs/r_logs/steps/0", func(b string) bool { return strings.Contains(b, `"step_finish"`) })
+	if d.AttemptsBadge == nil || d.AttemptsBadge.Badge != "not_recorded" || d.AttemptsBadge.Fix != "install a tracer (otel.Install records spans)" {
+		t.Errorf("logs-only attempts_badge = %+v, want not_recorded with the tracer fix", d.AttemptsBadge)
+	}
+	if d.Model.Answered != "" || d.Model.Requested != "script" || len(d.Attempts) != 1 || d.Attempts[0].Outcome != "" {
+		t.Errorf("logs-only model %+v attempts %+v, want requested only and one attempt without an outcome", d.Model, d.Attempts)
+	}
+}
+
+// TestStepAttemptEdges: a request record whose body did not parse is
+// still an attempt (attempt 0, its request index, badge derived) so the
+// count agrees with the requests route; attempt spans with no request
+// record put gap on attempts_badge.
+func TestStepAttemptEdges(t *testing.T) {
+	ts, srv := requestsServer(t)
+	chat := obsdb.Span{SpanID: "c000000000000001", Name: "chat m", Kind: 3, StatusCode: 1,
+		Attrs: map[string]any{"gen_ai.operation.name": "chat", "weft.step.index": int64(0), "weft.stream": true, "gen_ai.request.model": "m"}}
+	att := func(id string, n int64, status int) obsdb.Span {
+		return obsdb.Span{SpanID: id, ParentSpanID: chat.SpanID, Name: "attempt", Kind: 3, StatusCode: status,
+			Attrs: map[string]any{"weft.step.index": int64(0), "weft.attempt.index": n, "gen_ai.request.model": "m"}}
+	}
+	writeHand(t, srv.db, "r_edge", time.Now().UTC(), map[string]any{}, []handRec{
+		{kind: "event", pos: 0, body: `{"type":"run_start","id":"r_edge","model":{"provider":"p","name":"m"},"agent":"hand"}`,
+			extra: map[string]any{"weft.instructions.hash": "aa"}},
+		ev(1, `{"type":"step_start","run_id":"r_edge","index":0}`),
+		{kind: "request", pos: 0, body: `not json`, extra: map[string]any{"weft.step.index": int64(0)}},
+		ev(2, `{"type":"step_finish","run_id":"r_edge","index":0,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
+		ev(3, `{"type":"run_finish","run_id":"r_edge","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
+	}, chat, att("a000000000000001", 1, 2), att("a000000000000002", 2, 1))
+	var reqs requestsDoc
+	decode(t, fetchJSON(t, ts, "/api/runs/r_edge/requests", nil), &reqs)
+	d := getStep(t, ts, "/api/runs/r_edge/steps/0", nil)
+	if len(d.Attempts) != 3 {
+		t.Fatalf("attempts = %+v, want spans 1 and 2 and the unnumbered record", d.Attempts)
+	}
+	last := d.Attempts[2]
+	if last.Attempt != 0 || last.RequestIndex == nil || *last.RequestIndex != 0 || last.Badge != "derived" || len(reqs.Requests) != 1 {
+		t.Errorf("unnumbered attempt = %+v (requests route: %d rows), want attempt 0, request 0, derived", last, len(reqs.Requests))
+	}
+	if d.Attempts[0].Outcome != "error" || d.Attempts[1].Outcome != "ok" || d.Attempts[0].RequestIndex != nil {
+		t.Errorf("span attempts = %+v, want error then ok, no request", d.Attempts[:2])
+	}
+	if d.AttemptsBadge == nil || d.AttemptsBadge.Badge != "gap" || !slices.Contains(d.holes(), "derived") || !slices.Contains(d.holes(), "gap") {
+		t.Errorf("attempts_badge %+v holes %v, want gap, and derived listed", d.AttemptsBadge, d.holes())
+	}
+}
+
+// TestStepLostStepStart: step 1's step_start was dropped. Step 0 ends
+// at the first event past its step_finish (step 1's tool call never
+// folds into it) and lists the gap; step 1 still answers, from the
+// run's count, with the gap hole.
+func TestStepLostStepStart(t *testing.T) {
+	ts, srv := requestsServer(t)
+	writeHand(t, srv.db, "r_lost", time.Now().UTC(), map[string]any{}, []handRec{
+		ev(0, `{"type":"run_start","id":"r_lost","model":{"provider":"p","name":"m"},"agent":"hand"}`),
+		ev(1, `{"type":"step_start","run_id":"r_lost","index":0}`),
+		ev(2, `{"type":"tool_start","run_id":"r_lost","seq":1,"call_id":"c_a","name":"t","args":{}}`),
+		ev(3, `{"type":"tool_finish","run_id":"r_lost","seq":2,"call_id":"c_a","name":"t","content":"a","is_error":false}`),
+		ev(4, `{"type":"step_finish","run_id":"r_lost","index":0,"reason":"tool_calls","usage":{"input_tokens":1,"output_tokens":1}}`),
+		// pos 5, step 1's step_start, never arrived
+		ev(6, `{"type":"tool_start","run_id":"r_lost","seq":3,"call_id":"c_b","name":"t","args":{}}`),
+		ev(7, `{"type":"tool_finish","run_id":"r_lost","seq":4,"call_id":"c_b","name":"t","content":"b","is_error":false}`),
+		ev(8, `{"type":"step_finish","run_id":"r_lost","index":1,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
+		ev(9, `{"type":"run_finish","run_id":"r_lost","usage":{"input_tokens":2,"output_tokens":2},"steps":2}`),
+	})
+	d0 := getStep(t, ts, "/api/runs/r_lost/steps/0", nil)
+	if len(d0.Events) != 4 || len(d0.ToolCalls) != 1 || d0.ToolCalls[0].CallID != "c_a" || !slices.Contains(d0.holes(), "gap") {
+		t.Errorf("step 0 = %d events, calls %+v, holes %v; want its 4 events, c_a alone, and the gap", len(d0.Events), d0.ToolCalls, d0.holes())
+	}
+	d1 := getStep(t, ts, "/api/runs/r_lost/steps/1", nil)
+	if !slices.Contains(d1.holes(), "gap") {
+		t.Errorf("step 1 holes = %v, want gap", d1.holes())
+	}
+}
+
+// TestStepInterruptedAndPreA4: a run that stopped reporting inside step
+// 0 reads status error with the interrupted hole; its chat span has no
+// weft.stream and no attempt spans (a weft before A4), so attempts come
+// from the chat span under the not_recorded badge.
+func TestStepInterruptedAndPreA4(t *testing.T) {
+	ts, srv := requestsServer(t)
+	chat := obsdb.Span{SpanID: "c000000000000009", Name: "chat m", Kind: 3, StatusCode: 1,
+		Attrs: map[string]any{"gen_ai.operation.name": "chat", "weft.step.index": int64(0), "gen_ai.request.model": "m"}}
+	writeHand(t, srv.db, "r_int", time.Now().UTC().Add(-2*time.Minute), map[string]any{}, []handRec{
+		ev(0, `{"type":"run_start","id":"r_int","model":{"provider":"p","name":"m"},"agent":"hand"}`),
+		ev(1, `{"type":"step_start","run_id":"r_int","index":0}`),
+	}, chat)
+	d := getStep(t, ts, "/api/runs/r_int/steps/0", nil)
+	if d.Status != "error" || !slices.Contains(d.holes(), "interrupted") {
+		t.Errorf("interrupted step = status %q holes %v, want error with interrupted", d.Status, d.holes())
+	}
+	if d.AttemptsBadge == nil || d.AttemptsBadge.Badge != "not_recorded" || len(d.Attempts) != 1 || d.Attempts[0].SpanID != chat.SpanID {
+		t.Errorf("pre-A4 attempts = %+v badge %+v, want attempt 1 from the chat span under not_recorded", d.Attempts, d.AttemptsBadge)
+	}
+}
+
+// TestStepRealEdges, through the real pipeline: a capped tool result
+// reads truncated with the hole; a steer delivered after step 0 is
+// filed under step 0; a resume run's approved call, executed before its
+// step 0's step_start, is step 0's.
+func TestStepRealEdges(t *testing.T) {
+	ts, _ := requestsServer(t)
+	withPipeline(t, ts.URL, true, func(prov []core.Option) {
+		big := core.Tool("big", "Big.", func(context.Context, struct{}) (string, error) { return strings.Repeat("x", 100), nil },
+			core.MaxResultBytes(10))
+		refund := core.Tool("refund", "Refund.", func(context.Context, struct{}) (string, error) { return "refunded", nil },
+			core.RequireApproval())
+		agent := core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "big", Args: `{}`, ID: "c_big"}),
+			wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{}`, ID: "c_ref"}),
+			wefttest.Say("done"),
+		), append([]core.Option{big, refund}, prov...)...)
+		first, err := agent.Generate(context.Background(), core.RunID("r_edges"), core.Prompt("go"),
+			wefttest.NewSteers().At(0, core.User("and refund it")).Option())
+		if err != nil || len(first.Pending) != 1 {
+			t.Fatalf("first run: %v, pending %+v", err, first.Pending)
+		}
+		if _, err := agent.Generate(context.Background(), core.RunID("r_resume"), core.Messages(first.Messages...), core.Approve("c_ref")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	d := getStep(t, ts, "/api/runs/r_edges/steps/0", func(b string) bool { return strings.Contains(b, `"steered"`) })
+	var truncated bool
+	for _, c := range d.ToolCalls {
+		truncated = truncated || (c.CallID == "c_big" && c.Result != nil && strings.Contains(c.Result.Content, "[truncated 90 bytes]"))
+	}
+	body := fetchJSON(t, ts, "/api/runs/r_edges/steps/0", nil)
+	if !truncated || !strings.Contains(body, `"truncated":true`) || !slices.Contains(d.holes(), "truncated") {
+		t.Errorf("capped result: calls %+v holes %v, want truncated", d.ToolCalls, d.holes())
+	}
+	if last := d.Events[len(d.Events)-1].Event.Type; last != "steered" {
+		t.Errorf("step 0's last event = %s, want the steer delivered after it", last)
+	}
+	d1 := getStep(t, ts, "/api/runs/r_edges/steps/1", nil)
+	for _, e := range d1.Events {
+		if e.Event.Type == "steered" {
+			t.Error("the steer of step 0 is filed under step 1 too")
+		}
+	}
+	r0 := getStep(t, ts, "/api/runs/r_resume/steps/0", func(b string) bool { return strings.Contains(b, `"step_finish"`) })
+	if len(r0.Events) == 0 || r0.Events[0].Event.Type != "tool_start" || len(r0.ToolCalls) == 0 || r0.ToolCalls[0].CallID != "c_ref" ||
+		r0.ToolCalls[0].Result == nil || r0.ToolCalls[0].Result.Content != "refunded" {
+		t.Errorf("resume step 0 = events %+v calls %+v, want the approved refund ahead of step_start", r0.Events, r0.ToolCalls)
 	}
 }

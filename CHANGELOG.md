@@ -131,7 +131,11 @@ module, ADR 0005).
   `request: {badge: "hidden", reason, fix}`. A step past the run's
   last, or a running run's next, is 404. `/api/meta` lists the new
   `steps` capability; the web client gains `fetchStep` and the
-  `StepDoc` types (no UI change yet).
+  `StepDoc` types (no UI change yet). `children[].cost` is omitted
+  until A5 adds costs (absent, not zero); the answering model and the
+  attempts' outcomes are read from spans, so a run recorded without a
+  tracer badges its attempts `not_recorded` with the fix to install
+  one.
 - **Compaction in the record (ADR 0028 §8, plan A9.1).** When a
   `PrepareStep` sends a request whose messages are not the run's
   transcript, the core emits one `messages` record with

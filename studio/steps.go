@@ -108,6 +108,9 @@ type stepAttempt struct {
 	Finished     *time.Time `json:"finished,omitempty"`
 	SpanID       string     `json:"span_id,omitempty"`
 	RequestIndex *int64     `json:"request_index,omitempty"`
+	// Badge is "derived" on a request record with no attempt number,
+	// listed by its request index (Attempt 0).
+	Badge string `json:"badge,omitempty"`
 }
 
 // stepMessagesIn is the request's messages_ref: the messages record
@@ -123,8 +126,13 @@ type stepMessagesIn struct {
 
 // stepToolCall is one call the step's model made: its arguments, its
 // result (absent while running or parked), its execute_tool span, and
-// the child run it started (a Subagent). Pending is a parked call;
-// Badge is "stripped" when content-off dropped the args and result.
+// the child run it started (a Subagent). Pending is a parked call.
+// Badge is "max_tokens" on a call of a step cut at the output token
+// limit (never executed: read from the step's transcript, its result
+// the "not executed" text, no span), "stripped" when content-off
+// dropped the args and result — on such a max_tokens step the calls
+// are unknown beyond their count (the chat span's
+// weft.model.tool_calls), listed with call_id "".
 type stepToolCall struct {
 	CallID     string          `json:"call_id"`
 	Name       string          `json:"name"`
@@ -156,7 +164,8 @@ type stepSpan struct {
 }
 
 // stepChild is a child run one of the step's calls started (ADR 0014's
-// weft.parent.run.id / weft.parent.call.id). Cost arrives with A5.
+// weft.parent.run.id / weft.parent.call.id). The plan's cost field is
+// omitted until A5 adds costs: it is absent, not zero.
 type stepChild struct {
 	ID     string     `json:"id"`
 	CallID string     `json:"call_id"`
@@ -200,15 +209,30 @@ func (hs holeSet) add(h obsdb.Hole, reason, fix string) {
 	}
 }
 
+// noTracerFix is the fix for a run recorded without spans — the one
+// note obsdb.HoleNote's table does not word (its not_recorded fix is
+// "upgrade weft", wrong for an app that ran without a tracer). Local
+// until obsdb.HoleNote gains it.
+const noTracerFix = "install a tracer (otel.Install records spans)"
+
 func (hs holeSet) note(h obsdb.Hole) {
 	reason, fix := obsdb.HoleNote(h)
 	hs.add(h, reason, fix)
 }
 
+// list is the holes in ADR 0028 §11's order; a hole never goes out
+// without a reason.
 func (hs holeSet) list() []stepHole {
 	out := []stepHole{}
 	for _, h := range obsdb.Holes() {
 		if v, ok := hs[h]; ok {
+			if v.Reason == "" {
+				reason, fix := obsdb.HoleNote(h)
+				v.Reason = reason
+				if v.Fix == "" {
+					v.Fix = fix
+				}
+			}
 			out = append(out, v)
 		}
 	}
@@ -230,6 +254,7 @@ type stepEvents struct {
 type eventHead struct {
 	Type    string              `json:"type"`
 	Index   int                 `json:"index"`
+	Step    int                 `json:"step"`
 	Pending []core.ToolCallPart `json:"pending"`
 	CallID  string              `json:"call_id"`
 	Name    string              `json:"name"`
@@ -240,12 +265,17 @@ type eventHead struct {
 }
 
 // readStepEvents walks the run's events from the start, a page at a
-// time, and keeps step n's: from its step_start to the next step's
-// step_start (or run_finish). Step 0 also keeps what precedes its
-// step_start after run_start — a resume's approved calls, which the
-// transcript files under step 0 too. obsdb pages events by position
-// only, so the walk reads every earlier step's events too — but stops
-// at step n's end, never reading the rest of the run.
+// time, and keeps step n's: from its step_start to the first event that
+// is not step n's — one naming another step (step_start, step_finish
+// and steered carry the step, as does their record's weft.step.index),
+// anything but a steer of step n once step n's step_finish passed, or
+// run_finish. So a lost step_start never folds the next step's events
+// into this one; the lost position is the gap hole. Step 0 also keeps
+// what precedes its step_start after run_start — a resume's approved
+// calls, which the transcript files under step 0 too. obsdb pages
+// events by position only, so the walk reads every earlier step's
+// events too — but stops at step n's end, never reading the rest of
+// the run.
 func (s *Server) readStepEvents(ctx context.Context, id string, n int) (stepEvents, error) {
 	var out stepEvents
 	after := int64(-1)
@@ -287,10 +317,19 @@ walk:
 				continue
 			}
 			if !out.found {
+				if h.Type == "step_finish" && h.Index > n {
+					break walk // past step n without its step_start
+				}
 				if n == 0 {
 					before = append(before, pe)
 				}
 				continue
+			}
+			otherStep := (h.Type == "step_finish" && h.Index != n) || (h.Type == "steered" && h.Step != n)
+			steerOfN := h.Type == "steered" && h.Step == n
+			if otherStep || (out.finish != nil && !steerOfN) {
+				endPos = pe.Pos
+				break walk
 			}
 			out.events = append(out.events, pe)
 			if h.Type == "step_finish" && h.Index == n {
@@ -373,7 +412,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 
 	// Events, status, timing, usage.
 	for _, pe := range evs.events {
-		doc.Events = append(doc.Events, posEvent{Pos: pe.Pos, Time: pe.Time, Event: pe.Event})
+		doc.Events = append(doc.Events, posEventOf(pe))
 	}
 	if evs.start != nil {
 		t := evs.start.Time
@@ -390,7 +429,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		holes.add(obsdb.HoleGap, "positions are missing from this step's event stream: a destination dropped a batch", holeFix(obsdb.HoleGap))
 	}
 	if doc.Reason == string(core.StopMaxTokens) {
-		holes.add(obsdb.HoleMaxTokens, "the step finished on the output token limit: its tool calls were not executed", "raise max_tokens")
+		holes.note(obsdb.HoleMaxTokens)
 	}
 
 	// The step's spans: its chat span, that span's attempt children,
@@ -464,6 +503,62 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 			}
 		}
 	}
+	// A max_tokens step's calls never ran (rule 11): no tool events, no
+	// spans — the step's transcript batches hold the calls and their
+	// "not executed" results.
+	maxTokens := doc.Reason == string(core.StopMaxTokens)
+	if maxTokens {
+		batches, err := s.db.TranscriptBatches(ctx, id)
+		if err != nil {
+			dbError(w, r, "transcript of run", id, err)
+			return
+		}
+		for _, b := range batches {
+			if b.Step != n || b.Input {
+				continue
+			}
+			var msgs []struct {
+				Role    string `json:"role"`
+				Content []struct {
+					Type    string          `json:"type"`
+					ID      string          `json:"id"`
+					CallID  string          `json:"call_id"`
+					Name    string          `json:"name"`
+					Args    json.RawMessage `json:"args"`
+					Content string          `json:"content"`
+					IsError bool            `json:"is_error"`
+				} `json:"content"`
+			}
+			_ = json.Unmarshal(b.Messages, &msgs)
+			for _, m := range msgs {
+				for _, part := range m.Content {
+					switch {
+					case m.Role == "assistant" && part.Type == "tool_call":
+						c := callOf(part.ID, part.Name)
+						if len(part.Args) > 0 {
+							c.Args = part.Args
+						}
+					case m.Role == "tool" && part.Type == "tool_result":
+						if c, ok := calls[part.CallID]; ok && c.Result == nil {
+							c.Result = &stepToolResult{Content: part.Content, IsError: part.IsError, Bytes: int64(len(part.Content))}
+						}
+					}
+				}
+			}
+		}
+	}
+	if maxTokens && len(order) == 0 && chat != nil {
+		// Content-off: no messages were stored, so the calls' ids,
+		// names and arguments are unknown; the chat span counts them.
+		// One entry per call, stripped, so the step never reads as one
+		// that made none.
+		k, _ := attrInt64(chat.Attrs["weft.model.tool_calls"])
+		for i := range k {
+			key := "#" + strconv.FormatInt(i, 10)
+			c := callOf(key, "")
+			c.CallID = ""
+		}
+	}
 	for _, cid := range order {
 		c := calls[cid]
 		if sp, ok := toolSpans[cid]; ok {
@@ -480,8 +575,11 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		if c.Result == nil && evs.pendingCalls[cid] {
 			c.Pending = true
 		}
-		if stripped {
+		switch {
+		case stripped:
 			c.Badge = string(obsdb.HoleStripped)
+		case maxTokens && c.Span == nil:
+			c.Badge = string(obsdb.HoleMaxTokens)
 		}
 		if c.Result != nil && c.Result.Truncated {
 			holes.add(obsdb.HoleTruncated, "a tool result was cut by its result cap: the model saw a prefix and the marker", "raise the tool's weft.MaxResultBytes")
@@ -527,7 +625,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		doc.Status = stepRunning
 	case det.Status == obsdb.StatusInterrupted:
 		doc.Status = stepError
-		holes.add(obsdb.HoleInterrupted, "the run stopped reporting inside this step (last seen more than 30 s ago)", "")
+		holes.note(obsdb.HoleInterrupted)
 	default:
 		doc.Status = stepError
 	}
@@ -553,7 +651,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 	default:
 		doc.Model.Provider, doc.Model.Requested = det.Provider, det.Model
 		if modelCalled || !evs.found {
-			holes.add(obsdb.HoleDerived, "the step's requested model is the run's: no request record or chat span of the step names it", "")
+			holes.add(obsdb.HoleDerived, "the step's requested model is the run's: no request record or chat span of the step names it", holeFix(obsdb.HoleDerived))
 		}
 	}
 	if chat != nil {
@@ -623,12 +721,22 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		byAttempt[n] = a
 		return a
 	}
+	// A request record without an attempt number (a body that did not
+	// parse: content derived) is still an attempt — listed by its
+	// request index, badged derived — so the count agrees with the
+	// requests route.
+	var unnumbered []stepAttempt
 	for _, rec := range reqs {
+		idx := rec.Index
 		if rec.Attempt <= 0 {
+			unnumbered = append(unnumbered, stepAttempt{
+				Model: rec.Body.Model.Name, Provider: rec.Body.Model.Provider,
+				RequestIndex: &idx, Badge: string(obsdb.HoleDerived),
+			})
+			holes.add(obsdb.HoleDerived, "a request record of this step carried no attempt number (its body did not parse): it is listed by its request index", "")
 			continue
 		}
 		a := att(rec.Attempt)
-		idx := rec.Index
 		a.RequestIndex = &idx
 		a.Model, a.Provider = rec.Body.Model.Name, rec.Body.Model.Provider
 	}
@@ -658,8 +766,12 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		}
 		a.SpanID = sp.SpanID
 	}
+	spanWithoutRequest := false
 	for _, sp := range attemptSpans {
 		if k, ok := attrInt64(sp.Attrs["weft.attempt.index"]); ok && k > 0 {
+			if _, known := byAttempt[k]; !known && reqHole == "" {
+				spanWithoutRequest = true
+			}
 			fromSpan(att(k), sp)
 		}
 	}
@@ -678,20 +790,33 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		}
 		doc.Attempts = append(doc.Attempts, *a)
 	}
+	doc.Attempts = append(doc.Attempts, unnumbered...)
+	// The attempts' outcomes and the answering model come from spans
+	// (the chat span's gen_ai.response.model, the attempt spans): obsdb
+	// serves no event record's attributes, so the step_finish record's
+	// own gen_ai.response.model is not read. A run with no spans says
+	// why — no tracer when it recorded its step_finish, an older weft
+	// otherwise.
 	var attBadge obsdb.Hole
-	var attReason string
+	var attReason, attFix string
 	switch {
+	case chat == nil && len(allSpans) == 0 && evs.finish != nil:
+		attBadge, attReason, attFix = obsdb.HoleNotRecorded, "the run recorded its events but no spans: it ran without a tracer, so no attempt's outcome, timing or answering model was recorded", noTracerFix
 	case chat == nil && len(allSpans) == 0 && (modelCalled || !evs.found):
 		attBadge, attReason = obsdb.HoleNotRecorded, "the run has no spans: it was recorded without a tracer, or by a weft without attempt reporting (A4), so no attempt's outcome or timing exists"
 	case chat == nil && modelCalled:
 		attBadge, attReason = obsdb.HoleGap, "the step called the model, but its chat span was not stored: a destination dropped it"
 	case chat != nil && len(attemptSpans) == 0 && chat.Attrs["weft.stream"] == nil:
 		attBadge, attReason = obsdb.HoleNotRecorded, "the step's chat span has no attempt spans and no A4 timing: it was recorded by a weft before attempt reporting"
+	case spanWithoutRequest:
+		attBadge, attReason = obsdb.HoleGap, "an attempt span of this step has no request record: a destination dropped it"
 	}
 	if attBadge != "" {
-		fix := holeFix(attBadge)
-		doc.AttemptsBadge = &badgeFields{Badge: string(attBadge), Reason: attReason, Fix: fix}
-		holes.add(attBadge, attReason, fix)
+		if attFix == "" {
+			attFix = holeFix(attBadge)
+		}
+		doc.AttemptsBadge = &badgeFields{Badge: string(attBadge), Reason: attReason, Fix: attFix}
+		holes.add(attBadge, attReason, attFix)
 	}
 
 	// The compaction view the step's request carried.
@@ -729,6 +854,14 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		case doc.Compaction != nil && ref.Index != nil && *ref.Index == doc.Compaction.Index:
 			doc.MessagesIn.badgeFields = doc.Compaction.badgeFields
 		}
+	}
+	// Every block's badge lands in holes — messages_in's too, whichever
+	// identity reads the step (the request block may be hidden).
+	if b := doc.MessagesIn.badgeFields; b.Badge != "" {
+		holes.add(obsdb.Hole(b.Badge), b.Reason, b.Fix)
+	}
+	if first != nil && first.Content == obsdb.HoleDerived {
+		holes.add(obsdb.HoleDerived, "the step's request record did not parse: its body is empty and its hashes come from the record's attributes", "")
 	}
 	doc.Holes = holes.list()
 	writeJSON(w, r, http.StatusOK, doc)

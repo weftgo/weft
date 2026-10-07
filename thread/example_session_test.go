@@ -258,6 +258,14 @@ func ExampleSession_Path() {
 		fmt.Println(err)
 		return
 	}
+	// Wait returns when the turn is decided; the runner may still be
+	// between items. A Send in that window is accepted first — one
+	// more entry, one more id — so an example that prints its ids
+	// waits for the session to be idle.
+	if err := s.WaitIdle(ctx); err != nil {
+		fmt.Println(err)
+		return
+	}
 	if err := s.Branch(ctx, "e_p1"); err != nil {
 		fmt.Println(err)
 		return

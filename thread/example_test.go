@@ -284,6 +284,14 @@ func ExampleSession_Send() {
 	}
 	fmt.Println("run", t1.RunID(), "replied:", res.Text())
 
+	// The next Send could go at once — it would queue behind the
+	// runner's between-turn work, with an accepted receipt entry of its
+	// own. The example prints its ids, so it waits for the session to
+	// be idle and the Send takes the idle path.
+	if err := s.WaitIdle(ctx); err != nil {
+		fmt.Println(err)
+		return
+	}
 	t2, err := s.Send(ctx, weft.User("And what was in it?"))
 	if err != nil {
 		fmt.Println(err)

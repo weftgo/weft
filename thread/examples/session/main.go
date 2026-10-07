@@ -108,6 +108,13 @@ func run(w io.Writer, dir string) error {
 	if err := p(w, "receipt:", turn1.ID(), "run:", turn1.RunID()); err != nil {
 		return err
 	}
+	// Wait returns when the turn is decided; the runner may still be
+	// between items, and a Send in that window is accepted with a
+	// receipt entry first — one more id. The ids above are fixed, so
+	// wait for the session to be idle.
+	if err := s.WaitIdle(ctx); err != nil {
+		return err
+	}
 
 	if err := s.Label(ctx, turn1.ID(), "the shipping answer"); err != nil {
 		return err

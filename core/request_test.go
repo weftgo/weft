@@ -943,9 +943,10 @@ func BenchmarkRequestRecord(b *testing.B) {
 	}
 }
 
-// resolveRef returns the messages a request's messages_ref names: the
-// growth records up to its index, concatenated (no compaction records
-// exist before A9).
+// resolveRef returns the messages a request's messages_ref names (ADR
+// 0028 §8): the growth records up to its index, concatenated — and,
+// when the record at the index is a compaction view, with the view's
+// range replaced by its body.
 func resolveRef(t *testing.T, lp *recLogProvider, runID string, index int64) []core.Message {
 	t.Helper()
 	var out []core.Message
@@ -953,13 +954,24 @@ func resolveRef(t *testing.T, lp *recLogProvider, runID string, index int64) []c
 		if m.attr("weft.run.id") != runID {
 			continue
 		}
-		if idx, _ := m.intAttr("weft.messages.index"); idx <= index {
-			var batch []core.Message
-			if err := json.Unmarshal([]byte(m.body), &batch); err != nil {
-				t.Fatal(err)
-			}
-			out = append(out, batch...)
+		idx, _ := m.intAttr("weft.messages.index")
+		if idx > index {
+			continue
 		}
+		var batch []core.Message
+		if err := json.Unmarshal([]byte(m.body), &batch); err != nil {
+			t.Fatal(err)
+		}
+		if m.attr("weft.messages.reason") != "" {
+			if idx != index {
+				continue // another request's view: never carried forward
+			}
+			from, _ := m.intAttr("weft.messages.from_seq")
+			to, _ := m.intAttr("weft.messages.to_seq")
+			out = append(append(append([]core.Message(nil), out[:from]...), batch...), out[to:]...)
+			continue
+		}
+		out = append(out, batch...)
 	}
 	return out
 }

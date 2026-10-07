@@ -1,0 +1,29 @@
+{
+  "attributes": {
+    "gen_ai.agent.name": "STRING:support",
+    "weft.compaction.hash": "STRING:b022748236db0ea148e536968f21d964c16d716fa4f2578eb625fc1cf151ba3d",
+    "weft.compaction.scope": "STRING:run",
+    "weft.content": "STRING:full",
+    "weft.messages.count": "INT64:1",
+    "weft.messages.from_seq": "INT64:1",
+    "weft.messages.index": "INT64:5",
+    "weft.messages.reason": "STRING:compacted",
+    "weft.messages.to_seq": "INT64:3",
+    "weft.record": "STRING:messages",
+    "weft.run.id": "STRING:run-compacted",
+    "weft.step.index": "INT64:2"
+  },
+  "body": [
+    {
+      "content": [
+        {
+          "text": "summary of the middle",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "event_name": "weft.messages",
+  "severity": "INFO"
+}

@@ -339,7 +339,15 @@ func (s *Session) ApplyCompaction(ctx context.Context, c *Compaction) error {
 		plan.Reason = ReasonManual
 	}
 	s.mu.Lock()
+	// The context on either side of the write, for the session
+	// compaction marker's counts (ADR 0028 §8): read under the same
+	// lock as the write, so nothing lands in between.
+	before := s.rawContextLocked()
 	e, flushErr, err := s.applyCompactionLocked(ctx, &plan)
+	var after []core.Message
+	if err == nil {
+		after = s.rawContextLocked()
+	}
 	s.mu.Unlock()
 	// Everything below runs without the lock: the logger and both
 	// hooks are the caller's code, and a hook that reads the session
@@ -363,6 +371,10 @@ func (s *Session) ApplyCompaction(ctx context.Context, c *Compaction) error {
 			"session", s.header.ID, "reason", string(e.Reason),
 			"tokens_before", e.TokensBefore, "first_kept", e.FirstKept)
 	}
+	// The marker the next run to start reports (reportCompaction); a
+	// later compaction before that run replaces it.
+	marker := s.newCompactionMarker(e, before, after)
+	s.locked(func() { s.compactMarker = marker })
 	s.safeAfter(ctx, e) // the durable record, not the plan
 	return nil
 }

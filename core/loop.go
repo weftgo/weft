@@ -457,7 +457,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// then the request record (attempt 1), on the chat span's
 		// context, after PrepareStep, validation and composition, right
 		// before the chain runs. Reporting only: req is not touched.
-		reqRec := records.recordRequest(mctx, a, step, req, info, parkSet)
+		reqRec := records.recordRequest(mctx, a, step, req, info, parkSet, res.Messages, a.prepare != nil)
 		// The chain's reporting path (ReportFromContext): attempts and
 		// wire bodies the chain reports land on this step's record; each
 		// attempt after the first adds its own request record.

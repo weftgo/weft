@@ -625,7 +625,10 @@ type Agent struct {
 	toolMW          []ToolMiddleware
 	tracerProvider  trace.TracerProvider
 	loggerProvider  log.LoggerProvider
-	logger          *slog.Logger
+	// records is the provider resolved at New (the option's, else the
+	// global one), what LoggerProvider returns.
+	records log.LoggerProvider
+	logger  *slog.Logger
 	// content is the Content option's override of the capture question:
 	// nil means "as the logger in force says", resolved at each emission.
 	content *bool
@@ -678,6 +681,7 @@ func New(m Model, opts ...Option) *Agent {
 	if a.loggerProvider != nil {
 		lp = a.loggerProvider
 	}
+	a.records = lp
 	a.obs = observer{
 		tracer: tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(version)),
 		elog:   lp.Logger(instrumentationName, log.WithInstrumentationVersion(version)),
@@ -879,6 +883,15 @@ func (a *Agent) Logger() *slog.Logger {
 	}
 	return slog.Default()
 }
+
+// LoggerProvider returns the OpenTelemetry logger provider the agent's
+// runs emit their records through: the LoggerProvider option's value,
+// or the global provider resolved at New (which delegates, so an SDK
+// registered later is still reached). A satellite whose own records
+// must land beside the runs' — weft/thread's session compaction marker
+// (ADR 0028 §8) — emits through it, as Logger serves the same purpose
+// for log lines.
+func (a *Agent) LoggerProvider() log.LoggerProvider { return a.records }
 
 // TapPanics reports how many tap invocations have panicked and been
 // contained since construction — taps, OnMessages and OnRunEnd

@@ -608,6 +608,11 @@ type recorder struct {
 	eventPos    atomic.Int64
 	deltaPos    atomic.Int64
 	messagesIdx atomic.Int64
+	// growthTop is one past the index of the latest growth messages
+	// record (0 = none yet): what a request whose messages are the
+	// transcript points at. A compaction view takes an index on the
+	// same counter but never moves it (ADR 0028 §8).
+	growthTop atomic.Int64
 
 	// The request record's state (ADR 0028, request.go): one counter
 	// per kind, the per-run dedupe sets of the prompt and catalog
@@ -778,6 +783,8 @@ func (r *recorder) recordMessages(ctx context.Context, step int, msgs []Message,
 		}
 	}
 
+	idx := r.messagesIdx.Add(1) - 1
+	r.growthTop.Store(idx + 1)
 	var rec log.Record
 	rec.SetTimestamp(time.Now())
 	rec.SetEventName(eventNameMessages)
@@ -788,7 +795,7 @@ func (r *recorder) recordMessages(ctx context.Context, step int, msgs []Message,
 		attrRunID.String(r.runID),
 		attrContent.String(contentFull),
 		attrStepIndex.Int(step),
-		attrMessagesIndex.Int64(r.messagesIdx.Add(1) - 1),
+		attrMessagesIndex.Int64(idx),
 		attrMessagesCount.Int(len(msgs)),
 	}
 	if input {

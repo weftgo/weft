@@ -28,8 +28,9 @@ type DB interface {
 	// 100, max 1000.
 	Events(ctx context.Context, runID string, after int64, limit int) (EventPage, error)
 	// Transcript returns the messages bodies in index order, one per
-	// messages record, read through DedupTranscript — so they
-	// concatenate to the transcript the run held.
+	// growth messages record (a compaction view, ADR 0028 §8, is not
+	// transcript: see Compactions), read through DedupTranscript — so
+	// they concatenate to the transcript the run held.
 	Transcript(ctx context.Context, runID string) ([]json.RawMessage, error)
 	// TranscriptBatches is Transcript with what each messages record
 	// stored beside its body: its index, the step it joined
@@ -37,6 +38,16 @@ type DB interface {
 	// it is the run's input (weft.messages.input). The bodies are
 	// Transcript's, through DedupTranscript, one per record.
 	TranscriptBatches(ctx context.Context, runID string) ([]TranscriptBatch, error)
+	// Compactions returns the compactions a run's records name (ADR
+	// 0028 §8): the session marker thread emitted when the run was the
+	// first after a session compaction, then every run-scope view in
+	// index order — what a reader needs to draw the compaction and
+	// rebuild a request's messages. Transcript and TranscriptBatches
+	// never include a view: the plain transcript is growth records
+	// only. A messages record with an unknown weft.messages.reason is
+	// an error. ErrNotFound for an unknown run; empty, not an error,
+	// for a run that never compacted.
+	Compactions(ctx context.Context, runID string) ([]Compaction, error)
 
 	// The request record (ADR 0028). Requests pages a run's request
 	// records in index order, one per model-call attempt

@@ -36,6 +36,15 @@ const (
 	attrSystemHash       = attribute.Key("weft.system.hash")
 	attrCatalogHash      = attribute.Key("weft.catalog.hash")
 	attrInstructionsHash = attribute.Key("weft.instructions.hash")
+	attrMessagesReason   = attribute.Key("weft.messages.reason")
+	attrMessagesFromSeq  = attribute.Key("weft.messages.from_seq")
+	attrMessagesToSeq    = attribute.Key("weft.messages.to_seq")
+	attrCompactionHash   = attribute.Key("weft.compaction.hash")
+	attrCompactionScope  = attribute.Key("weft.compaction.scope")
+
+	// reasonCompacted is the one weft.messages.reason ADR 0028 §8
+	// defines: the record is a view, never part of the plain transcript.
+	reasonCompacted = "compacted"
 
 	eventNameRequest = "weft.request"
 	eventNamePrompt  = "weft.prompt"
@@ -255,7 +264,13 @@ type requestRecord struct {
 // when nothing records: every kind's Enabled is asked first. A panic
 // out of the logger is contained and counted; a body that does not
 // encode is dropped into the Debug log. Runs on the loop goroutine.
-func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req ModelRequest, info ModelInfo, parkSet *parkRule) (rr *requestRecord) {
+//
+// transcript is the run's transcript as the loop holds it; rewritten
+// says a PrepareStep chain ran, so req.Messages may differ from it.
+// When it does, the run-scope compaction view (ADR 0028 §8) is emitted
+// right before the request record and the request's messages_ref
+// names it; otherwise the ref names the latest growth record.
+func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req ModelRequest, info ModelInfo, parkSet *parkRule, transcript []Message, rewritten bool) (rr *requestRecord) {
 	defer r.contain(mctx, step, "request")
 	if mctx.Err() != nil {
 		return nil
@@ -264,7 +279,11 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 	capture := r.captureOn(mctx)
 	promptOn := capture && r.elog.Enabled(mctx, log.EnabledParameters{EventName: eventNamePrompt})
 	toolsOn := capture && r.elog.Enabled(mctx, log.EnabledParameters{EventName: eventNameTools})
-	if !reqOn && !promptOn && !toolsOn {
+	// The view record is content (the replacement messages), so it
+	// rides the messages kind's question; only a PrepareStep can make
+	// the request's messages differ from the transcript.
+	viewOn := capture && rewritten && r.elog.Enabled(mctx, log.EnabledParameters{EventName: eventNameMessages})
+	if !reqOn && !promptOn && !toolsOn && !viewOn {
 		return nil
 	}
 
@@ -309,6 +328,13 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 			r.seenCatalogs[catalog] = true
 		}
 	}
+	// The run-scope compaction view, between the tools and the request
+	// records: -1 when the request carries the transcript unchanged (or
+	// the view could not be recorded).
+	view := int64(-1)
+	if viewOn {
+		view = r.recordView(mctx, step, transcript, req.Messages)
+	}
 	if !reqOn {
 		return nil
 	}
@@ -334,10 +360,15 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 		Model:  requestModelBody(info),
 		Stream: true, // the Model contract is a stream (Model.Stream)
 	}
-	// The latest messages record is the view this request starts from;
-	// with capture off none exists and the index is omitted.
+	// The request's messages are the compaction view it was given, or
+	// else the transcript as of the latest growth record (never an
+	// earlier step's view: a run-scope rewrite applies to its own
+	// request alone, ADR 0028 §8); with capture off no messages record
+	// exists and the index is omitted.
 	if capture {
-		if last := r.messagesIdx.Load() - 1; last >= 0 {
+		if view >= 0 {
+			body.MessagesRef.Index = &view
+		} else if last := r.growthTop.Load() - 1; last >= 0 {
 			body.MessagesRef.Index = &last
 		}
 	}
@@ -502,4 +533,110 @@ func (r *recorder) debug(ctx context.Context, step int, what string, err error) 
 			slog.String("record", what),
 			slog.String(logErr, err.Error()))
 	}
+}
+
+// recordView emits the run-scope compaction view (ADR 0028 §8) when a
+// request's messages are not the run's transcript, and returns the
+// record's weft.messages.index — -1 when the two are equal (no record)
+// or the record could not be built. The replaced range is the
+// transcript's messages between the longest common prefix and the
+// longest common suffix (not overlapping the prefix), two messages
+// being equal when their wire JSON is byte-equal; the body is the
+// request's messages between the same two bounds. Reporting only: the
+// request is read, never touched. Runs on the loop goroutine, inside
+// recordRequest's containment.
+func (r *recorder) recordView(ctx context.Context, step int, transcript, sent []Message) int64 {
+	from, to, body, ok := compactionRange(transcript, sent)
+	if !ok {
+		return -1
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		if b, err = json.Marshal(quoteInvalidMessageArgs(body)); err != nil {
+			r.debug(ctx, step, "messages", err)
+			return -1
+		}
+	}
+	hash, err := compactionHash(from, to, b)
+	if err != nil {
+		r.debug(ctx, step, "messages", err)
+		return -1
+	}
+	idx := r.messagesIdx.Add(1) - 1
+	r.emitRecord(ctx, step, eventNameMessages, b, []attribute.KeyValue{
+		attrRecord.String("messages"),
+		attrRunID.String(r.runID),
+		attrContent.String(contentFull),
+		attrStepIndex.Int(step),
+		attrMessagesIndex.Int64(idx),
+		attrMessagesCount.Int(len(body)),
+		attrMessagesReason.String(reasonCompacted),
+		attrMessagesFromSeq.Int(from),
+		attrMessagesToSeq.Int(to),
+		attrCompactionScope.String("run"),
+		attrCompactionHash.String(hash),
+	})
+	// The index is taken whether or not the emit got through (a
+	// contained panic): the request names the view it was given, and a
+	// reader that misses the record sees a gap, never a wrong ref.
+	return idx
+}
+
+// compactionRange computes ADR 0028 §8's range between the transcript
+// and the messages a request carried: the half-open range [from, to)
+// of transcript ordinals the request replaced, and the request's
+// messages in its place. ok is false when the two are equal. A message
+// that does not encode (only invalid tool-call arguments do, and those
+// are quoted the way the records quote them) compares by its quoted
+// encoding.
+func compactionRange(transcript, sent []Message) (from, to int, body []Message, ok bool) {
+	enc := func(m Message) []byte {
+		b, err := json.Marshal(m)
+		if err != nil {
+			b, _ = json.Marshal(quoteInvalidMessageArgs([]Message{m})[0])
+		}
+		return b
+	}
+	n, m := len(transcript), len(sent)
+	tEnc := make([][]byte, n)
+	for i, msg := range transcript {
+		tEnc[i] = enc(msg)
+	}
+	sEnc := make([][]byte, m)
+	for i, msg := range sent {
+		sEnc[i] = enc(msg)
+	}
+	p := 0
+	for p < n && p < m && bytes.Equal(tEnc[p], sEnc[p]) {
+		p++
+	}
+	if p == n && p == m {
+		return 0, 0, nil, false
+	}
+	s := 0
+	for s < n-p && s < m-p && bytes.Equal(tEnc[n-1-s], sEnc[m-1-s]) {
+		s++
+	}
+	return p, n - s, sent[p : m-s], true
+}
+
+// compactionHash is weft.compaction.hash (ADR 0028 §8): sha256, lowercase
+// hex, over the canonical JSON (§5's encoder: values decoded with
+// UseNumber, map keys sorted, HTML not escaped, no trailing newline) of
+// {"entries", "from_seq", "to_seq"}, entries being the record's body.
+func compactionHash(from, to int, entries []byte) (string, error) {
+	dec := json.NewDecoder(bytes.NewReader(entries))
+	dec.UseNumber()
+	var decoded any
+	if err := dec.Decode(&decoded); err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	e := json.NewEncoder(&buf)
+	e.SetEscapeHTML(false)
+	if err := e.Encode(map[string]any{"entries": decoded, "from_seq": from, "to_seq": to}); err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(bytes.TrimSuffix(buf.Bytes(), []byte("\n")))
+	return hex.EncodeToString(sum[:]), nil
 }

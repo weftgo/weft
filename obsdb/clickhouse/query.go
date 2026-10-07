@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -359,7 +360,7 @@ func (d *DB) fillCountsOf(ctx context.Context, ids []string, byID map[string]*ob
 		args[i] = id
 	}
 	rs, err := d.conn.Query(ctx,
-		"SELECT RunId, uniqExactIf(Pos, Kind = 'event'), uniqExactIf(Pos, Kind = 'messages') FROM weft_records WHERE RunId IN ("+placeholders+") GROUP BY RunId",
+		"SELECT RunId, uniqExactIf(Pos, Kind = 'event'), uniqExactIf(Pos, Kind = 'messages' AND Reason = '') FROM weft_records WHERE RunId IN ("+placeholders+") GROUP BY RunId",
 		args...)
 	if err != nil {
 		return err
@@ -499,12 +500,14 @@ func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.Tra
 	if err := d.runExists(ctx, runID); err != nil {
 		return nil, err
 	}
+	// Growth records only (Reason = ''): a compaction view (ADR 0028
+	// §8) is not transcript; Compactions reads it.
 	// Step is weft_records.Step and Input weft_records.Input (0004;
 	// -1 on rows written before it). A row without a stored input flag
 	// has its index 0 inferred and marked so (obsdb.TranscriptBatch).
 	rs, err := d.conn.Query(ctx,
 		`SELECT Pos, Step, Input, Body FROM weft_records FINAL
-		WHERE RunId = ? AND Kind = 'messages' ORDER BY Pos`, runID)
+		WHERE RunId = ? AND Kind = 'messages' AND Reason = '' ORDER BY Pos`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -533,6 +536,78 @@ func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.Tra
 	// The later record of a rebuilt tool message is the authoritative
 	// one (the rule every backend reads through).
 	return obsdb.DedupBatches(out), nil
+}
+
+// Compactions reads the run's compaction records (ADR 0028 §8) from
+// otel_logs, the one table that keeps their attributes: weft_records
+// holds a view's Reason but not its range or hash, and thread's
+// session marker (kind compaction) is outside weft_records_mv's kinds.
+// Both carry weft.compaction.scope, so the attribute-key bloom index
+// narrows the scan to the granules that hold one. otel_logs is a plain
+// MergeTree: a retried batch's duplicate is dropped here, by (kind,
+// index).
+func (d *DB) Compactions(ctx context.Context, runID string) (_ []obsdb.Compaction, err error) {
+	if err := d.checkOpen(); err != nil {
+		return nil, err
+	}
+	defer d.closedErr(&err)
+	if err := d.runExists(ctx, runID); err != nil {
+		return nil, err
+	}
+	rs, err := d.conn.Query(ctx,
+		`SELECT LogAttributes, Body FROM otel_logs
+		WHERE mapContains(LogAttributes, 'weft.compaction.scope') AND LogAttributes['weft.run.id'] = ?
+		ORDER BY Timestamp`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rs.Close() }()
+	type key struct {
+		kind  string
+		index int64
+	}
+	seen := map[key]bool{}
+	out := []obsdb.Compaction{}
+	for rs.Next() {
+		var (
+			la   map[string]string
+			body string
+		)
+		if err := rs.Scan(&la, &body); err != nil {
+			return nil, err
+		}
+		attrs := make(map[string]any, len(la))
+		for k, v := range la {
+			attrs[k] = v
+		}
+		kind := la["weft.record"]
+		index := int64(-1)
+		if kind == "messages" {
+			n, perr := strconv.ParseInt(la["weft.messages.index"], 10, 64)
+			if perr != nil {
+				continue // a view without its index cannot be placed
+			}
+			index = n
+		}
+		step := -1
+		if n, perr := strconv.Atoi(la["weft.step.index"]); perr == nil {
+			step = n
+		}
+		c, ok, cerr := obsdb.CompactionOf(kind, index, step, attrs, []byte(body))
+		if cerr != nil {
+			return nil, fmt.Errorf("clickhouse: run %s: %w", runID, cerr)
+		}
+		if !ok || seen[key{kind, index}] {
+			continue
+		}
+		seen[key{kind, index}] = true
+		out = append(out, c)
+	}
+	if err := rs.Err(); err != nil {
+		return nil, err
+	}
+	obsdb.SortCompactions(out)
+	return out, nil
 }
 
 // loneAssistant reports whether a messages body is exactly one

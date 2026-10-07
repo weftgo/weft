@@ -60,6 +60,10 @@ type Weft struct {
 	ToolSeq                          int64 // -1 when absent
 	Playground                       bool
 	ExperimentID, ForkedFrom         string
+	// Reason is a messages record's weft.messages.reason: "" for
+	// transcript growth, "compacted" for a compaction view (ADR 0028
+	// §8), which is never counted or concatenated as transcript.
+	Reason string
 }
 
 // The identity-chain and record attribute names (ADR 0024's record
@@ -86,6 +90,14 @@ const (
 	attrPlayground   = "weft.playground"
 	attrExperimentID = "weft.experiment.id"
 	attrForkedFrom   = "weft.forked_from"
+
+	// ADR 0028 §8: the compaction view and the session marker.
+	attrMessagesReason  = "weft.messages.reason"
+	attrMessagesCount   = "weft.messages.count"
+	attrFromSeq         = "weft.messages.from_seq"
+	attrToSeq           = "weft.messages.to_seq"
+	attrCompactionHash  = "weft.compaction.hash"
+	attrCompactionScope = "weft.compaction.scope"
 )
 
 // DeriveSpan returns the weft identity a span carries, from its
@@ -130,6 +142,7 @@ func DeriveRecord(r Record) Weft {
 		Playground:   attrBool(r.Attrs, attrPlayground),
 		ExperimentID: attr(r.Attrs, attrExperimentID),
 		ForkedFrom:   attr(r.Attrs, attrForkedFrom),
+		Reason:       attr(r.Attrs, attrMessagesReason),
 	}
 	switch {
 	case has(r.Attrs, attrEventPos):

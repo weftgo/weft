@@ -57,6 +57,16 @@ module, ADR 0005).
   lacks them and must be recreated. ClickHouse now reads the transcript
   input flag as stored; only rows written before the column read
   `TranscriptBatch.InputDerived`.
+- **`obsdb.DB` gains `Compactions`** (ADR 0028 §8, plan A9): a run's
+  compactions as `obsdb.Compaction` — thread's session marker first,
+  then each run-scope view in index order with its step, half-open
+  range, hash and body. A third-party `DB` builds each through
+  `obsdb.CompactionOf` (from a `messages` record whose
+  `weft.messages.reason` is set, or a record of kind `compaction`) and
+  orders them with `obsdb.SortCompactions`. Its `Transcript` and
+  `TranscriptBatches` must skip every `messages` record whose
+  `weft.messages.reason` is set, and its messages count must not count
+  them (`obsdb.Weft.Reason` carries the attribute).
 
 ### Changed
 
@@ -70,6 +80,27 @@ module, ADR 0005).
 
 ### Added
 
+- **Compaction in the record (ADR 0028 §8, plan A9.1).** When a
+  `PrepareStep` sends a request whose messages are not the run's
+  transcript, the core emits one `messages` record with
+  `weft.messages.reason = compacted` right before that request's
+  record: `weft.messages.from_seq`/`to_seq` (the half-open range of the
+  transcript it replaced, by longest common prefix and suffix over wire
+  bytes), `weft.compaction.scope = run`, `weft.compaction.hash`, the
+  replacement messages as its body. The request's `messages_ref` names
+  it; the next request names the growth records again. Nothing is
+  emitted when nothing changed or with capture off, and what the model
+  receives is unchanged. `weft/thread` reports a session compaction
+  (threshold, `Compact`, `ApplyCompaction`, a trim, the overflow
+  re-run) as one record of kind `compaction` under the first run that
+  starts after it — scope `session`, the compaction entry's hash, the
+  messages replaced → summary entries and tokens before → after; no
+  messages. Both `obsdb` backends keep the plain transcript the growth
+  records alone and read both through `DB.Compactions`.
+- `(*core.Agent).LoggerProvider()` (and `weft.Agent`'s): the OTel
+  logger provider the agent's runs emit records through — the option's,
+  or the global one resolved at `New` — for satellites whose records
+  must land beside the run's.
 - `studio --version` prints `version.Runtime()` and exits.
 - **Studio's request record routes (ADR 0028 §10, plan A1).** `GET
   /api/runs/{id}/requests?step=&from=&limit=&refs=1`: one row per

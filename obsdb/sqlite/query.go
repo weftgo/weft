@@ -399,8 +399,12 @@ func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.Tra
 		if err := rs.Scan(&b.Index, &b.Step, &body, &attrs); err != nil {
 			return nil, err
 		}
+		input, reason := messagesFlags(attrs)
+		if reason != "" {
+			continue // a compaction view (ADR 0028 §8) is not transcript: Compactions reads it
+		}
 		b.Messages = json.RawMessage(body)
-		b.Input = messagesInput(attrs)
+		b.Input = input
 		out = append(out, b)
 	}
 	if err := rs.Err(); err != nil {
@@ -411,22 +415,75 @@ func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.Tra
 	return obsdb.DedupBatches(out), nil
 }
 
-// messagesInput reads weft.messages.input from a record's stored
-// attributes: a bool, or the string an OTLP sender may have sent.
-func messagesInput(attrs []byte) bool {
+// messagesFlags reads weft.messages.input (a bool, or the string an
+// OTLP sender may have sent) and weft.messages.reason from a record's
+// stored attributes.
+func messagesFlags(attrs []byte) (input bool, reason string) {
 	var a struct {
-		Input any `json:"weft.messages.input"`
+		Input  any    `json:"weft.messages.input"`
+		Reason string `json:"weft.messages.reason"`
 	}
 	if json.Unmarshal(attrs, &a) != nil {
-		return false
+		return false, ""
 	}
 	switch v := a.Input.(type) {
 	case bool:
-		return v
+		input = v
 	case string:
-		return v == "true"
+		input = v == "true"
 	}
-	return false
+	return input, a.Reason
+}
+
+func (d *DB) Compactions(ctx context.Context, runID string) (_ []obsdb.Compaction, err error) {
+	if err := d.checkOpen(); err != nil {
+		return nil, err
+	}
+	defer d.closedErr(&err)
+	if err := d.runExists(ctx, runID); err != nil {
+		return nil, err
+	}
+	// The views are messages records whose attributes name a reason
+	// (the instr narrows the scan; CompactionOf decides), the marker a
+	// record of thread's compaction kind.
+	rs, err := d.reads.QueryContext(ctx,
+		`SELECT kind, pos, step, body, attrs FROM records WHERE run_id = ?
+		AND (kind = 'compaction' OR (kind = 'messages' AND instr(attrs, '"weft.messages.reason"') > 0))
+		ORDER BY pos`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rs.Close() }()
+	out := []obsdb.Compaction{}
+	for rs.Next() {
+		var (
+			kind        string
+			pos         int64
+			step        int
+			body, attrs []byte
+		)
+		if err := rs.Scan(&kind, &pos, &step, &body, &attrs); err != nil {
+			return nil, err
+		}
+		var m map[string]any
+		if len(attrs) > 0 {
+			if err := unmarshalAttrs(attrs, &m); err != nil {
+				return nil, fmt.Errorf("sqlite: run %s record %d attrs: %w", runID, pos, err)
+			}
+		}
+		c, ok, err := obsdb.CompactionOf(kind, pos, step, m, body)
+		if err != nil {
+			return nil, fmt.Errorf("sqlite: run %s: %w", runID, err)
+		}
+		if ok {
+			out = append(out, c)
+		}
+	}
+	if err := rs.Err(); err != nil {
+		return nil, err
+	}
+	obsdb.SortCompactions(out)
+	return out, nil
 }
 
 func (d *DB) RunSpans(ctx context.Context, runID string) (_ []obsdb.Span, err error) {

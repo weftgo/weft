@@ -41,6 +41,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("SessionPaging", sessionPaging(open))
 	t.Run("TranscriptRebuilt", transcriptRebuilt(open))
 	t.Run("TranscriptSteps", transcriptSteps(open))
+	t.Run("Compactions", compactions(open))
 	t.Run("RequestRecords", requestRecords(open))
 	t.Run("RequestsManySteps", requestsManySteps(open))
 	t.Run("RequestRunRows", requestRunRows(open))
@@ -1058,6 +1059,171 @@ func transcriptSteps(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		if _, err := db.TranscriptBatches(ctx(), "nope"); !errors.Is(err, obsdb.ErrNotFound) {
 			t.Errorf("TranscriptBatches of an unknown run = %v, want ErrNotFound", err)
+		}
+	}
+}
+
+// compactions: ADR 0028 §8's two compaction records. A run whose
+// PrepareStep trimmed the middle at step 3 holds a compaction view —
+// a messages record with weft.messages.reason = compacted, its index
+// on the one counter — beside its growth records: the plain transcript
+// (Transcript, TranscriptBatches) is the growth records alone, byte for
+// byte; the run's messages count excludes the view; Compactions returns
+// it with its half-open range, hash, step and body. A run that was the
+// first after a session compaction holds thread's marker (kind
+// compaction, no messages), returned first, never applied. A view with
+// a reason this build does not know fails Compactions loudly.
+func compactions(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		msg := func(role, text string) string {
+			return `[{"role":"` + role + `","content":[{"type":"text","text":"` + text + `"}]}]`
+		}
+		step := func(n int) map[string]any { return map[string]any{"weft.step.index": int64(n)} }
+		recs := []obsdb.Record{
+			record("k1", "event", "run_start", 0, `{"type":"run_start","id":"k1"}`, nil),
+			record("k1", "messages", "", 0, msg("user", "u0"), map[string]any{"weft.messages.input": true, "weft.step.index": int64(0)}),
+		}
+		growth := []string{msg("user", "u0")}
+		idx := int64(1)
+		for s := 0; s < 3; s++ {
+			for _, role := range []string{"assistant", "tool"} {
+				body := msg(role, fmt.Sprintf("%s%d", role[:1], s))
+				recs = append(recs, record("k1", "messages", "", idx, body, step(s)))
+				growth = append(growth, body)
+				idx++
+			}
+		}
+		const view = `[{"role":"user","content":[{"type":"text","text":"summary"}]}]`
+		recs = append(recs, record("k1", "messages", "", idx, view, map[string]any{
+			"weft.step.index": int64(3), "weft.messages.count": int64(1),
+			"weft.messages.reason": "compacted", "weft.messages.from_seq": int64(1), "weft.messages.to_seq": int64(5),
+			"weft.compaction.scope": "run", "weft.compaction.hash": "h_view",
+		}))
+		idx++
+		recs = append(recs, record("k1", "messages", "", idx, msg("assistant", "a3"), step(3)))
+		growth = append(growth, msg("assistant", "a3"))
+		recs = append(recs, record("k1", "event", "run_finish", 1, `{"type":"run_finish","id":"k1","steps":4}`, nil))
+		if err := db.Write(ctx(), obsdb.Batch{Records: recs}); err != nil {
+			t.Fatal(err)
+		}
+		tr, err := db.Transcript(ctx(), "k1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tr) != len(growth) {
+			t.Fatalf("Transcript = %d bodies, want the %d growth records", len(tr), len(growth))
+		}
+		for i := range tr {
+			if string(tr[i]) != growth[i] {
+				t.Errorf("Transcript body %d = %s, want %s", i, tr[i], growth[i])
+			}
+		}
+		batches, err := db.TranscriptBatches(ctx(), "k1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, b := range batches {
+			if b.Index == 7 {
+				t.Errorf("TranscriptBatches holds the view (index 7): %s", b.Messages)
+			}
+		}
+		if len(batches) != len(growth) || batches[len(batches)-1].Index != 8 {
+			t.Errorf("batches = %d, last index %d; want %d, 8", len(batches), batches[len(batches)-1].Index, len(growth))
+		}
+		det, err := db.Run(ctx(), "k1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if det.MessageCount != int64(len(growth)) {
+			t.Errorf("MessageCount = %d, want %d (the view excluded)", det.MessageCount, len(growth))
+		}
+		page, err := db.Runs(ctx(), obsdb.RunQuery{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range page.Runs {
+			if r.ID == "k1" && r.MessageCount != int64(len(growth)) {
+				t.Errorf("Runs MessageCount = %d, want %d", r.MessageCount, len(growth))
+			}
+		}
+		cs, err := db.Compactions(ctx(), "k1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cs) != 1 {
+			t.Fatalf("Compactions = %+v, want the one view", cs)
+		}
+		c := cs[0]
+		if c.Scope != obsdb.CompactionRun || c.Hash != "h_view" || c.Index != 7 || c.Step != 3 ||
+			c.FromSeq != 1 || c.ToSeq != 5 || c.Replaced != 4 || c.Entries != 1 || string(c.Messages) != view {
+			t.Errorf("view = %+v", c)
+		}
+
+		// The session marker: the first run after a thread compaction.
+		marker := record("k2", "compaction", "", 0,
+			`{"scope":"session","hash":"h_sess","entry":"e1","reason":"threshold","replaced":12,"entries":1,"messages_before":14,"messages_after":3,"tokens_before":8100,"tokens_after":1200}`,
+			map[string]any{"weft.compaction.scope": "session", "weft.compaction.hash": "h_sess", "weft.content": "none"})
+		marker.EventName = "weft.compaction"
+		marker.Time = at(500 * time.Millisecond)
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+			record("k2", "event", "run_start", 0, `{"type":"run_start","id":"k2"}`, nil),
+			marker,
+			record("k2", "messages", "", 0, msg("user", "the compacted context"), map[string]any{"weft.messages.input": true, "weft.step.index": int64(0)}),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		// A retried transport's duplicate is still one marker.
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{marker}}); err != nil {
+			t.Fatal(err)
+		}
+		cs, err = db.Compactions(ctx(), "k2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cs) != 1 {
+			t.Fatalf("k2 Compactions = %+v, want the one marker", cs)
+		}
+		if m := cs[0]; m.Scope != obsdb.CompactionSession || m.Hash != "h_sess" || m.Index != -1 || m.Step != -1 ||
+			m.Reason != "threshold" || m.Replaced != 12 || m.Entries != 1 || m.TokensBefore != 8100 || m.TokensAfter != 1200 ||
+			m.Messages != nil {
+			t.Errorf("marker = %+v", m)
+		}
+		if tr, err := db.Transcript(ctx(), "k2"); err != nil || len(tr) != 1 {
+			t.Errorf("k2 Transcript = %d bodies, %v; the marker is not transcript", len(tr), err)
+		}
+		if det, err := db.Run(ctx(), "k2"); err != nil || det.MessageCount != 1 || det.Started != at(0) {
+			t.Errorf("k2 run = count %d started %v (%v); want 1 and run_start's time", det.MessageCount, det.Started, err)
+		}
+
+		// A run that never compacted: empty, not an error; unknown: ErrNotFound.
+		if cs, err := db.Compactions(ctx(), "k2x"); !errors.Is(err, obsdb.ErrNotFound) {
+			t.Errorf("Compactions of an unknown run = %v, %v; want ErrNotFound", cs, err)
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+			record("k3", "event", "run_start", 0, `{"type":"run_start","id":"k3"}`, nil),
+			record("k3", "messages", "", 0, msg("user", "plain"), step(0)),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		if cs, err := db.Compactions(ctx(), "k3"); err != nil || len(cs) != 0 {
+			t.Errorf("Compactions of a plain run = %+v, %v; want none", cs, err)
+		}
+
+		// A reason this build does not know: readers fail loudly.
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+			record("k4", "event", "run_start", 0, `{"type":"run_start","id":"k4"}`, nil),
+			record("k4", "messages", "", 0, msg("user", "u"), step(0)),
+			record("k4", "messages", "", 1, msg("user", "v"), map[string]any{
+				"weft.step.index": int64(1), "weft.messages.reason": "rewound", "weft.compaction.scope": "run"}),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Compactions(ctx(), "k4"); err == nil || !strings.Contains(err.Error(), "rewound") {
+			t.Errorf("Compactions over an unknown reason = %v, want an error naming it", err)
+		}
+		if tr, err := db.Transcript(ctx(), "k4"); err != nil || len(tr) != 1 {
+			t.Errorf("k4 Transcript = %d, %v; a view of any reason is never transcript", len(tr), err)
 		}
 	}
 }

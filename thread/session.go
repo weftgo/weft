@@ -363,7 +363,14 @@ type Session struct {
 	// join that turn's end batch. Both are guarded by mu; the drain
 	// itself (steerSource) never blocks.
 	steerQueue []queuedSteer
-	handed     []queuedSteer
+
+	// compactMarker is the session compaction marker (ADR 0028 §8)
+	// waiting for the next run's RunStart: set by ApplyCompaction,
+	// consumed by reportCompaction. Guarded by mu; not persisted (it is
+	// informational, and a restart's first run starts on a context the
+	// file already holds compacted).
+	compactMarker *compactionMarker
+	handed        []queuedSteer
 
 	// The compaction trigger's state (ADR 0020 §2): lastInput is the
 	// provider-reported input of the last model step the session ran,

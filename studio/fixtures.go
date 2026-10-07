@@ -191,6 +191,7 @@ func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) 
 	}
 	// A batch dropped here would shift every later request key:
 	// fixtures that silently never match. Refuse instead.
+	//
 	// TODO(A2 debt: stored step (F2/H6)): key fixtures by the stored step and input (runSteps), not by record order.
 	input, steps, err := sourceSteps(bodies)
 	if err != nil {

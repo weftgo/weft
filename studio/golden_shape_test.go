@@ -342,11 +342,14 @@ func TestTranscriptStepsFromARealRun(t *testing.T) {
 		Role    string `json:"role"`
 		Content []struct {
 			Type string `json:"type"`
+			ID   string `json:"id"`
 		} `json:"content"`
 	}
 	_ = json.Unmarshal(rows[0].Messages[len(rows[0].Messages)-1], &lastIn)
-	if lastIn.Role != "assistant" || len(lastIn.Content) != 2 || lastIn.Content[0].Type != "tool_call" {
-		t.Errorf("the resume's input record ends with %+v, want the assistant message with both calls", lastIn)
+	if lastIn.Role != "assistant" || len(lastIn.Content) != 2 ||
+		lastIn.Content[0].Type != "tool_call" || lastIn.Content[0].ID != "c_echo" ||
+		lastIn.Content[1].Type != "tool_call" || lastIn.Content[1].ID != "c_ref9" {
+		t.Errorf("the resume's input record ends with %+v, want the assistant message with exactly the calls c_echo and c_ref9", lastIn)
 	}
 	var rebuilt struct {
 		Content []struct {

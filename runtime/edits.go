@@ -20,10 +20,12 @@ import (
 // wrote. Both surfaces reject with the named reasons; the runtime's
 // copy is authoritative (§10.4).
 //
-// Steps are the source run's own: step 0 is its first assistant
-// message, whatever conversation the run was fed before it (the
-// input). An edit names a step of the run, never a turn of the
-// context.
+// Steps are the source run's own: each message belongs to the step its
+// messages record stored (weft.step.index, ADR 0028 §8 — a resumed
+// run's rebuilt tool message is step 0's, a steered message the step
+// that just finished), numbered by order only for a source without
+// stored steps (orderSteps). An edit names a step of the run, never a
+// turn of the context.
 
 // keptPrefix is §5.1's from_step semantics over a resolved source: the
 // run's whole input, then its steps through step from_step − 1 (their
@@ -33,9 +35,8 @@ import (
 // refuses a prefix that leaves one of the kept steps' calls without a
 // result: Repair would synthesize one, and the experiment would run on
 // a transcript nobody wrote.
-// TODO(A2 debt: stored step (F2/H6)): count steps by the stored step (obsdb.TranscriptBatch.Step), not by assistant order.
 func keptPrefix(src *sourceRun, fromStep int) ([]core.Message, error) {
-	cut := cutAtStep(src.steps, fromStep)
+	cut := src.cut(fromStep)
 	if err := prefixComplete(src.steps[:cut]); err != nil {
 		return nil, err
 	}
@@ -63,7 +64,8 @@ func applyTranscriptEdits(src *sourceRun, fromStep int, edits []transcriptEdit) 
 	if fromStep <= 0 {
 		return nil, fmt.Errorf("transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)")
 	}
-	cut := cutAtStep(src.steps, fromStep)
+	cut := src.cut(fromStep)
+	stepOf := src.stepIndex()[:cut]
 	// The kept steps are copied deep enough to patch: the source is
 	// shared by every reader of this command.
 	steps := make([]core.Message, cut)
@@ -87,11 +89,11 @@ func applyTranscriptEdits(src *sourceRun, fromStep int, edits []transcriptEdit) 
 			if e.CallID == "" {
 				return nil, fmt.Errorf("a tool_result edit needs call_id")
 			}
-			if !patchResult(steps, e.Step, e.CallID, e.ToolResult) {
+			if !patchResult(steps, stepOf, e.Step, e.CallID, e.ToolResult) {
 				return nil, fmt.Errorf("no tool call %q in the kept prefix's step %d", e.CallID, e.Step)
 			}
 		case e.Content != "":
-			if !rewriteReply(steps, e.Step, e.Content) {
+			if !rewriteReply(steps, stepOf, e.Step, e.Content) {
 				return nil, fmt.Errorf("step %d has no assistant reply in the kept prefix (or it carried tool calls: patch their results instead)", e.Step)
 			}
 		default:
@@ -107,18 +109,13 @@ func applyTranscriptEdits(src *sourceRun, fromStep int, edits []transcriptEdit) 
 }
 
 // patchResult replaces one call's result content in place — the result
-// of call callID inside step (a tool message belongs to the step its
-// assistant message opened). Scoped to the step: call ids are only
-// unique within a run's step, and a deterministic model reuses them.
-func patchResult(steps []core.Message, step int, callID, content string) bool {
+// of call callID inside step (stepOf[i] is the step steps[i] joined).
+// Scoped to the step: call ids are only unique within a run's step,
+// and a deterministic model reuses them.
+func patchResult(steps []core.Message, stepOf []int, step int, callID, content string) bool {
 	patched := false
-	at := -1 // the step the walk is in; -1 before the first assistant message
 	for mi := range steps {
-		if steps[mi].Role == core.RoleAssistant {
-			at++
-			continue
-		}
-		if steps[mi].Role != core.RoleTool || at != step {
+		if steps[mi].Role != core.RoleTool || stepOf[mi] != step {
 			continue
 		}
 		for pi := range steps[mi].Content {
@@ -138,22 +135,18 @@ func patchResult(steps []core.Message, step int, callID, content string) bool {
 // rewriteReply replaces one step's assistant message with a plain-text
 // reply. It refuses a message that carried tool calls: their results
 // would become orphans Repair drops silently.
-func rewriteReply(steps []core.Message, step int, content string) bool {
-	assistants := 0
+func rewriteReply(steps []core.Message, stepOf []int, step int, content string) bool {
 	for mi := range steps {
-		if steps[mi].Role != core.RoleAssistant {
+		if steps[mi].Role != core.RoleAssistant || stepOf[mi] != step {
 			continue
 		}
-		if assistants == step {
-			for _, p := range steps[mi].Content {
-				if _, ok := p.(core.ToolCallPart); ok {
-					return false
-				}
+		for _, p := range steps[mi].Content {
+			if _, ok := p.(core.ToolCallPart); ok {
+				return false
 			}
-			steps[mi].Content = []core.Part{core.TextPart{Text: content}}
-			return true
 		}
-		assistants++
+		steps[mi].Content = []core.Part{core.TextPart{Text: content}}
+		return true
 	}
 	return false
 }

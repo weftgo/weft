@@ -52,7 +52,7 @@ import {
   
 } from "@/lib/api"
 import type {AgentView, CommandStatus, Message, PlaygroundRunBody, RunRow, RuntimeView} from "@/lib/api";
-import { placeBatches, producedText, splitTranscript } from "@/lib/events"
+import { placeBatches, producedText } from "@/lib/events"
 import type { TranscriptBatch } from "@/lib/events"
 import { diffLines, diffSummary } from "@/lib/diff"
 import type { DiffRow } from "@/lib/diff"
@@ -403,28 +403,38 @@ export interface EditField {
  * panel's per-step fields are the shape (element.ts's drawer).
  *
  * Each message counts toward the step its batch joined — the stored
- * step the API carries (ADR 0028 §8; edits.go's runSteps reads the
- * same) — and the input record (the conversation the run was fed) is
- * not the run's own steps. Only a transcript with a batch placed by
- * inference (placeBatches' `derived`: no stored step) is counted the
- * pre-ADR-0028 way, as the server then counts it: each assistant
- * message the run PRODUCED opens a step, and a tool message recorded
- * before the first one (a resumed run's rebuilt results) is no kept
- * step's — the server patches results inside a step only. */
+ * step the API carries (ADR 0028 §8) — and the input record (the
+ * conversation the run was fed) is not the run's own steps. The split
+ * is the row's input flag; only when a row carries no stored step (-1,
+ * or an older Studio without the flag) are the steps numbered by order:
+ * each assistant message opens the next, what precedes the first is
+ * step 0's. Studio's runSteps and the runtime's orderSteps apply the
+ * same rule, so a field offered here is one both accept. */
 export function editFieldsOf(
   batches: TranscriptBatch[],
   fromStep: number
 ): EditField[] {
   const placed = placeBatches(batches)
+  const list = Array.isArray(batches) ? batches : []
+  const stored =
+    list.length > 0 &&
+    list.every(
+      (b) =>
+        typeof b.step === "number" && b.step >= 0 && typeof b.input === "boolean"
+    )
   const tagged: { step: number; m: Message }[] = []
-  if (placed.length > 0 && placed.every((b) => !b.derived)) {
-    for (const b of placed)
-      if (!b.input) for (const m of b.messages) tagged.push({ step: b.step, m })
-  } else {
+  for (const [i, b] of placed.entries()) {
+    const flag = list[i]?.input
+    const input = typeof flag === "boolean" ? flag : b.input
+    if (input) continue
+    for (const m of b.messages)
+      tagged.push({ step: stored ? (list[i].step as number) : -1, m })
+  }
+  if (!stored) {
     let at = -1
-    for (const m of splitTranscript(batches).produced) {
-      if (m.role === "assistant") at++
-      tagged.push({ step: at, m })
+    for (const t of tagged) {
+      if (t.m.role === "assistant") at++
+      t.step = Math.max(at, 0)
     }
   }
   const fields: EditField[] = []

@@ -107,6 +107,33 @@ describe("editFieldsOf", () => {
     ])
   })
 
+  it("splits on the input flag and numbers by order when a row has no stored step", () => {
+    // A resumed run, one record without a step: the rebuilt tool
+    // message precedes step 0's assistant message and is step 0's.
+    const mixed = [
+      { index: 0, step: 0, input: true, messages: [user("refund"), assistantCall("c_r", "refund")] },
+      { index: 1, step: -1, input: false, badge: "not_recorded", messages: [toolResult("c_r", "refund", "refunded")] },
+      { index: 2, step: 0, input: false, messages: [assistantCall("c1", "lookup_order")] },
+      { index: 3, step: 0, input: false, messages: [toolResult("c1", "lookup_order", "shipped")] },
+      { index: 4, step: 1, input: false, messages: [assistantText("done")] },
+    ]
+    expect(editFieldsOf(mixed, 1)).toEqual([
+      { step: 0, callID: "c_r", name: "refund", placeholder: "refunded" },
+      { step: 0, callID: "c1", name: "lookup_order", placeholder: "shipped" },
+    ])
+    // A run fed no messages, no stored steps: no row is flagged input,
+    // so none is taken for it.
+    const bare = [
+      { index: 0, step: -1, input: false, messages: [assistantCall("c1", "lookup_order")] },
+      { index: 1, step: -1, input: false, messages: [toolResult("c1", "lookup_order", "shipped")] },
+      { index: 2, step: -1, input: false, messages: [assistantText("done")] },
+    ]
+    expect(editFieldsOf(bare, 2)).toEqual([
+      { step: 0, callID: "c1", name: "lookup_order", placeholder: "shipped" },
+      { step: 1, name: "reply", placeholder: "done" },
+    ])
+  })
+
   it("keeps nothing when the whole turn re-runs (from_step 0)", () => {
     expect(editFieldsOf(batches, 0)).toEqual([])
   })

@@ -37,6 +37,11 @@ import (
 type sourceRun struct {
 	input []core.Message
 	steps []core.Message
+	// stepOf[i] is the step steps[i] joined, as its messages record
+	// stored it (weft.step.index, ADR 0028 §8). nil when the source
+	// carried no step for some record (a row from before the stamp, the
+	// thread path): orderSteps numbers them instead.
+	stepOf []int
 }
 
 // all is the whole transcript: input, then steps.
@@ -46,16 +51,47 @@ func (s *sourceRun) all() []core.Message {
 	return append(out, s.steps...)
 }
 
-// stepCount is how many steps the run recorded — one assistant message
-// opens each.
+// stepIndex is the step of each of the run's own messages: the stored
+// one, else the order walk.
+func (s *sourceRun) stepIndex() []int {
+	if s.stepOf != nil && len(s.stepOf) == len(s.steps) {
+		return s.stepOf
+	}
+	return orderSteps(s.steps)
+}
+
+// orderSteps is the fallback for a source without stored steps: each
+// assistant message opens the next step, and what comes before the
+// first one (a resumed run's rebuilt tool message) is step 0's — where
+// the core stamps it.
+func orderSteps(steps []core.Message) []int {
+	out := make([]int, len(steps))
+	at := -1
+	for i, m := range steps {
+		if m.Role == core.RoleAssistant {
+			at++
+		}
+		out[i] = max(at, 0)
+	}
+	return out
+}
+
+// stepCount is how many steps the run recorded: one past the last step
+// holding an assistant message (each model call writes one).
 func (s *sourceRun) stepCount() int {
 	n := 0
-	for _, m := range s.steps {
-		if m.Role == core.RoleAssistant {
-			n++
+	idx := s.stepIndex()
+	for i, m := range s.steps {
+		if m.Role == core.RoleAssistant && idx[i]+1 > n {
+			n = idx[i] + 1
 		}
 	}
 	return n
+}
+
+// cut is §5.1's from_step cut over the run's own steps (cutAt).
+func (s *sourceRun) cut(fromStep int) int {
+	return cutAt(s.steps, s.stepIndex(), fromStep)
 }
 
 // The bounds on a source transcript read: the fetch must answer inside
@@ -85,18 +121,24 @@ func (l *link) sourceTranscript(ctx context.Context, agent *core.Agent, runID st
 	return l.transcriptFromStudio(ctx, runID)
 }
 
-// transcriptFromObsdb reads the run's messages bodies from the local
-// sink: one JSON array of core.Message per messages record, in order.
+// transcriptFromObsdb reads the run's messages records from the local
+// sink: one JSON array of core.Message per record, in order, each with
+// the step and input flag it stored.
 func transcriptFromObsdb(ctx context.Context, db obsdb.DB, runID string) (*sourceRun, error) {
-	bodies, err := db.Transcript(ctx, runID)
+	batches, err := db.TranscriptBatches(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
-	return decodeBodies(bodies)
+	src := make([]sourceBatch, len(batches))
+	for i, b := range batches {
+		src[i] = sourceBatch{step: b.Step, input: b.Input, inputKnown: true, body: b.Messages}
+	}
+	return decodeBatches(src)
 }
 
 // transcriptFromStudio is path 3: the Studio API's transcript
-// ({batches: [{index, step, messages}]}), with the link's token.
+// ({batches: [{index, step, input, badge, messages}]}), with the link's
+// token.
 func (l *link) transcriptFromStudio(ctx context.Context, runID string) (*sourceRun, error) {
 	// A run id is path segments (a subagent's child id carries slashes);
 	// escaping keeps a "?" or "#" in a hostile id from re-aiming the
@@ -121,7 +163,8 @@ func (l *link) transcriptFromStudio(ctx context.Context, runID string) (*sourceR
 	var body struct {
 		Batches []struct {
 			Index    int64           `json:"index"`
-			Step     int             `json:"step"`
+			Step     *int            `json:"step"`
+			Input    *bool           `json:"input"`
 			Messages json.RawMessage `json:"messages"`
 		} `json:"batches"`
 	}
@@ -132,40 +175,87 @@ func (l *link) transcriptFromStudio(ctx context.Context, runID string) (*sourceR
 		}
 		return nil, err
 	}
-	bodies := make([]json.RawMessage, 0, len(body.Batches))
+	batches := make([]sourceBatch, 0, len(body.Batches))
 	for _, b := range body.Batches {
-		bodies = append(bodies, b.Messages)
+		sb := sourceBatch{step: -1, body: b.Messages}
+		// A Studio older than the input flag served a step it derived
+		// (0 for every batch): only a row with the flag carries a
+		// stored step (-1 with badge not_recorded when it has none).
+		if b.Input != nil {
+			sb.input, sb.inputKnown = *b.Input, true
+			if b.Step != nil {
+				sb.step = *b.Step
+			}
+		}
+		batches = append(batches, sb)
 	}
-	return decodeBodies(bodies)
+	return decodeBatches(batches)
 }
 
-// decodeBodies turns messages bodies ([]core.Message each, or null)
-// into a sourceRun. The first record of a run is its input record —
-// the loop writes the fed-in transcript before any step (D1) — and
-// every later one is what a step added; that position is the split.
-// A run with no messages at all (content capture off) is an error:
-// there is nothing to re-run from.
-// TODO(A2 debt: stored step (F2/H6)): split by the stored step and input (obsdb.DB.TranscriptBatches), not by record order.
+// sourceBatch is one messages record as a source path read it: its
+// body, the step it stored (-1: none) and its input flag when the path
+// carries one (stored, or inferred by a backend without the attribute).
+type sourceBatch struct {
+	step       int
+	input      bool
+	inputKnown bool
+	body       json.RawMessage
+}
+
+// decodeBodies is decodeBatches over bare bodies — no stored step, no
+// input flag: the first record is the input.
 func decodeBodies(bodies []json.RawMessage) (*sourceRun, error) {
+	batches := make([]sourceBatch, len(bodies))
+	for i, b := range bodies {
+		batches[i] = sourceBatch{step: -1, body: b}
+	}
+	return decodeBatches(batches)
+}
+
+// decodeBatches turns messages records ([]core.Message each, or null)
+// into a sourceRun. The split is the input flag: the input record (on a
+// partial resume a prefix of what the run was fed; the tail is a step-0
+// record) is the input, every other record what a step added. A record
+// without a flag (an older source) is split by position — the first is
+// the input, as the loop writes it first (D1). Each step message keeps
+// its record's stored step; when any record stored none, the steps are
+// numbered by order instead (orderSteps). A run with no messages at all
+// (content capture off) is an error: there is nothing to re-run from.
+func decodeBatches(batches []sourceBatch) (*sourceRun, error) {
 	src := &sourceRun{}
+	stored := true
+	var stepOf []int
 	first := true
-	for _, body := range bodies {
-		if len(body) == 0 || string(body) == "null" {
+	for _, b := range batches {
+		if len(b.body) == 0 || string(b.body) == "null" {
 			continue
 		}
 		var batch []core.Message
-		if err := json.Unmarshal(body, &batch); err != nil {
+		if err := json.Unmarshal(b.body, &batch); err != nil {
 			return nil, fmt.Errorf("messages body: %w", err)
 		}
-		if first {
-			src.input = batch
-			first = false
+		isInput := first
+		if b.inputKnown {
+			isInput = b.input
+		}
+		first = false
+		if isInput {
+			src.input = append(src.input, batch...)
 			continue
 		}
-		src.steps = append(src.steps, batch...)
+		if b.step < 0 {
+			stored = false
+		}
+		for _, m := range batch {
+			src.steps = append(src.steps, m)
+			stepOf = append(stepOf, b.step)
+		}
 	}
 	if len(src.input) == 0 && len(src.steps) == 0 {
 		return nil, fmt.Errorf("the run recorded no messages (content capture off?)")
+	}
+	if stored {
+		src.stepOf = stepOf
 	}
 	return src, nil
 }

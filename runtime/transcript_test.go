@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -158,5 +159,46 @@ func TestTranscriptFromThreadMemory(t *testing.T) {
 		if !validRunID(id) {
 			t.Errorf("validRunID(%q) = false, want accepted", id)
 		}
+	}
+}
+
+// TestDecodeBatchesSplitsOnTheFlag: the input flag splits a source,
+// never the position (a run fed no messages has no input record); each
+// step message keeps its record's stored step, and one record without
+// a step numbers the whole run by order, the rebuilt tool message that
+// precedes the first model call being step 0's either way.
+func TestDecodeBatchesSplitsOnTheFlag(t *testing.T) {
+	js := func(msgs ...core.Message) json.RawMessage {
+		b, err := json.Marshal(msgs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	call := core.Message{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c1", Name: "lookup", Args: []byte(`{}`)}}}
+	result := core.Message{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c1", Name: "lookup", Content: "ok"}}}
+	stored, err := decodeBatches([]sourceBatch{
+		{step: 0, inputKnown: true, body: js(result)}, // a resume's tail, no input record
+		{step: 0, inputKnown: true, body: js(call)},
+		{step: 1, inputKnown: true, body: js(core.Assistant("done"))},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.input) != 0 || fmt.Sprint(stored.stepIndex()) != "[0 0 1]" || stored.stepCount() != 2 || stored.cut(1) != 2 {
+		t.Errorf("stored = input %d, steps %v, count %d, cut(1) %d; want no input, [0 0 1], 2, 2",
+			len(stored.input), stored.stepIndex(), stored.stepCount(), stored.cut(1))
+	}
+	mixed, err := decodeBatches([]sourceBatch{
+		{step: 0, input: true, inputKnown: true, body: js(core.User("q"))},
+		{step: -1, inputKnown: true, body: js(result)},
+		{step: 0, inputKnown: true, body: js(call)},
+		{step: 1, inputKnown: true, body: js(core.Assistant("done"))},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mixed.input) != 1 || mixed.stepOf != nil || fmt.Sprint(mixed.stepIndex()) != "[0 0 1]" {
+		t.Errorf("mixed = input %d, stored %v, steps %v; want 1, none stored, [0 0 1] by order", len(mixed.input), mixed.stepOf, mixed.stepIndex())
 	}
 }

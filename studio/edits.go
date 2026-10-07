@@ -32,45 +32,24 @@ import (
 //     patch is scoped to the step it names (call ids are a step's own
 //     — a deterministic model reuses them).
 //
-// Only a transcript whose records carry no step (a ClickHouse row from
-// before 0004, a producer that never stamped one) or whose input flag
-// the backend inferred is counted the pre-ADR-0028 way, by assistant
-// order — weft/runtime's edits.go and transcript.go rule, which the
-// runtime still applies (A2 debt: stored step (F2/H6)).
+// The split is the input flag (stored, or inferred by a backend
+// without the attribute). Only a transcript with a record that carries
+// no step (a ClickHouse row from before 0004, a producer that never
+// stamped one) is numbered by order — each assistant message opens the
+// next step, what precedes the first is step 0's — the same rule as
+// weft/runtime's orderSteps, so the two never disagree on a command.
 
-// stepMessage is one of the run's own messages and the step it joined
-// (-1: recorded before the run's first model call on a transcript
-// counted by order).
+// stepMessage is one of the run's own messages and the step it joined.
 type stepMessage struct {
 	step int
 	msg  core.Message
 }
 
-// runSteps returns the run's own messages, each with its step: the
-// stored step when every batch carries one and a read input flag, else
-// the order walk over sourceSteps.
+// runSteps returns the run's own messages (every record but the input
+// one), each with its step: the stored step when every record carries
+// one, else the order walk.
 func runSteps(batches []obsdb.TranscriptBatch) ([]stepMessage, error) {
-	stored := len(batches) > 0
-	for _, b := range batches {
-		if b.Step < 0 || b.InputDerived {
-			stored = false
-		}
-	}
-	if !stored {
-		_, msgs, err := sourceSteps(obsdb.TranscriptBodies(batches))
-		if err != nil {
-			return nil, err
-		}
-		out := make([]stepMessage, len(msgs))
-		at := -1
-		for i, m := range msgs {
-			if m.Role == core.RoleAssistant {
-				at++
-			}
-			out[i] = stepMessage{step: at, msg: m}
-		}
-		return out, nil
-	}
+	stored := true
 	var out []stepMessage
 	for _, b := range batches {
 		if b.Input || len(b.Messages) == 0 || string(b.Messages) == "null" {
@@ -80,8 +59,20 @@ func runSteps(batches []obsdb.TranscriptBatch) ([]stepMessage, error) {
 		if err := json.Unmarshal(b.Messages, &batch); err != nil {
 			return nil, fmt.Errorf("messages body: %w", err)
 		}
+		if b.Step < 0 {
+			stored = false
+		}
 		for _, m := range batch {
 			out = append(out, stepMessage{step: b.Step, msg: m})
+		}
+	}
+	if !stored {
+		at := -1
+		for i := range out {
+			if out[i].msg.Role == core.RoleAssistant {
+				at++
+			}
+			out[i].step = max(at, 0)
 		}
 	}
 	return out, nil
@@ -199,14 +190,15 @@ func validateTranscriptEdits(steps []stepMessage, fromStep int, edits []linkrunt
 }
 
 // cutTranscriptAtStep is §5.1's from_step cut over a run's own steps:
-// the index of the first message of step fromStep or later, so what
-// lies before it is steps 0..fromStep−1 complete.
+// the index of step fromStep's assistant message (its model call), so
+// what lies before it is steps 0..fromStep−1 complete — weft/runtime's
+// cutAt.
 func cutTranscriptAtStep(steps []stepMessage, fromStep int) int {
 	if fromStep < 0 {
 		fromStep = 0
 	}
 	for i, m := range steps {
-		if m.step >= fromStep {
+		if m.msg.Role == core.RoleAssistant && m.step >= fromStep {
 			return i
 		}
 	}

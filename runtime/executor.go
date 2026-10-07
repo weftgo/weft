@@ -376,7 +376,7 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) (status, 
 	// pending call must match: a partial match left pending would be
 	// denied "no decision" by the resume.
 	if cmd.src != nil && (cmd.SideEffects == "" || cmd.SideEffects == "substitute") {
-		cut := cutAtStep(cmd.src.steps, cmd.Source.FromStep)
+		cut := cmd.src.cut(cmd.Source.FromStep)
 		records := recordedCalls(cmd.src.steps[cut:], cmd.src.steps[:cut])
 		steps, limit := numSteps(res), l.stepLimit(cmd)
 		breaks := map[string]bool{}
@@ -1074,26 +1074,27 @@ func thinkingLevel(s string) (core.ThinkingLevel, bool) {
 }
 
 // cutAtStep implements §5.1's from_step semantics over a run's own
-// steps (sourceRun.steps — what the run added to the transcript it was
-// fed): keep them through step N−1 (its tool results included) and run
-// step N fresh. The cut is the index where step N begins: the Nth
-// assistant message (steps count from 0, an assistant message opens
-// each), so everything before it is steps 0..N−1 complete — the same
-// boundary the messages records' weft.step.index draws. Step 0's cut
-// is the first assistant message: what a resumed run recorded before
-// its first model call is not a step's to re-run. keptPrefix refuses
-// a cut that leaves a call without its result.
+// steps numbered by order (orderSteps); cutAt is the rule.
 func cutAtStep(steps []core.Message, fromStep int) int {
+	return cutAt(steps, orderSteps(steps), fromStep)
+}
+
+// cutAt implements §5.1's from_step semantics over a run's own steps
+// (sourceRun.steps — what the run added to the transcript it was fed),
+// each with the step it joined: keep them through step N−1 (its tool
+// results and the messages steered after it included) and run step N
+// fresh. The cut is step N's assistant message — its model call — so
+// everything before it is steps 0..N−1 complete, and step 0's cut keeps
+// what a resumed run recorded before its first model call (the rebuilt
+// tool message, step 0's but no model call's to re-run). keptPrefix
+// refuses a cut that leaves a call without its result.
+func cutAt(steps []core.Message, stepOf []int, fromStep int) int {
 	if fromStep < 0 {
 		fromStep = 0
 	}
-	assistants := 0
 	for i, m := range steps {
-		if m.Role == core.RoleAssistant {
-			if assistants == fromStep {
-				return i
-			}
-			assistants++
+		if m.Role == core.RoleAssistant && stepOf[i] >= fromStep {
+			return i
 		}
 	}
 	return len(steps) // fewer steps than asked: keep it all

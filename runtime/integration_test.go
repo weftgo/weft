@@ -2045,3 +2045,88 @@ func (m *budgetModel) Stream(ctx context.Context, req core.ModelRequest) iter.Se
 		}
 	}
 }
+
+// TestPlaygroundEditsTheStoredStep: Studio's validator and the
+// runtime's editor number a source run's messages by the same rule —
+// the step each messages record stored (ADR 0028 §8) — so a command
+// Studio accepts (202) is one the runtime applies. Two sources the old
+// assistant-order count got wrong on the runtime side:
+//
+//   - a partial resume (echo executed, refund parked, approved, two
+//     more steps): the rebuilt tool message precedes step 0's model
+//     call and is step 0's, so {step 0, call_id c_ref9} at from_step 1
+//     patches it;
+//   - a run fed no messages (no input record): its first record is step
+//     0's, not the input, so from_step 1 keeps a real step 0.
+func TestPlaygroundEditsTheStoredStep(t *testing.T) {
+	e := newE2E(t)
+	type orderIn struct {
+		OrderID string `json:"order_id"`
+	}
+	echo := core.Tool("echo", "Echo.", func(context.Context, orderIn) (string, error) { return "echoed", nil },
+		core.Replay(core.ReplaySafe))
+	refund := core.Tool("refund", "Refund an order.", func(context.Context, orderIn) (string, error) {
+		return "refunded", nil
+	}, core.RequireApproval())
+	lookup := core.Tool("lookup_order", "Look up an order.", func(context.Context, orderIn) (string, error) {
+		return "shipped", nil
+	}, core.Replay(core.ReplaySafe))
+	e.agent = core.New(wefttest.Script(
+		wefttest.ToolCalls( // the partial run: echo runs, refund parks
+			wefttest.Call{Name: "echo", Args: `{"order_id":"9"}`, ID: "c_echo"},
+			wefttest.Call{Name: "refund", Args: `{"order_id":"9"}`, ID: "c_ref9"},
+		),
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"9"}`, ID: "c_look"}), // resume step 0
+		wefttest.Say("Refunded order 9."), // resume step 1
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"7"}`, ID: "c_b"}), // bare step 0
+		wefttest.Say("Order 7 shipped."),               // bare step 1
+		wefttest.Say("fresh after the patched refund"), // experiment 1's step 1
+		wefttest.Say("fresh after the patched lookup"), // experiment 2's step 1
+	), core.Name("acme-support"),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()), echo, refund, lookup)
+	ctx := context.Background()
+	parked, err := e.agent.Generate(ctx, core.Prompt("refund order 9"))
+	if err != nil || len(parked.Pending) != 1 {
+		t.Fatalf("partial run: %v, pending %+v", err, parked.Pending)
+	}
+	resumed, err := e.agent.Generate(ctx, core.Messages(parked.Messages...), core.Approve("c_ref9"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare, err := e.agent.Generate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.p.ForceFlush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	e.waitTranscript(t, resumed.ID, "Refunded order 9.")
+	e.waitTranscript(t, bare.ID, "Order 7 shipped.")
+
+	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent), runtime.Enabled(true))
+	defer shutdown()
+	rt := e.runtimeID(t)
+	for _, c := range []struct {
+		id, source, call, patched string
+	}{
+		{"cmd_resume_patch", resumed.ID, "c_ref9", "PATCHED-ref9"},
+		{"cmd_bare_patch", bare.ID, "c_b", "PATCHED-b"},
+	} {
+		body := fmt.Sprintf(`{
+		  "command_id": %q, "runtime": %q, "agent": "acme-support",
+		  "source": {"run_id": %q, "from_step": 1},
+		  "transcript_edits": [{"step": 0, "call_id": %q, "tool_result": %q}],
+		  "engine": "live", "side_effects": "substitute", "thread": "ephemeral"
+		}`, c.id, rt, c.source, c.call, c.patched)
+		row, runID := e.run(t, c.id, body, "finished")
+		if !strings.Contains(row, `"state":"finished"`) || runID == "" {
+			t.Fatalf("%s: Studio accepted it, the runtime did not run it: %s", c.id, row)
+		}
+		if err := e.p.ForceFlush(ctx); err != nil {
+			t.Fatal(err)
+		}
+		// The experiment was fed the patched result: the runtime applied
+		// the edit at the step Studio validated it against.
+		e.waitTranscript(t, runID, c.patched)
+	}
+}

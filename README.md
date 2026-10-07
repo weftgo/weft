@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/weftgo/weft/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/weftgo/weft/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/weftgo/weft.svg)](https://pkg.go.dev/github.com/weftgo/weft)
-[![Version](https://img.shields.io/badge/version-v0.7.0-orange)](https://github.com/weftgo/weft/releases/tag/v0.7.0)
+[![Version](https://img.shields.io/badge/version-v0.8.0-orange)](https://github.com/weftgo/weft/releases/tag/v0.8.0)
 
 A thin, opinionated core for building AI agents in Go — designed the way
 the standard library is: small interfaces, `context` everywhere, functional
@@ -14,7 +14,7 @@ flight — and nothing else. Concurrency is the point, not a feature: a
 step's tools fan out over goroutines, parallelism is a one-line dial, and
 tool failures never cancel their siblings.
 
-> **Status:** v0.7.0 — experimental, pre-1.0. The three load-bearing
+> **Status:** v0.8.0 — experimental, pre-1.0. The three load-bearing
 > contracts — message model, error model, tool contract — are implemented
 > and tested; the provider adapters (OpenAI + compatible servers,
 > Anthropic, Google) wrap the vendors' official Go SDKs; the two
@@ -767,10 +767,10 @@ docs/adr/             decision records for the contracts
 ```
 
 Each module directory tags independently (ADR 0005's monorepo rule).
-The current set (2026-10-02) is root `v0.7.0`, `thread` `v0.9.0`
-(with `thread/sqlite` `v0.3.0`), `obsdb` `v0.1.1`, `obsdb/clickhouse`
-`v0.1.1`, `otel` `v0.1.1`, `studio` `v0.3.1`, `studio/cmd` `v0.1.1`,
-`runtime` `v0.1.1` — and every module resolves from its tag, no
+The current set (2026-10-07) is root `v0.8.0`, `thread` `v0.9.1`
+(with `thread/sqlite` `v0.3.0`), `obsdb` `v0.2.0`, `obsdb/clickhouse`
+`v0.2.0`, `otel` `v0.2.0`, `studio` `v0.4.0`, `studio/cmd` `v0.2.0`,
+`runtime` `v0.2.0` — and every module resolves from its tag, no
 replaces. The whole
 recorder-and-inspector story is two lines: `defer otel.Install()()`
 and `studio.Handler(studio.DB(otel.LocalDB()))` (Recording runs and

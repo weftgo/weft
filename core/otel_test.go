@@ -299,6 +299,11 @@ func TestSpansChatBoundsTheModelCall(t *testing.T) {
 		"gen_ai.usage.output_tokens":     "5",
 		"gen_ai.response.finish_reasons": `["tool_calls"]`,
 		"weft.model.tool_calls":          "1",
+		// A4: the loop always streams; nothing reported an attempt, so
+		// the model that answered is the one asked. The script's bare
+		// tool call yields no delta: no weft.ttft_ms.
+		"weft.stream":           "true",
+		"gen_ai.response.model": "script",
 	}
 	var first *recSpan
 	tp.mu.Lock()

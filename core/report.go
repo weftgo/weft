@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -129,6 +130,37 @@ type stepReport struct {
 	// number. Nil when no destination wants request records. Set before
 	// the chain runs, never after.
 	request *requestRecord
+	// answered is the model of the last attempt reported as a success
+	// (AttemptInfo.Model with a nil Err): the model that answered after
+	// a retry or a fallback, read by the loop once the call has ended
+	// (answeredModel). Guarded by mu — reports may race each other —
+	// and touched only on the reporting path, so a call nothing reports
+	// on never locks.
+	mu       sync.Mutex
+	answered string
+
+	// start and ttft are the call's clock (ADR 0016's A4 note), kept
+	// here because this value is already allocated per step: the loop
+	// sets start before the chain's Stream and ttft at the first
+	// TextDelta or ToolArgsDelta (firstDelta). Loop goroutine only.
+	start time.Time
+	ttft  time.Duration
+}
+
+// firstDelta records the time to the first token once: the first
+// TextDelta or ToolArgsDelta of the call. Later calls are no-ops.
+func (s *stepReport) firstDelta() {
+	if s.ttft == 0 {
+		s.ttft = sinceAtLeast(s.start)
+	}
+}
+
+// answeredModel returns the model the last successful reported attempt
+// requested, "" when no attempt reported a success.
+func (s *stepReport) answeredModel() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.answered
 }
 
 func (s *stepReport) Value(key any) any {
@@ -197,6 +229,11 @@ func (s *stepReport) attempt(a AttemptInfo) {
 	}
 	defer s.contain()
 	index := s.n.Add(1)
+	if a.Err == nil && a.Model != "" {
+		s.mu.Lock()
+		s.answered = a.Model
+		s.mu.Unlock()
+	}
 	timed := !a.Start.IsZero() && !a.End.Before(a.Start)
 	ctx := s.Context
 	if trace.SpanFromContext(ctx).IsRecording() {
@@ -225,7 +262,14 @@ func (s *stepReport) attempt(a AttemptInfo) {
 			span.SetStatus(codes.Error, a.Err.Error())
 			span.SetAttributes(semconv.ErrorTypeKey.String(runErrorType(a.Err)))
 		} else {
+			// The attempt answered: the model it requested is the one
+			// that produced the response (the attempt knows no other
+			// name), the same value the chat span and the step_finish
+			// record carry as gen_ai.response.model.
 			span.SetStatus(codes.Ok, "")
+			if a.Model != "" {
+				span.SetAttributes(semconv.GenAIResponseModel(a.Model))
+			}
 		}
 		if timed {
 			span.End(trace.WithTimestamp(a.End))
@@ -281,4 +325,11 @@ func (s *stepReport) raw(p RawPair) {
 			slog.Int(logRequestBytes, len(p.Request)),
 			slog.Int(logResponseBytes, len(p.Response)))
 	}
+}
+
+// sinceAtLeast is time.Since(t), never below one nanosecond: a measured
+// interval must not read as "not measured" (0) on a clock too coarse to
+// see it pass.
+func sinceAtLeast(t time.Time) time.Duration {
+	return max(time.Since(t), time.Nanosecond)
 }

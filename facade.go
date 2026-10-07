@@ -698,6 +698,19 @@ type ToolFinish = core.ToolFinish
 // check (docs/life-of-a-call.md). Raw is the provider's own stop reason
 // when Reason was approximated (see ModelFinish.Raw); empty when the
 // mapping was exact.
+//
+// LatencyMS and TTFTMS are the step's model call timed by the loop as
+// it consumes the stream (ADR 0016's 2026-10-07 A4 note), in whole
+// milliseconds rounded up, so a measured interval is never 0 and 0
+// (absent on the wire) means not measured — an event recorded before
+// the fields existed, or one built by hand. LatencyMS runs from the
+// call's start (the chain's Stream) to the stream's end (the
+// ModelFinish); TTFTMS from the same start to the first TextDelta or
+// ToolArgsDelta — reasoning does not count — and is 0 when the call
+// yielded neither (a non-streaming adapter, a script's bare tool
+// call). The timing spans the whole model chain: a retry's backoff and
+// a fallback's failed tries are inside it. Both are observations, not
+// behaviour: nothing in the loop reads them.
 type StepFinish = core.StepFinish
 
 // Steered reports messages the run's steering source delivered at the

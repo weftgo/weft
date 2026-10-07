@@ -61,6 +61,9 @@ const (
 	attrToolApproved    = attribute.Key("weft.tool.approved")
 	attrToolPending     = attribute.Key("weft.tool.pending")
 	attrToolResultBytes = attribute.Key("weft.tool.result_bytes")
+	attrStream          = attribute.Key("weft.stream")
+	attrTTFTMS          = attribute.Key("weft.ttft_ms")
+	attrLatencyMS       = attribute.Key("weft.latency_ms")
 )
 
 // The record attributes and event names (ADR 0024's record contract),
@@ -316,9 +319,13 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 // outcome, exactly as mw.Log placed outermost reports one line per step.
 // The returned context carries the span, so an adapter's own HTTP spans
 // parent under chat. ModelInfo is the agent's — the model that was
-// asked; the model that answered after a fallback is not observable from
-// the loop and is not invented (ADR 0016).
-func (o *observer) model(ctx context.Context, runID string, step int, info ModelInfo) (context.Context, func(finish ModelFinish, finished bool, calls int, err error)) {
+// asked (gen_ai.request.model). The model that answered is the end
+// function's: callTiming.answered, from the chain's reported attempts
+// when one reported a success, else the asked model (ADR 0016's
+// 2026-10-07 A4 note); it is set only on a call that finished. The
+// span carries weft.stream=true — the loop always consumes a stream —
+// and weft.ttft_ms when a TextDelta or ToolArgsDelta arrived.
+func (o *observer) model(ctx context.Context, runID string, step int, info ModelInfo) (context.Context, func(finish ModelFinish, finished bool, calls int, err error, t callTiming)) {
 	ctx, span := o.tracer.Start(ctx, spanName(semconv.GenAIOperationNameChat, info.Name),
 		trace.WithSpanKind(trace.SpanKindClient))
 	start := time.Now()
@@ -327,6 +334,7 @@ func (o *observer) model(ctx context.Context, runID string, step int, info Model
 			semconv.GenAIOperationNameChat,
 			attrRunID.String(runID),
 			attrStepIndex.Int(step),
+			attrStream.Bool(true),
 		}
 		if info.Provider != "" {
 			attrs = append(attrs, semconv.GenAIProviderNameKey.String(providerName(info.Provider)))
@@ -337,7 +345,7 @@ func (o *observer) model(ctx context.Context, runID string, step int, info Model
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 	}
-	return ctx, func(finish ModelFinish, finished bool, calls int, err error) {
+	return ctx, func(finish ModelFinish, finished bool, calls int, err error, t callTiming) {
 		dur := time.Since(start)
 		// finished is the loop's own flag: a ModelFinish arrived. It is
 		// not inferred from the reason — the loop accepts an empty one —
@@ -355,7 +363,13 @@ func (o *observer) model(ctx context.Context, runID string, step int, info Model
 				if finish.Raw != "" {
 					attrs = append(attrs, attrStopRaw.String(finish.Raw))
 				}
+				if t.answered != "" {
+					attrs = append(attrs, semconv.GenAIResponseModel(t.answered))
+				}
 				span.SetAttributes(attrs...)
+			}
+			if t.ttft > 0 {
+				span.SetAttributes(attrTTFTMS.Int64(ceilMS(t.ttft)))
 			}
 			if err != nil {
 				span.SetStatus(codes.Error, err.Error())
@@ -397,6 +411,27 @@ func (o *observer) model(ctx context.Context, runID string, step int, info Model
 		}
 		span.End()
 	}
+}
+
+// callTiming is what the loop measured of one model call as it
+// consumed the stream, handed to the chat span's end and to the
+// step_finish record: ttft is the time to the first TextDelta or
+// ToolArgsDelta (0 when none arrived), latency the call's whole wall
+// time, answered the model that answered (see observer.model). A value,
+// so measuring costs no allocation.
+type callTiming struct {
+	ttft, latency time.Duration
+	answered      string
+}
+
+// ceilMS converts a measured duration to whole milliseconds rounded up,
+// so an interval that was measured is never reported as 0 — the value
+// that means "not measured" on StepFinish.TTFTMS. A duration <= 0 is 0.
+func ceilMS(d time.Duration) int64 {
+	if d <= 0 {
+		return 0
+	}
+	return int64((d + time.Millisecond - 1) / time.Millisecond)
 }
 
 // tool brackets one executed tool call: the span starts on the call's
@@ -598,6 +633,13 @@ type recorder struct {
 	// panic. Either may be nil in observer-only tests.
 	obs    *observer
 	panics *atomic.Int64
+
+	// stepModel is the model that answered the step whose StepFinish is
+	// being emitted (callTiming.answered): set by the loop goroutine
+	// right before that emit, read by recordEvent on the same goroutine
+	// (deliver is synchronous) for the step_finish record's
+	// gen_ai.response.model.
+	stepModel string
 }
 
 // captureOn resolves the content question for one emission: the agent's
@@ -669,7 +711,17 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 	case StepStart:
 		attrs = append(attrs, attrStepIndex.Int(e.Index))
 	case StepFinish:
-		attrs = append(attrs, attrStepIndex.Int(e.Index))
+		// The step's timing (the event's own fields, as attributes for
+		// backends that do not parse bodies) and the model that answered
+		// (the loop's stepModel, set just before the emit; not on the
+		// event).
+		attrs = append(attrs, attrStepIndex.Int(e.Index), attrLatencyMS.Int64(e.LatencyMS))
+		if e.TTFTMS > 0 {
+			attrs = append(attrs, attrTTFTMS.Int64(e.TTFTMS))
+		}
+		if r.stepModel != "" {
+			attrs = append(attrs, semconv.GenAIResponseModel(r.stepModel))
+		}
 	case Steered:
 		attrs = append(attrs, attrStepIndex.Int(e.Step))
 	case ToolStart:

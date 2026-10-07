@@ -105,7 +105,7 @@ step's `chat` and `execute_tool`s was considered and rejected for v1
 | Span | Name | Kind | Set at start | Set at end |
 |---|---|---|---|---|
 | run | `invoke_agent <agent>` (or `invoke_agent`) | Internal | `gen_ai.operation.name`, `gen_ai.agent.name` (named agents), `gen_ai.provider.name`, `gen_ai.request.model`, `weft.run.id` | `gen_ai.usage.input_tokens/output_tokens` (run totals, subagents included), `weft.run.steps`, `weft.run.pending` (when > 0), `weft.run.stop_reason`; status `Ok`, or `Error` + recorded exception + `error.type` |
-| model call | `chat <model>` | Client | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `weft.run.id`, `weft.step.index` | `gen_ai.usage.*` (this call's), `gen_ai.response.finish_reasons`, `weft.stop.raw` (when set), `weft.model.tool_calls`; status `Ok` or `Error` + exception + `error.type` |
+| model call | `chat <model>` | Client | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `weft.run.id`, `weft.step.index`, `weft.stream` (A4) | `gen_ai.usage.*` (this call's), `gen_ai.response.finish_reasons`, `weft.stop.raw` (when set), `weft.model.tool_calls`, `gen_ai.response.model` and `weft.ttft_ms` (A4 note); status `Ok` or `Error` + exception + `error.type` |
 | tool call | `execute_tool <tool>` | Internal | `gen_ai.operation.name`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `weft.run.id`, `weft.step.index`, `weft.tool.seq`, `weft.tool.approved` (resumed calls) | `weft.tool.result_bytes` (the capped length the model sees) or `weft.tool.pending=true` (parked) or `Error` status + `error.type`; the result text is never on the span |
 
 Placement, wired in `loop.go`:
@@ -127,7 +127,8 @@ Placement, wired in `loop.go`:
   `mw.Fallback` run *inside* it — one span per step measures the chain's
   outcome. `ModelInfo` is the agent's, i.e. the model that was *asked*
   (middleware forwards Info); the model that *answered* after a fallback
-  is not observable from the loop and is not invented (O9).
+  is not observable from the loop and is not invented (O9; since the
+  A4 note, the chain's reported attempts name it — see there).
 - **Tool call** (`execTools`' goroutine): started on the call's context
   after it is built and before the chain runs — just after
   `ToolStart` is emitted, so `weft.tool.seq` carries the event's Seq
@@ -293,6 +294,8 @@ model, typed for the observer. Unexported; no public surface moved.
 - **The answering model after `mw.Fallback`**: needs `ModelFinish` (or
   `ModelInfo` on the finish) to carry the responder — an additive event
   field, to be decided with the store (§11), which wants it too.
+  *Answered 2026-10-07 without an event field: the A8 hook's reported
+  attempts name it (A4 note).*
 - **`Agent.CallTool` spans** — when a second manual dispatcher besides
   `mcp.Serve` wants them.
 - **Span links for resumed runs**: a run resumed with `Approve` is a new
@@ -473,3 +476,50 @@ adapters the hook is optional (ADR 0013). Cost under the default
 program (no SDK, Debug off), measured 2026-10-07 on the machine above:
 `BenchmarkReportAttempt` 2 ns/op outside a run and 16 ns/op inside a
 model call, 0 allocs/op both.
+
+### A4 note (2026-10-07 — timing and the answering model; devtools plan A4)
+
+The loop consumes every model stream, so it times the call itself; no
+adapter cooperates. Measured on the step's reporter (one clock read
+before the chain's `Stream`, one at the first `TextDelta` or
+`ToolArgsDelta`, one when the stream ends; no allocation, nothing the
+loop decides on):
+
+- **Time to first token** is the first `TextDelta` or `ToolArgsDelta`
+  after the call started. Reasoning deltas do not count (this ADR
+  defined no first token; the plan's definition is taken, and ADR 0028
+  §7's "first model event" means this). A call that yields neither — a
+  non-streaming adapter, a bare tool call — has no TTFT: the value is
+  absent, never 0.
+- **Latency** is the call's whole wall time, the chain's `Stream` to
+  the stream's end (the `ModelFinish`): a retry's backoff and a
+  fallback's failed tries are inside it.
+- Both are reported in whole milliseconds **rounded up**, so a measured
+  interval is never 0 and 0 keeps meaning "not measured".
+- **The model that answered** is the `Model` of the last attempt
+  reported with a nil `Err` (A8's hook: `mw.Retry`, `mw.Fallback`, a
+  reporting adapter), else the model the call asked for (the agent's
+  `InfoOf(model).Name`, which a fallback chain reports as its primary).
+  `ModelFinish` carries no model name; the loop does not invent one
+  beyond this precedence. Set only on a call that finished.
+
+New keys, additive (no A8 key renamed or renumbered):
+
+| where | key | value |
+|---|---|---|
+| `chat` span | `weft.stream` | `true` — always; the loop streams |
+| `chat` span | `weft.ttft_ms` | int, when a delta arrived |
+| `chat` span | `gen_ai.response.model` | the answering model, on a finished call |
+| `attempt` span | `gen_ai.response.model` | the attempt's `Model`, on a successful attempt (status `Ok`) |
+| `step_finish` event | `latency_ms`, `ttft_ms` | `StepFinish.LatencyMS`, `.TTFTMS`; omitted when 0 |
+| `step_finish` record | `weft.latency_ms`, `weft.ttft_ms` | the event's values as attributes; `weft.ttft_ms` only when measured |
+| `step_finish` record | `gen_ai.response.model` | the answering model, when known |
+
+The attempt outcome the plan names is A8's: `ok` is status `Ok`, a
+failure status `Error` + `error.type`, `retry_after` is
+`weft.attempt.retry_after_ms`. `TestRetryOverFallbackReportsEveryAttempt`
+pins A4's Done line (`mw.Retry(3)` over `mw.Fallback`: every attempt
+under one `chat` span, the answering model on the step, model-visible
+output byte-identical with the reporting on and off, with and without
+a tracer); `TestStepTimingWithoutADelta` pins the absent TTFT.
+`BenchmarkWholeRunNoSDK` stays at 130 allocs/op.

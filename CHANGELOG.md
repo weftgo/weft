@@ -96,6 +96,19 @@ module, ADR 0005).
 - `weft.Origin(name)`, a tool option naming the tools record's `source`
   (`local` by default; `Subagent` sets `subagent`, `mcp.Tools` sets
   `mcp`).
+- **Model-call timing and the answering model (plan A4, ADR 0016's A4
+  note).** `StepFinish.LatencyMS` and `StepFinish.TTFTMS`
+  (`latency_ms`, `ttft_ms` on the wire, additive, omitted when 0): the
+  step's model call timed by the loop as it consumes the stream, whole
+  milliseconds rounded up; `ttft_ms` is the first `TextDelta` or
+  `ToolArgsDelta` and absent when neither arrived. The `chat` span gains
+  `weft.stream` (`true`), `weft.ttft_ms` (when a delta arrived) and
+  `gen_ai.response.model`; the `step_finish` record gains
+  `weft.latency_ms`, `weft.ttft_ms` (when measured) and
+  `gen_ai.response.model`; a successful `attempt` span gains
+  `gen_ai.response.model`. The answering model is the last attempt the
+  chain reported as a success (`mw.Retry`, `mw.Fallback`, a reporting
+  adapter), else the model the call asked for.
 
 ## 0.9.0 — 2026-10-07
 

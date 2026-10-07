@@ -450,13 +450,14 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// the span measures the chain's outcome (ADR 0016). The stream is
 		// consumed on the span's context, so an adapter's own HTTP spans
 		// parent under chat.
-		mctx, endModel := a.obs.model(ctx, cfg.id, step, InfoOf(model))
+		info := InfoOf(model)
+		mctx, endModel := a.obs.model(ctx, cfg.id, step, info)
 		// What this call is given, recorded beside it (ADR 0028): the
 		// prompt and tools records when their hash is new to the run,
 		// then the request record (attempt 1), on the chat span's
 		// context, after PrepareStep, validation and composition, right
 		// before the chain runs. Reporting only: req is not touched.
-		reqRec := records.recordRequest(mctx, a, step, req, InfoOf(model), parkSet)
+		reqRec := records.recordRequest(mctx, a, step, req, info, parkSet)
 		// The chain's reporting path (ReportFromContext): attempts and
 		// wire bodies the chain reports land on this step's record; each
 		// attempt after the first adds its own request record.
@@ -467,7 +468,14 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// documented: exactly one ModelFinish, nothing after it, and a
 		// panicking implementation becomes a run error instead of crashing
 		// the run goroutine — which no caller could recover.
+		//
+		// The call's timing is measured here as the stream is consumed
+		// (ADR 0016's A4 note): a clock read at the start, one at the
+		// first TextDelta/ToolArgsDelta, one at the end, kept on the
+		// step's reporter (already allocated, so timing costs no
+		// allocation) — and nothing the loop decides on.
 		consume := func() (err error) {
+			rep.start = time.Now()
 			defer func() {
 				if p := recover(); p != nil {
 					err = fmt.Errorf("%w: model stream panicked: %v", ErrModelContract, p)
@@ -482,6 +490,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 				}
 				switch e := mev.(type) {
 				case ModelTextDelta:
+					rep.firstDelta()
 					emit(TextDelta{RunID: cfg.id, Text: e.Text})
 					sb.WriteString(e.Text)
 				case ModelReasoningDelta:
@@ -519,6 +528,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 				case ModelToolCallDelta:
 					// Progress only — the assembled call still arrives
 					// as a ModelToolCall before ModelFinish.
+					rep.firstDelta()
 					emit(ToolArgsDelta{RunID: cfg.id, Name: e.Name, Args: e.Args})
 				case ModelFinish:
 					finish = e
@@ -533,8 +543,17 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			return nil
 		}
 		streamErr := consume()
+		timing := callTiming{ttft: rep.ttft, latency: max(sinceAtLeast(rep.start), rep.ttft)}
 		rep.end()
-		endModel(finish, finished, len(calls), streamErr)
+		// The model that answered (ADR 0016's A4 note): the last attempt
+		// the chain reported as a success, else the model the call asked
+		// for; only a call that finished has one.
+		if finished && streamErr == nil {
+			if timing.answered = rep.answeredModel(); timing.answered == "" {
+				timing.answered = info.Name
+			}
+		}
+		endModel(finish, finished, len(calls), streamErr, timing)
 		if streamErr != nil {
 			return fail(step, streamErr)
 		}
@@ -622,7 +641,9 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// reports the model call's numbers alone (finish.Usage), while
 		// RunResult.Usage carries the whole bill, subagents included.
 		res.Usage = rollUp(res.Usage, sub)
-		emit(StepFinish{RunID: cfg.id, Index: step, Reason: finish.Reason, Usage: finish.Usage, Raw: finish.Raw})
+		records.stepModel = timing.answered
+		emit(StepFinish{RunID: cfg.id, Index: step, Reason: finish.Reason, Usage: finish.Usage, Raw: finish.Raw,
+			LatencyMS: ceilMS(timing.latency), TTFTMS: ceilMS(timing.ttft)})
 
 		if len(pending) > 0 {
 			// The approval boundary: the step's other tools have run;

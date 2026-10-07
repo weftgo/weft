@@ -15,12 +15,15 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"go.opentelemetry.io/otel/codes"
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/mw"
@@ -1639,6 +1642,11 @@ func TestEventJSONRoundTrip(t *testing.T) {
 			`{"type":"step_finish","run_id":"r1","index":1,"reason":"tool_calls","usage":{"input_tokens":10,"output_tokens":5}}`},
 		{core.StepFinish{RunID: "r1", Index: 2, Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 1, OutputTokens: 1}, Raw: "refusal"},
 			`{"type":"step_finish","run_id":"r1","index":2,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1},"raw":"refusal"}`},
+		// A4: the model call's timing, additive and omitted when 0.
+		{core.StepFinish{RunID: "r1", Index: 3, Reason: core.StopEndTurn, LatencyMS: 812, TTFTMS: 140},
+			`{"type":"step_finish","run_id":"r1","index":3,"reason":"stop","usage":{"input_tokens":0,"output_tokens":0},"latency_ms":812,"ttft_ms":140}`},
+		{core.StepFinish{RunID: "r1", Index: 4, Reason: core.StopToolCalls, LatencyMS: 3},
+			`{"type":"step_finish","run_id":"r1","index":4,"reason":"tool_calls","usage":{"input_tokens":0,"output_tokens":0},"latency_ms":3}`},
 		{core.Steered{RunID: "r1", Seq: 3, Step: 0, Messages: []core.Message{core.User("use metric")}},
 			`{"type":"steered","run_id":"r1","seq":3,"step":0,"messages":[{"role":"user","content":[{"type":"text","text":"use metric"}]}]}`},
 		{core.Steered{RunID: "r1", Seq: 7, Step: 4},
@@ -4663,7 +4671,9 @@ func TestReportingHookChangesNothingModelVisible(t *testing.T) {
 		if o.messages, merr = json.Marshal(res.Messages); merr != nil {
 			t.Fatal(merr)
 		}
-		if o.events, merr = json.Marshal(events); merr != nil {
+		// The step timing (A4) is wall-clock, never equal across runs:
+		// stripped here, asserted by TestRetryOverFallbackReportsEveryAttempt.
+		if o.events, merr = json.Marshal(stripStepTiming(events)); merr != nil {
 			t.Fatal(merr)
 		}
 		if o.usage, merr = json.Marshal(res.Usage); merr != nil {
@@ -4688,6 +4698,241 @@ func TestReportingHookChangesNothingModelVisible(t *testing.T) {
 		}
 		if !bytes.Equal(got.usage, base.usage) || got.stop != base.stop {
 			t.Errorf("%s: usage/stop = %s/%q, want %s/%q", name, got.usage, got.stop, base.usage, base.stop)
+		}
+	}
+}
+
+// stripStepTiming zeroes StepFinish's wall-clock fields (LatencyMS,
+// TTFTMS), nested child events included, so event streams from two runs
+// compare byte for byte; the timing is asserted on its own.
+func stripStepTiming(evs []core.Event) []core.Event {
+	out := make([]core.Event, len(evs))
+	for i, ev := range evs {
+		switch e := ev.(type) {
+		case core.StepFinish:
+			e.LatencyMS, e.TTFTMS = 0, 0
+			ev = e
+		case core.Nested:
+			e.Event = stripStepTiming([]core.Event{e.Event})[0]
+			ev = e
+		}
+		out[i] = ev
+	}
+	return out
+}
+
+// namedScript is a scripted model under its own name, so a fallback's
+// models are told apart on the record. silent marks it as reporting its
+// own attempts (the ReportsAttempts convention) while reporting none:
+// the mw layers above it stay silent, which turns the reporting off
+// without changing the chain.
+type namedScript struct {
+	*wefttest.Model
+	name   string
+	silent bool
+}
+
+func (m namedScript) Info() core.ModelInfo  { return core.ModelInfo{Provider: "wefttest", Name: m.name} }
+func (m namedScript) ReportsAttempts() bool { return m.silent }
+
+// Plan A4's Done line, the core-provable half: mw.Retry(3) over
+// mw.Fallback(a, b), a failing twice and b answering on its second
+// try, shows every attempt — its model, its error — under one chat
+// span; the model that answered is named on the chat span and the
+// step_finish record (gen_ai.response.model); the step carries its
+// timing (latency_ms, ttft_ms on the event, the record and the span);
+// and the model-visible output — the requests each model saw, the
+// transcript, the events minus their timing, usage, stop — is byte
+// identical with the reporting on and off, with and without a tracer.
+func TestRetryOverFallbackReportsEveryAttempt(t *testing.T) {
+	type outcome struct {
+		requestsA, requestsB, messages, events, usage []byte
+		stop                                          core.StopReason
+		raw                                           []core.Event
+		tp                                            *recProvider
+		lp                                            *recLogProvider
+	}
+	run := func(report, traced bool) outcome {
+		t.Helper()
+		a := namedScript{Model: wefttest.Script(wefttest.Fail(core.ErrStreamIdle), wefttest.Fail(core.ErrStreamIdle)), name: "glm-a", silent: !report}
+		b := namedScript{Model: wefttest.Script(wefttest.Fail(core.ErrStreamIdle), wefttest.Say("done")), name: "glm-b", silent: !report}
+		opts := []core.Option{core.WrapModel(mw.Retry(mw.MaxRetries(3), mw.BaseDelay(0)), mw.Fallback(b))}
+		var o outcome
+		if traced {
+			o.tp, o.lp = newRecProvider(), newRecLogProvider()
+			opts = append(opts, core.TracerProvider(o.tp), core.LoggerProvider(o.lp), core.Content(true),
+				core.Logger(slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}))))
+		}
+		r := core.New(a, opts...).Stream(context.Background(), core.RunID("r"), core.Prompt("hello"))
+		for ev, err := range r.Events() {
+			if err != nil {
+				t.Fatal(err)
+			}
+			o.raw = append(o.raw, ev)
+		}
+		res, err := r.Wait()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for dst, v := range map[*[]byte]any{
+			&o.requestsA: a.Requests(), &o.requestsB: b.Requests(),
+			&o.messages: res.Messages, &o.events: stripStepTiming(o.raw), &o.usage: res.Usage,
+		} {
+			if *dst, err = json.Marshal(v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		o.stop = res.StopReason
+		return o
+	}
+	base := run(true, true)
+
+	// Every attempt under the one chat span, in order, with its model
+	// and its outcome; the fourth (glm-b's second try) answered.
+	chat := base.tp.find(t, "chat glm-a")
+	atts := attemptSpans(base.tp)
+	wantModels := []string{"glm-a", "glm-b", "glm-a", "glm-b"}
+	if len(atts) != len(wantModels) {
+		t.Fatalf("attempt spans = %d, want %d", len(atts), len(wantModels))
+	}
+	for i, att := range atts {
+		got := att.attrsMap()
+		if att.parent.SpanID() != chat.sc.SpanID() {
+			t.Errorf("attempt %d is not a child of the chat span", i+1)
+		}
+		if got["weft.attempt.index"] != strconv.Itoa(i+1) || got["gen_ai.request.model"] != wantModels[i] {
+			t.Errorf("attempt %d attrs = %v, want index %d model %s", i+1, got, i+1, wantModels[i])
+		}
+		_, status, _, _ := att.state()
+		if last := i == len(atts)-1; last {
+			if status != codes.Ok || got["gen_ai.response.model"] != "glm-b" || got["error.type"] != "" {
+				t.Errorf("answering attempt status=%v attrs=%v, want Ok, gen_ai.response.model=glm-b", status, got)
+			}
+		} else if status != codes.Error || got["error.type"] != "stream_idle" || got["gen_ai.response.model"] != "" {
+			t.Errorf("failed attempt %d status=%v attrs=%v, want Error/stream_idle, no response model", i+1, status, got)
+		}
+	}
+	// The chat span: asked glm-a, answered by glm-b, streamed, timed.
+	cs := chat.attrsMap()
+	if cs["gen_ai.request.model"] != "glm-a" || cs["gen_ai.response.model"] != "glm-b" || cs["weft.stream"] != "true" {
+		t.Errorf("chat span attrs = %v, want request glm-a, response glm-b, weft.stream true", cs)
+	}
+	if ms, err := strconv.ParseInt(cs["weft.ttft_ms"], 10, 64); err != nil || ms < 1 {
+		t.Errorf("chat span weft.ttft_ms = %q, want >= 1", cs["weft.ttft_ms"])
+	}
+	// The event: latency covers the whole chain, TTFT the first delta.
+	var sf core.StepFinish
+	for _, ev := range base.raw {
+		if e, ok := ev.(core.StepFinish); ok {
+			sf = e
+		}
+	}
+	if sf.TTFTMS < 1 || sf.LatencyMS < sf.TTFTMS {
+		t.Errorf("StepFinish timing = latency %d ttft %d, want ttft >= 1 and latency >= ttft", sf.LatencyMS, sf.TTFTMS)
+	}
+	// The step_finish record names the model that answered and carries
+	// the event's timing as attributes.
+	var found bool
+	for _, rec := range base.lp.ofKind(t, "event") {
+		if rec.attr("weft.event.type") != "step_finish" {
+			continue
+		}
+		found = true
+		lat, _ := rec.intAttr("weft.latency_ms")
+		ttft, _ := rec.intAttr("weft.ttft_ms")
+		if rec.attr("gen_ai.response.model") != "glm-b" || lat != sf.LatencyMS || ttft != sf.TTFTMS {
+			t.Errorf("step_finish record attrs = %v, want gen_ai.response.model glm-b, latency %d, ttft %d", rec.attrs, sf.LatencyMS, sf.TTFTMS)
+		}
+	}
+	if !found {
+		t.Error("no step_finish record")
+	}
+
+	// Silent chain, tracer on: nothing reported, so no attempt spans,
+	// and the answering model falls back to the one asked (the
+	// documented precedence: reported success, else the request).
+	silent := run(false, true)
+	if n := len(attemptSpans(silent.tp)); n != 0 {
+		t.Errorf("silent chain: %d attempt spans, want 0", n)
+	}
+	if got := silent.tp.find(t, "chat glm-a").attrsMap()["gen_ai.response.model"]; got != "glm-a" {
+		t.Errorf("silent chain: chat gen_ai.response.model = %q, want the asked glm-a", got)
+	}
+
+	for name, got := range map[string]outcome{
+		"reporting, no tracer": run(true, false),
+		"silent, tracer":       silent,
+		"silent, no tracer":    run(false, false),
+	} {
+		for what, pair := range map[string][2][]byte{
+			"glm-a requests": {base.requestsA, got.requestsA},
+			"glm-b requests": {base.requestsB, got.requestsB},
+			"transcript":     {base.messages, got.messages},
+			"events":         {base.events, got.events},
+			"usage":          {base.usage, got.usage},
+		} {
+			if !bytes.Equal(pair[0], pair[1]) {
+				t.Errorf("%s: %s differ:\nbase %s\ngot  %s", name, what, pair[0], pair[1])
+			}
+		}
+		if got.stop != base.stop {
+			t.Errorf("%s: stop = %q, want %q", name, got.stop, base.stop)
+		}
+	}
+}
+
+// A step whose model yields no TextDelta or ToolArgsDelta has no TTFT —
+// absent on the event, the record and the chat span, never 0 — while
+// its latency is still measured. Reasoning is not a first token.
+func TestStepTimingWithoutADelta(t *testing.T) {
+	tp, lp := newRecProvider(), newRecLogProvider()
+	model := wefttest.Script(
+		wefttest.Think("hmm", wefttest.ToolCalls(wefttest.Call{ID: "c1", Name: "echo", Args: `{"msg":"x"}`})),
+		wefttest.Raw(core.ModelFinish{Reason: core.StopEndTurn}),
+	)
+	var steps []core.StepFinish
+	agt := core.New(model, spanEcho, core.TracerProvider(tp), core.LoggerProvider(lp),
+		core.Tap(func(_ context.Context, ev core.Event) {
+			if e, ok := ev.(core.StepFinish); ok {
+				steps = append(steps, e)
+			}
+		}))
+	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 2 {
+		t.Fatalf("StepFinish events = %d, want 2", len(steps))
+	}
+	for _, e := range steps {
+		if e.TTFTMS != 0 || e.LatencyMS < 1 {
+			t.Errorf("step %d timing = latency %d ttft %d, want latency >= 1, no ttft", e.Index, e.LatencyMS, e.TTFTMS)
+		}
+		b, _ := json.Marshal(e)
+		if bytes.Contains(b, []byte("ttft_ms")) {
+			t.Errorf("step %d wire carries ttft_ms: %s", e.Index, b)
+		}
+	}
+	tp.mu.Lock()
+	for _, s := range tp.spans {
+		if strings.HasPrefix(s.name, "chat ") {
+			if _, ok := s.attrsMap()["weft.ttft_ms"]; ok {
+				t.Errorf("chat span %v carries weft.ttft_ms without a delta", s.attrsMap())
+			}
+		}
+	}
+	tp.mu.Unlock()
+	for _, rec := range lp.ofKind(t, "event") {
+		if rec.attr("weft.event.type") != "step_finish" {
+			continue
+		}
+		if _, ok := rec.intAttr("weft.ttft_ms"); ok {
+			t.Errorf("step_finish record carries weft.ttft_ms without a delta: %v", rec.attrs)
+		}
+		if lat, ok := rec.intAttr("weft.latency_ms"); !ok || lat < 1 {
+			t.Errorf("step_finish record weft.latency_ms = %d (%v), want >= 1", lat, ok)
+		}
+		if rec.attr("gen_ai.response.model") != "script" {
+			t.Errorf("step_finish record gen_ai.response.model = %q, want the asked script", rec.attr("gen_ai.response.model"))
 		}
 	}
 }

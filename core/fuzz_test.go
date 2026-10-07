@@ -119,6 +119,7 @@ func FuzzUnmarshalEvent(f *testing.F) {
 		`{"type":"tool_start","seq":7,"call_id":"c2","name":"t","args":null}`,
 		`{"type":"tool_finish","seq":6,"call_id":"c1","name":"echo","content":"ok","is_error":false}`,
 		`{"type":"step_finish","index":1,"reason":"tool_calls","usage":{"input_tokens":10,"output_tokens":5}}`,
+		`{"type":"step_finish","index":3,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1},"latency_ms":812,"ttft_ms":140}`,
 		`{"type":"steered","run_id":"r1","seq":3,"step":0,"messages":[{"role":"user","content":[{"type":"text","text":"use metric"}]}]}`,
 		`{"type":"steered","run_id":"r1","seq":7,"step":4,"messages":null}`,
 		`{"type":"steered","run_id":"r1","seq":8,"step":2,"messages":[]}`,

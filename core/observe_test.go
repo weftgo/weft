@@ -35,7 +35,7 @@ func TestObserverNoopAllocations(t *testing.T) {
 	}
 	if n := testing.AllocsPerRun(100, func() {
 		_, end := o.model(ctx, "r", 0, ModelInfo{})
-		end(finish, true, 0, nil)
+		end(finish, true, 0, nil, callTiming{})
 	}); n >= 10 {
 		t.Errorf("model span allocs = %.0f, want < 10", n)
 	}
@@ -69,7 +69,7 @@ func BenchmarkObserverNoop(b *testing.B) {
 	})
 	bench("model", func() {
 		_, end := o.model(ctx, "r", 0, ModelInfo{})
-		end(finish, true, 0, nil)
+		end(finish, true, 0, nil, callTiming{})
 	})
 	bench("tool", func() {
 		_, end := o.tool(ctx, Call{RunID: "r"}, 1)
@@ -101,7 +101,7 @@ func TestLoggerNoAllocWhenDisabled(t *testing.T) {
 	_, endModel := o.model(ctx, "r", 0, ModelInfo{Provider: "p", Name: "m"})
 	_, endTool := o.tool(ctx, Call{RunID: "r", Name: "t"}, 1)
 	endTool(ToolResultPart{Content: "x"}, false, nil)
-	endModel(ModelFinish{Reason: StopEndTurn}, true, 0, nil)
+	endModel(ModelFinish{Reason: StopEndTurn}, true, 0, nil, callTiming{})
 	endRun(&RunResult{}, nil)
 	if h.enabled == 0 {
 		t.Fatal("Enabled was never consulted")
@@ -129,7 +129,7 @@ func (h *gateHandler) WithGroup(string) slog.Handler      { return h }
 func TestReportAttemptNoopAllocations(t *testing.T) {
 	o := newNoopObserver()
 	mctx, end := o.model(context.Background(), "r", 0, ModelInfo{})
-	defer end(ModelFinish{}, true, 0, nil)
+	defer end(ModelFinish{}, true, 0, nil, callTiming{})
 	ctx := o.withReport(mctx, "r", 0, nil)
 	a := AttemptInfo{Model: "m", Provider: "p", Start: time.Now(), End: time.Now()}
 	if n := testing.AllocsPerRun(100, func() { ReportFromContext(ctx).Attempt(a) }); n != 0 {
@@ -146,7 +146,7 @@ func TestReportAttemptNoopAllocations(t *testing.T) {
 func BenchmarkReportAttempt(b *testing.B) {
 	o := newNoopObserver()
 	mctx, end := o.model(context.Background(), "r", 0, ModelInfo{})
-	defer end(ModelFinish{}, true, 0, nil)
+	defer end(ModelFinish{}, true, 0, nil, callTiming{})
 	inRun := o.withReport(mctx, "r", 0, nil)
 	a := AttemptInfo{Model: "m", Provider: "p", Start: time.Now(), End: time.Now()}
 	for _, c := range []struct {

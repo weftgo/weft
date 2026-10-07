@@ -1244,3 +1244,49 @@ func ExampleOrigin() {
 	}
 	// Output: lookup plugin
 }
+
+// A resume cancelled while its approved tool runs still records its
+// held tail (accepted input, emitted with WithoutCancel): the records
+// concatenate to RunError.Result.Messages. A resume cancelled before
+// it starts records nothing at all.
+func TestRequestRecordsCancelledResumeKeepsHeldTail(t *testing.T) {
+	started := make(chan struct{})
+	park := core.Tool("park", "Blocks.", func(ctx context.Context, _ struct{}) (string, error) {
+		close(started)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}, core.RequireApproval())
+	model := wefttest.Script(
+		wefttest.ToolCalls(
+			wefttest.Call{ID: "a", Name: "echo", Args: `{"msg":"1"}`},
+			wefttest.Call{ID: "b", Name: "park", Args: `{}`}),
+		wefttest.Say("done"))
+	res, err := core.New(model, reqEcho("echo"), park).Generate(context.Background(), core.Prompt("go"))
+	if err != nil || len(res.Pending) != 1 {
+		t.Fatalf("park: %v, pending %d", err, len(res.Pending))
+	}
+
+	lp := newRecLogProvider()
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { <-started; cancel() }()
+	_, err = core.New(model, reqEcho("echo"), park, core.LoggerProvider(lp)).
+		Generate(ctx, core.RunID("cancelled"), core.Messages(res.Messages...), core.Approve("b"))
+	var re *core.RunError
+	if !errors.As(err, &re) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("resume err = %v, want a cancelled RunError", err)
+	}
+	got, _ := json.Marshal(resolveRef(t, lp, "cancelled", 1<<30))
+	want, _ := json.Marshal(re.Result.Messages)
+	if !bytes.Equal(got, want) {
+		t.Errorf("records rebuild\n%s\nRunError.Result.Messages\n%s", got, want)
+	}
+
+	lp2 := newRecLogProvider()
+	dead, kill := context.WithCancel(context.Background())
+	kill()
+	_, _ = core.New(model, reqEcho("echo"), park, core.LoggerProvider(lp2)).
+		Generate(dead, core.RunID("dead"), core.Messages(res.Messages...), core.Approve("b"))
+	if n := len(lp2.ofKind(t, "messages")); n != 0 {
+		t.Errorf("a resume cancelled before it started recorded %d messages records", n)
+	}
+}

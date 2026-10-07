@@ -271,6 +271,21 @@ request. Readers stop inferring a batch's step from its neighbours.
 ClickHouse rows written before `0004` read `step = -1`; for those a
 reader falls back to inference and shows the `derived` badge.
 
+**Resumes (amends ADR 0024 D1).** On a resume the input record 0
+stops at the last assistant message with tool calls. The next growth
+record — step 0, not flagged `weft.messages.input` — carries the tool
+message the resume rebuilds or inserts and anything that followed it in
+the fed-in transcript (a user prompt included), as it stands after the
+resumed results attach. That tail is accepted input like record 0, so
+it is emitted with `context.WithoutCancel`: a resume cancelled during
+its approved tools still records it (if the run fails before the results
+attach, the tail is recorded as it was fed), and the records
+concatenate to `RunError.Result.Messages`; a resume cancelled before its
+input record went out records nothing. The concatenation rule and every
+request's `messages_ref` therefore hold on resumes. `obsdb.DedupTranscript`
+stays only for runs stored in the old shape, where record 0 held the
+partial tool message and record 1 its rebuilt copy.
+
 **Growth and views.** A `messages` record without
 `weft.messages.reason` is growth: readers concatenate growth records in
 index order, and that concatenation equals `RunResult.Messages` (ADR

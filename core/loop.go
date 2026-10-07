@@ -180,11 +180,14 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// held is the input's tail a resume will rebuild or extend (below):
 	// recorded after the resumed results attach, or here, if the run
 	// fails before they do — so the messages records still concatenate
-	// to the transcript (ADR 0024 D1).
+	// to the transcript (ADR 0024 D1, ADR 0028 §8). It is accepted input,
+	// like record 0, so it is recorded even when the run's context has
+	// been cancelled (WithoutCancel): a cancelled resume's records still
+	// rebuild RunError.Result.Messages.
 	var held []Message
 	fail := func(step int, err error) (*RunResult, error) {
 		if held != nil {
-			records.recordMessages(ctx, 0, held, false)
+			records.recordMessages(context.WithoutCancel(ctx), 0, held, false)
 			held = nil
 		}
 		spanEnded = true
@@ -234,6 +237,11 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		}
 	}
 	records.recordMessages(ctx, 0, inputRec, true)
+	if ctx.Err() != nil {
+		// Cancelled before the input record went out: no record of this
+		// run exists, so its tail is not recorded alone either.
+		held = nil
+	}
 
 	// The approval boundary's second half: approved calls run now,
 	// before any model call, and every other pending call is denied.
@@ -325,18 +333,21 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		res.Messages, joined = attachResults(res.Messages, resume, results)
 		if tailHeld {
 			// The held tail as it is now: the rebuilt (or inserted)
-			// tool message and whatever followed it.
+			// tool message and whatever followed it — accepted input,
+			// recorded through a cancellation (see held).
 			held = nil
-			records.recordMessages(ctx, 0, res.Messages[cut:], false)
+			records.recordMessages(context.WithoutCancel(ctx), 0, res.Messages[cut:], false)
 		}
 		if len(joined) > 0 {
 			// The completed tool message — created, or rebuilt over one
 			// the earlier run left partial — joins the transcript at
 			// step 0 of the resume (ADR 0007 §3). The transcript
 			// observers see it here, where the transcript grew, exactly
-			// as they see every step's messages; the record carries it
-			// beside the input record, so a resume's stored transcript
-			// rebuilds too.
+			// as they see every step's messages. Its record is the growth
+			// record after the input: the held tail above when the input
+			// continued past the assistant message (ADR 0028 §8), else
+			// the joined message itself, below — so a resume's stored
+			// transcript rebuilds too.
 			a.observeMessages(ctx, cfg, 0, joined)
 			if !tailHeld {
 				// Appended at the end: the next growth record.

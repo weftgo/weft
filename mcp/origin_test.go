@@ -42,13 +42,25 @@ func (l toolsLogger) Emit(_ context.Context, r log.Record) {
 // the tools record (ADR 0028 §5) names its source "mcp", with the
 // replay class it actually has (unannotated: never).
 func TestToolsRecordSourceIsMCP(t *testing.T) {
+	for name, c := range map[string]struct {
+		opts []Option
+		want string
+	}{
+		"default":         {want: "mcp"},
+		"caller's Origin": {opts: []Option{Policy(core.Origin("github"))}, want: "github"},
+	} {
+		t.Run(name, func(t *testing.T) { toolsRecordSource(t, c.opts, c.want) })
+	}
+}
+
+func toolsRecordSource(t *testing.T, importOpts []Option, want string) {
 	sess, stop := served(t, func(srv *sdk.Server) {
 		addRemoteTool(srv, "remote", true, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
 		})
 	})
 	defer stop()
-	tools, err := Tools(context.Background(), sess)
+	tools, err := Tools(context.Background(), sess, importOpts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +87,7 @@ func TestToolsRecordSourceIsMCP(t *testing.T) {
 	if err := json.Unmarshal([]byte(rec.bodies[0]), &body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Tools) != 1 || body.Tools[0].Source != "mcp" || body.Tools[0].Replay != "never" {
-		t.Errorf("tools record = %s, want the remote tool with source mcp, replay never", rec.bodies[0])
+	if len(body.Tools) != 1 || body.Tools[0].Source != want || body.Tools[0].Replay != "never" {
+		t.Errorf("tools record = %s, want the remote tool with source %s, replay never", rec.bodies[0], want)
 	}
 }

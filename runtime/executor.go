@@ -191,7 +191,11 @@ func runPrefix(src *sourceRun, cmd command, hasInput bool) ([]core.Message, erro
 		// prefix of step 0 is the input plus what a resumed run
 		// recorded before its first model call (the parked calls'
 		// results): a resumed turn has no prompt to drop, and its input
-		// alone ends at a call the new input must not orphan.
+		// alone ends at a call the new input must not orphan. A turn
+		// resumed with a prompt as well records it in that step-0 tail,
+		// after the completed tool message (ADR 0028 §8), so the
+		// trailing user message of the whole kept prefix — not of the
+		// input record alone — is the prompt the new input replaces.
 		kept, err := keptPrefix(src, 0)
 		if err != nil {
 			return nil, err
@@ -236,10 +240,11 @@ func validOptions(options map[string]float64, limits agentLimits) (string, bool)
 	return "", true
 }
 
-// withoutPrompt drops the turn's own user message from a run's input:
-// the trailing user message is the prompt the command's input replaces.
-// An input that ends otherwise (a resumed run's) is kept whole and the
-// new input follows it.
+// withoutPrompt drops the turn's own user message from a run's kept
+// step-0 prefix (the input record plus what a resume recorded before
+// the first model call): the trailing user message is the prompt the
+// command's input replaces. A prefix that ends otherwise (a resumed
+// run's, with no prompt) is kept whole and the new input follows it.
 func withoutPrompt(input []core.Message) []core.Message {
 	if n := len(input); n > 0 && input[n-1].Role == core.RoleUser {
 		return input[:n-1]

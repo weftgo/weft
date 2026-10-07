@@ -77,7 +77,9 @@ make a lost turn break replay of every later turn. The cost is accepted
 by the owner: a session's records grow with the square of its length, and
 the transcript is never capped, because a capped transcript is not
 replay-grade. Caps apply to event bodies and deltas; a destination that
-must bound transcript size turns content off.
+must bound transcript size turns content off. (Amended by ADR 0028 §8
+for resumes: record 0 stops at the last assistant message with tool
+calls, and the next growth record carries the rest.)
 
 **D2 — capture is signalled through the Logs API's `Enabled`, not a
 provider interface; `MaxBytes`/`Redact` live per destination in
@@ -262,7 +264,10 @@ families, pinned by tests like model-visible bytes:
   `weft.step.index`, `weft.messages.index` (0 is the input),
   `weft.messages.count`, `weft.messages.input = true` on index 0. Their
   concatenation equals `RunResult.Messages` byte-for-byte, signatures
-  included.
+  included. On a resume, the input record stops at the last assistant
+  message with tool calls and the tool message the resume creates or
+  rebuilds rides the next record with what followed it (amended by ADR
+  0028 §8).
 - **Content state:** `weft.content` = `full` | `stripped` | `none` (set
   by the core; `weft/otel`'s strip processor sets `stripped`), and
   `weft.content.truncated_bytes` when a destination's cap cut.

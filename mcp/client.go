@@ -235,7 +235,9 @@ func (p policyOption) apply(c *importConfig) { c.policy = append(c.policy, p...)
 // cannot be undone here, and RequireApproval is added, never removed.
 // Timeout, MaxResultBytes, RequireApproval and WrapTools apply as on
 // any tool; StrictInput has no effect (a RawTool receives the model's
-// raw arguments — validation belongs to the server).
+// raw arguments — validation belongs to the server). Every imported
+// tool carries core.Origin("mcp") (the tools record's source); a
+// core.Origin given here overrides it.
 func Policy(opts ...core.ToolOption) Option { return policyOption(opts) }
 
 // callHandler is the imported tool's handler: one tools/call round

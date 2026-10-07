@@ -209,6 +209,44 @@ func TestNewInputOnAResumedSourceKeepsTheResolution(t *testing.T) {
 	}
 }
 
+// TestNewInputOnAResumeWithPromptDropsThePrompt: a run resumed with a
+// prompt as well (Generate(Messages(parked...), Prompt("more"),
+// Approve(id))) is recorded in ADR 0028 §8's shape — record 0 stops at
+// the assistant message with calls, the next record carries the
+// completed tool message and the prompt — so the prompt sits in the
+// step-0 tail. A new input replaces it: the prefix keeps the
+// conversation through the call's result and drops "more".
+func TestNewInputOnAResumeWithPromptDropsThePrompt(t *testing.T) {
+	call := core.Message{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c_r", Name: "refund", Args: []byte(`{}`)}}}
+	result := core.Message{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c_r", Name: "refund", Content: "refunded"}}}
+	body := func(msgs ...core.Message) json.RawMessage {
+		b, err := json.Marshal(msgs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	src, err := decodeBodies([]json.RawMessage{
+		body(core.User("refund"), call),
+		body(result, core.User("more")),
+		body(core.Message{Role: core.RoleAssistant, Content: []core.Part{core.TextPart{Text: "done"}}}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := "something else"
+	got, err := runPrefix(src, command{Input: &in, Source: &sourceSpec{RunID: "s_x-t4"}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(got); n != 3 || got[n-1].Role != core.RoleTool {
+		t.Errorf("prefix = %+v, want the conversation through the call's result, the prompt dropped", got)
+	}
+	if err := prefixComplete(got); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestParseThreadRunIDWholeSuffix pins the thread run id shape: a
 // subagent child of a thread turn ("<session>-t1/2/c_1") is not a turn
 // of the session — fork mode must refuse it up front, not fork and fail.

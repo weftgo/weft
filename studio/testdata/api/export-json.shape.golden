@@ -175,6 +175,7 @@
 .run.experiment_id=string
 .run.finished=string
 .run.forked_from=string
+.run.holes[]
 .run.id=string
 .run.instructions_hash=string
 .run.last_seen=string

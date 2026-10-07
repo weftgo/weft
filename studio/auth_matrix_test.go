@@ -505,7 +505,8 @@ func TestAuthMatrix(t *testing.T) {
 			}
 			b, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
-			hidden := strings.Contains(string(b), `"badge":"hidden","reason":"a read-scoped panel token does not read system prompts or tool catalogs","fix":"use a playground-scoped token"`)
+			reason, fix := obsdb.HoleNote(obsdb.HoleHidden)
+			hidden := strings.Contains(string(b), `"badge":"hidden","reason":"`+reason+`","fix":"`+fix+`"`)
 			wantCode, wantHidden := ok, id.kind == "read"
 			if id.kind == "read" && (format == "otlp" || format == "wefttest") {
 				wantCode = forbidden403

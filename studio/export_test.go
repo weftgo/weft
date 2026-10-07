@@ -341,6 +341,17 @@ func TestExportOTLPRoundTrip(t *testing.T) {
 				}
 			}
 			_, got := exportGet(t, fresh, "/api/runs/r_otlp/export?format=json", nil)
+			// The chain's content marks ride the rebuilt event records
+			// (weft.content), so the copy badges the same events.
+			if tc.name == "content-off" {
+				for _, doc := range [][]byte{want, got} {
+					if !strings.Contains(string(doc), `"attrs":{"weft.content":"`) || !strings.Contains(string(doc), `"hole":"stripped"`) {
+						t.Errorf("content-off export lacks the events' weft.content attrs or the run's stripped hole:\n%s", doc)
+					}
+				}
+			} else if strings.Contains(string(got), `"attrs":{"weft.content":`) {
+				t.Error("the content-on copy badges events the source did not")
+			}
 			if a, b := withoutChildren(t, want), withoutChildren(t, got); a != b {
 				t.Errorf("re-ingested export differs from the source:\n got %s\nwant %s", b, a)
 			}

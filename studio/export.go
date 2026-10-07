@@ -176,9 +176,7 @@ func (s *Server) exportFixtures(w http.ResponseWriter, r *http.Request, id strin
 	}
 	files, err := runFixtures(src)
 	if errors.Is(err, errNoTranscript) {
-		b := badgeFields{Badge: string(obsdb.HoleGap),
-			Reason: "the run stored no messages record: there is no transcript to fixture",
-			Fix:    holeNotes[obsdb.HoleGap].fix}
+		b := badgeOf(obsdb.HoleGap)
 		if requestsStripped(src.requests) {
 			b = badgeOf(obsdb.HoleStripped)
 		}
@@ -247,6 +245,7 @@ type runExport struct {
 	prompts     []exportRef // in the order the requests first name them
 	catalogs    []exportRef
 	spans       []obsdb.Span
+	runHoles    []stepHole // the run's own (runHoles), as /api/runs/{id} serves them
 }
 
 // exportRef is one prompt or catalog hash the requests name: the record
@@ -277,6 +276,9 @@ func (s *Server) collectExport(ctx context.Context, id string, hidden bool) (*ru
 		return nil, err
 	}
 	x := &runExport{run: det}
+	if x.runHoles, err = s.runHoles(ctx, det.RunRow); err != nil {
+		return nil, err
+	}
 	if x.events, x.gaps, err = allEvents(ctx, s.db, id); err != nil {
 		return nil, err
 	}
@@ -429,6 +431,7 @@ func (x *runExport) runDoc() runDoc {
 	for _, kid := range x.run.Children {
 		doc.Children = append(doc.Children, row(kid))
 	}
+	doc.Holes = x.runHoles
 	return doc
 }
 
@@ -438,17 +441,10 @@ func (x *runExport) eventsBlock() exportEvents {
 		out.Gaps = []int64{}
 	}
 	for _, pe := range x.events {
-		out.Events = append(out.Events, posEvent{Pos: pe.Pos, Time: pe.Time, Event: pe.Event})
+		out.Events = append(out.Events, posEventOf(pe))
 	}
-	switch {
-	case len(x.gaps) > 0:
-		out.badgeFields = badgeFields{Badge: string(obsdb.HoleGap),
-			Reason: "positions are missing from the run's event stream: a destination dropped a batch",
-			Fix:    holeNotes[obsdb.HoleGap].fix}
-	case len(x.events) == 0 && x.run.Steps > 0:
-		out.badgeFields = badgeFields{Badge: string(obsdb.HoleGap),
-			Reason: "the run counts steps, but no event of it was stored: a destination dropped its records",
-			Fix:    holeNotes[obsdb.HoleGap].fix}
+	if len(x.gaps) > 0 || (len(x.events) == 0 && x.run.Steps > 0) {
+		out.badgeFields = badgeOf(obsdb.HoleGap)
 	}
 	return out
 }
@@ -468,13 +464,9 @@ func (x *runExport) transcriptBlock() exportTranscript {
 	if len(x.batches) == 0 {
 		switch {
 		case requestsStripped(x.requests):
-			out.badgeFields = badgeFields{Badge: string(obsdb.HoleStripped),
-				Reason: "this run's records were content-off: its messages were dropped before they were stored",
-				Fix:    holeNotes[obsdb.HoleStripped].fix}
+			out.badgeFields = badgeOf(obsdb.HoleStripped)
 		case x.run.Steps > 0 || x.run.RequestCount > 0:
-			out.badgeFields = badgeFields{Badge: string(obsdb.HoleGap),
-				Reason: "the run made model calls, but no messages record was stored: content capture was off, or a destination dropped them",
-				Fix:    holeNotes[obsdb.HoleGap].fix}
+			out.badgeFields = badgeOf(obsdb.HoleGap)
 		}
 	}
 	return out
@@ -528,43 +520,45 @@ func (x *runExport) requestsBlock() exportRequests {
 // §11's order.
 func (x *runExport) holes(blocks []exportBlock) []stepHole {
 	hs := holeSet{}
+	for _, h := range x.runHoles {
+		hs.add(obsdb.Hole(h.Hole), h.Reason, h.Fix)
+	}
 	for _, b := range blocks {
 		if b.Badge != "" {
 			hs.add(obsdb.Hole(b.Badge), b.Reason, b.Fix)
 		}
 	}
 	if requestsStripped(x.requests) {
-		hs.add(obsdb.HoleStripped, "this run's records were content-off: its system prompts, tool catalogs, messages, tool arguments and results were dropped before they were stored", holeNotes[obsdb.HoleStripped].fix)
+		hs.note(obsdb.HoleStripped)
 	}
 	for _, refs := range [][]exportRef{x.prompts, x.catalogs} {
 		for _, ref := range refs {
 			switch {
-			case ref.prompt != nil && ref.prompt.Content == obsdb.HoleTruncated:
-				hs.add(obsdb.HoleTruncated, "a system prompt was cut by a destination's cap", "raise the destination's MaxBytes")
-			case ref.catalog != nil && ref.catalog.Content == obsdb.HoleTruncated:
-				hs.add(obsdb.HoleTruncated, "a tool catalog was cut by a destination's cap", "raise the destination's MaxBytes")
+			case ref.prompt != nil && ref.prompt.Content == obsdb.HoleTruncated,
+				ref.catalog != nil && ref.catalog.Content == obsdb.HoleTruncated:
+				hs.note(obsdb.HoleTruncated)
 			case ref.prompt == nil && ref.catalog == nil && ref.hole == obsdb.HoleGap:
 				hs.note(obsdb.HoleGap)
 			}
 		}
 	}
 	if x.run.StopReason == "max_tokens" {
-		hs.add(obsdb.HoleMaxTokens, "the run finished on the output token limit", "raise max_tokens")
+		hs.note(obsdb.HoleMaxTokens)
 	}
 	if x.run.Status == obsdb.StatusInterrupted {
-		hs.add(obsdb.HoleInterrupted, "the run stopped reporting (last seen more than 30 s ago)", "")
+		hs.note(obsdb.HoleInterrupted)
 	}
 	for _, b := range x.batches {
 		switch {
 		case b.Step < 0:
-			hs.add(obsdb.HoleNotRecorded, "a messages record carries no step (weft.step.index): it was written before the field existed", "")
+			hs.note(obsdb.HoleNotRecorded)
 		case b.InputDerived:
-			hs.add(obsdb.HoleDerived, "the input flag of a messages record was inferred by the backend, not recorded", "")
+			hs.note(obsdb.HoleDerived)
 		}
 	}
 	for _, c := range x.compactions {
 		if c.Scope == obsdb.CompactionRun {
-			hs.add(obsdb.HoleCompacted, "the model saw a compacted view: a PrepareStep replaced part of the transcript for a step's request", "see the compactions block: the transcript range each view replaced and the messages that stood in")
+			hs.note(obsdb.HoleCompacted)
 			break
 		}
 	}
@@ -774,6 +768,14 @@ func (x *runExport) eventAttrs(pe obsdb.PosEvent) (map[string]any, bool) {
 	}
 	_ = json.Unmarshal(pe.Event, &h)
 	a := map[string]any{"weft.record": "event", "weft.event.type": h.Type, "weft.event.pos": pe.Pos}
+	// The chain's content marks, as obsdb stored them: a re-ingested
+	// copy badges the same events stripped or truncated.
+	if pe.Content != "" {
+		a["weft.content"] = pe.Content
+	}
+	if pe.TruncatedBytes > 0 {
+		a["weft.content.truncated_bytes"] = pe.TruncatedBytes
+	}
 	switch h.Type {
 	case "step_start", "step_finish":
 		if h.Index != nil {

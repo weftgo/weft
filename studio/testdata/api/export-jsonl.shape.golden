@@ -168,6 +168,7 @@
 <run>.run.experiment_id=string
 <run>.run.finished=string
 <run>.run.forked_from=string
+<run>.run.holes[]
 <run>.run.id=string
 <run>.run.instructions_hash=string
 <run>.run.last_seen=string

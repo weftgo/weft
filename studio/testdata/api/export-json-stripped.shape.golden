@@ -1,5 +1,7 @@
 .compactions[]
 .events.events[]
+.events.events[].attrs.<key>=string
+.events.events[].attrs{}
 .events.events[].event.type=string
 .events.events[].event[run_finish].pending[]
 .events.events[].event[run_finish].pending[].type=string
@@ -128,6 +130,11 @@
 .run.experiment_id=string
 .run.finished=string
 .run.forked_from=string
+.run.holes[]
+.run.holes[].fix=string
+.run.holes[].hole=string
+.run.holes[].reason=string
+.run.holes[]{}
 .run.id=string
 .run.instructions_hash=string
 .run.last_seen=string

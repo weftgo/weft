@@ -1,0 +1,7 @@
+{
+  "logs": [],
+  "badge": "not_recorded",
+  "reason": "the run was recorded without a tracer: app logs are attributed to a run through the spans they were emitted under, and this run stored none",
+  "fix": "install a tracer (otel.Install records spans)"
+}
+

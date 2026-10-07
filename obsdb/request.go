@@ -303,13 +303,20 @@ type ToolEntry struct {
 //     record it names is absent — a destination dropped it.
 //
 // A hash no request of the run names is a plain ErrNotFound.
+//
+// DB.OtherLogs returns one with Kind "logs", no Hash and
+// HoleNotRecorded for a run that has no span to attribute app logs
+// through (ReadOtherLogs).
 type HoleError struct {
-	Kind string // "prompt" or "tools"
+	Kind string // "prompt", "tools" or "logs"
 	Hash string
 	Hole Hole
 }
 
 func (e *HoleError) Error() string {
+	if e.Hash == "" {
+		return fmt.Sprintf("obsdb: not found: %s (%s)", e.Kind, e.Hole)
+	}
 	return fmt.Sprintf("obsdb: not found: %s %s (%s)", e.Kind, e.Hash, e.Hole)
 }
 

@@ -32,6 +32,7 @@
   },
   "event_count": 0,
   "message_count": 0,
+  "delta_count": 0,
   "instructions_hash": "",
   "catalog_hash": "",
   "request_count": 0,

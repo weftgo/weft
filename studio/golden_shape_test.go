@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	otellog "go.opentelemetry.io/otel/log"
+
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/otel"
@@ -66,9 +69,25 @@ func TestGoldensMatchARealRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lookup := core.Tool("lookup_order", "Look up an order.", func(_ context.Context, in struct {
+	// The app's own logger on the pipeline's LoggerProvider — what an
+	// slog bridge (otelslog) does: each line is an OTel log record
+	// carrying the span context of the ctx it is emitted with (the
+	// tool's execute_tool span), and no weft.run.id.
+	appLog := p.LoggerProvider().Logger("orders-app")
+	emit := func(ctx context.Context, sev otellog.Severity, body string, kv ...attribute.KeyValue) {
+		var rec otellog.Record
+		rec.SetTimestamp(time.Now())
+		rec.SetSeverity(sev)
+		rec.SetSeverityText(sev.String())
+		rec.SetBody(attribute.StringValue(body))
+		rec.AddAttributes(kv...)
+		appLog.Emit(ctx, rec)
+	}
+	lookup := core.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
 		OrderID string `json:"order_id"`
 	}) (string, error) {
+		emit(ctx, otellog.SeverityInfo, "looking up order "+in.OrderID, attribute.String("order_id", in.OrderID))
+		emit(ctx, otellog.SeverityWarn, "orders cache miss", attribute.String("cache", "orders"))
 		return "order shipped", nil
 	})
 	agent := core.New(wefttest.Script(
@@ -107,6 +126,11 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		}
 	}
 	trace, _ := fetch("/api/runs/" + res.ID).(map[string]any)["trace_id"].(string)
+	// The app's lines are the run's, in order, through the pipeline.
+	if logs, _ := fetch("/api/runs/" + res.ID + "/logs").(map[string]any)["logs"].([]any); len(logs) != 2 ||
+		logs[0].(map[string]any)["body"] != "looking up order 42" || logs[1].(map[string]any)["severity"] != "WARN" {
+		t.Errorf("the real run's app logs = %v, want the tool's two lines", logs)
+	}
 	for _, c := range []struct {
 		golden, path string
 		// what the fixture holds that this run does not: a subagent
@@ -127,6 +151,9 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// The step goldens are recorded from TestStepRoute's real run;
 		// this one has no instructions, one tool and no failed attempt.
 		{"step-0.golden.json", "/api/runs/" + res.ID + "/steps/0", []string{".attempts[].error_type", ".request.prompt", ".request.tools.tools[].schema"}},
+		// The app's two log lines, attributed through the tool's span.
+		{"logs-ok.golden.json", "/api/runs/" + res.ID + "/logs", nil},
+		{"logs-ok-paged.golden.json", "/api/runs/" + res.ID + "/logs?limit=1", nil},
 	} {
 		b, err := os.ReadFile(filepath.Join("testdata", "api", c.golden))
 		if err != nil {

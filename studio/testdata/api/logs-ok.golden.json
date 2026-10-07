@@ -1,0 +1,27 @@
+{
+  "logs": [
+    {
+      "index": 0,
+      "time": "2020-01-01T09:00:00.723Z",
+      "severity": "INFO",
+      "severity_number": 9,
+      "body": "looking up order 42",
+      "attrs": {
+        "order_id": "42"
+      },
+      "span_id": "0102030405060708"
+    },
+    {
+      "index": 1,
+      "time": "2020-01-01T09:00:00.923Z",
+      "severity": "WARN",
+      "severity_number": 13,
+      "body": "orders cache miss",
+      "attrs": {
+        "cache": "orders"
+      },
+      "span_id": "0102030405060708"
+    }
+  ]
+}
+

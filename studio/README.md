@@ -171,6 +171,7 @@ filters, cursor-paged; top-level only by default — `parent=<run id>`
 lists one run's subagent children, `all=1` (or `parent=*`) every run,
 children included),
 `runs/{id}` (the row and the subagent children, each child row with its own `holes` — never events; with
+`delta_count` (the streamed deltas, counted and never stored),
 `instructions_hash`, `catalog_hash`, `request_count` and, for a run
 written before ADR 0028, `requests_badge: "not_recorded"`),
 `runs/{id}/events?after=&limit=` (the paged durable stream),
@@ -183,7 +184,15 @@ read-scoped panel token (403, `badge: "hidden"`), and badged
 `not_recorded` / `stripped` rather than empty when there is nothing to
 show for a reason (a child run id whose last segment is itself one of
 these sub-route names — `events`, `transcript`, `spans`, `requests`,
-`tools`, `export` — is shadowed by the route; provider call ids never collide),
+`tools`, `export`, `logs` — is shadowed by the route; provider call ids never collide),
+`runs/{id}/logs?from=&limit=&severity=` (the app's own log lines — the
+non-weft records an `slog` bridge or the OTel Logs API emitted under one
+of the run's spans, or an app span below one — in time order, `{index,
+time, severity, severity_number, body, attrs, span_id?}`, `next_from`
+while pages are full; `severity` keeps a level and above without
+renumbering; under the `logs` capability; a run recorded without a
+tracer reads `badge: "not_recorded"`; app logs may carry prompts, so a
+read-scoped panel token is refused them, 403 with `badge: "hidden"`),
 `runs/{id}/steps/{n}` (one step assembled server-side, `n` its ordinal,
 under the `steps` capability: the step's status, timing, the model
 requested and the one that answered, attempt 1's request row, every

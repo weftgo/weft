@@ -28,7 +28,8 @@ import (
 //   - a read-scoped panel token never acts (runs, approvals, steer are
 //     403); a playground-scoped one acts inside its public id;
 //   - a read-scoped panel token never reads system prompts (the
-//     manifest, a run's requests and tools: 403, badge "hidden"; a
+//     manifest, a run's requests, tools and app logs — which may
+//     carry prompts the app logged: 403, badge "hidden"; a
 //     step's request block: the hidden badge inside a 200); a
 //     playground-scoped one reads them inside its public id; the run
 //     export's json and jsonl hide the request block for it, otlp and
@@ -269,6 +270,12 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "GET /api/runs/{id}/tools", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/tools" }, resources: all, want: acting(ok)},
 		{name: "GET /api/runs/{B's child}/requests", method: "GET", path: fixed("/api/runs/run_b/0/call_1/requests"), resources: []string{"B"}, want: acting(ok)},
 		{name: "GET /api/runs/{B's child}/tools", method: "GET", path: fixed("/api/runs/run_b/0/call_1/tools"), resources: []string{"B"}, want: acting(ok)},
+		// The run's app logs may carry anything the app logged, prompts
+		// included: refused to a read-scoped token whatever the run
+		// (403, badge hidden — pinned below), scoped for the playground
+		// token, the server token's everywhere.
+		{name: "GET /api/runs/{id}/logs", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/logs" }, resources: all, want: acting(ok)},
+		{name: "GET /api/runs/{B's child}/logs", method: "GET", path: fixed("/api/runs/run_b/0/call_1/logs"), resources: []string{"B"}, want: acting(ok)},
 		// One step: scoped like events for every identity — a read-scoped
 		// token reads the step with its request block hidden (pinned
 		// below), never a 403 on the step. A step past the run's last is
@@ -447,14 +454,14 @@ func TestAuthMatrix(t *testing.T) {
 		}
 	}
 
-	// The request routes' refusal of a read-scoped token is the hidden
-	// hole: the 403 carries the badge, its reason and its fix, so the
+	// The request routes' (and the app logs') refusal of a read-scoped
+	// token is the hidden hole: the 403 carries the badge, its reason and its fix, so the
 	// panel renders the badge instead of an error.
 	for _, id := range identities {
 		if id.kind != "read" {
 			continue
 		}
-		for _, path := range []string{"/api/runs/run_a/requests", "/api/runs/run_a/tools"} {
+		for _, path := range []string{"/api/runs/run_a/requests", "/api/runs/run_a/tools", "/api/runs/run_a/logs"} {
 			req, _ := http.NewRequest(http.MethodGet, ts.URL+path+"?token="+id.token, nil)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {

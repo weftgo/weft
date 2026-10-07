@@ -67,6 +67,18 @@ module, ADR 0005).
   `TranscriptBatches` must skip every `messages` record whose
   `weft.messages.reason` is set, and its messages count must not count
   them (`obsdb.Weft.Reason` carries the attribute).
+- **`obsdb.DB` gains `OtherLogs`** (plan A7): a run's app log records —
+  the non-weft records (no `weft.run.id`) the writers keep beside
+  weft's, attributed to the run through the span they were emitted
+  under (its own spans and the non-weft spans below them, never another
+  run's) — as `obsdb.OtherLog`, paged by `obsdb.LogQuery` (`From`
+  inclusive, `Limit` 0 = 100 max 1000, `MinSeverity` filtering without
+  renumbering). A third-party `DB` implements it as
+  `obsdb.ReadOtherLogs(ctx, db, runID, q, candidates)`, where
+  `candidates` reads the non-weft records of the run's traces within a
+  time window. `obsdb.HoleError.Kind` gains `"logs"`: a finished run
+  with no span has nothing to attribute through and answers
+  `HoleNotRecorded`.
 
 ### Changed
 
@@ -79,6 +91,22 @@ module, ADR 0005).
   content off for that destination.
 
 ### Added
+
+- **A run's app logs and its delta count in Studio (plan A7).**
+  `GET /api/runs/{id}/logs?from=&limit=&severity=`, under a new `logs`
+  capability in `/api/meta`, pages the app's own log lines (an `slog`
+  bridge or the OTel Logs API on the pipeline's `LoggerProvider`) that
+  were emitted under the run's spans — a tool handler's lines are the
+  run's — in time order: `{logs: [{index, time, severity,
+  severity_number, body, attrs, span_id?}], next_from?}`; `severity`
+  keeps a level and above (`trace`…`fatal`, or 1–24). A run recorded
+  without a tracer reads `badge: "not_recorded"` with the tracer fix.
+  App logs may carry anything the app logged, prompts included, so a
+  read-scoped panel token is refused them (403, `badge: "hidden"`); a
+  playground-scoped token, the server token and loopback read them. The
+  run row (`runs`, `runs/{id}`, sessions, the export) gains
+  `delta_count`, the streamed deltas counted and never stored. The web
+  client gains `fetchLogs` and the types (no UI yet).
 
 - **Subagents on the page (plan A10).** `GET /api/runs` takes `all=1`
   (every run, subagent children included — the same as `parent=*`; a

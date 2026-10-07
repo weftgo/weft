@@ -61,6 +61,14 @@ type DB interface {
 	Tools(ctx context.Context, runID, hash string) (ToolsRecord, error)
 	Catalogs(ctx context.Context, runID string) ([]ToolsRecord, error)
 	RunSpans(ctx context.Context, runID string) ([]Span, error)
+	// OtherLogs pages a run's app log records — the non-weft records
+	// the writers store beside weft's (other_logs on SQLite, otel_logs
+	// on ClickHouse), attributed to the run through the spans they were
+	// emitted under — in time order (LogQuery, ReadOtherLogs).
+	// ErrNotFound for an unknown run; empty, not nil, for a run with no
+	// app logs; a *HoleError (Kind "logs", HoleNotRecorded) for a
+	// finished run with no span to attribute them through.
+	OtherLogs(ctx context.Context, runID string, q LogQuery) ([]OtherLog, error)
 	Trace(ctx context.Context, traceID string) ([]Span, error) // empty, not an error, for an unknown trace
 
 	Sessions(ctx context.Context, q SessionQuery) (SessionPage, error)
@@ -311,7 +319,7 @@ type SessionDetail struct {
 }
 
 // ErrNotFound is returned by Run, Session, Events, Transcript,
-// RunSpans, Requests, Prompt, Tools, Catalogs, Experiment and
+// RunSpans, OtherLogs, Requests, Prompt, Tools, Catalogs, Experiment and
 // ResolvePublicID for an id the database does not hold (Prompt and
 // Tools also for a hash, possibly as a *HoleError). Trace answers an
 // unknown trace with no spans instead: a trace is only ever the spans

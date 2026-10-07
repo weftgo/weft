@@ -92,6 +92,7 @@
 .run.children[]
 .run.children[].agent=string
 .run.children[].catalog_hash=string
+.run.children[].delta_count=float64
 .run.children[].err=string
 .run.children[].event_count=float64
 .run.children[].experiment_id=string
@@ -125,6 +126,7 @@
 .run.children[].usage{}
 .run.children[].weft_version=string
 .run.children[]{}
+.run.delta_count=float64
 .run.err=string
 .run.event_count=float64
 .run.experiment_id=string

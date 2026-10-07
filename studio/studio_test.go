@@ -232,6 +232,19 @@ func fixtureDB(t *testing.T) obsdb.DB {
 	if err := db.Write(ctx, obsdb.Batch{Records: okEvents, Spans: okSpans}); err != nil {
 		t.Fatal(err)
 	}
+	// r_ok's app logs (plan A7): two lines the tool handler logged
+	// through the app's own logger, under the run's span — non-weft
+	// records, kept in other_logs.
+	if err := db.Write(ctx, obsdb.Batch{Records: []obsdb.Record{
+		{Time: okAt(600 * time.Millisecond), TraceID: fxTrace, SpanID: fxSpan, Severity: 9,
+			Body: "looking up order 42", Service: "studio-test",
+			Attrs: map[string]any{"order_id": "42"}, Resource: map[string]any{"service.name": "studio-test"}},
+		{Time: okAt(800 * time.Millisecond), TraceID: fxTrace, SpanID: fxSpan, Severity: 13,
+			Body: "orders cache miss", Service: "studio-test",
+			Attrs: map[string]any{"cache": "orders"}, Resource: map[string]any{"service.name": "studio-test"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
 
 	// r_fail
 	failAt := func(d time.Duration) time.Time { return fixtureT0.Add(time.Minute + d) }
@@ -446,13 +459,14 @@ func TestMetaGolden(t *testing.T) {
 
 	// Capabilities are computed from the registered route groups
 	// (S4.2): the read API names none; the request record's routes
-	// (requests, ADR 0028 §10), the step route (steps, plan A7), live
-	// and ingest are registered, so the open handler reports exactly
-	// [requests steps live ingest] — the panel
+	// (requests, ADR 0028 §10), the step route (steps, plan A7), the
+	// export and the app logs (export, logs, plan A7), live and ingest
+	// are registered, so the open handler reports exactly
+	// [requests steps export logs live ingest] — the panel
 	// and playground join with theirs (step 7/8).
 	_, _, plain := get(t, Handler(DB(fixtureDB(t))), "/studio/api/meta")
-	if !strings.Contains(plain, `"capabilities":["requests","steps","export","live","ingest"]`) {
-		t.Errorf("default capabilities = %s, want [requests steps export live ingest]", plain)
+	if !strings.Contains(plain, `"capabilities":["requests","steps","export","logs","live","ingest"]`) {
+		t.Errorf("default capabilities = %s, want [requests steps export logs live ingest]", plain)
 	}
 	// Ingest is open on loopback without a token, and meta says so
 	// (S4.4); a configured token closes it.
@@ -465,7 +479,7 @@ func TestMetaGolden(t *testing.T) {
 	}
 	// NoIngest drops the ingest group with its routes and capability.
 	_, _, ro := get(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/api/meta")
-	if !strings.Contains(ro, `"capabilities":["requests","steps","export","live"]`) || !strings.Contains(ro, `"ingest_open":false`) {
+	if !strings.Contains(ro, `"capabilities":["requests","steps","export","logs","live"]`) || !strings.Contains(ro, `"ingest_open":false`) {
 		t.Errorf("NoIngest meta: %s", ro)
 	}
 	if code, _, _ := post(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/v1/logs", "application/json", "{}"); code != http.StatusNotFound {
@@ -475,12 +489,12 @@ func TestMetaGolden(t *testing.T) {
 	// runtime link's (step 8's playground.go registers both; the
 	// step-6 pin asserted neither existed yet).
 	_, _, pg := get(t, Handler(DB(fixtureDB(t)), Playground(true)), "/studio/api/meta")
-	if !strings.Contains(pg, `"capabilities":["requests","steps","export","live","ingest","runtimes","breakpoints","steer","playground"]`) {
+	if !strings.Contains(pg, `"capabilities":["requests","steps","export","logs","live","ingest","runtimes","breakpoints","steer","playground"]`) {
 		t.Errorf("Playground capabilities = %s", pg)
 	}
 	// A hosting wrapper declares its own verbs beside the groups'.
 	_, _, caps := get(t, Handler(DB(fixtureDB(t)), Capabilities("fleet")), "/studio/api/meta")
-	if !strings.Contains(caps, `"capabilities":["requests","steps","export","live","ingest","fleet"]`) {
+	if !strings.Contains(caps, `"capabilities":["requests","steps","export","logs","live","ingest","fleet"]`) {
 		t.Errorf("declared capabilities = %s", caps)
 	}
 }

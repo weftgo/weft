@@ -187,7 +187,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    "steps"), runs/{id}/export?format=json|jsonl|otlp|wefttest (the whole run as one
 //    //    download, capability "export"; otlp re-ingests through /v1/*, wefttest is a zip
 //    //    wefttest.Replay reads — a compacted step keys on its view, noted compacted_at),
-//    //    traces/{id},
+//    //    runs/{id}/logs?from=&limit=&severity= (the app's own log lines under the run's
+//    //    spans, capability "logs"; refused to a read-scoped token: they may carry prompts;
+//    //    the run row carries delta_count), traces/{id},
 //    //    sessions, sessions/{id}, public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5); Token(tok) walls the
 //    //    /api tree (bearer or ?token=) — the UI shell and /panel.js are static,

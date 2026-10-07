@@ -57,6 +57,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("FilterCombinations", filterCombinations(open))
 	t.Run("PagingBigTie", pagingBigTie(open))
 	t.Run("ManyDaysOneBatch", manyDaysOneBatch(open))
+	t.Run("OtherLogs", otherLogs(open))
 	t.Run("CloseRace", closeRace(open))
 }
 

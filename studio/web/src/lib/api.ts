@@ -64,6 +64,9 @@ export interface RunRow {
   /** On a run document's children[] rows only (A10): the child's own
    * holes (api.go's runHoles), absent when it has none. */
   holes?: StepHole[]
+  /** The run's streamed deltas: counted, never stored. Absent on a
+   * Studio older than the field. */
+  delta_count?: number
 }
 
 /** GET /api/runs → RunsPage. */
@@ -995,6 +998,58 @@ export function exportUrl(runId: string, format: ExportFormat): string {
   const tok = studioToken()
   if (tok) url.searchParams.set("token", tok)
   return url.toString()
+}
+
+/** One app log record of a run (GET /api/runs/{id}/logs): a non-weft
+ * log line the app emitted under one of the run's spans. severity is
+ * the OTLP short name ("INFO", "WARN2"; "" unspecified), attrs the
+ * record's attributes (strings on a ClickHouse backend). */
+export interface LogRow {
+  index: number
+  time: string
+  severity: string
+  severity_number: number
+  body: string
+  attrs: Record<string, unknown>
+  span_id?: string
+}
+
+/** GET /api/runs/{id}/logs: one page (capability "logs"). next_from
+ * is the next page's from, absent on the last page; a run recorded
+ * without a tracer carries the not_recorded badge beside no logs. */
+export interface LogsPage extends Holed {
+  logs: LogRow[]
+  next_from?: number
+}
+
+/** The logs route's query: from (inclusive index), limit (0/absent is
+ * the server's 100, max 1000) and severity — the lowest level kept
+ * (trace, debug, info, warn, error, fatal or a number 1-24), which
+ * filters without renumbering. */
+export interface LogsQuery {
+  from?: number
+  limit?: number
+  severity?: string
+}
+
+/** GET /api/runs/{id}/logs?from=&limit=&severity=. App logs may carry
+ * prompts, so a read-scoped token's hidden refusal answers as an empty
+ * page carrying the hidden badge — a hole to render, not an error. */
+export async function fetchLogs(runId: string, q: LogsQuery = {}): Promise<LogsPage> {
+  const params = new URLSearchParams()
+  if (q.from !== undefined) params.set("from", String(q.from))
+  if (q.limit !== undefined) params.set("limit", String(q.limit))
+  if (q.severity) params.set("severity", q.severity)
+  const qs = params.toString()
+  try {
+    return await get<LogsPage>(
+      `runs/${encodeURIComponent(runId)}/logs${qs ? `?${qs}` : ""}`
+    )
+  } catch (err) {
+    const hidden = hiddenOf(err)
+    if (hidden) return { logs: [], ...hidden }
+    throw err
+  }
 }
 
 export function spansQuery(id: string) {

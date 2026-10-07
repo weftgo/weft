@@ -1,0 +1,262 @@
+package obsdb
+
+import (
+	"context"
+	"encoding/json"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// LogQuery selects a run's app log records for DB.OtherLogs. The zero
+// value reads every record from index 0, 100 at a time. From is the
+// first index read (inclusive): pass the last returned Index + 1 to
+// continue; a page shorter than PageLimit is the last. MinSeverity,
+// when above 0, keeps the records whose OTLP severity number is at
+// least that (ParseSeverity reads a level name); Index is the record's
+// place among all of the run's app logs, so a filtered page's indexes
+// skip and From continues a filtered walk alike. Limit: 0 = 100, max
+// 1000.
+type LogQuery struct {
+	From        int64
+	Limit       int
+	MinSeverity int
+}
+
+// PageLimit is the query's normalized limit: 100 for 0 (or negative),
+// 1000 at most.
+func (q LogQuery) PageLimit() int {
+	switch {
+	case q.Limit <= 0:
+		return 100
+	case q.Limit > 1000:
+		return 1000
+	}
+	return q.Limit
+}
+
+// OtherLog is one app log record of a run: a non-weft record (no
+// weft.run.id — the app's own slog or OTel Logs API lines, which the
+// writers keep in other_logs on SQLite and in otel_logs on ClickHouse)
+// attributed to the run through the span it was emitted under
+// (DB.OtherLogs). Index is its place in the run's app logs, in time
+// order; Severity the OTLP severity number (0 unspecified, 1–24;
+// SeverityText names it). Attrs are the record's attributes: typed on
+// SQLite, strings on ClickHouse, whose otel_logs keeps the collector's
+// string map only.
+type OtherLog struct {
+	Index     int64
+	Time      time.Time
+	Severity  int
+	EventName string
+	Body      string
+	Attrs     map[string]any
+	TraceID   string
+	SpanID    string
+	Service   string
+}
+
+// LogSkew widens a run's time window for the app-log scan (the
+// otel_logs read on ClickHouse, the same bound on SQLite): clock skew
+// between the emitters of one run.
+const LogSkew = time.Minute
+
+// severityLevels are the OTLP severity ranges' short names, four
+// numbers each from 1 (TRACE 1–4 … FATAL 21–24).
+var severityLevels = []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"}
+
+// SeverityText is an OTLP severity number's short name: "TRACE",
+// "DEBUG", "INFO", "WARN", "ERROR" or "FATAL" for the first number of
+// each range, with the range's ordinal after it for the rest ("WARN2"
+// is 14); "" for 0 (unspecified) and anything outside 1–24.
+func SeverityText(n int) string {
+	if n < 1 || n > 24 {
+		return ""
+	}
+	name := severityLevels[(n-1)/4]
+	if k := (n-1)%4 + 1; k > 1 {
+		name += strconv.Itoa(k)
+	}
+	return name
+}
+
+// ParseSeverity reads a severity filter: a level name (trace, debug,
+// info, warn or warning, error, fatal — any case, the range's first
+// number), a SeverityText spelling ("WARN2"), or a number 1–24. ok is
+// false for anything else.
+func ParseSeverity(s string) (n int, ok bool) {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	if v, err := strconv.Atoi(s); err == nil {
+		return v, v >= 1 && v <= 24
+	}
+	if s == "WARNING" {
+		s = "WARN"
+	}
+	for i, name := range severityLevels {
+		rest, found := strings.CutPrefix(s, name)
+		if !found {
+			continue
+		}
+		if rest == "" {
+			return i*4 + 1, true
+		}
+		k, err := strconv.Atoi(rest)
+		if err != nil || k < 2 || k > 4 {
+			return 0, false
+		}
+		return i*4 + k, true
+	}
+	return 0, false
+}
+
+// LogCandidates is a backend's half of DB.OtherLogs: the non-weft log
+// records (no weft.run.id) of the given traces whose time is within
+// [from, to], in any order. ReadOtherLogs does the rest.
+type LogCandidates func(ctx context.Context, traceIDs []string, from, to time.Time) ([]OtherLog, error)
+
+// ReadOtherLogs is DB.OtherLogs for every backend, so both attribute,
+// order, index and page alike. An app log names no run — it carries no
+// weft.run.id, or the writer would have taken it for a weft record —
+// so it is attributed through the span it was emitted under: a record
+// belongs to the run when its (trace, span) is one of the run's spans
+// (invoke_agent, chat, execute_tool: a tool handler's log line), or a
+// non-weft span below one of them (the app's own span inside a tool),
+// never one below another run's span (a subagent's lines are the
+// child's). A record emitted with no span context cannot be
+// attributed and is in no run's logs.
+//
+// The scan reads the run's traces, bounded by its time window
+// (Started − LogSkew to LastSeen + LogSkew). Duplicates — a retried
+// transport's batch, which neither backend's log table collapses — are
+// dropped (same time, trace, span, severity, event name, body and
+// attributes). The order is time, then span id, severity and body; the
+// filter applies after indexing (LogQuery). An unknown run is
+// ErrNotFound; a run with spans and no app logs is an empty slice,
+// never nil. A run with no span at all has nothing to attribute logs
+// through: a running one reads empty (its spans may not have arrived
+// yet), any other is a *HoleError{Kind: "logs", Hole: HoleNotRecorded}
+// — it was recorded without a tracer.
+func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candidates LogCandidates) ([]OtherLog, error) {
+	det, err := db.Run(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	own, err := db.RunSpans(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if len(own) == 0 {
+		if det.Status == StatusRunning {
+			return []OtherLog{}, nil
+		}
+		return nil, &HoleError{Kind: "logs", Hole: HoleNotRecorded}
+	}
+	var traces []string
+	seenTrace := map[string]bool{}
+	for _, s := range own {
+		if !seenTrace[s.TraceID] {
+			seenTrace[s.TraceID] = true
+			traces = append(traces, s.TraceID)
+		}
+	}
+	var all []Span
+	for _, id := range traces {
+		spans, err := db.Trace(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, spans...)
+	}
+	attributed := logSpans(own, all)
+
+	from, to := det.Started.Add(-LogSkew), det.LastSeen.Add(LogSkew)
+	cands, err := candidates(ctx, traces, from, to)
+	if err != nil {
+		return nil, err
+	}
+	type dedupKey struct {
+		ns                       int64
+		trace, span, event, body string
+		severity                 int
+		attrs                    string
+	}
+	seen := map[dedupKey]bool{}
+	logs := make([]OtherLog, 0, len(cands))
+	for _, l := range cands {
+		if !attributed[spanKey{l.TraceID, l.SpanID}] || l.Time.Before(from) || l.Time.After(to) {
+			continue
+		}
+		attrs, _ := json.Marshal(l.Attrs) // sorted keys: one spelling per map
+		k := dedupKey{l.Time.UnixNano(), l.TraceID, l.SpanID, l.EventName, l.Body, l.Severity, string(attrs)}
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		logs = append(logs, l)
+	}
+	sort.SliceStable(logs, func(i, j int) bool {
+		a, b := logs[i], logs[j]
+		switch {
+		case !a.Time.Equal(b.Time):
+			return a.Time.Before(b.Time)
+		case a.SpanID != b.SpanID:
+			return a.SpanID < b.SpanID
+		case a.Severity != b.Severity:
+			return a.Severity < b.Severity
+		}
+		return a.Body < b.Body
+	})
+	out := []OtherLog{}
+	limit := q.PageLimit()
+	for i := range logs {
+		l := logs[i]
+		l.Index = int64(i)
+		if l.Index < q.From || (q.MinSeverity > 0 && l.Severity < q.MinSeverity) {
+			continue
+		}
+		out = append(out, l)
+		if len(out) == limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+type spanKey struct{ trace, span string }
+
+// logSpans is the set of spans a run's app logs may be emitted under:
+// its own spans and, transitively, the non-weft spans below them (a
+// span with another run's id stops the walk — that run's logs are its
+// own).
+func logSpans(own, all []Span) map[spanKey]bool {
+	children := map[spanKey][]Span{}
+	for _, s := range all {
+		if s.ParentSpanID != "" {
+			p := spanKey{s.TraceID, s.ParentSpanID}
+			children[p] = append(children[p], s)
+		}
+	}
+	set := map[spanKey]bool{}
+	queue := make([]spanKey, 0, len(own))
+	for _, s := range own {
+		k := spanKey{s.TraceID, s.SpanID}
+		if !set[k] {
+			set[k] = true
+			queue = append(queue, k)
+		}
+	}
+	for len(queue) > 0 {
+		k := queue[0]
+		queue = queue[1:]
+		for _, c := range children[k] {
+			ck := spanKey{c.TraceID, c.SpanID}
+			if set[ck] || DeriveSpan(c).RunID != "" {
+				continue
+			}
+			set[ck] = true
+			queue = append(queue, ck)
+		}
+	}
+	return set
+}

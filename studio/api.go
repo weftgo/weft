@@ -134,6 +134,9 @@ type runRow struct {
 	Usage        core.Usage        `json:"usage"`
 	EventCount   int64             `json:"event_count"`
 	MessageCount int64             `json:"message_count"`
+	// DeltaCount is the run's streamed deltas: counted, never stored
+	// (obsdb.RunRow.DeltaCount, a high-water mark over their counter).
+	DeltaCount int64 `json:"delta_count"`
 	// The request record's run columns (ADR 0028 §10):
 	// instructions_hash "" means the run was written before the record
 	// existed, and requests_badge then reads "not_recorded" (absent
@@ -181,6 +184,7 @@ func row(rec obsdb.RunRow) runRow {
 		Usage:        rec.Usage,
 		EventCount:   rec.EventCount,
 		MessageCount: rec.MessageCount,
+		DeltaCount:   rec.DeltaCount,
 
 		InstructionsHash: rec.InstructionsHash,
 		CatalogHash:      rec.CatalogHash,

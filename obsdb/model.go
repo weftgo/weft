@@ -144,6 +144,10 @@ func DeriveRecord(r Record) Weft {
 		w.Pos = int64(attrInt(r.Attrs, attrPromptIdx))
 	case has(r.Attrs, attrToolsIdx):
 		w.Pos = int64(attrInt(r.Attrs, attrToolsIdx))
+	case w.Record == "request" || w.Record == "prompt" || w.Record == "tools":
+		// One of ADR 0028's kinds without its index: only a malformed
+		// producer gets here. -1 on both backends; duplicates collapse.
+		w.Pos = -1
 	}
 	return w
 }
@@ -218,22 +222,35 @@ var nonMetaAttr = map[string]struct{}{
 	attrRecord: {}, attrEventType: {}, attrEventPos: {}, attrDeltaPos: {},
 	attrMessagesIdx: {}, attrStepIndex: {}, attrToolSeq: {},
 	attrPlayground: {}, attrExperimentID: {}, attrForkedFrom: {},
-	"weft.messages.count":                      {},
-	"weft.messages.input":                      {},
-	"weft.content":                             {},
-	"weft.content.truncated_bytes":             {},
-	"weft.version":                             {},
-	"weft.manifest.hash":                       {},
-	"weft.run.steps":                           {},
-	"weft.run.pending":                         {},
-	"weft.run.stop_reason":                     {},
-	"weft.stop.raw":                            {},
-	"weft.model.tool_calls":                    {},
-	"weft.tool.approved":                       {},
-	"weft.tool.pending":                        {},
-	"weft.tool.result_bytes":                   {},
-	"weft.metadata.dropped":                    {},
-	"weft.override.hash":                       {},
+	"weft.messages.count":          {},
+	"weft.messages.input":          {},
+	"weft.content":                 {},
+	"weft.content.truncated_bytes": {},
+	"weft.version":                 {},
+	"weft.manifest.hash":           {},
+	"weft.run.steps":               {},
+	"weft.run.pending":             {},
+	"weft.run.stop_reason":         {},
+	"weft.stop.raw":                {},
+	"weft.model.tool_calls":        {},
+	"weft.tool.approved":           {},
+	"weft.tool.pending":            {},
+	"weft.tool.result_bytes":       {},
+	"weft.metadata.dropped":        {},
+	"weft.override.hash":           {},
+	// ADR 0028: the request record's keys.
+	"weft.request.index":                       {},
+	"weft.prompt.index":                        {},
+	"weft.tools.index":                         {},
+	"weft.system.hash":                         {},
+	"weft.catalog.hash":                        {},
+	"weft.attempt.index":                       {},
+	"weft.instructions.hash":                   {},
+	"weft.messages.reason":                     {},
+	"weft.messages.from_seq":                   {},
+	"weft.messages.to_seq":                     {},
+	"weft.compaction.hash":                     {},
+	"weft.compaction.scope":                    {},
 	"gen_ai.operation.name":                    {},
 	"gen_ai.provider.name":                     {},
 	"gen_ai.request.model":                     {},

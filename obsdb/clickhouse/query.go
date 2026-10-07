@@ -894,6 +894,11 @@ var contractKeys = []string{
 	"gen_ai.usage.cache_creation.input_tokens", "gen_ai.usage.reasoning.output_tokens",
 	"gen_ai.tool.name", "gen_ai.tool.call.id", "gen_ai.conversation.id",
 	"session.id", "user.id", "error.type",
+	// ADR 0028 (migration 0004's tuple; 0001's and 0003's end above).
+	"weft.request.index", "weft.prompt.index", "weft.tools.index",
+	"weft.system.hash", "weft.catalog.hash", "weft.attempt.index",
+	"weft.instructions.hash", "weft.messages.reason", "weft.messages.from_seq",
+	"weft.messages.to_seq", "weft.compaction.hash", "weft.compaction.scope",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

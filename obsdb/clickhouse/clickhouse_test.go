@@ -403,18 +403,26 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 }
 
 // The migrations' mapFilter tuples must be exactly obsdb.MetaOf's
-// exclusion set — the SQL copy of contractKeys: in both run views of
-// 0001, and in 0003's restated traces view.
+// exclusion set — the SQL copy of contractKeys. The latest restatement
+// of both run views (0004) carries the whole set; 0001's two views and
+// 0003's restated traces view carry the set as it was before ADR 0028,
+// contractKeys without its last adr0028Keys entries.
+const adr0028Keys = 12
+
 func TestMigrationContractTuple(t *testing.T) {
-	for v, want := range map[int]int{1: 2, 3: 1} {
-		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+	before := contractKeys[:len(contractKeys)-adr0028Keys]
+	for _, c := range []struct {
+		version, tuples int
+		keys            []string
+	}{{1, 2, before}, {3, 1, before}, {4, 2, contractKeys}} {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[c.version])
 		if err != nil {
 			t.Fatal(err)
 		}
 		marker := "NOT has(["
 		count := strings.Count(string(body), marker)
-		if count != want {
-			t.Fatalf("migration %d: expected the tuple %d time(s), found %d", v, want, count)
+		if count != c.tuples {
+			t.Fatalf("migration %d: expected the tuple %d time(s), found %d", c.version, c.tuples, count)
 		}
 		rest := string(body)
 		for i := 0; i < count; i++ {
@@ -428,12 +436,12 @@ func TestMigrationContractTuple(t *testing.T) {
 			for _, part := range strings.Split(tuple, ",") {
 				sqlKeys = append(sqlKeys, strings.Trim(strings.TrimSpace(part), "'"))
 			}
-			if len(sqlKeys) != len(contractKeys) {
-				t.Fatalf("migration %d: tuple has %d keys, contractKeys has %d", v, len(sqlKeys), len(contractKeys))
+			if len(sqlKeys) != len(c.keys) {
+				t.Fatalf("migration %d: tuple has %d keys, want %d", c.version, len(sqlKeys), len(c.keys))
 			}
-			for i, k := range contractKeys {
+			for i, k := range c.keys {
 				if sqlKeys[i] != k {
-					t.Errorf("migration %d: tuple key %d = %q, want %q", v, i, sqlKeys[i], k)
+					t.Errorf("migration %d: tuple key %d = %q, want %q", c.version, i, sqlKeys[i], k)
 				}
 			}
 			rest = rest[start+end:]
@@ -477,34 +485,42 @@ func TestMigration0003RestatesTracesView(t *testing.T) {
 	}
 }
 
-// Migration 0004 (ADR 0028) is additive: the request record's columns
-// and weft_records_mv restated with the three new kinds, their
-// positions and Step. Pinned offline against 0001's records view, so
-// the restated select cannot drift from the view it replaces in
-// anything but the named changes.
-func TestMigration0004RestatesRecordsView(t *testing.T) {
-	init, err := migrationsFS.ReadFile("migrations/" + migrations[1])
-	if err != nil {
-		t.Fatal(err)
+// Migration 0004 (ADR 0028) is additive: the request record's columns,
+// then three restated views. Each restated select is pinned offline
+// against the select it replaces (0001's records and logs views,
+// 0003's traces view), so it cannot drift in anything but the named
+// changes.
+func TestMigration0004RestatesViews(t *testing.T) {
+	read := func(v int) string {
+		b, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
 	}
-	body, err := migrationsFS.ReadFile("migrations/" + migrations[4])
-	if err != nil {
-		t.Fatal(err)
+	// selectAfter returns the statement text after marker, up to its ';'.
+	selectAfter := func(body, marker string) string {
+		_, rest, ok := strings.Cut(body, marker)
+		if !ok {
+			t.Fatalf("no %q", marker)
+		}
+		sel, _, _ := strings.Cut(rest, ";")
+		return strings.TrimSpace(sel)
 	}
-	const create = "CREATE MATERIALIZED VIEW IF NOT EXISTS weft_records_mv TO weft_records AS"
-	const alter = "ALTER TABLE weft_records_mv MODIFY QUERY"
-	_, was, ok := strings.Cut(string(init), create)
-	if !ok {
-		t.Fatal("0001 has no weft_records_mv")
-	}
-	was, _, _ = strings.Cut(was, ";")
-	stmts := splitStatements(string(body))
+	init, fix := read(1), read(3)
+	const (
+		recordsAlter = "ALTER TABLE weft_records_mv MODIFY QUERY"
+		logsAlter    = "ALTER TABLE weft_runs_logs_mv MODIFY QUERY"
+		tracesAlter  = "ALTER TABLE weft_runs_traces_mv MODIFY QUERY"
+	)
+	stmts := splitStatements(read(4))
 	wantPrefixes := []string{
-		"ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS Step Int32 DEFAULT -1",
+		"ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS Step Int32 DEFAULT -1 AFTER EventType",
+		"ALTER TABLE weft_records ADD COLUMN IF NOT EXISTS Reason LowCardinality(String) DEFAULT '' AFTER Step",
 		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS InstructionsHash SimpleAggregateFunction(max, String)",
 		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS CatalogHash SimpleAggregateFunction(max, String)",
 		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS RequestCount SimpleAggregateFunction(max, Int64)",
-		alter,
+		recordsAlter, logsAlter, tracesAlter,
 	}
 	if len(stmts) != len(wantPrefixes) {
 		t.Fatalf("0004 has %d statements, want %d", len(stmts), len(wantPrefixes))
@@ -514,8 +530,9 @@ func TestMigration0004RestatesRecordsView(t *testing.T) {
 			t.Errorf("0004 statement %d = %q, want prefix %q", i, stmts[i], p)
 		}
 	}
-	now := strings.TrimPrefix(stmts[4], alter)
-	want := strings.NewReplacer(
+	got := func(i int, alter string) string { return strings.TrimSpace(strings.TrimPrefix(stmts[i], alter)) }
+
+	records := strings.NewReplacer(
 		`    if(LogAttributes['weft.event.pos'] != '', toInt64OrZero(LogAttributes['weft.event.pos']),
       if(LogAttributes['weft.messages.index'] != '', toInt64OrZero(LogAttributes['weft.messages.index']), -1)) AS Pos,`,
 		`    multiIf(LogAttributes['weft.event.pos'] != '', toInt64OrZero(LogAttributes['weft.event.pos']),
@@ -527,11 +544,40 @@ func TestMigration0004RestatesRecordsView(t *testing.T) {
 `,
 		`    LogAttributes['weft.event.type'] AS EventType,
     if(LogAttributes['weft.step.index'] != '', toInt32OrZero(LogAttributes['weft.step.index']), -1) AS Step,
+    LogAttributes['weft.messages.reason'] AS Reason,
 `,
 		`IN ('event', 'messages')`, `IN ('event', 'messages', 'request', 'prompt', 'tools')`,
-	).Replace(strings.TrimSpace(was))
-	if strings.TrimSpace(now) != want {
-		t.Errorf("0004's records select is not 0001's with the request kinds and Step added:\n%s\nwant:\n%s", now, want)
+	).Replace(selectAfter(init, "CREATE MATERIALIZED VIEW IF NOT EXISTS weft_records_mv TO weft_records AS"))
+	if now := got(5, recordsAlter); now != records {
+		t.Errorf("0004's records select is not 0001's with the request kinds, Step and Reason:\n%s\nwant:\n%s", now, records)
+	}
+
+	tuple := `'error.type',
+        'weft.request.index', 'weft.prompt.index', 'weft.tools.index',
+        'weft.system.hash', 'weft.catalog.hash', 'weft.attempt.index',
+        'weft.instructions.hash', 'weft.messages.reason', 'weft.messages.from_seq',
+        'weft.messages.to_seq', 'weft.compaction.hash', 'weft.compaction.scope'], k)`
+	logsDelta := "toInt64OrZero(LogAttributes['weft.delta.pos']) + 1, 0) AS DeltaCount"
+	logs := strings.NewReplacer(
+		"'error.type'], k)", tuple,
+		logsDelta, logsDelta+`,
+    if(LogAttributes['weft.event.type'] = 'run_start', LogAttributes['weft.instructions.hash'], '') AS InstructionsHash,
+    if(LogAttributes['weft.record'] = 'request' AND LogAttributes['weft.request.index'] = '0', LogAttributes['weft.catalog.hash'], '') AS CatalogHash,
+    if(LogAttributes['weft.record'] = 'request' AND LogAttributes['weft.request.index'] != '', toInt64OrZero(LogAttributes['weft.request.index']) + 1, 0) AS RequestCount`,
+	).Replace(selectAfter(init, "CREATE MATERIALIZED VIEW IF NOT EXISTS weft_runs_logs_mv TO weft_runs AS"))
+	if now := got(6, logsAlter); now != logs {
+		t.Errorf("0004's logs run view is not 0001's with the tuple and the three columns:\n%s\nwant:\n%s", now, logs)
+	}
+
+	traces := strings.NewReplacer(
+		"'error.type'], k)", tuple,
+		"    toInt64(0) AS DeltaCount", `    toInt64(0) AS DeltaCount,
+    if(isInvoke, SpanAttributes['weft.instructions.hash'], '') AS InstructionsHash,
+    '' AS CatalogHash,
+    toInt64(0) AS RequestCount`,
+	).Replace(selectAfter(fix, tracesAlter))
+	if now := got(7, tracesAlter); now != traces {
+		t.Errorf("0004's traces run view is not 0003's with the tuple and the three columns:\n%s\nwant:\n%s", now, traces)
 	}
 }
 

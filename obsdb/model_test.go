@@ -82,6 +82,10 @@ func TestDeriveRecordKindAndPosition(t *testing.T) {
 		{"request", map[string]any{"weft.record": "request", "weft.request.index": int64(3), "weft.step.index": int64(2)}, "request", 3},
 		{"prompt", map[string]any{"weft.record": "prompt", "weft.prompt.index": int64(1)}, "prompt", 1},
 		{"tools", map[string]any{"weft.record": "tools", "weft.tools.index": int64(4)}, "tools", 4},
+		// A malformed producer: one of the new kinds without its index.
+		{"request without index", map[string]any{"weft.record": "request"}, "request", -1},
+		{"prompt without index", map[string]any{"weft.record": "prompt"}, "prompt", -1},
+		{"tools without index", map[string]any{"weft.record": "tools"}, "tools", -1},
 	} {
 		attrs := map[string]any{}
 		for k, v := range base {
@@ -186,5 +190,24 @@ func TestDerivePlaygroundAsStringAttr(t *testing.T) {
 		}}); w.Playground {
 			t.Fatalf("playground %#v derived true, want false", v)
 		}
+	}
+}
+
+// ADR 0028's keys are the record contract, never run metadata: a
+// request record's (and a compaction record's) attributes leave MetaOf
+// with only the caller's own pairs.
+func TestMetaOfExcludesRequestRecordKeys(t *testing.T) {
+	attrs := map[string]any{
+		"weft.record": "request", "weft.run.id": "r1",
+		"weft.request.index": "0", "weft.prompt.index": "0", "weft.tools.index": "0",
+		"weft.step.index": "1", "weft.attempt.index": "1",
+		"weft.system.hash": "aa", "weft.catalog.hash": "bb", "weft.instructions.hash": "cc",
+		"weft.messages.reason": "compacted", "weft.messages.from_seq": "1", "weft.messages.to_seq": "3",
+		"weft.compaction.hash": "dd", "weft.compaction.scope": "run",
+		"tenant": "acme",
+	}
+	meta := MetaOf(attrs)
+	if len(meta) != 1 || meta["tenant"] != "acme" {
+		t.Fatalf("MetaOf = %v, want only the caller's tenant", meta)
 	}
 }

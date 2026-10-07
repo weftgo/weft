@@ -1273,6 +1273,8 @@ func TestRequestRecordSchema(t *testing.T) {
 		kindRec("tools", "weft.tools.index", 0, -1),
 		kindRec("request", "weft.request.index", 0, 1),
 		kindRec("request", "weft.request.index", 1, 2),
+		obsdb.Record{Time: time.Unix(1790845923, 9).UTC(), EventName: "weft.tools", Body: `{}`,
+			Attrs: map[string]any{"weft.record": "tools", "weft.run.id": "r1"}}, // no index: Pos -1
 	)}
 	if err := db.Write(ctx, batch); err != nil {
 		t.Fatal(err)
@@ -1330,6 +1332,7 @@ func TestRequestRecordSchema(t *testing.T) {
 		Scan(&instructions, &catalog, &requests); err != nil {
 		t.Fatal(err)
 	}
+	// SQLite's write path fills these with the emission (ADR 0028, A1).
 	if instructions != "" || catalog != "" || requests != 0 {
 		t.Errorf("run columns = %q, %q, %d; want the defaults until the emission ships", instructions, catalog, requests)
 	}
@@ -1348,7 +1351,7 @@ func TestRequestRecordSchema(t *testing.T) {
 		}
 		got = append(got, fmt.Sprintf("%s/%d/%d", kind, pos, step))
 	}
-	if want := "prompt/0/-1 request/0/1 request/1/2 tools/0/-1"; strings.Join(got, " ") != want {
+	if want := "prompt/0/-1 request/0/1 request/1/2 tools/-1/-1 tools/0/-1"; strings.Join(got, " ") != want {
 		t.Errorf("records = %v, want %s", got, want)
 	}
 }

@@ -479,44 +479,55 @@ func TestExperimentCreatedSurvivesUpdate(t *testing.T) {
 	}
 }
 
-// Migration 0004 (ADR 0028) on a live server: weft_runs carries the
-// request record's three columns at their "not recorded" defaults, and
-// weft_records_mv keeps request, prompt and tools records under their
-// own per-run index, with weft.step.index in Step.
+// Migration 0004 (ADR 0028) on a live server: the run views fill
+// InstructionsHash (run_start), CatalogHash (request index 0) and
+// RequestCount (the request high-water mark) and keep the new keys out
+// of Meta; weft_records_mv keeps request, prompt and tools records
+// under their own per-run index (-1 without one), with Step and Reason.
 func TestRequestRecordSchema(t *testing.T) {
 	db, dsn := openFresh(t)
-	rec := func(kind, posKey string, pos, step int64) obsdb.Record {
-		attrs := map[string]any{"weft.record": kind, "weft.run.id": "q1", posKey: pos}
-		if step >= 0 {
-			attrs["weft.step.index"] = step
+	n := int64(0)
+	rec := func(kind string, attrs map[string]any) obsdb.Record {
+		n++
+		a := map[string]any{"weft.record": kind, "weft.run.id": "q1", "tenant": "acme"}
+		for k, v := range attrs {
+			a[k] = v
 		}
 		return obsdb.Record{
-			Time: time.Unix(0, 1790845923120000000+pos).UTC(), EventName: "weft." + kind,
-			Severity: 9, Body: `{}`, Service: "conf-svc", Attrs: attrs,
+			Time: time.Unix(0, 1790845923120000000+n).UTC(), EventName: "weft." + kind,
+			Severity: 9, Body: `{}`, Service: "conf-svc", Attrs: a,
 			Resource: map[string]any{"service.name": "conf-svc"},
 		}
 	}
 	if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
-		rec("prompt", "weft.prompt.index", 0, -1),
-		rec("tools", "weft.tools.index", 0, -1),
-		rec("request", "weft.request.index", 0, 1),
-		rec("request", "weft.request.index", 1, 2),
-		rec("messages", "weft.messages.index", 2, 1),
+		rec("event", map[string]any{"weft.event.type": "run_start", "weft.event.pos": int64(0), "weft.instructions.hash": "ih"}),
+		rec("prompt", map[string]any{"weft.prompt.index": int64(0), "weft.system.hash": "sh"}),
+		rec("tools", map[string]any{"weft.tools.index": int64(0), "weft.catalog.hash": "c0"}),
+		rec("request", map[string]any{"weft.request.index": int64(0), "weft.step.index": int64(0), "weft.attempt.index": int64(1), "weft.catalog.hash": "c0"}),
+		rec("request", map[string]any{"weft.request.index": int64(1), "weft.step.index": int64(1), "weft.attempt.index": int64(1), "weft.catalog.hash": "c1"}),
+		rec("messages", map[string]any{"weft.messages.index": int64(2), "weft.step.index": int64(1)}),
+		rec("messages", map[string]any{"weft.messages.index": int64(3), "weft.step.index": int64(1),
+			"weft.messages.reason": "compacted", "weft.messages.from_seq": int64(1), "weft.messages.to_seq": int64(3),
+			"weft.compaction.hash": "kh", "weft.compaction.scope": "run"}),
+		rec("tools", nil), // a malformed producer: no index
 	}}); err != nil {
 		t.Fatal(err)
 	}
 	conn := openRaw(t, dsn)
 	defer func() { _ = conn.Close() }()
-	var instructions, catalog string
+	var instructions, catalog, meta string
 	var requests int64
-	if err := conn.QueryRow(ctx(), `SELECT max(InstructionsHash), max(CatalogHash), max(RequestCount)
-		FROM weft_runs WHERE RunId = 'q1'`).Scan(&instructions, &catalog, &requests); err != nil {
+	if err := conn.QueryRow(ctx(), `SELECT max(InstructionsHash), max(CatalogHash), max(RequestCount), max(Meta)
+		FROM weft_runs WHERE RunId = 'q1'`).Scan(&instructions, &catalog, &requests, &meta); err != nil {
 		t.Fatal(err)
 	}
-	if instructions != "" || catalog != "" || requests != 0 {
-		t.Errorf("run columns = %q, %q, %d; want the defaults until the emission ships", instructions, catalog, requests)
+	if instructions != "ih" || catalog != "c0" || requests != 2 {
+		t.Errorf("run columns = %q, %q, %d; want ih, c0 (request 0's), 2", instructions, catalog, requests)
 	}
-	rows, err := conn.Query(ctx(), `SELECT Kind, Pos, Step FROM weft_records FINAL
+	if meta != `{"tenant":"acme"}` {
+		t.Errorf("run meta = %s; ADR 0028's keys must stay out of it", meta)
+	}
+	rows, err := conn.Query(ctx(), `SELECT Kind, Pos, Step, Reason FROM weft_records FINAL
 		WHERE RunId = 'q1' ORDER BY Kind, Pos`)
 	if err != nil {
 		t.Fatal(err)
@@ -524,15 +535,15 @@ func TestRequestRecordSchema(t *testing.T) {
 	defer func() { _ = rows.Close() }()
 	var got []string
 	for rows.Next() {
-		var kind string
+		var kind, reason string
 		var pos int64
 		var step int32
-		if err := rows.Scan(&kind, &pos, &step); err != nil {
+		if err := rows.Scan(&kind, &pos, &step, &reason); err != nil {
 			t.Fatal(err)
 		}
-		got = append(got, fmt.Sprintf("%s/%d/%d", kind, pos, step))
+		got = append(got, fmt.Sprintf("%s/%d/%d/%s", kind, pos, step, reason))
 	}
-	want := "messages/2/1 prompt/0/-1 request/0/1 request/1/2 tools/0/-1"
+	want := "event/0/-1/ messages/2/1/ messages/3/1/compacted prompt/0/-1/ request/0/0/ request/1/1/ tools/-1/-1/ tools/0/-1/"
 	if strings.Join(got, " ") != want {
 		t.Errorf("weft_records = %v, want %s", got, want)
 	}

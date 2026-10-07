@@ -14,10 +14,14 @@
   the wire discriminators), ADR 0006 (two seams), ADR 0014 (subagents
   as tools), ADR 0016 (observability; spans carry no content, O7),
   ADR 0020 (thread compaction)
-- Ships with this ADR: the schema only — `obsdb/sqlite` migration
-  `0003_request_record.sql` and `obsdb/clickhouse` migration
-  `0004_request_record.sql`. Emission, the API routes and the UI are
-  the plan items' own changes, each against this contract.
+- Ships with this ADR: the read side of `obsdb` — `obsdb/sqlite`
+  migration `0003_request_record.sql`, `obsdb/clickhouse` migration
+  `0004_request_record.sql` (columns, the widened records view, the run
+  views filling the new columns), the new kinds' positions in
+  `DeriveRecord` and the new keys in `MetaOf`. Emission, SQLite's
+  run-row fill, the transcript readers' growth filter, the API routes
+  and the UI are the plan items' own changes, each against this
+  contract.
 
 ## Context
 
@@ -63,7 +67,7 @@ per-destination policy: on for `otel.Local` and `otel.Studio`, off for
 third-party destinations, `Redact`-able, capped with a visible marker.
 Nothing reaches a destination that the content policy would not already
 let a transcript reach. The read path is the only new exposure, and it
-is gated (§9): a read-scoped panel token never sees a system prompt.
+is gated (§10): a read-scoped panel token never sees a system prompt.
 
 The fingerprint's meaning does not change: `weft.override.instructions
 = true` stays on the `invoke_agent` span, `weft.override.hash` stays
@@ -85,13 +89,18 @@ carries the identity chain ADR 0024 defines (`weft.run.id`,
 `gen_ai.agent.name` when named, every `Metadata` key) and `weft.content`.
 
 **Emission point.** In the model-call phase, after `PrepareStep` has
-produced the step's final `ModelRequest` and immediately before the
-model chain is called, in this order: `prompt` (when its hash is new to
-this run), `tools` (when its hash is new to this run), then `request`
-(attempt 1; a further attempt's record follows its report, §7).
-A reader that holds a `request` therefore always holds the `prompt` and
-`tools` it names, unless a destination dropped them (§6), which the
-reader can see.
+produced the step's final `ModelRequest`, after that request passed
+validation (tool choice, params) and after the tools' `PromptSnippet`s
+were composed into the system text, immediately before the model chain
+is called, in this order: `prompt` (when its hash is new to this run),
+`tools` (when its hash is new to this run), then `request` (attempt 1; a
+further attempt's record follows its report, §7). A request that was
+never sent — a `PrepareStep` error, a validation failure, a cancellation
+before the call — is never recorded. The three records are emitted on
+the `chat` span's context, so they carry its trace and span id and join
+it by span id. A reader that holds a `request` therefore always holds
+the `prompt` and `tools` it names, unless a destination dropped them
+(§6), which the reader can see.
 
 **Dedupe by hash (plan decision 9).** The system text and the catalog
 are stored once per distinct hash per run, never per step. A run that
@@ -112,7 +121,7 @@ Body (JSON, keys as written; absent = not set):
 | `step` | the step index (also `weft.step.index`) |
 | `attempt` | 1 for the loop's call; 2, 3, … for each further attempt the model chain reports (§7) |
 | `system_hash` | sha256 of the system text this request carried (§4); `""` when it carried none |
-| `messages_ref` | `{"index": i, "count": n}`: the request's messages are the run's view as of `messages` record `i` (§8), `n` messages long — the bytes are never duplicated |
+| `messages_ref` | `{"index": i, "count": n}`: the request's messages are the run's view as of `messages` record `i` (§8), `n` messages long — the bytes are never duplicated. On a run whose capture is off no `messages` record exists and `weft.messages.index` does not advance, so `index` is omitted and only `count` is kept |
 | `tools` | `{"catalog_hash": h, "names": [...]}`, names in the order offered |
 | `tool_choice` | the `ToolChoiceConfig` in force (mode, name) |
 | `thinking` | the `ThinkingConfig` in force |
@@ -128,39 +137,62 @@ Attributes: `weft.record = request`, `weft.request.index`,
 ### 4. The `prompt` record and the instructions hash
 
 Body `{"hash": h, "text": "..."}`; attributes `weft.record = prompt`,
-`weft.prompt.index`, `weft.system.hash`. The hash is the lowercase hex
-sha256 of the UTF-8 text — the encoding `weft.manifest.hash` and
-`weft.override.hash` already use — computed over the text before any
-destination redacts or caps it, so a hash identifies the prompt
-everywhere even where the text was cut.
+`weft.prompt.index`, `weft.system.hash`. Every text hash in this ADR is
+the lowercase hex sha256 of the UTF-8 bytes — the encoding
+`weft.manifest.hash` and `weft.override.hash` already use — computed
+over the text before any destination redacts or caps it, so a hash
+identifies the prompt everywhere even where the text was cut.
 
-Two hashes, deliberately: `instructions_hash` is the run's configured
-instructions (the agent's, or the run's override) and is fixed for the
-run; `system_hash` is what one request carried after `PrepareStep`. They
-are equal unless a `PrepareStep` rewrote the system text.
+Two hashes over two different texts:
 
-`RunStart` gains `instructions_hash` (an additive, omitted-when-empty
-field on the event wire, ADR 0004), mirrored as `weft.instructions.hash`
-on the `run_start` record and on the `invoke_agent` span. A hash is not
-content; it travels on content-off chains and on spans.
+- `system_hash` is over the **composed** system text the model
+  received: the request's system after `PrepareStep`, with the offered
+  tools' `PromptSnippet`s appended by `composeSystem` (`core/loop.go`).
+  It is the hash of the `prompt` record's text.
+- `instructions_hash` is over the **raw configured** instructions: the
+  agent's `Instructions`, or the run's override, before any
+  `PrepareStep` and before composition. It is fixed for the run.
+
+`RunStart` gains `instructions_hash` (an additive field on the event
+wire, ADR 0004), mirrored as `weft.instructions.hash` on the `run_start`
+record and on the `invoke_agent` span. It is **always** present on a
+run written by this version: a run with no instructions carries the
+hash of the empty string,
+`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+Its presence is what tells a reader the run was written under this
+contract (§10). A hash is not content; it travels on content-off chains
+and on spans.
 
 ### 5. The `tools` record
 
-Body `{"hash": h, "tools": [...]}`, one entry per tool in the order
-offered: `name`, `description`, `schema` (the JSON schema verbatim), and
-the policy chips — `timeout_ms`, `approval` (the tool requires approval
-or the run parks it), `replay` (the class the tool actually has; an
-unannotated tool, MCP tools included, is `never`), `max_result_bytes`,
-`sequential`, and `source`: `local` | `mcp` | `subagent`. Attributes
-`weft.record = tools`, `weft.tools.index`, `weft.catalog.hash`.
+Body `{"hash": h, "tools": [...]}`, one entry per tool in name order
+(the order the hash uses): `name`, `description`, `schema` (the JSON
+schema verbatim), and the policy chips — `timeout_ms`, `approval` (the
+tool requires approval or the run parks it), `replay` (the class the
+tool actually has; an unannotated tool, MCP tools included, is
+`never`), `max_result_bytes`, `sequential`, and `source`: `local` |
+`mcp` | `subagent`. Attributes `weft.record = tools`, `weft.tools.index`,
+`weft.catalog.hash`. The `request` record's `tools.names` keeps the
+order the model was offered.
 
-The catalog hash is sha256 over the canonical JSON of the
-model-visible list — `[{name, description, schema}]` in offered order,
-schema re-encoded canonically — and not over the policy chips: it
-names what the model was offered. A change of policy alone (a
-`ToolSource` swapping in the same schema with another timeout) is
-therefore not a new catalog and is not re-recorded; the chips describe
-the catalog as first recorded in the run.
+The catalog hash names what the model was offered, so it covers the
+model-visible triple and not the policy chips. The procedure, in Go
+terms; an emitter in another language follows the same steps:
+
+1. For each tool, decode its JSON schema with a `json.Decoder` that has
+   `UseNumber()` set, into an `any`.
+2. Build one object per tool, `{"name": …, "description": …, "schema":
+   <the decoded value>}`, and sort the objects by `name`.
+3. Encode the array with a `json.Encoder` that has
+   `SetEscapeHTML(false)`; Go's encoder writes map keys sorted and no
+   insignificant whitespace. Drop the encoder's trailing newline.
+4. The hash is sha256 of those bytes, lowercase hex.
+
+The result is JCS-equivalent (RFC 8785) except that numbers keep their
+source lexeme (`1.0` stays `1.0`), which `UseNumber` preserves. A change
+of policy alone (a `ToolSource` swapping in the same schema with another
+timeout) is therefore not a new catalog and is not re-recorded; the
+chips describe the catalog as first recorded in the run.
 
 ### 6. Content policy per kind
 
@@ -177,29 +209,38 @@ values (the prompt text and a stop sequence); their names are A1's,
 pinned by its tests. Unlike the transcript, a prompt is capped: a
 system prompt is not needed to rebuild `RunResult.Messages`, and the
 hash survives the cut. A capped or stripped request record is a badge,
-never a silent gap (§10).
+never a silent gap (§11).
 
 ### 7. Attempts and timing (A4)
 
-The loop calls the model chain once per step and emits that call's
-`request` record with `attempt = 1` before the chain runs. A middleware
-that calls `next` again (`mw.Retry`, `mw.Fallback`) reports each attempt
-through the core's context-carried hook, `weft.ReportFromContext(ctx)
-Reporter` (plan decision 10, item A8, ADR 0016's 2026-10-07 amendment).
-For every reported attempt with index 2 or more the core emits another
-`request` record — same hashes, `attempt` = the reported index, `model`
-as that attempt requested — when the report arrives, so its timestamp
-is the attempt's end, not its start. A run with no reporting middleware
-has exactly one `request` record per step. The `attempt` child span
-under `chat` is A8's, unchanged: `weft.attempt.index`,
-`gen_ai.provider.name`, `gen_ai.request.model`,
+Attempt numbers are the core's own count per model call, in the order
+attempts are reported: the reporter A8 put on the chain's context
+(`weft.ReportFromContext(ctx) Reporter`, plan decision 10, ADR 0016's
+2026-10-07 amendment) numbers them itself, with one counter per model
+call; a reporter never supplies a number. The loop's own `request`
+record, emitted before the chain runs, is attempt 1. Every reported
+attempt after the first adds one more `request` record with that
+number — same hashes, `model` as that attempt requested — emitted when
+the report arrives, so its timestamp is the attempt's end, not its
+start. Only the layer adjacent to the real model reports (`mw.Retry`,
+`mw.Fallback`, or an adapter that reports its SDK's own internal
+retries), and an adapter that does report SDK-internal retries adds
+records the same way; a count of `request` records per step is
+therefore "attempts the chain reported, at least one", not a fixed one.
+A report that arrives after its model call ended is dropped by the
+reporter and adds no record.
+
+The `attempt` child span under `chat` is A8's, unchanged:
+`weft.attempt.index`, `gen_ai.provider.name`, `gen_ai.request.model`,
 `weft.attempt.retry_after_ms` when the provider asked, status `Ok` or
-`Error` with `error.type`. The `request` record carries the same index
-as `weft.attempt.index`, so a record and its span join on (run, step,
-attempt). The hook reports; it wraps no call and changes no result, so
-it is not a third seam (ADR 0006). `Reporter.Raw`'s wire bodies stay
-dropped under this ADR: storing them is content of another size and a
-separate amendment.
+`Error` with `error.type`. The `request` record carries its number as
+`weft.attempt.index`, so a record joins its span on (run, step,
+attempt); when no `attempt` span exists (attempt 1 with nothing
+reporting, or no tracer recording), the join falls back to the `chat`
+span by the record's span id (§2). The hook reports; it wraps no call
+and changes no result, so it is not a third seam (ADR 0006).
+`Reporter.Raw`'s wire bodies stay dropped under this ADR: storing them
+is content of another size and a separate amendment.
 
 The `chat` span gains `weft.ttft_ms` (time to the first model event)
 and `weft.stream = true` when the call streamed. The `step_finish`
@@ -209,37 +250,75 @@ event gains `latency_ms` and `ttft_ms` (additive wire fields, ADR 0004).
 
 Every `messages` record carries `weft.step.index` — the step the batch
 belongs to, 0 for the input; the core knows it at each of the five
-growth points — and `obsdb` stores it in `records.step`. Readers stop
-inferring a batch's step from its neighbours.
+growth points — and `obsdb` stores it in `records.step`. A steered
+batch carries the step that just finished and feeds the next step's
+request. Readers stop inferring a batch's step from its neighbours.
+ClickHouse rows written before `0004` read `step = -1`; for those a
+reader falls back to inference and shows the `derived` badge.
 
-A view the transcript does not hold is recorded, never inferred: when
-the messages a request carries are not the run's transcript so far —
-a `thread` compaction (ADR 0020), an overflow re-run, a `PrepareStep`
-that trims or rewrites messages — the core emits one more `messages`
-record before that request, with `weft.messages.reason = compacted`:
+**Growth and views.** A `messages` record without
+`weft.messages.reason` is growth: readers concatenate growth records in
+index order, and that concatenation equals `RunResult.Messages` (ADR
+0024's byte-for-byte rule, now stated over growth records only). A
+record with `weft.messages.reason = compacted` is a view: it says what
+one request saw instead of the transcript, and it is never part of the
+plain transcript. `compacted` is the only reason this ADR defines; a
+reader fails loudly on one it does not know.
 
-- body: the replacement entries (the summary messages), the ordinary
-  messages wire, so per-part `Redact` applies unchanged;
-- `weft.messages.from_seq`, `weft.messages.to_seq`: the replaced range,
-  half-open, as message ordinals over the view it replaces — the run's
-  view (records in index order, input first, earlier compactions
-  applied) when the replacement happens inside the run, and the
-  session's context before compaction when `thread` compacted before
-  the run began (then `weft.compaction.scope = session`, otherwise
-  `run`);
-- `weft.compaction.hash`: sha256 over the canonical JSON of
-  `{from_seq, to_seq, entries}`, the compaction's own identity.
+**Run scope (the core emits it).** When the messages a request carries
+are not the run's transcript so far — a `PrepareStep` that trims,
+summarizes or rewrites messages, an overflow re-run — the core emits
+one `compacted` record immediately before that request's `request`
+record:
 
-It takes the next `weft.messages.index` on the same counter, so the
-(run, messages, index) key and contiguity hold. A record with a reason
-is not transcript growth: it is excluded from the concatenation that
-equals `RunResult.Messages` (ADR 0024's byte-for-byte rule now reads
-"the records without `weft.messages.reason`"). The `request` record's
-`messages_ref.index` points at the post-compaction record, so "what the
-model saw" is always the literal view: the records up to that index,
-compactions applied, `count` messages long. An absent reason means
-growth; `compacted` is the only reason this ADR defines, and a reader
-fails loudly on one it does not know.
+- the range is computed by the longest common prefix and the longest
+  common suffix (not overlapping the prefix) of the current transcript
+  and the request's messages; the messages between them in the
+  transcript are the replaced half-open range `[from_seq, to_seq)` of
+  message ordinals, and the request's messages between them are the
+  record's body (the ordinary messages wire, so per-part `Redact`
+  applies unchanged). If the two are equal, no record is emitted;
+- attributes `weft.messages.from_seq`, `weft.messages.to_seq`,
+  `weft.compaction.scope = run`, and `weft.compaction.hash`, sha256
+  over the canonical JSON (§5's encoder) of `{"from_seq", "to_seq",
+  "entries"}`;
+- it takes the next `weft.messages.index` on the same counter, so the
+  (run, messages, index) key and contiguity hold.
+
+The request's `messages_ref.index` points at that record: what the
+model saw is the growth records up to that index, concatenated, with
+that one record's range replaced by its body — `count` messages long. A
+run-scope rewrite applies only to the request that points at it and is
+never carried into later steps: each step's `PrepareStep` sees the full
+transcript again, and each rewritten request gets its own record.
+
+Worked example. Growth records 0 (input: `u1`), 1 (`a1`), 2 (`t1`)
+make the transcript `[u1, a1, t1]`. Step 2's `PrepareStep` replaces
+`a1, t1` with one summary `s`, so the request carries `[u1, s]`. Common
+prefix `[u1]`, common suffix empty: the core emits record 3, `compacted`,
+`from_seq = 1`, `to_seq = 3`, body `[s]`, and the request's
+`messages_ref = {index: 3, count: 2}`. The model answers `a2`, which is
+growth record 4: the transcript is `[u1, a1, t1, a2]` — record 3 is not
+in it. Step 3's request, if `PrepareStep` leaves the messages alone,
+has `messages_ref = {index: 4, count: 4}` and no `compacted` record
+applies to it.
+
+**Session scope (thread reports it).** The core has no knowledge of a
+`thread` compaction (ADR 0020): when `thread` compacted before the run,
+the run's input record 0 already holds the compacted context, which is
+literal and needs nothing applied. A marker with
+`weft.compaction.scope = session` is informational only: `thread` emits
+it through its own OTel records, it carries no messages, and readers
+never apply it. A9 designs that carrier.
+
+**Readers (A9's change, not this commit's).** Both transcript readers —
+`obsdb/sqlite`'s `Transcript` (`query.go`, the `kind = 'messages'`
+select) and `obsdb/clickhouse`'s (`query.go`, the `Kind = 'messages'`
+select) — must filter to growth records (`reason = ''`, read from the
+record's attributes in SQLite and from `weft_records.Reason` in
+ClickHouse) when building the plain transcript, and a run's messages
+count excludes `compacted` records. Until A9 lands the core emits no
+`compacted` record, so today's readers stay correct.
 
 ### 9. Subagents (A10)
 
@@ -256,19 +335,40 @@ parent's records never describe a child's request.
   is free text and the write path already stores a kind it does not
   count; ClickHouse's `weft_records_mv` filter widens to the three
   kinds, with `Pos` read from their indexes. `obsdb.DeriveRecord`
-  reads the three index attributes as the position.
+  reads the three index attributes as the position. A record of one of
+  the three kinds with no index attribute gets `Pos = -1` on both
+  backends; duplicates at -1 collapse under the key, and only a
+  malformed producer reaches it.
 - `records.step` holds `weft.step.index` (-1 = absent). SQLite has had
-  the column since `0001`; ClickHouse's `weft_records` gains `Step`.
-- The run row gains `instructions_hash` (from `run_start`'s
-  `weft.instructions.hash`), `catalog_hash` (the run's first catalog:
-  the `tools` record at index 0) and `request_count` (the request
-  high-water mark, max `weft.request.index` + 1, retry-proof like
-  `delta_count`). ClickHouse stores the three as max-aggregates on
-  `weft_runs`; its run views populate them when the emission ships,
-  restating their select with the contract tuple's new keys.
-- **No backfill.** A run written before this version has no `request`
-  records and `request_count = 0`, which reads "not recorded", never
-  "made no model call"; the UI states it with the `not_recorded` badge.
+  the column since `0001`; ClickHouse's `weft_records` gains `Step` and
+  `Reason` (`weft.messages.reason`, `''` for growth), because ClickHouse
+  keeps no attribute column to read the reason from.
+- The run row gains `instructions_hash` (`run_start`'s
+  `weft.instructions.hash`), `catalog_hash` (the `weft.catalog.hash` of
+  `request` index 0 — the request record survives content-off chains,
+  the `tools` record does not) and `request_count` (the number of
+  `request` records). ClickHouse fills them in its run views as
+  max-aggregates: `request_count` is the high-water mark, max
+  `weft.request.index` + 1, which equals the count because the index is
+  contiguous from 0, and which a retried batch cannot inflate (a sum
+  over rows could). SQLite's write path fills them with the emission
+  (A1).
+- Every new attribute key (`weft.request.index`, `weft.prompt.index`,
+  `weft.tools.index`, `weft.system.hash`, `weft.catalog.hash`,
+  `weft.attempt.index`, `weft.instructions.hash`,
+  `weft.messages.reason`, `weft.messages.from_seq`,
+  `weft.messages.to_seq`, `weft.compaction.hash`,
+  `weft.compaction.scope`) is part of the contract and never run
+  metadata: `obsdb.MetaOf` excludes it and ClickHouse's contract tuple
+  carries it.
+- **No backfill, and three readings of a run row:**
+
+  | Row | Means | Badge |
+  |---|---|---|
+  | `instructions_hash = ''` | written before this contract: no request records exist | `not_recorded` |
+  | `instructions_hash != ''`, `request_count = 0` | made no model call (a resume that parked again, a `PrepareStep` or validation failure at step 0, an early cancellation, a live run before its first call) | none |
+  | `instructions_hash != ''`, `request_count > 0` | recorded | none |
+
 - The API (A1): `GET /api/runs/{id}/requests` (paged, `step=` filter,
   hashes resolved inline unless `?refs=1`) and `GET
   /api/runs/{id}/tools`; `GET /api/runs/{id}` gains the three columns.
@@ -296,8 +396,8 @@ this ADR.
 | `max_tokens` | the step finished on the output token limit | raise `max_tokens` |
 | `interrupted` | the run stopped reporting (derived: last-seen older than 30 s, ADR 0024) | — |
 | `gap` | a hole in a contiguous counter: a lost batch | check the exporter's drops |
-| `not_recorded` | the record kind did not exist in the version that wrote the run | upgrade weft and re-run |
-| `derived` | the value was computed by the reader, not recorded | — |
+| `not_recorded` | the record kind did not exist in the version that wrote the run (`instructions_hash = ''`) | upgrade weft and re-run |
+| `derived` | the value was computed by the reader, not recorded (e.g. a ClickHouse row from before `0004` with `step = -1`) | — |
 | `hidden` | the reader's scope may not see it (a read-scoped token and a system prompt) | use a playground-scoped token |
 | `compacted` | the model saw a compacted view (§8) | open the compaction record |
 
@@ -339,8 +439,11 @@ columns and the badges are one contract and are read together.
   application whose prompt must not leave the process sets `Redact`
   for it or turns content off for that destination; the local sink and
   Studio default to on, as they do for the transcript.
-- `obsdb.DeriveRecord` positions the three kinds now; the ClickHouse
-  contract tuple and the run views gain the new attribute keys with the
-  emission, in the migration that restates them.
+- `obsdb` is ready before the emission: `DeriveRecord` positions the
+  three kinds, `MetaOf` and the ClickHouse contract tuple exclude the
+  new keys, and the ClickHouse run views fill the three run columns.
+  SQLite's run-row fill, the transcript readers' growth filter and the
+  messages count's exclusion of `compacted` records ship with A1 and
+  A9.
 - Every attribute name above joins ADR 0024's pinned set: changing one
   is an amendment to this ADR.

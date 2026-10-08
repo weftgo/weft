@@ -21,6 +21,7 @@ import { useRunEvents } from "@/hooks/use-run-events"
 import { HoleBadges } from "@/components/studio/hole-badge"
 import { StepBody } from "@/components/studio/step-list"
 import { RequestSection, useRunRequests } from "@/components/studio/step-request"
+import { runLink } from "@/lib/links"
 
 /** A child run as the parent's page knows it: the run document's
  * children row (RunDetail.Children), or — when only the step route's
@@ -159,8 +160,7 @@ export function SubagentBlock({
         <HoleBadges holes={holes} />
         <span className="font-mono text-[11px] text-faint">{child.id}</span>
         <Link
-          to="/runs/$id"
-          params={{ id: child.id }}
+          {...runLink(child.id)}
           className="ml-auto flex items-center gap-0.5 font-mono text-[11px] text-thread-ink hover:underline"
         >
           open run

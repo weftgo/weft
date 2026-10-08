@@ -75,6 +75,7 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command"
+import { runLink } from "@/lib/links"
 
 function Nav() {
   const meta = useQuery(metaQuery())
@@ -274,7 +275,10 @@ export function AppShell() {
               <CommandItem
                 key={r.id}
                 value={`${r.id} ${r.agent} ${r.status}`}
-                onSelect={() => go("/runs/$id", { id: r.id })}
+                onSelect={() => {
+                  setPaletteOpen(false)
+                  void router.navigate(runLink(r.id))
+                }}
               >
                 <StatusDot status={r.status} />
                 <span className="font-mono text-xs">{r.id}</span>

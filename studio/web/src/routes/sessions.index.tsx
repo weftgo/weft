@@ -19,6 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { sessionLink } from "@/lib/links"
 
 interface SessionsSearch {
   agent?: string
@@ -167,8 +168,7 @@ function SessionsPage() {
                   </TableCell>
                   <TableCell className="max-w-72">
                     <Link
-                      to="/sessions/$id"
-                      params={{ id: s.id }}
+                      {...sessionLink(s.id)}
                       className="font-mono text-[13px] hover:text-thread-ink"
                       title={absoluteTime(s.first_seen)}
                     >

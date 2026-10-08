@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { runLink } from "@/lib/links"
 
 export function SessionTurns({
   turns,
@@ -52,8 +53,7 @@ export function SessionTurns({
               </TableCell>
               <TableCell className="max-w-72">
                 <Link
-                  to="/runs/$id"
-                  params={{ id: r.id }}
+                  {...runLink(r.id)}
                   className="font-mono text-[13px] hover:text-thread-ink"
                 >
                   <span className="truncate">{r.id}</span>
@@ -101,8 +101,7 @@ export function SessionTurns({
                         aria-label="experiment"
                       />
                       <Link
-                        to="/runs/$id"
-                        params={{ id: x.id }}
+                        {...runLink(x.id)}
                         className="truncate font-mono text-[12px] hover:text-thread-ink"
                         title={`an experiment forked from this turn (${x.forked_from})`}
                       >

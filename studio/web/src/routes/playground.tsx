@@ -60,6 +60,7 @@ import { copyText, download } from "@/lib/json"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useRunEvents } from "@/hooks/use-run-events"
 import { Button } from "@/components/ui/button"
+import { experimentLink, runLink } from "@/lib/links"
 
 type Engine = "live" | "scripted"
 type SideEffects = "substitute" | "park" | "allow"
@@ -83,6 +84,9 @@ interface PlaygroundSearch {
   /** The runtime to send the command to (default: one registering
    * the agent). */
   runtime?: string
+  /** A saved experiment to point at in the history (lib/links.ts's
+   * experimentLink). */
+  experiment?: string
 }
 
 /** A search value as text: the router parses values as JSON, so an
@@ -125,6 +129,7 @@ function parseHandoff(search: Record<string, unknown>): PlaygroundSearch {
         : undefined,
     agent: str(search.agent),
     runtime: str(search.runtime),
+    experiment: str(search.experiment),
   }
 }
 
@@ -1065,7 +1070,7 @@ function Playground({ caps }: { caps: string[] }) {
             setCells={setCells}
             sourceRunID={sourceRunID}
           />
-          <History />
+          <History selected={search.experiment} />
         </section>
       </div>
     </div>
@@ -1367,8 +1372,7 @@ function ResultCard({
         </span>
         {experiment.runID && (
           <Link
-            to="/runs/$id"
-            params={{ id: experiment.runID }}
+            {...runLink(experiment.runID)}
             className="truncate font-mono text-faint hover:underline"
             title="open the run page"
           >
@@ -1843,8 +1847,7 @@ function Matrix({
                           >
                             {cell.runID ? (
                               <Link
-                                to="/runs/$id"
-                                params={{ id: cell.runID }}
+                                {...runLink(cell.runID)}
                                 className="hover:underline"
                                 title={cell.runID}
                               >
@@ -1873,7 +1876,7 @@ function Matrix({
 
 /** History is the experiment list (§4: "experiment history"): the
  * saved definitions with their matrix sizes. */
-function History() {
+function History({ selected }: { selected?: string }) {
   const experiments = useQuery(experimentsQuery())
   const list = experiments.data?.experiments ?? []
   if (experiments.isError)
@@ -1890,8 +1893,14 @@ function History() {
       </div>
       <div className="divide-y text-xs">
         {list.map((e) => (
-          <div key={e.id} className="flex items-center gap-2 px-3 py-1.5">
-            <code className="text-faint">{e.id}</code>
+          <div
+            key={e.id}
+            className={`flex items-center gap-2 px-3 py-1.5${e.id === selected ? " bg-secondary" : ""}`}
+            data-selected={e.id === selected ? "" : undefined}
+          >
+            <Link {...experimentLink(e.id)} className="font-mono text-faint hover:underline">
+              {e.id}
+            </Link>
             <span>{e.name || "—"}</span>
             <span className="text-faint">{e.agent}</span>
             <span className="text-faint">

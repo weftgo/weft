@@ -461,6 +461,7 @@ function StepCard({
     <div
       ref={ref}
       data-step={step.index}
+      data-highlighted={highlighted ? "" : undefined}
       className={`group/row space-y-2 rounded-lg border bg-background px-4 py-3 ${
         highlighted ? "ring-2 ring-thread/60" : ""
       } ${failedHere ? "border-status-bad/40" : ""}`}

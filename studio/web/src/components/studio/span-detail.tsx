@@ -30,6 +30,7 @@ import {
 } from "@/components/studio/step-list"
 import type { ChildRow } from "@/components/studio/subagent-block"
 import { Button } from "@/components/ui/button"
+import { runLink } from "@/lib/links"
 
 export type DetailMode = "detail" | "events" | "json"
 
@@ -103,8 +104,7 @@ function RunDetail({
       />
       {link ? (
         <Link
-          to="/runs/$id"
-          params={{ id: link.id }}
+          {...runLink(link.id)}
           className="inline-flex items-center gap-1 font-mono text-[11px] text-thread-ink hover:underline"
         >
           open the child's own run page

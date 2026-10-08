@@ -40,6 +40,8 @@ import type { ChildView, PanelRequests, PanelState, TurnView } from "./state"
 import { foldedWords, turnPromptOf } from "./playground"
 import type { ExperimentDraft, TurnWords } from "./playground"
 import { panelStudioVersion } from "./version"
+import { href, playgroundLink, runLink, sessionLink, traceLink } from "../lib/links"
+import type { PlaygroundHandoff } from "../lib/links"
 
 /** hasCapability reports whether meta lists the named capability (the
  * panel renders a control only when the server reports it, §8.5). */
@@ -54,18 +56,12 @@ export function statusChip(r: RunRow): string {
 }
 
 /** studioLink builds the ⤢ deep link (§2: "open in Studio" with the
- * context carried over; Dv3 adds the step). The run id is data (a
- * foreign SDK's ids are any string): it travels as one encoded path
- * segment, the way Studio's own links carry it, so a `/`, `?` or `#`
- * in it cannot rewrite the URL. The panel's token is never part of a
- * link. */
+ * context carried over; Dv3 adds the step, G1 makes it the ordinal):
+ * lib/links.ts's runLink, so the panel lands where Studio's own link
+ * to the step lands. The run id travels as one encoded path segment;
+ * the panel's token is never part of a link. */
 export function studioLink(endpoint: string, runId: string, step?: number): string {
-  const u = new URL(`runs/${encodeURIComponent(runId)}`, endpoint)
-  if (step !== undefined) {
-    u.searchParams.set("step", String(step))
-    u.searchParams.set("view", "story")
-  }
-  return u.toString()
+  return href(endpoint, runLink(runId, step === undefined ? {} : { step, view: "story" }))
 }
 
 /** The diff is plain LCS over lines (lib/diff.ts): its table is
@@ -613,7 +609,7 @@ export class WeftDevtools extends HTMLElement {
     h.appendChild(el("span", undefined, stats, { title: stats }))
     if (s.turns.length && s.selected) {
       const a = el("a", "weft-btn", "⤢", {
-        href: studioLink(this.base, s.selected, s.selectedStep ?? undefined),
+        href: studioLink(this.base, s.selected, linkedStep(s)),
         target: "_blank",
         rel: "noopener",
         title: "open in Studio (run, and the step you are reading)",
@@ -1094,10 +1090,8 @@ export class WeftDevtools extends HTMLElement {
       }
     })
     head.appendChild(keep)
-    const fixtureURL = new URL("playground", this.base)
-    if (r.runID) fixtureURL.hash = new URLSearchParams({ run: r.runID }).toString()
     const fixture = el("a", "weft-btn", "save as fixture", {
-      href: fixtureURL.toString(),
+      href: href(this.base, playgroundLink(r.runID ? { run: r.runID } : {})),
       target: "_blank",
       rel: "noopener",
       title: "hand off to Studio: the run's records as wefttest replay fixtures (D4)",
@@ -1133,7 +1127,10 @@ export class WeftDevtools extends HTMLElement {
     const status = r.row?.status ?? (r.ready ? "succeeded" : "running")
     for (const step of r.folded.steps) {
       if (step.text) body.appendChild(el("div", undefined, step.text))
-      for (const call of step.toolCalls) body.appendChild(renderCall(call, status))
+      for (const call of step.toolCalls)
+        body.appendChild(
+          renderCall(call, step.index, status, undefined, undefined, r.runID ? { endpoint: this.base, runId: r.runID } : undefined)
+        )
     }
     if (!r.folded.steps.length && !r.error && r.state === "queued")
       body.appendChild(el("div", "weft-note", "queued — waiting for the runtime to ack…"))
@@ -1307,6 +1304,8 @@ export class WeftDevtools extends HTMLElement {
     if (!t) return el("div")
     const wrap = el("div")
     wrap.appendChild(this.notes(t))
+    const ids = this.turnLinks(t)
+    if (ids) wrap.appendChild(ids)
     const wf = waterfall(t.spans ?? [])
     if (wf.length) wrap.appendChild(renderWaterfall(wf))
     const prompt = turnPromptOf(t.transcript)
@@ -1324,12 +1323,36 @@ export class WeftDevtools extends HTMLElement {
         t,
         s.selectedStep,
         { keys: this.openKeys, scope: t.id },
-        { endpoint: this.base }
+        { endpoint: this.base, runId: t.id }
       )
     )
     if (t.folded.pending.length) wrap.appendChild(this.approvals(t.folded.pending, !!row?.playground))
     if (this.canAct(s)) wrap.appendChild(this.actions(s))
     return wrap
+  }
+
+  /** turnLinks is the turn's join keys as links (G1): its session and
+   * its trace, each the page Studio shows it on. */
+  private turnLinks(t: TurnView): HTMLElement | null {
+    const row = this.rowOf(t.id)
+    const session = row?.session_id || t.doc?.session_id || ""
+    const trace = row?.trace_id || t.doc?.trace_id || ""
+    if (!session && !trace) return null
+    const box = el("div", "weft-row2")
+    const link = (label: string, url: string, title: string, attr: string, id: string) => {
+      const a = el("a", "weft-chip", label, { href: url, target: "_blank", rel: "noopener", title, [attr]: id })
+      a.style.textDecoration = "none"
+      return a
+    }
+    if (session)
+      box.appendChild(
+        link(`session ${session}`, href(this.base, sessionLink(session)), "the session in Studio", "data-weft-session-link", session)
+      )
+    if (trace)
+      box.appendChild(
+        link(`trace ${trace.slice(0, 8)}`, href(this.base, traceLink(trace)), `the OTel trace ${trace} in Studio`, "data-weft-trace-link", trace)
+      )
+    return box
   }
 
   /** actions is §3's row: ✎ Experiment (the drawer), ↻ Re-run (the
@@ -1457,6 +1480,19 @@ export function turnHoles(t: TurnView, row?: RunRow): HoleMark[] {
   )
 }
 
+/** linkedStep is the step ⤢ carries into Studio (G1): the one the
+ * user is reading, else — while the turn runs — the running one (its
+ * last step). Either is the step's ordinal (its index as the loop
+ * counts it, lib/links.ts), never an event's position. */
+export function linkedStep(s: PanelState): number | undefined {
+  if (s.selectedStep != null) return s.selectedStep
+  const t = s.turn
+  if (!t || t.id !== s.selected) return undefined
+  const row = [...s.turns, ...[...s.experiments.values()].flat()].find((r) => r.id === t.id)
+  const running = (row?.status ?? t.doc?.status) === "running"
+  return running ? t.folded.steps.at(-1)?.index : undefined
+}
+
 /** stepOrdinal is the step being read as source.from_step counts it:
  * its place among the run's own steps (0-based) — the runtime and
  * Studio cut the transcript at the Nth assistant message the run
@@ -1491,6 +1527,9 @@ export function renderWaterfall(bars: { name: string; left: number; width: numbe
 export interface FoldCtx {
   endpoint?: string
   child?: ChildView
+  /** The run the fold is of: its calls link to their place on its run
+   * page (G1). */
+  runId?: string
 }
 
 /** renderFolded draws the turn view (§2). */
@@ -1576,7 +1615,7 @@ function renderStep(
   }
   if (step.text) body.appendChild(el("div", undefined, step.text))
   if (step.steer) body.appendChild(el("div", "weft-note", `steered: ${step.steer.text}`))
-  for (const call of step.toolCalls) body.appendChild(renderCall(call, runStatus, t, open, ctx))
+  for (const call of step.toolCalls) body.appendChild(renderCall(call, step.index, runStatus, t, open, ctx))
   card.appendChild(body)
   return card
 }
@@ -1738,6 +1777,7 @@ function requestLine(step: number, req: PanelRequests, runStatus: string, open?:
 
 function renderCall(
   call: FoldedToolCall,
+  stepIndex: number,
   runStatus: string,
   t?: TurnView,
   open?: OpenState,
@@ -1745,13 +1785,38 @@ function renderCall(
 ): HTMLElement {
   const box = el("div", "weft-call")
   const state = callState(call, runStatus)
-  const head = el("div", "weft-call-h", [
-    el("span", "weft-name", call.name),
-    el("span", "weft-args", argsText(call)),
-  ])
+  // The call's name is its place on the run page (G1): the trace view
+  // with this call selected, named with its step — a call id repeats
+  // across steps.
+  const runId = ctx?.runId
+  const name =
+    ctx?.endpoint && runId
+      ? el("a", "weft-name", call.name, {
+          href: href(
+            ctx.endpoint,
+            runLink(runId, { step: stepIndex, call: call.callId, resumed: call.resumed })
+          ),
+          target: "_blank",
+          rel: "noopener",
+          title: `open this call in Studio (step ${stepIndex})`,
+          "data-weft-call-link": call.callId,
+        })
+      : el("span", "weft-name", call.name)
+  const head = el("div", "weft-call-h", [name, el("span", "weft-args", argsText(call))])
   box.appendChild(head)
   if (call.childRunId && (t || ctx?.child)) {
-    head.appendChild(el("span", "weft-badge weft-info", "subagent", { title: call.childRunId }))
+    // The badge is the child's run page too.
+    head.appendChild(
+      ctx?.endpoint
+        ? el("a", "weft-badge weft-info", "subagent", {
+            href: studioLink(ctx.endpoint, call.childRunId),
+            target: "_blank",
+            rel: "noopener",
+            title: call.childRunId,
+            "data-weft-subagent-link": call.childRunId,
+          })
+        : el("span", "weft-badge weft-info", "subagent", { title: call.childRunId })
+    )
     // One level inline: a grandchild is its badge and the hand-off.
     if (ctx?.child) {
       if (ctx.endpoint) head.appendChild(handOff(ctx.endpoint, call.childRunId))
@@ -1839,6 +1904,7 @@ function childBlock(childId: string, t: TurnView, open?: OpenState, endpoint?: s
       renderFolded(child.folded, status, undefined, undefined, open && { keys: open.keys, scope: childId }, {
         endpoint,
         child,
+        runId: childId,
       })
     )
     if (child.capped)
@@ -1847,8 +1913,8 @@ function childBlock(childId: string, t: TurnView, open?: OpenState, endpoint?: s
   return details
 }
 
-/** handOff is "open in Studio" for a child run: today's runs/<id>
- * page (studioLink). G1: the deep-link scheme replaces this URL. */
+/** handOff is "open in Studio" for a child run: its run page
+ * (studioLink, lib/links.ts's runLink). */
 function handOff(endpoint: string, runId: string): HTMLElement {
   return el("a", "weft-btn", "open in Studio ⤢", {
     href: studioLink(endpoint, runId),
@@ -1877,37 +1943,34 @@ export function studioPlaygroundLink(
   draft: ExperimentDraft | null,
   step: number | null
 ): string {
-  const u = new URL("playground", endpoint)
-  const p = new URLSearchParams()
+  const p: PlaygroundHandoff = {}
   if (draft) {
-    if (draft.runId) p.set("run", draft.runId)
-    if (step != null && step > 0) p.set("step", String(step))
+    if (draft.runId) p.run = draft.runId
+    if (step != null && step > 0) p.step = step
     // Only what changed (§10.1): Studio pre-fills the registered
     // prompt itself, and a prompt is long for a URL.
     if (draft.instructions && draft.instructions !== draft.registeredInstructions)
-      p.set("instructions", draft.instructions)
+      p.instructions = draft.instructions
     const on = Object.entries(draft.tools)
       .filter(([, enabled]) => enabled)
       .map(([name]) => name)
     if (on.length && on.length < Object.keys(draft.tools).length)
-      p.set("tools", on.join(","))
-    if (draft.model) p.set("model", draft.model)
-    if (draft.thinking) p.set("thinking", draft.thinking)
-    if (draft.input && draft.step === 0) p.set("input", draft.input)
+      p.tools = on.join(",")
+    if (draft.model) p.model = draft.model
+    if (draft.thinking) p.thinking = draft.thinking
+    if (draft.input && draft.step === 0) p.input = draft.input
     // The run's shape rides along too (the non-default values): a
     // scripted, parked or forked experiment must not open in Studio
     // as a live substitute ephemeral one.
-    if (draft.engine === "scripted") p.set("engine", draft.engine)
+    if (draft.engine === "scripted") p.engine = draft.engine
     if (draft.sideEffects && draft.sideEffects !== "substitute")
-      p.set("side_effects", draft.sideEffects)
-    if (draft.thread === "fork") p.set("thread", draft.thread)
+      p.side_effects = draft.sideEffects
+    if (draft.thread === "fork") p.thread = draft.thread
     // …and who runs it: the agent and the runtime the drawer opened on.
-    if (draft.agent) p.set("agent", draft.agent)
-    if (draft.runtimeId) p.set("runtime", draft.runtimeId)
+    if (draft.agent) p.agent = draft.agent
+    if (draft.runtimeId) p.runtime = draft.runtimeId
   }
-  const hash = p.toString()
-  if (hash) u.hash = hash
-  return u.toString()
+  return href(endpoint, playgroundLink(p))
 }
 
 /** sourceLabel takes the turn part back out of a `t3·x1` label (the

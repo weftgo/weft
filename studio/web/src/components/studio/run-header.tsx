@@ -28,6 +28,7 @@ import {
   BreadcrumbList,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
+import { runLink, sessionLink, traceLink } from "@/lib/links"
 
 function shortHash(hash: string | undefined): string {
   return hash ? hash.slice(0, 8) : "—"
@@ -151,7 +152,7 @@ export function RunHeader({
               <BreadcrumbItem>
                 <BreadcrumbLink
                   render={
-                    <Link to="/runs/$id" params={{ id: doc.parent_run_id }} />
+                    <Link {...runLink(doc.parent_run_id)} />
                   }
                   title="the parent run"
                 >
@@ -257,8 +258,7 @@ export function RunHeader({
         ) : null}
         {doc.session_id ? (
           <Link
-            to="/sessions/$id"
-            params={{ id: doc.session_id }}
+            {...sessionLink(doc.session_id)}
             className="font-mono hover:text-foreground hover:underline"
             title="the thread this run belongs to (a turn of it)"
           >
@@ -278,8 +278,7 @@ export function RunHeader({
         ))}
         {doc.trace_id ? (
           <Link
-            to="/traces/$id"
-            params={{ id: doc.trace_id }}
+            {...traceLink(doc.trace_id)}
             className="font-mono hover:text-foreground hover:underline"
             title="the OTel trace (correlation, polyglot)"
           >
@@ -296,8 +295,7 @@ export function RunHeader({
           {doc.children.map((c) => (
             <Link
               key={c.id}
-              to="/runs/$id"
-              params={{ id: c.id }}
+              {...runLink(c.id)}
               className="flex items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[11px] text-thread-ink hover:bg-secondary"
               title={`open the child run (${c.status})`}
             >

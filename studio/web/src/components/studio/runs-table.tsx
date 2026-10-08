@@ -33,6 +33,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { runLink, sessionLink } from "@/lib/links"
 
 const statusColor: Record<RunRow["status"], string> = {
   running: "bg-status-run",
@@ -199,7 +200,7 @@ export function RunsTable({ runs, selectedId, now }: RunsTableProps) {
                 // buttons inside keep their own behaviour (middle-click,
                 // copy).
                 if ((e.target as HTMLElement).closest("a,button")) return
-                void navigate({ to: "/runs/$id", params: { id: run.id } })
+                void navigate(runLink(run.id))
               }}
             >
               <TableCell>
@@ -207,8 +208,7 @@ export function RunsTable({ runs, selectedId, now }: RunsTableProps) {
               </TableCell>
               <TableCell className="max-w-64">
                 <Link
-                  to="/runs/$id"
-                  params={{ id: run.id }}
+                  {...runLink(run.id)}
                   className="flex items-center gap-1 font-mono text-[13px] hover:text-thread-ink"
                 >
                   <span className="truncate" title={run.id}>
@@ -223,8 +223,7 @@ export function RunsTable({ runs, selectedId, now }: RunsTableProps) {
                   >
                     ↳ subagent of
                     <Link
-                      to="/runs/$id"
-                      params={{ id: run.parent_run_id }}
+                      {...runLink(run.parent_run_id)}
                       className="truncate text-muted-foreground hover:text-thread-ink hover:underline"
                       title={`the parent run (call ${run.parent_call_id})`}
                     >
@@ -247,8 +246,7 @@ export function RunsTable({ runs, selectedId, now }: RunsTableProps) {
               <TableCell className="whitespace-nowrap">
                 {run.session_id ? (
                   <Link
-                    to="/sessions/$id"
-                    params={{ id: run.session_id }}
+                    {...sessionLink(run.session_id)}
                     className="font-mono text-[11px] text-muted-foreground hover:text-thread-ink hover:underline"
                     title={`the session (${run.public_id || "no public id"})`}
                   >

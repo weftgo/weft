@@ -550,7 +550,9 @@ describe("the token goes to data-endpoint and nowhere else (§6)", () => {
       expect(u.searchParams.get("token")).toBe("dev_secret_tok")
     }
     const links = all(el, "a").map((a) => a.getAttribute("href") ?? "")
-    expect(links.length).toBe(3) // ⤢, save as fixture, compare in Studio
+    // ⤢, save as fixture, compare in Studio, and the turn's join keys
+    // (G1: its session and trace are links)
+    expect(links.length).toBe(5)
     for (const href of links) {
       expect(href.startsWith("http://studio.test/studio/")).toBe(true)
       expect(href).not.toContain("secret")

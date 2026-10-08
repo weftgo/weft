@@ -30,6 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
+import { runLink } from "@/lib/links"
 
 interface RunsSearch {
   agent?: string
@@ -287,7 +288,7 @@ function RunsPage() {
         case "Enter": {
           const run = selected >= 0 ? runs.at(selected) : undefined
           if (run)
-            void router.navigate({ to: "/runs/$id", params: { id: run.id } })
+            void router.navigate(runLink(run.id))
           return
         }
       }

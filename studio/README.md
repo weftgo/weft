@@ -112,6 +112,17 @@ read-only, truncation/gap/stripped honesty, the raw JSON, a live tail,
 ⤢ deep links into Studio, lazy subagents (one level inline, with the
 child's request line and an "open in Studio" hand-off; a grandchild is
 the hand-off only) and a spans waterfall.
+Deep links (plan G1) follow one scheme, `src/lib/links.ts`, shared by
+the panel and Studio's app (an ESLint rule refuses a Studio URL built
+anywhere else): `runs/<id>?step=<n>&view=story|raw&sel=…&axis=time&t=…`,
+`sessions/<id>`, `traces/<id>?span=<span id>`, `playground#run=…` (the
+hand-off in the fragment) and `playground?experiment=<id>`. `step` is
+the step's ordinal — its index as the loop counts it, the `n` of
+`runs/{id}/steps/{n}` — never an event position or a transcript batch
+index; a call is named with its step (`sel=c:<step>:<call id>`,
+`c:resume:<call id>`). ⤢ carries the step being read (else the running
+one); each tool call, subagent badge, session and trace in the panel is
+a link. No link carries a token.
 `Alt+W` toggles (Q4), `?` lists keys, `r` flips raw. Setups B/C add
 `data-endpoint` and `data-token` (a dev token, or a panel token your
 backend mints per page via `POST /api/panel-tokens`). A single-page app

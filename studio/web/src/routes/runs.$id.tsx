@@ -27,6 +27,7 @@ import {
 import type { RunRow, Span as TimedSpan } from "@/lib/api"
 import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
+import type { RunSearch } from "@/lib/links"
 import {
   defaultSelection,
   flowFromFold,
@@ -39,7 +40,6 @@ import { RunHeader } from "@/components/studio/run-header"
 import { RawView } from "@/components/studio/raw-view"
 import { ReplayBar } from "@/components/studio/replay-bar"
 import { SpanDetail } from "@/components/studio/span-detail"
-import type { DetailMode } from "@/components/studio/span-detail"
 import { StepList } from "@/components/studio/step-list"
 import { runRequests } from "@/components/studio/step-request"
 import { Waterfall } from "@/components/studio/waterfall"
@@ -65,23 +65,17 @@ function readLayout(): Layout {
   return "auto"
 }
 
-interface RunSearch {
-  step?: number
-  view?: View
-  raw?: "events" | "doc"
-  /** The selected span's key (trace view): s0, c:<step>:call_1 (c:resume:<id>
-   * for a resumed call), t:<span id>. */
-  sel?: string
-  /** The detail panel's mode (trace view). */
-  d?: DetailMode
-  /** The waterfall's axis: positions (replay) or time (spans). */
-  axis?: "events" | "time"
-  t?: number
-}
+// The page's search is lib/links.ts's RunSearch: step is the step
+// ordinal (the loop's step index, the n of api/runs/{id}/steps/{n}),
+// never an event position — the page maps it to the step's card
+// (story) and span (trace) itself.
 
 export const Route = createFileRoute("/runs/$id")({
   validateSearch: (search: Record<string, unknown>): RunSearch => ({
-    step: typeof search.step === "number" ? search.step : undefined,
+    step:
+      typeof search.step === "number" && Number.isInteger(search.step) && search.step >= 0
+        ? search.step
+        : undefined,
     view:
       search.view === "raw" || search.view === "story"
         ? search.view
@@ -312,7 +306,13 @@ function RunPage() {
     () => spansFromFold(stream.folded, stream.events.length, runStatus),
     [stream.folded, stream.events.length, runStatus]
   )
-  const selKey = search.sel ?? defaultSelection(fullSpans)?.key
+  // ?step= (a deep link to a step, lib/links.ts) selects that step's
+  // span when no span is named: the ordinal is the span key's number.
+  const stepKey =
+    search.step !== undefined && fullSpans.some((s) => s.key === `s${search.step}`)
+      ? `s${search.step}`
+      : undefined
+  const selKey = search.sel ?? stepKey ?? defaultSelection(fullSpans)?.key
   const selected = traceSpans.find((s) => s.key === selKey)
   const select = useCallback(
     (key: string) =>

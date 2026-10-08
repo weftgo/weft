@@ -17,16 +17,29 @@ import {
 import { JsonTree } from "@/components/studio/json-tree"
 import { Waterfall } from "@/components/studio/waterfall"
 import { Spinner } from "@/components/ui/spinner"
+import { runLink } from "@/lib/links"
+import type { TraceSearch } from "@/lib/links"
 
 export const Route = createFileRoute("/traces/$id")({
+  // ?span=<span id> (lib/links.ts's traceLink) selects that span.
+  validateSearch: (search: Record<string, unknown>): TraceSearch => ({
+    span:
+      typeof search.span === "string" && search.span
+        ? search.span
+        : typeof search.span === "number"
+          ? String(search.span)
+          : undefined,
+  }),
   component: TracePage,
 })
 
 function TracePage() {
   const { id } = Route.useParams()
+  const { span } = Route.useSearch()
   const q = useQuery(traceQuery(id))
   const [view, setView] = useState<"tree" | "chat">("tree")
-  const [sel, setSel] = useState<string | undefined>(undefined)
+  // The time-axis rows are keyed t:<span id> (lib/trace).
+  const [sel, setSel] = useState<string | undefined>(span ? `t:${span}` : undefined)
 
   if (q.isPending) {
     return (
@@ -186,8 +199,7 @@ function GenAIChat({ spans }: { spans: TimedSpan[] }) {
               <span>{spanMs(Date.parse(sp.end) - Date.parse(sp.start))}</span>
               {runID ? (
                 <Link
-                  to="/runs/$id"
-                  params={{ id: runID }}
+                  {...runLink(runID)}
                   className="text-thread-ink hover:underline"
                 >
                   {runID}

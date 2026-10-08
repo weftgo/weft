@@ -17,6 +17,7 @@ import type { RunRow } from "@/lib/api"
 import { openLive, throttle } from "@/lib/live"
 import { elapsed, relativeTime } from "@/lib/format"
 import { StatusChip } from "@/components/studio/runs-table"
+import { runLink } from "@/lib/links"
 
 /** Agent streams held open at once; a browser's per-origin budget is
  * six, and the page still needs its own requests. */
@@ -38,8 +39,7 @@ function RunLane({ row }: { row: RunRow }) {
     >
       <StatusChip status={row.status} />
       <Link
-        to="/runs/$id"
-        params={{ id: row.id }}
+        {...runLink(row.id)}
         className="font-mono text-[13px] hover:text-thread-ink"
       >
         {row.id}

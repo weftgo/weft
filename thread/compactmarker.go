@@ -25,11 +25,12 @@ import (
 // session compacted here" is this marker: one OTel log record of kind
 // compaction, emitted through the agent's LoggerProvider (the provider
 // the runs' own records use) when the compaction lands, under the id
-// of the last run that produced the compacted context — so it is in
-// the sink at once, and every compaction emits one. A compaction of a
-// context no run produced (entries appended by hand) waits for the
-// next run this Session drives and is emitted under it; a Close before
-// that drops it with a Debug line. It is informational: counts and the
+// of the last run of this session that produced the compacted context
+// — so it is in the sink at once, and every compaction emits one. A
+// compaction of a context no run of this session produced (entries
+// appended by hand, or a fork's copied path) waits for the next run
+// this Session drives and is emitted under it; a Close before that
+// drops it with a Debug line. It is informational: counts and the
 // compaction's hash, never messages, and no reader applies it.
 const (
 	markerEventName = "weft.compaction"
@@ -58,7 +59,7 @@ type compactionMarker struct {
 	TokensAfter    int64  `json:"tokens_after"`
 }
 
-// runSight is what the Session last saw of a run it drove: its id, the
+// runSight is what the Session saw of a run it drove: its id, the
 // span context of its invoke_agent span and the run's merged metadata
 // (the session identity and the caller's thread.RunOptions metadata).
 type runSight struct {
@@ -67,14 +68,24 @@ type runSight struct {
 	md map[string]string
 }
 
+// maxSights bounds the runs the Session remembers. More than one: a
+// turn's overflowed attempt reports before the compaction it causes,
+// and that compaction is filed under the turn before it — whose sight
+// must still be there. A handful covers every such chain.
+const maxSights = 4
+
 // seeRun records the run reporting through the Session's observer and
 // emits, under it, the markers that were waiting for a run. Called on
 // every observed batch; cheap when nothing waits.
 func (s *Session) seeRun(rctx context.Context, runID string) {
 	var pending []*compactionMarker
 	s.locked(func() {
-		if s.lastRun.id != runID {
-			s.lastRun = runSight{id: runID, sc: trace.SpanContextFromContext(rctx), md: core.MetadataFromContext(rctx)}
+		if n := len(s.sights); n == 0 || s.sights[n-1].id != runID {
+			s.sights = slices.DeleteFunc(s.sights, func(r runSight) bool { return r.id == runID })
+			if len(s.sights) >= maxSights {
+				s.sights = slices.Delete(s.sights, 0, len(s.sights)-maxSights+1)
+			}
+			s.sights = append(s.sights, runSight{id: runID, sc: trace.SpanContextFromContext(rctx), md: core.MetadataFromContext(rctx)})
 		}
 		pending, s.pendingMarkers = s.pendingMarkers, nil
 	})
@@ -83,26 +94,43 @@ func (s *Session) seeRun(rctx context.Context, runID string) {
 	}
 }
 
-// lastRunIDLocked is the id of the last run that produced the leaf's
-// context: the run of the newest turn entry on the path. A message
-// entry's run counts only once its turn entry follows it — which is
-// then the newer entry — so a message entry whose run has no turn
-// entry yet (the prompt of a turn about to run: the pre-run threshold
-// trigger fires after the prompt is appended; the prompt of the
-// attempt that overflowed) never names the run. "" when no run
-// produced any of the context. Callers hold s.mu.
+// sightLocked is what the Session saw of run id, if it still
+// remembers it. Callers hold s.mu.
+func (s *Session) sightLocked(id string) (runSight, bool) {
+	for i := len(s.sights) - 1; i >= 0; i-- {
+		if s.sights[i].id == id {
+			return s.sights[i], true
+		}
+	}
+	return runSight{}, false
+}
+
+// lastRunIDLocked is the id of the last run of this session that
+// produced the leaf's context: the run of the newest turn entry on the
+// path. A message entry's run counts only once its turn entry follows
+// it — which is then the newer entry — so a message entry whose run
+// has no turn entry yet (the prompt of a turn about to run: the
+// pre-run threshold trigger fires after the prompt is appended; the
+// prompt of the attempt that overflowed) never names the run. A fork's
+// copied turn entries name the origin's runs, not this session's: the
+// walk stops at the first one, so a compaction of a context only the
+// origin's runs produced is held for this session's next run. "" when
+// no run of this session produced any of the context. Callers hold
+// s.mu.
 func (s *Session) lastRunIDLocked() string {
 	path, err := s.pathLocked(s.leaf)
 	if err != nil {
 		return ""
 	}
 	for i := len(path) - 1; i >= 0; i-- {
-		switch e := path[i].(type) {
-		case TurnEntry:
-			if e.RunID != "" {
-				return e.RunID
-			}
+		e, ok := path[i].(TurnEntry)
+		if !ok || e.RunID == "" {
+			continue
 		}
+		if _, ours := runSeq(s.header.ID, e.RunID); !ours {
+			return "" // the fork boundary: everything older is the origin's
+		}
+		return e.RunID
 	}
 	return ""
 }
@@ -135,16 +163,37 @@ func (s *Session) reportCompaction(ctx context.Context, e CompactionEntry, befor
 	}
 	m.Replaced, m.Entries = contextChange(before, after)
 	if runID == "" {
-		s.locked(func() { s.pendingMarkers = append(s.pendingMarkers, m) })
+		held := true
+		s.locked(func() {
+			// A Close that sealed the session since the compaction
+			// landed has already counted what it drops: no run will
+			// report under this Session again.
+			if s.closing == stateSealed {
+				held = false
+				return
+			}
+			s.pendingMarkers = append(s.pendingMarkers, m)
+		})
+		if !held {
+			s.agent.Logger().Debug("thread: compaction markers dropped at close: no run to report them under",
+				"session", s.header.ID, "markers", 1)
+		}
 		return
 	}
 	var sight runSight
-	s.locked(func() { sight = s.lastRun })
+	var seen bool
+	s.locked(func() { sight, seen = s.sightLocked(runID) })
 	ectx := trace.ContextWithSpanContext(ctx, trace.SpanContext{}) // never the caller's span
-	md := map[string]string{"weft.session.id": s.header.ID}
-	if sight.id == runID {
+	var md map[string]string
+	if seen {
 		ectx = trace.ContextWithSpanContext(ctx, sight.sc)
 		md = sight.md
+	} else {
+		// A run this Session did not see (it ran before a reopen, or
+		// is out of the sights): its session identity, read from the
+		// header and the run id — the caller's own pairs are gone.
+		n, _ := runSeq(s.header.ID, runID)
+		md = s.identityMetadata(n)
 	}
 	s.emitMarker(ectx, runID, md, m)
 }

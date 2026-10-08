@@ -200,36 +200,72 @@ func TestCompactionMarkerManual(t *testing.T) {
 }
 
 // The overflow re-run (ADR 0020 §5) compacts and runs again under a
-// fresh id: one marker, reason overflow.
+// fresh id: one marker, reason overflow, filed under the first turn
+// (-t1) — the run that produced the compacted context — on its span,
+// with its metadata. The overflowed attempt (-t2) produced nothing of
+// it: its step messages are branched off the path, its prompt has no
+// turn entry yet; the re-run is -t3. Mid-run, the attempt reports a
+// step before it overflows: the Session still remembers -t1's span and
+// metadata when the compaction files the marker under it.
 func TestCompactionMarkerOverflowReRun(t *testing.T) {
-	ctx := context.Background()
-	lp := &markerLogs{}
-	model := wefttest.Script(
-		wefttest.Say("the first answer"),
-		wefttest.Fail(core.ErrContextOverflow),
-		wefttest.Say("the summary of what came before"),
-		wefttest.Say("recovered after compaction"),
-	)
-	s, err := thread.Create(ctx, thread.Memory(), core.New(model, core.LoggerProvider(lp)), thread.KeepRecent(1))
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	sendWait(t, ctx, s, "a first question")
-	t1 := sendWait(t, ctx, s, "a prompt that overflows")
-	ms := lp.kind("compaction")
-	if len(ms) != 1 {
-		t.Fatalf("markers = %d, want 1", len(ms))
-	}
-	// Emitted when the compaction landed, under the run that produced
-	// the compacted context: the first turn's (-t1). The overflowed
-	// attempt (-t2) produced nothing of it — only its prompt is on the
-	// path, with no turn entry yet; the re-run is -t3.
-	if ms[0].attrs["weft.run.id"] != s.ID()+"-t1" || t1.RunID() != s.ID()+"-t3" {
-		t.Errorf("marker run = %q, want the first turn %s-t1 (re-run %q)", ms[0].attrs["weft.run.id"], s.ID(), t1.RunID())
-	}
-	var body markerBody
-	if err := json.Unmarshal([]byte(ms[0].body), &body); err != nil || body.Reason != "overflow" || body.Scope != "session" {
-		t.Errorf("marker body = %s (%v), want reason overflow", ms[0].body, err)
+	echo := core.Tool("echo", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "ok", nil
+	})
+	for _, tc := range []struct {
+		name    string
+		attempt []wefttest.Turn
+	}{
+		{"first step", []wefttest.Turn{wefttest.Fail(core.ErrContextOverflow)}},
+		{"mid-run", []wefttest.Turn{wefttest.ToolCalls(wefttest.Call{Name: "echo"}), wefttest.Fail(core.ErrContextOverflow)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			lp := &markerLogs{}
+			steps := append([]wefttest.Turn{wefttest.Say("the first answer")}, tc.attempt...)
+			steps = append(steps, wefttest.Say("the summary of what came before"), wefttest.Say("recovered after compaction"))
+			agent := core.New(wefttest.Script(steps...), echo, core.LoggerProvider(lp), core.TracerProvider(sdktrace.NewTracerProvider()))
+			s, err := thread.Create(ctx, thread.Memory(), agent, thread.KeepRecent(1))
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			caller := thread.RunOptions(core.Metadata(map[string]string{"tenant": "acme"}))
+			send := func(text string) *thread.Turn {
+				turn, err := s.Send(ctx, core.User(text), caller)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := turn.Wait(); err != nil {
+					t.Fatal(err)
+				}
+				return turn
+			}
+			t0 := send("a first question")
+			t1 := send("a prompt that overflows")
+			ms := lp.kind("compaction")
+			if len(ms) != 1 {
+				t.Fatalf("markers = %d, want 1", len(ms))
+			}
+			m := ms[0]
+			if m.attrs["weft.run.id"] != s.ID()+"-t1" || t0.RunID() != s.ID()+"-t1" || t1.RunID() != s.ID()+"-t3" {
+				t.Errorf("marker run = %q, want the first turn %s-t1 (re-run %q)", m.attrs["weft.run.id"], s.ID(), t1.RunID())
+			}
+			if m.attrs["tenant"] != "acme" || m.attrs["weft.turn"] != "1" || m.attrs["weft.session.id"] != s.ID() {
+				t.Errorf("marker attrs = %v, want turn 1's metadata", m.attrs)
+			}
+			var t0Span trace.SpanContext
+			for _, r := range lp.kind("event") {
+				if r.attrs["weft.run.id"] == t0.RunID() && r.attrs["weft.event.type"] == "run_start" {
+					t0Span = r.span
+				}
+			}
+			if !t0Span.IsValid() || m.span.SpanID() != t0Span.SpanID() || m.span.TraceID() != t0Span.TraceID() {
+				t.Errorf("marker span = %v, want turn 1's invoke_agent span %v", m.span, t0Span)
+			}
+			var body markerBody
+			if err := json.Unmarshal([]byte(m.body), &body); err != nil || body.Reason != "overflow" || body.Scope != "session" {
+				t.Errorf("marker body = %s (%v), want reason overflow", m.body, err)
+			}
+		})
 	}
 }
 
@@ -402,5 +438,171 @@ func TestCompactionMarkerThresholdNamesTheProducingRun(t *testing.T) {
 	}
 	if markerAt < 0 || t2StartAt < 0 || markerAt > t2StartAt {
 		t.Errorf("marker at %d, turn 2's run_start at %d: want the marker first", markerAt, t2StartAt)
+	}
+}
+
+// A fork copies its origin's turn entries, run ids and all; those runs
+// are the origin's. A compaction in the fork of a context only the
+// origin's runs produced is held for the fork's own first run — never
+// filed under the origin's run with the fork's session id.
+func TestCompactionMarkerForkHeldForTheForksRun(t *testing.T) {
+	ctx := context.Background()
+	lp := &markerLogs{}
+	model := wefttest.Script(
+		wefttest.Say(strings.Repeat("a", 4000)), wefttest.Say(strings.Repeat("b", 4000)),
+		wefttest.Say("the fork's summary"), wefttest.Say("the fork's first answer"))
+	agent := core.New(model, core.LoggerProvider(lp))
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sendWait(t, ctx, s, "q1")
+	sendWait(t, ctx, s, "q2")
+	f, err := s.Fork(ctx, s.Leaf(), thread.KeepRecent(1))
+	if err != nil {
+		t.Fatalf("Fork: %v", err)
+	}
+	if err := f.Compact(ctx); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if n := len(lp.kind("compaction")); n != 0 {
+		t.Fatalf("markers right after the fork's compaction = %d, want 0 (held for the fork's run)", n)
+	}
+	first := sendWait(t, ctx, f, "q3 in the fork")
+	ms := lp.kind("compaction")
+	if len(ms) != 1 {
+		t.Fatalf("markers = %d, want 1", len(ms))
+	}
+	if ms[0].attrs["weft.run.id"] != first.RunID() || !strings.HasPrefix(first.RunID(), f.ID()+"-t") ||
+		ms[0].attrs["weft.session.id"] != f.ID() {
+		t.Errorf("marker run %q session %q, want the fork's first run %q in %s",
+			ms[0].attrs["weft.run.id"], ms[0].attrs["weft.session.id"], first.RunID(), f.ID())
+	}
+}
+
+// After a reopen the Session has seen no run: a compaction filed under
+// a run of the previous process carries the session identity read from
+// the header and the run id — weft.session.id, weft.turn and the
+// public id — and no span.
+func TestCompactionMarkerAfterReopenCarriesIdentity(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	lp := &markerLogs{}
+	model := wefttest.Script(
+		wefttest.Say(strings.Repeat("a", 4000)), wefttest.Say(strings.Repeat("b", 4000)), wefttest.Say("the summary"))
+	s, err := thread.Create(ctx, st, core.New(model), thread.PublicID("ticket-42"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sendWait(t, ctx, s, "q1")
+	t2 := sendWait(t, ctx, s, "q2")
+	s = reopenWith(t, ctx, st, s, core.New(model, core.LoggerProvider(lp)), thread.KeepRecent(1))
+	if err := s.Compact(ctx); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	ms := lp.kind("compaction")
+	if len(ms) != 1 {
+		t.Fatalf("markers = %d, want 1", len(ms))
+	}
+	m := ms[0]
+	for k, want := range map[string]string{
+		"weft.run.id":     t2.RunID(),
+		"weft.session.id": s.ID(),
+		"weft.public_id":  "ticket-42",
+		"weft.turn":       "2",
+	} {
+		if m.attrs[k] != want {
+			t.Errorf("marker %s = %q, want %q", k, m.attrs[k], want)
+		}
+	}
+	if m.span.IsValid() {
+		t.Errorf("marker span = %v, want none (the run is not this process's)", m.span)
+	}
+}
+
+// Two compactions of a context no run produced: both markers are held,
+// and the next run emits both under it, in order; the run after it
+// carries none.
+func TestCompactionMarkerTwoHeldBeforeARun(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	lp := &markerLogs{}
+	rec := &summaryRecorder{reply: "the summary text"}
+	s, _ := thread.Create(ctx, st, core.New(rec))
+	_, ids := msgs(t, ctx, st, s,
+		strings.Repeat("a", 30_000), strings.Repeat("b", 30_000),
+		strings.Repeat("c", 30_000), strings.Repeat("d", 30_000))
+	s = reopenWith(t, ctx, st, s, core.New(rec, core.LoggerProvider(lp)), thread.KeepRecent(1))
+	// The first compaction keeps more than the policy would (from c),
+	// so the second has something left to compact.
+	plan, err := s.PreviewCompaction(ctx)
+	if err != nil {
+		t.Fatalf("PreviewCompaction: %v", err)
+	}
+	plan.FirstKept = ids[2]
+	if err := s.ApplyCompaction(ctx, plan); err != nil {
+		t.Fatalf("ApplyCompaction: %v", err)
+	}
+	if err := s.Compact(ctx); err != nil {
+		t.Fatalf("second Compact: %v", err)
+	}
+	var hashes []string
+	for _, e := range s.Entries() {
+		if c, ok := e.(thread.CompactionEntry); ok {
+			b, _ := json.Marshal(c)
+			sum := sha256.Sum256(b)
+			hashes = append(hashes, hex.EncodeToString(sum[:]))
+		}
+	}
+	if len(hashes) != 2 {
+		t.Fatalf("compactions = %d, want 2", len(hashes))
+	}
+	if n := len(lp.kind("compaction")); n != 0 {
+		t.Fatalf("markers before any run = %d, want 0", n)
+	}
+	first := sendWait(t, ctx, s, "next question")
+	sendWait(t, ctx, s, "and another")
+	ms := lp.kind("compaction")
+	if len(ms) != 2 {
+		t.Fatalf("markers = %d, want 2", len(ms))
+	}
+	for i, m := range ms {
+		if m.attrs["weft.run.id"] != first.RunID() || m.attrs["weft.compaction.hash"] != hashes[i] {
+			t.Errorf("marker %d: run %q hash %q, want %q %q", i, m.attrs["weft.run.id"], m.attrs["weft.compaction.hash"], first.RunID(), hashes[i])
+		}
+	}
+}
+
+// Open is read-only (T3): opening a compacted session with a
+// LoggerProvider emits nothing — no marker is re-emitted for a
+// compaction already on file, and reading the context emits none.
+func TestCompactionMarkerOpenEmitsNothing(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	model := wefttest.Script(
+		wefttest.Say(strings.Repeat("a", 4000)), wefttest.Say(strings.Repeat("b", 4000)), wefttest.Say("the summary"))
+	s, err := thread.Create(ctx, st, core.New(model), thread.KeepRecent(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sendWait(t, ctx, s, "q1")
+	sendWait(t, ctx, s, "q2")
+	if err := s.Compact(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	lp := &markerLogs{}
+	o, err := thread.Open(ctx, st, s.ID(), core.New(wefttest.Script(), core.LoggerProvider(lp)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = o.Context()
+	_ = o.Entries()
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	if len(lp.recs) != 0 {
+		t.Errorf("Open emitted %d records, want none: %+v", len(lp.recs), lp.recs)
 	}
 }

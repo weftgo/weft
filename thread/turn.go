@@ -1265,9 +1265,17 @@ func joinErrs(err, perr error) error {
 // hand (not through a session) carries none of this: the session is
 // the only minter.
 func (s *Session) runMetadata(t *Turn) map[string]string {
+	return s.identityMetadata(t.turn)
+}
+
+// identityMetadata is runMetadata for the run minted as turn n (the
+// turnSeq its id carries): the session's identity pairs, without the
+// caller's. The compaction marker's fallback when it has no sight of
+// the run it is filed under (compactmarker.go).
+func (s *Session) identityMetadata(n int) map[string]string {
 	md := map[string]string{
 		"weft.session.id": s.header.ID,
-		"weft.turn":       strconv.Itoa(t.turn), // the turnSeq the run id was minted from
+		"weft.turn":       strconv.Itoa(n), // the turnSeq the run id was minted from
 	}
 	if v := s.Meta()[publicIDKey]; v != "" {
 		md[publicIDKey] = v

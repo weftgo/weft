@@ -43,3 +43,32 @@ func TestRuntimeReadsBuildInfo(t *testing.T) {
 		}
 	}
 }
+
+// A build stamped from version control (Go 1.24 and later) names a
+// commit, not a release: pseudo-versions and "+dirty" builds read as
+// the source's tag; a tag, a pre-release tag and other build metadata
+// stay as they are.
+func TestOrTagMapsVCSStampsToVersion(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"v0.9.1-0.20261008120000-abcdef123456", Version},
+		{"v0.9.1-0.20261008120000-abcdef123456+dirty", Version},
+		{"v0.0.0-20261008120000-abcdef123456", Version},
+		{"v1.0.0-rc.1.0.20261008120000-abcdef123456", Version},
+		{"v2.3.4-0.20261008120000-abcdef123456+incompatible", Version},
+		{"v0.9.0+dirty", Version},
+		{"(devel)", Version},
+		{"", Version},
+		{"v0.9.0", "v0.9.0"},
+		{"v1.0.0-rc.1", "v1.0.0-rc.1"},
+		{"v1.2.3+incompatible", "v1.2.3+incompatible"},
+		{"v0.9.1-0.2026-abc", "v0.9.1-0.2026-abc"}, // not fourteen digits: not a pseudo-version
+	} {
+		if got := orTag(tc.in); got != tc.want {
+			t.Errorf("orTag(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	bi := &debug.BuildInfo{Main: debug.Module{Path: modulePath, Version: "v0.9.1-0.20261008120000-abcdef123456+dirty"}}
+	if got := fromBuildInfo(bi); got != Version {
+		t.Errorf("a local VCS-stamped build: got %q, want %q", got, Version)
+	}
+}

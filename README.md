@@ -561,7 +561,12 @@ s.Uncompact(ctx)                         // branch back — undo is a navigation
 manual calls. Compaction is a between-turns operation: `Compact`,
 `ApplyCompaction` and `Uncompact` fail with `thread.ErrBusy` while a
 turn runs. Hooks run without the session's lock and may call the
-session.
+session. Each compaction also emits one informational marker record
+(kind `compaction`, scope `session`: counts and the entry's hash, no
+messages) through the agent's `LoggerProvider` when it lands, under the
+last run of this session that produced the compacted context — held for
+the next run when none did — which `obsdb.DB.Compactions` and Studio's
+run page read back.
 
 `go run ./thread/examples/session` walks a session through turns, a
 label, a branch, a fork, a previewed compaction and a reopen from

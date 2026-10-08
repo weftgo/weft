@@ -822,6 +822,12 @@ func TestOverflowReRunRedeliversHandedSteers(t *testing.T) {
 	if _, err := t0.Wait(); err != nil {
 		t.Fatal(err)
 	}
+	// Wait returns when the turn lands; the runner may still be in its
+	// post-turn compaction check, and a Send then would be busy under
+	// BusyPolicy(Steer) — a queued send, with a receipt of its own.
+	if err := s.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
 	t1, err := s.Send(ctx, core.User("convert this"))
 	if err != nil {
 		t.Fatal(err)

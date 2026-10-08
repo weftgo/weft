@@ -181,7 +181,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    options DB/Open/Base/Manifest/Title/Capabilities/Token/Live/NoIngest/
 //    //    IngestToken/AllowOrigins/Playground; routes register through
 //    //    routes.go's groups (panel.go/playground.go add theirs in their own files).
-//    // API: meta, manifest, runs (+session/public/playground filters), runs/{id},
+//    // API: meta, manifest, runs (+session/public/playground filters; all=1 lists child
+//    //    runs too), runs/{id} (with its compactions: run-scope views, then session markers),
 //    //    runs/{id}/events|transcript|spans|requests|tools, runs/{id}/steps/{n} (one step
 //    //    assembled: request, attempts, events, tool calls, children, holes; capability
 //    //    "steps"), runs/{id}/export?format=json|jsonl|otlp|wefttest (the whole run as one
@@ -239,6 +240,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    Compaction (ADR 0020): thread.ContextWindow(n) arms it; s.Compact(ctx[, thread.SummaryInstructions(
 //    "…")]), s.PreviewCompaction, s.ApplyCompaction, s.Uncompact; thread.NoAutoCompact(), SummaryModel,
 //    ClearOldToolResults(n), BeforeCompact (thread.Proceed() | Cancel() | Replace(c)); overflow re-runs once.
+//    Each compaction emits a session marker record (kind compaction, informational, no messages) at
+//    ApplyCompaction, under the last run of this session that produced the context (held for the next run
+//    when none did); obsdb.DB.Compactions and the run page read it back.
 //    Approvals (ADR 0021): s.Pending(); s.Decide(ctx, thread.Approve(id) | Deny | Resolve | ResolveError |
 //    ApproveAlways) → auto-resume (turn.Next()) or s.Resume(ctx); s.Grant, s.Revoke, thread.WithApprover(a,
 //    timeout), Quorum(n), RequestExpiry(d), OnRequest(fn), s.Audit(). Signed: NewKeyring + WithKeyring (+

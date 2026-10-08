@@ -202,3 +202,13 @@ func TestDecodeBatchesSplitsOnTheFlag(t *testing.T) {
 		t.Errorf("mixed = input %d, stored %v, steps %v; want 1, none stored, [0 0 1] by order", len(mixed.input), mixed.stepOf, mixed.stepIndex())
 	}
 }
+
+// decodeBodies is decodeBatches over bare bodies — no stored step, no
+// input flag: the first record is the input.
+func decodeBodies(bodies []json.RawMessage) (*sourceRun, error) {
+	batches := make([]sourceBatch, len(bodies))
+	for i, b := range bodies {
+		batches[i] = sourceBatch{step: -1, body: b}
+	}
+	return decodeBatches(batches)
+}

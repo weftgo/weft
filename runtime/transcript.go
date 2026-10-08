@@ -202,16 +202,6 @@ type sourceBatch struct {
 	body       json.RawMessage
 }
 
-// decodeBodies is decodeBatches over bare bodies — no stored step, no
-// input flag: the first record is the input.
-func decodeBodies(bodies []json.RawMessage) (*sourceRun, error) {
-	batches := make([]sourceBatch, len(bodies))
-	for i, b := range bodies {
-		batches[i] = sourceBatch{step: -1, body: b}
-	}
-	return decodeBatches(batches)
-}
-
 // decodeBatches turns messages records ([]core.Message each, or null)
 // into a sourceRun. The split is the input flag: the input record (on a
 // partial resume a prefix of what the run was fed; the tail is a step-0
@@ -323,7 +313,7 @@ func parseThreadRunID(runID string) (session string, turn int, err error) {
 // root → the turn's TurnEntry, in conversation order): everything up
 // to the turn's first assistant or tool message is the run's input,
 // the rest of the turn its steps — the split the run's own messages
-// records draw (decodeBodies), so every path feeds a re-run the same.
+// records draw (decodeBatches), so every path feeds a re-run the same.
 func threadTurnMessages(path []thread.Entry, runID string) (*sourceRun, error) {
 	end, prevEnd := -1, -1
 	for i, e := range path {

@@ -365,12 +365,13 @@ type Session struct {
 	steerQueue []queuedSteer
 
 	// The session compaction marker's state (ADR 0028 §8,
-	// compactmarker.go), guarded by mu: lastRun is the latest run this
-	// Session saw report (its id, span and merged metadata), and
-	// pendingMarkers the markers of compactions no run had produced the
-	// context of yet — emitted under the next run when it reports,
-	// dropped at Close. Neither is persisted.
-	lastRun        runSight
+	// compactmarker.go), guarded by mu: sights are the latest runs this
+	// Session saw report (id, span and merged metadata; the newest
+	// last, at most maxSights), and pendingMarkers the markers of
+	// compactions no run had produced the context of yet — emitted
+	// under the next run when it reports, dropped at Close. Neither is
+	// persisted.
+	sights         []runSight
 	pendingMarkers []*compactionMarker
 	handed         []queuedSteer
 

@@ -65,10 +65,17 @@ func TestTokenAuth(t *testing.T) {
 		!strings.Contains(body, `"total":4`) {
 		t.Errorf("right bearer: %d %s", code, body)
 	}
-	// The query parameter carries the token where headers cannot
-	// (EventSource): the live stream's door.
-	if code, _, _ := getWith(t, closed, "/studio/api/live?run=r_ok&token=dev-secret", "", ""); code != http.StatusOK {
-		t.Errorf("token query parameter: %d", code)
+	// A token in the URL is never accepted (plan C5) — not even the
+	// right one, not even beside a good bearer, and the refusal does
+	// not echo it; the live stream's door is a grant.
+	for _, bearer := range []string{"", "dev-secret"} {
+		code, _, body := getWith(t, closed, "/studio/api/live?run=r_ok&token=dev-secret", bearer, "")
+		if code != http.StatusUnauthorized || strings.Contains(body, "dev-secret") || !strings.Contains(body, "live-grant") {
+			t.Errorf("token query parameter (bearer %q): %d %s, want 401 naming the grant", bearer, code, body)
+		}
+	}
+	if code, _, _ := getWith(t, closed, "/studio/api/live?run=r_ok&sig="+mustGrant(t, closed, "dev-secret", "run=r_ok"), "", ""); code != http.StatusOK {
+		t.Errorf("live grant: %d", code)
 	}
 	// The auth capability appears with the group.
 	_, _, meta := getWith(t, closed, "/studio/api/meta", "dev-secret", "")

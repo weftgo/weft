@@ -716,7 +716,7 @@ func TestStepReadTokenNotRecorded(t *testing.T) {
 		t.Fatal(err)
 	}
 	var d stepDocT
-	decode(t, fetchJSON(t, ts, "/api/runs/r_old/steps/0?token="+read, nil), &d)
+	decode(t, fetchJSONAs(t, ts, "/api/runs/r_old/steps/0", read, nil), &d)
 	checkHoles(t, "read token", d)
 	if d.Request == nil || d.Request.Badge != "hidden" || d.MessagesIn.Badge != "not_recorded" {
 		t.Errorf("request %+v messages_in %+v, want hidden and not_recorded", d.Request, d.MessagesIn)

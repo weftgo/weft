@@ -182,6 +182,10 @@ type Server struct {
 
 	shell []byte
 	csp   string
+
+	// grantKey signs the live stream's grants (livegrant.go): derived
+	// from the Token, else random per process.
+	grantKey []byte
 }
 
 // New builds a Studio server over one obsdb.DB (S4.1). Handler()
@@ -199,7 +203,7 @@ func New(opts ...Option) *Server {
 	if c.dbSet && c.db == nil {
 		panic("studio: New called with a nil DB")
 	}
-	s := &Server{config: c, now: time.Now, mux: http.NewServeMux()}
+	s := &Server{config: c, now: time.Now, mux: http.NewServeMux(), grantKey: liveGrantKey(c.token)}
 	if c.db == nil {
 		path := c.dbPath
 		if path == "" {

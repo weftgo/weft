@@ -2,6 +2,7 @@ package studio
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,7 +34,13 @@ var overrideNames = map[string]string{
 //     are open; everything under /api
 //     needs a token once one is configured (401 without, with the
 //     ingest token, or with a panel token that is expired, malformed
-//     or signed with another key) — as a bearer or as ?token=;
+//     or signed with another key) — as a bearer; a token in the URL
+//     (?token=) is refused on every route, the right one included,
+//     and with a good bearer beside it (plan C5);
+//   - the live stream opens with a bearer or with a grant: POST
+//     /api/live-grant is scoped exactly as the stream is (a panel
+//     token is refused a stream outside its public id at grant time),
+//     and the sig opens that one stream as the identity that asked;
 //   - the server token reads and does everything;
 //   - a panel token reaches its own public id only: another public
 //     id's resource, or one with no public id at all, is 403; an
@@ -113,15 +120,17 @@ func TestAuthMatrix(t *testing.T) {
 	type identity struct {
 		name, token string
 		query       bool   // ?token= instead of the bearer
+		both        bool   // ?token= beside the bearer
 		kind        string // "bad" | "server" | "read" | "pg"
 	}
 	identities := []identity{
 		{name: "anonymous", kind: "bad"},
 		{name: "server token (bearer)", token: serverTok, kind: "server"},
-		{name: "server token (?token=)", token: serverTok, query: true, kind: "server"},
+		{name: "server token (?token=)", token: serverTok, query: true, kind: "bad"},
+		{name: "server token (bearer and ?token=)", token: serverTok, query: true, both: true, kind: "bad"},
 		{name: "ingest token", token: ingestTok, kind: "bad"},
 		{name: "read panel token", token: sign(serverTok, panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: hour}), kind: "read"},
-		{name: "read panel token (?token=)", token: sign(serverTok, panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: hour}), query: true, kind: "read"},
+		{name: "read panel token (?token=)", token: sign(serverTok, panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: hour}), query: true, kind: "bad"},
 		{name: "playground panel token", token: sign(serverTok, panelClaims{PublicID: "pub_a", Scope: scopePlayground, Exp: hour}), kind: "pg"},
 		{name: "expired panel token", token: sign(serverTok, panelClaims{PublicID: "pub_a", Scope: scopePlayground, Exp: time.Now().Add(-time.Minute)}), kind: "bad"},
 		{name: "garbage token", token: "weft_pt.not-a-token", kind: "bad"},
@@ -149,7 +158,7 @@ func TestAuthMatrix(t *testing.T) {
 		if body != "" {
 			req.Header.Set("Content-Type", "application/json")
 		}
-		if !id.query && id.token != "" {
+		if (!id.query || id.both) && id.token != "" {
 			req.Header.Set("Authorization", "Bearer "+id.token)
 		}
 		resp, err := http.DefaultClient.Do(req)
@@ -163,6 +172,33 @@ func TestAuthMatrix(t *testing.T) {
 		return resp.StatusCode
 	}
 	server := identities[1]
+	// viaGrant opens a live stream the way a browser does: the
+	// identity asks for a grant for the path's stream, then the stream
+	// is opened with the sig alone. A refused grant is the answer.
+	viaGrant := func(path string, id identity) int {
+		t.Helper()
+		query := strings.TrimPrefix(path, "/api/live?")
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/live-grant?"+query, nil)
+		if id.query && id.token != "" {
+			req.URL.RawQuery += "&token=" + id.token
+		}
+		if (!id.query || id.both) && id.token != "" {
+			req.Header.Set("Authorization", "Bearer "+id.token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var g struct {
+			Sig string `json:"sig"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&g)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return resp.StatusCode
+		}
+		return do(http.MethodGet, path+"&sig="+g.Sig, "", identity{})
+	}
 
 	// Two runtimes: rt_test takes the commands (its stream is drained
 	// here), rt_link is the one the link routes of the matrix touch.
@@ -259,6 +295,10 @@ func TestAuthMatrix(t *testing.T) {
 		resources    []string
 		want         func(kind, res string) int
 		open         bool // no token wall at all (static)
+		// grant: the identity asks POST /api/live-grant for the path's
+		// stream (a refusal there is the row's answer), then opens the
+		// path with the sig alone — no bearer.
+		grant bool
 	}
 	all := []string{"A", "B", "none", "missing"}
 	one := []string{"A"}
@@ -399,6 +439,52 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "GET /api/live?run=&kinds=delta,messages,run", method: "GET", path: func(res string) string { return "/api/live?kinds=delta,messages,run&run=" + run[res] },
 			resources: []string{"A", "B", "none"}, want: scoped(ok)},
 
+		// The live grant (plan C5): scoped exactly as the stream is —
+		// a panel token is refused, at grant time, a stream outside its
+		// public id and every agent selector; a run or session nothing
+		// has stored yet is granted (each frame is checked).
+		{name: "POST /api/live-grant?run=", method: "POST", path: func(res string) string { return "/api/live-grant?run=" + run[res] }, resources: all,
+			want: func(kind, res string) int {
+				if res == "missing" {
+					return ok
+				}
+				return scoped(ok)(kind, res)
+			}},
+		{name: "POST /api/live-grant {session}", method: "POST", path: fixed("/api/live-grant"), body: func(res string) string { return `{"session":"` + session[res] + `","kinds":"event,messages"}` }, resources: all,
+			want: func(kind, res string) int {
+				if res == "missing" {
+					return ok
+				}
+				return scoped(ok)(kind, res)
+			}},
+		{name: "POST /api/live-grant {public_id}", method: "POST", path: fixed("/api/live-grant"), body: func(res string) string { return `{"public_id":"` + public[res] + `"}` },
+			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {
+				if kind == "server" || res == "A" {
+					return ok
+				}
+				return forbidden403
+			}},
+		{name: "POST /api/live-grant?agent=", method: "POST", path: fixed("/api/live-grant?agent=acme-support"), resources: one, want: serverOnly(ok)},
+		{name: "POST /api/live-grant (two selectors)", method: "POST", path: fixed("/api/live-grant?run=run_a&session=s_a"), resources: one, want: anyValid(http.StatusBadRequest)},
+		{name: "POST /api/live-grant (body and query)", method: "POST", path: fixed("/api/live-grant?run=run_a"), body: fixed(`{"run":"run_a"}`), resources: one, want: anyValid(http.StatusBadRequest)},
+		// The stream opened with the grant alone answers as the bearer
+		// would have: the refusals above are where the scope bites.
+		{name: "GET /api/live?run=&sig=", method: "GET", path: func(res string) string { return "/api/live?run=" + run[res] }, resources: all, grant: true,
+			want: func(kind, res string) int {
+				if res == "missing" {
+					return ok
+				}
+				return scoped(ok)(kind, res)
+			}},
+		{name: "GET /api/live?public_id=&kinds=&sig=", method: "GET", path: func(res string) string { return "/api/live?kinds=run,event,delta&public_id=" + public[res] },
+			resources: []string{"A", "B"}, grant: true, want: func(kind, res string) int {
+				if kind == "server" || res == "A" {
+					return ok
+				}
+				return forbidden403
+			}},
+		{name: "GET /api/live?agent=&sig=", method: "GET", path: fixed("/api/live?agent=acme-support"), resources: one, grant: true, want: serverOnly(ok)},
+
 		// The token mint: the server token's (401 for a panel token, as
 		// TestPanelTokenMint pins for the anonymous caller).
 		{name: "POST /api/panel-tokens", method: "POST", path: fixed("/api/panel-tokens"), body: fixed(`{"public_id":"pub_b","playground":true}`), resources: one,
@@ -479,9 +565,78 @@ func TestAuthMatrix(t *testing.T) {
 				if rt.body != nil {
 					body = rt.body(res)
 				}
-				if got := do(rt.method, rt.path(res), body, id); got != want {
+				var got int
+				if rt.grant {
+					got = viaGrant(rt.path(res), id)
+				} else {
+					got = do(rt.method, rt.path(res), body, id)
+				}
+				if got != want {
 					t.Errorf("%-44s resource %-7s %-32s = %d, want %d", rt.name, res, id.name, got, want)
 				}
+			}
+		}
+	}
+
+	// A grant opens one stream, until it expires, and nothing else:
+	// for every identity that can be granted one, the sig is refused
+	// (401) once expired, on another selector, on another kinds set,
+	// tampered, or presented to another route; the same kinds set in
+	// another order is the same stream.
+	for _, id := range identities {
+		if id.kind == "bad" {
+			continue
+		}
+		const stream = "run=run_a&kinds=event,run"
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/live-grant?"+stream, nil)
+		req.Header.Set("Authorization", "Bearer "+id.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var g struct {
+			Sig string    `json:"sig"`
+			Exp time.Time `json:"exp"`
+		}
+		decodeResp(t, resp, &g)
+		if resp.StatusCode != ok || g.Sig == "" {
+			t.Fatalf("live grant as %s = %d", id.name, resp.StatusCode)
+		}
+		if d := time.Until(g.Exp); d <= 0 || d > liveGrantTTL {
+			t.Errorf("live grant as %s: exp in %v, want within %v", id.name, d, liveGrantTTL)
+		}
+		// The expired twin: the same identity, signed with Studio's key,
+		// an expiry a second ago — what a replay after 60 s presents.
+		claims := liveGrantClaims{ID: grantServer, Exp: time.Now().Add(-time.Second)}
+		if id.kind != "server" {
+			claims = liveGrantClaims{ID: grantPanel, PublicID: "pub_a", Scope: map[string]string{"read": scopeRead, "pg": scopePlayground}[id.kind], Exp: claims.Exp}
+		}
+		sel, _ := liveSelector(map[string][]string{"run": {"run_a"}})
+		kinds, _ := liveKinds(map[string][]string{"kinds": {"event,run"}})
+		expired, err := signLiveGrant(srv.grantKey, claims, liveStream(sel, kinds))
+		if err != nil {
+			t.Fatal(err)
+		}
+		tampered := []byte(g.Sig)
+		tampered[len(tampered)-2] ^= 1
+		for _, c := range []struct {
+			name, path string
+			want       int
+		}{
+			{"valid sig", "/api/live?" + stream + "&sig=" + g.Sig, ok},
+			{"valid sig, kinds reordered", "/api/live?kinds=run,event&run=run_a&sig=" + g.Sig, ok},
+			{"expired sig", "/api/live?" + stream + "&sig=" + expired, unauthorized},
+			{"sig for another selector", "/api/live?run=run_b&kinds=event,run&sig=" + g.Sig, unauthorized},
+			{"sig for another selector kind", "/api/live?session=run_a&kinds=event,run&sig=" + g.Sig, unauthorized},
+			{"sig for another kinds set", "/api/live?run=run_a&kinds=event,run,delta&sig=" + g.Sig, unauthorized},
+			{"sig for a subset of the kinds", "/api/live?run=run_a&kinds=event&sig=" + g.Sig, unauthorized},
+			{"tampered sig", "/api/live?" + stream + "&sig=" + string(tampered), unauthorized},
+			{"empty sig", "/api/live?" + stream + "&sig=", unauthorized},
+			{"a panel token as the sig", "/api/live?" + stream + "&sig=" + identities[5].token, unauthorized},
+			{"sig on another route", "/api/runs/run_a?sig=" + g.Sig, unauthorized},
+		} {
+			if got := do(http.MethodGet, c.path, "", identity{}); got != c.want {
+				t.Errorf("%-32s granted to %-24s = %d, want %d", c.name, id.name, got, c.want)
 			}
 		}
 	}
@@ -496,11 +651,7 @@ func TestAuthMatrix(t *testing.T) {
 		}
 		path := "/api/runtimes"
 		req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
-		if id.query {
-			req, _ = http.NewRequest(http.MethodGet, ts.URL+path+"?token="+id.token, nil)
-		} else {
-			req.Header.Set("Authorization", "Bearer "+id.token)
-		}
+		req.Header.Set("Authorization", "Bearer "+id.token)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -523,7 +674,8 @@ func TestAuthMatrix(t *testing.T) {
 			continue
 		}
 		for _, path := range []string{"/api/runs/run_a/requests", "/api/runs/run_a/tools", "/api/runs/run_a/logs", "/api/manifest"} {
-			req, _ := http.NewRequest(http.MethodGet, ts.URL+path+"?token="+id.token, nil)
+			req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+			req.Header.Set("Authorization", "Bearer "+id.token)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatal(err)
@@ -545,7 +697,8 @@ func TestAuthMatrix(t *testing.T) {
 		if id.kind == "bad" {
 			continue
 		}
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/run_a/steps/0?token="+id.token, nil)
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/run_a/steps/0", nil)
+		req.Header.Set("Authorization", "Bearer "+id.token)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -568,7 +721,8 @@ func TestAuthMatrix(t *testing.T) {
 			continue
 		}
 		for _, format := range []string{"json", "jsonl", "otlp", "wefttest"} {
-			req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/run_a/export?format="+format+"&token="+id.token, nil)
+			req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/run_a/export?format="+format, nil)
+			req.Header.Set("Authorization", "Bearer "+id.token)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatal(err)
@@ -634,14 +788,8 @@ func TestAuthMatrix(t *testing.T) {
 		if id.kind == "bad" {
 			continue
 		}
-		path := "/api/meta"
-		if id.query {
-			path += "?token=" + id.token
-		}
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
-		if !id.query {
-			req.Header.Set("Authorization", "Bearer "+id.token)
-		}
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/meta", nil)
+		req.Header.Set("Authorization", "Bearer "+id.token)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -697,8 +845,8 @@ func TestAuthMatrix(t *testing.T) {
 		}
 		for _, path := range []string{"/api/runs?parent=*", "/api/runs?all=1", "/api/runs?parent=run_b",
 			"/api/runs?session=s_b", "/api/runs?agent=acme-support&limit=500", "/api/sessions?agent=acme-support"} {
-			sep := "&"
-			req, _ := http.NewRequest(http.MethodGet, ts.URL+path+sep+"token="+id.token, nil)
+			req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+			req.Header.Set("Authorization", "Bearer "+id.token)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatal(err)
@@ -722,7 +870,7 @@ func TestAuthMatrix(t *testing.T) {
 		{"anonymous", "", unauthorized},
 		{"ingest token", ingestTok, ok},
 		{"server token", serverTok, unauthorized},
-		{"panel token", identities[6].token, unauthorized},
+		{"panel token", identities[7].token, unauthorized},
 	} {
 		for _, path := range []string{"/v1/logs", "/v1/traces"} {
 			req, _ := http.NewRequest(http.MethodPost, ts.URL+path, strings.NewReader(logs))

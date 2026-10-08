@@ -151,12 +151,14 @@ func (s *Server) registerGroups() {
 			s.addRunRoute("logs", s.serveRunLogs)
 		},
 	})
-	// The live stream (S4.5).
+	// The live stream (S4.5) and its grant (plan C5): the stream's
+	// credential is its other half, so one group, one capability.
 	s.addGroup(routeGroup{
 		name:       "live",
 		capability: "live",
 		register: func(mux *http.ServeMux, s *Server) {
 			mux.HandleFunc("GET /api/live", s.serveLive)
+			mux.HandleFunc("POST /api/live-grant", s.serveLiveGrant)
 		},
 	})
 	// OTLP ingest (S4.4), unless NoIngest turned the receiver off.

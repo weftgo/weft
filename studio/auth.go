@@ -37,6 +37,14 @@ import (
 //     unless "playground": true. Every data route refuses anything
 //     outside the token's public id, so the token is safe to put in a
 //     page.
+//
+// In every setup a token rides the Authorization header only: a
+// ?token= query parameter is refused on every route (plan C5), and the
+// live stream — which EventSource opens without headers — takes a
+// 60-second grant for one exact stream from POST /api/live-grant
+// instead (livegrant.go). A #token= fragment, which `weft open` and
+// `weft studio --open` hand the browser, never reaches the server: the
+// UI reads it.
 
 // identityCtxKey carries the request's identity (server token, panel
 // token, or none) from the middleware to the handlers.
@@ -124,17 +132,15 @@ func parsePanelToken(key []byte, tok string) (panelClaims, error) {
 	return claims, nil
 }
 
-// bearerToken reads the request's token: the Authorization header, or
-// the token query parameter — EventSource cannot send headers, and
-// the live stream is the panel's main artery.
+// bearerToken reads the request's token from the Authorization header
+// — never from the URL (plan C5): a URL lands in logs, history and
+// Referer headers. The live stream, which EventSource opens without
+// headers, takes a short-lived grant instead (livegrant.go).
 func bearerToken(r *http.Request) string {
-	if h := r.Header.Get("Authorization"); h != "" {
-		if tok, ok := strings.CutPrefix(h, "Bearer "); ok {
-			return tok
-		}
-		return ""
+	if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+		return tok
 	}
-	return r.URL.Query().Get("token")
+	return ""
 }
 
 // auth wraps the API tree with S4.6's token check. Without a
@@ -160,7 +166,22 @@ func (s *Server) auth(next http.Handler) http.Handler {
 						"(e.g. \"http://"+r.Host+"\") or configure studio.Token")
 				return
 			}
+			if sig, ok := liveGrantRequest(r); ok {
+				s.identifyGrant(w, r, sig, identify)
+				return
+			}
 			identify(identity{})
+			return
+		}
+		if r.URL.Query().Has("token") {
+			// Never accepted, whatever it holds — and never echoed.
+			writeError(w, r, http.StatusUnauthorized, "unauthorized",
+				"a token in the URL is never accepted: send Authorization: Bearer <token> "+
+					"(the live stream: POST /api/live-grant, then /api/live?…&sig=)")
+			return
+		}
+		if sig, ok := liveGrantRequest(r); ok {
+			s.identifyGrant(w, r, sig, identify)
 			return
 		}
 		tok := bearerToken(r)
@@ -180,6 +201,18 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		}
 		identify(identity{panel: &claims})
 	})
+}
+
+// identifyGrant admits a live stream opened with a grant as the
+// identity the grant was issued to, or refuses it (401): a presented
+// sig must be valid, whatever else the request carries.
+func (s *Server) identifyGrant(w http.ResponseWriter, r *http.Request, sig string, identify func(identity)) {
+	id, err := s.verifyLiveGrant(r, sig)
+	if err != nil {
+		badGrant(w, r)
+		return
+	}
+	identify(id)
 }
 
 // tokenEqual compares a presented token with the configured one in

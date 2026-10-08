@@ -92,8 +92,22 @@ func recordRequestsRun(t *testing.T, url, runID string, dest ...otel.DestOption)
 // (ingest lands asynchronously), then returns the body.
 func fetchJSON(t *testing.T, ts *httptest.Server, path string, cond func(string) bool) string {
 	t.Helper()
+	return fetchJSONAs(t, ts, path, "", cond)
+}
+
+// fetchJSONAs is fetchJSON with a bearer token (the header: a token in
+// the URL is refused, plan C5).
+func fetchJSONAs(t *testing.T, ts *httptest.Server, path, bearer string, cond func(string) bool) string {
+	t.Helper()
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		resp, err := http.Get(ts.URL + path)
+		req, err := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}

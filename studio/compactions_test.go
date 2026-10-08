@@ -91,7 +91,7 @@ func TestRunCompactionsReadToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := fetchJSON(t, ts, "/api/runs/r_tok?token="+read, func(b string) bool { return strings.Contains(b, `"request_count":6`) })
+	body := fetchJSONAs(t, ts, "/api/runs/r_tok", read, func(b string) bool { return strings.Contains(b, `"request_count":6`) })
 	var doc struct {
 		Compactions []runCompactionT `json:"compactions"`
 	}

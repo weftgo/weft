@@ -336,7 +336,23 @@ stream whose frame ids are the hub's Seq: exactly one selector
 event/delta/messages/run (default `event,run`; deltas are opt-in,
 heartbeats never), a ping every 15 s, `Last-Event-ID` resume with the
 gap backfilled from the database and deduped on `(run, kind, pos)`,
-and `event: overflow` when a slow subscriber's queue drops it. OTLP
+and `event: overflow` when a slow subscriber's queue drops it. A token
+travels in the `Authorization` header only — `?token=` is refused on
+every route — so a browser's `EventSource`, which cannot set headers,
+opens the stream with a grant: `POST /api/live-grant` (authenticated
+like every route; the selector and `kinds` as a JSON body
+`{"run":"r_1","kinds":"event,run"}` or as the query, not both) answers
+`{sig, exp}`, and `GET /api/live?run=r_1&kinds=event,run&sig=<sig>`
+opens that one stream as the identity that asked. The sig is an
+HMAC-SHA256 over that identity (the server token, a panel token's
+public id and scope, or setup A's open API), the selector, the kinds
+set (order-free) and `exp` — 60 s, never past a panel token's own
+expiry; another selector, another kinds set, a tampered or an expired
+sig is 401, and a panel token is refused a stream outside its public
+id at grant time (403), as the stream would refuse it. Without a
+`Token` the key is random per process: one mechanism in every setup.
+The `#token=` fragment `weft open` and `weft studio --open` hand the
+browser never reaches the server; the UI reads it. OTLP
 ingest is `POST /v1/traces` and `/v1/logs` (protobuf and JSON, gzip,
 16 MiB after decompression, publish-then-write, 503 on a write failure
 so the exporter retries). Under `Playground(true)` the playground's
@@ -354,7 +370,8 @@ capabilities}`, capability `panel-config`) answers a loopback (or
 Origin only, else 404.
 
 Capabilities are computed from the registered route groups
-(`routes.go`) — never hard-coded: `live`, `ingest`, `auth` (with a
+(`routes.go`) — never hard-coded: `live` (the stream and its grant),
+`ingest`, `auth` (with a
 token), and `runtimes`, `breakpoints`, `steer` + `playground` under
 `Playground(true)`, plus anything a hosting wrapper declares with
 `studio.Capabilities(…)`.

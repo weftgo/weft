@@ -208,7 +208,8 @@ func TestExperimentsRefusePanelTokens(t *testing.T) {
 // names nothing stored yet passed the scope check (there was no row to
 // read a public id from) and subscribed; whatever later ran under that
 // id streamed to the token, whoever's it was. Every frame is checked
-// against the token's public id now.
+// against the token's public id now — through a live grant too, which
+// carries the panel token's identity onto the stream.
 func TestLivePanelTokenFramesStayInScope(t *testing.T) {
 	db, err := sqlite.Open(":memory:")
 	if err != nil {
@@ -221,7 +222,8 @@ func TestLivePanelTokenFramesStayInScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, sel := range []string{"session=s_future_0", "run=run_future_1"} {
-		resp := subscribeLive(t, h, "?"+sel+"&kinds=event,messages,run&token="+tok, "")
+		q := sel + "&kinds=event,messages,run"
+		resp := subscribeLive(t, h, "?"+q+"&sig="+mustGrant(t, h, tok, q), "")
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("%s: %d", sel, resp.StatusCode)
 		}
@@ -232,7 +234,7 @@ func TestLivePanelTokenFramesStayInScope(t *testing.T) {
 		_ = resp.Body.Close()
 	}
 	// Its own public id's frames still flow.
-	resp := subscribeLive(t, h, "?run=run_own&kinds=event&token="+tok, "")
+	resp := subscribeLive(t, h, "?run=run_own&kinds=event&sig="+mustGrant(t, h, tok, "run=run_own&kinds=event"), "")
 	seedRun(t, db, "run_own", "pub_mine", "s_mine", "", nil)
 	if frames := readSSE(t, resp, 1, 2*time.Second); len(frames) != 1 || frames[0].event != "record" {
 		t.Errorf("own frames = %+v", frames)

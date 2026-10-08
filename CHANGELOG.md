@@ -6,6 +6,31 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Added
+
+- **The live grant** (plan C5): `POST /api/live-grant` (capability
+  `live`, authenticated like every API route) takes one `/api/live`
+  selector and its `kinds` (JSON body or query) and answers `{sig,
+  exp}`; `GET /api/live?<selector>&kinds=…&sig=<sig>` opens that one
+  stream as the identity that asked. The sig is HMAC-SHA256 over the
+  identity, the selector, the kinds set and the expiry (60 s, never
+  past a panel token's own); it is refused (401) on another selector
+  or kinds set, tampered or expired. A panel token is granted only a
+  stream inside its public id. Without a `Token` the key is random per
+  process, so setup A takes the same path.
+
+### Changed — breaking
+
+- **A token in a URL is refused**: the `?token=` query parameter is no
+  longer read on any route (401, never echoed); a token travels in
+  `Authorization: Bearer` only. Migration: an `EventSource` (or any
+  client that put the token in the URL) requests a grant with `POST
+  /api/live-grant` and opens `/api/live?…&sig=`. The `#token=`
+  fragment of `weft open` / `weft studio --open` links is unaffected:
+  it never reaches the server.
+
 ## 0.11.0 — 2026-10-08
 
 Phase 2 of the devtools plan (start and find): the `weft` command,

@@ -62,7 +62,7 @@ export const PANEL_CSS = `
 .weft-narrow .weft-turn-pick { display: block; margin: 6px 10px 0; background: var(--weft-bg3); color: var(--weft-fg);
   border: 1px solid var(--weft-line); border-radius: var(--weft-radius-sm); font: inherit; }
 .weft-narrow .weft-turns { width: auto; border-right: none; max-height: 30%; }
-.weft-narrow .weft-turns > .weft-turn, .weft-narrow .weft-turns > .weft-expts { display: none; }
+.weft-narrow .weft-rows { display: none; }
 .weft-narrow .weft-head { flex-wrap: wrap; white-space: normal; }
 
 .weft-fab {
@@ -138,7 +138,7 @@ export const PANEL_CSS = `
 .weft-chip.weft-interrupted { color: var(--weft-info); border: 1px solid var(--weft-info); }
 .weft-chip.weft-parked { color: var(--weft-parked); border: 1px solid var(--weft-parked); }
 .weft-expts { margin: 0 0 4px 18px; }
-.weft-expts > .weft-turn { border-bottom: none; opacity: .85; }
+.weft-expts .weft-turn { border-bottom: none; opacity: .85; }
 
 .weft-step { border: 1px solid var(--weft-line); border-radius: var(--weft-radius); margin-bottom: 8px; background: var(--weft-bg2); }
 .weft-step-h { display: flex; gap: 8px; padding: 5px 8px; color: var(--weft-dim);

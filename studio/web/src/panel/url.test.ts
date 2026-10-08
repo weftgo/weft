@@ -524,7 +524,7 @@ describe("the collapsed pill's activity signal", () => {
     await settle()
     expect(fab(el).className).toBe("weft-fab weft-fab-bottom-right")
     expect(fab(el).textContent).toBe("devtools · 10→4") // the plain pill, with the turn's cost (D1)
-    expect(fab(el).getAttribute("aria-label")).toBeNull()
+    expect(fab(el).getAttribute("aria-label")).toBe("weft devtools · 10→4") // the running words gone; D3 labels every pill with its visible words
   })
 
   it("a run heard starting on the scope's stream pulses the pill (its steps unknown until it is followed)", async () => {

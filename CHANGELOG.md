@@ -10,6 +10,20 @@ module, ADR 0005).
 
 ### Added
 
+- **The devtools panel renders incrementally and is read by assistive
+  tech** (plan D3): a draw patches the dock in place — keyed by run id
+  for turn rows and by step ordinal for step cards — so a streaming
+  step re-renders only its own card, and focus, the caret, scroll and
+  opened `<details>` survive a redraw because their nodes do (the
+  manual restore is gone). The dock is `role="complementary"`
+  (`aria-label="weft devtools"`), the turn list a `role="list"` of
+  `listitem`s with a roving tabindex (`↓`/`↑` move it; `j`/`k` still
+  select), the running step's text the one `aria-live="polite"`
+  region, the expanders carry `aria-expanded`, every icon button an
+  `aria-label`; `Tab` wraps inside an open, focused float (never when
+  docked; `Esc` lets go). An axe-core run over every mode in both
+  themes reports zero violations (`a11y.test.ts`; axe is a
+  devDependency, never in `panel.js`). +1.1 KiB gzip.
 - **The devtools panel's theme** (plan D2): light and dark, following
   the host page without configuration — `data-theme="light|dark"`
   (also `weft:theme`, the script tag, `mount({theme})`) wins, then the

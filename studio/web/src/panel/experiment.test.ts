@@ -783,3 +783,54 @@ describe("the Studio hand-off (P2-17)", () => {
     expect(handoff(link.getAttribute("href")!).get("instructions")).toBe("typed after the pane was drawn")
   })
 })
+
+describe("the keyed renderer keeps the field the user types in (D3)", () => {
+  // No restore: the panel never sets a caret or refocuses a field
+  // itself — the node is kept, so its focus and caret are.
+  const typeInto = (n: HTMLInputElement, v: string, at: number) => {
+    n.focus()
+    n.value = v
+    n.setSelectionRange(at, at)
+    n.dispatchEvent(new Event("input", { bubbles: true }))
+  }
+  const redraw = async (el: Awaited<ReturnType<typeof mount>>) => {
+    const caret = vi.spyOn(HTMLInputElement.prototype, "setSelectionRange")
+    const focus = vi.spyOn(HTMLElement.prototype, "focus")
+    FakeEventSource.last("public_id=")!.emit("run", { run: runRow({ steps: 7 }) })
+    await settle()
+    expect(text(el, ".weft-turns")).toContain("7 steps") // the frame did redraw
+    expect(caret).not.toHaveBeenCalled()
+    expect(focus).not.toHaveBeenCalled()
+    caret.mockRestore()
+    focus.mockRestore()
+  }
+
+  it("the steer field: the same node, focused, its caret where it was", async () => {
+    const routes = baseRoutes()
+    routes["POST playground/runs"] = { command_id: "cmd_1", state: "queued" }
+    routes["playground/commands/cmd_1"] = command("cmd_1", "accepted", "pg_x1")
+    const { el } = await openDrawer(routes, { ...META, capabilities: [...META.capabilities, "steer"] })
+    await run(el)
+    const steer = $(el, "[data-weft-k=steer]") as HTMLInputElement
+    typeInto(steer, "refund it quietly", 6)
+    await redraw(el)
+    expect($(el, "[data-weft-k=steer]")).toBe(steer)
+    expect(el.shadowRoot?.activeElement).toBe(steer)
+    expect([steer.value, steer.selectionStart, steer.selectionEnd]).toEqual(["refund it quietly", 6, 6])
+  })
+
+  it("the resolve field: the same", async () => {
+    const routes = baseRoutes()
+    routes["POST playground/runs"] = { command_id: "cmd_1", state: "queued" }
+    routes["playground/commands/cmd_1"] = command("cmd_1", "finished", "pg_p1")
+    storeRun(routes, "pg_p1", "", [call("call_1")])
+    const { el } = await openDrawer(routes)
+    await run(el)
+    const paste = $(el, ".weft-xres input.weft-resolve") as HTMLInputElement
+    typeInto(paste, '{"refunded":false}', 3)
+    await redraw(el)
+    expect($(el, ".weft-xres input.weft-resolve")).toBe(paste)
+    expect(el.shadowRoot?.activeElement).toBe(paste)
+    expect([paste.value, paste.selectionStart]).toEqual(['{"refunded":false}', 3])
+  })
+})

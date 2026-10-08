@@ -89,8 +89,10 @@ describe("the panel's subagent badge (A10)", () => {
     const closed = $(el, `[data-weft-child="${CHILD}"]`)!
     // The nested row, before it is opened: agent, status, usage.
     expect(closed.querySelector("summary")?.textContent).toBe("subagent researcher · succeeded · 10→5 tok")
+    expect(closed.querySelector("summary")?.getAttribute("aria-expanded")).toBe("false") // D3
 
     const block = await openChild(el)
+    expect(block.querySelector("summary")?.getAttribute("aria-expanded")).toBe("true")
     // The child's request line, read by the child's id: its prompt.
     const line = block.querySelector('[data-weft-request="0"]')!
     expect(line.textContent).toContain(CHILD_PROMPT)

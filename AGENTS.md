@@ -213,7 +213,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    data-z-index (--weft-z), remembered in localStorage["weft.devtools"], every key but Alt+W
 //    //    heard inside the panel only; its theme, plan D2: data-theme light|dark > the stored ◐ choice >
 //    //    auto (<html data-theme|class="dark">, prefers-color-scheme, else dark), the Studio palette
-//    //    (src/lib/palette.ts) as --weft-* tokens on :host a host rule overrides; the build prints the per-item size table from
+//    //    (src/lib/palette.ts) as --weft-* tokens on :host a host rule overrides; its renderer, plan D3:
+//    //    a keyed patch (run id, step ordinal — only the streaming card changes; focus/caret kept, never
+//    //    restored), ARIA roles + roving tabindex + a trap only in a focused float, axe zero-violation
+//    //    budget in a11y.test.ts (axe-core dev-only); the build prints the per-item size table from
 //    //    studio/web/panel-budget.json; configured by a data-weft
 //    //    script tag, weft:* meta tags, or <base>/panel-config.json; studio/README.md
 //    //    has the ladder; it follows a scope — data-scope="pub_…;session=…;flow=…;run=…" or

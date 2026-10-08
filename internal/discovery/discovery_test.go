@@ -3,6 +3,8 @@ package discovery
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -433,4 +435,86 @@ func mustEval(t *testing.T, p string) string {
 		t.Fatal(err)
 	}
 	return r
+}
+
+// TestRefreshKeepsFresh (round 2, finding 2): a Studio running past
+// MaxAge stays discoverable once it refreshes; without a refresh its
+// file goes stale; a file another Studio wrote since is not touched.
+func TestRefreshKeepsFresh(t *testing.T) {
+	dir := t.TempDir()
+	useDirs(t, dir)
+	w, err := Write(fresh("http://127.0.0.1:7331"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now().Add(MaxAge + time.Hour)
+	old := now
+	now = func() time.Time { return later }
+	t.Cleanup(func() { now = old })
+	if _, _, ok := Lookup(env(), nil); ok {
+		t.Fatal("an unrefreshed file is still trusted past MaxAge (test bug)")
+	}
+	if err := w.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if info, _, ok := Lookup(env(), nil); !ok || !info.Started.Equal(later.UTC().Truncate(time.Second)) {
+		t.Errorf("after Refresh: %+v %v, want fresh, started re-stamped", info, ok)
+	}
+	// Another Studio's file: Refresh leaves it alone.
+	other := fresh("http://127.0.0.1:7332")
+	other.Started = later
+	writeRaw(t, dir, other)
+	before, _ := os.ReadFile(filepath.Join(dir, FileName))
+	_ = w.Refresh()
+	if after, _ := os.ReadFile(filepath.Join(dir, FileName)); string(after) != string(before) {
+		t.Error("Refresh rewrote another Studio's file")
+	}
+	var nilW *Written
+	if nilW.Refresh() != nil {
+		t.Error("nil Refresh")
+	}
+}
+
+// TestCleanupErrorClasses (round 2, finding 4): the writer's cleanup
+// removes a file it decoded as stale or rejected for good, and leaves
+// it on a transient failure (another Studio's rename mid-read, an open
+// error) — two Studios starting together never erase each other.
+func TestCleanupErrorClasses(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		err     error
+		info    Info
+		removed bool
+	}{
+		{"changed while being read", errors.New("changed while being read"), Info{}, false},
+		{"open error", fs.ErrPermission, Info{}, false},
+		{"mode", permanent(errors.New("mode 0644, not 0600")), Info{}, true},
+		{"owner", permanent(errors.New("owned by uid 0, not this user")), Info{}, true},
+		{"not regular", permanent(errors.New("not a regular file")), Info{}, true},
+		{"parse", permanent(errors.New("does not parse")), Info{}, true},
+		{"decoded, stale", nil, Info{URL: "http://127.0.0.1:1", PID: 1 << 30, Started: time.Now()}, true},
+		{"decoded, fresh", nil, fresh("http://127.0.0.1:1"), false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			a, b := t.TempDir(), t.TempDir()
+			useDirs(t, a, b)
+			writeRaw(t, b, fresh("http://127.0.0.1:9")) // the file under test, second location
+			p := filepath.Join(b, FileName)
+			old := loadFile
+			loadFile = func(path string) (Info, error) {
+				if path == p {
+					return c.info, c.err
+				}
+				return old(path)
+			}
+			t.Cleanup(func() { loadFile = old })
+			if _, err := Write(fresh("http://127.0.0.1:2")); err != nil {
+				t.Fatal(err)
+			}
+			_, err := os.Stat(p)
+			if removed := os.IsNotExist(err); removed != c.removed {
+				t.Errorf("removed = %v, want %v", removed, c.removed)
+			}
+		})
+	}
 }

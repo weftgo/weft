@@ -81,9 +81,10 @@ type Request struct {
 	// the loopback rule): the command's own --token / WEFT_STUDIO_TOKEN,
 	// never a dev token it generated (nobody else holds that).
 	Token string
-	// TokenFor, when set, is asked for the bearer of each probed
-	// address (the dialled host:port, an unspecified host as
-	// 127.0.0.1); a non-empty answer replaces Token for that probe. The
+	// TokenFor, when set and Token is empty, is asked for the bearer of
+	// each probed address (the dialled host:port, an unspecified host as
+	// 127.0.0.1); its non-empty answer is that probe's bearer. A fixed
+	// Token always wins and TokenFor is then never consulted. The
 	// command answers with the database's stable token only for an
 	// address its user's discovery file names (plan B3), so that
 	// long-lived token never goes to whatever else holds a port.
@@ -199,7 +200,7 @@ type verdict struct {
 func probe(ctx context.Context, addr string, r Request) verdict {
 	ctx, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
-	if r.TokenFor != nil {
+	if r.Token == "" && r.TokenFor != nil {
 		if tok := r.TokenFor(probeAddr(addr)); tok != "" {
 			r.Token = tok
 		}

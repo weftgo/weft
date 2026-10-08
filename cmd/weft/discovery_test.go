@@ -378,3 +378,48 @@ func TestTokenCreateRace(t *testing.T) {
 		t.Errorf(".weft/.gitignore after the token file: %q, %v", b, err)
 	}
 }
+
+// TestFixedTokenReusesOverStableFile (round 2, finding 1): a fixed
+// token always wins the probe — a database whose <db>.token holds
+// another (stable) token is still reused by a second `--token X` start.
+func TestFixedTokenReusesOverStableFile(t *testing.T) {
+	discoveryDir(t)
+	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	dbPath := filepath.Join(t.TempDir(), "weft.db")
+	if _, _, err := createTokenFile(dbPath + ".token"); err != nil {
+		t.Fatal(err)
+	}
+	base := freeBase(t, 2)
+	var first syncBuffer
+	bareStudio(t, "sqlite://"+dbPath, base, 2, loop(base), "X", false, &first)
+	var second syncBuffer
+	if err := serveWith("sqlite://"+dbPath, want{addr: loop(base), span: 2}, "X", &second, afterBoot{}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "studio already running at http://" + loop(base) + " (pid " + strconv.Itoa(os.Getpid()) + "), reusing\n"; second.String() != want {
+		t.Errorf("second --token X start printed %q, want %q", second.String(), want)
+	}
+}
+
+// TestDiscoveryRefreshedWhileServing (round 2, finding 2): a serving
+// Studio re-stamps its file's started time on refreshEvery.
+func TestDiscoveryRefreshedWhileServing(t *testing.T) {
+	dir := discoveryDir(t)
+	oldEvery := refreshEvery
+	refreshEvery = 1100 * time.Millisecond
+	t.Cleanup(func() { refreshEvery = oldEvery })
+	base := freeBase(t, 1)
+	var out syncBuffer
+	bareStudio(t, "sqlite://"+filepath.Join(t.TempDir(), "weft.db"), base, 1, loop(base), "tok", false, &out)
+	first, _ := readDiscovery(t, dir)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if cur, _ := readDiscovery(t, dir); cur.Started.After(first.Started) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the discovery file was never refreshed")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}

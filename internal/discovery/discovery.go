@@ -165,6 +165,9 @@ type Written struct {
 // writer is the one that cleans up. The write is atomic (a temporary
 // file renamed over the old one) and the file is 0600: it carries the
 // token. Another live Studio's file it displaces is restored by Remove.
+// The guarantee is for two live Studios: only the one displaced file is
+// remembered (with three, the first can be dropped), and Remove's
+// check-then-write is not atomic against a third writer.
 func Write(info Info) (*Written, error) {
 	dirs := Dirs()
 	if len(dirs) == 0 {
@@ -175,7 +178,10 @@ func Write(info Info) (*Written, error) {
 		if _, err := os.Lstat(p); err != nil {
 			continue
 		}
-		if old, err := load(p); err != nil || Stale(old) != "" {
+		// Removed only when it is decoded and stale, or rejected for
+		// good (mode, owner, type, size, parse) — never on a transient
+		// failure, such as another Studio's rename mid-read.
+		if old, err := loadFile(p); (err == nil && Stale(old) != "") || isPermanent(err) {
 			_ = os.Remove(p)
 		}
 	}
@@ -196,8 +202,9 @@ func Write(info Info) (*Written, error) {
 }
 
 // Remove removes the file when it is still this Studio's (same pid and
-// url) — putting back the live Studio it displaced, if any: a Studio
-// never erases the file another live one depends on. Nil-safe.
+// url) — putting back the live Studio it displaced, if any, its started
+// time re-stamped (that Studio refreshes its own file from then on): of
+// two live Studios, neither erases the other's file. Nil-safe.
 func (w *Written) Remove() {
 	if w == nil || w.Path == "" {
 		return
@@ -206,12 +213,35 @@ func (w *Written) Remove() {
 	if err != nil || cur.PID != w.Info.PID || cur.URL != w.Info.URL {
 		return
 	}
-	if w.prev != nil && Stale(*w.prev) == "" {
-		if writeAtomic(w.Path, *w.prev) == nil {
+	if w.prev != nil {
+		prev := *w.prev
+		prev.Started = now().UTC().Truncate(time.Second)
+		if Stale(prev) == "" && writeAtomic(w.Path, prev) == nil {
 			return
 		}
 	}
 	_ = os.Remove(w.Path)
+}
+
+// Refresh re-stamps the file's started time with now, while the file is
+// still this Studio's: a Studio running longer than MaxAge stays
+// discoverable (the writer calls it hourly). A file another Studio has
+// since written is left alone. Nil-safe.
+func (w *Written) Refresh() error {
+	if w == nil || w.Path == "" {
+		return nil
+	}
+	cur, err := load(w.Path)
+	if err != nil || cur.PID != w.Info.PID || cur.URL != w.Info.URL {
+		return nil
+	}
+	info := w.Info
+	info.Started = now().UTC().Truncate(time.Second)
+	if err := writeAtomic(w.Path, info); err != nil {
+		return err
+	}
+	w.Info = info
+	return nil
 }
 
 // GuardDir drops a .gitignore ("*") into dir when dir is a .weft
@@ -243,6 +273,9 @@ func writeAtomic(path string, info Info) error {
 	}
 	tmp := f.Name()
 	_, werr := f.Write(append(b, '\n'))
+	if werr == nil {
+		werr = f.Sync()
+	}
 	if cerr := f.Close(); werr == nil {
 		werr = cerr
 	}
@@ -307,6 +340,10 @@ func Lookup(getenv func(string) string, log *slog.Logger) (info Info, path strin
 	return Info{}, "", false
 }
 
+// loadFile is the writer's cleanup read; a variable so a test can
+// inject each class of failure.
+var loadFile = load
+
 // load reads and decodes one discovery file, refusing what is not a
 // regular file, what this user may not trust (checkFile: on unix mode
 // 0600 and owned by this user) and anything over maxFileBytes.
@@ -316,10 +353,10 @@ func load(path string) (Info, error) {
 		return Info{}, err
 	}
 	if !fi.Mode().IsRegular() {
-		return Info{}, fmt.Errorf("not a regular file (%s)", fi.Mode().Type())
+		return Info{}, permanent(fmt.Errorf("not a regular file (%s)", fi.Mode().Type()))
 	}
 	if err := checkFile(fi); err != nil {
-		return Info{}, err
+		return Info{}, permanent(err)
 	}
 	f, err := os.OpenFile(path, os.O_RDONLY|openFlags, 0)
 	if err != nil {
@@ -334,14 +371,32 @@ func load(path string) (Info, error) {
 		return Info{}, err
 	}
 	if len(b) > maxFileBytes {
-		return Info{}, fmt.Errorf("larger than %d bytes", maxFileBytes)
+		return Info{}, permanent(fmt.Errorf("larger than %d bytes", maxFileBytes))
 	}
 	if t := bytes.TrimSpace(b); len(t) == 0 || t[0] != '{' {
-		return Info{}, errors.New("does not parse: not a JSON object")
+		return Info{}, permanent(errors.New("does not parse: not a JSON object"))
 	}
 	var info Info
 	if err := json.Unmarshal(b, &info); err != nil {
-		return Info{}, fmt.Errorf("does not parse: %w", err)
+		return Info{}, permanent(fmt.Errorf("does not parse: %w", err))
 	}
 	return info, nil
+}
+
+// permanentError marks a load failure that rereading cannot change —
+// the file's mode, owner or type, its size, its parse: the writer
+// removes such a file. Anything else (not there, an open error, a
+// rename between the Lstat and the open — another Studio writing at
+// the same instant) is transient and the file is left alone.
+type permanentError struct{ err error }
+
+func (e permanentError) Error() string { return e.err.Error() }
+func (e permanentError) Unwrap() error { return e.err }
+
+func permanent(err error) error { return permanentError{err} }
+
+// isPermanent reports whether err is a permanent load failure.
+func isPermanent(err error) bool {
+	var p permanentError
+	return errors.As(err, &p)
 }

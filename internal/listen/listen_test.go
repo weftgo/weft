@@ -224,3 +224,35 @@ func TestSameFileThroughASymlink(t *testing.T) {
 		t.Errorf("symlinked db path: %+v, %v; want a reuse", c, err)
 	}
 }
+
+// TestFixedTokenBeatsTokenFor: a fixed Token is always the probe's
+// bearer — TokenFor is never consulted then — and with no Token,
+// TokenFor's answer is sent.
+func TestFixedTokenBeatsTokenFor(t *testing.T) {
+	for _, c := range []struct{ token, want string }{{"fixed", "Bearer fixed"}, {"", "Bearer stable"}} {
+		host, port := freeBase(t, 2)
+		ln, err := net.Listen("tcp", addr(host, port))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make(chan string, 4)
+		hs := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got <- r.Header.Get("Authorization")
+			http.NotFound(w, r)
+		})}
+		go func() { _ = hs.Serve(ln) }()
+		asked := false
+		_, err = choose(t, listen.Request{Addr: addr(host, port), Span: 2, Token: c.token,
+			TokenFor: func(string) string { asked = true; return "stable" }})
+		_ = hs.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a := <-got; a != c.want {
+			t.Errorf("Token %q: the probe sent %q, want %q", c.token, a, c.want)
+		}
+		if c.token != "" && asked {
+			t.Errorf("Token %q: TokenFor was consulted", c.token)
+		}
+	}
+}

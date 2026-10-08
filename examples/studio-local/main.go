@@ -77,7 +77,7 @@ import (
 const page = `<!doctype html><html><head><title>host app</title></head><body>
 <h1>the host app's own page</h1>
 <p>the devtools panel below is a script tag and nothing else</p>
-<script type="module" src="/studio/panel.js" data-public-id="pub_demo" data-open="true"></script>
+<script type="module" src="/studio/panel.js" data-weft data-public-id="pub_demo" data-open="true"></script>
 </body></html>`
 
 func main() {

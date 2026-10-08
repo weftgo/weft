@@ -88,7 +88,10 @@ func Sampler(s sdktrace.Sampler) Option {
 // NoEnv ignores the WEFT_* / OTEL_* destination variables, and the
 // discovery file a running `weft studio` / `weft dev` wrote (which
 // otherwise stands in for WEFT_STUDIO_URL when that is unset). Explicit
-// options are unaffected.
+// options are unaffected. It is otel's alone: the runtime link's own
+// discovery read (runtime.Install under WEFT_ENV=dev, when the pipeline
+// has no Studio) is governed by runtime's options and
+// WEFT_DISCOVERY=off.
 func NoEnv() Option {
 	return optionFunc(func(c *config) { c.noEnv = true })
 }

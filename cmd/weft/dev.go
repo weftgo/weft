@@ -276,8 +276,10 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 	stopCh := make(chan os.Signal, 1)
 	done := make(chan error, 1)
 	go func() { done <- serveUntil(httpServer(choice.Addr, srv.Handler()), choice.Listener, out, stopCh) }()
+	stopFresh := keepFresh(disc)
 	r.stop = func(sig os.Signal) {
 		defer disc.Remove()
+		defer stopFresh()
 		stopCh <- sig
 		if err := <-done; err != nil && !errors.Is(err, http.ErrServerClosed) {
 			_, _ = fmt.Fprintln(out, "weft dev: studio:", err)

@@ -174,6 +174,9 @@ func tempToken(dir string) (path, tok string, err error) {
 	}
 	tok = newSecret()
 	_, werr := f.WriteString(tok + "\n")
+	if werr == nil {
+		werr = f.Sync() // durable before it is linked into place
+	}
 	if cerr := f.Close(); werr == nil {
 		werr = cerr
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/weftgo/weft/internal/discovery"
@@ -54,4 +55,33 @@ func reuseNotes(out io.Writer, addr string, rotate bool) {
 	if discovery.Find("http://"+addr) == "" {
 		_, _ = fmt.Fprintf(out, "studio: the running Studio wrote no discovery file; apps need WEFT_STUDIO_URL=http://%s\n", addr)
 	}
+}
+
+// refreshEvery is how often a serving Studio re-stamps its discovery
+// file's started time, so it stays fresh past discovery.MaxAge; a
+// variable so a test may shorten it.
+var refreshEvery = time.Hour
+
+// keepFresh refreshes w every refreshEvery until the returned stop is
+// called (stop waits for the refresher). Nil-safe.
+func keepFresh(w *discovery.Written) (stop func()) {
+	if w == nil {
+		return func() {}
+	}
+	done, exited := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(exited)
+		t := time.NewTicker(refreshEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				_ = w.Refresh()
+			}
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(done); <-exited }) }
 }

@@ -99,7 +99,7 @@ server token's alone.
 One script tag puts the run loop in the corner of your own page —
 `/panel.js` is served by the same handler:
 
-    <script type="module" src="/studio/panel.js" data-public-id="pub_…"></script>
+    <script type="module" src="/studio/panel.js" data-weft data-public-id="pub_…"></script>
 
 Rung 1 is a viewer scoped to that conversation: the turns (parked
 shown), the step story with tool calls, usage splits, each step's

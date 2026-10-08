@@ -529,6 +529,7 @@ func serveWith(dbFlag string, w want, tokenFlag string, stdout io.Writer, after 
 	}
 	disc := announce(stdout, "http://"+loopbackAddr(choice.Addr), srv.token, dbPath)
 	defer disc.Remove()
+	defer keepFresh(disc)()
 	if after.open {
 		openBrowser(stdout, uiLink(choice.Addr, srv.token))
 	}

@@ -42,6 +42,10 @@
     "reason": "the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
     "fix": "upgrade weft and re-run",
     "causes": {
+      "no_public_id": {
+        "reason": "the session was created without thread.PublicID",
+        "fix": "thread.Create(…, thread.PublicID(id))"
+      },
       "no_spans": {
         "reason": "the run was recorded without a tracer, so attempt spans and the answering model were not stored",
         "fix": "install a tracer (otel.Install records spans)"
@@ -55,7 +59,13 @@
   {
     "hole": "hidden",
     "reason": "your token's scope may not read this: a read-scoped panel token does not read system prompts or tool catalogs",
-    "fix": "use a playground-scoped token"
+    "fix": "use a playground-scoped token",
+    "causes": {
+      "dev_token_only": {
+        "reason": "a panel token is scoped to one public id and may not look up a session's: this route answers the dev token only",
+        "fix": "ask with the server (dev) token, or use the public id the panel token was minted for"
+      }
+    }
   },
   {
     "hole": "compacted",

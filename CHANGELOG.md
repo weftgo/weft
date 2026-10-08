@@ -10,6 +10,21 @@ module, ADR 0005).
 
 ### Added
 
+- **`GET /api/sessions/{id}/public_id`** (plan C4.1): the reverse of
+  `GET /api/public/{public_id}` — `{"session_id", "public_id"}`, the
+  public id `thread.PublicID` stamped on the session's turns, for the
+  devtools' `scope()` given a session id and no public id. A session
+  created without one answers 200 with `"public_id": ""` and the
+  `not_recorded` badge (cause `no_public_id`: "the session was created
+  without thread.PublicID", fix `thread.Create(…, thread.PublicID(id))`);
+  an unknown session is 404 `not_found`. The dev (server) token's and
+  setup A's open API's alone: every panel token, read or playground,
+  is 403 with the `hidden` badge (cause `dev_token_only`) before the
+  session is looked up. In the always-on read group, so `/api/meta`'s
+  capabilities are unchanged. `obsdb` gains the two causes
+  (`CauseNoPublicID`, `CauseDevTokenOnly`) in `HoleCauses()` and
+  `studio/testdata/holes.golden.json`'s `causes`.
+
 - **`@weftgo/devtools` on npm** (plan C1, assembled in
   `studio/web/npm`, unpublished until a release publishes it): its
   `panel.js` is `/studio/panel.js` byte for byte (sha256 equal, gated

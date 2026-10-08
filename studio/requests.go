@@ -43,11 +43,15 @@ type badgeFields struct {
 	Fix    string `json:"fix,omitempty"`
 }
 
-func badgeOf(h obsdb.Hole) badgeFields {
+func badgeOf(h obsdb.Hole) badgeFields { return badgeFor(h, obsdb.CauseDefault) }
+
+// badgeFor is badgeOf for a hole whose cause the route knows: the
+// table's own words for that cause (obsdb.HoleNoteFor).
+func badgeFor(h obsdb.Hole, cause obsdb.HoleCause) badgeFields {
 	if h == "" {
 		return badgeFields{}
 	}
-	reason, fix := obsdb.HoleNote(h)
+	reason, fix := obsdb.HoleNoteFor(h, cause)
 	return badgeFields{Badge: string(h), Reason: reason, Fix: fix}
 }
 

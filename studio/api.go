@@ -1052,9 +1052,15 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveSessionRoutes dispatches /api/sessions/{id}: the thread's turns
-// in order (obsdb's SessionDetail).
+// in order (obsdb's SessionDetail); /api/sessions/{id}/public_id is the
+// reverse of api/public (serveSessionPublicID). Session ids carry no
+// slash, so the sub-route shadows none.
 func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	if sid, ok := strings.CutSuffix(id, "/public_id"); ok && sid != "" && !strings.Contains(sid, "/") {
+		s.serveSessionPublicID(w, r, sid)
+		return
+	}
 	if id == "" || strings.Contains(id, "/") {
 		notFound(w, r, "no such api route "+r.URL.Path)
 		return
@@ -1072,6 +1078,39 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		doc.Runs = append(doc.Runs, row(rr))
 	}
 	writeJSON(w, r, http.StatusOK, doc)
+}
+
+// sessionPublicID is api/sessions/{id}/public_id's answer: the public
+// id the session was created with, or "" with the not_recorded badge
+// when no turn of it carries one.
+type sessionPublicID struct {
+	SessionID string `json:"session_id"`
+	PublicID  string `json:"public_id"`
+	badgeFields
+}
+
+// serveSessionPublicID answers api/sessions/{id}/public_id (plan C4):
+// the reverse of api/public — the weft.public_id the session's turns
+// carry (thread.PublicID at Create stamps one value on every turn).
+// The dev token's alone: a panel token is scoped to one public id and
+// must not learn another's, so every panel token (read or playground,
+// its own session included) is 403 with the hidden badge before the
+// session is looked up — the refusal never says whether it exists.
+func (s *Server) serveSessionPublicID(w http.ResponseWriter, r *http.Request, id string) {
+	if idFrom(r).panel != nil {
+		refuseHiddenFor(w, r, "the session-to-public-id lookup answers the dev token only, never a panel token", obsdb.CauseDevTokenOnly)
+		return
+	}
+	det, err := s.db.Session(r.Context(), id)
+	if err != nil {
+		dbError(w, r, "session", id, err)
+		return
+	}
+	out := sessionPublicID{SessionID: id, PublicID: det.PublicID}
+	if out.PublicID == "" {
+		out.badgeFields = badgeFor(obsdb.HoleNotRecorded, obsdb.CauseNoPublicID)
+	}
+	writeJSON(w, r, http.StatusOK, out)
 }
 
 // servePublic answers api/public/{public_id} (S4.3): the public id

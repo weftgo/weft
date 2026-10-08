@@ -69,16 +69,36 @@ const (
 	// lines may be missing (truncated: no destination setting changes
 	// it).
 	CauseLogCap HoleCause = "log_cap"
+	// CauseNoPublicID: the session's turns carry no weft.public_id —
+	// it was created without thread.PublicID (not_recorded: Studio's
+	// GET /api/sessions/{id}/public_id).
+	CauseNoPublicID HoleCause = "no_public_id"
+	// CauseDevTokenOnly: the route answers the dev (server) token and
+	// setup A's open API only; a panel token, scoped to one public id,
+	// may not learn another (hidden: the session-to-public-id lookup).
+	CauseDevTokenOnly HoleCause = "dev_token_only"
 )
 
 // HoleCauses lists the causes the table words, in order.
-func HoleCauses() []HoleCause { return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap} }
+func HoleCauses() []HoleCause {
+	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly}
+}
 
 var causeNotes = map[Hole]map[HoleCause]holeNote{
 	HoleNotRecorded: {
 		CauseNoSpans: {
 			"the run was recorded without a tracer, so attempt spans and the answering model were not stored",
 			"install a tracer (otel.Install records spans)",
+		},
+		CauseNoPublicID: {
+			"the session was created without thread.PublicID",
+			"thread.Create(…, thread.PublicID(id))",
+		},
+	},
+	HoleHidden: {
+		CauseDevTokenOnly: {
+			"a panel token is scoped to one public id and may not look up a session's: this route answers the dev token only",
+			"ask with the server (dev) token, or use the public id the panel token was minted for",
 		},
 	},
 	HoleTruncated: {

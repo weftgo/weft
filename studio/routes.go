@@ -103,7 +103,8 @@ func (s *Server) capabilityList() []string {
 // step 8 and are absent here.
 func (s *Server) registerGroups() {
 	// The read API: meta, manifest, runs, run detail, events,
-	// transcript, spans, traces, sessions, public-id resolution.
+	// transcript, spans, traces, sessions, public-id resolution (and
+	// its reverse, sessions/{id}/public_id, the dev token's alone).
 	// Always present, so it names no capability.
 	s.addGroup(routeGroup{
 		name:     "api",
@@ -212,7 +213,7 @@ func registerReadAPI(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/runs", s.serveRuns)
 	mux.HandleFunc("GET /api/runs/", s.serveRunRoutes)
 	mux.HandleFunc("GET /api/sessions", s.serveSessions)
-	mux.HandleFunc("GET /api/sessions/", s.serveSessionRoutes)
+	mux.HandleFunc("GET /api/sessions/", s.serveSessionRoutes) // {id} and {id}/public_id
 	mux.HandleFunc("GET /api/traces/", s.serveTrace)
 	mux.HandleFunc("GET /api/public/", s.servePublic)
 	s.addRunRoute("events", s.serveRunEvents)

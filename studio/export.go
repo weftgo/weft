@@ -175,6 +175,12 @@ func rfc5987(s string) string {
 // refuseHidden is mayReadPrompts' refusal with the route's own words:
 // 403 in the error shape, the hidden badge beside it.
 func refuseHidden(w http.ResponseWriter, r *http.Request, msg string) {
+	refuseHiddenFor(w, r, msg, obsdb.CauseDefault)
+}
+
+// refuseHiddenFor is refuseHidden with the cause the route knows
+// (obsdb.HoleNoteFor's reason and fix).
+func refuseHiddenFor(w http.ResponseWriter, r *http.Request, msg string, cause obsdb.HoleCause) {
 	type errBody struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
@@ -182,7 +188,7 @@ func refuseHidden(w http.ResponseWriter, r *http.Request, msg string) {
 	writeJSON(w, r, http.StatusForbidden, struct {
 		Error errBody `json:"error"`
 		badgeFields
-	}{Error: errBody{"forbidden", msg}, badgeFields: badgeOf(obsdb.HoleHidden)})
+	}{Error: errBody{"forbidden", msg}, badgeFields: badgeFor(obsdb.HoleHidden, cause)})
 }
 
 // exportFixtures answers format=wefttest: the run's fixtures zipped

@@ -367,7 +367,13 @@ as `runs/{id}` serves them. A read-scoped panel token gets `json` and
 compaction view's `messages` null under the same badge; `otlp` and
 `wefttest` are 403 with that badge),
 `traces/{trace_id}` (any trace), `sessions`, `sessions/{id}` (turns in
-order), `public/{public_id}`, `manifest` (it carries the agents' system
+order), `sessions/{id}/public_id` (the reverse of `public/`: `{session_id,
+public_id}`, the public id `thread.PublicID` stamped on the session's
+turns; `public_id: ""` with `badge: "not_recorded"` when the session was
+created without one, 404 for an unknown session; the dev token's and
+setup A's alone — every panel token, read or playground, its own
+session included, is 403 with `badge: "hidden"`; session ids carry no
+`/`, so the sub-route shadows none), `public/{public_id}`, `manifest` (it carries the agents' system
 prompts: 403 with `badge: "hidden"` to a read-scoped panel token),
 `POST /api/panel-tokens`
 

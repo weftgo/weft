@@ -585,7 +585,10 @@ fix differs by it (`obsdb.HoleNoteFor(h, cause)`, the golden's
 `no_spans` (a run recorded without a tracer: install one), `truncated`
 by `result_cap` (the core's own `weft.MaxResultBytes` cut the tool
 result before any destination saw it) and by `log_cap` (the app-log
-reader's candidate cap, which no destination setting changes).
+reader's candidate cap, which no destination setting changes);
+`not_recorded` by `no_public_id` (a session created without
+`thread.PublicID`) and `hidden` by `dev_token_only` (Studio's
+session-to-public-id lookup, which no panel token may make).
 `redacted` is reserved: weft's pipeline does not yet mark a redaction
 on the record.
 

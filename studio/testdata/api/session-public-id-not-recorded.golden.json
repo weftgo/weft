@@ -1,0 +1,8 @@
+{
+  "session_id": "s_nopub",
+  "public_id": "",
+  "badge": "not_recorded",
+  "reason": "the session was created without thread.PublicID",
+  "fix": "thread.Create(…, thread.PublicID(id))"
+}
+

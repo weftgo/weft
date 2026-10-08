@@ -401,6 +401,22 @@ func TestAuthMatrix(t *testing.T) {
 				return forbidden403
 			}},
 		{name: "GET /api/sessions/{id}", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] }, resources: all, want: scoped(ok)},
+		// The reverse of public/ (plan C4): the dev token's alone. Every
+		// panel token is 403 (badge hidden, pinned below) whatever the
+		// session — its own included, an unknown one included, so the
+		// refusal never says whether it exists; the server token reads
+		// every session (s_none's answer is 200 with the not_recorded
+		// badge, TestSessionPublicID), 404 for one never stored.
+		{name: "GET /api/sessions/{id}/public_id", method: "GET", path: func(res string) string { return "/api/sessions/" + session[res] + "/public_id" }, resources: all,
+			want: func(kind, res string) int {
+				switch {
+				case kind != "server":
+					return forbidden403
+				case res == "missing":
+					return miss
+				}
+				return ok
+			}},
 		{name: "GET /api/public/{public_id}", method: "GET", path: func(res string) string { return "/api/public/" + public[res] },
 			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {
 				switch {
@@ -694,6 +710,32 @@ func TestAuthMatrix(t *testing.T) {
 					t.Errorf("%s as %s = %d %s, want 403 with %s", path, id.name, resp.StatusCode, b, want)
 				}
 			}
+		}
+	}
+
+	// The session-to-public-id lookup's refusal of every panel token is
+	// the hidden hole with its dev-token-only cause: the badge, the
+	// table's reason and fix beside the 403.
+	for _, id := range identities {
+		if id.kind != "read" && id.kind != "pg" {
+			continue
+		}
+		reason, fix := obsdb.HoleNoteFor(obsdb.HoleHidden, obsdb.CauseDevTokenOnly)
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/sessions/s_a/public_id", nil)
+		req.Header.Set("Authorization", "Bearer "+id.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		for _, want := range []string{`"code":"forbidden"`, `"badge":"hidden"`, `"reason":"` + reason + `"`, `"fix":"` + fix + `"`} {
+			if resp.StatusCode != forbidden403 || !strings.Contains(string(b), want) {
+				t.Errorf("sessions/s_a/public_id as %s = %d %s, want 403 with %s", id.name, resp.StatusCode, b, want)
+			}
+		}
+		if strings.Contains(string(b), "pub_a") {
+			t.Errorf("sessions/s_a/public_id as %s leaked the public id: %s", id.name, b)
 		}
 	}
 

@@ -7,7 +7,7 @@ authority; this is the map.
 Two Go modules (ADR 0027). `github.com/weftgo/weft` is the framework:
 the root package is the loop, and every layer below — `openai`,
 `anthropic`, `google`, `mcp`, `mw`, `wefttest`, `thread`, `otel`,
-`obsdb`, `studio`, `runtime` — is a package of it, one version, one
+`obsdb`, `studio`, `runtime`, `scope` — is a package of it, one version, one
 `go get`. `github.com/weftgo/weft/core` is the loop alone (plus
 `core/wefttest` and `core/mw`), the module to import when nothing else
 is wanted; its only dependency is the OTel API. The root package, `mw`,
@@ -241,6 +241,14 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    ("studio already running at … (pid n), reusing", exit 0); anything else → the
 //    //    next free port in 7331–7340, said in one line; --addr / WEFT_STUDIO_ADDR pins
 //    //    (busy → exit 1 naming it). /api/meta's pid follows db.path's guard.
+
+// 7b. The scope header (package weft/scope; plan C3): the app's own chat handler tells the
+//     devtools panel which conversation and run a response belongs to, in one line —
+//     mux.Handle("POST /chat", scope.Header(chat, func(r *http.Request) scope.Scope { return scope.Scope{PublicID: pub} }))
+//     // Weft-Scope: pub_…;session=…;flow=…;run=… (scope.Scope.String / scope.Parse, the web
+//     // lib/scope.ts form, both pinned by studio/testdata/scope.golden.json); scope.Set(w, s) once
+//     // the run id is known (before the first write); Access-Control-Expose-Headers gains
+//     // Weft-Scope; never a token. Not in the root package: that one is core's generated facade.
 
 // 7a. The playground (package weft/runtime): your app dials Studio out and
 //     executes experiment commands as runs of the agents you register:

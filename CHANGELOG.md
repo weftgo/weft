@@ -24,6 +24,22 @@ module, ADR 0005).
   registers listeners but the panel dispatches no events yet (C4).
   `make devtools-npm` builds the package and dry-runs `npm pack`.
 
+- **`weft/scope`** (plan C3.1): the Go side of the devtools' Scope.
+  `scope.Scope{PublicID, SessionID, FlowID, RunID}` with `String()`,
+  `IsZero()` and `scope.Parse(string) Scope`, the same string form as
+  the web side's `serializeScope`/`parseScope`
+  (`pub_…;session=…;flow=…;run=…`, values percent-encoded, a lenient
+  parser that never fails). One golden, `studio/testdata/scope.golden.json`,
+  is read by both test suites. `scope.Header(next, func(*http.Request)
+  scope.Scope) http.Handler` sets the `Weft-Scope` response header on
+  the app's own chat endpoint, and `scope.Set(w, s)` sets it once the
+  run id is known. Both append `Weft-Scope` to
+  `Access-Control-Expose-Headers`, and the header never carries a
+  token. `examples/studio-local`'s `/run` answers `Weft-Scope:
+  pub_demo;run=<id>`. The panel reads the header from C3.2 on. The
+  package sits beside the root rather than in it: the root package is
+  a generated facade over core, which never imports net/http.
+
 - **The live grant** (plan C5): `POST /api/live-grant` (capability
   `live`, authenticated like every API route) takes one `/api/live`
   selector and its `kinds` (JSON body or query) and answers `{sig,

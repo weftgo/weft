@@ -192,6 +192,21 @@ exports C4 completes. `make devtools-npm` assembles the package in
 and lists the tarball. `make studio-check` fails if the package's
 `panel.js` is not the served one. Publishing is done by hand.
 
+The scope header (plan C3, rung 2, the development rung) is set by the
+app's own handler, since `thread` has no HTTP layer: one line,
+`mux.Handle("POST /chat", scope.Header(chat, func(r *http.Request)
+scope.Scope { return scope.Scope{PublicID: pubOf(r)} }))` (package
+`github.com/weftgo/weft/scope`), sets `Weft-Scope: pub_…` on every
+response, and a handler that knows the run once its turn starts calls
+`scope.Set(w, scope.Scope{PublicID: …, RunID: turn.RunID()})` before
+writing (`examples/studio-local`'s `/run` answers `Weft-Scope:
+pub_demo;run=<id>`). It never carries a token. The value is the
+`data-weft-scope` marker's string form, pinned for both sides by
+`studio/testdata/scope.golden.json`. Both helpers append `Weft-Scope`
+to `Access-Control-Expose-Headers`; a page on another origin also
+needs your CORS policy to allow its origin. The panel reads the header
+from C3.2 on.
+
 ## The playground (WEFT-PLAYGROUND.md)
 
 Your app dials Studio out and executes experiment commands as runs of

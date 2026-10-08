@@ -1,53 +1,57 @@
 // The Scope marker's one string form (plan §13.3, C1): public id
-// first, then session=, flow=, run= in that order — the format C3.1's
-// Go side must read and write the same way.
+// first, then session=, flow=, run= in that order. The cases live in
+// studio/testdata/scope.golden.json, which the Go side
+// (scope/scope_test.go, C3.1) reads too — one fixture, two
+// serialisers, no drift.
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 import { parseScope, serializeScope } from "./scope"
+import type { Scope } from "./scope"
 
-describe("serializeScope", () => {
-  it("writes the public id bare, then session, flow, run in that order", () => {
-    expect(serializeScope({ publicId: "pub_1" })).toBe("pub_1")
-    expect(serializeScope({ run: "r_9", flow: "f_3", session: "s_2", publicId: "pub_1" })).toBe(
-      "pub_1;session=s_2;flow=f_3;run=r_9"
-    )
-    expect(serializeScope({ publicId: "pub_1", run: "r_9" })).toBe("pub_1;run=r_9")
+interface Case {
+  scope: Scope
+  string: string
+}
+const golden = JSON.parse(
+  readFileSync(resolve(process.cwd(), "../testdata/scope.golden.json"), "utf8")
+) as { roundtrip: Case[]; serialize: Case[]; parse: Case[] }
+
+describe("the shared golden (studio/testdata/scope.golden.json)", () => {
+  it("has every section, and a round-trip case with a flow field", () => {
+    expect(golden.roundtrip.length).toBeGreaterThan(0)
+    expect(golden.serialize.length).toBeGreaterThan(0)
+    expect(golden.parse.length).toBeGreaterThan(0)
+    expect(golden.roundtrip.some((c) => c.scope.flow)).toBe(true)
   })
 
-  it("an empty optional field is unset; an empty public id stays first", () => {
-    expect(serializeScope({ publicId: "pub_1", session: "" })).toBe("pub_1")
-    expect(serializeScope({ publicId: "", session: "s_2" })).toBe(";session=s_2")
+  it.each(golden.roundtrip)("round-trips $string", (c) => {
+    expect(serializeScope(c.scope)).toBe(c.string)
+    expect(parseScope(c.string)).toEqual(c.scope)
   })
 
-  it("percent-encodes what would break the marker, and only that kind of thing", () => {
-    expect(serializeScope({ publicId: "a;b", session: "x=y" })).toBe("a%3Bb;session=x%3Dy")
-    expect(serializeScope({ publicId: "pub_01J-x.y~z" })).toBe("pub_01J-x.y~z")
-  })
+  it.each(golden.serialize)(
+    "serialises to $string (empty fields are unset)",
+    (c) => {
+      expect(serializeScope(c.scope)).toBe(c.string)
+    }
+  )
 
-  it("never throws on a string encodeURIComponent refuses (a lone surrogate): the delimiters are still encoded", () => {
-    expect(() => serializeScope({ publicId: "\uD800" })).not.toThrow()
-    expect(serializeScope({ publicId: "a;\uD800", run: "=%" })).toBe("a%3B\uD800;run=%3D%25")
-    expect(parseScope(serializeScope({ publicId: "a;\uD800", run: "=%" }))).toEqual({ publicId: "a;\uD800", run: "=%" })
+  it.each(golden.parse)("parses $string leniently", (c) => {
+    expect(parseScope(c.string)).toEqual(c.scope)
   })
 })
 
-describe("parseScope", () => {
-  it("round-trips every shape serializeScope writes", () => {
-    for (const s of [
-      { publicId: "pub_1" },
-      { publicId: "pub_1", session: "s_2" },
-      { publicId: "pub_1", session: "s_2", flow: "f_3", run: "r_9" },
-      { publicId: "", run: "r_9" },
-      { publicId: "a;b=c", flow: "f;=" },
-    ])
-      expect(parseScope(serializeScope(s))).toEqual(s)
-  })
-
-  it("ignores unknown keys, repeats and segments without '=', and never throws", () => {
-    expect(parseScope("pub_1;tenant=acme;session=s_2;session=s_3;junk;run=")).toEqual({
-      publicId: "pub_1",
-      session: "s_2",
-    })
-    expect(parseScope("")).toEqual({ publicId: "" })
-    expect(parseScope("%E0%A4%A")).toEqual({ publicId: "%E0%A4%A" })
+// A lone surrogate cannot cross the golden (Go decodes it to U+FFFD);
+// the Go side pins its analogue, invalid UTF-8, in its own test.
+describe("serializeScope", () => {
+  it("never throws on a string encodeURIComponent refuses (a lone surrogate): the delimiters are still encoded", () => {
+    expect(() => serializeScope({ publicId: "\uD800" })).not.toThrow()
+    expect(serializeScope({ publicId: "a;\uD800", run: "=%" })).toBe(
+      "a%3B\uD800;run=%3D%25"
+    )
+    expect(
+      parseScope(serializeScope({ publicId: "a;\uD800", run: "=%" }))
+    ).toEqual({ publicId: "a;\uD800", run: "=%" })
   })
 })

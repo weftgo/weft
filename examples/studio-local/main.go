@@ -66,6 +66,7 @@ import (
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/runtime"
+	"github.com/weftgo/weft/scope"
 	"github.com/weftgo/weft/studio"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
@@ -152,9 +153,12 @@ func serve(addr string, explicitAddr bool) error {
 	mux.Handle("/studio/", http.StripPrefix("/studio", srv.Handler()))
 
 	// The demo's own surface: one thread turn per call, and the plain
-	// page the panel docks on (the gate harness drives both).
+	// page the panel docks on (the gate harness drives both). /run's
+	// responses carry the Weft-Scope header (the development rung):
+	// the conversation's public id on every answer, narrowed to the
+	// turn's run by the handler once the turn has started.
 	demo := newDemo(store, agent)
-	mux.HandleFunc("POST /run", demo.run)
+	mux.Handle("POST /run", demo.handler())
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = fmt.Fprint(w, page)
@@ -270,6 +274,18 @@ func newDemo(st thread.Storage, agent *weft.Agent) *demo {
 	return &demo{st: st, agent: agent, sem: make(chan struct{}, 1)}
 }
 
+// publicID is the demo session's public id: the panel's script tag
+// carries it, and every /run response's Weft-Scope header names it.
+const publicID = "pub_demo"
+
+// handler is /run with its scope header: the one line an app adds to
+// its chat endpoint.
+func (d *demo) handler() http.Handler {
+	return scope.Header(http.HandlerFunc(d.run), func(*http.Request) scope.Scope {
+		return scope.Scope{PublicID: publicID}
+	})
+}
+
 // run answers one question: one turn of the session whose public id
 // the panel carries.
 func (d *demo) run(w http.ResponseWriter, r *http.Request) {
@@ -304,7 +320,7 @@ func (d *demo) run(w http.ResponseWriter, r *http.Request) {
 	// be refused with thread.ErrLocked while the first is open.
 	d.mu.Lock()
 	if d.s == nil {
-		s, err := thread.Create(ctx, d.st, d.agent, thread.PublicID("pub_demo"))
+		s, err := thread.Create(ctx, d.st, d.agent, thread.PublicID(publicID))
 		if err != nil {
 			d.mu.Unlock()
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -319,6 +335,9 @@ func (d *demo) run(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// The run id exists once the turn is sent: the response's scope
+	// narrows to it before anything is written.
+	scope.Set(w, scope.Scope{PublicID: publicID, RunID: turn.RunID()})
 	// Answer when the turn lands: the reply is the demo's product, and
 	// a watcher of /studio/live saw it stream in meanwhile.
 	res, err := turn.Wait()

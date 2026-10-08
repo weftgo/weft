@@ -1,0 +1,42 @@
+{
+  "//": "The Scope string form (plan §13.3), shared by scope/scope_test.go (Go: scope.Scope.String, scope.Parse) and studio/web/src/lib/scope.test.ts (web: serializeScope, parseScope). roundtrip: serialise scope to string, parse string back to scope. serialize: serialise only (the parse side drops what it wrote as unset). parse: parse only (the lenient reader). Keys are the web Scope's: publicId, session, flow, run.",
+  "roundtrip": [
+    { "scope": { "publicId": "pub_1" }, "string": "pub_1" },
+    { "scope": { "publicId": "pub_1", "session": "s_2" }, "string": "pub_1;session=s_2" },
+    { "scope": { "publicId": "pub_1", "run": "r_9" }, "string": "pub_1;run=r_9" },
+    { "scope": { "publicId": "pub_1", "session": "s_2", "flow": "f_3", "run": "r_9" }, "string": "pub_1;session=s_2;flow=f_3;run=r_9" },
+    { "scope": { "publicId": "pub_demo", "flow": "f_7" }, "string": "pub_demo;flow=f_7" },
+    { "scope": { "publicId": "pub_demo", "flow": "f_7", "run": "r_8" }, "string": "pub_demo;flow=f_7;run=r_8" },
+    { "scope": { "publicId": "" }, "string": "" },
+    { "scope": { "publicId": "", "run": "r_9" }, "string": ";run=r_9" },
+    { "scope": { "publicId": "", "session": "s_2" }, "string": ";session=s_2" },
+    { "scope": { "publicId": "a;b", "session": "x=y" }, "string": "a%3Bb;session=x%3Dy" },
+    { "scope": { "publicId": "a;b=c", "flow": "f;=" }, "string": "a%3Bb%3Dc;flow=f%3B%3D" },
+    { "scope": { "publicId": "100%", "run": "%" }, "string": "100%25;run=%25" },
+    { "scope": { "publicId": "pub_01J-x.y~z" }, "string": "pub_01J-x.y~z" },
+    { "scope": { "publicId": "a!b*c'(d)" }, "string": "a!b*c'(d)" },
+    { "scope": { "publicId": "pub é", "session": "s ✓", "flow": "f+1/2" }, "string": "pub%20%C3%A9;session=s%20%E2%9C%93;flow=f%2B1%2F2" },
+    { "scope": { "publicId": "pub_1", "run": "r 😀&?#" }, "string": "pub_1;run=r%20%F0%9F%98%80%26%3F%23" }
+  ],
+  "serialize": [
+    { "scope": { "publicId": "pub_1", "session": "" }, "string": "pub_1" },
+    { "scope": { "publicId": "pub_1", "session": "", "flow": "", "run": "r_9" }, "string": "pub_1;run=r_9" }
+  ],
+  "parse": [
+    { "string": "pub_1;tenant=acme;session=s_2;session=s_3;junk;run=", "scope": { "publicId": "pub_1", "session": "s_2" } },
+    { "string": "pub_1;run=r_9;session=s_2", "scope": { "publicId": "pub_1", "session": "s_2", "run": "r_9" } },
+    { "string": "pub_1;flow=f_3;flow=f_x", "scope": { "publicId": "pub_1", "flow": "f_3" } },
+    { "string": "pub_1;run=;run=r_2", "scope": { "publicId": "pub_1", "run": "r_2" } },
+    { "string": "pub_1;flow=a=b", "scope": { "publicId": "pub_1", "flow": "a=b" } },
+    { "string": " pub_1 ; session = s_2 ", "scope": { "publicId": "pub_1", "session": "s_2" } },
+    { "string": "pub_1;Session=s_2;=x;;", "scope": { "publicId": "pub_1" } },
+    { "string": "pub%201;session=s%3B2;run=r%3d3", "scope": { "publicId": "pub 1", "session": "s;2", "run": "r=3" } },
+    { "string": "pub_1;run=r+1", "scope": { "publicId": "pub_1", "run": "r+1" } },
+    { "string": "pub_1;session=%ZZ;run=%", "scope": { "publicId": "pub_1", "session": "%ZZ", "run": "%" } },
+    { "string": "pub_1;session=%C0%AF", "scope": { "publicId": "pub_1", "session": "%C0%AF" } },
+    { "string": "%E0%A4%A", "scope": { "publicId": "%E0%A4%A" } },
+    { "string": "", "scope": { "publicId": "" } },
+    { "string": ";;;", "scope": { "publicId": "" } },
+    { "string": "junk", "scope": { "publicId": "junk" } }
+  ]
+}

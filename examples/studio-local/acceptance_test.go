@@ -24,6 +24,7 @@ import (
 	"github.com/weftgo/weft/obsdb/sqlite"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/runtime"
+	"github.com/weftgo/weft/scope"
 	"github.com/weftgo/weft/studio"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
@@ -314,5 +315,36 @@ func TestRunTwiceIsOneSession(t *testing.T) {
 	page, err := thread.List(context.Background(), st, thread.Query{})
 	if err != nil || len(page.Sessions) != 1 {
 		t.Fatalf("the storage holds %d sessions (%v), want the one", len(page.Sessions), err)
+	}
+}
+
+// Every /run response carries the Weft-Scope header (the development
+// rung, C3.1): the demo's public id, narrowed to the turn's run — the
+// run id the body names — and exposed to cross-origin pages. No
+// session field (the Done line's shape: pub_demo;run=<id>) and never a
+// token.
+func TestRunCarriesTheScopeHeader(t *testing.T) {
+	d := newDemo(thread.Memory(), weft.New(echoModel{}, lookupOrder))
+	srv := httptest.NewServer(d.handler())
+	defer srv.Close()
+	resp, err := http.Post(srv.URL+"/run", "text/plain", strings.NewReader("where is order 42?"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	fields := strings.Fields(string(body))
+	if resp.StatusCode != http.StatusOK || len(fields) < 2 || fields[0] != "run" {
+		t.Fatalf("/run: %d %q", resp.StatusCode, body)
+	}
+	want := "pub_demo;run=" + fields[1]
+	if got := resp.Header.Values("Weft-Scope"); len(got) != 1 || got[0] != want {
+		t.Errorf("Weft-Scope = %q, want [%s]", got, want)
+	}
+	if got := resp.Header.Get("Access-Control-Expose-Headers"); got != "Weft-Scope" {
+		t.Errorf("Access-Control-Expose-Headers = %q, want Weft-Scope", got)
+	}
+	if got := scope.Parse(resp.Header.Get("Weft-Scope")); got.SessionID != "" || got.PublicID != "pub_demo" {
+		t.Errorf("the header's scope is %#v, want pub_demo and no session", got)
 	}
 }

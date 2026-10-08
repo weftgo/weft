@@ -468,7 +468,11 @@ describe("the live streams end", () => {
       await vi.advanceTimersByTimeAsync(60_000)
     }
     const opened = FakeEventSource.instances.filter((i) => i.url.includes("public_id=")).length
-    expect(opened).toBe(6) // the first, and five reopens (5 s, doubling)
+    // The first and five reopens (5 s, doubling) — each refused stream
+    // given one fresh grant first (a restarted Studio's new key), then
+    // reported closed.
+    expect(opened).toBe(12)
+    expect(studio.posts("live-grant").filter((g) => (g.body as { public_id?: string }).public_id).length).toBe(12)
     expect(studio.gets("runs?public_id=").length).toBe(6)
   })
 

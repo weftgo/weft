@@ -311,6 +311,14 @@ export function useRunEvents(
         onRun: (f) => {
           if (!isCancelled() && f.run.id === id) onRunRef.current?.(f.run)
         },
+        // Subscribed for the first time: the stream opens once its
+        // grant answers (plan C5), after the first page was asked for —
+        // what was published in between is in neither, so the pages
+        // past the walk are read (after a walk in flight, which then
+        // reads once more).
+        onOpen: (reopened) => {
+          if (!reopened && !isCancelled()) void readPages(!walked)
+        },
         // Lost, or back after a loss: refetch pages (S4.5). While the
         // stream is down the poll below is the tail.
         onOverflow: () => {

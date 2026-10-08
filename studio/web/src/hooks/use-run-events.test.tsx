@@ -141,11 +141,14 @@ describe("useRunEvents walk and tail", () => {
   // next frame moved the cursor past it.
   it("keeps live frames that arrive during the initial walk", async () => {
     let release: (r: Response) => void = () => {}
-    const fetchMock = vi.fn(
-      (_i: RequestInfo | URL, _o?: RequestInit) =>
-        new Promise<Response>((res) => {
-          release = res
-        })
+    // The first page is held; any later read (the open's catch-up)
+    // finds nothing new.
+    const fetchMock = vi.fn((_i: RequestInfo | URL, _o?: RequestInit) =>
+      fetchMock.mock.calls.length === 1
+        ? new Promise<Response>((res) => {
+            release = res
+          })
+        : Promise.resolve(json(pageOf([], null)))
     )
     vi.stubGlobal("fetch", withLiveGrant(fetchMock))
     const { result } = renderHook(() => useRunEvents("r1", "running", { live: true }))
@@ -181,6 +184,34 @@ describe("useRunEvents walk and tail", () => {
     expect(fetchMock.mock.calls.map((c) => afterOf(c[0]))).toEqual([0, 2])
   })
 
+  // The stream opens once its grant answers (plan C5) — after the first
+  // page was read. An event published in between is in neither: the
+  // open reads the pages past the walk, without waiting for the next
+  // frame or the status flip.
+  it("reads the pages past the walk when the stream opens after it", async () => {
+    let stored = [0, 1]
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      json(pageOf(stored.filter((p) => p >= afterOf(input)), null))
+    )
+    const granted = withLiveGrant(fetchMock)
+    let answerGrant = () => {}
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).endsWith("/live-grant")
+        ? new Promise<Response>((res) => {
+            answerGrant = () => res(granted(input, init))
+          })
+        : granted(input, init)
+    )
+    const { result } = renderHook(() => useRunEvents("r1", "running", { live: true }))
+    await waitFor(() => expect(result.current.lastPos).toBe(1))
+    stored = [0, 1, 2] // published after the page, before the subscription
+    answerGrant()
+    const es = await waitFor(() => FakeEventSource.nth(0))
+    es.connect()
+    await waitFor(() => expect(result.current.lastPos).toBe(2))
+    expect(fetchMock.mock.calls.map((c) => afterOf(c[0]))).toEqual([0, 2])
+  })
+
   it("folds deltas and in-order events straight from the stream", async () => {
     const fetchMock = vi.fn(async () => json(pageOf([0], null)))
     vi.stubGlobal("fetch", withLiveGrant(fetchMock))
@@ -193,7 +224,9 @@ describe("useRunEvents walk and tail", () => {
     es.emit("record", frame(1, "delta"))
     await waitFor(() => expect(result.current.events).toHaveLength(4))
     expect(result.current.lastPos).toBe(1)
-    expect(fetchMock).toHaveBeenCalledTimes(1) // no refetch: nothing skipped
+    // The first walk and the open's catch-up (plan C5: the stream opens
+    // after the walk began); no refetch for the frames: nothing skipped.
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   // A cursor that does not advance (a server bug, a proxy replaying a
@@ -307,7 +340,8 @@ describe("useRunEvents seam holes", () => {
     es.connect()
     es.emit("record", frame(3), "9")
     await waitFor(() => expect(result.current.lastPos).toBe(3))
-    expect(fetchMock.mock.calls.map((c) => afterOf(c[0]))).toEqual([0, 2])
+    // The walk, the open's catch-up, the read for the hole.
+    expect(fetchMock.mock.calls.map((c) => afterOf(c[0]))).toEqual([0, 2, 2])
   })
 })
 

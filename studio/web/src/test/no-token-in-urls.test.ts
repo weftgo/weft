@@ -6,7 +6,11 @@
 // Authorization header or as a live grant's sig. Beside it, the static
 // half: `token=` appears in no client source but the one place a
 // client reads its own page's address (lib/api's
-// adoptTokenFromLocation — the page URL, never a request).
+// adoptTokenFromLocation, the fragment reader — the page URL, never a
+// request); no source sets a "token" search parameter in any form; and
+// the files that make raw requests (fetch(, new EventSource(,
+// sendBeacon, XMLHttpRequest) are exactly the four below — a new one
+// fails until it is enumerated here.
 //
 // The call sites (grep apiUrl, fetch(, new EventSource, token in
 // studio/web/src):
@@ -19,7 +23,6 @@
 //                    openPanelLive — POST live-grant, then new EventSource
 //   panel/config.ts  discoverEndpoint — GET panel-config.json (no credential at all)
 //   lib/api.ts       request()   — every fetch*/post*/put* and *Query queryFn
-//                    exportUrl   — a download link
 //   lib/live.ts      openLive    — POST live-grant (requestLiveGrant), then new EventSource
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
@@ -135,10 +138,6 @@ describe("no client request carries the token in a URL", () => {
       await settle()
       live.close()
       assertClean(token)
-      // The download link: no credential in it at all.
-      const link = api.exportUrl("r1", "json")
-      expect(link).not.toContain("token=")
-      expect(link).not.toContain(token)
     })
 
     it(`the devtools panel, under ${name}`, async () => {
@@ -183,8 +182,9 @@ function sources(dir: string): string[] {
 }
 
 /** The one exempt site: adoptTokenFromLocation in lib/api.ts, its doc
- * comment and its body — the client reading its own page's address
- * (?token= / #token=) and stripping it, never a request. */
+ * comment and its body — the fragment reader: the client reading its
+ * own page's `#token=` (and stripping a `?token=` unread), never a
+ * request. */
 function exemptLines(file: string, text: string): Set<number> {
   const out = new Set<number>()
   if (relative(SRC, file) !== join("lib", "api.ts")) return out
@@ -217,5 +217,54 @@ describe("no client source spells token= outside adoptTokenFromLocation", () => 
     expect(hits).toEqual([])
     // The exemption is real: the fragment reader is where it says.
     expect(exempt).toBeGreaterThan(0)
+  })
+})
+
+/** A "token" search-parameter key, in any form a URL is built with:
+ * .set("token", …) / .append("token", …) on search params, and a
+ * URLSearchParams literal ({ token: … } or [["token", …]]). */
+const TOKEN_KEY = [
+  /\.(set|append)\(\s*["'`]token["'`]/,
+  /URLSearchParams\(\s*\{[^}]*\btoken\s*:/,
+  /URLSearchParams\(\s*\[[^\]]*\[\s*["'`]token["'`]/,
+]
+
+describe("no client source sets a token search parameter", () => {
+  it("no .set/.append(\"token\", …) and no URLSearchParams literal with a token key", () => {
+    const hits: string[] = []
+    for (const f of sources(SRC)) {
+      readFileSync(f, "utf8")
+        .split("\n")
+        .forEach((line, i) => {
+          if (TOKEN_KEY.some((re) => re.test(line))) hits.push(`${relative(SRC, f)}:${i + 1}: ${line.trim()}`)
+        })
+    }
+    expect(hits).toEqual([])
+  })
+
+  it("the patterns catch the forms the clients used before plan C5", () => {
+    for (const line of [
+      'if (ep.token) params.set("token", ep.token)',
+      'if (tok) url.searchParams.set("token", tok)',
+      "q.append('token', t)",
+      "new URLSearchParams({ run, token: tok })",
+      'new URLSearchParams([["token", tok]])',
+    ])
+      expect(TOKEN_KEY.some((re) => re.test(line)), line).toBe(true)
+    // Reading or stripping the page's own parameter is not setting one.
+    expect(TOKEN_KEY.some((re) => re.test('url.searchParams.delete("token")'))).toBe(false)
+  })
+})
+
+/** The raw request primitives: a file holding one is a call site. */
+const RAW = [/\bfetch\(/, /new EventSource\(/, /\bsendBeacon\b/, /\bXMLHttpRequest\b/]
+
+describe("the call sites above are every raw request site", () => {
+  it("the files with fetch(, new EventSource(, sendBeacon or XMLHttpRequest are exactly the enumerated four", () => {
+    const found = sources(SRC)
+      .filter((f) => RAW.some((re) => re.test(readFileSync(f, "utf8"))))
+      .map((f) => relative(SRC, f).split("\\").join("/"))
+      .sort()
+    expect(found).toEqual(["lib/api.ts", "lib/live.ts", "panel/client.ts", "panel/config.ts"])
   })
 })

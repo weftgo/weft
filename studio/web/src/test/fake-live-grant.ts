@@ -25,9 +25,20 @@ export const grantLedger: { sig: string; bearer: string; stream: string; exp: nu
 export function resetGrants() {
   minted.clear()
   grantLedger.length = 0
+  serverSkewMs = 0
+}
+
+/** The fake server's clock minus the page's (ms): a test sets it to
+ * play a client clock that runs behind (positive) or ahead (negative).
+ * The fake's own checks stay on the page's clock — only what the
+ * answer says (exp, Date) is skewed. */
+let serverSkewMs = 0
+export function setServerSkew(ms: number) {
+  serverSkewMs = ms
 }
 
 const SELECTORS = ["run", "session", "public_id", "agent"] as const
+const KINDS = ["event", "delta", "messages", "run"]
 
 /** The canonical stream a query names, or an error message. */
 function streamOf(q: URLSearchParams): { stream: string; sel: string; value: string } | { error: string } {
@@ -36,9 +47,14 @@ function streamOf(q: URLSearchParams): { stream: string; sel: string; value: str
   const sel = named[0]
   const value = q.get(sel) ?? ""
   if (!value || q.getAll(sel).length !== 1) return { error: `${sel} must name one id` }
-  const raw = q.has("kinds") ? (q.get("kinds") ?? "") : "event,run"
-  const kinds = [...new Set(raw.split(",").filter(Boolean))].sort()
-  if (!kinds.length) return { error: "kinds must name at least one kind" }
+  // live.go's liveKinds: omitted or empty is event,run; names trimmed,
+  // a trailing comma allowed, anything outside the four a 400.
+  const raw = q.get("kinds") || "event,run"
+  const names = raw.split(",").map((k) => k.trim()).filter(Boolean)
+  const bad = names.find((k) => !KINDS.includes(k))
+  if (bad !== undefined) return { error: `kind "${bad}" is not one of event, delta, messages, run` }
+  const kinds = [...new Set(names)].sort()
+  if (!kinds.length) return { error: "kinds must name at least one of event, delta, messages, run" }
   return { stream: JSON.stringify([sel, value, kinds.join(",")]), sel, value }
 }
 
@@ -89,19 +105,29 @@ export function answerLiveGrant(url: URL, bearer: string, body: string | undefin
   let exp = now + GRANT_TTL_MS
   const claims = panelClaims(bearer)
   if (claims) {
+    // The wall (auth.go): an expired panel token is a 401 before any
+    // route. (Whether a run or session lies inside the token's public
+    // id needs the database; the fake does not check it.)
+    const tokExp = claims.exp ? Date.parse(claims.exp) : NaN
+    if (!Number.isFinite(tokExp) || tokExp <= now) return refuse(401, "unauthorized", "bad or expired token")
     if (s.sel === "agent") return refuse(403, "forbidden", "a panel token does not read an agent's stream")
     if (s.sel === "public_id" && s.value !== claims.public_id)
       return refuse(403, "forbidden", "outside the panel token's public id")
-    // The fake does not wall panel tokens (the suites mint them with a
-    // past exp): a token expiry still ahead caps the grant, as the
-    // server's does.
-    const tokExp = claims.exp ? Date.parse(claims.exp) : NaN
-    if (Number.isFinite(tokExp) && tokExp > now) exp = Math.min(exp, tokExp)
+    // The token's expiry caps the grant, as the server's does.
+    exp = Math.min(exp, tokExp)
   }
   const sig = `weft_lg.fake${++counter}.${btoa(s.stream).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_")}`
   minted.set(sig, { stream: s.stream, exp, bearer })
   grantLedger.push({ sig, bearer, stream: s.stream, exp })
-  return reply(200, { sig, exp: new Date(exp).toISOString() }, { "Cache-Control": "no-store" })
+  // The Date header is how the client turns exp into a deadline on its
+  // own clock (lib/live's grantDeadline); serverSkewMs plays a server
+  // whose clock differs from the page's.
+  const serverNow = now + serverSkewMs
+  return reply(
+    200,
+    { sig, exp: new Date(exp + serverSkewMs).toISOString() },
+    { "Cache-Control": "no-store", Date: new Date(serverNow).toUTCString() }
+  )
 }
 
 /** checkLiveURL is /api/live's door for a URL an EventSource opened:

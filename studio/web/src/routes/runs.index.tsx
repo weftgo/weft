@@ -172,6 +172,10 @@ function RunsPage() {
   // Pages accumulate through the next_before cursor; interrupted and
   // failed rows ride along with everything else (A1). A ?before= in
   // the URL is the first page's cursor.
+  const [follow, setFollow] = useState(false)
+  // A grant refused for good (a panel token is never granted an agent's
+  // stream, plan C5): following polls the list instead, and says so.
+  const [liveRefused, setLiveRefused] = useState(false)
   const page = useInfiniteQuery({
     // Its own key: runsQuery (the ⌘K palette) caches a plain RunsPage
     // under ["runs", filters]; sharing it would hand this observer a
@@ -184,6 +188,7 @@ function RunsPage() {
     // The exact cursor (next_before + next_before_id); one that does
     // not move ends the list (never a page loop).
     getNextPageParam: (last, _all, lastParam) => nextCursor(last, lastParam),
+    refetchInterval: follow && liveRefused ? 5_000 : false,
   })
   const runs = page.data?.pages.flatMap((p) => p.runs) ?? []
   const total = page.data?.pages[0]?.total ?? 0
@@ -194,7 +199,6 @@ function RunsPage() {
   // selector shape — a follow toggle subscribes to that agent's run
   // frames and refreshes the list as runs start and finish.
   const { has } = useCapabilities()
-  const [follow, setFollow] = useState(false)
   const agentKey = search.agent ?? ""
   const liveCapable = has("live")
   useEffect(() => {
@@ -236,6 +240,7 @@ function RunsPage() {
         if (!f.run.parent_run_id || filters.all || filters.parent) refetch()
       },
       onOverflow: refetch,
+      onRefused: () => setLiveRefused(true),
     })
     return () => {
       refetch.cancel()
@@ -412,6 +417,11 @@ function RunsPage() {
             <Radio data-slot="icon" className={follow ? "animate-pulse" : ""} />
             {follow ? "following" : "follow"}
           </Button>
+        ) : null}
+        {follow && liveRefused ? (
+          <span className="font-mono text-[11px] text-faint">
+            streaming needs the server token · polling
+          </span>
         ) : null}
         <Select
           value={search.status ?? "all"}

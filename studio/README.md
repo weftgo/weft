@@ -127,10 +127,12 @@ token travels in the `Authorization` header, and each live stream is
 opened with a grant (`POST /api/live-grant`, the bearer in the header;
 the stream URL carries only the `sig`). The browser's own reconnect is
 left to resume with `Last-Event-ID` while the grant lasts; one after
-its 60 s gets a new grant and a fresh connection (the panel refetches
-what it lists). A panel token's stream that ends with `event: expired`
-is reopened only when the host has handed over a fresh token; else the
-live dot goes out, history stays, nothing reaches the console.
+its 60 s, or one Studio refused (a restarted Studio's new grant key),
+gets one new grant and a fresh connection (the panel refetches what it
+lists). A panel token's stream that ends with `event: expired` is not
+asked again: the live dot goes out, history stays, nothing reaches the
+console — a new token is a new `data-token`, and the panel restarts
+its connection on it.
 `Alt+W` toggles (Q4), `?` lists keys, `r` flips raw. Setups B/C add
 `data-endpoint` and `data-token` (a dev token, or a panel token your
 backend mints per page via `POST /api/panel-tokens`). A single-page app
@@ -399,13 +401,20 @@ token's does not (nor setup A's). After `expired`, reopen only with a
 bearer that is still valid — a new panel token, then a new grant.
 Both clients do exactly this (`lib/live.ts`'s `openLive` for the UI,
 `openPanelLive` for the panel): a grant before every connection, the
-browser's own `Last-Event-ID` reconnect kept inside the grant's 60 s,
-a new grant (and a fresh connection, refetched) after it or after a
-refused stream, and after `expired` a new grant only for a fresh
-bearer. A fresh connection carries no resume cursor — the header is the
-only way `Last-Event-ID` is read — so the clients refetch pages
-instead. The UI's export link carries no token: it opens as is in
-setup A.
+browser's own `Last-Event-ID` reconnect kept inside the grant's 60 s —
+measured on the page's clock from the answer's `Date` header, so a
+skewed client clock neither spends every grant at once nor trusts a
+spent one — a new grant (and a fresh connection, refetched) after it or
+after a refused stream, on the backoff when it keeps failing. After
+`expired` the UI asks again only with a fresh bearer (a pasted token);
+the panel stops. A grant refused 403 (a panel token asking an agent's
+stream: the live page, the runs list's follow) is asked once; the page
+says "streaming needs the server token · polling" and polls. A fresh
+connection carries no resume cursor — the header is the only way
+`Last-Event-ID` is read — so the clients refetch pages instead, the
+run page's tail on its first open too. The UI adopts a token from the
+link's `#token=` fragment only; a `?token=` in the address is stripped,
+never kept.
 The `#token=` fragment `weft open` and `weft studio --open` hand the
 browser never reaches the server; the UI reads it. OTLP
 ingest is `POST /v1/traces` and `/v1/logs` (protobuf and JSON, gzip,

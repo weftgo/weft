@@ -11,9 +11,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "./api"
-import { freshBearer, openLive, panelTokenExp, throttle } from "./live"
+import { freshBearer, grantDeadline, LIVE_GRANT_TTL_MS, openLive, panelTokenExp, throttle } from "./live"
 import { FakeEventSource } from "@/test/fake-event-source"
-import { FakeStudio } from "@/test/fake-studio"
+import { setServerSkew } from "@/test/fake-live-grant"
+import { FakeStudio, apiError } from "@/test/fake-studio"
 
 const record = (pos: number, kind = "event") => ({
   run_id: "r1",
@@ -82,6 +83,91 @@ describe("openLive", () => {
     live.close()
   })
 
+  it("the browser's own reconnect inside the grant carries the newest frame id as Last-Event-ID", async () => {
+    const live = openLive({ selector: { run: "r1" } })
+    await flush()
+    const es = FakeEventSource.nth(0)
+    es.connect()
+    es.emit("record", record(0), "41")
+    es.emit("record", record(1)) // a backfilled frame: no id
+    es.emit("record", record(2), "42")
+    vi.advanceTimersByTime(20_000)
+    es.dropRetrying()
+    es.retry()
+    expect(es.resumedWith).toEqual(["42"])
+    expect(FakeEventSource.instances).toHaveLength(1)
+    live.close()
+  })
+
+  it("a 403 grant (a panel token asking an agent's stream) is asked once, then refused for good", async () => {
+    const tok = panelToken(Date.now() + 3600_000)
+    setStudioToken(tok)
+    studio.requireToken(tok)
+    const onRefused = vi.fn()
+    const onOverflow = vi.fn()
+    const live = openLive({ selector: { agent: "orders" }, kinds: ["run"], onRefused, onOverflow })
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    expect(studio.calls("POST live-grant")).toHaveLength(1)
+    expect(FakeEventSource.instances).toHaveLength(0)
+    expect(onRefused).toHaveBeenCalledTimes(1)
+    expect(onOverflow).toHaveBeenCalledTimes(1) // lost: the caller's poll is the tail
+    expect(live.refused()).toBe(true)
+    expect(live.overflowed()).toBe(true)
+    live.close()
+  })
+
+  it("another refused grant (401, 5xx) keeps the backoff: it may pass on a later attempt", async () => {
+    studio.on("POST live-grant", () => apiError(503, "unavailable", "starting"))
+    const onRefused = vi.fn()
+    const live = openLive({ selector: { run: "r1" }, onRefused })
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    expect(studio.calls("POST live-grant").length).toBe(7) // the first, then six backoff steps
+    expect(onRefused).not.toHaveBeenCalled()
+    expect(live.refused()).toBe(false)
+    live.close()
+  })
+
+  for (const [name, skew] of [
+    ["behind", 120_000],
+    ["ahead", -120_000],
+  ] as const) {
+    it(`a page clock 120 s ${name} of Studio's: no reconnect loop, the backoff applies`, async () => {
+      setServerSkew(skew)
+      const live = openLive({ selector: { run: "r1" } })
+      await flush()
+      const es = FakeEventSource.nth(0)
+      es.connect()
+      // A drop at 10 s is inside the grant on the page's clock too:
+      // left to the browser.
+      vi.advanceTimersByTime(10_000)
+      es.dropRetrying()
+      await flush()
+      expect(studio.calls("POST live-grant")).toHaveLength(1)
+      expect(es.closedByClient).toBe(false)
+      es.retry()
+      // A server that accepts and drops at once, after the grant: one
+      // immediate reconnect, then the backoff — never a burst.
+      vi.advanceTimersByTime(61_000)
+      es.dropRetrying()
+      await flush()
+      expect(studio.calls("POST live-grant")).toHaveLength(2)
+      for (let i = 0; i < 5; i++) {
+        FakeEventSource.instances.at(-1)!.dropRetrying()
+        await flush()
+      }
+      expect(studio.calls("POST live-grant")).toHaveLength(2)
+      // That one never opened and its grant runs out too: the second
+      // reconnect waits out the backoff (2 s), it is not immediate.
+      vi.advanceTimersByTime(61_000)
+      FakeEventSource.instances.at(-1)!.dropRetrying()
+      await flush()
+      expect(studio.calls("POST live-grant")).toHaveLength(2)
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(studio.calls("POST live-grant")).toHaveLength(3)
+      live.close()
+    })
+  }
+
   it("dedups record frames on (run, kind, pos)", async () => {
     const seen: number[] = []
     const live = openLive({ selector: { run: "r1" }, onRecord: (r) => seen.push(r.pos) })
@@ -111,6 +197,7 @@ describe("openLive", () => {
     expect(onOverflow).toHaveBeenCalledTimes(1) // lost: refetch
     vi.advanceTimersByTime(3000) // the browser's retry delay, well inside 60 s
     es.retry() // the same sig, still good
+    expect(es.resumedWith).toEqual([""]) // nothing with an id seen yet: no cursor
     expect(live.overflowed()).toBe(false)
     expect(onOverflow).toHaveBeenCalledTimes(2) // back: refetch what the gap hid
     expect(studio.calls("POST live-grant")).toHaveLength(1)
@@ -265,6 +352,24 @@ describe("openLive", () => {
     live.close()
     await flush()
     expect(FakeEventSource.instances).toHaveLength(0)
+  })
+})
+
+describe("grantDeadline", () => {
+  it("is the server's lifetime on the page's clock, less a second, clamped to the TTL", () => {
+    const now = 1_000_000_000_000
+    const at = (ms: number) => new Date(ms).toISOString()
+    const date = (ms: number) => new Date(ms).toUTCString()
+    // A server 120 s behind or ahead: the same 59 s from the page's now.
+    expect(grantDeadline(at(now - 120_000 + 60_000), date(now - 120_000), now)).toBe(now + 59_000)
+    expect(grantDeadline(at(now + 120_000 + 60_000), date(now + 120_000), now)).toBe(now + 59_000)
+    // A panel token's shorter grant stays short; never past the TTL, never negative.
+    expect(grantDeadline(at(now + 20_000), date(now), now)).toBe(now + 19_000)
+    expect(grantDeadline(at(now + 3600_000), date(now), now)).toBe(now + LIVE_GRANT_TTL_MS)
+    expect(grantDeadline(at(now - 5000), date(now), now)).toBe(now)
+    // No Date header (or no exp): the full TTL.
+    expect(grantDeadline(at(now + 20_000), null, now)).toBe(now + LIVE_GRANT_TTL_MS)
+    expect(grantDeadline(undefined, date(now), now)).toBe(now + LIVE_GRANT_TTL_MS)
   })
 })
 

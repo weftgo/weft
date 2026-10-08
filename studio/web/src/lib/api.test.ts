@@ -8,7 +8,6 @@ import {
   adoptTokenFromLocation,
   ApiError,
   asTranscript,
-  exportUrl,
   fetchRuns,
   fetchStep,
   isRequestRow,
@@ -34,11 +33,21 @@ describe("the token (S4.6, setup B)", () => {
 
   // The studio binary prints a dev token and serves the UI open: the
   // only way in used to be typing localStorage.setItem in the console.
-  it("adopts ?token= from the page URL and strips it", () => {
+  // A token in the query already reached Studio in a URL when the page
+  // loaded (plan C5): it is stripped from the address bar, never kept.
+  it("strips ?token= from the page URL without adopting it", () => {
     window.history.replaceState(null, "", "/runs?token=dev-secret&agent=orders")
-    expect(adoptTokenFromLocation()).toBe(true)
-    expect(studioToken()).toBe("dev-secret")
+    expect(adoptTokenFromLocation()).toBe(false)
+    expect(studioToken()).toBe("")
     expect(window.location.search).toBe("?agent=orders")
+  })
+
+  it("adopts the fragment's token and strips both forms when a link carries both", () => {
+    window.history.replaceState(null, "", "/runs?token=query-secret&agent=a#token=frag-secret&t=1")
+    expect(adoptTokenFromLocation()).toBe(true)
+    expect(studioToken()).toBe("frag-secret")
+    expect(window.location.search).toBe("?agent=a")
+    expect(window.location.hash).toBe("#t=1")
   })
 
   it("adopts #token= (never sent to the server) and strips it", () => {
@@ -106,31 +115,6 @@ describe("requests under the mount and the wall", () => {
     expect(runsSearch({ playground: true, public_id: "pub_1", limit: 500 })).toBe(
       "?public_id=pub_1&playground=true&limit=500"
     )
-  })
-})
-
-describe("exportUrl", () => {
-  afterEach(() => {
-    setStudioToken("")
-    document.querySelector("base")?.remove()
-  })
-
-  it("links a run's export under the mount, the id encoded, never a token (plan C5)", () => {
-    const base = document.createElement("base")
-    base.href = "/studio/"
-    document.head.appendChild(base)
-    const plain = new URL(exportUrl("r_1/1/c_sub", "wefttest"))
-    expect(plain.pathname).toBe("/studio/api/runs/r_1%2F1%2Fc_sub/export")
-    expect(plain.searchParams.get("format")).toBe("wefttest")
-    expect(plain.searchParams.has("token")).toBe(false)
-
-    // Studio refuses a token in a URL on every route: the link carries
-    // none, whatever the stored token.
-    setStudioToken("tok")
-    const walled = new URL(exportUrl("r_1", "jsonl"))
-    expect(walled.searchParams.get("format")).toBe("jsonl")
-    expect(walled.searchParams.has("token")).toBe(false)
-    expect(walled.toString()).not.toContain("tok")
   })
 })
 

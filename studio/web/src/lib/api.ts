@@ -510,39 +510,42 @@ export function setStudioToken(tok: string) {
 }
 
 /**
- * adoptTokenFromLocation takes a token handed over in the page URL —
- * `?token=…` or `#token=…` (the fragment never reaches a server or a
- * log) — stores it, and strips it from the address bar so it is not
+ * adoptTokenFromLocation takes a token handed over in the page URL's
+ * fragment — `#token=…`, which never reaches a server or a log —
+ * stores it, and strips it from the address bar so it is not
  * bookmarked or shared. This is how the reader of a token-walled
  * Studio (setup B's `weft studio` prints a dev token) gets in with
- * one link; the shell's token prompt is the other way. Reports whether
- * a token was adopted.
+ * one link; the shell's token prompt is the other way. A token in the
+ * query (`?token=…`) is not adopted — loading that page already sent it
+ * to Studio in a URL (plan C5) — only stripped from the address bar.
+ * Reports whether a token was adopted.
  */
 export function adoptTokenFromLocation(): boolean {
   let tok = ""
   try {
     const url = new URL(window.location.href)
-    const fromQuery = url.searchParams.get("token")
-    if (fromQuery) {
-      tok = fromQuery
+    let strip = false
+    if (url.searchParams.has("token")) {
       url.searchParams.delete("token")
+      strip = true
     }
     if (url.hash.length > 1) {
       const frag = new URLSearchParams(url.hash.slice(1))
-      const fromHash = frag.get("token")
-      if (fromHash) {
-        tok = tok || fromHash
+      tok = frag.get("token") ?? ""
+      if (frag.has("token")) {
         frag.delete("token")
         const rest = frag.toString()
         url.hash = rest ? `#${rest}` : ""
+        strip = true
       }
     }
+    if (strip)
+      window.history.replaceState(
+        window.history.state,
+        "",
+        url.pathname + url.search + url.hash
+      )
     if (!tok) return false
-    window.history.replaceState(
-      window.history.state,
-      "",
-      url.pathname + url.search + url.hash
-    )
   } catch {
     return false
   }
@@ -1101,24 +1104,8 @@ export function stepQuery(runId: string, n: number) {
   })
 }
 
-/** The formats GET /api/runs/{id}/export serves (capability "export"). */
-export type ExportFormat = "json" | "jsonl" | "otlp" | "wefttest"
-
-/**
- * exportUrl is the download link of a run's export: json (one
- * document), jsonl (one record per line), otlp (OTLP/JSON logs and
- * traces, re-ingestable) or wefttest (replay fixtures, zipped). The
- * link carries no credential (plan C5: no token in a URL — Studio
- * refuses one on every route): it opens as is in setup A; a
- * token-walled Studio's export is read with request()'s bearer header.
- * A read-scoped panel token's json and jsonl hide the request block;
- * its otlp and wefttest are 403 with badge "hidden".
- */
-export function exportUrl(runId: string, format: ExportFormat): string {
-  const url = new URL(`runs/${encodeURIComponent(runId)}/export`, apiBase())
-  url.searchParams.set("format", format)
-  return url.toString()
-}
+// A run's export (GET /api/runs/{id}/export, capability "export") has no
+// UI caller: a walled export is fetched through request() and saved as a blob when one needs it.
 
 /** One app log record of a run (GET /api/runs/{id}/logs): a non-weft
  * log line the app emitted under one of the run's spans. severity is

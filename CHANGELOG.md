@@ -67,7 +67,9 @@ module, ADR 0005).
 - **Both web clients request a live grant** (plan C5.2): the Studio UI
   and the devtools panel open every live stream with `POST
   /api/live-grant` (bearer in the header) and a `sig`, and put no
-  token in any URL — the UI's export link included.
+  token in any URL; the UI adopts a link's token from its `#token=`
+  fragment only (a `?token=` is stripped, not kept) and drops the
+  unused `exportUrl`.
 
 ## 0.11.0 — 2026-10-08
 

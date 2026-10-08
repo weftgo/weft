@@ -36,6 +36,12 @@ export class FakeEventSource {
 
   /** Why the server refused this URL (a 401), or null. */
   refused: string | null
+  /** The id of the newest frame that carried one: what the browser
+   * sends as Last-Event-ID when it reconnects by itself. */
+  lastEventId = ""
+  /** The Last-Event-ID header each of the browser's own reconnects
+   * (retry()) sent, oldest first. */
+  resumedWith: string[] = []
 
   constructor(readonly url: string) {
     FakeEventSource.instances.push(this)
@@ -63,6 +69,7 @@ export class FakeEventSource {
 
   /** One named frame; id becomes the frame's lastEventId. */
   emit(name: string, data: unknown, id = "") {
+    if (id) this.lastEventId = id
     const e = { data: JSON.stringify(data), lastEventId: id } as MessageEvent
     for (const fn of this.listeners.get(name) ?? []) fn(e)
   }
@@ -77,6 +84,7 @@ export class FakeEventSource {
    * same sig) knocks again — open while the grant lasts, refused (CLOSED)
    * once it is spent. */
   retry() {
+    this.resumedWith.push(this.lastEventId)
     if (checkLiveURL(this.url)) this.fail()
     else this.connect()
   }

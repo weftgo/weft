@@ -77,6 +77,9 @@ export function LiveRuns({
   onStale: () => void
 }) {
   const [frames, setFrames] = useState<Record<string, RunRow>>({})
+  // A grant refused for good (a panel token is never granted an agent's
+  // stream, plan C5): the rows ride the list's 5 s poll, and say so.
+  const [refused, setRefused] = useState(false)
   const agents = useMemo(
     () => Array.from(new Set(runs.map((r) => r.agent).filter(Boolean))).sort(),
     [runs]
@@ -102,6 +105,7 @@ export function LiveRuns({
             stale()
         },
         onOverflow: stale,
+        onRefused: () => setRefused(true),
       })
     )
     return () => {
@@ -118,6 +122,11 @@ export function LiveRuns({
           row={newest(r, frames[r.id] as RunRow | undefined)}
         />
       ))}
+      {refused ? (
+        <p className="font-mono text-[11px] text-faint">
+          streaming needs the server token · polling
+        </p>
+      ) : null}
       {agents.length > streamed.length ? (
         <p className="font-mono text-[11px] text-faint">
           streaming {streamed.length} of {agents.length} agents live (

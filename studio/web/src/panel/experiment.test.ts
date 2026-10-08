@@ -497,7 +497,7 @@ describe("the approval controls (P2-16)", () => {
 
   it("a read-scoped panel token is offered no write verb; a playground one is", async () => {
     const claims = (scope: string) =>
-      `weft_pt.${btoa(JSON.stringify({ public_id: "pub_orders", scope, exp: T0 })).replace(/=+$/, "")}.c2ln`
+      `weft_pt.${btoa(JSON.stringify({ public_id: "pub_orders", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.c2ln`
     expect(tokenScope(claims("read"))).toBe("read")
     expect(tokenScope(claims("playground"))).toBe("playground")
     expect(tokenScope("dev_token")).toBe("")

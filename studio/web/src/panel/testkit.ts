@@ -208,6 +208,12 @@ export class FakeEventSource {
   /** Why the server refused this URL (a 401: no or a spent grant, a
    * ?token=), or null. A refused stream errors CLOSED on its own. */
   refused: string | null
+  /** The newest frame id: what the browser sends as Last-Event-ID on
+   * its own reconnect. */
+  lastEventId = ""
+  /** The Last-Event-ID each of the browser's own reconnects (retry())
+   * sent, oldest first. */
+  resumedWith: string[] = []
   constructor(url: string) {
     this.url = url
     FakeEventSource.instances.push(this)
@@ -223,6 +229,7 @@ export class FakeEventSource {
   }
   /** emitRaw delivers the data string as the wire carried it. */
   emitRaw(type: string, data: string, id = "1") {
+    if (id) this.lastEventId = id
     this.listeners.get(type)?.forEach((cb) => cb({ data, lastEventId: id }))
   }
   /** opened: the connection is up. */
@@ -244,6 +251,7 @@ export class FakeEventSource {
    * sig) knocks again — open while the grant lasts, refused once it is
    * spent. */
   retry() {
+    this.resumedWith.push(this.lastEventId)
     if (checkLiveURL(this.url)) this.fail()
     else this.opened()
   }

@@ -21,6 +21,7 @@ import {
   text,
   ATTRS,
 } from "./testkit"
+import { setServerSkew } from "../test/fake-live-grant"
 
 beforeEach(setup)
 afterEach(teardown)
@@ -105,10 +106,13 @@ describe("the grant's lifetime", () => {
     await flush()
     const es = FakeEventSource.last("run=r1")!
     es.opened()
+    es.emit("record", { run_id: "r1", kind: "event", pos: 0, time: "2026-10-01T09:00:00Z", event: { type: "step_start", run_id: "r1", index: 0 } }, "17")
     vi.advanceTimersByTime(30_000)
     es.fail(FakeEventSource.CONNECTING)
     vi.advanceTimersByTime(3000)
     es.retry()
+    // The browser's own reconnect, with the same sig and the cursor.
+    expect(es.resumedWith).toEqual(["17"])
     expect(FakeEventSource.instances).toHaveLength(1)
     expect(studio.posts("live-grant")).toHaveLength(1)
     expect(onOpen.mock.calls).toEqual([[false], [true]])
@@ -190,26 +194,75 @@ describe("the grant's lifetime", () => {
     for (const spy of quiet) expect(spy).not.toHaveBeenCalled()
   })
 
-  it("an expired frame with a fresh bearer from the host asks for a new grant with it and reopens", async () => {
+  it("a retry refused before the grant is spent (a restarted Studio's new key) gets one new grant, then closed", async () => {
     const studio = fakeStudio({})
-    const ep = { base: EP, token: panelToken("read", Date.now() + 30_000) }
     const onOpen = vi.fn()
     const onOverflow = vi.fn()
-    const h = openPanelLive(ep, { selector: { public_id: "pub_orders" }, kinds: ["run"], onOpen, onOverflow })
+    const h = openPanelLive({ base: EP, token: "" }, { selector: { run: "r1" }, onOpen, onOverflow })
     await flush()
-    const es = FakeEventSource.last("public_id=")!
-    es.opened()
-    vi.advanceTimersByTime(30_000)
-    ep.token = panelToken("read", Date.now() + 3600_000) // a new token, handed over
-    es.expire()
+    const first = FakeEventSource.last("run=r1")!
+    first.opened()
+    vi.advanceTimersByTime(5000)
+    first.fail(FakeEventSource.CLOSED) // the old sig refused: the key changed
     await flush()
-    const grants = studio.posts("live-grant")
-    expect(grants).toHaveLength(2)
-    expect(grants[1].headers.Authorization).toBe(`Bearer ${ep.token}`)
-    FakeEventSource.instances[1].opened()
+    expect(studio.posts("live-grant")).toHaveLength(2) // at once, not after 10 s of silence
+    const second = FakeEventSource.instances[1]
+    second.opened()
     expect(onOpen.mock.calls).toEqual([[false], [true]])
-    expect(onOverflow).not.toHaveBeenCalled()
+    // Open again: the allowance is back.
+    second.fail(FakeEventSource.CLOSED)
+    await flush()
+    expect(studio.posts("live-grant")).toHaveLength(3)
+    // Refused straight after the fresh grant, before anything opened:
+    // closed, no loop.
+    FakeEventSource.instances[2].fail(FakeEventSource.CLOSED)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(studio.posts("live-grant")).toHaveLength(3)
+    expect(onOverflow.mock.calls).toEqual([["closed"]])
     h.close()
+  })
+
+  for (const [name, skew] of [
+    ["behind", 120_000],
+    ["ahead", -120_000],
+  ] as const) {
+    it(`a page clock 120 s ${name} of Studio's: the grant lasts its 60 s on the page's clock, no reconnect loop`, async () => {
+      setServerSkew(skew)
+      const studio = fakeStudio({})
+      const onOverflow = vi.fn()
+      const h = openPanelLive({ base: EP, token: "dev_server_tok" }, { selector: { run: "r1" }, onOverflow })
+      await flush()
+      const es = FakeEventSource.last("run=r1")!
+      es.opened()
+      es.emit("record", { run_id: "r1", kind: "event", pos: 0, time: "2026-10-01T09:00:00Z", event: { type: "step_start", run_id: "r1", index: 0 } }, "4")
+      // A drop at 10 s: well inside the grant on any clock — the
+      // browser resumes it, nothing is asked again.
+      vi.advanceTimersByTime(10_000)
+      es.fail(FakeEventSource.CONNECTING)
+      await flush()
+      expect(studio.posts("live-grant")).toHaveLength(1)
+      es.retry()
+      expect(es.resumedWith).toEqual(["4"])
+      // Drops past 60 s: one new grant per spent sig, never a burst.
+      for (let i = 0; i < 5; i++) {
+        vi.advanceTimersByTime(61_000)
+        FakeEventSource.instances.at(-1)!.fail(FakeEventSource.CONNECTING)
+        await flush()
+        FakeEventSource.instances.at(-1)!.opened()
+      }
+      expect(studio.posts("live-grant")).toHaveLength(6)
+      expect(onOverflow).not.toHaveBeenCalled()
+      h.close()
+    })
+  }
+
+  it("an expired panel token's grant is refused (401): closed, no stream", async () => {
+    fakeStudio({})
+    const onOverflow = vi.fn()
+    openPanelLive({ base: EP, token: panelToken("read", Date.now() - 1) }, { selector: { public_id: "pub_orders" }, onOverflow })
+    await flush()
+    expect(FakeEventSource.instances).toHaveLength(0)
+    expect(onOverflow.mock.calls).toEqual([["closed"]])
   })
 
   it("close() before the grant answers opens nothing", async () => {

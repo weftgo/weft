@@ -5,7 +5,7 @@
 // kinds set, 60 s, ?token= refused, and a panel token never granted an
 // agent's stream (403) — so under a panel token the live page stays on
 // its 5 s poll, as the server would have it.
-import { cleanup, configure, screen, waitFor } from "@testing-library/react"
+import { cleanup, configure, fireEvent, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
@@ -99,7 +99,7 @@ describe("the run page's tail opens with a grant", () => {
 
 describe("the live page's agent streams", () => {
   for (const [name, token, panel] of SETUPS) {
-    it(name + (panel ? ": refused an agent stream (403), the poll stays" : ": open with a grant"), async () => {
+    it(name + (panel ? ": refused an agent stream (403) once, says so, the poll stays" : ": open with a grant"), async () => {
       const tok = token()
       wall(tok)
       const running = [row({ id: "r_run_1", status: "running", finished: null, agent: "orders" })]
@@ -112,8 +112,12 @@ describe("the live page's agent streams", () => {
       expect(grant.body).toEqual({ agent: "orders", kinds: "run" })
       if (panel) {
         // studio/livegrant.go: a panel token is never granted an agent
-        // selector. No stream, and no token in a URL to fall back on.
-        await new Promise((r) => setTimeout(r, 50))
+        // selector. One ask, no stream, one line saying so, and the
+        // list's 5 s poll carries on.
+        expect(await screen.findByText("streaming needs the server token · polling")).toBeTruthy()
+        const polls = studio.calls("GET runs").length
+        await waitFor(() => expect(studio.calls("GET runs").length).toBeGreaterThan(polls))
+        expect(studio.calls("POST live-grant")).toHaveLength(1)
         expect(FakeEventSource.instances).toHaveLength(0)
         return
       }
@@ -124,4 +128,31 @@ describe("the live page's agent streams", () => {
       if (tok) expect(es.url).not.toContain(tok)
     })
   }
+})
+
+describe("the runs list's follow toggle", () => {
+  it("under a panel token: one grant refused (403), the line says so, following polls the list", async () => {
+    const tok = panelToken("read")
+    wall(tok)
+    studio.on("GET runs", { total: 1, runs: [row({ id: "r_run_1", agent: "orders" })], next_before: null })
+    renderApp("/runs?agent=orders")
+    expect(await screen.findByText("r_run_1")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: /follow/ }))
+    expect(await screen.findByText("streaming needs the server token · polling")).toBeTruthy()
+    const polls = studio.calls("GET runs").length
+    await waitFor(() => expect(studio.calls("GET runs").length).toBeGreaterThan(polls))
+    expect(studio.calls("POST live-grant")).toHaveLength(1)
+    expect(FakeEventSource.instances).toHaveLength(0)
+  })
+
+  it("under the server token it streams, and says nothing", async () => {
+    wall("dev-secret")
+    studio.on("GET runs", { total: 1, runs: [row({ id: "r_run_1", agent: "orders" })], next_before: null })
+    renderApp("/runs?agent=orders")
+    expect(await screen.findByText("r_run_1")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: /follow/ }))
+    await waitFor(() => expect(FakeEventSource.open()).toHaveLength(1))
+    expect(FakeEventSource.open()[0].refused).toBeNull()
+    expect(screen.queryByText("streaming needs the server token · polling")).toBeNull()
+  })
 })

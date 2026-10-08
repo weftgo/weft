@@ -21,7 +21,7 @@ import type {
 } from "../lib/api"
 import { asTranscript } from "../lib/api"
 import type { LiveGrant, LiveRecord, LiveRun, LiveSelector } from "../lib/live"
-import { freshBearer, grantSpent, liveStreamURL, requestLiveGrant } from "../lib/live"
+import { grantSpent, liveStreamURL, requestLiveGrant } from "../lib/live"
 
 export interface PanelEndpoint {
   /** Studio base URL, trailing slash included. */
@@ -357,9 +357,9 @@ export interface PanelLiveOptions {
    * the server's own frame (S4.5: refetch and reconnect), "closed" a
    * stream that failed for good or stayed down a whole round — the
    * caller decides whether to knock again, and how often; "expired"
-   * a panel token's stream that ended at the token's expiry with no
-   * fresh bearer to ask again with — the caller does not knock (the
-   * token would be refused), it shows no live. */
+   * a panel token's stream that ended at the token's expiry — the
+   * caller does not knock (the token would be refused), it shows no
+   * live; a new token is a new data-token, a new connection. */
   onOverflow?: (why: "overflow" | "closed" | "expired") => void
 }
 
@@ -400,6 +400,10 @@ export function openPanelLive(ep: PanelEndpoint, opts: PanelLiveOptions): PanelL
   let timer: ReturnType<typeof setTimeout> | null = null
   let es: EventSource | null = null
   let attempt = 0
+  // Fresh grants asked for since the stream was last open: one per
+  // failed open, so a stream refused straight after a new grant reports
+  // "closed" instead of looping.
+  let regrants = 0
   const seen = new Set<string>()
   const stop = () => {
     closed = true
@@ -423,10 +427,9 @@ export function openPanelLive(ep: PanelEndpoint, opts: PanelLiveOptions): PanelL
   // then opens the stream it names.
   const connect = () => {
     const n = ++attempt
-    const tok = ep.token
-    requestLiveGrant(apiUrl(ep, "live-grant"), tok, opts.selector, opts.kinds).then(
+    requestLiveGrant(apiUrl(ep, "live-grant"), ep.token, opts.selector, opts.kinds).then(
       (grant) => {
-        if (!closed && n === attempt) open(grant, tok)
+        if (!closed && n === attempt) open(grant)
       },
       () => {
         // Refused (a token gone bad) or no answer: the caller decides.
@@ -435,7 +438,7 @@ export function openPanelLive(ep: PanelEndpoint, opts: PanelLiveOptions): PanelL
     )
   }
 
-  const open = (grant: LiveGrant, tok: string) => {
+  const open = (grant: LiveGrant) => {
     let src: EventSource
     try {
       src = new EventSource(liveStreamURL(apiUrl(ep, "live"), opts.selector, opts.kinds, grant))
@@ -500,35 +503,39 @@ export function openPanelLive(ep: PanelEndpoint, opts: PanelLiveOptions): PanelL
     src.addEventListener(
       "expired",
       guarded(() => {
-        // The panel token's stream ended at its expiry (plan C5): ask
-        // again only with a fresh bearer the host handed over, else
-        // stop quietly.
-        src.close()
-        if (freshBearer(ep.token, tok)) {
-          dropped = true
-          connect()
-        } else report("expired")
+        // The panel token's stream ended at its expiry (plan C5): stop
+        // quietly. A fresh token comes as a new data-token, and the
+        // element restarts the whole connection on it.
+        report("expired")
       })
     )
     src.onopen = guarded(() => {
       if (timer) clearTimeout(timer)
       timer = null
+      regrants = 0
       const again = dropped
       dropped = false
       opts.onOpen?.(again)
     })
     src.onerror = () => {
       // EventSource retries on its own, with the sig it was opened
-      // with: while the grant lasts that resumes the stream; once it is
-      // spent the retry would be refused, so it is replaced by a new
-      // grant now. A stream that failed for good (refused), or that is
-      // still down after one round of silence (Studio gone), is closed
-      // here so the browser stops knocking — the caller hears "closed"
-      // once. A handle the panel closed itself never reports.
+      // with: while the grant lasts that resumes the stream. Once it is
+      // spent, or once a retry was refused (CLOSED: a Studio restarted
+      // with a new grant key, a clock out of step), the sig is no good,
+      // so it is replaced by one new grant now. Refused again before
+      // anything opened: the caller hears "closed". A stream still down
+      // after one round of silence (Studio gone) is closed here too, so
+      // the browser stops knocking. A handle the panel closed itself
+      // never reports.
       if (closed || es !== src) return
       dropped = true
-      if (grantSpent(grant)) {
+      if (src.readyState === EventSource.CLOSED || grantSpent(grant)) {
         src.close()
+        if (regrants >= 1) {
+          report("closed")
+          return
+        }
+        regrants++
         connect()
       }
       if (timer) return

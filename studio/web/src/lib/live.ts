@@ -27,8 +27,9 @@ export function selectorSearch(sel: LiveSelector): string {
 
 // ── The live grant (plan C5) ───────────────────────────────────────
 
-/** A live grant: the opaque, URL-safe sig and its expiry (ms since the
- * epoch, as the server stated it). */
+/** A live grant: the opaque, URL-safe sig and its expiry — a local
+ * deadline (ms on this page's clock), never the server's timestamp
+ * compared with a clock that may be skewed (grantDeadline). */
 export interface LiveGrant {
   sig: string
   exp: number
@@ -78,8 +79,22 @@ export async function requestLiveGrant(
   if (!res.ok) throw new LiveGrantError(res.status)
   const doc = (await res.json()) as { sig?: unknown; exp?: unknown } | null
   if (typeof doc?.sig !== "string" || !doc.sig) throw new LiveGrantError(res.status)
-  const exp = typeof doc.exp === "string" ? Date.parse(doc.exp) : NaN
-  return { sig: doc.sig, exp: Number.isFinite(exp) ? exp : Date.now() + LIVE_GRANT_TTL_MS }
+  return { sig: doc.sig, exp: grantDeadline(doc.exp, res.headers.get("Date")) }
+}
+
+/**
+ * grantDeadline turns the server's exp into a deadline on this page's
+ * clock: the lifetime the server meant (exp minus the answer's own Date
+ * header, less a second for the header's resolution), clamped to
+ * [0, LIVE_GRANT_TTL_MS], from now. A client clock that runs ahead or
+ * behind therefore neither spends every grant at once nor trusts a
+ * spent one. Without a readable Date header (or exp) the full TTL.
+ */
+export function grantDeadline(exp: unknown, date: string | null, now = Date.now()): number {
+  const serverExp = typeof exp === "string" ? Date.parse(exp) : NaN
+  const serverNow = date ? Date.parse(date) : NaN
+  if (!Number.isFinite(serverExp) || !Number.isFinite(serverNow)) return now + LIVE_GRANT_TTL_MS
+  return now + Math.min(LIVE_GRANT_TTL_MS, Math.max(0, serverExp - serverNow - 1000))
 }
 
 /** liveStreamURL is the stream a grant opens: GET {base}api/live with
@@ -169,6 +184,19 @@ export interface LiveHandlers {
    * client reconnects by itself; do not reopen from here.
    */
   onOverflow?: () => void
+  /**
+   * The stream is open (subscribed). again is false on the first open:
+   * whatever was published between the caller's first page read and
+   * this subscription is in neither — the caller reads the pages past
+   * what it folded. (A reopen after a loss is announced by onOverflow.)
+   */
+  onOpen?: (again: boolean) => void
+  /**
+   * The grant was refused for good (403: the token may not read this
+   * stream — a panel token asking an agent's stream). Nothing is
+   * retried; the caller says so and keeps its poll.
+   */
+  onRefused?: () => void
 }
 
 export interface LiveOptions extends LiveHandlers {
@@ -182,6 +210,8 @@ export interface LiveHandle {
   /** True while the stream is down — lost and not yet back (or given
    * up on): the caller's poll-shaped fallback is the tail meanwhile. */
   overflowed: () => boolean
+  /** True once the grant was refused for good (403): no stream comes. */
+  refused: () => boolean
 }
 
 interface RawRecordFrame {
@@ -223,6 +253,8 @@ export function openLive(opts: LiveOptions): LiveHandle {
   let timer: ReturnType<typeof setTimeout> | null = null
   let es: EventSource | null = null
   let attempt = 0 // the newest connect: an older grant answer is dropped
+  let opened = false // the stream has been open at least once
+  let refused = false
   let seen = new Set<string>()
   let older = new Set<string>()
 
@@ -254,9 +286,15 @@ export function openLive(opts: LiveOptions): LiveHandle {
       (grant) => {
         if (!closed && n === attempt) open(grant, tok)
       },
-      () => {
+      (err: unknown) => {
         if (closed || n !== attempt) return
         lost()
+        if (err instanceof LiveGrantError && err.status === 403) {
+          // Deterministic: asking again gets the same answer.
+          refused = true
+          opts.onRefused?.()
+          return
+        }
         reopenLater()
       }
     )
@@ -272,6 +310,9 @@ export function openLive(opts: LiveOptions): LiveHandle {
     src.onopen = () => {
       if (!current()) return
       failures = 0
+      const again = opened
+      opened = true
+      opts.onOpen?.(again)
       if (down) {
         // Back after a loss: frames in between were not delivered (a
         // fresh connection has no resume cursor; run frames are never
@@ -353,13 +394,18 @@ export function openLive(opts: LiveOptions): LiveHandle {
       // fresh connection has no resume cursor; onopen says refetch).
       // CLOSED: the browser will not retry (a non-200 answer — a
       // refusal, a spent sig — ends an EventSource for good), so the
-      // reconnect is ours, with a new grant, on the backoff.
+      // reconnect is ours, with a new grant, on the backoff. The
+      // immediate reconnect counts as an attempt: a second drop before
+      // anything opened waits out the backoff like any failure.
       if (src.readyState === EventSource.CLOSED) {
         src.close()
         reopenLater()
       } else if (grantSpent(grant)) {
         src.close()
-        connect()
+        if (failures === 0) {
+          failures++
+          connect()
+        } else reopenLater()
       }
     }
   }
@@ -374,6 +420,7 @@ export function openLive(opts: LiveOptions): LiveHandle {
       es?.close()
     },
     overflowed: () => down,
+    refused: () => refused,
   }
 }
 

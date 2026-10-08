@@ -201,6 +201,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    // driver lives): studio --db sqlite://path | clickhouse://user:pass@host:9000/db
 //    //    [--addr --token --manifest weft.json (or WEFT_MANIFEST)] serves UI + OTLP
 //    //    ingest on 127.0.0.1:7331; studio doctor [--url --token] checks one.
+//    //    Port policy (internal/listen): busy 7331 + a Studio on the same DB → reused
+//    //    ("studio already running at … (pid n), reusing", exit 0); anything else → the
+//    //    next free port in 7331–7340, said in one line; --addr / WEFT_STUDIO_ADDR pins
+//    //    (busy → exit 1 naming it). /api/meta's pid follows db.path's guard.
 
 // 7a. The playground (package weft/runtime): your app dials Studio out and
 //     executes experiment commands as runs of the agents you register:

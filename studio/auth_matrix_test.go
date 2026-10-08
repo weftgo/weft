@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -613,7 +614,7 @@ func TestAuthMatrix(t *testing.T) {
 		}
 	}
 
-	// api/meta's db.path and db.size (plan B5) are the server token's
+	// api/meta's db.path and db.size (plan B5), and pid (plan B2), are the server token's
 	// (setup B's dev token) — omitted, never nulled, for a read- or a
 	// playground-scoped panel token; db.kind and runtimes are
 	// everyone's (rt_test holds a command stream; the table's own
@@ -643,6 +644,7 @@ func TestAuthMatrix(t *testing.T) {
 		_ = resp.Body.Close()
 		var meta struct {
 			DB           map[string]any `json:"db"`
+			PID          *int           `json:"pid"`
 			Runtimes     int            `json:"runtimes"`
 			AuthRequired *bool          `json:"auth_required"`
 			Content      struct {
@@ -672,6 +674,10 @@ func TestAuthMatrix(t *testing.T) {
 		_, hasSize := meta.DB["size"]
 		if want := id.kind == "server"; hasPath != want || hasSize != want || meta.DB["kind"] != "sqlite" {
 			t.Errorf("GET /api/meta as %s: db = %v, want kind sqlite and path/size present = %v", id.name, meta.DB, want)
+		}
+		// pid (plan B2) follows db.path: the server token's alone.
+		if want := id.kind == "server"; (meta.PID != nil) != want || (want && *meta.PID != os.Getpid()) {
+			t.Errorf("GET /api/meta as %s: pid = %v, want present (this process's) = %v", id.name, meta.PID, want)
 		}
 		if meta.Runtimes < 1 {
 			t.Errorf("GET /api/meta as %s: runtimes = %d, want at least rt_test's stream", id.name, meta.Runtimes)

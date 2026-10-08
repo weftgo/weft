@@ -3,7 +3,7 @@
 // agent with a scripted model and two tools, and the runtime link —
 // WEFT-PLAYGROUND.md §7's P0 slice, drivable with curl.
 //
-//	go run ./runtime/examples/local -addr 127.0.0.1:7391
+//	go run ./runtime/examples/local -addr 127.0.0.1:7331
 //
 // It prints the Studio's URL, the id of the app's own run (the
 // experiment's source), and the curl line to run. The P0 acceptance
@@ -32,7 +32,7 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:7391", "the loopback address to serve Studio on")
+	addr := flag.String("addr", "127.0.0.1:7331", "the loopback address to serve Studio on")
 	flag.Parse()
 
 	ctx := context.Background()

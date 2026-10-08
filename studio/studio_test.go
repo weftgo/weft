@@ -444,6 +444,9 @@ func golden(t *testing.T, name, body string) {
 	wefttest.Golden(t, "testdata/api/"+name, []byte(pretty(t, body)))
 }
 
+// metaPIDRe finds api/meta's pid in an indented body.
+var metaPIDRe = regexp.MustCompile(`"pid": \d+`)
+
 func TestMetaGolden(t *testing.T) {
 	h := Handler(DB(fixtureDB(t)), Manifest([]byte(fixtureManifest)))
 	code, _, body := get(t, h, "/studio/api/meta")
@@ -453,9 +456,16 @@ func TestMetaGolden(t *testing.T) {
 	if !strings.Contains(body, `"db":{"kind":"sqlite"`) || !strings.Contains(body, `"interrupted_after_ms":30000`) {
 		t.Errorf("meta db kind / clock: %s", body)
 	}
+	// pid (plan B2) is this test process's: a loopback caller with no
+	// Token reads it, under db.path's rule; the golden normalizes it
+	// to 1234 (a number: the shape test compares leaf types).
+	if want := fmt.Sprintf(`"pid":%d`, os.Getpid()); !strings.Contains(body, want) {
+		t.Errorf("meta pid: %s, want %s", body, want)
+	}
 	// Not golden(): weft_version is pinned too (version.Runtime is the
 	// tag under go test; the release bump regenerates this file).
-	wefttest.Golden(t, "testdata/api/meta.golden.json", []byte(indent(t, body)))
+	wefttest.Golden(t, "testdata/api/meta.golden.json",
+		[]byte(metaPIDRe.ReplaceAllString(indent(t, body), `"pid": 1234`)))
 
 	// Capabilities are computed from the registered route groups
 	// (S4.2): the read API names none; the request record's routes

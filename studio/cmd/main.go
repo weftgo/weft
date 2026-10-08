@@ -17,6 +17,18 @@
 // the weft version (version.Runtime: the module tag this binary was
 // built from) and exits.
 //
+// The port policy (plan B2, internal/listen): 127.0.0.1:7331 is the
+// one default. When it is busy, studio asks GET /api/meta there (with
+// --token / WEFT_STUDIO_TOKEN as the bearer when set): a Studio serving
+// the same database file is reused — "studio already running at
+// http://127.0.0.1:7331 (pid 1234), reusing", exit 0, nothing opened —
+// and anything else (another program, a Studio on another database, a
+// Studio whose meta this token cannot read) moves studio to the next
+// free port in 7331–7340, said in one line before the banner, which
+// prints the real address. All ten busy is exit 1 naming the range.
+// --addr (or WEFT_STUDIO_ADDR) pins the address: busy is exit 1 with
+// the address in the error, never a probe or another port.
+//
 // `studio doctor [--url URL] [--token TOK]` checks a running Studio and
 // prints one line per check, each read from its GET /api/meta: reachable,
 // token accepted, the database's path and size, the content it stores,
@@ -43,17 +55,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/weftgo/weft/internal/doctor"
+	"github.com/weftgo/weft/internal/listen"
 	"github.com/weftgo/weft/obsdb/clickhouse"
 	"github.com/weftgo/weft/studio"
 	"github.com/weftgo/weft/version"
 )
 
-const defaultAddr = "127.0.0.1:7331"
+const defaultAddr = listen.DefaultAddr
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
@@ -75,7 +89,8 @@ func run(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("studio", flag.ContinueOnError)
 	db := fs.String("db", "",
 		"`sqlite://path` or `clickhouse://user:pass@host:9000/db` (default: $WEFT_DB or ./.weft/weft.db)")
-	addr := fs.String("addr", defaultAddr, "listen address (loopback by default)")
+	addr := fs.String("addr", "",
+		"listen `address` (default: $WEFT_STUDIO_ADDR, else "+defaultAddr+"); --addr pins; without it Studio reuses a running one on the same DB or takes the next free port in 7331–7340")
 	token := fs.String("token", "",
 		"API token (default: $WEFT_STUDIO_TOKEN, else a generated dev token printed at start)")
 	manifest := fs.String("manifest", "",
@@ -92,7 +107,26 @@ func run(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return serve(*db, *addr, *token, stdout, opts...)
+	return serve(*db, wantAddr(*addr, defaultAddr), *token, stdout, opts...)
+}
+
+// want is the address the command wants and whether it is pinned.
+type want struct {
+	addr   string
+	pinned bool
+	span   int // ports an unpinned start tries (0 = listen.DefaultSpan)
+}
+
+// wantAddr resolves the listen address: --addr, then WEFT_STUDIO_ADDR
+// (both pin it), else def — the one default, unpinned.
+func wantAddr(flagAddr, def string) want {
+	if flagAddr != "" {
+		return want{addr: flagAddr, pinned: true}
+	}
+	if env := os.Getenv("WEFT_STUDIO_ADDR"); env != "" {
+		return want{addr: env, pinned: true}
+	}
+	return want{addr: def}
 }
 
 // manifestOptions resolves --manifest (the flag, then WEFT_MANIFEST)
@@ -138,15 +172,45 @@ func runDoctor(args []string, stdout io.Writer) error {
 	return doctor.Run(context.Background(), stdout, *url, *token, os.Getenv)
 }
 
-// serve builds the server, prints where it lives, and listens until
-// the process is stopped. Split from main so the construction and the
-// banner are testable without a port.
-func serve(dbFlag, addr, tokenFlag string, stdout io.Writer, extra ...studio.Option) error {
-	srv, err := serveBoot(dbFlag, addr, tokenFlag, stdout, extra...)
+// serve applies the port policy (internal/listen, plan B2), then
+// builds the server, prints where it lives, and serves until the
+// process is stopped. A Studio already serving the same database on
+// the wanted address is reused: one line naming it, nil (exit 0), and
+// nothing opened. A busy address otherwise moves to the next free port
+// of the range with one line saying which and why — unless it is
+// pinned (--addr, WEFT_STUDIO_ADDR): then the busy address is the
+// error. The port is chosen before the database is opened, so a reuse
+// touches nothing and the banner prints the real address.
+func serve(dbFlag string, w want, tokenFlag string, stdout io.Writer, extra ...studio.Option) error {
+	dbPath, err := dbFile(dbFlag)
 	if err != nil {
 		return err
 	}
-	err = listen(httpServer(addr, srv.Handler()), stdout)
+	choice, err := listen.Choose(context.Background(), listen.Request{
+		Addr:   w.addr,
+		Pinned: w.pinned,
+		Span:   w.span,
+		DBPath: dbPath,
+		// The probe carries the token this command was given; a dev
+		// token it would generate is nobody else's.
+		Token: fixedToken(tokenFlag),
+	})
+	if err != nil {
+		return err
+	}
+	if choice.Reuse {
+		_, _ = fmt.Fprintln(stdout, choice.ReuseLine())
+		return nil
+	}
+	if choice.Note != "" {
+		_, _ = fmt.Fprintln(stdout, "studio: "+choice.Note)
+	}
+	srv, err := serveBoot(dbFlag, choice.Addr, tokenFlag, stdout, extra...)
+	if err != nil {
+		_ = choice.Listener.Close()
+		return err
+	}
+	err = serveOn(httpServer(choice.Addr, srv.Handler()), choice.Listener, stdout)
 	if cerr := srv.Close(); err == nil {
 		err = cerr
 	}
@@ -188,13 +252,13 @@ func (s *server) Close() error {
 	return err
 }
 
-// listen runs the HTTP server until SIGINT or SIGTERM — a graceful
+// serveOn runs the HTTP server on ln until SIGINT or SIGTERM — a graceful
 // stop (the audit's P2-20: a bare ListenAndServe cut SSE streams mid-
 // frame and skipped srv.Close): the listener closes at once, in-flight
 // requests get a five-second grace window (an SSE stream ends when its
 // request context cancels), and streams that outlive the window are
 // force-closed — the studio resources close after, in serve.
-func listen(httpSrv *http.Server, stdout io.Writer) error {
+func serveOn(httpSrv *http.Server, ln net.Listener, stdout io.Writer) error {
 	// Signal delivery is armed before the listener starts: a signal
 	// that lands while nobody is notified takes the process down.
 	stop := make(chan os.Signal, 1)
@@ -210,7 +274,7 @@ func listen(httpSrv *http.Server, stdout io.Writer) error {
 	httpSrv.BaseContext = func(net.Listener) context.Context { return base }
 	httpSrv.RegisterOnShutdown(cancelBase)
 	errCh := make(chan error, 1)
-	go func() { errCh <- httpSrv.ListenAndServe() }()
+	go func() { errCh <- httpSrv.Serve(ln) }()
 	select {
 	case err := <-errCh:
 		return err
@@ -313,13 +377,42 @@ func newServer(dbFlag, token string, extra ...studio.Option) (srv *server, err e
 // srvToken resolves the token: the flag, then WEFT_STUDIO_TOKEN,
 // then a generated dev token.
 func srvToken(tokenFlag string) string {
+	if tok := fixedToken(tokenFlag); tok != "" {
+		return tok
+	}
+	return studio.DevToken()
+}
+
+// fixedToken is the token the operator fixed: the flag, then
+// WEFT_STUDIO_TOKEN; "" when neither is set.
+func fixedToken(tokenFlag string) string {
 	if tokenFlag != "" {
 		return tokenFlag
 	}
-	if env := os.Getenv("WEFT_STUDIO_TOKEN"); env != "" {
-		return env
+	return os.Getenv("WEFT_STUDIO_TOKEN")
+}
+
+// dbFile is the absolute database file --db names, the one the port
+// policy compares with a running Studio's db.path: the default (the
+// local sink's $WEFT_DB or ./.weft/weft.db) and sqlite://path resolve
+// as obsdb/sqlite resolves them; ":memory:" and clickhouse:// name no
+// file ("", which never matches). A malformed --db is newServer's
+// error to report, after the port is chosen.
+func dbFile(dbFlag string) (string, error) {
+	var path string
+	switch {
+	case dbFlag == "":
+		path = os.Getenv("WEFT_DB")
+		if path == "" {
+			path = ".weft/weft.db"
+		}
+	case strings.HasPrefix(dbFlag, "sqlite://"):
+		path = strings.TrimPrefix(dbFlag, "sqlite://")
 	}
-	return studio.DevToken()
+	if path == "" || path == ":memory:" {
+		return "", nil
+	}
+	return filepath.Abs(path)
 }
 
 // dbLabel names the database for the banner. A DSN's password is

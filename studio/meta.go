@@ -57,6 +57,11 @@ type metaDoc struct {
 	// the manifest hash each agent's latest stored run recorded. Null
 	// without a manifest, and for a panel token (it reads no manifest).
 	ManifestCheck *metaManifest `json:"manifest_check"`
+	// PID is the serving process's id (plan B2: the CLI's "studio
+	// already running at … (pid 1234), reusing"). Under db.path's rule
+	// (mayReadDBPath) — loopback with no Token, or the server token —
+	// and omitted for anyone else.
+	PID int `json:"pid,omitempty"`
 }
 
 // metaDB names the database. Kind is everyone's; Path and Size only
@@ -150,6 +155,7 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 	}
 	if mayReadDBPath(s, r) {
 		doc.DB.Path, doc.DB.Size = dbFile(s.db)
+		doc.PID = os.Getpid()
 	}
 	if id.panel == nil && len(s.manifest) > 0 {
 		doc.ManifestCheck = s.manifestCheck(r.Context())
@@ -157,7 +163,7 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, doc)
 }
 
-// mayReadDBPath is the db.path/db.size rule: the server token, or no
+// mayReadDBPath is the db.path/db.size/pid rule: the server token, or no
 // Token configured and a loopback Host (setup A's guard, without the
 // AllowOrigins widening).
 func mayReadDBPath(s *Server, r *http.Request) bool {

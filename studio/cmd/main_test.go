@@ -289,20 +289,16 @@ func TestDBLabelMasksPassword(t *testing.T) {
 // nil (serve then closes the studio's resources) — the process can
 // exit on a signal at all, and the port actually closes.
 func TestListenShutsDownGracefully(t *testing.T) {
-	// A free port, proven by binding and letting go of it.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	addr := ln.Addr().String()
-	if err := ln.Close(); err != nil {
-		t.Fatal(err)
-	}
 
 	httpSrv := &http.Server{Addr: addr, Handler: http.HandlerFunc(
 		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })}
 	done := make(chan error, 1)
-	go func() { done <- listen(httpSrv, io.Discard) }()
+	go func() { done <- serveOn(httpSrv, ln, io.Discard) }()
 
 	// The server came up; then SIGTERM (to ourselves — listen's
 	// signal.Notify catches it before the default disposition).

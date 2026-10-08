@@ -49,7 +49,15 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 python app.py
 ```
 
 The dev token is printed at start (`WEFT_STUDIO_TOKEN` or `--token`
-fixes it); ingest is open on loopback; `--db sqlite://path` picks the
+fixes it); ingest is open on loopback;
+`127.0.0.1:7331` is the one default port: started again on the same
+database, the binary finds the running Studio through `/api/meta`
+(`db.path`, `pid`) and reuses it (`studio already running at … (pid
+n), reusing`, exit 0 — fix the token with `WEFT_STUDIO_TOKEN` so the
+second start can read the first's meta); anything else on the port
+moves it to the next free one in 7331–7340 with one line saying so.
+`--addr` (or `WEFT_STUDIO_ADDR`) pins: a busy pinned address is an
+error, never a fallback; `--db sqlite://path` picks the
 file, `--db clickhouse://user:pass@host:9000/db` the hosted backend
 (`obsdb/clickhouse`, the one place the driver is imported).
 

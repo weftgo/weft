@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -152,9 +153,9 @@ func TestMetaManifestCheck(t *testing.T) {
 	}
 }
 
-// TestMetaDBPathSetupA pins db.path/db.size in setup A (no Token): a
-// loopback Host reads them; a Host let in only by AllowOrigins reads
-// the kind alone. (Setup B and the panel tokens: TestAuthMatrix.)
+// TestMetaDBPathSetupA pins db.path/db.size and pid in setup A (no
+// Token): a loopback Host reads them; a Host let in only by
+// AllowOrigins reads the kind alone. (Setup B and the panel tokens: TestAuthMatrix.)
 func TestMetaDBPathSetupA(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "weft.db")
 	srv := New(Open(path), AllowOrigins("http://studio.example"))
@@ -164,8 +165,11 @@ func TestMetaDBPathSetupA(t *testing.T) {
 	if m := metaOf(t, ts, ""); m.DB.Kind != "sqlite" || m.DB.Path != path || m.DB.Size == nil || *m.DB.Size <= 0 {
 		t.Errorf("loopback meta.db = %+v, want sqlite at %s with a size", m.DB, path)
 	}
-	if m := metaOf(t, ts, "studio.example"); m.DB.Kind != "sqlite" || m.DB.Path != "" || m.DB.Size != nil {
-		t.Errorf("AllowOrigins host meta.db = %+v, want the kind only", m.DB)
+	if m := metaOf(t, ts, ""); m.PID != os.Getpid() {
+		t.Errorf("loopback meta.pid = %d, want this process's %d", m.PID, os.Getpid())
+	}
+	if m := metaOf(t, ts, "studio.example"); m.DB.Kind != "sqlite" || m.DB.Path != "" || m.DB.Size != nil || m.PID != 0 {
+		t.Errorf("AllowOrigins host meta.db = %+v, pid %d, want the kind only and no pid", m.DB, m.PID)
 	}
 }
 

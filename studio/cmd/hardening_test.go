@@ -139,9 +139,8 @@ func TestShutdownEndsOpenStreams(t *testing.T) {
 		t.Fatal(err)
 	}
 	addr := l.Addr().String()
-	_ = l.Close()
 	done := make(chan error, 1)
-	go func() { done <- listen(httpServer(addr, srv.Handler()), io.Discard) }()
+	go func() { done <- serveOn(httpServer(addr, srv.Handler()), l, io.Discard) }()
 
 	var stream *http.Response
 	for deadline := time.Now().Add(5 * time.Second); ; {

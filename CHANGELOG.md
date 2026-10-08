@@ -10,6 +10,24 @@ module, ADR 0005).
 
 ### Added
 
+- **Studio's port policy** (plan B2, `internal/listen`, wired into
+  `studio/cmd`): `127.0.0.1:7331` is the one default. On a busy port
+  the binary asks `GET /api/meta` there (bearer: `--token` /
+  `WEFT_STUDIO_TOKEN` when set): a Studio on the same database file is
+  reused — `studio already running at http://127.0.0.1:7331 (pid
+  1234), reusing`, exit 0, nothing opened — and anything else (another
+  program, a Studio on another database, one whose meta this token
+  cannot read) moves Studio to the next free port in 7331–7340 with
+  one line naming the skipped address and why; the banner prints the
+  real address. All ten busy is exit 1 naming the range. `studio.New`
+  is unchanged: an embedded Studio is the app's own listener.
+- **`WEFT_STUDIO_ADDR`**, the `--addr` mirror. Either pins the
+  address: busy is exit 1 with the address in the error — no probe, no
+  fallback.
+- **`/api/meta` `pid`**: the serving process's id, under `db.path`'s
+  guard (loopback with no Token, or the server token; never a panel
+  token).
+
 - **`studio doctor [--url URL] [--token TOK]`** (plan B5): checks a
   running Studio and prints one line per check — reachable, token
   accepted, the database's path and size, the content it stores,
@@ -41,6 +59,11 @@ module, ADR 0005).
   database.
 - **obsdb/sqlite**: `(*DB).Path()` — the database file's absolute
   path (`""` for `:memory:`).
+
+### Changed
+
+- `runtime/examples/local` serves on `127.0.0.1:7331` (was 7391, for
+  no documented reason): one default port everywhere.
 
 ### Changed — breaking
 

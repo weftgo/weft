@@ -16,7 +16,7 @@ import { TokenWall } from "@/components/studio/token-wall"
 const meta = {
   weft_version: "v0.7.0",
   studio_version: "v0.3.0",
-  db: "sqlite",
+  db: { kind: "sqlite" },
   title: "weft studio",
   has_manifest: false,
   ingest_open: true,

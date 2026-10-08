@@ -31,7 +31,7 @@ const T0 = "2026-10-01T09:00:00Z"
 const meta = {
   weft_version: "v0.6.0",
   studio_version: "v0.2.1",
-  db: "sqlite",
+  db: { kind: "sqlite" },
   title: "t",
   has_manifest: false,
   ingest_open: true,

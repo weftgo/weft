@@ -271,7 +271,11 @@ export interface PublicResolution {
 export interface Meta {
   weft_version: string
   studio_version: string
-  db: string
+  /** The panel bundle's version stamp (equal to studio_version unless
+   * the embedded dist is stale). */
+  panel_version?: string
+  /** path and size reach loopback (no token) and the server token only. */
+  db: { kind: string; path?: string; size?: number }
   title: string
   has_manifest: boolean
   ingest_open: boolean
@@ -281,6 +285,16 @@ export interface Meta {
    * — "runtime-started runs" (PQ7: the app's own turns are
    * viewer-only). */
   debug_scope?: string
+  /** Studio's ingest policy and the latest run's content mark (B5). */
+  content?: {
+    ingest: string
+    latest: { run_id: string; mark: string; note: string; fix?: string } | null
+  }
+  pricing?: boolean
+  retention?: string | null
+  /** Runtimes holding a command stream now. */
+  runtimes?: number
+  manifest_check?: { agents: number; checked: number; stale: string[] } | null
 }
 
 /** A panel token minted by the backend (S4.6). */

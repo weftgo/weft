@@ -450,7 +450,7 @@ func TestMetaGolden(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("meta: %d", code)
 	}
-	if !strings.Contains(body, `"db":"sqlite"`) || !strings.Contains(body, `"interrupted_after_ms":30000`) {
+	if !strings.Contains(body, `"db":{"kind":"sqlite"`) || !strings.Contains(body, `"interrupted_after_ms":30000`) {
 		t.Errorf("meta db kind / clock: %s", body)
 	}
 	// Not golden(): weft_version is pinned too (version.Runtime is the
@@ -879,7 +879,7 @@ func TestOpenOption(t *testing.T) {
 	path := filepath.Join(dir, "sub", "dev.db") // Open creates the parent
 	h := Handler(Open(path))
 	code, _, body := get(t, h, "/studio/api/meta")
-	if code != http.StatusOK || !strings.Contains(body, `"db":"sqlite"`) {
+	if code != http.StatusOK || !strings.Contains(body, `"db":{"kind":"sqlite"`) {
 		t.Errorf("Open: %d %s", code, body)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -889,7 +889,7 @@ func TestOpenOption(t *testing.T) {
 	envDB := filepath.Join(dir, "env.db")
 	t.Setenv("WEFT_DB", envDB)
 	_, _, body = get(t, Handler(), "/studio/api/meta")
-	if !strings.Contains(body, `"db":"sqlite"`) {
+	if !strings.Contains(body, `"db":{"kind":"sqlite"`) {
 		t.Errorf("WEFT_DB default: %s", body)
 	}
 	if _, err := os.Stat(envDB); err != nil {

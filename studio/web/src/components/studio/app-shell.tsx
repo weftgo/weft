@@ -213,7 +213,7 @@ export function AppShell() {
             <div className="space-y-0.5 px-3 pb-2 font-mono text-[10px] text-faint group-data-[collapsible=icon]:hidden">
               <div>weft {meta.data.weft_version || "(unknown)"}</div>
               <div>
-                studio {meta.data.studio_version} · {meta.data.db}
+                studio {meta.data.studio_version} · {meta.data.db.kind}
               </div>
             </div>
           )}

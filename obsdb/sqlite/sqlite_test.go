@@ -1408,3 +1408,43 @@ func inputRecs() []obsdb.Record {
 		rec("c_none", 0, reply, nil),
 	}
 }
+
+// TestPath pins Path (Studio's api/meta db.path): the absolute path of
+// a file database, resolved at Open, and "" for ":memory:".
+func TestPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	db, err := sqlite.Open("rel/weft.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	got := db.(interface{ Path() string }).Path()
+	want, _ := filepath.Abs("rel/weft.db")
+	if got != want || !filepath.IsAbs(got) {
+		t.Errorf("Path() = %q, want %q", got, want)
+	}
+	mem, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mem.Close() })
+	if p := mem.(interface{ Path() string }).Path(); p != "" {
+		t.Errorf(":memory: Path() = %q, want empty", p)
+	}
+}
+
+// ExampleDB_Path: the file a database lives in, through the interface
+// Studio's api/meta reads (db.path).
+func ExampleDB_Path() {
+	dir, _ := os.MkdirTemp("", "obsdb")
+	defer func() { _ = os.RemoveAll(dir) }()
+	db, err := sqlite.Open(filepath.Join(dir, "weft.db"))
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = db.Close() }()
+	p := db.(interface{ Path() string }).Path()
+	fmt.Println(filepath.Base(p), filepath.IsAbs(p))
+	// Output: weft.db true
+}

@@ -150,6 +150,14 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		!strings.HasPrefix(spanOf[line(1)["span_id"].(string)], "execute_tool") || logsDoc["partial"] != nil || logsDoc["badge"] != nil {
 		t.Errorf("the real run's app logs = %v (spans %v), want the Tap's line under invoke_agent, then the tool's two under execute_tool, nothing partial or badged", logsDoc, spanOf)
 	}
+	// api/meta reads the real run's content mark (full: the pipeline's
+	// Studio destination is content-on) and, on loopback, the file.
+	meta := fetch("/api/meta").(map[string]any)
+	latest, _ := meta["content"].(map[string]any)["latest"].(map[string]any)
+	db, _ := meta["db"].(map[string]any)
+	if latest["run_id"] != res.ID || latest["mark"] != "full" || db["path"] != filepath.Join(dir, "weft.db") || db["size"] == nil {
+		t.Errorf("meta after a real run: content %v, db %v; want the run marked full and the file's path and size", latest, db)
+	}
 	for _, c := range []struct {
 		golden, path string
 		// what the fixture holds that this run does not: a subagent
@@ -178,6 +186,8 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// The app's two log lines, attributed through the tool's span.
 		{"logs-ok.golden.json", "/api/runs/" + res.ID + "/logs", nil},
 		{"logs-ok-paged.golden.json", "/api/runs/" + res.ID + "/logs?limit=1", nil},
+		// This server has no manifest (manifest_check is null).
+		{"meta.golden.json", "/api/meta", []string{".manifest_check"}},
 	} {
 		b, err := os.ReadFile(filepath.Join("testdata", "api", c.golden))
 		if err != nil {

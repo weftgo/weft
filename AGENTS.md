@@ -181,7 +181,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    options DB/Open/Base/Manifest/Title/Capabilities/Token/Live/NoIngest/
 //    //    IngestToken/AllowOrigins/Playground; routes register through
 //    //    routes.go's groups (panel.go/playground.go add theirs in their own files).
-//    // API: meta, manifest, runs (+session/public/playground filters; all=1 lists child
+//    // API: meta (db {kind, path, size: path/size to loopback and the server token only},
+//    //    content, runtimes, manifest_check, pricing, retention — `studio doctor` prints it
+//    //    line by line), manifest, runs (+session/public/playground filters; all=1 lists child
 //    //    runs too), runs/{id} (with its compactions: run-scope views, then session markers),
 //    //    runs/{id}/events|transcript|spans|requests|tools, runs/{id}/steps/{n} (one step
 //    //    assembled: request, attempts, events, tool calls, children, holes; capability

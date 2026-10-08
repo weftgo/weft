@@ -15,6 +15,16 @@
 // the weft version (version.Runtime: the module tag this binary was
 // built from) and exits.
 //
+// `studio doctor [--url URL] [--token TOK]` checks a running Studio and
+// prints one line per check, each read from its GET /api/meta: reachable,
+// token accepted, the database's path and size, the content it stores,
+// connected runtimes (and, when none, what this shell's WEFT_ENV and
+// WEFT_STUDIO_URL say about why), the panel bundle's version and
+// whether weft.json is stale against the latest runs. --url defaults
+// to $WEFT_STUDIO_URL, else http://127.0.0.1:7331; --token to
+// $WEFT_STUDIO_TOKEN. It exits 1 when a check fails — first of all an
+// unreachable Studio, reported on the first line within a short timeout.
+//
 // It is a package of the framework module (ADR 0027) kept apart from
 // the studio library so the library never carries what only the
 // binary needs — it is the one place that imports the clickhouse
@@ -35,6 +45,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/weftgo/weft/internal/doctor"
 	"github.com/weftgo/weft/obsdb/clickhouse"
 	"github.com/weftgo/weft/studio"
 	"github.com/weftgo/weft/version"
@@ -44,7 +55,8 @@ const defaultAddr = "127.0.0.1:7331"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
-		if !errors.Is(err, flag.ErrHelp) {
+		// A failed doctor check has printed its own lines.
+		if !errors.Is(err, flag.ErrHelp) && !errors.Is(err, doctor.ErrUnhealthy) {
 			fmt.Fprintln(os.Stderr, "studio:", err)
 		}
 		os.Exit(1)
@@ -55,6 +67,9 @@ func main() {
 // (version.Runtime) and returns when --version is set. Split from main
 // so the flag surface is testable.
 func run(args []string, stdout io.Writer) error {
+	if len(args) > 0 && args[0] == "doctor" {
+		return runDoctor(args[1:], stdout)
+	}
 	fs := flag.NewFlagSet("studio", flag.ContinueOnError)
 	db := fs.String("db", "",
 		"`sqlite://path` or `clickhouse://user:pass@host:9000/db` (default: $WEFT_DB or ./.weft/weft.db)")
@@ -70,6 +85,30 @@ func run(args []string, stdout io.Writer) error {
 		return err
 	}
 	return serve(*db, *addr, *token, stdout)
+}
+
+// runDoctor is `studio doctor`: the flags mirror WEFT_STUDIO_URL and
+// WEFT_STUDIO_TOKEN one to one; internal/doctor does the checking.
+func runDoctor(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("studio doctor", flag.ContinueOnError)
+	defURL := os.Getenv("WEFT_STUDIO_URL")
+	if defURL == "" {
+		defURL = "http://" + defaultAddr
+	}
+	url := fs.String("url", defURL, "the Studio to check (default: $WEFT_STUDIO_URL, else http://"+defaultAddr+")")
+	// The token's default is resolved after parsing: --help must not
+	// print it.
+	token := fs.String("token", "", "API token (default: $WEFT_STUDIO_TOKEN)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *token == "" {
+		*token = os.Getenv("WEFT_STUDIO_TOKEN")
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("doctor takes no arguments, got %q", fs.Args())
+	}
+	return doctor.Run(context.Background(), stdout, *url, *token, os.Getenv)
 }
 
 // serve builds the server, prints where it lives, and listens until

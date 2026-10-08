@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -167,11 +166,6 @@ func TestVersionIsTheModules(t *testing.T) {
 		t.Errorf("panel.js is stamped %q, version.Version is %q: run 'make studio-build' and commit", got, version.Version)
 	}
 }
-
-// panelStampRe finds panelStudioVersion's body in the built bundle:
-// the define folds it to a single returned string literal. The
-// minifier may name it with a $ ("$e"), a valid JS identifier.
-var panelStampRe = regexp.MustCompile(`//#region src/panel/version\.ts\s*function [\w$]+\(\)\s*\{\s*return "([^"]*)";?\s*\}`)
 
 // TestPanelTokenMintExample pins the setup-C flow end to end against
 // the fixture server: a backend holding the server token mints a

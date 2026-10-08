@@ -6,6 +6,41 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Added
+
+- **`studio doctor [--url URL] [--token TOK]`** (plan B5): checks a
+  running Studio and prints one line per check — reachable, token
+  accepted, the database's path and size, the content it stores,
+  connected runtimes (and, when none, what this shell's `WEFT_ENV` and
+  `WEFT_STUDIO_URL` say about why), the panel bundle's version, and
+  whether `weft.json` is stale against the latest runs. Every line
+  reads a field of `GET /api/meta` (`internal/doctor.Lines` is the
+  table); the flags mirror `WEFT_STUDIO_URL` / `WEFT_STUDIO_TOKEN`. An
+  unreachable Studio is the first line within a 5 s timeout and exit 1.
+- **`/api/meta` explains itself**: `content` (Studio's ingest policy,
+  `"as_received"`, and the latest run's content mark — `full`,
+  `stripped`, `none` or `unmarked` — with a note and the fix naming
+  `otel.NoContent()` or `weft.Content(false)`), `pricing` (`false`
+  until a pricing table exists), `retention` (`null`: none
+  configured), `runtimes` (runtimes holding a command stream now),
+  `panel_version` (the embedded `/panel.js` stamp) and
+  `manifest_check` (`{agents, checked, stale}`: each manifest agent's
+  hash against its latest run's `weft.manifest.hash`; `null` without a
+  manifest or for a panel token).
+- **obsdb/sqlite**: `(*DB).Path()` — the database file's absolute
+  path (`""` for `:memory:`).
+
+### Changed — breaking
+
+- **`/api/meta`'s `db` is an object**: `{kind, path, size}` instead of
+  the kind string. Read `db.kind` where you read `db`. `path` and
+  `size` (bytes, the WAL sidecar included) are served only to a
+  loopback request with no `studio.Token` and to the server token —
+  omitted for panel tokens and `AllowOrigins` hosts, and for a
+  database with no file.
+
 ## 0.10.1 — 2026-10-08
 
 ### Fixed

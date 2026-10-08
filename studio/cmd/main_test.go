@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -18,6 +19,7 @@ import (
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 
+	"github.com/weftgo/weft/internal/doctor"
 	"github.com/weftgo/weft/version"
 )
 
@@ -142,7 +144,7 @@ func TestNewServerClickhouse(t *testing.T) {
 		t.Errorf("anonymous meta: %d %s", code, body)
 	}
 	code, body := get("/api/meta", "tok")
-	if code != http.StatusOK || !strings.Contains(body, `"db":"clickhouse"`) ||
+	if code != http.StatusOK || !strings.Contains(body, `"db":{"kind":"clickhouse"`) ||
 		!strings.Contains(body, `"ingest_open":true`) || !strings.Contains(body, `"auth"`) {
 		t.Errorf("meta: %d %s", code, body)
 	}
@@ -193,7 +195,7 @@ func assertSetupB(t *testing.T, h http.Handler, token, dbPath string) {
 		t.Errorf("anonymous meta: %d %s", code, body)
 	}
 	code, body = get("/api/meta", token)
-	if code != http.StatusOK || !strings.Contains(body, `"db":"sqlite"`) ||
+	if code != http.StatusOK || !strings.Contains(body, `"db":{"kind":"sqlite"`) ||
 		!strings.Contains(body, `"ingest_open":true`) || !strings.Contains(body, `"auth"`) {
 		t.Errorf("meta: %d %s", code, body)
 	}
@@ -329,5 +331,39 @@ func TestListenShutsDownGracefully(t *testing.T) {
 	if conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond); err == nil {
 		_ = conn.Close()
 		t.Error("the port still accepts after the graceful shutdown")
+	}
+}
+
+// TestDoctorSubcommand pins `studio doctor`'s wiring (internal/doctor
+// is the checking): --url picks the Studio, an unreachable one is the
+// first line and doctor.ErrUnhealthy (main exits 1 without a second
+// message), and WEFT_STUDIO_URL / WEFT_STUDIO_TOKEN are the flags'
+// defaults.
+func TestDoctorSubcommand(t *testing.T) {
+	var out strings.Builder
+	err := run([]string{"doctor", "--url", "http://127.0.0.1:1"}, &out)
+	if !errors.Is(err, doctor.ErrUnhealthy) || !strings.HasPrefix(out.String(), "studio not reachable at http://127.0.0.1:1: ") {
+		t.Errorf("unreachable: %v\n%s", err, out.String())
+	}
+
+	srv, err := newServer("sqlite://"+t.TempDir()+"/weft.db", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = srv.Close() }()
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	t.Setenv("WEFT_STUDIO_URL", ts.URL)
+	t.Setenv("WEFT_STUDIO_TOKEN", "tok")
+	t.Setenv("WEFT_ENV", "")
+	out.Reset()
+	if err := run([]string{"doctor"}, &out); err != nil {
+		t.Fatalf("doctor from the env: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "ok   token     accepted") || !strings.Contains(out.String(), "WEFT_ENV is unset") {
+		t.Errorf("doctor from the env:\n%s", out.String())
+	}
+	if err := run([]string{"doctor", "extra"}, &out); err == nil {
+		t.Error("doctor with an argument: no error")
 	}
 }

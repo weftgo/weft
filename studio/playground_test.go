@@ -233,7 +233,13 @@ func TestPlaygroundCapabilities(t *testing.T) {
 	resp, _ := http.Get(off.URL + "/api/meta")
 	meta, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
-	if strings.Contains(string(meta), `"playground"`) || strings.Contains(string(meta), `"runtimes"`) {
+	var offMeta struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := json.Unmarshal(meta, &offMeta); err != nil {
+		t.Fatal(err)
+	}
+	if caps := strings.Join(offMeta.Capabilities, ","); strings.Contains(caps, "playground") || strings.Contains(caps, "runtimes") {
 		t.Errorf("a Studio without Playground(true) reports the playground capabilities: %s", meta)
 	}
 	for _, path := range []string{"/api/runtimes", "/api/playground/runs", "/api/playground/commands/x",

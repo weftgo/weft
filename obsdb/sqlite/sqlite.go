@@ -35,6 +35,7 @@ type DB struct {
 	writer     *sql.DB
 	reads      *sql.DB
 	mem        bool // :memory: — one handle serves writer and reads
+	path       string
 	keepDeltas bool
 	hub        obsdb.Hub
 	mu         sync.Mutex
@@ -94,6 +95,13 @@ func Open(path string, opts ...Option) (obsdb.DB, error) {
 		return nil, err
 	}
 	db.reads = reads
+	if !db.mem {
+		if abs, err := filepath.Abs(path); err == nil {
+			db.path = abs
+		} else {
+			db.path = path
+		}
+	}
 	db.keepDeltas = cfg.keepDeltas
 	db.hub = obsdb.NewHub()
 	return db, nil
@@ -202,6 +210,12 @@ func openHandles(path string) (*DB, *sql.DB, error) {
 // frames to it before returning (D4 — this handle is what setup A's
 // studio.DB(otel.LocalDB()) shares).
 func (d *DB) Hub() obsdb.Hub { return d.hub }
+
+// Path returns the database file's absolute path, as Open resolved it
+// against the working directory at open time; "" for ":memory:". Studio
+// reads it for api/meta's db.path (through interface{ Path() string },
+// so another backend may answer too).
+func (d *DB) Path() string { return d.path }
 
 // Close closes the handles.
 func (d *DB) Close() error {

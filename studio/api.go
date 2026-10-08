@@ -565,39 +565,6 @@ type publicResolution struct {
 
 // ── Handlers ───────────────────────────────────────────────────────
 
-// serveMeta answers api/meta (S4.3): versions, the DB kind, the
-// title, whether a manifest is present, whether ingest is open
-// without a token (S4.4 says meta must say so), the derived-interval
-// clock, and the capabilities the registered route groups provide
-// (computed, never hard-coded) plus any the backing server declared.
-func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, r, http.StatusOK, struct {
-		WeftVersion        string   `json:"weft_version"`
-		StudioVersion      string   `json:"studio_version"`
-		DB                 string   `json:"db"`
-		Title              string   `json:"title"`
-		HasManifest        bool     `json:"has_manifest"`
-		IngestOpen         bool     `json:"ingest_open"`
-		InterruptedAfterMs int64    `json:"interrupted_after_ms"`
-		Capabilities       []string `json:"capabilities"`
-		// DebugScope says what the debugger's write verbs (breakpoints,
-		// steer) can act on — the runtime-started runs only. The app's
-		// own turns are viewer-only (D7, PQ7); meta says so plainly
-		// (WEFT-DEVTOOLS §8.5 item 6).
-		DebugScope string `json:"debug_scope,omitempty"`
-	}{
-		WeftVersion:        weftVersion(),
-		StudioVersion:      Version,
-		DB:                 dbKind(s.db),
-		Title:              s.title,
-		HasManifest:        len(s.manifest) > 0,
-		IngestOpen:         !s.noIngest && s.ingestToken == "",
-		InterruptedAfterMs: obsdb.InterruptedAfter.Milliseconds(),
-		Capabilities:       s.capabilityList(),
-		DebugScope:         s.debugScope(),
-	})
-}
-
 // debugScope names what the debugger's write verbs may act on: the
 // runtime-started runs, only when those verbs are registered.
 func (s *Server) debugScope() string {

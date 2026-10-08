@@ -1,7 +1,10 @@
 {
   "weft_version": "v0.10.1",
   "studio_version": "v0.10.1",
-  "db": "sqlite",
+  "panel_version": "v0.10.1",
+  "db": {
+    "kind": "sqlite"
+  },
   "title": "weft studio",
   "has_manifest": true,
   "ingest_open": true,
@@ -13,6 +16,24 @@
     "logs",
     "live",
     "ingest"
-  ]
+  ],
+  "content": {
+    "ingest": "as_received",
+    "latest": {
+      "run_id": "r_stale",
+      "mark": "unmarked",
+      "note": "the latest run carries no content mark: no events stored, a weft older than the mark, or a non-weft exporter"
+    }
+  },
+  "pricing": false,
+  "retention": null,
+  "runtimes": 0,
+  "manifest_check": {
+    "agents": 1,
+    "checked": 1,
+    "stale": [
+      "orders"
+    ]
+  }
 }
 

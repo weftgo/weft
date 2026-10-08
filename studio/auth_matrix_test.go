@@ -613,6 +613,44 @@ func TestAuthMatrix(t *testing.T) {
 		}
 	}
 
+	// api/meta's db.path and db.size (plan B5) are the server token's
+	// (setup B's dev token) — omitted, never nulled, for a read- or a
+	// playground-scoped panel token; db.kind and runtimes are
+	// everyone's (rt_test holds a command stream; the table's own
+	// rt_link stream may not have wound down yet).
+	for _, id := range identities {
+		if id.kind == "bad" {
+			continue
+		}
+		path := "/api/meta"
+		if id.query {
+			path += "?token=" + id.token
+		}
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		if !id.query {
+			req.Header.Set("Authorization", "Bearer "+id.token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		var meta struct {
+			DB       map[string]any `json:"db"`
+			Runtimes int            `json:"runtimes"`
+		}
+		decode(t, string(b), &meta)
+		_, hasPath := meta.DB["path"]
+		_, hasSize := meta.DB["size"]
+		if want := id.kind == "server"; hasPath != want || hasSize != want || meta.DB["kind"] != "sqlite" {
+			t.Errorf("GET /api/meta as %s: db = %v, want kind sqlite and path/size present = %v", id.name, meta.DB, want)
+		}
+		if meta.Runtimes < 1 {
+			t.Errorf("GET /api/meta as %s: runtimes = %d, want at least rt_test's stream", id.name, meta.Runtimes)
+		}
+	}
+
 	// A list forced onto the token's public id holds nothing of another's.
 	for _, id := range identities {
 		if id.kind != "read" && id.kind != "pg" {

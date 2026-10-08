@@ -120,7 +120,7 @@ function fakeStudio(routes: Record<string, unknown>, meta: unknown = metaOK) {
 const metaOK = {
   weft_version: "v0.6.0",
   studio_version: "v0.2.1",
-  db: "sqlite",
+  db: { kind: "sqlite" },
   title: "weft studio",
   has_manifest: false,
   ingest_open: true,

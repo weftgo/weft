@@ -56,7 +56,7 @@ export const SESSION: SessionRow = {
 export const META = {
   weft_version: "v0.7.0",
   studio_version: "v0.2.1",
-  db: "sqlite",
+  db: { kind: "sqlite" },
   title: "weft studio",
   has_manifest: false,
   ingest_open: true,

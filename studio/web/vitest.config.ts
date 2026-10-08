@@ -18,10 +18,11 @@ function devtoolsPackage(): Plugin {
     name: "weft-devtools-package",
     enforce: "pre",
     resolveId(source, importer) {
-      const m = /^@weftgo\/devtools(?:\/(react|vue|svelte))?$/.exec(source)
+      const m = /^@weftgo\/devtools(?:\/(react|vue|svelte|scope))?$/.exec(source)
       if (m) {
         const name = m.at(1) ?? "index"
-        return built ? path.resolve(root, `npm/${name}.js`) : path.resolve(root, `src/npm/${name}.ts`)
+        if (built) return path.resolve(root, `npm/${name}.js`)
+        return path.resolve(root, name === "scope" ? "src/lib/scope.ts" : `src/npm/${name}.ts`)
       }
       if (source === "./panel.js" && importer?.startsWith(srcNpm))
         return path.resolve(root, "../dist/panel/panel.js")

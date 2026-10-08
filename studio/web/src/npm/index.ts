@@ -9,11 +9,11 @@
 // What is complete in C1 and what C4 completes is in npm/README.md's
 // API table.
 import "./panel.js"
-import { serializeScope } from "../lib/scope"
-import type { Scope } from "../lib/scope"
+import { serializeScope } from "../lib/scope.js"
+import type { Scope } from "../lib/scope.js"
 
-export { parseScope, serializeScope } from "../lib/scope"
-export type { Scope } from "../lib/scope"
+export { parseScope, serializeScope } from "../lib/scope.js"
+export type { Scope } from "../lib/scope.js"
 
 /** Where the dock sits. */
 export type Position = "bottom-right" | "bottom-left" | "right-dock"
@@ -74,18 +74,41 @@ function later(fn: () => void): void {
 
 /** The scope scope() last set: a mount made after it starts there. */
 let current: Scope | null = null
+/** What open()/close() last asked for: a mount made after it starts
+ * that way (null: the ladder decides). */
+let wantOpen: boolean | null = null
+
+/** isOpen reads the element's open state (the same version's field). */
+const isOpen = (n: WeftDevtoolsElement) => (n as unknown as { open?: unknown }).open === true
+
+/** The element's methods, when it is the panel's: a foreign element
+ * defined under the tag first, or a panel whose boot failed, gets no
+ * call — the host's code never sees the panel's TypeError. */
+const rescanOf = (n: WeftDevtoolsElement) => (typeof n.rescan === "function" ? () => n.rescan() : null)
+const toggleOf = (n: WeftDevtoolsElement) => (typeof n.toggle === "function" ? () => n.toggle() : null)
 
 /** mount appends a <weft-devtools> configured by opts (rung 1) to
  * opts.target or document.body and returns it. It is the host's
  * mount: where Studio does not answer it shows one "Studio not
  * reachable" line instead of removing itself. One panel per page: the
- * dock the bundle mounted by itself (no markup, data-auto) is replaced;
- * markup of the page's own is left alone. */
+ * dock the bundle mounted by itself (no markup, data-auto) is replaced
+ * — its open state carried over — and markup of the page's own is
+ * left alone. Unless opts says otherwise, the new panel starts in the
+ * last scope() and open state open()/close() asked for. */
 export function mount(opts: MountOptions = {}): WeftDevtoolsElement {
   const { target, ...options } = opts
-  for (const n of elements()) if (n.autoMounted) n.remove()
+  let carried: boolean | null = null
+  for (const n of elements())
+    if (n.autoMounted) {
+      carried = isOpen(n)
+      n.remove()
+    }
   const node = document.createElement(TAG) as WeftDevtoolsElement
-  node.options = current && options.publicId === undefined ? { ...options, publicId: current.publicId } : options
+  const o = { ...options }
+  if (current && o.publicId === undefined) o.publicId = current.publicId
+  const startOpen = wantOpen ?? carried
+  if (o.open === undefined && startOpen !== null) o.open = startOpen
+  node.options = o
   if (current) node.setAttribute("data-weft-scope", serializeScope(current))
   ;(target ?? document.body).appendChild(node)
   return node
@@ -96,46 +119,46 @@ export function mount(opts: MountOptions = {}): WeftDevtoolsElement {
  * window.__WEFT__), and each element carries s serialised in its
  * data-weft-scope attribute. In C1 the panel follows the public id
  * only; session, flow and run are carried in the marker for C3.1. A
- * string is a public id. */
+ * string is a public id. The same scope again, already on every
+ * element, does nothing (a framework re-render is not a rescope). */
 export function scope(s: Scope | string): void {
   const next: Scope = typeof s === "string" ? { publicId: s } : { ...s }
+  const form = serializeScope(next)
+  const same = current !== null && serializeScope(current) === form
   current = next
   later(() => {
     for (const n of elements()) {
+      if (same && n.getAttribute("data-weft-scope") === form && n.options?.publicId === next.publicId) continue
       n.options = { ...n.options, publicId: next.publicId }
-      n.setAttribute("data-weft-scope", serializeScope(next))
-      n.rescan()
+      n.setAttribute("data-weft-scope", form)
+      rescanOf(n)?.()
     }
   })
 }
-
-/** isOpen reads the element's open state (the same version's field). */
-const isOpen = (n: WeftDevtoolsElement) => (n as unknown as { open?: unknown }).open === true
 
 function setOpen(want: boolean): void {
+  wantOpen = want
   later(() => {
-    for (const n of elements()) {
-      // Not connected yet: the first connect adopts rung 1's open.
-      if (!n.isConnected) n.options = { ...n.options, open: want }
-      else if (isOpen(n) !== want) n.toggle()
-    }
+    for (const n of elements()) if (isOpen(n) !== want) toggleOf(n)?.()
   })
 }
 
-/** open expands every panel on the page. */
+/** open expands every panel on the page; a panel mounted later starts
+ * expanded. */
 export function open(): void {
   setOpen(true)
 }
 
-/** close collapses every panel on the page to its button. */
+/** close collapses every panel on the page to its button; a panel
+ * mounted later starts collapsed. */
 export function close(): void {
   setOpen(false)
 }
 
-/** toggle flips every panel on the page. */
+/** toggle flips every panel on the page (the panels there now only). */
 export function toggle(): void {
   later(() => {
-    for (const n of elements()) n.toggle()
+    for (const n of elements()) toggleOf(n)?.()
   })
 }
 

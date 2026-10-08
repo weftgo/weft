@@ -4,13 +4,14 @@
 // is imported lazily, when an element is bound — never at module
 // evaluation — so a helper imported by a server-rendered component
 // (Next, SvelteKit, Nuxt) touches no DOM on the server.
-import { serializeScope } from "../lib/scope"
-import type { Scope } from "../lib/scope"
-import type { WeftDevtoolsElement } from "./index"
+import { serializeScope } from "../lib/scope.js"
+import type { Scope } from "../lib/scope.js"
+import type { WeftDevtoolsElement } from "./index.js"
 
 /** What every helper takes. endpoint and token configure the panel the
  * helper mounts when the page has none of its own (the bundle's
- * self-mounted dock is replaced when either is given). */
+ * self-mounted dock is replaced); with neither, the helper mounts
+ * nothing and scopes the panel the page has. */
 export interface HelperOptions {
   /** The scope to follow and mark; a string is a public id. */
   scope: Scope | string
@@ -30,9 +31,15 @@ function attach(node: Element, o: HelperOptions): () => void {
   import("./index.js")
     .then((api) => {
       if (!live) return
+      // A mount only where the host named where Studio is: without an
+      // endpoint or token the page configures the panel itself (meta
+      // tags, its markup) — a helper mount there would be a host mount
+      // of nothing in particular, its "not reachable" line on a page
+      // that asked for none. scope() alone reaches whatever panel the
+      // page has, now or mounted later.
       const all = Array.from(document.querySelectorAll<WeftDevtoolsElement>("weft-devtools"))
       const hosts = all.some((n) => !n.autoMounted)
-      if (!hosts && (all.length === 0 || o.endpoint || o.token)) api.mount({ endpoint: o.endpoint, token: o.token })
+      if (!hosts && (o.endpoint || o.token)) api.mount({ endpoint: o.endpoint, token: o.token })
       api.scope(s)
     })
     .catch(() => {
@@ -68,4 +75,44 @@ export function binder(get: () => HelperOptions) {
     undo = attach(n, o)
   }
   return { bind, unbind }
+}
+
+type Binder = ReturnType<typeof binder>
+
+/** One binder per element, whatever closure binds it: a framework that
+ * hands a new ref callback every render (React) rebinds the same node
+ * with the same options — a no-op — instead of unmarking and
+ * rescoping. */
+interface Bound {
+  b: Binder
+  opts: HelperOptions
+  releasing: boolean
+}
+const bound = new WeakMap<Element, Bound>()
+
+/** bindNode binds node through its one binder, with opts. */
+export function bindNode(node: Element, opts: HelperOptions): void {
+  let e = bound.get(node)
+  if (!e) {
+    const entry: Bound = { opts, releasing: false, b: binder(() => entry.opts) }
+    bound.set(node, entry)
+    e = entry
+  }
+  e.opts = opts
+  e.releasing = false
+  e.b.bind(node)
+}
+
+/** releaseNode unbinds node at the end of the current task, unless it
+ * is bound again first: React detaches the previous render's ref and
+ * attaches the next one in the same commit. */
+export function releaseNode(node: Element): void {
+  const e = bound.get(node)
+  if (!e) return
+  e.releasing = true
+  queueMicrotask(() => {
+    if (!e.releasing || bound.get(node) !== e) return
+    e.b.unbind()
+    bound.delete(node)
+  })
 }

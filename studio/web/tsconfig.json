@@ -16,6 +16,7 @@
     "paths": {
       "@/*": ["./src/*"],
       "@weftgo/devtools": ["./src/npm/index.ts"],
+      "@weftgo/devtools/scope": ["./src/lib/scope.ts"],
       "@weftgo/devtools/*": ["./src/npm/*.ts"]
     },
 

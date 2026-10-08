@@ -22,6 +22,12 @@ describe("serializeScope", () => {
     expect(serializeScope({ publicId: "a;b", session: "x=y" })).toBe("a%3Bb;session=x%3Dy")
     expect(serializeScope({ publicId: "pub_01J-x.y~z" })).toBe("pub_01J-x.y~z")
   })
+
+  it("never throws on a string encodeURIComponent refuses (a lone surrogate): the delimiters are still encoded", () => {
+    expect(() => serializeScope({ publicId: "\uD800" })).not.toThrow()
+    expect(serializeScope({ publicId: "a;\uD800", run: "=%" })).toBe("a%3B\uD800;run=%3D%25")
+    expect(parseScope(serializeScope({ publicId: "a;\uD800", run: "=%" }))).toEqual({ publicId: "a;\uD800", run: "=%" })
+  })
 })
 
 describe("parseScope", () => {

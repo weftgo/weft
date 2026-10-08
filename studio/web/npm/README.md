@@ -58,10 +58,15 @@ server token.
 |---|---|---|
 | `mount(opts?)` | Appends a `<weft-devtools>` configured by `opts` (`endpoint`, `publicId`, `token`, `position`, `open`, `auto`, `target`), which is configuration rung 1, above attributes and meta tags. This is the host's own mount: if Studio does not answer, it shows `Studio not reachable at … · retry` and stays. It replaces the dock the bundle mounted by itself and leaves the page's own markup alone. Returns the element. | complete in C1 |
 | `scope(s)` | Points every panel on the page at `s` (a `Scope`, or a string public id). The new scope overrides `data-public-id` and `window.__WEFT__`. It also writes `s` into each element's `data-weft-scope` attribute. A later `mount` starts in this scope. | C1 follows `publicId` only. `session`, `flow` and `run` are carried in the marker, and C3.1 makes the panel follow them. |
-| `open()`, `close()`, `toggle()` | Expand, collapse or flip every panel on the page. | complete in C1 |
+| `open()`, `close()`, `toggle()` | Expand, collapse or flip every panel on the page. A panel mounted after `open()` or `close()` starts in that state. | complete in C1 |
 | `on(event, cb)` | Calls `cb(detail)` for each `weft:<event>` CustomEvent a panel dispatches (`"run"`, `"parked"`, `"error"`; details typed by `DevtoolsEvents`). Returns the unsubscribe function. | Registration works in C1, but the panel does not dispatch any of these events yet, so `cb` is never called. C4 adds the dispatches. |
 | `serializeScope(s)`, `parseScope(str)` | The marker's one string form: `pub_…;session=s_…;flow=f_…;run=r_…`. The public id comes first. The other fields are optional and appear in that order, each value percent-encoded. | complete in C1 |
 | types `Scope`, `MountOptions`, `Position`, `WeftDevtoolsElement`, `DevtoolsEvents` | | complete in C1 |
+
+`import { serializeScope, parseScope, type Scope } from "@weftgo/devtools/scope"`
+loads only the marker's serialiser. It touches no DOM, so it is safe in
+server code: in a server-rendered component, use it to write
+`data-weft-scope` into the markup yourself.
 
 Calls made while the page is still parsing take effect once the dock is
 mounted.
@@ -69,11 +74,13 @@ mounted.
 ## Framework helpers
 
 Each helper sets `data-weft-scope` on the element that shows the
-conversation. It mounts the panel if the page has none, using
-`mount({ endpoint, token })`. If either option is given, it replaces
-the bundle's self-mounted dock. Then it calls `scope()`. On detach it
-removes the marker. Each helper is about 20 lines and contains no
-component.
+conversation and calls `scope()`. If you pass `endpoint` or `token` and
+the page has no panel of its own, the helper first mounts one with
+`mount({ endpoint, token })`, replacing the bundle's self-mounted dock.
+With neither option it mounts nothing: the page's own configuration
+(meta tags, markup) decides. On detach it removes the marker.
+Re-rendering with the same options does nothing. Each helper is about
+20 lines and contains no component.
 
 ```tsx
 // React 18/19: a callback ref.

@@ -193,6 +193,22 @@ describe("scope", () => {
 })
 
 describe("open, close, toggle", () => {
+  it("mount carries the open state of the bundle's dock it replaces", async () => {
+    fakeStudio(baseRoutes())
+    await load()
+    await settle()
+    // The user opened the self-mounted dock (Alt+W, the fab).
+    dock()?.toggle()
+    await settle()
+    expect(shadow(".weft-dock")).not.toBeNull()
+    const { mount } = await load()
+    mount({ endpoint: STUDIO })
+    await settle()
+    expect(dock()?.autoMounted).toBe(false)
+    expect(shadow(".weft-dock")).not.toBeNull()
+  })
+
+
   it("drive the dock's open state", async () => {
     fakeStudio(baseRoutes())
     const api = await load()
@@ -257,12 +273,73 @@ describe("the framework helpers", () => {
     expect(dock()?.autoMounted).toBe(false) // the helper's mount, at the endpoint it named
     expect(dock()?.getAttribute("data-weft-scope")).toBe("pub_orders;session=s_01")
     expect(scopes()).toEqual(["pub_orders"])
-    cleanup?.() // React 19
+    cleanup?.() // React 19: unbinds at the end of the commit…
+    await Promise.resolve()
     expect(host.hasAttribute("data-weft-scope")).toBe(false)
     ref(host)
     ref(null) // React 18
+    await Promise.resolve()
     expect(host.hasAttribute("data-weft-scope")).toBe(false)
     expect(docks()).toHaveLength(1) // one panel, however often the ref binds
+  })
+
+  it("react: re-renders with the same options rescan once, the marker never leaving the element", async () => {
+    fakeStudio(baseRoutes())
+    await load()
+    await settle()
+    const proto = (customElements.get("weft-devtools") as CustomElementConstructor).prototype as Dock
+    const rescan = vi.spyOn(proto, "rescan")
+    const { useWeftDevtools } = await import("@weftgo/devtools/react")
+    const host = document.createElement("div")
+    document.body.appendChild(host)
+    const opts = () => ({ scope: { publicId: "pub_orders" }, endpoint: STUDIO })
+    const changes: (string | null)[] = []
+    const watch = new MutationObserver((rs) => rs.forEach(() => changes.push(host.getAttribute("data-weft-scope"))))
+    watch.observe(host, { attributes: true, attributeFilter: ["data-weft-scope"] })
+    // React 19's commit for each render: the previous ref's cleanup,
+    // then the new ref — a new closure every render, the renders apart.
+    let cleanup = useWeftDevtools(opts())(host)
+    await settle()
+    for (let i = 0; i < 3; i++) {
+      cleanup?.()
+      cleanup = useWeftDevtools(opts())(host)
+      await settle()
+    }
+    await Promise.resolve()
+    watch.disconnect()
+    expect(changes).toEqual(["pub_orders"]) // set once, never removed and re-added
+    expect(rescan).toHaveBeenCalledTimes(1)
+    expect(scopes()).toEqual(["pub_orders"])
+    rescan.mockRestore()
+  })
+
+  it("a helper without endpoint or token mounts nothing: no Studio, no dock and no 'not reachable' line", async () => {
+    fakeStudio(baseRoutes(), () => new Response("no", { status: 404 }))
+    await load()
+    await settle()
+    expect(docks()).toHaveLength(0) // the bundle's own dock removed itself
+    const { useWeftDevtools } = await import("@weftgo/devtools/react")
+    const host = document.createElement("div")
+    document.body.appendChild(host)
+    useWeftDevtools({ scope: "pub_orders" })(host)
+    await settle()
+    expect(host.getAttribute("data-weft-scope")).toBe("pub_orders")
+    expect(docks()).toHaveLength(0)
+    expect(document.body.innerHTML).not.toContain("not reachable")
+  })
+
+  it("a helper's mount starts open after open() — called with no panel there, or on the dock it replaces", async () => {
+    fakeStudio(baseRoutes(), () => new Response("no", { status: 404 }))
+    const api = await load()
+    await settle()
+    expect(docks()).toHaveLength(0)
+    api.open() // nothing to open yet: remembered
+    const { useWeftDevtools } = await import("@weftgo/devtools/react")
+    const host = document.createElement("div")
+    document.body.appendChild(host)
+    useWeftDevtools({ scope: "pub_orders", endpoint: STUDIO })(host)
+    await settle()
+    expect((dock() as unknown as { open: boolean }).open).toBe(true)
   })
 
   it("vue: the function ref follows a getter, rebinding only when the scope changes", async () => {

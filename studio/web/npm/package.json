@@ -31,6 +31,10 @@
       "types": "./types/npm/svelte.d.ts",
       "default": "./svelte.js"
     },
+    "./scope": {
+      "types": "./types/lib/scope.d.ts",
+      "default": "./scope.js"
+    },
     "./panel.js": "./panel.js",
     "./package.json": "./package.json"
   },

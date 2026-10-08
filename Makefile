@@ -123,7 +123,9 @@ live:
 # tag in version/version.go, (2) the same tag in core/observe.go's
 # `version` literal (the core imports nothing above it), (3) regenerate
 # studio's meta golden (`go test ./studio -run TestMetaGolden -update`)
-# and rerun this target, committing studio/dist. studio's
+# and rerun this target, committing studio/dist and
+# studio/web/npm/package.json (the build writes the version into
+# @weftgo/devtools' manifest; studio-check fails on a stale one). studio's
 # TestVersionIsTheModules fails on a stale or hand-edited stamp, and
 # TestWeftVersionMatchesRoot (otel, runtime) on a missed step 2.
 
@@ -154,15 +156,21 @@ studio-check: studio-build
 	cd studio/web && bun run scripts/npm-package.ts --check
 	git diff --exit-code -- studio/web/npm/package.json || { echo "studio/web/npm/package.json is not the weft version: run 'make studio-build' and commit"; exit 1; }
 	cd studio/web && bun run typecheck && bun run test
+	cd studio/web && WEFT_DEVTOOLS_PKG=1 bunx vitest run src/npm
+	cd studio/web && bun run scripts/npm-consumer.ts
 
 # @weftgo/devtools (plan C1): the npm delivery of the panel, assembled
 # in studio/web/npm by the build — the served panel.js byte for byte
 # (+ panel.js.sha256), the thin ESM entry with mount/scope/open/close/
-# on, the react/vue/svelte helpers and their declarations. This target
-# drives the package suite against the assembled files and lists the
-# tarball's contents. It never publishes: `npm publish` from
-# studio/web/npm is a release decision, not a build step.
+# on, the react/vue/svelte helpers, the DOM-free scope.js and their
+# declarations. This target (and studio-check) drives the package
+# suite against the assembled files and type-checks a consumer of
+# every subpath under node16 and bundler resolution
+# (scripts/npm-consumer.ts); this one also lists the tarball. It
+# never publishes: `npm publish` from studio/web/npm is a release
+# decision, not a build step.
 devtools-npm: studio-build
 	cd studio/web && bun run scripts/npm-package.ts --check
 	cd studio/web && WEFT_DEVTOOLS_PKG=1 bunx vitest run src/npm
+	cd studio/web && bun run scripts/npm-consumer.ts
 	cd studio/web/npm && npm pack --dry-run

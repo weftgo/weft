@@ -3,7 +3,8 @@
 // emits panel.js — the side-effect bundle /studio/panel.js serves —
 // and this config emits the thin modules beside it: index.js (mount,
 // scope, open, close, toggle, on — through the registered element)
-// and the react / vue / svelte helpers. Their `import "./panel.js"`
+// the react / vue / svelte helpers, and scope.js (the marker's
+// serialiser, DOM-free). Their `import "./panel.js"`
 // stays external: the package ships the panel bundle itself, the same
 // bytes, never a second copy of the panel's code.
 // scripts/npm-package.ts assembles studio/web/npm from both outputs
@@ -54,6 +55,9 @@ export default defineConfig({
         react: `${src}react.ts`,
         vue: `${src}vue.ts`,
         svelte: `${src}svelte.ts`,
+        // DOM-free: the Scope marker for server code (the root entry
+        // defines a custom element at import time).
+        scope: new URL("./src/lib/scope.ts", import.meta.url).pathname,
       },
       formats: ["es"],
       fileName: (_format, name) => `${name}.js`,

@@ -23,7 +23,17 @@ export interface Scope {
 /** The optional fields, in their serialised order. */
 const KEYS = ["session", "flow", "run"] as const
 
-const enc = (v: string) => encodeURIComponent(v)
+/** enc percent-encodes a value; a string encodeURIComponent refuses
+ * (a lone surrogate) has only the marker's own delimiters encoded —
+ * the marker is set inside a host's ref or action, where a throw would
+ * be the host's. */
+const enc = (v: string) => {
+  try {
+    return encodeURIComponent(v)
+  } catch {
+    return v.replace(/[%;=]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+  }
+}
 const dec = (v: string) => {
   try {
     return decodeURIComponent(v)

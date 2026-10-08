@@ -1,10 +1,10 @@
 // @weftgo/devtools/svelte — one action, no component and no Svelte
 // import: <div use:weftDevtools={{ scope: { publicId } }}>.
-import { binder } from "./marker"
-import type { HelperOptions } from "./marker"
+import { binder } from "./marker.js"
+import type { HelperOptions } from "./marker.js"
 
-export type { HelperOptions } from "./marker"
-export type { Scope } from "../lib/scope"
+export type { HelperOptions } from "./marker.js"
+export type { Scope } from "../lib/scope.js"
 
 /** weftDevtools is a Svelte action (3, 4 and 5): on mount it sets
  * data-weft-scope on the node, mounts the panel if the page has none

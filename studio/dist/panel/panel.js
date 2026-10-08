@@ -1169,7 +1169,7 @@ function ot(e, t) {
 //#endregion
 //#region src/panel/version.ts
 function st() {
-	return "v0.9.0";
+	return "v0.10.0";
 }
 function ct(e) {
 	if (typeof e != "string") return null;

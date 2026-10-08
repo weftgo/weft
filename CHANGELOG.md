@@ -6,7 +6,14 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
-## Unreleased
+## 0.10.0 — 2026-10-08
+
+The request record (ADR 0028): every model call's system prompt, tool
+catalog, parameters and attempts recorded beside the transcript, read
+back by Studio and the devtools panel with a closed table of honesty
+badges; app logs, the step route, the export in four formats; one
+version from the module. Tags `core/v0.10.0` (compatible additions
+only) and `v0.10.0` (breaking in the pre-freeze layers listed below).
 
 ### Changed — breaking
 

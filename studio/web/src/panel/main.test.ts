@@ -15,6 +15,9 @@ beforeEach(() => {
   const s = document.createElement("script")
   s.type = "module"
   s.src = "http://studio.test/studio/panel.js"
+  // The tag §5.2 documents for the __WEFT__ default: no data-* knob, so
+  // data-weft is what lets the panel find it (C2: no file-name match).
+  s.setAttribute("data-weft", "")
   document.head.appendChild(s)
 })
 
@@ -34,7 +37,7 @@ const scopes = () =>
 
 describe("window.__WEFT__ (§5.2)", () => {
   it("stays the page's own object: its other properties survive the panel loading", async () => {
-    fakeStudio(baseRoutes())
+    const studio = fakeStudio(baseRoutes())
     const mine = { publicId: "pub_orders", build: "2026.10" }
     page.__WEFT__ = mine
     await import("./main")
@@ -45,6 +48,11 @@ describe("window.__WEFT__ (§5.2)", () => {
     expect(scopes()).toEqual(["pub_orders"])
     expect(dock()?.hasAttribute("data-public-id")).toBe(false) // the page's markup is not written to
     expect(dock()?.autoMounted).toBe(true)
+    // The endpoint is the script's own directory — origin and path, not
+    // the page's (the fake Studio routes on the path alone, so only the
+    // URL itself can tell).
+    const metas = studio.fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/api/meta"))
+    expect(metas).toEqual(["http://studio.test/studio/api/meta"])
   })
 
   it("rescopes on reassignment and on setting publicId on the object; none returns to the default", async () => {

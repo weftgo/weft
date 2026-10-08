@@ -175,16 +175,22 @@ module, ADR 0005).
   with no file (`:memory:`, ClickHouse) gets a per-process token,
   printed as before. `--token` / `WEFT_STUDIO_TOKEN` override as
   before and never touch the file.
-- **The panel no longer finds its script tag by file name** (the
-  `panel(-vX)?.js` pattern is gone): a renamed or proxied bundle whose
-  tag carries none of the panel's `data-*` attributes needs `data-weft`
-  on it, or the configuration at a higher rung (a meta tag, the
-  element, `mount(opts)`). A `<weft-devtools>` element in your markup
-  with no Studio answering now shows the not-reachable line instead of
-  an empty element.
 
 ### Changed — breaking
 
+- **The panel no longer finds its script tag by file name** (the
+  `panel(-vX)?.js` pattern is gone). A tag carrying none of the panel's
+  `data-*` attributes — the bare `<script type="module"
+  src="/studio/panel.js">` that relied on `window.__WEFT__`, or a
+  renamed or proxied bundle — is no longer found: its endpoint falls to
+  the page's own directory, Studio does not answer there, and the auto
+  dock removes itself silently. Migration: add `data-weft` to the
+  script tag (`<script type="module" src="/studio/panel.js"
+  data-weft>`), or configure a higher rung (a `weft:*` meta tag, the
+  element, `mount(opts)`). Tags with `data-public-id`, `data-endpoint`
+  or another panel attribute keep working. A `<weft-devtools>` element
+  in your markup with no Studio answering now shows the not-reachable
+  line instead of an empty element.
 - **`studio/cmd` is removed**: the setup-B binary is `weft studio`
   (`go install github.com/weftgo/weft/cmd/weft@latest`), every flag
   kept. `studio --version` is `weft version`; `studio doctor` is

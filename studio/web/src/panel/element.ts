@@ -98,6 +98,10 @@ function attachStyles(root: ShadowRoot): void {
 
 const quiet = () => {}
 
+/** How long panel-config.json (configuration rung 5) may take before
+ * the panel falls through to the script's own directory. */
+const PROBE_TIMEOUT_MS = 3_000
+
 /** How the renderers remember which <details> the user opened. */
 interface OpenState {
   keys: Set<string>
@@ -135,6 +139,11 @@ export class WeftDevtools extends HTMLElement {
   /** The endpoint that did not answer, for the not-reachable line of
    * a mount the host made (null: no line). */
   private unreachable: string | null = null
+  /** A retry from the not-reachable line is in flight: the line stays
+   * (saying "checking…") until the probe resolves. */
+  private checking = false
+  /** Aborts the panel-config.json request of the start in flight. */
+  private probe: AbortController | null = null
   private startSeq = 0
   private scheduled = false
   /** Studio did not answer and the node is not ours to remove. */
@@ -217,6 +226,8 @@ export class WeftDevtools extends HTMLElement {
     this.holdTimer = null
     this.held = this.composing = false
     this.startSeq++ // a start still in flight is no longer this element's
+    this.probe?.abort()
+    this.probe = null
     this.model?.dispose()
     this.model = null
     this.conn = null
@@ -338,23 +349,44 @@ export class WeftDevtools extends HTMLElement {
    * instead: "Studio not reachable at … · retry". Only the newest
    * start decides: one that was superseded (the attributes changed
    * while a request was in flight) must not take the panel down. */
-  private async start() {
+  private async start(retrying = false) {
     const seq = ++this.startSeq
     const cfg = this.cfg
     this.model?.dispose()
     this.model = null
     this.conn = null
-    this.dormant = false
-    this.unreachable = null
+    this.probe?.abort()
+    this.probe = null
     this.scratch.clear()
-    // The previous connection's dock is not this one's.
-    this.render(emptyPanelState())
+    // A retry keeps the not-reachable line up while it probes: no fab
+    // or empty dock flashing in between.
+    const keepLine = retrying && this.dormant && this.unreachable !== null
+    if (keepLine) {
+      this.checking = true
+      this.render(emptyPanelState())
+    } else {
+      this.dormant = false
+      this.unreachable = null
+      this.checking = false
+      // The previous connection's dock is not this one's.
+      this.render(emptyPanelState())
+    }
     let ok = false
     let endpoint = cfg.endpoint
     if (cfg.configURL) {
       // Rung 5: the endpoint the Studio beside the script names, or
-      // the script's directory (rung 6) when it names none.
-      endpoint = (await discoverEndpoint(cfg.configURL)) || cfg.endpoint
+      // the script's directory (rung 6) when it names none. Bounded:
+      // a proxy that holds the request does not hold the panel, and a
+      // newer start or a disconnect aborts it.
+      const probe = new AbortController()
+      this.probe = probe
+      const timer = setTimeout(() => probe.abort(), PROBE_TIMEOUT_MS)
+      try {
+        endpoint = (await discoverEndpoint(cfg.configURL, probe.signal)) || cfg.endpoint
+      } finally {
+        clearTimeout(timer)
+        if (this.probe === probe) this.probe = null
+      }
       if (seq !== this.startSeq) return
     }
     if (endpoint) {
@@ -374,7 +406,16 @@ export class WeftDevtools extends HTMLElement {
       }
       if (seq !== this.startSeq || this.model !== model) return
     }
-    if (ok) return
+    this.checking = false
+    if (ok) {
+      if (this.dormant) {
+        // A retry that found Studio: the panel replaces the line.
+        this.dormant = false
+        this.unreachable = null
+        this.render(this.last)
+      }
+      return
+    }
     // No Studio answered.
     this.model?.dispose()
     this.model = null
@@ -392,7 +433,7 @@ export class WeftDevtools extends HTMLElement {
   /** retry is the not-reachable line's control: probe again. */
   private retry() {
     this.cfg = readConfig(this)
-    void this.start().catch(quiet)
+    void this.start(true).catch(quiet)
   }
 
   toggle() {
@@ -465,9 +506,12 @@ export class WeftDevtools extends HTMLElement {
           ...(this.unreachable ? [el("span", "weft-unreachable-at", this.unreachable)] : []),
           " · "
         )
-        const again = el("button", "weft-retry", "retry", { type: "button", title: "ask Studio again" })
-        again.addEventListener("click", () => this.retry())
-        line.appendChild(again)
+        if (this.checking) line.append(el("span", "weft-checking", "checking…"))
+        else {
+          const again = el("button", "weft-retry", "retry", { type: "button", title: "ask Studio again" })
+          again.addEventListener("click", () => this.retry())
+          line.appendChild(again)
+        }
         next.push(line)
       }
     } else if (!this.open) {

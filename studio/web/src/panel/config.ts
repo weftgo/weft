@@ -156,10 +156,13 @@ const attrRung = (n: Element | null | undefined): Rung => (f) => n?.getAttribute
 export function readConfig(el?: HTMLElement & { options?: MountOptions | null }): PanelConfig {
   const script = findPanelScript()
   const rungs: Rung[] = [optionsRung(el?.options), attrRung(el), metaRung(), attrRung(script)]
+  /** pick: the first rung that sets f. For the endpoint an empty value
+   * (data-endpoint="", content="") sets nothing — it falls through, so
+   * it neither resolves to the page's own URL nor skips rung 5. */
   const pick = (f: Field): string | null => {
     for (const r of rungs) {
       const v = r(f)
-      if (v !== null) return v
+      if (v !== null && !(f === "endpoint" && v.trim() === "")) return v
     }
     return null
   }
@@ -198,6 +201,7 @@ export function readConfig(el?: HTMLElement & { options?: MountOptions | null })
  * JSON, no answer): the caller falls through to rung 6. No token and
  * no credentials go with the request. */
 export async function discoverEndpoint(configURL: string, signal?: AbortSignal): Promise<string> {
+  if (signal?.aborted) return ""
   try {
     const res = await fetch(configURL, {
       headers: { Accept: "application/json" },

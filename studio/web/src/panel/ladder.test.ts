@@ -58,7 +58,7 @@ interface Case {
  * (rung 1: mount options, 2: the element, 3: a meta tag, 4: the
  * data-weft script tag) and reads the configuration back. */
 function stage(
-  field: "endpoint" | "token" | "public-id" | "position",
+  field: "endpoint" | "token" | "public-id" | "position" | "open" | "auto",
   set: Rung[],
   values: Record<Rung, string>
 ) {
@@ -68,8 +68,10 @@ function stage(
   if (set.includes(3)) meta(field, values[3])
   const attrs: Record<string, string> = {}
   if (set.includes(2)) attrs[`data-${field}`] = values[2]
-  const key = { endpoint: "endpoint", token: "token", "public-id": "publicId", position: "position" }[field]
-  const options = set.includes(1) ? ({ [key]: values[1] } as MountOptions) : null
+  const key = { endpoint: "endpoint", token: "token", "public-id": "publicId", position: "position", open: "open", auto: "auto" }[field]
+  // mount(opts) takes booleans for open and auto.
+  const v1 = field === "open" || field === "auto" ? values[1] === "true" : values[1]
+  const options = set.includes(1) ? ({ [key]: v1 } as MountOptions) : null
   return readConfig(element(attrs, options))
 }
 
@@ -138,6 +140,60 @@ describe("the configuration ladder (C2): each field, one case per rung", () => {
       expect(stage("position", c.set, positions).position).toBe(c.want)
     })
   }
+
+  const flags = (field: "open" | "auto", set: Rung[], v: string) =>
+    stage(field, set, { 1: v, 2: v, 3: v, 4: v } as Record<Rung, string>)
+  for (const c of [
+    { rung: "1", set: [1] as Rung[] },
+    { rung: "2", set: [2] as Rung[] },
+    { rung: "3", set: [3] as Rung[] },
+    { rung: "4", set: [4] as Rung[] },
+  ]) {
+    it(`open — rung ${c.rung}: "true" opens; a higher rung's "false" wins over a lower "true"`, () => {
+      expect(flags("open", c.set, "true").open).toBe(true)
+      document.head.querySelectorAll("script, meta").forEach((n) => n.remove())
+      const lower = (c.set[0] + 1) as Rung
+      if (lower <= 4) {
+        const vals = { 1: "true", 2: "true", 3: "true", 4: "true" } as Record<Rung, string>
+        vals[c.set[0]] = "false"
+        expect(stage("open", [c.set[0], lower], vals).open).toBe(false)
+      }
+    })
+    it(`auto — rung ${c.rung}: "false" turns the auto mount off; a higher rung's "true" wins over a lower "false"`, () => {
+      expect(flags("auto", c.set, "false").auto).toBe(false)
+      document.head.querySelectorAll("script, meta").forEach((n) => n.remove())
+      const lower = (c.set[0] + 1) as Rung
+      if (lower <= 4) {
+        const vals = { 1: "false", 2: "false", 3: "false", 4: "false" } as Record<Rung, string>
+        vals[c.set[0]] = "true"
+        expect(stage("auto", [c.set[0], lower], vals).auto).toBe(true)
+      }
+    })
+  }
+
+  it("public id — none at any rung: window.__WEFT__.publicId", () => {
+    ;(window as { __WEFT__?: unknown }).__WEFT__ = { publicId: "pub_weft" }
+    try {
+      expect(stage("public-id", [], ids).publicId).toBe("pub_weft")
+      document.head.querySelectorAll("script, meta").forEach((n) => n.remove())
+      expect(stage("public-id", [4], ids).publicId).toBe("pub_script") // any rung beats it
+    } finally {
+      delete (window as { __WEFT__?: unknown }).__WEFT__
+    }
+  })
+
+  it("an empty endpoint at any rung is unset: it falls through to the next rung, and to panel-config.json", () => {
+    script({ "data-weft": "", "data-endpoint": "http://script.test/studio" })
+    meta("endpoint", "")
+    let cfg = readConfig(element({ "data-endpoint": "" }, { endpoint: "" }))
+    expect(cfg.endpoint).toBe("http://script.test/studio/")
+    document.head.querySelectorAll("script, meta").forEach((n) => n.remove())
+    script({ "data-weft": "", "data-endpoint": " " })
+    cfg = readConfig(element({ "data-endpoint": "" }))
+    expect(cfg.endpointExplicit).toBe(false)
+    expect(cfg.endpoint).toBe("https://proxy.example/assets/")
+    expect(cfg.configURL).toBe("https://proxy.example/assets/panel-config.json")
+  })
 
   it("fields resolve independently: the token from a meta tag, the endpoint from the script tag, the scope from the element", () => {
     script({ "data-weft": "", "data-endpoint": "http://script.test/studio/" })
@@ -341,6 +397,49 @@ describe("no Studio: a line for the host's mount, silence for the panel's own", 
     for (const s of spies) expect(s).not.toHaveBeenCalled()
   })
 
+  it("a retry keeps the line (checking…) while the probe is in flight — never the fab, never an empty dock", async () => {
+    let release: () => void = () => {}
+    let held = false
+    const studio = fakeStudio(baseRoutes(), async () => {
+      if (!held) return new Response("no studio", { status: 404 })
+      await new Promise<void>((r) => (release = r))
+      return new Response("no studio", { status: 404 })
+    })
+    for (const open of [false, true]) {
+      held = false
+      const el = mountPanel({ endpoint: "http://studio.test/studio/", open })
+      await settle()
+      expect($(el, ".weft-unreachable button")).toBeTruthy()
+      held = true
+      click($(el, ".weft-unreachable button"))
+      await new Promise((r) => setTimeout(r, 20)) // the probe is in flight
+      expect(text(el, ".weft-unreachable")).toBe("Studio not reachable at http://studio.test/studio/ · checking…")
+      expect($(el, ".weft-fab, .weft-dock")).toBeNull()
+      release()
+      await settle()
+      expect(text(el, ".weft-unreachable")).toContain("· retry")
+      expect($(el, ".weft-fab, .weft-dock")).toBeNull()
+      el.remove()
+    }
+    expect(studio.gets("meta")).toHaveLength(4)
+  })
+
+  it("retry re-reads the configuration: a meta tag changed after the first failure is used", async () => {
+    meta("endpoint", "http://down.test/studio/")
+    const studio = fakeStudio(baseRoutes())
+    // The first request (meta at down.test) gets no Studio.
+    studio.fetchMock.mockImplementationOnce(async () => new Response("no studio", { status: 404 }))
+    const el = mountPanel({ open: true, publicId: "pub_orders" })
+    await settle()
+    expect(text(el, ".weft-unreachable")).toContain("http://down.test/studio/")
+    document.head.querySelector("meta")!.setAttribute("content", "http://up.test/studio/")
+    click($(el, ".weft-unreachable button"))
+    await settle()
+    expect($(el, ".weft-unreachable")).toBeNull()
+    expect(metaURLs(studio)).toEqual(["http://down.test/studio/api/meta", "http://up.test/studio/api/meta"])
+    expect(text(el, ".weft-title")).toContain("pub_orders")
+  })
+
   it("markup with data-auto=false shows the line too", async () => {
     fakeStudio(baseRoutes(), new Response("no studio", { status: 404 }))
     const el = element({ "data-endpoint": "http://studio.test/studio/", "data-auto": "false" })
@@ -360,6 +459,53 @@ describe("no Studio: a line for the host's mount, silence for the panel's own", 
     expect(dock.isConnected).toBe(false)
     expect(document.querySelector("weft-devtools")).toBeNull()
     expect(studio.gets("meta")).toHaveLength(1)
+    // At most two requests: panel-config.json, then meta.
+    expect(studio.fetchMock).toHaveBeenCalledTimes(2)
     for (const s of spies) expect(s).not.toHaveBeenCalled()
+  })
+
+  it("a held panel-config.json is bounded: aborted after 3 s, then the script's directory", async () => {
+    vi.useFakeTimers()
+    script({ "data-weft": "" })
+    let aborted = false
+    const studio = fakeStudio({
+      ...baseRoutes(),
+      "/assets/panel-config.json": (init?: RequestInit) =>
+        new Promise((_, reject) =>
+          init?.signal?.addEventListener("abort", () => {
+            aborted = true
+            reject(new DOMException("aborted", "AbortError"))
+          })
+        ),
+    })
+    const el = mountPanel()
+    await vi.advanceTimersByTimeAsync(2_900)
+    expect(metaURLs(studio)).toEqual([])
+    await vi.advanceTimersByTimeAsync(200)
+    expect(aborted).toBe(true)
+    expect(metaURLs(studio)).toEqual(["https://proxy.example/assets/api/meta"])
+    vi.useRealTimers()
+    el.remove()
+  })
+
+  it("removing the element aborts its panel-config.json request", async () => {
+    script({ "data-weft": "" })
+    let aborted = false
+    const studio = fakeStudio({
+      ...baseRoutes(),
+      "/assets/panel-config.json": (init?: RequestInit) =>
+        new Promise((_, reject) =>
+          init?.signal?.addEventListener("abort", () => {
+            aborted = true
+            reject(new DOMException("aborted", "AbortError"))
+          })
+        ),
+    })
+    const el = mountPanel()
+    await new Promise((r) => setTimeout(r, 10))
+    el.remove()
+    await settle()
+    expect(aborted).toBe(true)
+    expect(metaURLs(studio)).toEqual([]) // nothing after the disconnect
   })
 })

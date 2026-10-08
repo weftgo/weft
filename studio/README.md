@@ -111,7 +111,11 @@ child's request line and an "open in Studio" hand-off; a grandchild is
 the hand-off only) and a spans waterfall.
 `Alt+W` toggles (Q4), `?` lists keys, `r` flips raw. Setups B/C add
 `data-endpoint` and `data-token` (a dev token, or a panel token your
-backend mints per page via `POST /api/panel-tokens`).
+backend mints per page via `POST /api/panel-tokens`). A single-page app
+that switches conversations sets `window.__WEFT__ = { publicId }`
+instead of `data-public-id`; the tag then carries no other knob, so
+keep `data-weft` on it — it is how the panel finds its own tag (and
+with it the endpoint) whatever the file is called.
 
 Where the configuration comes from (plan C2). Each field — `endpoint`,
 `public-id`, `token`, `position`, `open`, `auto` — resolves on its
@@ -122,7 +126,7 @@ behind a proxy configures itself the same way.
 
 | # | Source | The explicit form |
 |---|---|---|
-| 1 | `mount(opts)` — a programmatic mount (the npm entry exports it) | `mount({endpoint, publicId, token, position, open, auto, target})` |
+| 1 | `mount(opts)` — a programmatic mount (C1's npm entry; not in the script-tag bundle) | `mount({endpoint, publicId, token, position, open, auto, target})` |
 | 2 | the `<weft-devtools>` element's attributes | `<weft-devtools data-endpoint="…" data-token="…">` |
 | 3 | meta tags | `<meta name="weft:endpoint" content="…">` (also `weft:public-id`, `weft:token`, `weft:position`, `weft:open`, `weft:auto`) |
 | 4 | the panel's `<script>` tag: the running classic script, else the first with a `data-weft` attribute (any `src`, any value), else the first carrying one of the `data-*` attributes above | `<script type="module" src="…" data-weft data-endpoint="…">` |
@@ -133,14 +137,20 @@ A renamed bundle whose tag carries none of the panel's `data-*`
 attributes needs `data-weft` on it (or a higher rung); without a tag to
 find, the endpoint is the page's own directory.
 
+A `weft:token` meta tag, like `data-token`, is a token in the page's
+source: in HTML you ship, use a per-page panel token your backend
+mints (`POST /api/panel-tokens`), never a dev or server token.
+
 No Studio answering: the dock the script mounted by itself removes
-itself silently — no console, one request. A mount you made (a
+itself silently — no console, at most two requests (`panel-config.json`,
+then meta; `panel-config.json` gives up after 3 s). A mount you made (a
 `<weft-devtools>` element in your markup, `mount(opts)`, or
 `data-auto="false"`) shows one quiet line instead, `Studio not
-reachable at <endpoint> · retry`, where `retry` asks again. The
+reachable at <endpoint> · retry`, where `retry` asks again (the line
+reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 110,894 B raw / 30.6 KiB gzip;
+committed `studio/dist/panel/panel.js`, 111,622 B raw / 30.8 KiB gzip;
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 

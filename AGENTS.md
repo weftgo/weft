@@ -205,7 +205,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    spans, capability "logs"; refused to a read-scoped token: they may carry prompts;
 //    //    the run row carries delta_count), traces/{id},
 //    //    sessions, sessions/{id}, public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
-//    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5), /panel-config.json
+//    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5; configured by a data-weft
+//    //    script tag, weft:* meta tags, or <base>/panel-config.json; studio/README.md
+//    //    has the ladder), /panel-config.json
 //    //    ({endpoint, version, capabilities}; loopback Host / same-origin only, else
 //    //    404; capability "panel-config"); Token(tok) walls the
 //    //    /api tree (bearer or ?token=) — the UI shell and /panel.js are static,

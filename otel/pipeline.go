@@ -162,8 +162,11 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 		o.apply(&cfg)
 	}
 	dests := append([]dest{}, cfg.dests...)
+	var joined *discovered
 	if !cfg.noEnv {
-		dests = append(dests, dedupe(cfg.dests, envDestinations(envGetenv))...)
+		getenv := envGetenv
+		getenv, joined = discoverStudio(getenv)
+		dests = append(dests, dedupe(cfg.dests, envDestinations(getenv))...)
 	}
 	if len(dests) == 0 {
 		return nil, errNoDestinations
@@ -171,6 +174,13 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 	p, failed := build(ctx, cfg, dests)
 	if failed != nil {
 		return nil, failed
+	}
+	if joined != nil && p.studioURL == normalizeEnvEndpoint(joined.info.URL) {
+		// The one INFO line: which Studio this process joined, and how
+		// to stop it doing so.
+		slog.Info("weft/otel: joined the running Studio", "url", joined.info.URL,
+			"pid", joined.info.PID, "file", joined.path,
+			"hint", "WEFT_STUDIO_URL names another; WEFT_DISCOVERY=off ignores the file")
 	}
 	if !cfg.noGlobal {
 		registerGlobals(p)

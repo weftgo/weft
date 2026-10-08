@@ -1,8 +1,11 @@
 package otel
 
 import (
+	"log/slog"
 	"net/url"
 	"strings"
+
+	"github.com/weftgo/weft/internal/discovery"
 )
 
 // The environment destinations (S2.3). The core reads no environment
@@ -16,6 +19,7 @@ import (
 //	OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT      → content for the env OTLP destination
 //	OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES            → resource (buildResource)
 //	WEFT_DB                                                  → the default Local path
+//	(neither WEFT_STUDIO_URL nor WEFT_DISCOVERY=off)          → the discovery file's Studio (discoverStudio)
 //
 // An http:// scheme the operator wrote in OTEL_EXPORTER_OTLP_ENDPOINT is
 // the opt-in for a plaintext export to that host — the variable's
@@ -139,4 +143,34 @@ func dedupe(explicit, env []dest) []dest {
 		out = append(out, d)
 	}
 	return out
+}
+
+// discovered is the running Studio the discovery file named.
+type discovered struct {
+	info discovery.Info
+	path string
+}
+
+// discoverStudio is the discovery rung (plan B3): when WEFT_STUDIO_URL
+// is unset and WEFT_DISCOVERY is not "off", the discovery file `weft
+// studio` / `weft dev` writes (internal/discovery: ./.weft, then
+// $XDG_RUNTIME_DIR/weft, then the user cache directory) stands in for
+// WEFT_STUDIO_URL and WEFT_STUDIO_TOKEN — its url and token, together.
+// A stale file (its pid gone, or 24 hours old) is never trusted; a
+// missing, stale or malformed one changes nothing and logs Debug at
+// most. NoEnv turns this off with the rest of the environment.
+func discoverStudio(getenv func(string) string) (func(string) string, *discovered) {
+	info, path, ok := discovery.Lookup(getenv, slog.Default())
+	if !ok {
+		return getenv, nil
+	}
+	return func(k string) string {
+		switch k {
+		case "WEFT_STUDIO_URL":
+			return info.URL
+		case "WEFT_STUDIO_TOKEN":
+			return info.Token
+		}
+		return getenv(k)
+	}, &discovered{info: info, path: path}
 }

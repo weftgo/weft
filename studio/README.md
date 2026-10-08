@@ -45,17 +45,21 @@ bearer is the defence and the `Host` does not matter.
 ```sh
 go install github.com/weftgo/weft/cmd/weft@latest
 weft studio                            # UI + OTLP + SQLite + playground + dev token on 127.0.0.1:7331
-WEFT_STUDIO_URL=http://127.0.0.1:7331 ./my-go-app
+./my-go-app                            # otel.Install() finds it through the discovery file
 OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 python app.py
 ```
 
-The dev token is printed at start (`WEFT_STUDIO_TOKEN` or `--token`
-fixes it); ingest is open on loopback;
+The dev token is stable per database — `<db>.token` beside the SQLite
+file, 0600, never printed (`--rotate-token` renews it;
+`WEFT_STUDIO_TOKEN` or `--token` overrides it); a Go app with
+`otel.Install()` / `runtime.Install()` finds the running Studio through
+the discovery file `studio.json` (`./.weft`, `$XDG_RUNTIME_DIR/weft`,
+the user cache directory; `WEFT_STUDIO_URL` always wins,
+`WEFT_DISCOVERY=off` ignores it); ingest is open on loopback;
 `127.0.0.1:7331` is the one default port: started again on the same
 database, the binary finds the running Studio through `/api/meta`
-(`db.path`, `pid`) and reuses it (`studio already running at … (pid
-n), reusing`, exit 0 — fix the token with `WEFT_STUDIO_TOKEN` so the
-second start can read the first's meta); anything else on the port
+(`db.path`, `pid`, read with the stable token) and reuses it (`studio
+already running at … (pid n), reusing`, exit 0); anything else on the port
 moves it to the next free one in 7331–7340 with one line saying so.
 `--addr` (or `WEFT_STUDIO_ADDR`) pins: a busy pinned address is an
 error, never a fallback; `--db sqlite://path` picks the

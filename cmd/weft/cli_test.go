@@ -19,6 +19,7 @@ import (
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftgo/weft/internal/discovery"
 	"github.com/weftgo/weft/otel"
 )
 
@@ -43,13 +44,23 @@ func TestMain(m *testing.M) {
 		os.Exit(devHelper(mode))
 	}
 	stdoutIsTTY = func() bool { return false }
+	// Every discovery file the tests' Studios write (and every read)
+	// goes to a directory of this process's own, never the developer's
+	// ./.weft, $XDG_RUNTIME_DIR/weft or user cache directory.
+	discDir, err := os.MkdirTemp("", "weft-discovery-")
+	if err != nil {
+		panic(err)
+	}
+	discovery.Dirs = func() []string { return []string{discDir} }
 	openURL = func(link string) error {
 		opened.mu.Lock()
 		defer opened.mu.Unlock()
 		opened.links = append(opened.links, link)
 		return nil
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	_ = os.RemoveAll(discDir)
+	os.Exit(code)
 }
 
 // TestUsage pins the dispatcher: no command and an unknown one are

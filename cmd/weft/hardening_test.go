@@ -87,9 +87,10 @@ func TestBadDatabaseIsAnErrorNotAPanic(t *testing.T) {
 // page URL's fragment, so the banner of a server that drew its own dev
 // token prints a link that opens the UI already authenticated. The
 // fragment never reaches a server or a Referer. A token the operator
-// fixed is not printed, in the link either.
+// fixed is not printed, in the link either; nor is a database's stable
+// token (TestStableTokenAuthenticatesUnprinted).
 func TestBannerLinkCarriesAGeneratedToken(t *testing.T) {
-	t.Setenv("WEFT_DB", t.TempDir()+"/link.db")
+	t.Setenv("WEFT_DB", ":memory:") // no file: the token is this process's alone
 	t.Setenv("WEFT_STUDIO_TOKEN", "")
 	var banner strings.Builder
 	srv, err := serveBoot("", "127.0.0.1:7331", "", &banner)

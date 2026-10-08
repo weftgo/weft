@@ -181,6 +181,7 @@ func (s *Server) registerGroups() {
 	if panelGroupHook != nil {
 		s.addGroup(panelGroupHook()) // step 7: always on
 	}
+	s.addGroup(panelConfigGroup()) // plan B3: GET /panel-config.json, always on
 	if s.playground && playgroundGroupHook != nil {
 		s.addGroup(playgroundGroupHook()) // step 8: Playground(true)
 	}

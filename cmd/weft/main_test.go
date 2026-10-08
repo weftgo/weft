@@ -208,26 +208,48 @@ func assertSetupB(t *testing.T, h http.Handler, token, dbPath string) {
 	if code != http.StatusOK || !strings.Contains(body, `<base href="/">`) {
 		t.Errorf("shell: %d %.80s", code, body)
 	}
+	if dbPath == "" {
+		return // a database with no file
+	}
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Errorf("database %s not opened: %v", dbPath, err)
 	}
 }
 
-// TestTokenPrecedence pins --token > WEFT_STUDIO_TOKEN > generated.
+// TestTokenPrecedence pins --token > WEFT_STUDIO_TOKEN > the
+// database's stable token (plan B3) > generated (a database with no
+// file).
 func TestTokenPrecedence(t *testing.T) {
-	t.Setenv("WEFT_STUDIO_TOKEN", "from-env")
-	if got := srvToken(""); got != "from-env" {
-		t.Errorf("env token: %q", got)
+	db := "sqlite://" + filepath.Join(t.TempDir(), "p.db")
+	resolve := func(dbFlag, flag string) resolvedToken {
+		t.Helper()
+		tok, err := resolveToken(dbFlag, flag, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
 	}
-	if got := srvToken("from-flag"); got != "from-flag" {
-		t.Errorf("flag token: %q", got)
+	t.Setenv("WEFT_STUDIO_TOKEN", "from-env")
+	if got := resolve(db, ""); got.value != "from-env" || got.source != tokenFromEnv {
+		t.Errorf("env token: %+v", got)
+	}
+	if got := resolve(db, "from-flag"); got.value != "from-flag" || got.source != tokenFromFlag {
+		t.Errorf("flag token: %+v", got)
 	}
 	t.Setenv("WEFT_STUDIO_TOKEN", "")
-	if got := srvToken(""); got == "" || len(got) < 20 {
-		t.Errorf("generated token: %q", got)
+	stable := resolve(db, "")
+	if stable.source != tokenFromFile || len(stable.value) < 40 || !stable.created || stable.printable() {
+		t.Errorf("stable token: %+v", stable)
 	}
-	if a, b := srvToken(""), srvToken(""); a == b {
-		t.Errorf("generated token repeats: %q", a)
+	if again := resolve(db, ""); again.value != stable.value || again.created {
+		t.Errorf("the stable token moved: %+v, then %+v", stable, again)
+	}
+	mem := "sqlite://:memory:"
+	if got := resolve(mem, ""); got.value == "" || len(got.value) < 20 || !got.printable() {
+		t.Errorf("generated token: %+v", got)
+	}
+	if a, b := resolve(mem, ""), resolve(mem, ""); a.value == b.value {
+		t.Errorf("generated token repeats: %q", a.value)
 	}
 }
 
@@ -239,7 +261,7 @@ func TestTokenPrecedence(t *testing.T) {
 // 401'd against /api/meta, breaking setup B's documented hand-off.
 func TestBootBannerTokenAuthenticates(t *testing.T) {
 	t.Setenv("WEFT_STUDIO_TOKEN", "")
-	t.Setenv("WEFT_DB", t.TempDir()+"/boot.db")
+	t.Setenv("WEFT_DB", ":memory:") // no file: a token generated for this process
 	var banner strings.Builder
 	srv, err := serveBoot("", "127.0.0.1:7331", "", &banner)
 	if err != nil {
@@ -259,12 +281,43 @@ func TestBootBannerTokenAuthenticates(t *testing.T) {
 	}
 
 	// That token authenticates against this server's API.
-	assertSetupB(t, srv.Handler(), token, os.Getenv("WEFT_DB"))
+	assertSetupB(t, srv.Handler(), token, "")
 
 	// And the banner is printed exactly once — one resolution, not a
 	// second draw for the wall.
 	if n := strings.Count(banner.String(), "dev token"); n != 1 {
 		t.Errorf("banner names the dev token %d times, want 1:\n%s", n, banner.String())
+	}
+}
+
+// TestStableTokenAuthenticatesUnprinted: on a database file the token
+// is the one in <db>.token — it opens the API, and the banner never
+// prints it (it is the panel tokens' signing key), naming the file
+// instead.
+func TestStableTokenAuthenticatesUnprinted(t *testing.T) {
+	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	db := filepath.Join(t.TempDir(), "boot.db")
+	t.Setenv("WEFT_DB", db)
+	var banner strings.Builder
+	srv, err := serveBoot("", "127.0.0.1:7331", "", &banner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = srv.Close() }()
+	b, err := os.ReadFile(db + ".token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(db + ".token"); fi.Mode().Perm() != 0o600 {
+		t.Errorf("token file mode %v, want 0600", fi.Mode().Perm())
+	}
+	token := strings.TrimSpace(string(b))
+	assertSetupB(t, srv.Handler(), token, db)
+	if strings.Contains(banner.String(), token) || strings.Contains(banner.String(), "#token=") {
+		t.Errorf("the banner prints the stable token:\n%s", banner.String())
+	}
+	if want := "studio: token created in " + db + ".token"; !strings.Contains(banner.String(), want) {
+		t.Errorf("banner %q, want it to name the file (%q)", banner.String(), want)
 	}
 }
 

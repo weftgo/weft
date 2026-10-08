@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/internal/discovery"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/studio"
 	"github.com/weftgo/weft/thread"
@@ -33,8 +34,10 @@ type config struct {
 // Studio dials the Studio at url with token (setups B and C: the local
 // binary or the hosted one). Empty token is the dev mode of setup B.
 // Without a Studio or Local option, Install falls back to the pipeline's
-// own Studio destination — otel.StudioEndpoint() — and opens nothing
-// when the pipeline has none.
+// own Studio destination — otel.StudioEndpoint() — then, when that is
+// empty, to the discovery file a running `weft studio` / `weft dev`
+// wrote (unless WEFT_STUDIO_URL is set or WEFT_DISCOVERY=off; a stale
+// file is never trusted), and opens nothing when there is none.
 func Studio(url, token string) Option {
 	return func(c *config) { c.studioURL, c.studioToken = url, token }
 }
@@ -171,6 +174,17 @@ func Install(opts ...Option) (shutdown func()) {
 		// (otel.StudioEndpoint, S2.1). weft/otel knows nothing about
 		// this package; this is the one place the two meet.
 		url, token = otel.StudioEndpoint()
+	}
+	if c.local == nil && url == "" {
+		// The discovery rung (plan B3): the file `weft studio` / `weft
+		// dev` writes names the running Studio — never read when
+		// WEFT_STUDIO_URL is set or WEFT_DISCOVERY=off, never trusted
+		// when stale. One INFO line says which Studio this joined.
+		if info, path, ok := discovery.Lookup(os.Getenv, slog.Default()); ok {
+			url, token = info.URL, info.Token
+			slog.Info("weft/runtime: joined the running Studio", "url", info.URL, "pid", info.PID, "file", path,
+				"hint", "WEFT_STUDIO_URL or runtime.Studio(url, token) names another; WEFT_DISCOVERY=off ignores the file")
+		}
 	}
 	if c.local == nil && url == "" {
 		slog.Warn("weft/runtime: no Studio to dial: no link opened",

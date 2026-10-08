@@ -15,7 +15,8 @@
     "export",
     "logs",
     "live",
-    "ingest"
+    "ingest",
+    "panel-config"
   ],
   "capabilities_off": {
     "auth": "no server token to sign panel tokens with: studio.Token(tok) / weft studio --token",

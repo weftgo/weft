@@ -367,8 +367,8 @@ environment variable one to one (the table below).
 
 | Command | What it does |
 |---|---|
-| `weft studio [--addr] [--db] [--token] [--manifest] [--open] [--no-playground]` | Setup B: `studio.New` with the UI, OTLP ingest, the playground (inert until an app's `weft/runtime` connects; `--no-playground` turns it off) and a dev token. Reuses a Studio already serving the same database on 7331, else takes the next free port in 7331–7340; `--addr` pins. The manifest is `--manifest`, else the nearest `weft.json` upward (one line says which). `--open` (default on a terminal) opens the UI with the token in the URL fragment. |
-| `weft dev [studio's flags] [--no-watch] [--watch dir] [-- go run ./cmd/app]` | Studio (as `weft studio`, in-process, same port policy) plus your app run beside it and restarted on a `.go` save. Prints one line per start: `studio http://127.0.0.1:7331/#token=… · app pid 4242 · runtime rt_… registered`. See below. |
+| `weft studio [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground]` | Setup B: `studio.New` with the UI, OTLP ingest, the playground (inert until an app's `weft/runtime` connects; `--no-playground` turns it off) and a dev token stable per database. Reuses a Studio already serving the same database on 7331, else takes the next free port in 7331–7340; `--addr` pins. Writes the discovery file apps find it through (below). The manifest is `--manifest`, else the nearest `weft.json` upward (one line says which). `--open` (default on a terminal) opens the UI with the token in the URL fragment. |
+| `weft dev [studio's flags] [--no-watch] [--watch dir] [-- go run ./cmd/app]` | Studio (as `weft studio`, in-process, same port policy) plus your app run beside it and restarted on a `.go` save. Prints one line per start: `studio http://127.0.0.1:7331/ · app pid 4242 · runtime rt_… registered`. See below. |
 | `weft runs [--agent] [--since 2h\|RFC3339] [--failed] [--limit] [--json]` | One row per run (id, agent, status, started, steps) from `GET /api/runs`; `--limit` defaults to 50 (0 lists all) and says so on stderr when it hid runs; `--json` for scripts. |
 | `weft open <run id> [--open] [--with-token]` | Prints the run's page, `<url>/runs/<id>`, bare — a fixed token may be the panel tokens' signing key, so it stays out of logs; `--with-token` prints the `#token=` fragment too; `--open` hands the browser the link with the token. |
 | `weft export <run id> [--format json\|jsonl\|otlp]` | `GET /api/runs/<id>/export` to stdout. |
@@ -380,13 +380,56 @@ environment variable one to one (the table below).
 |---|---|---|
 | `--addr` | `WEFT_STUDIO_ADDR` | `127.0.0.1:7331` (unpinned) |
 | `--db` | `WEFT_DB` | `./.weft/weft.db` |
-| `--token` | `WEFT_STUDIO_TOKEN` | `weft studio`, `weft dev`: a generated dev token, printed |
+| `--token` | `WEFT_STUDIO_TOKEN` | `weft studio`, `weft dev`: the database's stable token, `<db>.token` (never printed); a generated one, printed, for a database with no file |
 | `--manifest` | `WEFT_MANIFEST` | the nearest `weft.json` upward |
 | `--url` (runs, open, export, doctor) | `WEFT_STUDIO_URL` | `http://127.0.0.1:7331` |
 
 `weft dev`'s `--watch` and `--no-watch` shape the dev loop only and
 have no environment mirror; like `--open` and `--no-playground` they
-are not connection settings.
+are not connection settings. `--rotate-token` has none either: it is an
+action, not a setting.
+
+##### The dev token and the discovery file
+
+The dev token is stable per database: the first start on a SQLite file
+writes 32 random bytes (base64url) beside it — `<db>.token`, so
+`./.weft/weft.db.token` by default, mode 0600 — and every later start
+on that file serves the same token, so a restart keeps the browser
+tab, the app's `WEFT_STUDIO_TOKEN` and a second start's reuse probe
+valid. `--rotate-token` writes a new one (panel tokens signed with the
+old one stop verifying); `--token` / `WEFT_STUDIO_TOKEN` override it
+and leave the file alone. The stable token is the panel tokens'
+signing key, like a fixed one, so it is never printed: the banner
+names its file, `weft open --with-token` prints the fragment, `--open`
+hands it to the browser. A database with no file (`:memory:`,
+ClickHouse) gets a token generated for that process, printed as
+before.
+
+Once its listener is bound, `weft studio` (and `weft dev`) writes
+`studio.json` — `{"url","token","db","pid","started","version"}`, mode
+0600, the real port in it — and removes it on a clean exit. It goes to
+the first of `./.weft/` (when that directory exists: the project's
+own), `$XDG_RUNTIME_DIR/weft/` (Linux), `os.UserCacheDir()/weft/`
+(macOS, Windows, bare containers). `otel.Install()` and
+`runtime.Install()` read the same order when `WEFT_STUDIO_URL` is
+unset, so an app with `defer otel.Install()()` exports to the running
+Studio, and `runtime.Install` dials it, with no configuration — one
+INFO line names the Studio joined. A stale file (its pid gone, or 24
+hours old) is never trusted: it is skipped without a word above Debug
+and the next writer removes it. A reusing start writes nothing (the
+running Studio owns the file) and says so when that file is missing.
+
+The file is a convenience, never a requirement: `WEFT_STUDIO_URL`
+always wins (the file is not read), `WEFT_DISCOVERY=off` turns the read
+off, and `otel.Studio(url, tok)` / `runtime.Studio(url, tok)` name a
+Studio in code.
+
+Setup A's handler serves `GET <base>/panel-config.json` —
+`{"endpoint", "version", "capabilities"}` — to a loopback (or
+`AllowOrigins`) Host and a same-origin or loopback Origin only, a 404
+to anyone else, so the devtools panel reads its endpoint instead of
+inferring it from its own `src`; `api/meta` lists the `panel-config`
+capability.
 
 ##### `weft dev`
 
@@ -402,7 +445,7 @@ with four environment variables added to yours:
 |---|---|---|
 | `WEFT_ENV` | `dev` (kept when you already set it non-empty) | `runtime.Install` opens its link |
 | `WEFT_STUDIO_URL` | the Studio's URL | `otel`'s Studio destination; `runtime.Install`'s default endpoint |
-| `WEFT_STUDIO_TOKEN` | the Studio's token (the real one, generated or fixed) | the same two |
+| `WEFT_STUDIO_TOKEN` | the Studio's token (the real one: stable, fixed or generated) | the same two |
 | `WEFT_DB` | the Studio's SQLite file, absolute (not set for ClickHouse) | `otel.Local("")`'s path: the app's local sink and Studio share one file |
 
 The last three override whatever your shell had. Everything here is
@@ -428,22 +471,22 @@ caught: on Linux `go run` still gets SIGTERM (Pdeathsig), but the
 binary it started — the grandchild — can be orphaned; elsewhere the
 whole group can.
 
-Each start prints one line: the UI link (with `#token=` only for a
-generated dev token — a fixed `--token` / `WEFT_STUDIO_TOKEN` stays out
-of the log), the app's pid, and the first runtime that registered with
+Each start prints one line: the UI link (bare by default — the stable
+token and a fixed `--token` / `WEFT_STUDIO_TOKEN` stay out of the log;
+`#token=` only for a token generated for a database with no file), the
+app's pid, and the first runtime that registered with
 this Studio within five seconds — else `no runtime registered yet (the
 app needs runtime.Install; WEFT_ENV=dev is set)` and a later line when
 one does. A Studio bound to every interface (`--addr 0.0.0.0:7331`) is
 handed to the app, and printed, as `127.0.0.1`.
 
-Reuse follows the port policy, whose probe carries only a fixed token
-(`--token` / `WEFT_STUDIO_TOKEN`): a Studio already serving the same
-database with that token is reused (the app gets that URL and token;
-`weft dev` stops only the app). Without a fixed token a running
-token-walled Studio answers the probe 401 and is skipped — `weft dev`
-takes the next port with its own Studio on the same file; a reused
-Studio with no token wall gives the app an empty `WEFT_STUDIO_TOKEN`,
-all it needs. (Plan B3's stable per-database token changes this.)
+Reuse follows the port policy, whose probe carries the fixed token
+(`--token` / `WEFT_STUDIO_TOKEN`), else the database's stable token: a
+Studio already serving the same database is reused (the app gets that
+URL and token; `weft dev` stops only the app), so two bare starts in a
+row reuse. A running Studio walled by another token answers the probe
+401 and is skipped — `weft dev` takes the next port with its own
+Studio.
 
 `go run ./studio/examples/basic` records demo runs (a tool call, a
 subagent, a failure) into an obsdb database and serves Studio on

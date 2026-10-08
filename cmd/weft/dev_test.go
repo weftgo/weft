@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/weftgo/weft/internal/discovery"
 )
 
 // `weft dev` (plan B1.2). The app is the helper process
@@ -149,20 +151,27 @@ func atoi(t *testing.T, s string) int {
 }
 
 // TestDevEnvAndOneLine: the app sees the four variables, the one line
-// names its pid, and the link carries a generated token — never a
-// fixed one, which the app still receives. Ctrl-C (SIGINT) stops the
+// names its pid, and the link is the bare URL for the database's stable
+// token (the default, plan B3) and for a fixed one — both the panel
+// tokens' signing key, which the app still receives — and carries the
+// token only when it was generated for this process (a database with
+// no file). Ctrl-C (SIGINT) stops the
 // app first with the same signal, then Studio: exit 0, the app gone,
 // nothing listening. With no runtime registering, the line says so.
 func TestDevEnvAndOneLine(t *testing.T) {
 	shortRuntimeWait(t, 300*time.Millisecond)
 	for _, c := range []struct {
 		name, token string
-	}{{"generated", ""}, {"fixed", "fixed-signing-key"}} {
+	}{{"stable", ""}, {"fixed", "fixed-signing-key"}, {"generated", ""}} {
 		t.Run(c.name, func(t *testing.T) {
 			dir := t.TempDir()
 			db := filepath.Join(dir, "weft.db")
+			dbArg, wantDB := "sqlite://"+db, db
+			if c.name == "generated" {
+				dbArg, wantDB = "sqlite://:memory:", ""
+			}
 			addr := loop(freeBase(t, 1))
-			args := []string{"--addr", addr, "--db", "sqlite://" + db, "--watch", dir}
+			args := []string{"--addr", addr, "--db", dbArg, "--watch", dir}
 			if c.token != "" {
 				args = append(args, "--token", c.token)
 			}
@@ -180,14 +189,26 @@ func TestDevEnvAndOneLine(t *testing.T) {
 			if helper[3] != "http://"+addr {
 				t.Errorf("WEFT_STUDIO_URL = %q, want http://%s", helper[3], addr)
 			}
-			if helper[5] != db {
-				t.Errorf("WEFT_DB = %q, want %s", helper[5], db)
+			if helper[5] != wantDB {
+				t.Errorf("WEFT_DB = %q, want %q", helper[5], wantDB)
 			}
 			tok := helper[4]
-			switch c.token {
-			case "":
+			switch c.name {
+			case "generated":
 				if tok == "" || link != "http://"+addr+"/#token="+tok {
 					t.Errorf("generated token %q: link %q, want it in the fragment", tok, link)
+				}
+			case "stable":
+				b, err := os.ReadFile(db + ".token")
+				if err != nil || tok == "" || tok != strings.TrimSpace(string(b)) {
+					t.Errorf("WEFT_STUDIO_TOKEN = %q, want the stable token in %s.token (%v)", tok, db, err)
+				}
+				if discovery.Find("http://"+addr) == "" {
+					t.Error("weft dev wrote no discovery file for its Studio")
+				}
+				own := helperRe.ReplaceAllString(d.out.String(), "") // the app prints what it was handed
+				if link != "http://"+addr+"/" || strings.Contains(own, tok) {
+					t.Errorf("the stable token's line %q: want the bare URL, the token nowhere in the output", line[0])
 				}
 			default:
 				if tok != c.token {
@@ -210,6 +231,9 @@ func TestDevEnvAndOneLine(t *testing.T) {
 			}
 			gone(t, "the app", pid)
 			notListening(t, addr)
+			if p := discovery.Find("http://" + addr); p != "" {
+				t.Errorf("the discovery file %s outlived weft dev", p)
+			}
 		})
 	}
 }
@@ -424,6 +448,9 @@ func TestDevStopSignals(t *testing.T) {
 			}
 			gone(t, "the app", pid)
 			notListening(t, addr)
+			if p := discovery.Find("http://" + addr); p != "" {
+				t.Errorf("the discovery file %s outlived weft dev", p)
+			}
 		})
 	}
 }

@@ -29,7 +29,8 @@ var overrideNames = map[string]string{
 // §10.4) as one table: every registered route × every identity × the
 // resource's public id. The rules it spells out:
 //
-//   - the UI and /panel.js are static and open; everything under /api
+//   - the UI, /panel.js and /panel-config.json (loopback Host only)
+//     are open; everything under /api
 //     needs a token once one is configured (401 without, with the
 //     ingest token, or with a panel token that is expired, malformed
 //     or signed with another key) — as a bearer or as ?token=;
@@ -267,6 +268,11 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "GET / (the UI)", method: "GET", path: fixed("/"), resources: one, open: true},
 		{name: "GET /runs/x (the SPA fallback)", method: "GET", path: fixed("/runs/x"), resources: one, open: true},
 		{name: "GET /panel.js", method: "GET", path: fixed("/panel.js"), resources: one, open: true},
+		// The panel's config (plan B3): unauthenticated, on a loopback
+		// Host — which the test server's is — whatever the token; a
+		// non-loopback Host or a foreign Origin is a 404
+		// (TestPanelConfig).
+		{name: "GET /panel-config.json", method: "GET", path: fixed("/panel-config.json"), resources: one, open: true},
 
 		// The read API.
 		{name: "GET /api/meta", method: "GET", path: fixed("/api/meta"), resources: one, want: anyValid(ok)},

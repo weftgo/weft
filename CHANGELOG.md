@@ -107,6 +107,28 @@ module, ADR 0005).
   database.
 - **obsdb/sqlite**: `(*DB).Path()` — the database file's absolute
   path (`""` for `:memory:`).
+- **The discovery file** (plan B3, `internal/discovery`): `weft studio`
+  and `weft dev` write `studio.json` — `{url, token, db, pid, started,
+  version}`, mode 0600, the bound port in it — to `./.weft/` when it
+  exists, else `$XDG_RUNTIME_DIR/weft/`, else `os.UserCacheDir()/weft/`,
+  and remove it on a clean exit. `otel.Install`/`otel.Start` and
+  `runtime.Install` read it when `WEFT_STUDIO_URL` is unset: an app
+  with `defer otel.Install()()` exports to the running Studio (and its
+  runtime dials it) with no configuration, one INFO line naming the
+  Studio joined. A stale file (pid gone, or 24 h old) is ignored at
+  Debug and removed by the next writer. `WEFT_STUDIO_URL` always wins;
+  **`WEFT_DISCOVERY=off`** turns the read off; `otel.NoEnv()` ignores
+  it with the rest of the environment.
+- **A stable dev token per database**: `<db>.token` beside the SQLite
+  file (`.weft/weft.db.token`), 32 random bytes base64url, 0600,
+  created on the first start and served by every later one, so the
+  token survives a restart and a second bare start's probe reuses the
+  running Studio. **`--rotate-token`** (`weft studio`, `weft dev`;
+  an action, no environment mirror) writes a new one.
+- **`GET <base>/panel-config.json`** (studio): `{endpoint, version,
+  capabilities}` for the devtools panel, answered to a loopback (or
+  `AllowOrigins`) Host and a same-origin or loopback Origin only — a
+  404 otherwise; `/api/meta` lists the new `panel-config` capability.
 
 ### Dependencies
 
@@ -117,6 +139,15 @@ module, ADR 0005).
 
 - `runtime/examples/local` serves on `127.0.0.1:7331` (was 7391, for
   no documented reason): one default port everywhere.
+- **The dev token is stable per database and no longer printed by
+  default**: `weft studio`'s banner and `weft dev`'s one line print the
+  bare URL and name the token file (the stable token is the panel
+  tokens' signing key, like a fixed one); `--open` still hands the
+  browser the link with the token, `weft open --with-token` prints it,
+  and `weft dev`'s app still gets `WEFT_STUDIO_TOKEN`. Only a database
+  with no file (`:memory:`, ClickHouse) gets a per-process token,
+  printed as before. `--token` / `WEFT_STUDIO_TOKEN` override as
+  before and never touch the file.
 
 ### Changed — breaking
 

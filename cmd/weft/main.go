@@ -3,7 +3,7 @@
 //
 //	go install github.com/weftgo/weft/cmd/weft@latest
 //
-//	weft studio [--addr] [--db] [--token] [--manifest] [--open] [--no-playground]
+//	weft studio [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground]
 //	weft dev [studio's flags] [--no-watch] [--watch dir] [-- command args…]
 //	weft runs [--agent] [--since] [--failed] [--limit] [--json]
 //	weft open <run id> [--open] [--with-token]
@@ -35,8 +35,22 @@
 // ./.weft/weft.db), so the same file serves an in-process app and the
 // binary. --db sqlite://path picks another file; --db
 // clickhouse://user:pass@host:9000/db serves the hosted backend
-// (obsdb/clickhouse). The dev token is printed at start and fixed by
-// WEFT_STUDIO_TOKEN or --token. The playground is on (studio.Playground):
+// (obsdb/clickhouse). The dev token is stable per database (plan B3):
+// the first start on a SQLite file writes 32 random bytes (base64url)
+// beside it, <db>.token (0600), and every later start serves that
+// token; --rotate-token writes a new one (an action: no environment
+// mirror); --token or WEFT_STUDIO_TOKEN overrides it and leaves the
+// file alone. Like a fixed token it is the panel tokens' signing key,
+// so it is never printed — the banner names its file. A database with
+// no file (":memory:", ClickHouse) gets a token generated for this
+// process, printed at start. Once bound, weft studio writes the
+// discovery file (internal/discovery: studio.json in ./.weft when that
+// exists, else $XDG_RUNTIME_DIR/weft, else the user cache directory;
+// {url, token, db, pid, started, version}, 0600) and removes it on a
+// clean exit: otel.Install and runtime.Install read it when
+// WEFT_STUDIO_URL is unset, so an app joins this Studio with no
+// configuration (WEFT_DISCOVERY=off turns the read off). The
+// playground is on (studio.Playground):
 // inert until an app's runtime (weft/runtime) dials in; --no-playground
 // turns it off. The manifest served at /api/manifest is --manifest
 // (default $WEFT_MANIFEST), else the nearest weft.json from the working
@@ -51,12 +65,14 @@
 //
 // The port policy (plan B2, internal/listen): 127.0.0.1:7331 is the
 // one default. When it is busy, weft studio asks GET /api/meta there
-// (with --token / WEFT_STUDIO_TOKEN as the bearer when set, to loopback
-// only): a Studio serving the same database file is reused — "studio
-// already running at http://127.0.0.1:7331 (pid 1234), reusing", exit
-// 0, no database or listener opened (--open still opens the browser on
-// it) — and anything else (another program, a Studio on another
-// database, a Studio whose meta this token cannot read) moves Studio to
+// (with --token / WEFT_STUDIO_TOKEN as the bearer when set, else the
+// database's stable token, to loopback only): a Studio serving the same
+// database file is reused — "studio already running at
+// http://127.0.0.1:7331 (pid 1234), reusing", exit 0, no database or
+// listener opened (--open still opens the browser on it; a missing
+// discovery file of that Studio is said in one line) — and anything
+// else (another program, a Studio on another database, a Studio whose
+// meta this token cannot read) moves Studio to
 // the next free port in 7331–7340, said in one line before the banner,
 // which prints the real address. All ten busy is exit 1 naming the
 // range. --addr (or WEFT_STUDIO_ADDR) pins the address: busy is exit 1
@@ -119,20 +135,21 @@
 // `go run` gets SIGTERM (Pdeathsig), but the binary it started can be
 // orphaned. Each start prints one line,
 //
-//	studio http://127.0.0.1:7331/#token=… · app pid 4242 · runtime rt_… registered
+//	studio http://127.0.0.1:7331/ · app pid 4242 · runtime rt_… registered
 //
-// the token in the fragment only when it was generated (a fixed one
-// stays out of the log); the runtime is the first one GET
+// the token in a #token= fragment only when it was generated for this
+// process (a database with no file: the stable and the fixed token
+// stay out of the log); the runtime is the first one GET
 // /api/runtimes lists that was not there before the app started,
 // waited for up to five seconds, else "no runtime registered yet" and
 // a later line when one registers. An unspecified listen host
 // (0.0.0.0) is handed to the app as 127.0.0.1. Reuse is the port
-// policy's: its probe carries only a fixed token, so a running Studio
-// walled by another (or a generated) token is skipped for the next
-// port; a reused Studio with no wall gives the app an empty
-// WEFT_STUDIO_TOKEN (plan B3's stable per-database token changes
-// this). --watch and --no-watch have no environment mirror: they are
-// the dev loop's, not connection settings.
+// policy's: its probe carries the fixed token, else the database's
+// stable token, so a Studio on the same database is reused and the app
+// gets its URL and token; one walled by another token is skipped for
+// the next port. A Studio weft dev starts writes the discovery file as
+// weft studio does. --watch and --no-watch have no environment mirror:
+// they are the dev loop's, not connection settings.
 //
 // `weft version` prints the weft version (version.Runtime: the module
 // tag this binary was built from).
@@ -191,7 +208,7 @@ func usageError(format string, args ...any) error {
 const usage = `weft — the weft framework's command line
 
 Usage:
-  weft studio  [--addr] [--db] [--token] [--manifest] [--open] [--no-playground]
+  weft studio  [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground]
   weft dev     [studio's flags] [--no-watch] [--watch dir] [-- command args…]   (default: go run .)
   weft runs    [--url] [--token] [--agent] [--since] [--failed] [--limit] [--json]
   weft open    <run id> [--url] [--token] [--open] [--with-token]
@@ -298,13 +315,15 @@ func runStudio(args []string, stdout, stderr io.Writer) error {
 	addr := fs.String("addr", "",
 		"listen `address` (default: $WEFT_STUDIO_ADDR, else "+defaultAddr+"); --addr pins; without it Studio reuses a running one on the same DB or takes the next free port in 7331–7340")
 	token := fs.String("token", "",
-		"API token (default: $WEFT_STUDIO_TOKEN, else a generated dev token printed at start)")
+		"API token (default: $WEFT_STUDIO_TOKEN, else the database's stable token, <db>.token, never printed; a generated one, printed, for a database with no file)")
 	manifest := fs.String("manifest", "",
 		"`path` to the app's weft.json, served at /api/manifest and checked against the latest runs (default: $WEFT_MANIFEST, else the nearest weft.json from the working directory upward)")
 	open := fs.Bool("open", stdoutIsTTY(),
 		"open the browser on the UI, the token in the URL fragment (default: on when stdout is a terminal)")
 	noPlayground := fs.Bool("no-playground", false,
 		"turn the playground off (it is inert until an app's runtime connects)")
+	rotate := fs.Bool("rotate-token", false,
+		"write a new stable dev token beside the database (<db>.token) before serving; an action, so no environment mirror")
 	if err := parse(fs, args); err != nil {
 		return err
 	}
@@ -321,7 +340,7 @@ func runStudio(args []string, stdout, stderr io.Writer) error {
 	}
 	opts = append(opts, studio.Playground(!*noPlayground))
 	return serveWith(*db, wantAddr(*addr, defaultAddr), *token, stdout,
-		afterBoot{notes: []string{note}, open: *open}, opts...)
+		afterBoot{notes: []string{note}, open: *open, rotate: *rotate}, opts...)
 }
 
 // want is the address the command wants and whether it is pinned.
@@ -439,8 +458,9 @@ func runDoctor(args []string, stdout, stderr io.Writer) error {
 // afterBoot is what `weft studio` adds around the port policy: lines
 // printed after the banner, and whether to open the browser on the UI.
 type afterBoot struct {
-	notes []string
-	open  bool
+	notes  []string
+	open   bool
+	rotate bool // --rotate-token: a new stable token before serving
 }
 
 // serve applies the port policy (internal/listen, plan B2), then
@@ -466,29 +486,32 @@ func serveWith(dbFlag string, w want, tokenFlag string, stdout io.Writer, after 
 	if err != nil {
 		return err
 	}
+	// The probe carries the token this command was given, else the
+	// database's stable token (plan B3) — what a Studio on the same
+	// database serves. A token it would generate is nobody else's.
+	probe := probeToken(dbPath, tokenFlag)
 	choice, err := listen.Choose(context.Background(), listen.Request{
 		Addr:   w.addr,
 		Pinned: w.pinned,
 		Span:   w.span,
 		DBPath: dbPath,
-		// The probe carries the token this command was given; a dev
-		// token it would generate is nobody else's.
-		Token: fixedToken(tokenFlag),
+		Token:  probe,
 	})
 	if err != nil {
 		return err
 	}
 	if choice.Reuse {
 		_, _ = fmt.Fprintln(stdout, choice.ReuseLine())
+		reuseNotes(stdout, loopbackAddr(choice.Addr), after.rotate)
 		if after.open {
-			openBrowser(stdout, uiLink(choice.Addr, fixedToken(tokenFlag)))
+			openBrowser(stdout, uiLink(choice.Addr, probe))
 		}
 		return nil
 	}
 	if choice.Note != "" {
 		_, _ = fmt.Fprintln(stdout, "studio: "+choice.Note)
 	}
-	srv, err := serveBoot(dbFlag, choice.Addr, tokenFlag, stdout, extra...)
+	srv, err := serveBootWith(dbFlag, choice.Addr, tokenFlag, after.rotate, stdout, extra...)
 	if err != nil {
 		_ = choice.Listener.Close()
 		return err
@@ -498,6 +521,8 @@ func serveWith(dbFlag string, w want, tokenFlag string, stdout io.Writer, after 
 			_, _ = fmt.Fprintln(stdout, n)
 		}
 	}
+	disc := announce(stdout, "http://"+loopbackAddr(choice.Addr), srv.token, dbPath)
+	defer disc.remove()
 	if after.open {
 		openBrowser(stdout, uiLink(choice.Addr, srv.token))
 	}
@@ -539,8 +564,9 @@ func httpServer(addr string, h http.Handler) *http.Server {
 // owner, and for --db clickhouse:// that owner is this binary.
 type server struct {
 	*studio.Server
-	db    io.Closer // nil when the studio server owns its database
-	token string    // the one token serveBoot resolved (the wall's)
+	db    io.Closer     // nil when the studio server owns its database
+	token string        // the one token serveBoot resolved (the wall's)
+	tok   resolvedToken // where it came from (the banner's and the one line's policy)
 }
 
 // Close closes the studio server, then the binary's own handle.
@@ -609,30 +635,46 @@ func serveUntil(httpSrv *http.Server, ln net.Listener, stdout io.Writer, stop <-
 // boot path — token resolution, banner, wall — is testable without a
 // port.
 func serveBoot(dbFlag, addr, tokenFlag string, stdout io.Writer, extra ...studio.Option) (*server, error) {
-	token := srvToken(tokenFlag)
-	srv, err := newServer(dbFlag, token, extra...)
+	return serveBootWith(dbFlag, addr, tokenFlag, false, stdout, extra...)
+}
+
+// serveBootWith is serveBoot with --rotate-token.
+func serveBootWith(dbFlag, addr, tokenFlag string, rotate bool, stdout io.Writer, extra ...studio.Option) (*server, error) {
+	tok, err := resolveToken(dbFlag, tokenFlag, rotate)
 	if err != nil {
 		return nil, err
 	}
-	srv.token = token
+	srv, err := newServer(dbFlag, tok.value, extra...)
+	if err != nil {
+		return nil, err
+	}
+	srv.token, srv.tok = tok.value, tok
 	// The banner is best-effort by design: a closed stdout must not
 	// keep the server from serving.
-	// Only a generated dev token is printed — nobody knows it
-	// otherwise — and then the link carries it too, in the fragment:
-	// the UI adopts a token from the page URL, and a fragment never
-	// reaches a server or a Referer. A token the operator fixed is
-	// theirs already, and it is the panel tokens' signing key (S4.6
-	// setup C): it stays out of the log, link included.
+	// Only a token generated for this process is printed — nobody
+	// knows it otherwise — and then the link carries it too, in the
+	// fragment: the UI adopts a token from the page URL, and a fragment
+	// never reaches a server or a Referer. A token the operator fixed,
+	// and the database's stable token (plan B3), are the panel tokens'
+	// signing key (S4.6 setup C): they stay out of the log, link
+	// included — the banner says where the token is instead.
+	if !tok.printable() {
+		_, _ = fmt.Fprintf(stdout, "studio: http://%s/\n", addr)
+	}
 	switch {
-	case tokenFlag != "":
-		_, _ = fmt.Fprintf(stdout, "studio: http://%s/\n", addr)
+	case tok.source == tokenFromFlag:
 		_, _ = fmt.Fprintln(stdout, "studio: token from --token")
-	case os.Getenv("WEFT_STUDIO_TOKEN") != "":
-		_, _ = fmt.Fprintf(stdout, "studio: http://%s/\n", addr)
+	case tok.source == tokenFromEnv:
 		_, _ = fmt.Fprintln(stdout, "studio: token from WEFT_STUDIO_TOKEN")
+	case tok.rotated:
+		_, _ = fmt.Fprintf(stdout, "studio: token rotated: a new one in %s (panel tokens signed with the old one no longer verify)\n", tok.path)
+	case tok.created:
+		_, _ = fmt.Fprintf(stdout, "studio: token created in %s (stable for this database; --rotate-token renews it)\n", tok.path)
+	case tok.source == tokenFromFile:
+		_, _ = fmt.Fprintf(stdout, "studio: token from %s (stable for this database; --rotate-token renews it)\n", tok.path)
 	default:
-		_, _ = fmt.Fprintf(stdout, "studio: http://%s/#token=%s\n", addr, token)
-		_, _ = fmt.Fprintf(stdout, "studio: dev token %s (WEFT_STUDIO_TOKEN fixes it)\n", token)
+		_, _ = fmt.Fprintf(stdout, "studio: http://%s/#token=%s\n", addr, tok.value)
+		_, _ = fmt.Fprintf(stdout, "studio: dev token %s (WEFT_STUDIO_TOKEN fixes it)\n", tok.value)
 	}
 	_, _ = fmt.Fprintf(stdout, "studio: db %s\n", dbLabel(dbFlag))
 	return srv, nil
@@ -682,15 +724,6 @@ func newServer(dbFlag, token string, extra ...studio.Option) (srv *server, err e
 		return nil, fmt.Errorf("--db must be sqlite://path or clickhouse://user:pass@host:9000/db")
 	}
 	return &server{Server: studio.New(opts...), db: own, token: token}, nil
-}
-
-// srvToken resolves the token: the flag, then WEFT_STUDIO_TOKEN,
-// then a generated dev token.
-func srvToken(tokenFlag string) string {
-	if tok := fixedToken(tokenFlag); tok != "" {
-		return tok
-	}
-	return studio.DevToken()
 }
 
 // fixedToken is the token the operator fixed: the flag, then

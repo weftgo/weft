@@ -167,6 +167,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    // (weft.heartbeat records — otel.Heartbeat(d), default 10 s — keep a quiet
 //    // run reading running); the durable run reads back through obsdb —
 //    // otel.LocalDB() — never through the process.
+//    // With WEFT_STUDIO_URL unset (and WEFT_DISCOVERY not "off") Install also reads
+//    // the discovery file a running `weft studio`/`weft dev` wrote (./.weft, then
+//    // $XDG_RUNTIME_DIR/weft, then the user cache dir; internal/discovery): the app
+//    // exports to that Studio with no configuration, one INFO line names it; a stale
+//    // file (pid gone or 24 h old) is ignored at Debug. WEFT_STUDIO_URL always wins.
 //    weft.Metadata(map[string]string{"cwd": wd})  // run option: caller pairs on every record/span of the run
 //    // (inherited by subagents; thread sessions stamp weft.session.id,
 //    // weft.public_id, weft.turn — block 8).
@@ -194,14 +199,20 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    spans, capability "logs"; refused to a read-scoped token: they may carry prompts;
 //    //    the run row carries delta_count), traces/{id},
 //    //    sessions, sessions/{id}, public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
-//    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5); Token(tok) walls the
+//    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5), /panel-config.json
+//    //    ({endpoint, version, capabilities}; loopback Host / same-origin only, else
+//    //    404; capability "panel-config"); Token(tok) walls the
 //    //    /api tree (bearer or ?token=) — the UI shell and /panel.js are static,
 //    //    OTLP ingest (/v1/traces, /v1/logs) carries its own IngestToken.
 //    // Setup B, any language (package cmd/weft — `go install github.com/weftgo/weft/cmd/weft@latest`;
 //    // the one place the clickhouse driver lives): weft studio --db sqlite://path |
 //    //    clickhouse://user:pass@host:9000/db [--addr --token --manifest weft.json (or
 //    //    WEFT_MANIFEST; else the nearest weft.json upward) --open --no-playground] serves UI +
-//    //    OTLP ingest + the playground on 127.0.0.1:7331. The API over a terminal (--url
+//    //    OTLP ingest + the playground on 127.0.0.1:7331. The dev token is stable per DB
+//    //    (<db>.token beside the file, 0600, never printed; --rotate-token renews it,
+//    //    --token / WEFT_STUDIO_TOKEN override; a fileless DB gets a printed per-process
+//    //    one); studio.json {url, token, db, pid, started, version} (0600, removed on exit)
+//    //    is the discovery file apps find it through (block 6). The API over a terminal (--url
 //    //    WEFT_STUDIO_URL, --token WEFT_STUDIO_TOKEN): weft doctor checks one; weft runs
 //    //    [--agent --since --failed --limit --json]; weft open <run id> [--open --with-token]
 //    //    (prints the bare <url>/runs/<id>; the token only to the browser or on --with-token);
@@ -212,7 +223,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    Studio in-process + the app with WEFT_ENV=dev (kept if set), WEFT_STUDIO_URL,
 //    //    WEFT_STUDIO_TOKEN, WEFT_DB set (plain env vars the app may set itself), restarted
 //    //    on a .go save (300 ms debounce; its process group stopped: SIGTERM, 5 s, SIGKILL);
-//    //    one line per start: studio <url>[#token= when generated] · app pid n · runtime rt_… registered.
+//    //    one line per start: studio <url> (bare; #token= only for a fileless DB's generated
+//    //    token) · app pid n · runtime rt_… registered.
 //    //    Port policy (internal/listen): busy 7331 + a Studio on the same DB → reused
 //    //    ("studio already running at … (pid n), reusing", exit 0); anything else → the
 //    //    next free port in 7331–7340, said in one line; --addr / WEFT_STUDIO_ADDR pins
@@ -224,7 +236,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //         runtime.Agents(support), runtime.Models(map[string]weft.Model{"glm": m}),
 //         runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000}),
 //         runtime.AllowSideEffects("send_email"), runtime.Threads(store))()
-//     // WEFT_ENV=dev (or runtime.Enabled(true)) opens the link; commands ack
+//     // WEFT_ENV=dev (or runtime.Enabled(true)) opens the link; with no Studio option
+//     // and no otel Studio destination it dials the discovery file's Studio (block 6's
+//     // rule: WEFT_STUDIO_URL wins, WEFT_DISCOVERY=off, stale ignored); commands ack
 //     // before they run (at-most-once), a never-class tool's call is substituted
 //     // with its recorded result or parked (weft.Replay(weft.ReplaySafe) vouches a
 //     // read: it runs in every mode); side_effects substitute (default) | park |

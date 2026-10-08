@@ -73,13 +73,15 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 	addr := fs.String("addr", "",
 		"listen `address` (default: $WEFT_STUDIO_ADDR, else "+defaultAddr+"); --addr pins; without it Studio reuses a running one on the same DB or takes the next free port in 7331–7340")
 	token := fs.String("token", "",
-		"API token (default: $WEFT_STUDIO_TOKEN, else a generated dev token); the app receives it as WEFT_STUDIO_TOKEN")
+		"API token (default: $WEFT_STUDIO_TOKEN, else the database's stable token, <db>.token); the app receives it as WEFT_STUDIO_TOKEN")
 	manifest := fs.String("manifest", "",
 		"`path` to the app's weft.json (default: $WEFT_MANIFEST, else the nearest weft.json from the working directory upward)")
 	open := fs.Bool("open", stdoutIsTTY(),
 		"open the browser on the UI, the token in the URL fragment (default: on when stdout is a terminal)")
 	noPlayground := fs.Bool("no-playground", false,
 		"turn the playground off (the app's runtime link then has nothing to register with)")
+	rotate := fs.Bool("rotate-token", false,
+		"write a new stable dev token beside the database (<db>.token) before serving; an action, so no environment mirror")
 	noWatch := fs.Bool("no-watch", false,
 		"do not restart the app on a .go change; weft dev exits with the app's exit code")
 	var roots []string
@@ -127,18 +129,12 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 	out := &lockedWriter{w: stdout}
 	w := wantAddr(*addr, devDefaultAddr)
 	w.span = devSpan
-	st, err := devStudio(*db, w, *token, out, opts...)
+	st, err := devStudio(*db, w, *token, *rotate, out, opts...)
 	if err != nil {
 		return err
 	}
 	stopSig := os.Signal(syscall.SIGTERM)
 	defer func() { st.stop(stopSig) }()
-
-	// TODO(B3): write the discovery file (the running Studio's URL,
-	// token and database, for the panel and other tools to find) — plan
-	// B3 owns its format and the stable per-DB token; this is its one
-	// call site.
-	writeDiscovery(st.url, st.token, st.dbPath)
 
 	if *open {
 		openBrowser(out, uiLink(st.addr, st.token))
@@ -171,9 +167,6 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 	}
 	return err
 }
-
-// writeDiscovery is plan B3's seam; a no-op until B3 lands.
-func writeDiscovery(url, token, dbPath string) { _, _, _ = url, token, dbPath }
 
 // devEnv is the app's environment: the parent's, plus WEFT_ENV=dev
 // (kept when already set to something), WEFT_STUDIO_URL,
@@ -223,20 +216,20 @@ type devStudioRun struct {
 
 // devStudio applies `weft studio`'s port policy and starts Studio in
 // this process, or reuses one already serving the same database. The
-// probe carries only a fixed token (--token, WEFT_STUDIO_TOKEN): a
-// running Studio walled by another token answers it 401 and is
-// skipped for the next port, so a reuse is either that fixed token's
-// Studio or one with no token wall — whose app gets an empty
-// WEFT_STUDIO_TOKEN, all it needs. (Plan B3's stable per-DB token
-// changes this.)
-func devStudio(dbFlag string, w want, tokenFlag string, out io.Writer, opts ...studio.Option) (*devStudioRun, error) {
+// probe carries the fixed token (--token, WEFT_STUDIO_TOKEN), else the
+// database's stable token (plan B3): a Studio on the same database
+// serves exactly that, so a reuse hands the app the token it needs. A
+// running Studio walled by another token answers 401 and is skipped
+// for the next port. A Studio this process starts writes the discovery
+// file; a reused one owns its own.
+func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writer, opts ...studio.Option) (*devStudioRun, error) {
 	dbPath, err := dbFile(dbFlag)
 	if err != nil {
 		return nil, err
 	}
-	fixed := fixedToken(tokenFlag)
+	probe := probeToken(dbPath, tokenFlag)
 	choice, err := listen.Choose(context.Background(), listen.Request{
-		Addr: w.addr, Pinned: w.pinned, Span: w.span, DBPath: dbPath, Token: fixed,
+		Addr: w.addr, Pinned: w.pinned, Span: w.span, DBPath: dbPath, Token: probe,
 	})
 	if err != nil {
 		return nil, err
@@ -248,31 +241,42 @@ func devStudio(dbFlag string, w want, tokenFlag string, out io.Writer, opts ...s
 	r := &devStudioRun{addr: dial, url: "http://" + dial, dbPath: dbPath, stop: func(os.Signal) {}}
 	if choice.Reuse {
 		_, _ = fmt.Fprintln(out, choice.ReuseLine())
-		r.token, r.link = fixed, uiLink(dial, "")
+		reuseNotes(out, dial, rotate)
+		r.token, r.link = probe, uiLink(dial, "")
 		return r, nil
 	}
 	if choice.Note != "" {
 		_, _ = fmt.Fprintln(out, "studio: "+choice.Note)
 	}
 	// The banner is the one line's job here: serveBoot's goes nowhere.
-	srv, err := serveBoot(dbFlag, choice.Addr, tokenFlag, io.Discard, opts...)
+	srv, err := serveBootWith(dbFlag, choice.Addr, tokenFlag, rotate, io.Discard, opts...)
 	if err != nil {
 		_ = choice.Listener.Close()
 		return nil, err
 	}
 	r.token = srv.token
 	r.noPlayground = srv.Runtime() == nil
-	// A fixed token stays out of the log, link included (B1.1's rule);
-	// a generated one is nobody's secret yet and opens the UI.
-	if fixed != "" {
-		r.link = uiLink(dial, "")
-	} else {
+	// A fixed or stable token stays out of the log, link included
+	// (B1.1's rule; the stable token is the signing key too); only one
+	// generated for this process (a database with no file) is nobody's
+	// secret yet and opens the UI.
+	if srv.tok.printable() {
 		r.link = uiLink(dial, srv.token)
+	} else {
+		r.link = uiLink(dial, "")
+	}
+	if srv.tok.rotated {
+		_, _ = fmt.Fprintf(out, "studio: token rotated: a new one in %s\n", srv.tok.path)
+	}
+	disc, derr := writeDiscovery(r.url, srv.token, dbPath)
+	if derr != nil {
+		_, _ = fmt.Fprintf(out, "studio: no discovery file (%v); the app gets WEFT_STUDIO_URL regardless\n", derr)
 	}
 	stopCh := make(chan os.Signal, 1)
 	done := make(chan error, 1)
 	go func() { done <- serveUntil(httpServer(choice.Addr, srv.Handler()), choice.Listener, out, stopCh) }()
 	r.stop = func(sig os.Signal) {
+		defer disc.remove()
 		stopCh <- sig
 		if err := <-done; err != nil && !errors.Is(err, http.ErrServerClosed) {
 			_, _ = fmt.Fprintln(out, "weft dev: studio:", err)

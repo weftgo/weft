@@ -33,7 +33,7 @@ import { installMarkerRung, markerOf } from "./markers"
 import type { Marker, MarkerRung } from "./markers"
 import { parseScope, serializeScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
-import { el, fmtJSON, on, patch, waterfall } from "./render"
+import { el, fmtJSON, on, patch, spanWindow, waterfall } from "./render"
 import { PANEL_CSS } from "./styles"
 import { nextTheme, resolveTheme, themeSetting, ThemeWatch } from "./theme"
 import {
@@ -185,7 +185,7 @@ export const SHORTCUTS: readonly (readonly [string, string])[] = [
   ["j / k", "next / previous turn"],
   ["J / K", "next / previous step"],
   ["g s", "open the turn (and step) in Studio"],
-  ["r", "the Raw tab (again: back to Story)"],
+  ["r", "the Raw tab (again: back to the tab before it)"],
   ["/", "filter: the raw tree's on the Raw tab, else the turn list's"],
   ["← / →", "on the tabs: the previous / next tab"],
   ["?", "this list"],
@@ -1358,7 +1358,9 @@ export class WeftDevtools extends HTMLElement {
     else if (k === "/") {
       // D4: the open Raw tab's filter, else the turn list's.
       const raw = this.lay.tab === "raw" && this.last.turn
-      this.body.querySelector<HTMLElement>(raw ? ".weft-tree-q" : ".weft-turn-q")?.focus()
+      const box = this.body.querySelector<HTMLElement>(raw ? ".weft-tree-q" : ".weft-turn-q")
+      if (box) box.focus()
+      else done = false // no box (an empty list): the key stays the page's
     } else done = false
     if (done) e.preventDefault()
   }
@@ -1641,13 +1643,16 @@ export class WeftDevtools extends HTMLElement {
   }
 
   toggleRaw() {
-    this.setTab(this.lay.tab === "raw" ? "story" : "raw")
+    this.setTab(this.lay.tab === "raw" ? this.prevTab : "raw")
   }
+  /** The tab r goes back to from Raw. */
+  private prevTab = "story"
 
   /** setTab opens one of the turn view's tabs (D4), remembered as the
    * stored layout's tab (raw mirrors it). */
   private setTab(id: string) {
     if (!TABS.includes(id)) return
+    if (this.lay.tab !== "raw") this.prevTab = this.lay.tab
     this.lay.tab = id
     this.lay.raw = id === "raw"
     this.save()
@@ -1927,7 +1932,9 @@ export class WeftDevtools extends HTMLElement {
   /** turnPick is the turn column as a dropdown (a panel under
    * NARROW_W wide): every listed turn, the selected one chosen. */
   private turnPick(s: PanelState): HTMLElement | null {
-    const rows = [...s.turns.filter((r) => this.match(r)), ...[...s.experiments.values()].flat()]
+    // The filter narrows the dropdown as it does the column; the
+    // selected turn stays listed (it is what the select shows).
+    const rows = [...s.turns, ...[...s.experiments.values()].flat()].filter((r) => r.id === s.selected || this.match(r))
     if (!rows.length) return null
     const sel = el("select", "weft-turn-pick", undefined, { "aria-label": "turn", "data-weft-k": "turnpick" }) as HTMLSelectElement
     for (const r of rows) {
@@ -2070,7 +2077,7 @@ export class WeftDevtools extends HTMLElement {
     const isRaw = this.lay.tab === "raw"
     const raw = el("button", `weft-btn${isRaw ? " weft-active" : ""}`, "raw", {
       title: "the JSON, one keypress away (r)",
-      "aria-expanded": String(isRaw && !!s.turn),
+      "aria-pressed": String(isRaw),
     })
     on(raw, "click", () => this.toggleRaw())
     h.appendChild(raw)
@@ -2147,8 +2154,11 @@ export class WeftDevtools extends HTMLElement {
     // panel has read; a status; has error. Applied to the loaded rows.
     list.appendChild(this.turnFilter())
     const turns = s.turns.filter((r) => this.match(r))
-    const filtered = this.tq.text.trim() !== "" || !!this.tq.status || this.tq.err
-    if (filtered) list.appendChild(el("div", "weft-tq-n", `${turns.length} of ${s.turns.length} turns`))
+    const filtered = this.filtering()
+    if (filtered)
+      list.appendChild(
+        el("div", "weft-tq-n", `${turns.length} of ${s.turns.length} ${s.turnsCapped ? "loaded" : "turns"}${s.turnsCapped ? " · the filter applies to the loaded turns" : ""}`)
+      )
     // One list (D3): a listitem per run, keyed by its id; one row
     // tabbable (the roving tabindex — the row last focused, else the
     // selected one, else the first), arrow keys move it.
@@ -2177,7 +2187,9 @@ export class WeftDevtools extends HTMLElement {
       const more = el("button", "weft-btn weft-older", s.loadingOlder ? "loading older turns…" : "older turns ↓", {
         type: "button",
         title: "load the next older page of turns",
-        "data-key": `older:${s.turns.length}`,
+        // Keyed by the cursor: each page read (even one that added no
+        // row) is a new sentinel, so the observer is armed again.
+        "data-key": `older:${s.olderAt}`,
       })
       on(more, "click", () => this.go(this.model?.loadOlder()))
       list.appendChild(more)
@@ -2222,6 +2234,11 @@ export class WeftDevtools extends HTMLElement {
     return box
   }
 
+  /** filtering: the turn filter narrows anything. */
+  private filtering(): boolean {
+    return this.tq.text.trim() !== "" || !!this.tq.status || this.tq.err
+  }
+
   /** match is the turn filter's test of one row. */
   private match(r: RunRow): boolean {
     const f = this.tq
@@ -2238,12 +2255,15 @@ export class WeftDevtools extends HTMLElement {
    * sentinel is a button. */
   private watchOlder() {
     const n = this.body.querySelector(".weft-older")
-    if (n === this.ioAt) return
+    // Narrow, the rows are a dropdown; filtered, a scroll would read
+    // page after page for rows the filter may hide: the sentinel is a
+    // button only.
+    const want = !!n && typeof IntersectionObserver === "function" && !n.closest(".weft-narrow") && !this.filtering()
+    if (n === this.ioAt && !!this.io === want) return
     this.io?.disconnect()
     this.io = null
     this.ioAt = n
-    // Narrow, the rows are a dropdown: the sentinel is a button only.
-    if (!n || typeof IntersectionObserver !== "function" || n.closest(".weft-narrow")) return
+    if (!n || !want) return
     try {
       this.io = new IntersectionObserver(
         (es) => {
@@ -2356,18 +2376,26 @@ export class WeftDevtools extends HTMLElement {
     main.appendChild(this.tabs())
     const tab = this.lay.tab
     const t = s.turn
-    let tp: HTMLElement
-    if (tab === "story") {
-      // The story's own box is the panel (its notes stay its children).
-      tp = this.turnView(s)
-      tp.appendChild(this.playgroundArea(s))
-    } else
-      tp = el("div", undefined, [
-        tab === "raw" ? this.rawView(t) : tab === "timeline" ? renderTimeline(t) : el("div", "weft-note", "Request: lands with E1.2"),
-      ])
-    const at = { class: "weft-tp", role: "tabpanel", id: `weft-tp-${tab}`, "aria-labelledby": `weft-tab-${tab}`, "data-key": `tp:${tab}` }
-    for (const [k, v] of Object.entries(at)) tp.setAttribute(k, v)
-    main.appendChild(tp)
+    const panel = (tp: HTMLElement, id: string) => {
+      const at = { class: "weft-tp", role: "tabpanel", id: `weft-tp-${id}`, "aria-labelledby": `weft-tab-${id}`, "data-key": `tp:${id}` }
+      for (const [k, v] of Object.entries(at)) tp.setAttribute(k, v)
+      main.appendChild(tp)
+      return tp
+    }
+    // The story's own box is its panel (its notes stay its children),
+    // drawn on every tab and hidden on the others: its node — the
+    // <details> opened, its scroll — stays across a tab switch.
+    const story = this.turnView(s)
+    story.appendChild(this.playgroundArea(s))
+    if (tab !== "story") story.setAttribute("hidden", "")
+    panel(story, "story")
+    if (tab !== "story")
+      panel(
+        el("div", undefined, [
+          tab === "raw" ? this.rawView(t) : tab === "timeline" ? renderTimeline(t) : el("div", "weft-note", "Request: lands with E1.2"),
+        ]),
+        tab
+      )
     return main
   }
 
@@ -3125,11 +3153,12 @@ export class WeftDevtools extends HTMLElement {
    * holds them — built once per change of what it holds. */
   private rawView(t: TurnView): HTMLElement {
     if (this.treeFor !== t.id) {
-      this.tree = { ...newTree(), q: this.tree.q }
+      this.tree = { ...newTree(), q: this.tree.q, applied: this.tree.applied }
       this.treeFor = t.id
     }
     const r = t.requests
-    const key = [t.id, t.doc, t.events, t.events.length, t.transcript, t.spans, r]
+    // The events array grows in place: its length says it changed.
+    const key = [t.id, t.doc, t.events.length, t.transcript, t.spans, r]
     const m = this.rawMemo
     if (!m || m.key.some((v, i) => v !== key[i]))
       this.rawMemo = {
@@ -3143,7 +3172,9 @@ export class WeftDevtools extends HTMLElement {
         },
       }
     return treeView(this.rawMemo!.doc, this.tree, t.id.replace(/[\\/]/g, "_"), {
-      redraw: () => this.render(this.last),
+      redraw: () => {
+        if (this.isConnected) this.render(this.last)
+      },
       root: () => this.shadow,
     })
   }
@@ -3195,12 +3226,14 @@ export function stepPosition(view: FoldedRun, selected: number | null): number {
  * when the run has spans; without, its steps and tool calls placed by
  * the event sequence (seq: the event's position in the run's stream). */
 export function renderTimeline(t: TurnView): HTMLElement {
-  const spans = (t.spans ?? []).filter((x) => Number.isFinite(Date.parse(x.start)) && Number.isFinite(Date.parse(x.end)))
+  const spans = t.spans ?? []
+  const win = spanWindow(spans)
   const bars: { name: string; left: number; width: number; ms: number; label?: string }[] = waterfall(spans)
   let axis = "time"
   let end = 0
   if (bars.length) {
-    end = Math.max(...spans.map((x) => Date.parse(x.end))) - Math.min(...spans.map((x) => Date.parse(x.start)))
+    // The axis is the bars' own window (waterfall's).
+    end = win.to - win.from
   } else {
     axis = "seq"
     const open = new Map<string, [string, number]>()
@@ -3221,6 +3254,9 @@ export function renderTimeline(t: TurnView): HTMLElement {
     for (const [name, a] of open.values()) put(name, a, end)
   }
   const box = el("div", "weft-timeline", undefined, { "data-axis": axis })
+  const lost = spans.length - win.placed
+  if (lost > 0)
+    box.appendChild(el("div", "weft-note weft-warn", `${lost} span${lost === 1 ? "" : "s"} not placed: unreadable times, or an end before the start`))
   if (!bars.length) {
     box.appendChild(el("div", "weft-note", "nothing to place yet: no spans and no steps"))
     return box

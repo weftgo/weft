@@ -8,7 +8,8 @@
 // marks it; copy-node, copy-all and download hand the JSON out.
 import { el, on, stringify } from "./render"
 
-/** A string longer than this shows its head and a "+N bytes" expander. */
+/** A string longer than this many characters (UTF-16 units, so 2,048
+ * characters — not 2 KiB) shows its head and a "+N bytes" expander. */
 export const STR_CAP = 2048
 /** A container shows this many children, then "+N more". */
 export const KIDS_CAP = 200
@@ -26,15 +27,38 @@ export interface TreeState {
   more: Map<string, number>
   /** Strings shown whole, by path. */
   full: Set<string>
+  /** What the filter box holds; applied is what the walk searched for
+   * (the box, FILTER_MS after the last keystroke). */
   q: string
+  applied: string
   /** The last copy's outcome ("copied", or why not). */
   said: string
   /** The text to select by hand when the clipboard refused it. */
   box: string
+  /** The search, the default opening and the capped strings' byte
+   * counts, each kept until its document (or string) changes: a draw
+   * that changed neither walks nothing. */
   memo?: { root: unknown; q: string; hits: Set<string>; via: Set<string>; n: number }
+  auto?: { root: unknown; open: Set<string> }
+  bytes: Map<string, { v: string; n: number }>
+  /** The pending debounce and the "copied" line's clearing. */
+  timer?: ReturnType<typeof setTimeout>
+  saidTimer?: ReturnType<typeof setTimeout>
 }
 
-export const newTree = (): TreeState => ({ open: new Map(), more: new Map(), full: new Set(), q: "", said: "", box: "" })
+/** The filter's debounce: a keystroke walks a 10 MB document once. */
+export const FILTER_MS = 100
+
+export const newTree = (): TreeState => ({
+  open: new Map(),
+  more: new Map(),
+  full: new Set(),
+  q: "",
+  applied: "",
+  said: "",
+  box: "",
+  bytes: new Map(),
+})
 
 type Box = Record<string, unknown> | unknown[]
 const isBox = (v: unknown): v is Box => v !== null && typeof v === "object"
@@ -102,8 +126,25 @@ export function search(root: unknown, q: string): { hits: Set<string>; via: Set<
   return { hits, via, n }
 }
 
-/** utf8 is a string's length in UTF-8 bytes. */
-const utf8 = (s: string) => new TextEncoder().encode(s).length
+/** utf8 counts a string's UTF-8 bytes from one index on — a loop over
+ * char codes, no allocation (a surrogate pair is 4 bytes). */
+export function utf8(s: string, from = 0): number {
+  let n = 0
+  for (let i = from; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c < 0x80) n += 1
+    else if (c < 0x800) n += 2
+    else if ((c & 0xfc00) === 0xd800 && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+      n += 4
+      i++
+    } else n += 3
+  }
+  return n
+}
+
+/** cut is where a capped string's head ends: STR_CAP, one unit back
+ * when that would split a surrogate pair. */
+const cut = (s: string) => ((s.charCodeAt(STR_CAP - 1) & 0xfc00) === 0xd800 ? STR_CAP - 1 : STR_CAP)
 
 /** preview is a collapsed container's one line. */
 const preview = (v: Box) => (Array.isArray(v) ? `[…] ${v.length} items` : `{…} ${size(v)} keys`)
@@ -121,10 +162,20 @@ export function copy(st: TreeState, text: string, cx: TreeCtx) {
   const done = (ok: boolean) => {
     st.said = ok ? "copied" : "the clipboard refused: select and copy below"
     st.box = ok ? "" : text
+    // "copied" goes after 2 s (or with the next action).
+    clearTimeout(st.saidTimer)
+    if (ok)
+      st.saidTimer = setTimeout(() => {
+        if (st.said !== "copied") return
+        st.said = ""
+        cx.redraw()
+      }, 2_000)
     cx.redraw()
     if (!ok)
       try {
-        cx.root()?.querySelector<HTMLTextAreaElement>(".weft-copybox")?.select()
+        const ta = cx.root()?.querySelector<HTMLTextAreaElement>(".weft-copybox")
+        ta?.focus()
+        ta?.select()
       } catch {
         // nothing to select
       }
@@ -143,13 +194,21 @@ export function copy(st: TreeState, text: string, cx: TreeCtx) {
 /** treeView draws the Raw tab: the toolbar (filter, count, copy all,
  * download) and the rows. name is the download's file name. */
 export function treeView(root: unknown, st: TreeState, name: string, cx: TreeCtx): HTMLElement {
-  const q = st.q.trim()
+  const q = st.applied.trim()
   let found: { hits: Set<string>; via: Set<string>; n: number } | null = null
   if (q) {
     const m = st.memo
     found = m && m.root === root && m.q === q ? m : (st.memo = { root, q, ...search(root, q) })
   }
-  const auto = autoOpen(root)
+  let memo = st.auto
+  if (!memo || memo.root !== root) memo = st.auto = { root, open: autoOpen(root) }
+  const auto = memo.open
+  /** act: a toggle or an expander — the copy's line goes with it. */
+  const act = (fn: () => void) => () => {
+    fn()
+    st.said = ""
+    cx.redraw()
+  }
   const isOpen = (p: string) => st.open.get(p) ?? (found?.via.has(p) || auto.has(p))
   const rows: HTMLElement[] = []
   const draw = (k: string, v: unknown, p: string, depth: number) => {
@@ -163,21 +222,18 @@ export function treeView(root: unknown, st: TreeState, name: string, cx: TreeCtx
         "aria-expanded": String(open),
         "aria-label": `${open ? "collapse" : "expand"} ${k}`,
       })
-      on(t, "click", () => {
-        st.open.set(p, !open)
-        cx.redraw()
-      })
+      on(t, "click", act(() => st.open.set(p, !open)))
       r.appendChild(t)
     } else r.appendChild(el("span", "weft-tt", "", { "aria-hidden": "true" }))
     r.appendChild(el("span", "weft-tk", `${k}: `))
     if (box) r.appendChild(el("span", "weft-tv", preview(v)))
     else if (typeof v === "string" && v.length > STR_CAP && !st.full.has(p)) {
-      r.appendChild(el("span", "weft-tv", `${JSON.stringify(v.slice(0, STR_CAP)).slice(0, -1)}…`))
-      const more = el("button", "weft-btn weft-tmore", `… +${utf8(v.slice(STR_CAP))} bytes`, { type: "button", title: "show the whole string" })
-      on(more, "click", () => {
-        st.full.add(p)
-        cx.redraw()
-      })
+      const end = cut(v)
+      r.appendChild(el("span", "weft-tv", `${JSON.stringify(v.slice(0, end)).slice(0, -1)}…`))
+      let b = st.bytes.get(p)
+      if (b?.v !== v) st.bytes.set(p, (b = { v, n: utf8(v, end) }))
+      const more = el("button", "weft-btn weft-tmore", `… +${b.n} bytes`, { type: "button", title: "show the whole string" })
+      on(more, "click", act(() => st.full.add(p)))
       r.appendChild(more)
     } else r.appendChild(el("span", "weft-tv", json(v, 0)))
     const c = el("button", "weft-tc", "⧉", { type: "button", title: "copy this node's JSON", "aria-label": `copy ${k}` })
@@ -198,10 +254,7 @@ export function treeView(root: unknown, st: TreeState, name: string, cx: TreeCtx
     if (hidden) {
       const more = el("button", "weft-btn weft-tmore", `… +${hidden} more`, { type: "button", "data-key": `m${p}` })
       more.style.marginLeft = `${depth * 12 + 16}px`
-      on(more, "click", () => {
-        st.more.set(p, (st.more.get(p) ?? 0) + KIDS_CAP)
-        cx.redraw()
-      })
+      on(more, "click", act(() => st.more.set(p, (st.more.get(p) ?? 0) + KIDS_CAP)))
       rows.push(more)
     }
   }
@@ -217,13 +270,21 @@ export function treeView(root: unknown, st: TreeState, name: string, cx: TreeCtx
   input.value = st.q
   on(input, "input", (_, n) => {
     st.q = (n as HTMLInputElement).value
-    // A new query lays the tree out afresh: the paths to its matches
-    // open, whatever was toggled before.
-    st.open.clear()
-    cx.redraw()
+    clearTimeout(st.timer)
+    st.timer = setTimeout(() => {
+      // A new query lays the tree out afresh: the paths to its matches
+      // open, whatever was toggled before.
+      st.applied = st.q
+      st.open.clear()
+      st.said = ""
+      cx.redraw()
+    }, FILTER_MS)
   })
   bar.appendChild(input)
-  bar.appendChild(el("span", "weft-tree-n", found ? `${found.n} match${found.n === 1 ? "" : "es"}` : ""))
+  // Every match is counted; the paths opened (and rows marked) are the
+  // first OPEN_HITS, and the count says so past them.
+  const count = found ? `${found.n} match${found.n === 1 ? "" : "es"}${found.n > found.hits.size ? ` · first ${found.hits.size} opened` : ""}` : ""
+  bar.appendChild(el("span", "weft-tree-n", count))
   const all = el("button", "weft-btn", "copy all", { type: "button", title: "copy the whole document's JSON" })
   on(all, "click", () => copy(st, json(root), cx))
   bar.appendChild(all)
@@ -244,6 +305,19 @@ export function treeView(root: unknown, st: TreeState, name: string, cx: TreeCtx
   if (st.box) {
     const ta = el("textarea", "weft-input weft-copybox", undefined, { readonly: "", "aria-label": "the JSON to copy", rows: "4" }) as HTMLTextAreaElement
     ta.value = st.box
+    // Gone once it is left (or on Esc): it was there to copy from.
+    const drop = () => {
+      st.box = ""
+      st.said = ""
+      cx.redraw()
+    }
+    on(ta, "blur", drop)
+    on(ta, "keydown", (e) => {
+      if ((e as KeyboardEvent).key === "Escape") {
+        e.preventDefault()
+        drop()
+      }
+    })
     out.appendChild(ta)
   }
   const list = el("div", "weft-tree", rows, { "data-key": "tree" })

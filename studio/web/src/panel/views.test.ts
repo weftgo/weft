@@ -4,7 +4,7 @@
 // paging (before=/before_id=, no cap).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { patch } from "./render"
-import { KIDS_CAP, newTree, STR_CAP, treeView } from "./tree"
+import { FILTER_MS, KIDS_CAP, newTree, STR_CAP, treeView, utf8 } from "./tree"
 import { STORE_KEY } from "./layout"
 import {
   $,
@@ -14,6 +14,7 @@ import {
   fakeStudio,
   mount,
   page,
+  pause,
   runEvents,
   runRow,
   settle,
@@ -58,7 +59,7 @@ const tab = (el: WeftDevtools, name: string) => $(el, `#weft-tab-${name}`) as HT
 const type = async (input: HTMLInputElement, value: string) => {
   input.value = value
   input.dispatchEvent(new Event("input", { bubbles: true }))
-  await settle()
+  await settle(FILTER_MS + 20) // the raw filter's debounce
 }
 
 /** A fake clipboard; null takes it away. */
@@ -126,18 +127,30 @@ describe("the tabs", () => {
     expect(text(el, "#weft-tp-request")).toBe("Request: lands with E1.2")
   })
 
-  it("r opens Raw and again goes back to Story; the raw button says which", async () => {
+  it("r opens Raw and again goes back to the tab before it; the raw button is a toggle (aria-pressed)", async () => {
     fakeStudio(baseRoutes())
     const el = await mount(BASE)
+    const raw = () => all(el, ".weft-head button").find((b) => b.textContent === "raw")!
+    expect(raw().getAttribute("aria-pressed")).toBe("false")
     dock(el).focus()
     key(dock(el), { key: "r" })
     await settle()
     expect(tab(el, "raw").getAttribute("aria-selected")).toBe("true")
-    const raw = all(el, ".weft-head button").find((b) => b.textContent === "raw")!
-    expect(raw.getAttribute("aria-expanded")).toBe("true")
+    expect(raw().getAttribute("aria-pressed")).toBe("true")
+    expect(raw().hasAttribute("aria-expanded")).toBe(false)
     key(dock(el), { key: "r" })
     await settle()
     expect(tab(el, "story").getAttribute("aria-selected")).toBe("true")
+    // From the Timeline, r and r again land back on the Timeline.
+    click(tab(el, "timeline"))
+    await settle()
+    dock(el).focus()
+    key(dock(el), { key: "r" })
+    await settle()
+    expect(tab(el, "raw").getAttribute("aria-selected")).toBe("true")
+    key(dock(el), { key: "r" })
+    await settle()
+    expect(tab(el, "timeline").getAttribute("aria-selected")).toBe("true")
   })
 
   it("⤢ carries the step being read from any tab (G1)", async () => {
@@ -191,6 +204,61 @@ describe("the timeline", () => {
     expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual(["seq 0", "seq 1", "seq 3", "seq 4", "seq 5"])
     expect(all(el, ".weft-wf .weft-wf-name").map((n) => n.textContent)).toEqual(["lookup_order", "step 0"])
     expect(all(el, ".weft-wf .weft-wf-ms").map((n) => n.textContent)).toEqual(["#2–3", "#1–4"])
+  })
+
+  it("review: the axis is the waterfall's own window, and a span it cannot place is said", async () => {
+    const routes = baseRoutes()
+    routes["runs/s_01-t1/spans"] = {
+      spans: [
+        { name: "chat", start: "2026-10-01T09:00:00.000Z", end: "2026-10-01T09:00:01.000Z" },
+        // Ends before it starts: waterfall drops it, so the axis must too.
+        { name: "bent", start: "2026-10-01T09:00:05.000Z", end: "2026-10-01T09:00:04.000Z" },
+        { name: "garbled", start: "yesterday", end: "today" },
+      ],
+    }
+    fakeStudio(routes)
+    const el = await mount(BASE)
+    click(tab(el, "timeline"))
+    await settle()
+    expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual(["0 ms", "250 ms", "500 ms", "750 ms", "1000 ms"])
+    expect(all(el, ".weft-wf .weft-wf-name").map((n) => n.textContent)).toEqual(["chat"])
+    expect(text(el, ".weft-timeline .weft-warn")).toBe("2 spans not placed: unreadable times, or an end before the start")
+  })
+})
+
+describe("the tabs keep the story (review)", () => {
+  it("the Story panel is the same node across a tab switch (hidden, not rebuilt): an opened <details> stays open", async () => {
+    const routes = baseRoutes()
+    routes["runs/s_01-t1/events?after=0&limit=500"] = page([
+      ...runEvents("s_01-t1").slice(0, 2),
+      { type: "tool_start", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "lookup_order", args: {} },
+      { type: "tool_finish", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "lookup_order", content: "ok", is_error: false },
+      ...runEvents("s_01-t1").slice(2),
+    ])
+    fakeStudio(routes)
+    const el = await mount(BASE)
+    const story = $(el, "#weft-tp-story")!
+    click(tab(el, "timeline"))
+    await settle()
+    expect($(el, "#weft-tp-story")).toBe(story)
+    expect(story.hasAttribute("hidden")).toBe(true)
+    expect($(el, "#weft-tp-timeline")).not.toBeNull()
+    click(tab(el, "story"))
+    await settle()
+    expect($(el, "#weft-tp-story")).toBe(story)
+    expect(story.hasAttribute("hidden")).toBe(false)
+    expect($(el, "#weft-tp-timeline")).toBeNull()
+  })
+
+  it("⤢ from the Raw tab carries the step being read", async () => {
+    fakeStudio(baseRoutes())
+    const el = await mount(BASE)
+    click(tab(el, "raw"))
+    await settle()
+    dock(el).focus()
+    key(dock(el), { key: "J" })
+    await settle()
+    expect(all(el, ".weft-head a").find((n) => n.textContent === "⤢")!.getAttribute("href")).toContain("step=0")
   })
 })
 
@@ -318,7 +386,7 @@ describe("the raw tree", () => {
   it("a match past the cap is drawn anyway; every match is counted", () => {
     const doc = { big: Array.from({ length: 50_000 }, (_, i) => ({ i })) }
     const { box, st, redraw } = draw(doc)
-    st.q = "49999"
+    st.q = st.applied = "49999"
     redraw()
     // The key "49999" and the value 49999.
     expect(box.querySelector(".weft-tree-n")?.textContent).toBe("2 matches")
@@ -334,6 +402,111 @@ describe("the raw tree", () => {
     click(more)
     expect(box.querySelector(".weft-tn .weft-tv")!.textContent).toBe(JSON.stringify("a".repeat(STR_CAP) + "é".repeat(1000)))
     expect(box.querySelector(".weft-tmore")).toBeNull()
+  })
+
+  it("review: past OPEN_HITS matches the count says only the first 200 are opened", () => {
+    const { box, st, redraw } = draw({ a: Array.from({ length: 300 }, () => "x") })
+    st.q = st.applied = "x"
+    redraw()
+    expect(box.querySelector(".weft-tree-n")?.textContent).toBe("300 matches · first 200 opened")
+    expect(box.querySelectorAll(".weft-tn.weft-hit")).toHaveLength(200)
+  })
+
+  it("review: the cap is 2,048 characters and never splits a surrogate pair; bytes counted without allocating", () => {
+    const s = "a".repeat(STR_CAP - 1) + "😀" + "b".repeat(10)
+    const { box } = draw({ s, cjk: "中".repeat(3000) })
+    const [v1, v2] = Array.from(box.querySelectorAll(".weft-tn .weft-tv"), (n) => n.textContent)
+    expect(v1).toBe(`"${"a".repeat(STR_CAP - 1)}…`)
+    expect(/[\ud800-\udbff](?![\udc00-\udfff])/.test(v1)).toBe(false)
+    expect(v2).toBe(`"${"中".repeat(STR_CAP)}…`)
+    expect(Array.from(box.querySelectorAll(".weft-tmore"), (n) => n.textContent)).toEqual(["… +14 bytes", `… +${(3000 - STR_CAP) * 3} bytes`])
+    const mixed = "aé中😀\u{1F600}x"
+    expect(utf8(mixed)).toBe(new TextEncoder().encode(mixed).length)
+  })
+
+  it("review: a redraw re-walks nothing — the byte count, the search and the default opening are kept per document", () => {
+    const { box, st, redraw } = draw({ s: "z".repeat(STR_CAP + 5), o: { k: 1 } })
+    st.q = st.applied = "k"
+    redraw()
+    const memo = st.memo
+    const auto = st.auto
+    st.bytes.get("/s")!.n = 999 // were it counted again, this would be overwritten
+    redraw()
+    expect(st.memo).toBe(memo)
+    expect(st.auto).toBe(auto)
+    expect(box.querySelector(".weft-tmore")?.textContent).toBe("… +999 bytes")
+  })
+
+  it("review: the filter is debounced: three keystrokes, one walk, FILTER_MS after the last", () => {
+    vi.useFakeTimers()
+    const { box, st } = draw({ alpha: 1, beta: 2 })
+    const q = box.querySelector(".weft-tree-q") as HTMLInputElement
+    for (const v of ["a", "al", "alp"]) {
+      q.value = v
+      q.dispatchEvent(new Event("input", { bubbles: true }))
+      vi.advanceTimersByTime(FILTER_MS / 2)
+    }
+    expect(st.memo).toBeUndefined()
+    expect(box.querySelector(".weft-tree-n")?.textContent).toBe("")
+    vi.advanceTimersByTime(FILTER_MS)
+    expect(st.memo?.q).toBe("alp")
+    expect(box.querySelector(".weft-tree-n")?.textContent).toBe("1 match")
+  })
+
+  it("review: a redraw that changes no record re-walks nothing in the open Raw tab", async () => {
+    fakeStudio(baseRoutes())
+    const el = await mount(BASE)
+    click(tab(el, "raw"))
+    await settle()
+    await type($(el, ".weft-tree-q") as HTMLInputElement, "run_start")
+    const tree = (el as unknown as { tree: { memo?: unknown; auto?: unknown } }).tree
+    const memo = tree.memo
+    const auto = tree.auto
+    // Two redraws that change no record (the ? list opened and closed).
+    dock(el).focus()
+    key(dock(el), { key: "?" })
+    await settle()
+    key(dock(el), { key: "?" })
+    await settle()
+    expect(tree.memo).toBe(memo)
+    expect(tree.auto).toBe(auto)
+  })
+
+  it("review: \"copied\" goes after 2 s or with the next action; the hand-copy box goes on blur or Esc", async () => {
+    vi.useFakeTimers()
+    const writeText = vi.fn<(t: string) => Promise<void>>(async () => {})
+    clipboard(writeText)
+    const { box } = draw({ a: { b: 1 } })
+    document.body.appendChild(box)
+    click(box.querySelector(".weft-tc"))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(box.querySelector(".weft-tree-said")?.textContent).toBe("copied")
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(box.querySelector(".weft-tree-said")).toBeNull()
+    click(box.querySelector(".weft-tc"))
+    await vi.advanceTimersByTimeAsync(0)
+    click(box.querySelector(".weft-tt")) // the next action
+    expect(box.querySelector(".weft-tree-said")).toBeNull()
+    clipboard(null)
+    click(box.querySelector(".weft-tc"))
+    await vi.advanceTimersByTimeAsync(0)
+    const ta = box.querySelector(".weft-copybox") as HTMLTextAreaElement
+    expect(document.activeElement).toBe(ta)
+    ta.dispatchEvent(new Event("blur"))
+    expect(box.querySelector(".weft-copybox")).toBeNull()
+    click(box.querySelector(".weft-tc"))
+    await vi.advanceTimersByTimeAsync(0)
+    key(box.querySelector(".weft-copybox")!, { key: "Escape" })
+    expect(box.querySelector(".weft-copybox")).toBeNull()
+  })
+
+  it("review: copy-node on a container past the 200-child cap copies the whole node", () => {
+    const writeText = vi.fn<(t: string) => Promise<void>>(async () => {})
+    clipboard(writeText)
+    const big = Array.from({ length: 500 }, (_, i) => i)
+    const { box } = draw({ big })
+    click(Array.from(box.querySelectorAll(".weft-tc")).find((b) => b.getAttribute("aria-label") === "copy big"))
+    expect(JSON.parse(String(writeText.mock.calls[0]?.[0]))).toEqual(big)
   })
 })
 
@@ -384,6 +557,32 @@ describe("the turn list's filter", () => {
     expect(text(el, ".weft-tq-n")).toBe("1 of 3 turns")
     // j/k walk the filtered rows; nothing about the filter is stored.
     expect(JSON.stringify(stored() ?? {})).not.toMatch(/boom|status|err/)
+  })
+
+  it("review: the narrow dropdown keeps the selected turn listed and runs experiments through the filter too", async () => {
+    const routes = three()
+    const x1 = runRow({ id: "x1", playground: true, session_id: "", forked_from: "s_01-t1#0", started: "2026-10-01T09:03:00Z" })
+    const page0 = routes["runs?public_id=pub_orders&limit=50"] as { runs: unknown[] }
+    page0.runs.push(x1)
+    fakeStudio(routes)
+    const el = await mount(BASE) // 520 px: the dropdown
+    const pick = () => $(el, ".weft-turn-pick") as HTMLSelectElement
+    expect(pick().value).toBe("s_01-t3")
+    expect(Array.from(pick().options, (o) => o.value)).toContain("x1")
+    await type($(el, ".weft-turn-q") as HTMLInputElement, "boom")
+    expect(Array.from(pick().options, (o) => o.value)).toEqual(["s_01-t3", "s_01-t2"])
+    expect(pick().value).toBe("s_01-t3") // still what the column shows
+    expect(Array.from(pick().options, (o) => o.value)).not.toContain("x1")
+  })
+
+  it("review: / with no filter box to focus (an empty list) is left to the page", async () => {
+    const routes = baseRoutes()
+    routes["runs?public_id=pub_orders&limit=50"] = { total: 0, runs: [], next_before: null }
+    fakeStudio(routes)
+    const el = await mount(BASE)
+    dock(el).focus()
+    expect($(el, ".weft-turn-q")).toBeNull()
+    expect(key(dock(el), { key: "/" }).defaultPrevented).toBe(false)
   })
 })
 
@@ -525,5 +724,109 @@ describe("paging (before= / before_id=, no cap)", () => {
     click($(wide, ".weft-older"))
     await settle()
     expect(all(wide, ".weft-turn")).toHaveLength(100)
+  })
+
+  /** A long() variant: page two is rows already listed (it adds no
+   * turn) with a cursor to page three. */
+  it("review: a page that adds no turn still re-arms the observer (the sentinel is keyed by the cursor)", async () => {
+    FakeIO.all = []
+    vi.stubGlobal("IntersectionObserver", FakeIO)
+    const routes = long()
+    const k2 = `runs?${new URLSearchParams({ public_id: "pub_orders", limit: "50", before: at(151), before_id: "t151" })}`
+    const real2 = routes[k2] as { runs: unknown[]; next_before: string; next_before_id: string }
+    routes[k2] = { total: N, runs: (routes["runs?public_id=pub_orders&limit=50"] as { runs: unknown[] }).runs, next_before: real2.next_before, next_before_id: real2.next_before_id }
+    fakeStudio(routes)
+    const el = await mount(WIDE)
+    FakeIO.all.at(-1)!.fire()
+    await settle()
+    expect(all(el, ".weft-turn")).toHaveLength(50) // nothing new…
+    const io = FakeIO.all.at(-1)!
+    expect(io.off).toBe(false) // …but a new observer on the new sentinel
+    expect(FakeIO.all).toHaveLength(2)
+    io.fire()
+    await settle()
+    expect(all(el, ".weft-turn")).toHaveLength(100)
+  })
+
+  it("review: a refresh landing while an older page is read does not discard that page (cursors compared by value)", async () => {
+    FakeIO.all = []
+    vi.stubGlobal("IntersectionObserver", FakeIO)
+    const routes = long()
+    const k2 = `runs?${new URLSearchParams({ public_id: "pub_orders", limit: "50", before: at(151), before_id: "t151" })}`
+    const body = routes[k2]
+    let release = () => {}
+    routes[k2] = () => new Promise((r) => (release = () => r(body)))
+    fakeStudio(routes)
+    const el = await mount(WIDE)
+    FakeIO.all.at(-1)!.fire()
+    await pause(60)
+    expect(text(el, ".weft-older")).toBe("loading older turns…")
+    await (el as unknown as { model: { refresh: () => Promise<void> } }).model.refresh()
+    release()
+    await settle()
+    expect(all(el, ".weft-turn")).toHaveLength(100)
+  })
+
+  it("review: with the turn filter on, the list does not auto-load; the count says what it covers", async () => {
+    FakeIO.all = []
+    vi.stubGlobal("IntersectionObserver", FakeIO)
+    fakeStudio(long())
+    const el = await mount(WIDE)
+    const io = FakeIO.all.at(-1)!
+    await type($(el, ".weft-turn-q") as HTMLInputElement, "t15")
+    expect(io.off).toBe(true)
+    expect(FakeIO.all).toHaveLength(1)
+    expect(text(el, ".weft-tq-n")).toBe("9 of 50 loaded · the filter applies to the loaded turns")
+    expect(text(el, ".weft-older")).toBe("older turns ↓")
+    click($(el, ".weft-older")) // the button still pages
+    await settle()
+    expect(text(el, ".weft-tq-n")).toBe("10 of 100 loaded · the filter applies to the loaded turns")
+    await type($(el, ".weft-turn-q") as HTMLInputElement, "")
+    expect(FakeIO.all.at(-1)!.off).toBe(false) // watched again
+  })
+
+  it("review: a refresh with new runs at the top keeps the pages read and adds the new rows", async () => {
+    FakeIO.all = []
+    vi.stubGlobal("IntersectionObserver", FakeIO)
+    const routes = long()
+    fakeStudio(routes)
+    const el = await mount(WIDE)
+    FakeIO.all.at(-1)!.fire()
+    await settle()
+    expect(all(el, ".weft-turn")).toHaveLength(100)
+    const fresh = turn(201)
+    const first = routes["runs?public_id=pub_orders&limit=50"] as { runs: ReturnType<typeof turn>[] }
+    const rows = [fresh, ...first.runs.slice(0, 49)]
+    routes["runs?public_id=pub_orders&limit=50"] = { total: N + 1, runs: rows, next_before: rows[49].started, next_before_id: rows[49].id }
+    routes["runs/t201"] = { ...fresh, children: [] }
+    await (el as unknown as { model: { refresh: () => Promise<void> } }).model.refresh()
+    await settle()
+    const ids = all(el, ".weft-turn .weft-id").map((n) => n.textContent)
+    expect(ids).toHaveLength(101)
+    expect(ids[0]).toBe("t201")
+    expect(ids.at(-1)).toBe("t101")
+    expect(new Set(ids).size).toBe(101)
+    expect($(el, ".weft-older")).not.toBeNull()
+  })
+
+  it("review: rows tied on started across a page boundary are both listed once (before_id is the tie-breaker)", async () => {
+    FakeIO.all = []
+    vi.stubGlobal("IntersectionObserver", FakeIO)
+    const routes = long()
+    // t150 starts when t151 does: page two begins inside the tie.
+    const k2 = `runs?${new URLSearchParams({ public_id: "pub_orders", limit: "50", before: at(151), before_id: "t151" })}`
+    const p2 = routes[k2] as { runs: ReturnType<typeof turn>[] }
+    p2.runs[0] = { ...p2.runs[0], started: at(151) }
+    const studio = fakeStudio(routes)
+    const el = await mount(WIDE)
+    FakeIO.all.at(-1)!.fire()
+    await settle()
+    expect(studio.gets("runs?public_id=pub_orders&limit=50&before=").at(-1)?.path).toContain("before_id=t151")
+    await (el as unknown as { model: { refresh: () => Promise<void> } }).model.refresh()
+    await settle()
+    const ids = all(el, ".weft-turn .weft-id").map((n) => n.textContent)
+    expect(ids).toHaveLength(100)
+    expect(ids).toEqual(expect.arrayContaining(["t151", "t150"]))
+    expect(new Set(ids).size).toBe(100)
   })
 })

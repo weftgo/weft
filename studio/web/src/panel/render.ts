@@ -164,17 +164,24 @@ export interface WaterfallBar {
   ms: number
 }
 
+/** spanWindow is the spans the waterfall can place (readable times, an
+ * end not before the start) and their [min start, max end] window. */
+export function spanWindow(spans: { name: string; start: string; end: string }[]) {
+  const parsed = spans
+    .map((s) => ({ name: s.name, a: Date.parse(s.start), b: Date.parse(s.end) }))
+    .filter((s) => Number.isFinite(s.a) && Number.isFinite(s.b) && s.b >= s.a)
+  const from = parsed.length ? Math.min(...parsed.map((s) => s.a)) : 0
+  const to = parsed.length ? Math.max(...parsed.map((s) => s.b)) : 0
+  return { parsed, from, to, placed: parsed.length }
+}
+
 /** waterfall lays spans over the run's [min start, max end] window.
  * Spanless runs and unparseable times yield nothing. */
 export function waterfall(
   spans: { name: string; start: string; end: string }[]
 ): WaterfallBar[] {
-  const parsed = spans
-    .map((s) => ({ name: s.name, a: Date.parse(s.start), b: Date.parse(s.end) }))
-    .filter((s) => Number.isFinite(s.a) && Number.isFinite(s.b) && s.b >= s.a)
+  const { parsed, from, to } = spanWindow(spans)
   if (!parsed.length) return []
-  const from = Math.min(...parsed.map((s) => s.a))
-  const to = Math.max(...parsed.map((s) => s.b))
   const span = Math.max(1, to - from)
   return parsed.map((s) => ({
     name: s.name,

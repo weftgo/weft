@@ -53,6 +53,13 @@ import {
 import type { ExperimentDraft, ExperimentResult, TurnWords } from "./playground"
 import { studioIsTooNew } from "./version"
 
+/** The runs list's paging cursor (next_before, next_before_id). */
+interface Cursor {
+  before: string
+  id: string
+}
+const sameCursor = (a: Cursor | null, b: Cursor) => !!a && a.before === b.before && a.id === b.id
+
 /** The events walk's page cap: 20 pages of 500. A longer run says so
  * (capped) instead of reading as complete. */
 export const MAX_EVENT_PAGES = 20
@@ -202,6 +209,9 @@ export interface PanelState {
   paged: boolean
   /** An older page is being read. */
   loadingOlder: boolean
+  /** The runs cursor's values ("before|before_id"), "" with none: the
+   * sentinel is keyed by it (a page read is a new sentinel). */
+  olderAt: string
   /** Experiments (playground runs) by the source turn id they hang
    * off (forked_from's run part). Empty until step 8 turns the
    * playground on; the slot exists (§2). */
@@ -256,6 +266,7 @@ export function emptyPanelState(): PanelState {
     turnsCapped: false,
     paged: false,
     loadingOlder: false,
+    olderAt: "",
     experiments: new Map(),
     selected: "",
     selectedStep: null,
@@ -578,7 +589,7 @@ export class PanelModel {
     s.session = null
     s.turns = []
     s.turnsCapped = s.paged = s.loadingOlder = false
-    this.cursor = null
+    this.setCursor(null)
     s.experiments = new Map()
     s.selected = ""
     s.selectedStep = null
@@ -855,7 +866,7 @@ export class PanelModel {
         for (const r of [...keptX.values()].flat()) if (older(r)) this.upsertRun(r, true)
       } else {
         s.paged = false
-        this.cursor = page.next_before != null ? { before: page.next_before, id: page.next_before_id ?? "" } : null
+        this.setCursor(page.next_before != null ? { before: page.next_before, id: page.next_before_id ?? "" } : null)
       }
       s.turnsCapped = this.cursor != null
       for (const r of during) this.upsertRun(r)
@@ -1939,7 +1950,13 @@ export class PanelModel {
 
   /** The runs cursor of the oldest page loaded (next_before /
    * next_before_id), null when every run is listed. */
-  private cursor: { before: string; id: string } | null = null
+  private cursor: Cursor | null = null
+
+  /** setCursor moves the runs cursor and the key the sentinel reads. */
+  private setCursor(c: Cursor | null) {
+    this.cursor = c
+    this.state.olderAt = c ? `${c.before}|${c.id}` : ""
+  }
 
   /** loadOlder reads the conversation's next older page (D4): runs?
    * with before= and before_id= (studio/api.go's cursor), merged under
@@ -1959,10 +1976,12 @@ export class PanelModel {
         before: c.before,
         ...(c.id ? { before_id: c.id } : {}),
       })
-      if (seq !== this.loadSeq || this.disposed || this.cursor !== c) return
+      // A refresh that landed meanwhile may have set an equal cursor (a
+      // new object): the page is still the one asked for.
+      if (seq !== this.loadSeq || this.disposed || !sameCursor(this.cursor, c)) return
       const runs: (RunRow | null)[] = Array.isArray(page.runs) ? page.runs : []
       for (const r of runs) if (r && typeof r.id === "string" && !r.parent_run_id && this.inSession(r)) this.upsertRun(r, true)
-      this.cursor = page.next_before != null ? { before: page.next_before, id: page.next_before_id ?? "" } : null
+      this.setCursor(page.next_before != null ? { before: page.next_before, id: page.next_before_id ?? "" } : null)
       s.paged = true
       s.turnsCapped = this.cursor != null
     } catch {

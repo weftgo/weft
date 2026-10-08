@@ -12,6 +12,7 @@ import { resolve } from "node:path"
 import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { baseRoutes, fakeStudio, mount, settle, setup, teardown } from "./testkit"
+import { FILTER_MS } from "./tree"
 import type { WeftDevtools } from "./element"
 
 beforeEach(() => {
@@ -47,7 +48,7 @@ async function rawOpen(el: WeftDevtools) {
   const q = el.shadowRoot!.querySelector(".weft-tree-q") as HTMLInputElement
   q.value = "run_start"
   q.dispatchEvent(new Event("input", { bubbles: true }))
-  await settle()
+  await settle(FILTER_MS + 20) // the filter's debounce
 }
 /** D3 fixes: the experiment drawer (its selects and fields), and the
  * Raw tab's tree with the ? shortcuts overlay over it. */

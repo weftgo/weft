@@ -125,27 +125,46 @@ the event sequence, `seq`, the position in the run's event stream) and
 already read them: `▸`/`▾` per node (`aria-expanded`; `→` opens, `←`
 closes); only open nodes are built — a small document opens whole, a
 large one its top rows (150 by default, breadth-first), a container
-shows 200 children then "… +N more", a string over 2 KiB its head and
-"… +N bytes" (UTF-8) — so a 10 MB transcript costs only what is open.
-The filter box (`/`) matches keys and values, case-insensitively,
-opens the path to each match (the first 200), marks it and says "n
-matches" (every match counted; a match past a container's 200 is drawn
-anyway). `⧉` copies that node's JSON, `copy all` the document, through
-`navigator.clipboard`; where the clipboard is missing or refuses, the
-text is shown selected to copy by hand. `download` saves the document
+shows 200 children then "… +N more", a string over 2,048 characters
+(UTF-16 units, so a CJK or emoji string is cut by characters, never
+inside a surrogate pair) its head and "… +N bytes" (the rest's UTF-8
+bytes, counted once per string) — so a 10 MB transcript costs only what
+is open, and a redraw that changes no record walks nothing again. The
+filter box (`/`) matches keys and values, case-insensitively, 100 ms
+after the last keystroke; it opens the path to each match (the first
+200), marks it and says "n matches" (every match counted; past 200,
+"n matches · first 200 opened"; a match past a container's 200 is drawn
+anyway). `⧉` copies that node's JSON (the whole node, past any cap),
+`copy all` the document, through `navigator.clipboard`; "copied" goes
+after 2 s or with the next action; where the clipboard is missing or
+refuses, the text is shown selected to copy by hand, and that box goes
+once you leave it (or on `Esc`). The Story tab's node is kept across a
+tab switch (hidden, not rebuilt), so what you opened in it stays open;
+the Timeline's axis is the waterfall's own window, and spans it cannot
+place (unreadable times, an end before the start) are counted in a
+note. `download` saves the document
 as `<run id>.json` (a `/` in a child's id becomes `_`). The turn list
 has its own filter above it — text over the run id, the error and the
-prompts of the turns the panel has opened (a row carries no prompt),
-a status (`running`, `succeeded`, `failed`, `parked`) and has error
-— over the loaded rows, never stored, "n of m turns" while it narrows.
+prompts of the turns the panel has opened — it cannot search the
+prompts of turns not opened, because `/api/runs` rows carry no prompt
+preview — a status (`running`, `succeeded`, `failed`, `parked`) and has
+error — over the loaded rows, never stored, "n of m turns" while it
+narrows ("n of m loaded · the filter applies to the loaded turns" while
+older pages remain, and then nothing loads by itself: the button does;
+the narrow dropdown keeps the selected turn listed).
 The list pages: when it scrolls to its end, a sentinel row (one
 passive `IntersectionObserver` inside the panel's own list,
 disconnected with the element) reads the next older page through the
 runs route's cursor (`before=`/`before_id=`, 50 a page) — no cap: it
 reads "loading older turns…" while a page is read and "all n turns
-loaded" at the end. Where there is no observer, and in the narrow
-dropdown, the sentinel is a button (`older turns ↓`). A refresh (the
-live lane reconnecting, a stale read) keeps the pages already read.
+loaded" at the end. The sentinel is keyed by the cursor, so a page
+that adds no row (all experiments, another session's) still arms the
+next read. Where there is no observer, and in the narrow layout, the
+sentinel is a button (`older turns ↓`): the default 520 px float and
+the 460 px right dock are narrow (the turn column is a dropdown there),
+so in them older turns load by the button — three clicks for 200
+turns. A refresh (the live lane reconnecting, a stale read) keeps the
+pages already read and adds new rows at the top.
 The dev list (no public id) stays the newest 10 runs.
 Deep links (plan G1) follow one scheme, `src/lib/links.ts`, shared by
 the panel and Studio's app (an ESLint rule refuses a Studio URL built
@@ -448,7 +467,7 @@ puts focus in it, so the keys below work at once.
 | `j` / `k` | next / previous turn |
 | `J` / `K` | next / previous step (⤢ carries it) |
 | `g s` | open the turn and step in Studio (`lib/links.ts`, the link ⤢ carries), in a new tab |
-| `r` | the Raw tab (again: back to Story) |
+| `r` | the Raw tab (again: back to the tab before it) |
 | `/` | focus the filter: the raw tree's on the Raw tab, else the turn list's |
 | `←` / `→` | on the tabs: previous / next tab (`Home` / `End`: first / last) |
 | `?` | the key list |
@@ -477,7 +496,7 @@ throttle stays.
 | the turn list | `.weft-rows`: `role="list"` (`aria-label="turns"`); each run a `role="listitem"` holding its row button, the selected one `aria-current="true"`; roving tabindex (one row `tabindex="0"`) |
 | the running step's text | `aria-live="polite"` and `aria-busy="true"` while it streams (a reader waits instead of re-reading each draw) — the one live text region |
 | the step-end status | a visually hidden `role="status"` line, always in the dock, written once when the running step ends: `step N finished · n words` |
-| expanders | `aria-expanded` on how to scope, raw, a subagent's summary, and each raw tree node's `▸`/`▾` |
+| expanders | `aria-expanded` on how to scope, a subagent's summary, and each raw tree node's `▸`/`▾`; the header's `raw` is a toggle, `aria-pressed` (D4: it switches tabs) |
 | the turn view's tabs (D4) | `role="tablist"` (`aria-label="turn views"`) of `role="tab"` buttons with `aria-selected`, one `tabindex="0"`, `aria-controls` on the selected one; the drawn panel `role="tabpanel"`, `aria-labelledby` its tab |
 | the filters | `aria-label="filter turns"`, `aria-label="status"`, `aria-label="filter keys and values"`; `⧉` labelled `copy <key>` |
 | icon buttons | an `aria-label` on each: `⤢`, `⇆`, `◐`, `–`, `↺`, and the pill (its visible words, `weft devtools · 10→4`) |
@@ -536,8 +555,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 187,119 B raw / 53,386 B gzip
-(52.1 KiB, under the 80 KiB cap). The scope-detection ladder (C3: rungs
+committed `studio/dist/panel/panel.js`, 188,955 B raw / 54,040 B gzip
+(52.8 KiB, under the 80 KiB cap). The scope-detection ladder (C3: rungs
 2 to 5 and the activity pill) cost +6.0 KiB gzip against its +3 KiB
 estimate: nothing deferrable supplies the first scope and the
 deferrable remainder is under 1 KiB, so the overrun is accepted rather
@@ -545,8 +564,8 @@ than split. The host API below cost about +3.1 KiB against +1 KiB (with its
 review fixes); the
 layout (D1) +3.6 KiB against +4 KiB (with its review fixes); the keyed
 renderer and ARIA (D3) +1.5 KiB against +2 KiB (with its review fixes); the views (D4: tabs,
-the JSON tree and its filter, the turn filter, paging) +4.5 KiB against
-+5 KiB.
+the JSON tree and its filter, the turn filter, paging) +5.2 KiB against
++5 KiB (with its review fixes).
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 

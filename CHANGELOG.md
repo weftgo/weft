@@ -18,7 +18,7 @@ module, ADR 0005).
   (`src/panel/tree.ts`, no library) of `{doc, events, transcript,
   spans}` (and `requests` when the panel holds them) with per-node
   collapse (`aria-expanded`, `→`/`←`), lazy children (only open nodes
-  are built; 200 children, then "+N more"; a string over 2 KiB shows
+  are built; 200 children, then "+N more"; a string over 2,048 characters shows
   "+N bytes"), a filter over keys and values that opens the path to
   each match and counts them, copy-node, copy-all (the clipboard,
   else the text selected to copy by hand) and a `<run id>.json`
@@ -31,7 +31,10 @@ module, ADR 0005).
   API's `before=`/`before_id=` cursor as it scrolls to its end (an
   `IntersectionObserver` on a sentinel; a button where there is none,
   and in the narrow dropdown): no 50-turn cap, "all n turns loaded".
-  +4.5 KiB gzip of its +5 KiB.
+  `r` returns to the tab before Raw (the header's `raw` is
+  `aria-pressed`), the raw filter is debounced (100 ms) and a redraw
+  re-walks nothing; the Story tab's node is kept across tab switches.
+  +5.2 KiB gzip of its +5 KiB (with its review fixes).
 - **The devtools panel renders incrementally and is read by assistive
   tech** (plan D3): a draw patches the dock in place — keyed by run id
   for turn rows and by step ordinal for step cards — so a streaming

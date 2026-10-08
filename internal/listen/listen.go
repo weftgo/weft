@@ -18,6 +18,13 @@
 //     addresses were skipped and why. All of them busy is an error
 //     naming the range.
 //
+// The token goes to loopback only: the probe attaches Request.Token
+// as a bearer when the host it dials is loopback (127.0.0.0/8, ::1,
+// localhost; an unspecified host is dialled on 127.0.0.1). A busy
+// non-loopback address is probed bare — a fixed token never leaves the
+// machine for whatever holds that port — so it is never reused: the
+// db.path a reuse needs is served to loopback or the token alone.
+//
 // The policy is the command's, not the library's: studio.New gains
 // nothing, and an app's embedded Studio (setup A) is the app's own
 // listener on the app's own port. The logic lives here, apart from the
@@ -31,6 +38,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -185,13 +193,11 @@ type verdict struct {
 func probe(ctx context.Context, addr string, r Request) verdict {
 	ctx, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+probeAddr(addr)+"/api/meta", nil)
+	req, err := probeRequest(ctx, addr, r.Token)
 	if err != nil {
 		return verdict{why: "not a weft Studio"}
 	}
-	if r.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+r.Token)
-	}
+	sentToken := req.Header.Get("Authorization") != ""
 	client := &http.Client{
 		Timeout:       r.Timeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
@@ -218,6 +224,9 @@ func probe(ctx context.Context, addr string, r Request) verdict {
 			return verdict{why: "not a weft Studio"}
 		}
 	case http.StatusUnauthorized, http.StatusForbidden:
+		if r.Token != "" && !sentToken {
+			return verdict{why: "a Studio that requires a token, which goes to loopback only"}
+		}
 		if r.Token == "" {
 			return verdict{why: "a Studio that requires a token: set WEFT_STUDIO_TOKEN to its token to reuse it"}
 		}
@@ -228,10 +237,41 @@ func probe(ctx context.Context, addr string, r Request) verdict {
 	switch {
 	case m.DB.Path == "":
 		return verdict{why: "a Studio that serves no database path"}
-	case r.DBPath == "" || !sameFile(m.DB.Path, r.DBPath):
+	case r.DBPath == "":
+		return verdict{why: "a Studio on another database, " + m.DB.Path}
+	}
+	same, err := sameFile(m.DB.Path, r.DBPath)
+	switch {
+	case err != nil:
+		return verdict{why: "a Studio on " + m.DB.Path + " (could not compare: " + err.Error() + ")"}
+	case !same:
 		return verdict{why: "a Studio on another database, " + m.DB.Path}
 	}
 	return verdict{reuse: true, pid: m.PID}
+}
+
+// probeRequest builds the probe's GET /api/meta for the busy addr.
+// The bearer is attached only when the dialled host is loopback: a
+// fixed token is never sent to whatever holds a non-loopback port.
+func probeRequest(ctx context.Context, addr, token string) (*http.Request, error) {
+	dial := probeAddr(addr)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+dial+"/api/meta", nil)
+	if err != nil {
+		return nil, err
+	}
+	if host, _, err := net.SplitHostPort(dial); err == nil && token != "" && isLoopback(host) {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return req, nil
+}
+
+// isLoopback reports whether host is a loopback IP or "localhost".
+func isLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // probeAddr is the address the probe dials: an unspecified host
@@ -249,12 +289,23 @@ func probeAddr(addr string) string {
 
 // sameFile reports whether two database paths name one file: equal
 // once cleaned, or — through a symlink (macOS's /tmp) — the same file
-// on disk.
-func sameFile(a, b string) bool {
-	if filepath.Clean(a) == filepath.Clean(b) {
-		return true
+// on disk. A path that does not exist names a different file than one
+// that does (the command's file is often not created yet); a stat that
+// fails otherwise (permissions) is the error: the paths could not be
+// compared.
+func sameFile(running, mine string) (bool, error) {
+	if filepath.Clean(running) == filepath.Clean(mine) {
+		return true, nil
 	}
-	fa, errA := os.Stat(a)
-	fb, errB := os.Stat(b)
-	return errA == nil && errB == nil && os.SameFile(fa, fb)
+	fa, errA := os.Stat(running)
+	fb, errB := os.Stat(mine)
+	for _, err := range []error{errA, errB} {
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return false, err
+		}
+	}
+	if errA != nil || errB != nil {
+		return false, nil
+	}
+	return os.SameFile(fa, fb), nil
 }

@@ -289,6 +289,7 @@ func TestDBLabelMasksPassword(t *testing.T) {
 // nil (serve then closes the studio's resources) — the process can
 // exit on a signal at all, and the port actually closes.
 func TestListenShutsDownGracefully(t *testing.T) {
+	skipWithoutSelfSignal(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -313,9 +314,7 @@ func TestListenShutsDownGracefully(t *testing.T) {
 			t.Fatalf("server never listened on %s: %v", addr, err)
 		}
 	}
-	if err := syscall.Kill(syscall.Getpid(), syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
+	signalSelf(t, syscall.SIGTERM)
 	select {
 	case err := <-done:
 		if err != nil {

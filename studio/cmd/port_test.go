@@ -73,6 +73,7 @@ func loop(port int) string { return "127.0.0.1:" + strconv.Itoa(port) }
 // stop) and waits for serve to return.
 func startStudio(t *testing.T, db string, base, span int, wantAt string, out *syncBuffer) (stop func()) {
 	t.Helper()
+	skipWithoutSelfSignal(t)
 	done := make(chan error, 1)
 	go func() { done <- serve(db, want{addr: loop(base), span: span}, "tok", out) }()
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
@@ -95,9 +96,7 @@ func startStudio(t *testing.T, db string, base, span int, wantAt string, out *sy
 		}
 	}
 	return func() {
-		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
-			t.Fatal(err)
-		}
+		signalSelf(t, syscall.SIGTERM)
 		select {
 		case err := <-done:
 			if err != nil {
@@ -262,5 +261,64 @@ func TestAddrResolution(t *testing.T) {
 	}
 	if w := wantAddr("127.0.0.1:9001", defaultAddr); w.addr != "127.0.0.1:9001" || !w.pinned {
 		t.Errorf("flag = %+v, want 127.0.0.1:9001 pinned (over the env)", w)
+	}
+}
+
+// TestDBFile pins the path the port policy compares with a running
+// Studio's db.path: the file obsdb/sqlite opens for --db, absolute —
+// "" (never a match) for a fileless or malformed --db.
+func TestDBFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	wd, err := os.Getwd() // dir as the process sees it (symlinks resolved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	abs := filepath.Join(dir, "abs", "weft.db")
+	for _, c := range []struct {
+		name, flag, env, want string
+	}{
+		{"relative sqlite://", "sqlite://weft.db", "", filepath.Join(wd, "weft.db")},
+		{"relative sqlite:// in a directory", "sqlite://sub/../x/weft.db", "", filepath.Join(wd, "x", "weft.db")},
+		{"absolute sqlite:///", "sqlite://" + abs, "", abs},
+		{"sqlite:// wins over $WEFT_DB", "sqlite://" + abs, "env.db", abs},
+		{"$WEFT_DB relative", "", "env.db", filepath.Join(wd, "env.db")},
+		{"$WEFT_DB absolute", "", abs, abs},
+		{"the default", "", "", filepath.Join(wd, ".weft", "weft.db")},
+		{"sqlite://:memory:", "sqlite://:memory:", "", ""},
+		{"$WEFT_DB=:memory:", "", ":memory:", ""},
+		{"empty sqlite://", "sqlite://", "", ""},
+		{"clickhouse://", "clickhouse://u:p@127.0.0.1:9000/db", "", ""},
+		{"a bare path (not a --db form)", "weft.db", "", ""},
+		{"malformed", "postgres://x", "", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("WEFT_DB", c.env)
+			got, err := dbFile(c.flag)
+			if err != nil || got != c.want {
+				t.Errorf("dbFile(%q) with WEFT_DB=%q = %q, %v; want %q", c.flag, c.env, got, err, c.want)
+			}
+		})
+	}
+}
+
+// TestRelativeDBFormsReuse: a Studio started with a relative
+// --db sqlite://x.db is reused by a start in the same directory that
+// names the same file through $WEFT_DB — the two forms resolve to one
+// absolute path.
+func TestRelativeDBFormsReuse(t *testing.T) {
+	t.Chdir(t.TempDir())
+	base := freeBase(t, 2)
+	var first syncBuffer
+	stop := startStudio(t, "sqlite://x.db", base, 2, loop(base), &first)
+	defer stop()
+
+	t.Setenv("WEFT_DB", "x.db")
+	var second strings.Builder
+	if err := serve("", want{addr: loop(base), span: 2}, "tok", &second); err != nil {
+		t.Fatalf("second start: %v", err)
+	}
+	if want := "studio already running at http://" + loop(base) + " (pid " + strconv.Itoa(os.Getpid()) + "), reusing\n"; second.String() != want {
+		t.Errorf("second start printed %q, want %q", second.String(), want)
 	}
 }

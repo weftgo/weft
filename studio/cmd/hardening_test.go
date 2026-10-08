@@ -4,7 +4,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"syscall"
 	"testing"
@@ -128,6 +127,7 @@ func TestBannerLinkCarriesAGeneratedToken(t *testing.T) {
 // force-close — "an SSE stream ends when its request context cancels"
 // was never true. The streams now see the shutdown and end at once.
 func TestShutdownEndsOpenStreams(t *testing.T) {
+	skipWithoutSelfSignal(t)
 	t.Setenv("WEFT_DB", t.TempDir()+"/stop.db")
 	srv, err := serveBoot("", "127.0.0.1:0", "tok", io.Discard)
 	if err != nil {
@@ -161,9 +161,7 @@ func TestShutdownEndsOpenStreams(t *testing.T) {
 	}
 
 	start := time.Now()
-	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
-		t.Fatal(err)
-	}
+	signalSelf(t, syscall.SIGINT)
 	select {
 	case err := <-done:
 		if err != nil {

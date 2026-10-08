@@ -223,7 +223,8 @@ export function baselineCaption(b: PromptBaseline): string {
  * toolSetMayExplain says whether a system hash that moved between two
  * steps could be the tool set's doing rather than a PrepareStep: the
  * offered names differ and the verified agent cannot show that every
- * tool added or dropped carries no PromptSnippet (a ToolSource tool is
+ * tool added or dropped carries no PromptSnippet — or, the same set
+ * reordered, that no offered tool carries one (a ToolSource tool is
  * never in the manifest; an unverified manifest decides nothing).
  */
 export function toolSetMayExplain(
@@ -234,7 +235,16 @@ export function toolSetMayExplain(
   const a = new Set(before)
   const b = new Set(after)
   const changed = [...before.filter((n) => !b.has(n)), ...after.filter((n) => !a.has(n))]
-  if (changed.length === 0) return false
+  if (changed.length === 0) {
+    // The same set: unchanged unless reordered — and offer order is
+    // snippet order in composeSystem, so a reorder moves the hash
+    // unless the verified agent shows no offered tool has a snippet.
+    const reordered = before.length !== after.length || before.some((n, i) => n !== after[i])
+    if (!reordered) return false
+    if (!reg?.verified) return true
+    const all = snippetsOf(after, reg.agent)
+    return all === undefined || all.some(Boolean)
+  }
   if (!reg?.verified) return true
   const snippets = snippetsOf(changed, reg.agent)
   return snippets === undefined || snippets.some(Boolean)

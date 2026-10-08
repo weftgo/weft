@@ -100,6 +100,17 @@ function knownSel(
   return (calls.find((s) => s.key === `c:${step}:${call}`) ?? calls.at(0))?.key
 }
 
+/** How long after the end the run page waits for the run's
+ * invoke_agent span (an OTLP exporter's batch lands after run_finish). */
+const INVOKE_AGENT_WAIT_MS = 30_000
+
+/** hasInvokeAgent: the run's own invoke_agent span is among these. */
+function hasInvokeAgent(spans: TimedSpan[] | undefined, runId: string): boolean {
+  return (spans ?? []).some(
+    (s) => s.attrs["gen_ai.operation.name"] === "invoke_agent" && s.attrs["weft.run.id"] === runId
+  )
+}
+
 /** timeStepKey is the time-axis row of step n: its chat span (the
  * core stamps weft.step.index on it), else any span of that step. */
 function timeStepKey(timeSpans: TraceSpan[], n: number): string | undefined {
@@ -247,13 +258,28 @@ function RunPage() {
   // weft.override.* fingerprint (one query, shared with the trace).
   // That span ships only when the run ends, so the story view reads
   // the spans once the run is over (the end-of-run invalidation above
-  // reads them again) and never polls them.
+  // reads them again) and never polls them while it runs. Over OTLP
+  // (weft dev, setup B) spans batch later than the run_finish record
+  // that flips the status, so a read just after the end may come back
+  // without the run's invoke_agent span: until one is seen, the spans
+  // are read again every 2 s for 30 s after the page saw the end.
+  const endSeen = useRef<{ id: string; at: number | null }>({ id, at: null })
+  useEffect(() => {
+    if (endSeen.current.id !== id) endSeen.current = { id, at: null }
+    if (run.data && runStatus !== "running" && endSeen.current.at === null)
+      endSeen.current.at = Date.now()
+  }, [id, run.data, runStatus])
   const spans = useQuery({
     ...spansQuery(id),
     enabled:
       (view === "trace" || (requestsCapable && runStatus !== "running")) &&
       Boolean(run.data?.trace_id),
-    refetchInterval: view === "trace" && runStatus === "running" ? 5000 : false,
+    refetchInterval: (q) => {
+      if (runStatus === "running") return view === "trace" ? 5000 : false
+      const at = endSeen.current.id === id ? endSeen.current.at : null
+      if (at === null || Date.now() - at > INVOKE_AGENT_WAIT_MS) return false
+      return hasInvokeAgent(q.state.data?.spans, id) ? false : 2000
+    },
   })
   const override = useMemo(() => overrideOf(spans.data?.spans, id), [spans.data, id])
   const requests = useMemo(

@@ -1,4 +1,4 @@
-import{n as e}from"./rolldown-runtime-CbXtAM7H.js";import{H as t,Lt as n}from"./useRenderElement-BaeCEzq5.js";import{f as r,u as i}from"./index-C8ylSeTg.js";import{t as a}from"./live-mKgistut.js";function o(e,t){let n=e.split(`
+import{n as e}from"./rolldown-runtime-CbXtAM7H.js";import{H as t,Lt as n}from"./useRenderElement-BaeCEzq5.js";import{f as r,u as i}from"./index-DxNrNCB9.js";import{t as a}from"./live-mKgistut.js";function o(e,t){let n=e.split(`
 `),r=t.split(`
 `),i=Array.from({length:n.length+1},()=>Array(r.length+1).fill(0));for(let e=n.length-1;e>=0;e--)for(let t=r.length-1;t>=0;t--)i[e][t]=n[e]===r[t]?i[e+1][t+1]+1:Math.max(i[e+1][t],i[e][t+1]);let a=[],o=0,s=0;for(;o<n.length&&s<r.length;)n[o]===r[s]?(a.push({kind:`same`,text:n[o]}),o++,s++):i[o+1][s]>=i[o][s+1]?(a.push({kind:`del`,text:n[o]}),o++):(a.push({kind:`add`,text:r[s]}),s++);for(;o<n.length;o++)a.push({kind:`del`,text:n[o]});for(;s<r.length;s++)a.push({kind:`add`,text:r[s]});return a}function s(e){let t=e.filter(e=>e.kind===`add`).length,n=e.filter(e=>e.kind===`del`).length;return!t&&!n?`identical`:`+${t} −${n}`}var c=2e3;function l(e,t,n=c){let r=e.split(`
 `),i=t.split(`

@@ -223,6 +223,17 @@ describe("snippetsOf and toolSetMayExplain", () => {
     expect(toolSetMayExplain(["lookup"], ["lookup", "refund"], { agent: a, verified: false })).toBe(true)
     expect(toolSetMayExplain(["lookup"], ["lookup", "refund"], undefined)).toBe(true)
   })
+  it("a reorder of the same set is snippet order: it explains unless no offered tool has a snippet", () => {
+    const v = { agent: a, verified: true }
+    // lookup carries a snippet: reordering moves the composed text.
+    expect(toolSetMayExplain(["lookup", "refund"], ["refund", "lookup"], v)).toBe(true)
+    // Unverified, or a tool the manifest does not know: undecidable.
+    expect(toolSetMayExplain(["lookup", "refund"], ["refund", "lookup"], { agent: a, verified: false })).toBe(true)
+    // No offered tool has a snippet: a reorder cannot move the hash.
+    const bare = { ...a, tools: [{ name: "lookup" }, { name: "refund" }] }
+    expect(toolSetMayExplain(["lookup", "refund"], ["refund", "lookup"], { agent: bare, verified: true })).toBe(false)
+    expect(toolSetMayExplain(["lookup", "x"], ["x", "lookup"], { agent: bare, verified: true })).toBe(true)
+  })
 })
 
 describe("baselineCaption", () => {

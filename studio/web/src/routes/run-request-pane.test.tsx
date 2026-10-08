@@ -414,6 +414,35 @@ describe("the override chip reads the spans once, at run end (review 5)", () => 
   })
 })
 
+describe("the invoke_agent span lands after the end (round-2 review 1)", () => {
+  it("over OTLP the first read after the end lacks it: the spans are read again until it comes, then no more", async () => {
+    let done = false
+    await serve({
+      instructions: PROMPT0,
+      manifest: manifest(REGISTERED),
+      ended: () => done,
+    })
+    // The span batch lands after run_finish: the first read has only a
+    // chat span, the next one the invoke_agent span too.
+    const chat: Span = { ...invokeAgent({}), span_id: "c1", name: "chat script", attrs: { "gen_ai.operation.name": "chat", "weft.run.id": RUN } }
+    studio.on(`GET runs/${RUN}/spans`, () => ({
+      spans:
+        studio.calls(`GET runs/${RUN}/spans`).length <= 1
+          ? [chat]
+          : [chat, invokeAgent({ "weft.override.hash": "f00d", "weft.override.instructions": true })],
+    }))
+    renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() => expect(document.querySelectorAll("[data-request]").length).toBe(3))
+    done = true
+    await waitFor(() => expect(marks(0)).toEqual(["overridden by experiment"]), { timeout: 15_000 })
+    const reads = studio.calls(`GET runs/${RUN}/spans`).length
+    expect(reads).toBe(2)
+    // Seen: the reads stop.
+    await new Promise((r) => setTimeout(r, 4500))
+    expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(reads)
+  })
+})
+
 describe("the Request pane's rows", () => {
   it("every params field is a row, 'adapter default' where nil; tool choice and thinking are rows", async () => {
     await serve({ instructions: PROMPT0 })

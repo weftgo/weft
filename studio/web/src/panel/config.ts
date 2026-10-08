@@ -134,7 +134,7 @@ function optionsRung(opts: MountOptions | null | undefined): Rung {
       open: opts.open,
       auto: opts.auto,
     }[f]
-    return v === undefined || v === null ? null : String(v)
+    return v === undefined ? null : String(v)
   }
 }
 

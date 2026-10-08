@@ -75,7 +75,7 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command"
-import { runLink } from "@/lib/links"
+import { playgroundLink, runLink } from "@/lib/links"
 
 function Nav() {
   const meta = useQuery(metaQuery())
@@ -108,7 +108,7 @@ function Nav() {
               link's routes are registered (the capability is computed
               from them, never hard-coded). */}
           {meta.data?.capabilities.includes("playground") &&
-            item("/playground", "Playground", <FlaskConical data-slot="icon" />)}
+            item(playgroundLink().to, "Playground", <FlaskConical data-slot="icon" />)}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>

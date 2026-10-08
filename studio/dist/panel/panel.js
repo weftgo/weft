@@ -54,7 +54,7 @@ function o(e) {
 			open: e.open,
 			auto: e.auto
 		}[t];
-		return n == null ? null : String(n);
+		return n === void 0 ? null : String(n);
 	};
 }
 function s() {

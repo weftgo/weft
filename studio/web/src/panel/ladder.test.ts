@@ -142,7 +142,7 @@ describe("the configuration ladder (C2): each field, one case per rung", () => {
   }
 
   const flags = (field: "open" | "auto", set: Rung[], v: string) =>
-    stage(field, set, { 1: v, 2: v, 3: v, 4: v } as Record<Rung, string>)
+    stage(field, set, { 1: v, 2: v, 3: v, 4: v })
   for (const c of [
     { rung: "1", set: [1] as Rung[] },
     { rung: "2", set: [2] as Rung[] },

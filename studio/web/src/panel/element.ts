@@ -981,7 +981,7 @@ export class WeftDevtools extends HTMLElement {
       const editsBox = el("div", "weft-field")
       editsBox.appendChild(el("span", undefined, `Transcript edits (steps 0..${d.step - 1} are kept)`))
       // Steps are numbered the way from_step and the edits count them
-      // on the wire: over the run's own steps, in order (stepOrdinal).
+      // on the wire: over the run's own steps, in order (stepPosition).
       for (const [n, step] of t.folded.steps.entries()) {
         if (n >= d.step) break
         for (const call of step.toolCalls) {
@@ -1109,7 +1109,7 @@ export class WeftDevtools extends HTMLElement {
       // The step Studio continues from: the drawer's own, else the one
       // being read — as from_step counts it.
       const step =
-        mine && mine.step > 0 ? mine.step : s.turn ? stepOrdinal(s.turn.folded, s.selectedStep) : -1
+        mine && mine.step > 0 ? mine.step : s.turn ? stepPosition(s.turn.folded, s.selectedStep) : -1
       compare.setAttribute("href", studioPlaygroundLink(this.base, mine, step))
     }
     link()
@@ -1372,7 +1372,7 @@ export class WeftDevtools extends HTMLElement {
     })
     rerun.addEventListener("click", () => this.go(this.model?.rerun(t.id)))
     row.appendChild(rerun)
-    const from = stepOrdinal(t.folded, s.selectedStep)
+    const from = stepPosition(t.folded, s.selectedStep)
     if (from > 0) {
       const cont = el("button", "weft-btn", `⎇ Continue from step ${from}`, {
         title: "keep the transcript through the previous step (edits apply) and run this step fresh",
@@ -1493,11 +1493,12 @@ export function linkedStep(s: PanelState): number | undefined {
   return running ? t.folded.steps.at(-1)?.index : undefined
 }
 
-/** stepOrdinal is the step being read as source.from_step counts it:
+/** stepPosition is the step being read as source.from_step counts it
+ * (the playground hand-off's step — not the step ordinal links carry):
  * its place among the run's own steps (0-based) — the runtime and
  * Studio cut the transcript at the Nth assistant message the run
  * produced, whatever index the step's events carry. -1 when none. */
-export function stepOrdinal(view: FoldedRun, selected: number | null): number {
+export function stepPosition(view: FoldedRun, selected: number | null): number {
   return selected == null ? -1 : view.steps.findIndex((st) => st.index === selected)
 }
 

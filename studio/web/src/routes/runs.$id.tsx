@@ -28,6 +28,7 @@ import type { RunRow, Span as TimedSpan } from "@/lib/api"
 import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
 import type { RunSearch } from "@/lib/links"
+import type { Span as TraceSpan } from "@/lib/trace"
 import {
   defaultSelection,
   flowFromFold,
@@ -69,6 +70,47 @@ function readLayout(): Layout {
 // ordinal (the loop's step index, the n of api/runs/{id}/steps/{n}),
 // never an event position — the page maps it to the step's card
 // (story) and span (trace) itself.
+
+/**
+ * knownSel is ?sel= when it names a span the page has: a key no row
+ * carries (a call gone from the run, a typo) selects nothing and is
+ * dropped, so ?step= or the default decides instead. A pre-G1 call key
+ * (c:<call id>, ambiguous once a call id repeats across steps) maps to
+ * the call in the linked step when there is one, else to the first
+ * c:<step>:<call id> key.
+ */
+function knownSel(
+  sel: string | undefined,
+  step: number | undefined,
+  fullSpans: TraceSpan[],
+  timeSpans: TraceSpan[]
+): string | undefined {
+  if (!sel) return undefined
+  if (fullSpans.some((s) => s.key === sel) || timeSpans.some((s) => s.key === sel)) return sel
+  const call = /^c:([^:]+)$/.exec(sel)?.[1]
+  if (!call) return undefined
+  // A top-level call's key is c:<step|resume>:<call id>; a child's
+  // carries its run id too and never matches this shape.
+  const calls = fullSpans.filter((s) => {
+    const at = s.key.split(":")[1]
+    return s.kind === "tool" && s.key === `c:${at}:${call}`
+  })
+  return (calls.find((s) => s.key === `c:${step}:${call}`) ?? calls.at(0))?.key
+}
+
+/** timeStepKey is the time-axis row of step n: its chat span (the
+ * core stamps weft.step.index on it), else any span of that step. */
+function timeStepKey(timeSpans: TraceSpan[], n: number): string | undefined {
+  const ofStep = timeSpans.filter((s) => {
+    const v = s.timed?.span.attrs["weft.step.index"]
+    return (typeof v === "number" || typeof v === "string") && String(v) === String(n)
+  })
+  const chat = ofStep.find((s) => {
+    const sp = s.timed?.span
+    return sp?.attrs["gen_ai.operation.name"] === "chat" || sp?.name.startsWith("chat")
+  })
+  return (chat ?? ofStep.at(0))?.key
+}
 
 export const Route = createFileRoute("/runs/$id")({
   validateSearch: (search: Record<string, unknown>): RunSearch => ({
@@ -307,12 +349,22 @@ function RunPage() {
     [stream.folded, stream.events.length, runStatus]
   )
   // ?step= (a deep link to a step, lib/links.ts) selects that step's
-  // span when no span is named: the ordinal is the span key's number.
+  // row when no (known) span is named: on the position axis the step's
+  // own span (the ordinal is its key's number), on the time axis the
+  // step's chat span (weft.step.index), else the default.
+  const onTime = axis === "time" && haveTime
   const stepKey =
-    search.step !== undefined && fullSpans.some((s) => s.key === `s${search.step}`)
-      ? `s${search.step}`
-      : undefined
-  const selKey = search.sel ?? stepKey ?? defaultSelection(fullSpans)?.key
+    search.step === undefined
+      ? undefined
+      : onTime
+        ? timeStepKey(timeSpans, search.step)
+        : fullSpans.some((s) => s.key === `s${search.step}`)
+          ? `s${search.step}`
+          : undefined
+  const selKey =
+    knownSel(search.sel, search.step, fullSpans, timeSpans) ??
+    stepKey ??
+    defaultSelection(fullSpans)?.key
   const selected = traceSpans.find((s) => s.key === selKey)
   const select = useCallback(
     (key: string) =>

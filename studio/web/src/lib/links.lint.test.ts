@@ -56,6 +56,15 @@ describe("only links.ts builds a Studio URL", () => {
     ],
     ["navigate to a run", 'void navigate({ to: "/runs/$id", params: { id } })'],
     ["a helper given the route", 'go("/runs/$id", { id })'],
+    ["an absolute template path", "const u = `/runs/${id}`"],
+    ["a relative template path with a search", "const u = `runs/${id}?step=2`"],
+    [
+      "a page path after an origin",
+      "const u = `${location.origin}/studio/runs/${id}`",
+    ],
+    ["navigate to the playground", 'void navigate({ to: "/playground" })'],
+    ["a router Link to the playground", 'const x = <Link to="/playground" />'],
+    ["an experiments route", 'const x = <Link to="/experiments" />'],
   ])("refuses %s", async (_name, code) => {
     expect(await problems(code)).toBeGreaterThan(0)
   })
@@ -71,6 +80,14 @@ describe("only links.ts builds a Studio URL", () => {
       'export const Route = createFileRoute("/runs/$id")({})',
     ],
     ["useNavigate's from", 'const n = useNavigate({ from: "/runs/$id" })'],
+    ["useSearch's from", 'const q = useSearch({ from: "/playground" })'],
+    [
+      "the playground's declaration",
+      'export const Route = createFileRoute("/playground")({})',
+    ],
+    ["a relative API path (the API's own shape)", "const p = `runs/${id}`"],
+    ["an API path with a query", "const p = `runs/${id}/requests?limit=${n}`"],
+    ["an api/ display string", "const s = `api/runs/${id} — the run document`"],
     ["a spread link", "const x = <Link {...runLink(id)} />"],
     ["a list page", 'const x = <Link to="/runs" />'],
   ])("allows %s", async (_name, code) => {

@@ -6,7 +6,7 @@
 // Studio hand-off (P2-17), and every refusal surfacing as words.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { tokenScope } from "./config"
-import { stepOrdinal, studioPlaygroundLink } from "./element"
+import { stepPosition, studioPlaygroundLink } from "./element"
 import { pickRuntime } from "./playground"
 import type { ExperimentDraft } from "./playground"
 import {
@@ -708,10 +708,10 @@ describe("step numbering", () => {
     // A run whose events number its steps from 3 (a resumed run): the
     // wire still counts its first step as 0.
     const view = { runId: "r", steps: [step(3), step(4), step(5)], pending: [], finished: true }
-    expect(stepOrdinal(view, 3)).toBe(0)
-    expect(stepOrdinal(view, 5)).toBe(2)
-    expect(stepOrdinal(view, null)).toBe(-1)
-    expect(stepOrdinal(view, 9)).toBe(-1)
+    expect(stepPosition(view, 3)).toBe(0)
+    expect(stepPosition(view, 5)).toBe(2)
+    expect(stepPosition(view, null)).toBe(-1)
+    expect(stepPosition(view, 9)).toBe(-1)
   })
 })
 

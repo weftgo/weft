@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/weftgo/weft/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/weftgo/weft/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/weftgo/weft.svg)](https://pkg.go.dev/github.com/weftgo/weft)
-[![Version](https://img.shields.io/badge/version-v0.10.1-orange)](https://github.com/weftgo/weft/releases/tag/v0.10.1)
+[![Version](https://img.shields.io/badge/version-v0.11.0-orange)](https://github.com/weftgo/weft/releases/tag/v0.11.0)
 
 A modular framework for building AI agents in Go — designed the way the
 standard library is: small interfaces, `context` everywhere, functional
@@ -10,8 +10,8 @@ options, wrapped errors, and zero required configuration. One `go get`
 is the whole framework; one import path is the loop alone:
 
 ```sh
-go get github.com/weftgo/weft@v0.10.1       # the framework: every package below, one version
-go get github.com/weftgo/weft/core@v0.10.1  # the loop alone: its only dependency is the OTel API
+go get github.com/weftgo/weft@v0.11.0       # the framework: every package below, one version
+go get github.com/weftgo/weft/core@v0.11.0  # the loop alone: its only dependency is the OTel API
 ```
 
 | Package | What it gives you |
@@ -28,7 +28,7 @@ Concurrency is the point, not a feature: a step's tools fan out over
 goroutines, parallelism is a one-line dial, and tool failures never cancel
 their siblings.
 
-> **Status:** v0.10.1 — experimental, pre-1.0, released as one module
+> **Status:** v0.11.0 — experimental, pre-1.0, released as one module
 > (plus `core`; see [Releases](https://github.com/weftgo/weft/releases),
 > `CHANGELOG.md` and, coming from 0.8, [`MIGRATION-0.9.md`](MIGRATION-0.9.md)). The core's three load-bearing contracts — message
 > model, error model, tool contract — are implemented and tested, and
@@ -441,8 +441,10 @@ needs no file.
 
 Setup A's handler serves `GET <base>/panel-config.json` —
 `{"endpoint", "version", "capabilities"}` — to a loopback (or
-`AllowOrigins`) Host and a same-origin or loopback Origin only, a 404
-to anyone else, so the devtools panel reads its endpoint instead of
+`AllowOrigins`) Host and a same-origin, `AllowOrigins` or loopback
+Origin only (loopback by the Host's rule — `localhost`, `*.localhost`,
+127.0.0.0/8, `[::1]` — even with `AllowOrigins` set), a 404 to anyone
+else, so the devtools panel reads its endpoint instead of
 inferring it from its own `src`; `api/meta` lists the `panel-config`
 capability.
 
@@ -496,8 +498,11 @@ one does. A Studio bound to every interface (`--addr 0.0.0.0:7331`) is
 handed to the app, and printed, as `127.0.0.1`.
 
 Reuse follows the port policy, whose probe carries the fixed token
-(`--token` / `WEFT_STUDIO_TOKEN`), else the database's stable token: a
-Studio already serving the same database is reused (the app gets that
+(`--token` / `WEFT_STUDIO_TOKEN`), else the database's stable token —
+sent only to an address a trusted discovery file names (from another
+directory with `--db` on the same file the probe goes out bare and a
+second Studio starts on the next port): a Studio already serving the
+same database is reused (the app gets that
 URL and token; `weft dev` stops only the app), so two bare starts in a
 row reuse. A running Studio walled by another token answers the probe
 401 and is skipped — `weft dev` takes the next port with its own

@@ -1244,7 +1244,7 @@ function dt(e, t) {
 //#endregion
 //#region src/panel/version.ts
 function ft() {
-	return "v0.10.1";
+	return "v0.11.0";
 }
 function pt(e) {
 	if (typeof e != "string") return null;

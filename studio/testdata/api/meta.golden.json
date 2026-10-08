@@ -1,7 +1,7 @@
 {
-  "weft_version": "v0.10.1",
-  "studio_version": "v0.10.1",
-  "panel_version": "v0.10.1",
+  "weft_version": "v0.11.0",
+  "studio_version": "v0.11.0",
+  "panel_version": "v0.11.0",
   "db": {
     "kind": "sqlite"
   },

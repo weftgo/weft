@@ -6,7 +6,14 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
-## Unreleased
+## 0.11.0 — 2026-10-08
+
+Phase 2 of the devtools plan (start and find): the `weft` command,
+`weft dev`, the port policy, discovery, the stable dev token, the
+Agents page from runtime registrations, `weft doctor`, and the panel's
+configuration ladder. Tags `core/v0.11.0` (the `weft.version` literal
+only; core's API is unchanged since 0.10.1) and `v0.11.0` — a minor
+bump, as `studio/cmd` is removed (Changed — breaking).
 
 ### Added
 
@@ -72,7 +79,7 @@ module, ADR 0005).
   the binary asks `GET /api/meta` there (bearer: `--token` /
   `WEFT_STUDIO_TOKEN` when set): a Studio on the same database file is
   reused — `studio already running at http://127.0.0.1:7331 (pid
-  1234), reusing`, exit 0, nothing opened — and anything else (another
+  1234), reusing`, exit 0, no database or listener opened — and anything else (another
   program, a Studio on another database, one whose meta this token
   cannot read) moves Studio to the next free port in 7331–7340 with
   one line naming the skipped address and why; the banner prints the
@@ -141,8 +148,10 @@ module, ADR 0005).
   an action, no environment mirror) writes a new one.
 - **`GET <base>/panel-config.json`** (studio): `{endpoint, version,
   capabilities}` for the devtools panel, answered to a loopback (or
-  `AllowOrigins`) Host and a same-origin or loopback Origin only — a
-  404 otherwise; `/api/meta` lists the new `panel-config` capability.
+  `AllowOrigins`) Host and a same-origin, `AllowOrigins` or loopback
+  Origin only (loopback by the Host's rule — `localhost`,
+  `*.localhost`, 127.0.0.0/8, `[::1]` — even with `AllowOrigins` set) —
+  a 404 otherwise; `/api/meta` lists the new `panel-config` capability.
 - **The devtools panel's configuration ladder** (plan C2): each field
   (`endpoint`, `public-id`, `token`, `position`, `open`, `auto`)
   resolves on its own through `mount(opts)` → the `<weft-devtools>`

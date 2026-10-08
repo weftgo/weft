@@ -21,7 +21,7 @@ go get github.com/weftgo/weft/core@v0.10.1  # the loop alone: its only dependenc
 | `weft/thread` | Durable sessions: an append-only conversation tree with branching, compaction, approvals that survive restarts, steering and a bounded pool of child agents (jsonl, SQLite or memory storage) |
 | `weft/otel` | Recording in one line (`defer otel.Install()()`): every event, transcript and span exported over OpenTelemetry — to a local database, Studio, or any OTLP backend — with per-destination content policy and redaction |
 | `weft/obsdb` | The queryable store those records land in: SQLite locally, ClickHouse hosted (`weft/obsdb/clickhouse`) |
-| `weft/studio` | The Inspector: runs, sessions, traces and live streams in a web UI, an in-app devtools panel for your own pages, and a playground that re-runs a turn with an edited prompt, model or tools; the `studio` binary (`weft/studio/cmd`) serves it for apps in any language |
+| `weft/studio` | The Inspector: runs, sessions, traces and live streams in a web UI, an in-app devtools panel for your own pages, and a playground that re-runs a turn with an edited prompt, model or tools; the `weft` binary (`weft/cmd/weft`: `weft studio`) serves it for apps in any language |
 | `weft/runtime` | The playground's in-app side: your app executes experiment commands safely — side-effect tools are substituted or parked unless you opt them in |
 
 Concurrency is the point, not a feature: a step's tools fan out over
@@ -341,10 +341,11 @@ live SSE stream — served as one `http.Handler` with the UI embedded,
 no build step, nothing leaves the process. Setup A embeds it beside
 the app and passes the pipeline's handle for the live lane; a token
 (`studio.Token`) walls the API when it leaves loopback. Setup B is the
-binary — package `weft/studio/cmd`, the one place that imports the
-ClickHouse driver — for any language's OTel app: UI + ingest + a dev
-token on `127.0.0.1:7331`, `--db sqlite://path` or
-`clickhouse://user:pass@host:9000/db` ([studio/README.md](studio/README.md)).
+`weft` binary's `weft studio` — package `weft/cmd/weft`, the one place
+that imports the ClickHouse driver — for any language's OTel app: UI +
+ingest + the playground + a dev token on `127.0.0.1:7331`,
+`--db sqlite://path` or `clickhouse://user:pass@host:9000/db`
+([studio/README.md](studio/README.md)).
 
 ```go
 mux.Handle("/studio/", http.StripPrefix("/studio",
@@ -352,9 +353,35 @@ mux.Handle("/studio/", http.StripPrefix("/studio",
 ```
 
 ```sh
-go run ./studio/cmd --db sqlite://.weft/dev.db    # OTel app: point
+go install github.com/weftgo/weft/cmd/weft@latest
+weft studio --db sqlite://.weft/dev.db            # OTel app: point
 OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 # its exporter here
 ```
+
+#### The `weft` command
+
+Every subcommand is a thin client of the Studio API or of `studio.New`
+— a convenience over options the app can set itself, so a team that
+skips the CLI loses nothing. Every flag mirrors an environment
+variable one to one.
+
+| Command | What it does |
+|---|---|
+| `weft studio [--addr] [--db] [--token] [--manifest] [--open] [--no-playground]` | Setup B: `studio.New` with the UI, OTLP ingest, the playground (inert until an app's `weft/runtime` connects; `--no-playground` turns it off) and a dev token. Reuses a Studio already serving the same database on 7331, else takes the next free port in 7331–7340; `--addr` pins. The manifest is `--manifest`, else the nearest `weft.json` upward (one line says which). `--open` (default on a terminal) opens the UI with the token in the URL fragment. |
+| `weft runs [--agent] [--since 2h\|RFC3339] [--failed] [--limit] [--json]` | One row per run (id, agent, status, started, steps) from `GET /api/runs`; `--json` for scripts. |
+| `weft open <run id> [--open]` | Prints the run's page, `<url>/runs/<id>` (`#token=` when a token is set); `--open` opens it. |
+| `weft export <run id> [--format json\|jsonl\|otlp]` | `GET /api/runs/<id>/export` to stdout. |
+| `weft export <run id> --wefttest ./testdata [--test TestName] [--force]` | The run's wefttest replay fixtures unzipped into `./testdata/<TestName>/` (default: the run id), where `wefttest.Replay(t, "testdata")` reads them. |
+| `weft doctor` | One line per check of a running Studio, each read from `GET /api/meta`. |
+| `weft version` | The weft version this binary was built from. |
+
+| Flag | Environment | Default |
+|---|---|---|
+| `--addr` | `WEFT_STUDIO_ADDR` | `127.0.0.1:7331` (unpinned) |
+| `--db` | `WEFT_DB` | `./.weft/weft.db` |
+| `--token` | `WEFT_STUDIO_TOKEN` | `weft studio`: a generated dev token, printed |
+| `--manifest` | `WEFT_MANIFEST` | the nearest `weft.json` upward |
+| `--url` (runs, open, export, doctor) | `WEFT_STUDIO_URL` | `http://127.0.0.1:7331` |
 
 `go run ./studio/examples/basic` records demo runs (a tool call, a
 subagent, a failure) into an obsdb database and serves Studio on
@@ -772,7 +799,8 @@ otel/                 the observability pipeline: destinations, content policies
 obsdb/                the observability database: model, DB interface, sqlite backend, obsdbtest
 obsdb/clickhouse/     the hosted backend (collector-compatible schema, materialized views)
 studio/               the Inspector on obsdb: UI + JSON API + OTLP ingest + live (web/ is its
-                      Bun source, cmd/ the setup-B binary)
+                      Bun source)
+cmd/weft/             the weft binary: `weft studio` (setup B), runs, open, export, doctor
 runtime/              the playground's in-app side: the Studio link, the experiment executor
 examples/             runnable examples (getting-started, approval, otel, studio-local;
                       per-adapter: <adapter>/example)

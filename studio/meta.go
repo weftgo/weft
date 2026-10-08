@@ -18,7 +18,7 @@ import (
 
 // api/meta (S4.3, plan B5): what this Studio is and how it is wired,
 // computed from the server's own state, never hard-coded. Every line
-// `studio doctor` prints reads one of these fields — the doctor
+// `weft doctor` prints reads one of these fields — the doctor
 // computes nothing Studio does not serve.
 
 // metaDoc is api/meta's body.

@@ -493,7 +493,7 @@ func isLoopbackName(host string) bool {
 
 // DevToken generates a random dev token for setup B's binary: printed
 // at start, fixed by WEFT_STUDIO_TOKEN. Exported because the binary
-// lives in another package (studio/cmd).
+// lives in another package (cmd/weft).
 func DevToken() string {
 	b := make([]byte, 18)
 	if _, err := rand.Read(b); err != nil {

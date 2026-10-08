@@ -16,7 +16,7 @@
 //	curl -s -XPOST localhost:7331/run -d 'where is order 42?'
 //
 // 7331 is Studio's one default port, and this listener is the app's
-// own (setup A): it keeps its port. The binary (studio/cmd) started
+// own (setup A): it keeps its port. The binary (`weft studio`) started
 // beside it does not collide: it finds 7331 busy with something that
 // is not a Studio at /api/meta (this app mounts Studio under /studio/)
 // and moves to the next free port, saying so in one line (plan B2).

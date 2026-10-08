@@ -87,7 +87,7 @@ at the port the service maps onto the runner. A service container takes
 `ulimits:` key — one makes the whole workflow file invalid), and the
 health check holds the steps until the server answers a query on the
 native port. A gated test that skips fails the job, so a DSN the tests
-cannot read never reads green; the same DSN un-gates `studio/cmd`'s
+cannot read never reads green; the same DSN un-gates `cmd/weft`'s
 `--db clickhouse://` test.
 
 ```yaml
@@ -122,10 +122,10 @@ clickhouse:
           echo "gated tests skipped: WEFT_CLICKHOUSE_DSN did not reach them" >&2
           exit 1
         fi
-    - name: test (studio/cmd, gated --db clickhouse:// test)
-      working-directory: studio/cmd
+    - name: test (cmd/weft, gated --db clickhouse:// test)
+      working-directory: cmd/weft
       run: |
         set -o pipefail
-        go test -race -count=1 -v -run '^TestNewServerClickhouse$' ./... | tee "$RUNNER_TEMP/studio-cmd.log"
-        grep -q -- '--- PASS: TestNewServerClickhouse' "$RUNNER_TEMP/studio-cmd.log"
+        go test -race -count=1 -v -run '^TestNewServerClickhouse$' ./... | tee "$RUNNER_TEMP/weft-cmd.log"
+        grep -q -- '--- PASS: TestNewServerClickhouse' "$RUNNER_TEMP/weft-cmd.log"
 ```

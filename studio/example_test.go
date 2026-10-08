@@ -65,7 +65,7 @@ func ExampleServer() {
 	srv := studio.New(studio.Open(dir+"/weft.db"), studio.NoIngest()) // read-only: no OTLP receiver
 	defer func() { _ = srv.Close() }()                                // New opened that DB: closed here
 
-	_ = srv.Handler() // mount it; the binary in studio/cmd does
+	_ = srv.Handler() // mount it; the weft binary (cmd/weft) does
 	_ = srv.Runtime() // nil without Playground(true) (studio/runtime)
 	fmt.Println("ok")
 	// Output:

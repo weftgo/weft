@@ -28,8 +28,7 @@
 // The policy is the command's, not the library's: studio.New gains
 // nothing, and an app's embedded Studio (setup A) is the app's own
 // listener on the app's own port. The logic lives here, apart from the
-// command wiring (studio/cmd today, cmd/weft later), so the commands
-// share it.
+// command wiring (cmd/weft), so the commands share it.
 package listen
 
 import (

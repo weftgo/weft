@@ -8,6 +8,7 @@
 /docs/tool-schema-design.md
 
 # Build output
+/weft
 /bin/
 /dist/
 /examples/otel/otel

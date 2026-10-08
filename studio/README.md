@@ -43,7 +43,8 @@ bearer is the defence and the `Host` does not matter.
 **B · local binary** — any language's app, several services:
 
 ```sh
-go run ./studio/cmd                    # UI + OTLP + SQLite + dev token on 127.0.0.1:7331
+go install github.com/weftgo/weft/cmd/weft@latest
+weft studio                            # UI + OTLP + SQLite + playground + dev token on 127.0.0.1:7331
 WEFT_STUDIO_URL=http://127.0.0.1:7331 ./my-go-app
 OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 python app.py
 ```
@@ -59,7 +60,23 @@ moves it to the next free one in 7331–7340 with one line saying so.
 `--addr` (or `WEFT_STUDIO_ADDR`) pins: a busy pinned address is an
 error, never a fallback; `--db sqlite://path` picks the
 file, `--db clickhouse://user:pass@host:9000/db` the hosted backend
-(`obsdb/clickhouse`, the one place the driver is imported).
+(`obsdb/clickhouse`, the one place the driver is imported). The
+playground is on (`studio.Playground(true)`), inert until an app's
+`weft/runtime` connects; `--no-playground` turns it off. The manifest
+is `--manifest` (`WEFT_MANIFEST`), else the nearest `weft.json` from
+the working directory upward — one line says which file, or that none
+was found. `--open` (default on when stdout is a terminal) opens the
+UI with the token in the URL fragment.
+
+The same binary is the API over a terminal, each subcommand one
+route, `--url` (`WEFT_STUDIO_URL`) and `--token` (`WEFT_STUDIO_TOKEN`)
+picking the Studio: `weft runs [--agent] [--since] [--failed] [--json]`
+(`GET /api/runs`), `weft open <run id>` (checks `GET /api/runs/{id}`,
+prints `<url>/runs/<id>`), `weft export <run id> [--format
+json|jsonl|otlp]` and `weft export <run id> --wefttest ./testdata
+[--test TestName]` (`GET /api/runs/{id}/export`, the fixtures unzipped
+where `wefttest.Replay(t, "testdata")` reads them), `weft doctor`
+(`GET /api/meta`).
 
 **C · hosted** — the same handler behind `studio.Token`: the panel's
 scoped tokens are HMAC-signed `{public_id, scope, exp}` minted by your
@@ -312,6 +329,7 @@ dev -- --base /studio/` (Vite on :3000 proxying `/studio/api`).
 
 Import path: `github.com/weftgo/weft/studio`, a package of the
 framework module (`go get github.com/weftgo/weft`); it imports `core`,
-`obsdb` and, for its tests, `otel`. The binary is [cmd/](./cmd)
-(`go install github.com/weftgo/weft/studio/cmd@latest`), the one
-place that imports the clickhouse driver.
+`obsdb` and, for its tests, `otel`. The binary is
+[cmd/weft](../cmd/weft) (`go install
+github.com/weftgo/weft/cmd/weft@latest`, `make studio-bin` in this
+repo), the one place that imports the clickhouse driver.

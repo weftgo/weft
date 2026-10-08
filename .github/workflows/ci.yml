@@ -100,7 +100,7 @@ jobs:
   # The gated ClickHouse suite (obsdb/clickhouse's README "CI job
   # (service container)" block): the conformance table and the
   # collector-shape insert test need a server; each test creates and
-  # drops its own database. The same DSN also un-gates studio/cmd's
+  # drops its own database. The same DSN also un-gates cmd/weft's
   # hosted-backend test. The job waits for the server's health check
   # (a real query on the native port), and a gated test that skips
   # fails it — a DSN the tests cannot read must not turn the job green.
@@ -139,12 +139,12 @@ jobs:
             echo "gated tests skipped: WEFT_CLICKHOUSE_DSN did not reach them" >&2
             exit 1
           fi
-      - name: test (studio/cmd, gated --db clickhouse:// test)
-        working-directory: studio/cmd
+      - name: test (cmd/weft, gated --db clickhouse:// test)
+        working-directory: cmd/weft
         run: |
           set -o pipefail
-          go test -race -count=1 -v -run '^TestNewServerClickhouse$' ./... | tee "$RUNNER_TEMP/studio-cmd.log"
-          grep -q -- '--- PASS: TestNewServerClickhouse' "$RUNNER_TEMP/studio-cmd.log"
+          go test -race -count=1 -v -run '^TestNewServerClickhouse$' ./... | tee "$RUNNER_TEMP/weft-cmd.log"
+          grep -q -- '--- PASS: TestNewServerClickhouse' "$RUNNER_TEMP/weft-cmd.log"
 
   # The offline gate (ADR 0013's kill-switch clause): the whole
   # workspace stays green under WEFT_MODEL_REQUESTS=deny — suites that

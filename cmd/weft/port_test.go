@@ -214,15 +214,16 @@ func TestPinnedAddrBusyFails(t *testing.T) {
 	}
 	defer func() { _ = occupied.Close() }()
 	db := "sqlite://" + filepath.Join(t.TempDir(), "weft.db")
-	var out strings.Builder
-	err = run([]string{"--addr", loop(base), "--db", db, "--token", "tok"}, &out)
-	if err == nil || !strings.Contains(err.Error(), loop(base)) {
-		t.Errorf("--addr on a busy port: %v, want an error naming %s", err, loop(base))
+	var out, errb strings.Builder
+	code := run([]string{"studio", "--addr", loop(base), "--db", db, "--token", "tok"}, &out, &errb)
+	if code != 1 || !strings.Contains(errb.String(), loop(base)) {
+		t.Errorf("--addr on a busy port: exit %d %q, want 1 and an error naming %s", code, errb.String(), loop(base))
 	}
 	t.Setenv("WEFT_STUDIO_ADDR", loop(base))
-	err = run([]string{"--db", db, "--token", "tok"}, &out)
-	if err == nil || !strings.Contains(err.Error(), loop(base)) {
-		t.Errorf("WEFT_STUDIO_ADDR on a busy port: %v, want an error naming %s", err, loop(base))
+	errb.Reset()
+	code = run([]string{"studio", "--db", db, "--token", "tok"}, &out, &errb)
+	if code != 1 || !strings.Contains(errb.String(), loop(base)) {
+		t.Errorf("WEFT_STUDIO_ADDR on a busy port: exit %d %q, want 1 and an error naming %s", code, errb.String(), loop(base))
 	}
 	if out.String() != "" {
 		t.Errorf("a pinned busy start printed %q, want nothing (no banner, no move)", out.String())

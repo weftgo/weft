@@ -1,4 +1,4 @@
-// Package doctor is `studio doctor` (plan B5): it asks a running
+// Package doctor is `weft doctor` (plan B5): it asks a running
 // Studio what it is and how it is wired, and prints one line per
 // check. Every line reads one field of GET /api/meta (Lines is the
 // table) — or, for the runtime check, the two environment variables the
@@ -6,8 +6,8 @@
 // computes nothing Studio does not serve: a second source of truth
 // would drift.
 //
-// The logic lives here, apart from the command wiring (studio/cmd
-// today, cmd/weft later), so the command moves without it.
+// The logic lives here, apart from the command wiring (cmd/weft), so
+// the command stays a thin client of it.
 package doctor
 
 import (
@@ -105,7 +105,7 @@ func Run(ctx context.Context, w io.Writer, url, token string, getenv func(string
 	resp, err := client.Do(req)
 	if err != nil {
 		p.raw("studio not reachable at %s: %v", url, err)
-		p.sub("start one with `studio`, or point --url (WEFT_STUDIO_URL) at the one you run")
+		p.sub("start one with `weft studio`, or point --url (WEFT_STUDIO_URL) at the one you run")
 		return ErrUnhealthy
 	}
 	defer func() { _ = resp.Body.Close() }()

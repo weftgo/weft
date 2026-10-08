@@ -109,7 +109,9 @@ paths at a local checkout; the path is a directory of the framework
 module now.
 
 The `studio` binary installs from the framework module:
-`go install github.com/weftgo/weft/studio/cmd@v0.9.0`.
+`go install github.com/weftgo/weft/studio/cmd@v0.9.0`. (Since the
+release after 0.10.1 it is the `weft` binary's `weft studio`:
+`go install github.com/weftgo/weft/cmd/weft@latest`.)
 
 ## What a tool manifest records
 

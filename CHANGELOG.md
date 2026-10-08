@@ -10,8 +10,31 @@ module, ADR 0005).
 
 ### Added
 
+- **The `weft` command** (plan B1, `cmd/weft`): `go install
+  github.com/weftgo/weft/cmd/weft@latest` yields a `weft` binary.
+  `weft studio [--addr] [--db] [--token] [--manifest] [--open]
+  [--no-playground]` is setup B (what `studio/cmd` served) with the
+  playground on (`studio.Playground(true)`, inert until an app's
+  runtime connects; `--no-playground` turns it off), the manifest from
+  `--manifest` / `WEFT_MANIFEST` else the nearest `weft.json` from the
+  working directory upward (one line says which, or that none was
+  found), and `--open` (default on when stdout is a terminal) opening
+  the UI with the token in the URL fragment. The Studio API over a
+  terminal: `weft runs [--agent] [--since] [--failed] [--limit]
+  [--json]` (`GET /api/runs`), `weft open <run id> [--open]` (prints
+  `<url>/runs/<id>`), `weft export <run id> [--format json|jsonl|otlp]`
+  to stdout and `weft export <run id> --wefttest <dir> [--test name]
+  [--force]` (the wefttest fixtures unzipped into `<dir>/<name>/`, where
+  `wefttest.Replay(t, dir)` reads them; a non-empty target needs
+  `--force`); `weft doctor`; `weft version`. The API clients take
+  `--url` (`WEFT_STUDIO_URL`, default `http://127.0.0.1:7331`) and
+  `--token` (`WEFT_STUDIO_TOKEN`). Exit codes: 0, 1 a failure, 2 a
+  usage error. `weft dev` is not implemented yet (B1.2): it says so
+  and exits 2.
+- **`make studio-bin`** builds `./weft` from `./cmd/weft` (ignored by
+  git).
 - **Studio's port policy** (plan B2, `internal/listen`, wired into
-  `studio/cmd`): `127.0.0.1:7331` is the one default. On a busy port
+  `weft studio`): `127.0.0.1:7331` is the one default. On a busy port
   the binary asks `GET /api/meta` there (bearer: `--token` /
   `WEFT_STUDIO_TOKEN` when set): a Studio on the same database file is
   reused — `studio already running at http://127.0.0.1:7331 (pid
@@ -28,7 +51,7 @@ module, ADR 0005).
   guard (loopback with no Token, or the server token; never a panel
   token).
 
-- **`studio doctor [--url URL] [--token TOK]`** (plan B5): checks a
+- **`weft doctor [--url URL] [--token TOK]`** (plan B5): checks a
   running Studio and prints one line per check — reachable, token
   accepted, the database's path and size, the content it stores,
   connected runtimes (and, when none, what this shell's `WEFT_ENV` and
@@ -38,7 +61,7 @@ module, ADR 0005).
   table); the flags mirror `WEFT_STUDIO_URL` / `WEFT_STUDIO_TOKEN`. An
   unreachable Studio is the first line within a 5 s timeout and exit 1;
   a redirect is reported, never followed.
-- **`studio --manifest path`** (default `$WEFT_MANIFEST`; the flag
+- **`weft studio --manifest path`** (default `$WEFT_MANIFEST`; the flag
   wins): the app's `weft.json`, read once at start and served as
   `studio.Manifest` — `/api/manifest` and the doctor's weft.json check
   in setup B. An unreadable file is a start error.
@@ -67,6 +90,11 @@ module, ADR 0005).
 
 ### Changed — breaking
 
+- **`studio/cmd` is removed**: the setup-B binary is `weft studio`
+  (`go install github.com/weftgo/weft/cmd/weft@latest`), every flag
+  kept. `studio --version` is `weft version`; `studio doctor` is
+  `weft doctor`. Scripts that ran `go run ./studio/cmd` or
+  `go install github.com/weftgo/weft/studio/cmd@…` run `weft studio`.
 - **`/api/meta`'s `db` is an object**: `{kind, path, size}` instead of
   the kind string. Read `db.kind` where you read `db`. `path` and
   `size` (bytes, the WAL sidecar included) are served only to a

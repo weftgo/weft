@@ -14,7 +14,7 @@ RELEASE_DIR ?= studio/web/dist-release
 # reports from go.work.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy generate live tools apidiff apidiff-core apidiff-all apidiff-selftest offline fuzz fuzz-thread soak-thread studio-build studio-check studio-panel-asset
+.PHONY: build test vet fmt lint tidy generate live tools apidiff apidiff-core apidiff-all apidiff-selftest offline fuzz fuzz-thread soak-thread studio-build studio-bin studio-check studio-panel-asset
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -129,6 +129,12 @@ live:
 
 studio-build:
 	cd studio/web && bun install --frozen-lockfile && bun run build
+
+# The weft binary (cmd/weft: `weft studio`, runs, open, export, doctor,
+# version) built into ./weft (ignored). Users install it with
+#   go install github.com/weftgo/weft/cmd/weft@latest
+studio-bin:
+	$(GO) build -o weft ./cmd/weft
 
 # The devtools panel as a release asset (WEFT-DEVTOOLS §5.1): non-Go
 # backends serve this file themselves (V2).

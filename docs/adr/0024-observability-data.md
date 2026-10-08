@@ -57,7 +57,8 @@ database. New modules: `weft/obsdb` (the observability database: model,
 `DB` interface, SQLite backend, OTLP mapping, the live hub interface),
 `obsdb/clickhouse` (its own module, so the driver is opt-in), `weft/otel`
 (destinations, heartbeats, the local sink), `weft/runtime` (the playground
-link), `studio/cmd` (the local binary). Arrows only point down: `thread`
+link), `studio/cmd` (the local binary; superseded path: `cmd/weft`,
+`weft studio`, plan B1). Arrows only point down: `thread`
 never imports `obsdb`/`otel`/`runtime`; `obsdb` never imports
 `otel`/`runtime`/`studio`; `otel` never imports `thread`; root imports
 none of them. Studio ingests OTLP and serves one API; the devtools panel

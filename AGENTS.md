@@ -182,7 +182,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    IngestToken/AllowOrigins/Playground; routes register through
 //    //    routes.go's groups (panel.go/playground.go add theirs in their own files).
 //    // API: meta (db {kind, path, size: path/size to loopback and the server token only},
-//    //    auth_required, content, runtimes, manifest_check, pricing, retention — `studio doctor` prints it
+//    //    auth_required, content, runtimes, manifest_check, pricing, retention — `weft doctor` prints it
 //    //    line by line), manifest, runs (+session/public/playground filters; all=1 lists child
 //    //    runs too), runs/{id} (with its compactions: run-scope views, then session markers),
 //    //    runs/{id}/events|transcript|spans|requests|tools, runs/{id}/steps/{n} (one step
@@ -197,10 +197,15 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5); Token(tok) walls the
 //    //    /api tree (bearer or ?token=) — the UI shell and /panel.js are static,
 //    //    OTLP ingest (/v1/traces, /v1/logs) carries its own IngestToken.
-//    // Setup B, any language (package studio/cmd — the one place the clickhouse
-//    // driver lives): studio --db sqlite://path | clickhouse://user:pass@host:9000/db
-//    //    [--addr --token --manifest weft.json (or WEFT_MANIFEST)] serves UI + OTLP
-//    //    ingest on 127.0.0.1:7331; studio doctor [--url --token] checks one.
+//    // Setup B, any language (package cmd/weft — `go install github.com/weftgo/weft/cmd/weft@latest`;
+//    // the one place the clickhouse driver lives): weft studio --db sqlite://path |
+//    //    clickhouse://user:pass@host:9000/db [--addr --token --manifest weft.json (or
+//    //    WEFT_MANIFEST; else the nearest weft.json upward) --open --no-playground] serves UI +
+//    //    OTLP ingest + the playground on 127.0.0.1:7331. The API over a terminal (--url
+//    //    WEFT_STUDIO_URL, --token WEFT_STUDIO_TOKEN): weft doctor checks one; weft runs
+//    //    [--agent --since --failed --json]; weft open <run id> (prints <url>/runs/<id>);
+//    //    weft export <run id> [--format json|jsonl|otlp | --wefttest ./testdata --test Name]
+//    //    (fixtures where wefttest.Replay reads them); weft version.
 //    //    Port policy (internal/listen): busy 7331 + a Studio on the same DB → reused
 //    //    ("studio already running at … (pid n), reusing", exit 0); anything else → the
 //    //    next free port in 7331–7340, said in one line; --addr / WEFT_STUDIO_ADDR pins

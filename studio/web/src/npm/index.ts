@@ -91,8 +91,9 @@ export interface DevtoolsEvents {
    * approval names — the call id weft.Approve/Deny/Resolve and POST
    * /api/runs/{runId}/approvals ({call_id}) take: it equals callId. */
   parked: { runId: string; callId: string; ackId: string; name: string }
-  /** A run failed: its error, once per run. */
-  error: { message: string; runId?: string }
+  /** A run of the conversation failed: its error, once per run (the
+   * panel's own failures are lines in the panel, not events). */
+  error: { message: string; runId: string }
 }
 
 const TAG = "weft-devtools"

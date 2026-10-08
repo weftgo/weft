@@ -472,3 +472,41 @@ func TestPageDrivesThePanel(t *testing.T) {
 		t.Error("the page hand-builds a Studio run URL; it must ask studioLink")
 	}
 }
+
+// A deny-first that fails (plan C4.2 review): the request is answered
+// with a line naming it — no Send queued behind the parked call — and
+// the server keeps serving; once the denial goes through the next
+// question runs.
+func TestDenyFailureIsAnswered(t *testing.T) {
+	agent := weft.New(echoModel{}, weft.Name("studio-local"), lookupOrder, refundOrder)
+	d := newDemo(thread.Memory(), agent)
+	ask := func(q string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		d.run(w, httptest.NewRequest(http.MethodPost, "/run", strings.NewReader(q)))
+		return w
+	}
+	if w := ask("refund order 42"); !strings.Contains(w.Body.String(), "awaiting approval") {
+		t.Fatalf("refund: %d %q", w.Code, w.Body.String())
+	}
+	real := d.decide
+	d.decide = func(*thread.Session, context.Context, ...thread.Decision) (*thread.Turn, error) {
+		return nil, fmt.Errorf("the store is read-only")
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- ask("where is order 43?") }()
+	select {
+	case w := <-done:
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "could not deny the pending call: the store is read-only") {
+			t.Fatalf("failed deny answered %d %q", w.Code, w.Body.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the request hung behind the parked call")
+	}
+	if p := d.s.Pending(); len(p) != 1 {
+		t.Fatalf("pending after the failed deny = %+v, want the refund still pending", p)
+	}
+	d.decide = real
+	if w := ask("where is order 44?"); !strings.Contains(w.Body.String(), `About "where is order 44?": order 44`) {
+		t.Errorf("after the failure the next turn answered %d %q", w.Code, w.Body.String())
+	}
+}

@@ -42,7 +42,7 @@ module, ADR 0005).
   `weft:run` `{runId, status, publicId?, sessionId?, step?}` per status
   transition, `weft:parked` `{runId, callId, ackId, name}` once per
   parked call (`ackId` is the call id its approval takes) and
-  `weft:error` `{message, runId?}` once per failed run — bubbling,
+  `weft:error` `{message, runId}` once per failed run — bubbling,
   composed, asynchronous, only for the conversation followed. The
   script-tag install publishes the API as `window.weft.devtools` while a
   panel is connected (never replacing another library's `window.weft`;
@@ -50,8 +50,17 @@ module, ADR 0005).
   `select`, `isOpen` and `studioLink` and no global.
   `examples/studio-local`'s page drives the panel from its own
   "debug this" buttons and a "report this run" link, and a refund
-  question parks its turn on a `weft.RequireApproval` tool. The panel is
-  41,313 B gzip.
+  question parks its turn on a `weft.RequireApproval` tool. The host API
+  costs +3.1 KiB gzip (ledger row "C4.2 fixes": 45,664 B). Review fixes:
+  `scope()` reads `{session}` alone and `sessionId`/`runId` aliases and
+  says a scope naming neither; `scope(null)` restores what `mount()`
+  named; a frozen `window.weft` is said in the footer; a conversation
+  returned to does not re-report its runs; an ordinal the run lacks is
+  said and the last step carried; a lookup or run read Studio did not
+  answer says so; a host call waits 10 s at most for a hung start;
+  `error.runId` is required; the panel gate (`scripts/panel-gate.ts`) drives studio-local's
+  own page script (`--page-script`); a failed deny-first in the example
+  answers 409 instead of queueing.
 
 - **`examples/devtools-vite`** (the phase 3 gate's first clause): a
   minimal Vite app that installs the packed `@weftgo/devtools` and

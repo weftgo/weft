@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { href, runLink } from "../lib/links"
 import type { Scope } from "../lib/scope"
+import { SETTLE_MS } from "./element"
 import type { DevtoolsAPI, DevtoolsEvents, WeftDevtools } from "./element"
 import type { PanelModel } from "./state"
 import {
@@ -474,5 +475,146 @@ describe("studioLink", () => {
     expect(el.studioLink("a/b?c#d")).toContain("a%2Fb%3Fc%23d")
     expect(el.studioLink("")).toBe("")
     expect(el.api.studioLink("s_01-t1", -1)).toBe(href(STUDIO, runLink("s_01-t1")))
+  })
+})
+
+// ── C4.2's review fixes ───────────────────────────────────────────
+
+describe("review fixes", () => {
+  function two() {
+    const routes = baseRoutes()
+    const b = runRow({ id: "r_b", public_id: "pub_b", session_id: "s_b" })
+    routes["sessions?public_id=pub_b"] = { total: 0, sessions: [], next_before: null }
+    routes["runs?public_id=pub_b&limit=50"] = { total: 1, runs: [b], next_before: null }
+    routes["runs/r_b"] = { ...b, children: [] }
+    routes["runs/r_b/events?after=0&limit=500"] = page(runEvents("r_b"))
+    routes["runs/r_b/transcript"] = transcript([user("q b")], [assistant("a b")])
+    routes["runs/r_b/spans"] = { spans: [] }
+    routes["runs?public_id=pub_b&session_id=s_b&limit=50"] = routes["runs?public_id=pub_b&limit=50"]
+    return routes
+  }
+
+  it("1. scope({session}) — no publicId — is looked up like the string form", async () => {
+    const routes = two()
+    routes["sessions/s_b/public_id"] = { session_id: "s_b", public_id: "pub_b" }
+    const studio = fakeStudio(routes)
+    const el = await mountWith({ "data-endpoint": STUDIO, "data-open": "true", "data-public-id": "pub_orders" })
+    el.scope({ session: "s_b" } as unknown as Scope)
+    await settle()
+    expect(studio.gets("sessions/s_b/public_id")).toHaveLength(1)
+    expect(following(el)).toEqual({ publicId: "pub_b", session: "s_b" })
+  })
+
+  it("1. a run event's detail fed back (sessionId, runId) keeps the narrowing", async () => {
+    fakeStudio(two())
+    const el = await mountWith({ "data-endpoint": STUDIO, "data-open": "true" })
+    el.scope({ publicId: "pub_b", sessionId: "s_b", runId: "r_b" } as unknown as Scope)
+    await settle()
+    expect(following(el)).toEqual({ publicId: "pub_b", session: "s_b", run: "r_b" })
+  })
+
+  it("1. a scope naming neither a public id nor a session is said, not dropped", async () => {
+    fakeStudio(baseRoutes())
+    const el = await mountWith()
+    el.scope({ flow: "f_1" } as unknown as Scope)
+    await settle()
+    expect(text(el, ".weft-api-note")).toBe("scope: no public id or session")
+    expect(following(el).publicId).toBe("pub_orders")
+  })
+
+  it("2. scope(null) restores what mount() named before the first scope()", async () => {
+    fakeStudio(two())
+    const el = create({ "data-endpoint": STUDIO, "data-open": "true" })
+    el.options = { publicId: "pub_orders" }
+    document.body.appendChild(el)
+    await settle()
+    el.scope("pub_b")
+    await settle()
+    el.scope({ publicId: "pub_b", run: "r_b" })
+    await settle()
+    expect(following(el).publicId).toBe("pub_b")
+    el.scope(null)
+    await settle()
+    expect(following(el)).toEqual({ publicId: "pub_orders" })
+    expect(el.options).toEqual({ publicId: "pub_orders" })
+    expect(el.getAttribute("data-weft-scope")).toBe("pub_orders")
+  })
+
+  it("3. a frozen plain window.weft gets no global, and the footer says so", async () => {
+    fakeStudio(baseRoutes())
+    const theirs = Object.freeze({ v: 1 })
+    win().weft = theirs
+    const t = trap()
+    const el = await mountWith()
+    t.release()
+    expect(t.escaped).toEqual([])
+    expect(win().weft).toBe(theirs)
+    expect(text(el, ".weft-global")).toContain("window.weft is the page's: no window.weft.devtools")
+  })
+
+  it("4. returning to a conversation is not a new sighting: A→B→A→B→A reports a running run once", async () => {
+    const routes = two()
+    const t2 = runRow({ id: "s_01-t2", status: "running", finished: null, started: "2026-10-01T09:05:00Z" })
+    routes["runs?public_id=pub_orders&limit=50"] = { total: 2, runs: [t2, runRow({})], next_before: null }
+    addRun(routes, "s_01-t2", { status: "running", finished: null, started: "2026-10-01T09:05:00Z" })
+    fakeStudio(routes)
+    const el = create({ "data-endpoint": STUDIO, "data-open": "true", "data-public-id": "pub_orders" })
+    const seen = record(el)
+    document.body.appendChild(el)
+    await settle()
+    for (const pub of ["pub_b", "pub_orders", "pub_b", "pub_orders"]) {
+      el.scope(pub)
+      await settle()
+    }
+    const runs = seen.map((e) => e.detail as DevtoolsEvents["run"]).filter((d) => d.runId === "s_01-t2")
+    expect(runs.map((d) => d.status)).toEqual(["running"])
+  })
+
+  it("5. a step the run does not have is said, and the last step is carried instead", async () => {
+    fakeStudio(baseRoutes())
+    const el = await mountWith()
+    el.select("s_01-t1", 99)
+    await settle()
+    expect(state(el).selectedStep).toBe(0)
+    expect(text(el, ".weft-api-note")).toBe("step 99 not in run s_01-t1 · showing step 0")
+    const a = Array.from(el.shadowRoot!.querySelectorAll("a")).find((n) => n.textContent === "⤢")!
+    expect(a.getAttribute("href")).toContain("step=0")
+  })
+
+  it("6. a lookup Studio did not answer says so (nothing was learned about the session)", async () => {
+    const routes = two()
+    routes["sessions/s_b/public_id"] = () => apiError(500, "internal", "boom")
+    fakeStudio(routes)
+    const el = await mountWith()
+    el.scope({ publicId: "", session: "s_b" })
+    await settle()
+    expect(text(el, ".weft-api-note")).toBe("session s_b: Studio did not answer the lookup")
+  })
+
+  it("6. select over a run read that failed in transport is not 'not in this conversation'", async () => {
+    const routes = baseRoutes()
+    routes["runs/r_x"] = () => apiError(503, "unavailable", "down")
+    routes["runs/r_y"] = () => Promise.reject(new TypeError("network"))
+    fakeStudio(routes)
+    const el = await mountWith()
+    el.select("r_x")
+    await settle()
+    expect(text(el, ".weft-api-note")).toBe("run r_x: Studio did not answer")
+    el.select("r_y")
+    await settle()
+    expect(text(el, ".weft-api-note")).toBe("run r_y: Studio did not answer")
+  })
+
+  it("8. a start that hangs holds a select() SETTLE_MS at most, then says the panel is not connected", async () => {
+    vi.useFakeTimers()
+    fakeStudio(baseRoutes(), () => new Promise(() => {}))
+    const el = create()
+    document.body.appendChild(el)
+    await vi.advanceTimersByTimeAsync(10)
+    el.select("s_01-t1")
+    await vi.advanceTimersByTimeAsync(SETTLE_MS - 100)
+    expect($(el, ".weft-api-note")).toBeNull()
+    await vi.advanceTimersByTimeAsync(200)
+    expect(text(el, ".weft-api-note")).toBe("select s_01-t1: the panel is not connected")
   })
 })

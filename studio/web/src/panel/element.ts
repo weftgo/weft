@@ -214,8 +214,10 @@ export interface DevtoolsEvents {
    * /api/runs/{runId}/approvals ({call_id}) take — so it equals
    * callId. */
   parked: { runId: string; callId: string; ackId: string; name: string }
-  /** A run failed: its error, once per run. */
-  error: { message: string; runId?: string }
+  /** A run of the conversation failed: its error, once per run (the
+   * panel's own failures — Studio not answering — are lines, not
+   * events). */
+  error: { message: string; runId: string }
 }
 
 /** A host event's name. */
@@ -266,15 +268,38 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 export const PARKED_RECHECK_MS = 1_000
 const PARKED_TRIES = 3
 
-/** scopeValue reads a host-given Scope object: its string fields only
- * (null when it has no publicId string). */
+/** scopeValue reads a host-given Scope object: its string fields only,
+ * sessionId / runId accepted for session / run (a run event's detail
+ * fed back), a missing publicId read as "" when a session names the
+ * conversation. null when it names neither. */
 function scopeValue(v: unknown): Scope | null {
   if (!v || typeof v !== "object") return null
   const o = v as Record<string, unknown>
-  if (typeof o.publicId !== "string") return null
-  const out: Scope = { publicId: o.publicId }
-  for (const k of ["session", "flow", "run"] as const) if (typeof o[k] === "string" && o[k]) out[k] = o[k]
+  const str = (...keys: string[]) => {
+    for (const k of keys) if (typeof o[k] === "string" && o[k]) return o[k]
+    return ""
+  }
+  const session = str("session", "sessionId")
+  if (typeof o.publicId !== "string" && !session) return null
+  const out: Scope = { publicId: typeof o.publicId === "string" ? o.publicId : "" }
+  const flow = str("flow")
+  const run = str("run", "runId")
+  if (session) out.session = session
+  if (flow) out.flow = flow
+  if (run) out.run = run
   return out
+}
+
+/** How long a host's select() or session lookup waits for the panel's
+ * start or rescope before saying it is not connected. */
+export const SETTLE_MS = 10_000
+
+/** scopeForm is the serialised explicit scope options carry ("" for none). */
+function scopeForm(o: MountOptions): string {
+  const sc = o.scope
+  if (typeof sc === "string") return sc
+  if (sc) return serializeScope(sc)
+  return o.publicId ? serializeScope({ publicId: o.publicId }) : ""
 }
 
 /** stepOrdinal is a host-given step: a non-negative integer, else none. */
@@ -433,6 +458,12 @@ export class WeftDevtools extends HTMLElement {
   private evBaseline = true
   /** The status each run was last reported (or recorded) with. */
   private evStatus = new Map<string, string>()
+  /** Each conversation's statuses (by listKey): returning to one is not
+   * a new sighting of its runs. */
+  private evByKey = new Map<string, Map<string, string>>()
+  /** What mount() / the markup's options named before the first
+   * scope(): scope(null) puts it back. null: scope() has not set one. */
+  private preScope: { scope?: MountOptions["scope"]; publicId?: string } | null = null
   /** Parked calls reported (run + call id), runs whose failure was
    * reported, runs whose pending calls are being read. */
   private evParked = new Set<string>()
@@ -562,14 +593,24 @@ export class WeftDevtools extends HTMLElement {
       if (s === null) {
         this.note = ""
         const { scope: _s, publicId: _p, ...rest } = this.options ?? {}
-        this.options = rest
-        this.removeAttribute("data-weft-scope")
+        const pre = this.preScope
+        this.preScope = null
+        const back: MountOptions = { ...rest }
+        if (pre?.scope !== undefined) back.scope = pre.scope
+        if (pre?.publicId !== undefined) back.publicId = pre.publicId
+        this.options = back
+        const form = scopeForm(back)
+        if (form) this.setAttribute("data-weft-scope", form)
+        else this.removeAttribute("data-weft-scope")
         this.rescan()
         this.render(this.last)
         return
       }
       const next = typeof s === "string" ? parseScope(s) : scopeValue(s)
-      if (!next) return
+      if (!next || (!next.publicId && !next.session && typeof s === "string" && s.trim() !== "")) {
+        this.say("scope: no public id or session")
+        return
+      }
       if (!next.publicId && next.session) {
         this.lookupSession(next, seq)
         return
@@ -592,6 +633,8 @@ export class WeftDevtools extends HTMLElement {
       this.render(this.last)
       return
     }
+    // What mount() named stays mount()'s: scope(null) restores it.
+    this.preScope ??= { scope: this.options?.scope, publicId: this.options?.publicId }
     // publicId too: the rung-1 field readConfig reads after scope.
     this.options = { ...this.options, publicId: s.publicId, scope: { ...s } }
     this.setAttribute("data-weft-scope", form)
@@ -607,8 +650,13 @@ export class WeftDevtools extends HTMLElement {
       this.say(`session ${id}: the session lookup needs the dev token`)
       return
     }
-    this.afterSettle(async () => {
-      if (seq !== this.scopeSeq || !this.ready || !this.base) return
+    this.afterSettle(async (ok) => {
+      if (seq !== this.scopeSeq) return
+      if (!ok) {
+        if (!this.dormant) this.say(`session ${id}: the panel is not connected`)
+        return
+      }
+      if (!this.ready || !this.base) return
       let pub = ""
       let badge = ""
       try {
@@ -621,9 +669,11 @@ export class WeftDevtools extends HTMLElement {
         if (seq !== this.scopeSeq) return
         const status = err instanceof PanelApiError ? err.status : 0
         this.say(
-          status === 403
+          status === 403 || status === 401
             ? `session ${id}: the session lookup needs the dev token`
-            : `session ${id} has no public id · ${status === 404 ? "unknown session" : "Studio did not answer the lookup"}`
+            : status === 404
+              ? `session ${id} has no public id · unknown session`
+              : `session ${id}: Studio did not answer the lookup`
         )
         return
       }
@@ -648,13 +698,18 @@ export class WeftDevtools extends HTMLElement {
       if (!id) return
       const n = stepOrdinal(step)
       const seq = ++this.selectSeq
-      this.afterSettle(async () => {
+      this.afterSettle(async (settled) => {
+        if (seq !== this.selectSeq) return
+        if (!settled) {
+          if (!this.dormant) this.say(`select ${id}: the panel is not connected`)
+          return
+        }
         const m = this.model
-        if (!m || !this.ready || seq !== this.selectSeq) return
-        const ok = await m.adoptRun(id)
+        if (!m || !this.ready) return
+        const found = await m.adoptRun(id)
         if (this.model !== m || seq !== this.selectSeq) return
-        if (!ok) {
-          this.say(`run ${id} not in this conversation`)
+        if (found !== "ok") {
+          this.say(found === "unreachable" ? `run ${id}: Studio did not answer` : `run ${id} not in this conversation`)
           return
         }
         this.note = ""
@@ -662,6 +717,17 @@ export class WeftDevtools extends HTMLElement {
         if (n !== undefined) m.selectStep(n)
         else if (!loading) this.render(this.last)
         await loading
+        if (n === undefined || this.model !== m || seq !== this.selectSeq) return
+        // The step, checked against the run's own steps once they are
+        // read: an ordinal the run does not have is said, and the last
+        // step is the one carried instead.
+        const t = m.state.turn
+        const steps = t && t.id === id ? t.folded.steps.map((st) => st.index) : []
+        if (steps.length && !steps.includes(n)) {
+          const last = steps[steps.length - 1]
+          m.selectStep(last)
+          this.say(`step ${n} not in run ${id} · showing step ${last}`)
+        }
       })
     } catch {
       // the host's call must go through
@@ -743,6 +809,13 @@ export class WeftDevtools extends HTMLElement {
         return
       }
       const ours = ns as Record<string, unknown>
+      // A frozen, sealed or read-only namespace cannot take the name:
+      // said, not attempted (a strict-mode write would throw).
+      const slot = Object.getOwnPropertyDescriptor(ours, "devtools")
+      if (slot ? !slot.writable && !slot.set : !Object.isExtensible(ours)) {
+        this.globalNote = "window.weft is the page's: no window.weft.devtools"
+        return
+      }
       const cur = ours.devtools
       const panels = cur !== undefined && !!cur && typeof cur === "object" && API_OBJECTS.has(cur)
       if (cur !== undefined && !panels) {
@@ -801,20 +874,33 @@ export class WeftDevtools extends HTMLElement {
   /** afterSettle runs fn once the apply already scheduled, and the
    * start or rescope it began, have settled — so a select() right after
    * a scope() acts in the new scope's list. */
-  private afterSettle(fn: () => Promise<void>) {
+  private afterSettle(fn: (settled: boolean) => Promise<void>) {
     void this.settled()
       .then(fn)
       .catch(quiet)
   }
 
-  private async settled(): Promise<void> {
+  /** settled waits for the scheduled apply and the start or rescope it
+   * began, SETTLE_MS at most: false when they did not settle by then (a
+   * start that hangs never holds a host's call for ever). */
+  private async settled(): Promise<boolean> {
+    const deadline = Date.now() + SETTLE_MS
     for (let i = 0; i < 20; i++) {
       // A scheduled apply runs in the microtask queued before this one.
       if (this.scheduled) await Promise.resolve()
       const p = this.settling
-      await p.catch(quiet)
-      if (p === this.settling && !this.scheduled) return
+      const left = deadline - Date.now()
+      if (left <= 0) return false
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const late = await Promise.race([
+        p.catch(quiet).then(() => false),
+        new Promise<boolean>((r) => (timer = setTimeout(() => r(true), left))),
+      ])
+      clearTimeout(timer)
+      if (late) return false
+      if (p === this.settling && !this.scheduled) return true
     }
+    return true
   }
 
   /** watchRuns turns what the panel sees into the host events: the
@@ -829,10 +915,18 @@ export class WeftDevtools extends HTMLElement {
     const key = listKey(m.publicId, m.narrowing.session)
     if (s.listKey !== key) return
     if (m !== this.evModel || key !== this.evKey) {
+      if (m !== this.evModel) this.evByKey.clear()
       this.evModel = m
       this.evKey = key
+      // A conversation seen before keeps its statuses: only runs never
+      // seen are its history now.
+      const known = this.evByKey.get(key)
+      this.evStatus = known ?? new Map()
+      if (!known) {
+        this.evByKey.set(key, this.evStatus)
+        if (this.evByKey.size > DETECTED_LIMIT) this.evByKey.delete(this.evByKey.keys().next().value ?? "")
+      }
       this.evBaseline = true
-      this.evStatus = new Map()
     }
     const baseline = this.evBaseline
     this.evBaseline = false

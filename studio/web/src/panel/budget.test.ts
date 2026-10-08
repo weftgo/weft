@@ -37,7 +37,7 @@ describe("the size ledger (panel-budget.json)", () => {
     const row = (id: string) => lines.find((l) => l.startsWith(id.padEnd(6))) ?? ""
     expect(row("D1")).toMatch(/drag\/resize\/dock\/persist\s+\+4\.0 KiB\s+\+3\.5 KiB\s+ok$/)
     expect(row("C3")).toMatch(/\+3\.0 KiB\s+\+6\.0 KiB\s+over \(accepted\)$/)
-    expect(row("C4")).toMatch(/\+1\.0 KiB\s+\+2\.5 KiB\s+over \(accepted\)$/)
+    expect(row("C4")).toMatch(/\+1\.0 KiB\s+\+3\.1 KiB\s+over \(accepted\)$/) // C4.2 + its fixes
     expect(row("D4")).toMatch(/\+5\.0 KiB\s+—\s+not landed$/)
     expect(lines).toContain("baseline C1: 32,359 B")
     expect(lines.find((l) => l.includes("unbudgeted"))).toMatch(/G1, C5\.2.*\+0\.4 KiB/)
@@ -45,9 +45,9 @@ describe("the size ledger (panel-budget.json)", () => {
   })
 
   it("says when the build differs from the last row, and only the cap fails", () => {
-    const drift = budgetTable(ledger, 45100)
+    const drift = budgetTable(ledger, 45764)
     expect(drift.over).toBe(false)
-    expect(drift.lines.some((l) => l.includes("differs from the ledger's last row (D1, 45,016 B) by +0.1 KiB"))).toBe(true)
+    expect(drift.lines.some((l) => l.includes("differs from the ledger's last row (C4.2 fixes, 45,664 B) by +0.1 KiB"))).toBe(true)
     const big = budgetTable(ledger, 81921)
     expect(big.over).toBe(true)
     expect(big.lines.at(-1)).toContain("OVER THE CAP")

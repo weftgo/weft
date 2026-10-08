@@ -274,7 +274,11 @@ var refundOrder = weft.Tool("refund_order", "Refund an order (needs an approval)
 }, weft.RequireApproval())
 
 // refundCallID is the id of the call the echo model makes on a refund
-// question: the id the approval names.
+// question: the id the approval names — the panel's on("parked") ackId.
+// The app approves its own turns through its Session,
+// s.Decide(ctx, thread.Approve(ackId)); Studio's POST
+// /api/runs/{id}/approvals is for playground runs only (it answers 403
+// for a run no runtime started, this one included).
 const refundCallID = "call_refund"
 
 // echoModel is the demo's deterministic model: it answers the last
@@ -371,10 +375,13 @@ type demo struct {
 	agent *weft.Agent
 	s     *thread.Session
 	sem   chan struct{} // one writer per session (thread's rule)
+	// decide records the deny-first decisions (Session.Decide; a test
+	// stands in a failing one).
+	decide func(*thread.Session, context.Context, ...thread.Decision) (*thread.Turn, error)
 }
 
 func newDemo(st thread.Storage, agent *weft.Agent) *demo {
-	return &demo{st: st, agent: agent, sem: make(chan struct{}, 1)}
+	return &demo{st: st, agent: agent, sem: make(chan struct{}, 1), decide: (*thread.Session).Decide}
 }
 
 // publicID is the demo session's public id: every /run response's
@@ -443,7 +450,14 @@ func (d *demo) run(w http.ResponseWriter, r *http.Request) {
 		for _, p := range pending {
 			ds = append(ds, thread.Deny(p.CallID, "the user asked something else"))
 		}
-		if resume, err := session.Decide(ctx, ds...); err == nil && resume != nil {
+		resume, err := d.decide(session, ctx, ds...)
+		if err != nil {
+			// Undenied, the call still holds the session: a Send now would
+			// wait behind it until its context ended. Say so instead.
+			http.Error(w, "could not deny the pending call: "+err.Error(), http.StatusConflict)
+			return
+		}
+		if resume != nil {
 			_, _ = resume.Wait()
 		}
 	}

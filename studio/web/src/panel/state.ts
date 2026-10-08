@@ -1340,26 +1340,32 @@ export class PanelModel {
   /** adoptRun makes a run the list does not show selectable (the host
    * API's select, plan C4): its document is read by id (the token
    * scopes it as every read), and a top-level run of the conversation
-   * followed — any run's, on the dev list — joins the list. False when
-   * it cannot be read or is another conversation's (or a subagent's). */
-  async adoptRun(id: string): Promise<boolean> {
-    if (this.rowOf(id)) return true
+   * followed — any run's, on the dev list — joins the list: "ok".
+   * "foreign" when Studio says it is another conversation's (or a
+   * subagent's, or refuses or misses it), "unreachable" when Studio did
+   * not answer. A row without a session id is not judged by a session
+   * narrowing (a playground run's included). */
+  async adoptRun(id: string): Promise<"ok" | "foreign" | "unreachable"> {
+    if (this.rowOf(id)) return "ok"
     let raw: unknown
     try {
       raw = await fetchRun(this.ep, id)
-    } catch {
-      return false
+    } catch (err) {
+      // A refusal or a miss is an answer (not this conversation's); a
+      // transport error or a 5xx is not.
+      const status = err instanceof PanelApiError ? err.status : 0
+      return status >= 400 && status < 500 ? "foreign" : "unreachable"
     }
-    if (this.disposed || !raw || typeof raw !== "object") return false
+    if (this.disposed || !raw || typeof raw !== "object") return "unreachable"
     const doc = raw as RunDoc
-    if (doc.id !== id || doc.parent_run_id) return false
-    if (this.publicId && doc.public_id !== this.publicId) return false
-    if (!this.inSession(doc)) return false
+    if (doc.id !== id || doc.parent_run_id) return "foreign"
+    if (this.publicId && doc.public_id !== this.publicId) return "foreign"
+    if (!this.inSession(doc)) return "foreign"
     // The row, not the document: children and holes stay the view's.
     const { children: _c, holes: _h, compactions: _x, ...row } = doc
     this.upsertRun(row)
     this.emit()
-    return true
+    return "ok"
   }
 
   /** pendingCalls reads the calls a run parked on — its run_finish's

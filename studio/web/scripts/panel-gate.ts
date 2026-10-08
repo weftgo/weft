@@ -26,6 +26,10 @@
 // /panel.js check still compares what Studio serves with the committed
 // artifact it embeds.
 //
+// Setup A also drives the app's own served page (--page-script, on by
+// default; "off" skips it): its inline script, window.weft.devtools,
+// "debug this", the report link and data-parked-count (plan C4).
+//
 // Prints PASS lines and exits non-zero on the first failed
 // expectation.
 
@@ -47,6 +51,10 @@ interface Args {
   threads: string
   /** The bundle to drive; "" is the committed dist/panel/panel.js. */
   bundle: string
+  /** Setup A only (default on; --page-script off skips it): drive the
+   * served page itself — its own inline script, the host API through
+   * window.weft.devtools (plan C4) — after the synthesised page's run. */
+  pageScript: boolean
 }
 
 function parseArgs(argv: string[]): Args {
@@ -67,6 +75,7 @@ function parseArgs(argv: string[]): Args {
     otlp: a.otlp ?? "",
     threads: a.threads ?? "",
     bundle: a.bundle ?? "",
+    pageScript: a["page-script"] !== "off",
   }
 }
 
@@ -523,9 +532,90 @@ async function main() {
     console.log(`PASS fork mode: the pane follows the forked session's turn ${forkRunId}`)
   }
 
+  if (!args.otlp && args.pageScript) await pageScriptGate(args, panelJs)
+
   console.log("PANEL GATE PASS")
   dom.window.close()
   process.exit(0)
+}
+
+/** pageScriptGate drives the app's own served page (examples/studio-local's
+ * `/`) with its inline script running: the panel's one global, the
+ * "debug this" button, the "report this run" link and the parked-call
+ * count (plan C4's Done line). The inline script is evaluated before
+ * panel.js, as the page orders them; DOMContentLoaded is dispatched
+ * after both. */
+async function pageScriptGate(args: Args, panelJs: string) {
+  const res = await fetch(args.page)
+  if (!res.ok) throw new Error(`FAIL the app's page: ${res.status}`)
+  const dom = new JSDOM(await res.text(), { url: args.page, runScripts: "outside-only", pretendToBeVisual: true })
+  const w = dom.window as unknown as { fetch: typeof fetch; EventSource: typeof EventSource; eval: (code: string) => void }
+  const doc = dom.window.document
+  const Ev = (dom.window as unknown as { Event: typeof Event }).Event
+  // The page's own fetch("/run") is relative to the page.
+  w.fetch = (input: RequestInfo | URL, init?: RequestInit) =>
+    fetch(typeof input === "string" ? new URL(input, args.page) : input, init)
+  w.EventSource = FetchEventSource as unknown as typeof EventSource
+  Object.defineProperty(w, "addEventListener", { configurable: true, value: () => {} })
+  Object.defineProperty(w, "removeEventListener", { configurable: true, value: () => {} })
+  const inline = Array.from(doc.querySelectorAll("script:not([src])")).map((n) => n.textContent)
+  if (!inline.length) throw new Error("FAIL the app's page has no inline script")
+  for (const code of inline) w.eval(`(function(){\n${code}\n})()`)
+  w.eval(`(function(){\n${panelJs}\n})()`)
+  doc.dispatchEvent(new Ev("DOMContentLoaded"))
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  const waitFor = async (what: () => string | null, label: string, ms = 20000) => {
+    const deadline = Date.now() + ms
+    for (;;) {
+      const got = what()
+      if (got) {
+        console.log(`PASS ${label}`)
+        return got
+      }
+      if (Date.now() > deadline) throw new Error(`FAIL ${label}`)
+      await sleep(100)
+    }
+  }
+  const shadow = () => doc.querySelector("weft-devtools")?.shadowRoot
+  await waitFor(
+    () => ((dom.window as unknown as { weft?: { devtools?: unknown } }).weft?.devtools ? "global" : null),
+    "page script: window.weft.devtools is the panel's API"
+  )
+  // A user asks once the panel is up: Studio answered and the header
+  // rung reads the page's fetches (the footer says so).
+  await waitFor(
+    () => (shadow()?.querySelector(".weft-detect")?.textContent.includes("headers") ? "rung" : null),
+    "page script: the panel answered and reads the page's Weft-Scope headers"
+  )
+  const input = doc.querySelector<HTMLInputElement>("#ask input[name=text]")
+  if (!input) throw new Error("FAIL the page has no ask form")
+  input.value = "refund order 42 (page script)"
+  doc.getElementById("ask")?.dispatchEvent(new Ev("submit", { bubbles: true, cancelable: true }))
+  await waitFor(
+    () => (doc.body.getAttribute("data-parked-count") === "1" ? "1" : null),
+    'page script: on("parked") fired once for the refund turn (data-parked-count="1")'
+  )
+  await waitFor(
+    () => (doc.querySelector("button.debug-this") ? "button" : null),
+    'page script: the reply carries its "debug this" button'
+  )
+  const debug = doc.querySelector<HTMLButtonElement>("button.debug-this")
+  const run = debug?.dataset.run ?? ""
+  if (!run) throw new Error("FAIL the debug button names no run")
+  debug?.dispatchEvent(new Ev("click", { bubbles: true }))
+  await waitFor(
+    () => (shadow()?.querySelector(".weft-sel .weft-id")?.textContent === run ? run : null),
+    `page script: "debug this" scoped and selected ${run} in the panel`
+  )
+  const arrow = await waitFor(() => {
+    const h = Array.from(shadow()?.querySelectorAll("a") ?? []).find((a) => a.textContent === "⤢")?.getAttribute("href") ?? ""
+    return h.includes(`/runs/${encodeURIComponent(run)}?step=0&view=story`) ? h : null
+  }, "page script: the ⤢ link carries the selected step (0)")
+  const report = doc.querySelector<HTMLAnchorElement>("#report")?.getAttribute("href") ?? ""
+  if (!report.includes(`/runs/${encodeURIComponent(run)}?step=`) || report.includes("token"))
+    throw new Error(`FAIL the report link is not the panel's run link: ${report}`)
+  console.log(`PASS page script: "report this run" is the panel's studioLink: ${report} (⤢ ${arrow})`)
+  dom.window.close()
 }
 
 main().catch((e) => {

@@ -404,12 +404,13 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 159,154 B raw / 45,016 B gzip
-(44.0 KiB, under the 80 KiB cap). The scope-detection ladder (C3: rungs
+committed `studio/dist/panel/panel.js`, 161,395 B raw / 45,664 B gzip
+(44.6 KiB, under the 80 KiB cap). The scope-detection ladder (C3: rungs
 2 to 5 and the activity pill) cost +6.0 KiB gzip against its +3 KiB
 estimate: nothing deferrable supplies the first scope and the
 deferrable remainder is under 1 KiB, so the overrun is accepted rather
-than split. The host API below cost about +2.5 KiB against +1 KiB; the
+than split. The host API below cost about +3.1 KiB against +1 KiB (with its
+review fixes); the
 layout (D1) +3.5 KiB against +4 KiB.
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
@@ -459,8 +460,8 @@ panel on the page.
 | Method | What it does |
 |---|---|
 | `open()`, `close()`, `toggle()`, `isOpen` | expand, collapse or flip the dock; `isOpen` reads it (from npm, `isOpen()`) |
-| `scope(s)` | the explicit scope (rung 1: it wins over the URL, markers and headers, and its run pins): a `Scope` or its string form (`"pub_…;session=…;run=…"`); `scope(null)` clears what `scope()` set, so the ladder decides again (a `data-scope` in your markup stays yours) |
-| `select(runId, step?)` | selects that turn, and the step by its ordinal (G1), once a `scope()` just before it has settled; ⤢ then carries the step. A run the list does not show is read by id (`GET /api/runs/{id}`, scoped by the token) and joins the list when it is the conversation's; else the line `run r_… not in this conversation` |
+| `scope(s)` | the explicit scope (rung 1: it wins over the URL, markers and headers, and its run pins): a `Scope` or its string form (`"pub_…;session=…;run=…"`); `sessionId`/`runId` are read as `session`/`run`, so a `run` event's detail can be fed back; one naming neither a public id nor a session reads `scope: no public id or session`. `scope(null)` clears what `scope()` set and puts back what `mount()` named, so the ladder decides again (a `data-scope` in your markup stays yours) |
+| `select(runId, step?)` | selects that turn, and the step by its ordinal (G1), once a `scope()` just before it has settled; ⤢ then carries the step. A run the list does not show is read by id (`GET /api/runs/{id}`, scoped by the token) and joins the list when it is the conversation's (a run with no session id — a playground run — is not judged by a session narrowing, as in the list); else the line `run r_… not in this conversation` (`run r_…: Studio did not answer` when the read failed). A step the run does not have reads `step n not in run r_… · showing step m`, and the last step is carried. A call made while the panel's start hangs waits 10 s, then reads `select r_…: the panel is not connected` |
 | `on(event, cb)` → unsubscribe | follows one event (below); a `cb` that throws is swallowed |
 | `studioLink(runId, step?)` | the Studio page of that run (and step) through `lib/links.ts` — the link ⤢ carries, never with a token; `""` before the panel knows its endpoint |
 
@@ -470,8 +471,9 @@ session: "s_…"})`, or `";session=s_…"`) is resolved through `GET
 ask: under a panel token the panel does not ask, and says `session s_…:
 the session lookup needs the dev token` (a 403 reads the same); a
 session created without `thread.PublicID` reads `session s_… has no
-public id · not recorded …`, an unknown one `… · unknown session`. The
-panel keeps its scope and nothing is thrown.
+public id · not recorded …`, an unknown one `… · unknown session`, a
+lookup Studio did not answer `session s_…: Studio did not answer the
+lookup`. The panel keeps its scope and nothing is thrown.
 
 The events are `CustomEvent`s named `weft:run`, `weft:parked` and
 `weft:error`, dispatched from the element (`bubbles`, `composed`) after
@@ -484,8 +486,8 @@ running there, and the run the scope pins, are reported.
 | Event | `detail` | When |
 |---|---|---|
 | `run` | `{runId, status, publicId?, sessionId?, step?}` — `status` the turn list's word (`running`, `succeeded`, `failed`, `parked`, `interrupted`), `step` the run's last step ordinal the panel knows | a run starts, and each status change, once per transition |
-| `parked` | `{runId, callId, ackId, name}` — `ackId` is the id the approval names, the call id `weft.Approve`/`Deny`/`Resolve` and `POST /api/runs/{runId}/approvals` (`call_id`) take, so it equals `callId` | once per call a run parked on (read from its `run_finish`'s pending list) |
-| `error` | `{message, runId?}` | a run failed: its error, once per run |
+| `parked` | `{runId, callId, ackId, name}` — `ackId` is the id the approval names, the call id `weft.Approve`/`Deny`/`Resolve` and `POST /api/runs/{runId}/approvals` (`call_id`) take, so it equals `callId`. The app approves its own turns through its Session, `s.Decide(ctx, thread.Approve(ackId))`; the Studio route is for playground runs only (403 for a run no runtime started) | once per call a run parked on (read from its `run_finish`'s pending list) |
+| `error` | `{message, runId}` | a run of the conversation failed: its error, once per run — run errors only (the panel's own trouble, Studio not answering, is a line in the panel) |
 
 The global: while a `<weft-devtools>` from the script tag is connected,
 `window.weft.devtools` is its API object (`window.weft` is created only

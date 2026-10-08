@@ -21,6 +21,7 @@
     { "label": "C3.4", "item": "C3", "gzip": 38764 },
     { "label": "C4.2", "item": "C4", "gzip": 41313 },
     { "label": "C3.4 fixes", "item": "C3", "gzip": 41465 },
-    { "label": "D1", "item": "D1", "gzip": 45016 }
+    { "label": "D1", "item": "D1", "gzip": 45016 },
+    { "label": "C4.2 fixes", "item": "C4", "gzip": 45664 }
   ]
 }

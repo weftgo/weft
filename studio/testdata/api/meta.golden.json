@@ -17,6 +17,7 @@
     "live",
     "ingest"
   ],
+  "auth_required": false,
   "content": {
     "ingest": "as_received",
     "latest": {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/otel"
 )
 
@@ -217,4 +220,95 @@ func TestMetaRuntimes(t *testing.T) {
 	cancel()
 	_ = stream.Body.Close()
 	waitRuntimes(0)
+}
+
+// failingDB fails the reads meta makes: Runs, or Events only.
+type failingDB struct {
+	obsdb.DB
+	runs, events bool
+}
+
+func (f failingDB) Runs(ctx context.Context, q obsdb.RunQuery) (obsdb.RunPage, error) {
+	if f.runs {
+		return obsdb.RunPage{}, errors.New("disk on fire")
+	}
+	return f.DB.Runs(ctx, q)
+}
+
+func (f failingDB) Events(ctx context.Context, runID string, after int64, limit int) (obsdb.EventPage, error) {
+	if f.events {
+		return obsdb.EventPage{}, errors.New("events on fire")
+	}
+	return f.DB.Events(ctx, runID, after, limit)
+}
+
+// TestMetaReadErrors pins the review's finding 2: a failed read is not
+// "no run stored" — content.error and manifest_check.error say what
+// failed (the logger too), and meta still answers 200.
+func TestMetaReadErrors(t *testing.T) {
+	serve := func(db obsdb.DB, manifest string) metaDoc {
+		t.Helper()
+		srv := New(DB(db), Manifest([]byte(manifest)))
+		ts := httptest.NewServer(srv.Handler())
+		t.Cleanup(ts.Close)
+		return metaOf(t, ts, "")
+	}
+	fx := fixtureDB(t)
+	var logged strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	m := serve(failingDB{DB: fx, runs: true}, fixtureManifest)
+	if !strings.Contains(logged.String(), "disk on fire") {
+		t.Errorf("the failed read was not logged: %q", logged.String())
+	}
+	if m.Content.Latest != nil || !strings.Contains(m.Content.Error, "disk on fire") {
+		t.Errorf("Runs failing: content = %+v, want latest null and the error", m.Content)
+	}
+	if m.ManifestCheck == nil || m.ManifestCheck.Checked != 0 || !strings.Contains(m.ManifestCheck.Error, "disk on fire") {
+		t.Errorf("Runs failing: manifest_check = %+v, want the error", m.ManifestCheck)
+	}
+
+	m = serve(failingDB{DB: fx, events: true}, fixtureManifest)
+	if m.Content.Latest == nil || m.Content.Latest.Mark != markUnmarked || !strings.Contains(m.Content.Error, "events on fire") {
+		t.Errorf("Events failing: content = %+v, want the run, unmarked, and the error", m.Content)
+	}
+
+	m = serve(fx, `{"weft":1,"agents":[`)
+	if m.ManifestCheck == nil || m.ManifestCheck.Agents != 0 || !strings.Contains(m.ManifestCheck.Error, "does not parse") {
+		t.Errorf("unparsable manifest: manifest_check = %+v, want the parse error", m.ManifestCheck)
+	}
+	if m.Content.Error != "" || m.Content.Latest == nil {
+		t.Errorf("healthy reads: content = %+v, want no error", m.Content)
+	}
+}
+
+// pathDB names a file through the Path interface dbFile reads.
+type pathDB struct {
+	obsdb.DB
+	path string
+}
+
+func (p pathDB) Path() string { return p.path }
+
+// TestDBFileClean: db.path is the cleaned path whether or not the file
+// can be stat'ed (size only when it can).
+func TestDBFileClean(t *testing.T) {
+	dir := t.TempDir()
+	db := filepath.Join(dir, "weft.db")
+	srv := New(Open(db))
+	t.Cleanup(func() { _ = srv.Close() })
+	for _, c := range []struct {
+		path, want string
+		size       bool
+	}{
+		{dir + "/sub/../weft.db", db, true},
+		{dir + "//missing/../gone.db", filepath.Join(dir, "gone.db"), false},
+	} {
+		got, size := dbFile(pathDB{srv.db, c.path})
+		if got != c.want || (size != nil) != c.size {
+			t.Errorf("dbFile(%q) = %q, size %v; want %q, size present %v", c.path, got, size, c.want, c.size)
+		}
+	}
 }

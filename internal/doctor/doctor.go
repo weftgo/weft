@@ -37,12 +37,12 @@ type Line struct {
 // Lines is the doctor's line table, in print order.
 var Lines = []Line{
 	{"studio", []string{"status", "weft_version", "studio_version"}},
-	{"token", []string{"status"}},
+	{"token", []string{"status", "auth_required"}},
 	{"db", []string{"db.kind", "db.path", "db.size"}},
-	{"content", []string{"content.ingest", "content.latest.run_id", "content.latest.mark", "content.latest.note", "content.latest.fix"}},
+	{"content", []string{"content.ingest", "content.latest.run_id", "content.latest.mark", "content.latest.note", "content.latest.fix", "content.error"}},
 	{"runtimes", []string{"runtimes", "capabilities", "env:WEFT_ENV", "env:WEFT_STUDIO_URL"}},
 	{"panel", []string{"panel_version", "studio_version"}},
-	{"weft.json", []string{"has_manifest", "manifest_check.agents", "manifest_check.checked", "manifest_check.stale"}},
+	{"weft.json", []string{"has_manifest", "manifest_check.agents", "manifest_check.checked", "manifest_check.stale", "manifest_check.error"}},
 }
 
 // meta is the slice of GET /api/meta the doctor reads.
@@ -53,8 +53,10 @@ type meta struct {
 	DB            json.RawMessage `json:"db"`
 	HasManifest   bool            `json:"has_manifest"`
 	Capabilities  []string        `json:"capabilities"`
+	AuthRequired  bool            `json:"auth_required"`
 	Content       struct {
 		Ingest string `json:"ingest"`
+		Error  string `json:"error"`
 		Latest *struct {
 			RunID string `json:"run_id"`
 			Mark  string `json:"mark"`
@@ -67,6 +69,7 @@ type meta struct {
 		Agents  int      `json:"agents"`
 		Checked int      `json:"checked"`
 		Stale   []string `json:"stale"`
+		Error   string   `json:"error"`
 	} `json:"manifest_check"`
 }
 
@@ -93,7 +96,13 @@ func Run(ctx context.Context, w io.Writer, url, token string, getenv func(string
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := (&http.Client{Timeout: Timeout}).Do(req)
+	// The doctor talks to --url only: a redirect is reported (the
+	// default branch below), never followed.
+	client := &http.Client{
+		Timeout:       Timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		p.raw("studio not reachable at %s: %v", url, err)
 		p.sub("start one with `studio`, or point --url (WEFT_STUDIO_URL) at the one you run")
@@ -118,7 +127,11 @@ func Run(ctx context.Context, w io.Writer, url, token string, getenv func(string
 		return ErrUnhealthy
 	default:
 		p.line(ok, "studio", "reachable at %s", url)
-		p.line(fail, "token", "api/meta answered %d: %s", resp.StatusCode, errorMessage(body))
+		msg := errorMessage(body)
+		if loc := resp.Header.Get("Location"); resp.StatusCode/100 == 3 {
+			msg = "a redirect to " + loc + ", not followed: point --url at the Studio itself"
+		}
+		p.line(fail, "token", "api/meta answered %d: %s", resp.StatusCode, msg)
 		return ErrUnhealthy
 	}
 	var m meta
@@ -128,10 +141,10 @@ func Run(ctx context.Context, w io.Writer, url, token string, getenv func(string
 	}
 
 	p.line(ok, "studio", "reachable at %s (weft %s, studio %s)", url, m.WeftVersion, m.StudioVersion)
-	if token == "" {
-		p.line(ok, "token", "none needed: studio has no token (setup A, loopback)")
-	} else {
+	if m.AuthRequired {
 		p.line(ok, "token", "accepted")
+	} else {
+		p.line(ok, "token", "not required (no Token configured)")
 	}
 	p.db(m.DB)
 	p.content(m)
@@ -202,6 +215,13 @@ func (p *printer) content(m meta) {
 		policy = "studio ingest policy " + m.Content.Ingest
 	}
 	l := m.Content.Latest
+	if m.Content.Error != "" {
+		p.line(warn, "content", "%s; the latest run could not be read: %s", policy, m.Content.Error)
+		if l != nil {
+			p.sub("latest run %s: %s — %s", l.RunID, l.Mark, l.Note)
+		}
+		return
+	}
 	if l == nil {
 		p.line(ok, "content", "%s; no run stored yet", policy)
 		return
@@ -257,11 +277,13 @@ func (p *printer) manifest(m meta) {
 	c := m.ManifestCheck
 	switch {
 	case !m.HasManifest:
-		p.line(ok, "weft.json", "no manifest configured (studio.Manifest), nothing to compare")
+		p.line(ok, "weft.json", "no manifest configured (studio.Manifest, or --manifest / WEFT_MANIFEST), nothing to compare")
 	case c == nil:
 		p.line(ok, "weft.json", "configured; not checked for this caller")
+	case c.Error != "":
+		p.line(warn, "weft.json", "the check failed: %s", c.Error)
 	case len(c.Stale) > 0:
-		p.line(warn, "weft.json", "stale for %s: the latest runs carry another manifest hash; regenerate weft.json (its golden test with -update)", strings.Join(c.Stale, ", "))
+		p.line(warn, "weft.json", "stale for %s: weft.json and the latest runs disagree: regenerate weft.json, or redeploy the app if weft.json is newer", strings.Join(c.Stale, ", "))
 	case c.Checked == 0:
 		p.line(ok, "weft.json", "%d agents; none has a recorded run to compare yet", c.Agents)
 	default:

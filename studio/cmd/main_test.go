@@ -367,3 +367,54 @@ func TestDoctorSubcommand(t *testing.T) {
 		t.Error("doctor with an argument: no error")
 	}
 }
+
+// TestManifestFlag pins --manifest (plan B5 review): the flag, else
+// WEFT_MANIFEST, read once at start into studio.Manifest — the flag
+// wins; an unreadable file is a start error naming the flag.
+func TestManifestFlag(t *testing.T) {
+	dir := t.TempDir()
+	flagFile, envFile := dir+"/flag.json", dir+"/env.json"
+	if err := os.WriteFile(flagFile, []byte(`{"weft":1,"agents":[{"name":"from-flag"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(envFile, []byte(`{"weft":1,"agents":[{"name":"from-env"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	served := func(flagPath string) string {
+		t.Helper()
+		opts, err := manifestOptions(flagPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv, err := newServer("sqlite://"+t.TempDir()+"/weft.db", "tok", opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = srv.Close() }()
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/manifest", nil)
+		req.Header.Set("Authorization", "Bearer tok")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Sprintf("%d %s", resp.StatusCode, b)
+	}
+	t.Setenv("WEFT_MANIFEST", "")
+	if got := served(""); !strings.HasPrefix(got, "404") {
+		t.Errorf("no flag, no env: %s, want 404 (no manifest)", got)
+	}
+	t.Setenv("WEFT_MANIFEST", envFile)
+	if got := served(""); !strings.Contains(got, "from-env") {
+		t.Errorf("WEFT_MANIFEST: %s", got)
+	}
+	if got := served(flagFile); !strings.Contains(got, "from-flag") {
+		t.Errorf("--manifest beside WEFT_MANIFEST: %s, want the flag's file", got)
+	}
+	if err := run([]string{"--manifest", dir + "/missing.json"}, io.Discard); err == nil || !strings.Contains(err.Error(), "--manifest") {
+		t.Errorf("missing manifest: %v, want a start error naming --manifest", err)
+	}
+}

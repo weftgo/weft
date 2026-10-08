@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -34,6 +35,9 @@ type metaDoc struct {
 	IngestOpen         bool     `json:"ingest_open"`
 	InterruptedAfterMs int64    `json:"interrupted_after_ms"`
 	Capabilities       []string `json:"capabilities"`
+	// AuthRequired is whether a Token is configured: the API then reads
+	// the bearer (setup B/C); false is setup A, where no token is read.
+	AuthRequired bool `json:"auth_required"`
 	// DebugScope says what the debugger's write verbs (breakpoints,
 	// steer) can act on — the runtime-started runs only. The app's
 	// own turns are viewer-only (D7, PQ7); meta says so plainly
@@ -78,6 +82,10 @@ type metaContent struct {
 	// Latest is the latest top-level run's mark; null when no run is
 	// stored yet (or it could not be read).
 	Latest *metaContentRun `json:"latest"`
+	// Error is the read that failed while looking for the latest run
+	// (logged too); latest is then null for that reason, not because no
+	// run is stored.
+	Error string `json:"error,omitempty"`
 }
 
 // metaContentRun is one run's content mark with Studio's reading of it.
@@ -96,6 +104,10 @@ type metaManifest struct {
 	Agents  int      `json:"agents"`  // agents in the manifest
 	Checked int      `json:"checked"` // of those, agents with a stored run carrying a manifest hash
 	Stale   []string `json:"stale"`   // checked agents whose latest run's hash differs; never null
+	// Error is the first failure of the check (a manifest that does
+	// not parse, a run read that failed; logged too): the counts cover
+	// only what was checked before or around it.
+	Error string `json:"error,omitempty"`
 }
 
 // Content marks api/meta reports (content.latest.mark).
@@ -132,7 +144,8 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 		InterruptedAfterMs: obsdb.InterruptedAfter.Milliseconds(),
 		Capabilities:       s.capabilityList(),
 		DebugScope:         s.debugScope(),
-		Content:            metaContent{Ingest: contentIngestAsReceived, Latest: s.latestContent(r.Context(), id)},
+		AuthRequired:       s.token != "",
+		Content:            s.latestContent(r.Context(), id),
 		Runtimes:           s.connectedRuntimes(),
 	}
 	if mayReadDBPath(s, r) {
@@ -167,7 +180,7 @@ func dbFile(db obsdb.DB) (string, *int64) {
 	if !ok || p.Path() == "" {
 		return "", nil
 	}
-	path := p.Path()
+	path := filepath.Clean(p.Path())
 	fi, err := os.Stat(path)
 	if err != nil {
 		return path, nil
@@ -176,26 +189,34 @@ func dbFile(db obsdb.DB) (string, *int64) {
 	if wal, err := os.Stat(path + "-wal"); err == nil {
 		size += wal.Size()
 	}
-	return filepath.Clean(path), &size
+	return path, &size
 }
 
 // latestContent reads the latest top-level run's content mark, scoped
-// to a panel token's public id. A failed read is reported as no run:
-// meta never fails on an observation.
-func (s *Server) latestContent(ctx context.Context, id identity) *metaContentRun {
+// to a panel token's public id. Meta never fails on an observation: a
+// failed read is logged and reported in content.error.
+func (s *Server) latestContent(ctx context.Context, id identity) metaContent {
+	out := metaContent{Ingest: contentIngestAsReceived}
 	q := obsdb.RunQuery{Limit: 1}
 	if id.panel != nil {
 		q.PublicID = id.panel.PublicID
 	}
 	page, err := s.db.Runs(ctx, q)
-	if err != nil || len(page.Runs) == 0 {
-		return nil
+	if err != nil {
+		out.Error = metaReadFailed("content: read the latest run", err)
+		return out
+	}
+	if len(page.Runs) == 0 {
+		return out
 	}
 	run := page.Runs[0]
 	mark := markUnmarked
 	if run.EventCount > 0 {
 		ev, err := s.db.Events(ctx, run.ID, -1, 1)
-		if err == nil && len(ev.Events) > 0 {
+		switch {
+		case err != nil:
+			out.Error = metaReadFailed("content: read run "+run.ID+"'s first event", err)
+		case len(ev.Events) > 0:
 			switch m := ev.Events[0].Content; m {
 			case markFull, markStripped, markNone:
 				mark = m
@@ -203,7 +224,17 @@ func (s *Server) latestContent(ctx context.Context, id identity) *metaContentRun
 		}
 	}
 	n := contentNotes[mark]
-	return &metaContentRun{RunID: run.ID, Mark: mark, Note: n[0], Fix: n[1]}
+	out.Latest = &metaContentRun{RunID: run.ID, Mark: mark, Note: n[0], Fix: n[1]}
+	return out
+}
+
+// metaReadFailed logs a meta observation that failed (studio has no
+// logger of its own: the process's slog default, as studio/runtime)
+// and returns the text meta reports.
+func metaReadFailed(what string, err error) string {
+	msg := what + ": " + err.Error()
+	slog.Warn("studio: api/meta: "+what, "err", err)
+	return msg
 }
 
 // connectedRuntimes counts the runtimes holding a command stream.
@@ -224,17 +255,24 @@ func (s *Server) connectedRuntimes() int {
 // agent's own one-agent manifest document, the hash the core stamps as
 // weft.manifest.hash — with the latest stored run of that agent
 // (subagent runs included). A manifest that does not parse checks
-// nothing.
+// nothing; it and a failed run read are logged and reported in error.
 func (s *Server) manifestCheck(ctx context.Context) *metaManifest {
 	hashes, err := manifestAgentHashes(s.manifest)
 	out := &metaManifest{Stale: []string{}}
 	if err != nil {
+		out.Error = metaReadFailed("manifest_check: the manifest does not parse", err)
 		return out
 	}
 	out.Agents = len(hashes)
 	for _, a := range hashes {
 		page, err := s.db.Runs(ctx, obsdb.RunQuery{Agent: a.name, ParentRunID: "*", Limit: 1})
-		if err != nil || len(page.Runs) == 0 || page.Runs[0].ManifestHash == "" {
+		if err != nil {
+			if out.Error == "" {
+				out.Error = metaReadFailed("manifest_check: read agent "+a.name+"'s latest run", err)
+			}
+			continue
+		}
+		if len(page.Runs) == 0 || page.Runs[0].ManifestHash == "" {
 			continue
 		}
 		out.Checked++

@@ -281,6 +281,8 @@ export interface Meta {
   ingest_open: boolean
   interrupted_after_ms: number
   capabilities: string[]
+  /** Whether a Token is configured (the API reads the bearer). */
+  auth_required?: boolean
   /** What the debugger's write verbs (breakpoints, steer) may act on
    * — "runtime-started runs" (PQ7: the app's own turns are
    * viewer-only). */

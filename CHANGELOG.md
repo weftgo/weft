@@ -18,7 +18,12 @@ module, ADR 0005).
   whether `weft.json` is stale against the latest runs. Every line
   reads a field of `GET /api/meta` (`internal/doctor.Lines` is the
   table); the flags mirror `WEFT_STUDIO_URL` / `WEFT_STUDIO_TOKEN`. An
-  unreachable Studio is the first line within a 5 s timeout and exit 1.
+  unreachable Studio is the first line within a 5 s timeout and exit 1;
+  a redirect is reported, never followed.
+- **`studio --manifest path`** (default `$WEFT_MANIFEST`; the flag
+  wins): the app's `weft.json`, read once at start and served as
+  `studio.Manifest` — `/api/manifest` and the doctor's weft.json check
+  in setup B. An unreadable file is a start error.
 - **`/api/meta` explains itself**: `content` (Studio's ingest policy,
   `"as_received"`, and the latest run's content mark — `full`,
   `stripped`, `none` or `unmarked` — with a note and the fix naming
@@ -28,7 +33,12 @@ module, ADR 0005).
   `panel_version` (the embedded `/panel.js` stamp) and
   `manifest_check` (`{agents, checked, stale}`: each manifest agent's
   hash against its latest run's `weft.manifest.hash`; `null` without a
-  manifest or for a panel token).
+  manifest or for a panel token), and `auth_required` (whether a
+  `studio.Token` is configured). `content.error` and
+  `manifest_check.error` (omitted when empty) report a read that
+  failed or a manifest that does not parse — logged through the
+  process's `slog` default too — instead of reading as an empty
+  database.
 - **obsdb/sqlite**: `(*DB).Path()` — the database file's absolute
   path (`""` for `:memory:`).
 

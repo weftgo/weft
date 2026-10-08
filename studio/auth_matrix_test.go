@@ -617,7 +617,12 @@ func TestAuthMatrix(t *testing.T) {
 	// (setup B's dev token) — omitted, never nulled, for a read- or a
 	// playground-scoped panel token; db.kind and runtimes are
 	// everyone's (rt_test holds a command stream; the table's own
-	// rt_link stream may not have wound down yet).
+	// rt_link stream may not have wound down yet). auth_required is
+	// everyone's. A panel token's content.latest is the newest run of
+	// its own public id — never the newer run seeded here under pub_b —
+	// and its manifest_check is null (it reads no manifest).
+	time.Sleep(2 * time.Millisecond) // strictly newer than every seeded run
+	seedRun(t, srv.db, "run_b_newer", "pub_b", "", "", nil)
 	for _, id := range identities {
 		if id.kind == "bad" {
 			continue
@@ -637,10 +642,32 @@ func TestAuthMatrix(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		var meta struct {
-			DB       map[string]any `json:"db"`
-			Runtimes int            `json:"runtimes"`
+			DB           map[string]any `json:"db"`
+			Runtimes     int            `json:"runtimes"`
+			AuthRequired *bool          `json:"auth_required"`
+			Content      struct {
+				Latest *struct {
+					RunID string `json:"run_id"`
+				} `json:"latest"`
+			} `json:"content"`
+			ManifestCheck *struct {
+				Agents int `json:"agents"`
+			} `json:"manifest_check"`
 		}
 		decode(t, string(b), &meta)
+		if meta.AuthRequired == nil || !*meta.AuthRequired {
+			t.Errorf("GET /api/meta as %s: auth_required = %v, want true (a Token is configured)", id.name, meta.AuthRequired)
+		}
+		wantLatest := run["A"]
+		if id.kind == "server" {
+			wantLatest = "run_b_newer"
+		}
+		if meta.Content.Latest == nil || meta.Content.Latest.RunID != wantLatest {
+			t.Errorf("GET /api/meta as %s: content.latest = %+v, want run %s", id.name, meta.Content.Latest, wantLatest)
+		}
+		if gotCheck := meta.ManifestCheck != nil; gotCheck != (id.kind == "server") {
+			t.Errorf("GET /api/meta as %s: manifest_check = %+v, want present only for the server token (null for panel tokens)", id.name, meta.ManifestCheck)
+		}
 		_, hasPath := meta.DB["path"]
 		_, hasSize := meta.DB["size"]
 		if want := id.kind == "server"; hasPath != want || hasSize != want || meta.DB["kind"] != "sqlite" {

@@ -182,7 +182,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    IngestToken/AllowOrigins/Playground; routes register through
 //    //    routes.go's groups (panel.go/playground.go add theirs in their own files).
 //    // API: meta (db {kind, path, size: path/size to loopback and the server token only},
-//    //    content, runtimes, manifest_check, pricing, retention — `studio doctor` prints it
+//    //    auth_required, content, runtimes, manifest_check, pricing, retention — `studio doctor` prints it
 //    //    line by line), manifest, runs (+session/public/playground filters; all=1 lists child
 //    //    runs too), runs/{id} (with its compactions: run-scope views, then session markers),
 //    //    runs/{id}/events|transcript|spans|requests|tools, runs/{id}/steps/{n} (one step
@@ -199,7 +199,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    OTLP ingest (/v1/traces, /v1/logs) carries its own IngestToken.
 //    // Setup B, any language (package studio/cmd — the one place the clickhouse
 //    // driver lives): studio --db sqlite://path | clickhouse://user:pass@host:9000/db
-//    //    [--addr --token] serves UI + OTLP ingest on 127.0.0.1:7331.
+//    //    [--addr --token --manifest weft.json (or WEFT_MANIFEST)] serves UI + OTLP
+//    //    ingest on 127.0.0.1:7331; studio doctor [--url --token] checks one.
 
 // 7a. The playground (package weft/runtime): your app dials Studio out and
 //     executes experiment commands as runs of the agents you register:

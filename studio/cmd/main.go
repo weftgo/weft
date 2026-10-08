@@ -11,7 +11,9 @@
 // binary. --db sqlite://path picks another file; --db
 // clickhouse://user:pass@host:9000/db serves the hosted backend
 // (obsdb/clickhouse, wired at merge-B). The dev token is printed at
-// start and fixed by WEFT_STUDIO_TOKEN or --token. --version prints
+// start and fixed by WEFT_STUDIO_TOKEN or --token. --manifest path
+// (default $WEFT_MANIFEST) serves the app's weft.json at /api/manifest,
+// read once at start. --version prints
 // the weft version (version.Runtime: the module tag this binary was
 // built from) and exits.
 //
@@ -76,6 +78,8 @@ func run(args []string, stdout io.Writer) error {
 	addr := fs.String("addr", defaultAddr, "listen address (loopback by default)")
 	token := fs.String("token", "",
 		"API token (default: $WEFT_STUDIO_TOKEN, else a generated dev token printed at start)")
+	manifest := fs.String("manifest", "",
+		"`path` to the app's weft.json, served at /api/manifest and checked against the latest runs (default: $WEFT_MANIFEST)")
 	showVersion := fs.Bool("version", false, "print the weft version and exit")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -84,7 +88,30 @@ func run(args []string, stdout io.Writer) error {
 		_, err := fmt.Fprintln(stdout, version.Runtime())
 		return err
 	}
-	return serve(*db, *addr, *token, stdout)
+	opts, err := manifestOptions(*manifest)
+	if err != nil {
+		return err
+	}
+	return serve(*db, *addr, *token, stdout, opts...)
+}
+
+// manifestOptions resolves --manifest (the flag, then WEFT_MANIFEST)
+// and reads the file once, at start: studio.Manifest takes the bytes.
+// No path is no option; an unreadable file is a start error, never a
+// Studio silently serving without the manifest it was given.
+func manifestOptions(flagPath string) ([]studio.Option, error) {
+	path := flagPath
+	if path == "" {
+		path = os.Getenv("WEFT_MANIFEST")
+	}
+	if path == "" {
+		return nil, nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("--manifest: %w", err)
+	}
+	return []studio.Option{studio.Manifest(b)}, nil
 }
 
 // runDoctor is `studio doctor`: the flags mirror WEFT_STUDIO_URL and
@@ -114,8 +141,8 @@ func runDoctor(args []string, stdout io.Writer) error {
 // serve builds the server, prints where it lives, and listens until
 // the process is stopped. Split from main so the construction and the
 // banner are testable without a port.
-func serve(dbFlag, addr, tokenFlag string, stdout io.Writer) error {
-	srv, err := serveBoot(dbFlag, addr, tokenFlag, stdout)
+func serve(dbFlag, addr, tokenFlag string, stdout io.Writer, extra ...studio.Option) error {
+	srv, err := serveBoot(dbFlag, addr, tokenFlag, stdout, extra...)
 	if err != nil {
 		return err
 	}
@@ -208,9 +235,9 @@ func listen(httpSrv *http.Server, stdout io.Writer) error {
 // printed one could not open the API it advertised). Split out so the
 // boot path — token resolution, banner, wall — is testable without a
 // port.
-func serveBoot(dbFlag, addr, tokenFlag string, stdout io.Writer) (*server, error) {
+func serveBoot(dbFlag, addr, tokenFlag string, stdout io.Writer, extra ...studio.Option) (*server, error) {
 	token := srvToken(tokenFlag)
-	srv, err := newServer(dbFlag, token)
+	srv, err := newServer(dbFlag, token, extra...)
 	if err != nil {
 		return nil, err
 	}
@@ -247,8 +274,8 @@ func serveBoot(dbFlag, addr, tokenFlag string, stdout io.Writer) (*server, error
 // studio.New panics when it cannot open its database (a construction
 // error, for a library). For the binary that is a mistyped --db: the
 // panic is returned as the error main prints.
-func newServer(dbFlag, token string) (srv *server, err error) {
-	opts := []studio.Option{studio.Base("/"), studio.Token(token)}
+func newServer(dbFlag, token string, extra ...studio.Option) (srv *server, err error) {
+	opts := append([]studio.Option{studio.Base("/"), studio.Token(token)}, extra...)
 	var own io.Closer
 	defer func() {
 		if r := recover(); r != nil {

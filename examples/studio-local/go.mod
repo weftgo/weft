@@ -4,7 +4,7 @@ go 1.26.0
 
 // Every weft module resolves from its released tag (the module
 // proxy, no replace — the two-phase rule, ADR 0005).
-require github.com/weftgo/weft v0.10.1
+require github.com/weftgo/weft v0.11.0
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
@@ -17,7 +17,7 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/weftgo/weft/core v0.10.1 // indirect
+	github.com/weftgo/weft/core v0.11.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.46.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.22.0 // indirect

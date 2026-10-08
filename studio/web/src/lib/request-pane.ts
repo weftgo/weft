@@ -20,6 +20,9 @@ import { isHoleRef } from "./api"
 export const CHIP_PREPARE_STEP = "changed by PrepareStep"
 export const CHIP_EXPERIMENT = "overridden by experiment"
 export const CHIP_CATALOG = "catalog changed at this step"
+/** The neutral prompt chip: the hash moved, and the tool set did too
+ * (a PrepareStep, or the tools' PromptSnippets). */
+export const CHIP_PROMPT_CHANGED = "prompt changed at this step"
 
 /** The sha256 of "": the instructions hash of a run with no
  * instructions (ADR 0028 §4). */
@@ -68,18 +71,40 @@ export function overrideOf(spans: Span[] | undefined, runId: string): RunOverrid
   }
 }
 
-/** The registered agent a run ran: the manifest's agent with the run's
- * own manifest hash, else the one with its name. */
+/** The manifest's agent for a run, and whether it is the version the
+ * run ran. */
+export interface Registered {
+  agent: ManifestAgent
+  /** The agent carries the run's own weft.manifest.hash, or the
+   * manifest's file source lists it under that hash. A name-only match
+   * (a weft.json that may be stale) is not verified: its snippets
+   * decide nothing and its instructions are not presented as the run's. */
+  verified: boolean
+}
+
+/** registeredAgent picks the manifest's agent for a run: the one with
+ * the run's own manifest hash, else the one with its name (unverified
+ * unless the file source lists that name under the run's hash). */
 export function registeredAgent(
   manifest: Manifest | undefined,
   agent: string,
   manifestHash?: string
-): ManifestAgent | undefined {
+): Registered | undefined {
   const agents = manifest?.agents ?? []
-  return (
-    (manifestHash ? agents.find((a) => a.manifest_hash === manifestHash) : undefined) ??
-    agents.find((a) => a.name === agent)
-  )
+  if (manifestHash) {
+    const exact = agents.find((a) => a.manifest_hash === manifestHash)
+    if (exact) return { agent: exact, verified: true }
+  }
+  const named = agents.find((a) => a.name === agent)
+  if (!named) return undefined
+  const listed =
+    !!manifestHash &&
+    (manifest?.sources ?? []).some(
+      (src) =>
+        src.source === "file" &&
+        src.agents.some((a) => a.name === agent && a.manifest_hash === manifestHash)
+    )
+  return { agent: named, verified: listed }
 }
 
 /** sha256Hex is the lowercase hex sha256 of the UTF-8 bytes — the
@@ -105,11 +130,16 @@ export function composeSystem(instructions: string, snippets: string[]): string 
 }
 
 /** The offered tools' PromptSnippets in offer order, from the
- * registered agent; undefined when the manifest does not know it. */
-export function snippetsOf(row: RequestRow, agent: ManifestAgent | undefined): string[] | undefined {
+ * registered agent; undefined when the manifest does not know the
+ * agent or any offered tool (a ToolSource tool is never in it). */
+export function snippetsOf(
+  names: string[],
+  agent: ManifestAgent | undefined
+): string[] | undefined {
   if (!agent) return undefined
   const byName = new Map(agent.tools.map((t) => [t.name, t.prompt_snippet ?? ""]))
-  return row.body.tools.names.map((n) => byName.get(n) ?? "")
+  if (names.some((n) => !byName.has(n))) return undefined
+  return names.map((n) => byName.get(n) ?? "")
 }
 
 /** The prompt text a row carries, when the record is here. */
@@ -124,9 +154,11 @@ export function promptText(row: RequestRow | undefined): string | undefined {
  * system text is the run's configured instructions (instructions_hash)
  * plus nothing but the offered tools' PromptSnippets — the loop's own
  * composition, no PrepareStep. true or false when the hashes and texts
- * decide it; undefined when they cannot (the text is not here, the
- * snippets are unknown and the text alone does not hash to the
- * instructions, no WebCrypto).
+ * decide it; undefined when they cannot: the text is not here, no
+ * WebCrypto, or tools were offered and the snippets are unknown or
+ * unverified (a stale weft.json, a ToolSource tool) — then only an
+ * exact match decides, and a mismatch is undefined, never false.
+ * `snippets` must come from a verified agent to decide a mismatch.
  */
 export async function composedFromInstructions(
   row: RequestRow,
@@ -148,6 +180,8 @@ export async function composedFromInstructions(
     snippets = []
   }
   const parts = snippets.filter(Boolean)
+  // From here the snippets are the verified agent's: a mismatch is the
+  // text's, not the manifest's.
   if (parts.length === 0) {
     const h = await sha256Hex(text)
     return h === undefined ? undefined : h === instructionsHash
@@ -168,6 +202,42 @@ export interface PromptBaseline {
   /** The previous step's ordinal (kind "previous"). */
   step?: number
   text: string
+  /** The baseline's own record was cut by the recorder. */
+  truncated?: boolean
+  /** kind "registered": the manifest's agent is the run's version. */
+  verified?: boolean
+  /** kind "registered": the run replaced its instructions. */
+  overridden?: boolean
+}
+
+/** The diff's caption. */
+export function baselineCaption(b: PromptBaseline): string {
+  if (b.kind === "previous") return `diff vs step ${b.step}`
+  if (!b.verified) return "diff vs weft.json's instructions — not verified for this run"
+  return b.overridden
+    ? "diff vs the registered instructions (overridden for this run)"
+    : "diff vs the registered instructions"
+}
+
+/**
+ * toolSetMayExplain says whether a system hash that moved between two
+ * steps could be the tool set's doing rather than a PrepareStep: the
+ * offered names differ and the verified agent cannot show that every
+ * tool added or dropped carries no PromptSnippet (a ToolSource tool is
+ * never in the manifest; an unverified manifest decides nothing).
+ */
+export function toolSetMayExplain(
+  before: string[],
+  after: string[],
+  reg: Registered | undefined
+): boolean {
+  const a = new Set(before)
+  const b = new Set(after)
+  const changed = [...before.filter((n) => !b.has(n)), ...after.filter((n) => !a.has(n))]
+  if (changed.length === 0) return false
+  if (!reg?.verified) return true
+  const snippets = snippetsOf(changed, reg.agent)
+  return snippets === undefined || snippets.some(Boolean)
 }
 
 /** The previous recorded step's last row, for each step that has one. */
@@ -191,8 +261,10 @@ export interface MessagesSent {
   bytes?: number
   /** The last messages sent (at most `last`), oldest first. */
   last: Message[]
-  /** The messages before `last`. */
+  /** How many messages came before `last`. */
   earlier: number
+  /** Those messages, when the transcript placed them (the raw tree). */
+  before: Message[]
   /** compacted: the request saw a compaction view (the marker above);
    * gap: the transcript does not hold what the record counts; absent
    * index (capture off): only the count was kept. */
@@ -217,7 +289,13 @@ export function messagesSent(
 ): MessagesSent {
   const ref = row.body.messages_ref
   const count = ref.count
-  const only = (hole: MessagesSent["hole"]): MessagesSent => ({ count, last: [], earlier: count, hole })
+  const only = (hole: MessagesSent["hole"]): MessagesSent => ({
+    count,
+    last: [],
+    earlier: count,
+    before: [],
+    hole,
+  })
   if (ref.index === undefined) return only("no_index")
   const at = ref.index
   if (compactions.some((c) => c.scope === "run" && c.index === at)) return only("compacted")
@@ -229,5 +307,6 @@ export function messagesSent(
   if (msgs.length !== count) return only("gap")
   const bytes = new TextEncoder().encode(JSON.stringify(msgs)).length
   const shown = msgs.slice(Math.max(0, msgs.length - last))
-  return { count, bytes, last: shown, earlier: msgs.length - shown.length }
+  const cutAt = msgs.length - shown.length
+  return { count, bytes, last: shown, earlier: cutAt, before: msgs.slice(0, cutAt) }
 }

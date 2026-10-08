@@ -511,7 +511,10 @@ Studio.
 `go run ./studio/examples/basic` records demo runs (a tool call, a
 subagent, a failure) into an obsdb database and serves Studio on
 `127.0.0.1:7331`; `examples/studio-local` is setup A's five lines with
-a live thread session.
+a live thread session, and its agent's `PrepareStep` trims a first-step
+paragraph from the system prompt from step 1 on — the Request pane's
+"changed by PrepareStep" diff (`TestPrepareStepTrimsThePrompt` pins the
+record).
 
 ## Sessions — `weft/thread`
 

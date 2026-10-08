@@ -4,8 +4,12 @@
 // sent, resolved against the transcript.
 import { describe, expect, it } from "vitest"
 
-import type { RequestRow, Span, Transcript } from "./api"
+import type { Manifest, RequestRow, Span, Transcript } from "./api"
 import {
+  baselineCaption,
+  registeredAgent,
+  snippetsOf,
+  toolSetMayExplain,
   composedFromInstructions,
   composeSystem,
   EMPTY_SHA256,
@@ -167,5 +171,71 @@ describe("messagesSent", () => {
       "compacted"
     )
     expect(messagesSent(r, null).hole).toBe("no_transcript")
+  })
+})
+
+describe("registeredAgent", () => {
+  const agent = (over: Record<string, unknown> = {}) => ({
+    name: "orders",
+    model: { provider: "p", name: "m" },
+    instructions: "x",
+    policy: { parallelism: 1, max_steps: 1, max_result_bytes: 1, max_model_retries: 1 },
+    tools: [{ name: "lookup", prompt_snippet: "s" }, { name: "refund" }],
+    ...over,
+  })
+  it("is verified by the run's own manifest hash", () => {
+    const m: Manifest = { weft: 1, agents: [agent({ manifest_hash: "h1" })] }
+    expect(registeredAgent(m, "orders", "h1")?.verified).toBe(true)
+    expect(registeredAgent(m, "orders", "h2")?.verified).toBe(false)
+  })
+  it("is verified by the file source listing the name under the run's hash", () => {
+    const m: Manifest = {
+      weft: 1,
+      agents: [agent()],
+      sources: [{ source: "file", manifest_hash: "f", agents: [{ name: "orders", manifest_hash: "h1" }] }],
+    }
+    expect(registeredAgent(m, "orders", "h1")?.verified).toBe(true)
+    expect(registeredAgent(m, "orders", "h2")?.verified).toBe(false)
+    expect(registeredAgent(m, "other", "h1")).toBeUndefined()
+  })
+  it("a name-only match is not verified", () => {
+    expect(registeredAgent({ weft: 1, agents: [agent()] }, "orders", "h1")?.verified).toBe(false)
+  })
+})
+
+describe("snippetsOf and toolSetMayExplain", () => {
+  const a = {
+    name: "orders",
+    model: { provider: "p", name: "m" },
+    policy: { parallelism: 1, max_steps: 1, max_result_bytes: 1, max_model_retries: 1 },
+    tools: [{ name: "lookup", prompt_snippet: "s" }, { name: "refund" }],
+  }
+  it("a name the manifest does not know (a ToolSource tool) makes the snippets unknown", () => {
+    expect(snippetsOf(["lookup", "refund"], a)).toEqual(["s", ""])
+    expect(snippetsOf(["lookup", "search_docs"], a)).toBeUndefined()
+  })
+  it("the tool set explains a moved hash unless the verified agent shows no snippet came or went", () => {
+    const v = { agent: a, verified: true }
+    expect(toolSetMayExplain(["lookup"], ["lookup"], v)).toBe(false)
+    expect(toolSetMayExplain(["lookup"], ["lookup", "refund"], v)).toBe(false)
+    expect(toolSetMayExplain(["refund"], ["lookup", "refund"], v)).toBe(true)
+    expect(toolSetMayExplain(["lookup"], ["lookup", "search_docs"], v)).toBe(true)
+    expect(toolSetMayExplain(["lookup"], ["lookup", "refund"], { agent: a, verified: false })).toBe(true)
+    expect(toolSetMayExplain(["lookup"], ["lookup", "refund"], undefined)).toBe(true)
+  })
+})
+
+describe("baselineCaption", () => {
+  it("names what the diff is against, and says when it is not verified", () => {
+    expect(baselineCaption({ kind: "previous", step: 0, text: "" })).toBe("diff vs step 0")
+    expect(baselineCaption({ kind: "registered", text: "", verified: true })).toBe(
+      "diff vs the registered instructions"
+    )
+    expect(baselineCaption({ kind: "registered", text: "", verified: true, overridden: true })).toBe(
+      "diff vs the registered instructions (overridden for this run)"
+    )
+    expect(baselineCaption({ kind: "registered", text: "", verified: false })).toBe(
+      "diff vs weft.json's instructions — not verified for this run"
+    )
   })
 })

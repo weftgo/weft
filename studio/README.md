@@ -340,16 +340,22 @@ lazily — their events and their request record (the child's prompt,
 read by the child's id) are their own runs', fetched on demand. Each
 step card's **Request** pane shows what the step called the model with:
 the system prompt (diffed against the previous step, or at the first
-step against the registered instructions when they differ), the tool
-catalog (description, schema, policy chips), every param ("adapter
-default" when nil), tool choice, thinking, the attempts and the
-messages sent (count and bytes, the last three inline, the rest in the
-raw view), with three chips decided by the hashes — **changed by
-PrepareStep** (`system_hash` moved, or at the first step is not
-`instructions_hash` plus the offered tools' snippets), **overridden by
-experiment** (the invoke_agent span carries
-`weft.override.instructions`) and **catalog changed at this step**; a
-read-scoped token sees the `hidden` badge and nothing else:
+step against the registered instructions when they differ; never over
+a cut record, and "too large to diff" past 2,000 differing lines a
+side), the tool catalog (description, schema, policy chips), every
+param ("adapter default" when nil), tool choice, thinking, the attempts
+and the messages sent (count and bytes computed from the transcript as
+JSON, the last three inline, the rest as a raw tree), with the chips the
+hashes decide — **changed by PrepareStep** (`system_hash` moved with
+the tool set unchanged, or at the first step is not `instructions_hash`
+plus the offered tools' snippets as a manifest verified for the run
+names them), the neutral **prompt changed at this step** when a changed
+tool set may explain the move (a ToolSource tool, an unverified
+weft.json), **overridden by experiment** (the invoke_agent span carries
+`weft.override.instructions`; the story view reads the spans once the
+run ends) and **catalog changed at this step**; a read-scoped token
+sees the `hidden` badge and nothing else
+(`examples/studio-local`'s PrepareStep trim is the live demo):
 
 ![run page with the trace, light theme](screenshots/run-light.png)
 

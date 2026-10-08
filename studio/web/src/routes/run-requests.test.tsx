@@ -125,13 +125,16 @@ describe("the run page's request section (A1.4)", () => {
     await story()
     await waitFor(() =>
       expect(
-        within(section(1)).getByText("changed by PrepareStep")
+        within(section(1)).getByText("prompt changed at this step")
       ).toBeTruthy()
     )
 
-    // The marks sit on the steps whose hash moved: step 1's prompt
-    // (the PrepareStep rewrite) and catalog (the ToolSource growth);
-    // step 2's prompt (back to the base) but not its catalog.
+    // The marks sit on the steps whose hash moved: step 1's prompt and
+    // catalog — the tool set grew there (a ToolSource tool the manifest
+    // cannot vouch for), so the prompt mark is the neutral one; step
+    // 2's prompt (back to the base, the tool set unchanged: only a
+    // PrepareStep) but not its catalog.
+    expect(within(section(2)).getByText("changed by PrepareStep")).toBeTruthy()
     expect(section(0).querySelector("[data-mark]")).toBeNull()
     expect(section(1).querySelector('[data-mark="prompt"]')).toBeTruthy()
     expect(section(1).querySelector('[data-mark="catalog"]')).toBeTruthy()
@@ -262,7 +265,7 @@ describe("the run page's request section (A1.4)", () => {
     serve("ok")
     renderApp(`/runs/${RUN}?sel=s1`)
     await waitFor(() =>
-      expect(screen.getByText("changed by PrepareStep")).toBeTruthy()
+      expect(screen.getByText("prompt changed at this step")).toBeTruthy()
     )
     expect(screen.getByText("catalog changed at this step")).toBeTruthy()
   })

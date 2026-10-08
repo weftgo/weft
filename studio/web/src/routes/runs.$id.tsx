@@ -230,6 +230,11 @@ function RunPage() {
     seenStatus.current = { id, status: loadedStatus }
     if (was === "running" && loadedStatus && loadedStatus !== "running") {
       void queryClient.invalidateQueries({ queryKey: ["requests", id] })
+      // The invoke_agent span (the override fingerprint) ships at run
+      // end: the spans are read again too — joining a read the status
+      // change itself started (the story view enables it now), never a
+      // second one.
+      void queryClient.invalidateQueries({ queryKey: ["spans", id] }, { cancelRefetch: false })
       // A step doc read while running carries running-time holes (no
       // spans yet): every cached step of the run is read again.
       void queryClient.invalidateQueries({ queryKey: ["step", id] })
@@ -240,10 +245,15 @@ function RunPage() {
   // requests capability, for the Request pane's "overridden by
   // experiment" chip: the run's invoke_agent span carries the
   // weft.override.* fingerprint (one query, shared with the trace).
+  // That span ships only when the run ends, so the story view reads
+  // the spans once the run is over (the end-of-run invalidation above
+  // reads them again) and never polls them.
   const spans = useQuery({
     ...spansQuery(id),
-    enabled: (view === "trace" || requestsCapable) && Boolean(run.data?.trace_id),
-    refetchInterval: runStatus === "running" ? 5000 : false,
+    enabled:
+      (view === "trace" || (requestsCapable && runStatus !== "running")) &&
+      Boolean(run.data?.trace_id),
+    refetchInterval: view === "trace" && runStatus === "running" ? 5000 : false,
   })
   const override = useMemo(() => overrideOf(spans.data?.spans, id), [spans.data, id])
   const requests = useMemo(

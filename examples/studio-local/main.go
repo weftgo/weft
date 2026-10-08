@@ -112,12 +112,31 @@ func main() {
 // demoAgent is the app's one agent: built once here, and the
 // acceptance test runs the same value. The model is a deterministic
 // echo — offline, and prompt-dependent, so a playground experiment
-// with an edited input visibly answers differently.
+// with an edited input visibly answers differently. Its PrepareStep
+// trims the prompt: from step 1 on the first-step guidance paragraph
+// is dropped, so Studio's Request pane shows step 1's system prompt
+// diffed against step 0's with the "changed by PrepareStep" chip.
 func demoAgent() *weft.Agent {
 	return weft.New(paced{150 * time.Millisecond, echoModel{}},
 		weft.Name("studio-local"),
-		weft.Instructions("You are the studio-local demo agent."),
+		weft.Instructions(demoInstructions),
+		weft.PrepareStep(trimGuidance),
 		lookupOrder)
+}
+
+// firstStepGuidance is the paragraph only step 0's prompt carries.
+const firstStepGuidance = "First-step guidance: look the order up with lookup_order before answering."
+
+const demoInstructions = "You are the studio-local demo agent.\n\n" + firstStepGuidance
+
+// trimGuidance is the demo's PrepareStep: after step 0 the guidance
+// has done its job, so the system text loses that paragraph — the
+// same trimmed text on every later step.
+func trimGuidance(_ context.Context, step int, req weft.ModelRequest) (weft.ModelRequest, error) {
+	if step >= 1 {
+		req.System = strings.Replace(req.System, "\n\n"+firstStepGuidance, "", 1)
+	}
+	return req, nil
 }
 
 // serve is setup A (§10.1) plus this demo's own /run endpoint.

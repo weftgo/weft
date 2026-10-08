@@ -4,20 +4,25 @@
 // choice, thinking, the messages sent, the model and the attempts —
 // read from GET runs/{id}/requests. The header carries the chips the
 // hashes decide (plan E1.1, lib/request-pane.ts): "changed by
-// PrepareStep" (the system hash moved from the previous step's, or at
-// the first step is not the configured instructions plus the tools'
-// snippets), "overridden by experiment" (the run's invoke_agent span
+// PrepareStep" (the system hash moved from the previous step's with
+// the tool set unchanged — or changed only by tools the verified
+// manifest shows carry no snippet — or at the first step is not the
+// configured instructions plus the verified tools' snippets), the
+// neutral "prompt changed at this step" when the tool set may explain
+// the move, "overridden by experiment" (the run's invoke_agent span
 // carries weft.override.instructions) and "catalog changed at this
-// step"; the prompt is diffed against the previous step, or at the
-// first step against the registered instructions when they differ.
+// step"; nothing is guessed from an unverified weft.json. The prompt
+// is diffed (bounded, never over a cut record) against the previous
+// step, or at the first step against the registered instructions when
+// they differ. The messages sent come from the page's transcript: the
+// last three inline, the rest as a raw tree.
 // Every hole is a badge with its reason and fix: a run older than the
 // record, a content-off destination, a token that may not read
 // prompts — never an empty section. The provider wire pair (plan A6)
 // is not recorded by any route yet: nothing is drawn for it.
 import { useQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { ChevronRight } from "lucide-react"
-import { useState } from "react"
+import { useMemo, useState } from "react"
 
 import { isHoleRef, manifestQuery, requestsQuery } from "@/lib/api"
 import type {
@@ -30,12 +35,12 @@ import type {
   Transcript,
 } from "@/lib/api"
 import { messageLine } from "@/lib/compaction"
-import { diffLines } from "@/lib/diff"
-import { runLink } from "@/lib/links"
+import { diffLinesBounded } from "@/lib/diff"
 import {
   CHIP_CATALOG,
   CHIP_EXPERIMENT,
   CHIP_PREPARE_STEP,
+  CHIP_PROMPT_CHANGED,
   composedFromInstructions,
   composeSystem,
   messagesSent,
@@ -43,6 +48,8 @@ import {
   promptText,
   registeredAgent,
   snippetsOf,
+  toolSetMayExplain,
+  baselineCaption,
 } from "@/lib/request-pane"
 import type { PromptBaseline, RunOverride } from "@/lib/request-pane"
 import {
@@ -163,33 +170,52 @@ function Label({ children }: { children: React.ReactNode }) {
 
 /** The prompt's diff against its baseline: the previous step's, or the
  * registered instructions'. */
-function PromptDiff({ base, text }: { base: PromptBaseline; text: string }) {
-  const rows = diffLines(base.text, text)
+function PromptDiff({
+  base,
+  text,
+  truncated,
+}: {
+  base: PromptBaseline
+  text: string
+  /** This step's own prompt record was cut by the recorder. */
+  truncated: boolean
+}) {
+  // Bounded and memoized: the request query refetches every 2 s while
+  // the run runs, and a prompt may be thousands of lines.
+  const diff = useMemo(
+    () => (truncated || base.truncated ? null : diffLinesBounded(base.text, text)),
+    [base.text, base.truncated, text, truncated]
+  )
   return (
     <div className="space-y-0.5" data-prompt-diff={base.kind}>
-      <span className="font-mono text-[10px] text-faint">
-        {base.kind === "previous"
-          ? `diff vs step ${base.step}`
-          : "diff vs the registered instructions"}
-      </span>
-      <pre className="max-w-full overflow-x-auto rounded-md border px-2 py-1.5 font-mono text-[12px] whitespace-pre-wrap">
-        {rows.map((r, i) => (
-          <div
-            key={i}
-            data-diff={r.kind}
-            className={
-              r.kind === "add"
-                ? "bg-status-ok/10 text-status-ok"
-                : r.kind === "del"
-                  ? "bg-status-bad/10 text-status-bad line-through"
-                  : "text-muted-foreground"
-            }
-          >
-            {r.kind === "add" ? "+ " : r.kind === "del" ? "− " : "  "}
-            {r.text}
-          </div>
-        ))}
-      </pre>
+      <span className="font-mono text-[10px] text-faint">{baselineCaption(base)}</span>
+      {diff === null ? (
+        // A cut tail would read as lines a PrepareStep removed.
+        <HoleBadge hole="truncated" label="diff not drawn: the prompt was cut" />
+      ) : "tooLarge" in diff ? (
+        <span className="block font-mono text-[11px] text-faint" data-diff-too-large>
+          too large to diff ({diff.tooLarge.before} → {diff.tooLarge.after} lines)
+        </span>
+      ) : (
+        <pre className="max-w-full overflow-x-auto rounded-md border px-2 py-1.5 font-mono text-[12px] whitespace-pre-wrap">
+          {diff.rows.map((r, i) => (
+            <div
+              key={i}
+              data-diff={r.kind}
+              className={
+                r.kind === "add"
+                  ? "bg-status-ok/10 text-status-ok"
+                  : r.kind === "del"
+                    ? "bg-status-bad/10 text-status-bad line-through"
+                    : "text-muted-foreground"
+              }
+            >
+              {r.kind === "add" ? "+ " : r.kind === "del" ? "− " : "  "}
+              {r.text}
+            </div>
+          ))}
+        </pre>
+      )}
     </div>
   )
 }
@@ -251,7 +277,9 @@ function PromptView({
         ) : null}
         {doc.content === "derived" ? <HoleBadge hole="derived" detail /> : null}
       </span>
-      {base && base.text !== doc.text ? <PromptDiff base={base} text={doc.text} /> : null}
+      {base && base.text !== doc.text ? (
+        <PromptDiff base={base} text={doc.text} truncated={doc.truncated_bytes > 0} />
+      ) : null}
     </div>
   )
 }
@@ -389,12 +417,16 @@ function CatalogView({ row, stripped }: { row: RequestRow; stripped?: Holed }) {
  * inline, the rest in the raw view — resolved against the transcript
  * the page holds, never fetched again. */
 function MessagesView({ row, ctx }: { row: RequestRow; ctx?: RequestContext }) {
+  const [earlier, setEarlier] = useState(false)
   const m = messagesSent(row, ctx?.transcript, ctx?.compactions)
   const n = `${m.count} ${m.count === 1 ? "message" : "messages"}`
   return (
     <div className="min-w-0 flex-1 space-y-1" data-messages-sent>
       <span className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
-        <span data-messages-line>
+        <span
+          data-messages-line
+          title={m.bytes !== undefined ? "computed from the transcript as JSON" : undefined}
+        >
           {m.bytes !== undefined ? `${n} · ${bytes(m.bytes)}` : n}
         </span>
         {m.hole === "compacted" ? (
@@ -405,12 +437,19 @@ function MessagesView({ row, ctx }: { row: RequestRow; ctx?: RequestContext }) {
             reason="the transcript does not hold the messages this request counts"
             detail
           />
-        ) : m.hole === "no_index" && row.content !== "stripped" ? (
-          <HoleBadge
-            hole="stripped"
-            reason="no messages record names this request: the run captured no content"
-            detail
-          />
+        ) : m.hole === "no_index" ? (
+          row.content === "stripped" ? (
+            <HoleBadge hole="stripped" />
+          ) : (
+            // Content was captured, yet no messages record names the
+            // request: the core omits the index when a rewritten
+            // request's view could not be recorded.
+            <HoleBadge
+              hole="gap"
+              reason="no messages record names this request (its compaction view could not be recorded)"
+              detail
+            />
+          )
         ) : m.hole === "no_transcript" ? (
           <span className="text-faint">bytes when the transcript is read</span>
         ) : null}
@@ -424,13 +463,28 @@ function MessagesView({ row, ctx }: { row: RequestRow; ctx?: RequestContext }) {
           ))}
         </ul>
       ) : null}
-      {ctx && m.earlier > 0 && m.last.length ? (
-        <Link
-          {...runLink(ctx.runId, { step: row.step, view: "raw" })}
-          className="font-mono text-[11px] text-thread-ink hover:underline"
-        >
-          {m.earlier} earlier in the raw view
-        </Link>
+      {m.before.length ? (
+        // The rest as the raw tree, from the transcript the page holds:
+        // nothing is fetched again.
+        <div className="space-y-1">
+          <button
+            type="button"
+            className="flex items-center gap-1 font-mono text-[11px] text-thread-ink hover:underline"
+            aria-expanded={earlier}
+            onClick={() => setEarlier((x) => !x)}
+          >
+            <ChevronRight
+              className={`size-3 transition-transform ${earlier ? "rotate-90" : ""}`}
+              data-slot="icon"
+            />
+            {m.before.length} earlier {m.before.length === 1 ? "message" : "messages"} (raw)
+          </button>
+          {earlier ? (
+            <div data-messages-earlier>
+              <JsonTree value={m.before} openDepth={5} />
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </div>
   )
@@ -525,22 +579,34 @@ function AttemptView({
 
 /** What the hashes say about one step's prompt (plan E1.1). */
 interface PromptFacts {
-  prepareStep: boolean
+  /** "prepare_step": only a PrepareStep can have moved the hash;
+   * "either": a PrepareStep or the tool set's snippets (the neutral
+   * "prompt changed at this step"). */
+  prompt?: "prepare_step" | "either"
   experiment: boolean
   base?: PromptBaseline
 }
 
+/** A prompt record's cut, when it was capped. */
+function cut(row: RequestRow | undefined): boolean {
+  const p = row?.prompt
+  return !!p && !isHoleRef(p) && p.truncated_bytes > 0
+}
+
 /**
- * usePromptFacts decides the step's prompt chips and its diff baseline.
- * A later step: its system hash moved from the previous recorded
- * step's — a PrepareStep rewrote it (an override is fixed for the run,
- * so it never moves a hash between steps). The first recorded step:
- * "overridden by experiment" when the run's invoke_agent span says the
+ * usePromptFacts decides the step's prompt chip and its diff baseline.
+ * A later step whose system hash moved from the previous recorded
+ * step's: a PrepareStep rewrote it (an override is fixed for the run,
+ * so it never moves a hash between steps) — unless the offered tools
+ * changed too and the verified manifest cannot show that none of the
+ * tools added or dropped carries a PromptSnippet: then the neutral
+ * "prompt changed at this step". The first recorded step: "overridden
+ * by experiment" when the run's invoke_agent span says the
  * instructions were replaced; "changed by PrepareStep" when the system
  * text is not the configured instructions (instructions_hash) plus the
- * offered tools' PromptSnippets — decided only when the hashes and
- * texts can decide it. The registered agent (the manifest) is read
- * only when the first step's hashes differ or an override is in play.
+ * offered tools' snippets — decided only by a verified manifest (or an
+ * exact hash match), never guessed. The manifest is read only when a
+ * chip needs it.
  */
 function usePromptFacts(
   req: RunRequests,
@@ -553,53 +619,68 @@ function usePromptFacts(
   const insHash = ctx?.instructionsHash
   const experiment = first && ctx?.override?.instructions === true
   const differs = first && !!insHash && row.system_hash !== insHash
+  const changed = !first && (req.steps.get(step)?.promptChanged ?? false)
+  const names = row?.body.tools.names ?? []
+  const prevNames = prev?.body.tools.names ?? []
+  const toolsMoved =
+    changed && (names.length !== prevNames.length || names.some((n, i) => n !== prevNames[i]))
   const manifest = useQuery({
     ...manifestQuery(),
-    enabled: differs || experiment,
+    enabled: differs || experiment || toolsMoved,
     retry: false,
   })
-  const agent =
+  const reg =
     ctx?.agent !== undefined
       ? registeredAgent(manifest.data, ctx.agent, ctx.manifestHash)
       : undefined
-  const snippets = row ? snippetsOf(row, agent) : undefined
+  const known = snippetsOf(names, reg?.agent)
+  // Only the verified agent's snippets decide a mismatch.
+  const snippets = reg?.verified ? known : undefined
   const settled = !manifest.isPending || manifest.fetchStatus === "idle"
   const composed = useQuery({
     queryKey: [
       "composed",
       row?.system_hash ?? "",
       insHash ?? "",
-      row?.body.tools.names.join(",") ?? "",
+      names.join(","),
       snippets?.join("\u0000") ?? null,
     ],
     enabled: differs && settled,
     staleTime: Infinity,
     queryFn: () => composedFromInstructions(row!, insHash!, snippets).then((v) => v ?? null),
   })
-  if (!row) return { prepareStep: false, experiment: false }
+  if (!row) return { experiment: false }
   const text = promptText(row)
   if (!first) {
-    const changed = req.steps.get(step)?.promptChanged ?? false
     const before = promptText(prev)
     return {
-      prepareStep: changed,
+      prompt: !changed
+        ? undefined
+        : toolsMoved && (!settled || toolSetMayExplain(prevNames, names, reg))
+          ? "either"
+          : "prepare_step",
       experiment: false,
       base:
         changed && prev && before !== undefined && text !== undefined
-          ? { kind: "previous", step: prev.step, text: before }
+          ? { kind: "previous", step: prev.step, text: before, truncated: cut(prev) }
           : undefined,
     }
   }
   const registered =
-    agent && agent.instructions !== undefined && snippets
-      ? composeSystem(agent.instructions, snippets)
+    reg && reg.agent.instructions !== undefined && known
+      ? composeSystem(reg.agent.instructions, known)
       : undefined
   return {
-    prepareStep: differs && composed.data === false,
+    prompt: differs && composed.data === false ? "prepare_step" : undefined,
     experiment,
     base:
       registered !== undefined && text !== undefined && registered !== text
-        ? { kind: "registered", text: registered }
+        ? {
+            kind: "registered",
+            text: registered,
+            verified: reg?.verified,
+            overridden: experiment,
+          }
         : undefined,
   }
 }
@@ -660,7 +741,7 @@ export function RequestSection({
         <span className="font-mono text-[11px] text-faint">
           {row.body.tools.names.length} tools
         </span>
-        {facts.prepareStep ? (
+        {facts.prompt === "prepare_step" ? (
           <Mark
             mark="prompt"
             title={
@@ -670,6 +751,13 @@ export function RequestSection({
             }
           >
             {CHIP_PREPARE_STEP}
+          </Mark>
+        ) : facts.prompt === "either" ? (
+          <Mark
+            mark="prompt"
+            title="the system prompt's hash differs from the previous step's, and so does the tool set: a PrepareStep rewrote it, or the tools added or dropped brought or took their PromptSnippets"
+          >
+            {CHIP_PROMPT_CHANGED}
           </Mark>
         ) : null}
         {facts.experiment ? (

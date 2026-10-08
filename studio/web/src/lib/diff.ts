@@ -48,3 +48,40 @@ export function diffSummary(rows: DiffRow[]): string {
   if (!add && !del) return "identical"
   return `+${add} −${del}`
 }
+
+/** The LCS table's side past which a diff is not drawn (2,000 lines on
+ * each side, after the common ends are trimmed: 4M cells). */
+export const DIFF_CAP = 2000
+
+/** A bounded diff: the rows, or — past the cap — the sizes of the
+ * middle that differs, for a "too large to diff" note. */
+export type BoundedDiff = { rows: DiffRow[] } | { tooLarge: { before: number; after: number } }
+
+/** diffLinesBounded is diffLines with the common leading and trailing
+ * lines trimmed before the LCS (a prompt rewrite is usually local),
+ * and the middle capped at `cap` lines a side. */
+export function diffLinesBounded(before: string, after: string, cap = DIFF_CAP): BoundedDiff {
+  const a = before.split("\n")
+  const b = after.split("\n")
+  let head = 0
+  while (head < a.length && head < b.length && a[head] === b[head]) head++
+  let tail = 0
+  while (
+    tail < a.length - head &&
+    tail < b.length - head &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
+  )
+    tail++
+  const midA = a.slice(head, a.length - tail)
+  const midB = b.slice(head, b.length - tail)
+  if (midA.length > cap || midB.length > cap)
+    return { tooLarge: { before: a.length, after: b.length } }
+  const same = (lines: string[]): DiffRow[] => lines.map((text) => ({ kind: "same", text }))
+  const mid: DiffRow[] =
+    midA.length === 0
+      ? midB.map((text) => ({ kind: "add", text }))
+      : midB.length === 0
+        ? midA.map((text) => ({ kind: "del", text }))
+        : diffLines(midA.join("\n"), midB.join("\n"))
+  return { rows: [...same(a.slice(0, head)), ...mid, ...same(a.slice(a.length - tail))] }
+}

@@ -208,7 +208,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    alone, every panel token 403 hidden), public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5 — its host API, plan C4: the element's
 //    //    open/close/toggle/isOpen/scope/select/on/studioLink, window.weft.devtools while connected
-//    //    unless data-global="off", events weft:run|parked|error; configured by a data-weft
+//    //    unless data-global="off", events weft:run|parked|error; its layout, plan D1: float, dock
+//    //    left|right|bottom|top, pill, hidden — data-position/data-mode/data-push (pads <html>)/
+//    //    data-z-index (--weft-z), remembered in localStorage["weft.devtools"], every key but Alt+W
+//    //    heard inside the panel only; the build prints the per-item size table from
+//    //    studio/web/panel-budget.json; configured by a data-weft
 //    //    script tag, weft:* meta tags, or <base>/panel-config.json; studio/README.md
 //    //    has the ladder; it follows a scope — data-scope="pub_…;session=…;flow=…;run=…" or
 //    //    window.__WEFT__ (data-public-id deprecated), else the Weft-Scope header of the page's

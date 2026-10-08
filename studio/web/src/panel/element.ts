@@ -48,6 +48,8 @@ import type { ChildView, PanelRequests, PanelState, TurnView } from "./state"
 import { foldedWords, turnPromptOf } from "./playground"
 import type { ExperimentDraft, TurnWords } from "./playground"
 import { panelStudioVersion } from "./version"
+import { clampLayout, CYCLE, geometry, initialLayout, NARROW_W, pillPlace, placedIn, Push, readStore, writeStore } from "./layout"
+import type { Geometry, Layout } from "./layout"
 import { href, playgroundLink, runLink, sessionLink, traceLink } from "../lib/links"
 import type { PlaygroundHandoff } from "../lib/links"
 
@@ -165,6 +167,27 @@ function prefersReducedMotion(): boolean {
   }
 }
 
+/** typing: the key's real target (off the composed path) is a field. */
+function typing(e: KeyboardEvent): boolean {
+  const t = ((typeof e.composedPath === "function" ? e.composedPath()[0] : null) ?? e.target) as HTMLElement | null
+  return !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)
+}
+
+/** SHORTCUTS is the keyboard, in one place (the ? overlay and the
+ * README's table). Every key but Alt+W fires only with focus in the
+ * panel. */
+export const SHORTCUTS: readonly (readonly [string, string])[] = [
+  ["Alt+W", "toggle the dock, anywhere on the page (Ctrl+Shift+W too, where the browser delivers it)"],
+  ["Alt+Shift+W", "next layout: float, dock right, bottom, left, top"],
+  ["Esc", "close (this list first)"],
+  ["j / k", "next / previous turn"],
+  ["J / K", "next / previous step"],
+  ["g s", "open the turn (and step) in Studio"],
+  ["r", "raw JSON of the open turn"],
+  ["/", "search (reserved: arrives with D4)"],
+  ["?", "this list"],
+]
+
 /** A conversation the panel knows of (plan C3.3's switcher). */
 export interface KnownScope {
   scope: Scope
@@ -275,6 +298,8 @@ export class WeftDevtools extends HTMLElement {
     "data-open",
     "data-auto",
     "data-global",
+    "data-push",
+    "data-z-index",
   ]
 
   /** Set by the entry module on the dock it mounts itself: only that
@@ -343,7 +368,26 @@ export class WeftDevtools extends HTMLElement {
   private scheduled = false
   /** Studio did not answer and the node is not ours to remove. */
   private dormant = false
-  private shown: boolean
+  /** The layout (D1): mode, side, box, open, hidden, and what is
+   * remembered with them — outside the render, so redraws keep it. */
+  private lay: Layout
+  /** data-push's padding on <html>, while it is applied. */
+  private push = new Push()
+  /** The user placed the panel (or a placement was stored): the
+   * placement is remembered from then on. */
+  private placed = false
+  /** A drag or a resize is in progress: draws wait for its end. */
+  private dragging = false
+  /** When g was pressed (the g s chord), 0 for none. */
+  private gAt = 0
+  private onResize = () => {
+    clampLayout(this.lay)
+    this.render(this.last)
+  }
+  /** Expanded and not hidden. */
+  private get shown(): boolean {
+    return this.lay.open && !this.lay.hidden
+  }
   /** data-open was adopted (on first connect); toggles own it after. */
   private opened = false
   /** The ? shortcuts overlay (Dv3). */
@@ -405,12 +449,16 @@ export class WeftDevtools extends HTMLElement {
   constructor() {
     super()
     this.cfg = readConfig(this)
-    this.shown = this.cfg.open
+    this.lay = initialLayout(this.cfg.position, this.cfg.open, this.cfg.mode)
     this.shadow = this.attachShadow({ mode: "open" })
     this.body = el("div", "weft-root")
     attachStyles(this.shadow)
     this.shadow.append(this.body)
     this.shadow.addEventListener("pointerdown", () => this.hold())
+    // Every shortcut but Alt+W is heard here, inside the shadow root:
+    // only a key pressed with focus in the panel reaches it, so the
+    // panel never captures a key of the host page's (D1).
+    this.shadow.addEventListener("keydown", (e) => this.panelKey(e as KeyboardEvent))
     this.shadow.addEventListener("compositionstart", () => {
       this.composing = true
     })
@@ -436,14 +484,21 @@ export class WeftDevtools extends HTMLElement {
     // once (the user's toggles own it afterwards).
     this.cfg = readConfig(this)
     if (!this.opened) {
+      // data-position / data-open / data-mode are the initial values;
+      // what this origin stored last (D1) wins over them.
       this.opened = true
-      this.shown = this.cfg.open
+      const st = readStore()
+      this.placed = placedIn(st)
+      this.lay = { ...initialLayout(this.cfg.position, this.cfg.open, this.cfg.mode), ...st }
     }
+    clampLayout(this.lay)
     // §5.2's keyboard: Alt+W (and Ctrl+Shift+W where the browser
-    // delivers it — Q4) toggles the dock, ? lists the keys, r flips
-    // the raw JSON, Esc closes. Keys never fire while the user types
-    // in an input — the host page's or the panel's own.
+    // delivers it — Q4) toggles the dock from anywhere on the page;
+    // every other key is the shadow root's (panelKey). Keys never fire
+    // while the user types in an input — the host page's or the
+    // panel's own.
     window.addEventListener("keydown", this.onKey)
+    window.addEventListener("resize", this.onResize, { passive: true })
     window.addEventListener("pointerup", this.onRelease, true)
     window.addEventListener("pointercancel", this.onRelease, true)
     window.addEventListener("hashchange", this.onURL, { passive: true })
@@ -454,6 +509,8 @@ export class WeftDevtools extends HTMLElement {
 
   disconnectedCallback() {
     window.removeEventListener("keydown", this.onKey)
+    window.removeEventListener("resize", this.onResize)
+    this.push.restore()
     window.removeEventListener("pointerup", this.onRelease, true)
     window.removeEventListener("pointercancel", this.onRelease, true)
     window.removeEventListener("hashchange", this.onURL)
@@ -1096,58 +1153,105 @@ export class WeftDevtools extends HTMLElement {
     return d ?? cfg.scope
   }
 
-  /** keydown is the whole keyboard surface. The window sees a key
-   * pressed inside a shadow tree as coming from its host, so the real
-   * target is read off the composed path — typing r or ? into the
-   * drawer's own fields is typing, not a shortcut. Bare keys only
-   * (Ctrl+R stays the browser's reload), never during an IME
-   * composition, never a key the page already handled, and only when
-   * focus is in the panel or nowhere: a key aimed at one of the host
-   * page's own widgets is the page's. preventDefault only on a key
-   * that was handled. */
+  /** keydown is the window's one key: Alt+W (Ctrl+Shift+W where the
+   * browser delivers it) toggles the dock from anywhere — never while
+   * the user types in a field, never during an IME composition, never
+   * a key the page already handled. */
   private keydown(e: KeyboardEvent): void {
-    if (e.defaultPrevented || e.isComposing) return
-    const path = typeof e.composedPath === "function" ? e.composedPath() : []
-    const t = (path[0] ?? e.target) as HTMLElement | null
-    if (
-      t &&
-      (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" ||
-        t.isContentEditable)
-    )
-      return
+    if (e.defaultPrevented || e.isComposing || typing(e)) return
     const toggleCombo =
       (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && e.code === "KeyW") || // Q4's pick
       (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.code === "KeyW") // where delivered
-    if (toggleCombo) {
+    if (!toggleCombo) return
+    e.preventDefault()
+    this.keys = false
+    this.toggle()
+  }
+
+  /** panelKey is every other shortcut (SHORTCUTS), heard on the shadow
+   * root: focus is in the panel, or the key never arrives. Typing in
+   * the panel's own fields is typing; Ctrl/Cmd keys stay the
+   * browser's; preventDefault only on a key that was handled. */
+  private panelKey(e: KeyboardEvent): void {
+    if (e.defaultPrevented || e.isComposing || typing(e)) return
+    if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === "KeyW") {
       e.preventDefault()
-      this.keys = false
-      this.toggle()
+      this.cycle()
       return
     }
-    if (e.ctrlKey || e.metaKey || e.altKey) return
-    if (!this.shown) return
-    // Nothing focused: the key came from the window, the document or
-    // the page's body, not from an element of the page's own. Esc
-    // included — the page's own dialog closes on it, not the dock.
-    const idle = !t || t.nodeType !== 1 || t.tagName === "BODY" || t.tagName === "HTML"
-    if (!idle && !path.includes(this)) return
-    if (e.key === "Escape") {
+    if (e.ctrlKey || e.metaKey || e.altKey || !this.shown) return
+    const k = e.key
+    const chord = this.gAt > 0 && Date.now() - this.gAt < 1_500
+    this.gAt = 0
+    let done = true
+    if (chord && k === "s") this.openInStudio()
+    else if (k === "g") this.gAt = Date.now()
+    else if (k === "Escape") {
       if (this.keys) {
         this.keys = false
         this.render(this.last)
       } else this.toggle()
-      return
-    }
-    if (e.key === "?") {
-      e.preventDefault()
+    } else if (k === "?") {
       this.keys = !this.keys
       this.render(this.last)
-      return
+    } else if ((k === "r" || k === "R") && this.model) this.toggleRaw()
+    else if (k === "j" || k === "k") this.turnKey(k === "j" ? 1 : -1)
+    else if (k === "J" || k === "K") this.stepKey(k === "J" ? 1 : -1)
+    else done = false // "/" included: search is D4's, reserved
+    if (done) e.preventDefault()
+  }
+
+  /** turnKey selects the next (1) or previous (-1) turn of the list. */
+  private turnKey(d: number) {
+    const s = this.last
+    const ids = s.turns.map((r) => r.id)
+    const i = ids.indexOf(s.selected)
+    const id = ids.at(Math.min(Math.max(i + d, 0), ids.length - 1))
+    if (id && id !== s.selected) this.go(this.model?.select(id, true))
+  }
+
+  /** stepKey marks the next (1) or previous (-1) step of the open turn
+   * as the one being read (⤢ and g s carry it). */
+  private stepKey(d: number) {
+    const s = this.last
+    const steps = s.turn?.folded.steps ?? []
+    if (!steps.length) return
+    const i = steps.findIndex((st) => st.index === linkedStep(s))
+    const at = i < 0 ? (d > 0 ? 0 : steps.length - 1) : Math.min(Math.max(i + d, 0), steps.length - 1)
+    this.model?.selectStep(steps[at].index)
+  }
+
+  /** openInStudio is g s: the selected turn (and step) in Studio, the
+   * link ⤢ carries (lib/links.ts), in a new tab. */
+  private openInStudio() {
+    const url = this.last.selected ? this.studioLink(this.last.selected, linkedStep(this.last)) : ""
+    try {
+      if (url) window.open(url, "_blank", "noopener")
+    } catch {
+      // a blocked popup: nothing thrown into the host
     }
-    if ((e.key === "r" || e.key === "R") && this.model) {
-      e.preventDefault()
-      this.toggleRaw()
+  }
+
+  /** cycle moves the dock to the next layout of CYCLE (Alt+Shift+W,
+   * the header's layout button): float, dock right, bottom, left, top. */
+  private cycle() {
+    const l = this.lay
+    const next = CYCLE[(CYCLE.indexOf(l.mode === "float" ? "float" : l.side) + 1) % CYCLE.length]
+    if (next === "float") l.mode = "float"
+    else {
+      l.mode = "dock"
+      l.side = next
     }
+    clampLayout(l)
+    this.save(true)
+    this.render(this.last)
+  }
+
+  /** save remembers the layout (localStorage["weft.devtools"]); place
+   * marks a user's placement (a toggle, a move, a resize, a re-dock). */
+  private save(place = false) {
+    this.placed ||= place
+    writeStore(this.lay, this.placed)
   }
 
   /** quiet reports that the model has no draw scheduled (a draw held
@@ -1169,10 +1273,18 @@ export class WeftDevtools extends HTMLElement {
     }
   }
 
-  attributeChangedCallback(_name: string, old: string | null, value: string | null) {
+  attributeChangedCallback(name: string, old: string | null, value: string | null) {
     if (old === value) return
     this.cfg = readConfig(this)
     if (!this.isConnected) return
+    // A data-position set after connect is the host moving the dock
+    // (D1): the float's corner, or a dock's side; the size stays.
+    if (name === "data-position") {
+      const at = initialLayout(this.cfg.position, true, "")
+      const l = this.lay
+      Object.assign(l, { mode: at.mode, side: at.side, y: innerHeight - l.h - 16 })
+      l.x = this.cfg.position === "bottom-left" ? 16 : innerWidth - l.w - 16
+    }
     this.syncGlobal()
     this.syncDetect()
     this.schedule()
@@ -1276,6 +1388,8 @@ export class WeftDevtools extends HTMLElement {
         scope,
         (s) => this.render(s)
       )
+      model.prefer = this.lay.run
+      model.state.raw = this.lay.raw
       this.model = model
       this.conn = { endpoint: cfg.endpoint, token: cfg.token, scope: serializeScope(scope) }
       this.base = endpoint
@@ -1325,8 +1439,13 @@ export class WeftDevtools extends HTMLElement {
     this.settling = this.start(true).catch(quiet)
   }
 
+  /** toggle flips the dock; from hidden it opens (Alt+W, open()). */
   toggle() {
-    this.shown = !this.shown
+    if (this.lay.hidden) {
+      this.lay.hidden = false
+      this.lay.open = true
+    } else this.lay.open = !this.lay.open
+    this.save(true)
     this.render(this.last)
   }
 
@@ -1374,7 +1493,13 @@ export class WeftDevtools extends HTMLElement {
     }
     // Whether anyone is looking: the dev list is polled only then.
     this.model?.watch(this.shown && !this.dormant)
-    if (this.held || this.composing) {
+    // The raw flip and the selected turn are remembered (D1).
+    if (this.model && s === this.model.state && (s.raw !== this.lay.raw || (s.selected && s.selected !== this.lay.run))) {
+      this.lay.raw = s.raw
+      this.lay.run = s.selected || this.lay.run
+      this.save()
+    }
+    if (this.held || this.composing || this.dragging) {
       this.dirty = true
       return
     }
@@ -1408,22 +1533,13 @@ export class WeftDevtools extends HTMLElement {
         }
         next.push(line)
       }
+    } else if (this.lay.hidden) {
+      // hidden (D1): nothing drawn; the element, its API and its
+      // events stay, and Alt+W or open() bring the dock back.
     } else if (!this.shown) {
       next.push(this.pill(s))
     } else if (!s.gone) {
-      const dock = el("div", `weft-dock weft-${this.cfg.position} weft-open`)
-      dock.appendChild(this.header(s))
-      if (this.howTo && !this.model?.publicId) dock.appendChild(this.howToBox())
-      const cols = el("div", "weft-cols")
-      cols.appendChild(this.turnList(s))
-      cols.appendChild(this.main(s))
-      dock.appendChild(cols)
-      dock.appendChild(this.footer(s))
-      // The overlays live inside the dock: it is their containing
-      // block. Outside it they would be laid over the host page.
-      if (s.raw && s.turn) dock.appendChild(this.rawView(s.turn))
-      if (this.keys) dock.appendChild(this.shortcuts())
-      next.push(dock)
+      next.push(this.dock(s))
     }
     // The whole dock re-renders per state change; the panes' scroll
     // positions, the field the user is typing in and its caret are the
@@ -1432,6 +1548,7 @@ export class WeftDevtools extends HTMLElement {
       (root.querySelector(sel))?.scrollTop ?? 0
     const scrolls = [scrollOf(".weft-turns"), scrollOf(".weft-main")]
     const active = this.shadow.activeElement as (HTMLElement & Partial<HTMLInputElement>) | null
+    let refocus = !!active
     const focusKey = active?.getAttribute("data-weft-k") ?? null
     let caret: [number, number] | null = null
     try {
@@ -1449,6 +1566,7 @@ export class WeftDevtools extends HTMLElement {
       for (const n of Array.from(root.querySelectorAll("[data-weft-k]"))) {
         if (n.getAttribute("data-weft-k") !== focusKey) continue
         const field = n as HTMLInputElement
+        refocus = false
         try {
           field.focus({ preventScroll: true })
           if (caret) field.setSelectionRange(caret[0], caret[1])
@@ -1458,6 +1576,123 @@ export class WeftDevtools extends HTMLElement {
         break
       }
     }
+    // Focus was in the panel: it stays there (the dock, or the pill),
+    // so its shortcuts keep working across the rebuild.
+    if (refocus) root.querySelector<HTMLElement>(".weft-dock, .weft-fab")?.focus({ preventScroll: true })
+    root.setAttribute("data-mode", this.dormant ? "line" : this.lay.hidden ? "hidden" : this.shown ? this.lay.mode : "pill")
+    // data-push (D1): only while a dock is drawn docked.
+    if (this.cfg.push && this.isConnected && root.querySelector(".weft-docked")) this.push.apply(this.lay.side, this.lay.d)
+    else this.push.restore()
+  }
+
+  /** dock is the expanded panel, placed by the layout (D1): a float
+   * dragged by its header and resized from its corner, a dock resized
+   * along its edge, a bottom sheet on a narrow viewport. */
+  private dock(s: PanelState): HTMLElement {
+    clampLayout(this.lay)
+    const g = geometry(this.lay)
+    const dock = el("div", `weft-dock weft-open ${g.cls}`, undefined, { tabindex: "-1" })
+    this.place(dock, g)
+    const head = this.header(s)
+    const l = this.lay
+    if (l.mode === "float" && !g.sheet) {
+      head.classList.add("weft-drag")
+      head.addEventListener("pointerdown", (e) => {
+        const { x, y } = l
+        this.grab(e, (dx, dy) => {
+          l.x = x + dx
+          l.y = y + dy
+        })
+      })
+    }
+    dock.appendChild(head)
+    if (this.howTo && !this.model?.publicId) dock.appendChild(this.howToBox())
+    const cols = el("div", "weft-cols")
+    if (g.width < NARROW_W) {
+      const pick = this.turnPick(s)
+      if (pick) cols.appendChild(pick)
+    }
+    cols.appendChild(this.turnList(s))
+    cols.appendChild(this.main(s))
+    dock.appendChild(cols)
+    dock.appendChild(this.footer(s))
+    // The overlays live inside the dock: it is their containing
+    // block. Outside it they would be laid over the host page.
+    if (s.raw && s.turn) dock.appendChild(this.rawView(s.turn))
+    if (this.keys) dock.appendChild(this.shortcuts())
+    if (!g.sheet) {
+      const float = l.mode === "float"
+      const grip = el("div", float ? "weft-grip" : `weft-edge weft-edge-${l.side}`, undefined, { title: "resize", "aria-hidden": "true" })
+      grip.addEventListener("pointerdown", (e) => {
+        const { w, h, d } = l
+        this.grab(e, (dx, dy) => {
+          if (float) {
+            l.w = w + dx
+            l.h = h + dy
+          } else l.d = d + ({ left: dx, right: -dx, top: dy, bottom: -dy } as const)[l.side]
+        })
+      })
+      dock.appendChild(grip)
+    }
+    return dock
+  }
+
+  /** place gives the dock its box (and z-index, and the narrow class)
+   * — also mid-drag, without a rebuild. */
+  private place(dock: HTMLElement, g: Geometry = geometry(this.lay)) {
+    for (const k of ["left", "top", "width", "height"]) dock.style.setProperty(k, g.style[k] ?? "")
+    if (this.cfg.zIndex) dock.style.zIndex = this.cfg.zIndex
+    dock.classList.toggle("weft-narrow", g.width < NARROW_W)
+  }
+
+  /** grab follows one drag of a handle (pointer events, captured):
+   * move gets the pointer's offset, the layout is clamped and the dock
+   * placed on every move; the end is remembered and redrawn. A press
+   * on a control in the header is the control's. */
+  private grab(e: PointerEvent, move: (dx: number, dy: number) => void) {
+    const h = e.currentTarget as HTMLElement
+    if (e.button > 0 || (e.target as Element).closest("button, a, select, input, textarea")) return
+    e.preventDefault()
+    const dock = h.closest(".weft-dock") as HTMLElement
+    const x0 = e.clientX
+    const y0 = e.clientY
+    this.dragging = true
+    try {
+      h.setPointerCapture(e.pointerId)
+    } catch {
+      // no capture here (an old engine, a test DOM): moves on the handle still work
+    }
+    const mv = (ev: Event) => {
+      const p = ev as PointerEvent
+      move(p.clientX - x0, p.clientY - y0)
+      clampLayout(this.lay)
+      this.place(dock)
+      if (this.cfg.push && dock.classList.contains("weft-docked")) this.push.apply(this.lay.side, this.lay.d)
+    }
+    const up = () => {
+      for (const t of ["pointermove", "pointerup", "pointercancel"]) h.removeEventListener(t, t === "pointermove" ? mv : up)
+      this.dragging = false
+      this.save(true)
+      this.render(this.last)
+    }
+    h.addEventListener("pointermove", mv)
+    h.addEventListener("pointerup", up)
+    h.addEventListener("pointercancel", up)
+  }
+
+  /** turnPick is the turn column as a dropdown (a panel under
+   * NARROW_W wide): every listed turn, the selected one chosen. */
+  private turnPick(s: PanelState): HTMLElement | null {
+    const rows = [...s.turns, ...[...s.experiments.values()].flat()]
+    if (!rows.length) return null
+    const sel = el("select", "weft-turn-pick", undefined, { "aria-label": "turn", "data-weft-k": "turnpick" }) as HTMLSelectElement
+    for (const r of rows) {
+      const o = el("option", undefined, `${statusChip(r)} · ${r.id} · ${r.steps} steps`, { value: r.id }) as HTMLOptionElement
+      o.selected = r.id === s.selected
+      sel.appendChild(o)
+    }
+    sel.addEventListener("change", () => this.go(this.model?.select(sel.value, true)))
+    return sel
   }
 
   /** pill is the collapsed dock (the fab). The activity signal (plan
@@ -1471,22 +1706,39 @@ export class WeftDevtools extends HTMLElement {
     // poll, and its status may be a poll period old.
     const streamed = (r: RunRow) => !!this.model?.publicId || r.agent === s.devAgent
     const running = s.live ? s.turns.find((r) => r.status === "running" && streamed(r)) : undefined
+    const cls = `weft-fab weft-fab-${pillPlace(this.lay)}`
     if (!running) {
-      const fab = el("button", `weft-fab weft-fab-${this.cfg.position}`, "devtools", {
+      const fab = el("button", cls, "devtools", {
         title: "weft devtools — Alt+W",
       })
-      fab.addEventListener("click", () => this.toggle())
-      return fab
+      return this.pillEnd(fab, s)
     }
     const folded = s.turn?.id === running.id ? s.turn.folded.steps.length : 0
     const step = Math.max(folded, running.steps)
     const words = `weft devtools · running${step ? `, step ${step}` : ""}`
     const fab = el(
       "button",
-      `weft-fab weft-fab-${this.cfg.position} weft-fab-running${prefersReducedMotion() ? "" : " weft-fab-pulse"}`,
+      `${cls} weft-fab-running${prefersReducedMotion() ? "" : " weft-fab-pulse"}`,
       [document.createTextNode("devtools"), el("span", "weft-fab-count", step ? ` ● ${step}` : " ●")],
       { title: `${words} — Alt+W`, "aria-label": words }
     )
+    return this.pillEnd(fab, s, running)
+  }
+
+  /** pillEnd finishes the pill (D1): the current turn's cost — its
+   * tokens in→out once the run has finished, "—" while unknown — the
+   * z-index, the click. */
+  private pillEnd(fab: HTMLElement, s: PanelState, running?: RunRow): HTMLElement {
+    const r = running ?? [...s.turns, ...[...s.experiments.values()].flat()].find((x) => x.id === s.selected)
+    if (r) {
+      const known = usageKnown(r.status)
+      fab.appendChild(
+        el("span", "weft-fab-cost", ` · ${known ? `${tokens(r.usage.input_tokens)}→${tokens(r.usage.output_tokens)}` : "—"}`, {
+          title: known ? "the current turn's tokens, input→output" : "the current turn's usage: known when it finishes",
+        })
+      )
+    }
+    if (this.cfg.zIndex) fab.style.zIndex = this.cfg.zIndex
     fab.addEventListener("click", () => this.toggle())
     return fab
   }
@@ -1510,13 +1762,8 @@ export class WeftDevtools extends HTMLElement {
   private shortcuts(): HTMLElement {
     const box = el("div", "weft-keys")
     const dl = el("dl")
-    for (const [k, v] of [
-      ["Alt+W", "toggle the dock (Ctrl+Shift+W too, where the browser delivers it)"],
-      ["r", "raw JSON of the open turn"],
-      ["Esc", "close"],
-      ["?", "this list"],
-    ] as const) {
-      dl.appendChild(el("dt", undefined, k))
+    for (const [k, v] of SHORTCUTS) {
+      dl.appendChild(el("dt", undefined, k, k === "/" ? { title: "reserved: search arrives with D4" } : undefined))
       dl.appendChild(el("dd", undefined, v))
     }
     box.appendChild(dl)
@@ -1578,6 +1825,10 @@ export class WeftDevtools extends HTMLElement {
     })
     raw.addEventListener("click", () => this.toggleRaw())
     h.appendChild(raw)
+    const where = this.lay.mode === "float" ? "float" : `dock ${this.lay.side}`
+    const lay = el("button", "weft-btn weft-layout", "⇆", { title: `layout: ${where} — next (Alt+Shift+W)`, "aria-label": `layout: ${where}` })
+    lay.addEventListener("click", () => this.cycle())
+    h.appendChild(lay)
     const close = el("button", "weft-btn", "–", { title: "collapse (Alt+W)" })
     close.addEventListener("click", () => this.toggle())
     h.appendChild(close)

@@ -133,7 +133,8 @@ lists). A panel token's stream that ends with `event: expired` is not
 asked again: the live dot goes out, history stays, nothing reaches the
 console — a new token is a new `data-token`, and the panel restarts
 its connection on it.
-`Alt+W` toggles (Q4), `?` lists keys, `r` flips raw. Setups B/C add
+`Alt+W` toggles (Q4); the other keys, the dock's layout and what it
+remembers are under "Layout" below. Setups B/C add
 `data-endpoint` and `data-token` (a dev token, or a panel token your
 backend mints per page via `POST /api/panel-tokens`). A single-page app
 that switches conversations sets `window.__WEFT__ = { scope }` (or
@@ -312,9 +313,66 @@ when that run is the turn the panel follows, else its row's (unknown
 while it runs: `●` alone, `weft devtools · running`). When the run
 ends the next draw is the plain pill.
 
+Layout (plan D1). The dock floats — dragged by its header, resized
+from its corner, between 360×280 and the viewport minus 16 px, clamped
+again on every window resize (a passive listener, removed on
+disconnect) — or docks to the `left`, `right`, `bottom` or `top` edge,
+resized along that edge (pointer events with pointer capture, no
+library; touch works through them). Collapsed it is the pill: the live
+dot and step count above, and the current turn's cost — its tokens
+in→out once the run has finished, `—` while it runs (Studio prices no
+usage, so tokens are the cost). Hidden draws nothing: the element, its
+API and its events stay, and `Alt+W` or `open()` bring the dock back.
+Under 640 px of panel width the turn column is a dropdown and the
+header's actions wrap; under a 480 px viewport the panel is a
+full-width bottom sheet, 70 vh at most. The header's `⇆` button and
+`Alt+Shift+W` go to the next layout: float, dock right, bottom, left,
+top.
+
+| Attribute | What it sets | Default |
+|---|---|---|
+| `data-position` | the initial place: `bottom-right` or `bottom-left` (the float's corner), `right-dock`, `left-dock`, `top-dock`, `bottom-dock`; set later, it moves the dock | `bottom-right` |
+| `data-open` | start expanded | collapsed (the pill) |
+| `data-mode` | the initial mode: `float`, `dock`, `pill` or `hidden` | from the two above |
+| `data-push="true"` | while docked and open, pads `<html>` on the docked side by the dock's size: `padding-<side>: var(--weft-devtools-inset)`, the variable set to the size — so a docked panel never covers your composer. The panel's one write to your document, opt-in; the previous inline values are put back exactly on close, on a mode change and on disconnect | off |
+| `data-z-index` | the dock's and the pill's z-index (an integer) | `--weft-z` on the element, else 2147483000 |
+
+The panel remembers, per origin, in `localStorage["weft.devtools"]`
+— one JSON object, `{v: 1, mode, side, open, hidden, x, y, w, h, d,
+run, theme, raw, debug}`: the mode (`float`/`dock`), the docked side,
+open, hidden, the float's box (`x`, `y`, `w`, `h`, px), the dock's size
+(`d`), the last selected turn (`run`, by run id), `theme` (reserved
+for D2), the raw view, and `debug` (the old `localStorage.weft_debug=1`
+switch, migrated into the key and dropped). The placement fields are
+written only once you place the panel (toggle, drag, resize, re-dock):
+until then the `data-*` attributes above decide on every load; after,
+the stored placement wins over them. Another version is ignored; every
+read and write is guarded, so a private window just forgets.
+`localStorage.removeItem("weft.devtools")` resets everything (and turns
+`debug` off).
+
+The keyboard (`src/panel/element.ts`'s `SHORTCUTS`, the `?` list).
+`Alt+W` is the one key the panel hears on `window`; every other key is
+heard on its shadow root, so it fires only while focus is inside the
+panel — a key typed into your page never reaches it, and keys typed
+into the panel's own fields are typing.
+
+| Key | Does |
+|---|---|
+| `Alt+W` | toggle the dock, anywhere on the page (`Ctrl+Shift+W` too, where the browser delivers it) |
+| `Alt+Shift+W` | next layout: float, dock right, bottom, left, top |
+| `Esc` | close (the `?` list first) |
+| `j` / `k` | next / previous turn |
+| `J` / `K` | next / previous step (⤢ carries it) |
+| `g s` | open the turn and step in Studio (`lib/links.ts`, the link ⤢ carries), in a new tab |
+| `r` | raw JSON of the open turn |
+| `/` | search — reserved for D4, does nothing yet |
+| `?` | the key list |
+
 Where the configuration comes from (plan C2). Each field — `endpoint`,
 `scope` (or the deprecated `public-id`; `scope` wins at the same rung),
-`token`, `detect`, `position`, `open`, `auto`, `global` — resolves on its
+`token`, `detect`, `position`, `open`, `auto`, `global`, `mode`, `push`,
+`z-index` — resolves on its
 own; the first source that sets it wins, so a meta tag can carry the
 token while the script tag carries the endpoint. The panel never reads
 its own file name: a bundle served as `/assets/devtools.abc123.js`
@@ -324,8 +382,8 @@ behind a proxy configures itself the same way.
 |---|---|---|
 | 1 | `mount(opts)` — a programmatic mount (`import { mount } from "@weftgo/devtools"`, the npm entry; not in the script-tag bundle) | `mount({endpoint, scope, publicId, token, detect, position, open, auto, target})` |
 | 2 | the `<weft-devtools>` element's attributes | `<weft-devtools data-endpoint="…" data-token="…">` |
-| 3 | meta tags | `<meta name="weft:endpoint" content="…">` (also `weft:scope`, `weft:public-id`, `weft:token`, `weft:detect`, `weft:position`, `weft:open`, `weft:auto`, `weft:global`) |
-| 4 | the panel's `<script>` tag: the running classic script, else the first with a `data-weft` attribute (any `src`, any value), else the first carrying one of the `data-*` attributes above | `<script type="module" src="…" data-weft data-endpoint="…">` |
+| 3 | meta tags | `<meta name="weft:endpoint" content="…">` (also `weft:scope`, `weft:public-id`, `weft:token`, `weft:detect`, `weft:position`, `weft:open`, `weft:auto`, `weft:global`, `weft:mode`, `weft:push`, `weft:z-index`) |
+| 4 | the panel's `<script>` tag: the running classic script, else the first with a `data-weft` attribute (any `src`, any value), else the first carrying one of the `data-*` attributes above (`data-mode`, `data-push` and `data-z-index` excepted: other scripts use those words) | `<script type="module" src="…" data-weft data-endpoint="…">` |
 | 5 | `panel-config.json` beside the script (`/studio/panel.js` → `/studio/panel-config.json`), asked only when rungs 1–4 named no endpoint; its `endpoint` is taken on the script's own origin only, and it never carries a token | name the endpoint at any rung above |
 | 6 | the script's own origin + directory (setup A) | name the endpoint at any rung above |
 
@@ -346,15 +404,31 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 147,407 B raw / 41,465 B gzip
-(40.5 KiB, under the 80 KiB cap). The scope-detection ladder (C3: rungs
-2 to 5 and the activity pill) cost +5.9 KiB gzip, 32,801 → 38,675 B,
-against D1's +3 KiB estimate (its review fixes about 0.15 KiB more):
-nothing deferrable supplies the first scope and the deferrable
-remainder is under 1 KiB, so the overrun is accepted rather than split.
-The host API below cost about +2.5 KiB against +1 KiB;
+committed `studio/dist/panel/panel.js`, 159,154 B raw / 45,016 B gzip
+(44.0 KiB, under the 80 KiB cap). The scope-detection ladder (C3: rungs
+2 to 5 and the activity pill) cost +6.0 KiB gzip against its +3 KiB
+estimate: nothing deferrable supplies the first scope and the
+deferrable remainder is under 1 KiB, so the overrun is accepted rather
+than split. The host API below cost about +2.5 KiB against +1 KiB; the
+layout (D1) +3.5 KiB against +4 KiB.
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
+
+The size ledger. Every panel build (`bun run build`, `make
+studio-build`, `make studio-check`) prints the per-item size table:
+each plan item's estimate beside its measured gzip delta, `over` when
+the delta is more than half again the estimate (`over (accepted)` when
+the plan recorded why it was not split), the unbudgeted items, the
+baseline, and the total against the 80 KiB cap with the headroom left.
+The deltas come from `studio/web/panel-budget.json`, a committed,
+append-only ledger: one row per landed item — `{"label": "D1", "item":
+"D1", "gzip": <panel.js's gzip bytes after it>}`, `item` the budget
+line it counts against (`""` for none) — and earlier rows are never
+edited. An item adds its row in the same commit as its rebuilt
+`panel.js` (the build says when the built file differs from the last
+row, and `src/panel/budget.test.ts` fails until the last row is the
+committed file). The table is evidence, not a gate: only the cap fails
+the build (`vite.panel.config.ts`).
 
 The same file is on npm as `@weftgo/devtools`, for apps that bundle
 everything and ship no `<script>` tag (Vite, Next, SvelteKit). This

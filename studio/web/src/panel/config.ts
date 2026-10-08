@@ -4,7 +4,7 @@
 //
 //   1. mount(opts) — the options a programmatic mount passed;
 //   2. the <weft-devtools> element's own data-* attributes;
-//   3. <meta name="weft:endpoint|scope|public-id|token|detect|position|open|auto|global">;
+//   3. <meta name="weft:endpoint|scope|public-id|token|detect|position|open|auto|global|mode|push|z-index">;
 //   4. the panel's <script> tag's data-* attributes: the running
 //      classic script (document.currentScript), else the first script
 //      carrying data-weft (any src — a renamed or proxied bundle), else
@@ -30,10 +30,15 @@
 // scope only when no rung above it names one.
 import { parseScope, serializeScope } from "../lib/scope"
 import { isLoopback } from "./detect"
+import { migrateDebug } from "./layout"
 import type { Scope } from "../lib/scope"
 
-/** data-position — where the dock sits. */
+/** data-position — where the dock sits (mount's option). */
 export type PanelPosition = "bottom-right" | "bottom-left" | "right-dock"
+
+/** data-position's values (D1): the float's corner, or a dock's side —
+ * the initial value; the stored layout wins once there is one. */
+export type PanelPlacement = PanelPosition | "left-dock" | "top-dock" | "bottom-dock"
 
 export interface PanelConfig {
   /** Studio base URL, trailing slash included (default: the script's
@@ -67,9 +72,15 @@ export interface PanelConfig {
   detect: DetectSetting
   /** API token (setups B and C); "" in setup A. */
   token: string
-  position: PanelPosition
+  position: PanelPlacement
   /** Start expanded. */
   open: boolean
+  /** data-mode (D1): the initial mode — float, dock, pill or hidden ("" unset). */
+  mode: string
+  /** data-push="true" (D1): a docked, open panel pads <html> on its side. */
+  push: boolean
+  /** data-z-index (D1): the dock's z-index ("" for --weft-z, else 2147483000). */
+  zIndex: string
   /** Mount without markup; fail silently when Studio doesn't answer. */
   auto: boolean
   /** data-global (weft:global): the script-tag bundle publishes the
@@ -109,14 +120,16 @@ export function detectSetting(v: string | null | undefined): DetectSetting {
   return h && m ? "headers,markers" : h ? "headers" : m ? "markers" : ""
 }
 
-const POSITIONS: PanelPosition[] = ["bottom-right", "bottom-left", "right-dock"]
+const POSITIONS: PanelPlacement[] = ["bottom-right", "bottom-left", "right-dock", "left-dock", "top-dock", "bottom-dock"]
 
 /** The fields, by their attribute stem: data-<stem> on the element and
  * the script tag, weft:<stem> on a meta tag. */
-export const FIELDS = ["endpoint", "scope", "public-id", "token", "detect", "position", "open", "auto", "global"] as const
+export const FIELDS = ["endpoint", "scope", "public-id", "token", "detect", "position", "open", "auto", "global", "mode", "push", "z-index"] as const
 type Field = (typeof FIELDS)[number]
 
-export const DATA_ATTRS = FIELDS.map((f) => `data-${f}`)
+/** The attributes that find the panel's own <script> tag: the fields
+ * before D1 (data-mode and data-push are words other scripts use). */
+export const DATA_ATTRS = FIELDS.slice(0, 9).map((f) => `data-${f}`)
 
 /** The script running now, captured while the bundle evaluates: a
  * classic include knows itself whatever its file is called. null for a
@@ -192,6 +205,9 @@ function optionsRung(opts: MountOptions | null | undefined): Rung {
       // Not a mount option: the npm entry adds no global (its exports
       // are the API).
       global: undefined,
+      mode: undefined,
+      push: undefined,
+      "z-index": undefined,
     }[f]
     return v === undefined ? null : String(v)
   }
@@ -267,6 +283,8 @@ export function readConfig(el?: HTMLElement & { options?: MountOptions | null })
   }
   scope ??= weftScope()
   const detect = pick("detect")
+  const mode = pick("mode") ?? ""
+  const z = (pick("z-index") ?? "").trim()
   return {
     endpoint,
     endpointExplicit: raw !== null,
@@ -277,10 +295,13 @@ export function readConfig(el?: HTMLElement & { options?: MountOptions | null })
     urlScope: urlScope(),
     token: pick("token") ?? "",
     detect: detectSetting(detect),
-    position: POSITIONS.includes(position as PanelPosition)
-      ? (position as PanelPosition)
+    position: POSITIONS.includes(position as PanelPlacement)
+      ? (position as PanelPlacement)
       : "bottom-right",
     open: open === "true" || open === "",
+    mode: ["float", "dock", "pill", "hidden"].includes(mode) ? mode : "",
+    push: pick("push") === "true",
+    zIndex: /^-?\d+$/.test(z) ? z : "",
     auto: pick("auto") !== "false",
     global: !["off", "false"].includes((pick("global") ?? "").trim().toLowerCase()),
   }
@@ -448,11 +469,13 @@ export function tokenScope(token: string): TokenScope {
 
 /** ?weft=debug or localStorage.weft_debug=1 forces the panel on
  * where the endpoint exists (staging) — §5.3's override switch. The
- * namespaced parameter never collides with an app's own ?debug=. */
+ * namespaced parameter never collides with an app's own ?debug=. The
+ * old key is migrated into localStorage["weft.devtools"] (debug: true)
+ * and dropped (D1); removing that key turns the switch off. */
 export function debugForced(): boolean {
   try {
     if (new URLSearchParams(location.search).get("weft") === "debug") return true
-    if (localStorage.getItem("weft_debug") === "1") return true
+    if (migrateDebug()) return true
   } catch {
     // about:blank and friends: not forced
   }

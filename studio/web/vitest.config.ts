@@ -39,6 +39,8 @@ export default defineConfig({
     environment: "jsdom",
     // enables @testing-library/react's auto-cleanup between tests
     globals: true,
+    // The panel's layout key is cleared before each test (D1).
+    setupFiles: ["src/test-setup.ts"],
   },
   resolve: {
     alias: { "@": path.resolve(root, "src") },

@@ -106,8 +106,12 @@ describe("the keyboard (§5.2, Q4 decided: Alt+W primary)", () => {
     return el as WeftDevtools
   }
 
+  // Alt+W is the window's; every other key is heard inside the panel
+  // (D1), so it is pressed on the dock.
   const press = (el: WeftDevtools, ev: Partial<KeyboardEventInit>) =>
-    el.shadowRoot && window.dispatchEvent(new KeyboardEvent("keydown", ev))
+    (ev.altKey || ev.ctrlKey ? window : (el.shadowRoot?.querySelector(".weft-dock") ?? window)).dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, composed: true, ...ev })
+    )
 
   it("starts collapsed and Alt+W opens the dock (Q4's pick)", async () => {
     const el = await mountClosed()

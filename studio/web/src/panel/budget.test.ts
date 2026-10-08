@@ -1,0 +1,55 @@
+// The per-item size table the panel build prints (plan phase 3's gate
+// evidence; scripts/panel-budget.ts over the committed ledger).
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
+import { gzipSync } from "node:zlib"
+import { describe, expect, it } from "vitest"
+import { budgetTable } from "../../scripts/panel-budget"
+import type { Ledger } from "../../scripts/panel-budget"
+
+const ledger = JSON.parse(readFileSync(resolve(process.cwd(), "panel-budget.json"), "utf8")) as Ledger
+
+describe("the size ledger (panel-budget.json)", () => {
+  it("is append-only: the recorded rows stay as recorded", () => {
+    expect(ledger.rows.slice(0, 10).map((r) => [r.label, r.item, r.gzip])).toEqual([
+      ["C1", "", 32359],
+      ["G1", "", 32700],
+      ["C5.2", "", 32810],
+      ["C3.2", "C3", 35379],
+      ["C3.3", "C3", 36889],
+      ["C3.3 fixes", "C3", 37303],
+      ["C3.4", "C3", 38764],
+      ["C4.2", "C4", 41313],
+      ["C3.4 fixes", "C3", 41465],
+      ["D1", "D1", 45016],
+    ])
+    for (let i = 1; i < ledger.rows.length; i++) expect(ledger.items.some((x) => x.id === ledger.rows[i].item) || ledger.rows[i].item === "").toBe(true)
+  })
+
+  it("its last row is the committed panel.js", () => {
+    const built = gzipSync(readFileSync(resolve(process.cwd(), "../dist/panel/panel.js"))).length
+    expect(ledger.rows.at(-1)?.gzip).toBe(built)
+  })
+
+  it("prints one line per item: estimate, measured delta, over past half again its estimate; the total and headroom", () => {
+    const { lines, over } = budgetTable(ledger, 45016)
+    expect(over).toBe(false)
+    const row = (id: string) => lines.find((l) => l.startsWith(id.padEnd(6))) ?? ""
+    expect(row("D1")).toMatch(/drag\/resize\/dock\/persist\s+\+4\.0 KiB\s+\+3\.5 KiB\s+ok$/)
+    expect(row("C3")).toMatch(/\+3\.0 KiB\s+\+6\.0 KiB\s+over \(accepted\)$/)
+    expect(row("C4")).toMatch(/\+1\.0 KiB\s+\+2\.5 KiB\s+over \(accepted\)$/)
+    expect(row("D4")).toMatch(/\+5\.0 KiB\s+—\s+not landed$/)
+    expect(lines).toContain("baseline C1: 32,359 B")
+    expect(lines.find((l) => l.includes("unbudgeted"))).toMatch(/G1, C5\.2.*\+0\.4 KiB/)
+    expect(lines.at(-1)).toBe("total 45,016 B (44.0 KiB) of 81,920 B · headroom 36,904 B (36.0 KiB)")
+  })
+
+  it("says when the build differs from the last row, and only the cap fails", () => {
+    const drift = budgetTable(ledger, 45100)
+    expect(drift.over).toBe(false)
+    expect(drift.lines.some((l) => l.includes("differs from the ledger's last row (D1, 45,016 B) by +0.1 KiB"))).toBe(true)
+    const big = budgetTable(ledger, 81921)
+    expect(big.over).toBe(true)
+    expect(big.lines.at(-1)).toContain("OVER THE CAP")
+  })
+})

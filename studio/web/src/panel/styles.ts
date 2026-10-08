@@ -23,30 +23,47 @@ export const PANEL_CSS = `
 .weft-root * { margin: 0; padding: 0; font: inherit; color: inherit; }
 
 .weft-dock {
-  position: fixed; z-index: 2147483000;
+  position: fixed; z-index: var(--weft-z, 2147483000);
   display: flex; flex-direction: column;
   background: var(--w-bg); color: var(--w-fg);
   border: 1px solid var(--w-line); border-radius: 8px;
   box-shadow: 0 12px 40px rgba(0,0,0,.45);
-  overflow: hidden;
+  overflow: hidden; outline: none;
 }
-.weft-bottom-right { right: 16px; bottom: 16px; }
-.weft-bottom-left { left: 16px; bottom: 16px; }
-.weft-bottom-right.weft-open, .weft-bottom-left.weft-open {
-  width: 520px; max-width: calc(100vw - 32px); height: 560px;
-}
-.weft-right-dock { right: 0; top: 0; bottom: 0; width: 460px; max-width: 100vw;
-  height: 100vh; border-radius: 0; border-right: none; }
+/* D1: the float's box and the dock's size are inline (layout.ts). */
+.weft-docked { border-radius: 0; max-width: 100vw; max-height: 100vh; }
+.weft-side-right { right: 0; top: 0; bottom: 0; border-right: none; }
+.weft-side-left { left: 0; top: 0; bottom: 0; border-left: none; }
+.weft-side-bottom { left: 0; right: 0; bottom: 0; border-bottom: none; }
+.weft-side-top { left: 0; right: 0; top: 0; border-top: none; }
+.weft-sheet { left: 0; right: 0; bottom: 0; height: 70vh; max-height: 70vh; border-radius: 8px 8px 0 0; }
+.weft-drag { cursor: move; touch-action: none; }
+.weft-grip { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize;
+  touch-action: none; z-index: 4; background: linear-gradient(135deg, transparent 50%, var(--w-line) 50%); }
+.weft-edge { position: absolute; z-index: 4; touch-action: none; }
+.weft-edge-right, .weft-edge-left { top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.weft-edge-right { left: 0; } .weft-edge-left { right: 0; }
+.weft-edge-top, .weft-edge-bottom { left: 0; right: 0; height: 6px; cursor: ns-resize; }
+.weft-edge-bottom { top: 0; } .weft-edge-top { bottom: 0; }
+.weft-turn-pick { display: none; }
+.weft-narrow .weft-cols { flex-direction: column; }
+.weft-narrow .weft-turn-pick { display: block; margin: 6px 10px 0; background: var(--w-bg3); color: var(--w-fg);
+  border: 1px solid var(--w-line); border-radius: 5px; font: inherit; }
+.weft-narrow .weft-turns { width: auto; border-right: none; max-height: 30%; }
+.weft-narrow .weft-turns > .weft-turn, .weft-narrow .weft-turns > .weft-expts { display: none; }
+.weft-narrow .weft-head { flex-wrap: wrap; white-space: normal; }
 
 .weft-fab {
-  position: fixed; z-index: 2147483000;
-  right: 16px; bottom: 16px; width: 40px; height: 40px;
-  border-radius: 50%; border: 1px solid var(--w-line);
+  position: fixed; z-index: var(--weft-z, 2147483000);
+  right: 16px; bottom: 16px; min-width: 40px; height: 40px; padding: 0 10px;
+  border-radius: 20px; border: 1px solid var(--w-line);
   background: var(--w-bg); color: var(--w-fg); cursor: pointer;
   font: 13px ${MONO_STACK};
   display: flex; align-items: center; justify-content: center;
 }
 .weft-fab-bottom-left { right: auto; left: 16px; }
+.weft-fab-top-right { bottom: auto; top: 16px; }
+.weft-fab-cost { color: var(--w-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
 .weft-fab:hover { background: var(--w-bg2); }
 .weft-fab::before { content: "\\25C8"; color: var(--w-accent); margin-right: 4px; }
 
@@ -67,7 +84,7 @@ export const PANEL_CSS = `
 .weft-dot.weft-on { background: var(--w-accent); }
 .weft-dot.weft-run { background: var(--w-warn); animation: weft-pulse 1.2s infinite; }
 @keyframes weft-pulse { 50% { opacity: .35; } }
-.weft-fab-running { border-color: var(--w-warn); width: auto; min-width: 40px; border-radius: 20px; padding: 0 10px; }
+.weft-fab-running { border-color: var(--w-warn); }
 .weft-fab-count { color: var(--w-warn); font-variant-numeric: tabular-nums; }
 .weft-fab-pulse { animation: weft-pulse 1.2s infinite; }
 .weft-howto { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--w-line); color: var(--w-dim); }

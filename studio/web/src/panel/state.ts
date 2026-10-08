@@ -472,6 +472,10 @@ export class PanelModel {
   private pinChecks = 0
   private pinTimer: ReturnType<typeof setTimeout> | null = null
 
+  /** The turn to select first when the list has it (the element's
+   * remembered run, D1); used once. */
+  prefer = ""
+
   constructor(ep: PanelEndpoint, scope: Scope | string, notify: PanelNotify) {
     this.ep = ep
     this.notify = notify
@@ -862,7 +866,10 @@ export class PanelModel {
       await this.select(pin)
     } else if (!this.state.selected) {
       const running = this.state.turns.find((r) => r.status === "running")
-      const target = running ?? this.state.turns.at(0)
+      // The turn remembered from the last visit (D1), when it is listed.
+      const kept = this.state.turns.find((r) => r.id === this.prefer)
+      if (this.state.turns.length) this.prefer = ""
+      const target = kept ?? running ?? this.state.turns.at(0)
       if (target) await this.select(target.id)
       else this.emit()
     } else {

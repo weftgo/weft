@@ -10,6 +10,26 @@ module, ADR 0005).
 
 ### Added
 
+- **The devtools panel's layout** (plan D1): the dock floats (dragged
+  by its header, resized from its corner, 360×280 up to the viewport
+  minus 16 px, clamped on every window resize) or docks to any side —
+  `left`, `right`, `bottom`, `top` — resized along its edge; collapsed
+  it is the pill (now with the current turn's tokens in→out, `—` while
+  it runs), and `data-mode="hidden"` draws nothing while the API and
+  events keep working. `data-position` gains `left-dock`, `top-dock` and
+  `bottom-dock`; `data-mode`, `data-push="true"` (pads `<html>` on the
+  docked side through `--weft-devtools-inset`, restored exactly; off by
+  default) and `data-z-index` / `--weft-z` are new. Under 640 px of
+  panel the turn column is a dropdown; under a 480 px viewport the panel
+  is a bottom sheet. The placement, the selected turn and the raw view
+  are remembered per origin in `localStorage["weft.devtools"]` (`{v: 1,
+  …}`; `localStorage.weft_debug=1` is migrated into it). Keys: `Alt+W`
+  stays the one global; `Alt+Shift+W` (next layout), `Esc`, `j`/`k`
+  (turns), `J`/`K` (steps), `g s` (open in Studio), `r`, `?` and the
+  reserved `/` fire only with focus inside the panel — the panel no
+  longer hears bare keys pressed on the page's body. Every panel build
+  prints the per-item size table from the append-only
+  `studio/web/panel-budget.json` ledger against the 80 KiB cap.
 - **The devtools panel's host API** (plan C4.2): the `<weft-devtools>`
   element's `open()`, `close()`, `toggle()`, `isOpen`, `scope(s)` (a
   `Scope` or its string form; `scope(null)` hands the scope back to the

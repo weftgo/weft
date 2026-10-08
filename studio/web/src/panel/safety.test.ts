@@ -86,11 +86,11 @@ describe("the element's lifecycle", () => {
     expect(text(el, ".weft-turns")).not.toContain("s_01-t1")
     expect(FakeEventSource.live("public_id=pub_orders")).toHaveLength(0)
     expect(FakeEventSource.live("public_id=pub_other")).toHaveLength(1)
-    // data-position redraws, and asks the server nothing.
+    // data-position re-places the dock (D1), and asks the server nothing.
     const before = studio.calls.length
     el.setAttribute("data-position", "bottom-left")
     await settle()
-    expect($(el, ".weft-dock.weft-bottom-left")).toBeTruthy()
+    expect(($(el, ".weft-dock.weft-float") as HTMLElement).style.left).toBe("16px")
     expect(studio.calls.length).toBe(before)
   })
 
@@ -309,10 +309,17 @@ describe("the keyboard never takes the page's keys", () => {
     await settle()
     expect(r.defaultPrevented).toBe(false)
     expect($(el, ".weft-raw")).toBeNull()
-    // …and with nothing focused, r is the raw toggle.
+    // …nor with nothing focused (D1: no key capture on the host)…
     const idle = key(document.body, { key: "r" })
     await settle()
-    expect(idle.defaultPrevented).toBe(true)
+    expect(idle.defaultPrevented).toBe(false)
+    expect($(el, ".weft-raw")).toBeNull()
+    // …but with focus in the panel, r is the raw toggle.
+    const dock = $(el, ".weft-dock") as HTMLElement
+    dock.focus()
+    const inside = key(dock, { key: "r" })
+    await settle()
+    expect(inside.defaultPrevented).toBe(true)
     expect($(el, ".weft-raw")).toBeTruthy()
   })
 
@@ -325,9 +332,13 @@ describe("the keyboard never takes the page's keys", () => {
     key(dialog, { key: "Escape" })
     await settle()
     expect($(el, ".weft-dock")).toBeTruthy()
-    // With nothing focused, Esc closes the dock.
+    // With nothing focused it is not the panel's either (D1)…
     dialog.blur()
     key(document.body, { key: "Escape" })
+    await settle()
+    expect($(el, ".weft-dock")).toBeTruthy()
+    // …with focus in the panel, Esc closes the dock.
+    key($(el, ".weft-dock")!, { key: "Escape" })
     await settle()
     expect($(el, ".weft-dock")).toBeNull()
   })
@@ -450,7 +461,7 @@ describe("the redraw keeps what is the user's", () => {
     fakeStudio(baseRoutes())
     const el = await mount()
     click(button(el, "raw"))
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }))
+    $(el, ".weft-dock")!.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true, composed: true }))
     await settle()
     expect($(el, ".weft-dock > .weft-raw")).toBeTruthy()
     expect($(el, ".weft-dock > .weft-keys")).toBeTruthy()

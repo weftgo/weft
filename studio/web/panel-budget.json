@@ -1,0 +1,26 @@
+{
+  "about": "The devtools panel's size ledger (plan phase 3; studio/README.md, 'The size ledger'). Append-only: an item that lands appends one row — its label, the budget item it counts against (\"\" for none) and panel.js's gzip bytes after it — and never edits an earlier one. scripts/panel-budget.ts prints the per-item table from it on every build; only the cap fails the build.",
+  "cap": 81920,
+  "items": [
+    { "id": "D1", "what": "drag/resize/dock/persist", "estimate": 4096 },
+    { "id": "D2", "what": "theme tokens", "estimate": 1024 },
+    { "id": "D3", "what": "keyed renderer + ARIA", "estimate": 2048 },
+    { "id": "D4", "what": "JSON tree + filter", "estimate": 5120 },
+    { "id": "E1", "what": "Request tab", "estimate": 4096 },
+    { "id": "E3", "what": "2-way step diff", "estimate": 4096 },
+    { "id": "C3", "what": "detection ladder", "estimate": 3072, "accepted": "nothing deferrable supplies the first scope; the deferrable remainder is under 1 KiB" },
+    { "id": "C4", "what": "typed API surface (the host API)", "estimate": 1024, "accepted": "the host API is one surface for both installs; nothing to load later" }
+  ],
+  "rows": [
+    { "label": "C1", "item": "", "gzip": 32359, "note": "the baseline" },
+    { "label": "G1", "item": "", "gzip": 32700, "note": "approximate" },
+    { "label": "C5.2", "item": "", "gzip": 32810 },
+    { "label": "C3.2", "item": "C3", "gzip": 35379 },
+    { "label": "C3.3", "item": "C3", "gzip": 36889 },
+    { "label": "C3.3 fixes", "item": "C3", "gzip": 37303 },
+    { "label": "C3.4", "item": "C3", "gzip": 38764 },
+    { "label": "C4.2", "item": "C4", "gzip": 41313 },
+    { "label": "C3.4 fixes", "item": "C3", "gzip": 41465 },
+    { "label": "D1", "item": "D1", "gzip": 45016 }
+  ]
+}

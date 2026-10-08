@@ -12,10 +12,13 @@
 // version/version.go (scripts/weft-version.ts); panel.js refuses to
 // render against a newer Studio (§5.1 Versioning).
 // studio/panel_test.go pins the stamp to version.Version.
+import { readFileSync } from "node:fs"
 import { gzipSync } from "node:zlib"
 import { defineConfig } from "vite"
 import type { Plugin } from "vite"
 import { weftVersion } from "./scripts/weft-version.ts"
+import { budgetTable } from "./scripts/panel-budget.ts"
+import type { Ledger } from "./scripts/panel-budget.ts"
 
 /** §5.1's budget: panel.js is ≤ 80 KiB gzip. */
 const PANEL_GZIP_BUDGET = 80 * 1024
@@ -48,6 +51,10 @@ function panelBudget(): Plugin {
       }
       const code = out.type === "chunk" ? out.code : String(out.source)
       const gz = gzipSync(code).length
+      // The per-item table (plan phase 3): the ledger's items against
+      // this build — printed, never a failure of its own.
+      const ledger = JSON.parse(readFileSync(new URL("./panel-budget.json", import.meta.url), "utf8")) as Ledger
+      for (const line of budgetTable({ ...ledger, cap: PANEL_GZIP_BUDGET }, gz).lines) console.log(line)
       if (gz > PANEL_GZIP_BUDGET)
         this.error(`panel.js is ${gz} bytes gzipped, over the ${PANEL_GZIP_BUDGET} budget (WEFT-DEVTOOLS §5.1)`)
     },

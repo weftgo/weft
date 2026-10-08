@@ -523,7 +523,7 @@ describe("the collapsed pill's activity signal", () => {
     FakeEventSource.last("public_id=pub_orders")!.emit("run", { run: runRow({ id: "s_01-t2", turn: 2, steps: 2, started: "2026-10-01T09:05:00Z" }) }, "9")
     await settle()
     expect(fab(el).className).toBe("weft-fab weft-fab-bottom-right")
-    expect(fab(el).textContent).toBe("devtools")
+    expect(fab(el).textContent).toBe("devtools · 10→4") // the plain pill, with the turn's cost (D1)
     expect(fab(el).getAttribute("aria-label")).toBeNull()
   })
 

@@ -587,3 +587,27 @@ func TestLoopbackAddr(t *testing.T) {
 		}
 	}
 }
+
+// TestDevPendingSignalStartsNoApp: a signal already buffered when the
+// loop begins (a Ctrl-C during Studio's port probes) ends weft dev
+// without starting the app — no start, no "could not start" line —
+// and is the signal the loop reports.
+func TestDevPendingSignalStartsNoApp(t *testing.T) {
+	var buf syncBuffer
+	d := &devLoop{
+		argv: []string{"/nonexistent/weft-dev-pending-signal"},
+		out:  &lockedWriter{w: &buf},
+		url:  "http://127.0.0.1:1",
+	}
+	sigs := make(chan os.Signal, 1)
+	sigs <- os.Interrupt
+	if err := d.run(sigs, nil); err != nil {
+		t.Fatalf("run: %v, want nil", err)
+	}
+	if d.stopSig != os.Interrupt {
+		t.Errorf("stopSig %v, want %v", d.stopSig, os.Interrupt)
+	}
+	if out := buf.String(); out != "" {
+		t.Errorf("the app was started (or tried) after a pending signal:\n%s", out)
+	}
+}

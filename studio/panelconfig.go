@@ -66,7 +66,8 @@ func (s *Server) servePanelConfig(w http.ResponseWriter, r *http.Request) {
 
 // panelConfigAllowed is the route's guard: a loopback (or
 // AllowOrigins) Host, and an Origin, when present, that is the same
-// origin, a loopback one or an AllowOrigins entry.
+// origin, a loopback one (the Host check's rule, AllowOrigins set or
+// not) or an AllowOrigins entry.
 func panelConfigAllowed(origins []string, r *http.Request) bool {
 	if !hostAllowed(origins, r) {
 		return false
@@ -75,7 +76,17 @@ func panelConfigAllowed(origins []string, r *http.Request) bool {
 	if origin == "" {
 		return true
 	}
-	if u, err := url.Parse(origin); err == nil && strings.EqualFold(u.Host, r.Host) {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(u.Host, r.Host) {
+		return true
+	}
+	// A loopback Origin passes by the Host check's own rule
+	// (isLoopbackName: localhost, *.localhost, 127.0.0.0/8, [::1]),
+	// before and whatever the AllowOrigins list says.
+	if (u.Scheme == "http" || u.Scheme == "https") && isLoopbackName(u.Hostname()) {
 		return true
 	}
 	return originAllowed(origins, true, origin)

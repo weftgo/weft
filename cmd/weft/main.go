@@ -150,8 +150,10 @@
 // a later line when one registers. An unspecified listen host
 // (0.0.0.0) is handed to the app as 127.0.0.1. Reuse is the port
 // policy's: its probe carries the fixed token, else the database's
-// stable token, so a Studio on the same database is reused and the app
-// gets its URL and token; one walled by another token is skipped for
+// stable token (only to an address a trusted discovery file names: from
+// another directory with --db on the same file the probe goes out bare
+// and a second Studio starts), so a Studio on the same database is
+// reused and the app gets its URL and token; one walled by another token is skipped for
 // the next port. A Studio weft dev starts writes the discovery file as
 // weft studio does. --watch and --no-watch have no environment mirror:
 // they are the dev loop's, not connection settings.

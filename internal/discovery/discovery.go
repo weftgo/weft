@@ -225,14 +225,22 @@ func (w *Written) Remove() {
 
 // Refresh re-stamps the file's started time with now, while the file is
 // still this Studio's: a Studio running longer than MaxAge stays
-// discoverable (the writer calls it hourly). A file another Studio has
-// since written is left alone. Nil-safe.
+// discoverable (the writer calls it hourly). A missing file — removed
+// by hand, or by another writer's cleanup racing this Studio's rename —
+// is written again, the same content and 0600 atomic rename as Write.
+// A file another Studio has since written is left alone. Nil-safe.
 func (w *Written) Refresh() error {
 	if w == nil || w.Path == "" {
 		return nil
 	}
 	cur, err := load(w.Path)
-	if err != nil || cur.PID != w.Info.PID || cur.URL != w.Info.URL {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		if err := os.MkdirAll(filepath.Dir(w.Path), 0o700); err != nil {
+			return err
+		}
+		GuardDir(filepath.Dir(w.Path))
+	case err != nil || cur.PID != w.Info.PID || cur.URL != w.Info.URL:
 		return nil
 	}
 	info := w.Info

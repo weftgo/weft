@@ -257,7 +257,7 @@ func (p *printer) runtimes(m meta, url string, getenv func(string) string) {
 	}
 	switch su := strings.TrimRight(getenv("WEFT_STUDIO_URL"), "/"); {
 	case su == "":
-		p.sub("WEFT_STUDIO_URL is unset in this shell: the app dials its otel Studio destination; set WEFT_STUDIO_URL=%s (or runtime.Studio(url, token))", url)
+		p.sub("WEFT_STUDIO_URL is unset in this shell: the app dials the Studio a running `weft studio` names in its discovery file, else its otel Studio destination; set WEFT_STUDIO_URL=%s to pin this one (or runtime.Studio(url, token))", url)
 	case su != url:
 		p.sub("WEFT_STUDIO_URL=%s in this shell, not %s: the app dials the former", su, url)
 	}

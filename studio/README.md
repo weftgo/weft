@@ -58,7 +58,10 @@ the user cache directory; `WEFT_STUDIO_URL` always wins,
 `WEFT_DISCOVERY=off` ignores it); ingest is open on loopback;
 `127.0.0.1:7331` is the one default port: started again on the same
 database, the binary finds the running Studio through `/api/meta`
-(`db.path`, `pid`, read with the stable token) and reuses it (`studio
+(`db.path`, `pid`, read with the stable token — sent only to an
+address a trusted discovery file names, so from another directory with
+`--db` on the same file the probe goes out bare and a second Studio
+starts) and reuses it (`studio
 already running at … (pid n), reusing`, exit 0); anything else on the port
 moves it to the next free one in 7331–7340 with one line saying so.
 `--addr` (or `WEFT_STUDIO_ADDR`) pins: a busy pinned address is an
@@ -234,8 +237,10 @@ everything. Keys fire only on a bare press outside a text box.
 
 ## The API (S4.2/S4.3)
 
-JSON under `{base}api/`: `meta` (versions, the DB kind,
-`ingest_open`, `interrupted_after_ms`, capabilities), `runs` (agent,
+JSON under `{base}api/`: `meta` (versions, `db` {kind, path, size —
+path and size to loopback and the server token only}, `pid`,
+`ingest_open`, `interrupted_after_ms`, capabilities, `capabilities_off`
+{capability: why}, `manifest_sources`), `runs` (agent,
 status, session, public id, playground, parent and `tag.<k>=<v>`
 filters, cursor-paged; top-level only by default — `parent=<run id>`
 lists one run's subagent children, `all=1` (or `parent=*`) every run,
@@ -332,7 +337,10 @@ routes join (`GET /api/runtimes`, `POST /api/playground/runs`, `GET
 link's own (`POST /api/runtime/register`, `GET /api/runtime/commands`
 SSE, `POST /api/runtime/acks` — server token only, never a panel
 token); `/panel.js` serves the devtools panel bundle — static and
-unauthenticated.
+unauthenticated; `/panel-config.json` (`{endpoint, version,
+capabilities}`, capability `panel-config`) answers a loopback (or
+`AllowOrigins`) Host and a same-origin, `AllowOrigins` or loopback
+Origin only, else 404.
 
 Capabilities are computed from the registered route groups
 (`routes.go`) — never hard-coded: `live`, `ingest`, `auth` (with a

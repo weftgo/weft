@@ -475,6 +475,32 @@ func TestRefreshKeepsFresh(t *testing.T) {
 	}
 }
 
+// TestRefreshRewritesMissing: a Studio whose file has gone (removed by
+// hand, or by a racing writer's cleanup) writes it again on its next
+// Refresh — this pid and url, 0600 — and stays discoverable.
+func TestRefreshRewritesMissing(t *testing.T) {
+	dir := t.TempDir()
+	useDirs(t, dir)
+	w, err := Write(fresh("http://127.0.0.1:7331"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, FileName)
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	info, path, ok := Lookup(env(), nil)
+	if !ok || path != p || info.PID != os.Getpid() || info.URL != "http://127.0.0.1:7331" || info.Token != "tok" {
+		t.Fatalf("after Refresh of a missing file: %+v %q %v, want this Studio's file back", info, path, ok)
+	}
+	if fi, err := os.Stat(p); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
+		t.Errorf("rewritten file: %v %v, want 0600", fi.Mode(), err)
+	}
+}
+
 // TestCleanupErrorClasses (round 2, finding 4): the writer's cleanup
 // removes a file it decoded as stale or rejected for good, and leaves
 // it on a transient failure (another Studio's rename mid-read, an open

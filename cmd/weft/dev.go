@@ -319,6 +319,14 @@ type devLoop struct {
 // stops first, with the same signal; nil) or — under --no-watch — the
 // app's own exit (its exit code).
 func (d *devLoop) run(sigs <-chan os.Signal, changes <-chan string) error {
+	// A Ctrl-C buffered while Studio started (the port probes, the
+	// database) ends here: the app is never started only to be killed.
+	select {
+	case sig := <-sigs:
+		d.stopSig = sig
+		return nil
+	default:
+	}
 	cur, line := d.start()
 	if cur == nil && d.noWatch {
 		// Nothing will ever restart it: the shell's "command not found".

@@ -88,6 +88,11 @@ func TestPanelConfig(t *testing.T) {
 			if code, _ := do("", "http://localhost:3000"); code != http.StatusOK {
 				t.Errorf("a loopback Origin: %d", code)
 			}
+			for _, o := range []string{"http://[::1]:3000", "http://127.0.0.2:3000", "https://app.localhost"} {
+				if code, _ := do("", o); code != http.StatusOK {
+					t.Errorf("loopback Origin %s: %d", o, code)
+				}
+			}
 			if code, _ := do("studio.example.com", ""); code != http.StatusNotFound {
 				t.Errorf("non-loopback Host: %d, want 404", code)
 			}
@@ -95,5 +100,36 @@ func TestPanelConfig(t *testing.T) {
 				t.Errorf("foreign Origin: %d, want 404", code)
 			}
 		})
+	}
+}
+
+// TestPanelConfigLoopbackOriginWithAllowOrigins: a loopback Origin
+// passes the route's guard even when AllowOrigins is set — the
+// loopback rule is checked before the list — while an origin neither
+// loopback nor listed is still a 404.
+func TestPanelConfigLoopbackOriginWithAllowOrigins(t *testing.T) {
+	srv := New(Open(filepath.Join(t.TempDir(), "p.db")), AllowOrigins("https://app.example"))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	for origin, want := range map[string]int{
+		"http://localhost:3000":   http.StatusOK,
+		"http://[::1]:3000":       http.StatusOK,
+		"http://127.0.0.2:5173":   http.StatusOK,
+		"http://dev.localhost":    http.StatusOK,
+		"https://app.example":     http.StatusOK,
+		"https://evil.example":    http.StatusNotFound,
+		"http://localhost.evil.x": http.StatusNotFound,
+	} {
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/panel-config.json", nil)
+		req.Header.Set("Origin", origin)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("Origin %s: %d, want %d", origin, resp.StatusCode, want)
+		}
 	}
 }

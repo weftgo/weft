@@ -1,8 +1,10 @@
 package otel
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -245,6 +247,89 @@ func TestRequestRecordsRedactPanicNeverLeaks(t *testing.T) {
 	}
 	reqs := recordsOfKind(recs, "request")
 	if len(reqs) != 1 || attrOf(reqs[0], "weft.content") != "stripped" || strings.Contains(reqs[0].Body().AsString(), testCard) {
-		t.Errorf("request after a panicking Redact: %d records %v", len(reqs), reqs)
+		t.Fatalf("request after a panicking Redact: %d records %v", len(reqs), reqs)
+	}
+	// Only params.stop goes: this destination is content-on and got the
+	// messages records, so the request still points at them.
+	var body struct {
+		MessagesRef struct {
+			Index *int64 `json:"index"`
+		} `json:"messages_ref"`
+		Params map[string]json.RawMessage `json:"params"`
+	}
+	if err := json.Unmarshal([]byte(reqs[0].Body().AsString()), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.MessagesRef.Index == nil {
+		t.Errorf("a panicking Redact dropped messages_ref.index on a content-on destination: %s", reqs[0].Body().AsString())
+	}
+	if _, has := body.Params["stop"]; has {
+		t.Errorf("params.stop survived a panicking Redact: %s", reqs[0].Body().AsString())
+	}
+	if n := len(recordsOfKind(recs, "messages")); n == 0 {
+		t.Error("the content-on destination received no messages records")
+	}
+}
+
+// capToolsQuadratic is capTools as first written: re-encode the whole
+// body after every dropped entry. The reference the linear cut must
+// match exactly.
+func capToolsQuadratic(body string, maxBytes int) ([]byte, int, error) {
+	if maxBytes < 0 || len(body) <= maxBytes {
+		return nil, 0, nil
+	}
+	var tr struct {
+		Hash  string            `json:"hash"`
+		Tools []json.RawMessage `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(body), &tr); err != nil {
+		return nil, 0, err
+	}
+	if tr.Tools == nil {
+		tr.Tools = []json.RawMessage{}
+	}
+	for {
+		b, err := json.Marshal(tr)
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(b) <= maxBytes || len(tr.Tools) == 0 {
+			return b, len(body) - len(b), nil
+		}
+		tr.Tools = tr.Tools[:len(tr.Tools)-1]
+	}
+}
+
+// capTools finds its cut by summing entry lengths, encoding the body
+// once more at the end: over many tools (spaced, HTML-escaped and
+// unequal entries included) it keeps exactly the entries, and reports
+// exactly the truncated bytes, of re-encoding after every drop.
+func TestCapToolsMatchesReencodeEachDrop(t *testing.T) {
+	var buf bytes.Buffer
+	buf.WriteString(`{"hash":"h", "tools": [`)
+	for i := range 200 {
+		if i > 0 {
+			buf.WriteString(", ")
+		}
+		fmt.Fprintf(&buf, `{"name": "t%03d", "description": "<%s>", "schema": {"type": "object"}}`, i, strings.Repeat("d", i%37*5))
+	}
+	buf.WriteString(`]}`)
+	body := buf.String()
+	for _, maxBytes := range []int{0, 24, 25, 2000, 8 << 10, 16 << 10, len(body) - 1, len(body), len(body) * 2, -1} {
+		got, gotCut, err := capTools(body, maxBytes)
+		want, wantCut, werr := capToolsQuadratic(body, maxBytes)
+		if err != nil || werr != nil {
+			t.Fatalf("max %d: %v / %v", maxBytes, err, werr)
+		}
+		if !bytes.Equal(got, want) || gotCut != wantCut {
+			t.Errorf("max %d: cut %d (%d bytes), want cut %d (%d bytes)", maxBytes, gotCut, len(got), wantCut, len(want))
+		}
+	}
+	for _, b := range []string{`{"hash":"h"}`, `{"hash":"h","tools":[]}`} {
+		got, gotCut, _ := capTools(b, 2)
+		want, wantCut, _ := capToolsQuadratic(b, 2)
+		if !bytes.Equal(got, want) || gotCut != wantCut {
+			t.Errorf("%s: %s/%d, want %s/%d", b, got, gotCut, want, wantCut)
+		}
 	}
 }

@@ -11,10 +11,13 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/log/embedded"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -198,5 +201,63 @@ func TestLateReportCannotNameTheModel(t *testing.T) {
 	ReportFromContext(rep).Attempt(AttemptInfo{Model: "later"})
 	if got := rep.answeredModel(); got != final {
 		t.Errorf("a report after end named %q (was %q)", got, final)
+	}
+}
+
+// endWatchLogger counts request records and fails any emitted once the
+// step's reporter has ended.
+type endWatchLogger struct {
+	embedded.Logger
+	rep              *stepReport
+	emitted, lateOne atomic.Int64
+}
+
+func (l *endWatchLogger) Emit(_ context.Context, rec log.Record) {
+	if rec.EventName() != eventNameRequest {
+		return
+	}
+	l.emitted.Add(1)
+	if l.rep.ended.Load() {
+		l.lateOne.Add(1)
+	}
+}
+
+func (*endWatchLogger) Enabled(context.Context, log.EnabledParameters) bool { return true }
+
+// ADR 0028 §7: a report racing the model call's end adds no request
+// record after end — the record is emitted under the lock end takes,
+// so once end returns the count is final (run under -race).
+func TestLateReportAddsNoRequestRecord(t *testing.T) {
+	for range 50 {
+		o := newNoopObserver()
+		mctx, endModel := o.model(context.Background(), "r", 0, ModelInfo{})
+		rep := o.withReport(mctx, "r", 0, nil)
+		on := true
+		lg := &endWatchLogger{rep: rep}
+		rep.request = &requestRecord{r: &recorder{elog: lg, capture: &on, runID: "r"}, body: requestBody{Attempt: 1}}
+
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for range 4 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				for range 50 {
+					ReportFromContext(rep).Attempt(AttemptInfo{Model: "m"})
+				}
+			}()
+		}
+		close(start)
+		rep.end()
+		final := lg.emitted.Load()
+		wg.Wait()
+		endModel(ModelFinish{}, true, 0, nil, callTiming{})
+		if n := lg.lateOne.Load(); n != 0 {
+			t.Fatalf("%d request records emitted after end", n)
+		}
+		if got := lg.emitted.Load(); got != final {
+			t.Fatalf("request records after end returned: %d, then %d", final, got)
+		}
 	}
 }

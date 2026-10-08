@@ -565,7 +565,8 @@ func TestRequestRecordsSubagentOwnRun(t *testing.T) {
 }
 
 // RunStart carries the raw instructions' hash: the agent's, or the run
-// override's; the empty string's when there are none. It round-trips
+// override's (an empty one included); the empty string's when there are
+// none. It round-trips
 // the event wire.
 func TestRunStartInstructionsHash(t *testing.T) {
 	cases := []struct {
@@ -576,6 +577,9 @@ func TestRunStartInstructionsHash(t *testing.T) {
 		{want: emptySHA256},
 		{agent: []core.Option{core.Instructions("a")}, want: sha("a")},
 		{agent: []core.Option{core.Instructions("a")}, run: []core.RunOption{core.Instructions("b")}, want: sha("b")},
+		// An empty override is an override: the agent's hash (taken
+		// once at New) does not stand in for it.
+		{agent: []core.Option{core.Instructions("a")}, run: []core.RunOption{core.Instructions("")}, want: emptySHA256},
 	}
 	for i, c := range cases {
 		tp := newRecProvider()
@@ -822,7 +826,27 @@ func (panicLogger) Enabled(context.Context, log.EnabledParameters) bool { return
 func (panicLogger) Emit(_ context.Context, r log.Record) {
 	switch r.EventName() {
 	case "weft.request", "weft.prompt", "weft.tools":
-		panic("broken exporter")
+		// A broken exporter that quotes what it was given.
+		panic("broken exporter: " + r.Body().AsString())
+	}
+}
+
+// A contained record panic leaves a Debug line naming the panic's type
+// only: its value may quote the record's body, which is content.
+func TestRequestRecordsPanicLineCarriesNoContent(t *testing.T) {
+	var buf bytes.Buffer
+	agt := core.New(wefttest.Script(wefttest.Say("done")), reqEcho("echo"),
+		core.Instructions("secret-prompt"), core.LoggerProvider(panicOnKinds{}),
+		core.Logger(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))))
+	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "record panicked (string)") {
+		t.Errorf("no contained-panic line:\n%s", out)
+	}
+	if strings.Contains(out, "secret-prompt") || strings.Contains(out, "broken exporter") {
+		t.Errorf("the Debug line carries the panic's value:\n%s", out)
 	}
 }
 
@@ -865,7 +889,7 @@ func TestRequestRecordsChangeNothingModelVisible(t *testing.T) {
 		if msgs, e = json.Marshal(res.Messages); e != nil {
 			t.Fatal(e)
 		}
-		if events, e = json.Marshal(evs); e != nil {
+		if events, e = json.Marshal(stripStepTiming(evs)); e != nil {
 			t.Fatal(e)
 		}
 		return reqs, msgs, events
@@ -1109,9 +1133,10 @@ func TestRequestRecordsRetryOverFallbackNotDoubled(t *testing.T) {
 	}
 }
 
-// An attempt that reports only its model keeps the call's provider, and
-// one that reports only its provider keeps the call's model name.
-func TestRequestRecordsAttemptKeepsUnreportedModelFields(t *testing.T) {
+// A further attempt that reports a model is recorded under that model
+// and the provider it reported, never the call's; one that reports no
+// model keeps the call's model and provider.
+func TestRequestRecordsAttemptModelAsReported(t *testing.T) {
 	lp := newRecLogProvider()
 	agt := core.New(wefttest.Script(wefttest.Say("done")), core.LoggerProvider(lp),
 		core.WrapModel(func(next core.Model) core.Model {
@@ -1121,20 +1146,27 @@ func TestRequestRecordsAttemptKeepsUnreportedModelFields(t *testing.T) {
 				r.Attempt(core.AttemptInfo{})
 				r.Attempt(core.AttemptInfo{Model: "other"})
 				r.Attempt(core.AttemptInfo{Provider: "elsewhere"})
+				r.Attempt(core.AttemptInfo{Model: "gpt", Provider: "openai"})
 			})(next), info: core.InfoOf(next)}
 		}))
 	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
 		t.Fatal(err)
 	}
 	reqs := lp.ofKind(t, "request")
-	if len(reqs) != 3 {
-		t.Fatalf("request records = %d, want 3", len(reqs))
+	if len(reqs) != 4 {
+		t.Fatalf("request records = %d, want 4", len(reqs))
 	}
-	if m := decodeRequest(t, reqs[1]).Model; m.Provider != "wefttest" || m.Name != "other" {
-		t.Errorf("model-only attempt = %+v", m)
+	// A reported model brings its reported provider, empty included: a
+	// fallback elsewhere is never filed under the call's provider.
+	if m := decodeRequest(t, reqs[1]).Model; m.Provider != "" || m.Name != "other" {
+		t.Errorf("model-only attempt = %+v, want the call's provider dropped", m)
 	}
-	if m := decodeRequest(t, reqs[2]).Model; m.Provider != "elsewhere" || m.Name != "script" {
-		t.Errorf("provider-only attempt = %+v", m)
+	// No model reported: the call's own, provider included.
+	if m := decodeRequest(t, reqs[2]).Model; m.Provider != "wefttest" || m.Name != "script" {
+		t.Errorf("provider-only attempt = %+v, want the call's model", m)
+	}
+	if m := decodeRequest(t, reqs[3]).Model; m.Provider != "openai" || m.Name != "gpt" {
+		t.Errorf("model and provider attempt = %+v", m)
 	}
 }
 
@@ -1313,5 +1345,43 @@ func TestRequestRecordsCancelledResumeKeepsHeldTail(t *testing.T) {
 		Generate(dead, core.RunID("dead"), core.Messages(res.Messages...), core.Approve("b"))
 	if n := len(lp2.ofKind(t, "messages")); n != 0 {
 		t.Errorf("a resume cancelled before it started recorded %d messages records", n)
+	}
+}
+
+// The same through a cancellation when the input ended at the assistant
+// message (one parked call, no held tail): the joined tool message is
+// recorded with WithoutCancel too, so the records still concatenate to
+// RunError.Result.Messages.
+func TestRequestRecordsCancelledResumeKeepsJoinedMessage(t *testing.T) {
+	started := make(chan struct{})
+	park := core.Tool("park", "Blocks.", func(ctx context.Context, _ struct{}) (string, error) {
+		close(started)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}, core.RequireApproval())
+	model := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{ID: "b", Name: "park", Args: `{}`}),
+		wefttest.Say("done"))
+	res, err := core.New(model, park).Generate(context.Background(), core.Prompt("go"))
+	if err != nil || len(res.Pending) != 1 {
+		t.Fatalf("park: %v, pending %d", err, len(res.Pending))
+	}
+	if last := res.Messages[len(res.Messages)-1]; last.Role != core.RoleAssistant {
+		t.Fatalf("parked transcript ends at %q, want the assistant message", last.Role)
+	}
+
+	lp := newRecLogProvider()
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { <-started; cancel() }()
+	_, err = core.New(model, park, core.LoggerProvider(lp)).
+		Generate(ctx, core.RunID("cancelled"), core.Messages(res.Messages...), core.Approve("b"))
+	var re *core.RunError
+	if !errors.As(err, &re) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("resume err = %v, want a cancelled RunError", err)
+	}
+	got, _ := json.Marshal(resolveRef(t, lp, "cancelled", 1<<30))
+	want, _ := json.Marshal(re.Result.Messages)
+	if !bytes.Equal(got, want) {
+		t.Errorf("records rebuild\n%s\nRunError.Result.Messages\n%s", got, want)
 	}
 }

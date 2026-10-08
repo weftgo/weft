@@ -71,8 +71,12 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// Instructions or the run's override, before PrepareStep and before
 	// composition — fixed for the run, always present (sha256 of "" when
 	// there are none). One hash per run, on RunStart, its record and the
-	// invoke_agent span; it is not content.
-	instructionsHash := hashText(cfg.effectiveSystem(a.system))
+	// invoke_agent span; it is not content. The agent's own is hashed
+	// once at New; only a run override is hashed here.
+	instructionsHash := a.instructionsHash
+	if cfg.systemSet {
+		instructionsHash = hashText(cfg.system)
+	}
 	var runExtra []attribute.KeyValue
 	runExtra = append(runExtra, cfg.overrideAttrs()...)
 	runExtra = append(runExtra, attrInstructionsHash.String(instructionsHash))
@@ -351,7 +355,9 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			a.observeMessages(ctx, cfg, 0, joined)
 			if !tailHeld {
 				// Appended at the end: the next growth record.
-				records.recordMessages(ctx, 0, joined, false)
+				// Recorded through a cancellation, as the held tail is:
+				// the joined message is accepted transcript either way.
+				records.recordMessages(context.WithoutCancel(ctx), 0, joined, false)
 			}
 		}
 		// Resumed delegations roll into the total only: there is no

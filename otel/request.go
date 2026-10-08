@@ -24,7 +24,9 @@ import (
 // itself. A cap that cut sets weft.content.truncated_bytes. A body that
 // cannot be shaped — it does not decode, or Redact panicked — is never
 // sent unshaped: a prompt or tools record is dropped and counted as the
-// destination's loss, a request record goes out stripped.
+// destination's loss, a request record goes out stripped (on a
+// content-on chain only params.stop goes: the messages records its
+// messages_ref.index points at were sent there).
 
 // maxBytes is the destination's cap with the 32 KiB default.
 func (p *destProc) maxBytes() int {
@@ -99,7 +101,9 @@ func shapePrompt(body string, redact func(core.ContentKind, string) string, maxB
 // a schema is a JSON document a byte cut would make undecodable, so
 // whole tool entries are dropped from the end of the name-ordered list
 // until the body fits, and the bytes removed are the cut. It returns
-// nil bytes when the body already fits.
+// nil bytes when the body already fits. Linear in the body: each entry
+// is encoded once to learn its length, the cut is found by summing
+// those lengths, and only the kept list is encoded as the result.
 func capTools(body string, maxBytes int) ([]byte, int, error) {
 	if maxBytes < 0 || len(body) <= maxBytes {
 		return nil, 0, nil
@@ -111,19 +115,39 @@ func capTools(body string, maxBytes int) ([]byte, int, error) {
 	if err := json.Unmarshal([]byte(body), &tr); err != nil {
 		return nil, 0, errors.New("a tools record that does not decode cannot be capped: dropped")
 	}
-	if tr.Tools == nil {
-		tr.Tools = []json.RawMessage{}
+	all := tr.Tools
+	tr.Tools = []json.RawMessage{}
+	empty, err := json.Marshal(tr)
+	if err != nil {
+		return nil, 0, errors.New("a capped tools record did not re-encode: dropped")
 	}
-	for {
-		b, err := json.Marshal(tr)
+	// The encoded body with the first k entries is len(empty) plus
+	// their encoded lengths plus k-1 separating commas: keep the
+	// largest k that fits (none may fit).
+	size, keep := len(empty), 0
+	for i, t := range all {
+		e, err := json.Marshal(t)
 		if err != nil {
 			return nil, 0, errors.New("a capped tools record did not re-encode: dropped")
 		}
-		if len(b) <= maxBytes || len(tr.Tools) == 0 {
-			return b, len(body) - len(b), nil
+		next := size + len(e)
+		if i > 0 {
+			next++
 		}
-		tr.Tools = tr.Tools[:len(tr.Tools)-1]
+		if next > maxBytes {
+			break
+		}
+		size, keep = next, i+1
 	}
+	if keep == 0 {
+		return empty, len(body) - len(empty), nil
+	}
+	tr.Tools = all[:keep]
+	b, err := json.Marshal(tr)
+	if err != nil {
+		return nil, 0, errors.New("a capped tools record did not re-encode: dropped")
+	}
+	return b, len(body) - len(b), nil
 }
 
 // redactRequest applies a content-on destination's Redact to a request
@@ -136,7 +160,10 @@ func (p *destProc) redactRequest(clone *sdklog.Record) {
 	}
 	defer func() {
 		if v := recover(); v != nil {
-			p.stripRequest(clone)
+			// This destination is content-on: it received the messages
+			// records, so messages_ref.index stays; only the text Redact
+			// could not shape goes.
+			stripStop(clone)
 			p.drops.dropped(1, fmt.Errorf("content redaction panicked (%T): the request record was exported stripped", v))
 		}
 	}()
@@ -150,8 +177,18 @@ func (p *destProc) redactRequest(clone *sdklog.Record) {
 		return stop, changed
 	})
 	if !ok {
-		p.stripRequest(clone)
+		stripStop(clone)
 	}
+}
+
+// stripStop is a content-on chain's request record that could not be
+// redacted: params.stop removed, marked weft.content=stripped; the
+// messages_ref.index, hashes, names and numbers stay.
+func stripStop(clone *sdklog.Record) {
+	if _, ok := editStop(clone, func([]string) ([]string, bool) { return nil, true }); !ok {
+		clone.SetBody(attribute.StringValue("{}"))
+	}
+	setAttr(clone, attrContentKey, attribute.StringValue(contentStripped))
 }
 
 // stripRequest is a content-off chain's request record: params.stop

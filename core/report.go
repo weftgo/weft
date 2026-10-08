@@ -174,9 +174,10 @@ func (s *stepReport) Value(key any) any {
 // arrives later (a goroutine the chain left behind) is dropped rather
 // than recorded against a step that has moved on.
 //
-// The flag is stored under mu so that it orders with answered: an
-// attempt that names the answering model checks ended inside the same
-// lock, so once end returns no late report can change answeredModel.
+// The flag is stored under mu so that it orders with answered and the
+// request record: an attempt that names the answering model, or emits a
+// further attempt's record, checks ended inside the same lock, so once
+// end returns no late report can change answeredModel or add a record.
 func (s *stepReport) end() {
 	s.mu.Lock()
 	s.ended.Store(true)
@@ -311,10 +312,20 @@ func (s *stepReport) attempt(a AttemptInfo) {
 		l.LogAttrs(ctx, slog.LevelDebug, "model attempt", attrs...)
 	}
 	// Attempt 1's request record was emitted by the loop before the
-	// chain ran; each further reported attempt adds its own. The ended
-	// check is repeated here, just before the record: a report racing
-	// the call's end must add no record (ADR 0028 §7).
-	if index > 1 && s.request != nil && !s.ended.Load() {
+	// chain ran; each further reported attempt adds its own.
+	if index > 1 && s.request != nil {
+		s.requestAttempt(ctx, index, a)
+	}
+}
+
+// requestAttempt emits a further attempt's request record under mu,
+// re-checking ended there: end takes the same lock, so a report racing
+// the call's end either lands its record before end returns or adds
+// none (ADR 0028 §7).
+func (s *stepReport) requestAttempt(ctx context.Context, index int64, a AttemptInfo) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.ended.Load() {
 		s.request.attempt(ctx, index, a)
 	}
 }

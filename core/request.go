@@ -403,13 +403,12 @@ func (rr *requestRecord) attempt(ctx context.Context, index int64, a AttemptInfo
 	}
 	body := rr.body
 	body.Attempt = index
-	// Each field the attempt reported overrides the call's own; one it
-	// left zero keeps it.
+	// A reported model is the attempt's own, with its provider as
+	// reported (empty or not): a fallback to another vendor must not
+	// be recorded under the call's provider. An attempt that names no
+	// model keeps the call's.
 	if a.Model != "" {
-		body.Model.Name = a.Model
-	}
-	if a.Provider != "" {
-		body.Model.Provider = a.Provider
+		body.Model = requestModelBody{Provider: a.Provider, Name: a.Model}
 	}
 	rr.emit(ctx, body)
 }
@@ -523,7 +522,9 @@ func (r *recorder) contained(ctx context.Context, step int, what string, p any) 
 	if r.panics != nil {
 		r.panics.Add(1)
 	}
-	r.debug(ctx, step, what, fmt.Errorf("record panicked: %v", p))
+	// The panic's type only: its value may be built from the very
+	// body the record carried (content).
+	r.debug(ctx, step, what, fmt.Errorf("record panicked (%T)", p))
 }
 
 // debug reports a record that could not be built: one Debug line, never

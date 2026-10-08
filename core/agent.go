@@ -640,6 +640,10 @@ type Agent struct {
 	// run's invoke_agent span and run_start record (ADR 0024). "" when
 	// the agent is unnamed (the manifest requires a name).
 	manifestHash string
+	// instructionsHash is hashText(system), computed once at New: a run
+	// that does not override Instructions reports it as is (ADR 0028
+	// §4), so the common run hashes nothing.
+	instructionsHash string
 	// hasOutput records that Output was applied: a Subagent delegating
 	// to this agent returns the submitted JSON, not the final text.
 	hasOutput bool
@@ -697,6 +701,7 @@ func New(m Model, opts ...Option) *Agent {
 			a.manifestHash = hex.EncodeToString(sum[:])
 		}
 	}
+	a.instructionsHash = hashText(a.system)
 	// The model chain is built once, here: first registered = outermost.
 	for i := len(a.modelMW) - 1; i >= 0; i-- {
 		a.model = a.modelMW[i](a.model)

@@ -175,7 +175,7 @@ off by default here).
 | 2 | response headers: the `Weft-Scope` header of the page's own same-origin `fetch` responses (the scope header below) | by default only with the page and the endpoint on loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`) and no token or a dev/server token, and only once Studio has answered; anywhere with `data-detect="headers"` (or `mount({detect: "headers"})`); never under a panel token (`weft_pt.`) unless asked | `data-scope` |
 | 3 | the DOM marker: `data-weft-scope="pub_…;session=…;flow=…;run=…"` on any element of the page — the framework helpers (`useWeftDevtools` for React and Vue, the Svelte `weftDevtools` action) set it on the element they are given | by default everywhere except a page off loopback under a read-scoped panel token (a playground-scoped panel token, the dev token, no token, or any token on loopback keep it on); anywhere with `data-detect="markers"` (or `"headers,markers"`, `mount({detect: "markers"})`) | `data-scope` |
 | 4 | the page URL: `?weft_scope=…` (read first), else `#weft_scope=…` — the same string form, URL-decoded (`#weft_scope=pub_x%3Bflow%3Df_1`); a value without a public id is ignored | always, every setup and token, `data-detect="off"` included; below rung 1, above rungs 2 and 3; re-read on `hashchange` and `popstate` | `data-scope` |
-| 5 | the fallback: no rung names a scope — the header reads "no conversation detected on this page · how to scope" and lists the newest runs | when 1–4 name nothing | any line under "how to scope": `data-scope="pub_…"` on the tag, `scope("pub_…")` from `@weftgo/devtools`, `data-weft-scope="pub_…"` on the chat's element, `scope.Header` on the app's handler |
+| 5 | the fallback: no rung names a scope — the header reads "no conversation detected on this page · how to scope" and lists the newest runs | when 1–4 name nothing | any line under "how to scope": `data-scope="pub_…" on the panel's <script> tag (or <weft-devtools>)`, `scope("pub_…") from @weftgo/devtools`, `data-weft-scope="pub_…" on the chat's element`, `scope.Header(h, …) on the app's handler (Go, package weft/scope)` |
 
 Rung 2 patches a global of your page, `window.fetch` (shadow DOM
 scopes DOM and CSS, not JavaScript), so it is held to these rules
@@ -275,7 +275,14 @@ does). A new URL scope drops a switcher choice and pins its run, as a
 new explicit scope does; an explicit scope set later wins over it, and
 removing that hands the panel back to the URL. Focus in a marked chat
 does not move the panel off the URL's scope; the switcher (which lists
-it as `url`, after `explicit`) does.
+it as `url`, after `explicit`) does. The parameter is read from the
+query and from the fragment, a hash router's own query included
+(`#/chat?weft_scope=pub_…`); a value ends at the next `&` or `?`, is
+decoded once (a value encoded twice, whose public id still holds `;` or
+`=`, is ignored), and one without a public id is ignored. Because the
+rung listens instead of patching, a navigation the page makes with
+`pushState` or `replaceState` is not seen until the next `hashchange`
+or `popstate`, or an attribute change on the panel.
 
 Rung 5, the fallback: with no scope from any rung, the header says
 `no conversation detected on this page · how to scope`, and "how to
@@ -284,13 +291,16 @@ follow `/api/live?agent=<agent of the newest listed run>` (run frames
 only, opened through a grant like every stream) instead of a poll: the
 live API has no selector for everything (exactly one of `run`,
 `session`, `public_id`, `agent`), and an app's dev page usually runs
-one agent. The 10 s poll (while the dock is open and the page visible)
-stays only while no stream covers the list — no run listed yet (no
-agent to name), the stream gone, a grant refused (`streaming needs the
+one agent. While that stream is up the list says `live: agent X · the
+other agents' runs every 30 s` and is still read every 30 s (dock open,
+page visible), so another agent's runs that start later appear. The
+10 s poll (dock open, page visible) takes over while no stream is up —
+no run listed yet (no agent to name), the stream gone (it is reopened
+on the bounded backoff — 5 s, doubling, capped at a minute, five times at most; the poll does
+not reopen it in between), or a grant refused (`streaming needs the
 server token · polling`; a panel token is never granted an agent's
-stream, so under one the panel never asks and says the same), or runs
-of a second agent (`live: agent X · the other agents' runs every
-10 s`).
+stream, so under one the panel never asks and says the same). In the
+fallback only the streamed agent's runs light the pill below.
 
 The collapsed pill is an activity signal: while the stream the panel
 holds anyway (its scope's `public_id` stream, or the fallback's agent
@@ -336,11 +346,13 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 146,824 B raw / 41,313 B gzip
-(40.3 KiB, under the 80 KiB cap; the scope-detection ladder, rungs 2
-to 5 and the activity pill, costs about +5.7 KiB of it against the
-plan's +3 KiB estimate, and the host API below about +2.5 KiB against
-+1 KiB);
+committed `studio/dist/panel/panel.js`, 147,407 B raw / 41,465 B gzip
+(40.5 KiB, under the 80 KiB cap). The scope-detection ladder (C3: rungs
+2 to 5 and the activity pill) cost +5.9 KiB gzip, 32,801 → 38,675 B,
+against D1's +3 KiB estimate (its review fixes about 0.15 KiB more):
+nothing deferrable supplies the first scope and the deferrable
+remainder is under 1 KiB, so the overrun is accepted rather than split.
+The host API below cost about +2.5 KiB against +1 KiB;
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 

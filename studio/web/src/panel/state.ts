@@ -67,12 +67,16 @@ const POLL_MS = 700
 const POLL_FAILS = 8
 /** The dev list (no public id) is streamed on its newest run's agent
  * (agent=…, plan C3.4: S4.5 has no selector for everything); while no
- * stream covers every agent it lists (none known yet, the grant
- * refused, the stream gone, a second agent) it is read again this
- * often while the dock is open and the page visible. */
+ * stream is up (no agent known yet, the grant refused, the stream gone)
+ * it is read again this often while the dock is open and the page
+ * visible — with one up, every DEV_DISCOVERY_MS. */
 export const DEV_POLL_MS = 10_000
 /** The dev list's length: the newest top-level runs. */
 export const DEV_LIMIT = 10
+/** While the fallback's agent stream is up, the dev list is still read
+ * this often (dock open, page visible): a run of another agent that
+ * starts later is found, never silently missing. */
+export const DEV_DISCOVERY_MS = 30_000
 /** While a tail streams, the dock is redrawn at most this often: a
  * redraw rebuilds the whole dock inside the host page, and a burst of
  * deltas must not cost it a rebuild per animation frame. Everything
@@ -435,6 +439,9 @@ export class PanelModel {
   private expSub?: PanelLiveHandle
   /** The fallback's agent stream (no public id). */
   private devSub?: PanelLiveHandle
+  /** The fallback's stream closed and its next open waits on the
+   * backoff (retry "dev"); still set once LIVE_RETRIES ran out. */
+  private devBackoff = false
   private disposed = false
   private loadSeq = 0 // selects the freshest async load after a rescope
   private timers = new Set<ReturnType<typeof setTimeout>>()
@@ -554,6 +561,7 @@ export class PanelModel {
     this.scopeSub = this.runSub = this.expSub = this.devSub = undefined
     this.clearTimers()
     this.retries = { scope: 0, run: 0, exp: 0, dev: 0 }
+    this.devBackoff = false
     const s = this.state
     s.live = false
     s.devAgent = ""
@@ -673,9 +681,9 @@ export class PanelModel {
     this.cancel(this.devTimer)
     this.devTimer = null
     if (!this.watching || this.publicId || this.disposed || !this.state.meta || this.state.tooNew) return
-    // The agent stream covers the list: frames keep it current.
-    if (this.devSub && this.state.turns.every((r) => r.agent === this.state.devAgent)) return
-    this.devTimer = this.after(DEV_POLL_MS, () => {
+    // The agent stream keeps its agent's rows current; the slower read
+    // finds the other agents' runs.
+    this.devTimer = this.after(this.devSub ? DEV_DISCOVERY_MS : DEV_POLL_MS, () => {
       this.devTimer = null
       if (typeof document !== "undefined" && document.visibilityState === "hidden") {
         this.armDev()
@@ -707,6 +715,28 @@ export class PanelModel {
     })
   }
 
+  /** capDev bounds the dev list: the newest DEV_LIMIT turns, and the
+   * newest DEV_LIMIT experiment rows — frames add rows the replacing
+   * read may be minutes away from. */
+  private capDev() {
+    const s = this.state
+    s.turns = s.turns.slice(0, DEV_LIMIT)
+    const rows = [...s.experiments.values()].flat()
+    if (rows.length <= DEV_LIMIT) return
+    const keep = new Set(
+      rows
+        .sort((a, b) => Date.parse(b.started) - Date.parse(a.started))
+        .slice(0, DEV_LIMIT)
+        .map((r) => r.id)
+    )
+    const next = new Map<string, RunRow[]>()
+    for (const [key, list] of s.experiments) {
+      const kept = list.filter((r) => keep.has(r.id))
+      if (kept.length) next.set(key, kept)
+    }
+    s.experiments = next
+  }
+
   /** subscribeDev opens the fallback's live lane (no public id, plan
    * C3.4): run frames of the agent of the newest listed run — the
    * broadest selector S4.5 has (exactly one of run, session, public_id,
@@ -718,7 +748,7 @@ export class PanelModel {
    * covering the gap. */
   private subscribeDev(seq: number) {
     const s = this.state
-    if (this.publicId || this.devSub || s.devRefused || this.disposed || !s.meta || s.tooNew) return
+    if (this.publicId || this.devSub || s.devRefused || this.devBackoff || this.disposed || !s.meta || s.tooNew) return
     if (tokenScope(this.ep.token) !== "") {
       s.devRefused = true
       return
@@ -752,7 +782,15 @@ export class PanelModel {
         ended()
         if (why === "expired") return
         if (why === "overflow") void again().catch(quiet)
-        else this.retry("dev", again)
+        else {
+          // Bounded: the poll's refreshes do not reopen it meanwhile,
+          // and once the retries ran out the flag stays.
+          this.devBackoff = true
+          this.retry("dev", async () => {
+            this.devBackoff = false
+            await again()
+          })
+        }
       },
     })
     s.live = true
@@ -886,7 +924,7 @@ export class PanelModel {
     if (!this.inSession(run)) return
     for (const c of this.collectors) c.push(run)
     this.upsertRun(run)
-    if (!this.publicId) this.state.turns = this.state.turns.slice(0, DEV_LIMIT)
+    if (!this.publicId) this.capDev()
     this.armStale()
     // The scope's run, heard as it starts: the pin takes it.
     const pin = this.takePin()

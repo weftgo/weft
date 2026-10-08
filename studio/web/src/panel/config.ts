@@ -351,11 +351,13 @@ export const pageURL = { href: (): string => location.href }
 export const URL_SCOPE_PARAM = "weft_scope"
 
 /** urlParam is the first weft_scope=… of a query or fragment string
- * (its leading ? or # dropped), URL-decoded once — "+" stays "+" (the
- * scope's own form percent-encodes it), a malformed escape is kept as
- * written; null when the string carries none. */
+ * (its leading ? or # dropped; split on both ? and &, so a hash
+ * router's own query — #/chat?weft_scope=… — is read and a value ends
+ * at the next ?), URL-decoded once — "+" stays "+" (the scope's own
+ * form percent-encodes it), a malformed escape is kept as written;
+ * null when the string carries none. */
 function urlParam(part: string): string | null {
-  for (const pair of part.replace(/^[?#]/, "").split("&")) {
+  for (const pair of part.replace(/^[?#]/, "").split(/[?&]/)) {
     const at = pair.indexOf("=")
     if ((at < 0 ? pair : pair.slice(0, at)) !== URL_SCOPE_PARAM) continue
     const v = at < 0 ? "" : pair.slice(at + 1)
@@ -370,8 +372,9 @@ function urlParam(part: string): string | null {
 
 /** urlScope is detection rung 4 (plan C3.4): the host page's
  * ?weft_scope= (read first), else its #weft_scope= — the serialised
- * Scope (lib/scope.ts), URL-decoded, as Studio's dev links write it.
- * null when neither names a public id. Reads the page's URL, never
+ * Scope (lib/scope.ts), URL-decoded once, as Studio's dev links write
+ * it. null when neither names a public id (or names one still holding
+ * ";" or "=": encoded twice). Reads the page's URL, never
  * writes it; never throws. page defaults to pageURL.href(). */
 export function urlScope(page: string = pageURL.href()): Scope | null {
   try {
@@ -380,7 +383,9 @@ export function urlScope(page: string = pageURL.href()): Scope | null {
       const v = urlParam(part)
       if (v === null) continue
       const sc = parseScope(v)
-      if (sc.publicId) return sc
+      // A ";" or "=" left in the public id is a value encoded twice
+      // (pub_x%253Bflow…): no conversation has that id.
+      if (sc.publicId && !/[;=]/.test(sc.publicId)) return sc
     }
   } catch {
     // not a URL: no scope

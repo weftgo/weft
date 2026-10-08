@@ -36,7 +36,7 @@ import type { Scope } from "../lib/scope"
 import { el, fmtJSON, waterfall } from "./render"
 import { PANEL_CSS } from "./styles"
 import {
-  DEV_POLL_MS,
+  DEV_DISCOVERY_MS,
   emptyPanelState,
   listKey,
   MAX_EVENT_PAGES,
@@ -857,7 +857,7 @@ export class WeftDevtools extends HTMLElement {
 
   /** followsURL: the scope followed is the page URL's (rung 4). */
   private followsURL(): boolean {
-    return !!this.cfg.urlScope && this.scopeNow() === this.cfg.urlScope
+    return !!this.cfg.urlScope && !this.cfg.scopeExplicit && serializeScope(this.scopeNow()) === serializeScope(this.cfg.urlScope)
   }
 
   /** detectedScopes is every conversation the header rung has seen —
@@ -1467,7 +1467,10 @@ export class WeftDevtools extends HTMLElement {
    * its open tail's steps when it is the turn followed, else its row's
    * — "● 3"; nothing running, it is the plain pill. No stream of its own. */
   private pill(s: PanelState): HTMLElement {
-    const running = s.live ? s.turns.find((r) => r.status === "running") : undefined
+    // The fallback streams one agent: another agent's row came by the
+    // poll, and its status may be a poll period old.
+    const streamed = (r: RunRow) => !!this.model?.publicId || r.agent === s.devAgent
+    const running = s.live ? s.turns.find((r) => r.status === "running" && streamed(r)) : undefined
     if (!running) {
       const fab = el("button", `weft-fab weft-fab-${this.cfg.position}`, "devtools", {
         title: "weft devtools — Alt+W",
@@ -1627,8 +1630,8 @@ export class WeftDevtools extends HTMLElement {
     // several followed live.
     if (!this.model?.publicId && s.devRefused)
       list.appendChild(el("div", "weft-note weft-dev-poll", "streaming needs the server token · polling"))
-    else if (s.devAgent && s.turns.some((r) => r.agent !== s.devAgent))
-      list.appendChild(el("div", "weft-note weft-dev-poll", `live: agent ${s.devAgent} · the other agents' runs every ${DEV_POLL_MS / 1000} s`))
+    else if (!this.model?.publicId && s.devAgent)
+      list.appendChild(el("div", "weft-note weft-dev-poll", `live: agent ${s.devAgent} · the other agents' runs every ${DEV_DISCOVERY_MS / 1000} s`))
     if (!s.turns.length && !s.experiments.size) {
       const empty = session
         ? `no turns of session ${session} yet`

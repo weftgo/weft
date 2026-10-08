@@ -10,6 +10,28 @@ module, ADR 0005).
 
 ### Added
 
+- **The devtools panel's views** (plan D4): the open turn has tabs —
+  **Story** (the step story), **Request** (a placeholder E1.2 fills),
+  **Timeline** (the spans waterfall at full width over a time axis in
+  ms, or, on a run without spans, its steps and tool calls over the
+  event sequence) and **Raw**: a hand-written JSON tree
+  (`src/panel/tree.ts`, no library) of `{doc, events, transcript,
+  spans}` (and `requests` when the panel holds them) with per-node
+  collapse (`aria-expanded`, `→`/`←`), lazy children (only open nodes
+  are built; 200 children, then "+N more"; a string over 2 KiB shows
+  "+N bytes"), a filter over keys and values that opens the path to
+  each match and counts them, copy-node, copy-all (the clipboard,
+  else the text selected to copy by hand) and a `<run id>.json`
+  download. `/` focuses the Raw tab's filter, else the turn list's.
+  ARIA tabs (`role="tablist"`, `←`/`→`/`Home`/`End`); the tab is
+  remembered as `tab` in `localStorage["weft.devtools"]` (additive to
+  v1; `raw` mirrors it). The turn list gets a filter box (text over
+  the id, the error and the prompts the panel has read; a status;
+  has error — "n of m turns") and pages older turns through the runs
+  API's `before=`/`before_id=` cursor as it scrolls to its end (an
+  `IntersectionObserver` on a sentinel; a button where there is none,
+  and in the narrow dropdown): no 50-turn cap, "all n turns loaded".
+  +4.5 KiB gzip of its +5 KiB.
 - **The devtools panel renders incrementally and is read by assistive
   tech** (plan D3): a draw patches the dock in place — keyed by run id
   for turn rows and by step ordinal for step cards — so a streaming

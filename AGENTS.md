@@ -216,7 +216,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    (src/lib/palette.ts) as --weft-* tokens on :host a host rule overrides; its renderer, plan D3:
 //    //    a keyed patch (run id, step ordinal — only the streaming card changes; focus/caret kept, never
 //    //    restored), ARIA roles + roving tabindex + a trap only in a focused float, axe zero-violation
-//    //    budget in a11y.test.ts (axe-core dev-only); the build prints the per-item size table from
+//    //    budget in a11y.test.ts (axe-core dev-only); its views, plan D4: tabs Story/Request (E1.2's
+//    //    placeholder)/Timeline (time axis with spans, seq without)/Raw (src/panel/tree.ts: a lazy JSON
+//    //    tree, "/" filter, copy-node/all, download), a turn-list filter, runs paged by before=/before_id=
+//    //    with no cap, the tab stored as `tab`; the build prints the per-item size table from
 //    //    studio/web/panel-budget.json; configured by a data-weft
 //    //    script tag, weft:* meta tags, or <base>/panel-config.json; studio/README.md
 //    //    has the ladder; it follows a scope — data-scope="pub_…;session=…;flow=…;run=…" or

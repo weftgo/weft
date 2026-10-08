@@ -41,15 +41,16 @@ import {
   emptyPanelState,
   listKey,
   MAX_EVENT_PAGES,
+  DEV_LIMIT,
   PanelModel,
   strippedContent,
-  TURNS_LIMIT,
 } from "./state"
 import type { ChildView, PanelRequests, PanelState, TurnView } from "./state"
 import { foldedWords, turnPromptOf } from "./playground"
 import type { ExperimentDraft, TurnWords } from "./playground"
 import { panelStudioVersion } from "./version"
-import { clampLayout, CYCLE, geometry, initialLayout, NARROW_W, pillPlace, placedIn, Push, readStore, writeStore } from "./layout"
+import { clampLayout, CYCLE, geometry, initialLayout, NARROW_W, pillPlace, placedIn, Push, readStore, TABS, writeStore } from "./layout"
+import { newTree, treeView } from "./tree"
 import type { Geometry, Layout } from "./layout"
 import { href, playgroundLink, runLink, sessionLink, traceLink } from "../lib/links"
 import type { PlaygroundHandoff } from "../lib/links"
@@ -184,8 +185,9 @@ export const SHORTCUTS: readonly (readonly [string, string])[] = [
   ["j / k", "next / previous turn"],
   ["J / K", "next / previous step"],
   ["g s", "open the turn (and step) in Studio"],
-  ["r", "raw JSON of the open turn"],
-  ["/", "search (reserved: arrives with D4)"],
+  ["r", "the Raw tab (again: back to Story)"],
+  ["/", "filter: the raw tree's on the Raw tab, else the turn list's"],
+  ["← / →", "on the tabs: the previous / next tab"],
   ["?", "this list"],
 ]
 
@@ -416,6 +418,19 @@ export class WeftDevtools extends HTMLElement {
   private rove = ""
   /** When g was pressed (the g s chord), 0 for none. */
   private gAt = 0
+  /** The Raw tab's tree (D4): toggles, the filter, the copy's outcome;
+   * of the turn treeFor (another turn starts closed, the filter kept). */
+  private tree = newTree()
+  private treeFor = ""
+  private rawMemo: { key: unknown[]; doc: unknown } | null = null
+  /** The turn list's filter (D4), this session only. */
+  private tq = { text: "", status: "", err: false }
+  /** The prompts of the turns opened so far, by run id: what the
+   * filter's text matches beyond the id and the error. */
+  private prompts = new Map<string, string>()
+  /** The older-turns sentinel watched, and its observer (D4). */
+  private io: IntersectionObserver | null = null
+  private ioAt: Element | null = null
   private onResize = () => {
     clampLayout(this.lay)
     this.render(this.last)
@@ -569,6 +584,8 @@ export class WeftDevtools extends HTMLElement {
     this.dragging = false
     this.push.restore()
     this.themeWatch.stop()
+    this.io?.disconnect()
+    this.io = this.ioAt = null
     window.removeEventListener("pointerup", this.onRelease, true)
     window.removeEventListener("pointercancel", this.onRelease, true)
     window.removeEventListener("hashchange", this.onURL)
@@ -1334,7 +1351,11 @@ export class WeftDevtools extends HTMLElement {
     } else if ((k === "r" || k === "R") && this.model) this.toggleRaw()
     else if (k === "j" || k === "k") this.turnKey(k === "j" ? 1 : -1)
     else if (k === "J" || k === "K") this.stepKey(k === "J" ? 1 : -1)
-    else done = false // "/" included: search is D4's, reserved
+    else if (k === "/") {
+      // D4: the open Raw tab's filter, else the turn list's.
+      const raw = this.lay.tab === "raw" && this.last.turn
+      this.body.querySelector<HTMLElement>(raw ? ".weft-tree-q" : ".weft-turn-q")?.focus()
+    } else done = false
     if (done) e.preventDefault()
   }
 
@@ -1359,7 +1380,7 @@ export class WeftDevtools extends HTMLElement {
   /** turnKey selects the next (1) or previous (-1) turn of the list. */
   private turnKey(d: number) {
     const s = this.last
-    const ids = s.turns.map((r) => r.id)
+    const ids = s.turns.filter((r) => this.match(r)).map((r) => r.id)
     const i = ids.indexOf(s.selected)
     const id = ids.at(Math.min(Math.max(i + d, 0), ids.length - 1))
     if (id && id !== s.selected) this.go(this.model?.select(id, true))
@@ -1545,7 +1566,6 @@ export class WeftDevtools extends HTMLElement {
         (s) => this.render(s)
       )
       model.prefer = this.lay.run
-      model.state.raw = this.lay.raw
       this.model = model
       this.conn = { endpoint: cfg.endpoint, token: cfg.token, scope: serializeScope(scope) }
       this.base = endpoint
@@ -1606,7 +1626,17 @@ export class WeftDevtools extends HTMLElement {
   }
 
   toggleRaw() {
-    this.model?.toggleRaw()
+    this.setTab(this.lay.tab === "raw" ? "story" : "raw")
+  }
+
+  /** setTab opens one of the turn view's tabs (D4), remembered as the
+   * stored layout's tab (raw mirrors it). */
+  private setTab(id: string) {
+    if (!TABS.includes(id)) return
+    this.lay.tab = id
+    this.lay.raw = id === "raw"
+    this.save()
+    this.render(this.last)
   }
 
   // ── Rendering ───────────────────────────────────────────────────
@@ -1653,10 +1683,9 @@ export class WeftDevtools extends HTMLElement {
     }
     // Whether anyone is looking: the dev list is polled only then.
     this.model?.watch(this.shown && !this.dormant)
-    // The raw flip and the selected turn are remembered (D1).
-    if (this.model && s === this.model.state && (s.raw !== this.lay.raw || (s.selected && s.selected !== this.lay.run))) {
-      this.lay.raw = s.raw
-      this.lay.run = s.selected || this.lay.run
+    // The selected turn is remembered (D1); the tab by setTab (D4).
+    if (this.model && s === this.model.state && s.selected && s.selected !== this.lay.run) {
+      this.lay.run = s.selected
       this.save()
     }
     if (this.held || this.composing || this.dragging) {
@@ -1709,6 +1738,7 @@ export class WeftDevtools extends HTMLElement {
     const had = !!this.shadow.activeElement
     patch(root, next)
     if (had && !this.shadow.activeElement) root.querySelector<HTMLElement>(".weft-dock, .weft-fab")?.focus({ preventScroll: true })
+    this.watchOlder()
     this.syncTheme()
     const mode = this.dormant ? "line" : this.lay.hidden ? "hidden" : this.shown ? this.lay.mode : "pill"
     if (root.getAttribute("data-mode") !== mode) root.setAttribute("data-mode", mode)
@@ -1788,9 +1818,8 @@ export class WeftDevtools extends HTMLElement {
     cols.appendChild(this.main(s))
     dock.appendChild(cols)
     dock.appendChild(this.footer(s))
-    // The overlays live inside the dock: it is their containing
-    // block. Outside it they would be laid over the host page.
-    if (s.raw && s.turn) dock.appendChild(this.rawView(s.turn))
+    // The overlay lives inside the dock: it is its containing block.
+    // Outside it it would be laid over the host page.
     if (this.keys) dock.appendChild(this.shortcuts())
     if (!g.sheet) {
       const float = l.mode === "float"
@@ -1864,7 +1893,7 @@ export class WeftDevtools extends HTMLElement {
   /** turnPick is the turn column as a dropdown (a panel under
    * NARROW_W wide): every listed turn, the selected one chosen. */
   private turnPick(s: PanelState): HTMLElement | null {
-    const rows = [...s.turns, ...[...s.experiments.values()].flat()]
+    const rows = [...s.turns.filter((r) => this.match(r)), ...[...s.experiments.values()].flat()]
     if (!rows.length) return null
     const sel = el("select", "weft-turn-pick", undefined, { "aria-label": "turn", "data-weft-k": "turnpick" }) as HTMLSelectElement
     for (const r of rows) {
@@ -1946,7 +1975,7 @@ export class WeftDevtools extends HTMLElement {
     const box = el("div", "weft-keys")
     const dl = el("dl")
     for (const [k, v] of SHORTCUTS) {
-      dl.appendChild(el("dt", undefined, k, k === "/" ? { title: "reserved: search arrives with D4" } : undefined))
+      dl.appendChild(el("dt", undefined, k))
       dl.appendChild(el("dd", undefined, v))
     }
     box.appendChild(dl)
@@ -2004,9 +2033,10 @@ export class WeftDevtools extends HTMLElement {
       a.style.textDecoration = "none"
       h.appendChild(a)
     }
-    const raw = el("button", `weft-btn${s.raw ? " weft-active" : ""}`, "raw", {
+    const isRaw = this.lay.tab === "raw"
+    const raw = el("button", `weft-btn${isRaw ? " weft-active" : ""}`, "raw", {
       title: "the JSON, one keypress away (r)",
-      "aria-expanded": String(!!(s.raw && s.turn)),
+      "aria-expanded": String(isRaw && !!s.turn),
     })
     on(raw, "click", () => this.toggleRaw())
     h.appendChild(raw)
@@ -2079,16 +2109,21 @@ export class WeftDevtools extends HTMLElement {
       list.appendChild(el("div", "weft-splash", empty))
       return list
     }
+    // The filter (D4): text over the id, the error and the prompts the
+    // panel has read; a status; has error. Applied to the loaded rows.
+    list.appendChild(this.turnFilter())
+    const turns = s.turns.filter((r) => this.match(r))
+    const filtered = this.tq.text.trim() !== "" || !!this.tq.status || this.tq.err
+    if (filtered) list.appendChild(el("div", "weft-tq-n", `${turns.length} of ${s.turns.length} turns`))
     // One list (D3): a listitem per run, keyed by its id; one row
     // tabbable (the roving tabindex — the row last focused, else the
     // selected one, else the first), arrow keys move it.
-    const ids = [...s.turns, ...[...s.experiments.values()].flat()].map((r) => r.id)
+    const ids = [...turns, ...[...s.experiments.values()].flat()].map((r) => r.id)
     const tab = ids.includes(this.rove) ? this.rove : ids.includes(s.selected) ? s.selected : ids[0]
     const items = el("div", "weft-rows", undefined, { role: "list", "aria-label": "turns" })
     const row = (r: RunRow) => this.turnRow(r, s.selected, tab)
-    const shown = new Set<string>()
-    for (const r of s.turns) {
-      shown.add(r.id)
+    const shown = new Set<string>(s.turns.map((r) => r.id))
+    for (const r of turns) {
       items.appendChild(row(r))
       // The experiment slot (§2): runs that forked from this turn nest
       // under it; empty without the playground capability.
@@ -2099,15 +2134,93 @@ export class WeftDevtools extends HTMLElement {
     // page, or a run of another experiment) are still runs of this
     // conversation: listed, not dropped.
     const orphans: RunRow[] = []
-    for (const [key, rows] of s.experiments) if (!shown.has(key)) orphans.push(...rows)
+    for (const [key, rows] of s.experiments) if (!shown.has(key)) orphans.push(...rows.filter((r) => this.match(r)))
     if (orphans.length) items.appendChild(el("div", "weft-expts", orphans.map(row), { "data-key": "x:" }))
     list.appendChild(items)
-    if (s.turnsCapped) {
-      list.appendChild(
-        el("div", "weft-note", `the newest ${TURNS_LIMIT} runs — older ones are in Studio (⤢)`)
-      )
-    }
+    // Paging (D4): the sentinel loads the next older page when the list
+    // scrolls to it (watchOlder), or on a click; no cap.
+    if (s.turnsCapped && this.model?.publicId) {
+      const more = el("button", "weft-btn weft-older", s.loadingOlder ? "loading older turns…" : "older turns ↓", {
+        type: "button",
+        title: "load the next older page of turns",
+        "data-key": `older:${s.turns.length}`,
+      })
+      on(more, "click", () => this.go(this.model?.loadOlder()))
+      list.appendChild(more)
+    } else if (s.turnsCapped) list.appendChild(el("div", "weft-note", `the newest ${DEV_LIMIT} runs — older ones are in Studio (⤢)`))
+    else if (s.paged) list.appendChild(el("div", "weft-tq-n weft-all", `all ${s.turns.length} turns loaded`))
     return list
+  }
+
+  /** turnFilter is the box above the turn list (D4): free text, a
+   * status, has error — this session only, never stored. */
+  private turnFilter(): HTMLElement {
+    const f = this.tq
+    const box = el("div", "weft-tq", undefined, { "data-key": "tq" })
+    const q = el("input", "weft-input weft-turn-q", undefined, {
+      type: "search",
+      "aria-label": "filter turns",
+      placeholder: "/ filter turns",
+    }) as HTMLInputElement
+    q.value = f.text
+    on(q, "input", (_, n) => {
+      f.text = (n as HTMLInputElement).value
+      this.render(this.last)
+    })
+    const st = el("select", "weft-input weft-tq-status", undefined, { "aria-label": "status" }) as HTMLSelectElement
+    for (const v of ["", "running", "succeeded", "failed", "parked"]) {
+      const o = el("option", undefined, v || "any status", { value: v }) as HTMLOptionElement
+      o.selected = v === f.status
+      st.appendChild(o)
+    }
+    st.value = f.status
+    on(st, "change", (_, n) => {
+      f.status = (n as HTMLSelectElement).value
+      this.render(this.last)
+    })
+    const err = el("input", "weft-tq-err", undefined, { type: "checkbox" }) as HTMLInputElement
+    err.checked = f.err
+    on(err, "change", (_, n) => {
+      f.err = (n as HTMLInputElement).checked
+      this.render(this.last)
+    })
+    box.append(q, st, el("label", "weft-tool", [err, document.createTextNode("has error")]))
+    return box
+  }
+
+  /** match is the turn filter's test of one row. */
+  private match(r: RunRow): boolean {
+    const f = this.tq
+    if (f.status && statusChip(r) !== f.status) return false
+    if (f.err && !r.err && r.status !== "failed") return false
+    const q = f.text.trim().toLowerCase()
+    return !q || `${r.id}\n${r.err}\n${this.prompts.get(r.id) ?? ""}`.toLowerCase().includes(q)
+  }
+
+  /** watchOlder observes the older-turns sentinel (D4): one passive
+   * IntersectionObserver over the turn column, moved to each new
+   * sentinel (one per page, so a list still short of the column keeps
+   * loading); disconnected with the element. No observer: the
+   * sentinel is a button. */
+  private watchOlder() {
+    const n = this.body.querySelector(".weft-older")
+    if (n === this.ioAt) return
+    this.io?.disconnect()
+    this.io = null
+    this.ioAt = n
+    // Narrow, the rows are a dropdown: the sentinel is a button only.
+    if (!n || typeof IntersectionObserver !== "function" || n.closest(".weft-narrow")) return
+    try {
+      this.io = new IntersectionObserver(
+        (es) => {
+          if (es.some((e) => e.isIntersecting)) this.go(this.model?.loadOlder())
+        },
+        { root: n.closest(".weft-turns") }
+      )
+      this.io.observe(n)
+    } catch {
+      this.io = null
+    }
   }
 
   private turnRow(r: RunRow, selected: string, tab: string): HTMLElement {
@@ -2204,9 +2317,57 @@ export class WeftDevtools extends HTMLElement {
       main.appendChild(el("div", "weft-splash", "select a turn"))
       return main
     }
-    main.appendChild(this.turnView(s))
-    main.appendChild(this.playgroundArea(s))
+    // The turn's tabs (D4): Story (the step story and the playground),
+    // Request (E1.2 fills it), Timeline, Raw.
+    main.appendChild(this.tabs())
+    const tab = this.lay.tab
+    const t = s.turn
+    let tp: HTMLElement
+    if (tab === "story") {
+      // The story's own box is the panel (its notes stay its children).
+      tp = this.turnView(s)
+      tp.appendChild(this.playgroundArea(s))
+    } else
+      tp = el("div", undefined, [
+        tab === "raw" ? this.rawView(t) : tab === "timeline" ? renderTimeline(t) : el("div", "weft-note", "Request: lands with E1.2"),
+      ])
+    const at = { class: "weft-tp", role: "tabpanel", id: `weft-tp-${tab}`, "aria-labelledby": `weft-tab-${tab}`, "data-key": `tp:${tab}` }
+    for (const [k, v] of Object.entries(at)) tp.setAttribute(k, v)
+    main.appendChild(tp)
     return main
+  }
+
+  /** tabs is the turn view's tablist (D4): ARIA tabs, one tab stop,
+   * ←/→ (Home/End) move and select. */
+  private tabs(): HTMLElement {
+    const bar = el("div", "weft-tabs", undefined, { role: "tablist", "aria-label": "turn views", "data-key": "tabs" })
+    for (const id of TABS) {
+      const sel = id === this.lay.tab
+      const b = el("button", `weft-tab${sel ? " weft-active" : ""}`, id[0].toUpperCase() + id.slice(1), {
+        type: "button",
+        role: "tab",
+        id: `weft-tab-${id}`,
+        "aria-selected": String(sel),
+        tabindex: sel ? "0" : "-1",
+        "data-key": `tab:${id}`,
+        // Only the drawn panel exists to be controlled.
+        ...(sel ? { "aria-controls": `weft-tp-${id}` } : {}),
+      })
+      on(b, "click", () => this.setTab(id))
+      bar.appendChild(b)
+    }
+    on(bar, "keydown", (e) => {
+      const k = (e as KeyboardEvent).key
+      const i = TABS.indexOf(this.lay.tab)
+      const n = TABS.length
+      const j = k === "ArrowRight" ? i + 1 : k === "ArrowLeft" ? i - 1 : k === "Home" ? 0 : k === "End" ? n - 1 : null
+      if (j === null) return
+      e.preventDefault()
+      const id = TABS[(j + n) % n]
+      this.setTab(id)
+      this.body.querySelector<HTMLElement>(`#weft-tab-${id}`)?.focus()
+    })
+    return bar
   }
 
   /** playgroundArea draws rung 2 (§8.2) under the turn view: the
@@ -2766,9 +2927,8 @@ export class WeftDevtools extends HTMLElement {
     wrap.appendChild(this.notes(t))
     const ids = this.turnLinks(t)
     if (ids) wrap.appendChild(ids)
-    const wf = waterfall(t.spans ?? [])
-    if (wf.length) wrap.appendChild(renderWaterfall(wf))
     const prompt = turnPromptOf(t.transcript)
+    if (prompt) this.prompts.set(t.id, prompt)
     if (prompt) wrap.appendChild(el("div", "weft-note", prompt))
     // thread's session markers (A9.2) at the top of the turn they are
     // filed under; a run from before A9 names none and draws nothing.
@@ -2926,8 +3086,32 @@ export class WeftDevtools extends HTMLElement {
     return el("div", "weft-footer", parts, { "data-key": "foot" })
   }
 
+  /** rawView is the Raw tab (D4): the turn's records as one JSON tree
+   * — {doc, events, transcript, spans}, and requests when the panel
+   * holds them — built once per change of what it holds. */
   private rawView(t: TurnView): HTMLElement {
-    return el("pre", "weft-raw", fmtJSON({ doc: t.doc, events: t.events, transcript: t.transcript }))
+    if (this.treeFor !== t.id) {
+      this.tree = { ...newTree(), q: this.tree.q }
+      this.treeFor = t.id
+    }
+    const r = t.requests
+    const key = [t.id, t.doc, t.events, t.events.length, t.transcript, t.spans, r]
+    const m = this.rawMemo
+    if (!m || m.key.some((v, i) => v !== key[i]))
+      this.rawMemo = {
+        key,
+        doc: {
+          doc: t.doc,
+          events: t.events,
+          transcript: t.transcript,
+          spans: t.spans,
+          ...(r && !r.error ? { requests: { ...r, steps: Object.fromEntries(r.steps) } } : {}),
+        },
+      }
+    return treeView(this.rawMemo!.doc, this.tree, t.id.replace(/[\\/]/g, "_"), {
+      redraw: () => this.render(this.last),
+      root: () => this.shadow,
+    })
   }
 
   private rowOf(id: string): RunRow | undefined {
@@ -2972,9 +3156,57 @@ export function stepPosition(view: FoldedRun, selected: number | null): number {
   return selected == null ? -1 : view.steps.findIndex((st) => st.index === selected)
 }
 
+/** renderTimeline is the Timeline tab (D4): the waterfall at the
+ * column's full width over a time axis (ms from the run's first span)
+ * when the run has spans; without, its steps and tool calls placed by
+ * the event sequence (seq: the event's position in the run's stream). */
+export function renderTimeline(t: TurnView): HTMLElement {
+  const spans = (t.spans ?? []).filter((x) => Number.isFinite(Date.parse(x.start)) && Number.isFinite(Date.parse(x.end)))
+  const bars: { name: string; left: number; width: number; ms: number; label?: string }[] = waterfall(spans)
+  let axis = "time"
+  let end = 0
+  if (bars.length) {
+    end = Math.max(...spans.map((x) => Date.parse(x.end))) - Math.min(...spans.map((x) => Date.parse(x.start)))
+  } else {
+    axis = "seq"
+    const open = new Map<string, [string, number]>()
+    end = Math.max(1, t.events.length ? t.events[t.events.length - 1].pos : 0)
+    const put = (name: string, a: number, b: number) =>
+      bars.push({ name, left: a / end, width: Math.max(0.005, (b - a) / end), ms: b - a, label: `#${a}–${b}` })
+    for (const e of t.events) {
+      const ev = e.event as { type?: string; index?: number; call_id?: string; name?: string }
+      const id = ev.type?.startsWith("step_") ? `s${ev.index}` : `c${ev.call_id}`
+      if (ev.type === "step_start" || ev.type === "tool_start") open.set(id, [ev.type === "step_start" ? `step ${ev.index}` : String(ev.name), e.pos])
+      else if ((ev.type === "step_finish" || ev.type === "tool_finish") && open.has(id)) {
+        const [name, a] = open.get(id)!
+        open.delete(id)
+        put(name, a, e.pos)
+      }
+    }
+    // Still running: open to the newest event.
+    for (const [name, a] of open.values()) put(name, a, end)
+  }
+  const box = el("div", "weft-timeline", undefined, { "data-axis": axis })
+  if (!bars.length) {
+    box.appendChild(el("div", "weft-note", "nothing to place yet: no spans and no steps"))
+    return box
+  }
+  const ticks = el("div", "weft-axis")
+  for (const f of [0, 0.25, 0.5, 0.75, 1]) {
+    const v = Math.round(end * f)
+    const tick = el("span", "weft-tick", axis === "time" ? `${v} ms` : `seq ${v}`)
+    tick.style.left = `${f * 100}%`
+    ticks.appendChild(tick)
+  }
+  box.appendChild(el("div", "weft-wf-row", [el("span", "weft-wf-name", axis === "time" ? "time (ms)" : "seq"), ticks, el("span", "weft-wf-ms")]))
+  box.appendChild(renderWaterfall(bars))
+  return box
+}
+
 /** renderWaterfall draws §2's timing mini-waterfall: one bar per
- * span over the run's own window, wall milliseconds beside. */
-export function renderWaterfall(bars: { name: string; left: number; width: number; ms: number }[]): HTMLElement {
+ * span over the run's own window, wall milliseconds beside (or the
+ * bar's own label: the seq range on a spanless run). */
+export function renderWaterfall(bars: { name: string; left: number; width: number; ms: number; label?: string }[]): HTMLElement {
   const box = el("div", "weft-wf")
   for (const b of bars) {
     const row = el("div", "weft-wf-row")
@@ -2985,7 +3217,7 @@ export function renderWaterfall(bars: { name: string; left: number; width: numbe
     bar.style.width = `${(b.width * 100).toFixed(2)}%`
     track.appendChild(bar)
     row.appendChild(track)
-    row.appendChild(el("span", "weft-wf-ms", `${b.ms}ms`))
+    row.appendChild(el("span", "weft-wf-ms", b.label ?? `${b.ms}ms`))
     box.appendChild(row)
   }
   return box

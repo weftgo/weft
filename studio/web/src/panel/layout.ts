@@ -29,9 +29,15 @@ export interface Layout {
   /** The user's theme choice (D2, the ◐ button): "light", "dark", or "" for auto. */
   theme: string
   raw: boolean
+  /** The open turn's tab (D4): story, request, timeline or raw (raw
+   * mirrors it, so a v1 reader that knows only raw still agrees). */
+  tab: string
   /** The §5.3 force-on switch, migrated from localStorage.weft_debug. */
   debug: boolean
 }
+
+/** The turn view's tabs (D4), in their order. */
+export const TABS = ["story", "request", "timeline", "raw"]
 
 /** The one key the panel keeps, per origin. */
 export const STORE_KEY = "weft.devtools"
@@ -70,6 +76,7 @@ export function initialLayout(position: PanelPlacement, open: boolean, mode: str
     run: "",
     theme: "",
     raw: false,
+    tab: "story",
     debug: false,
   }
   return l
@@ -94,12 +101,14 @@ export function readStore(): Partial<Layout> {
     const want: Record<string, string> = {
       x: "number", y: "number", w: "number", h: "number", d: "number",
       open: "boolean", hidden: "boolean", raw: "boolean", debug: "boolean",
-      run: "string", theme: "string",
+      run: "string", theme: "string", tab: "string",
     }
     for (const [k, t] of Object.entries(want))
       if (typeof doc[k] === t && (t !== "number" || Number.isFinite(doc[k]))) out[k] = doc[k]
     if (doc.mode === "float" || doc.mode === "dock") out.mode = doc.mode
     if (["left", "right", "bottom", "top"].includes(doc.side as string)) out.side = doc.side
+    // D4: tab is additive; a v1 document from before it says raw only.
+    if (!TABS.includes(out.tab as string)) out.tab = out.raw ? "raw" : "story"
     return out
   } catch {
     return {}

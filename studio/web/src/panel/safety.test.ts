@@ -457,13 +457,13 @@ describe("the redraw keeps what is the user's", () => {
     expect(studio.gets("runs/s_01-t1/0/c1/events").length).toBe(1)
   })
 
-  it("the raw view and the shortcuts overlay sit inside the dock, not over the page", async () => {
+  it("the raw view (D4: the Raw tab) and the shortcuts overlay sit inside the dock, not over the page", async () => {
     fakeStudio(baseRoutes())
     const el = await mount()
     click(button(el, "raw"))
     $(el, ".weft-dock")!.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true, composed: true }))
     await settle()
-    expect($(el, ".weft-dock > .weft-raw")).toBeTruthy()
+    expect($(el, ".weft-dock .weft-main .weft-raw")).toBeTruthy()
     expect($(el, ".weft-dock > .weft-keys")).toBeTruthy()
   })
 })

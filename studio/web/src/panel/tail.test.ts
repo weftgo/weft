@@ -339,13 +339,14 @@ describe("the turn list", () => {
     expect(all(el, ".weft-turn")).toHaveLength(1)
   })
 
-  it("says when the page was full: older turns exist", async () => {
+  it("says when the page was full: older turns exist, and loads them (D4: no Studio note)", async () => {
     const routes = baseRoutes()
     routes["runs?public_id=pub_orders&limit=50"] = { total: 80, runs: [runRow({})], next_before: T0 }
     fakeStudio(routes)
     const el = await mount()
     expect(text(el, ".weft-head")).toContain("1+ turns")
-    expect(text(el, ".weft-turns")).toContain("the newest 50 runs")
+    expect(text(el, ".weft-older")).toBe("older turns ↓")
+    expect(text(el, ".weft-turns")).not.toContain("in Studio")
   })
 
   it("an experiment whose source turn is not listed is still listed", async () => {

@@ -56,7 +56,8 @@ import { studioIsTooNew } from "./version"
 /** The events walk's page cap: 20 pages of 500. A longer run says so
  * (capped) instead of reading as complete. */
 export const MAX_EVENT_PAGES = 20
-/** The turn list's page: the newest runs of the conversation. */
+/** The turn list's page: the newest runs of the conversation, and each
+ * older page (D4: before=/before_id= paging, no cap). */
 export const TURNS_LIMIT = 50
 /** How often a stream that closed for good is reopened before the
  * panel stops knocking (5 s, doubling, capped at a minute). */
@@ -195,8 +196,12 @@ export interface PanelState {
   session: SessionRow | null
   /** The conversation's top-level turns, newest first. */
   turns: RunRow[]
-  /** The runs page was full: older turns exist beyond TURNS_LIMIT. */
+  /** Older turns exist past the loaded pages (the runs cursor is set). */
   turnsCapped: boolean
+  /** An older page was loaded (D4): the list says when all are. */
+  paged: boolean
+  /** An older page is being read. */
+  loadingOlder: boolean
   /** Experiments (playground runs) by the source turn id they hang
    * off (forked_from's run part). Empty until step 8 turns the
    * playground on; the slot exists (§2). */
@@ -225,7 +230,6 @@ export interface PanelState {
   /** The fallback's stream was refused (403, or a panel token, which is
    * never granted an agent's stream): the dev list polls, and says so. */
   devRefused: boolean
-  raw: boolean
   /** The scope's run, when it is not among the conversation's listed
    * runs: "run r_… not in this conversation", an honest line (C3.2). */
   pinMissing: string
@@ -250,6 +254,8 @@ export function emptyPanelState(): PanelState {
     session: null,
     turns: [],
     turnsCapped: false,
+    paged: false,
+    loadingOlder: false,
     experiments: new Map(),
     selected: "",
     selectedStep: null,
@@ -261,7 +267,6 @@ export function emptyPanelState(): PanelState {
     live: false,
     devAgent: "",
     devRefused: false,
-    raw: false,
     pinMissing: "",
     sessionUnrecorded: false,
     listKey: "",
@@ -572,7 +577,8 @@ export class PanelModel {
     s.devRefused = false
     s.session = null
     s.turns = []
-    s.turnsCapped = false
+    s.turnsCapped = s.paged = s.loadingOlder = false
+    this.cursor = null
     s.experiments = new Map()
     s.selected = ""
     s.selectedStep = null
@@ -834,10 +840,24 @@ export class PanelModel {
       const runs = listed.filter((r): r is RunRow => !!r && typeof r.id === "string")
       const { turns, experiments } = partitionRuns(runs)
       const want = this.narrowing.session
-      this.state.sessionUnrecorded = !!want && turns.length > 0 && !turns.some((r) => r.session_id)
-      this.state.turns = turns.filter((r) => this.inSession(r))
-      this.state.experiments = experiments
-      this.state.turnsCapped = page.next_before != null
+      const s = this.state
+      s.sessionUnrecorded = !!want && turns.length > 0 && !turns.some((r) => r.session_id)
+      const kept = s.turns
+      const keptX = s.experiments
+      s.turns = turns.filter((r) => this.inSession(r))
+      s.experiments = experiments
+      if (s.paged && page.next_before != null) {
+        // The older pages stay (D4): the rows past this page's cursor
+        // are re-merged, and the cursor is still the oldest page's.
+        const edge = Date.parse(page.next_before)
+        const older = (r: RunRow) => !(Date.parse(r.started) > edge)
+        for (const r of kept) if (older(r)) this.upsertRun(r, true)
+        for (const r of [...keptX.values()].flat()) if (older(r)) this.upsertRun(r, true)
+      } else {
+        s.paged = false
+        this.cursor = page.next_before != null ? { before: page.next_before, id: page.next_before_id ?? "" } : null
+      }
+      s.turnsCapped = this.cursor != null
       for (const r of during) this.upsertRun(r)
       this.state.listKey = listKey(this.publicId, this.narrowing.session)
     } catch {
@@ -966,7 +986,9 @@ export class PanelModel {
    * place. Drop any existing row (turn or experiment) with the id,
    * then insert per partitionRuns's rule: prepend to turns with the
    * newest-first sort kept, or append to its experiments bucket. */
-  private upsertRun(run: RunRow) {
+  private upsertRun(run: RunRow, keep = false) {
+    // keep: an older row re-merged under a fresher one — never over it.
+    if (keep && this.rowOf(run.id)) return
     const turns = this.state.turns.filter((r) => r.id !== run.id)
     const experiments = new Map<string, RunRow[]>()
     for (const [key, list] of this.state.experiments) {
@@ -1915,10 +1937,40 @@ export class PanelModel {
     return this.disposed || this.state.result !== res
   }
 
-  /** toggleRaw flips the raw JSON view (§2: one keypress away). */
-  toggleRaw() {
-    this.state.raw = !this.state.raw
+  /** The runs cursor of the oldest page loaded (next_before /
+   * next_before_id), null when every run is listed. */
+  private cursor: { before: string; id: string } | null = null
+
+  /** loadOlder reads the conversation's next older page (D4): runs?
+   * with before= and before_id= (studio/api.go's cursor), merged under
+   * the list; one read at a time; a failed read leaves the cursor for
+   * the next try. The dev list (no public id) is not paged. */
+  async loadOlder() {
+    const s = this.state
+    const c = this.cursor
+    if (!this.publicId || !c || s.loadingOlder) return
+    const seq = this.loadSeq
+    s.loadingOlder = true
     this.emit()
+    try {
+      const page = await fetchRuns(this.ep, {
+        public_id: this.publicId,
+        limit: String(TURNS_LIMIT),
+        before: c.before,
+        ...(c.id ? { before_id: c.id } : {}),
+      })
+      if (seq !== this.loadSeq || this.disposed || this.cursor !== c) return
+      const runs: (RunRow | null)[] = Array.isArray(page.runs) ? page.runs : []
+      for (const r of runs) if (r && typeof r.id === "string" && !r.parent_run_id && this.inSession(r)) this.upsertRun(r, true)
+      this.cursor = page.next_before != null ? { before: page.next_before, id: page.next_before_id ?? "" } : null
+      s.paged = true
+      s.turnsCapped = this.cursor != null
+    } catch {
+      // the cursor stays: scrolling there again (or the button) retries
+    } finally {
+      if (seq === this.loadSeq) s.loadingOlder = false
+      this.emit()
+    }
   }
 
   /** selectStep marks the step the user is reading: the ⤢ deep link

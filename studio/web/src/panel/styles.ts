@@ -183,11 +183,34 @@ details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
   padding: 5px 10px; border-top: 1px solid var(--weft-line); color: var(--weft-faint);
   background: var(--weft-bg2); white-space: normal; font-size: 11px;
 }
-.weft-raw {
-  position: absolute; inset: 44px 0 28px 0; background: var(--weft-bg);
-  overflow: auto; padding: 10px; white-space: pre; color: var(--weft-dim);
-  z-index: 2; border-top: 1px solid var(--weft-line); border-bottom: 1px solid var(--weft-line);
-}
+/* D4: the turn view's tabs, the turn filter, paging, the raw tree, the timeline axis. */
+.weft-tabs { display: flex; gap: 2px; margin: -4px 0 8px; border-bottom: 1px solid var(--weft-line); }
+.weft-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--weft-dim);
+  padding: 3px 8px; cursor: pointer; font: inherit; }
+.weft-tab:hover { color: var(--weft-fg); }
+.weft-tab.weft-active { color: var(--weft-fg); border-bottom-color: var(--weft-accent); }
+.weft-tq { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; border-bottom: 1px solid var(--weft-line); color: var(--weft-dim); }
+.weft-tq .weft-turn-q { flex: 1 1 100%; }
+.weft-tq .weft-tq-status { width: auto; }
+.weft-tq-n { padding: 4px 9px; color: var(--weft-dim); }
+.weft-older { display: block; width: calc(100% - 12px); margin: 6px; }
+.weft-raw { color: var(--weft-dim); }
+.weft-tbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+.weft-tbar .weft-tree-q { flex: 1; min-width: 120px; width: auto; }
+.weft-copybox { margin-bottom: 6px; }
+.weft-tree { overflow-x: auto; }
+.weft-tn { display: flex; gap: 4px; align-items: baseline; white-space: pre; }
+.weft-tn.weft-hit { background: var(--weft-bg3); box-shadow: inset 2px 0 0 var(--weft-warn); }
+.weft-tn.weft-hit .weft-tk { color: var(--weft-fg); }
+.weft-tt { width: 14px; flex: none; background: none; border: none; color: var(--weft-dim); cursor: pointer; font: inherit; }
+.weft-tk { color: var(--weft-info); flex: none; }
+.weft-tv { overflow: hidden; text-overflow: ellipsis; }
+.weft-tc { margin-left: auto; flex: none; background: none; border: none; color: var(--weft-dim); cursor: pointer; font: inherit; }
+.weft-tmore { margin: 1px 0; }
+.weft-axis { flex: 1; position: relative; height: 14px; }
+.weft-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--weft-dim); font-size: 10px; white-space: nowrap; }
+.weft-tick:first-child { transform: none; }
+.weft-tick:last-child { transform: translateX(-100%); }
 .weft-keys {
   position: absolute; inset: 0; z-index: 3; background: var(--weft-scrim);
   display: flex; align-items: center; justify-content: center;

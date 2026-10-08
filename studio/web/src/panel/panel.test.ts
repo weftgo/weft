@@ -438,7 +438,7 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     await idle()
     const raw = $(el, ".weft-raw")?.textContent ?? ""
     expect(raw).toContain('"run_start"')
-    expect(raw).toContain('"batches"')
+    expect(raw).toContain("batches:") // a key of the tree (D4)
   })
 
   it("the live tail: a run frame refreshes the row; a record frame folds a delta in", async () => {

@@ -112,6 +112,41 @@ read-only, truncation/gap/stripped honesty, the raw JSON, a live tail,
 ⤢ deep links into Studio, lazy subagents (one level inline, with the
 child's request line and an "open in Studio" hand-off; a grandchild is
 the hand-off only) and a spans waterfall.
+
+The views (plan D4). The open turn has four tabs, a `role="tablist"`
+(`←`/`→`, `Home`/`End` move and select; one tab stop): **Story** (the
+step story above, and the playground's drawer and result), **Request**
+(a placeholder until E1.2 fills it), **Timeline** (the spans waterfall
+at the column's full width over a time axis — ms from the run's first
+span — or, on a run without spans, its steps and tool calls placed by
+the event sequence, `seq`, the position in the run's event stream) and
+**Raw**. Raw is a JSON tree (`src/panel/tree.ts`, hand-written) of
+`{doc, events, transcript, spans}`, plus `requests` when the panel
+already read them: `▸`/`▾` per node (`aria-expanded`; `→` opens, `←`
+closes); only open nodes are built — a small document opens whole, a
+large one its top rows (150 by default, breadth-first), a container
+shows 200 children then "… +N more", a string over 2 KiB its head and
+"… +N bytes" (UTF-8) — so a 10 MB transcript costs only what is open.
+The filter box (`/`) matches keys and values, case-insensitively,
+opens the path to each match (the first 200), marks it and says "n
+matches" (every match counted; a match past a container's 200 is drawn
+anyway). `⧉` copies that node's JSON, `copy all` the document, through
+`navigator.clipboard`; where the clipboard is missing or refuses, the
+text is shown selected to copy by hand. `download` saves the document
+as `<run id>.json` (a `/` in a child's id becomes `_`). The turn list
+has its own filter above it — text over the run id, the error and the
+prompts of the turns the panel has opened (a row carries no prompt),
+a status (`running`, `succeeded`, `failed`, `parked`) and has error
+— over the loaded rows, never stored, "n of m turns" while it narrows.
+The list pages: when it scrolls to its end, a sentinel row (one
+passive `IntersectionObserver` inside the panel's own list,
+disconnected with the element) reads the next older page through the
+runs route's cursor (`before=`/`before_id=`, 50 a page) — no cap: it
+reads "loading older turns…" while a page is read and "all n turns
+loaded" at the end. Where there is no observer, and in the narrow
+dropdown, the sentinel is a button (`older turns ↓`). A refresh (the
+live lane reconnecting, a stale read) keeps the pages already read.
+The dev list (no public id) stays the newest 10 runs.
 Deep links (plan G1) follow one scheme, `src/lib/links.ts`, shared by
 the panel and Studio's app (an ESLint rule refuses a Studio URL built
 anywhere else): `runs/<id>?step=<n>&view=story|raw&sel=…&axis=time&t=…`,
@@ -383,10 +418,13 @@ underlined), not a theme's.
 
 The panel remembers, per origin, in `localStorage["weft.devtools"]`
 — one JSON object, `{v: 1, mode, side, open, hidden, x, y, w, h, d,
-run, theme, raw, debug}`: the mode (`float`/`dock`), the docked side,
+run, theme, raw, tab, debug}`: the mode (`float`/`dock`), the docked side,
 open, hidden, the float's box (`x`, `y`, `w`, `h`, px), the dock's size
 (`d`), the last selected turn (`run`, by run id), `theme` (the `◐`
-choice: `light`, `dark`, or `""` for auto), the raw view, and `debug` (the old `localStorage.weft_debug=1`
+choice: `light`, `dark`, or `""` for auto), the raw view, `tab` (D4,
+additive to v1: the turn view's tab — `story`, `request`, `timeline` or
+`raw`; `raw` mirrors it, and a document without `tab` opens Raw when
+`raw` is true, else Story), and `debug` (the old `localStorage.weft_debug=1`
 switch, migrated into the key and dropped). The placement fields are
 written only once you place the panel (toggle, drag, resize, re-dock):
 until then the `data-*` attributes above decide on every load; after,
@@ -410,8 +448,9 @@ puts focus in it, so the keys below work at once.
 | `j` / `k` | next / previous turn |
 | `J` / `K` | next / previous step (⤢ carries it) |
 | `g s` | open the turn and step in Studio (`lib/links.ts`, the link ⤢ carries), in a new tab |
-| `r` | raw JSON of the open turn |
-| `/` | search — reserved for D4, does nothing yet |
+| `r` | the Raw tab (again: back to Story) |
+| `/` | focus the filter: the raw tree's on the Raw tab, else the turn list's |
+| `←` / `→` | on the tabs: previous / next tab (`Home` / `End`: first / last) |
 | `?` | the key list |
 | `↓` / `↑` | on a turn row: move the list's one tab stop to the next / previous row (`Enter` or a click selects) |
 | `Tab` | in an open, focused float: wraps from the last control to the first (`Shift+Tab` back) — the one focus trap; `Esc` lets go; docked, the pill and the sheet never trap |
@@ -435,14 +474,17 @@ throttle stays.
 | the dock | `role="complementary"`, `aria-label="weft devtools"` |
 | the turn list | `.weft-rows`: `role="list"` (`aria-label="turns"`); each run a `role="listitem"` holding its row button, the selected one `aria-current="true"`; roving tabindex (one row `tabindex="0"`) |
 | the running step's text | `aria-live="polite"` — the one live region; nothing else in the dock is live |
-| expanders | `aria-expanded` on how to scope, raw, and a subagent's summary |
+| expanders | `aria-expanded` on how to scope, raw, a subagent's summary, and each raw tree node's `▸`/`▾` |
+| the turn view's tabs (D4) | `role="tablist"` (`aria-label="turn views"`) of `role="tab"` buttons with `aria-selected`, one `tabindex="0"`, `aria-controls` on the selected one; the drawn panel `role="tabpanel"`, `aria-labelledby` its tab |
+| the filters | `aria-label="filter turns"`, `aria-label="status"`, `aria-label="filter keys and values"`; `⧉` labelled `copy <key>` |
 | icon buttons | an `aria-label` on each: `⤢`, `⇆`, `◐`, `–`, `↺`, and the pill (its visible words, `weft devtools · 10→4`) |
 | the switcher, the turn dropdown | `aria-label="conversation"`, `aria-label="turn"` |
 
 The accessibility budget. `src/panel/a11y.test.ts` runs axe-core (a
 devDependency only — a test asserts `panel.js` holds no `axe`) with its
 default rules over the panel's shadow root in each mode — float open,
-docked right, the bottom sheet at 400 px, the pill — in both themes,
+docked right, the bottom sheet at 400 px, the pill, the Raw tab with
+its tree open and filtered, the Timeline tab — in both themes,
 and fails on any violation, listing them. jsdom has no layout, so the
 rules that need one come back incomplete, never as a pass:
 `color-contrast` (D2's `theme.test.ts` holds the palette to WCAG AA
@@ -487,15 +529,17 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 169,490 B raw / 48,102 B gzip
-(47.0 KiB, under the 80 KiB cap). The scope-detection ladder (C3: rungs
+committed `studio/dist/panel/panel.js`, 185,521 B raw / 52,951 B gzip
+(51.7 KiB, under the 80 KiB cap). The scope-detection ladder (C3: rungs
 2 to 5 and the activity pill) cost +6.0 KiB gzip against its +3 KiB
 estimate: nothing deferrable supplies the first scope and the
 deferrable remainder is under 1 KiB, so the overrun is accepted rather
 than split. The host API below cost about +3.1 KiB against +1 KiB (with its
 review fixes); the
 layout (D1) +3.6 KiB against +4 KiB (with its review fixes); the keyed
-renderer and ARIA (D3) +1.1 KiB against +2 KiB.
+renderer and ARIA (D3) +1.1 KiB against +2 KiB; the views (D4: tabs,
+the JSON tree and its filter, the turn filter, paging) +4.5 KiB against
++5 KiB.
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 

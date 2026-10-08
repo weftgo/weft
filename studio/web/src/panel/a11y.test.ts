@@ -1,6 +1,7 @@
 // Plan D3's accessibility budget: axe-core (a devDependency, never in
 // the bundle) over the panel's shadow root in each mode — float open,
-// docked right, the bottom sheet at 400 px, the pill — in both themes (D2),
+// docked right, the bottom sheet at 400 px, the pill, and (D4) the Raw
+// tab's open, filtered tree and the Timeline tab — in both themes (D2),
 // with axe's default rules; the budget is zero violations. jsdom has
 // no layout, so the rules that need one (color-contrast, and
 // label-content-name-mismatch's visible text) come back "incomplete",
@@ -10,7 +11,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { baseRoutes, fakeStudio, mount, setup, teardown } from "./testkit"
+import { baseRoutes, fakeStudio, mount, settle, setup, teardown } from "./testkit"
 import type { WeftDevtools } from "./element"
 
 beforeEach(() => {
@@ -38,11 +39,28 @@ const THEMES: Record<string, Record<string, string>> = {
   light: { "data-theme": "light" },
 }
 
-const MODES: { name: string; width: number; attrs: Record<string, string>; sel: string }[] = [
+/** D4: the Raw tab with its tree open and filtered (a marked match),
+ * and the Timeline tab. */
+async function rawOpen(el: WeftDevtools) {
+  ;(el.shadowRoot!.querySelector("#weft-tab-raw") as HTMLElement).click()
+  await settle()
+  const q = el.shadowRoot!.querySelector(".weft-tree-q") as HTMLInputElement
+  q.value = "run_start"
+  q.dispatchEvent(new Event("input", { bubbles: true }))
+  await settle()
+}
+async function timeline(el: WeftDevtools) {
+  ;(el.shadowRoot!.querySelector("#weft-tab-timeline") as HTMLElement).click()
+  await settle()
+}
+
+const MODES: { name: string; width: number; attrs: Record<string, string>; sel: string; act?: (el: WeftDevtools) => Promise<void> }[] = [
   { name: "float, open", width: 1024, attrs: { "data-open": "true" }, sel: ".weft-dock.weft-float" },
   { name: "docked right", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-dock.weft-docked" },
   { name: "bottom sheet at 400 px", width: 400, attrs: { "data-open": "true" }, sel: ".weft-dock.weft-sheet" },
   { name: "the pill", width: 1024, attrs: {}, sel: ".weft-fab" },
+  { name: "the Raw tab, its tree open and filtered", width: 1024, attrs: { "data-open": "true", "data-position": "bottom-dock" }, sel: ".weft-tn.weft-hit", act: rawOpen },
+  { name: "the Timeline tab", width: 1024, attrs: { "data-open": "true" }, sel: ".weft-timeline", act: timeline },
 ]
 
 /** The rules jsdom leaves incomplete: they need layout (the browser
@@ -67,6 +85,7 @@ describe("the axe budget: zero violations", () => {
         viewport(m.width, 768)
         fakeStudio(baseRoutes())
         const el = await mount({ ...BASE, ...m.attrs, ...themeAttrs })
+        await m.act?.(el)
         expect(el.shadowRoot!.querySelector(m.sel)).not.toBeNull()
         const { violations, incomplete } = await audit(el)
         expect(violations, violations.join("\n")).toEqual([])

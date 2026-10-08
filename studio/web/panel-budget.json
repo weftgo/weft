@@ -26,6 +26,7 @@
     { "label": "D1 fixes", "item": "D1", "gzip": 45836 },
     { "label": "D2", "item": "D2", "gzip": 46953 },
     { "label": "D3", "item": "D3", "gzip": 48102 },
-    { "label": "D2 fixes", "item": "D2", "gzip": 48298 }
+    { "label": "D2 fixes", "item": "D2", "gzip": 48298 },
+    { "label": "D4", "item": "D4", "gzip": 52951 }
   ]
 }

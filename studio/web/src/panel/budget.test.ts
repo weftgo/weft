@@ -11,7 +11,7 @@ const ledger = JSON.parse(readFileSync(resolve(process.cwd(), "panel-budget.json
 
 describe("the size ledger (panel-budget.json)", () => {
   it("is append-only: the recorded rows stay as recorded", () => {
-    expect(ledger.rows.slice(0, 15).map((r) => [r.label, r.item, r.gzip])).toEqual([
+    expect(ledger.rows.slice(0, 16).map((r) => [r.label, r.item, r.gzip])).toEqual([
       ["C1", "", 32359],
       ["G1", "", 32700],
       ["C5.2", "", 32810],
@@ -27,6 +27,7 @@ describe("the size ledger (panel-budget.json)", () => {
       ["D2", "D2", 46953],
       ["D3", "D3", 48102],
       ["D2 fixes", "D2", 48298],
+      ["D4", "D4", 52951],
     ])
     for (let i = 1; i < ledger.rows.length; i++) expect(ledger.items.some((x) => x.id === ledger.rows[i].item) || ledger.rows[i].item === "").toBe(true)
   })
@@ -37,7 +38,7 @@ describe("the size ledger (panel-budget.json)", () => {
   })
 
   it("prints one line per item: estimate, measured delta, over past half again its estimate; the total and headroom", () => {
-    const { lines, over } = budgetTable(ledger, 48298)
+    const { lines, over } = budgetTable(ledger, 52951)
     expect(over).toBe(false)
     const row = (id: string) => lines.find((l) => l.startsWith(id.padEnd(6))) ?? ""
     expect(row("D1")).toMatch(/drag\/resize\/dock\/persist\s+\+4\.0 KiB\s+\+3\.6 KiB\s+ok$/) // D1 + its fixes
@@ -45,16 +46,17 @@ describe("the size ledger (panel-budget.json)", () => {
     expect(row("D3")).toMatch(/keyed renderer \+ ARIA\s+\+2\.0 KiB\s+\+1\.1 KiB\s+ok$/)
     expect(row("C3")).toMatch(/\+3\.0 KiB\s+\+6\.0 KiB\s+over \(accepted\)$/)
     expect(row("C4")).toMatch(/\+1\.0 KiB\s+\+3\.1 KiB\s+over \(accepted\)$/) // C4.2 + its fixes
-    expect(row("D4")).toMatch(/\+5\.0 KiB\s+—\s+not landed$/)
+    expect(row("D4")).toMatch(/JSON tree \+ filter\s+\+5\.0 KiB\s+\+4\.5 KiB\s+ok$/)
+    expect(row("E1")).toMatch(/\+4\.0 KiB\s+—\s+not landed$/)
     expect(lines).toContain("baseline C1: 32,359 B")
     expect(lines.find((l) => l.includes("unbudgeted"))).toMatch(/G1, C5\.2.*\+0\.4 KiB/)
-    expect(lines.at(-1)).toBe("total 48,298 B (47.2 KiB) of 81,920 B · headroom 33,622 B (32.8 KiB)")
+    expect(lines.at(-1)).toBe("total 52,951 B (51.7 KiB) of 81,920 B · headroom 28,969 B (28.3 KiB)")
   })
 
   it("says when the build differs from the last row, and only the cap fails", () => {
-    const drift = budgetTable(ledger, 48398)
+    const drift = budgetTable(ledger, 53051)
     expect(drift.over).toBe(false)
-    expect(drift.lines.some((l) => l.includes("differs from the ledger's last row (D2 fixes, 48,298 B) by +0.1 KiB"))).toBe(true)
+    expect(drift.lines.some((l) => l.includes("differs from the ledger's last row (D4, 52,951 B) by +0.1 KiB"))).toBe(true)
     const big = budgetTable(ledger, 81921)
     expect(big.over).toBe(true)
     expect(big.lines.at(-1)).toContain("OVER THE CAP")

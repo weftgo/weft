@@ -300,7 +300,7 @@ describe("remembered per origin (localStorage[\"weft.devtools\"])", () => {
     let el = await open()
     key(dock(el), { key: "j" })
     await settle()
-    expect(stored()).toEqual({ v: 1, run: "s_01-t1", theme: "", raw: false, debug: false })
+    expect(stored()).toEqual({ v: 1, run: "s_01-t1", theme: "", raw: false, tab: "story", debug: false })
     el = await remount(el)
     expect(root(el).getAttribute("data-mode")).toBe("pill") // no data-open now: collapsed
     el.remove()
@@ -597,18 +597,22 @@ describe("the keyboard (only inside the panel, except Alt+W)", () => {
     expect(dock(el).classList.contains("weft-side-right")).toBe(true)
   })
 
-  it("/ is reserved for D4's search: it does nothing yet, and the list says so", async () => {
+  it("/ (D4) focuses the turn list's filter, and on the Raw tab the tree's; the list says so", async () => {
     fakeStudio(baseRoutes())
     const el = await open()
-    const before = el.shadowRoot!.innerHTML
-    expect(key(dock(el), { key: "/" }).defaultPrevented).toBe(false)
+    expect(key(dock(el), { key: "/" }).defaultPrevented).toBe(true)
+    expect(el.shadowRoot!.activeElement?.classList.contains("weft-turn-q")).toBe(true)
+    dock(el).focus()
+    key(dock(el), { key: "r" })
     await settle()
-    expect(el.shadowRoot!.innerHTML).toBe(before)
+    expect(key(dock(el), { key: "/" }).defaultPrevented).toBe(true)
+    expect(el.shadowRoot!.activeElement?.classList.contains("weft-tree-q")).toBe(true)
+    dock(el).focus()
     key(dock(el), { key: "?" })
     await settle()
     const keys = all(el, ".weft-keys dt").map((n) => n.textContent)
     expect(keys).toEqual(SHORTCUTS.map(([k]) => k))
-    expect(all(el, ".weft-keys dt").find((n) => n.textContent === "/")!.getAttribute("title")).toBe("reserved: search arrives with D4")
+    expect(all(el, ".weft-keys dt").find((n) => n.textContent === "/")!.hasAttribute("title")).toBe(false)
   })
 
   it("a j typed into the host page's input never reaches the panel (no key capture on the host)", async () => {

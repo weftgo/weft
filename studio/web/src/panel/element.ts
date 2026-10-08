@@ -402,6 +402,11 @@ export class WeftDevtools extends HTMLElement {
   private push = new Push()
   /** D2: follows <html>'s theme and prefers-color-scheme while connected. */
   private themeWatch = new ThemeWatch()
+  /** The theme the current render resolved (D2). */
+  private themeNow: "light" | "dark" = "dark"
+  private resolveNow() {
+    return resolveTheme(this.cfg.theme, this.lay.theme, this.themeWatch.host)
+  }
   /** The user placed the panel (or a placement was stored): the
    * placement is remembered from then on. */
   private placed = false
@@ -548,8 +553,9 @@ export class WeftDevtools extends HTMLElement {
     window.addEventListener("hashchange", this.onURL, { passive: true })
     window.addEventListener("popstate", this.onURL, { passive: true })
     this.themeWatch.start(() => {
-      if (this.getAttribute("data-theme-resolved") !== resolveTheme(this.cfg.theme, this.lay.theme)) this.render(this.last)
+      if (this.getAttribute("data-theme-resolved") !== this.resolveNow()) this.render(this.last)
     })
+    this.themeNow = this.resolveNow()
     this.syncTheme()
     this.syncGlobal()
     this.schedule()
@@ -1636,6 +1642,10 @@ export class WeftDevtools extends HTMLElement {
    * state that cannot be drawn leaves the previous frame standing. */
   private render(s: PanelState) {
     this.last = s
+    // D2: the theme, resolved once per render (the header's ◐ and
+    // data-theme-resolved read it); not before the connect, which
+    // resolves it itself.
+    if (this.isConnected) this.themeNow = this.resolveNow()
     try {
       this.watchRuns(s)
     } catch {
@@ -1713,25 +1723,27 @@ export class WeftDevtools extends HTMLElement {
   /** syncTheme sets data-theme-resolved on the element itself (D2):
    * the :host rule that picks the token set reads it. */
   private syncTheme(): void {
-    const t = resolveTheme(this.cfg.theme, this.lay.theme)
+    const t = this.themeNow
     if (this.isConnected && this.getAttribute("data-theme-resolved") !== t) this.setAttribute("data-theme-resolved", t)
   }
 
   /** themeButton cycles the user's theme (D2): auto → light → dark;
    * stored per origin, auto clears it. An explicit data-theme wins, so
-   * the button then only says so. */
+   * the button then only says so — aria-disabled, not disabled, so it
+   * stays focusable and read. */
   private themeButton(): HTMLElement {
     const pick = themeSetting(this.lay.theme)
-    const now = resolveTheme(this.cfg.theme, this.lay.theme)
+    const now = this.themeNow
     const fixed = this.cfg.theme !== "auto"
-    const said = fixed ? `theme: ${now}, set by the page (data-theme)` : `theme: ${pick}${pick === "auto" ? ` (${now})` : ""}`
+    const said = fixed ? `theme: ${now}, set by the page` : `theme: ${pick}${pick === "auto" ? ` (${now})` : ""}`
     const b = el("button", "weft-btn weft-theme", "◐", {
       type: "button",
       title: fixed ? said : `${said} — next: ${nextTheme(pick)}`,
       "aria-label": said,
-      ...(fixed ? { disabled: "" } : {}),
+      ...(fixed ? { "aria-disabled": "true" } : {}),
     })
     on(b, "click", () => {
+      if (fixed) return
       const next = nextTheme(pick)
       this.lay.theme = next === "auto" ? "" : next
       writeStore(this.lay, this.placed)

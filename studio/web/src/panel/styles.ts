@@ -24,13 +24,14 @@ const tokens = (t: Theme) =>
 export const TOKENS = [...Object.keys(PALETTE.dark).map((k) => `--weft-${k}`), "--weft-font", "--weft-radius", "--weft-radius-sm"]
 
 export const PANEL_CSS = `
-:host { all: initial; box-sizing: border-box; color-scheme: dark; ${tokens("dark")}
+:host { all: initial; color: inherit; box-sizing: border-box; color-scheme: dark; ${tokens("dark")}
   --weft-font: ${MONO_STACK}; --weft-radius: 8px; --weft-radius-sm: 5px; }
 :host([data-theme-resolved="light"]) { color-scheme: light; ${tokens("light")} }
 *, *::before, *::after { box-sizing: inherit; }
+/* No colour here: the dock and the pill set theirs; the unreachable
+   line keeps the host's (:host inherits color past all: initial). */
 .weft-root {
   font: 12px/1.45 var(--weft-font);
-  color: var(--weft-fg);
 }
 .weft-root * { margin: 0; padding: 0; font: inherit; color: inherit; }
 
@@ -60,7 +61,7 @@ export const PANEL_CSS = `
 .weft-turn-pick { display: none; }
 .weft-narrow .weft-cols { flex-direction: column; }
 .weft-narrow .weft-turn-pick { display: block; margin: 6px 10px 0; background: var(--weft-bg3); color: var(--weft-fg);
-  border: 1px solid var(--weft-line); border-radius: var(--weft-radius-sm); font: inherit; }
+  border: 1px solid var(--weft-faint); border-radius: var(--weft-radius-sm); font: inherit; }
 .weft-narrow .weft-turns { width: auto; border-right: none; max-height: 30%; }
 .weft-narrow .weft-rows { display: none; }
 .weft-narrow .weft-head { flex-wrap: wrap; white-space: normal; }
@@ -80,10 +81,11 @@ export const PANEL_CSS = `
 .weft-fab::before { content: "\\25C8"; color: var(--weft-accent); margin-right: 4px; }
 
 /* C2: a mount the host made, with no Studio answering — one quiet
-   line in the page's flow, where the host put the element. */
-.weft-unreachable { display: inline; font: 12px/1.45 var(--weft-font); color: var(--weft-dim); }
+   line in the page's flow, where the host put the element: it sits on
+   the host's background, so it takes the host's colour, not a theme's. */
+.weft-unreachable { display: inline; font: 12px/1.45 var(--weft-font); color: inherit; }
 .weft-unreachable-at { color: inherit; }
-.weft-retry { background: none; border: none; padding: 0; color: var(--weft-info); cursor: pointer;
+.weft-retry { background: none; border: none; padding: 0; color: inherit; cursor: pointer;
   text-decoration: underline; font: inherit; }
 
 .weft-head {
@@ -111,6 +113,7 @@ export const PANEL_CSS = `
 }
 .weft-btn:hover { color: var(--weft-fg); background: var(--weft-bg3); }
 .weft-btn.weft-active { color: var(--weft-accent); border-color: var(--weft-accent); }
+.weft-btn.weft-active:hover { background: var(--weft-bg2); }
 
 .weft-cols { display: flex; min-height: 0; flex: 1; }
 .weft-turns {
@@ -138,7 +141,7 @@ export const PANEL_CSS = `
 .weft-chip.weft-interrupted { color: var(--weft-info); border: 1px solid var(--weft-info); }
 .weft-chip.weft-parked { color: var(--weft-parked); border: 1px solid var(--weft-parked); }
 .weft-expts { margin: 0 0 4px 18px; }
-.weft-expts .weft-turn { border-bottom: none; opacity: .85; }
+.weft-expts .weft-turn { border-bottom: none; border-left: 1px solid var(--weft-line); }
 
 .weft-step { border: 1px solid var(--weft-line); border-radius: var(--weft-radius); margin-bottom: 8px; background: var(--weft-bg2); }
 .weft-step-h { display: flex; gap: 8px; padding: 5px 8px; color: var(--weft-dim);
@@ -204,7 +207,7 @@ details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 .weft-field > span { display: block; margin-bottom: 3px; }
 .weft-input {
   width: 100%; box-sizing: border-box; background: var(--weft-bg3); color: var(--weft-fg);
-  border: 1px solid var(--weft-line); border-radius: var(--weft-radius-sm); padding: 4px 6px;
+  border: 1px solid var(--weft-faint); border-radius: var(--weft-radius-sm); padding: 4px 6px;
   font: inherit; font-size: 11.5px;
 }
 textarea.weft-input { resize: vertical; }

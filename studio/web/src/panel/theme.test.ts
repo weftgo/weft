@@ -119,6 +119,27 @@ describe("auto (D2): the host page, then the system, then dark", () => {
     expect(html.className).toBe("dark")
   })
 
+  it("reads <html>'s computed style once per host change, not once per render", async () => {
+    fakeStudio(baseRoutes())
+    const cs = vi.spyOn(window, "getComputedStyle")
+    const onHtml = () => cs.mock.calls.filter((c) => c[0] === html).length
+    const el = await mount(BASE)
+    expect(onHtml()).toBeLessThanOrEqual(1)
+    const before = onHtml()
+    const raw = Array.from(el.shadowRoot!.querySelectorAll("button")).find((b) => b.textContent === "raw")
+    expect(raw).toBeTruthy()
+    click(raw)
+    await settle()
+    expect(onHtml()).toBe(before) // a render with nothing changed on <html>: cached
+    html.setAttribute("data-theme", "light")
+    await observed()
+    expect(resolved(el)).toBe("light") // data-theme short-circuits: no style read
+    html.removeAttribute("data-theme")
+    await observed()
+    expect(onHtml()).toBe(before + 1) // the change invalidated the cache: one read
+    expect(resolved(el)).toBe("dark")
+  })
+
   it("removes its observer and its media listener on disconnect", async () => {
     fakeStudio(baseRoutes())
     const media = stubMedia(false)
@@ -152,8 +173,13 @@ describe("explicit > stored > auto (D2)", () => {
     const explicit = await mount({ ...BASE, "data-theme": "dark" })
     expect(resolved(explicit)).toBe("dark") // explicit > stored
     const b = $(explicit, ".weft-theme") as HTMLButtonElement
-    expect(b.disabled).toBe(true)
-    expect(b.getAttribute("aria-label")).toBe("theme: dark, set by the page (data-theme)")
+    // aria-disabled, not disabled: it stays focusable and read; a click does nothing.
+    expect(b.disabled).toBe(false)
+    expect(b.getAttribute("aria-disabled")).toBe("true")
+    expect(b.getAttribute("aria-label")).toBe("theme: dark, set by the page")
+    click(b)
+    expect(resolved(explicit)).toBe("dark")
+    expect(stored()?.theme).toBe("light")
     explicit.setAttribute("data-theme", "auto") // auto hands it back
     await settle()
     expect(resolved(explicit)).toBe("light")
@@ -180,6 +206,7 @@ describe("explicit > stored > auto (D2)", () => {
     let el = await mount(BASE)
     expect(resolved(el)).toBe("dark")
     expect($(el, ".weft-theme")?.getAttribute("title")).toBe("theme: auto (dark) — next: light")
+    expect($(el, ".weft-theme")?.hasAttribute("aria-disabled")).toBe(false)
     click($(el, ".weft-theme"))
     expect(resolved(el)).toBe("light")
     expect(stored()?.theme).toBe("light")
@@ -208,16 +235,20 @@ describe("the tokens (D2)", () => {
     for (const t of TOKENS) expect(host, t).toContain(`${t}:`)
     for (const [k, v] of Object.entries(PALETTE.light)) expect(light).toContain(`--weft-${k}: ${v};`)
     for (const [k, v] of Object.entries(PALETTE.dark)) expect(host).toContain(`--weft-${k}: ${v};`)
-    // No colour outside the tokens.
+    // No colour outside the tokens, and no token declared (or
+    // redeclared) anywhere but the two :host blocks: a redeclaration on
+    // an inner node would shadow a host override.
     const rules = PANEL_CSS.replace(host, "").replace(light, "")
     expect(rules).not.toMatch(/#[0-9a-f]{3,6}\b|rgba?\(/i)
+    expect(rules).not.toMatch(/--weft-[a-z0-9-]+\s*:/)
   })
 
-  it("a host override of --weft-bg is honoured", async () => {
-    // jsdom does not cascade a shadow tree's :host rules, so the token's
-    // panel default is asserted above (declared on :host); here the
-    // host's own rule — an outer-document rule, which the cascade ranks
-    // above any :host rule (CSS Scoping §3.3) — resolves on the element.
+  it("the panel sets no token inline and an outer weft-devtools rule resolves on the element (jsdom; the cascade proof is a browser's)", async () => {
+    // jsdom does not cascade a shadow tree's :host rules, so this
+    // cannot prove the outer rule beats :host — CSS Scoping ranks an
+    // outer-document rule above any :host rule, and the review's
+    // real-Chrome run confirmed the override. What jsdom does prove:
+    // the outer rule reaches the element, and nothing inline beats it.
     fakeStudio(baseRoutes())
     const style = document.createElement("style")
     style.textContent = "weft-devtools { --weft-bg: #123456; }"
@@ -232,6 +263,10 @@ describe("the tokens (D2)", () => {
 /** The token values styles.css declares in a block (:root or .dark). */
 function studioTokens(selector: string): Record<string, string> {
   const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8")
+  // Exactly one top-level block per selector: a later override block
+  // would change the app's colours without this test seeing it.
+  const esc = selector.replace(".", "\\.")
+  expect(css.match(new RegExp(`^${esc}\\s*\\{`, "gm"))?.length, `top-level ${selector} blocks`).toBe(1)
   const at = css.search(new RegExp(`^${selector.replace(".", "\\.")} \\{`, "m"))
   expect(at, selector).toBeGreaterThanOrEqual(0)
   const body = css.slice(at, css.indexOf("}", at))
@@ -265,6 +300,13 @@ function contrast(a: string, b: string): number {
   return (x + 0.05) / (y + 0.05)
 }
 
+/** blend is fg drawn at opacity a over bg (what opacity does to text). */
+function blend(fg: string, bg: string, a: number): string {
+  const ch = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))
+  const [f, b] = [ch(fg), ch(bg)]
+  return "#" + f.map((v, i) => Math.round(v * a + b[i] * (1 - a)).toString(16).padStart(2, "0")).join("")
+}
+
 describe("contrast (D2; D3's axe run confirms it)", () => {
   it("measures what WCAG says", () => {
     expect(contrast("#000000", "#ffffff")).toBeCloseTo(21, 5)
@@ -287,11 +329,46 @@ describe("contrast (D2; D3's axe run confirms it)", () => {
         ["fg", "bg3", 4.5],
         ["dim", "bg3", 4.5],
         ["on-accent", "accent", 4.5],
-        // UI: the live dot, the selected row's bar, bars on the track.
+        // An active button hovered: accent on bg2 (.weft-btn.weft-active:hover).
+        ["accent", "bg2", 4.5],
+        // UI: the live dot, the selected row's bar, bars on the track;
+        // faint is the fields' border on their bg3 fill (dark bg3 is the line).
         ["accent", "bg3", 3],
         ["info", "bg3", 3],
         ["faint", "bg2", 3],
+        ["faint", "bg3", 3],
       ]
       for (const [f, b, min] of pairs) expect(contrast(p[f], p[b]), `${t} --weft-${f} on --weft-${b}`).toBeGreaterThanOrEqual(min)
+      // Any static opacity in the stylesheet blends text into its
+      // surface: every text token, so blended, must still clear 4.5:1
+      // (@keyframes are animation, not a resting state).
+      const resting = PANEL_CSS.replace(/@keyframes[^{]*\{[^{}]*\{[^}]*\}\s*\}/g, "")
+      for (const m of resting.matchAll(/opacity:\s*([\d.]+)/g))
+        for (const f of TEXT)
+          for (const b of ["bg", "bg2"])
+            expect(contrast(blend(p[f], p[b], Number(m[1])), p[b]), `${t} --weft-${f} at opacity ${m[1]} on --weft-${b}`).toBeGreaterThanOrEqual(4.5)
     })
+
+  it("faint never sits on a hovered or selected row (it reads 4.41/4.21 on bg3): those rows recolour it dim", () => {
+    expect(PANEL_CSS).toContain(".weft-turn:hover .weft-when, .weft-turn.weft-sel .weft-when { color: var(--weft-dim); }")
+    const onBg3 = PANEL_CSS.split("}").filter((r) => r.includes("background: var(--weft-bg3)") && r.includes("color: var(--weft-faint)"))
+    expect(onBg3).toEqual([])
+  })
+
+  it("an experiment row is marked by its indent and rule, not by opacity", () => {
+    expect(PANEL_CSS).toContain(".weft-expts .weft-turn { border-bottom: none; border-left: 1px solid var(--weft-line); }")
+    expect(PANEL_CSS).not.toMatch(/\.weft-expts[^{]*\{[^}]*opacity/)
+  })
+
+  it("the unreachable line sits on the host page's background, so it takes the host's colour", () => {
+    const rule = (sel: string) => new RegExp(`\\${sel} \\{([^}]*)\\}`).exec(PANEL_CSS)?.[1] ?? ""
+    for (const sel of [".weft-unreachable", ".weft-retry"]) {
+      expect(rule(sel), sel).toContain("color: inherit")
+      expect(rule(sel), sel).not.toMatch(/color: var\(--weft-/)
+    }
+    expect(rule(".weft-retry")).toContain("text-decoration: underline")
+    // :host passes the page's colour through all: initial; .weft-root sets none.
+    expect(/:host \{ all: initial; color: inherit;/.test(PANEL_CSS)).toBe(true)
+    expect(rule(".weft-root")).not.toMatch(/(^|[^-])color:/)
+  })
 })

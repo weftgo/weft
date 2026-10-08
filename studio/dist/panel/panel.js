@@ -303,14 +303,18 @@ function ue() {
 	let e = le(ce);
 	return e ? e.matches ? "dark" : le("(prefers-color-scheme: light)")?.matches ? "light" : "" : "";
 }
-function de(e, t) {
-	return e === "auto" ? oe(t) || se() || ue() || "dark" : e;
+function de(e, t, n = se) {
+	return e === "auto" ? oe(t) || n() || ue() || "dark" : e;
 }
 var fe = (e) => e === "auto" ? "light" : e === "light" ? "dark" : "auto", pe = class {
 	obs = null;
 	mq = null;
 	cb = () => {};
-	fire = () => this.cb();
+	cached = null;
+	fire = () => {
+		this.cached = null, this.cb();
+	};
+	host = () => this.obs ? this.cached ??= se() : se();
 	start(e) {
 		this.stop(), this.cb = e;
 		try {
@@ -333,7 +337,7 @@ var fe = (e) => e === "auto" ? "light" : e === "light" ? "dark" : "auto", pe = c
 		try {
 			this.mq?.removeEventListener ? this.mq.removeEventListener("change", this.fire) : this.mq?.removeListener(this.fire);
 		} catch {}
-		this.mq = null, this.cb = () => {};
+		this.mq = null, this.cached = null, this.cb = () => {};
 	}
 };
 //#endregion
@@ -1656,13 +1660,14 @@ var gn = {
 }, _n = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", monospace", vn = (e) => Object.entries(gn[e]).map(([e, t]) => `--weft-${e}: ${t};`).join(" ");
 [...Object.keys(gn.dark).map((e) => `--weft-${e}`)];
 var yn = `
-:host { all: initial; box-sizing: border-box; color-scheme: dark; ${vn("dark")}
+:host { all: initial; color: inherit; box-sizing: border-box; color-scheme: dark; ${vn("dark")}
   --weft-font: ${_n}; --weft-radius: 8px; --weft-radius-sm: 5px; }
 :host([data-theme-resolved="light"]) { color-scheme: light; ${vn("light")} }
 *, *::before, *::after { box-sizing: inherit; }
+/* No colour here: the dock and the pill set theirs; the unreachable
+   line keeps the host's (:host inherits color past all: initial). */
 .weft-root {
   font: 12px/1.45 var(--weft-font);
-  color: var(--weft-fg);
 }
 .weft-root * { margin: 0; padding: 0; font: inherit; color: inherit; }
 
@@ -1692,7 +1697,7 @@ var yn = `
 .weft-turn-pick { display: none; }
 .weft-narrow .weft-cols { flex-direction: column; }
 .weft-narrow .weft-turn-pick { display: block; margin: 6px 10px 0; background: var(--weft-bg3); color: var(--weft-fg);
-  border: 1px solid var(--weft-line); border-radius: var(--weft-radius-sm); font: inherit; }
+  border: 1px solid var(--weft-faint); border-radius: var(--weft-radius-sm); font: inherit; }
 .weft-narrow .weft-turns { width: auto; border-right: none; max-height: 30%; }
 .weft-narrow .weft-rows { display: none; }
 .weft-narrow .weft-head { flex-wrap: wrap; white-space: normal; }
@@ -1712,10 +1717,11 @@ var yn = `
 .weft-fab::before { content: "\\25C8"; color: var(--weft-accent); margin-right: 4px; }
 
 /* C2: a mount the host made, with no Studio answering — one quiet
-   line in the page's flow, where the host put the element. */
-.weft-unreachable { display: inline; font: 12px/1.45 var(--weft-font); color: var(--weft-dim); }
+   line in the page's flow, where the host put the element: it sits on
+   the host's background, so it takes the host's colour, not a theme's. */
+.weft-unreachable { display: inline; font: 12px/1.45 var(--weft-font); color: inherit; }
 .weft-unreachable-at { color: inherit; }
-.weft-retry { background: none; border: none; padding: 0; color: var(--weft-info); cursor: pointer;
+.weft-retry { background: none; border: none; padding: 0; color: inherit; cursor: pointer;
   text-decoration: underline; font: inherit; }
 
 .weft-head {
@@ -1743,6 +1749,7 @@ var yn = `
 }
 .weft-btn:hover { color: var(--weft-fg); background: var(--weft-bg3); }
 .weft-btn.weft-active { color: var(--weft-accent); border-color: var(--weft-accent); }
+.weft-btn.weft-active:hover { background: var(--weft-bg2); }
 
 .weft-cols { display: flex; min-height: 0; flex: 1; }
 .weft-turns {
@@ -1770,7 +1777,7 @@ var yn = `
 .weft-chip.weft-interrupted { color: var(--weft-info); border: 1px solid var(--weft-info); }
 .weft-chip.weft-parked { color: var(--weft-parked); border: 1px solid var(--weft-parked); }
 .weft-expts { margin: 0 0 4px 18px; }
-.weft-expts .weft-turn { border-bottom: none; opacity: .85; }
+.weft-expts .weft-turn { border-bottom: none; border-left: 1px solid var(--weft-line); }
 
 .weft-step { border: 1px solid var(--weft-line); border-radius: var(--weft-radius); margin-bottom: 8px; background: var(--weft-bg2); }
 .weft-step-h { display: flex; gap: 8px; padding: 5px 8px; color: var(--weft-dim);
@@ -1836,7 +1843,7 @@ details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 .weft-field > span { display: block; margin-bottom: 3px; }
 .weft-input {
   width: 100%; box-sizing: border-box; background: var(--weft-bg3); color: var(--weft-fg);
-  border: 1px solid var(--weft-line); border-radius: var(--weft-radius-sm); padding: 4px 6px;
+  border: 1px solid var(--weft-faint); border-radius: var(--weft-radius-sm); padding: 4px 6px;
   font: inherit; font-size: 11.5px;
 }
 textarea.weft-input { resize: vertical; }
@@ -3160,6 +3167,10 @@ var Cr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	lay;
 	push = new ie();
 	themeWatch = new pe();
+	themeNow = "dark";
+	resolveNow() {
+		return de(this.cfg.theme, this.lay.theme, this.themeWatch.host);
+	}
 	placed = !1;
 	dragging = !1;
 	rove = "";
@@ -3225,8 +3236,8 @@ var Cr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			};
 		}
 		S(this.lay), window.addEventListener("keydown", this.onKey), window.addEventListener("resize", this.onResize, { passive: !0 }), window.addEventListener("pointerup", this.onRelease, !0), window.addEventListener("pointercancel", this.onRelease, !0), window.addEventListener("hashchange", this.onURL, { passive: !0 }), window.addEventListener("popstate", this.onURL, { passive: !0 }), this.themeWatch.start(() => {
-			this.getAttribute("data-theme-resolved") !== de(this.cfg.theme, this.lay.theme) && this.render(this.last);
-		}), this.syncTheme(), this.syncGlobal(), this.schedule();
+			this.getAttribute("data-theme-resolved") !== this.resolveNow() && this.render(this.last);
+		}), this.themeNow = this.resolveNow(), this.syncTheme(), this.syncGlobal(), this.schedule();
 	}
 	disconnectedCallback() {
 		window.removeEventListener("keydown", this.onKey), window.removeEventListener("resize", this.onResize), this.dropDrag?.(), this.dropDrag = null, this.dragging = !1, this.push.restore(), this.themeWatch.stop(), window.removeEventListener("pointerup", this.onRelease, !0), window.removeEventListener("pointercancel", this.onRelease, !0), window.removeEventListener("hashchange", this.onURL), window.removeEventListener("popstate", this.onURL), this.holdTimer && clearTimeout(this.holdTimer), this.holdTimer = null, this.held = this.composing = !1, this.startSeq++, this.probe?.abort(), this.probe = null, this.model?.dispose(), this.model = null, this.conn = null, this.ready = !1, this.dropRung(), this.dropMarkers(), this.dropGlobal();
@@ -3765,7 +3776,7 @@ var Cr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		this.dirty && !this.held && !this.composing && this.render(this.last);
 	}
 	render(e) {
-		this.last = e;
+		this.last = e, this.isConnected && (this.themeNow = this.resolveNow());
 		try {
 			this.watchRuns(e);
 		} catch {}
@@ -3800,17 +3811,18 @@ var Cr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		t.getAttribute("data-mode") !== i && t.setAttribute("data-mode", i), this.cfg.push && this.isConnected && t.querySelector(".weft-docked") ? this.push.apply(this.lay.side, `${this.lay.d}px`) : this.cfg.push && this.isConnected && t.querySelector(".weft-sheet") ? this.push.apply("bottom", "70vh") : this.push.restore();
 	}
 	syncTheme() {
-		let e = de(this.cfg.theme, this.lay.theme);
+		let e = this.themeNow;
 		this.isConnected && this.getAttribute("data-theme-resolved") !== e && this.setAttribute("data-theme-resolved", e);
 	}
 	themeButton() {
-		let e = ae(this.lay.theme), t = de(this.cfg.theme, this.lay.theme), n = this.cfg.theme !== "auto", r = n ? `theme: ${t}, set by the page (data-theme)` : `theme: ${e}${e === "auto" ? ` (${t})` : ""}`, i = V("button", "weft-btn weft-theme", "◐", {
+		let e = ae(this.lay.theme), t = this.themeNow, n = this.cfg.theme !== "auto", r = n ? `theme: ${t}, set by the page` : `theme: ${e}${e === "auto" ? ` (${t})` : ""}`, i = V("button", "weft-btn weft-theme", "◐", {
 			type: "button",
 			title: n ? r : `${r} — next: ${fe(e)}`,
 			"aria-label": r,
-			...n ? { disabled: "" } : {}
+			...n ? { "aria-disabled": "true" } : {}
 		});
 		return H(i, "click", () => {
+			if (n) return;
 			let t = fe(e);
 			this.lay.theme = t === "auto" ? "" : t, b(this.lay, this.placed), this.render(this.last);
 		}), i;

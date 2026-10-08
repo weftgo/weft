@@ -26,7 +26,7 @@ export interface Layout {
   d: number
   /** The last selected turn, by run id. */
   run: string
-  /** Reserved for the theme (D2): kept as stored, not read yet. */
+  /** The user's theme choice (D2, the ◐ button): "light", "dark", or "" for auto. */
   theme: string
   raw: boolean
   /** The §5.3 force-on switch, migrated from localStorage.weft_debug. */

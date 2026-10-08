@@ -63,22 +63,34 @@ export function systemTheme(): Theme | "" {
 }
 
 /** resolveTheme: explicit, then stored, then the host page, then the
- * system, then dark. */
-export function resolveTheme(explicit: ThemeSetting, stored: string): Theme {
+ * system, then dark. host reads the page (a ThemeWatch's cache). */
+export function resolveTheme(explicit: ThemeSetting, stored: string, host: () => Theme | "" = hostTheme): Theme {
   if (explicit !== "auto") return explicit
-  return word(stored) || hostTheme() || systemTheme() || "dark"
+  return word(stored) || host() || systemTheme() || "dark"
 }
 
 /** The theme button's cycle: auto → light → dark → auto. */
 export const nextTheme = (t: ThemeSetting): ThemeSetting => (t === "auto" ? "light" : t === "light" ? "dark" : "auto")
 
 /** ThemeWatch calls back when the host page or the system may have
- * changed theme. */
+ * changed theme, and caches what <html> says between those changes:
+ * hostTheme's getComputedStyle forces a style recalc, so it runs once
+ * per change, not once per render. A stylesheet-driven color-scheme
+ * change (no attribute moves) is not observed: <html>'s data-theme and
+ * class are the signals. */
 export class ThemeWatch {
   private obs: MutationObserver | null = null
   private mq: MediaQueryList | null = null
   private cb = () => {}
-  private readonly fire = () => this.cb()
+  private cached: Theme | "" | null = null
+  private readonly fire = () => {
+    this.cached = null
+    this.cb()
+  }
+
+  /** host is hostTheme(), cached until the next change while watching
+   * (unwatched, nothing would tell the cache it is stale). */
+  readonly host = (): Theme | "" => (this.obs ? (this.cached ??= hostTheme()) : hostTheme())
 
   start(cb: () => void): void {
     this.stop()
@@ -108,6 +120,7 @@ export class ThemeWatch {
       // nothing to remove
     }
     this.mq = null
+    this.cached = null // nothing observed from here: read afresh next time
     this.cb = () => {}
   }
 }

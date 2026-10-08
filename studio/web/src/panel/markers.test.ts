@@ -346,7 +346,7 @@ describe("the panel's marker rung", () => {
     expect(text(el, ".weft-title")).toContain("pub_a")
   })
 
-  it("data-detect=\"off\" installs nothing; disconnect removes the observer and the focusin listener", async () => {
+  it("data-detect=\"off\" installs no marker observer and no focusin listener; disconnect removes them", async () => {
     fakeStudio(routesFor("pub_a"))
     const spy = vi.spyOn(MutationObserver.prototype, "observe")
     // The marker rung's observer only (D2's theme observer watches <html>'s own attributes).

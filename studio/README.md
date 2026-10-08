@@ -366,6 +366,20 @@ fields), `--weft-fg`, `--weft-dim`, `--weft-faint`, `--weft-line`,
 `--weft-err`, `--weft-info`, `--weft-ok`, `--weft-parked`,
 `--weft-scrim` (the `?` overlay), `--weft-shadow`, `--weft-font`,
 `--weft-radius`, `--weft-radius-sm` (and `--weft-z`, above).
+The panel's own tokens, not Studio's: light `--weft-faint` `#766f61`
+(Studio's `--faint` reads 2.6:1 on paper, under AA; dark `--weft-faint`
+is Studio's `--code-mut`), `--weft-parked` (Studio has no purple),
+`--weft-scrim` and `--weft-shadow`. Two consequences of the Studio
+palette: in light, `--weft-bg2` equals `--weft-bg` (Studio's `--card`
+is its `--background`), so the header, steps and footer differ from
+the panes by their line only; in dark, `--weft-bg3` equals
+`--weft-line`, so fields (`.weft-input`, the narrow turn dropdown) draw
+their border in `--weft-faint` (3:1 on their fill). `color-scheme` on
+`:host` gives the panel's native controls and scrollbars the resolved
+theme. The one thing drawn in your page's flow — the "Studio not
+reachable" line a mount you made shows — sits on your background, so
+it takes your page's text colour (`color: inherit`, the retry link
+underlined), not a theme's.
 
 The panel remembers, per origin, in `localStorage["weft.devtools"]`
 — one JSON object, `{v: 1, mode, side, open, hidden, x, y, w, h, d,

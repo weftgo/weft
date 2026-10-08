@@ -450,7 +450,9 @@ the event stream, the stop reason and the usage, through real
 report is contained and counted in `Agent.TapPanics`, the report
 dropped; a report made after its model call returned is dropped, best-effort
 (no lock: one racing report from a goroutine the chain left behind may
-still land under the ended chat span). The
+still land under the ended chat span; the request record a further
+attempt adds is emitted under the lock the call's end takes, so it
+never lands late — ADR 0028 §7). The
 reporter numbers the model call's attempts itself, 1..n in report
 order (atomic, so concurrent reports stay unique) — the caller gives
 no index. An `Attempt` becomes, with a tracer recording, an `attempt`

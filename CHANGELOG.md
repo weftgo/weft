@@ -371,6 +371,118 @@ module, ADR 0005).
   the attempt list (model, outcome, `retry_after`, times) from the step
   route on expand under the `steps` capability, the same on the trace
   view's `chat` span, and `not_recorded` on a run from before A4.
+- **The reporting hook (plan A8, ADR 0016).** `weft.ReportFromContext(ctx)`
+  returns the model call's `Reporter`: `.Attempt(weft.AttemptInfo{…})`
+  records one provider request as an `attempt` span under `chat`
+  (provider, model, `weft.attempt.index`, `weft.attempt.retry_after_ms`,
+  `error.type` or Ok) and, from the second attempt on, its own
+  `request` record; `.Raw(weft.RawPair{…})` is accepted and dropped
+  (sizes on a Debug line). The reporter numbers attempts itself; a
+  layer that reports declares `ReportsAttempts() bool` and an outer
+  reporting layer stays silent. `mw.Retry` and `mw.Fallback` report
+  every attempt. Outside a run's model call the reporter is a no-op.
+- **`obsdb` names the phase-1 readers added above**: `CompactionRun`,
+  `CompactionSession`, `RecordCompaction`, `ReasonCompacted`;
+  `HoleCause`, `HoleCauses`, `CauseDefault`; `LogSkew`, `ParseSeverity`,
+  `SeverityText`; `RunDetail.{InstructionsHash,CatalogHash,RequestCount}`
+  beside `RunRow`'s; the `RequestBody` parts `RequestMessagesRef`,
+  `RequestModel`, `RequestParams`, `RequestThinking`, `RequestToolChoice`,
+  `RequestTools`.
+
+### Fixed
+
+Found by the phase-1 review of the request record (2026-10-08); none
+changes what the model sees.
+
+- **core**: a reported attempt that raced the model call's end could
+  still add a `request` record; the record is now emitted under the
+  lock `end()` takes, so a late report adds none (ADR 0028 §7). A
+  cancelled resume whose transcript ended at the assistant message
+  (every call parked) records its rebuilt tool message like a resume
+  with a held tail does, so the records still concatenate to
+  `RunError.Result.Messages`. A further attempt that reports a model
+  is recorded under the provider it reported, even an empty one — a
+  fallback to another vendor no longer carries the primary's provider.
+  The agent's instructions hash is computed once at `New` (two
+  allocations fewer per run). The Debug line for a contained recorder
+  panic names the panic's type, never its value.
+- **otel**: `capTools` encodes the catalog once instead of once per
+  dropped entry (a 400-tool catalog took 86 ms on the run goroutine).
+  A `Redact` panic on `params.stop` drops the stop sequences only; the
+  request keeps `messages_ref.index` on a destination that received
+  the messages records.
+- **obsdb**: a run row with request records but no instructions hash
+  (the `run_start` batch lost or not yet landed) reads recorded, and a
+  prompt or catalog its requests name but the store lacks is a `gap` —
+  not `not_recorded` with "upgrade weft" (ADR 0028 §10's table gains
+  the row). `weft.attempt.retry_after_ms` and the ten
+  `weft.override.*` fingerprint fields join the contract keys on both
+  backends (and 0004's tuples), so a non-string value no longer lands
+  in ClickHouse's run meta and not SQLite's. A `messages` record
+  without its index — growth or view — and an index attribute present
+  but empty read position -1 on both backends and stay out of the
+  transcript and the messages count (before, SQLite stored a growth
+  record at 0 where the input record dropped it and ClickHouse read it
+  first). A non-string `weft.messages.reason` reads as "not growth" on
+  SQLite as it does on ClickHouse. Two session markers with distinct
+  non-hex hashes keep distinct positions on SQLite (a 60-bit FNV
+  fallback). App-log lines equal in time, span, severity and body sort
+  by event name and attributes on both backends, so paging by
+  `next_from` neither skips nor repeats a line.
+- **thread**: a compaction in a forked session no longer files its
+  marker under the origin session's run — it is held for the fork's
+  first run. A mid-run overflow's compaction keeps the earlier turn's
+  span context and metadata on its marker (the Session remembers the
+  last four runs it saw). After a reopen the marker carries
+  `weft.turn`, `weft.public_id` and the lineage pairs, not the session
+  id alone. A held marker that loses a race with `Close` is dropped
+  with the "compaction markers dropped at close" Debug line.
+- **version**: `version.Runtime()` maps a VCS-stamped pseudo-version
+  and a `+dirty` suffix to `Version`, as it does `(devel)`, so a local
+  `go build` reports the same version its runs stamp.
+- **studio (server)**: a read-scoped token no longer sees tool names
+  through the `invoke_agent` span's `weft.override.tools`,
+  `weft.override.park_on`, `weft.override.park_all_except` (and a named
+  `tool_choice`) on `runs/{id}/spans`, `traces/{id}` or the json/jsonl
+  export, nor a compaction view's messages in the export (`null` with
+  the `hidden` badge); `/api/manifest`'s 403 carries the hidden badge
+  like every other prompt-bearing refusal; the fixtures route checks
+  scope before it decodes the body. The step route joins a child to
+  the step its id names (a call id repeated across steps no longer
+  borrows another step's child); a running step is no longer badged
+  `not_recorded`/`gap` for a chat span that has not ended; a running
+  run's step without a stored `step_start` reads running, not ok with
+  a gap; `weft.model.tool_calls` is clamped before it sizes a response;
+  a lone unnumbered request record merges into attempt 1 instead of
+  counting the call twice; a `messages_ref` naming a dropped view reads
+  `gap` on `messages_in`. The run document and the export share one
+  rule for lost events (`gap` when requests or steps exist with no
+  spans, `derived` when spans exist); one unreadable child no longer
+  fails the parent's document; export children rows carry `holes`;
+  the export's top-level `holes` also lists `truncated`, non-final
+  `max_tokens` and per-event `stripped`. Every hole's fix comes from
+  `obsdb.HoleNote`/`HoleNoteFor` (two new causes: `result_cap`,
+  `log_cap`). The auth matrix gains `runs?all=1`, a child's otlp/jsonl
+  export, `steps/{bad}` (403 wins), HEAD on every export format and
+  the span-attribute check.
+- **studio (web, panel)**: `linkView` is idempotent (a re-render no
+  longer links one child to a second call with the same id); call
+  rows and trace span keys are step-qualified (`c:<step>:<call>`,
+  `c:resume:<call>`), so a repeated call id selects the right call and
+  React sees no duplicate keys in a resumed step 0 — old `?sel=c:<id>`
+  links no longer resolve; the step document is re-read while a step
+  runs and once the run ends, and its running-time holes are never
+  shown as final; the requests query re-reads from the first missing
+  index on the terminal refetch (an out-of-order row no longer leaves a
+  false `gap`); `applyTranscript` clones the steps it overlays (a late
+  delta no longer appends to transcript text); the `derived` attempt
+  badge says what the server means and lists an unnumbered record by
+  its request index; the header and the panel share one status-hole
+  rule (`statusHoles`); "show original" reports a transcript read
+  error instead of loading forever; `findCall` closes the most recent
+  open call; no bare "1 attempt". `logs.test.ts` reads the Go goldens
+  and a drift guard checks every step and logs golden against the TS
+  types.
 
 ## 0.9.0 — 2026-10-07
 

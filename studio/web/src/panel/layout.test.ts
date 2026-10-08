@@ -8,6 +8,7 @@ import {
   all,
   assistant,
   baseRoutes,
+  FakeEventSource,
   fakeStudio,
   mount,
   page,
@@ -140,10 +141,14 @@ describe("the modes (D1)", () => {
     expect(root(el).children).toHaveLength(0)
     expect(el.isOpen).toBe(false)
     expect(el.studioLink("s_01-t1", 0)).toBe("http://studio.test/studio/runs/s_01-t1?step=0&view=story")
+    expect((window as unknown as { weft?: { devtools?: unknown } }).weft?.devtools).toBe(el.api) // the global, while hidden
     const seen: string[] = []
-    el.on("run", (d) => seen.push(d.runId))
-    el.select("s_01-t1", 0)
+    el.on("run", (d) => seen.push(`${d.runId} ${d.status}`))
+    FakeEventSource.last("public_id=pub_orders")!.emit("run", {
+      run: runRow({ id: "s_01-t3", turn: 3, status: "running", finished: null, steps: 0, started: "2026-10-01T09:09:00Z" }),
+    })
     await settle()
+    expect(seen).toEqual(["s_01-t3 running"]) // events keep flowing while hidden
     expect(el.shadowRoot!.querySelectorAll(".weft-dock, .weft-fab")).toHaveLength(0)
     el.open()
     await settle()
@@ -207,6 +212,33 @@ describe("drag and resize (pointer events, clamped to the viewport)", () => {
       el.remove()
       localStorage.clear()
     }
+  })
+
+  it("a drag that never ends on its handle still ends: a lost capture, a release elsewhere, a disconnect", async () => {
+    fakeStudio(baseRoutes())
+    const el = await open()
+    pointer($(el, ".weft-head")!, "pointerdown", 600, 200)
+    pointer($(el, ".weft-head")!, "pointermove", 500, 150)
+    $(el, ".weft-head")!.dispatchEvent(new PointerEvent("lostpointercapture", { pointerId: 1 }))
+    await settle()
+    expect(dock(el).style.left).toBe("388px")
+    expect(stored()).toMatchObject({ x: 388 }) // ended: saved
+    // Released outside the handle (no capture): the window's release ends it.
+    pointer($(el, ".weft-head")!, "pointerdown", 600, 200)
+    window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }))
+    el.close()
+    await settle()
+    expect($(el, ".weft-fab")).toBeTruthy() // drawn: no drag holds the draws
+    // Disconnected mid-drag, then reconnected: it draws again.
+    el.open()
+    await settle()
+    pointer($(el, ".weft-head")!, "pointerdown", 600, 200)
+    el.remove()
+    document.body.appendChild(el)
+    await settle()
+    el.close()
+    await settle()
+    expect($(el, ".weft-fab")).toBeTruthy()
   })
 
   it("a viewport resize clamps the float again (a passive listener, removed on disconnect)", async () => {
@@ -277,6 +309,26 @@ describe("remembered per origin (localStorage[\"weft.devtools\"])", () => {
     expect(text(el, ".weft-turn.weft-sel .weft-id")).toBe("s_01-t1")
   })
 
+  it("a running turn outranks the remembered one on reload", async () => {
+    const routes = twoTurns()
+    const t2 = runRow({ id: "s_01-t2", turn: 2, status: "running", finished: null, steps: 0, started: "2026-10-01T09:05:00Z" })
+    routes["runs?public_id=pub_orders&limit=50"] = { total: 2, runs: [t2, runRow({})], next_before: null }
+    routes["runs/s_01-t2"] = { ...t2, children: [] }
+    fakeStudio(routes)
+    localStorage.setItem(STORE_KEY, JSON.stringify({ v: 1, run: "s_01-t1" }))
+    const el = await open()
+    expect(text(el, ".weft-turn.weft-sel .weft-id")).toBe("s_01-t2")
+  })
+
+  it("an explicit data-mode float|dock wins over what data-position implies", async () => {
+    fakeStudio(baseRoutes())
+    let el = await open({ "data-position": "left-dock", "data-mode": "float" })
+    expect(dock(el).classList.contains("weft-float")).toBe(true)
+    el.remove()
+    el = await open({ "data-position": "bottom-left", "data-mode": "dock" })
+    expect(dock(el).classList.contains("weft-side-right")).toBe(true)
+  })
+
   it("an unknown version is ignored; a private window (storage throws) just forgets", async () => {
     fakeStudio(baseRoutes())
     localStorage.setItem(STORE_KEY, JSON.stringify({ v: 2, open: true, mode: "dock" }))
@@ -310,6 +362,17 @@ describe("remembered per origin (localStorage[\"weft.devtools\"])", () => {
     localStorage.removeItem(STORE_KEY) // the documented off switch
     expect(debugForced()).toBe(false)
   })
+
+  it("weft_debug=1 still forces the panel when the migration cannot write", () => {
+    localStorage.setItem("weft_debug", "1")
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError")
+    })
+    expect(debugForced()).toBe(true)
+    expect(localStorage.getItem("weft_debug")).toBe("1") // not migrated, not dropped
+    vi.restoreAllMocks()
+    localStorage.removeItem("weft_debug")
+  })
 })
 
 describe("data-push (opt-in: padding on <html> while docked)", () => {
@@ -341,6 +404,38 @@ describe("data-push (opt-in: padding on <html> while docked)", () => {
     expect(html.style.getPropertyValue("padding-right")).toBe("3px")
     el.remove()
     expect(html.getAttribute("style")).toBe("padding-right: 3px !important;")
+  })
+
+  it("left and top docks pad their own side", async () => {
+    fakeStudio(baseRoutes())
+    const html = document.documentElement
+    for (const side of ["left", "top"]) {
+      const el = await open({ "data-position": `${side}-dock`, "data-push": "true" })
+      expect(html.style.getPropertyValue(`padding-${side}`), side).toBe("var(--weft-devtools-inset)")
+      expect(html.style.getPropertyValue("--weft-devtools-inset")).toBe("460px")
+      el.remove()
+      expect(html.style.cssText).toBe("")
+      localStorage.clear()
+    }
+  })
+
+  it("a host padding set while docked is the host's: replaced while docked, given back on undock", async () => {
+    fakeStudio(baseRoutes())
+    const html = document.documentElement
+    const el = await open({ "data-position": "right-dock", "data-push": "true" })
+    html.style.setProperty("padding-right", "9px")
+    // The next redraw (a stream event) takes the side again…
+    FakeEventSource.last("public_id=pub_orders")!.emit("run", { run: runRow({ steps: 2 }) })
+    await settle()
+    expect(html.style.getPropertyValue("padding-right")).toBe("var(--weft-devtools-inset)")
+    // …and further redraws leave it alone (written only when not ours).
+    const set = vi.spyOn(html.style, "setProperty")
+    FakeEventSource.last("public_id=pub_orders")!.emit("run", { run: runRow({ steps: 3 }) })
+    await settle()
+    expect(set).not.toHaveBeenCalled()
+    el.close()
+    await settle()
+    expect(html.getAttribute("style")).toBe("padding-right: 9px;")
   })
 
   it("a float never pushes", async () => {
@@ -376,7 +471,15 @@ describe("narrow panels and small viewports", () => {
     expect([d.style.left, d.style.top, d.style.width, d.style.height]).toEqual(["", "", "", ""])
     expect($(el, "select.weft-turn-pick")).toBeTruthy()
     expect($(el, ".weft-grip, .weft-edge")).toBeNull()
-    expect(document.documentElement.getAttribute("style")).toBeNull() // a sheet never pushes
+    // data-push: the sheet pads the bottom by its 70vh, restored exactly.
+    const html = document.documentElement
+    expect(html.style.getPropertyValue("padding-bottom")).toBe("var(--weft-devtools-inset)")
+    expect(html.style.getPropertyValue("--weft-devtools-inset")).toBe("70vh")
+    el.close()
+    await settle()
+    expect(html.style.cssText).toBe("")
+    el.open()
+    await settle()
     expect(PANEL_CSS).toMatch(/\.weft-sheet \{[^}]*max-height: 70vh/)
     expect(PANEL_CSS).toMatch(/\.weft-narrow \.weft-head \{[^}]*flex-wrap: wrap/)
     viewport(1024, 768)
@@ -424,6 +527,17 @@ function twoTurns() {
 }
 
 describe("the keyboard (only inside the panel, except Alt+W)", () => {
+  it("Alt+W from the page opens the dock with focus in it: Esc then closes it", async () => {
+    fakeStudio(baseRoutes())
+    const el = await mount({ ...BASE })
+    key(window, { code: "KeyW", altKey: true })
+    await settle()
+    expect(el.shadowRoot!.activeElement).toBe(dock(el))
+    key(el.shadowRoot!.activeElement!, { key: "Escape" })
+    await settle()
+    expect($(el, ".weft-fab")).toBeTruthy()
+  })
+
   it("j / k move through the turns, J / K through the steps; ⤢ carries the step", async () => {
     fakeStudio(twoTurns())
     const el = await open()

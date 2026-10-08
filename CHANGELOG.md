@@ -18,8 +18,9 @@ module, ADR 0005).
   it runs), and `data-mode="hidden"` draws nothing while the API and
   events keep working. `data-position` gains `left-dock`, `top-dock` and
   `bottom-dock`; `data-mode`, `data-push="true"` (pads `<html>` on the
-  docked side through `--weft-devtools-inset`, restored exactly; off by
-  default) and `data-z-index` / `--weft-z` are new. Under 640 px of
+  docked side — the bottom sheet by its 70vh — through
+  `--weft-devtools-inset`, restored exactly; off by default; a fixed or
+  sticky composer uses the variable in its own CSS) and `data-z-index` / `--weft-z` are new. Under 640 px of
   panel the turn column is a dropdown; under a 480 px viewport the panel
   is a bottom sheet. The placement, the selected turn and the raw view
   are remembered per origin in `localStorage["weft.devtools"]` (`{v: 1,

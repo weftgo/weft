@@ -177,9 +177,9 @@ function typing(e: KeyboardEvent): boolean {
  * README's table). Every key but Alt+W fires only with focus in the
  * panel. */
 export const SHORTCUTS: readonly (readonly [string, string])[] = [
-  ["Alt+W", "toggle the dock, anywhere on the page (Ctrl+Shift+W too, where the browser delivers it)"],
+  ["Alt+W", "toggle the dock from the page, not while a text field has focus (Ctrl+Shift+W too, where delivered)"],
   ["Alt+Shift+W", "next layout: float, dock right, bottom, left, top"],
-  ["Esc", "close (this list first)"],
+  ["Esc", "close (this list first); the page's own Esc handlers still run"],
   ["j / k", "next / previous turn"],
   ["J / K", "next / previous step"],
   ["g s", "open the turn (and step) in Studio"],
@@ -439,7 +439,14 @@ export class WeftDevtools extends HTMLElement {
     const next = urlScope()
     if ((next ? serializeScope(next) : "") !== (this.cfg.urlScope ? serializeScope(this.cfg.urlScope) : "")) this.rescan()
   }
-  private onRelease = () => this.release()
+  private onRelease = () => {
+    this.endDrag?.()
+    this.release()
+  }
+  /** The drag in progress: its end (saved, redrawn) and its drop
+   * (listeners off, nothing saved — a disconnect). */
+  private endDrag: (() => void) | null = null
+  private dropDrag: (() => void) | null = null
 
   // ── The host API's state (plan C4) ──
   /** The API's honest line (a session lookup refused, a run not in the
@@ -541,6 +548,9 @@ export class WeftDevtools extends HTMLElement {
   disconnectedCallback() {
     window.removeEventListener("keydown", this.onKey)
     window.removeEventListener("resize", this.onResize)
+    this.dropDrag?.()
+    this.dropDrag = null
+    this.dragging = false
     this.push.restore()
     window.removeEventListener("pointerup", this.onRelease, true)
     window.removeEventListener("pointercancel", this.onRelease, true)
@@ -1260,6 +1270,9 @@ export class WeftDevtools extends HTMLElement {
     e.preventDefault()
     this.keys = false
     this.toggle()
+    // Opened from the keyboard: focus goes to the dock, so Esc, j, k…
+    // work at once (the user asked for the panel).
+    if (this.shown) this.body.querySelector<HTMLElement>(".weft-dock")?.focus({ preventScroll: true })
   }
 
   /** panelKey is every other shortcut (SHORTCUTS), heard on the shadow
@@ -1675,7 +1688,10 @@ export class WeftDevtools extends HTMLElement {
     if (refocus) root.querySelector<HTMLElement>(".weft-dock, .weft-fab")?.focus({ preventScroll: true })
     root.setAttribute("data-mode", this.dormant ? "line" : this.lay.hidden ? "hidden" : this.shown ? this.lay.mode : "pill")
     // data-push (D1): only while a dock is drawn docked.
-    if (this.cfg.push && this.isConnected && root.querySelector(".weft-docked")) this.push.apply(this.lay.side, this.lay.d)
+    // data-push (D1): a dock pads its side by its size; the bottom
+    // sheet pads the bottom by its 70vh.
+    if (this.cfg.push && this.isConnected && root.querySelector(".weft-docked")) this.push.apply(this.lay.side, `${this.lay.d}px`)
+    else if (this.cfg.push && this.isConnected && root.querySelector(".weft-sheet")) this.push.apply("bottom", "70vh")
     else this.push.restore()
   }
 
@@ -1761,17 +1777,26 @@ export class WeftDevtools extends HTMLElement {
       move(p.clientX - x0, p.clientY - y0)
       clampLayout(this.lay)
       this.place(dock)
-      if (this.cfg.push && dock.classList.contains("weft-docked")) this.push.apply(this.lay.side, this.lay.d)
+      if (this.cfg.push && dock.classList.contains("weft-docked")) this.push.apply(this.lay.side, `${this.lay.d}px`)
     }
-    const up = () => {
-      for (const t of ["pointermove", "pointerup", "pointercancel"]) h.removeEventListener(t, t === "pointermove" ? mv : up)
+    const ends = ["pointerup", "pointercancel", "lostpointercapture"]
+    const off = () => {
+      h.removeEventListener("pointermove", mv)
+      for (const t of ends) h.removeEventListener(t, up)
+      this.endDrag = this.dropDrag = null
       this.dragging = false
+    }
+    // Every end ends it: the release on the handle, a cancel, a lost
+    // capture, a release anywhere (onRelease), a disconnect.
+    const up = () => {
+      off()
       this.save(true)
       this.render(this.last)
     }
+    this.endDrag = up
+    this.dropDrag = off
     h.addEventListener("pointermove", mv)
-    h.addEventListener("pointerup", up)
-    h.addEventListener("pointercancel", up)
+    for (const t of ends) h.addEventListener(t, up)
   }
 
   /** turnPick is the turn column as a dropdown (a panel under

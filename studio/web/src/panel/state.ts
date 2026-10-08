@@ -869,7 +869,8 @@ export class PanelModel {
       // The turn remembered from the last visit (D1), when it is listed.
       const kept = this.state.turns.find((r) => r.id === this.prefer)
       if (this.state.turns.length) this.prefer = ""
-      const target = kept ?? running ?? this.state.turns.at(0)
+      // A running turn outranks the remembered one.
+      const target = running ?? kept ?? this.state.turns.at(0)
       if (target) await this.select(target.id)
       else this.emit()
     } else {

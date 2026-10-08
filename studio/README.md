@@ -324,8 +324,10 @@ in→out once the run has finished, `—` while it runs (Studio prices no
 usage, so tokens are the cost). Hidden draws nothing: the element, its
 API and its events stay, and `Alt+W` or `open()` bring the dock back.
 Under 640 px of panel width the turn column is a dropdown and the
-header's actions wrap; under a 480 px viewport the panel is a
-full-width bottom sheet, 70 vh at most. The header's `⇆` button and
+header's actions wrap — the default 520 px float is that narrow, so the
+dropdown is what it shows until you widen it; under a 480 px viewport
+the panel is a full-width bottom sheet, 70 vh at most. The resize
+handles are pointer-only (`aria-hidden`; a keyboard resize is D3's). The header's `⇆` button and
 `Alt+Shift+W` go to the next layout: float, dock right, bottom, left,
 top.
 
@@ -334,7 +336,7 @@ top.
 | `data-position` | the initial place: `bottom-right` or `bottom-left` (the float's corner), `right-dock`, `left-dock`, `top-dock`, `bottom-dock`; set later, it moves the dock | `bottom-right` |
 | `data-open` | start expanded | collapsed (the pill) |
 | `data-mode` | the initial mode: `float`, `dock`, `pill` or `hidden` | from the two above |
-| `data-push="true"` | while docked and open, pads `<html>` on the docked side by the dock's size: `padding-<side>: var(--weft-devtools-inset)`, the variable set to the size — so a docked panel never covers your composer. The panel's one write to your document, opt-in; the previous inline values are put back exactly on close, on a mode change and on disconnect | off |
+| `data-push="true"` | while docked and open, pads `<html>` on the docked side by the dock's size — `padding-<side>: var(--weft-devtools-inset)`, the variable set to the size (the bottom sheet: `padding-bottom` by its `70vh`) — so the page's flow never sits under the panel. It replaces the inline padding on that side while docked; the inline values from before (or one your page set meanwhile) are put back exactly on close, on a mode change and on disconnect. The panel's one write to your document, opt-in. Padding does not move `position: fixed` or `sticky` elements: a fixed or sticky composer keeps clear with the variable in your own CSS, `bottom: var(--weft-devtools-inset, 0)` (and the matching `right`/`left`/`top` for those docks) — push sets the variable as well as the padding | off |
 | `data-z-index` | the dock's and the pill's z-index (an integer) | `--weft-z` on the element, else 2147483000 |
 
 The panel remembers, per origin, in `localStorage["weft.devtools"]`
@@ -355,13 +357,14 @@ The keyboard (`src/panel/element.ts`'s `SHORTCUTS`, the `?` list).
 `Alt+W` is the one key the panel hears on `window`; every other key is
 heard on its shadow root, so it fires only while focus is inside the
 panel — a key typed into your page never reaches it, and keys typed
-into the panel's own fields are typing.
+into the panel's own fields are typing. `Alt+W` that opens the dock
+puts focus in it, so the keys below work at once.
 
 | Key | Does |
 |---|---|
-| `Alt+W` | toggle the dock, anywhere on the page (`Ctrl+Shift+W` too, where the browser delivers it) |
+| `Alt+W` | toggle the dock from the page — not while a text field has focus (`Ctrl+Shift+W` too, where the browser delivers it) |
 | `Alt+Shift+W` | next layout: float, dock right, bottom, left, top |
-| `Esc` | close (the `?` list first) |
+| `Esc` | close (the `?` list first); it is not stopped, so your page's own `document` Esc handlers (a modal) still run — the panel never blocks them |
 | `j` / `k` | next / previous turn |
 | `J` / `K` | next / previous step (⤢ carries it) |
 | `g s` | open the turn and step in Studio (`lib/links.ts`, the link ⤢ carries), in a new tab |
@@ -404,14 +407,14 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 161,395 B raw / 45,664 B gzip
-(44.6 KiB, under the 80 KiB cap). The scope-detection ladder (C3: rungs
+committed `studio/dist/panel/panel.js`, 162,007 B raw / 45,836 B gzip
+(44.8 KiB, under the 80 KiB cap). The scope-detection ladder (C3: rungs
 2 to 5 and the activity pill) cost +6.0 KiB gzip against its +3 KiB
 estimate: nothing deferrable supplies the first scope and the
 deferrable remainder is under 1 KiB, so the overrun is accepted rather
 than split. The host API below cost about +3.1 KiB against +1 KiB (with its
 review fixes); the
-layout (D1) +3.5 KiB against +4 KiB.
+layout (D1) +3.6 KiB against +4 KiB (with its review fixes).
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 
@@ -425,11 +428,13 @@ The deltas come from `studio/web/panel-budget.json`, a committed,
 append-only ledger: one row per landed item — `{"label": "D1", "item":
 "D1", "gzip": <panel.js's gzip bytes after it>}`, `item` the budget
 line it counts against (`""` for none) — and earlier rows are never
-edited. An item adds its row in the same commit as its rebuilt
-`panel.js` (the build says when the built file differs from the last
-row, and `src/panel/budget.test.ts` fails until the last row is the
-committed file). The table is evidence, not a gate: only the cap fails
-the build (`vite.panel.config.ts`).
+edited. An item appends its row in the same commit as its rebuilt
+`studio/dist/panel/panel.js`: the build says when the built file
+differs from the last row, and `src/panel/budget.test.ts` — run by
+`make studio-check` — fails until the last row is the committed file,
+so a rebuild that forgets its row fails studio-check. The per-item
+marks are evidence, not a gate; the build itself fails only over the
+cap (`vite.panel.config.ts`).
 
 The same file is on npm as `@weftgo/devtools`, for apps that bundle
 everything and ship no `<script>` tag (Vite, Next, SvelteKit). This

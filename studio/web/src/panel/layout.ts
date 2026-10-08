@@ -57,7 +57,8 @@ export function initialLayout(position: PanelPlacement, open: boolean, mode: str
   const w = 520
   const h = 560
   const l: Layout = {
-    mode: dock || mode === "dock" ? "dock" : "float",
+    // An explicit data-mode float|dock wins over what the position implies.
+    mode: mode === "float" ? "float" : dock || mode === "dock" ? "dock" : "float",
     side: dock ? (position.slice(0, -5) as Side) : "right",
     open: mode === "pill" ? false : mode === "float" || mode === "dock" || open,
     hidden: mode === "hidden",
@@ -128,16 +129,19 @@ export function writeStore(l: Layout, placed: boolean): void {
 /** migrateDebug moves localStorage.weft_debug=1 into the key (debug)
  * and drops the old one; reports whether the switch is on. */
 export function migrateDebug(): boolean {
+  let old = false
   try {
     const s = storage()
-    if (s?.getItem("weft_debug") === "1") {
-      s.setItem(STORE_KEY, JSON.stringify({ v: 1, ...readStore(), debug: true }))
-      s.removeItem("weft_debug")
+    old = s?.getItem("weft_debug") === "1"
+    if (old) {
+      s?.setItem(STORE_KEY, JSON.stringify({ v: 1, ...readStore(), debug: true }))
+      s?.removeItem("weft_debug")
     }
   } catch {
-    // not migrated: read below as far as it goes
+    // not migrated (a full quota, an old private mode): the old key
+    // stays, and still forces the panel on
   }
-  return readStore().debug === true
+  return old || readStore().debug === true
 }
 
 /** horizontal: docked on the left or right (sized by width). */
@@ -199,21 +203,27 @@ export function pillPlace(l: Layout): string {
 /** Push is data-push's one write to the host document: padding on
  * the docked side of <html>, through --weft-devtools-inset, restored
  * exactly (value and priority, or removed) when it ends. */
+const INSET = "--weft-devtools-inset"
+const INSET_VAR = `var(${INSET})`
+
 export class Push {
   private prev: { prop: string; was: [string, string][] } | null = null
 
-  apply(side: Side | null, size: number): void {
+  /** apply pads side by value (a CSS length: the dock's px, the
+   * sheet's 70vh). It writes only what is not already its own: a value
+   * the host set on that side since is taken as the host's (restore
+   * gives it back) and replaced again while docked. */
+  apply(side: Side | null, value: string): void {
     const st = document.documentElement.style
     const prop = side ? `padding-${side}` : ""
     if (this.prev && this.prev.prop !== prop) this.restore()
     if (!side) return
-    if (!this.prev)
-      this.prev = {
-        prop,
-        was: ["--weft-devtools-inset", prop].map((p) => [st.getPropertyValue(p), st.getPropertyPriority(p)]),
-      }
-    st.setProperty("--weft-devtools-inset", `${size}px`)
-    st.setProperty(prop, "var(--weft-devtools-inset)")
+    const snap = (p: string): [string, string] => [st.getPropertyValue(p), st.getPropertyPriority(p)]
+    const ours = st.getPropertyValue(prop) === INSET_VAR
+    if (!this.prev) this.prev = { prop, was: [snap(INSET), snap(prop)] }
+    else if (!ours) this.prev.was[1] = snap(prop)
+    if (st.getPropertyValue(INSET) !== value) st.setProperty(INSET, value)
+    if (!ours) st.setProperty(prop, INSET_VAR)
   }
 
   restore(): void {
@@ -221,7 +231,7 @@ export class Push {
     if (!p) return
     this.prev = null
     const st = document.documentElement.style
-    ;["--weft-devtools-inset", p.prop].forEach((name, i) => {
+    ;[INSET, p.prop].forEach((name, i) => {
       const [v, prio] = p.was[i]
       if (v) st.setProperty(name, v, prio)
       else st.removeProperty(name)

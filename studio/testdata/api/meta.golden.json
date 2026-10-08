@@ -1,6 +1,6 @@
 {
-  "weft_version": "v0.10.0",
-  "studio_version": "v0.10.0",
+  "weft_version": "v0.10.1",
+  "studio_version": "v0.10.1",
   "db": "sqlite",
   "title": "weft studio",
   "has_manifest": true,

@@ -6,6 +6,16 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## 0.10.1 — 2026-10-08
+
+### Fixed
+
+- **studio**: `make studio-panel-asset` (the devtools panel as a release
+  asset) read the `studio.Version` literal that 0.10.0 removed and
+  failed; it reads the one version from `version/version.go` through
+  the same helper the panel build stamps from. Tags `core/v0.10.1` (the
+  `weft.version` literal only) and `v0.10.1`.
+
 ## 0.10.0 — 2026-10-08
 
 The request record (ADR 0028): every model call's system prompt, tool

@@ -15,6 +15,7 @@ import (
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftgo/weft/otel"
 )
 
 // The registered manifests (plan B4): a runtime's registration carries
@@ -289,7 +290,7 @@ func TestMetaRegisteredManifest(t *testing.T) {
 	t.Cleanup(ots.Close)
 	d = meta(ots, "")
 	for _, c := range []string{"playground", "runtimes", "breakpoints", "steer"} {
-		if r := d.CapabilitiesOff[c]; !strings.Contains(r, "studio.Playground(false)") || !strings.Contains(r, "--no-playground") {
+		if r := d.CapabilitiesOff[c]; !strings.Contains(r, "studio.Playground(true)") || !strings.Contains(r, "--no-playground") {
 			t.Errorf("capabilities_off[%s] = %q", c, r)
 		}
 	}
@@ -298,5 +299,112 @@ func TestMetaRegisteredManifest(t *testing.T) {
 	}
 	if code, body := b4Do(t, http.MethodGet, ots.URL+"/api/manifest", "", ""); code != http.StatusNotFound || !strings.Contains(body, "--no-playground") {
 		t.Errorf("playground off: api/manifest %d %s, want 404 naming --no-playground", code, body)
+	}
+}
+
+// TestManifestSameNameTwoServices: two live services register the same
+// agent name with different manifests. Both versions are served, each
+// carrying its own hash; manifest_check names the disagreement and
+// checks each run against every version, so neither service's runs
+// read stale for the other's.
+func TestManifestSameNameTwoServices(t *testing.T) {
+	ts := b4Studio(t)
+	a, oneA := b4Agent(t, "support", "shop prompt")
+	b, oneB := b4Agent(t, "support", "ledger prompt")
+	b4Register(t, ts, "", "rt_a", "shop", a)
+	b4Connect(t, ts, "", "rt_a")
+	b4Register(t, ts, "", "rt_b", "ledger", b)
+	b4Connect(t, ts, "", "rt_b")
+	b4WaitLive(t, ts, "", true, true)
+	code, body := b4Do(t, http.MethodGet, ts.URL+"/api/manifest", "", "")
+	if code != http.StatusOK {
+		t.Fatalf("api/manifest: %d %s", code, body)
+	}
+	var m struct {
+		Agents []struct {
+			Name         string `json:"name"`
+			ManifestHash string `json:"manifest_hash"`
+			Instructions string `json:"instructions"`
+		} `json:"agents"`
+	}
+	decode(t, body, &m)
+	got := map[string]string{}
+	for _, ag := range m.Agents {
+		got[ag.ManifestHash] = ag.Instructions
+	}
+	if len(m.Agents) != 2 || got[sha(oneA)] != "shop prompt" || got[sha(oneB)] != "ledger prompt" {
+		t.Errorf("agents = %+v, want both versions of support, each with its own hash", m.Agents)
+	}
+
+	// The shop's version ran last: current, not stale for the ledger's.
+	runThrough(t, ts, []core.Option{core.Name("support"), core.Instructions("shop prompt")}, otel.NoContent())
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		c := metaOf(t, ts, "").ManifestCheck
+		if c != nil && c.Checked == 1 {
+			if len(c.Stale) != 0 || len(c.Differs) != 1 || c.Differs[0] != "support" || c.Agents != 1 {
+				t.Errorf("manifest_check = %+v, want 1 agent, none stale, differs [support]", c)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("manifest_check never checked the run: %+v", c)
+		}
+	}
+}
+
+// TestWithSourcesClash: a weft.json with a sources key of its own gets
+// Studio's in its place — one key, never a duplicate.
+func TestWithSourcesClash(t *testing.T) {
+	file := []byte(`{"weft":1,"sources":"mine","agents":[]}`)
+	h := Handler(DB(fixtureDB(t)), Manifest(file))
+	code, _, body := get(t, h, "/studio/api/manifest")
+	if code != http.StatusOK || strings.Count(body, `"sources"`) != 1 || strings.Contains(body, `"mine"`) {
+		t.Fatalf("manifest = %d %s, want one sources key, Studio's", code, body)
+	}
+	var doc struct {
+		Sources []struct {
+			Source string `json:"source"`
+		} `json:"sources"`
+	}
+	decode(t, body, &doc)
+	if len(doc.Sources) != 1 || doc.Sources[0].Source != "file" {
+		t.Errorf("sources = %+v", doc.Sources)
+	}
+}
+
+// TestCapabilitiesOffTable: every capability a group registers only
+// under an option has a reason in optionalCapabilities, and every
+// entry there is such a capability; a capability a host declares
+// itself is never reported off.
+func TestCapabilitiesOffTable(t *testing.T) {
+	caps := func(opts ...Option) map[string]bool {
+		srv := New(append([]Option{Open(filepath.Join(t.TempDir(), "weft.db"))}, opts...)...)
+		t.Cleanup(func() { _ = srv.Close() })
+		out := map[string]bool{}
+		for _, c := range srv.capabilityList() {
+			out[c] = true
+		}
+		return out
+	}
+	all := caps(Playground(true), Token("t"))
+	none := caps(NoIngest())
+	optional := map[string]bool{}
+	for c := range all {
+		if !none[c] {
+			optional[c] = true
+			if optionalCapabilities[c] == "" {
+				t.Errorf("optional capability %q has no capabilities_off reason", c)
+			}
+		}
+	}
+	for c := range optionalCapabilities {
+		if !optional[c] {
+			t.Errorf("capabilities_off reason for %q, which is not an optional group's capability", c)
+		}
+	}
+	srv := New(Open(filepath.Join(t.TempDir(), "weft.db")), Capabilities("playground"))
+	t.Cleanup(func() { _ = srv.Close() })
+	if off := srv.capabilitiesOff(); off["playground"] != "" || off["steer"] == "" {
+		t.Errorf("declared playground: capabilities_off = %v, want playground absent, steer present", off)
 	}
 }

@@ -731,6 +731,13 @@ func TestManifest(t *testing.T) {
 A tool or policy change without regenerating fails `go test`; the diff
 is the review artifact. ([ADR 0012](docs/adr/0012-manifest-format.md))
 
+Without a `weft.json`, Studio's Agents page shows the manifests your
+app's `runtime.Install` registers (`weft studio` has the playground on
+by default), each hash labelled live or remembered; Studio keeps them in
+memory, so a restart forgets them until the runtime registers again.
+With `--no-playground` the Agents page, the playground and the debugger
+say why they are off (`/api/meta`'s `capabilities_off`).
+
 ## MCP: both ways
 
 `weft/mcp` (a package over the official Go MCP SDK, aliased

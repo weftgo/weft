@@ -19,11 +19,11 @@
     "panel-config"
   ],
   "capabilities_off": {
-    "auth": "no server token to sign panel tokens with: studio.Token(tok) / weft studio --token",
-    "breakpoints": "the playground is off: studio.Playground(false) / weft studio --no-playground",
-    "playground": "the playground is off: studio.Playground(false) / weft studio --no-playground",
-    "runtimes": "the playground is off: studio.Playground(false) / weft studio --no-playground",
-    "steer": "the playground is off: studio.Playground(false) / weft studio --no-playground"
+    "auth": "no server token to sign panel tokens with: turn it on with studio.Token(tok); weft studio always sets one",
+    "breakpoints": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "playground": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "runtimes": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "steer": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off"
   },
   "manifest_sources": 1,
   "auth_required": false,

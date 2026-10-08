@@ -122,6 +122,10 @@ type metaManifest struct {
 	Agents  int      `json:"agents"`  // agents in the manifest
 	Checked int      `json:"checked"` // of those, agents with a stored run carrying a manifest hash
 	Stale   []string `json:"stale"`   // checked agents whose latest run's hash differs; never null
+	// Differs names the agents registered services hold in different
+	// versions (source runtime only): their runs are checked against
+	// every version, so no service's runs read stale for another's.
+	Differs []string `json:"differs,omitempty"`
 	// Error is the first failure of the check (a manifest that does
 	// not parse, a run read that failed; logged too): the counts cover
 	// only what was checked before or around it.
@@ -290,12 +294,27 @@ func (s *Server) manifestCheck(ctx context.Context, reg []linkruntime.ManifestSo
 		out.Error = metaReadFailed("manifest_check: the manifest does not parse", err)
 		return out
 	}
-	out.Agents = len(hashes)
+	// One check per agent name. Registered services may hold different
+	// versions of one name: a run matching any of them is current, and
+	// the name is listed in differs.
+	var names []string
+	versions := map[string]map[string]bool{}
 	for _, a := range hashes {
-		page, err := s.db.Runs(ctx, obsdb.RunQuery{Agent: a.name, ParentRunID: "*", Limit: 1})
+		if versions[a.name] == nil {
+			versions[a.name] = map[string]bool{}
+			names = append(names, a.name)
+		}
+		versions[a.name][a.hash] = true
+	}
+	out.Agents = len(names)
+	for _, name := range names {
+		if len(versions[name]) > 1 {
+			out.Differs = append(out.Differs, name)
+		}
+		page, err := s.db.Runs(ctx, obsdb.RunQuery{Agent: name, ParentRunID: "*", Limit: 1})
 		if err != nil {
 			if out.Error == "" {
-				out.Error = metaReadFailed("manifest_check: read agent "+a.name+"'s latest run", err)
+				out.Error = metaReadFailed("manifest_check: read agent "+name+"'s latest run", err)
 			}
 			continue
 		}
@@ -303,8 +322,8 @@ func (s *Server) manifestCheck(ctx context.Context, reg []linkruntime.ManifestSo
 			continue
 		}
 		out.Checked++
-		if page.Runs[0].ManifestHash != a.hash {
-			out.Stale = append(out.Stale, a.name)
+		if !versions[name][page.Runs[0].ManifestHash] {
+			out.Stale = append(out.Stale, name)
 		}
 	}
 	return out

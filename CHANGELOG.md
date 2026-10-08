@@ -10,6 +10,15 @@ module, ADR 0005).
 
 ### Added
 
+- **Agents from runtime registrations** (plan B4): Studio remembers
+  each runtime's registration manifest by (service, manifest hash), in
+  memory; `/api/manifest` serves it when no `weft.json` is configured
+  (the file still wins) and lists every source in `sources[]` with
+  `live`; two services registering one agent name in different versions
+  both appear. `/api/meta` gains `manifest_sources`, `capabilities_off`
+  (why an option left a capability off) and `manifest_check.source` /
+  `differs`; the Agents page, playground and debugger empty states show
+  the reason.
 - **The `weft` command** (plan B1, `cmd/weft`): `go install
   github.com/weftgo/weft/cmd/weft@latest` yields a `weft` binary.
   `weft studio [--addr] [--db] [--token] [--manifest] [--open]

@@ -283,8 +283,8 @@ export interface Meta {
   capabilities: string[]
   /** Why each capability an option left off is off (plan B4): the
    * option and the CLI flag — e.g. playground: "the playground is off:
-   * studio.Playground(false) / weft studio --no-playground". Absent
-   * when nothing is off. */
+   * turn it on with studio.Playground(true); weft studio
+   * --no-playground turns it off". Absent when nothing is off. */
   capabilities_off?: Record<string, string>
   /** api/manifest's sources: the weft.json plus each manifest a
    * runtime registered with (plan B4). */
@@ -310,6 +310,8 @@ export interface Meta {
     agents: number
     checked: number
     stale: string[]
+    /** Agents registered services hold in different versions. */
+    differs?: string[]
   } | null
 }
 
@@ -431,6 +433,9 @@ export interface ManifestSource {
 
 export interface ManifestAgent {
   name: string
+  /** The agent's own hash — set on registered agents (B4): two services
+   * may register different versions under one name. */
+  manifest_hash?: string
   model: ModelInfo
   instructions?: string
   policy: {

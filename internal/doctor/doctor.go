@@ -280,7 +280,7 @@ func (p *printer) manifest(m meta) {
 	case !m.HasManifest:
 		p.line(ok, "weft.json", "no manifest configured (studio.Manifest, or --manifest / WEFT_MANIFEST), nothing to compare")
 	case c == nil:
-		p.line(ok, "weft.json", "configured; not checked for this caller")
+		p.line(ok, "weft.json", "a manifest is present (weft.json or a runtime's registration); not checked for this caller")
 	case c.Error != "":
 		p.line(warn, "weft.json", "the check failed: %s", c.Error)
 	case c.Source == "runtime" && len(c.Stale) > 0:

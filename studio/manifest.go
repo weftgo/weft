@@ -26,13 +26,26 @@ const (
 	manifestSourceRuntime = "runtime"
 )
 
-// Why a capability is off: the option that would turn it on and the
-// CLI flag that turned it off (meta.capabilities_off).
+// Why a capability is off: the option that turns it on and the CLI
+// flag that turns it off (meta.capabilities_off).
 const (
-	offPlayground = "the playground is off: studio.Playground(false) / weft studio --no-playground"
-	offIngest     = "OTLP ingest is off: studio.NoIngest()"
-	offAuth       = "no server token to sign panel tokens with: studio.Token(tok) / weft studio --token"
+	offPlayground = "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off"
+	offIngest     = "OTLP ingest is off: studio.NoIngest() turned it off"
+	offAuth       = "no server token to sign panel tokens with: turn it on with studio.Token(tok); weft studio always sets one"
 )
+
+// optionalCapabilities is every capability a route group registers
+// only under an option, with the reason meta.capabilities_off gives
+// when it is absent — the one table capabilitiesOff reads (a test
+// checks every optional group has an entry).
+var optionalCapabilities = map[string]string{
+	"playground":  offPlayground,
+	"runtimes":    offPlayground,
+	"breakpoints": offPlayground,
+	"steer":       offPlayground,
+	"ingest":      offIngest,
+	"auth":        offAuth,
+}
 
 // manifestSourceView is one entry of api/manifest's sources.
 type manifestSourceView struct {
@@ -93,25 +106,50 @@ func (s *Server) manifestSources(reg []linkruntime.ManifestSource) []manifestSou
 }
 
 // registeredAgents merges the registered manifests into one agent
-// list: each agent name once, from the first source that has it in
-// Manifests' order — a live manifest before a remembered one, the
-// newest before the older.
+// list. Each (service, agent name) contributes once, from the first
+// source that has it in Manifests' order — a live manifest before a
+// remembered one, the newest before the older — so a service's older
+// builds do not repeat its agents. Two services whose agents share a
+// name but differ both stay (deduplicated by the agent's own hash):
+// one service's prompt never stands in for another's.
 func registeredAgents(reg []linkruntime.ManifestSource) (version int, agents []linkruntime.ManifestAgent) {
-	seen := map[string]bool{}
+	seen := map[[2]string]bool{}   // (service, name)
+	listed := map[[2]string]bool{} // (name, hash)
 	version = 1
 	for i, m := range reg {
 		if i == 0 && m.Version != 0 {
 			version = m.Version
 		}
 		for _, a := range m.Agents {
-			if seen[a.Name] {
+			if seen[[2]string{m.Service, a.Name}] {
 				continue
 			}
-			seen[a.Name] = true
+			seen[[2]string{m.Service, a.Name}] = true
+			if listed[[2]string{a.Name, a.ManifestHash}] {
+				continue
+			}
+			listed[[2]string{a.Name, a.ManifestHash}] = true
 			agents = append(agents, a)
 		}
 	}
 	return version, agents
+}
+
+// withHash prepends the agent's own manifest hash to its manifest
+// object, so a reader matches each card to the sources holding that
+// exact version (two services may register different agents under one
+// name).
+func withHash(entry json.RawMessage, hash string) json.RawMessage {
+	body := bytes.TrimSpace(entry)
+	if len(body) < 2 || body[0] != '{' {
+		return entry
+	}
+	h, _ := json.Marshal(hash)
+	out := append([]byte(`{"manifest_hash":`), h...)
+	if rest := bytes.TrimSpace(body[1:]); len(rest) > 0 && rest[0] != '}' {
+		out = append(out, ',')
+	}
+	return append(out, body[1:]...)
 }
 
 // serveManifest answers api/manifest: the file manifest with sources
@@ -143,7 +181,7 @@ func (s *Server) serveManifest(w http.ResponseWriter, r *http.Request) {
 	version, agents := registeredAgents(reg)
 	entries := make([]json.RawMessage, 0, len(agents))
 	for _, a := range agents {
-		entries = append(entries, a.Entry)
+		entries = append(entries, withHash(a.Entry, a.ManifestHash))
 	}
 	writeJSON(w, r, http.StatusOK, struct {
 		Version int                  `json:"weft"`
@@ -153,7 +191,8 @@ func (s *Server) serveManifest(w http.ResponseWriter, r *http.Request) {
 }
 
 // withSources splices "sources" into the file manifest as its last key,
-// the file's own bytes kept verbatim before it. A file that is not a
+// the file's own bytes kept verbatim before it (a file that has a
+// sources key already is re-encoded with Studio's in its place). A file that is not a
 // JSON object is returned as given (manifest_check reports the parse
 // error).
 func withSources(manifest []byte, sources []manifestSourceView) []byte {
@@ -163,6 +202,15 @@ func withSources(manifest []byte, sources []manifestSourceView) []byte {
 	}
 	b, err := json.Marshal(sources)
 	if err != nil {
+		return manifest
+	}
+	if _, clash := obj["sources"]; clash {
+		// The file has a sources key of its own: Studio's replaces it
+		// (one key, never a duplicate), re-encoded through the map.
+		obj["sources"] = b
+		if out, err := json.Marshal(obj); err == nil {
+			return append(out, '\n')
+		}
 		return manifest
 	}
 	body := bytes.TrimRight(manifest, " \t\r\n")
@@ -204,21 +252,20 @@ func (s *Server) checkedManifest(reg []linkruntime.ManifestSource) (source strin
 	return manifestSourceRuntime, hashes, nil
 }
 
-// capabilitiesOff names each capability an option left off and why
-// (meta.capabilities_off): the reason names the option and, where the
-// CLI has one, its flag. Nil when nothing is off.
+// capabilitiesOff names each optional capability this server does not
+// report and why (meta.capabilities_off): computed from capabilityList,
+// so a capability a host declares itself (Capabilities) is never both
+// on and off. Nil when nothing is off.
 func (s *Server) capabilitiesOff() map[string]string {
+	on := map[string]bool{}
+	for _, c := range s.capabilityList() {
+		on[c] = true
+	}
 	off := map[string]string{}
-	if !s.playground {
-		for _, c := range []string{"playground", "runtimes", "breakpoints", "steer"} {
-			off[c] = offPlayground
+	for c, why := range optionalCapabilities {
+		if !on[c] {
+			off[c] = why
 		}
-	}
-	if s.noIngest {
-		off["ingest"] = offIngest
-	}
-	if s.token == "" {
-		off["auth"] = offAuth
 	}
 	if len(off) == 0 {
 		return nil

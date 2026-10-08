@@ -17,7 +17,9 @@ import (
 
 // maxManifests bounds the remembered manifests: a dev loop that
 // rebuilds on every save registers a new hash each time. Past it the
-// oldest one no connected runtime holds is forgotten.
+// oldest one no connected runtime holds is forgotten. The bound is soft:
+// while every entry is held by a connected runtime nothing is dropped,
+// and an over-full store shrinks by one per registration.
 const maxManifests = 64
 
 // ManifestSource is one remembered registration manifest.

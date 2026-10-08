@@ -7,7 +7,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 
-import type { ManifestSource } from "@/lib/api"
+import type { ManifestAgent, ManifestSource } from "@/lib/api"
 import { ApiError, manifestQuery } from "@/lib/api"
 import { AgentCard } from "@/components/studio/agent-cards"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -55,8 +55,13 @@ function AgentsPage() {
       </span>
       {sources.length > 0 && <SourceList sources={sources} />}
       {manifest.data.agents.map((a) => (
-        <div key={a.name} className="space-y-1">
-          <AgentSources name={a.name} sources={sources} />
+        <div key={`${a.name}:${a.manifest_hash ?? ""}`} className="space-y-1">
+          <AgentSources agent={a} sources={sources} />
+          {manifest.data.agents.filter((b) => b.name === a.name).length > 1 && (
+            <p className="text-[11px] text-status-int">
+              {a.name} differs between services: one card per version
+            </p>
+          )}
           <AgentCard agent={a} />
         </div>
       ))}
@@ -129,28 +134,34 @@ function StateLabel({ source }: { source: ManifestSource }) {
   return <span className={tone}>{sourceState(source)}</span>
 }
 
-/** Which sources hold this agent, with the agent's own hash in each
- * (the weft.manifest.hash its runs carry). */
+/** Which sources hold this agent — this exact version when the agent
+ * carries its hash (a registered one), else by name — with the agent's
+ * own hash in each (the weft.manifest.hash its runs carry). */
 function AgentSources({
-  name,
+  agent,
   sources,
 }: {
-  name: string
+  agent: ManifestAgent
   sources: ManifestSource[]
 }) {
   const holding = sources.flatMap((s) =>
     s.agents
-      .filter((a) => a.name === name)
+      .filter(
+        (a) =>
+          a.name === agent.name &&
+          (!agent.manifest_hash || a.manifest_hash === agent.manifest_hash)
+      )
       .map((a) => ({ s, hash: a.manifest_hash }))
   )
   if (holding.length === 0) return null
   return (
     <p
       className="flex flex-wrap gap-x-3 font-mono text-[11px]"
-      aria-label={`${name} sources`}
+      aria-label={`${agent.name} sources`}
     >
       {holding.map(({ s, hash }) => (
         <span key={`${s.source}:${s.service ?? ""}:${s.manifest_hash}`}>
+          {s.service && <span className="text-foreground">{s.service} </span>}
           <span className="text-muted-foreground" title={hash}>
             {shortHash(hash)}
           </span>{" "}

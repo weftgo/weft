@@ -13,7 +13,7 @@ configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
 
 const OFF =
-  "the playground is off: studio.Playground(false) / weft studio --no-playground"
+  "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off"
 const meta = (over: Record<string, unknown> = {}) => ({
   ...golden<Record<string, unknown>>("meta"),
   ...over,
@@ -121,6 +121,59 @@ describe("the Agents page from registrations (B4)", () => {
       .install()
     renderApp("/agents")
     expect(await screen.findByText("agents · weft.json")).toBeTruthy()
+  })
+})
+
+describe("one name, two services (B4)", () => {
+  it("draws one card per version, each labelled with its own service", async () => {
+    const support = (instructions: string, manifest_hash: string) => ({
+      ...agent("support", instructions),
+      manifest_hash,
+    })
+    new FakeStudio()
+      .on(
+        "GET meta",
+        meta({ has_manifest: true, capabilities: ["live", "playground"] })
+      )
+      .on("GET manifest", {
+        weft: 1,
+        agents: [
+          support("shop prompt", "aaaa00000000a"),
+          support("ledger prompt", "bbbb00000000b"),
+        ],
+        sources: [
+          {
+            source: "runtime",
+            manifest_hash: "1111",
+            service: "shop",
+            live: true,
+            runtime_id: "rt_a",
+            agents: [{ name: "support", manifest_hash: "aaaa00000000a" }],
+          },
+          {
+            source: "runtime",
+            manifest_hash: "2222",
+            service: "ledger",
+            live: true,
+            runtime_id: "rt_b",
+            agents: [{ name: "support", manifest_hash: "bbbb00000000b" }],
+          },
+        ],
+      })
+      .install()
+    renderApp("/agents")
+    const labels = await screen.findAllByLabelText("support sources")
+    expect(labels).toHaveLength(2)
+    expect(within(labels[0]).getByText("aaaa00000000")).toBeTruthy()
+    expect(within(labels[0]).queryByText("bbbb00000000")).toBeNull()
+    expect(labels[0].textContent).toContain("shop")
+    expect(within(labels[1]).getByText("bbbb00000000")).toBeTruthy()
+    expect(labels[1].textContent).toContain("ledger")
+    expect(
+      screen.getAllByText(
+        "support differs between services: one card per version"
+      )
+    ).toHaveLength(2)
   })
 })
 

@@ -188,7 +188,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    routes.go's groups (panel.go/playground.go add theirs in their own files).
 //    // API: meta (db {kind, path, size: path/size to loopback and the server token only},
 //    //    auth_required, content, runtimes, manifest_check, pricing, retention — `weft doctor` prints it
-//    //    line by line), manifest, runs (+session/public/playground filters; all=1 lists child
+//    //    line by line; capabilities_off {capability: why} names the option/flag that left one off;
+//    //    manifest_sources), manifest (the weft.json, else the manifests runtimes registered with —
+//    //    remembered in memory by (service, manifest_hash), each in sources[] live or remembered; a
+//    //    Studio restart forgets them until the next registration; manifest_check.source file|runtime),
+//    //    runs (+session/public/playground filters; all=1 lists child
 //    //    runs too), runs/{id} (with its compactions: run-scope views, then session markers),
 //    //    runs/{id}/events|transcript|spans|requests|tools, runs/{id}/steps/{n} (one step
 //    //    assembled: request, attempts, events, tool calls, children, holes; capability

@@ -1,3 +1,5 @@
+//go:build !windows
+
 package main
 
 import (
@@ -9,6 +11,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -53,6 +57,26 @@ func TestStudioAgentsFromRuntime(t *testing.T) {
 			done := make(chan int, 1)
 			args := append([]string{"studio", "--addr", addr, "--db", db, "--token", "tok"}, c.extra...)
 			go func() { done <- run(args, &out, io.Discard) }()
+			// The Studio stops once, whether the test ends or fails:
+			// SIGTERM, then its exit code, bounded.
+			var studioOnce sync.Once
+			studioCode := -1
+			stopStudioOnce := func() {
+				studioOnce.Do(func() {
+					select {
+					case studioCode = <-done: // already exited
+						return
+					default:
+					}
+					signalSelf(t, syscall.SIGTERM)
+					select {
+					case studioCode = <-done:
+					case <-time.After(10 * time.Second):
+						t.Errorf("weft studio never returned after SIGTERM")
+					}
+				})
+			}
+			t.Cleanup(stopStudioOnce)
 			waitMeta(t, addr, done, &out)
 
 			app := exec.Command(os.Args[0])
@@ -66,16 +90,22 @@ func TestStudioAgentsFromRuntime(t *testing.T) {
 			}
 			appDone := make(chan struct{})
 			go func() { _ = app.Wait(); close(appDone) }()
+			var appOnce sync.Once
 			stopApp := func() {
-				_ = app.Process.Signal(os.Interrupt)
-				select {
-				case <-appDone:
-				case <-time.After(10 * time.Second):
-					_ = app.Process.Kill()
-					<-appDone
-					t.Errorf("the helper app ignored the interrupt (output %q)", appOut.String())
-				}
+				appOnce.Do(func() {
+					_ = app.Process.Signal(os.Interrupt)
+					select {
+					case <-appDone:
+					case <-time.After(10 * time.Second):
+						_ = app.Process.Kill()
+						<-appDone
+						t.Errorf("the helper app ignored the interrupt (output %q)", appOut.String())
+					}
+				})
 			}
+			// Registered after the Studio's cleanup, so it runs first
+			// (LIFO): the app goes before the Studio it dials.
+			t.Cleanup(stopApp)
 
 			get := func(path string) (int, []byte) {
 				t.Helper()
@@ -163,8 +193,9 @@ func TestStudioAgentsFromRuntime(t *testing.T) {
 				}
 			}
 			stopApp()
-			if code := stopStudio(t, done); code != 0 {
-				t.Errorf("weft studio exited %d", code)
+			stopStudioOnce()
+			if studioCode != 0 {
+				t.Errorf("weft studio exited %d", studioCode)
 			}
 			notListening(t, addr)
 		})

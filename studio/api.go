@@ -1092,6 +1092,12 @@ type sessionPublicID struct {
 // serveSessionPublicID answers api/sessions/{id}/public_id (plan C4):
 // the reverse of api/public — the weft.public_id the session's turns
 // carry (thread.PublicID at Create stamps one value on every turn).
+// The public id is MAX(weft.public_id) over the session's top-level
+// turns (obsdb's SessionRow.PublicID, the sessions?public_id= filter's
+// value): one value per thread session; a session whose turns carry
+// several (core.Metadata, a non-Go OTLP app) answers the greatest,
+// unbadged — and may then disagree with api/public, which resolves a
+// public id to its newest session.
 // The dev token's alone: a panel token is scoped to one public id and
 // must not learn another's, so every panel token (read or playground,
 // its own session included) is 403 with the hidden badge before the

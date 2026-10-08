@@ -12,11 +12,13 @@ module, ADR 0005).
 
 - **`GET /api/sessions/{id}/public_id`** (plan C4.1): the reverse of
   `GET /api/public/{public_id}` — `{"session_id", "public_id"}`, the
-  public id `thread.PublicID` stamped on the session's turns, for the
-  devtools' `scope()` given a session id and no public id. A session
-  created without one answers 200 with `"public_id": ""` and the
-  `not_recorded` badge (cause `no_public_id`: "the session was created
-  without thread.PublicID", fix `thread.Create(…, thread.PublicID(id))`);
+  public id `thread.PublicID` stamped on the session's turns
+  (MAX(`weft.public_id`) over its top-level turns: a session whose turns
+  carry several answers the greatest, unbadged), for the devtools'
+  `scope()` given a session id and no public id. A session whose turns
+  carry none answers 200 with `"public_id": ""` and the `not_recorded`
+  badge (cause `no_public_id`, fix `thread.Create(…,
+  thread.PublicID(id))`, or set `weft.public_id` on every turn);
   an unknown session is 404 `not_found`. The dev (server) token's and
   setup A's open API's alone: every panel token, read or playground,
   is 403 with the `hidden` badge (cause `dev_token_only`) before the

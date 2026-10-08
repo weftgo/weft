@@ -70,7 +70,8 @@ const (
 	// it).
 	CauseLogCap HoleCause = "log_cap"
 	// CauseNoPublicID: the session's turns carry no weft.public_id —
-	// it was created without thread.PublicID (not_recorded: Studio's
+	// a thread session created without thread.PublicID, or an app that
+	// never stamped one (not_recorded: Studio's
 	// GET /api/sessions/{id}/public_id).
 	CauseNoPublicID HoleCause = "no_public_id"
 	// CauseDevTokenOnly: the route answers the dev (server) token and
@@ -91,8 +92,8 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 			"install a tracer (otel.Install records spans)",
 		},
 		CauseNoPublicID: {
-			"the session was created without thread.PublicID",
-			"thread.Create(…, thread.PublicID(id))",
+			"the session's turns carry no weft.public_id (a thread session is created without thread.PublicID)",
+			"thread.Create(…, thread.PublicID(id)), or set weft.public_id on every turn",
 		},
 	},
 	HoleHidden: {

@@ -47,7 +47,8 @@ func TestSessionPublicID(t *testing.T) {
 	decode(t, body, &doc)
 	if code != http.StatusOK || doc.SessionID != "s_nopub" || doc.PublicID == nil || *doc.PublicID != "" ||
 		doc.Badge != "not_recorded" || doc.Reason != reason || doc.Fix != fix ||
-		reason != "the session was created without thread.PublicID" || fix != "thread.Create(…, thread.PublicID(id))" {
+		reason != "the session's turns carry no weft.public_id (a thread session is created without thread.PublicID)" ||
+		fix != "thread.Create(…, thread.PublicID(id)), or set weft.public_id on every turn" {
 		t.Errorf("s_nopub: %d %s, want 200, public_id \"\" and the not_recorded badge (%q, %q)", code, body, reason, fix)
 	}
 	golden(t, "session-public-id-not-recorded.golden.json", body)

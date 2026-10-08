@@ -43,8 +43,8 @@
     "fix": "upgrade weft and re-run",
     "causes": {
       "no_public_id": {
-        "reason": "the session was created without thread.PublicID",
-        "fix": "thread.Create(…, thread.PublicID(id))"
+        "reason": "the session's turns carry no weft.public_id (a thread session is created without thread.PublicID)",
+        "fix": "thread.Create(…, thread.PublicID(id)), or set weft.public_id on every turn"
       },
       "no_spans": {
         "reason": "the run was recorded without a tracer, so attempt spans and the answering model were not stored",

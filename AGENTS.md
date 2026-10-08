@@ -204,7 +204,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    runs/{id}/logs?from=&limit=&severity= (the app's own log lines under the run's
 //    //    spans, capability "logs"; refused to a read-scoped token: they may carry prompts;
 //    //    the run row carries delta_count), traces/{id},
-//    //    sessions, sessions/{id}, public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
+//    //    sessions, sessions/{id}, sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
+//    //    alone, every panel token 403 hidden), public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5; configured by a data-weft
 //    //    script tag, weft:* meta tags, or <base>/panel-config.json; studio/README.md
 //    //    has the ladder; the same bytes on npm as @weftgo/devtools — import "@weftgo/devtools",

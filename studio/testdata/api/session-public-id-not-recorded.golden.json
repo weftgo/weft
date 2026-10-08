@@ -2,7 +2,7 @@
   "session_id": "s_nopub",
   "public_id": "",
   "badge": "not_recorded",
-  "reason": "the session was created without thread.PublicID",
-  "fix": "thread.Create(…, thread.PublicID(id))"
+  "reason": "the session's turns carry no weft.public_id (a thread session is created without thread.PublicID)",
+  "fix": "thread.Create(…, thread.PublicID(id)), or set weft.public_id on every turn"
 }
 

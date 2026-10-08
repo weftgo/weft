@@ -369,7 +369,9 @@ compaction view's `messages` null under the same badge; `otlp` and
 `traces/{trace_id}` (any trace), `sessions`, `sessions/{id}` (turns in
 order), `sessions/{id}/public_id` (the reverse of `public/`: `{session_id,
 public_id}`, the public id `thread.PublicID` stamped on the session's
-turns; `public_id: ""` with `badge: "not_recorded"` when the session was
+turns — MAX(`weft.public_id`) over its top-level turns: one value per
+thread session; a session whose turns carry several answers the
+greatest, unbadged; `public_id: ""` with `badge: "not_recorded"` when the session was
 created without one, 404 for an unknown session; the dev token's and
 setup A's alone — every panel token, read or playground, its own
 session included, is 403 with `badge: "hidden"`; session ids carry no

@@ -26,6 +26,22 @@ module, ADR 0005).
   `data-detect` accepts `markers` and `headers,markers`; the rung is on
   by default except under a read-scoped panel token off loopback, and
   the footer says `detect: markers` / `headers+markers`.
+- **The devtools panel's URL rung, live fallback and activity pill**
+  (plan C3.4): `?weft_scope=` (read first) or `#weft_scope=` on the host
+  page — the scope's string form, URL-decoded — scopes the panel, below
+  an explicit `data-scope`/`scope()` and above the marker and header
+  rungs; it is re-read on `hashchange`/`popstate` (passive listeners,
+  removed on disconnect), never written, and never gated (`data-detect`
+  `off` turns rungs 2–3 off only; the footer says `detect: url`). With no
+  scope from any rung the header reads "no conversation detected on this
+  page · how to scope" (the one-line fixes behind the link) and the
+  latest list follows `/api/live?agent=<the newest run's agent>` through
+  a grant instead of the 10 s poll, which stays only while no stream
+  covers the list (a 403 or a panel token: "streaming needs the server
+  token · polling"; a second agent: said). The collapsed pill pulses
+  (not under `prefers-reduced-motion`) and shows the running run's step
+  count ("● 3", `aria-label` "weft devtools · running, step 3") from
+  the streams the panel already holds.
 
 - **Studio's Request pane** (plan E1.1): each run-page step card's
   request now carries the chips the request record's hashes decide —

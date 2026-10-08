@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   $,
   all,
+  apiError,
   assistant,
   baseRoutes,
   button,
@@ -377,10 +378,11 @@ describe("the turn list", () => {
 })
 
 describe("the dev list (no public id)", () => {
-  it("is read again while the dock is open and the page visible — never while collapsed or hidden", async () => {
+  it("without a stream (its grant refused) it is read again while the dock is open and the page visible — never while collapsed or hidden", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const routes = baseRoutes()
     routes["runs?limit=10"] = { total: 1, runs: [runRow({})], next_before: null }
+    routes["POST live-grant"] = () => apiError(403, "forbidden", "no")
     const studio = fakeStudio(routes)
     const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true" })
     const reads = () => studio.gets("runs?limit=10").length

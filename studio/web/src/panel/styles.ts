@@ -67,7 +67,11 @@ export const PANEL_CSS = `
 .weft-dot.weft-on { background: var(--w-accent); }
 .weft-dot.weft-run { background: var(--w-warn); animation: weft-pulse 1.2s infinite; }
 @keyframes weft-pulse { 50% { opacity: .35; } }
-@media (prefers-reduced-motion: reduce) { .weft-dot.weft-run { animation: none; } }
+.weft-fab-running { border-color: var(--w-warn); width: auto; min-width: 40px; border-radius: 20px; padding: 0 10px; }
+.weft-fab-count { color: var(--w-warn); font-variant-numeric: tabular-nums; }
+.weft-fab-pulse { animation: weft-pulse 1.2s infinite; }
+.weft-howto { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--w-line); color: var(--w-dim); }
+@media (prefers-reduced-motion: reduce) { .weft-dot.weft-run, .weft-fab-pulse { animation: none; } }
 .weft-head .weft-title { overflow: hidden; text-overflow: ellipsis; }
 .weft-head .weft-grow { flex: 1; }
 .weft-switch { max-width: 40%; background: var(--w-bg); color: var(--w-dim); border: 1px solid var(--w-line);

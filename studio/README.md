@@ -154,20 +154,28 @@ header and filters nothing yet (it waits for `weft/flow`).
 is deprecated: `data-scope` is the form.
 
 Where the scope comes from (plan C3, scope detection). Each rung after
-the first is passive, and `data-detect="off"` turns rungs 2–4 off;
-rung 1 always works. The footer says which is in effect in one word:
+the first is passive, and `data-detect="off"` turns rungs 2 and 3 off;
+rungs 1 and 4 always work — no `data-detect` value and no token turns
+them off. The order is explicit (rung 1) > the URL (rung 4) > a marker
+(rung 3) > a header (rung 2): the numbers are the order the rungs were
+added, the precedence is how deliberate each one is — the host's own
+word, then a hand-off a link made (Studio's dev links), then what the
+page shows passively. The footer says which is in effect in one word:
 the rungs installed — `detect: headers` (with `(chained)` when the
 `fetch` it wrapped was not the browser's own), `detect: markers` or
-`detect: headers+markers` — else `detect: off`, `detect: explicit`
-(rung 1 names the scope, nothing detects) or `detect: none` (nothing
-names one, and rungs 2 and 3 are off by default here).
+`detect: headers+markers` — led by `url` (`detect: url`,
+`detect: url+markers`, …) while the scope followed is the URL's, else
+`detect: off`, `detect: explicit` (rung 1 names the scope, nothing
+detects) or `detect: none` (nothing names one, and rungs 2 and 3 are
+off by default here).
 
 | # | Rung | When it is on | The explicit alternative |
 |---|---|---|---|
 | 1 | explicit: `data-scope` (element, `weft:scope` meta, script tag), `window.__WEFT__ = { scope }` or `{ publicId }`, `scope()` / `mount({scope})` from `@weftgo/devtools`, the deprecated `data-public-id` | always; it wins over every detected scope | — |
 | 2 | response headers: the `Weft-Scope` header of the page's own same-origin `fetch` responses (the scope header below) | by default only with the page and the endpoint on loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`) and no token or a dev/server token, and only once Studio has answered; anywhere with `data-detect="headers"` (or `mount({detect: "headers"})`); never under a panel token (`weft_pt.`) unless asked | `data-scope` |
 | 3 | the DOM marker: `data-weft-scope="pub_…;session=…;flow=…;run=…"` on any element of the page — the framework helpers (`useWeftDevtools` for React and Vue, the Svelte `weftDevtools` action) set it on the element they are given | by default everywhere except a page off loopback under a read-scoped panel token (a playground-scoped panel token, the dev token, no token, or any token on loopback keep it on); anywhere with `data-detect="markers"` (or `"headers,markers"`, `mount({detect: "markers"})`) | `data-scope` |
-| 4 | the page URL | C3.4 | `data-scope` |
+| 4 | the page URL: `?weft_scope=…` (read first), else `#weft_scope=…` — the same string form, URL-decoded (`#weft_scope=pub_x%3Bflow%3Df_1`); a value without a public id is ignored | always, every setup and token, `data-detect="off"` included; below rung 1, above rungs 2 and 3; re-read on `hashchange` and `popstate` | `data-scope` |
+| 5 | the fallback: no rung names a scope — the header reads "no conversation detected on this page · how to scope" and lists the newest runs | when 1–4 name nothing | any line under "how to scope": `data-scope="pub_…"` on the tag, `scope("pub_…")` from `@weftgo/devtools`, `data-weft-scope="pub_…"` on the chat's element, `scope.Header` on the app's handler |
 
 Rung 2 patches a global of your page, `window.fetch` (shadow DOM
 scopes DOM and CSS, not JavaScript), so it is held to these rules
@@ -254,10 +262,45 @@ not offered. One known conversation shows no switcher.
 | `headers` | on anywhere | as unset |
 | `markers` | as unset | on anywhere |
 | `headers,markers` | on anywhere | on anywhere |
-| `off` (named anywhere: `off,headers` is `off`) | off | off |
+| `off` (named anywhere: `off,headers` is `off`) | off | off (rungs 1 and 4 stay on) |
 
 Empty words are skipped (`markers,` is `markers`); a value naming
 anything else (`bogus`, `headers,bogus`) is unset: the defaults apply.
+
+Rung 4, the URL, reads `location` and listens to `hashchange` and
+`popstate` — two passive listeners on `window`, removed when the panel
+disconnects (event listeners, not patches); it never writes the URL
+(no `pushState`, `replaceState` or hash change, whatever the switcher
+does). A new URL scope drops a switcher choice and pins its run, as a
+new explicit scope does; an explicit scope set later wins over it, and
+removing that hands the panel back to the URL. Focus in a marked chat
+does not move the panel off the URL's scope; the switcher (which lists
+it as `url`, after `explicit`) does.
+
+Rung 5, the fallback: with no scope from any rung, the header says
+`no conversation detected on this page · how to scope`, and "how to
+scope" opens the four one-line fixes above. The newest runs it lists
+follow `/api/live?agent=<agent of the newest listed run>` (run frames
+only, opened through a grant like every stream) instead of a poll: the
+live API has no selector for everything (exactly one of `run`,
+`session`, `public_id`, `agent`), and an app's dev page usually runs
+one agent. The 10 s poll (while the dock is open and the page visible)
+stays only while no stream covers the list — no run listed yet (no
+agent to name), the stream gone, a grant refused (`streaming needs the
+server token · polling`; a panel token is never granted an agent's
+stream, so under one the panel never asks and says the same), or runs
+of a second agent (`live: agent X · the other agents' runs every
+10 s`).
+
+The collapsed pill is an activity signal: while the stream the panel
+holds anyway (its scope's `public_id` stream, or the fallback's agent
+stream — no second one is opened) lists a run as running, the pill
+pulses (a CSS animation, none under `prefers-reduced-motion`) and shows
+the run's live step count, `● 3`, with `aria-label` and title
+`weft devtools · running, step 3`. The count is the open tail's steps
+when that run is the turn the panel follows, else its row's (unknown
+while it runs: `●` alone, `weft devtools · running`). When the run
+ends the next draw is the plain pill.
 
 Where the configuration comes from (plan C2). Each field — `endpoint`,
 `scope` (or the deprecated `public-id`; `scope` wins at the same rung),
@@ -293,9 +336,10 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 131,804 B raw / 37,303 B gzip
-(36.4 KiB, under the 80 KiB cap; the scope-detection ladder, rungs 2
-and 3, costs about +4.4 KiB of it against the plan's +3 KiB estimate);
+committed `studio/dist/panel/panel.js`, 137,095 B raw / 38,764 B gzip
+(37.9 KiB, under the 80 KiB cap; the scope-detection ladder, rungs 2
+to 5 and the activity pill, costs about +5.7 KiB of it against the
+plan's +3 KiB estimate);
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 

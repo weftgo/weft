@@ -25,7 +25,7 @@ import {
 import { attemptLine, attemptsHole, factsFromRows, timingLine } from "../lib/attempts"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
 import { duration, relativeTime, tokens } from "../lib/format"
-import { discoverEndpoint, headerRungOn, markerRungOn, readConfig, tokenScope } from "./config"
+import { discoverEndpoint, headerRungOn, markerRungOn, readConfig, tokenScope, urlScope } from "./config"
 import type { MountOptions, PanelConfig } from "./config"
 import { installHeaderRung } from "./detect"
 import type { HeaderRung } from "./detect"
@@ -36,6 +36,7 @@ import type { Scope } from "../lib/scope"
 import { el, fmtJSON, waterfall } from "./render"
 import { PANEL_CSS } from "./styles"
 import {
+  DEV_POLL_MS,
   emptyPanelState,
   MAX_EVENT_PAGES,
   PanelModel,
@@ -126,14 +127,42 @@ export interface DetectedScope {
   at: number
 }
 
+/** The rungs installed, as the footer says them. */
+type RungWord = "headers" | "markers" | "headers+markers"
+
 /** The detection word the footer shows: the rungs installed
  * ("headers", "markers", "headers+markers"), "off" under
  * data-detect="off", "explicit" when an explicit form (rung 1) names
- * the scope and no rung detects, "none" when nothing does. */
-export type DetectWord = "headers" | "markers" | "headers+markers" | "off" | "explicit" | "none"
+ * the scope and no rung detects, "none" when nothing does — led by
+ * "url" ("url", "url+markers", …) while the scope followed is the page
+ * URL's (rung 4, C3.4). */
+export type DetectWord = RungWord | "off" | "explicit" | "none" | "url" | `url+${RungWord}`
 
 /** Where a conversation the switcher lists came from. */
-export type ScopeSource = "explicit" | "marker" | "header"
+export type ScopeSource = "explicit" | "url" | "marker" | "header"
+
+/** The fallback's one-line fixes (plan C3.4): every way to name the
+ * scope, one line each, from the README's ladder — shown under "how to
+ * scope" when no rung names one. */
+export const HOW_TO_SCOPE: readonly string[] = [
+  'data-scope="pub_…" on the panel\'s <script> tag (or <weft-devtools>)',
+  'scope("pub_…") from @weftgo/devtools',
+  'data-weft-scope="pub_…" on the chat\'s element',
+  "scope.Header(h, …) on the app's handler (Go, package weft/scope)",
+]
+
+/** The fallback's header label: no rung names a scope. */
+export const NO_SCOPE_LABEL = "no conversation detected on this page"
+
+/** prefersReducedMotion reports the page's prefers-reduced-motion:
+ * reduce (false where matchMedia is missing or throws). */
+function prefersReducedMotion(): boolean {
+  try {
+    return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  } catch {
+    return false
+  }
+}
 
 /** A conversation the panel knows of (plan C3.3's switcher). */
 export interface KnownScope {
@@ -208,6 +237,10 @@ export class WeftDevtools extends HTMLElement {
   private explicitForm = ""
   /** A marker has carried the explicit conversation since it was set. */
   private explicitMarked = false
+  /** The URL scope last applied (rung 4): a new one resets the choice. */
+  private urlForm = ""
+  /** The fallback's "how to scope" lines are shown. */
+  private howTo = false
   /** The endpoint the running connection talks to: cfg.endpoint, or
    * what panel-config.json named (rung 5). The deep links use it. */
   private base = ""
@@ -244,6 +277,12 @@ export class WeftDevtools extends HTMLElement {
   /** The <details> the user opened, by key (survives redraws). */
   private openKeys = new Set<string>()
   private onKey = (e: KeyboardEvent) => this.keydown(e)
+  /** hashchange / popstate (rung 4): passive listeners on window, a
+   * read of location — never a patch, never a write to the URL. */
+  private onURL = () => {
+    const next = urlScope()
+    if ((next ? serializeScope(next) : "") !== (this.cfg.urlScope ? serializeScope(this.cfg.urlScope) : "")) this.rescan()
+  }
   private onRelease = () => this.release()
 
   constructor() {
@@ -290,6 +329,8 @@ export class WeftDevtools extends HTMLElement {
     window.addEventListener("keydown", this.onKey)
     window.addEventListener("pointerup", this.onRelease, true)
     window.addEventListener("pointercancel", this.onRelease, true)
+    window.addEventListener("hashchange", this.onURL, { passive: true })
+    window.addEventListener("popstate", this.onURL, { passive: true })
     this.schedule()
   }
 
@@ -297,6 +338,8 @@ export class WeftDevtools extends HTMLElement {
     window.removeEventListener("keydown", this.onKey)
     window.removeEventListener("pointerup", this.onRelease, true)
     window.removeEventListener("pointercancel", this.onRelease, true)
+    window.removeEventListener("hashchange", this.onURL)
+    window.removeEventListener("popstate", this.onURL)
     if (this.holdTimer) clearTimeout(this.holdTimer)
     this.holdTimer = null
     this.held = this.composing = false
@@ -315,10 +358,16 @@ export class WeftDevtools extends HTMLElement {
 
   /** detectWord is the resolved detection choice, as the footer says it. */
   detectWord(): DetectWord {
-    if (this.rung) return this.markerRung ? "headers+markers" : "headers"
-    if (this.markerRung) return "markers"
+    const rungs: RungWord | "" = this.rung ? (this.markerRung ? "headers+markers" : "headers") : this.markerRung ? "markers" : ""
+    if (this.followsURL()) return rungs ? `url+${rungs}` : "url"
+    if (rungs) return rungs
     if (this.cfg.detect === "off") return "off"
     return this.cfg.scopeExplicit ? "explicit" : "none"
+  }
+
+  /** followsURL: the scope followed is the page URL's (rung 4). */
+  private followsURL(): boolean {
+    return !!this.cfg.urlScope && this.scopeNow() === this.cfg.urlScope
   }
 
   /** detectedScopes is every conversation the header rung has seen —
@@ -347,6 +396,7 @@ export class WeftDevtools extends HTMLElement {
         out.push({ scope: { ...scope }, key, source })
     }
     if (this.cfg.scopeExplicit) add(this.cfg.scope, "explicit")
+    if (this.cfg.urlScope) add(this.cfg.urlScope, "url")
     for (const m of this.markers) add(m.scope, "marker")
     for (const d of this.seen) add(d.scope, "header")
     return out
@@ -478,6 +528,16 @@ export class WeftDevtools extends HTMLElement {
       if (ex) this.forceNext = true
       this.follow()
     }
+    // A new URL scope (rung 4: a dev link, a hashchange) is a hand-off:
+    // it drops the user's switcher choice and pins its run.
+    const url = this.cfg.urlScope ? serializeScope(this.cfg.urlScope) : ""
+    if (url !== this.urlForm) {
+      this.urlForm = url
+      if (url && !this.cfg.scopeExplicit) {
+        this.chosen = null
+        this.forceNext = true
+      }
+    }
   }
 
   /** dropRung restores the page's fetch and forgets what was seen. */
@@ -524,7 +584,8 @@ export class WeftDevtools extends HTMLElement {
   /** scopeNow is the scope the panel follows: the user's switcher
    * choice; the explicit forms', unless a marker on the page carries
    * the same conversation (the helpers' scope() and marker: then the
-   * marked one, so focus moves between helpers' chats); the marked
+   * marked one, so focus moves between helpers' chats); with no
+   * explicit form, the page URL's (rung 4, as written); the marked
    * conversation (the header's newest scope of it, when the header
    * rung saw it: its run narrows); the explicit one; the newest
    * detected one while the header rung is on; else none (the dev list). */
@@ -533,6 +594,8 @@ export class WeftDevtools extends HTMLElement {
     const cfg = this.cfg
     const marked = this.markerRung ? this.marked : null
     if (cfg.scopeExplicit && !(marked && this.explicitMarked)) return cfg.scope
+    // Rung 4: below every explicit form, above the detected ones.
+    if (cfg.urlScope && !cfg.scopeExplicit) return cfg.urlScope
     // The marked conversation is the explicit one: the explicit form
     // carries its run (a helper's scope() names it before the marker
     // scan reads it).
@@ -849,14 +912,11 @@ export class WeftDevtools extends HTMLElement {
         next.push(line)
       }
     } else if (!this.open) {
-      const fab = el("button", `weft-fab weft-fab-${this.cfg.position}`, "devtools", {
-        title: "weft devtools — Alt+W",
-      })
-      fab.addEventListener("click", () => this.toggle())
-      next.push(fab)
+      next.push(this.pill(s))
     } else if (!s.gone) {
       const dock = el("div", `weft-dock weft-${this.cfg.position} weft-open`)
       dock.appendChild(this.header(s))
+      if (this.howTo && !this.model?.publicId) dock.appendChild(this.howToBox())
       const cols = el("div", "weft-cols")
       cols.appendChild(this.turnList(s))
       cols.appendChild(this.main(s))
@@ -903,6 +963,41 @@ export class WeftDevtools extends HTMLElement {
     }
   }
 
+  /** pill is the collapsed dock (the fab). The activity signal (plan
+   * C3.4): while the stream the panel holds anyway (its scope's, or the
+   * fallback's agent stream) has a run reading running, it pulses (not
+   * under prefers-reduced-motion) and shows the run's live step count —
+   * its open tail's steps when it is the turn followed, else its row's
+   * — "● 3"; nothing running, it is the plain pill. No stream of its own. */
+  private pill(s: PanelState): HTMLElement {
+    const running = s.live ? s.turns.find((r) => r.status === "running") : undefined
+    if (!running) {
+      const fab = el("button", `weft-fab weft-fab-${this.cfg.position}`, "devtools", {
+        title: "weft devtools — Alt+W",
+      })
+      fab.addEventListener("click", () => this.toggle())
+      return fab
+    }
+    const folded = s.turn?.id === running.id ? s.turn.folded.steps.length : 0
+    const step = Math.max(folded, running.steps)
+    const words = `weft devtools · running${step ? `, step ${step}` : ""}`
+    const fab = el(
+      "button",
+      `weft-fab weft-fab-${this.cfg.position} weft-fab-running${prefersReducedMotion() ? "" : " weft-fab-pulse"}`,
+      [document.createTextNode("devtools"), el("span", "weft-fab-count", step ? ` ● ${step}` : " ●")],
+      { title: `${words} — Alt+W`, "aria-label": words }
+    )
+    fab.addEventListener("click", () => this.toggle())
+    return fab
+  }
+
+  /** howToBox is the fallback's expander: the one-line fixes. */
+  private howToBox(): HTMLElement {
+    const box = el("div", "weft-howto")
+    for (const line of HOW_TO_SCOPE) box.appendChild(el("code", undefined, line))
+    return box
+  }
+
   /** go runs one of the model's async verbs; a rejection stays here
    * (the host page's unhandledrejection is not the panel's log). */
   private go(p: Promise<unknown> | undefined) {
@@ -938,8 +1033,22 @@ export class WeftDevtools extends HTMLElement {
     )
     const agent = s.session?.agent ?? s.turns.at(0)?.agent ?? ""
     const scope = this.model?.publicId || s.session?.public_id || ""
-    const title = scope ? `${agent ? agent + " · " : ""}${scope}` : "latest (dev)"
-    h.appendChild(el("span", "weft-title", title, { title }))
+    const title = scope ? `${agent ? agent + " · " : ""}${scope}` : NO_SCOPE_LABEL
+    h.appendChild(el("span", "weft-title", title, { title: scope ? title : `${title}: the newest runs are shown` }))
+    if (!scope) {
+      // The fallback (C3.4): never an unexplained list — the fixes are
+      // one click away.
+      const how = el("button", `weft-btn weft-howto-btn${this.howTo ? " weft-active" : ""}`, "how to scope", {
+        type: "button",
+        "aria-expanded": String(this.howTo),
+        title: "the one-line ways to scope the panel to your conversation",
+      })
+      how.addEventListener("click", () => {
+        this.howTo = !this.howTo
+        this.render(this.last)
+      })
+      h.append(" · ", how)
+    }
     const sw = this.switcher(s)
     if (sw) h.appendChild(sw)
     // The scope's narrowing, as chips: the session filters the list,
@@ -1015,6 +1124,12 @@ export class WeftDevtools extends HTMLElement {
     const session = this.model?.narrowing.session
     if (session && s.sessionUnrecorded)
       list.appendChild(el("div", "weft-note", `session ${session}: these runs carry no session id — not narrowed`))
+    // The fallback's stream, said: refused (it polls), or one agent of
+    // several followed live.
+    if (!this.model?.publicId && s.devRefused)
+      list.appendChild(el("div", "weft-note weft-dev-poll", "streaming needs the server token · polling"))
+    else if (s.devAgent && s.turns.some((r) => r.agent !== s.devAgent))
+      list.appendChild(el("div", "weft-note weft-dev-poll", `live: agent ${s.devAgent} · the other agents' runs every ${DEV_POLL_MS / 1000} s`))
     if (!s.turns.length && !s.experiments.size) {
       const empty = session
         ? `no turns of session ${session} yet`
@@ -1843,7 +1958,11 @@ export class WeftDevtools extends HTMLElement {
     const word = this.detectWord()
     parts.push(
       el("span", "weft-detect", ` · detect: ${word}${this.rung?.chained ? " (chained)" : ""}${this.notRestored && !this.rung ? " (fetch not restored: patched after the panel)" : ""}`, {
-        title: word.includes("headers") || word === "markers" ? "reading Weft-Scope on same-origin fetches / data-weft-scope markers" : "scope from data-scope / window.__WEFT__",
+        title: word.startsWith("url")
+          ? "scope from the page URL's weft_scope"
+          : word.includes("headers") || word === "markers"
+            ? "reading Weft-Scope on same-origin fetches / data-weft-scope markers"
+            : "scope from data-scope / window.__WEFT__",
       })
     )
     return el("div", "weft-footer", parts)

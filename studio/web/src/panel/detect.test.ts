@@ -99,7 +99,7 @@ describe("C3's Done line: the studio-local page without data-public-id", () => {
     script({ "data-weft": "", "data-open": "true" })
     const el = mountPanel()
     await settle()
-    expect(text(el, ".weft-title")).toBe("latest (dev)")
+    expect(text(el, ".weft-title")).toBe("no conversation detected on this page")
     expect(text(el, ".weft-detect")).toContain("detect: headers")
     // The page's own chat surface: one turn, one fetch.
     const res = await window.fetch("/run", { method: "POST", body: JSON.stringify("where is order 42?") })
@@ -538,7 +538,7 @@ describe("the panel's detected scopes", () => {
     const el = await mountWith({ "data-endpoint": LOCAL, "data-open": "true" })
     await window.fetch(`${LOCAL}api/runs?limit=10`) // a request under the endpoint, through the wrapper
     await settle()
-    expect(text(el, ".weft-title")).toBe("latest (dev)")
+    expect(text(el, ".weft-title")).toBe("no conversation detected on this page")
     expect(el.detectedScopes()).toEqual([])
   })
 })

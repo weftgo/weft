@@ -494,12 +494,12 @@ describe("the live streams end", () => {
     expect(FakeEventSource.live("run=s_01-t2")).toHaveLength(0)
   })
 
-  it("the dev list (no public id) has no subscription and does not paint the live dot", async () => {
+  it("the dev list (no public id) with no run yet names no agent: no subscription, no live dot (C3.4 streams it once one is listed)", async () => {
     const routes = baseRoutes()
-    routes["runs?limit=10"] = { total: 1, runs: [runRow({})], next_before: null }
+    routes["runs?limit=10"] = { total: 0, runs: [], next_before: null }
     fakeStudio(routes)
     const el = await mount({ "data-endpoint": ATTRS["data-endpoint"], "data-open": "true" })
-    expect(text(el, ".weft-title")).toBe("latest (dev)")
+    expect(text(el, ".weft-title")).toBe("no conversation detected on this page")
     expect(FakeEventSource.instances).toHaveLength(0)
     expect($(el, ".weft-dot")?.getAttribute("title")).toBe("history")
     expect($(el, ".weft-dot.weft-on, .weft-dot.weft-run")).toBeNull()

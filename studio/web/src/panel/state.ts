@@ -65,10 +65,14 @@ export const LIVE_RETRIES = 5
  * row end it. */
 const POLL_MS = 700
 const POLL_FAILS = 8
-/** The dev list (no public id) has no stream that covers it (S4.5
- * wants exactly one selector): it is read again this often while the
- * dock is open and the page visible. */
+/** The dev list (no public id) is streamed on its newest run's agent
+ * (agent=…, plan C3.4: S4.5 has no selector for everything); while no
+ * stream covers every agent it lists (none known yet, the grant
+ * refused, the stream gone, a second agent) it is read again this
+ * often while the dock is open and the page visible. */
 export const DEV_POLL_MS = 10_000
+/** The dev list's length: the newest top-level runs. */
+export const DEV_LIMIT = 10
 /** While a tail streams, the dock is redrawn at most this often: a
  * redraw rebuilds the whole dock inside the host page, and a burst of
  * deltas must not cost it a rebuild per animation frame. Everything
@@ -208,8 +212,15 @@ export interface PanelState {
   /** The drawer's runtime's breakpoint set (§8.3): the stored set
    * GET /api/runtimes reports, then what PUT …/breakpoints answered. */
   breakpoints: string[]
-  /** The scope subscription is open (the live dot). */
+  /** The scope subscription (or, with no public id, the fallback's
+   * agent stream) is open (the live dot). */
   live: boolean
+  /** The fallback (no public id, plan C3.4): the agent whose runs the
+   * dev list streams (agent=…), "" while none does. */
+  devAgent: string
+  /** The fallback's stream was refused (403, or a panel token, which is
+   * never granted an agent's stream): the dev list polls, and says so. */
+  devRefused: boolean
   raw: boolean
   /** The scope's run, when it is not among the conversation's listed
    * runs: "run r_… not in this conversation", an honest line (C3.2). */
@@ -239,6 +250,8 @@ export function emptyPanelState(): PanelState {
     result: null,
     breakpoints: [],
     live: false,
+    devAgent: "",
+    devRefused: false,
     raw: false,
     pinMissing: "",
     sessionUnrecorded: false,
@@ -414,11 +427,13 @@ export class PanelModel {
   private scopeSub?: PanelLiveHandle
   private runSub?: PanelLiveHandle
   private expSub?: PanelLiveHandle
+  /** The fallback's agent stream (no public id). */
+  private devSub?: PanelLiveHandle
   private disposed = false
   private loadSeq = 0 // selects the freshest async load after a rescope
   private timers = new Set<ReturnType<typeof setTimeout>>()
   /** Reopen attempts since each stream last opened (LIVE_RETRIES). */
-  private retries = { scope: 0, run: 0, exp: 0 }
+  private retries = { scope: 0, run: 0, exp: 0, dev: 0 }
   /** Run frames that arrived while a turn-list fetch was in flight:
    * the fetch's snapshot is older than they are, so they are applied
    * over it. */
@@ -529,11 +544,14 @@ export class PanelModel {
     this.scopeSub?.close()
     this.runSub?.close()
     this.expSub?.close()
-    this.scopeSub = this.runSub = this.expSub = undefined
+    this.devSub?.close()
+    this.scopeSub = this.runSub = this.expSub = this.devSub = undefined
     this.clearTimers()
-    this.retries = { scope: 0, run: 0, exp: 0 }
+    this.retries = { scope: 0, run: 0, exp: 0, dev: 0 }
     const s = this.state
     s.live = false
+    s.devAgent = ""
+    s.devRefused = false
     s.session = null
     s.turns = []
     s.turnsCapped = false
@@ -607,7 +625,7 @@ export class PanelModel {
 
   /** retry runs fn after the kind's next backoff step, LIVE_RETRIES
    * times at most between two successful opens. */
-  private retry(kind: "scope" | "run" | "exp", fn: () => Promise<void>) {
+  private retry(kind: "scope" | "run" | "exp" | "dev", fn: () => Promise<void>) {
     const n = this.retries[kind]
     if (n >= LIVE_RETRIES) return
     this.retries[kind] = n + 1
@@ -649,6 +667,8 @@ export class PanelModel {
     this.cancel(this.devTimer)
     this.devTimer = null
     if (!this.watching || this.publicId || this.disposed || !this.state.meta || this.state.tooNew) return
+    // The agent stream covers the list: frames keep it current.
+    if (this.devSub && this.state.turns.every((r) => r.agent === this.state.devAgent)) return
     this.devTimer = this.after(DEV_POLL_MS, () => {
       this.devTimer = null
       if (typeof document !== "undefined" && document.visibilityState === "hidden") {
@@ -681,6 +701,60 @@ export class PanelModel {
     })
   }
 
+  /** subscribeDev opens the fallback's live lane (no public id, plan
+   * C3.4): run frames of the agent of the newest listed run — the
+   * broadest selector S4.5 has (exactly one of run, session, public_id,
+   * agent; none for everything) — through a grant like every stream.
+   * Once open it stays on that agent until it ends. A refused grant
+   * (403) and a panel token (never granted an agent's stream, so never
+   * asked for one) leave the dev list on its poll, said as such; a
+   * stream that closed is retried on the bounded backoff, the poll
+   * covering the gap. */
+  private subscribeDev(seq: number) {
+    const s = this.state
+    if (this.publicId || this.devSub || s.devRefused || this.disposed || !s.meta || s.tooNew) return
+    if (tokenScope(this.ep.token) !== "") {
+      s.devRefused = true
+      return
+    }
+    const agent = s.turns.find((r) => r.agent)?.agent ?? ""
+    if (!agent) return
+    const ended = () => {
+      this.devSub = undefined
+      s.live = false
+      s.devAgent = ""
+      this.armDev()
+      this.emit()
+    }
+    const again = async () => {
+      if (seq !== this.loadSeq || this.disposed) return
+      await this.refresh()
+    }
+    this.devSub = openPanelLive(this.ep, {
+      selector: { agent },
+      kinds: ["run"],
+      onOpen: (reopened) => {
+        this.retries.dev = 0
+        if (reopened) void this.refresh().catch(quiet)
+      },
+      onRun: (f) => this.onRunFrame(f),
+      onRefused: () => {
+        s.devRefused = true
+        ended()
+      },
+      onOverflow: (why) => {
+        ended()
+        if (why === "expired") return
+        if (why === "overflow") void again().catch(quiet)
+        else this.retry("dev", again)
+      },
+    })
+    s.live = true
+    s.devAgent = agent
+    this.armDev()
+    this.emit()
+  }
+
   private clearTimers() {
     for (const t of this.timers) clearTimeout(t)
     this.timers.clear()
@@ -705,7 +779,7 @@ export class PanelModel {
       }
       const page = await fetchRuns(
         this.ep,
-        this.publicId ? { public_id: this.publicId, limit: String(TURNS_LIMIT) } : { limit: "10" }
+        this.publicId ? { public_id: this.publicId, limit: String(TURNS_LIMIT) } : { limit: String(DEV_LIMIT) }
       )
       if (seq !== this.loadSeq || this.disposed) return
       const listed: (RunRow | null)[] = Array.isArray(page.runs) ? page.runs : []
@@ -725,6 +799,12 @@ export class PanelModel {
       this.collectors.delete(during)
     }
     this.armStale()
+    // The fallback's stream: opened once the list names an agent; the
+    // poll stops while it covers the list.
+    if (!this.publicId) {
+      this.subscribeDev(seq)
+      this.armDev()
+    }
     // The open turn's row may have ended without a frame saying so (a
     // run that read interrupted only now): its tail is done.
     const open = this.state.turn
@@ -789,7 +869,8 @@ export class PanelModel {
    * deltas'). */
   private onRunFrame(f: LiveRun) {
     const run = f.run
-    if (run.public_id && run.public_id !== this.publicId) return
+    // The dev list's agent stream carries every conversation's runs.
+    if (this.publicId && run.public_id && run.public_id !== this.publicId) return
     // A subagent's run inherits the public id, but it is not a turn:
     // the list is top-level runs (runs?public_id= reads the same way)
     // and the child hangs off its parent's call.
@@ -798,6 +879,7 @@ export class PanelModel {
     if (!this.inSession(run)) return
     for (const c of this.collectors) c.push(run)
     this.upsertRun(run)
+    if (!this.publicId) this.state.turns = this.state.turns.slice(0, DEV_LIMIT)
     this.armStale()
     // The scope's run, heard as it starts: the pin takes it.
     const pin = this.takePin()
@@ -1792,7 +1874,8 @@ export class PanelModel {
     this.scopeSub?.close()
     this.runSub?.close()
     this.expSub?.close()
-    this.scopeSub = this.runSub = this.expSub = undefined
+    this.devSub?.close()
+    this.scopeSub = this.runSub = this.expSub = this.devSub = undefined
   }
 }
 

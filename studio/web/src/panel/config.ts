@@ -24,8 +24,10 @@
 // form, read as a scope with only its first field — deprecated, kept
 // working). At each rung data-scope is read first; without either at
 // any rung, window.__WEFT__ ({scope} or {publicId}) is the scope.
-// Those are the explicit forms (detection rung 1); the header rung
-// (detect.ts) supplies a scope only when none of them names one.
+// Those are the explicit forms (detection rung 1); the page URL's
+// ?weft_scope= / #weft_scope= (rung 4, urlScope) comes next, then the
+// marker and header rungs (markers.ts, detect.ts) — each supplies a
+// scope only when no rung above it names one.
 import { parseScope, serializeScope } from "../lib/scope"
 import { isLoopback } from "./detect"
 import type { Scope } from "../lib/scope"
@@ -53,10 +55,15 @@ export interface PanelConfig {
   /** Whether an explicit form named a non-empty scope: detection rungs
    * 2–4 then supply nothing — the page's own word wins. */
   scopeExplicit: boolean
+  /** Detection rung 4 (plan C3.4): the scope the page's URL names
+   * (?weft_scope=, else #weft_scope=), null when it names none. Never
+   * gated: no data-detect value or token turns it off; below rung 1,
+   * above rungs 2–3. */
+  urlScope: Scope | null
   /** data-detect: "headers" / "markers" / "headers,markers" turn the
    * rungs named on anywhere (an unnamed one keeps its default), "off"
-   * turns every detection rung off (the explicit forms still work),
-   * "" leaves the defaults (headerRungOn, markerRungOn). */
+   * turns detection rungs 2 and 3 off (the explicit forms and the URL
+   * still work), "" leaves the defaults (headerRungOn, markerRungOn). */
   detect: DetectSetting
   /** API token (setups B and C); "" in setup A. */
   token: string
@@ -260,6 +267,7 @@ export function readConfig(el?: HTMLElement & { options?: MountOptions | null })
     publicId: scope.publicId,
     scope,
     scopeExplicit: !!(scope.publicId || scope.session || scope.flow || scope.run),
+    urlScope: urlScope(),
     token: pick("token") ?? "",
     detect: detectSetting(detect),
     position: POSITIONS.includes(position as PanelPosition)
@@ -330,6 +338,47 @@ export function weftScope(): Scope {
  * location.href) — one object, so a test can stand the panel on a page
  * off loopback, which jsdom's location cannot be moved to. */
 export const pageURL = { href: (): string => location.href }
+
+/** The page URL's scope parameter (detection rung 4, plan C3.4). */
+export const URL_SCOPE_PARAM = "weft_scope"
+
+/** urlParam is the first weft_scope=… of a query or fragment string
+ * (its leading ? or # dropped), URL-decoded once — "+" stays "+" (the
+ * scope's own form percent-encodes it), a malformed escape is kept as
+ * written; null when the string carries none. */
+function urlParam(part: string): string | null {
+  for (const pair of part.replace(/^[?#]/, "").split("&")) {
+    const at = pair.indexOf("=")
+    if ((at < 0 ? pair : pair.slice(0, at)) !== URL_SCOPE_PARAM) continue
+    const v = at < 0 ? "" : pair.slice(at + 1)
+    try {
+      return decodeURIComponent(v)
+    } catch {
+      return v
+    }
+  }
+  return null
+}
+
+/** urlScope is detection rung 4 (plan C3.4): the host page's
+ * ?weft_scope= (read first), else its #weft_scope= — the serialised
+ * Scope (lib/scope.ts), URL-decoded, as Studio's dev links write it.
+ * null when neither names a public id. Reads the page's URL, never
+ * writes it; never throws. page defaults to pageURL.href(). */
+export function urlScope(page: string = pageURL.href()): Scope | null {
+  try {
+    const u = new URL(page)
+    for (const part of [u.search, u.hash]) {
+      const v = urlParam(part)
+      if (v === null) continue
+      const sc = parseScope(v)
+      if (sc.publicId) return sc
+    }
+  } catch {
+    // not a URL: no scope
+  }
+  return null
+}
 
 /** headerRungOn is the header rung's switch (plan §13.3): data-detect
  * "headers" turns it on anywhere and "off" turns it off; by default it

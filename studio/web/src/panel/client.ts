@@ -21,7 +21,7 @@ import type {
 } from "../lib/api"
 import { asTranscript } from "../lib/api"
 import type { LiveGrant, LiveRecord, LiveRun, LiveSelector } from "../lib/live"
-import { grantSpent, liveStreamURL, requestLiveGrant } from "../lib/live"
+import { grantSpent, LiveGrantError, liveStreamURL, requestLiveGrant } from "../lib/live"
 
 export interface PanelEndpoint {
   /** Studio base URL, trailing slash included. */
@@ -361,6 +361,11 @@ export interface PanelLiveOptions {
    * caller does not knock (the token would be refused), it shows no
    * live; a new token is a new data-token, a new connection. */
   onOverflow?: (why: "overflow" | "closed" | "expired") => void
+  /** The grant was refused for good (403: this token may not read the
+   * stream, e.g. a panel token asking for an agent's): asking again
+   * gets the same answer. Without it a 403 is "closed" like any other
+   * refusal. */
+  onRefused?: () => void
 }
 
 export interface PanelLiveHandle {
@@ -431,9 +436,19 @@ export function openPanelLive(ep: PanelEndpoint, opts: PanelLiveOptions): PanelL
       (grant) => {
         if (!closed && n === attempt) open(grant)
       },
-      () => {
+      (err: unknown) => {
+        if (closed || n !== attempt) return
+        if (opts.onRefused && err instanceof LiveGrantError && err.status === 403) {
+          stop()
+          try {
+            opts.onRefused()
+          } catch {
+            // contained
+          }
+          return
+        }
         // Refused (a token gone bad) or no answer: the caller decides.
-        if (!closed && n === attempt) report("closed")
+        report("closed")
       }
     )
   }

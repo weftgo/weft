@@ -214,7 +214,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    no or a dev token, restored on disconnect, or a data-weft-scope DOM marker (the helpers set it;
 //    //    attributes read through one MutationObserver, the marker holding focus wins, a header switcher
 //    //    when several conversations are known; off only under a read panel token off loopback),
-//    //    data-detect="headers"|"markers"|"headers,markers"|"off"; the same bytes on npm as @weftgo/devtools — import "@weftgo/devtools",
+//    //    data-detect="headers"|"markers"|"headers,markers"|"off" (off: those two rungs only), or the page
+//    //    URL's ?weft_scope= / #weft_scope= (below data-scope, above markers and headers; never gated,
+//    //    never written); with none, "no conversation detected on this page · how to scope" over the latest
+//    //    runs, streamed on agent=; the collapsed pill pulses "● step" while a run runs; the same bytes on npm as @weftgo/devtools — import "@weftgo/devtools",
 //    //    mount/scope/open/close/on, /react /vue /svelte marker helpers; studio/web/npm,
 //    //    make devtools-npm, never published by the build), /panel-config.json
 //    //    ({endpoint, version, capabilities}; loopback Host / same-origin only, else

@@ -204,7 +204,8 @@ pub_demo;run=<id>`). It never carries a token. The value is the
 `data-weft-scope` marker's string form, pinned for both sides by
 `studio/testdata/scope.golden.json`. Both helpers append `Weft-Scope`
 to `Access-Control-Expose-Headers`; a page on another origin also
-needs your CORS policy to allow its origin. The panel reads the header
+needs your CORS policy to allow its origin. Put `scope.Header` inside
+your CORS middleware, or list `Weft-Scope` in its exposed headers. The panel reads the header
 from C3.2 on.
 
 ## The playground (WEFT-PLAYGROUND.md)

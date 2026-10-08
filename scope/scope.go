@@ -103,7 +103,11 @@ func Parse(str string) Scope {
 // header to cross-origin pages (Access-Control-Expose-Headers gains
 // Weft-Scope; the app's CORS policy must still allow the page's
 // origin). The header is set before next runs, so a streaming
-// handler's first flush carries it; next may replace it with Set.
+// handler's first flush carries it; next may replace it with Set. A
+// CORS layer inside Header that sets its own expose list replaces the
+// entry, so the header is sent but a cross-origin page cannot read it:
+// put scope.Header inside your CORS middleware, or list Weft-Scope in
+// its exposed headers.
 func Header(next http.Handler, scopeOf func(*http.Request) Scope) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s := scopeOf(r); !s.IsZero() {
@@ -114,10 +118,13 @@ func Header(next http.Handler, scopeOf func(*http.Request) Scope) http.Handler {
 }
 
 // Set sets the Weft-Scope header on w to s, replacing any earlier
-// value, and exposes it to cross-origin pages; a zero s removes the
-// header. Like any header it must be set before the handler's first
-// Write or WriteHeader — the dynamic case: a handler that knows the
-// run id once its turn starts.
+// value, and exposes it to cross-origin pages (Weft-Scope is appended
+// to Access-Control-Expose-Headers unless already listed; a "*" there
+// does not cover it for a credentialed request). A zero s removes the
+// Weft-Scope header but leaves the expose entry an earlier Set added.
+// Like any header it must be set before the handler's first Write or
+// WriteHeader — the dynamic case: a handler that knows the run id once
+// its turn starts; a Set after that changes nothing sent.
 func Set(w http.ResponseWriter, s Scope) {
 	h := w.Header()
 	if s.IsZero() {
@@ -127,7 +134,7 @@ func Set(w http.ResponseWriter, s Scope) {
 	h.Set(HeaderName, s.String())
 	for _, v := range h.Values("Access-Control-Expose-Headers") {
 		for _, name := range strings.Split(v, ",") {
-			if n := strings.TrimSpace(name); n == "*" || strings.EqualFold(n, HeaderName) {
+			if n := strings.TrimSpace(name); strings.EqualFold(n, HeaderName) {
 				return
 			}
 		}

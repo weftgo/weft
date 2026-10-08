@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -125,13 +126,15 @@ func TestHeaderSkipsAZeroScope(t *testing.T) {
 }
 
 // The expose list is appended to, never replaced, and never repeats
-// Weft-Scope (or adds it beside a "*").
+// Weft-Scope. A "*" does not cover it: the Fetch spec's wildcard does
+// not apply to a credentialed request, and "*, Weft-Scope" is valid in
+// both modes.
 func TestExposeHeadersAppends(t *testing.T) {
 	for _, tc := range []struct{ before, want []string }{
 		{nil, []string{HeaderName}},
 		{[]string{"X-Request-Id"}, []string{"X-Request-Id", HeaderName}},
 		{[]string{"X-Request-Id, weft-scope"}, []string{"X-Request-Id, weft-scope"}},
-		{[]string{"*"}, []string{"*"}},
+		{[]string{"*"}, []string{"*", HeaderName}},
 	} {
 		w := httptest.NewRecorder()
 		for _, v := range tc.before {
@@ -163,5 +166,85 @@ func TestSetReplacesAndZeroRemoves(t *testing.T) {
 	}
 	if got := run(Scope{}).Values(HeaderName); len(got) != 0 {
 		t.Errorf("after a zero Set: %s = %q, want none", HeaderName, got)
+	}
+}
+
+// Middleware order (Header's godoc): a CORS layer inside Header that
+// h.Set()s its expose list wipes the entry — the header is still sent,
+// unreadable cross-origin; a CORS layer outside Header leaves both
+// lines, which browsers join, so Weft-Scope stays readable.
+func TestExposeEntryAndCORSOrder(t *testing.T) {
+	cors := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "https://page.example")
+			w.Header().Set("Access-Control-Expose-Headers", "X-Request-Id")
+			next.ServeHTTP(w, r)
+		})
+	}
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	of := func(*http.Request) Scope { return Scope{PublicID: "pub_1"} }
+	exposes := func(h http.Header) bool {
+		for _, v := range h.Values("Access-Control-Expose-Headers") {
+			for _, n := range strings.Split(v, ",") {
+				if strings.EqualFold(strings.TrimSpace(n), HeaderName) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for _, tc := range []struct {
+		name     string
+		h        http.Handler
+		readable bool
+	}{
+		{"CORS inside Header", Header(cors(ok), of), false},
+		{"CORS outside Header", cors(Header(ok, of)), true},
+	} {
+		w := httptest.NewRecorder()
+		tc.h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+		h := w.Result().Header
+		if got := h.Get(HeaderName); got != "pub_1" {
+			t.Errorf("%s: %s = %q, want pub_1 (sent either way)", tc.name, HeaderName, got)
+		}
+		if got := exposes(h); got != tc.readable {
+			t.Errorf("%s: exposed = %v (%q), want %v", tc.name, got, h.Values("Access-Control-Expose-Headers"), tc.readable)
+		}
+	}
+}
+
+// A zero Set removes Weft-Scope but leaves the expose entry an earlier
+// Set added.
+func TestZeroSetKeepsTheExposeEntry(t *testing.T) {
+	w := httptest.NewRecorder()
+	Set(w, Scope{PublicID: "pub_1"})
+	Set(w, Scope{})
+	if _, ok := w.Header()[HeaderName]; ok {
+		t.Errorf("a zero Set left %s = %q", HeaderName, w.Header().Get(HeaderName))
+	}
+	if got := w.Header().Values("Access-Control-Expose-Headers"); !slices.Equal(got, []string{HeaderName}) {
+		t.Errorf("expose = %q, want [%s]", got, HeaderName)
+	}
+}
+
+// A Set after WriteHeader is standard net/http: the headers already
+// left, so the response carries what was set before (here nothing).
+func TestSetAfterWriteHeaderChangesNothingSent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		Set(w, Scope{PublicID: "pub_1", RunID: "r_1"})
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if got := resp.Header.Values(HeaderName); len(got) != 0 {
+		t.Errorf("%s = %q after a late Set, want none", HeaderName, got)
+	}
+	if got := resp.Header.Values("Access-Control-Expose-Headers"); len(got) != 0 {
+		t.Errorf("expose = %q after a late Set, want none", got)
 	}
 }

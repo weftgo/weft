@@ -1,0 +1,17 @@
+{
+  "name": "weft-example-devtools-vite",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "bun run check.ts"
+  },
+  "dependencies": {
+    "@weftgo/devtools": "file:./vendor/weftgo-devtools.tgz"
+  },
+  "devDependencies": {
+    "jsdom": "^30",
+    "vite": "^8"
+  }
+}

@@ -1,0 +1,10 @@
+# The packed @weftgo/devtools (make devtools-vite-check copies it in),
+# the install it feeds, and the build output. The lockfile is ignored
+# too: it pins the tarball's integrity, which changes with every panel
+# build.
+/vendor/
+/node_modules/
+/dist/
+/bun.lock
+/bun.lockb
+/package-lock.json

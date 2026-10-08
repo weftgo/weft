@@ -10,6 +10,11 @@ module, ADR 0005).
 
 ### Added
 
+- **`examples/devtools-vite`** (the phase 3 gate's first clause): a
+  minimal Vite app that installs the packed `@weftgo/devtools` and
+  shows the panel with no `<script>` tag; `make devtools-vite-check`
+  builds it and proves the panel mounts (jsdom, a fake `/api/meta`)
+  and that the installed `panel.js` is the served one by sha256.
 - **The devtools panel's DOM-marker rung and scope switcher** (plan
   C3.3): the panel follows `data-weft-scope` markers anywhere on the
   page — the attribute the framework helpers already set — read through

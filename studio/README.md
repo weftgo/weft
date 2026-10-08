@@ -295,7 +295,9 @@ version. `studio/web/npm/README.md` has the API table, including which
 exports C4 completes. `make devtools-npm` assembles the package in
 `studio/web/npm`, runs the package suite against the assembled files
 and lists the tarball. `make studio-check` fails if the package's
-`panel.js` is not the served one. Publishing is done by hand.
+`panel.js` is not the served one. Publishing is done by hand. A Vite app
+that installs the packed package is in `examples/devtools-vite`
+(`make devtools-vite-check`).
 
 The scope header (plan C3, rung 2, the development rung) is set by the
 app's own handler, since `thread` has no HTTP layer: one line,

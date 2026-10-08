@@ -14,7 +14,7 @@ RELEASE_DIR ?= studio/web/dist-release
 # reports from go.work.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy generate live tools apidiff apidiff-core apidiff-all apidiff-selftest offline fuzz fuzz-thread soak-thread studio-build studio-bin studio-check studio-panel-asset devtools-npm
+.PHONY: build test vet fmt lint tidy generate live tools apidiff apidiff-core apidiff-all apidiff-selftest offline fuzz fuzz-thread soak-thread studio-build studio-bin studio-check studio-panel-asset devtools-npm devtools-vite-check
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -174,3 +174,22 @@ devtools-npm: studio-build
 	cd studio/web && WEFT_DEVTOOLS_PKG=1 bunx vitest run src/npm
 	cd studio/web && bun run scripts/npm-consumer.ts
 	cd studio/web/npm && npm pack --dry-run
+
+# The phase 3 gate's first clause (plan §12), reproducible: a real Vite
+# app (examples/devtools-vite) installs the packed @weftgo/devtools —
+# the tarball `npm publish` would upload — builds with `vite build`,
+# and its smoke test (check.ts, jsdom + a fake /api/meta, no browser)
+# proves the bundled package put <weft-devtools> on the page and that
+# the installed panel.js is studio/dist/panel/panel.js byte for byte.
+# Needs the assembled studio/web/npm (make studio-build or
+# devtools-npm). The install is npm's: an explicit tarball spec
+# reinstalls a changed tarball, which bun's cache does not.
+DEVTOOLS_VITE := examples/devtools-vite
+devtools-vite-check:
+	@test -f studio/web/npm/panel.js || { echo "studio/web/npm is not assembled: run 'make studio-build' first"; exit 1; }
+	rm -rf $(DEVTOOLS_VITE)/vendor && mkdir -p $(DEVTOOLS_VITE)/vendor
+	cd studio/web/npm && npm pack --silent --pack-destination $(abspath $(DEVTOOLS_VITE))/vendor >/dev/null
+	mv $(DEVTOOLS_VITE)/vendor/weftgo-devtools-*.tgz $(DEVTOOLS_VITE)/vendor/weftgo-devtools.tgz
+	rm -rf $(DEVTOOLS_VITE)/node_modules/@weftgo
+	cd $(DEVTOOLS_VITE) && npm install --no-save --no-audit --no-fund --loglevel=error ./vendor/weftgo-devtools.tgz
+	cd $(DEVTOOLS_VITE) && bun run check

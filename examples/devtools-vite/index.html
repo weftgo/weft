@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>weft devtools in a Vite app</title>
+    <style>
+      body { font: 15px/1.5 system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+      #log p { margin: .25rem 0; }
+      #log .you { color: #555; }
+      form { display: flex; gap: .5rem; }
+      input { flex: 1; padding: .4rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Order help</h1>
+    <!-- The conversation's DOM marker: the panel scopes to pub_demo
+         (studio-local's public id). No script tag loads the panel:
+         src/main.ts imports it from the npm package. -->
+    <div id="chat" data-weft-scope="pub_demo">
+      <div id="log"></div>
+      <form id="ask">
+        <input name="text" autocomplete="off" placeholder="where is order 42?" />
+        <button>Send</button>
+      </form>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

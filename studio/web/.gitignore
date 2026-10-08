@@ -19,3 +19,10 @@ todos.json
 
 # typescript
 *.tsbuildinfo
+
+# @weftgo/devtools (plan C1): npm/ is assembled by the build
+# (scripts/npm-package.ts); only its package.json and README are
+# written by hand.
+/npm/*
+!/npm/package.json
+!/npm/README.md

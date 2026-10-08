@@ -10,6 +10,20 @@ module, ADR 0005).
 
 ### Added
 
+- **`@weftgo/devtools` on npm** (plan C1, assembled in
+  `studio/web/npm`, unpublished until a release publishes it): its
+  `panel.js` is `/studio/panel.js` byte for byte (sha256 equal, gated
+  by `make studio-check`). `import "@weftgo/devtools"` mounts the
+  panel on a page with no `<script>` tag. The typed entry exports
+  `mount`, `scope`, `open`, `close`, `toggle`, `on`, `serializeScope`
+  and `parseScope` (the `data-weft-scope` marker:
+  `pub_…;session=…;flow=…;run=…`). `/react`, `/vue` and `/svelte`
+  export marker helpers, not components. Zero runtime dependencies;
+  the version is the weft version. In this release `scope()` follows
+  the public id only (C3.1 adds session, flow and run), and `on()`
+  registers listeners but the panel dispatches no events yet (C4).
+  `make devtools-npm` builds the package and dry-runs `npm pack`.
+
 - **The live grant** (plan C5): `POST /api/live-grant` (capability
   `live`, authenticated like every API route) takes one `/api/live`
   selector and its `kinds` (JSON body or query) and answers `{sig,

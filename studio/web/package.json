@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 3000",
-    "build": "vite build && vite build --config vite.panel.config.ts && bun scripts/clean-dist.ts",
+    "build": "vite build && vite build --config vite.panel.config.ts && vite build --config vite.npm.config.ts && tsc -p tsconfig.npm.json && bun scripts/clean-dist.ts && bun scripts/npm-package.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "lint": "eslint",

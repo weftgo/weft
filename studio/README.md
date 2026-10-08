@@ -140,7 +140,7 @@ behind a proxy configures itself the same way.
 
 | # | Source | The explicit form |
 |---|---|---|
-| 1 | `mount(opts)` — a programmatic mount (C1's npm entry; not in the script-tag bundle) | `mount({endpoint, publicId, token, position, open, auto, target})` |
+| 1 | `mount(opts)` — a programmatic mount (`import { mount } from "@weftgo/devtools"`, the npm entry; not in the script-tag bundle) | `mount({endpoint, publicId, token, position, open, auto, target})` |
 | 2 | the `<weft-devtools>` element's attributes | `<weft-devtools data-endpoint="…" data-token="…">` |
 | 3 | meta tags | `<meta name="weft:endpoint" content="…">` (also `weft:public-id`, `weft:token`, `weft:position`, `weft:open`, `weft:auto`) |
 | 4 | the panel's `<script>` tag: the running classic script, else the first with a `data-weft` attribute (any `src`, any value), else the first carrying one of the `data-*` attributes above | `<script type="module" src="…" data-weft data-endpoint="…">` |
@@ -167,6 +167,22 @@ artifact is built by
 committed `studio/dist/panel/panel.js`, 111,622 B raw / 30.8 KiB gzip;
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
+
+The same file is on npm as `@weftgo/devtools`, for apps that bundle
+everything and ship no `<script>` tag (Vite, Next, SvelteKit). This
+is a second delivery, not a replacement: the handler above is still the
+canonical install. `import "@weftgo/devtools"` loads the package's
+`panel.js`, which has the same sha256 as `/studio/panel.js` of the same
+version, and so does what the tag does. Beside it are a thin typed
+module (`mount`, `scope`, `open`, `close`, `toggle`, `on`,
+`serializeScope`/`parseScope`) and the `/react`, `/vue` and `/svelte`
+helpers, which set the `data-weft-scope` marker and are not components.
+The package has zero runtime dependencies and its version is the weft
+version. `studio/web/npm/README.md` has the API table, including which
+exports C4 completes. `make devtools-npm` assembles the package in
+`studio/web/npm`, runs the package suite against the assembled files
+and lists the tarball. `make studio-check` fails if the package's
+`panel.js` is not the served one. Publishing is done by hand.
 
 ## The playground (WEFT-PLAYGROUND.md)
 

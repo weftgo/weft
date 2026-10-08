@@ -1,0 +1,15 @@
+{
+  "//": "The @weftgo/devtools declarations (plan C1): emitted from the package's sources into dist/npm-tmp/types, which scripts/npm-package.ts copies into npm/types.",
+  "extends": "./tsconfig.json",
+  "include": ["src/npm/*.ts", "src/lib/scope.ts"],
+  "exclude": ["src/**/*.test.ts"],
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "src",
+    "outDir": "dist/npm-tmp/types",
+    "types": [],
+    "paths": {}
+  }
+}

@@ -105,7 +105,16 @@ export default [
   },
   {
     // dist-release holds the staged panel asset (a built bundle, not
-    // source — make studio-panel-asset).
-    ignores: ["eslint.config.js", "eslint.config.d.ts", ".prettierrc", "src/routeTree.gen.ts", "dist-release/**"],
+    // source — make studio-panel-asset); npm/ is the assembled
+    // @weftgo/devtools package (scripts/npm-package.ts), built output
+    // beside its package.json.
+    ignores: [
+      "eslint.config.js",
+      "eslint.config.d.ts",
+      ".prettierrc",
+      "src/routeTree.gen.ts",
+      "dist-release/**",
+      "npm/**",
+    ],
   },
 ]

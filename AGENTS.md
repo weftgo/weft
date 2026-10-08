@@ -207,7 +207,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    sessions, sessions/{id}, public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5; configured by a data-weft
 //    //    script tag, weft:* meta tags, or <base>/panel-config.json; studio/README.md
-//    //    has the ladder), /panel-config.json
+//    //    has the ladder; the same bytes on npm as @weftgo/devtools — import "@weftgo/devtools",
+//    //    mount/scope/open/close/on, /react /vue /svelte marker helpers; studio/web/npm,
+//    //    make devtools-npm, never published by the build), /panel-config.json
 //    //    ({endpoint, version, capabilities}; loopback Host / same-origin only, else
 //    //    404; capability "panel-config"); Token(tok) walls the
 //    //    /api tree (the Authorization bearer only: ?token= is refused on every /api route, in every setup;

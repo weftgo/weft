@@ -1,0 +1,58 @@
+{
+  "name": "@weftgo/devtools",
+  "version": "0.11.0",
+  "description": "The weft devtools panel: the same bytes as /studio/panel.js, as an ES module, with typed mount/scope/open/close/on and thin React, Vue and Svelte helpers.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weftgo/weft.git",
+    "directory": "studio/web/npm"
+  },
+  "type": "module",
+  "sideEffects": [
+    "./panel.js",
+    "./index.js"
+  ],
+  "types": "./types/npm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/npm/index.d.ts",
+      "default": "./index.js"
+    },
+    "./react": {
+      "types": "./types/npm/react.d.ts",
+      "default": "./react.js"
+    },
+    "./vue": {
+      "types": "./types/npm/vue.d.ts",
+      "default": "./vue.js"
+    },
+    "./svelte": {
+      "types": "./types/npm/svelte.d.ts",
+      "default": "./svelte.js"
+    },
+    "./panel.js": "./panel.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "*.js",
+    "panel.js.sha256",
+    "types/"
+  ],
+  "peerDependencies": {
+    "react": ">=18",
+    "svelte": ">=3",
+    "vue": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "svelte": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    }
+  }
+}

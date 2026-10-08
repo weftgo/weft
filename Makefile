@@ -14,7 +14,7 @@ RELEASE_DIR ?= studio/web/dist-release
 # reports from go.work.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy generate live tools apidiff apidiff-core apidiff-all apidiff-selftest offline fuzz fuzz-thread soak-thread studio-build studio-bin studio-check studio-panel-asset
+.PHONY: build test vet fmt lint tidy generate live tools apidiff apidiff-core apidiff-all apidiff-selftest offline fuzz fuzz-thread soak-thread studio-build studio-bin studio-check studio-panel-asset devtools-npm
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -151,4 +151,18 @@ studio-check: studio-build
 	  sz=$$(gzip -c $$f | wc -c); total=$$((total+sz)); done; \
 	kib=$$((total / 1024)); echo "studio dist: $$kib KiB gzipped (budget 600)"; \
 	test $$kib -le 600 || { echo "studio dist exceeds the 600 KiB gzip budget (ADR 0018 §7)"; exit 1; }
+	cd studio/web && bun run scripts/npm-package.ts --check
+	git diff --exit-code -- studio/web/npm/package.json || { echo "studio/web/npm/package.json is not the weft version: run 'make studio-build' and commit"; exit 1; }
 	cd studio/web && bun run typecheck && bun run test
+
+# @weftgo/devtools (plan C1): the npm delivery of the panel, assembled
+# in studio/web/npm by the build — the served panel.js byte for byte
+# (+ panel.js.sha256), the thin ESM entry with mount/scope/open/close/
+# on, the react/vue/svelte helpers and their declarations. This target
+# drives the package suite against the assembled files and lists the
+# tarball's contents. It never publishes: `npm publish` from
+# studio/web/npm is a release decision, not a build step.
+devtools-npm: studio-build
+	cd studio/web && bun run scripts/npm-package.ts --check
+	cd studio/web && WEFT_DEVTOOLS_PKG=1 bunx vitest run src/npm
+	cd studio/web/npm && npm pack --dry-run

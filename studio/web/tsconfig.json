@@ -6,6 +6,7 @@
     "prettier.config.js",
     "vite.config.ts"
   ],
+  "exclude": ["node_modules", "dist", "dist-release", "npm"],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",
@@ -13,7 +14,9 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@weftgo/devtools": ["./src/npm/index.ts"],
+      "@weftgo/devtools/*": ["./src/npm/*.ts"]
     },
 
     /* Bundler mode */

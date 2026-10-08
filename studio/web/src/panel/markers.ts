@@ -7,8 +7,10 @@
 //   - passive: attributes read, never written; no global touched
 //     (window.fetch stays as the page left it);
 //   - one MutationObserver on document.documentElement, its scans
-//     debounced with a trailing call, and one capturing, passive
-//     focusin listener on document — both removed by disconnect;
+//     debounced with a trailing call (at most MAX_WAIT_MS apart while
+//     changes keep coming; none while the page is hidden, one when it
+//     is shown), one capturing, passive focusin listener and one
+//     visibilitychange listener on document — all removed by disconnect;
 //   - never the panel's own tree: a <weft-devtools> (which carries the
 //     scope scope()/mount() set) and anything inside one is skipped,
 //     and its shadow tree is out of a document query's reach;
@@ -45,15 +47,32 @@ export interface MarkerRung {
 
 const PANEL = "weft-devtools"
 
-/** markerOf is the nearest element at or above n carrying the marker,
- * outside any <weft-devtools>; null when there is none. */
+/** markerOf is the nearest element at or above n carrying the marker;
+ * null when there is none, and null for n inside (or being) a
+ * <weft-devtools> — focus in the panel's shadow tree reaches the
+ * document retargeted to the panel element, and a panel placed inside
+ * a marked chat is not that chat. */
 export function markerOf(n: unknown): Element | null {
   try {
-    const e = n instanceof Element ? n.closest(`[${MARKER_ATTR}]`) : null
-    return e && !e.closest(PANEL) ? e : null
+    if (!(n instanceof Element) || n.closest(PANEL)) return null
+    return n.closest(`[${MARKER_ATTR}]`)
   } catch {
     return null
   }
+}
+
+/** The longest a scan waits while DOM changes keep arriving (a chat
+ * streaming its reply): the trailing debounce alone would never fire. */
+export const MAX_WAIT_MS = 500
+
+/** touchesMarkers reports whether a mutation record can change the
+ * marker list: an attribute change outside the panel, or an added or
+ * removed element that is or holds a marker. */
+function touchesMarkers(r: MutationRecord): boolean {
+  if (r.type === "attributes") return !(r.target instanceof Element && r.target.closest(PANEL))
+  for (const n of [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)])
+    if (n instanceof Element && (n.hasAttribute(MARKER_ATTR) || n.querySelector(`[${MARKER_ATTR}]`))) return true
+  return false
 }
 
 /** scanMarkers lists root's markers in document order: an empty or
@@ -76,13 +95,26 @@ export function installMarkerRung(opts: MarkerRungOptions): MarkerRung | null {
   const root = opts.root ?? document
   let timer: ReturnType<typeof setTimeout> | null = null
   let obs: MutationObserver | null = null
+  /** When the pending scan's first change came (0: none pending). */
+  let since = 0
+  /** A scan was due while the page was hidden: run it when shown. */
+  let stale = false
   const scan = () => {
     timer = null
+    since = 0
+    if (root.hidden) {
+      stale = true
+      return
+    }
+    stale = false
     try {
       opts.onScopes(scanMarkers(root))
     } catch {
       // fail silent: observability never changes behaviour
     }
+  }
+  const shown = () => {
+    if (stale && !root.hidden) scan()
   }
   const focus = (e: Event) => {
     const m = markerOf(e.target)
@@ -95,13 +127,17 @@ export function installMarkerRung(opts: MarkerRungOptions): MarkerRung | null {
   }
   try {
     obs = new MutationObserver((records) => {
-      // The panel's own attribute (scope() sets it) is not the page's.
-      if (records.every((r) => r.target instanceof Element && r.target.closest(PANEL))) return
+      // The panel's own attribute (scope() sets it) is not the page's,
+      // nor is a node that holds no marker.
+      if (!records.some(touchesMarkers)) return
+      const now = Date.now()
+      since ||= now
       if (timer) clearTimeout(timer)
-      timer = setTimeout(scan, opts.debounceMs ?? 100)
+      timer = setTimeout(scan, Math.max(0, Math.min(opts.debounceMs ?? 100, since + MAX_WAIT_MS - now)))
     })
     obs.observe(root.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: [MARKER_ATTR] })
     root.addEventListener("focusin", focus, { capture: true, passive: true })
+    root.addEventListener("visibilitychange", shown, { passive: true })
   } catch {
     obs?.disconnect()
     return null
@@ -114,6 +150,7 @@ export function installMarkerRung(opts: MarkerRungOptions): MarkerRung | null {
       if (timer) clearTimeout(timer)
       timer = null
       root.removeEventListener("focusin", focus, { capture: true })
+      root.removeEventListener("visibilitychange", shown)
     },
   }
 }

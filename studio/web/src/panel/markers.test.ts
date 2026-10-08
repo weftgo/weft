@@ -5,14 +5,15 @@
 // and lists every conversation it knows in a header switcher. No
 // global is touched: window.fetch stays the page's.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { detectSetting, markerRungOn, readConfig } from "./config"
+import { detectSetting, markerRungOn, pageURL, readConfig } from "./config"
 import { SCOPE_HEADER } from "./detect"
-import type { WeftDevtools } from "./element"
-import { installMarkerRung, MARKER_ATTR, markerOf, scanMarkers } from "./markers"
+import { WeftDevtools } from "./element"
+import { installMarkerRung, MARKER_ATTR, MAX_WAIT_MS, markerOf, scanMarkers } from "./markers"
 import {
   $,
   all,
   baseRoutes,
+  click,
   create,
   FakeEventSource,
   fakeStudio,
@@ -88,6 +89,9 @@ function pick(el: WeftDevtools, label: string) {
   sel.dispatchEvent(new Event("change", { bubbles: true }))
 }
 const settleScan = () => settle(150)
+
+/** draws counts the panel's redraws (the private draw every render ends in). */
+const draws = () => vi.spyOn(WeftDevtools.prototype as unknown as { draw: () => void }, "draw")
 
 const consoleSpies = () =>
   (["log", "info", "warn", "error", "debug"] as const).map((m) => vi.spyOn(console, m).mockImplementation(() => {}))
@@ -289,7 +293,11 @@ describe("the panel's marker rung", () => {
     await settleScan()
     expect(text(el, ".weft-title")).toContain("pub_a") // kept: only focus or the switcher moves it
     expect(el.conversations().map((c) => c.key)).toEqual(["pub_b"])
-    expect(switcher(el)).toBeNull() // one conversation known: no switcher
+    // The followed one is said gone, the one left offered.
+    expect(options(el)).toEqual([
+      ["● pub_a · not on the page", null],
+      ["pub_b · marker", "marker"],
+    ])
     b.input.focus()
     await settle()
     expect(text(el, ".weft-title")).toContain("pub_b")
@@ -383,19 +391,24 @@ describe("the panel's marker rung", () => {
     expect(markerRungOn({ detect: "", token: PANEL_TOKEN }, "http://127.0.0.1:5173/")).toBe(true)
   })
 
-  it("data-detect's accepted values", () => {
-    expect(["headers", "markers", "headers,markers", "markers, headers", "OFF", "off", "", "bogus", "headers,bogus", "off,markers"].map(detectSetting)).toEqual([
-      "headers",
-      "markers",
-      "headers,markers",
-      "headers,markers",
-      "off",
-      "off",
-      "",
-      "",
-      "",
-      "",
-    ])
+  it("data-detect's accepted values: off wins where named, empty words skipped, anything else unset", () => {
+    const cases: [string, string][] = [
+      ["headers", "headers"],
+      ["markers", "markers"],
+      ["headers,markers", "headers,markers"],
+      ["markers, headers", "headers,markers"],
+      ["markers,", "markers"],
+      ["headers,,markers", "headers,markers"],
+      ["OFF", "off"],
+      ["off,headers", "off"],
+      ["off,markers", "off"],
+      ["off,bogus", "off"],
+      ["", ""],
+      [",", ""],
+      ["bogus", ""],
+      ["headers,bogus", ""],
+    ]
+    for (const [v, want] of cases) expect([v, detectSetting(v)]).toEqual([v, want])
     const el = create({ "data-detect": "markers,headers" })
     expect(readConfig(el).detect).toBe("headers,markers")
   })
@@ -437,5 +450,158 @@ describe("the panel's marker rung", () => {
     await settleScan()
     el.remove()
     for (const s of spies) expect(s).not.toHaveBeenCalled()
+  })
+})
+
+// ── Review fixes (C3.3 round 2) ───────────────────────────────────
+
+describe("the marker rung, review fixes", () => {
+  it("a panel nested in a marked chat: focus in its own fields is not the chat's — bounded draws, the switcher choice kept", async () => {
+    fakeStudio(routesFor("pub_a", "pub_b"))
+    const a = chat("pub_a")
+    chat("pub_b")
+    const el = create({ "data-endpoint": REMOTE, "data-open": "true" })
+    a.box.appendChild(el) // mount({target}) into the chat container
+    await settle()
+    expect(markerOf(el)).toBeNull()
+    pick(el, "pub_b")
+    await settle()
+    expect(text(el, ".weft-title")).toContain("pub_b")
+    const spy = draws()
+    switcher(el)?.focus() // the switcher's data-weft-k field, refocused by every draw
+    await settle()
+    expect(spy.mock.calls.length).toBeLessThan(3)
+    expect(text(el, ".weft-title")).toContain("pub_b") // the choice stands
+  })
+
+  it("a helper's explicit scope keeps being a marker's after that marker leaves: focus in the other chat stands", async () => {
+    fakeStudio(routesFor("pub_a", "pub_b"))
+    const a = chat("pub_a")
+    const b = chat("pub_b")
+    // B's helper called scope("pub_b") last.
+    const el = await mountWith({ "data-endpoint": REMOTE, "data-scope": "pub_b", "data-open": "true" })
+    expect(text(el, ".weft-title")).toContain("pub_b")
+    a.input.focus()
+    await settle()
+    expect(text(el, ".weft-title")).toContain("pub_a")
+    b.box.remove() // B unmounts; scope() is never cleared
+    await settleScan()
+    expect(text(el, ".weft-title")).toContain("pub_a")
+  })
+
+  it("with the rung on, a helper's run change after a user's click pins the run", async () => {
+    const routes = routesFor("pub_a")
+    const r2 = runRow({ id: "r_2", public_id: "pub_a", session_id: "s_pub_a", started: "2026-10-01T09:30:00Z" })
+    routes["runs?public_id=pub_a&limit=50"] = { total: 2, runs: [r2, runRow({ id: "r_pub_a", public_id: "pub_a", session_id: "s_pub_a" })], next_before: null }
+    routes["runs/r_2"] = { ...r2, children: [] }
+    routes["runs/r_2/events?after=0&limit=500"] = page(runEvents("r_2"))
+    routes["runs/r_2/transcript"] = transcript([user("q2")], [assistant("a2")])
+    routes["runs/r_2/spans"] = { spans: [] }
+    fakeStudio(routes)
+    const a = chat("pub_a")
+    const el = await mountWith({ "data-endpoint": REMOTE, "data-scope": "pub_a", "data-open": "true" })
+    expect(text(el, ".weft-sel .weft-id")).toBe("r_2") // the newest
+    click(all(el, ".weft-turn").find((n) => n.textContent.includes("r_pub_a")))
+    await settle()
+    expect(text(el, ".weft-sel .weft-id")).toBe("r_pub_a") // the user's click
+    // The helper: the marker and scope() together; the scan has not run.
+    a.box.setAttribute(MARKER_ATTR, "pub_a;run=r_2")
+    el.setAttribute("data-scope", "pub_a;run=r_2")
+    await settle()
+    expect(text(el, ".weft-sel .weft-id")).toBe("r_2") // pinned over the click
+    expect(text(el, ".weft-detect")).toBe(" · detect: markers")
+  })
+
+  it("a route change: the followed marker and every old one gone, one new one — the new one is followed", async () => {
+    fakeStudio(routesFor("pub_a", "pub_c"))
+    const a = chat("pub_a")
+    const el = await mountWith({ "data-endpoint": REMOTE, "data-open": "true" })
+    expect(text(el, ".weft-title")).toContain("pub_a")
+    a.box.remove()
+    chat("pub_c")
+    await settleScan()
+    expect(text(el, ".weft-title")).toContain("pub_c")
+    expect(switcher(el)).toBeNull()
+  })
+
+  it("unrelated DOM churn draws nothing: five inserts and a marker-less attribute change", async () => {
+    fakeStudio(routesFor("pub_a", "pub_b"))
+    chat("pub_a")
+    chat("pub_b")
+    const onScopes = vi.fn()
+    const rung = installMarkerRung({ onScopes, debounceMs: 10 })!
+    const el = await mountWith({ "data-endpoint": REMOTE, "data-open": "true" })
+    const spy = draws()
+    const list = document.createElement("ul")
+    document.body.appendChild(list)
+    for (let i = 0; i < 5; i++) {
+      list.appendChild(document.createElement("li"))
+      await pause(30)
+    }
+    await settleScan()
+    expect(spy).not.toHaveBeenCalled()
+    expect(onScopes).toHaveBeenCalledTimes(1) // the pre-filter: no scan at all
+    expect(text(el, ".weft-title")).toContain("pub_a")
+    rung.disconnect()
+  })
+
+  it("continuous churn does not starve the scan: at most MAX_WAIT_MS between scans while marker changes keep coming", async () => {
+    const box = chat("pub_a").box
+    const other = chat("pub_x").box
+    const seen: string[][] = []
+    const rung = installMarkerRung({ onScopes: (ms) => seen.push(ms.map((m) => m.scope.publicId)), debounceMs: 100 })!
+    box.setAttribute(MARKER_ATTR, "pub_b")
+    const t0 = Date.now()
+    let i = 0
+    while (Date.now() - t0 < MAX_WAIT_MS + 150) {
+      other.setAttribute(MARKER_ATTR, `pub_x${i++ % 2}`) // a streaming widget's churn, 16 ms apart
+      await pause(16)
+    }
+    expect(seen.length).toBeGreaterThanOrEqual(2)
+    expect(seen[1][0]).toBe("pub_b")
+    rung.disconnect()
+  })
+
+  it("no scan while the page is hidden; one when it is shown", async () => {
+    const box = chat("pub_a").box
+    const onScopes = vi.fn()
+    let hidden = false
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden })
+    try {
+      const rung = installMarkerRung({ onScopes, debounceMs: 10 })!
+      hidden = true
+      box.setAttribute(MARKER_ATTR, "pub_b")
+      await pause(40)
+      expect(onScopes).toHaveBeenCalledTimes(1)
+      hidden = false
+      document.dispatchEvent(new Event("visibilitychange"))
+      expect(onScopes).toHaveBeenCalledTimes(2)
+      expect(onScopes.mock.calls[1][0][0].scope.publicId).toBe("pub_b")
+      rung.disconnect()
+    } finally {
+      delete (document as { hidden?: boolean }).hidden
+    }
+  })
+
+  it("mounted on a page off loopback under a read-scoped panel token: neither rung; data-detect=\"markers\" installs the markers alone", async () => {
+    vi.spyOn(pageURL, "href").mockReturnValue("https://shop.example/chat")
+    fakeStudio(routesFor("pub_a"))
+    const original = window.fetch
+    const observe = vi.spyOn(MutationObserver.prototype, "observe")
+    chat("pub_a")
+    const off = await mountWith({ "data-endpoint": `${location.origin}/studio/`, "data-token": PANEL_TOKEN, "data-open": "true" })
+    expect(observe).not.toHaveBeenCalled()
+    expect(window.fetch).toBe(original)
+    expect(text(off, ".weft-detect")).toBe(" · detect: none")
+    expect(text(off, ".weft-title")).toBe("latest (dev)")
+    off.setAttribute("data-scope", "pub_a")
+    await settle()
+    expect(text(off, ".weft-detect")).toBe(" · detect: explicit")
+    off.remove()
+    const on = await mountWith({ "data-endpoint": REMOTE, "data-token": PANEL_TOKEN, "data-detect": "markers", "data-open": "true" })
+    expect(observe).toHaveBeenCalledTimes(1)
+    expect(window.fetch).toBe(original)
+    expect(text(on, ".weft-detect")).toBe(" · detect: markers")
+    expect(text(on, ".weft-title")).toContain("pub_a")
   })
 })

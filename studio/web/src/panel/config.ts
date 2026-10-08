@@ -85,12 +85,13 @@ export interface MountOptions {
 /** data-detect's values; "" is unset. */
 export type DetectSetting = "" | "headers" | "markers" | "headers,markers" | "off"
 
-/** detectSetting reads a data-detect value: "off", or the rungs it
- * names (headers, markers, comma-separated, either order); anything
- * else is unset. */
+/** detectSetting reads a data-detect value: "off" wherever it is
+ * named (the author asked for less), else the rungs it names (headers,
+ * markers, comma-separated, either order, empty words skipped); a
+ * value naming anything else is unset — the defaults apply. */
 export function detectSetting(v: string | null | undefined): DetectSetting {
-  const words = new Set(String(v ?? "").toLowerCase().split(",").map((w) => w.trim()))
-  if (words.has("off")) return words.size === 1 ? "off" : ""
+  const words = new Set(String(v ?? "").toLowerCase().split(",").map((w) => w.trim()).filter(Boolean))
+  if (words.has("off")) return "off"
   const h = words.delete("headers")
   const m = words.delete("markers")
   if (words.size) return ""
@@ -325,6 +326,11 @@ export function weftScope(): Scope {
   return { publicId: weftPublicId() }
 }
 
+/** pageURL is where the rung switches read the page's URL (default
+ * location.href) — one object, so a test can stand the panel on a page
+ * off loopback, which jsdom's location cannot be moved to. */
+export const pageURL = { href: (): string => location.href }
+
 /** headerRungOn is the header rung's switch (plan §13.3): data-detect
  * "headers" turns it on anywhere and "off" turns it off; by default it
  * is on only where the host has said so by its setup — the page AND
@@ -335,7 +341,7 @@ export function weftScope(): Scope {
  * the page's URL (default location.href). */
 export function headerRungOn(
   cfg: Pick<PanelConfig, "detect" | "endpoint" | "token">,
-  page: string = location.href
+  page: string = pageURL.href()
 ): boolean {
   if (cfg.detect === "off") return false
   if (cfg.detect.includes("headers")) return true
@@ -349,7 +355,7 @@ export function headerRungOn(
  * "off" turns it off. */
 export function markerRungOn(
   cfg: Pick<PanelConfig, "detect" | "token">,
-  page: string = location.href
+  page: string = pageURL.href()
 ): boolean {
   if (cfg.detect === "off") return false
   if (cfg.detect.includes("markers")) return true

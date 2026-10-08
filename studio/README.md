@@ -205,25 +205,38 @@ it is not in the conversation.
 Rung 3, the DOM marker, is the production rung: it touches no global
 of your page (`window.fetch` stays as you left it) — it reads
 attributes only, through one `MutationObserver` on
-`document.documentElement` (rescans debounced ~100 ms, trailing) and
-one passive, capturing `focusin` listener on `document` (an event
-listener, not a patch), both removed when the panel disconnects or the
+`document.documentElement` (only changes that add, remove or re-mark a
+marked element count; rescans debounced ~100 ms, trailing, but at most
+500 ms apart while such changes keep coming, and none while the page is
+hidden — one when it is shown), one passive, capturing `focusin`
+listener and one `visibilitychange` listener on `document` (event
+listeners, not patches), all removed when the panel disconnects or the
 rung is turned off (`src/panel/markers.ts`). It never writes to your
 DOM, never reads the panel's own tree (a `<weft-devtools>` and
-anything inside it are skipped), ignores an empty value or one without
-a public id, and prints nothing. With several markers on one page the
+anything inside it are skipped, and focus inside the panel — even a
+panel mounted inside a marked chat — is never a chat's), ignores an
+empty value or one without a public id, and prints nothing; a scan
+that changes nothing draws nothing. The marker must sit in the light
+DOM: one inside a widget's own shadow root is invisible to the scan
+(and to focus's `closest()`) — put it on the host element at or above
+the widget. With several markers on one page the
 one nearest focus wins: the closest marker around the focused element,
 else the one focus was last in, else the one followed now, else the
 first in document order. A marker's scope is a conversation (public id,
 session, flow) whose run narrows it, so following it is C3.2's rescope
 — the same conversation narrows, another restarts, a turn you clicked
-stays. A followed marker that leaves the page stays followed; only
-focus or the switcher moves the panel. An explicit `data-scope` (or
+stays. A followed marker that leaves the page stays followed — only
+focus or the switcher moves the panel — except on a route change: when
+every old marker is gone and exactly one new one appeared in the same
+scan, the new one is followed. An explicit `data-scope` (or
 `window.__WEFT__`) wins over a marker, unless a marker carries the
 same conversation — the helpers call `scope()` and set the marker, so
-focus moves between the helpers' chats.
+focus moves between the helpers' chats; from then until the explicit
+scope changes it counts as a marker's, even after that marker leaves,
+and its run (a helper's next `scope()`) pins as an explicit run does.
 
-The scope switcher: when more than one conversation is known — the
+The scope switcher: when more than one conversation is known (or one,
+while the panel follows a conversation no longer on the page) — the
 explicit scope, then the markers in document order, then the
 header-detected scopes in first-seen order, each conversation once
 under the first source that names it, at most 20 — the panel header
@@ -237,11 +250,14 @@ not offered. One known conversation shows no switcher.
 
 | `data-detect` | rung 2 (headers) | rung 3 (markers) |
 |---|---|---|
-| unset | page and endpoint on loopback, no or a dev token | on, except a read-scoped panel token off loopback |
+| unset | page and endpoint on loopback, any token but a panel token (`weft_pt.`) | on, except a read-scoped panel token off loopback |
 | `headers` | on anywhere | as unset |
 | `markers` | as unset | on anywhere |
 | `headers,markers` | on anywhere | on anywhere |
-| `off` | off | off |
+| `off` (named anywhere: `off,headers` is `off`) | off | off |
+
+Empty words are skipped (`markers,` is `markers`); a value naming
+anything else (`bogus`, `headers,bogus`) is unset: the defaults apply.
 
 Where the configuration comes from (plan C2). Each field — `endpoint`,
 `scope` (or the deprecated `public-id`; `scope` wins at the same rung),
@@ -277,7 +293,9 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 125,095 B raw / 34.5 KiB gzip;
+committed `studio/dist/panel/panel.js`, 131,804 B raw / 37,303 B gzip
+(36.4 KiB, under the 80 KiB cap; the scope-detection ladder, rungs 2
+and 3, costs about +4.4 KiB of it against the plan's +3 KiB estimate);
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 
@@ -597,7 +615,7 @@ make studio-check   # rebuild, prove dist is fresh, check the 600 KiB gzip budge
 
 `make studio-check` is the freshness gate (ADR 0018 §4): it fails if
 `dist/` does not match `web/` or if the gzipped total exceeds 600 KiB
-(currently ~397 KiB: the app's ~363 plus the panel bundle's ~34.5).
+(currently ~400 KiB: the app's ~363 plus the panel bundle's ~36.4).
 The build is deterministic — two builds from
 one tree are byte-identical (`scripts/clean-dist.ts` pins the router's
 prerender timestamp and keeps `<base href>` first in `<head>`).

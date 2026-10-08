@@ -206,6 +206,8 @@ export class WeftDevtools extends HTMLElement {
   private forceNext = false
   /** The explicit scope last applied: a new one resets focus and choice. */
   private explicitForm = ""
+  /** A marker has carried the explicit conversation since it was set. */
+  private explicitMarked = false
   /** The endpoint the running connection talks to: cfg.endpoint, or
    * what panel-config.json named (rung 5). The deep links use it. */
   private base = ""
@@ -366,20 +368,42 @@ export class WeftDevtools extends HTMLElement {
     if (this.ready) this.schedule()
   }
 
-  /** onMarkers takes a settled scan of the page's markers. */
+  /** markerSig is what a marker change can change on screen: the
+   * scope followed and the switcher's entries. */
+  private markerSig(): string {
+    return [serializeScope(this.scopeNow()), ...this.conversations().map((c) => c.key + c.source)].join("|")
+  }
+
+  /** onMarkers takes a settled scan of the page's markers; a scan that
+   * changed nothing (unrelated DOM churn) draws nothing. */
   private onMarkers(list: Marker[]) {
+    const prev = this.markers
+    const form = (m: Marker) => serializeScope(m.scope)
+    if (list.length === prev.length && list.every((m, i) => m.element === prev[i].element && form(m) === form(prev[i]))) return
+    const before = this.markerSig()
+    // A route change: the followed marker and every old one gone, one
+    // new one in their place — that is the page's chat now.
+    const key = this.marked ? conversationKey(this.marked) : ""
+    if (
+      key && list.length === 1 && !list.some((m) => conversationKey(m.scope) === key) &&
+      !list.some((m) => prev.some((p) => p.element === m.element))
+    )
+      this.marked = null
     this.markers = list
     this.follow()
-    this.rescopeSoon()
+    if (this.markerSig() !== before) this.rescopeSoon()
   }
 
   /** onMarkerFocus: focus went into a marker's element — the user is
-   * in that chat now (above an earlier switcher choice). */
+   * in that chat now (above an earlier switcher choice). Focus again in
+   * the chat already followed changes nothing. */
   private onMarkerFocus(e: Element) {
+    if (e === this.lastFocused && !this.chosen) return
+    const before = this.markerSig()
     this.lastFocused = e
     this.chosen = null
     this.follow()
-    this.rescopeSoon()
+    if (this.markerSig() !== before) this.rescopeSoon()
   }
 
   /** follow picks the marked conversation: the marker holding the
@@ -393,6 +417,11 @@ export class WeftDevtools extends HTMLElement {
     const key = this.marked ? conversationKey(this.marked) : ""
     const pick =
       at(markerOf(document.activeElement)) ?? at(this.lastFocused) ?? list.find((m) => key && conversationKey(m.scope) === key)
+    // Once a marker carries the explicit conversation (a helper's
+    // scope() and marker), the explicit scope is a marker's until it
+    // changes — that marker leaving does not hand the panel back to it.
+    const exKey = conversationKey(this.cfg.scope)
+    if (this.cfg.scopeExplicit && list.some((m) => conversationKey(m.scope) === exKey)) this.explicitMarked = true
     if (pick) this.marked = pick.scope
     else if (!this.marked) {
       // An explicit scope whose marker is not read yet (a helper sets
@@ -443,6 +472,10 @@ export class WeftDevtools extends HTMLElement {
     if (ex !== this.explicitForm) {
       this.explicitForm = ex
       this.chosen = this.marked = this.lastFocused = null
+      this.explicitMarked = false
+      // The page's (or a helper's) new word pins its run, as with the
+      // marker rung off.
+      if (ex) this.forceNext = true
       this.follow()
     }
   }
@@ -499,8 +532,11 @@ export class WeftDevtools extends HTMLElement {
     if (this.chosen) return this.chosen
     const cfg = this.cfg
     const marked = this.markerRung ? this.marked : null
-    const ex = conversationKey(cfg.scope)
-    if (cfg.scopeExplicit && !(marked && this.markers.some((m) => conversationKey(m.scope) === ex))) return cfg.scope
+    if (cfg.scopeExplicit && !(marked && this.explicitMarked)) return cfg.scope
+    // The marked conversation is the explicit one: the explicit form
+    // carries its run (a helper's scope() names it before the marker
+    // scan reads it).
+    if (marked && cfg.scopeExplicit && conversationKey(marked) === conversationKey(cfg.scope)) return cfg.scope
     const d = this.rung ? this.detected : null
     if (marked) return d && conversationKey(d) === conversationKey(marked) ? d : marked
     if (cfg.scopeExplicit) return cfg.scope
@@ -617,7 +653,7 @@ export class WeftDevtools extends HTMLElement {
         // An explicit scope's run (or the user's switcher choice) pins
         // whatever the user clicked; a detected one (the next turn's
         // header, a marker focus follows) respects the click.
-        const force = this.forceNext || (cfg.scopeExplicit && next === cfg.scope)
+        const force = this.forceNext || (cfg.scopeExplicit && next === cfg.scope && !this.explicitMarked)
         void this.model.rescope(next, { force }).catch(quiet)
       }
       this.forceNext = false
@@ -946,8 +982,9 @@ export class WeftDevtools extends HTMLElement {
    * left the page) is said, not listed as a choice. */
   private switcher(s: PanelState): HTMLElement | null {
     const list = this.conversations()
-    if (list.length < 2) return null
     const cur = conversationKey(this.scopeNow())
+    const listed = list.some((c) => c.key === cur)
+    if (list.length < (listed ? 2 : 1)) return null
     const sel = el("select", "weft-switch", undefined, { "aria-label": "conversation", "data-weft-k": "switch" }) as HTMLSelectElement
     const opt = (label: string, value: string, on: boolean) => {
       const o = el("option", undefined, label, { value }) as HTMLOptionElement
@@ -956,7 +993,7 @@ export class WeftDevtools extends HTMLElement {
       return o
     }
     const dot = s.live ? "● " : "○ "
-    if (!list.some((c) => c.key === cur)) opt(`${dot}${cur || "latest (dev)"} · not on the page`, "", true).disabled = true
+    if (!listed) opt(`${dot}${cur || "latest (dev)"} · not on the page`, "", true).disabled = true
     list.forEach((c, i) => {
       const { publicId, session, flow } = c.scope
       const label = [publicId, session && `session ${session}`, flow && `flow ${flow}`, c.source].filter(Boolean).join(" · ")

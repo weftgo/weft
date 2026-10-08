@@ -154,15 +154,17 @@ header and filters nothing yet (it waits for `weft/flow`).
 is deprecated: `data-scope` is the form.
 
 Where the scope comes from (plan C3, scope detection). Each rung after
-the first is passive and same-origin only, and `data-detect="off"`
-turns rungs 2–4 off; rung 1 always works. The footer says which is in
-effect in one word: `detect: headers`, `detect: off` or `detect:
-explicit`.
+the first is passive, and `data-detect="off"` turns rungs 2–4 off;
+rung 1 always works. The footer says which is in effect in one word:
+`detect: headers` (with `(chained)` when the `fetch` it wrapped was
+not the browser's own), `detect: off`, `detect: explicit` (rung 1
+names the scope, nothing detects) or `detect: none` (nothing names
+one, and rung 2 is off by default here).
 
 | # | Rung | When it is on | The explicit alternative |
 |---|---|---|---|
 | 1 | explicit: `data-scope` (element, `weft:scope` meta, script tag), `window.__WEFT__ = { scope }` or `{ publicId }`, `scope()` / `mount({scope})` from `@weftgo/devtools`, the deprecated `data-public-id` | always; it wins over every detected scope | — |
-| 2 | response headers: the `Weft-Scope` header of the page's own same-origin `fetch` responses (the scope header below) | by default only with the endpoint on loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`) and no token or a dev/server token; anywhere with `data-detect="headers"` (or `mount({detect: "headers"})`); never under a panel token (`weft_pt.`) off loopback unless asked | `data-scope` |
+| 2 | response headers: the `Weft-Scope` header of the page's own same-origin `fetch` responses (the scope header below) | by default only with the page and the endpoint on loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`) and no token or a dev/server token, and only once Studio has answered; anywhere with `data-detect="headers"` (or `mount({detect: "headers"})`); never under a panel token (`weft_pt.`) unless asked | `data-scope` |
 | 3 | the DOM marker (`data-weft-scope`) | C3.3 | `data-scope` |
 | 4 | the page URL | C3.4 | `data-scope` |
 
@@ -170,18 +172,34 @@ Rung 2 patches a global of your page, `window.fetch` (shadow DOM
 scopes DOM and CSS, not JavaScript), so it is held to these rules
 (`src/panel/detect.ts`): it reads the response URL and the
 `Weft-Scope` header only, never a body, never a clone, and never sends
-anything; a cross-origin response is ignored even when it exposes the
-header; it chains to the `fetch` it found (the browser's own or
+anything; it reads a same-origin response, or a cross-origin one only
+when the page and the response are both on loopback (a dev server on
+`:5173` calling the app on `:8080`) — any other cross-origin response
+is ignored even when it exposes the header, so a cross-origin
+production app uses `data-scope` or the DOM marker; the panel's own
+Studio requests are never read; it is installed only once Studio has
+answered, so a panel whose Studio never answers never touches `fetch`;
+it chains to the `fetch` it found (the browser's own or
 another library's patch) and returns the same response or rejection;
 it is put back exactly as found when the panel disconnects or the rung
 is turned off, unless another patcher wrapped it after the panel (then
 that stack is left alone, the wrapper goes inert and the footer says
-`fetch not restored`); and nothing it does reaches the console. It is
+`fetch not restored`) — so with two panels on one page, the first to
+disconnect leaves its inert wrapper in the chain, a pass-through; and
+nothing it does reaches the console. It is
 fetch-only: a page cannot read an `EventSource`'s response headers, so
 an SSE chat app names its scope with rung 1 (or, from C3.3, rung 3).
-WebSocket is never wrapped. The panel follows the newest scope seen and
-keeps the newest per request path and every distinct scope seen, for
-C3.3's switcher.
+WebSocket is never wrapped. A detected scope of the conversation the
+panel follows (the same public id, session and flow — the next turn's
+header) is a narrowing, never a restart: its run is pinned unless you
+have clicked a turn since the last pin. Another conversation is
+followed only from the request path that set the current one, so two
+widgets polling for different conversations do not thrash; the panel
+keeps the newest scope per path and one entry per conversation seen
+(with its newest run), for C3.3's switcher. A run the scope names
+that is not listed yet (a streaming handler's header lands before its
+run row) is looked for once more a second later before the panel says
+it is not in the conversation.
 
 Where the configuration comes from (plan C2). Each field — `endpoint`,
 `scope` (or the deprecated `public-id`; `scope` wins at the same rung),
@@ -217,7 +235,7 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 123,406 B raw / 34.1 KiB gzip;
+committed `studio/dist/panel/panel.js`, 125,095 B raw / 34.5 KiB gzip;
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 
@@ -251,9 +269,10 @@ pub_demo;run=<id>`). It never carries a token. The value is the
 to `Access-Control-Expose-Headers`; a page on another origin also
 needs your CORS policy to allow its origin. Put `scope.Header` inside
 your CORS middleware, or list `Weft-Scope` in its exposed headers. The panel reads the header
-through rung 2 of the scope-detection ladder above (on by default on
-loopback with no or a dev token, `data-detect="headers"` elsewhere,
-same-origin responses only) — `examples/studio-local`'s tag names no
+through rung 2 of the scope-detection ladder above (on by default with the page and the endpoint on
+loopback and no or a dev token, `data-detect="headers"` elsewhere;
+same-origin responses, or cross-origin ones between two loopback
+origins) — `examples/studio-local`'s tag names no
 scope, and its first `/run` scopes the panel to `pub_demo` and pins
 that run.
 
@@ -528,7 +547,7 @@ make studio-check   # rebuild, prove dist is fresh, check the 600 KiB gzip budge
 
 `make studio-check` is the freshness gate (ADR 0018 §4): it fails if
 `dist/` does not match `web/` or if the gzipped total exceeds 600 KiB
-(currently ~388 KiB: the app's ~358 plus the panel bundle's ~30).
+(currently ~397 KiB: the app's ~363 plus the panel bundle's ~34.5).
 The build is deterministic — two builds from
 one tree are byte-identical (`scripts/clean-dist.ts` pins the router's
 prerender timestamp and keeps `<base href>` first in `<head>`).

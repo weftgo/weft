@@ -107,7 +107,11 @@ func Parse(str string) Scope {
 // CORS layer inside Header that sets its own expose list replaces the
 // entry, so the header is sent but a cross-origin page cannot read it:
 // put scope.Header inside your CORS middleware, or list Weft-Scope in
-// its exposed headers.
+// its exposed headers. The devtools panel reads a cross-origin
+// response's header only when the page and the response are both on
+// loopback (a dev server on :5173 calling the app on :8080); a
+// cross-origin production app names its scope with data-scope or the
+// DOM marker instead.
 func Header(next http.Handler, scopeOf func(*http.Request) Scope) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s := scopeOf(r); !s.IsZero() {

@@ -152,7 +152,13 @@ async function main() {
   const shipped = readFileSync(new URL("../../dist/panel/panel.js", import.meta.url), "utf8")
   const panelJs = args.bundle ? readFileSync(args.bundle, "utf8") : shipped
 
-  const scriptAttrs = [`src="${args.endpoint}panel.js"`, `data-public-id="${args.publicId}"`]
+  // Setup A's page names no scope, like examples/studio-local's: the
+  // panel scopes itself from the trigger's Weft-Scope response header
+  // (detection rung 2), the trigger going through the page's own
+  // window.fetch. Setups B/C (--otlp) have no app to trigger: the tag
+  // names the scope (data-scope).
+  const scriptAttrs = [`src="${args.endpoint}panel.js"`]
+  if (args.otlp) scriptAttrs.push(`data-scope="${args.publicId}"`)
   if (args.token) scriptAttrs.push(`data-token="${args.token}"`)
   // data-open so the gate sees the docked panel without a click; the
   // endpoint attribute pins the API origin exactly like setups B/C.
@@ -218,10 +224,12 @@ async function main() {
 
   // 1. the panel mounted on the plain page and Studio answered.
   await waitFor(() => ($(".weft-dock") ? "dock" : null), "panel docked on a plain HTML page")
-  await waitFor(
-    () => (text(".weft-title").includes(args.publicId) ? text(".weft-title") : null),
-    `header scoped to ${args.publicId}`
-  )
+  const scoped = () =>
+    waitFor(
+      () => (text(".weft-title").includes(args.publicId) ? text(".weft-title") : null),
+      `header scoped to ${args.publicId}${args.otlp ? "" : " (from the trigger's Weft-Scope header)"}`
+    )
+  if (args.otlp) await scoped()
 
   // 2a. setups B/C (--otlp): replay the recorded export into
   // /v1/traces — the Python app's stand-in — and let the panel read
@@ -259,12 +267,14 @@ async function main() {
       // conversations' turns too): the turn's own row is one that was
       // not there — "some row exists" would pass on turn 1's.
       const before = new Set(rowIds())
-      const res = await fetch(args.trigger, {
+      // The page's own fetch — the panel's header rung wraps it.
+      const res = await w.fetch(args.trigger, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: `text=${encodeURIComponent(`${args.text} (#${t + 1})`)}`,
       })
       if (!res.ok) throw new Error(`trigger failed: ${res.status} ${await res.text()}`)
+      if (t === 0) await scoped()
       const fresh = await waitFor(
         () => rowIds().find((id) => !before.has(id)) ?? null,
         `turn ${t + 1}: its run row appears in the turn list`
@@ -325,12 +335,16 @@ async function main() {
 
   // Timing on the rows either way; grouping and content are the
   // setup-A shapes (a spans-only export has no events to fold).
-  const row2 = Array.from(
-    dom.window.document.querySelector("weft-devtools")?.shadowRoot?.querySelectorAll(".weft-row2") ?? []
-  ).map((n) => n.textContent)
-  if (!row2.some((t) => /(\d+m?s|\d+ms)/.test(t)))
-    throw new Error(`FAIL timing: no duration on the turn rows (${row2.join(" | ")})`)
-  console.log("PASS timing: the turn rows carry durations")
+  // The finished-run frame may land after the turn view's text: the
+  // rows' durations are waited for, not read once.
+  const row2 = () =>
+    Array.from(
+      dom.window.document.querySelector("weft-devtools")?.shadowRoot?.querySelectorAll(".weft-row2") ?? []
+    ).map((n) => n.textContent)
+  await waitFor(
+    () => (row2().some((t) => /(\d+m?s|\d+ms)/.test(t)) ? "timed" : null),
+    "timing: a duration on the turn rows"
+  )
 
   if (!args.otlp) {
     // Grouped: Studio resolves the public id to one thread whose turn

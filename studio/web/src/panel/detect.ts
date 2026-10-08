@@ -11,14 +11,21 @@
 //     loopback with no or a dev token, or data-detect="headers");
 //   - read-only: the response's URL and its Weft-Scope header, never a
 //     body, never a clone, never a request of its own;
-//   - same-origin only: a cross-origin response is ignored even when
-//     it exposes the header;
+//   - same-origin only, with one exception: a cross-origin response is
+//     read only when the page and the response are both on loopback
+//     (a dev server on :5173 calling the Go app on :8080); any other
+//     cross-origin response is ignored even when it exposes the header
+//     (a cross-origin production app names its scope with data-scope
+//     or the DOM marker);
+//   - never the panel's own Studio requests (the caller's ignore);
 //   - chained: the wrapper calls the fetch it found (a native one or
 //     another library's patch) with the page's own this and arguments,
 //     and returns what it returns once it settles;
 //   - restored: put back exactly as found on disconnect, when
 //     window.fetch is still the wrapper; another patcher that wrapped
-//     after it is left alone (the wrapper then passes through inert);
+//     after it is left alone (the wrapper then passes through inert —
+//     two panels on one page leave the first one's inert wrapper in
+//     the chain when it disconnects first: a pass-through);
 //   - silent: a failure inside the wrapper (a headers.get that throws,
 //     an opaque response) is swallowed — no console line, ever.
 //
@@ -34,8 +41,14 @@ import type { Scope } from "../lib/scope"
 export const SCOPE_HEADER = "Weft-Scope"
 
 export interface HeaderRungOptions {
-  /** Called with each same-origin response's scope and its URL path. */
+  /** Called with each readable response's scope and its URL path. */
   onScope: (scope: Scope, path: string) => void
+  /** Responses whose absolute URL this returns true for are not read
+   * (the panel's own Studio requests). */
+  ignore?: (href: string) => boolean
+  /** The page's URL (default location.href): what same-origin and
+   * loopback are judged against. */
+  pageURL?: () => string
   /** Whether a function is the browser's own fetch (default: its
    * source reads "[native code]"). Only reported, never a refusal. */
   isNativeFetch?: (f: unknown) => boolean
@@ -74,6 +87,28 @@ function requestURL(input: unknown): string {
   }
 }
 
+/** isLoopback reports whether a URL's host is this machine's:
+ * localhost, *.localhost, 127.0.0.0/8 or [::1]. */
+export function isLoopback(url: string): boolean {
+  try {
+    const h = new URL(url).hostname.toLowerCase()
+    return h === "localhost" || h.endsWith(".localhost") || /^127(\.\d{1,3}){3}$/.test(h) || h === "[::1]"
+  } catch {
+    return false
+  }
+}
+
+/** readable reports whether a response at url may be read from a page
+ * at page: the same origin, or both on loopback. */
+export function readable(url: string, page: string): boolean {
+  try {
+    if (new URL(url).origin === new URL(page).origin) return true
+  } catch {
+    return false
+  }
+  return isLoopback(url) && isLoopback(page)
+}
+
 /** installHeaderRung wraps window.fetch so every same-origin response
  * carrying Weft-Scope reports parseScope(header) and the response's
  * URL path to onScope. null when window.fetch is not a function or
@@ -98,8 +133,10 @@ export function installHeaderRung(opts: HeaderRungOptions): HeaderRung | null {
     // The response's own URL (after redirects) — or, where a response
     // carries none (a constructed one), the URL that was asked for.
     const at = (res as { url?: unknown }).url
-    const url = new URL(typeof at === "string" && at ? at : requestURL(input), location.href)
-    if (url.origin !== location.origin) return
+    const page = opts.pageURL ? opts.pageURL() : location.href
+    const url = new URL(typeof at === "string" && at ? at : requestURL(input), page)
+    if (!readable(url.href, page)) return
+    if (opts.ignore?.(url.href)) return
     const scope = parseScope(value)
     if (!scope.publicId && !scope.session && !scope.flow && !scope.run) return
     opts.onScope(scope, url.pathname)
@@ -120,11 +157,23 @@ export function installHeaderRung(opts: HeaderRungOptions): HeaderRung | null {
       return res
     })
   }
+  // A host whose fetch setter stores something other than the
+  // wrapper (a guard, a proxy) gets its own function back and nothing
+  // installed.
+  const giveUp = () => {
+    live = false
+    try {
+      if (window.fetch !== prev) window.fetch = prev
+    } catch {
+      // nothing more to put back
+    }
+    return null
+  }
   try {
     window.fetch = wrapper
-    if (window.fetch !== (wrapper)) return null
+    if (window.fetch !== wrapper) return giveUp()
   } catch {
-    return null
+    return giveUp()
   }
   return {
     chained: !native,

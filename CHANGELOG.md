@@ -98,18 +98,23 @@ module, ADR 0005).
   not in this conversation`; `session` narrows the turn list to the runs
   that carry that `weft.session.id`; `flow` is a header chip and filters
   nothing yet. Rung 2 reads the `Weft-Scope` header (`weft/scope`) of the
-  page's own same-origin `fetch` responses by wrapping `window.fetch`:
-  headers and URL only, never bodies, never sends; it chains to whatever
-  `fetch` it found and is restored on disconnect. It is on by default
-  only with a loopback endpoint and no token or a dev token, opt-in
-  elsewhere with `data-detect="headers"` (or `mount({detect})`), and
-  `data-detect="off"` turns detection off. Under a panel token off
-  loopback the page's `fetch` is never touched. It is fetch-only,
+  page's own `fetch` responses by wrapping `window.fetch`: same-origin
+  responses, or cross-origin ones between two loopback origins; headers
+  and URL only, never bodies, never sends, never the panel's own Studio
+  requests; it chains to whatever `fetch` it found, is installed only
+  once Studio has answered and is restored on disconnect. The next
+  turn's header of the same conversation re-pins its run unless the
+  user has clicked a turn since, and another conversation is followed
+  only from the request path that set the current one. It is on by
+  default only with the page and the endpoint on loopback and no token
+  or a dev token, opt-in elsewhere with `data-detect="headers"` (or
+  `mount({detect})`), and `data-detect="off"` turns detection off.
+  Under a panel token the page's `fetch` is never touched unless asked. It is fetch-only,
   because a page cannot read an `EventSource`'s headers, and WebSocket is
   never wrapped. The footer names the choice: `detect: headers | off |
-  explicit`. `examples/studio-local`'s tag drops `data-public-id`, and
+  explicit | none`. `examples/studio-local`'s tag drops `data-public-id`, and
   its page's first `/run` scopes the panel to `pub_demo`. Panel:
-  34.1 KiB gzip (was 32.0).
+  34.5 KiB gzip (was 32.0).
 
 ### Changed
 

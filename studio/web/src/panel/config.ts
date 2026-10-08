@@ -27,6 +27,7 @@
 // Those are the explicit forms (detection rung 1); the header rung
 // (detect.ts) supplies a scope only when none of them names one.
 import { parseScope, serializeScope } from "../lib/scope"
+import { isLoopback } from "./detect"
 import type { Scope } from "../lib/scope"
 
 /** data-position — where the dock sits. */
@@ -311,28 +312,24 @@ export function weftScope(): Scope {
   return { publicId: weftPublicId() }
 }
 
-/** isLoopback reports whether a URL's host is this machine's:
- * localhost, *.localhost, 127.0.0.0/8 or [::1]. */
-export function isLoopback(url: string): boolean {
-  try {
-    const h = new URL(url).hostname.toLowerCase()
-    return h === "localhost" || h.endsWith(".localhost") || /^127(\.\d{1,3}){3}$/.test(h) || h === "[::1]"
-  } catch {
-    return false
-  }
-}
-
 /** headerRungOn is the header rung's switch (plan §13.3): data-detect
  * "headers" turns it on anywhere and "off" turns it off; by default it
- * is on only where the host has said so by its setup — an endpoint on
- * loopback with no token (setup A) or the dev/server token (setup B),
- * never under a panel token (weft_pt., setup C). Every other page's
- * window.fetch is never touched. */
-export function headerRungOn(cfg: Pick<PanelConfig, "detect" | "endpoint" | "token">): boolean {
+ * is on only where the host has said so by its setup — the page AND
+ * the endpoint on loopback, with no token (setup A) or the dev/server
+ * token (setup B), never under a panel token (weft_pt., setup C). A
+ * production page pointed at a loopback endpoint is not patched by
+ * default; every other page's window.fetch is never touched. page is
+ * the page's URL (default location.href). */
+export function headerRungOn(
+  cfg: Pick<PanelConfig, "detect" | "endpoint" | "token">,
+  page: string = location.href
+): boolean {
   if (cfg.detect === "off") return false
   if (cfg.detect === "headers") return true
-  return isLoopback(cfg.endpoint) && !cfg.token.startsWith("weft_pt.")
+  return isLoopback(page) && isLoopback(cfg.endpoint) && !cfg.token.startsWith("weft_pt.")
 }
+
+export { isLoopback }
 
 /** What a token may do, as far as the page can tell (§6). A panel
  * token (setup C) is `weft_pt.<claims>.<signature>` with its scope in

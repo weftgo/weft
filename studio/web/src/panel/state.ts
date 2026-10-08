@@ -74,6 +74,12 @@ export const DEV_POLL_MS = 10_000
  * deltas must not cost it a rebuild per animation frame. Everything
  * else (a click's answer, a turn loading) draws on the next frame. */
 export const LIVE_DRAW_MS = 100
+
+/** When the scope's run is not listed on the first look (a streaming
+ * handler's header lands before the run row does), the list is read
+ * once more this much later; only a second miss says "not in this
+ * conversation". */
+export const PIN_RECHECK_MS = 1_000
 /** How many times an experiment's run is read after its command
  * finished, 1 s apart, before the pane settles on what it has. */
 const SETTLE_READS = 15
@@ -429,6 +435,14 @@ export class PanelModel {
   /** The run the pin was last applied for: a pin selects its run once,
    * the user's clicks own the selection afterwards. */
   private pinApplied = ""
+  /** The user clicked a turn since the last pin: a new run of the same
+   * conversation (the next turn's header) no longer moves the
+   * selection. An explicit rescope (force) clears it. */
+  private userSelected = false
+  /** Looks (a refresh, a live frame) for the pinned run since it was
+   * set: the missing line waits for the second. */
+  private pinChecks = 0
+  private pinTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(ep: PanelEndpoint, scope: Scope | string, notify: PanelNotify) {
     this.ep = ep
@@ -470,19 +484,40 @@ export class PanelModel {
   /** rescope follows another scope (the §5.2 setter path, the header
    * rung): another public id starts over on that conversation; the
    * same one with another session, flow or run re-narrows the list
-   * already followed. A string is a public id. */
-  async rescope(next: Scope | string) {
+   * already followed — never a restart: a new run there re-pins the
+   * selection unless the user has clicked a turn since the last pin
+   * (opts.force, an explicit rescope, pins regardless). A string is a
+   * public id. */
+  async rescope(next: Scope | string, opts: { force?: boolean } = {}) {
     const s: Scope = typeof next === "string" ? { publicId: next } : next
     const narrowing = narrowingOf(s)
     const sameNarrowing = serializeScope({ publicId: "", ...narrowing }) === serializeScope({ publicId: "", ...this.narrowing })
     if (s.publicId === this.publicId && sameNarrowing) return
     const samePublic = s.publicId === this.publicId
+    const sameSession = narrowing.session === this.narrowing.session
+    if (narrowing.run !== this.narrowing.run) {
+      this.pinApplied = ""
+      this.pinChecks = 0
+      this.cancel(this.pinTimer)
+      this.pinTimer = null
+    }
+    if (opts.force) this.userSelected = false
     this.publicId = s.publicId
     this.narrowing = narrowing
-    this.pinApplied = ""
     if (!this.state.meta || this.state.tooNew) return
-    if (samePublic) await this.refresh()
-    else await this.scope()
+    if (!samePublic) {
+      await this.scope()
+      return
+    }
+    // The same conversation: a run already listed is pinned in place;
+    // otherwise (or with another session) the list is read again.
+    if (sameSession && (!narrowing.run || this.rowOf(narrowing.run))) {
+      const pin = this.takePin()
+      if (pin) await this.select(pin)
+      else this.emit()
+      return
+    }
+    await this.refresh()
   }
 
   /** scope starts over on the conversation: the header and the turn
@@ -511,6 +546,9 @@ export class PanelModel {
     s.pinMissing = ""
     s.sessionUnrecorded = false
     this.pinApplied = ""
+    this.pinChecks = 0
+    this.pinTimer = null // clearTimers above dropped it
+    this.userSelected = false
     this.compareWords.clear()
     this.emit()
     // Subscribe before the list is fetched: a run frame that lands
@@ -646,7 +684,7 @@ export class PanelModel {
   private clearTimers() {
     for (const t of this.timers) clearTimeout(t)
     this.timers.clear()
-    this.devTimer = this.staleTimer = this.liveTimer = null
+    this.devTimer = this.staleTimer = this.liveTimer = this.pinTimer = null
   }
 
   /** refresh reloads the header and the turn list. */
@@ -716,8 +754,12 @@ export class PanelModel {
   }
 
   /** takePin is the scope's run pin: the id to select now — once per
-   * scope, when the run is among the listed ones — or "". A run that
-   * is not listed is reported (pinMissing) instead of dropped. */
+   * run, when it is among the listed ones and the user has not clicked
+   * a turn since the last pin — or "". A run that is not listed is
+   * reported (pinMissing) instead of dropped, but only on a second
+   * look: the first miss reads the list again PIN_RECHECK_MS later (a
+   * live frame counts as a look too), so a header that lands before
+   * its run row says nothing false. */
   private takePin(): string {
     const run = this.narrowing.run
     if (!run) {
@@ -725,8 +767,18 @@ export class PanelModel {
       return ""
     }
     const hit = this.rowOf(run)
-    this.state.pinMissing = hit ? "" : run
-    if (!hit || this.pinApplied === run) return ""
+    this.pinChecks++
+    if (!hit) {
+      this.state.pinMissing = this.pinChecks >= 2 ? run : ""
+      if (this.pinChecks === 1 && !this.pinTimer)
+        this.pinTimer = this.after(PIN_RECHECK_MS, () => {
+          this.pinTimer = null
+          void this.refresh().catch(quiet)
+        })
+      return ""
+    }
+    this.state.pinMissing = ""
+    if (this.pinApplied === run || this.userSelected) return ""
     this.pinApplied = run
     return run
   }
@@ -817,8 +869,10 @@ export class PanelModel {
 
   /** select loads one turn: the doc (subagent children), every events
    * page, the transcript and the spans, then follows its live tail
-   * while it runs. */
-  async select(id: string) {
+   * while it runs. byUser: a click in the turn list (the scope's run
+   * pin then leaves the selection alone). */
+  async select(id: string, byUser = false) {
+    if (byUser) this.userSelected = true
     this.runSub?.close()
     this.runSub = undefined
     this.retries.run = 0

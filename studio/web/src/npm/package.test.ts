@@ -135,7 +135,7 @@ describe("mount", () => {
     type Pkg = Omit<Devtools.MountOptions, "target">
     const toLadder = (o: Pkg): LadderOptions => o
     const toPkg = (o: LadderOptions): Pkg => o
-    const all: Required<Pkg> = { endpoint: STUDIO, scope: "p;run=r", publicId: "p", token: "t", detect: "headers", position: "right-dock", open: true, auto: false }
+    const all: Required<Pkg> = { endpoint: STUDIO, scope: "p;run=r", publicId: "p", token: "t", detect: "headers", position: "right-dock", open: true, auto: false, theme: "light" }
     expect(toPkg(toLadder(all))).toEqual(all)
   })
 })

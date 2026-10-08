@@ -338,13 +338,41 @@ top.
 | `data-mode` | the initial mode: `float`, `dock`, `pill` or `hidden` | from the two above |
 | `data-push="true"` | while docked and open, pads `<html>` on the docked side by the dock's size — `padding-<side>: var(--weft-devtools-inset)`, the variable set to the size (the bottom sheet: `padding-bottom` by its `70vh`) — so the page's flow never sits under the panel. It replaces the inline padding on that side while docked; the inline values from before (or one your page set meanwhile) are put back exactly on close, on a mode change and on disconnect. The panel's one write to your document, opt-in. Padding does not move `position: fixed` or `sticky` elements: a fixed or sticky composer keeps clear with the variable in your own CSS, `bottom: var(--weft-devtools-inset, 0)` (and the matching `right`/`left`/`top` for those docks) — push sets the variable as well as the padding | off |
 | `data-z-index` | the dock's and the pill's z-index (an integer) | `--weft-z` on the element, else 2147483000 |
+| `data-theme` | `light` or `dark` names the theme (above everything); `auto` leaves it to the order below | `auto` |
+
+Theme (plan D2). The panel is light or dark, resolved in one order:
+(1) explicit — `data-theme="light|dark"` on the element, `weft:theme`,
+the script tag, or `mount({theme})`; (2) stored — the header's `◐`
+button cycles auto → light → dark (disabled, and saying so, under an
+explicit theme), kept as `theme` in the key below, and auto clears it;
+(3) auto — your page's `<html data-theme="dark|light">`, else
+`<html class="dark|light">`, else `<html>`'s computed `color-scheme`
+when it is exactly `dark` or `light`, then the system's
+`prefers-color-scheme`, else dark. A theme toggle on your page is
+followed (one passive attributes-only observer on `<html>`'s `class`
+and `data-theme`, and one media-query listener, both removed on
+disconnect); `<html>` and `matchMedia` are only read. The result is
+`data-theme-resolved` on the `<weft-devtools>` element itself. The
+palette is the Studio app's (`src/lib/palette.ts`, which names the
+`src/styles.css` variable each shared token equals — a test fails on
+drift), and both themes clear WCAG AA (`theme.test.ts`: 4.5:1 text,
+3:1 UI). Every colour, radius and font is a custom property on the
+panel's `:host`, so your CSS overrides any of them — an outer rule
+beats the shadow tree's `:host`, in either theme:
+`weft-devtools { --weft-bg: #fff }`. The tokens: `--weft-bg` (panes),
+`--weft-bg2` (header, steps, footer), `--weft-bg3` (selected row,
+fields), `--weft-fg`, `--weft-dim`, `--weft-faint`, `--weft-line`,
+`--weft-accent`, `--weft-on-accent` (text on the accent), `--weft-warn`,
+`--weft-err`, `--weft-info`, `--weft-ok`, `--weft-parked`,
+`--weft-scrim` (the `?` overlay), `--weft-shadow`, `--weft-font`,
+`--weft-radius`, `--weft-radius-sm` (and `--weft-z`, above).
 
 The panel remembers, per origin, in `localStorage["weft.devtools"]`
 — one JSON object, `{v: 1, mode, side, open, hidden, x, y, w, h, d,
 run, theme, raw, debug}`: the mode (`float`/`dock`), the docked side,
 open, hidden, the float's box (`x`, `y`, `w`, `h`, px), the dock's size
-(`d`), the last selected turn (`run`, by run id), `theme` (reserved
-for D2), the raw view, and `debug` (the old `localStorage.weft_debug=1`
+(`d`), the last selected turn (`run`, by run id), `theme` (the `◐`
+choice: `light`, `dark`, or `""` for auto), the raw view, and `debug` (the old `localStorage.weft_debug=1`
 switch, migrated into the key and dropped). The placement fields are
 written only once you place the panel (toggle, drag, resize, re-dock):
 until then the `data-*` attributes above decide on every load; after,
@@ -375,7 +403,7 @@ puts focus in it, so the keys below work at once.
 Where the configuration comes from (plan C2). Each field — `endpoint`,
 `scope` (or the deprecated `public-id`; `scope` wins at the same rung),
 `token`, `detect`, `position`, `open`, `auto`, `global`, `mode`, `push`,
-`z-index` — resolves on its
+`z-index`, `theme` — resolves on its
 own; the first source that sets it wins, so a meta tag can carry the
 token while the script tag carries the endpoint. The panel never reads
 its own file name: a bundle served as `/assets/devtools.abc123.js`
@@ -383,10 +411,10 @@ behind a proxy configures itself the same way.
 
 | # | Source | The explicit form |
 |---|---|---|
-| 1 | `mount(opts)` — a programmatic mount (`import { mount } from "@weftgo/devtools"`, the npm entry; not in the script-tag bundle) | `mount({endpoint, scope, publicId, token, detect, position, open, auto, target})` |
+| 1 | `mount(opts)` — a programmatic mount (`import { mount } from "@weftgo/devtools"`, the npm entry; not in the script-tag bundle) | `mount({endpoint, scope, publicId, token, detect, position, open, auto, theme, target})` |
 | 2 | the `<weft-devtools>` element's attributes | `<weft-devtools data-endpoint="…" data-token="…">` |
-| 3 | meta tags | `<meta name="weft:endpoint" content="…">` (also `weft:scope`, `weft:public-id`, `weft:token`, `weft:detect`, `weft:position`, `weft:open`, `weft:auto`, `weft:global`, `weft:mode`, `weft:push`, `weft:z-index`) |
-| 4 | the panel's `<script>` tag: the running classic script, else the first with a `data-weft` attribute (any `src`, any value), else the first carrying one of the `data-*` attributes above (`data-mode`, `data-push` and `data-z-index` excepted: other scripts use those words) | `<script type="module" src="…" data-weft data-endpoint="…">` |
+| 3 | meta tags | `<meta name="weft:endpoint" content="…">` (also `weft:scope`, `weft:public-id`, `weft:token`, `weft:detect`, `weft:position`, `weft:open`, `weft:auto`, `weft:global`, `weft:mode`, `weft:push`, `weft:z-index`, `weft:theme`) |
+| 4 | the panel's `<script>` tag: the running classic script, else the first with a `data-weft` attribute (any `src`, any value), else the first carrying one of the `data-*` attributes above (`data-mode`, `data-push`, `data-z-index` and `data-theme` excepted: other scripts use those words) | `<script type="module" src="…" data-weft data-endpoint="…">` |
 | 5 | `panel-config.json` beside the script (`/studio/panel.js` → `/studio/panel-config.json`), asked only when rungs 1–4 named no endpoint; its `endpoint` is taken on the script's own origin only, and it never carries a token | name the endpoint at any rung above |
 | 6 | the script's own origin + directory (setup A) | name the endpoint at any rung above |
 

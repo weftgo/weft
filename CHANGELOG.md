@@ -10,6 +10,21 @@ module, ADR 0005).
 
 ### Added
 
+- **The devtools panel's theme** (plan D2): light and dark, following
+  the host page without configuration — `data-theme="light|dark"`
+  (also `weft:theme`, the script tag, `mount({theme})`) wins, then the
+  user's choice from the header's `◐` button (stored as `theme` in
+  `localStorage["weft.devtools"]`; auto clears it), then auto: `<html
+  data-theme>`, `<html class="dark|light">`, `<html>`'s computed
+  `color-scheme`, `prefers-color-scheme`, else dark. A host toggle and a
+  system change are followed (passive, removed on disconnect); the
+  result is `data-theme-resolved` on the element. The colours are the
+  Studio app's palette (`studio/web/src/lib/palette.ts`, held in
+  lockstep with `src/styles.css` by a test), contrast-checked to WCAG AA
+  in both themes, and every colour, radius and font is a `--weft-*`
+  custom property on the panel's `:host` — `weft-devtools { --weft-bg:
+  … }` overrides it. The panel's old dark-only `--w-*` variables are
+  gone.
 - **The devtools panel's layout** (plan D1): the dock floats (dragged
   by its header, resized from its corner, 360×280 up to the viewport
   minus 16 px, clamped on every window resize) or docks to any side —

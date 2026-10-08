@@ -4,7 +4,7 @@
 //
 //   1. mount(opts) — the options a programmatic mount passed;
 //   2. the <weft-devtools> element's own data-* attributes;
-//   3. <meta name="weft:endpoint|scope|public-id|token|detect|position|open|auto|global|mode|push|z-index">;
+//   3. <meta name="weft:endpoint|scope|public-id|token|detect|position|open|auto|global|mode|push|z-index|theme">;
 //   4. the panel's <script> tag's data-* attributes: the running
 //      classic script (document.currentScript), else the first script
 //      carrying data-weft (any src — a renamed or proxied bundle), else
@@ -31,6 +31,8 @@
 import { parseScope, serializeScope } from "../lib/scope"
 import { isLoopback } from "./detect"
 import { migrateDebug } from "./layout"
+import { themeSetting } from "./theme"
+import type { ThemeSetting } from "./theme"
 import type { Scope } from "../lib/scope"
 
 /** data-position — where the dock sits (mount's option). */
@@ -81,6 +83,9 @@ export interface PanelConfig {
   push: boolean
   /** data-z-index (D1): the dock's z-index ("" for --weft-z, else 2147483000). */
   zIndex: string
+  /** data-theme (D2): light or dark names the theme (above the stored
+   * choice and the host page); auto (or unset) leaves it to them. */
+  theme: ThemeSetting
   /** Mount without markup; fail silently when Studio doesn't answer. */
   auto: boolean
   /** data-global (weft:global): the script-tag bundle publishes the
@@ -102,6 +107,8 @@ export interface MountOptions {
   position?: PanelPosition
   open?: boolean
   auto?: boolean
+  /** data-theme, as an option (D2). */
+  theme?: ThemeSetting
 }
 
 /** data-detect's values; "" is unset. */
@@ -124,7 +131,7 @@ const POSITIONS: PanelPlacement[] = ["bottom-right", "bottom-left", "right-dock"
 
 /** The fields, by their attribute stem: data-<stem> on the element and
  * the script tag, weft:<stem> on a meta tag. */
-export const FIELDS = ["endpoint", "scope", "public-id", "token", "detect", "position", "open", "auto", "global", "mode", "push", "z-index"] as const
+export const FIELDS = ["endpoint", "scope", "public-id", "token", "detect", "position", "open", "auto", "global", "mode", "push", "z-index", "theme"] as const
 type Field = (typeof FIELDS)[number]
 
 /** The attributes that find the panel's own <script> tag: the fields
@@ -208,6 +215,7 @@ function optionsRung(opts: MountOptions | null | undefined): Rung {
       mode: undefined,
       push: undefined,
       "z-index": undefined,
+      theme: opts.theme,
     }[f]
     return v === undefined ? null : String(v)
   }
@@ -302,6 +310,7 @@ export function readConfig(el?: HTMLElement & { options?: MountOptions | null })
     mode: ["float", "dock", "pill", "hidden"].includes(mode) ? mode : "",
     push: pick("push") === "true",
     zIndex: /^-?\d+$/.test(z) ? z : "",
+    theme: themeSetting(pick("theme")),
     auto: pick("auto") !== "false",
     global: !["off", "false"].includes((pick("global") ?? "").trim().toLowerCase()),
   }

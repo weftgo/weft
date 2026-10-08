@@ -35,6 +35,7 @@ import { parseScope, serializeScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
 import { el, fmtJSON, waterfall } from "./render"
 import { PANEL_CSS } from "./styles"
+import { nextTheme, resolveTheme, themeSetting, ThemeWatch } from "./theme"
 import {
   DEV_DISCOVERY_MS,
   emptyPanelState,
@@ -325,6 +326,7 @@ export class WeftDevtools extends HTMLElement {
     "data-global",
     "data-push",
     "data-z-index",
+    "data-theme",
   ]
 
   /** Set by the entry module on the dock it mounts itself: only that
@@ -398,6 +400,8 @@ export class WeftDevtools extends HTMLElement {
   private lay: Layout
   /** data-push's padding on <html>, while it is applied. */
   private push = new Push()
+  /** D2: follows <html>'s theme and prefers-color-scheme while connected. */
+  private themeWatch = new ThemeWatch()
   /** The user placed the panel (or a placement was stored): the
    * placement is remembered from then on. */
   private placed = false
@@ -541,6 +545,10 @@ export class WeftDevtools extends HTMLElement {
     window.addEventListener("pointercancel", this.onRelease, true)
     window.addEventListener("hashchange", this.onURL, { passive: true })
     window.addEventListener("popstate", this.onURL, { passive: true })
+    this.themeWatch.start(() => {
+      if (this.getAttribute("data-theme-resolved") !== resolveTheme(this.cfg.theme, this.lay.theme)) this.render(this.last)
+    })
+    this.syncTheme()
     this.syncGlobal()
     this.schedule()
   }
@@ -552,6 +560,7 @@ export class WeftDevtools extends HTMLElement {
     this.dropDrag = null
     this.dragging = false
     this.push.restore()
+    this.themeWatch.stop()
     window.removeEventListener("pointerup", this.onRelease, true)
     window.removeEventListener("pointercancel", this.onRelease, true)
     window.removeEventListener("hashchange", this.onURL)
@@ -1392,6 +1401,7 @@ export class WeftDevtools extends HTMLElement {
       Object.assign(l, { mode: at.mode, side: at.side, y: innerHeight - l.h - 16 })
       l.x = this.cfg.position === "bottom-left" ? 16 : innerWidth - l.w - 16
     }
+    if (name === "data-theme") this.render(this.last)
     this.syncGlobal()
     this.syncDetect()
     this.schedule()
@@ -1686,6 +1696,7 @@ export class WeftDevtools extends HTMLElement {
     // Focus was in the panel: it stays there (the dock, or the pill),
     // so its shortcuts keep working across the rebuild.
     if (refocus) root.querySelector<HTMLElement>(".weft-dock, .weft-fab")?.focus({ preventScroll: true })
+    this.syncTheme()
     root.setAttribute("data-mode", this.dormant ? "line" : this.lay.hidden ? "hidden" : this.shown ? this.lay.mode : "pill")
     // data-push (D1): only while a dock is drawn docked.
     // data-push (D1): a dock pads its side by its size; the bottom
@@ -1693,6 +1704,36 @@ export class WeftDevtools extends HTMLElement {
     if (this.cfg.push && this.isConnected && root.querySelector(".weft-docked")) this.push.apply(this.lay.side, `${this.lay.d}px`)
     else if (this.cfg.push && this.isConnected && root.querySelector(".weft-sheet")) this.push.apply("bottom", "70vh")
     else this.push.restore()
+  }
+
+  /** syncTheme sets data-theme-resolved on the element itself (D2):
+   * the :host rule that picks the token set reads it. */
+  private syncTheme(): void {
+    const t = resolveTheme(this.cfg.theme, this.lay.theme)
+    if (this.isConnected && this.getAttribute("data-theme-resolved") !== t) this.setAttribute("data-theme-resolved", t)
+  }
+
+  /** themeButton cycles the user's theme (D2): auto → light → dark;
+   * stored per origin, auto clears it. An explicit data-theme wins, so
+   * the button then only says so. */
+  private themeButton(): HTMLElement {
+    const pick = themeSetting(this.lay.theme)
+    const now = resolveTheme(this.cfg.theme, this.lay.theme)
+    const fixed = this.cfg.theme !== "auto"
+    const said = fixed ? `theme: ${now}, set by the page (data-theme)` : `theme: ${pick}${pick === "auto" ? ` (${now})` : ""}`
+    const b = el("button", "weft-btn weft-theme", "◐", {
+      type: "button",
+      title: fixed ? said : `${said} — next: ${nextTheme(pick)}`,
+      "aria-label": said,
+      ...(fixed ? { disabled: "" } : {}),
+    })
+    b.addEventListener("click", () => {
+      const next = nextTheme(pick)
+      this.lay.theme = next === "auto" ? "" : next
+      writeStore(this.lay, this.placed)
+      this.render(this.last)
+    })
+    return b
   }
 
   /** dock is the expanded panel, placed by the layout (D1): a float
@@ -1948,6 +1989,7 @@ export class WeftDevtools extends HTMLElement {
     const lay = el("button", "weft-btn weft-layout", "⇆", { title: `layout: ${where} — next (Alt+Shift+W)`, "aria-label": `layout: ${where}` })
     lay.addEventListener("click", () => this.cycle())
     h.appendChild(lay)
+    h.appendChild(this.themeButton())
     const close = el("button", "weft-btn", "–", { title: "collapse (Alt+W)" })
     close.addEventListener("click", () => this.toggle())
     h.appendChild(close)
@@ -2946,7 +2988,7 @@ function renderStep(
 ): HTMLElement {
   const card = el("div", "weft-step")
   card.setAttribute("data-weft-step", String(step.index))
-  if (selectedStep === step.index) card.style.outline = "1px solid var(--w-accent)"
+  if (selectedStep === step.index) card.style.outline = "1px solid var(--weft-accent)"
   const head = el("div", "weft-step-h", [
     el("span", undefined, `step ${step.index}`),
     el("span", "weft-grow"),

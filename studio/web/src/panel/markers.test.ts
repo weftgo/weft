@@ -348,19 +348,21 @@ describe("the panel's marker rung", () => {
 
   it("data-detect=\"off\" installs nothing; disconnect removes the observer and the focusin listener", async () => {
     fakeStudio(routesFor("pub_a"))
-    const observe = vi.spyOn(MutationObserver.prototype, "observe")
+    const spy = vi.spyOn(MutationObserver.prototype, "observe")
+    // The marker rung's observer only (D2's theme observer watches <html>'s own attributes).
+    const observe = { get mock() { return { calls: spy.mock.calls.filter((c) => c[1]?.subtree) } } }
     const disconnect = vi.spyOn(MutationObserver.prototype, "disconnect")
     const add = vi.spyOn(document, "addEventListener")
     const remove = vi.spyOn(document, "removeEventListener")
     chat("pub_a")
     const off = await mountWith({ "data-endpoint": REMOTE, "data-detect": "off", "data-open": "true" })
-    expect(observe).not.toHaveBeenCalled()
+    expect(observe.mock.calls).toHaveLength(0)
     expect(add.mock.calls.filter((c) => c[0] === "focusin")).toHaveLength(0)
     expect(text(off, ".weft-title")).toBe("no conversation detected on this page")
     expect(text(off, ".weft-detect")).toBe(" · detect: off")
     off.remove()
     const on = await mountWith({ "data-endpoint": REMOTE, "data-open": "true" })
-    expect(observe).toHaveBeenCalledTimes(1)
+    expect(observe.mock.calls).toHaveLength(1)
     expect(observe.mock.calls[0][0]).toBe(document.documentElement)
     expect(observe.mock.calls[0][1]).toEqual({ subtree: true, childList: true, attributes: true, attributeFilter: [MARKER_ATTR] })
     const focusin = add.mock.calls.find((c) => c[0] === "focusin")!
@@ -587,10 +589,11 @@ describe("the marker rung, review fixes", () => {
     vi.spyOn(pageURL, "href").mockReturnValue("https://shop.example/chat")
     fakeStudio(routesFor("pub_a"))
     const original = window.fetch
-    const observe = vi.spyOn(MutationObserver.prototype, "observe")
+    const spy = vi.spyOn(MutationObserver.prototype, "observe")
+    const observe = { get mock() { return { calls: spy.mock.calls.filter((c) => c[1]?.subtree) } } }
     chat("pub_a")
     const off = await mountWith({ "data-endpoint": `${location.origin}/studio/`, "data-token": PANEL_TOKEN, "data-open": "true" })
-    expect(observe).not.toHaveBeenCalled()
+    expect(observe.mock.calls).toHaveLength(0)
     expect(window.fetch).toBe(original)
     expect(text(off, ".weft-detect")).toBe(" · detect: none")
     expect(text(off, ".weft-title")).toBe("no conversation detected on this page")
@@ -599,7 +602,7 @@ describe("the marker rung, review fixes", () => {
     expect(text(off, ".weft-detect")).toBe(" · detect: explicit")
     off.remove()
     const on = await mountWith({ "data-endpoint": REMOTE, "data-token": PANEL_TOKEN, "data-detect": "markers", "data-open": "true" })
-    expect(observe).toHaveBeenCalledTimes(1)
+    expect(observe.mock.calls).toHaveLength(1)
     expect(window.fetch).toBe(original)
     expect(text(on, ".weft-detect")).toBe(" · detect: markers")
     expect(text(on, ".weft-title")).toContain("pub_a")

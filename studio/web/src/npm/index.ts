@@ -43,6 +43,10 @@ export interface MountOptions {
   /** Start expanded. */
   open?: boolean
   auto?: boolean
+  /** The theme: "light" or "dark" names it; "auto" (the default) is
+   * the user's stored choice, else the page's <html> (data-theme,
+   * class="dark"), else prefers-color-scheme, else dark. */
+  theme?: "auto" | "light" | "dark"
   /** Where the element is appended (default document.body). */
   target?: Element
 }

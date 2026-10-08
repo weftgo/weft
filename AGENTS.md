@@ -211,7 +211,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    unless data-global="off", events weft:run|parked|error; its layout, plan D1: float, dock
 //    //    left|right|bottom|top, pill, hidden — data-position/data-mode/data-push (pads <html>)/
 //    //    data-z-index (--weft-z), remembered in localStorage["weft.devtools"], every key but Alt+W
-//    //    heard inside the panel only; the build prints the per-item size table from
+//    //    heard inside the panel only; its theme, plan D2: data-theme light|dark > the stored ◐ choice >
+//    //    auto (<html data-theme|class="dark">, prefers-color-scheme, else dark), the Studio palette
+//    //    (src/lib/palette.ts) as --weft-* tokens on :host a host rule overrides; the build prints the per-item size table from
 //    //    studio/web/panel-budget.json; configured by a data-weft
 //    //    script tag, weft:* meta tags, or <base>/panel-config.json; studio/README.md
 //    //    has the ladder; it follows a scope — data-scope="pub_…;session=…;flow=…;run=…" or

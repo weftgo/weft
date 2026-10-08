@@ -25,8 +25,10 @@ import {
   spansQuery,
 } from "@/lib/api"
 import type { RunRow, Span as TimedSpan } from "@/lib/api"
+import { compactionsOf } from "@/lib/compaction"
 import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
+import { overrideOf } from "@/lib/request-pane"
 import type { RunSearch } from "@/lib/links"
 import type { Span as TraceSpan } from "@/lib/trace"
 import {
@@ -233,6 +235,17 @@ function RunPage() {
       void queryClient.invalidateQueries({ queryKey: ["step", id] })
     }
   }, [loadedStatus, id, queryClient])
+  // The run's timed spans (the time axis's rows, S4.7), fetched when
+  // the trace view is on and the run has a trace — and, under the
+  // requests capability, for the Request pane's "overridden by
+  // experiment" chip: the run's invoke_agent span carries the
+  // weft.override.* fingerprint (one query, shared with the trace).
+  const spans = useQuery({
+    ...spansQuery(id),
+    enabled: (view === "trace" || requestsCapable) && Boolean(run.data?.trace_id),
+    refetchInterval: runStatus === "running" ? 5000 : false,
+  })
+  const override = useMemo(() => overrideOf(spans.data?.spans, id), [spans.data, id])
   const requests = useMemo(
     () =>
       requestsCapable
@@ -240,6 +253,15 @@ function RunPage() {
             loading: requestsQ.isPending,
             error: requestsQ.isError ? requestsQ.error.message : undefined,
             running: runStatus === "running",
+            ctx: {
+              runId: id,
+              agent: run.data?.agent,
+              manifestHash: run.data?.manifest_hash,
+              instructionsHash: run.data?.instructions_hash,
+              override,
+              transcript: transcript.data,
+              compactions: compactionsOf(run.data),
+            },
           })
         : undefined,
     [
@@ -249,17 +271,19 @@ function RunPage() {
       requestsQ.isError,
       requestsQ.error,
       runStatus,
+      id,
+      run.data,
+      override,
+      transcript.data,
     ]
   )
 
-  // The run's timed spans (the time axis's rows, S4.7), fetched when
-  // the trace view is on and the run has a trace.
-  const spans = useQuery({
-    ...spansQuery(id),
-    enabled: view === "trace" && Boolean(run.data?.trace_id),
-    refetchInterval: runStatus === "running" ? 5000 : false,
-  })
-  const timed: TimedSpan[] = spans.data?.spans ?? []
+  // The time axis is the trace view's: the story reads the spans only
+  // for the override chip, and stays on the position axis (replay).
+  const timed: TimedSpan[] = useMemo(
+    () => (view === "trace" ? (spans.data?.spans ?? []) : []),
+    [view, spans.data]
+  )
   const haveTime = timed.length > 0
   const axis: "events" | "time" = search.axis ?? (haveTime ? "time" : "events")
 

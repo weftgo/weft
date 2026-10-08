@@ -160,7 +160,8 @@ export function pagedRequests(
 }
 
 /** The 403 requests.go's mayReadPrompts answers a read-scoped panel
- * token on the request and tools routes: the error shape with the
+ * token on the request and tools routes (export.go's refuseHidden,
+ * obsdb's HoleHidden note word for word): the error shape with the
  * hidden badge beside it. */
 export function hiddenRefusal(): Response {
   return json(
@@ -171,7 +172,8 @@ export function hiddenRefusal(): Response {
           "the request record carries the system prompt and the tool catalog: a read-scoped panel token does not read it",
       },
       badge: "hidden",
-      reason: "a read-scoped panel token does not read system prompts or tool catalogs",
+      reason:
+        "your token's scope may not read this: a read-scoped panel token does not read system prompts or tool catalogs",
       fix: "use a playground-scoped token",
     },
     403
@@ -192,8 +194,17 @@ export type RequestsVariant = "ok" | "stripped" | "not-recorded" | "hidden"
  * read-scoped panel token reads it (the request block hidden). */
 export type StepGolden = "0" | "1" | "2" | "stripped" | "not-recorded" | "hidden"
 
+/** One answer the fake gave: the route, the status and the body text
+ * exactly as the client received it. */
+export interface FakeResponse {
+  route: string
+  status: number
+  body: string
+}
+
 export class FakeStudio {
   readonly requests: FakeRequest[] = []
+  private answered: Promise<FakeResponse>[] = []
   private routes = new Map<string, Handler>()
   private token = ""
 
@@ -252,43 +263,63 @@ export class FakeStudio {
     return this.requests.filter((r) => `${r.method} ${r.path}` === route)
   }
 
+  /** Every answer given so far, oldest first (route "" for one given
+   * before routing: a 401). */
+  responses(): Promise<FakeResponse[]> {
+    return Promise.all(this.answered)
+  }
+
   /** Install as the global fetch. */
   install(): this {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = new URL(String(input))
-        const req: FakeRequest = {
-          method: (init?.method ?? "GET").toUpperCase(),
-          path: decodeURIComponent(url.pathname.replace(/^.*?\/api\//, "")),
-          query: url.searchParams,
-          headers: new Headers(init?.headers),
-          body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
-        }
-        this.requests.push(req)
-        if (req.query.has("token"))
-          return apiError(401, "unauthorized", "a token in the URL is refused: send Authorization: Bearer <token>")
-        const h = req.headers.get("Authorization")
-        const presented = h !== null && h.startsWith("Bearer ") ? h.slice(7) : ""
-        if (this.token) {
-          if (!presented)
-            return apiError(401, "unauthorized", "the API requires a token: Authorization: Bearer <token>")
-          if (presented !== this.token) return apiError(401, "unauthorized", "bad or expired token")
-        }
-        if (req.method === "POST" && req.path === "live-grant" && !this.routes.has("POST live-grant"))
-          return answerLiveGrant(url, presented, typeof init?.body === "string" ? init.body : undefined)
-        const handler = this.routes.get(`${req.method} ${req.path}`)
-        if (!handler)
-          return apiError(404, "not_found", `no such api route /api/${req.path}`)
-        const out = await handler(req)
-        if (out instanceof Response) return out
-        // The write verbs that enqueue answer 202 Accepted (playground.go).
-        const accepted =
-          req.method === "POST" &&
-          (req.path === "playground/runs" || /^runs\/.+\/approvals$/.test(req.path))
-        return json(out, accepted ? 202 : 200)
+        const res = await this.answer(input, init)
+        const route = `${(init?.method ?? "GET").toUpperCase()} ${decodeURIComponent(
+          new URL(String(input)).pathname.replace(/^.*?\/api\//, "")
+        )}`
+        this.answered.push(
+          res
+            .clone()
+            .text()
+            .then((body) => ({ route, status: res.status, body }))
+        )
+        return res
       })
     )
     return this
+  }
+
+  private async answer(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const url = new URL(String(input))
+    const req: FakeRequest = {
+      method: (init?.method ?? "GET").toUpperCase(),
+      path: decodeURIComponent(url.pathname.replace(/^.*?\/api\//, "")),
+      query: url.searchParams,
+      headers: new Headers(init?.headers),
+      body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+    }
+    this.requests.push(req)
+    if (req.query.has("token"))
+      return apiError(401, "unauthorized", "a token in the URL is refused: send Authorization: Bearer <token>")
+    const h = req.headers.get("Authorization")
+    const presented = h !== null && h.startsWith("Bearer ") ? h.slice(7) : ""
+    if (this.token) {
+      if (!presented)
+        return apiError(401, "unauthorized", "the API requires a token: Authorization: Bearer <token>")
+      if (presented !== this.token) return apiError(401, "unauthorized", "bad or expired token")
+    }
+    if (req.method === "POST" && req.path === "live-grant" && !this.routes.has("POST live-grant"))
+      return answerLiveGrant(url, presented, typeof init?.body === "string" ? init.body : undefined)
+    const handler = this.routes.get(`${req.method} ${req.path}`)
+    if (!handler)
+      return apiError(404, "not_found", `no such api route /api/${req.path}`)
+    const out = await handler(req)
+    if (out instanceof Response) return out
+    // The write verbs that enqueue answer 202 Accepted (playground.go).
+    const accepted =
+      req.method === "POST" &&
+      (req.path === "playground/runs" || /^runs\/.+\/approvals$/.test(req.path))
+    return json(out, accepted ? 202 : 200)
   }
 }

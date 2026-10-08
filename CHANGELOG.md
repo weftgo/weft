@@ -10,6 +10,23 @@ module, ADR 0005).
 
 ### Added
 
+- **Studio's Request pane** (plan E1.1): each run-page step card's
+  request now carries three chips decided by the request record's
+  hashes — "changed by PrepareStep" (the step's `system_hash` moved from
+  the previous step's, or at the first step is not the run's
+  `instructions_hash` plus the offered tools' PromptSnippets),
+  "overridden by experiment" (the run's invoke_agent span carries
+  `weft.override.instructions`) and "catalog changed at this step" — a
+  line diff of the system prompt against the previous step, or at the
+  first step against the registered agent's instructions when they
+  differ, params, tool choice and thinking as rows ("adapter default"
+  when nil), and the messages sent (count and bytes, the last three
+  inline, the rest linked to the raw view) resolved against the
+  transcript the page already holds. The run page now reads
+  `runs/{id}/spans` in the story view too (under the `requests`
+  capability) for the override fingerprint; the time axis stays the
+  trace view's. A read-scoped token still sees only the `hidden` badge.
+
 - **`GET /api/sessions/{id}/public_id`** (plan C4.1): the reverse of
   `GET /api/public/{public_id}` — `{"session_id", "public_id"}`, the
   public id `thread.PublicID` stamped on the session's turns

@@ -13,6 +13,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import type { RunRow, RunStatus, StepChild, Usage } from "@/lib/api"
 import { runQuery, transcriptQuery } from "@/lib/api"
+import { compactionsOf } from "@/lib/compaction"
 import { applyTranscript, linkView } from "@/lib/events"
 import { usageSummary } from "@/lib/format"
 import { mergeHoles, rowHoles, USAGE_AT_FINISH, usageKnown } from "@/lib/honesty"
@@ -81,9 +82,20 @@ export function SubagentBlock({
   const stream = useRunEvents(open ? child.id : "", childStatus)
   // The child's own request record, by the child's id (A10): each of
   // its steps says what IT called the model with.
+  // The pane's context is what the block already read: the child's
+  // row and document, its transcript (its spans are not read here, so
+  // no override chip on a child).
   const requests = useRunRequests(child.id, {
     enabled: open,
     running: childStatus === "running",
+    ctx: {
+      runId: child.id,
+      agent: child.agent,
+      manifestHash: child.manifest_hash,
+      instructionsHash: child.instructions_hash ?? doc.data?.instructions_hash,
+      transcript: transcript.data,
+      compactions: compactionsOf(doc.data),
+    },
   })
   // The child's holes: its document's once read, its row's before.
   const holes = mergeHoles(doc.data?.holes ?? rowHoles(child))

@@ -1,24 +1,50 @@
 // The step's request (ADR 0028 §10, plan A1.4): what this step called
 // the model with — the exact system prompt, the tool catalog (each
 // tool's description, schema and policy chips), the params, tool
-// choice, thinking, the model and the attempts — read from GET
-// runs/{id}/requests. A hash that moved since the previous step is
-// marked ("prompt changed at this step": a PrepareStep rewrote it);
-// the diff itself is E1's. Every hole is a badge with its reason and
-// fix: a run older than the record, a content-off destination, a
-// token that may not read prompts — never an empty section.
+// choice, thinking, the messages sent, the model and the attempts —
+// read from GET runs/{id}/requests. The header carries the chips the
+// hashes decide (plan E1.1, lib/request-pane.ts): "changed by
+// PrepareStep" (the system hash moved from the previous step's, or at
+// the first step is not the configured instructions plus the tools'
+// snippets), "overridden by experiment" (the run's invoke_agent span
+// carries weft.override.instructions) and "catalog changed at this
+// step"; the prompt is diffed against the previous step, or at the
+// first step against the registered instructions when they differ.
+// Every hole is a badge with its reason and fix: a run older than the
+// record, a content-off destination, a token that may not read
+// prompts — never an empty section. The provider wire pair (plan A6)
+// is not recorded by any route yet: nothing is drawn for it.
 import { useQuery } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { ChevronRight } from "lucide-react"
 import { useState } from "react"
 
-import { isHoleRef, requestsQuery } from "@/lib/api"
+import { isHoleRef, manifestQuery, requestsQuery } from "@/lib/api"
 import type {
   Holed,
   HoleRef,
   RequestRow,
+  RunCompaction,
   RunRequestsDoc,
   ToolEntry,
+  Transcript,
 } from "@/lib/api"
+import { messageLine } from "@/lib/compaction"
+import { diffLines } from "@/lib/diff"
+import { runLink } from "@/lib/links"
+import {
+  CHIP_CATALOG,
+  CHIP_EXPERIMENT,
+  CHIP_PREPARE_STEP,
+  composedFromInstructions,
+  composeSystem,
+  messagesSent,
+  previousRows,
+  promptText,
+  registeredAgent,
+  snippetsOf,
+} from "@/lib/request-pane"
+import type { PromptBaseline, RunOverride } from "@/lib/request-pane"
 import {
   byStep,
   paramFields,
@@ -32,6 +58,23 @@ import { HoleBadge } from "@/components/studio/hole-badge"
 import { JsonTree } from "@/components/studio/json-tree"
 import { useCapabilities } from "@/hooks/use-capabilities"
 
+/** What the pane reads beside the request record — all of it what
+ * the page already holds (the run row, its spans, its transcript),
+ * never a second fetch of the same route. */
+export interface RequestContext {
+  runId: string
+  agent?: string
+  /** The run's weft.manifest.hash: picks the registered agent. */
+  manifestHash?: string
+  /** The run's configured instructions' hash (ADR 0028 §4). */
+  instructionsHash?: string
+  /** The run's weft.override.* fingerprint (its invoke_agent span). */
+  override?: RunOverride
+  /** The transcript's growth records: the messages each request sent. */
+  transcript?: Transcript | null
+  compactions?: RunCompaction[]
+}
+
 /** What the run page hands every step: the run's request record, or
  * where reading it stands. */
 export interface RunRequests {
@@ -39,16 +82,21 @@ export interface RunRequests {
   error?: string
   doc?: RunRequestsDoc
   steps: Map<number, StepRequests>
+  /** Each step's previous recorded step's last row (the diff's
+   * baseline); absent on the first recorded step. */
+  prev: Map<number, RequestRow>
   /** The run is still running: a step without a row may not have been
    * stored yet. */
   running: boolean
+  ctx?: RequestContext
 }
 
 export function runRequests(
   doc: RunRequestsDoc | undefined,
-  opts: { loading: boolean; error?: string; running: boolean }
+  opts: { loading: boolean; error?: string; running: boolean; ctx?: RequestContext }
 ): RunRequests {
-  return { ...opts, doc, steps: byStep(doc?.requests ?? []) }
+  const rows = doc?.requests ?? []
+  return { ...opts, doc, steps: byStep(rows), prev: previousRows(rows) }
 }
 
 /**
@@ -60,7 +108,7 @@ export function runRequests(
  */
 export function useRunRequests(
   runId: string,
-  opts: { enabled: boolean; running: boolean }
+  opts: { enabled: boolean; running: boolean; ctx?: RequestContext }
 ): RunRequests | undefined {
   const { has } = useCapabilities()
   const capable = has("requests")
@@ -74,6 +122,7 @@ export function useRunRequests(
     loading: q.isPending,
     error: q.isError ? q.error.message : undefined,
     running: opts.running,
+    ctx: opts.ctx,
   })
 }
 
@@ -112,7 +161,48 @@ function Label({ children }: { children: React.ReactNode }) {
   )
 }
 
-function PromptView({ row, stripped }: { row: RequestRow; stripped?: Holed }) {
+/** The prompt's diff against its baseline: the previous step's, or the
+ * registered instructions'. */
+function PromptDiff({ base, text }: { base: PromptBaseline; text: string }) {
+  const rows = diffLines(base.text, text)
+  return (
+    <div className="space-y-0.5" data-prompt-diff={base.kind}>
+      <span className="font-mono text-[10px] text-faint">
+        {base.kind === "previous"
+          ? `diff vs step ${base.step}`
+          : "diff vs the registered instructions"}
+      </span>
+      <pre className="max-w-full overflow-x-auto rounded-md border px-2 py-1.5 font-mono text-[12px] whitespace-pre-wrap">
+        {rows.map((r, i) => (
+          <div
+            key={i}
+            data-diff={r.kind}
+            className={
+              r.kind === "add"
+                ? "bg-status-ok/10 text-status-ok"
+                : r.kind === "del"
+                  ? "bg-status-bad/10 text-status-bad line-through"
+                  : "text-muted-foreground"
+            }
+          >
+            {r.kind === "add" ? "+ " : r.kind === "del" ? "− " : "  "}
+            {r.text}
+          </div>
+        ))}
+      </pre>
+    </div>
+  )
+}
+
+function PromptView({
+  row,
+  stripped,
+  base,
+}: {
+  row: RequestRow
+  stripped?: Holed
+  base?: PromptBaseline
+}) {
   const [all, setAll] = useState(false)
   const p = row.prompt
   if (!row.system_hash || !p)
@@ -161,6 +251,7 @@ function PromptView({ row, stripped }: { row: RequestRow; stripped?: Holed }) {
         ) : null}
         {doc.content === "derived" ? <HoleBadge hole="derived" detail /> : null}
       </span>
+      {base && base.text !== doc.text ? <PromptDiff base={base} text={doc.text} /> : null}
     </div>
   )
 }
@@ -294,7 +385,68 @@ function CatalogView({ row, stripped }: { row: RequestRow; stripped?: Holed }) {
   )
 }
 
-function AttemptView({ row, stripped }: { row: RequestRow; stripped?: Holed }) {
+/** The messages a request sent: the count and bytes, the last few
+ * inline, the rest in the raw view — resolved against the transcript
+ * the page holds, never fetched again. */
+function MessagesView({ row, ctx }: { row: RequestRow; ctx?: RequestContext }) {
+  const m = messagesSent(row, ctx?.transcript, ctx?.compactions)
+  const n = `${m.count} ${m.count === 1 ? "message" : "messages"}`
+  return (
+    <div className="min-w-0 flex-1 space-y-1" data-messages-sent>
+      <span className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+        <span data-messages-line>
+          {m.bytes !== undefined ? `${n} · ${bytes(m.bytes)}` : n}
+        </span>
+        {m.hole === "compacted" ? (
+          <HoleBadge hole="compacted" />
+        ) : m.hole === "gap" ? (
+          <HoleBadge
+            hole="gap"
+            reason="the transcript does not hold the messages this request counts"
+            detail
+          />
+        ) : m.hole === "no_index" && row.content !== "stripped" ? (
+          <HoleBadge
+            hole="stripped"
+            reason="no messages record names this request: the run captured no content"
+            detail
+          />
+        ) : m.hole === "no_transcript" ? (
+          <span className="text-faint">bytes when the transcript is read</span>
+        ) : null}
+      </span>
+      {m.last.length ? (
+        <ul className="space-y-0.5" data-messages-last>
+          {m.last.map((msg, i) => (
+            <li key={i} className="truncate font-mono text-[11px] text-muted-foreground">
+              {messageLine(msg)}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {ctx && m.earlier > 0 && m.last.length ? (
+        <Link
+          {...runLink(ctx.runId, { step: row.step, view: "raw" })}
+          className="font-mono text-[11px] text-thread-ink hover:underline"
+        >
+          {m.earlier} earlier in the raw view
+        </Link>
+      ) : null}
+    </div>
+  )
+}
+
+function AttemptView({
+  row,
+  stripped,
+  base,
+  ctx,
+}: {
+  row: RequestRow
+  stripped?: Holed
+  base?: PromptBaseline
+  ctx?: RequestContext
+}) {
   const b = row.body
   const model = [b.model.provider, b.model.name].filter(Boolean).join("/")
   return (
@@ -317,7 +469,7 @@ function AttemptView({ row, stripped }: { row: RequestRow; stripped?: Holed }) {
       ) : null}
       <div className="flex gap-2">
         <Label>system</Label>
-        <PromptView row={row} stripped={stripped} />
+        <PromptView row={row} stripped={stripped} base={base} />
       </div>
       <div className="flex gap-2">
         <Label>tools</Label>
@@ -325,10 +477,10 @@ function AttemptView({ row, stripped }: { row: RequestRow; stripped?: Holed }) {
       </div>
       <div className="flex gap-2">
         <Label>params</Label>
-        <span className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[11px]">
+        <span className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono text-[11px]">
           {paramFields(row).map(([k, v]) => (
-            <span key={k}>
-              <span className="text-faint">{k}</span>{" "}
+            <span key={k} className="contents" data-param={k}>
+              <span className="text-faint">{k}</span>
               <span className={v === "adapter default" ? "text-faint" : ""}>
                 {v}
               </span>
@@ -356,14 +508,112 @@ function AttemptView({ row, stripped }: { row: RequestRow; stripped?: Holed }) {
         <Label>execution</Label>
         <span className="font-mono text-[11px]">
           sequential_tools {b.sequential_tools ? "true" : "false"} · stream{" "}
-          {b.stream ? "true" : "false"} · {b.messages_ref.count} messages
+          {b.stream ? "true" : "false"}
         </span>
+      </div>
+      <div className="flex gap-2">
+        <Label>messages</Label>
+        <MessagesView row={row} ctx={ctx} />
       </div>
       <div className="flex gap-2">
         <Label>model</Label>
         <span className="font-mono text-[11px]">{model || "not reported"}</span>
       </div>
     </div>
+  )
+}
+
+/** What the hashes say about one step's prompt (plan E1.1). */
+interface PromptFacts {
+  prepareStep: boolean
+  experiment: boolean
+  base?: PromptBaseline
+}
+
+/**
+ * usePromptFacts decides the step's prompt chips and its diff baseline.
+ * A later step: its system hash moved from the previous recorded
+ * step's — a PrepareStep rewrote it (an override is fixed for the run,
+ * so it never moves a hash between steps). The first recorded step:
+ * "overridden by experiment" when the run's invoke_agent span says the
+ * instructions were replaced; "changed by PrepareStep" when the system
+ * text is not the configured instructions (instructions_hash) plus the
+ * offered tools' PromptSnippets — decided only when the hashes and
+ * texts can decide it. The registered agent (the manifest) is read
+ * only when the first step's hashes differ or an override is in play.
+ */
+function usePromptFacts(
+  req: RunRequests,
+  step: number,
+  row: RequestRow | undefined
+): PromptFacts {
+  const ctx = req.ctx
+  const prev = req.prev.get(step)
+  const first = row !== undefined && prev === undefined && !req.doc?.badge
+  const insHash = ctx?.instructionsHash
+  const experiment = first && ctx?.override?.instructions === true
+  const differs = first && !!insHash && row.system_hash !== insHash
+  const manifest = useQuery({
+    ...manifestQuery(),
+    enabled: differs || experiment,
+    retry: false,
+  })
+  const agent =
+    ctx?.agent !== undefined
+      ? registeredAgent(manifest.data, ctx.agent, ctx.manifestHash)
+      : undefined
+  const snippets = row ? snippetsOf(row, agent) : undefined
+  const settled = !manifest.isPending || manifest.fetchStatus === "idle"
+  const composed = useQuery({
+    queryKey: [
+      "composed",
+      row?.system_hash ?? "",
+      insHash ?? "",
+      row?.body.tools.names.join(",") ?? "",
+      snippets?.join("\u0000") ?? null,
+    ],
+    enabled: differs && settled,
+    staleTime: Infinity,
+    queryFn: () => composedFromInstructions(row!, insHash!, snippets).then((v) => v ?? null),
+  })
+  if (!row) return { prepareStep: false, experiment: false }
+  const text = promptText(row)
+  if (!first) {
+    const changed = req.steps.get(step)?.promptChanged ?? false
+    const before = promptText(prev)
+    return {
+      prepareStep: changed,
+      experiment: false,
+      base:
+        changed && prev && before !== undefined && text !== undefined
+          ? { kind: "previous", step: prev.step, text: before }
+          : undefined,
+    }
+  }
+  const registered =
+    agent && agent.instructions !== undefined && snippets
+      ? composeSystem(agent.instructions, snippets)
+      : undefined
+  return {
+    prepareStep: differs && composed.data === false,
+    experiment,
+    base:
+      registered !== undefined && text !== undefined && registered !== text
+        ? { kind: "registered", text: registered }
+        : undefined,
+  }
+}
+
+/** One chip of the pane's header. */
+function Mark({ mark, title, children }: { mark: string; title: string; children: string }) {
+  return (
+    <span
+      data-mark={mark}
+      className="rounded-sm border border-thread/50 px-1.5 py-px font-mono text-[10px] text-thread"
+      title={title}
+    >
+      {children}
+    </span>
   )
 }
 
@@ -385,6 +635,7 @@ export function RequestSection({
   const mine = req.steps.get(step)
   const rows = mine?.rows ?? []
   const row = rows.find((r) => r.attempt === pick) ?? rows.at(-1)
+  const facts = usePromptFacts(req, step, rows.at(0))
 
   let head: React.ReactNode
   let body: React.ReactNode = null
@@ -409,23 +660,30 @@ export function RequestSection({
         <span className="font-mono text-[11px] text-faint">
           {row.body.tools.names.length} tools
         </span>
-        {mine?.promptChanged ? (
-          <span
-            data-mark="prompt"
-            className="rounded-sm border border-thread/50 px-1.5 py-px font-mono text-[10px] text-thread"
-            title="the system prompt's hash differs from the previous step's"
+        {facts.prepareStep ? (
+          <Mark
+            mark="prompt"
+            title={
+              req.prev.has(step)
+                ? "the system prompt's hash differs from the previous step's: PrepareStep rewrote it"
+                : "the system prompt is not the run's instructions plus the tools' snippets: PrepareStep rewrote it"
+            }
           >
-            prompt changed at this step
-          </span>
+            {CHIP_PREPARE_STEP}
+          </Mark>
+        ) : null}
+        {facts.experiment ? (
+          <Mark
+            mark="experiment"
+            title="the run's instructions were replaced for this run (weft.override.instructions on its invoke_agent span)"
+          >
+            {CHIP_EXPERIMENT}
+          </Mark>
         ) : null}
         {mine?.catalogChanged ? (
-          <span
-            data-mark="catalog"
-            className="rounded-sm border border-thread/50 px-1.5 py-px font-mono text-[10px] text-thread"
-            title="the tool catalog's hash differs from the previous step's"
-          >
-            catalog changed at this step
-          </span>
+          <Mark mark="catalog" title="the tool catalog's hash differs from the previous step's">
+            {CHIP_CATALOG}
+          </Mark>
         ) : null}
         {row.content ? <HoleBadge hole={row.content} /> : null}
       </>
@@ -450,7 +708,17 @@ export function RequestSection({
             ))}
           </div>
         ) : null}
-        <AttemptView key={row.index} row={row} stripped={req.doc?.stripped} />
+        <AttemptView
+          key={row.index}
+          row={row}
+          stripped={req.doc?.stripped}
+          // The diff compares each step's first attempt; a retry sent
+          // the same prompt unless its hash says otherwise.
+          base={
+            facts.base && row.system_hash === rows[0].system_hash ? facts.base : undefined
+          }
+          ctx={req.ctx}
+        />
       </div>
     )
   } else if (req.loading) {

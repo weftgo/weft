@@ -125,7 +125,7 @@ describe("the run page's request section (A1.4)", () => {
     await story()
     await waitFor(() =>
       expect(
-        within(section(1)).getByText("prompt changed at this step")
+        within(section(1)).getByText("changed by PrepareStep")
       ).toBeTruthy()
     )
 
@@ -262,7 +262,7 @@ describe("the run page's request section (A1.4)", () => {
     serve("ok")
     renderApp(`/runs/${RUN}?sel=s1`)
     await waitFor(() =>
-      expect(screen.getByText("prompt changed at this step")).toBeTruthy()
+      expect(screen.getByText("changed by PrepareStep")).toBeTruthy()
     )
     expect(screen.getByText("catalog changed at this step")).toBeTruthy()
   })
@@ -287,7 +287,7 @@ describe("the run page's request record, paged and live (A1.4 review)", () => {
     await story()
     await waitFor(() =>
       expect(
-        within(section(2)).getByText("prompt changed at this step")
+        within(section(2)).getByText("changed by PrepareStep")
       ).toBeTruthy()
     )
     expect(
@@ -341,7 +341,7 @@ describe("the run page's request record, paged and live (A1.4 review)", () => {
     ended = true
     await waitFor(() =>
       expect(
-        within(section(2)).getByText("prompt changed at this step")
+        within(section(2)).getByText("changed by PrepareStep")
       ).toBeTruthy()
     )
     expect(section(2).textContent).not.toContain("no request record names it")
@@ -375,7 +375,7 @@ describe("the run page's request record, paged and live (A1.4 review)", () => {
     FakeEventSource.open()[0].emit("run", { run: row }, "9")
     await waitFor(() =>
       expect(
-        within(section(2)).getByText("prompt changed at this step")
+        within(section(2)).getByText("changed by PrepareStep")
       ).toBeTruthy()
     )
   })
@@ -398,7 +398,7 @@ describe("a request row ingested below the high-water mark (out of order)", () =
       )
       .install()
     await story()
-    await waitFor(() => expect(section(2).textContent).toContain("prompt changed at this step"))
+    await waitFor(() => expect(section(2).textContent).toContain("changed by PrepareStep"))
     open(1)
     expect(within(section(1)).queryByRole("button", { name: "attempt 2" })).toBeNull()
     ended = true

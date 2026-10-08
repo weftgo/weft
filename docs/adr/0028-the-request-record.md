@@ -127,7 +127,7 @@ Body (JSON, keys as written; absent = not set):
 | `thinking` | the `ThinkingConfig` in force |
 | `sequential_tools` | true when the step dispatches tools one at a time |
 | `params` | `temperature`, `top_p`, `max_tokens`, `stop`, `seed`; an absent field (nil) means the adapter's default |
-| `model` | `{"provider", "name"}` as requested by this attempt (a fallback attempt names its own model) |
+| `model` | `{"provider", "name"}` as requested by this attempt: a further attempt that reports a model names its own model and provider (a provider it left empty is absent, never the call's), one that reports no model keeps the call's |
 | `stream` | true when the call streams |
 
 Attributes: `weft.record = request`, `weft.request.index`,
@@ -171,7 +171,8 @@ schema verbatim), and the policy chips — `timeout_ms`, `approval` (the
 tool requires approval or the run parks it), `replay` (the class the
 tool actually has; an unannotated tool, MCP tools included, is
 `never`), `max_result_bytes`, `sequential`, and `source`: `local` |
-`mcp` | `subagent`. Attributes `weft.record = tools`, `weft.tools.index`,
+`subagent` | the tool's `Origin` (`weft/mcp` sets `mcp`; a caller may
+set its own name, which replaces it). Attributes `weft.record = tools`, `weft.tools.index`,
 `weft.catalog.hash`. The `request` record's `tools.names` keeps the
 order the model was offered.
 
@@ -221,7 +222,11 @@ values (the prompt text and a stop sequence); their names are A1's,
 pinned by its tests. Unlike the transcript, a prompt is capped: a
 system prompt is not needed to rebuild `RunResult.Messages`, and the
 hash survives the cut. A capped or stripped request record is a badge,
-never a silent gap (§11).
+never a silent gap (§11). Capture off in the core (`weft.Content(false)`)
+marks the request record `weft.content = stripped` at emission (events
+carry `none`), with no `prompt`, `tools` or view record behind it and no
+`messages_ref.index`; the fix is `Content(true)`, or content on for the
+destination.
 
 ### 7. Attempts and timing (A4)
 
@@ -232,7 +237,10 @@ attempts are reported: the reporter A8 put on the chain's context
 call; a reporter never supplies a number. The loop's own `request`
 record, emitted before the chain runs, is attempt 1. Every reported
 attempt after the first adds one more `request` record with that
-number — same hashes, `model` as that attempt requested — emitted when
+number — same hashes, `model` as that attempt requested (a reported
+model brings its reported provider with it, empty or not, so a fallback
+to another vendor is never recorded under the first one's; an attempt
+that reports no model keeps the call's) — emitted when
 the report arrives, so its timestamp is the attempt's end, not its
 start. Only the layer adjacent to the real model reports (`mw.Retry`,
 `mw.Fallback`, or an adapter that reports its SDK's own internal
@@ -242,8 +250,9 @@ therefore "attempts the chain reported, at least one", not a fixed one.
 A report made after its model call ended is dropped by the reporter
 best-effort, as `core/report.go` documents: a goroutine the chain left
 behind that reports while the call is ending may still land. So A1
-additionally checks the reporter's ended state before it emits the
-extra `request` record, and a late report adds no record.
+emits the extra `request` record under the lock the call's end takes,
+re-checking the reporter's ended state there: once the call has ended,
+a late report adds no record.
 
 The `attempt` child span under `chat` is A8's, unchanged:
 `weft.attempt.index`, `gen_ai.provider.name`, `gen_ai.request.model`,
@@ -367,22 +376,30 @@ a fourth kind beside `request`, `prompt` and `tools`: `weft.record =
 compaction`, EventName `weft.compaction`, emitted by the session through
 the agent's own `LoggerProvider` (`(*core.Agent).LoggerProvider`, so it
 lands wherever the run's records land) **when the compaction lands**,
-under the id of the last run that produced the compacted context — the
-run of the newest turn entry on the session's path; a prompt whose run
-has no turn entry yet (the pre-run threshold trigger fires after the
-turn's prompt is appended) produced nothing and never names the run.
+under the id of the last run of this session that produced the
+compacted context — the run of the newest turn entry on the session's
+path; a prompt whose run has no turn entry yet (the pre-run threshold
+trigger fires after the turn's prompt is appended) produced nothing and
+never names the run, and a fork's copied turn entries name the origin's
+runs, not the fork's: the walk stops at the first of them.
 It is in the sink at once (a compaction followed by `Close` is
 reported), and every compaction emits its own; nothing supersedes. It
 is emitted on that run's `invoke_agent` span context and stamped with
 that run's merged metadata (the session identity and the caller's
-`thread.RunOptions` metadata) when this Session drove the run; after a
-reopen, with the session id alone and no span. The overflow re-run's
+`thread.RunOptions` metadata) when this Session drove the run (it
+remembers its last few runs, so an overflowed attempt that reported a
+step before the compaction does not displace the turn before it); after
+a reopen, with no span and the session identity read from the header
+and the run id — `weft.session.id`, `weft.turn` and, when set,
+`weft.public_id` — without the caller's pairs. The overflow re-run's
 compaction is filed under the turn before it, by the same rule (the
 attempt that overflowed left only its prompt on the path); the re-run
-starts on the compacted context. A compaction of a context no run produced (entries appended by
-hand) is held and emitted under the next run this Session drives, on
+starts on the compacted context. A compaction of a context no run of
+this session produced (entries appended by hand, or a fork's copied
+path) is held and emitted under the next run this Session drives, on
 that run's context, when it reports its first batch; a `Close` before
-that drops it with a Debug line. Attributes `weft.run.id`,
+that — or one that sealed the session while the compaction was being
+reported — drops it with a Debug line. Attributes `weft.run.id`,
 `weft.compaction.scope = session`, `weft.compaction.hash` (sha256,
 lowercase hex, of the compaction entry's JSON as `thread` wrote it — its
 id included, so no two compactions share one), `weft.content = none`,
@@ -461,9 +478,14 @@ parent's records never describe a child's request.
   count; ClickHouse's `weft_records_mv` filter widens to the three
   kinds, with `Pos` read from their indexes. `obsdb.DeriveRecord`
   reads the three index attributes as the position. A record of one of
-  the three kinds with no index attribute gets `Pos = -1` on both
-  backends; duplicates at -1 collapse under the key, and only a
-  malformed producer reaches it.
+  the three kinds with no index attribute — or a `messages` record
+  without `weft.messages.index`, growth or view, or an index attribute
+  present but empty — gets `Pos = -1` on both backends; the transcript
+  readers and the messages count skip a messages record at -1;
+  duplicates at -1 collapse under the key, and only a malformed
+  producer reaches it. Which duplicate survives a key collision is the
+  backend's own rule (SQLite keeps the first row written, ClickHouse's
+  replacing merge the last), never a reader's contract.
 - `records.step` holds `weft.step.index` (-1 = absent). SQLite has had
   the column since `0001`; ClickHouse's `weft_records` gains `Step` and
   `Reason` (`weft.messages.reason`, `''` for growth), because ClickHouse
@@ -503,17 +525,20 @@ parent's records never describe a child's request.
   `obsdb.Hole` is §11's table as a Go type.
 - Every new attribute key (`weft.request.index`, `weft.prompt.index`,
   `weft.tools.index`, `weft.system.hash`, `weft.catalog.hash`,
-  `weft.attempt.index`, `weft.instructions.hash`,
-  `weft.messages.reason`, `weft.messages.from_seq`,
-  `weft.messages.to_seq`, `weft.compaction.hash`,
-  `weft.compaction.scope`) is part of the contract and never run
-  metadata: `obsdb.MetaOf` excludes it and ClickHouse's contract tuple
-  carries it.
+  `weft.attempt.index`, `weft.attempt.retry_after_ms`,
+  `weft.instructions.hash`, `weft.messages.reason`,
+  `weft.messages.from_seq`, `weft.messages.to_seq`,
+  `weft.compaction.hash`, `weft.compaction.scope`, and the
+  `weft.override.*` fingerprint fields) is part of the contract and
+  never run metadata: `obsdb.MetaOf` excludes it and ClickHouse's
+  contract tuple carries it, so a non-string value (an int, a bool)
+  lands in neither backend's meta.
 - **No backfill, and three readings of a run row:**
 
   | Row | Means | Badge |
   |---|---|---|
-  | `instructions_hash = ''` | written before this contract: no request records exist | `not_recorded` |
+  | `instructions_hash = ''`, `request_count = 0` | written before this contract: no request records exist | `not_recorded` |
+  | `instructions_hash = ''`, `request_count > 0` | the batch carrying `run_start` was lost or has not landed; the requests are recorded, a prompt or catalog they name but the store lacks is a `gap` | none on the row |
   | `instructions_hash != ''`, `request_count = 0` | made no model call (a resume that parked again, a `PrepareStep` or validation failure at step 0, an early cancellation, a live run before its first call) | none |
   | `instructions_hash != ''`, `request_count > 0` | recorded | none |
 
@@ -554,8 +579,15 @@ place, `obsdb.HoleNote` (beside the `obsdb.Hole` enum and `Holes()`),
 golden-tested into `studio/testdata/holes.golden.json`; Studio's web
 table (`studio/web/src/lib/honesty.ts`, read by the run page and the
 devtools panel) is checked against that golden key by key, so the two
-trees cannot drift (A3). `redacted` is reserved: weft's pipeline does
-not yet mark a redaction on the record.
+trees cannot drift (A3). A badge may carry a cause when the one-line
+fix differs by it (`obsdb.HoleNoteFor(h, cause)`, the golden's
+`causes` sub-object, which the web table ignores): `not_recorded` by
+`no_spans` (a run recorded without a tracer: install one), `truncated`
+by `result_cap` (the core's own `weft.MaxResultBytes` cut the tool
+result before any destination saw it) and by `log_cap` (the app-log
+reader's candidate cap, which no destination setting changes).
+`redacted` is reserved: weft's pipeline does not yet mark a redaction
+on the record.
 
 ## Why this is a record-contract change, not a model-visible one
 

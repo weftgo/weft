@@ -236,7 +236,11 @@ func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candida
 		attrs                    string
 	}
 	seen := map[dedupKey]bool{}
-	logs := make([]OtherLog, 0, len(cands))
+	type keyed struct {
+		l   OtherLog
+		enc string // the attributes, encoded once for the sort
+	}
+	kept := make([]keyed, 0, len(cands))
 	for _, l := range cands {
 		if l.Time.Before(from) || l.Time.After(to) {
 			continue
@@ -259,10 +263,10 @@ func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candida
 			}
 			continue
 		}
-		logs = append(logs, l)
+		kept = append(kept, keyed{l, string(attrs)})
 	}
-	sort.SliceStable(logs, func(i, j int) bool {
-		a, b := logs[i], logs[j]
+	sort.SliceStable(kept, func(i, j int) bool {
+		a, b := kept[i].l, kept[j].l
 		switch {
 		case !a.Time.Equal(b.Time):
 			return a.Time.Before(b.Time)
@@ -270,9 +274,21 @@ func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candida
 			return a.SpanID < b.SpanID
 		case a.Severity != b.Severity:
 			return a.Severity < b.Severity
+		case a.Body != b.Body:
+			return a.Body < b.Body
+		case a.EventName != b.EventName:
+			return a.EventName < b.EventName
 		}
-		return a.Body < b.Body
+		// The last tiebreak is the attributes' encoding: two lines equal
+		// in everything above but their attributes must still read in
+		// one order from every page, or a client's next_from skips or
+		// repeats one.
+		return kept[i].enc < kept[j].enc
 	})
+	logs := make([]OtherLog, len(kept))
+	for i, k := range kept {
+		logs[i] = k.l
+	}
 	out := page.Logs
 	limit := q.PageLimit()
 	for i := range logs {

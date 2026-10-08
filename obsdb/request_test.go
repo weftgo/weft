@@ -91,6 +91,10 @@ func TestRequestsHoleReadingTable(t *testing.T) {
 		{obsdb.RunRow{}, obsdb.HoleNotRecorded},
 		{obsdb.RunRow{InstructionsHash: "h"}, ""},
 		{obsdb.RunRow{InstructionsHash: "h", RequestCount: 3}, ""},
+		// Request records without run_start: the batch carrying the
+		// hash was lost, the requests were not — recorded, not
+		// not_recorded (a missing prompt is then ExplainMissing's gap).
+		{obsdb.RunRow{RequestCount: 1}, ""},
 	} {
 		if got := c.row.RequestsHole(); got != c.want {
 			t.Errorf("%+v.RequestsHole() = %q, want %q", c.row, got, c.want)

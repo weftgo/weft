@@ -360,7 +360,7 @@ func (d *DB) fillCountsOf(ctx context.Context, ids []string, byID map[string]*ob
 		args[i] = id
 	}
 	rs, err := d.conn.Query(ctx,
-		"SELECT RunId, uniqExactIf(Pos, Kind = 'event'), uniqExactIf(Pos, Kind = 'messages' AND Reason = '') FROM weft_records WHERE RunId IN ("+placeholders+") GROUP BY RunId",
+		"SELECT RunId, uniqExactIf(Pos, Kind = 'event'), uniqExactIf(Pos, Kind = 'messages' AND Reason = '' AND Pos >= 0) FROM weft_records WHERE RunId IN ("+placeholders+") GROUP BY RunId",
 		args...)
 	if err != nil {
 		return err
@@ -507,7 +507,7 @@ func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.Tra
 	// has its index 0 inferred and marked so (obsdb.TranscriptBatch).
 	rs, err := d.conn.Query(ctx,
 		`SELECT Pos, Step, Input, Body FROM weft_records FINAL
-		WHERE RunId = ? AND Kind = 'messages' AND Reason = '' ORDER BY Pos`, runID)
+		WHERE RunId = ? AND Kind = 'messages' AND Reason = '' AND Pos >= 0 ORDER BY Pos`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -1038,6 +1038,13 @@ var contractKeys = []string{
 	"weft.messages.to_seq", "weft.compaction.hash", "weft.compaction.scope",
 	// Plan A4 (ADR 0016's A4 note), the same restatement of 0004.
 	"gen_ai.response.model", "weft.stream", "weft.ttft_ms", "weft.latency_ms",
+	// The attempt span's retry-after ask and the experiment
+	// fingerprint's fields, the same restatement of 0004.
+	"weft.attempt.retry_after_ms",
+	"weft.override.instructions", "weft.override.max_steps", "weft.override.model",
+	"weft.override.parallelism", "weft.override.params", "weft.override.park_all_except",
+	"weft.override.park_on", "weft.override.thinking", "weft.override.tool_choice",
+	"weft.override.tools",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

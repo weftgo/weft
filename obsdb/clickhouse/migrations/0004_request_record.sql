@@ -32,7 +32,9 @@
 -- max-aggregates, and both run views are restated (0001's logs view,
 -- 0003's traces view) with two changes each: the contract tuple gains
 -- ADR 0028's twelve keys and plan A4's four (gen_ai.response.model,
--- weft.stream, weft.ttft_ms, weft.latency_ms; added before release)
+-- weft.stream, weft.ttft_ms, weft.latency_ms), the attempt span's
+-- weft.attempt.retry_after_ms and the ten weft.override.* fingerprint
+-- fields (all added before release)
 -- (obsdb.MetaOf's set; TestMigrationContractTuple pins it), and the
 -- three columns are filled. InstructionsHash comes
 -- from run_start's (and the invoke_agent span's) weft.instructions.hash;
@@ -115,7 +117,12 @@ WITH mapFilter((k, v) -> NOT has([
         'weft.system.hash', 'weft.catalog.hash', 'weft.attempt.index',
         'weft.instructions.hash', 'weft.messages.reason', 'weft.messages.from_seq',
         'weft.messages.to_seq', 'weft.compaction.hash', 'weft.compaction.scope',
-        'gen_ai.response.model', 'weft.stream', 'weft.ttft_ms', 'weft.latency_ms'], k), LogAttributes) AS metaMap
+        'gen_ai.response.model', 'weft.stream', 'weft.ttft_ms', 'weft.latency_ms',
+        'weft.attempt.retry_after_ms',
+        'weft.override.instructions', 'weft.override.max_steps', 'weft.override.model',
+        'weft.override.parallelism', 'weft.override.params', 'weft.override.park_all_except',
+        'weft.override.park_on', 'weft.override.thinking', 'weft.override.tool_choice',
+        'weft.override.tools'], k), LogAttributes) AS metaMap
 SELECT
     LogAttributes['weft.run.id'] AS RunId,
     LogAttributes['weft.parent.run.id'] AS ParentRunID,
@@ -182,7 +189,12 @@ WITH if(mapContains(SpanAttributes, 'gen_ai.operation.name'),
         'weft.system.hash', 'weft.catalog.hash', 'weft.attempt.index',
         'weft.instructions.hash', 'weft.messages.reason', 'weft.messages.from_seq',
         'weft.messages.to_seq', 'weft.compaction.hash', 'weft.compaction.scope',
-        'gen_ai.response.model', 'weft.stream', 'weft.ttft_ms', 'weft.latency_ms'], k), SpanAttributes) AS metaMap
+        'gen_ai.response.model', 'weft.stream', 'weft.ttft_ms', 'weft.latency_ms',
+        'weft.attempt.retry_after_ms',
+        'weft.override.instructions', 'weft.override.max_steps', 'weft.override.model',
+        'weft.override.parallelism', 'weft.override.params', 'weft.override.park_all_except',
+        'weft.override.park_on', 'weft.override.thinking', 'weft.override.tool_choice',
+        'weft.override.tools'], k), SpanAttributes) AS metaMap
 SELECT
     SpanAttributes['weft.run.id'] AS RunId,
     SpanAttributes['weft.parent.run.id'] AS ParentRunID,

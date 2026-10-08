@@ -32,7 +32,7 @@ func (d *DB) logCandidates(ctx context.Context, traceIDs []string, from, to time
 		WHERE Timestamp BETWEEN ? AND ?
 		  AND TraceId IN (?)
 		  AND LogAttributes['weft.run.id'] = ''
-		ORDER BY Timestamp, SpanId LIMIT ?`, from, to, traceIDs, limit)
+		ORDER BY Timestamp, SpanId, SeverityNumber, Body, EventName LIMIT ?`, from, to, traceIDs, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -60,16 +60,35 @@ const (
 	// CauseNoSpans: the run's records arrived but no span did — it ran
 	// without a tracer (not_recorded: attempts, the answering model).
 	CauseNoSpans HoleCause = "no_spans"
+	// CauseResultCap: the core's own tool-result cap cut the content
+	// before any destination saw it (truncated: a tool result the model
+	// itself read as a prefix plus the marker, weft.MaxResultBytes).
+	CauseResultCap HoleCause = "result_cap"
+	// CauseLogCap: the app-log reader scanned its candidate cap
+	// (MaxLogCandidates) before attributing lines to the run, so later
+	// lines may be missing (truncated: no destination setting changes
+	// it).
+	CauseLogCap HoleCause = "log_cap"
 )
 
 // HoleCauses lists the causes the table words, in order.
-func HoleCauses() []HoleCause { return []HoleCause{CauseNoSpans} }
+func HoleCauses() []HoleCause { return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap} }
 
 var causeNotes = map[Hole]map[HoleCause]holeNote{
 	HoleNotRecorded: {
 		CauseNoSpans: {
 			"the run was recorded without a tracer, so attempt spans and the answering model were not stored",
 			"install a tracer (otel.Install records spans)",
+		},
+	},
+	HoleTruncated: {
+		CauseResultCap: {
+			"a tool result was cut by its result cap: the model saw a prefix and the marker",
+			"raise the tool's weft.MaxResultBytes",
+		},
+		CauseLogCap: {
+			"the app-log reader's candidate cap was reached before attribution; later lines of this run may be missing",
+			"log less in the run's trace (a busy subagent or sibling run counts too); phase 2 filters by span before the cap",
 		},
 	},
 }
@@ -324,12 +343,17 @@ func (e *HoleError) Error() string {
 func (e *HoleError) Is(target error) bool { return target == ErrNotFound }
 
 // RequestsHole is ADR 0028 §10's reading table over a run row:
-// HoleNotRecorded when InstructionsHash is "" (written before the
-// request record existed: no request, prompt or tools records), ""
-// otherwise — with RequestCount 0 the run made no model call, above 0
-// its requests are recorded.
+// HoleNotRecorded when InstructionsHash is "" and no request record
+// exists (written before the request record existed: no request,
+// prompt or tools records), "" otherwise — with RequestCount 0 the run
+// made no model call, above 0 its requests are recorded. A row with
+// request records but no instructions hash lost the batch that carried
+// run_start (or has not received it yet): its requests are recorded,
+// and a prompt or catalog they name but the store lacks is a gap
+// (ExplainMissing), never not_recorded — "upgrade weft" would be the
+// wrong fix for a run this weft wrote.
 func (r RunRow) RequestsHole() Hole {
-	if r.InstructionsHash == "" {
+	if r.InstructionsHash == "" && r.RequestCount == 0 {
 		return HoleNotRecorded
 	}
 	return ""

@@ -157,10 +157,17 @@ func requestRecords(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		nocall := &fxRun{id: "rq_nocall"}
 		nocall.start(true)
 		nocall.finish(1, 0)
+		// The batch carrying run_start was lost (or has not landed):
+		// request records, no instructions hash. Recorded, not
+		// not_recorded — "upgrade weft" is the wrong fix for a run this
+		// weft wrote; the prompt its request names is a gap.
+		lost := &fxRun{id: "rq_lost"}
+		lost.request(0, 0, 1, fxSystem1, "", "full", fxRequest(0, 1, fxSystem1, "", "lookup", "script", 0, 1))
+		lost.finish(1, 1)
 		var recs []obsdb.Record
 		recs = append(recs, requestFixture("rq")...)
 		recs = append(recs, strippedFixture("rq_off")...)
-		recs = append(append(append(recs, gap.recs...), old.recs...), nocall.recs...)
+		recs = append(append(append(append(recs, gap.recs...), old.recs...), nocall.recs...), lost.recs...)
 		if err := db.Write(ctx(), obsdb.Batch{Records: recs}); err != nil {
 			t.Fatal(err)
 		}
@@ -180,6 +187,7 @@ func requestRecords(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{"rq_gap", fxInstructions, "", 1, ""},
 			{"rq_old", "", "", 0, obsdb.HoleNotRecorded},
 			{"rq_nocall", fxInstructions, "", 0, ""},
+			{"rq_lost", "", "", 1, ""},
 		} {
 			run, err := db.Run(ctx(), c.id)
 			if err != nil {
@@ -311,6 +319,7 @@ func requestRecords(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{"rq_off", "prompt", fxSystem1, obsdb.HoleStripped},
 			{"rq_off", "tools", fxCatalog1, obsdb.HoleStripped},
 			{"rq_gap", "prompt", fxSystem1, obsdb.HoleGap},
+			{"rq_lost", "prompt", fxSystem1, obsdb.HoleGap},
 			{"rq_old", "prompt", fxSystem1, obsdb.HoleNotRecorded},
 			{"rq_old", "tools", fxCatalog1, obsdb.HoleNotRecorded},
 		} {

@@ -1,6 +1,7 @@
 package obsdb
 
 import (
+	"hash/fnv"
 	"strconv"
 	"time"
 )
@@ -145,23 +146,27 @@ func DeriveRecord(r Record) Weft {
 		Reason:       attr(r.Attrs, attrMessagesReason),
 	}
 	switch {
-	case has(r.Attrs, attrEventPos):
+	case hasIndex(r.Attrs, attrEventPos):
 		w.Pos = int64(attrInt(r.Attrs, attrEventPos))
-	case has(r.Attrs, attrMessagesIdx):
+	case hasIndex(r.Attrs, attrMessagesIdx):
 		w.Pos = int64(attrInt(r.Attrs, attrMessagesIdx))
-	case has(r.Attrs, attrDeltaPos):
+	case hasIndex(r.Attrs, attrDeltaPos):
 		w.Pos = int64(attrInt(r.Attrs, attrDeltaPos))
-	case has(r.Attrs, attrRequestIdx):
+	case hasIndex(r.Attrs, attrRequestIdx):
 		w.Pos = int64(attrInt(r.Attrs, attrRequestIdx))
-	case has(r.Attrs, attrPromptIdx):
+	case hasIndex(r.Attrs, attrPromptIdx):
 		w.Pos = int64(attrInt(r.Attrs, attrPromptIdx))
-	case has(r.Attrs, attrToolsIdx):
+	case hasIndex(r.Attrs, attrToolsIdx):
 		w.Pos = int64(attrInt(r.Attrs, attrToolsIdx))
-	case w.Record == "messages" && w.Reason != "":
-		// A compaction view without its index (ADR 0028 §8): only a
-		// malformed producer gets here. -1 on both backends, as for
-		// ADR 0028's kinds — never position 0, where it would collide
-		// with the input record; Compactions reports it as an error.
+	case w.Record == "messages":
+		// A messages record without its index — a compaction view or a
+		// growth record (ADR 0028 §8): only a malformed producer gets
+		// here. -1 on both backends, as for ADR 0028's kinds — never
+		// position 0, where it would collide with the input record and
+		// one backend would keep it as the transcript's first batch
+		// while the other dropped it. The transcript readers and the
+		// messages count skip it; Compactions reports a view at -1 as
+		// an error.
 		w.Pos = -1
 	case w.Record == RecordCompaction:
 		// thread's session marker has no counter (ADR 0028 §8): its
@@ -186,8 +191,19 @@ func attr(m map[string]any, k string) string {
 	return ""
 }
 
-// has reports whether k is present, whatever its value's type.
-func has(m map[string]any, k string) bool { _, ok := m[k]; return ok }
+// hasIndex reports whether an index attribute is present and names a
+// position: present with any non-string value, or a non-empty string.
+// An empty string is absent — the reading ClickHouse's records view
+// gives it (`!= ”`), so a malformed producer's record lands at -1 on
+// both backends rather than at 0 on one.
+func hasIndex(m map[string]any, k string) bool {
+	v, ok := m[k]
+	if !ok {
+		return false
+	}
+	s, isString := v.(string)
+	return !isString || s != ""
+}
 
 // attrInt reads an integer attribute; missing and non-numeric read 0.
 func attrInt(m map[string]any, k string) int { return attrIntOr(m, k, 0) }
@@ -277,10 +293,26 @@ var nonMetaAttr = map[string]struct{}{
 	"weft.compaction.scope":  {},
 	// Plan A4 (ADR 0016's A4 note): the step timing and the answering
 	// model on the chat span and the step_finish record.
-	"gen_ai.response.model":                    {},
-	"weft.stream":                              {},
-	"weft.ttft_ms":                             {},
-	"weft.latency_ms":                          {},
+	"gen_ai.response.model": {},
+	"weft.stream":           {},
+	"weft.ttft_ms":          {},
+	"weft.latency_ms":       {},
+	// The attempt span's retry-after ask (ADR 0016's A8 note) and the
+	// experiment fingerprint's fields (weft.override.*, ADR 0024 S1):
+	// contract, never caller metadata — and not strings only, so left
+	// out they would land in ClickHouse's meta (stringified) and not in
+	// SQLite's (MetaOf keeps strings), the two backends disagreeing.
+	"weft.attempt.retry_after_ms":              {},
+	"weft.override.instructions":               {},
+	"weft.override.max_steps":                  {},
+	"weft.override.model":                      {},
+	"weft.override.parallelism":                {},
+	"weft.override.params":                     {},
+	"weft.override.park_all_except":            {},
+	"weft.override.park_on":                    {},
+	"weft.override.thinking":                   {},
+	"weft.override.tool_choice":                {},
+	"weft.override.tools":                      {},
 	"gen_ai.operation.name":                    {},
 	"gen_ai.provider.name":                     {},
 	"gen_ai.request.model":                     {},
@@ -320,15 +352,22 @@ func MetaOf(attrs map[string]any) map[string]string {
 }
 
 // markerPos is a session compaction marker's position: the first 60
-// bits of its hash (lowercase hex), 0 for a hash that is absent or not
-// hex.
+// bits of its hash (lowercase hex). A hash that is absent or not hex
+// gets the low 60 bits of its FNV-1a hash instead (0 only for the empty
+// string), so two markers with distinct non-hex hashes keep distinct
+// keys on SQLite as they do on ClickHouse, which dedupes by the hash
+// string; 15 hex digits never exceed 2^60-1, so the position is never
+// negative.
 func markerPos(hash string) int64 {
-	if len(hash) < 15 {
+	if hash == "" {
 		return 0
 	}
-	n, err := strconv.ParseInt(hash[:15], 16, 64)
-	if err != nil {
-		return 0
+	if len(hash) >= 15 {
+		if n, err := strconv.ParseInt(hash[:15], 16, 64); err == nil {
+			return n
+		}
 	}
-	return n
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(hash))
+	return int64(h.Sum64() & (1<<60 - 1))
 }

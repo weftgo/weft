@@ -389,7 +389,7 @@ func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.Tra
 	// step is the record's weft.step.index, stored by the write path
 	// (-1 when absent); the input flag is read from the attribute column.
 	rs, err := d.reads.QueryContext(ctx,
-		`SELECT pos, step, body, attrs FROM records WHERE run_id = ? AND kind = 'messages' ORDER BY pos`, runID)
+		`SELECT pos, step, body, attrs FROM records WHERE run_id = ? AND kind = 'messages' AND pos >= 0 ORDER BY pos`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -425,8 +425,8 @@ func (d *DB) TranscriptBatches(ctx context.Context, runID string) (_ []obsdb.Tra
 // stored attributes.
 func messagesFlags(attrs []byte) (input bool, reason string) {
 	var a struct {
-		Input  any    `json:"weft.messages.input"`
-		Reason string `json:"weft.messages.reason"`
+		Input  any `json:"weft.messages.input"`
+		Reason any `json:"weft.messages.reason"`
 	}
 	if json.Unmarshal(attrs, &a) != nil {
 		return false, ""
@@ -437,7 +437,17 @@ func messagesFlags(attrs []byte) (input bool, reason string) {
 	case string:
 		input = v == "true"
 	}
-	return input, a.Reason
+	// A reason of any type reads as "not growth", as ClickHouse's
+	// stringified column does: a non-string reason must not demote a
+	// view into the transcript on one backend only.
+	switch v := a.Reason.(type) {
+	case nil:
+	case string:
+		reason = v
+	default:
+		reason = fmt.Sprint(v)
+	}
+	return input, reason
 }
 
 func (d *DB) Compactions(ctx context.Context, runID string) (_ []obsdb.Compaction, err error) {

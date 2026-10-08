@@ -79,8 +79,10 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 				return err
 			}
 			// A compaction view (ADR 0028 §8) is stored but never
-			// counted: the run's messages count is its growth records.
-			if inserted && w.Reason == "" {
+			// counted: the run's messages count is its growth records —
+			// and a messages record without its index (Pos -1, a
+			// malformed producer's) is neither, on either backend.
+			if inserted && w.Reason == "" && (w.Record != "messages" || w.Pos >= 0) {
 				u.count(w.Record, 1)
 				if err := u.applyDurable(ctx, tx, r, w); err != nil {
 					return err

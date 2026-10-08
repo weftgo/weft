@@ -1141,6 +1141,12 @@ func compactions(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		idx++
 		recs = append(recs, record("k1", "messages", "", idx, msg("assistant", "a3"), step(3)))
 		growth = append(growth, msg("assistant", "a3"))
+		// A malformed producer's growth record without its index: -1 on
+		// both backends, in neither the transcript nor the count — never
+		// the first batch on one backend and dropped on the other.
+		stray := record("k1", "messages", "", 0, msg("user", "stray"), step(3))
+		delete(stray.Attrs, "weft.messages.index")
+		recs = append(recs, stray)
 		recs = append(recs, record("k1", "event", "run_finish", 1, `{"type":"run_finish","id":"k1","steps":4}`, nil))
 		if err := db.Write(ctx(), obsdb.Batch{Records: recs}); err != nil {
 			t.Fatal(err)

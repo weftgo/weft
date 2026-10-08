@@ -86,6 +86,13 @@ func TestDeriveRecordKindAndPosition(t *testing.T) {
 		{"request without index", map[string]any{"weft.record": "request"}, "request", -1},
 		{"prompt without index", map[string]any{"weft.record": "prompt"}, "prompt", -1},
 		{"tools without index", map[string]any{"weft.record": "tools"}, "tools", -1},
+		// An index present but empty is absent, the reading ClickHouse's
+		// view gives (`!= ''`): -1, never 0.
+		{"request with empty index", map[string]any{"weft.record": "request", "weft.request.index": ""}, "request", -1},
+		// A messages record without its index: a view or a growth
+		// record, -1 on both backends (never the input's position 0).
+		{"view without index", map[string]any{"weft.record": "messages", "weft.messages.reason": "compacted"}, "messages", -1},
+		{"growth without index", map[string]any{"weft.record": "messages"}, "messages", -1},
 	} {
 		attrs := map[string]any{}
 		for k, v := range base {
@@ -208,10 +215,40 @@ func TestMetaOfExcludesRequestRecordKeys(t *testing.T) {
 		// keys (ints on the wire, strings here to prove the exclusion).
 		"gen_ai.response.model": "glm-b", "weft.stream": "true",
 		"weft.ttft_ms": "140", "weft.latency_ms": "812",
+		// The attempt span's retry-after ask and the fingerprint's
+		// fields (strings here; ints and bools on the wire, which
+		// SQLite's MetaOf would drop and ClickHouse's stringify —
+		// excluded on both, the backends agree).
+		"weft.attempt.retry_after_ms": "250",
+		"weft.override.instructions":  "true", "weft.override.max_steps": "3",
+		"weft.override.model": "glm", "weft.override.parallelism": "1",
+		"weft.override.params": "{}", "weft.override.park_all_except": "lookup",
+		"weft.override.park_on": "refund", "weft.override.thinking": "high",
+		"weft.override.tool_choice": "any", "weft.override.tools": "lookup,refund",
 		"tenant": "acme",
 	}
 	meta := MetaOf(attrs)
 	if len(meta) != 1 || meta["tenant"] != "acme" {
 		t.Fatalf("MetaOf = %v, want only the caller's tenant", meta)
+	}
+}
+
+// markerPos: the first 60 bits of a hex hash, a 60-bit FNV of anything
+// else, 0 only for the empty string — never negative, and distinct for
+// distinct non-hex hashes (ClickHouse dedupes markers by the hash
+// string; SQLite by this position).
+func TestMarkerPos(t *testing.T) {
+	if markerPos("") != 0 {
+		t.Fatal("empty hash: want 0")
+	}
+	if got := markerPos("0123456789abcdef0123"); got != 0x0123456789abcde {
+		t.Fatalf("hex hash: pos = %#x, want the first 15 digits", got)
+	}
+	a, b := markerPos("h_sess"), markerPos("h_sess2")
+	if a == 0 || b == 0 || a == b || a < 0 || b < 0 {
+		t.Fatalf("non-hex hashes: %d, %d; want distinct, non-zero, non-negative", a, b)
+	}
+	if markerPos("zz0123456789abcdef") < 0 || markerPos("ffffffffffffffffffff") < 0 {
+		t.Fatal("a position must never be negative")
 	}
 }

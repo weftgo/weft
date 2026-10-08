@@ -33,8 +33,24 @@ module, ADR 0005).
   follow a redirect. The API clients take
   `--url` (`WEFT_STUDIO_URL`, default `http://127.0.0.1:7331`) and
   `--token` (`WEFT_STUDIO_TOKEN`). Exit codes: 0, 1 a failure, 2 a
-  usage error. `weft dev` is not implemented yet (B1.2): it says so
-  and exits 2.
+  usage error.
+- **`weft dev`** (plan B1.2, FEATURES D7): `weft dev [studio's flags]
+  [--no-watch] [--watch dir] [-- command…]` (default `go run .`)
+  starts Studio in-process as `weft studio` does (same flags and port
+  policy) and runs the app with `WEFT_ENV=dev` (kept when already set
+  non-empty), `WEFT_STUDIO_URL`, `WEFT_STUDIO_TOKEN` and `WEFT_DB` (the
+  Studio's SQLite file) set — plain variables the app can set itself.
+  The app runs in its own process group and restarts on a `.go` save
+  (fsnotify, 300 ms debounce; SIGTERM, 5 s, SIGKILL); a build failure
+  waits for the next save; `--no-watch` exits with the app's code;
+  Ctrl-C stops the app, then Studio. Each start prints one line:
+  `studio <url>[#token=…] · app pid <n> · runtime rt_… registered`
+  (the token only when generated; "no runtime registered yet" after
+  5 s, then a later line). A reused Studio needs a fixed token. The
+  discovery file is plan B3's. `examples/studio-local` runs under it:
+  with `WEFT_STUDIO_URL` set it listens on 8080, keeps its local sink
+  (`otel.Local("")`, explicit) and registers its runtime with that
+  Studio.
 - **`make studio-bin`** builds `./weft` from `./cmd/weft` (ignored by
   git).
 - **Studio's port policy** (plan B2, `internal/listen`, wired into
@@ -86,6 +102,11 @@ module, ADR 0005).
   database.
 - **obsdb/sqlite**: `(*DB).Path()` — the database file's absolute
   path (`""` for `:memory:`).
+
+### Dependencies
+
+- `github.com/fsnotify/fsnotify` v1.9.0 (framework module only, for
+  `weft dev`'s watcher; `core` is untouched).
 
 ### Changed
 

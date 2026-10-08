@@ -31,6 +31,18 @@
 // one lookup_order tool call so the panel's step story and the
 // waterfall have a tool to show. A real app replaces the model with
 // its own and changes nothing else.
+//
+// Under `weft dev` (plan B1.2) the same binary is the app beside the
+// command's Studio:
+//
+//	weft dev -- go run ./examples/studio-local
+//
+// weft dev sets WEFT_STUDIO_URL, WEFT_STUDIO_TOKEN, WEFT_DB and
+// WEFT_ENV=dev; with WEFT_STUDIO_URL set the demo listens on
+// 127.0.0.1:8080 (weft dev's Studio holds 7331), the pipeline exports
+// to that Studio besides the local sink (the same file: WEFT_DB), and
+// the runtime link registers there instead of with the embedded
+// server — the three lines in serve that read the environment.
 package main
 
 import (
@@ -42,6 +54,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -65,7 +78,14 @@ const page = `<!doctype html><html><head><title>host app</title></head><body>
 </body></html>`
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:7331", "listen address")
+	// 7331 is Studio's one default port, and this listener is the
+	// app's own; beside a Studio that already holds it (weft dev sets
+	// WEFT_STUDIO_URL) the app takes 8080.
+	def := "127.0.0.1:7331"
+	if os.Getenv("WEFT_STUDIO_URL") != "" {
+		def = "127.0.0.1:8080"
+	}
+	addr := flag.String("addr", def, "listen address")
 	flag.Parse()
 	if err := serve(*addr); err != nil {
 		log.Fatal(err)
@@ -87,7 +107,10 @@ func demoAgent() *weft.Agent {
 // Everything between the two comments is what an embedding app
 // writes; nothing else is configured.
 func serve(addr string) error {
-	defer otel.Install()() // local sink ./.weft/weft.db, content on, no network
+	// The local sink ($WEFT_DB or ./.weft/weft.db), content on; named
+	// explicitly so it stays when the environment adds a destination
+	// (WEFT_STUDIO_URL under weft dev): the embedded Studio reads it.
+	defer otel.Install(otel.Local(""))()
 
 	agent := demoAgent()
 
@@ -101,8 +124,15 @@ func serve(addr string) error {
 		return err
 	}
 	srv := studio.New(studio.DB(otel.LocalDB()), studio.Playground(true))
+	// The runtime link dials the embedded server in-process — or, under
+	// weft dev, the Studio WEFT_STUDIO_URL names, so its playground
+	// drives this app.
+	link := runtime.Local(srv)
+	if u := os.Getenv("WEFT_STUDIO_URL"); u != "" {
+		link = runtime.Studio(u, os.Getenv("WEFT_STUDIO_TOKEN"))
+	}
 	defer runtime.Install(
-		runtime.Local(srv),
+		link,
 		runtime.Agents(agent),
 		runtime.Threads(store),
 		runtime.Enabled(true),

@@ -38,6 +38,10 @@ func takeOpened() []string {
 }
 
 func TestMain(m *testing.M) {
+	// `weft dev`'s helper process: this binary re-executed as the app.
+	if mode := os.Getenv("WEFT_DEV_HELPER"); mode != "" {
+		os.Exit(devHelper(mode))
+	}
 	stdoutIsTTY = func() bool { return false }
 	openURL = func(link string) error {
 		opened.mu.Lock()
@@ -50,7 +54,7 @@ func TestMain(m *testing.M) {
 
 // TestUsage pins the dispatcher: no command and an unknown one are
 // usage errors (exit 2, the usage on stderr), help is exit 0 on stdout,
-// and `weft dev` says it is B1.2's and exits 2.
+// and a bad `weft dev` flag or --watch directory is a usage error.
 func TestUsage(t *testing.T) {
 	for _, c := range []struct {
 		args       []string
@@ -60,8 +64,8 @@ func TestUsage(t *testing.T) {
 		{nil, 2, "", "a command is required"},
 		{[]string{"nope"}, 2, "", `unknown command "nope"`},
 		{[]string{"help"}, 0, "weft studio", ""},
-		{[]string{"dev"}, 2, "", "weft: dev: not implemented yet (B1.2)\n"},
-		{[]string{"dev", "--", "go", "run", "./examples/studio-local"}, 2, "", "not implemented yet (B1.2)"},
+		{[]string{"dev", "--bogus"}, 2, "", "flag provided but not defined: -bogus"},
+		{[]string{"dev", "--watch", "/nonexistent-weft-dev-dir"}, 2, "", "--watch /nonexistent-weft-dev-dir: not a directory"},
 		{[]string{"version", "extra"}, 2, "", "version takes no arguments"},
 		{[]string{"runs", "--bogus"}, 2, "", "flag provided but not defined: -bogus"},
 		{[]string{"runs", "-h"}, 0, "", "-since"},

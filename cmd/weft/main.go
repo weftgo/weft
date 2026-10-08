@@ -4,6 +4,7 @@
 //	go install github.com/weftgo/weft/cmd/weft@latest
 //
 //	weft studio [--addr] [--db] [--token] [--manifest] [--open] [--no-playground]
+//	weft dev [studio's flags] [--no-watch] [--watch dir] [-- command args…]
 //	weft runs [--agent] [--since] [--failed] [--limit] [--json]
 //	weft open <run id> [--open] [--with-token]
 //	weft export <run id> [--wefttest dir [--test name] [--force]] [--format json|jsonl|otlp]
@@ -94,9 +95,38 @@
 // runs. It exits 1 when a check fails — first of all an unreachable
 // Studio, reported on the first line within a short timeout.
 //
+// # weft dev
+//
+// `weft dev [flags] [-- command args…]` (plan B1.2) is `weft studio`
+// (in-process: the same flags, the same port policy) plus the app —
+// the command after "--", default `go run .` — run with WEFT_ENV=dev
+// (kept when already set non-empty), WEFT_STUDIO_URL, WEFT_STUDIO_TOKEN
+// and WEFT_DB (the Studio's SQLite file, absolute; unset for
+// ClickHouse) added to the environment, the last three overriding the
+// shell's. Each is a plain variable the app could be given by hand:
+// the command is a convenience, never a requirement. The app runs in
+// its own process group; a .go change under the working directory
+// (--watch dir, repeatable, replaces it; .git, node_modules, vendor,
+// testdata, .weft and dist are skipped) restarts it after 300 ms of
+// quiet — SIGTERM to the group, up to five seconds, SIGKILL, then the
+// command again. A build failure or an app that exits is reported with
+// its exit code and the next save retries; --no-watch turns watching
+// off, and weft dev then exits with the app's code. Ctrl-C stops the
+// app first (the same signal), then Studio; exit 0. Each start prints
+// one line,
+//
+//	studio http://127.0.0.1:7331/#token=… · app pid 4242 · runtime rt_… registered
+//
+// the token in the fragment only when it was generated (a fixed one
+// stays out of the log); the runtime is the first one GET
+// /api/runtimes lists that was not there before the app started,
+// waited for up to five seconds, else "no runtime registered yet" and
+// a later line when one registers. A Studio already serving the same
+// database is reused only with a fixed token: the app needs it, and a
+// running Studio's generated token is not known here.
+//
 // `weft version` prints the weft version (version.Runtime: the module
-// tag this binary was built from). `weft dev` is not implemented yet
-// (plan B1.2): it says so and exits 2.
+// tag this binary was built from).
 //
 // Exit codes: 0 success, 1 a failure (printed as "weft: …" on stderr,
 // except doctor, whose lines say it), 2 a usage error.
@@ -153,6 +183,7 @@ const usage = `weft — the weft framework's command line
 
 Usage:
   weft studio  [--addr] [--db] [--token] [--manifest] [--open] [--no-playground]
+  weft dev     [studio's flags] [--no-watch] [--watch dir] [-- command args…]   (default: go run .)
   weft runs    [--url] [--token] [--agent] [--since] [--failed] [--limit] [--json]
   weft open    <run id> [--url] [--token] [--open] [--with-token]
   weft export  <run id> [--url] [--token] [--format json|jsonl|otlp] [--wefttest dir [--test name] [--force]]
@@ -173,6 +204,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch {
 	case err == nil, errors.Is(err, flag.ErrHelp):
 		return 0
+	case errors.As(err, new(exitCode)):
+		// weft dev --no-watch: the app's own exit code, already said.
+		var code exitCode
+		errors.As(err, &code)
+		return int(code)
 	case errors.Is(err, doctor.ErrUnhealthy):
 		// A failed doctor check has printed its own lines.
 		return 1
@@ -227,7 +263,7 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		_, err := fmt.Fprintln(stdout, version.Runtime())
 		return err
 	case "dev":
-		return usageError("dev: not implemented yet (B1.2)")
+		return runDev(rest, stdout, stderr)
 	case "help", "-h", "--help", "-help":
 		_, _ = fmt.Fprint(stdout, usage)
 		return nil
@@ -521,6 +557,13 @@ func serveOn(httpSrv *http.Server, ln net.Listener, stdout io.Writer) error {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(stop)
+	return serveUntil(httpSrv, ln, stdout, stop)
+}
+
+// serveUntil is serveOn's body: it serves on ln until stop delivers a
+// signal (or Serve fails), then stops gracefully. `weft dev` owns its
+// signals (the app stops first) and hands its own channel here.
+func serveUntil(httpSrv *http.Server, ln net.Listener, stdout io.Writer, stop <-chan os.Signal) error {
 	// Shutdown never cancels a request's context — it waits for the
 	// connection to go idle, which a stream never does. Every request's
 	// context derives from this one, canceled when the shutdown begins,

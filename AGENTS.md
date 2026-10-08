@@ -208,6 +208,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    weft export <run id> [--format json|jsonl|otlp | --wefttest ./testdata --test Name
 //    //    --force] (fixtures where wefttest.Replay reads them; --force replaces, never
 //    //    merges); weft version.
+//    //    weft dev [studio's flags --no-watch --watch dir] [-- go run ./cmd/app] (default: go run .):
+//    //    Studio in-process + the app with WEFT_ENV=dev (kept if set), WEFT_STUDIO_URL,
+//    //    WEFT_STUDIO_TOKEN, WEFT_DB set (plain env vars the app may set itself), restarted
+//    //    on a .go save (300 ms debounce; its process group stopped: SIGTERM, 5 s, SIGKILL);
+//    //    one line per start: studio <url>[#token= when generated] · app pid n · runtime rt_… registered.
 //    //    Port policy (internal/listen): busy 7331 + a Studio on the same DB → reused
 //    //    ("studio already running at … (pid n), reusing", exit 0); anything else → the
 //    //    next free port in 7331–7340, said in one line; --addr / WEFT_STUDIO_ADDR pins

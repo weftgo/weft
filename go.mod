@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
 	github.com/anthropics/anthropic-sdk-go v1.72.0
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/openai/openai-go v1.12.0

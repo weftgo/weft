@@ -94,7 +94,7 @@ describe("the element's lifecycle", () => {
     expect(studio.calls.length).toBe(before)
   })
 
-  it("markup Studio does not answer goes dormant in place — never removed from under a framework", async () => {
+  it("markup Studio does not answer goes dormant in place — never removed from under a framework; one quiet line says why", async () => {
     const t = trap()
     const fetchMock = vi.fn(async () => new Response("no studio", { status: 404 }))
     vi.stubGlobal("fetch", fetchMock)
@@ -102,6 +102,7 @@ describe("the element's lifecycle", () => {
     await settle()
     expect(el.isConnected).toBe(true) // the page's node (a framework may own it)
     expect(el.shadowRoot?.querySelector(".weft-fab, .weft-dock")).toBeNull()
+    expect(text(el, ".weft-unreachable")).toBe("Studio not reachable at http://studio.test/studio/ · retry")
     expect(fetchMock).toHaveBeenCalledTimes(1)
     t.release()
     expect(t.escaped).toEqual([])

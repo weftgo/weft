@@ -50,6 +50,13 @@ export const PANEL_CSS = `
 .weft-fab:hover { background: var(--w-bg2); }
 .weft-fab::before { content: "\\25C8"; color: var(--w-accent); margin-right: 4px; }
 
+/* C2: a mount the host made, with no Studio answering — one quiet
+   line in the page's flow, where the host put the element. */
+.weft-unreachable { display: inline; font: 12px/1.45 ${MONO_STACK}; color: #8b98a5; }
+.weft-unreachable-at { color: inherit; }
+.weft-retry { background: none; border: none; padding: 0; color: #6cb6ff; cursor: pointer;
+  text-decoration: underline; font: inherit; }
+
 .weft-head {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 10px; background: var(--w-bg2);

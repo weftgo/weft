@@ -3,7 +3,8 @@
 //
 //   1. define <weft-devtools>, so any markup in the page upgrades;
 //   2. install the window.__WEFT__ publicId watch (a setter, §5.2);
-//   3. read its own <script> tag's data-* attributes;
+//   3. read its configuration (config.ts's ladder, plan C2: meta tags,
+//      then its own <script> tag — data-weft, any file name);
 //   4. mount the dock without markup when data-auto (default) or the
 //      ?weft=debug / localStorage.weft_debug=1 override allows it
 //      (§5.3) — the host page including the tag only in dev builds is

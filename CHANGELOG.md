@@ -143,6 +143,19 @@ module, ADR 0005).
   capabilities}` for the devtools panel, answered to a loopback (or
   `AllowOrigins`) Host and a same-origin or loopback Origin only — a
   404 otherwise; `/api/meta` lists the new `panel-config` capability.
+- **The devtools panel's configuration ladder** (plan C2): each field
+  (`endpoint`, `public-id`, `token`, `position`, `open`, `auto`)
+  resolves on its own through `mount(opts)` → the `<weft-devtools>`
+  element's attributes → `<meta name="weft:endpoint|public-id|token|
+  position|open|auto">` → the panel's `<script>` tag (the running
+  classic script, else the first with `data-weft`, any `src`) →
+  `panel-config.json` beside the script (endpoint only, same origin
+  only, never a token; asked only when nothing above named an endpoint)
+  → the script's own directory. A `<weft-devtools>` element, a
+  `mount(opts)` or `data-auto="false"` with no Studio answering shows
+  one line, `Studio not reachable at <endpoint> · retry`; the dock the
+  script mounted by itself still removes itself silently. The rung
+  table is in `studio/README.md`.
 
 ### Dependencies
 
@@ -162,6 +175,13 @@ module, ADR 0005).
   with no file (`:memory:`, ClickHouse) gets a per-process token,
   printed as before. `--token` / `WEFT_STUDIO_TOKEN` override as
   before and never touch the file.
+- **The panel no longer finds its script tag by file name** (the
+  `panel(-vX)?.js` pattern is gone): a renamed or proxied bundle whose
+  tag carries none of the panel's `data-*` attributes needs `data-weft`
+  on it, or the configuration at a higher rung (a meta tag, the
+  element, `mount(opts)`). A `<weft-devtools>` element in your markup
+  with no Studio answering now shows the not-reachable line instead of
+  an empty element.
 
 ### Changed — breaking
 

@@ -111,10 +111,36 @@ child's request line and an "open in Studio" hand-off; a grandchild is
 the hand-off only) and a spans waterfall.
 `Alt+W` toggles (Q4), `?` lists keys, `r` flips raw. Setups B/C add
 `data-endpoint` and `data-token` (a dev token, or a panel token your
-backend mints per page via `POST /api/panel-tokens`). No Studio
-answering: the panel removes itself silently. The artifact is built by
+backend mints per page via `POST /api/panel-tokens`).
+
+Where the configuration comes from (plan C2). Each field — `endpoint`,
+`public-id`, `token`, `position`, `open`, `auto` — resolves on its
+own; the first source that sets it wins, so a meta tag can carry the
+token while the script tag carries the endpoint. The panel never reads
+its own file name: a bundle served as `/assets/devtools.abc123.js`
+behind a proxy configures itself the same way.
+
+| # | Source | The explicit form |
+|---|---|---|
+| 1 | `mount(opts)` — a programmatic mount (the npm entry exports it) | `mount({endpoint, publicId, token, position, open, auto, target})` |
+| 2 | the `<weft-devtools>` element's attributes | `<weft-devtools data-endpoint="…" data-token="…">` |
+| 3 | meta tags | `<meta name="weft:endpoint" content="…">` (also `weft:public-id`, `weft:token`, `weft:position`, `weft:open`, `weft:auto`) |
+| 4 | the panel's `<script>` tag: the running classic script, else the first with a `data-weft` attribute (any `src`, any value), else the first carrying one of the `data-*` attributes above | `<script type="module" src="…" data-weft data-endpoint="…">` |
+| 5 | `panel-config.json` beside the script (`/studio/panel.js` → `/studio/panel-config.json`), asked only when rungs 1–4 named no endpoint; its `endpoint` is taken on the script's own origin only, and it never carries a token | name the endpoint at any rung above |
+| 6 | the script's own origin + directory (setup A) | name the endpoint at any rung above |
+
+A renamed bundle whose tag carries none of the panel's `data-*`
+attributes needs `data-weft` on it (or a higher rung); without a tag to
+find, the endpoint is the page's own directory.
+
+No Studio answering: the dock the script mounted by itself removes
+itself silently — no console, one request. A mount you made (a
+`<weft-devtools>` element in your markup, `mount(opts)`, or
+`data-auto="false"`) shows one quiet line instead, `Studio not
+reachable at <endpoint> · retry`, where `retry` asks again. The
+artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 108,579 B raw / 29.9 KiB gzip;
+committed `studio/dist/panel/panel.js`, 110,894 B raw / 30.6 KiB gzip;
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 

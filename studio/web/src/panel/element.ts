@@ -25,8 +25,8 @@ import {
 import { attemptLine, attemptsHole, factsFromRows, timingLine } from "../lib/attempts"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
 import { duration, relativeTime, tokens } from "../lib/format"
-import { readConfig, tokenScope } from "./config"
-import type { PanelConfig } from "./config"
+import { discoverEndpoint, readConfig, tokenScope } from "./config"
+import type { MountOptions, PanelConfig } from "./config"
 import { el, fmtJSON, waterfall } from "./render"
 import { PANEL_CSS } from "./styles"
 import {
@@ -120,11 +120,21 @@ export class WeftDevtools extends HTMLElement {
    * a node removed behind a framework's back breaks its next unmount. */
   autoMounted = false
 
+  /** Configuration rung 1 (plan C2): what mount(opts) passed; above
+   * the element's own attributes, field by field. */
+  options: MountOptions | null = null
+
   private cfg: PanelConfig
   private shadow: ShadowRoot
   private model: PanelModel | null = null
   /** What the running model was started with. */
   private conn: { endpoint: string; token: string; publicId: string } | null = null
+  /** The endpoint the running connection talks to: cfg.endpoint, or
+   * what panel-config.json named (rung 5). The deep links use it. */
+  private base = ""
+  /** The endpoint that did not answer, for the not-reachable line of
+   * a mount the host made (null: no line). */
+  private unreachable: string | null = null
   private startSeq = 0
   private scheduled = false
   /** Studio did not answer and the node is not ours to remove. */
@@ -320,10 +330,14 @@ export class WeftDevtools extends HTMLElement {
     void this.start().catch(quiet)
   }
 
-  /** start (re)connects: one meta request; a failure removes the
-   * panel silently — no console, no retries (§5.3). Only the newest
+  /** start (re)connects: one meta request (after panel-config.json
+   * when no rung named the endpoint, C2's rung 5). Where Studio does
+   * not answer, the dock the entry mounted itself removes itself
+   * silently — no console, no retries (§5.3); a mount the host made
+   * (its markup, mount(opts), data-auto=false) shows one quiet line
+   * instead: "Studio not reachable at … · retry". Only the newest
    * start decides: one that was superseded (the attributes changed
-   * while meta was in flight) must not take the panel down. */
+   * while a request was in flight) must not take the panel down. */
   private async start() {
     const seq = ++this.startSeq
     const cfg = this.cfg
@@ -331,18 +345,27 @@ export class WeftDevtools extends HTMLElement {
     this.model = null
     this.conn = null
     this.dormant = false
+    this.unreachable = null
     this.scratch.clear()
     // The previous connection's dock is not this one's.
     this.render(emptyPanelState())
     let ok = false
-    if (cfg.endpoint) {
+    let endpoint = cfg.endpoint
+    if (cfg.configURL) {
+      // Rung 5: the endpoint the Studio beside the script names, or
+      // the script's directory (rung 6) when it names none.
+      endpoint = (await discoverEndpoint(cfg.configURL)) || cfg.endpoint
+      if (seq !== this.startSeq) return
+    }
+    if (endpoint) {
       const model = new PanelModel(
-        { base: cfg.endpoint, token: cfg.token },
+        { base: endpoint, token: cfg.token },
         cfg.publicId,
         (s) => this.render(s)
       )
       this.model = model
       this.conn = { endpoint: cfg.endpoint, token: cfg.token, publicId: cfg.publicId }
+      this.base = endpoint
       this.last = model.state
       try {
         ok = await model.start()
@@ -351,16 +374,25 @@ export class WeftDevtools extends HTMLElement {
       }
       if (seq !== this.startSeq || this.model !== model) return
     }
-    if (ok || !cfg.auto) return
-    // No Studio answered: this page does not want a panel (V4).
+    if (ok) return
+    // No Studio answered.
     this.model?.dispose()
     this.model = null
     this.conn = null
+    // The panel's own dock: this page does not want a panel (V4).
     if (this.autoMounted) this.remove()
     else {
+      // The host wrote the mount: it wants to see why nothing is there.
       this.dormant = true
+      this.unreachable = endpoint
       this.render(this.last)
     }
+  }
+
+  /** retry is the not-reachable line's control: probe again. */
+  private retry() {
+    this.cfg = readConfig(this)
+    void this.start().catch(quiet)
   }
 
   toggle() {
@@ -425,7 +457,19 @@ export class WeftDevtools extends HTMLElement {
     // as it was.
     const next: Node[] = []
     if (this.dormant) {
-      // nothing: Studio did not answer
+      // Studio did not answer a mount the host made: one quiet line.
+      if (this.unreachable !== null) {
+        const line = el("div", "weft-unreachable", undefined, { role: "status" })
+        line.append(
+          this.unreachable ? "Studio not reachable at " : "Studio not reachable: no http(s) endpoint",
+          ...(this.unreachable ? [el("span", "weft-unreachable-at", this.unreachable)] : []),
+          " · "
+        )
+        const again = el("button", "weft-retry", "retry", { type: "button", title: "ask Studio again" })
+        again.addEventListener("click", () => this.retry())
+        line.appendChild(again)
+        next.push(line)
+      }
     } else if (!this.open) {
       const fab = el("button", `weft-fab weft-fab-${this.cfg.position}`, "devtools", {
         title: "weft devtools — Alt+W",
@@ -525,7 +569,7 @@ export class WeftDevtools extends HTMLElement {
     h.appendChild(el("span", undefined, stats, { title: stats }))
     if (s.turns.length && s.selected) {
       const a = el("a", "weft-btn", "⤢", {
-        href: studioLink(this.cfg.endpoint, s.selected, s.selectedStep ?? undefined),
+        href: studioLink(this.base, s.selected, s.selectedStep ?? undefined),
         target: "_blank",
         rel: "noopener",
         title: "open in Studio (run, and the step you are reading)",
@@ -1006,7 +1050,7 @@ export class WeftDevtools extends HTMLElement {
       }
     })
     head.appendChild(keep)
-    const fixtureURL = new URL("playground", this.cfg.endpoint)
+    const fixtureURL = new URL("playground", this.base)
     if (r.runID) fixtureURL.hash = new URLSearchParams({ run: r.runID }).toString()
     const fixture = el("a", "weft-btn", "save as fixture", {
       href: fixtureURL.toString(),
@@ -1028,7 +1072,7 @@ export class WeftDevtools extends HTMLElement {
       // being read — as from_step counts it.
       const step =
         mine && mine.step > 0 ? mine.step : s.turn ? stepOrdinal(s.turn.folded, s.selectedStep) : -1
-      compare.setAttribute("href", studioPlaygroundLink(this.cfg.endpoint, mine, step))
+      compare.setAttribute("href", studioPlaygroundLink(this.base, mine, step))
     }
     link()
     compare.setAttribute("target", "_blank")
@@ -1236,7 +1280,7 @@ export class WeftDevtools extends HTMLElement {
         t,
         s.selectedStep,
         { keys: this.openKeys, scope: t.id },
-        { endpoint: this.cfg.endpoint }
+        { endpoint: this.base }
       )
     )
     if (t.folded.pending.length) wrap.appendChild(this.approvals(t.folded.pending, !!row?.playground))
@@ -1846,4 +1890,19 @@ function usageLine(u: Usage): string {
   if (u.reasoning_tokens) parts.push(`${tokens(u.reasoning_tokens)} reasoning`)
   if (u.cache_write_tokens) parts.push(`${tokens(u.cache_write_tokens)} cache-write`)
   return parts.join(" · ")
+}
+
+/** mount is the programmatic mount (plan C2's rung 1; the npm entry,
+ * C1, exports it — the script-tag bundle stays a side-effect module):
+ * a <weft-devtools> configured by opts, field by field above every
+ * other source, appended to target (default document.body). It is the
+ * host's mount: where Studio does not answer it shows the
+ * not-reachable line, never removes itself. */
+export function mount(opts: MountOptions & { target?: Element } = {}): WeftDevtools {
+  if (!customElements.get("weft-devtools")) customElements.define("weft-devtools", WeftDevtools)
+  const { target, ...options } = opts
+  const node = document.createElement("weft-devtools") as WeftDevtools
+  node.options = options
+  ;(target ?? document.body).appendChild(node)
+  return node
 }

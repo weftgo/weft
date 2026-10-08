@@ -1,7 +1,8 @@
 // §5.2's mounting contract: the data-* attributes, their defaults,
 // the script-directory endpoint resolution, and §5.3's debug override.
+// The configuration ladder (plan C2) has its own suite: ladder.test.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { debugForced, findPanelScript, readConfig } from "./config"
+import { debugForced, readConfig } from "./config"
 
 function setScript(attrs: Record<string, string>) {
   const s = document.createElement("script")
@@ -69,29 +70,6 @@ describe("readConfig (§5.2 attributes and defaults)", () => {
     setScript({ "data-auto": "false" })
     expect(readConfig().auto).toBe(false)
   })
-})
-
-describe("findPanelScript (§5.1: panel.js, or the release asset's own name)", () => {
-  const find = (src: string) => {
-    const tag = setScript({ src })
-    const found = findPanelScript() === tag
-    tag.remove()
-    return found
-  }
-
-  it("matches the panel's file on its path segment, served or as released", () => {
-    expect(find("/studio/panel.js")).toBe(true)
-    expect(find("panel.js?v=3")).toBe(true)
-    expect(find("https://cdn.internal/assets/panel-v0.3.0.js")).toBe(true)
-    expect(find("/static/panel-0.3.1-rc.1.js#x")).toBe(true)
-  })
-
-  it("the host page's own scripts are not the panel", () => {
-    expect(find("/js/control-panel.js")).toBe(false)
-    expect(find("/js/panel-admin.js")).toBe(false)
-    expect(find("/js/panel.json")).toBe(false)
-    expect(find("/js/app.js")).toBe(false)
-  })
 
   it("an endpoint that cannot be used is no endpoint — never another origin", () => {
     setScript({ "data-endpoint": "http://" })
@@ -99,6 +77,7 @@ describe("findPanelScript (§5.1: panel.js, or the release asset's own name)", (
     document.head.querySelectorAll("script").forEach((s) => s.remove())
     setScript({ "data-endpoint": "javascript:alert(1)" })
     expect(readConfig().endpoint).toBe("")
+    expect(readConfig().configURL).toBe("") // and no panel-config.json in its place
   })
 })
 

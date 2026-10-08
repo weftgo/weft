@@ -124,15 +124,20 @@ module, ADR 0005).
   `runtime.Install` read it when `WEFT_STUDIO_URL` is unset: an app
   with `defer otel.Install()()` exports to the running Studio (and its
   runtime dials it) with no configuration, one INFO line naming the
-  Studio joined. A stale file (pid gone, or 24 h old) is ignored at
-  Debug and removed by the next writer. `WEFT_STUDIO_URL` always wins;
-  **`WEFT_DISCOVERY=off`** turns the read off; `otel.NoEnv()` ignores
-  it with the rest of the environment.
+  Studio joined. The file is trusted only when its url is loopback, it
+  is fresh (pid alive, under 24 h) and, on unix, it is 0600 and the
+  reading user's; anything else is ignored at Debug and removed by the
+  next writer. A second Studio's exit restores the first's file; the
+  writer drops `.weft/.gitignore` (`*`) when there is none. An explicit
+  `otel.Studio(...)` or `WEFT_STUDIO_URL` switches the read off;
+  **`WEFT_DISCOVERY=off`** turns it off; `otel.NoEnv()` ignores it with
+  the rest of the environment.
 - **A stable dev token per database**: `<db>.token` beside the SQLite
   file (`.weft/weft.db.token`), 32 random bytes base64url, 0600,
   created on the first start and served by every later one, so the
   token survives a restart and a second bare start's probe reuses the
-  running Studio. **`--rotate-token`** (`weft studio`, `weft dev`;
+  running Studio (the probe sends it only to an address the user's
+  discovery file names). **`--rotate-token`** (`weft studio`, `weft dev`;
   an action, no environment mirror) writes a new one.
 - **`GET <base>/panel-config.json`** (studio): `{endpoint, version,
   capabilities}` for the devtools panel, answered to a loopback (or

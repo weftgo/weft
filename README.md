@@ -414,15 +414,30 @@ own), `$XDG_RUNTIME_DIR/weft/` (Linux), `os.UserCacheDir()/weft/`
 `runtime.Install()` read the same order when `WEFT_STUDIO_URL` is
 unset, so an app with `defer otel.Install()()` exports to the running
 Studio, and `runtime.Install` dials it, with no configuration — one
-INFO line names the Studio joined. A stale file (its pid gone, or 24
-hours old) is never trusted: it is skipped without a word above Debug
-and the next writer removes it. A reusing start writes nothing (the
-running Studio owns the file) and says so when that file is missing.
+INFO line names the Studio joined. After a default start `./.weft`
+always exists, so the file lands there: run the app from the directory
+you ran `weft studio` in, or set `WEFT_STUDIO_URL`. The file is trusted
+only when its url is a loopback address (127.0.0.0/8, `::1`,
+`localhost`), it is fresh (its pid alive, under 24 hours old) and, on
+unix, it is mode 0600 and owned by you — a `studio.json` that arrived
+through a git checkout (0644) or names another host is never used.
+Anything untrusted is skipped without a word above Debug and the next
+writer removes it. The writer also drops a `.gitignore` (`*`) into
+`./.weft` when it has none, so the database, its token and the file
+stay out of commits. Two Studios never erase each other's file: the
+second one's exit puts the first's back. A reusing start writes nothing
+(the running Studio owns the file) and says so when that file is
+missing; its port probe sends the stable token only to an address your
+discovery file names (anything else on the port is probed bare). `weft
+studio` stops gracefully on SIGHUP too, so a closed terminal removes
+the file.
 
 The file is a convenience, never a requirement: `WEFT_STUDIO_URL`
 always wins (the file is not read), `WEFT_DISCOVERY=off` turns the read
-off, and `otel.Studio(url, tok)` / `runtime.Studio(url, tok)` name a
-Studio in code.
+off, `otel.NoEnv()` ignores it with the rest of the environment, and a
+Studio named in code — `otel.Studio(url, tok)` (which switches the read
+off: explicit > environment > file) or `runtime.Studio(url, tok)` —
+needs no file.
 
 Setup A's handler serves `GET <base>/panel-config.json` —
 `{"endpoint", "version", "capabilities"}` — to a loopback (or

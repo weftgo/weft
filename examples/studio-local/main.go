@@ -38,11 +38,12 @@
 //	weft dev -- go run ./examples/studio-local
 //
 // weft dev sets WEFT_STUDIO_URL, WEFT_STUDIO_TOKEN, WEFT_DB and
-// WEFT_ENV=dev; with WEFT_STUDIO_URL set the demo listens on
-// 127.0.0.1:8080 (weft dev's Studio holds 7331), the pipeline exports
-// to that Studio besides the local sink (the same file: WEFT_DB), and
-// the runtime link registers there instead of with the embedded
-// server — the three lines in serve that read the environment. The
+// WEFT_ENV=dev; with WEFT_STUDIO_URL set — or, run bare beside a
+// `weft studio`, with the Studio its discovery file names — the demo
+// listens on 127.0.0.1:8080 (that Studio holds 7331), the pipeline
+// exports to that Studio besides the local sink, and the runtime link
+// registers there instead of with the embedded server: serve reads
+// otel.StudioEndpoint() after Install. The
 // app then writes the shared WEFT_DB twice, through its local sink and
 // through Studio's ingest: harmless, the sqlite writer is INSERT OR
 // IGNORE. -addr still overrides 8080.
@@ -57,7 +58,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -83,14 +83,13 @@ const page = `<!doctype html><html><head><title>host app</title></head><body>
 func main() {
 	// 7331 is Studio's one default port, and this listener is the
 	// app's own; beside a Studio that already holds it (weft dev sets
-	// WEFT_STUDIO_URL) the app takes 8080.
-	def := "127.0.0.1:7331"
-	if os.Getenv("WEFT_STUDIO_URL") != "" {
-		def = "127.0.0.1:8080"
-	}
-	addr := flag.String("addr", def, "listen address")
+	// WEFT_STUDIO_URL, or a running weft studio's discovery file names
+	// it) the app takes 8080. -addr always wins.
+	addr := flag.String("addr", "127.0.0.1:7331", "listen address (default 127.0.0.1:7331; 127.0.0.1:8080 beside a running Studio)")
 	flag.Parse()
-	if err := serve(*addr); err != nil {
+	explicit := false
+	flag.Visit(func(f *flag.Flag) { explicit = explicit || f.Name == "addr" })
+	if err := serve(*addr, explicit); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -109,11 +108,19 @@ func demoAgent() *weft.Agent {
 // serve is setup A (§10.1) plus this demo's own /run endpoint.
 // Everything between the two comments is what an embedding app
 // writes; nothing else is configured.
-func serve(addr string) error {
+func serve(addr string, explicitAddr bool) error {
 	// The local sink ($WEFT_DB or ./.weft/weft.db), content on; named
 	// explicitly so it stays when the environment adds a destination
 	// (WEFT_STUDIO_URL under weft dev): the embedded Studio reads it.
 	defer otel.Install(otel.Local(""))()
+
+	// Beside a running Studio — WEFT_STUDIO_URL, or the one the
+	// pipeline joined through the discovery file — that Studio holds
+	// 7331: this app's own listener takes 8080.
+	studioURL, studioToken := otel.StudioEndpoint()
+	if studioURL != "" && !explicitAddr {
+		addr = "127.0.0.1:8080"
+	}
 
 	agent := demoAgent()
 
@@ -131,8 +138,8 @@ func serve(addr string) error {
 	// weft dev, the Studio WEFT_STUDIO_URL names, so its playground
 	// drives this app.
 	link := runtime.Local(srv)
-	if u := os.Getenv("WEFT_STUDIO_URL"); u != "" {
-		link = runtime.Studio(u, os.Getenv("WEFT_STUDIO_TOKEN"))
+	if studioURL != "" {
+		link = runtime.Studio(studioURL, studioToken)
 	}
 	defer runtime.Install(
 		link,

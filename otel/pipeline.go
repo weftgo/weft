@@ -165,7 +165,14 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 	var joined *discovered
 	if !cfg.noEnv {
 		getenv := envGetenv
-		getenv, joined = discoverStudio(getenv)
+		// Explicit > environment > file: a Studio named in code
+		// (otel.Studio) switches the discovery read off, as
+		// WEFT_STUDIO_URL does — the file never adds a second Studio,
+		// and never becomes the one StudioEndpoint (and runtime.Install)
+		// reports.
+		if !hasStudio(cfg.dests) {
+			getenv, joined = discoverStudio(getenv)
+		}
 		dests = append(dests, dedupe(cfg.dests, envDestinations(getenv))...)
 	}
 	if len(dests) == 0 {

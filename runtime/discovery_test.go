@@ -109,6 +109,21 @@ func TestInstallJoinsDiscoveredStudio(t *testing.T) {
 		}
 	})
 
+	// WEFT_ENV unset and no Enabled: a fresh file opens no link (§6
+	// rule 1 holds whatever the file says).
+	t.Run("WEFT_ENV unset", func(t *testing.T) {
+		t.Setenv("WEFT_ENV", "")
+		stop := Install(Agents(testAgent("disc-agent")))
+		time.Sleep(100 * time.Millisecond)
+		stop()
+		if ids := runtimes(); len(ids) != 0 {
+			t.Errorf("WEFT_ENV unset, and a runtime registered: %v", ids)
+		}
+		if strings.Contains(logs.String(), "joined") {
+			t.Errorf("a join was claimed with the link off: %s", logs.String())
+		}
+	})
+
 	stop := Install(Agents(testAgent("disc-agent")))
 	defer stop()
 	deadline := time.Now().Add(10 * time.Second)

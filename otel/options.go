@@ -85,7 +85,9 @@ func Sampler(s sdktrace.Sampler) Option {
 	})
 }
 
-// NoEnv ignores the WEFT_* / OTEL_* destination variables. Explicit
+// NoEnv ignores the WEFT_* / OTEL_* destination variables, and the
+// discovery file a running `weft studio` / `weft dev` wrote (which
+// otherwise stands in for WEFT_STUDIO_URL when that is unset). Explicit
 // options are unaffected.
 func NoEnv() Option {
 	return optionFunc(func(c *config) { c.noEnv = true })
@@ -116,7 +118,9 @@ func Local(path string, opts ...DestOption) Option {
 
 // Studio exports OTLP/HTTP protobuf to a Weft Studio with a bearer
 // token. Content on, traces + logs, short batches (logs 200 ms, spans
-// 1 s).
+// 1 s). Naming a Studio here switches the discovery file off: the
+// explicit destination is the pipeline's one Studio from the file's
+// point of view (WEFT_STUDIO_URL still adds its own, de-duplicated).
 func Studio(url, token string, opts ...DestOption) Option {
 	return optionFunc(func(c *config) {
 		d := newDest(destStudio, "studio")

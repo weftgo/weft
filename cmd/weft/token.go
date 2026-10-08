@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/weftgo/weft/internal/discovery"
 	"github.com/weftgo/weft/studio"
 )
 
@@ -82,17 +83,35 @@ func resolveToken(dbFlag, flagTok string, rotate bool) (resolvedToken, error) {
 // tokenPath is the token file beside a database file.
 func tokenPath(dbPath string) string { return dbPath + ".token" }
 
-// probeToken is the bearer a start's port probe sends: the fixed token,
-// else the database's stable token when its file exists (never created
-// by a probe). A Studio on the same database serves exactly that.
-func probeToken(dbPath, flagTok string) string {
+// stableProbe is the port probe's per-address bearer (listen.Request
+// TokenFor): the database's stable token, only for an address a
+// trusted discovery file of this user names — the token is long-lived
+// and the panel tokens' signing key, so whatever else holds a port is
+// probed bare (a token-walled Studio there is skipped for the next
+// port, as before B3). nil without a database file.
+func stableProbe(dbPath string) func(addr string) string {
+	if dbPath == "" {
+		return nil
+	}
+	return func(addr string) string {
+		if discovery.Find("http://"+addr) == "" {
+			return ""
+		}
+		return readTokenFile(tokenPath(dbPath))
+	}
+}
+
+// probeToken is the bearer a probe of addr sends: the fixed token
+// (--token, WEFT_STUDIO_TOKEN), else stableProbe's answer — what a
+// reused Studio on the same database serves.
+func probeToken(dbPath, flagTok, addr string) string {
 	if tok := fixedToken(flagTok); tok != "" {
 		return tok
 	}
-	if dbPath == "" {
-		return ""
+	if f := stableProbe(dbPath); f != nil {
+		return f(addr)
 	}
-	return readTokenFile(tokenPath(dbPath))
+	return ""
 }
 
 // readTokenFile is the token in path, "" when there is none.
@@ -113,33 +132,59 @@ func newSecret() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// createTokenFile writes a new token to path unless one appeared
-// meanwhile (O_EXCL: two first starts agree on one token).
+// createTokenFile writes a new token to path unless one is there:
+// the token goes to a temporary file, complete, and os.Link publishes
+// it — an atomic create-if-absent, so two first starts can never see a
+// half-written file or end on different tokens (the loser of the link
+// reads the winner's). A .weft directory gets its .gitignore first.
 func createTokenFile(path string) (tok string, created bool, err error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", false, fmt.Errorf("token file %s: %w", path, err)
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, fs.ErrExist) {
-		if tok := readTokenFile(path); tok != "" {
-			return tok, false, nil
-		}
-		// An empty or unreadable file: replace it.
-		tok, err := writeTokenFile(path)
-		return tok, true, err
-	}
+	discovery.GuardDir(dir)
+	tmp, tok, err := tempToken(dir)
 	if err != nil {
 		return "", false, fmt.Errorf("token file %s: %w", path, err)
+	}
+	defer func() { _ = os.Remove(tmp) }()
+	if err := linkFile(tmp, path); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			if existing := readTokenFile(path); existing != "" {
+				return existing, false, nil
+			}
+			// An empty or unreadable file: replace it.
+			tok, err := writeTokenFile(path)
+			return tok, true, err
+		}
+		return "", false, fmt.Errorf("token file %s: %w", path, err)
+	}
+	return tok, true, nil
+}
+
+// linkFile is os.Link; a variable so a test can lose the race on
+// purpose.
+var linkFile = os.Link
+
+// tempToken writes a fresh token to a 0600 temporary file in dir.
+func tempToken(dir string) (path, tok string, err error) {
+	f, err := os.CreateTemp(dir, ".token-*")
+	if err != nil {
+		return "", "", err
 	}
 	tok = newSecret()
 	_, werr := f.WriteString(tok + "\n")
 	if cerr := f.Close(); werr == nil {
 		werr = cerr
 	}
-	if werr != nil {
-		return "", false, fmt.Errorf("token file %s: %w", path, werr)
+	if werr == nil {
+		werr = os.Chmod(f.Name(), 0o600)
 	}
-	return tok, true, nil
+	if werr != nil {
+		_ = os.Remove(f.Name())
+		return "", "", werr
+	}
+	return f.Name(), tok, nil
 }
 
 // writeTokenFile replaces path with a new token, atomically, 0600.
@@ -148,25 +193,14 @@ func writeTokenFile(path string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("token file %s: %w", path, err)
 	}
-	f, err := os.CreateTemp(dir, ".token-*")
+	discovery.GuardDir(dir)
+	tmp, tok, err := tempToken(dir)
 	if err != nil {
 		return "", fmt.Errorf("token file %s: %w", path, err)
 	}
-	tmp := f.Name()
-	tok := newSecret()
-	_, werr := f.WriteString(tok + "\n")
-	if cerr := f.Close(); werr == nil {
-		werr = cerr
-	}
-	if werr == nil {
-		werr = os.Chmod(tmp, 0o600)
-	}
-	if werr == nil {
-		werr = os.Rename(tmp, path)
-	}
-	if werr != nil {
+	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
-		return "", fmt.Errorf("token file %s: %w", path, werr)
+		return "", fmt.Errorf("token file %s: %w", path, err)
 	}
 	return tok, nil
 }

@@ -217,8 +217,9 @@ type devStudioRun struct {
 // devStudio applies `weft studio`'s port policy and starts Studio in
 // this process, or reuses one already serving the same database. The
 // probe carries the fixed token (--token, WEFT_STUDIO_TOKEN), else the
-// database's stable token (plan B3): a Studio on the same database
-// serves exactly that, so a reuse hands the app the token it needs. A
+// database's stable token (plan B3) to an address this user's
+// discovery file names: a Studio on the same database serves exactly
+// that, so a reuse hands the app the token it needs. A
 // running Studio walled by another token answers 401 and is skipped
 // for the next port. A Studio this process starts writes the discovery
 // file; a reused one owns its own.
@@ -227,9 +228,9 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 	if err != nil {
 		return nil, err
 	}
-	probe := probeToken(dbPath, tokenFlag)
 	choice, err := listen.Choose(context.Background(), listen.Request{
-		Addr: w.addr, Pinned: w.pinned, Span: w.span, DBPath: dbPath, Token: probe,
+		Addr: w.addr, Pinned: w.pinned, Span: w.span, DBPath: dbPath,
+		Token: fixedToken(tokenFlag), TokenFor: stableProbe(dbPath),
 	})
 	if err != nil {
 		return nil, err
@@ -242,7 +243,7 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 	if choice.Reuse {
 		_, _ = fmt.Fprintln(out, choice.ReuseLine())
 		reuseNotes(out, dial, rotate)
-		r.token, r.link = probe, uiLink(dial, "")
+		r.token, r.link = probeToken(dbPath, tokenFlag, dial), uiLink(dial, "")
 		return r, nil
 	}
 	if choice.Note != "" {
@@ -276,7 +277,7 @@ func devStudio(dbFlag string, w want, tokenFlag string, rotate bool, out io.Writ
 	done := make(chan error, 1)
 	go func() { done <- serveUntil(httpServer(choice.Addr, srv.Handler()), choice.Listener, out, stopCh) }()
 	r.stop = func(sig os.Signal) {
-		defer disc.remove()
+		defer disc.Remove()
 		stopCh <- sig
 		if err := <-done; err != nil && !errors.Is(err, http.ErrServerClosed) {
 			_, _ = fmt.Fprintln(out, "weft dev: studio:", err)

@@ -47,10 +47,14 @@
 // discovery file (internal/discovery: studio.json in ./.weft when that
 // exists, else $XDG_RUNTIME_DIR/weft, else the user cache directory;
 // {url, token, db, pid, started, version}, 0600) and removes it on a
-// clean exit: otel.Install and runtime.Install read it when
-// WEFT_STUDIO_URL is unset, so an app joins this Studio with no
-// configuration (WEFT_DISCOVERY=off turns the read off). The
-// playground is on (studio.Playground):
+// clean exit — SIGINT, SIGTERM and (unix) SIGHUP all stop it
+// gracefully; a second live Studio's exit puts the first's file back.
+// The writer drops a .gitignore ("*") into ./.weft when it has none.
+// otel.Install and runtime.Install read the file when WEFT_STUDIO_URL
+// is unset (and no otel.Studio is named), trusting it only when its url
+// is loopback, it is fresh and, on unix, it is 0600 and the reader's,
+// so an app joins this Studio with no configuration (WEFT_DISCOVERY=off
+// turns the read off). The playground is on (studio.Playground):
 // inert until an app's runtime (weft/runtime) dials in; --no-playground
 // turns it off. The manifest served at /api/manifest is --manifest
 // (default $WEFT_MANIFEST), else the nearest weft.json from the working
@@ -66,7 +70,8 @@
 // The port policy (plan B2, internal/listen): 127.0.0.1:7331 is the
 // one default. When it is busy, weft studio asks GET /api/meta there
 // (with --token / WEFT_STUDIO_TOKEN as the bearer when set, else the
-// database's stable token, to loopback only): a Studio serving the same
+// database's stable token — only to an address this user's discovery
+// file names — to loopback only): a Studio serving the same
 // database file is reused — "studio already running at
 // http://127.0.0.1:7331 (pid 1234), reusing", exit 0, no database or
 // listener opened (--open still opens the browser on it; a missing
@@ -177,7 +182,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/weftgo/weft/internal/doctor"
@@ -487,20 +491,22 @@ func serveWith(dbFlag string, w want, tokenFlag string, stdout io.Writer, after 
 		return err
 	}
 	// The probe carries the token this command was given, else the
-	// database's stable token (plan B3) — what a Studio on the same
-	// database serves. A token it would generate is nobody else's.
-	probe := probeToken(dbPath, tokenFlag)
+	// database's stable token (plan B3) — only to an address this
+	// user's discovery file names. A token it would generate is nobody
+	// else's.
 	choice, err := listen.Choose(context.Background(), listen.Request{
-		Addr:   w.addr,
-		Pinned: w.pinned,
-		Span:   w.span,
-		DBPath: dbPath,
-		Token:  probe,
+		Addr:     w.addr,
+		Pinned:   w.pinned,
+		Span:     w.span,
+		DBPath:   dbPath,
+		Token:    fixedToken(tokenFlag),
+		TokenFor: stableProbe(dbPath),
 	})
 	if err != nil {
 		return err
 	}
 	if choice.Reuse {
+		probe := probeToken(dbPath, tokenFlag, loopbackAddr(choice.Addr))
 		_, _ = fmt.Fprintln(stdout, choice.ReuseLine())
 		reuseNotes(stdout, loopbackAddr(choice.Addr), after.rotate)
 		if after.open {
@@ -522,7 +528,7 @@ func serveWith(dbFlag string, w want, tokenFlag string, stdout io.Writer, after 
 		}
 	}
 	disc := announce(stdout, "http://"+loopbackAddr(choice.Addr), srv.token, dbPath)
-	defer disc.remove()
+	defer disc.Remove()
 	if after.open {
 		openBrowser(stdout, uiLink(choice.Addr, srv.token))
 	}
@@ -580,7 +586,8 @@ func (s *server) Close() error {
 	return err
 }
 
-// serveOn runs the HTTP server on ln until SIGINT or SIGTERM — a graceful
+// serveOn runs the HTTP server on ln until SIGINT, SIGTERM or (unix)
+// SIGHUP — a graceful
 // stop (the audit's P2-20: a bare ListenAndServe cut SSE streams mid-
 // frame and skipped srv.Close): the listener closes at once, in-flight
 // requests get a five-second grace window (an SSE stream ends when its
@@ -589,8 +596,10 @@ func (s *server) Close() error {
 func serveOn(httpSrv *http.Server, ln net.Listener, stdout io.Writer) error {
 	// Signal delivery is armed before the listener starts: a signal
 	// that lands while nobody is notified takes the process down.
+	// SIGHUP too on unix (devSignals): a closed terminal stops Studio
+	// gracefully, so its discovery file is removed.
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(stop, devSignals...)
 	defer signal.Stop(stop)
 	return serveUntil(httpSrv, ln, stdout, stop)
 }

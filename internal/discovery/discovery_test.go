@@ -38,6 +38,33 @@ func debugLog() (*slog.Logger, *bytes.Buffer) {
 	return slog.New(slog.NewTextHandler(&b, &slog.HandlerOptions{Level: slog.LevelDebug})), &b
 }
 
+// onlyDebug fails on any captured line above Debug.
+func onlyDebug(t *testing.T, what string, buf *bytes.Buffer) {
+	t.Helper()
+	for _, lvl := range []string{"level=INFO", "level=WARN", "level=ERROR"} {
+		if strings.Contains(buf.String(), lvl) {
+			t.Errorf("%s: a line above Debug: %s", what, buf.String())
+		}
+	}
+}
+
+func writeRaw(t *testing.T, dir string, info Info) {
+	t.Helper()
+	b, _ := json.Marshal(info)
+	writeBytes(t, dir, b)
+}
+
+func writeBytes(t *testing.T, dir string, b []byte) {
+	t.Helper()
+	p := filepath.Join(dir, FileName)
+	if err := os.WriteFile(p, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(p, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestWriteShapeModeAndRemove: the file is the documented shape, 0600,
 // in the first location (created), and Remove takes only its own.
 func TestWriteShapeModeAndRemove(t *testing.T) {
@@ -45,10 +72,11 @@ func TestWriteShapeModeAndRemove(t *testing.T) {
 	first, second := filepath.Join(root, "a", "weft"), filepath.Join(root, "b")
 	useDirs(t, first, second)
 	info := fresh("http://127.0.0.1:7331")
-	p, err := Write(info)
+	w, err := Write(info)
 	if err != nil {
 		t.Fatal(err)
 	}
+	p := w.Path
 	if p != filepath.Join(first, FileName) {
 		t.Errorf("written to %s, want the first location", p)
 	}
@@ -78,22 +106,69 @@ func TestWriteShapeModeAndRemove(t *testing.T) {
 	if got := Find("http://127.0.0.1:7331/"); got != p {
 		t.Errorf("Find = %q, want %q", got, p)
 	}
+	if _, err := os.Stat(filepath.Join(first, ".gitignore")); err == nil {
+		t.Error("a .gitignore in a directory that is not .weft")
+	}
 
-	// Another Studio's info does not remove it; its own does.
-	other := info
-	other.PID++
-	Remove(p, other)
+	// A handle for another Studio does not remove it; its own does.
+	other := &Written{Path: p, Info: info}
+	other.Info.PID++
+	other.Remove()
 	if _, err := os.Stat(p); err != nil {
 		t.Fatalf("Remove took another Studio's file: %v", err)
 	}
-	Remove(p, info)
+	w.Remove()
 	if _, err := os.Stat(p); !os.IsNotExist(err) {
 		t.Errorf("Remove left its own file: %v", err)
 	}
+	(*Written)(nil).Remove() // nil-safe
 }
 
-// TestWriterRemovesStale: a stale file in any location is removed by
-// the next writer; a fresh one elsewhere stays.
+// TestTwoLiveWriters: a second live Studio displaces the first's file;
+// when it exits the first's file is put back, never erased; when the
+// displaced Studio is gone by then, the file is simply removed.
+func TestTwoLiveWriters(t *testing.T) {
+	dir := t.TempDir()
+	useDirs(t, dir)
+	a := fresh("http://127.0.0.1:7331")
+	wa, err := Write(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := fresh("http://127.0.0.1:7332")
+	b.PID = os.Getppid() // another live process
+	wb, err := Write(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, _, ok := Lookup(env(), nil); !ok || info.URL != b.URL {
+		t.Fatalf("the newer Studio is not the one found: %+v", info)
+	}
+	wb.Remove()
+	if info, _, ok := Lookup(env(), nil); !ok || info.URL != a.URL {
+		t.Errorf("after B exits, A is not discoverable: %+v %v", info, ok)
+	}
+	wa.Remove()
+	if _, err := os.Stat(filepath.Join(dir, FileName)); !os.IsNotExist(err) {
+		t.Errorf("A's exit left a file: %v", err)
+	}
+
+	// The displaced Studio died meanwhile: nothing is put back.
+	dead := fresh("http://127.0.0.1:7333")
+	writeRaw(t, dir, dead)
+	wc, err := Write(fresh("http://127.0.0.1:7334"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wc.prev.PID = 1 << 30 // the displaced one is gone now
+	wc.Remove()
+	if _, err := os.Stat(filepath.Join(dir, FileName)); !os.IsNotExist(err) {
+		t.Errorf("a dead Studio's file was put back: %v", err)
+	}
+}
+
+// TestWriterRemovesStale: an untrusted file in any location is removed
+// by the next writer.
 func TestWriterRemovesStale(t *testing.T) {
 	a, b := t.TempDir(), t.TempDir()
 	useDirs(t, a, b)
@@ -113,50 +188,55 @@ func TestWriterRemovesStale(t *testing.T) {
 	}
 }
 
-func writeRaw(t *testing.T, dir string, info Info) {
-	t.Helper()
-	b, _ := json.Marshal(info)
-	if err := os.WriteFile(filepath.Join(dir, FileName), b, 0o600); err != nil {
+// TestGuardDir: the writer drops .weft/.gitignore ("*") when there is
+// none, and never touches an existing one.
+func TestGuardDir(t *testing.T) {
+	weft := filepath.Join(t.TempDir(), ".weft")
+	useDirs(t, weft)
+	if _, err := Write(fresh("http://127.0.0.1:1")); err != nil {
 		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(weft, ".gitignore"))
+	if err != nil || !strings.Contains(string(b), "\n*\n") {
+		t.Errorf(".gitignore %q, %v; want one ignoring everything", b, err)
+	}
+	if err := os.WriteFile(filepath.Join(weft, ".gitignore"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	GuardDir(weft)
+	if b, _ := os.ReadFile(filepath.Join(weft, ".gitignore")); string(b) != "mine\n" {
+		t.Errorf("an existing .gitignore was rewritten: %q", b)
 	}
 }
 
 // TestLookupOrder: the reader walks the writer's order and takes the
-// first fresh file; stale and malformed ones are skipped with Debug
-// lines only.
+// first trusted file; untrusted ones are skipped with Debug lines only.
 func TestLookupOrder(t *testing.T) {
 	weft, xdg, cache := t.TempDir(), t.TempDir(), t.TempDir()
 	useDirs(t, weft, xdg, cache)
-	writeRaw(t, cache, fresh("http://cache"))
-	if info, _, ok := Lookup(env(), nil); !ok || info.URL != "http://cache" {
+	writeRaw(t, cache, fresh("http://127.0.0.1:3"))
+	if info, _, ok := Lookup(env(), nil); !ok || info.URL != "http://127.0.0.1:3" {
 		t.Errorf("cache only: %+v %v", info, ok)
 	}
-	writeRaw(t, xdg, fresh("http://xdg"))
-	if info, _, ok := Lookup(env(), nil); !ok || info.URL != "http://xdg" {
+	writeRaw(t, xdg, fresh("http://127.0.0.1:2"))
+	if info, _, ok := Lookup(env(), nil); !ok || info.URL != "http://127.0.0.1:2" {
 		t.Errorf("xdg before cache: %+v %v", info, ok)
 	}
-	writeRaw(t, weft, fresh("http://weft"))
+	writeRaw(t, weft, fresh("http://localhost:1"))
 	info, p, ok := Lookup(env(), nil)
-	if !ok || info.URL != "http://weft" || p != filepath.Join(weft, FileName) || info.Token != "tok" {
+	if !ok || info.URL != "http://localhost:1" || p != filepath.Join(weft, FileName) || info.Token != "tok" {
 		t.Errorf("./.weft first: %+v %s %v", info, p, ok)
 	}
 
-	// Stale and malformed files ahead of a fresh one: skipped, Debug only.
-	stale := fresh("http://weft")
+	stale := fresh("http://127.0.0.1:1")
 	stale.Started = time.Now().Add(-MaxAge - time.Minute)
 	writeRaw(t, weft, stale)
-	if err := os.WriteFile(filepath.Join(xdg, FileName), []byte("{nope"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeBytes(t, xdg, []byte("{nope"))
 	log, buf := debugLog()
-	if info, _, ok := Lookup(env(), log); !ok || info.URL != "http://cache" {
+	if info, _, ok := Lookup(env(), log); !ok || info.URL != "http://127.0.0.1:3" {
 		t.Errorf("past stale and malformed: %+v %v", info, ok)
 	}
-	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
-		if !strings.Contains(line, "level=DEBUG") {
-			t.Errorf("a line above Debug: %s", line)
-		}
-	}
+	onlyDebug(t, "order", buf)
 	if n := strings.Count(buf.String(), "level=DEBUG"); n != 2 {
 		t.Errorf("%d Debug lines, want 2 (stale, malformed):\n%s", n, buf.String())
 	}
@@ -164,11 +244,11 @@ func TestLookupOrder(t *testing.T) {
 
 // TestLookupEscapes: WEFT_STUDIO_URL wins (the file is not read) and
 // WEFT_DISCOVERY=off turns the read off; a dead pid or an old file is
-// ignored silently.
+// ignored silently, and the reader never removes it.
 func TestLookupEscapes(t *testing.T) {
 	dir := t.TempDir()
 	useDirs(t, dir)
-	writeRaw(t, dir, fresh("http://found"))
+	writeRaw(t, dir, fresh("http://127.0.0.1:9"))
 	if _, _, ok := Lookup(env("WEFT_STUDIO_URL", "http://explicit"), nil); ok {
 		t.Error("WEFT_STUDIO_URL set, and the file was read")
 	}
@@ -186,20 +266,134 @@ func TestLookupEscapes(t *testing.T) {
 		if name == "dead pid" && runtime.GOOS == "windows" {
 			continue // liveness is best effort there
 		}
-		info := fresh("http://found")
+		info := fresh("http://127.0.0.1:9")
 		mut(&info)
 		writeRaw(t, dir, info)
 		log, buf := debugLog()
 		if _, _, ok := Lookup(env(), log); ok {
 			t.Errorf("%s: a stale file was trusted", name)
 		}
-		if strings.Contains(buf.String(), "level=INFO") || strings.Contains(buf.String(), "level=WARN") {
-			t.Errorf("%s: noise above Debug: %s", name, buf.String())
-		}
+		onlyDebug(t, name, buf)
 		if _, err := os.Stat(filepath.Join(dir, FileName)); err != nil {
 			t.Errorf("%s: the reader removed the file (only a writer does): %v", name, err)
 		}
 	}
+}
+
+// TestUntrustedFiles (review finding 2): a url that is not loopback is
+// never trusted — a committed .weft/studio.json naming
+// https://evil.example with pid 1 (EPERM: "alive") exports nothing —
+// and, on unix, neither is a file that is not 0600 or not this user's.
+// Each is one Debug line.
+func TestUntrustedFiles(t *testing.T) {
+	dir := t.TempDir()
+	useDirs(t, dir)
+	for _, u := range []string{"https://evil.example", "http://10.0.0.1:7331", "http://studio.local:7331", "ftp://127.0.0.1", "http://user:pw@127.0.0.1:1", "127.0.0.1:7331"} {
+		info := fresh(u)
+		info.PID = 1
+		writeRaw(t, dir, info)
+		log, buf := debugLog()
+		if got, _, ok := Lookup(env(), log); ok {
+			t.Errorf("url %q trusted: %+v", u, got)
+		}
+		if Find(u) != "" {
+			t.Errorf("Find trusted url %q", u)
+		}
+		onlyDebug(t, u, buf)
+		if !strings.Contains(buf.String(), "level=DEBUG") {
+			t.Errorf("url %q: no Debug line", u)
+		}
+	}
+	for _, u := range []string{"http://127.0.0.2:1", "http://[::1]:1", "https://localhost"} {
+		writeRaw(t, dir, fresh(u))
+		if _, _, ok := Lookup(env(), nil); !ok {
+			t.Errorf("loopback url %q not trusted", u)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+	writeRaw(t, dir, fresh("http://127.0.0.1:1"))
+	p := filepath.Join(dir, FileName)
+	for _, mode := range []os.FileMode{0o644, 0o640, 0o400, 0o700} {
+		if err := os.Chmod(p, mode); err != nil {
+			t.Fatal(err)
+		}
+		log, buf := debugLog()
+		if _, _, ok := Lookup(env(), log); ok {
+			t.Errorf("mode %#o trusted", mode)
+		}
+		if !strings.Contains(buf.String(), "not 0600") {
+			t.Errorf("mode %#o: Debug line %q", mode, buf.String())
+		}
+		onlyDebug(t, "mode", buf)
+	}
+	if err := os.Chmod(p, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := Lookup(env(), nil); !ok {
+		t.Error("back to 0600, still untrusted")
+	}
+	// The owner rule: checkFile on another uid's stat refuses it.
+	fi, _ := os.Stat(p)
+	if err := checkFile(foreignOwner{fi}); err == nil || !strings.Contains(err.Error(), "not this user") {
+		t.Errorf("another user's file: %v", err)
+	}
+	// A FIFO in the file's place: refused at once, never opened.
+	_ = os.Remove(p)
+	if err := mkfifo(p); err == nil {
+		done := make(chan bool, 1)
+		go func() { _, _, ok := Lookup(env(), nil); done <- ok }()
+		select {
+		case ok := <-done:
+			if ok {
+				t.Error("a FIFO was trusted")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("a FIFO blocked the reader")
+		}
+	}
+}
+
+// TestMalformedFiles (review finding 8): null, [], truncated, a huge
+// or negative pid, a future start, an oversized file — never a panic,
+// never trusted, Debug only.
+func TestMalformedFiles(t *testing.T) {
+	dir := t.TempDir()
+	useDirs(t, dir)
+	now := time.Now().UTC().Format(time.RFC3339)
+	for name, body := range map[string]string{
+		"null":      `null`,
+		"array":     `[]`,
+		"string":    `"x"`,
+		"empty":     ``,
+		"truncated": `{"url":"http://127.0.0.1:1","pid":`,
+		"huge pid":  `{"url":"http://127.0.0.1:1","pid":1099511627776,"started":"` + now + `"}`,
+		"neg pid":   `{"url":"http://127.0.0.1:1","pid":-1,"started":"` + now + `"}`,
+		"future":    `{"url":"http://127.0.0.1:1","pid":` + itoa(os.Getpid()) + `,"started":"2999-01-01T00:00:00Z"}`,
+		"bad time":  `{"url":"http://127.0.0.1:1","pid":` + itoa(os.Getpid()) + `,"started":"yesterday"}`,
+		"oversized": `{"url":"http://127.0.0.1:1","pad":"` + strings.Repeat("x", maxFileBytes) + `"}`,
+	} {
+		writeBytes(t, dir, []byte(body))
+		log, buf := debugLog()
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%s: panic %v", name, r)
+				}
+			}()
+			if info, _, ok := Lookup(env(), log); ok {
+				t.Errorf("%s: trusted %+v", name, info)
+			}
+			_ = Find("http://127.0.0.1:1")
+		}()
+		onlyDebug(t, name, buf)
+	}
+}
+
+func itoa(n int) string {
+	b, _ := json.Marshal(n)
+	return string(b)
 }
 
 // TestDefaultDirs: ./.weft first only when it exists; XDG next when

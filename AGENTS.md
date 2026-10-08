@@ -170,8 +170,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    // With WEFT_STUDIO_URL unset (and WEFT_DISCOVERY not "off") Install also reads
 //    // the discovery file a running `weft studio`/`weft dev` wrote (./.weft, then
 //    // $XDG_RUNTIME_DIR/weft, then the user cache dir; internal/discovery): the app
-//    // exports to that Studio with no configuration, one INFO line names it; a stale
-//    // file (pid gone or 24 h old) is ignored at Debug. WEFT_STUDIO_URL always wins.
+//    // exports to that Studio with no configuration, one INFO line names it. Trusted
+//    // only when its url is loopback, fresh (pid alive, < 24 h) and, on unix, 0600 and
+//    // this user's; else ignored at Debug. Explicit otel.Studio(...) > WEFT_STUDIO_URL >
+//    // the file: either switches the read off, as do WEFT_DISCOVERY=off and NoEnv().
 //    weft.Metadata(map[string]string{"cwd": wd})  // run option: caller pairs on every record/span of the run
 //    // (inherited by subagents; thread sessions stamp weft.session.id,
 //    // weft.public_id, weft.turn — block 8).

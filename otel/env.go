@@ -158,7 +158,8 @@ type discovered struct {
 // WEFT_STUDIO_URL and WEFT_STUDIO_TOKEN — its url and token, together.
 // A stale file (its pid gone, or 24 hours old) is never trusted; a
 // missing, stale or malformed one changes nothing and logs Debug at
-// most. NoEnv turns this off with the rest of the environment.
+// most. NoEnv turns this off with the rest of the environment, and an
+// explicit Studio destination (otel.Studio) turns it off on its own.
 func discoverStudio(getenv func(string) string) (func(string) string, *discovered) {
 	info, path, ok := discovery.Lookup(getenv, slog.Default())
 	if !ok {
@@ -173,4 +174,14 @@ func discoverStudio(getenv func(string) string) (func(string) string, *discovere
 		}
 		return getenv(k)
 	}, &discovered{info: info, path: path}
+}
+
+// hasStudio reports whether dests name a Studio destination.
+func hasStudio(dests []dest) bool {
+	for _, d := range dests {
+		if d.kind == destStudio {
+			return true
+		}
+	}
+	return false
 }

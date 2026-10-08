@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -286,4 +287,94 @@ func TestStableTokenSurvivesRestart(t *testing.T) {
 		t.Error("--token did not override the stable token, or touched its file")
 	}
 	stop()
+}
+
+// TestProbeSendsStableTokenOnlyToDiscovered (review finding 4): the
+// stable token is long-lived and the panel tokens' signing key — a
+// bare start probes a busy port bare unless this user's discovery file
+// names that address, and then it sends the stable token.
+func TestProbeSendsStableTokenOnlyToDiscovered(t *testing.T) {
+	dir := discoveryDir(t)
+	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	dbPath := filepath.Join(t.TempDir(), "weft.db")
+	stable, _, err := createTokenFile(dbPath + ".token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, named := range []bool{false, true} {
+		base := freeBase(t, 2)
+		var mu sync.Mutex
+		var auths []string
+		foreign, err := net.Listen("tcp", loop(base))
+		if err != nil {
+			t.Fatal(err)
+		}
+		hs := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			auths = append(auths, r.Header.Get("Authorization"))
+			mu.Unlock()
+			http.NotFound(w, r)
+		})}
+		go func() { _ = hs.Serve(foreign) }()
+		if named {
+			info := discovery.Info{URL: "http://" + loop(base), Token: stable, PID: os.Getpid(), Started: time.Now()}
+			w, err := discovery.Write(info)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = w // the Studio below displaces it; nothing to restore after the test
+		}
+		var out syncBuffer
+		stop := bareStudio(t, "sqlite://"+dbPath, base, 2, loop(base+1), "", false, &out)
+		stop()
+		_ = hs.Close()
+		mu.Lock()
+		got := append([]string(nil), auths...)
+		mu.Unlock()
+		want := ""
+		if named {
+			want = "Bearer " + stable
+		}
+		if len(got) != 1 || got[0] != want {
+			t.Errorf("discovery file names the port: %v — the probe's Authorization %q, want %q", named, got, want)
+		}
+		_ = os.Remove(filepath.Join(dir, discovery.FileName))
+	}
+}
+
+// TestTokenCreateRace (review finding 6): two first starts agree on one
+// token — the loser of the atomic link reads the winner's complete file
+// instead of replacing it.
+func TestTokenCreateRace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".weft", "weft.db.token")
+	var winner string
+	old := linkFile
+	linkFile = func(oldname, newname string) error {
+		// The other start publishes its token first.
+		var err error
+		winner, _, err = func() (string, bool, error) {
+			linkFile = old
+			defer func() { linkFile = old }()
+			return createTokenFile(newname)
+		}()
+		if err != nil {
+			return err
+		}
+		return old(oldname, newname)
+	}
+	t.Cleanup(func() { linkFile = old })
+	tok, created, err := createTokenFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok != winner || created || readTokenFile(path) != winner {
+		t.Errorf("the race diverged: got %q (created %v), winner %q, file %q", tok, created, winner, readTokenFile(path))
+	}
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".token-*")); len(left) != 0 {
+		t.Errorf("temporary files left: %v", left)
+	}
+	// The token creator guards .weft too (finding 10).
+	if b, err := os.ReadFile(filepath.Join(filepath.Dir(path), ".gitignore")); err != nil || !strings.Contains(string(b), "*") {
+		t.Errorf(".weft/.gitignore after the token file: %q, %v", b, err)
+	}
 }

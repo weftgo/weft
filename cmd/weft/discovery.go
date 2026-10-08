@@ -17,18 +17,9 @@ import (
 // joins the running Studio with no configuration. A reuse writes
 // nothing: the running Studio owns the file.
 
-// written is a discovery file this process wrote.
-type written struct {
-	path string
-	info discovery.Info
-}
-
-// remove removes the file if it is still this Studio's.
-func (w written) remove() { discovery.Remove(w.path, w.info) }
-
 // writeDiscovery writes the file for the Studio at url. dbPath is the
 // SQLite file, "" for a database with no file.
-func writeDiscovery(url, token, dbPath string) (written, error) {
+func writeDiscovery(url, token, dbPath string) (*discovery.Written, error) {
 	info := discovery.Info{
 		URL:     url,
 		Token:   token,
@@ -37,23 +28,19 @@ func writeDiscovery(url, token, dbPath string) (written, error) {
 		Started: time.Now().UTC().Truncate(time.Second),
 		Version: version.Runtime(),
 	}
-	path, err := discovery.Write(info)
-	if err != nil {
-		return written{}, err
-	}
-	return written{path: path, info: info}, nil
+	return discovery.Write(info)
 }
 
 // announce writes the discovery file and says where in one line (a
 // failure is said too: the Studio serves regardless — apps then need
 // WEFT_STUDIO_URL).
-func announce(out io.Writer, url, token, dbPath string) written {
+func announce(out io.Writer, url, token, dbPath string) *discovery.Written {
 	w, err := writeDiscovery(url, token, dbPath)
 	if err != nil {
 		_, _ = fmt.Fprintf(out, "studio: no discovery file (%v); apps need WEFT_STUDIO_URL=%s\n", err, url)
-		return written{}
+		return nil
 	}
-	_, _ = fmt.Fprintf(out, "studio: apps find this Studio through %s (WEFT_STUDIO_URL overrides it, WEFT_DISCOVERY=off ignores it)\n", w.path)
+	_, _ = fmt.Fprintf(out, "studio: apps find this Studio through %s (WEFT_STUDIO_URL overrides it, WEFT_DISCOVERY=off ignores it)\n", w.Path)
 	return w
 }
 

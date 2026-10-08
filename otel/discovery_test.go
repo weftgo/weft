@@ -196,3 +196,49 @@ func TestDiscoveryEscapes(t *testing.T) {
 		})
 	}
 }
+
+// TestDiscoveryExplicitStudioWins (review finding 1): explicit > env >
+// file — a Studio named in code switches the discovery read off: the
+// pipeline has the explicit destination alone, StudioEndpoint (what
+// runtime.Install dials) is the explicit one, and no join is claimed.
+func TestDiscoveryExplicitStudioWins(t *testing.T) {
+	t.Setenv("WEFT_STUDIO_URL", "")
+	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFT_DISCOVERY", "")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	var mu sync.Mutex
+	hits := map[string]int{}
+	sink := func(name string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			hits[name]++
+			mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+		}))
+	}
+	discovered, explicit := sink("discovered"), sink("explicit")
+	defer discovered.Close()
+	defer explicit.Close()
+	discoveryFile(t, discovered.URL, "disc-token", os.Getpid(), time.Now())
+	logs := captureLog(t)
+
+	p, err := Start(testCtx(t), NoGlobal(), Heartbeat(0), Studio(explicit.URL, "explicit-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(p.dests); n != 1 {
+		t.Errorf("%d destinations, want the explicit Studio alone", n)
+	}
+	if u, tok := p.StudioEndpoint(); u != explicit.URL || tok != "explicit-token" {
+		t.Errorf("StudioEndpoint = %q, %q; want the explicit %q", u, tok, explicit.URL)
+	}
+	_ = p.Shutdown(testCtx(t))
+	mu.Lock()
+	defer mu.Unlock()
+	if hits["discovered"] != 0 {
+		t.Errorf("the discovered Studio got %d requests", hits["discovered"])
+	}
+	if strings.Contains(logs.String(), "joined") {
+		t.Errorf("a join was claimed: %s", logs.String())
+	}
+}

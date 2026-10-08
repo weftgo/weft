@@ -81,6 +81,13 @@ type Request struct {
 	// the loopback rule): the command's own --token / WEFT_STUDIO_TOKEN,
 	// never a dev token it generated (nobody else holds that).
 	Token string
+	// TokenFor, when set, is asked for the bearer of each probed
+	// address (the dialled host:port, an unspecified host as
+	// 127.0.0.1); a non-empty answer replaces Token for that probe. The
+	// command answers with the database's stable token only for an
+	// address its user's discovery file names (plan B3), so that
+	// long-lived token never goes to whatever else holds a port.
+	TokenFor func(addr string) string
 	// Timeout bounds each probe (0 = ProbeTimeout).
 	Timeout time.Duration
 }
@@ -192,6 +199,11 @@ type verdict struct {
 func probe(ctx context.Context, addr string, r Request) verdict {
 	ctx, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
+	if r.TokenFor != nil {
+		if tok := r.TokenFor(probeAddr(addr)); tok != "" {
+			r.Token = tok
+		}
+	}
 	req, err := probeRequest(ctx, addr, r.Token)
 	if err != nil {
 		return verdict{why: "not a weft Studio"}

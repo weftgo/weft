@@ -11,8 +11,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+
 	"time"
 
 	"github.com/weftgo/weft/core"
@@ -746,9 +748,12 @@ func TestStepLogsOnly(t *testing.T) {
 }
 
 // TestStepAttemptEdges: a request record whose body did not parse is
-// still an attempt (attempt 0, its request index, badge derived) so the
-// count agrees with the requests route; attempt spans with no request
-// record put gap on attempts_badge.
+// still an attempt, badged derived, so the count agrees with the
+// requests route. The step's only record, unnumbered, joins the first
+// attempt the spans time (one call is never two attempts); an attempt
+// span with no request record beside it puts gap on attempts_badge.
+// With the chat span alone, the record is attempt 1 and nothing is a
+// gap.
 func TestStepAttemptEdges(t *testing.T) {
 	ts, srv := requestsServer(t)
 	chat := obsdb.Span{SpanID: "c000000000000001", Name: "chat m", Kind: 3, StatusCode: 1,
@@ -768,18 +773,39 @@ func TestStepAttemptEdges(t *testing.T) {
 	var reqs requestsDoc
 	decode(t, fetchJSON(t, ts, "/api/runs/r_edge/requests", nil), &reqs)
 	d := getStep(t, ts, "/api/runs/r_edge/steps/0", nil)
-	if len(d.Attempts) != 3 {
-		t.Fatalf("attempts = %+v, want spans 1 and 2 and the unnumbered record", d.Attempts)
+	if len(d.Attempts) != 2 || len(reqs.Requests) != 1 {
+		t.Fatalf("attempts = %+v (requests route: %d rows), want spans 1 and 2, the record joined to 1", d.Attempts, len(reqs.Requests))
 	}
-	last := d.Attempts[2]
-	if last.Attempt != 0 || last.RequestIndex == nil || *last.RequestIndex != 0 || last.Badge != "derived" || len(reqs.Requests) != 1 {
-		t.Errorf("unnumbered attempt = %+v (requests route: %d rows), want attempt 0, request 0, derived", last, len(reqs.Requests))
+	first := d.Attempts[0]
+	if first.Attempt != 1 || first.RequestIndex == nil || *first.RequestIndex != 0 || first.Badge != "derived" || first.Outcome != "error" {
+		t.Errorf("attempt 1 = %+v, want the unnumbered record joined to span 1: request 0, derived, error", first)
 	}
-	if d.Attempts[0].Outcome != "error" || d.Attempts[1].Outcome != "ok" || d.Attempts[0].RequestIndex != nil {
-		t.Errorf("span attempts = %+v, want error then ok, no request", d.Attempts[:2])
+	if d.Attempts[1].Attempt != 2 || d.Attempts[1].Outcome != "ok" || d.Attempts[1].RequestIndex != nil {
+		t.Errorf("attempt 2 = %+v, want span 2's ok, no request", d.Attempts[1])
 	}
 	if d.AttemptsBadge == nil || d.AttemptsBadge.Badge != "gap" || !slices.Contains(d.holes(), "derived") || !slices.Contains(d.holes(), "gap") {
-		t.Errorf("attempts_badge %+v holes %v, want gap, and derived listed", d.AttemptsBadge, d.holes())
+		t.Errorf("attempts_badge %+v holes %v, want gap (span 2 has no record), and derived listed", d.AttemptsBadge, d.holes())
+	}
+
+	// The chat span alone: the unnumbered record is attempt 1, timed by
+	// the chat span — one attempt, no gap.
+	chat1 := obsdb.Span{SpanID: "c000000000000002", Name: "chat m", Kind: 3, StatusCode: 1,
+		Attrs: map[string]any{"gen_ai.operation.name": "chat", "weft.step.index": int64(0), "weft.stream": true, "gen_ai.request.model": "m"}}
+	writeHand(t, srv.db, "r_edge1", time.Now().UTC(), map[string]any{}, []handRec{
+		{kind: "event", pos: 0, body: `{"type":"run_start","id":"r_edge1","model":{"provider":"p","name":"m"},"agent":"hand"}`,
+			extra: map[string]any{"weft.instructions.hash": "aa"}},
+		ev(1, `{"type":"step_start","run_id":"r_edge1","index":0}`),
+		{kind: "request", pos: 0, body: `not json`, extra: map[string]any{"weft.step.index": int64(0)}},
+		ev(2, `{"type":"step_finish","run_id":"r_edge1","index":0,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
+		ev(3, `{"type":"run_finish","run_id":"r_edge1","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
+	}, chat1)
+	d1 := getStep(t, ts, "/api/runs/r_edge1/steps/0", nil)
+	if len(d1.Attempts) != 1 || d1.Attempts[0].Attempt != 1 || d1.Attempts[0].SpanID != chat1.SpanID ||
+		d1.Attempts[0].RequestIndex == nil || d1.Attempts[0].Badge != "derived" {
+		t.Errorf("chat-span attempts = %+v, want one: attempt 1, the chat span, request 0, derived", d1.Attempts)
+	}
+	if d1.AttemptsBadge != nil || slices.Contains(d1.holes(), "gap") || !slices.Contains(d1.holes(), "derived") {
+		t.Errorf("chat-span attempts_badge %+v holes %v, want no badge, no gap, derived listed", d1.AttemptsBadge, d1.holes())
 	}
 }
 
@@ -906,5 +932,127 @@ func TestStepOldContentOffCalls(t *testing.T) {
 	}
 	if got := d.holes(); !slices.Contains(got, "stripped") || !slices.Contains(got, "not_recorded") {
 		t.Errorf("holes = %v, want stripped and not_recorded", got)
+	}
+}
+
+// reqBody is a hand-written request record body for step n, attempt 1;
+// ref is the messages_ref JSON.
+func reqBody(step int, ref string) string {
+	return `{"step":` + strconv.Itoa(step) + `,"attempt":1,"messages_ref":` + ref +
+		`,"tools":{"catalog_hash":"","names":[]},"model":{"provider":"p","name":"m"}}`
+}
+
+// TestStepChildrenByStep: call ids may repeat across steps — step 0's
+// Subagent call "same" started child r_same/0/same; step 1's plain call
+// is also "same". The child is step 0's by its id alone: step 1 lists
+// no child and its call no child_run_id.
+func TestStepChildrenByStep(t *testing.T) {
+	ts, srv := requestsServer(t)
+	at := time.Now().UTC().Add(-time.Hour)
+	writeHand(t, srv.db, "r_same", at, map[string]any{}, []handRec{
+		ev(0, `{"type":"run_start","id":"r_same","model":{"provider":"p","name":"m"},"agent":"hand"}`),
+		ev(1, `{"type":"step_start","run_id":"r_same","index":0}`),
+		ev(2, `{"type":"tool_start","run_id":"r_same","seq":1,"call_id":"same","name":"research","args":{}}`),
+		ev(3, `{"type":"tool_finish","run_id":"r_same","seq":2,"call_id":"same","name":"research","content":"found","is_error":false}`),
+		ev(4, `{"type":"step_finish","run_id":"r_same","index":0,"reason":"tool_calls","usage":{"input_tokens":1,"output_tokens":1}}`),
+		ev(5, `{"type":"step_start","run_id":"r_same","index":1}`),
+		ev(6, `{"type":"tool_start","run_id":"r_same","seq":3,"call_id":"same","name":"t","args":{}}`),
+		ev(7, `{"type":"tool_finish","run_id":"r_same","seq":4,"call_id":"same","name":"t","content":"ok","is_error":false}`),
+		ev(8, `{"type":"step_finish","run_id":"r_same","index":1,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
+		ev(9, `{"type":"run_finish","run_id":"r_same","usage":{"input_tokens":2,"output_tokens":2},"steps":2}`),
+	})
+	writeHand(t, srv.db, "r_same/0/same", at, map[string]any{"weft.parent.run.id": "r_same", "weft.parent.call.id": "same"}, []handRec{
+		ev(0, `{"type":"run_start","id":"r_same/0/same","model":{"provider":"p","name":"m"},"agent":"hand"}`),
+		ev(1, `{"type":"run_finish","run_id":"r_same/0/same","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
+	})
+	d0 := getStep(t, ts, "/api/runs/r_same/steps/0", nil)
+	if len(d0.Children) != 1 || d0.Children[0].ID != "r_same/0/same" || len(d0.ToolCalls) != 1 || d0.ToolCalls[0].ChildRunID != "r_same/0/same" {
+		t.Errorf("step 0 children %+v calls %+v, want the child joined to its call", d0.Children, d0.ToolCalls)
+	}
+	d1 := getStep(t, ts, "/api/runs/r_same/steps/1", nil)
+	if len(d1.Children) != 0 || len(d1.ToolCalls) != 1 || d1.ToolCalls[0].ChildRunID != "" {
+		t.Errorf("step 1 children %+v calls %+v, want none: the child is step 0's", d1.Children, d1.ToolCalls)
+	}
+}
+
+// TestStepRunningNoFalseHoles: a running run's step is in flight, not lost. Step 1
+// of r_live has started (its chat span is not exported until the call
+// ends, and a position below the high-water mark is still on its way):
+// status running, no attempts badge, no gap. r_live2 has a request
+// record of step 0 but no step_start stored yet and no span at all:
+// running too — never not_recorded ("install a tracer") or gap.
+func TestStepRunningNoFalseHoles(t *testing.T) {
+	ts, srv := requestsServer(t)
+	now := time.Now().UTC()
+	hash := map[string]any{"weft.instructions.hash": "aa"}
+	chat := obsdb.Span{SpanID: "c0000000000000a1", Name: "chat m", Kind: 3, StatusCode: 1,
+		Attrs: map[string]any{"gen_ai.operation.name": "chat", "weft.step.index": int64(0), "weft.stream": true, "gen_ai.request.model": "m"}}
+	writeHand(t, srv.db, "r_live", now, map[string]any{}, []handRec{
+		{kind: "event", pos: 0, body: `{"type":"run_start","id":"r_live","model":{"provider":"p","name":"m"},"agent":"hand"}`, extra: hash},
+		ev(1, `{"type":"step_start","run_id":"r_live","index":0}`),
+		{kind: "request", pos: 0, body: reqBody(0, `{"count":1}`), extra: map[string]any{"weft.step.index": int64(0)}},
+		ev(2, `{"type":"step_finish","run_id":"r_live","index":0,"reason":"tool_calls","usage":{"input_tokens":1,"output_tokens":1}}`),
+		ev(3, `{"type":"step_start","run_id":"r_live","index":1}`),
+		{kind: "request", pos: 1, body: reqBody(1, `{"count":2}`), extra: map[string]any{"weft.step.index": int64(1)}},
+		// pos 4 is in flight
+		ev(5, `{"type":"tool_start","run_id":"r_live","seq":1,"call_id":"c1","name":"t","args":{}}`),
+	}, chat)
+	d := getStep(t, ts, "/api/runs/r_live/steps/1", nil)
+	if d.Status != "running" || d.AttemptsBadge != nil || slices.Contains(d.holes(), "gap") {
+		t.Errorf("running step 1 = status %q attempts_badge %+v holes %v, want running, no badge, no gap", d.Status, d.AttemptsBadge, d.holes())
+	}
+	writeHand(t, srv.db, "r_live2", now, map[string]any{}, []handRec{
+		{kind: "event", pos: 0, body: `{"type":"run_start","id":"r_live2","model":{"provider":"p","name":"m"},"agent":"hand"}`, extra: hash},
+		{kind: "request", pos: 0, body: reqBody(0, `{"count":1}`), extra: map[string]any{"weft.step.index": int64(0)}},
+	})
+	d2 := getStep(t, ts, "/api/runs/r_live2/steps/0", nil)
+	if d2.Status != "running" || d2.AttemptsBadge != nil || slices.Contains(d2.holes(), "gap") || slices.Contains(d2.holes(), "not_recorded") {
+		t.Errorf("running step 0 without its step_start = status %q attempts_badge %+v holes %v, want running, no badge, no gap",
+			d2.Status, d2.AttemptsBadge, d2.holes())
+	}
+}
+
+// TestStepCountedCallsBounded: a content-off max_tokens step lists its
+// calls from the chat span's weft.model.tool_calls — a count, so a
+// hostile value is clamped (maxStepCountedCalls) and the clamp badged
+// derived, never allocated.
+func TestStepCountedCallsBounded(t *testing.T) {
+	ts, srv := requestsServer(t)
+	chat := obsdb.Span{SpanID: "c0000000000000b1", Name: "chat m", Kind: 3, StatusCode: 1,
+		Attrs: map[string]any{"gen_ai.operation.name": "chat", "weft.step.index": int64(0), "weft.stream": true,
+			"gen_ai.request.model": "m", "weft.model.tool_calls": int64(1) << 40}}
+	writeHand(t, srv.db, "r_huge", time.Now().UTC().Add(-time.Hour), map[string]any{}, []handRec{
+		ev(0, `{"type":"run_start","id":"r_huge","model":{"provider":"p","name":"m"},"agent":"hand"}`),
+		ev(1, `{"type":"step_start","run_id":"r_huge","index":0}`),
+		ev(2, `{"type":"step_finish","run_id":"r_huge","index":0,"reason":"max_tokens","usage":{"input_tokens":1,"output_tokens":1}}`),
+		ev(3, `{"type":"run_finish","run_id":"r_huge","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
+	}, chat)
+	d := getStep(t, ts, "/api/runs/r_huge/steps/0", nil)
+	if len(d.ToolCalls) != maxStepCountedCalls || !slices.Contains(d.holes(), "derived") {
+		t.Fatalf("calls = %d holes %v, want %d and derived", len(d.ToolCalls), d.holes(), maxStepCountedCalls)
+	}
+	for _, h := range d.Holes {
+		if h.Hole == "derived" && !strings.Contains(h.Reason, "1099511627776 tool calls") {
+			t.Errorf("derived reason = %q, want the span's count named", h.Reason)
+		}
+	}
+}
+
+// TestStepMessagesRefDropped: a request whose messages_ref.index names
+// a messages record neither stored as a growth batch nor as a
+// compaction view reads gap on messages_in, and in holes.
+func TestStepMessagesRefDropped(t *testing.T) {
+	ts, srv := requestsServer(t)
+	writeHand(t, srv.db, "r_ref", time.Now().UTC().Add(-time.Hour), map[string]any{}, []handRec{
+		{kind: "event", pos: 0, body: `{"type":"run_start","id":"r_ref","model":{"provider":"p","name":"m"},"agent":"hand"}`,
+			extra: map[string]any{"weft.instructions.hash": "aa"}},
+		ev(1, `{"type":"step_start","run_id":"r_ref","index":0}`),
+		{kind: "request", pos: 0, body: reqBody(0, `{"index":5,"count":2}`), extra: map[string]any{"weft.step.index": int64(0)}},
+		ev(2, `{"type":"step_finish","run_id":"r_ref","index":0,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
+		ev(3, `{"type":"run_finish","run_id":"r_ref","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
+	})
+	d := getStep(t, ts, "/api/runs/r_ref/steps/0", nil)
+	if d.MessagesIn.Badge != "gap" || d.MessagesIn.Count != 2 || d.MessagesIn.Index == nil || *d.MessagesIn.Index != 5 || !slices.Contains(d.holes(), "gap") {
+		t.Errorf("messages_in = %+v holes %v, want index 5, count 2 under gap, gap listed", d.MessagesIn, d.holes())
 	}
 }

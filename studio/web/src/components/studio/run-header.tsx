@@ -9,6 +9,7 @@ import { useEffect, useState } from "react"
 import type { RunDoc, Transcript } from "@/lib/api"
 import { producedTexts, runHoles, turnPrompt } from "@/lib/events"
 import type { FoldedRun } from "@/lib/events"
+import { mergeHoles, statusHoles } from "@/lib/honesty"
 import {
   absoluteTime,
   duration,
@@ -106,10 +107,14 @@ export function RunHeader({
   folded,
   eventCount,
   transcript,
+  gaps,
 }: {
   doc: RunDoc
   folded: FoldedRun
   eventCount: number
+  /** The event positions the walk found missing (the last page's
+   * gaps): a gap hole once the run is over. */
+  gaps?: number[]
   /** The messages records: the finished words (deltas are not
    * stored), fetched by the page beside the fold. */
   transcript?: Transcript
@@ -127,7 +132,12 @@ export function RunHeader({
         : "no finish recorded"
   // The run's holes (ADR 0028 §11): what the record cannot say about
   // this run, and why — never a pane left silently empty.
-  const holes = runHoles(doc, folded)
+  // The shared rule (statusHoles, as the panel's turn): the row's
+  // status and stop reason, and the walk's gaps once the run is over.
+  const holes = mergeHoles(
+    runHoles(doc, folded),
+    statusHoles({ status: doc.status, stop_reason: doc.stop_reason, gaps })
+  )
   return (
     <div className="space-y-2.5">
       <Breadcrumb>

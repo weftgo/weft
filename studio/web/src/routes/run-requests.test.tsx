@@ -381,7 +381,53 @@ describe("the run page's request record, paged and live (A1.4 review)", () => {
   })
 })
 
+describe("a request row ingested below the high-water mark (out of order)", () => {
+  it("is read by the run's final refetch: the step shows it, not a gap", async () => {
+    const all = golden<RequestsPage>("requests-ok").requests
+    let ended = false
+    const running: RunDoc = { ...doc, status: "running", finished: null }
+    studio = new FakeStudio()
+      .on("GET meta", meta(["requests", "ingest"]))
+      .on(`GET runs/${RUN}`, () => (ended ? doc : running))
+      .on(`GET runs/${RUN}/events`, pagedEvents(events(), { done: () => ended }))
+      .on(`GET runs/${RUN}/transcript`, transcriptOf([]))
+      .on(`GET runs/${RUN}/spans`, { spans: [] })
+      // Row 2 (step 1's attempt 2) lands after row 3 was read.
+      .on(`GET runs/${RUN}/requests`, (req) =>
+        pagedRequests({ requests: ended ? all : all.filter((r) => r.index !== 2) })(req)
+      )
+      .install()
+    await story()
+    await waitFor(() => expect(section(2).textContent).toContain("prompt changed at this step"))
+    open(1)
+    expect(within(section(1)).queryByRole("button", { name: "attempt 2" })).toBeNull()
+    ended = true
+    await waitFor(() =>
+      expect(within(section(1)).getByRole("button", { name: "attempt 2" })).toBeTruthy()
+    )
+  })
+})
+
 describe("fetchAllRequests", () => {
+  it("re-reads from the first missing index when the held rows skip one", async () => {
+    const all = golden<RequestsPage>("requests-ok").requests
+    let rows = all.filter((r) => r.index !== 2)
+    studio = new FakeStudio()
+      .on(`GET runs/${RUN}/requests`, (req) => pagedRequests({ requests: rows })(req))
+      .install()
+    const first = await fetchAllRequests(RUN)
+    expect(first.requests.map((r) => r.index)).toEqual([0, 1, 3])
+    rows = all
+    const second = await fetchAllRequests(RUN, first)
+    expect(second.requests.map((r) => r.index)).toEqual([0, 1, 2, 3])
+    // full: the whole record from the top.
+    const third = await fetchAllRequests(RUN, second, { full: true })
+    expect(third.requests.map((r) => r.index)).toEqual([0, 1, 2, 3])
+    expect(
+      studio.calls(`GET runs/${RUN}/requests`).map((c) => c.query.get("from"))
+    ).toEqual([null, "2", null])
+  })
+
   it("polls incrementally: only the rows past the last index, the stripped note read once", async () => {
     const all = golden<RequestsPage>("requests-stripped").requests
     let stored = 2

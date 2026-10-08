@@ -189,7 +189,7 @@ describe("subagents on the run page (A10)", () => {
 
   it("the trace view's subagent call opens the child, whose step shows the child's request", async () => {
     serve()
-    renderApp(`/runs/${RUN}?sel=${encodeURIComponent("c:c_sub")}`)
+    renderApp(`/runs/${RUN}?sel=${encodeURIComponent("c:1:c_sub")}`)
     let block: HTMLElement | null = null
     await waitFor(() => {
       block = document.querySelector<HTMLElement>(`[data-child-row="${CHILD}"]`)
@@ -206,9 +206,8 @@ describe("the trace view on a call id repeated across steps (A10)", () => {
   // subagent, also as c1 (ids may repeat across steps, core/loop.go):
   // the child, <run>/1/c1, belongs to step 1's call alone. The trace
   // fold is linked by child id (linkView), so the call detail joins on
-  // it. ?sel=c:c1 itself stays ambiguous — it selects the first span
-  // with that key, step 0's — until G1 keys spans by step (G1/G2 debt);
-  // step 1's call is reached through its step's detail (?sel=s1).
+  // it. A call span's key names its step (c:<step>:<call id>), so
+  // ?sel=c:1:c1 selects step 1's call, never step 0's.
   const R = "r_rep"
   const KID = `${R}/1/c1`
   const U = { input_tokens: 1, output_tokens: 1 }
@@ -236,13 +235,27 @@ describe("the trace view on a call id repeated across steps (A10)", () => {
 
   it("step 0's c1 lookup shows no child; step 1's c1 subagent shows it", async () => {
     serveRepeated()
-    renderApp(`/runs/${R}?sel=${encodeURIComponent("c:c1")}`)
-    // The ambiguous key lands on step 0's lookup: no child there.
+    renderApp(`/runs/${R}?sel=${encodeURIComponent("c:0:c1")}`)
+    // Step 0's key lands on step 0's lookup: no child there.
     await waitFor(() =>
-      expect(document.querySelector('[data-span="c:c1"][aria-selected="true"]')).toBeTruthy()
+      expect(document.querySelector('[data-span="c:0:c1"][aria-selected="true"]')).toBeTruthy()
     )
+    expect(document.querySelector('[data-span="c:1:c1"][aria-selected="true"]')).toBeNull()
     expect(document.querySelector("[data-call=\"c1\"]")?.textContent).toContain("lookup_order")
     expect(document.querySelector("[data-child-row]")).toBeNull()
+    cleanup()
+
+    // Step 1's key selects step 1's call: the research subagent, its child.
+    serveRepeated()
+    renderApp(`/runs/${R}?sel=${encodeURIComponent("c:1:c1")}`)
+    await waitFor(() =>
+      expect(document.querySelector('[data-span="c:1:c1"][aria-selected="true"]')).toBeTruthy()
+    )
+    expect(document.querySelector('[data-span="c:0:c1"][aria-selected="true"]')).toBeNull()
+    await waitFor(() => {
+      const block = document.querySelector<HTMLElement>(`[data-child-row="${KID}"]`)
+      expect(block?.closest("[data-call]")?.textContent).toContain("research")
+    })
     cleanup()
 
     serveRepeated()

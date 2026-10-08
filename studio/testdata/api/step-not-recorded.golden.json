@@ -13,8 +13,8 @@
   "attempts": [],
   "attempts_badge": {
     "badge": "not_recorded",
-    "reason": "the run has no spans: it was recorded without a tracer, or by a weft without attempt reporting (A4), so no attempt's outcome or timing exists",
-    "fix": "upgrade weft and re-run"
+    "reason": "the run was recorded without a tracer, so attempt spans and the answering model were not stored",
+    "fix": "install a tracer (otel.Install records spans)"
   },
   "messages_in": {
     "count": 0,

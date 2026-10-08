@@ -9,8 +9,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/otel"
 )
+
+// overrideNames are the tool-name overrides the matrix stamps on A's
+// invoke_agent span, each with a name no other byte of the run holds.
+var overrideNames = map[string]string{
+	"weft.override.tools":           "secret_only_tool",
+	"weft.override.park_on":         "secret_park_tool",
+	"weft.override.park_all_except": "secret_except_tool",
+	"weft.override.tool_choice":     "tool:secret_choice_tool",
+}
 
 // TestAuthMatrix pins S4.6 (and WEFT-DEVTOOLS §6, WEFT-PLAYGROUND
 // §10.4) as one table: every registered route × every identity × the
@@ -33,11 +45,18 @@ import (
 //     step's request block: the hidden badge inside a 200); a
 //     playground-scoped one reads them inside its public id; the run
 //     export's json and jsonl hide the request block for it, otlp and
-//     wefttest are 403 with the hidden badge;
+//     wefttest are 403 with the hidden badge, and its compaction views'
+//     bodies are null under the same badge;
+//   - a read-scoped panel token never reads the tool names a run's
+//     overrides carry on its invoke_agent span (OnlyTools, ParkOn,
+//     ParkAllExcept, a named ToolChoice): spans, traces and the
+//     export drop them (spansFor);
+
 //   - what is not public-id-shaped is the server token's alone: the
 //     runtime link, breakpoints, experiments, the token mint;
 //   - ingest takes the ingest token and nothing else.
 func TestAuthMatrix(t *testing.T) {
+
 	const serverTok, ingestTok = "srv-token", "ingest-token"
 	srv := New(Open(t.TempDir()+"/matrix.db"), Playground(true), Token(serverTok),
 		IngestToken(ingestTok), Manifest([]byte(`{"weft":1,"agents":[]}`)))
@@ -64,6 +83,14 @@ func TestAuthMatrix(t *testing.T) {
 		}
 		if public[res] != "" {
 			span.Attrs["weft.public_id"] = public[res]
+		}
+		if res == "A" {
+			// A per-run tool override (core's OnlyTools, ParkOn,
+			// ParkAllExcept, a named ToolChoice): tool names, which a
+			// read-scoped token does not read (pinned below).
+			for k, v := range overrideNames {
+				span.Attrs[k] = v
+			}
 		}
 		if err := srv.db.Write(context.Background(), obsdb.Batch{Spans: []obsdb.Span{span}}); err != nil {
 			t.Fatal(err)
@@ -251,6 +278,7 @@ func TestAuthMatrix(t *testing.T) {
 			return ok
 		}},
 		{name: "GET /api/runs", method: "GET", path: fixed("/api/runs"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/runs?all=1", method: "GET", path: fixed("/api/runs?all=1"), resources: one, want: anyValid(ok)}, // forced onto the token's public id (pinned below)
 		{name: "GET /api/runs?public_id=", method: "GET", path: func(res string) string { return "/api/runs?public_id=" + public[res] },
 			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {
 				if kind == "server" || res == "A" {
@@ -282,6 +310,15 @@ func TestAuthMatrix(t *testing.T) {
 		// 404 only once the scope passed.
 		{name: "GET /api/runs/{id}/steps/0", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/steps/0" }, resources: all, want: scoped(ok)},
 		{name: "GET /api/runs/{id}/steps/9", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/steps/9" }, resources: all, want: scoped(miss)},
+		// A bad ordinal is 400 only once the scope passed: a foreign
+		// token's 403 wins (the run's existence elsewhere stays unsaid).
+		{name: "GET /api/runs/{id}/steps/x", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/steps/x" }, resources: all,
+			want: func(kind, res string) int {
+				if kind != "server" && (res == "B" || res == "none") {
+					return forbidden403
+				}
+				return http.StatusBadRequest
+			}},
 		{name: "GET /api/runs/{B's child}/steps/0", method: "GET", path: fixed("/api/runs/run_b/0/call_1/steps/0"), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/runs/{B's child}", method: "GET", path: fixed("/api/runs/run_b/0/call_1"), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/runs/{B's child}/transcript", method: "GET", path: fixed("/api/runs/run_b/0/call_1/transcript"), resources: []string{"B"}, want: scoped(ok)},
@@ -298,6 +335,14 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "GET /api/runs/{id}/export?format=wefttest", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=wefttest" }, resources: all, want: acting(ok)},
 		{name: "GET /api/runs/{B's child}/export?format=json", method: "GET", path: fixed("/api/runs/run_b/0/call_1/export?format=json"), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/runs/{B's child}/export?format=wefttest", method: "GET", path: fixed("/api/runs/run_b/0/call_1/export?format=wefttest"), resources: []string{"B"}, want: acting(ok)},
+		{name: "GET /api/runs/{B's child}/export?format=otlp", method: "GET", path: fixed("/api/runs/run_b/0/call_1/export?format=otlp"), resources: []string{"B"}, want: acting(ok)},
+		{name: "GET /api/runs/{B's child}/export?format=jsonl", method: "GET", path: fixed("/api/runs/run_b/0/call_1/export?format=jsonl"), resources: []string{"B"}, want: scoped(ok)},
+		// HEAD answers as GET does, for every identity: the download's
+		// headers are no way around the scope or the hidden rule.
+		{name: "HEAD /api/runs/{id}/export?format=json", method: "HEAD", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=json" }, resources: all, want: scoped(ok)},
+		{name: "HEAD /api/runs/{id}/export?format=jsonl", method: "HEAD", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=jsonl" }, resources: all, want: scoped(ok)},
+		{name: "HEAD /api/runs/{id}/export?format=otlp", method: "HEAD", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=otlp" }, resources: all, want: acting(ok)},
+		{name: "HEAD /api/runs/{id}/export?format=wefttest", method: "HEAD", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=wefttest" }, resources: all, want: acting(ok)},
 		{name: "GET /api/runs/{id}/export?format=xml", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=xml" }, resources: one, want: anyValid(http.StatusBadRequest)},
 		{name: "GET /api/traces/{id}", method: "GET", path: func(res string) string { return "/api/traces/" + trace[res] }, resources: all, want: scoped(ok)},
 		{name: "GET /api/sessions", method: "GET", path: fixed("/api/sessions"), resources: one, want: anyValid(ok)},
@@ -388,6 +433,15 @@ func TestAuthMatrix(t *testing.T) {
 		// refused to a read-scoped token like the export's wefttest.
 		{name: "POST /api/playground/fixtures", method: "POST", path: fixed("/api/playground/fixtures"),
 			body: func(res string) string { return `{"run_id":"` + run[res] + `"}` }, resources: all, want: acting(ok)},
+		// The scope is checked before the body is read: a read-scoped
+		// token's bad body is 403, never 400.
+		{name: "POST /api/playground/fixtures (bad body)", method: "POST", path: fixed("/api/playground/fixtures"),
+			body: fixed(`not json`), resources: one, want: func(kind, _ string) int {
+				if kind == "read" {
+					return forbidden403
+				}
+				return http.StatusBadRequest
+			}},
 
 		// Not public-id-shaped: the server token's alone.
 		{name: "GET /api/experiments", method: "GET", path: fixed("/api/experiments"), resources: one, want: serverOnly(ok)},
@@ -461,7 +515,7 @@ func TestAuthMatrix(t *testing.T) {
 		if id.kind != "read" {
 			continue
 		}
-		for _, path := range []string{"/api/runs/run_a/requests", "/api/runs/run_a/tools", "/api/runs/run_a/logs"} {
+		for _, path := range []string{"/api/runs/run_a/requests", "/api/runs/run_a/tools", "/api/runs/run_a/logs", "/api/manifest"} {
 			req, _ := http.NewRequest(http.MethodGet, ts.URL+path+"?token="+id.token, nil)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
@@ -526,12 +580,46 @@ func TestAuthMatrix(t *testing.T) {
 		}
 	}
 
+	// The invoke_agent span's tool overrides are tool names: a
+	// read-scoped token's spans, trace and json/jsonl export carry none
+	// of them (the named tool choice keeps its mode); every other
+	// identity reads them.
+	for _, id := range identities {
+		if id.kind == "bad" {
+			continue
+		}
+		for _, path := range []string{"/api/runs/run_a/spans", "/api/traces/" + trace["A"],
+			"/api/runs/run_a/export?format=json", "/api/runs/run_a/export?format=jsonl"} {
+			req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+			req.Header.Set("Authorization", "Bearer "+id.token)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode != ok {
+				t.Errorf("%s as %s = %d, want 200", path, id.name, resp.StatusCode)
+				continue
+			}
+			for k, v := range overrideNames {
+				if got, want := strings.Contains(string(b), v), id.kind != "read"; got != want {
+					t.Errorf("%s as %s: %s (%s) present = %v, want %v", path, id.name, k, v, got, want)
+				}
+			}
+			if id.kind == "read" && !strings.Contains(string(b), `"weft.override.tool_choice":"tool"`) {
+				t.Errorf("%s as %s: the named tool choice lost its mode: %s", path, id.name, b)
+			}
+		}
+	}
+
 	// A list forced onto the token's public id holds nothing of another's.
 	for _, id := range identities {
 		if id.kind != "read" && id.kind != "pg" {
 			continue
 		}
-		for _, path := range []string{"/api/runs?parent=*", "/api/runs?parent=run_b", "/api/runs?session=s_b", "/api/runs?agent=acme-support&limit=500", "/api/sessions?agent=acme-support"} {
+		for _, path := range []string{"/api/runs?parent=*", "/api/runs?all=1", "/api/runs?parent=run_b",
+			"/api/runs?session=s_b", "/api/runs?agent=acme-support&limit=500", "/api/sessions?agent=acme-support"} {
 			sep := "&"
 			req, _ := http.NewRequest(http.MethodGet, ts.URL+path+sep+"token="+id.token, nil)
 			resp, err := http.DefaultClient.Do(req)
@@ -584,6 +672,92 @@ func TestAuthMatrix(t *testing.T) {
 		_ = resp.Body.Close()
 		if resp.StatusCode != unauthorized {
 			t.Errorf("POST /v1/logs?token= = %d, want 401", resp.StatusCode)
+		}
+	}
+}
+
+// TestSpansHideOverrideTools, through the real pipeline: a run started
+// with OnlyTools and ParkOn carries the tool names on its invoke_agent
+// span (core's weft.override.*). A read-scoped panel token's spans,
+// trace and json/jsonl export hold none of them; a playground-scoped
+// token reads them.
+func TestSpansHideOverrideTools(t *testing.T) {
+	const tok = "srv-token"
+	srv := New(Open(t.TempDir()+"/weft.db"), Token(tok))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(ts.URL, tok), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	noop := func(context.Context, struct{}) (string, error) { return "ok", nil }
+	agent := core.New(wefttest.Script(wefttest.Say("done")), core.Name("ov"),
+		core.Tool("alpha_secret_tool", "A.", noop), core.Tool("beta_secret_tool", "B.", noop), core.Tool("gamma_tool", "C.", noop),
+		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	if _, err := agent.Generate(ctx, core.RunID("r_ov"), core.Prompt("go"), core.Metadata(map[string]string{"weft.public_id": "pub_a"}),
+		core.OnlyTools("alpha_secret_tool", "beta_secret_tool"), core.ParkOn("beta_secret_tool")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	sign := func(scope string) string {
+		s, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scope, Exp: time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	get := func(path, bearer string) string {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s = %d %s", path, resp.StatusCode, b)
+		}
+		return string(b)
+	}
+	var doc struct {
+		Spans []struct {
+			TraceID string         `json:"trace_id"`
+			Attrs   map[string]any `json:"attrs"`
+		} `json:"spans"`
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		decode(t, get("/api/runs/r_ov/spans", tok), &doc)
+		found := false
+		for _, sp := range doc.Spans {
+			found = found || sp.Attrs["weft.override.tools"] != nil
+		}
+		if found {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no span carries weft.override.tools: %+v", doc.Spans)
+		}
+	}
+	paths := []string{"/api/runs/r_ov/spans", "/api/traces/" + doc.Spans[0].TraceID,
+		"/api/runs/r_ov/export?format=json", "/api/runs/r_ov/export?format=jsonl"}
+	for _, c := range []struct {
+		scope string
+		see   bool
+	}{{scopeRead, false}, {scopePlayground, true}} {
+		bearer := sign(c.scope)
+		for _, path := range paths {
+			body := get(path, bearer)
+			for _, name := range []string{"weft.override.tools", "weft.override.park_on", "alpha_secret_tool", "beta_secret_tool"} {
+				if strings.Contains(body, name) != c.see {
+					t.Errorf("%s as a %s token: %s present = %v, want %v", path, c.scope, name, !c.see, c.see)
+				}
+			}
 		}
 	}
 }

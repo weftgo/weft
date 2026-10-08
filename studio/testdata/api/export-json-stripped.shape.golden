@@ -98,6 +98,11 @@
 .run.children[].experiment_id=string
 .run.children[].finished=string
 .run.children[].forked_from=string
+.run.children[].holes[]
+.run.children[].holes[].fix=string
+.run.children[].holes[].hole=string
+.run.children[].holes[].reason=string
+.run.children[].holes[]{}
 .run.children[].id=string
 .run.children[].instructions_hash=string
 .run.children[].last_seen=string

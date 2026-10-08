@@ -13,6 +13,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -657,13 +659,23 @@ func TestExportPanelTokens(t *testing.T) {
 		}
 	}
 	read := sign(scopeRead)
+	const viewText = "summary: the order was looked up" // step 2's compaction view: request content
 	for _, format := range []string{"json", "jsonl"} {
 		code, body := get(format, read)
 		if code != http.StatusOK || !strings.Contains(body, `"badge":"hidden"`) || strings.Contains(body, "You are a support agent.") ||
 			!strings.Contains(body, `refund order 42`) {
 			t.Errorf("read token %s = %d, want 200 with the transcript, the request block hidden and no prompt:\n%s", format, code, body)
 		}
+		if strings.Contains(body, viewText) || !regexp.MustCompile(`"scope":"run"[^{}]*"messages":null[^{}]*"badge":"hidden"`).MatchString(body) {
+			t.Errorf("read token %s carries the compaction view's body, or no hidden badge in its place:\n%s", format, body)
+		}
 	}
+	for _, bearer := range []string{sign(scopePlayground), tok} {
+		if _, body := get("json", bearer); !strings.Contains(body, viewText) {
+			t.Errorf("a prompt-reading identity's json lacks the compaction view's body")
+		}
+	}
+
 	for _, format := range []string{"otlp", "wefttest"} {
 		code, body := get(format, read)
 		if code != http.StatusForbidden || !strings.Contains(body, `"badge":"hidden"`) || strings.Contains(body, "You are a support agent.") {
@@ -866,5 +878,166 @@ func TestExportDownloadHeaders(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || len(b) != 0 || resp.Header.Get("Content-Length") != strconv.Itoa(len(body)) ||
 		resp.Header.Get("Content-Disposition") != `attachment; filename="r_head.json"` {
 		t.Errorf("HEAD = %d, %d body bytes, length %q, disposition %q", resp.StatusCode, len(b), resp.Header.Get("Content-Length"), resp.Header.Get("Content-Disposition"))
+	}
+}
+
+// TestExportHolesFromEvents: the export's holes name what any event
+// says, not only the run's first or last — a tool result a
+// destination's cap cut (truncated), a later event a content-off chain
+// stripped, a step before the last that finished on the output token
+// limit (max_tokens).
+func TestExportHolesFromEvents(t *testing.T) {
+	ts, srv := requestsServer(t)
+	writeHand(t, srv.db, "r_evh", time.Now().UTC().Add(-time.Hour), map[string]any{}, []handRec{
+		ev(0, `{"type":"run_start","id":"r_evh","model":{"provider":"p","name":"m"},"agent":"hand"}`),
+		ev(1, `{"type":"step_start","run_id":"r_evh","index":0}`),
+		{kind: "event", pos: 2, body: `{"type":"step_finish","run_id":"r_evh","index":0,"reason":"max_tokens","usage":{"input_tokens":1,"output_tokens":1}}`},
+		ev(3, `{"type":"step_start","run_id":"r_evh","index":1}`),
+		{kind: "event", pos: 4, body: `{"type":"tool_start","run_id":"r_evh","seq":1,"call_id":"c1","name":"t","args":null}`,
+			extra: map[string]any{"weft.content": "stripped"}},
+		{kind: "event", pos: 5, body: `{"type":"tool_finish","run_id":"r_evh","seq":2,"call_id":"c1","name":"t","content":"xx","is_error":false}`,
+			extra: map[string]any{"weft.content.truncated_bytes": int64(12)}},
+		ev(6, `{"type":"step_finish","run_id":"r_evh","index":1,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
+		ev(7, `{"type":"run_finish","run_id":"r_evh","usage":{"input_tokens":2,"output_tokens":2},"steps":2}`),
+	})
+	_, body := exportGet(t, ts, "/api/runs/r_evh/export?format=json", nil)
+	var d exportDocT
+	decode(t, string(body), &d)
+	for _, want := range []string{"truncated", "stripped", "max_tokens"} {
+		if !slices.Contains(strings.Split(d.holes(), ","), want) {
+			t.Errorf("export holes = %s, want %s", d.holes(), want)
+		}
+	}
+	_, lines := exportGet(t, ts, "/api/runs/r_evh/export?format=jsonl", nil)
+	for _, want := range []string{`"hole":"truncated"`, `"hole":"stripped"`, `"hole":"max_tokens"`} {
+		if !strings.Contains(strings.SplitN(string(lines), "\n", 2)[0], want) {
+			t.Errorf("jsonl run line lacks %s", want)
+		}
+	}
+}
+
+// failEventsDB is an obsdb.DB whose Events read of one run fails.
+type failEventsDB struct {
+	obsdb.DB
+	run string
+}
+
+func (d failEventsDB) Events(ctx context.Context, id string, after int64, limit int) (obsdb.EventPage, error) {
+	if id == d.run {
+		return obsdb.EventPage{}, errors.New("unreadable")
+	}
+	return d.DB.Events(ctx, id, after, limit)
+}
+
+// TestChildHoles: the run page and the export carry each child's holes
+// (one helper, childRows), and a child whose holes cannot be read goes
+// out without them — its parent's page and export still answer 200.
+func TestChildHoles(t *testing.T) {
+	_, base := requestsServer(t)
+	at := time.Now().UTC().Add(-time.Hour)
+	writeHand(t, base.db, "r_kids", at, map[string]any{}, []handRec{
+		ev(0, `{"type":"run_start","id":"r_kids","model":{"provider":"p","name":"m"},"agent":"hand"}`),
+		ev(1, `{"type":"run_finish","run_id":"r_kids","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
+	})
+	for _, kid := range []string{"r_kids/0/ok", "r_kids/0/bad"} {
+		// No run_finish, an hour quiet: interrupted, a hole to carry.
+		writeHand(t, base.db, kid, at, map[string]any{"weft.parent.run.id": "r_kids", "weft.parent.call.id": kid[len("r_kids/0/"):]}, []handRec{
+			ev(0, `{"type":"run_start","id":"`+kid+`","model":{"provider":"p","name":"m"},"agent":"hand"}`),
+		})
+	}
+	srv := New(DB(failEventsDB{DB: base.db, run: "r_kids/0/bad"}))
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	type kidT struct {
+		ID    string `json:"id"`
+		Holes []struct {
+			Hole string `json:"hole"`
+		} `json:"holes"`
+	}
+	check := func(where string, kids []kidT) {
+		t.Helper()
+		if len(kids) != 2 {
+			t.Fatalf("%s children = %+v, want 2", where, kids)
+		}
+		for _, k := range kids {
+			switch k.ID {
+			case "r_kids/0/ok":
+				if len(k.Holes) == 0 || k.Holes[0].Hole != "interrupted" {
+					t.Errorf("%s: child ok holes = %+v, want interrupted", where, k.Holes)
+				}
+			case "r_kids/0/bad":
+				if len(k.Holes) != 0 {
+					t.Errorf("%s: unreadable child holes = %+v, want none", where, k.Holes)
+				}
+			}
+		}
+	}
+	var page struct {
+		Children []kidT `json:"children"`
+	}
+	decode(t, fetchJSON(t, ts, "/api/runs/r_kids", nil), &page)
+	check("run page", page.Children)
+	var x struct {
+		Run struct {
+			Children []kidT `json:"children"`
+		} `json:"run"`
+	}
+	_, body := exportGet(t, ts, "/api/runs/r_kids/export?format=json", nil)
+	decode(t, string(body), &x)
+	check("export", x.Run.Children)
+}
+
+// TestLostEventsOneRule: the run document's holes and the export's
+// events block read a run with no stored event by one rule
+// (lostEvents): request records but no event is a gap, with the same
+// reason on both; spans alone are derived (the row built from them);
+// neither — a row whose only record is a messages batch — is nothing,
+// never "built from its spans".
+func TestLostEventsOneRule(t *testing.T) {
+	ts, srv := requestsServer(t)
+	old := time.Now().UTC().Add(-time.Hour)
+	writeHand(t, srv.db, "r_reqonly", old, map[string]any{}, []handRec{
+		{kind: "request", pos: 0, body: reqBody(0, `{"count":1}`), extra: map[string]any{"weft.step.index": int64(0)}},
+	})
+	writeHand(t, srv.db, "r_spanonly", old, map[string]any{}, nil, obsdb.Span{SpanID: "d0000000000000a1", Name: "invoke_agent hand", Kind: 1,
+		StatusCode: 1, Attrs: map[string]any{"gen_ai.operation.name": "invoke_agent"}})
+	if err := srv.db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{{
+		Time: old, EventName: "weft.messages", Severity: 9, Body: `[{"role":"user","content":[{"type":"text","text":"hi"}]}]`, Service: "svc",
+		Attrs: map[string]any{"weft.record": "messages", "weft.run.id": "r_msgonly", "gen_ai.agent.name": "hand",
+			"weft.messages.index": int64(0), "weft.messages.count": int64(1)},
+		Resource: map[string]any{"service.name": "svc"},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	type holeT struct{ Hole, Reason, Fix string }
+	for _, c := range []struct {
+		run, want string // the lost-events badge, "" for none
+	}{{"r_reqonly", "gap"}, {"r_spanonly", "derived"}, {"r_msgonly", ""}} {
+		var doc struct {
+			Holes []holeT `json:"holes"`
+		}
+		decode(t, fetchJSON(t, ts, "/api/runs/"+c.run, nil), &doc)
+		var x struct {
+			Events struct {
+				Badge, Reason, Fix string
+			} `json:"events"`
+		}
+		_, body := exportGet(t, ts, "/api/runs/"+c.run+"/export?format=json", nil)
+		decode(t, string(body), &x)
+		var runHole *holeT
+		for i := range doc.Holes {
+			if h := doc.Holes[i].Hole; h == "gap" || h == "derived" {
+				runHole = &doc.Holes[i]
+			}
+		}
+		switch {
+		case c.want == "":
+			if runHole != nil || x.Events.Badge != "" {
+				t.Errorf("%s: run hole %+v, events badge %q, want neither", c.run, runHole, x.Events.Badge)
+			}
+		case runHole == nil || runHole.Hole != c.want || x.Events.Badge != c.want ||
+			runHole.Reason != x.Events.Reason || runHole.Fix != x.Events.Fix:
+			t.Errorf("%s: run hole %+v, events %+v, want %s on both, worded alike", c.run, runHole, x.Events, c.want)
+		}
 	}
 }

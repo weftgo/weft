@@ -485,6 +485,22 @@ describe("applyTranscript and the input record", () => {
     expect(view.steps[0].text).toBe("turn two's reply")
   })
 
+  it("writes onto clones: a delta folded afterwards never lands on the transcript's words", () => {
+    const feed = newFold()
+    feed.push({ type: "run_start", id: "rc" } as WireEvent)
+    feed.push({ type: "step_start", index: 0 } as WireEvent)
+    feed.push({ type: "text_delta", text: "Hel" } as WireEvent)
+    const before = feed.result()
+    const view = applyTranscript(before, [{ messages: [assistant("Hello world")] }], {
+      replace: true,
+    })
+    expect(view.steps[0].text).toBe("Hello world")
+    expect(before.steps[0].text).toBe("Hel")
+    feed.push({ type: "text_delta", text: "lo" } as WireEvent)
+    expect(feed.result().steps[0].text).toBe("Hello")
+    expect(view.steps[0].text).toBe("Hello world")
+  })
+
   it("splits the transcript into what was fed and what was produced", () => {
     const { input, produced } = splitTranscript(turn2)
     expect(input.map((m) => m.role)).toEqual(["user", "assistant", "user"])
@@ -964,6 +980,18 @@ describe("content attrs → badges", () => {
       { hole: "compacted", reason: "r" },
     ])
   })
+
+  it("ignores a step doc read while the step ran: its holes are the moment's", () => {
+    const view = fold([
+      { type: "run_start", id: "r" },
+      { type: "step_start", index: 0 },
+    ] as WireEvent[])
+    const doc = { status: "running", holes: [{ hole: "gap", reason: "no spans yet" }] }
+    expect(stepHoles(view.steps[0], [], doc)).toEqual([])
+    expect(stepHoles(view.steps[0], [], { ...doc, status: "ok" }).map((h) => h.hole)).toEqual([
+      "gap",
+    ])
+  })
 })
 
 // A10: a resumed run's step 0 may hold two calls with one id — the
@@ -1001,5 +1029,64 @@ describe("linkView on a repeated call id inside a resumed step", () => {
   it("links each child once: a second pass changes nothing", () => {
     const view = linkView(linkView(fold(events), [own, resumed]), [resumed, own])
     expect(view.steps[0].toolCalls.map((c) => c.childRunId)).toEqual([resumed.id, own.id])
+  })
+})
+
+// The page links on every render, and the view's calls are the feed's
+// own objects: a second pass must not hand an already-linked child to
+// the next free call with its id (step 1's plain "call_0" drawing step
+// 0's subagent).
+describe("linkView is idempotent when calls outnumber children", () => {
+  const R = "r_idem"
+  const U = { input_tokens: 1, output_tokens: 1 }
+  const events = [
+    { type: "run_start", id: R, model: { provider: "p", name: "m" } },
+    { type: "step_start", run_id: R, index: 0 },
+    { type: "tool_start", run_id: R, seq: 1, call_id: "call_0", name: "research", args: {} },
+    { type: "tool_finish", run_id: R, seq: 1, call_id: "call_0", name: "research", content: "a", is_error: false },
+    { type: "step_finish", run_id: R, index: 0, reason: "tool_calls", usage: U },
+    { type: "step_start", run_id: R, index: 1 },
+    { type: "tool_start", run_id: R, seq: 2, call_id: "call_0", name: "lookup", args: {} },
+    { type: "tool_finish", run_id: R, seq: 2, call_id: "call_0", name: "lookup", content: "b", is_error: false },
+    { type: "step_finish", run_id: R, index: 1, reason: "tool_calls", usage: U },
+  ] as WireEvent[]
+  const ids = (v: ReturnType<typeof fold>) =>
+    v.steps.map((s) => s.toolCalls.map((c) => c.childRunId ?? null))
+  for (const [label, child] of [
+    ["named child", { id: `${R}/0/call_0`, parent_run_id: R, parent_call_id: "call_0" }],
+    ["unnamed child", { id: "legacy-child", parent_run_id: R, parent_call_id: "call_0" }],
+  ] as const) {
+    it(`a second and third pass link the same one call (${label})`, () => {
+      const feed = newFold()
+      events.forEach((e) => feed.push(e))
+      const first = ids(linkView(feed.result(), [child]))
+      expect(first).toEqual([[child.id], [null]])
+      expect(ids(linkView(feed.result(), [child]))).toEqual(first)
+      expect(ids(linkView(feed.result(), [child]))).toEqual(first)
+    })
+  }
+  it("a pass with fewer children drops the links it no longer has", () => {
+    const feed = newFold()
+    events.forEach((e) => feed.push(e))
+    const child = { id: `${R}/1/call_0`, parent_run_id: R, parent_call_id: "call_0" }
+    linkView(feed.result(), [child])
+    expect(ids(linkView(feed.result(), []))).toEqual([[null], [null]])
+  })
+})
+
+// A finish with a repeated id closes the most recent open call.
+describe("tool_finish closes the most recent open call with its id", () => {
+  it("two open calls with one id in a step: the later closes first", () => {
+    const view = fold([
+      { type: "run_start", id: "r" },
+      { type: "step_start", index: 0 },
+      { type: "tool_start", call_id: "c", name: "a", args: {} },
+      { type: "tool_start", call_id: "c", name: "b", args: {} },
+      { type: "tool_finish", call_id: "c", name: "b", content: "B", is_error: false },
+    ] as WireEvent[])
+    expect(view.steps[0].toolCalls.map((c) => [c.name, c.state])).toEqual([
+      ["a", "running"],
+      ["b", "done"],
+    ])
   })
 })

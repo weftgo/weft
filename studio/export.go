@@ -109,6 +109,7 @@ func (s *Server) serveRunExport(w http.ResponseWriter, r *http.Request, id strin
 		dbError(w, r, "run", id, err)
 		return
 	}
+	x.spans = spansFor(r, x.spans)
 	var body []byte
 	switch name {
 	case "json":
@@ -259,6 +260,10 @@ type runExport struct {
 	catalogs    []exportRef
 	spans       []obsdb.Span
 	runHoles    []stepHole // the run's own (runHoles), as /api/runs/{id} serves them
+	children    []runRow   // the run's children with their holes (childRows), as /api/runs/{id} serves them
+	// hidden: the identity is a read-scoped panel token — the request
+	// block and the compaction views' bodies are not its.
+	hidden bool
 	// stripped is whether any request record came through a content-off
 	// chain — read even when the request block is hidden, so a read
 	// token's transcript badge says stripped, not gap.
@@ -292,7 +297,7 @@ func (s *Server) collectExport(ctx context.Context, id string, hidden bool) (*ru
 	if err != nil {
 		return nil, err
 	}
-	x := &runExport{run: det}
+	x := &runExport{run: det, hidden: hidden, children: s.childRows(ctx, det.Children)}
 	if x.runHoles, err = s.runHoles(ctx, det.RunRow); err != nil {
 		return nil, err
 	}
@@ -414,6 +419,8 @@ type exportTranscript struct {
 // exportCompaction is one obsdb.Compaction: a run-scope view (index,
 // step, the replaced range and the messages that stood in) or a
 // session marker (reason, counts, token estimates; index and step -1).
+// A view's messages are the request's content: for a read-scoped
+// panel token they are null under the hidden badge.
 type exportCompaction struct {
 	Scope        string          `json:"scope"`
 	Hash         string          `json:"hash"`
@@ -427,6 +434,7 @@ type exportCompaction struct {
 	Entries      int             `json:"entries"`
 	TokensBefore int64           `json:"tokens_before"`
 	TokensAfter  int64           `json:"tokens_after"`
+	badgeFields
 }
 
 // exportRequests is the request block: every request record as the
@@ -449,9 +457,9 @@ type exportBlock struct {
 }
 
 func (x *runExport) runDoc() runDoc {
-	doc := runDoc{runRow: row(x.run.RunRow), Children: make([]runRow, 0, len(x.run.Children))}
-	for _, kid := range x.run.Children {
-		doc.Children = append(doc.Children, row(kid))
+	doc := runDoc{runRow: row(x.run.RunRow), Children: x.children}
+	if doc.Children == nil {
+		doc.Children = []runRow{}
 	}
 	doc.Holes = x.runHoles
 	return doc
@@ -465,7 +473,14 @@ func (x *runExport) eventsBlock() exportEvents {
 	for _, pe := range x.events {
 		out.Events = append(out.Events, posEventOf(pe))
 	}
-	if len(x.gaps) > 0 || (len(x.events) == 0 && x.run.Steps > 0) {
+	switch {
+	case len(x.events) == 0:
+		// The run document's rule (lostEvents), word for word.
+		if lost := lostEvents(x.run.RunRow, len(x.spans) > 0); len(lost) > 0 {
+			out.badgeFields = lost[0]
+		}
+
+	case len(x.gaps) > 0 && x.run.Status != obsdb.StatusRunning:
 		out.badgeFields = badgeOf(obsdb.HoleGap)
 	}
 	return out
@@ -498,13 +513,16 @@ func (x *runExport) compactionsBlock() []exportCompaction {
 	out := make([]exportCompaction, 0, len(x.compactions))
 	for _, c := range x.compactions {
 		msgs := c.Messages
+		var badge badgeFields
 		if len(msgs) == 0 {
 			msgs = json.RawMessage("null")
+		} else if x.hidden {
+			msgs, badge = json.RawMessage("null"), badgeOf(obsdb.HoleHidden)
 		}
 		out = append(out, exportCompaction{
 			Scope: c.Scope, Hash: c.Hash, Index: c.Index, Step: c.Step, FromSeq: c.FromSeq, ToSeq: c.ToSeq,
 			Messages: rawOrNull(string(msgs)), Reason: c.Reason, Replaced: c.Replaced, Entries: c.Entries,
-			TokensBefore: c.TokensBefore, TokensAfter: c.TokensAfter,
+			TokensBefore: c.TokensBefore, TokensAfter: c.TokensAfter, badgeFields: badge,
 		})
 	}
 	return out
@@ -570,6 +588,25 @@ func (x *runExport) holes(blocks []exportBlock) []stepHole {
 	if x.run.StopReason == "max_tokens" {
 		hs.note(obsdb.HoleMaxTokens)
 	}
+	// What the events say beyond the run's first: any event a
+	// destination's cap cut or a content-off chain stripped, and any
+	// step that finished on the output token limit (not only the last).
+	for _, pe := range x.events {
+		if pe.TruncatedBytes > 0 {
+			hs.note(obsdb.HoleTruncated)
+		}
+		if pe.Content == "stripped" || pe.Content == "none" {
+			hs.note(obsdb.HoleStripped)
+		}
+		var h struct {
+			Type   string `json:"type"`
+			Reason string `json:"reason"`
+		}
+		if json.Unmarshal(pe.Event, &h) == nil && h.Type == "step_finish" && h.Reason == "max_tokens" {
+			hs.note(obsdb.HoleMaxTokens)
+		}
+	}
+
 	if x.run.Status == obsdb.StatusInterrupted {
 		hs.note(obsdb.HoleInterrupted)
 	}

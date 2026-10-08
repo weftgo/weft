@@ -13,6 +13,7 @@ import {
   contentHoles,
   holeWords,
   isHole,
+  statusHoles,
   kib,
   mergeHoles,
 } from "./honesty"
@@ -96,5 +97,20 @@ describe("the honesty table", () => {
       { hole: "stripped" },
       { hole: "not_recorded" },
     ])
+  })
+})
+
+// One rule on both surfaces (the run page's header, the panel's turn).
+describe("statusHoles", () => {
+  it("interrupted, max_tokens from the stop reason, a gap only once the run is over", () => {
+    expect(statusHoles({ status: "running", gaps: [4] })).toEqual([])
+    expect(statusHoles({ gaps: [4] })).toEqual([])
+    expect(statusHoles({ status: "failed", gaps: [4, 5] })).toEqual([
+      { hole: "gap", reason: "2 events missing (positions 4, 5): a destination dropped a batch" },
+    ])
+    expect(statusHoles({ status: "succeeded", stop_reason: "max_tokens" })).toEqual([
+      { hole: "max_tokens" },
+    ])
+    expect(statusHoles({ status: "interrupted" })).toEqual([{ hole: "interrupted" }])
   })
 })

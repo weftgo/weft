@@ -853,17 +853,27 @@ export interface RunRequestsDoc extends Holed {
 /**
  * fetchAllRequests reads the run's request record from where `prev`
  * left off: a poll of a running run asks only for the rows past the
- * last index it holds (an explicit from — next_from appears only on a
- * full page) and appends them, prompts and catalogs inline for the new
- * rows alone. The stripped note is read once. A cursor that does not
- * move forward ends the walk.
+ * contiguous prefix it holds (an explicit from — next_from appears
+ * only on a full page) and appends them, prompts and catalogs inline
+ * for the new rows alone. Rows are ingested out of order: when the
+ * held indexes skip one, the read restarts at the first missing index
+ * (the rows past it are read again), so a row landing below the
+ * high-water mark is read on the next poll. `full` — the run is over —
+ * reads the whole record from the top. The stripped note is read once.
+ * A cursor that does not move forward ends the walk.
  */
 export async function fetchAllRequests(
   runId: string,
-  prev?: RunRequestsDoc
+  prev?: RunRequestsDoc,
+  opts?: { full?: boolean }
 ): Promise<RunRequestsDoc> {
   const base = prev && !prev.badge ? prev : undefined
-  const rows: RequestRow[] = base ? [...base.requests] : []
+  const held = opts?.full || !base ? [] : [...base.requests].sort((a, b) => a.index - b.index)
+  // The contiguous prefix 0..n-1: what is past its first hole is read
+  // again.
+  let keep = 0
+  while (keep < held.length && held[keep].index === keep) keep++
+  const rows: RequestRow[] = held.slice(0, keep)
   let from: number | undefined = rows.length ? rows[rows.length - 1].index + 1 : undefined
   for (;;) {
     const page = await fetchRequests(runId, { from, limit: 1000 })
@@ -888,8 +898,14 @@ export function requestsQuery(runId: string) {
   return queryOptions({
     queryKey: ["requests", runId],
     staleTime: 30_000,
-    queryFn: ({ client, queryKey }) =>
-      fetchAllRequests(runId, client.getQueryData<RunRequestsDoc>(queryKey)),
+    queryFn: ({ client, queryKey }) => {
+      // A run that is over is read whole: its last read must not trust
+      // an incremental cursor that a late, out-of-order row fell below.
+      const status = client.getQueryData<RunDoc>(runQuery(runId).queryKey)?.status
+      return fetchAllRequests(runId, client.getQueryData<RunRequestsDoc>(queryKey), {
+        full: status !== undefined && status !== "running",
+      })
+    },
   })
 }
 
@@ -920,8 +936,10 @@ export interface StepAttempt {
   span_id?: string
   /** The attempt's request record index (the requests route's row). */
   request_index?: number
-  /** "derived": the attempt was told from the step's events alone (no
-   * span named it) — its number may then be 0. */
+  /** "derived": the attempt's request record carried no attempt
+   * number (its body did not parse). With attempt 0 it is listed by its
+   * request index (request_index); with a number, it was joined to the
+   * first attempt the spans time. */
   badge?: "derived"
 }
 
@@ -1022,6 +1040,10 @@ export function stepQuery(runId: string, n: number) {
   return queryOptions({
     queryKey: ["step", runId, n],
     queryFn: () => fetchStep(runId, n),
+    // A step read while running carries running-time holes (no spans
+    // yet): an observer that fetches it re-reads it until it is over.
+    // The run page also invalidates ["step", id] when the run ends.
+    refetchInterval: (q) => (q.state.data?.status === "running" ? 2000 : false),
   })
 }
 

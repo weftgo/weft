@@ -82,7 +82,7 @@ the hand-off only) and a spans waterfall.
 backend mints per page via `POST /api/panel-tokens`). No Studio
 answering: the panel removes itself silently. The artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 107,693 B raw / 29.7 KiB gzip;
+committed `studio/dist/panel/panel.js`, 108,579 B raw / 29.9 KiB gzip;
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 
@@ -181,7 +181,11 @@ step, from_seq, to_seq, hash, replaced, entries}` and thread's session
 markers `{scope: "session", hash, replaced, entries, tokens_before?,
 tokens_after?, reason}`, counts and hashes only, `[]` when none),
 `runs/{id}/events?after=&limit=` (the paged durable stream),
-`runs/{id}/transcript` (the messages bodies), `runs/{id}/spans`,
+`runs/{id}/transcript` (the messages bodies), `runs/{id}/spans` (for a
+read-scoped panel token — here, in `traces/{trace_id}` and in the
+export alike — without the tool names a run's overrides put on its
+invoke_agent span: `weft.override.tools`, `park_on`,
+`park_all_except`, and a named `tool_choice` cut to its mode),
 `runs/{id}/requests?step=&from=&limit=&refs=1` (one row per model-call
 attempt, the prompt and catalog its hashes name inline unless `refs=1`,
 `next_from` while pages are full) and `runs/{id}/tools` (the run's
@@ -231,11 +235,16 @@ in OTLP/JSON, which `POST /v1/logs` and `/v1/traces` read back into the
 same run; `wefttest` is the run's model calls as replay fixtures,
 zipped flat — unzip into `testdata/<TestName>/` and `wefttest.Replay`
 answers, a step whose request carried a compaction view keyed on it
-and noted `compacted_at`. A read-scoped panel token gets `json` and
-`jsonl` with the request block `{badge: "hidden", …}`; `otlp` and
+and noted `compacted_at`. The run block's children carry their `holes`
+as `runs/{id}` serves them. A read-scoped panel token gets `json` and
+`jsonl` with the request block `{badge: "hidden", …}` and each
+compaction view's `messages` null under the same badge; `otlp` and
 `wefttest` are 403 with that badge),
 `traces/{trace_id}` (any trace), `sessions`, `sessions/{id}` (turns in
-order), `public/{public_id}`, `manifest`, `POST /api/panel-tokens`
+order), `public/{public_id}`, `manifest` (it carries the agents' system
+prompts: 403 with `badge: "hidden"` to a read-scoped panel token),
+`POST /api/panel-tokens`
+
 (mint; the panel's scoped tokens — see the devtools panel above), and
 `GET /api/live` — the SSE
 stream whose frame ids are the hub's Seq: exactly one selector
@@ -284,7 +293,7 @@ make studio-check   # rebuild, prove dist is fresh, check the 600 KiB gzip budge
 
 `make studio-check` is the freshness gate (ADR 0018 §4): it fails if
 `dist/` does not match `web/` or if the gzipped total exceeds 600 KiB
-(currently ~371 KiB: the app's ~347 plus the panel bundle's ~24).
+(currently ~388 KiB: the app's ~358 plus the panel bundle's ~30).
 The build is deterministic — two builds from
 one tree are byte-identical (`scripts/clean-dist.ts` pins the router's
 prerender timestamp and keeps `<base href>` first in `<head>`).

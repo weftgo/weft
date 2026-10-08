@@ -266,10 +266,10 @@ describe("the step story's attempts and timing (A4.2)", () => {
       return p!
     })
     expect(pane.querySelector('[data-hole="not_recorded"]')).toBeTruthy()
-    expect(pane.textContent).toContain(
-      "the run has no spans: it was recorded without a tracer, or by a weft without attempt reporting (A4)"
-    )
-    expect(pane.textContent).toContain("upgrade weft and re-run")
+    // The badge's words are Go's (the golden's attempts_badge).
+    const badge = golden<StepDoc>("step-not-recorded").attempts_badge!
+    expect(pane.textContent).toContain(badge.reason!)
+    expect(pane.textContent).toContain(badge.fix!)
     expect(pane.querySelectorAll("[data-attempt]").length).toBe(0)
   })
 
@@ -488,5 +488,98 @@ describe("the step story's attempts and timing (A4.2)", () => {
     open[1] = { ...open[1], status: "unset" }
     const two = await chatFacts(open)
     expect(two.attempts).toBe("2")
+  })
+
+  it("a step doc read while running drops its running-time holes, and the run's end reads it again", async () => {
+    const run = "r_live_step"
+    let ended = false
+    const finished: RunDoc = { ...rOK, id: run, steps: 1, children: [] }
+    const running: RunDoc = { ...finished, status: "running", finished: null }
+    const live: StepDoc = {
+      ...step0,
+      run_id: run,
+      status: "running",
+      attempts: [],
+      attempts_badge: { badge: "not_recorded", reason: "no spans yet" },
+      holes: [{ hole: "gap", reason: "no spans yet" }],
+    }
+    studio = new FakeStudio()
+      .on("GET meta", meta(["requests", "steps", "ingest"]))
+      .on(`GET runs/${run}`, () => (ended ? finished : running))
+      .on(`GET runs/${run}/events`, pagedEvents(streamOf(run, bareStep(run, {})), { done: () => ended }))
+      .on(`GET runs/${run}/transcript`, transcriptOf([]))
+      .on(`GET runs/${run}/spans`, { spans: [] })
+      .on(`GET runs/${run}/requests`, pagedRequests(recorded()))
+      .on(`GET runs/${run}/steps/0`, () => (ended ? { ...step0, run_id: run } : live))
+      .install()
+    renderApp(`/runs/${run}?view=story`)
+    await waitFor(() => expect(attemptsSection()).toBeTruthy())
+    openAttempts()
+    await waitFor(() =>
+      expect(attemptsSection().querySelector("[data-attempts-pane]")).toBeTruthy()
+    )
+    // Running: the doc's "no spans yet" is about the moment — neither
+    // the pane nor the card badges it.
+    expect(attemptsSection().textContent).not.toContain("no spans yet")
+    expect(card().querySelector('[data-holes] [data-hole="gap"]')).toBeNull()
+    ended = true
+    await waitFor(() =>
+      expect(attemptsSection().querySelectorAll("[data-attempt]").length).toBe(4)
+    )
+    expect(attemptsSection().querySelector("[data-hole]")).toBeNull()
+    expect(card().textContent).not.toContain("no spans yet")
+  })
+
+  it("a derived attempt with no number reads as its request, with the reason Go gives", async () => {
+    const run = step0.run_id
+    serve({
+      run,
+      events: streamOf(run, step0.events.map((e) => e.event)),
+      steps: ["0"],
+      requests: recorded(),
+    })
+    studio.on(`GET runs/${run}/steps/0`, {
+      ...step0,
+      attempts: [
+        ...step0.attempts,
+        { attempt: 0, model: "glm-b", request_index: 7, badge: "derived" },
+      ],
+    })
+    renderApp(`/runs/${run}?view=story`)
+    await waitFor(() => expect(attemptsSection()).toBeTruthy())
+    openAttempts()
+    await waitFor(() =>
+      expect(attemptsSection().querySelectorAll("[data-attempt]").length).toBe(5)
+    )
+    const derived = attemptsSection().querySelector<HTMLElement>('[data-attempt="0"]')!
+    expect(derived.textContent).toContain("request #7")
+    expect(derived.textContent).not.toContain("attempt 0")
+    expect(derived.querySelector('[data-hole="derived"]')?.getAttribute("title")).toContain(
+      "this request record's body did not parse: listed by its request index"
+    )
+  })
+
+  it("a collapsed attempt list counts only past one, as the request section does", async () => {
+    const run = step0.run_id
+    const all = recorded().requests
+    serve({
+      run,
+      events: streamOf(run, step0.events.map((e) => e.event)),
+      steps: ["0"],
+      requests: { requests: [{ ...all[3], index: 0, attempt: 1 }] },
+    })
+    renderApp(`/runs/${run}?view=story`)
+    await waitFor(() => expect(attemptsSection()).toBeTruthy())
+    await waitFor(() => expect(studio.calls(`GET runs/${run}/requests`).length).toBeGreaterThan(0))
+    expect(attemptsSection().textContent).not.toContain("1 attempt")
+    cleanup()
+    serve({
+      run,
+      events: streamOf(run, step0.events.map((e) => e.event)),
+      steps: ["0"],
+      requests: recorded(),
+    })
+    renderApp(`/runs/${run}?view=story`)
+    await waitFor(() => expect(attemptsSection().textContent).toContain("4 attempts"))
   })
 })

@@ -2,7 +2,17 @@
   {
     "hole": "truncated",
     "reason": "a destination's size cap cut this content before it was stored (weft.content.truncated_bytes)",
-    "fix": "raise the destination's cap: otel.Content(otel.ContentConfig{MaxBytes: …}), -1 for unlimited"
+    "fix": "raise the destination's cap: otel.Content(otel.ContentConfig{MaxBytes: …}), -1 for unlimited",
+    "causes": {
+      "log_cap": {
+        "reason": "the app-log reader's candidate cap was reached before attribution; later lines of this run may be missing",
+        "fix": "log less in the run's trace (a busy subagent or sibling run counts too); phase 2 filters by span before the cap"
+      },
+      "result_cap": {
+        "reason": "a tool result was cut by its result cap: the model saw a prefix and the marker",
+        "fix": "raise the tool's weft.MaxResultBytes"
+      }
+    }
   },
   {
     "hole": "stripped",

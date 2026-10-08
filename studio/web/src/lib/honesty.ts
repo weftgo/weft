@@ -212,6 +212,32 @@ export function rowHoles(row: {
   return mergeHoles(out)
 }
 
+/**
+ * statusHoles is what a run's header adds to the run document's holes,
+ * one rule on both surfaces (the run page's header, the panel's turn):
+ * interrupted from the row's status, max_tokens from its stop reason,
+ * and the event positions the walk found missing — a gap only once the
+ * run is over (status known and not running): while it runs a missing
+ * position may still be in flight, and the run page says so in a
+ * banner instead.
+ */
+export function statusHoles(r: {
+  status?: string
+  stop_reason?: string
+  gaps?: number[]
+}): HoleMark[] {
+  const out: HoleMark[] = []
+  if (r.status === "interrupted") out.push({ hole: "interrupted" })
+  const gaps = Array.isArray(r.gaps) ? r.gaps : []
+  if (gaps.length && r.status && r.status !== "running")
+    out.push({
+      hole: "gap",
+      reason: `${gaps.length} ${gaps.length === 1 ? "event" : "events"} missing (${gaps.length === 1 ? "position" : "positions"} ${gaps.slice(0, 8).join(", ")}${gaps.length > 8 ? ", …" : ""}): a destination dropped a batch`,
+    })
+  if (r.stop_reason === "max_tokens") out.push({ hole: "max_tokens" })
+  return out
+}
+
 /** usageKnown says whether a run row's usage is a number to show: the
  * record sets it only when the run ends (run_finish, the run span's
  * end), so a running row's zeros are "not yet" and an interrupted

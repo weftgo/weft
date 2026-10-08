@@ -6,7 +6,7 @@
 // meta.capabilities reports the playground (§8.5 item 3).
 import type { RunCompaction, RunRow, ToolCallPart, Transcript, Usage } from "../lib/api"
 import { isHoleRef } from "../lib/api"
-import { holeWords, mergeHoles, rowHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
+import { holeWords, mergeHoles, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
 import type { HoleMark } from "../lib/honesty"
 import { paramsLine, REQUEST_NOT_RECORDED_LABEL, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
 import { MAX_REQUEST_PAGES, REQUEST_PAGE } from "./client"
@@ -1359,15 +1359,14 @@ export class WeftDevtools extends HTMLElement {
  * document's and the fold's (runHoles, the run page's header), the
  * row's interrupted status and max_tokens stop, the walk's gaps. */
 export function turnHoles(t: TurnView, row?: RunRow): HoleMark[] {
-  const extra: HoleMark[] = []
-  if (row?.status === "interrupted") extra.push({ hole: "interrupted" })
-  if (t.gaps.length)
-    extra.push({
-      hole: "gap",
-      reason: `${t.gaps.length} events missing (positions ${t.gaps.slice(0, 8).join(", ")}${t.gaps.length > 8 ? ", …" : ""}): a destination dropped a batch`,
+  return mergeHoles(
+    runHoles(t.doc, t.folded),
+    statusHoles({
+      status: row?.status ?? t.doc?.status,
+      stop_reason: row?.stop_reason ?? t.doc?.stop_reason,
+      gaps: t.gaps,
     })
-  if (row?.stop_reason === "max_tokens") extra.push({ hole: "max_tokens" })
-  return mergeHoles(runHoles(t.doc, t.folded), extra)
+  )
 }
 
 /** stepOrdinal is the step being read as source.from_step counts it:

@@ -22,7 +22,7 @@ import { setStudioToken } from "@/lib/api"
 import type { RunCompaction, RunDoc } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
-import { FakeStudio, golden, pagedEvents } from "@/test/fake-studio"
+import { apiError, FakeStudio, golden, pagedEvents } from "@/test/fake-studio"
 import type { FakePosEvent } from "@/test/fake-studio"
 
 configure({ asyncUtilTimeout: 10_000 })
@@ -194,6 +194,21 @@ describe("the compaction marker on the run page (A9.2)", () => {
     })
     expect(gap.parentElement?.textContent).toContain("messages record 2 before the view is missing")
     expect(m.querySelectorAll("[data-original-seq]").length).toBe(0)
+  })
+
+  it("a transcript that could not be read says so, never loading forever", async () => {
+    serve({ transcript: () => apiError(404, "not_found", "no such transcript") })
+    renderApp(`/runs/${RUN}?view=story`)
+    const m = await marker('[data-compaction="2"]')
+    await waitFor(() => expect(studio.calls(`GET runs/${RUN}/transcript`).length).toBeGreaterThan(0))
+    showOriginal(m)
+    const gap = await waitFor(() => {
+      const g = m.querySelector<HTMLElement>('[data-compaction-original] [data-hole="gap"]')
+      expect(g).toBeTruthy()
+      return g!
+    })
+    expect(gap.getAttribute("title")).toContain("the transcript could not be read")
+    expect(m.textContent).not.toContain("loading the transcript")
   })
 
   it("a transcript body that is not a message array below the view is a gap, never a shifted range", async () => {

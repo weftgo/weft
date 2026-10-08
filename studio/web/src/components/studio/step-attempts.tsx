@@ -130,7 +130,11 @@ function AttemptRow({ a, from }: { a: StepAttempt; from?: string }) {
       data-attempt={a.attempt}
       className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[11px]"
     >
-      <span className="w-16 text-faint">attempt {a.attempt}</span>
+      <span className="w-16 text-faint">
+        {a.attempt === 0 && typeof a.request_index === "number"
+          ? `request #${a.request_index}`
+          : `attempt ${a.attempt}`}
+      </span>
       <span data-attempt-model className="text-muted-foreground">
         {a.model}
       </span>
@@ -146,7 +150,11 @@ function AttemptRow({ a, from }: { a: StepAttempt; from?: string }) {
       {a.badge === "derived" ? (
         <HoleBadge
           hole="derived"
-          reason="this attempt was told from the step's records alone: no span names it"
+          reason={
+            a.attempt === 0
+              ? "this request record's body did not parse: listed by its request index"
+              : "this attempt's request record carried no attempt number (its body did not parse): joined to the first attempt the spans time"
+          }
         />
       ) : null}
     </li>
@@ -157,7 +165,10 @@ function AttemptRow({ a, from }: { a: StepAttempt; from?: string }) {
  * words that say why there are none. */
 function AttemptsPane({ doc, running }: { doc: StepDoc; running: boolean }) {
   const rows: StepAttempt[] = Array.isArray(doc.attempts) ? doc.attempts : []
-  const badge = doc.attempts_badge
+  // A step still running has no attempt spans yet: its badge
+  // (not_recorded, "no spans yet") is about the moment, not the step —
+  // the doc is refetched until it is over (stepQuery).
+  const badge = doc.status === "running" ? undefined : doc.attempts_badge
   return (
     <div className="space-y-1.5 pt-2" data-attempts-pane>
       {badge ? (
@@ -216,8 +227,9 @@ export function AttemptsSection({
   })
   if (!capable) return null
   const running = runStatus === "running"
-  // Collapsed, the request rows say how many attempts (a step older
-  // than attempt reporting is badged on the card: stepAttemptsHole).
+  // Collapsed, the request rows say how many attempts when there was
+  // more than one, as RequestSection does (a step older than attempt
+  // reporting is badged on the card: stepAttemptsHole).
   const rows = requests?.steps.get(step.index)?.rows ?? []
   let body: React.ReactNode = null
   if (open) {
@@ -251,9 +263,9 @@ export function AttemptsSection({
           />
           attempts
         </button>
-        {!open && rows.length ? (
+        {!open && rows.length > 1 ? (
           <span className="font-mono text-[11px] text-faint">
-            {rows.length} {rows.length === 1 ? "attempt" : "attempts"}
+            {rows.length} attempts
           </span>
         ) : null}
       </div>

@@ -133,7 +133,7 @@ describe("a run written by the previous release (A3's done line)", () => {
     // (TestRunHolesPreA1), its events and transcript as v0.9.0 kept
     // them: transcript batches with no stored step.
     const doc = golden<RunDoc>("run-pre-a1")
-    expect(doc.holes?.[0].hole).toBe("not_recorded")
+    expect(doc.holes?.some((h) => h.hole === "not_recorded")).toBe(true)
     const RUN = doc.id
     new FakeStudio()
       .on("GET meta", meta(["requests", "ingest"]))
@@ -261,5 +261,53 @@ describe("transcript words whose step has no events (view.unplaced)", () => {
       ).toContain("Looking.")
     )
     expect(document.querySelector("[data-unplaced]")).toBeTruthy()
+  })
+})
+
+// The header's rule is the panel's (statusHoles): max_tokens from the
+// row's stop reason, and the walk's gaps as a gap badge once the run
+// is over — while it runs, the banner says they may be in flight.
+describe("the run header's status holes (the panel's rule)", () => {
+  const RUN = "r_status_holes"
+  function serve(status: RunDoc["status"]) {
+    const base = golden<RunDoc>("run-pre-a1")
+    const doc: RunDoc = {
+      ...base,
+      id: RUN,
+      steps: 2,
+      status,
+      finished: status === "running" ? null : base.finished,
+      stop_reason: "max_tokens",
+      instructions_hash: "h",
+      requests_badge: undefined,
+      holes: [],
+    }
+    new FakeStudio()
+      .on("GET meta", meta(["ingest"]))
+      .on(`GET runs/${RUN}`, doc)
+      .on(`GET runs/${RUN}/events`, pagedEvents(v090Events(RUN), { gaps: [3], done: status !== "running" }))
+      .on(`GET runs/${RUN}/transcript`, { batches: [] })
+      .on(`GET runs/${RUN}/spans`, { spans: [] })
+      .install()
+  }
+
+  it("a finished run badges max_tokens and the gap", async () => {
+    serve("succeeded")
+    renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-run-holes] [data-hole='gap']")).toBeTruthy()
+    )
+    const header = document.querySelector<HTMLElement>("[data-run-holes]")!
+    expect(header.querySelector("[data-hole='max_tokens']")).toBeTruthy()
+    expect(header.textContent).toContain("1 event missing (position 3)")
+  })
+
+  it("a running run badges max_tokens, and its gaps only in the banner", async () => {
+    serve("running")
+    renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() => expect(screen.getByText(/missing from the/)).toBeTruthy())
+    const header = document.querySelector<HTMLElement>("[data-run-holes]")!
+    expect(header.querySelector("[data-hole='max_tokens']")).toBeTruthy()
+    expect(header.querySelector("[data-hole='gap']")).toBeNull()
   })
 })

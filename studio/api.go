@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strconv"
+
 	"strings"
 	"time"
 
@@ -452,7 +454,54 @@ type spansDoc struct {
 	Spans []spanDTO `json:"spans"`
 }
 
+// toolNameAttrs are the invoke_agent span's per-run tool overrides
+// (core's OnlyTools, ParkOn, ParkAllExcept): comma-joined tool names —
+// a slice of the catalog, which a read-scoped panel token does not
+// read. A named tool choice (weft.override.tool_choice "named:<tool>")
+// names one too.
+var toolNameAttrs = []string{"weft.override.tools", "weft.override.park_on", "weft.override.park_all_except"}
+
+const attrOverrideToolChoice = "weft.override.tool_choice"
+
+// namesTools says whether a span carries a tool name a read-scoped
+// panel token does not read.
+func namesTools(attrs map[string]any) bool {
+	for _, k := range toolNameAttrs {
+		if _, ok := attrs[k]; ok {
+			return true
+		}
+	}
+	tc, _ := attrs[attrOverrideToolChoice].(string)
+	return strings.HasPrefix(tc, string(core.ToolChoiceNamed)+":")
+}
+
+// spansFor is the spans the request's identity may read: all of them
+// for one that reads prompts (readsPrompts); for a read-scoped panel
+// token, copies without the tool names (toolNameAttrs, a named tool
+// choice cut to its mode). Every route that serves spans goes through
+// it: spans, traces, the export.
+func spansFor(r *http.Request, list []obsdb.Span) []obsdb.Span {
+	if readsPrompts(r) {
+		return list
+	}
+	out := make([]obsdb.Span, len(list))
+	for i, sp := range list {
+		if namesTools(sp.Attrs) {
+			sp.Attrs = maps.Clone(sp.Attrs)
+			for _, k := range toolNameAttrs {
+				delete(sp.Attrs, k)
+			}
+			if tc, _ := sp.Attrs[attrOverrideToolChoice].(string); strings.HasPrefix(tc, string(core.ToolChoiceNamed)+":") {
+				sp.Attrs[attrOverrideToolChoice] = string(core.ToolChoiceNamed)
+			}
+		}
+		out[i] = sp
+	}
+	return out
+}
+
 func spans(in []obsdb.Span) spansDoc {
+
 	out := spansDoc{Spans: make([]spanDTO, 0, len(in))}
 	for _, s := range in {
 		dto := spanDTO{
@@ -730,17 +779,7 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 		dbError(w, r, "run", id, err)
 		return
 	}
-	doc := runDoc{runRow: row(det.RunRow), Children: make([]runRow, 0, len(det.Children))}
-	for _, kid := range det.Children {
-		kr := row(kid)
-		kh, err := s.runHoles(r.Context(), kid)
-		if err != nil {
-			dbError(w, r, "run", id, err)
-			return
-		}
-		kr.Holes = kh
-		doc.Children = append(doc.Children, kr)
-	}
+	doc := runDoc{runRow: row(det.RunRow), Children: s.childRows(r.Context(), det.Children)}
 	holes, err := s.runHoles(r.Context(), det.RunRow)
 	if err != nil {
 		dbError(w, r, "run", id, err)
@@ -755,13 +794,60 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	writeJSON(w, r, http.StatusOK, runPage{runDoc: doc, Compactions: runCompactions(comps)})
 }
 
+// childRows is a run document's children[] rows, each with its own
+// runHoles (plan A10) — the run page's and the export's. A child whose
+// holes cannot be read goes out without them: one unreadable child
+// never fails its parent's page.
+func (s *Server) childRows(ctx context.Context, kids []obsdb.RunRow) []runRow {
+	out := make([]runRow, 0, len(kids))
+	for _, kid := range kids {
+		kr := row(kid)
+		if kh, err := s.runHoles(ctx, kid); err == nil {
+			kr.Holes = kh
+		}
+		out = append(out, kr)
+	}
+	return out
+}
+
+// lostEvents is the one rule for a run none of whose events was stored
+// (EventCount 0) — the run document's holes and the export's events
+// block (its first) alike, in the table's order:
+//
+//   - gap: the row counts request records (the records arrived, the
+//     events beside them did not), or counts steps with no span to
+//     have counted them (a row whose events were dropped);
+//   - derived: spans hold the run — its row was built from them by the
+//     reader (a tracer without a logger records no events at all, so
+//     spans alone are no gap).
+//
+// Nothing for a run with events, or a running one (in flight).
+func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
+	if rec.EventCount > 0 || rec.Status == obsdb.StatusRunning {
+		return nil
+	}
+	var out []badgeFields
+	if rec.RequestCount > 0 || (rec.Steps > 0 && !hasSpans) {
+		out = append(out, badgeFields{Badge: string(obsdb.HoleGap),
+			Reason: "the run counts steps or model calls, but none of its events was stored: a destination dropped them",
+			Fix:    holeFix(obsdb.HoleGap)})
+	}
+	if hasSpans {
+		out = append(out, badgeFields{Badge: string(obsdb.HoleDerived),
+			Reason: "this run has spans but no stored events: its row was built from its spans by the reader",
+			Fix:    holeFix(obsdb.HoleDerived)})
+	}
+	return out
+}
+
 // runHoles is the run's own holes, from what obsdb can tell about the
 // whole run (ADR 0028 §11; plan A3):
 //
 //   - not_recorded: RequestsHole — written before the request record;
 //   - interrupted: the derived status (obsdb.InterruptedAfter);
-//   - derived: no stored event, yet the run is no longer running and
-//     never finished — its row was built from its spans alone;
+//   - gap or derived: no stored event (lostEvents) — counted steps or
+//     requests whose events were dropped, or a row built from its
+//     spans alone;
 //   - stripped: its events came through a content-off chain, or the
 //     core captured none (the run_start's weft.content: stripped or
 //     none);
@@ -780,9 +866,16 @@ func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, er
 	if rec.Status == obsdb.StatusInterrupted {
 		holes.note(obsdb.HoleInterrupted)
 	}
-	if rec.EventCount == 0 && rec.Status != obsdb.StatusRunning && rec.Status != obsdb.StatusSucceeded {
-		holes.add(obsdb.HoleDerived, "this run has spans but no stored events: its row was built from its spans by the reader", holeFix(obsdb.HoleDerived))
+	if rec.EventCount == 0 && rec.Status != obsdb.StatusRunning {
+		sp, err := s.db.RunSpans(ctx, rec.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, b := range lostEvents(rec, len(sp) > 0) {
+			holes.add(obsdb.Hole(b.Badge), b.Reason, b.Fix)
+		}
 	}
+
 	if rec.EventCount > 0 {
 		page, err := s.db.Events(ctx, rec.ID, -1, 1)
 		if err != nil {
@@ -914,7 +1007,7 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 		dbError(w, r, "spans of run", id, err)
 		return
 	}
-	writeJSON(w, r, http.StatusOK, spans(list))
+	writeJSON(w, r, http.StatusOK, spans(spansFor(r, list)))
 }
 
 // serveTrace answers api/traces/{trace_id} (S4.3): any trace, weft or
@@ -937,7 +1030,7 @@ func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
 		notFound(w, r, "no trace "+id)
 		return
 	}
-	doc := spans(list)
+	doc := spans(spansFor(r, list))
 	if !scopeSpans(w, r, doc.Spans) {
 		return
 	}
@@ -1044,8 +1137,7 @@ func (s *Server) serveManifest(w http.ResponseWriter, r *http.Request) {
 	// the same field for it): only an identity that may start
 	// experiments reads it. The panel itself never asks for it.
 	if !readsPrompts(r) {
-		writeError(w, r, http.StatusForbidden, "forbidden",
-			"the manifest carries the agents' system prompts: a read-scoped panel token does not read it")
+		refuseHidden(w, r, "the manifest carries the agents' system prompts: a read-scoped panel token does not read it")
 		return
 	}
 	if len(s.manifest) == 0 {

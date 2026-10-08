@@ -69,7 +69,8 @@ interface RunSearch {
   step?: number
   view?: View
   raw?: "events" | "doc"
-  /** The selected span's key (trace view): s0, c:call_1, t:<span id>. */
+  /** The selected span's key (trace view): s0, c:<step>:call_1 (c:resume:<id>
+   * for a resumed call), t:<span id>. */
   sel?: string
   /** The detail panel's mode (trace view). */
   d?: DetailMode
@@ -189,8 +190,12 @@ function RunPage() {
   useEffect(() => {
     const was = seenStatus.current.id === id ? seenStatus.current.status : undefined
     seenStatus.current = { id, status: loadedStatus }
-    if (was === "running" && loadedStatus && loadedStatus !== "running")
+    if (was === "running" && loadedStatus && loadedStatus !== "running") {
       void queryClient.invalidateQueries({ queryKey: ["requests", id] })
+      // A step doc read while running carries running-time holes (no
+      // spans yet): every cached step of the run is read again.
+      void queryClient.invalidateQueries({ queryKey: ["step", id] })
+    }
   }, [loadedStatus, id, queryClient])
   const requests = useMemo(
     () =>
@@ -264,15 +269,19 @@ function RunPage() {
     if (!replaying) return foldedNow
     const prefix = fold(stream.events, playhead, stream.attrs)
     if (!batches || runStatus === "running") return prefix
-    // The finished steps are the prefix's own objects: the overlay
-    // lands on them in place.
-    applyTranscript(
+    // Only the finished steps take the overlay; it returns clones,
+    // which replace the prefix's own by index.
+    const overlaid = applyTranscript(
       { ...prefix, steps: prefix.steps.filter((st) => st.finish) },
       batches,
       { replace: true }
     )
-    prefix.unplaced = foldedNow.unplaced
-    return prefix
+    const byIndex = new Map(overlaid.steps.map((st) => [st.index, st]))
+    return {
+      ...prefix,
+      steps: prefix.steps.map((st) => byIndex.get(st.index) ?? st),
+      unplaced: foldedNow.unplaced,
+    }
   }, [replaying, stream.events, stream.attrs, foldedNow, playhead, batches, runStatus])
   // While scrubbing the run reads as running: calls past the playhead
   // are "running", not "never completed".
@@ -390,6 +399,7 @@ function RunPage() {
         folded={atPlayhead}
         eventCount={Math.max(doc.event_count, stream.events.length)}
         transcript={transcript.data}
+        gaps={stream.gaps}
       />
       {axis === "events" ? (
         <ReplayBar
@@ -567,6 +577,7 @@ function RunPage() {
             onJump={jump}
             requests={requests}
             transcript={transcript.data}
+            transcriptError={transcript.isError ? transcript.error.message : undefined}
           />
         </TabsContent>
         <TabsContent value="raw" className="mt-3">

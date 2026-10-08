@@ -141,7 +141,7 @@
     "count": 4,
     "badge": "compacted",
     "reason": "the model saw a compacted view: a PrepareStep replaced part of the transcript for this step's request",
-    "fix": "see the compaction block: the transcript range it replaced and the messages that stood in"
+    "fix": "open the compaction record"
   },
   "events": [
     {
@@ -215,13 +215,13 @@
     "entries": 1,
     "badge": "compacted",
     "reason": "the model saw a compacted view: a PrepareStep replaced part of the transcript for this step's request",
-    "fix": "see the compaction block: the transcript range it replaced and the messages that stood in"
+    "fix": "open the compaction record"
   },
   "holes": [
     {
       "hole": "compacted",
       "reason": "the model saw a compacted view: a PrepareStep replaced part of the transcript for this step's request",
-      "fix": "see the compaction block: the transcript range it replaced and the messages that stood in"
+      "fix": "open the compaction record"
     }
   ]
 }

@@ -37,7 +37,7 @@ describe("spansFromFold", () => {
     expect([call.from, call.to]).toEqual([2, 3]) // tool_start … tool_finish
     expect(call.tone).toBe("tool")
     expect(call.badge).toBe("ok")
-    expect(spans.map((s) => s.key)).toEqual(["run", "s0", "c:call_3"])
+    expect(spans.map((s) => s.key)).toEqual(["run", "s0", "c:0:call_3"])
     // Nothing went wrong: start at the first step.
     expect(defaultSelection(spans)?.key).toBe("s0")
     // The flow strip: one pill per top-level step; no stored text, so
@@ -210,5 +210,37 @@ describe("spansFromTimed (the time axis, S4.7)", () => {
   it("is empty without spans", () => {
     expect(spansFromTimed([])).toEqual([])
     expect(timeDomain([])).toEqual([0, 1])
+  })
+})
+
+// A10: call ids repeat across steps and, in a resumed run's step 0,
+// beside the resumed call. A call span's key names its step (or
+// "resume"), so every key and id is unique and ?sel= lands on the
+// call it names.
+describe("call span keys on repeated call ids", () => {
+  it("keys by step, and a resumed call by resume", () => {
+    const U = { input_tokens: 1, output_tokens: 1 }
+    const events = [
+      { type: "run_start", id: "r" },
+      { type: "tool_start", call_id: "c1", name: "research", args: {} },
+      { type: "tool_finish", call_id: "c1", name: "research", content: "resumed", is_error: false },
+      { type: "step_start", index: 0 },
+      { type: "tool_start", call_id: "c1", name: "research", args: {} },
+      { type: "tool_finish", call_id: "c1", name: "research", content: "own", is_error: false },
+      { type: "step_finish", index: 0, reason: "tool_calls", usage: U },
+      { type: "step_start", index: 1 },
+      { type: "tool_start", call_id: "c1", name: "lookup", args: {} },
+      { type: "tool_finish", call_id: "c1", name: "lookup", content: "ok", is_error: false },
+      { type: "step_finish", index: 1, reason: "tool_calls", usage: U },
+    ] as WireEvent[]
+    const spans = spansFromFold(fold(events), events.length, "succeeded")
+    const calls = spans.filter((s) => s.kind === "tool")
+    expect(calls.map((s) => [s.key, s.label])).toEqual([
+      ["c:resume:c1", "research"],
+      ["c:0:c1", "research"],
+      ["c:1:c1", "lookup"],
+    ])
+    expect(new Set(spans.map((s) => s.key)).size).toBe(spans.length)
+    expect(new Set(spans.map((s) => s.id)).size).toBe(spans.length)
   })
 })

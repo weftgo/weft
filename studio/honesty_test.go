@@ -177,7 +177,9 @@ func TestLiveFrameAttrs(t *testing.T) {
 
 // TestRunHolesPreA1: the run of a database written by the previous
 // release (TestRequestsNotRecorded's file) reads not_recorded with the
-// table's reason and fix — the run header's badge.
+// table's reason and fix — the run header's badge. The file's row
+// counts two steps but holds no event: gap first (lostEvents, the
+// export's events block says the same).
 func TestRunHolesPreA1(t *testing.T) {
 	srv := New(Open(preA1File(t)))
 	t.Cleanup(func() { _ = srv.Close() })
@@ -190,9 +192,11 @@ func TestRunHolesPreA1(t *testing.T) {
 	var doc holesDoc
 	decode(t, body, &doc)
 	reason, fix := obsdb.HoleNote(obsdb.HoleNotRecorded)
-	if len(doc.Holes) != 1 || doc.Holes[0].Hole != "not_recorded" || doc.Holes[0].Reason != reason || doc.Holes[0].Fix != fix {
-		t.Errorf("pre-A1 run holes = %+v, want [not_recorded] with the table's words", doc.Holes)
+	if len(doc.Holes) != 2 || doc.Holes[0].Hole != "gap" || doc.Holes[1].Hole != "not_recorded" ||
+		doc.Holes[1].Reason != reason || doc.Holes[1].Fix != fix {
+		t.Errorf("pre-A1 run holes = %+v, want [gap, not_recorded], not_recorded with the table's words", doc.Holes)
 	}
+
 }
 
 // TestRunHolesInterrupted: a run that stopped reporting reads

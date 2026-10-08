@@ -7,9 +7,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { RunRow, SessionRow } from "../lib/api"
 import { HOLES } from "../lib/honesty"
-import { statusChip, studioLink, WeftDevtools } from "./element"
+import { statusChip, studioLink, turnHoles, WeftDevtools } from "./element"
 import { fold } from "../lib/events"
 import { partitionRuns, strippedContent } from "./state"
+import type { TurnView } from "./state"
 import { idle } from "./testkit"
 
 // ── The fake Studio ───────────────────────────────────────────────
@@ -602,5 +603,21 @@ describe("pure helpers", () => {
     expect(studioLink("http://studio.test/studio/", "r_ok", 2)).toBe(
       "http://studio.test/studio/runs/r_ok?step=2&view=story"
     )
+  })
+})
+
+// The turn's holes follow the run page header's rule (statusHoles):
+// max_tokens from the row's stop reason, a gap only once the run is
+// over — while it runs a missing position may still be in flight.
+describe("turnHoles (the run header's rule)", () => {
+  const turn = (gaps: number[]) =>
+    ({ doc: null, folded: fold([]), gaps }) as unknown as TurnView
+  const holes = (gaps: number[], row: Partial<RunRow>) =>
+    turnHoles(turn(gaps), row as RunRow).map((h) => h.hole)
+  it("no gap while running; a gap once over; max_tokens from stop_reason", () => {
+    expect(holes([2, 3], { status: "running" })).toEqual([])
+    expect(holes([2, 3], { status: "succeeded" })).toEqual(["gap"])
+    expect(holes([], { status: "succeeded", stop_reason: "max_tokens" })).toEqual(["max_tokens"])
+    expect(holes([], { status: "running", stop_reason: "max_tokens" })).toEqual(["max_tokens"])
   })
 })

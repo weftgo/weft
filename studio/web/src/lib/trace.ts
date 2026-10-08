@@ -70,6 +70,7 @@ const CODED = /^([A-Z][A-Z0-9_]+): /
 
 function callSpans(
   call: FoldedToolCall,
+  stepIndex: number,
   parent: string,
   depth: number,
   runStatus: string,
@@ -94,10 +95,15 @@ function callSpans(
       ? (coded?.[1] ?? "error")
       : "ok"
   const sub = open ? "" : call.result ? `${bytesOf(call.result.content)} B` : ""
-  const id = `${parent}/call:${call.callId}`
+  // Call ids repeat across steps (core/loop.go) and, in a resumed
+  // run's step 0, beside the resumed call: the key names the step (or
+  // "resume", as the child run's id does), so ?sel= and a click land on
+  // the call they name.
+  const at = call.resumed ? "resume" : String(stepIndex)
+  const id = `${parent}/call:${call.resumed ? "resume:" : ""}${call.callId}`
   out.push({
     id,
-    key: isChild ? `c:${runId}:${call.callId}` : `c:${call.callId}`,
+    key: isChild ? `c:${runId}:${at}:${call.callId}` : `c:${at}:${call.callId}`,
     parent,
     depth,
     kind: "tool",
@@ -156,7 +162,7 @@ function stepSpans(
     runId,
   })
   for (const call of step.toolCalls)
-    callSpans(call, id, depth + 1, runStatus, runId, isChild, out)
+    callSpans(call, step.index, id, depth + 1, runStatus, runId, isChild, out)
 }
 
 function runSpans(

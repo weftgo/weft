@@ -75,8 +75,9 @@ type logsPage struct {
 	badgeFields
 }
 
-// logsTruncatedFix is the truncated hole's fix on this route.
-const logsTruncatedFix = "log less in the run's trace (a busy subagent or sibling run counts too); phase 2 filters by span before the cap"
+// logsTruncatedFix is the truncated hole's fix on this route: the
+// table's, for the reader's own candidate cap (obsdb.CauseLogCap).
+var logsTruncatedFix = func() string { _, fix := obsdb.HoleNoteFor(obsdb.HoleTruncated, obsdb.CauseLogCap); return fix }()
 
 // logsCap is obsdb.MaxLogCandidates as the reason spells it: digits in
 // groups of three ("10 000").
@@ -105,21 +106,7 @@ func mayReadLogs(w http.ResponseWriter, r *http.Request) bool {
 	if readsPrompts(r) {
 		return true
 	}
-	type errBody struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	}
-	writeJSON(w, r, http.StatusForbidden, struct {
-		Error errBody `json:"error"`
-		badgeFields
-	}{
-		Error: errBody{"forbidden", "a run's app logs may carry anything the app logged, prompts included: a read-scoped panel token does not read them"},
-		badgeFields: badgeFields{
-			Badge:  string(obsdb.HoleHidden),
-			Reason: "your token's scope may not read this: a read-scoped panel token does not read the app's own logs, which may carry prompts",
-			Fix:    holeFix(obsdb.HoleHidden),
-		},
-	})
+	refuseHidden(w, r, "a run's app logs may carry anything the app logged, prompts included: a read-scoped panel token does not read them")
 	return false
 }
 

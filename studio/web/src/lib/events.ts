@@ -204,18 +204,21 @@ export function newFold(): FoldFeed {
     if (at > s.to) s.to = at
     return s
   }
-  // A finish closes the call with its id still open (a resumed run's
-  // step 0 may hold two calls with one id), else the latest with it.
+  // A finish closes the most recent call with its id still open (a
+  // resumed run's step 0 may hold two calls with one id), else the
+  // most recent with it.
   const findCall = (callId: string): FoldedToolCall | undefined => {
-    for (let i = run.steps.length - 1; i >= 0; i--) {
-      const c = run.steps[i].toolCalls.find((x) => x.callId === callId && x.state === "running")
-      if (c) return c
+    const latest = (open: boolean): FoldedToolCall | undefined => {
+      for (let i = run.steps.length - 1; i >= 0; i--) {
+        const calls = run.steps[i].toolCalls
+        for (let j = calls.length - 1; j >= 0; j--) {
+          const c = calls[j]
+          if (c.callId === callId && (!open || c.state === "running")) return c
+        }
+      }
+      return undefined
     }
-    for (let i = run.steps.length - 1; i >= 0; i--) {
-      const c = run.steps[i].toolCalls.find((x) => x.callId === callId)
-      if (c) return c
-    }
-    return undefined
+    return latest(true) ?? latest(false)
   }
   const last = (): number =>
     run.steps.length ? run.steps[run.steps.length - 1].index : 0
@@ -371,6 +374,13 @@ export function linkView(
   // loop started there (not a resumed one) where there is one; the
   // rest then take a resumed call with their id where there is one,
   // else the first unlinked. No call is linked twice.
+  //
+  // The view's steps and calls are the feed's own objects (result()
+  // copies the list, not the calls) and the page links on every
+  // render, so a pass starts from no links: a call keeps no child a
+  // previous pass gave it, and a child already linked is never handed
+  // to the next free call with its id.
+  for (const st of view.steps) for (const c of st.toolCalls) delete c.childRunId
   const named = new Map<(typeof children)[number], FoldedStep>()
   for (const child of children) {
     if (!child.parent_call_id) continue
@@ -385,6 +395,8 @@ export function linkView(
     steps: FoldedStep[],
     resumed: boolean
   ) => {
+    if (view.steps.some((st) => st.toolCalls.some((c) => c.childRunId === child.id)))
+      return
     const free = steps.flatMap((st) =>
       st.toolCalls.filter((c) => c.callId === child.parent_call_id && !c.childRunId)
     )
@@ -577,14 +589,33 @@ export function applyTranscript(
   opts?: { replace?: boolean }
 ): FoldedRun {
   const replace = opts?.replace === true
-  view.unplaced = []
+  // The view's steps and calls are the feed's own objects (result()
+  // copies the list, not the steps): the overlay writes onto clones,
+  // so a delta folded afterwards appends to the streamed text, never
+  // to the transcript's. The returned view is a new object; the one
+  // passed in is left as it was.
+  const out: FoldedRun = { ...view, steps: [...view.steps], unplaced: [] }
+  const unplaced: PlacedBatch[] = []
+  const cloned = new Set<FoldedStep>()
+  const own = (at: number): FoldedStep => {
+    const st = out.steps[at]
+    if (cloned.has(st)) return st
+    const copy: FoldedStep = {
+      ...st,
+      toolCalls: st.toolCalls.map((c) => ({ ...c })),
+    }
+    cloned.add(copy)
+    out.steps[at] = copy
+    return copy
+  }
   for (const b of placeBatches(batches)) {
     if (b.input) continue
-    const step = view.steps.find((s) => s.index === b.step)
-    if (!step) {
-      view.unplaced.push(b)
+    const at = out.steps.findIndex((s) => s.index === b.step)
+    if (at < 0) {
+      unplaced.push(b)
       continue
     }
+    const step = own(at)
     for (const msg of b.messages) {
       if (msg.role !== "assistant") continue
       if (b.derived) step.derived = true
@@ -609,13 +640,14 @@ export function applyTranscript(
       }
     }
   }
-  return view
+  out.unplaced = unplaced
+  return out
 }
 
 /**
  * stepHoles is what a step card badges (ADR 0028 §11): the union of
  * the step route's holes when the page has them cached (A7's
- * assembled step), the fold's — the recorder's cuts on the step's
+ * assembled step; not while that doc says the step is running), the fold's — the recorder's cuts on the step's
  * events, a `derived` placement of its words, a `max_tokens` finish —
  * and the run's holes that hold for every step of it (not_recorded: a
  * run written before the request record; stripped: a content-off
@@ -625,8 +657,12 @@ export function applyTranscript(
 export function stepHoles(
   step: FoldedStep,
   inherited?: HoleMark[],
-  stepDoc?: { holes?: HoleMark[] }
+  stepDoc?: { holes?: HoleMark[]; status?: string }
 ): HoleMark[] {
+  // A step doc read while the step ran carries running-time holes (no
+  // spans yet, not recorded yet): they say nothing about the step until
+  // it is over and the doc is read again.
+  if (stepDoc?.status === "running") stepDoc = undefined
   const own: HoleMark[] = [...(step.holes ?? [])]
   if (step.derived)
     own.push({

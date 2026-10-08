@@ -466,6 +466,14 @@ func fixtureKey(doc fixtureKeyDoc) string {
 // drops them into the suite's testdata (the panel never writes to
 // your code or files; WEFT-DEVTOOLS §9).
 func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) {
+	// Fixtures are request-derived (the step's tool names, thinking,
+	// the system prompt): a read-scoped panel token is refused them, as
+	// it is the request record and the export's wefttest format —
+	// before its body is read, so a bad body never answers it 400.
+	if !readsPrompts(r) {
+		refuseHidden(w, r, "fixtures are rebuilt from the run's request records and carry its system prompt and tool names: a read-scoped panel token does not read them")
+		return
+	}
 	var req struct {
 		RunID string   `json:"run_id"`
 		Tools []string `json:"tools"`
@@ -477,13 +485,7 @@ func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) 
 		badRequest(w, r, "fixture body: run_id is required")
 		return
 	}
-	// Fixtures are request-derived (the step's tool names, thinking,
-	// the system prompt): a read-scoped panel token is refused them, as
-	// it is the request record and the export's wefttest format.
-	if !readsPrompts(r) {
-		refuseHidden(w, r, "fixtures are rebuilt from the run's request records and carry its system prompt and tool names: a read-scoped panel token does not read them")
-		return
-	}
+
 	// A panel token fixtures inside its public id only (S4.6) — like
 	// every run-id route in api.go.
 	if !s.scopeRunID(w, r, req.RunID) {

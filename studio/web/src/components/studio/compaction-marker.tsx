@@ -31,12 +31,16 @@ export function CompactionMarker({
   all,
   runId,
   transcript,
+  transcriptError,
 }: {
   c: RunCompaction
   /** Every compaction of the run: a view's index skips the others'. */
   all: RunCompaction[]
   runId: string
   transcript?: Transcript | null
+  /** The transcript query's error, when it failed: "show original"
+   * then says so instead of loading forever. */
+  transcriptError?: string
 }) {
   const [open, setOpen] = useState(false)
   const session = isSessionMarker(c)
@@ -75,7 +79,13 @@ export function CompactionMarker({
         session ? (
           <SessionOriginal c={c} />
         ) : (
-          <ViewOriginal c={c} all={all} runId={runId} transcript={transcript} />
+          <ViewOriginal
+            c={c}
+            all={all}
+            runId={runId}
+            transcript={transcript}
+            transcriptError={transcriptError}
+          />
         )
       ) : null}
     </div>
@@ -96,11 +106,13 @@ function ViewOriginal({
   all,
   runId,
   transcript,
+  transcriptError,
 }: {
   c: RunCompaction
   all: RunCompaction[]
   runId: string
   transcript?: Transcript | null
+  transcriptError?: string
 }) {
   // The step route when the page has it cached (opening the step's
   // attempts loads it): its request's messages_ref count.
@@ -111,7 +123,13 @@ function ViewOriginal({
   const orig = originalOf(c, transcript, all)
   return (
     <div className="mt-1 space-y-1" data-compaction-original>
-      {"loading" in orig ? (
+      {"loading" in orig && transcriptError !== undefined ? (
+        <HoleBadge
+          hole="gap"
+          reason={`the transcript could not be read: ${transcriptError}`}
+          detail
+        />
+      ) : "loading" in orig ? (
         <p className="font-mono text-faint">loading the transcript…</p>
       ) : "gap" in orig ? (
         <HoleBadge hole="gap" reason={orig.gap} detail />

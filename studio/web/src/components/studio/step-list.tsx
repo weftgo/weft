@@ -10,7 +10,7 @@ import { ChevronRight, Play } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 import { stepQuery } from "@/lib/api"
-import type { RunCompaction, RunDoc, Transcript, WireEvent } from "@/lib/api"
+import type { RunCompaction, RunDoc, StepChild, Transcript, WireEvent } from "@/lib/api"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
 import {
   callState,
@@ -285,9 +285,12 @@ export function StepBody({
    * steps, child ids carry the step) — the block fetches its events on
    * expand. */
   childLinks: Map<string, ChildRow>
-  /** The step route's children[] (A7) by call id — one step's, so its
-   * call ids are unique — when cached: a child the run document does
-   * not list yet (a live run's) still gets its row. */
+  /** The step route's children[] (A7) by call id, when cached: a
+   * child the run document does not list yet (a live run's) still gets
+   * its row. A call id that repeats — a resumed step 0 holds the
+   * resumed call beside the model's own — is not in it (stepChildMap),
+   * and a call whose id repeats in the step never joins on it: which
+   * call owns the child is then the run document's to say. */
   stepChildren?: Map<string, ChildRow>
   onJump?: (t: number) => void
   compact?: boolean
@@ -315,13 +318,18 @@ export function StepBody({
         <div className="space-y-2">
           {step.toolCalls.map((call) => (
             <ToolCallRow
-              key={call.callId}
+              // Call ids may repeat inside a step (a resumed step 0);
+              // the stream position never does.
+              key={call.startPos}
               call={call}
               runStatus={runStatus}
               child={
                 (call.childRunId
                   ? childLinks.get(call.childRunId)
-                  : undefined) ?? stepChildren?.get(call.callId)
+                  : undefined) ??
+                (step.toolCalls.filter((c) => c.callId === call.callId).length === 1
+                  ? stepChildren?.get(call.callId)
+                  : undefined)
               }
               onJump={onJump}
               compact={compact}
@@ -415,6 +423,7 @@ function StepCard({
   requests,
   compactions,
   transcript,
+  transcriptError,
 }: {
   step: FoldedStep
   runId: string
@@ -425,6 +434,7 @@ function StepCard({
    * draw their marker inside the card. */
   compactions: RunCompaction[]
   transcript?: Transcript | null
+  transcriptError?: string
   runStatus: string
   childLinks: Map<string, ChildRow>
   highlighted?: boolean
@@ -441,9 +451,7 @@ function StepCard({
   )
   // The children the step route names (A10), joined by call id: the
   // run document's rows win where both have one (they carry more).
-  const stepChildren = new Map(
-    (stepDoc.data?.children ?? []).map((c) => [c.call_id, childOfStep(c)])
-  )
+  const stepChildren = stepChildMap(stepDoc.data?.children)
   // A ?step= link (A3) lands on the card it names.
   useEffect(() => {
     if (highlighted) ref.current?.scrollIntoView({ block: "center" })
@@ -490,6 +498,7 @@ function StepCard({
             all={compactions}
             runId={runId}
             transcript={transcript}
+            transcriptError={transcriptError}
           />
         ))}
       {requests ? <RequestSection req={requests} step={step.index} /> : null}
@@ -508,6 +517,25 @@ function StepCard({
       />
     </div>
   )
+}
+
+/** stepChildMap keys the step route's children by call id, leaving
+ * out every call id more than one child names (a resumed step 0's
+ * resumed and own calls): a repeated id says nothing about which call
+ * a child belongs to, so neither child joins on it. */
+export function stepChildMap(children: StepChild[] | undefined): Map<string, ChildRow> {
+  const out = new Map<string, ChildRow>()
+  const repeated = new Set<string>()
+  for (const c of children ?? []) {
+    if (repeated.has(c.call_id)) continue
+    if (out.has(c.call_id)) {
+      out.delete(c.call_id)
+      repeated.add(c.call_id)
+      continue
+    }
+    out.set(c.call_id, childOfStep(c))
+  }
+  return out
 }
 
 /** The words of transcript batches whose step the record holds no
@@ -554,6 +582,7 @@ export function StepList({
   onJump,
   requests,
   transcript,
+  transcriptError,
 }: {
   events: WireEvent[]
   folded: FoldedRun
@@ -576,6 +605,8 @@ export function StepList({
   /** The transcript route's growth records, when loaded: "show
    * original" reads a view's replaced range from them (plan A9.2). */
   transcript?: Transcript | null
+  /** The transcript query's error message, when it failed. */
+  transcriptError?: string
 }) {
   // The compactions the run document names (A9.2). A run from before
   // A9 has none in its document and draws no marker: the record is
@@ -605,6 +636,7 @@ export function StepList({
           all={compactions}
           runId={doc.id}
           transcript={transcript}
+          transcriptError={transcriptError}
         />
       ))}
       {view.steps.map((step) => (
@@ -620,6 +652,7 @@ export function StepList({
             requests={requests}
             compactions={compactions}
             transcript={transcript}
+            transcriptError={transcriptError}
           />
           {step.steer ? <SteerBlock steer={step.steer} onJump={onJump} /> : null}
         </div>

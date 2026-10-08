@@ -47,6 +47,11 @@ const (
 // stepEventsPage is the events page size the step walk reads with.
 const stepEventsPage = 1000
 
+// maxStepCountedCalls bounds the anonymous calls a content-off
+// max_tokens step lists from its chat span's weft.model.tool_calls (a
+// count, not a list); a larger count is listed this far, badged derived.
+const maxStepCountedCalls = maxRequestsLimit
+
 // stepDoc is GET /api/runs/{id}/steps/{n}. Blocks a step may lack are
 // omitted; when one is missing for a reason, that reason is a badge —
 // on the block (request, attempts_badge, messages_in, compaction) and
@@ -108,8 +113,10 @@ type stepAttempt struct {
 	Finished     *time.Time `json:"finished,omitempty"`
 	SpanID       string     `json:"span_id,omitempty"`
 	RequestIndex *int64     `json:"request_index,omitempty"`
-	// Badge is "derived" on a request record with no attempt number,
-	// listed by its request index (Attempt 0).
+	// Badge is "derived" on a request record with no attempt number:
+	// the step's only record joins the first attempt the spans time;
+	// beside others it is listed by its request index (Attempt 0).
+
 	Badge string `json:"badge,omitempty"`
 }
 
@@ -441,7 +448,9 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		doc.LatencyMS, doc.TTFTMS = evs.finishBody.LatencyMS, evs.finishBody.TTFTMS
 		doc.Usage = evs.finishBody.Usage
 	}
-	if len(evs.gaps) > 0 {
+	// A running run's missing positions may still be in flight (runHoles'
+	// rule): a gap only once it stopped.
+	if len(evs.gaps) > 0 && det.Status != obsdb.StatusRunning {
 		holes.add(obsdb.HoleGap, "positions are missing from this step's event stream: a destination dropped a batch", holeFix(obsdb.HoleGap))
 	}
 	if doc.Reason == string(core.StopMaxTokens) {
@@ -530,10 +539,24 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 	// spans — the step's transcript batches hold the calls and their
 	// "not executed" results.
 	maxTokens := doc.Reason == string(core.StopMaxTokens)
-	if maxTokens {
-		batches, err := s.db.TranscriptBatches(ctx, id)
-		if err != nil {
+	// The run's messages batches, read once when a block needs them (a
+	// max_tokens step's calls, a messages_ref to check).
+	var batches []obsdb.TranscriptBatch
+	batchesRead := false
+	readBatches := func() bool {
+		if batchesRead {
+			return true
+		}
+		var err error
+		if batches, err = s.db.TranscriptBatches(ctx, id); err != nil {
 			dbError(w, r, "transcript of run", id, err)
+			return false
+		}
+		batchesRead = true
+		return true
+	}
+	if maxTokens {
+		if !readBatches() {
 			return
 		}
 		for _, b := range batches {
@@ -575,7 +598,14 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		// names and arguments are unknown; the chat span counts them.
 		// One entry per call, stripped, so the step never reads as one
 		// that made none.
+		// The count is a span attribute, not a list: bounded, so a
+		// hostile value cannot size the response.
 		k, _ := attrInt64(chat.Attrs["weft.model.tool_calls"])
+		if k > maxStepCountedCalls {
+			holes.also(obsdb.HoleDerived, "the chat span counts "+strconv.FormatInt(k, 10)+" tool calls: the step lists the first "+
+				strconv.Itoa(maxStepCountedCalls), "")
+			k = maxStepCountedCalls
+		}
 		for i := range k {
 			key := "#" + strconv.FormatInt(i, 10)
 			c := callOf(key, "")
@@ -606,16 +636,28 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 			c.Badge = string(obsdb.HoleMaxTokens)
 		}
 		if c.Result != nil && c.Result.Truncated {
-			holes.add(obsdb.HoleTruncated, "a tool result was cut by its result cap: the model saw a prefix and the marker", "raise the tool's weft.MaxResultBytes")
+			reason, fix := obsdb.HoleNoteFor(obsdb.HoleTruncated, obsdb.CauseResultCap)
+			holes.add(obsdb.HoleTruncated, reason, fix)
 		}
 	}
 
-	// Children: the run's child runs that this step's calls started.
+	// Children: the run's child runs that this step's calls started. A
+	// child named <run>/<step>/<call> (the core's childRunID) is this
+	// step's by its id alone — a call id may repeat across steps; only a
+	// child named otherwise joins on its parent call id.
 	prefix := id + "/" + item + "/"
 	for _, kid := range det.Children {
-		c, ok := calls[kid.ParentCallID]
-		if !ok && !strings.HasPrefix(kid.ID, prefix) {
-			continue
+		var c *stepToolCall
+		ok := false
+		switch {
+		case strings.HasPrefix(kid.ID, prefix):
+			c, ok = calls[kid.ParentCallID]
+		case strings.HasPrefix(kid.ID, id+"/"):
+			continue // another step's
+		default:
+			if c, ok = calls[kid.ParentCallID]; !ok {
+				continue
+			}
 		}
 		if ok && c.ChildRunID == "" {
 			c.ChildRunID = kid.ID
@@ -637,6 +679,10 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 				doc.Status = stepParked
 			}
 		}
+	case !evs.found && det.Status == obsdb.StatusRunning:
+		// Named by a request record of a running run whose step_start
+		// is not stored yet: in flight, not lost.
+		doc.Status = stepRunning
 	case !evs.found:
 		// Counted by the run row or named by a request, but no event
 		// records the step: the run's outcome, and the gap said.
@@ -645,6 +691,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		if det.Status == obsdb.StatusFailed && n == det.Steps-1 {
 			doc.Status = stepError
 		}
+
 	case det.Status == obsdb.StatusRunning:
 		doc.Status = stepRunning
 	case det.Status == obsdb.StatusInterrupted:
@@ -748,11 +795,17 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 	// A request record without an attempt number (a body that did not
 	// parse: content derived) is still an attempt — listed by its
 	// request index, badged derived — so the count agrees with the
-	// requests route.
+	// requests route. The step's only record, unnumbered, is the call
+	// the spans time: it joins the first attempt there (attempt 1, or
+	// the lowest attempt span), never a second attempt beside it.
 	var unnumbered []stepAttempt
+	numbered := false
+	for _, rec := range reqs {
+		numbered = numbered || rec.Attempt > 0
+	}
 	for _, rec := range reqs {
 		idx := rec.Index
-		if rec.Attempt <= 0 {
+		if rec.Attempt <= 0 && (numbered || len(reqs) > 1) {
 			unnumbered = append(unnumbered, stepAttempt{
 				Model: rec.Body.Model.Name, Provider: rec.Body.Model.Provider,
 				RequestIndex: &idx, Badge: string(obsdb.HoleDerived),
@@ -760,10 +813,27 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 			holes.add(obsdb.HoleDerived, "a request record of this step carried no attempt number (its body did not parse): it is listed by its request index", "")
 			continue
 		}
-		a := att(rec.Attempt)
+		num := rec.Attempt
+		if num <= 0 {
+			num = 0
+			for _, sp := range attemptSpans {
+				if k, ok := attrInt64(sp.Attrs["weft.attempt.index"]); ok && k > 0 && (num == 0 || k < num) {
+					num = k
+				}
+			}
+			num = max(num, 1)
+
+			holes.add(obsdb.HoleDerived, "the step's request record carried no attempt number (its body did not parse): it is joined to attempt "+
+				strconv.FormatInt(num, 10)+", the first the spans time", "")
+		}
+		a := att(num)
 		a.RequestIndex = &idx
 		a.Model, a.Provider = rec.Body.Model.Name, rec.Body.Model.Provider
+		if rec.Attempt <= 0 {
+			a.Badge = string(obsdb.HoleDerived)
+		}
 	}
+
 	fromSpan := func(a *stepAttempt, sp obsdb.Span) {
 		if m, _ := sp.Attrs["gen_ai.request.model"].(string); m != "" {
 			a.Model = m
@@ -819,16 +889,15 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 	// (the chat span's gen_ai.response.model, the attempt spans): obsdb
 	// serves no event record's attributes, so the step_finish record's
 	// own gen_ai.response.model is not read. A run with no spans says
-	// why — no tracer when it recorded its step_finish, an older weft
-	// otherwise.
+	// why: it ran without a tracer. A running step's chat span is not
+	// exported until its call ends — nothing is missing yet.
 	var attBadge obsdb.Hole
 	var attReason, attFix string
 	switch {
-	case chat == nil && len(allSpans) == 0 && evs.finish != nil:
+	case doc.Status == stepRunning:
+	case chat == nil && len(allSpans) == 0 && (evs.finish != nil || modelCalled || !evs.found):
 		attBadge = obsdb.HoleNotRecorded
 		attReason, attFix = obsdb.HoleNoteFor(obsdb.HoleNotRecorded, obsdb.CauseNoSpans)
-	case chat == nil && len(allSpans) == 0 && (modelCalled || !evs.found):
-		attBadge, attReason = obsdb.HoleNotRecorded, "the run has no spans: it was recorded without a tracer, or by a weft without attempt reporting (A4), so no attempt's outcome or timing exists"
 	case chat == nil && modelCalled:
 		attBadge, attReason = obsdb.HoleGap, "the step called the model, but its chat span was not stored: a destination dropped it"
 	case chat != nil && len(attemptSpans) == 0 && chat.Attrs["weft.stream"] == nil:
@@ -851,7 +920,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		}
 		note := badgeFields{Badge: string(obsdb.HoleCompacted),
 			Reason: "the model saw a compacted view: a PrepareStep replaced part of the transcript for this step's request",
-			Fix:    "see the compaction block: the transcript range it replaced and the messages that stood in"}
+			Fix:    holeFix(obsdb.HoleCompacted)}
 		doc.Compaction = &stepCompaction{
 			Scope: c.Scope, Index: c.Index, FromSeq: c.FromSeq, ToSeq: c.ToSeq, Hash: c.Hash,
 			Replaced: c.Replaced, Entries: c.Entries, badgeFields: note,
@@ -878,7 +947,32 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 				Fix:    holeFix(obsdb.HoleStripped)}
 		case doc.Compaction != nil && ref.Index != nil && *ref.Index == doc.Compaction.Index:
 			doc.MessagesIn.badgeFields = doc.Compaction.badgeFields
+		case ref.Index != nil && det.Status != obsdb.StatusRunning:
+			// The index names a messages record: a growth batch or a
+			// stored compaction view. Neither stored, once the run
+			// stopped (a running run's may be in flight), is a dropped
+			// record.
+
+			known := false
+			for _, c := range comps {
+				known = known || (c.Scope == obsdb.CompactionRun && c.Index == *ref.Index)
+			}
+			if !known {
+				if !readBatches() {
+					return
+				}
+				for _, b := range batches {
+					known = known || b.Index == *ref.Index
+				}
+			}
+			if !known {
+				doc.MessagesIn.badgeFields = badgeFields{Badge: string(obsdb.HoleGap),
+					Reason: "the request's messages_ref names messages record " + strconv.FormatInt(*ref.Index, 10) +
+						", which was not stored: a destination dropped it",
+					Fix: holeFix(obsdb.HoleGap)}
+			}
 		}
+
 	}
 	// Every block's badge lands in holes — messages_in's too, whichever
 	// identity reads the step (the request block may be hidden).

@@ -151,17 +151,7 @@ func mayReadPrompts(w http.ResponseWriter, r *http.Request) bool {
 	if readsPrompts(r) {
 		return true
 	}
-	type errBody struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	}
-	writeJSON(w, r, http.StatusForbidden, struct {
-		Error errBody `json:"error"`
-		badgeFields
-	}{
-		Error:       errBody{"forbidden", "the request record carries the system prompt and the tool catalog: a read-scoped panel token does not read it"},
-		badgeFields: badgeOf(obsdb.HoleHidden),
-	})
+	refuseHidden(w, r, "the request record carries the system prompt and the tool catalog: a read-scoped panel token does not read it")
 	return false
 }
 

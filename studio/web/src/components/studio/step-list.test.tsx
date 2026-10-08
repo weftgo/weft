@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { screen } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { stepQuery } from "@/lib/api"
 import type { EventsPage, RunDoc, StepDoc, WireEvent } from "@/lib/api"
@@ -273,5 +273,55 @@ describe("StepList's subagent child rows (A10)", () => {
     await renderWithRouter(<StepList events={events} folded={fold(events)} doc={doc} />)
     expect(document.querySelector(`[data-step="1"] [data-child-row="${kid.id}"]`)).toBeTruthy()
     expect(document.querySelector(`[data-step="0"] [data-child-row]`)).toBeNull()
+  })
+
+  // A10: a resumed run's step 0 holds two calls with one id (the
+  // resumed call and the model's own). Rows are keyed by stream
+  // position — no duplicate-key warning — and the step route's
+  // children, which name that id twice, never join on it.
+  it("renders a resumed step 0 with a repeated call id: no duplicate keys, each call its own child", async () => {
+    const R = "r_res"
+    const U = { input_tokens: 1, output_tokens: 1 }
+    const events: WireEvent[] = [
+      { type: "run_start", id: R, model: { provider: "p", name: "m" } },
+      { type: "tool_start", run_id: R, seq: 1, call_id: "c1", name: "research", args: {} },
+      { type: "tool_finish", run_id: R, seq: 1, call_id: "c1", name: "research", content: "resumed", is_error: false },
+      { type: "step_start", run_id: R, index: 0 },
+      { type: "tool_start", run_id: R, seq: 2, call_id: "c1", name: "research", args: {} },
+      { type: "tool_finish", run_id: R, seq: 2, call_id: "c1", name: "research", content: "own", is_error: false },
+      { type: "step_finish", run_id: R, index: 0, reason: "tool_calls", usage: U },
+      { type: "run_finish", run_id: R, usage: U, steps: 1 },
+    ]
+    const base = subDoc.children[0]
+    const resumed = { ...base, id: `${R}/resume/c1`, parent_run_id: R, parent_call_id: "c1" }
+    const own = { ...base, id: `${R}/0/c1`, parent_run_id: R, parent_call_id: "c1" }
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    client.setQueryData(stepQuery(R, 0).queryKey, {
+      children: [resumed, own].map((k) => ({ id: k.id, call_id: "c1", agent: "researcher", status: "succeeded", usage: k.usage })),
+    } as unknown as StepDoc)
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      // The run document lists neither: the step route's two c1
+      // children are ambiguous, so no call draws one.
+      const { unmount } = await renderWithRouter(
+        <StepList events={events} folded={fold(events)} doc={{ ...subDoc, id: R, children: [] }} />,
+        client
+      )
+      expect(document.querySelectorAll(`[data-step="0"] [data-child-row]`).length).toBe(0)
+      unmount()
+      // The run document lists both: each call its own.
+      await renderWithRouter(
+        <StepList events={events} folded={fold(events)} doc={{ ...subDoc, id: R, children: [resumed, own] }} />,
+        client
+      )
+      const rows = [...document.querySelectorAll(`[data-step="0"] [data-child-row]`)].map((r) =>
+        r.getAttribute("data-child-row")
+      )
+      expect(rows).toEqual([resumed.id, own.id])
+      const dup = errors.mock.calls.filter((c) => String(c[0]).includes("same key"))
+      expect(dup).toEqual([])
+    } finally {
+      errors.mockRestore()
+    }
   })
 })

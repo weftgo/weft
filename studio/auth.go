@@ -39,7 +39,8 @@ import (
 //     page.
 //
 // In every setup a token rides the Authorization header only: a
-// ?token= query parameter is refused on every route (plan C5), and the
+// ?token= query parameter is refused on every /api route, in every
+// setup (plan C5), and the
 // live stream — which EventSource opens without headers — takes a
 // 60-second grant for one exact stream from POST /api/live-grant
 // instead (livegrant.go). A #token= fragment, which `weft open` and
@@ -157,6 +158,14 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		identify := func(id identity) {
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), identityCtxKey{}, id)))
 		}
+		if r.URL.Query().Has("token") {
+			// Never accepted on the /api tree, in any setup, whatever it
+			// holds — and never echoed.
+			writeError(w, r, http.StatusUnauthorized, "unauthorized",
+				"a token in the URL is never accepted: send Authorization: Bearer <token> "+
+					"(the live stream: POST /api/live-grant, then /api/live?…&sig=)")
+			return
+		}
 		if s.token == "" {
 			if !hostAllowed(s.origins, r) {
 				writeError(w, r, http.StatusForbidden, "forbidden",
@@ -173,21 +182,17 @@ func (s *Server) auth(next http.Handler) http.Handler {
 			identify(identity{})
 			return
 		}
-		if r.URL.Query().Has("token") {
-			// Never accepted, whatever it holds — and never echoed.
-			writeError(w, r, http.StatusUnauthorized, "unauthorized",
-				"a token in the URL is never accepted: send Authorization: Bearer <token> "+
-					"(the live stream: POST /api/live-grant, then /api/live?…&sig=)")
-			return
-		}
 		if sig, ok := liveGrantRequest(r); ok {
 			s.identifyGrant(w, r, sig, identify)
 			return
 		}
 		tok := bearerToken(r)
 		if tok == "" {
-			writeError(w, r, http.StatusUnauthorized, "unauthorized",
-				"the API requires a token: Authorization: Bearer <token>")
+			msg := "the API requires a token: Authorization: Bearer <token>"
+			if r.URL.Path == "/api/live" {
+				msg += " — or, where headers cannot be sent (EventSource), a sig from POST /api/live-grant: /api/live?…&sig="
+			}
+			writeError(w, r, http.StatusUnauthorized, "unauthorized", msg)
 			return
 		}
 		if tokenEqual(tok, s.token) {

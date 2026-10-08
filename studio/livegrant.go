@@ -33,7 +33,11 @@ import (
 // token's public id and scope, or setup A's open API), the selector,
 // the kinds set and the expiry — liveGrantTTL (60 s) from the grant,
 // never later than the panel token's own expiry. A leaked URL opens
-// one stream for a minute; the token itself is never in it. One code
+// one stream for a minute; the token itself is never in it. The grant
+// bounds opening: a stream opened in time runs on, as the identity
+// that asked — and a panel token's stream ends at the token's own
+// expiry (signed into the grant as token_exp), whichever way it was
+// opened; a server token's or setup A's has nothing to end it. One code
 // path for every setup: without a Token the key is a per-process
 // random one (no cookie, no second mechanism).
 
@@ -57,9 +61,13 @@ const (
 // when. The stream it opens (selector and kinds) is not in the payload
 // — the request names it — but the MAC covers it (liveGrantMAC).
 type liveGrantClaims struct {
-	ID       string    `json:"id"` // grantServer | grantPanel | grantOpen
-	PublicID string    `json:"public_id,omitempty"`
-	Scope    string    `json:"scope,omitempty"`
+	ID       string `json:"id"` // grantServer | grantPanel | grantOpen
+	PublicID string `json:"public_id,omitempty"`
+	Scope    string `json:"scope,omitempty"`
+	// TokenExp is a panel token's own expiry: the grant bounds opening
+	// the stream (Exp), the token bounds the stream itself (serveLive
+	// ends it at TokenExp).
+	TokenExp time.Time `json:"token_exp,omitzero"`
 	Exp      time.Time `json:"exp"`
 }
 
@@ -162,7 +170,8 @@ func parseLiveGrant(key []byte, sig string, stream []byte, now time.Time) (liveG
 	switch claims.ID {
 	case grantServer, grantOpen:
 	case grantPanel:
-		if claims.PublicID == "" || (claims.Scope != scopeRead && claims.Scope != scopePlayground) {
+		if claims.PublicID == "" || (claims.Scope != scopeRead && claims.Scope != scopePlayground) ||
+			!claims.TokenExp.After(now) {
 			return claims, errBadGrant
 		}
 	default:
@@ -179,7 +188,7 @@ func (c liveGrantClaims) identity() identity {
 	case grantServer:
 		return identity{server: true}
 	case grantPanel:
-		return identity{panel: &panelClaims{PublicID: c.PublicID, Scope: c.Scope, Exp: c.Exp}}
+		return identity{panel: &panelClaims{PublicID: c.PublicID, Scope: c.Scope, Exp: c.TokenExp}}
 	}
 	return identity{}
 }
@@ -285,7 +294,7 @@ func (s *Server) serveLiveGrant(w http.ResponseWriter, r *http.Request) {
 	case id.server:
 		claims.ID = grantServer
 	case id.panel != nil:
-		claims = liveGrantClaims{ID: grantPanel, PublicID: id.panel.PublicID, Scope: id.panel.Scope}
+		claims = liveGrantClaims{ID: grantPanel, PublicID: id.panel.PublicID, Scope: id.panel.Scope, TokenExp: id.panel.Exp.UTC()}
 		if id.panel.Exp.Before(exp) {
 			exp = id.panel.Exp.UTC() // never outlives the token it came from
 		}

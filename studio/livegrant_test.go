@@ -94,9 +94,113 @@ func TestLiveGrantReplayAfterExpiry(t *testing.T) {
 	if got := liveStatus(t, ts.URL, "run=r_ok&sig="+sig); got != http.StatusOK {
 		t.Fatalf("fresh grant: %d", got)
 	}
+	// A panel token's grant, the same way: the token outlives the
+	// grant, the URL does not.
+	pt, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, psig, pbody := grantAt(t, ts.URL, pt, "public_id=pub_a&kinds=event")
+	if code != http.StatusOK {
+		t.Fatalf("panel grant: %d %s", code, pbody)
+	}
+	if got := liveStatus(t, ts.URL, "public_id=pub_a&kinds=event&sig="+psig); got != http.StatusOK {
+		t.Fatalf("fresh panel grant: %d", got)
+	}
 	time.Sleep(time.Until(g.Exp) + 50*time.Millisecond)
 	if got := liveStatus(t, ts.URL, "run=r_ok&sig="+sig); got != http.StatusUnauthorized {
 		t.Errorf("replayed after expiry: %d, want 401", got)
+	}
+	var pg struct {
+		Exp time.Time `json:"exp"`
+	}
+	decode(t, pbody, &pg)
+	time.Sleep(time.Until(pg.Exp) + 50*time.Millisecond)
+	if got := liveStatus(t, ts.URL, "public_id=pub_a&kinds=event&sig="+psig); got != http.StatusUnauthorized {
+		t.Errorf("panel grant replayed after expiry: %d, want 401", got)
+	}
+}
+
+// TestLiveGrantKindsEquivalence: kinds is a set on both sides — spaces,
+// a trailing comma, a repeat and the order spell the same set, and an
+// empty kinds is the omitted default (event,run), at grant time and at
+// verify time alike.
+func TestLiveGrantKindsEquivalence(t *testing.T) {
+	ts := httptest.NewServer(New(DB(fixtureDB(t)), Token("srv")).Handler())
+	t.Cleanup(ts.Close)
+	same := []string{"kinds=event,run", "kinds=event,%20run", "kinds=event,run,", "kinds=event,event,run", "kinds=run,event", "kinds=", ""}
+	for _, grantQ := range same {
+		code, sig, body := grantAt(t, ts.URL, "srv", "run=r_ok&"+grantQ)
+		if code != http.StatusOK {
+			t.Fatalf("grant %q: %d %s", grantQ, code, body)
+		}
+		for _, openQ := range same {
+			if got := liveStatus(t, ts.URL, "run=r_ok&"+openQ+"&sig="+sig); got != http.StatusOK {
+				t.Errorf("granted %q, opened %q: %d, want 200", grantQ, openQ, got)
+			}
+		}
+		if got := liveStatus(t, ts.URL, "run=r_ok&kinds=event,run,messages&sig="+sig); got != http.StatusUnauthorized {
+			t.Errorf("granted %q, opened another set: %d, want 401", grantQ, got)
+		}
+	}
+}
+
+// TestLiveStreamEndsAtTokenExpiry pins the split (plan C5): a grant
+// bounds opening a stream; a panel token's stream — opened with a
+// grant or with the bearer — ends at the token's own expiry with one
+// `event: expired` frame, then closes; a server token's stream
+// outlives its grant.
+func TestLiveStreamEndsAtTokenExpiry(t *testing.T) {
+	old := liveGrantTTL
+	liveGrantTTL = 200 * time.Millisecond
+	t.Cleanup(func() { liveGrantTTL = old })
+	h := Handler(DB(fixtureDB(t)), Token("srv"))
+	ts := httptest.NewServer(h)
+	t.Cleanup(ts.Close)
+
+	open := func(query, bearer string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/live?"+query, nil)
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("open %s: %d", query, resp.StatusCode)
+		}
+		return resp
+	}
+	for _, via := range []string{"grant", "bearer"} {
+		exp := time.Now().Add(700 * time.Millisecond)
+		pt, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: exp})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var resp *http.Response
+		if via == "grant" {
+			_, sig, _ := grantAt(t, ts.URL, pt, "public_id=pub_a")
+			resp = open("public_id=pub_a&sig="+sig, "")
+		} else {
+			resp = open("public_id=pub_a", pt)
+		}
+		frames := readSSE(t, resp, 2, 5*time.Second) // returns at EOF
+		if len(frames) != 1 || frames[0].event != "expired" {
+			t.Errorf("%s: frames = %+v, want exactly one expired frame, then the end", via, frames)
+		}
+		if late := time.Since(exp); late < 0 || late > 2*time.Second {
+			t.Errorf("%s: the stream ended %v after the token's expiry", via, late)
+		}
+	}
+
+	// The server token's stream is not bounded by its grant.
+	_, sig, _ := grantAt(t, ts.URL, "srv", "run=r_ok")
+	resp := open("run=r_ok&sig="+sig, "")
+	if frames := readSSE(t, resp, 1, 3*liveGrantTTL); len(frames) != 0 {
+		t.Errorf("server-token stream past its grant's expiry: %+v, want still open and silent", frames)
 	}
 }
 
@@ -181,6 +285,31 @@ func TestLiveGrantSetupA(t *testing.T) {
 	t.Cleanup(other.Close)
 	if got := liveStatus(t, other.URL, "run=r_ok&kinds=event&sig="+sig); got != http.StatusUnauthorized {
 		t.Errorf("another setup-A server: %d, want 401", got)
+	}
+	// A token in the URL is refused here too (every /api route, every
+	// setup), naming the grant, never echoing it; so is the no-sig
+	// stream's hint, under a Token, which names the grant as well.
+	for _, path := range []string{"/api/runs?token=s3cret-in-url", "/api/live?run=r_ok&token=s3cret-in-url"} {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized || strings.Contains(string(b), "s3cret") || !strings.Contains(string(b), "POST /api/live-grant") {
+			t.Errorf("setup A %s: %d %s, want 401 naming POST /api/live-grant", path, resp.StatusCode, b)
+		}
+	}
+	closed := httptest.NewServer(New(DB(fixtureDB(t)), Token("srv")).Handler())
+	t.Cleanup(closed.Close)
+	if resp, err := http.Get(closed.URL + "/api/live?run=r_ok"); err != nil {
+		t.Fatal(err)
+	} else {
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized || !strings.Contains(string(b), "POST /api/live-grant") {
+			t.Errorf("no-sig stream under a Token: %d %s, want 401 naming POST /api/live-grant", resp.StatusCode, b)
+		}
 	}
 	// A foreign Host is refused before the sig is read.
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/live?run=r_ok&kinds=event&sig="+sig, nil)

@@ -338,7 +338,8 @@ heartbeats never), a ping every 15 s, `Last-Event-ID` resume with the
 gap backfilled from the database and deduped on `(run, kind, pos)`,
 and `event: overflow` when a slow subscriber's queue drops it. A token
 travels in the `Authorization` header only — `?token=` is refused on
-every route — so a browser's `EventSource`, which cannot set headers,
+every `/api` route, in every setup (401 naming the grant) — so a
+browser's `EventSource`, which cannot set headers,
 opens the stream with a grant: `POST /api/live-grant` (authenticated
 like every route; the selector and `kinds` as a JSON body
 `{"run":"r_1","kinds":"event,run"}` or as the query, not both) answers
@@ -351,6 +352,11 @@ expiry; another selector, another kinds set, a tampered or an expired
 sig is 401, and a panel token is refused a stream outside its public
 id at grant time (403), as the stream would refuse it. Without a
 `Token` the key is random per process: one mechanism in every setup.
+A grant opens one stream within 60 s; a panel token's stream (opened
+with a grant or with the bearer) ends at the token's expiry with one
+final `event: expired` frame (`data: {}`) and closes; a server
+token's does not (nor setup A's). After `expired`, reopen only with a
+bearer that is still valid — a new panel token, then a new grant.
 The `#token=` fragment `weft open` and `weft studio --open` hand the
 browser never reaches the server; the UI reads it. OTLP
 ingest is `POST /v1/traces` and `/v1/logs` (protobuf and JSON, gzip,

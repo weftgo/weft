@@ -210,8 +210,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    has the ladder), /panel-config.json
 //    //    ({endpoint, version, capabilities}; loopback Host / same-origin only, else
 //    //    404; capability "panel-config"); Token(tok) walls the
-//    //    /api tree (the Authorization bearer only: ?token= is refused; EventSource opens /api/live with
-//    POST /api/live-grant's 60 s sig: ?<selector>&kinds=…&sig=) — the UI shell and /panel.js are static,
+//    //    /api tree (the Authorization bearer only: ?token= is refused on every /api route, in every setup;
+//    EventSource opens /api/live with POST /api/live-grant's 60 s sig: ?<selector>&kinds=…&sig=; a panel
+//    token's stream ends at its expiry with `event: expired`) — the UI shell and /panel.js are static,
 //    //    OTLP ingest (/v1/traces, /v1/logs) carries its own IngestToken.
 //    // Setup B, any language (package cmd/weft — `go install github.com/weftgo/weft/cmd/weft@latest`;
 //    // the one place the clickhouse driver lives): weft studio --db sqlite://path |

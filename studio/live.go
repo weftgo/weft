@@ -250,7 +250,16 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 	// Subscribe before the backfill reads the database: records that
 	// arrive during the backfill arrive on both paths, and the
 	// (run, kind, pos) dedup keeps each to one delivery.
+	//
+	// A panel token's stream ends at the token's expiry (plan C5),
+	// opened with the bearer or with a grant alike: the grant bounds
+	// opening, the token bounds the stream (the backfill included). The
+	// server token's and setup A's streams have nothing to end them.
 	ctx, cancel := context.WithCancel(r.Context())
+	if p := idFrom(r).panel; p != nil {
+		cancel()
+		ctx, cancel = context.WithDeadline(r.Context(), p.Exp)
+	}
 	defer cancel()
 	frames, err := s.live.Subscribe(ctx, sel, after)
 	if err != nil {
@@ -267,6 +276,16 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	sw := &sseWriter{w: w, rc: http.NewResponseController(w)}
 	sw.flush()
+	// tokenExpired is the end-of-token frame: the client may reopen only
+	// with a bearer that is still valid (a new token, a new grant).
+	tokenExpired := func() bool {
+		if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return false
+		}
+		sw.frame("event: expired\ndata: {}\n\n")
+		sw.flush()
+		return true
+	}
 
 	sent := newLiveDedup(liveDedupSize)
 	if r.Header.Get("Last-Event-ID") != "" {
@@ -281,6 +300,7 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 	for sw.err == nil {
 		select {
 		case <-ctx.Done():
+			tokenExpired()
 			return
 		case <-ticker.C:
 			// The heartbeat frame (S4.5): keeps proxies from timing the
@@ -290,6 +310,9 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 			sw.flush()
 		case f, open := <-frames:
 			if !open {
+				if tokenExpired() {
+					return
+				}
 				// The hub dropped this subscriber: its queue (obsdb's
 				// QueueSize, 1,000 by default) overflowed. Say so and
 				// close (S4.5): the client refetches pages and

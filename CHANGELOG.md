@@ -19,12 +19,16 @@ module, ADR 0005).
   past a panel token's own); it is refused (401) on another selector
   or kinds set, tampered or expired. A panel token is granted only a
   stream inside its public id. Without a `Token` the key is random per
-  process, so setup A takes the same path.
+  process, so setup A takes the same path. A grant bounds opening only:
+  a panel token's stream — opened with a grant or with the bearer —
+  now ends at the token's expiry with one `event: expired` frame; a
+  server token's stream does not.
 
 ### Changed — breaking
 
-- **A token in a URL is refused**: the `?token=` query parameter is no
-  longer read on any route (401, never echoed); a token travels in
+- **A token in a URL is refused**: the `?token=` query parameter is
+  refused on every `/api` route, in every setup (401, never echoed,
+  naming the grant); a token travels in
   `Authorization: Bearer` only. Migration: an `EventSource` (or any
   client that put the token in the URL) requests a grant with `POST
   /api/live-grant` and opens `/api/live?…&sig=`. The `#token=`

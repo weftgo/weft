@@ -609,7 +609,7 @@ func TestAuthMatrix(t *testing.T) {
 		// an expiry a second ago — what a replay after 60 s presents.
 		claims := liveGrantClaims{ID: grantServer, Exp: time.Now().Add(-time.Second)}
 		if id.kind != "server" {
-			claims = liveGrantClaims{ID: grantPanel, PublicID: "pub_a", Scope: map[string]string{"read": scopeRead, "pg": scopePlayground}[id.kind], Exp: claims.Exp}
+			claims = liveGrantClaims{ID: grantPanel, PublicID: "pub_a", Scope: map[string]string{"read": scopeRead, "pg": scopePlayground}[id.kind], TokenExp: hour, Exp: claims.Exp}
 		}
 		sel, _ := liveSelector(map[string][]string{"run": {"run_a"}})
 		kinds, _ := liveKinds(map[string][]string{"kinds": {"event,run"}})
@@ -634,8 +634,15 @@ func TestAuthMatrix(t *testing.T) {
 			{"empty sig", "/api/live?" + stream + "&sig=", unauthorized},
 			{"a panel token as the sig", "/api/live?" + stream + "&sig=" + identities[5].token, unauthorized},
 			{"sig on another route", "/api/runs/run_a?sig=" + g.Sig, unauthorized},
+			{"HEAD: valid sig", "HEAD /api/live?" + stream + "&sig=" + g.Sig, ok},
+			{"HEAD: expired sig", "HEAD /api/live?" + stream + "&sig=" + expired, unauthorized},
+			{"HEAD: sig for another kinds set", "HEAD /api/live?run=run_a&kinds=event&sig=" + g.Sig, unauthorized},
 		} {
-			if got := do(http.MethodGet, c.path, "", identity{}); got != c.want {
+			method, path := http.MethodGet, c.path
+			if p, isHead := strings.CutPrefix(path, "HEAD "); isHead {
+				method, path = http.MethodHead, p
+			}
+			if got := do(method, path, "", identity{}); got != c.want {
 				t.Errorf("%-32s granted to %-24s = %d, want %d", c.name, id.name, got, c.want)
 			}
 		}

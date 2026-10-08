@@ -120,8 +120,12 @@ func Base(path string) Option {
 	}
 }
 
-// Manifest supplies core.Manifest bytes for the agent and tool cards.
-// Without it api/manifest answers 404 and the UI hides the Agents nav.
+// Manifest supplies core.Manifest bytes (weft.json) for the agent and
+// tool cards. It wins over the manifests runtimes register with
+// (Playground(true)), which api/manifest lists beside it in sources;
+// without either api/manifest answers 404 and the UI hides the Agents
+// nav. Registered manifests live in memory: a Studio restart forgets
+// them until the runtimes register again.
 func Manifest(json []byte) Option {
 	return func(c *config) { c.manifest = json }
 }

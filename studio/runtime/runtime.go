@@ -432,8 +432,12 @@ type RuntimeServer struct {
 	// runSeen is when an ack last named the run: the retention clock
 	// of its runs/runPub entries.
 	runSeen map[string]time.Time
-	nextSeq uint64
-	now     func() time.Time
+	// manifests are the registrations' manifests by (service, hash)
+	// (manifests.go): what Studio's /api/manifest serves without a
+	// weft.json.
+	manifests map[manifestKey]*ManifestSource
+	nextSeq   uint64
+	now       func() time.Time
 }
 
 // connected is one registered runtime and its live command stream.
@@ -445,6 +449,8 @@ type connected struct {
 	// breakpoints is the debugger's tool set (§8.3), applied to every
 	// run this runtime starts; GET /api/runtimes reports it.
 	breakpoints []string
+	// manifest keys the manifest its latest registration carried.
+	manifest manifestKey
 }
 
 // commandRow is one command's lifecycle state.
@@ -475,6 +481,7 @@ func New() *RuntimeServer {
 		runPub:         map[string]string{},
 		runFork:        map[string]bool{},
 		runSeen:        map[string]time.Time{},
+		manifests:      map[manifestKey]*ManifestSource{},
 		now:            time.Now,
 	}
 }
@@ -527,6 +534,7 @@ func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, http.StatusBadRequest, "bad_request", "register body: no agents")
 		return
 	}
+	src, hasManifest := registrationManifest(reg)
 	rs.mu.Lock()
 	rs.pruneLocked()
 	c := rs.runtimes[reg.RuntimeID]
@@ -544,6 +552,11 @@ func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 	c.lastSeen = rs.now()
 	if c.connectedSince.IsZero() {
 		c.connectedSince = c.lastSeen
+	}
+	if hasManifest {
+		rs.rememberLocked(c, src, c.lastSeen)
+	} else {
+		c.manifest = manifestKey{}
 	}
 	rs.mu.Unlock()
 	slog.Debug("studio/runtime: registered", "runtime_id", reg.RuntimeID, "agents", len(reg.Agents))

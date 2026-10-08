@@ -17,6 +17,14 @@
     "live",
     "ingest"
   ],
+  "capabilities_off": {
+    "auth": "no server token to sign panel tokens with: studio.Token(tok) / weft studio --token",
+    "breakpoints": "the playground is off: studio.Playground(false) / weft studio --no-playground",
+    "playground": "the playground is off: studio.Playground(false) / weft studio --no-playground",
+    "runtimes": "the playground is off: studio.Playground(false) / weft studio --no-playground",
+    "steer": "the playground is off: studio.Playground(false) / weft studio --no-playground"
+  },
+  "manifest_sources": 1,
   "auth_required": false,
   "content": {
     "ingest": "as_received",
@@ -30,6 +38,7 @@
   "retention": null,
   "runtimes": 0,
   "manifest_check": {
+    "source": "file",
     "agents": 1,
     "checked": 1,
     "stale": [

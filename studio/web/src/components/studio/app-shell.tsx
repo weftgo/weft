@@ -98,7 +98,10 @@ function Nav() {
           {item("/runs", "Runs", <List data-slot="icon" />)}
           {item("/sessions", "Sessions", <MessagesSquare data-slot="icon" />)}
           {item("/live", "Live", <Activity data-slot="icon" />)}
-          {meta.data?.has_manifest &&
+          {/* Agents: a manifest (weft.json or a registration), or a
+              runtime link a runtime may register one through (B4). */}
+          {(meta.data?.has_manifest ||
+            meta.data?.capabilities.includes("playground")) &&
             item("/agents", "Agents", <Bot data-slot="icon" />)}
           {/* The playground (step 8): offered exactly when the runtime
               link's routes are registered (the capability is computed
@@ -300,7 +303,8 @@ export function AppShell() {
               <Activity data-slot="icon" />
               Live
             </CommandItem>
-            {meta.data?.has_manifest && (
+            {(meta.data?.has_manifest ||
+              meta.data?.capabilities.includes("playground")) && (
               <CommandItem
                 value="agents manifest"
                 onSelect={() => go("/agents")}

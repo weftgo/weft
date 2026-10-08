@@ -1095,30 +1095,6 @@ func (s *Server) servePublic(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, publicResolution{SessionID: sid})
 }
 
-// serveManifest answers api/manifest with the bytes passed to
-// Manifest(...), or 404 when none was given (the UI hides the Agents
-// nav).
-func (s *Server) serveManifest(w http.ResponseWriter, r *http.Request) {
-	// The manifest carries every agent's system prompt, which a
-	// read-scoped panel token's page does not get (serveRuntimes strips
-	// the same field for it): only an identity that may start
-	// experiments reads it. The panel itself never asks for it.
-	if !readsPrompts(r) {
-		refuseHidden(w, r, "the manifest carries the agents' system prompts: a read-scoped panel token does not read it")
-		return
-	}
-	if len(s.manifest) == 0 {
-		notFound(w, r, "no manifest configured")
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	if r.Method == http.MethodHead {
-		return
-	}
-	_, _ = w.Write(s.manifest)
-}
-
 // dbKind names the database's backend for api/meta, best effort: the
 // dynamic type's full name ("*sqlite.DB" → "sqlite", anything else
 // carrying "mem" → "memory", the hosted backend → "clickhouse"), else

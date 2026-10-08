@@ -42,7 +42,7 @@ var Lines = []Line{
 	{"content", []string{"content.ingest", "content.latest.run_id", "content.latest.mark", "content.latest.note", "content.latest.fix", "content.error"}},
 	{"runtimes", []string{"runtimes", "capabilities", "env:WEFT_ENV", "env:WEFT_STUDIO_URL"}},
 	{"panel", []string{"panel_version", "studio_version"}},
-	{"weft.json", []string{"has_manifest", "manifest_check.agents", "manifest_check.checked", "manifest_check.stale", "manifest_check.error"}},
+	{"weft.json", []string{"has_manifest", "manifest_check.source", "manifest_check.agents", "manifest_check.checked", "manifest_check.stale", "manifest_check.error"}},
 }
 
 // meta is the slice of GET /api/meta the doctor reads.
@@ -66,6 +66,7 @@ type meta struct {
 	} `json:"content"`
 	Runtimes      int `json:"runtimes"`
 	ManifestCheck *struct {
+		Source  string   `json:"source"` // file | runtime (registered, no weft.json)
 		Agents  int      `json:"agents"`
 		Checked int      `json:"checked"`
 		Stale   []string `json:"stale"`
@@ -282,6 +283,10 @@ func (p *printer) manifest(m meta) {
 		p.line(ok, "weft.json", "configured; not checked for this caller")
 	case c.Error != "":
 		p.line(warn, "weft.json", "the check failed: %s", c.Error)
+	case c.Source == "runtime" && len(c.Stale) > 0:
+		p.line(warn, "weft.json", "none configured; stale for %s: the manifest a runtime registered and the latest runs disagree (runs from another build)", strings.Join(c.Stale, ", "))
+	case c.Source == "runtime":
+		p.line(ok, "weft.json", "none configured; %d agents from a runtime's registration, %d checked against their latest runs", c.Agents, c.Checked)
 	case len(c.Stale) > 0:
 		p.line(warn, "weft.json", "stale for %s: weft.json and the latest runs disagree: regenerate weft.json, or redeploy the app if weft.json is newer", strings.Join(c.Stale, ", "))
 	case c.Checked == 0:

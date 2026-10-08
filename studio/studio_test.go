@@ -913,8 +913,17 @@ func TestManifestEndpoint(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("manifest: %d", code)
 	}
-	if body != fixtureManifest {
-		t.Errorf("manifest bytes not passed through verbatim")
+	// The file's bytes verbatim, sources spliced in as the last key
+	// (plan B4): one file source, no runtime registered.
+	head := strings.TrimRight(strings.TrimRight(strings.TrimSpace(fixtureManifest), "}"), " \n")
+	if !strings.HasPrefix(body, head+`,"sources":[{"source":"file","manifest_hash":"`) {
+		t.Errorf("manifest bytes not passed through verbatim: %s", body)
+	}
+	var doc struct {
+		Sources []map[string]any `json:"sources"`
+	}
+	if err := json.Unmarshal([]byte(body), &doc); err != nil || len(doc.Sources) != 1 {
+		t.Errorf("manifest with sources: %v %s", err, body)
 	}
 	code, _, body = get(t, Handler(DB(fixtureDB(t))), "/studio/api/manifest")
 	if code != http.StatusNotFound {

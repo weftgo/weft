@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/weftgo/weft/obsdb"
+	linkruntime "github.com/weftgo/weft/studio/runtime"
 )
 
 // api/meta (S4.3, plan B5): what this Studio is and how it is wired,
@@ -35,6 +36,14 @@ type metaDoc struct {
 	IngestOpen         bool     `json:"ingest_open"`
 	InterruptedAfterMs int64    `json:"interrupted_after_ms"`
 	Capabilities       []string `json:"capabilities"`
+	// CapabilitiesOff names each capability an option left off, with
+	// the option (and CLI flag) that did (plan B4): the UI's empty
+	// states say it. Omitted when nothing is off.
+	CapabilitiesOff map[string]string `json:"capabilities_off,omitempty"`
+	// ManifestSources counts api/manifest's sources: the weft.json
+	// (when configured) plus each manifest a runtime registered with,
+	// by (service, manifest hash), live or remembered.
+	ManifestSources int `json:"manifest_sources"`
 	// AuthRequired is whether a Token is configured: the API then reads
 	// the bearer (setup B/C); false is setup A, where no token is read.
 	AuthRequired bool `json:"auth_required"`
@@ -53,7 +62,8 @@ type metaDoc struct {
 	// Runtimes is how many runtimes hold a live command stream now: 0
 	// when the playground is off (no runtime link) or none dialed in.
 	Runtimes int `json:"runtimes"`
-	// ManifestCheck compares the configured manifest (weft.json) with
+	// ManifestCheck compares the manifest (weft.json, else the
+	// registered agents api/manifest serves; source says which) with
 	// the manifest hash each agent's latest stored run recorded. Null
 	// without a manifest, and for a panel token (it reads no manifest).
 	ManifestCheck *metaManifest `json:"manifest_check"`
@@ -106,6 +116,9 @@ type metaContentRun struct {
 
 // metaManifest is the manifest staleness check.
 type metaManifest struct {
+	// Source is what was checked: file (weft.json) or runtime (the
+	// manifests runtimes registered with — no weft.json configured).
+	Source  string   `json:"source"`
 	Agents  int      `json:"agents"`  // agents in the manifest
 	Checked int      `json:"checked"` // of those, agents with a stored run carrying a manifest hash
 	Stale   []string `json:"stale"`   // checked agents whose latest run's hash differs; never null
@@ -138,16 +151,19 @@ var contentNotes = map[string][2]string{
 // serveMeta answers api/meta.
 func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 	id := idFrom(r)
+	reg := s.registeredManifests()
 	doc := metaDoc{
 		WeftVersion:        weftVersion(),
 		StudioVersion:      Version,
 		PanelVersion:       panelVersion(),
 		DB:                 metaDB{Kind: dbKind(s.db)},
 		Title:              s.title,
-		HasManifest:        len(s.manifest) > 0,
+		HasManifest:        len(s.manifest) > 0 || len(reg) > 0,
+		ManifestSources:    len(s.manifestSources(reg)),
 		IngestOpen:         !s.noIngest && s.ingestToken == "",
 		InterruptedAfterMs: obsdb.InterruptedAfter.Milliseconds(),
 		Capabilities:       s.capabilityList(),
+		CapabilitiesOff:    s.capabilitiesOff(),
 		DebugScope:         s.debugScope(),
 		AuthRequired:       s.token != "",
 		Content:            s.latestContent(r.Context(), id),
@@ -157,8 +173,8 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 		doc.DB.Path, doc.DB.Size = dbFile(s.db)
 		doc.PID = os.Getpid()
 	}
-	if id.panel == nil && len(s.manifest) > 0 {
-		doc.ManifestCheck = s.manifestCheck(r.Context())
+	if id.panel == nil {
+		doc.ManifestCheck = s.manifestCheck(r.Context(), reg)
 	}
 	writeJSON(w, r, http.StatusOK, doc)
 }
@@ -260,11 +276,16 @@ func (s *Server) connectedRuntimes() int {
 // manifestCheck compares each manifest agent's hash — sha256 of the
 // agent's own one-agent manifest document, the hash the core stamps as
 // weft.manifest.hash — with the latest stored run of that agent
-// (subagent runs included). A manifest that does not parse checks
-// nothing; it and a failed run read are logged and reported in error.
-func (s *Server) manifestCheck(ctx context.Context) *metaManifest {
-	hashes, err := manifestAgentHashes(s.manifest)
-	out := &metaManifest{Stale: []string{}}
+// (subagent runs included). The manifest is the weft.json, else the
+// registered agents api/manifest serves; nil when there is neither. A
+// manifest that does not parse checks nothing; it and a failed run
+// read are logged and reported in error.
+func (s *Server) manifestCheck(ctx context.Context, reg []linkruntime.ManifestSource) *metaManifest {
+	source, hashes, err := s.checkedManifest(reg)
+	if source == "" {
+		return nil
+	}
+	out := &metaManifest{Source: source, Stale: []string{}}
 	if err != nil {
 		out.Error = metaReadFailed("manifest_check: the manifest does not parse", err)
 		return out

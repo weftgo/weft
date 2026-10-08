@@ -281,6 +281,14 @@ export interface Meta {
   ingest_open: boolean
   interrupted_after_ms: number
   capabilities: string[]
+  /** Why each capability an option left off is off (plan B4): the
+   * option and the CLI flag — e.g. playground: "the playground is off:
+   * studio.Playground(false) / weft studio --no-playground". Absent
+   * when nothing is off. */
+  capabilities_off?: Record<string, string>
+  /** api/manifest's sources: the weft.json plus each manifest a
+   * runtime registered with (plan B4). */
+  manifest_sources?: number
   /** Whether a Token is configured (the API reads the bearer). */
   auth_required?: boolean
   /** What the debugger's write verbs (breakpoints, steer) may act on
@@ -296,7 +304,13 @@ export interface Meta {
   retention?: string | null
   /** Runtimes holding a command stream now. */
   runtimes?: number
-  manifest_check?: { agents: number; checked: number; stale: string[] } | null
+  manifest_check?: {
+    /** file (weft.json) or runtime (registered; no weft.json). */
+    source?: "file" | "runtime"
+    agents: number
+    checked: number
+    stale: string[]
+  } | null
 }
 
 /** A panel token minted by the backend (S4.6). */
@@ -395,6 +409,24 @@ export interface Message {
 export interface Manifest {
   weft: number
   agents: ManifestAgent[]
+  /** Where the agents come from (plan B4): the weft.json when one is
+   * configured (it wins the agents), then every manifest a runtime
+   * registered with, by (service, manifest_hash) — live while a
+   * connected runtime holds it, else remembered. */
+  sources?: ManifestSource[]
+}
+
+export interface ManifestSource {
+  source: "file" | "runtime"
+  manifest_hash: string
+  /** A registered source's identity and liveness (absent for the file). */
+  service?: string
+  live?: boolean
+  registered_at?: string
+  runtime_id?: string
+  /** The source's agents, each with its own hash (the
+   * weft.manifest.hash its runs carry). */
+  agents: { name: string; manifest_hash: string }[]
 }
 
 export interface ManifestAgent {

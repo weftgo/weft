@@ -182,14 +182,21 @@ function useHandoff(): PlaygroundSearch {
 function PlaygroundPage() {
   const caps = useCapabilities()
   if (caps.loading) return <p className="p-6 text-xs text-muted-foreground">loading…</p>
-  if (!caps.has("playground")) return <NoPlayground />
+  if (!caps.has("playground")) return <NoPlayground why={caps.why("playground")} />
   return <Playground caps={caps.caps} />
 }
 
-function NoPlayground() {
+/** The playground's (and the debugger's) empty state: meta's
+ * capabilities_off reason when an option turned it off (plan B4). */
+function NoPlayground({ why }: { why?: string }) {
   return (
     <div className="mx-auto max-w-lg space-y-2 py-24 text-center">
-      <p className="text-sm">This Studio has no playground.</p>
+      <p className="text-sm">This Studio has no playground and no debugger.</p>
+      {why && (
+        <p className="text-xs text-muted-foreground" data-testid="playground-why">
+          {why}
+        </p>
+      )}
       <p className="text-xs text-muted-foreground">
         The runtime link opens with <span className="font-mono">studio.Playground(true)</span>{" "}
         and <span className="font-mono">runtime.Install(...)</span> in your app

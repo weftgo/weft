@@ -10,6 +10,7 @@ import { studioPlaygroundLink, WeftDevtools } from "./element"
 import { buildRunBody, experimentLabel, pickRuntime } from "./playground"
 import type { ExperimentDraft } from "./playground"
 import { idle } from "./testkit"
+import { answerLiveGrant, checkLiveURL, resetGrants } from "../test/fake-live-grant"
 
 const T0 = "2026-10-01T09:00:00Z"
 
@@ -125,6 +126,12 @@ function fakeStudio(routes: Record<string, unknown>, meta: unknown = metaPlaygro
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://studio.test/studio/api/")
     const path = decodeURIComponent(url.pathname).replace(/^.*\/api\//, "") + (url.search || "")
+    if (init?.method === "POST" && path === "live-grant") {
+      // The live grant (plan C5): the shared fake mints the sig the
+      // stream must carry.
+      const auth = new Headers(init.headers).get("Authorization") ?? ""
+      return answerLiveGrant(url, auth.replace(/^Bearer /, ""), init.body ? String(init.body) : undefined)
+    }
     if (init?.method === "POST") {
       posts.push({ path, body: JSON.parse(String(init.body)) })
       const hit = routes["POST " + path]
@@ -171,6 +178,13 @@ class FakeEventSource {
   constructor(url: string) {
     this.url = url
     FakeEventSource.instances.push(this)
+    // A URL without a valid grant is refused, as /api/live answers it.
+    if (checkLiveURL(url)) {
+      queueMicrotask(() => {
+        this.readyState = 2
+        this.onerror?.({})
+      })
+    }
   }
   addEventListener(type: string, cb: (e: { data: string; lastEventId?: string }) => void) {
     if (!this.listeners.has(type)) this.listeners.set(type, new Set())
@@ -208,6 +222,7 @@ const text = (el: WeftDevtools, sel: string): string => $(el, sel)?.textContent 
 
 beforeEach(() => {
   FakeEventSource.instances = []
+  resetGrants()
   vi.stubGlobal("EventSource", FakeEventSource)
   ;(globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ = "v0.2.1"
 })

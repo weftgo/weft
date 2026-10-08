@@ -68,7 +68,7 @@ describe("the token wall (S4.6, setup B)", () => {
     expect(studio.requests.length).toBe(n)
   })
 
-  it("carries the token on the live stream (EventSource cannot send headers)", async () => {
+  it("opens the live stream with a grant the bearer bought: no token in its URL (plan C5)", async () => {
     setStudioToken("dev-secret")
     const running: RunDoc = { ...rOK, status: "running", finished: null, children: [] }
     studio
@@ -79,7 +79,13 @@ describe("the token wall (S4.6, setup B)", () => {
       .on("GET runs/r_ok/spans", { spans: [] })
     renderApp("/runs/r_ok")
     await waitFor(() => expect(FakeEventSource.open()).toHaveLength(1))
-    expect(new URL(FakeEventSource.open()[0].url).searchParams.get("token")).toBe("dev-secret")
+    const es = FakeEventSource.open()[0]
+    expect(es.refused).toBeNull()
+    expect(es.url).not.toContain("token=")
+    expect(es.url).not.toContain("dev-secret")
+    expect(new URL(es.url).searchParams.get("sig")).toMatch(/^weft_lg\./)
+    expect(studio.calls("POST live-grant")).toHaveLength(1)
+    expect(studio.calls("POST live-grant")[0].body).toEqual({ run: "r_ok", kinds: "event,delta,run" })
     expect(studio.requests.every((r) => r.headers.get("Authorization") === "Bearer dev-secret")).toBe(true)
   })
 })

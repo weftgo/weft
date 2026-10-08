@@ -20,13 +20,14 @@ import type {
   Transcript,
 } from "../lib/api"
 import { asTranscript } from "../lib/api"
-import type { LiveRecord, LiveRun, LiveSelector } from "../lib/live"
-import { selectorSearch } from "../lib/live"
+import type { LiveGrant, LiveRecord, LiveRun, LiveSelector } from "../lib/live"
+import { freshBearer, grantSpent, liveStreamURL, requestLiveGrant } from "../lib/live"
 
 export interface PanelEndpoint {
   /** Studio base URL, trailing slash included. */
   base: string
-  /** Bearer token ("" in setup A). */
+  /** Bearer token ("" in setup A). Sent only in the Authorization
+   * header — never in a URL; the live stream opens with a grant. */
   token: string
 }
 
@@ -355,8 +356,11 @@ export interface PanelLiveOptions {
   /** The stream ended and will not come back by itself: "overflow" is
    * the server's own frame (S4.5: refetch and reconnect), "closed" a
    * stream that failed for good or stayed down a whole round — the
-   * caller decides whether to knock again, and how often. */
-  onOverflow?: (why: "overflow" | "closed") => void
+   * caller decides whether to knock again, and how often; "expired"
+   * a panel token's stream that ended at the token's expiry with no
+   * fresh bearer to ask again with — the caller does not knock (the
+   * token would be refused), it shows no live. */
+  onOverflow?: (why: "overflow" | "closed" | "expired") => void
 }
 
 export interface PanelLiveHandle {
@@ -380,120 +384,161 @@ export const LIVE_DEDUP_SIZE = 1 << 16
  * openPanelLive is live.ts's openLive over the panel's endpoint and
  * token: same frames, same dedup on (run, kind, pos) — a transport
  * retry and the database's own publish both re-deliver a record, and
- * one delivery is enough. The token rides the URL because
- * EventSource cannot send headers. Nothing in here may throw into the
- * host page: a frame that does not parse is skipped, and a handler
- * that fails is contained.
+ * one delivery is enough. No token rides a URL (plan C5): each
+ * connection first asks POST {endpoint}api/live-grant, the bearer in
+ * the header, for a sig bound to this one stream for 60 s, and opens
+ * the stream with the sig. The browser's own reconnect is left alone
+ * while the grant lasts (it resumes with Last-Event-ID); one after it
+ * is replaced by a new grant and a fresh connection (onOpen(true): the
+ * caller refetches). Nothing in here may throw into the host page: a
+ * frame that does not parse is skipped, a handler that fails is
+ * contained, and a refused grant is silence ("closed").
  */
 export function openPanelLive(ep: PanelEndpoint, opts: PanelLiveOptions): PanelLiveHandle {
   let closed = false
   let dropped = false
   let timer: ReturnType<typeof setTimeout> | null = null
+  let es: EventSource | null = null
+  let attempt = 0
   const seen = new Set<string>()
   const stop = () => {
     closed = true
+    attempt++
     if (timer) clearTimeout(timer)
     timer = null
+    es?.close()
   }
-
-  let es: EventSource
-  try {
-    const params = new URLSearchParams(selectorSearch(opts.selector))
-    params.set("kinds", (opts.kinds ?? ["event", "run"]).join(","))
-    if (ep.token) params.set("token", ep.token)
-    es = new EventSource(apiUrl(ep, `live?${params.toString()}`))
-  } catch {
-    // No EventSource here, or a URL it refuses: history only.
-    return { close: stop }
-  }
-  const guarded = (fn: (e: MessageEvent) => void) => (e: Event) => {
-    if (closed) return
+  const report = (why: "overflow" | "closed" | "expired") => {
+    stop()
     try {
-      fn(e as MessageEvent)
+      opts.onOverflow?.(why)
     } catch {
-      // a malformed frame or a failed handler: skip the frame
+      // contained: a callback must not throw into the host page
     }
   }
-  es.addEventListener(
-    "record",
-    guarded((e) => {
-      const raw = JSON.parse(e.data as string) as {
-        run_id: string
-        session_id: string
-        public_id: string
-        kind: string
-        pos: number
-        time: string
-        event: unknown
+  // No EventSource here: history only, and no grant asked for.
+  if (typeof EventSource === "undefined") return { close: stop }
+
+  // connect asks for a grant with the bearer the endpoint holds now,
+  // then opens the stream it names.
+  const connect = () => {
+    const n = ++attempt
+    const tok = ep.token
+    requestLiveGrant(apiUrl(ep, "live-grant"), tok, opts.selector, opts.kinds).then(
+      (grant) => {
+        if (!closed && n === attempt) open(grant, tok)
+      },
+      () => {
+        // Refused (a token gone bad) or no answer: the caller decides.
+        if (!closed && n === attempt) report("closed")
       }
-      const key = `${raw.run_id}\u0000${raw.kind}\u0000${raw.pos}`
-      if (seen.has(key)) return
-      seen.add(key)
-      // A Set iterates in insertion order: the first key is the oldest.
-      if (seen.size > LIVE_DEDUP_SIZE) seen.delete(seen.values().next().value as string)
-      const id = e.lastEventId
-      opts.onRecord?.({
-        seq: Number(id) > 0 ? Number(id) : 0,
-        run_id: raw.run_id,
-        session_id: raw.session_id,
-        public_id: raw.public_id,
-        kind: raw.kind as LiveRecord["kind"],
-        pos: raw.pos,
-        time: raw.time,
-        event: raw.event as LiveRecord["event"],
-      })
-    })
-  )
-  es.addEventListener(
-    "run",
-    guarded((e) => {
-      const raw = JSON.parse(e.data as string) as { run?: LiveRun["run"] } | null
-      if (!raw?.run || typeof raw.run.id !== "string") return
-      const id = e.lastEventId
-      opts.onRun?.({ seq: Number(id) > 0 ? Number(id) : 0, run: raw.run })
-    })
-  )
-  es.addEventListener("ping", () => {})
-  es.addEventListener(
-    "overflow",
-    guarded(() => {
+    )
+  }
+
+  const open = (grant: LiveGrant, tok: string) => {
+    let src: EventSource
+    try {
+      src = new EventSource(liveStreamURL(apiUrl(ep, "live"), opts.selector, opts.kinds, grant))
+    } catch {
+      // A URL it refuses: history only.
       stop()
-      es.close()
-      opts.onOverflow?.("overflow")
-    })
-  )
-  es.onopen = guarded(() => {
-    if (timer) clearTimeout(timer)
-    timer = null
-    const again = dropped
-    dropped = false
-    opts.onOpen?.(again)
-  })
-  es.onerror = () => {
-    // EventSource retries on its own. A stream that failed for good
-    // (a refused token closes it), or that is still down after one
-    // round of silence (Studio gone), is closed here so the browser
-    // stops knocking — the caller hears "closed" once. A handle the
-    // panel closed itself never reports.
-    if (closed) return
-    dropped = true
-    if (timer) return
-    timer = setTimeout(() => {
-      timer = null
-      if (closed || es.readyState === EventSource.OPEN) return
-      stop()
-      es.close()
+      return
+    }
+    es = src
+    const guarded = (fn: (e: MessageEvent) => void) => (e: Event) => {
+      if (closed || es !== src) return
       try {
-        opts.onOverflow?.("closed")
+        fn(e as MessageEvent)
       } catch {
-        // contained: a timer must not throw into the host page
+        // a malformed frame or a failed handler: skip the frame
       }
-    }, LIVE_SILENCE_MS)
+    }
+    src.addEventListener(
+      "record",
+      guarded((e) => {
+        const raw = JSON.parse(e.data as string) as {
+          run_id: string
+          session_id: string
+          public_id: string
+          kind: string
+          pos: number
+          time: string
+          event: unknown
+        }
+        const key = `${raw.run_id}\u0000${raw.kind}\u0000${raw.pos}`
+        if (seen.has(key)) return
+        seen.add(key)
+        // A Set iterates in insertion order: the first key is the oldest.
+        if (seen.size > LIVE_DEDUP_SIZE) seen.delete(seen.values().next().value as string)
+        const id = e.lastEventId
+        opts.onRecord?.({
+          seq: Number(id) > 0 ? Number(id) : 0,
+          run_id: raw.run_id,
+          session_id: raw.session_id,
+          public_id: raw.public_id,
+          kind: raw.kind as LiveRecord["kind"],
+          pos: raw.pos,
+          time: raw.time,
+          event: raw.event as LiveRecord["event"],
+        })
+      })
+    )
+    src.addEventListener(
+      "run",
+      guarded((e) => {
+        const raw = JSON.parse(e.data as string) as { run?: LiveRun["run"] } | null
+        if (!raw?.run || typeof raw.run.id !== "string") return
+        const id = e.lastEventId
+        opts.onRun?.({ seq: Number(id) > 0 ? Number(id) : 0, run: raw.run })
+      })
+    )
+    src.addEventListener("ping", () => {})
+    src.addEventListener(
+      "overflow",
+      guarded(() => report("overflow"))
+    )
+    src.addEventListener(
+      "expired",
+      guarded(() => {
+        // The panel token's stream ended at its expiry (plan C5): ask
+        // again only with a fresh bearer the host handed over, else
+        // stop quietly.
+        src.close()
+        if (freshBearer(ep.token, tok)) {
+          dropped = true
+          connect()
+        } else report("expired")
+      })
+    )
+    src.onopen = guarded(() => {
+      if (timer) clearTimeout(timer)
+      timer = null
+      const again = dropped
+      dropped = false
+      opts.onOpen?.(again)
+    })
+    src.onerror = () => {
+      // EventSource retries on its own, with the sig it was opened
+      // with: while the grant lasts that resumes the stream; once it is
+      // spent the retry would be refused, so it is replaced by a new
+      // grant now. A stream that failed for good (refused), or that is
+      // still down after one round of silence (Studio gone), is closed
+      // here so the browser stops knocking — the caller hears "closed"
+      // once. A handle the panel closed itself never reports.
+      if (closed || es !== src) return
+      dropped = true
+      if (grantSpent(grant)) {
+        src.close()
+        connect()
+      }
+      if (timer) return
+      timer = setTimeout(() => {
+        timer = null
+        if (closed || es?.readyState === EventSource.OPEN) return
+        report("closed")
+      }, LIVE_SILENCE_MS)
+    }
   }
-  return {
-    close() {
-      stop()
-      es.close()
-    },
-  }
+  connect()
+  return { close: stop }
 }

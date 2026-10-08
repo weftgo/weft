@@ -48,6 +48,10 @@ module, ADR 0005).
   /api/live-grant` and opens `/api/live?…&sig=`. The `#token=`
   fragment of `weft open` / `weft studio --open` links is unaffected:
   it never reaches the server.
+- **Both web clients request a live grant** (plan C5.2): the Studio UI
+  and the devtools panel open every live stream with `POST
+  /api/live-grant` (bearer in the header) and a `sig`, and put no
+  token in any URL — the UI's export link included.
 
 ## 0.11.0 — 2026-10-08
 

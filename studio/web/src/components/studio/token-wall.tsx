@@ -2,10 +2,10 @@
 // — setup B's `weft studio` always, setup C's hosted handler —
 // answers every API call 401 until the request carries the token. The
 // UI itself is served open, so this is where the reader hands the
-// token over: pasted here, or carried in the link as ?token= / #token=
-// (lib/api's adoptTokenFromLocation, run before the router starts). It
-// is kept in this browser's localStorage and sent as a bearer on every
-// request (the live stream carries it as ?token=, S4.6).
+// token over: pasted here, or carried in the link's fragment (lib/api's
+// adoptTokenFromLocation, run before the router starts). It is kept in
+// this browser's localStorage and sent as a bearer header on every
+// request, never in a URL (the live stream opens with a grant, C5).
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 

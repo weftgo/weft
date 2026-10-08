@@ -12,7 +12,7 @@ function runtimeBasepath(): string {
 }
 
 export function getRouter() {
-  // A token handed over in the link (?token= / #token=, S4.6) is
+  // A token handed over in the link (adoptTokenFromLocation, S4.6) is
   // stored and stripped before the router reads the location — and
   // before the first API call needs it. Not in the shell prerender.
   if (typeof document !== "undefined") adoptTokenFromLocation()

@@ -115,7 +115,7 @@ describe("exportUrl", () => {
     document.querySelector("base")?.remove()
   })
 
-  it("links a run's export under the mount, the id encoded, the token as ?token=", () => {
+  it("links a run's export under the mount, the id encoded, never a token (plan C5)", () => {
     const base = document.createElement("base")
     base.href = "/studio/"
     document.head.appendChild(base)
@@ -124,11 +124,13 @@ describe("exportUrl", () => {
     expect(plain.searchParams.get("format")).toBe("wefttest")
     expect(plain.searchParams.has("token")).toBe(false)
 
-    // A download link cannot carry a bearer header.
+    // Studio refuses a token in a URL on every route: the link carries
+    // none, whatever the stored token.
     setStudioToken("tok")
     const walled = new URL(exportUrl("r_1", "jsonl"))
     expect(walled.searchParams.get("format")).toBe("jsonl")
-    expect(walled.searchParams.get("token")).toBe("tok")
+    expect(walled.searchParams.has("token")).toBe(false)
+    expect(walled.toString()).not.toContain("tok")
   })
 })
 

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { RunRow } from "@/lib/api"
 import { LiveRuns, MAX_AGENT_STREAMS } from "@/components/studio/live-runs"
 import { FakeEventSource } from "@/test/fake-event-source"
+import { withLiveGrant } from "@/test/fake-live-grant"
 import { renderWithRouter } from "@/test/render"
 
 // Waits are for conditions; the bound is a ceiling for a loaded machine.
@@ -28,6 +29,7 @@ describe("LiveRuns", () => {
   beforeEach(() => {
     FakeEventSource.reset()
     vi.stubGlobal("EventSource", FakeEventSource)
+    vi.stubGlobal("fetch", withLiveGrant())
   })
   afterEach(() => {
     cleanup()
@@ -39,7 +41,7 @@ describe("LiveRuns", () => {
       run(`r${i}`, i % 2 ? "orders" : "research")
     )
     await renderWithRouter(<LiveRuns runs={runs} onStale={() => {}} />)
-    expect(FakeEventSource.open()).toHaveLength(2)
+    await waitFor(() => expect(FakeEventSource.open()).toHaveLength(2))
     const selectors = FakeEventSource.open().map((es) =>
       new URL(es.url).searchParams.get("agent")
     )
@@ -56,7 +58,7 @@ describe("LiveRuns", () => {
   it("caps the streams of a large fleet and says which are live", async () => {
     const runs = Array.from({ length: 9 }, (_, i) => run(`r${i}`, `agent-${i}`))
     await renderWithRouter(<LiveRuns runs={runs} onStale={() => {}} />)
-    expect(FakeEventSource.open()).toHaveLength(MAX_AGENT_STREAMS)
+    await waitFor(() => expect(FakeEventSource.open()).toHaveLength(MAX_AGENT_STREAMS))
     expect(screen.getByText(/streaming 4 of 9 agents live/)).toBeTruthy()
   })
 
@@ -65,7 +67,7 @@ describe("LiveRuns", () => {
     await renderWithRouter(
       <LiveRuns runs={[run("r1", "orders")]} onStale={onStale} />
     )
-    const es = FakeEventSource.instances[0]
+    const es = await waitFor(() => FakeEventSource.nth(0))
     act(() => {
       es.connect()
       // A heartbeat-driven frame of a run already listed: no refetch.

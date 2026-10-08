@@ -7,6 +7,8 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { vi } from "vitest"
 
+import { answerLiveGrant } from "./fake-live-grant"
+
 export function golden<T = unknown>(name: string): T {
   return JSON.parse(
     readFileSync(
@@ -196,8 +198,10 @@ export class FakeStudio {
   private token = ""
 
   /** Wall the API the way auth.go does under Token(tok): a request
-   * without the bearer (the Authorization header, or ?token= — what an
-   * EventSource sends) is a 401 before any route is consulted. */
+   * without the bearer in the Authorization header is a 401 before any
+   * route is consulted. A ?token= is a 401 on every route, walled or
+   * not (plan C5); POST live-grant is answered by the fake grant
+   * (fake-live-grant.ts) unless a route overrides it. */
   requireToken(tok: string): this {
     this.token = tok
     return this
@@ -262,13 +266,17 @@ export class FakeStudio {
           body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
         }
         this.requests.push(req)
+        if (req.query.has("token"))
+          return apiError(401, "unauthorized", "a token in the URL is refused: send Authorization: Bearer <token>")
+        const h = req.headers.get("Authorization")
+        const presented = h !== null && h.startsWith("Bearer ") ? h.slice(7) : ""
         if (this.token) {
-          const h = req.headers.get("Authorization")
-          const presented = h !== null ? (h.startsWith("Bearer ") ? h.slice(7) : "") : (req.query.get("token") ?? "")
           if (!presented)
             return apiError(401, "unauthorized", "the API requires a token: Authorization: Bearer <token>")
           if (presented !== this.token) return apiError(401, "unauthorized", "bad or expired token")
         }
+        if (req.method === "POST" && req.path === "live-grant" && !this.routes.has("POST live-grant"))
+          return answerLiveGrant(url, presented, typeof init?.body === "string" ? init.body : undefined)
         const handler = this.routes.get(`${req.method} ${req.path}`)
         if (!handler)
           return apiError(404, "not_found", `no such api route /api/${req.path}`)

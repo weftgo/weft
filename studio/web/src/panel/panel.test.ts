@@ -12,6 +12,7 @@ import { fold } from "../lib/events"
 import { partitionRuns, strippedContent } from "./state"
 import type { TurnView } from "./state"
 import { idle } from "./testkit"
+import { answerLiveGrant, checkLiveURL, resetGrants } from "../test/fake-live-grant"
 
 // ── The fake Studio ───────────────────────────────────────────────
 // The shapes mirror studio/testdata/api/*.golden.json (S4.3), which
@@ -99,7 +100,7 @@ const SESSION: SessionRow = {
 /** routes: the fake Studio's answers. Meta is set per test. */
 function fakeStudio(routes: Record<string, unknown>, meta: unknown = metaOK) {
   const calls: string[] = []
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://studio.test/studio/api/")
     // Run ids carry slashes and travel percent-encoded; Go's mux
     // decodes them before routing, so the fake keys the decoded path.
@@ -107,6 +108,12 @@ function fakeStudio(routes: Record<string, unknown>, meta: unknown = metaOK) {
       decodeURIComponent(url.pathname).replace(/^.*\/api\//, "") + (url.search || "")
     calls.push(path)
     if (url.pathname.endsWith("/meta")) return json(meta)
+    // The live grant (plan C5): the shared fake mints the sig the
+    // stream below must carry.
+    if (path === "live-grant" && init?.method === "POST") {
+      const auth = new Headers(init.headers).get("Authorization") ?? ""
+      return answerLiveGrant(url, auth.replace(/^Bearer /, ""), init.body ? String(init.body) : undefined)
+    }
     const hit = routes[path]
     if (hit) return json(hit)
     return new Response(JSON.stringify({ error: { code: "not_found", message: path } }), {
@@ -145,6 +152,13 @@ class FakeEventSource {
   constructor(url: string) {
     this.url = url
     FakeEventSource.instances.push(this)
+    // A URL without a valid grant is refused, as /api/live answers it.
+    if (checkLiveURL(url)) {
+      queueMicrotask(() => {
+        this.readyState = 2
+        this.onerror?.({})
+      })
+    }
   }
   addEventListener(type: string, cb: (e: { data: string; lastEventId?: string }) => void) {
     if (!this.listeners.has(type)) this.listeners.set(type, new Set())
@@ -169,6 +183,7 @@ const runRoutes = (runs: RunRow[]): Record<string, unknown> => ({
 
 beforeEach(() => {
   FakeEventSource.instances = []
+  resetGrants()
   vi.stubGlobal("EventSource", FakeEventSource)
   // The unbundled sources have no build-time define: the global seam
   // says the panel was built against the same studio the fake serves.

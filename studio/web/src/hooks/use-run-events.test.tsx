@@ -9,6 +9,7 @@ import { act, cleanup, configure, renderHook, waitFor } from "@testing-library/r
 
 import { setStudioToken } from "@/lib/api"
 import { FakeEventSource } from "@/test/fake-event-source"
+import { withLiveGrant } from "@/test/fake-live-grant"
 import { useRunEvents } from "./use-run-events"
 
 // Waits are for conditions; the bound is a ceiling for a loaded machine.
@@ -46,7 +47,7 @@ describe("useRunEvents fetch auth", () => {
           headers: { "Content-Type": "application/json" },
         })
     )
-    vi.stubGlobal("fetch", fetchMock)
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
 
     const { result } = renderHook(() => useRunEvents("r1", "succeeded"))
     await waitFor(() => {
@@ -67,7 +68,7 @@ describe("useRunEvents fetch auth", () => {
           headers: { "Content-Type": "application/json" },
         })
     )
-    vi.stubGlobal("fetch", fetchMock)
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
 
     const { result } = renderHook(() => useRunEvents("r1", "succeeded"))
     await waitFor(() => expect(result.current.done).toBe(true))
@@ -127,7 +128,7 @@ describe("useRunEvents walk and tail", () => {
   // child was running.
   it("does nothing without a run id", async () => {
     const fetchMock = vi.fn(async () => json(pageOf([], null)))
-    vi.stubGlobal("fetch", fetchMock)
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
     const { result } = renderHook(() => useRunEvents("", "running", { live: true }))
     await new Promise((r) => setTimeout(r, 30))
     expect(fetchMock).not.toHaveBeenCalled()
@@ -146,10 +147,10 @@ describe("useRunEvents walk and tail", () => {
           release = res
         })
     )
-    vi.stubGlobal("fetch", fetchMock)
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
     const { result } = renderHook(() => useRunEvents("r1", "running", { live: true }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-    const es = FakeEventSource.instances[0]
+    const es = await waitFor(() => FakeEventSource.nth(0))
     es.connect()
     // The page was read at positions 0..1; 2 and 3 are published while
     // its response is still in flight.
@@ -169,10 +170,10 @@ describe("useRunEvents walk and tail", () => {
         ? json(pageOf([0, 1], null))
         : json(pageOf([2, 3], null))
     )
-    vi.stubGlobal("fetch", fetchMock)
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
     const { result } = renderHook(() => useRunEvents("r1", "running", { live: true }))
     await waitFor(() => expect(result.current.lastPos).toBe(1))
-    const es = FakeEventSource.instances[0]
+    const es = await waitFor(() => FakeEventSource.nth(0))
     es.connect()
     es.emit("record", frame(3), "9") // 2 was never delivered live
     await waitFor(() => expect(result.current.lastPos).toBe(3))
@@ -182,10 +183,10 @@ describe("useRunEvents walk and tail", () => {
 
   it("folds deltas and in-order events straight from the stream", async () => {
     const fetchMock = vi.fn(async () => json(pageOf([0], null)))
-    vi.stubGlobal("fetch", fetchMock)
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
     const { result } = renderHook(() => useRunEvents("r1", "running", { live: true }))
     await waitFor(() => expect(result.current.lastPos).toBe(0))
-    const es = FakeEventSource.instances[0]
+    const es = await waitFor(() => FakeEventSource.nth(0))
     es.connect()
     es.emit("record", frame(0, "delta"))
     es.emit("record", frame(1), "5")
@@ -199,7 +200,7 @@ describe("useRunEvents walk and tail", () => {
   // page) must end the walk, not spin on the API.
   it("stops on a cursor that does not advance", async () => {
     const fetchMock = vi.fn(async () => json(pageOf([0], 1)))
-    vi.stubGlobal("fetch", fetchMock)
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
     const { result } = renderHook(() => useRunEvents("r1", "succeeded"))
     await waitFor(() => expect(result.current.loading).toBe(false))
     await new Promise((r) => setTimeout(r, 30))
@@ -215,7 +216,7 @@ describe("useRunEvents walk and tail", () => {
         ? json(pageOf([0, 1], 2, true))
         : json(pageOf([2], null, true))
     )
-    vi.stubGlobal("fetch", fetchMock)
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
     const seenDone: [boolean, number][] = []
     const { result } = renderHook(() => {
       const s = useRunEvents("r1", "succeeded")
@@ -232,11 +233,11 @@ describe("useRunEvents walk and tail", () => {
   // page used to open a second EventSource for them — two of a
   // browser's six connections per origin for one tab).
   it("hands run frames to onRun on the same stream", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => json(pageOf([0], null))))
+    vi.stubGlobal("fetch", withLiveGrant(vi.fn(async () => json(pageOf([0], null)))))
     const onRun = vi.fn()
     renderHook(() => useRunEvents("r1", "running", { live: true, onRun }))
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
-    const es = FakeEventSource.instances[0]
+    const es = await waitFor(() => FakeEventSource.nth(0))
     expect(new URL(es.url).searchParams.get("kinds")).toBe("event,delta,run")
     es.connect()
     es.emit("run", { run: { id: "r1", status: "succeeded" } }, "12")
@@ -245,7 +246,7 @@ describe("useRunEvents walk and tail", () => {
 
   it("closes its stream and stops polling on unmount", async () => {
     const fetchMock = vi.fn(async () => json(pageOf([0], null)))
-    vi.stubGlobal("fetch", fetchMock)
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
     const { unmount } = renderHook(() => useRunEvents("r1", "running", { live: true }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     unmount()
@@ -282,10 +283,10 @@ describe("useRunEvents seam holes", () => {
           })
         : Promise.resolve(json(pageOf([2, 3, 4], null)))
     )
-    vi.stubGlobal("fetch", fetchMock)
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
     const { result } = renderHook(() => useRunEvents("r1", "running", { live: true }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-    const es = FakeEventSource.instances[0]
+    const es = await waitFor(() => FakeEventSource.nth(0))
     es.connect()
     es.emit("record", frame(4), "9") // 2 and 3 were published before the subscription
     release(json(pageOf([0, 1], null)))
@@ -299,10 +300,10 @@ describe("useRunEvents seam holes", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
       afterOf(input) === 0 ? json(pageOf([0, 1], null)) : json(pageOf([], null))
     )
-    vi.stubGlobal("fetch", fetchMock)
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
     const { result } = renderHook(() => useRunEvents("r1", "running", { live: true }))
     await waitFor(() => expect(result.current.lastPos).toBe(1))
-    const es = FakeEventSource.instances[0]
+    const es = await waitFor(() => FakeEventSource.nth(0))
     es.connect()
     es.emit("record", frame(3), "9")
     await waitFor(() => expect(result.current.lastPos).toBe(3))
@@ -324,7 +325,7 @@ describe("useRunEvents live publish cost", () => {
   // stream published frame by frame re-rendered a 10k-event page tens
   // of times a second and locked the tab. A burst is one publish.
   it("coalesces a burst of live frames into one publish", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => json(pageOf([0], null))))
+    vi.stubGlobal("fetch", withLiveGrant(vi.fn(async () => json(pageOf([0], null)))))
     const published = new Set<unknown>()
     const { result } = renderHook(() => {
       const s = useRunEvents("r1", "running", { live: true })
@@ -332,7 +333,7 @@ describe("useRunEvents live publish cost", () => {
       return s
     })
     await waitFor(() => expect(result.current.lastPos).toBe(0))
-    const es = FakeEventSource.instances[0]
+    const es = await waitFor(() => FakeEventSource.nth(0))
     es.connect()
     const before = published.size
     // Each SSE frame is its own browser task — no batching for free:

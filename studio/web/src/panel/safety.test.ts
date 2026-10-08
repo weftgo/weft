@@ -501,13 +501,16 @@ describe("the live streams end", () => {
     expect($(el, ".weft-dot.weft-on, .weft-dot.weft-run")).toBeNull()
   })
 
-  it("a stream's dedup set is bounded: a tail open for a long run does not grow by one key per delta", () => {
+  it("a stream's dedup set is bounded: a tail open for a long run does not grow by one key per delta", async () => {
+    fakeStudio({})
     const got: number[] = []
     const h = openPanelLive(
       { base: "http://studio.test/studio/", token: "" },
       { selector: { run: "r1" }, kinds: ["delta"], onRecord: (r) => got.push(r.pos) }
     )
+    await settle()
     const es = FakeEventSource.last("run=r1")!
+    es.opened()
     const delta = (pos: number) =>
       es.emit("record", { run_id: "r1", kind: "delta", pos, time: T0, event: { type: "text_delta", run_id: "r1", text: "x" } })
     const max = 1 << 16 // studio/live.go's liveDedupSize: the same window on both sides
@@ -528,7 +531,7 @@ describe("the live streams end", () => {
 })
 
 describe("the token goes to data-endpoint and nowhere else (§6)", () => {
-  it("bearer on fetches, ?token= on the EventSource only, never in a link to Studio", async () => {
+  it("bearer on fetches only; the EventSource carries a grant's sig, never the token; never in a link to Studio", async () => {
     const routes = baseRoutes()
     routes["POST playground/runs"] = apiError(503, "unavailable", "runtime rt_01 is not connected")
     const studio = fakeStudio(routes)
@@ -544,10 +547,15 @@ describe("the token goes to data-endpoint and nowhere else (§6)", () => {
       expect(u.origin + u.pathname.slice(0, 12)).toBe("http://studio.test/studio/api/")
       expect(u.search).not.toContain("secret")
     }
+    expect(studio.posts("live-grant").length).toBeGreaterThan(0)
+    expect(FakeEventSource.instances.length).toBeGreaterThan(0)
     for (const es of FakeEventSource.instances) {
       const u = new URL(es.url)
       expect(u.origin).toBe("http://studio.test")
-      expect(u.searchParams.get("token")).toBe("dev_secret_tok")
+      expect(u.searchParams.has("token")).toBe(false)
+      expect(es.url).not.toContain("secret")
+      expect(u.searchParams.get("sig")).toMatch(/^weft_lg\./)
+      expect(es.refused).toBeNull()
     }
     const links = all(el, "a").map((a) => a.getAttribute("href") ?? "")
     // ⤢, save as fixture, compare in Studio, and the turn's join keys

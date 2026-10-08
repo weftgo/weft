@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { renderWaterfall, studioLink, WeftDevtools } from "./element"
 import { idle } from "./testkit"
 import { waterfall } from "./render"
+import { withLiveGrant } from "../test/fake-live-grant"
 
 class FakeEventSource {
   static instances: FakeEventSource[] = []
@@ -95,7 +96,7 @@ describe("the keyboard (§5.2, Q4 decided: Alt+W primary)", () => {
       )
       return new Response(body, { headers: { "content-type": "application/json" } })
     })
-    vi.stubGlobal("fetch", fetchMock)
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
     if (!customElements.get("weft-devtools")) customElements.define("weft-devtools", WeftDevtools)
     const el = document.createElement("weft-devtools")
     el.setAttribute("data-endpoint", "http://studio.test/studio/")

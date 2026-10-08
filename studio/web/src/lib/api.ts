@@ -483,8 +483,9 @@ export function apiBase(): string {
 /**
  * The bearer token, when the serving Studio is token-walled (setup B
  * and C). The UI stores it in localStorage under the site's key after
- * the reader pastes it; every request — EventSource included, via the
- * token query parameter — carries it.
+ * the reader pastes it; every request carries it in the Authorization
+ * header, and never in a URL — the live stream opens with a grant the
+ * header bought (lib/live's requestLiveGrant, plan C5).
  */
 const TOKEN_KEY = "studio.token"
 export function studioToken(): string {
@@ -1106,16 +1107,16 @@ export type ExportFormat = "json" | "jsonl" | "otlp" | "wefttest"
 /**
  * exportUrl is the download link of a run's export: json (one
  * document), jsonl (one record per line), otlp (OTLP/JSON logs and
- * traces, re-ingestable) or wefttest (replay fixtures, zipped). A link
- * cannot carry a bearer header, so a token-walled Studio's token rides
- * as ?token=. A read-scoped panel token's json and jsonl hide the
- * request block; its otlp and wefttest are 403 with badge "hidden".
+ * traces, re-ingestable) or wefttest (replay fixtures, zipped). The
+ * link carries no credential (plan C5: no token in a URL — Studio
+ * refuses one on every route): it opens as is in setup A; a
+ * token-walled Studio's export is read with request()'s bearer header.
+ * A read-scoped panel token's json and jsonl hide the request block;
+ * its otlp and wefttest are 403 with badge "hidden".
  */
 export function exportUrl(runId: string, format: ExportFormat): string {
   const url = new URL(`runs/${encodeURIComponent(runId)}/export`, apiBase())
   url.searchParams.set("format", format)
-  const tok = studioToken()
-  if (tok) url.searchParams.set("token", tok)
   return url.toString()
 }
 

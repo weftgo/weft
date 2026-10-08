@@ -122,7 +122,15 @@ the step's ordinal — its index as the loop counts it, the `n` of
 index; a call is named with its step (`sel=c:<step>:<call id>`,
 `c:resume:<call id>`). ⤢ carries the step being read (else the running
 one); each tool call, subagent badge, session and trace in the panel is
-a link. No link carries a token.
+a link. No link carries a token, and no request does in its URL: the
+token travels in the `Authorization` header, and each live stream is
+opened with a grant (`POST /api/live-grant`, the bearer in the header;
+the stream URL carries only the `sig`). The browser's own reconnect is
+left to resume with `Last-Event-ID` while the grant lasts; one after
+its 60 s gets a new grant and a fresh connection (the panel refetches
+what it lists). A panel token's stream that ends with `event: expired`
+is reopened only when the host has handed over a fresh token; else the
+live dot goes out, history stays, nothing reaches the console.
 `Alt+W` toggles (Q4), `?` lists keys, `r` flips raw. Setups B/C add
 `data-endpoint` and `data-token` (a dev token, or a panel token your
 backend mints per page via `POST /api/panel-tokens`). A single-page app
@@ -373,6 +381,15 @@ with a grant or with the bearer) ends at the token's expiry with one
 final `event: expired` frame (`data: {}`) and closes; a server
 token's does not (nor setup A's). After `expired`, reopen only with a
 bearer that is still valid — a new panel token, then a new grant.
+Both clients do exactly this (`lib/live.ts`'s `openLive` for the UI,
+`openPanelLive` for the panel): a grant before every connection, the
+browser's own `Last-Event-ID` reconnect kept inside the grant's 60 s,
+a new grant (and a fresh connection, refetched) after it or after a
+refused stream, and after `expired` a new grant only for a fresh
+bearer. A fresh connection carries no resume cursor — the header is the
+only way `Last-Event-ID` is read — so the clients refetch pages
+instead. The UI's export link carries no token: it opens as is in
+setup A.
 The `#token=` fragment `weft open` and `weft studio --open` hand the
 browser never reaches the server; the UI reads it. OTLP
 ingest is `POST /v1/traces` and `/v1/logs` (protobuf and JSON, gzip,

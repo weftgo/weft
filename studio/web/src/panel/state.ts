@@ -515,6 +515,8 @@ export class PanelModel {
         // database's job. A stream that closed for good is retried a
         // bounded number of times, further apart each time — a Studio
         // that went away (or a token that expired) is not hammered.
+        // A panel token that expired is not asked again: no live, quietly.
+        if (why === "expired") return
         if (why === "overflow") void again().catch(quiet)
         else this.retry("scope", again)
       },
@@ -747,11 +749,13 @@ export class PanelModel {
   }
 
   /** resumeTurn (re)loads the view's stored records and, while the run
-   * is running, follows its tail. The tail subscribes BEFORE the pages
-   * are read (the hook's order, hooks/use-run-events.ts): frames that
-   * land during the walk are held and folded after it by position, so
-   * nothing published between the last page and the subscription is
-   * lost until the run ends. */
+   * is running, follows its tail. The tail is asked for BEFORE the
+   * pages are read (the hook's order, hooks/use-run-events.ts); its
+   * stream opens once its live grant answers (plan C5). Frames that
+   * land during the walk are held and folded after it by position, and
+   * the tail's open reads the pages past what was folded, so nothing
+   * published between the last page and the subscription is lost until
+   * the run ends. */
   private async resumeTurn(view: TurnView) {
     const followed = !view.done && this.rowOf(view.id)?.status === "running"
     if (followed) this.follow(view)
@@ -992,6 +996,8 @@ export class PanelModel {
         // The tail is gone, the run is not: reload what is stored and
         // follow again — at once on the server's own overflow frame,
         // on the bounded backoff when the stream closed for good.
+        // A panel token that expired is not asked again: no live, quietly.
+        if (why === "expired") return
         if (why === "overflow") void this.resumeTurn(view).catch(quiet)
         else this.retry("run", () => this.resumeTurn(view))
       },
@@ -1492,6 +1498,8 @@ export class PanelModel {
           if (this.left(res) || res.runID !== runID || isReady(res)) return
           if (res.state === "queued" || res.state === "accepted") this.openExperimentStream(res)
         }
+        // A panel token that expired is not asked again: no live, quietly.
+        if (why === "expired") return
         if (why === "overflow") void again().catch(quiet)
         else this.retry("exp", again)
       },

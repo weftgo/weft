@@ -176,19 +176,27 @@ describe("the live tail", () => {
   const TOOL_FINISH = { type: "tool_finish", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "lookup_order", content: "shipped", is_error: false }
   const calls = (el: Parameters<typeof all>[0]) => all(el, ".weft-step .weft-call .weft-name").map((n) => n.textContent)
 
-  it("subscribes before the pages are read: a frame that lands during the walk folds after them", async () => {
+  it("asks for the tail before the pages are read: a frame that lands during the walk folds after them", async () => {
     const routes = liveTurn()
     let tailDuringWalk = false
-    routes["runs/s_01-t1/events?after=0&limit=500"] = () => {
-      // The tool call starts while the page travels back: the page
-      // does not hold it, the stream does.
+    let grantFirst = false
+    routes["runs/s_01-t1/events?after=0&limit=500"] = async () => {
+      // The tail's grant was asked for before this page (plan C5: the
+      // stream opens once the grant answers). The tool call starts
+      // while the page travels back: the page does not hold it, the
+      // stream does.
+      grantFirst = studio.posts("live-grant").some((c) => c.body && (c.body as { run?: string }).run === "s_01-t1")
+      await vi.waitFor(() => {
+        if (!FakeEventSource.last("run=s_01-t1")) throw new Error("no tail yet")
+      })
       const tail = FakeEventSource.last("run=s_01-t1")
       tailDuringWalk = tail !== undefined
       tail?.emit("record", { run_id: "s_01-t1", kind: "event", pos: 2, time: T0, event: TOOL_START })
       return page(runEvents("s_01-t1").slice(0, 2), { done: false })
     }
-    fakeStudio(routes)
+    const studio = fakeStudio(routes)
     const el = await mount()
+    expect(grantFirst).toBe(true)
     expect(tailDuringWalk).toBe(true)
     expect(calls(el)).toEqual(["lookup_order"])
     expect(text(el, ".weft-step .weft-call")).toContain("running…")

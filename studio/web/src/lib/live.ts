@@ -4,8 +4,11 @@
 // resume for free — it echoes the last received id on its own
 // reconnects — so a dropped connection the browser is retrying is left
 // alone; a stream that ended for good (the overflow frame, a refused
-// connection) is reopened here with backoff. The token rides the URL
-// because EventSource cannot send headers.
+// connection) is reopened here with backoff. No token rides a URL
+// (plan C5): EventSource cannot send headers, so every connection is
+// opened with a live grant — POST /api/live-grant with the bearer in
+// the header answers a sig bound to this exact stream for 60 s, and
+// the stream URL carries the sig, never the token.
 import type { RunRow, WireEvent } from "./api"
 import type { ContentAttrs } from "./honesty"
 import { apiBase, studioToken } from "./api"
@@ -20,6 +23,115 @@ export type LiveSelector =
 export function selectorSearch(sel: LiveSelector): string {
   const [[k, v]] = Object.entries(sel)
   return `${encodeURIComponent(k)}=${encodeURIComponent(v)}`
+}
+
+// ── The live grant (plan C5) ───────────────────────────────────────
+
+/** A live grant: the opaque, URL-safe sig and its expiry (ms since the
+ * epoch, as the server stated it). */
+export interface LiveGrant {
+  sig: string
+  exp: number
+}
+
+/** The grant's lifetime as the server mints it (studio/livegrant.go's
+ * liveGrantTTL): the fallback when an answer's exp does not parse. */
+export const LIVE_GRANT_TTL_MS = 60_000
+
+/** A refused grant request (the status says why: 401 a bad or missing
+ * bearer, 403 a stream outside the token's scope). */
+export class LiveGrantError extends Error {
+  constructor(readonly status: number) {
+    super(`live grant refused: ${status}`)
+  }
+}
+
+/** liveKinds is the stream's kinds set as the query carries it. */
+function liveKinds(kinds?: string[]): string {
+  return (kinds ?? ["event", "run"]).join(",")
+}
+
+/**
+ * requestLiveGrant asks grantURL (POST {base}api/live-grant) for a sig
+ * that opens this one stream: the selector and kinds in the JSON body,
+ * the bearer in the Authorization header (none in setup A). The token
+ * is never part of a URL.
+ */
+export async function requestLiveGrant(
+  grantURL: string,
+  token: string,
+  selector: LiveSelector,
+  kinds?: string[],
+  signal?: AbortSignal
+): Promise<LiveGrant> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  }
+  if (token) headers.Authorization = `Bearer ${token}`
+  const res = await fetch(grantURL, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ ...selector, kinds: liveKinds(kinds) }),
+    signal,
+  })
+  if (!res.ok) throw new LiveGrantError(res.status)
+  const doc = (await res.json()) as { sig?: unknown; exp?: unknown } | null
+  if (typeof doc?.sig !== "string" || !doc.sig) throw new LiveGrantError(res.status)
+  const exp = typeof doc.exp === "string" ? Date.parse(doc.exp) : NaN
+  return { sig: doc.sig, exp: Number.isFinite(exp) ? exp : Date.now() + LIVE_GRANT_TTL_MS }
+}
+
+/** liveStreamURL is the stream a grant opens: GET {base}api/live with
+ * the same selector and kinds, and the sig. */
+export function liveStreamURL(
+  liveURL: string,
+  selector: LiveSelector,
+  kinds: string[] | undefined,
+  grant: LiveGrant
+): string {
+  const url = new URL(liveURL)
+  url.search = selectorSearch(selector)
+  url.searchParams.set("kinds", liveKinds(kinds))
+  url.searchParams.set("sig", grant.sig)
+  return url.toString()
+}
+
+/** grantSpent reports whether a grant can no longer open a stream — the
+ * moment the browser's own reconnect would be refused. */
+export function grantSpent(grant: LiveGrant, now = Date.now()): boolean {
+  return now >= grant.exp
+}
+
+/** panelTokenExp is a panel token's expiry (ms), read from its claims;
+ * null for anything else or claims the page cannot read. A hint, never
+ * a check: Studio verifies the token. */
+export function panelTokenExp(token: string): number | null {
+  if (!token.startsWith("weft_pt.")) return null
+  try {
+    const body = token.slice("weft_pt.".length).split(".")[0]
+    const b64 = body.replace(/-/g, "+").replace(/_/g, "/")
+    const claims = JSON.parse(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))) as { exp?: unknown }
+    const exp = typeof claims.exp === "string" ? Date.parse(claims.exp) : NaN
+    return Number.isFinite(exp) ? exp : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * freshBearer decides what follows a panel token's `expired` frame: a
+ * new grant only for a bearer that is not the one whose stream ended
+ * (that one is expired by the server's clock, whatever this page's
+ * says) and that can still be valid — a server token, or a panel token
+ * whose claims have not expired. No bearer, the same one, or an
+ * expired one: the stream stops quietly.
+ */
+export function freshBearer(token: string, ended: string, now = Date.now()): boolean {
+  if (!token || token === ended) return false
+  if (!token.startsWith("weft_pt.")) return true
+  const exp = panelTokenExp(token)
+  return exp !== null && exp > now
 }
 
 /** A record frame: one event as ingested, deltas included. */
@@ -105,14 +217,12 @@ const SEEN_GENERATION = 20_000
  * become the resume cursor EventSource echoes on its own reconnect.
  */
 export function openLive(opts: LiveOptions): LiveHandle {
-  const params = new URLSearchParams(selectorSearch(opts.selector))
-  params.set("kinds", (opts.kinds ?? ["event", "run"]).join(","))
-
   let closed = false
   let down = false // lost and not yet back
   let failures = 0 // consecutive attempts that never opened
   let timer: ReturnType<typeof setTimeout> | null = null
   let es: EventSource | null = null
+  let attempt = 0 // the newest connect: an older grant answer is dropped
   let seen = new Set<string>()
   let older = new Set<string>()
 
@@ -132,14 +242,29 @@ export function openLive(opts: LiveOptions): LiveHandle {
     }, delay)
   }
 
+  // connect asks for a grant, then opens the stream it names. The
+  // token is read per connection: a pasted or refreshed one takes
+  // effect on the next attempt. A refused or failed grant request is a
+  // failed attempt like a refused stream: the same backoff, the same
+  // give-up.
   const connect = () => {
-    // The token is read per connection: a pasted or refreshed one
-    // takes effect on the next attempt.
+    const n = ++attempt
     const tok = studioToken()
-    if (tok) params.set("token", tok)
-    else params.delete("token")
+    requestLiveGrant(new URL("live-grant", apiBase()).toString(), tok, opts.selector, opts.kinds).then(
+      (grant) => {
+        if (!closed && n === attempt) open(grant, tok)
+      },
+      () => {
+        if (closed || n !== attempt) return
+        lost()
+        reopenLater()
+      }
+    )
+  }
+
+  const open = (grant: LiveGrant, tok: string) => {
     const src = new EventSource(
-      new URL(`live?${params.toString()}`, apiBase()).toString()
+      liveStreamURL(new URL("live", apiBase()).toString(), opts.selector, opts.kinds, grant)
     )
     es = src
     const current = () => !closed && es === src
@@ -207,16 +332,34 @@ export function openLive(opts: LiveOptions): LiveHandle {
       lost()
       reopenLater()
     })
+    src.addEventListener("expired", () => {
+      // A panel token's stream ended at the token's expiry (plan C5):
+      // a new grant only for a fresh bearer (a new token handed over),
+      // else the stream stops quietly — down, the fallback stays.
+      if (!current()) return
+      src.close()
+      lost()
+      if (freshBearer(studioToken(), tok)) connect()
+      else es = null
+    })
     src.onerror = () => {
       if (!current()) return
       lost()
-      // CONNECTING: the browser is retrying on its own and will echo
-      // Last-Event-ID — the server backfills, onopen says refetch.
-      // CLOSED: it will not (a non-200 answer ends an EventSource for
-      // good), so the reconnect is ours.
+      // CONNECTING within the grant's lifetime: the browser is
+      // retrying on its own and will echo Last-Event-ID — the server
+      // backfills, onopen says refetch. CONNECTING once the grant is
+      // spent: the browser's retry would reuse the spent sig and be
+      // refused, so the reconnect is ours, now, with a new grant (a
+      // fresh connection has no resume cursor; onopen says refetch).
+      // CLOSED: the browser will not retry (a non-200 answer — a
+      // refusal, a spent sig — ends an EventSource for good), so the
+      // reconnect is ours, with a new grant, on the backoff.
       if (src.readyState === EventSource.CLOSED) {
         src.close()
         reopenLater()
+      } else if (grantSpent(grant)) {
+        src.close()
+        connect()
       }
     }
   }
@@ -225,6 +368,7 @@ export function openLive(opts: LiveOptions): LiveHandle {
   return {
     close() {
       closed = true
+      attempt++
       if (timer !== null) clearTimeout(timer)
       timer = null
       es?.close()

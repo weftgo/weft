@@ -6,6 +6,7 @@
 import { vi } from "vitest"
 import type { RunRow, SessionRow } from "../lib/api"
 import { WeftDevtools } from "./element"
+import { answerLiveGrant, checkLiveURL, resetGrants } from "../test/fake-live-grant"
 
 export const T0 = "2026-10-01T09:00:00Z"
 
@@ -149,7 +150,10 @@ export const apiError = (status: number, code: string, message: string): Respons
 
 /** The fake Studio: keyed on the decoded path (+ "POST "/"PUT " for
  * the write verbs). A route may be a function — a stateful answer, a
- * delayed one, or a Response with a status. */
+ * delayed one, or a Response with a status. POST live-grant is
+ * answered by the fake grant (fake-live-grant.ts) unless a route
+ * overrides it; a ?token= on any route is a 401, as studio/auth.go
+ * refuses it. */
 export function fakeStudio(routes: Record<string, Route>, meta: Route = META) {
   const calls: { method: string; path: string; body: unknown; headers: Record<string, string> }[] = []
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -170,7 +174,12 @@ export function fakeStudio(routes: Record<string, Route>, meta: Route = META) {
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
       headers: (init?.headers ?? {}) as Record<string, string>,
     })
+    if (url.searchParams.has("token")) return apiError(401, "unauthorized", "a token in the URL is refused")
     const key = method === "GET" ? path : `${method} ${path}`
+    if (key === "POST live-grant" && !("POST live-grant" in routes)) {
+      const auth = new Headers(init?.headers).get("Authorization") ?? ""
+      return answerLiveGrant(url, auth.startsWith("Bearer ") ? auth.slice(7) : "", init?.body ? String(init.body) : undefined)
+    }
     let hit: Route = path === "meta" ? meta : routes[key]
     if (typeof hit === "function") hit = await (hit as (i?: RequestInit) => unknown)(init)
     if (hit instanceof Response) return hit
@@ -196,9 +205,14 @@ export class FakeEventSource {
   onerror: ((e: unknown) => void) | null = null
   onopen: ((e: unknown) => void) | null = null
   private listeners = new Map<string, Set<(e: Frame) => void>>()
+  /** Why the server refused this URL (a 401: no or a spent grant, a
+   * ?token=), or null. A refused stream errors CLOSED on its own. */
+  refused: string | null
   constructor(url: string) {
     this.url = url
     FakeEventSource.instances.push(this)
+    this.refused = checkLiveURL(url)
+    if (this.refused) queueMicrotask(() => this.readyState !== 2 && this.fail())
   }
   addEventListener(type: string, cb: (e: Frame) => void) {
     if (!this.listeners.has(type)) this.listeners.set(type, new Set())
@@ -213,6 +227,7 @@ export class FakeEventSource {
   }
   /** opened: the connection is up. */
   opened() {
+    if (this.refused) throw new Error(`FakeEventSource: ${this.url} was refused: ${this.refused}`)
     this.readyState = 1
     this.onopen?.({})
   }
@@ -224,6 +239,18 @@ export class FakeEventSource {
   }
   close() {
     this.readyState = 2
+  }
+  /** The browser's own reconnect after a drop: the same URL (the same
+   * sig) knocks again — open while the grant lasts, refused once it is
+   * spent. */
+  retry() {
+    if (checkLiveURL(this.url)) this.fail()
+    else this.opened()
+  }
+  /** A panel token's stream ended at its expiry: the one final frame,
+   * no id. */
+  expire() {
+    this.listeners.get("expired")?.forEach((cb) => cb({ data: "{}", lastEventId: "" }))
   }
   static live(part: string): FakeEventSource[] {
     return FakeEventSource.instances.filter((i) => i.url.includes(part) && i.readyState !== 2)
@@ -343,6 +370,7 @@ export function baseRoutes(): Record<string, Route> {
 export function setup() {
   inflight = 0
   FakeEventSource.instances = []
+  resetGrants()
   vi.stubGlobal("EventSource", FakeEventSource)
   ;(globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ = "v0.2.1"
 }

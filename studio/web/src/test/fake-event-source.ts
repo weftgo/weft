@@ -1,6 +1,9 @@
 // Test double for EventSource (jsdom has none): the tests drive the
 // stream by hand — open it, emit named frames, drop it the way a
-// browser reports a lost or refused connection.
+// browser reports a lost or refused connection. The URL passes the
+// fake live grant's door (fake-live-grant.ts's checkLiveURL) or the
+// stream is refused the way a browser reports a 401: CLOSED, onerror.
+import { checkLiveURL, resetGrants } from "./fake-live-grant"
 
 export class FakeEventSource {
   static readonly CONNECTING = 0
@@ -10,6 +13,15 @@ export class FakeEventSource {
   static instances: FakeEventSource[] = []
   static reset() {
     FakeEventSource.instances = []
+    resetGrants()
+  }
+  /** The nth instance, or a throw while it does not exist yet: a
+   * stream opens once its live grant has answered, so a test waits for
+   * it — await waitFor(() => FakeEventSource.nth(0)). */
+  static nth(i: number): FakeEventSource {
+    const es = FakeEventSource.instances.at(i)
+    if (!es) throw new Error(`no stream #${i} yet`)
+    return es
   }
   /** The instances not closed by the code under test. */
   static open(): FakeEventSource[] {
@@ -22,8 +34,13 @@ export class FakeEventSource {
   onerror: (() => void) | null = null
   private listeners = new Map<string, ((e: MessageEvent) => void)[]>()
 
+  /** Why the server refused this URL (a 401), or null. */
+  refused: string | null
+
   constructor(readonly url: string) {
     FakeEventSource.instances.push(this)
+    this.refused = checkLiveURL(url)
+    if (this.refused) queueMicrotask(() => !this.closedByClient && this.fail())
   }
 
   addEventListener(name: string, fn: (e: MessageEvent) => void) {
@@ -39,6 +56,7 @@ export class FakeEventSource {
 
   /** The connection is up. */
   connect() {
+    if (this.refused) throw new Error(`FakeEventSource: ${this.url} was refused: ${this.refused}`)
     this.readyState = FakeEventSource.OPEN
     this.onopen?.()
   }
@@ -53,6 +71,20 @@ export class FakeEventSource {
   dropRetrying() {
     this.readyState = FakeEventSource.CONNECTING
     this.onerror?.()
+  }
+
+  /** The browser's own reconnect after a drop: the same URL (the
+   * same sig) knocks again — open while the grant lasts, refused (CLOSED)
+   * once it is spent. */
+  retry() {
+    if (checkLiveURL(this.url)) this.fail()
+    else this.connect()
+  }
+
+  /** A panel token's stream ended at its expiry: the one final frame
+   * (no id), then the server hangs up. */
+  expire() {
+    this.emit("expired", {})
   }
 
   /** The connection failed for good (a non-200 answer, e.g. the wall's

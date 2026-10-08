@@ -203,9 +203,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    WEFT_MANIFEST; else the nearest weft.json upward) --open --no-playground] serves UI +
 //    //    OTLP ingest + the playground on 127.0.0.1:7331. The API over a terminal (--url
 //    //    WEFT_STUDIO_URL, --token WEFT_STUDIO_TOKEN): weft doctor checks one; weft runs
-//    //    [--agent --since --failed --json]; weft open <run id> (prints <url>/runs/<id>);
-//    //    weft export <run id> [--format json|jsonl|otlp | --wefttest ./testdata --test Name]
-//    //    (fixtures where wefttest.Replay reads them); weft version.
+//    //    [--agent --since --failed --limit --json]; weft open <run id> [--open --with-token]
+//    //    (prints the bare <url>/runs/<id>; the token only to the browser or on --with-token);
+//    //    weft export <run id> [--format json|jsonl|otlp | --wefttest ./testdata --test Name
+//    //    --force] (fixtures where wefttest.Replay reads them; --force replaces, never
+//    //    merges); weft version.
 //    //    Port policy (internal/listen): busy 7331 + a Studio on the same DB → reused
 //    //    ("studio already running at … (pid n), reusing", exit 0); anything else → the
 //    //    next free port in 7331–7340, said in one line; --addr / WEFT_STUDIO_ADDR pins

@@ -70,12 +70,15 @@ UI with the token in the URL fragment.
 
 The same binary is the API over a terminal, each subcommand one
 route, `--url` (`WEFT_STUDIO_URL`) and `--token` (`WEFT_STUDIO_TOKEN`)
-picking the Studio: `weft runs [--agent] [--since] [--failed] [--json]`
-(`GET /api/runs`), `weft open <run id>` (checks `GET /api/runs/{id}`,
-prints `<url>/runs/<id>`), `weft export <run id> [--format
-json|jsonl|otlp]` and `weft export <run id> --wefttest ./testdata
-[--test TestName]` (`GET /api/runs/{id}/export`, the fixtures unzipped
-where `wefttest.Replay(t, "testdata")` reads them), `weft doctor`
+picking the Studio: `weft runs [--agent] [--since] [--failed] [--limit]
+[--json]` (`GET /api/runs`; a limit that hid runs says so on stderr),
+`weft open <run id> [--open] [--with-token]` (checks `GET
+/api/runs/{id}`, prints the bare `<url>/runs/<id>`; the token goes only
+to the browser, or to stdout on `--with-token`), `weft export <run id>
+[--format json|jsonl|otlp]` and `weft export <run id> --wefttest
+./testdata [--test TestName] [--force]` (`GET /api/runs/{id}/export`,
+the fixtures unzipped where `wefttest.Replay(t, "testdata")` reads
+them; `--force` replaces a non-empty target's fixtures), `weft doctor`
 (`GET /api/meta`).
 
 **C · hosted** — the same handler behind `studio.Token`: the panel's

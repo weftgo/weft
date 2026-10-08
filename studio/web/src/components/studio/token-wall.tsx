@@ -1,5 +1,5 @@
 // The token wall's front door (S4.6): a Studio served with Token(...)
-// — setup B's `studio` binary always, setup C's hosted handler —
+// — setup B's `weft studio` always, setup C's hosted handler —
 // answers every API call 401 until the request carries the token. The
 // UI itself is served open, so this is where the reader hands the
 // token over: pasted here, or carried in the link as ?token= / #token=

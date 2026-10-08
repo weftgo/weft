@@ -21,12 +21,16 @@ module, ADR 0005).
   found), and `--open` (default on when stdout is a terminal) opening
   the UI with the token in the URL fragment. The Studio API over a
   terminal: `weft runs [--agent] [--since] [--failed] [--limit]
-  [--json]` (`GET /api/runs`), `weft open <run id> [--open]` (prints
-  `<url>/runs/<id>`), `weft export <run id> [--format json|jsonl|otlp]`
-  to stdout and `weft export <run id> --wefttest <dir> [--test name]
-  [--force]` (the wefttest fixtures unzipped into `<dir>/<name>/`, where
-  `wefttest.Replay(t, dir)` reads them; a non-empty target needs
-  `--force`); `weft doctor`; `weft version`. The API clients take
+  [--json]` (`GET /api/runs`; `--limit` 50 by default, and a limit
+  that hid runs says so on stderr), `weft open <run id> [--open]
+  [--with-token]` (prints the bare `<url>/runs/<id>`; the token goes
+  only to the browser, or to stdout on `--with-token`), `weft export
+  <run id> [--format json|jsonl|otlp]` to stdout and `weft export <run
+  id> --wefttest <dir> [--test name] [--force]` (the wefttest fixtures
+  unzipped into `<dir>/<name>/`, where `wefttest.Replay(t, dir)` reads
+  them; a non-empty target needs `--force`, which replaces its `*.json`
+  fixtures); `weft doctor`; `weft version`. The API clients never
+  follow a redirect. The API clients take
   `--url` (`WEFT_STUDIO_URL`, default `http://127.0.0.1:7331`) and
   `--token` (`WEFT_STUDIO_TOKEN`). Exit codes: 0, 1 a failure, 2 a
   usage error. `weft dev` is not implemented yet (B1.2): it says so

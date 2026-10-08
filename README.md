@@ -362,16 +362,16 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:7331 # its exporter here
 
 Every subcommand is a thin client of the Studio API or of `studio.New`
 — a convenience over options the app can set itself, so a team that
-skips the CLI loses nothing. Every flag mirrors an environment
-variable one to one.
+skips the CLI loses nothing. Every connection flag mirrors an
+environment variable one to one (the table below).
 
 | Command | What it does |
 |---|---|
 | `weft studio [--addr] [--db] [--token] [--manifest] [--open] [--no-playground]` | Setup B: `studio.New` with the UI, OTLP ingest, the playground (inert until an app's `weft/runtime` connects; `--no-playground` turns it off) and a dev token. Reuses a Studio already serving the same database on 7331, else takes the next free port in 7331–7340; `--addr` pins. The manifest is `--manifest`, else the nearest `weft.json` upward (one line says which). `--open` (default on a terminal) opens the UI with the token in the URL fragment. |
-| `weft runs [--agent] [--since 2h\|RFC3339] [--failed] [--limit] [--json]` | One row per run (id, agent, status, started, steps) from `GET /api/runs`; `--json` for scripts. |
-| `weft open <run id> [--open]` | Prints the run's page, `<url>/runs/<id>` (`#token=` when a token is set); `--open` opens it. |
+| `weft runs [--agent] [--since 2h\|RFC3339] [--failed] [--limit] [--json]` | One row per run (id, agent, status, started, steps) from `GET /api/runs`; `--limit` defaults to 50 (0 lists all) and says so on stderr when it hid runs; `--json` for scripts. |
+| `weft open <run id> [--open] [--with-token]` | Prints the run's page, `<url>/runs/<id>`, bare — a fixed token may be the panel tokens' signing key, so it stays out of logs; `--with-token` prints the `#token=` fragment too; `--open` hands the browser the link with the token. |
 | `weft export <run id> [--format json\|jsonl\|otlp]` | `GET /api/runs/<id>/export` to stdout. |
-| `weft export <run id> --wefttest ./testdata [--test TestName] [--force]` | The run's wefttest replay fixtures unzipped into `./testdata/<TestName>/` (default: the run id), where `wefttest.Replay(t, "testdata")` reads them. |
+| `weft export <run id> --wefttest ./testdata [--test TestName] [--force]` | The run's wefttest replay fixtures unzipped into `./testdata/<TestName>/` (default: the run id), where `wefttest.Replay(t, "testdata")` reads them; a non-empty target needs `--force`, which replaces its `*.json` fixtures (never merges). |
 | `weft doctor` | One line per check of a running Studio, each read from `GET /api/meta`. |
 | `weft version` | The weft version this binary was built from. |
 

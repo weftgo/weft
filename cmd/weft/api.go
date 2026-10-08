@@ -34,13 +34,33 @@ func newClient(base, token string) *client {
 	return &client{
 		base:  strings.TrimRight(base, "/"),
 		token: token,
-		// An export is a whole run: the bound is generous, never absent.
-		http: &http.Client{Timeout: 2 * time.Minute},
+		http: &http.Client{
+			// An export is a whole run: the bound is generous, never absent.
+			Timeout: 2 * time.Minute,
+			// The client talks to --url only: a redirect is an error,
+			// never followed — Go keeps the bearer on a same-host
+			// other-port hop and on https→http (the doctor's rule).
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
 	}
+}
+
+// redacted is the Studio's URL for a message: a password in its
+// userinfo is never printed.
+func (c *client) redacted() string {
+	u, err := url.Parse(c.base)
+	if err != nil {
+		return "the --url given"
+	}
+	return u.Redacted()
 }
 
 // maxBody bounds what a client reads from one response.
 const maxBody = 512 << 20
+
+// maxUnzip bounds what one wefttest export unzips to, all entries
+// together (a variable so a test reaches it).
+var maxUnzip int64 = maxBody
 
 // get answers GET path?q with the response body; a non-2xx answer is
 // an error carrying Studio's own error message.
@@ -58,7 +78,7 @@ func (c *client) get(ctx context.Context, path string, q url.Values) ([]byte, er
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("studio not reachable at %s: %w (weft studio starts one; --url or WEFT_STUDIO_URL points at another)", c.base, err)
+		return nil, fmt.Errorf("studio not reachable at %s: %w (weft studio starts one; --url or WEFT_STUDIO_URL points at another)", c.redacted(), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
@@ -67,6 +87,13 @@ func (c *client) get(ctx context.Context, path string, q url.Values) ([]byte, er
 	}
 	if len(body) > maxBody {
 		return nil, fmt.Errorf("GET %s: the response exceeds %d MiB", path, maxBody>>20)
+	}
+	if resp.StatusCode/100 == 3 {
+		loc := resp.Header.Get("Location")
+		if loc == "" {
+			loc = "(no Location)"
+		}
+		return nil, fmt.Errorf("GET %s: %d, a redirect to %s, not followed: point --url at the Studio itself", path, resp.StatusCode, loc)
 	}
 	if resp.StatusCode/100 != 2 {
 		return nil, apiError(path, resp.StatusCode, body)
@@ -171,6 +198,8 @@ func runRuns(args []string, stdout, stderr io.Writer) error {
 	var raws []json.RawMessage
 	var rows []runRow
 	ctx := context.Background()
+	cut := false // stopped at --limit with more runs to list
+	seen := map[string]bool{}
 pages:
 	for {
 		q.Set("limit", strconv.Itoa(runsPageSize))
@@ -186,7 +215,7 @@ pages:
 		if err := json.Unmarshal(body, &page); err != nil {
 			return fmt.Errorf("GET /api/runs: %w", err)
 		}
-		for _, raw := range page.Runs {
+		for i, raw := range page.Runs {
 			var r runRow
 			if err := json.Unmarshal(raw, &r); err != nil {
 				return fmt.Errorf("GET /api/runs: %w", err)
@@ -197,17 +226,33 @@ pages:
 			}
 			raws, rows = append(raws, raw), append(rows, r)
 			if *limit > 0 && len(rows) == *limit {
+				cut = i < len(page.Runs)-1 || page.NextBefore != nil
 				break pages
 			}
 		}
-		if page.NextBefore == nil {
+		// A page with no runs, or a cursor this listing already
+		// followed, ends it: a cursor that does not move never loops.
+		if page.NextBefore == nil || len(page.Runs) == 0 {
 			break
 		}
-		q.Set("before", page.NextBefore.Format(time.RFC3339Nano))
-		q.Del("before_id")
+		before, beforeID := page.NextBefore.Format(time.RFC3339Nano), ""
 		if page.NextBeforeID != nil {
-			q.Set("before_id", *page.NextBeforeID)
+			beforeID = *page.NextBeforeID
 		}
+		if seen[before+"\x00"+beforeID] {
+			_, _ = fmt.Fprintln(stderr, "weft: the runs cursor did not move; stopping")
+			break
+		}
+		seen[before+"\x00"+beforeID] = true
+		q.Set("before", before)
+		q.Del("before_id")
+		if beforeID != "" {
+			q.Set("before_id", beforeID)
+		}
+	}
+	// Truncation is visible: the limit says so when it hid runs.
+	if cut {
+		_, _ = fmt.Fprintf(stderr, "weft: showing the newest %d; --limit 0 lists all\n", *limit)
 	}
 	if *asJSON {
 		if raws == nil {
@@ -259,7 +304,8 @@ func parseSince(v string, now time.Time) (time.Time, error) {
 func runOpen(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("open", stderr)
 	base, token := clientFlags(fs)
-	open := fs.Bool("open", false, "open the link in the browser too")
+	open := fs.Bool("open", false, "open the link in the browser too, the token in its fragment")
+	withToken := fs.Bool("with-token", false, "print the link with the token in its fragment (#token=); the token may be the panel tokens' signing key: keep it out of logs")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -272,12 +318,18 @@ func runOpen(args []string, stdout, stderr io.Writer) error {
 	if _, err := c.get(context.Background(), runPath(id), nil); err != nil {
 		return err
 	}
-	link := runLink(c.base, id, c.token)
-	if _, err := fmt.Fprintln(stdout, link); err != nil {
+	// The printed link is bare unless asked: a fixed token is the panel
+	// tokens' signing key and stays out of logs (serveBoot's banner
+	// rule). The browser gets it in the fragment.
+	printed := runLink(c.base, id, "")
+	if *withToken {
+		printed = runLink(c.base, id, c.token)
+	}
+	if _, err := fmt.Fprintln(stdout, printed); err != nil {
 		return err
 	}
 	if *open {
-		openBrowser(stdout, link)
+		openBrowser(stdout, runLink(c.base, id, c.token))
 	}
 	return nil
 }
@@ -344,6 +396,9 @@ func runExport(args []string, stdout, stderr io.Writer) error {
 	}
 	// A subtest's name (TestX/case) is a nested directory, as
 	// wefttest.Replay reads it; anything that climbs out is refused.
+	if filepath.IsAbs(name) || strings.HasPrefix(name, "/") || strings.HasPrefix(name, `\`) {
+		return usageError("--test %q must name a directory inside %s, not an absolute path", name, *dir)
+	}
 	target := filepath.Join(*dir, filepath.FromSlash(name))
 	if rel, err := filepath.Rel(*dir, target); err != nil || rel == "." || strings.HasPrefix(rel, "..") {
 		return usageError("--test %q must name a directory inside %s", name, *dir)
@@ -368,7 +423,12 @@ func runExport(args []string, stdout, stderr io.Writer) error {
 
 // unzipFixtures writes the export's flat zip into dir. Every entry
 // must be a plain file name — the export zips flat — so nothing lands
-// outside dir; the zip is checked whole before the first write.
+// outside dir; the zip is checked whole (names and total size) before
+// the first write. The *.json files already in dir are removed first,
+// as wefttest.Record replaces a test's fixtures: Replay loads every
+// *.json there, and a stale one from an earlier export would answer
+// in place of ErrNoFixture. A symlink among them is removed, never
+// followed.
 func unzipFixtures(body []byte, dir string) (int, error) {
 	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
 	if err != nil {
@@ -382,25 +442,62 @@ func unzipFixtures(body []byte, dir string) (int, error) {
 	if len(zr.File) == 0 {
 		return 0, errors.New("the wefttest export holds no fixtures")
 	}
+	var total uint64
+	for _, f := range zr.File {
+		total += f.UncompressedSize64
+		if total > uint64(maxUnzip) {
+			return 0, fmt.Errorf("the wefttest export unzips to more than %d bytes", maxUnzip)
+		}
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return 0, err
 	}
+	stale, err := filepath.Glob(filepath.Join(dir, "*.json"))
+	if err != nil {
+		return 0, err
+	}
+	for _, p := range stale {
+		if err := os.Remove(p); err != nil {
+			return 0, fmt.Errorf("clear the target: %w", err)
+		}
+	}
+	var written int64
 	for _, f := range zr.File {
 		rc, err := f.Open()
 		if err != nil {
 			return 0, err
 		}
-		b, err := io.ReadAll(io.LimitReader(rc, maxBody+1))
+		// The declared sizes passed the total cap; the read is bounded
+		// by what is left of it, so a lying header cannot exceed it.
+		b, err := io.ReadAll(io.LimitReader(rc, maxUnzip-written+1))
 		_ = rc.Close()
 		if err != nil {
 			return 0, fmt.Errorf("%s: %w", f.Name, err)
 		}
-		if len(b) > maxBody {
-			return 0, fmt.Errorf("%s exceeds %d MiB", f.Name, maxBody>>20)
+		if written += int64(len(b)); written > maxUnzip {
+			return 0, fmt.Errorf("the wefttest export unzips to more than %d bytes", maxUnzip)
 		}
-		if err := os.WriteFile(filepath.Join(dir, f.Name), b, 0o644); err != nil {
+		if err := writeNew(filepath.Join(dir, f.Name), b); err != nil {
 			return 0, err
 		}
 	}
 	return len(zr.File), nil
+}
+
+// writeNew writes b to path, replacing whatever is there without
+// following it: a symlink planted at path is removed, not written
+// through.
+func writeNew(path string, b []byte) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }

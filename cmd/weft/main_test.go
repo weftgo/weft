@@ -439,6 +439,25 @@ func TestManifestFlag(t *testing.T) {
 	if got, note := served(flagFile, deep); !strings.Contains(got, "from-flag") || note != "studio: manifest "+flagFile+" (--manifest)" {
 		t.Errorf("--manifest beside WEFT_MANIFEST: %s (note %q), want the flag's file", got, note)
 	}
+	// A file that does not parse is a start error naming it, named or
+	// found upward — never served verbatim.
+	bad := filepath.Join(t.TempDir(), "weft.json")
+	if err := os.WriteFile(bad, []byte(`{"weft":1,"agents":[`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WEFT_MANIFEST", "")
+	if _, _, err := manifestOptions(bad, empty); err == nil || !strings.HasPrefix(err.Error(), "manifest "+bad+": does not parse: ") {
+		t.Errorf("a malformed --manifest: %v, want \"manifest %s: does not parse: …\"", err, bad)
+	}
+	if _, _, err := manifestOptions("", filepath.Dir(bad)); err == nil || !strings.HasPrefix(err.Error(), "manifest "+bad+": does not parse: ") {
+		t.Errorf("a malformed weft.json found upward: %v", err)
+	}
+	if err := os.WriteFile(bad, []byte(`[1,2]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := manifestOptions(bad, empty); err == nil || !strings.Contains(err.Error(), "does not parse") {
+		t.Errorf("a manifest that is not an object: %v", err)
+	}
 	var errb strings.Builder
 	if code := run([]string{"studio", "--manifest", dir + "/missing.json"}, io.Discard, &errb); code != 1 || !strings.Contains(errb.String(), "--manifest") {
 		t.Errorf("missing manifest: exit %d, stderr %q, want 1 and a start error naming --manifest", code, errb.String())

@@ -5,7 +5,7 @@
 //
 //	weft studio [--addr] [--db] [--token] [--manifest] [--open] [--no-playground]
 //	weft runs [--agent] [--since] [--failed] [--limit] [--json]
-//	weft open <run id> [--open]
+//	weft open <run id> [--open] [--with-token]
 //	weft export <run id> [--wefttest dir [--test name] [--force]] [--format json|jsonl|otlp]
 //	weft doctor
 //	weft version
@@ -16,7 +16,7 @@
 // (GET /api/runs, /api/runs/{id}, /api/runs/{id}/export, /api/meta). A
 // team that dislikes the CLI loses nothing.
 //
-// Every flag mirrors an environment variable one to one: --addr
+// Every connection flag mirrors an environment variable one to one: --addr
 // WEFT_STUDIO_ADDR, --db WEFT_DB, --token WEFT_STUDIO_TOKEN, --manifest
 // WEFT_MANIFEST, --url WEFT_STUDIO_URL (the Studio the API clients talk
 // to, default http://127.0.0.1:7331).
@@ -43,6 +43,10 @@
 // was found. --open opens the browser on the UI with the token in the
 // URL fragment (a fragment never reaches a server or a Referer); it is
 // on by default when stdout is a terminal, --open=false turns it off.
+// The link, token included, is the opener's argument (xdg-open, open,
+// rundll32): briefly visible to local users in the process list
+// (/proc/*/cmdline) — acceptable for handing the user's own browser
+// its link, and the reason the token is never printed.
 //
 // The port policy (plan B2, internal/listen): 127.0.0.1:7331 is the
 // one default. When it is busy, weft studio asks GET /api/meta there
@@ -64,15 +68,20 @@
 // `weft runs` prints one row per top-level run (id, agent, status,
 // started, steps), newest first, from GET /api/runs; --agent and
 // --failed filter on the server, --since (a duration such as 2h, or an
-// RFC 3339 time) stops the paging at the first older run, --json prints
-// the rows as Studio serves them. `weft open <id>` checks the run exists
-// and prints its page, <url>/runs/<id> (with #token= when the command
-// holds a token); --open opens it in the browser. `weft export <id>`
+// RFC 3339 time) stops the paging at the first older run, --limit
+// (default 50, 0 for all) caps the rows and says so on stderr when it
+// hid any, --json prints the rows as Studio serves them. `weft open
+// <id>` checks the run exists and prints its page, <url>/runs/<id>,
+// bare: --with-token prints the #token= fragment too, --open hands
+// the browser the link with the token. `weft export <id>`
 // writes GET /api/runs/<id>/export to stdout (--format json, jsonl or
 // otlp); with --wefttest <dir> it downloads the wefttest fixtures and
 // unzips them into <dir>/<name>/, the directory wefttest.Replay(t, dir)
-// reads for a test named <name> (--test; default the run id), refusing
-// a non-empty target without --force.
+// reads for a test named <name> (--test, a relative name; default the
+// run id), refusing a non-empty target without --force. With --force
+// the target's *.json fixtures are replaced, never merged (as
+// wefttest.Record replaces them): a stale one would answer for a
+// request the new run never made.
 //
 // # weft doctor
 //
@@ -100,6 +109,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -144,12 +154,12 @@ const usage = `weft — the weft framework's command line
 Usage:
   weft studio  [--addr] [--db] [--token] [--manifest] [--open] [--no-playground]
   weft runs    [--url] [--token] [--agent] [--since] [--failed] [--limit] [--json]
-  weft open    <run id> [--url] [--token] [--open]
+  weft open    <run id> [--url] [--token] [--open] [--with-token]
   weft export  <run id> [--url] [--token] [--format json|jsonl|otlp] [--wefttest dir [--test name] [--force]]
   weft doctor  [--url] [--token]
   weft version
 
-Environment (each mirrors a flag): WEFT_STUDIO_ADDR (--addr), WEFT_DB (--db),
+Environment (each mirrors a connection flag): WEFT_STUDIO_ADDR (--addr), WEFT_DB (--db),
 WEFT_STUDIO_TOKEN (--token), WEFT_MANIFEST (--manifest), WEFT_STUDIO_URL (--url).
 Run "weft <command> -h" for a command's flags.
 `
@@ -311,6 +321,16 @@ func manifestOptions(flagPath, dir string) (opts []studio.Option, note string, e
 			return nil, "", fmt.Errorf("manifest %s: %w", path, err)
 		}
 		return nil, "", fmt.Errorf("%s: %w", from, err)
+	}
+	// The top-level shape weft.Manifest writes: an object with the
+	// format version and the agents. A file that is not is a start
+	// error, never served verbatim.
+	var shape struct {
+		Weft   int               `json:"weft"`
+		Agents []json.RawMessage `json:"agents"`
+	}
+	if err := json.Unmarshal(b, &shape); err != nil {
+		return nil, "", fmt.Errorf("manifest %s: does not parse: %w", path, err)
 	}
 	return []studio.Option{studio.Manifest(b)}, "studio: manifest " + path + " (" + from + ")", nil
 }

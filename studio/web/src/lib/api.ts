@@ -476,7 +476,7 @@ export function setStudioToken(tok: string) {
  * `?token=…` or `#token=…` (the fragment never reaches a server or a
  * log) — stores it, and strips it from the address bar so it is not
  * bookmarked or shared. This is how the reader of a token-walled
- * Studio (setup B's `studio` binary prints a dev token) gets in with
+ * Studio (setup B's `weft studio` prints a dev token) gets in with
  * one link; the shell's token prompt is the other way. Reports whether
  * a token was adopted.
  */

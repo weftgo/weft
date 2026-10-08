@@ -70,6 +70,8 @@ export const PANEL_CSS = `
 @media (prefers-reduced-motion: reduce) { .weft-dot.weft-run { animation: none; } }
 .weft-head .weft-title { overflow: hidden; text-overflow: ellipsis; }
 .weft-head .weft-grow { flex: 1; }
+.weft-switch { max-width: 40%; background: var(--w-bg); color: var(--w-dim); border: 1px solid var(--w-line);
+  border-radius: 5px; font: inherit; font-size: 11px; }
 .weft-btn {
   background: none; border: 1px solid var(--w-line); border-radius: 5px;
   color: var(--w-dim); cursor: pointer; padding: 1px 6px; font: inherit;

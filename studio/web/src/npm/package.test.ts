@@ -366,6 +366,43 @@ describe("the framework helpers", () => {
     expect((dock() as unknown as { open: boolean }).open).toBe(true)
   })
 
+  it("react alone, the header rung off: the DOM marker scopes the page, window.fetch untouched (C3's Done line)", async () => {
+    const routes = baseRoutes()
+    routes["runs?public_id=pub_b&limit=50"] = { total: 0, runs: [], next_before: null }
+    const studio = fakeStudio(routes)
+    // Production mode: only the marker rung is named; the endpoint is
+    // off loopback, so the header rung keeps its default (off).
+    const meta = document.createElement("meta")
+    meta.name = "weft:detect"
+    meta.content = "markers"
+    document.head.appendChild(meta)
+    const { useWeftDevtools } = await import("@weftgo/devtools/react")
+    const chat = (scope: string) => {
+      const box = document.createElement("section")
+      box.appendChild(document.createElement("input"))
+      document.body.appendChild(box)
+      useWeftDevtools({ scope, endpoint: STUDIO })(box)
+      return box
+    }
+    const a = chat("pub_orders")
+    await settle()
+    type Panel = Dock & { detectWord: () => string; markerScopes: () => { scope: { publicId: string }; element: Element }[] }
+    const panel = dock() as Panel
+    expect(window.fetch).toBe(studio.fetchMock) // no global touched
+    expect(panel.detectWord()).toBe("markers")
+    expect(panel.markerScopes()).toEqual([{ scope: { publicId: "pub_orders" }, element: a }])
+    expect(scopes()).toEqual(["pub_orders"])
+    // A second chat's helper calls scope("pub_b") last; the marker the
+    // user is in decides, not the last scope() call.
+    chat("pub_b")
+    await settle(150)
+    expect(scopes()).toEqual(["pub_b"])
+    a.querySelector("input")?.focus()
+    await settle()
+    expect(scopes()).toEqual(["pub_orders"])
+    expect(window.fetch).toBe(studio.fetchMock)
+  })
+
   it("vue: the function ref follows a getter, rebinding only when the scope changes", async () => {
     const routes = baseRoutes()
     routes["runs?public_id=pub_b&limit=50"] = { total: 0, runs: [], next_before: null }

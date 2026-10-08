@@ -29,9 +29,12 @@ export interface MountOptions {
   /** The conversation to follow; "" is the dev list. */
   publicId?: string
   /** Scope detection: "headers" turns the header rung (Weft-Scope on
-   * same-origin fetch responses) on anywhere; "off" turns detection
-   * off. Unset: on only on loopback with no or a dev token. */
-  detect?: "headers" | "off"
+   * same-origin fetch responses) on anywhere, "markers" the DOM-marker
+   * rung (data-weft-scope), "headers,markers" both; "off" turns
+   * detection off. Unset: headers only on loopback with no or a dev
+   * token; markers everywhere but a read-scoped panel token's page off
+   * loopback. */
+  detect?: "headers" | "markers" | "headers,markers" | "off"
   /** API token (setups B and C): a per-page panel token in pages you ship. */
   token?: string
   position?: Position

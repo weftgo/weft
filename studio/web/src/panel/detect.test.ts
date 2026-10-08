@@ -123,10 +123,15 @@ describe("when the header rung is on (C5's clause)", () => {
     const el = await mountWith({ "data-endpoint": REMOTE, "data-token": PANEL_TOKEN, "data-open": "true" })
     expect(window.fetch).toBe(original)
     expect(window.fetch.toString()).toBe(source)
-    expect(text(el, ".weft-detect")).toBe(" · detect: none") // nothing names a scope, nothing detects
+    // The page is loopback (jsdom's): the marker rung (attributes only)
+    // stays on; nothing names a scope.
+    expect(text(el, ".weft-detect")).toBe(" · detect: markers")
     el.setAttribute("data-scope", "pub_demo")
     await settle()
-    expect(text(el, ".weft-detect")).toBe(" · detect: explicit")
+    expect(text(el, ".weft-detect")).toBe(" · detect: markers")
+    el.setAttribute("data-detect", "off")
+    await settle()
+    expect(text(el, ".weft-detect")).toBe(" · detect: off")
     el.remove()
     expect(window.fetch).toBe(original)
   })
@@ -183,7 +188,7 @@ describe("when the header rung is on (C5's clause)", () => {
     const a = await mountWith({ "data-endpoint": LOCAL, "data-open": "true" })
     const afterA = window.fetch
     const b = await mountWith({ "data-endpoint": LOCAL, "data-open": "true" })
-    expect(text(b, ".weft-detect")).toContain("detect: headers (chained)") // B chained to A's wrapper
+    expect(text(b, ".weft-detect")).toContain("detect: headers+markers (chained)") // B chained to A's wrapper
     a.remove() // A first: window.fetch is B's wrapper, A's is left in place, inert
     expect(window.fetch).not.toBe(afterA)
     const res = await window.fetch("/run", { method: "POST" })

@@ -156,16 +156,17 @@ is deprecated: `data-scope` is the form.
 Where the scope comes from (plan C3, scope detection). Each rung after
 the first is passive, and `data-detect="off"` turns rungs 2–4 off;
 rung 1 always works. The footer says which is in effect in one word:
-`detect: headers` (with `(chained)` when the `fetch` it wrapped was
-not the browser's own), `detect: off`, `detect: explicit` (rung 1
-names the scope, nothing detects) or `detect: none` (nothing names
-one, and rung 2 is off by default here).
+the rungs installed — `detect: headers` (with `(chained)` when the
+`fetch` it wrapped was not the browser's own), `detect: markers` or
+`detect: headers+markers` — else `detect: off`, `detect: explicit`
+(rung 1 names the scope, nothing detects) or `detect: none` (nothing
+names one, and rungs 2 and 3 are off by default here).
 
 | # | Rung | When it is on | The explicit alternative |
 |---|---|---|---|
 | 1 | explicit: `data-scope` (element, `weft:scope` meta, script tag), `window.__WEFT__ = { scope }` or `{ publicId }`, `scope()` / `mount({scope})` from `@weftgo/devtools`, the deprecated `data-public-id` | always; it wins over every detected scope | — |
 | 2 | response headers: the `Weft-Scope` header of the page's own same-origin `fetch` responses (the scope header below) | by default only with the page and the endpoint on loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`) and no token or a dev/server token, and only once Studio has answered; anywhere with `data-detect="headers"` (or `mount({detect: "headers"})`); never under a panel token (`weft_pt.`) unless asked | `data-scope` |
-| 3 | the DOM marker (`data-weft-scope`) | C3.3 | `data-scope` |
+| 3 | the DOM marker: `data-weft-scope="pub_…;session=…;flow=…;run=…"` on any element of the page — the framework helpers (`useWeftDevtools` for React and Vue, the Svelte `weftDevtools` action) set it on the element they are given | by default everywhere except a page off loopback under a read-scoped panel token (a playground-scoped panel token, the dev token, no token, or any token on loopback keep it on); anywhere with `data-detect="markers"` (or `"headers,markers"`, `mount({detect: "markers"})`) | `data-scope` |
 | 4 | the page URL | C3.4 | `data-scope` |
 
 Rung 2 patches a global of your page, `window.fetch` (shadow DOM
@@ -188,7 +189,7 @@ that stack is left alone, the wrapper goes inert and the footer says
 disconnect leaves its inert wrapper in the chain, a pass-through; and
 nothing it does reaches the console. It is
 fetch-only: a page cannot read an `EventSource`'s response headers, so
-an SSE chat app names its scope with rung 1 (or, from C3.3, rung 3).
+an SSE chat app names its scope with rung 1 or rung 3.
 WebSocket is never wrapped. A detected scope of the conversation the
 panel follows (the same public id, session and flow — the next turn's
 header) is a narrowing, never a restart: its run is pinned unless you
@@ -196,10 +197,51 @@ have clicked a turn since the last pin. Another conversation is
 followed only from the request path that set the current one, so two
 widgets polling for different conversations do not thrash; the panel
 keeps the newest scope per path and one entry per conversation seen
-(with its newest run), for C3.3's switcher. A run the scope names
+(with its newest run), for the switcher below. A run the scope names
 that is not listed yet (a streaming handler's header lands before its
 run row) is looked for once more a second later before the panel says
 it is not in the conversation.
+
+Rung 3, the DOM marker, is the production rung: it touches no global
+of your page (`window.fetch` stays as you left it) — it reads
+attributes only, through one `MutationObserver` on
+`document.documentElement` (rescans debounced ~100 ms, trailing) and
+one passive, capturing `focusin` listener on `document` (an event
+listener, not a patch), both removed when the panel disconnects or the
+rung is turned off (`src/panel/markers.ts`). It never writes to your
+DOM, never reads the panel's own tree (a `<weft-devtools>` and
+anything inside it are skipped), ignores an empty value or one without
+a public id, and prints nothing. With several markers on one page the
+one nearest focus wins: the closest marker around the focused element,
+else the one focus was last in, else the one followed now, else the
+first in document order. A marker's scope is a conversation (public id,
+session, flow) whose run narrows it, so following it is C3.2's rescope
+— the same conversation narrows, another restarts, a turn you clicked
+stays. A followed marker that leaves the page stays followed; only
+focus or the switcher moves the panel. An explicit `data-scope` (or
+`window.__WEFT__`) wins over a marker, unless a marker carries the
+same conversation — the helpers call `scope()` and set the marker, so
+focus moves between the helpers' chats.
+
+The scope switcher: when more than one conversation is known — the
+explicit scope, then the markers in document order, then the
+header-detected scopes in first-seen order, each conversation once
+under the first source that names it, at most 20 — the panel header
+shows a `<select aria-label="conversation">` listing each by its public
+id (with its session and flow when set) and its source (`explicit`,
+`marker`, `header`); `●` (live) or `○` marks the one followed.
+Choosing one follows it and pins its run (a forced rescope) until focus
+next goes into a marker or the explicit scope changes. A followed
+conversation that is no longer known is shown as "not on the page",
+not offered. One known conversation shows no switcher.
+
+| `data-detect` | rung 2 (headers) | rung 3 (markers) |
+|---|---|---|
+| unset | page and endpoint on loopback, no or a dev token | on, except a read-scoped panel token off loopback |
+| `headers` | on anywhere | as unset |
+| `markers` | as unset | on anywhere |
+| `headers,markers` | on anywhere | on anywhere |
+| `off` | off | off |
 
 Where the configuration comes from (plan C2). Each field — `endpoint`,
 `scope` (or the deprecated `public-id`; `scope` wins at the same rung),

@@ -10,6 +10,18 @@ module, ADR 0005).
 
 ### Added
 
+- **The devtools panel's DOM-marker rung and scope switcher** (plan
+  C3.3): the panel follows `data-weft-scope` markers anywhere on the
+  page — the attribute the framework helpers already set — read through
+  one MutationObserver (debounced) and one passive `focusin` listener,
+  no global touched; with several, the marker around the focused
+  element wins. A header switcher (`aria-label="conversation"`) lists
+  every conversation known — explicit, markers, headers, each once, at
+  most 20 — with its source and a live dot, and choosing one rescopes.
+  `data-detect` accepts `markers` and `headers,markers`; the rung is on
+  by default except under a read-scoped panel token off loopback, and
+  the footer says `detect: markers` / `headers+markers`.
+
 - **Studio's Request pane** (plan E1.1): each run-page step card's
   request now carries the chips the request record's hashes decide —
   "changed by PrepareStep" (the step's `system_hash` moved from the

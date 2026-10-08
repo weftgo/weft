@@ -53,9 +53,10 @@ export interface PanelConfig {
   /** Whether an explicit form named a non-empty scope: detection rungs
    * 2–4 then supply nothing — the page's own word wins. */
   scopeExplicit: boolean
-  /** data-detect: "headers" turns the header rung on anywhere, "off"
+  /** data-detect: "headers" / "markers" / "headers,markers" turn the
+   * rungs named on anywhere (an unnamed one keeps its default), "off"
    * turns every detection rung off (the explicit forms still work),
-   * "" leaves the default (headerRungOn). */
+   * "" leaves the defaults (headerRungOn, markerRungOn). */
   detect: DetectSetting
   /** API token (setups B and C); "" in setup A. */
   token: string
@@ -74,7 +75,7 @@ export interface MountOptions {
   scope?: Scope | string
   publicId?: string
   /** data-detect, as an option. */
-  detect?: "headers" | "off"
+  detect?: Exclude<DetectSetting, "">
   token?: string
   position?: PanelPosition
   open?: boolean
@@ -82,7 +83,19 @@ export interface MountOptions {
 }
 
 /** data-detect's values; "" is unset. */
-export type DetectSetting = "" | "headers" | "off"
+export type DetectSetting = "" | "headers" | "markers" | "headers,markers" | "off"
+
+/** detectSetting reads a data-detect value: "off", or the rungs it
+ * names (headers, markers, comma-separated, either order); anything
+ * else is unset. */
+export function detectSetting(v: string | null | undefined): DetectSetting {
+  const words = new Set(String(v ?? "").toLowerCase().split(",").map((w) => w.trim()))
+  if (words.has("off")) return words.size === 1 ? "off" : ""
+  const h = words.delete("headers")
+  const m = words.delete("markers")
+  if (words.size) return ""
+  return h && m ? "headers,markers" : h ? "headers" : m ? "markers" : ""
+}
 
 const POSITIONS: PanelPosition[] = ["bottom-right", "bottom-left", "right-dock"]
 
@@ -247,7 +260,7 @@ export function readConfig(el?: HTMLElement & { options?: MountOptions | null })
     scope,
     scopeExplicit: !!(scope.publicId || scope.session || scope.flow || scope.run),
     token: pick("token") ?? "",
-    detect: detect === "headers" || detect === "off" ? detect : "",
+    detect: detectSetting(detect),
     position: POSITIONS.includes(position as PanelPosition)
       ? (position as PanelPosition)
       : "bottom-right",
@@ -325,8 +338,22 @@ export function headerRungOn(
   page: string = location.href
 ): boolean {
   if (cfg.detect === "off") return false
-  if (cfg.detect === "headers") return true
+  if (cfg.detect.includes("headers")) return true
   return isLoopback(page) && isLoopback(cfg.endpoint) && !cfg.token.startsWith("weft_pt.")
+}
+
+/** markerRungOn is the DOM-marker rung's switch (plan C3.3): it reads
+ * attributes only, so it is the production rung — on by default
+ * everywhere except a page off loopback under a read-scoped panel
+ * token (C5); data-detect naming "markers" turns it on there too,
+ * "off" turns it off. */
+export function markerRungOn(
+  cfg: Pick<PanelConfig, "detect" | "token">,
+  page: string = location.href
+): boolean {
+  if (cfg.detect === "off") return false
+  if (cfg.detect.includes("markers")) return true
+  return isLoopback(page) || tokenScope(cfg.token) !== "read"
 }
 
 export { isLoopback }

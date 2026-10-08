@@ -211,7 +211,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    has the ladder; it follows a scope — data-scope="pub_…;session=…;flow=…;run=…" or
 //    //    window.__WEFT__ (data-public-id deprecated), else the Weft-Scope header of the page's
 //    //    same-origin fetches: a read-only window.fetch wrapper, on by default only on loopback with
-//    //    no or a dev token, data-detect="headers"|"off", restored on disconnect; the same bytes on npm as @weftgo/devtools — import "@weftgo/devtools",
+//    //    no or a dev token, restored on disconnect, or a data-weft-scope DOM marker (the helpers set it;
+//    //    attributes read through one MutationObserver, the marker holding focus wins, a header switcher
+//    //    when several conversations are known; off only under a read panel token off loopback),
+//    //    data-detect="headers"|"markers"|"headers,markers"|"off"; the same bytes on npm as @weftgo/devtools — import "@weftgo/devtools",
 //    //    mount/scope/open/close/on, /react /vue /svelte marker helpers; studio/web/npm,
 //    //    make devtools-npm, never published by the build), /panel-config.json
 //    //    ({endpoint, version, capabilities}; loopback Host / same-origin only, else

@@ -25,10 +25,12 @@ import {
 import { attemptLine, attemptsHole, factsFromRows, timingLine } from "../lib/attempts"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
 import { duration, relativeTime, tokens } from "../lib/format"
-import { discoverEndpoint, headerRungOn, readConfig, tokenScope } from "./config"
+import { discoverEndpoint, headerRungOn, markerRungOn, readConfig, tokenScope } from "./config"
 import type { MountOptions, PanelConfig } from "./config"
 import { installHeaderRung } from "./detect"
 import type { HeaderRung } from "./detect"
+import { installMarkerRung, markerOf } from "./markers"
+import type { Marker, MarkerRung } from "./markers"
 import { serializeScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
 import { el, fmtJSON, waterfall } from "./render"
@@ -124,11 +126,22 @@ export interface DetectedScope {
   at: number
 }
 
-/** The detection word the footer shows: "headers" while the header
- * rung is installed, "off" under data-detect="off", "explicit" when an
- * explicit form (rung 1) names the scope and no rung detects, "none"
- * when nothing does (the rung is off by default here). */
-export type DetectWord = "headers" | "off" | "explicit" | "none"
+/** The detection word the footer shows: the rungs installed
+ * ("headers", "markers", "headers+markers"), "off" under
+ * data-detect="off", "explicit" when an explicit form (rung 1) names
+ * the scope and no rung detects, "none" when nothing does. */
+export type DetectWord = "headers" | "markers" | "headers+markers" | "off" | "explicit" | "none"
+
+/** Where a conversation the switcher lists came from. */
+export type ScopeSource = "explicit" | "marker" | "header"
+
+/** A conversation the panel knows of (plan C3.3's switcher). */
+export interface KnownScope {
+  scope: Scope
+  /** conversationKey(scope): the list is distinct by it. */
+  key: string
+  source: ScopeSource
+}
 
 /** How the renderers remember which <details> the user opened. */
 interface OpenState {
@@ -178,6 +191,21 @@ export class WeftDevtools extends HTMLElement {
   private ready = false
   /** Every distinct scope seen, first-seen order (DETECTED_LIMIT). */
   private seen: DetectedScope[] = []
+  /** The DOM-marker rung (C3.3), while it is installed. */
+  private markerRung: MarkerRung | null = null
+  /** The page's markers, document order. */
+  private markers: Marker[] = []
+  /** The marker element focus last went into. */
+  private lastFocused: Element | null = null
+  /** The marked conversation followed (null: none yet). It stays when
+   * its marker leaves the page: only focus or the switcher moves it. */
+  private marked: Scope | null = null
+  /** What the user chose in the switcher (null: nothing). */
+  private chosen: Scope | null = null
+  /** The next rescope is the user's choice: it pins. */
+  private forceNext = false
+  /** The explicit scope last applied: a new one resets focus and choice. */
+  private explicitForm = ""
   /** The endpoint the running connection talks to: cfg.endpoint, or
    * what panel-config.json named (rung 5). The deep links use it. */
   private base = ""
@@ -278,13 +306,15 @@ export class WeftDevtools extends HTMLElement {
     this.conn = null
     this.ready = false
     this.dropRung()
+    this.dropMarkers()
   }
 
-  // ── Scope detection (plan C3.2) ─────────────────────────────────
+  // ── Scope detection (plan C3.2, C3.3) ───────────────────────────
 
   /** detectWord is the resolved detection choice, as the footer says it. */
   detectWord(): DetectWord {
-    if (this.rung) return "headers"
+    if (this.rung) return this.markerRung ? "headers+markers" : "headers"
+    if (this.markerRung) return "markers"
     if (this.cfg.detect === "off") return "off"
     return this.cfg.scopeExplicit ? "explicit" : "none"
   }
@@ -295,6 +325,90 @@ export class WeftDevtools extends HTMLElement {
    * carried it: the list C3.3's switcher offers. */
   detectedScopes(): DetectedScope[] {
     return this.seen.map((d) => ({ ...d, scope: { ...d.scope } }))
+  }
+
+  /** markerScopes is the page's data-weft-scope markers the rung read,
+   * document order (empty while the rung is off). */
+  markerScopes(): Marker[] {
+    return this.markers.map((m) => ({ ...m, scope: { ...m.scope } }))
+  }
+
+  /** conversations is what the switcher lists: the explicit scope,
+   * then the markers in document order, then the header-detected
+   * scopes in first-seen order — each conversation once, under the
+   * first source that names it, at most DETECTED_LIMIT. */
+  conversations(): KnownScope[] {
+    const out: KnownScope[] = []
+    const add = (scope: Scope, source: ScopeSource) => {
+      const key = conversationKey(scope)
+      if (scope.publicId && out.length < DETECTED_LIMIT && !out.some((c) => c.key === key))
+        out.push({ scope: { ...scope }, key, source })
+    }
+    if (this.cfg.scopeExplicit) add(this.cfg.scope, "explicit")
+    for (const m of this.markers) add(m.scope, "marker")
+    for (const d of this.seen) add(d.scope, "header")
+    return out
+  }
+
+  /** choose follows a conversation the user picked in the switcher:
+   * above every rung until focus moves into a marker or the explicit
+   * scope changes, and its run pins (force). */
+  private choose(c: KnownScope) {
+    this.chosen = c.scope
+    this.forceNext = true
+    this.rescopeSoon()
+  }
+
+  /** rescopeSoon applies a new scope once Studio answered; before that
+   * the start in flight reads scopeNow itself (and checks again once
+   * it is ready) — a scan never restarts a start. */
+  private rescopeSoon() {
+    if (this.ready) this.schedule()
+  }
+
+  /** onMarkers takes a settled scan of the page's markers. */
+  private onMarkers(list: Marker[]) {
+    this.markers = list
+    this.follow()
+    this.rescopeSoon()
+  }
+
+  /** onMarkerFocus: focus went into a marker's element — the user is
+   * in that chat now (above an earlier switcher choice). */
+  private onMarkerFocus(e: Element) {
+    this.lastFocused = e
+    this.chosen = null
+    this.follow()
+    this.rescopeSoon()
+  }
+
+  /** follow picks the marked conversation: the marker holding the
+   * focused element, else the one focus was last in, else the one
+   * followed now (its newest form), else — nothing followed yet — the
+   * explicit scope's marker (a helper's scope()) or, with no explicit
+   * scope, the first in document order. A followed marker that left the page stays followed. */
+  private follow() {
+    const list = this.markers
+    const at = (e: Element | null) => (e ? list.find((m) => m.element === e) : undefined)
+    const key = this.marked ? conversationKey(this.marked) : ""
+    const pick =
+      at(markerOf(document.activeElement)) ?? at(this.lastFocused) ?? list.find((m) => key && conversationKey(m.scope) === key)
+    if (pick) this.marked = pick.scope
+    else if (!this.marked) {
+      // An explicit scope whose marker is not read yet (a helper sets
+      // both; the scan is debounced) waits for it: the explicit one
+      // wins meanwhile, and the next scan finds its marker.
+      const ex = this.cfg.scopeExplicit ? conversationKey(this.cfg.scope) : ""
+      this.marked = (ex ? list.find((m) => conversationKey(m.scope) === ex) : list.at(0))?.scope ?? null
+    }
+  }
+
+  /** dropMarkers removes the marker rung and forgets what it read. */
+  private dropMarkers() {
+    this.markerRung?.disconnect()
+    this.markerRung = null
+    this.markers = []
+    this.marked = this.lastFocused = null
   }
 
   /** detectedByPath is the newest scope seen per response path. */
@@ -317,6 +431,20 @@ export class WeftDevtools extends HTMLElement {
         ignore: (u) => !!this.base && u.startsWith(this.base),
       })
     } else if (!want && this.rung) this.dropRung()
+    // The marker rung reads attributes only: on from the connect (its
+    // first scan names the scope the first start asks for).
+    const marks = this.isConnected && !this.dormant && markerRungOn(this.cfg)
+    if (marks && !this.markerRung)
+      this.markerRung = installMarkerRung({ onScopes: (m) => this.onMarkers(m), onFocus: (e) => this.onMarkerFocus(e) })
+    else if (!marks && this.markerRung) this.dropMarkers()
+    // A new explicit scope is the page's new word: focus history and
+    // the user's choice were about the previous one.
+    const ex = this.cfg.scopeExplicit ? serializeScope(this.cfg.scope) : ""
+    if (ex !== this.explicitForm) {
+      this.explicitForm = ex
+      this.chosen = this.marked = this.lastFocused = null
+      this.follow()
+    }
   }
 
   /** dropRung restores the page's fetch and forgets what was seen. */
@@ -360,13 +488,23 @@ export class WeftDevtools extends HTMLElement {
     if (serializeScope(sc) !== before && !this.cfg.scopeExplicit) this.schedule()
   }
 
-  /** scopeNow is the scope the panel follows: the explicit forms', or
-   * the newest detected one while the header rung is on, else none
-   * (the dev list). */
+  /** scopeNow is the scope the panel follows: the user's switcher
+   * choice; the explicit forms', unless a marker on the page carries
+   * the same conversation (the helpers' scope() and marker: then the
+   * marked one, so focus moves between helpers' chats); the marked
+   * conversation (the header's newest scope of it, when the header
+   * rung saw it: its run narrows); the explicit one; the newest
+   * detected one while the header rung is on; else none (the dev list). */
   private scopeNow(): Scope {
-    if (this.cfg.scopeExplicit) return this.cfg.scope
-    if (this.rung && this.detected) return this.detected
-    return this.cfg.scope
+    if (this.chosen) return this.chosen
+    const cfg = this.cfg
+    const marked = this.markerRung ? this.marked : null
+    const ex = conversationKey(cfg.scope)
+    if (cfg.scopeExplicit && !(marked && this.markers.some((m) => conversationKey(m.scope) === ex))) return cfg.scope
+    const d = this.rung ? this.detected : null
+    if (marked) return d && conversationKey(d) === conversationKey(marked) ? d : marked
+    if (cfg.scopeExplicit) return cfg.scope
+    return d ?? cfg.scope
   }
 
   /** keydown is the whole keyboard surface. The window sees a key
@@ -476,10 +614,13 @@ export class WeftDevtools extends HTMLElement {
         // a resolve result) is not offered under the next one.
         if (this.model.publicId !== next.publicId) this.scratch.clear()
         conn.scope = form
-        // An explicit scope's run pins whatever the user clicked; a
-        // detected one (the next turn's header) respects the click.
-        void this.model.rescope(next, { force: this.cfg.scopeExplicit }).catch(quiet)
+        // An explicit scope's run (or the user's switcher choice) pins
+        // whatever the user clicked; a detected one (the next turn's
+        // header, a marker focus follows) respects the click.
+        const force = this.forceNext || (cfg.scopeExplicit && next === cfg.scope)
+        void this.model.rescope(next, { force }).catch(quiet)
       }
+      this.forceNext = false
       this.render(this.last)
       return
     }
@@ -538,6 +679,7 @@ export class WeftDevtools extends HTMLElement {
     }
     if (endpoint) {
       const scope = this.scopeNow()
+      this.forceNext = false
       const model = new PanelModel(
         { base: endpoint, token: cfg.token },
         scope,
@@ -563,13 +705,16 @@ export class WeftDevtools extends HTMLElement {
         this.unreachable = null
       }
       // Studio answered: the header rung may go in now (and the footer
-      // says so).
+      // says so); a marker that changed while Studio was asked is
+      // followed now.
       this.syncDetect()
+      if (serializeScope(this.scopeNow()) !== this.conn?.scope) this.schedule()
       this.render(this.last)
       return
     }
     // No Studio answered: the page's fetch is not the panel's to touch.
     this.dropRung()
+    this.dropMarkers()
     this.model?.dispose()
     this.model = null
     this.conn = null
@@ -759,6 +904,8 @@ export class WeftDevtools extends HTMLElement {
     const scope = this.model?.publicId || s.session?.public_id || ""
     const title = scope ? `${agent ? agent + " · " : ""}${scope}` : "latest (dev)"
     h.appendChild(el("span", "weft-title", title, { title }))
+    const sw = this.switcher(s)
+    if (sw) h.appendChild(sw)
     // The scope's narrowing, as chips: the session filters the list,
     // the flow is carried and filters nothing yet (C3.2).
     const narrowing = this.model?.narrowing ?? {}
@@ -790,6 +937,36 @@ export class WeftDevtools extends HTMLElement {
     close.addEventListener("click", () => this.toggle())
     h.appendChild(close)
     return h
+  }
+
+  /** switcher is the header's conversation switcher (C3.3): shown only
+   * when more than one conversation is known, each listed by its public
+   * id (session, flow when set) and its source, the live dot (●) on the
+   * one followed. A followed conversation no longer known (its marker
+   * left the page) is said, not listed as a choice. */
+  private switcher(s: PanelState): HTMLElement | null {
+    const list = this.conversations()
+    if (list.length < 2) return null
+    const cur = conversationKey(this.scopeNow())
+    const sel = el("select", "weft-switch", undefined, { "aria-label": "conversation", "data-weft-k": "switch" }) as HTMLSelectElement
+    const opt = (label: string, value: string, on: boolean) => {
+      const o = el("option", undefined, label, { value }) as HTMLOptionElement
+      o.selected = on
+      sel.appendChild(o)
+      return o
+    }
+    const dot = s.live ? "● " : "○ "
+    if (!list.some((c) => c.key === cur)) opt(`${dot}${cur || "latest (dev)"} · not on the page`, "", true).disabled = true
+    list.forEach((c, i) => {
+      const { publicId, session, flow } = c.scope
+      const label = [publicId, session && `session ${session}`, flow && `flow ${flow}`, c.source].filter(Boolean).join(" · ")
+      opt(c.key === cur ? dot + label : label, String(i), c.key === cur).setAttribute("data-weft-source", c.source)
+    })
+    sel.addEventListener("change", () => {
+      const c = sel.value ? list.at(Number(sel.value)) : undefined
+      if (c && c.key !== cur) this.choose(c)
+    })
+    return sel
   }
 
   private turnList(s: PanelState): HTMLElement {
@@ -1629,7 +1806,7 @@ export class WeftDevtools extends HTMLElement {
     const word = this.detectWord()
     parts.push(
       el("span", "weft-detect", ` · detect: ${word}${this.rung?.chained ? " (chained)" : ""}${this.notRestored && !this.rung ? " (fetch not restored: patched after the panel)" : ""}`, {
-        title: word === "headers" ? "reading Weft-Scope on this page's same-origin fetches" : "scope from data-scope / window.__WEFT__",
+        title: word.includes("headers") || word === "markers" ? "reading Weft-Scope on same-origin fetches / data-weft-scope markers" : "scope from data-scope / window.__WEFT__",
       })
     )
     return el("div", "weft-footer", parts)

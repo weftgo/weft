@@ -36,8 +36,8 @@ module, ADR 0005).
   and `parseScope` (the `data-weft-scope` marker:
   `pub_…;session=…;flow=…;run=…`). `/react`, `/vue` and `/svelte`
   export marker helpers, not components. Zero runtime dependencies;
-  the version is the weft version. In this release `scope()` follows
-  the public id only (C3.1 adds session, flow and run), and `on()`
+  the version is the weft version. `scope()` passes the whole scope
+  to the panel (C3.2, below), and `on()`
   registers listeners but the panel dispatches no events yet (C4).
   `make devtools-npm` builds the package and dry-runs `npm pack`.
 
@@ -53,7 +53,7 @@ module, ADR 0005).
   run id is known. Both append `Weft-Scope` to
   `Access-Control-Expose-Headers`, and the header never carries a
   token. `examples/studio-local`'s `/run` answers `Weft-Scope:
-  pub_demo;run=<id>`. The panel reads the header from C3.2 on. The
+  pub_demo;run=<id>`. The panel reads the header (C3.2, below). The
   package sits beside the root rather than in it: the root package is
   a generated facade over core, which never imports net/http.
 
@@ -70,6 +70,37 @@ module, ADR 0005).
   a panel token's stream — opened with a grant or with the bearer —
   now ends at the token's expiry with one `event: expired` frame; a
   server token's stream does not.
+
+- **The panel follows a whole scope, and detects it from response
+  headers** (plan C3.2). Detection rung 1 is the explicit forms:
+  `data-scope="pub_…;session=…;flow=…;run=…"` on the element, the
+  `weft:scope` meta tag or the script tag, `window.__WEFT__ = { scope }`
+  (or `{ publicId }`), and `mount({scope})` / `scope()` from
+  `@weftgo/devtools`. The public id selects the conversation; `run` pins
+  the selected turn and its live tail once, or the panel says `run r_…
+  not in this conversation`; `session` narrows the turn list to the runs
+  that carry that `weft.session.id`; `flow` is a header chip and filters
+  nothing yet. Rung 2 reads the `Weft-Scope` header (`weft/scope`) of the
+  page's own same-origin `fetch` responses by wrapping `window.fetch`:
+  headers and URL only, never bodies, never sends; it chains to whatever
+  `fetch` it found and is restored on disconnect. It is on by default
+  only with a loopback endpoint and no token or a dev token, opt-in
+  elsewhere with `data-detect="headers"` (or `mount({detect})`), and
+  `data-detect="off"` turns detection off. Under a panel token off
+  loopback the page's `fetch` is never touched. It is fetch-only,
+  because a page cannot read an `EventSource`'s headers, and WebSocket is
+  never wrapped. The footer names the choice: `detect: headers | off |
+  explicit`. `examples/studio-local`'s tag drops `data-public-id`, and
+  its page's first `/run` scopes the panel to `pub_demo`. Panel:
+  34.1 KiB gzip (was 32.0).
+
+### Changed
+
+- **`data-public-id` is deprecated in favour of `data-scope`** (plan
+  C3.2). It is still read, as the scope with only its public id, at
+  every rung where it was read before (`weft:public-id` too), and
+  `data-scope` wins at the same rung. `mount({publicId})` keeps working
+  beside the new `mount({scope})`.
 
 ### Changed — breaking
 

@@ -25,8 +25,12 @@ import {
 import { attemptLine, attemptsHole, factsFromRows, timingLine } from "../lib/attempts"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
 import { duration, relativeTime, tokens } from "../lib/format"
-import { discoverEndpoint, readConfig, tokenScope } from "./config"
+import { discoverEndpoint, headerRungOn, readConfig, tokenScope } from "./config"
 import type { MountOptions, PanelConfig } from "./config"
+import { installHeaderRung } from "./detect"
+import type { HeaderRung } from "./detect"
+import { serializeScope } from "../lib/scope"
+import type { Scope } from "../lib/scope"
 import { el, fmtJSON, waterfall } from "./render"
 import { PANEL_CSS } from "./styles"
 import {
@@ -98,6 +102,27 @@ const quiet = () => {}
  * the panel falls through to the script's own directory. */
 const PROBE_TIMEOUT_MS = 3_000
 
+/** How many distinct detected scopes the panel remembers (oldest
+ * dropped first): the list C3.3's switcher offers. */
+export const DETECTED_LIMIT = 20
+
+/** A scope the header rung saw (C3.2): the newest response path that
+ * carried it and when, in first-seen order. */
+export interface DetectedScope {
+  scope: Scope
+  /** Its serialised form — the key the list is distinct by. */
+  key: string
+  /** The URL path of the newest response that carried it. */
+  path: string
+  /** Date.now() of that response. */
+  at: number
+}
+
+/** The detection word the footer shows: "headers" while the header
+ * rung is installed, "off" under data-detect="off", "explicit" when
+ * only the explicit forms (rung 1) are in effect. */
+export type DetectWord = "headers" | "off" | "explicit"
+
 /** How the renderers remember which <details> the user opened. */
 interface OpenState {
   keys: Set<string>
@@ -107,8 +132,10 @@ interface OpenState {
 export class WeftDevtools extends HTMLElement {
   static observedAttributes = [
     "data-endpoint",
+    "data-scope",
     "data-public-id",
     "data-token",
+    "data-detect",
     "data-position",
     "data-open",
     "data-auto",
@@ -128,7 +155,17 @@ export class WeftDevtools extends HTMLElement {
   private shadow: ShadowRoot
   private model: PanelModel | null = null
   /** What the running model was started with. */
-  private conn: { endpoint: string; token: string; publicId: string } | null = null
+  private conn: { endpoint: string; token: string; scope: string } | null = null
+  /** The header rung's fetch wrapper, while it is installed. */
+  private rung: HeaderRung | null = null
+  /** The last restore found another patcher over the wrapper. */
+  private notRestored = false
+  /** The newest scope the header rung saw (null: none yet). */
+  private detected: Scope | null = null
+  /** The newest scope seen per response path. */
+  private byPath = new Map<string, Scope>()
+  /** Every distinct scope seen, first-seen order (DETECTED_LIMIT). */
+  private seen: DetectedScope[] = []
   /** The endpoint the running connection talks to: cfg.endpoint, or
    * what panel-config.json named (rung 5). The deep links use it. */
   private base = ""
@@ -211,6 +248,7 @@ export class WeftDevtools extends HTMLElement {
     window.addEventListener("keydown", this.onKey)
     window.addEventListener("pointerup", this.onRelease, true)
     window.addEventListener("pointercancel", this.onRelease, true)
+    this.syncDetect()
     this.schedule()
   }
 
@@ -227,6 +265,77 @@ export class WeftDevtools extends HTMLElement {
     this.model?.dispose()
     this.model = null
     this.conn = null
+    this.dropRung()
+  }
+
+  // ── Scope detection (plan C3.2) ─────────────────────────────────
+
+  /** detectWord is the resolved detection choice, as the footer says it. */
+  detectWord(): DetectWord {
+    if (this.rung) return "headers"
+    return this.cfg.detect === "off" ? "off" : "explicit"
+  }
+
+  /** detectedScopes is every distinct scope the header rung has seen,
+   * first-seen order, each with the newest path that carried it — the
+   * list C3.3's switcher offers. */
+  detectedScopes(): DetectedScope[] {
+    return this.seen.map((d) => ({ ...d, scope: { ...d.scope } }))
+  }
+
+  /** detectedByPath is the newest scope seen per response path. */
+  detectedByPath(): Map<string, Scope> {
+    return new Map(this.byPath)
+  }
+
+  /** syncDetect installs or removes the header rung as the
+   * configuration says (headerRungOn): the host page's fetch is
+   * touched only while it is on, and put back the moment it is not. */
+  private syncDetect() {
+    const want = this.isConnected && headerRungOn(this.cfg)
+    if (want && !this.rung) {
+      this.notRestored = false
+      this.rung = installHeaderRung({ onScope: (sc, path) => this.onDetected(sc, path) })
+    } else if (!want && this.rung) this.dropRung()
+  }
+
+  /** dropRung restores the page's fetch and forgets what was seen. */
+  private dropRung() {
+    if (!this.rung) return
+    this.notRestored = !this.rung.restore()
+    this.rung = null
+    this.detected = null
+    this.byPath.clear()
+    this.seen = []
+  }
+
+  /** onDetected takes one response's scope: newest per path, the
+   * distinct list, and — unless an explicit form names the scope — a
+   * rescope to it. */
+  private onDetected(sc: Scope, path: string) {
+    const key = serializeScope(sc)
+    this.byPath.set(path, sc)
+    const at = Date.now()
+    const known = this.seen.find((d) => d.key === key)
+    if (known) {
+      known.path = path
+      known.at = at
+    } else {
+      this.seen.push({ scope: sc, key, path, at })
+      if (this.seen.length > DETECTED_LIMIT) this.seen.shift()
+    }
+    const before = this.detected ? serializeScope(this.detected) : ""
+    this.detected = sc
+    if (key !== before && !this.cfg.scopeExplicit) this.schedule()
+  }
+
+  /** scopeNow is the scope the panel follows: the explicit forms', or
+   * the newest detected one while the header rung is on, else none
+   * (the dev list). */
+  private scopeNow(): Scope {
+    if (this.cfg.scopeExplicit) return this.cfg.scope
+    if (this.rung && this.detected) return this.detected
+    return this.cfg.scope
   }
 
   /** keydown is the whole keyboard surface. The window sees a key
@@ -295,13 +404,17 @@ export class WeftDevtools extends HTMLElement {
    * still wins (readConfig). */
   rescan() {
     this.cfg = readConfig(this)
-    if (this.isConnected) this.schedule()
+    if (this.isConnected) {
+      this.syncDetect()
+      this.schedule()
+    }
   }
 
   attributeChangedCallback(_name: string, old: string | null, value: string | null) {
     if (old === value) return
     this.cfg = readConfig(this)
     if (!this.isConnected) return
+    this.syncDetect()
     this.schedule()
   }
 
@@ -323,13 +436,16 @@ export class WeftDevtools extends HTMLElement {
   private apply() {
     const cfg = this.cfg
     const conn = this.conn
+    this.syncDetect()
     if (this.model && conn && conn.endpoint === cfg.endpoint && conn.token === cfg.token) {
-      if (conn.publicId !== cfg.publicId) {
-        conn.publicId = cfg.publicId
+      const next = this.scopeNow()
+      const form = serializeScope(next)
+      if (conn.scope !== form) {
         // What was typed for the previous conversation (an unsent steer,
         // a resolve result) is not offered under the next one.
-        this.scratch.clear()
-        void this.model.rescope(cfg.publicId).catch(quiet)
+        if (this.model.publicId !== next.publicId) this.scratch.clear()
+        conn.scope = form
+        void this.model.rescope(next).catch(quiet)
       }
       this.render(this.last)
       return
@@ -386,13 +502,14 @@ export class WeftDevtools extends HTMLElement {
       if (seq !== this.startSeq) return
     }
     if (endpoint) {
+      const scope = this.scopeNow()
       const model = new PanelModel(
         { base: endpoint, token: cfg.token },
-        cfg.publicId,
+        scope,
         (s) => this.render(s)
       )
       this.model = model
-      this.conn = { endpoint: cfg.endpoint, token: cfg.token, publicId: cfg.publicId }
+      this.conn = { endpoint: cfg.endpoint, token: cfg.token, scope: serializeScope(scope) }
       this.base = endpoint
       this.last = model.state
       try {
@@ -599,9 +716,16 @@ export class WeftDevtools extends HTMLElement {
       })
     )
     const agent = s.session?.agent ?? s.turns.at(0)?.agent ?? ""
-    const scope = this.cfg.publicId || s.session?.public_id || ""
+    const scope = this.model?.publicId || s.session?.public_id || ""
     const title = scope ? `${agent ? agent + " · " : ""}${scope}` : "latest (dev)"
     h.appendChild(el("span", "weft-title", title, { title }))
+    // The scope's narrowing, as chips: the session filters the list,
+    // the flow is carried and filters nothing yet (C3.2).
+    const narrowing = this.model?.narrowing ?? {}
+    if (narrowing.session)
+      h.appendChild(el("span", "weft-chip weft-scope-chip", `session ${narrowing.session}`, { title: "the turn list is narrowed to this session" }))
+    if (narrowing.flow)
+      h.appendChild(el("span", "weft-chip weft-scope-chip", `flow ${narrowing.flow}`, { title: "the scope's flow — carried, filters nothing yet" }))
     h.appendChild(el("span", "weft-grow"))
     const inTok = s.turns.reduce((n, r) => n + r.usage.input_tokens, 0)
     const outTok = s.turns.reduce((n, r) => n + r.usage.output_tokens, 0)
@@ -630,10 +754,20 @@ export class WeftDevtools extends HTMLElement {
 
   private turnList(s: PanelState): HTMLElement {
     const list = el("div", "weft-turns")
+    // The scope's narrowing, said where it applies: never an empty or
+    // unpinned list without a reason.
+    if (s.pinMissing)
+      list.appendChild(el("div", "weft-note weft-pin-missing", `run ${s.pinMissing} not in this conversation`))
+    const session = this.model?.narrowing.session
+    if (session && s.sessionUnrecorded)
+      list.appendChild(el("div", "weft-note", `session ${session}: these runs carry no session id — not narrowed`))
     if (!s.turns.length && !s.experiments.size) {
-      list.appendChild(
-        el("div", "weft-splash", this.cfg.publicId ? "no turns yet — run your app" : "no runs yet (dev)")
-      )
+      const empty = session
+        ? `no turns of session ${session} yet`
+        : this.model?.publicId
+          ? "no turns yet — run your app"
+          : "no runs yet (dev)"
+      list.appendChild(el("div", "weft-splash", empty))
       return list
     }
     const shown = new Set<string>()
@@ -1447,13 +1581,18 @@ export class WeftDevtools extends HTMLElement {
 
   private footer(s: PanelState): HTMLElement {
     const line = "prompts, args and results from your app, via your Studio"
-    if (strippedContent(s.turn?.folded)) {
-      return el("div", "weft-footer", [
-        el("span", undefined, line),
-        el("span", undefined, " · content is stripped for this destination"),
-      ])
-    }
-    return el("div", "weft-footer", line)
+    const parts: HTMLElement[] = [el("span", undefined, line)]
+    if (strippedContent(s.turn?.folded)) parts.push(el("span", undefined, " · content is stripped for this destination"))
+    // The resolved detection choice, one word (C3.2); and, when the
+    // page's fetch could not be put back (another patcher wrapped it
+    // after the panel), that too.
+    const word = this.detectWord()
+    parts.push(
+      el("span", "weft-detect", ` · detect: ${word}${this.notRestored && !this.rung ? " (fetch not restored: patched after the panel)" : ""}`, {
+        title: word === "headers" ? "reading Weft-Scope on this page's same-origin fetches" : "scope from data-scope / window.__WEFT__",
+      })
+    )
+    return el("div", "weft-footer", parts)
   }
 
   private rawView(t: TurnView): HTMLElement {

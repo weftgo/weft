@@ -23,8 +23,15 @@ export type Position = "bottom-right" | "bottom-left" | "right-dock"
 export interface MountOptions {
   /** Studio's base URL (setup A: "/studio/"). */
   endpoint?: string
+  /** The full scope to follow (data-scope's form, or a Scope); above
+   * publicId. */
+  scope?: Scope | string
   /** The conversation to follow; "" is the dev list. */
   publicId?: string
+  /** Scope detection: "headers" turns the header rung (Weft-Scope on
+   * same-origin fetch responses) on anywhere; "off" turns detection
+   * off. Unset: on only on loopback with no or a dev token. */
+  detect?: "headers" | "off"
   /** API token (setups B and C): a per-page panel token in pages you ship. */
   token?: string
   position?: Position
@@ -105,7 +112,10 @@ export function mount(opts: MountOptions = {}): WeftDevtoolsElement {
     }
   const node = document.createElement(TAG) as WeftDevtoolsElement
   const o = { ...options }
-  if (current && o.publicId === undefined) o.publicId = current.publicId
+  if (current && o.publicId === undefined && o.scope === undefined) {
+    o.publicId = current.publicId
+    o.scope = { ...current }
+  }
   const startOpen = wantOpen ?? carried
   if (o.open === undefined && startOpen !== null) o.open = startOpen
   node.options = o
@@ -115,12 +125,13 @@ export function mount(opts: MountOptions = {}): WeftDevtoolsElement {
 }
 
 /** scope points every <weft-devtools> on the page at s: the panel
- * follows s.publicId (rung 1, so it wins over data-public-id and
- * window.__WEFT__), and each element carries s serialised in its
- * data-weft-scope attribute. In C1 the panel follows the public id
- * only; session, flow and run are carried in the marker for C3.1. A
- * string is a public id. The same scope again, already on every
- * element, does nothing (a framework re-render is not a rescope). */
+ * follows the whole scope (rung 1, so it wins over data-scope,
+ * data-public-id, window.__WEFT__ and any detected scope) — the public
+ * id selects the conversation, session narrows its turn list, run pins
+ * the selected turn, flow is carried — and each element carries s
+ * serialised in its data-weft-scope attribute. A string is a public
+ * id. The same scope again, already on every element, does nothing (a
+ * framework re-render is not a rescope). */
 export function scope(s: Scope | string): void {
   const next: Scope = typeof s === "string" ? { publicId: s } : { ...s }
   const form = serializeScope(next)
@@ -128,8 +139,11 @@ export function scope(s: Scope | string): void {
   current = next
   later(() => {
     for (const n of elements()) {
-      if (same && n.getAttribute("data-weft-scope") === form && n.options?.publicId === next.publicId) continue
-      n.options = { ...n.options, publicId: next.publicId }
+      const had = n.options?.scope
+      const hadForm = typeof had === "string" ? had : had ? serializeScope(had) : ""
+      if (same && n.getAttribute("data-weft-scope") === form && hadForm === form) continue
+      // publicId too: a panel bundle older than the scope option reads it.
+      n.options = { ...n.options, publicId: next.publicId, scope: { ...next } }
       n.setAttribute("data-weft-scope", form)
       rescanOf(n)?.()
     }

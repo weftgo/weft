@@ -74,11 +74,25 @@ import (
 
 // page is the host app's own landing page: a plain HTML document
 // whose only weft-ness is the panel's script tag (setup A, §5.3 —
-// same origin as Studio, no token, the session's public id baked in).
+// same origin as Studio, no token). The tag names no scope: the
+// page's own ask form POSTs /run with fetch, and the panel reads the
+// response's Weft-Scope header (detection rung 2, on by default on
+// loopback with no token) — so the first turn scopes it to pub_demo
+// and pins that turn's run. A page that wants to name its scope
+// itself adds data-scope="pub_demo" to the tag.
 const page = `<!doctype html><html><head><title>host app</title></head><body>
 <h1>the host app's own page</h1>
 <p>the devtools panel below is a script tag and nothing else</p>
-<script type="module" src="/studio/panel.js" data-weft data-public-id="pub_demo" data-open="true"></script>
+<form id="ask"><input name="text" value="where is order 42?" size="40"> <button>ask</button></form>
+<pre id="answer"></pre>
+<script>
+document.getElementById("ask").addEventListener("submit", async (e) => {
+  e.preventDefault()
+  const res = await fetch("/run", { method: "POST", body: new FormData(e.target).get("text") })
+  document.getElementById("answer").textContent = await res.text()
+})
+</script>
+<script type="module" src="/studio/panel.js" data-weft data-open="true"></script>
 </body></html>`
 
 func main() {
@@ -274,8 +288,9 @@ func newDemo(st thread.Storage, agent *weft.Agent) *demo {
 	return &demo{st: st, agent: agent, sem: make(chan struct{}, 1)}
 }
 
-// publicID is the demo session's public id: the panel's script tag
-// carries it, and every /run response's Weft-Scope header names it.
+// publicID is the demo session's public id: every /run response's
+// Weft-Scope header names it, and the panel scopes itself from that
+// header (the script tag carries no scope).
 const publicID = "pub_demo"
 
 // handler is /run with its scope header: the one line an app adds to

@@ -134,7 +134,7 @@ describe("mount", () => {
     type Pkg = Omit<Devtools.MountOptions, "target">
     const toLadder = (o: Pkg): LadderOptions => o
     const toPkg = (o: LadderOptions): Pkg => o
-    const all: Required<Pkg> = { endpoint: STUDIO, publicId: "p", token: "t", position: "right-dock", open: true, auto: false }
+    const all: Required<Pkg> = { endpoint: STUDIO, scope: "p;run=r", publicId: "p", token: "t", detect: "headers", position: "right-dock", open: true, auto: false }
     expect(toPkg(toLadder(all))).toEqual(all)
   })
 })
@@ -168,6 +168,30 @@ describe("scope", () => {
     await settle()
     expect(scopes()).toEqual(["pub_orders"])
     expect(node.getAttribute("data-weft-scope")).toBe("pub_orders;flow=f_1")
+  })
+
+  it("passes the full scope through (C3.2): session narrows, run pins, flow is a chip; a mount after it starts there", async () => {
+    const routes = baseRoutes()
+    const t2 = { ...(routes["runs?public_id=pub_orders&limit=50"] as { runs: object[] }).runs[0], id: "s_01-t2", session_id: "s_02" }
+    routes["runs?public_id=pub_orders&limit=50"] = {
+      total: 2,
+      runs: [t2, ...(routes["runs?public_id=pub_orders&limit=50"] as { runs: object[] }).runs],
+      next_before: null,
+    }
+    fakeStudio(routes)
+    const api = await load()
+    api.scope({ publicId: "pub_orders", session: "s_01", flow: "f_1", run: "s_01-t1" })
+    const node = api.mount({ endpoint: STUDIO, open: true })
+    await settle()
+    expect(node.options?.scope).toEqual({ publicId: "pub_orders", session: "s_01", flow: "f_1", run: "s_01-t1" })
+    const q = (sel: string) => Array.from(node.shadowRoot?.querySelectorAll(sel) ?? []).map((n) => n.textContent)
+    expect(q(".weft-turn .weft-id")).toEqual(["s_01-t1"]) // s_02's turn narrowed away
+    expect(q(".weft-sel .weft-id")).toEqual(["s_01-t1"])
+    expect(q(".weft-scope-chip")).toEqual(["session s_01", "flow f_1"])
+    api.scope({ publicId: "pub_orders" }) // the same conversation, unnarrowed
+    await settle()
+    expect(q(".weft-turn .weft-id")).toEqual(["s_01-t2", "s_01-t1"])
+    expect(q(".weft-scope-chip")).toEqual([])
   })
 
   it("scope and open called while the page is still parsing apply once the bundle has mounted its dock", async () => {

@@ -16,6 +16,8 @@ import type { Holed, Meta, PosEvent, RunDoc, RunRow, SessionRow, Span, Transcrip
 import { HOLES } from "../lib/honesty"
 import { byStep } from "../lib/requests"
 import type { StepRequests } from "../lib/requests"
+import { serializeScope } from "../lib/scope"
+import type { Scope } from "../lib/scope"
 import { tokenScope } from "./config"
 import { applyTranscript, linkView, newFold } from "../lib/events"
 import type { FoldFeed, FoldedRun } from "../lib/events"
@@ -203,6 +205,12 @@ export interface PanelState {
   /** The scope subscription is open (the live dot). */
   live: boolean
   raw: boolean
+  /** The scope's run, when it is not among the conversation's listed
+   * runs: "run r_… not in this conversation", an honest line (C3.2). */
+  pinMissing: string
+  /** The scope names a session but no listed run carries a session id:
+   * the list is not narrowed, and says so. */
+  sessionUnrecorded: boolean
 }
 
 export type PanelNotify = (s: PanelState) => void
@@ -226,6 +234,8 @@ export function emptyPanelState(): PanelState {
     breakpoints: [],
     live: false,
     raw: false,
+    pinMissing: "",
+    sessionUnrecorded: false,
   }
 }
 
@@ -410,9 +420,27 @@ export class PanelModel {
   private posting = false
   private deciding = false
 
-  constructor(ep: PanelEndpoint, public publicId: string, notify: PanelNotify) {
+  /** The conversation followed; "" is the dev list. */
+  publicId: string
+  /** What narrows it (C3.2): session filters the turn list (on runs
+   * that carry weft.session.id), run pins the selected turn once per
+   * scope, flow is carried (the header's chip) and filters nothing. */
+  narrowing: Omit<Scope, "publicId"> = {}
+  /** The run the pin was last applied for: a pin selects its run once,
+   * the user's clicks own the selection afterwards. */
+  private pinApplied = ""
+
+  constructor(ep: PanelEndpoint, scope: Scope | string, notify: PanelNotify) {
     this.ep = ep
     this.notify = notify
+    const s: Scope = typeof scope === "string" ? { publicId: scope } : scope
+    this.publicId = s.publicId
+    this.narrowing = narrowingOf(s)
+  }
+
+  /** following is the scope the model follows, as one value. */
+  get following(): Scope {
+    return { publicId: this.publicId, ...this.narrowing }
   }
 
   /** start checks meta once, then follows the conversation. */
@@ -439,11 +467,22 @@ export class PanelModel {
     return true
   }
 
-  /** rescope moves to another conversation (the §5.2 setter path). */
-  async rescope(publicId: string) {
-    if (publicId === this.publicId) return
-    this.publicId = publicId
-    if (this.state.meta && !this.state.tooNew) await this.scope()
+  /** rescope follows another scope (the §5.2 setter path, the header
+   * rung): another public id starts over on that conversation; the
+   * same one with another session, flow or run re-narrows the list
+   * already followed. A string is a public id. */
+  async rescope(next: Scope | string) {
+    const s: Scope = typeof next === "string" ? { publicId: next } : next
+    const narrowing = narrowingOf(s)
+    const sameNarrowing = serializeScope({ publicId: "", ...narrowing }) === serializeScope({ publicId: "", ...this.narrowing })
+    if (s.publicId === this.publicId && sameNarrowing) return
+    const samePublic = s.publicId === this.publicId
+    this.publicId = s.publicId
+    this.narrowing = narrowing
+    this.pinApplied = ""
+    if (!this.state.meta || this.state.tooNew) return
+    if (samePublic) await this.refresh()
+    else await this.scope()
   }
 
   /** scope starts over on the conversation: the header and the turn
@@ -469,6 +508,9 @@ export class PanelModel {
     s.turn = null
     s.drawer = null
     s.result = null
+    s.pinMissing = ""
+    s.sessionUnrecorded = false
+    this.pinApplied = ""
     this.compareWords.clear()
     this.emit()
     // Subscribe before the list is fetched: a run frame that lands
@@ -617,7 +659,11 @@ export class PanelModel {
         // The header's row; without it the list still loads.
         const sessions = await fetchSessions(this.ep, { public_id: this.publicId }).catch(() => null)
         if (seq !== this.loadSeq || this.disposed) return
-        if (sessions && Array.isArray(sessions.sessions)) this.state.session = sessions.sessions[0] ?? null
+        if (sessions && Array.isArray(sessions.sessions)) {
+          const want = this.narrowing.session
+          this.state.session =
+            (want ? sessions.sessions.find((x) => x.id === want) : sessions.sessions[0]) ?? null
+        }
       }
       const page = await fetchRuns(
         this.ep,
@@ -627,7 +673,9 @@ export class PanelModel {
       const listed: (RunRow | null)[] = Array.isArray(page.runs) ? page.runs : []
       const runs = listed.filter((r): r is RunRow => !!r && typeof r.id === "string")
       const { turns, experiments } = partitionRuns(runs)
-      this.state.turns = turns
+      const want = this.narrowing.session
+      this.state.sessionUnrecorded = !!want && turns.length > 0 && !turns.some((r) => r.session_id)
+      this.state.turns = turns.filter((r) => this.inSession(r))
       this.state.experiments = experiments
       this.state.turnsCapped = page.next_before != null
       for (const r of during) this.upsertRun(r)
@@ -646,7 +694,10 @@ export class PanelModel {
       const status = this.rowOf(open.id)?.status
       if (status && status !== "running") void this.settleTurn(open).catch(quiet)
     }
-    if (!this.state.selected) {
+    const pin = this.takePin()
+    if (pin) {
+      await this.select(pin)
+    } else if (!this.state.selected) {
       const running = this.state.turns.find((r) => r.status === "running")
       const target = running ?? this.state.turns.at(0)
       if (target) await this.select(target.id)
@@ -654,6 +705,30 @@ export class PanelModel {
     } else {
       this.emit()
     }
+  }
+
+  /** inSession keeps a row under the scope's session: every row when
+   * the scope names none, and a row that carries no session id (an
+   * experiment, a run outside a thread) is not judged. */
+  private inSession(r: RunRow): boolean {
+    const want = this.narrowing.session
+    return !want || !r.session_id || r.session_id === want
+  }
+
+  /** takePin is the scope's run pin: the id to select now — once per
+   * scope, when the run is among the listed ones — or "". A run that
+   * is not listed is reported (pinMissing) instead of dropped. */
+  private takePin(): string {
+    const run = this.narrowing.run
+    if (!run) {
+      this.state.pinMissing = ""
+      return ""
+    }
+    const hit = this.rowOf(run)
+    this.state.pinMissing = hit ? "" : run
+    if (!hit || this.pinApplied === run) return ""
+    this.pinApplied = run
+    return run
   }
 
   /** onRunFrame upserts a turn row from the live lane and keeps the
@@ -667,9 +742,17 @@ export class PanelModel {
     // the list is top-level runs (runs?public_id= reads the same way)
     // and the child hangs off its parent's call.
     if (run.parent_run_id) return
+    // Another session's run is not a turn of the narrowed list.
+    if (!this.inSession(run)) return
     for (const c of this.collectors) c.push(run)
     this.upsertRun(run)
     this.armStale()
+    // The scope's run, heard as it starts: the pin takes it.
+    const pin = this.takePin()
+    if (pin) {
+      void this.select(pin).catch(quiet)
+      return
+    }
     if (!this.state.selected && this.state.turns.length) {
       const running = this.state.turns.find((r) => r.status === "running")
       void this.select((running ?? this.state.turns[0]).id).catch(quiet)
@@ -1697,4 +1780,13 @@ function isReady(res: ExperimentResult): boolean {
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/** narrowingOf is a scope's narrowing fields, the empty ones dropped. */
+function narrowingOf(s: Scope): Omit<Scope, "publicId"> {
+  const out: Omit<Scope, "publicId"> = {}
+  if (s.session) out.session = s.session
+  if (s.flow) out.flow = s.flow
+  if (s.run) out.run = s.run
+  return out
 }

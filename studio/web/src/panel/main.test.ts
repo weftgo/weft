@@ -79,6 +79,26 @@ describe("window.__WEFT__ (§5.2)", () => {
     expect(studio.gets("runs?limit=10").length).toBeGreaterThan(0) // the dev list again
   })
 
+  it("window.__WEFT__ = {scope} (C3.2) rescopes too, and setting scope on the object does", async () => {
+    const routes = baseRoutes()
+    routes["runs?public_id=pub_b&limit=50"] = { total: 0, runs: [], next_before: null }
+    fakeStudio(routes)
+    await import("./main")
+    await settle()
+    ;(page as { __WEFT__?: unknown }).__WEFT__ = { scope: "pub_b;flow=f_1" }
+    await settle()
+    expect(scopes()).toEqual(["pub_b"])
+    const chips = () =>
+      Array.from(dock()?.shadowRoot?.querySelectorAll(".weft-scope-chip") ?? []).map((n) => n.textContent)
+    dock()?.toggle()
+    await settle()
+    expect(chips()).toEqual(["flow f_1"])
+    ;(page.__WEFT__ as { scope?: string }).scope = "pub_orders"
+    await settle()
+    expect(scopes()).toEqual(["pub_orders"])
+    expect(chips()).toEqual([])
+  })
+
   it("markup the page re-renders (a framework remount) follows __WEFT__ too; an explicit data-public-id is never overridden", async () => {
     const routes = baseRoutes()
     routes["runs?public_id=pub_b&limit=50"] = { total: 0, runs: [], next_before: null }

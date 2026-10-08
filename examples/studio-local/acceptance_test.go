@@ -348,3 +348,32 @@ func TestRunCarriesTheScopeHeader(t *testing.T) {
 		t.Errorf("the header's scope is %#v, want pub_demo and no session", got)
 	}
 }
+
+// The landing page's panel tag names no scope (plan C3.2): no
+// data-public-id, no data-scope — the panel scopes itself from the
+// Weft-Scope header of the page's own fetch to /run (detection rung
+// 2), which the page's ask form makes. The panel's own suite proves
+// the scoping (studio/web/src/panel/detect.test.ts, the Done line);
+// this pins the page that suite models.
+func TestPageScopesFromTheRunHeader(t *testing.T) {
+	var tag string
+	for _, line := range strings.Split(page, "\n") {
+		if strings.Contains(line, `src="/studio/panel.js"`) {
+			tag = line
+		}
+	}
+	if tag == "" {
+		t.Fatal("the page carries no panel script tag")
+	}
+	if !strings.Contains(tag, "data-weft") {
+		t.Errorf("the panel tag %q lacks data-weft", tag)
+	}
+	for _, attr := range []string{"data-public-id", "data-scope", "data-detect"} {
+		if strings.Contains(tag, attr) {
+			t.Errorf("the panel tag %q carries %s: the scope must come from the /run header", tag, attr)
+		}
+	}
+	if !strings.Contains(page, `fetch("/run"`) {
+		t.Error("the page does not fetch /run: nothing would carry the scope header to the panel")
+	}
+}

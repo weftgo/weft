@@ -4,7 +4,7 @@
 //
 //   1. mount(opts) — the options a programmatic mount passed;
 //   2. the <weft-devtools> element's own data-* attributes;
-//   3. <meta name="weft:endpoint|public-id|token|position|open|auto">;
+//   3. <meta name="weft:endpoint|scope|public-id|token|detect|position|open|auto">;
 //   4. the panel's <script> tag's data-* attributes: the running
 //      classic script (document.currentScript), else the first script
 //      carrying data-weft (any src — a renamed or proxied bundle), else
@@ -18,6 +18,16 @@
 // A meta tag may supply the token while the script tag supplies the
 // endpoint: fields never travel together. The panel's file name is
 // never read — the bundle may be served as anything.
+//
+// The scope (plan C3.2) is one field with two spellings: data-scope
+// (the serialised Scope, lib/scope.ts) and data-public-id (the older
+// form, read as a scope with only its first field — deprecated, kept
+// working). At each rung data-scope is read first; without either at
+// any rung, window.__WEFT__ ({scope} or {publicId}) is the scope.
+// Those are the explicit forms (detection rung 1); the header rung
+// (detect.ts) supplies a scope only when none of them names one.
+import { parseScope, serializeScope } from "../lib/scope"
+import type { Scope } from "../lib/scope"
 
 /** data-position — where the dock sits. */
 export type PanelPosition = "bottom-right" | "bottom-left" | "right-dock"
@@ -33,8 +43,19 @@ export interface PanelConfig {
   /** Where panel-config.json is asked (rung 5): the script's own
    * directory; "" when the endpoint is explicit or no script is known. */
   configURL: string
-  /** The conversation to scope to; "" means the dev list (latest). */
+  /** The conversation to scope to; "" means the dev list (latest).
+   * Always scope.publicId. */
   publicId: string
+  /** The scope the explicit forms name (data-scope, data-public-id,
+   * window.__WEFT__, mount's scope/publicId). */
+  scope: Scope
+  /** Whether an explicit form named a non-empty scope: detection rungs
+   * 2–4 then supply nothing — the page's own word wins. */
+  scopeExplicit: boolean
+  /** data-detect: "headers" turns the header rung on anywhere, "off"
+   * turns every detection rung off (the explicit forms still work),
+   * "" leaves the default (headerRungOn). */
+  detect: DetectSetting
   /** API token (setups B and C); "" in setup A. */
   token: string
   position: PanelPosition
@@ -48,18 +69,25 @@ export interface PanelConfig {
  * exports mount; the script-tag bundle stays a side-effect module. */
 export interface MountOptions {
   endpoint?: string
+  /** The full scope (rung 1's data-scope); above publicId. */
+  scope?: Scope | string
   publicId?: string
+  /** data-detect, as an option. */
+  detect?: "headers" | "off"
   token?: string
   position?: PanelPosition
   open?: boolean
   auto?: boolean
 }
 
+/** data-detect's values; "" is unset. */
+export type DetectSetting = "" | "headers" | "off"
+
 const POSITIONS: PanelPosition[] = ["bottom-right", "bottom-left", "right-dock"]
 
 /** The fields, by their attribute stem: data-<stem> on the element and
  * the script tag, weft:<stem> on a meta tag. */
-export const FIELDS = ["endpoint", "public-id", "token", "position", "open", "auto"] as const
+export const FIELDS = ["endpoint", "scope", "public-id", "token", "detect", "position", "open", "auto"] as const
 type Field = (typeof FIELDS)[number]
 
 export const DATA_ATTRS = FIELDS.map((f) => `data-${f}`)
@@ -128,14 +156,30 @@ function optionsRung(opts: MountOptions | null | undefined): Rung {
     if (!opts) return null
     const v = {
       endpoint: opts.endpoint,
+      scope: scopeOption(opts.scope),
       "public-id": opts.publicId,
       token: opts.token,
+      detect: opts.detect,
       position: opts.position,
       open: opts.open,
       auto: opts.auto,
     }[f]
     return v === undefined ? null : String(v)
   }
+}
+
+/** scopeOption is mount's scope option in its string form (a Scope
+ * object serialised; anything else is unset). */
+function scopeOption(v: unknown): string | undefined {
+  if (typeof v === "string") return v
+  if (v && typeof v === "object" && typeof (v as Scope).publicId === "string") {
+    try {
+      return serializeScope(v as Scope)
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
 }
 
 function metaRung(): Rung {
@@ -175,15 +219,34 @@ export function readConfig(el?: HTMLElement & { options?: MountOptions | null })
     : dir || normalize("./", document.baseURI)
   const position = pick("position")
   const open = pick("open")
+  // The scope: at each rung data-scope, then data-public-id; the first
+  // rung with either wins. Without one, window.__WEFT__ (§5.2's
+  // default) — read here, so markup a framework mounts later scopes
+  // itself on connect.
+  let scope: Scope | null = null
+  for (const r of rungs) {
+    const sc = r("scope")
+    if (sc !== null) {
+      scope = parseScope(sc)
+      break
+    }
+    const id = r("public-id")
+    if (id !== null) {
+      scope = { publicId: id }
+      break
+    }
+  }
+  scope ??= weftScope()
+  const detect = pick("detect")
   return {
     endpoint,
     endpointExplicit: raw !== null,
     configURL: raw === null && dir ? dir + "panel-config.json" : "",
-    // An explicit public id (any rung) always wins; without one,
-    // window.__WEFT__.publicId is the scope (§5.2's default) — read
-    // here, so markup a framework mounts later scopes itself on connect.
-    publicId: pick("public-id") ?? weftPublicId(),
+    publicId: scope.publicId,
+    scope,
+    scopeExplicit: !!(scope.publicId || scope.session || scope.flow || scope.run),
     token: pick("token") ?? "",
+    detect: detect === "headers" || detect === "off" ? detect : "",
     position: POSITIONS.includes(position as PanelPosition)
       ? (position as PanelPosition)
       : "bottom-right",
@@ -229,6 +292,46 @@ export function weftPublicId(): string {
   } catch {
     return ""
   }
+}
+
+/** weftScope reads window.__WEFT__: its scope (the serialised form, or
+ * a Scope object), else its publicId — the page's object, as the page
+ * wrote it. The empty scope when there is none or it cannot be read
+ * (a getter of the page's that throws is not the panel's to surface). */
+export function weftScope(): Scope {
+  try {
+    const w = (window as { __WEFT__?: { scope?: unknown; publicId?: unknown } | null }).__WEFT__
+    const sc = w?.scope
+    if (typeof sc === "string") return parseScope(sc)
+    const form = scopeOption(sc)
+    if (form !== undefined) return parseScope(form)
+  } catch {
+    // fall through to the public id
+  }
+  return { publicId: weftPublicId() }
+}
+
+/** isLoopback reports whether a URL's host is this machine's:
+ * localhost, *.localhost, 127.0.0.0/8 or [::1]. */
+export function isLoopback(url: string): boolean {
+  try {
+    const h = new URL(url).hostname.toLowerCase()
+    return h === "localhost" || h.endsWith(".localhost") || /^127(\.\d{1,3}){3}$/.test(h) || h === "[::1]"
+  } catch {
+    return false
+  }
+}
+
+/** headerRungOn is the header rung's switch (plan §13.3): data-detect
+ * "headers" turns it on anywhere and "off" turns it off; by default it
+ * is on only where the host has said so by its setup — an endpoint on
+ * loopback with no token (setup A) or the dev/server token (setup B),
+ * never under a panel token (weft_pt., setup C). Every other page's
+ * window.fetch is never touched. */
+export function headerRungOn(cfg: Pick<PanelConfig, "detect" | "endpoint" | "token">): boolean {
+  if (cfg.detect === "off") return false
+  if (cfg.detect === "headers") return true
+  return isLoopback(cfg.endpoint) && !cfg.token.startsWith("weft_pt.")
 }
 
 /** What a token may do, as far as the page can tell (§6). A panel

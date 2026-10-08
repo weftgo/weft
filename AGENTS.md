@@ -208,7 +208,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    alone, every panel token 403 hidden), public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5; configured by a data-weft
 //    //    script tag, weft:* meta tags, or <base>/panel-config.json; studio/README.md
-//    //    has the ladder; the same bytes on npm as @weftgo/devtools — import "@weftgo/devtools",
+//    //    has the ladder; it follows a scope — data-scope="pub_…;session=…;flow=…;run=…" or
+//    //    window.__WEFT__ (data-public-id deprecated), else the Weft-Scope header of the page's
+//    //    same-origin fetches: a read-only window.fetch wrapper, on by default only on loopback with
+//    //    no or a dev token, data-detect="headers"|"off", restored on disconnect; the same bytes on npm as @weftgo/devtools — import "@weftgo/devtools",
 //    //    mount/scope/open/close/on, /react /vue /svelte marker helpers; studio/web/npm,
 //    //    make devtools-npm, never published by the build), /panel-config.json
 //    //    ({endpoint, version, capabilities}; loopback Host / same-origin only, else

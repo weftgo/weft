@@ -2,7 +2,8 @@
 // What it does, in order:
 //
 //   1. define <weft-devtools>, so any markup in the page upgrades;
-//   2. install the window.__WEFT__ publicId watch (a setter, §5.2);
+//   2. install the window.__WEFT__ watch (a setter, §5.2): its scope
+//      (C3.2) or publicId;
 //   3. read its configuration (config.ts's ladder, plan C2: meta tags,
 //      then its own <script> tag — data-weft, any file name);
 //   4. mount the dock without markup when data-auto (default) or the
@@ -15,7 +16,7 @@ import { WeftDevtools } from "./element"
 
 declare global {
   interface Window {
-    __WEFT__?: { publicId?: string }
+    __WEFT__?: { publicId?: string; scope?: string | { publicId: string; session?: string; flow?: string; run?: string } }
   }
 }
 
@@ -45,22 +46,24 @@ function watchWeft(): void {
       // the page's assignment must go through
     }
   }
-  /** arm watches publicId on the page's object itself. */
+  /** arm watches publicId and scope (C3.2) on the page's object itself. */
   const arm = (v: unknown) => {
     if (!v || typeof v !== "object") return
-    let id: unknown = (v as { publicId?: unknown }).publicId
-    try {
-      Object.defineProperty(v, "publicId", {
-        configurable: true,
-        enumerable: true,
-        get: () => id,
-        set: (next: unknown) => {
-          id = next
-          tell()
-        },
-      })
-    } catch {
-      // a frozen object: reassigning window.__WEFT__ still works
+    for (const key of ["publicId", "scope"]) {
+      let held: unknown = (v as Record<string, unknown>)[key]
+      try {
+        Object.defineProperty(v, key, {
+          configurable: true,
+          enumerable: true,
+          get: () => held,
+          set: (next: unknown) => {
+            held = next
+            tell()
+          },
+        })
+      } catch {
+        // a frozen object: reassigning window.__WEFT__ still works
+      }
     }
   }
   let held: unknown = (window as { __WEFT__?: unknown }).__WEFT__

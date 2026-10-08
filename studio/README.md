@@ -102,7 +102,7 @@ server token's alone.
 One script tag puts the run loop in the corner of your own page —
 `/panel.js` is served by the same handler:
 
-    <script type="module" src="/studio/panel.js" data-weft data-public-id="pub_…"></script>
+    <script type="module" src="/studio/panel.js" data-weft data-scope="pub_…"></script>
 
 Rung 1 is a viewer scoped to that conversation: the turns (parked
 shown), the step story with tool calls, usage splits, each step's
@@ -136,13 +136,56 @@ its connection on it.
 `Alt+W` toggles (Q4), `?` lists keys, `r` flips raw. Setups B/C add
 `data-endpoint` and `data-token` (a dev token, or a panel token your
 backend mints per page via `POST /api/panel-tokens`). A single-page app
-that switches conversations sets `window.__WEFT__ = { publicId }`
-instead of `data-public-id`; the tag then carries no other knob, so
-keep `data-weft` on it — it is how the panel finds its own tag (and
-with it the endpoint) whatever the file is called.
+that switches conversations sets `window.__WEFT__ = { scope }` (or
+`{ publicId }`) instead of `data-scope`; the tag then carries no other
+knob, so keep `data-weft` on it — it is how the panel finds its own tag
+(and with it the endpoint) whatever the file is called.
+
+The panel follows a scope, `pub_…;session=s_…;flow=f_…;run=r_…`
+(`src/lib/scope.ts`; only the public id is required). The public id
+selects the conversation; `run` pins the selected turn, and its live
+tail, to that run once (your clicks own the selection afterwards), or
+says `run r_… not in this conversation` when it is not among the
+conversation's runs; `session` narrows the turn list to that session's
+runs (a run without a session id is not judged, and a list whose runs
+carry none says it is not narrowed); `flow` shows as a chip in the
+header and filters nothing yet (it waits for `weft/flow`).
+`data-public-id="pub_…"` is still read, as the scope `pub_…`, but it
+is deprecated: `data-scope` is the form.
+
+Where the scope comes from (plan C3, scope detection). Each rung after
+the first is passive and same-origin only, and `data-detect="off"`
+turns rungs 2–4 off; rung 1 always works. The footer says which is in
+effect in one word: `detect: headers`, `detect: off` or `detect:
+explicit`.
+
+| # | Rung | When it is on | The explicit alternative |
+|---|---|---|---|
+| 1 | explicit: `data-scope` (element, `weft:scope` meta, script tag), `window.__WEFT__ = { scope }` or `{ publicId }`, `scope()` / `mount({scope})` from `@weftgo/devtools`, the deprecated `data-public-id` | always; it wins over every detected scope | — |
+| 2 | response headers: the `Weft-Scope` header of the page's own same-origin `fetch` responses (the scope header below) | by default only with the endpoint on loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`) and no token or a dev/server token; anywhere with `data-detect="headers"` (or `mount({detect: "headers"})`); never under a panel token (`weft_pt.`) off loopback unless asked | `data-scope` |
+| 3 | the DOM marker (`data-weft-scope`) | C3.3 | `data-scope` |
+| 4 | the page URL | C3.4 | `data-scope` |
+
+Rung 2 patches a global of your page, `window.fetch` (shadow DOM
+scopes DOM and CSS, not JavaScript), so it is held to these rules
+(`src/panel/detect.ts`): it reads the response URL and the
+`Weft-Scope` header only, never a body, never a clone, and never sends
+anything; a cross-origin response is ignored even when it exposes the
+header; it chains to the `fetch` it found (the browser's own or
+another library's patch) and returns the same response or rejection;
+it is put back exactly as found when the panel disconnects or the rung
+is turned off, unless another patcher wrapped it after the panel (then
+that stack is left alone, the wrapper goes inert and the footer says
+`fetch not restored`); and nothing it does reaches the console. It is
+fetch-only: a page cannot read an `EventSource`'s response headers, so
+an SSE chat app names its scope with rung 1 (or, from C3.3, rung 3).
+WebSocket is never wrapped. The panel follows the newest scope seen and
+keeps the newest per request path and every distinct scope seen, for
+C3.3's switcher.
 
 Where the configuration comes from (plan C2). Each field — `endpoint`,
-`public-id`, `token`, `position`, `open`, `auto` — resolves on its
+`scope` (or the deprecated `public-id`; `scope` wins at the same rung),
+`token`, `detect`, `position`, `open`, `auto` — resolves on its
 own; the first source that sets it wins, so a meta tag can carry the
 token while the script tag carries the endpoint. The panel never reads
 its own file name: a bundle served as `/assets/devtools.abc123.js`
@@ -150,9 +193,9 @@ behind a proxy configures itself the same way.
 
 | # | Source | The explicit form |
 |---|---|---|
-| 1 | `mount(opts)` — a programmatic mount (`import { mount } from "@weftgo/devtools"`, the npm entry; not in the script-tag bundle) | `mount({endpoint, publicId, token, position, open, auto, target})` |
+| 1 | `mount(opts)` — a programmatic mount (`import { mount } from "@weftgo/devtools"`, the npm entry; not in the script-tag bundle) | `mount({endpoint, scope, publicId, token, detect, position, open, auto, target})` |
 | 2 | the `<weft-devtools>` element's attributes | `<weft-devtools data-endpoint="…" data-token="…">` |
-| 3 | meta tags | `<meta name="weft:endpoint" content="…">` (also `weft:public-id`, `weft:token`, `weft:position`, `weft:open`, `weft:auto`) |
+| 3 | meta tags | `<meta name="weft:endpoint" content="…">` (also `weft:scope`, `weft:public-id`, `weft:token`, `weft:detect`, `weft:position`, `weft:open`, `weft:auto`) |
 | 4 | the panel's `<script>` tag: the running classic script, else the first with a `data-weft` attribute (any `src`, any value), else the first carrying one of the `data-*` attributes above | `<script type="module" src="…" data-weft data-endpoint="…">` |
 | 5 | `panel-config.json` beside the script (`/studio/panel.js` → `/studio/panel-config.json`), asked only when rungs 1–4 named no endpoint; its `endpoint` is taken on the script's own origin only, and it never carries a token | name the endpoint at any rung above |
 | 6 | the script's own origin + directory (setup A) | name the endpoint at any rung above |
@@ -174,7 +217,7 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 111,622 B raw / 30.8 KiB gzip;
+committed `studio/dist/panel/panel.js`, 123,406 B raw / 34.1 KiB gzip;
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 
@@ -208,7 +251,11 @@ pub_demo;run=<id>`). It never carries a token. The value is the
 to `Access-Control-Expose-Headers`; a page on another origin also
 needs your CORS policy to allow its origin. Put `scope.Header` inside
 your CORS middleware, or list `Weft-Scope` in its exposed headers. The panel reads the header
-from C3.2 on.
+through rung 2 of the scope-detection ladder above (on by default on
+loopback with no or a dev token, `data-detect="headers"` elsewhere,
+same-origin responses only) — `examples/studio-local`'s tag names no
+scope, and its first `/run` scopes the panel to `pub_demo` and pins
+that run.
 
 ## The playground (WEFT-PLAYGROUND.md)
 

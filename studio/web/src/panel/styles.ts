@@ -34,6 +34,7 @@ export const PANEL_CSS = `
   font: 12px/1.45 var(--weft-font);
 }
 .weft-root * { margin: 0; padding: 0; font: inherit; color: inherit; }
+.weft-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .weft-dock {
   position: fixed; z-index: var(--weft-z, 2147483000);

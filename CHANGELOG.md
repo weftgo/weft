@@ -45,7 +45,12 @@ module, ADR 0005).
   `aria-label`; `Tab` wraps inside an open, focused float (never when
   docked; `Esc` lets go). An axe-core run over every mode in both
   themes reports zero violations (`a11y.test.ts`; axe is a
-  devDependency, never in `panel.js`). +1.1 KiB gzip.
+  devDependency, never in `panel.js`), the experiment drawer and the
+  `?` overlay included. The streaming text is `aria-busy` while it
+  grows and a step's end is said once on a hidden `role="status"` line;
+  per-call lines and dropdown options are keyed; the Studio app's
+  Tailwind no longer scans the panel's sources (`@source not
+  "./panel"`). +1.5 KiB gzip.
 - **The devtools panel's theme** (plan D2): light and dark, following
   the host page without configuration — `data-theme="light|dark"`
   (also `weft:theme`, the script tag, `mount({theme})`) wins, then the

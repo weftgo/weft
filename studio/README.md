@@ -453,14 +453,16 @@ puts focus in it, so the keys below work at once.
 | `←` / `→` | on the tabs: previous / next tab (`Home` / `End`: first / last) |
 | `?` | the key list |
 | `↓` / `↑` | on a turn row: move the list's one tab stop to the next / previous row (`Enter` or a click selects) |
-| `Tab` | in an open, focused float: wraps from the last control to the first (`Shift+Tab` back) — the one focus trap; `Esc` lets go; docked, the pill and the sheet never trap |
+| `Tab` | in an open, focused float: wraps from the last control Tab can reach to the first (`Shift+Tab` back) — controls inside a closed `<details>` or hidden by CSS (the narrow float's list) are skipped. The float is non-modal (`role="complementary"`, no backdrop, the page stays live), so this is the one focus trap, and `Esc` collapses the dock to leave it; docked, the pill and the sheet never trap |
 
 The renderer (plan D3). A draw builds the dock afresh and patches it
 into the nodes on screen (`src/panel/render.ts`'s `patch`, about 1 KiB,
 no framework, no `innerHTML` — text nodes only): a child matches by its
 `data-key` — a turn row by its run id, a step card by its step ordinal
-(`s<n>`), a switcher option by its conversation key, the dock and the
-footer by name — else by tag and class; a kept node is updated in place
+(`s<n>`), a tool call or a parked call's line by its call id, a
+turn-dropdown option by its run id, a switcher option by its
+conversation key, the dock and the footer by name — else by tag and
+class (a key repeated under one parent pairs in order); a kept node is updated in place
 (attributes, text, a field's value only when the build says otherwise),
 and handlers ride `on()`, so a kept node answers with the newest
 closure. While a turn streams only its running step's card changes,
@@ -473,26 +475,31 @@ throttle stays.
 |---|---|
 | the dock | `role="complementary"`, `aria-label="weft devtools"` |
 | the turn list | `.weft-rows`: `role="list"` (`aria-label="turns"`); each run a `role="listitem"` holding its row button, the selected one `aria-current="true"`; roving tabindex (one row `tabindex="0"`) |
-| the running step's text | `aria-live="polite"` — the one live region; nothing else in the dock is live |
+| the running step's text | `aria-live="polite"` and `aria-busy="true"` while it streams (a reader waits instead of re-reading each draw) — the one live text region |
+| the step-end status | a visually hidden `role="status"` line, always in the dock, written once when the running step ends: `step N finished · n words` |
 | expanders | `aria-expanded` on how to scope, raw, a subagent's summary, and each raw tree node's `▸`/`▾` |
 | the turn view's tabs (D4) | `role="tablist"` (`aria-label="turn views"`) of `role="tab"` buttons with `aria-selected`, one `tabindex="0"`, `aria-controls` on the selected one; the drawn panel `role="tabpanel"`, `aria-labelledby` its tab |
 | the filters | `aria-label="filter turns"`, `aria-label="status"`, `aria-label="filter keys and values"`; `⧉` labelled `copy <key>` |
 | icon buttons | an `aria-label` on each: `⤢`, `⇆`, `◐`, `–`, `↺`, and the pill (its visible words, `weft devtools · 10→4`) |
 | the switcher, the turn dropdown | `aria-label="conversation"`, `aria-label="turn"` |
+| the experiment drawer | the system prompt, input and edit fields inside their `<label>`; the selects `aria-label`led `model`, `thinking`, `side effects`, `engine`, `thread`; the result pane's `compare with`; tool and breakpoint checkboxes inside their labels; `–` / `↺` labelled |
 
 The accessibility budget. `src/panel/a11y.test.ts` runs axe-core (a
 devDependency only — a test asserts `panel.js` holds no `axe`) with its
 default rules over the panel's shadow root in each mode — float open,
 docked right, the bottom sheet at 400 px, the pill, the Raw tab with
-its tree open and filtered, the Timeline tab — in both themes,
+its tree open and filtered, the Timeline tab, the experiment drawer
+open, and the Raw tree under the `?` shortcuts overlay — in both themes,
 and fails on any violation, listing them. jsdom has no layout, so the
 rules that need one come back incomplete, never as a pass:
 `color-contrast` (D2's `theme.test.ts` holds the palette to WCAG AA
 instead) and `label-content-name-mismatch` (visible text needs layout);
 any other incomplete rule fails the budget. What jsdom cannot see —
 contrast as rendered over your page, focus-ring visibility, real
-screen-reader announcements — is the browser gate's
-(`scripts/panel-gate.ts` against a real Studio, and a manual pass).
+screen-reader announcements (whether a reader waits on the busy stream
+and speaks the step-end status once is a manual browser-gate check) —
+is the browser gate's (`scripts/panel-gate.ts` against a real Studio,
+and a manual pass).
 
 Where the configuration comes from (plan C2). Each field — `endpoint`,
 `scope` (or the deprecated `public-id`; `scope` wins at the same rung),
@@ -529,15 +536,15 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 185,521 B raw / 52,951 B gzip
-(51.7 KiB, under the 80 KiB cap). The scope-detection ladder (C3: rungs
+committed `studio/dist/panel/panel.js`, 187,119 B raw / 53,386 B gzip
+(52.1 KiB, under the 80 KiB cap). The scope-detection ladder (C3: rungs
 2 to 5 and the activity pill) cost +6.0 KiB gzip against its +3 KiB
 estimate: nothing deferrable supplies the first scope and the
 deferrable remainder is under 1 KiB, so the overrun is accepted rather
 than split. The host API below cost about +3.1 KiB against +1 KiB (with its
 review fixes); the
 layout (D1) +3.6 KiB against +4 KiB (with its review fixes); the keyed
-renderer and ARIA (D3) +1.1 KiB against +2 KiB; the views (D4: tabs,
+renderer and ARIA (D3) +1.5 KiB against +2 KiB (with its review fixes); the views (D4: tabs,
 the JSON tree and its filter, the turn filter, paging) +4.5 KiB against
 +5 KiB.
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256

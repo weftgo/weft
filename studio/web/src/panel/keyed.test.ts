@@ -290,3 +290,258 @@ describe("patch, a reorder around focus", () => {
     box.remove()
   })
 })
+
+// ── Review fixes (D3) ─────────────────────────────────────────────
+
+type Inside = { render: (s: unknown) => void; model: { state: Record<string, unknown> } | null }
+const inside = (el: WeftDevtools) => el as unknown as Inside
+
+function viewport(w: number, hgt: number) {
+  Object.defineProperty(window, "innerWidth", { value: w, configurable: true, writable: true })
+  Object.defineProperty(window, "innerHeight", { value: hgt, configurable: true, writable: true })
+  window.dispatchEvent(new Event("resize"))
+}
+
+function streamingTurn() {
+  const routes = baseRoutes()
+  const running = runRow({ id: "s_01-t1", status: "running", finished: null, steps: 2 })
+  routes["runs?public_id=pub_orders&limit=50"] = { total: 1, runs: [running], next_before: null }
+  routes["runs/s_01-t1"] = { ...running, children: [] }
+  routes["runs/s_01-t1/events?after=0&limit=500"] = page(
+    [...runEvents("s_01-t1").slice(0, 3), { type: "step_start", run_id: "s_01-t1", index: 1 }],
+    { done: false }
+  )
+  routes["runs/s_01-t1/transcript"] = transcript([user("where is my order #4411?")], [{ role: "assistant", content: [{ type: "text", text: "Let me check." }] }])
+  return routes
+}
+
+/** watch records the shadow root's mutations, split by whether they
+ * fall inside the node in(). */
+function watch(el: WeftDevtools, within: (n: Node) => boolean) {
+  const yes: MutationRecord[] = []
+  const no: MutationRecord[] = []
+  const mo = new MutationObserver((ms) => {
+    for (const m of ms) (within(m.target) ? yes : no).push(m)
+  })
+  mo.observe(el.shadowRoot!, { subtree: true, childList: true, attributes: true, characterData: true })
+  return {
+    yes,
+    no,
+    stop() {
+      for (const m of mo.takeRecords()) (within(m.target) ? yes : no).push(m)
+      mo.disconnect()
+    },
+  }
+}
+const said = (ms: MutationRecord[]) => ms.map((m) => `${m.type} ${m.target.nodeType === 1 ? (m.target as Element).className : m.target.nodeName}`)
+
+describe("review fixes: what a draw touches", () => {
+  it("tool_start and tool_finish on the running step change only its card", async () => {
+    fakeStudio(streamingTurn())
+    const el = await mount({ ...BASE, "data-position": "right-dock" })
+    const tail = FakeEventSource.last("run=s_01-t1")!
+    const card = $(el, '.weft-step[data-weft-step="1"]')!
+    const w = watch(el, (n) => card.contains(n))
+    tail.emit("record", { run_id: "s_01-t1", kind: "event", pos: 4, time: T0, event: { type: "tool_start", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "lookup_order", args: { id: "4411" } } })
+    await settle(150)
+    tail.emit("record", { run_id: "s_01-t1", kind: "event", pos: 5, time: T0, event: { type: "tool_finish", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "lookup_order", content: "shipped", is_error: false } })
+    await settle(150)
+    w.stop()
+    expect(card.querySelector(".weft-call")?.textContent).toContain("shipped")
+    expect(w.yes.length).toBeGreaterThan(0)
+    expect(said(w.no)).toEqual([])
+  })
+
+  it("another turn's status flip changes only that turn's row", async () => {
+    const routes = baseRoutes()
+    const t2 = runRow({ id: "s_01-t2", turn: 2 })
+    routes["runs?public_id=pub_orders&limit=50"] = { total: 2, runs: [t2, runRow({})], next_before: null }
+    routes["runs/s_01-t2"] = { ...t2, children: [] }
+    routes["runs/s_01-t2/events?after=0&limit=500"] = page(runEvents("s_01-t2"))
+    routes["runs/s_01-t2/spans"] = { spans: [] }
+    routes["runs/s_01-t2/transcript"] = transcript([user("and the refund?")], [{ role: "assistant", content: [{ type: "text", text: "Issued." }] }])
+    fakeStudio(routes)
+    const el = await mount({ ...BASE, "data-position": "right-dock" })
+    const item = $(el, '[role=listitem][data-key="s_01-t1"]')!
+    // That turn is also an option of the narrow dropdown: its option,
+    // and the dropdown or the list itself for a move.
+    const opt = $(el, '.weft-turn-pick option[data-key="s_01-t1"]')
+    const w = watch(el, (n) => item.contains(n) || !!opt?.contains(n) || n === $(el, ".weft-rows") || n === $(el, ".weft-turn-pick"))
+    FakeEventSource.last("public_id=")!.emit("run", { run: runRow({ status: "failed", err: "boom" }) })
+    await settle()
+    w.stop()
+    expect(item.textContent).toContain("boom")
+    expect(w.yes.length).toBeGreaterThan(0)
+    expect(said(w.no)).toEqual([])
+  })
+
+  it("redraws add no listener to a node on screen: the handlers ride the kept nodes", async () => {
+    fakeStudio(baseRoutes())
+    const el = await mount(BASE)
+    const add = EventTarget.prototype.addEventListener
+    const live: string[] = []
+    vi.spyOn(EventTarget.prototype, "addEventListener").mockImplementation(function (this: EventTarget, ...a: Parameters<EventTarget["addEventListener"]>) {
+      if ((this as Node).isConnected) live.push(`${(this as Element).className} ${a[0]}`)
+      return add.apply(this, a)
+    })
+    for (let i = 2; i < 7; i++) {
+      FakeEventSource.last("public_id=")!.emit("run", { run: runRow({ steps: i }) })
+      await settle()
+    }
+    expect(all(el, ".weft-turn")[0].textContent).toContain("6 steps")
+    expect(live).toEqual([])
+  })
+})
+
+describe("review fixes: the patch's edges", () => {
+  it("attributes the build no longer has are removed: boolean, data-*, style", () => {
+    const box = h("div")
+    const b = h("button", { disabled: "", "data-x": "1", style: "color: red", "aria-expanded": "true" }, "go")
+    patch(box, [b])
+    const live = box.firstElementChild as HTMLButtonElement
+    patch(box, [h("button", { "aria-expanded": "false" }, "go")])
+    expect(box.firstElementChild).toBe(live)
+    expect(live.disabled).toBe(false)
+    expect(live.hasAttribute("data-x")).toBe(false)
+    expect(live.hasAttribute("style")).toBe(false)
+    expect(live.getAttribute("aria-expanded")).toBe("false")
+  })
+
+  it("a <select> keeps its node and its value across an option reorder; the options move, not rewritten", () => {
+    const box = h("div")
+    const sel = (order: string[], v: string) => {
+      const s = h("select", { "aria-label": "x" }, order.map((k) => h("option", { value: k, "data-key": k }, k))) as HTMLSelectElement
+      s.value = v
+      return s
+    }
+    patch(box, [sel(["a", "b", "c"], "b")])
+    const live = box.firstElementChild as HTMLSelectElement
+    const opts = Array.from(live.options)
+    const seen: MutationRecord[] = []
+    const mo = new MutationObserver((m) => seen.push(...m))
+    mo.observe(box, { subtree: true, characterData: true, attributes: true, childList: true })
+    patch(box, [sel(["c", "a", "b"], "b")])
+    seen.push(...mo.takeRecords())
+    mo.disconnect()
+    expect(box.firstElementChild).toBe(live)
+    expect(live.value).toBe("b")
+    expect(Array.from(live.options)).toEqual([opts[2], opts[0], opts[1]])
+    expect(seen.filter((m) => m.type !== "childList")).toEqual([])
+  })
+
+  it("a key repeated under one parent pairs in order: both nodes kept", () => {
+    const box = h("div")
+    patch(box, [h("p", { "data-key": "k" }, "one"), h("p", { "data-key": "k" }, "two")])
+    const [a, b] = Array.from(box.children)
+    patch(box, [h("p", { "data-key": "k" }, "one"), h("p", { "data-key": "k" }, "two!")])
+    expect(Array.from(box.children)).toEqual([a, b])
+    expect(b.textContent).toBe("two!")
+  })
+
+  it("two unkeyed-alike lines, keyed by call: focus in the second survives the first's removal", () => {
+    const box = h("div")
+    document.body.appendChild(box)
+    // The build carries what was typed (the panel's scratch), as the panel does.
+    const typed: Record<string, string> = {}
+    const line = (id: string) => {
+      const i = h("input", { class: "weft-resolve" }) as HTMLInputElement
+      i.value = typed[id] ?? ""
+      return h("div", { class: "weft-call", "data-key": id }, [i])
+    }
+    patch(box, [line("c1"), line("c2")])
+    const second = box.querySelectorAll("input")[1]
+    second.focus()
+    second.value = typed.c2 = "abc"
+    second.setSelectionRange(1, 1)
+    patch(box, [line("c2")])
+    expect(box.querySelector("input")).toBe(second)
+    expect(document.activeElement).toBe(second)
+    expect(second.selectionStart).toBe(1)
+    box.remove()
+  })
+})
+
+describe("review fixes: the live region and the step-end status", () => {
+  it("the streaming text is aria-busy; the step's end is said once on a status line that stays", async () => {
+    fakeStudio(streamingTurn())
+    const el = await mount({ ...BASE, "data-position": "right-dock" })
+    const tail = FakeEventSource.last("run=s_01-t1")!
+    tail.emit("record", { run_id: "s_01-t1", kind: "delta", pos: 0, time: T0, event: { type: "text_delta", run_id: "s_01-t1", text: "Found it here" } })
+    await settle()
+    const stream = $(el, ".weft-stream")!
+    expect(stream.getAttribute("aria-live")).toBe("polite")
+    expect(stream.getAttribute("aria-busy")).toBe("true")
+    const status = $(el, ".weft-sr[role=status]")!
+    expect(status.textContent).toBe("")
+    const writes = watch(el, (n) => status.contains(n))
+    tail.emit("record", { run_id: "s_01-t1", kind: "event", pos: 4, time: T0, event: { type: "step_finish", run_id: "s_01-t1", index: 1, reason: "tool_calls", usage: { input_tokens: 1, output_tokens: 1 } } })
+    tail.emit("record", { run_id: "s_01-t1", kind: "event", pos: 5, time: T0, event: { type: "step_start", run_id: "s_01-t1", index: 2 } })
+    await settle(150)
+    expect(status.textContent).toBe("step 1 finished · 3 words")
+    // Busy moved with the stream: step 1's text is no longer busy.
+    expect($(el, '.weft-step[data-weft-step="1"] [aria-busy]')).toBeNull()
+    expect($(el, '.weft-step[data-weft-step="2"] .weft-stream')?.getAttribute("aria-busy")).toBe("true")
+    for (let i = 0; i < 3; i++) {
+      tail.emit("record", { run_id: "s_01-t1", kind: "delta", pos: 6 + i, time: T0, event: { type: "text_delta", run_id: "s_01-t1", text: ` w${i}` } })
+      await settle(120)
+    }
+    writes.stop()
+    expect(writes.yes).toHaveLength(1) // written once, then left alone
+    expect($(el, ".weft-sr[role=status]")).toBe(status)
+  })
+})
+
+describe("review fixes: the narrow dropdown and the trap's stops", () => {
+  afterEach(() => viewport(1024, 768))
+
+  it("a re-sort moves the turn dropdown's options, never rewrites them", async () => {
+    viewport(400, 768)
+    const routes = baseRoutes()
+    const t2 = runRow({ id: "s_01-t2", turn: 2 })
+    routes["runs?public_id=pub_orders&limit=50"] = { total: 2, runs: [t2, runRow({})], next_before: null }
+    routes["runs/s_01-t2"] = { ...t2, children: [] }
+    routes["runs/s_01-t2/events?after=0&limit=500"] = page(runEvents("s_01-t2"))
+    routes["runs/s_01-t2/spans"] = { spans: [] }
+    routes["runs/s_01-t2/transcript"] = transcript([user("q")], [])
+    fakeStudio(routes)
+    const el = await mount(BASE)
+    const pick = $(el, ".weft-turn-pick") as HTMLSelectElement
+    const before = Array.from(pick.options)
+    const ids = before.map((o) => o.value)
+    const w = watch(el, () => true)
+    const s = inside(el).model!.state
+    inside(el).render({ ...s, turns: [...(s.turns as unknown[])].reverse() })
+    w.stop()
+    expect($(el, ".weft-turn-pick")).toBe(pick)
+    expect(Array.from(pick.options).map((o) => o.value)).toEqual([...ids].reverse())
+    expect(Array.from(pick.options)).toEqual([...before].reverse())
+    expect(w.yes.filter((m) => m.type === "characterData" && pick.contains(m.target))).toEqual([])
+  })
+
+  it("Tab wraps between the first and last stops Tab can reach: not the narrow float's hidden list, not a closed details' insides", async () => {
+    fakeStudio(baseRoutes())
+    const el = await mount(BASE)
+    const dock = $(el, ".weft-dock") as HTMLElement
+    expect(dock.classList.contains("weft-float") && dock.classList.contains("weft-narrow")).toBe(true)
+    // A closed <details> at the end: its summary is reachable, its button is not.
+    const d = document.createElement("details")
+    d.innerHTML = "<summary>more</summary><button type=button>inside</button>"
+    dock.appendChild(d)
+    const summary = d.querySelector("summary")!
+    const visible = (all(el, ".weft-dock button, .weft-dock a[href], .weft-dock select, .weft-dock input, .weft-dock textarea, .weft-dock summary, .weft-dock [tabindex]") as HTMLElement[]).filter(
+      (n) => n.tabIndex >= 0 && !(n as HTMLButtonElement).disabled && !n.closest(".weft-rows") && !(n.closest("details") && n.closest("details") !== d.parentElement && n !== summary && !(n.closest("details") as HTMLDetailsElement).open)
+    )
+    const first = visible[0]
+    expect(first.closest(".weft-rows")).toBeNull()
+    expect(visible.at(-1)).toBe(summary)
+    summary.focus()
+    expect(key(summary, { key: "Tab" }).defaultPrevented).toBe(true)
+    expect(el.shadowRoot!.activeElement).toBe(first)
+    expect(key(first, { key: "Tab", shiftKey: true }).defaultPrevented).toBe(true)
+    expect(el.shadowRoot!.activeElement).toBe(summary)
+    // The hidden list's tab stop is not a stop: Shift+Tab from it is the browser's.
+    const row = $(el, ".weft-rows .weft-turn") as HTMLElement
+    row.focus()
+    expect(key(row, { key: "Tab", shiftKey: true }).defaultPrevented).toBe(false)
+  })
+})

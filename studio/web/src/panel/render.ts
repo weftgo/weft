@@ -53,18 +53,19 @@ const cls = (n: Node) => (n.nodeType === 1 ? (n as Element).className : "")
 /** patch makes parent's children next, reusing what matches. */
 export function patch(parent: Node, next: Node[]): void {
   const old = Array.from(parent.childNodes)
-  const keyed = new Map<string, Node>()
+  // A key repeated under one parent pairs in order (never "last
+  // wins", which would rebuild both on every draw).
+  const keyed = new Map<string, Node[]>()
   const free: Node[] = []
   for (const o of old) {
     const k = keyOf(o)
     if (k === null) free.push(o)
-    else keyed.set(k, o)
+    else keyed.set(k, [...(keyed.get(k) ?? []), o])
   }
   const plan = next.map((n): [Node, Node | undefined] => {
     const k = keyOf(n)
     if (k !== null) {
-      const o = keyed.get(k)
-      keyed.delete(k)
+      const o = keyed.get(k)?.shift()
       return [n, o && like(o, n) ? o : undefined]
     }
     let i = free.findIndex((o) => like(o, n) && cls(o) === cls(n))

@@ -1562,13 +1562,13 @@ function mn(e, t) {
 	let n = Array.from(e.childNodes), r = /* @__PURE__ */ new Map(), i = [];
 	for (let e of n) {
 		let t = dn(e);
-		t === null ? i.push(e) : r.set(t, e);
+		t === null ? i.push(e) : r.set(t, [...r.get(t) ?? [], e]);
 	}
 	let a = t.map((e) => {
 		let t = dn(e);
 		if (t !== null) {
-			let n = r.get(t);
-			return r.delete(t), [e, n && fn(n, e) ? n : void 0];
+			let n = r.get(t)?.shift();
+			return [e, n && fn(n, e) ? n : void 0];
 		}
 		let n = i.findIndex((t) => fn(t, e) && pn(t) === pn(e));
 		return n < 0 && (n = i.findIndex((t) => fn(t, e))), [e, n < 0 ? void 0 : i.splice(n, 1)[0]];
@@ -1677,6 +1677,7 @@ var Sn = `
   font: 12px/1.45 var(--weft-font);
 }
 .weft-root * { margin: 0; padding: 0; font: inherit; color: inherit; }
+.weft-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .weft-dock {
   position: fixed; z-index: var(--weft-z, 2147483000);
@@ -3408,6 +3409,8 @@ var Rr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	}
 	placed = !1;
 	dragging = !1;
+	streamKey = "";
+	said = "";
 	rove = "";
 	gAt = 0;
 	tree = nr();
@@ -3907,8 +3910,12 @@ var Rr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	trap(e) {
 		let t = this.body.querySelector(".weft-dock.weft-float");
 		if (!t || !this.shown) return;
-		let n = Array.from(t.querySelectorAll("button, a[href], select, input, textarea, summary, [tabindex]")).filter((e) => e.tabIndex >= 0 && !e.disabled), r = n[0], i = n.at(-1), a = this.shadow.activeElement, o = e.shiftKey ? a === r || a === t ? i : null : a === i ? r : null;
-		o && (e.preventDefault(), o.focus());
+		let n = t.getClientRects().length > 0, r = t.classList.contains("weft-narrow"), i = Array.from(t.querySelectorAll("button, a[href], select, input, textarea, summary, [tabindex]")).filter((e) => {
+			if (e.tabIndex < 0 || e.disabled) return !1;
+			for (let t = e.parentElement?.closest("details"); t; t = t.parentElement?.closest("details")) if (!t.open && (e.tagName !== "SUMMARY" || e.parentElement !== t)) return !1;
+			return n ? e.getClientRects().length > 0 : !(r && e.closest(".weft-rows"));
+		}), a = i[0], o = i.at(-1), s = this.shadow.activeElement, c = e.shiftKey ? s === a || s === t ? o : null : s === o ? a : null;
+		c && (e.preventDefault(), c.focus());
 	}
 	turnKey(e) {
 		let t = this.last, n = t.turns.filter((e) => this.match(e)).map((e) => e.id), r = n.indexOf(t.selected), i = n.at(Math.min(Math.max(r + e, 0), n.length - 1));
@@ -4108,7 +4115,7 @@ var Rr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			let t = this.turnPick(e);
 			t && a.appendChild(t);
 		}
-		if (a.appendChild(this.turnList(e)), a.appendChild(this.main(e)), n.appendChild(a), n.appendChild(this.footer(e)), this.keys && n.appendChild(this.shortcuts()), !t.sheet) {
+		if (a.appendChild(this.turnList(e)), a.appendChild(this.main(e)), n.appendChild(a), n.appendChild(this.footer(e)), this.keys && n.appendChild(this.shortcuts()), n.appendChild(this.announcer(e)), !t.sheet) {
 			let e = i.mode === "float", t = B("div", e ? "weft-grip" : `weft-edge weft-edge-${i.side}`, void 0, {
 				title: "resize",
 				"aria-hidden": "true"
@@ -4162,6 +4169,17 @@ var Rr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		this.endDrag = l, this.dropDrag = c, n.addEventListener("pointermove", o);
 		for (let e of s) n.addEventListener(e, l);
 	}
+	announcer(e) {
+		let t = e.turn, n = (t ? this.rowOf(t.id)?.status ?? t.doc?.status ?? "running" : "") === "running" ? t?.folded.steps.at(-1) : void 0, r = t && n ? `${t.id}\u0000${n.index}` : "";
+		if (this.streamKey && this.streamKey !== r) {
+			let [e, n] = this.streamKey.split("\0"), r = t?.id === e ? t.folded.steps.find((e) => String(e.index) === n) : void 0;
+			r && (this.said = `step ${n} finished · ${(r.text || "").split(/\s+/).filter(Boolean).length} words`);
+		}
+		return this.streamKey = r, B("div", "weft-sr", this.said, {
+			role: "status",
+			"data-key": "said"
+		});
+	}
 	turnPick(e) {
 		let t = [...e.turns.filter((e) => this.match(e)), ...[...e.experiments.values()].flat()];
 		if (!t.length) return null;
@@ -4170,7 +4188,10 @@ var Rr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			"data-weft-k": "turnpick"
 		});
 		for (let r of t) {
-			let t = B("option", void 0, `${J(r)} · ${r.id} · ${r.steps} steps`, { value: r.id });
+			let t = B("option", void 0, `${J(r)} · ${r.id} · ${r.steps} steps`, {
+				value: r.id,
+				"data-key": r.id
+			});
 			t.selected = r.id === e.selected, n.appendChild(t);
 		}
 		return V(n, "change", (e, t) => this.go(this.model?.select(t.value, !0))), n;
@@ -4476,7 +4497,7 @@ var Rr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			}
 			o.appendChild(e);
 		}
-		let u = B("div", "weft-fields"), d = B("select", "weft-input"), f = e.turn?.doc?.model.name ?? "", p = B("option", void 0, `model: ${f || "—"}`);
+		let u = B("div", "weft-fields"), d = B("select", "weft-input", void 0, { "aria-label": "model" }), f = e.turn?.doc?.model.name ?? "", p = B("option", void 0, `model: ${f || "—"}`);
 		p.value = "", d.appendChild(p);
 		for (let e of n?.models ?? []) {
 			if (e === f) continue;
@@ -4484,7 +4505,7 @@ var Rr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			t.value = e, d.appendChild(t);
 		}
 		d.value = t.model, V(d, "change", (e, t) => this.model?.setDraft({ model: t.value })), u.appendChild(d);
-		let m = B("select", "weft-input"), h = B("option", void 0, "thinking: default");
+		let m = B("select", "weft-input", void 0, { "aria-label": "thinking" }), h = B("option", void 0, "thinking: default");
 		h.value = "", m.appendChild(h);
 		for (let e of [
 			"off",
@@ -4499,7 +4520,7 @@ var Rr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			let e = B("label", "weft-field", [B("span", void 0, "Input (replaces the user message)")]), n = this.field(B("textarea", "weft-input"), "input");
 			n.rows = 2, n.value = t.input, V(n, "input", (e, t) => this.model?.setDraft({ input: t.value }, !0)), e.appendChild(n), o.appendChild(e);
 		}
-		let g = B("div", "weft-fields"), _ = B("select", "weft-input");
+		let g = B("div", "weft-fields"), _ = B("select", "weft-input", void 0, { "aria-label": "side effects" });
 		_.title = "How side-effect tools behave in the re-run. ReplaySafe tools always run; the others substitute, park, or — under allow, if the app opted them in — run for real.";
 		let v = B("option", void 0, "side effects: substitute", { title: "a side-effect call the source recorded is answered from the record; any other call parks for you" });
 		v.value = "", _.appendChild(v);
@@ -4507,11 +4528,11 @@ var Rr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		y.value = "park", _.appendChild(y);
 		let b = B("option", void 0, "allow — runs the tools this app opted in (AllowSideEffects) for real", { title: "refused unless every tool left on is opted in or ReplaySafe" });
 		b.value = "allow", _.appendChild(b), _.value = t.sideEffects === "substitute" ? "" : t.sideEffects, V(_, "change", (e, t) => this.model?.setDraft({ sideEffects: t.value })), g.appendChild(_);
-		let x = B("select", "weft-input"), S = B("option", void 0, "engine: live");
+		let x = B("select", "weft-input", void 0, { "aria-label": "engine" }), S = B("option", void 0, "engine: live");
 		S.value = "live", x.appendChild(S);
 		let ee = B("option", void 0, "scripted (zero tokens)");
 		ee.value = "scripted", x.appendChild(ee), x.value = t.engine, V(x, "change", (e, t) => this.model?.setDraft({ engine: t.value })), g.appendChild(x);
-		let C = B("select", "weft-input"), w = B("option", void 0, "thread: ephemeral");
+		let C = B("select", "weft-input", void 0, { "aria-label": "thread" }), w = B("option", void 0, "thread: ephemeral");
 		w.value = "ephemeral", C.appendChild(w);
 		let T = B("option", void 0, "fork (new session)");
 		if (T.value = "fork", C.appendChild(T), C.value = t.thread, C.title = "fork continues the conversation in a new session (needs an input)", V(C, "change", (e, t) => this.model?.setDraft({ thread: t.value })), g.appendChild(C), o.appendChild(g), br(e, "breakpoints") && k(this.cfg.token) === "" && n?.tools.length) {
@@ -4534,7 +4555,7 @@ var Rr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 				if (r >= t.step) break;
 				for (let t of i.toolCalls) {
 					if (!t.result) continue;
-					let i = B("label", "weft-edit");
+					let i = B("label", "weft-edit", void 0, { "data-key": `${r}:${t.callId}` });
 					i.appendChild(B("span", void 0, `step ${r} · ${t.name} →`));
 					let a = this.field(B("input", "weft-input"), `edit:${r}:${t.callId}`);
 					a.placeholder = String(t.result.content).slice(0, 60);
@@ -4554,7 +4575,7 @@ var Rr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 					}), i.appendChild(a), n.appendChild(i);
 				}
 				if (i.text && !i.toolCalls.length) {
-					let t = B("label", "weft-edit");
+					let t = B("label", "weft-edit", void 0, { "data-key": `${r}` });
 					t.appendChild(B("span", void 0, `step ${r} · reply`));
 					let i = this.field(B("textarea", "weft-input"), `edit:${r}`);
 					i.rows = 2;
@@ -4635,7 +4656,7 @@ var Rr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			label: $(e.id)
 		}))];
 		if (p.length > 1) {
-			let e = B("select", "weft-input");
+			let e = B("select", "weft-input", void 0, { "aria-label": "compare with" });
 			for (let t of p) {
 				let n = B("option", void 0, `compare vs ${t.label || "source"}`);
 				n.value = t.id, e.appendChild(n);
@@ -4680,7 +4701,7 @@ var Rr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			resolve: "resolve"
 		};
 		for (let n of e) {
-			let e = B("div", "weft-call"), i = B("div", "weft-call-h", [B("span", "weft-name", n.name), B("span", "weft-args", n.args === void 0 ? "(…)" : _n(n.args))]);
+			let e = B("div", "weft-call", void 0, { "data-key": n.id }), i = B("div", "weft-call-h", [B("span", "weft-name", n.name), B("span", "weft-args", n.args === void 0 ? "(…)" : _n(n.args))]);
 			t[n.id] && i.appendChild(B("span", "weft-badge weft-info", `decided: ${a[t[n.id]] ?? t[n.id]}`)), e.appendChild(i);
 			let o = B("div", "weft-res"), s = `resolve:${n.id}`, c = this.field(B("input", "weft-input weft-resolve"), s);
 			c.placeholder = "the result to resolve with", c.value = this.scratch.get(s) ?? "", V(c, "input", (e, t) => this.scratch.set(s, t.value));
@@ -4766,7 +4787,7 @@ var Rr = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		n.appendChild(B("div", "weft-step-h", [B("span", void 0, "awaiting decision (read-only)")]));
 		let r = B("div", "weft-step-b");
 		for (let n of e) {
-			let e = B("div", "weft-call");
+			let e = B("div", "weft-call", void 0, { "data-key": n.id });
 			e.appendChild(B("div", "weft-call-h", [
 				B("span", "weft-name", n.name),
 				B("span", "weft-args", n.args === void 0 ? "(…)" : _n(n.args)),
@@ -4913,7 +4934,10 @@ function Kr(e, t, n, r, i, a, o = !1) {
 		}
 		t.appendChild(B("summary", void 0, "reasoning")), t.appendChild(B("div", void 0, e.reasoning)), g.appendChild(t);
 	}
-	o ? g.appendChild(B("div", "weft-stream", e.text, { "aria-live": "polite" })) : e.text && g.appendChild(B("div", void 0, e.text)), e.steer && g.appendChild(B("div", "weft-note", `steered: ${e.steer.text}`));
+	o ? g.appendChild(B("div", "weft-stream", e.text, {
+		"aria-live": "polite",
+		"aria-busy": "true"
+	})) : e.text && g.appendChild(B("div", void 0, e.text)), e.steer && g.appendChild(B("div", "weft-note", `steered: ${e.steer.text}`));
 	for (let r of e.toolCalls) g.appendChild(Qr(r, e.index, t, n, i, a));
 	return s.appendChild(g), s;
 }
@@ -4991,7 +5015,7 @@ function Zr(e, t, n, r) {
 	return i.appendChild(B("div", "weft-res", `tools: ${l.length ? l.join(", ") : "none"}`)), i.appendChild(B("div", "weft-res", `params: ${qe(o)}`)), i;
 }
 function Qr(e, t, n, r, i, a) {
-	let o = B("div", "weft-call"), s = zt(e, n), c = a?.runId, l = B("div", "weft-call-h", [a?.endpoint && c ? B("a", "weft-name", e.name, {
+	let o = B("div", "weft-call", void 0, { "data-key": e.callId }), s = zt(e, n), c = a?.runId, l = B("div", "weft-call-h", [a?.endpoint && c ? B("a", "weft-name", e.name, {
 		href: q(a.endpoint, mr(c, {
 			step: t,
 			call: e.callId,

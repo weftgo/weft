@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* The devtools panel styles itself in its shadow root (src/panel/styles.ts):
+   its sources are not the app's utility candidates. */
+@source not "./panel";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 

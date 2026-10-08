@@ -49,6 +49,17 @@ async function rawOpen(el: WeftDevtools) {
   q.dispatchEvent(new Event("input", { bubbles: true }))
   await settle()
 }
+/** D3 fixes: the experiment drawer (its selects and fields), and the
+ * Raw tab's tree with the ? shortcuts overlay over it. */
+async function drawer(el: WeftDevtools) {
+  ;(Array.from(el.shadowRoot!.querySelectorAll("button")).find((b) => b.textContent === "✎ Experiment") as HTMLElement).click()
+  await settle()
+}
+async function rawAndKeys(el: WeftDevtools) {
+  await rawOpen(el)
+  el.shadowRoot!.querySelector(".weft-dock")!.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true, composed: true, cancelable: true }))
+  await settle()
+}
 async function timeline(el: WeftDevtools) {
   ;(el.shadowRoot!.querySelector("#weft-tab-timeline") as HTMLElement).click()
   await settle()
@@ -61,6 +72,8 @@ const MODES: { name: string; width: number; attrs: Record<string, string>; sel: 
   { name: "the pill", width: 1024, attrs: {}, sel: ".weft-fab" },
   { name: "the Raw tab, its tree open and filtered", width: 1024, attrs: { "data-open": "true", "data-position": "bottom-dock" }, sel: ".weft-tn.weft-hit", act: rawOpen },
   { name: "the Timeline tab", width: 1024, attrs: { "data-open": "true" }, sel: ".weft-timeline", act: timeline },
+  { name: "the experiment drawer open", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-drawer select[aria-label=thread]", act: drawer },
+  { name: "the Raw tab's tree with the shortcuts overlay", width: 1024, attrs: { "data-open": "true", "data-position": "bottom-dock" }, sel: ".weft-keys", act: rawAndKeys },
 ]
 
 /** The rules jsdom leaves incomplete: they need layout (the browser

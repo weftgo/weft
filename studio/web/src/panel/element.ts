@@ -414,6 +414,10 @@ export class WeftDevtools extends HTMLElement {
   private placed = false
   /** A drag or a resize is in progress: draws wait for its end. */
   private dragging = false
+  /** The streaming step last drawn (run id + ordinal) and the line
+   * said when it ended (D3). */
+  private streamKey = ""
+  private said = ""
   /** The turn row that holds the list's tab stop (D3), "" for none. */
   private rove = ""
   /** When g was pressed (the g s chord), 0 for none. */
@@ -1365,9 +1369,20 @@ export class WeftDevtools extends HTMLElement {
   private trap(e: KeyboardEvent) {
     const dock = this.body.querySelector<HTMLElement>(".weft-dock.weft-float")
     if (!dock || !this.shown) return
+    // Only what Tab can reach: not disabled, not inside a closed
+    // <details> (its summary excepted), not CSS-hidden — measured where
+    // there is layout, else the panel's own hiding rule (the narrow
+    // float's list gives way to its dropdown).
+    const laidOut = dock.getClientRects().length > 0
+    const narrow = dock.classList.contains("weft-narrow")
     const stops = Array.from(
       dock.querySelectorAll<HTMLElement>("button, a[href], select, input, textarea, summary, [tabindex]")
-    ).filter((n) => n.tabIndex >= 0 && !(n as HTMLButtonElement).disabled)
+    ).filter((n) => {
+      if (n.tabIndex < 0 || (n as HTMLButtonElement).disabled) return false
+      for (let d = n.parentElement?.closest("details"); d; d = d.parentElement?.closest("details"))
+        if (!d.open && !(n.tagName === "SUMMARY" && n.parentElement === d)) return false
+      return laidOut ? n.getClientRects().length > 0 : !(narrow && n.closest(".weft-rows"))
+    })
     const first = stops[0]
     const last = stops.at(-1)
     const now = this.shadow.activeElement
@@ -1821,6 +1836,7 @@ export class WeftDevtools extends HTMLElement {
     // The overlay lives inside the dock: it is its containing block.
     // Outside it it would be laid over the host page.
     if (this.keys) dock.appendChild(this.shortcuts())
+    dock.appendChild(this.announcer(s))
     if (!g.sheet) {
       const float = l.mode === "float"
       const grip = el("div", float ? "weft-grip" : `weft-edge weft-edge-${l.side}`, undefined, { title: "resize", "aria-hidden": "true" })
@@ -1890,6 +1906,24 @@ export class WeftDevtools extends HTMLElement {
     for (const t of ends) h.addEventListener(t, up)
   }
 
+  /** announcer is the step end, said once (D3): while the open turn's
+   * running step streams its text is aria-busy; when that step ends
+   * this role="status" line (always in the dock, visually hidden) is
+   * written once — "step N finished · n words". */
+  private announcer(s: PanelState): HTMLElement {
+    const t = s.turn
+    const status = t ? (this.rowOf(t.id)?.status ?? t.doc?.status ?? "running") : ""
+    const cur = status === "running" ? t?.folded.steps.at(-1) : undefined
+    const key = t && cur ? `${t.id}\u0000${cur.index}` : ""
+    if (this.streamKey && this.streamKey !== key) {
+      const [id, n] = this.streamKey.split("\u0000")
+      const st = t?.id === id ? t.folded.steps.find((x) => String(x.index) === n) : undefined
+      if (st) this.said = `step ${n} finished · ${(st.text || "").split(/\s+/).filter(Boolean).length} words`
+    }
+    this.streamKey = key
+    return el("div", "weft-sr", this.said, { role: "status", "data-key": "said" })
+  }
+
   /** turnPick is the turn column as a dropdown (a panel under
    * NARROW_W wide): every listed turn, the selected one chosen. */
   private turnPick(s: PanelState): HTMLElement | null {
@@ -1897,7 +1931,7 @@ export class WeftDevtools extends HTMLElement {
     if (!rows.length) return null
     const sel = el("select", "weft-turn-pick", undefined, { "aria-label": "turn", "data-weft-k": "turnpick" }) as HTMLSelectElement
     for (const r of rows) {
-      const o = el("option", undefined, `${statusChip(r)} · ${r.id} · ${r.steps} steps`, { value: r.id }) as HTMLOptionElement
+      const o = el("option", undefined, `${statusChip(r)} · ${r.id} · ${r.steps} steps`, { value: r.id, "data-key": r.id }) as HTMLOptionElement
       o.selected = r.id === s.selected
       sel.appendChild(o)
     }
@@ -2463,7 +2497,7 @@ export class WeftDevtools extends HTMLElement {
 
     // Model, thinking, input — the row of small selects.
     const opts = el("div", "weft-fields")
-    const modelSel = el("select", "weft-input") as HTMLSelectElement
+    const modelSel = el("select", "weft-input", undefined, { "aria-label": "model" }) as HTMLSelectElement
     const own = s.turn?.doc?.model.name ?? ""
     const ownOpt = el("option", undefined, `model: ${own || "—"}`) as unknown as HTMLOptionElement
     ownOpt.value = ""
@@ -2477,7 +2511,7 @@ export class WeftDevtools extends HTMLElement {
     modelSel.value = d.model
     on(modelSel, "change", (_, n) => this.model?.setDraft({ model: (n as HTMLSelectElement).value }))
     opts.appendChild(modelSel)
-    const thinkSel = el("select", "weft-input") as HTMLSelectElement
+    const thinkSel = el("select", "weft-input", undefined, { "aria-label": "thinking" }) as HTMLSelectElement
     const defOpt = el("option", undefined, "thinking: default") as unknown as HTMLOptionElement
     defOpt.value = ""
     thinkSel.appendChild(defOpt)
@@ -2508,7 +2542,7 @@ export class WeftDevtools extends HTMLElement {
     // opted in with AllowSideEffects run for real — only here; a
     // ReplaySafe tool runs in every mode).
     const seRow = el("div", "weft-fields")
-    const seSel = el("select", "weft-input") as HTMLSelectElement
+    const seSel = el("select", "weft-input", undefined, { "aria-label": "side effects" }) as HTMLSelectElement
     seSel.title =
       "How side-effect tools behave in the re-run. ReplaySafe tools always run; the others substitute, park, or — under allow, if the app opted them in — run for real."
     const seLabel = el("option", undefined, "side effects: substitute", {
@@ -2532,7 +2566,7 @@ export class WeftDevtools extends HTMLElement {
     // The engine (§5.5): live, or scripted — the source run's recorded
     // turns at zero tokens, refused with an instructions/model
     // override (the prompt trap).
-    const engSel = el("select", "weft-input") as HTMLSelectElement
+    const engSel = el("select", "weft-input", undefined, { "aria-label": "engine" }) as HTMLSelectElement
     const engLive = el("option", undefined, "engine: live") as unknown as HTMLOptionElement
     engLive.value = "live"
     engSel.appendChild(engLive)
@@ -2546,7 +2580,7 @@ export class WeftDevtools extends HTMLElement {
     // ephemeral (an experiment, never a turn) or fork (a new session
     // with lineage, the input its next turn). Fork needs an input —
     // the runtime refuses the command otherwise.
-    const thrSel = el("select", "weft-input") as HTMLSelectElement
+    const thrSel = el("select", "weft-input", undefined, { "aria-label": "thread" }) as HTMLSelectElement
     const thrEphemeral = el("option", undefined, "thread: ephemeral") as unknown as HTMLOptionElement
     thrEphemeral.value = "ephemeral"
     thrSel.appendChild(thrEphemeral)
@@ -2603,7 +2637,7 @@ export class WeftDevtools extends HTMLElement {
         if (n >= d.step) break
         for (const call of step.toolCalls) {
           if (!call.result) continue
-          const lab = el("label", "weft-edit")
+          const lab = el("label", "weft-edit", undefined, { "data-key": `${n}:${call.callId}` })
           lab.appendChild(el("span", undefined, `step ${n} · ${call.name} →`))
           const inp = this.field(
             el("input", "weft-input") as HTMLInputElement,
@@ -2630,7 +2664,7 @@ export class WeftDevtools extends HTMLElement {
           editsBox.appendChild(lab)
         }
         if (step.text && !step.toolCalls.length) {
-          const lab = el("label", "weft-edit")
+          const lab = el("label", "weft-edit", undefined, { "data-key": `${n}` })
           lab.appendChild(el("span", undefined, `step ${n} · reply`))
           const reply = this.field(
             el("textarea", "weft-input") as HTMLTextAreaElement,
@@ -2767,7 +2801,7 @@ export class WeftDevtools extends HTMLElement {
         .map((x) => ({ id: x.id, label: shortId(x.id) })),
     ]
     if (siblings.length > 1) {
-      const cmp = el("select", "weft-input") as HTMLSelectElement
+      const cmp = el("select", "weft-input", undefined, { "aria-label": "compare with" }) as HTMLSelectElement
       for (const sb of siblings) {
         const o = el("option", undefined, `compare vs ${sb.label || "source"}`) as unknown as HTMLOptionElement
         o.value = sb.id
@@ -2872,7 +2906,7 @@ export class WeftDevtools extends HTMLElement {
     }
     const verbs: Record<string, string> = { approve: "continue", deny: "skip", resolve: "resolve" }
     for (const call of pending) {
-      const line = el("div", "weft-call")
+      const line = el("div", "weft-call", undefined, { "data-key": call.id })
       const head = el("div", "weft-call-h", [
         el("span", "weft-name", call.name),
         el("span", "weft-args", call.args === undefined ? "(…)" : fmtJSON(call.args)),
@@ -3042,7 +3076,7 @@ export class WeftDevtools extends HTMLElement {
     box.appendChild(el("div", "weft-step-h", [el("span", undefined, "awaiting decision (read-only)")]))
     const body = el("div", "weft-step-b")
     for (const call of pending) {
-      const line = el("div", "weft-call")
+      const line = el("div", "weft-call", undefined, { "data-key": call.id })
       line.appendChild(
         el("div", "weft-call-h", [
           el("span", "weft-name", call.name),
@@ -3320,7 +3354,9 @@ function renderStep(
     d.appendChild(el("div", undefined, step.reasoning))
     body.appendChild(d)
   }
-  if (streaming) body.appendChild(el("div", "weft-stream", step.text, { "aria-live": "polite" }))
+  // Busy while it grows: a reader waits rather than re-reading the
+  // text per draw; the step's end is said once by the dock's status.
+  if (streaming) body.appendChild(el("div", "weft-stream", step.text, { "aria-live": "polite", "aria-busy": "true" }))
   else if (step.text) body.appendChild(el("div", undefined, step.text))
   if (step.steer) body.appendChild(el("div", "weft-note", `steered: ${step.steer.text}`))
   for (const call of step.toolCalls) body.appendChild(renderCall(call, step.index, runStatus, t, open, ctx))
@@ -3491,7 +3527,7 @@ function renderCall(
   open?: OpenState,
   ctx?: FoldCtx
 ): HTMLElement {
-  const box = el("div", "weft-call")
+  const box = el("div", "weft-call", undefined, { "data-key": call.callId })
   const state = callState(call, runStatus)
   // The call's name is its place on the run page (G1): the trace view
   // with this call selected, named with its step — a call id repeats

@@ -833,4 +833,24 @@ describe("the keyed renderer keeps the field the user types in (D3)", () => {
     expect(el.shadowRoot?.activeElement).toBe(paste)
     expect([paste.value, paste.selectionStart]).toEqual(['{"refunded":false}', 3])
   })
+
+  it("two parked calls: focus in the second resolve field survives the first line's removal (keyed by call id)", async () => {
+    const routes = baseRoutes()
+    routes["POST playground/runs"] = { command_id: "cmd_1", state: "queued" }
+    routes["playground/commands/cmd_1"] = command("cmd_1", "finished", "pg_p1")
+    storeRun(routes, "pg_p1", "", [call("call_1"), call("call_2")])
+    const { el } = await openDrawer(routes)
+    await run(el)
+    const lines = all(el, ".weft-xres .weft-call[data-key]")
+    expect(lines.map((n) => n.getAttribute("data-key"))).toEqual(["call_1", "call_2"])
+    const second = lines[1].querySelector("input.weft-resolve") as HTMLInputElement
+    typeInto(second, "ok", 1)
+    // The first call leaves the pending set; the pane is drawn again.
+    const inner = el as unknown as { render: (s: unknown) => void; model: { state: { result: { folded: { pending: unknown[] } } } } }
+    inner.model.state.result.folded.pending.splice(0, 1)
+    inner.render(inner.model.state)
+    expect(all(el, ".weft-xres input.weft-resolve")).toEqual([second])
+    expect(el.shadowRoot?.activeElement).toBe(second)
+    expect([second.value, second.selectionStart]).toEqual(["ok", 1])
+  })
 })

@@ -9,7 +9,7 @@ import { isHoleRef } from "../lib/api"
 import { holeWords, mergeHoles, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
 import type { HoleMark } from "../lib/honesty"
 import { paramsLine, REQUEST_NOT_RECORDED_LABEL, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
-import { MAX_REQUEST_PAGES, REQUEST_PAGE } from "./client"
+import { fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, REQUEST_PAGE } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
 import { callState, runHoles, stepHoles, truncation } from "../lib/events"
 import {
@@ -31,13 +31,14 @@ import { installHeaderRung } from "./detect"
 import type { HeaderRung } from "./detect"
 import { installMarkerRung, markerOf } from "./markers"
 import type { Marker, MarkerRung } from "./markers"
-import { serializeScope } from "../lib/scope"
+import { parseScope, serializeScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
 import { el, fmtJSON, waterfall } from "./render"
 import { PANEL_CSS } from "./styles"
 import {
   DEV_POLL_MS,
   emptyPanelState,
+  listKey,
   MAX_EVENT_PAGES,
   PanelModel,
   strippedContent,
@@ -172,6 +173,91 @@ export interface KnownScope {
   source: ScopeSource
 }
 
+/** The host events (plan C4) and what each one carries. Each is a
+ * CustomEvent named `weft:<event>` dispatched from the element
+ * (bubbling, composed): the npm entry's on() hears it on document, a
+ * host may listen on the element itself. Only runs of the conversation
+ * followed are reported, and only transitions the panel sees: a
+ * scope's first read of its list is history (no event), except a run
+ * reading running there and the run the scope pins. */
+export interface DevtoolsEvents {
+  /** A run started (status "running") or changed status — "succeeded",
+   * "failed", "parked" (succeeded with calls awaiting approval),
+   * "interrupted" — once per transition. step: the run's last step
+   * ordinal the panel knows (G1's ordinal). */
+  run: { runId: string; status: string; publicId?: string; sessionId?: string; step?: number }
+  /** One call a run parked on, once per call. ackId is the id the
+   * approval names — the call id weft.Approve/Deny/Resolve and POST
+   * /api/runs/{runId}/approvals ({call_id}) take — so it equals
+   * callId. */
+  parked: { runId: string; callId: string; ackId: string; name: string }
+  /** A run failed: its error, once per run. */
+  error: { message: string; runId?: string }
+}
+
+/** A host event's name. */
+export type DevtoolsEvent = keyof DevtoolsEvents
+
+/** The events on() accepts. */
+export const DEVTOOLS_EVENTS: readonly DevtoolsEvent[] = ["run", "parked", "error"]
+
+/** The host API (plan C4): the element's own methods, as one object —
+ * window.weft.devtools under the script tag, the npm entry's exports
+ * over the same element. */
+export interface DevtoolsAPI {
+  /** Expands the dock. */
+  open: () => void
+  /** Collapses the dock to its button. */
+  close: () => void
+  /** Flips the dock. */
+  toggle: () => void
+  /** Whether the dock is expanded. */
+  readonly isOpen: boolean
+  /** Sets the explicit scope (rung 1); null hands it back to the ladder. */
+  scope: (s: Scope | string | null) => void
+  /** Selects a turn, and the step (its ordinal) ⤢ carries. */
+  select: (runId: string, step?: number) => void
+  /** Follows one host event; returns the unsubscribe. */
+  on: <TEvent extends DevtoolsEvent>(event: TEvent, cb: (detail: DevtoolsEvents[TEvent]) => void) => () => void
+  /** The Studio page of a run (and step), through lib/links.ts; no token. */
+  studioLink: (runId: string, step?: number) => string
+}
+
+/** Every API object a panel published: window.weft.devtools is
+ * replaced or removed only when it is one of these. */
+const API_OBJECTS = new WeakSet<object>()
+/** The window.weft namespace a panel created (removed with the last
+ * API, when nothing else was put in it). */
+let createdNS: Record<string, unknown> | null = null
+
+/** isPlainObject: an object literal's shape (Object.prototype or no
+ * prototype) — the only window.weft the panel adds a property to. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  if (!v || typeof v !== "object") return false
+  const proto = Object.getPrototypeOf(v) as unknown
+  return proto === Object.prototype || proto === null
+}
+
+/** How long a parked run whose calls are not readable yet waits
+ * before the next look (PARKED_TRIES looks at most). */
+export const PARKED_RECHECK_MS = 1_000
+const PARKED_TRIES = 3
+
+/** scopeValue reads a host-given Scope object: its string fields only
+ * (null when it has no publicId string). */
+function scopeValue(v: unknown): Scope | null {
+  if (!v || typeof v !== "object") return null
+  const o = v as Record<string, unknown>
+  if (typeof o.publicId !== "string") return null
+  const out: Scope = { publicId: o.publicId }
+  for (const k of ["session", "flow", "run"] as const) if (typeof o[k] === "string" && o[k]) out[k] = o[k]
+  return out
+}
+
+/** stepOrdinal is a host-given step: a non-negative integer, else none. */
+const stepOrdinal = (n: unknown): number | undefined =>
+  typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : undefined
+
 /** How the renderers remember which <details> the user opened. */
 interface OpenState {
   keys: Set<string>
@@ -188,6 +274,7 @@ export class WeftDevtools extends HTMLElement {
     "data-position",
     "data-open",
     "data-auto",
+    "data-global",
   ]
 
   /** Set by the entry module on the dock it mounts itself: only that
@@ -256,7 +343,7 @@ export class WeftDevtools extends HTMLElement {
   private scheduled = false
   /** Studio did not answer and the node is not ours to remove. */
   private dormant = false
-  private open: boolean
+  private shown: boolean
   /** data-open was adopted (on first connect); toggles own it after. */
   private opened = false
   /** The ? shortcuts overlay (Dv3). */
@@ -285,10 +372,40 @@ export class WeftDevtools extends HTMLElement {
   }
   private onRelease = () => this.release()
 
+  // ── The host API's state (plan C4) ──
+  /** The API's honest line (a session lookup refused, a run not in the
+   * conversation), drawn atop the turn list; "" for none. */
+  private note = ""
+  /** The newest start or rescope apply began: the API's select and
+   * session lookups run once it has settled. */
+  private settling: Promise<unknown> = Promise.resolve()
+  /** Bumped by each scope() / select(): an older lookup yields. */
+  private scopeSeq = 0
+  private selectSeq = 0
+  /** The model and conversation the event bookkeeping is about. */
+  private evModel: PanelModel | null = null
+  private evKey = ""
+  /** The next pass is the conversation's first read: its history. */
+  private evBaseline = true
+  /** The status each run was last reported (or recorded) with. */
+  private evStatus = new Map<string, string>()
+  /** Parked calls reported (run + call id), runs whose failure was
+   * reported, runs whose pending calls are being read. */
+  private evParked = new Set<string>()
+  private evErrored = new Set<string>()
+  private evParking = new Set<string>()
+  /** The API object (window.weft.devtools), made once. */
+  private apiObj: DevtoolsAPI | null = null
+  /** Why window.weft.devtools was not added ("" when it was, or off). */
+  private globalNote = ""
+  /** Set by the npm entry on the registered class: the package's
+   * exports are the API, so no panel adds the global. */
+  static noGlobal = false
+
   constructor() {
     super()
     this.cfg = readConfig(this)
-    this.open = this.cfg.open
+    this.shown = this.cfg.open
     this.shadow = this.attachShadow({ mode: "open" })
     this.body = el("div", "weft-root")
     attachStyles(this.shadow)
@@ -320,7 +437,7 @@ export class WeftDevtools extends HTMLElement {
     this.cfg = readConfig(this)
     if (!this.opened) {
       this.opened = true
-      this.open = this.cfg.open
+      this.shown = this.cfg.open
     }
     // §5.2's keyboard: Alt+W (and Ctrl+Shift+W where the browser
     // delivers it — Q4) toggles the dock, ? lists the keys, r flips
@@ -331,6 +448,7 @@ export class WeftDevtools extends HTMLElement {
     window.addEventListener("pointercancel", this.onRelease, true)
     window.addEventListener("hashchange", this.onURL, { passive: true })
     window.addEventListener("popstate", this.onURL, { passive: true })
+    this.syncGlobal()
     this.schedule()
   }
 
@@ -352,6 +470,378 @@ export class WeftDevtools extends HTMLElement {
     this.ready = false
     this.dropRung()
     this.dropMarkers()
+    this.dropGlobal()
+  }
+
+  // ── The host API (plan C4) ──────────────────────────────────────
+
+  /** isOpen reports whether the dock is expanded. */
+  get isOpen(): boolean {
+    return this.shown
+  }
+
+  /** open expands the dock. */
+  open(): void {
+    if (!this.shown) this.toggle()
+  }
+
+  /** close collapses the dock to its button. */
+  close(): void {
+    if (this.shown) this.toggle()
+  }
+
+  /** scope sets the explicit scope (detection rung 1: it wins over the
+   * URL, markers and headers, and its run pins): a Scope, or its string
+   * form ("pub_…;session=…;run=…", parseScope). null clears what scope()
+   * set, so the ladder decides again (a data-scope in the page's markup
+   * stays the page's). A scope naming a session and no public id is
+   * resolved through GET /api/sessions/{id}/public_id — setup A or the
+   * dev token only; under a panel token, or where the lookup finds no
+   * public id, the panel says so in one line and keeps its scope. Never
+   * throws. */
+  scope(s: Scope | string | null): void {
+    try {
+      const seq = ++this.scopeSeq
+      if (s === null) {
+        this.note = ""
+        const { scope: _s, publicId: _p, ...rest } = this.options ?? {}
+        this.options = rest
+        this.removeAttribute("data-weft-scope")
+        this.rescan()
+        this.render(this.last)
+        return
+      }
+      const next = typeof s === "string" ? parseScope(s) : scopeValue(s)
+      if (!next) return
+      if (!next.publicId && next.session) {
+        this.lookupSession(next, seq)
+        return
+      }
+      this.note = ""
+      this.applyScope(next)
+    } catch {
+      // the host's call must go through
+    }
+  }
+
+  /** applyScope makes s the explicit scope (options rung 1, the
+   * data-weft-scope attribute); the same scope again changes nothing
+   * (a framework re-render is not a rescope). */
+  private applyScope(s: Scope) {
+    const form = serializeScope(s)
+    const had = this.options?.scope
+    const hadForm = typeof had === "string" ? had : had ? serializeScope(had) : ""
+    if (hadForm === form && this.getAttribute("data-weft-scope") === form) {
+      this.render(this.last)
+      return
+    }
+    // publicId too: the rung-1 field readConfig reads after scope.
+    this.options = { ...this.options, publicId: s.publicId, scope: { ...s } }
+    this.setAttribute("data-weft-scope", form)
+    this.rescan()
+    this.render(this.last)
+  }
+
+  /** lookupSession resolves a session-only scope to its public id
+   * (plan C4.1's route) and applies it; refusals are said, not thrown. */
+  private lookupSession(s: Scope, seq: number) {
+    const id = s.session ?? ""
+    if (tokenScope(this.cfg.token) !== "") {
+      this.say(`session ${id}: the session lookup needs the dev token`)
+      return
+    }
+    this.afterSettle(async () => {
+      if (seq !== this.scopeSeq || !this.ready || !this.base) return
+      let pub = ""
+      let badge = ""
+      try {
+        const doc = (await fetchSessionPublicId({ base: this.base, token: this.cfg.token }, id)) as
+          | { public_id?: unknown; badge?: unknown }
+          | null
+        pub = typeof doc?.public_id === "string" ? doc.public_id : ""
+        badge = typeof doc?.badge === "string" ? doc.badge : ""
+      } catch (err) {
+        if (seq !== this.scopeSeq) return
+        const status = err instanceof PanelApiError ? err.status : 0
+        this.say(
+          status === 403
+            ? `session ${id}: the session lookup needs the dev token`
+            : `session ${id} has no public id · ${status === 404 ? "unknown session" : "Studio did not answer the lookup"}`
+        )
+        return
+      }
+      if (seq !== this.scopeSeq) return
+      if (!pub) {
+        this.say(`session ${id} has no public id · ${badge === "not_recorded" ? "not recorded (created without thread.PublicID)" : "none recorded"}`)
+        return
+      }
+      this.note = ""
+      this.applyScope({ ...s, publicId: pub })
+    })
+  }
+
+  /** select selects a turn — and, given, the step (its ordinal, G1) ⤢
+   * then carries — once the scope set before it has settled. A run the
+   * list does not show is read by id and joins the list when it is the
+   * conversation's; else the panel says "run r_… not in this
+   * conversation". Never throws. */
+  select(runId: string, step?: number): void {
+    try {
+      const id = typeof runId === "string" ? runId : ""
+      if (!id) return
+      const n = stepOrdinal(step)
+      const seq = ++this.selectSeq
+      this.afterSettle(async () => {
+        const m = this.model
+        if (!m || !this.ready || seq !== this.selectSeq) return
+        const ok = await m.adoptRun(id)
+        if (this.model !== m || seq !== this.selectSeq) return
+        if (!ok) {
+          this.say(`run ${id} not in this conversation`)
+          return
+        }
+        this.note = ""
+        const loading = m.state.selected === id ? null : m.select(id, true)
+        if (n !== undefined) m.selectStep(n)
+        else if (!loading) this.render(this.last)
+        await loading
+      })
+    } catch {
+      // the host's call must go through
+    }
+  }
+
+  /** on calls cb with each event of the kind named this panel
+   * dispatches, and returns the unsubscribe. A throwing cb is the
+   * host's: swallowed, never the panel's console. */
+  on<TEvent extends DevtoolsEvent>(event: TEvent, cb: (detail: DevtoolsEvents[TEvent]) => void): () => void {
+    if (!DEVTOOLS_EVENTS.includes(event) || typeof cb !== "function") return () => {}
+    const listener = (e: Event) => {
+      try {
+        cb((e as CustomEvent<DevtoolsEvents[TEvent]>).detail)
+      } catch {
+        // the host's listener: not the panel's to report
+      }
+    }
+    this.addEventListener(`weft:${event}`, listener)
+    return () => this.removeEventListener(`weft:${event}`, listener)
+  }
+
+  /** studioLink is the Studio page of a run — at a step, given its
+   * ordinal — through lib/links.ts (G1): the link ⤢ would carry,
+   * never with a token. "" before the panel knows its endpoint. */
+  studioLink(runId: string, step?: number): string {
+    const base = this.base || this.cfg.endpoint
+    if (!base || typeof runId !== "string" || !runId) return ""
+    try {
+      return studioLink(base, runId, stepOrdinal(step))
+    } catch {
+      return ""
+    }
+  }
+
+  /** api is the host API over this element, one frozen object. */
+  get api(): DevtoolsAPI {
+    if (this.apiObj) return this.apiObj
+    const self = this
+    const api: DevtoolsAPI = Object.freeze({
+      open: () => this.open(),
+      close: () => this.close(),
+      toggle: () => this.toggle(),
+      get isOpen() {
+        return self.isOpen
+      },
+      scope: (s: Scope | string | null) => this.scope(s),
+      select: (runId: string, step?: number) => this.select(runId, step),
+      on: <TEvent extends DevtoolsEvent>(event: TEvent, cb: (detail: DevtoolsEvents[TEvent]) => void) => this.on(event, cb),
+      studioLink: (runId: string, step?: number) => this.studioLink(runId, step),
+    })
+    API_OBJECTS.add(api)
+    this.apiObj = api
+    return api
+  }
+
+  /** syncGlobal publishes window.weft.devtools while this panel is
+   * connected (the script-tag install's one global, plan C4): window.weft
+   * is created only when absent, never replaced; a window.weft that is
+   * not a plain object, or a devtools of the page's own, is left alone
+   * and the footer says so. data-global="off" (weft:global), and the
+   * npm entry, keep it off. */
+  syncGlobal(): void {
+    try {
+      const want = this.isConnected && this.cfg.global && !WeftDevtools.noGlobal
+      if (!want) {
+        this.globalNote = ""
+        this.dropGlobal()
+        return
+      }
+      const w = window as unknown as { weft?: unknown }
+      let ns = w.weft
+      if (ns === undefined) {
+        createdNS = {}
+        ns = createdNS
+        w.weft = ns
+      } else if (!isPlainObject(ns)) {
+        this.globalNote = "window.weft is the page's: no window.weft.devtools"
+        return
+      }
+      const ours = ns as Record<string, unknown>
+      const cur = ours.devtools
+      const panels = cur !== undefined && !!cur && typeof cur === "object" && API_OBJECTS.has(cur)
+      if (cur !== undefined && !panels) {
+        this.globalNote = "window.weft.devtools is the page's: not replaced"
+        return
+      }
+      this.globalNote = ""
+      // Another connected panel published first: it keeps the name.
+      if (panels && cur !== this.apiObj && this.publisherConnected(cur)) return
+      ours.devtools = this.api
+    } catch {
+      // a sealed window: no global, and nothing thrown
+    }
+  }
+
+  /** publisherConnected: the panel whose API api is is still connected. */
+  private publisherConnected(api: object): boolean {
+    return Array.from(document.querySelectorAll("weft-devtools")).some(
+      (n) => n !== this && (n as Partial<WeftDevtools>).apiObjIs?.(api) === true
+    )
+  }
+
+  /** apiObjIs reports whether api is this panel's API object. */
+  apiObjIs(api: unknown): boolean {
+    return this.apiObj !== null && api === this.apiObj && this.isConnected
+  }
+
+  /** dropGlobal removes this panel's window.weft.devtools: another
+   * connected panel publishes its own instead; with none, a namespace
+   * the panel created and left empty goes too. */
+  private dropGlobal(): void {
+    try {
+      const w = window as unknown as { weft?: unknown }
+      const ns = w.weft
+      if (!isPlainObject(ns) || ns.devtools !== this.apiObj || !this.apiObj) return
+      delete ns.devtools
+      const other = Array.from(document.querySelectorAll("weft-devtools")).find(
+        (n) => n !== this && n.isConnected && typeof (n as Partial<WeftDevtools>).syncGlobal === "function"
+      ) as WeftDevtools | undefined
+      other?.syncGlobal()
+      if (!("devtools" in ns) && ns === createdNS && Object.keys(ns).length === 0) {
+        delete w.weft
+        createdNS = null
+      }
+    } catch {
+      // nothing thrown into the host
+    }
+  }
+
+  /** say draws the API's honest line. */
+  private say(line: string) {
+    this.note = line
+    this.render(this.last)
+  }
+
+  /** afterSettle runs fn once the apply already scheduled, and the
+   * start or rescope it began, have settled — so a select() right after
+   * a scope() acts in the new scope's list. */
+  private afterSettle(fn: () => Promise<void>) {
+    void this.settled()
+      .then(fn)
+      .catch(quiet)
+  }
+
+  private async settled(): Promise<void> {
+    for (let i = 0; i < 20; i++) {
+      // A scheduled apply runs in the microtask queued before this one.
+      if (this.scheduled) await Promise.resolve()
+      const p = this.settling
+      await p.catch(quiet)
+      if (p === this.settling && !this.scheduled) return
+    }
+  }
+
+  /** watchRuns turns what the panel sees into the host events: the
+   * runs of the conversation followed, each status change once. A
+   * conversation's first read of its list is history — only a run
+   * reading running there, and the run the scope pins, are reported. */
+  private watchRuns(s: PanelState) {
+    const m = this.model
+    if (!m || s !== m.state || !m.publicId || this.dormant) return
+    // Until the followed conversation's list is read, what the state
+    // holds is the previous one's (or a frame ahead of the read).
+    const key = listKey(m.publicId, m.narrowing.session)
+    if (s.listKey !== key) return
+    if (m !== this.evModel || key !== this.evKey) {
+      this.evModel = m
+      this.evKey = key
+      this.evBaseline = true
+      this.evStatus = new Map()
+    }
+    const baseline = this.evBaseline
+    this.evBaseline = false
+    const pin = m.narrowing.run ?? ""
+    for (const r of [...s.turns, ...[...s.experiments.values()].flat()]) {
+      const status = statusChip(r)
+      const prev = this.evStatus.get(r.id)
+      if (prev === status) continue
+      this.evStatus.set(r.id, status)
+      if (prev === undefined && baseline && status !== "running" && r.id !== pin) continue
+      const folded = s.turn?.id === r.id ? s.turn.folded.steps.at(-1)?.index : undefined
+      const step = folded ?? (r.steps > 0 ? r.steps - 1 : undefined)
+      this.fire("run", {
+        runId: r.id,
+        status,
+        publicId: r.public_id || m.publicId,
+        ...(r.session_id ? { sessionId: r.session_id } : {}),
+        ...(step !== undefined ? { step } : {}),
+      })
+      if (status === "failed" && !this.evErrored.has(r.id)) {
+        this.evErrored.add(r.id)
+        this.fire("error", { message: r.err || `run ${r.id} failed`, runId: r.id })
+      }
+      if (status === "parked") this.reportParked(m, r.id, 1)
+    }
+  }
+
+  /** reportParked fires "parked" once per call the run parked on, with
+   * the id its approval takes; calls not readable yet are looked for
+   * again (PARKED_TRIES looks), while the run is still in scope. */
+  private reportParked(m: PanelModel, runId: string, tries: number) {
+    if (this.evParking.has(runId)) return
+    this.evParking.add(runId)
+    void m
+      .pendingCalls(runId)
+      .then((calls) => {
+        this.evParking.delete(runId)
+        const row = m.rowOf(runId)
+        if (this.model !== m || !row || statusChip(row) !== "parked") return
+        if (!calls.length) {
+          if (tries < PARKED_TRIES)
+            setTimeout(() => {
+              if (this.model === m) this.reportParked(m, runId, tries + 1)
+            }, PARKED_RECHECK_MS)
+          return
+        }
+        for (const c of calls) {
+          const k = `${runId}\u0000${c.id}`
+          if (this.evParked.has(k)) continue
+          this.evParked.add(k)
+          this.fire("parked", { runId, callId: c.id, ackId: c.id, name: typeof c.name === "string" ? c.name : "" })
+        }
+      })
+      .catch(quiet)
+  }
+
+  /** fire dispatches a host event from the element, asynchronously: a
+   * host listener runs outside the panel's draw. */
+  private fire<TEvent extends DevtoolsEvent>(name: TEvent, detail: DevtoolsEvents[TEvent]) {
+    queueMicrotask(() => {
+      try {
+        if (this.isConnected) this.dispatchEvent(new CustomEvent(`weft:${name}`, { detail, bubbles: true, composed: true }))
+      } catch {
+        // never the host's error
+      }
+    })
   }
 
   // ── Scope detection (plan C3.2, C3.3) ───────────────────────────
@@ -635,7 +1125,7 @@ export class WeftDevtools extends HTMLElement {
       return
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return
-    if (!this.open) return
+    if (!this.shown) return
     // Nothing focused: the key came from the window, the document or
     // the page's body, not from an element of the page's own. Esc
     // included — the page's own dialog closes on it, not the dock.
@@ -673,6 +1163,7 @@ export class WeftDevtools extends HTMLElement {
   rescan() {
     this.cfg = readConfig(this)
     if (this.isConnected) {
+      this.syncGlobal()
       this.syncDetect()
       this.schedule()
     }
@@ -682,6 +1173,7 @@ export class WeftDevtools extends HTMLElement {
     if (old === value) return
     this.cfg = readConfig(this)
     if (!this.isConnected) return
+    this.syncGlobal()
     this.syncDetect()
     this.schedule()
   }
@@ -717,13 +1209,13 @@ export class WeftDevtools extends HTMLElement {
         // whatever the user clicked; a detected one (the next turn's
         // header, a marker focus follows) respects the click.
         const force = this.forceNext || (cfg.scopeExplicit && next === cfg.scope && !this.explicitMarked)
-        void this.model.rescope(next, { force }).catch(quiet)
+        this.settling = this.model.rescope(next, { force }).catch(quiet)
       }
       this.forceNext = false
       this.render(this.last)
       return
     }
-    void this.start().catch(quiet)
+    this.settling = this.start().catch(quiet)
   }
 
   /** start (re)connects: one meta request (after panel-config.json
@@ -830,11 +1322,11 @@ export class WeftDevtools extends HTMLElement {
   /** retry is the not-reachable line's control: probe again. */
   private retry() {
     this.cfg = readConfig(this)
-    void this.start(true).catch(quiet)
+    this.settling = this.start(true).catch(quiet)
   }
 
   toggle() {
-    this.open = !this.open
+    this.shown = !this.shown
     this.render(this.last)
   }
 
@@ -875,8 +1367,13 @@ export class WeftDevtools extends HTMLElement {
    * state that cannot be drawn leaves the previous frame standing. */
   private render(s: PanelState) {
     this.last = s
+    try {
+      this.watchRuns(s)
+    } catch {
+      // observability never changes behaviour
+    }
     // Whether anyone is looking: the dev list is polled only then.
-    this.model?.watch(this.open && !this.dormant)
+    this.model?.watch(this.shown && !this.dormant)
     if (this.held || this.composing) {
       this.dirty = true
       return
@@ -911,7 +1408,7 @@ export class WeftDevtools extends HTMLElement {
         }
         next.push(line)
       }
-    } else if (!this.open) {
+    } else if (!this.shown) {
       next.push(this.pill(s))
     } else if (!s.gone) {
       const dock = el("div", `weft-dock weft-${this.cfg.position} weft-open`)
@@ -1117,6 +1614,8 @@ export class WeftDevtools extends HTMLElement {
 
   private turnList(s: PanelState): HTMLElement {
     const list = el("div", "weft-turns")
+    // The host API's honest line (a lookup refused, a run not here).
+    if (this.note) list.appendChild(el("div", "weft-note weft-api-note", this.note, { role: "status" }))
     // The scope's narrowing, said where it applies: never an empty or
     // unpinned list without a reason.
     if (s.pinMissing)
@@ -1965,6 +2464,7 @@ export class WeftDevtools extends HTMLElement {
             : "scope from data-scope / window.__WEFT__",
       })
     )
+    if (this.globalNote) parts.push(el("span", "weft-global", ` · global: ${this.globalNote}`))
     return el("div", "weft-footer", parts)
   }
 

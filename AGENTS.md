@@ -206,7 +206,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    the run row carries delta_count), traces/{id},
 //    //    sessions, sessions/{id}, sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
 //    //    alone, every panel token 403 hidden), public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
-//    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5; configured by a data-weft
+//    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5 — its host API, plan C4: the element's
+//    //    open/close/toggle/isOpen/scope/select/on/studioLink, window.weft.devtools while connected
+//    //    unless data-global="off", events weft:run|parked|error; configured by a data-weft
 //    //    script tag, weft:* meta tags, or <base>/panel-config.json; studio/README.md
 //    //    has the ladder; it follows a scope — data-scope="pub_…;session=…;flow=…;run=…" or
 //    //    window.__WEFT__ (data-public-id deprecated), else the Weft-Scope header of the page's

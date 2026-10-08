@@ -4,7 +4,7 @@
 //
 //   1. mount(opts) — the options a programmatic mount passed;
 //   2. the <weft-devtools> element's own data-* attributes;
-//   3. <meta name="weft:endpoint|scope|public-id|token|detect|position|open|auto">;
+//   3. <meta name="weft:endpoint|scope|public-id|token|detect|position|open|auto|global">;
 //   4. the panel's <script> tag's data-* attributes: the running
 //      classic script (document.currentScript), else the first script
 //      carrying data-weft (any src — a renamed or proxied bundle), else
@@ -72,6 +72,10 @@ export interface PanelConfig {
   open: boolean
   /** Mount without markup; fail silently when Studio doesn't answer. */
   auto: boolean
+  /** data-global (weft:global): the script-tag bundle publishes the
+   * host API as window.weft.devtools while a panel is connected (plan
+   * C4); "off" (or "false") keeps the page's globals untouched. */
+  global: boolean
 }
 
 /** What a programmatic mount passes (rung 1). The npm entry (plan C1)
@@ -109,7 +113,7 @@ const POSITIONS: PanelPosition[] = ["bottom-right", "bottom-left", "right-dock"]
 
 /** The fields, by their attribute stem: data-<stem> on the element and
  * the script tag, weft:<stem> on a meta tag. */
-export const FIELDS = ["endpoint", "scope", "public-id", "token", "detect", "position", "open", "auto"] as const
+export const FIELDS = ["endpoint", "scope", "public-id", "token", "detect", "position", "open", "auto", "global"] as const
 type Field = (typeof FIELDS)[number]
 
 export const DATA_ATTRS = FIELDS.map((f) => `data-${f}`)
@@ -185,6 +189,9 @@ function optionsRung(opts: MountOptions | null | undefined): Rung {
       position: opts.position,
       open: opts.open,
       auto: opts.auto,
+      // Not a mount option: the npm entry adds no global (its exports
+      // are the API).
+      global: undefined,
     }[f]
     return v === undefined ? null : String(v)
   }
@@ -275,6 +282,7 @@ export function readConfig(el?: HTMLElement & { options?: MountOptions | null })
       : "bottom-right",
     open: open === "true" || open === "",
     auto: pick("auto") !== "false",
+    global: !["off", "false"].includes((pick("global") ?? "").trim().toLowerCase()),
   }
 }
 

@@ -304,7 +304,7 @@ ends the next draw is the plain pill.
 
 Where the configuration comes from (plan C2). Each field — `endpoint`,
 `scope` (or the deprecated `public-id`; `scope` wins at the same rung),
-`token`, `detect`, `position`, `open`, `auto` — resolves on its
+`token`, `detect`, `position`, `open`, `auto`, `global` — resolves on its
 own; the first source that sets it wins, so a meta tag can carry the
 token while the script tag carries the endpoint. The panel never reads
 its own file name: a bundle served as `/assets/devtools.abc123.js`
@@ -314,7 +314,7 @@ behind a proxy configures itself the same way.
 |---|---|---|
 | 1 | `mount(opts)` — a programmatic mount (`import { mount } from "@weftgo/devtools"`, the npm entry; not in the script-tag bundle) | `mount({endpoint, scope, publicId, token, detect, position, open, auto, target})` |
 | 2 | the `<weft-devtools>` element's attributes | `<weft-devtools data-endpoint="…" data-token="…">` |
-| 3 | meta tags | `<meta name="weft:endpoint" content="…">` (also `weft:scope`, `weft:public-id`, `weft:token`, `weft:detect`, `weft:position`, `weft:open`, `weft:auto`) |
+| 3 | meta tags | `<meta name="weft:endpoint" content="…">` (also `weft:scope`, `weft:public-id`, `weft:token`, `weft:detect`, `weft:position`, `weft:open`, `weft:auto`, `weft:global`) |
 | 4 | the panel's `<script>` tag: the running classic script, else the first with a `data-weft` attribute (any `src`, any value), else the first carrying one of the `data-*` attributes above | `<script type="module" src="…" data-weft data-endpoint="…">` |
 | 5 | `panel-config.json` beside the script (`/studio/panel.js` → `/studio/panel-config.json`), asked only when rungs 1–4 named no endpoint; its `endpoint` is taken on the script's own origin only, and it never carries a token | name the endpoint at any rung above |
 | 6 | the script's own origin + directory (setup A) | name the endpoint at any rung above |
@@ -336,10 +336,11 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 137,095 B raw / 38,764 B gzip
-(37.9 KiB, under the 80 KiB cap; the scope-detection ladder, rungs 2
+committed `studio/dist/panel/panel.js`, 146,824 B raw / 41,313 B gzip
+(40.3 KiB, under the 80 KiB cap; the scope-detection ladder, rungs 2
 to 5 and the activity pill, costs about +5.7 KiB of it against the
-plan's +3 KiB estimate);
+plan's +3 KiB estimate, and the host API below about +2.5 KiB against
++1 KiB);
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 
@@ -350,16 +351,68 @@ canonical install. `import "@weftgo/devtools"` loads the package's
 `panel.js`, which has the same sha256 as `/studio/panel.js` of the same
 version, and so does what the tag does. Beside it are a thin typed
 module (`mount`, `scope`, `open`, `close`, `toggle`, `on`,
-`serializeScope`/`parseScope`) and the `/react`, `/vue` and `/svelte`
+`serializeScope`/`parseScope`, and the host API below: `select`,
+`isOpen`, `studioLink`) and the `/react`, `/vue` and `/svelte`
 helpers, which set the `data-weft-scope` marker and are not components.
 The package has zero runtime dependencies and its version is the weft
-version. `studio/web/npm/README.md` has the API table, including which
-exports C4 completes. `make devtools-npm` assembles the package in
+version. `studio/web/npm/README.md` has the API table. `make devtools-npm` assembles the package in
 `studio/web/npm`, runs the package suite against the assembled files
 and lists the tarball. `make studio-check` fails if the package's
 `panel.js` is not the served one. Publishing is done by hand. A Vite app
 that installs the packed package is in `examples/devtools-vite`
 (`make devtools-vite-check`).
+
+The host API (plan C4) drives the panel from the page's own UI — a
+"debug this" button beside a reply, a "report this run" link — with no
+Studio URL in the page. It is the `<weft-devtools>` element's own
+methods, one implementation for both installs: under the script tag the
+bundle publishes them as `window.weft.devtools`, the one global the
+panel adds (below); from npm the package's exports call them on every
+panel on the page.
+
+| Method | What it does |
+|---|---|
+| `open()`, `close()`, `toggle()`, `isOpen` | expand, collapse or flip the dock; `isOpen` reads it (from npm, `isOpen()`) |
+| `scope(s)` | the explicit scope (rung 1: it wins over the URL, markers and headers, and its run pins): a `Scope` or its string form (`"pub_…;session=…;run=…"`); `scope(null)` clears what `scope()` set, so the ladder decides again (a `data-scope` in your markup stays yours) |
+| `select(runId, step?)` | selects that turn, and the step by its ordinal (G1), once a `scope()` just before it has settled; ⤢ then carries the step. A run the list does not show is read by id (`GET /api/runs/{id}`, scoped by the token) and joins the list when it is the conversation's; else the line `run r_… not in this conversation` |
+| `on(event, cb)` → unsubscribe | follows one event (below); a `cb` that throws is swallowed |
+| `studioLink(runId, step?)` | the Studio page of that run (and step) through `lib/links.ts` — the link ⤢ carries, never with a token; `""` before the panel knows its endpoint |
+
+A scope naming a session and no public id (`scope({publicId: "",
+session: "s_…"})`, or `";session=s_…"`) is resolved through `GET
+/api/sessions/{id}/public_id`, which only setup A and the dev token may
+ask: under a panel token the panel does not ask, and says `session s_…:
+the session lookup needs the dev token` (a 403 reads the same); a
+session created without `thread.PublicID` reads `session s_… has no
+public id · not recorded …`, an unknown one `… · unknown session`. The
+panel keeps its scope and nothing is thrown.
+
+The events are `CustomEvent`s named `weft:run`, `weft:parked` and
+`weft:error`, dispatched from the element (`bubbles`, `composed`) after
+the panel's own work (a microtask), so `document.addEventListener`
+hears them too. Only runs of the conversation followed are reported
+(none in the fallback), and only transitions the panel sees: a
+conversation's first read of its list is history — only a run reading
+running there, and the run the scope pins, are reported.
+
+| Event | `detail` | When |
+|---|---|---|
+| `run` | `{runId, status, publicId?, sessionId?, step?}` — `status` the turn list's word (`running`, `succeeded`, `failed`, `parked`, `interrupted`), `step` the run's last step ordinal the panel knows | a run starts, and each status change, once per transition |
+| `parked` | `{runId, callId, ackId, name}` — `ackId` is the id the approval names, the call id `weft.Approve`/`Deny`/`Resolve` and `POST /api/runs/{runId}/approvals` (`call_id`) take, so it equals `callId` | once per call a run parked on (read from its `run_finish`'s pending list) |
+| `error` | `{message, runId?}` | a run failed: its error, once per run |
+
+The global: while a `<weft-devtools>` from the script tag is connected,
+`window.weft.devtools` is its API object (`window.weft` is created only
+when absent — an existing plain object gets the one property, anything
+else is left alone and the footer says `global: window.weft is the
+page's`; a `devtools` of your own is never replaced). It is deleted on
+disconnect (with `window.weft` when the panel created it and nothing
+else is in it). `data-global="off"` on the tag or element (or `<meta
+name="weft:global" content="off">`) keeps it off; the npm package adds
+none. `examples/studio-local`'s page uses it: "debug this" per reply,
+"report this run" from `on("run")` and `studioLink`, and `on("parked")`
+counted into `<body data-parked-count>` (ask it about a refund: the
+turn parks on `refund_order`, a `weft.RequireApproval` tool).
 
 The scope header (plan C3, rung 2, the development rung) is set by the
 app's own handler, since `thread` has no HTTP layer: one line,

@@ -36,7 +36,7 @@ That one import does what the script tag does. It defines
 `<weft-devtools>` and mounts the dock. The panel configures itself
 from the same ladder as the script tag, minus the tag itself:
 `mount(opts)`, the element's `data-*` attributes, then
-`<meta name="weft:endpoint|public-id|token|position|open|auto">`. With
+`<meta name="weft:endpoint|scope|public-id|token|detect|position|open|auto">`. With
 none of these set, the endpoint is the page's own directory. If Studio
 does not answer, the dock removes itself silently.
 
@@ -54,14 +54,19 @@ server token.
 
 `import { … } from "@weftgo/devtools"`
 
-| Export | What it does | Status |
-|---|---|---|
-| `mount(opts?)` | Appends a `<weft-devtools>` configured by `opts` (`endpoint`, `scope`, `publicId`, `token`, `detect`, `position`, `open`, `auto`, `target`), which is configuration rung 1, above attributes and meta tags. This is the host's own mount: if Studio does not answer, it shows `Studio not reachable at … · retry` and stays. It replaces the dock the bundle mounted by itself and leaves the page's own markup alone. Returns the element. | complete in C1 |
-| `scope(s)` | Points every panel on the page at `s` (a `Scope`, or a string public id). The new scope overrides `data-scope`, `data-public-id`, `window.__WEFT__` and any detected scope. The panel follows all of it: `publicId` selects the conversation, `session` narrows the turn list, `run` pins the selected turn, and `flow` shows as a chip without filtering anything yet. It also writes `s` into each element's `data-weft-scope` attribute. A later `mount` starts in this scope. | complete in C3.2 |
-| `open()`, `close()`, `toggle()` | Expand, collapse or flip every panel on the page. A panel mounted after `open()` or `close()` starts in that state. | complete in C1 |
-| `on(event, cb)` | Calls `cb(detail)` for each `weft:<event>` CustomEvent a panel dispatches (`"run"`, `"parked"`, `"error"`; details typed by `DevtoolsEvents`). Returns the unsubscribe function. | Registration works in C1, but the panel does not dispatch any of these events yet, so `cb` is never called. C4 adds the dispatches. |
-| `serializeScope(s)`, `parseScope(str)` | The marker's one string form: `pub_…;session=s_…;flow=f_…;run=r_…`. The public id comes first. The other fields are optional and appear in that order, each value percent-encoded. | complete in C1 |
-| types `Scope`, `MountOptions`, `Position`, `WeftDevtoolsElement`, `DevtoolsEvents` | | complete in C1 |
+| Export | What it does |
+|---|---|
+| `mount(opts?)` | Appends a `<weft-devtools>` configured by `opts` (`endpoint`, `scope`, `publicId`, `token`, `detect`, `position`, `open`, `auto`, `target`), which is configuration rung 1, above attributes and meta tags. This is the host's own mount: if Studio does not answer, it shows `Studio not reachable at … · retry` and stays. It replaces the dock the bundle mounted by itself and leaves the page's own markup alone. Returns the element. |
+| `scope(s)` | Points every panel on the page at `s`: a `Scope`, or its string form (`"pub_…"`, `"pub_…;session=…;run=…"`, read by `parseScope`). The new scope overrides `data-scope`, `data-public-id`, `window.__WEFT__` and any detected scope. The panel follows all of it: `publicId` selects the conversation, `session` narrows the turn list, `run` pins the selected turn, and `flow` shows as a chip without filtering anything yet. It also writes `s` into each element's `data-weft-scope` attribute. A later `mount` starts in this scope. `scope(null)` clears it: the ladder (the URL, markers, headers, the fallback) decides again. A scope with a `session` and no `publicId` is resolved through Studio's `GET /api/sessions/{id}/public_id`, which only setup A and the dev token may ask; under a panel token, or when the session has no public id, the panel says so in one line and keeps its scope. |
+| `select(runId, step?)` | Selects that turn in every panel, and the step by its ordinal (the `n` of `runs/{id}/steps/{n}`), once a `scope()` called just before it has settled. The panel's ⤢ link then carries the step. A run the list does not show is read by id and joins the list when it belongs to the conversation followed; otherwise the panel shows `run r_… not in this conversation`. |
+| `open()`, `close()`, `toggle()`, `isOpen()` | Expand, collapse or flip every panel on the page; `isOpen()` reports whether one is expanded. A panel mounted after `open()` or `close()` starts in that state. |
+| `on(event, cb)` | Calls `cb(detail)` for each `weft:<event>` CustomEvent a panel dispatches, and returns the unsubscribe function. A `cb` that throws is swallowed. The events, typed by `DevtoolsEvents`: `run` `{runId, status, publicId?, sessionId?, step?}` (a run starts, and each status change: `running`, `succeeded`, `failed`, `parked`, `interrupted`), `parked` `{runId, callId, ackId, name}` (once per call a run parked on; `ackId` is the id its approval names, the call id, so it equals `callId`), `error` `{message, runId?}` (a failed run, once). Only runs of the conversation the panel follows, and only transitions it sees: the list it first reads is history, except a running run and the run the scope pins. |
+| `studioLink(runId, step?)` | The Studio page of that run (at that step) as the panel builds it, the link its ⤢ carries. It never carries a token. Empty before a panel knows its endpoint. |
+| `serializeScope(s)`, `parseScope(str)` | The marker's one string form: `pub_…;session=s_…;flow=f_…;run=r_…`. The public id comes first. The other fields are optional and appear in that order, each value percent-encoded. |
+| types `Scope`, `MountOptions`, `Position`, `WeftDevtoolsElement`, `DevtoolsEvents` | |
+
+The package adds no global: its exports are the API. (The script-tag
+install publishes the same methods as `window.weft.devtools`.)
 
 `import { serializeScope, parseScope, type Scope } from "@weftgo/devtools/scope"`
 loads only the marker's serialiser. It touches no DOM, so it is safe in

@@ -6,10 +6,12 @@
 // the registered element — none of the panel's code is bundled twice,
 // so this file stays a few hundred bytes.
 //
-// What is complete in C1 and what C4 completes is in npm/README.md's
-// API table.
+// The API itself is the element's (plan C4): each export below calls
+// the same method on every panel on the page — the one implementation
+// window.weft.devtools exposes under the script tag. Importing this
+// module adds no global: its exports are the API.
 import "./panel.js"
-import { serializeScope } from "../lib/scope.js"
+import { parseScope, serializeScope } from "../lib/scope.js"
 import type { Scope } from "../lib/scope.js"
 
 export { parseScope, serializeScope } from "../lib/scope.js"
@@ -56,19 +58,57 @@ export interface WeftDevtoolsElement extends HTMLElement {
   rescan: () => void
   /** Flips the dock open or closed. */
   toggle: () => void
+  /** Expands the dock. */
+  open: () => void
+  /** Collapses the dock to its button. */
+  close: () => void
+  /** Whether the dock is expanded. */
+  readonly isOpen: boolean
+  /** The explicit scope (rung 1); null hands it back to the ladder. */
+  scope: (s: Scope | string | null) => void
+  /** Selects a turn (and the step, its ordinal, ⤢ carries). */
+  select: (runId: string, step?: number) => void
+  /** Follows one of this panel's events; returns the unsubscribe. */
+  on: <TEvent extends keyof DevtoolsEvents>(event: TEvent, cb: (detail: DevtoolsEvents[TEvent]) => void) => () => void
+  /** The Studio page of a run (and step); no token, "" before the
+   * panel knows its endpoint. */
+  studioLink: (runId: string, step?: number) => string
+  /** Publishes or removes window.weft.devtools as the configuration says. */
+  syncGlobal: () => void
 }
 
-/** The events on() can follow, and what each carries. */
+/** The events on() can follow, and what each carries (the panel's
+ * DevtoolsEvents, element.ts — the same shapes). Only runs of the
+ * conversation the panel follows are reported, and only the
+ * transitions it sees: a scope's first read of its list is history,
+ * except a run reading running there and the run the scope pins. */
 export interface DevtoolsEvents {
-  /** A run of the followed conversation started or finished. */
-  run: { runId: string; status: string }
-  /** A run parked on calls awaiting approval. */
-  parked: { runId: string; pending: number }
-  /** The panel could not reach or read Studio. */
-  error: { message: string }
+  /** A run started ("running") or changed status ("succeeded",
+   * "failed", "parked", "interrupted"), once per transition; step is
+   * the run's last step ordinal the panel knows. */
+  run: { runId: string; status: string; publicId?: string; sessionId?: string; step?: number }
+  /** One call a run parked on, once per call. ackId is the id its
+   * approval names — the call id weft.Approve/Deny/Resolve and POST
+   * /api/runs/{runId}/approvals ({call_id}) take: it equals callId. */
+  parked: { runId: string; callId: string; ackId: string; name: string }
+  /** A run failed: its error, once per run. */
+  error: { message: string; runId?: string }
 }
 
 const TAG = "weft-devtools"
+
+// The package's exports are the API: no panel on this page adds
+// window.weft.devtools (the script-tag install's global).
+try {
+  const ctor: (CustomElementConstructor & { noGlobal?: boolean }) | undefined = customElements.get(TAG)
+  if (ctor && "noGlobal" in ctor) {
+    ctor.noGlobal = true
+    for (const n of Array.from(document.querySelectorAll<WeftDevtoolsElement>(TAG)))
+      if (typeof n.syncGlobal === "function") n.syncGlobal()
+  }
+} catch {
+  // a page without custom elements: no panel, no global
+}
 
 const elements = (): WeftDevtoolsElement[] =>
   Array.from(document.querySelectorAll<WeftDevtoolsElement>(TAG))
@@ -88,8 +128,8 @@ let current: Scope | null = null
  * that way (null: the ladder decides). */
 let wantOpen: boolean | null = null
 
-/** isOpen reads the element's open state (the same version's field). */
-const isOpen = (n: WeftDevtoolsElement) => (n as unknown as { open?: unknown }).open === true
+/** isOpen reads the element's open state (its public getter). */
+const openOf = (n: WeftDevtoolsElement) => (n as Partial<WeftDevtoolsElement>).isOpen === true
 
 /** The element's methods, when it is the panel's: a foreign element
  * defined under the tag first, or a panel whose boot failed, gets no
@@ -110,20 +150,24 @@ export function mount(opts: MountOptions = {}): WeftDevtoolsElement {
   let carried: boolean | null = null
   for (const n of elements())
     if (n.autoMounted) {
-      carried = isOpen(n)
+      carried = openOf(n)
       n.remove()
     }
   const node = document.createElement(TAG) as WeftDevtoolsElement
   const o = { ...options }
-  if (current && o.publicId === undefined && o.scope === undefined) {
-    o.publicId = current.publicId
-    o.scope = { ...current }
+  // A session-only scope is resolved by the panel (scope() below), not
+  // carried as an option.
+  const carry = current && o.publicId === undefined && o.scope === undefined ? current : null
+  if (carry?.publicId) {
+    o.publicId = carry.publicId
+    o.scope = { ...carry }
   }
   const startOpen = wantOpen ?? carried
   if (o.open === undefined && startOpen !== null) o.open = startOpen
   node.options = o
-  if (current) node.setAttribute("data-weft-scope", serializeScope(current))
+  if (carry?.publicId) node.setAttribute("data-weft-scope", serializeScope(carry))
   ;(target ?? document.body).appendChild(node)
+  if (carry && !carry.publicId && typeof node.scope === "function") node.scope({ ...carry })
   return node
 }
 
@@ -132,20 +176,37 @@ export function mount(opts: MountOptions = {}): WeftDevtoolsElement {
  * data-public-id, window.__WEFT__ and any detected scope) — the public
  * id selects the conversation, session narrows its turn list, run pins
  * the selected turn, flow is carried — and each element carries s
- * serialised in its data-weft-scope attribute. A string is a public
- * id. The same scope again, already on every element, does nothing (a
- * framework re-render is not a rescope). */
-export function scope(s: Scope | string): void {
-  const next: Scope = typeof s === "string" ? { publicId: s } : { ...s }
-  const form = serializeScope(next)
-  const same = current !== null && serializeScope(current) === form
+ * serialised in its data-weft-scope attribute. A string is the
+ * serialised form (parseScope: a bare public id, or
+ * "pub_…;session=…;run=…"). A scope with a session and no public id is
+ * resolved through Studio (GET /api/sessions/{id}/public_id: setup A or
+ * the dev token only — under a panel token the panel says so and keeps
+ * its scope). null clears what scope() set: the ladder (URL, markers,
+ * headers, the fallback) decides again. The same scope again, already
+ * on every element, does nothing (a framework re-render is not a
+ * rescope). */
+export function scope(s: Scope | string | null): void {
+  if (s === null) {
+    current = null
+    later(() => {
+      for (const n of elements()) {
+        if (typeof n.scope === "function") n.scope(null)
+        else n.removeAttribute("data-weft-scope")
+      }
+    })
+    return
+  }
+  const next: Scope = typeof s === "string" ? parseScope(s) : { ...s }
   current = next
+  const form = serializeScope(next)
   later(() => {
     for (const n of elements()) {
-      const had = n.options?.scope
-      const hadForm = typeof had === "string" ? had : had ? serializeScope(had) : ""
-      if (same && n.getAttribute("data-weft-scope") === form && hadForm === form) continue
-      // publicId too: a panel bundle older than the scope option reads it.
+      if (typeof n.scope === "function") {
+        n.scope({ ...next })
+        continue
+      }
+      // Not the panel's element (a foreign one under the tag): the
+      // marker and the option, as far as they go.
       n.options = { ...n.options, publicId: next.publicId, scope: { ...next } }
       n.setAttribute("data-weft-scope", form)
       rescanOf(n)?.()
@@ -153,10 +214,43 @@ export function scope(s: Scope | string): void {
   })
 }
 
+/** select selects the turn runId (and, given, the step — its ordinal,
+ * the n of runs/{id}/steps/{n} — which the panel's ⤢ link then
+ * carries) in every panel on the page, once a scope() set just before
+ * it has settled. A run the panel's list does not show is read by id
+ * and joins the list when it belongs to the conversation followed;
+ * otherwise the panel says "run r_… not in this conversation". */
+export function select(runId: string, step?: number): void {
+  later(() => {
+    for (const n of elements()) if (typeof n.select === "function") n.select(runId, step)
+  })
+}
+
+/** isOpen reports whether a panel on the page is expanded (false with
+ * no panel). */
+export function isOpen(): boolean {
+  return elements().some(openOf)
+}
+
+/** studioLink is the Studio page of runId — at step, given its
+ * ordinal — as the first panel on the page builds it (lib/links.ts, the
+ * link its ⤢ carries): never with a token; "" with no panel, or before
+ * it knows its endpoint. */
+export function studioLink(runId: string, step?: number): string {
+  for (const n of elements()) if (typeof n.studioLink === "function") return n.studioLink(runId, step)
+  return ""
+}
+
 function setOpen(want: boolean): void {
   wantOpen = want
   later(() => {
-    for (const n of elements()) if (isOpen(n) !== want) toggleOf(n)?.()
+    for (const n of elements()) {
+      if (openOf(n) === want) continue
+      if (typeof n.open === "function" && typeof n.close === "function") {
+        if (want) n.open()
+        else n.close()
+      } else toggleOf(n)?.()
+    }
   })
 }
 
@@ -180,16 +274,22 @@ export function toggle(): void {
 }
 
 /** on calls cb with each event of the kind named, from any panel on
- * the page, and returns the unsubscribe. The panel dispatches them as
- * `weft:<event>` CustomEvents (bubbling, composed) whose detail is
- * DevtoolsEvents[event]. In C1 the panel dispatches none yet: C4
- * wires all three; until then on() registers and unsubscribes, and cb
- * is never called. */
+ * the page (one mounted later included), and returns the unsubscribe.
+ * The panel dispatches them as `weft:<event>` CustomEvents (bubbling,
+ * composed) from its element, asynchronously; detail is
+ * DevtoolsEvents[event]. A cb that throws is swallowed: the panel's
+ * work goes on and nothing reaches the console. */
 export function on<TEvent extends keyof DevtoolsEvents>(
   event: TEvent,
   cb: (detail: DevtoolsEvents[TEvent]) => void
 ): () => void {
-  const listener = (e: Event) => cb((e as CustomEvent<DevtoolsEvents[TEvent]>).detail)
+  const listener = (e: Event) => {
+    try {
+      cb((e as CustomEvent<DevtoolsEvents[TEvent]>).detail)
+    } catch {
+      // the host's listener: not the panel's to report
+    }
+  }
   document.addEventListener(`weft:${event}`, listener)
   return () => document.removeEventListener(`weft:${event}`, listener)
 }

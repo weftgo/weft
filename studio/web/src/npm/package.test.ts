@@ -13,7 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type * as Devtools from "@weftgo/devtools"
 import { weftVersion } from "../../scripts/weft-version.ts"
 import type { MountOptions as LadderOptions } from "../panel/config"
-import { baseRoutes, FakeEventSource, fakeStudio, META, settle, setup, teardown } from "../panel/testkit"
+import type { DevtoolsAPI, DevtoolsEvents as PanelEvents } from "../panel/element"
+import { baseRoutes, FakeEventSource, fakeStudio, META, page, runEvents, runRow, settle, setup, teardown } from "../panel/testkit"
 
 const load = () => import("@weftgo/devtools")
 const STUDIO = "http://studio.test/studio/"
@@ -269,15 +270,111 @@ describe("on", () => {
     expect(seen).toHaveLength(1)
   })
 
-  it("in C1 the panel dispatches none of run, parked, error yet (C4 wires them)", async () => {
-    fakeStudio(baseRoutes(), () => new Response("no", { status: 500 }))
+  it("the panel dispatches them now (C4): run transitions, a parked call with its ack id, a failed run's error", async () => {
+    const routes = baseRoutes()
+    const t2 = { id: "s_01-t2", started: "2026-10-01T09:05:00Z" }
+    routes["runs/s_01-t2"] = { ...runRow(t2), children: [] }
+    routes["runs/s_01-t2/events?after=0&limit=500"] = page(
+      runEvents("s_01-t2", { pending: [{ type: "tool_call", id: "call_9", name: "refund", args: {} }] })
+    )
+    routes["runs/s_01-t2/transcript"] = { batches: [] }
+    routes["runs/s_01-t2/spans"] = { spans: [] }
+    fakeStudio(routes)
     const api = await load()
-    const seen: string[] = []
-    for (const k of ["run", "parked", "error"] as const) api.on(k, () => seen.push(k))
+    const seen: unknown[] = []
+    for (const k of ["run", "parked", "error"] as const) api.on(k, (d) => seen.push([k, d]))
+    // A throwing listener is the host's: swallowed, the others still hear.
+    api.on("run", () => {
+      throw new Error("host bug")
+    })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
     api.mount({ endpoint: STUDIO, publicId: "pub_orders" })
     await settle()
-    expect(shadow(".weft-unreachable")).not.toBeNull() // an error the panel shows, not dispatches
-    expect(seen).toEqual([])
+    expect(seen).toEqual([]) // the conversation's history is not a transition
+    const lane = FakeEventSource.last("public_id=")!
+    lane.emit("run", { run: runRow({ ...t2, status: "running", finished: null }) })
+    await settle()
+    lane.emit("run", { run: runRow({ ...t2, pending: 1 }) })
+    await settle()
+    lane.emit("run", { run: runRow({ id: "s_01-t3", started: "2026-10-01T09:07:00Z", status: "failed", err: "boom" }) })
+    await settle()
+    expect(seen).toEqual([
+      ["run", { runId: "s_01-t2", status: "running", publicId: "pub_orders", sessionId: "s_01", step: 0 }],
+      ["run", { runId: "s_01-t2", status: "parked", publicId: "pub_orders", sessionId: "s_01", step: 0 }],
+      ["parked", { runId: "s_01-t2", callId: "call_9", ackId: "call_9", name: "refund" }],
+      ["run", { runId: "s_01-t3", status: "failed", publicId: "pub_orders", sessionId: "s_01", step: 0 }],
+      ["error", { message: "boom", runId: "s_01-t3" }],
+    ])
+    expect(errorSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe("select, isOpen, studioLink, scope(null) (C4)", () => {
+  it("select picks the turn and step in the panel; studioLink carries the step, never the token", async () => {
+    const routes = baseRoutes()
+    const t2 = runRow({ id: "s_01-t2", started: "2026-10-01T09:05:00Z" })
+    routes["runs?public_id=pub_orders&limit=50"] = { total: 2, runs: [t2, runRow({})], next_before: null }
+    routes["runs/s_01-t2"] = { ...t2, children: [] }
+    routes["runs/s_01-t2/events?after=0&limit=500"] = page(runEvents("s_01-t2"))
+    routes["runs/s_01-t2/transcript"] = { batches: [] }
+    routes["runs/s_01-t2/spans"] = { spans: [] }
+    fakeStudio(routes)
+    const api = await load()
+    api.mount({ endpoint: STUDIO, publicId: "pub_orders", token: "dev_tok", open: true })
+    await settle()
+    expect(shadow(".weft-sel .weft-id")?.textContent).toBe("s_01-t2")
+    api.select("s_01-t1", 0)
+    await settle()
+    expect(shadow(".weft-sel .weft-id")?.textContent).toBe("s_01-t1")
+    const link = api.studioLink("s_01-t1", 0)
+    expect(link).toBe(`${STUDIO}runs/s_01-t1?step=0&view=story`)
+    expect(link).not.toContain("dev_tok")
+    const arrow = Array.from(dock()?.shadowRoot?.querySelectorAll("a") ?? []).find((a) => a.textContent === "⤢")
+    expect(arrow?.getAttribute("href")).toBe(link)
+    expect(api.isOpen()).toBe(true)
+    api.close()
+    await settle()
+    expect(api.isOpen()).toBe(false)
+  })
+
+  it("scope(string) is the serialised form; scope(null) hands the scope back to the ladder", async () => {
+    const routes = baseRoutes()
+    routes["runs?public_id=pub_b&limit=50"] = { total: 0, runs: [], next_before: null }
+    fakeStudio(routes)
+    const api = await load()
+    const node = api.mount({ endpoint: STUDIO })
+    await settle()
+    api.scope("pub_b;run=r_1")
+    await settle()
+    expect(scopes()).toEqual(["pub_b"])
+    expect(node.getAttribute("data-weft-scope")).toBe("pub_b;run=r_1")
+    api.scope(null)
+    await settle()
+    expect(scopes()).toEqual([]) // the fallback: no conversation named
+    expect(node.hasAttribute("data-weft-scope")).toBe(false)
+  })
+
+  it("the package's event and API types are the panel's, field for field", () => {
+    // A compile-time pin: npm/index.ts restates element.ts's shapes (the
+    // package may carry only src/npm and lib/scope.ts).
+    const toPanel = (e: Devtools.DevtoolsEvents): PanelEvents => e
+    const toPkg = (e: PanelEvents): Devtools.DevtoolsEvents => e
+    const ev: Devtools.DevtoolsEvents = {
+      run: { runId: "r", status: "running", publicId: "p", sessionId: "s", step: 0 },
+      parked: { runId: "r", callId: "c", ackId: "c", name: "refund" },
+      error: { message: "m", runId: "r" },
+    }
+    expect(toPkg(toPanel(ev))).toEqual(ev)
+    const api = (n: Devtools.WeftDevtoolsElement): Omit<DevtoolsAPI, "isOpen"> & { isOpen: boolean } => n
+    expect(typeof api).toBe("function")
+  })
+
+  it("the package adds no global: its exports are the API", async () => {
+    fakeStudio(baseRoutes())
+    await load()
+    await settle()
+    expect(docks()).toHaveLength(1)
+    expect((window as { weft?: unknown }).weft).toBeUndefined()
   })
 })
 
@@ -363,7 +460,8 @@ describe("the framework helpers", () => {
     document.body.appendChild(host)
     useWeftDevtools({ scope: "pub_orders", endpoint: STUDIO })(host)
     await settle()
-    expect((dock() as unknown as { open: boolean }).open).toBe(true)
+    expect(dock()?.isOpen).toBe(true)
+    expect(api.isOpen()).toBe(true)
   })
 
   it("react alone, the header rung off: the DOM marker scopes the page, window.fetch untouched (C3's Done line)", async () => {

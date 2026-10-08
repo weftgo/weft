@@ -377,3 +377,98 @@ func TestPageScopesFromTheRunHeader(t *testing.T) {
 		t.Error("the page does not fetch /run: nothing would carry the scope header to the panel")
 	}
 }
+
+// The deterministic parking path (plan C4.2): a refund question makes
+// the echo model call refund_order, a weft.RequireApproval tool, so the
+// turn's run ends successfully with that one call pending — the run the
+// panel reports once through on("parked"), with the call id the
+// approval takes. The demo has no approver: the next question denies
+// the pending call first, so the session is not held behind it.
+func TestRefundParksOnApproval(t *testing.T) {
+	path := t.TempDir() + "/weft.db"
+	defer otel.Install(otel.NoEnv(), otel.Local(path))()
+	agent := weft.New(echoModel{}, weft.Name("studio-local"), lookupOrder, refundOrder) // the demo's tools, unpaced
+	d := newDemo(thread.Memory(), agent)
+	ask := func(q string) string {
+		t.Helper()
+		w := httptest.NewRecorder()
+		d.run(w, httptest.NewRequest(http.MethodPost, "/run", strings.NewReader(q)))
+		if w.Code != http.StatusOK {
+			t.Fatalf("/run %q: %d %s", q, w.Code, w.Body.String())
+		}
+		return w.Body.String()
+	}
+	body := ask("refund order 42")
+	if !strings.Contains(body, "awaiting approval: refund_order (call "+refundCallID+")") {
+		t.Fatalf("the refund turn answered %q, want it parked on refund_order", body)
+	}
+	runID := strings.Fields(body)[1]
+	pending := d.s.Pending()
+	if len(pending) != 1 || pending[0].CallID != refundCallID || pending[0].Tool != "refund_order" {
+		t.Fatalf("pending = %+v, want the one refund_order call %s", pending, refundCallID)
+	}
+	// The recorded run: succeeded, one call pending (the row the panel
+	// reads as parked), its run_finish naming the call.
+	ctx := context.Background()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		det, err := otel.LocalDB().Run(ctx, runID)
+		if err == nil && det.Status == obsdb.StatusSucceeded && det.Pending == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run %s never read succeeded with 1 pending: %+v (%v)", runID, det, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	events, err := otel.LocalDB().Events(ctx, runID, -1, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finish := ""
+	for _, pe := range events.Events {
+		if strings.Contains(string(pe.Event), `"run_finish"`) {
+			finish = string(pe.Event)
+		}
+	}
+	if !strings.Contains(finish, `"pending"`) || !strings.Contains(finish, refundCallID) {
+		t.Errorf("run_finish = %s, want its pending list naming %s", finish, refundCallID)
+	}
+	// The next question is not held behind the parked call.
+	if next := ask("where is order 43?"); !strings.Contains(next, `About "where is order 43?": order 43`) {
+		t.Errorf("the next turn answered %q", next)
+	}
+	if p := d.s.Pending(); len(p) != 0 {
+		t.Errorf("still pending after the next question: %+v", p)
+	}
+}
+
+// The page drives the panel from its own UI through window.weft.devtools
+// (plan C4): a "debug this" button per reply that scopes the panel to the
+// turn and selects its step, a "report this run" link built from
+// on("run") by the panel's studioLink, and on("parked") counted into
+// <body data-parked-count>. The panel's own suite proves each call
+// (studio/web/src/panel/api.test.ts); this pins the page that uses them.
+func TestPageDrivesThePanel(t *testing.T) {
+	for _, want := range []string{
+		`<body data-parked-count="0">`,
+		`debug.className = "debug-this"`,
+		`debug.textContent = "debug this"`,
+		`window.weft && window.weft.devtools`,
+		`devtools.scope("pub_demo;run=" + b.dataset.run)`,
+		`devtools.select(b.dataset.run, 0)`,
+		`devtools.on("run", (d) => {`,
+		`report.href = devtools.studioLink(d.runId, d.step)`,
+		`devtools.on("parked", () => {`,
+		`document.body.dataset.parkedCount`,
+		`<a id="report"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the page lacks %q", want)
+		}
+	}
+	// The page builds no Studio URL of its own: the link is the panel's.
+	if strings.Contains(page, "/studio/runs") {
+		t.Error("the page hand-builds a Studio run URL; it must ask studioLink")
+	}
+}

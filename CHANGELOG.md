@@ -10,6 +10,29 @@ module, ADR 0005).
 
 ### Added
 
+- **The devtools panel's host API** (plan C4.2): the `<weft-devtools>`
+  element's `open()`, `close()`, `toggle()`, `isOpen`, `scope(s)` (a
+  `Scope` or its string form; `scope(null)` hands the scope back to the
+  ladder; a session-only scope resolves through
+  `GET /api/sessions/{id}/public_id` for setup A and the dev token, and
+  says why when it cannot), `select(runId, step?)` (a run the list does
+  not show joins it when it is the conversation's, else "run r_… not in
+  this conversation"), `on(event, cb)` and `studioLink(runId, step?)`
+  (through `lib/links.ts`, never a token). The panel dispatches
+  `weft:run` `{runId, status, publicId?, sessionId?, step?}` per status
+  transition, `weft:parked` `{runId, callId, ackId, name}` once per
+  parked call (`ackId` is the call id its approval takes) and
+  `weft:error` `{message, runId?}` once per failed run — bubbling,
+  composed, asynchronous, only for the conversation followed. The
+  script-tag install publishes the API as `window.weft.devtools` while a
+  panel is connected (never replacing another library's `window.weft`;
+  `data-global="off"` / `weft:global` opt out); `@weftgo/devtools` adds
+  `select`, `isOpen` and `studioLink` and no global.
+  `examples/studio-local`'s page drives the panel from its own
+  "debug this" buttons and a "report this run" link, and a refund
+  question parks its turn on a `weft.RequireApproval` tool. The panel is
+  41,313 B gzip.
+
 - **`examples/devtools-vite`** (the phase 3 gate's first clause): a
   minimal Vite app that installs the packed `@weftgo/devtools` and
   shows the panel with no `<script>` tag; `make devtools-vite-check`

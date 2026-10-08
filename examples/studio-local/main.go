@@ -29,8 +29,11 @@
 // configuration: one turn of a thread session per call, on a
 // deterministic echo model so the example runs offline; the turn makes
 // one lookup_order tool call so the panel's step story and the
-// waterfall have a tool to show. A real app replaces the model with
-// its own and changes nothing else.
+// waterfall have a tool to show; a question about a refund calls
+// refund_order instead, a weft.RequireApproval tool, so that turn parks
+// on an approval (the panel's on("parked") fires once, with the call's
+// id) and the next question denies it before it runs. A real app
+// replaces the model with its own and changes nothing else.
 //
 // Under `weft dev` (plan B1.2) the same binary is the app beside the
 // command's Studio:
@@ -80,16 +83,63 @@ import (
 // loopback with no token) — so the first turn scopes it to pub_demo
 // and pins that turn's run. A page that wants to name its scope
 // itself adds data-scope="pub_demo" to the tag.
-const page = `<!doctype html><html><head><title>host app</title></head><body>
+//
+// The page also drives the panel from its own UI through the one
+// global the script tag adds, window.weft.devtools (plan C4): each
+// reply gets a "debug this" button that scopes the panel to that turn
+// (scope("pub_demo;run=<id>")) and selects its first step (select(id,
+// 0)); a "report this run" link follows on("run") and asks the panel
+// for the Studio link (studioLink(runId, step) — the panel builds it,
+// the page knows no Studio URL); and on("parked") counts the parked
+// calls into <body data-parked-count>, one per call.
+const page = `<!doctype html><html><head><title>host app</title></head><body data-parked-count="0">
 <h1>the host app's own page</h1>
-<p>the devtools panel below is a script tag and nothing else</p>
+<p>the devtools panel below is a script tag and nothing else; ask about a refund to see a turn park on an approval</p>
 <form id="ask"><input name="text" value="where is order 42?" size="40"> <button>ask</button></form>
-<pre id="answer"></pre>
+<ol id="answers"></ol>
+<p><a id="report" target="_blank" rel="noopener" hidden>report this run</a></p>
 <script>
+const answers = document.getElementById("answers")
 document.getElementById("ask").addEventListener("submit", async (e) => {
   e.preventDefault()
   const res = await fetch("/run", { method: "POST", body: new FormData(e.target).get("text") })
-  document.getElementById("answer").textContent = await res.text()
+  const run = ((res.headers.get("Weft-Scope") || "").split(";").find((p) => p.startsWith("run=")) || "").slice(4)
+  const li = document.createElement("li")
+  const answer = document.createElement("pre")
+  answer.textContent = await res.text()
+  li.append(answer)
+  if (run) {
+    const debug = document.createElement("button")
+    debug.type = "button"
+    debug.className = "debug-this"
+    debug.dataset.run = decodeURIComponent(run)
+    debug.textContent = "debug this"
+    li.append(debug)
+  }
+  answers.append(li)
+})
+// "debug this": the panel follows that turn, at its first step.
+answers.addEventListener("click", (e) => {
+  const b = e.target.closest("button.debug-this")
+  const devtools = window.weft && window.weft.devtools
+  if (!b || !devtools) return
+  devtools.scope("pub_demo;run=" + b.dataset.run)
+  devtools.select(b.dataset.run, 0)
+  devtools.open()
+})
+// The panel's global exists once its module has run (before this event).
+document.addEventListener("DOMContentLoaded", () => {
+  const devtools = window.weft && window.weft.devtools
+  if (!devtools) return
+  const report = document.getElementById("report")
+  devtools.on("run", (d) => {
+    report.href = devtools.studioLink(d.runId, d.step)
+    report.textContent = "report this run (" + d.runId + ", " + d.status + ")"
+    report.hidden = false
+  })
+  devtools.on("parked", () => {
+    document.body.dataset.parkedCount = String(Number(document.body.dataset.parkedCount) + 1)
+  })
 })
 </script>
 <script type="module" src="/studio/panel.js" data-weft data-open="true"></script>
@@ -121,7 +171,7 @@ func demoAgent() *weft.Agent {
 		weft.Name("studio-local"),
 		weft.Instructions(demoInstructions),
 		weft.PrepareStep(trimGuidance),
-		lookupOrder)
+		lookupOrder, refundOrder)
 }
 
 // firstStepGuidance is the paragraph only step 0's prompt carries.
@@ -212,8 +262,24 @@ var lookupOrder = weft.Tool("lookup_order", "Look up an order.", func(_ context.
 	return "order " + in.OrderID + ": shipped this morning", nil
 }, weft.Replay(weft.ReplaySafe))
 
+// refundOrder is the demo's one write: it needs an approval
+// (weft.RequireApproval), so a turn that calls it ends parked with the
+// call pending — the deterministic parking path the panel's
+// on("parked") is shown with. Unannotated for replay: the playground
+// substitutes or parks it, never re-fires it.
+var refundOrder = weft.Tool("refund_order", "Refund an order (needs an approval).", func(_ context.Context, in struct {
+	OrderID string `json:"order_id"`
+}) (string, error) {
+	return "order " + in.OrderID + ": refunded", nil
+}, weft.RequireApproval())
+
+// refundCallID is the id of the call the echo model makes on a refund
+// question: the id the approval names.
+const refundCallID = "call_refund"
+
 // echoModel is the demo's deterministic model: it answers the last
-// user text with one lookup_order call, then a reply that quotes both
+// user text with one lookup_order call (refund_order when the text
+// asks for a refund), then a reply that quotes both
 // the question and the tool's result — so an experiment's edited input
 // produces a visibly different answer (the diff has something to
 // show), and everything runs offline.
@@ -235,7 +301,11 @@ func (echoModel) Stream(ctx context.Context, req weft.ModelRequest) iter.Seq2[we
 			if num == "" {
 				num = "42"
 			}
-			yield(weft.ModelToolCall{ID: "call_1", Name: "lookup_order",
+			id, tool := "call_1", "lookup_order"
+			if strings.Contains(strings.ToLower(last.Text()), "refund") {
+				id, tool = refundCallID, "refund_order"
+			}
+			yield(weft.ModelToolCall{ID: id, Name: tool,
 				Args: []byte(`{"order_id":"` + num + `"}`)}, nil)
 			yield(weft.ModelFinish{Reason: weft.StopToolCalls,
 				Usage: weft.Usage{InputTokens: 10, OutputTokens: 5}}, nil)
@@ -364,6 +434,19 @@ func (d *demo) run(w http.ResponseWriter, r *http.Request) {
 	}
 	session := d.s
 	d.mu.Unlock()
+	// A refund the previous question parked is still awaiting its
+	// approval, and a parked session holds every next turn behind it:
+	// the demo has no approver, so the new question denies it first
+	// (one resume run reads the denial, then this turn runs).
+	if pending := session.Pending(); len(pending) > 0 {
+		ds := make([]thread.Decision, 0, len(pending))
+		for _, p := range pending {
+			ds = append(ds, thread.Deny(p.CallID, "the user asked something else"))
+		}
+		if resume, err := session.Decide(ctx, ds...); err == nil && resume != nil {
+			_, _ = resume.Wait()
+		}
+	}
 	turn, err := session.Send(ctx, weft.User(question))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -377,6 +460,15 @@ func (d *demo) run(w http.ResponseWriter, r *http.Request) {
 	res, err := turn.Wait()
 	if err != nil {
 		_, _ = fmt.Fprintf(w, "run %s (%s): %v\n", turn.RunID(), session.ID(), err)
+		return
+	}
+	if len(res.Pending) > 0 {
+		names := make([]string, 0, len(res.Pending))
+		for _, c := range res.Pending {
+			names = append(names, c.Name+" (call "+c.ID+")")
+		}
+		_, _ = fmt.Fprintf(w, "run %s (%s): awaiting approval: %s\n", turn.RunID(), session.ID(),
+			strings.Join(names, ", "))
 		return
 	}
 	_, _ = fmt.Fprintf(w, "run %s (%s): %s\n", turn.RunID(), session.ID(),

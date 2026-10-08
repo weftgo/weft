@@ -190,6 +190,19 @@ export function fetchSession(
   return panelGet<SessionDoc>(ep, `sessions/${encodeURIComponent(id)}`, signal)
 }
 
+/** GET /api/sessions/{id}/public_id (plan C4.1): the public id a
+ * thread session's turns carry — public_id "" with badge
+ * "not_recorded" when it was created without one. The dev token's and
+ * setup A's alone: every panel token is refused (403, badge hidden);
+ * an unknown session is a 404. Errors are PanelApiError. */
+export function fetchSessionPublicId(
+  ep: PanelEndpoint,
+  id: string,
+  signal?: AbortSignal
+): Promise<{ session_id: string; public_id: string; badge?: string }> {
+  return panelGet(ep, `sessions/${encodeURIComponent(id)}/public_id`, signal)
+}
+
 export function fetchPublic(
   ep: PanelEndpoint,
   publicId: string,

@@ -12,7 +12,7 @@
 // timer is the model's own (dispose clears them), every retry is
 // bounded, and a response that arrives for a view the user has left
 // is dropped.
-import type { Holed, Meta, PosEvent, RunDoc, RunRow, SessionRow, Span, Transcript } from "../lib/api"
+import type { Holed, Meta, PosEvent, RunDoc, RunRow, SessionRow, Span, ToolCallPart, Transcript } from "../lib/api"
 import { HOLES } from "../lib/honesty"
 import { byStep } from "../lib/requests"
 import type { StepRequests } from "../lib/requests"
@@ -228,6 +228,11 @@ export interface PanelState {
   /** The scope names a session but no listed run carries a session id:
    * the list is not narrowed, and says so. */
   sessionUnrecorded: boolean
+  /** The conversation (listKey: public id and session) whose turn list
+   * was read last, "" before the first read: the host events (plan C4)
+   * take a conversation's first read as its history, not as
+   * transitions. */
+  listKey: string
 }
 
 export type PanelNotify = (s: PanelState) => void
@@ -255,6 +260,7 @@ export function emptyPanelState(): PanelState {
     raw: false,
     pinMissing: "",
     sessionUnrecorded: false,
+    listKey: "",
   }
 }
 
@@ -791,6 +797,7 @@ export class PanelModel {
       this.state.experiments = experiments
       this.state.turnsCapped = page.next_before != null
       for (const r of during) this.upsertRun(r)
+      this.state.listKey = listKey(this.publicId, this.narrowing.session)
     } catch {
       // A refresh that fails leaves what was there; run frames will
       // retry the shape naturally.
@@ -1283,6 +1290,56 @@ export class PanelModel {
       status,
     })
     this.emit()
+  }
+
+  /** adoptRun makes a run the list does not show selectable (the host
+   * API's select, plan C4): its document is read by id (the token
+   * scopes it as every read), and a top-level run of the conversation
+   * followed — any run's, on the dev list — joins the list. False when
+   * it cannot be read or is another conversation's (or a subagent's). */
+  async adoptRun(id: string): Promise<boolean> {
+    if (this.rowOf(id)) return true
+    let raw: unknown
+    try {
+      raw = await fetchRun(this.ep, id)
+    } catch {
+      return false
+    }
+    if (this.disposed || !raw || typeof raw !== "object") return false
+    const doc = raw as RunDoc
+    if (doc.id !== id || doc.parent_run_id) return false
+    if (this.publicId && doc.public_id !== this.publicId) return false
+    if (!this.inSession(doc)) return false
+    // The row, not the document: children and holes stay the view's.
+    const { children: _c, holes: _h, compactions: _x, ...row } = doc
+    this.upsertRun(row)
+    this.emit()
+    return true
+  }
+
+  /** pendingCalls reads the calls a run parked on — its run_finish's
+   * pending list (the calls Approve/Deny and POST
+   * /api/runs/{id}/approvals name by call id): the open turn's fold
+   * when it holds the finish, else the run's stored events. [] when
+   * they cannot be read. */
+  async pendingCalls(id: string): Promise<ToolCallPart[]> {
+    const open = this.state.turn
+    if (open && open.id === id && open.folded.finished && open.folded.pending.length) return [...open.folded.pending]
+    try {
+      const walk = await this.walkEvents(id)
+      for (let i = walk.events.length - 1; i >= 0; i--) {
+        const ev = walk.events[i]?.event as { type?: string; pending?: unknown } | undefined
+        if (ev?.type !== "run_finish") continue
+        return Array.isArray(ev.pending)
+          ? (ev.pending as (ToolCallPart | null)[]).filter(
+              (c): c is ToolCallPart => !!c && typeof c.id === "string" && c.id !== ""
+            )
+          : []
+      }
+    } catch {
+      // unreadable: nothing to report
+    }
+    return []
   }
 
   /** rowOf finds a run's row: a turn, or an experiment nested under
@@ -1917,6 +1974,12 @@ function isReady(res: ExperimentResult): boolean {
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/** listKey names the conversation a turn list is of: its public id
+ * and session (the scope's serialised form of the two). */
+export function listKey(publicId: string, session?: string): string {
+  return serializeScope({ publicId, session })
 }
 
 /** narrowingOf is a scope's narrowing fields, the empty ones dropped. */

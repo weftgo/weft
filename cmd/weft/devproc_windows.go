@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"syscall"
 )
 
 // ownGroup is a no-op on Windows: there is no process group to signal.
@@ -27,3 +28,10 @@ func (c *child) kill() {
 
 // groupAlive has no group to ask about on Windows.
 func (c *child) groupAlive() bool { return false }
+
+// devSignals are the signals that stop weft dev (the app first).
+var devSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
+
+// appSignal is the signal the app is stopped with (Windows ends the
+// tree whatever it is).
+func appSignal(sig os.Signal) os.Signal { return sig }

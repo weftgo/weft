@@ -111,9 +111,13 @@
 // quiet — SIGTERM to the group, up to five seconds, SIGKILL, then the
 // command again. A build failure or an app that exits is reported with
 // its exit code and the next save retries; --no-watch turns watching
-// off, and weft dev then exits with the app's code. Ctrl-C stops the
-// app first (the same signal), then Studio; exit 0. Each start prints
-// one line,
+// off, and weft dev then exits with the app's code (127 when it cannot
+// start). A directory arriving with .go files in it restarts too;
+// editor lock files (.#name.go) do not. Ctrl-C, SIGTERM and SIGHUP
+// stop the app first (the same signal; SIGHUP as SIGTERM), then
+// Studio; exit 0. A SIGKILL of weft dev cannot be caught: on Linux
+// `go run` gets SIGTERM (Pdeathsig), but the binary it started can be
+// orphaned. Each start prints one line,
 //
 //	studio http://127.0.0.1:7331/#token=… · app pid 4242 · runtime rt_… registered
 //
@@ -121,9 +125,14 @@
 // stays out of the log); the runtime is the first one GET
 // /api/runtimes lists that was not there before the app started,
 // waited for up to five seconds, else "no runtime registered yet" and
-// a later line when one registers. A Studio already serving the same
-// database is reused only with a fixed token: the app needs it, and a
-// running Studio's generated token is not known here.
+// a later line when one registers. An unspecified listen host
+// (0.0.0.0) is handed to the app as 127.0.0.1. Reuse is the port
+// policy's: its probe carries only a fixed token, so a running Studio
+// walled by another (or a generated) token is skipped for the next
+// port; a reused Studio with no wall gives the app an empty
+// WEFT_STUDIO_TOKEN (plan B3's stable per-database token changes
+// this). --watch and --no-watch have no environment mirror: they are
+// the dev loop's, not connection settings.
 //
 // `weft version` prints the weft version (version.Runtime: the module
 // tag this binary was built from).

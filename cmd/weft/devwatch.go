@@ -18,14 +18,18 @@ import (
 // waits for nobody — while one restart is pending another burst adds
 // nothing. Directories named in skipDirs are not descended into (a
 // root is always watched); directories created later are added as
-// they appear. A watcher error is one line on out, never a stop.
+// they appear — and a directory that arrives with .go files already in
+// it (a checkout, a mv, a stash pop) is a change itself. Editor lock
+// files (.#name.go) are not. A watcher error, or a directory that
+// could not be watched (inotify's max_user_watches spent), is one line
+// on out, never a stop.
 func watchGo(roots []string, debounce time.Duration, out io.Writer) (<-chan string, func(), error) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, nil, fmt.Errorf("watch: %w", err)
 	}
 	for _, r := range roots {
-		if err := addTree(w, r, true); err != nil {
+		if _, err := addTree(w, r, true, out); err != nil {
 			_ = w.Close()
 			return nil, nil, fmt.Errorf("watch %s: %w", r, err)
 		}
@@ -51,17 +55,23 @@ func watchGo(roots []string, debounce time.Duration, out io.Writer) (<-chan stri
 				if !ok {
 					return
 				}
+				changed := ""
 				if ev.Has(fsnotify.Create) {
 					if fi, err := os.Stat(ev.Name); err == nil && fi.IsDir() {
-						_ = addTree(w, ev.Name, false)
-						continue
+						changed, _ = addTree(w, ev.Name, false, out)
+						if changed == "" {
+							continue
+						}
 					}
 				}
-				if !strings.HasSuffix(ev.Name, ".go") || ev.Op == fsnotify.Chmod {
-					continue
+				if changed == "" {
+					if !isGoSource(ev.Name) || ev.Op == fsnotify.Chmod {
+						continue
+					}
+					changed = ev.Name
 				}
 				if pending == "" {
-					pending = ev.Name
+					pending = changed
 				}
 				if timer == nil {
 					timer = time.NewTimer(debounce)
@@ -92,10 +102,21 @@ func watchGo(roots []string, debounce time.Duration, out io.Writer) (<-chan stri
 	return changes, stop, nil
 }
 
+// isGoSource reports whether path is a .go file a save would change —
+// not an editor's lock file (.#name.go).
+func isGoSource(path string) bool {
+	base := filepath.Base(path)
+	return strings.HasSuffix(base, ".go") && !strings.HasPrefix(base, ".#")
+}
+
 // addTree adds dir and every directory below it, skipping skipDirs'
-// names (root itself is added whatever its name).
-func addTree(w *fsnotify.Watcher, dir string, root bool) error {
-	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+// names (root itself is added whatever its name), and returns the
+// first .go file it met ("" for none). A directory below dir that
+// cannot be watched is said on out — the first, then how many more —
+// and skipped; dir itself failing is the error.
+func addTree(w *fsnotify.Watcher, dir string, root bool, out io.Writer) (goFile string, err error) {
+	failed := 0
+	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if path == dir {
 				return err
@@ -103,14 +124,27 @@ func addTree(w *fsnotify.Watcher, dir string, root bool) error {
 			return nil // a subdirectory that vanished or is unreadable
 		}
 		if !d.IsDir() {
+			if goFile == "" && isGoSource(path) {
+				goFile = path
+			}
 			return nil
 		}
 		if (path != dir || !root) && skipDirs[d.Name()] {
 			return filepath.SkipDir
 		}
-		if err := w.Add(path); err != nil && path == dir {
-			return err
+		if err := w.Add(path); err != nil {
+			if path == dir && root {
+				return err
+			}
+			if failed == 0 {
+				_, _ = fmt.Fprintf(out, "weft dev: watch %s: %v\n", path, err)
+			}
+			failed++
 		}
 		return nil
 	})
+	if failed > 1 {
+		_, _ = fmt.Fprintf(out, "weft dev: watch: %d more directories under %s not watched\n", failed-1, dir)
+	}
+	return goFile, err
 }

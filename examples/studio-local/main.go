@@ -42,7 +42,10 @@
 // 127.0.0.1:8080 (weft dev's Studio holds 7331), the pipeline exports
 // to that Studio besides the local sink (the same file: WEFT_DB), and
 // the runtime link registers there instead of with the embedded
-// server — the three lines in serve that read the environment.
+// server — the three lines in serve that read the environment. The
+// app then writes the shared WEFT_DB twice, through its local sink and
+// through Studio's ingest: harmless, the sqlite writer is INSERT OR
+// IGNORE. -addr still overrides 8080.
 package main
 
 import (

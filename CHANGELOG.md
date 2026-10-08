@@ -42,11 +42,16 @@ module, ADR 0005).
   Studio's SQLite file) set — plain variables the app can set itself.
   The app runs in its own process group and restarts on a `.go` save
   (fsnotify, 300 ms debounce; SIGTERM, 5 s, SIGKILL); a build failure
-  waits for the next save; `--no-watch` exits with the app's code;
-  Ctrl-C stops the app, then Studio. Each start prints one line:
+  waits for the next save; `--no-watch` exits with the app's code
+  (127 when it cannot start); a directory arriving with `.go` files
+  restarts too. Ctrl-C, SIGTERM and SIGHUP stop the app, then Studio
+  (Linux adds Pdeathsig for `go run`; a SIGKILL of `weft dev` can
+  still orphan the app's binary). Each start prints one line:
   `studio <url>[#token=…] · app pid <n> · runtime rt_… registered`
   (the token only when generated; "no runtime registered yet" after
-  5 s, then a later line). A reused Studio needs a fixed token. The
+  5 s, then a later line). Reuse follows the port policy: without a
+  fixed token a running token-walled Studio is skipped for the next
+  port (plan B3's stable token changes this). The
   discovery file is plan B3's. `examples/studio-local` runs under it:
   with `WEFT_STUDIO_URL` set it listens on 8080, keeps its local sink
   (`otel.Local("")`, explicit) and registers its runtime with that

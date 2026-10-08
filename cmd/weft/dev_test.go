@@ -5,9 +5,11 @@ package main
 import (
 	"errors"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -29,10 +31,13 @@ var helperRe = regexp.MustCompile(`(?m)^helper pid=(\d+) WEFT_ENV=(\S*) WEFT_STU
 type devRun struct {
 	out, errb *syncBuffer
 	code      chan int
+	exited    bool // the exit code was received
 }
 
-// startDev runs `weft dev args… -- <helper>` in the background, the
-// helper in mode app with env set.
+// startDev runs `weft dev args…` in the background — args without a
+// "--" get `-- <helper>`, the helper in mode app with env set. A test
+// that fails before weft dev returned still leaves nothing behind: the
+// cleanup interrupts it (the app's group goes with it) and waits.
 func startDev(t *testing.T, args []string, env map[string]string) *devRun {
 	t.Helper()
 	skipWithoutSelfSignal(t)
@@ -41,8 +46,22 @@ func startDev(t *testing.T, args []string, env map[string]string) *devRun {
 		t.Setenv(k, v)
 	}
 	d := &devRun{out: &syncBuffer{}, errb: &syncBuffer{}, code: make(chan int, 1)}
-	argv := append(append([]string{"dev"}, args...), "--", os.Args[0])
+	argv := append([]string{"dev"}, args...)
+	if !slices.Contains(args, "--") {
+		argv = append(argv, "--", os.Args[0])
+	}
 	go func() { d.code <- run(argv, d.out, d.errb) }()
+	t.Cleanup(func() {
+		if d.exited {
+			return
+		}
+		signalSelf(t, syscall.SIGINT)
+		select {
+		case <-d.code:
+		case <-time.After(20 * time.Second):
+			t.Errorf("cleanup: weft dev never returned")
+		}
+	})
 	return d
 }
 
@@ -57,6 +76,7 @@ func (d *devRun) waitOut(t *testing.T, re *regexp.Regexp, n int) [][]string {
 		}
 		select {
 		case code := <-d.code:
+			d.exited = true
 			t.Fatalf("weft dev exited %d before %s matched %d times\nstdout:\n%s\nstderr:\n%s", code, re, n, d.out.String(), d.errb.String())
 		default:
 		}
@@ -80,6 +100,7 @@ func (d *devRun) wait(t *testing.T, want int) {
 	t.Helper()
 	select {
 	case code := <-d.code:
+		d.exited = true
 		if code != want {
 			t.Fatalf("weft dev = exit %d, want %d\nstdout:\n%s\nstderr:\n%s", code, want, d.out.String(), d.errb.String())
 		}
@@ -204,6 +225,11 @@ func TestDevRestartOnSave(t *testing.T) {
 	if err := os.WriteFile(src, []byte("package main\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	for _, skip := range []string{"node_modules", "testdata"} {
+		if err := os.Mkdir(filepath.Join(dir, skip), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	addr := loop(freeBase(t, 1))
 	d := startDev(t, []string{"--addr", addr, "--db", "sqlite://" + filepath.Join(pids, "weft.db"), "--watch", dir},
 		map[string]string{"WEFT_DEV_HELPER_GRANDCHILD": pids})
@@ -228,6 +254,12 @@ func TestDevRestartOnSave(t *testing.T) {
 	gone(t, "the old app's grandchild", gc1)
 	gc2 := grandchild(t, pids, second)
 
+	// Skipped directories and an editor's lock file restart nothing.
+	for _, p := range []string{"node_modules/dep.go", "testdata/fixture.go", ".#main.go"} {
+		if err := os.WriteFile(filepath.Join(dir, p), []byte("package x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// Well past the debounce window: still one restart.
 	time.Sleep(4 * devDebounce)
 	if n := strings.Count(d.out.String(), "changed; restarting the app"); n != 1 {
@@ -318,5 +350,213 @@ func TestDevEnv(t *testing.T) {
 	}
 	if v, _ := get(env, "WEFT_DB"); v != "/mine.db" {
 		t.Errorf("WEFT_DB without a Studio file = %q, want the shell's", v)
+	}
+}
+
+// setVar sets *v for the test.
+func setVar[T any](t *testing.T, v *T, val T) {
+	t.Helper()
+	old := *v
+	*v = val
+	t.Cleanup(func() { *v = old })
+}
+
+// writeGo writes a .go file under dir.
+func writeGo(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("package main\n// "+body+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestDevNewDirRestarts: a directory that arrives with .go files in it
+// (a checkout, a mv) is a change — one restart — though no file event
+// inside it was ever watched.
+func TestDevNewDirRestarts(t *testing.T) {
+	shortRuntimeWait(t, 200*time.Millisecond)
+	dir, side := t.TempDir(), t.TempDir()
+	addr := loop(freeBase(t, 1))
+	d := startDev(t, []string{"--addr", addr, "--db", "sqlite://" + filepath.Join(side, "weft.db"), "--watch", dir}, nil)
+	d.waitOut(t, oneLineRe, 1)
+	pkg := filepath.Join(side, "pkg")
+	if err := os.Mkdir(pkg, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeGo(t, pkg, "a.go", "moved in")
+	if err := os.Rename(pkg, filepath.Join(dir, "pkg")); err != nil {
+		t.Fatal(err)
+	}
+	d.waitOut(t, oneLineRe, 2)
+	time.Sleep(4 * devDebounce)
+	if n := strings.Count(d.out.String(), "changed; restarting the app"); n != 1 {
+		t.Errorf("%d restarts for one directory moved in, want 1:\n%s", n, d.out.String())
+	}
+	// An empty directory is no change.
+	if err := os.Mkdir(filepath.Join(dir, "empty"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(4 * devDebounce)
+	if n := strings.Count(d.out.String(), "changed; restarting the app"); n != 1 {
+		t.Errorf("an empty directory restarted the app:\n%s", d.out.String())
+	}
+	d.interrupt(t)
+	notListening(t, addr)
+}
+
+// TestDevStopSignals: SIGTERM and SIGHUP (the terminal closed) stop
+// weft dev like Ctrl-C — the app first (SIGHUP becomes SIGTERM for
+// it: many servers read SIGHUP as reload), then Studio; exit 0.
+func TestDevStopSignals(t *testing.T) {
+	shortRuntimeWait(t, 200*time.Millisecond)
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGHUP} {
+		t.Run(sig.String(), func(t *testing.T) {
+			dir := t.TempDir()
+			addr := loop(freeBase(t, 1))
+			d := startDev(t, []string{"--addr", addr, "--db", "sqlite://" + filepath.Join(dir, "weft.db"), "--watch", dir}, nil)
+			pid := atoi(t, d.waitOut(t, oneLineRe, 1)[0][2])
+			signalSelf(t, sig)
+			d.wait(t, 0)
+			if !strings.Contains(d.out.String(), "helper pid="+strconv.Itoa(pid)+" got terminated") {
+				t.Errorf("the app was not stopped with SIGTERM:\n%s", d.out.String())
+			}
+			if !strings.Contains(d.out.String(), "studio: shutting down") {
+				t.Errorf("studio was not stopped:\n%s", d.out.String())
+			}
+			gone(t, "the app", pid)
+			notListening(t, addr)
+		})
+	}
+}
+
+// TestDevStartFailure: a command that cannot start is said; in watch
+// mode the next save retries it, under --no-watch weft dev exits 127
+// (the shell's "command not found") instead of waiting forever.
+func TestDevStartFailure(t *testing.T) {
+	const missing = "/nonexistent/weft-dev-no-such-command"
+	failRe := regexp.MustCompile(`(?m)^weft dev: could not start "` + missing + `"`)
+
+	dir := t.TempDir()
+	addr := loop(freeBase(t, 1))
+	d := startDev(t, []string{"--addr", addr, "--db", "sqlite://" + filepath.Join(t.TempDir(), "weft.db"), "--watch", dir, "--", missing}, nil)
+	d.waitOut(t, failRe, 1)
+	writeGo(t, dir, "main.go", "retry")
+	d.waitOut(t, failRe, 2)
+	d.interrupt(t)
+	notListening(t, addr)
+
+	addr = loop(freeBase(t, 1))
+	d = startDev(t, []string{"--addr", addr, "--db", "sqlite://" + filepath.Join(t.TempDir(), "weft.db"), "--no-watch", "--", missing}, nil)
+	d.wait(t, 127)
+	if !failRe.MatchString(d.out.String()) {
+		t.Errorf("the start failure is not said:\n%s", d.out.String())
+	}
+	notListening(t, addr)
+}
+
+// TestDevAppExitThenSave: an app that exits on its own in watch mode is
+// reported with its code, and the next save starts it again.
+func TestDevAppExitThenSave(t *testing.T) {
+	exitRe := regexp.MustCompile(`(?m)^weft dev: app pid \d+ exited \(exit code 3\); a \.go save restarts it$`)
+	dir := t.TempDir()
+	addr := loop(freeBase(t, 1))
+	d := startDev(t, []string{"--addr", addr, "--db", "sqlite://" + filepath.Join(t.TempDir(), "weft.db"), "--watch", dir},
+		map[string]string{"WEFT_DEV_HELPER_EXIT": "3"})
+	d.waitOut(t, exitRe, 1)
+	writeGo(t, dir, "main.go", "fixed")
+	d.waitOut(t, exitRe, 2)
+	if n := len(helperRe.FindAllString(d.out.String(), -1)); n != 2 {
+		t.Errorf("the app ran %d times, want 2:\n%s", n, d.out.String())
+	}
+	d.interrupt(t)
+	notListening(t, addr)
+}
+
+// TestDevPortShift: without --addr the port policy applies — a busy
+// base port moves Studio to the next one, said in one line, and the
+// app's WEFT_STUDIO_URL (and the one line) name the port really used.
+func TestDevPortShift(t *testing.T) {
+	shortRuntimeWait(t, 200*time.Millisecond)
+	base := freeBase(t, 2)
+	foreign, err := net.Listen("tcp", loop(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := &http.Server{Handler: http.NotFoundHandler(), ReadHeaderTimeout: time.Second}
+	go func() { _ = hs.Serve(foreign) }()
+	defer func() { _ = hs.Close() }()
+	setVar(t, &devDefaultAddr, loop(base))
+	setVar(t, &devSpan, 2)
+	t.Setenv("WEFT_STUDIO_ADDR", "")
+
+	dir := t.TempDir()
+	d := startDev(t, []string{"--db", "sqlite://" + filepath.Join(dir, "weft.db"), "--watch", dir}, nil)
+	line := d.waitOut(t, oneLineRe, 1)[0]
+	helper := d.waitOut(t, helperRe, 1)[0]
+	if helper[3] != "http://"+loop(base+1) {
+		t.Errorf("WEFT_STUDIO_URL = %q, want the shifted http://%s", helper[3], loop(base+1))
+	}
+	if !strings.HasPrefix(line[1], "http://"+loop(base+1)+"/") {
+		t.Errorf("the one line's link %q is not on %s", line[1], loop(base+1))
+	}
+	if !strings.Contains(d.out.String(), "studio: "+loop(base)+" is busy") {
+		t.Errorf("the shift is not said:\n%s", d.out.String())
+	}
+	d.interrupt(t)
+	notListening(t, loop(base+1))
+}
+
+// TestDevReusesRunningStudio: a Studio already serving the same
+// database, walled by the fixed token weft dev was given, is reused —
+// the reuse line, the app pointed at its URL with that token — and
+// weft dev stops only the app: the reused Studio is not its to stop.
+func TestDevReusesRunningStudio(t *testing.T) {
+	shortRuntimeWait(t, 200*time.Millisecond)
+	base := freeBase(t, 1)
+	dir := t.TempDir()
+	db := "sqlite://" + filepath.Join(dir, "weft.db")
+	var running syncBuffer
+	stopRunning := startStudio(t, db, base, 1, loop(base), &running)
+	setVar(t, &devDefaultAddr, loop(base))
+	setVar(t, &devSpan, 1)
+	t.Setenv("WEFT_STUDIO_ADDR", "")
+
+	d := startDev(t, []string{"--db", db, "--token", "tok", "--watch", dir}, nil)
+	line := d.waitOut(t, oneLineRe, 1)[0]
+	helper := d.waitOut(t, helperRe, 1)[0]
+	if !strings.Contains(d.out.String(), "studio already running at http://"+loop(base)) {
+		t.Errorf("no reuse line:\n%s", d.out.String())
+	}
+	if helper[3] != "http://"+loop(base) || helper[4] != "tok" {
+		t.Errorf("the app got %q / %q, want the running Studio's URL and the fixed token", helper[3], helper[4])
+	}
+	if line[1] != "http://"+loop(base)+"/" {
+		t.Errorf("link %q, want the bare running Studio URL", line[1])
+	}
+	// One SIGTERM stops both: weft dev (its app first) and the running
+	// Studio (its own serveOn) — weft dev must not print a shutdown of
+	// a Studio it did not start.
+	pid := atoi(t, line[2])
+	stopRunning()
+	d.wait(t, 0)
+	gone(t, "the app", pid)
+	if strings.Contains(d.out.String(), "studio: shutting down") {
+		t.Errorf("weft dev stopped a Studio it reused:\n%s", d.out.String())
+	}
+	notListening(t, loop(base))
+}
+
+// TestLoopbackAddr: the app dials loopback for a Studio bound to every
+// interface (otel refuses plaintext to a non-loopback host).
+func TestLoopbackAddr(t *testing.T) {
+	for in, want := range map[string]string{
+		"0.0.0.0:7331":   "127.0.0.1:7331",
+		"[::]:7331":      "127.0.0.1:7331",
+		":7331":          "127.0.0.1:7331",
+		"127.0.0.1:7331": "127.0.0.1:7331",
+		"10.0.0.5:7331":  "10.0.0.5:7331",
+	} {
+		if got := loopbackAddr(in); got != want {
+			t.Errorf("loopbackAddr(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

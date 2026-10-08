@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -44,6 +45,11 @@ const (
 // them.
 var (
 	devRuntimeWait = 5 * time.Second
+	// devDefaultAddr and devSpan are the port policy's unpinned start
+	// (defaultAddr, listen.DefaultSpan); variables so a test may move
+	// them to free ports.
+	devDefaultAddr = defaultAddr
+	devSpan        = 0
 	devPoll        = 100 * time.Millisecond
 )
 
@@ -112,12 +118,16 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 
 	// Signals are ours from here on: Ctrl-C stops the app first, then
 	// Studio. Armed before anything starts, so none is lost.
+	// SIGHUP (the terminal closed) is one of them on unix: its default
+	// action would end weft dev without stopping the app.
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(sigs, devSignals...)
 	defer signal.Stop(sigs)
 
 	out := &lockedWriter{w: stdout}
-	st, err := devStudio(*db, wantAddr(*addr, defaultAddr), *token, out, opts...)
+	w := wantAddr(*addr, devDefaultAddr)
+	w.span = devSpan
+	st, err := devStudio(*db, w, *token, out, opts...)
 	if err != nil {
 		return err
 	}
@@ -212,10 +222,13 @@ type devStudioRun struct {
 }
 
 // devStudio applies `weft studio`'s port policy and starts Studio in
-// this process, or reuses one already serving the same database. A
-// reuse needs the token the app will present: a fixed one (--token,
-// WEFT_STUDIO_TOKEN); the running Studio's generated dev token is that
-// process's alone.
+// this process, or reuses one already serving the same database. The
+// probe carries only a fixed token (--token, WEFT_STUDIO_TOKEN): a
+// running Studio walled by another token answers it 401 and is
+// skipped for the next port, so a reuse is either that fixed token's
+// Studio or one with no token wall — whose app gets an empty
+// WEFT_STUDIO_TOKEN, all it needs. (Plan B3's stable per-DB token
+// changes this.)
 func devStudio(dbFlag string, w want, tokenFlag string, out io.Writer, opts ...studio.Option) (*devStudioRun, error) {
 	dbPath, err := dbFile(dbFlag)
 	if err != nil {
@@ -228,13 +241,14 @@ func devStudio(dbFlag string, w want, tokenFlag string, out io.Writer, opts ...s
 	if err != nil {
 		return nil, err
 	}
-	r := &devStudioRun{addr: choice.Addr, url: choice.URL(), dbPath: dbPath, stop: func(os.Signal) {}}
+	// The app and the one line dial loopback: a Studio bound to every
+	// interface (--addr 0.0.0.0:7331) is reachable there, and otel's
+	// Studio destination refuses plaintext to a non-loopback host.
+	dial := loopbackAddr(choice.Addr)
+	r := &devStudioRun{addr: dial, url: "http://" + dial, dbPath: dbPath, stop: func(os.Signal) {}}
 	if choice.Reuse {
-		if fixed == "" {
-			return nil, fmt.Errorf("%s — but weft dev hands the app that Studio's token, and its generated dev token is not known here: set WEFT_STUDIO_TOKEN (or --token) to it, or stop that Studio", choice.ReuseLine())
-		}
 		_, _ = fmt.Fprintln(out, choice.ReuseLine())
-		r.token, r.link = fixed, uiLink(choice.Addr, "")
+		r.token, r.link = fixed, uiLink(dial, "")
 		return r, nil
 	}
 	if choice.Note != "" {
@@ -251,9 +265,9 @@ func devStudio(dbFlag string, w want, tokenFlag string, out io.Writer, opts ...s
 	// A fixed token stays out of the log, link included (B1.1's rule);
 	// a generated one is nobody's secret yet and opens the UI.
 	if fixed != "" {
-		r.link = uiLink(choice.Addr, "")
+		r.link = uiLink(dial, "")
 	} else {
-		r.link = uiLink(choice.Addr, srv.token)
+		r.link = uiLink(dial, srv.token)
 	}
 	stopCh := make(chan os.Signal, 1)
 	done := make(chan error, 1)
@@ -266,6 +280,19 @@ func devStudio(dbFlag string, w want, tokenFlag string, out io.Writer, opts ...s
 		_ = srv.Close()
 	}
 	return r, nil
+}
+
+// loopbackAddr is addr with an unspecified host (0.0.0.0, ::, empty)
+// replaced by 127.0.0.1: where a client on this machine dials it.
+func loopbackAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		return net.JoinHostPort("127.0.0.1", port)
+	}
+	return addr
 }
 
 // devLoop runs the app and restarts it: one child at a time.
@@ -286,6 +313,10 @@ type devLoop struct {
 // app's own exit (its exit code).
 func (d *devLoop) run(sigs <-chan os.Signal, changes <-chan string) error {
 	cur, line := d.start()
+	if cur == nil && d.noWatch {
+		// Nothing will ever restart it: the shell's "command not found".
+		return exitCode(127)
+	}
 	for {
 		var done <-chan struct{}
 		if cur != nil {
@@ -296,7 +327,7 @@ func (d *devLoop) run(sigs <-chan os.Signal, changes <-chan string) error {
 			d.stopSig = sig
 			if cur != nil {
 				line.finish()
-				cur.stop(sig)
+				cur.stop(appSignal(sig))
 			}
 			return nil
 		case path := <-changes:
@@ -304,6 +335,14 @@ func (d *devLoop) run(sigs <-chan os.Signal, changes <-chan string) error {
 			if cur != nil {
 				line.finish()
 				cur.stop(syscall.SIGTERM)
+			}
+			// A Ctrl-C during the stop's grace window ends here: no
+			// fresh app started only to be killed.
+			select {
+			case sig := <-sigs:
+				d.stopSig = sig
+				return nil
+			default:
 			}
 			cur, line = d.start()
 		case <-done:

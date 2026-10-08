@@ -384,6 +384,10 @@ environment variable one to one (the table below).
 | `--manifest` | `WEFT_MANIFEST` | the nearest `weft.json` upward |
 | `--url` (runs, open, export, doctor) | `WEFT_STUDIO_URL` | `http://127.0.0.1:7331` |
 
+`weft dev`'s `--watch` and `--no-watch` shape the dev loop only and
+have no environment mirror; like `--open` and `--no-playground` they
+are not connection settings.
+
 ##### `weft dev`
 
 ```sh
@@ -413,17 +417,33 @@ restarts it after 300 ms of quiet: SIGTERM to the group, five seconds,
 then SIGKILL, then the command again. A build failure is printed and
 the next save retries; an app that exits on its own is reported with
 its exit code and the next save restarts it. `--no-watch` turns the
-watching off, and `weft dev` then exits with the app's exit code.
-Ctrl-C stops the app first (the same signal), then Studio.
+watching off, and `weft dev` then exits with the app's exit code (127
+when the command cannot start at all). A directory that arrives with
+`.go` files in it (a checkout, a `mv`) restarts too; editor lock files
+(`.#name.go`) do not; a directory that cannot be watched (inotify's
+`max_user_watches` spent) is said in one line. Ctrl-C, SIGTERM and
+SIGHUP (the terminal closing) stop the app first — the same signal,
+SIGHUP sent as SIGTERM — then Studio. A SIGKILL of `weft dev` cannot be
+caught: on Linux `go run` still gets SIGTERM (Pdeathsig), but the
+binary it started — the grandchild — can be orphaned; elsewhere the
+whole group can.
 
 Each start prints one line: the UI link (with `#token=` only for a
 generated dev token — a fixed `--token` / `WEFT_STUDIO_TOKEN` stays out
 of the log), the app's pid, and the first runtime that registered with
 this Studio within five seconds — else `no runtime registered yet (the
 app needs runtime.Install; WEFT_ENV=dev is set)` and a later line when
-one does. A Studio already serving the same database is reused only
-with a fixed token (`WEFT_STUDIO_TOKEN`): its generated one is not
-known to this command.
+one does. A Studio bound to every interface (`--addr 0.0.0.0:7331`) is
+handed to the app, and printed, as `127.0.0.1`.
+
+Reuse follows the port policy, whose probe carries only a fixed token
+(`--token` / `WEFT_STUDIO_TOKEN`): a Studio already serving the same
+database with that token is reused (the app gets that URL and token;
+`weft dev` stops only the app). Without a fixed token a running
+token-walled Studio answers the probe 401 and is skipped — `weft dev`
+takes the next port with its own Studio on the same file; a reused
+Studio with no token wall gives the app an empty `WEFT_STUDIO_TOKEN`,
+all it needs. (Plan B3's stable per-database token changes this.)
 
 `go run ./studio/examples/basic` records demo runs (a tool call, a
 subagent, a failure) into an obsdb database and serves Studio on

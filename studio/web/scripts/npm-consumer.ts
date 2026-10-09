@@ -21,8 +21,9 @@ await writeFile(`${dir}package.json`, `${JSON.stringify({ name: "consumer", priv
 await writeFile(
   `${dir}app.ts`,
   `import "@weftgo/devtools"
+import "@weftgo/devtools/panel.js"
 import { close, mount, on, open, parseScope, scope, serializeScope, toggle } from "@weftgo/devtools"
-import type { DevtoolsEvents, MountOptions, Scope, WeftDevtoolsElement } from "@weftgo/devtools"
+import type { DevtoolsEvents, Mode, MountOptions, Position, Scope, WeftDevtoolsElement } from "@weftgo/devtools"
 import { parseScope as parseOnly, serializeScope as serializeOnly } from "@weftgo/devtools/scope"
 import type { Scope as ScopeOnly } from "@weftgo/devtools/scope"
 import { useWeftDevtools as reactRef } from "@weftgo/devtools/react"
@@ -31,15 +32,19 @@ import { weftDevtools } from "@weftgo/devtools/svelte"
 
 const s: Scope = parseScope(serializeScope({ publicId: "pub_1", run: "r_1" }))
 const t: ScopeOnly = parseOnly(serializeOnly(s))
-const o: MountOptions = { endpoint: "/studio/", open: true }
-const el: WeftDevtoolsElement = mount(o)
+const at: Position = "left-dock"
+const mode: Mode = "pill"
+const o: MountOptions = { endpoint: "/studio/", open: true, position: at, mode, push: true, zIndex: 10, enabled: true }
+// null with enabled: false or on a server
+const mounted: WeftDevtoolsElement | null = mount(o)
+const el: Element = mounted ?? document.createElement("div")
 scope(t)
 open()
 close()
 toggle()
 const off = on("run", (d: DevtoolsEvents["run"]) => d.runId.length)
 off()
-const ref: (node: Element | null) => (() => void) | undefined = reactRef({ scope: "pub_1" })
+const ref: (node: Element | null) => (() => void) | undefined = reactRef({ scope: "pub_1", enabled: false })
 vueRef(() => ({ scope: "pub_1" }))(el)
 weftDevtools(el, { scope: s }).destroy()
 ref(null)
@@ -48,15 +53,19 @@ ref(null)
 const a: number = parseScope("x")
 // @ts-expect-error the scope entry's parseScope too
 const b: number = parseOnly("x")
-// @ts-expect-error mount returns the element
+// @ts-expect-error mount returns the element (or null)
 const c: number = mount()
+// @ts-expect-error mount returns the element or null, never undefined
+const g: WeftDevtoolsElement | undefined = mount()
+// @ts-expect-error a position the panel does not know
+const h: Position = "middle"
 // @ts-expect-error the react helper returns a ref callback
 const d: number = reactRef({ scope: "p" })
 // @ts-expect-error the vue helper returns a function ref
 const e: number = vueRef({ scope: "p" })
 // @ts-expect-error the svelte action returns { update, destroy }
 const f: number = weftDevtools(el, { scope: "p" })
-export { a, b, c, d, e, f }
+export { a, b, c, d, e, f, g, h }
 `
 )
 const base = {

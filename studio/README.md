@@ -699,10 +699,21 @@ module (`mount`, `scope`, `open`, `close`, `toggle`, `on`,
 `isOpen`, `studioLink`) and the `/react`, `/vue` and `/svelte`
 helpers, which set the `data-weft-scope` marker and are not components.
 The package has zero runtime dependencies and its version is the weft
-version. `studio/web/npm/README.md` has the API table. `make devtools-npm` assembles the package in
+version. `studio/web/npm/README.md` has the API table. The root entry
+is import-safe on a server (the assembled `index.js` imports `panel.js`
+between `ssr-guard.js` and `ssr-unguard.js`, which lend its element
+class a placeholder `HTMLElement` where there is none; every export is
+a no-op without a DOM). `mount()` is idempotent (a second call reuses
+the element the first made, with the new options), waits for `<body>`
+when called from `<head>`, and with the helpers takes `enabled`
+(`enabled: import.meta.env.DEV` keeps production visitors from loading
+the panel). `make devtools-npm` assembles the package in
 `studio/web/npm`, runs the package suite against the assembled files
 and lists the tarball. `make studio-check` fails if the package's
-`panel.js` is not the served one. Publishing is done by hand. A Vite app
+`panel.js` is not the served one, an `exports`/`types` target is
+missing, or `package.json` or the package README names another
+version; the same check is the package's `prepublishOnly`, and
+`publishConfig.access` is `public`. Publishing is done by hand. A Vite app
 that installs the packed package is in `examples/devtools-vite`
 (`make devtools-vite-check`).
 

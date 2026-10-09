@@ -10,6 +10,23 @@ module, ADR 0005).
 
 ### Added
 
+- **Review fixes (npm)**: `@weftgo/devtools` publishes public
+  (`publishConfig.access`), with `prepublishOnly` running
+  `npm-package.ts --check`, which now also fails on a missing `exports`
+  or `types` target, an unguarded panel import, or a README naming
+  another version (the README no longer hard-codes one); `engines`
+  (node >= 18), `homepage`, `bugs`, `keywords`, and `types` for
+  `./panel.js`. `mount()` waits for `<body>` (called from `<head>` it
+  returns the element and appends it on `DOMContentLoaded`), is
+  idempotent (a second call reuses the element it made and applies the
+  new options) and returns `null` with `enabled: false` or on a server;
+  the root entry is import-safe without a DOM (`ssr-guard.js` /
+  `ssr-unguard.js` around the `panel.js` import; every export a no-op);
+  `enabled` on `mount()` and the React/Vue/Svelte helpers; `Position`
+  is the panel's whole placement union (`left-dock`, `top-dock`,
+  `bottom-dock` added) and `mount()` takes `mode`, `push` and `zIndex`
+  (written as `data-mode`, `data-push`, `data-z-index`). **Breaking**:
+  `mount()` returns `WeftDevtoolsElement | null`.
 - **The devtools panel's Request tab** (plan E1.2): the run page's
   Request pane in the panel, one step at a time (`J`/`K`, the tab's step
   buttons, a step card; `⤢` carries it) — the chips "changed by

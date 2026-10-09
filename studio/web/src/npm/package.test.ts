@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type * as Devtools from "@weftgo/devtools"
 import { weftVersion } from "../../scripts/weft-version.ts"
-import type { MountOptions as LadderOptions } from "../panel/config"
+import type { MountOptions as LadderOptions, PanelPlacement } from "../panel/config"
 import type { DevtoolsAPI, DevtoolsEvents as PanelEvents } from "../panel/element"
 import { baseRoutes, FakeEventSource, fakeStudio, META, page, runEvents, runRow, settle, setup, teardown } from "../panel/testkit"
 
@@ -22,6 +22,11 @@ const STUDIO = "http://studio.test/studio/"
 type Dock = Devtools.WeftDevtoolsElement
 const docks = () => Array.from(document.querySelectorAll<Dock>("weft-devtools"))
 const dock = () => docks().at(0) ?? null
+/** mounted is mount's element, failing the test on null. */
+const mounted = (n: Dock | null): Dock => {
+  if (!n) throw new Error("mount returned null")
+  return n
+}
 const shadow = (sel: string) => dock()?.shadowRoot?.querySelector(sel) ?? null
 /** The public ids the open conversation streams follow right now. */
 const scopes = () =>
@@ -97,7 +102,7 @@ describe("mount", () => {
     const api = await load()
     await settle()
     expect(dock()?.autoMounted).toBe(true)
-    const node = api.mount({ endpoint: STUDIO, publicId: "pub_orders", open: true })
+    const node = mounted(api.mount({ endpoint: STUDIO, publicId: "pub_orders", open: true }))
     await settle()
     expect(docks()).toEqual([node])
     expect(node.autoMounted).toBe(false)
@@ -114,7 +119,7 @@ describe("mount", () => {
     const api = await load()
     const box = document.createElement("section")
     document.body.appendChild(box)
-    const node = api.mount({ endpoint: STUDIO, target: box })
+    const node = mounted(api.mount({ endpoint: STUDIO, target: box }))
     await settle()
     expect(markup.isConnected).toBe(true)
     expect(node.parentElement).toBe(box)
@@ -132,11 +137,97 @@ describe("mount", () => {
 
   it("its options are configuration rung 1, field for field", () => {
     // A compile-time pin: the package's public type and the ladder's.
-    type Pkg = Omit<Devtools.MountOptions, "target">
-    const toLadder = (o: Pkg): LadderOptions => o
-    const toPkg = (o: LadderOptions): Pkg => o
-    const all: Required<Pkg> = { endpoint: STUDIO, scope: "p;run=r", publicId: "p", token: "t", detect: "headers", position: "right-dock", open: true, auto: false, theme: "light" }
+    // position is the panel's whole placement union (D1), which the
+    // ladder reads from any rung; the layout fields are attributes.
+    type Pkg = Omit<Devtools.PanelOptions, "position">
+    type Ladder = Omit<LadderOptions, "position">
+    const toLadder = (o: Pkg): Ladder => o
+    const toPkg = (o: Ladder): Pkg => o
+    const all: Required<Pkg> = { endpoint: STUDIO, scope: "p;run=r", publicId: "p", token: "t", detect: "headers", open: true, auto: false, theme: "light" }
     expect(toPkg(toLadder(all))).toEqual(all)
+    const toPlacement = (p: Devtools.Position): PanelPlacement => p
+    const toPosition = (p: PanelPlacement): Devtools.Position => p
+    expect(toPosition(toPlacement("left-dock"))).toBe("left-dock")
+    const toConfigMode = (m: Devtools.Mode): string => m
+    expect(toConfigMode("pill")).toBe("pill")
+  })
+
+  it("the layout options are the element's data-mode, data-push and data-z-index; any placement is accepted", async () => {
+    fakeStudio(baseRoutes())
+    const api = await load()
+    await settle()
+    const node = mounted(api.mount({ endpoint: STUDIO, position: "left-dock", mode: "dock", push: true, zIndex: 50 }))
+    expect(node.getAttribute("data-mode")).toBe("dock")
+    expect(node.getAttribute("data-push")).toBe("true")
+    expect(node.getAttribute("data-z-index")).toBe("50")
+    expect(node.options?.position).toBe("left-dock")
+    // A later mount without them removes what the first one wrote.
+    api.mount({ endpoint: STUDIO })
+    expect(node.hasAttribute("data-mode")).toBe(false)
+    expect(node.hasAttribute("data-push")).toBe(false)
+    expect(node.hasAttribute("data-z-index")).toBe(false)
+  })
+
+  it("is idempotent: a second mount (StrictMode, HMR) reuses the element and applies the new options", async () => {
+    fakeStudio(baseRoutes())
+    const api = await load()
+    await settle()
+    const first = mounted(api.mount({ endpoint: STUDIO, publicId: "pub_a" }))
+    await settle()
+    const second = api.mount({ endpoint: STUDIO, publicId: "pub_b" })
+    await settle()
+    expect(second).toBe(first)
+    expect(docks()).toEqual([first])
+    expect(first.options?.publicId).toBe("pub_b")
+    expect(scopes()).toEqual(["pub_b"])
+    // The page's own markup is not the host's mount: never reused.
+    const markup = document.createElement("weft-devtools")
+    document.body.appendChild(markup)
+    expect(api.mount({ endpoint: STUDIO })).toBe(first)
+    // A new target moves it.
+    const box = document.createElement("section")
+    document.body.appendChild(box)
+    expect(api.mount({ endpoint: STUDIO, target: box })?.parentElement).toBe(box)
+  })
+
+  it("enabled: false mounts nothing and returns null", async () => {
+    const studio = fakeStudio(baseRoutes())
+    const api = await load()
+    await settle()
+    const before = docks()
+    expect(api.mount({ endpoint: STUDIO, enabled: false })).toBeNull()
+    await settle()
+    expect(docks()).toEqual(before)
+    expect(studio.fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.startsWith(STUDIO))).toHaveLength(0)
+  })
+
+  it("before <body> exists (a bundle in <head>) it returns the element and appends it on DOMContentLoaded", async () => {
+    fakeStudio(baseRoutes())
+    const state = Object.getOwnPropertyDescriptor(document, "readyState")
+    Object.defineProperty(document, "readyState", { configurable: true, get: () => "loading" })
+    const body = document.body
+    let api: typeof Devtools
+    let node: Dock
+    let again: Dock | null
+    try {
+      api = await load()
+      body.remove()
+      expect(document.body).toBeNull()
+      node = mounted(api.mount({ endpoint: STUDIO, publicId: "pub_orders" }))
+      again = api.mount({ endpoint: STUDIO, publicId: "pub_orders" })
+      expect(node.isConnected).toBe(false)
+    } finally {
+      if (state) Object.defineProperty(document, "readyState", state)
+      else delete (document as { readyState?: unknown }).readyState
+      document.documentElement.appendChild(body)
+    }
+    expect(again).toBe(node)
+    document.dispatchEvent(new Event("DOMContentLoaded"))
+    await settle()
+    // The bundle's own dock (mounted by its listener, first) replaced.
+    expect(docks()).toEqual([node])
+    expect(node.parentElement).toBe(document.body)
+    expect(scopes()).toEqual(["pub_orders"])
   })
 })
 
@@ -146,7 +237,7 @@ describe("scope", () => {
     routes["runs?public_id=pub_b&limit=50"] = { total: 0, runs: [], next_before: null }
     const studio = fakeStudio(routes)
     const api = await load()
-    const node = api.mount({ endpoint: STUDIO, publicId: "pub_orders" })
+    const node = mounted(api.mount({ endpoint: STUDIO, publicId: "pub_orders" }))
     node.setAttribute("data-public-id", "pub_orders")
     await settle()
     expect(scopes()).toEqual(["pub_orders"])
@@ -165,7 +256,7 @@ describe("scope", () => {
     fakeStudio(baseRoutes())
     const api = await load()
     api.scope({ publicId: "pub_orders", flow: "f_1" })
-    const node = api.mount({ endpoint: STUDIO })
+    const node = mounted(api.mount({ endpoint: STUDIO }))
     await settle()
     expect(scopes()).toEqual(["pub_orders"])
     expect(node.getAttribute("data-weft-scope")).toBe("pub_orders;flow=f_1")
@@ -182,7 +273,7 @@ describe("scope", () => {
     fakeStudio(routes)
     const api = await load()
     api.scope({ publicId: "pub_orders", session: "s_01", flow: "f_1", run: "s_01-t1" })
-    const node = api.mount({ endpoint: STUDIO, open: true })
+    const node = mounted(api.mount({ endpoint: STUDIO, open: true }))
     await settle()
     expect(node.options?.scope).toEqual({ publicId: "pub_orders", session: "s_01", flow: "f_1", run: "s_01-t1" })
     const q = (sel: string) => Array.from(node.shadowRoot?.querySelectorAll(sel) ?? []).map((n) => n.textContent)
@@ -342,7 +433,7 @@ describe("select, isOpen, studioLink, scope(null) (C4)", () => {
     routes["runs?public_id=pub_b&limit=50"] = { total: 0, runs: [], next_before: null }
     fakeStudio(routes)
     const api = await load()
-    const node = api.mount({ endpoint: STUDIO })
+    const node = mounted(api.mount({ endpoint: STUDIO }))
     await settle()
     api.scope("pub_b;run=r_1")
     await settle()
@@ -432,6 +523,26 @@ describe("the framework helpers", () => {
     expect(rescan).toHaveBeenCalledTimes(1)
     expect(scopes()).toEqual(["pub_orders"])
     rescan.mockRestore()
+  })
+
+  it("enabled: false turns every helper off: no marker, no panel loaded, no mount", async () => {
+    const studio = fakeStudio(baseRoutes())
+    const { useWeftDevtools } = await import("@weftgo/devtools/react")
+    const vue = await import("@weftgo/devtools/vue")
+    const svelte = await import("@weftgo/devtools/svelte")
+    const hosts = [0, 1, 2].map(() => document.body.appendChild(document.createElement("div")))
+    useWeftDevtools({ scope: "pub_orders", endpoint: STUDIO, enabled: false })(hosts[0])
+    vue.useWeftDevtools({ scope: "pub_orders", endpoint: STUDIO, enabled: false })(hosts[1])
+    const action = svelte.weftDevtools(hosts[2], { scope: "pub_orders", endpoint: STUDIO, enabled: false })
+    await settle()
+    for (const h of hosts) expect(h.hasAttribute("data-weft-scope")).toBe(false)
+    expect(docks()).toHaveLength(0)
+    expect(studio.fetchMock).not.toHaveBeenCalled()
+    // Switched on later (the same element): it binds then.
+    action.update({ scope: "pub_orders", endpoint: STUDIO })
+    await settle()
+    expect(hosts[2].getAttribute("data-weft-scope")).toBe("pub_orders")
+    expect(docks()).toHaveLength(1)
   })
 
   it("a helper without endpoint or token mounts nothing: no Studio, no dock and no 'not reachable' line", async () => {

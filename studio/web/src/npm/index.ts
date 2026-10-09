@@ -10,6 +10,13 @@
 // the same method on every panel on the page — the one implementation
 // window.weft.devtools exposes under the script tag. Importing this
 // module adds no global: its exports are the API.
+//
+// Import-safe on a server: the assembled index.js imports the bundle
+// between ssr-guard.js and ssr-unguard.js (npm-package.ts rewrites this
+// line), which give the panel's element class a placeholder
+// HTMLElement to extend where there is none — and every export below
+// is a no-op without a DOM (mount returns null, on returns a no-op
+// unsubscribe).
 import "./panel.js"
 import { parseScope, serializeScope } from "../lib/scope.js"
 import type { Scope } from "../lib/scope.js"
@@ -17,8 +24,14 @@ import type { Scope } from "../lib/scope.js"
 export { parseScope, serializeScope } from "../lib/scope.js"
 export type { Scope } from "../lib/scope.js"
 
-/** Where the dock sits. */
-export type Position = "bottom-right" | "bottom-left" | "right-dock"
+/** Where the dock starts (data-position, D1): the float's corner, or
+ * a dock's side. The panel's PanelPlacement, value for value
+ * (package.test.ts pins the two unions). */
+export type Position = "bottom-right" | "bottom-left" | "right-dock" | "left-dock" | "top-dock" | "bottom-dock"
+
+/** The dock's initial mode (data-mode, D1); the user's stored layout
+ * wins once there is one. */
+export type Mode = "float" | "dock" | "pill" | "hidden"
 
 /** mount's options: configuration rung 1, field by field above the
  * element's attributes, meta tags and the script tag. */
@@ -47,15 +60,30 @@ export interface MountOptions {
    * the user's stored choice, else the page's <html> (data-theme,
    * class="dark"), else prefers-color-scheme, else dark. */
   theme?: "auto" | "light" | "dark"
-  /** Where the element is appended (default document.body). */
+  /** The initial mode (data-mode). */
+  mode?: Mode
+  /** A docked, open panel pads <html> on its side (data-push). */
+  push?: boolean
+  /** The dock's z-index (data-z-index; default --weft-z, else 2147483000). */
+  zIndex?: number | string
+  /** Where the element is appended (default document.body; with no
+   * <body> yet, it is appended to the body on DOMContentLoaded). */
   target?: Element
+  /** false: mount nothing and return null (default true). Gate the
+   * panel on your build's environment: enabled: import.meta.env.DEV. */
+  enabled?: boolean
 }
+
+/** The options the element carries as configuration rung 1: mount's,
+ * minus where it goes, whether it mounts, and the layout fields mount
+ * writes as the element's data-mode / data-push / data-z-index. */
+export type PanelOptions = Omit<MountOptions, "target" | "enabled" | "mode" | "push" | "zIndex">
 
 /** The registered element, as far as this module touches it: the
  * public members of panel.js's WeftDevtools, the same version's. */
 export interface WeftDevtoolsElement extends HTMLElement {
   /** Rung 1: the options mount passed. */
-  options: Omit<MountOptions, "target"> | null
+  options: PanelOptions | null
   /** True only on the dock the bundle mounted by itself. */
   autoMounted: boolean
   /** Re-reads the configuration ladder and applies it. */
@@ -102,9 +130,14 @@ export interface DevtoolsEvents {
 
 const TAG = "weft-devtools"
 
+/** Whether there is a page to put a panel in: false on a server (Node,
+ * a worker, an edge runtime), where every export is a no-op. */
+const hasDOM = () => typeof document !== "undefined" && typeof HTMLElement !== "undefined"
+
 // The package's exports are the API: no panel on this page adds
 // window.weft.devtools (the script-tag install's global).
 try {
+  if (!hasDOM()) throw new Error("no DOM")
   const ctor: (CustomElementConstructor & { noGlobal?: boolean }) | undefined = customElements.get(TAG)
   if (ctor && "noGlobal" in ctor) {
     ctor.noGlobal = true
@@ -116,12 +149,13 @@ try {
 }
 
 const elements = (): WeftDevtoolsElement[] =>
-  Array.from(document.querySelectorAll<WeftDevtoolsElement>(TAG))
+  hasDOM() ? Array.from(document.querySelectorAll<WeftDevtoolsElement>(TAG)) : []
 
 /** later runs fn now, or — while the page is still parsing, before the
  * bundle has mounted its dock — once it has (the bundle's own
  * DOMContentLoaded listener was added first, so it runs first). */
 function later(fn: () => void): void {
+  if (!hasDOM()) return
   if (document.readyState === "loading")
     document.addEventListener("DOMContentLoaded", fn, { once: true })
   else fn()
@@ -142,6 +176,36 @@ const openOf = (n: WeftDevtoolsElement) => (n as Partial<WeftDevtoolsElement>).i
 const rescanOf = (n: WeftDevtoolsElement) => (typeof n.rescan === "function" ? () => n.rescan() : null)
 const toggleOf = (n: WeftDevtoolsElement) => (typeof n.toggle === "function" ? () => n.toggle() : null)
 
+/** HOST marks the element mount() made (Symbol.for: it survives the
+ * module being evaluated again — HMR, a second copy of the package). */
+const HOST = Symbol.for("weft.devtools.mount")
+type Hosted = WeftDevtoolsElement & { [HOST]?: true }
+
+/** The element mount() made and has not appended yet: no <body> when
+ * it was called (a classic bundle in <head>). */
+let pending: { node: WeftDevtoolsElement; target?: Element } | null = null
+
+/** hostMounted is the element an earlier mount() made, if it is still
+ * on the page (or waiting for <body>). */
+const hostMounted = (): WeftDevtoolsElement | null =>
+  pending?.node ?? elements().find((n) => (n as Hosted)[HOST] === true) ?? null
+
+/** The page's <body> and root element now: null before the parser has
+ * made them (the DOM types say never). */
+const bodyNow = () => document.body as HTMLElement | null
+const rootNow = () => document.documentElement as HTMLElement | null
+
+/** layout writes the layout options as the element's attributes
+ * (rung 2: the panel's options rung does not carry them); an option
+ * left out removes what an earlier mount() wrote. */
+function layout(node: Element, o: Pick<MountOptions, "mode" | "push" | "zIndex">): void {
+  const set = (name: string, v: string | undefined) =>
+    v === undefined ? node.removeAttribute(name) : node.setAttribute(name, v)
+  set("data-mode", o.mode)
+  set("data-push", o.push === undefined ? undefined : String(o.push))
+  set("data-z-index", o.zIndex === undefined ? undefined : String(o.zIndex))
+}
+
 /** mount appends a <weft-devtools> configured by opts (rung 1) to
  * opts.target or document.body and returns it. It is the host's
  * mount: where Studio does not answer it shows one "Studio not
@@ -149,17 +213,20 @@ const toggleOf = (n: WeftDevtoolsElement) => (typeof n.toggle === "function" ? (
  * dock the bundle mounted by itself (no markup, data-auto) is replaced
  * — its open state carried over — and markup of the page's own is
  * left alone. Unless opts says otherwise, the new panel starts in the
- * last scope() and open state open()/close() asked for. */
-export function mount(opts: MountOptions = {}): WeftDevtoolsElement {
-  const { target, ...options } = opts
-  let carried: boolean | null = null
-  for (const n of elements())
-    if (n.autoMounted) {
-      carried = openOf(n)
-      n.remove()
-    }
-  const node = document.createElement(TAG) as WeftDevtoolsElement
-  const o = { ...options }
+ * last scope() and open state open()/close() asked for.
+ *
+ * mount is idempotent: a second call (a React StrictMode effect, HMR)
+ * returns the element the first one made, with the new options
+ * applied (and moved to a new target, given one) — never a second
+ * panel. Called before <body> exists (a bundle in <head>) and with no
+ * target, the element is returned at once and appended on
+ * DOMContentLoaded. It never throws into the host: with
+ * enabled: false, or on a server (no DOM), it mounts nothing and
+ * returns null. */
+export function mount(opts: MountOptions = {}): WeftDevtoolsElement | null {
+  if (opts.enabled === false || !hasDOM()) return null
+  const { target, enabled: _enabled, mode, push, zIndex, ...options } = opts
+  const o: PanelOptions = { ...options }
   // A session-only scope is resolved by the panel (scope() below), not
   // carried as an option.
   const carry = current && o.publicId === undefined && o.scope === undefined ? current : null
@@ -167,12 +234,63 @@ export function mount(opts: MountOptions = {}): WeftDevtoolsElement {
     o.publicId = carry.publicId
     o.scope = { ...carry }
   }
-  const startOpen = wantOpen ?? carried
-  if (o.open === undefined && startOpen !== null) o.open = startOpen
+  if (o.open === undefined && wantOpen !== null) o.open = wantOpen
+  const scopeOnto = (n: WeftDevtoolsElement) => {
+    if (carry?.publicId) n.setAttribute("data-weft-scope", serializeScope(carry))
+    if (carry && !carry.publicId && typeof n.scope === "function") n.scope({ ...carry })
+  }
+
+  const again = hostMounted()
+  if (again) {
+    again.options = o
+    layout(again, { mode, push, zIndex })
+    if (pending?.node === again) {
+      if (target) pending.target = target
+    } else if (target && again.parentNode !== target) target.appendChild(again)
+    rescanOf(again)?.()
+    if (again.isConnected) scopeOnto(again)
+    return again
+  }
+
+  const node = document.createElement(TAG) as Hosted
+  node[HOST] = true
   node.options = o
-  if (carry?.publicId) node.setAttribute("data-weft-scope", serializeScope(carry))
-  ;(target ?? document.body).appendChild(node)
-  if (carry && !carry.publicId && typeof node.scope === "function") node.scope({ ...carry })
+  layout(node, { mode, push, zIndex })
+  const place = (at: Element) => {
+    let carried: boolean | null = null
+    for (const n of elements())
+      if (n.autoMounted && n !== node) {
+        carried = openOf(n)
+        n.remove()
+      }
+    if (node.options && node.options.open === undefined && carried !== null)
+      node.options = { ...node.options, open: carried }
+    at.appendChild(node)
+    scopeOnto(node)
+  }
+  const at = target ?? bodyNow()
+  if (at) place(at)
+  else if (document.readyState === "loading") {
+    pending = { node }
+    document.addEventListener(
+      "DOMContentLoaded",
+      () => {
+        const p = pending
+        if (p?.node !== node) return
+        pending = null
+        try {
+          const where = p.target ?? bodyNow() ?? rootNow()
+          if (where) place(where)
+        } catch {
+          // never into the host
+        }
+      },
+      { once: true }
+    )
+  } else {
+    const root = rootNow()
+    if (root) place(root)
+  }
   return node
 }
 
@@ -288,6 +406,7 @@ export function on<TEvent extends keyof DevtoolsEvents>(
   event: TEvent,
   cb: (detail: DevtoolsEvents[TEvent]) => void
 ): () => void {
+  if (!hasDOM()) return () => {}
   const listener = (e: Event) => {
     try {
       cb((e as CustomEvent<DevtoolsEvents[TEvent]>).detail)

@@ -2,6 +2,21 @@
   "name": "@weftgo/devtools",
   "version": "0.11.0",
   "description": "The weft devtools panel: the same bytes as /studio/panel.js, as an ES module, with typed mount/scope/open/close/on and thin React, Vue and Svelte helpers.",
+  "keywords": [
+    "weft",
+    "devtools",
+    "agents",
+    "llm",
+    "observability",
+    "studio",
+    "react",
+    "vue",
+    "svelte"
+  ],
+  "homepage": "https://github.com/weftgo/weft/tree/main/studio#readme",
+  "bugs": {
+    "url": "https://github.com/weftgo/weft/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -11,7 +26,9 @@
   "type": "module",
   "sideEffects": [
     "./panel.js",
-    "./index.js"
+    "./index.js",
+    "./ssr-guard.js",
+    "./ssr-unguard.js"
   ],
   "types": "./types/npm/index.d.ts",
   "exports": {
@@ -35,7 +52,10 @@
       "types": "./types/lib/scope.d.ts",
       "default": "./scope.js"
     },
-    "./panel.js": "./panel.js",
+    "./panel.js": {
+      "types": "./types/npm/panel.d.ts",
+      "default": "./panel.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -43,6 +63,15 @@
     "panel.js.sha256",
     "types/"
   ],
+  "scripts": {
+    "prepublishOnly": "bun ../scripts/npm-package.ts --check"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "peerDependencies": {
     "react": ">=18",
     "svelte": ">=3",

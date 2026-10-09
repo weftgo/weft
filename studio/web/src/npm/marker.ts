@@ -17,6 +17,11 @@ export interface HelperOptions {
   scope: Scope | string
   endpoint?: string
   token?: string
+  /** false: the helper does nothing — no marker, no panel loaded, no
+   * mount (default true). Gate it on your build's environment, e.g.
+   * enabled: import.meta.env.DEV, so production visitors never load
+   * the panel. */
+  enabled?: boolean
 }
 
 const asScope = (s: Scope | string): Scope => (typeof s === "string" ? { publicId: s } : s)
@@ -24,6 +29,7 @@ const asScope = (s: Scope | string): Scope => (typeof s === "string" ? { publicI
 /** attach marks node, mounts and scopes the panel, and returns the undo
  * (which removes the marker if it is still the one set here). */
 function attach(node: Element, o: HelperOptions): () => void {
+  if (o.enabled === false) return () => {}
   const s = asScope(o.scope)
   const value = serializeScope(s)
   node.setAttribute("data-weft-scope", value)
@@ -39,7 +45,7 @@ function attach(node: Element, o: HelperOptions): () => void {
       // page has, now or mounted later.
       const all = Array.from(document.querySelectorAll<WeftDevtoolsElement>("weft-devtools"))
       const hosts = all.some((n) => !n.autoMounted)
-      if (!hosts && (o.endpoint || o.token)) api.mount({ endpoint: o.endpoint, token: o.token })
+      if (!hosts && (o.endpoint || o.token)) api.mount({ endpoint: o.endpoint, token: o.token, enabled: o.enabled })
       api.scope(s)
     })
     .catch(() => {
@@ -67,7 +73,7 @@ export function binder(get: () => HelperOptions) {
   const bind = (n: Element | null) => {
     if (!n) return unbind()
     const o = get()
-    const k = [serializeScope(asScope(o.scope)), o.endpoint ?? "", o.token ?? ""].join("\u0000")
+    const k = [serializeScope(asScope(o.scope)), o.endpoint ?? "", o.token ?? "", String(o.enabled !== false)].join("\u0000")
     if (n === node && k === key) return
     unbind()
     node = n

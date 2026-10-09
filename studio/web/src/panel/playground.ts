@@ -7,6 +7,7 @@ import { splitTranscript, turnPrompt } from "../lib/events"
 import type { FoldFeed, FoldedRun } from "../lib/events"
 import type { LiveRecord } from "../lib/live"
 import type { ReplayDraft, ReplayVerb } from "../lib/replay"
+import type { HoleMark } from "../lib/honesty"
 import type { CommandStatus, RuntimeView } from "./client"
 import { stringify } from "./render"
 
@@ -65,7 +66,7 @@ export interface ExperimentDraft {
    * step's request record, or (unreadable there: the hole, if one is
    * named) the registered prompt. */
   promptFrom?: "step" | "registered"
-  promptHole?: { hole: string; bytes?: number }
+  promptHole?: HoleMark
 }
 
 /** The running (or finished) experiment: the command's lifecycle, the
@@ -214,7 +215,7 @@ export function experimentLabel(sourceRunID: string, forkedCount: number): strin
  * opposite of what the drawer shows. */
 export function draftProblem(draft: ExperimentDraft): string | null {
   // Studio's buildRunBody refuses the same (lib/experiment-body.ts).
-  if (draft.thread === "fork" && !(draft.runId && draft.input && draft.step === 0))
+  if (draft.thread === "fork" && !(draft.runId && draft.input.trim() && draft.step === 0))
     return "fork continues the conversation in a new session: it needs a source run, an input, and step 0"
   const names = Object.keys(draft.tools)
   if (names.length && !names.some((n) => draft.tools[n]))

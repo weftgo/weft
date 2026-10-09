@@ -517,7 +517,7 @@ describe("the approval controls (P2-16)", () => {
 })
 
 describe("the drawer", () => {
-  it("↻ Re-run runs the whole turn with the drawer's current edits", async () => {
+  it("↻ Re-run puts the drawer on the whole turn with its current edits, and posts only on Run (ack before execute)", async () => {
     const routes = baseRoutes()
     routes["POST playground/runs"] = { command_id: "cmd_1", state: "queued" }
     routes["playground/commands/cmd_1"] = command("cmd_1", "queued")
@@ -526,6 +526,12 @@ describe("the drawer", () => {
     prompt.value = "Always include the tracking link."
     prompt.dispatchEvent(new Event("input", { bubbles: true }))
     click(button(el, "↻ Re-run"))
+    await settle()
+    // The drawer, from step 0, its ack preview drawn: nothing posted yet.
+    expect(studio.posts("playground/runs")).toHaveLength(0)
+    expect($(el, ".weft-drawer [data-weft-ack]")).not.toBeNull()
+    expect($(el, '[data-weft-drawer-verb="rerun"]')).not.toBeNull()
+    click(button(el, "Run experiment ▶"))
     await settle()
     const body = studio.posts("playground/runs").at(0)?.body as
       | { overrides: { instructions?: string } }

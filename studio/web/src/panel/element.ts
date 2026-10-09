@@ -22,7 +22,8 @@ import {
   rerun,
 } from "../lib/replay"
 import type { CatalogTool, ReplayDraft } from "../lib/replay"
-import { ackCatalogHole, badge, capLine, catalogReadError, cutBadge, holeBadges, holeLine, noPublicIdWords, requestCapped, requestHole, turnChips } from "./badges"
+import { replayBounds } from "../lib/experiment-body"
+import { ackCatalogHole, badge, capLine, catalogCapped, catalogNotRecorded, catalogNotStored, catalogReadError, cutBadge, holeBadges, holeLine, noPublicIdWords, requestCapped, requestHole, turnChips } from "./badges"
 import { fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, panelGet, REQUEST_PAGE } from "./client"
 import type { AgentView } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
@@ -1466,7 +1467,11 @@ export class WeftDevtools extends HTMLElement {
     let done = true
     if (chord && k === "s") this.openInStudio()
     else if (k === "g") this.gAt = Date.now()
-    else if (k === "Escape") {
+    else if (k === "Escape" && this.last.drawer && at.closest(".weft-drawer")) {
+      // Escape on a drawer control closes the drawer (focus back to its
+      // verb), not the panel.
+      this.closeDrawer()
+    } else if (k === "Escape") {
       if (this.keys) {
         this.keys = false
         this.render(this.last)
@@ -2673,12 +2678,7 @@ export class WeftDevtools extends HTMLElement {
       el("span", "weft-grow"),
     ])
     const close = el("button", "weft-btn", "–", { title: "close the drawer", "aria-label": "close the drawer" })
-    on(close, "click", () => {
-      const back = this.opener
-      this.opener = null
-      this.model?.closeExperiment()
-      if (back?.isConnected) back.focus({ preventScroll: true })
-    })
+    on(close, "click", () => this.closeDrawer())
     head.appendChild(close)
     card.appendChild(head)
     const body = el("div", "weft-step-b")
@@ -2709,7 +2709,7 @@ export class WeftDevtools extends HTMLElement {
     // record holds it whole, else the registered prompt — said.
     if (d.promptFrom === "registered") {
       const note = el("div", "weft-note", undefined, { "data-weft-prompt-from": "registered" })
-      if (d.promptHole) note.append(badge(d.promptHole.hole, { bytes: d.promptHole.bytes }), " ")
+      if (d.promptHole) note.append(badge(d.promptHole.hole, d.promptHole), " ")
       note.append("step prompt unreadable · the registered one pre-filled")
       body.appendChild(note)
     }
@@ -2782,7 +2782,7 @@ export class WeftDevtools extends HTMLElement {
         this.model?.setDraft({ input: v }, true)
         // A fork's Run waits for its message (no redraw while typing).
         const btn = n.closest(".weft-drawer")?.querySelector<HTMLButtonElement>(".weft-run-btn")
-        if (btn) btn.disabled = btn.hasAttribute("data-weft-held") || (this.model?.state.drawer?.thread === "fork" && !v)
+        if (btn) btn.disabled = btn.hasAttribute("data-weft-held") || (this.model?.state.drawer?.thread === "fork" && !v.trim())
       })
       inputRow.appendChild(inTa)
       body.appendChild(inputRow)
@@ -2975,11 +2975,20 @@ export class WeftDevtools extends HTMLElement {
       title: "POST /api/playground/runs — the runtime in your app executes it",
     })
     if (refused || unplaced) run.setAttribute("data-weft-held", "")
-    if (refused || unplaced || (d.thread === "fork" && !d.input)) run.setAttribute("disabled", "")
+    if (refused || unplaced || (d.thread === "fork" && !d.input.trim())) run.setAttribute("disabled", "")
     on(run, "click", () => this.go(this.model?.runExperiment()))
     body.appendChild(run)
     card.appendChild(body)
     return card
+  }
+
+  /** closeDrawer closes the experiment drawer and gives focus back to
+   * the verb that opened it (the close button, Escape inside it). */
+  private closeDrawer() {
+    const back = this.opener
+    this.opener = null
+    this.model?.closeExperiment()
+    if (back?.isConnected) back.focus({ preventScroll: true })
   }
 
   /** ack draws the drawer's ack preview (plan F1; the run page's
@@ -2995,7 +3004,12 @@ export class WeftDevtools extends HTMLElement {
     const from = d.thread === "fork" ? 0 : d.step
     const compacted = from > 0 && compactionsOf(src?.doc).some((c) => !isSessionMarker(c) && typeof c.step === "number" && c.step <= from)
     box.appendChild(el("div", "weft-res", prefixLine(from, compacted), { "data-weft-prefix": "" }))
-    const cat = catalogAt(src?.requests, from, hasCapability(s, "requests"))
+    // The replayed run not read (a child whose history did not load):
+    // its catalog is the registration's, said.
+    const status = src && "status" in src ? src.status : (this.rowOf(d.runId)?.status ?? src?.doc?.status ?? "")
+    const cat = src
+      ? catalogAt(src.requests, from, hasCapability(s, "requests"), boundsOf(src.transcript)?.stepCount ?? null, status === "running")
+      : { tools: null, hole: catalogReadError("the run's records could not be read") }
     if (cat.hole) box.appendChild(ackCatalogHole(cat.hole, !!agent))
     const names = Object.keys(d.tools)
     const kept = names.filter((n) => d.tools[n])
@@ -3039,7 +3053,8 @@ export class WeftDevtools extends HTMLElement {
         )
       )
     }
-    return refused.length > 0
+    // Ack before execute: no Run while the verdicts are still unread.
+    return refused.length > 0 || !!cat.loading
   }
 
   /** experimentResult is §3's Result pane: the label (`t3·x1`), the
@@ -3100,7 +3115,9 @@ export class WeftDevtools extends HTMLElement {
       const mine = draft && draft.runId === r.sourceRunID ? draft : null
       // The step Studio continues from: the drawer's own, else the one
       // being read — as from_step counts it.
-      const step = mine && mine.step > 0 ? mine.step : s.turn ? readStep(s.turn.folded, s.selectedStep) : -1
+      // The drawer's own step (a re-run stays one, a child's is the
+      // child's); the step being read only without a drawer.
+      const step = mine ? mine.step : s.turn ? readStep(s.turn.folded, s.selectedStep) : -1
       a.setAttribute("href", studioPlaygroundLink(this.base, mine, step))
     }
     link(compare)
@@ -3349,8 +3366,10 @@ export class WeftDevtools extends HTMLElement {
                 replay: {
                   runId: t.id,
                   agent: row?.agent,
-                  count: replayStepCount(t.transcript, t.folded),
-                  fork: !!(row?.session_id || t.doc?.session_id),
+                  max: boundsOf(t.transcript)?.max ?? null,
+                  // A session's top-level turn only (a child adopted by
+                  // select() is no conversation to fork).
+                  fork: !!(row?.session_id || t.doc?.session_id) && !(row?.parent_run_id || t.doc?.parent_run_id),
                   open: (runId, draft, agent, from) => {
                     this.opener = from
                     this.go(this.model?.openExperiment(runId, draft, { agent, under: t.id }))
@@ -3403,7 +3422,7 @@ export class WeftDevtools extends HTMLElement {
     on(experiment, "click", () => this.go(this.model?.openExperiment(t.id, 0)))
     row.appendChild(experiment)
     const again = el("button", "weft-btn", "↻ Re-run", {
-      title: "re-run the whole turn with the drawer's current edits",
+      title: "re-run the whole turn: the drawer from step 0, with its current edits — Run after the ack",
     })
     on(again, "click", () => this.go(this.model?.rerun(t.id)))
     row.appendChild(again)
@@ -3654,13 +3673,26 @@ interface AckCatalog {
   loading?: boolean
 }
 
-export function catalogAt(req: PanelRequests | null | undefined, ordinal: number, served: boolean): AckCatalog {
+export function catalogAt(
+  req: PanelRequests | null | undefined,
+  ordinal: number,
+  served: boolean,
+  /** The transcript's step count (null: unknown) and whether the run
+   * is still running: a missing row is said by why it is missing. */
+  count: number | null = null,
+  running = false
+): AckCatalog {
   if (!req) return served ? { tools: null, loading: true } : { tools: null, hole: catalogReadError("the server has no request route") }
   if (req.badge) return { tools: null, hole: { hole: req.badge, reason: req.reason, fix: req.fix } }
   if (req.error) return { tools: null, hole: catalogReadError(req.error) }
   const rows = req.steps.get(ordinal)?.rows
   const row = rows?.[rows.length - 1]
-  if (!row) return { tools: null, hole: { hole: "gap", reason: REQUEST_NO_RECORD_REASON } }
+  if (!row) {
+    if (req.truncated && ordinal > lastStep(req)) return { tools: null, hole: catalogCapped(MAX_REQUEST_PAGES * REQUEST_PAGE) }
+    if (count !== null && ordinal >= count) return { tools: null, hole: catalogNotRecorded() }
+    if (running) return { tools: null, hole: catalogNotStored() }
+    return { tools: null, hole: { hole: "gap", reason: REQUEST_NO_RECORD_REASON } }
+  }
   const c = row.tools
   if (!c) return row.catalog_hash ? { tools: null, hole: { hole: "gap" } } : { tools: [], none: true }
   if (isHoleRef(c)) return { tools: null, hole: { hole: c.badge } }
@@ -3668,42 +3700,24 @@ export function catalogAt(req: PanelRequests | null | undefined, ordinal: number
 }
 
 /** Where a story's verbs replay from (plan F1): the run (a child's own
- * id on a child's steps — A10), its agent, how many steps it has as
- * its transcript counts them (one past the last step holding an
- * assistant message: a step that started and never answered is no
- * from_step the server accepts), whether "continue here" (a fork) is
- * offered — a top-level run with a session only — and the opener.
- * from_step and an edit's step are the step's ordinal (its stored
- * index), as studio/edits.go and the runtime cut. */
+ * id on a child's steps — A10), its agent, the highest from_step the
+ * server accepts for its transcript (lib/experiment-body.ts's
+ * replayBounds — studio/edits.go's rule; null without a transcript:
+ * no edit or steer verb), whether "continue here" (a fork) is offered
+ * — a session's top-level run only — and the opener. from_step and an
+ * edit's step are the step's ordinal (its stored index). */
 export interface ReplayCtx {
   runId: string
   agent?: string
-  count: number
+  max: number | null
   fork: boolean
   open: (runId: string, draft: ReplayDraft, agent: string | undefined, from: HTMLElement) => void
 }
 
-/** replayStepCount is the run's step count as its transcript stores it
- * (the stored step of each batch holding an assistant message; by
- * order where a batch carries none); without a transcript, one past
- * the last step the fold saw finish. */
-export function replayStepCount(tr: Transcript | null | undefined, folded: FoldedRun): number {
-  const batches = tr?.batches ?? []
-  if (batches.length) {
-    let n = 0
-    let order = 0
-    const stored = batches.every((b) => typeof b.step === "number" && typeof b.input === "boolean")
-    for (const b of batches) {
-      if (b.input || (!stored && b.index === 0)) continue
-      if (!b.messages.some((m) => m.role === "assistant")) continue
-      order++
-      n = Math.max(n, stored ? b.step + 1 : order)
-    }
-    return n
-  }
-  let n = 0
-  for (const st of folded.steps) if (st.finish) n = Math.max(n, st.index + 1)
-  return n
+/** boundsOf is the server's reading of a run's transcript (its step
+ * count and highest from_step), null without one. */
+export function boundsOf(tr: Transcript | null | undefined): { stepCount: number; max: number } | null {
+  return tr ? replayBounds(tr.batches) : null
 }
 
 /** verb is one hover/focus affordance (the run page's Verb): a button
@@ -3745,12 +3759,11 @@ function stepVerbs(n: number, r: ReplayCtx): HTMLElement {
 
 /** A tool call's verbs: edit its result and replay (the next step run
  * fresh against the edit), and replay from its step. */
-function callVerbs(n: number, call: FoldedToolCall, r: ReplayCtx, answered: boolean): HTMLElement {
+function callVerbs(n: number, call: FoldedToolCall, r: ReplayCtx): HTMLElement {
   const list: HTMLElement[] = []
-  // from_step n+1 is one the server accepts while a later step holds a
-  // reply, or — n the transcript's last step — when every call of n has
-  // its result (the kept prefix ends in answered calls).
-  if (call.result && call.callId && (n + 1 < r.count || (n + 1 === r.count && answered))) {
+  // from_step n+1 must be one the server accepts: below the step count,
+  // or at it when the transcript's kept prefix ends in answered calls.
+  if (call.result && call.callId && r.max !== null && n + 1 <= r.max) {
     // An empty recorded result seeds no edit (lib/replay.ts).
     list.push(verb(`edit this result and replay (call ${call.callId})`, "✎", editResultAndReplay(n, call.callId, String(call.result.content)), r))
   }
@@ -3979,12 +3992,12 @@ function renderStep(
     // The steer is kept in the prefix; the step that answers it runs
     // fresh (none after it: nothing to replay).
     const next = step.index + 1
-    if (ctx?.replay && next < ctx.replay.count)
+    const max = ctx?.replay?.max
+    if (ctx?.replay && max != null && next <= max)
       note.appendChild(verbs("steer", [verb(`replay from this steer (step ${next} runs fresh)`, "↦", replayFromStep(next), ctx.replay)]))
     body.appendChild(note)
   }
-  const answered = step.toolCalls.every((c) => c.result)
-  for (const call of step.toolCalls) body.appendChild(renderCall(call, step.index, runStatus, t, open, ctx, answered))
+  for (const call of step.toolCalls) body.appendChild(renderCall(call, step.index, runStatus, t, open, ctx))
   card.appendChild(body)
   return card
 }
@@ -4114,9 +4127,7 @@ function renderCall(
   runStatus: string,
   t?: TurnView,
   open?: OpenState,
-  ctx?: FoldCtx,
-  /** Every call of the step has its result (the verbs' gate). */
-  answered = false
+  ctx?: FoldCtx
 ): HTMLElement {
   const box = el("div", "weft-call", undefined, { "data-key": call.callId })
   const state = callState(call, runStatus)
@@ -4175,7 +4186,7 @@ function renderCall(
       box.appendChild(childBlock(call.childRunId, t, open, ctx?.endpoint, replay))
     }
   }
-  if (replay) head.appendChild(callVerbs(stepIndex, call, replay, answered))
+  if (replay) head.appendChild(callVerbs(stepIndex, call, replay))
   if (call.result) {
     const ms = spanMs(t, call)
     if (ms) head.appendChild(el("span", "weft-badge weft-info", ms))
@@ -4252,7 +4263,7 @@ function childBlock(childId: string, t: TurnView, open?: OpenState, endpoint?: s
         runId: childId,
         // The child's steps replay the child (A10); never a fork.
         ...(replay
-          ? { replay: { ...replay, runId: childId, agent: row?.agent ?? "", count: replayStepCount(child.transcript, child.folded), fork: false } }
+          ? { replay: { ...replay, runId: childId, agent: row?.agent ?? "", max: boundsOf(child.transcript)?.max ?? null, fork: false } }
           : {}),
       })
     )

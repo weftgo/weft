@@ -265,14 +265,21 @@ Replay from here (plan F1). The Story view's step cards, tool calls,
 steers, the subagent call's child row and the child's own steps carry
 the run page's verbs, shown on hover and on keyboard focus
 (`aria-label`s; Enter/Space stop at the verb, Escape goes on to the
-panel): **replay from this step**, **edit this result and replay**
-(`from_step` N+1 with the call's recorded result pre-filled — on the
-transcript's last step only when every call there has its result; an
-empty result seeds no edit), **edit the
-prompt and replay** (the step's system prompt from its request record;
-unreadable or cut, the registered prompt and a line saying so),
-**re-run** and **continue here with a new message** (a fork, on a
-session's top-level turn only; Run waits for the message). `from_step`
+panel; Escape on a drawer control closes the drawer and returns focus
+to its verb): **replay from this step**, **edit this result and
+replay** (`from_step` N+1 with the call's recorded result pre-filled —
+drawn only up to the highest `from_step` the server accepts for the
+transcript, `lib/experiment-body.ts`'s `replayBounds`: on its last step
+only when that step's calls are all answered there; no transcript, no
+edit or steer verb; an empty result seeds no edit), **edit the prompt
+and replay** (the step's system prompt from its request record;
+unreadable or cut, the registered prompt and a line saying so, with
+the hole's badge),
+**re-run** (the actions row's ↻ too: it opens the drawer, it never
+posts at once) and **continue here with a new message** (a fork, on a
+session's top-level turn only; Run waits for a message that is not
+blank). A child replayed from its row is read first, and Run waits
+while a step's catalog is being read. `from_step`
 and an edit's step are the step ordinal. Each opens the experiment
 drawer pre-filled from `lib/replay.ts`'s draft — the same draft Studio's
 replay drawer opens on, posting byte for byte the same command — with

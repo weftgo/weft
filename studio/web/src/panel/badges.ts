@@ -10,7 +10,7 @@
 import type { Meta, RunRow } from "../lib/api"
 import { HOLES, holeWords, kib, resultCapReason } from "../lib/honesty"
 import type { ContentAttrs, HoleMark } from "../lib/honesty"
-import { REQUEST_NOT_RECORDED_LABEL, requestCappedWords } from "../lib/requests"
+import { REQUEST_NOT_RECORDED_LABEL, REQUEST_NOT_STORED, requestCappedWords } from "../lib/requests"
 import { UNRUN_CALL_REASON } from "../lib/events"
 import type { Truncation } from "../lib/events"
 import { el } from "./render"
@@ -244,4 +244,28 @@ export function ackCatalogHole(m: HoleMark, registered: boolean): HTMLElement {
     )
   )
   return box
+}
+
+/** The ack preview's holes for a step the request record has no row
+ * of (the run page's words): a step that never ran (at or past the
+ * transcript's step count) — its tools unknown; one past the request
+ * pages the panel read; one of a run still running. */
+export function catalogNotRecorded(): HoleMark {
+  return { hole: "not_recorded", reason: "the step carries no request record: the tools it offered are unknown" }
+}
+export function catalogCapped(n: number): HoleMark {
+  return { hole: "truncated", ...requestCappedWords(n) }
+}
+export function catalogNotStored(): HoleMark {
+  return { hole: "not_recorded", reason: `request: ${REQUEST_NOT_STORED}` }
+}
+
+/** The edit-the-prompt fallback's hole when the step's prompt cannot
+ * be read: the server serves no request record (not_served), or the
+ * read failed (derived: the registered prompt stands in). */
+export function promptNotServed(): HoleMark {
+  return { hole: "not_recorded", cause: "not_served" }
+}
+export function promptReadError(error: string): HoleMark {
+  return { hole: "derived", reason: `the step's prompt could not be read (${error}): the registered prompt is pre-filled` }
 }

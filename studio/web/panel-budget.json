@@ -9,7 +9,7 @@
     { "id": "D4", "what": "JSON tree + filter", "estimate": 5120 },
     { "id": "E1", "what": "Request tab", "estimate": 4096, "accepted": "review-driven honesty (derived records, the manifest re-asked, the unreachable child, not_served); nothing deferrable at first paint; the minify lever in reserve" },
     { "id": "E3", "what": "2-way step diff", "estimate": 4096 },
-    { "id": "F1", "what": "replay from here", "estimate": 3072 },
+    { "id": "F1", "what": "replay from here", "estimate": 3072, "accepted": "the verbs and the ack preview are the item; nothing deferrable is more than 0.3 KiB; 14 KiB of headroom with the minify lever in reserve" },
     { "id": "C3", "what": "detection ladder", "estimate": 3072, "accepted": "nothing deferrable supplies the first scope; the deferrable remainder is under 1 KiB" },
     { "id": "C4", "what": "typed API surface (the host API)", "estimate": 1024, "accepted": "the host API is one surface for both installs; nothing to load later" }
   ],
@@ -41,6 +41,7 @@
     { "label": "verification fixes", "item": "", "gzip": 62734, "note": "verification review: the selfURL match only for the standalone panel.js (the npm mark), running passed to messagesSent, overflow calm from the reopen, Alt+W prefers a live page-mounted panel (+0.1 KiB)" },
     { "label": "ci fixes", "item": "", "gzip": 62591, "note": "the first row measured with pako (level 6) instead of the host Node's zlib — the measure note above; the eslint fixes in config.ts/element.ts; not comparable byte for byte with the rows before it" },
     { "label": "F1", "item": "F1", "gzip": 67199, "note": "replay from here in the panel (F1.3): the verbs on steps, calls, steers and children, the drawer pre-filled from lib/replay.ts's drafts, the ack preview, the link back — +4.5 KiB of +3 KiB, at the over line (4,608 B of a 4,608 B limit)" },
-    { "label": "F1 fixes", "item": "F1", "gzip": 67245, "note": "F1.2 re-review, mirrored: the hand-off and ⎇ send the step ordinal (readStep), edit-result on the transcript's last step when its calls are answered (+46 B; F1 +4,654 B, 46 B past half again its estimate — reported, not accepted)" }
+    { "label": "F1 fixes", "item": "F1", "gzip": 67245, "note": "F1.2 re-review, mirrored: the hand-off and ⎇ send the step ordinal (readStep), edit-result on the transcript's last step when its calls are answered (+46 B; F1 +4,654 B, 46 B past half again its estimate — reported, not accepted)" },
+    { "label": "F1 review fixes", "item": "F1", "gzip": 67774, "note": "F1.3 review: the child read before its ack, Run held while the catalog loads, a missing request row said by why, the transcript bounds from lib/experiment-body.ts's replayBounds (now in the bundle), Escape closes the drawer, ↻ opens the drawer, the prompt fallback badged (+529 B). The orchestrator accepted F1 at +4,654 B against +3,072 B (the item's accepted note); with this row F1 is +5,183 B" }
   ]
 }

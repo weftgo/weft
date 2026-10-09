@@ -14,9 +14,11 @@ import type { VariantFields } from "../lib/experiment-body"
 import { continueHere, editResultAndReplay, replayFromStep, rerun } from "../lib/replay"
 import type { ReplayDraft } from "../lib/replay"
 import type { WeftDevtools } from "./element"
-import { buildRunBody } from "./playground"
+import { buildRunBody, draftProblem } from "./playground"
+import { catalogAt } from "./element"
+import { HOLES } from "../lib/honesty"
 import type { ExperimentDraft } from "./playground"
-import { $, all, ATTRS, fakeStudio, META, mount, runRow, settle, setup, teardown, text } from "./testkit"
+import { $, all, ATTRS, fakeStudio, META, mount, pause, runRow, settle, setup, teardown, text } from "./testkit"
 import { agentView, AS_CALLED, CHILD, ERR, REPLAY_META, replayRoutes, requestRow, researcher, RUN, transcriptCut } from "./replaykit"
 
 beforeEach(setup)
@@ -386,5 +388,139 @@ describe("one body for one draft (the panel's buildRunBody against Studio's)", (
         sideEffects: "park",
       })
     )
+  })
+})
+
+describe("F1.3 review fixes", () => {
+  const runBtn = (el: WeftDevtools) => all(el, ".weft-drawer button").find((b) => b.textContent === "Run experiment ▶") as HTMLButtonElement
+
+  it("1: a child replayed from its row before it was opened is read first: its verdicts are drawn before Run is enabled", async () => {
+    const r = replayRoutes({ agents: [agentView, researcher] })
+    const row = requestRow(0, { hash: "k", tools: [{ ...(requestRow(0).tools as { tools: object[] }).tools[2] }], content: "", truncated_bytes: 0 })
+    r[`runs/${CHILD}/requests?limit=1000`] = async () => {
+      await pause(40)
+      return { requests: [row] }
+    }
+    const studio = fakeStudio(r, REPLAY_META)
+    const el = await mount()
+    expect($(el, `[data-weft-child="${CHILD}"]`)!.hasAttribute("open")).toBe(false)
+    click(verbIn(el, callBox(el, "c2"), "rerun"))
+    await settle()
+    expect(studio.gets(`runs/${CHILD}/requests`)).toHaveLength(1)
+    expect(verdict(el, "search_kb")).toBe("runs")
+    expect(runBtn(el).disabled).toBe(false)
+  })
+
+  it("1: Run is held while the step's catalog is still being read", async () => {
+    fakeStudio(replayRoutes(), REPLAY_META)
+    const el = await mount()
+    click(verbIn(el, '[data-weft-step="2"] > .weft-step-h', "from_step"))
+    await settle()
+    expect(runBtn(el).disabled).toBe(false)
+    // The record being read again (a reload): the verdicts are unread.
+    const model = (el as unknown as { model: { state: { turn: { requests: unknown } }; setDraft: (p: object) => void } }).model
+    const kept = model.state.turn.requests
+    model.state.turn.requests = null
+    model.setDraft({})
+    await settle()
+    expect(text(el, "[data-weft-ack]")).toContain("reading the step's catalog…")
+    expect(runBtn(el).disabled).toBe(true)
+    model.state.turn.requests = kept
+    model.setDraft({})
+    await settle()
+    expect(verdict(el, "refund")).toBe("substituted")
+    expect(runBtn(el).disabled).toBe(false)
+  })
+
+  it("2: a missing request row is said by why: a step that never ran, past the read pages, a live run", () => {
+    const req = { steps: new Map(), truncated: false }
+    expect(catalogAt(req, 4, true, 4).hole).toEqual({ hole: "not_recorded", reason: "the step carries no request record: the tools it offered are unknown" })
+    expect(catalogAt({ ...req, truncated: true }, 4, true, 9).hole?.hole).toBe("truncated")
+    expect(catalogAt(req, 2, true, 4, true).hole?.hole).toBe("not_recorded")
+    expect(catalogAt(req, 2, true, 4).hole?.hole).toBe("gap")
+  })
+
+  it("3: without a transcript no edit or steer verb is drawn (the server's step count is unknown)", async () => {
+    const r = replayRoutes()
+    r[`runs/${RUN}/transcript`] = () => new Response("{}", { status: 500 })
+    fakeStudio(r, REPLAY_META)
+    const el = await mount()
+    expect(all(el, '[data-weft-verb="edit_result"]')).toHaveLength(0)
+    expect(verbIn(el, callBox(el, "c3"), "from_step")).not.toBeNull()
+  })
+
+  it("4: the answered gate reads the transcript: a call the fold saw finish but the transcript never answered is no from_step", async () => {
+    const r = replayRoutes()
+    r[`runs/${RUN}/transcript`] = transcriptCut(6) // c3 called at step 2, its result never stored
+    fakeStudio(r, REPLAY_META)
+    const el = await mount()
+    expect(verbIn(el, callBox(el, "c2"), "edit_result")).not.toBeNull()
+    expect(verbIn(el, callBox(el, "c3"), "edit_result")).toBeNull()
+  })
+
+  it("5: Escape on a drawer control closes the drawer and hands focus to its verb; the panel stays open", async () => {
+    fakeStudio(replayRoutes(), REPLAY_META)
+    const el = await mount()
+    click(verbIn(el, '[data-weft-step="1"] > .weft-step-h', "from_step"))
+    await settle()
+    const close = $(el, '.weft-drawer button[aria-label="close the drawer"]') as HTMLElement
+    close.focus()
+    close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, composed: true, cancelable: true }))
+    await settle()
+    expect($(el, ".weft-drawer")).toBeNull()
+    expect($(el, ".weft-dock")).not.toBeNull()
+    expect(el.shadowRoot!.activeElement?.getAttribute("data-weft-verb")).toBe("from_step")
+  })
+
+  it("6: compare in Studio for a child's experiment carries the child's step, not the parent's", async () => {
+    fakeStudio(replayRoutes({ agents: [agentView, researcher] }), REPLAY_META)
+    const el = await mount()
+    click($(el, '[data-weft-step="2"]')) // the parent step being read
+    await settle()
+    const d = $(el, `[data-weft-child="${CHILD}"]`) as HTMLDetailsElement
+    d.setAttribute("open", "")
+    d.dispatchEvent(new Event("toggle", { bubbles: true }))
+    await settle()
+    click(verbIn(el, `[data-weft-child="${CHILD}"] [data-weft-step="1"] > .weft-step-h`, "from_step"))
+    await settle()
+    click(runBtn(el))
+    await settle(60)
+    const href = all(el, ".weft-xres a").find((a) => a.textContent === "compare in Studio")!.getAttribute("href")!
+    expect(href).toContain(`run=${encodeURIComponent(CHILD)}`)
+    expect(href).toContain("step=1")
+    expect(href).not.toContain("step=2")
+  })
+
+  it("7: continue here is not offered on a run with a parent (a child adopted by select)", async () => {
+    const r = replayRoutes()
+    const row = runRow({ id: RUN, steps: 4, parent_run_id: "r_parent" })
+    r["runs?public_id=pub_orders&limit=50"] = { total: 1, runs: [row], next_before: null }
+    fakeStudio(r, REPLAY_META)
+    const el = await mount()
+    expect(verbIn(el, '[data-weft-step="3"] > .weft-step-h', "from_step")).not.toBeNull()
+    expect(all(el, '[data-weft-verb="continue"]')).toHaveLength(0)
+  })
+
+  it("9: a fork's whitespace-only message holds Run, and the draft says why", async () => {
+    fakeStudio(replayRoutes(), REPLAY_META)
+    const el = await mount()
+    click(verbIn(el, '[data-weft-step="3"] > .weft-step-h', "continue"))
+    await settle()
+    const input = $(el, '.weft-drawer [data-weft-k="input"]') as HTMLTextAreaElement
+    input.value = "   "
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+    expect(runBtn(el).disabled).toBe(true)
+    const model = (el as unknown as { model: { state: { drawer: ExperimentDraft } } }).model
+    expect(draftProblem(model.state.drawer)).toContain("it needs a source run, an input, and step 0")
+  })
+
+  it("10b: edit the prompt without the requests capability: the registered prompt, badged not_served", async () => {
+    fakeStudio(replayRoutes(), META)
+    const el = await mount()
+    click(verbIn(el, '[data-weft-step="1"] > .weft-step-h', "edit_prompt"))
+    await settle()
+    const b = $(el, '[data-weft-prompt-from="registered"] [data-hole="not_recorded"]')
+    expect(b).not.toBeNull()
+    expect(b!.getAttribute("title")).not.toBe(HOLES.not_recorded.reason)
   })
 })

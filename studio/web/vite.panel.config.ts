@@ -77,6 +77,9 @@ const studioVersion = weftVersion()
 
 export default defineConfig({
   plugins: [panelBudget()],
+  // The app's "@/" alias: lib/experiment-body.ts (the replay bounds,
+  // plan F1) imports its siblings through it.
+  resolve: { alias: { "@": new URL("./src", import.meta.url).pathname } },
   define: {
     __PANEL_STUDIO_VERSION__: JSON.stringify(studioVersion),
   },

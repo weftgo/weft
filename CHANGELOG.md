@@ -37,7 +37,9 @@ module, ADR 0005).
   focus verbs — replay from this step, edit this result and replay
   (`from_step` N+1, the call's recorded result pre-filled), edit the
   prompt and replay (the step's own system prompt from its request
-  record, else the registered one, said), re-run, and continue here
+  record; where that is unreadable, Studio's drawer pre-fills the
+  registered prompt without saying so — a fix is queued — while the
+  panel says it, badged), re-run, and continue here
   with a new message (a fork; a session's top-level turn only) — that
   open a non-modal replay drawer on the run page. `from_step` and every
   edit's step are the step ordinal. Above Run, the ack preview lists per
@@ -107,6 +109,11 @@ module, ADR 0005).
   hand-off** send the step being read by its ordinal (as every verb
   does; `stepPosition` is gone, `readStep` replaces it), and its token-scope reading is
   `lib/replay.ts`'s `tokenScopeOf` (one reading for both surfaces).
+- **The panel's ↻ Re-run no longer posts at once**: it opens the drawer
+  on the whole turn (the `rerun()` draft, the drawer's current edits
+  kept) with the ack preview; the command is posted by Run, as every
+  verb's. Escape on a drawer control closes the drawer and returns focus
+  to the verb that opened it, instead of collapsing the panel.
 
 ## 0.12.0 — 2026-10-09
 

@@ -20,6 +20,7 @@ import { serializeScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
 import { tokenScope } from "./config"
 import { isHoleRef } from "../lib/api"
+import { catalogNotRecorded, promptNotServed, promptReadError } from "./badges"
 import { rerun as rerunDraft } from "../lib/replay"
 import type { ReplayDraft } from "../lib/replay"
 import { applyTranscript, linkView, newFold } from "../lib/events"
@@ -1543,6 +1544,15 @@ export class PanelModel {
     for (const t of agent.tools) tools[t.name] = true
     // The rule that is parking this runtime's runs, whoever set it.
     this.state.breakpoints = Array.isArray(rt.breakpoints) ? [...rt.breakpoints] : []
+    // A child replayed from its row before it was ever opened: its
+    // records (the catalog the ack preview judges, its steps) are read
+    // first — ack before execute.
+    const host = this.state.turn
+    if (host && runId !== host.id && !host.children.has(runId)) {
+      const left = () => this.disposed || seq !== this.loadSeq
+      await this.expandChild(runId)
+      if (left()) return
+    }
     const turn = this.state.turn
     const src = turn ? (turn.id === runId ? turn : turn.children.get(runId)) : undefined
     // The source's own prompt, pre-filled where the run starts over —
@@ -1564,8 +1574,13 @@ export class PanelModel {
         promptFrom = "step"
       } else {
         promptFrom = "registered"
+        // Every fallback says why, with its badge.
+        const req = src?.requests
         if (p) promptHole = isHoleRef(p) ? { hole: p.badge } : { hole: "truncated", bytes: p.truncated_bytes }
-        else if (src?.requests?.badge) promptHole = { hole: src.requests.badge }
+        else if (!req) promptHole = promptNotServed()
+        else if (req.badge) promptHole = { hole: req.badge, reason: req.reason, fix: req.fix }
+        else if (req.error) promptHole = promptReadError(req.error)
+        else promptHole = catalogNotRecorded()
       }
     }
     this.state.drawer = {
@@ -1618,16 +1633,18 @@ export class PanelModel {
     const d = this.state.drawer
     if (!d || d.runId !== runId) {
       await this.openExperiment(runId, rerunDraft())
-      if (this.state.drawer?.runId !== runId) return
-    } else if (d.step !== 0) {
-      const turn = this.state.turn
-      this.state.drawer = {
-        ...d,
-        step: 0,
-        input: d.input || (turn && turn.id === runId ? turnPromptOf(turn.transcript) : ""),
-      }
+      return
     }
-    await this.runExperiment()
+    // The drawer open on this turn: its edits kept, from step 0 — the
+    // ack preview drawn again before anything is posted.
+    const turn = this.state.turn
+    this.state.drawer = {
+      ...d,
+      verb: "rerun",
+      step: 0,
+      input: d.input || (turn && turn.id === runId ? turnPromptOf(turn.transcript) : ""),
+    }
+    this.emit()
   }
 
   /** runExperiment posts §5.1's command and follows it: the lifecycle

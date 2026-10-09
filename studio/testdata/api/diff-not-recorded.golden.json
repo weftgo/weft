@@ -1,0 +1,146 @@
+{
+  "a": {
+    "run_id": "old1",
+    "steps": 2,
+    "status": "succeeded"
+  },
+  "b": {
+    "run_id": "old2",
+    "steps": 2,
+    "status": "succeeded"
+  },
+  "steps": [
+    {
+      "step": 0,
+      "changed": false,
+      "a": {
+        "status": "ok",
+        "system_hash": "",
+        "system": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "text": null,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        "marks": [],
+        "holes": [
+          {
+            "hole": "gap",
+            "reason": "the run counts this step, but no event of it was stored: a destination dropped its records",
+            "fix": "check the exporter's drops"
+          },
+          {
+            "hole": "not_recorded",
+            "reason": "the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
+            "fix": "upgrade weft and re-run"
+          },
+          {
+            "hole": "derived",
+            "reason": "the step's requested model is the run's: no request record or chat span of the step names it"
+          }
+        ]
+      },
+      "b": {
+        "status": "ok",
+        "system_hash": "",
+        "system": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "text": null,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        "marks": [],
+        "holes": [
+          {
+            "hole": "gap",
+            "reason": "the run counts this step, but no event of it was stored: a destination dropped its records",
+            "fix": "check the exporter's drops"
+          },
+          {
+            "hole": "not_recorded",
+            "reason": "the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
+            "fix": "upgrade weft and re-run"
+          },
+          {
+            "hole": "derived",
+            "reason": "the step's requested model is the run's: no request record or chat span of the step names it"
+          }
+        ]
+      },
+      "changes": []
+    },
+    {
+      "step": 1,
+      "changed": false,
+      "a": {
+        "status": "ok",
+        "system_hash": "",
+        "system": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "text": null,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        "marks": [],
+        "holes": [
+          {
+            "hole": "gap",
+            "reason": "the run counts this step, but no event of it was stored: a destination dropped its records",
+            "fix": "check the exporter's drops"
+          },
+          {
+            "hole": "not_recorded",
+            "reason": "the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
+            "fix": "upgrade weft and re-run"
+          },
+          {
+            "hole": "derived",
+            "reason": "the step's requested model is the run's: no request record or chat span of the step names it"
+          }
+        ]
+      },
+      "b": {
+        "status": "ok",
+        "system_hash": "",
+        "system": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "text": null,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        "marks": [],
+        "holes": [
+          {
+            "hole": "gap",
+            "reason": "the run counts this step, but no event of it was stored: a destination dropped its records",
+            "fix": "check the exporter's drops"
+          },
+          {
+            "hole": "not_recorded",
+            "reason": "the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
+            "fix": "upgrade weft and re-run"
+          },
+          {
+            "hole": "derived",
+            "reason": "the step's requested model is the run's: no request record or chat span of the step names it"
+          }
+        ]
+      },
+      "changes": []
+    }
+  ],
+  "summary": {
+    "changed_steps": [],
+    "first_changed": null
+  },
+  "holes": []
+}
+

@@ -191,6 +191,10 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// The app's two log lines, attributed through the tool's span.
 		{"logs-ok.golden.json", "/api/runs/" + res.ID + "/logs", nil},
 		{"logs-ok-paged.golden.json", "/api/runs/" + res.ID + "/logs?limit=1", nil},
+		// The step-aligned diff (plan E3.1), the real run against itself:
+		// no change, no instructions (system ""), the golden's lookup a
+		// result of its own.
+		{"diff.golden.json", "/api/diff?a=" + res.ID + "&b=" + res.ID, []string{".summary.first_changed", ".summary.changed_steps[]", ".steps[].changes[]"}},
 		// This server has no manifest (manifest_check is null).
 		{"meta.golden.json", "/api/meta", []string{".manifest_check"}},
 	} {

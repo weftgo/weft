@@ -3,6 +3,7 @@ package studio
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"slices"
@@ -85,6 +86,13 @@ type stepDoc struct {
 	Usage      core.Usage      `json:"usage"`
 	Compaction *stepCompaction `json:"compaction,omitempty"`
 	Holes      []stepHole      `json:"holes"`
+
+	// For the diff route, never served here: attempt 1's system hash
+	// (whoever reads) and its system text when the request block
+	// carries it ("" for a request with no system text; nil when the
+	// block is a badge or the prompt record is missing).
+	sysHash string
+	sysText *string
 }
 
 // stepModel is the model the step asked for and the one that answered
@@ -287,6 +295,97 @@ type eventHead struct {
 	IsError bool                `json:"is_error"`
 }
 
+// stepRun is what assembling any step of one run reads once: the run
+// row, its spans and compactions, and — as a walk needs them — its
+// event pages and transcript batches. The step route assembles one
+// step from it; the diff route assembles every step of two runs.
+type stepRun struct {
+	ctx     context.Context
+	db      obsdb.DB
+	id      string
+	det     obsdb.RunDetail
+	spans   []obsdb.Span
+	comps   []obsdb.Compaction
+	pages   []obsdb.EventPage
+	batches []obsdb.TranscriptBatch
+	batched bool
+}
+
+// stepReadError is a failed database read of the step assembly: noun
+// names it for dbError ("run", "events of run", …).
+type stepReadError struct {
+	noun string
+	err  error
+}
+
+func (e *stepReadError) Error() string { return "read " + e.noun + ": " + e.err.Error() }
+func (e *stepReadError) Unwrap() error { return e.err }
+
+// errNoStep is assembleStep's answer for a step nothing records.
+var errNoStep = errors.New("no such step")
+
+// loadStepRun reads the run's row, spans and compactions.
+func (s *Server) loadStepRun(ctx context.Context, id string) (*stepRun, error) {
+	sr := &stepRun{ctx: ctx, db: s.db, id: id}
+	var err error
+	if sr.det, err = s.db.Run(ctx, id); err != nil {
+		return nil, &stepReadError{"run", err}
+	}
+	if sr.spans, err = s.db.RunSpans(ctx, id); err != nil {
+		return nil, &stepReadError{"spans of run", err}
+	}
+	if sr.comps, err = s.db.Compactions(ctx, id); err != nil {
+		return nil, &stepReadError{"compactions of run", err}
+	}
+	return sr, nil
+}
+
+// eventPage is the run's i-th events page of stepEventsPage events,
+// read once.
+func (sr *stepRun) eventPage(i int) (obsdb.EventPage, error) {
+	for len(sr.pages) <= i {
+		after := int64(-1)
+		if k := len(sr.pages); k > 0 {
+			if sr.pages[k-1].NextAfter == nil {
+				return sr.pages[k-1], nil
+			}
+			after = *sr.pages[k-1].NextAfter
+		}
+		page, err := sr.db.Events(sr.ctx, sr.id, after, stepEventsPage)
+		if err != nil {
+			return obsdb.EventPage{}, &stepReadError{"events of run", err}
+		}
+		sr.pages = append(sr.pages, page)
+	}
+	return sr.pages[i], nil
+}
+
+// transcript is the run's messages batches, read once.
+func (sr *stepRun) transcript() ([]obsdb.TranscriptBatch, error) {
+	if !sr.batched {
+		b, err := sr.db.TranscriptBatches(sr.ctx, sr.id)
+		if err != nil {
+			return nil, &stepReadError{"transcript of run", err}
+		}
+		sr.batches, sr.batched = b, true
+	}
+	return sr.batches, nil
+}
+
+// writeStepError answers a failed assembly: 404 for a step nothing records,
+// dbError's mapping for a failed read.
+func writeStepError(w http.ResponseWriter, r *http.Request, id string, n int, err error) {
+	var re *stepReadError
+	switch {
+	case errors.Is(err, errNoStep):
+		notFound(w, r, "no step "+strconv.Itoa(n)+" of run "+id)
+	case errors.As(err, &re):
+		dbError(w, r, re.noun, id, re.err)
+	default:
+		dbError(w, r, "run", id, err)
+	}
+}
+
 // readStepEvents walks the run's events from the start, a page at a
 // time, and keeps step n's: from its step_start to the first event that
 // is not step n's — one naming another step (step_start, step_finish
@@ -298,16 +397,16 @@ type eventHead struct {
 // calls, which the transcript files under step 0 too. obsdb pages
 // events by position only, so the walk reads every earlier step's
 // events too — but stops at step n's end, never reading the rest of
-// the run.
-func (s *Server) readStepEvents(ctx context.Context, id string, n int) (stepEvents, error) {
+// the run. The pages read are kept on sr, so a later step's walk (the
+// diff route's, step after step) re-reads none of them.
+func (sr *stepRun) readStepEvents(n int) (stepEvents, error) {
 	var out stepEvents
-	after := int64(-1)
 	var startPos, endPos int64 = -1, -1
 	var allGaps []int64
 	var before []obsdb.PosEvent // step 0's events ahead of its step_start
 walk:
-	for {
-		page, err := s.db.Events(ctx, id, after, stepEventsPage)
+	for pi := 0; ; pi++ {
+		page, err := sr.eventPage(pi)
 		if err != nil {
 			return out, err
 		}
@@ -363,7 +462,6 @@ walk:
 		if page.NextAfter == nil {
 			break
 		}
-		after = *page.NextAfter
 	}
 	if out.found {
 		if len(out.events) > 0 {
@@ -388,23 +486,35 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		badRequest(w, r, "the step must be a non-negative integer ordinal")
 		return
 	}
-	ctx := r.Context()
-	det, err := s.db.Run(ctx, id)
+	sr, err := s.loadStepRun(r.Context(), id)
 	if err != nil {
-		dbError(w, r, "run", id, err)
+		writeStepError(w, r, id, n, err)
 		return
 	}
-	evs, err := s.readStepEvents(ctx, id, n)
+	doc, err := sr.assembleStep(n, readsPrompts(r))
 	if err != nil {
-		dbError(w, r, "events of run", id, err)
+		writeStepError(w, r, id, n, err)
 		return
+	}
+	writeJSON(w, r, http.StatusOK, doc)
+}
+
+// assembleStep is step n of sr's run as the step route serves it;
+// prompts is readsPrompts' answer for the identity (false: the request
+// block is the hidden badge). errNoStep for a step nothing records; a
+// *stepReadError for a failed read.
+func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
+	ctx, id, det, allSpans, comps := sr.ctx, sr.id, sr.det, sr.spans, sr.comps
+	item := strconv.Itoa(n)
+	evs, err := sr.readStepEvents(n)
+	if err != nil {
+		return stepDoc{}, err
 	}
 	reqHole := det.RequestsHole()
 	var reqs []obsdb.RequestRecord
 	if reqHole == "" {
-		if reqs, err = s.db.Requests(ctx, id, obsdb.RequestQuery{Step: &n, Limit: maxRequestsLimit}); err != nil {
-			dbError(w, r, "requests of run", id, err)
-			return
+		if reqs, err = sr.db.Requests(ctx, id, obsdb.RequestQuery{Step: &n, Limit: maxRequestsLimit}); err != nil {
+			return stepDoc{}, &stepReadError{"requests of run", err}
 		}
 	}
 	// The step exists when something records it: its step_start, a
@@ -412,18 +522,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 	// were lost). A step past all three is 404, a running run's next
 	// step included.
 	if !evs.found && len(reqs) == 0 && n >= det.Steps {
-		notFound(w, r, "no step "+item+" of run "+id)
-		return
-	}
-	allSpans, err := s.db.RunSpans(ctx, id)
-	if err != nil {
-		dbError(w, r, "spans of run", id, err)
-		return
-	}
-	comps, err := s.db.Compactions(ctx, id)
-	if err != nil {
-		dbError(w, r, "compactions of run", id, err)
-		return
+		return stepDoc{}, errNoStep
 	}
 
 	holes := holeSet{}
@@ -542,22 +641,9 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 	// The run's messages batches, read once when a block needs them (a
 	// max_tokens step's calls, a messages_ref to check).
 	var batches []obsdb.TranscriptBatch
-	batchesRead := false
-	readBatches := func() bool {
-		if batchesRead {
-			return true
-		}
-		var err error
-		if batches, err = s.db.TranscriptBatches(ctx, id); err != nil {
-			dbError(w, r, "transcript of run", id, err)
-			return false
-		}
-		batchesRead = true
-		return true
-	}
 	if maxTokens {
-		if !readBatches() {
-			return
+		if batches, err = sr.transcript(); err != nil {
+			return stepDoc{}, err
 		}
 		for _, b := range batches {
 			if b.Step != n || b.Input {
@@ -729,16 +815,19 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		doc.Model.Answered, _ = chat.Attrs["gen_ai.response.model"].(string)
 	}
 
+	if first != nil {
+		doc.sysHash = first.SystemHash
+	}
 	// The request block: attempt 1, as the requests route serves it.
 	switch {
-	case !readsPrompts(r):
+	case !prompts:
 		doc.Request = badgeOf(obsdb.HoleHidden)
 		holes.note(obsdb.HoleHidden)
 	case reqHole != "":
 		doc.Request = badgeOf(reqHole)
 		holes.note(reqHole)
 	case first != nil:
-		res := resolver{ctx: ctx, db: s.db, run: id, prompts: map[string]any{}, catalogs: map[string]any{}}
+		res := resolver{ctx: ctx, db: sr.db, run: id, prompts: map[string]any{}, catalogs: map[string]any{}}
 		row := requestRow{
 			Index: first.Index, Step: first.Step, Attempt: first.Attempt, Time: first.Time,
 			SystemHash: first.SystemHash, CatalogHash: first.CatalogHash,
@@ -751,10 +840,14 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 			row.Tools, err = res.catalog(first.CatalogHash, stripped)
 		}
 		if err != nil {
-			dbError(w, r, "requests of run", id, err)
-			return
+			return stepDoc{}, &stepReadError{"requests of run", err}
 		}
 		doc.Request = row
+		if d, ok := row.Prompt.(promptDoc); ok {
+			doc.sysText = &d.Text
+		} else if first.SystemHash == "" {
+			doc.sysText = new(string)
+		}
 		if first.Content != "" {
 			holes.note(first.Content)
 		}
@@ -958,8 +1051,8 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 				known = known || (c.Scope == obsdb.CompactionRun && c.Index == *ref.Index)
 			}
 			if !known {
-				if !readBatches() {
-					return
+				if batches, err = sr.transcript(); err != nil {
+					return stepDoc{}, err
 				}
 				for _, b := range batches {
 					known = known || b.Index == *ref.Index
@@ -1001,7 +1094,7 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		holes.also(obsdb.HoleTruncated, "a destination's cap cut "+strconv.FormatInt(cut, 10)+" bytes from this step's events before they were stored", holeFix(obsdb.HoleTruncated))
 	}
 	doc.Holes = holes.list()
-	writeJSON(w, r, http.StatusOK, doc)
+	return doc, nil
 }
 
 // spanStep is a span's weft.step.index, -1 when it has none.

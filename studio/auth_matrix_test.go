@@ -371,6 +371,16 @@ func TestAuthMatrix(t *testing.T) {
 				}
 				return http.StatusBadRequest
 			}},
+		// The step-aligned diff (plan E3.1): both runs scoped as the step
+		// route scopes one — a run outside the token's public id on
+		// either side is 403, an unknown one 404 once the other passed;
+		// a read-scoped token reads it with the system column hidden
+		// (pinned below). A missing run parameter is 400 before any scope.
+		{name: "GET /api/diff?a=<A>&b=<res>", method: "GET", path: func(res string) string { return "/api/diff?a=run_a&b=" + run[res] }, resources: all, want: scoped(ok)},
+		{name: "GET /api/diff?a=<res>&b=<A>", method: "GET", path: func(res string) string { return "/api/diff?a=" + run[res] + "&b=run_a" }, resources: all, want: scoped(ok)},
+		{name: "GET /api/diff?a=<res>&b=<res>", method: "GET", path: func(res string) string { return "/api/diff?a=" + run[res] + "&b=" + run[res] }, resources: all, want: scoped(ok)},
+		{name: "GET /api/diff?a=<B's child>&b=<B>", method: "GET", path: fixed("/api/diff?a=run_b/0/call_1&b=run_b"), resources: []string{"B"}, want: scoped(ok)},
+		{name: "GET /api/diff?a=<A>", method: "GET", path: fixed("/api/diff?a=run_a"), resources: one, want: anyValid(http.StatusBadRequest)},
 		{name: "GET /api/runs/{B's child}/steps/0", method: "GET", path: fixed("/api/runs/run_b/0/call_1/steps/0"), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/runs/{B's child}", method: "GET", path: fixed("/api/runs/run_b/0/call_1"), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/runs/{B's child}/transcript", method: "GET", path: fixed("/api/runs/run_b/0/call_1/transcript"), resources: []string{"B"}, want: scoped(ok)},
@@ -764,6 +774,28 @@ func TestAuthMatrix(t *testing.T) {
 		hidden := strings.Contains(string(b), `"request":{"badge":"hidden","reason":"`+reason+`","fix":"`+fix+`"}`)
 		if resp.StatusCode != ok || hidden != (id.kind == "read") {
 			t.Errorf("steps/0 as %s = %d %s, want 200 with the request hidden = %v", id.name, resp.StatusCode, b, id.kind == "read")
+		}
+	}
+
+	// The diff hides the system column alone from a read-scoped token:
+	// 200, the hidden badge on its sides; every other identity that may
+	// read both runs gets no hidden badge.
+	for _, id := range identities {
+		if id.kind == "bad" {
+			continue
+		}
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/diff?a=run_a&b=run_a", nil)
+		req.Header.Set("Authorization", "Bearer "+id.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		reason, fix := obsdb.HoleNote(obsdb.HoleHidden)
+		hidden := strings.Contains(string(b), `{"hole":"hidden","reason":"`+reason+`","fix":"`+fix+`"}`)
+		if resp.StatusCode != ok || hidden != (id.kind == "read") {
+			t.Errorf("diff as %s = %d %s, want 200 with the system hidden = %v", id.name, resp.StatusCode, b, id.kind == "read")
 		}
 	}
 

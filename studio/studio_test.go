@@ -476,7 +476,7 @@ func TestMetaGolden(t *testing.T) {
 	// [requests steps export logs live ingest panel-config] — the
 	// playground joins with its own (step 8).
 	_, _, plain := get(t, Handler(DB(fixtureDB(t))), "/studio/api/meta")
-	if !strings.Contains(plain, `"capabilities":["requests","steps","export","logs","live","ingest","panel-config"]`) {
+	if !strings.Contains(plain, `"capabilities":["requests","steps","export","logs","diff","live","ingest","panel-config"]`) {
 		t.Errorf("default capabilities = %s, want [requests steps export logs live ingest panel-config]", plain)
 	}
 	// Ingest is open on loopback without a token, and meta says so
@@ -490,7 +490,7 @@ func TestMetaGolden(t *testing.T) {
 	}
 	// NoIngest drops the ingest group with its routes and capability.
 	_, _, ro := get(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/api/meta")
-	if !strings.Contains(ro, `"capabilities":["requests","steps","export","logs","live","panel-config"]`) || !strings.Contains(ro, `"ingest_open":false`) {
+	if !strings.Contains(ro, `"capabilities":["requests","steps","export","logs","diff","live","panel-config"]`) || !strings.Contains(ro, `"ingest_open":false`) {
 		t.Errorf("NoIngest meta: %s", ro)
 	}
 	if code, _, _ := post(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/v1/logs", "application/json", "{}"); code != http.StatusNotFound {
@@ -500,12 +500,12 @@ func TestMetaGolden(t *testing.T) {
 	// runtime link's (step 8's playground.go registers both; the
 	// step-6 pin asserted neither existed yet).
 	_, _, pg := get(t, Handler(DB(fixtureDB(t)), Playground(true)), "/studio/api/meta")
-	if !strings.Contains(pg, `"capabilities":["requests","steps","export","logs","live","ingest","panel-config","runtimes","breakpoints","steer","playground"]`) {
+	if !strings.Contains(pg, `"capabilities":["requests","steps","export","logs","diff","live","ingest","panel-config","runtimes","breakpoints","steer","playground"]`) {
 		t.Errorf("Playground capabilities = %s", pg)
 	}
 	// A hosting wrapper declares its own verbs beside the groups'.
 	_, _, caps := get(t, Handler(DB(fixtureDB(t)), Capabilities("fleet")), "/studio/api/meta")
-	if !strings.Contains(caps, `"capabilities":["requests","steps","export","logs","live","ingest","panel-config","fleet"]`) {
+	if !strings.Contains(caps, `"capabilities":["requests","steps","export","logs","diff","live","ingest","panel-config","fleet"]`) {
 		t.Errorf("declared capabilities = %s", caps)
 	}
 }

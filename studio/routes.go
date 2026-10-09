@@ -152,6 +152,16 @@ func (s *Server) registerGroups() {
 			s.addRunRoute("logs", s.serveRunLogs)
 		},
 	})
+	// The step-aligned diff of two runs (plan E3.1): every step of
+	// both assembled as the step route assembles it. Always present;
+	// the capability is what the UIs gate their compare views on.
+	s.addGroup(routeGroup{
+		name:       "diff",
+		capability: "diff",
+		register: func(mux *http.ServeMux, s *Server) {
+			mux.HandleFunc("GET /api/diff", s.serveDiff)
+		},
+	})
 	// The live stream (S4.5) and its grant (plan C5): the stream's
 	// credential is its other half, so one group, one capability.
 	s.addGroup(routeGroup{

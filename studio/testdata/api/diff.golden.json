@@ -1,0 +1,301 @@
+{
+  "a": {
+    "run_id": "r_da",
+    "steps": 5,
+    "status": "succeeded"
+  },
+  "b": {
+    "run_id": "r_db",
+    "steps": 5,
+    "status": "succeeded"
+  },
+  "steps": [
+    {
+      "step": 0,
+      "changed": false,
+      "a": {
+        "status": "ok",
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "system": "You are a support agent.",
+        "tool_calls": [
+          {
+            "name": "lookup_order",
+            "args": {
+              "order_id": "0"
+            }
+          }
+        ],
+        "tool_results": [
+          {
+            "call_id": "c0",
+            "name": "lookup_order",
+            "content": "order 0 shipped",
+            "is_error": false
+          }
+        ],
+        "text": "",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "marks": [],
+        "holes": []
+      },
+      "b": {
+        "status": "ok",
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "system": "You are a support agent.",
+        "tool_calls": [
+          {
+            "name": "lookup_order",
+            "args": {
+              "order_id": "0"
+            }
+          }
+        ],
+        "tool_results": [
+          {
+            "call_id": "c0",
+            "name": "lookup_order",
+            "content": "order 0 shipped",
+            "is_error": false
+          }
+        ],
+        "text": "",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "marks": [],
+        "holes": []
+      },
+      "changes": []
+    },
+    {
+      "step": 1,
+      "changed": false,
+      "a": {
+        "status": "ok",
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "system": "You are a support agent.",
+        "tool_calls": [
+          {
+            "name": "lookup_order",
+            "args": {
+              "order_id": "1"
+            }
+          }
+        ],
+        "tool_results": [
+          {
+            "call_id": "c1",
+            "name": "lookup_order",
+            "content": "order 1 shipped",
+            "is_error": false
+          }
+        ],
+        "text": "",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "marks": [],
+        "holes": []
+      },
+      "b": {
+        "status": "ok",
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "system": "You are a support agent.",
+        "tool_calls": [
+          {
+            "name": "lookup_order",
+            "args": {
+              "order_id": "1"
+            }
+          }
+        ],
+        "tool_results": [
+          {
+            "call_id": "c1",
+            "name": "lookup_order",
+            "content": "order 1 shipped",
+            "is_error": false
+          }
+        ],
+        "text": "",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "marks": [],
+        "holes": []
+      },
+      "changes": []
+    },
+    {
+      "step": 2,
+      "changed": false,
+      "a": {
+        "status": "ok",
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "system": "You are a support agent.",
+        "tool_calls": [
+          {
+            "name": "lookup_order",
+            "args": {
+              "order_id": "2"
+            }
+          }
+        ],
+        "tool_results": [
+          {
+            "call_id": "c2",
+            "name": "lookup_order",
+            "content": "order 2 shipped",
+            "is_error": false
+          }
+        ],
+        "text": "",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "marks": [],
+        "holes": []
+      },
+      "b": {
+        "status": "ok",
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "system": "You are a support agent.",
+        "tool_calls": [
+          {
+            "name": "lookup_order",
+            "args": {
+              "order_id": "2"
+            }
+          }
+        ],
+        "tool_results": [
+          {
+            "call_id": "c2",
+            "name": "lookup_order",
+            "content": "order 2 shipped",
+            "is_error": false
+          }
+        ],
+        "text": "",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "marks": [],
+        "holes": []
+      },
+      "changes": []
+    },
+    {
+      "step": 3,
+      "changed": true,
+      "a": {
+        "status": "ok",
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "system": "You are a support agent.",
+        "tool_calls": [
+          {
+            "name": "lookup_order",
+            "args": {
+              "order_id": "3"
+            }
+          }
+        ],
+        "tool_results": [
+          {
+            "call_id": "c3",
+            "name": "lookup_order",
+            "content": "order 3 shipped",
+            "is_error": false
+          }
+        ],
+        "text": "",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "marks": [],
+        "holes": []
+      },
+      "b": {
+        "status": "ok",
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "system": "You are a support agent.",
+        "tool_calls": [
+          {
+            "name": "lookup_order",
+            "args": {
+              "order_id": "3"
+            }
+          }
+        ],
+        "tool_results": [
+          {
+            "call_id": "c3",
+            "name": "lookup_order",
+            "content": "order 3 lost",
+            "is_error": false
+          }
+        ],
+        "text": "",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "marks": [],
+        "holes": []
+      },
+      "changes": [
+        "tool_results"
+      ]
+    },
+    {
+      "step": 4,
+      "changed": false,
+      "a": {
+        "status": "ok",
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "system": "You are a support agent.",
+        "tool_calls": [],
+        "tool_results": [],
+        "text": "all looked up",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "marks": [],
+        "holes": []
+      },
+      "b": {
+        "status": "ok",
+        "system_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+        "system": "You are a support agent.",
+        "tool_calls": [],
+        "tool_results": [],
+        "text": "all looked up",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 5
+        },
+        "marks": [],
+        "holes": []
+      },
+      "changes": []
+    }
+  ],
+  "summary": {
+    "changed_steps": [
+      3
+    ],
+    "first_changed": 3
+  },
+  "holes": []
+}
+

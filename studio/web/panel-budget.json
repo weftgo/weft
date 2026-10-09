@@ -35,6 +35,7 @@
     { "label": "D5 fixes", "item": "", "gzip": 61258, "note": "D5 review: the no-record gap, accessible badge words, the content line on evidence (+0.4 KiB)" },
     { "label": "E1 fixes", "item": "E1", "gzip": 61898, "note": "E1.2 review: derived records, the manifest re-asked, the unreachable child, the tab's step for ⤢ and J/K, not_served, the tools route's stripped words (+0.6 KiB; E1 +6.1 KiB, 0.1 KiB past half again its estimate)" },
     { "label": "scope fix", "item": "", "gzip": 61927, "note": "phase 3 Go review: lib/scope.ts's non-encodable fallback encodes control characters too (+29 B)" },
-    { "label": "phase 3 review fixes", "item": "", "gzip": 62591, "note": "panel review: the script tag by import.meta.url, no render after disconnect, capped memos, overflow backoff, per-frame resize, one Alt+W owner, Object.hasOwn, data-weft-untrusted; npm: the ssr guards, idempotent mount (+0.6 KiB)" }
+    { "label": "phase 3 review fixes", "item": "", "gzip": 62591, "note": "panel review: the script tag by import.meta.url, no render after disconnect, capped memos, overflow backoff, per-frame resize, one Alt+W owner, Object.hasOwn, data-weft-untrusted; npm: the ssr guards, idempotent mount (+0.6 KiB)" },
+    { "label": "verification fixes", "item": "", "gzip": 62734, "note": "verification review: the selfURL match only for the standalone panel.js (the npm mark), running passed to messagesSent, overflow calm from the reopen, Alt+W prefers a live page-mounted panel (+0.1 KiB)" }
   ]
 }

@@ -724,7 +724,12 @@ against its +4 KiB estimate (with its review fixes): the overrun is the
 review's honesty work (derived records, the manifest asked again, the
 unreachable child, `not_served`), nothing in it is deferrable at first
 paint, and minifying the bundle is held in reserve, so it is accepted
-rather than cut.
+rather than cut. The transcript editor and its preview (F2) measured
++6.3 KiB against +4 KiB with its review fixes: the overrun is
+review-driven honesty and correctness (the compacted-range pre-check,
+the pending and held Run states, steers by step, the int64 and 2^53
+refusals, the fork hold), nothing deferrable supplies the editor's
+first paint, and 2.2 KiB of headroom remain, so it is accepted.
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 

@@ -23,6 +23,7 @@ import { editResultAndReplay, replayFromStep } from "@/lib/replay"
 import type { ReplayDraft } from "@/lib/replay"
 import { renderWithRouter } from "@/test/render"
 import { HOLES } from "@/lib/honesty"
+import { runLink } from "@/lib/links"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -1183,5 +1184,37 @@ describe("the replay drawer's state in the URL (G2)", () => {
     studio.on(`GET runs/${RUN}`, () => new Promise(() => {}))
     renderApp(`/runs/${RUN}`)
     await waitFor(() => expect(document.title).toBe("run r_fail · weft studio"))
+  })
+})
+
+describe("the replay drawer's link, closing round (F2.2)", () => {
+  beforeEach(() => serve())
+
+  it("a drawer link under a token that may not act clears its keys (nothing would be open)", async () => {
+    const claims = btoa(JSON.stringify({ public_id: "pub_1", scope: "read", exp: new Date(Date.now() + 3600_000).toISOString() }))
+      .replace(/=+$/, "")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+    setStudioToken(`weft_pt.${claims}.c2ln`)
+    const { router } = renderApp(`/runs/${RUN}?view=story&replay=from_step&from=2`)
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty("replay"))
+    expect(router.state.location.search).not.toHaveProperty("from")
+    expect(drawer()).toBeNull()
+  })
+
+  it("an in-app navigation to another run's drawer link reopens it there", async () => {
+    const { router } = renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() => expect(document.querySelector('[data-step="0"]')).toBeTruthy())
+    expect(drawer()).toBeNull()
+    void router.navigate({ ...runLink("pg_new", { view: "story", replay: { verb: "from_step", from: 1 } }) })
+    await waitFor(() => expect(drawer()).toBeTruthy())
+    expect(within(drawer()!).getByText(/^pg_new/)).toBeTruthy()
+  })
+
+  it("a reloaded edit link reopens as the rebuilt draft, and the URL says its verb", async () => {
+    const { router } = renderApp(`/runs/${RUN}?view=story&replay=edit_result&from=3`)
+    await waitFor(() => expect(drawer()).toBeTruthy())
+    expect(within(drawer()!).getByText("Replay from this step")).toBeTruthy()
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ replay: "from_step", from: 3 }))
   })
 })

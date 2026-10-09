@@ -229,16 +229,28 @@ function RunPage() {
   useDocumentTitle({ page: "run", id, status: run.data?.status })
   // A link with the drawer's state reopens it once, on that step, from
   // the verb's own draft (the edits were never in the link).
-  const linked = useRef(false)
+  // Once per run id: an in-app navigation to another run's link
+  // reopens there too.
+  const linked = useRef("")
   useEffect(() => {
-    if (linked.current || capsLoading) return
-    linked.current = true
+    if (linked.current === id || capsLoading) return
+    linked.current = id
     const r = replayFromSearch(search)
-    if (!r || !replayable) return
+    if (!r) return
+    // No drawer for this page (no playground, a read-scoped token): the
+    // keys would name a drawer that is not open — cleared.
+    if (!replayable) {
+      writeReplay(null)
+      return
+    }
     const draft =
       r.verb === "rerun" ? rerun() : r.verb === "continue" ? continueHere() : r.verb === "edit_prompt" ? editPromptAndReplay(r.from) : replayFromStep(r.from)
     setReplay((cur) => ({ req: { runID: r.of ?? id, draft }, n: cur.n + 1 }))
-  }, [capsLoading, replayable, search, id])
+    // The link's edits were never in it: a reopened edit / edit_result
+    // drawer is the rebuilt draft's verb, and the URL says so.
+    if (draft.verb !== r.verb || draft.fromStep !== r.from)
+      writeReplay({ verb: draft.verb, from: draft.fromStep, ...(r.of ? { of: r.of } : {}) })
+  }, [capsLoading, replayable, search, id, writeReplay])
   const transcript = useQuery({
     ...transcriptQuery(id),
     // The transcript is the finished words: refresh while running,

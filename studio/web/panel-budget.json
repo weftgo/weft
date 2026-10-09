@@ -13,7 +13,7 @@
     { "id": "C3", "what": "detection ladder", "estimate": 3072, "accepted": "nothing deferrable supplies the first scope; the deferrable remainder is under 1 KiB" },
     { "id": "C4", "what": "typed API surface (the host API)", "estimate": 1024, "accepted": "the host API is one surface for both installs; nothing to load later" },
     { "id": "F3", "what": "option lab form", "estimate": 3072 },
-    { "id": "F2", "what": "transcript editor + preview", "estimate": 4096 }
+    { "id": "F2", "what": "transcript editor + preview", "estimate": 4096, "accepted": "review-driven honesty and correctness: the compacted-range pre-check in F1.1's words, the pending/held Run states, steers by step, the int64/2^53 refusals, the fork hold; nothing deferrable supplies the editor's first paint; 2.2 KiB of headroom remain" }
   ],
   "rows": [
     { "label": "C1", "item": "", "gzip": 32359, "note": "the baseline" },
@@ -52,6 +52,7 @@
     { "label": "F3 fixes", "item": "F3", "gzip": 73193, "note": "F3.2 review: the model's free text kept as typed (modelFree), the server's words for an unknown tool once per list, a 0 cap no bound, whole-number checks by safe integer and checkNeutral's 1e6, a ticked only_tools box stays clearable (+92 B; F3 +2,913 B of +3,072 B)" },
     { "label": "F2", "item": "F2", "gzip": 78015, "note": "the transcript editor and the preview in the panel (F2.2): the Story's prompt, steers, args (lib/edits.ts's checkArgs, the catalog schema), results, replies and boundary inserts edited in place into the drawer's one command, its list by kind, the will-be-sent preview (lib/preview.ts, POST /api/playground/preview), the weft.edits chips; the step compare's settled-without-diff line (+4,822 B of +4,096 B, under half again its estimate)" },
     { "label": "F2 fixes", "item": "F2", "gzip": 79522, "note": "F2.2 review: an editor follows its command (Escape, close, drop, another verb), a steer by its step, inserts within the bound and after the last step, a fork's edits held, checkArgs' int64 and lossy numbers, the run's last catalog per tool, the mark's colons and reused ids, Run waits for a pending preview, the compacted-range pre-check from transcript?step (+1,507 B; F2 +6,329 B of +4,096 B — past half again its estimate: reported, not accepted)" },
-    { "label": "G2 replay URL", "item": "", "gzip": 79600, "note": "the replay drawer's state in the URL: lib/links.ts's replaySearch/replayFromSearch and RunSearch's replay/from/of, which the panel bundles with links.ts though it never writes them (+78 B)" }
+    { "label": "G2 replay URL", "item": "", "gzip": 79600, "note": "the replay drawer's state in the URL: lib/links.ts's replaySearch/replayFromSearch and RunSearch's replay/from/of, which the panel bundles with links.ts though it never writes them (+78 B)" },
+    { "label": "F2 final", "item": "F2", "gzip": 79707, "note": "F2.2 closing round: Run held the moment a drawer field changes (and runExperiment refuses while the preview is pending), a preview that never answers released after 10 s as failed-not-refused, the drawer's link cleared where no drawer can open and re-read per run id, a reloaded edit link's verb written back (+107 B; F2 +6,436 B of +4,096 B, accepted)" }
   ]
 }

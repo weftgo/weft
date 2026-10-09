@@ -18,7 +18,7 @@ import type { PlaygroundRunBody, RunRow } from "@/lib/api"
 import { checkArgs, editable, editKey, editLine, editMarks, kindOf, markedPart, markLine, MARK_CHIPS } from "@/lib/edits"
 import type { ReplayEdit, UserMessage } from "@/lib/edits"
 import type { TranscriptBatch } from "@/lib/events"
-import { previewView } from "@/lib/preview"
+import { PREVIEW_SILENT, PREVIEW_TIMEOUT_MS, previewView } from "@/lib/preview"
 import type { PreviewDoc } from "@/lib/preview"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Button } from "@/components/ui/button"
@@ -269,17 +269,30 @@ export function usePreview(body: string): PreviewState {
   useEffect(() => {
     if (!body) return
     let live = true
+    let answered = false
     const t = setTimeout(() => {
       postPlaygroundPreview(JSON.parse(body) as PlaygroundRunBody).then(
-        (doc) => live && setSt({ doc, for: body }),
-        (e: unknown) =>
-          live &&
-          setSt({ error: e instanceof Error ? e.message : String(e), refused: e instanceof ApiError && e.status === 400, for: body })
+        (doc) => {
+          answered = true
+          if (live) setSt({ doc, for: body })
+        },
+        (e: unknown) => {
+          answered = true
+          if (live) setSt({ error: e instanceof Error ? e.message : String(e), refused: e instanceof ApiError && e.status === 400, for: body })
+        }
       )
     }, PREVIEW_DEBOUNCE_MS)
+    // A preview that never answers does not hold Run forever: past the
+    // bound it is failed, not refused.
+    const bound = setTimeout(() => {
+      if (!live || answered) return
+      live = false
+      setSt((cur) => ({ doc: cur.doc, error: PREVIEW_SILENT, for: body }))
+    }, PREVIEW_DEBOUNCE_MS + PREVIEW_TIMEOUT_MS)
     return () => {
       live = false
       clearTimeout(t)
+      clearTimeout(bound)
     }
   }, [body])
   if (!body) return {}

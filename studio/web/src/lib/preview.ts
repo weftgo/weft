@@ -49,6 +49,12 @@ export interface PreviewDoc {
 
 export const PREVIEW_PATH = "playground/preview"
 
+/** How long a preview may stay unanswered before the drawer stops
+ * waiting for it, and the line it says then: Run is released (the
+ * preview failed, it did not refuse — the server still validates). */
+export const PREVIEW_TIMEOUT_MS = 10_000
+export const PREVIEW_SILENT = "the preview did not answer; Run is yours — the server still validates"
+
 /** One aligned message: its op, role, and the words on each side. */
 export interface PreviewRow {
   op: PreviewOp

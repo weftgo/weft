@@ -19,6 +19,8 @@ import { apiError, FakeStudio, golden, pagedEvents, pagedRequests, transcriptOf 
 import { agentView, bodies, DONE_EDITS, editCatalog as catalog, events, requestRow, RUN, runtimeOf, steerBodies, steerEvents } from "@/panel/replaykit"
 import { AS_OF_2, COMPACTED_C1 } from "@/test/edit-fixtures"
 import { FORK_EDITS } from "@/lib/edits"
+import { PREVIEW_SILENT, PREVIEW_TIMEOUT_MS } from "@/lib/preview"
+import { PREVIEW_DEBOUNCE_MS } from "@/components/studio/transcript-editor"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -360,5 +362,24 @@ describe("an edit inside the compacted range is said before anything is posted (
     await edit("the result of search_kb (c2)", "y")
     await waitFor(() => expect(drawer()!.querySelector("[data-replay-view-edit]")?.textContent).toBe(COMPACTED_C1))
     expect(within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)
+  })
+})
+
+describe("a preview that never answers (closing round)", () => {
+  afterEach(() => vi.useRealTimers())
+
+  it("past the bound it is failed, not refused: the line, and Run released", async () => {
+    serve({ preview: () => new Promise<Response>(() => {}) })
+    await story()
+    await edit("the result of search_kb (c2)", "x")
+    const run = within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" })
+    await waitFor(() => expect(studio.calls("POST playground/preview").length).toBeGreaterThan(0))
+    expect(run.disabled).toBe(true)
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    // A changed command starts its own bound under the fake clock.
+    fireEvent.change(ta("the result of search_kb (c2)")!, { target: { value: "xy" } })
+    vi.advanceTimersByTime(PREVIEW_DEBOUNCE_MS + PREVIEW_TIMEOUT_MS + 50)
+    await waitFor(() => expect(drawer()!.querySelector("[data-preview-error]")?.textContent).toBe(PREVIEW_SILENT))
+    await waitFor(() => expect(run.disabled).toBe(false))
   })
 })

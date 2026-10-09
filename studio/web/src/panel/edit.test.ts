@@ -7,7 +7,7 @@
 // (Run held), nothing without the capability; a replayed run's
 // weft.edits is drawn as chips, never on a child. The fixture is
 // replaykit.ts's, the run page's (routes/run-edit.test.tsx).
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { WeftDevtools } from "./element"
 import { marksBlock } from "./editor"
@@ -15,6 +15,8 @@ import { $, all, apiError, assistant, fakeStudio, mount, page, pause, settle, se
 import { DONE_EDITS, EDIT_META, editRoutes, events, REPLAY_META, RUN, runRowOf, steerBodies, steerEvents, transcriptCut } from "./replaykit"
 import { AS_OF_2, COMPACTED_C1 } from "../test/edit-fixtures"
 import { FORK_EDITS } from "../lib/edits"
+import { PREVIEW_SILENT, PREVIEW_TIMEOUT_MS } from "../lib/preview"
+import { PREVIEW_MS } from "./state"
 import { golden } from "../test/fake-studio"
 
 beforeEach(setup)
@@ -293,5 +295,42 @@ describe("an edit inside the compacted range is said before anything is posted (
     await settle(400)
     expect(text(el, "[data-weft-view-edit]")).toBe(COMPACTED_C1)
     expect(runBtn(el).disabled).toBe(true)
+  })
+})
+
+describe("the preview's pending and its bound (closing round)", () => {
+  afterEach(() => vi.useRealTimers())
+
+  it("typing in the drawer's own field holds Run at once, and runExperiment refuses while pending", async () => {
+    const studio = fakeStudio(routes(), META_PV)
+    const el = await mount()
+    await edit(el, C2, "tool_result:1:c2:0", "x")
+    await settle(400)
+    expect(runBtn(el).disabled).toBe(false)
+    const prompt = $(el, '.weft-drawer textarea[data-weft-k="prompt"]') as HTMLTextAreaElement
+    prompt.value = "Be brief."
+    prompt.dispatchEvent(new Event("input", { bubbles: true }))
+    await settle()
+    expect(runBtn(el).disabled).toBe(true)
+    await (el as unknown as { model: { runExperiment: () => Promise<void> } }).model.runExperiment()
+    expect(studio.posts("playground/runs")).toHaveLength(0)
+    await settle(400)
+    expect(runBtn(el).disabled).toBe(false)
+  })
+
+  it("a preview that never answers is failed past the bound, not refused: the line, and Run released", async () => {
+    fakeStudio(routes(() => new Promise(() => {})), META_PV)
+    const el = await mount()
+    await edit(el, C2, "tool_result:1:c2:0", "x")
+    expect(runBtn(el).disabled).toBe(true)
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    const t = $(el, 'textarea[data-weft-k="ed:tool_result:1:c2:0"]') as HTMLTextAreaElement
+    t.value = "xy"
+    t.dispatchEvent(new Event("input", { bubbles: true }))
+    vi.advanceTimersByTime(PREVIEW_MS + PREVIEW_TIMEOUT_MS + 50)
+    vi.useRealTimers()
+    await settle()
+    expect(text(el, "[data-weft-preview-error]")).toBe(PREVIEW_SILENT)
+    expect(runBtn(el).disabled).toBe(false)
   })
 })

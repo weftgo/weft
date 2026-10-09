@@ -61,6 +61,7 @@ import {
 import type { ExperimentDraft, ExperimentResult, TurnWords } from "./playground"
 import type { PanelPreview } from "./editor"
 import type { CompactedNote } from "../lib/experiment-body"
+import { PREVIEW_SILENT, PREVIEW_TIMEOUT_MS } from "../lib/preview"
 import { studioIsTooNew } from "./version"
 
 /** The runs list's paging cursor (next_before, next_before_id). */
@@ -1674,14 +1675,25 @@ export class PanelModel {
       return
     }
     // Pending until this draft's answer: Run waits (the last answer
-    // stays drawn).
+    // stays drawn). Said at once: a field typed without a redraw must
+    // not leave Run enabled for the debounce.
+    const was = this.state.preview?.pending
     this.state.preview = { doc: this.state.preview?.doc, pending: true }
+    if (!was) this.emit()
+    const left = () => this.disposed || seq !== this.pvSeq
     this.after(PREVIEW_MS, () => {
-      const left = () => this.disposed || seq !== this.pvSeq
       void postPreview(this.ep, buildRunBody(d, this.publicId)).then(
         (doc) => !left() && this.setPreview({ doc }),
         (err: unknown) => !left() && this.setPreview({ error: messageOf(err), refused: err instanceof PanelApiError && err.status === 400 })
       )
+    })
+    // A preview that never answers does not hold Run forever: past the
+    // bound it is failed, not refused.
+    this.after(PREVIEW_MS + PREVIEW_TIMEOUT_MS, () => {
+      if (!left() && this.state.preview?.pending) {
+        this.pvSeq++
+        this.setPreview({ doc: this.state.preview.doc, error: PREVIEW_SILENT })
+      }
     })
   }
 
@@ -1721,7 +1733,8 @@ export class PanelModel {
    * start (and bill) a second run. */
   async runExperiment() {
     const draft = this.state.drawer
-    if (!draft || this.posting) return
+    // Not while the draft's preview is pending (a 400 may be coming).
+    if (!draft || this.posting || this.state.preview?.pending) return
     const problem = draftProblem(draft)
     if (problem) {
       this.setExperimentError(problem, draft.under ?? draft.runId)

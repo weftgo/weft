@@ -249,6 +249,18 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 				badRequest(w, r, "the scripted engine replays a source run's recorded turns: a source run is required")
 				return
 			}
+			// from_step at the step count is the step the source never
+			// answered (ADR 0029): nothing recorded to replay — refused in
+			// weft/runtime's words (executor.go's scriptedAtCount). A
+			// transcript that does not read leaves it to the runtime.
+			if n := req.Source.FromStep; n > 0 {
+				if batches, terr := s.db.TranscriptBatches(r.Context(), req.Source.RunID); terr == nil {
+					if steps, serr := runSteps(batches); serr == nil && stepCount(steps) == n {
+						badRequest(w, r, fmt.Sprintf("the scripted engine has no recorded turn for step %d: the source never answered it (use engine live)", n))
+						return
+					}
+				}
+			}
 		default:
 			badRequest(w, r, "unknown engine "+req.Engine)
 			return

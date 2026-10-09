@@ -723,6 +723,19 @@ func TestReplayFromTheStepCountAnswersTheCalls(t *testing.T) {
 				!strings.HasSuffix(fed[0], `"is_error":false}]}]`) {
 				t.Errorf("the replay's model calls = %v, want one answering the patched c3 result", fed)
 			}
+			t.Run("scripted", func(t *testing.T) {
+				cmd := command{CommandID: "cmd_scripted", Agent: "failing", Engine: "scripted",
+					Source: &sourceSpec{RunID: "r_fail", FromStep: 3}}
+				const want = "the scripted engine has no recorded turn for step 3: the source never answered it (use engine live)"
+				if reason, ok := l.validate(ctx, &cmd); ok || reason != want {
+					t.Errorf("scripted at the step count = %v %q, want refused: %q", ok, reason, want)
+				}
+				cmd = command{CommandID: "cmd_scripted_2", Agent: "failing", Engine: "scripted",
+					Source: &sourceSpec{RunID: "r_fail", FromStep: 2}}
+				if reason, ok := l.validate(ctx, &cmd); !ok {
+					t.Errorf("scripted from a recorded step refused: %s", reason)
+				}
+			})
 			for _, bad := range []command{
 				{CommandID: "cmd_past", Agent: "failing", Engine: "live", Source: &sourceSpec{RunID: "r_fail", FromStep: 4}},
 				{CommandID: "cmd_done", Agent: "failing", Engine: "live", Source: &sourceSpec{RunID: "r_done", FromStep: 4}},

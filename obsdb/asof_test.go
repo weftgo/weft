@@ -122,6 +122,59 @@ func TestAssembleStep(t *testing.T) {
 	}
 }
 
+// TestAssembleStepAtTheCountAfterAView: a run-scope view on step n−1
+// and no request at step n (the run stopped after step n−1's calls were
+// answered): step n is the whole growth transcript, derived, with no
+// view — a view applies to its own request alone and never carries into
+// a later step (ADR 0028 §8, ADR 0029).
+func TestAssembleStepAtTheCountAfterAView(t *testing.T) {
+	body := func(msgs ...core.Message) json.RawMessage {
+		b, err := json.Marshal(msgs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	call := func(id string) core.Message {
+		return core.Message{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: id, Name: "lookup", Args: []byte(`{}`)}}}
+	}
+	result := func(id string) core.Message {
+		return core.Message{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: id, Name: "lookup", Content: "r"}}}
+	}
+	batches := []TranscriptBatch{
+		{Index: 0, Step: 0, Input: true, Messages: body(core.User("u"))},
+		{Index: 1, Step: 0, Messages: body(call("c1"))},
+		{Index: 2, Step: 0, Messages: body(result("c1"))},
+		// index 3: step 1's view (below)
+		{Index: 4, Step: 1, Messages: body(call("c2"))},
+		{Index: 5, Step: 1, Messages: body(result("c2"))},
+	}
+	idx := func(i int64) *int64 { return &i }
+	reqs := []RequestRecord{
+		{Index: 0, Step: 0, Body: RequestBody{MessagesRef: RequestMessagesRef{Index: idx(0), Count: 1}}},
+		{Index: 1, Step: 1, Body: RequestBody{MessagesRef: RequestMessagesRef{Index: idx(3), Count: 2}}},
+	}
+	view := Compaction{Scope: CompactionRun, Index: 3, Step: 1, FromSeq: 1, ToSeq: 3, Messages: body(core.User("summary")), Replaced: 2, Entries: 1}
+	if sm, err := AssembleStep(batches, reqs, []Compaction{view}, 1); err != nil || sm.View == nil || len(sm.Messages) != 2 {
+		t.Fatalf("step 1 = %+v %v, want its view", sm, err)
+	}
+	sm, err := AssembleStep(batches, reqs, []Compaction{view}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sm.Derived || sm.View != nil || len(sm.Messages) != 5 || sm.Messages[1].Role != core.RoleAssistant || sm.Messages[4].Role != core.RoleTool {
+		t.Errorf("step 2 = %+v, want the 5 growth messages, derived, no view", sm)
+	}
+	for _, m := range sm.Messages {
+		if m.Text() == "summary" {
+			t.Errorf("step 2 carried step 1's view: %+v", sm.Messages)
+		}
+	}
+	if _, err := AssembleStep(batches, reqs, []Compaction{view}, 3); !errors.Is(err, ErrNotFound) {
+		t.Errorf("step 3 = %v, want ErrNotFound", err)
+	}
+}
+
 func isHole(err error, h Hole) bool {
 	var e *StepMessagesError
 	return errors.Is(err, ErrStepMessages) && errors.As(err, &e) && e.Hole == h

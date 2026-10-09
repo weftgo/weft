@@ -252,4 +252,14 @@ func TestFromStepAtTheStepCount(t *testing.T) {
 			t.Errorf("%s from_step %d = %d %s, want %d", c.run, c.from, code, strings.TrimSpace(out), c.code)
 		}
 	}
+	// The scripted engine has nothing recorded for the step the source
+	// never answered: 400 in weft/runtime's words; from a recorded step
+	// it is accepted.
+	for from, want := range map[int]int{2: http.StatusBadRequest, 1: http.StatusAccepted} {
+		code, out := pt.post(t, fmt.Sprintf(`{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"r_failed","from_step":%d},`+
+			`"engine":"scripted","side_effects":"substitute","thread":"ephemeral"}`, from))
+		if code != want || (want == http.StatusBadRequest && !strings.Contains(out, "the scripted engine has no recorded turn for step 2: the source never answered it (use engine live)")) {
+			t.Errorf("scripted from_step %d = %d %s, want %d", from, code, strings.TrimSpace(out), want)
+		}
+	}
 }

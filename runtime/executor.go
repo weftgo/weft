@@ -159,6 +159,11 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 			(cmd.Source.FromStep > n || cmd.Source.FromStep == n && !endsInAnsweredCalls(cmd.src.steps)) {
 			return fmt.Sprintf("from_step %d is beyond the source run's last step (it recorded %d; a run past the end has nothing fresh to answer)",
 				cmd.Source.FromStep, n), false
+		} else if cmd.Engine == "scripted" && cmd.Source.FromStep > 0 && cmd.Source.FromStep == n {
+			// The step at the count is the one the source never answered:
+			// the scripted engine has nothing to replay for it — refused
+			// before the ack, never acked and failed at run time.
+			return scriptedAtCount(n), false
 		}
 		var err error
 		if cmd.prefix, err = runPrefix(cmd.src, *cmd, hasInput); err != nil {
@@ -1103,6 +1108,13 @@ func cutAt(steps []core.Message, stepOf []int, fromStep int) int {
 		}
 	}
 	return len(steps) // fewer steps than asked: keep it all
+}
+
+// scriptedAtCount is the refusal of a scripted command from the step the
+// source never answered — Studio's copy (studio/playground.go) words it
+// identically.
+func scriptedAtCount(n int) string {
+	return fmt.Sprintf("the scripted engine has no recorded turn for step %d: the source never answered it (use engine live)", n)
 }
 
 // endsInAnsweredCalls reports whether a run's own messages end in a

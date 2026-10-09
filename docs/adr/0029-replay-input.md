@@ -38,7 +38,12 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
    0 re-runs the turn from what it was fed (its step-0 `PrepareStep`
    runs again over the original input); no view applies there.
    `from_step` counts the run's own steps, unchanged — a compaction
-   changes no step count.
+   changes no step count. `from_step` may equal the step count when the
+   last step ended in answered tool calls (a failed or budget-stopped
+   run): the prefix is that step's request if one was recorded, else
+   the whole growth transcript (derived; no view carries forward), and
+   the replay's first model call answers those results; after a
+   call-free reply it is refused.
 
    *The limit.* The runtime runs the agent (Studio never does), so the
    replayed agent's own `PrepareStep` runs over that prefix as it is.

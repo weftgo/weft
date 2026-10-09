@@ -151,7 +151,12 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 		}
 	}
 	if cmd.src != nil && cmd.Thread != "fork" {
-		if n := cmd.src.stepCount(); cmd.Source.FromStep > 0 && cmd.Source.FromStep >= n {
+		// from_step at the step count is a step that never answered: fresh
+		// when the last kept step ended in answered tool calls (the replay's
+		// first model call answers them — the source's next step, failed or
+		// never made), nothing to answer after a call-free reply (ADR 0029).
+		if n := cmd.src.stepCount(); cmd.Source.FromStep > 0 &&
+			(cmd.Source.FromStep > n || cmd.Source.FromStep == n && !endsInAnsweredCalls(cmd.src.steps)) {
 			return fmt.Sprintf("from_step %d is beyond the source run's last step (it recorded %d; a run past the end has nothing fresh to answer)",
 				cmd.Source.FromStep, n), false
 		}
@@ -1098,6 +1103,40 @@ func cutAt(steps []core.Message, stepOf []int, fromStep int) int {
 		}
 	}
 	return len(steps) // fewer steps than asked: keep it all
+}
+
+// endsInAnsweredCalls reports whether a run's own messages end in a
+// step whose assistant message made tool calls that all have results
+// after it: the transcript waits for the model call that answers them.
+// Studio's copy (studio/edits.go) reads the same.
+func endsInAnsweredCalls(steps []core.Message) bool {
+	last := -1
+	for i, m := range steps {
+		if m.Role == core.RoleAssistant {
+			last = i
+		}
+	}
+	if last < 0 {
+		return false
+	}
+	answered := map[string]bool{}
+	for _, m := range steps[last+1:] {
+		for _, p := range m.Content {
+			if tr, ok := p.(core.ToolResultPart); ok && m.Role == core.RoleTool {
+				answered[tr.CallID] = true
+			}
+		}
+	}
+	calls := 0
+	for _, p := range steps[last].Content {
+		if c, ok := p.(core.ToolCallPart); ok {
+			calls++
+			if !answered[c.ID] {
+				return false
+			}
+		}
+	}
+	return calls > 0
 }
 
 // orDefault returns s when set, def otherwise.

@@ -83,6 +83,12 @@ module, ADR 0005).
   re-shapes it). A thread-stored source whose records cannot rebuild the
   step (content off) replays on the thread's messages with a warning
   instead of being refused.
+- **`from_step` at the step count**: accepted on both sides when the
+  source's last step ended in answered tool calls (a run that failed or
+  hit its budget before answering them) — the replay's first model call
+  answers them; `transcript?step=` serves that prefix (the step's
+  request, else the whole transcript as `derived`). After a call-free
+  reply it is still refused.
 - **Edits inside a compacted range are refused** on both sides (Studio
   400, the runtime's reject) in one wording: `call "c_1" of step 0 was
   compacted away before step 3's request (messages [1, 3) replaced by

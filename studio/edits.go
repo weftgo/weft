@@ -142,7 +142,9 @@ func validateTranscriptEdits(steps []stepMessage, fromStep int, edits []linkrunt
 	if fromStep <= 0 {
 		return fmt.Errorf("transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)")
 	}
-	if n := stepCount(steps); fromStep >= n {
+	// from_step at the step count is fresh only when the last kept step
+	// ended in answered tool calls (weft/runtime's endsInAnsweredCalls).
+	if n := stepCount(steps); fromStep > n || fromStep == n && !endsInAnsweredCalls(steps) {
 		return fmt.Errorf("from_step %d is beyond the source run's last step (it recorded %d; a run past the end has nothing fresh to answer)",
 			fromStep, n)
 	}
@@ -213,6 +215,39 @@ func validateTranscriptEdits(steps []stepMessage, fromStep int, edits []linkrunt
 		}
 	}
 	return nil
+}
+
+// endsInAnsweredCalls reports whether the run's own messages end in a
+// step whose assistant message made tool calls that all have results
+// after it — weft/runtime's copy of the same name.
+func endsInAnsweredCalls(steps []stepMessage) bool {
+	last := -1
+	for i, m := range steps {
+		if m.msg.Role == core.RoleAssistant {
+			last = i
+		}
+	}
+	if last < 0 {
+		return false
+	}
+	answered := map[string]bool{}
+	for _, m := range steps[last+1:] {
+		for _, p := range m.msg.Content {
+			if tr, ok := p.(core.ToolResultPart); ok && m.msg.Role == core.RoleTool {
+				answered[tr.CallID] = true
+			}
+		}
+	}
+	calls := 0
+	for _, p := range steps[last].msg.Content {
+		if c, ok := p.(core.ToolCallPart); ok {
+			calls++
+			if !answered[c.ID] {
+				return false
+			}
+		}
+	}
+	return calls > 0
 }
 
 // cutTranscriptAtStep is §5.1's from_step cut over a run's own steps:

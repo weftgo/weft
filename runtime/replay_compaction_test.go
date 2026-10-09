@@ -644,3 +644,102 @@ func TestThreadSourceWithUnreachableStudio(t *testing.T) {
 		})
 	}
 }
+
+// TestReplayFromTheStepCountAnswersTheCalls (ADR 0029): the common
+// failing run — step 2's call errors, then step 3's model call fails —
+// records three steps that end in an answered call with no reply. "Edit
+// c3's result, replay from step 3" is from_step 3 (the step count) with
+// a tool_result edit on step 2: accepted, and the replay's step 0 is
+// the model call that answers the patched result — what the source's
+// failed step 3 would have been. After a call-free last reply, from_step
+// at the step count has nothing to answer and is still refused, as is
+// any from_step past it.
+func TestReplayFromTheStepCountAnswersTheCalls(t *testing.T) {
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Local(filepath.Join(t.TempDir(), "weft.db")), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = p.Shutdown(ctx) }()
+	tail := &tailModel{}
+	var failing atomic.Bool
+	failing.Store(true)
+	model := modelStream(func(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+		last := req.Messages[len(req.Messages)-1]
+		if failing.Load() && last.Role == core.RoleTool {
+			for _, part := range last.Content {
+				if tr, ok := part.(core.ToolResultPart); ok && tr.CallID == "c3" {
+					return func(yield func(core.ModelEvent, error) bool) { yield(nil, errors.New("provider down")) }
+				}
+			}
+		}
+		return tail.Stream(ctx, req)
+	})
+	lookup := core.Tool("lookup", "Look up a record.", func(_ context.Context, in struct {
+		ID string `json:"id"`
+	}) (string, error) {
+		if in.ID == "c3" {
+			return "", errors.New("429 Too Many Requests")
+		}
+		return "record " + in.ID, nil
+	}, core.Replay(core.ReplaySafe))
+	agent := core.New(model, core.Name("failing"),
+		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()), lookup)
+	if _, err := agent.Generate(ctx, core.RunID("r_fail"), core.Prompt("look everything up")); err == nil {
+		t.Fatal("the source run did not fail")
+	}
+	failing.Store(false)
+	if _, err := agent.Generate(ctx, core.RunID("r_done"), core.Prompt("look everything up")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ForceFlush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	tail.take()
+	db := p.LocalDB()
+	ts := httptest.NewServer(studio.New(studio.DB(db)).Handler())
+	defer ts.Close()
+
+	for name, local := range map[string]func() obsdb.DB{
+		"local":  func() obsdb.DB { return db },
+		"studio": func() obsdb.DB { return nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := &config{agents: []*core.Agent{agent}}
+			l := newLink(cfg, newRegistry(cfg), ts.URL, "")
+			l.localDB = local
+			defer l.stop()
+			cmd := command{CommandID: "cmd_count", Agent: "failing", Engine: "live", SideEffects: "substitute",
+				Source:          &sourceSpec{RunID: "r_fail", FromStep: 3},
+				TranscriptEdits: []transcriptEdit{{Step: 2, CallID: "c3", ToolResult: "record c3"}}}
+			if reason, ok := l.validate(ctx, &cmd); !ok {
+				t.Fatalf("from_step at the step count after answered calls: %s", reason)
+			}
+			if status, _, errText := l.execute(ctx, cmd, "pg_count_"+name); status != "succeeded" {
+				t.Fatalf("execute = %s %s", status, errText)
+			}
+			fed := tail.take()
+			if len(fed) != 1 || !strings.Contains(fed[0], `"call_id":"c3"`) || !strings.Contains(fed[0], `"content":"record c3"`) ||
+				!strings.HasSuffix(fed[0], `"is_error":false}]}]`) {
+				t.Errorf("the replay's model calls = %v, want one answering the patched c3 result", fed)
+			}
+			for _, bad := range []command{
+				{CommandID: "cmd_past", Agent: "failing", Engine: "live", Source: &sourceSpec{RunID: "r_fail", FromStep: 4}},
+				{CommandID: "cmd_done", Agent: "failing", Engine: "live", Source: &sourceSpec{RunID: "r_done", FromStep: 4}},
+			} {
+				if reason, ok := l.validate(ctx, &bad); ok || !strings.Contains(reason, "beyond the source run's last step") {
+					t.Errorf("%s from_step %d = %v %q, want refused as beyond the last step", bad.Source.RunID, bad.Source.FromStep, ok, reason)
+				}
+			}
+		})
+	}
+}
+
+// modelStream is a core.Model from a stream function.
+type modelStream func(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error]
+
+func (modelStream) Info() core.ModelInfo { return core.ModelInfo{Provider: "wefttest", Name: "stream"} }
+
+func (f modelStream) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	return f(ctx, req)
+}

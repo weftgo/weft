@@ -3,6 +3,8 @@ package studio
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/otel"
 )
@@ -159,5 +162,94 @@ func TestPlaygroundEditInsideCompactionRefused(t *testing.T) {
 	}
 	if code, body := post(`{"step":1,"call_id":"c_sub","tool_result":"x"}`); strings.Contains(body, "compacted") || strings.Contains(body, "kept prefix") {
 		t.Errorf("edit outside the view = %d %s, want the transcript checks passed", code, body)
+	}
+}
+
+// recordAnsweredRun records, through the real pipeline into Studio, a
+// run whose last step's call has its (error) result but no reply: step
+// 0 looks up, step 1's refund errors, then the run stops before step 2
+// answers — the model call failing (failed: step 2 has a request
+// record) or the step budget breached (budget: no request record for
+// step 2). A third shape (done) answers with a call-free reply.
+func recordAnsweredRun(t *testing.T, url, runID, shape string) {
+	t.Helper()
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(url, ""), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	type in struct {
+		OrderID string `json:"order_id"`
+	}
+	lookup := core.Tool("lookup_order", "Look up.", func(context.Context, in) (string, error) { return "shipped", nil })
+	refund := core.Tool("refund", "Refund.", func(context.Context, in) (string, error) {
+		return "", &core.ToolError{Code: "RATE_LIMITED", Message: "429"}
+	})
+	turns := []wefttest.Turn{
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"42"}`, ID: "c1"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"42"}`, ID: "c2"}),
+	}
+	opts := []core.Option{core.Name("acme-support"), core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()), lookup, refund}
+	switch shape {
+	case "failed":
+		turns = append(turns, wefttest.Fail(errors.New("provider down")))
+	case "budget":
+		opts = append(opts, core.MaxSteps(2))
+	case "done":
+		turns = append(turns, wefttest.Say("sorry, the refund failed"))
+	}
+	_, err = core.New(wefttest.Script(turns...), opts...).Generate(ctx, core.RunID(runID), core.Prompt("refund 42"))
+	if (err == nil) != (shape == "done") {
+		t.Fatalf("%s run: err = %v", shape, err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestFromStepAtTheStepCount (ADR 0029): from_step equal to the run's
+// step count is fresh when the last step ended in answered tool calls —
+// the replay's first model call answers them — so a run that failed (or
+// hit its step budget) after step 1's refund errored replays from step
+// 2 with step 1's result edited: the playground accepts it, and
+// transcript?step=2 serves the prefix (the failed call's own request; a
+// derived whole transcript when no request was recorded). After a
+// call-free reply the same from_step has nothing to answer: still 400.
+func TestFromStepAtTheStepCount(t *testing.T) {
+	pt := newPlaygroundTestServer(t)
+	go func() {
+		for range pt.cmd {
+		}
+	}()
+	for _, shape := range []string{"failed", "budget", "done"} {
+		recordAnsweredRun(t, pt.ts.URL, "r_"+shape, shape)
+	}
+	for shape, want := range map[string]struct {
+		count int
+		badge string
+	}{"failed": {5, ""}, "budget": {5, "derived"}} {
+		body := fetchJSON(t, pt.ts, "/api/runs/r_"+shape+"/transcript?step=2", nil)
+		var doc transcriptAsOfT
+		decode(t, body, &doc)
+		if len(doc.Messages) != want.count || doc.Badge != want.badge || doc.CompactedAt != nil ||
+			doc.Messages[len(doc.Messages)-1].Role != core.RoleTool {
+			t.Errorf("%s: transcript?step=2 = %d messages, badge %q; want %d ending in the refund's result, badge %q", shape, len(doc.Messages), doc.Badge, want.count, want.badge)
+		}
+	}
+	for _, c := range []struct {
+		run  string
+		from int
+		code int
+	}{
+		{"r_failed", 2, http.StatusAccepted},
+		{"r_budget", 2, http.StatusAccepted},
+		{"r_failed", 3, http.StatusBadRequest},
+		{"r_done", 3, http.StatusBadRequest},
+	} {
+		code, out := pt.post(t, fmt.Sprintf(`{"runtime":"rt_test","agent":"acme-support","source":{"run_id":%q,"from_step":%d},`+
+			`"engine":"live","side_effects":"substitute","thread":"ephemeral","transcript_edits":[{"step":1,"call_id":"c2","tool_result":"refunded"}]}`, c.run, c.from))
+		if code != c.code || (c.code == http.StatusBadRequest && !strings.Contains(out, "beyond the source run's last step")) {
+			t.Errorf("%s from_step %d = %d %s, want %d", c.run, c.from, code, strings.TrimSpace(out), c.code)
+		}
 	}
 }

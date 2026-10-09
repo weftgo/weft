@@ -105,12 +105,6 @@ func hasViewRef(reqs []RequestRecord) bool {
 // growth batches (TranscriptBatches), its request records (any steps;
 // the answering — last — attempt of step is used) and its compactions.
 func AssembleStep(batches []TranscriptBatch, requests []RequestRecord, compactions []Compaction, step int) (StepMessages, error) {
-	type placed struct {
-		index int64
-		step  int
-		input bool
-		msg   core.Message
-	}
 	var all []placed
 	indices := map[int64]bool{}
 	stored := true
@@ -209,6 +203,18 @@ func AssembleStep(batches []TranscriptBatch, requests []RequestRecord, compactio
 			found = true
 		}
 	}
+	if !found && rec == nil && step > 0 && step == lastStep(all, steps)+1 && answeredAtEnd(all) {
+		// The step after the last, when the last ended in answered tool
+		// calls: a model call that was never recorded (the run stopped on
+		// a budget, or failed before its request record) — the next
+		// request would have carried the whole transcript. No view
+		// applies: a run-scope view never carries into a later step.
+		out := StepMessages{Step: step, Derived: true, Messages: make([]core.Message, 0, len(all))}
+		for _, p := range all {
+			out.Messages = append(out.Messages, p.msg)
+		}
+		return out, nil
+	}
 	if !found {
 		return StepMessages{}, fmt.Errorf("obsdb: no step %d: %w", step, ErrNotFound)
 	}
@@ -225,6 +231,58 @@ func AssembleStep(batches []TranscriptBatch, requests []RequestRecord, compactio
 		out.Messages = append(out.Messages, p.msg)
 	}
 	return out, nil
+}
+
+// placed is one stored message with the record it came from.
+type placed struct {
+	index int64
+	step  int
+	input bool
+	msg   core.Message
+}
+
+// lastStep is the highest step holding one of the run's own assistant
+// messages (-1 for none); steps[i] is all[i]'s step.
+func lastStep(all []placed, steps []int) int {
+	n := -1
+	for i, p := range all {
+		if !p.input && p.msg.Role == core.RoleAssistant && steps[i] > n {
+			n = steps[i]
+		}
+	}
+	return n
+}
+
+// answeredAtEnd reports whether the run's last own assistant message
+// made tool calls that all have results after it.
+func answeredAtEnd(all []placed) bool {
+	last := -1
+	for i, p := range all {
+		if !p.input && p.msg.Role == core.RoleAssistant {
+			last = i
+		}
+	}
+	if last < 0 {
+		return false
+	}
+	answered := map[string]bool{}
+	for _, p := range all[last+1:] {
+		for _, part := range p.msg.Content {
+			if tr, ok := part.(core.ToolResultPart); ok && p.msg.Role == core.RoleTool {
+				answered[tr.CallID] = true
+			}
+		}
+	}
+	calls := 0
+	for _, part := range all[last].msg.Content {
+		if c, ok := part.(core.ToolCallPart); ok {
+			calls++
+			if !answered[c.ID] {
+				return false
+			}
+		}
+	}
+	return calls > 0
 }
 
 // ViewOf returns the run-scope compaction view a request record names:

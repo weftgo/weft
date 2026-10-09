@@ -879,7 +879,10 @@ and no parent linkage (ADR 0029). A replay from step N is fed what step
 N's model call carried, compaction view included; the replayed agent's
 own PrepareStep then runs over it, so the model's input is exact when
 the agent's PrepareStep is idempotent over its own output — a count- or
-index-keyed PrepareStep re-shapes the replay's input.
+index-keyed PrepareStep re-shapes the replay's input. `from_step` may
+equal the run's step count when its last step ended in answered tool
+calls (a run that failed answering them): the replay's first model call
+answers them, so "edit the result, replay from the next step" works.
 
 P1–P5 ride the same command: `transcript_edits` (validated on both
 sides — a patch names a call in the kept prefix, the prefix ends at a

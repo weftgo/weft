@@ -455,3 +455,83 @@ func TestTranscriptStepsFromARealRun(t *testing.T) {
 		t.Errorf("steered event step = %d, want 0 (the step its batch is stored under)", steered)
 	}
 }
+
+// TestPreviewGoldenMatchesARealRun is the shape row of
+// playground-preview.golden.json (plan F2): a real run driven through
+// the real pipeline into a Playground(true) Studio, previewed with an
+// edit of each kind; every field the golden pins must exist in the
+// real answer with the same JSON type.
+func TestPreviewGoldenMatchesARealRun(t *testing.T) {
+	srv := studio.New(studio.Open(filepath.Join(t.TempDir(), "weft.db")), studio.Playground(true))
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	t.Cleanup(func() { _ = srv.Close() })
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(ts.URL, ""), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := core.Tool("lookup_order", "Look up an order.", func(_ context.Context, in struct {
+		OrderID string `json:"order_id" jsonschema:"the order"`
+	}) (string, error) {
+		return "order " + in.OrderID + " shipped", nil
+	})
+	agent := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"42"}`, ID: "c1"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"43"}`, ID: "c2"}),
+		wefttest.Say("both shipped"),
+	), core.Name("orders"), core.Instructions("You look orders up."), lookup,
+		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	if _, err := agent.Generate(ctx, core.RunID("r_shape"), core.Prompt("where are orders 42 and 43?")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"agent":"orders","source":{"run_id":"r_shape","from_step":2},` +
+		`"overrides":{"instructions":"Be brief.","options":{"temperature":0.5}},"transcript_edits":[` +
+		`{"kind":"user","step":0,"content":"where are orders 7 and 43?"},` +
+		`{"kind":"tool_args","step":0,"call_id":"c1","args":{"order_id":"7"}},` +
+		`{"step":1,"call_id":"c2","tool_result":"order 43 lost"},` +
+		`{"kind":"insert","step":2,"content":"and refund the lost one"},` +
+		`{"kind":"insert","step":1,"content":"also check 43"}],"engine":"live"}`
+	var got any
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		resp, err := http.Post(ts.URL+"/api/playground/preview", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			if err := json.Unmarshal(b, &got); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("POST preview = %d %s", resp.StatusCode, b)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join("testdata", "api", "playground-preview.golden.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var g any
+	if err := json.Unmarshal(b, &g); err != nil {
+		t.Fatal(err)
+	}
+	want, have := map[string]bool{}, map[string]bool{}
+	shapePaths("", g, want)
+	shapePaths("", got, have)
+	var missing []string
+	for k := range want {
+		if !have[k] {
+			missing = append(missing, k)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Errorf("playground-preview.golden.json pins fields a real run's preview does not carry: %v", missing)
+	}
+}

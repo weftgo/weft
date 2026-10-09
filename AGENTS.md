@@ -320,7 +320,12 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // with lineage, the panel keeps chatting in it). Breakpoints and steer act
 //     // on the runs this runtime starts only (D7). Studio side:
 //     // studio.New(..., studio.Playground(true)): /api/playground/runs (the §5.1
-//     // command, transcript_edits validated on both sides), /api/playground/
+//     // command, transcript_edits validated on both sides — kind tool_result | reply |
+//     // user | tool_args (schema-checked, obsdb.CheckToolArgs) | insert, absent = the
+//     // pre-F2 shape, ADR 0029 §8; the replay carries weft.edits, <step>:<call>:args the
+//     // "args edited" mark; scripted + edits refused), /api/playground/preview (the
+//     // same body → the replay's exact first request beside the recorded step's and
+//     // their diff, pure assembly, no runtime needed; capability preview), /api/playground/
 //     // commands/{id}, /api/runs/{id}/approvals (a parked run's own verbs),
 //     // /api/playground/fixtures (wefttest replay fixtures from a run's records),
 //     // /api/experiments (the saved groups + the runs they label), /api/runtimes/

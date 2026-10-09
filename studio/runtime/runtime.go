@@ -278,13 +278,25 @@ type ToolChoice struct {
 	Name string `json:"name,omitempty"`
 }
 
-// TranscriptEdit is a D2/D3 edit: a step's recorded tool result or
-// message replaced before the experiment re-runs from that step.
+// TranscriptEdit is a D2/D3 edit of the kept prefix before the
+// experiment re-runs from from_step (ADR 0029 §8). Kind is the
+// discriminator — tool_result | reply | user | tool_args | insert —
+// and absent, the fields decide as before F2 (tool_result + call_id
+// patch a result, content rewrites a call-free reply), so every body
+// recorded before it still validates. user rewrites a user message of
+// step Step (Content; Index picks among the step's user messages, step
+// 0's turn prompt first); tool_args rewrites call CallID's arguments
+// (Args, a JSON object checked against the tool's schema); insert adds
+// a user message (Content) at the boundary before step Step's model
+// call, 0..from_step — where a steer delivered there would land.
 type TranscriptEdit struct {
-	Step       int    `json:"step"`
-	ToolResult string `json:"tool_result,omitempty"`
-	CallID     string `json:"call_id,omitempty"`
-	Content    string `json:"content,omitempty"`
+	Kind       string          `json:"kind,omitempty"`
+	Step       int             `json:"step"`
+	ToolResult string          `json:"tool_result,omitempty"`
+	CallID     string          `json:"call_id,omitempty"`
+	Content    string          `json:"content,omitempty"`
+	Args       json.RawMessage `json:"args,omitempty"`
+	Index      int             `json:"index,omitempty"`
 }
 
 // Breakpoints is an `event: breakpoints` frame's data (§8.3): the

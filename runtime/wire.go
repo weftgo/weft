@@ -1,6 +1,10 @@
 package runtime
 
-import "github.com/weftgo/weft/core"
+import (
+	"encoding/json"
+
+	"github.com/weftgo/weft/core"
+)
 
 // The runtime link's wire protocol (WEFT-PLAYGROUND.md §10.3): all
 // JSON over HTTP. Commands come down an SSE stream; everything else
@@ -124,6 +128,9 @@ type command struct {
 	// carried by every run of the command, a resume's included. Nil when
 	// the override is the agent's own or an allow-list name.
 	model core.Model
+	// schemas are the agent's tools' input schemas, read in validate:
+	// what a tool_args edit is checked against (obsdb.CheckToolArgs).
+	schemas map[string]json.RawMessage
 }
 
 // sourceSpec names the run to re-run: its id and the step to continue
@@ -170,14 +177,24 @@ type toolChoiceWire struct {
 	Name string `json:"name,omitempty"`
 }
 
-// transcriptEdit is a D2/D3 edit — rewrite a kept step's model reply
-// (content), or patch one of its tool results (tool_result + call_id).
-// Step is the source run's own step index.
+// transcriptEdit is a D2/D3 edit of the kept prefix (ADR 0029 §8).
+// Kind is the discriminator; absent, the fields decide as before F2 —
+// tool_result + call_id patches a result ("tool_result"), content
+// rewrites a call-free reply ("reply"). The F2 kinds: "user" rewrites
+// a user message of the step (content; Index picks among the step's
+// user messages, step 0's turn prompt first), "tool_args" rewrites a
+// call's arguments (call_id + args, checked against the tool's
+// schema), "insert" adds a user message (content) at the boundary
+// before step Step's model call. Step is the source run's own step
+// index (for insert, the boundary 0..from_step).
 type transcriptEdit struct {
-	Step       int    `json:"step"`
-	ToolResult string `json:"tool_result,omitempty"`
-	CallID     string `json:"call_id,omitempty"`
-	Content    string `json:"content,omitempty"`
+	Kind       string          `json:"kind,omitempty"`
+	Step       int             `json:"step"`
+	ToolResult string          `json:"tool_result,omitempty"`
+	CallID     string          `json:"call_id,omitempty"`
+	Content    string          `json:"content,omitempty"`
+	Args       json.RawMessage `json:"args,omitempty"`
+	Index      int             `json:"index,omitempty"`
 }
 
 // cancelCommand is an `event: cancel` frame's data.

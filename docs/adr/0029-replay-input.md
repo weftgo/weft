@@ -3,10 +3,12 @@
 - Status: decided (2026-10-09; the devtools plan's item F1.1, the Go
   half of F1 "replay from here", closing A9's and A10's replay clauses
   and the phase 4 gate's "a replay across a compaction boundary
-  reproduces the model's exact input")
+  reproduces the model's exact input"; decision 8 added the same day
+  by F2.1, the edited request)
 - Depends on: ADR 0007 (the approval boundary), ADR 0014 (subagents as
   tools), ADR 0020 (thread compaction), ADR 0024 (observability data),
-  ADR 0028 §8 (the compaction view) and §9 (subagents)
+  ADR 0028 §8 (the compaction view) and §9 (subagents), ADR 0019 (the
+  steer shape an insert edit takes at rest)
 
 ## Context
 
@@ -117,6 +119,82 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
    agent's value, and a command cannot clear the agent's `stop` or
    `max_tokens`.
 
+8. **The edited request** (plan F2, item F2.1). A command's
+   `transcript_edits` is one list; each edit's optional `kind` is the
+   discriminator, and an edit without one reads as before F2 (a
+   `tool_result` + `call_id` patch, or a `content` rewrite of a
+   call-free reply — kinds `tool_result` and `reply`), so every body
+   recorded before it still validates. Three kinds join them:
+
+   - `user` (`step`, `content`, optional `index`) rewrites a user
+     message of a kept step. A step's user messages are, in order: for
+     step 0 the turn's prompt (the input's last message, when it is a
+     user message), then the user messages the step's records hold (a
+     steer delivered after its tool batch, a resumed turn's prompt in
+     its step-0 tail); `index` (0 by default) picks one. The first text
+     part takes the new text, the other text parts go, an image or a
+     file stays. Earlier turns' messages in the input are not editable.
+     A user edit of step 0 is what `input` is for `from_step` 0, so
+     `input` beside `from_step` > 0 is refused pointing at it.
+   - `tool_args` (`step`, `call_id`, `args`) rewrites a kept call's
+     arguments: a JSON object, checked against the tool's input schema
+     (`obsdb.CheckToolArgs` — the runtime against its agent's tool,
+     Studio against the run's tools record; a tool with no schema at
+     hand needs only an object) and refused in the loop's own
+     `INVALID_INPUT: tool "x": field "f": expected …, got …` wording.
+     The call keeps its id, name and signature; its result stays unless
+     a `tool_result` edit rewrites it too.
+   - `insert` (`step`, `content`) adds a user message at the boundary
+     before step `step`'s model call, `0..from_step`: after step
+     `step − 1`'s tool results — where ADR 0019's steer delivered after
+     that step's tool batch lands, at rest. Inserts at one boundary
+     keep the command's order.
+
+   Every edit applies to the transcript first; then from_step's view
+   (decision 1) is spliced in and the inserts are placed, a boundary at
+   or past the view's range moved with it. The kept-prefix invariants
+   stand: the prefix ends at a step boundary, every kept call has its
+   result, nothing before `from_step` executes. An edit inside the view's
+   range is refused in decision 4's words; so is an insert whose
+   boundary lies strictly inside it (`the boundary before step N was
+   compacted away before step M's request …`). Every refusal is worded
+   once, in the runtime (authoritative, before the ack) and in Studio
+   (the mirror, a 400), and both are pinned.
+
+   *The mark.* A replayed run whose prefix was edited carries
+   `weft.edits` (run metadata, on every span and record, in the run
+   row's `meta`): one token per edit in the command's order,
+   comma-joined — `<step>:<call_id>:args` (the pair's "args edited"
+   mark), `<step>:<call_id>:result`, `<step>:reply`, `<step>:user`
+   (`<step>:user:<index>` past the first) and `<step>:insert`. Past
+   core's 1024-byte metadata value it ends in `+<n> more`.
+
+   *The scripted engine.* Its recorded turns are keyed on what the
+   model saw; every edit changes that, so a scripted command with
+   edits is refused before the ack — `the scripted engine would replay
+   the recorded turn N, which answered a different prompt: transcript
+   edits need engine live` — never acked and failed "no recorded turn".
+
+   *The preview.* `POST /api/playground/preview` (capability `preview`,
+   with the playground) takes the command's body and answers the first
+   request the replay would send — system, messages, tools, model,
+   params, thinking, tool choice — beside step `from_step`'s recorded
+   request and a diff of the two (messages aligned same / changed /
+   added / removed; system, tools and knobs). It is assembly in Studio's
+   process from the records (`MessagesAsOf`, the edits, the overrides
+   laid over the registered agent's defaults, else the recorded
+   request's): no model call, no tool, no runtime needed. It promises
+   the messages exactly; what the model sees is exact when the agent's
+   PrepareStep is idempotent over its own output (decision 1's limit,
+   a warning on every answer). The scripted engine's refusals are
+   warnings there, in the run route's words; the system text with an
+   instructions override is shown as written (the loop appends tool
+   prompt snippets the record does not hold — a warning); overrides
+   only a registration can check are listed `unchecked` when no
+   runtime holds the agent. A read-scoped panel token gets the system
+   prompt and the catalog hidden, and the messages hidden when a view
+   is in them.
+
 ## Consequences
 
 - "Replay from here" on a step after a compaction reproduces the
@@ -126,6 +204,8 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
 - The scripted engine keys the recorded turns from `from_step` on over
   the compacted prefix too, so a scripted replay across a compaction
   still answers from the record.
-- F2's preview can say which prefix a replay uses (`compacted_at`).
+- F2's preview says which prefix a replay uses (`compacted_at`) and
+  shows the edited request before it is sent (decision 8); the replayed
+  run's `weft.edits` says what was edited, the pair's args included.
 - A Studio older than the parameter answers the bare transcript; the
   runtime then cannot know a view and logs that it used the original.

@@ -1,8 +1,10 @@
 package studio
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
@@ -129,67 +131,204 @@ func compactedEditError(what string, step, fromStep int, c *compactedRange) erro
 }
 
 // validateTranscriptEdits applies the edits to the source run's kept
-// steps in memory and reports the first rule they break, in the
-// runtime's own words. steps are the run's own (runSteps), never its
-// input; view is the compaction from_step's request carried (nil:
-// none) — an edit inside its range is refused. A nil error means the
-// patched prefix is complete: every kept call answered, the cut at a
-// step boundary.
-func validateTranscriptEdits(steps []stepMessage, fromStep int, edits []linkruntime.TranscriptEdit, view *compactedRange) error {
+// prefix in memory and reports the first rule they break, in the
+// runtime's own words (editedPrefix).
+func validateTranscriptEdits(input []core.Message, steps []stepMessage, fromStep int, edits []linkruntime.TranscriptEdit, view *compactedRange, schemas map[string]json.RawMessage) error {
+	_, _, err := editedPrefix(input, steps, fromStep, edits, view, schemas)
+	return err
+}
+
+// Edit kinds (ADR 0029 §8) — weft/runtime's names. An edit without one
+// is read as before F2: tool_result + call_id is a result patch,
+// content a reply rewrite.
+const (
+	editToolResult = "tool_result"
+	editReply      = "reply"
+	editUser       = "user"
+	editToolArgs   = "tool_args"
+	editInsert     = "insert"
+)
+
+// editKindOf resolves an edit's kind and checks that it carries the
+// fields its kind takes, no other — weft/runtime's editKind, word for
+// word.
+func editKindOf(e linkruntime.TranscriptEdit) (string, error) {
+	kind := e.Kind
+	if kind == "" {
+		switch {
+		case e.ToolResult != "" && e.Content != "":
+			return "", fmt.Errorf("an edit is one thing: tool_result (patch a result) or content (rewrite the reply), not both")
+		case e.ToolResult != "":
+			kind = editToolResult
+		case e.Content != "":
+			kind = editReply
+		case len(e.Args) > 0:
+			return "", fmt.Errorf("an edit with args needs kind %q", editToolArgs)
+		default:
+			return "", fmt.Errorf("an empty edit (neither tool_result nor content)")
+		}
+	}
+	var takes []string
+	switch kind {
+	case editToolResult:
+		takes = []string{"call_id", "tool_result"}
+	case editReply, editInsert:
+		takes = []string{"content"}
+	case editUser:
+		takes = []string{"content", "index"}
+	case editToolArgs:
+		takes = []string{"call_id", "args"}
+	default:
+		return "", fmt.Errorf("unknown edit kind %q (tool_result, reply, user, tool_args or insert)", kind)
+	}
+	carried := map[string]bool{
+		"tool_result": e.ToolResult != "", "call_id": e.CallID != "", "content": e.Content != "",
+		"args": len(e.Args) > 0, "index": e.Index != 0,
+	}
+	for _, f := range []string{"tool_result", "call_id", "content", "args", "index"} {
+		if carried[f] && !slices.Contains(takes, f) {
+			return "", fmt.Errorf("%s %s edit does not take %s", article(kind), kind, f)
+		}
+	}
+	for _, f := range takes {
+		if f != "index" && !carried[f] {
+			return "", fmt.Errorf("%s %s edit needs %s", article(kind), kind, f)
+		}
+	}
+	if e.Index < 0 {
+		return "", fmt.Errorf("edit index %d is negative", e.Index)
+	}
+	return kind, nil
+}
+
+// article is the indefinite article an edit kind takes in a refusal.
+func article(kind string) string {
+	if kind == editInsert {
+		return "an"
+	}
+	return "a"
+}
+
+// insertAt is one insert edit placed: before transcript seq seq (the
+// input's messages counted), the message to add.
+type insertAt struct {
+	seq int
+	msg core.Message
+}
+
+// editedPrefix is weft/runtime's applyEdits over Studio's records: the
+// kept prefix — the run's input, then its own messages through step
+// from_step − 1 — with every edit but the inserts applied, and the
+// inserts placed (seq in the prefix's own numbering), before any
+// compaction view is spliced in. input is the run's input record
+// (runInput), steps its own messages (runSteps); view is the
+// compaction from_step's request carried (nil: none) — an edit inside
+// its range is refused; schemas the run's recorded tool schemas (a
+// tool absent: its arguments need only be an object). A nil error
+// means the patched prefix is complete: every kept call answered, the
+// cut at a step boundary. Every refusal is the runtime's sentence.
+func editedPrefix(input []core.Message, steps []stepMessage, fromStep int, edits []linkruntime.TranscriptEdit, view *compactedRange, schemas map[string]json.RawMessage) ([]core.Message, []insertAt, error) {
 	if len(edits) == 0 {
-		return nil
+		return nil, nil, nil
 	}
 	if fromStep <= 0 {
-		return fmt.Errorf("transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)")
+		return nil, nil, fmt.Errorf("transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)")
 	}
 	// from_step at the step count is fresh only when the last kept step
 	// ended in answered tool calls (weft/runtime's endsInAnsweredCalls).
 	if n := stepCount(steps); fromStep > n || fromStep == n && !endsInAnsweredCalls(steps) {
-		return fmt.Errorf("from_step %d is beyond the source run's last step (it recorded %d; a run past the end has nothing fresh to answer)",
+		return nil, nil, fmt.Errorf("from_step %d is beyond the source run's last step (it recorded %d; a run past the end has nothing fresh to answer)",
 			fromStep, n)
 	}
 	cut := cutTranscriptAtStep(steps, fromStep)
 	// Copied deep enough to patch: the parts slices are the decoded
 	// transcript's.
+	in := make([]core.Message, len(input))
+	for i, m := range input {
+		in[i] = core.Message{Role: m.Role, Content: append([]core.Part(nil), m.Content...)}
+	}
 	kept := make([]stepMessage, cut)
 	for i, m := range steps[:cut] {
 		kept[i] = stepMessage{step: m.step, msg: core.Message{Role: m.msg.Role, Content: append([]core.Part(nil), m.msg.Content...)}}
 	}
+	var inserts []insertAt
 	for _, e := range edits {
+		kind, err := editKindOf(e)
+		if err != nil {
+			return nil, nil, err
+		}
 		if e.Step < 0 {
-			return fmt.Errorf("edit step %d is negative", e.Step)
+			return nil, nil, fmt.Errorf("edit step %d is negative", e.Step)
+		}
+		if kind == editInsert {
+			if e.Step > fromStep {
+				return nil, nil, fmt.Errorf("insert step %d is past from_step %d: an insert lands at a step boundary 0..%d", e.Step, fromStep, fromStep)
+			}
+			seq := len(in) + cutTranscriptAtStep(kept, e.Step)
+			if view != nil && seq > view.from && seq < view.to {
+				return nil, nil, fmt.Errorf("the boundary before step %d was compacted away before step %d's request (messages [%d, %d) replaced by %d): the model never saw it there; insert outside the range",
+					e.Step, fromStep, view.from, view.to, view.entries)
+			}
+			inserts = append(inserts, insertAt{seq: seq, msg: core.User(e.Content)})
+			continue
 		}
 		if e.Step >= fromStep {
-			return fmt.Errorf("edit step %d is not in the kept prefix (from_step %d keeps steps 0..%d)",
+			return nil, nil, fmt.Errorf("edit step %d is not in the kept prefix (from_step %d keeps steps 0..%d)",
 				e.Step, fromStep, fromStep-1)
 		}
-		if e.ToolResult != "" && e.Content != "" {
-			return fmt.Errorf("an edit is one thing: tool_result (patch a result) or content (rewrite the reply), not both")
-		}
-		switch {
-		case e.ToolResult != "":
-			if e.CallID == "" {
-				return fmt.Errorf("a tool_result edit needs call_id")
-			}
+		switch kind {
+		case editToolResult:
 			at := patchTranscriptResult(kept, e.Step, e.CallID, e.ToolResult)
 			if len(at) == 0 {
-				return fmt.Errorf("no tool call %q in the kept prefix's step %d", e.CallID, e.Step)
+				return nil, nil, fmt.Errorf("no tool call %q in the kept prefix's step %d", e.CallID, e.Step)
 			}
 			for _, i := range at {
 				if view.holds(i) {
-					return compactedEditError(fmt.Sprintf("call %q", e.CallID), e.Step, fromStep, view)
+					return nil, nil, compactedEditError(fmt.Sprintf("call %q", e.CallID), e.Step, fromStep, view)
 				}
 			}
-		case e.Content != "":
+		case editReply:
 			at := checkRewrite(kept, e.Step)
 			if at < 0 {
-				return fmt.Errorf("step %d has no assistant reply in the kept prefix (or it carried tool calls: patch their results instead)", e.Step)
+				return nil, nil, fmt.Errorf("step %d has no assistant reply in the kept prefix (or it carried tool calls: patch their results instead)", e.Step)
 			}
 			if view.holds(at) {
-				return compactedEditError("the reply", e.Step, fromStep, view)
+				return nil, nil, compactedEditError("the reply", e.Step, fromStep, view)
 			}
-		default:
-			return fmt.Errorf("an empty edit (neither tool_result nor content)")
+			kept[at].msg.Content = []core.Part{core.TextPart{Text: e.Content}}
+		case editUser:
+			seqs := userSeqs(in, kept, e.Step)
+			if e.Index >= len(seqs) {
+				if len(seqs) == 0 {
+					return nil, nil, fmt.Errorf("step %d has no user message in the kept prefix", e.Step)
+				}
+				return nil, nil, fmt.Errorf("step %d has %d user message(s) in the kept prefix: index %d is out of range", e.Step, len(seqs), e.Index)
+			}
+			seq := seqs[e.Index]
+			if view.holds(seq - len(in)) {
+				return nil, nil, compactedEditError("the user message", e.Step, fromStep, view)
+			}
+			if seq < len(in) {
+				in[seq].Content = rewriteText(in[seq].Content, e.Content)
+			} else {
+				kept[seq-len(in)].msg.Content = rewriteText(kept[seq-len(in)].msg.Content, e.Content)
+			}
+		case editToolArgs:
+			mi, pi, name := findCall(kept, e.Step, e.CallID)
+			if mi < 0 {
+				return nil, nil, fmt.Errorf("no tool call %q in the kept prefix's step %d", e.CallID, e.Step)
+			}
+			if err := obsdb.CheckToolArgs(name, schemas[name], e.Args); err != nil {
+				return nil, nil, err
+			}
+			if view.holds(mi) {
+				return nil, nil, compactedEditError(fmt.Sprintf("call %q", e.CallID), e.Step, fromStep, view)
+			}
+			var buf bytes.Buffer
+			_ = json.Compact(&buf, e.Args) // CheckToolArgs read it as JSON
+			c := kept[mi].msg.Content[pi].(core.ToolCallPart)
+			c.Args = json.RawMessage(buf.Bytes())
+			kept[mi].msg.Content[pi] = c
 		}
 	}
 	// §1's boundary rule over the kept steps: every call answered.
@@ -210,11 +349,117 @@ func validateTranscriptEdits(steps []stepMessage, fromStep int, edits []linkrunt
 		}
 		for _, p := range m.msg.Content {
 			if c, ok := p.(core.ToolCallPart); ok && !answered[c.ID] {
-				return fmt.Errorf("the kept prefix leaves call %q (%s) without a result: from_step must end at a step boundary", c.ID, c.Name)
+				return nil, nil, fmt.Errorf("the kept prefix leaves call %q (%s) without a result: from_step must end at a step boundary", c.ID, c.Name)
 			}
 		}
 	}
-	return nil
+	out := make([]core.Message, 0, len(in)+len(kept))
+	out = append(out, in...)
+	for _, m := range kept {
+		out = append(out, m.msg)
+	}
+	return out, inserts, nil
+}
+
+// runInput returns the run's input record's messages — what the run
+// was fed: the conversation before the turn and the turn's prompt.
+func runInput(batches []obsdb.TranscriptBatch) ([]core.Message, error) {
+	var out []core.Message
+	for _, b := range batches {
+		if !b.Input || len(b.Messages) == 0 || string(b.Messages) == "null" {
+			continue
+		}
+		var batch []core.Message
+		if err := json.Unmarshal(b.Messages, &batch); err != nil {
+			return nil, fmt.Errorf("messages body: %w", err)
+		}
+		out = append(out, batch...)
+	}
+	return out, nil
+}
+
+// userSeqs is weft/runtime's userMessages: the prefix seqs of step's
+// user messages — for step 0 the turn's prompt first (the input's last
+// message when it is a user message), then the user messages the
+// step's records hold.
+func userSeqs(input []core.Message, steps []stepMessage, step int) []int {
+	var out []int
+	if n := len(input); step == 0 && n > 0 && input[n-1].Role == core.RoleUser {
+		out = append(out, n-1)
+	}
+	for i, m := range steps {
+		if m.msg.Role == core.RoleUser && m.step == step {
+			out = append(out, len(input)+i)
+		}
+	}
+	return out
+}
+
+// rewriteText is weft/runtime's: the first text part takes text, the
+// other text parts go, every other part stays.
+func rewriteText(parts []core.Part, text string) []core.Part {
+	out := make([]core.Part, 0, len(parts)+1)
+	placed := false
+	for _, p := range parts {
+		if _, ok := p.(core.TextPart); ok {
+			if !placed {
+				out = append(out, core.TextPart{Text: text})
+				placed = true
+			}
+			continue
+		}
+		out = append(out, p)
+	}
+	if !placed {
+		out = append([]core.Part{core.TextPart{Text: text}}, out...)
+	}
+	return out
+}
+
+// findCall locates call callID in step's assistant message: the
+// message's index, the part's, and the tool's name (-1 for none).
+func findCall(steps []stepMessage, step int, callID string) (mi, pi int, name string) {
+	for i, m := range steps {
+		if m.msg.Role != core.RoleAssistant || m.step != step {
+			continue
+		}
+		for j, p := range m.msg.Content {
+			if c, ok := p.(core.ToolCallPart); ok && c.ID == callID {
+				return i, j, c.Name
+			}
+		}
+	}
+	return -1, -1, ""
+}
+
+// placeInserts is weft/runtime's: the inserts added to seen (the
+// prefix as the model sees it) before their boundaries, moved past a
+// spliced view's range (v nil: none).
+func placeInserts(seen []core.Message, inserts []insertAt, v *obsdb.Compaction) []core.Message {
+	if len(inserts) == 0 {
+		return seen
+	}
+	pos := func(seq int) int {
+		if v != nil && int64(seq) >= v.ToSeq {
+			return seq - int(v.ToSeq-v.FromSeq) + v.Entries
+		}
+		return seq
+	}
+	sorted := slices.Clone(inserts)
+	slices.SortStableFunc(sorted, func(a, b insertAt) int { return pos(a.seq) - pos(b.seq) })
+	out := make([]core.Message, 0, len(seen)+len(inserts))
+	next := 0
+	for i, m := range seen {
+		for next < len(sorted) && pos(sorted[next].seq) <= i {
+			out = append(out, sorted[next].msg)
+			next++
+		}
+		out = append(out, m)
+	}
+	for ; next < len(sorted); next++ {
+		out = append(out, sorted[next].msg)
+	}
+	return out
 }
 
 // endsInAnsweredCalls reports whether the run's own messages end in a

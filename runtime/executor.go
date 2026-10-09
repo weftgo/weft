@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -52,6 +53,13 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 		if !hasSource {
 			return "the scripted engine replays a source run's recorded turns: a source run is required", false
 		}
+		if len(cmd.TranscriptEdits) > 0 {
+			// An edit changes what the model saw at from_step, and the
+			// recorded turns are keyed on what it saw: refused here, in
+			// one sentence, rather than acked and failed "no recorded
+			// turn" at the first step (ADR 0029 §8).
+			return scriptedEdits(cmd.Source.FromStep), false
+		}
 	default:
 		return fmt.Sprintf("unknown engine %q", cmd.Engine), false
 	}
@@ -96,7 +104,12 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 			return "source.from_step must be 0 or more", false
 		}
 		if hasInput && cmd.Source.FromStep > 0 {
-			return "input replaces the turn's user message only when from_step is 0", false
+			return inputPastStepZero, false
+		}
+		if len(cmd.TranscriptEdits) > 0 && cmd.Source.FromStep <= 0 {
+			// Studio's wording; refused here too, so a fork (which reads
+			// no kept prefix) never drops the edits unread.
+			return "transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)", false
 		}
 		if cmd.Thread == "fork" {
 			if _, _, err := parseThreadRunID(cmd.Source.RunID); err != nil {
@@ -180,6 +193,7 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 			// before the ack, never acked and failed at run time.
 			return scriptedAtCount(n), false
 		}
+		cmd.schemas = toolSchemas(agent)
 		var err error
 		if cmd.prefix, err = runPrefix(cmd.src, *cmd, hasInput); err != nil {
 			return err.Error(), false
@@ -370,7 +384,7 @@ func runPrefix(src *sourceRun, cmd command, hasInput bool) ([]core.Message, erro
 	case len(cmd.TranscriptEdits) > 0 || cmd.Source.FromStep > 0:
 		// The kept prefix, the edits applied (D2/D3) — the runtime's
 		// copy is authoritative (§10.4).
-		return applyTranscriptEdits(src, cmd.Source.FromStep, cmd.TranscriptEdits)
+		return applyEdits(src, cmd.Source.FromStep, cmd.TranscriptEdits, cmd.schemas)
 	case hasInput:
 		// §5.1: input "replaces the turn's user message" — the
 		// conversation before the turn stays, the prompt goes. The kept
@@ -1268,6 +1282,12 @@ func (l *link) overrideOptions(cmd command) []core.RunOption {
 	if cmd.Actor != "" {
 		meta["weft.playground.actor"] = cmd.Actor
 	}
+	if len(cmd.TranscriptEdits) > 0 {
+		// The edits the run's prefix carries (ADR 0029 §8): a call whose
+		// arguments were rewritten reads "<step>:<call_id>:args" — the
+		// pair's "args edited" mark — beside the other kinds.
+		meta["weft.edits"] = editsMark(cmd.TranscriptEdits)
+	}
 	opts = append(opts, core.Metadata(meta))
 	return opts
 }
@@ -1401,6 +1421,32 @@ func cutAt(steps []core.Message, stepOf []int, fromStep int) int {
 		}
 	}
 	return len(steps) // fewer steps than asked: keep it all
+}
+
+// scriptedEdits is the refusal of a scripted command that edits the
+// transcript — Studio's copy (studio/playground.go) words it
+// identically, and its preview shows it as a warning.
+func scriptedEdits(fromStep int) string {
+	return fmt.Sprintf("the scripted engine would replay the recorded turn %d, which answered a different prompt: transcript edits need engine live", fromStep)
+}
+
+// inputPastStepZero is the refusal of an input beside from_step > 0 —
+// Studio's copy words it identically.
+const inputPastStepZero = `input replaces the turn's user message only when from_step is 0: with from_step > 0, edit step 0's user message instead (a transcript edit of kind "user")`
+
+// toolSchemas is each of the agent's tools' input schema, as the tools
+// record stores it: what a tool_args edit is checked against.
+func toolSchemas(agent *core.Agent) map[string]json.RawMessage {
+	out := map[string]json.RawMessage{}
+	for _, t := range agent.Tools() {
+		if t.InputSchema == nil {
+			continue
+		}
+		if b, err := json.Marshal(t.InputSchema); err == nil {
+			out[t.Name] = b
+		}
+	}
+	return out
 }
 
 // scriptedAtCount is the refusal of a scripted command from the step the

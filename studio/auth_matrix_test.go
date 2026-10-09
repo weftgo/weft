@@ -544,6 +544,16 @@ func TestAuthMatrix(t *testing.T) {
 			body: func(res string) string { return runBody("pub_a", run[res]) }, resources: all, want: acting(accepted)},
 		{name: "POST /api/playground/runs (source = B's child)", method: "POST", path: fixed("/api/playground/runs"),
 			body: fixed(runBody("pub_a", "run_b/0/call_1")), resources: []string{"B"}, want: acting(accepted)},
+		// The preview (plan F2) is a read: pure assembly of a replay's
+		// first request from the source run's records. Any identity
+		// inside the source's public id — a read-scoped token too, with
+		// the system prompt hidden (TestPreviewHidesSystemFromAReadToken).
+		{name: "POST /api/playground/preview", method: "POST", path: fixed("/api/playground/preview"),
+			body: func(res string) string {
+				return `{"agent":"acme-support","source":{"run_id":"` + run[res] + `","from_step":0}}`
+			}, resources: all, want: scoped(ok)},
+		{name: "POST /api/playground/preview (B's child)", method: "POST", path: fixed("/api/playground/preview"),
+			body: fixed(`{"agent":"acme-support","source":{"run_id":"run_b/0/call_1","from_step":0}}`), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/playground/commands/{id}", method: "GET", path: func(res string) string { return "/api/playground/commands/" + cmd[res] }, resources: all, want: scoped(ok)},
 		{name: "POST /api/runs/{id}/approvals", method: "POST", path: func(res string) string { return "/api/runs/" + rtRun[res] + "/approvals" },
 			body: fixed(`{"call_id":"call_1","decision":"deny","reason":"matrix"}`), resources: all, want: acting(accepted)},

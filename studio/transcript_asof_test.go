@@ -160,6 +160,16 @@ func TestPlaygroundEditInsideCompactionRefused(t *testing.T) {
 	if code != http.StatusBadRequest || !strings.Contains(body, want) {
 		t.Errorf("edit inside the view = %d %s\nwant 400 with %s", code, body, want)
 	}
+	// The F2 kinds (ADR 0029 §8): an args rewrite inside the range is
+	// refused in the same words; a user edit of the turn's prompt and an
+	// insert at the range's end lie outside it.
+	code, body = post(`{"kind":"tool_args","step":0,"call_id":"c_lookup","args":{"order_id":"1"}}`)
+	if code != http.StatusBadRequest || !strings.Contains(body, want) {
+		t.Errorf("args edit inside the view = %d %s\nwant 400 with %s", code, body, want)
+	}
+	if code, body := post(`{"kind":"user","step":0,"content":"x"},{"kind":"insert","step":1,"content":"y"}`); strings.Contains(body, "compacted") || strings.Contains(body, "kept prefix") {
+		t.Errorf("user edit and insert outside the view = %d %s, want the transcript checks passed", code, body)
+	}
 	if code, body := post(`{"step":1,"call_id":"c_sub","tool_result":"x"}`); strings.Contains(body, "compacted") || strings.Contains(body, "kept prefix") {
 		t.Errorf("edit outside the view = %d %s, want the transcript checks passed", code, body)
 	}

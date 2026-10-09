@@ -1,0 +1,272 @@
+{
+  "source": {
+    "run_id": "r_pv",
+    "from_step": 2
+  },
+  "agent": "acme-support",
+  "engine": "live",
+  "runtime": null,
+  "will_send": {
+    "system": "Be brief.",
+    "system_source": "override",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "where are orders 7 and 43?"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_call",
+            "id": "c1",
+            "name": "lookup_order",
+            "args": {
+              "order_id": "7"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [
+          {
+            "type": "tool_result",
+            "call_id": "c1",
+            "name": "lookup_order",
+            "content": "order 42 shipped",
+            "is_error": false
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "also check 43"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_call",
+            "id": "c2",
+            "name": "lookup_order",
+            "args": {
+              "order_id": "43"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [
+          {
+            "type": "tool_result",
+            "call_id": "c2",
+            "name": "lookup_order",
+            "content": "order 43 lost",
+            "is_error": false
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "and refund the lost one"
+          }
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "name": "lookup_order",
+        "description": "Look up an order.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "order_id": {
+              "type": "string",
+              "description": "the order"
+            }
+          },
+          "required": [
+            "order_id"
+          ]
+        }
+      }
+    ],
+    "tools_source": "recorded",
+    "model": "script",
+    "params": {
+      "temperature": 0.5
+    },
+    "params_source": "recorded",
+    "thinking": "",
+    "tool_choice": {
+      "mode": "auto"
+    }
+  },
+  "was_sent": {
+    "system": "You look orders up.",
+    "system_source": "recorded",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "where are orders 42 and 43?"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_call",
+            "id": "c1",
+            "name": "lookup_order",
+            "args": {
+              "order_id": "42"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [
+          {
+            "type": "tool_result",
+            "call_id": "c1",
+            "name": "lookup_order",
+            "content": "order 42 shipped",
+            "is_error": false
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_call",
+            "id": "c2",
+            "name": "lookup_order",
+            "args": {
+              "order_id": "43"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [
+          {
+            "type": "tool_result",
+            "call_id": "c2",
+            "name": "lookup_order",
+            "content": "order 43 shipped",
+            "is_error": false
+          }
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "name": "lookup_order",
+        "description": "Look up an order.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "order_id": {
+              "type": "string",
+              "description": "the order"
+            }
+          },
+          "required": [
+            "order_id"
+          ]
+        }
+      }
+    ],
+    "tools_source": "recorded",
+    "model": "script",
+    "params": {},
+    "params_source": "recorded",
+    "thinking": "",
+    "tool_choice": {
+      "mode": "auto"
+    }
+  },
+  "diff": {
+    "system": "changed",
+    "messages": [
+      {
+        "op": "changed",
+        "was": 0,
+        "will": 0
+      },
+      {
+        "op": "changed",
+        "was": 1,
+        "will": 1
+      },
+      {
+        "op": "same",
+        "was": 2,
+        "will": 2
+      },
+      {
+        "op": "added",
+        "was": null,
+        "will": 3
+      },
+      {
+        "op": "same",
+        "was": 3,
+        "will": 4
+      },
+      {
+        "op": "changed",
+        "was": 4,
+        "will": 5
+      },
+      {
+        "op": "added",
+        "was": null,
+        "will": 6
+      }
+    ],
+    "tools": {
+      "added": [],
+      "removed": []
+    },
+    "model": "same",
+    "params": "changed",
+    "thinking": "same",
+    "tool_choice": "same"
+  },
+  "compacted_at": null,
+  "warnings": [
+    {
+      "kind": "prepare_step",
+      "message": "the agent's PrepareStep runs again at replay time (ADR 0029): this request is exact when it is idempotent over its own output"
+    },
+    {
+      "kind": "instructions",
+      "message": "the loop appends the offered tools' prompt snippets to the instructions; the record does not hold them, so the override is shown as written"
+    }
+  ],
+  "unchecked": []
+}
+

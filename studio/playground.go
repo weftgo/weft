@@ -85,6 +85,16 @@ func registerPlayground(mux *http.ServeMux, s *Server) {
 			rs.MountGuarded(mux, s.serverOnly)
 		},
 	})
+	// The preview (plan F2): pure assembly of a replay's first request,
+	// no runtime needed — its own capability so the UIs gate the
+	// "will be sent" pane on it.
+	s.addGroup(routeGroup{
+		name:       "preview",
+		capability: "preview",
+		register: func(mux *http.ServeMux, s *Server) {
+			mux.HandleFunc("POST /api/playground/preview", s.servePlaygroundPreview(rs))
+		},
+	})
 	s.addGroup(routeGroup{
 		name:       "breakpoints",
 		capability: "breakpoints",
@@ -186,113 +196,8 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 			return
 		}
 
-		// The transcript edits (D2/D3) validate against the source
-		// transcript: the boundary rule and the no-call-without-result
-		// rule are 400s (§10.4), so Repair never synthesizes what
-		// nobody wrote.
-		if len(req.TranscriptEdits) > 0 {
-			switch {
-			case req.Source == nil || req.Source.RunID == "":
-				badRequest(w, r, "transcript_edits need a source run")
-				return
-			case req.Source.FromStep <= 0:
-				badRequest(w, r, "transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)")
-				return
-			}
-			batches, terr := s.db.TranscriptBatches(r.Context(), req.Source.RunID)
-			if terr != nil {
-				badRequest(w, r, "the source run has no readable transcript to edit")
-				return
-			}
-			// The run's own steps, each where its record says it joined
-			// (the input record is context, never a step).
-			steps, serr := runSteps(batches)
-			if serr != nil {
-				badRequest(w, r, "the source run has no readable transcript to edit")
-				return
-			}
-			// The replay prefix is what the model saw at from_step (ADR
-			// 0029): when that request carried a compaction view, an
-			// edit inside its range is refused. A step the run never
-			// reached has no view; the step-count rule refuses it.
-			var view *compactedRange
-			sm, aerr := obsdb.MessagesAsOf(r.Context(), s.db, req.Source.RunID, req.Source.FromStep)
-			switch {
-			case aerr == nil:
-				view = compactedRangeOf(batches, sm)
-			case !errors.Is(aerr, obsdb.ErrNotFound):
-				badRequest(w, r, fmt.Sprintf("the source run's step %d does not rebuild from its records: %v", req.Source.FromStep, aerr))
-				return
-			}
-			if verr := validateTranscriptEdits(steps, req.Source.FromStep, req.TranscriptEdits, view); verr != nil {
-				badRequest(w, r, verr.Error())
-				return
-			}
-		}
-		switch req.Engine {
-		case "", "live":
-		case "scripted":
-			// §5.5's prompt trap: the replay key ignores the system
-			// prompt by design, so an instructions or model override
-			// would silently replay the old answer — refused. Changes
-			// that alter the key miss instead and fail the step with
-			// "no recorded turn".
-			if req.Overrides.Instructions != "" {
-				badRequest(w, r, "scripted engine with an instructions override would silently replay the old answer (WEFT-PLAYGROUND §5.5)")
-				return
-			}
-			if req.Overrides.Model != "" {
-				badRequest(w, r, "scripted engine with a model override would silently replay the old answer (WEFT-PLAYGROUND §5.5)")
-				return
-			}
-			if req.Source == nil || req.Source.RunID == "" {
-				badRequest(w, r, "the scripted engine replays a source run's recorded turns: a source run is required")
-				return
-			}
-			// from_step at the step count is the step the source never
-			// answered (ADR 0029): nothing recorded to replay — refused in
-			// weft/runtime's words (executor.go's scriptedAtCount). A
-			// transcript that does not read leaves it to the runtime.
-			if n := req.Source.FromStep; n > 0 {
-				if batches, terr := s.db.TranscriptBatches(r.Context(), req.Source.RunID); terr == nil {
-					if steps, serr := runSteps(batches); serr == nil && stepCount(steps) == n {
-						badRequest(w, r, fmt.Sprintf("the scripted engine has no recorded turn for step %d: the source never answered it (use engine live)", n))
-						return
-					}
-				}
-			}
-		default:
-			badRequest(w, r, "unknown engine "+req.Engine)
-			return
-		}
-		switch req.Thread {
-		case "", "ephemeral":
-		case "fork":
-			// §5.4: fork continues the conversation in a new session
-			// with lineage — it needs a source turn and an input;
-			// from_step is the ephemeral verb (a mid-turn re-run),
-			// never the fork's. The runtime's own threads availability
-			// is checked against its registration below.
-			if req.Source == nil || req.Source.RunID == "" {
-				badRequest(w, r, "fork mode forks a source turn's session: a source run is required")
-				return
-			}
-			if req.Input == nil || *req.Input == "" {
-				badRequest(w, r, "fork mode continues the conversation: an input is required")
-				return
-			}
-			if req.Source.FromStep > 0 {
-				badRequest(w, r, "fork mode re-runs no steps (from_step is the ephemeral verb); send an input instead")
-				return
-			}
-		default:
-			badRequest(w, r, "unknown thread mode "+req.Thread)
-			return
-		}
-		switch req.SideEffects {
-		case "", "substitute", "park", "allow":
-		default:
-			badRequest(w, r, "unknown side_effects mode "+req.SideEffects)
+		if e := s.checkCommand(r.Context(), &req, false); e != nil {
+			e.write(w, r)
 			return
 		}
 
@@ -320,135 +225,14 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 			return
 		}
 
-		// The source turn: from_step is 0+ and input may not replace
-		// a continued turn's message (both 400, body-shape errors),
-		// and the run must exist (404).
-		if req.Source != nil && req.Source.RunID != "" {
-			if req.Source.FromStep < 0 {
-				badRequest(w, r, "source.from_step must be 0 or more")
-				return
-			}
-			if req.Input != nil && *req.Input != "" && req.Source.FromStep > 0 {
-				badRequest(w, r, "input replaces the turn's user message only when from_step is 0")
-				return
-			}
-			if _, err := s.db.Run(r.Context(), req.Source.RunID); err != nil {
-				if errors.Is(err, obsdb.ErrNotFound) {
-					notFound(w, r, "unknown source run "+req.Source.RunID)
-					return
-				}
-				dbError(w, r, "source run", req.Source.RunID, err)
-				return
-			}
+		if e := s.checkSource(r.Context(), &req); e != nil {
+			e.write(w, r)
+			return
 		}
 
-		// Overrides against the registered copy — narrowing only
-		// (§6 rule 2): tools the manifest lacks are 400, a raised
-		// limit or a refused side-effect tool is 403.
-		manifestTools := agent.ManifestToolNames()
-		known := make(map[string]bool, len(manifestTools))
-		for _, name := range manifestTools {
-			known[name] = true
-		}
-		enabled := req.Overrides.ToolsEnabled
-		for _, name := range enabled {
-			if !known[name] {
-				badRequest(w, r, "tool "+name+" is not in agent "+agent.Name+"'s manifest")
-				return
-			}
-		}
-		// The option lab's tool-shaped overrides (plan F3): names the
-		// manifest lacks are 400; only_tools outside tools_enabled is a
-		// widening, 403; a named tool_choice the run turns off or parks
-		// could never be honoured, 400.
-		// Version skew: a runtime older than the option lab decodes the
-		// command without these fields and would run the experiment
-		// without them (only_tools ignored runs every tool, park_on
-		// ignored runs a ReplaySafe tool for real). A current runtime
-		// always registers its defaults (tool_choice mode at least
-		// "auto"); one that sends none is refused the new knobs.
-		if o := req.Overrides; agent.Defaults.ToolChoice.Mode == "" &&
-			(o.Params != nil || o.ToolChoice != nil || len(o.ParkOn) > 0 || len(o.OnlyTools) > 0) {
-			badRequest(w, r, "runtime predates the option lab: upgrade weft/runtime to use params, tool_choice, park_on, only_tools")
+		if e := checkRegistered(&req, agent); e != nil {
+			e.write(w, r)
 			return
-		}
-		if widens, msg := toolOverrides(req.Overrides, agent.Name, known, agent.Defaults.ToolChoice); msg != "" {
-			if widens {
-				writeError(w, r, http.StatusForbidden, "forbidden", msg)
-			} else {
-				badRequest(w, r, msg)
-			}
-			return
-		}
-		// A model outside the allow-list is the runtime's ModelResolver
-		// to decide (it resolves before the ack, and its refusal is the
-		// rejected command's reason); without one it is unknown here.
-		if m := req.Overrides.Model; m != "" && !contains(agent.Models, m) && m != agent.ManifestModelName() && !agent.Resolver {
-			badRequest(w, r, "unknown model "+m+": neither the agent's own nor a registered alternate (register it with runtime.Models or add runtime.ModelResolver)")
-			return
-		}
-		switch req.Overrides.Thinking {
-		case "", "off", "low", "medium", "high":
-		default:
-			badRequest(w, r, "unknown thinking level "+req.Overrides.Thinking)
-			return
-		}
-		for key, v := range req.Overrides.Options {
-			switch key {
-			case "max_steps", "parallelism":
-				// A whole number from 1: the lower-only checks below
-				// compare it as an int, and a negative, fractional or
-				// out-of-range value would slip under them.
-				if v < 1 || v > 1e6 || v != math.Trunc(v) {
-					badRequest(w, r, key+" must be a whole number from 1")
-					return
-				}
-			case "temperature":
-				// The range every provider accepts — the runtime's own
-				// check (validOptions), answered here as a 400 instead of
-				// a rejected command.
-				if v < 0 || v > 2 {
-					badRequest(w, r, "temperature must be between 0 and 2")
-					return
-				}
-			default:
-				badRequest(w, r, "unknown option "+key)
-				return
-			}
-		}
-		if msg := paramsOverride(req.Overrides.Params); msg != "" {
-			badRequest(w, r, msg)
-			return
-		}
-		if n := int(req.Overrides.Options["max_steps"]); n > 0 && agent.Limits.MaxSteps > 0 && n > agent.Limits.MaxSteps {
-			writeError(w, r, http.StatusForbidden, "forbidden",
-				"max_steps may only lower the agent's cap")
-			return
-		}
-		if n := int(req.Overrides.Options["parallelism"]); n > 0 && agent.Limits.Parallelism > 0 && n > agent.Limits.Parallelism {
-			writeError(w, r, http.StatusForbidden, "forbidden",
-				"parallelism may only lower the agent's cap")
-			return
-		}
-		if req.SideEffects == "allow" {
-			touched := enabled
-			if len(req.Overrides.OnlyTools) > 0 {
-				touched = req.Overrides.OnlyTools // inside tools_enabled: checked above
-			}
-			if len(touched) == 0 {
-				touched = manifestTools
-			}
-			// "allow" runs the AllowSideEffects tools for real; a tool
-			// the code vouched ReplaySafe (or an Output agent's
-			// submission) is no side effect and runs in every mode, so it
-			// may stay on too — the runtime's own check is the same.
-			for _, name := range touched {
-				if !agent.IsAllowed(name) && agent.SideEffects[name] != "safe" && name != "submit_output" {
-					writeError(w, r, http.StatusForbidden, "forbidden",
-						"tool "+name+" is not opted in for real side effects")
-					return
-				}
-			}
 		}
 
 		// The at-most-once id: a reuse is 409, whatever the body.
@@ -496,6 +280,303 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 			State     string `json:"state"`
 		}{cmd.CommandID, linkruntime.StateQueued})
 	}
+}
+
+// cmdError is one refusal of a §5.1 command: its status, error code
+// and sentence — what POST /api/playground/runs and the preview both
+// answer it with (§10.4's table).
+type cmdError struct {
+	status    int
+	code, msg string
+}
+
+func (e *cmdError) write(w http.ResponseWriter, r *http.Request) {
+	writeError(w, r, e.status, e.code, e.msg)
+}
+
+// refuse is a 400; refuseWidening the 403 a widening override gets.
+func refuse(msg string) *cmdError { return &cmdError{http.StatusBadRequest, "bad_request", msg} }
+
+func refuseWidening(msg string) *cmdError {
+	return &cmdError{http.StatusForbidden, "forbidden", msg}
+}
+
+// checkCommand runs the checks a command needs no runtime for: the
+// transcript edits against the source run's records (D2/D3 — the
+// boundary rule and the no-call-without-result rule are 400s, §10.4,
+// so Repair never synthesizes what nobody wrote), the engine, the
+// thread mode and the side-effect mode. preview is the preview's
+// reading of the scripted engine's refusals (§5.5's prompt trap, the
+// step it never answered, the edits it cannot answer): returned as
+// warnings instead, worded the same, never a 400 there.
+func (s *Server) checkCommand(ctx context.Context, req *runRequest, preview bool) *cmdError {
+	_, err := s.checkCommandWarn(ctx, req, preview)
+	return err
+}
+
+// checkCommandWarn is checkCommand with the scripted warnings the
+// preview reads (always nil when preview is false).
+func (s *Server) checkCommandWarn(ctx context.Context, req *runRequest, preview bool) ([]string, *cmdError) {
+	if len(req.TranscriptEdits) > 0 {
+		switch {
+		case req.Source == nil || req.Source.RunID == "":
+			return nil, refuse("transcript_edits need a source run")
+		case req.Source.FromStep <= 0:
+			return nil, refuse("transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)")
+		}
+		batches, terr := s.db.TranscriptBatches(ctx, req.Source.RunID)
+		if terr != nil {
+			return nil, refuse("the source run has no readable transcript to edit")
+		}
+		// The run's input (a user edit may rewrite the turn's prompt)
+		// and its own steps, each where its record says it joined.
+		input, ierr := runInput(batches)
+		steps, serr := runSteps(batches)
+		if ierr != nil || serr != nil {
+			return nil, refuse("the source run has no readable transcript to edit")
+		}
+		// The replay prefix is what the model saw at from_step (ADR
+		// 0029): when that request carried a compaction view, an
+		// edit inside its range is refused. A step the run never
+		// reached has no view; the step-count rule refuses it.
+		var view *compactedRange
+		sm, aerr := obsdb.MessagesAsOf(ctx, s.db, req.Source.RunID, req.Source.FromStep)
+		switch {
+		case aerr == nil:
+			view = compactedRangeOf(batches, sm)
+		case !errors.Is(aerr, obsdb.ErrNotFound):
+			return nil, refuse(fmt.Sprintf("the source run's step %d does not rebuild from its records: %v", req.Source.FromStep, aerr))
+		}
+		if verr := validateTranscriptEdits(input, steps, req.Source.FromStep, req.TranscriptEdits, view, s.recordedSchemas(ctx, req.Source.RunID)); verr != nil {
+			return nil, refuse(verr.Error())
+		}
+	}
+	var warnings []string
+	trap := func(msg string) *cmdError {
+		if preview {
+			warnings = append(warnings, msg)
+			return nil
+		}
+		return refuse(msg)
+	}
+	switch req.Engine {
+	case "", "live":
+	case "scripted":
+		// §5.5's prompt trap: the replay key ignores the system
+		// prompt by design, so an instructions or model override
+		// would silently replay the old answer — refused. Changes
+		// that alter the key miss instead and fail the step with
+		// "no recorded turn" — except a transcript edit, refused here
+		// in weft/runtime's words (executor.go's scriptedEdits).
+		if req.Overrides.Instructions != "" {
+			if e := trap("scripted engine with an instructions override would silently replay the old answer (WEFT-PLAYGROUND §5.5)"); e != nil {
+				return nil, e
+			}
+		}
+		if req.Overrides.Model != "" {
+			if e := trap("scripted engine with a model override would silently replay the old answer (WEFT-PLAYGROUND §5.5)"); e != nil {
+				return nil, e
+			}
+		}
+		if req.Source == nil || req.Source.RunID == "" {
+			return nil, refuse("the scripted engine replays a source run's recorded turns: a source run is required")
+		}
+		if len(req.TranscriptEdits) > 0 {
+			if e := trap(fmt.Sprintf("the scripted engine would replay the recorded turn %d, which answered a different prompt: transcript edits need engine live", req.Source.FromStep)); e != nil {
+				return nil, e
+			}
+		}
+		// from_step at the step count is the step the source never
+		// answered (ADR 0029): nothing recorded to replay — refused in
+		// weft/runtime's words (executor.go's scriptedAtCount). A
+		// transcript that does not read leaves it to the runtime.
+		if n := req.Source.FromStep; n > 0 {
+			if batches, terr := s.db.TranscriptBatches(ctx, req.Source.RunID); terr == nil {
+				if steps, serr := runSteps(batches); serr == nil && stepCount(steps) == n {
+					if e := trap(fmt.Sprintf("the scripted engine has no recorded turn for step %d: the source never answered it (use engine live)", n)); e != nil {
+						return nil, e
+					}
+				}
+			}
+		}
+	default:
+		return nil, refuse("unknown engine " + req.Engine)
+	}
+	switch req.Thread {
+	case "", "ephemeral":
+	case "fork":
+		// §5.4: fork continues the conversation in a new session
+		// with lineage — it needs a source turn and an input;
+		// from_step is the ephemeral verb (a mid-turn re-run),
+		// never the fork's. The runtime's own threads availability
+		// is checked against its registration.
+		if req.Source == nil || req.Source.RunID == "" {
+			return nil, refuse("fork mode forks a source turn's session: a source run is required")
+		}
+		if req.Input == nil || *req.Input == "" {
+			return nil, refuse("fork mode continues the conversation: an input is required")
+		}
+		if req.Source.FromStep > 0 {
+			return nil, refuse("fork mode re-runs no steps (from_step is the ephemeral verb); send an input instead")
+		}
+	default:
+		return nil, refuse("unknown thread mode " + req.Thread)
+	}
+	switch req.SideEffects {
+	case "", "substitute", "park", "allow":
+	default:
+		return nil, refuse("unknown side_effects mode " + req.SideEffects)
+	}
+	return warnings, nil
+}
+
+// recordedSchemas is the source run's recorded tool schemas by name
+// (every catalog its requests named, a later one winning): what a
+// tool_args edit is checked against on this side. None recorded (a run
+// before ADR 0028, a content-off chain): an empty map — the arguments
+// need only be an object, and the runtime checks its agent's own.
+func (s *Server) recordedSchemas(ctx context.Context, runID string) map[string]json.RawMessage {
+	out := map[string]json.RawMessage{}
+	cats, err := s.db.Catalogs(ctx, runID)
+	if err != nil {
+		return out
+	}
+	for _, c := range cats {
+		for _, t := range c.Tools {
+			if len(t.Schema) > 0 {
+				out[t.Name] = t.Schema
+			}
+		}
+	}
+	return out
+}
+
+// checkSource checks the source turn: from_step is 0+ and input may not
+// replace a continued turn's message (both 400, body-shape errors), and
+// the run must exist (404).
+func (s *Server) checkSource(ctx context.Context, req *runRequest) *cmdError {
+	if req.Source == nil || req.Source.RunID == "" {
+		return nil
+	}
+	if req.Source.FromStep < 0 {
+		return refuse("source.from_step must be 0 or more")
+	}
+	if req.Input != nil && *req.Input != "" && req.Source.FromStep > 0 {
+		return refuse(`input replaces the turn's user message only when from_step is 0: with from_step > 0, edit step 0's user message instead (a transcript edit of kind "user")`)
+	}
+	if _, err := s.db.Run(ctx, req.Source.RunID); err != nil {
+		if errors.Is(err, obsdb.ErrNotFound) {
+			return &cmdError{http.StatusNotFound, "not_found", "unknown source run " + req.Source.RunID}
+		}
+		return &cmdError{http.StatusInternalServerError, "internal", "read source run " + req.Source.RunID + " failed"}
+	}
+	return nil
+}
+
+// checkRegistered checks the overrides against the runtime's registered
+// copy of the agent — narrowing only (§6 rule 2): tools the manifest
+// lacks are 400, a raised limit or a refused side-effect tool is 403.
+func checkRegistered(req *runRequest, agent linkruntime.AgentRegistration) *cmdError {
+	manifestTools := agent.ManifestToolNames()
+	known := make(map[string]bool, len(manifestTools))
+	for _, name := range manifestTools {
+		known[name] = true
+	}
+	enabled := req.Overrides.ToolsEnabled
+	for _, name := range enabled {
+		if !known[name] {
+			return refuse("tool " + name + " is not in agent " + agent.Name + "'s manifest")
+		}
+	}
+	// The option lab's tool-shaped overrides (plan F3): names the
+	// manifest lacks are 400; only_tools outside tools_enabled is a
+	// widening, 403; a named tool_choice the run turns off or parks
+	// could never be honoured, 400.
+	// Version skew: a runtime older than the option lab decodes the
+	// command without these fields and would run the experiment
+	// without them (only_tools ignored runs every tool, park_on
+	// ignored runs a ReplaySafe tool for real). A current runtime
+	// always registers its defaults (tool_choice mode at least
+	// "auto"); one that sends none is refused the new knobs.
+	if o := req.Overrides; agent.Defaults.ToolChoice.Mode == "" &&
+		(o.Params != nil || o.ToolChoice != nil || len(o.ParkOn) > 0 || len(o.OnlyTools) > 0) {
+		return refuse("runtime predates the option lab: upgrade weft/runtime to use params, tool_choice, park_on, only_tools")
+	}
+	if widens, msg := toolOverrides(req.Overrides, agent.Name, known, agent.Defaults.ToolChoice); msg != "" {
+		if widens {
+			return refuseWidening(msg)
+		}
+		return refuse(msg)
+	}
+	// A model outside the allow-list is the runtime's ModelResolver
+	// to decide (it resolves before the ack, and its refusal is the
+	// rejected command's reason); without one it is unknown here.
+	if m := req.Overrides.Model; m != "" && !contains(agent.Models, m) && m != agent.ManifestModelName() && !agent.Resolver {
+		return refuse("unknown model " + m + ": neither the agent's own nor a registered alternate (register it with runtime.Models or add runtime.ModelResolver)")
+	}
+	if e := checkNeutral(req.Overrides); e != nil {
+		return e
+	}
+	if n := int(req.Overrides.Options["max_steps"]); n > 0 && agent.Limits.MaxSteps > 0 && n > agent.Limits.MaxSteps {
+		return refuseWidening("max_steps may only lower the agent's cap")
+	}
+	if n := int(req.Overrides.Options["parallelism"]); n > 0 && agent.Limits.Parallelism > 0 && n > agent.Limits.Parallelism {
+		return refuseWidening("parallelism may only lower the agent's cap")
+	}
+	if req.SideEffects == "allow" {
+		touched := enabled
+		if len(req.Overrides.OnlyTools) > 0 {
+			touched = req.Overrides.OnlyTools // inside tools_enabled: checked above
+		}
+		if len(touched) == 0 {
+			touched = manifestTools
+		}
+		// "allow" runs the AllowSideEffects tools for real; a tool
+		// the code vouched ReplaySafe (or an Output agent's
+		// submission) is no side effect and runs in every mode, so it
+		// may stay on too — the runtime's own check is the same.
+		for _, name := range touched {
+			if !agent.IsAllowed(name) && agent.SideEffects[name] != "safe" && name != "submit_output" {
+				return refuseWidening("tool " + name + " is not opted in for real side effects")
+			}
+		}
+	}
+	return nil
+}
+
+// checkNeutral checks the overrides no registration is needed for: the
+// thinking level, the numeric options' shape and range, the sampling
+// params.
+func checkNeutral(o linkruntime.Overrides) *cmdError {
+	switch o.Thinking {
+	case "", "off", "low", "medium", "high":
+	default:
+		return refuse("unknown thinking level " + o.Thinking)
+	}
+	for key, v := range o.Options {
+		switch key {
+		case "max_steps", "parallelism":
+			// A whole number from 1: the lower-only checks compare it
+			// as an int, and a negative, fractional or out-of-range
+			// value would slip under them.
+			if v < 1 || v > 1e6 || v != math.Trunc(v) {
+				return refuse(key + " must be a whole number from 1")
+			}
+		case "temperature":
+			// The range every provider accepts — the runtime's own
+			// check (validOptions), answered here as a 400 instead of
+			// a rejected command.
+			if v < 0 || v > 2 {
+				return refuse("temperature must be between 0 and 2")
+			}
+		default:
+			return refuse("unknown option " + key)
+		}
+	}
+	if msg := paramsOverride(o.Params); msg != "" {
+		return refuse(msg)
+	}
+	return nil
 }
 
 // actorOf names who triggered the run (§6 rule 4): the server token,

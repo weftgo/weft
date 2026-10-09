@@ -129,7 +129,43 @@ module, ADR 0005).
   that may act (`canReplay`, Studio's gate). panel.js grows by the F1
   row of the size ledger.
 
+- **Edit the transcript in place, Go half** (plan F2.1, ADR 0029
+  decision 8): a playground command's `transcript_edits` gains a
+  discriminator `kind` and three kinds — `user` (rewrite a kept step's
+  user message; step 0's is the turn's prompt, `index` picks among a
+  step's several), `tool_args` (rewrite a kept call's `args`, checked
+  against the tool's schema by the new `obsdb.CheckToolArgs` and refused
+  in the loop's `INVALID_INPUT: tool "x": field "f": expected …, got …`
+  words; the result stays unless also edited) and `insert` (a user
+  message at a step boundary `0..from_step`, where a steer delivered
+  there would land). An edit without `kind` reads as before (`tool_result`
+  or `reply`). Validated in the runtime before the ack and mirrored in
+  Studio in one wording; an edit or an insert boundary inside
+  from_step's compaction view is refused. The replayed run carries
+  `weft.edits` (run metadata: `<step>:<call_id>:args` is the "args
+  edited" mark, beside `:result`, `:reply`, `:user`, `:insert`).
+  `POST /api/playground/preview` (capability `preview`, with the
+  playground; `capabilities_off` says why when off) takes the command's
+  body and answers the replay's exact first request — system, messages,
+  tools, model, params, thinking, tool choice, each with its source —
+  beside the request step `from_step` recorded and their diff (messages
+  aligned same/changed/added/removed, system, tools added/removed, the
+  knobs), plus warnings (PrepareStep runs again, a compacted or derived
+  prefix, the scripted engine's refusals) and the overrides no
+  registration checked (`unchecked`). Pure assembly in Studio: no model,
+  no tool, no runtime needed; a read-scoped panel token gets the system
+  prompt and the catalog hidden.
+
 ### Changed
+
+- **A scripted command with transcript edits is refused before the
+  ack** (runtime and Studio, one sentence: `the scripted engine would
+  replay the recorded turn N, which answered a different prompt:
+  transcript edits need engine live`) instead of being accepted and
+  failing its first step with "no recorded turn". The runtime also
+  refuses edits with `from_step` 0 itself (Studio did), so a fork
+  command can no longer carry edits it would drop unread; `input`
+  beside `from_step` > 0 now says to edit step 0's user message instead.
 
 - A playground command's sampling override (`options.temperature`, now
   also `params`) is laid over the agent's own `weft.Params` instead of
@@ -182,6 +218,15 @@ module, ADR 0005).
   kept) with the ack preview; the command is posted by Run, as every
   verb's. Escape on a drawer control closes the drawer and returns focus
   to the verb that opened it, instead of collapsing the panel.
+
+### Changed — breaking
+
+- **`studio/runtime.TranscriptEdit` is no longer comparable** (plan
+  F2.1): it gains `Kind`, `Index` and `Args json.RawMessage` — a slice,
+  so `==` on two edits (or an edit as a map key) no longer compiles.
+  Migration: compare the fields you need, or their JSON. The wire shape
+  only grows: every body recorded before it decodes and validates as
+  before.
 
 ## 0.12.0 — 2026-10-09
 

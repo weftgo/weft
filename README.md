@@ -765,6 +765,17 @@ memory, so a restart forgets them until the runtime registers again.
 With `--no-playground` the Agents page, the playground and the debugger
 say why they are off (`/api/meta`'s `capabilities_off`).
 
+A replay from step N may edit what it keeps before it runs: a kept
+step's user message (step 0's is the turn's prompt), a call's
+arguments (checked against the tool's schema, refused in the loop's
+`INVALID_INPUT` words), a tool result, a call-free reply, or a user
+message inserted at a step boundary — one `transcript_edits` list on
+the command. `POST /api/playground/preview` takes the same body and
+answers the exact first request that replay will send, diffed against
+the one step N recorded, without calling a model or needing a runtime;
+the replayed run carries `weft.edits` naming every edit
+([ADR 0029](docs/adr/0029-replay-input.md) decision 8).
+
 ## MCP: both ways
 
 `weft/mcp` (a package over the official Go MCP SDK, aliased

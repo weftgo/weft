@@ -894,8 +894,9 @@ func TestPlaygroundAgentDefaultToolChoice(t *testing.T) {
 // the command without params/tool_choice/park_on/only_tools — it would
 // run the experiment without them — so Studio refuses each one (400,
 // naming the upgrade) and still accepts an old-shape command. The
-// runtimes view shows the old runtime's caps as its defaults and auto
-// as the tool choice.
+// runtimes view carries no defaults for the old runtime (absent, never
+// filled in), so a client tells it from a current one and greys the
+// option lab's knobs.
 func TestPlaygroundOldRuntimeRefusesOptionLab(t *testing.T) {
 	pt := newPlaygroundTestServer(t)
 	reg, _ := pt.rs.Registration("rt_test")
@@ -924,8 +925,7 @@ func TestPlaygroundOldRuntimeRefusesOptionLab(t *testing.T) {
 		t.Errorf("old-shape body on an old runtime = %d (%s), want 202", code, out)
 	}
 	pt.waitCommand(t, "old shape")
-	if _, view := pt.get(t, "/api/runtimes"); !strings.Contains(view,
-		`"defaults":{"max_steps":10,"parallelism":4,"thinking":"","tool_choice":{"mode":"auto"}}`) {
-		t.Errorf("old runtime's view defaults: %s", view)
+	if _, view := pt.get(t, "/api/runtimes"); strings.Contains(view, `"defaults"`) || !strings.Contains(view, `"name":"acme-support"`) {
+		t.Errorf("old runtime's view = %s, want the agent with no defaults (absent = older than the option lab)", view)
 	}
 }

@@ -376,11 +376,15 @@ type RuntimeView struct {
 // outside Models may be proposed, and the run defaults the option lab
 // shows greyed beside each override.
 type AgentView struct {
-	Name     string        `json:"name"`
-	Models   []string      `json:"models"`
-	Resolver bool          `json:"resolver"`
-	Defaults AgentDefaults `json:"defaults"`
-	Tools    []ToolView    `json:"tools"`
+	Name     string   `json:"name"`
+	Models   []string `json:"models"`
+	Resolver bool     `json:"resolver"`
+	// Defaults are the agent's run defaults as its runtime registered
+	// them; nil (absent on the wire) for a runtime older than the
+	// option lab, which registers none — a client greys the new knobs
+	// on that, as Studio refuses them (playground.go).
+	Defaults *AgentDefaults `json:"defaults,omitempty"`
+	Tools    []ToolView     `json:"tools"`
 	// Instructions is the agent's registered system prompt, read from
 	// its manifest: the experiment drawer pre-fills from the registered
 	// config, never a guess from the trace (WEFT-PLAYGROUND §3).
@@ -1159,15 +1163,15 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			Breakpoints:    append([]string{}, c.breakpoints...),
 		}
 		for _, a := range c.reg.Agents {
-			av := AgentView{Name: a.Name, Models: a.Models, Resolver: a.Resolver, Defaults: a.Defaults,
+			av := AgentView{Name: a.Name, Models: a.Models, Resolver: a.Resolver,
 				Instructions: a.ManifestInstructions()}
-			// A runtime older than defaults sends none: its caps are
-			// still the registered limits, and no tool choice is auto.
-			if av.Defaults.MaxSteps == 0 && av.Defaults.Parallelism == 0 {
-				av.Defaults.MaxSteps, av.Defaults.Parallelism = a.Limits.MaxSteps, a.Limits.Parallelism
-			}
-			if av.Defaults.ToolChoice.Mode == "" {
-				av.Defaults.ToolChoice.Mode = "auto"
+			// A current runtime always registers its defaults (tool
+			// choice mode at least "auto"); one older than the option lab
+			// sends none, and the view says so by carrying none — never
+			// defaults filled in for it.
+			if a.Defaults.ToolChoice.Mode != "" {
+				d := a.Defaults
+				av.Defaults = &d
 			}
 			if av.Models == nil {
 				av.Models = []string{}

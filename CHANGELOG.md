@@ -195,6 +195,14 @@ module, ADR 0005).
 
 ### Changed
 
+- **An old runtime's registration shows no defaults** (plan F3.1's
+  fix): `GET /api/runtimes` omits an agent's `defaults` when its runtime
+  registered none (one older than the option lab) instead of filling in
+  its caps and tool choice `auto` — a client tells it from a current one
+  and greys the option lab's knobs before Studio's 400.
+  `studio/runtime.AgentView.Defaults` (new this release) is
+  `*AgentDefaults`, nil for that runtime.
+
 - **A scripted command with transcript edits is refused before the
   ack** (runtime and Studio, one sentence: `the scripted engine would
   replay the recorded turn N, which answered a different prompt:

@@ -314,7 +314,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // {max_steps, parallelism, temperature}, params {top_p, max_tokens, stop, seed},
 //     // tool_choice {mode, name}, park_on, only_tools — narrowing or neutral, each refusal
 //     // naming its rule; /api/runtimes gives each agent resolver + defaults (the form greys
-//     // them); runs carry weft.playground and never touch weft.session.id
+//     // them; absent for a runtime older than the option lab); runs carry weft.playground and never touch weft.session.id
 //     // (ephemeral). Engines live | scripted (the source
 //     // run's recorded turns, zero tokens); thread ephemeral | fork (a new session
 //     // with lineage, the panel keeps chatting in it). Breakpoints and steer act

@@ -53,13 +53,6 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 		if !hasSource {
 			return "the scripted engine replays a source run's recorded turns: a source run is required", false
 		}
-		if len(cmd.TranscriptEdits) > 0 {
-			// An edit changes what the model saw at from_step, and the
-			// recorded turns are keyed on what it saw: refused here, in
-			// one sentence, rather than acked and failed "no recorded
-			// turn" at the first step (ADR 0029 §8).
-			return scriptedEdits(cmd.Source.FromStep), false
-		}
 	default:
 		return fmt.Sprintf("unknown engine %q", cmd.Engine), false
 	}
@@ -102,9 +95,6 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 		}
 		if cmd.Source.FromStep < 0 {
 			return "source.from_step must be 0 or more", false
-		}
-		if hasInput && cmd.Source.FromStep > 0 {
-			return inputPastStepZero, false
 		}
 		if len(cmd.TranscriptEdits) > 0 && cmd.Source.FromStep <= 0 {
 			// Studio's wording; refused here too, so a fork (which reads
@@ -168,7 +158,12 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 		case cmd.Source.FromStep > 0 || len(cmd.TranscriptEdits) > 0 || cmd.Engine == "scripted" || !hasInput:
 			// The command is a re-run of that transcript: without it
 			// there is nothing to run — and a scripted command must
-			// never fall through to the live model.
+			// never fall through to the live model. An input beside
+			// from_step > 0 is refused for itself first, as Studio does
+			// before it looks the source up (checkSource).
+			if hasInput && cmd.Source.FromStep > 0 && len(cmd.TranscriptEdits) == 0 {
+				return inputPastStepZero, false
+			}
 			return fmt.Sprintf("source transcript unresolved: %v", err), false
 		default:
 			// A fresh input on an unresolvable source still runs, on
@@ -187,17 +182,37 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 			(cmd.Source.FromStep > n || cmd.Source.FromStep == n && !endsInAnsweredCalls(cmd.src.steps)) {
 			return fmt.Sprintf("from_step %d is beyond the source run's last step (it recorded %d; a run past the end has nothing fresh to answer)",
 				cmd.Source.FromStep, n), false
-		} else if cmd.Engine == "scripted" && cmd.Source.FromStep > 0 && cmd.Source.FromStep == n {
-			// The step at the count is the one the source never answered:
-			// the scripted engine has nothing to replay for it — refused
-			// before the ack, never acked and failed at run time.
-			return scriptedAtCount(n), false
 		}
 		cmd.schemas = toolSchemas(agent)
 		var err error
 		if cmd.prefix, err = runPrefix(cmd.src, *cmd, hasInput); err != nil {
 			return err.Error(), false
 		}
+		if len(cmd.TranscriptEdits) > 0 {
+			// The kept steps as edited: what the substitute lookup keys
+			// the kept calls on (validated just above).
+			_, cmd.kept, _ = applyEditsKept(cmd.src, cmd.Source.FromStep, cmd.TranscriptEdits, cmd.schemas)
+		}
+		// Studio's order (playground.go's checkCommand, then
+		// checkSource): the edits first, then the scripted engine's
+		// refusals, then the input — so one body gets one sentence on
+		// both sides.
+		if cmd.Engine == "scripted" && len(cmd.TranscriptEdits) > 0 {
+			// An edit changes what the model saw at from_step, and the
+			// recorded turns are keyed on what it saw: refused here, in
+			// one sentence, rather than acked and failed "no recorded
+			// turn" at the first step (ADR 0029 §8).
+			return scriptedEdits(cmd.Source.FromStep), false
+		}
+		if n := cmd.src.stepCount(); cmd.Engine == "scripted" && cmd.Source.FromStep > 0 && cmd.Source.FromStep == n {
+			// The step at the count is the one the source never answered:
+			// the scripted engine has nothing to replay for it — refused
+			// before the ack, never acked and failed at run time.
+			return scriptedAtCount(n), false
+		}
+	}
+	if hasSource && hasInput && cmd.Source.FromStep > 0 {
+		return inputPastStepZero, false
 	}
 
 	// The budget cap (§6 rule 6): a breach rejects the next command of
@@ -581,7 +596,16 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) (status, 
 	// denied "no decision" by the resume.
 	if cmd.src != nil && (cmd.SideEffects == "" || cmd.SideEffects == "substitute") {
 		cut := cmd.src.cut(cmd.Source.FromStep)
-		records := recordedCalls(cmd.src.steps[cut:], cmd.src.steps[:cut])
+		// The kept calls answer from what the model saw answered: the
+		// edited pairs when the command edited them (ADR 0029 §8) — a
+		// call re-issued with its edited arguments gets the kept (or
+		// patched) result; one re-issued with the original arguments
+		// no longer matches and parks (or runs, per its class).
+		kept := cmd.src.steps[:cut]
+		if cmd.kept != nil {
+			kept = cmd.kept
+		}
+		records := recordedCalls(cmd.src.steps[cut:], kept)
 		steps, limit := numSteps(res), l.stepLimit(cmd)
 		breaks := map[string]bool{}
 		for _, t := range l.breakpointTools(cmd.Agent) {

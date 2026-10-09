@@ -100,7 +100,7 @@ func editKind(e transcriptEdit) (string, error) {
 			kind = editToolResult
 		case e.Content != "":
 			kind = editReply
-		case len(e.Args) > 0:
+		case hasArgs(e.Args):
 			return "", fmt.Errorf("an edit with args needs kind %q", editToolArgs)
 		default:
 			return "", fmt.Errorf("an empty edit (neither tool_result nor content)")
@@ -121,7 +121,7 @@ func editKind(e transcriptEdit) (string, error) {
 	}
 	carried := map[string]bool{
 		"tool_result": e.ToolResult != "", "call_id": e.CallID != "", "content": e.Content != "",
-		"args": len(e.Args) > 0, "index": e.Index != 0,
+		"args": hasArgs(e.Args), "index": e.Index != 0,
 	}
 	for _, f := range []string{"tool_result", "call_id", "content", "args", "index"} {
 		if carried[f] && !slices.Contains(takes, f) {
@@ -137,6 +137,14 @@ func editKind(e transcriptEdit) (string, error) {
 		return "", fmt.Errorf("edit index %d is negative", e.Index)
 	}
 	return kind, nil
+}
+
+// hasArgs reports whether an edit carries arguments: empty or JSON
+// null is absent — a client that serialises "args": null on every edit
+// sends none, and a tool_args edit needs an object.
+func hasArgs(raw json.RawMessage) bool {
+	t := bytes.TrimSpace(raw)
+	return len(t) > 0 && string(t) != "null"
 }
 
 // article is the indefinite article an edit kind takes in a refusal.
@@ -186,11 +194,21 @@ type insertAt struct {
 //     or an insert at a boundary inside it: the replay prefix is what
 //     the model saw (ADR 0029), and the model never saw that there.
 func applyEdits(src *sourceRun, fromStep int, edits []transcriptEdit, schemas map[string]json.RawMessage) ([]core.Message, error) {
+	prefix, _, err := applyEditsKept(src, fromStep, edits, schemas)
+	return prefix, err
+}
+
+// applyEditsKept is applyEdits that also returns the kept steps as
+// edited (the source's own messages through step from_step − 1, before
+// any view or insert): what the substitute lookup keys the kept calls
+// on — the pairs the model saw answered (ADR 0029 §8).
+func applyEditsKept(src *sourceRun, fromStep int, edits []transcriptEdit, schemas map[string]json.RawMessage) ([]core.Message, []core.Message, error) {
 	if len(edits) == 0 {
-		return keptPrefix(src, fromStep)
+		prefix, err := keptPrefix(src, fromStep)
+		return prefix, src.steps[:src.cut(fromStep)], err
 	}
 	if fromStep <= 0 {
-		return nil, fmt.Errorf("transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)")
+		return nil, nil, fmt.Errorf("transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)")
 	}
 	cut := src.cut(fromStep)
 	stepOf := src.stepIndex()[:cut]
@@ -214,53 +232,53 @@ func applyEdits(src *sourceRun, fromStep int, edits []transcriptEdit, schemas ma
 	for _, e := range edits {
 		kind, err := editKind(e)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if e.Step < 0 {
-			return nil, fmt.Errorf("edit step %d is negative", e.Step)
+			return nil, nil, fmt.Errorf("edit step %d is negative", e.Step)
 		}
 		if kind == editInsert {
 			if e.Step > fromStep {
-				return nil, fmt.Errorf("insert step %d is past from_step %d: an insert lands at a step boundary 0..%d", e.Step, fromStep, fromStep)
+				return nil, nil, fmt.Errorf("insert step %d is past from_step %d: an insert lands at a step boundary 0..%d", e.Step, fromStep, fromStep)
 			}
 			seq := len(input) + cutAt(steps, stepOf, e.Step)
 			if view != nil && int64(seq) > view.c.FromSeq && int64(seq) < view.c.ToSeq {
-				return nil, compactedBoundaryError(e.Step, fromStep, view.c.FromSeq, view.c.ToSeq, view.c.Entries)
+				return nil, nil, compactedBoundaryError(e.Step, fromStep, view.c.FromSeq, view.c.ToSeq, view.c.Entries)
 			}
 			inserts = append(inserts, insertAt{seq: seq, msg: core.User(e.Content)})
 			continue
 		}
 		if e.Step >= fromStep {
-			return nil, fmt.Errorf("edit step %d is not in the kept prefix (from_step %d keeps steps 0..%d)",
+			return nil, nil, fmt.Errorf("edit step %d is not in the kept prefix (from_step %d keeps steps 0..%d)",
 				e.Step, fromStep, fromStep-1)
 		}
 		switch kind {
 		case editToolResult:
 			at := patchResult(steps, stepOf, e.Step, e.CallID, e.ToolResult)
 			if len(at) == 0 {
-				return nil, fmt.Errorf("no tool call %q in the kept prefix's step %d", e.CallID, e.Step)
+				return nil, nil, fmt.Errorf("no tool call %q in the kept prefix's step %d", e.CallID, e.Step)
 			}
 			for _, i := range at {
 				if inView(i) {
-					return nil, compactedEditError(fmt.Sprintf("call %q", e.CallID), e.Step, fromStep, view)
+					return nil, nil, compactedEditError(fmt.Sprintf("call %q", e.CallID), e.Step, fromStep, view)
 				}
 			}
 		case editReply:
 			at := rewriteReply(steps, stepOf, e.Step, e.Content)
 			if at < 0 {
-				return nil, fmt.Errorf("step %d has no assistant reply in the kept prefix (or it carried tool calls: patch their results instead)", e.Step)
+				return nil, nil, fmt.Errorf("step %d has no assistant reply in the kept prefix (or it carried tool calls: patch their results instead)", e.Step)
 			}
 			if inView(at) {
-				return nil, compactedEditError("the reply", e.Step, fromStep, view)
+				return nil, nil, compactedEditError("the reply", e.Step, fromStep, view)
 			}
 		case editUser:
 			seqs := userMessages(input, steps, stepOf, e.Step)
 			if e.Index >= len(seqs) {
-				return nil, userIndexError(e.Step, e.Index, len(seqs))
+				return nil, nil, userIndexError(e.Step, e.Index, len(seqs))
 			}
 			seq := seqs[e.Index]
 			if view.holds(seq) {
-				return nil, compactedEditError("the user message", e.Step, fromStep, view)
+				return nil, nil, compactedEditError("the user message", e.Step, fromStep, view)
 			}
 			if seq < len(input) {
 				input[seq].Content = rewriteText(input[seq].Content, e.Content)
@@ -270,30 +288,30 @@ func applyEdits(src *sourceRun, fromStep int, edits []transcriptEdit, schemas ma
 		case editToolArgs:
 			name := callName(steps, stepOf, e.Step, e.CallID)
 			if name == "" {
-				return nil, fmt.Errorf("no tool call %q in the kept prefix's step %d", e.CallID, e.Step)
+				return nil, nil, fmt.Errorf("no tool call %q in the kept prefix's step %d", e.CallID, e.Step)
 			}
 			if err := obsdb.CheckToolArgs(name, schemas[name], e.Args); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			at := rewriteArgs(steps, stepOf, e.Step, e.CallID, e.Args)
 			if inView(at) {
-				return nil, compactedEditError(fmt.Sprintf("call %q", e.CallID), e.Step, fromStep, view)
+				return nil, nil, compactedEditError(fmt.Sprintf("call %q", e.CallID), e.Step, fromStep, view)
 			}
 		}
 	}
 	if err := prefixComplete(steps); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]core.Message, 0, len(input)+cut+len(inserts))
 	out = append(out, input...)
 	seen, err := src.seenAt(fromStep, append(out, steps...))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if view == nil {
-		return placeInserts(seen, inserts, nil), nil
+		return placeInserts(seen, inserts, nil), steps, nil
 	}
-	return placeInserts(seen, inserts, &view.c), nil
+	return placeInserts(seen, inserts, &view.c), steps, nil
 }
 
 // userIndexError is the refusal of a user edit naming a user message

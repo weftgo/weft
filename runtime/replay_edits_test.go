@@ -128,6 +128,15 @@ func TestReplayWithEditedRequest(t *testing.T) {
 				t.Errorf("weft.edits = %q, want every edit, c1 marked args", got)
 			}
 
+			// A client that serialises "args": null on every edit sends
+			// no args: a user edit with it is accepted.
+			nullArgs := command{CommandID: "cmd_null", Agent: "orders", Engine: "live",
+				Source: &sourceSpec{RunID: "r_edit", FromStep: 2},
+				TranscriptEdits: []transcriptEdit{{Kind: "user", Step: 0, Content: "x", Args: json.RawMessage(`null`)},
+					{Kind: "reply", Step: 1, Content: "y", Args: json.RawMessage(` `)}}}
+			if reason, ok := l.validate(ctx, &nullArgs); ok || reason != "step 1 has no assistant reply in the kept prefix (or it carried tool calls: patch their results instead)" {
+				t.Errorf("null args = %v %q, want them read as absent (and the explicit reply kind checked as a reply)", ok, reason)
+			}
 			for _, c := range []struct {
 				name   string
 				mutate func(*command)
@@ -160,6 +169,9 @@ func TestReplayWithEditedRequest(t *testing.T) {
 				{"a field the kind does not take", func(c *command) {
 					c.TranscriptEdits = []transcriptEdit{{Kind: "user", Step: 0, Content: "x", CallID: "c1"}}
 				}, "a user edit does not take call_id"},
+				{"args null on a tool_args edit", func(c *command) {
+					c.TranscriptEdits = []transcriptEdit{{Kind: "tool_args", Step: 0, CallID: "c1", Args: json.RawMessage(`null`)}}
+				}, "a tool_args edit needs args"},
 				{"args without kind", func(c *command) {
 					c.TranscriptEdits = []transcriptEdit{{Step: 0, CallID: "c1", Args: json.RawMessage(`{}`)}}
 				}, `an edit with args needs kind "tool_args"`},

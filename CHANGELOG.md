@@ -144,7 +144,14 @@ module, ADR 0005).
   Studio in one wording; an edit or an insert boundary inside
   from_step's compaction view is refused. The replayed run carries
   `weft.edits` (run metadata: `<step>:<call_id>:args` is the "args
-  edited" mark, beside `:result`, `:reply`, `:user`, `:insert`).
+  edited" mark, beside `:result`, `:reply`, `:user`, `:insert`) in the
+  source run's coordinates — its step ordinals and call ids — and a
+  child run inherits it with the rest of the metadata. `args` empty or
+  `null` reads as absent. In substitute mode a kept call re-issued with
+  its edited arguments is answered from the kept result; one re-issued
+  with the original arguments parks. `CheckToolArgs` reads a null field
+  as absent (encoding/json's rule) and refuses a non-integral literal
+  for an integer.
   `POST /api/playground/preview` (capability `preview`, with the
   playground; `capabilities_off` says why when off) takes the command's
   body and answers the replay's exact first request — system, messages,
@@ -155,7 +162,8 @@ module, ADR 0005).
   prefix, the scripted engine's refusals) and the overrides no
   registration checked (`unchecked`). Pure assembly in Studio: no model,
   no tool, no runtime needed; a read-scoped panel token gets the system
-  prompt and the catalog hidden.
+  prompt and the catalog hidden (its args edits checked for shape only,
+  its registration refusals generic, the messages hidden under a view).
 
 ### Changed
 

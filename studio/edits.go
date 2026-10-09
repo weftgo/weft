@@ -162,7 +162,7 @@ func editKindOf(e linkruntime.TranscriptEdit) (string, error) {
 			kind = editToolResult
 		case e.Content != "":
 			kind = editReply
-		case len(e.Args) > 0:
+		case hasArgs(e.Args):
 			return "", fmt.Errorf("an edit with args needs kind %q", editToolArgs)
 		default:
 			return "", fmt.Errorf("an empty edit (neither tool_result nor content)")
@@ -183,7 +183,7 @@ func editKindOf(e linkruntime.TranscriptEdit) (string, error) {
 	}
 	carried := map[string]bool{
 		"tool_result": e.ToolResult != "", "call_id": e.CallID != "", "content": e.Content != "",
-		"args": len(e.Args) > 0, "index": e.Index != 0,
+		"args": hasArgs(e.Args), "index": e.Index != 0,
 	}
 	for _, f := range []string{"tool_result", "call_id", "content", "args", "index"} {
 		if carried[f] && !slices.Contains(takes, f) {
@@ -199,6 +199,14 @@ func editKindOf(e linkruntime.TranscriptEdit) (string, error) {
 		return "", fmt.Errorf("edit index %d is negative", e.Index)
 	}
 	return kind, nil
+}
+
+// hasArgs reports whether an edit carries arguments: empty or JSON
+// null is absent — a client that serialises "args": null on every edit
+// sends none, and a tool_args edit needs an object.
+func hasArgs(raw json.RawMessage) bool {
+	t := bytes.TrimSpace(raw)
+	return len(t) > 0 && string(t) != "null"
 }
 
 // article is the indefinite article an edit kind takes in a refusal.

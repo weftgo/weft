@@ -40,17 +40,23 @@ func TestCheckToolArgs(t *testing.T) {
 		{schema, ``, `INVALID_INPUT: tool "lookup_order": missing required field "order_id"`},
 		{schema, `{"order_id":"42","days":"3"}`, `INVALID_INPUT: tool "lookup_order": field "days": expected integer, got string`},
 		{schema, `{"order_id":"42","days":1.5}`, `INVALID_INPUT: tool "lookup_order": field "days": expected integer, got number 1.5`},
-		{schema, `{"order_id":"42","days":3.0}`, ""},
+		{schema, `{"order_id":"42","days":3.0}`, `INVALID_INPUT: tool "lookup_order": field "days": expected integer, got number 3.0`},
+		{schema, `{"order_id":"42","days":3e0}`, `INVALID_INPUT: tool "lookup_order": field "days": expected integer, got number 3e0`},
+		// A null field is a no-op, as encoding/json decodes it — a
+		// required one included (present, null).
+		{schema, `{"order_id":null,"days":null,"items":null,"tags":null}`, ""},
+		{schema, `{"order_id":"42","items":[{"sku":null,"qty":1}]}`, ""},
 		{schema, `{"order_id":"42","items":[{"sku":"a","qty":1},{"sku":"b","qty":"2"}]}`, `INVALID_INPUT: tool "lookup_order": field "items.1.qty": expected integer, got string`},
 		{schema, `{"order_id":"42","tags":{"k":1}}`, `INVALID_INPUT: tool "lookup_order": field "tags.k": expected string, got number`},
 		{schema, `["42"]`, `INVALID_INPUT: tool "lookup_order": expected object at the top level, got array`},
 		{schema, `{"order_id":"42"} {}`, `INVALID_INPUT: tool "lookup_order": trailing data after the JSON arguments`},
-		{schema, `{"order_id":`, `INVALID_INPUT: tool "lookup_order": invalid JSON: unexpected EOF`},
+		{schema, `{"order_id":`, `INVALID_INPUT: tool "lookup_order": invalid JSON: unexpected end of input`},
 		{closed, `{"mode":"fast","n":null}`, ""},
 		{closed, `{"mode":"medium"}`, `INVALID_INPUT: tool "lookup_order": field "mode": "medium" is not one of the schema's values`},
 		{closed, `{"n":"1"}`, `INVALID_INPUT: tool "lookup_order": field "n": expected integer or null, got string`},
 		{closed, `{"x":1}`, `INVALID_INPUT: tool "lookup_order": unknown field "x": not in the schema`},
 		{nil, `{"anything":[1]}`, ""},
+		{nil, `{"a":}`, `INVALID_INPUT: tool "lookup_order": invalid JSON at offset 6: invalid character '}' looking for beginning of value`},
 		{nil, `"x"`, `INVALID_INPUT: tool "lookup_order": expected object at the top level, got string`},
 	} {
 		err := obsdb.CheckToolArgs("lookup_order", c.schema, json.RawMessage(c.args))

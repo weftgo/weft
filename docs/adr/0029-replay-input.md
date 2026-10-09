@@ -143,7 +143,15 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
      hand needs only an object) and refused in the loop's own
      `INVALID_INPUT: tool "x": field "f": expected …, got …` wording.
      The call keeps its id, name and signature; its result stays unless
-     a `tool_result` edit rewrites it too.
+     a `tool_result` edit rewrites it too. `args` empty or `null` is
+     absent (a `tool_args` edit then needs it; any other kind ignores
+     it). The two schema sources differ by design: Studio checks against
+     the run's recorded catalogs, the runtime against its agent's
+     current tool — a schema changed since the recording can make Studio
+     accept what the runtime refuses (or the reverse), and the runtime,
+     authoritative, decides before the ack. A read-scoped panel token's
+     preview checks the object shape alone, so no refusal names what
+     the hidden catalog declares.
    - `insert` (`step`, `content`) adds a user message at the boundary
      before step `step`'s model call, `0..from_step`: after step
      `step − 1`'s tool results — where ADR 0019's steer delivered after
@@ -161,13 +169,26 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
    once, in the runtime (authoritative, before the ack) and in Studio
    (the mirror, a 400), and both are pinned.
 
+   *Substitution keys on the edited pairs.* The substitute mode
+   answers a re-issued kept call from what the model saw answered —
+   after an edit, the edited pair. A call re-issued with its edited
+   arguments is answered with the kept (or patched) result; one
+   re-issued with the original arguments no longer matches and parks (or
+   runs, per its replay class); a patched result's re-issue gets the
+   patched result. The fresh steps' records are unchanged.
+
    *The mark.* A replayed run whose prefix was edited carries
    `weft.edits` (run metadata, on every span and record, in the run
    row's `meta`): one token per edit in the command's order,
    comma-joined — `<step>:<call_id>:args` (the pair's "args edited"
    mark), `<step>:<call_id>:result`, `<step>:reply`, `<step>:user`
    (`<step>:user:<index>` past the first) and `<step>:insert`. Past
-   core's 1024-byte metadata value it ends in `+<n> more`.
+   core's 1024-byte metadata value it ends in `+<n> more`. The tokens
+   are in the source's coordinates — the source run's step ordinals and
+   call ids, the edit's own — never the replay's: a reader maps them
+   onto the replay's input pair by step and call id. A child run the
+   replay starts inherits the value, as every run metadata is inherited
+   (core's Metadata): it names the parent's edits, not the child's.
 
    *The scripted engine.* Its recorded turns are keyed on what the
    model saw; every edit changes that, so a scripted command with

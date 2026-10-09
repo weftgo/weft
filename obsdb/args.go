@@ -3,6 +3,7 @@ package obsdb
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -21,10 +22,15 @@ import (
 // wording. A nil error means the arguments fit.
 //
 // The failure is a *core.ToolError coded INVALID_INPUT whose cause is
-// core.ErrInvalidToolInput, worded the way the loop words a model's bad
-// arguments — `INVALID_INPUT: tool "lookup_order": field "days":
+// core.ErrInvalidToolInput, worded like the loop where the loop has a
+// sentence for it — `INVALID_INPUT: tool "lookup_order": field "days":
 // expected integer, got string` — naming the field by its JSON path
-// (dotted; an array element by its index).
+// (dotted; an array element by its index). The loop's decode does not
+// check required fields or enums; their sentences ("missing required
+// field …", "… is not one of the schema's values") are this check's
+// own. A null field is a no-op, as encoding/json decodes it; an
+// integer must be written as one (3.0 is refused, as the loop refuses
+// it).
 //
 // The arguments must be one JSON object (empty or null reads as {}, as
 // the loop decodes them). The schema walk covers the vocabulary weft's
@@ -47,6 +53,14 @@ func CheckToolArgs(tool string, schema, args json.RawMessage) error {
 	dec.UseNumber()
 	var v any
 	if err := dec.Decode(&v); err != nil {
+		// The loop's own words (core's describeDecodeError).
+		var syn *json.SyntaxError
+		if errors.As(err, &syn) {
+			return fail("invalid JSON at offset %d: %s", syn.Offset, syn.Error())
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+			return fail("invalid JSON: unexpected end of input")
+		}
 		return fail("invalid JSON: %v", err)
 	}
 	if _, err := dec.Token(); err != io.EOF {
@@ -68,6 +82,12 @@ func CheckToolArgs(tool string, schema, args json.RawMessage) error {
 // checkValue walks one value against its schema and returns the first
 // mismatch, worded, or "".
 func checkValue(path string, s map[string]any, v any) string {
+	if v == nil && path != "" {
+		// encoding/json's rule, which the loop decodes by: a null field
+		// is a no-op whatever its type (a strict-mode model writes null
+		// for an optional field).
+		return ""
+	}
 	at := func(want, got string) string {
 		if path == "" {
 			return fmt.Sprintf("expected %s at the top level, got %s", want, got)
@@ -200,11 +220,10 @@ func typeMatches(t string, v any) bool {
 		if !ok {
 			return false
 		}
-		if _, err := n.Int64(); err == nil {
-			return true
-		}
-		f, err := n.Float64()
-		return err == nil && f == float64(int64(f))
+		// The literal must be integral, as the loop's decode into an
+		// int reads it: 3.0 and 3e0 are refused there, so here.
+		_, err := n.Int64()
+		return err == nil
 	}
 	return true
 }

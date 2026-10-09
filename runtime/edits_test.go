@@ -193,3 +193,16 @@ func TestTranscriptEditsAreTheRunsOwnSteps(t *testing.T) {
 		t.Errorf("a kept prefix with an unanswered call: err = %v", err)
 	}
 }
+
+// TestExplicitReplyKind: kind "reply" is the pre-F2 content edit named
+// — the same rewrite, the same refusal of a step with calls.
+func TestExplicitReplyKind(t *testing.T) {
+	got, err := applyTranscriptEdits(editSource(), 3, []transcriptEdit{{Kind: "reply", Step: 2, Content: "rewritten"}})
+	if err != nil || got[len(got)-1].Content[0].(core.TextPart).Text != "rewritten" {
+		t.Errorf("explicit reply = %v %v", got, err)
+	}
+	if _, err := applyTranscriptEdits(editSource(), 3, []transcriptEdit{{Kind: "reply", Step: 1, Content: "x"}}); err == nil ||
+		!strings.Contains(err.Error(), "carried tool calls") {
+		t.Errorf("explicit reply of a step with calls = %v", err)
+	}
+}

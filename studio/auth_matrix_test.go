@@ -552,6 +552,14 @@ func TestAuthMatrix(t *testing.T) {
 			body: func(res string) string {
 				return `{"agent":"acme-support","source":{"run_id":"` + run[res] + `","from_step":0}}`
 			}, resources: all, want: scoped(ok)},
+		// The edit path under every identity: the seeded runs have one
+		// call-free step, so from_step 1 with an edit is read, assembled
+		// and refused (400, beyond the last step) inside the scope.
+		{name: "POST /api/playground/preview (an edit)", method: "POST", path: fixed("/api/playground/preview"),
+			body: func(res string) string {
+				return `{"agent":"acme-support","source":{"run_id":"` + run[res] + `","from_step":1},` +
+					`"transcript_edits":[{"kind":"user","step":0,"content":"x"}]}`
+			}, resources: []string{"A", "B", "none"}, want: scoped(http.StatusBadRequest)},
 		{name: "POST /api/playground/preview (B's child)", method: "POST", path: fixed("/api/playground/preview"),
 			body: fixed(`{"agent":"acme-support","source":{"run_id":"run_b/0/call_1","from_step":0}}`), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/playground/commands/{id}", method: "GET", path: func(res string) string { return "/api/playground/commands/" + cmd[res] }, resources: all, want: scoped(ok)},

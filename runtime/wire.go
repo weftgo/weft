@@ -131,6 +131,9 @@ type command struct {
 	// schemas are the agent's tools' input schemas, read in validate:
 	// what a tool_args edit is checked against (obsdb.CheckToolArgs).
 	schemas map[string]json.RawMessage
+	// kept is the source's kept steps with the edits applied (nil
+	// without edits): the substitute lookup's kept calls.
+	kept []core.Message
 }
 
 // sourceSpec names the run to re-run: its id and the step to continue

@@ -38,7 +38,9 @@ import (
 // A read-scoped panel token previews inside its public id with the
 // system prompt and the tool catalog hidden (the requests routes'
 // rule) and the messages hidden when a compaction view is in them (the
-// transcript's ?step= rule).
+// transcript's ?step= rule); no refusal may carry the catalog either —
+// its tool_args edits are checked for their object shape alone, and a
+// refusal against the registration is a generic sentence.
 
 // previewDoc is the preview's answer.
 type previewDoc struct {
@@ -154,7 +156,8 @@ func (s *Server) servePlaygroundPreview(rs *linkruntime.RuntimeServer) http.Hand
 			badRequest(w, r, "the preview assembles an ephemeral replay: a fork continues the session in your app, whose context is the session's")
 			return
 		}
-		scripted, e := s.checkCommandWarn(ctx, &req, true)
+		prompts := readsPrompts(r)
+		scripted, e := s.checkCommandWarn(ctx, &req, true, prompts)
 		if e == nil {
 			e = s.checkSource(ctx, &req)
 		}
@@ -174,6 +177,12 @@ func (s *Server) servePlaygroundPreview(rs *linkruntime.RuntimeServer) http.Hand
 			Warnings: []previewWarning{}, Unchecked: []string{}}
 		if agent != nil {
 			if e := checkRegistered(&req, *agent); e != nil {
+				if !prompts {
+					// The refusal would name what the hidden catalog
+					// holds (a tool the manifest lacks): a read-scoped
+					// token gets the status, not the detail.
+					e.msg = "the overrides were refused against the agent's registration: its tools are hidden to this token"
+				}
 				e.write(w, r)
 				return
 			}
@@ -185,7 +194,7 @@ func (s *Server) servePlaygroundPreview(rs *linkruntime.RuntimeServer) http.Hand
 			}
 			doc.Unchecked = uncheckedOverrides(req)
 		}
-		if e := s.assemblePreview(ctx, &doc, req, agent, readsPrompts(r)); e != nil {
+		if e := s.assemblePreview(ctx, &doc, req, agent, prompts); e != nil {
 			e.write(w, r)
 			return
 		}
@@ -272,7 +281,11 @@ func (s *Server) assemblePreview(ctx context.Context, doc *previewDoc, req runRe
 		if sm.View != nil {
 			view = compactedRangeOf(batches, sm)
 		}
-		prefix, inserts, err := editedPrefix(input, own, from, req.TranscriptEdits, view, s.recordedSchemas(ctx, run))
+		var schemas map[string]json.RawMessage
+		if prompts {
+			schemas = s.recordedSchemas(ctx, run)
+		}
+		prefix, inserts, err := editedPrefix(input, own, from, req.TranscriptEdits, view, schemas)
 		if err != nil {
 			return refuse(err.Error()) // checkCommand refused it first
 		}
@@ -596,9 +609,10 @@ func diffTools(will, was []previewTool) *previewToolsDiff {
 	return d
 }
 
-// maxDiffCells bounds the message alignment's table; past it the two
+// maxDiffCells bounds the message alignment's table (4 MiB of int32
+// cells — the route answers read-scoped tokens too); past it the two
 // lists are compared position by position.
-const maxDiffCells = 4 << 20
+const maxDiffCells = 1 << 20
 
 // diffMessages aligns was and will by their longest common subsequence
 // of identical messages (compared as JSON); between two matches, the

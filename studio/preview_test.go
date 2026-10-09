@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
+	linkruntime "github.com/weftgo/weft/studio/runtime"
 )
 
 // recordPreviewRun records, through the real pipeline into the
@@ -217,6 +219,8 @@ func TestPreviewRoute(t *testing.T) {
 		{"a field the kind does not take", edit(`{"kind":"insert","step":1,"content":"x","call_id":"c1"}`),
 			"an insert edit does not take call_id"},
 		{"args without kind", edit(`{"step":0,"call_id":"c1","args":{}}`), `an edit with args needs kind "tool_args"`},
+		{"args null on a tool_args edit", edit(`{"kind":"tool_args","step":0,"call_id":"c1","args":null}`), "a tool_args edit needs args"},
+		{"args null beside a user edit", edit(`{"kind":"user","step":0,"content":"x","args":null}`), ""},
 		{"input beside from_step", `{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"r_pv","from_step":2},"input":"x"}`,
 			`input replaces the turn's user message only when from_step is 0: with from_step > 0, edit step 0's user message instead (a transcript edit of kind "user")`},
 	} {
@@ -224,7 +228,7 @@ func TestPreviewRoute(t *testing.T) {
 			code, out := previewPost(t, pt, path, "", c.body)
 			if c.want == "" {
 				// Not a refusal: the lookup_order schema the reflector
-				// wrote does not close the object.
+				// wrote does not close the object; null args are absent.
 				if path == "/api/playground/preview" && code != http.StatusOK {
 					t.Errorf("%s on %s = %d %s, want accepted", c.name, path, code, out)
 				}
@@ -374,5 +378,141 @@ func TestPreviewOverACompactedStep(t *testing.T) {
 	if code != http.StatusOK || strings.Join(ops, ",") != "same,same,added,same,same" ||
 		string(ins.WillSend.Messages[2]) != `{"role":"user","content":[{"type":"text","text":"go on"}]}` {
 		t.Errorf("insert over the view = %d %v %s", code, ops, out)
+	}
+}
+
+// TestPreviewReadTokenLearnsNoCatalog: the preview answers a read-scoped
+// token, which may not read the tool catalog — so no refusal may carry
+// it. Under a read token a tool_args edit is checked for its object
+// shape alone (a schema-invalid one previews; the run route would
+// refuse it to a token that may act), a registration refusal is
+// generic, and over a compaction view the messages and their diff are
+// hidden too. A playground-scoped token gets the detailed sentences.
+func TestPreviewReadTokenLearnsNoCatalog(t *testing.T) {
+	pt := newPlaygroundServer(t, "srv-token")
+	withPipeline(t, pt.ts.URL, true, func(prov []core.Option) {
+		lookup := core.Tool("lookup_order", "Look up an order.", func(_ context.Context, in diffOrderIn) (string, error) {
+			return "order " + in.OrderID + " shipped", nil
+		})
+		agent := core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"42"}`, ID: "c1"}),
+			wefttest.Say("shipped"),
+		), append([]core.Option{core.Name("acme-support"), lookup}, prov...)...)
+		if _, err := agent.Generate(context.Background(), core.RunID("r_rt"), core.Prompt("where is 42?"),
+			core.Metadata(map[string]string{"weft.public_id": "pub_a"})); err != nil {
+			t.Fatal(err)
+		}
+	})
+	waitRun(t, pt.ts, "r_rt", 2, "srv-token")
+	recordStepsRun(t, pt.ts.URL, "r_rv", map[string]string{"weft.public_id": "pub_a"})
+	fetchJSONAs(t, pt.ts, "/api/runs/r_rv", "srv-token", func(b string) bool { return strings.Contains(b, `"request_count":6`) })
+	tok := func(scope string) string {
+		s, err := signPanelToken([]byte("srv-token"), panelClaims{PublicID: "pub_a", Scope: scope, Exp: time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	read, pg := tok(scopeRead), tok(scopePlayground)
+	bad := `{"agent":"acme-support","source":{"run_id":"r_rt","from_step":1},` +
+		`"transcript_edits":[{"kind":"tool_args","step":0,"call_id":"c1","args":{"order_id":7}}]}`
+	if code, out := previewPost(t, pt, "/api/playground/preview", read, bad); code != http.StatusOK || strings.Contains(out, "expected string") {
+		t.Errorf("read token, schema-invalid args = %d %s, want previewed, no schema detail", code, out)
+	}
+	if code, out := previewPost(t, pt, "/api/playground/preview", pg, bad); code != http.StatusBadRequest ||
+		!strings.Contains(out, `field \"order_id\": expected string, got number`) {
+		t.Errorf("playground token, schema-invalid args = %d %s, want the field named", code, out)
+	}
+	if code, out := previewPost(t, pt, "/api/playground/preview", read, `{"agent":"acme-support","source":{"run_id":"r_rt","from_step":1},"transcript_edits":[{"kind":"tool_args","step":0,"call_id":"c1","args":[7]}]}`); code != http.StatusBadRequest ||
+		!strings.Contains(out, "expected object at the top level, got array") {
+		t.Errorf("read token, args not an object = %d %s, want the shape refused", code, out)
+	}
+	unknown := `{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"r_rt","from_step":1},"overrides":{"tools_enabled":["secret_tool"]}}`
+	if code, out := previewPost(t, pt, "/api/playground/preview", read, unknown); code != http.StatusBadRequest ||
+		strings.Contains(out, "secret_tool") || !strings.Contains(out, "hidden to this token") {
+		t.Errorf("read token, unknown tool = %d %s, want a generic 400", code, out)
+	}
+	if code, out := previewPost(t, pt, "/api/playground/preview", pg, unknown); code != http.StatusBadRequest || !strings.Contains(out, "secret_tool is not in agent") {
+		t.Errorf("playground token, unknown tool = %d %s, want the tool named", code, out)
+	}
+	// Over a view: the messages and their diff hidden from a read token.
+	view := `{"agent":"orders","source":{"run_id":"r_rv","from_step":2}}`
+	code, out := previewPost(t, pt, "/api/playground/preview", read, view)
+	var d struct {
+		WillSend struct {
+			Messages      []json.RawMessage `json:"messages"`
+			MessagesBadge string            `json:"messages_badge"`
+		} `json:"will_send"`
+		WasSent struct {
+			Messages      []json.RawMessage `json:"messages"`
+			MessagesBadge string            `json:"messages_badge"`
+		} `json:"was_sent"`
+		Diff struct {
+			Messages []json.RawMessage `json:"messages"`
+		} `json:"diff"`
+		CompactedAt any `json:"compacted_at"`
+	}
+	decode(t, out, &d)
+	if code != http.StatusOK || d.WillSend.Messages != nil || d.WasSent.Messages != nil || d.Diff.Messages != nil ||
+		d.WillSend.MessagesBadge != "hidden" || d.WasSent.MessagesBadge != "hidden" || d.CompactedAt == nil || strings.Contains(out, "summary:") {
+		t.Errorf("read token over a view = %d %s, want messages and their diff hidden", code, out)
+	}
+	if code, out := previewPost(t, pt, "/api/playground/preview", pg, view); code != http.StatusOK || !strings.Contains(out, "summary:") {
+		t.Errorf("playground token over a view = %d %s, want the messages", code, out)
+	}
+}
+
+// TestEditedPrefixKinds pins Studio's mirror on the kinds the API
+// tests do not reach: the explicit reply kind (the pre-F2 content
+// edit, named), and null args read as absent.
+func TestEditedPrefixKinds(t *testing.T) {
+	input := []core.Message{core.User("refund 4411")}
+	steps := []stepMessage{
+		{0, core.Message{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c1", Name: "lookup", Args: []byte(`{}`)}}}},
+		{0, core.Message{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c1", Name: "lookup", Content: "shipped"}}}},
+		{1, core.Assistant("Shipped.")},
+		{1, core.User("thanks")},
+		{2, core.Assistant("Anytime.")},
+	}
+	got, _, err := editedPrefix(input, steps, 2, []linkruntime.TranscriptEdit{
+		{Kind: "reply", Step: 1, Content: "rewritten", Args: json.RawMessage(`null`)},
+		{Kind: "user", Step: 1, Content: "thank you"},
+	}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(got)
+	if !strings.Contains(string(b), `"text":"rewritten"`) || !strings.Contains(string(b), `"text":"thank you"`) || strings.Contains(string(b), "Shipped.") {
+		t.Errorf("edited prefix = %s", b)
+	}
+	if _, _, err := editedPrefix(input, steps, 2, []linkruntime.TranscriptEdit{{Kind: "reply", Step: 0, Content: "x"}}, nil, nil); err == nil ||
+		!strings.Contains(err.Error(), "carried tool calls") {
+		t.Errorf("explicit reply of a step with calls = %v", err)
+	}
+}
+
+// TestDiffMessagesFallsBackPastTheCap: past maxDiffCells the alignment
+// is position by position — a long transcript still answers, every
+// message aligned, the one changed message changed.
+func TestDiffMessagesFallsBackPastTheCap(t *testing.T) {
+	n := 1100 // 1101² cells > maxDiffCells
+	was := make([]core.Message, n)
+	for i := range was {
+		was[i] = core.User(strconv.Itoa(i))
+	}
+	will := slices.Clone(was)
+	will[500] = core.User("edited")
+	rows := diffMessages(was, will)
+	changed := 0
+	for i, r := range rows {
+		if r.Was == nil || r.Will == nil || *r.Was != i || *r.Will != i {
+			t.Fatalf("row %d = %+v, want positional", i, r)
+		}
+		if r.Op == "changed" {
+			changed++
+		}
+	}
+	if len(rows) != n || changed != 1 || rows[500].Op != "changed" {
+		t.Errorf("%d rows, %d changed, row 500 %s", len(rows), changed, rows[500].Op)
 	}
 }

@@ -310,13 +310,16 @@ func refuseWidening(msg string) *cmdError {
 // step it never answered, the edits it cannot answer): returned as
 // warnings instead, worded the same, never a 400 there.
 func (s *Server) checkCommand(ctx context.Context, req *runRequest, preview bool) *cmdError {
-	_, err := s.checkCommandWarn(ctx, req, preview)
+	_, err := s.checkCommandWarn(ctx, req, preview, true)
 	return err
 }
 
 // checkCommandWarn is checkCommand with the scripted warnings the
-// preview reads (always nil when preview is false).
-func (s *Server) checkCommandWarn(ctx context.Context, req *runRequest, preview bool) ([]string, *cmdError) {
+// preview reads (always nil when preview is false). prompts is
+// readsPrompts' answer for the identity: without it the tool schemas
+// stay hidden — a tool_args edit is checked for its object shape
+// alone, so no refusal names what the catalog declares.
+func (s *Server) checkCommandWarn(ctx context.Context, req *runRequest, preview, prompts bool) ([]string, *cmdError) {
 	if len(req.TranscriptEdits) > 0 {
 		switch {
 		case req.Source == nil || req.Source.RunID == "":
@@ -347,7 +350,11 @@ func (s *Server) checkCommandWarn(ctx context.Context, req *runRequest, preview 
 		case !errors.Is(aerr, obsdb.ErrNotFound):
 			return nil, refuse(fmt.Sprintf("the source run's step %d does not rebuild from its records: %v", req.Source.FromStep, aerr))
 		}
-		if verr := validateTranscriptEdits(input, steps, req.Source.FromStep, req.TranscriptEdits, view, s.recordedSchemas(ctx, req.Source.RunID)); verr != nil {
+		var schemas map[string]json.RawMessage
+		if prompts {
+			schemas = s.recordedSchemas(ctx, req.Source.RunID)
+		}
+		if verr := validateTranscriptEdits(input, steps, req.Source.FromStep, req.TranscriptEdits, view, schemas); verr != nil {
 			return nil, refuse(verr.Error())
 		}
 	}

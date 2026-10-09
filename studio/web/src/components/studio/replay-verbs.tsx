@@ -25,11 +25,11 @@ export interface ReplayAt {
   runID: string
   agent?: string
   step: number
-  /** The transcript's step count (studio/edits.go's stepCount: one
-   * past the last step holding an assistant message); null while it is
-   * unknown. A from_step at or past it is refused (400), so a verb that
-   * would send one is not drawn. */
-  stepCount: number | null
+  /** The highest from_step the server accepts for this transcript
+   * (lib/replay.ts maxFromStep: the step count when the last step's
+   * calls are all answered, else one less); null while it is unknown.
+   * A verb that would send more (a 400) is not drawn. */
+  maxFromStep: number | null
   /** "continue here" forks the run's session: only a top-level run
    * that is a session's turn can (a `<session>-tN` id, a runtime with
    * Threads). */
@@ -107,7 +107,8 @@ export function StepVerbs({ at }: { at: ReplayAt }) {
 }
 
 /** A tool call's verbs: edit its result and replay (the next step run
- * fresh against the edit — only when the transcript has a next step),
+ * fresh against the edit — only when the server would accept that
+ * from_step: a next step, or the last step's calls all answered),
  * and replay from its step. */
 export function CallVerbs({
   at,
@@ -125,7 +126,7 @@ export function CallVerbs({
   const n = at.step
   return (
     <span className="flex items-center" data-replay-verbs="call">
-      {content !== undefined && callId && at.stepCount !== null && n + 1 < at.stepCount ? (
+      {content !== undefined && callId && at.maxFromStep !== null && n + 1 <= at.maxFromStep ? (
         <Verb
           at={at}
           label={`edit this result and replay (call ${callId})`}
@@ -149,7 +150,7 @@ export function CallVerbs({
 export function SteerVerb({ at }: { at: ReplayAt }) {
   const open = useReplay()
   const n = at.step + 1
-  if (!open || at.step < 0 || at.stepCount === null || n >= at.stepCount) return null
+  if (!open || at.step < 0 || at.maxFromStep === null || n > at.maxFromStep) return null
   return (
     <Verb
       at={at}
@@ -167,7 +168,7 @@ export function ChildVerb({ runID, agent }: { runID: string; agent: string }) {
   if (!open) return null
   return (
     <Verb
-      at={{ runID, agent, step: 0, stepCount: null }}
+      at={{ runID, agent, step: 0, maxFromStep: null }}
       label={`replay the child run ${runID} (agent ${agent || "unnamed"})`}
       icon={<RotateCcw data-slot="icon" />}
       draft={rerun()}

@@ -14,7 +14,7 @@ import { setStudioToken } from "@/lib/api"
 import type { AgentView, RunDoc, RunRow, RunsPage, RuntimeView, StepDoc } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
-import { FakeStudio, golden, pagedEvents, transcriptOf } from "@/test/fake-studio"
+import { FakeStudio, golden, hiddenRefusal, pagedEvents, transcriptOf } from "@/test/fake-studio"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { unmatchedDrafts } from "@/lib/experiment-body"
 import { TranscriptEdits } from "@/components/studio/experiment-form"
@@ -470,16 +470,63 @@ describe("verbs gate on the transcript's steps, not the fold's (review 1)", () =
     { type: "step_start", run_id: RUN, index: 3 },
   ].map((event, pos) => ({ pos, time: rOK.started, event }))
 
-  it("no edit-result verb on the last transcript step (from_step would be past it: 400)", async () => {
+  it("Done line on the common shape: the failing step is the LAST one — edit its result and replay from step 3", async () => {
+    // Step 2's refund errors; step 3's model call failed (a step_start,
+    // no reply): the transcript's step count is 3, and its last step's
+    // calls are all answered — the server accepts from_step 3
+    // (endsInAnsweredCalls), the replay's first model call answers them.
     serve({ events: failingLast, bodies: bodies.slice(0, -1), doc: runDoc({ status: "failed", err: "model down" }) })
     const c3 = await openStory('[data-call="c3"]')
-    // Step 2 is the transcript's last step with a reply: nothing fresh
-    // would answer from_step 3.
-    await waitFor(() => expect(within(c3).getByRole("button", { name: /replay from this step \(call c3/ })).toBeTruthy())
-    expect(within(c3).queryByRole("button", { name: "edit this result and replay (call c3)" })).toBeNull()
-    // Step 1's call has a next step: its verb is drawn.
-    const c2 = document.querySelector<HTMLElement>('[data-call="c2"]')!
-    expect(within(c2).getByRole("button", { name: "edit this result and replay (call c2)" })).toBeTruthy()
+    const verb = await waitFor(() =>
+      within(c3).getByRole("button", { name: "edit this result and replay (call c3)" })
+    )
+    fireEvent.click(verb)
+    const d = await waitFor(() => within(drawer()!))
+    const picker = await waitFor(() => {
+      const el = d.getByLabelText<HTMLSelectElement>("continue from step")
+      expect(el.tagName).toBe("SELECT")
+      return el
+    })
+    expect(picker.value).toBe("3")
+    expect([...picker.options].map((o) => o.textContent).at(-1)).toBe(
+      "3 · after the last step (answers its calls)"
+    )
+    const edit = await waitFor(() => d.getByLabelText<HTMLInputElement>("edit the result of refund (c3) at step 2"))
+    expect(edit.value).toBe(ERR)
+    // The pre-filled field has focus (review: focus the verb's field).
+    await waitFor(() => expect(document.activeElement).toBe(edit))
+    await waitFor(() => expect(verdict("refund")).toBe("substituted"))
+    expect(verdict("search_kb")).toBe("runs")
+    expect(drawer()!.querySelector("[data-replay-prefix]")!.textContent).toBe("steps 0–2 kept")
+    expect(drawer()!.querySelector("[data-replay-past-end]")).toBeNull()
+    fireEvent.change(edit, { target: { value: "refunded" } })
+    await waitFor(() => expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false))
+    fireEvent.click(d.getByRole("button", { name: "Run" }))
+    await waitFor(() => expect(studio.calls("POST playground/runs").length).toBe(1))
+    expect(studio.calls("POST playground/runs")[0].body).toMatchObject({
+      source: { run_id: RUN, from_step: 3 },
+      transcript_edits: [{ step: 2, call_id: "c3", tool_result: "refunded" }],
+    })
+  })
+
+  it("past a call-free last reply nothing is offered: the steer after it has no verb, the picker stops at it", async () => {
+    // The base run ends in step 3's reply: max from_step is 3.
+    const steerAfterLast = [
+      ...events.slice(0, -1).map((e) => e.event),
+      { type: "steered", run_id: RUN, seq: 20, step: 3, messages: [{ role: "user", content: [{ type: "text", text: "thanks" }] }] },
+      events.at(-1)!.event,
+    ].map((event, pos) => ({ pos, time: rOK.started, event }))
+    serve({ events: steerAfterLast })
+    const steer = await openStory("[data-steer]")
+    await waitFor(() => expect(document.querySelector('[data-call="c3"] [data-replay-verb="edit_result"]')).toBeTruthy())
+    expect(within(steer).queryByRole("button", { name: /replay from this steer/ })).toBeNull()
+    fireEvent.click(document.querySelector<HTMLElement>('[data-call="c3"] [data-replay-verb="edit_result"]')!)
+    const picker = await waitFor(() => {
+      const el = within(drawer()!).getByLabelText<HTMLSelectElement>("continue from step")
+      expect(el.tagName).toBe("SELECT")
+      return el
+    })
+    expect([...picker.options].some((o) => o.textContent.includes("after the last step"))).toBe(false)
   })
 
   it("the steer verb replays from the step that answers the steer, only when it exists", async () => {
@@ -689,5 +736,55 @@ describe("a pre-filled edit is never pruned silently (review 2)", () => {
     expect(container.querySelector('[data-edit-orphan="c3"]')!.textContent).toContain("unchecked edit")
     expect(setDrafts).not.toHaveBeenCalled()
     expect(unmatchedDrafts(drafts, null, 3)).toEqual(drafts)
+  })
+})
+
+// ── Final fixes (F1.2) ─────────────────────────────────────────────
+
+describe("the verb's field has focus on open (final 2)", () => {
+  beforeEach(() => serve())
+
+  it("edit the prompt focuses the prompt once pre-filled", async () => {
+    const card = await openStory('[data-step="1"]')
+    fireEvent.click(within(card).getByRole("button", { name: "edit the prompt and replay (step 1)" }))
+    const prompt = await waitFor(() => within(drawer()!).getByLabelText<HTMLTextAreaElement>("system prompt"))
+    await waitFor(() => expect(document.activeElement).toBe(prompt))
+  })
+
+  it("continue here focuses the input", async () => {
+    const card = await openStory('[data-step="3"]')
+    fireEvent.click(within(card).getByRole("button", { name: "continue here with a new message" }))
+    const input = await waitFor(() => within(drawer()!).getByLabelText<HTMLTextAreaElement>("input"))
+    await waitFor(() => expect(document.activeElement).toBe(input))
+  })
+})
+
+describe("the edits while the transcript loads, and when it is hidden (final 3, 4)", () => {
+  const drafts = [{ step: 2, callID: "c3", toolResult: ERR }]
+  const mount = () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return render(
+      <QueryClientProvider client={client}>
+        <TranscriptEdits runID={RUN} fromStep={3} drafts={drafts} setDrafts={vi.fn()} />
+      </QueryClientProvider>
+    )
+  }
+
+  it("loading: a reading line, no unchecked alarm — and the drafts still hold Run", async () => {
+    serve()
+    studio.on(`GET runs/${RUN}/transcript`, () => new Promise(() => {}))
+    const { container } = mount()
+    await waitFor(() => expect(container.querySelector("[data-edits-reading]")).toBeTruthy())
+    expect(container.querySelector("[data-edit-orphan]")).toBeNull()
+    expect(container.textContent).not.toContain("unchecked")
+    expect(unmatchedDrafts(drafts, null, 3)).toEqual(drafts) // the caller's hold
+  })
+
+  it("a 403 hidden on the transcript is the hidden hole badge, not 'transcript unreadable'", async () => {
+    serve()
+    studio.on(`GET runs/${RUN}/transcript`, () => hiddenRefusal())
+    const { container } = mount()
+    await waitFor(() => expect(container.querySelector('[data-hole="hidden"]')).toBeTruthy())
+    expect(container.querySelector("[data-edits-unreadable]")).toBeNull()
   })
 })

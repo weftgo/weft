@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest"
 import {
   allowRefusals,
   breakpointsFor,
+  endsInAnsweredCalls,
+  maxFromStep,
   canReplay,
   continueHere,
   editPromptAndReplay,
@@ -22,7 +24,7 @@ import {
   transcriptStepCount,
 } from "./replay"
 import type { CatalogTool, ReplayVerdict, SideEffectsMode } from "./replay"
-import type { AgentView } from "./api"
+import type { AgentView, Message } from "./api"
 
 const catalog: CatalogTool[] = [
   { name: "lookup", replay: "never", approval: false }, // explicit never
@@ -256,6 +258,27 @@ describe("the verbs' drafts (one command on both surfaces)", () => {
     expect(transcriptStepCount([0, 1, 2, 3])).toBe(4)
     expect(transcriptStepCount([0, 2])).toBe(3)
     expect(transcriptStepCount([])).toBe(0)
+  })
+
+  it("endsInAnsweredCalls / maxFromStep: the server's bound on from_step", () => {
+    const call = (...ids: string[]): Message => ({
+      role: "assistant",
+      content: ids.map((id) => ({ type: "tool_call", id, name: "t" })),
+    })
+    const res = (id: string): Message => ({
+      role: "tool",
+      content: [{ type: "tool_result", call_id: id, name: "t", content: "x", is_error: false }],
+    })
+    const reply: Message = { role: "assistant", content: [{ type: "text", text: "done" }] }
+    // The last step's calls all answered: from_step may be the count.
+    expect(endsInAnsweredCalls([call("c1"), res("c1")])).toBe(true)
+    expect(maxFromStep(3, true)).toBe(3)
+    // One call unanswered: not.
+    expect(endsInAnsweredCalls([call("c1", "c2"), res("c1")])).toBe(false)
+    // A call-free last reply: nothing fresh to answer.
+    expect(endsInAnsweredCalls([call("c1"), res("c1"), reply])).toBe(false)
+    expect(maxFromStep(4, false)).toBe(3)
+    expect(endsInAnsweredCalls([])).toBe(false)
   })
 
   it("an empty recorded result seeds no edit (the server refuses an empty one)", () => {

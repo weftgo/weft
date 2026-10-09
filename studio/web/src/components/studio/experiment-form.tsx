@@ -12,7 +12,7 @@ import type { Dispatch, SetStateAction } from "react"
 import { ApiError, putBreakpoints, runQuery, transcriptQuery } from "@/lib/api"
 import type { AgentView, RuntimeView } from "@/lib/api"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
-import { editFieldsOf, sourceSteps, unmatchedDrafts } from "@/lib/experiment-body"
+import { editFieldsOf, replayBounds, sourceSteps, unmatchedDrafts } from "@/lib/experiment-body"
 import type { EditDraft, EditField, SourceStep, VariantFields } from "@/lib/experiment-body"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Badge } from "@/components/ui/badge"
@@ -232,8 +232,11 @@ export function TranscriptEdits({
 }) {
   const source = useSourceEditFields(runID)
   const fields = (source.fields ?? []).filter((f) => f.step < fromStep)
-  const orphans = unmatchedDrafts(drafts, source.fields, fromStep)
-  if (!fields.length && !orphans.length && !source.error) return null
+  const loading = source.fields === null && !source.error
+  // While the transcript loads nothing is judged yet: the drafts wait
+  // (Run is held by the caller), no alarm is raised.
+  const orphans = loading ? [] : unmatchedDrafts(drafts, source.fields, fromStep)
+  if (!loading && !fields.length && !orphans.length && !source.error) return null
   const draftOf = (f: EditField) => drafts.find((d) => d.step === f.step && d.callID === f.callID)
   const set = (f: EditField, v: string) => {
     const at = (d: EditDraft) => d.step === f.step && d.callID === f.callID
@@ -251,7 +254,14 @@ export function TranscriptEdits({
       <span className="text-xs text-muted-foreground">
         Transcript edits (steps 0..{fromStep - 1} are kept)
       </span>
-      {source.error ? (
+      {loading ? (
+        <p className="text-[11px] text-faint" data-edits-reading>
+          reading the transcript…
+        </p>
+      ) : null}
+      {source.hidden ? (
+        <HoleBadge hole="hidden" />
+      ) : source.error ? (
         <Badge
           variant="outline"
           className="font-mono text-[10px] font-normal"
@@ -322,12 +332,27 @@ export function TranscriptEdits({
  * changed step needs no refetch) through the transcript query the run
  * page shares: fields null while loading — and on a failed read, with
  * the error — never [] for "unknown". */
-export function useSourceEditFields(runID: string): { fields: EditField[] | null; error?: string } {
+export function useSourceEditFields(runID: string): {
+  fields: EditField[] | null
+  error?: string
+  /** The read was refused for the token's scope (403 hidden). */
+  hidden?: boolean
+} {
   const q = useQuery({ ...transcriptQuery(runID), enabled: Boolean(runID) })
   if (!runID) return { fields: [] }
-  if (q.isError) return { fields: null, error: q.error.message }
+  if (q.isError) return { fields: null, error: q.error.message, hidden: isHidden(q.error) }
   if (!q.data) return { fields: null }
   return { fields: editFieldsOf(q.data.batches, Number.MAX_SAFE_INTEGER) }
+}
+
+/** isHidden: a refusal for the token's scope (a 403 carrying the
+ * hidden badge) — a hole, not an error. */
+function isHidden(e: unknown): boolean {
+  return (
+    e instanceof ApiError &&
+    e.status === 403 &&
+    (e.doc as { badge?: string } | null | undefined)?.badge === "hidden"
+  )
 }
 
 /** useSourceSteps reads a source run's own steps (the transcript and
@@ -337,17 +362,16 @@ export function useSourceSteps(runID: string): {
   steps: SourceStep[] | null
   error?: string
   hidden?: boolean
+  /** The highest from_step the server accepts (replayBounds). */
+  max?: number
+  stepCount?: number
 } {
   const transcript = useQuery({ ...transcriptQuery(runID), enabled: Boolean(runID) })
   const doc = useQuery({ ...runQuery(runID), enabled: Boolean(runID), staleTime: 30_000 })
   if (!runID) return { steps: [] }
   if (transcript.isError) {
     const e = transcript.error
-    const hidden =
-      e instanceof ApiError &&
-      e.status === 403 &&
-      (e.doc as { badge?: string } | null | undefined)?.badge === "hidden"
-    return { steps: null, error: e.message, hidden }
+    return { steps: null, error: e.message, hidden: isHidden(e) }
   }
   if (!transcript.data) return { steps: null }
   const compacted = new Set(
@@ -355,14 +379,21 @@ export function useSourceSteps(runID: string): {
       .filter((c) => !isSessionMarker(c) && typeof c.step === "number")
       .map((c) => c.step as number)
   )
-  return { steps: sourceSteps(transcript.data.batches, compacted) }
+  const bounds = replayBounds(transcript.data.batches)
+  return {
+    steps: sourceSteps(transcript.data.batches, compacted),
+    max: bounds.max,
+    stepCount: bounds.stepCount,
+  }
 }
 
 /** StepPicker is the playground's (and the replay drawer's) from_step
  * field: the source run's steps by their ordinal (from_step IS the
  * ordinal) — step 0 starts the turn over with a new input; step N
- * keeps steps 0..N-1 and runs N fresh. The run's last step is not
- * offered past: nothing fresh would answer.
+ * keeps steps 0..N-1 and runs N fresh. Past the last step only when
+ * its calls are all answered (the server's rule, replayBounds: the
+ * replay's first model call answers them); never past a call-free
+ * last reply.
  * When the run's steps cannot be read the number field stays, with a
  * badge saying why — never an empty picker. */
 export function StepPicker({
@@ -378,7 +409,7 @@ export function StepPicker({
   model?: string
 }) {
   const doc = useQuery({ ...runQuery(runID), enabled: Boolean(runID), staleTime: 30_000 })
-  const { steps, error, hidden } = useSourceSteps(runID)
+  const { steps, error, hidden, max, stepCount } = useSourceSteps(runID)
   const shownModel = model ?? (doc.data ? doc.data.model.name : undefined)
   const failed = doc.data && doc.data.status === "failed" ? doc.data.err || "failed" : ""
   if (steps === null || steps.length === 0) {
@@ -413,8 +444,11 @@ export function StepPicker({
   }
   // A value the list lacks (a hand-off's step the run does not have) is
   // shown as itself, not silently moved.
-  const offered = steps.filter((st) => st.ordinal > 0)
-  const known = value === 0 || offered.some((st) => st.ordinal === value)
+  const offered = steps.filter((st) => st.ordinal > 0 && (max === undefined || st.ordinal <= max))
+  // The step after the last, when its calls are answered (a failed
+  // run's next model call, run fresh).
+  const after = max !== undefined && stepCount !== undefined && max === stepCount && max > 0 ? max : null
+  const known = value === 0 || value === after || offered.some((st) => st.ordinal === value)
   const last = Math.max(...steps.map((st) => st.ordinal))
   return (
     <label className="block space-y-1" data-step-picker="list">
@@ -441,6 +475,9 @@ export function StepPicker({
             </option>
           )
         })}
+        {after !== null ? (
+          <option value={String(after)}>{after} · after the last step (answers its calls)</option>
+        ) : null}
         {known ? null : <option value={String(value)}>{value} · not a step of this run</option>}
       </select>
     </label>

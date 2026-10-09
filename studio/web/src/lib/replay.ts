@@ -21,7 +21,7 @@
 //   - a RequireApproval tool parks at the approval boundary anyway;
 //   - a tool switched off in tools_enabled is not offered at all.
 // lib/replay.test.ts pins the table.
-import type { AgentView, RuntimeView, ToolEntry, ToolView } from "./api"
+import type { AgentView, Message, RuntimeView, ToolEntry, ToolView } from "./api"
 
 /** The command's side_effects mode ("" is the server's default,
  * substitute). */
@@ -260,6 +260,41 @@ export function transcriptStepCount(assistantOrdinals: readonly number[]): numbe
   let n = 0
   for (const o of assistantOrdinals) if (o + 1 > n) n = o + 1
   return n
+}
+
+/** endsInAnsweredCalls is studio/edits.go's (and the runtime's) rule
+ * for a from_step AT the step count: over the run's own messages in
+ * order, the last assistant message made at least one tool call and
+ * every one of them has a later tool result — the replay's first model
+ * call answers them, as a failed or budget-stopped run's next step
+ * would have. A last step that ended in a call-free reply has nothing
+ * fresh to answer. */
+export function endsInAnsweredCalls(
+  own: readonly Pick<Message, "role" | "content">[]
+): boolean {
+  let last = -1
+  own.forEach((m, i) => {
+    if (m.role === "assistant") last = i
+  })
+  if (last < 0) return false
+  const answered = new Set<string>()
+  for (const m of own.slice(last + 1))
+    if (m.role === "tool")
+      for (const p of m.content) if (p.type === "tool_result") answered.add(p.call_id)
+  let calls = 0
+  for (const p of own[last].content) {
+    if (p.type !== "tool_call") continue
+    calls++
+    if (!answered.has(p.id)) return false
+  }
+  return calls > 0
+}
+
+/** maxFromStep is the highest from_step the server accepts: the step
+ * count when the kept prefix ends in answered calls, else one less (a
+ * from_step past it is a 400). -1 when the run has no step. */
+export function maxFromStep(stepCount: number, answeredCalls: boolean): number {
+  return answeredCalls ? stepCount : stepCount - 1
 }
 
 /** The prefix line the ack preview shows: what the replayed run keeps.

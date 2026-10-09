@@ -25,7 +25,12 @@ import type { CatalogTool, ReplayDraft, SideEffectsMode, ToolVerdict } from "@/l
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { queued, settled, useCommandTracking } from "@/hooks/use-command-tracking"
 import type { Experiment } from "@/hooks/use-command-tracking"
-import { ExperimentForm, StepPicker, useSourceEditFields } from "@/components/studio/experiment-form"
+import {
+  ExperimentForm,
+  StepPicker,
+  useSourceEditFields,
+  useSourceSteps,
+} from "@/components/studio/experiment-form"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Button } from "@/components/ui/button"
 
@@ -278,11 +283,30 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
     // step it would keep is reset, never sent and refused.
     if (p.thread === "fork") setFromStep(0)
   }
-  // The heading takes focus on open (the verb's click left it there).
+  // Focus on open: the heading, then — when the verb pre-filled a field
+  // (the edit, the prompt, the input) — that field, once it is drawn
+  // (the edit's field waits for the transcript).
   const heading = useRef<HTMLHeadingElement>(null)
+  const formBody = useRef<HTMLDivElement>(null)
+  const fieldFocused = useRef(false)
   useEffect(() => {
     heading.current?.focus()
   }, [])
+  const focusSel =
+    draft.focus === "prompt"
+      ? 'textarea[aria-label="system prompt"]'
+      : draft.focus === "input"
+        ? 'textarea[aria-label="input"]'
+        : draft.focus === "edit" && draft.edits[0]?.callID
+          ? `[data-edit-call="${CSS.escape(draft.edits[0].callID)}"]`
+          : ""
+  useEffect(() => {
+    if (fieldFocused.current || !focusSel) return
+    const el = formBody.current?.querySelector<HTMLElement>(focusSel)
+    if (!el) return
+    fieldFocused.current = true
+    el.focus()
+  })
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const [experiment, setExperiment] = useState<Experiment | null>(null)
@@ -293,6 +317,12 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
   const ordinal = fromStep
   const edits = useSourceEditFields(runID)
   const orphans = unmatchedDrafts(editDrafts, edits.fields, variant.thread === "fork" ? 0 : fromStep)
+  const editsLoading = edits.fields === null && !edits.error
+  // The server's bound on from_step for this transcript (replayBounds):
+  // past it the command is a 400, so Run is held and the rule named.
+  const { max: maxFrom, stepCount } = useSourceSteps(runID)
+  const pastEnd =
+    variant.thread !== "fork" && maxFrom !== undefined && stepCount !== undefined && fromStep > maxFrom
   const stepDoc = useQuery({ ...stepQuery(runID, ordinal), enabled: caps.includes("steps"), retry: false })
   const catalog = caps.includes("steps")
     ? catalogOfStep(stepDoc.data, stepDoc.isError ? stepDoc.error.message : undefined)
@@ -394,7 +424,7 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
           {runtime && !target.mismatch ? ` · on ${runtime.service || runtime.id}` : ""}
         </p>
       </div>
-      <div className="space-y-3 px-6 pb-6">
+      <div ref={formBody} className="space-y-3 px-6 pb-6">
         {blocked ? (
           <p className="text-xs text-status-bad" role="alert" data-replay-blocked>
             {blocked}
@@ -434,7 +464,14 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
             turn {refused.length === 1 ? "it" : "them"} off, or pick substitute or park
           </p>
         ) : null}
-        {orphans.length ? (
+        {pastEnd ? (
+          <p className="text-xs text-status-bad" role="alert" data-replay-past-end>
+            from step {fromStep} has nothing fresh to answer: the run recorded {stepCount}{" "}
+            {stepCount === 1 ? "step" : "steps"}
+            {maxFrom === stepCount - 1 ? ", and its last ended in a reply" : ""}
+          </p>
+        ) : null}
+        {orphans.length && !editsLoading ? (
           <p className="text-xs text-status-bad" role="alert" data-replay-orphans>
             {edits.fields === null
               ? "the transcript is not read: the edits cannot be checked against the kept steps"
@@ -461,6 +498,7 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
               busy ||
               refused.length > 0 ||
               orphans.length > 0 ||
+              pastEnd ||
               (variant.thread === "fork" && !variant.input.trim()) ||
               Boolean(experiment && !settled(experiment.state))
             }

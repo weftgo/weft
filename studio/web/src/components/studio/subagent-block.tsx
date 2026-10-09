@@ -21,8 +21,7 @@ import { useRunEvents } from "@/hooks/use-run-events"
 
 import { HoleBadges } from "@/components/studio/hole-badge"
 import { ChildVerb, StepVerbs } from "@/components/studio/replay-verbs"
-import { sourceSteps } from "@/lib/experiment-body"
-import { transcriptStepCount } from "@/lib/replay"
+import { replayBounds } from "@/lib/experiment-body"
 import { StepBody } from "@/components/studio/step-list"
 import { RequestSection, useRunRequests } from "@/components/studio/step-request"
 import { runLink } from "@/lib/links"
@@ -122,9 +121,7 @@ export function SubagentBlock({
   const childAt = {
     runID: child.id,
     agent: child.agent,
-    stepCount: transcript.data
-      ? transcriptStepCount(sourceSteps(transcript.data.batches).map((st) => st.ordinal))
-      : null,
+    maxFromStep: transcript.data ? replayBounds(transcript.data.batches).max : null,
     canFork: false,
   }
 

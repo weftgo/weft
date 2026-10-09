@@ -28,8 +28,7 @@ import type {
 import { mergeHoles } from "@/lib/honesty"
 import type { HoleMark } from "@/lib/honesty"
 import { tokens } from "@/lib/format"
-import { sourceSteps } from "@/lib/experiment-body"
-import { transcriptStepCount } from "@/lib/replay"
+import { replayBounds } from "@/lib/experiment-body"
 import { bytes } from "@/lib/summarize"
 import { CodeWin } from "@/components/studio/codewin"
 import { CompactionMarker } from "@/components/studio/compaction-marker"
@@ -651,18 +650,16 @@ export function StepList({
   // playhead are "running", not "never completed".
   const runStatus = replaying ? "running" : doc.status
   // The verbs' from_step is the card's own step ordinal (the stored
-  // index the server cuts at). Whether a next step exists is the
-  // transcript's to say (the server's stepCount), never the fold's — a
-  // step_start without a reply counts there and would 400.
-  const stepCount = transcript
-    ? transcriptStepCount(sourceSteps(transcript.batches).map((st) => st.ordinal))
-    : null
+  // index the server cuts at). How far a replay may start is the
+  // transcript's to say (the server's rule, replayBounds), never the
+  // fold's — a step_start without a reply counts there and would 400.
+  const maxFrom = transcript ? replayBounds(transcript.batches).max : null
   const canFork = !doc.parent_run_id && Boolean(doc.session_id)
   const replayAt = (index: number): ReplayAt => ({
     runID: doc.id,
     agent: doc.agent || undefined,
     step: index,
-    stepCount,
+    maxFromStep: maxFrom,
     canFork,
   })
   return (

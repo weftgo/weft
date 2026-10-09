@@ -5,6 +5,7 @@
 // page's replay drawer (plan F1): one form, one body, one wire.
 import type { AgentView, Message, PlaygroundRunBody, RuntimeView } from "@/lib/api"
 import { placeBatches } from "@/lib/events"
+import { endsInAnsweredCalls, maxFromStep, transcriptStepCount } from "@/lib/replay"
 import type { TranscriptBatch } from "@/lib/events"
 
 export type Engine = "live" | "scripted"
@@ -190,6 +191,20 @@ export function ownMessages(batches: TranscriptBatch[]): { step: number; m: Mess
     }
   }
   return tagged
+}
+
+/** replayBounds is what the server will accept as from_step for this
+ * source transcript (studio/edits.go): its step count, whether the kept
+ * prefix ends in answered calls, and the highest from_step. */
+export function replayBounds(batches: TranscriptBatch[]): {
+  stepCount: number
+  answeredCalls: boolean
+  max: number
+} {
+  const own = ownMessages(batches)
+  const stepCount = transcriptStepCount(own.filter((t) => t.m.role === "assistant").map((t) => t.step))
+  const answeredCalls = endsInAnsweredCalls(own.map((t) => t.m))
+  return { stepCount, answeredCalls, max: maxFromStep(stepCount, answeredCalls) }
 }
 
 /** One step of a source run as the step picker lists it. */

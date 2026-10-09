@@ -371,7 +371,8 @@ var me = [
 	}
 })(), ge = (() => {
 	try {
-		return String(import.meta.url ?? "");
+		let e = import.meta.url;
+		return typeof e == "string" ? e : "";
 	} catch {
 		return "";
 	}

@@ -134,6 +134,25 @@
   --status-int: #e3b341;
 }
 
+/* A stacked split (plan H3, components/studio/split-pane.tsx): the group
+   and its panes stay mounted across the breakpoint — a draft in a pane
+   survives it — and are laid out here one above the other, each at its
+   content's height; the library's inline layout yields to these. */
+[data-split][data-stacked] {
+  flex-direction: column !important;
+  height: auto !important;
+  max-height: none !important;
+}
+[data-split][data-stacked] > [data-panel] {
+  flex: none !important;
+  width: 100% !important;
+  max-height: none !important;
+}
+[data-split][data-stacked] > [data-panel] > div {
+  max-height: none !important;
+  overflow: visible !important;
+}
+
 /* Density (plan H3): compact is the same pages, tighter — through the
    theme's own tokens, never a per-component override. --spacing is the
    step every p-/m-/gap-/w- utility multiplies; the text steps are the

@@ -157,15 +157,32 @@ describe("the run page's story/request split", () => {
     expect(readPaneSizes("story-request", 2)?.[0]).toBe(now(h))
     // Closed, the pane goes back inline.
     fireEvent.click(within(card(1)).getByRole("button", { name: /^request$/ }))
-    await waitFor(() => expect(card(1).querySelector('[data-split="story-request"]')).toBeNull())
+    await waitFor(() => expect(card(1).querySelector('[data-pane="request"]')).toBeNull())
+    expect(within(card(1)).queryByRole("separator")).toBeNull()
+    expect(card(1).querySelector('[data-pane="story"] [data-request="1"]')).toBeTruthy()
   })
 
   it("narrower than lg the open pane stays inline, above the story", async () => {
     stubViewport(900)
     await openRequest(0)
     await waitFor(() => expect(card(0).querySelector('[data-request] button[aria-expanded="true"]')).toBeTruthy())
-    expect(card(0).querySelector('[data-split="story-request"]')).toBeNull()
+    expect(card(0).querySelector('[data-pane="request"]')).toBeNull()
     expect(within(card(0)).queryByRole("separator")).toBeNull()
+  })
+
+  it("a resize across lg with the pane open leaves the keyboard where it is", async () => {
+    const resize = stubViewport(1280)
+    await openRequest(1)
+    await waitFor(() => expect(card(1).querySelector('[data-pane="request"] [data-request="1"]')).toBeTruthy())
+    const jump = within(card(1)).getAllByRole("button", { name: /^jump to this step/ })[0]
+    jump.focus()
+    await act(async () => resize(900))
+    await waitFor(() => expect(card(1).querySelector('[data-pane="request"]')).toBeNull())
+    expect(card(1).querySelector('[data-request] button[aria-expanded="true"]')).toBeTruthy()
+    expect(document.activeElement).toBe(jump)
+    await act(async () => resize(1280))
+    await waitFor(() => expect(card(1).querySelector('[data-pane="request"] [data-request="1"]')).toBeTruthy())
+    expect(document.activeElement).toBe(jump)
   })
 })
 
@@ -180,6 +197,28 @@ describe("the playground's columns", () => {
     expect(moved).toBeGreaterThan(30)
     renderApp("/playground")
     expect(now(await sep())).toBe(moved)
+  })
+
+  it("a draft in the config column survives crossing the phone width both ways", async () => {
+    new FakeStudio()
+      .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: ["live", "playground", "runtimes"] })
+      .on("GET runtimes", {
+        runtimes: [{ ...runtimes.runtimes[0], agents: [{ ...runtimes.runtimes[0].agents[0], resolver: true }] }],
+      })
+      .on("GET experiments", { experiments: [] })
+      .install()
+    const resize = stubViewport(1280)
+    renderApp("/playground")
+    const free = await screen.findByLabelText<HTMLInputElement>("model name the app resolves")
+    fireEvent.change(free, { target: { value: "my-own-model" } })
+    await act(async () => resize(390))
+    await waitFor(() => expect(document.querySelector('[data-split="playground"][data-stacked]')).toBeTruthy())
+    expect(screen.getByLabelText<HTMLInputElement>("model name the app resolves")).toBe(free)
+    expect(free.value).toBe("my-own-model")
+    await act(async () => resize(1280))
+    await waitFor(() => expect(document.querySelector('[data-split="playground"][data-stacked]')).toBeNull())
+    expect(screen.getByLabelText<HTMLInputElement>("model name the app resolves")).toBe(free)
+    expect(free.value).toBe("my-own-model")
   })
 
   it("stack at phone width: config above runs, the header wrapping, no native select", async () => {

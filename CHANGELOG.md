@@ -291,7 +291,15 @@ module, ADR 0005).
   native `<select>`s are the shared `components/ui` Select
   (`select-field.tsx`; same labels, values and options) and their raw
   Tailwind colours theme tokens; a lint rule (`controlRules`,
-  `src/lib/controls.lint.test.ts`) refuses either coming back.
+  `src/lib/controls.lint.test.ts`) refuses either coming back (arbitrary
+  colours and Tailwind 4.3's new palettes too). A split never remounts
+  its panes' contents — a step's Request pane opening, the window
+  crossing the phone width — so a draft survives; a double click on a
+  handle resets that split to its defaults and forgets it; the theme
+  and density toggles hydrate the prerendered shell without a mismatch
+  whatever is stored (the theme toggle's own hydration mismatch with a
+  stored choice is fixed with it); each select's visible caption names
+  and focuses it.
 
 - **Studio notifications** (plan H5): the installed `sonner` toaster is
   mounted in the app shell (bottom-right, the Studio theme, no hotkey),

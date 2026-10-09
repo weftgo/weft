@@ -1,21 +1,24 @@
 // The density toggle (plan H3), beside the theme toggle: comfortable ⇄
 // compact, the choice lib/density.ts stores and puts on <html>.
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useSyncExternalStore } from "react"
 import { Rows2, Rows4 } from "lucide-react"
 
 import { DENSITY_EVENT, readDensity, toggleDensity } from "@/lib/density"
 import type { Density } from "@/lib/density"
 import { Button } from "@/components/ui/button"
 
-/** useDensity follows the stored choice: the palette can change it too. */
+function subscribe(onChange: () => void) {
+  window.addEventListener(DENSITY_EVENT, onChange)
+  return () => window.removeEventListener(DENSITY_EVENT, onChange)
+}
+
+/** useDensity follows the stored choice: the palette can change it too.
+ * The server snapshot is the default, so hydrating the prerendered
+ * shell matches it byte for byte whatever is stored — the stored
+ * choice is drawn in the render after (a mismatch would re-render the
+ * document: app-shell.tsx's hydration rule). */
 export function useDensity(): Density {
-  const [d, setD] = useState<Density>(readDensity)
-  useEffect(() => {
-    const sync = () => setD(readDensity())
-    window.addEventListener(DENSITY_EVENT, sync)
-    return () => window.removeEventListener(DENSITY_EVENT, sync)
-  }, [])
-  return d
+  return useSyncExternalStore(subscribe, readDensity, () => "comfortable")
 }
 
 export function DensityToggle() {

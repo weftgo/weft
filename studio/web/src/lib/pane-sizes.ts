@@ -73,6 +73,20 @@ export function writePaneSizes(id: string, sizes: number[], from = "") {
   )
 }
 
+/** forgetPaneSizes drops split `id`'s saved layout (a double click on
+ * its handle): it opens at its default again, and the mounted
+ * instances other than `from` follow to `defaults`. */
+export function forgetPaneSizes(id: string, defaults: number[], from = "") {
+  try {
+    localStorage.removeItem(paneKey(id))
+  } catch {
+    // unwritable storage: nothing was saved
+  }
+  window.dispatchEvent(
+    new CustomEvent<PanesChanged>(PANES_CHANGED_EVENT, { detail: { id, sizes: defaults, from } })
+  )
+}
+
 /** resetPaneSizes forgets every split's saved layout and puts the
  * mounted ones back at their defaults (the ⌘K palette's "Reset pane
  * layout"). */

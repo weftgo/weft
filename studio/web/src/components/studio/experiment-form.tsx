@@ -123,8 +123,8 @@ export function ExperimentForm({
       <ModelField variant={variant} patch={patch} agent={agent} />
       <div className="flex flex-wrap gap-2">
         <div className="block min-w-0 flex-1 space-y-1">
-          <span className="block text-xs text-muted-foreground">Engine</span>
           <SelectField
+            caption="Engine"
             label="Engine"
             className="w-full"
             value={variant.engine}
@@ -136,8 +136,8 @@ export function ExperimentForm({
           />
         </div>
         <div className="block min-w-0 flex-1 space-y-1">
-          <span className="block text-xs text-muted-foreground">Side effects</span>
           <SelectField
+            caption="Side effects"
             label="Side effects"
             className="w-full"
             value={variant.sideEffects}
@@ -165,8 +165,8 @@ export function ExperimentForm({
             conversation in a new session with lineage — it needs a
             source turn and an input. */}
         <div className="block min-w-0 flex-1 space-y-1">
-          <span className="block text-xs text-muted-foreground">Thread</span>
           <SelectField
+            caption="Thread"
             label="Thread"
             className="w-full"
             value={variant.thread}
@@ -239,8 +239,8 @@ function ModelField({
   return (
     <div className="flex flex-wrap gap-2">
       <div className="block min-w-0 flex-1 space-y-1">
-        <span className="block text-xs text-muted-foreground">Model</span>
         <SelectField
+          caption="Model"
           label="model"
           className={`w-full ${variant.model ? "border-primary text-primary" : ""}`}
           value={listed && models.includes(variant.model) ? variant.model : ""}
@@ -272,8 +272,8 @@ function ModelField({
         </label>
       ) : null}
       <div className="block space-y-1">
-        <span className="block text-xs text-muted-foreground">Thinking</span>
         <SelectField
+          caption="Thinking"
           label="thinking"
           value={variant.thinking}
           onValueChange={(v) => patch({ thinking: v })}
@@ -721,8 +721,8 @@ export function StepPicker({
   const last = Math.max(...steps.map((st) => st.ordinal))
   return (
     <div className="block space-y-1" data-step-picker="list">
-      <span className="block text-xs text-muted-foreground">Continue from step</span>
       <SelectField
+        caption="Continue from step"
         label="continue from step"
         className="w-full"
         value={String(value)}

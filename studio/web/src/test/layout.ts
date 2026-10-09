@@ -36,22 +36,33 @@ export function stubLayout(width = 1000, height = 600) {
 }
 
 /** stubViewport makes window.matchMedia answer (max-width: N) and
- * (min-width: N) queries for a window `width` px wide. */
+ * (min-width: N) queries for a window `width` px wide. It returns
+ * resize(w): the window becomes w px wide and every query's change
+ * listeners hear it, as a browser's do. */
 export function stubViewport(width: number) {
-  window.innerWidth = width
-  window.matchMedia = vi.fn().mockImplementation((query: string) => {
+  let w = width
+  const listeners = new Set<() => void>()
+  const matches = (query: string) => {
     const max = /max-width:\s*([\d.]+)px/.exec(query)
     const min = /min-width:\s*([\d.]+)px/.exec(query)
-    const matches = max ? width <= Number(max[1]) : min ? width >= Number(min[1]) : false
-    return {
-      matches,
-      media: query,
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    }
-  })
+    return max ? w <= Number(max[1]) : min ? w >= Number(min[1]) : false
+  }
+  window.innerWidth = w
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    get matches() {
+      return matches(query)
+    },
+    media: query,
+    onchange: null,
+    addEventListener: (_t: string, fn: () => void) => listeners.add(fn),
+    removeEventListener: (_t: string, fn: () => void) => listeners.delete(fn),
+    addListener: (fn: () => void) => listeners.add(fn),
+    removeListener: (fn: () => void) => listeners.delete(fn),
+    dispatchEvent: vi.fn(),
+  }))
+  return (next: number) => {
+    w = next
+    window.innerWidth = next
+    for (const fn of [...listeners]) fn()
+  }
 }

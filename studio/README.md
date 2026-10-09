@@ -1198,7 +1198,12 @@ Panes and density (plan H3): three splits resize — the trace page's
 span tree beside the selected span, a run step's story beside its open
 Request pane (one size for every card), and the playground's config
 column beside its runs column. Drag the handle, or focus it (`Tab`) and
-use the arrow keys, `Home`/`End`; a double click puts it back. Each
+use the arrow keys, `Home`/`End`; a double click puts both panes back
+at their defaults and forgets the saved size (the split's other
+instances follow). A split never remounts what is in its panes — not
+when a step's Request pane opens or closes beside its story, not when
+the window crosses the phone width — so a half-typed draft (an edit in
+the Story, the playground's free model name) survives. Each
 pane keeps a minimum size, so nothing — a badge, a hole mark — is
 squeezed out of sight. The sizes are a per-device preference, never
 the URL: `localStorage["studio.panes.<split>"]` (`trace-detail`,
@@ -1209,7 +1214,9 @@ splits back. **Density** — comfortable (the default) or compact — is
 the toggle beside the theme toggle in the sidebar footer and
 "Compact density" / "Comfortable density" in `⌘K`: `data-density` on
 `<html>`, set before paint by the bootstrap and stored as
-`localStorage["studio.density"]`; compact scales the theme's own
+`localStorage["studio.density"]` (the toggles, like the theme toggle,
+draw the default on the hydrating render and the stored choice right
+after, so the prerendered shell always hydrates cleanly); compact scales the theme's own
 tokens (Tailwind's `--spacing` step, `--text-xs`/`--text-sm`/`--text-base`,
 the body's `--studio-text`) under `[data-density="compact"]`, so every
 page follows. At phone width (≤ 640 px) the splits stack: the trace
@@ -1221,8 +1228,10 @@ beside its story from the `lg` width (1024 px) up, inline above it
 below that. The playground's controls are the shared
 `components/ui` Select (`select-field.tsx`) in theme-token colours: the
 lint rule `controlRules` (eslint.config.js, pinned by
-`src/lib/controls.lint.test.ts`) refuses a native `<select>` and a raw
-Tailwind palette class (`text-red-500`, `bg-amber-100`, …) in the
+`src/lib/controls.lint.test.ts`) refuses a native `<select>`, a raw
+Tailwind palette class (`text-red-500`, `bg-amber-100`, Tailwind 4.3's
+mauve/mist/olive/taupe, …) and an arbitrary colour (`text-[#…]`,
+`bg-[rgb(…)]`, `border-[oklch(…)]`) in the
 playground, the experiment form and the split, density and select
 components.
 

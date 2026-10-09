@@ -166,10 +166,12 @@ describe("subagents on the run page (A10)", () => {
     expect(sec.textContent).not.toContain("You are a support agent.")
     expect(studio.calls(`GET runs/${CHILD}/requests`).length).toBeGreaterThan(0)
     // The parent's own step 1 still reads the parent's prompt.
-    const parent = document.querySelector<HTMLElement>('[data-step="1"] [data-request="1"]')!
-    fireEvent.click(within(parent).getAllByRole("button", { name: /request/ })[0])
+    // (Opened, the section moves beside the story — plan H3's split —
+    // so it is read again where it lands.)
+    const parent = () => document.querySelector<HTMLElement>('[data-step="1"] [data-request="1"]')!
+    fireEvent.click(within(parent()).getAllByRole("button", { name: /request/ })[0])
     await waitFor(() =>
-      expect(parent.querySelector("[data-prompt]")?.textContent).toBe("You are a support agent.")
+      expect(parent().querySelector("[data-prompt]")?.textContent).toBe("You are a support agent.")
     )
     // The child's words, folded from its own stream.
     expect(await within(block).findByText("the carrier lost it")).toBeTruthy()

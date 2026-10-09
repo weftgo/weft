@@ -711,7 +711,7 @@ function Playground({ caps }: { caps: string[] }) {
       <SplitPane
         split={SPLITS.playground}
         className="min-h-0 flex-1"
-        stackedClassName="min-h-0 flex-1 overflow-y-auto"
+        stackedClassName="overflow-y-auto!"
         panes={[
           {
             id: "config",

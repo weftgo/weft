@@ -1087,6 +1087,50 @@ describe("the option lab (plan F3, Studio's drawer)", () => {
     expect(verdict("refund")).toBe("off")
   })
 
+  it("the named tool's list greys a parked or turned-off tool, and a greyed one cannot be chosen", async () => {
+    const d = await openLab()
+    fireEvent.click(d.getByRole("checkbox", { name: "park on: lookup_order" }))
+    await choose(d.getByLabelText("tool choice"), "named")
+    const pick = await waitFor(() => d.getByLabelText("tool choice: the tool"))
+    const greyed = async () => (await optionsOf(pick)).filter((o) => o.disabled).map((o) => o.value)
+    expect((await optionsOf(pick)).map((o) => o.value)).toEqual(["", "lookup_order", "refund"])
+    expect(await greyed()).toEqual(["lookup_order"])
+    await expect(choose(pick, "lookup_order")).rejects.toThrow(/disabled/)
+    expect(valueOf(pick)).toBe("")
+    await choose(pick, "refund")
+    expect(valueOf(pick)).toBe("refund")
+    // Turned off, refund is greyed too.
+    fireEvent.click(d.getByRole("checkbox", { name: /^refund/ }))
+    expect(await greyed()).toEqual(["lookup_order", "refund"])
+  })
+
+  it("the side-effects options keep their explanations", async () => {
+    const d = await openLab()
+    expect((await optionsOf(d.getByLabelText("Side effects"))).map((o) => [o.value, o.title])).toEqual([
+      ["substitute", "a side-effect call the source recorded is answered from the record; any other call parks"],
+      ["park", "every side-effect call parks; nothing is answered from the record"],
+      ["allow", "refused unless every tool left on is opted in or ReplaySafe"],
+    ])
+  })
+
+  it("a select's visible caption names it and, clicked, focuses it (what its <label> did)", async () => {
+    const d = await openLab()
+    for (const [caption, label] of [
+      ["Engine", "Engine"],
+      ["Side effects", "Side effects"],
+      ["Thread", "Thread"],
+      ["Model", "model"],
+      ["Thinking", "thinking"],
+      ["Continue from step", "continue from step"],
+    ]) {
+      const trigger = d.getByLabelText(label)
+      const text = d.getByText(caption, { selector: "span" })
+      expect(trigger.getAttribute("aria-labelledby")).toBe(text.id)
+      fireEvent.click(text)
+      expect(document.activeElement, caption).toBe(trigger)
+    }
+  })
+
   it("a model name that extends a listed one is kept as typed and sent trimmed", async () => {
     const d = await openLab()
     const free = d.getByLabelText<HTMLInputElement>("model name the app resolves")

@@ -149,6 +149,28 @@ describe("the Story's editor (F2's Done line, Studio half)", () => {
   })
 })
 
+describe("a draft survives the Request pane opening beside it (plan H3)", () => {
+  it("the open editor, its text and the edited chip stay as the card splits and unsplits", async () => {
+    serve()
+    await story()
+    const ta = await edit("the result of search_kb (c2)", "policy: no refunds")
+    const card = ta.closest<HTMLElement>("[data-step]")!
+    await waitFor(() => expect(card.querySelector("[data-edited]")).toBeTruthy())
+    const chip = card.querySelector("[data-edited]")
+    await waitFor(() => expect(within(card).getByRole("button", { name: /^request$/ })).toBeTruthy())
+    fireEvent.click(within(card).getByRole("button", { name: /^request$/ }))
+    await waitFor(() => expect(card.querySelector('[data-pane="request"] [data-request]')).toBeTruthy())
+    // The same editor, not a new one: the draft was never dropped.
+    expect(card.querySelector('textarea[aria-label="edit the result of search_kb (c2)"]')).toBe(ta)
+    expect(ta.value).toBe("policy: no refunds")
+    expect(card.querySelector("[data-edited]")).toBe(chip)
+    fireEvent.click(within(card).getByRole("button", { name: /^request$/ }))
+    await waitFor(() => expect(card.querySelector('[data-pane="request"]')).toBeNull())
+    expect(card.querySelector('textarea[aria-label="edit the result of search_kb (c2)"]')).toBe(ta)
+    expect(ta.value).toBe("policy: no refunds")
+  })
+})
+
 describe("the preview (will be sent)", () => {
   it("draws the server's rows with their op chips, the changed knobs and the warnings", async () => {
     serve()

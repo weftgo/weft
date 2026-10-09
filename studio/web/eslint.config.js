@@ -53,11 +53,13 @@ export const deepLinkRules = {
 }
 
 /** Raw Tailwind palette colours (text-red-500, bg-amber-100/50,
- * hover:border-emerald-400, text-white …): the H3 rule refuses them —
+ * hover:border-emerald-400, text-white, Tailwind 4.3's mauve/mist/
+ * olive/taupe …) and arbitrary colours (text-[#b42318],
+ * bg-[rgb(…)], border-[oklch(…)], fill-[color:…]): the H3 rule refuses them —
  * the Studio palette's tokens (text-destructive, bg-muted,
  * text-status-ok, …) are the one source of colour. */
 const RAW_COLOUR =
-  "(^|[\\s:'\"`!])-?(text|bg|border|border-[trblxyse]|ring|ring-offset|outline|fill|stroke|from|via|to|divide|decoration|shadow|accent|caret|placeholder|inset-shadow|inset-ring)-((red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-[0-9]{2,3}|white|black)(?![\\w-])"
+  "(^|[\\s:'\"`!])-?(text|bg|border|border-[trblxyse]|ring|ring-offset|outline|fill|stroke|from|via|to|divide|decoration|shadow|accent|caret|placeholder|inset-shadow|inset-ring)-(((red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone|mauve|mist|olive|taupe)-[0-9]{2,3}|white|black)(?![\\w-])|\\[(#|(rgba?|hsla?|hwb|oklch|oklab|lab|lch|color)\\(|color:))"
 
 /** The H3 rule (the playground's controls are the shared components/ui
  * ones, coloured by theme tokens), exported for its own test

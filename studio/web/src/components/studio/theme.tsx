@@ -4,7 +4,7 @@
 // down browser must not take the app down. The class is applied by the
 // inline bootstrap before paint; this hook only tracks the resolved
 // state for the UI.
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 import { Monitor, Moon, Sun } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -94,15 +94,21 @@ export function cycleTheme(): ThemeChoice {
   return next
 }
 
+function subscribeTheme(onChange: () => void) {
+  window.addEventListener("studio:theme", onChange)
+  return () => window.removeEventListener("studio:theme", onChange)
+}
+
+/** The stored choice, kept in step with the palette's cycling. The
+ * server snapshot is "system", so the prerendered shell hydrates
+ * without a mismatch whatever is stored (plan H3's review). */
+export function useThemeChoice(): ThemeChoice {
+  return useSyncExternalStore(subscribeTheme, readChoice, () => "system")
+}
+
 export function ThemeToggle() {
-  const [choice, setChoice] = useState<ThemeChoice>(readChoice)
-  // The palette can cycle the theme too; keep the icon in step.
-  useEffect(() => {
-    const sync = () => setChoice(readChoice())
-    window.addEventListener("studio:theme", sync)
-    return () => window.removeEventListener("studio:theme", sync)
-  }, [])
-  const onToggle = useCallback(() => setChoice(cycleTheme()), [])
+  const choice = useThemeChoice()
+  const onToggle = useCallback(() => void cycleTheme(), [])
   const label = `theme: ${choice}`
   return (
     <Button

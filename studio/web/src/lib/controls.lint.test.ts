@@ -45,6 +45,16 @@ describe("the playground's controls are components/ui's, coloured by tokens", ()
     ["white", 'const x = <span className="text-white" />'],
     ["an important black", 'const x = <span className="!bg-black" />'],
     ["a side border", 'const x = <span className="border-l-slate-200" />'],
+    ["Tailwind 4.3's mauve", 'const x = <span className="text-mauve-500" />'],
+    ["Tailwind 4.3's mist", 'const x = <span className="bg-mist-100" />'],
+    ["Tailwind 4.3's olive", 'const x = <span className="border-olive-700" />'],
+    ["Tailwind 4.3's taupe", 'const x = <span className="ring-taupe-300" />'],
+    ["an arbitrary hex", 'const x = <span className="text-[#b42318]" />'],
+    ["an arbitrary rgb", 'const x = <span className="bg-[rgb(1,2,3)]" />'],
+    ["an arbitrary rgba behind a variant", 'const x = <span className="hover:bg-[rgba(1,2,3,.5)]" />'],
+    ["an arbitrary hsl", 'const x = <span className="border-[hsl(10,50%,50%)]" />'],
+    ["an arbitrary oklch", 'const x = <span className="text-[oklch(63%_0.2_25)]" />'],
+    ["an arbitrary typed colour", 'const x = <span className="fill-[color:#fff]" />'],
   ])("refuses %s", async (_name, code) => {
     expect(await problems(code)).toBeGreaterThan(0)
   })
@@ -59,6 +69,9 @@ describe("the playground's controls are components/ui's, coloured by tokens", ()
     ["prose naming a colour", 'const s = "the red badge"'],
     ["a word that only starts like one", 'const c = "text-redact bg-blueprint"'],
     ["a data attribute", 'const x = <div data-select="" />'],
+    ["an arbitrary size", 'const x = <span className="text-[11px] bg-[length:200%] w-[calc(100%-2rem)]" />'],
+    ["an arbitrary token colour", 'const x = <span className="bg-(--thread) text-[var(--faint)]" />'],
+    ["a word like a new palette", 'const c = "text-mistake bg-olives"'],
   ])("allows %s", async (_name, code) => {
     expect(await problems(code)).toBe(0)
   })

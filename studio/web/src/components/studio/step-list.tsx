@@ -534,7 +534,10 @@ function StepCard({
   // The Request pane open beside the story (plan H3) — where the page
   // is wide enough and a ResizeObserver measures the split.
   const [reqOpen, setReqOpen] = useState(false)
-  const [moved, setMoved] = useState(false)
+  // A toggle that moves the section (into or out of the split) hands
+  // the keyboard to the toggle where it lands — once: a later remount
+  // (the viewport crossing lg) leaves focus where it is.
+  const focusNext = useRef(false)
   const wide = useCanSplit(STORY_REQUEST_STACK)
   const split = Boolean(requests) && reqOpen && wide
   const request = requests ? (
@@ -544,9 +547,13 @@ function StepCard({
       open={reqOpen}
       onOpenChange={(o) => {
         setReqOpen(o)
-        setMoved(wide)
+        focusNext.current = wide
       }}
-      focusToggle={moved}
+      takeFocus={() => {
+        const f = focusNext.current
+        focusNext.current = false
+        return f
+      }}
     />
   ) : null
   const promptEl = prompt ? <PromptEditor user={prompt} /> : null
@@ -615,44 +622,40 @@ function StepCard({
             transcriptError={transcriptError}
           />
         ))}
-      {split ? (
-        // The story beside the open Request pane (plan H3): the
-        // divider dragged or arrowed, one remembered size for every
-        // card; narrower than lg, the pane stays inline above the story.
-        <SplitPane
-          split={SPLITS.storyRequest}
-          instance={`story-request-${runId}-${step.index}`}
-          panes={[
-            {
-              id: "story",
-              label: "the step's story",
-              defaultSize: 55,
-              minSize: 30,
-              className: "space-y-2 pr-1",
-              children: (
-                <>
-                  {promptEl}
-                  {rest}
-                </>
-              ),
-            },
-            {
-              id: "request",
-              label: "the step's request",
-              defaultSize: 45,
-              minSize: 25,
-              className: "pl-1",
-              children: request,
-            },
-          ]}
-        />
-      ) : (
-        <>
-          {promptEl}
-          {request}
-          {rest}
-        </>
-      )}
+      {/* The story beside the open Request pane (plan H3): the
+          divider dragged or arrowed, one remembered size for every card;
+          narrower than lg the pane stays inline, above the story. One
+          tree shape either way — the story's pane never remounts, so a
+          draft in its editor survives the Request pane opening. */}
+      <SplitPane
+        split={SPLITS.storyRequest}
+        instance={`story-request-${runId}-${step.index}`}
+        second={split}
+        panes={[
+          {
+            id: "story",
+            label: "the step's story",
+            defaultSize: 55,
+            minSize: 30,
+            className: split ? "space-y-2 pr-1" : "space-y-2",
+            children: (
+              <>
+                {promptEl}
+                {split ? null : request}
+                {rest}
+              </>
+            ),
+          },
+          {
+            id: "request",
+            label: "the step's request",
+            defaultSize: 45,
+            minSize: 25,
+            className: "pl-1",
+            children: split ? request : null,
+          },
+        ]}
+      />
     </div>
   )
 }

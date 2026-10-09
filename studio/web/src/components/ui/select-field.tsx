@@ -3,6 +3,7 @@
 // options as data, the value and its change as strings, the trigger
 // labelled and carrying the value (data-value) so a test or a script
 // can read it without opening the list.
+import { useId } from "react"
 import type { ReactNode } from "react"
 import { cn } from "cn"
 
@@ -31,6 +32,8 @@ export function SelectField({
   disabled,
   className,
   attrs,
+  caption,
+  captionClassName,
 }: {
   value: string
   onValueChange: (value: string) => void
@@ -41,9 +44,17 @@ export function SelectField({
   className?: string
   /** Extra data-* attributes for the trigger. */
   attrs?: Record<`data-${string}`, string | undefined>
+  /** The visible caption above the trigger: it names the trigger
+   * (aria-labelledby, beside the aria-label) and, clicked, focuses it —
+   * what a <label> around a native select did. */
+  caption?: ReactNode
+  captionClassName?: string
 }) {
+  const uid = useId()
+  const triggerID = `${uid}-trigger`
+  const captionID = `${uid}-caption`
   const shown = (v: unknown) => options.find((o) => o.value === v)?.label ?? String(v ?? "")
-  return (
+  const select = (
     <Select
       value={value}
       disabled={disabled}
@@ -51,7 +62,9 @@ export function SelectField({
     >
       <SelectTrigger
         size="sm"
+        id={triggerID}
         aria-label={label}
+        aria-labelledby={caption ? captionID : undefined}
         data-value={value}
         className={cn(
           "h-7 max-w-full min-w-0 rounded-md px-2 py-1 text-xs data-[size=sm]:h-7",
@@ -77,5 +90,18 @@ export function SelectField({
         ))}
       </SelectContent>
     </Select>
+  )
+  if (!caption) return select
+  return (
+    <>
+      <span
+        id={captionID}
+        className={cn("block text-xs text-muted-foreground", captionClassName)}
+        onClick={() => document.getElementById(triggerID)?.focus()}
+      >
+        {caption}
+      </span>
+      {select}
+    </>
   )
 }

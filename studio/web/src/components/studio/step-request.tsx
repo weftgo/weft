@@ -722,7 +722,7 @@ export function RequestSection({
   step,
   open: openProp,
   onOpenChange,
-  focusToggle,
+  takeFocus,
 }: {
   req: RunRequests
   step: number
@@ -730,9 +730,10 @@ export function RequestSection({
    * section holds its own when absent. */
   open?: boolean
   onOpenChange?: (open: boolean) => void
-  /** Focus the toggle on mount: the card moved the section into (or
-   * out of) its split, and the keyboard stays where it was. */
-  focusToggle?: boolean
+  /** Asked once, on mount: true when the card moved the section into
+   * (or out of) its split on a toggle, and the keyboard follows it.
+   * The card answers true once only. */
+  takeFocus?: () => boolean
 }) {
   const [ownOpen, setOwnOpen] = useState(false)
   const open = openProp ?? ownOpen
@@ -742,10 +743,11 @@ export function RequestSection({
     else setOwnOpen(next)
   }
   const toggleRef = useRef<HTMLButtonElement>(null)
+  const takeFocusRef = useRef(takeFocus)
   useEffect(() => {
-    if (focusToggle) toggleRef.current?.focus()
     // On mount only: the card remounts the section where it moved it.
-  }, [focusToggle])
+    if (takeFocusRef.current?.()) toggleRef.current?.focus()
+  }, [])
   const [pick, setPick] = useState<number | null>(null)
   const env = req.doc?.badge ? req.doc : undefined
   const mine = req.steps.get(step)

@@ -69,8 +69,11 @@ func newPlaygroundServer(t *testing.T, token string) *playgroundTestServer {
 			Manifest: `{"weft":1,"agents":[{"name":"acme-support","model":{"provider":"wefttest","name":"script"},` +
 				`"policy":{"parallelism":4,"max_steps":10,"max_model_retries":3},` +
 				`"tools":[{"name":"lookup_order"},{"name":"refund"},{"name":"track_parcel"}]}]}`,
-			Models:      []string{"glm-5.3-flash"},
-			Limits:      linkruntime.AgentLimits{MaxSteps: 10, Parallelism: 4},
+			Models: []string{"glm-5.3-flash"},
+			Limits: linkruntime.AgentLimits{MaxSteps: 10, Parallelism: 4},
+			// A current runtime always registers its defaults; zero
+			// Defaults are an older runtime's (TestPlaygroundOldRuntimeRefusesOptionLab).
+			Defaults:    linkruntime.AgentDefaults{MaxSteps: 10, Parallelism: 4, ToolChoice: linkruntime.ToolChoice{Mode: "auto"}},
 			SideEffects: map[string]string{"lookup_order": "never", "refund": "never", "track_parcel": "safe"},
 			Allow:       []string{"lookup_order"},
 		}},
@@ -442,8 +445,6 @@ func TestPlaygroundRuntimesView(t *testing.T) {
 		`"name":"acme-support"`, `"models":["glm-5.3-flash"]`,
 		`{"name":"lookup_order","side_effects":"never","allow":true}`,
 		`{"name":"refund","side_effects":"never","allow":false}`,
-		// A registration without defaults (an older runtime) shows its
-		// caps as the defaults and auto as the tool choice.
 		`"resolver":false`,
 		`"defaults":{"max_steps":10,"parallelism":4,"thinking":"","tool_choice":{"mode":"auto"}}`} {
 		if !strings.Contains(body, key) {
@@ -885,5 +886,46 @@ func TestPlaygroundAgentDefaultToolChoice(t *testing.T) {
 			continue
 		}
 		pt.waitCommand(t, "ok")
+	}
+}
+
+// TestPlaygroundOldRuntimeRefusesOptionLab pins the version-skew rule:
+// a runtime older than the option lab registers no defaults and decodes
+// the command without params/tool_choice/park_on/only_tools — it would
+// run the experiment without them — so Studio refuses each one (400,
+// naming the upgrade) and still accepts an old-shape command. The
+// runtimes view shows the old runtime's caps as its defaults and auto
+// as the tool choice.
+func TestPlaygroundOldRuntimeRefusesOptionLab(t *testing.T) {
+	pt := newPlaygroundTestServer(t)
+	reg, _ := pt.rs.Registration("rt_test")
+	reg.Agents[0].Defaults = linkruntime.AgentDefaults{}
+	b, _ := json.Marshal(reg)
+	req, _ := http.NewRequest(http.MethodPost, pt.ts.URL+"/api/runtime/register", strings.NewReader(string(b)))
+	req.Header.Set("Content-Type", "application/json")
+	pt.auth(req)
+	if code, out := pt.do(t, req); code != http.StatusOK {
+		t.Fatalf("re-register: %d %s", code, out)
+	}
+	for _, field := range []string{
+		`"params": {"seed": 1}`,
+		`"tool_choice": {"mode": "auto"}`,
+		`"park_on": ["refund"]`,
+		`"only_tools": ["refund"]`,
+	} {
+		body := strings.Replace(validRun, `"thinking": "off"`, `"thinking": "off", `+field, 1)
+		code, out := pt.post(t, body)
+		if code != http.StatusBadRequest ||
+			!strings.Contains(out, "runtime predates the option lab: upgrade weft/runtime to use params, tool_choice, park_on, only_tools") {
+			t.Errorf("%s on an old runtime = %d (%s), want 400 naming the upgrade", field, code, out)
+		}
+	}
+	if code, out := pt.post(t, validRun); code != http.StatusAccepted {
+		t.Errorf("old-shape body on an old runtime = %d (%s), want 202", code, out)
+	}
+	pt.waitCommand(t, "old shape")
+	if _, view := pt.get(t, "/api/runtimes"); !strings.Contains(view,
+		`"defaults":{"max_steps":10,"parallelism":4,"thinking":"","tool_choice":{"mode":"auto"}}`) {
+		t.Errorf("old runtime's view defaults: %s", view)
 	}
 }

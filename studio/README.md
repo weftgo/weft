@@ -895,7 +895,8 @@ of the agent; `only_tools` inside `tools_enabled` when both are sent,
 403 otherwise). `model` is the agent's own, a `runtime.Models` name,
 or — when the runtime registered `runtime.ModelResolver(func(ctx,
 name) (weft.Model, error))` — any name the app's resolver accepts: it
-runs before the ack (bounded at 10 s: "resolver timed out"), its error
+runs before the ack (bounded at 10 s: "resolver timed out"; a resolver
+that ignores ctx is abandoned at the bound), its error
 text is the rejected command's reason
 (`model <name>: …`; the app writes that text, so it carries no key or
 URL), and without a resolver Studio answers 400 `unknown model … :
@@ -903,7 +904,11 @@ register it with runtime.Models or add runtime.ModelResolver`.
 `GET /api/runtimes` gives each agent `resolver` and `defaults`
 `{max_steps, parallelism, thinking, temperature?, top_p?, max_tokens?,
 seed?, stop?, tool_choice}` — the run defaults the form greys beside
-each override. A subagent's child run replays as its own
+each override. Version skew: a runtime older than the option lab
+registers no defaults and would run a command without `params`,
+`tool_choice`, `park_on` or `only_tools` (it does not know them), so
+Studio refuses any of the four for it (400 `runtime predates the option
+lab: upgrade weft/runtime …`); an old-shape command still runs. A subagent's child run replays as its own
 agent, registered on the runtime by that name (`runtime.Agents(parent,
 child)`): the replay carries `weft.forked_from="<child id>#<from_step>"`
 and no parent linkage (ADR 0029). A replay from step N is fed what step

@@ -94,7 +94,9 @@ func Models(models map[string]core.Model) Option {
 // clients if building one is costly. Each call is bounded: its ctx is
 // canceled after 10 s and the command is rejected with "model <name>:
 // resolver timed out" (the command runs before its ack, and an ack
-// Studio waits on too long is marked lost) — honour ctx. Registration reports the flag
+// Studio waits on too long is marked lost); a resolver that ignores
+// ctx is abandoned at the bound and its late result dropped — honour
+// ctx, or the abandoned call keeps running. Registration reports the flag
 // (resolver: true), and Studio accepts an unlisted name only then. A
 // nil resolve is ignored.
 func ModelResolver(resolve func(ctx context.Context, name string) (core.Model, error)) Option {

@@ -1003,3 +1003,38 @@ func TestModelResolverIsBounded(t *testing.T) {
 		t.Errorf("slow resolver: reason = %q ok = %v, want rejected as timed out", reason, ok)
 	}
 }
+
+// TestModelResolverIgnoringCtxIsAbandoned pins the bound for a resolver
+// that never looks at ctx: validate returns at the timeout, rejected
+// "resolver timed out", and the abandoned call's late result is dropped
+// (the command carries no model).
+func TestModelResolverIgnoringCtxIsAbandoned(t *testing.T) {
+	defer func(d time.Duration) { resolveTimeout = d }(resolveTimeout)
+	resolveTimeout = 20 * time.Millisecond
+	block := make(chan struct{}) // never closed by the test
+	late := make(chan struct{})
+	agent := core.New(wefttest.Script(wefttest.Say("own")), core.Name("a"))
+	cfg := &config{agents: []*core.Agent{agent}}
+	ModelResolver(func(context.Context, string) (core.Model, error) {
+		<-block
+		close(late)
+		return wefttest.Script(wefttest.Say("late")), nil
+	})(cfg)
+	l := newLink(cfg, newRegistry(cfg), "", "")
+	in := "hi"
+	cmd := &command{CommandID: "cmd_stuck", Agent: "a", Engine: "live", Thread: "ephemeral", Input: &in,
+		Overrides: overrides{Model: "anthropic/claude-haiku-4-5"}}
+	start := time.Now()
+	reason, ok := l.validate(context.Background(), cmd)
+	if ok || reason != "model anthropic/claude-haiku-4-5: resolver timed out after 20ms" {
+		t.Errorf("stuck resolver: reason = %q ok = %v", reason, ok)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("validate took %v: the stuck resolver held it", d)
+	}
+	block <- struct{}{} // let the abandoned call finish: its result is dropped
+	<-late
+	if cmd.model != nil {
+		t.Error("the abandoned call's late model reached the command")
+	}
+}

@@ -36,10 +36,14 @@ module, ADR 0005).
   turns off — `top_p` outside 0..1, `max_tokens` ≤ 0, more than four or
   empty `stop` sequences; 403 for
   `only_tools` outside `tools_enabled`) and again by the runtime before
-  its ack. An old command (none of the new fields) validates as before.
+  its ack. An old command (none of the new fields) validates as before;
+  a runtime older than the option lab (no registered `defaults`) is
+  refused the four new fields (400 `runtime predates the option lab:
+  upgrade weft/runtime …`), since it would run the command without them.
   **`runtime.ModelResolver(func(ctx, name) (weft.Model, error))`**: a
   model override outside `runtime.Models` is resolved by the app's code
-  before the ack, bounded at 10 s ("resolver timed out") — the run uses the returned model (named on the run
+  before the ack, bounded at 10 s ("resolver timed out"; one that ignores ctx is
+  abandoned) — the run uses the returned model (named on the run
   row and `weft.override.model`), an error rejects the command with
   `model <name>: <the error's text>`; without a resolver Studio refuses
   the name (400 `unknown model …: register it with runtime.Models or

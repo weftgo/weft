@@ -361,6 +361,17 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 		// manifest lacks are 400; only_tools outside tools_enabled is a
 		// widening, 403; a named tool_choice the run turns off or parks
 		// could never be honoured, 400.
+		// Version skew: a runtime older than the option lab decodes the
+		// command without these fields and would run the experiment
+		// without them (only_tools ignored runs every tool, park_on
+		// ignored runs a ReplaySafe tool for real). A current runtime
+		// always registers its defaults (tool_choice mode at least
+		// "auto"); one that sends none is refused the new knobs.
+		if o := req.Overrides; agent.Defaults.ToolChoice.Mode == "" &&
+			(o.Params != nil || o.ToolChoice != nil || len(o.ParkOn) > 0 || len(o.OnlyTools) > 0) {
+			badRequest(w, r, "runtime predates the option lab: upgrade weft/runtime to use params, tool_choice, park_on, only_tools")
+			return
+		}
 		if widens, msg := toolOverrides(req.Overrides, agent.Name, known, agent.Defaults.ToolChoice); msg != "" {
 			if widens {
 				writeError(w, r, http.StatusForbidden, "forbidden", msg)

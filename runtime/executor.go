@@ -204,10 +204,7 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 		// the ack, so a refusal is a rejected command naming why, never
 		// a failed run. Its error text is the app's (ModelResolver).
 		m := cmd.Overrides.Model
-		rctx, cancel := context.WithTimeout(ctx, resolveTimeout)
-		model, err := l.cfg.resolve(rctx, m)
-		timedOut := errors.Is(rctx.Err(), context.DeadlineExceeded)
-		cancel()
+		model, timedOut, err := l.resolveModel(ctx, m)
 		switch {
 		case timedOut:
 			return fmt.Sprintf("model %s: resolver timed out after %s", m, resolveTimeout), false
@@ -219,6 +216,43 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 		cmd.model = model
 	}
 	return "", true
+}
+
+// resolveModel calls the app's resolver bounded by resolveTimeout. The
+// call runs on its own goroutine so a resolver that ignores ctx cannot
+// hold validate (and the ack) past the bound: on timeout the goroutine
+// is abandoned, as the core abandons a timed-out tool handler, and its
+// late result is dropped. A panic in the resolver is an error, never a
+// crash of the app.
+func (l *link) resolveModel(ctx context.Context, name string) (model core.Model, timedOut bool, err error) {
+	rctx, cancel := context.WithTimeout(ctx, resolveTimeout)
+	defer cancel()
+	type result struct {
+		m   core.Model
+		err error
+	}
+	done := make(chan result, 1) // buffered: an abandoned call never blocks
+	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				done <- result{err: fmt.Errorf("resolver panicked: %v", p)}
+			}
+		}()
+		m, err := l.cfg.resolve(rctx, name)
+		done <- result{m, err}
+	}()
+	select {
+	case r := <-done:
+		if errors.Is(rctx.Err(), context.DeadlineExceeded) {
+			return nil, true, nil
+		}
+		return r.m, false, r.err
+	case <-rctx.Done():
+		if errors.Is(rctx.Err(), context.DeadlineExceeded) {
+			return nil, true, nil
+		}
+		return nil, false, rctx.Err()
+	}
 }
 
 // resolveTimeout bounds one ModelResolver call: validate runs before

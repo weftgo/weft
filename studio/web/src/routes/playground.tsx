@@ -26,11 +26,10 @@
 // result — V6: one API, two clients.
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useLocation, useNavigate, useSearch } from "@tanstack/react-router"
-import { useEffect, useMemo, useRef, useState   } from "react"
-import type {Dispatch, SetStateAction} from "react";
+import { useEffect, useMemo, useRef, useState } from "react"
+import type { Dispatch, SetStateAction } from "react"
 
 import {
-  ApiError,
   metaQuery,
   experimentsQuery,
   fetchRun,
@@ -41,30 +40,49 @@ import {
   postSteer,
   fetchCommand,
   postPlaygroundRun,
-  putBreakpoints,
   runQuery,
-  runtimesQuery
-  
-  
-  
-  
-  
+  runtimesQuery,
 } from "@/lib/api"
-import type {AgentView, CommandStatus, Message, PlaygroundRunBody, RunRow, RuntimeView} from "@/lib/api";
-import { placeBatches, producedText } from "@/lib/events"
-import type { TranscriptBatch } from "@/lib/events"
+import type { PlaygroundRunBody, RunRow } from "@/lib/api"
+import { producedText } from "@/lib/events"
 import { diffLines, diffSummary } from "@/lib/diff"
 import type { DiffRow } from "@/lib/diff"
+import {
+  buildRunBody,
+  overridesOf,
+  pickTarget,
+  toolsOffFor,
+} from "@/lib/experiment-body"
+import type { EditDraft, Engine, SideEffects, ThreadMode, VariantFields } from "@/lib/experiment-body"
 import { spanMs } from "@/lib/format"
 import { copyText, download } from "@/lib/json"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import {
+  isUnknownCommand,
+  queued,
+  settled,
+  useCommandTracking,
+} from "@/hooks/use-command-tracking"
+import type { Experiment } from "@/hooks/use-command-tracking"
 import { useRunEvents } from "@/hooks/use-run-events"
+import { ExperimentForm, StepPicker } from "@/components/studio/experiment-form"
 import { Button } from "@/components/ui/button"
 import { experimentLink, runLink } from "@/lib/links"
 
-type Engine = "live" | "scripted"
-type SideEffects = "substitute" | "park" | "allow"
-type ThreadMode = "ephemeral" | "fork"
+// The command's pure halves and the form's controls live in shared
+// modules (plan F1: the run page's replay drawer renders the same
+// form and sends the same body); re-exported here for their callers.
+export {
+  buildRunBody,
+  editFieldsOf,
+  overridesOf,
+  pickTarget,
+  toolsOffFor,
+  wireEdits,
+} from "@/lib/experiment-body"
+export type { EditDraft, EditField } from "@/lib/experiment-body"
+export { Breakpoints } from "@/components/studio/experiment-form"
+
 
 /** What the panel carries over (§2: run, step, current overrides —
  * every knob of the drawer, so nothing is retyped or reset). */
@@ -211,48 +229,11 @@ function NoPlayground({ why }: { why?: string }) {
   )
 }
 
-/** One experiment in flight or finished: the command's lifecycle, the
- * run it produced, the fold streaming in from the live lane. */
-interface Experiment {
-  commandID: string
-  state: CommandStatus["state"]
-  /** The run's outcome once the command finished (succeeded | failed). */
-  status?: CommandStatus["status"]
-  runID: string
-  error: string | null
-  label: string
-  row: RunRow | null
-  /** The decisions sent on a parked run's calls. The runtime resumes a
-   * park only once every pending call has one: until then each
-   * decision is held, and its command finishes under the still-parked
-   * run's id — this is what the card shows as decided. */
-  decided?: { runID: string; calls: Record<string, string> }
-  /** The thread mode the command was issued with (fork: no run id
-   * until the turn is in flight — the runtime acks again naming it). */
-  thread?: ThreadMode
-}
-
 /** One variant of the experiment (§4's columns): its overrides and its
  * own run, side by side with its siblings. */
-interface Variant {
+interface Variant extends VariantFields {
   key: string
-  instructions: string
-  toolsOff: Set<string>
-  model: string
-  thinking: string
-  input: string
-  engine: Engine
-  sideEffects: SideEffects
-  /** §5.4's thread mode (review fix 4a): ephemeral — an experiment,
-   * never a turn — or fork, a new session with lineage whose next
-   * turn is the input. */
-  thread: ThreadMode
   result: Experiment | null
-}
-
-/** A fresh experiment for a command just issued. */
-function queued(commandID: string, label: string): Experiment {
-  return { commandID, state: "queued", runID: "", error: null, label, row: null }
 }
 
 /** variantA seeds the first variant from the panel's carried-over
@@ -272,217 +253,6 @@ function variantA(search: PlaygroundSearch): Variant {
     thread: search.thread ?? "ephemeral",
     result: null,
   }
-}
-
-/** toolsOffFor turns the hand-off's tools= (the names left ON) into
- * the agent's turned-off set. Names the agent does not have are
- * ignored; no tools= means everything stays on. */
-export function toolsOffFor(tools: string | undefined, agent: AgentView): Set<string> {
-  if (!tools) return new Set()
-  const on = new Set(tools.split(",").map((t) => t.trim()).filter(Boolean))
-  return new Set(agent.tools.map((t) => t.name).filter((n) => !on.has(n)))
-}
-
-/**
- * pickTarget names the runtime and agent a command goes to. The agent
- * is the one asked for — the hand-off's agent=, else the source run's
- * own — on a runtime that registers it; a runtime named explicitly is
- * honoured when it exists. Only when nothing was asked for (or nobody
- * registers it) does the first registered agent stand in, and
- * `mismatch` then names the agent that could not be found, so the page
- * says so instead of silently experimenting on a different agent.
- */
-export function pickTarget(
-  runtimes: RuntimeView[],
-  want: { runtime?: string; agent?: string }
-): { runtime?: RuntimeView; agent?: AgentView; mismatch?: string } {
-  const named = want.runtime
-    ? runtimes.find((r) => r.id === want.runtime)
-    : undefined
-  const has = (r: RuntimeView) => r.agents.some((a) => a.name === want.agent)
-  const runtime =
-    named && (!want.agent || has(named))
-      ? named
-      : ((want.agent ? runtimes.find(has) : undefined) ??
-        named ??
-        runtimes.find((r) => r.agents.length > 0))
-  if (!runtime) return {}
-  const agent = runtime.agents.find((a) => a.name === want.agent)
-  if (agent) return { runtime, agent }
-  return {
-    runtime,
-    agent: runtime.agents.at(0),
-    mismatch: want.agent || undefined,
-  }
-}
-
-/** The overrides a variant applies to the registered agent — only
- * what changed (§10.1): an unchanged prompt is not an override, and
- * no tool turned off sends no tools_enabled. */
-export function overridesOf(
-  variant: Pick<Variant, "instructions" | "toolsOff" | "model" | "thinking">,
-  agent: AgentView
-): NonNullable<PlaygroundRunBody["overrides"]> {
-  const overrides: NonNullable<PlaygroundRunBody["overrides"]> = {}
-  if (variant.instructions && variant.instructions !== (agent.instructions ?? ""))
-    overrides.instructions = variant.instructions
-  const names = agent.tools.map((t) => t.name)
-  const enabled = names.filter((n) => !variant.toolsOff.has(n))
-  if (enabled.length < names.length) {
-    // The wire cannot say "no tools": an empty tools_enabled reads as
-    // "not overridden" on the other side and the run would get every
-    // tool back. Refuse here rather than run the opposite experiment.
-    if (enabled.length === 0)
-      throw new Error(
-        "at least one tool must stay on — the command cannot express an empty tool set (it would run with every tool)"
-      )
-    overrides.tools_enabled = enabled
-  }
-  if (variant.model) overrides.model = variant.model
-  if (variant.thinking) overrides.thinking = variant.thinking
-  return overrides
-}
-
-/**
- * buildRunBody is §5.1's command for one variant. Throws with the
- * reason when the command would be refused or would run something
- * other than what the form shows (no input and no source; fork without
- * its input; every tool turned off).
- */
-export function buildRunBody(opts: {
-  runtime: string
-  agent: AgentView
-  variant: Variant
-  sourceRunID: string
-  fromStep: number
-  /** The input for this command (the variant's, or a matrix row's). */
-  input: string
-  edits?: EditDraft[]
-  /** The source run's public id: the experiment carries it, so the
-   * page that owns the conversation sees it too (S4.6). */
-  publicID?: string
-  experimentID?: string
-}): PlaygroundRunBody {
-  const { variant, sourceRunID, fromStep } = opts
-  const input = fromStep === 0 ? opts.input : ""
-  if (!sourceRunID && !input)
-    throw new Error("a run needs an input, or a source run to take the turn from")
-  if (variant.thread === "fork" && !(sourceRunID && input && fromStep === 0))
-    throw new Error(
-      "fork continues the conversation in a new session: it needs a source run, an input, and step 0"
-    )
-  const body: PlaygroundRunBody = {
-    runtime: opts.runtime,
-    agent: opts.agent.name,
-    source: sourceRunID ? { run_id: sourceRunID, from_step: fromStep } : null,
-    overrides: overridesOf(variant, opts.agent),
-    engine: variant.engine,
-    side_effects: variant.sideEffects,
-    thread: variant.thread,
-  }
-  if (input) body.input = input
-  if (fromStep > 0 && opts.edits?.length) body.transcript_edits = wireEdits(opts.edits)
-  if (opts.experimentID) body.experiment_id = opts.experimentID
-  if (opts.publicID) body.public_id = opts.publicID
-  return body
-}
-
-/** One transcript edit draft (§5.1's wire shape — review fix 4b): a
- * patched tool result (pinned by call_id) or a rewritten call-free
- * reply, on a kept step. */
-export interface EditDraft {
-  step: number
-  callID?: string
-  toolResult?: string
-  content?: string
-}
-
-/** One editable field of a kept step, derived from the source
- * transcript. */
-export interface EditField {
-  step: number
-  callID?: string
-  /** The tool's name, or "reply". */
-  name: string
-  placeholder: string
-}
-
-/** editFieldsOf derives the kept steps' editable fields from the
- * source transcript (steps 0..fromStep−1): every tool result the
- * prefix holds, and each step's reply when that step carried no tool
- * calls (a reply rewrite may not drop a step's calls — D2/D3). The
- * panel's per-step fields are the shape (element.ts's drawer).
- *
- * Each message counts toward the step its batch joined — the stored
- * step the API carries (ADR 0028 §8) — and the input record (the
- * conversation the run was fed) is not the run's own steps. The split
- * is the row's input flag; only when a row carries no stored step (-1,
- * or an older Studio without the flag) are the steps numbered by order:
- * each assistant message opens the next, what precedes the first is
- * step 0's. Studio's runSteps and the runtime's orderSteps apply the
- * same rule, so a field offered here is one both accept. */
-export function editFieldsOf(
-  batches: TranscriptBatch[],
-  fromStep: number
-): EditField[] {
-  const placed = placeBatches(batches)
-  const list = Array.isArray(batches) ? batches : []
-  const stored =
-    list.length > 0 &&
-    list.every(
-      (b) =>
-        typeof b.step === "number" && b.step >= 0 && typeof b.input === "boolean"
-    )
-  const tagged: { step: number; m: Message }[] = []
-  for (const [i, b] of placed.entries()) {
-    const flag = list[i]?.input
-    const input = typeof flag === "boolean" ? flag : b.input
-    if (input) continue
-    for (const m of b.messages)
-      tagged.push({ step: stored ? (list[i].step as number) : -1, m })
-  }
-  if (!stored) {
-    let at = -1
-    for (const t of tagged) {
-      if (t.m.role === "assistant") at++
-      t.step = Math.max(at, 0)
-    }
-  }
-  const fields: EditField[] = []
-  for (const { step, m } of tagged) {
-    if (step < 0 || step >= fromStep) continue
-    if (m.role === "assistant") {
-      let text = ""
-      let hadCalls = false
-      for (const p of m.content) {
-        if (p.type === "tool_call") hadCalls = true
-        if (p.type === "text" && p.text) text += p.text
-      }
-      if (text && !hadCalls) fields.push({ step, name: "reply", placeholder: text })
-    } else if (m.role === "tool") {
-      for (const p of m.content) {
-        if (p.type === "tool_result")
-          fields.push({
-            step,
-            callID: p.call_id,
-            name: p.name || p.call_id,
-            placeholder: typeof p.content === "string" ? p.content : "",
-          })
-      }
-    }
-  }
-  return fields
-}
-
-/** wireEdits maps the drafts to §5.1's flattened wire shape — the
- * same mapping the panel's buildRunBody makes. */
-export function wireEdits(drafts: EditDraft[]): unknown[] {
-  return drafts.map((e) => ({
-    step: e.step,
-    ...(e.callID ? { call_id: e.callID } : {}),
-    ...(e.toolResult ? { tool_result: e.toolResult } : {}),
-    ...(e.content ? { content: e.content } : {}),
-  }))
 }
 
 function Playground({ caps }: { caps: string[] }) {
@@ -844,178 +614,20 @@ function Playground({ caps }: { caps: string[] }) {
             ) : null}
           </label>
           {sourceRunID && (
-            <label className="block space-y-1">
-              <span className="text-xs text-muted-foreground">Continue from step</span>
-              <input
-                type="number"
-                min={0}
-                className="w-20 rounded border bg-transparent px-2 py-1 text-xs"
-                value={fromStep}
-                onChange={(e) =>
-                  setFromStep(Math.max(0, Math.floor(Number(e.target.value) || 0)))
-                }
-              />
-            </label>
+            <StepPicker runID={sourceRunID} value={fromStep} onChange={setFromStep} />
           )}
-          {/* The kept prefix's edits (D2/D3, review fix 4b — the
-              panel's per-step fields, rendered here too): when
-              continuing from a step, the kept steps' tool results are
-              patchable and their call-free replies rewritable. */}
-          {sourceRunID && fromStep > 0 && (
-            <TranscriptEdits
-              runID={sourceRunID}
-              fromStep={fromStep}
-              drafts={editDrafts}
-              setDrafts={setEditDrafts}
-            />
-          )}
-          <label className="block space-y-1">
-            <span className="text-xs text-muted-foreground">System prompt</span>
-            <textarea
-              rows={4}
-              className="w-full rounded border bg-transparent px-2 py-1 text-xs"
-              value={variant.instructions}
-              onChange={(e) => patch({ instructions: e.target.value })}
-            />
-            <button
-              className="text-xs text-muted-foreground hover:underline"
-              onClick={() => patch({ instructions: registered })}
-            >
-              ↺ reset to the registered prompt
-            </button>
-          </label>
-          {agent?.tools.length ? (
-            <div className="space-y-1">
-              <span className="text-xs text-muted-foreground">Tools</span>
-              {agent.tools.map((t) => (
-                <label key={t.name} className="flex items-center gap-2 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={!variant.toolsOff.has(t.name)}
-                    onChange={(e) => {
-                      const next = new Set(variant.toolsOff)
-                      if (e.target.checked) next.delete(t.name)
-                      else next.add(t.name)
-                      patch({ toolsOff: next })
-                    }}
-                  />
-                  {t.name}
-                  {(t.side_effects === "never" || !t.side_effects) && (
-                    <span title="side-effect tool (ReplayPolicy never): substitute or park, never re-fire silently — only side effects: allow runs it for real, and only if the app opted it in">
-                      ⚠
-                    </span>
-                  )}
-                </label>
-              ))}
-            </div>
-          ) : null}
-          <div className="flex gap-2">
-            <label className="block flex-1 space-y-1">
-              <span className="text-xs text-muted-foreground">Model</span>
-              <select
-                className="w-full rounded border bg-transparent px-1 py-1 text-xs"
-                value={variant.model}
-                onChange={(e) => patch({ model: e.target.value })}
-              >
-                <option value="">(the agent's own)</option>
-                {agent?.models.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block space-y-1">
-              <span className="text-xs text-muted-foreground">Thinking</span>
-              <select
-                className="rounded border bg-transparent px-1 py-1 text-xs"
-                value={variant.thinking}
-                onChange={(e) => patch({ thinking: e.target.value })}
-              >
-                <option value="">default</option>
-                {["off", "low", "medium", "high"].map((l) => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="flex gap-2">
-            <label className="block flex-1 space-y-1">
-              <span className="text-xs text-muted-foreground">Engine</span>
-              <select
-                className="w-full rounded border bg-transparent px-1 py-1 text-xs"
-                value={variant.engine}
-                onChange={(e) => patch({ engine: e.target.value as Engine })}
-              >
-                <option value="live">live</option>
-                <option value="scripted">scripted (zero tokens)</option>
-              </select>
-            </label>
-            <label className="block flex-1 space-y-1">
-              <span className="text-xs text-muted-foreground">Side effects</span>
-              <select
-                className="w-full rounded border bg-transparent px-1 py-1 text-xs"
-                value={variant.sideEffects}
-                onChange={(e) => patch({ sideEffects: e.target.value as SideEffects })}
-              >
-                <option
-                  value="substitute"
-                  title="a side-effect call the source recorded is answered from the record; any other call parks"
-                >
-                  substitute — recorded results, else park
-                </option>
-                <option value="park" title="every side-effect call parks; nothing is answered from the record">
-                  park — every side-effect call waits
-                </option>
-                <option value="allow" title="refused unless every tool left on is opted in or ReplaySafe">
-                  allow — runs the tools this app opted in (AllowSideEffects) for real
-                </option>
-              </select>
-            </label>
-            {/* §5.4's thread mode (review fix 4a): fork continues the
-                conversation in a new session with lineage — it needs a
-                source turn and an input. */}
-            <label className="block flex-1 space-y-1">
-              <span className="text-xs text-muted-foreground">Thread</span>
-              <select
-                className="w-full rounded border bg-transparent px-1 py-1 text-xs"
-                value={variant.thread}
-                onChange={(e) => patch({ thread: e.target.value as ThreadMode })}
-              >
-                <option value="ephemeral">ephemeral</option>
-                <option value="fork">fork (new session)</option>
-              </select>
-            </label>
-          </div>
-          {/* Rung 3 (§8.3): break on tools — PUT /api/runtimes/{id}/
-              breakpoints; the runtime parks them on every run it
-              starts. */}
-          {caps.includes("breakpoints") && runtime && agent?.tools.length ? (
-            <div className="space-y-1">
-              <span className="text-xs text-muted-foreground">Break on (parks every run)</span>
-              <Breakpoints
-                key={runtime.id}
-                runtimeID={runtime.id}
-                stored={runtime.breakpoints}
-                tools={[...new Set(runtime.agents.flatMap((a) => a.tools.map((t) => t.name)))]}
-              />
-            </div>
-          ) : null}
-          {fromStep === 0 && (
-            <label className="block space-y-1">
-              <span className="text-xs text-muted-foreground">
-                Input (replaces the user message)
-              </span>
-              <textarea
-                rows={2}
-                className="w-full rounded border bg-transparent px-2 py-1 text-xs"
-                value={variant.input}
-                onChange={(e) => patch({ input: e.target.value })}
-              />
-            </label>
-          )}
+          <ExperimentForm
+            variant={variant}
+            patch={patch}
+            agent={agent}
+            registered={registered}
+            runtime={runtime}
+            caps={caps}
+            sourceRunID={sourceRunID}
+            fromStep={fromStep}
+            editDrafts={editDrafts}
+            setEditDrafts={setEditDrafts}
+          />
           {error && (
             <p className="text-xs text-red-500" role="alert">
               {error}
@@ -1130,98 +742,8 @@ function stateLabel(e: Pick<Experiment, "state" | "status">): string {
   return e.state === "finished" && e.status ? `${e.state} · ${e.status}` : e.state
 }
 
-/** Row reads after a command settled, waiting for the run's row to
- * leave running (useCommandTracking). A parked run reads succeeded. */
-const ROW_SETTLE_READS = 15
-
 /** Result cards tailing their run live at once (see `streamed`). */
 const MAX_LIVE_CARDS = 3
-
-/** True when the lifecycle is over (§10.5): nothing more will change. */
-function settled(state: CommandStatus["state"]): boolean {
-  return state === "finished" || state === "rejected" || state === "lost"
-}
-
-/** A command Studio no longer knows (it restarted: commands live in
- * its memory) will never answer — it reads as lost, not as a poll
- * that spins forever. */
-function isUnknownCommand(e: unknown): boolean {
-  return e instanceof ApiError && e.status === 404
-}
-
-/** useCommandTracking follows the command's lifecycle (§10.5): the
- * run id as soon as the ack names it, the terminal state last. */
-function useCommandTracking(
-  experiment: Experiment | null,
-  setExperiment: Dispatch<SetStateAction<Experiment | null>>
-) {
-  const setRef = useRef(setExperiment)
-  setRef.current = setExperiment
-  const commandID = experiment?.commandID ?? ""
-  useEffect(() => {
-    if (!commandID) return
-    let alive = true
-    // Read through a function: the cleanup flips the flag while a
-    // tick awaits, which control-flow analysis cannot see.
-    const gone = (): boolean => !alive
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const mine = (cur: Experiment | null): cur is Experiment =>
-      cur !== null && cur.commandID === commandID
-    // Reads of the row after the command settled: the finished ack can
-    // land before the run's last records are exported, so the row may
-    // still read running (partial usage, no finish) — it is read again
-    // until it settles, a bounded number of times.
-    let afterSettled = 0
-    const tick = async () => {
-      let st: CommandStatus
-      try {
-        st = await fetchCommand(commandID)
-      } catch (e) {
-        if (gone()) return
-        if (isUnknownCommand(e)) {
-          setRef.current((cur) =>
-            mine(cur)
-              ? { ...cur, state: "lost", error: "Studio no longer knows this command (it restarted)" }
-              : cur
-          )
-          return
-        }
-        timer = setTimeout(() => void tick(), 700)
-        return
-      }
-      if (gone()) return
-      setRef.current((cur) =>
-        mine(cur)
-          ? { ...cur, state: st.state, status: st.status, runID: st.run_id || cur.runID, error: st.error }
-          : cur
-      )
-      let rowSettled = false
-      if (st.run_id) {
-        // The metrics row (P3: tokens, latency) once the run lands.
-        try {
-          const row: RunRow = await fetchRun(st.run_id)
-          if (gone()) return
-          rowSettled = row.status !== "running"
-          setRef.current((cur) => (mine(cur) ? { ...cur, row } : cur))
-        } catch {
-          // the row loads on the next poll
-        }
-      }
-      if (gone()) return
-      if (settled(st.state)) {
-        if (!st.run_id || rowSettled || ++afterSettled > ROW_SETTLE_READS) return
-        timer = setTimeout(() => void tick(), 1000)
-        return
-      }
-      timer = setTimeout(() => void tick(), 700)
-    }
-    void tick()
-    return () => {
-      alive = false
-      if (timer) clearTimeout(timer)
-    }
-  }, [commandID])
-}
 
 /** One parked call's decision verbs (ADR 0007): continue runs the
  * handler for real, skip denies with a reason, resolve pastes a
@@ -1910,176 +1432,6 @@ function History({ selected }: { selected?: string }) {
           </div>
         ))}
       </div>
-    </div>
-  )
-}
-
-/** TranscriptEdits renders the kept prefix's editable fields (review
- * fix 4b): when continuing from a step, the kept steps' tool results
- * are patchable and their call-free replies rewritable — the
- * counterfactual the fresh step answers. The panel's drawer is the
- * shape; this is the same wire. */
-function TranscriptEdits({
-  runID,
-  fromStep,
-  drafts,
-  setDrafts,
-}: {
-  runID: string
-  fromStep: number
-  drafts: EditDraft[]
-  setDrafts: React.Dispatch<React.SetStateAction<EditDraft[]>>
-}) {
-  const all = useSourceEditFields(runID)
-  const fields = all.filter((f) => f.step < fromStep)
-  // A draft belongs to a field of the kept prefix: one left over from
-  // another source run, or from a step no longer kept, would be sent
-  // and refused (400) with nothing on screen to explain it.
-  const fieldKeys = fields.map((f) => `${f.step}\u0000${f.callID ?? ""}`).join("\u0001")
-  useEffect(() => {
-    const keep = new Set(fieldKeys ? fieldKeys.split("\u0001") : [])
-    setDrafts((cur) => {
-      const next = cur.filter((d) => keep.has(`${d.step}\u0000${d.callID ?? ""}`))
-      return next.length === cur.length ? cur : next
-    })
-  }, [fieldKeys, setDrafts])
-  if (!fields.length) return null
-  const draftOf = (f: EditField) => drafts.find((d) => d.step === f.step && d.callID === f.callID)
-  const set = (f: EditField, v: string) => {
-    const at = (d: EditDraft) => d.step === f.step && d.callID === f.callID
-    setDrafts((cur) => {
-      const i = cur.findIndex(at)
-      if (v === "") return i >= 0 ? cur.filter((_, j) => j !== i) : cur
-      const draft: EditDraft = f.callID
-        ? { step: f.step, callID: f.callID, toolResult: v }
-        : { step: f.step, content: v }
-      return i >= 0 ? cur.map((d, j) => (j === i ? draft : d)) : [...cur, draft]
-    })
-  }
-  return (
-    <div className="space-y-1">
-      <span className="text-xs text-muted-foreground">
-        Transcript edits (steps 0..{fromStep - 1} are kept)
-      </span>
-      {fields.map((f) =>
-        f.callID ? (
-          <label key={`${f.step}:${f.callID}`} className="flex items-center gap-1 text-xs">
-            <span className="shrink-0 text-faint">
-              step {f.step} · {f.name} →
-            </span>
-            <input
-              className="w-full rounded border bg-transparent px-2 py-1"
-              placeholder={f.placeholder.slice(0, 60)}
-              value={draftOf(f)?.toolResult ?? ""}
-              onChange={(e) => set(f, e.target.value)}
-            />
-          </label>
-        ) : (
-          <label key={`${f.step}:reply`} className="block space-y-1 text-xs">
-            <span className="text-faint">step {f.step} · reply</span>
-            <textarea
-              rows={2}
-              className="w-full rounded border bg-transparent px-2 py-1"
-              placeholder={f.placeholder.slice(0, 80)}
-              value={draftOf(f)?.content ?? ""}
-              onChange={(e) => set(f, e.target.value)}
-            />
-          </label>
-        )
-      )}
-    </div>
-  )
-}
-
-/** useSourceEditFields loads every editable field of the source
- * transcript (the fromStep filter is applied at render, so a changed
- * step needs no refetch). */
-function useSourceEditFields(runID: string): EditField[] {
-  const [fields, setFields] = useState<EditField[]>([])
-  useEffect(() => {
-    setFields([])
-    if (!runID) return
-    let alive = true
-    fetchTranscript(runID)
-      .then((doc) => {
-        if (alive) setFields(editFieldsOf(doc.batches, Number.MAX_SAFE_INTEGER))
-      })
-      .catch(() => {
-        if (alive) setFields([])
-      })
-    return () => {
-      alive = false
-    }
-  }, [runID])
-  return fields
-}
-
-/** Breakpoints is the rung-3 control (§8.3): one checkbox per tool,
- * applied on change — the runtime parks them on every run it starts
- * from then on, whatever the command asked for. The set is the
- * runtime's own: the boxes show what GET /api/runtimes reports
- * (`stored`, so a reload — or another tab's change — is reflected)
- * and, after a change, what the PUT answered; a refused change (a
- * disconnected runtime is a 503 and stores nothing) is undone and
- * says why. */
-export function Breakpoints({
-  runtimeID,
-  tools,
-  stored,
-}: {
-  runtimeID: string
-  tools: string[]
-  /** The runtime's stored set, as the runtimes view last read it. */
-  stored?: string[]
-}) {
-  const [set, setSet] = useState<Set<string>>(() => new Set(stored ?? []))
-  // Follow the server's set when it changes under us (the view is
-  // re-read every few seconds) — by value, not by array identity.
-  const storedKey = stored ? [...stored].sort().join("\u0000") : null
-  useEffect(() => {
-    if (storedKey !== null)
-      setSet(new Set(storedKey ? storedKey.split("\u0000") : []))
-  }, [storedKey])
-  const [err, setErr] = useState("")
-  const [saving, setSaving] = useState(false)
-  const toggle = async (name: string, on: boolean) => {
-    const prev = set
-    const next = new Set(set)
-    if (on) next.add(name)
-    else next.delete(name)
-    setSet(next)
-    setErr("")
-    setSaving(true)
-    try {
-      const out = await putBreakpoints(runtimeID, [...next].sort())
-      setSet(new Set(out.tools ?? []))
-    } catch (e) {
-      setSet(prev)
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setSaving(false)
-    }
-  }
-  return (
-    <div className="space-y-1">
-      <div className="flex flex-wrap gap-2 text-xs">
-        {tools.map((t) => (
-          <label key={t} className="flex items-center gap-1">
-            <input
-              type="checkbox"
-              checked={set.has(t)}
-              disabled={saving}
-              onChange={(e) => void toggle(t, e.target.checked)}
-            />
-            {t}
-          </label>
-        ))}
-      </div>
-      {err && (
-        <p className="text-xs text-red-500" role="alert">
-          {err}
-        </p>
-      )}
     </div>
   )
 }

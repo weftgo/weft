@@ -126,8 +126,8 @@ function EventRow({
               variant="ghost"
               size="icon-xs"
               className="text-faint hover:text-foreground"
-              aria-label={`replay to event ${pos}`}
-              title={`replay to here (t=${pos + 1})`}
+              aria-label={`jump to event ${pos}`}
+              title={`jump to here (t=${pos + 1})`}
               onClick={(e) => {
                 e.stopPropagation()
                 onJump(pos + 1)

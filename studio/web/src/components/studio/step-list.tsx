@@ -28,6 +28,7 @@ import type {
 import { mergeHoles } from "@/lib/honesty"
 import type { HoleMark } from "@/lib/honesty"
 import { tokens } from "@/lib/format"
+import { stepPositionOf } from "@/lib/replay"
 import { bytes } from "@/lib/summarize"
 import { CodeWin } from "@/components/studio/codewin"
 import { CompactionMarker } from "@/components/studio/compaction-marker"
@@ -37,6 +38,8 @@ import {
   StepHeadline,
   stepAttemptsHole,
 } from "@/components/studio/step-attempts"
+import { CallVerbs, SteerVerb, StepVerbs } from "@/components/studio/replay-verbs"
+import type { ReplayAt } from "@/components/studio/replay-verbs"
 import { RequestSection } from "@/components/studio/step-request"
 import type { RunRequests } from "@/components/studio/step-request"
 import { childOfStep, SubagentBlock } from "@/components/studio/subagent-block"
@@ -172,12 +175,15 @@ export function ToolCallRow({
   child,
   onJump,
   compact,
+  replayAt,
 }: {
   call: FoldedToolCall
   runStatus: string
   child?: ChildRow
   onJump?: (t: number) => void
   compact?: boolean
+  /** Where the call's replay verbs replay from (absent: none). */
+  replayAt?: ReplayAt
 }) {
   const state = callState(call, runStatus)
   const [open, setOpen] = useState(true)
@@ -229,10 +235,13 @@ export function ToolCallRow({
           >
             {call.callId}
           </span>
+          {replayAt ? (
+            <CallVerbs at={replayAt} callId={call.callId} content={call.result?.content} />
+          ) : null}
           <JumpButton
             pos={call.startPos}
             onJump={onJump}
-            label={`replay to this call (event #${call.startPos})`}
+            label={`jump to this call (event #${call.startPos})`}
           />
         </span>
       </div>
@@ -277,6 +286,7 @@ export function StepBody({
   stepChildren,
   onJump,
   compact,
+  replayAt,
 }: {
   step: FoldedStep
   runStatus: string
@@ -294,6 +304,8 @@ export function StepBody({
   stepChildren?: Map<string, ChildRow>
   onJump?: (t: number) => void
   compact?: boolean
+  /** Where this step's replay verbs replay from (the call rows'). */
+  replayAt?: ReplayAt
 }) {
   return (
     <>
@@ -333,6 +345,7 @@ export function StepBody({
               }
               onJump={onJump}
               compact={compact}
+              replayAt={replayAt}
             />
           ))}
         </div>
@@ -355,9 +368,12 @@ export function StepBody({
 function SteerBlock({
   steer,
   onJump,
+  replayAt,
 }: {
   steer: { text: string; pos: number }
   onJump?: (t: number) => void
+  /** The step the steer followed (its replay verb runs the next). */
+  replayAt?: ReplayAt
 }) {
   return (
     <div
@@ -371,10 +387,11 @@ function SteerBlock({
         </p>
       </div>
       <span className="flex items-start">
+        {replayAt ? <SteerVerb at={replayAt} /> : null}
         <JumpButton
           pos={steer.pos}
           onJump={onJump}
-          label={`replay to this steer (event #${steer.pos})`}
+          label={`jump to this steer (event #${steer.pos})`}
         />
       </span>
     </div>
@@ -424,6 +441,7 @@ function StepCard({
   compactions,
   transcript,
   transcriptError,
+  replayAt,
 }: {
   step: FoldedStep
   runId: string
@@ -440,6 +458,7 @@ function StepCard({
   highlighted?: boolean
   onJump?: (t: number) => void
   requests?: RunRequests
+  replayAt?: ReplayAt
 }) {
   const ref = useRef<HTMLDivElement>(null)
   // The step route's assembled holes when the page has it (A7): read
@@ -483,10 +502,11 @@ function StepCard({
           >
             events {step.from}–{step.to}
           </span>
+          {replayAt ? <StepVerbs at={replayAt} /> : null}
           <JumpButton
             pos={step.from}
             onJump={onJump}
-            label={`replay from this step (event #${step.from})`}
+            label={`jump to this step (event #${step.from})`}
           />
         </span>
       </div>
@@ -515,6 +535,7 @@ function StepCard({
         childLinks={childLinks}
         stepChildren={stepChildren}
         onJump={onJump}
+        replayAt={replayAt}
       />
     </div>
   )
@@ -628,6 +649,16 @@ export function StepList({
   // While scrubbing, the run reads as running: calls past the
   // playhead are "running", not "never completed".
   const runStatus = replaying ? "running" : doc.status
+  // The verbs' from_step is a step's POSITION among the run's own
+  // steps (the playground's count), read off the whole fold — a
+  // scrubbed prefix lists the same steps in the same order.
+  const indexes = folded.steps.map((st) => st.index)
+  const replayAt = (index: number): ReplayAt => ({
+    runID: doc.id,
+    agent: doc.agent || undefined,
+    position: stepPositionOf(indexes, index),
+    stepCount: indexes.length,
+  })
   return (
     <div className="space-y-3">
       {sessionMarkers.map((c, i) => (
@@ -654,8 +685,11 @@ export function StepList({
             compactions={compactions}
             transcript={transcript}
             transcriptError={transcriptError}
+            replayAt={replayAt(step.index)}
           />
-          {step.steer ? <SteerBlock steer={step.steer} onJump={onJump} /> : null}
+          {step.steer ? (
+            <SteerBlock steer={step.steer} onJump={onJump} replayAt={replayAt(step.index)} />
+          ) : null}
         </div>
       ))}
       {view.unplaced?.length ? <Unplaced batches={view.unplaced} /> : null}

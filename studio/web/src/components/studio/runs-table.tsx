@@ -33,6 +33,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { forkSource } from "@/lib/experiments"
 import { runLink, sessionLink } from "@/lib/links"
 
 const statusColor: Record<RunRow["status"], string> = {
@@ -159,6 +160,25 @@ export interface RunsTableProps {
   now?: number
 }
 
+/** A replayed run's source step (plan F1): forked_from's run and
+ * from_step, linked (the step number lands as the ordinal — the same
+ * on a run with no lost records). */
+function ReplayChip({ run }: { run: Pick<RunRow, "forked_from"> }) {
+  const src = forkSource(run)
+  if (!src) return null
+  return (
+    <div className="truncate font-mono text-[11px] text-faint" data-replay-chip>
+      ↻ replay of{" "}
+      <Link
+        {...runLink(src.runID, { step: src.fromStep })}
+        className="text-muted-foreground hover:text-thread-ink hover:underline"
+      >
+        {src.runID} · step {src.fromStep}
+      </Link>
+    </div>
+  )
+}
+
 export function RunsTable({ runs, selectedId, now }: RunsTableProps) {
   const clock = now ?? Date.now()
   const navigate = useNavigate()
@@ -231,6 +251,7 @@ export function RunsTable({ runs, selectedId, now }: RunsTableProps) {
                     </Link>
                   </div>
                 ) : null}
+                <ReplayChip run={run} />
                 {run.err ? (
                   <div
                     className="truncate font-mono text-[11px] text-status-bad/80"

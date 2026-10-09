@@ -315,7 +315,7 @@ export function SpanDetail({
               variant="ghost"
               size="xs"
               className="h-5 px-1.5 font-mono text-[10px] text-faint hover:text-foreground"
-              title={`replay to the start of this span (event #${span.from})`}
+              title={`jump to the start of this span (event #${span.from})`}
               onClick={() => onJump(span.from + 1)}
             >
               ▶ replay here

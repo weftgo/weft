@@ -28,7 +28,8 @@ import {
   BreadcrumbList,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { runLink, sessionLink, traceLink } from "@/lib/links"
+import { forkSource } from "@/lib/experiments"
+import { experimentLink, runLink, sessionLink, traceLink } from "@/lib/links"
 
 function shortHash(hash: string | undefined): string {
   return hash ? hash.slice(0, 8) : "—"
@@ -101,6 +102,35 @@ function useNow(active: boolean): number {
     return () => clearInterval(t)
   }, [active])
   return now
+}
+
+/**
+ * ReplayOf is a replayed run's link back to its source step (plan F1):
+ * forked_from is "<source run id>#<from_step>" (weft/runtime stamps
+ * it). from_step counts the step's position among the source's own
+ * steps, and the link lands on that number as the step ordinal — the
+ * two are the same on a run with no lost records (lib/links.ts). The
+ * experiment it was filed under, when one was named, links too.
+ */
+export function ReplayOf({ doc }: { doc: Pick<RunDoc, "forked_from" | "experiment_id"> }) {
+  const src = forkSource(doc)
+  if (!src) return null
+  return (
+    <span className="flex items-center gap-2 font-mono text-[11px] text-faint" data-replay-of>
+      <Link
+        {...runLink(src.runID, { step: src.fromStep })}
+        className="text-thread-ink hover:underline"
+        title="the source run and the step this replay continued from"
+      >
+        replay of {src.runID} from step {src.fromStep}
+      </Link>
+      {doc.experiment_id ? (
+        <Link {...experimentLink(doc.experiment_id)} className="hover:text-foreground hover:underline">
+          experiment {doc.experiment_id}
+        </Link>
+      ) : null}
+    </span>
+  )
 }
 
 export function RunHeader({
@@ -191,6 +221,7 @@ export function RunHeader({
             child of call {doc.parent_call_id}
           </span>
         ) : null}
+        <ReplayOf doc={doc} />
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground tabular-nums">

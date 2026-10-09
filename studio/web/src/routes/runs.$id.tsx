@@ -21,6 +21,7 @@ import { Columns2, Rows3 } from "lucide-react"
 import {
   requestsQuery,
   runQuery,
+  studioToken,
   transcriptQuery,
   spansQuery,
 } from "@/lib/api"
@@ -29,6 +30,7 @@ import { compactionsOf } from "@/lib/compaction"
 import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
 import { overrideOf } from "@/lib/request-pane"
+import { canReplay } from "@/lib/replay"
 import type { RunSearch } from "@/lib/links"
 import type { Span as TraceSpan } from "@/lib/trace"
 import {
@@ -42,6 +44,8 @@ import { FlowStrip } from "@/components/studio/flow-strip"
 import { RunHeader } from "@/components/studio/run-header"
 import { RawView } from "@/components/studio/raw-view"
 import { ReplayBar } from "@/components/studio/replay-bar"
+import { ReplayContext, ReplayDrawer } from "@/components/studio/replay-drawer"
+import type { ReplayRequest } from "@/components/studio/replay-drawer"
 import { SpanDetail } from "@/components/studio/span-detail"
 import { StepList } from "@/components/studio/step-list"
 import { runRequests } from "@/components/studio/step-request"
@@ -153,8 +157,20 @@ function RunPage() {
   const navigate = useNavigate({ from: "/runs/$id" })
   const view: View = search.view ?? "trace"
   const [layout, setLayout] = useState<Layout>(readLayout)
-  const { has, loading: capsLoading } = useCapabilities()
+  const { has, caps, loading: capsLoading } = useCapabilities()
   const liveCapable = has("live")
+  // The replay drawer (plan F1): its verbs are drawn when the server
+  // has the playground and the bearer may act (a read-scoped panel
+  // token may not) — hidden, not disabled, otherwise.
+  const replayable = canReplay(caps, studioToken())
+  const [replay, setReplay] = useState<{ req: ReplayRequest | null; n: number }>({
+    req: null,
+    n: 0,
+  })
+  const openReplay = useCallback(
+    (req: ReplayRequest) => setReplay((cur) => ({ req, n: cur.n + 1 })),
+    []
+  )
   const cycleLayout = () =>
     setLayout((l) => {
       const next: Layout =
@@ -448,7 +464,8 @@ function RunPage() {
     [navigate]
   )
 
-  // A "replay to here" from a step, call or raw row: seek there.
+  // A "jump to here" from a step, call or raw row: seek the playhead
+  // there ("replay" is the playground's word: the replay drawer).
   const jump = useCallback(
     (t: number) => {
       setPlayhead(t)
@@ -518,6 +535,7 @@ function RunPage() {
   const doc = run.data
 
   return (
+    <ReplayContext.Provider value={replayable ? openReplay : null}>
     <div className="space-y-4">
       <RunHeader
         doc={doc}
@@ -724,6 +742,14 @@ function RunPage() {
           />
         </TabsContent>
       </Tabs>
+      {replayable ? (
+        <ReplayDrawer
+          request={replay.req}
+          requestKey={replay.n}
+          onClose={() => setReplay((cur) => ({ ...cur, req: null }))}
+        />
+      ) : null}
     </div>
+    </ReplayContext.Provider>
   )
 }

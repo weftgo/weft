@@ -20,6 +20,7 @@ import { mergeHoles, rowHoles, USAGE_AT_FINISH, usageKnown } from "@/lib/honesty
 import { useRunEvents } from "@/hooks/use-run-events"
 
 import { HoleBadges } from "@/components/studio/hole-badge"
+import { ChildVerb, StepVerbs } from "@/components/studio/replay-verbs"
 import { StepBody } from "@/components/studio/step-list"
 import { RequestSection, useRunRequests } from "@/components/studio/step-request"
 import { runLink } from "@/lib/links"
@@ -51,7 +52,7 @@ export function SubagentBlock({
   child: ChildRow
   /** Accepted for the call row's signature and not passed down: a
    * child's steps carry positions in the CHILD's stream, and the
-   * replay playhead scrubs the parent's — a "replay to here" from
+   * replay playhead scrubs the parent's — a "jump to here" from
    * inside the block would land on an unrelated parent event. The
    * child's own page (the link above) replays it. */
   onJump?: (t: number) => void
@@ -116,7 +117,7 @@ export function SubagentBlock({
 
   return (
     <div
-      className="my-1 rounded-md border border-ev-tool/25 bg-secondary/40"
+      className="group/row my-1 rounded-md border border-ev-tool/25 bg-secondary/40"
       data-child-row={child.id}
     >
       <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2">
@@ -171,9 +172,14 @@ export function SubagentBlock({
         </span>
         <HoleBadges holes={holes} />
         <span className="font-mono text-[11px] text-faint">{child.id}</span>
+        {/* A10: replay from here replays the CHILD as its own run (its
+            id, its agent), the parent untouched. */}
+        <span className="ml-auto flex items-center">
+          <ChildVerb runID={child.id} agent={child.agent} />
+        </span>
         <Link
           {...runLink(child.id)}
-          className="ml-auto flex items-center gap-0.5 font-mono text-[11px] text-thread-ink hover:underline"
+          className="flex items-center gap-0.5 font-mono text-[11px] text-thread-ink hover:underline"
         >
           open run
           <ArrowUpRight className="size-3" data-slot="icon" />
@@ -182,8 +188,8 @@ export function SubagentBlock({
       {open ? (
         <div className="space-y-2 border-l border-ev-tool/25 pl-3">
           {view ? (
-            view.steps.map((step) => (
-              <div key={step.index} className="space-y-1.5">
+            view.steps.map((step, position) => (
+              <div key={step.index} className="group/row space-y-1.5" data-child-step={step.index}>
                 <div className="flex items-center gap-2">
                   <span className="eyebrow">step {step.index}</span>
                   {step.finish ? (
@@ -191,6 +197,11 @@ export function SubagentBlock({
                       {step.finish.reason}
                     </span>
                   ) : null}
+                  <span className="ml-auto">
+                    <StepVerbs
+                      at={{ runID: child.id, agent: child.agent, position, stepCount: view.steps.length }}
+                    />
+                  </span>
                 </div>
                 {requests ? (
                   <div data-child-request={step.index}>
@@ -202,6 +213,7 @@ export function SubagentBlock({
                   runStatus={childStatus}
                   childLinks={childLinksOf(doc.data?.children)}
                   compact
+                  replayAt={{ runID: child.id, agent: child.agent, position, stepCount: view.steps.length }}
                 />
               </div>
             ))

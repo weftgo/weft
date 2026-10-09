@@ -116,7 +116,7 @@ the hand-off only) and a spans waterfall.
 The views (plan D4). The open turn has four tabs, a `role="tablist"`
 (`←`/`→`, `Home`/`End` move and select; one tab stop): **Story** (the
 step story above, and the playground's drawer and result), **Request**
-(a placeholder until E1.2 fills it), **Timeline** (the spans waterfall
+(the step's request, below), **Timeline** (the spans waterfall
 at the column's full width over a time axis — ms from the run's first
 span — or, on a run without spans, its steps and tool calls placed by
 the event sequence, `seq`, the position in the run's event stream) and
@@ -198,8 +198,37 @@ turn number when the list holds it; "experiment" alone with only
 `weft.experiment.id`). `src/panel/parity.test.ts` serves one run per
 hole of the table to both surfaces from one fake Studio and asserts each
 shows `data-hole="<hole>"` with the table's words — and that a pre-A1
-run's request section says `not_recorded` on the run page (the panel's
-Request tab case runs once E1.2 draws the tab).
+run's request section says `not_recorded` on the run page and in the
+panel's Request tab.
+
+The Request tab (plan E1.2) is the run page's Request pane in the panel
+(`src/panel/request.ts`, the same readings: `lib/request-pane.ts`,
+`lib/requests.ts`, `lib/diff.ts`'s bounded diff). It shows one step — the
+one `J`/`K` move, a click on a step card or the tab's own step buttons
+picks, and `⤢` carries — with its header (the model, the attempt line,
+the chips **changed by PrepareStep**, the neutral **prompt changed at
+this step**, **overridden by experiment**, **catalog changed at this
+step**, decided by the same hash rules as the pane), an attempt picker
+when the step retried, the system prompt (12 lines, then "show all")
+with its diff — against the previous step when the hash moved, at the
+first step against the registered instructions when the panel can read
+`/api/manifest` (setup A, a dev token; captioned "not verified for this
+run" from a name-only weft.json, and when no manifest is readable the
+tab says so instead of diffing), never over a cut record, "too large to
+diff" past 2,000 differing lines a side — the messages sent (count ·
+bytes from the transcript the panel holds, the last three inline, the
+rest in D4's tree), the tool catalog (each name expands to its
+description, its policy chips and its schema in D4's tree), every param
+("adapter default" when nil), tool choice, thinking, a subagent call's
+child request (its step 0, read by the child's id on demand) and the
+step's compaction marker. `/` on the tab focuses an open tree's filter,
+else the turn list's. Every absent block is a badge from `badges.ts`
+with its reason; a run-wide hole is that badge and nothing else — a
+read-scoped token sees `hidden` and never asks for the record or the
+manifest, so no prompt byte reaches the page. The provider wire pair
+(plan A6) is recorded by no route yet, so the tab draws nothing for it.
+`scripts/panel-gate.ts` opens the tab on `examples/studio-local`'s
+trimmed turn and checks the chip and the deleted guidance line.
 Deep links (plan G1) follow one scheme, `src/lib/links.ts`, shared by
 the panel and Studio's app (an ESLint rule refuses a Studio URL built
 anywhere else): `runs/<id>?step=<n>&view=story|raw&sel=…&axis=time&t=…`,

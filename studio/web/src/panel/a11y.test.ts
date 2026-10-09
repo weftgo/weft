@@ -2,7 +2,8 @@
 // the bundle) over the panel's shadow root in each mode — float open,
 // docked right, the bottom sheet at 400 px, the pill, and (D4) the Raw
 // tab's open, filtered tree and the Timeline tab, and (D5) a turn
-// whose badges, cap line and chips are all drawn — in both themes (D2),
+// whose badges, cap line and chips are all drawn, and (E1.2) the
+// Request tab's chips, diff and trees — in both themes (D2),
 // with axe's default rules; the budget is zero violations. jsdom has
 // no layout, so the rules that need one (color-contrast, and
 // label-content-name-mismatch's visible text) come back "incomplete",
@@ -12,7 +13,8 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { baseRoutes, fakeStudio, mount, page, runEvents, runRow, settle, setup, teardown } from "./testkit"
+import { golden } from "../test/fake-studio"
+import { baseRoutes, fakeStudio, META, mount, page, runEvents, runRow, settle, setup, teardown, transcript } from "./testkit"
 import type { Route } from "./testkit"
 import { FILTER_MS } from "./tree"
 import type { WeftDevtools } from "./element"
@@ -95,7 +97,35 @@ async function badgesDrawn(el: WeftDevtools) {
     expect(root.querySelector(sel), sel).not.toBeNull()
 }
 
-const MODES: { name: string; width: number; attrs: Record<string, string>; sel: string; act?: (el: WeftDevtools) => Promise<void>; routes?: () => Record<string, Route> }[] = [
+/** E1.2: the Request tab over a recorded request record — step 2's
+ * chip and diff, a tool expanded to its schema tree, the earlier
+ * messages' tree open. */
+function requestRoutes(): Record<string, Route> {
+  const r = baseRoutes()
+  const id = "s_01-t1"
+  const evs: unknown[] = [{ type: "run_start", id, model: { provider: "wefttest", name: "script" } }]
+  for (let i = 0; i < 3; i++) evs.push({ type: "step_start", run_id: id, index: i }, { type: "step_finish", run_id: id, index: i, reason: "stop", usage: { input_tokens: 1, output_tokens: 1 } })
+  r[`runs/${id}/events?after=0&limit=500`] = page(evs)
+  const m = (role: string) => [{ role, content: [{ type: "text", text: role }] }]
+  r[`runs/${id}/transcript`] = transcript(m("user"), m("assistant"), m("tool"), m("assistant"), m("tool"))
+  r[`runs/${id}/requests?limit=1000`] = golden("requests-ok")
+  return r
+}
+async function request(el: WeftDevtools) {
+  const q = (sel: string) => el.shadowRoot!.querySelector(sel) as HTMLElement
+  q("#weft-tab-request").click()
+  await settle()
+  q('[data-weft-rq-step="2"]').click()
+  await settle()
+  q('[data-weft-tool="refund"] button').click()
+  await settle()
+  Array.from(el.shadowRoot!.querySelectorAll("#weft-tp-request button")).find((b) => b.textContent.includes("earlier messages"))?.dispatchEvent(new Event("click", { bubbles: true }))
+  await settle()
+  for (const sel of ['#weft-tp-request [data-weft-mark="prompt"]', '#weft-tp-request [data-weft-diff="del"]', '#weft-tp-request [data-weft-tool="refund"] .weft-tree'])
+    expect(el.shadowRoot!.querySelector(sel), sel).not.toBeNull()
+}
+
+const MODES: { name: string; width: number; attrs: Record<string, string>; sel: string; act?: (el: WeftDevtools) => Promise<void>; routes?: () => Record<string, Route>; meta?: unknown }[] = [
   { name: "float, open", width: 1024, attrs: { "data-open": "true" }, sel: ".weft-dock.weft-float" },
   { name: "docked right", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-dock.weft-docked" },
   { name: "bottom sheet at 400 px", width: 400, attrs: { "data-open": "true" }, sel: ".weft-dock.weft-sheet" },
@@ -104,6 +134,7 @@ const MODES: { name: string; width: number; attrs: Record<string, string>; sel: 
   { name: "the Timeline tab", width: 1024, attrs: { "data-open": "true" }, sel: ".weft-timeline", act: timeline },
   { name: "the experiment drawer open", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-drawer select[aria-label=thread]", act: drawer },
   { name: "the Raw tab's tree with the shortcuts overlay", width: 1024, attrs: { "data-open": "true", "data-position": "bottom-dock" }, sel: ".weft-keys", act: rawAndKeys },
+  { name: "the Request tab: chips, diff, a tool's schema tree, the earlier messages", width: 1024, attrs: { "data-open": "true", "data-position": "bottom-dock" }, sel: "#weft-tp-request [data-weft-messages-earlier] .weft-tn", act: request, routes: requestRoutes, meta: { ...META, capabilities: [...META.capabilities, "requests"] } },
   { name: "badges, the cap line and the chips", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-chip="fork"]', act: badgesDrawn, routes: badgeRoutes },
 ]
 
@@ -127,7 +158,7 @@ describe("the axe budget: zero violations", () => {
     for (const m of MODES)
       it(`${m.name} (${theme})`, async () => {
         viewport(m.width, 768)
-        fakeStudio((m.routes ?? baseRoutes)())
+        fakeStudio((m.routes ?? baseRoutes)(), m.meta ?? META)
         const el = await mount({ ...BASE, ...m.attrs, ...themeAttrs })
         await m.act?.(el)
         expect(el.shadowRoot!.querySelector(m.sel)).not.toBeNull()

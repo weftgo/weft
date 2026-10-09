@@ -175,10 +175,8 @@ describe("a pre-A1 run's Request tab (D5's second Done clause)", () => {
     expect(title).toContain(HOLES.not_recorded.fix!)
   })
 
-  // The panel's Request tab is E1.2's: until it renders the request
-  // pane, its placeholder stands there and this case is skipped — it
-  // runs, unchanged, the moment the tab draws the record.
-  it("the panel's Request tab says not_recorded (runs once E1.2 draws the tab)", async (ctx) => {
+  // The panel's Request tab (E1.2) draws the record's hole.
+  it("the panel's Request tab says not_recorded", async () => {
     serve(NOT_RECORDED(), false)
     const el = await mount(ATTRS)
     await vi.waitFor(() => expect($(el, "#weft-tab-request")).toBeTruthy())
@@ -186,7 +184,7 @@ describe("a pre-A1 run's Request tab (D5's second Done clause)", () => {
     await settle()
     const tab = $(el, '[data-key="tp:request"]')!
     expect(tab).toBeTruthy()
-    if (/lands with E1\.2/.test(tab.textContent)) ctx.skip()
+    expect(tab.textContent).not.toMatch(/lands with E1\.2/)
     await vi.waitFor(() => expect(tab.querySelector('[data-hole="not_recorded"]')).toBeTruthy())
     expect(tab.querySelector('[data-hole="not_recorded"]')!.getAttribute("title")).toContain(HOLES.not_recorded.fix!)
   })

@@ -209,6 +209,16 @@ details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 .weft-tv { overflow: hidden; text-overflow: ellipsis; }
 .weft-tc { margin-left: auto; flex: none; background: none; border: none; color: var(--weft-dim); cursor: pointer; font: inherit; }
 .weft-tmore { margin: 1px 0; }
+/* The Request tab (E1.2) */
+.weft-rq-steps, .weft-rq-head { margin-bottom: 6px; align-items: center; }
+.weft-rq-row { display: flex; gap: 8px; margin-top: 7px; }
+.weft-rq-k { width: 76px; flex: none; color: var(--weft-dim); }
+.weft-rq-v { flex: 1; min-width: 0; }
+.weft-rq-prompt { white-space: pre-wrap; word-break: break-word; background: var(--weft-bg3); border-radius: var(--weft-radius-sm); padding: 4px 6px; }
+.weft-rq-hash, .weft-rq-def { color: var(--weft-dim); }
+.weft-rq-params > div { display: flex; gap: 8px; }
+.weft-rq-pk { width: 84px; flex: none; color: var(--weft-dim); }
+.weft-rq-tool { display: block; margin: 2px 0; }
 .weft-axis { flex: 1; position: relative; height: 14px; }
 .weft-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--weft-dim); font-size: 10px; white-space: nowrap; }
 .weft-tick:first-child { transform: none; }

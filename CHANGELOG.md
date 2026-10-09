@@ -10,6 +10,21 @@ module, ADR 0005).
 
 ### Added
 
+- **The devtools panel's Request tab** (plan E1.2): the run page's
+  Request pane in the panel, one step at a time (`J`/`K`, the tab's step
+  buttons, a step card; `⤢` carries it) — the chips "changed by
+  PrepareStep", "prompt changed at this step", "overridden by
+  experiment" and "catalog changed at this step" from the request
+  record's hashes, the system prompt with its bounded diff (vs the
+  previous step; at the first step vs the registered instructions when
+  the panel can read `/api/manifest`), the messages sent (count · bytes,
+  the last three inline, the rest in the Raw tab's tree), the tool
+  catalog (description, policy chips, schema tree), params with "adapter
+  default", tool choice, thinking, the attempts, a subagent call's child
+  request and the compaction marker. Every absent block is a badge; a
+  read-scoped token sees `hidden` and nothing else, and asks for no
+  prompt. The panel gate checks the studio-local trim's chip and diff
+  live. +5.5 KiB gzip (estimate +4 KiB).
 - **The devtools panel's honesty** (plan D5): every badge the panel
   draws comes from the A3 table through one module,
   `src/panel/badges.ts` (`<span class="weft-badge" data-hole="…">`, the

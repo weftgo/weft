@@ -4,13 +4,13 @@
 // state.ts owns the data. Rung 1 is a viewer (§8.1); rung 2's
 // experiment drawer and approval controls render only when
 // meta.capabilities reports the playground (§8.5 item 3).
-import type { RunCompaction, RunRow, ToolCallPart, Transcript, Usage } from "../lib/api"
+import type { Manifest, RunCompaction, RunRow, ToolCallPart, Transcript, Usage } from "../lib/api"
 import { isHoleRef } from "../lib/api"
 import { mergeHoles, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
 import type { HoleMark } from "../lib/honesty"
 import { paramsLine, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
 import { badge, capLine, cutBadge, holeBadges, holeLine, noPublicIdWords, requestCapped, requestHole, turnChips } from "./badges"
-import { fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, REQUEST_PAGE } from "./client"
+import { fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, panelGet, REQUEST_PAGE } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
 import { callState, runHoles, stepHoles, truncation } from "../lib/events"
 import {
@@ -51,6 +51,8 @@ import type { ExperimentDraft, TurnWords } from "./playground"
 import { panelStudioVersion } from "./version"
 import { clampLayout, CYCLE, geometry, initialLayout, NARROW_W, pillPlace, placedIn, Push, readStore, TABS, writeStore } from "./layout"
 import { newTree, treeView } from "./tree"
+import type { TreeState } from "./tree"
+import { renderRequestTab } from "./request"
 import type { Geometry, Layout } from "./layout"
 import { href, playgroundLink, runLink, sessionLink, traceLink } from "../lib/links"
 import type { PlaygroundHandoff } from "../lib/links"
@@ -427,6 +429,14 @@ export class WeftDevtools extends HTMLElement {
   private tree = newTree()
   private treeFor = ""
   private rawMemo: { key: unknown[]; doc: unknown } | null = null
+  /** The Request tab's (E1.2): its trees (a tool's schema, the earlier
+   * messages) and the attempt picked per step, of the turn rqFor; the
+   * manifest (undefined: not asked yet; null: not readable here). */
+  private rqTrees = new Map<string, TreeState>()
+  private rqPick = new Map<number, number>()
+  private rqFor = ""
+  private manifest: Manifest | null | undefined = undefined
+  private manifestAsked = false
   /** The turn list's filter (D4), this session only. */
   private tq = { text: "", status: "", err: false }
   /** The prompts of the turns opened so far, by run id: what the
@@ -1356,9 +1366,11 @@ export class WeftDevtools extends HTMLElement {
     else if (k === "j" || k === "k") this.turnKey(k === "j" ? 1 : -1)
     else if (k === "J" || k === "K") this.stepKey(k === "J" ? 1 : -1)
     else if (k === "/") {
-      // D4: the open Raw tab's filter, else the turn list's.
-      const raw = this.lay.tab === "raw" && this.last.turn
-      const box = this.body.querySelector<HTMLElement>(raw ? ".weft-tree-q" : ".weft-turn-q")
+      // D4: the open Raw tab's filter, else the turn list's; on the
+      // Request tab (E1.2) an open tree's filter, else the turn list's.
+      const tab = this.last.turn ? this.lay.tab : ""
+      const tree = tab === "raw" || tab === "request" ? this.body.querySelector<HTMLElement>(`#weft-tp-${tab} .weft-tree-q`) : null
+      const box = tree ?? (tab === "raw" ? null : this.body.querySelector<HTMLElement>(".weft-turn-q"))
       if (box) box.focus()
       else done = false // no box (an empty list): the key stays the page's
     } else done = false
@@ -2398,7 +2410,7 @@ export class WeftDevtools extends HTMLElement {
     if (tab !== "story")
       panel(
         el("div", undefined, [
-          tab === "raw" ? this.rawView(t) : tab === "timeline" ? renderTimeline(t) : el("div", "weft-note", "Request: lands with E1.2"),
+          tab === "raw" ? this.rawView(t) : tab === "timeline" ? renderTimeline(t) : this.requestView(s, t),
         ]),
         tab
       )
@@ -3181,6 +3193,73 @@ export class WeftDevtools extends HTMLElement {
       },
       root: () => this.shadow,
     })
+  }
+
+  /** requestView is the Request tab (E1.2, request.ts): the step
+   * being read (J/K, a click, select) — its prompt, diff, chips,
+   * messages, catalog, params and attempts. */
+  private requestView(s: PanelState, t: TurnView): HTMLElement {
+    if (this.rqFor !== t.id) {
+      this.rqTrees.clear()
+      this.rqPick.clear()
+      this.rqFor = t.id
+    }
+    const redraw = () => {
+      if (this.isConnected) this.render(this.last)
+    }
+    const status = this.rowOf(t.id)?.status ?? t.doc?.status ?? "running"
+    const open = { keys: this.openKeys, scope: t.id }
+    return renderRequestTab({
+      t,
+      step: linkedStep(s),
+      running: status === "running",
+      manifest: () => this.readManifest(redraw),
+      keys: this.openKeys,
+      tree: (k) => {
+        let st = this.rqTrees.get(k)
+        if (!st) this.rqTrees.set(k, (st = newTree()))
+        return st
+      },
+      cx: { redraw, root: () => this.shadow },
+      select: (n) => this.model?.selectStep(n),
+      pick: this.rqPick,
+      redraw,
+      compaction: (c) => compactionBox(c, compactionsOf(t.doc), t.transcript, open),
+      child: (call) => {
+        const id = call.childRunId ?? ""
+        const cv = t.children.get(id)
+        const name = el("span", "weft-name", call.name, { title: id })
+        const box = el("div", "weft-call", [el("div", "weft-call-h", [name, el("span", "weft-args", "subagent · step 0")])], {
+          "data-key": `sub:${call.callId}`,
+          "data-weft-rq-child": id,
+        })
+        // Read on demand, as the Story's expander reads it (A10).
+        if (cv?.requests) box.appendChild(requestLine(0, cv.requests, cv.status, open))
+        else box.appendChild(on(el("button", "weft-btn", "read its request", { type: "button" }), "click", () => this.go(this.model?.expandChild(id))))
+        return box
+      },
+    })
+  }
+
+  /** readManifest is the registered config the Request tab's first
+   * step diffs against (E1.2): read once, when a chip needs it, and
+   * only where it can be read — a read-scoped token never asks. */
+  private readManifest(redraw: () => void): Manifest | null | undefined {
+    if (tokenScope(this.cfg.token) === "read") return null
+    if (!this.manifestAsked) {
+      this.manifestAsked = true
+      panelGet<Manifest>({ base: this.base, token: this.cfg.token }, "manifest").then(
+        (m) => {
+          this.manifest = Array.isArray((m as Partial<Manifest> | null)?.agents) ? m : null
+          redraw()
+        },
+        () => {
+          this.manifest = null
+          redraw()
+        }
+      )
+    }
+    return this.manifest
   }
 
   private rowOf(id: string): RunRow | undefined {

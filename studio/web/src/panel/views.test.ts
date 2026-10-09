@@ -119,12 +119,12 @@ describe("the tabs", () => {
     expect(tab(el, "story").getAttribute("aria-selected")).toBe("true")
   })
 
-  it("Request is E1.2's: an honest placeholder panel", async () => {
+  it("Request is E1.2's pane (requesttab.test.ts); without the record it says why, never empty", async () => {
     fakeStudio(baseRoutes())
     const el = await mount(BASE)
     click(tab(el, "request"))
     await settle()
-    expect(text(el, "#weft-tp-request")).toBe("Request: lands with E1.2")
+    expect(text(el, "#weft-tp-request")).toContain("request record not served by this Studio")
   })
 
   it("r opens Raw and again goes back to the tab before it; the raw button is a toggle (aria-pressed)", async () => {

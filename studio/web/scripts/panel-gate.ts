@@ -408,6 +408,31 @@ async function main() {
     console.log("PASS the deep link resolves in Studio (the SPA shell serves the route)")
   }
 
+  // 5b. the Request tab (plan E1.2): the example's PrepareStep
+  // (trimGuidance) drops the guidance paragraph from step 1 on — the
+  // tab shows step 1 with the "changed by PrepareStep" chip and the
+  // paragraph as a deletion in its diff vs step 0. Back to Story after
+  // (the experiment action below lives there).
+  if (!args.otlp) {
+    const Ev = (dom.window as unknown as { Event: typeof Event }).Event
+    const press = (sel: string) => $(sel)?.dispatchEvent(new Ev("click", { bubbles: true }))
+    press("#weft-tab-request")
+    await waitFor(() => ($('#weft-tp-request [data-weft-rq-step="1"]') ? "step 1" : null), "the Request tab lists the trimmed turn's steps")
+    press('#weft-tp-request [data-weft-rq-step="1"]')
+    await waitFor(() => {
+      const chips = Array.from($("#weft-tp-request")?.querySelectorAll("[data-weft-mark]") ?? []).map((m) => m.textContent)
+      return $('#weft-tp-request [data-weft-rq-pane="1"]') && chips.includes("changed by PrepareStep") ? chips.join(", ") : null
+    }, 'the Request tab: step 1 carries the "changed by PrepareStep" chip')
+    const del = await waitFor(() => {
+      const dels = Array.from($("#weft-tp-request")?.querySelectorAll('[data-weft-diff="del"]') ?? []).map((r) => r.textContent)
+      const line = dels.find((r) => r.includes("First-step guidance"))
+      return line && !$('#weft-tp-request [data-weft-diff="add"]') ? line : null
+    }, "the Request tab: step 1's diff vs step 0 deletes the guidance paragraph (no additions)")
+    console.log(`     the deleted line: ${del}`)
+    press("#weft-tab-story")
+    await waitFor(() => ($("#weft-tab-story")?.getAttribute("aria-selected") === "true" ? "story" : null), "back on the Story tab")
+  }
+
   // 6. rung 2's P1 gate (WEFT-PLAYGROUND §10.6, setup A's shape): edit
   // the prompt in the panel, re-run through the runtime link, see the
   // result stream in place with the inline diff — and the original

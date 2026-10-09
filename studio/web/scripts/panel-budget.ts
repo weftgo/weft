@@ -5,10 +5,27 @@
 // delta is more than half again its estimate — then the total against
 // the cap and the headroom left. vite.panel.config.ts prints it on
 // every panel build (`bun run build`, `make studio-build`/`studio-check`),
-// measured there with node's zlib, as the ledger's rows were, over the
+// measured there with gzipSize (pako's pure-JS deflate, below) over the
 // bundle with its version stamp normalized (normalizeStamp) so a version
 // bump moves no byte. The table is evidence, not a gate: only the cap
 // fails the build.
+
+import { gzip } from "pako"
+
+/** gzipSize is panel.js's gzip bytes as the ledger counts them, in the
+ * build (vite.panel.config.ts) and in budget.test.ts alike: pako's
+ * pure-JS port of zlib's deflate (pinned by package.json and the
+ * lockfile) at level 6, gzip -6's default. Not node:zlib: vite and
+ * vitest run under the host Node, whose bundled zlib differs across
+ * versions (a local Node 22 read the committed bundle as 62,734 B, the
+ * CI runner's Node as 62,590 B), so a ledger row held only on the
+ * machine that wrote it. pako's bytes depend on the input and its own
+ * version alone. The ledger's rows before its "measure" note (beside
+ * "about") were measured with node:zlib; from the next row on, with
+ * this. */
+export function gzipSize(code: string): number {
+  return gzip(code, { level: 6 }).length
+}
 
 export interface BudgetItem {
   id: string

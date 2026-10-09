@@ -153,7 +153,10 @@ const bootScript: HTMLScriptElement | null = (() => {
  * ladder suite, which writes a tag with this src. */
 export const selfURL: string = (() => {
   try {
-    return String(import.meta.url ?? "")
+    // A bundler that rewrites import.meta may leave url undefined at
+    // runtime though it is typed string: read it as unknown.
+    const url: unknown = import.meta.url
+    return typeof url === "string" ? url : ""
   } catch {
     return ""
   }

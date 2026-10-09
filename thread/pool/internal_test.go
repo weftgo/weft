@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"testing"
 
@@ -97,6 +98,38 @@ func TestRegistersPruned(t *testing.T) {
 	if len(p.delegates) != 0 || len(p.byChild) != 0 || len(p.sessionAgents) != 0 || len(p.calls) != 0 {
 		t.Errorf("after 20 settled delegations: delegates=%d byChild=%d sessionAgents=%d calls=%d, want all empty",
 			len(p.delegates), len(p.byChild), len(p.sessionAgents), len(p.calls))
+	}
+}
+
+// A pump reads the ledger, then looks for each child's delegate; a
+// delegation that settles between the two has retired its delegate and
+// its Register'd agent. The lookup reads the ledger again after the
+// miss and reports the delegation settled — it used to report
+// ErrNoAgent for the child that had just finished (TestDecideJoinsErrors
+// on CI, where Decide's own pump raced the watch's) or reopen it.
+func TestDelegateForReadsTheLedgerAfterTheMiss(t *testing.T) {
+	ctx := context.Background()
+	p := New(1)
+	parent, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
+	gate := make(chan struct{})
+	r, err := p.Submit(ctx, parent, core.New(stubModel{gate: gate}), "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, ok := lookup(parent, r.ID) // the pump's read, a step behind
+	if !ok || stale.Settled() {
+		t.Fatalf("receipt before the run = %+v, %v", stale, ok)
+	}
+	close(gate)
+	if rc, err := p.Wait(ctx, parent, r.ID); err != nil || rc.State != Done {
+		t.Fatalf("receipt = %+v, %v", rc, err)
+	}
+	d, err := p.delegateFor(ctx, parent, stale, "")
+	if !errors.Is(err, errSettled) || d != nil {
+		t.Fatalf("delegateFor on a delegation settled since the read = %v, %v; want errSettled", d, err)
+	}
+	if err := p.Close(ctx); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -1,5 +1,6 @@
 {
   "about": "The devtools panel's size ledger (plan phase 3; studio/README.md, 'The size ledger'). Append-only: an item that lands appends one row — its label, the budget item it counts against (\"\" for none) and panel.js's gzip bytes after it — and never edits an earlier one. scripts/panel-budget.ts prints the per-item table from it on every build; only the cap fails the build. Sizes are measured with the version stamp normalized: the stamped version string (scripts/weft-version.ts, JSON-quoted) is replaced by the fixed-length placeholder \"v0.00.0\" (normalizeStamp) before gzip, in the build and in budget.test.ts alike, so a version bump moves no byte; the rows before this normalization read the same under it.",
+  "measure": "The rows through \"verification fixes\" (62,734 B) were measured with node:zlib's gzipSync under the host Node, whose zlib differs across Node versions (the CI runner read the same bundle as 62,590 B). From the next row on, sizes are measured with gzipSize (scripts/panel-budget.ts): pako's pure-JS port of zlib's deflate at level 6, pinned by the lockfile, the same bytes on any host. Earlier rows stay as recorded.",
   "cap": 81920,
   "items": [
     { "id": "D1", "what": "drag/resize/dock/persist", "estimate": 4096 },

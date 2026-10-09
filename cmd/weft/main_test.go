@@ -359,17 +359,22 @@ func TestListenShutsDownGracefully(t *testing.T) {
 	go func() { done <- serveOn(httpSrv, ln, io.Discard) }()
 
 	// The server came up; then SIGTERM (to ourselves — listen's
-	// signal.Notify catches it before the default disposition).
-	deadline := time.Now().Add(2 * time.Second)
+	// signal.Notify catches it before the default disposition). Up
+	// means an HTTP answer, not a TCP connect: ln is bound before
+	// serveOn even runs, so a connect succeeded before its Notify was
+	// armed, and a SIGTERM then killed the test binary (CI's "signal:
+	// terminated"); Serve starts only after the Notify.
+	deadline := time.Now().Add(5 * time.Second)
 	for {
-		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		resp, err := http.Get("http://" + addr + "/")
 		if err == nil {
-			_ = conn.Close()
+			_ = resp.Body.Close()
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("server never listened on %s: %v", addr, err)
+			t.Fatalf("server never served on %s: %v", addr, err)
 		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	signalSelf(t, syscall.SIGTERM)
 	select {

@@ -28,10 +28,13 @@ vet:
 fmt:
 	for m in $(MODULES); do (cd $$m && $(GO) fmt ./...) || exit 1; done
 
-# Needs: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-# PATH gains GOPATH/bin so the target works from a bare shell (as apidiff does).
+# Needs: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+# (the version ci.yml's lint job pins; a release built with a Go older
+# than the toolchain's export data fails every import — v2.13.2 under
+# Go 1.27.2). PATH gains GOPATH/bin, last, so the target works from a
+# bare shell (as apidiff does) and a golangci-lint already on PATH wins.
 lint:
-	for m in $(MODULES); do (cd $$m && PATH="$$(go env GOPATH)/bin:$$PATH" golangci-lint run) || exit 1; done
+	for m in $(MODULES); do (cd $$m && PATH="$$PATH:$$(go env GOPATH)/bin" golangci-lint run) || exit 1; done
 
 tidy:
 	for m in $(MODULES); do (cd $$m && $(GO) mod tidy) || exit 1; done

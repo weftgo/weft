@@ -157,6 +157,9 @@ func (p *Pool) reattach(ctx context.Context, parent *thread.Session, rc Receipt)
 		}
 	}
 	d, err := p.delegateFor(ctx, parent, rc, wrapper)
+	if errors.Is(err, errSettled) {
+		return nil // settled since the caller read the ledger: nothing to reattach
+	}
 	if err != nil {
 		return err
 	}

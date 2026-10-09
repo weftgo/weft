@@ -280,7 +280,7 @@ describe("review: the per-run bookkeeping is bounded and starts empty", () => {
     evParked: Set<string>
     evErrored: Set<string>
     byPath: Map<string, Scope>
-    onDetected(sc: Scope, path: string): void
+    onDetected: (sc: Scope, path: string) => void
   }
   const books = (el: WeftDevtools) => el as unknown as Books
 

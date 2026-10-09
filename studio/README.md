@@ -688,7 +688,10 @@ measured with the version stamp normalized — the stamped version
 string (`scripts/weft-version.ts`) replaced by the fixed-length
 placeholder `"v0.00.0"` (`normalizeStamp` in `scripts/panel-budget.ts`)
 before gzip, in the build and in `budget.test.ts` alike, so a version
-bump moves no ledger byte:
+bump moves no ledger byte — and gzipped by `gzipSize` there, pako's
+pure-JS deflate at level 6, not `node:zlib`, whose bytes differ across
+the host Node versions vite and vitest run under (the ledger's
+`measure` note says which rows were measured which way):
 each plan item's estimate beside its measured gzip delta, `over` when
 the delta is more than half again the estimate (`over (accepted)` when
 the plan recorded why it was not split), the unbudgeted items, the

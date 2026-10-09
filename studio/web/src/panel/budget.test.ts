@@ -2,9 +2,8 @@
 // evidence; scripts/panel-budget.ts over the committed ledger).
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { gzipSync } from "node:zlib"
 import { describe, expect, it } from "vitest"
-import { budgetTable, normalizeStamp, STAMP_PLACEHOLDER } from "../../scripts/panel-budget"
+import { budgetTable, gzipSize, normalizeStamp, STAMP_PLACEHOLDER } from "../../scripts/panel-budget"
 import { weftVersion } from "../../scripts/weft-version"
 import type { Ledger } from "../../scripts/panel-budget"
 
@@ -44,14 +43,15 @@ describe("the size ledger (panel-budget.json)", () => {
 
   it("its last row is the committed panel.js, measured with the version stamp normalized", () => {
     const code = readFileSync(resolve(process.cwd(), "../dist/panel/panel.js"), "utf8")
-    const built = gzipSync(normalizeStamp(code, weftVersion())).length
+    // gzipSize, as the build measures: a pure-JS deflate, the same bytes under any host Node.
+    const built = gzipSize(normalizeStamp(code, weftVersion()))
     expect(ledger.rows.at(-1)?.gzip).toBe(built)
   })
 
   it("a version bump moves no measured byte: the stamp is normalized to a fixed-length placeholder", () => {
     const code = readFileSync(resolve(process.cwd(), "../dist/panel/panel.js"), "utf8")
     const stamp = JSON.stringify(weftVersion())
-    const measure = (v: string) => gzipSync(normalizeStamp(code.split(stamp).join(JSON.stringify(v)), v)).length
+    const measure = (v: string) => gzipSize(normalizeStamp(code.split(stamp).join(JSON.stringify(v)), v))
     const at = measure(weftVersion())
     for (const v of ["v0.12.0", "v0.100.0", "v1.0.0", "v0.12.0-rc.1"]) expect(measure(v)).toBe(at)
     expect(normalizeStamp(`x=${stamp}`, weftVersion())).toBe(`x=${JSON.stringify(STAMP_PLACEHOLDER)}`)
@@ -75,9 +75,10 @@ describe("the size ledger (panel-budget.json)", () => {
   })
 
   it("says when the build differs from the last row, and only the cap fails", () => {
-    const drift = budgetTable(ledger, 62805)
+    const last = ledger.rows.at(-1)!
+    const drift = budgetTable(ledger, last.gzip + 71)
     expect(drift.over).toBe(false)
-    expect(drift.lines.some((l) => l.includes("differs from the ledger's last row (verification fixes, 62,734 B) by +0.1 KiB"))).toBe(true)
+    expect(drift.lines.some((l) => l.includes(`differs from the ledger's last row (${last.label}, ${last.gzip.toLocaleString("en-US")} B) by +0.1 KiB`))).toBe(true)
     const big = budgetTable(ledger, 81921)
     expect(big.over).toBe(true)
     expect(big.lines.at(-1)).toContain("OVER THE CAP")

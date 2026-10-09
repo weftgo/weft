@@ -397,6 +397,9 @@ func (p *Pool) pump(ctx context.Context, parent *thread.Session) error {
 			continue // a mirror with no delegation behind it: nothing to resume
 		}
 		d, err := p.delegateFor(ctx, parent, rc, wrappers[childID])
+		if errors.Is(err, errSettled) {
+			continue // it finished since the ledger read above (a racing pump armed it)
+		}
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -543,6 +546,15 @@ func (p *Pool) delegateFor(ctx context.Context, parent *thread.Session, rc Recei
 		return d, nil
 	}
 	p.mu.Unlock()
+	// No live delegate: the ledger is the truth, read after the miss.
+	// rc may be a step behind it — a delegation that settled between
+	// the caller's Receipts read and this lookup has retired its
+	// delegate and its Register'd agent (settle records the ledger
+	// first), and reopening it would report ErrNoAgent for a child
+	// that just finished, or resume one that is over.
+	if receiptSettled(parent, rc.ID) {
+		return nil, errSettled
+	}
 	agent, name, err := p.agentForSession(ctx, parent, rc.Child)
 	if err != nil {
 		return nil, err
@@ -573,6 +585,16 @@ func (p *Pool) delegateFor(ctx context.Context, parent *thread.Session, rc Recei
 	p.delegates[rc.ID] = d
 	p.mu.Unlock()
 	return d, nil
+}
+
+// errSettled is delegateFor's answer for a delegation the ledger
+// already holds settled: there is nothing to arm or reattach.
+var errSettled = errors.New("thread/pool: the delegation is settled")
+
+// receiptSettled reads the parent's ledger now for receipt id.
+func receiptSettled(parent *thread.Session, id string) bool {
+	r, ok := lookup(parent, id)
+	return ok && r.Settled()
 }
 
 // lineageInfo rebuilds the run info of a child of parent after a

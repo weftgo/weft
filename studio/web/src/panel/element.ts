@@ -141,7 +141,7 @@ function capAdd(set: Set<string>, k: string, max: number): void {
 
 /** capSet sets k in a map bounded at max; a key set again is the
  * newest. */
-function capSet<V>(m: Map<string, V>, k: string, v: V, max: number): void {
+function capSet<TValue>(m: Map<string, TValue>, k: string, v: TValue, max: number): void {
   m.delete(k)
   m.set(k, v)
   if (m.size > max) m.delete(m.keys().next().value as string)

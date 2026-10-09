@@ -195,6 +195,36 @@ module, ADR 0005).
   prompt and the catalog hidden (its args edits checked for shape only,
   its registration refusals generic, the messages hidden under a view).
 
+- **Edit the transcript in place, web half** (plan F2.2): on both
+  surfaces — the run page's Story and the devtools panel's Story tab —
+  step 0's prompt, a steer, a call's args, a tool result and a call-free
+  reply become a textarea in place (click, or Enter on its pencil), with
+  revert and a red "edited" chip, and each step boundary takes an
+  inserted message; the edits accumulate into the replay drawer's one
+  command (opened, verb "Edit the transcript and replay", on the first
+  edit), which lists them by kind, keeps `from_step` at what they imply
+  (an edit of step N needs N+1, an insert at N needs N) and runs them on
+  engine live (the scripted engine is refused with edits, and the drawer
+  says why). `transcript_edits` always carries `kind` (`args` an object,
+  each kind's own fields only) — one module, `src/lib/edits.ts`, for both
+  surfaces' bodies, byte-identical. An args edit is JSON checked in the
+  editor against the tool's schema from the step's catalog record —
+  `checkArgs`, `obsdb.CheckToolArgs`' rules by name — and a refusal is
+  said on the field in the loop's `INVALID_INPUT` words and holds Run.
+  The drawer's "will be sent" preview (capability `preview`) draws
+  `POST /api/playground/preview` through `src/lib/preview.ts`: the
+  system's state, the messages with an op per row (a changed row shows
+  was and will), tools added/removed, the knobs that changed, every
+  `*_badge` from the honesty table, the warnings and the `unchecked`
+  line; re-read (debounced) as the edits and overrides change, its 400
+  shown verbatim and holding Run; none for a fork. A replayed run whose
+  row carries `weft.edits` draws its chips ("args edited", "result
+  edited", "edited", "inserted") with the edited args or result read
+  from its input by call id; a child run, which inherits the mark, draws
+  none. The panel no longer says "reading the step compare…" forever
+  for a run that settled before meta reported `diff`. Panel: +4,822 B
+  gzip (ledger row F2, estimate 4,096 B).
+
 - **Studio URLs that mean something** (plan G2): every piece of page
   state lives in search params, through `lib/links.ts` — the trace
   page's selected span and view (`traces/<id>?span=…&view=chat`), the

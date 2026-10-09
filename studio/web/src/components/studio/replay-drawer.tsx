@@ -13,6 +13,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { XIcon } from "lucide-react"
 import { createContext, useContext, useEffect, useRef, useState } from "react"
+import type { Dispatch, SetStateAction } from "react"
 
 import { ApiError, isHoleRef, isRequestRow, postPlaygroundRun, runQuery, runtimesQuery, stepQuery } from "@/lib/api"
 import type { AgentView, PlaygroundRunBody, StepDoc } from "@/lib/api"
@@ -20,6 +21,7 @@ import { compactionsOf, isSessionMarker } from "@/lib/compaction"
 import { buildRunBody, labProblems, pickTarget, unmatchedDrafts } from "@/lib/experiment-body"
 import type { EditDraft, VariantFields } from "@/lib/experiment-body"
 import { compareLink, playgroundLink, runLink } from "@/lib/links"
+import { impliedFromStep, putEdit } from "@/lib/edits"
 import { allowRefusals, breakpointsFor, prefixLine, replayVerdicts } from "@/lib/replay"
 import type { CatalogTool, ReplayDraft, SideEffectsMode, ToolVerdict } from "@/lib/replay"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -33,6 +35,7 @@ import {
 } from "@/components/studio/experiment-form"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { StepCompare } from "@/components/studio/step-diff"
+import { EditList, PreviewPane, usePreview } from "@/components/studio/transcript-editor"
 import { Button } from "@/components/ui/button"
 
 /** One "replay from here": the run to take the turn from (a child
@@ -64,17 +67,28 @@ const VERB_TITLES: Record<ReplayDraft["verb"], string> = {
   edit_prompt: "Edit the prompt and replay",
   rerun: "Re-run",
   continue: "Continue here with a new message",
+  edit: "Edit the transcript and replay",
 }
 
 export function ReplayDrawer({
   request,
   requestKey,
   onClose,
+  edits,
+  setEdits,
+  invalid = [],
 }: {
   request: ReplayRequest | null
   /** A new value per opening: a new request is a new form. */
   requestKey?: number
   onClose: () => void
+  /** The command's transcript edits (plan F2), held by the run page —
+   * the Story's editor adds to them. Absent: the form holds its own,
+   * from the draft. */
+  edits?: EditDraft[]
+  setEdits?: (e: EditDraft[]) => void
+  /** The editor's refusals (a schema-invalid args edit): Run is held. */
+  invalid?: string[]
 }) {
   // Non-modal (the sheet's look, not its focus trap): the run stays
   // readable and its other verbs usable beside the drawer. Escape
@@ -121,7 +135,7 @@ export function ReplayDrawer({
       >
         <XIcon />
       </Button>
-      <ReplayForm key={requestKey} request={request} />
+      <ReplayForm key={requestKey} request={request} lifted={edits && setEdits ? { edits, setEdits } : undefined} invalid={invalid} />
     </aside>
   )
 }
@@ -252,7 +266,15 @@ export function ReplayAck({
   )
 }
 
-function ReplayForm({ request }: { request: ReplayRequest }) {
+function ReplayForm({
+  request,
+  lifted,
+  invalid,
+}: {
+  request: ReplayRequest
+  lifted?: { edits: EditDraft[]; setEdits: (e: EditDraft[]) => void }
+  invalid: string[]
+}) {
   const { caps } = useCapabilities()
   const { draft, runID } = request
   const runtimes = useQuery({ ...runtimesQuery(), refetchInterval: 5_000 })
@@ -267,7 +289,11 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
   const registered = agent?.instructions ?? ""
 
   const [fromStep, setFromStep] = useState(draft.fromStep)
-  const [editDrafts, setEditDrafts] = useState<EditDraft[]>(() => draft.edits.map((e) => ({ ...e })))
+  const [ownDrafts, setOwnDrafts] = useState<EditDraft[]>(() => draft.edits.map((e) => ({ ...e })))
+  const editDrafts = lifted ? lifted.edits : ownDrafts
+  const setEditDrafts: Dispatch<SetStateAction<EditDraft[]>> = lifted
+    ? (v) => lifted.setEdits(typeof v === "function" ? v(lifted.edits) : v)
+    : setOwnDrafts
   const [variant, setVariant] = useState<VariantFields>(() => ({
     instructions: draft.instructions ?? "",
     toolsOff: new Set(),
@@ -284,6 +310,17 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
     // step it would keep is reset, never sent and refused.
     if (p.thread === "fork") setFromStep(0)
   }
+  // The prefix keeps every edited step (plan F2): from_step follows the
+  // edits up, never down; and an edited prefix needs engine live (the
+  // scripted engine's turns answered the recorded prompt).
+  const implied = impliedFromStep(editDrafts)
+  useEffect(() => {
+    if (variant.thread !== "fork" && implied > fromStep) setFromStep(implied)
+  }, [implied, fromStep, variant.thread])
+  const edited = editDrafts.length > 0 && variant.thread !== "fork"
+  useEffect(() => {
+    if (edited && variant.engine === "scripted") setVariant((v) => ({ ...v, engine: "live" }))
+  }, [edited, variant.engine])
   // Focus on open: the heading, then — when the verb pre-filled a field
   // (the edit, the prompt, the input) — that field, once it is drawn
   // (the edit's field waits for the transcript).
@@ -407,6 +444,31 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
   // walk), whatever the step offered.
   const refused = allowRefusals(agent, variant.sideEffects, toolsEnabled)
 
+  // The preview (plan F2, capability "preview"): the request the
+  // replay's first step will send — the same body Run posts, assembled
+  // by Studio (no runtime needed), re-read while the form changes. A
+  // fork is not an ephemeral replay: none. Its 400 holds Run.
+  let previewBody = ""
+  if (caps.includes("preview") && variant.thread !== "fork" && wantAgent) {
+    try {
+      previewBody = JSON.stringify(
+        buildRunBody({
+          runtime: runtime?.id ?? "",
+          agent: agent ?? { name: wantAgent, models: [], tools: [] },
+          variant,
+          sourceRunID: runID,
+          fromStep,
+          input: variant.input,
+          edits: editDrafts,
+          publicID: sourceRow?.public_id || undefined,
+        })
+      )
+    } catch {
+      // The form's own refusal is said where Run's error goes.
+    }
+  }
+  const preview = usePreview(previewBody)
+
   const run = async () => {
     setError("")
     if (!runtime || !agent || busy) return
@@ -481,6 +543,13 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
         ) : (
           <StepPicker runID={runID} value={fromStep} onChange={setFromStep} />
         )}
+        <EditList edits={editDrafts} onDrop={(e) => setEditDrafts((cur) => putEdit(cur, e, true))} />
+        {edited ? (
+          <p className="text-[11px] text-faint" data-replay-live>
+            engine live: transcript edits need it — the scripted engine replays recorded turns, which answered a
+            different prompt
+          </p>
+        ) : null}
         <ExperimentForm
           variant={variant}
           patch={patch}
@@ -511,6 +580,12 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
           fromStep={variant.thread === "fork" ? 0 : fromStep}
           compacted={compacted}
         />
+        {previewBody ? <PreviewPane state={preview} fromStep={fromStep} /> : null}
+        {invalid.length ? (
+          <p className="text-xs text-status-bad" role="alert" data-replay-invalid>
+            an edit is refused in the editor: {invalid[0]}
+          </p>
+        ) : null}
         {refused.length ? (
           <p className="text-xs text-status-bad" role="alert">
             side effects allow is refused while {refused.join(", ")} {refused.length === 1 ? "is" : "are"} on:
@@ -567,6 +642,8 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
               labProblems(variant, agent).length > 0 ||
               pastEnd ||
               scriptedPastEnd ||
+              invalid.length > 0 ||
+              Boolean(preview.refused) ||
               (variant.thread === "fork" && !variant.input.trim()) ||
               Boolean(experiment && !settled(experiment.state))
             }

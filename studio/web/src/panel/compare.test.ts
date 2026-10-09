@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { golden } from "../test/fake-studio"
+import type { PanelState } from "./state"
 import { $, all, DIFF_META, fakeStudio, META, mount, runExperiment, setup, stepDiffRoutes, teardown, text } from "./testkit"
 
 beforeEach(setup)
@@ -99,6 +100,20 @@ describe("the result pane's step compare", () => {
     release(golden("diff"))
     await vi.waitFor(() => expect($(el, "[data-weft-step-diff]")).not.toBeNull())
     expect($(el, "[data-weft-step-diff-loading]")).toBeNull()
+  })
+
+  it("a run settled before meta reported diff never reads forever: a later meta draws why the compare is absent", async () => {
+    const studio = fakeStudio(stepDiffRoutes(golden("diff")), META)
+    const el = await mount()
+    await runExperiment(el)
+    await vi.waitFor(() => expect(text(el, ".weft-xres")).toContain("It is delayed until Friday."))
+    const model = (el as unknown as { model: { state: PanelState; emit: () => void } }).model
+    model.state.meta = { ...model.state.meta!, capabilities: [...model.state.meta!.capabilities, "diff"] }
+    model.emit()
+    await vi.waitFor(() => expect(text(el, ".weft-xres")).toContain("the step compare could not be read"))
+    expect($(el, "[data-weft-step-diff-loading]")).toBeNull()
+    expect(text(el, ".weft-xres")).toContain("the server did not report the diff capability when the run settled")
+    expect(studio.gets("diff")).toHaveLength(0)
   })
 
   it("is not asked for, nor drawn, without capability diff", async () => {

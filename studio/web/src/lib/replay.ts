@@ -22,6 +22,7 @@
 //   - a tool switched off in tools_enabled is not offered at all.
 // lib/replay.test.ts pins the table.
 import type { AgentView, Message, RuntimeView, ToolEntry, ToolView } from "./api"
+import type { ReplayEdit } from "./edits"
 
 /** The command's side_effects mode ("" is the server's default,
  * substitute). */
@@ -164,18 +165,12 @@ export function breakpointsFor(runtime: Pick<RuntimeView, "breakpoints"> | undef
 // without a stored step, where order is the ordinal). A card sends its
 // own step.index — a fold with a gap shifts nothing.
 
-export type ReplayVerb = "from_step" | "edit_result" | "edit_prompt" | "rerun" | "continue"
+export type ReplayVerb = "from_step" | "edit_result" | "edit_prompt" | "rerun" | "continue" | "edit"
 
-/** One transcript edit on the kept prefix: a patched tool result
- * (callID + toolResult) or a rewritten call-free reply (content) — the
- * shape both clients' drafts share (§5.1's wire, flattened by their
- * buildRunBody). step is the step ordinal, as from_step. */
-export interface ReplayEdit {
-  step: number
-  callID?: string
-  toolResult?: string
-  content?: string
-}
+/** One transcript edit on the kept prefix (lib/edits.ts: the five
+ * kinds, the wire both clients' buildRunBody send). step is the step
+ * ordinal, as from_step. */
+export type { ReplayEdit } from "./edits"
 
 /** The drawer's pre-filled state for one verb. */
 export interface ReplayDraft {
@@ -232,6 +227,13 @@ export function editPromptAndReplay(n: number, systemText?: string): ReplayDraft
     input: "",
     focus: "prompt",
   }
+}
+
+/** edit the transcript and replay (plan F2): the Story's in-place
+ * editor opened the drawer; from_step is what its edits imply
+ * (lib/edits.ts's impliedFromStep), the edits come as they are made. */
+export function editTranscript(fromStep: number, edits: ReplayEdit[] = []): ReplayDraft {
+  return { verb: "edit", fromStep: pos(fromStep), edits, thread: "ephemeral", input: "" }
 }
 
 /** re-run: the whole turn again (from_step 0, the source's own input). */

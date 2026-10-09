@@ -30,7 +30,10 @@ import { compactionsOf } from "@/lib/compaction"
 import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
 import { overrideOf } from "@/lib/request-pane"
-import { canReplay } from "@/lib/replay"
+import { canReplay, editTranscript } from "@/lib/replay"
+import { editKey, impliedFromStep, putEdit, schemaAt } from "@/lib/edits"
+import type { ReplayEdit } from "@/lib/edits"
+import { replayBounds } from "@/lib/experiment-body"
 import type { RunSearch } from "@/lib/links"
 import type { Span as TraceSpan } from "@/lib/trace"
 import {
@@ -48,6 +51,8 @@ import { ReplayContext, ReplayDrawer } from "@/components/studio/replay-drawer"
 import type { ReplayRequest } from "@/components/studio/replay-drawer"
 import { SpanDetail } from "@/components/studio/span-detail"
 import { StepList } from "@/components/studio/step-list"
+import { EditorContext } from "@/components/studio/transcript-editor"
+import type { Editor } from "@/components/studio/transcript-editor"
 import { runRequests } from "@/components/studio/step-request"
 import { Waterfall } from "@/components/studio/waterfall"
 import { Button } from "@/components/ui/button"
@@ -167,10 +172,14 @@ function RunPage() {
     req: null,
     n: 0,
   })
-  const openReplay = useCallback(
-    (req: ReplayRequest) => setReplay((cur) => ({ req, n: cur.n + 1 })),
-    []
-  )
+  // The transcript editor's edits (plan F2): one command's, made in
+  // the Story and listed in the drawer; a verb's opening starts them
+  // over from its draft, closing the drawer drops them.
+  const [edits, setEdits] = useState<{ list: ReplayEdit[]; invalid: Record<string, string> }>({ list: [], invalid: {} })
+  const openReplay = useCallback((req: ReplayRequest) => {
+    setEdits({ list: req.draft.edits, invalid: {} })
+    setReplay((cur) => ({ req, n: cur.n + 1 }))
+  }, [])
   const cycleLayout = () =>
     setLayout((l) => {
       const next: Layout =
@@ -533,9 +542,37 @@ function RunPage() {
     )
   }
   const doc = run.data
+  // The editor (plan F2): on the run's own steps, where a replay can
+  // keep them — only with the drawer's verbs, never on a running run.
+  const maxFrom = transcript.data ? replayBounds(transcript.data.batches).max : null
+  const editor: Editor | null =
+    replayable && transcript.data && doc.status !== "running"
+      ? {
+          edits: edits.list,
+          invalid: edits.invalid,
+          maxFrom,
+          schema: (step, tool) => schemaAt(requests?.steps, step, tool),
+          put: (target, next, error) => {
+            const k = editKey(target)
+            const list = putEdit(edits.list, next ?? target, !next)
+            const invalid = { ...edits.invalid }
+            if (error) invalid[k] = error
+            else delete invalid[k]
+            setEdits({ list, invalid })
+            // The edits feed the drawer's one command: opened (on this
+            // run) when the first edit is made.
+            if (replay.req?.runID !== doc.id)
+              setReplay((cur) => ({
+                req: { runID: doc.id, agent: doc.agent || undefined, draft: editTranscript(impliedFromStep(list), list) },
+                n: cur.n + 1,
+              }))
+          },
+        }
+      : null
 
   return (
     <ReplayContext.Provider value={replayable ? openReplay : null}>
+    <EditorContext.Provider value={editor}>
     <div className="space-y-4">
       <RunHeader
         doc={doc}
@@ -746,10 +783,17 @@ function RunPage() {
         <ReplayDrawer
           request={replay.req}
           requestKey={replay.n}
-          onClose={() => setReplay((cur) => ({ ...cur, req: null }))}
+          edits={edits.list}
+          invalid={Object.values(edits.invalid)}
+          setEdits={(list) => setEdits((cur) => ({ ...cur, list }))}
+          onClose={() => {
+            setReplay((cur) => ({ ...cur, req: null }))
+            setEdits({ list: [], invalid: {} })
+          }}
         />
       ) : null}
     </div>
+    </EditorContext.Provider>
     </ReplayContext.Provider>
   )
 }

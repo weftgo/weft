@@ -313,6 +313,9 @@ describe("no panel-only badge strings", () => {
     "request.ts|data-weft-mark", // E1.2's change chips
     "request.ts|request could not be read",
     "request.ts|data-weft-attempts",
+    "element.ts|data-weft-edited", // the editor's "edited" chip (plan F2)
+    "editor.ts|MARK_CHIPS", // the replayed run's weft.edits chips
+    "editor.ts|changed`", // the preview's changed knobs
   ]
 
   it("every other weft-badge is a named non-hole badge", () => {

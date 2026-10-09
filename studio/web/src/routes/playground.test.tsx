@@ -140,15 +140,15 @@ describe("editFieldsOf", () => {
 })
 
 describe("wireEdits", () => {
-  it("maps drafts to §5.1's flattened shape — the panel's buildRunBody mapping", () => {
+  it("maps drafts to §5.1's shape, kind always sent — the panel's buildRunBody mapping", () => {
     expect(
       wireEdits([
         { step: 1, callID: "c2", toolResult: "429 Too Many Requests" },
         { step: 0, content: "a rewritten reply" },
       ])
     ).toEqual([
-      { step: 1, call_id: "c2", tool_result: "429 Too Many Requests" },
-      { step: 0, content: "a rewritten reply" },
+      { kind: "tool_result", step: 1, call_id: "c2", tool_result: "429 Too Many Requests" },
+      { kind: "reply", step: 0, content: "a rewritten reply" },
     ])
   })
 })
@@ -252,7 +252,7 @@ describe("the command body (§5.1, §10.4)", () => {
     expect(whole.transcript_edits).toBeUndefined()
     const cont = buildRunBody({ ...base, variant, fromStep: 2, input: "ignored", edits })
     expect(cont.input).toBeUndefined() // 400 otherwise: input with from_step > 0
-    expect(cont.transcript_edits).toEqual([{ step: 0, call_id: "c1", tool_result: "429" }])
+    expect(cont.transcript_edits).toEqual([{ kind: "tool_result", step: 0, call_id: "c1", tool_result: "429" }])
     expect(cont.source).toEqual({ run_id: "s_1-t3", from_step: 2 })
   })
 

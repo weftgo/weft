@@ -41,6 +41,9 @@ import {
 import { CallVerbs, SteerVerb, StepVerbs } from "@/components/studio/replay-verbs"
 import type { ReplayAt } from "@/components/studio/replay-verbs"
 import { RequestSection } from "@/components/studio/step-request"
+import { Editable, EditsMark, InsertHere, PromptEditor } from "@/components/studio/transcript-editor"
+import { userMessagesOf } from "@/lib/edits"
+import type { UserMessage } from "@/lib/edits"
 import type { RunRequests } from "@/components/studio/step-request"
 import { childOfStep, SubagentBlock } from "@/components/studio/subagent-block"
 import type { ChildRow } from "@/components/studio/subagent-block"
@@ -176,6 +179,7 @@ export function ToolCallRow({
   onJump,
   compact,
   replayAt,
+  editStep,
 }: {
   call: FoldedToolCall
   runStatus: string
@@ -184,6 +188,9 @@ export function ToolCallRow({
   compact?: boolean
   /** Where the call's replay verbs replay from (absent: none). */
   replayAt?: ReplayAt
+  /** The run's own step this call is of: its args and result are
+   * editable in place (plan F2); absent elsewhere (a child, a span). */
+  editStep?: number
 }) {
   const state = callState(call, runStatus)
   const [open, setOpen] = useState(true)
@@ -248,11 +255,22 @@ export function ToolCallRow({
       {open ? (
         <div className={`space-y-1.5 pt-1 ${compact ? "" : "max-w-3xl"}`}>
           {call.args !== undefined ? (
-            <CodeWin
-              title="args"
-              text={JSON.stringify(call.args, null, 2)}
-              json
-            />
+            editStep !== undefined ? (
+              <Editable
+                target={{ kind: "tool_args", step: editStep, callID: call.callId }}
+                recorded={JSON.stringify(call.args, null, 2)}
+                label={`the args of ${call.name} (${call.callId})`}
+                tool={call.name}
+              >
+                <CodeWin title="args" text={JSON.stringify(call.args, null, 2)} json />
+              </Editable>
+            ) : (
+              <CodeWin
+                title="args"
+                text={JSON.stringify(call.args, null, 2)}
+                json
+              />
+            )
           ) : call.streamedArgs ? (
             <div className="font-mono text-xs text-muted-foreground">
               writing args…{" "}
@@ -263,11 +281,17 @@ export function ToolCallRow({
             <SubagentBlock child={child} onJump={onJump} />
           ) : null}
           {call.result ? (
-            <CodeWin
-              title={call.result.isError ? "result · error as data" : "result"}
-              text={call.result.content}
-              tone={call.result.isError ? "error" : "result"}
-            />
+            <Editable
+              target={editStep !== undefined ? { kind: "tool_result", step: editStep, callID: call.callId } : { step: -1 }}
+              recorded={call.result.content}
+              label={`the result of ${call.name} (${call.callId})`}
+            >
+              <CodeWin
+                title={call.result.isError ? "result · error as data" : "result"}
+                text={call.result.content}
+                tone={call.result.isError ? "error" : "result"}
+              />
+            </Editable>
           ) : null}
         </div>
       ) : null}
@@ -287,6 +311,7 @@ export function StepBody({
   onJump,
   compact,
   replayAt,
+  editable,
 }: {
   step: FoldedStep
   runStatus: string
@@ -306,7 +331,10 @@ export function StepBody({
   compact?: boolean
   /** Where this step's replay verbs replay from (the call rows'). */
   replayAt?: ReplayAt
+  /** The run's own step: editable in place (plan F2). */
+  editable?: boolean
 }) {
+  const editStep = editable ? step.index : undefined
   return (
     <>
       {step.reasoning ? (
@@ -346,17 +374,26 @@ export function StepBody({
               onJump={onJump}
               compact={compact}
               replayAt={replayAt}
+              editStep={editStep}
             />
           ))}
         </div>
       )}
 
       {step.text ? (
-        <div
-          className={`${compact ? "text-xs" : "text-sm"} leading-relaxed whitespace-pre-wrap`}
+        <Editable
+          // A reply rewrite may not drop a step's calls (D2/D3): only a
+          // call-free reply is editable.
+          target={editStep !== undefined && step.toolCalls.length === 0 ? { kind: "reply", step: editStep } : { step: -1 }}
+          recorded={step.text}
+          label={`the reply of step ${step.index}`}
         >
-          {step.text}
-        </div>
+          <div
+            className={`${compact ? "text-xs" : "text-sm"} leading-relaxed whitespace-pre-wrap`}
+          >
+            {step.text}
+          </div>
+        </Editable>
       ) : null}
     </>
   )
@@ -369,11 +406,15 @@ function SteerBlock({
   steer,
   onJump,
   replayAt,
+  user,
 }: {
   steer: { text: string; pos: number }
   onJump?: (t: number) => void
   /** The step the steer followed (its replay verb runs the next). */
   replayAt?: ReplayAt
+  /** The user message the transcript holds for it (by its words): the
+   * user edit's step and index (plan F2). */
+  user?: UserMessage
 }) {
   return (
     <div
@@ -382,9 +423,15 @@ function SteerBlock({
     >
       <div className="min-w-0 flex-1">
         <span className="eyebrow text-thread/80">steered · user</span>
-        <p className="mt-0.5 text-sm leading-relaxed whitespace-pre-wrap">
-          {steer.text}
-        </p>
+        <Editable
+          target={user ? { kind: "user", step: user.step, index: user.index } : { step: -1 }}
+          recorded={steer.text}
+          label={`the steer after step ${user?.step ?? ""}`}
+        >
+          <p className="mt-0.5 text-sm leading-relaxed whitespace-pre-wrap">
+            {steer.text}
+          </p>
+        </Editable>
       </div>
       <span className="flex items-start">
         {replayAt ? <SteerVerb at={replayAt} /> : null}
@@ -442,6 +489,7 @@ function StepCard({
   transcript,
   transcriptError,
   replayAt,
+  prompt,
 }: {
   step: FoldedStep
   runId: string
@@ -459,6 +507,8 @@ function StepCard({
   onJump?: (t: number) => void
   requests?: RunRequests
   replayAt?: ReplayAt
+  /** Step 0's turn prompt: editable in place (plan F2). */
+  prompt?: UserMessage
 }) {
   const ref = useRef<HTMLDivElement>(null)
   // The step route's assembled holes when the page has it (A7): read
@@ -522,6 +572,7 @@ function StepCard({
             transcriptError={transcriptError}
           />
         ))}
+      {prompt ? <PromptEditor user={prompt} /> : null}
       {requests ? <RequestSection req={requests} step={step.index} /> : null}
       <AttemptsSection
         step={step}
@@ -536,6 +587,7 @@ function StepCard({
         stepChildren={stepChildren}
         onJump={onJump}
         replayAt={replayAt}
+        editable
       />
     </div>
   )
@@ -655,6 +707,10 @@ export function StepList({
   // fold's — a step_start without a reply counts there and would 400.
   const maxFrom = transcript ? replayBounds(transcript.batches).max : null
   const canFork = !doc.parent_run_id && Boolean(doc.session_id)
+  // The user messages the editor counts (plan F2): step 0's prompt on
+  // its card, a steer by its words.
+  const users = transcript ? userMessagesOf(transcript.batches) : []
+  const prompt = users.find((u) => u.step === 0 && u.index === 0)
   const replayAt = (index: number): ReplayAt => ({
     runID: doc.id,
     agent: doc.agent || undefined,
@@ -664,6 +720,7 @@ export function StepList({
   })
   return (
     <div className="space-y-3">
+      <EditsMark row={doc} batches={transcript?.batches} />
       {sessionMarkers.map((c, i) => (
         <CompactionMarker
           key={c.hash || `session-${i}`}
@@ -676,6 +733,7 @@ export function StepList({
       ))}
       {view.steps.map((step) => (
         <div key={step.index} className="space-y-3">
+          <InsertHere step={step.index} />
           <StepCard
             step={step}
             runId={doc.id}
@@ -689,9 +747,15 @@ export function StepList({
             transcript={transcript}
             transcriptError={transcriptError}
             replayAt={replayAt(step.index)}
+            prompt={step.index === 0 ? prompt : undefined}
           />
           {step.steer ? (
-            <SteerBlock steer={step.steer} onJump={onJump} replayAt={replayAt(step.index)} />
+            <SteerBlock
+              steer={step.steer}
+              onJump={onJump}
+              replayAt={replayAt(step.index)}
+              user={users.find((u) => u !== prompt && u.text === step.steer?.text)}
+            />
           ) : null}
         </div>
       ))}

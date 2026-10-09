@@ -956,7 +956,8 @@ describe("Run is held where the server would refuse (reviews 3.4, 3.5)", () => {
       { type: "step_start", run_id: RUN, index: 3 },
     ].map((event, pos) => ({ pos, time: rOK.started, event }))
     serve({ events: failingLast, bodies: bodies.slice(0, -1), doc: runDoc({ status: "failed", err: "model down" }) })
-    const d = await drawerFor(editResultAndReplay(2, "c3", ERR))
+    // No edit (an edited prefix runs live, plan F2): the step count alone.
+    const d = await drawerFor(replayFromStep(3))
     await waitFor(() => expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false))
     fireEvent.change(d.getByLabelText("Engine"), { target: { value: "scripted" } })
     expect(drawer()!.querySelector("[data-replay-scripted-past-end]")!.textContent).toBe(

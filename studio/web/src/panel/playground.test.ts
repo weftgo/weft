@@ -297,7 +297,7 @@ describe("the pure halves", () => {
       ""
     ) as Record<string, any>
     expect(edited.transcript_edits).toEqual([
-      { step: 1, call_id: "c2", tool_result: "429" },
+      { kind: "tool_result", step: 1, call_id: "c2", tool_result: "429" },
     ])
     // An unchanged tool set carries no override (§10.1).
     const sameTools = buildRunBody(

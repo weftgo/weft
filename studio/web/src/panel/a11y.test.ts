@@ -20,7 +20,7 @@ import { baseRoutes, DIFF_META, fakeStudio, META, mount, page, runEvents, runExp
 import type { Route } from "./testkit"
 import { FILTER_MS } from "./tree"
 import type { WeftDevtools } from "./element"
-import { REPLAY_META, replayRoutes } from "./replaykit"
+import { EDIT_META, editRoutes, REPLAY_META, replayRoutes } from "./replaykit"
 
 beforeEach(() => {
   setup()
@@ -154,6 +154,23 @@ async function optionLab(el: WeftDevtools) {
   await settle()
 }
 
+/** F2: the transcript editor — an edited prompt (its chip and revert),
+ * a refused args edit (its alert), the drawer's edit list and the
+ * "will be sent" preview with its op rows and warnings. */
+async function transcriptEditor(el: WeftDevtools) {
+  const type = async (sel: string, key: string, value: string) => {
+    ;(el.shadowRoot!.querySelector(sel) as HTMLElement).click()
+    await settle()
+    const ta = el.shadowRoot!.querySelector(`textarea[data-weft-k="ed:${key}"]`) as HTMLTextAreaElement
+    ta.value = value
+    ta.dispatchEvent(new Event("input", { bubbles: true }))
+    await settle()
+  }
+  await type('[data-key="prompt"][data-weft-editable="user"]', "user:0::0", "refund order 7")
+  await type('.weft-call[data-key="c1"] [data-weft-editable="tool_args"]', "tool_args:0:c1:0", '{"q": 5}')
+  await settle(400) // the preview's debounce
+}
+
 const MODES: { name: string; width: number; attrs: Record<string, string>; sel: string; act?: (el: WeftDevtools) => Promise<void>; routes?: () => Record<string, Route>; meta?: unknown }[] = [
   { name: "float, open", width: 1024, attrs: { "data-open": "true" }, sel: ".weft-dock.weft-float" },
   { name: "docked right", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-dock.weft-docked" },
@@ -167,6 +184,7 @@ const MODES: { name: string; width: number; attrs: Record<string, string>; sel: 
   { name: "the replay verbs and a verb's drawer with its ack preview", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-drawer [data-weft-ack] [data-verdict]", act: replayDrawer, routes: replayRoutes, meta: REPLAY_META },
   { name: "the experiment's step compare: markers, the table, marks and badges", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-step-diff] table [data-hole="hidden"]', act: runExperiment, routes: () => stepDiffRoutes(golden("diff-hidden")), meta: DIFF_META },
   { name: "the option lab: defaults, an override, a refusal, the named tool picker", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '.weft-drawer [data-weft-lab-problem="max_steps"]', act: optionLab, routes: labRoutes },
+  { name: "the transcript editor: an edit, a refusal, the edit list and the preview", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-drawer [data-weft-preview-op]", act: transcriptEditor, routes: editRoutes, meta: EDIT_META },
   { name: "badges, the cap line and the chips", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-chip="fork"]', act: badgesDrawn, routes: badgeRoutes },
 ]
 

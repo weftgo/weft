@@ -32,6 +32,14 @@ import { FakeStudio, golden, hiddenRefusal, pagedEvents, pagedRequests } from ".
 import type { FakePosEvent } from "../test/fake-studio"
 import { $, all, assistant, ATTRS, click, META, mount, runRow, SESSION, settle, setup, T0, teardown, transcript, user } from "./testkit"
 import type { WeftDevtools } from "./element"
+import { buildRunBody as studioBody } from "../lib/experiment-body"
+import type { VariantFields } from "../lib/experiment-body"
+import type { ReplayEdit } from "../lib/edits"
+import { previewView } from "../lib/preview"
+import type { PreviewDoc } from "../lib/preview"
+import { PreviewPane } from "../components/studio/transcript-editor"
+import { previewBlock } from "./editor"
+import { buildRunBody as panelBody } from "./playground"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -606,4 +614,92 @@ describe("step compare parity (E3.2)", () => {
         expect(Object.values(row).filter((s) => s !== "same")).toEqual(n === "3" ? ["changed"] : [])
     }
   })
+})
+
+// Plan F2: one transcript_edits and one preview on both surfaces. The
+// same edits (the Done line's, all five kinds) build byte-identical
+// command bodies through Studio's buildRunBody and the panel's; the
+// same preview answer (the playground-preview golden, and its hidden
+// variant) draws the same rows — op, was, will — the same system
+// state, changed knobs, holes, warnings and unchecked line.
+describe("the transcript editor's command and preview (F2 parity)", () => {
+  const edits: ReplayEdit[] = [
+    { kind: "user", step: 0, content: "refund order 7" },
+    { kind: "tool_args", step: 0, callID: "c1", args: { q: "c9" } },
+    { kind: "tool_result", step: 1, callID: "c2", toolResult: "policy: no refunds" },
+    { kind: "reply", step: 1, content: "rewritten" },
+    { kind: "insert", step: 2, content: "and check 43" },
+  ]
+
+  it("both surfaces post byte-identical transcript_edits for the same edits", () => {
+    const variant: VariantFields = {
+      instructions: "",
+      toolsOff: new Set(),
+      model: "",
+      thinking: "",
+      input: "",
+      engine: "live",
+      sideEffects: "substitute",
+      thread: "ephemeral",
+    }
+    const agent = { name: "acme-support", models: [], tools: [{ name: "lookup_order", side_effects: "never", allow: false }] }
+    const studio = studioBody({ runtime: "rt_1", agent, variant, sourceRunID: RUN, fromStep: 3, input: "", edits })
+    const panel = panelBody(
+      {
+        edits,
+        runId: RUN,
+        agent: "acme-support",
+        step: 3,
+        instructions: "",
+        registeredInstructions: "",
+        tools: { lookup_order: true },
+        model: "",
+        thinking: "",
+        input: "",
+        engine: "live",
+        sideEffects: "substitute",
+        thread: "ephemeral",
+        runtimeId: "rt_1",
+      },
+      ""
+    )
+    expect(JSON.stringify(panel.transcript_edits)).toBe(JSON.stringify(studio.transcript_edits))
+    expect(JSON.stringify(panel)).toBe(JSON.stringify(studio))
+    expect((studio.transcript_edits as { kind: string }[]).map((e) => e.kind)).toEqual(["user", "tool_args", "tool_result", "reply", "insert"])
+  })
+
+  type Rows = { system: string; changed: string[]; holes: string[]; rows: string[][]; warnings: string[]; unchecked: string }
+  const read = (root: ParentNode, p: string): Rows => ({
+    system: root.querySelector(`[data-${p}preview-system]`)!.getAttribute(`data-${p}preview-system`)!,
+    changed: [...root.querySelectorAll(`[data-${p}preview-changed]`)].map((n) => n.getAttribute(`data-${p}preview-changed`)!),
+    holes: [...root.querySelectorAll("[data-hole]")].map((n) => n.getAttribute("data-hole")!),
+    rows: [...root.querySelectorAll(`[data-${p}preview-op]`)].map((r) => [
+      r.getAttribute(`data-${p}preview-op`)!,
+      r.querySelector(`[data-${p}preview-was]`)?.textContent ?? "",
+      r.querySelector(`[data-${p}preview-will]`)?.textContent ?? "",
+    ]),
+    warnings: [...root.querySelectorAll(`[data-${p}preview-warning]`)].map((n) => `${n.getAttribute(`data-${p}preview-warning`)}: ${n.textContent}`),
+    unchecked: root.querySelector(`[data-${p}preview-unchecked]`)?.textContent ?? "",
+  })
+  const PV = golden<PreviewDoc>("playground-preview")
+  const hidden: PreviewDoc = {
+    ...PV,
+    will_send: { ...PV.will_send, system: null, system_badge: "hidden", tools: null, tools_badge: "hidden" },
+    was_sent: { ...PV.was_sent, system: null, system_badge: "hidden", tools: null, tools_badge: "hidden", badge: "derived" },
+    diff: { ...PV.diff, system: "hidden", tools: null },
+    unchecked: ["model"],
+  }
+
+  for (const [name, doc] of [["the golden", PV], ["hidden to a read token, unchecked", hidden]] as const)
+    it(`both surfaces draw the same preview rows: ${name}`, async () => {
+      const panel = read(previewBlock({ doc }, 2), "weft-")
+      const { container } = await renderWithRouter(createElement(PreviewPane, { state: { doc }, fromStep: 2 }))
+      await waitFor(() => expect(container.querySelector("[data-preview-system]")).toBeTruthy())
+      const studio = read(container, "")
+      cleanup()
+      expect(panel).toEqual(studio)
+      const v = previewView(doc)
+      expect(studio.rows).toEqual(v.rows!.map((r) => [r.op, r.was, r.will]))
+      expect(studio.holes).toEqual(v.holes.map((h) => h.hole))
+    })
 })

@@ -43,6 +43,7 @@ import {
   PanelApiError,
   postApproval,
   postPlaygroundRun,
+  postPreview,
   postSteer,
   putBreakpoints,
 } from "./client"
@@ -57,6 +58,7 @@ import {
   turnWordsOf,
 } from "./playground"
 import type { ExperimentDraft, ExperimentResult, TurnWords } from "./playground"
+import type { PanelPreview } from "./editor"
 import { studioIsTooNew } from "./version"
 
 /** The runs list's paging cursor (next_before, next_before_id). */
@@ -68,6 +70,9 @@ const sameCursor = (a: Cursor | null, b: Cursor) => !!a && a.before === b.before
 
 /** The events walk's page cap: 20 pages of 500. A longer run says so
  * (capped) instead of reading as complete. */
+/** How long the drawer rests before its preview is read (plan F2). */
+export const PREVIEW_MS = 300
+
 export const MAX_EVENT_PAGES = 20
 /** The turn list's page: the newest runs of the conversation, and each
  * older page (D4: before=/before_id= paging, no cap). */
@@ -244,6 +249,9 @@ export interface PanelState {
   runtimes: RuntimeView[]
   /** The drawer's running or finished experiment (the result pane). */
   result: ExperimentResult | null
+  /** The drawer's "will be sent" preview (plan F2, capability
+   * "preview"): read again, debounced, while the draft changes. */
+  preview: PanelPreview | null
   /** The drawer's runtime's breakpoint set (§8.3): the stored set
    * GET /api/runtimes reports, then what PUT …/breakpoints answered. */
   breakpoints: string[]
@@ -290,6 +298,7 @@ export function emptyPanelState(): PanelState {
     drawer: null,
     runtimes: [],
     result: null,
+    preview: null,
     breakpoints: [],
     live: false,
     devAgent: "",
@@ -1584,6 +1593,8 @@ export class PanelModel {
         else promptHole = promptNotRecorded()
       }
     }
+    this.pvSeq++
+    this.state.preview = null
     this.state.drawer = {
       runId,
       agent: agentName,
@@ -1611,6 +1622,7 @@ export class PanelModel {
       ...(promptFrom ? { promptFrom } : {}),
       ...(promptHole ? { promptHole } : {}),
     }
+    this.schedulePreview()
     this.emit()
   }
 
@@ -1620,6 +1632,7 @@ export class PanelModel {
   setDraft(patch: Partial<ExperimentDraft>, still = false) {
     if (!this.state.drawer) return
     this.state.drawer = { ...this.state.drawer, ...patch }
+    this.schedulePreview()
     if (!still) this.emit()
   }
 
@@ -1627,6 +1640,33 @@ export class PanelModel {
    * run replaces or discards it). */
   closeExperiment() {
     this.state.drawer = null
+    this.schedulePreview()
+    this.emit()
+  }
+
+  private pvSeq = 0
+  /** schedulePreview reads the drawer's preview again once the draft
+   * rests (POST /api/playground/preview — the body Run posts; plan F2):
+   * only with capability "preview", never for a fork (no ephemeral
+   * replay to assemble). The last read wins. */
+  private schedulePreview() {
+    const seq = ++this.pvSeq
+    const d = this.state.drawer
+    if (!d || d.thread === "fork" || !(this.state.meta?.capabilities.includes("preview") ?? false)) {
+      this.state.preview = null
+      return
+    }
+    this.after(PREVIEW_MS, () => {
+      const left = () => this.disposed || seq !== this.pvSeq
+      void postPreview(this.ep, buildRunBody(d, this.publicId)).then(
+        (doc) => !left() && this.setPreview({ doc }),
+        (err: unknown) => !left() && this.setPreview({ error: messageOf(err), refused: err instanceof PanelApiError && err.status === 400 })
+      )
+    })
+  }
+
+  private setPreview(p: PanelPreview) {
+    this.state.preview = p
     this.emit()
   }
 
@@ -1645,6 +1685,7 @@ export class PanelModel {
     // posted.
     const r = rerunDraft()
     this.state.drawer = { ...d, verb: r.verb, step: r.fromStep, thread: r.thread, input: r.input }
+    this.schedulePreview()
     this.emit()
   }
 
@@ -2067,7 +2108,14 @@ export class PanelModel {
    * its source (plan E3): GET /api/diff, the response lib/stepdiff.ts
    * reads on both surfaces — only when meta reports capability "diff". */
   private async loadStepDiff(res: ExperimentResult) {
-    if (!res.runID || !res.sourceRunID || !(this.state.meta?.capabilities.includes("diff") ?? false)) return
+    if (!res.runID || !res.sourceRunID) return
+    if (!(this.state.meta?.capabilities.includes("diff") ?? false)) {
+      // Not read: said, so a meta that reports diff later draws why the
+      // compare is absent — never "reading…" forever.
+      res.stepDiffError = "the server did not report the diff capability when the run settled"
+      this.emit()
+      return
+    }
     try {
       const doc = await fetchDiff(this.ep, res.sourceRunID, res.runID)
       if (this.left(res)) return

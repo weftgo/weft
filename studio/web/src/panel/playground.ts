@@ -4,6 +4,8 @@
 // Studio UI posts the same body to the same endpoint (V6).
 import type { AgentDefaults, Message, Part, PosEvent, RunRow, Transcript } from "../lib/api"
 import { labOverrides } from "../lib/experiment-body"
+import { wireEdits } from "../lib/edits"
+import type { ReplayEdit } from "../lib/edits"
 import type { LabFields } from "../lib/experiment-body"
 import { splitTranscript, turnPrompt } from "../lib/events"
 import type { FoldFeed, FoldedRun } from "../lib/events"
@@ -14,15 +16,10 @@ import type { DiffDoc } from "../lib/stepdiff"
 import type { CommandStatus, RuntimeView } from "./client"
 import { stringify } from "./render"
 
-/** One transcript edit (D2/D3): patch a kept step's tool result (the
- * "what if the API returned 429?" counterfactual) or rewrite its
- * call-free assistant reply. The wire shape is §5.1's. */
-export interface TranscriptEditDraft {
-  step: number
-  callID?: string
-  toolResult?: string
-  content?: string
-}
+/** One transcript edit (D2/D3, plan F2's five kinds — lib/edits.ts):
+ * a kept step's tool result, call-free reply, user message or call
+ * arguments, or a message inserted at a boundary. */
+export type TranscriptEditDraft = ReplayEdit
 
 /** The drawer's editable experiment (§1's knobs): prompt, tools off,
  * model, thinking, input, start point, engine, side-effect mode. */
@@ -281,12 +278,7 @@ export function buildRunBody(draft: ExperimentDraft, publicId: string): Record<s
   // starts the turn over (§10.4's table).
   if (draft.step === 0 && draft.input) body.input = draft.input
   if (draft.step > 0 && draft.edits.length)
-    body.transcript_edits = draft.edits.map((e) => ({
-      step: e.step,
-      ...(e.callID ? { call_id: e.callID } : {}),
-      ...(e.toolResult ? { tool_result: e.toolResult } : {}),
-      ...(e.content ? { content: e.content } : {}),
-    }))
+    body.transcript_edits = wireEdits(draft.edits)
   if (publicId) body.public_id = publicId
   return body
 }

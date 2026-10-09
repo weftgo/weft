@@ -4,6 +4,8 @@
 // shared lib because the panel is endpoint-addressed — data-endpoint
 // points it at an embedded Studio, the local binary or a hosted one
 // (§3) — while the app's own api.ts resolves against its document.
+import { PREVIEW_PATH } from "../lib/preview"
+import type { PreviewDoc } from "../lib/preview"
 import type {
   AgentDefaults,
   EventsPage,
@@ -276,6 +278,12 @@ export function postPlaygroundRun(
   body: Record<string, unknown>
 ): Promise<{ command_id: string; state: string }> {
   return panelPost(ep, "playground/runs", body)
+}
+
+/** POST /api/playground/preview (plan F2): the run body in, the first
+ * request the replay would send out (lib/preview.ts). */
+export function postPreview(ep: PanelEndpoint, body: Record<string, unknown>): Promise<PreviewDoc> {
+  return panelPost(ep, PREVIEW_PATH, body)
 }
 
 /** GET /api/playground/commands/{id} — §10.5's lifecycle row. */

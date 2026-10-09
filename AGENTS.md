@@ -230,7 +230,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    src/panel/request.ts: the run page's Request pane per step — J/K pick it — chips, prompt diff,
 //    //    messages, catalog, params; a read token sees hidden only; plan F1: the Story's replay verbs —
 //    //    replay from this step, edit this result, edit the prompt, re-run, continue here — open the
-//    //    experiment drawer pre-filled from lib/replay.ts with its ack preview, gated by canReplay)/Timeline (time axis with spans, seq without)/Raw (src/panel/tree.ts: a lazy JSON
+//    //    experiment drawer pre-filled from lib/replay.ts with its ack preview, gated by canReplay;
+//    //    plan F2: the Story edits in place — prompt, steer, args (JSON checked against the step's catalog
+//    //    schema, lib/edits.ts), result, reply, an insert at a boundary — into that drawer's one command, its
+//    //    "will be sent" preview (lib/preview.ts, capability preview); a replayed run's weft.edits as chips)/Timeline (time axis with spans, seq without)/Raw (src/panel/tree.ts: a lazy JSON
 //    //    tree, "/" filter, copy-node/all, download), a turn-list filter, runs paged by before=/before_id=
 //    //    with no cap, the tab stored as `tab`; its honesty, plan D5: every badge drawn by
 //    //    src/panel/badges.ts from the A3 table (data-hole, reason — fix: as title; badge(hole, note) for

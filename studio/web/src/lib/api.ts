@@ -4,6 +4,8 @@
 // tests against testdata/api/*.golden.json, this side type-checks
 // against the same shapes.
 
+import { PREVIEW_PATH } from "./preview"
+import type { PreviewDoc } from "./preview"
 import { queryOptions } from "@tanstack/react-query"
 
 import type { ContentAttrs } from "./honesty"
@@ -1363,6 +1365,13 @@ function post<T>(path: string, body: unknown): Promise<T> {
 /** POST /api/playground/runs → 202 { command_id, state }. */
 export function postPlaygroundRun(body: PlaygroundRunBody) {
   return post<{ command_id: string; state: string }>("playground/runs", body)
+}
+
+/** POST /api/playground/preview (plan F2, capability "preview"): the
+ * run command's body in, the first request the replay would send out —
+ * pure assembly, no runtime needed; a refusal is the command's 400. */
+export function postPlaygroundPreview(body: PlaygroundRunBody) {
+  return post<PreviewDoc>(PREVIEW_PATH, body)
 }
 
 /** GET /api/playground/commands/{id} — §10.5's lifecycle row. */

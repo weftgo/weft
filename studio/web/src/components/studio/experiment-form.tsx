@@ -11,6 +11,7 @@ import type { Dispatch, ReactNode, SetStateAction } from "react"
 
 import { ApiError, putBreakpoints, runQuery, transcriptQuery } from "@/lib/api"
 import type { AgentView, RuntimeView } from "@/lib/api"
+import { kindOf } from "@/lib/edits"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
 import {
   editFieldsOf,
@@ -493,11 +494,14 @@ export function TranscriptEdits({
   // (Run is held by the caller), no alarm is raised.
   const orphans = loading ? [] : unmatchedDrafts(drafts, source.fields, fromStep)
   if (!loading && !fields.length && !orphans.length && !source.error) return null
-  const draftOf = (f: EditField) => drafts.find((d) => d.step === f.step && d.callID === f.callID)
+  // A field is a result patch or a reply rewrite: the Story's other
+  // kinds on the same call (its args) are not this field's.
+  const at = (f: EditField) => (d: EditDraft) =>
+    d.step === f.step && d.callID === f.callID && kindOf(d) === (f.callID ? "tool_result" : "reply")
+  const draftOf = (f: EditField) => drafts.find(at(f))
   const set = (f: EditField, v: string) => {
-    const at = (d: EditDraft) => d.step === f.step && d.callID === f.callID
     setDrafts((cur) => {
-      const i = cur.findIndex(at)
+      const i = cur.findIndex(at(f))
       if (v === "") return i >= 0 ? cur.filter((_, j) => j !== i) : cur
       const draft: EditDraft = f.callID
         ? { step: f.step, callID: f.callID, toolResult: v }

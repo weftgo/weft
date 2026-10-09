@@ -985,6 +985,49 @@ build the command's overrides through `labOverrides`, so they post
 byte-identical JSON for the same choices (`src/panel/optionlab.test.ts`:
 a table over `testdata/api/runtimes.golden.json` and the parity check).
 
+The transcript editor (plan F2) is the Story view's, on both surfaces —
+the run page and the panel's Story tab — under the replay drawer's gate
+(`canReplay`) and on a run that is over: step 0's prompt, a steer, a
+call's args, a tool result and a call-free reply turn into a textarea in
+place (click the thing, or Enter on its pencil), with revert and a red
+"edited" chip, and every step boundary up to the highest `from_step` the
+server accepts takes an inserted message ("· insert a message before
+step N" — a steer at rest). The edits are the five kinds of
+`transcript_edits` — `user` (`step`, `index`), `tool_args` (`step`,
+`call_id`, `args` an object), `tool_result`, `reply`, `insert` — and
+accumulate into one command: the first opens the replay drawer ("Edit
+the transcript and replay"), which lists them by kind (each droppable),
+keeps `from_step` at what they imply (an edit of step N keeps N, so
+N + 1; an insert at boundary N, N) and runs them on engine live, saying
+why (the scripted engine replays recorded turns, which answered a
+different prompt). Args are JSON, checked in the editor against the
+tool's input schema from the step's catalog record (`src/lib/edits.ts`'s
+`checkArgs`, `obsdb.CheckToolArgs`' rules by name — type and type lists,
+integer literals, enum, required, properties, additionalProperties,
+items, a null field absent): a refusal is said on the field in the
+loop's `INVALID_INPUT: tool "x": field "f": expected …, got …` words,
+never sent, and holds Run — the check matters most for a read-scoped
+preview, whose server check is the object shape only. Both surfaces
+build `transcript_edits` through `lib/edits.ts`'s `wireEdits` (`kind`
+always), so they post byte-identical JSON. Above Run, "will be sent"
+(capability `preview`; nothing asked for without it, nor for a fork):
+`POST /api/playground/preview` with the very body Run would post,
+re-read 300 ms after the form rests, drawn through `src/lib/preview.ts`
+— the system's state (`same`, `changed`, `unknown`, `hidden`), the
+messages one row each with the server's op (`same`, `changed` with was
+struck through above will, `added`, `removed`), tools added and removed,
+the knobs that changed (model, params, thinking, tool choice), every
+`*_badge` from the honesty table, the warnings one line each
+(`prepare_step` always, `compacted`, `derived`, `scripted`,
+`instructions`) and `unchecked` as a line naming what only a runtime
+checks. Its 400 is the command's own sentence, shown verbatim, and
+holds Run. A replayed run whose row carries `weft.edits` opens its Story
+with "kept prefix edited": one chip per token — "args edited", "result
+edited", "edited" (a user message or a reply), "inserted" — at its
+source coordinates, a call's edited args or result read from the
+replay's input by call id (the kept prefix is positional); a child run
+inherits the mark and draws none.
+
 The step compare (plan E3, capability `diff`; hidden when off, like
 every capability-gated control): two or more runs side by side, one row
 per step ordinal, a column per compared field — system, tool calls,

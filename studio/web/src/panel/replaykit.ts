@@ -4,6 +4,7 @@
 // step 1 — served to the panel's fake Studio, so both surfaces are
 // tested on one shape.
 import type { AgentView } from "./client"
+import { golden } from "../test/fake-studio"
 import { baseRoutes, META, page, runRow, T0, transcript } from "./testkit"
 import type { Route } from "./testkit"
 
@@ -187,3 +188,38 @@ export function replayRoutes(opts: { agents?: AgentView[]; compactions?: unknown
 /** The transcript cut after its first n batches (5: steps 0–1, each
  * call answered): the fold's later steps hold no reply. */
 export const transcriptCut = (n: number) => transcript(...bodies.slice(0, n))
+
+// ── The transcript editor's fixture (plan F2) ─────────────────────
+
+/** lookup_order's recorded input schema: q a string, nothing else. */
+export const ARGS_SCHEMA = { type: "object", properties: { q: { type: "string" } }, required: ["q"], additionalProperties: false }
+
+/** The steps' catalog with lookup_order's schema recorded. */
+export const editCatalog = {
+  hash: "t",
+  content: "",
+  truncated_bytes: 0,
+  tools: [{ ...tool("lookup_order", "never"), schema: ARGS_SCHEMA }, tool("refund", ""), tool("search_kb", "safe")],
+}
+
+/** The command the Done line's edits make on either surface, in order:
+ * step 0's prompt, c1's args, c2's result, a message before step 2. */
+export const DONE_EDITS = [
+  { kind: "user", step: 0, content: "refund order 7" },
+  { kind: "tool_args", step: 0, call_id: "c1", args: { q: "c9" } },
+  { kind: "tool_result", step: 1, call_id: "c2", tool_result: "policy: no refunds" },
+  { kind: "insert", step: 2, content: "and check 43" },
+]
+
+/** META with the replay's records and the preview served. */
+export const EDIT_META = { ...REPLAY_META, capabilities: [...REPLAY_META.capabilities, "preview"] }
+
+/** The replay fixture's routes with lookup_order's schema in every
+ * step's catalog and POST /api/playground/preview answering preview
+ * (default: the playground-preview golden). */
+export function editRoutes(preview: Route = golden("playground-preview")): Record<string, Route> {
+  const r = replayRoutes()
+  r[`runs/${RUN}/requests?limit=1000`] = { requests: [0, 1, 2, 3].map((n) => requestRow(n, editCatalog)) }
+  r["POST playground/preview"] = preview
+  return r
+}

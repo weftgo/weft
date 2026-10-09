@@ -12,7 +12,8 @@
     { "id": "F1", "what": "replay from here", "estimate": 3072, "accepted": "the verbs and the ack preview are the item; nothing deferrable is more than 0.3 KiB; 14 KiB of headroom with the minify lever in reserve" },
     { "id": "C3", "what": "detection ladder", "estimate": 3072, "accepted": "nothing deferrable supplies the first scope; the deferrable remainder is under 1 KiB" },
     { "id": "C4", "what": "typed API surface (the host API)", "estimate": 1024, "accepted": "the host API is one surface for both installs; nothing to load later" },
-    { "id": "F3", "what": "option lab form", "estimate": 3072 }
+    { "id": "F3", "what": "option lab form", "estimate": 3072 },
+    { "id": "F2", "what": "transcript editor + preview", "estimate": 4096 }
   ],
   "rows": [
     { "label": "C1", "item": "", "gzip": 32359, "note": "the baseline" },
@@ -48,6 +49,7 @@
     { "label": "E3", "item": "E3", "gzip": 70042, "note": "the 2-way step compare in the result pane (E3.2): lib/stepdiff.ts (GET /api/diff's rows, cells, marks, markers), panel/compare.ts's table, fetchDiff, the compareLink hand-off; with E3.1's response_cap cause in lib/honesty.ts built for the first time (+2,225 B of +4,096 B)" },
     { "label": "E3 fixes", "item": "E3", "gzip": 70280, "note": "E3.2 review: a hole-mark drawn once, as its badge; the hidden badge in a withheld system cell; the markers as step links; the ⤢ hand-off at the first changed step; the reading line; nWayView's error line; missing rows counted apart (+238 B; E3 +2,463 B of +4,096 B)" },
     { "label": "F3", "item": "F3", "gzip": 73101, "note": "the option lab in the drawer (F3.2): every knob the command carries — options, params, tool_choice, park_on, only_tools, the resolver's free model name — lib/experiment-body.ts's labOverrides (Studio's rules by name), defaults greyed, overrides in colour with a reset, the ack preview following park_on/only_tools (+2,821 B of +3,072 B)" },
-    { "label": "F3 fixes", "item": "F3", "gzip": 73193, "note": "F3.2 review: the model's free text kept as typed (modelFree), the server's words for an unknown tool once per list, a 0 cap no bound, whole-number checks by safe integer and checkNeutral's 1e6, a ticked only_tools box stays clearable (+92 B; F3 +2,913 B of +3,072 B)" }
+    { "label": "F3 fixes", "item": "F3", "gzip": 73193, "note": "F3.2 review: the model's free text kept as typed (modelFree), the server's words for an unknown tool once per list, a 0 cap no bound, whole-number checks by safe integer and checkNeutral's 1e6, a ticked only_tools box stays clearable (+92 B; F3 +2,913 B of +3,072 B)" },
+    { "label": "F2", "item": "F2", "gzip": 78015, "note": "the transcript editor and the preview in the panel (F2.2): the Story's prompt, steers, args (lib/edits.ts's checkArgs, the catalog schema), results, replies and boundary inserts edited in place into the drawer's one command, its list by kind, the will-be-sent preview (lib/preview.ts, POST /api/playground/preview), the weft.edits chips; the step compare's settled-without-diff line (+4,822 B of +4,096 B, under half again its estimate)" }
   ]
 }

@@ -7,6 +7,8 @@ import type { AgentDefaults, AgentView, Message, PlaygroundRunBody, RuntimeView,
 import { placeBatches } from "@/lib/events"
 import { endsInAnsweredCalls, maxFromStep, transcriptStepCount } from "@/lib/replay"
 import type { TranscriptBatch } from "@/lib/events"
+import { kindOf, wireEdits } from "@/lib/edits"
+import type { ReplayEdit } from "@/lib/edits"
 
 export type Engine = "live" | "scripted"
 export type SideEffects = "substitute" | "park" | "allow"
@@ -146,15 +148,10 @@ export function buildRunBody(opts: {
   return body
 }
 
-/** One transcript edit draft (§5.1's wire shape — review fix 4b): a
- * patched tool result (pinned by call_id) or a rewritten call-free
- * reply, on a kept step. */
-export interface EditDraft {
-  step: number
-  callID?: string
-  toolResult?: string
-  content?: string
-}
+/** One transcript edit draft (§5.1's wire shape — review fix 4b; plan
+ * F2's five kinds, lib/edits.ts): a patched tool result, a rewritten
+ * call-free reply, a user message, a call's arguments, an insert. */
+export type EditDraft = ReplayEdit
 
 /** One editable field of a kept step, derived from the source
  * transcript. */
@@ -321,19 +318,20 @@ export function unmatchedDrafts(
   if (fromStep <= 0) return []
   if (fields === null) return drafts
   const keys = new Set(fields.filter((f) => f.step < fromStep).map((f) => `${f.step}\u0000${f.callID ?? ""}`))
-  return drafts.filter((d) => !keys.has(`${d.step}\u0000${d.callID ?? ""}`))
+  // The Story's editor (plan F2) names user messages, arguments and
+  // boundaries it read from the transcript itself: those are checked
+  // against the kept range only (the server checks the rest).
+  return drafts.filter((d) => {
+    const k = kindOf(d)
+    if (k === "insert") return d.step > fromStep
+    if (k === "user" || k === "tool_args") return d.step >= fromStep
+    return !keys.has(`${d.step}\u0000${d.callID ?? ""}`)
+  })
 }
 
-/** wireEdits maps the drafts to §5.1's flattened wire shape — the
- * same mapping the panel's buildRunBody makes. */
-export function wireEdits(drafts: EditDraft[]): unknown[] {
-  return drafts.map((e) => ({
-    step: e.step,
-    ...(e.callID ? { call_id: e.callID } : {}),
-    ...(e.toolResult ? { tool_result: e.toolResult } : {}),
-    ...(e.content ? { content: e.content } : {}),
-  }))
-}
+/** wireEdits maps the drafts to §5.1's wire shape, kind always sent —
+ * lib/edits.ts's, the mapping the panel's buildRunBody makes too. */
+export { wireEdits }
 
 // ── The option lab (plan F3) ─────────────────────────────────────
 // Every run option the core exposes as narrowing or neutral, as the

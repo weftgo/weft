@@ -957,15 +957,21 @@ step, linking to that step. Each side's marks (`compacted`, `subagent`,
 beside it — never a change by themselves — and its holes are badges
 from the one table, as is the response's own `truncated`
 (`response_cap`). Both surfaces read `GET /api/diff` through one module,
-`src/lib/stepdiff.ts`: Studio's `/compare?a=<run>&b=["<run>",…]` page
+`src/lib/stepdiff.ts`: Studio's `/compare?a=<run>&b=["<run>",…]&step=N` page
 (`lib/links.ts`'s `compareLink`; N-way is N−1 calls of the 2-way route
-against the base run `a`, drawn in the first column) — reached from the
+against the base run `a`, drawn in the first column; `step` highlights
+and scrolls to that ordinal's row; a mark the side's holes already
+carry is drawn once, as its badge; a system prompt withheld from a read
+token is the `hidden` badge in its cell, beside the state the hashes
+gave) — reached from the
 run header ("compare with source" for a replayed run, via
 `weft.forked_from`, and "compare with…"), the replay drawer's finished
 result, and the playground (every finished variant against the source
 run, beside the final-text diff); the panel's experiment result pane
 draws the 2-way table (the replayed run against its source) at panel
-width, with a ⤢ hand-off to the same compare page.
+width — "reading the step compare…" while it loads, each marker a link
+to its step — with a ⤢ hand-off to the same compare page at the first
+changed step.
 `src/panel/parity.test.ts` holds both to the same rows, markers and
 badges from the same goldens (`studio/testdata/api/diff*.golden.json`).
 

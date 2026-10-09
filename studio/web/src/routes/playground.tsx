@@ -1136,6 +1136,7 @@ function CompareTable({ variants }: { variants: Variant[] }) {
  * diff below stays: it shows the final words line by line, which a
  * step row only marks changed. */
 function VariantSteps({ variants, sourceRunID }: { variants: Variant[]; sourceRunID: string }) {
+  const { has } = useCapabilities()
   const done = variants.flatMap((v) =>
     v.result?.state === "finished" && v.result.row && v.result.row.status !== "running" && v.result.runID
       ? [v.result.runID]
@@ -1143,7 +1144,7 @@ function VariantSteps({ variants, sourceRunID }: { variants: Variant[]; sourceRu
   )
   const base = sourceRunID || done[0] || ""
   const others = done.filter((id) => id !== base)
-  if (!base || !others.length) return null
+  if (!has("diff") || !base || !others.length) return null
   return (
     <div className="space-y-2 rounded border p-3" data-variant-steps>
       <div className="flex items-center gap-3 text-xs text-muted-foreground">

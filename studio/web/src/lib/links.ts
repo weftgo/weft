@@ -131,6 +131,8 @@ export interface PlaygroundLink {
 export interface CompareSearch {
   a?: string
   b?: string[]
+  /** The step ordinal to land on (the row scrolled to, highlighted). */
+  step?: number
 }
 
 export interface CompareLink {
@@ -205,11 +207,16 @@ export function experimentLink(id: string): PlaygroundLink {
 }
 
 /** compareLink is the step-aligned compare of a base run with others
- * (rows by step ordinal; N-way is N−1 diffs against a). Empty ids and
- * the base itself are dropped from others, duplicates kept once. */
-export function compareLink(a: string, others: string[] = []): CompareLink {
+ * (rows by step ordinal; N-way is N−1 diffs against a), optionally
+ * landing on one step (its ordinal). Empty ids and the base itself are
+ * dropped from others, duplicates kept once. */
+export function compareLink(a: string, others: string[] = [], step?: number): CompareLink {
   const b = [...new Set(others.filter((x) => x && x !== a))]
-  return { to: "/compare", search: b.length ? { a, b } : { a } }
+  const search: CompareSearch = { a }
+  if (b.length) search.b = b
+  const n = ordinal(step)
+  if (n !== undefined) search.step = n
+  return { to: "/compare", search }
 }
 
 /** A search value as the router writes it (TanStack's default

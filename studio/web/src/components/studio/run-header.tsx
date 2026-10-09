@@ -147,7 +147,7 @@ export function CompareWith({ doc }: { doc: Pick<RunDoc, "id" | "forked_from"> }
     <span className="flex items-center gap-2 font-mono text-[11px] text-faint" data-compare-with>
       {src ? (
         <Link
-          {...compareLink(src.runID, [doc.id])}
+          {...compareLink(src.runID, [doc.id], src.fromStep)}
           className="text-thread-ink hover:underline"
           title="this run beside its source, step by step"
           data-compare-source

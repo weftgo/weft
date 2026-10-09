@@ -7,7 +7,7 @@
 // compare page says which option left it off.
 import { useQueries } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { Fragment } from "react"
+import { Fragment, useEffect, useRef } from "react"
 
 import { diffQuery } from "@/lib/api"
 import { runLink } from "@/lib/links"
@@ -16,11 +16,12 @@ import {
   CELL_WORDS,
   COLUMN_LABELS,
   DIFF_COLUMNS,
+  cellHole,
   cellText,
   markerWords,
   nWayView,
 } from "@/lib/stepdiff"
-import type { CellState, DiffColumn, DiffDoc, NWayView, SideView } from "@/lib/stepdiff"
+import type { CellState, DiffColumn, DiffDoc, DiffSide, NWayView, SideView } from "@/lib/stepdiff"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
 import { Badge } from "@/components/ui/badge"
@@ -33,13 +34,18 @@ const STATE_TONE: Record<CellState, string> = {
   missing: "text-muted-foreground",
 }
 
-/** SideMarks draws a side's marks (chips, the table's words where a
- * mark is a hole) and its holes (badges). */
+/** SideMarks draws a side's marks and its holes: a mark that is a
+ * hole of the table (compacted, max_tokens, interrupted — one its
+ * holes do not already carry) is that hole's badge, as the panel's
+ * badge() draws it; the others are chips. */
 function SideMarks({ side }: { side: SideView }) {
   if (!side.marks.length && !side.holes.length) return null
   return (
     <span className="flex flex-wrap items-center gap-1">
-      {side.marks.map((m) => (
+      {side.marks.map((m) =>
+        m.hole ? (
+          <HoleBadge key={m.mark} hole={m.hole} />
+        ) : (
         <Badge
           key={m.mark}
           variant="outline"
@@ -50,7 +56,8 @@ function SideMarks({ side }: { side: SideView }) {
           {m.label}
           <span className="sr-only">{` — ${m.title}`}</span>
         </Badge>
-      ))}
+        )
+      )}
       <HoleBadges holes={side.holes} />
     </span>
   )
@@ -60,20 +67,26 @@ function Cell({
   run,
   col,
   side,
+  base,
   state,
 }: {
   run: string
   col: DiffColumn
   side: SideView
+  /** The base side (a compared run's cell): a hole either side carries
+   * in this column rides beside the state. */
+  base?: DiffSide | null
   state?: CellState
 }) {
   const text = cellText(side.side, col)
+  const hole = state ? cellHole(col, base ?? null, side.side) : cellHole(col, side.side)
   // The base column holds the values; a compared run's cell says its
-  // state, and the value where it differs from the base.
+  // state, and the value where it differs from the base. A withheld
+  // system prompt is the hidden badge, its state still the hashes'.
   if (!state)
     return (
       <td className="max-w-[18rem] border-l px-2 py-1 align-top break-words" data-diff-run={run} data-diff-cell={col}>
-        {text}
+        {hole ? <HoleBadge hole={hole} /> : text}
       </td>
     )
   return (
@@ -85,13 +98,30 @@ function Cell({
       title={CELL_REASONS[state]}
     >
       {state === "changed" ? text : CELL_WORDS[state]}
+      {hole ? (
+        <>
+          {" "}
+          <HoleBadge hole={hole} />
+        </>
+      ) : null}
     </td>
   )
 }
 
 /** StepDiffTable renders an N-way view: the base run first, each
  * compared run beside it, one row per step ordinal. */
-export function StepDiffTable({ view }: { view: NWayView }) {
+export function StepDiffTable({ view, focus }: { view: NWayView; focus?: number }) {
+  // The step a link landed on (compareLink's step): scrolled to once.
+  const target = useRef<HTMLTableRowElement>(null)
+  useEffect(() => {
+    target.current?.scrollIntoView({ block: "center" })
+  }, [focus])
+  if (view.error)
+    return (
+      <p className="text-xs text-status-bad" role="alert" data-step-diff-error>
+        {view.error}
+      </p>
+    )
   const runs = [view.base.run_id, ...view.others.map((o) => o.run_id)]
   const markers = view.others.flatMap((o, i) =>
     view.rows
@@ -165,8 +195,10 @@ export function StepDiffTable({ view }: { view: NWayView }) {
             {view.rows.map((row) => (
               <tr
                 key={row.step}
-                className={`border-t ${row.changed ? "bg-secondary/40" : ""}`}
+                ref={row.step === focus ? target : undefined}
+                className={`border-t ${row.changed ? "bg-secondary/40" : ""} ${row.step === focus ? "outline-2 outline-thread" : ""}`}
                 data-diff-step={row.step}
+                data-diff-target={row.step === focus ? "" : undefined}
                 data-changed={row.changed ? "" : undefined}
               >
                 <th scope="row" className="px-2 py-1 text-left align-top font-normal">
@@ -186,7 +218,7 @@ export function StepDiffTable({ view }: { view: NWayView }) {
                       <SideMarks side={o.side} />
                     </td>
                     {DIFF_COLUMNS.map((c) => (
-                      <Cell key={c} run={o.run_id} col={c} side={o.side} state={o.cells[c]} />
+                      <Cell key={c} run={o.run_id} col={c} side={o.side} base={row.base.side} state={o.cells[c]} />
                     ))}
                   </Fragment>
                 ))}
@@ -205,14 +237,16 @@ export function StepDiffTable({ view }: { view: NWayView }) {
  * capability seam: a hidden control, never a broken one) or without a
  * run to compare.
  */
-export function StepCompare({ base, others }: { base: string; others: string[] }) {
+export function StepCompare({ base, others, focus }: { base: string; others: string[]; focus?: number }) {
   const { has } = useCapabilities()
   const ids = others.filter((x) => x && x !== base)
   const on = has("diff") && !!base && ids.length > 0
   const qs = useQueries({ queries: ids.map((b) => ({ ...diffQuery(base, b), enabled: on })) })
   if (!on) return null
+  // An error replaces the table only before every response arrived: a
+  // failed background re-read keeps what was drawn.
   const failed = qs.find((q) => q.isError)
-  if (failed?.error)
+  if (failed?.error && !qs.every((q) => q.data))
     return (
       <p className="text-xs text-status-bad" role="alert" data-step-diff-error>
         the step compare could not be read: {failed.error.message}
@@ -224,5 +258,5 @@ export function StepCompare({ base, others }: { base: string; others: string[] }
         <Spinner /> reading the step compare…
       </div>
     )
-  return <StepDiffTable view={nWayView(qs.map((q) => q.data as DiffDoc))} />
+  return <StepDiffTable view={nWayView(qs.map((q) => q.data as DiffDoc))} focus={focus} />
 }

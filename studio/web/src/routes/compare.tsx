@@ -24,13 +24,15 @@ export const Route = createFileRoute("/compare")({
   validateSearch: (search: Record<string, unknown>): CompareSearch => {
     const list = Array.isArray(search.b) ? search.b : search.b === undefined ? [] : [search.b]
     const b = list.map(str).filter((x): x is string => !!x)
-    return { a: str(search.a), ...(b.length ? { b } : {}) }
+    const step =
+      typeof search.step === "number" && Number.isInteger(search.step) && search.step >= 0 ? search.step : undefined
+    return { a: str(search.a), ...(b.length ? { b } : {}), ...(step !== undefined ? { step } : {}) }
   },
   component: ComparePage,
 })
 
 function ComparePage() {
-  const { a = "", b = [] } = Route.useSearch()
+  const { a = "", b = [], step } = Route.useSearch()
   const navigate = useNavigate()
   const caps = useCapabilities()
   const [add, setAdd] = useState("")
@@ -39,7 +41,7 @@ function ComparePage() {
     const id = add.trim()
     if (!id) return
     setAdd("")
-    void navigate(a ? compareLink(a, [...others, id]) : compareLink(id))
+    void navigate(a ? compareLink(a, [...others, id], step) : compareLink(id))
   }
   if (!caps.loading && !caps.has("diff"))
     return (
@@ -80,7 +82,7 @@ function ComparePage() {
         </Button>
       </form>
       {a && others.length ? (
-        <StepCompare base={a} others={others} />
+        <StepCompare base={a} others={others} focus={step} />
       ) : (
         <p className="text-xs text-faint">name {a ? "a run to compare with" : "a base run"} above</p>
       )}

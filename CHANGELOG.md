@@ -30,7 +30,8 @@ module, ADR 0005).
   one "changed at step N" marker per changed step, each side's marks as
   chips and its holes (and the response's `truncated`/`response_cap`)
   as badges from the one table. Studio gains the N-way `/compare` page
-  (N−1 diffs against one base; `compareLink` in `lib/links.ts`), reached
+  (N−1 diffs against one base; `compareLink` in `lib/links.ts`, whose
+  `step` lands on a row), reached
   from the run header ("compare with source" via `weft.forked_from`,
   "compare with…"), the replay drawer's finished result and the
   playground's variants; the devtools panel's experiment result pane

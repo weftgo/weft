@@ -1,1 +1,0 @@
-import{Z as e}from"./useRenderElement-ssVb62Nz.js";import{n as t}from"./spinner-8Zcq8N4l.js";function n(){let n=t(e()),r=n.data?.capabilities??[],i=e=>r.includes(e);return{caps:r,has:i,why:e=>i(e)?void 0:n.data?.capabilities_off?.[e],loading:n.isPending}}export{n as t};

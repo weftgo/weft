@@ -297,6 +297,26 @@ describe("replay from a failing step (F1's Done line, Studio half)", () => {
     expect(drawer()!.querySelector('[data-diff-step="3"] [data-diff-state="changed"]')!.getAttribute("data-diff-cell")).toBe("tool_results")
     const open = drawer()!.querySelector<HTMLAnchorElement>("[data-replay-compare-link]")!
     expect(open.getAttribute("href")).toContain("/compare?")
+    expect(new URL(open.getAttribute("href")!, "http://x").searchParams.get("step")).toBe("3")
+  })
+
+  it("without capability diff the finished replay offers no step compare, and none is asked for", async () => {
+    serve({ capabilities: ["playground", "steps"] })
+    studio.on("GET diff", golden<object>("diff"))
+    renderApp(`/runs/${RUN}?view=story`)
+    const row = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-call="c3"]')
+      expect(el).toBeTruthy()
+      return el!
+    })
+    fireEvent.click(within(row).getByRole("button", { name: "edit this result and replay (call c3)" }))
+    await waitFor(() => expect(verdict("refund")).toBe("substituted"))
+    fireEvent.click(within(drawer()!).getByRole("button", { name: "Run" }))
+    await waitFor(() => expect(drawer()!.querySelector("[data-replay-run-link]")).toBeTruthy())
+    await waitFor(() => expect(within(drawer()!).getByText("compare in the playground")).toBeTruthy())
+    expect(drawer()!.querySelector("[data-replay-compare-link]")).toBeNull()
+    expect(drawer()!.querySelector("[data-step-diff]")).toBeNull()
+    expect(studio.calls("GET diff")).toHaveLength(0)
   })
 
   it("the step card's verbs: replay from this step, re-run, continue here — each its own draft", async () => {

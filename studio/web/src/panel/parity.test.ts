@@ -24,7 +24,7 @@ import { renderApp, stubBrowser } from "../test/app"
 import { renderWithRouter } from "../test/render"
 import { createElement } from "react"
 import { StepDiffTable } from "../components/studio/step-diff"
-import { markerWords, nWayView, stepDiffView } from "../lib/stepdiff"
+import { DIFF_COLUMNS, cellHole, markerWords, nWayView, stepDiffView } from "../lib/stepdiff"
 import type { DiffDoc } from "../lib/stepdiff"
 import { stepDiffBlock } from "./compare"
 import { FakeEventSource as StudioEventSource } from "../test/fake-event-source"
@@ -474,20 +474,31 @@ describe("the Request panes word a record's holes alike (E1.2)", () => {
 })
 
 // E3.2's parity: the step compare. The same GET /api/diff response
-// (the E3.1 goldens) drawn by the panel's 2-way block (panel/compare.ts)
-// and by Studio's table (components/studio/step-diff.tsx) gives the
-// same rows, the same cell states, the same "changed at step N"
-// markers and the same badges per side — both read lib/stepdiff.ts.
+// (the E3.1 goldens, some patched with marks or a truncated hole) drawn
+// by the panel's 2-way block (panel/compare.ts) and by Studio's table
+// (components/studio/step-diff.tsx) gives the same rows, the same cell
+// states, the same "changed at step N" markers, the same badges per
+// side (a hole-mark one badge, never twice) and in the cells, the same
+// chips — both read lib/stepdiff.ts.
 describe("step compare parity (E3.2)", () => {
   interface Drawn {
     markers: { step: string; text: string }[]
     cells: Record<string, Record<string, string>>
+    /** Per row and side: the badges, then the chips. */
     holes: Record<string, string[]>
+    chips: Record<string, string[]>
+    /** Per row: the badges inside the compared cells. */
+    cellHoles: Record<string, string[]>
+    /** The response's own badges. */
+    top: string[]
   }
+  const blank = (): Drawn => ({ markers: [], cells: {}, holes: {}, chips: {}, cellHoles: {}, top: [] })
+  const attr = (ns: Iterable<Element>, a: string) => [...ns].map((n) => n.getAttribute(a)!)
 
   function panelDrawn(doc: DiffDoc): Drawn {
     const box = stepDiffBlock(doc, "http://studio.test/studio/")
-    const out: Drawn = { markers: [], cells: {}, holes: {} }
+    const out = blank()
+    out.top = attr(box.querySelectorAll(":scope > .weft-note [data-hole]"), "data-hole")
     for (const m of box.querySelectorAll("[data-weft-diff-marker]"))
       out.markers.push({ step: m.getAttribute("data-weft-diff-marker")!, text: m.textContent })
     for (const tr of box.querySelectorAll("tbody tr")) {
@@ -495,8 +506,11 @@ describe("step compare parity (E3.2)", () => {
       out.cells[n] = {}
       for (const td of tr.querySelectorAll("[data-weft-diff-cell]"))
         out.cells[n][td.getAttribute("data-weft-diff-cell")!] = td.getAttribute("data-state")!
-      for (const side of ["a", "b"])
-        out.holes[`${n}${side}`] = [...tr.querySelectorAll(`[data-weft-diff-side="${side}"] [data-hole]`)].map((b) => b.getAttribute("data-hole")!)
+      out.cellHoles[n] = attr(tr.querySelectorAll("[data-weft-diff-cell] [data-hole]"), "data-hole")
+      for (const side of ["a", "b"]) {
+        out.holes[`${n}${side}`] = attr(tr.querySelectorAll(`[data-weft-diff-side="${side}"] [data-hole]`), "data-hole")
+        out.chips[`${n}${side}`] = attr(tr.querySelectorAll(`[data-weft-diff-side="${side}"] [data-weft-diff-mark]`), "data-weft-diff-mark")
+      }
     }
     return out
   }
@@ -504,33 +518,84 @@ describe("step compare parity (E3.2)", () => {
   async function studioDrawn(doc: DiffDoc): Promise<Drawn> {
     const { container } = await renderWithRouter(createElement(StepDiffTable, { view: nWayView([doc]) }))
     await waitFor(() => expect(container.querySelector("[data-step-diff]")).toBeTruthy())
-    const out: Drawn = { markers: [], cells: {}, holes: {} }
+    const out = blank()
+    out.top = attr(container.querySelectorAll("[data-diff-holes] [data-hole]"), "data-hole")
     for (const m of container.querySelectorAll("[data-diff-marker]"))
       out.markers.push({ step: m.getAttribute("data-diff-marker")!, text: m.querySelector("a")!.textContent })
     for (const tr of container.querySelectorAll("tbody tr")) {
       const n = tr.getAttribute("data-diff-step")!
       out.cells[n] = {}
-      for (const td of tr.querySelectorAll(`[data-diff-run="${doc.b.run_id}"][data-diff-state]`))
-        out.cells[n][td.getAttribute("data-diff-cell")!] = td.getAttribute("data-diff-state")!
-      for (const [side, run] of [["a", doc.a.run_id], ["b", doc.b.run_id]])
-        out.holes[`${n}${side}`] = [...tr.querySelectorAll(`[data-diff-run="${run}"][data-diff-marks] [data-hole]`)].map((b) => b.getAttribute("data-hole")!)
+      const mine = `[data-diff-run="${doc.b.run_id}"][data-diff-state]`
+      for (const td of tr.querySelectorAll(mine)) out.cells[n][td.getAttribute("data-diff-cell")!] = td.getAttribute("data-diff-state")!
+      out.cellHoles[n] = attr(tr.querySelectorAll(`${mine} [data-hole]`), "data-hole")
+      for (const [side, run] of [["a", doc.a.run_id], ["b", doc.b.run_id]]) {
+        out.holes[`${n}${side}`] = attr(tr.querySelectorAll(`[data-diff-run="${run}"][data-diff-marks] [data-hole]`), "data-hole")
+        out.chips[`${n}${side}`] = attr(tr.querySelectorAll(`[data-diff-run="${run}"][data-diff-marks] [data-diff-mark]`), "data-diff-mark")
+      }
     }
     cleanup()
     return out
   }
 
-  it.each(["diff", "diff-hidden", "diff-not-recorded"])("%s.golden.json: the same rows, cells, markers and badges on both surfaces", async (name) => {
-    const doc = golden<DiffDoc>(name)
+  /** want is what lib/stepdiff.ts says either surface must draw. */
+  function want(doc: DiffDoc): Drawn {
     const v = stepDiffView(doc)
-    const want: Drawn = { markers: [], cells: {}, holes: {} }
+    const out = blank()
+    out.top = v.holes.map((h) => h.hole)
     for (const r of v.rows) {
-      if (r.changed) want.markers.push({ step: String(r.step), text: markerWords(r) })
-      want.cells[String(r.step)] = { ...r.cells }
-      want.holes[`${r.step}a`] = r.a.holes.map((h) => h.hole)
-      want.holes[`${r.step}b`] = r.b.holes.map((h) => h.hole)
+      const n = String(r.step)
+      if (r.changed) out.markers.push({ step: n, text: markerWords(r) })
+      out.cells[n] = { ...r.cells }
+      out.cellHoles[n] = DIFF_COLUMNS.flatMap((c) => cellHole(c, r.a.side, r.b.side) ?? [])
+      for (const [side, sv] of [["a", r.a], ["b", r.b]] as const) {
+        out.holes[`${n}${side}`] = [...sv.marks.flatMap((m) => m.hole ?? []), ...sv.holes.map((h) => h.hole)]
+        out.chips[`${n}${side}`] = sv.marks.filter((m) => !m.hole).map((m) => m.mark)
+      }
     }
-    expect(panelDrawn(doc), "panel").toEqual(want)
-    expect(await studioDrawn(doc), "studio").toEqual(want)
+    return out
+  }
+
+  /** marked is diff.golden.json with marks on step 1's sides:
+   * a compaction and a subagent call on a, max_tokens on b — listed in
+   * b's holes too, as the server does — and its response truncated. */
+  function marked(): DiffDoc {
+    const doc = golden<DiffDoc>("diff")
+    const s1 = doc.steps[1]
+    s1.a = { ...s1.a!, marks: ["compacted", "subagent"] }
+    s1.b = { ...s1.b!, marks: ["max_tokens"], holes: [{ hole: "max_tokens", reason: "the step finished on the output token limit" }] }
+    doc.holes = [{ hole: "truncated", reason: "this response reads a bounded number of steps", fix: "open the later steps" }]
+    return doc
+  }
+
+  const cases: [string, () => DiffDoc][] = [
+    ["diff", () => golden<DiffDoc>("diff")],
+    ["diff-hidden", () => golden<DiffDoc>("diff-hidden")],
+    ["diff-not-recorded", () => golden<DiffDoc>("diff-not-recorded")],
+    ["diff with marks and a truncated response", marked],
+  ]
+  it.each(cases)("%s: the same rows, cells, markers, badges and chips on both surfaces", async (_, make) => {
+    const doc = make()
+    expect(panelDrawn(doc), "panel").toEqual(want(doc))
+    expect(await studioDrawn(doc), "studio").toEqual(want(doc))
+  })
+
+  it("marks: one badge per hole per side — max_tokens in both marks and holes is drawn once — subagent a chip", async () => {
+    const doc = marked()
+    for (const got of [panelDrawn(doc), await studioDrawn(doc)]) {
+      expect(got.holes["1a"]).toEqual(["compacted"])
+      expect(got.chips["1a"]).toEqual(["subagent"])
+      expect(got.holes["1b"]).toEqual(["max_tokens"])
+      expect(got.top).toEqual(["truncated"])
+    }
+  })
+
+  it("a read token: the system cells carry the hidden badge on both, their state the server's", async () => {
+    const doc = golden<DiffDoc>("diff-hidden")
+    for (const got of [panelDrawn(doc), await studioDrawn(doc)])
+      for (const n of ["0", "1", "2", "3", "4"]) {
+        expect(got.cellHoles[n]).toEqual(["hidden"])
+        expect(got.cells[n].system).toBe("same")
+      }
   })
 
   it("the Done line: a tool result that differs at step 3 is one marker on both, every other row the same", async () => {

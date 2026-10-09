@@ -1,7 +1,7 @@
 // The panel's 2-way step compare (plan E3, E3.2): the experiment's run
 // against its source, from GET /api/diff (served from the E3.1 goldens,
 // studio/testdata/api/diff*.golden.json), drawn through lib/stepdiff.ts.
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { golden } from "../test/fake-studio"
 import { $, all, DIFF_META, fakeStudio, META, mount, runExperiment, setup, stepDiffRoutes, teardown, text } from "./testkit"
@@ -45,8 +45,11 @@ describe("the result pane's step compare", () => {
     expect(changed.textContent).toContain("b order 3 lost")
     expect(text(el, "[data-weft-step-diff] .weft-diff-h")).toContain("1 of 5 steps changed · first at step 3")
     // The hand-off: Studio's compare page with the same pair.
-    const open = $(el, "[data-weft-step-diff] .weft-diff-h a")!.getAttribute("href")!
-    expect(new URL(open).pathname).toBe("/studio/compare")
+    const open = new URL($(el, "[data-weft-step-diff] .weft-diff-h a")!.getAttribute("href")!)
+    expect(open.pathname).toBe("/studio/compare")
+    expect(open.searchParams.get("step")).toBe("3") // the first changed step
+    // The marker links to the step, as Studio's does.
+    expect($(el, '[data-weft-diff-marker="3"] a')!.getAttribute("href")).toBe("http://studio.test/studio/runs/r_db?step=3")
   })
 
   it("a column a side did not record reads not comparable — never same — with its holes as badges", async () => {
@@ -68,7 +71,10 @@ describe("the result pane's step compare", () => {
     const el = await mount()
     await runExperiment(el)
     expect(all(el, "[data-weft-diff-marker]").map((m) => m.getAttribute("data-weft-diff-marker"))).toEqual(["3"])
-    expect(all(el, '[data-weft-step-diff] [data-hole="hidden"]')).toHaveLength(10)
+    expect(all(el, '[data-weft-step-diff] [data-weft-diff-side] [data-hole="hidden"]')).toHaveLength(10)
+    const sys = $(el, '[data-weft-diff-step="0"] [data-weft-diff-cell="system"]')!
+    expect(sys.getAttribute("data-state")).toBe("same")
+    expect(sys.querySelector('[data-hole="hidden"]')).not.toBeNull()
   })
 
   it("a truncated response says so with the response_cap badge", async () => {
@@ -78,6 +84,21 @@ describe("the result pane's step compare", () => {
     const el = await mount()
     await runExperiment(el)
     expect($(el, '[data-weft-step-diff] > .weft-note [data-hole="truncated"]')).not.toBeNull()
+  })
+
+  it("says it is reading while GET /api/diff is in flight, then draws the table", async () => {
+    let release: (v: unknown) => void = () => {}
+    const held = new Promise((r) => (release = r))
+    const routes = stepDiffRoutes(null)
+    routes["diff?a=s_01-t1&b=pg_x1"] = () => held
+    fakeStudio(routes, DIFF_META)
+    const el = await mount()
+    await runExperiment(el)
+    expect(text(el, "[data-weft-step-diff-loading]")).toBe("reading the step compare…")
+    expect($(el, "[data-weft-step-diff]")).toBeNull()
+    release(golden("diff"))
+    await vi.waitFor(() => expect($(el, "[data-weft-step-diff]")).not.toBeNull())
+    expect($(el, "[data-weft-step-diff-loading]")).toBeNull()
   })
 
   it("is not asked for, nor drawn, without capability diff", async () => {

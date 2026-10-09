@@ -6,12 +6,13 @@
 // is same, changed (the two values beneath), not comparable or
 // missing; each side's marks are chips and its holes badges.ts's
 // badges. Vanilla, at panel width.
-import { compareLink, href } from "../lib/links"
+import { compareLink, href, runLink } from "../lib/links"
 import {
   CELL_REASONS,
   CELL_WORDS,
   COLUMN_LABELS,
   DIFF_COLUMNS,
+  cellHole,
   cellText,
   markerWords,
   stepDiffView,
@@ -41,7 +42,7 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
   const v = stepDiffView(doc)
   const box = el("div", "weft-diff", undefined, { "data-weft-step-diff": "", "data-key": "step-diff" })
   const link = el("a", "weft-btn", "⤢", {
-    href: href(base, compareLink(v.a.run_id, [v.b.run_id])),
+    href: href(base, compareLink(v.a.run_id, [v.b.run_id], v.markers.at(0))),
     target: "_blank",
     rel: "noopener",
     "aria-label": `open the step compare of ${v.a.run_id} and ${v.b.run_id} in Studio`,
@@ -52,7 +53,11 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
   if (v.markers.length) {
     const list = el("ul", "weft-diff-markers", undefined, { "aria-label": "changed steps" })
     for (const r of v.rows)
-      if (r.changed) list.appendChild(el("li", undefined, markerWords(r), { "data-weft-diff-marker": String(r.step) }))
+      if (r.changed) {
+        // The marker is a link to the step, as Studio's: the compared run's.
+        const a = el("a", undefined, markerWords(r), { href: href(base, runLink(v.b.run_id, { step: r.step })), target: "_blank", rel: "noopener" })
+        list.appendChild(el("li", undefined, [a], { "data-weft-diff-marker": String(r.step) }))
+      }
     box.appendChild(list)
   }
   const table = el("table", "weft-diff-table")
@@ -73,6 +78,13 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
     for (const c of DIFF_COLUMNS) {
       const state = r.cells[c]
       const td = el("td", `weft-diff-${state}`, CELL_WORDS[state], { "data-weft-diff-cell": c, "data-state": state, title: CELL_REASONS[state] })
+      // A withheld system prompt: the hidden badge beside the state
+      // (the server compared the hashes).
+      const hole = cellHole(c, r.a.side, r.b.side)
+      if (hole) {
+        td.appendChild(document.createTextNode(" "))
+        td.appendChild(badge(hole))
+      }
       if (state === "changed") {
         td.appendChild(el("div", "weft-diff-row weft-diff-a", `a ${cellText(r.a.side, c)}`))
         td.appendChild(el("div", "weft-diff-row weft-diff-b", `b ${cellText(r.b.side, c)}`))

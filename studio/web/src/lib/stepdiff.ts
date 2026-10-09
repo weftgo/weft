@@ -196,6 +196,20 @@ function argsText(args: unknown): string {
   return typeof args === "string" ? args : JSON.stringify(args)
 }
 
+/** systemHidden: the side's system prompt is withheld from this
+ * token (a read-scoped panel token: system null under hidden). Its
+ * hash still compares, so the cell keeps the server's state. */
+export function systemHidden(side: DiffSide | null): boolean {
+  return !!side && side.system === null && side.holes.some((h) => h.hole === "hidden")
+}
+
+/** cellHole is the hole a compared cell carries beside its state: the
+ * hidden badge in the system column when either side's prompt is
+ * withheld — a "same" there is the hashes', the words unseen. */
+export function cellHole(col: DiffColumn, ...sides: (DiffSide | null)[]): "hidden" | undefined {
+  return col === "system" && sides.some(systemHidden) ? "hidden" : undefined
+}
+
 /** cellText is what a side holds in a column, in one short line both
  * surfaces print the same: the system prompt (or its hash's head when
  * only the hash is known), name(args) per call, each result (an error
@@ -206,6 +220,7 @@ export function cellText(side: DiffSide | null, col: DiffColumn): string {
   switch (col) {
     case "system":
       if (side.system !== null) return side.system ? clip(side.system) : "(empty)"
+      if (systemHidden(side)) return HOLES.hidden.label
       return side.system_hash ? `#${side.system_hash.slice(0, 8)}` : "—"
     case "tool_calls":
       return side.tool_calls.length ? clip(side.tool_calls.map((c) => `${c.name}(${argsText(c.args)})`).join(", ")) : "(none)"
@@ -253,8 +268,14 @@ export interface StepDiffView {
   unknown: number
 }
 
-function sideView(side: DiffSide | null): SideView {
-  return { side, marks: (side?.marks ?? []).map(markChip), holes: sideHoles(side) }
+/** sideView is a side as drawn: its holes, and its marks less any
+ * mark its holes already carry (the server lists max_tokens and
+ * interrupted in both) — one badge per hole per side. A mark that is a
+ * hole (hole set) is drawn as that hole's badge on both surfaces. */
+export function sideView(side: DiffSide | null): SideView {
+  const holes = sideHoles(side)
+  const marks = (side?.marks ?? []).filter((m) => !holes.some((h) => h.hole === m)).map(markChip)
+  return { side, marks, holes }
 }
 
 function cellsOf(row: DiffRowDoc): Record<DiffColumn, CellState> {
@@ -301,8 +322,10 @@ export function markerWords(row: Pick<StepRowView, "step" | "cells" | "changedCo
  * changed" covers only what both runs recorded. */
 export function summaryWords(v: Pick<StepDiffView, "rows" | "markers" | "unknown">): string {
   const n = v.markers.length
+  // A step only one run has is a change (E3.1), said apart.
+  const only = v.rows.filter((r) => r.changed && DIFF_COLUMNS.every((c) => r.cells[c] === "missing")).length
   const head = n
-    ? `${n} of ${v.rows.length} ${v.rows.length === 1 ? "step" : "steps"} changed · first at step ${v.markers[0]}`
+    ? `${n} of ${v.rows.length} ${v.rows.length === 1 ? "step" : "steps"} changed${only ? ` (${only} only in one run)` : ""} · first at step ${v.markers[0]}`
     : `no step changed of ${v.rows.length}`
   return v.unknown ? `${head} · ${v.unknown} ${v.unknown === 1 ? "cell" : "cells"} not comparable` : head
 }
@@ -333,6 +356,9 @@ export interface NWayView {
   /** Per compared run (same order as others), its changed ordinals. */
   markers: number[][]
   holes: HoleMark[]
+  /** Why the responses cannot be laid side by side (none, or not one
+   * base): one line a renderer shows instead of the table. */
+  error?: string
 }
 
 const ALL_MISSING = (): Record<DiffColumn, CellState> => {
@@ -343,13 +369,21 @@ const ALL_MISSING = (): Record<DiffColumn, CellState> => {
 
 /** nWayView lays N−1 responses against one base run side by side:
  * the base in the first column, each compared run beside it, rows by
- * ordinal. Every response must name the same a (else it throws: the
- * N-way rule is one base). */
+ * ordinal. Every response must name the same a: else (or with none)
+ * the view is empty and its error says why — it never throws. */
 export function nWayView(docs: DiffDoc[]): NWayView {
-  if (!docs.length) throw new Error("nWayView: no responses")
+  const empty = (error: string, base: DiffRun = { run_id: "", steps: 0, status: "" }): NWayView => ({
+    base,
+    others: [],
+    rows: [],
+    markers: [],
+    holes: [],
+    error,
+  })
+  if (!docs.length) return empty("no step compare to show: no run was compared")
   const base = docs[0].a
-  for (const d of docs)
-    if (d.a.run_id !== base.run_id) throw new Error(`nWayView: every response compares against one base (${base.run_id}, not ${d.a.run_id})`)
+  const other = docs.find((d) => d.a.run_id !== base.run_id)
+  if (other) return empty(`the step compare needs one base run: ${base.run_id} and ${other.a.run_id} were both answered as base`, base)
   const views = docs.map(stepDiffView)
   const steps = [...new Set(views.flatMap((v) => v.rows.map((r) => r.step)))].sort((x, y) => x - y)
   const rows = steps.map((step): NWayRow => {

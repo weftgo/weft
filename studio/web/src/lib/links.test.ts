@@ -144,6 +144,13 @@ describe("compareLink", () => {
     expect(JSON.parse(u.searchParams.get("a")!)).toBe("123")
     expect(JSON.parse(u.searchParams.get("b")!)).toEqual(["r/2"])
   })
+
+  it("lands on a step: the ordinal, dropped when it is not one", () => {
+    expect(compareLink("r_1", ["r_2"], 3)).toEqual({ to: "/compare", search: { a: "r_1", b: ["r_2"], step: 3 } })
+    expect(compareLink("r_1", ["r_2"], -1).search).toEqual({ a: "r_1", b: ["r_2"] })
+    expect(compareLink("r_1", [], 1.5).search).toEqual({ a: "r_1" })
+    expect(new URL(href(BASE, compareLink("r_1", ["r_2"], 3))).searchParams.get("step")).toBe("3")
+  })
 })
 
 describe("no link ever carries a token", () => {

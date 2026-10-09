@@ -568,6 +568,36 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     ])
   })
 
+  it("without capability diff the playground draws no step compare and asks for none", async () => {
+    const done = {
+      events: [
+        { type: "run_start", id: "pg_1", model: rOK.model, agent: "orders" },
+        { type: "step_start", run_id: "pg_1", index: 0 },
+        { type: "step_finish", run_id: "pg_1", index: 0, reason: "stop", usage: { input_tokens: 5, output_tokens: 2 } },
+        { type: "run_finish", run_id: "pg_1", usage: { input_tokens: 5, output_tokens: 2 }, steps: 1 },
+      ].map((event, pos) => ({ pos, time: rOK.started, event })),
+      next_after: null,
+      done: true,
+      gaps: [],
+    }
+    studio
+      .on("GET meta", meta(["live", "playground", "runtimes"]))
+      .on("POST playground/runs", command("cmd_1", "queued"))
+      .on("GET playground/commands/cmd_1", command("cmd_1", "finished", "pg_1"))
+      .on("GET runs/pg_1", { ...row({ id: "pg_1", playground: true, status: "succeeded" }), children: [] })
+      .on("GET runs/pg_1/events", done)
+      .on("GET runs/pg_1/transcript", { batches: [] })
+      .on("GET diff", golden<object>("diff"))
+    renderApp("/playground?run=r_ok")
+    const runButton = await screen.findByRole("button", { name: "Run A" })
+    await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
+    fireEvent.click(runButton)
+    await waitFor(() => expect(document.querySelector('[data-variant="A"]')?.textContent).toContain("finished"))
+    await new Promise((r) => setTimeout(r, 100))
+    expect(document.querySelector("[data-variant-steps]")).toBeNull()
+    expect(studio.calls("GET diff")).toHaveLength(0)
+  })
+
   it("follows a variant's command after the reader moves to another variant, and offers a parked run's verbs", async () => {
     let state = "queued"
     studio

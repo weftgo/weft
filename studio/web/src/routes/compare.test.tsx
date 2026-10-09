@@ -118,9 +118,57 @@ describe("the compare page", () => {
     serve(["diff"], { "r_ta|r_tb": doc })
     renderApp('/compare?a=r_ta&b=["r_tb"]')
     await waitFor(() => expect(document.querySelector("[data-step-diff]")).toBeTruthy())
-    expect(document.querySelectorAll('[data-step-diff] tbody [data-hole="hidden"]').length).toBe(10)
+    expect(document.querySelectorAll('[data-step-diff] tbody [data-diff-marks] [data-hole="hidden"]').length).toBe(10)
+    // The system cells: the hidden badge, never the hash as words; the
+    // compared cell keeps the server's state (the hashes match).
+    const sys = document.querySelector<HTMLElement>('[data-diff-step="0"] [data-diff-run="r_tb"][data-diff-cell="system"]')!
+    expect(sys.getAttribute("data-diff-state")).toBe("same")
+    expect(sys.querySelector('[data-hole="hidden"]')).toBeTruthy()
+    expect(document.querySelector('[data-diff-step="0"] [data-diff-run="r_ta"][data-diff-cell="system"] [data-hole="hidden"]')).toBeTruthy()
     expect(document.querySelector('[data-diff-holes] [data-hole="truncated"]')).toBeTruthy()
     expect(markers().map((m) => m.step)).toEqual(["3"])
+  })
+
+  it("a link's step: the row is targeted, highlighted and scrolled to", async () => {
+    serve(["diff"], { "r_da|r_db": golden<DiffDoc>("diff") })
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    renderApp('/compare?a=r_da&b=["r_db"]&step=3')
+    const row = await waitFor(() => {
+      const el = document.querySelector("[data-diff-target]")
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(row.getAttribute("data-diff-step")).toBe("3")
+    expect(document.querySelectorAll("[data-diff-target]")).toHaveLength(1)
+    expect(scroll.mock.contexts).toContain(row)
+  })
+
+  it("a failed background re-read keeps the drawn table; an error replaces nothing it had", async () => {
+    // A side still running is re-read every 2 s (diffQuery).
+    const doc = golden<DiffDoc>("diff")
+    doc.b = { ...doc.b, status: "running" }
+    let calls = 0
+    serve(["diff"])
+    studio.on("GET diff", () => (++calls === 1 ? doc : apiError(500, "internal", "the database is gone")))
+    renderApp('/compare?a=r_da&b=["r_db"]')
+    await waitFor(() => expect(document.querySelector("[data-step-diff]")).toBeTruthy())
+    await waitFor(() => expect(calls).toBeGreaterThanOrEqual(2), { timeout: 6_000 })
+    await new Promise((r) => setTimeout(r, 100))
+    expect(document.querySelector("[data-step-diff]")).toBeTruthy()
+    expect(document.querySelector("[data-step-diff-error]")).toBeNull()
+  })
+
+  it("an error before any response arrived is one line", async () => {
+    serve(["diff"])
+    studio.on("GET diff", () => apiError(500, "internal", "the database is gone"))
+    renderApp('/compare?a=r_da&b=["r_db"]')
+    const line = await waitFor(() => {
+      const el = document.querySelector("[data-step-diff-error]")
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(line.textContent).toContain("the database is gone")
   })
 
   it("without capability diff: no call, the page says why", async () => {
@@ -167,6 +215,7 @@ describe("the run header's compare links", () => {
     const u = new URL(src.getAttribute("href")!, "http://x")
     expect(u.pathname).toBe("/compare")
     expect(u.searchParams.get("a")).toBe("r_src")
+    expect(u.searchParams.get("step")).toBe("3") // the step the fork continued from
     expect(JSON.parse(u.searchParams.get("b")!)).toEqual(["pg_new"])
     expect(other.textContent).toBe("compare with…")
     expect(new URL(other.getAttribute("href")!, "http://x").searchParams.get("b")).toBeNull()

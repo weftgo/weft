@@ -3219,6 +3219,8 @@ export class WeftDevtools extends HTMLElement {
       if (r.stepDiff) body.appendChild(stepDiffBlock(r.stepDiff, this.base))
       else if (r.stepDiffError)
         body.appendChild(el("div", "weft-note weft-warn", `the step compare could not be read: ${r.stepDiffError}`))
+      else if (r.runID && r.sourceRunID)
+        body.appendChild(el("div", "weft-note", "reading the step compare…", { "data-weft-step-diff-loading": "" }))
     }
 
     // The parked calls' controls: the runtime-started run's approval

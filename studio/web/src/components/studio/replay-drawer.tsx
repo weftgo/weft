@@ -637,7 +637,7 @@ function ReplayOutcome({
           ) : null}
           {e.state === "finished" && has("diff") ? (
             <Link
-              {...compareLink(sourceRunID, [e.runID])}
+              {...compareLink(sourceRunID, [e.runID], fromStep)}
               className="text-muted-foreground hover:underline"
               data-replay-compare-link
             >

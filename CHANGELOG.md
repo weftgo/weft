@@ -280,13 +280,24 @@ module, ADR 0005).
   <status>`, "open"; a matrix once, when its last cell settles), a run
   parked (`run <id> parked at <tool>`, "open", and "approve" through
   `POST /api/runs/{id}/approvals` for one parked call of a
-  runtime-started run when the playground is on and the token may act),
-  a runtime connected or disconnected (from `GET /api/runtimes`' set —
-  the live stream has no runtime kind), the live stream giving up
+  runtime-started run when the playground is on and the token may act;
+  posted once however often it is clicked; the toast goes when the park
+  ends), "finished" only from the run's settled row, never guessed,
+  a runtime connected or disconnected (one toast per flip of its
+  `connected` in `GET /api/runtimes`, read every 5 s by the shell —
+  the live stream has no runtime kind; a runtime gone from the list is
+  disconnected once, a failed read says nothing), the live stream giving up
   (`live updates stopped after 6 reconnects`, "retry" — it stopped in
   silence before; `openLive`'s handle gains `gaveUp()` / `retry()` and
   `onGaveUp`), and copy link ("link copied" / "copy failed", beside the
-  header's own words).
+  header's own words). `next-themes` is no longer a dependency.
+
+- **`GET /api/runtimes` says whether each runtime is connected**
+  (`connected`: it holds a live command stream now). A runtime whose
+  stream dropped stays listed until its commands resolve — 10 minutes,
+  24 hours with breakpoints — and a reconnect re-registers under the
+  same id, so the list alone could not say a runtime went away;
+  `RuntimeView.Connected` in `weft/studio/runtime`.
 
 ### Changed
 

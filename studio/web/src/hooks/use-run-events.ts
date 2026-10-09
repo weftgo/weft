@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from "react"
 import { fetchEventsPage, metaQuery, postApproval, runQuery, studioToken } from "@/lib/api"
 import { canReplay } from "@/lib/replay"
 import type { EventsPage, RunRow, ToolCallPart, WireEvent } from "@/lib/api"
-import { notify } from "@/lib/notify"
+import { dismissNotice, notify } from "@/lib/notify"
 import { queryClient } from "@/lib/query"
 import { openLive } from "@/lib/live"
 import type { LiveHandle, LiveRecord } from "@/lib/live"
@@ -179,6 +179,16 @@ export function useRunEvents(
   trackedRef.current = Boolean(opts?.tracked)
   const approveRef = useRef(opts?.approve)
   approveRef.current = opts?.approve
+  // The run whose parked notice this hook raised: its park ends when
+  // the hook moves on to another run (a playground card follows the
+  // resumed run once every call is decided) — the toast goes then.
+  const parkedRun = useRef("")
+  useEffect(() => {
+    if (id && parkedRun.current && parkedRun.current !== id) {
+      dismissNotice("parked", parkedRun.current)
+      parkedRun.current = ""
+    }
+  }, [id])
   /** Read the pages again from the cursor (the current effect's). */
   const catchUp = useRef<() => void>(() => {})
   /** Close the current effect's live stream (the run is over). */
@@ -214,7 +224,12 @@ export function useRunEvents(
         if (parkArmed === null) parkArmed = pending.length === 0 || trackedRef.current
         if (parkArmed && pending.length > 0) {
           parkArmed = false
+          parkedRun.current = id
           void noticeParked(id, pending, approveRef.current)
+        } else if (pending.length === 0 && parkedRun.current === id) {
+          // The park ended (a later finish with nothing pending).
+          dismissNotice("parked", id)
+          parkedRun.current = ""
         }
       }
       setStream({

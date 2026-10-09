@@ -356,14 +356,19 @@ type CommandStatus struct {
 // shape, pinned): identity, liveness, and per agent the alternate
 // models and every tool with its side-effect class and allow flag.
 type RuntimeView struct {
-	ID             string      `json:"id"`
-	Host           string      `json:"host"`
-	Pid            int         `json:"pid"`
-	Service        string      `json:"service"`
-	Env            string      `json:"env"`
-	ConnectedSince time.Time   `json:"connected_since"`
-	LastSeen       time.Time   `json:"last_seen"`
-	Agents         []AgentView `json:"agents"`
+	ID             string    `json:"id"`
+	Host           string    `json:"host"`
+	Pid            int       `json:"pid"`
+	Service        string    `json:"service"`
+	Env            string    `json:"env"`
+	ConnectedSince time.Time `json:"connected_since"`
+	LastSeen       time.Time `json:"last_seen"`
+	// Connected reports whether the runtime holds a live command stream
+	// now. A runtime whose stream dropped stays listed (until its
+	// commands resolve, pruneLocked) with Connected false; a reconnect
+	// re-registers under the same id and reads true again.
+	Connected bool        `json:"connected"`
+	Agents    []AgentView `json:"agents"`
 	// Breakpoints is the debugger's stored tool set for this runtime
 	// (WEFT-DEVTOOLS §8.3) — what PUT …/breakpoints last delivered, so a
 	// reloaded UI shows the rule that is parking its runs. Empty, never
@@ -1160,6 +1165,7 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			Env:            c.reg.Env,
 			ConnectedSince: c.connectedSince,
 			LastSeen:       c.lastSeen,
+			Connected:      c.feed != nil,
 			Breakpoints:    append([]string{}, c.breakpoints...),
 		}
 		for _, a := range c.reg.Agents {

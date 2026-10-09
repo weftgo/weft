@@ -8,7 +8,7 @@ import type { Dispatch, SetStateAction } from "react"
 import { ApiError, fetchCommand, fetchRun } from "@/lib/api"
 import type { CommandStatus, RunRow } from "@/lib/api"
 import type { ThreadMode } from "@/lib/experiment-body"
-import { notify } from "@/lib/notify"
+import { dismissNotice, notify } from "@/lib/notify"
 
 /** One experiment in flight or finished: the command's lifecycle, the
  * run it produced, the fold streaming in from the live lane. */
@@ -61,6 +61,12 @@ export function useCommandTracking(
   const setRef = useRef(setExperiment)
   setRef.current = setExperiment
   const commandID = experiment?.commandID ?? ""
+  // A decision's command (Experiment.decided): the parked run it
+  // answers. Once the command names another run — the resumed one —
+  // that park is over, and its parked notice goes (plan H5). A held
+  // decision finishes under the parked run's own id: the park stands.
+  const decidedRef = useRef(experiment?.decided?.runID ?? "")
+  decidedRef.current = experiment?.decided?.runID ?? ""
   useEffect(() => {
     if (!commandID) return
     let alive = true
@@ -75,16 +81,25 @@ export function useCommandTracking(
     // still read running (partial usage, no finish) — it is read again
     // until it settles, a bounded number of times.
     let afterSettled = 0
-    let lastRow: RunRow | null = null
-    /** The finished notice (plan H5), once the run's row says how it
-     * ended — or the reads gave up waiting. A parked run (its row still
-     * holds pending calls — a park, or a decision held while another
-     * call waits) is not finished: the parked notice speaks for it. */
-    const finished = (st: CommandStatus) => {
-      if (st.state !== "finished" || (lastRow?.pending ?? 0) > 0) return
-      const status =
-        lastRow && lastRow.status !== "running" ? lastRow.status : (st.status ?? "succeeded")
-      notify({ kind: "experiment", commandID, runID: st.run_id, status })
+    /** The finished notice (plan H5), from the run's settled row only
+     * — its status, never a guess from the ack's. A parked run (its row
+     * still holds pending calls — a park, or a decision held while
+     * another call waits) is not finished: the parked notice speaks for
+     * it. */
+    const finished = (st: CommandStatus, row: RunRow) => {
+      if (st.state !== "finished" || row.pending > 0) return
+      notify({ kind: "experiment", commandID, runID: st.run_id, status: row.status })
+    }
+    /** The row reads ran out with the row missing or still running:
+     * one more read, and a notice only if it settled. */
+    const lastTry = async (st: CommandStatus) => {
+      if (st.state !== "finished" || !st.run_id) return
+      try {
+        const row = await fetchRun(st.run_id)
+        if (!gone() && row.status !== "running") finished(st, row)
+      } catch {
+        // no settled row: no notice
+      }
     }
     const tick = async () => {
       let st: CommandStatus
@@ -104,6 +119,8 @@ export function useCommandTracking(
         return
       }
       if (gone()) return
+      const parkedRun = decidedRef.current
+      if (parkedRun && st.run_id && st.run_id !== parkedRun) dismissNotice("parked", parkedRun)
       setRef.current((cur) =>
         mine(cur)
           ? { ...cur, state: st.state, status: st.status, runID: st.run_id || cur.runID, error: st.error }
@@ -116,7 +133,7 @@ export function useCommandTracking(
           const row: RunRow = await fetchRun(st.run_id)
           if (gone()) return
           rowSettled = row.status !== "running"
-          lastRow = row
+          if (rowSettled && settled(st.state)) finished(st, row)
           setRef.current((cur) => (mine(cur) ? { ...cur, row } : cur))
         } catch {
           // the row loads on the next poll
@@ -124,8 +141,9 @@ export function useCommandTracking(
       }
       if (gone()) return
       if (settled(st.state)) {
-        if (!st.run_id || rowSettled || ++afterSettled > ROW_SETTLE_READS) {
-          finished(st)
+        if (!st.run_id || rowSettled) return
+        if (++afterSettled > ROW_SETTLE_READS) {
+          void lastTry(st)
           return
         }
         timer = setTimeout(() => void tick(), 1000)

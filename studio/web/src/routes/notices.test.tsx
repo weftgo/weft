@@ -188,6 +188,104 @@ describe("the playground's notices", () => {
     await waitFor(() => expect(studio.calls("POST runs/pg_1/approvals")).toHaveLength(1))
     expect(studio.calls("POST runs/pg_1/approvals")[0].body).toEqual({ call_id: "call_9", decision: "approve" })
   })
+
+  const parkedPG1 = () =>
+    studio
+      .on("POST playground/runs", command("cmd_1", "queued"))
+      .on("GET playground/commands/cmd_1", command("cmd_1", "finished", "pg_1", "succeeded"))
+      .on("GET runs/pg_1", { ...row({ id: "pg_1", playground: true, pending: 1 }), children: [] })
+      .on("GET runs/pg_1/events", eventsOf("pg_1", [{ type: "tool_call", id: "call_9", name: "refund", args: {} }]))
+      .on("GET runs/pg_1/transcript", { batches: [] })
+      .on("POST runs/pg_1/approvals", command("cmd_d1", "queued"))
+      .on("GET runs/pg_2/transcript", { batches: [] })
+
+  it("a double click on approve posts once", async () => {
+    parkedPG1().on("GET playground/commands/cmd_d1", command("cmd_d1", "queued"))
+    await runA()
+    const t = await toastFor(/^run pg_1 parked at refund$/)
+    const approve = within(t).getByRole("button", { name: "approve" })
+    fireEvent.click(approve)
+    fireEvent.click(approve)
+    await waitFor(() => expect(studio.calls("POST runs/pg_1/approvals")).toHaveLength(1))
+    await settle()
+    expect(studio.calls("POST runs/pg_1/approvals")).toHaveLength(1)
+  })
+
+  it("a park decided on the card takes its toast down; the resumed run's finish is its own toast", async () => {
+    parkedPG1()
+      .on("GET playground/commands/cmd_d1", command("cmd_d1", "finished", "pg_2", "succeeded"))
+      .on("GET runs/pg_2", { ...row({ id: "pg_2", playground: true, status: "succeeded" }), children: [] })
+      .on("GET runs/pg_2/events", eventsOf("pg_2"))
+    await runA()
+    await toastFor(/^run pg_1 parked at refund$/)
+    const card = document.querySelector<HTMLElement>('[data-variant="A"]')!
+    fireEvent.click(await within(card).findByRole("button", { name: "continue" }))
+    await toastFor(/^experiment pg_2 finished · succeeded$/)
+    await waitFor(() => expect(toastTitles()).not.toContain("run pg_1 parked at refund"))
+  })
+
+  it("a resumed run that parks again raises a fresh parked toast", async () => {
+    parkedPG1()
+      .on("GET playground/commands/cmd_d1", command("cmd_d1", "finished", "pg_2", "succeeded"))
+      .on("GET runs/pg_2", { ...row({ id: "pg_2", playground: true, pending: 1 }), children: [] })
+      .on("GET runs/pg_2/events", eventsOf("pg_2", [{ type: "tool_call", id: "call_10", name: "lookup_order", args: {} }]))
+    await runA()
+    const t = await toastFor(/^run pg_1 parked at refund$/)
+    fireEvent.click(within(t).getByRole("button", { name: "approve" }))
+    await toastFor(/^run pg_2 parked at lookup_order$/)
+    // The resumed run parked again: no "finished", the old park's toast gone.
+    await waitFor(() => expect(toastTitles()).toEqual(["run pg_2 parked at lookup_order"]))
+  })
+
+  it("says nothing finished when no read of the run's row settles (all fail)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    studio
+      .on("POST playground/runs", command("cmd_1", "queued"))
+      .on("GET playground/commands/cmd_1", command("cmd_1", "finished", "pg_1", "succeeded"))
+      .on("GET runs/pg_1", apiError(500, "internal", "db down"))
+      .on("GET runs/pg_1/events", pagedEvents([], { done: false }))
+      .on("GET runs/pg_1/transcript", { batches: [] })
+    await runA()
+    await waitFor(() => expect(studio.calls("GET runs/pg_1").length).toBeGreaterThan(0))
+    for (let i = 0; i < 30; i++) await vi.advanceTimersByTimeAsync(1000)
+    // Every read refused, the last try too: the bounded reads ended.
+    const reads = studio.calls("GET runs/pg_1").length
+    expect(reads).toBeGreaterThan(15)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(studio.calls("GET runs/pg_1").length).toBe(reads)
+    expect(toastTitles().filter((x) => x.startsWith("experiment"))).toEqual([])
+  })
+
+  it("a matrix with a refused cell and out-of-order settles: one toast, and open opens the experiment", async () => {
+    let n = 0
+    let aDone = false
+    studio
+      .on("POST experiments", (req) => req.body)
+      .on("POST playground/runs", () =>
+        ++n === 2 ? apiError(503, "unavailable", "runtime rt_1 is not connected") : command(`cmd_m${n}`, "queued")
+      )
+      .on("GET playground/commands/cmd_m1", () =>
+        aDone ? command("cmd_m1", "finished", "pg_m1", "succeeded") : command("cmd_m1", "accepted", "pg_m1")
+      )
+      .on("GET playground/commands/cmd_m3", command("cmd_m3", "finished", "pg_m3", "failed"))
+    const { router } = renderApp("/playground?run=r_ok")
+    await waitFor(() => expect(screen.getByLabelText<HTMLSelectElement>("agent").value).toBe("orders"))
+    fireEvent.click(screen.getByRole("button", { name: "+ variant" }))
+    fireEvent.click(screen.getByRole("button", { name: "+ variant" }))
+    fireEvent.change(screen.getByLabelText("experiment name"), { target: { value: "exp_mix" } })
+    const go = screen.getByRole("button", { name: "Run matrix" })
+    await waitFor(() => expect(go).toHaveProperty("disabled", false))
+    fireEvent.click(go)
+    // C (the last issued) settles first, B was refused: A still runs.
+    await waitFor(() => expect(document.querySelector('[data-cell="C×1"]')?.textContent).toContain("finished"))
+    await settle()
+    expect(toastTitles()).toEqual([])
+    aDone = true
+    const t = await toastFor(/^experiment exp_mix finished · 1 succeeded, 1 failed, 1 not run$/)
+    fireEvent.click(within(t).getByRole("link", { name: "open" }))
+    await waitFor(() => expect(router.state.location.search).toEqual({ experiment: "exp_mix" }))
+    expect(toastTitles().filter((x) => x.startsWith("experiment"))).toHaveLength(1)
+  })
 })
 
 describe("a run page's parked notice", () => {
@@ -290,6 +388,60 @@ describe("runtime notices", () => {
     await queryClient.invalidateQueries({ queryKey: ["runtimes"] })
     await settle()
     expect(toastTitles().sort()).toEqual(["runtime acme-api (rt_1) disconnected", "runtime billing (rt_2) connected"])
+  })
+
+  it("diffs each runtime's connected: a dropped stream, a re-register under the same id, a failed read in between", async () => {
+    const rt = (connected: boolean) => ({
+      id: "rt_1",
+      host: "laptop",
+      pid: 1,
+      service: "acme-api",
+      env: "dev",
+      connected_since: rOK.started,
+      last_seen: rOK.started,
+      connected,
+      agents: [],
+    })
+    let answer: unknown = { runtimes: [rt(true)] }
+    studio
+      .on("GET meta", meta(["live", "playground", "runtimes"]))
+      .on("GET runs", runs)
+      .on("GET runtimes", () => answer)
+    renderApp("/runs")
+    await waitFor(() => expect(studio.calls("GET runtimes").length).toBeGreaterThan(0))
+    await settle()
+    expect(toastTitles()).toEqual([])
+    // The stream dropped: still listed, connected false.
+    answer = { runtimes: [rt(false)] }
+    await queryClient.invalidateQueries({ queryKey: ["runtimes"] })
+    await toastFor(/^runtime acme-api \(rt_1\) disconnected$/)
+    // A failed read in between says nothing.
+    answer = apiError(500, "internal", "studio hiccup")
+    await queryClient.invalidateQueries({ queryKey: ["runtimes"] }).catch(() => {})
+    await settle()
+    expect(toastTitles()).toEqual(["runtime acme-api (rt_1) disconnected"])
+    // The link reconnects under the same id: connected again.
+    answer = { runtimes: [rt(true)] }
+    await queryClient.invalidateQueries({ queryKey: ["runtimes"] })
+    await toastFor(/^runtime acme-api \(rt_1\) connected$/)
+    // And a second flap is its own toast, not swallowed by the first.
+    answer = { runtimes: [rt(false)] }
+    await queryClient.invalidateQueries({ queryKey: ["runtimes"] })
+    await waitFor(() =>
+      expect(toastTitles().filter((x) => x === "runtime acme-api (rt_1) disconnected")).toHaveLength(2)
+    )
+  })
+
+  it("the shell is the one poller: one read of /api/runtimes per 5 s", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    studio
+      .on("GET meta", meta(["live", "playground", "runtimes"]))
+      .on("GET runs", runs)
+      .on("GET runtimes", { runtimes: [] })
+    renderApp("/runs")
+    await waitFor(() => expect(studio.calls("GET runtimes")).toHaveLength(1))
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(studio.calls("GET runtimes")).toHaveLength(4)
   })
 
   it("reads no runtimes without the playground capability", async () => {

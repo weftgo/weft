@@ -320,6 +320,50 @@ func TestBreakpointsSurviveAReconnect(t *testing.T) {
 	}
 }
 
+// TestSnapshotConnected: a runtime whose stream dropped stays listed
+// (its commands may still resolve) but reads connected false; the
+// reconnect re-registers under the same id and reads true again — what
+// Studio's runtime notices diff on.
+func TestSnapshotConnected(t *testing.T) {
+	rs := fastServer()
+	ts := httptest.NewServer(mux(rs))
+	defer ts.Close()
+	connected := func() bool {
+		t.Helper()
+		views := rs.Snapshot()
+		if len(views) != 1 || views[0].ID != "rt_flap" {
+			t.Fatalf("snapshot = %+v", views)
+		}
+		return views[0].Connected
+	}
+	register(t, mux(rs), regBody("rt_flap"))
+	if connected() {
+		t.Error("registered without a stream: connected = true")
+	}
+	_, close1 := subscribe(t, rs, ts.URL, "rt_flap", "")
+	if !connected() {
+		t.Error("streaming: connected = false")
+	}
+	close1()
+	waitDisconnected(t, rs, "rt_flap")
+	if connected() {
+		t.Error("stream dropped: connected = true")
+	}
+	register(t, mux(rs), regBody("rt_flap"))
+	_, close2 := subscribe(t, rs, ts.URL, "rt_flap", "")
+	defer close2()
+	if !connected() {
+		t.Error("re-registered and streaming: connected = false")
+	}
+	b, err := json.Marshal(rs.Snapshot()[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"connected":true`) {
+		t.Errorf("snapshot JSON lacks connected: %s", b)
+	}
+}
+
 // nextNonPing reads the next non-ping frame's event and data, bounded.
 func nextNonPing(t *testing.T, r *bufio.Reader, wait time.Duration) (string, []byte) {
 	t.Helper()

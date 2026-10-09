@@ -316,7 +316,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // experiment; overrides: instructions, tools_enabled, model, thinking, options
 //     // {max_steps, parallelism, temperature}, params {top_p, max_tokens, stop, seed},
 //     // tool_choice {mode, name}, park_on, only_tools — narrowing or neutral, each refusal
-//     // naming its rule; /api/runtimes gives each agent resolver + defaults (the form greys
+//     // naming its rule; /api/runtimes gives each runtime connected (a live stream now; a dropped
+//     // one stays listed, false, until pruned) and each agent resolver + defaults (the form greys
 //     // them; absent for a runtime older than the option lab); runs carry weft.playground and never touch weft.session.id
 //     // (ephemeral). Engines live | scripted (the source
 //     // run's recorded turns, zero tokens); thread ephemeral | fork (a new session

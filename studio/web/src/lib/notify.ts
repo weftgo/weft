@@ -32,7 +32,16 @@ export type Notice =
     }
   /** A run this page follows parked (run_finish.pending). */
   | { kind: "parked"; runID: string; tools: string[]; approve?: () => Promise<void> }
-  | { kind: "runtime-connected" | "runtime-disconnected"; runtimeID: string; service: string }
+  /** The parked notice's "approve" was refused. */
+  | { kind: "approve-failed"; runID: string; message: string }
+  /** A runtime's connected flipped: transition counts this id's flips,
+   * so each flap is its own instance. */
+  | {
+      kind: "runtime-connected" | "runtime-disconnected"
+      runtimeID: string
+      service: string
+      transition: number
+    }
   /** The live stream gave up reconnecting. */
   | { kind: "live-gave-up"; stream: number; round: number; retry: () => void }
   /** A copy-link press: n is the press (each one its own instance). */
@@ -47,10 +56,12 @@ export function noticeKey(n: Notice): string {
       return `matrix:${n.experimentID}:${[...n.commandIDs].sort().join(",")}`
     case "parked":
       return `parked:${n.runID}`
+    case "approve-failed":
+      return `approve-failed:${n.runID}`
     case "runtime-connected":
-      return `runtime-up:${n.runtimeID}`
+      return `runtime-up:${n.runtimeID}:${n.transition}`
     case "runtime-disconnected":
-      return `runtime-down:${n.runtimeID}`
+      return `runtime-down:${n.runtimeID}:${n.transition}`
     case "live-gave-up":
       return `live-gave-up:${n.stream}:${n.round}`
     case "copy-link":
@@ -81,6 +92,8 @@ export function noticeText(n: Notice): { title: string; tone: Tone } {
     }
     case "parked":
       return { title: `run ${n.runID} parked at ${n.tools.join(", ")}`, tone: "info" }
+    case "approve-failed":
+      return { title: `approve on run ${n.runID} refused: ${n.message}`, tone: "error" }
     case "runtime-connected":
       return { title: `runtime ${runtimeName(n)} connected`, tone: "success" }
     case "runtime-disconnected":
@@ -119,13 +132,18 @@ function actionsOf(n: Notice, id: string): ToastAction[] {
       const approve = n.approve
       const open: ToastAction = { label: "open", link: runLink(n.runID) }
       if (!approve) return [open]
+      // Once: a second click during the toast's exit animation must not
+      // post a second decision.
+      let sent = false
       return [
         {
           label: "approve",
           onClick: () => {
+            if (sent) return
+            sent = true
             dismiss()
             approve().catch((e: unknown) => {
-              toast.error(`approve on run ${n.runID} refused: ${e instanceof Error ? e.message : String(e)}`)
+              notify({ kind: "approve-failed", runID: n.runID, message: e instanceof Error ? e.message : String(e) })
             })
           },
         },
@@ -172,8 +190,11 @@ export function notify(n: Notice): boolean {
 
 /** dismissNotice takes a kind-wide toast down (the stream that gave up
  * was closed: its notice no longer stands for anything). */
-export function dismissNotice(kind: "live-gave-up"): void {
-  toast.dismiss(kind)
+export function dismissNotice(kind: "live-gave-up"): void
+/** …or a run's parked notice, once its park ended (decided anywhere). */
+export function dismissNotice(kind: "parked", runID: string): void
+export function dismissNotice(kind: "live-gave-up" | "parked", runID = ""): void {
+  toast.dismiss(kind === "parked" ? `parked:${runID}` : kind)
 }
 
 /** resetNotices forgets every raised key (tests: one page per test). */

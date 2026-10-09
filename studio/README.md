@@ -876,7 +876,10 @@ defer runtime.Install(runtime.Local(srv), // or runtime.Studio(url, tok)
 ```
 
 Studio's side is `studio.New(..., studio.Playground(true))`, which
-serves `GET /api/runtimes` (the connected runtimes),
+serves `GET /api/runtimes` (the registered runtimes, each with
+`connected`: whether it holds a live command stream now — one whose
+stream dropped stays listed, `connected: false`, until its commands
+resolve, and a reconnect re-registers under the same id),
 `POST /api/playground/runs` (the §10.4 validation table: 400 unknown
 tool/model names and unsupported 8b modes, 403 raised limits or a
 refused side-effect tool, 404 unknown runtime/agent/source run, 409 a
@@ -1170,12 +1173,16 @@ playground variant's or the replay drawer's command settled
 when its last cell settles, with "open" to the experiment. **run …
 parked at tool** — a run a page follows parked (`useRunEvents`: a
 playground card's run, or a run that parks while its page is open — a
-run opened already parked says so on its page only), with "open" and,
+run opened already parked says so on its page only; the toast goes
+when the park ends), with "open" and,
 for one parked call of a runtime-started run where the playground is on
 and the token may act, "approve" (`POST /api/runs/{id}/approvals`).
 **runtime … connected / disconnected** — the live stream has no runtime
-kind, so the shell compares `GET /api/runtimes`' set every 5 s
-(playground capability; never under a read-scoped panel token).
+kind, so the shell reads `GET /api/runtimes` every 5 s (playground
+capability; never under a read-scoped panel token)
+and raises one toast per transition of a runtime's `connected` (a
+runtime gone from the list counts as disconnected, once; a failed read
+says nothing; each flap of the same id is its own toast).
 **live updates stopped after 6 reconnects** — `lib/live.ts` gave up
 (never on a clean close or a panel token's `expired`), with "retry",
 which starts every stream that gave up over. **link copied** / **copy

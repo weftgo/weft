@@ -1327,6 +1327,11 @@ export interface RuntimeView {
   env: string
   connected_since: string
   last_seen: string
+  /** Whether it holds a live command stream now: one whose stream
+   * dropped stays listed, false, until its commands resolve; a
+   * reconnect re-registers under the same id. Absent on a Studio older
+   * than the field (read as connected: it listed only those). */
+  connected?: boolean
   agents: AgentView[]
   /** The debugger's stored tool set for this runtime (PUT
    * /api/runtimes/{id}/breakpoints): what it parks on every run it

@@ -307,6 +307,34 @@ describe("openLive", () => {
     off()
   })
 
+  it("a retry that fails again is a second give-up (round 2); a clean close is none", async () => {
+    const heard = vi.fn()
+    const off = onLiveGaveUp(heard)
+    const live = openLive({ selector: { run: "r1" } })
+    await flush()
+    const failAll = async () => {
+      for (let i = 0; i < 20; i++) {
+        FakeEventSource.instances.at(-1)?.fail()
+        await vi.advanceTimersByTimeAsync(60_000)
+      }
+    }
+    await failAll()
+    live.retry()
+    await flush()
+    await failAll()
+    expect(heard.mock.calls.map((c) => (c[0] as { round: number }).round)).toEqual([1, 2])
+    live.close()
+
+    const clean = openLive({ selector: { run: "r2" } })
+    await flush()
+    FakeEventSource.instances.at(-1)!.connect()
+    clean.close()
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    expect(clean.gaveUp()).toBe(false)
+    expect(heard).toHaveBeenCalledTimes(2)
+    off()
+  })
+
   it("backs off a refused grant the same way (a token the wall refuses)", async () => {
     setStudioToken("wrong")
     studio.requireToken("dev-secret")

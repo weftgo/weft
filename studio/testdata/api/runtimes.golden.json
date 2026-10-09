@@ -8,6 +8,7 @@
       "env": "dev",
       "connected_since": "2026-10-09T10:00:00Z",
       "last_seen": "2026-10-09T10:00:05Z",
+      "connected": true,
       "agents": [
         {
           "name": "acme-support",

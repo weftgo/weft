@@ -15,10 +15,20 @@ export const RUNTIMES_POLL_MS = 5_000
 /**
  * useRuntimeNotices says when a runtime connects or disconnects. The
  * live stream carries no runtime kind (event, delta, run only), so the
- * set is GET /api/runtimes's — the playground's and the drawer's query,
- * shared under its key — compared with the last read. The first read
- * is the baseline: runtimes already connected are not news. Only where
- * the runtime link exists (capability "playground").
+ * truth is GET /api/runtimes: each runtime's `connected` (a live command
+ * stream now). A runtime whose stream dropped stays listed, connected
+ * false, until its commands resolve; a reconnect re-registers under the
+ * same id — so the notices diff (id, connected), not the set of ids, and
+ * each flip of an id is its own notice (a per-id transition count). A
+ * runtime gone from the list counts as disconnected, once. The first
+ * read is the baseline: what is already there is not news. A failed
+ * read changes nothing (react-query keeps the last data) and says
+ * nothing.
+ *
+ * This hook is the one 5 s poller of /api/runtimes: the shell mounts it
+ * on every page, and the playground and the drawer read the same query
+ * key (their own observers need no interval of their own). Only where
+ * the runtime link exists and the bearer may act (canReplay).
  */
 export function useRuntimeNotices(enabled: boolean) {
   const runtimes = useQuery({
@@ -26,18 +36,39 @@ export function useRuntimeNotices(enabled: boolean) {
     enabled,
     refetchInterval: RUNTIMES_POLL_MS,
   })
-  const known = useRef<Map<string, RuntimeView> | null>(null)
+  const known = useRef<Map<string, { up: boolean; service: string }> | null>(null)
+  const flips = useRef(new Map<string, number>())
   const data = runtimes.data
   useEffect(() => {
     if (!data) return
-    const now = new Map(data.runtimes.map((r) => [r.id, r]))
+    const now = new Map<string, { up: boolean; service: string }>(
+      data.runtimes.map((r: RuntimeView) => [r.id, { up: r.connected ?? true, service: r.service }])
+    )
     const before = known.current
+    if (!before) {
+      known.current = now
+      return
+    }
+    const flip = (id: string, service: string, up: boolean) => {
+      const n = (flips.current.get(id) ?? 0) + 1
+      flips.current.set(id, n)
+      notify({
+        kind: up ? "runtime-connected" : "runtime-disconnected",
+        runtimeID: id,
+        service,
+        transition: n,
+      })
+    }
+    for (const [id, r] of now) {
+      const was = before.get(id)
+      // New and up, or back up: connected. New and already down: it
+      // came and went between reads — nothing to say now.
+      if ((was?.up ?? false) !== r.up && (was || r.up)) flip(id, r.service, r.up)
+    }
+    // Gone from the list: disconnected, unless the last read already
+    // said so.
+    for (const [id, r] of before) if (!now.has(id) && r.up) flip(id, r.service, false)
     known.current = now
-    if (!before) return
-    for (const [id, r] of now)
-      if (!before.has(id)) notify({ kind: "runtime-connected", runtimeID: id, service: r.service })
-    for (const [id, r] of before)
-      if (!now.has(id)) notify({ kind: "runtime-disconnected", runtimeID: id, service: r.service })
   }, [data])
 }
 

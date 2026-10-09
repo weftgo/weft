@@ -22,6 +22,7 @@ go get github.com/weftgo/weft/core@v0.11.0  # the loop alone: its only dependenc
 | `weft/otel` | Recording in one line (`defer otel.Install()()`): every event, transcript and span exported over OpenTelemetry — to a local database, Studio, or any OTLP backend — with per-destination content policy and redaction |
 | `weft/obsdb` | The queryable store those records land in: SQLite locally, ClickHouse hosted (`weft/obsdb/clickhouse`) |
 | `weft/studio` | The Inspector: runs, sessions, traces and live streams in a web UI, an in-app devtools panel for your own pages, and a playground that re-runs a turn with an edited prompt, model or tools; the `weft` binary (`weft/cmd/weft`: `weft studio`, `weft dev`) serves it for apps in any language |
+| `weft/scope` | The devtools' scope header: `scope.Header(handler, …)` sets `Weft-Scope` on your own chat endpoint so the in-page panel follows the conversation and run a response belongs to |
 | `weft/runtime` | The playground's in-app side: your app executes experiment commands safely — side-effect tools are substituted or parked unless you opt them in |
 
 Concurrency is the point, not a feature: a step's tools fan out over
@@ -345,7 +346,10 @@ the app and passes the pipeline's handle for the live lane; a token
 that imports the ClickHouse driver — for any language's OTel app: UI +
 ingest + the playground + a dev token on `127.0.0.1:7331`,
 `--db sqlite://path` or `clickhouse://user:pass@host:9000/db`
-([studio/README.md](studio/README.md)).
+([studio/README.md](studio/README.md)). The in-page devtools panel
+is also on npm as `@weftgo/devtools`, for bundled apps with no
+`<script>` tag: `npm install @weftgo/devtools`, then
+`import { mount } from "@weftgo/devtools"; mount({ enabled: import.meta.env.DEV })`.
 
 ```go
 mux.Handle("/studio/", http.StripPrefix("/studio",

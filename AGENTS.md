@@ -236,15 +236,18 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    data-detect="headers"|"markers"|"headers,markers"|"off" (off: those two rungs only), or the page
 //    //    URL's ?weft_scope= / #weft_scope= (below data-scope, above markers and headers; never gated,
 //    //    never written); with none, "no conversation detected on this page · how to scope" over the latest
-//    //    runs, streamed on agent=; the collapsed pill pulses "● step" while a run runs; the same bytes on npm as @weftgo/devtools — import "@weftgo/devtools",
-//    //    mount/scope/open/close/on, /react /vue /svelte marker helpers; studio/web/npm,
-//    //    make devtools-npm, never published by the build), /panel-config.json
+//    //    runs, streamed on agent=; the collapsed pill pulses "● step" while a run runs; the same bytes on npm
+//    //    as @weftgo/devtools — import "@weftgo/devtools", mount (returns the element, or null under
+//    //    enabled:false / on a server; idempotent; options endpoint/scope/token/detect/position/mode/push/
+//    //    zIndex/open/auto/theme/target/enabled)/scope/open/close/toggle/isOpen/select/studioLink/on,
+//    //    serializeScope/parseScope, /react /vue /svelte marker helpers (enabled too); import-safe on a
+//    //    server; studio/web/npm, make devtools-npm, never published by the build), /panel-config.json
 //    //    ({endpoint, version, capabilities}; loopback Host / same-origin only, else
 //    //    404; capability "panel-config"); Token(tok) walls the
 //    //    /api tree (the Authorization bearer only: ?token= is refused on every /api route, in every setup;
-//    EventSource opens /api/live with POST /api/live-grant's sig: ?<selector>&kinds=…&sig= — a 60 s window, reusable (a
-//    reconnect reuses it), each stream running until closed; a panel
-//    token's stream ends at its expiry with `event: expired`) — the UI shell and /panel.js are static,
+//    //    EventSource opens /api/live with POST /api/live-grant's sig: ?<selector>&kinds=…&sig= — a 60 s
+//    //    window, reusable (a reconnect reuses it), each stream running until closed; a panel
+//    //    token's stream ends at its expiry with `event: expired`) — the UI shell and /panel.js are static,
 //    //    OTLP ingest (/v1/traces, /v1/logs) carries its own IngestToken.
 //    // Setup B, any language (package cmd/weft — `go install github.com/weftgo/weft/cmd/weft@latest`;
 //    // the one place the clickhouse driver lives): weft studio --db sqlite://path |

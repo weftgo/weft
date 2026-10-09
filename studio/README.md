@@ -638,7 +638,7 @@ behind a proxy configures itself the same way.
 
 | # | Source | The explicit form |
 |---|---|---|
-| 1 | `mount(opts)` — a programmatic mount (`import { mount } from "@weftgo/devtools"`, the npm entry; not in the script-tag bundle) | `mount({endpoint, scope, publicId, token, detect, position, open, auto, theme, target})` |
+| 1 | `mount(opts)` — a programmatic mount (`import { mount } from "@weftgo/devtools"`, the npm entry; not in the script-tag bundle) | `mount({endpoint, scope, publicId, token, detect, position, mode, push, zIndex, open, auto, theme, target, enabled})` — `mode`/`push`/`zIndex` written as `data-mode`/`data-push`/`data-z-index`; `enabled: false` mounts nothing (`null`) |
 | 2 | the `<weft-devtools>` element's attributes | `<weft-devtools data-endpoint="…" data-token="…">` |
 | 3 | meta tags | `<meta name="weft:endpoint" content="…">` (also `weft:scope`, `weft:public-id`, `weft:token`, `weft:detect`, `weft:position`, `weft:open`, `weft:auto`, `weft:global`, `weft:mode`, `weft:push`, `weft:z-index`, `weft:theme`) |
 | 4 | the panel's `<script>` tag: the running classic script, else the first with a `data-weft` attribute (any `src`, any value), else the module script whose `src` resolves to the bundle's own URL (`import.meta.url`) — never a tag because it carries a `data-endpoint`, `data-token` or other generic `data-*` word: a third-party widget's tag is not the panel's configuration | `<script type="module" src="…" data-weft data-endpoint="…">` |
@@ -663,8 +663,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 188,955 B raw / 54,040 B gzip
-(52.8 KiB, under the 80 KiB cap). The scope-detection ladder (C3: rungs
+committed `studio/dist/panel/panel.js`, 216,640 B raw / 62,591 B gzip
+(61.1 KiB, the ledger's last row; 18.9 KiB under the 80 KiB cap). The scope-detection ladder (C3: rungs
 2 to 5 and the activity pill) cost +6.0 KiB gzip against its +3 KiB
 estimate: nothing deferrable supplies the first scope and the
 deferrable remainder is under 1 KiB, so the overrun is accepted rather

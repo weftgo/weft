@@ -10,6 +10,12 @@ module, ADR 0005).
 
 ### Added
 
+- **The panel's size**: `studio/dist/panel/panel.js` ships at 62,591 B
+  gzip (61.1 KiB, 18.9 KiB of headroom under the 80 KiB cap), the last
+  row of the append-only ledger `studio/web/panel-budget.json`; every
+  panel build prints the per-item table from it. The KiB figures in the
+  entries below are each item's delta, or the panel's size when that
+  item landed — intermediate, not the release's.
 - **Review fixes (panel)**: the size table and `budget.test.ts` measure
   `panel.js` with its version stamp normalized to the fixed-length
   placeholder `"v0.00.0"` (`normalizeStamp`), so a version bump moves no
@@ -124,7 +130,8 @@ module, ADR 0005).
   own reason/fix win; the parity test compares both surfaces' badge sets
   over a hole-free baseline.
 - **The devtools panel's views** (plan D4): the open turn has tabs —
-  **Story** (the step story), **Request** (a placeholder E1.2 fills),
+  **Story** (the step story), **Request** (the run page's Request
+  pane, one step at a time — E1.2, above),
   **Timeline** (the spans waterfall at full width over a time axis in
   ms, or, on a run without spans, its steps and tool calls over the
   event sequence) and **Raw**: a hand-written JSON tree
@@ -316,11 +323,13 @@ module, ADR 0005).
   panel on a page with no `<script>` tag. The typed entry exports
   `mount`, `scope`, `open`, `close`, `toggle`, `on`, `serializeScope`
   and `parseScope` (the `data-weft-scope` marker:
-  `pub_…;session=…;flow=…;run=…`). `/react`, `/vue` and `/svelte`
-  export marker helpers, not components. Zero runtime dependencies;
-  the version is the weft version. `scope()` passes the whole scope
-  to the panel (C3.2, below), and `on()`
-  registers listeners but the panel dispatches no events yet (C4).
+  `pub_…;session=…;flow=…;run=…`), and the host API's `select`,
+  `isOpen` and `studioLink` (C4.2, above). `/react`, `/vue` and
+  `/svelte` export marker helpers, not components. Zero runtime
+  dependencies; the version is the weft version. `scope()` passes the
+  whole scope to the panel (C3.2, below), and `on()` subscribes to the
+  `weft:run`, `weft:parked` and `weft:error` events the panel
+  dispatches (C4.2, above).
   `make devtools-npm` builds the package and dry-runs `npm pack`.
 
 - **`weft/scope`** (plan C3.1): the Go side of the devtools' Scope.
@@ -382,8 +391,9 @@ module, ADR 0005).
   because a page cannot read an `EventSource`'s headers, and WebSocket is
   never wrapped. The footer names the choice: `detect: headers | off |
   explicit | none`. `examples/studio-local`'s tag drops `data-public-id`, and
-  its page's first `/run` scopes the panel to `pub_demo`. Panel:
-  34.5 KiB gzip (was 32.0).
+  its page's first `/run` scopes the panel to `pub_demo`. Panel after
+  C3.2: 34.5 KiB gzip (was 32.0) — an intermediate size; the release's
+  is the first entry above.
 
 ### Changed
 
@@ -409,6 +419,33 @@ module, ADR 0005).
   token in any URL; the UI adopts a link's token from its `#token=`
   fragment only (a `?token=` is stripped, not kept) and drops the
   unused `exportUrl`.
+
+### Changed — migration
+
+One line per change above that asks something of a caller:
+
+- `?token=` is refused on every `/api` route: send `Authorization:
+  Bearer <token>`, and open `/api/live` with a `POST /api/live-grant`
+  sig; the `#token=` fragment of `weft open` / `weft studio --open`
+  links stays (it never reaches the server).
+- `data-public-id` (and `weft:public-id`, `mount({publicId})`) is
+  deprecated: write `data-scope="pub_…"` (`weft:scope`,
+  `mount({scope})`); the old forms are still read.
+- `/api/meta`'s `content` note for `none` now reads "the latest run
+  captured no content: weft.Content(false) on the agent, or no
+  destination takes content" (its fix names both remedies): a client
+  that matched the old "the agent captured no content" text reads the
+  `none` mark instead.
+- The panel's badge attribute is `data-hole` (was `data-weft-hole`):
+  a host selector or test reading the old name reads the new one.
+- `mount()` from `@weftgo/devtools` returns `WeftDevtoolsElement |
+  null` — `null` with `enabled: false` or on a server: check the
+  result before calling methods on it.
+- The panel no longer adopts a `<script>` tag because it carries a
+  generic `data-endpoint`/`data-token`: a tag whose `src` is not the
+  bundle's own URL (an inlined or re-served bundle, a loader) needs
+  `data-weft` on it, or a higher rung (meta tags, the element,
+  `mount()`).
 
 ## 0.11.0 — 2026-10-08
 

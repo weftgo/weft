@@ -66,6 +66,20 @@ describe("only links.ts builds a Studio URL", () => {
     ["navigate to the playground", 'void navigate({ to: "/playground" })'],
     ["a router Link to the playground", 'const x = <Link to="/playground" />'],
     ["an experiments route", 'const x = <Link to="/experiments" />'],
+    // G2's keys are links.ts's too: a hand-built page URL with them is
+    // refused like any other.
+    ["a trace's span and view by hand", "const u = `traces/${id}?span=${s}&view=chat`"],
+    [
+      "a trace Link with a hand-written search",
+      'const x = <Link to="/traces/$id" params={{ id }} search={{ span, view: "chat" }} />',
+    ],
+    ["the raw view's filters by hand", "const u = `runs/${id}?view=raw&q=${q}&hide=delta&ev=3`"],
+    ["the raw view's open event by hand", "const u = `/runs/${id}?ev=${n}`"],
+    [
+      "the playground's state by hand",
+      'void navigate({ to: "/playground", search: { run, step, agent, engine } })',
+    ],
+    ["the playground's state off a base", 'const u = new URL("playground?run=r_1&engine=scripted", base)'],
   ])("refuses %s", async (_name, code) => {
     expect(await problems(code)).toBeGreaterThan(0)
   })
@@ -91,6 +105,12 @@ describe("only links.ts builds a Studio URL", () => {
     ["an api/ display string", "const s = `api/runs/${id} — the run document`"],
     ["a spread link", "const x = <Link {...runLink(id)} />"],
     ["a list page", 'const x = <Link to="/runs" />'],
+    [
+      "a page writing its own state through links.ts",
+      'void navigate({ to: ".", search: (prev) => ({ ...prev, ...rawSearch(s) }), replace: true })',
+    ],
+    ["a spread trace link with its view", 'void navigate({ ...traceLink(id, { span, view }), replace: true })'],
+    ["the playground's state through links.ts", "const x = <Link {...playgroundStateLink({ run })} />"],
   ])("allows %s", async (_name, code) => {
     expect(await problems(code)).toBe(0)
   })

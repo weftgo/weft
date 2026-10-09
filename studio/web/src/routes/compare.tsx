@@ -11,6 +11,7 @@ import type { CompareSearch } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { StepCompare } from "@/components/studio/step-diff"
 import { Button } from "@/components/ui/button"
+import { useDocumentTitle } from "@/hooks/use-document-title"
 
 /** A search value as text: the router parses values as JSON, so an
  * all-digit run id arrives as a number — still the id the link carried. */
@@ -33,6 +34,7 @@ export const Route = createFileRoute("/compare")({
 
 function ComparePage() {
   const { a = "", b = [], step } = Route.useSearch()
+  useDocumentTitle({ page: "compare", a: a || undefined, b })
   const navigate = useNavigate()
   const caps = useCapabilities()
   const [add, setAdd] = useState("")

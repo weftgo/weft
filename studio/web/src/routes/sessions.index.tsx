@@ -20,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { sessionLink } from "@/lib/links"
+import { useDocumentTitle } from "@/hooks/use-document-title"
 
 interface SessionsSearch {
   agent?: string
@@ -71,6 +72,7 @@ function FilterBox({
 }
 
 function SessionsPage() {
+  useDocumentTitle({ page: "sessions" })
   const search = Route.useSearch()
   const navigate = useNavigate({ from: "/sessions/" })
   const filters = { agent: search.agent, public_id: search.public_id }

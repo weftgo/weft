@@ -10,12 +10,14 @@ import { LiveRuns } from "@/components/studio/live-runs"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { useDocumentTitle } from "@/hooks/use-document-title"
 
 export const Route = createFileRoute("/live")({
   component: LivePage,
 })
 
 function LivePage() {
+  useDocumentTitle({ page: "live" })
   const { has, loading } = useCapabilities()
   if (loading) {
     return (

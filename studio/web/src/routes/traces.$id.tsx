@@ -3,8 +3,7 @@
 // are present (the polyglot promise: a Python app's OTel GenAI
 // instrumentation shows up exactly like a weft run's chats).
 import { useQuery } from "@tanstack/react-query"
-import { createFileRoute, Link } from "@tanstack/react-router"
-import { useState } from "react"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 
 import { traceQuery } from "@/lib/api"
 import type { Span as TimedSpan } from "@/lib/api"
@@ -17,11 +16,13 @@ import {
 import { JsonTree } from "@/components/studio/json-tree"
 import { Waterfall } from "@/components/studio/waterfall"
 import { Spinner } from "@/components/ui/spinner"
-import { runLink } from "@/lib/links"
+import { runLink, traceLink } from "@/lib/links"
 import type { TraceSearch } from "@/lib/links"
+import { useDocumentTitle } from "@/hooks/use-document-title"
 
 export const Route = createFileRoute("/traces/$id")({
-  // ?span=<span id> (lib/links.ts's traceLink) selects that span.
+  // ?span=<span id> (lib/links.ts's traceLink) selects that span;
+  // ?view=chat is the GenAI chat view (G2: the page's state is its URL).
   validateSearch: (search: Record<string, unknown>): TraceSearch => ({
     span:
       typeof search.span === "string" && search.span
@@ -29,17 +30,31 @@ export const Route = createFileRoute("/traces/$id")({
         : typeof search.span === "number"
           ? String(search.span)
           : undefined,
+    view: search.view === "chat" ? "chat" : undefined,
   }),
   component: TracePage,
 })
 
 function TracePage() {
   const { id } = Route.useParams()
-  const { span } = Route.useSearch()
+  const search = Route.useSearch()
+  const { span } = search
   const q = useQuery(traceQuery(id))
-  const [view, setView] = useState<"tree" | "chat">("tree")
+  const navigate = useNavigate()
+  useDocumentTitle({ page: "trace", id })
+  // The page's state is its URL (G2): the view is a view change — a
+  // history entry, so back walks it — and the selection a cursor move,
+  // replaced in place.
+  const view = search.view === "chat" ? "chat" : "tree"
+  const setView = (v: "tree" | "chat") =>
+    void navigate({ ...traceLink(id, { span, view: v }) })
   // The time-axis rows are keyed t:<span id> (lib/trace).
-  const [sel, setSel] = useState<string | undefined>(span ? `t:${span}` : undefined)
+  const sel = span ? `t:${span}` : undefined
+  const setSel = (key: string) =>
+    void navigate({
+      ...traceLink(id, { span: key.replace(/^t:/, ""), view }),
+      replace: true,
+    })
 
   if (q.isPending) {
     return (

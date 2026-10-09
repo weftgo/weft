@@ -44,6 +44,27 @@ export interface RunSearch {
   axis?: "events" | "time"
   /** The replay playhead: a stream position. */
   t?: number
+  /** The raw view's search text (G2). */
+  q?: string
+  /** The raw view's hidden event kinds, comma-separated (G2). */
+  hide?: string
+  /** The raw view's open event: its stream position (G2). */
+  ev?: number
+}
+
+/** The raw view's event kinds (lib/summarize.ts's EventKind), as a
+ * link's ?hide= names them. */
+export const RAW_KINDS = ["step", "tool", "result", "error", "reasoning", "delta"] as const
+export type RawKind = (typeof RAW_KINDS)[number]
+
+/** The raw view's state a link carries (G2). */
+export interface RawLinkState {
+  /** The search text. */
+  q?: string
+  /** The hidden event kinds. */
+  hide?: RawKind[]
+  /** The open event's stream position. */
+  ev?: number
 }
 
 export interface RunLinkOptions {
@@ -64,6 +85,8 @@ export interface RunLinkOptions {
   axis?: "events" | "time"
   /** The replay playhead (a stream position). */
   t?: number
+  /** The raw view's filters and open event (view "raw"). */
+  raw?: RawLinkState
 }
 
 export interface RunLink {
@@ -81,6 +104,9 @@ export interface SessionLink {
 export interface TraceSearch {
   /** The span to select, by its span id. */
   span?: string
+  /** The view: the span tree (the default, never written) or the
+   * GenAI chat (G2). */
+  view?: "chat"
 }
 
 export interface TraceLink {
@@ -114,6 +140,24 @@ export interface PlaygroundHandoff {
 export interface PlaygroundSearch {
   /** A saved experiment to show (GET /api/experiments/{id}). */
   experiment?: string
+  /** The page's own state (G2), written back as it changes so a
+   * copied link reopens it: the source run, the step it continues
+   * from (the ordinal), the agent and runtime picked, and the engine.
+   * A prompt never rides the query (see hash below). */
+  run?: string
+  step?: number
+  agent?: string
+  runtime?: string
+  engine?: "live" | "scripted"
+}
+
+/** The playground's state a link carries (G2): see PlaygroundSearch. */
+export interface PlaygroundState {
+  run?: string
+  step?: number
+  agent?: string
+  runtime?: string
+  engine?: "live" | "scripted"
 }
 
 export interface PlaygroundLink {
@@ -163,7 +207,44 @@ export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
   else if (opts.axis === "events") search.axis = "events"
   const t = ordinal(opts.t)
   if (t !== undefined) search.t = t
+  if (opts.raw) {
+    const raw = rawSearch(opts.raw)
+    if (raw.q !== undefined) search.q = raw.q
+    if (raw.hide !== undefined) search.hide = raw.hide
+    if (raw.ev !== undefined) search.ev = raw.ev
+  }
   return { to: "/runs/$id", params: { id }, search }
+}
+
+/** rawSearch is the raw view's state as search keys, every one
+ * present (undefined clears it): the raw view merges them into the
+ * current search. Hidden kinds are written in RAW_KINDS' order. */
+export function rawSearch(raw: RawLinkState): {
+  q: string | undefined
+  hide: string | undefined
+  ev: number | undefined
+} {
+  const hidden = new Set(raw.hide ?? [])
+  const hide = RAW_KINDS.filter((k) => hidden.has(k)).join(",")
+  return {
+    q: raw.q || undefined,
+    hide: hide || undefined,
+    ev: ordinal(raw.ev),
+  }
+}
+
+/** rawFromSearch reads the raw view's state back from a run page's
+ * search, as the router parsed it (values arrive JSON-parsed: a search
+ * text of digits is a number — still the text the link carried).
+ * Unknown kinds and a position that is not an ordinal are dropped. */
+export function rawFromSearch(search: Record<string, unknown>): RawLinkState {
+  const q =
+    typeof search.q === "string" ? search.q : typeof search.q === "number" ? String(search.q) : ""
+  const hide =
+    typeof search.hide === "string"
+      ? RAW_KINDS.filter((k) => (search.hide as string).split(",").includes(k))
+      : []
+  return { q, hide, ev: ordinal(search.ev as number | undefined) }
 }
 
 /** sessionLink is a session's page (its turns). */
@@ -171,13 +252,16 @@ export function sessionLink(id: string): SessionLink {
   return { to: "/sessions/$id", params: { id }, search: {} }
 }
 
-/** traceLink is a trace's page, optionally with a span selected. */
-export function traceLink(id: string, opts: { span?: string } = {}): TraceLink {
-  return {
-    to: "/traces/$id",
-    params: { id },
-    search: opts.span ? { span: opts.span } : {},
-  }
+/** traceLink is a trace's page, optionally with a span selected and
+ * the chat view on. */
+export function traceLink(
+  id: string,
+  opts: { span?: string; view?: "tree" | "chat" } = {}
+): TraceLink {
+  const search: TraceSearch = {}
+  if (opts.span) search.span = opts.span
+  if (opts.view === "chat") search.view = "chat"
+  return { to: "/traces/$id", params: { id }, search }
 }
 
 /** playgroundLink is the playground with the hand-off carried over
@@ -198,6 +282,35 @@ export function playgroundLink(
   return hash
     ? { to: "/playground", search: {}, hash }
     : { to: "/playground", search: {} }
+}
+
+/** playgroundStateLink is the playground with its own state in the
+ * query (G2): what the page writes back as the reader changes it, so
+ * the address bar is always a link to what is on screen. The hand-off
+ * (playgroundLink) stays the fragment's: a prompt never rides here. */
+export function playgroundStateLink(
+  state: PlaygroundState,
+  experiment?: string
+): PlaygroundLink {
+  return { to: "/playground", search: playgroundSearch(state, experiment) }
+}
+
+/** playgroundSearch is playgroundStateLink's search alone (for the
+ * page's own navigate, which merges it into the current search). */
+export function playgroundSearch(
+  state: PlaygroundState,
+  experiment?: string
+): PlaygroundSearch {
+  const search: PlaygroundSearch = {}
+  if (experiment) search.experiment = experiment
+  if (state.run) search.run = state.run
+  // Step 0 is the default (the whole turn): never written.
+  const step = ordinal(state.step)
+  if (step) search.step = step
+  if (state.agent) search.agent = state.agent
+  if (state.runtime) search.runtime = state.runtime
+  if (state.engine === "scripted") search.engine = "scripted"
+  return search
 }
 
 /** experimentLink is a saved experiment, shown in the playground's
@@ -245,6 +358,27 @@ export function path(link: StudioLink): string {
   const qs = q.toString()
   const hash = "hash" in link && link.hash ? `#${link.hash}` : ""
   return `${p}${qs ? `?${qs}` : ""}${hash}`
+}
+
+/** Search keys a copied link never carries: credentials, and a panel
+ * scope string. Studio's own pages strip a handed-over token on
+ * arrival (adoptTokenFromLocation); this is the second wall, so a
+ * "copy link" can never leak one. */
+const STRIPPED_KEYS = ["token", "access_token", "sig", "weft_scope"]
+
+/**
+ * canonical is the page's link as a reader copies it (G2's copy link):
+ * the absolute URL with its search — every bit of page state — and
+ * without a fragment (a hand-off or a token, never page state) or a
+ * credential key. A copied link is the bare page URL: never a token,
+ * never a panel scope string.
+ */
+export function canonical(url: string | URL): string {
+  const u = new URL(url)
+  u.hash = ""
+  // Only a present key is deleted: a delete re-serializes the query.
+  for (const k of STRIPPED_KEYS) if (u.searchParams.has(k)) u.searchParams.delete(k)
+  return u.toString()
 }
 
 /** href is a link as an absolute URL under a Studio base (the panel's

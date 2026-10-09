@@ -69,7 +69,8 @@ import type { Experiment } from "@/hooks/use-command-tracking"
 import { useRunEvents } from "@/hooks/use-run-events"
 import { ExperimentForm, StepPicker, useSourceEditFields } from "@/components/studio/experiment-form"
 import { Button } from "@/components/ui/button"
-import { compareLink, experimentLink, runLink } from "@/lib/links"
+import { compareLink, experimentLink, playgroundSearch, runLink } from "@/lib/links"
+import { useDocumentTitle } from "@/hooks/use-document-title"
 import { StepCompare } from "@/components/studio/step-diff"
 
 // The command's pure halves and the form's controls live in shared
@@ -178,19 +179,34 @@ export const Route = createFileRoute("/playground")({
   component: PlaygroundPage,
 })
 
+/** The page's own state the query carries (G2): what it writes back
+ * as the reader changes it, so a copied link reopens the same source
+ * run, step, target and engine. */
+interface PageState {
+  run: string
+  step: number
+  agent: string
+  runtime: string
+  engine: Engine
+}
+
 /**
  * useHandoff is the page's hand-off: the query's parameters, with the
  * fragment's laid over them. The fragment is read once, on arrival,
  * then stripped from the address bar; it stops applying when the query
- * changes under the page (a later navigation to /playground?run=…).
+ * changes under the page (a later navigation to /playground?run=…) —
+ * not when the page itself writes its state back (G2: own() names
+ * those writes).
  */
-function useHandoff(): PlaygroundSearch {
+function useHandoff(): PlaygroundSearch & { own: (state: PageState) => void } {
   const query = useSearch({ from: "/playground" })
   const hash = useLocation({ select: (l) => l.hash })
   const navigate = useNavigate()
   const [arrival] = useState(() => ({
     fromHash: handoffFromHash(hash),
     query: JSON.stringify(query),
+    // The queries the page wrote itself: still the arrival's.
+    own: new Set<string>(),
   }))
   const stripped = useRef(false)
   useEffect(() => {
@@ -199,13 +215,38 @@ function useHandoff(): PlaygroundSearch {
     void navigate({ to: ".", search: true, hash: "", replace: true })
   }, [hash, navigate])
   const queryKey = JSON.stringify(query)
+  // own writes the page's state into the query in place (a cursor,
+  // not a view: back does not walk it), keeping every other key — a
+  // hand-off's instructions= and experiment= stay as they arrived.
+  const own = useMemo(
+    () => (state: PageState) => {
+      const mine = playgroundSearch(state)
+      const next = parseHandoff({
+        ...query,
+        run: mine.run,
+        step: mine.step,
+        agent: mine.agent,
+        runtime: mine.runtime,
+        engine: mine.engine,
+      })
+      const key = JSON.stringify(next)
+      if (key === queryKey) return
+      if (queryKey === arrival.query || arrival.own.has(queryKey)) arrival.own.add(key)
+      // No hash: the fragment was read on arrival and leaves the bar.
+      void navigate({ to: ".", search: next, replace: true })
+    },
+    [query, queryKey, arrival, navigate]
+  )
+  const fromArrival = queryKey === arrival.query || arrival.own.has(queryKey)
   return useMemo(
-    () => (queryKey === arrival.query ? { ...query, ...arrival.fromHash } : query),
-    [query, queryKey, arrival]
+    () => ({ ...(fromArrival ? { ...query, ...arrival.fromHash } : query), own }),
+    [query, fromArrival, arrival, own]
   )
 }
 
 function PlaygroundPage() {
+  const { experiment } = useSearch({ from: "/playground" })
+  useDocumentTitle({ page: "playground", experiment })
   const caps = useCapabilities()
   if (caps.loading) return <p className="p-6 text-xs text-muted-foreground">loading…</p>
   if (!caps.has("playground")) return <NoPlayground why={caps.why("playground")} />
@@ -285,6 +326,8 @@ function Playground({ caps }: { caps: string[] }) {
    * rewritten call-free replies — the counterfactual the fresh step
    * answers. Source-shaped, not variant-shaped, so they live here. */
   const [editDrafts, setEditDrafts] = useState<EditDraft[]>([])
+  // A later navigation to /playground?run=… takes the page there; the
+  // page's own write-back (below) is the value it already shows.
   useEffect(() => {
     if (search.run) setSourceRunID(search.run)
   }, [search.run])
@@ -296,6 +339,22 @@ function Playground({ caps }: { caps: string[] }) {
   // pickers override.
   const [runtimeChoice, setRuntimeChoice] = useState(search.runtime ?? "")
   const [agentChoice, setAgentChoice] = useState(search.agent ?? "")
+  // The page's state is its URL (G2): the source run, the step, the
+  // agent and runtime picked and the first variant's engine are
+  // written back in place as they change — the address bar (and the
+  // copy link) reopens this page as it stands. A prompt is never
+  // written: it stays in the fragment hand-off and in memory.
+  const own = search.own
+  const engineA = variants[0]?.engine ?? "live"
+  useEffect(() => {
+    own({
+      run: sourceRunID.trim(),
+      step: fromStep,
+      agent: agentChoice,
+      runtime: runtimeChoice,
+      engine: engineA,
+    })
+  }, [own, sourceRunID, fromStep, agentChoice, runtimeChoice, engineA])
   const source = useQuery({
     ...runQuery(sourceRunID),
     enabled: Boolean(sourceRunID),

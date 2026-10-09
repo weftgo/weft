@@ -195,6 +195,25 @@ module, ADR 0005).
   prompt and the catalog hidden (its args edits checked for shape only,
   its registration refusals generic, the messages hidden under a view).
 
+- **Studio URLs that mean something** (plan G2): every piece of page
+  state lives in search params, through `lib/links.ts` — the trace
+  page's selected span and view (`traces/<id>?span=…&view=chat`), the
+  raw view's filters and open event (`runs/<id>?view=raw&q=…&hide=…&ev=…`),
+  and the playground's source run, step, agent, runtime and engine
+  (`playground?run=…&step=…&agent=…&runtime=…&engine=scripted`, written
+  back as they change; a prompt stays in the fragment hand-off). Cursor
+  moves (a selection, a filter, the open event) replace the history
+  entry; view changes (tab, view mode) push one, so the back button
+  walks views, not cursor moves. A **copy link** button in the run
+  header and a `y` key (also in the ⌘K palette) copy the page's
+  canonical link — the bare URL with its state, never a fragment, a
+  token or a panel scope (`canonical` strips `token`, `access_token`,
+  `sig`, `weft_scope`) — and say "copied". Every page sets
+  `document.title` through one helper (`lib/title.ts`):
+  `run s_…-t3 · succeeded · weft studio`, `trace … · weft studio`,
+  `playground · weft studio`. The ⌘K palette's items render inside
+  cmdk's root (opening it threw before).
+
 ### Changed
 
 - **An old runtime's registration shows no defaults** (plan F3.1's

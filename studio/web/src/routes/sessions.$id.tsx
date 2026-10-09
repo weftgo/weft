@@ -10,6 +10,7 @@ import { StatusChip } from "@/components/studio/runs-table"
 import { SessionTurns } from "@/components/studio/session-turns"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { useDocumentTitle } from "@/hooks/use-document-title"
 
 export const Route = createFileRoute("/sessions/$id")({
   component: SessionPage,
@@ -17,6 +18,7 @@ export const Route = createFileRoute("/sessions/$id")({
 
 function SessionPage() {
   const { id } = Route.useParams()
+  useDocumentTitle({ page: "session", id })
   const q = useQuery(sessionQuery(id))
   // The experiments that forked this thread's turns: playground runs
   // are not turns of the session (an ephemeral one has no session id),

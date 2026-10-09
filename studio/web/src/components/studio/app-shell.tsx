@@ -25,6 +25,7 @@ import {
   Bot,
   FlaskConical,
   Keyboard,
+  Link2,
   List,
   MessagesSquare,
   Search,
@@ -33,6 +34,7 @@ import {
 
 import { metaQuery, runsQuery } from "@/lib/api"
 import { isPlainShortcut } from "@/lib/keys"
+import { useCopyLink } from "@/hooks/use-copy-link"
 import { KbdHelpBody } from "@/components/studio/kbd-help"
 import { TokenWall } from "@/components/studio/token-wall"
 import {
@@ -67,6 +69,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import {
+  Command,
   CommandDialog,
   CommandEmpty,
   CommandGroup,
@@ -108,7 +111,11 @@ function Nav() {
               link's routes are registered (the capability is computed
               from them, never hard-coded). */}
           {meta.data?.capabilities.includes("playground") &&
-            item(playgroundLink().to, "Playground", <FlaskConical data-slot="icon" />)}
+            item(
+              playgroundLink().to,
+              "Playground",
+              <FlaskConical data-slot="icon" />
+            )}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>
@@ -164,6 +171,10 @@ export function AppShell() {
   // anywhere (A4). "/" is reserved for search where there is a list
   // (wired with the runs list).
   const [helpOpen, setHelpOpen] = useState(false)
+  // y copies the page's link as it stands (plan G2), from anywhere and
+  // from the palette; the header says "link copied" for a moment.
+  const link = useCopyLink()
+  const copyLink = link.copy
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (
@@ -176,10 +187,11 @@ export function AppShell() {
         return
       }
       if (e.key === "?" && isPlainShortcut(e)) setHelpOpen(true)
+      else if (e.key === "y" && isPlainShortcut(e)) void copyLink()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [])
+  }, [copyLink])
 
   const go = (to: string, params?: Record<string, string>) => {
     setPaletteOpen(false)
@@ -230,10 +242,17 @@ export function AppShell() {
           <ClientOnly fallback={null}>
             <Place />
           </ClientOnly>
+          <span
+            className="ml-auto font-mono text-[11px] text-thread-ink"
+            role="status"
+            data-link-copied={link.copied ? "" : undefined}
+          >
+            {link.copied ? "link copied" : ""}
+          </span>
           <Button
             variant="outline"
             size="sm"
-            className="ml-auto h-7 gap-2 text-muted-foreground"
+            className="h-7 gap-2 text-muted-foreground"
             onClick={() => setPaletteOpen(true)}
           >
             <Search data-slot="icon" />
@@ -267,80 +286,98 @@ export function AppShell() {
       </Dialog>
 
       <CommandDialog open={paletteOpen} onOpenChange={setPaletteOpen}>
-        <CommandInput placeholder="Run id, agent, or a command…" />
-        <CommandList>
-          <CommandEmpty>Nothing matches.</CommandEmpty>
-          <CommandGroup heading="Recent runs">
-            {(recent.data?.runs ?? []).slice(0, 25).map((r) => (
+        {/* The dialog is the frame; cmdk's root (its store) is Command —
+            without it every item throws on open. */}
+        <Command>
+          <CommandInput placeholder="Run id, agent, or a command…" />
+          <CommandList>
+            <CommandEmpty>Nothing matches.</CommandEmpty>
+            <CommandGroup heading="Recent runs">
+              {(recent.data?.runs ?? []).slice(0, 25).map((r) => (
+                <CommandItem
+                  key={r.id}
+                  value={`${r.id} ${r.agent} ${r.status}`}
+                  onSelect={() => {
+                    setPaletteOpen(false)
+                    void router.navigate(runLink(r.id))
+                  }}
+                >
+                  <StatusDot status={r.status} />
+                  <span className="font-mono text-xs">{r.id}</span>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {r.agent}
+                  </span>
+                </CommandItem>
+              ))}
+              {recent.isPending && paletteOpen ? (
+                <CommandItem disabled value="loading">
+                  loading…
+                </CommandItem>
+              ) : null}
+            </CommandGroup>
+            <CommandSeparator />
+            <CommandGroup heading="Go to">
+              <CommandItem value="runs list" onSelect={() => go("/runs")}>
+                <List data-slot="icon" />
+                Runs
+              </CommandItem>
               <CommandItem
-                key={r.id}
-                value={`${r.id} ${r.agent} ${r.status}`}
+                value="sessions threads"
+                onSelect={() => go("/sessions")}
+              >
+                <MessagesSquare data-slot="icon" />
+                Sessions
+              </CommandItem>
+              <CommandItem value="live streaming" onSelect={() => go("/live")}>
+                <Activity data-slot="icon" />
+                Live
+              </CommandItem>
+              {(meta.data?.has_manifest ||
+                meta.data?.capabilities.includes("playground")) && (
+                <CommandItem
+                  value="agents manifest"
+                  onSelect={() => go("/agents")}
+                >
+                  <Bot data-slot="icon" />
+                  Agents
+                </CommandItem>
+              )}
+            </CommandGroup>
+            <CommandGroup heading="Studio">
+              <CommandItem
+                value="copy link to this page url share yank"
                 onSelect={() => {
                   setPaletteOpen(false)
-                  void router.navigate(runLink(r.id))
+                  void copyLink()
                 }}
               >
-                <StatusDot status={r.status} />
-                <span className="font-mono text-xs">{r.id}</span>
-                <span className="ml-auto text-xs text-muted-foreground">
-                  {r.agent}
-                </span>
+                <Link2 data-slot="icon" />
+                Copy link to this page
+                <Kbd className="ml-auto">y</Kbd>
               </CommandItem>
-            ))}
-            {recent.isPending && paletteOpen ? (
-              <CommandItem disabled value="loading">
-                loading…
-              </CommandItem>
-            ) : null}
-          </CommandGroup>
-          <CommandSeparator />
-          <CommandGroup heading="Go to">
-            <CommandItem value="runs list" onSelect={() => go("/runs")}>
-              <List data-slot="icon" />
-              Runs
-            </CommandItem>
-            <CommandItem value="sessions threads" onSelect={() => go("/sessions")}>
-              <MessagesSquare data-slot="icon" />
-              Sessions
-            </CommandItem>
-            <CommandItem value="live streaming" onSelect={() => go("/live")}>
-              <Activity data-slot="icon" />
-              Live
-            </CommandItem>
-            {(meta.data?.has_manifest ||
-              meta.data?.capabilities.includes("playground")) && (
               <CommandItem
-                value="agents manifest"
-                onSelect={() => go("/agents")}
+                value="theme toggle dark light"
+                onSelect={() => {
+                  cycleTheme()
+                  setPaletteOpen(false)
+                }}
               >
-                <Bot data-slot="icon" />
-                Agents
+                <SunMoon data-slot="icon" />
+                Cycle theme
               </CommandItem>
-            )}
-          </CommandGroup>
-          <CommandGroup heading="Studio">
-            <CommandItem
-              value="theme toggle dark light"
-              onSelect={() => {
-                cycleTheme()
-                setPaletteOpen(false)
-              }}
-            >
-              <SunMoon data-slot="icon" />
-              Cycle theme
-            </CommandItem>
-            <CommandItem
-              value="keyboard help shortcuts"
-              onSelect={() => {
-                setPaletteOpen(false)
-                setHelpOpen(true)
-              }}
-            >
-              <Keyboard data-slot="icon" />
-              Keyboard help
-            </CommandItem>
-          </CommandGroup>
-        </CommandList>
+              <CommandItem
+                value="keyboard help shortcuts"
+                onSelect={() => {
+                  setPaletteOpen(false)
+                  setHelpOpen(true)
+                }}
+              >
+                <Keyboard data-slot="icon" />
+                Keyboard help
+              </CommandItem>
+            </CommandGroup>
+          </CommandList>
+        </Command>
       </CommandDialog>
     </SidebarProvider>
   )

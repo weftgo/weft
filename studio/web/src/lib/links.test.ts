@@ -3,11 +3,16 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  canonical,
   compareLink,
   experimentLink,
   href,
   path,
   playgroundLink,
+  playgroundSearch,
+  playgroundStateLink,
+  rawFromSearch,
+  rawSearch,
   runLink,
   sessionLink,
   traceLink,
@@ -184,5 +189,65 @@ describe("no link ever carries a token", () => {
         expect(u).not.toContain("sekrit")
       }
     }
+  })
+})
+
+describe("G2: page state as search keys", () => {
+  it("the trace page's span and view", () => {
+    expect(path(traceLink("t_1", { span: "ab12", view: "chat" }))).toBe(
+      "traces/t_1?span=ab12&view=chat"
+    )
+    // The tree is the default view: never written.
+    expect(traceLink("t_1", { view: "tree" }).search).toEqual({})
+  })
+
+  it("the raw view's filters and open event", () => {
+    expect(
+      path(runLink("r_1", { view: "raw", raw: { q: "refund", hide: ["delta", "step"], ev: 4 } }))
+    ).toBe("runs/r_1?view=raw&q=refund&hide=step%2Cdelta&ev=4")
+    // Empty state writes nothing; a bad position is dropped.
+    expect(runLink("r_1", { raw: { q: "", hide: [], ev: -1 } }).search).toEqual({})
+    // rawSearch names every key, so a merge clears what was turned off.
+    expect(rawSearch({})).toEqual({ q: undefined, hide: undefined, ev: undefined })
+  })
+
+  it("reads the raw state back as the router parsed it", () => {
+    expect(rawFromSearch({ q: 42, hide: "delta,bogus,step", ev: 3 })).toEqual({
+      q: "42",
+      hide: ["step", "delta"],
+      ev: 3,
+    })
+    expect(rawFromSearch({ ev: 1.5 })).toEqual({ q: "", hide: [], ev: undefined })
+    // A search of digits survives the router's JSON round trip.
+    const u = new URL(href(BASE, runLink("r_1", { raw: { q: "123" } })))
+    expect(u.searchParams.get("q")).toBe('"123"')
+  })
+
+  it("the playground's own state rides the query, never a prompt", () => {
+    expect(
+      path(playgroundStateLink({ run: "r_1", step: 2, agent: "orders", runtime: "rt_1", engine: "scripted" }))
+    ).toBe("playground?run=r_1&step=2&agent=orders&runtime=rt_1&engine=scripted")
+    // Step 0 and the live engine are the defaults: never written.
+    expect(playgroundSearch({ run: "r_1", step: 0, engine: "live" })).toEqual({ run: "r_1" })
+    expect(playgroundSearch({}, "exp_1")).toEqual({ experiment: "exp_1" })
+    expect(playgroundStateLink({ run: "r_1" })).not.toHaveProperty("hash")
+  })
+})
+
+describe("canonical (the copy link)", () => {
+  it("keeps the page's state and drops the fragment", () => {
+    expect(canonical(`${BASE}runs/r_1?step=2&sel=c%3A2%3Ac1#token=abc`)).toBe(
+      `${BASE}runs/r_1?step=2&sel=c%3A2%3Ac1`
+    )
+  })
+
+  it("never carries a token or a panel scope", () => {
+    const u = canonical(`${BASE}runs/r_1?token=sekrit&view=raw&sig=x&weft_scope=pub_1&access_token=y`)
+    expect(u).toBe(`${BASE}runs/r_1?view=raw`)
+  })
+
+  it("leaves a query with nothing to drop byte for byte", () => {
+    const u = `${BASE}traces/t_1?span=%22123%22&view=chat`
+    expect(canonical(u)).toBe(u)
   })
 })

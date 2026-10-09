@@ -39,6 +39,7 @@ export const bindings: Binding[] = [
   },
   { keys: ["g", "r"], action: "go to runs" },
   { keys: ["g", "a"], action: "go to agents" },
+  { keys: ["y"], action: "copy a link to this page as it stands" },
   { keys: ["?"], action: "this help" },
 ]
 

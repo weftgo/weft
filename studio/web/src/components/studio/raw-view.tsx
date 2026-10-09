@@ -8,12 +8,20 @@
 //
 // Both copy and download whole. Rows are rendered in pages of ROWS
 // so a 50k-event run never becomes a 50k-row DOM in one go.
+//
+// The events surface's filters and its open event are the page's URL
+// (G2): ?q= the search, ?hide= the hidden kinds, ?ev= the open row's
+// position (lib/links.ts's rawSearch) — written in place, cursor-like:
+// back walks the run page's views, never a keystroke.
+import { useNavigate, useSearch } from "@tanstack/react-router"
 import { ChevronRight, Download, Play } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { RunDoc, WireEvent } from "@/lib/api"
 import type { HoleMark } from "@/lib/honesty"
 import { copyText, download, pretty } from "@/lib/json"
+import { rawFromSearch, rawSearch } from "@/lib/links"
+import type { RawLinkState } from "@/lib/links"
 import {
   eventKind,
   eventSummary,
@@ -78,6 +86,8 @@ function EventRow({
   revealed,
   onJump,
   holes,
+  isOpen,
+  onOpen,
 }: {
   pos: number
   ev: WireEvent
@@ -85,8 +95,15 @@ function EventRow({
   onJump?: (t: number) => void
   /** What the recorder did to this event's content (its attrs). */
   holes?: HoleMark[]
+  /** The row's open state when the explorer's owner holds it (the
+   * URL's ?ev=); absent, the row holds its own. */
+  isOpen?: boolean
+  onOpen?: (open: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [ownOpen, setOwnOpen] = useState(false)
+  const open = isOpen ?? ownOpen
+  const setOpen = (f: (o: boolean) => boolean) =>
+    onOpen ? onOpen(f(open)) : setOwnOpen(f)
   const kind = eventKind(ev)
   const text = useMemo(() => (open ? pretty(ev) : ""), [open, ev])
   return (
@@ -161,6 +178,8 @@ export function EventsExplorer({
   range,
   compact,
   eventHoles,
+  state,
+  onState,
 }: {
   events: WireEvent[]
   playhead: number | null
@@ -171,10 +190,45 @@ export function EventsExplorer({
   range?: [number, number]
   /** A tighter toolbar for a side panel. */
   compact?: boolean
+  /** The filters and the open event, when the owner holds them (the
+   * raw view: the URL); absent, the explorer holds its own. */
+  state?: RawLinkState
+  onState?: (s: RawLinkState) => void
 }) {
-  const [hidden, setHidden] = useState<Set<EventKind>>(() => new Set())
-  const [q, setQ] = useState("")
+  const [ownHidden, setOwnHidden] = useState<Set<EventKind>>(() => new Set())
+  const hidden = useMemo(
+    () => (state ? new Set<EventKind>(state.hide ?? []) : ownHidden),
+    [state, ownHidden]
+  )
+  // The search box types into local state (a URL write lands a tick
+  // later; a box reading it back would lose keys), mirrored to the
+  // owner on every change. A value the owner reports that this box
+  // did not write — back to an entry, a pasted link — replaces it.
+  const ownerQ = state?.q ?? ""
+  const [q, setQState] = useState(ownerQ)
+  const written = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!state) return
+    if (ownerQ === q) written.current.clear()
+    else if (!written.current.has(ownerQ)) setQState(ownerQ)
+    // Only the owner's value drives this (q is read, not watched).
+  }, [ownerQ])
+  const openPos = state?.ev
   const [limit, setLimit] = useState(ROWS)
+  const emit = (next: Partial<RawLinkState>) =>
+    onState?.({ q, hide: [...hidden], ev: openPos, ...next })
+  const setQ = (v: string) => {
+    setQState(v)
+    if (state) {
+      written.current.add(v)
+      emit({ q: v })
+    }
+  }
+  const setHidden = (f: Set<EventKind> | ((h: Set<EventKind>) => Set<EventKind>)) => {
+    const next = typeof f === "function" ? f(hidden) : f
+    if (state) emit({ hide: [...next] })
+    else setOwnHidden(next)
+  }
 
   const counts = useMemo(() => {
     const c: Record<EventKind, number> = {
@@ -200,6 +254,22 @@ export function EventsExplorer({
     })
     return out
   }, [events, hidden, q, range])
+
+  // A linked open event (?ev=): its page of rows is drawn and the row
+  // scrolled to, once — when the events holding it have arrived.
+  const shownLinked = useRef(false)
+  const linkedIndex =
+    openPos === undefined ? -1 : rows.findIndex((r) => r.pos === openPos)
+  useEffect(() => {
+    if (shownLinked.current || linkedIndex < 0) return
+    shownLinked.current = true
+    if (linkedIndex >= limit) setLimit((Math.floor(linkedIndex / ROWS) + 1) * ROWS)
+    requestAnimationFrame(() =>
+      document
+        .querySelector(`[data-pos="${openPos}"]`)
+        ?.scrollIntoView({ block: "center" })
+    )
+  }, [linkedIndex, limit, openPos])
 
   const inRange = range
     ? Math.max(0, Math.min(range[1], events.length - 1) - range[0] + 1)
@@ -241,8 +311,14 @@ export function EventsExplorer({
               type="button"
               className="font-mono text-[11px] text-thread-ink hover:underline"
               onClick={() => {
-                setHidden(new Set())
-                setQ("")
+                if (state) {
+                  setQState("")
+                  written.current.add("")
+                  emit({ q: "", hide: [] })
+                } else {
+                  setHidden(new Set())
+                  setQ("")
+                }
               }}
             >
               reset
@@ -280,6 +356,10 @@ export function EventsExplorer({
                 revealed={pos < at}
                 onJump={onJump}
                 holes={eventHoles?.[pos]}
+                isOpen={state ? openPos === pos : undefined}
+                onOpen={
+                  state ? (o) => emit({ ev: o ? pos : undefined }) : undefined
+                }
               />
             ))
         )}
@@ -325,6 +405,21 @@ export function RawView({
   onSurface: (s: "events" | "doc") => void
 }) {
   const [copied, setCopied] = useState<string | null>(null)
+  // The events surface's state is the URL's (see the header): read
+  // from the run page's search, written back in place.
+  const search: Record<string, unknown> = useSearch({ strict: false })
+  const navigate = useNavigate()
+  const linked = useMemo(
+    () => rawFromSearch(search),
+    // The three keys are the state; the rest of the search is not.
+    [search.q, search.hide, search.ev]
+  )
+  const setLinked = (s: RawLinkState) =>
+    void navigate({
+      to: ".",
+      search: (prev: Record<string, unknown>) => ({ ...prev, ...rawSearch(s) }),
+      replace: true,
+    })
   const whole = surface === "events" ? events : doc
   const name = `${doc.id.replace(/[^\w.-]+/g, "_")}.${surface === "events" ? "events" : "run"}.json`
   const copyAll = () =>
@@ -395,6 +490,8 @@ export function RawView({
           eventHoles={eventHoles}
           playhead={playhead}
           onJump={onJump}
+          state={linked}
+          onState={setLinked}
         />
       ) : (
         <div className="codewin">

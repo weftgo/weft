@@ -307,8 +307,11 @@ trimmed turn and checks the chip and the deleted guidance line.
 Deep links (plan G1) follow one scheme, `src/lib/links.ts`, shared by
 the panel and Studio's app (an ESLint rule refuses a Studio URL built
 anywhere else): `runs/<id>?step=<n>&view=story|raw&sel=…&axis=time&t=…`,
-`sessions/<id>`, `traces/<id>?span=<span id>`, `playground#run=…` (the
-hand-off in the fragment) and `playground?experiment=<id>`. `step` is
+`sessions/<id>`, `traces/<id>?span=<span id>&view=chat`,
+`playground#run=…` (the hand-off in the fragment),
+`playground?run=…&step=…&agent=…&engine=…` (the page's own state, G2)
+and `playground?experiment=<id>`; the page state each one carries is
+the table under "Every view is a URL" below. `step` is
 the step's ordinal — its index as the loop counts it, the `n` of
 `runs/{id}/steps/{n}` — never an event position or a transcript batch
 index; a call is named with its step (`sel=c:<step>:<call id>`,
@@ -1054,13 +1057,42 @@ status; `/live` shows everything streaming right now; `/traces/{id}`
 renders any trace — a stock OTel GenAI app's included — as a span tree
 plus a chat view when semconv content was captured.
 
-Every view is a URL: filters, `view=story|raw` (and `raw=doc`), the
-selected span `sel` and detail mode `d`, the axis, the selected step,
-and the replay position `t` all live in search params. Keyboard:
-`⌘K` jumps to any recent run, `/` filters, `j`/`k` move, `enter`
-opens, `e`/`s`/`r` switch trace/story/raw, `space` replays, `[`/`]`
-jump by step or tool event, `,`/`.` move one event, `?` lists
-everything. Keys fire only on a bare press outside a text box.
+Every view is a URL (plan G2): each piece of page state lives in a
+search param, built and read through `src/lib/links.ts`. A cursor move
+replaces the history entry; a view change pushes one — the back button
+walks views, never cursor moves:
+
+| page | key | state | history |
+| --- | --- | --- | --- |
+| runs list | `agent`, `status`, … | the filters | push |
+| run | `view=story\|raw` | the view (trace is the default) | push |
+| run | `raw=doc` | the raw view's surface | push |
+| run | `step` | the step (its ordinal) | — (a link's landing) |
+| run | `sel`, `d`, `axis` | the selected span, detail mode, axis | replace |
+| run | `t` | the replay playhead (seeks and pauses) | replace |
+| run | `q`, `hide`, `ev` | the raw view's search, hidden kinds (`hide=step,delta`), open event's position | replace |
+| trace | `view=chat` | the GenAI chat view (the tree is the default) | push |
+| trace | `span` | the selected span | replace |
+| playground | `run`, `step`, `agent`, `runtime`, `engine` | the source run, its step, the target, the first variant's engine — written back as they change | replace |
+| playground | `experiment` | a saved experiment, highlighted in the history | push |
+| compare | `a`, `b`, `step` | the base, the runs compared, the step | push |
+
+The playground's prompt and other hand-off fields ride the fragment
+(`playground#run=…&instructions=…`), read once and stripped: a prompt
+never reaches the query. The replay drawer's state is not in the URL
+yet. **Copy link** — the button in the run header, `y` anywhere, or
+"Copy link to this page" in `⌘K` — copies the page's canonical link:
+the bare URL with its state, never a fragment, a token or a panel scope
+(`lib/links.ts`'s `canonical`); the header says "link copied". Each page
+titles its tab through `lib/title.ts`: `run s_…-t3 · succeeded · weft
+studio`, `trace 0af76519…319c · weft studio`, `playground · weft
+studio`.
+
+Keyboard: `⌘K` jumps to any recent run, `/` filters, `j`/`k` move,
+`enter` opens, `e`/`s`/`r` switch trace/story/raw, `space` replays,
+`[`/`]` jump by step or tool event, `,`/`.` move one event, `y` copies
+the page's link, `?` lists everything. Keys fire only on a bare press
+outside a text box.
 
 ## The API (S4.2/S4.3)
 

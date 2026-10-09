@@ -3,7 +3,7 @@
 // first three questions are answered above the fold: what was the
 // prompt, did it succeed, and what did it say.
 import { Link } from "@tanstack/react-router"
-import { ArrowUpRight, ChevronRight } from "lucide-react"
+import { ArrowUpRight, Check, ChevronRight, Link2 } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import type { RunDoc, Transcript } from "@/lib/api"
@@ -31,6 +31,32 @@ import {
 import { forkSource } from "@/lib/experiments"
 import { compareLink, experimentLink, runLink, sessionLink, traceLink } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { useCopyLink } from "@/hooks/use-copy-link"
+import { useDocumentTitle } from "@/hooks/use-document-title"
+import { Button } from "@/components/ui/button"
+
+/**
+ * CopyLink copies this page's link as it stands (plan G2): the run,
+ * and every bit of view state the URL holds — the step, the selected
+ * span, the view, the raw filters — never a token. A small inline
+ * "copied" says it worked.
+ */
+export function CopyLink() {
+  const { copy, copied } = useCopyLink()
+  return (
+    <Button
+      variant="outline"
+      size="xs"
+      className="font-mono"
+      title="copy a link to this page as it stands (y)"
+      onClick={() => void copy()}
+      data-copy-link
+    >
+      {copied ? <Check data-slot="icon" /> : <Link2 data-slot="icon" />}
+      <span aria-live="polite">{copied ? "copied" : "copy link"}</span>
+    </Button>
+  )
+}
 
 function shortHash(hash: string | undefined): string {
   return hash ? hash.slice(0, 8) : "—"
@@ -184,6 +210,7 @@ export function RunHeader({
   transcript?: Transcript
 }) {
   const now = useNow(doc.status === "running")
+  useDocumentTitle({ page: "run", id: doc.id, status: doc.status })
   // The words this run was asked: the last user message it was fed
   // (in a thread the first one is an earlier turn's).
   const prompt = turnPrompt(transcript?.batches ?? [])
@@ -256,6 +283,9 @@ export function RunHeader({
         ) : null}
         <ReplayOf doc={doc} />
         <CompareWith doc={doc} />
+        <span className="ml-auto">
+          <CopyLink />
+        </span>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground tabular-nums">

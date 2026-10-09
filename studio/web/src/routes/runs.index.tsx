@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { runLink } from "@/lib/links"
+import { useDocumentTitle } from "@/hooks/use-document-title"
 
 interface RunsSearch {
   agent?: string
@@ -163,6 +164,7 @@ function undefinedOr(before: string | undefined): PageCursor | undefined {
 }
 
 function RunsPage() {
+  useDocumentTitle({ page: "runs" })
   const search = Route.useSearch()
   const navigate = useNavigate({ from: "/runs/" })
   const router = useRouter()

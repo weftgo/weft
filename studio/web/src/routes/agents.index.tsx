@@ -12,6 +12,7 @@ import { ApiError, manifestQuery } from "@/lib/api"
 import { AgentCard } from "@/components/studio/agent-cards"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { Spinner } from "@/components/ui/spinner"
+import { useDocumentTitle } from "@/hooks/use-document-title"
 
 export const Route = createFileRoute("/agents/")({
   component: AgentsPage,
@@ -22,6 +23,7 @@ export const Route = createFileRoute("/agents/")({
 const REFRESH_MS = 5_000
 
 function AgentsPage() {
+  useDocumentTitle({ page: "agents" })
   const manifest = useQuery({ ...manifestQuery(), refetchInterval: REFRESH_MS })
   const caps = useCapabilities()
   if (manifest.isPending) {

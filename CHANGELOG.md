@@ -10,6 +10,16 @@ module, ADR 0005).
 
 ### Added
 
+- **Step-aligned run diff, Go half** (plan E3.1): `GET /api/diff?a=&b=`
+  (capability `diff`) compares two runs step by step, aligned by step
+  ordinal — each step assembled as `runs/{id}/steps/{n}` assembles it and
+  reduced to its system prompt (by hash), tool calls `name(args)`, tool
+  results, assistant text and usage; rows carry `changed` and `changes`
+  (`missing` for a step one run lacks), `summary` names the changed steps.
+  A compaction view or a subagent call is a mark on its side, never a
+  change by itself; every absent column is a hole from the one table, and
+  a read-scoped panel token gets `system: null` under `hidden`.
+
 - **The option lab, Go half** (plan F3.1): a playground command's
   `overrides` gains, beside the numeric `options` (`max_steps`,
   `parallelism`, `temperature` — unchanged), `params` `{top_p?,

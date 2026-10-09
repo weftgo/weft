@@ -206,7 +206,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    wefttest.Replay reads — a compacted step keys on its view, noted compacted_at),
 //    //    runs/{id}/logs?from=&limit=&severity= (the app's own log lines under the run's
 //    //    spans, capability "logs"; refused to a read-scoped token: they may carry prompts;
-//    //    the run row carries delta_count), traces/{id},
+//    //    the run row carries delta_count), diff?a=&b= (two runs aligned by step ordinal, each
+//    //    step reduced to system/tool_calls/tool_results/text/usage with changes per row and
+//    //    a summary; compaction and subagent are marks, never a change; system hidden to a read
+//    //    token; capability "diff"), traces/{id},
 //    //    sessions, sessions/{id}, sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
 //    //    alone, every panel token 403 hidden), public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5 — its host API, plan C4: the element's

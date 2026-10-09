@@ -1073,6 +1073,37 @@ as `runs/{id}` serves them. A read-scoped panel token gets `json` and
 `jsonl` with the request block `{badge: "hidden", …}` and each
 compaction view's `messages` null under the same badge; `otlp` and
 `wefttest` are 403 with that badge),
+`diff?a=<run id>&b=<run id>` (two runs compared step by step, under the
+`diff` capability — plan E3: `{a, b, steps, summary, holes}`, `a`/`b`
+`{run_id, steps, status}`; one row per step ordinal from 0 to the
+longer run's last — the ordinal is the alignment key — `{step, changed,
+a, b, changes}`, each side the step as `runs/{id}/steps/{n}` assembles
+it, reduced to `{status, system_hash, system, tool_calls: [{name,
+args}], tool_results: [{call_id, name, content, is_error}], text,
+usage, marks, holes}`, or `null` on the side whose run has no such
+step (`changes: ["missing"]`); `changes` lists what differs, in the
+order `system` (by hash when both sides have one), `tool_calls`
+(`name(args)`, the args canonicalised: keys sorted), `tool_results`
+(content and `is_error`, in call order — call ids are not compared),
+`text` (the step's assistant text from the transcript, exact) and
+`usage` (the numbers); status, timing, marks and holes are never
+compared. `marks` say what the side's step was — `compacted` (a
+compaction view: the model saw other messages, which the diff does not
+compare), `subagent` (a call started a child run), `max_tokens`,
+`parked`, `running`, `interrupted`, `error` — and never flip `changed`
+by themselves: a compaction or a subagent marks its side, never forced
+to align. Every column a side lacks is a hole in its `holes`, from the
+same table — `system: null` under `hidden` for a read-scoped panel
+token (the hash stays: `instructions_hash` is read-scoped too, so the
+column still compares), `not_recorded` for a run written before ADR
+0028, `text: null` under `gap` when no messages record of a finished
+step was stored; `summary` is `{changed_steps, first_changed}`
+(`first_changed: null` when nothing differs); the top-level `holes` is
+`truncated` when a run has more than 500 steps (the first 500 are
+compared). Both runs must be inside a panel token's public id (403
+whichever side is outside; an unknown run 404; a missing `a` or `b`
+400); `a == b` is every row unchanged. The route is two-way: an N-way
+compare calls it N−1 times against one base run),
 `traces/{trace_id}` (any trace), `sessions`, `sessions/{id}` (turns in
 order), `sessions/{id}/public_id` (the reverse of `public/`: `{session_id,
 public_id}`, the public id `thread.PublicID` stamped on the session's

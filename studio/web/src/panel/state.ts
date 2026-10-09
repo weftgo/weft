@@ -70,6 +70,13 @@ export const TURNS_LIMIT = 50
 /** How often a stream that closed for good is reopened before the
  * panel stops knocking (5 s, doubling, capped at a minute). */
 export const LIVE_RETRIES = 5
+/** The server's overflow frame (the client fell behind) reopens on its
+ * own bounded backoff: OVERFLOW_MIN_MS after the frame, doubling for
+ * each overflow that follows the last within OVERFLOW_CALM_MS, capped
+ * at a minute — never at once (each reopen is a new grant and a
+ * refetch), never given up (an overflow is not a failure). */
+export const OVERFLOW_MIN_MS = 1_000
+export const OVERFLOW_CALM_MS = 60_000
 /** The lifecycle poll: its cadence, and how many failed reads in a
  * row end it. */
 const POLL_MS = 700
@@ -470,6 +477,8 @@ export class PanelModel {
   private timers = new Set<ReturnType<typeof setTimeout>>()
   /** Reopen attempts since each stream last opened (LIVE_RETRIES). */
   private retries = { scope: 0, run: 0, exp: 0, dev: 0 }
+  /** Each lane's overflow backoff: the step it is at and the last overflow. */
+  private overflows = { scope: { n: 0, at: 0 }, run: { n: 0, at: 0 }, exp: { n: 0, at: 0 }, dev: { n: 0, at: 0 } }
   /** Run frames that arrived while a turn-list fetch was in flight:
    * the fetch's snapshot is older than they are, so they are applied
    * over it. */
@@ -588,6 +597,7 @@ export class PanelModel {
     this.scopeSub = this.runSub = this.expSub = this.devSub = undefined
     this.clearTimers()
     this.retries = { scope: 0, run: 0, exp: 0, dev: 0 }
+    this.overflows = { scope: { n: 0, at: 0 }, run: { n: 0, at: 0 }, exp: { n: 0, at: 0 }, dev: { n: 0, at: 0 } }
     this.devBackoff = false
     const s = this.state
     s.live = false
@@ -657,7 +667,7 @@ export class PanelModel {
         // that went away (or a token that expired) is not hammered.
         // A panel token that expired is not asked again: no live, quietly.
         if (why === "expired") return
-        if (why === "overflow") void again().catch(quiet)
+        if (why === "overflow") this.overflowed("scope", again)
         else this.retry("scope", again)
       },
     })
@@ -672,6 +682,17 @@ export class PanelModel {
     if (n >= LIVE_RETRIES) return
     this.retries[kind] = n + 1
     this.after(Math.min(5_000 * 2 ** n, 60_000), () => void fn().catch(quiet))
+  }
+
+  /** overflowed reopens a lane the server's overflow frame closed, on
+   * the overflow backoff (OVERFLOW_MIN_MS, doubling while overflows
+   * follow each other within OVERFLOW_CALM_MS, a minute at most). */
+  private overflowed(kind: "scope" | "run" | "exp" | "dev", fn: () => Promise<void>) {
+    const o = this.overflows[kind]
+    const now = Date.now()
+    o.n = o.at && now - o.at < OVERFLOW_CALM_MS ? o.n + 1 : 0
+    o.at = now
+    this.after(Math.min(OVERFLOW_MIN_MS * 2 ** Math.min(o.n, 6), 60_000), () => void fn().catch(quiet))
   }
 
   private after(ms: number, fn: () => void): ReturnType<typeof setTimeout> {
@@ -809,10 +830,15 @@ export class PanelModel {
       onOverflow: (why) => {
         ended()
         if (why === "expired") return
-        if (why === "overflow") void again().catch(quiet)
-        else {
-          // Bounded: the poll's refreshes do not reopen it meanwhile,
-          // and once the retries ran out the flag stays.
+        // Either backoff: the poll's refreshes do not reopen it meanwhile.
+        if (why === "overflow") {
+          this.devBackoff = true
+          this.overflowed("dev", async () => {
+            this.devBackoff = false
+            await again()
+          })
+        } else {
+          // Bounded: once the retries ran out the flag stays.
           this.devBackoff = true
           this.retry("dev", async () => {
             this.devBackoff = false
@@ -1309,11 +1335,15 @@ export class PanelModel {
         this.runSub = undefined
         if (this.state.turn !== view || view.done) return
         // The tail is gone, the run is not: reload what is stored and
-        // follow again — at once on the server's own overflow frame,
-        // on the bounded backoff when the stream closed for good.
+        // follow again — on the overflow backoff after the server's own
+        // overflow frame, on the bounded backoff when the stream closed
+        // for good.
         // A panel token that expired is not asked again: no live, quietly.
         if (why === "expired") return
-        if (why === "overflow") void this.resumeTurn(view).catch(quiet)
+        if (why === "overflow")
+          this.overflowed("run", async () => {
+            if (this.state.turn === view && !view.done) await this.resumeTurn(view)
+          })
         else this.retry("run", () => this.resumeTurn(view))
       },
     })
@@ -1866,8 +1896,9 @@ export class PanelModel {
         this.expSub = undefined
         if (this.state.result !== res || res.runID !== runID || res.ready) return
         // The stream is gone, the run is not: what is stored reloads
-        // and the tail reopens (at once on the server's overflow
-        // frame, on the bounded backoff when it closed for good).
+        // and the tail reopens (on the overflow backoff after the
+        // server's overflow frame, on the bounded backoff when it
+        // closed for good).
         const again = async () => {
           if (this.state.result !== res || res.runID !== runID || res.ready) return
           await this.loadExperiment(res)
@@ -1876,7 +1907,7 @@ export class PanelModel {
         }
         // A panel token that expired is not asked again: no live, quietly.
         if (why === "expired") return
-        if (why === "overflow") void again().catch(quiet)
+        if (why === "overflow") this.overflowed("exp", again)
         else this.retry("exp", again)
       },
     })

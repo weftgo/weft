@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { tokenScope } from "./config"
 import { stepPosition, studioPlaygroundLink } from "./element"
 import { pickRuntime } from "./playground"
+import { OVERFLOW_MIN_MS } from "./state"
 import type { ExperimentDraft } from "./playground"
 import {
   $,
@@ -354,7 +355,7 @@ describe("the result pane follows the command to its run", () => {
     await run(el)
     const first = FakeEventSource.last("run=pg_x1")!
     first.emit("overflow", {})
-    await settle()
+    await settle(OVERFLOW_MIN_MS + 50)
     expect(first.readyState).toBe(FakeEventSource.CLOSED)
     expect(FakeEventSource.live("run=pg_x1")).toHaveLength(1)
     expect(text(el, ".weft-xres")).toContain("lookup_order") // what the dropped stream had carried

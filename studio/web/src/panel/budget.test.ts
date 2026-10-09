@@ -4,7 +4,8 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { gzipSync } from "node:zlib"
 import { describe, expect, it } from "vitest"
-import { budgetTable } from "../../scripts/panel-budget"
+import { budgetTable, normalizeStamp, STAMP_PLACEHOLDER } from "../../scripts/panel-budget"
+import { weftVersion } from "../../scripts/weft-version"
 import type { Ledger } from "../../scripts/panel-budget"
 
 const ledger = JSON.parse(readFileSync(resolve(process.cwd(), "panel-budget.json"), "utf8")) as Ledger
@@ -39,9 +40,20 @@ describe("the size ledger (panel-budget.json)", () => {
     for (let i = 1; i < ledger.rows.length; i++) expect(ledger.items.some((x) => x.id === ledger.rows[i].item) || ledger.rows[i].item === "").toBe(true)
   })
 
-  it("its last row is the committed panel.js", () => {
-    const built = gzipSync(readFileSync(resolve(process.cwd(), "../dist/panel/panel.js"))).length
+  it("its last row is the committed panel.js, measured with the version stamp normalized", () => {
+    const code = readFileSync(resolve(process.cwd(), "../dist/panel/panel.js"), "utf8")
+    const built = gzipSync(normalizeStamp(code, weftVersion())).length
     expect(ledger.rows.at(-1)?.gzip).toBe(built)
+  })
+
+  it("a version bump moves no measured byte: the stamp is normalized to a fixed-length placeholder", () => {
+    const code = readFileSync(resolve(process.cwd(), "../dist/panel/panel.js"), "utf8")
+    const stamp = JSON.stringify(weftVersion())
+    const measure = (v: string) => gzipSync(normalizeStamp(code.split(stamp).join(JSON.stringify(v)), v)).length
+    const at = measure(weftVersion())
+    for (const v of ["v0.12.0", "v0.100.0", "v1.0.0", "v0.12.0-rc.1"]) expect(measure(v)).toBe(at)
+    expect(normalizeStamp(`x=${stamp}`, weftVersion())).toBe(`x=${JSON.stringify(STAMP_PLACEHOLDER)}`)
+    expect(() => normalizeStamp("no stamp here", weftVersion())).toThrow(/version stamp/)
   })
 
   it("prints one line per item: estimate, measured delta, over past half again its estimate; the total and headroom", () => {

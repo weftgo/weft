@@ -46,6 +46,21 @@ export interface TreeState {
   saidTimer?: ReturnType<typeof setTimeout>
 }
 
+/** stopTree clears a tree's pending timers (the filter's debounce, the
+ * "copied" line's clearing): the element calls it on disconnect, so
+ * nothing redraws a detached panel. A pending query is applied as the
+ * box holds it, for the next draw. */
+export function stopTree(st: TreeState): void {
+  if (st.timer !== undefined && st.applied !== st.q) {
+    st.applied = st.q
+    st.open.clear()
+  }
+  clearTimeout(st.timer)
+  clearTimeout(st.saidTimer)
+  st.timer = st.saidTimer = undefined
+  if (st.said === "copied") st.said = ""
+}
+
 /** The filter's debounce: a keystroke walks a 10 MB document once. */
 export const FILTER_MS = 100
 

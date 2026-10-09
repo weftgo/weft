@@ -160,7 +160,8 @@ export function capLine(
   const fromMeta = !own && latest && (!turn || latest.run_id === turn.id) ? latest : null
   const mark = own ?? fromMeta?.mark ?? ""
   const tail = turn?.capped && cappedAt ? ` · first ${cappedAt} events` : ""
-  if (mark in CONTENT_OFF) {
+  // Own keys only: the mark is the record's, and "constructor" is no mode.
+  if (Object.hasOwn(CONTENT_OFF, mark)) {
     const w = holeWords({ hole: "stripped", reason: fromMeta?.note, fix: fromMeta?.fix })
     return { text: `content off · ${CONTENT_OFF[mark]}${tail}`, title: badgeTitle(w.reason, w.fix), hole: "stripped" }
   }

@@ -636,3 +636,40 @@ describe("the keyboard (only inside the panel, except Alt+W)", () => {
     expect(docAdd.mock.calls.filter(([t]) => t === "keydown")).toHaveLength(0)
   })
 })
+
+describe("review: resize and Alt+W", () => {
+  it("a burst of resize events is one clamp and one redraw per animation frame", async () => {
+    fakeStudio(baseRoutes())
+    const el = await open()
+    const inner = el as unknown as { render: (s: unknown) => void }
+    const spy = vi.spyOn(inner, "render")
+    for (const w of [900, 880, 860, 840, 820]) {
+      Object.defineProperty(window, "innerWidth", { value: w, configurable: true, writable: true })
+      window.dispatchEvent(new Event("resize"))
+    }
+    expect(spy).not.toHaveBeenCalled() // nothing synchronous
+    await new Promise((r) => requestAnimationFrame(() => r(null)))
+    await new Promise((r) => requestAnimationFrame(() => r(null)))
+    expect(spy).toHaveBeenCalledTimes(1)
+    el.remove()
+  })
+
+  it("two panels on one page: Alt+W toggles one of them (the first connected, the global's), never both", async () => {
+    fakeStudio(baseRoutes())
+    const a = await mount(BASE)
+    const b = await mount(BASE)
+    expect([a.isOpen, b.isOpen]).toEqual([false, false])
+    key(window, { code: "KeyW", altKey: true })
+    await settle()
+    expect([a.isOpen, b.isOpen]).toEqual([true, false])
+    key(window, { code: "KeyW", altKey: true })
+    await settle()
+    expect([a.isOpen, b.isOpen]).toEqual([false, false])
+    // The owner leaves: the other answers.
+    a.remove()
+    await settle()
+    key(window, { code: "KeyW", altKey: true })
+    await settle()
+    expect(b.isOpen).toBe(true)
+  })
+})

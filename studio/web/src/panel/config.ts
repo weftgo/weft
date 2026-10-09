@@ -8,7 +8,8 @@
 //   4. the panel's <script> tag's data-* attributes: the running
 //      classic script (document.currentScript), else the first script
 //      carrying data-weft (any src — a renamed or proxied bundle), else
-//      the first carrying one of the panel's own data-* attributes;
+//      the script whose src resolves to the module's own URL
+//      (import.meta.url) — never a tag for its generic data-* words;
 //   5. <script directory>/panel-config.json (B3), asked only when no
 //      rung above named an endpoint, for the endpoint alone (never a
 //      token, never another origin) — resolveEndpoint in element.ts's
@@ -134,13 +135,10 @@ const POSITIONS: PanelPlacement[] = ["bottom-right", "bottom-left", "right-dock"
 export const FIELDS = ["endpoint", "scope", "public-id", "token", "detect", "position", "open", "auto", "global", "mode", "push", "z-index", "theme"] as const
 type Field = (typeof FIELDS)[number]
 
-/** The attributes that find the panel's own <script> tag: the fields
- * before D1 (data-mode and data-push are words other scripts use). */
-export const DATA_ATTRS = FIELDS.slice(0, 9).map((f) => `data-${f}`)
-
 /** The script running now, captured while the bundle evaluates: a
  * classic include knows itself whatever its file is called. null for a
- * module script (the usual), which the data-weft scan finds instead. */
+ * module script (the usual), which the data-weft scan or the module's
+ * own URL finds instead. */
 const bootScript: HTMLScriptElement | null = (() => {
   try {
     const s = document.currentScript
@@ -150,17 +148,38 @@ const bootScript: HTMLScriptElement | null = (() => {
   }
 })()
 
+/** The bundle's own URL (it is ESM): the <script src> that resolves to
+ * it is the panel's tag. "" where it cannot be read. Exported for the
+ * ladder suite, which writes a tag with this src. */
+export const selfURL: string = (() => {
+  try {
+    return String(import.meta.url ?? "")
+  } catch {
+    return ""
+  }
+})()
+
 /** The panel's own <script> tag (rung 4): document.currentScript when
  * the bundle ran as a classic script; else the first script carrying
  * data-weft, in document order (any src: a renamed bundle, a proxy);
- * else the first carrying one of the panel's own data-* attributes —
- * the tags written before data-weft existed. Never the file name. */
+ * else the script whose src resolves to the module's own URL
+ * (import.meta.url). Never the file name, and never a tag because it
+ * carries a generic data-* attribute: a third-party widget's
+ * data-endpoint or data-token is not the panel's configuration. */
 export function findPanelScript(): HTMLScriptElement | null {
   if (bootScript?.isConnected) return bootScript
   try {
     const tagged = document.querySelector<HTMLScriptElement>("script[data-weft]")
     if (tagged) return tagged
-    return document.querySelector<HTMLScriptElement>(DATA_ATTRS.map((a) => `script[${a}]`).join(","))
+    if (!selfURL) return null
+    for (const s of Array.from(document.querySelectorAll<HTMLScriptElement>("script[src]"))) {
+      try {
+        if (new URL(s.getAttribute("src") ?? "", document.baseURI).href === selfURL) return s
+      } catch {
+        // an unparsable src is not the panel's
+      }
+    }
+    return null
   } catch {
     return null
   }

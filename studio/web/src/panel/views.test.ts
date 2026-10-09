@@ -829,4 +829,34 @@ describe("paging (before= / before_id=, no cap)", () => {
     expect(ids).toEqual(expect.arrayContaining(["t151", "t150"]))
     expect(new Set(ids).size).toBe(100)
   })
+
+  it("review: nothing draws after the disconnect — a tree debounce, a copied timer or a late render creates no observer on the detached sentinel", async () => {
+    FakeIO.all = []
+    vi.stubGlobal("IntersectionObserver", FakeIO)
+    fakeStudio(long())
+    const el = await mount(WIDE)
+    click(tab(el, "raw"))
+    await settle()
+    expect($(el, ".weft-older")).not.toBeNull()
+    const q = $(el, ".weft-tree-q") as HTMLInputElement
+    q.value = "run_start"
+    q.dispatchEvent(new Event("input", { bubbles: true })) // the debounce is pending
+    type Inner = { tree: { timer?: unknown; saidTimer?: unknown; applied: string }; render: (s: unknown) => void; last: unknown }
+    const inner = el as unknown as Inner
+    expect(inner.tree.timer).toBeDefined()
+    el.remove()
+    expect(FakeIO.all.every((io) => io.off)).toBe(true)
+    const made = FakeIO.all.length
+    // The timers went with the element; the query typed is kept for the next draw.
+    expect(inner.tree.timer).toBeUndefined()
+    expect(inner.tree.saidTimer).toBeUndefined()
+    expect(inner.tree.applied).toBe("run_start")
+    const before = el.shadowRoot!.innerHTML
+    // A late answer (a composed() promise, a model frame) asks for a draw.
+    inner.render(inner.last)
+    window.dispatchEvent(new Event("resize"))
+    await pause(FILTER_MS + 50)
+    expect(FakeIO.all.length).toBe(made)
+    expect(el.shadowRoot!.innerHTML).toBe(before)
+  })
 })

@@ -17,7 +17,7 @@ import { gzipSync } from "node:zlib"
 import { defineConfig } from "vite"
 import type { Plugin } from "vite"
 import { weftVersion } from "./scripts/weft-version.ts"
-import { budgetTable } from "./scripts/panel-budget.ts"
+import { budgetTable, normalizeStamp } from "./scripts/panel-budget.ts"
 import type { Ledger } from "./scripts/panel-budget.ts"
 
 /** §5.1's budget: panel.js is ≤ 80 KiB gzip. */
@@ -50,7 +50,10 @@ function panelBudget(): Plugin {
           this.error(`panel.js must carry no package code (V1), got: ${deps.slice(0, 5).join(", ")}`)
       }
       const code = out.type === "chunk" ? out.code : String(out.source)
-      const gz = gzipSync(code).length
+      // Measured with the version stamp normalized (normalizeStamp): a
+      // version bump changes no ledger byte, and budget.test.ts measures
+      // the committed panel.js the same way. The cap reads the same size.
+      const gz = gzipSync(normalizeStamp(code, studioVersion)).length
       // The per-item table (plan phase 3): the ledger's items against
       // this build — printed, never a failure of its own.
       const ledger = JSON.parse(readFileSync(new URL("./panel-budget.json", import.meta.url), "utf8")) as Ledger

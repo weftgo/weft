@@ -232,7 +232,9 @@ export function holeWords(m: HoleMark): {
   tone: "loss" | "note"
 } {
   const note = isHole(m.hole) ? HOLES[m.hole] : undefined
-  const why = m.cause && isHole(m.hole) ? CAUSES[m.hole]?.[m.cause] : undefined
+  // Own keys only: the cause is the record's ("constructor" names none).
+  const causes = isHole(m.hole) ? CAUSES[m.hole] : undefined
+  const why = m.cause && causes && Object.hasOwn(causes, m.cause) ? causes[m.cause] : undefined
   const label =
     m.hole === "truncated" && m.bytes && !m.cause
       ? `shortened by the recorder: ${kib(m.bytes)} cut`

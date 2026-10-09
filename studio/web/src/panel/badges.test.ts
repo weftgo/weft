@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { Meta } from "../lib/api"
 import { UNRUN_CALL_REASON } from "../lib/events"
-import { CAUSES, HOLE_ORDER, HOLES, resultCapReason } from "../lib/honesty"
+import { CAUSES, HOLE_ORDER, HOLES, holeWords, resultCapReason } from "../lib/honesty"
 import type { HoleMark } from "../lib/honesty"
 import { REQUEST_NO_RECORD_REASON, requestCappedWords } from "../lib/requests"
 import {
@@ -121,6 +121,17 @@ describe("the footer's content line (said on evidence only)", () => {
     // A full mark is said for the run it names, or with no turn open.
     expect(capLine(turn([{}]), meta("full"))!.text).toBe("content on")
     expect(capLine(null, meta("full"))!.text).toBe("content on")
+  })
+
+  it("review: a mark or a cause that names a prototype key is no mode and no cause (own keys only)", () => {
+    for (const k of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+      expect(capLine(turn([{ "weft.content": k }]), null)).toBeNull()
+      expect(capLine(null, meta(k))).toBeNull()
+      const w = holeWords({ hole: "truncated", cause: k })
+      expect(w.reason).toBe(HOLES.truncated.reason)
+      expect(w.fix).toBe(HOLES.truncated.fix)
+      expect(`${w.reason}${w.fix}`).not.toContain("[native code]")
+    }
   })
 
   it("unknown says nothing: no mark, an unmarked run, the latest run's mark on another turn", () => {

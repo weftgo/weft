@@ -328,6 +328,17 @@ off by default here).
 | 4 | the page URL: `?weft_scope=…` (read first), else `#weft_scope=…` — the same string form, URL-decoded (`#weft_scope=pub_x%3Bflow%3Df_1`); a value without a public id is ignored | always, every setup and token, `data-detect="off"` included; below rung 1, above rungs 2 and 3; re-read on `hashchange` and `popstate` | `data-scope` |
 | 5 | the fallback: no rung names a scope — the header reads "no conversation detected on this page · how to scope" and lists the newest runs | when 1–4 name nothing | any line under "how to scope": `data-scope="pub_…" on the panel's <script> tag (or <weft-devtools>)`, `scope("pub_…") from @weftgo/devtools`, `data-weft-scope="pub_…" on the chat's element`, `scope.Header(h, …) on the app's handler (Go, package weft/scope)` |
 
+Rung 3 trusts the page's DOM: a `data-weft-scope` attribute anywhere
+in it names a conversation, and an HTML sanitizer (DOMPurify among
+them) keeps `data-*` attributes by default — so markers must not
+appear in untrusted HTML. A page that renders user or model HTML marks
+the container `data-weft-untrusted`: a marker on or inside such an
+element is ignored (focus inside it names the chat around it, if that
+one is marked), and setting or lifting the attribute later rescans. A
+host that cannot mark it sets `data-detect="off"` (markers and headers
+off — a `data-detect` naming only `headers` leaves markers at their
+default, on) and names the scope explicitly.
+
 Rung 2 patches a global of your page, `window.fetch` (shadow DOM
 scopes DOM and CSS, not JavaScript), so it is held to these rules
 (`src/panel/detect.ts`): it reads the response URL and the
@@ -630,13 +641,14 @@ behind a proxy configures itself the same way.
 | 1 | `mount(opts)` — a programmatic mount (`import { mount } from "@weftgo/devtools"`, the npm entry; not in the script-tag bundle) | `mount({endpoint, scope, publicId, token, detect, position, open, auto, theme, target})` |
 | 2 | the `<weft-devtools>` element's attributes | `<weft-devtools data-endpoint="…" data-token="…">` |
 | 3 | meta tags | `<meta name="weft:endpoint" content="…">` (also `weft:scope`, `weft:public-id`, `weft:token`, `weft:detect`, `weft:position`, `weft:open`, `weft:auto`, `weft:global`, `weft:mode`, `weft:push`, `weft:z-index`, `weft:theme`) |
-| 4 | the panel's `<script>` tag: the running classic script, else the first with a `data-weft` attribute (any `src`, any value), else the first carrying one of the `data-*` attributes above (`data-mode`, `data-push`, `data-z-index` and `data-theme` excepted: other scripts use those words) | `<script type="module" src="…" data-weft data-endpoint="…">` |
+| 4 | the panel's `<script>` tag: the running classic script, else the first with a `data-weft` attribute (any `src`, any value), else the module script whose `src` resolves to the bundle's own URL (`import.meta.url`) — never a tag because it carries a `data-endpoint`, `data-token` or other generic `data-*` word: a third-party widget's tag is not the panel's configuration | `<script type="module" src="…" data-weft data-endpoint="…">` |
 | 5 | `panel-config.json` beside the script (`/studio/panel.js` → `/studio/panel-config.json`), asked only when rungs 1–4 named no endpoint; its `endpoint` is taken on the script's own origin only, and it never carries a token | name the endpoint at any rung above |
 | 6 | the script's own origin + directory (setup A) | name the endpoint at any rung above |
 
-A renamed bundle whose tag carries none of the panel's `data-*`
-attributes needs `data-weft` on it (or a higher rung); without a tag to
-find, the endpoint is the page's own directory.
+A tag whose `src` is not the bundle's own URL (a bundler that inlined
+or re-served the panel, a loader script) needs `data-weft` on it (or a
+higher rung); without a tag to find, the endpoint is the page's own
+directory.
 
 A `weft:token` meta tag, like `data-token`, is a token in the page's
 source: in HTML you ship, use a per-page panel token your backend
@@ -671,7 +683,12 @@ rather than cut.
 for non-Go backends.
 
 The size ledger. Every panel build (`bun run build`, `make
-studio-build`, `make studio-check`) prints the per-item size table:
+studio-build`, `make studio-check`) prints the per-item size table,
+measured with the version stamp normalized — the stamped version
+string (`scripts/weft-version.ts`) replaced by the fixed-length
+placeholder `"v0.00.0"` (`normalizeStamp` in `scripts/panel-budget.ts`)
+before gzip, in the build and in `budget.test.ts` alike, so a version
+bump moves no ledger byte:
 each plan item's estimate beside its measured gzip delta, `over` when
 the delta is more than half again the estimate (`over (accepted)` when
 the plan recorded why it was not split), the unbudgeted items, the

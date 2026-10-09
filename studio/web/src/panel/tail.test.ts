@@ -31,6 +31,7 @@ import {
   user,
 } from "./testkit"
 import { WeftDevtools } from "./element"
+import { OVERFLOW_MIN_MS } from "./state"
 
 beforeEach(setup)
 afterEach(teardown)
@@ -167,10 +168,35 @@ describe("the live tail", () => {
     click($(el, "[data-weft-step]"))
     await settle()
     FakeEventSource.last("run=s_01-t1")!.emit("overflow", {})
-    await settle()
+    await settle(OVERFLOW_MIN_MS + 50)
     expect(studio.gets("runs/s_01-t1/events").length).toBe(2)
     expect(FakeEventSource.live("run=s_01-t1")).toHaveLength(1)
     expect($(el, ".weft-head a")?.getAttribute("href")).toContain("step=0") // the step being read survived
+  })
+
+  it("review: an overflow frame reopens on a bounded backoff — never at once, further apart while overflows repeat", async () => {
+    const routes = liveTurn()
+    const studio = fakeStudio(routes)
+    await mount()
+    const grants = () => studio.posts("live-grant").filter((c) => (c.body as { run?: string } | undefined)?.run === "s_01-t1").length
+    const before = grants()
+    expect(FakeEventSource.live("run=s_01-t1")).toHaveLength(1)
+    vi.useFakeTimers()
+    FakeEventSource.last("run=s_01-t1")!.emit("overflow", {})
+    await vi.advanceTimersByTimeAsync(OVERFLOW_MIN_MS - 100)
+    // Not at once: no new grant, no refetch, no stream yet.
+    expect(grants()).toBe(before)
+    expect(FakeEventSource.live("run=s_01-t1")).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(grants()).toBe(before + 1)
+    expect(FakeEventSource.live("run=s_01-t1")).toHaveLength(1)
+    // A second overflow straight after: twice the wait.
+    FakeEventSource.last("run=s_01-t1")!.emit("overflow", {})
+    await vi.advanceTimersByTimeAsync(2 * OVERFLOW_MIN_MS - 100)
+    expect(grants()).toBe(before + 1)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(grants()).toBe(before + 2)
+    expect(FakeEventSource.live("run=s_01-t1")).toHaveLength(1)
   })
 
   const TOOL_START = { type: "tool_start", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "lookup_order", args: { id: "4411" } }

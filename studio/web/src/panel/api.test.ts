@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { href, runLink } from "../lib/links"
 import type { Scope } from "../lib/scope"
-import { SETTLE_MS } from "./element"
+import { PATHS_LIMIT, RUN_MEMO_LIMIT, SETTLE_MS } from "./element"
 import type { DevtoolsAPI, DevtoolsEvents, WeftDevtools } from "./element"
 import type { PanelModel } from "./state"
 import {
@@ -271,6 +271,68 @@ describe("select", () => {
     el.select("s_01-t1")
     await settle()
     expect($(el, ".weft-api-note")).toBeNull()
+  })
+})
+
+describe("review: the per-run bookkeeping is bounded and starts empty", () => {
+  type Books = {
+    prompts: Map<string, string>
+    evParked: Set<string>
+    evErrored: Set<string>
+    byPath: Map<string, Scope>
+    onDetected(sc: Scope, path: string): void
+  }
+  const books = (el: WeftDevtools) => el as unknown as Books
+
+  it("prompts, evErrored and byPath stay at their caps (the oldest goes); a new start clears prompts, evParked and evErrored", async () => {
+    fakeStudio(baseRoutes())
+    const el = create()
+    const errors: DevtoolsEvents["error"][] = []
+    el.on("error", (d) => errors.push(d))
+    document.body.appendChild(el)
+    await settle()
+    const b = books(el)
+    // A long-lived page: more failures than the memo holds.
+    for (let i = 0; i < RUN_MEMO_LIMIT; i++) b.evErrored.add(`r_old${i}`)
+    const t2 = runRow({ id: "s_01-t2", status: "running", finished: null, started: "2026-10-01T09:05:00Z" })
+    lane().emit("run", { run: t2 })
+    await settle()
+    lane().emit("run", { run: { ...t2, status: "failed" as const, err: "boom" } })
+    await settle()
+    expect(errors).toEqual([{ message: "boom", runId: "s_01-t2" }])
+    expect(b.evErrored.size).toBe(RUN_MEMO_LIMIT)
+    expect(b.evErrored.has("s_01-t2")).toBe(true)
+    expect(b.evErrored.has("r_old0")).toBe(false)
+    // The turn filter's prompts: the turn opened is the newest.
+    for (let i = 0; i < RUN_MEMO_LIMIT; i++) b.prompts.set(`r_old${i}`, "q")
+    el.select("s_01-t1")
+    await settle()
+    expect(b.prompts.size).toBe(RUN_MEMO_LIMIT)
+    expect(b.prompts.get("s_01-t1")).toBe("where is my order #4411?")
+    // The header rung's paths: one per response path, bounded.
+    for (let i = 0; i < PATHS_LIMIT + 10; i++) b.onDetected({ publicId: "pub_orders" }, `/api/chat/${i}`)
+    expect(b.byPath.size).toBe(PATHS_LIMIT)
+    expect(b.byPath.has(`/api/chat/${PATHS_LIMIT + 9}`)).toBe(true)
+    expect(b.byPath.has("/api/chat/0")).toBe(false)
+    // A new connection (another token) starts from nothing.
+    b.evParked.add("r\u0000c")
+    el.setAttribute("data-token", "tok_next")
+    await settle()
+    expect(b.evParked.size).toBe(0)
+    expect(b.evErrored.size).toBe(0)
+    expect(b.byPath.size).toBe(0)
+    expect([...b.prompts.keys()].every((k) => !k.startsWith("r_old"))).toBe(true)
+  })
+
+  it("a rescope to another conversation forgets the previous one's prompts", async () => {
+    fakeStudio(baseRoutes())
+    const el = create()
+    document.body.appendChild(el)
+    await settle()
+    books(el).prompts.set("r_elsewhere", "an old question")
+    el.scope("pub_other")
+    await settle()
+    expect(books(el).prompts.has("r_elsewhere")).toBe(false)
   })
 })
 

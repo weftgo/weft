@@ -121,7 +121,7 @@ export function readStore(): Partial<Layout> {
 export const PLACE = ["mode", "side", "open", "hidden", "x", "y", "w", "h", "d"]
 
 /** placedIn: a stored layout carries a placement. */
-export const placedIn = (st: Partial<Layout>) => PLACE.some((k) => k in st)
+export const placedIn = (st: Partial<Layout>) => PLACE.some((k) => Object.hasOwn(st, k))
 
 /** writeStore writes the layout under STORE_KEY (its placement only
  * when placed); a private window (or a full quota) just forgets. */

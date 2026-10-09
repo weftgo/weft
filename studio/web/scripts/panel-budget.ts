@@ -5,8 +5,10 @@
 // delta is more than half again its estimate — then the total against
 // the cap and the headroom left. vite.panel.config.ts prints it on
 // every panel build (`bun run build`, `make studio-build`/`studio-check`),
-// measured there with node's zlib, as the ledger's rows were. The table
-// is evidence, not a gate: only the cap fails the build.
+// measured there with node's zlib, as the ledger's rows were, over the
+// bundle with its version stamp normalized (normalizeStamp) so a version
+// bump moves no byte. The table is evidence, not a gate: only the cap
+// fails the build.
 
 export interface BudgetItem {
   id: string
@@ -28,6 +30,25 @@ export interface Ledger {
   cap: number
   items: BudgetItem[]
   rows: BudgetRow[]
+}
+
+/** The placeholder the version stamp is measured as: fixed length, so a
+ * version bump (v0.11.0 → v0.12.0, or → v0.100.0) moves no ledger
+ * byte. Chosen so the ledger's rows — measured with the real stamp
+ * before this normalization — read the same (E1 fixes: 61,898 B). */
+export const STAMP_PLACEHOLDER = "v0.00.0"
+
+/** normalizeStamp is panel.js as the ledger measures it: every
+ * occurrence of the stamped version string literal (scripts/weft-
+ * version.ts's value, JSON-quoted as vite's define writes it) replaced
+ * by STAMP_PLACEHOLDER. The build's printed table and budget.test.ts
+ * both measure through it. Throws when the stamp is absent: a
+ * normalization that silently replaced nothing would measure the raw
+ * bundle again. */
+export function normalizeStamp(code: string, version: string): string {
+  const stamp = JSON.stringify(version)
+  if (!code.includes(stamp)) throw new Error(`panel-budget: the version stamp ${stamp} is not in panel.js`)
+  return code.split(stamp).join(JSON.stringify(STAMP_PLACEHOLDER))
 }
 
 const kib = (n: number) => `${(n / 1024).toFixed(1)} KiB`

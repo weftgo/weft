@@ -8,6 +8,7 @@ function setScript(attrs: Record<string, string>) {
   const s = document.createElement("script")
   s.type = "module"
   s.src = "src" in attrs ? attrs.src : "/studio/panel.js"
+  s.setAttribute("data-weft", "") // the panel's own tag, marked (a generic data-* word finds nothing)
   for (const [k, v] of Object.entries(attrs)) s.setAttribute(k, v)
   document.head.appendChild(s)
   return s

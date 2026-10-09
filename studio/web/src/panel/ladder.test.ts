@@ -6,7 +6,7 @@
 // and a mount the host made says "Studio not reachable at … · retry"
 // where the panel's own dock removes itself silently.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { discoverEndpoint, findPanelScript, readConfig } from "./config"
+import { discoverEndpoint, findPanelScript, readConfig, selfURL } from "./config"
 import type { MountOptions } from "./config"
 import { mount as mountPanel, WeftDevtools } from "./element"
 import { $, baseRoutes, click, fakeStudio, json, META, settle, setup, teardown, text } from "./testkit"
@@ -251,12 +251,34 @@ describe("the panel's script tag (C2: never by its file name)", () => {
     }
   })
 
-  it("a tag written before data-weft (panel.js with data-public-id) still configures it; a bare host script does not", () => {
+  it("without data-weft, the tag whose src resolves to the module's own URL (import.meta.url) is the panel's", () => {
     script({}, "/js/app.js")
-    const tag = script({ "data-public-id": "pub_demo" }, "/studio/panel.js")
+    const tag = script({ "data-public-id": "pub_demo" }, selfURL)
     expect(findPanelScript()).toBe(tag)
+    expect(readConfig().publicId).toBe("pub_demo")
     tag.remove()
     expect(findPanelScript()).toBeNull()
+  })
+
+  it("a third-party widget's tag ahead of the panel's, with generic data-* words, is never the panel's", () => {
+    meta("token", "tok_meta")
+    const decoy = script(
+      { "data-endpoint": "https://widget.example/api", "data-token": "widget_tok", "data-position": "left-dock", "data-open": "true", "data-auto": "false" },
+      "https://widget.example/embed.js",
+    )
+    expect(findPanelScript()).toBeNull() // no data-weft, no src of ours: no tag at all
+    let cfg = readConfig()
+    expect(cfg.endpoint).not.toContain("widget.example")
+    expect(cfg.token).toBe("tok_meta") // the meta token, bound for the page's own endpoint
+    expect(cfg.position).toBe("bottom-right")
+    expect(cfg.auto).toBe(true)
+    const mine = script({ "data-public-id": "pub_mine" }, selfURL)
+    expect(document.head.querySelector("script")).toBe(decoy) // the decoy comes first in document order
+    expect(findPanelScript()).toBe(mine)
+    cfg = readConfig()
+    expect(cfg.publicId).toBe("pub_mine")
+    expect(cfg.endpoint).not.toContain("widget.example")
+    expect(cfg.token).toBe("tok_meta")
   })
 })
 

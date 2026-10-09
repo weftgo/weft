@@ -14,12 +14,23 @@
 //   - never the panel's own tree: a <weft-devtools> (which carries the
 //     scope scope()/mount() set) and anything inside one is skipped,
 //     and its shadow tree is out of a document query's reach;
+//   - never untrusted content: a marker on or inside an element carrying
+//     data-weft-untrusted (the host's mark on rendered user/model HTML,
+//     where a sanitizer such as DOMPurify keeps data-* attributes) is
+//     not read, nor does focus inside one name a conversation;
 //   - silent: no console output, a failure is swallowed.
 import { parseScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
 
 /** The marker attribute (the helpers' data-weft-scope). */
 export const MARKER_ATTR = "data-weft-scope"
+
+/** The host's one-attribute escape hatch: markers on or inside an
+ * element carrying it are ignored (rendered user or model HTML). */
+export const UNTRUSTED_ATTR = "data-weft-untrusted"
+
+/** untrusted: el is, or is inside, an element the host marked untrusted. */
+const untrusted = (el: Element) => !!el.closest(`[${UNTRUSTED_ATTR}]`)
 
 /** One marker on the page: its parsed scope and the element. */
 export interface Marker {
@@ -55,7 +66,11 @@ const PANEL = "weft-devtools"
 export function markerOf(n: unknown): Element | null {
   try {
     if (!(n instanceof Element) || n.closest(PANEL)) return null
-    return n.closest(`[${MARKER_ATTR}]`)
+    // Inside untrusted HTML: the nearest marker outside it, if any — the
+    // chat element around a rendered message still names its chat.
+    let m = n.closest(`[${MARKER_ATTR}]`)
+    while (m && untrusted(m)) m = m.parentElement?.closest(`[${MARKER_ATTR}]`) ?? null
+    return m
   } catch {
     return null
   }
@@ -72,16 +87,17 @@ function touchesMarkers(r: MutationRecord): boolean {
   if (r.type === "attributes") return !(r.target instanceof Element && r.target.closest(PANEL))
   for (const n of [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)])
     if (n instanceof Element && (n.hasAttribute(MARKER_ATTR) || n.querySelector(`[${MARKER_ATTR}]`))) return true
+  // (An untrusted mark set or lifted is an attribute record: above.)
   return false
 }
 
 /** scanMarkers lists root's markers in document order: an empty or
  * unparsable value (no public id) is ignored, the panel's own elements
- * are skipped. */
+ * and anything on or inside a data-weft-untrusted element are skipped. */
 export function scanMarkers(root: Document = document): Marker[] {
   const out: Marker[] = []
   for (const element of Array.from(root.querySelectorAll(`[${MARKER_ATTR}]`))) {
-    if (element.closest(PANEL)) continue
+    if (element.closest(PANEL) || untrusted(element)) continue
     const scope = parseScope(element.getAttribute(MARKER_ATTR) ?? "")
     if (scope.publicId) out.push({ scope, element })
   }
@@ -135,7 +151,7 @@ export function installMarkerRung(opts: MarkerRungOptions): MarkerRung | null {
       if (timer) clearTimeout(timer)
       timer = setTimeout(scan, Math.max(0, Math.min(opts.debounceMs ?? 100, since + MAX_WAIT_MS - now)))
     })
-    obs.observe(root.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: [MARKER_ATTR] })
+    obs.observe(root.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: [MARKER_ATTR, UNTRUSTED_ATTR] })
     root.addEventListener("focusin", focus, { capture: true, passive: true })
     root.addEventListener("visibilitychange", shown, { passive: true })
   } catch {

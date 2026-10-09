@@ -1,5 +1,5 @@
 {
-  "about": "The devtools panel's size ledger (plan phase 3; studio/README.md, 'The size ledger'). Append-only: an item that lands appends one row — its label, the budget item it counts against (\"\" for none) and panel.js's gzip bytes after it — and never edits an earlier one. scripts/panel-budget.ts prints the per-item table from it on every build; only the cap fails the build.",
+  "about": "The devtools panel's size ledger (plan phase 3; studio/README.md, 'The size ledger'). Append-only: an item that lands appends one row — its label, the budget item it counts against (\"\" for none) and panel.js's gzip bytes after it — and never edits an earlier one. scripts/panel-budget.ts prints the per-item table from it on every build; only the cap fails the build. Sizes are measured with the version stamp normalized: the stamped version string (scripts/weft-version.ts, JSON-quoted) is replaced by the fixed-length placeholder \"v0.00.0\" (normalizeStamp) before gzip, in the build and in budget.test.ts alike, so a version bump moves no byte; the rows before this normalization read the same under it.",
   "cap": 81920,
   "items": [
     { "id": "D1", "what": "drag/resize/dock/persist", "estimate": 4096 },

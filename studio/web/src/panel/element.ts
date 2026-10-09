@@ -50,7 +50,7 @@ import { foldedWords, turnPromptOf } from "./playground"
 import type { ExperimentDraft, TurnWords } from "./playground"
 import { panelStudioVersion } from "./version"
 import { clampLayout, CYCLE, geometry, initialLayout, NARROW_W, pillPlace, placedIn, Push, readStore, TABS, writeStore } from "./layout"
-import { newTree, treeView } from "./tree"
+import { newTree, stopTree, treeView } from "./tree"
 import type { TreeState } from "./tree"
 import { renderRequestTab, stepsOf } from "./request"
 import type { Geometry, Layout } from "./layout"
@@ -121,6 +121,36 @@ export function conversationKey(s: Scope): string {
 /** How many distinct detected scopes the panel remembers (oldest
  * dropped first): the list C3.3's switcher offers. */
 export const DETECTED_LIMIT = 20
+
+/** How many response paths the header rung remembers (byPath), oldest
+ * dropped first: an app that calls a new path per request does not
+ * grow the panel. */
+export const PATHS_LIMIT = 64
+
+/** How many runs (and parked calls) the per-run bookkeeping remembers —
+ * the turn filter's prompts, the failures and parked calls reported —
+ * oldest dropped first. Cleared on every start. */
+export const RUN_MEMO_LIMIT = 500
+
+/** capAdd adds k to a set bounded at max (insertion order: the oldest
+ * goes). */
+function capAdd(set: Set<string>, k: string, max: number): void {
+  set.add(k)
+  if (set.size > max) set.delete(set.values().next().value as string)
+}
+
+/** capSet sets k in a map bounded at max; a key set again is the
+ * newest. */
+function capSet<V>(m: Map<string, V>, k: string, v: V, max: number): void {
+  m.delete(k)
+  m.set(k, v)
+  if (m.size > max) m.delete(m.keys().next().value as string)
+}
+
+/** The connected panels, in connect order: the first (or the one
+ * window.weft.devtools is) owns Alt+W, so two panels on one page do not
+ * toggle out of phase. */
+const LIVE = new Set<WeftDevtools>()
 
 /** A scope the header rung saw (C3.2): the newest response path that
  * carried it and when, in first-seen order. */
@@ -447,9 +477,19 @@ export class WeftDevtools extends HTMLElement {
   /** The older-turns sentinel watched, and its observer (D4). */
   private io: IntersectionObserver | null = null
   private ioAt: Element | null = null
+  /** The resize frame pending: a burst of resize events is one clamp
+   * and one redraw per animation frame. */
+  private resizeFrame: number | null = null
   private onResize = () => {
-    clampLayout(this.lay)
-    this.render(this.last)
+    if (this.resizeFrame !== null) return
+    const frame = () => {
+      this.resizeFrame = null
+      if (!this.isConnected) return
+      clampLayout(this.lay)
+      this.render(this.last)
+    }
+    this.resizeFrame =
+      typeof requestAnimationFrame === "function" ? requestAnimationFrame(frame) : (setTimeout(frame, 16) as unknown as number)
   }
   /** Expanded and not hidden. */
   private get shown(): boolean {
@@ -577,6 +617,7 @@ export class WeftDevtools extends HTMLElement {
     // every other key is the shadow root's (panelKey). Keys never fire
     // while the user types in an input — the host page's or the
     // panel's own.
+    LIVE.add(this)
     window.addEventListener("keydown", this.onKey)
     window.addEventListener("resize", this.onResize, { passive: true })
     window.addEventListener("pointerup", this.onRelease, true)
@@ -593,8 +634,18 @@ export class WeftDevtools extends HTMLElement {
   }
 
   disconnectedCallback() {
+    LIVE.delete(this)
     window.removeEventListener("keydown", this.onKey)
     window.removeEventListener("resize", this.onResize)
+    if (this.resizeFrame !== null) {
+      if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.resizeFrame)
+      clearTimeout(this.resizeFrame)
+      this.resizeFrame = null
+    }
+    // A tree's filter debounce or "copied" timer, and a pending
+    // composition check, draw nothing once the element is gone.
+    stopTree(this.tree)
+    for (const st of this.rqTrees.values()) stopTree(st)
     this.dropDrag?.()
     this.dropDrag = null
     this.dragging = false
@@ -1013,7 +1064,7 @@ export class WeftDevtools extends HTMLElement {
         ...(step !== undefined ? { step } : {}),
       })
       if (status === "failed" && !this.evErrored.has(r.id)) {
-        this.evErrored.add(r.id)
+        capAdd(this.evErrored, r.id, RUN_MEMO_LIMIT)
         this.fire("error", { message: r.err || `run ${r.id} failed`, runId: r.id })
       }
       if (status === "parked") this.reportParked(m, r.id, 1)
@@ -1042,7 +1093,7 @@ export class WeftDevtools extends HTMLElement {
         for (const c of calls) {
           const k = `${runId}\u0000${c.id}`
           if (this.evParked.has(k)) continue
-          this.evParked.add(k)
+          capAdd(this.evParked, k, RUN_MEMO_LIMIT)
           this.fire("parked", { runId, callId: c.id, ackId: c.id, name: typeof c.name === "string" ? c.name : "" })
         }
       })
@@ -1269,7 +1320,7 @@ export class WeftDevtools extends HTMLElement {
    * — two widgets polling for different conversations do not thrash. */
   private onDetected(sc: Scope, path: string) {
     const key = conversationKey(sc)
-    this.byPath.set(path, sc)
+    capSet(this.byPath, path, sc, PATHS_LIMIT)
     const at = Date.now()
     const known = this.seen.find((d) => d.key === key)
     if (known) {
@@ -1319,6 +1370,7 @@ export class WeftDevtools extends HTMLElement {
    * a key the page already handled. */
   private keydown(e: KeyboardEvent): void {
     if (e.defaultPrevented || e.isComposing || typing(e)) return
+    if (!this.ownsToggle()) return
     const toggleCombo =
       (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && e.code === "KeyW") || // Q4's pick
       (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.code === "KeyW") // where delivered
@@ -1329,6 +1381,19 @@ export class WeftDevtools extends HTMLElement {
     // Opened from the keyboard: focus goes to the dock, so Esc, j, k…
     // work at once (the user asked for the panel).
     if (this.shown) this.body.querySelector<HTMLElement>(".weft-dock")?.focus({ preventScroll: true })
+  }
+
+  /** ownsToggle: of the connected panels, the one window.weft.devtools
+   * is answers Alt+W, else the first connected — one toggle per press. */
+  private ownsToggle(): boolean {
+    try {
+      const ns = (window as unknown as { weft?: unknown }).weft
+      const api = isPlainObject(ns) ? Object.getOwnPropertyDescriptor(ns, "devtools")?.value : undefined
+      if (api) for (const p of LIVE) if (p.apiObjIs(api)) return p === this
+    } catch {
+      // a page's own window.weft: the first panel answers
+    }
+    return LIVE.values().next().value === this
   }
 
   /** panelKey is every other shortcut (SHORTCUTS), heard on the shadow
@@ -1539,7 +1604,11 @@ export class WeftDevtools extends HTMLElement {
       if (conn.scope !== form) {
         // What was typed for the previous conversation (an unsent steer,
         // a resolve result) is not offered under the next one.
-        if (this.model.publicId !== next.publicId) this.scratch.clear()
+        if (this.model.publicId !== next.publicId) {
+          this.scratch.clear()
+          // The turn filter's prompts were the previous conversation's.
+          this.prompts.clear()
+        }
         conn.scope = form
         // An explicit scope's run (or the user's switcher choice) pins
         // whatever the user clicked; a detected one (the next turn's
@@ -1573,6 +1642,13 @@ export class WeftDevtools extends HTMLElement {
     this.probe?.abort()
     this.probe = null
     this.scratch.clear()
+    // The previous connection's bookkeeping: a rescope by a new start
+    // remembers nothing of the old one (dropRung clears byPath with its
+    // rung; this clears it without one too).
+    this.byPath.clear()
+    this.prompts.clear()
+    this.evParked.clear()
+    this.evErrored.clear()
     // A retry keeps the not-reachable line up while it probes: no fab
     // or empty dock flashing in between.
     const keepLine = retrying && this.dormant && this.unreachable !== null
@@ -1722,6 +1798,12 @@ export class WeftDevtools extends HTMLElement {
    * state that cannot be drawn leaves the previous frame standing. */
   private render(s: PanelState) {
     this.last = s
+    // Once connected, a disconnected element draws nothing: a timer, a
+    // debounce or a promise that answers after the disconnect must not
+    // re-create an observer on a detached sentinel. The next connect
+    // draws this.last. (Before the first connect the constructor's
+    // empty frame is drawn.)
+    if (!this.isConnected && this.opened) return
     // D2: the theme, resolved once per render (the header's ◐ and
     // data-theme-resolved read it); not before the connect, which
     // resolves it itself.
@@ -2284,6 +2366,11 @@ export class WeftDevtools extends HTMLElement {
    * loading); disconnected with the element. No observer: the
    * sentinel is a button. */
   private watchOlder() {
+    if (!this.isConnected) {
+      this.io?.disconnect()
+      this.io = this.ioAt = null
+      return
+    }
     const n = this.body.querySelector(".weft-older")
     // Narrow, the rows are a dropdown; filtered, a scroll would read
     // page after page for rows the filter may hide: the sentinel is a
@@ -3027,7 +3114,7 @@ export class WeftDevtools extends HTMLElement {
     const ids = this.turnLinks(t)
     if (ids) wrap.appendChild(ids)
     const prompt = turnPromptOf(t.transcript)
-    if (prompt) this.prompts.set(t.id, prompt)
+    if (prompt) capSet(this.prompts, t.id, prompt, RUN_MEMO_LIMIT)
     if (prompt) wrap.appendChild(el("div", "weft-note", prompt))
     // thread's session markers (A9.2) at the top of the turn they are
     // filed under; a run from before A9 names none and draws nothing.

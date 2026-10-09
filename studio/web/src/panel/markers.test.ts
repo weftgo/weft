@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { detectSetting, markerRungOn, pageURL, readConfig } from "./config"
 import { SCOPE_HEADER } from "./detect"
 import { WeftDevtools } from "./element"
-import { installMarkerRung, MARKER_ATTR, MAX_WAIT_MS, markerOf, scanMarkers } from "./markers"
+import { installMarkerRung, MARKER_ATTR, MAX_WAIT_MS, markerOf, scanMarkers, UNTRUSTED_ATTR } from "./markers"
 import {
   $,
   all,
@@ -210,6 +210,36 @@ describe("installMarkerRung", () => {
     rung.disconnect()
   })
 
+  it("review: a marker on or inside a data-weft-untrusted element is not read — scan, focus, or a mark set later", async () => {
+    const chatBox = chat("pub_chat").box
+    // A rendered model reply (sanitized HTML keeps data-*) carries a forged marker.
+    const reply = document.createElement("div")
+    reply.setAttribute(UNTRUSTED_ATTR, "")
+    reply.innerHTML = `<p ${MARKER_ATTR}="pub_forged"><a href="#" id="forged">x</a></p>`
+    chatBox.appendChild(reply)
+    const self = document.createElement("div")
+    self.setAttribute(UNTRUSTED_ATTR, "")
+    self.setAttribute(MARKER_ATTR, "pub_self")
+    document.body.appendChild(self)
+    expect(scanMarkers().map((m) => m.scope.publicId)).toEqual(["pub_chat"])
+    // Focus inside the untrusted reply names the chat around it, not the forgery.
+    expect(markerOf(document.getElementById("forged"))).toBe(chatBox)
+    expect(markerOf(self)).toBeNull()
+    // The hatch set later rescans; lifted, the marker counts again.
+    const onScopes = vi.fn()
+    const rung = installMarkerRung({ onScopes, debounceMs: 10 })!
+    const plain = chat("pub_plain").box
+    await pause(40)
+    expect(onScopes.mock.calls.at(-1)![0].map((m: { scope: { publicId: string } }) => m.scope.publicId)).toEqual(["pub_chat", "pub_plain"])
+    plain.setAttribute(UNTRUSTED_ATTR, "")
+    await pause(40)
+    expect(onScopes.mock.calls.at(-1)![0].map((m: { scope: { publicId: string } }) => m.scope.publicId)).toEqual(["pub_chat"])
+    reply.removeAttribute(UNTRUSTED_ATTR)
+    await pause(40)
+    expect(onScopes.mock.calls.at(-1)![0].map((m: { scope: { publicId: string } }) => m.scope.publicId)).toEqual(["pub_chat", "pub_forged"])
+    rung.disconnect()
+  })
+
   it("ignores an empty or unparsable value (no public id)", () => {
     chat("")
     chat(";session=s_1")
@@ -364,7 +394,7 @@ describe("the panel's marker rung", () => {
     const on = await mountWith({ "data-endpoint": REMOTE, "data-open": "true" })
     expect(observe.mock.calls).toHaveLength(1)
     expect(observe.mock.calls[0][0]).toBe(document.documentElement)
-    expect(observe.mock.calls[0][1]).toEqual({ subtree: true, childList: true, attributes: true, attributeFilter: [MARKER_ATTR] })
+    expect(observe.mock.calls[0][1]).toEqual({ subtree: true, childList: true, attributes: true, attributeFilter: [MARKER_ATTR, UNTRUSTED_ATTR] })
     const focusin = add.mock.calls.find((c) => c[0] === "focusin")!
     on.remove()
     expect(disconnect).toHaveBeenCalled()

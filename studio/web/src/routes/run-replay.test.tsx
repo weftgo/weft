@@ -18,7 +18,10 @@ import { FakeStudio, golden, hiddenRefusal, pagedEvents, transcriptOf } from "@/
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { unmatchedDrafts } from "@/lib/experiment-body"
 import { TranscriptEdits } from "@/components/studio/experiment-form"
-import { ReplayAck, catalogOfStep } from "@/components/studio/replay-drawer"
+import { ReplayAck, ReplayDrawer, catalogOfStep } from "@/components/studio/replay-drawer"
+import { editResultAndReplay, replayFromStep } from "@/lib/replay"
+import type { ReplayDraft } from "@/lib/replay"
+import { renderWithRouter } from "@/test/render"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -786,5 +789,149 @@ describe("the edits while the transcript loads, and when it is hidden (final 3, 
     const { container } = mount()
     await waitFor(() => expect(container.querySelector('[data-hole="hidden"]')).toBeTruthy())
     expect(container.querySelector("[data-edits-unreadable]")).toBeNull()
+  })
+})
+
+// ── Review fixes (3) ───────────────────────────────────────────────
+
+/** The drawer alone over the fake Studio, for a draft no verb on the
+ * page would hand it (a from_step past the bound). */
+async function drawerFor(draft: ReplayDraft) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  await renderWithRouter(<ReplayDrawer request={{ runID: RUN, draft }} requestKey={1} onClose={() => {}} />, client)
+  return waitFor(() => within(drawer()!))
+}
+
+describe("a run with no step re-runs from step 0 (review 3.1)", () => {
+  it("re-run is not held as past the end: the server accepts from_step 0", async () => {
+    // The first model call failed: a step_start, no reply — the
+    // transcript holds the input alone (step count 0, max −1).
+    const none = [
+      events[0].event,
+      { type: "step_start", run_id: RUN, index: 0 },
+    ].map((event, pos) => ({ pos, time: rOK.started, event }))
+    serve({ events: none, bodies: bodies.slice(0, 1), doc: runDoc({ status: "failed", err: "model down", steps: 0, children: [] }) })
+    const card = await openStory('[data-step="0"]')
+    fireEvent.click(within(card).getByRole("button", { name: "re-run the whole turn" }))
+    const d = await waitFor(() => within(drawer()!))
+    await waitFor(() => expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false))
+    expect(drawer()!.querySelector("[data-replay-past-end]")).toBeNull()
+    fireEvent.click(d.getByRole("button", { name: "Run" }))
+    await waitFor(() => expect(studio.calls("POST playground/runs").length).toBe(1))
+    expect(studio.calls("POST playground/runs")[0].body).toMatchObject({ source: { run_id: RUN, from_step: 0 } })
+  })
+})
+
+describe("edit the prompt from a hole says so (review 3.2)", () => {
+  const withPrompt = (prompt: unknown): StepDoc => {
+    const doc = stepDoc(1)
+    return { ...doc, request: { ...(doc.request as object), prompt } as StepDoc["request"] }
+  }
+
+  it("a hidden request: the hidden badge and the registered prompt, labelled", async () => {
+    serve()
+    studio.on(`GET runs/${RUN}/steps/1`, golden<StepDoc>("step-hidden"))
+    const card = await openStory('[data-step="1"]')
+    fireEvent.click(within(card).getByRole("button", { name: "edit the prompt and replay (step 1)" }))
+    const prompt = await waitFor(() => within(drawer()!).getByLabelText<HTMLTextAreaElement>("system prompt"))
+    await waitFor(() => expect(prompt.value).toBe("You are a support agent."))
+    const note = drawer()!.querySelector("[data-prompt-hole]")!
+    expect(note.getAttribute("data-prompt-hole")).toBe("hidden")
+    expect(note.querySelector('[data-hole="hidden"]')).toBeTruthy()
+    expect(note.textContent).toContain("prompt from the registered instructions, not the step's")
+  })
+
+  it("a truncated prompt is not pre-filled: truncated badge, registered prompt", async () => {
+    serve()
+    studio.on(
+      `GET runs/${RUN}/steps/1`,
+      withPrompt({ hash: "p", text: "You are a sup", content: "truncated", truncated_bytes: 900 })
+    )
+    const card = await openStory('[data-step="1"]')
+    fireEvent.click(within(card).getByRole("button", { name: "edit the prompt and replay (step 1)" }))
+    const prompt = await waitFor(() => within(drawer()!).getByLabelText<HTMLTextAreaElement>("system prompt"))
+    await waitFor(() => expect(prompt.value).toBe("You are a support agent."))
+    expect(drawer()!.querySelector('[data-prompt-hole="truncated"] [data-hole="truncated"]')).toBeTruthy()
+  })
+
+  it("no step route: derived", async () => {
+    serve({ capabilities: ["playground"] })
+    const card = await openStory('[data-step="1"]')
+    fireEvent.click(within(card).getByRole("button", { name: "edit the prompt and replay (step 1)" }))
+    await waitFor(() => expect(drawer()!.querySelector('[data-prompt-hole="derived"]')).toBeTruthy())
+  })
+})
+
+describe("the deferred field focus yields to the user (review 3.3)", () => {
+  function servePending() {
+    serve()
+    let release = () => {}
+    const ready = new Promise<void>((r) => (release = r))
+    studio.on(`GET runs/${RUN}/transcript`, async () => {
+      await ready
+      return transcriptOf(bodies)
+    })
+    return () => release()
+  }
+
+  it("the edit field takes focus once drawn, when focus is still on the heading", async () => {
+    const release = servePending()
+    const d = await drawerFor(editResultAndReplay(2, "c3", ERR))
+    await waitFor(() => expect(document.activeElement?.id).toBe("replay-drawer-title"))
+    release()
+    const edit = await waitFor(() => d.getByLabelText<HTMLInputElement>("edit the result of refund (c3) at step 2"))
+    await waitFor(() => expect(document.activeElement).toBe(edit))
+  })
+
+  it("a user who moved focus before the field was drawn keeps it", async () => {
+    const release = servePending()
+    const d = await drawerFor(editResultAndReplay(2, "c3", ERR))
+    await waitFor(() => expect(document.activeElement?.id).toBe("replay-drawer-title"))
+    const mine = d.getByLabelText<HTMLSelectElement>("Side effects")
+    mine.focus()
+    fireEvent.change(mine, { target: { value: "park" } })
+    release()
+    await waitFor(() => d.getByLabelText("edit the result of refund (c3) at step 2"))
+    expect(document.activeElement).toBe(mine)
+  })
+})
+
+describe("Run is held where the server would refuse (reviews 3.4, 3.5)", () => {
+  it("scripted at the step count: no recorded turn for that step", async () => {
+    const failingLast = [
+      ...events.slice(0, -3).map((e) => e.event),
+      { type: "step_start", run_id: RUN, index: 3 },
+    ].map((event, pos) => ({ pos, time: rOK.started, event }))
+    serve({ events: failingLast, bodies: bodies.slice(0, -1), doc: runDoc({ status: "failed", err: "model down" }) })
+    const d = await drawerFor(editResultAndReplay(2, "c3", ERR))
+    await waitFor(() => expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false))
+    fireEvent.change(d.getByLabelText("Engine"), { target: { value: "scripted" } })
+    expect(drawer()!.querySelector("[data-replay-scripted-past-end]")!.textContent).toBe(
+      "the scripted engine has no recorded turn for step 3: the source never answered it (use engine live)"
+    )
+    expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)
+  })
+
+  it("past a last reply: held, 'its last ended in a reply'", async () => {
+    serve()
+    const d = await drawerFor(replayFromStep(4))
+    await waitFor(() =>
+      expect(drawer()!.querySelector("[data-replay-past-end]")?.textContent).toBe(
+        "from step 4 has nothing fresh to answer: the run recorded 4 steps, and its last ended in a reply"
+      )
+    )
+    expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)
+  })
+
+  it("past unanswered last calls: held, 'its last step's calls are not all answered'", async () => {
+    // Step 2 called refund and no result was recorded.
+    serve({ bodies: bodies.slice(0, -2) })
+    const d = await drawerFor(replayFromStep(3))
+    await waitFor(() =>
+      expect(drawer()!.querySelector("[data-replay-past-end]")?.textContent).toBe(
+        "from step 3 has nothing fresh to answer: the run recorded 3 steps, and its last step's calls are not all answered"
+      )
+    )
+    expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)
   })
 })

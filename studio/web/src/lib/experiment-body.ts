@@ -199,12 +199,18 @@ export function ownMessages(batches: TranscriptBatch[]): { step: number; m: Mess
 export function replayBounds(batches: TranscriptBatch[]): {
   stepCount: number
   answeredCalls: boolean
+  /** The last assistant message made at least one tool call (with
+   * answeredCalls false: some are unanswered; false: a call-free
+   * reply, or no step at all). */
+  lastCalls: boolean
   max: number
 } {
   const own = ownMessages(batches)
-  const stepCount = transcriptStepCount(own.filter((t) => t.m.role === "assistant").map((t) => t.step))
+  const assistants = own.filter((t) => t.m.role === "assistant")
+  const stepCount = transcriptStepCount(assistants.map((t) => t.step))
   const answeredCalls = endsInAnsweredCalls(own.map((t) => t.m))
-  return { stepCount, answeredCalls, max: maxFromStep(stepCount, answeredCalls) }
+  const lastCalls = assistants.at(-1)?.m.content.some((p) => p.type === "tool_call") ?? false
+  return { stepCount, answeredCalls, lastCalls, max: maxFromStep(stepCount, answeredCalls) }
 }
 
 /** One step of a source run as the step picker lists it. */

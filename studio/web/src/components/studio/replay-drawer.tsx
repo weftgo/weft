@@ -302,6 +302,12 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
           : ""
   useEffect(() => {
     if (fieldFocused.current || !focusSel) return
+    // The user moved on before the field was drawn (a click elsewhere
+    // while the transcript loaded): their focus stays theirs.
+    if (heading.current && document.activeElement !== heading.current) {
+      fieldFocused.current = true
+      return
+    }
     const el = formBody.current?.querySelector<HTMLElement>(focusSel)
     if (!el) return
     fieldFocused.current = true
@@ -320,9 +326,24 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
   const editsLoading = edits.fields === null && !edits.error
   // The server's bound on from_step for this transcript (replayBounds):
   // past it the command is a 400, so Run is held and the rule named.
-  const { max: maxFrom, stepCount } = useSourceSteps(runID)
+  const { max: maxFrom, stepCount, lastCalls } = useSourceSteps(runID)
+  // from_step 0 re-runs the whole turn: always accepted, even for a
+  // run that failed before its first reply (no step: max −1).
   const pastEnd =
-    variant.thread !== "fork" && maxFrom !== undefined && stepCount !== undefined && fromStep > maxFrom
+    variant.thread !== "fork" &&
+    fromStep > 0 &&
+    maxFrom !== undefined &&
+    stepCount !== undefined &&
+    fromStep > maxFrom
+  // The scripted engine replays the source's recorded turns: a step the
+  // source never answered (from_step at the step count) has none
+  // (runtime's wording).
+  const scriptedPastEnd =
+    variant.engine === "scripted" &&
+    variant.thread !== "fork" &&
+    fromStep > 0 &&
+    stepCount !== undefined &&
+    fromStep === stepCount
   const stepDoc = useQuery({ ...stepQuery(runID, ordinal), enabled: caps.includes("steps"), retry: false })
   const catalog = caps.includes("steps")
     ? catalogOfStep(stepDoc.data, stepDoc.isError ? stepDoc.error.message : undefined)
@@ -331,25 +352,43 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
   // The prompt: the registered one, or — edit the prompt — the text
   // the step was called with (a truncated record is not pre-filled:
   // sending a prefix as the prompt would change what the model sees).
+  // When "edit the prompt" cannot have the step's text, the box holds
+  // the registered prompt — and says so, with the hole that is why.
+  const [promptHole, setPromptHole] = useState<{ hole: string; reason?: string; fix?: string } | null>(null)
   const seeded = useRef(false)
   useEffect(() => {
     if (seeded.current || draft.instructions !== undefined) return
-    // Without the step route there is no text to wait for: the
-    // registered prompt stands.
-    if (draft.verb === "edit_prompt" && caps.includes("steps")) {
-      if (!stepDoc.data && !stepDoc.isError) return
-      const req = stepDoc.data?.request
-      const prompt = req && isRequestRow(req) ? req.prompt : undefined
-      if (prompt && !isHoleRef(prompt) && prompt.content !== "truncated" && prompt.text) {
-        seeded.current = true
-        patch({ instructions: prompt.text })
-        return
+    let hole: { hole: string; reason?: string; fix?: string } | null = null
+    if (draft.verb === "edit_prompt") {
+      if (!caps.includes("steps")) {
+        hole = { hole: "derived", reason: "this Studio has no step route: the step's prompt cannot be read" }
+      } else {
+        if (!stepDoc.data && !stepDoc.isError) return
+        const req = stepDoc.data?.request
+        const prompt = req && isRequestRow(req) ? req.prompt : undefined
+        if (stepDoc.isError) hole = { hole: "derived", reason: `the step could not be read: ${stepDoc.error.message}` }
+        else if (!req) hole = { hole: "not_recorded", reason: "the step carries no request record" }
+        else if (!isRequestRow(req)) hole = { hole: req.badge ?? "gap", reason: req.reason, fix: req.fix }
+        else if (!prompt) hole = { hole: "derived", reason: "the step's request named no system prompt" }
+        else if (isHoleRef(prompt)) hole = { hole: prompt.badge }
+        else if (prompt.content === "truncated" || prompt.truncated_bytes > 0)
+          hole = {
+            hole: "truncated",
+            reason: "the step's prompt record was cut: sending its prefix would change what the model sees",
+          }
+        else if (!prompt.text) hole = { hole: "derived", reason: "the step's system prompt is empty" }
+        else {
+          seeded.current = true
+          patch({ instructions: prompt.text })
+          return
+        }
       }
     }
     if (!agent) return
     seeded.current = true
+    setPromptHole(hole)
     patch({ instructions: registered })
-  }, [agent, registered, draft, stepDoc.data, stepDoc.isError, caps])
+  }, [agent, registered, draft, stepDoc.data, stepDoc.isError, stepDoc.error, caps])
 
   const compacted =
     fromStep > 0 &&
@@ -448,6 +487,14 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
           fromStep={fromStep}
           editDrafts={editDrafts}
           setEditDrafts={setEditDrafts}
+          promptNote={
+            promptHole ? (
+              <span className="flex flex-wrap items-center gap-1 text-[11px] text-faint" data-prompt-hole={promptHole.hole}>
+                <HoleBadge hole={promptHole.hole} reason={promptHole.reason} fix={promptHole.fix} />
+                prompt from the registered instructions, not the step's
+              </span>
+            ) : null
+          }
         />
         <ReplayAck
           catalog={catalog}
@@ -468,7 +515,17 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
           <p className="text-xs text-status-bad" role="alert" data-replay-past-end>
             from step {fromStep} has nothing fresh to answer: the run recorded {stepCount}{" "}
             {stepCount === 1 ? "step" : "steps"}
-            {maxFrom === stepCount - 1 ? ", and its last ended in a reply" : ""}
+            {stepCount === 0
+              ? ""
+              : lastCalls
+                ? ", and its last step's calls are not all answered"
+                : ", and its last ended in a reply"}
+          </p>
+        ) : null}
+        {scriptedPastEnd ? (
+          <p className="text-xs text-status-bad" role="alert" data-replay-scripted-past-end>
+            the scripted engine has no recorded turn for step {fromStep}: the source never answered it (use
+            engine live)
           </p>
         ) : null}
         {orphans.length && !editsLoading ? (
@@ -499,6 +556,7 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
               refused.length > 0 ||
               orphans.length > 0 ||
               pastEnd ||
+              scriptedPastEnd ||
               (variant.thread === "fork" && !variant.input.trim()) ||
               Boolean(experiment && !settled(experiment.state))
             }

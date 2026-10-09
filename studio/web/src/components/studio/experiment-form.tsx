@@ -7,7 +7,7 @@
 // either.
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
-import type { Dispatch, SetStateAction } from "react"
+import type { Dispatch, ReactNode, SetStateAction } from "react"
 
 import { ApiError, putBreakpoints, runQuery, transcriptQuery } from "@/lib/api"
 import type { AgentView, RuntimeView } from "@/lib/api"
@@ -28,6 +28,7 @@ export function ExperimentForm({
   fromStep,
   editDrafts,
   setEditDrafts,
+  promptNote,
 }: {
   variant: VariantFields
   patch: (p: Partial<VariantFields>) => void
@@ -43,6 +44,9 @@ export function ExperimentForm({
   fromStep: number
   editDrafts: EditDraft[]
   setEditDrafts: Dispatch<SetStateAction<EditDraft[]>>
+  /** Drawn above the system prompt box: where its text came from when
+   * that is not what the caller asked for (a hole, badged). */
+  promptNote?: ReactNode
 }) {
   return (
     <>
@@ -60,6 +64,7 @@ export function ExperimentForm({
       )}
       <label className="block space-y-1">
         <span className="text-xs text-muted-foreground">System prompt</span>
+        {promptNote}
         <textarea
           rows={4}
           aria-label="system prompt"
@@ -365,6 +370,9 @@ export function useSourceSteps(runID: string): {
   /** The highest from_step the server accepts (replayBounds). */
   max?: number
   stepCount?: number
+  /** replayBounds' answeredCalls and lastCalls (the past-end reason). */
+  answeredCalls?: boolean
+  lastCalls?: boolean
 } {
   const transcript = useQuery({ ...transcriptQuery(runID), enabled: Boolean(runID) })
   const doc = useQuery({ ...runQuery(runID), enabled: Boolean(runID), staleTime: 30_000 })
@@ -384,6 +392,8 @@ export function useSourceSteps(runID: string): {
     steps: sourceSteps(transcript.data.batches, compacted),
     max: bounds.max,
     stepCount: bounds.stepCount,
+    answeredCalls: bounds.answeredCalls,
+    lastCalls: bounds.lastCalls,
   }
 }
 
